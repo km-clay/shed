@@ -1,0 +1,15 @@
+[package]
+name = "fern"
+description = "A linux shell written in rust"
+publish = false
+version = "0.1.0"
+
+edition = "2021"
+
+[profile.release]
+debug = true
+
+[dependencies]
+bitflags = "2.8.0"
+nix = { version = "0.29.0", features = ["uio", "term", "user", "hostname", "fs", "default", "signal", "process", "event", "ioctl"] }
+rustyline = { version = "15.0.0", features = [ "derive" ] }
