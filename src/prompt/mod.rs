@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use readline::SynHelper;
-use rustyline::{config::Configurer, history::DefaultHistory, ColorMode, CompletionType, Config, DefaultEditor, EditMode, Editor};
+use rustyline::{config::Configurer, history::{DefaultHistory, History}, ColorMode, CompletionType, Config, DefaultEditor, EditMode, Editor};
 
 pub mod readline;
 pub mod highlight;
@@ -27,10 +27,19 @@ fn init_rl<'a>(shenv: &'a mut ShEnv) -> Editor<SynHelper<'a>, DefaultHistory> {
 
 pub fn read_line<'a>(shenv: &'a mut ShEnv) -> ShResult<String> {
 	log!(TRACE, "Entering prompt");
-	let prompt = &style_text("$ ", Style::Green | Style::Bold);
+	let prompt = "$ ".styled(Style::Green | Style::Bold);
 	let mut editor = init_rl(shenv);
-	match editor.readline(prompt) {
-		Ok(line) => Ok(line),
+	match editor.readline(&prompt) {
+		Ok(line) => {
+			if !line.is_empty() {
+				let hist_path = std::env::var("FERN_HIST").ok();
+				editor.history_mut().add(&line).unwrap();
+				if let Some(path) = hist_path {
+					editor.history_mut().save(&PathBuf::from(path)).unwrap();
+				}
+			}
+			Ok(line)
+		},
 		Err(rustyline::error::ReadlineError::Eof) => {
 			kill(Pid::this(), Signal::SIGQUIT)?;
 			Ok(String::new())

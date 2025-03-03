@@ -11,11 +11,11 @@ pub fn expand_var(var_sub: Token, shenv: &mut ShEnv) -> Vec<Token> {
 	Lexer::new(value).lex() // Automatically handles word splitting for us
 }
 
-pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> String {
+pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> Token {
 	let dquote_raw = dquote.to_string();
 	let mut result = String::new();
 	let mut var_name = String::new();
-	let mut chars = dquote_raw.chars();
+	let mut chars = dquote_raw.chars().peekable();
 	let mut in_brace = false;
 
 	while let Some(ch) = chars.next() {
@@ -25,11 +25,13 @@ pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> String {
 					result.push(next_ch)
 				}
 			}
-			'"' => continue,
 			'$' => {
-				while let Some(ch) = chars.next() {
+				while let Some(ch) = chars.peek() {
+					if *ch == '"' {
+						break
+					}
+					let ch = chars.next().unwrap();
 					match ch {
-						'"' => continue,
 						'{' => {
 							in_brace = true;
 						}
@@ -59,5 +61,7 @@ pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> String {
 		}
 	}
 
-	result
+	log!(DEBUG, result);
+
+	Lexer::new(Rc::new(result)).lex().pop().unwrap_or(dquote)
 }

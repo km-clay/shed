@@ -92,8 +92,8 @@ impl VarTab {
 		env::set_var("HOME", home.clone());
 		env_vars.insert("SHELL".into(), pathbuf_to_string(std::env::current_exe()));
 		env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
-		env_vars.insert("HIST_FILE".into(),format!("{}/.fern_hist",home));
-		env::set_var("HIST_FILE",format!("{}/.fern_hist",home));
+		env_vars.insert("FERN_HIST".into(),format!("{}/.fern_hist",home));
+		env::set_var("FERN_HIST",format!("{}/.fern_hist",home));
 
 		env_vars
 	}

@@ -54,7 +54,7 @@ pub struct SynHint {
 
 impl SynHint {
 	pub fn new(text: String) -> Self {
-		let styled = style_text(&text, Style::BrightBlack);
+		let styled = (&text).styled(Style::BrightBlack);
 		Self { text, styled }
 	}
 	pub fn empty() -> Self {
@@ -78,7 +78,6 @@ impl Hint for SynHint {
 impl<'a> Hinter for SynHelper<'a> {
 	type Hint = SynHint;
 	fn hint(&self, line: &str, pos: usize, ctx: &rustyline::Context<'_>) -> Option<Self::Hint> {
-		return Some(SynHint::empty());
 		if line.is_empty() {
 			return None
 		}

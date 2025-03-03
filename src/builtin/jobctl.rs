@@ -22,7 +22,7 @@ pub fn continue_job(node: Node, shenv: &mut ShEnv, fg: bool) -> ShResult<()> {
 		let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {
 			id
 		} else {
-			return Err(ShErr::full(ShErrKind::ExecFail, "No jobs found".into(), blame))
+			return Err(ShErr::full(ShErrKind::ExecFail, "No jobs found", blame))
 		};
 
 		let tabid = match argv_s.next() {
@@ -66,7 +66,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 			});
 			match result {
 				Some(id) => Ok(id),
-				None => Err(ShErr::full(ShErrKind::InternalErr,"Found a job but no table id in parse_job_id()".into(),blame))
+				None => Err(ShErr::full(ShErrKind::InternalErr,"Found a job but no table id in parse_job_id()",blame))
 			}
 		}
 	} else if arg.chars().all(|ch| ch.is_ascii_digit()) {
@@ -86,7 +86,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 
 		match result {
 			Some(id) => Ok(id),
-			None => Err(ShErr::full(ShErrKind::InternalErr,"Found a job but no table id in parse_job_id()".into(),blame))
+			None => Err(ShErr::full(ShErrKind::InternalErr,"Found a job but no table id in parse_job_id()",blame))
 		}
 	} else {
 		Err(ShErr::full(ShErrKind::SyntaxErr,format!("Invalid fd arg: {}", arg),blame))
@@ -103,7 +103,7 @@ pub fn jobs(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 			let arg_s = arg.to_string();
 			let mut chars = arg_s.chars().peekable();
 			if chars.peek().is_none_or(|ch| *ch != '-') {
-				return Err(ShErr::full(ShErrKind::SyntaxErr, "Invalid flag in jobs call".into(), arg.span().clone()))
+				return Err(ShErr::full(ShErrKind::SyntaxErr, "Invalid flag in jobs call", arg.span().clone()))
 			}
 			chars.next();
 			while let Some(ch) = chars.next() {
@@ -113,7 +113,7 @@ pub fn jobs(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 					'n' => JobCmdFlags::NEW_ONLY,
 					'r' => JobCmdFlags::RUNNING,
 					's' => JobCmdFlags::STOPPED,
-					_ => return Err(ShErr::full(ShErrKind::SyntaxErr, "Invalid flag in jobs call".into(), arg.span().clone()))
+					_ => return Err(ShErr::full(ShErrKind::SyntaxErr, "Invalid flag in jobs call", arg.span().clone()))
 
 				};
 				flags |= flag

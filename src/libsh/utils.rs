@@ -5,8 +5,19 @@ use nix::libc::getpgrp;
 
 use crate::{expand::{expand_vars::{expand_dquote, expand_var}, tilde::expand_tilde}, prelude::*};
 
+use super::term::StyleSet;
+
 pub trait StrOps {
-	fn trim_quotes(&self) -> String;
+	/// This function operates on anything that implements `AsRef<str>` and `Display`, which is mainly strings.
+	/// It takes a 'Style' which can be passed as a single Style object like `Style::Cyan` or a Bit OR of many styles,
+	/// For instance: `Style::Red | Style::Bold | Style::Italic`
+	fn styled<S: Into<StyleSet>>(self, style: S) -> String;
+}
+
+impl<T: AsRef<str> + Display> StrOps for T {
+	fn styled<S: Into<StyleSet>>(self, style: S) -> String {
+		style_text(&self, style)
+	}
 }
 
 pub trait ArgVec {
@@ -16,30 +27,12 @@ pub trait ArgVec {
 
 impl ArgVec for Vec<Token> {
 	/// Converts the contained tokens into strings.
-	/// This function also performs token expansion.
 	fn as_strings(self, shenv: &mut ShEnv) -> Vec<String> {
 		let mut argv_iter = self.into_iter();
 		let mut argv_processed = vec![];
 		while let Some(arg) = argv_iter.next() {
-			match arg.rule() {
-				TkRule::VarSub => {
-					let mut tokens = expand_var(arg, shenv).into_iter();
-					while let Some(token) = tokens.next() {
-						argv_processed.push(token.to_string())
-					}
-				}
-				TkRule::TildeSub => {
-					let expanded = expand_tilde(arg);
-					argv_processed.push(expanded);
-				}
-				TkRule::DQuote => {
-					let expanded = expand_dquote(arg, shenv);
-					argv_processed.push(expanded)
-				}
-				_ => {
-					argv_processed.push(arg.to_string())
-				}
-			}
+			let cleaned = trim_quotes(&arg);
+			argv_processed.push(cleaned);
 		}
 		argv_processed
 	}
@@ -72,11 +65,11 @@ pub enum LogLevel {
 impl Display for LogLevel {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			ERROR => write!(f,"{}",style_text("ERROR", Style::Red | Style::Bold)),
-			WARN => write!(f,"{}",style_text("WARN", Style::Yellow | Style::Bold)),
-			INFO => write!(f,"{}",style_text("INFO", Style::Green | Style::Bold)),
-			DEBUG => write!(f,"{}",style_text("DEBUG", Style::Magenta | Style::Bold)),
-			TRACE => write!(f,"{}",style_text("TRACE", Style::Blue | Style::Bold)),
+			ERROR => write!(f,"{}","ERROR".styled(Style::Red | Style::Bold)),
+			WARN => write!(f,"{}","WARN".styled(Style::Yellow | Style::Bold)),
+			INFO => write!(f,"{}","INFO".styled(Style::Green | Style::Bold)),
+			DEBUG => write!(f,"{}","DEBUG".styled(Style::Magenta | Style::Bold)),
+			TRACE => write!(f,"{}","TRACE".styled(Style::Blue | Style::Bold)),
 			NULL => write!(f,"")
 		}
 	}
@@ -89,9 +82,9 @@ macro_rules! log {
 			let var_name = stringify!($var);
 			if $level <= log_level() {
 				let file = file!();
-				let file_styled = style_text(file,Style::Cyan);
+				let file_styled = file.styled(Style::Cyan);
 				let line = line!();
-				let line_styled = style_text(line,Style::Cyan);
+				let line_styled = line.to_string().styled(Style::Cyan);
 				let logged = format!("[{}][{}:{}] {} = {:#?}",$level, file_styled,line_styled,var_name, &$var);
 
 				write(borrow_fd(2),format!("{}\n",logged).as_bytes()).unwrap();
@@ -102,9 +95,9 @@ macro_rules! log {
 	($level:expr, $lit:literal) => {{
 		if $level <= log_level() {
 			let file = file!();
-			let file_styled = style_text(file, Style::Cyan);
+			let file_styled = file.styled(Style::Cyan);
 			let line = line!();
-			let line_styled = style_text(line, Style::Cyan);
+			let line_styled = line.to_string().styled(Style::Cyan);
 			let logged = format!("[{}][{}:{}] {}", $level, file_styled, line_styled, $lit);
 			write(borrow_fd(2), format!("{}\n", logged).as_bytes()).unwrap();
 		}
@@ -114,9 +107,9 @@ macro_rules! log {
 		if $level <= log_level() {
 			let formatted = format!($($arg)*);
 			let file = file!();
-			let file_styled = style_text(file, Style::Cyan);
+			let file_styled = file.styled(Style::Cyan);
 			let line = line!();
-			let line_styled = style_text(line, Style::Cyan);
+			let line_styled = line.to_string().styled(Style::Cyan);
 			let logged = format!("[{}][{}:{}] {}", $level, file_styled, line_styled, formatted);
 			write(borrow_fd(2), format!("{}\n", logged).as_bytes()).unwrap();
 		}

@@ -83,6 +83,7 @@ pub enum NdRule {
 	Main { cmd_lists: Vec<Node> },
 	Command { argv: Vec<Token>, redirs: Vec<Redir> },
 	Assignment { assignments: Vec<Token>, cmd: Option<Box<Node>> },
+	FuncDef { name: Token, body: Token },
 	Subshell { body: Token, argv: Vec<Token>, redirs: Vec<Redir> },
 	CmdList { cmds: Vec<(Option<CmdGuard>,Node)> },
 	Pipeline { cmds: Vec<Node> }
@@ -255,6 +256,7 @@ ndrule_def!(CmdList, |tokens: &[Token]| {
 
 ndrule_def!(Expr, |tokens: &[Token]| {
 	try_rules!(tokens,
+		ShellCmd,
 		Pipeline,
 		Subshell,
 		Assignment,
@@ -264,10 +266,55 @@ ndrule_def!(Expr, |tokens: &[Token]| {
 // Used in pipelines to avoid recursion
 ndrule_def!(ExprNoPipeline, |tokens: &[Token]| {
 	try_rules!(tokens,
+		ShellCmd,
 		Subshell,
 		Assignment,
 		Command
 	);
+});
+
+ndrule_def!(ShellCmd, |tokens: &[Token]| {
+	try_rules!(tokens,
+		FuncDef
+	);
+});
+
+ndrule_def!(FuncDef, |tokens: &[Token]| {
+	let mut tokens_iter = tokens.iter();
+	let mut node_toks = vec![];
+	let name: Token;
+	let body: Token;
+
+	if let Some(token) = tokens_iter.next() {
+		if let TkRule::FuncName = token.rule() {
+			node_toks.push(token.clone());
+			name = token.clone();
+		} else {
+			return Ok(None)
+		}
+	} else {
+		return Ok(None)
+	}
+
+	if let Some(token) = tokens_iter.next() {
+		if let TkRule::BraceGrp = token.rule() {
+			node_toks.push(token.clone());
+			body = token.clone();
+		} else {
+			return Ok(None)
+		}
+	} else {
+		return Ok(None)
+	}
+
+	let span = get_span(&node_toks)?;
+	let node = Node {
+		node_rule: NdRule::FuncDef { name, body },
+		tokens: node_toks,
+		span,
+		flags: NdFlag::empty()
+	};
+	Ok(Some(node))
 });
 
 ndrule_def!(Subshell, |tokens: &[Token]| {

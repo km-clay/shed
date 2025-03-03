@@ -86,6 +86,7 @@ pub use crate::{
 			Redir,
 			RedirType,
 			RedirBldr,
+			StrOps,
 			RedirTarget,
 			CmdRedirs,
 			borrow_fd,
@@ -112,11 +113,16 @@ pub use crate::{
 		cd::cd,
 		pwd::pwd,
 		read::read_builtin,
+		alias::alias,
 		jobctl::{
 			continue_job,
 			jobs
 		},
 		BUILTINS
+	},
+	expand::{
+		expand_argv,
+		alias::expand_aliases
 	},
 	shellenv::{
 		self,

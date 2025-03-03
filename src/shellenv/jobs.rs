@@ -99,9 +99,10 @@ impl<'a> ChildProc {
 		} else {
 			WtStat::Exited(pid, 0)
 		};
+		log!(DEBUG, command);
 		let mut child = Self { pgid: pid, pid, command, stat };
 		if let Some(pgid) = pgid {
-			child.set_pgid(pgid)?;
+			child.set_pgid(pgid).ok();
 		}
 		Ok(child)
 	}
@@ -345,14 +346,14 @@ impl Job {
 			stat_line = format!("{}{} ",pid,stat_line);
 			stat_line = format!("{} {}", stat_line, cmd);
 			stat_line = match job_stat {
-				WtStat::Stopped(..) | WtStat::Signaled(..) => style_text(stat_line, Style::Magenta),
+				WtStat::Stopped(..) | WtStat::Signaled(..) => stat_line.styled(Style::Magenta),
 				WtStat::Exited(_, code) => {
 					match code {
-						0 => style_text(stat_line, Style::Green),
-						_ => style_text(stat_line, Style::Red),
+						0 => stat_line.styled(Style::Green),
+						_ => stat_line.styled(Style::Red),
 					}
 				}
-				_ => style_text(stat_line, Style::Cyan)
+				_ => stat_line.styled(Style::Cyan)
 			};
 			if i != self.get_cmds().len() - 1 {
 				stat_line = format!("{} |",stat_line);

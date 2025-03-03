@@ -89,14 +89,14 @@ pub enum ShErr {
 }
 
 impl ShErr {
-	pub fn simple(kind: ShErrKind, message: &str) -> Self {
-		Self::Simple { kind, message: message.to_string() }
+	pub fn simple<S: Into<String>>(kind: ShErrKind, message: S) -> Self {
+		Self::Simple { kind, message: message.into() }
 	}
 	pub fn io() -> Self {
 		io::Error::last_os_error().into()
 	}
-	pub fn full(kind: ShErrKind, message: String, span: Span) -> Self {
-		Self::Full { kind, message, span }
+	pub fn full<S: Into<String>>(kind: ShErrKind, message: S, span: Span) -> Self {
+		Self::Full { kind, message: message.into(), span }
 	}
 	pub fn try_blame(&mut self, blame: Span) {
 		match self {
@@ -178,7 +178,7 @@ impl Display for ShErr {
 				let dist = span.end() - span.start();
 				let padding = " ".repeat(offset);
 				let line_inner = "~".repeat(dist.saturating_sub(2));
-				let err_kind = style_text(&self.display_kind(), Style::Red | Style::Bold);
+				let err_kind = &self.display_kind().styled(Style::Red | Style::Bold);
 				let stat_line = format!("[{}:{}] - {}{}",line_no,offset,err_kind,message);
 				let indicator_line = if dist == 1 {
 					format!("{}^",padding)

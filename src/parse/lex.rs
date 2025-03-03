@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 use crate::prelude::*;
 
@@ -74,7 +74,7 @@ impl Lexer {
 	}
 }
 
-#[derive(Debug,Clone)]
+#[derive(Clone)]
 pub struct Token {
 	rule: TkRule,
 	span: Span
@@ -95,6 +95,13 @@ impl Token {
 
 	pub fn rule(&self) -> TkRule {
 		self.rule
+	}
+}
+
+impl Debug for Token {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let info = (self.rule(),self.to_string(),self.span.start,self.span.end);
+		write!(f,"{:?}",info)
 	}
 }
 
@@ -462,7 +469,7 @@ tkrule_def!(DQuote, |input: &str| {
 	// Double quoted strings
 	let mut chars = input.chars();
 	let mut len = 0;
-	let mut quoted = false;
+	let mut quote_count = 0;
 
 	while let Some(ch) = chars.next() {
 		match ch {
@@ -470,21 +477,38 @@ tkrule_def!(DQuote, |input: &str| {
 				chars.next();
 				len += 2;
 			}
-			'"' if !quoted => {
+			'"' => {
 				len += 1;
-				quoted = true;
+				quote_count += 1;
 			}
-			'"' if quoted => {
-				len += 1;
-				return Some(len)
-			}
-			_ if !quoted => {
-				return None
+			' ' | '\t' | ';' | '\n' if quote_count % 2 == 0 => {
+				if quote_count > 0 {
+					if quote_count % 2 == 0 {
+						return Some(len)
+					} else {
+						return None
+					}
+				} else {
+					return None
+				}
 			}
 			_ => len += 1
 		}
 	}
-	None
+	match len {
+		0 => None,
+		_ => {
+			if quote_count > 0 {
+				if quote_count % 2 == 0 {
+					return Some(len)
+				} else {
+					return None
+				}
+			} else {
+				return None
+			}
+		}
+	}
 });
 
 tkrule_def!(ProcSub, |input: &str| {

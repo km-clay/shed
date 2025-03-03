@@ -47,14 +47,91 @@ fn exec_list(list: Vec<(Option<CmdGuard>, Node)>, shenv: &mut ShEnv) -> ShResult
 		}
 		log!(TRACE, "{:?}", *cmd.rule());
 		match *cmd.rule() {
-			NdRule::Command {..} if cmd.flags().contains(NdFlag::BUILTIN) => exec_builtin(cmd,shenv).try_blame(span)?,
-			NdRule::Command {..} => exec_cmd(cmd,shenv).try_blame(span)?,
+			NdRule::Command {..} => dispatch_command(cmd, shenv).try_blame(span)?,
 			NdRule::Subshell {..} => exec_subshell(cmd,shenv).try_blame(span)?,
+			NdRule::FuncDef {..} => exec_funcdef(cmd,shenv).try_blame(span)?,
 			NdRule::Assignment {..} => exec_assignment(cmd,shenv).try_blame(span)?,
 			NdRule::Pipeline {..} => exec_pipeline(cmd, shenv).try_blame(span)?,
 			_ => unimplemented!()
 		}
 	}
+	Ok(())
+}
+
+fn dispatch_command(mut node: Node, shenv: &mut ShEnv) -> ShResult<()> {
+	let mut is_builtin = false;
+	let mut is_func = false;
+	let mut is_subsh = false;
+	if let NdRule::Command { ref mut argv, redirs: _ } = node.rule_mut() {
+		*argv = expand_argv(argv.to_vec(), shenv);
+		let cmd = argv.first().unwrap().to_string();
+		if shenv.logic().get_function(&cmd).is_some() {
+			is_func = true;
+		} else if node.flags().contains(NdFlag::BUILTIN) {
+			is_builtin = true;
+		}
+	} else if let NdRule::Subshell { body: _, ref mut argv, redirs: _ } = node.rule_mut() {
+		*argv = expand_argv(argv.to_vec(), shenv);
+		is_subsh = true;
+	} else { unreachable!() }
+
+	if is_builtin {
+		exec_builtin(node, shenv)?;
+	} else if is_func {
+		exec_func(node, shenv)?;
+	} else if is_subsh {
+		exec_subshell(node, shenv)?;
+	} else {
+		exec_cmd(node, shenv)?;
+	}
+	Ok(())
+}
+
+fn exec_func(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
+	let rule = node.into_rule();
+	if let NdRule::Command { argv, redirs } = rule {
+		let mut argv_iter = argv.into_iter();
+		let func_name = argv_iter.next().unwrap().to_string();
+		let body = shenv.logic().get_function(&func_name).unwrap().to_string();
+		let snapshot = shenv.clone();
+		shenv.vars_mut().reset_params();
+		while let Some(arg) = argv_iter.next() {
+			shenv.vars_mut().bpush_arg(&arg.to_string());
+		}
+		shenv.collect_redirs(redirs);
+
+		let lex_input = Rc::new(body);
+		let tokens = Lexer::new(lex_input).lex();
+		match Parser::new(tokens).parse() {
+			Ok(syn_tree) => {
+				match Executor::new(syn_tree, shenv).walk() {
+					Ok(_) => { /* yippee */ }
+					Err(e) => {
+						*shenv = snapshot;
+						return Err(e.into())
+					}
+				}
+			}
+			Err(e) => {
+				*shenv = snapshot;
+				return Err(e.into())
+			}
+		}
+		*shenv = snapshot;
+	}
+	Ok(())
+}
+
+fn exec_funcdef(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
+	let rule = node.into_rule();
+	if let NdRule::FuncDef { name, body } = rule {
+		let name_raw = name.to_string();
+		let name = name_raw.trim_end_matches("()");
+		let body_raw = body.to_string();
+		let body = body_raw[1..body_raw.len() - 1].trim();
+
+		shenv.logic_mut().set_function(name, body);
+	} else { unreachable!() }
 	Ok(())
 }
 
@@ -154,6 +231,7 @@ fn exec_builtin(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		"fg" => continue_job(node, shenv, true)?,
 		"bg" => continue_job(node, shenv, false)?,
 		"read" => read_builtin(node, shenv)?,
+		"alias" => alias(node, shenv)?,
 		_ => unimplemented!("Have not yet implemented support for builtin `{}'",command)
 	}
 	log!(TRACE, "done");
@@ -212,6 +290,8 @@ fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 			if let NdRule::Command { argv, redirs: _ } = cmd.rule() {
 				let cmd_name = argv.first().unwrap().span().get_slice().to_string();
 				cmd_names.push(cmd_name);
+			} else if let NdRule::Subshell {..} = cmd.rule() {
+				cmd_names.push("subshell".to_string());
 			} else { unimplemented!() }
 
 			match unsafe { fork()? } {
@@ -234,11 +314,7 @@ fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 						shenv.ctx_mut().push_rdr(rpipe_redir);
 					}
 
-					if cmd.flags().contains(NdFlag::BUILTIN) {
-						exec_builtin(cmd, shenv).unwrap();
-					} else {
-						exec_cmd(cmd, shenv).unwrap();
-					}
+					dispatch_command(cmd, shenv)?;
 					exit(0);
 				}
 				Parent { child } => {

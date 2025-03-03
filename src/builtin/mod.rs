@@ -4,8 +4,9 @@ pub mod pwd;
 pub mod export;
 pub mod jobctl;
 pub mod read;
+pub mod alias;
 
-pub const BUILTINS: [&str;8] = [
+pub const BUILTINS: [&str;9] = [
 	"echo",
 	"cd",
 	"pwd",
@@ -13,5 +14,6 @@ pub const BUILTINS: [&str;8] = [
 	"fg",
 	"bg",
 	"jobs",
-	"read"
+	"read",
+	"alias"
 ];
