@@ -1,18 +1,15 @@
 use crate::{parse::lex::Token, prelude::*};
 
 pub fn expand_var(var_sub: Token, shenv: &mut ShEnv) -> Vec<Token> {
-	let var_name = var_sub.to_string();
+	let var_name = var_sub.as_raw(shenv);
 	let var_name = var_name.trim_start_matches('$').trim_matches(['{','}']);
-	let value = Rc::new(
-			shenv.vars()
-				.get_var(var_name)
-				.to_string()
-	);
-	Lexer::new(value).lex() // Automatically handles word splitting for us
+	let value = shenv.vars().get_var(var_name).to_string();
+
+	shenv.expand_input(&value, var_sub.span())
 }
 
 pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> Token {
-	let dquote_raw = dquote.to_string();
+	let dquote_raw = dquote.as_raw(shenv);
 	let mut result = String::new();
 	let mut var_name = String::new();
 	let mut chars = dquote_raw.chars().peekable();
@@ -63,5 +60,8 @@ pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> Token {
 
 	log!(DEBUG, result);
 
-	Lexer::new(Rc::new(result)).lex().pop().unwrap_or(dquote)
+	log!(DEBUG, "{:?}",dquote.span());
+	let token = shenv.expand_input(&result, dquote.span()).pop().unwrap_or(dquote);
+	log!(DEBUG, "{}",token.as_raw(shenv));
+	token
 }

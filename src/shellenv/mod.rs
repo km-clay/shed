@@ -10,6 +10,7 @@ pub mod exec_ctx;
 pub mod meta;
 pub mod shenv;
 pub mod vars;
+pub mod input;
 
 /// Calls attach_tty() on the shell's process group to retake control of the terminal
 pub fn take_term() -> ShResult<()> {

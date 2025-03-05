@@ -5,6 +5,7 @@ pub struct ShEnv {
 	vars: shellenv::vars::VarTab,
 	logic: shellenv::logic::LogTab,
 	meta: shellenv::meta::MetaTab,
+	input_man: shellenv::input::InputMan,
 	ctx: shellenv::exec_ctx::ExecCtx
 }
 
@@ -14,6 +15,7 @@ impl ShEnv {
 			vars: shellenv::vars::VarTab::new(),
 			logic: shellenv::logic::LogTab::new(),
 			meta: shellenv::meta::MetaTab::new(),
+			input_man: shellenv::input::InputMan::new(),
 			ctx: shellenv::exec_ctx::ExecCtx::new(),
 		}
 	}
@@ -25,6 +27,58 @@ impl ShEnv {
 	}
 	pub fn meta(&self) -> &shellenv::meta::MetaTab {
 		&self.meta
+	}
+	pub fn input_slice(&self, span: Rc<RefCell<Span>>) -> &str {
+		&self.input_man.get_slice(span).unwrap_or_default()
+	}
+	pub fn expand_input(&mut self, new: &str, repl_span: Rc<RefCell<Span>>) -> Vec<Token> {
+		let saved_spans = self.input_man.spans_mut().clone();
+		let mut new_tokens = Lexer::new(new.to_string(), self).lex();
+		*self.input_man.spans_mut() = saved_spans;
+
+		let offset = repl_span.borrow().start();
+		for token in new_tokens.iter_mut() {
+			token.span().borrow_mut().shift(offset as isize);
+		}
+
+		let repl_start = repl_span.borrow().start();
+		let repl_end = repl_span.borrow().end();
+		let range = repl_start..repl_end;
+
+		if let Some(ref mut input) = self.input_man.get_input_mut() {
+			let old = &input[range.clone()];
+			let delta: isize = new.len() as isize - old.len() as isize;
+			input.replace_range(range, new);
+			let expanded = input.clone();
+			log!(DEBUG, expanded);
+
+			for span in self.input_man.spans_mut() {
+				let mut span_mut = span.borrow_mut();
+				if span_mut.start() > repl_start {
+					span_mut.shift(delta);
+				}
+			}
+			for token in &new_tokens {
+				self.input_man.spans_mut().push(token.span());
+			}
+		}
+		self.input_man.clamp_all();
+		new_tokens
+	}
+	pub fn new_input(&mut self, input: &str) {
+		self.input_man.clear();
+		self.input_man.new_input(input);
+	}
+	pub fn get_input(&self) -> String {
+		let input = self.input_man.get_input().map(|s| s.to_string()).unwrap_or_default();
+		log!(DEBUG, input);
+		input
+	}
+	pub fn inputman(&self) -> &shellenv::input::InputMan {
+		&self.input_man
+	}
+	pub fn inputman_mut(&mut self) -> &mut shellenv::input::InputMan {
+		&mut self.input_man
 	}
 	pub fn meta_mut(&mut self) -> &mut shellenv::meta::MetaTab {
 		&mut self.meta

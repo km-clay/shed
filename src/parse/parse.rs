@@ -1,9 +1,9 @@
 use core::fmt::Display;
-use std::str::FromStr;
+use std::{cell::Ref, str::FromStr};
 
 use crate::prelude::*;
 
-use super::lex::{TkRule, Span, Token};
+use super::lex::{Span, TkRule, Token, KEYWORDS};
 
 bitflags! {
 	#[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -17,12 +17,12 @@ bitflags! {
 
 pub trait ParseRule {
 	/// Used for cases where a rule is optional
-	fn try_match(input: &[Token]) -> ShResult<Option<Node>>;
+	fn try_match(input: &[Token], shenv: &mut ShEnv) -> ShResult<Option<Node>>;
 	/// Used for cases where a rule is assumed based on context
 	/// For instance, if the "for" keyword is encountered, then it *must* be a for loop
 	/// And if it isn't, return a parse error
-	fn assert_match(input: &[Token]) -> ShResult<Node> {
-		Self::try_match(input)?.ok_or_else(||
+	fn assert_match(input: &[Token], shenv: &mut ShEnv) -> ShResult<Node> {
+		Self::try_match(input,shenv)?.ok_or_else(||
 			ShErr::simple(ShErrKind::ParseErr, "Parse Error")
 		)
 	}
@@ -40,7 +40,7 @@ pub enum CmdGuard {
 pub struct Node {
 	node_rule: NdRule,
 	tokens: Vec<Token>,
-	span: Span,
+	span: Rc<RefCell<Span>>,
 	flags: NdFlag,
 }
 
@@ -60,8 +60,11 @@ impl Node {
 	pub fn into_rule(self) -> NdRule {
 		self.node_rule
 	}
-	pub fn span(&self) -> Span {
+	pub fn span(&self) -> Rc<RefCell<Span>> {
 		self.span.clone()
+	}
+	pub fn as_raw(&self, shenv: &mut ShEnv) -> String {
+		shenv.input_slice(self.span()).to_string()
 	}
 	pub fn flags(&self) -> NdFlag {
 		self.flags
@@ -71,11 +74,10 @@ impl Node {
 	}
 }
 
-impl Display for Node {
-	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-		let raw = self.span().get_slice();
-		write!(f, "{}", raw)
-	}
+#[derive(Clone,Debug)]
+pub enum LoopKind {
+	While,
+	Until
 }
 
 #[derive(Clone,Debug)]
@@ -84,6 +86,9 @@ pub enum NdRule {
 	Command { argv: Vec<Token>, redirs: Vec<Redir> },
 	Assignment { assignments: Vec<Token>, cmd: Option<Box<Node>> },
 	FuncDef { name: Token, body: Token },
+	IfThen { cond_blocks: Vec<(Vec<Node>,Vec<Node>)>, else_block: Option<Vec<Node>> },
+	Loop { kind: LoopKind, cond: Vec<Node>, body: Vec<Node> },
+	ForLoop { vars: Vec<Token>, arr: Vec<Token>, body: Vec<Node> },
 	Subshell { body: Token, argv: Vec<Token>, redirs: Vec<Redir> },
 	CmdList { cmds: Vec<(Option<CmdGuard>,Node)> },
 	Pipeline { cmds: Vec<Node> }
@@ -91,12 +96,12 @@ pub enum NdRule {
 
 /// Define a Node rule. The body of this macro becomes the implementation for the try_match() method for the rule.
 macro_rules! ndrule_def {
-	($name:ident,$try:expr) => {
+	($name:ident,$shenv:ident,$try:expr) => {
 		#[derive(Debug)]
 		pub struct $name;
 		impl ParseRule for $name {
-			fn try_match(input: &[Token]) -> ShResult<Option<Node>> {
-				$try(input)
+			fn try_match(input: &[Token],shenv: &mut ShEnv) -> ShResult<Option<Node>> {
+				$try(input,shenv)
 			}
 		}
 	};
@@ -105,9 +110,9 @@ macro_rules! ndrule_def {
 /// This macro attempts to match all of the given Rules. It returns upon finding the first match, so the order matters
 /// Place the most specialized/specific rules first, and the most general rules last
 macro_rules! try_rules {
-    ($tokens:expr, $($name:ident),+) => {
+    ($tokens:expr,$shenv:expr,$($name:ident),+) => {
 			$(
-				let result = $name::try_match($tokens)?;
+				let result = $name::try_match($tokens,$shenv)?;
 				if let Some(node) = result {
 					return Ok(Some(node))
 				}
@@ -125,6 +130,9 @@ impl SynTree {
 	pub fn new() -> Self {
 		Self { tree: VecDeque::new() }
 	}
+	pub fn from_vec(nodes: Vec<Node>) -> Self {
+		Self { tree: VecDeque::from(nodes) }
+	}
 	pub fn push_node(&mut self, node: Node) {
 		self.tree.bpush(node)
 	}
@@ -133,16 +141,17 @@ impl SynTree {
 	}
 }
 
-pub struct Parser {
+pub struct Parser<'a> {
 	token_stream: Vec<Token>,
+	shenv: &'a mut ShEnv,
 	ast: SynTree
 }
 
-impl Parser {
-	pub fn new(mut token_stream: Vec<Token>) -> Self {
+impl<'a> Parser<'a> {
+	pub fn new(mut token_stream: Vec<Token>, shenv: &'a mut ShEnv) -> Self {
 		log!(TRACE, "New parser");
 		token_stream.retain(|tk| !matches!(tk.rule(), TkRule::Whitespace | TkRule::Comment));
-		Self { token_stream, ast: SynTree::new() }
+		Self { token_stream, shenv, ast: SynTree::new() }
 	}
 
 	pub fn parse(mut self) -> ShResult<SynTree> {
@@ -150,11 +159,10 @@ impl Parser {
 		let mut lists = VecDeque::new();
 		let token_slice = &*self.token_stream;
 		// Get the Main rule
-		if let Some(mut node) = Main::try_match(token_slice)? {
+		if let Some(mut node) = Main::try_match(token_slice,self.shenv)? {
 			// Extract the inner lists
 			if let NdRule::Main { ref mut cmd_lists } = node.rule_mut() {
 				while let Some(node) = cmd_lists.pop() {
-					log!(DEBUG, node);
 					lists.bpush(node)
 				}
 			}
@@ -167,26 +175,42 @@ impl Parser {
 	}
 }
 
-fn get_span(toks: &Vec<Token>) -> ShResult<Span> {
+fn get_span(toks: &Vec<Token>, shenv: &mut ShEnv) -> ShResult<Rc<RefCell<Span>>> {
 	if toks.is_empty() {
 		Err(ShErr::simple(ShErrKind::InternalErr, "Get_span was given an empty token list"))
 	} else {
-		let start = toks.first().unwrap().span().start();
-		let end = toks.iter().last().unwrap().span().end();
-		let input = toks.iter().last().unwrap().span().get_input();
-		Ok(Span::new(input,start,end))
+		let start = toks.first().unwrap().span().borrow().start();
+		let end = toks.iter().last().unwrap().span().borrow().end();
+		let span = shenv.inputman_mut().new_span(start, end);
+		Ok(span)
 	}
+}
+
+fn get_lists(mut tokens: &[Token], shenv: &mut ShEnv) -> (usize,Vec<Node>) {
+	let mut lists = vec![];
+	let mut tokens_eaten = 0;
+	while !tokens.is_empty() {
+		match CmdList::try_match(tokens, shenv) {
+			Ok(Some(list)) => {
+				tokens_eaten += list.len();
+				tokens = &tokens[list.len()..];
+				lists.push(list);
+			}
+			Ok(None) | Err(_) => break
+		}
+	}
+	(tokens_eaten,lists)
 }
 
 // TODO: Redirs with FD sources appear to be looping endlessly for some reason
 
-ndrule_def!(Main, |tokens: &[Token]| {
+ndrule_def!(Main, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	log!(TRACE, "Parsing main");
 	let mut cmd_lists = vec![];
 	let mut node_toks = vec![];
 	let mut token_slice = &*tokens;
 
-	while let Some(node) = CmdList::try_match(token_slice)? {
+	while let Some(node) = CmdList::try_match(token_slice,shenv)? {
 		node_toks.extend(node.tokens().clone());
 		token_slice = &token_slice[node.len()..];
 		cmd_lists.push(node);
@@ -195,7 +219,7 @@ ndrule_def!(Main, |tokens: &[Token]| {
 	if cmd_lists.is_empty() {
 		return Ok(None)
 	}
-	let span = get_span(&node_toks)?;
+	let span = get_span(&node_toks,shenv)?;
 	let node = Node {
 		node_rule: NdRule::Main { cmd_lists },
 		tokens: node_toks,
@@ -205,14 +229,14 @@ ndrule_def!(Main, |tokens: &[Token]| {
 	Ok(Some(node))
 });
 
-ndrule_def!(CmdList, |tokens: &[Token]| {
+ndrule_def!(CmdList, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	log!(TRACE, "Parsing cmdlist");
 	let mut commands: Vec<(Option<CmdGuard>,Node)> = vec![];
 	let mut node_toks = vec![];
 	let mut token_slice = &*tokens;
 	let mut cmd_guard = None; // Operators like '&&' and '||'
 
-	while let Some(mut node) = Expr::try_match(token_slice)? {
+	while let Some(mut node) = Expr::try_match(token_slice,shenv)? {
 		// Add sub-node tokens to our tokens
 		node_toks.extend(node.tokens().clone());
 		// Reflect changes in the token slice
@@ -221,8 +245,11 @@ ndrule_def!(CmdList, |tokens: &[Token]| {
 		log!(DEBUG, token_slice);
 		// Push sub-node
 		if let NdRule::Command { argv, redirs: _ } = node.rule() {
-			if argv.first().is_some_and(|arg| BUILTINS.contains(&arg.to_string().as_str())) {
-				*node.flags_mut() |= NdFlag::BUILTIN;
+			if let Some(arg) = argv.first() {
+				let slice = shenv.input_slice(arg.span().clone());
+				if BUILTINS.contains(&slice) {
+					*node.flags_mut() |= NdFlag::BUILTIN;
+				}
 			}
 		}
 		commands.push((cmd_guard.take(),node));
@@ -244,7 +271,7 @@ ndrule_def!(CmdList, |tokens: &[Token]| {
 	if node_toks.is_empty() {
 		return Ok(None)
 	}
-	let span = get_span(&node_toks)?;
+	let span = get_span(&node_toks,shenv)?;
 	let node = Node {
 		node_rule: NdRule::CmdList { cmds: commands },
 		tokens: node_toks,
@@ -254,8 +281,8 @@ ndrule_def!(CmdList, |tokens: &[Token]| {
 	Ok(Some(node))
 });
 
-ndrule_def!(Expr, |tokens: &[Token]| {
-	try_rules!(tokens,
+ndrule_def!(Expr, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
+	try_rules!(tokens, shenv,
 		ShellCmd,
 		Pipeline,
 		Subshell,
@@ -264,8 +291,8 @@ ndrule_def!(Expr, |tokens: &[Token]| {
 	);
 });
 // Used in pipelines to avoid recursion
-ndrule_def!(ExprNoPipeline, |tokens: &[Token]| {
-	try_rules!(tokens,
+ndrule_def!(ExprNoPipeline, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
+	try_rules!(tokens, shenv,
 		ShellCmd,
 		Subshell,
 		Assignment,
@@ -273,13 +300,352 @@ ndrule_def!(ExprNoPipeline, |tokens: &[Token]| {
 	);
 });
 
-ndrule_def!(ShellCmd, |tokens: &[Token]| {
-	try_rules!(tokens,
+ndrule_def!(ShellCmd, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
+	try_rules!(tokens, shenv,
+		IfThen,
+		Loop,
 		FuncDef
 	);
 });
 
-ndrule_def!(FuncDef, |tokens: &[Token]| {
+ndrule_def!(ForLoop, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
+	let err = |msg: &str, span: Rc<RefCell<Span>>, shenv: &mut ShEnv | {
+		ShErr::full(ShErrKind::ParseErr, msg, shenv.get_input(), span)
+	};
+	let mut tokens_iter = tokens.iter().peekable();
+	let mut node_toks = vec![];
+	let mut vars = vec![];
+	let mut arr = vec![];
+	let body: Vec<Node>;
+
+	if let Some(token) = tokens_iter.next() {
+		if let TkRule::For = token.rule() {
+			node_toks.push(token.clone());
+			tokens = &tokens[1..];
+		} else { return Ok(None) }
+	} else { return Ok(None) }
+
+	while let Some(token) = tokens_iter.next() {
+		if let TkRule::Ident = token.rule() {
+			node_toks.push(token.clone());
+			tokens = &tokens[1..];
+			if token.as_raw(shenv) == "in" { break }
+			vars.push(token.clone());
+		} else {
+			let span = get_span(&node_toks, shenv)?;
+			return Err(err("Expected an ident in for loop vars",span,shenv))
+		}
+	}
+	if vars.is_empty() {
+		let span = get_span(&node_toks, shenv)?;
+		return Err(err("Expected an ident in for loop vars",span,shenv))
+	}
+	while let Some(token) = tokens_iter.next() {
+		if let TkRule::Ident = token.rule() {
+			node_toks.push(token.clone());
+			tokens = &tokens[1..];
+			if token.rule() == TkRule::Sep { break }
+			arr.push(token.clone());
+		} else {
+			let span = get_span(&node_toks, shenv)?;
+			return Err(err("Expected an ident in for loop array",span,shenv))
+		}
+	}
+	if arr.is_empty() {
+		let span = get_span(&node_toks, shenv)?;
+		return Err(err("Expected an ident in for loop array",span,shenv))
+	}
+
+	if let Some(token) = tokens_iter.next() {
+		node_toks.push(token.clone());
+		tokens = &tokens[1..];
+		if token.rule() != TkRule::Do {
+			let span = get_span(&node_toks, shenv)?;
+			return Err(err("Expected `do` after for loop array",span,shenv))
+		}
+	} else {
+		let span = get_span(&node_toks, shenv)?;
+		return Err(err("Expected `do` after for loop array",span,shenv))
+	}
+
+	let (used,lists) = get_lists(tokens, shenv);
+	for list in &lists {
+		node_toks.extend(list.tokens().clone());
+	}
+	tokens = &tokens[used..];
+	body = lists;
+	tokens_iter = tokens.iter().peekable();
+
+	if let Some(token) = tokens_iter.next() {
+		node_toks.push(token.clone());
+		if token.rule() != TkRule::Done {
+			let span = get_span(&node_toks, shenv)?;
+			return Err(err("Expected `done` after for loop",span,shenv))
+		}
+	} else {
+		let span = get_span(&node_toks, shenv)?;
+		return Err(err("Expected `done` after for loop",span,shenv))
+	}
+
+	let span = get_span(&node_toks, shenv)?;
+	let node = Node {
+		node_rule: NdRule::ForLoop { vars, arr, body },
+		tokens: node_toks,
+		span,
+		flags: NdFlag::empty()
+	};
+
+	Ok(Some(node))
+});
+
+ndrule_def!(IfThen, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
+	let err = |msg: &str, span: Rc<RefCell<Span>>, shenv: &mut ShEnv | {
+		ShErr::full(ShErrKind::ParseErr, msg, shenv.get_input(), span)
+	};
+	let mut tokens_iter = tokens.iter().peekable();
+	let mut node_toks = vec![];
+	let mut cond_blocks = vec![];
+	let mut else_block: Option<Vec<Node>> = None;
+
+	if let Some(token) = tokens_iter.next() {
+		if let TkRule::If = token.rule() {
+			node_toks.push(token.clone());
+			tokens = &tokens[1..];
+		} else { return Ok(None) }
+	} else { return Ok(None) }
+
+	let (used,lists) = get_lists(tokens, shenv);
+	for list in &lists {
+		node_toks.extend(list.tokens().clone());
+	}
+	tokens = &tokens[used..];
+	let cond = lists;
+	tokens_iter = tokens.iter().peekable();
+
+	while let Some(token) = tokens_iter.next() {
+		match token.rule() {
+			TkRule::Then => {
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+				break
+			}
+			TkRule::Sep | TkRule::Whitespace => {
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+			}
+			_ => {
+				let span = get_span(&node_toks,shenv)?;
+				return Err(err("Expected `then` after if statement condition",span,shenv))
+			}
+		}
+	}
+
+	if tokens_iter.peek().is_none() {
+		let span = get_span(&node_toks,shenv)?;
+		return Err(err("Failed to parse this if statement",span,shenv))
+	}
+
+	let (used,lists) = get_lists(tokens, shenv);
+	for list in &lists {
+		node_toks.extend(list.tokens().clone());
+	}
+	tokens = &tokens[used..];
+	let body = lists;
+	tokens_iter = tokens.iter().peekable();
+	cond_blocks.push((cond,body));
+
+
+	let mut closed = false;
+	while let Some(token) = tokens_iter.next() {
+		match token.rule() {
+			TkRule::Elif => {
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+
+				let (used,lists) = get_lists(tokens, shenv);
+				for list in &lists {
+					node_toks.extend(list.tokens().clone());
+				}
+				tokens = &tokens[used..];
+				let cond = lists;
+				tokens_iter = tokens.iter().peekable();
+
+				while let Some(token) = tokens_iter.next() {
+					match token.rule() {
+						TkRule::Then => {
+							node_toks.push(token.clone());
+							tokens = &tokens[1..];
+							break
+						}
+						TkRule::Sep | TkRule::Whitespace => {
+							node_toks.push(token.clone());
+							tokens = &tokens[1..];
+						}
+						_ => {
+							let span = get_span(&node_toks,shenv)?;
+							return Err(err("Expected `then` after if statement condition",span,shenv))
+						}
+					}
+				}
+
+				if tokens_iter.peek().is_none() {
+					let span = get_span(&node_toks,shenv)?;
+					return Err(err("Failed to parse this if statement",span,shenv))
+				}
+
+				let (used,lists) = get_lists(tokens, shenv);
+				for list in &lists {
+					node_toks.extend(list.tokens().clone());
+				}
+				tokens = &tokens[used..];
+				let body = lists;
+				tokens_iter = tokens.iter().peekable();
+				cond_blocks.push((cond,body));
+			}
+			TkRule::Else => {
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+				let (used,lists) = get_lists(tokens, shenv);
+				for list in &lists {
+					node_toks.extend(list.tokens().clone());
+				}
+				tokens = &tokens[used..];
+				else_block = Some(lists);
+				tokens_iter = tokens.iter().peekable();
+			}
+			TkRule::Fi => {
+				closed = true;
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+			}
+			TkRule::Sep | TkRule::Whitespace => {
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+				if closed { break }
+			}
+			_ => {
+				let span = get_span(&node_toks, shenv)?;
+				return Err(err("Unexpected token in if statement",span,shenv))
+			}
+		}
+	}
+
+	if !closed {
+		let span = get_span(&node_toks, shenv)?;
+		return Err(err("Expected `fi` to close if statement",span,shenv))
+	}
+
+	let span = get_span(&node_toks, shenv)?;
+	let node = Node {
+		node_rule: NdRule::IfThen { cond_blocks, else_block },
+		tokens: node_toks,
+		span,
+		flags: NdFlag::empty()
+	};
+
+	Ok(Some(node))
+});
+
+ndrule_def!(Loop, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
+	let err = |msg: &str, span: Rc<RefCell<Span>>, shenv: &mut ShEnv | {
+		ShErr::full(ShErrKind::ParseErr, msg, shenv.get_input(), span)
+	};
+	let mut tokens_iter = tokens.iter().peekable();
+	let mut node_toks = vec![];
+	let kind: LoopKind;
+	let cond: Vec<Node>;
+	let body: Vec<Node>;
+
+	if let Some(token) = tokens_iter.next() {
+		node_toks.push(token.clone());
+		match token.rule() {
+			TkRule::While => {
+				kind = LoopKind::While
+			}
+			TkRule::Until => {
+				kind = LoopKind::Until
+			}
+			_ => return Ok(None)
+		}
+	} else { return Ok(None) }
+	tokens = &tokens[1..];
+
+	let (used,lists) = get_lists(tokens, shenv);
+	for list in &lists {
+		node_toks.extend(list.tokens().clone());
+	}
+	tokens = &tokens[used..];
+	cond = lists;
+	tokens_iter = tokens.iter().peekable();
+
+	while let Some(token) = tokens_iter.next() {
+		match token.rule() {
+			TkRule::Sep | TkRule::Whitespace => {
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+			}
+			TkRule::Do => {
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+				break
+			}
+			_ => {
+				let span = get_span(&node_toks,shenv)?;
+				return Err(err("Expected `do` after loop condition",span,shenv))
+			}
+		}
+	}
+
+	if tokens_iter.peek().is_none() {
+		return Ok(None)
+	}
+
+	let (used,lists) = get_lists(tokens, shenv);
+	for list in &lists {
+		node_toks.extend(list.tokens().clone());
+	}
+	tokens = &tokens[used..];
+	body = lists;
+	tokens_iter = tokens.iter().peekable();
+
+	let mut closed = false;
+	while let Some(token) = tokens_iter.next() {
+		match token.rule() {
+			TkRule::Sep | TkRule::Whitespace => {
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+				if closed { break }
+			}
+			TkRule::Done => {
+				closed = true;
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+			}
+			_ => {
+				let span = get_span(&node_toks,shenv)?;
+				return Err(err("Unexpected token in loop",span,shenv))
+			}
+		}
+	}
+
+	if !closed {
+		let span = get_span(&node_toks,shenv)?;
+		return Err(err("Expected `done` to close loop",span,shenv))
+	}
+
+	let span = get_span(&node_toks, shenv)?;
+	let node = Node {
+		node_rule: NdRule::Loop { kind, cond, body },
+		tokens: node_toks,
+		span,
+		flags: NdFlag::empty()
+	};
+
+	log!(DEBUG, node);
+	Ok(Some(node))
+});
+
+ndrule_def!(FuncDef, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	let mut tokens_iter = tokens.iter();
 	let mut node_toks = vec![];
 	let name: Token;
@@ -307,7 +673,7 @@ ndrule_def!(FuncDef, |tokens: &[Token]| {
 		return Ok(None)
 	}
 
-	let span = get_span(&node_toks)?;
+	let span = get_span(&node_toks,shenv)?;
 	let node = Node {
 		node_rule: NdRule::FuncDef { name, body },
 		tokens: node_toks,
@@ -317,7 +683,7 @@ ndrule_def!(FuncDef, |tokens: &[Token]| {
 	Ok(Some(node))
 });
 
-ndrule_def!(Subshell, |tokens: &[Token]| {
+ndrule_def!(Subshell, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	let mut tokens_iter = tokens.iter();
 	let mut node_toks = vec![];
 	let mut argv = vec![];
@@ -350,27 +716,29 @@ ndrule_def!(Subshell, |tokens: &[Token]| {
 					TkRule::RedirOp => {
 						node_toks.push(token.clone());
 						// Get the raw redirection text, e.g. "1>&2" or "2>" or ">>" or something
-						let redir_raw = token.span().get_slice();
+						let redir_raw = shenv.input_slice(token.span());
 						let mut redir_bldr = RedirBldr::from_str(&redir_raw).unwrap();
 						// If there isn't an FD target, get the next token and use it as the filename
 						if redir_bldr.tgt().is_none() {
 							if let Some(filename) = tokens_iter.next() {
 								// Make sure it's a word and not an operator or something
-								if !matches!(filename.rule(), TkRule::SQuote | TkRule::DQuote | TkRule::Ident | TkRule::Keyword) {
+								if !matches!(filename.rule(), TkRule::SQuote | TkRule::DQuote | TkRule::Ident) || KEYWORDS.contains(&filename.rule()) {
 									let mut err = ShErr::simple(ShErrKind::ParseErr, "Did not find a target for this redirection");
-									err.blame(token.span().clone());
+									let input = shenv.input_slice(token.span()).to_string();
+									err.blame(input, token.span());
 									return Err(err)
 								}
 								node_toks.push(filename.clone());
 								// Construct the Path object
-								let filename_raw = filename.span().get_slice();
+								let filename_raw = shenv.input_slice(filename.span()).to_string();
 								let filename_path = PathBuf::from(filename_raw);
 								let tgt = RedirTarget::File(filename_path);
 								// Update the builder
 								redir_bldr = redir_bldr.with_tgt(tgt);
 							} else {
 								let mut err = ShErr::simple(ShErrKind::ParseErr, "Did not find a target for this redirection");
-								err.blame(token.span().clone());
+								let input = shenv.input_slice(token.span()).to_string();
+								err.blame(input, token.span());
 								return Err(err)
 							}
 						}
@@ -379,7 +747,7 @@ ndrule_def!(Subshell, |tokens: &[Token]| {
 					_ => break
 				}
 			}
-			let span = get_span(&node_toks)?;
+			let span = get_span(&node_toks,shenv)?;
 			let node = Node {
 				node_rule: NdRule::Subshell { body, argv, redirs },
 				tokens: node_toks,
@@ -394,7 +762,7 @@ ndrule_def!(Subshell, |tokens: &[Token]| {
 	Ok(None)
 });
 
-ndrule_def!(Pipeline, |mut tokens: &[Token]| {
+ndrule_def!(Pipeline, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 	log!(TRACE, "Parsing pipeline");
 	let mut tokens_iter = tokens.iter().peekable();
 	let mut node_toks = vec![];
@@ -411,7 +779,7 @@ ndrule_def!(Pipeline, |mut tokens: &[Token]| {
 			}
 			_ => { /* Keep going */ }
 		}
-		if let Some(mut cmd) = ExprNoPipeline::try_match(tokens)? {
+		if let Some(mut cmd) = ExprNoPipeline::try_match(tokens,shenv)? {
 			// Add sub-node's tokens to our tokens
 			node_toks.extend(cmd.tokens().clone());
 
@@ -422,8 +790,11 @@ ndrule_def!(Pipeline, |mut tokens: &[Token]| {
 			}
 
 			if let NdRule::Command { argv, redirs: _ } = cmd.rule() {
-				if argv.first().is_some_and(|arg| BUILTINS.contains(&arg.to_string().as_str())) {
-					*cmd.flags_mut() |= NdFlag::BUILTIN;
+				if let Some(arg) = argv.first() {
+					let slice = shenv.input_slice(arg.span().clone());
+					if BUILTINS.contains(&slice) {
+						*cmd.flags_mut() |= NdFlag::BUILTIN;
+					}
 				}
 			}
 			// Push sub-node
@@ -458,7 +829,7 @@ ndrule_def!(Pipeline, |mut tokens: &[Token]| {
 	if node_toks.is_empty() {
 		return Ok(None)
 	}
-	let span = get_span(&node_toks)?;
+	let span = get_span(&node_toks,shenv)?;
 	let node = Node {
 		node_rule: NdRule::Pipeline { cmds },
 		tokens: node_toks,
@@ -468,7 +839,7 @@ ndrule_def!(Pipeline, |mut tokens: &[Token]| {
 	Ok(Some(node))
 });
 
-ndrule_def!(Command, |tokens: &[Token]| {
+ndrule_def!(Command, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	log!(TRACE, "Parsing command");
 	let mut tokens = tokens.iter().peekable();
 	let mut node_toks = vec![];
@@ -495,40 +866,49 @@ ndrule_def!(Command, |tokens: &[Token]| {
 			}
 			TkRule::RedirOp => {
 				// Get the raw redirection text, e.g. "1>&2" or "2>" or ">>" or something
-				let redir_raw = token.span().get_slice();
+				let redir_raw = shenv.input_slice(token.span()).to_string();
 				let mut redir_bldr = RedirBldr::from_str(&redir_raw).unwrap();
 				// If there isn't an FD target, get the next token and use it as the filename
 				if redir_bldr.tgt().is_none() {
 					if let Some(filename) = tokens.next() {
 						// Make sure it's a word and not an operator or something
-						if !matches!(filename.rule(), TkRule::SQuote | TkRule::DQuote | TkRule::Ident | TkRule::Keyword) {
+						if !matches!(filename.rule(), TkRule::SQuote | TkRule::DQuote | TkRule::Ident) || KEYWORDS.contains(&filename.rule()) {
 							let mut err = ShErr::simple(ShErrKind::ParseErr, "Did not find a target for this redirection");
-							err.blame(token.span().clone());
+							let input = shenv.input_slice(token.span()).to_string();
+							err.blame(input, token.span());
 							return Err(err)
 						}
 						node_toks.push(filename.clone());
 						// Construct the Path object
-						let filename_raw = filename.span().get_slice();
+						let filename_raw = shenv.input_slice(filename.span()).to_string();
 						let filename_path = PathBuf::from(filename_raw);
 						let tgt = RedirTarget::File(filename_path);
 						// Update the builder
 						redir_bldr = redir_bldr.with_tgt(tgt);
 					} else {
 						let mut err = ShErr::simple(ShErrKind::ParseErr, "Did not find a target for this redirection");
-						err.blame(token.span().clone());
+						let input = shenv.input_slice(token.span()).to_string();
+						err.blame(input, token.span());
 						return Err(err)
 					}
 				}
 				redirs.push(redir_bldr.build());
 			}
 			TkRule::Sep => break,
-			_ => unreachable!("Found this rule: {:?}", token.rule())
+			_ => return Err(
+				ShErr::full(
+					ShErrKind::ParseErr,
+					format!("Unexpected token in command rule: {:?}", token.rule()),
+					shenv.get_input(),
+					get_span(&node_toks,shenv)?
+				)
+			)
 		}
 	}
 	if node_toks.is_empty() {
 		return Ok(None)
 	}
-	let span = get_span(&node_toks)?;
+	let span = get_span(&node_toks,shenv)?;
 	if !argv.is_empty() {
 		let node = Node {
 			node_rule: NdRule::Command { argv, redirs },
@@ -542,7 +922,7 @@ ndrule_def!(Command, |tokens: &[Token]| {
 	}
 });
 
-ndrule_def!(Assignment, |tokens: &[Token]| {
+ndrule_def!(Assignment, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	log!(TRACE, "Parsing assignment");
 	let mut tokens = tokens.into_iter().peekable();
 	let mut node_toks = vec![];
@@ -559,11 +939,11 @@ ndrule_def!(Assignment, |tokens: &[Token]| {
 	if tokens.peek().is_some() {
 		let tokens_vec: Vec<Token> = tokens.into_iter().map(|token| token.clone()).collect();
 		let tokens_slice = &tokens_vec;
-		let cmd = Command::try_match(tokens_slice)?.map(|cmd| Box::new(cmd));
+		let cmd = Command::try_match(tokens_slice,shenv)?.map(|cmd| Box::new(cmd));
 		if let Some(ref cmd) = cmd {
 			node_toks.extend(cmd.tokens().clone());
 		}
-		let span = get_span(&node_toks)?;
+		let span = get_span(&node_toks,shenv)?;
 		let node = Node {
 			node_rule: NdRule::Assignment { assignments, cmd },
 			tokens: node_toks,
@@ -572,7 +952,7 @@ ndrule_def!(Assignment, |tokens: &[Token]| {
 		};
 		return Ok(Some(node))
 	} else {
-		let span = get_span(&node_toks)?;
+		let span = get_span(&node_toks,shenv)?;
 		let node = Node {
 			node_rule: NdRule::Assignment { assignments, cmd: None },
 			tokens: node_toks,

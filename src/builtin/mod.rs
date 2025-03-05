@@ -5,8 +5,9 @@ pub mod export;
 pub mod jobctl;
 pub mod read;
 pub mod alias;
+pub mod control_flow;
 
-pub const BUILTINS: [&str;9] = [
+pub const BUILTINS: [&str;13] = [
 	"echo",
 	"cd",
 	"pwd",
@@ -15,5 +16,9 @@ pub const BUILTINS: [&str;9] = [
 	"bg",
 	"jobs",
 	"read",
-	"alias"
+	"alias",
+	"exit",
+	"continue",
+	"return",
+	"break",
 ];

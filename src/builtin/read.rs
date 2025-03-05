@@ -27,7 +27,8 @@ pub fn read_builtin(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 				shenv.vars_mut().set_var(&first_var.to_string(), &read_input);
 			}
 			*/
-			shenv.vars_mut().set_var(&var.to_string(), &read_input);
+			let var_name = shenv.input_slice(var.span()).to_string();
+			shenv.vars_mut().set_var(&var_name, &read_input);
 		}
 	} else {
 		unreachable!()

@@ -14,6 +14,7 @@ pub fn continue_job(node: Node, shenv: &mut ShEnv, fg: bool) -> ShResult<()> {
 				ShErr::full(
 					ShErrKind::InternalErr,
 					format!("Somehow called {} with an existing foreground job",cmd),
+					shenv.get_input(),
 					blame
 				)
 			)
@@ -22,11 +23,11 @@ pub fn continue_job(node: Node, shenv: &mut ShEnv, fg: bool) -> ShResult<()> {
 		let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {
 			id
 		} else {
-			return Err(ShErr::full(ShErrKind::ExecFail, "No jobs found", blame))
+			return Err(ShErr::full(ShErrKind::ExecFail, "No jobs found", shenv.get_input(), blame))
 		};
 
 		let tabid = match argv_s.next() {
-			Some(arg) => parse_job_id(&arg, blame.clone())?,
+			Some(arg) => parse_job_id(&arg, blame.clone(),shenv)?,
 			None => curr_job_id
 		};
 
@@ -36,7 +37,14 @@ pub fn continue_job(node: Node, shenv: &mut ShEnv, fg: bool) -> ShResult<()> {
 			if query_result.is_some() {
 				Ok(j.remove_job(id.clone()).unwrap())
 			} else {
-				Err(ShErr::full(ShErrKind::ExecFail, format!("Job id `{}' not found", tabid), blame))
+				Err(
+					ShErr::full(
+						ShErrKind::ExecFail,
+						format!("Job id `{}' not found", tabid),
+						shenv.get_input(),
+						blame
+					)
+				)
 			}
 		})?;
 
@@ -54,7 +62,7 @@ pub fn continue_job(node: Node, shenv: &mut ShEnv, fg: bool) -> ShResult<()> {
 	Ok(())
 }
 
-fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
+fn parse_job_id(arg: &str, blame: Rc<RefCell<Span>>, shenv: &mut ShEnv) -> ShResult<usize> {
 	if arg.starts_with('%') {
 		let arg = arg.strip_prefix('%').unwrap();
 		if arg.chars().all(|ch| ch.is_ascii_digit()) {
@@ -66,7 +74,14 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 			});
 			match result {
 				Some(id) => Ok(id),
-				None => Err(ShErr::full(ShErrKind::InternalErr,"Found a job but no table id in parse_job_id()",blame))
+				None => Err(
+					ShErr::full(
+						ShErrKind::InternalErr,
+						"Found a job but no table id in parse_job_id()",
+						shenv.get_input(),
+						blame
+					)
+				)
 			}
 		}
 	} else if arg.chars().all(|ch| ch.is_ascii_digit()) {
@@ -86,10 +101,24 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 
 		match result {
 			Some(id) => Ok(id),
-			None => Err(ShErr::full(ShErrKind::InternalErr,"Found a job but no table id in parse_job_id()",blame))
+			None => Err(
+				ShErr::full(
+					ShErrKind::InternalErr,
+					"Found a job but no table id in parse_job_id()",
+					shenv.get_input(),
+					blame
+				)
+			)
 		}
 	} else {
-		Err(ShErr::full(ShErrKind::SyntaxErr,format!("Invalid fd arg: {}", arg),blame))
+		Err(
+			ShErr::full(
+				ShErrKind::SyntaxErr,
+				format!("Invalid fd arg: {}", arg),
+				shenv.get_input(),
+				blame
+			)
+		)
 	}
 }
 
@@ -100,10 +129,17 @@ pub fn jobs(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 
 		let mut flags = JobCmdFlags::empty();
 		while let Some(arg) = argv.next() {
-			let arg_s = arg.to_string();
+			let arg_s = shenv.input_slice(arg.span());
 			let mut chars = arg_s.chars().peekable();
 			if chars.peek().is_none_or(|ch| *ch != '-') {
-				return Err(ShErr::full(ShErrKind::SyntaxErr, "Invalid flag in jobs call", arg.span().clone()))
+				return Err(
+					ShErr::full(
+						ShErrKind::SyntaxErr,
+						"Invalid flag in jobs call",
+						shenv.get_input(),
+						arg.span()
+					)
+				)
 			}
 			chars.next();
 			while let Some(ch) = chars.next() {
@@ -113,7 +149,14 @@ pub fn jobs(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 					'n' => JobCmdFlags::NEW_ONLY,
 					'r' => JobCmdFlags::RUNNING,
 					's' => JobCmdFlags::STOPPED,
-					_ => return Err(ShErr::full(ShErrKind::SyntaxErr, "Invalid flag in jobs call", arg.span().clone()))
+					_ => return Err(
+						ShErr::full(
+							ShErrKind::SyntaxErr,
+							"Invalid flag in jobs call",
+							shenv.get_input(),
+							arg.span()
+						)
+					)
 
 				};
 				flags |= flag

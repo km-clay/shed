@@ -4,6 +4,7 @@ use rustyline::{config::Configurer, history::{DefaultHistory, History}, ColorMod
 
 pub mod readline;
 pub mod highlight;
+pub mod validate;
 
 fn init_rl<'a>(shenv: &'a mut ShEnv) -> Editor<SynHelper<'a>, DefaultHistory> {
 	let hist_path = std::env::var("FERN_HIST").unwrap_or_default();
@@ -25,7 +26,7 @@ fn init_rl<'a>(shenv: &'a mut ShEnv) -> Editor<SynHelper<'a>, DefaultHistory> {
 	editor
 }
 
-pub fn read_line<'a>(shenv: &'a mut ShEnv) -> ShResult<String> {
+pub fn read_line(shenv: &mut ShEnv) -> ShResult<String> {
 	log!(TRACE, "Entering prompt");
 	let prompt = "$ ".styled(Style::Green | Style::Bold);
 	let mut editor = init_rl(shenv);

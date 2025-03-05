@@ -6,7 +6,7 @@ pub fn export(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		let mut argv_iter = argv.into_iter();
 		argv_iter.next(); // Ignore 'export'
 		while let Some(arg) = argv_iter.next() {
-			let arg_raw = arg.to_string();
+			let arg_raw = shenv.input_slice(arg.span()).to_string();
 			if let Some((var,val)) = arg_raw.split_once('=') {
 				shenv.vars_mut().export(var, val);
 			} else {

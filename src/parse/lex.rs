@@ -1,66 +1,66 @@
-use std::fmt::{Debug, Display};
+use std::{cell::Ref, fmt::{Debug, Display}};
 
 use crate::prelude::*;
 
-pub const KEYWORDS: [&str;14] = [
-	"if",
-	"then",
-	"elif",
-	"else",
-	"fi",
-	"while",
-	"until",
-	"for",
-	"in",
-	"select",
-	"do",
-	"done",
-	"case",
-	"esac"
+pub const KEYWORDS: [TkRule;14] = [
+	TkRule::If,
+	TkRule::Then,
+	TkRule::Elif,
+	TkRule::Else,
+	TkRule::Fi,
+	TkRule::While,
+	TkRule::Until,
+	TkRule::For,
+	TkRule::In,
+	TkRule::Select,
+	TkRule::Do,
+	TkRule::Done,
+	TkRule::Case,
+	TkRule::Esac
 ];
 
-pub const SEPARATORS: [TkRule; 7] = [
+pub const SEPARATORS: [TkRule; 6] = [
 	TkRule::Sep,
 	TkRule::AndOp,
 	TkRule::OrOp,
 	TkRule::PipeOp,
 	TkRule::ErrPipeOp,
 	TkRule::BgOp,
-	TkRule::Keyword // Keywords don't count as command names
 ];
 
 pub trait LexRule {
 	fn try_match(input: &str) -> Option<usize>;
 }
 
-pub struct Lexer {
-	input: Rc<String>,
+pub struct Lexer<'a> {
+	input: String,
 	tokens: Vec<Token>,
 	is_command: bool,
+	shenv: &'a mut ShEnv,
 	consumed: usize
 }
 
-impl Lexer {
-	pub fn new(input: Rc<String>) -> Self {
-		Self { input, tokens: vec![], is_command: true, consumed: 0  }
+impl<'a> Lexer<'a> {
+	pub fn new(input: String, shenv: &'a mut ShEnv) -> Self {
+		Self { input, tokens: vec![], is_command: true, shenv, consumed: 0  }
 	}
 	pub fn lex(mut self) -> Vec<Token> {
 		unsafe {
 			let mut input = self.input.as_str();
 			while let Some((mut rule,len)) = TkRule::try_match(input) {
 				// If we see a keyword in an argument position, it's actually an ident
-				if !self.is_command && rule == TkRule::Keyword {
+				if !self.is_command && KEYWORDS.contains(&rule) {
 					rule = TkRule::Ident
 
 				// If we are in a command right now, after this we are in arguments
-				} else if self.is_command && !matches!(rule,TkRule::Keyword | TkRule::Whitespace) {
+				} else if self.is_command && rule != TkRule::Whitespace && !KEYWORDS.contains(&rule) {
 					self.is_command = false;
 				}
 				// If we see a separator like && or ;, we are now in a command again
 				if SEPARATORS.contains(&rule) {
 					self.is_command = true;
 				}
-				let span = Span::new(self.input.clone(),self.consumed,self.consumed + len);
+				let span = self.shenv.inputman_mut().new_span(self.consumed, self.consumed + len);
 				let token = Token::new(rule, span);
 				self.consumed += len;
 				input = &input[len..];
@@ -77,73 +77,43 @@ impl Lexer {
 #[derive(Clone)]
 pub struct Token {
 	rule: TkRule,
-	span: Span
+	span: Rc<RefCell<Span>>
 }
 
 impl Token {
-	pub fn new(rule: TkRule, span: Span) -> Self {
+	pub fn new(rule: TkRule, span: Rc<RefCell<Span>>) -> Self {
 		Self { rule, span }
 	}
 
-	pub fn span(&self) -> &Span {
-		&self.span
-	}
-
-	pub fn span_mut(&mut self) -> &mut Span {
-		&mut self.span
+	pub fn span(&self) -> Rc<RefCell<Span>> {
+		self.span.clone()
 	}
 
 	pub fn rule(&self) -> TkRule {
 		self.rule
 	}
+
+	pub fn as_raw(&self, shenv: &mut ShEnv) -> String {
+		shenv.input_slice(self.span()).to_string()
+	}
 }
 
 impl Debug for Token {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let info = (self.rule(),self.to_string(),self.span.start,self.span.end);
+		let info = (self.rule(),self.span.borrow().start,self.span.borrow().end);
 		write!(f,"{:?}",info)
-	}
-}
-
-impl Display for Token {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let slice = self.span.get_slice();
-		write!(f,"{}",slice)
 	}
 }
 
 #[derive(Debug,Clone)]
 pub struct Span {
-	input: Rc<String>,
 	start: usize,
 	end: usize
 }
 
 impl Span {
-	pub fn new(input: Rc<String>, start: usize, end: usize) -> Self {
-		Self { input, start, end } }
-	pub fn get_slice(&self) -> String {
-		unsafe {
-			let slice = &self.input[self.start..self.end];
-			slice.to_string()
-		}
-	}
-	pub fn get_line(&self) -> (usize,usize,String) {
-		unsafe {
-			let mut dist = 0;
-			let mut line_no = 0;
-			let mut lines = self.input.lines();
-			while let Some(line) = lines.next() {
-				line_no += 1;
-				dist += line.len();
-				if dist > self.start {
-					dist -= line.len();
-					let offset = self.start - dist;
-					return (offset,line_no,line.to_string())
-				}
-			}
-		}
-		(0,0,String::new())
+	pub fn new(start: usize, end: usize) -> Self {
+		Self { start, end }
 	}
 	pub fn start(&self) -> usize {
 		self.start
@@ -151,8 +121,19 @@ impl Span {
 	pub fn end(&self) -> usize {
 		self.end
 	}
-	pub fn get_input(&self) -> Rc<String> {
-		self.input.clone()
+	pub fn clamp_start(&mut self, start: usize) {
+		if self.start > start {
+			self.start = start
+		}
+	}
+	pub fn clamp_end(&mut self, end: usize) {
+		if self.end > end {
+			self.end = end
+		}
+	}
+	pub fn shift(&mut self, delta: isize) {
+		self.start = self.start.saturating_add_signed(delta);
+		self.end = self.end.saturating_add_signed(delta);
 	}
 }
 
@@ -204,7 +185,20 @@ pub enum TkRule {
 	CmdSub,
 	DQuote,
 	SQuote,
-	Keyword,
+	If,
+	Then,
+	Elif,
+	Else,
+	Fi,
+	While,
+	Until,
+	For,
+	In,
+	Select,
+	Do,
+	Done,
+	Case,
+	Esac,
 	Assign,
 	Ident,
 	Sep,
@@ -232,8 +226,21 @@ impl TkRule {
 		try_match!(TildeSub,input);
 		try_match!(Subshell,input);
 		try_match!(Sep,input);
-		try_match!(Keyword,input);
 		try_match!(Assign,input);
+		try_match!(If,input);
+		try_match!(Then,input);
+		try_match!(Elif,input);
+		try_match!(Else,input);
+		try_match!(Fi,input);
+		try_match!(While,input);
+		try_match!(Until,input);
+		try_match!(For,input);
+		try_match!(In,input);
+		try_match!(Select,input);
+		try_match!(Do,input);
+		try_match!(Done,input);
+		try_match!(Case,input);
+		try_match!(Esac,input);
 		try_match!(Ident,input);
 		None
 	}
@@ -371,17 +378,159 @@ tkrule_def!(OrOp, |input: &str| {
 	}
 });
 
-
-tkrule_def!(Keyword, |input: &str| {
-	for &kw in KEYWORDS.iter() {
-		if input.starts_with(kw) {
-			let len = kw.len();
-			if input.chars().nth(len).map_or(true, |ch| ch.is_whitespace() || ch == ';') {
-				return Some(len);
-			}
+tkrule_def!(If, |input: &str| {
+	if input.starts_with("if") {
+		match input.chars().nth(2) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(2),
+			Some(_) => None,
+			None => Some(2), // "if" is the entire input
 		}
+	} else {
+		None
 	}
-	None
+});
+tkrule_def!(Then, |input: &str| {
+	if input.starts_with("then") {
+		match input.chars().nth(4) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(4),
+			Some(_) => None,
+			None => Some(4), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(Elif, |input: &str| {
+	if input.starts_with("elif") {
+		match input.chars().nth(4) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(4),
+			Some(_) => None,
+			None => Some(4), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(Else, |input: &str| {
+	if input.starts_with("else") {
+		match input.chars().nth(4) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(4),
+			Some(_) => None,
+			None => Some(4), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(Fi, |input: &str| {
+	if input.starts_with("fi") {
+		match input.chars().nth(2) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(2),
+			Some(_) => None,
+			None => Some(2), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(While, |input: &str| {
+	if input.starts_with("while") {
+		match input.chars().nth(5) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(5),
+			Some(_) => None,
+			None => Some(5), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(Until, |input: &str| {
+	if input.starts_with("until") {
+		match input.chars().nth(5) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(5),
+			Some(_) => None,
+			None => Some(5), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(For, |input: &str| {
+	if input.starts_with("for") {
+		match input.chars().nth(3) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(3),
+			Some(_) => None,
+			None => Some(3), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(In, |input: &str| {
+	if input.starts_with("in") {
+		match input.chars().nth(2) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(2),
+			Some(_) => None,
+			None => Some(2), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(Select, |input: &str| {
+	if input.starts_with("select") {
+		match input.chars().nth(6) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(6),
+			Some(_) => None,
+			None => Some(6), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(Do, |input: &str| {
+	if input.starts_with("do") {
+		match input.chars().nth(2) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(2),
+			Some(_) => None,
+			None => Some(2), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(Done, |input: &str| {
+	if input.starts_with("done") {
+		match input.chars().nth(4) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(4),
+			Some(_) => None,
+			None => Some(4), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(Case, |input: &str| {
+	if input.starts_with("case") {
+		match input.chars().nth(4) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(4),
+			Some(_) => None,
+			None => Some(4), // "if" is the entire input
+		}
+	} else {
+		None
+	}
+});
+tkrule_def!(Esac, |input: &str| {
+	if input.starts_with("esac") {
+		match input.chars().nth(4) {
+			Some(ch) if ch.is_whitespace() || ch == ';' => Some(4),
+			Some(_) => None,
+			None => Some(4), // "if" is the entire input
+		}
+	} else {
+		None
+	}
 });
 
 tkrule_def!(Ident, |input: &str| {
@@ -717,6 +866,14 @@ tkrule_def!(BraceGrp, |input: &str| {
 });
 
 tkrule_def!(RedirOp, |input: &str| {
+	if let Some(ch) = input.chars().next() {
+		match ch {
+			'>' |
+			'<' |
+			'&' => { /* Continue */ }
+			_ => return None
+		}
+	}
 	// Order matters here
 	// For instance, if '>' is checked before '>>', '>' will always match first, and '>>' will never be checked
 	try_match_inner!(RedirCombineAppend,input); // Ex: &>>

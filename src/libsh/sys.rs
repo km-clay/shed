@@ -40,6 +40,31 @@ pub fn c_pipe() -> Result<(RawFd,RawFd),Errno> {
 	Ok((pipes[0],pipes[1]))
 }
 
+pub fn sh_quit(code: i32) -> ! {
+	write_jobs(|j| {
+		for job in j.jobs_mut().iter_mut().flatten() {
+			job.killpg(Signal::SIGTERM).ok();
+		}
+	});
+	exit(code);
+}
+
+pub fn read_to_string(fd: i32) -> ShResult<String> {
+	let mut buf = Vec::with_capacity(4096);
+	let mut temp_buf = [0u8;1024];
+
+	loop {
+		match read(fd, &mut temp_buf) {
+			Ok(0) => break, // EOF
+			Ok(n) => buf.extend_from_slice(&temp_buf[..n]),
+			Err(Errno::EINTR) => continue, // Retry on EINTR
+			Err(e) => return Err(e.into()), // Return other errors
+		}
+	}
+
+	Ok(String::from_utf8_lossy(&buf).to_string())
+}
+
 pub fn execvpe(cmd: String, argv: Vec<String>, envp: Vec<String>) -> Result<(),Errno> {
 	let cmd_raw = CString::new(cmd).unwrap();
 

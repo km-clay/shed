@@ -4,6 +4,33 @@ use shellenv::jobs::{ChildProc, JobBldr};
 
 use crate::{builtin::export::export, libsh::{error::Blame, sys::{execvpe, get_bin_path}, utils::{ArgVec, StrOps}}, parse::{lex::Token, parse::{CmdGuard, NdFlag, Node, NdRule, SynTree}}, prelude::*};
 
+pub mod ifthen;
+
+pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> {
+	let input = input.into();
+	shenv.new_input(&input);
+	log!(INFO, "New input: {:?}", input);
+
+	let token_stream = Lexer::new(input,shenv).lex();
+
+	let token_stream = expand_aliases(token_stream, shenv);
+	for token in &token_stream {
+		log!(DEBUG, token);
+		log!(DEBUG, "{}",token.as_raw(shenv));
+	}
+
+	let syn_tree = Parser::new(token_stream,shenv).parse()?;
+	if let Err(e) = Executor::new(syn_tree, shenv).walk() {
+		if let ShErrKind::CleanExit = e.kind() {
+			let code = shenv.get_code();
+			sh_quit(code);
+		} else {
+			return Err(e.into())
+		}
+	}
+	Ok(())
+}
+
 pub struct Executor<'a> {
 	ast: SynTree,
 	shenv: &'a mut ShEnv
@@ -16,10 +43,9 @@ impl<'a> Executor<'a> {
 	pub fn walk(&mut self) -> ShResult<()> {
 		log!(DEBUG, "Starting walk");
 		while let Some(node) = self.ast.next_node() {
-			let span = node.span();
 			if let NdRule::CmdList { cmds } = node.clone().into_rule() {
 				log!(TRACE, "{:?}", cmds);
-				exec_list(cmds, self.shenv).try_blame(span)?
+				exec_list(cmds, self.shenv).try_blame(node.as_raw(self.shenv),node.span())?
 			} else { unreachable!() }
 		}
 		Ok(())
@@ -33,6 +59,7 @@ fn exec_list(list: Vec<(Option<CmdGuard>, Node)>, shenv: &mut ShEnv) -> ShResult
 		let guard = cmd_info.0;
 		let cmd = cmd_info.1;
 		let span = cmd.span();
+		let cmd_raw = cmd.as_raw(shenv);
 
 		if let Some(guard) = guard {
 			let code = shenv.get_code();
@@ -47,11 +74,12 @@ fn exec_list(list: Vec<(Option<CmdGuard>, Node)>, shenv: &mut ShEnv) -> ShResult
 		}
 		log!(TRACE, "{:?}", *cmd.rule());
 		match *cmd.rule() {
-			NdRule::Command {..} => dispatch_command(cmd, shenv).try_blame(span)?,
-			NdRule::Subshell {..} => exec_subshell(cmd,shenv).try_blame(span)?,
-			NdRule::FuncDef {..} => exec_funcdef(cmd,shenv).try_blame(span)?,
-			NdRule::Assignment {..} => exec_assignment(cmd,shenv).try_blame(span)?,
-			NdRule::Pipeline {..} => exec_pipeline(cmd, shenv).try_blame(span)?,
+			NdRule::Command {..} => dispatch_command(cmd, shenv).try_blame(cmd_raw, span)?,
+			NdRule::Subshell {..} => exec_subshell(cmd,shenv).try_blame(cmd_raw, span)?,
+			NdRule::IfThen {..} => ifthen::exec_if(cmd, shenv).try_blame(cmd_raw, span)?,
+			NdRule::FuncDef {..} => exec_funcdef(cmd,shenv).try_blame(cmd_raw, span)?,
+			NdRule::Assignment {..} => exec_assignment(cmd,shenv).try_blame(cmd_raw, span)?,
+			NdRule::Pipeline {..} => exec_pipeline(cmd, shenv).try_blame(cmd_raw, span)?,
 			_ => unimplemented!()
 		}
 	}
@@ -64,7 +92,7 @@ fn dispatch_command(mut node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	let mut is_subsh = false;
 	if let NdRule::Command { ref mut argv, redirs: _ } = node.rule_mut() {
 		*argv = expand_argv(argv.to_vec(), shenv);
-		let cmd = argv.first().unwrap().to_string();
+		let cmd = argv.first().unwrap().as_raw(shenv);
 		if shenv.logic().get_function(&cmd).is_some() {
 			is_func = true;
 		} else if node.flags().contains(NdFlag::BUILTIN) {
@@ -91,33 +119,32 @@ fn exec_func(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	let rule = node.into_rule();
 	if let NdRule::Command { argv, redirs } = rule {
 		let mut argv_iter = argv.into_iter();
-		let func_name = argv_iter.next().unwrap().to_string();
+		let func_name = argv_iter.next().unwrap().as_raw(shenv);
 		let body = shenv.logic().get_function(&func_name).unwrap().to_string();
 		let snapshot = shenv.clone();
 		shenv.vars_mut().reset_params();
 		while let Some(arg) = argv_iter.next() {
-			shenv.vars_mut().bpush_arg(&arg.to_string());
+			let arg_raw = shenv.input_slice(arg.span()).to_string();
+			shenv.vars_mut().bpush_arg(&arg_raw);
 		}
 		shenv.collect_redirs(redirs);
 
-		let lex_input = Rc::new(body);
-		let tokens = Lexer::new(lex_input).lex();
-		match Parser::new(tokens).parse() {
-			Ok(syn_tree) => {
-				match Executor::new(syn_tree, shenv).walk() {
-					Ok(_) => { /* yippee */ }
-					Err(e) => {
-						*shenv = snapshot;
-						return Err(e.into())
-					}
-				}
+		match exec_input(body, shenv) {
+			Ok(()) => {
+				*shenv = snapshot;
+				return Ok(())
+			}
+			Err(e) if e.kind() == ShErrKind::FuncReturn => {
+				let code = shenv.get_code();
+				*shenv = snapshot;
+				shenv.set_code(code);
+				return Ok(())
 			}
 			Err(e) => {
 				*shenv = snapshot;
 				return Err(e.into())
 			}
 		}
-		*shenv = snapshot;
 	}
 	Ok(())
 }
@@ -125,9 +152,9 @@ fn exec_func(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 fn exec_funcdef(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	let rule = node.into_rule();
 	if let NdRule::FuncDef { name, body } = rule {
-		let name_raw = name.to_string();
+		let name_raw = name.as_raw(shenv);
 		let name = name_raw.trim_end_matches("()");
-		let body_raw = body.to_string();
+		let body_raw = body.as_raw(shenv);
 		let body = body_raw[1..body_raw.len() - 1].trim();
 
 		shenv.logic_mut().set_function(name, body);
@@ -148,26 +175,18 @@ fn exec_subshell(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 				exit(1);
 			}
 			for arg in argv {
-				shenv.vars_mut().bpush_arg(&arg.to_string());
+				let arg_raw = &arg.as_raw(shenv);
+				shenv.vars_mut().bpush_arg(arg_raw);
 			}
-			let body_raw = body.to_string();
-			let lexer_input = Rc::new(
-					body_raw[1..body_raw.len() - 1].to_string()
-			);
-			let token_stream = Lexer::new(lexer_input).lex();
-			match Parser::new(token_stream).parse() {
-				Ok(syn_tree) => {
-					if let Err(e) = Executor::new(syn_tree, shenv).walk() {
-						write_err(e)?;
-						exit(1);
-					}
-				}
+			let body_raw = body.as_raw(shenv);
+
+			match exec_input(body_raw, shenv) {
+				Ok(()) => sh_quit(0),
 				Err(e) => {
-					write_err(e)?;
-					exit(1);
+					eprintln!("{}",e);
+					sh_quit(1);
 				}
 			}
-			exit(0);
 		} else {
 			match unsafe { fork()? } {
 				Child => {
@@ -177,26 +196,17 @@ fn exec_subshell(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 						exit(1);
 					}
 					for arg in argv {
-						shenv.vars_mut().bpush_arg(&arg.to_string());
+						let arg_raw = &arg.as_raw(shenv);
+						shenv.vars_mut().bpush_arg(arg_raw);
 					}
-					let body_raw = body.to_string();
-					let lexer_input = Rc::new(
-							body_raw[1..body_raw.len() - 1].to_string()
-					);
-					let token_stream = Lexer::new(lexer_input).lex();
-					match Parser::new(token_stream).parse() {
-						Ok(syn_tree) => {
-							if let Err(e) = Executor::new(syn_tree, shenv).walk() {
-								write_err(e)?;
-								exit(1);
-							}
-						}
+					let body_raw = body.as_raw(shenv);
+					match exec_input(body_raw, shenv) {
+						Ok(()) => sh_quit(0),
 						Err(e) => {
-							write_err(e)?;
-							exit(1);
+							eprintln!("{}",e);
+							sh_quit(1);
 						}
 					}
-					exit(0);
 				}
 				Parent { child } => {
 					*shenv = snapshot;
@@ -218,7 +228,7 @@ fn exec_subshell(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 fn exec_builtin(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	log!(DEBUG, "Executing builtin");
 	let command = if let NdRule::Command { argv, redirs: _ } = node.rule() {
-		argv.first().unwrap().to_string()
+		argv.first().unwrap().as_raw(shenv)
 	} else { unreachable!() };
 
 	log!(TRACE, "{}", command.as_str());
@@ -232,6 +242,8 @@ fn exec_builtin(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		"bg" => continue_job(node, shenv, false)?,
 		"read" => read_builtin(node, shenv)?,
 		"alias" => alias(node, shenv)?,
+		"exit" => sh_flow(node, shenv, ShErrKind::CleanExit)?,
+		"return" => sh_flow(node, shenv, ShErrKind::FuncReturn)?,
 		_ => unimplemented!("Have not yet implemented support for builtin `{}'",command)
 	}
 	log!(TRACE, "done");
@@ -247,7 +259,7 @@ fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		let mut assigns = assignments.into_iter();
 		if let Some(cmd) = cmd {
 			while let Some(assign) = assigns.next() {
-				let assign_raw = assign.to_string();
+				let assign_raw = assign.as_raw(shenv);
 				if let Some((var,val)) = assign_raw.split_once('=') {
 					shenv.vars_mut().export(var, val);
 				}
@@ -259,7 +271,7 @@ fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 			}
 		} else {
 			while let Some(assign) = assigns.next() {
-				let assign_raw = assign.to_string();
+				let assign_raw = assign.as_raw(shenv);
 				if let Some((var,val)) = assign_raw.split_once('=') {
 					shenv.vars_mut().set_var(var, val);
 				}
@@ -288,7 +300,7 @@ fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 				(Some(r_pipe),Some(w_pipe))
 			};
 			if let NdRule::Command { argv, redirs: _ } = cmd.rule() {
-				let cmd_name = argv.first().unwrap().span().get_slice().to_string();
+				let cmd_name = argv.first().unwrap().as_raw(shenv);
 				cmd_names.push(cmd_name);
 			} else if let NdRule::Subshell {..} = cmd.rule() {
 				cmd_names.push("subshell".to_string());
@@ -305,12 +317,12 @@ fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 
 					// Create some redirections
 					if let Some(w_pipe) = w_pipe {
-						let wpipe_redir = Redir::new(1, RedirType::Output, RedirTarget::Fd(w_pipe.as_raw_fd()));
+						let wpipe_redir = Redir::output(1, w_pipe);
 						shenv.ctx_mut().push_rdr(wpipe_redir);
 					}
 					// Use the r_pipe created in the last iteration
 					if let Some(prev_rpipe) = prev_rpipe {
-						let rpipe_redir = Redir::new(0, RedirType::Input, RedirTarget::Fd(prev_rpipe.as_raw_fd()));
+						let rpipe_redir = Redir::input(0, prev_rpipe);
 						shenv.ctx_mut().push_rdr(rpipe_redir);
 					}
 
@@ -348,6 +360,7 @@ fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 fn exec_cmd(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	log!(DEBUG, "Executing command");
 	let blame = node.span();
+	let blame_raw = node.as_raw(shenv);
 	let rule = node.into_rule();
 
 	if let NdRule::Command { argv, redirs } = rule {
@@ -395,7 +408,7 @@ fn exec_cmd(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 				}
 			}
 		} else {
-			return Err(ShErr::full(ShErrKind::CmdNotFound, format!("{}", command), blame))
+			return Err(ShErr::full(ShErrKind::CmdNotFound, format!("{}", command), shenv.get_input(), blame))
 		}
 	} else { unreachable!("Found this rule in exec_cmd: {:?}", rule) }
 	Ok(())

@@ -3,9 +3,25 @@ use std::{os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd}, str::FromStr}
 
 use nix::libc::getpgrp;
 
-use crate::{expand::{expand_vars::{expand_dquote, expand_var}, tilde::expand_tilde}, prelude::*};
+use crate::prelude::*;
 
 use super::term::StyleSet;
+
+pub trait RedirTargetType {
+	fn as_tgt(self) -> RedirTarget;
+}
+
+impl RedirTargetType for PathBuf {
+	fn as_tgt(self) -> RedirTarget {
+		RedirTarget::File(self)
+	}
+}
+
+impl RedirTargetType for i32 {
+	fn as_tgt(self) -> RedirTarget {
+		RedirTarget::Fd(self)
+	}
+}
 
 pub trait StrOps {
 	/// This function operates on anything that implements `AsRef<str>` and `Display`, which is mainly strings.
@@ -31,7 +47,7 @@ impl ArgVec for Vec<Token> {
 		let mut argv_iter = self.into_iter();
 		let mut argv_processed = vec![];
 		while let Some(arg) = argv_iter.next() {
-			let cleaned = trim_quotes(&arg);
+			let cleaned = trim_quotes(&arg.as_raw(shenv));
 			argv_processed.push(cleaned);
 		}
 		argv_processed
@@ -247,6 +263,12 @@ pub struct Redir {
 impl Redir {
 	pub fn new(src: i32, op: RedirType, tgt: RedirTarget) -> Self {
 		Self { src, op, tgt }
+	}
+	pub fn output(src: i32, tgt: impl RedirTargetType) -> Self {
+		Self::new(src, RedirType::Output, tgt.as_tgt())
+	}
+	pub fn input(src: i32, tgt: impl RedirTargetType) -> Self {
+		Self::new(src, RedirType::Input, tgt.as_tgt())
 	}
 }
 

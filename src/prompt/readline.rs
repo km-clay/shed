@@ -33,11 +33,6 @@ impl<'a> SynHelper<'a> {
 	}
 }
 
-impl<'a> Validator for SynHelper<'a> {
-	fn validate(&self, ctx: &mut rustyline::validate::ValidationContext) -> rustyline::Result<rustyline::validate::ValidationResult> {
-		Ok(ValidationResult::Valid(None))
-	}
-}
 
 
 impl<'a> Completer for SynHelper<'a> {

@@ -1,19 +1,22 @@
 use rustyline::highlight::Highlighter;
 use sys::get_bin_path;
 
-use crate::prelude::*;
+use crate::{parse::lex::KEYWORDS, prelude::*};
 
 use super::readline::SynHelper;
 
 impl<'a> Highlighter for SynHelper<'a> {
 	fn highlight<'l>(&self, line: &'l str, pos: usize) -> std::borrow::Cow<'l, str> {
+		let mut shenv_clone = self.shenv.clone();
+		shenv_clone.new_input(line);
+
 		let mut result = String::new();
-		let mut tokens = Lexer::new(Rc::new(line.to_string())).lex().into_iter();
+		let mut tokens = Lexer::new(line.to_string(),&mut shenv_clone).lex().into_iter();
 		let mut is_command = true;
 		let mut in_array = false;
 
 		while let Some(token) = tokens.next() {
-			let raw = token.to_string();
+			let raw = token.as_raw(&mut shenv_clone);
 			match token.rule() {
 				TkRule::Comment => {
 					let styled = &raw.styled(Style::BrightBlack);
@@ -35,7 +38,7 @@ impl<'a> Highlighter for SynHelper<'a> {
 					let rebuilt = format!("{styled}()");
 					result.push_str(&rebuilt);
 				}
-				TkRule::Keyword => {
+				_ if KEYWORDS.contains(&token.rule()) => {
 					if &raw == "for" {
 						in_array = true;
 					}
@@ -76,7 +79,7 @@ impl<'a> Highlighter for SynHelper<'a> {
 						result.push_str(&raw);
 
 					} else if is_command {
-						if get_bin_path(&token.to_string(), self.shenv).is_some() ||
+						if get_bin_path(&token.as_raw(&mut shenv_clone), self.shenv).is_some() ||
 						self.shenv.logic().get_alias(&raw).is_some() ||
 						self.shenv.logic().get_function(&raw).is_some() ||
 						BUILTINS.contains(&raw.as_str()) {

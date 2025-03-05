@@ -97,12 +97,15 @@ pub use crate::{
 		},
 		sys::{
 			self,
+			sh_quit,
+			read_to_string,
 			write_err,
 			write_out,
 			c_pipe,
 			execvpe
 		},
 		error::{
+			ResultExt,
 			ShErrKind,
 			ShErr,
 			ShResult
@@ -114,6 +117,7 @@ pub use crate::{
 		pwd::pwd,
 		read::read_builtin,
 		alias::alias,
+		control_flow::sh_flow,
 		jobctl::{
 			continue_job,
 			jobs
@@ -140,7 +144,10 @@ pub use crate::{
 		exec_ctx::ExecFlags,
 		shenv::ShEnv
 	},
-	execute::Executor,
+	execute::{
+		exec_input,
+		Executor,
+	},
 	parse::{
 		parse::{
 			Node,

@@ -1,9 +1,10 @@
-pub mod expand_vars;
+pub mod vars;
 pub mod tilde;
 pub mod alias;
+pub mod cmdsub;
 
 use alias::expand_aliases;
-use expand_vars::{expand_dquote, expand_var};
+use vars::{expand_dquote, expand_var};
 use tilde::expand_tilde;
 
 use crate::prelude::*;
@@ -11,7 +12,7 @@ use crate::prelude::*;
 pub fn expand_argv(argv: Vec<Token>, shenv: &mut ShEnv) -> Vec<Token> {
 	let mut processed = vec![];
 	for arg in argv {
-		log!(DEBUG, arg);
+		log!(DEBUG, "{}",arg.as_raw(shenv));
 		log!(DEBUG, processed);
 		match arg.rule() {
 			TkRule::DQuote => {
@@ -23,7 +24,7 @@ pub fn expand_argv(argv: Vec<Token>, shenv: &mut ShEnv) -> Vec<Token> {
 				processed.append(&mut varsub_exp);
 			}
 			TkRule::TildeSub => {
-				let tilde_exp = expand_tilde(arg.clone());
+				let tilde_exp = expand_tilde(arg.clone(), shenv);
 				processed.push(tilde_exp);
 			}
 			_ => {
