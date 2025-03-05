@@ -1,7 +1,6 @@
-use core::{arch::asm, fmt::{self, Debug, Display, Write}, ops::Deref};
-use std::{os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd}, str::FromStr};
+use core::fmt::{Debug, Display, Write};
+use std::{os::fd::{AsRawFd, BorrowedFd}, str::FromStr};
 
-use nix::libc::getpgrp;
 
 use crate::prelude::*;
 
@@ -311,7 +310,7 @@ impl CmdRedirs {
 			let Redir { src, op, tgt } = redir;
 			let src = borrow_fd(src);
 
-			let mut file_fd = if let RedirTarget::File(path) = tgt {
+			let file_fd = if let RedirTarget::File(path) = tgt {
 				let flags = match op {
 					RedirType::Input => OFlag::O_RDONLY,
 					RedirType::Output => OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_TRUNC,
@@ -331,7 +330,7 @@ impl CmdRedirs {
 	pub fn open_fd_tgts(&mut self) -> ShResult<()> {
 		while let Some(redir) = self.targets_fd.pop() {
 			let Redir { src, op: _, tgt } = redir;
-			let mut tgt = if let RedirTarget::Fd(fd) = tgt {
+			let tgt = if let RedirTarget::Fd(fd) = tgt {
 				borrow_fd(fd)
 			} else { unreachable!() };
 			let src = borrow_fd(src);

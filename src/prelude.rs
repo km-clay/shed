@@ -150,6 +150,7 @@ pub use crate::{
 	},
 	parse::{
 		parse::{
+			SynTree,
 			Node,
 			NdRule,
 			Parser,

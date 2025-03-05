@@ -10,6 +10,9 @@ bitflags! {
 #[derive(Clone,Debug)]
 pub struct ExecCtx {
 	redirs: Vec<Redir>,
+	depth: usize,
+	state_stack: Vec<Self>,
+	max_depth: usize,
 	flags: ExecFlags,
 	io_masks: IoMasks,
 	saved_io: Option<SavedIo>
@@ -19,10 +22,62 @@ impl ExecCtx {
 	pub fn new() -> Self {
 		Self {
 			redirs: vec![],
+			depth: 0,
+			state_stack: vec![],
+			max_depth: 1500,
 			flags: ExecFlags::empty(),
 			io_masks: IoMasks::new(),
 			saved_io: None
 		}
+	}
+	pub fn push_state(&mut self) {
+		self.state_stack.push(self.clone());
+	}
+	pub fn pop_state(&mut self) {
+		if let Some(state) = self.state_stack.pop() {
+			*self = state;
+		}
+	}
+	pub fn descend(&mut self) -> ShResult<()> {
+		self.push_state();
+		self.depth += 1;
+		log!(DEBUG, "{}",self.depth);
+		if self.depth > self.max_depth {
+			return Err(
+				ShErr::simple(ShErrKind::ExecFail,"Exceeded maximum execution depth")
+			)
+		}
+		Ok(())
+	}
+	pub fn ascend(&mut self) {
+		self.pop_state();
+		self.depth = self.depth.saturating_sub(1);
+	}
+	pub fn as_cond(&self) -> Self {
+		let mut clone = self.clone();
+		let (cond_redirs,_) = self.sort_redirs();
+		clone.redirs = cond_redirs;
+		clone
+	}
+	pub fn as_body(&self) -> Self {
+		let mut clone = self.clone();
+		let (_,body_redirs) = self.sort_redirs();
+		clone.redirs = body_redirs;
+		clone
+	}
+	pub fn sort_redirs(&self) -> (Vec<Redir>,Vec<Redir>) {
+		let mut cond_redirs = vec![];
+		let mut body_redirs = vec![];
+		for redir in self.redirs.clone() {
+			match redir.op {
+				RedirType::Input |
+				RedirType::HereString |
+				RedirType::HereDoc => cond_redirs.push(redir),
+				RedirType::Output |
+				RedirType::Append => body_redirs.push(redir)
+			}
+		}
+		(cond_redirs,body_redirs)
 	}
 	pub fn masks(&self) -> &IoMasks {
 		&self.io_masks

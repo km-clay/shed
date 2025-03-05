@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 pub fn expand_cmdsub(token: Token, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
-	let mut new_tokens = vec![];
+	let new_tokens = vec![];
 	let cmdsub_raw = token.as_raw(shenv);
 	let body = &cmdsub_raw[2..cmdsub_raw.len() - 1].to_string(); // From '$(this)' to 'this'
 

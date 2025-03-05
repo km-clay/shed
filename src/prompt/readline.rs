@@ -1,4 +1,4 @@
-use rustyline::{completion::{Completer, FilenameCompleter}, highlight::Highlighter, hint::{Hint, Hinter}, history::{History, SearchDirection}, validate::{ValidationResult, Validator}, Helper};
+use rustyline::{completion::{Completer, FilenameCompleter}, hint::{Hint, Hinter}, history::{History, SearchDirection}, Helper};
 
 use crate::prelude::*;
 

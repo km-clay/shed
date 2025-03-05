@@ -63,7 +63,32 @@ impl ShEnv {
 			}
 		}
 		self.input_man.clamp_all();
-		new_tokens
+		log!(DEBUG, new_tokens);
+		if new_tokens.is_empty() {
+			let empty = Token::new(
+				TkRule::Ident,
+				self.inputman_mut().new_span(repl_start, repl_start)
+			);
+			vec![empty]
+		} else {
+			new_tokens
+		}
+	}
+	pub fn exec_as_cond(&mut self, nodes: Vec<Node>) -> ShResult<i32> {
+		let saved = self.ctx().clone();
+		self.ctx = self.ctx().as_cond();
+		let ast = SynTree::from_vec(nodes);
+		Executor::new(ast, self).walk()?;
+		self.ctx = saved;
+		Ok(self.get_code())
+	}
+	pub fn exec_as_body(&mut self, nodes: Vec<Node>) -> ShResult<i32> {
+		let saved = self.ctx().clone();
+		self.ctx = self.ctx().as_body();
+		let ast = SynTree::from_vec(nodes);
+		Executor::new(ast, self).walk()?;
+		self.ctx = saved;
+		Ok(self.get_code())
 	}
 	pub fn new_input(&mut self, input: &str) {
 		self.input_man.clear();

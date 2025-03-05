@@ -3,7 +3,6 @@ pub mod tilde;
 pub mod alias;
 pub mod cmdsub;
 
-use alias::expand_aliases;
 use vars::{expand_dquote, expand_var};
 use tilde::expand_tilde;
 

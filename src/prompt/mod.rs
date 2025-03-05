@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use readline::SynHelper;
-use rustyline::{config::Configurer, history::{DefaultHistory, History}, ColorMode, CompletionType, Config, DefaultEditor, EditMode, Editor};
+use rustyline::{config::Configurer, history::{DefaultHistory, History}, ColorMode, CompletionType, Config, EditMode, Editor};
 
 pub mod readline;
 pub mod highlight;
@@ -8,7 +8,7 @@ pub mod validate;
 
 fn init_rl<'a>(shenv: &'a mut ShEnv) -> Editor<SynHelper<'a>, DefaultHistory> {
 	let hist_path = std::env::var("FERN_HIST").unwrap_or_default();
-	let mut config = Config::builder()
+	let config = Config::builder()
 		.max_history_size(1000).unwrap()
 		.history_ignore_dups(true).unwrap()
 		.completion_prompt_limit(100)

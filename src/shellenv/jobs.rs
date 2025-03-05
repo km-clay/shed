@@ -1,8 +1,6 @@
 use std::{fmt, sync::{Arc, LazyLock, RwLock}};
 
 use nix::unistd::setpgid;
-use shellenv::{disable_reaping, enable_reaping};
-use sys::SIG_EXIT_OFFSET;
 
 use crate::prelude::*;
 
