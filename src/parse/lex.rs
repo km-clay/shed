@@ -19,13 +19,14 @@ pub const KEYWORDS: [TkRule;14] = [
 	TkRule::Esac
 ];
 
-pub const SEPARATORS: [TkRule; 6] = [
+pub const SEPARATORS: [TkRule; 7] = [
 	TkRule::Sep,
 	TkRule::AndOp,
 	TkRule::OrOp,
 	TkRule::PipeOp,
 	TkRule::ErrPipeOp,
 	TkRule::BgOp,
+	TkRule::CasePat
 ];
 
 pub trait LexRule {
@@ -105,15 +106,16 @@ impl Debug for Token {
 	}
 }
 
-#[derive(Debug,Clone)]
+#[derive(PartialEq,Debug,Clone)]
 pub struct Span {
 	start: usize,
-	end: usize
+	end: usize,
+	pub expanded: bool
 }
 
 impl Span {
 	pub fn new(start: usize, end: usize) -> Self {
-		Self { start, end }
+		Self { start, end, expanded: false }
 	}
 	pub fn start(&self) -> usize {
 		self.start
@@ -181,6 +183,7 @@ pub enum TkRule {
 	ProcSub,
 	VarSub,
 	TildeSub,
+	ArithSub,
 	Subshell,
 	CmdSub,
 	DQuote,
@@ -199,6 +202,7 @@ pub enum TkRule {
 	Done,
 	Case,
 	Esac,
+	CasePat,
 	Assign,
 	Ident,
 	Sep,
@@ -213,6 +217,7 @@ impl TkRule {
 		try_match!(VarSub,input);
 		try_match!(ProcSub,input);
 		try_match!(CmdSub,input);
+		try_match!(ArithSub,input);
 		try_match!(AndOp,input);
 		try_match!(OrOp,input);
 		try_match!(PipeOp,input);
@@ -225,6 +230,7 @@ impl TkRule {
 		try_match!(BraceGrp,input);
 		try_match!(TildeSub,input);
 		try_match!(Subshell,input);
+		try_match!(CasePat,input);
 		try_match!(Sep,input);
 		try_match!(Assign,input);
 		try_match!(If,input);
@@ -269,6 +275,16 @@ tkrule_def!(Whitespace, |input: &str| {
 	let mut len = 0;
 	while let Some(ch) = chars.next() {
 		match ch {
+			'\\' => {
+				len += 1;
+				if let Some(ch) = chars.next() {
+					if matches!(ch, ' ' | '\t' | '\n') {
+						len += 1;
+					} else {
+						return None
+					}
+				}
+			}
 			' ' | '\t' => len += 1,
 			_ => {
 				match len {
@@ -282,6 +298,71 @@ tkrule_def!(Whitespace, |input: &str| {
 		0 => return None,
 		_ => return Some(len),
 	}
+});
+
+tkrule_def!(CasePat, |input:&str| {
+	let mut chars = input.chars();
+	let mut len = 0;
+	let mut is_casepat = false;
+	while let Some(ch) = chars.next() {
+		len += 1;
+		match ch {
+			'\\' => {
+				if chars.next().is_some() {
+					len += 1;
+				}
+			}
+			')' => {
+				while let Some(ch) = chars.next() {
+					if ch == ')' {
+						len += 1;
+					} else {
+						break
+					}
+				}
+				is_casepat = true;
+				break
+			}
+			_ if ch.is_whitespace() => return None,
+			_ => { /* Continue */ }
+		}
+	}
+	if is_casepat { Some(len) } else { None }
+});
+
+tkrule_def!(ArithSub, |input: &str| {
+	let mut chars = input.chars();
+	let mut len = 0;
+	let mut is_arith_sub = false;
+	while let Some(ch) = chars.next() {
+		len += 1;
+		match ch {
+			'\\' => {
+				if chars.next().is_some() {
+					len += 1;
+				}
+			}
+			'`' => {
+				while let Some(ch) = chars.next() {
+					len += 1;
+					match ch {
+						'\\' => {
+							if chars.next().is_some() {
+								len += 1;
+							}
+						}
+						'`' => {
+							is_arith_sub = true;
+							break
+						}
+						_ => { /* Continue */ }
+					}
+				}
+			}
+			_ => { /* Continue */ }
+		}
+	}
+	if is_arith_sub { Some(len) } else { None }
 });
 
 tkrule_def!(TildeSub, |input: &str| {
@@ -567,8 +648,14 @@ tkrule_def!(Sep, |input: &str| {
 	while let Some(ch) = chars.next() {
 		match ch {
 			'\\' => {
-				chars.next();
-				len += 2;
+				return None
+			}
+			' ' | '\t' => {
+				if len == 0 {
+					return None
+				} else {
+					len += 1;
+				}
 			}
 			';' | '\n' => len += 1,
 			_ => {

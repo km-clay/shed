@@ -1,6 +1,6 @@
 use shellenv::jobs::{ChildProc, JobBldr};
 
-use crate::{parse::parse::{Node, NdRule}, prelude::*};
+use crate::prelude::*;
 
 pub fn pwd(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	let rule = node.into_rule();

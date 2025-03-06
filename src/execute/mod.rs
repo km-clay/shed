@@ -1,11 +1,10 @@
 use std::os::fd::AsRawFd;
 
+use crate::prelude::*;
 use shellenv::jobs::{ChildProc, JobBldr};
 
-use crate::{builtin::export::export, libsh::{error::Blame, sys::{execvpe, get_bin_path}, utils::{ArgVec, StrOps}}, parse::{lex::Token, parse::{CmdGuard, NdFlag, Node, NdRule, SynTree}}, prelude::*};
+pub mod shellcmd;
 
-pub mod ifthen;
-pub mod loops;
 
 pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> {
 	let input = input.into();
@@ -43,6 +42,7 @@ impl<'a> Executor<'a> {
 	}
 	pub fn walk(&mut self) -> ShResult<()> {
 		self.shenv.ctx_mut().descend()?;
+		self.shenv.inputman_mut().save_state();
 		log!(DEBUG, "Starting walk");
 		while let Some(node) = self.ast.next_node() {
 			if let NdRule::CmdList { cmds } = node.clone().into_rule() {
@@ -51,6 +51,8 @@ impl<'a> Executor<'a> {
 			} else { unreachable!() }
 		}
 		self.shenv.ctx_mut().ascend();
+		self.shenv.inputman_mut().load_state();
+		log!(DEBUG, "passed");
 		Ok(())
 	}
 }
@@ -79,8 +81,10 @@ fn exec_list(list: Vec<(Option<CmdGuard>, Node)>, shenv: &mut ShEnv) -> ShResult
 		match *cmd.rule() {
 			NdRule::Command {..} => dispatch_command(cmd, shenv).try_blame(cmd_raw, span)?,
 			NdRule::Subshell {..} => exec_subshell(cmd,shenv).try_blame(cmd_raw, span)?,
-			NdRule::IfThen {..} => ifthen::exec_if(cmd, shenv).try_blame(cmd_raw, span)?,
-			NdRule::Loop {..} => loops::exec_loop(cmd, shenv).try_blame(cmd_raw, span)?,
+			NdRule::IfThen {..} => shellcmd::exec_if(cmd, shenv).try_blame(cmd_raw, span)?,
+			NdRule::Loop {..} => shellcmd::exec_loop(cmd, shenv).try_blame(cmd_raw, span)?,
+			NdRule::ForLoop {..} => shellcmd::exec_for(cmd, shenv).try_blame(cmd_raw, span)?,
+			NdRule::Case {..} => shellcmd::exec_case(cmd, shenv).try_blame(cmd_raw, span)?,
 			NdRule::FuncDef {..} => exec_funcdef(cmd,shenv).try_blame(cmd_raw, span)?,
 			NdRule::Assignment {..} => exec_assignment(cmd,shenv).try_blame(cmd_raw, span)?,
 			NdRule::Pipeline {..} => exec_pipeline(cmd, shenv).try_blame(cmd_raw, span)?,

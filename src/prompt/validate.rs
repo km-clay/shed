@@ -7,13 +7,26 @@ use super::readline::SynHelper;
 pub fn check_delims(line: &str) -> bool {
 	let mut delim_stack = vec![];
 	let mut chars = line.chars();
+	let mut in_case = false;
+	let mut case_check = String::new();
 	let mut in_quote = None; // Tracks which quote type is open (`'` or `"`)
 
 	while let Some(ch) = chars.next() {
+		case_check.push(ch);
+		if case_check.ends_with("case") {
+			in_case = true;
+		}
+		if case_check.ends_with("esac") {
+			in_case = false;
+		}
 		match ch {
 			'{' | '(' | '[' if in_quote.is_none() => delim_stack.push(ch),
 			'}' if in_quote.is_none() && delim_stack.pop() != Some('{') => return false,
-			')' if in_quote.is_none() && delim_stack.pop() != Some('(') => return false,
+			')' if in_quote.is_none() && delim_stack.pop() != Some('(') => {
+				if !in_case {
+					return false
+				}
+			}
 			']' if in_quote.is_none() && delim_stack.pop() != Some('[') => return false,
 			'"' | '\'' => {
 				if in_quote == Some(ch) {

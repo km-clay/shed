@@ -219,7 +219,7 @@ impl ShErr {
 		}
 	}
 	pub fn get_line(&self) -> (usize,usize,String) {
-		if let ShErr::Full { kind, message, blame } = self {
+		if let ShErr::Full { kind: _, message: _, blame } = self {
 			unsafe {
 				let mut dist = 0;
 				let mut line_no = 0;
@@ -256,8 +256,7 @@ impl Display for ShErr {
 			ShErr::Simple { kind: _, message } => format!("{}{}",self.display_kind(),message),
 			ShErr::Full { kind: _, message, blame } => {
 				let (offset,line_no,line_text) = self.get_line();
-				log!(DEBUG, blame);
-				let dist = blame.len();
+				let dist = blame.end().saturating_sub(blame.start());
 				let padding = " ".repeat(offset);
 				let line_inner = "~".repeat(dist.saturating_sub(2));
 				let err_kind = &self.display_kind().styled(Style::Red | Style::Bold);

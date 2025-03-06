@@ -32,6 +32,11 @@ impl ShEnv {
 		&self.input_man.get_slice(span).unwrap_or_default()
 	}
 	pub fn expand_input(&mut self, new: &str, repl_span: Rc<RefCell<Span>>) -> Vec<Token> {
+		log!(DEBUG,repl_span);
+		if repl_span.borrow().expanded {
+			return vec![];
+		}
+		repl_span.borrow_mut().expanded = true;
 		let saved_spans = self.input_man.spans_mut().clone();
 		let mut new_tokens = Lexer::new(new.to_string(), self).lex();
 		*self.input_man.spans_mut() = saved_spans;
@@ -45,9 +50,10 @@ impl ShEnv {
 		let repl_end = repl_span.borrow().end();
 		let range = repl_start..repl_end;
 
-		if let Some(ref mut input) = self.input_man.get_input_mut() {
+		if let Some(input) = self.input_man.get_input_mut() {
 			let old = &input[range.clone()];
 			let delta: isize = new.len() as isize - old.len() as isize;
+			log!(DEBUG, input);
 			input.replace_range(range, new);
 			let expanded = input.clone();
 			log!(DEBUG, expanded);
@@ -74,6 +80,11 @@ impl ShEnv {
 			new_tokens
 		}
 	}
+	/// Executes a group of command lists, and only uses redirections that operate on input
+	/// For instance:
+	/// `if cat; then echo foo; fi < file.txt > otherfile.txt`
+	/// `cat` will be executed as a condition, meaning the input from file.txt will be the only
+	/// redirection used.
 	pub fn exec_as_cond(&mut self, nodes: Vec<Node>) -> ShResult<i32> {
 		let saved = self.ctx().clone();
 		self.ctx = self.ctx().as_cond();
@@ -82,6 +93,11 @@ impl ShEnv {
 		self.ctx = saved;
 		Ok(self.get_code())
 	}
+	/// Executes a group of command lists, and only uses redirections that operate on output
+	/// For instance:
+	/// `if cat; then echo foo; fi < file.txt > otherfile.txt`
+	/// `echo foo` will be executed as a body, meaning the output to otherfile.txt will be the only
+	/// redirection used.
 	pub fn exec_as_body(&mut self, nodes: Vec<Node>) -> ShResult<i32> {
 		let saved = self.ctx().clone();
 		self.ctx = self.ctx().as_body();
@@ -96,7 +112,7 @@ impl ShEnv {
 	}
 	pub fn get_input(&self) -> String {
 		let input = self.input_man.get_input().map(|s| s.to_string()).unwrap_or_default();
-		log!(DEBUG, input);
+		log!(TRACE, input);
 		input
 	}
 	pub fn inputman(&self) -> &shellenv::input::InputMan {

@@ -155,6 +155,9 @@ impl VarTab {
 	pub fn set_var(&mut self, var: &str, val: &str) {
 		self.vars.insert(var.to_string(), val.to_string());
 	}
+	pub fn unset_var(&mut self, var: &str) {
+		self.vars.remove(var);
+	}
 	pub fn export(&mut self, var: &str, val: &str) {
 		self.env.insert(var.to_string(),val.to_string());
 		std::env::set_var(var, val);

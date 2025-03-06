@@ -97,6 +97,7 @@ pub use crate::{
 		},
 		sys::{
 			self,
+			get_bin_path,
 			sh_quit,
 			read_to_string,
 			write_err,
@@ -106,6 +107,7 @@ pub use crate::{
 		},
 		error::{
 			ResultExt,
+			Blame,
 			ShErrKind,
 			ShErr,
 			ShResult
@@ -118,6 +120,7 @@ pub use crate::{
 		read::read_builtin,
 		alias::alias,
 		control_flow::sh_flow,
+		export::export,
 		jobctl::{
 			continue_job,
 			jobs
@@ -126,6 +129,7 @@ pub use crate::{
 	},
 	expand::{
 		expand_argv,
+		expand_token,
 		alias::expand_aliases
 	},
 	shellenv::{
@@ -149,13 +153,14 @@ pub use crate::{
 		Executor,
 	},
 	parse::{
-		parse::{
-			SynTree,
-			Node,
-			NdRule,
-			Parser,
-			ParseRule
-		},
+		SynTree,
+		LoopKind,
+		Node,
+		CmdGuard,
+		NdFlag,
+		NdRule,
+		Parser,
+		ParseRule,
 		lex::{
 			Span,
 			Token,

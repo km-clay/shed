@@ -1,15 +1,16 @@
-
 use crate::prelude::*;
 
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug,PartialEq)]
 pub struct InputMan {
 	input: Option<String>,
+	saved_input: Option<String>,
 	spans: Vec<Rc<RefCell<Span>>>,
+	saved_spans: Vec<Span>
 }
 
 impl InputMan {
 	pub fn new() -> Self {
-		Self { input: None, spans: vec![] }
+		Self { input: None, saved_input: None, spans: vec![], saved_spans: vec![] }
 	}
 	pub fn clear(&mut self) {
 		*self = Self::new();
@@ -22,6 +23,24 @@ impl InputMan {
 	}
 	pub fn get_input_mut(&mut self) -> Option<&mut String> {
 		self.input.as_mut()
+	}
+	pub fn save_state(&mut self) {
+		self.saved_input = self.input.clone();
+		self.saved_spans.clear();
+		for span in &self.spans {
+			self.saved_spans.push(span.borrow().clone());
+		}
+	}
+	pub fn load_state(&mut self) {
+		if self.saved_input.is_some() {
+			self.input = self.saved_input.take();
+
+			for (span, saved_span) in self.spans.iter_mut().zip(self.saved_spans.iter()) {
+				*span.borrow_mut() = saved_span.clone();
+			}
+
+			self.saved_spans.clear();
+		}
 	}
 	pub fn new_span(&mut self, start: usize, end: usize) -> Rc<RefCell<Span>> {
 		if let Some(_input) = &self.input {
