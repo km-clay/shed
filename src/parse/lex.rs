@@ -371,6 +371,7 @@ tkrule_def!(ArithSub, |input: &str| {
 					}
 				}
 			}
+			' ' | '\t' | ';' | '\n' => return None,
 			_ => { /* Continue */ }
 		}
 	}

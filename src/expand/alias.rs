@@ -51,7 +51,6 @@ pub fn expand_aliases(tokens: Vec<Token>, shenv: &mut ShEnv) -> Vec<Token> {
 			TkRule::Ident if is_command => {
 				is_command = false;
 				let mut alias_tokens = expand_alias(token.clone(), shenv);
-				log!(DEBUG, alias_tokens);
 				if !alias_tokens.is_empty() {
 					processed.append(&mut alias_tokens);
 				} else {

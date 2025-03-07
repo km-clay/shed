@@ -97,7 +97,6 @@ impl<'a> ChildProc {
 		} else {
 			WtStat::Exited(pid, 0)
 		};
-		log!(DEBUG, command);
 		let mut child = Self { pgid: pid, pid, command, stat };
 		if let Some(pgid) = pgid {
 			child.set_pgid(pgid).ok();
@@ -505,7 +504,6 @@ impl JobTab {
 		self.fg.as_mut()
 	}
 	pub fn new_fg<'a>(&mut self, job: Job) -> ShResult<Vec<WtStat>> {
-		log!(DEBUG, "New fg job: {:?}", job);
 		let pgid = job.pgid();
 		self.fg = Some(job);
 		attach_tty(pgid)?;
@@ -519,7 +517,6 @@ impl JobTab {
 		}
 		take_term()?;
 		let fg = std::mem::take(&mut self.fg);
-		log!(DEBUG, "Moving foreground job to background");
 		if let Some(mut job) = fg {
 			job.set_stats(stat);
 			self.insert_job(job, false)?;

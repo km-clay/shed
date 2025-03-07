@@ -119,7 +119,7 @@ pub fn exec_case(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	if let NdRule::Case { pat, blocks, redirs } = rule {
 		shenv.collect_redirs(redirs);
 		let mut blocks_iter = blocks.into_iter();
-		let pat_raw = expand_token(pat, shenv)
+		let pat_raw = expand_token(pat, shenv)?
 			.iter()
 			.map(|tk| tk.as_raw(shenv))
 			.collect::<Vec<_>>()

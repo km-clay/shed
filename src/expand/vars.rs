@@ -58,10 +58,6 @@ pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> Token {
 		}
 	}
 
-	log!(DEBUG, result);
-
-	log!(DEBUG, "{:?}",dquote.span());
 	let token = shenv.expand_input(&result, dquote.span()).pop().unwrap_or(dquote);
-	log!(DEBUG, "{}",token.as_raw(shenv));
 	token
 }

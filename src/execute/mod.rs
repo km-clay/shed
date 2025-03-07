@@ -14,8 +14,8 @@ pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> 
 
 	let token_stream = expand_aliases(token_stream, shenv);
 	for token in &token_stream {
-		log!(DEBUG, token);
-		log!(DEBUG, "{}",token.as_raw(shenv));
+		log!(TRACE, token);
+		log!(TRACE, "{}",token.as_raw(shenv));
 	}
 
 	let syn_tree = Parser::new(token_stream,shenv).parse()?;
@@ -43,7 +43,7 @@ impl<'a> Executor<'a> {
 	}
 	pub fn walk(&mut self) -> ShResult<()> {
 		self.shenv.inputman_mut().save_state();
-		log!(DEBUG, "Starting walk");
+		log!(TRACE, "Starting walk");
 		while let Some(node) = self.ast.next_node() {
 			if let NdRule::CmdList { cmds } = node.clone().into_rule() {
 				log!(TRACE, "{:?}", cmds);
@@ -51,13 +51,13 @@ impl<'a> Executor<'a> {
 			} else { unreachable!() }
 		}
 		self.shenv.inputman_mut().load_state();
-		log!(DEBUG, "passed");
+		log!(TRACE, "passed");
 		Ok(())
 	}
 }
 
 fn exec_list(list: Vec<(Option<CmdGuard>, Node)>, shenv: &mut ShEnv) -> ShResult<()> {
-	log!(DEBUG, "Executing list");
+	log!(TRACE, "Executing list");
 	let mut list = VecDeque::from(list);
 	while let Some(cmd_info) = list.fpop() {
 		let guard = cmd_info.0;
@@ -104,7 +104,7 @@ fn dispatch_command(mut node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	let mut is_func = false;
 	let mut is_subsh = false;
 	if let NdRule::Command { ref mut argv, redirs: _ } = node.rule_mut() {
-		*argv = expand_argv(argv.to_vec(), shenv);
+		*argv = expand_argv(argv.to_vec(), shenv)?;
 		let cmd = argv.first().unwrap().as_raw(shenv);
 		if shenv.logic().get_function(&cmd).is_some() {
 			is_func = true;
@@ -112,7 +112,7 @@ fn dispatch_command(mut node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 			is_builtin = true;
 		}
 	} else if let NdRule::Subshell { body: _, ref mut argv, redirs: _ } = node.rule_mut() {
-		*argv = expand_argv(argv.to_vec(), shenv);
+		*argv = expand_argv(argv.to_vec(), shenv)?;
 		is_subsh = true;
 	} else { unreachable!() }
 
@@ -239,7 +239,7 @@ fn exec_subshell(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 }
 
 fn exec_builtin(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
-	log!(DEBUG, "Executing builtin");
+	log!(TRACE, "Executing builtin");
 	let command = if let NdRule::Command { argv, redirs: _ } = node.rule() {
 		argv.first().unwrap().as_raw(shenv)
 	} else { unreachable!() };
@@ -267,7 +267,7 @@ fn exec_builtin(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 }
 
 fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
-	log!(DEBUG, "Executing assignment");
+	log!(TRACE, "Executing assignment");
 	let rule = node.into_rule();
 	if let NdRule::Assignment { assignments, cmd } = rule {
 		log!(TRACE, "Assignments: {:?}", assignments);
@@ -298,7 +298,7 @@ fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 }
 
 fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
-	log!(DEBUG, "Executing pipeline");
+	log!(TRACE, "Executing pipeline");
 	let rule = node.into_rule();
 	if let NdRule::Pipeline { cmds } = rule {
 		let mut prev_rpipe: Option<i32> = None;
@@ -384,7 +384,7 @@ fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 }
 
 fn exec_cmd(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
-	log!(DEBUG, "Executing command");
+	log!(TRACE, "Executing command");
 	let blame = node.span();
 	let rule = node.into_rule();
 
@@ -393,11 +393,11 @@ fn exec_cmd(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		let command = argv.first().unwrap().to_string();
 		if get_bin_path(&command, shenv).is_some() {
 
-			log!(DEBUG, "{:?}",shenv.ctx().flags());
+			log!(TRACE, "{:?}",shenv.ctx().flags());
 			if shenv.ctx().flags().contains(ExecFlags::NO_FORK) {
 				log!(TRACE, "Not forking");
 				shenv.collect_redirs(redirs);
-				log!(DEBUG, "{:?}",shenv.ctx().redirs());
+				log!(TRACE, "{:?}",shenv.ctx().redirs());
 				if let Err(e) = shenv.ctx_mut().activate_rdrs() {
 					eprintln!("{:?}",e);
 					exit(1);
@@ -411,7 +411,7 @@ fn exec_cmd(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 				log!(TRACE, "Forking");
 				match unsafe { fork()? } {
 					Child => {
-						log!(DEBUG, redirs);
+						log!(TRACE, redirs);
 						shenv.collect_redirs(redirs);
 						if let Err(e) = shenv.ctx_mut().activate_rdrs() {
 							eprintln!("{:?}",e);
@@ -441,9 +441,9 @@ fn exec_cmd(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 }
 
 fn prep_execve(argv: Vec<Token>, shenv: &mut ShEnv) -> (Vec<String>, Vec<String>) {
-	log!(DEBUG, "Preparing execvpe args");
+	log!(TRACE, "Preparing execvpe args");
 	let argv_s = argv.as_strings(shenv);
-	log!(DEBUG, argv_s);
+	log!(TRACE, argv_s);
 
 	let mut envp = vec![];
 	let mut env_vars = shenv.vars().env().iter();

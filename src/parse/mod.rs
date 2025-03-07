@@ -343,7 +343,6 @@ ndrule_def!(ShellCmd, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 });
 
 ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
-	log!(DEBUG, tokens);
 	let err = |msg: &str, span: Rc<RefCell<Span>>, shenv: &mut ShEnv | {
 		ShErr::full(ShErrKind::ParseErr, msg, shenv.get_input(), span)
 	};
@@ -411,7 +410,6 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 			}
 		}
 	}
-	log!(DEBUG,tokens);
 	tokens_iter = tokens.iter().peekable();
 
 	if tokens_iter.peek().is_none() {
@@ -431,14 +429,10 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 					let block_pat = token.clone();
 					let (used,lists) = get_lists(tokens, shenv);
 					let mut lists_iter = lists.iter().peekable();
-					log!(DEBUG, used);
-					log!(DEBUG, lists);
 					while let Some(list) = lists_iter.next() {
 						node_toks.extend(list.tokens.clone());
 						if lists_iter.peek().is_none() {
-							log!(DEBUG, list);
 							for token in list.tokens() {
-								log!(DEBUG, "{}", token.as_raw(shenv));
 							}
 						}
 						if let Some(token) = list.tokens().last() {
@@ -482,7 +476,6 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 					redirs.push(redir);
 				}
 				_ => {
-					log!(DEBUG, token);
 					return Err(err("Expected `esac` or a case block here", node_toks.last().unwrap().span(), shenv))
 				}
 			}
@@ -523,7 +516,6 @@ ndrule_def!(ForLoop, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 	} else { return Ok(None) }
 
 	while let Some(token) = tokens_iter.next() {
-		log!(DEBUG, token);
 		node_toks.push(token.clone());
 		tokens = &tokens[1..];
 		match token.rule() {
@@ -656,7 +648,6 @@ ndrule_def!(ForLoop, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 });
 
 ndrule_def!(IfThen, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
-	log!(DEBUG,tokens);
 	let err = |msg: &str, span: Rc<RefCell<Span>>, shenv: &mut ShEnv | {
 		ShErr::full(ShErrKind::ParseErr, msg, shenv.get_input(), span)
 	};
@@ -666,7 +657,6 @@ ndrule_def!(IfThen, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 	let mut redirs = vec![];
 	let mut else_block: Option<Vec<Node>> = None;
 
-	log!(DEBUG,tokens);
 	if let Some(token) = tokens_iter.next() {
 		if let TkRule::If = token.rule() {
 			node_toks.push(token.clone());
@@ -1151,6 +1141,7 @@ ndrule_def!(Command, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 			TkRule::DQuote |
 			TkRule::Assign |
 			TkRule::TildeSub |
+			TkRule::ArithSub |
 			TkRule::VarSub => {
 				argv.push(token.clone());
 			}
@@ -1228,13 +1219,11 @@ ndrule_def!(Assignment, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 		};
 		return Ok(Some(node))
 	} else {
-		log!(DEBUG, tokens);
 		if let Some(token) = tokens.next() {
 			if token.rule() == TkRule::Sep {
 				node_toks.push(token.clone());
 			}
 		}
-		log!(DEBUG, node_toks);
 
 		let span = get_span(&node_toks,shenv)?;
 		let node = Node {

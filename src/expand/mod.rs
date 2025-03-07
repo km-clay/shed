@@ -2,24 +2,26 @@ pub mod vars;
 pub mod tilde;
 pub mod alias;
 pub mod cmdsub;
+pub mod arithmetic;
 
+use arithmetic::expand_arithmetic;
 use vars::{expand_dquote, expand_var};
 use tilde::expand_tilde;
 
 use crate::prelude::*;
 
-pub fn expand_argv(argv: Vec<Token>, shenv: &mut ShEnv) -> Vec<Token> {
+pub fn expand_argv(argv: Vec<Token>, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
 	let mut processed = vec![];
 	for arg in argv {
 		log!(DEBUG, "{}",arg.as_raw(shenv));
 		log!(DEBUG, processed);
-		let mut expanded = expand_token(arg, shenv);
+		let mut expanded = expand_token(arg, shenv)?;
 		processed.append(&mut expanded);
 	}
-	processed
+	Ok(processed)
 }
 
-pub fn expand_token(token: Token, shenv: &mut ShEnv) -> Vec<Token> {
+pub fn expand_token(token: Token, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
 	let mut processed = vec![];
 	match token.rule() {
 		TkRule::DQuote => {
@@ -34,6 +36,10 @@ pub fn expand_token(token: Token, shenv: &mut ShEnv) -> Vec<Token> {
 			let tilde_exp = expand_tilde(token.clone(), shenv);
 			processed.push(tilde_exp);
 		}
+		TkRule::ArithSub => {
+			let arith_exp = expand_arithmetic(token.clone(), shenv)?;
+			processed.push(arith_exp);
+		}
 		_ => {
 			if token.rule() != TkRule::Ident {
 				log!(WARN, "found this in expand_token: {:?}", token.rule());
@@ -41,5 +47,5 @@ pub fn expand_token(token: Token, shenv: &mut ShEnv) -> Vec<Token> {
 			processed.push(token.clone())
 		}
 	}
-	processed
+	Ok(processed)
 }

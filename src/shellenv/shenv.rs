@@ -33,7 +33,6 @@ impl ShEnv {
 	}
 	pub fn source_file(&mut self, path: PathBuf) -> ShResult<()> {
 		if path.is_file() {
-			log!(DEBUG, "sourcing {}", path.to_str().unwrap());
 			let mut file = std::fs::File::open(path)?;
 			let mut buf = String::new();
 			file.read_to_string(&mut buf)?;
@@ -43,14 +42,12 @@ impl ShEnv {
 		Ok(())
 	}
 	pub fn source_rc(&mut self) -> ShResult<()> {
-		log!(DEBUG, "sourcing rc");
 		let path_raw = std::env::var("FERN_RC")?;
 		let path = PathBuf::from(path_raw);
 		self.source_file(path)?;
 		Ok(())
 	}
 	pub fn expand_input(&mut self, new: &str, repl_span: Rc<RefCell<Span>>) -> Vec<Token> {
-		log!(DEBUG,repl_span);
 		if repl_span.borrow().expanded {
 			return vec![];
 		}
@@ -71,10 +68,8 @@ impl ShEnv {
 		if let Some(input) = self.input_man.get_input_mut() {
 			let old = &input[range.clone()];
 			let delta: isize = new.len() as isize - old.len() as isize;
-			log!(DEBUG, input);
 			input.replace_range(range, new);
 			let expanded = input.clone();
-			log!(DEBUG, expanded);
 
 			for span in self.input_man.spans_mut() {
 				let mut span_mut = span.borrow_mut();
@@ -87,7 +82,6 @@ impl ShEnv {
 			}
 		}
 		self.input_man.clamp_all();
-		log!(DEBUG, new_tokens);
 		if new_tokens.is_empty() {
 			let empty = Token::new(
 				TkRule::Ident,
@@ -156,11 +150,8 @@ impl ShEnv {
 			let stderr = ctx.masks().stderr().get_fd();
 
 			let saved_in = dup(stdin)?;
-			log!(DEBUG, saved_in);
 			let saved_out = dup(stdout)?;
-			log!(DEBUG, saved_out);
 			let saved_err = dup(stderr)?;
-			log!(DEBUG, saved_err);
 
 			let saved_io = shellenv::exec_ctx::SavedIo::save(saved_in, saved_out, saved_err);
 			*ctx.saved_io() = Some(saved_io);
