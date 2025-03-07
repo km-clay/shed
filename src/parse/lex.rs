@@ -19,7 +19,15 @@ pub const KEYWORDS: [TkRule;14] = [
 	TkRule::Esac
 ];
 
-pub const SEPARATORS: [TkRule; 7] = [
+pub const OPERATORS: [TkRule;5] = [
+	TkRule::AndOp,
+	TkRule::OrOp,
+	TkRule::PipeOp,
+	TkRule::ErrPipeOp,
+	TkRule::BgOp,
+];
+
+pub const SEPARATORS: [TkRule;7] = [
 	TkRule::Sep,
 	TkRule::AndOp,
 	TkRule::OrOp,
@@ -92,6 +100,10 @@ impl Token {
 
 	pub fn rule(&self) -> TkRule {
 		self.rule
+	}
+
+	pub fn rule_mut(&mut self) -> &mut TkRule {
+		&mut self.rule
 	}
 
 	pub fn as_raw(&self, shenv: &mut ShEnv) -> String {
@@ -241,7 +253,7 @@ impl TkRule {
 		try_match!(While,input);
 		try_match!(Until,input);
 		try_match!(For,input);
-		try_match!(In,input);
+		//try_match!(In,input);
 		try_match!(Select,input);
 		try_match!(Do,input);
 		try_match!(Done,input);
@@ -547,6 +559,7 @@ tkrule_def!(For, |input: &str| {
 		None
 	}
 });
+/*
 tkrule_def!(In, |input: &str| {
 	if input.starts_with("in") {
 		match input.chars().nth(2) {
@@ -558,6 +571,7 @@ tkrule_def!(In, |input: &str| {
 		None
 	}
 });
+*/
 tkrule_def!(Select, |input: &str| {
 	if input.starts_with("select") {
 		match input.chars().nth(6) {

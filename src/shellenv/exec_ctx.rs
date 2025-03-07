@@ -65,6 +65,9 @@ impl ExecCtx {
 		clone.redirs = body_redirs;
 		clone
 	}
+	pub fn redirs(&self) -> &Vec<Redir> {
+		&self.redirs
+	}
 	pub fn sort_redirs(&self) -> (Vec<Redir>,Vec<Redir>) {
 		let mut cond_redirs = vec![];
 		let mut body_redirs = vec![];

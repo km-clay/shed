@@ -31,6 +31,24 @@ impl ShEnv {
 	pub fn input_slice(&self, span: Rc<RefCell<Span>>) -> &str {
 		&self.input_man.get_slice(span).unwrap_or_default()
 	}
+	pub fn source_file(&mut self, path: PathBuf) -> ShResult<()> {
+		if path.is_file() {
+			log!(DEBUG, "sourcing {}", path.to_str().unwrap());
+			let mut file = std::fs::File::open(path)?;
+			let mut buf = String::new();
+			file.read_to_string(&mut buf)?;
+
+			exec_input(buf, self)?;
+		}
+		Ok(())
+	}
+	pub fn source_rc(&mut self) -> ShResult<()> {
+		log!(DEBUG, "sourcing rc");
+		let path_raw = std::env::var("FERN_RC")?;
+		let path = PathBuf::from(path_raw);
+		self.source_file(path)?;
+		Ok(())
+	}
 	pub fn expand_input(&mut self, new: &str, repl_span: Rc<RefCell<Span>>) -> Vec<Token> {
 		log!(DEBUG,repl_span);
 		if repl_span.borrow().expanded {
@@ -131,17 +149,22 @@ impl ShEnv {
 		&mut self.logic
 	}
 	pub fn save_io(&mut self) -> ShResult<()> {
-		let ctx = self.ctx_mut();
-		let stdin = ctx.masks().stdin().get_fd();
-		let stdout = ctx.masks().stdout().get_fd();
-		let stderr = ctx.masks().stderr().get_fd();
+		if self.ctx_mut().saved_io().is_none() {
+			let ctx = self.ctx_mut();
+			let stdin = ctx.masks().stdin().get_fd();
+			let stdout = ctx.masks().stdout().get_fd();
+			let stderr = ctx.masks().stderr().get_fd();
 
-		let saved_in = dup(stdin)?;
-		let saved_out = dup(stdout)?;
-		let saved_err = dup(stderr)?;
+			let saved_in = dup(stdin)?;
+			log!(DEBUG, saved_in);
+			let saved_out = dup(stdout)?;
+			log!(DEBUG, saved_out);
+			let saved_err = dup(stderr)?;
+			log!(DEBUG, saved_err);
 
-		let saved_io = shellenv::exec_ctx::SavedIo::save(saved_in, saved_out, saved_err);
-		*ctx.saved_io() = Some(saved_io);
+			let saved_io = shellenv::exec_ctx::SavedIo::save(saved_in, saved_out, saved_err);
+			*ctx.saved_io() = Some(saved_io);
+		}
 		Ok(())
 	}
 	pub fn reset_io(&mut self) -> ShResult<()> {

@@ -121,6 +121,7 @@ pub use crate::{
 		alias::alias,
 		control_flow::sh_flow,
 		export::export,
+		source::source,
 		jobctl::{
 			continue_job,
 			jobs

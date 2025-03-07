@@ -17,6 +17,9 @@ use crate::prelude::*;
 pub fn main() {
 	sig_setup();
 	let mut shenv = ShEnv::new();
+	if let Err(e) = shenv.source_rc() {
+		eprintln!("Error sourcing rc file: {}", e.to_string());
+	}
 
 	loop {
 		log!(TRACE, "Entered loop");

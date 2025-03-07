@@ -14,6 +14,7 @@ impl<'a> Highlighter for SynHelper<'a> {
 		let mut tokens = Lexer::new(line.to_string(),&mut shenv_clone).lex().into_iter();
 		let mut is_command = true;
 		let mut in_array = false;
+		let mut in_case = false;
 
 		while let Some(token) = tokens.next() {
 			let raw = token.as_raw(&mut shenv_clone);
@@ -32,18 +33,44 @@ impl<'a> Highlighter for SynHelper<'a> {
 					let styled = &raw.styled(Style::Cyan);
 					result.push_str(&styled);
 				}
+				TkRule::CasePat => {
+					let pat = raw.trim_end_matches(')');
+					let len_delta = raw.len().saturating_sub(pat.len());
+					let parens = ")".repeat(len_delta);
+					let styled = pat.styled(Style::Magenta);
+					let rebuilt = format!("{styled}{parens}");
+					result.push_str(&rebuilt);
+				}
 				TkRule::FuncName => {
 					let name = raw.strip_suffix("()").unwrap_or(&raw);
 					let styled = name.styled(Style::Cyan);
 					let rebuilt = format!("{styled}()");
 					result.push_str(&rebuilt);
 				}
-				_ if KEYWORDS.contains(&token.rule()) => {
-					if &raw == "for" {
-						in_array = true;
-					}
-					let styled = &raw.styled(Style::Yellow);
+				TkRule::DQuote | TkRule::SQuote => {
+					let styled = raw.styled(Style::BrightYellow);
 					result.push_str(&styled);
+				}
+				_ if KEYWORDS.contains(&token.rule()) => {
+					if in_array || in_case {
+						if &raw == "in" {
+							let styled = &raw.styled(Style::Yellow);
+							result.push_str(&styled);
+							if in_case { in_case = false };
+						} else {
+							let styled = &raw.styled(Style::Magenta);
+							result.push_str(&styled);
+						}
+					} else {
+						if &raw == "for" {
+							in_array = true;
+						}
+						if &raw == "case" {
+							in_case = true;
+						}
+						let styled = &raw.styled(Style::Yellow);
+						result.push_str(&styled);
+					}
 				}
 				TkRule::BraceGrp => {
 					let body = &raw[1..raw.len() - 1];
@@ -65,16 +92,30 @@ impl<'a> Highlighter for SynHelper<'a> {
 					is_command = false;
 					result.push_str(&rebuilt);
 				}
+				TkRule::VarSub => {
+					let styled = raw.styled(Style::Magenta);
+					result.push_str(&styled);
+				}
+				TkRule::Assign => {
+					let (var,val) = raw.split_once('=').unwrap();
+					let var_styled = var.styled(Style::Magenta);
+					let val_styled = val.styled(Style::Cyan);
+					let rebuilt = vec![var_styled,val_styled].join("=");
+					result.push_str(&rebuilt);
+				}
 				TkRule::Ident => {
-					if in_array {
+					if in_array || in_case {
 						if &raw == "in" {
 							let styled = &raw.styled(Style::Yellow);
 							result.push_str(&styled);
+							if in_case { in_case = false };
 						} else {
 							let styled = &raw.styled(Style::Magenta);
 							result.push_str(&styled);
 						}
-
+					} else if raw.starts_with(['"','\'']) {
+						let styled = &raw.styled(Style::BrightYellow);
+						result.push_str(&styled);
 					} else if &raw == "{" || &raw == "}" {
 						result.push_str(&raw);
 

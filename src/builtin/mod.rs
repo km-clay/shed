@@ -6,8 +6,9 @@ pub mod jobctl;
 pub mod read;
 pub mod alias;
 pub mod control_flow;
+pub mod source;
 
-pub const BUILTINS: [&str;13] = [
+pub const BUILTINS: [&str;14] = [
 	"echo",
 	"cd",
 	"pwd",
@@ -21,4 +22,5 @@ pub const BUILTINS: [&str;13] = [
 	"continue",
 	"return",
 	"break",
+	"source",
 ];

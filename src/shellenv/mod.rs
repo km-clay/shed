@@ -75,7 +75,9 @@ pub fn enable_reaping() -> ShResult<()> {
 }
 
 pub fn attach_tty(pgid: Pid) -> ShResult<()> {
-	if !isatty(0).unwrap_or(false) || pgid == term_ctlr() {
+	// If we aren't attached to a terminal, the pgid already controls it, or the process group does not exist
+	// Then return ok
+	if !isatty(0).unwrap_or(false) || pgid == term_ctlr() || killpg(pgid, None).is_err() {
 		return Ok(())
 	}
 	log!(DEBUG, "Attaching tty to pgid: {}",pgid);

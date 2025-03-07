@@ -78,7 +78,7 @@ impl<'a> Hinter for SynHelper<'a> {
 		}
 		let history = ctx.history();
 		let result = self.hist_search(line, history)?;
-		let window = result[line.len()..].to_string();
+		let window = result[line.len()..].trim_end().to_string();
 		Some(SynHint::new(window))
 	}
 }

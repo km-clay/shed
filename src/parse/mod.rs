@@ -4,7 +4,7 @@ use std::{iter::Peekable, str::FromStr};
 
 use crate::prelude::*;
 
-use lex::{Span, TkRule, Token, KEYWORDS};
+use lex::{Span, TkRule, Token, KEYWORDS, OPERATORS, SEPARATORS};
 
 bitflags! {
 	#[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -315,8 +315,8 @@ ndrule_def!(CmdList, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 
 ndrule_def!(Expr, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	try_rules!(tokens, shenv,
-		ShellCmd,
 		Pipeline,
+		ShellCmd,
 		Subshell,
 		Assignment,
 		Command
@@ -365,8 +365,14 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 		tokens = &tokens[1..];
 		match token.rule() {
 			TkRule::Whitespace => continue,
-			TkRule::Ident => {
+			TkRule::Ident | TkRule::VarSub => {
 				pat = Some(token.clone());
+				break
+			}
+			_ if KEYWORDS.contains(&token.rule()) => {
+				let mut clone = token.clone();
+				*clone.rule_mut() = TkRule::Ident;
+				pat = Some(clone);
 				break
 			}
 			_ => return Err(err("Expected an ident in case statement", token.span(), shenv))
@@ -377,28 +383,36 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 		return Err(err("Expected an ident in case statement", node_toks.last().unwrap().span(), shenv))
 	}
 	let pat = pat.unwrap();
+	tokens_iter = tokens.iter().peekable();
 
 	let mut closed = false;
 	while let Some(token) = tokens_iter.next() {
-		node_toks.push(token.clone());
-		tokens = &tokens[1..];
 		match token.rule() {
-			TkRule::Whitespace => continue,
 			TkRule::Ident => {
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
 				if token.as_raw(shenv) != "in" {
+					panic!();
 					return Err(err("Expected `in` after case statement pattern", token.span(), shenv))
 				} else {
 					closed = true;
 				}
 			}
 			TkRule::Sep => {
-				if closed {
-					break
-				}
+				node_toks.push(token.clone());
+				tokens = &tokens[1..];
+				if closed { break }
 			}
-			_ => return Err(err("Expected `in` after case statement pattern", token.span(), shenv))
+			_ => {
+				if closed { break }
+				log!(ERROR, token);
+				panic!();
+				return Err(err("Expected `in` after case statement pattern", token.span(), shenv))
+			}
 		}
 	}
+	log!(DEBUG,tokens);
+	tokens_iter = tokens.iter().peekable();
 
 	if tokens_iter.peek().is_none() {
 		return Err(err("Expected `in` after case statement pattern", node_toks.last().unwrap().span(), shenv))
@@ -451,6 +465,9 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 					if closed {
 						break
 					}
+				}
+				_ if OPERATORS.contains(&token.rule()) => {
+					if closed { break }
 				}
 				TkRule::RedirOp if closed => {
 					node_toks.push(token.clone());
@@ -506,14 +523,25 @@ ndrule_def!(ForLoop, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 	} else { return Ok(None) }
 
 	while let Some(token) = tokens_iter.next() {
+		log!(DEBUG, token);
 		node_toks.push(token.clone());
 		tokens = &tokens[1..];
-		if let TkRule::Ident = token.rule() {
-			if token.as_raw(shenv) == "in" { break }
-			vars.push(token.clone());
-		} else {
-			let span = get_span(&node_toks, shenv)?;
-			return Err(err("Expected an ident in for loop vars",span,shenv))
+		match token.rule() {
+			_ if token.as_raw(shenv) == "in" => break,
+			TkRule::Ident => {
+				vars.push(token.clone());
+			}
+			_ if KEYWORDS.contains(&token.rule()) => {
+				let mut clone = token.clone();
+				*clone.rule_mut() = TkRule::Ident;
+				vars.push(clone);
+			}
+			_ => {
+				log!(ERROR,"{:?}",token.rule());
+				log!(ERROR,token);
+				let span = get_span(&node_toks, shenv)?;
+				return Err(err("Expected an ident in for loop vars",span,shenv))
+			}
 		}
 	}
 	if vars.is_empty() {
@@ -523,15 +551,26 @@ ndrule_def!(ForLoop, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 	while let Some(token) = tokens_iter.next() {
 		node_toks.push(token.clone());
 		tokens = &tokens[1..];
-		if token.rule() == TkRule::Sep { break }
-		if let TkRule::Ident = token.rule() {
-			arr.push(token.clone());
-		} else {
-			let span = get_span(&node_toks, shenv)?;
-			return Err(err("Expected an ident in for loop array",span,shenv))
+		match token.rule() {
+			TkRule::Sep => break,
+			TkRule::Ident => {
+				arr.push(token.clone());
+			}
+			_ if KEYWORDS.contains(&token.rule()) => {
+				let mut clone = token.clone();
+				*clone.rule_mut() = TkRule::Ident;
+				arr.push(clone);
+			}
+			_ => {
+				log!(ERROR,"{:?}",token.rule());
+				log!(ERROR,token);
+				let span = get_span(&node_toks, shenv)?;
+				return Err(err("Expected an ident in for loop array",span,shenv))
+			}
 		}
 	}
 	if arr.is_empty() {
+		log!(ERROR,node_toks);
 		let span = get_span(&node_toks, shenv)?;
 		return Err(err("Expected an ident in for loop array",span,shenv))
 	}
@@ -576,6 +615,9 @@ ndrule_def!(ForLoop, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 			TkRule::Sep => {
 				node_toks.push(token.clone());
 				tokens = &tokens[1..];
+				if closed { break }
+			}
+			_ if OPERATORS.contains(&token.rule()) => {
 				if closed { break }
 			}
 			TkRule::RedirOp if closed => {
@@ -763,6 +805,9 @@ ndrule_def!(IfThen, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 				tokens = &tokens[used..];
 				redirs.push(redir);
 			}
+			_ if OPERATORS.contains(&token.rule()) => {
+				if closed { break }
+			}
 			_ => {
 				let span = get_span(&node_toks, shenv)?;
 				return Err(err(&format!("Unexpected token in if statement: {:?}",token.rule()),span,shenv))
@@ -928,6 +973,12 @@ ndrule_def!(FuncDef, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 		return Ok(None)
 	}
 
+	if let Some(token) = tokens_iter.next() {
+		if let TkRule::Sep = token.rule() {
+			node_toks.push(token.clone());
+		}
+	}
+
 	let span = get_span(&node_toks,shenv)?;
 	let node = Node {
 		node_rule: NdRule::FuncDef { name, body },
@@ -1005,7 +1056,11 @@ ndrule_def!(Pipeline, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 
 	while let Some(token) = tokens_iter.peek() {
 		match token.rule() {
-			TkRule::AndOp | TkRule::OrOp => {
+			_ if SEPARATORS.contains(&token.rule()) => {
+				if token.rule() == TkRule::Sep {
+					let token = tokens_iter.next().unwrap();
+					node_toks.push(token.clone());
+				}
 				// If there are no commands or only one, this isn't a pipeline
 				match cmds.len() {
 					0 | 1 => return Ok(None),
@@ -1158,6 +1213,12 @@ ndrule_def!(Assignment, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 		if let Some(ref cmd) = cmd {
 			node_toks.extend(cmd.tokens().clone());
 		}
+		if let Some(token) = tokens_slice.first() {
+			let token = token.clone();
+			if token.rule() == TkRule::Sep {
+				node_toks.push(token.clone());
+			}
+		}
 		let span = get_span(&node_toks,shenv)?;
 		let node = Node {
 			node_rule: NdRule::Assignment { assignments, cmd },
@@ -1167,6 +1228,14 @@ ndrule_def!(Assignment, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 		};
 		return Ok(Some(node))
 	} else {
+		log!(DEBUG, tokens);
+		if let Some(token) = tokens.next() {
+			if token.rule() == TkRule::Sep {
+				node_toks.push(token.clone());
+			}
+		}
+		log!(DEBUG, node_toks);
+
 		let span = get_span(&node_toks,shenv)?;
 		let node = Node {
 			node_rule: NdRule::Assignment { assignments, cmd: None },

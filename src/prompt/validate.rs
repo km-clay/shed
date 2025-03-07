@@ -7,23 +7,26 @@ use super::readline::SynHelper;
 pub fn check_delims(line: &str) -> bool {
 	let mut delim_stack = vec![];
 	let mut chars = line.chars();
-	let mut in_case = false;
+	let mut case_depth: u64 = 0;
 	let mut case_check = String::new();
 	let mut in_quote = None; // Tracks which quote type is open (`'` or `"`)
 
 	while let Some(ch) = chars.next() {
 		case_check.push(ch);
+		if case_check.len() > 4 {
+			case_check = case_check[1..].to_string();
+		}
 		if case_check.ends_with("case") {
-			in_case = true;
+			case_depth += 1;
 		}
 		if case_check.ends_with("esac") {
-			in_case = false;
+			case_depth = case_depth.saturating_sub(1);
 		}
 		match ch {
 			'{' | '(' | '[' if in_quote.is_none() => delim_stack.push(ch),
 			'}' if in_quote.is_none() && delim_stack.pop() != Some('{') => return false,
 			')' if in_quote.is_none() && delim_stack.pop() != Some('(') => {
-				if !in_case {
+				if case_depth == 0 {
 					return false
 				}
 			}
@@ -44,75 +47,9 @@ pub fn check_delims(line: &str) -> bool {
 }
 
 pub fn check_keywords(line: &str, shenv: &mut ShEnv) -> bool {
-	use TkRule::*;
-	let mut expecting: Vec<Vec<TkRule>> = vec![];
-	let mut tokens = Lexer::new(line.to_string(),shenv).lex().into_iter();
-
-	while let Some(token) = tokens.next() {
-		match token.rule() {
-			If => {
-				expecting.push(vec![Then]);
-			}
-			Then => {
-				if let Some(frame) = expecting.pop() {
-					if frame.contains(&Then) {
-						expecting.push(vec![Elif, Else, Fi])
-					} else { return false }
-				} else { return false }
-			}
-			Elif => {
-				if let Some(frame) = expecting.pop() {
-					if frame.contains(&Elif) {
-						expecting.push(vec![Then])
-					} else { return false }
-				} else { return false }
-			}
-			Else => {
-				if let Some(frame) = expecting.pop() {
-					if frame.contains(&Else) {
-						expecting.push(vec![Fi])
-					} else { return false }
-				} else { return false }
-			}
-			Fi => {
-				if let Some(frame) = expecting.pop() {
-					if frame.contains(&Fi) {
-						/* Do nothing */
-					} else { return false }
-				} else { return false }
-			}
-			While | Until | For | Select => {
-				expecting.push(vec![Do])
-			}
-			Do => {
-				if let Some(frame) = expecting.pop() {
-					if frame.contains(&Do) {
-						expecting.push(vec![Done])
-					} else { return false }
-				} else { return false }
-			}
-			Done => {
-				if let Some(frame) = expecting.pop() {
-					if frame.contains(&Done) {
-						/* Do nothing */
-					} else { return false }
-				} else { return false }
-			}
-			Case => {
-				expecting.push(vec![Esac])
-			}
-			Esac => {
-				if let Some(frame) = expecting.pop() {
-					if frame.contains(&Esac) {
-						/* Do nothing */
-					} else { return false }
-				} else { return false }
-			}
-			_ => { /* Do nothing */ }
-		}
-	}
-
-	expecting.is_empty()
+	shenv.new_input(line);
+	let tokens = Lexer::new(line.to_string(),shenv).lex();
+	Parser::new(tokens, shenv).parse().is_ok()
 }
 
 impl<'a> Validator for SynHelper<'a> {

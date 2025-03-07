@@ -3,33 +3,36 @@ use crate::{parse::lex::SEPARATORS, prelude::*};
 pub fn expand_alias(candidate: Token, shenv: &mut ShEnv) -> Vec<Token> {
 	let mut tokens = vec![];
 	let mut work_stack = VecDeque::new();
-	let mut expanded_aliases = vec![];
 	let logic = shenv.logic().clone();
+	let mut done = false;
 
 	// Start with the candidate token in the work queue
 	work_stack.bpush(candidate);
 
 	// Process until there are no more tokens in the queue
-	while let Some(token) = work_stack.fpop() {
-		if token.rule() == TkRule::Ident {
-			let candidate_str = token.as_raw(shenv);
-			if let Some(alias) = logic.get_alias(&candidate_str) {
-				// Expand the alias only if it hasn't been expanded yet
-				if !expanded_aliases.contains(&candidate_str) {
-					expanded_aliases.push(candidate_str);
-					let mut new_tokens = shenv.expand_input(alias, token.span());
-					for token in new_tokens.iter_mut() {
-						work_stack.bpush(token.clone());
+	while !done {
+		done = true;
+		while let Some(token) = work_stack.fpop() {
+			if token.rule() == TkRule::Ident {
+				let cand_str = token.as_raw(shenv);
+				if let Some(alias) = logic.get_alias(&cand_str) {
+					done = false;
+					if !token.span().borrow().expanded {
+						let mut new_tokens = shenv.expand_input(alias, token.span());
+						new_tokens.retain(|tk| tk.rule() != TkRule::Whitespace);
+						for token in &new_tokens {
+							tokens.push(token.clone());
+						}
 					}
 				} else {
-					// If already expanded, just add the token to the output
 					tokens.push(token);
 				}
 			} else {
 				tokens.push(token);
 			}
-		} else {
-			tokens.push(token);
+		}
+		if !done {
+			work_stack.extend(tokens.drain(..));
 		}
 	}
 	tokens
