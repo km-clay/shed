@@ -164,6 +164,7 @@ pub use crate::{
 		Parser,
 		ParseRule,
 		lex::{
+			EXPANSIONS,
 			Span,
 			Token,
 			TkRule,

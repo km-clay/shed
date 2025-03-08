@@ -394,6 +394,9 @@ tkrule_def!(ArithSub, |input: &str| {
 						_ => { /* Continue */ }
 					}
 				}
+				if is_arith_sub {
+					break
+				}
 			}
 			' ' | '\t' | ';' | '\n' => return None,
 			_ => { /* Continue */ }

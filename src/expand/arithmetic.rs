@@ -153,22 +153,29 @@ pub fn eval_rpn(tokens: Vec<ExprToken>) -> ShResult<f64> {
 	Ok(stack.pop().unwrap())
 }
 
-pub fn expand_arithmetic(token: Token, shenv: &mut ShEnv) -> ShResult<Token> {
+pub fn expand_arith_token(token: Token, shenv: &mut ShEnv) -> ShResult<Token> {
 	log!(INFO, "{}", token.as_raw(shenv));
 	// I mean hey it works
 	let token_raw = token.as_raw(shenv);
 	log!(INFO, token_raw);
-	let expanded = expand_string(token_raw, shenv);
-	token.span().borrow_mut().expanded = false;
 
-	log!(INFO, expanded);
-	let arith_raw = expanded.trim_matches('`');
+	let arith_raw = token_raw.trim_matches('`');
 
-	let expr_tokens = shunting_yard(tokenize_expr(arith_raw)?)?;
-	log!(DEBUG,expr_tokens);
-	let result = eval_rpn(expr_tokens)?.to_string();
+	let result = expand_arith_string(arith_raw,shenv)?;
 
 	let mut final_expansion = shenv.expand_input(&result, token.span());
 
 	Ok(final_expansion.pop().unwrap_or(token))
+}
+
+pub fn expand_arith_string(s: &str,shenv: &mut ShEnv) -> ShResult<String> {
+	let mut exp = expand_string(s,shenv);
+	if exp.starts_with('`') && s.ends_with('`') {
+		exp = exp[1..exp.len() - 1].to_string();
+	}
+	log!(INFO,exp);
+	let expr_tokens = shunting_yard(tokenize_expr(&exp)?)?;
+	log!(DEBUG,expr_tokens);
+	let result = eval_rpn(expr_tokens)?.to_string();
+	Ok(result)
 }

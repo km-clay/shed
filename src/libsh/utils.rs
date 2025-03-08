@@ -357,7 +357,11 @@ pub fn clean_string(s: impl ToString) -> String {
 		(s.starts_with('\'') && s.ends_with('\'')) ||
 		(s.starts_with('`') && s.ends_with('`'))
 	{
-		s[1..s.len() - 1].to_string()
+		if s.len() > 1 {
+			s[1..s.len() - 1].to_string()
+		} else {
+			s
+		}
 	} else if s.starts_with("$(") && s.ends_with(')') {
 		s[2..s.len() - 1].to_string()
 	} else {

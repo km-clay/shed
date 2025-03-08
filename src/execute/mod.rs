@@ -1,6 +1,6 @@
 use std::os::fd::AsRawFd;
 
-use crate::{expand::vars::expand_string, prelude::*};
+use crate::{expand::{arithmetic::expand_arith_string, tilde::expand_tilde_string, vars::{expand_string, expand_var}}, prelude::*};
 use shellenv::jobs::{ChildProc, JobBldr};
 
 pub mod shellcmd;
@@ -11,6 +11,7 @@ pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> 
 	shenv.new_input(&input);
 
 	let token_stream = Lexer::new(input,shenv).lex();
+	log!(INFO, token_stream);
 
 	let token_stream = expand_aliases(token_stream, shenv);
 	for token in &token_stream {
@@ -85,14 +86,14 @@ fn dispatch_node(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	let node_raw = node.as_raw(shenv);
 	let span = node.span();
 	match *node.rule() {
-		NdRule::Command {..} => dispatch_command(node, shenv).try_blame(node_raw, span)?,
-		NdRule::Subshell {..} => exec_subshell(node,shenv).try_blame(node_raw, span)?,
+		NdRule::Command {..} |
+		NdRule::Subshell {..} |
+		NdRule::Assignment {..} => dispatch_command(node, shenv).try_blame(node_raw, span)?,
 		NdRule::IfThen {..} => shellcmd::exec_if(node, shenv).try_blame(node_raw, span)?,
 		NdRule::Loop {..} => shellcmd::exec_loop(node, shenv).try_blame(node_raw, span)?,
 		NdRule::ForLoop {..} => shellcmd::exec_for(node, shenv).try_blame(node_raw, span)?,
 		NdRule::Case {..} => shellcmd::exec_case(node, shenv).try_blame(node_raw, span)?,
 		NdRule::FuncDef {..} => exec_funcdef(node,shenv).try_blame(node_raw, span)?,
-		NdRule::Assignment {..} => exec_assignment(node,shenv).try_blame(node_raw, span)?,
 		NdRule::Pipeline {..} => exec_pipeline(node, shenv).try_blame(node_raw, span)?,
 		_ => unimplemented!("No support for NdRule::{:?} yet", node.rule())
 	}
@@ -103,6 +104,7 @@ fn dispatch_command(mut node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	let mut is_builtin = false;
 	let mut is_func = false;
 	let mut is_subsh = false;
+	let mut is_assign = false;
 	if let NdRule::Command { ref mut argv, redirs: _ } = node.rule_mut() {
 		*argv = expand_argv(argv.to_vec(), shenv)?;
 		let cmd = argv.first().unwrap().as_raw(shenv);
@@ -114,6 +116,8 @@ fn dispatch_command(mut node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	} else if let NdRule::Subshell { body: _, ref mut argv, redirs: _ } = node.rule_mut() {
 		*argv = expand_argv(argv.to_vec(), shenv)?;
 		is_subsh = true;
+	} else if let NdRule::Assignment { assignments: _, cmd: _ } = node.rule() {
+		is_assign = true;
 	} else { unreachable!() }
 
 	if is_builtin {
@@ -122,6 +126,8 @@ fn dispatch_command(mut node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		exec_func(node, shenv)?;
 	} else if is_subsh {
 		exec_subshell(node, shenv)?;
+	} else if is_assign {
+		exec_assignment(node, shenv)?;
 	} else {
 		exec_cmd(node, shenv)?;
 	}
@@ -274,30 +280,50 @@ fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		log!(TRACE, "Command: {:?}", cmd);
 		let mut assigns = assignments.into_iter();
 		if let Some(cmd) = cmd {
-			while let Some((var,val)) = assigns.next() {
-				let var_raw = var.as_raw(shenv);
-				let val_raw = val.as_raw(shenv);
-				if check_expansion(&val_raw).is_some() {
-					let exp = expand_token(val.clone(), shenv)?;
-					let val_exp = exp.into_iter().next().unwrap_or(val);
-					let val_exp_raw = val_exp.as_raw(shenv);
-					shenv.vars_mut().export(&var_raw, &val_exp_raw);
-				} else {
-					shenv.vars_mut().export(&var_raw, &val_raw);
+			let saved_env = shenv.vars().env().clone();
+			while let Some(token) = assigns.next() {
+				let raw = token.as_raw(shenv);
+				if let Some((var,val)) = raw.split_once('=') {
+					let val_rule = Lexer::get_rule(&val);
+					if EXPANSIONS.contains(&val_rule) {
+						let exp = match val_rule {
+							TkRule::ArithSub => expand_arith_string(val,shenv)?,
+							TkRule::DQuote => expand_string(val, shenv),
+							TkRule::TildeSub => expand_tilde_string(val),
+							TkRule::VarSub => {
+								let val = shenv.vars().get_var(var);
+								val.to_string()
+							}
+							_ => unimplemented!()
+						};
+						shenv.vars_mut().set_var(var, &exp);
+					} else {
+						shenv.vars_mut().set_var(var, val);
+					}
 				}
 			}
 			dispatch_command(*cmd, shenv)?;
+			*shenv.vars_mut().env_mut() = saved_env;
 		} else {
-			while let Some((var,val)) = assigns.next() {
-				let var_raw = var.as_raw(shenv);
-				let val_raw = val.as_raw(shenv);
-				if check_expansion(&val_raw).is_some() {
-					let exp = expand_token(val.clone(), shenv)?;
-					let val_exp = exp.into_iter().next().unwrap_or(val);
-					let val_exp_raw = val_exp.as_raw(shenv);
-					shenv.vars_mut().export(&var_raw, &val_exp_raw);
-				} else {
-					shenv.vars_mut().export(&var_raw, &val_raw);
+			while let Some(token) = assigns.next() {
+				let raw = token.as_raw(shenv);
+				if let Some((var,val)) = raw.split_once('=') {
+					let val_rule = Lexer::get_rule(&val);
+					if EXPANSIONS.contains(&val_rule) {
+						let exp = match val_rule {
+							TkRule::ArithSub => expand_arith_string(val,shenv)?,
+							TkRule::DQuote => expand_string(val, shenv),
+							TkRule::TildeSub => expand_tilde_string(val),
+							TkRule::VarSub => {
+								let val = shenv.vars().get_var(var);
+								val.to_string()
+							}
+							_ => unimplemented!()
+						};
+						shenv.vars_mut().set_var(var, &exp);
+					} else {
+						shenv.vars_mut().set_var(var, val);
+					}
 				}
 			}
 		}

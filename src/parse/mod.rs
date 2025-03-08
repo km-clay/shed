@@ -85,7 +85,7 @@ pub enum LoopKind {
 pub enum NdRule {
 	Main { cmd_lists: Vec<Node> },
 	Command { argv: Vec<Token>, redirs: Vec<Redir> },
-	Assignment { assignments: Vec<(Token,Token)>, cmd: Option<Box<Node>> },
+	Assignment { assignments: Vec<Token>, cmd: Option<Box<Node>> },
 	FuncDef { name: Token, body: Token },
 	Case { pat: Token, blocks: Vec<(Token,Vec<Node>)>, redirs: Vec<Redir> },
 	IfThen { cond_blocks: Vec<(Vec<Node>,Vec<Node>)>, else_block: Option<Vec<Node>>, redirs: Vec<Redir> },
@@ -364,7 +364,7 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 		tokens = &tokens[1..];
 		match token.rule() {
 			TkRule::Whitespace => continue,
-			TkRule::Ident | TkRule::VarSub => {
+			TkRule::Ident | TkRule::VarSub | TkRule::ArithSub => {
 				pat = Some(token.clone());
 				break
 			}
@@ -426,6 +426,15 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 				TkRule::CasePat => {
 					node_toks.push(token.clone());
 					tokens = &tokens[1..];
+					while let Some(token) = tokens_iter.peek() {
+						if token.rule() == TkRule::Sep {
+							let token = tokens_iter.next().unwrap();
+							node_toks.push(token.clone());
+							tokens = &tokens[1..];
+						} else {
+							break
+						}
+					}
 					let block_pat = token.clone();
 					let (used,lists) = get_lists(tokens, shenv);
 					let mut lists_iter = lists.iter().peekable();
@@ -1189,29 +1198,13 @@ ndrule_def!(Assignment, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	while let Some(token) = tokens.peek() {
 		if matches!(token.rule(), TkRule::Ident | TkRule::ArithSub | TkRule::CmdSub | TkRule::DQuote) {
 			let raw = token.as_raw(shenv);
+			log!(INFO, raw);
 			// We are going to deconstruct this Ident into two separate tokens
 			// This makes expanding it easier later
-			if let Some((var,val)) = raw.split_once('=') {
-				const LEN_DELTA: usize = 1; // The distance covered by the '=' that we just split at
+			if raw.split_once('=').is_some() {
 				let token = tokens.next().unwrap();
-				let var_span = shenv.inputman_mut().new_span(
-					token.span().borrow().start(),
-					var.len()
-				);
-				let val_span = shenv.inputman_mut().new_span(
-					var.len() + LEN_DELTA,
-					token.span().borrow().end()
-				);
-				let var_rule = TkRule::Ident;
-				let val_rule = if let Some(rule) = check_expansion(&val) {
-					rule
-				} else {
-					TkRule::Ident
-				};
-				let var_token = Token::new(var_rule,var_span);
-				let val_token = Token::new(val_rule,val_span);
 				node_toks.push(token.clone());
-				assignments.push((var_token.clone(),val_token.clone()));
+				assignments.push(token.clone());
 			} else {
 				break
 			}
