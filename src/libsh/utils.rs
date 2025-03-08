@@ -2,7 +2,7 @@ use core::fmt::{Debug, Display, Write};
 use std::{os::fd::{AsRawFd, BorrowedFd}, str::FromStr};
 
 
-use crate::prelude::*;
+use crate::{parse::lex::EXPANSIONS, prelude::*};
 
 use super::term::StyleSet;
 
@@ -46,7 +46,7 @@ impl ArgVec for Vec<Token> {
 		let mut argv_iter = self.into_iter();
 		let mut argv_processed = vec![];
 		while let Some(arg) = argv_iter.next() {
-			let cleaned = trim_quotes(&arg.as_raw(shenv));
+			let cleaned = clean_string(&arg.as_raw(shenv));
 			argv_processed.push(cleaned);
 		}
 		argv_processed
@@ -342,12 +342,24 @@ impl CmdRedirs {
 	}
 }
 
-pub fn trim_quotes(s: impl ToString) -> String {
+pub fn check_expansion(s: &str) -> Option<TkRule> {
+	let rule = Lexer::get_rule(s);
+	if EXPANSIONS.contains(&rule) {
+		Some(rule)
+	} else {
+		None
+	}
+}
+
+pub fn clean_string(s: impl ToString) -> String {
 	let s = s.to_string();
-	if s.starts_with('"') && s.ends_with('"') {
-		s.trim_matches('"').to_string()
-	} else if s.starts_with('\'') && s.ends_with('\'') {
-		s.trim_matches('\'').to_string()
+	if (s.starts_with('"') && s.ends_with('"')) ||
+		(s.starts_with('\'') && s.ends_with('\'')) ||
+		(s.starts_with('`') && s.ends_with('`'))
+	{
+		s[1..s.len() - 1].to_string()
+	} else if s.starts_with("$(") && s.ends_with(')') {
+		s[2..s.len() - 1].to_string()
 	} else {
 		s
 	}

@@ -96,13 +96,6 @@ impl<'a> Highlighter for SynHelper<'a> {
 					let styled = raw.styled(Style::Magenta);
 					result.push_str(&styled);
 				}
-				TkRule::Assign => {
-					let (var,val) = raw.split_once('=').unwrap();
-					let var_styled = var.styled(Style::Magenta);
-					let val_styled = val.styled(Style::Cyan);
-					let rebuilt = vec![var_styled,val_styled].join("=");
-					result.push_str(&rebuilt);
-				}
 				TkRule::Ident => {
 					if in_array || in_case {
 						if &raw == "in" {
@@ -113,6 +106,11 @@ impl<'a> Highlighter for SynHelper<'a> {
 							let styled = &raw.styled(Style::Magenta);
 							result.push_str(&styled);
 						}
+					} else if let Some((var,val)) = raw.split_once('=') {
+						let var_styled = var.styled(Style::Magenta);
+						let val_styled = val.styled(Style::Cyan);
+						let rebuilt = vec![var_styled,val_styled].join("=");
+						result.push_str(&rebuilt);
 					} else if raw.starts_with(['"','\'']) {
 						let styled = &raw.styled(Style::BrightYellow);
 						result.push_str(&styled);

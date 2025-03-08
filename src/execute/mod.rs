@@ -1,6 +1,6 @@
 use std::os::fd::AsRawFd;
 
-use crate::prelude::*;
+use crate::{expand::vars::expand_string, prelude::*};
 use shellenv::jobs::{ChildProc, JobBldr};
 
 pub mod shellcmd;
@@ -274,22 +274,30 @@ fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		log!(TRACE, "Command: {:?}", cmd);
 		let mut assigns = assignments.into_iter();
 		if let Some(cmd) = cmd {
-			while let Some(assign) = assigns.next() {
-				let assign_raw = assign.as_raw(shenv);
-				if let Some((var,val)) = assign_raw.split_once('=') {
-					shenv.vars_mut().export(var, val);
+			while let Some((var,val)) = assigns.next() {
+				let var_raw = var.as_raw(shenv);
+				let val_raw = val.as_raw(shenv);
+				if check_expansion(&val_raw).is_some() {
+					let exp = expand_token(val.clone(), shenv)?;
+					let val_exp = exp.into_iter().next().unwrap_or(val);
+					let val_exp_raw = val_exp.as_raw(shenv);
+					shenv.vars_mut().export(&var_raw, &val_exp_raw);
+				} else {
+					shenv.vars_mut().export(&var_raw, &val_raw);
 				}
 			}
-			if cmd.flags().contains(NdFlag::BUILTIN) {
-				exec_builtin(*cmd, shenv)?;
-			} else {
-				exec_cmd(*cmd, shenv)?;
-			}
+			dispatch_command(*cmd, shenv)?;
 		} else {
-			while let Some(assign) = assigns.next() {
-				let assign_raw = assign.as_raw(shenv);
-				if let Some((var,val)) = assign_raw.split_once('=') {
-					shenv.vars_mut().set_var(var, val);
+			while let Some((var,val)) = assigns.next() {
+				let var_raw = var.as_raw(shenv);
+				let val_raw = val.as_raw(shenv);
+				if check_expansion(&val_raw).is_some() {
+					let exp = expand_token(val.clone(), shenv)?;
+					let val_exp = exp.into_iter().next().unwrap_or(val);
+					let val_exp_raw = val_exp.as_raw(shenv);
+					shenv.vars_mut().export(&var_raw, &val_exp_raw);
+				} else {
+					shenv.vars_mut().export(&var_raw, &val_raw);
 				}
 			}
 		}

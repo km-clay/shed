@@ -51,9 +51,12 @@ impl ShEnv {
 		if repl_span.borrow().expanded {
 			return vec![];
 		}
+		log!(INFO, repl_span);
+		log!(INFO, new);
 		repl_span.borrow_mut().expanded = true;
 		let saved_spans = self.input_man.spans_mut().clone();
 		let mut new_tokens = Lexer::new(new.to_string(), self).lex();
+		log!(INFO, new_tokens);
 		*self.input_man.spans_mut() = saved_spans;
 
 		let offset = repl_span.borrow().start();
@@ -68,8 +71,9 @@ impl ShEnv {
 		if let Some(input) = self.input_man.get_input_mut() {
 			let old = &input[range.clone()];
 			let delta: isize = new.len() as isize - old.len() as isize;
+			log!(INFO, input);
+			log!(INFO, range);
 			input.replace_range(range, new);
-			let expanded = input.clone();
 
 			for span in self.input_man.spans_mut() {
 				let mut span_mut = span.borrow_mut();

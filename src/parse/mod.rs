@@ -85,7 +85,7 @@ pub enum LoopKind {
 pub enum NdRule {
 	Main { cmd_lists: Vec<Node> },
 	Command { argv: Vec<Token>, redirs: Vec<Redir> },
-	Assignment { assignments: Vec<Token>, cmd: Option<Box<Node>> },
+	Assignment { assignments: Vec<(Token,Token)>, cmd: Option<Box<Node>> },
 	FuncDef { name: Token, body: Token },
 	Case { pat: Token, blocks: Vec<(Token,Vec<Node>)>, redirs: Vec<Redir> },
 	IfThen { cond_blocks: Vec<(Vec<Node>,Vec<Node>)>, else_block: Option<Vec<Node>>, redirs: Vec<Redir> },
@@ -1003,7 +1003,6 @@ ndrule_def!(Subshell, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 					TkRule::Ident |
 					TkRule::SQuote |
 					TkRule::DQuote |
-					TkRule::Assign |
 					TkRule::TildeSub |
 					TkRule::VarSub => {
 						node_toks.push(token.clone());
@@ -1139,7 +1138,6 @@ ndrule_def!(Command, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 			TkRule::Ident |
 			TkRule::SQuote |
 			TkRule::DQuote |
-			TkRule::Assign |
 			TkRule::TildeSub |
 			TkRule::ArithSub |
 			TkRule::VarSub => {
@@ -1188,10 +1186,38 @@ ndrule_def!(Assignment, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	let mut tokens = tokens.into_iter().peekable();
 	let mut node_toks = vec![];
 	let mut assignments = vec![];
-	while tokens.peek().is_some_and(|tk| tk.rule() == TkRule::Assign) {
-		let token = tokens.next().unwrap();
-		node_toks.push(token.clone());
-		assignments.push(token.clone());
+	while let Some(token) = tokens.peek() {
+		if matches!(token.rule(), TkRule::Ident | TkRule::ArithSub | TkRule::CmdSub | TkRule::DQuote) {
+			let raw = token.as_raw(shenv);
+			// We are going to deconstruct this Ident into two separate tokens
+			// This makes expanding it easier later
+			if let Some((var,val)) = raw.split_once('=') {
+				const LEN_DELTA: usize = 1; // The distance covered by the '=' that we just split at
+				let token = tokens.next().unwrap();
+				let var_span = shenv.inputman_mut().new_span(
+					token.span().borrow().start(),
+					var.len()
+				);
+				let val_span = shenv.inputman_mut().new_span(
+					var.len() + LEN_DELTA,
+					token.span().borrow().end()
+				);
+				let var_rule = TkRule::Ident;
+				let val_rule = if let Some(rule) = check_expansion(&val) {
+					rule
+				} else {
+					TkRule::Ident
+				};
+				let var_token = Token::new(var_rule,var_span);
+				let val_token = Token::new(val_rule,val_span);
+				node_toks.push(token.clone());
+				assignments.push((var_token.clone(),val_token.clone()));
+			} else {
+				break
+			}
+		} else {
+			break
+		}
 	}
 	if assignments.is_empty() {
 		return Ok(None)

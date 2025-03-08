@@ -90,7 +90,8 @@ pub use crate::{
 			RedirTarget,
 			CmdRedirs,
 			borrow_fd,
-			trim_quotes
+			check_expansion,
+			clean_string
 		},
 		collections::{
 			VecDequeAliases

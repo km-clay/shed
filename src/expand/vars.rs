@@ -8,11 +8,10 @@ pub fn expand_var(var_sub: Token, shenv: &mut ShEnv) -> Vec<Token> {
 	shenv.expand_input(&value, var_sub.span())
 }
 
-pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> Token {
-	let dquote_raw = dquote.as_raw(shenv);
+pub fn expand_string(s: String, shenv: &mut ShEnv) -> String {
 	let mut result = String::new();
 	let mut var_name = String::new();
-	let mut chars = dquote_raw.chars().peekable();
+	let mut chars = s.chars().peekable();
 	let mut in_brace = false;
 
 	while let Some(ch) = chars.next() {
@@ -23,6 +22,7 @@ pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> Token {
 				}
 			}
 			'$' => {
+				let mut expanded = false;
 				while let Some(ch) = chars.peek() {
 					if *ch == '"' {
 						break
@@ -33,31 +33,42 @@ pub fn expand_dquote(dquote: Token, shenv: &mut ShEnv) -> Token {
 							in_brace = true;
 						}
 						'}' if in_brace => {
+							let value = shenv.vars().get_var(&var_name);
+							result.push_str(value);
+							expanded = true;
 							break
 						}
 						_ if ch.is_ascii_digit() && var_name.is_empty() && !in_brace => {
 							var_name.push(ch);
+							let value = shenv.vars().get_var(&var_name);
+							result.push_str(value);
+							expanded = true;
 							break
 						}
 						'@' | '#' | '*' | '-' | '?' | '!' | '$' if var_name.is_empty() => {
 							var_name.push(ch);
+							let value = shenv.vars().get_var(&var_name);
+							result.push_str(value);
+							expanded = true;
 							break
 						}
 						' ' | '\t' => {
+							let value = shenv.vars().get_var(&var_name);
+							result.push_str(value);
+							result.push(ch);
+							expanded = true;
 							break
 						}
 						_ => var_name.push(ch)
 					}
 				}
-				log!(TRACE, var_name);
-				let value = shenv.vars().get_var(&var_name);
-				log!(TRACE, value);
-				result.push_str(value);
+				if !expanded {
+					let value = shenv.vars().get_var(&var_name);
+					result.push_str(value);
+				}
 			}
 			_ => result.push(ch)
 		}
 	}
-
-	let token = shenv.expand_input(&result, dquote.span()).pop().unwrap_or(dquote);
-	token
+	result
 }

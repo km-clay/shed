@@ -37,6 +37,15 @@ pub const SEPARATORS: [TkRule;7] = [
 	TkRule::CasePat
 ];
 
+pub const EXPANSIONS: [TkRule;6] = [
+	TkRule::DQuote,
+	TkRule::VarSub,
+	TkRule::CmdSub,
+	TkRule::ProcSub,
+	TkRule::TildeSub,
+	TkRule::ArithSub
+];
+
 pub trait LexRule {
 	fn try_match(input: &str) -> Option<usize>;
 }
@@ -74,11 +83,22 @@ impl<'a> Lexer<'a> {
 				self.consumed += len;
 				input = &input[len..];
 				self.tokens.push(token);
+
+				if input.is_empty() {
+					break
+				}
 			}
 			if !input.is_empty() {
 				log!(WARN, "unconsumed input: {}", input)
 			}
 			self.tokens
+		}
+	}
+	pub fn get_rule(s: &str) -> TkRule {
+		if let Some((rule,_)) = TkRule::try_match(s) {
+			rule
+		} else {
+			TkRule::Ident
 		}
 	}
 }
@@ -146,8 +166,14 @@ impl Span {
 		}
 	}
 	pub fn shift(&mut self, delta: isize) {
-		self.start = self.start.saturating_add_signed(delta);
-		self.end = self.end.saturating_add_signed(delta);
+		self.shift_start(delta);
+		self.shift_end(delta);
+	}
+	pub fn shift_start(&mut self, delta: isize) {
+		self.start = self.start.saturating_add_signed(delta)
+	}
+	pub fn shift_end(&mut self, delta: isize) {
+		self.end = self.end.saturating_add_signed(delta)
 	}
 }
 
@@ -215,7 +241,6 @@ pub enum TkRule {
 	Case,
 	Esac,
 	CasePat,
-	Assign,
 	Ident,
 	Sep,
 }
@@ -244,7 +269,6 @@ impl TkRule {
 		try_match!(Subshell,input);
 		try_match!(CasePat,input);
 		try_match!(Sep,input);
-		try_match!(Assign,input);
 		try_match!(If,input);
 		try_match!(Then,input);
 		try_match!(Elif,input);
@@ -899,37 +923,6 @@ tkrule_def!(FuncName, |input: &str| {
 		}
 	}
 	None
-});
-
-tkrule_def!(Assign, |input: &str| {
-	let mut chars = input.chars();
-	let mut len = 0;
-	let mut found_equals = false;
-
-	while let Some(ch) = chars.next() {
-		match ch {
-			'\\' => {
-				len += 2;
-				chars.next();
-			}
-			'=' if len == 0 => return None,
-			'=' => {
-				len += 1;
-				found_equals = true;
-			}
-			' ' | '\t' | ';' | '\n' => {
-				match len {
-					_ if found_equals && len > 1 => return Some(len),
-					_ => return None
-				}
-			}
-			_ => len += 1
-		}
-	}
-	match len {
-		_ if found_equals && len > 1 => return Some(len),
-		_ => return None
-	}
 });
 
 tkrule_def!(BraceGrp, |input: &str| {

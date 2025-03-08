@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::vars::expand_dquote;
+use super::vars::expand_string;
 
 #[derive(Clone,PartialEq,Debug)]
 pub enum ExprToken {
@@ -154,12 +154,15 @@ pub fn eval_rpn(tokens: Vec<ExprToken>) -> ShResult<f64> {
 }
 
 pub fn expand_arithmetic(token: Token, shenv: &mut ShEnv) -> ShResult<Token> {
-	// I mean hey it works (I think)
-	let dummy_token = Token::new(TkRule::DQuote, token.span());
-	let expanded = expand_dquote(dummy_token, shenv);
+	log!(INFO, "{}", token.as_raw(shenv));
+	// I mean hey it works
+	let token_raw = token.as_raw(shenv);
+	log!(INFO, token_raw);
+	let expanded = expand_string(token_raw, shenv);
 	token.span().borrow_mut().expanded = false;
-	let expanded_raw = expanded.as_raw(shenv);
-	let arith_raw = expanded_raw.trim_matches('`');
+
+	log!(INFO, expanded);
+	let arith_raw = expanded.trim_matches('`');
 
 	let expr_tokens = shunting_yard(tokenize_expr(arith_raw)?)?;
 	log!(DEBUG,expr_tokens);

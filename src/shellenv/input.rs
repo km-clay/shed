@@ -51,6 +51,11 @@ impl InputMan {
 			Rc::new(RefCell::new(Span::new(0,0)))
 		}
 	}
+	pub fn remove_span(&mut self, span: Rc<RefCell<Span>>) {
+		if let Some(idx) = self.spans.iter().position(|iter_span| *iter_span == span) {
+			self.spans.remove(idx);
+		}
+	}
 	pub fn spans_mut(&mut self) -> &mut Vec<Rc<RefCell<Span>>> {
 		&mut self.spans
 	}
