@@ -175,6 +175,12 @@ impl Span {
 	pub fn shift_end(&mut self, delta: isize) {
 		self.end = self.end.saturating_add_signed(delta)
 	}
+	pub fn set_start(&mut self, start: usize) {
+		self.start = start
+	}
+	pub fn set_end(&mut self, end: usize) {
+		self.end = end
+	}
 }
 
 macro_rules! try_match {
@@ -251,9 +257,9 @@ impl TkRule {
 		// Generalized rules come last
 		try_match!(Whitespace,input);
 		try_match!(Comment,input);
+		try_match!(CmdSub,input);
 		try_match!(VarSub,input);
 		try_match!(ProcSub,input);
-		try_match!(CmdSub,input);
 		try_match!(ArithSub,input);
 		try_match!(AndOp,input);
 		try_match!(OrOp,input);

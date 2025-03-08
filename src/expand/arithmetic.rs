@@ -169,7 +169,7 @@ pub fn expand_arith_token(token: Token, shenv: &mut ShEnv) -> ShResult<Token> {
 }
 
 pub fn expand_arith_string(s: &str,shenv: &mut ShEnv) -> ShResult<String> {
-	let mut exp = expand_string(s,shenv);
+	let mut exp = expand_string(s,shenv)?;
 	if exp.starts_with('`') && s.ends_with('`') {
 		exp = exp[1..exp.len() - 1].to_string();
 	}

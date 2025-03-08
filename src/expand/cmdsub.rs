@@ -1,9 +1,17 @@
 use crate::prelude::*;
 
-pub fn expand_cmdsub(token: Token, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
-	let new_tokens = vec![];
+pub fn expand_cmdsub_token(token: Token, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
 	let cmdsub_raw = token.as_raw(shenv);
-	let body = &cmdsub_raw[2..cmdsub_raw.len() - 1].to_string(); // From '$(this)' to 'this'
+	let output = expand_cmdsub_string(&cmdsub_raw, shenv)?;
+	let new_tokens = shenv.expand_input(&output, token.span());
+
+	Ok(new_tokens)
+}
+
+pub fn expand_cmdsub_string(mut s: &str, shenv: &mut ShEnv) -> ShResult<String> {
+	if s.starts_with("$(") && s.ends_with(')') {
+		s = &s[2..s.len() - 1]; // From '$(this)' to 'this'
+	}
 
 	let (r_pipe,w_pipe) = c_pipe()?;
 	let pipe_redir = Redir::output(1, w_pipe);
@@ -14,17 +22,12 @@ pub fn expand_cmdsub(token: Token, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
 	match unsafe { fork()? } {
 		Child => {
 			close(r_pipe).ok();
-			exec_input(body, shenv).abort_if_err();
-			sh_quit(0);
+			exec_input(s, &mut sub_shenv).abort_if_err();
+			exit(0);
 		}
-		Parent { child } => {
+		Parent { child: _ } => {
 			close(w_pipe).ok();
 		}
 	}
-	let output = read_to_string(r_pipe)?;
-	if !output.is_empty() {
-		let lex_input = Rc::new(output);
-	}
-
-	Ok(new_tokens)
+	Ok(read_to_string(r_pipe)?)
 }

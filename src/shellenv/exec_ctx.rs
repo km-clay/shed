@@ -11,7 +11,6 @@ bitflags! {
 pub struct ExecCtx {
 	redirs: Vec<Redir>,
 	depth: usize,
-	state_stack: Vec<Self>,
 	max_depth: usize,
 	flags: ExecFlags,
 	io_masks: IoMasks,
@@ -23,35 +22,11 @@ impl ExecCtx {
 		Self {
 			redirs: vec![],
 			depth: 0,
-			state_stack: vec![],
 			max_depth: 1500,
 			flags: ExecFlags::empty(),
 			io_masks: IoMasks::new(),
 			saved_io: None
 		}
-	}
-	pub fn push_state(&mut self) {
-		self.state_stack.push(self.clone());
-	}
-	pub fn pop_state(&mut self) {
-		if let Some(state) = self.state_stack.pop() {
-			*self = state;
-		}
-	}
-	pub fn descend(&mut self) -> ShResult<()> {
-		self.push_state();
-		self.depth += 1;
-		log!(DEBUG, "{}",self.depth);
-		if self.depth > self.max_depth {
-			return Err(
-				ShErr::simple(ShErrKind::ExecFail,"Exceeded maximum execution depth")
-			)
-		}
-		Ok(())
-	}
-	pub fn ascend(&mut self) {
-		self.pop_state();
-		self.depth = self.depth.saturating_sub(1);
 	}
 	pub fn as_cond(&self) -> Self {
 		let mut clone = self.clone();

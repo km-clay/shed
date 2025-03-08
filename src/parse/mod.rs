@@ -391,7 +391,6 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 				node_toks.push(token.clone());
 				tokens = &tokens[1..];
 				if token.as_raw(shenv) != "in" {
-					panic!();
 					return Err(err("Expected `in` after case statement pattern", token.span(), shenv))
 				} else {
 					closed = true;
@@ -405,7 +404,6 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 			_ => {
 				if closed { break }
 				log!(ERROR, token);
-				panic!();
 				return Err(err("Expected `in` after case statement pattern", token.span(), shenv))
 			}
 		}
@@ -440,12 +438,8 @@ ndrule_def!(Case, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 					let mut lists_iter = lists.iter().peekable();
 					while let Some(list) = lists_iter.next() {
 						node_toks.extend(list.tokens.clone());
-						if lists_iter.peek().is_none() {
-							for token in list.tokens() {
-							}
-						}
 						if let Some(token) = list.tokens().last() {
-							if lists_iter.peek().is_none() && (token.rule() != TkRule::Sep || token.as_raw(shenv).trim() != ";;") {
+							if lists_iter.peek().is_none() && (token.rule() != TkRule::Sep || !token.as_raw(shenv).trim().ends_with(";;")) {
 								log!(ERROR, "{:?}",list.tokens());
 								log!(ERROR, token);
 								log!(ERROR, "{}",token.as_raw(shenv).trim());
@@ -1149,6 +1143,7 @@ ndrule_def!(Command, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 			TkRule::DQuote |
 			TkRule::TildeSub |
 			TkRule::ArithSub |
+			TkRule::CmdSub |
 			TkRule::VarSub => {
 				argv.push(token.clone());
 			}

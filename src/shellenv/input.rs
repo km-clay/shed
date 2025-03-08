@@ -1,16 +1,41 @@
 use crate::prelude::*;
 
 #[derive(Clone,Debug,PartialEq)]
+pub struct SavedSpan {
+	pointer: Rc<RefCell<Span>>,
+	start: usize,
+	end: usize,
+	expanded: bool
+}
+
+impl SavedSpan {
+	pub fn from_span(pointer: Rc<RefCell<Span>>) -> Self {
+		let expanded = pointer.borrow().expanded;
+		let start = pointer.borrow().start();
+		let end = pointer.borrow().end();
+		Self { pointer, start, end, expanded }
+	}
+	pub fn restore(&self) {
+		let mut deref = self.pointer.borrow_mut();
+		deref.set_start(self.start);
+		deref.set_end(self.end);
+		deref.expanded = self.expanded
+	}
+	pub fn into_span(self) -> Rc<RefCell<Span>> {
+		self.pointer
+	}
+}
+
+#[derive(Clone,Debug,PartialEq)]
 pub struct InputMan {
 	input: Option<String>,
-	saved_input: Option<String>,
 	spans: Vec<Rc<RefCell<Span>>>,
-	saved_spans: Vec<Span>
+	saved_states: Vec<(String,Vec<SavedSpan>)>,
 }
 
 impl InputMan {
 	pub fn new() -> Self {
-		Self { input: None, saved_input: None, spans: vec![], saved_spans: vec![] }
+		Self { input: None, spans: vec![], saved_states: vec![] }
 	}
 	pub fn clear(&mut self) {
 		*self = Self::new();
@@ -24,22 +49,27 @@ impl InputMan {
 	pub fn get_input_mut(&mut self) -> Option<&mut String> {
 		self.input.as_mut()
 	}
-	pub fn save_state(&mut self) {
-		self.saved_input = self.input.clone();
-		self.saved_spans.clear();
-		for span in &self.spans {
-			self.saved_spans.push(span.borrow().clone());
+	pub fn push_state(&mut self) {
+		if let Some(input) = &self.input {
+			let saved_input = input.clone();
+			let mut saved_spans = vec![];
+			for span in &self.spans {
+				let saved_span = SavedSpan::from_span(span.clone());
+				saved_spans.push(saved_span);
+			}
+			self.saved_states.push((saved_input,saved_spans));
 		}
 	}
-	pub fn load_state(&mut self) {
-		if self.saved_input.is_some() {
-			self.input = self.saved_input.take();
-
-			for (span, saved_span) in self.spans.iter_mut().zip(self.saved_spans.iter()) {
-				*span.borrow_mut() = saved_span.clone();
+	pub fn pop_state(&mut self) {
+		if let Some((saved_input, saved_spans)) = self.saved_states.pop() {
+			self.input = Some(saved_input);
+			let mut restored_spans = vec![];
+			for saved_span in saved_spans.into_iter() {
+				saved_span.restore();
+				let span = saved_span.into_span();
+				restored_spans.push(span);
 			}
-
-			self.saved_spans.clear();
+			self.spans = restored_spans;
 		}
 	}
 	pub fn new_span(&mut self, start: usize, end: usize) -> Rc<RefCell<Span>> {

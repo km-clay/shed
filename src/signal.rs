@@ -53,12 +53,7 @@ pub extern "C" fn ignore_sigchld(_: libc::c_int) {
 }
 
 extern "C" fn handle_sigquit(_: libc::c_int) {
-	write_jobs(|j| {
-		for job in j.jobs_mut().iter_mut().flatten() {
-			job.killpg(Signal::SIGTERM).ok();
-		}
-	});
-	exit(0);
+	sh_quit(0)
 }
 
 pub extern "C" fn handle_sigchld(_: libc::c_int) {
@@ -125,11 +120,11 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
 	 * We can reasonably assume that if it is not a foreground job, then it exists in the job table
 	 * If this assumption is incorrect, the code has gone wrong somewhere.
 	 */
-	let (
+	if let Some((
 		pgid,
 		is_fg,
 		is_finished
-	) = write_jobs(|j| {
+	)) = write_jobs(|j| {
 		let fg_pgid = j.get_fg().map(|job| job.pgid());
 		if let Some(job) = j.query_mut(JobID::Pid(pid)) {
 			let pgid = job.pgid();
@@ -141,21 +136,22 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
 				child.set_stat(status);
 			}
 
-			Ok((pgid, is_fg, is_finished))
+			Some((pgid, is_fg, is_finished))
 		} else {
-			Err(ShErr::simple(ShErrKind::InternalErr, "Job not found"))
+			None
 		}
-	})?;
+	}) {
 
-	if is_finished {
-		if is_fg {
-			take_term()?;
-		} else {
-			println!();
-			let job_order = read_jobs(|j| j.order().to_vec());
-			let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
-			if let Some(job) = result {
-				println!("{}",job.display(&job_order,shellenv::jobs::JobCmdFlags::PIDS))
+		if is_finished {
+			if is_fg {
+				take_term()?;
+			} else {
+				println!();
+				let job_order = read_jobs(|j| j.order().to_vec());
+				let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
+				if let Some(job) = result {
+					println!("{}",job.display(&job_order,shellenv::jobs::JobCmdFlags::PIDS))
+				}
 			}
 		}
 	}

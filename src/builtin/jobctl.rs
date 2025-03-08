@@ -162,7 +162,7 @@ pub fn jobs(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 				flags |= flag
 			}
 		}
-		read_jobs(|j| j.print_jobs(flags))?;
+		write_jobs(|j| j.print_jobs(flags))?;
 		shenv.set_code(0);
 	} else { unreachable!() }
 

@@ -82,6 +82,16 @@ impl<'a> Highlighter for SynHelper<'a> {
 					is_command = false;
 					result.push_str(&rebuilt);
 				}
+				TkRule::CmdSub => {
+					let body = &raw[2..raw.len() - 1];
+					let highlighted = self.highlight(body, 0).to_string();
+					let styled_o_paren = "$(".styled(Style::BrightBlue);
+					let styled_c_paren = ")".styled(Style::BrightBlue);
+					let rebuilt = format!("{styled_o_paren}{highlighted}{styled_c_paren}");
+
+					is_command = false;
+					result.push_str(&rebuilt);
+				}
 				TkRule::Subshell => {
 					let body = &raw[1..raw.len() - 1];
 					let highlighted = self.highlight(body, 0).to_string();

@@ -1,4 +1,6 @@
-use std::fmt::Display;
+use std::{fmt::Display, os::fd::AsRawFd};
+
+use nix::sys::termios;
 
 use crate::prelude::*;
 
@@ -46,6 +48,9 @@ pub fn sh_quit(code: i32) -> ! {
 			job.killpg(Signal::SIGTERM).ok();
 		}
 	});
+	if let Some(termios) = crate::get_saved_termios() {
+		termios::tcsetattr(std::io::stdin(), termios::SetArg::TCSANOW, &termios).unwrap();
+	}
 	exit(code);
 }
 

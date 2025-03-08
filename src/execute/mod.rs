@@ -21,15 +21,18 @@ pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> 
 
 	let syn_tree = Parser::new(token_stream,shenv).parse()?;
 	let exec_start = std::time::Instant::now();
+	shenv.save_io()?;
 	if let Err(e) = Executor::new(syn_tree, shenv).walk() {
 		if let ShErrKind::CleanExit = e.kind() {
 			let code = shenv.get_code();
 			sh_quit(code);
 		} else {
+			shenv.reset_io()?;
 			return Err(e.into())
 		}
 	}
 	log!(INFO, "Executing done in {:?}", exec_start.elapsed());
+	shenv.reset_io()?;
 	Ok(())
 }
 
@@ -43,7 +46,7 @@ impl<'a> Executor<'a> {
 		Self { ast, shenv }
 	}
 	pub fn walk(&mut self) -> ShResult<()> {
-		self.shenv.inputman_mut().save_state();
+		self.shenv.inputman_mut().push_state();
 		log!(TRACE, "Starting walk");
 		while let Some(node) = self.ast.next_node() {
 			if let NdRule::CmdList { cmds } = node.clone().into_rule() {
@@ -51,7 +54,7 @@ impl<'a> Executor<'a> {
 				exec_list(cmds, self.shenv).try_blame(node.as_raw(self.shenv),node.span())?
 			} else { unreachable!() }
 		}
-		self.shenv.inputman_mut().load_state();
+		self.shenv.inputman_mut().pop_state();
 		log!(TRACE, "passed");
 		Ok(())
 	}
@@ -288,7 +291,7 @@ fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 					if EXPANSIONS.contains(&val_rule) {
 						let exp = match val_rule {
 							TkRule::ArithSub => expand_arith_string(val,shenv)?,
-							TkRule::DQuote => expand_string(val, shenv),
+							TkRule::DQuote => expand_string(val, shenv)?,
 							TkRule::TildeSub => expand_tilde_string(val),
 							TkRule::VarSub => {
 								let val = shenv.vars().get_var(var);
@@ -312,7 +315,7 @@ fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 					if EXPANSIONS.contains(&val_rule) {
 						let exp = match val_rule {
 							TkRule::ArithSub => expand_arith_string(val,shenv)?,
-							TkRule::DQuote => expand_string(val, shenv),
+							TkRule::DQuote => expand_string(val, shenv)?,
 							TkRule::TildeSub => expand_tilde_string(val),
 							TkRule::VarSub => {
 								let val = shenv.vars().get_var(var);

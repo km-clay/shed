@@ -538,7 +538,7 @@ impl JobTab {
 			None
 		}
 	}
-	pub fn print_jobs(&self, flags: JobCmdFlags) -> ShResult<()> {
+	pub fn print_jobs(&mut self, flags: JobCmdFlags) -> ShResult<()> {
 		let jobs = if flags.contains(JobCmdFlags::NEW_ONLY) {
 			&self.jobs
 				.iter()
@@ -551,6 +551,7 @@ impl JobTab {
 				.map(|job| job.as_ref())
 				.collect::<Vec<Option<&Job>>>()
 		};
+		let mut jobs_to_remove = vec![];
 		for job in jobs.iter().flatten() {
 			// Skip foreground job
 			let id = job.tabid().unwrap();
@@ -563,6 +564,12 @@ impl JobTab {
 			}
 			// Print the job in the selected format
 			write(borrow_fd(1), format!("{}\n",job.display(&self.order,flags)).as_bytes())?;
+			if job.get_stats().iter().all(|stat| matches!(stat,WtStat::Exited(_, _))) {
+				jobs_to_remove.push(JobID::TableID(id));
+			}
+		}
+		for id in jobs_to_remove {
+			self.remove_job(id);
 		}
 		Ok(())
 	}

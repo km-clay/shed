@@ -5,6 +5,7 @@ pub mod cmdsub;
 pub mod arithmetic;
 
 use arithmetic::expand_arith_token;
+use cmdsub::expand_cmdsub_token;
 use vars::{expand_string, expand_var};
 use tilde::expand_tilde_token;
 
@@ -27,7 +28,7 @@ pub fn expand_token(token: Token, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
 	log!(INFO, "rule: {:?}", token.rule());
 	match token.rule() {
 		TkRule::DQuote => {
-			let dquote_exp = expand_string(&token.as_raw(shenv), shenv);
+			let dquote_exp = expand_string(&token.as_raw(shenv), shenv)?;
 			let mut expanded = shenv.expand_input(&dquote_exp, token.span());
 			processed.append(&mut expanded);
 		}
@@ -42,6 +43,10 @@ pub fn expand_token(token: Token, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
 		TkRule::ArithSub => {
 			let arith_exp = expand_arith_token(token.clone(), shenv)?;
 			processed.push(arith_exp);
+		}
+		TkRule::CmdSub => {
+			let mut cmdsub_exp = expand_cmdsub_token(token.clone(), shenv)?;
+			processed.append(&mut cmdsub_exp);
 		}
 		_ => {
 			if token.rule() != TkRule::Ident {
