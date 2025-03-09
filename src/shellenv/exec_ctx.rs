@@ -43,6 +43,9 @@ impl ExecCtx {
 	pub fn redirs(&self) -> &Vec<Redir> {
 		&self.redirs
 	}
+	pub fn clear_redirs(&mut self) {
+		self.redirs.clear()
+	}
 	pub fn sort_redirs(&self) -> (Vec<Redir>,Vec<Redir>) {
 		let mut cond_redirs = vec![];
 		let mut body_redirs = vec![];

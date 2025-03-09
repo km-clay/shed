@@ -136,7 +136,7 @@ pub use crate::{
 	},
 	shellenv::{
 		self,
-		wait_fg,
+		dispatch_job,
 		log_level,
 		attach_tty,
 		term_ctlr,

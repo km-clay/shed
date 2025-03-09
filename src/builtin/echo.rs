@@ -75,6 +75,7 @@ pub fn echo(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		}
 
 		shenv.collect_redirs(redirs);
+		log!(DEBUG,"{:?}",shenv.ctx().redirs());
 		shenv.ctx_mut().activate_rdrs()?;
 		write_out(formatted)?;
 

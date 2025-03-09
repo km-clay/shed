@@ -16,6 +16,7 @@ pub enum Op {
 	Sub,
 	Mul,
 	Div,
+	IntDiv,
 	Mod,
 	Pow
 }
@@ -24,7 +25,7 @@ impl Op {
 	pub fn precedence(&self) -> u8 {
 		match self {
 			Op::Add | Op::Sub => 1,
-			Op::Mul | Op::Div | Op::Mod => 2,
+			Op::Mul | Op::Div | Op::IntDiv | Op::Mod => 2,
 			Op::Pow => 3
 		}
 	}
@@ -49,7 +50,14 @@ fn tokenize_expr(expr: &str) -> ShResult<Vec<ExprToken>> {
 					tokens.push(ExprToken::Operator(Op::Mul));
 				}
 			}
-			'/' => tokens.push(ExprToken::Operator(Op::Div)),
+			'/' => {
+				if chars.peek() == Some(&'/') {
+					chars.next();
+					tokens.push(ExprToken::Operator(Op::IntDiv));
+				} else {
+					tokens.push(ExprToken::Operator(Op::Div));
+				}
+			}
 			'%' => tokens.push(ExprToken::Operator(Op::Mod)),
 			'(' => tokens.push(ExprToken::OpenParen),
 			')' => tokens.push(ExprToken::CloseParen),
@@ -142,6 +150,12 @@ pub fn eval_rpn(tokens: Vec<ExprToken>) -> ShResult<f64> {
 						}
 						lhs / rhs
 					}
+					Op::IntDiv => {
+						if rhs == 0.0 {
+							return Err(ShErr::simple(ShErrKind::ParseErr, "Attempt to divide by zero in arithmetic expansion"))
+						}
+						(lhs as i64 / rhs as i64) as f64
+					}
 				};
 				stack.push(result);
 			}
@@ -154,10 +168,8 @@ pub fn eval_rpn(tokens: Vec<ExprToken>) -> ShResult<f64> {
 }
 
 pub fn expand_arith_token(token: Token, shenv: &mut ShEnv) -> ShResult<Token> {
-	log!(INFO, "{}", token.as_raw(shenv));
 	// I mean hey it works
 	let token_raw = token.as_raw(shenv);
-	log!(INFO, token_raw);
 
 	let arith_raw = token_raw.trim_matches('`');
 
@@ -173,7 +185,6 @@ pub fn expand_arith_string(s: &str,shenv: &mut ShEnv) -> ShResult<String> {
 	if exp.starts_with('`') && s.ends_with('`') {
 		exp = exp[1..exp.len() - 1].to_string();
 	}
-	log!(INFO,exp);
 	let expr_tokens = shunting_yard(tokenize_expr(&exp)?)?;
 	log!(DEBUG,expr_tokens);
 	let result = eval_rpn(expr_tokens)?.to_string();

@@ -2,7 +2,7 @@ pub mod lex;
 
 use std::{iter::Peekable, str::FromStr};
 
-use crate::prelude::*;
+use crate::{expand::vars::expand_string, prelude::*};
 
 use lex::{Span, TkRule, Token, KEYWORDS, OPERATORS, SEPARATORS};
 
@@ -208,30 +208,54 @@ fn get_redir(token: Token, token_slice: &[Token], shenv: &mut ShEnv) -> ShResult
 	let mut tokens_eaten = 0;
 	let mut tokens_iter = token_slice.into_iter();
 	let redir_raw = shenv.input_slice(token.span());
-	let mut redir_bldr = RedirBldr::from_str(&redir_raw).unwrap();
+	let mut redir_bldr = RedirBldr::from_str(&redir_raw)?;
 	// If there isn't an FD target, get the next token and use it as the filename
-	if redir_bldr.tgt().is_none() {
-		if let Some(filename) = tokens_iter.next() {
-			// Make sure it's a word and not an operator or something
-			if !matches!(filename.rule(), TkRule::SQuote | TkRule::DQuote | TkRule::Ident) || KEYWORDS.contains(&filename.rule()) {
+	if redir_bldr.tgt().is_none() || redir_bldr.op() == Some(RedirType::HereDoc) {
+		if let Some(RedirType::HereString) = redir_bldr.op() {
+			if let Some(herestring) = tokens_iter.next() {
+				if !matches!(herestring.rule(), TkRule::SQuote | TkRule::DQuote) {
+					let mut err = ShErr::simple(ShErrKind::ParseErr, "Expected a string after herestring operator");
+					let input = shenv.input_slice(token.span()).to_string();
+					err.blame(input, token.span());
+					return Err(err)
+				}
+				tokens_eaten += 1;
+				let raw = clean_string(herestring.as_raw(shenv));
+				let exp = expand_string(&raw, shenv)?;
+				let tgt = RedirTarget::HereString(exp);
+				redir_bldr = redir_bldr.with_tgt(tgt);
+			}
+		} else if let Some(RedirType::HereDoc) = redir_bldr.op() {
+			if let Some(RedirTarget::HereDoc(body)) = redir_bldr.tgt() {
+				let body_exp = expand_string(body, shenv)?;
+				log!(DEBUG, body_exp);
+				let exp_tgt = RedirTarget::HereDoc(body_exp);
+				redir_bldr = redir_bldr.with_tgt(exp_tgt);
+			} else { unreachable!() }
+		} else {
+			if let Some(filename) = tokens_iter.next() {
+				// Make sure it's a word and not an operator or something
+				if !matches!(filename.rule(), TkRule::SQuote | TkRule::DQuote | TkRule::Ident) || KEYWORDS.contains(&filename.rule()) {
+					let mut err = ShErr::simple(ShErrKind::ParseErr, "Did not find a target for this redirection");
+					let input = shenv.input_slice(token.span()).to_string();
+					err.blame(input, token.span());
+					return Err(err)
+				}
+				tokens_eaten += 1;
+				// Construct the Path object
+				let filename_raw = filename.as_raw(shenv);
+				let filename_path = PathBuf::from(filename_raw);
+				let tgt = RedirTarget::File(filename_path);
+				// Update the builder
+				redir_bldr = redir_bldr.with_tgt(tgt);
+			} else {
 				let mut err = ShErr::simple(ShErrKind::ParseErr, "Did not find a target for this redirection");
 				let input = shenv.input_slice(token.span()).to_string();
 				err.blame(input, token.span());
 				return Err(err)
 			}
-			tokens_eaten += 1;
-			// Construct the Path object
-			let filename_raw = shenv.input_slice(filename.span()).to_string();
-			let filename_path = PathBuf::from(filename_raw);
-			let tgt = RedirTarget::File(filename_path);
-			// Update the builder
-			redir_bldr = redir_bldr.with_tgt(tgt);
-		} else {
-			let mut err = ShErr::simple(ShErrKind::ParseErr, "Did not find a target for this redirection");
-			let input = shenv.input_slice(token.span()).to_string();
-			err.blame(input, token.span());
-			return Err(err)
 		}
+
 	}
 	Ok((tokens_eaten,redir_bldr.build()))
 }
@@ -983,10 +1007,11 @@ ndrule_def!(FuncDef, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 });
 
 ndrule_def!(Subshell, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
-	let mut tokens_iter = tokens.into_iter();
+	let mut tokens_iter = tokens.into_iter().peekable();
 	let mut node_toks = vec![];
 	let mut argv = vec![];
 	let mut redirs = vec![];
+	let mut flags = NdFlag::empty();
 	if let Some(token) = tokens_iter.next() {
 		if let TkRule::Subshell = token.rule() {
 			node_toks.push(token.clone());
@@ -1011,6 +1036,16 @@ ndrule_def!(Subshell, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 						node_toks.push(token.clone());
 						argv.push(token.clone());
 					}
+					TkRule::BgOp => {
+						flags |= NdFlag::BACKGROUND;
+						while let Some(token) = tokens_iter.peek() {
+							if token.rule() == TkRule::Sep {
+								let token = tokens_iter.next().unwrap();
+								node_toks.push(token.clone());
+							} else { break }
+						}
+						break
+					}
 					TkRule::RedirOp => {
 						node_toks.push(token.clone());
 						let slice = &tokens_iter.clone().map(|tk| tk.clone()).collect::<Vec<_>>();
@@ -1030,7 +1065,7 @@ ndrule_def!(Subshell, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 				node_rule: NdRule::Subshell { body, argv, redirs },
 				tokens: node_toks,
 				span,
-				flags: NdFlag::empty()
+				flags
 			};
 			return Ok(Some(node))
 		} else {
@@ -1045,6 +1080,7 @@ ndrule_def!(Pipeline, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 	let mut tokens_iter = tokens.iter().peekable();
 	let mut node_toks = vec![];
 	let mut cmds = vec![];
+	let mut flags = NdFlag::empty();
 
 	while let Some(token) = tokens_iter.peek() {
 		match token.rule() {
@@ -1069,6 +1105,9 @@ ndrule_def!(Pipeline, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 			tokens = &tokens[cmd.len()..];
 			for _ in 0..cmd.len() {
 				tokens_iter.next();
+			}
+			if cmd.flags().contains(NdFlag::BACKGROUND) {
+				flags |= NdFlag::BACKGROUND;
 			}
 
 			if let NdRule::Command { argv, redirs: _ } = cmd.rule() {
@@ -1116,7 +1155,7 @@ ndrule_def!(Pipeline, shenv, |mut tokens: &[Token], shenv: &mut ShEnv| {
 		node_rule: NdRule::Pipeline { cmds },
 		tokens: node_toks,
 		span,
-		flags: NdFlag::empty()
+		flags
 	};
 	Ok(Some(node))
 });
@@ -1127,6 +1166,7 @@ ndrule_def!(Command, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	let mut node_toks = vec![];
 	let mut argv = vec![];
 	let mut redirs = vec![];
+	let mut flags = NdFlag::empty();
 
 	while let Some(token) = tokens_iter.peek() {
 		match token.rule() {
@@ -1144,6 +1184,7 @@ ndrule_def!(Command, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 			TkRule::TildeSub |
 			TkRule::ArithSub |
 			TkRule::CmdSub |
+			TkRule::BraceGrp |
 			TkRule::VarSub => {
 				argv.push(token.clone());
 			}
@@ -1152,10 +1193,21 @@ ndrule_def!(Command, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 				let (used,redir) = get_redir(token.clone(), slice, shenv)?;
 				for _ in 0..used {
 					if let Some(token) = tokens_iter.next() {
+						// FIXME: this pushes literally anything, it should only push stuff that looks like a filename
 						node_toks.push(token.clone());
 					}
 				}
 				redirs.push(redir);
+			}
+			TkRule::BgOp => {
+				flags |= NdFlag::BACKGROUND;
+				while let Some(token) = tokens_iter.peek() {
+					if token.rule() == TkRule::Sep {
+						let token = tokens_iter.next().unwrap();
+						node_toks.push(token.clone());
+					} else { break }
+				}
+				break
 			}
 			TkRule::Sep => break,
 			_ => return Err(
@@ -1177,7 +1229,7 @@ ndrule_def!(Command, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 			node_rule: NdRule::Command { argv, redirs },
 			tokens: node_toks,
 			span,
-			flags: NdFlag::empty()
+			flags
 		};
 		Ok(Some(node))
 	} else {
@@ -1193,7 +1245,6 @@ ndrule_def!(Assignment, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 	while let Some(token) = tokens.peek() {
 		if matches!(token.rule(), TkRule::Ident | TkRule::ArithSub | TkRule::CmdSub | TkRule::DQuote) {
 			let raw = token.as_raw(shenv);
-			log!(INFO, raw);
 			// We are going to deconstruct this Ident into two separate tokens
 			// This makes expanding it easier later
 			if raw.split_once('=').is_some() {

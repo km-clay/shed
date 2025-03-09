@@ -11,6 +11,7 @@ pub fn expand_var(var_sub: Token, shenv: &mut ShEnv) -> Vec<Token> {
 }
 
 pub fn expand_string(s: &str, shenv: &mut ShEnv) -> ShResult<String> {
+	log!(DEBUG, s);
 	let mut result = String::new();
 	let mut var_name = String::new();
 	let mut chars = s.chars().peekable();
@@ -78,7 +79,7 @@ pub fn expand_string(s: &str, shenv: &mut ShEnv) -> ShResult<String> {
 							expanded = true;
 							break
 						}
-						' ' | '\t' => {
+						' ' | '\t' | '\n' | ';' => {
 							let value = shenv.vars().get_var(&var_name);
 							result.push_str(value);
 							result.push(ch);
@@ -89,7 +90,6 @@ pub fn expand_string(s: &str, shenv: &mut ShEnv) -> ShResult<String> {
 					}
 				}
 				if !expanded {
-					log!(INFO, var_name);
 					let value = shenv.vars().get_var(&var_name);
 					result.push_str(value);
 				}

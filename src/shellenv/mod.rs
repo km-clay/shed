@@ -11,6 +11,7 @@ pub mod meta;
 pub mod shenv;
 pub mod vars;
 pub mod input;
+pub mod shopt;
 
 /// Calls attach_tty() on the shell's process group to retake control of the terminal
 pub fn take_term() -> ShResult<()> {
@@ -56,6 +57,17 @@ pub fn wait_fg(job: Job, shenv: &mut ShEnv) -> ShResult<()> {
 	Ok(())
 }
 
+pub fn dispatch_job(job: Job, is_bg: bool, shenv: &mut ShEnv) -> ShResult<()> {
+	if is_bg {
+		write_jobs(|j| {
+			j.insert_job(job, false)
+		})?;
+	} else {
+		wait_fg(job, shenv)?;
+	}
+	Ok(())
+}
+
 pub fn log_level() -> crate::libsh::utils::LogLevel {
 	let level = env::var("FERN_LOG_LEVEL").unwrap_or_default();
 	match level.to_lowercase().as_str() {
@@ -80,7 +92,7 @@ pub fn attach_tty(pgid: Pid) -> ShResult<()> {
 	if !isatty(0).unwrap_or(false) || pgid == term_ctlr() || killpg(pgid, None).is_err() {
 		return Ok(())
 	}
-	log!(DEBUG, "Attaching tty to pgid: {}",pgid);
+	log!(TRACE, "Attaching tty to pgid: {}",pgid);
 
 	if pgid == getpgrp() && term_ctlr() != getpgrp() {
 		kill(term_ctlr(), Signal::SIGTTOU).ok();

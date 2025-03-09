@@ -989,7 +989,7 @@ tkrule_def!(RedirOp, |input: &str| {
 	try_match_inner!(RedirSimpleOut,input); // >
 	try_match_inner!(RedirInOut,input); // <>
 	try_match_inner!(RedirSimpleHerestring,input); // <<<
-	try_match_inner!(RedirSimpleHeredoc,input); // <<
+	try_match_inner!(RedirHeredoc,input); // <<
 	try_match_inner!(RedirSimpleIn,input); // <
 	try_match_inner!(RedirFdOutFd,input); // Ex: 2>&1
 	try_match_inner!(RedirFdInFd,input); // Ex: 2<&1
@@ -1018,9 +1018,41 @@ tkrule_def!(RedirInOut, |input: &str| {
 	}
 });
 
-tkrule_def!(RedirSimpleHeredoc, |input: &str| {
+tkrule_def!(RedirHeredoc, |mut input: &str| {
 	if input.starts_with("<<") {
-		Some(2)
+		let mut len = 2;
+		input = &input[2..];
+		let mut chars = input.chars();
+		let mut delim = "";
+		let mut delim_len = 0;
+		let mut body = "";
+		let mut body_len = 1;
+		while let Some(ch) = chars.next() {
+			len += 1;
+			match ch {
+				' ' | '\t' | '\n' | ';' if delim.is_empty() => return None,
+				_ if delim.is_empty() => {
+					delim_len += 1;
+					while let Some(ch) = chars.next() {
+						len += 1;
+						match ch {
+							'\n' => {
+								delim = &input[..delim_len];
+								input = &input[delim_len..];
+								break
+							}
+							_ => delim_len += 1,
+						}
+					}
+				}
+				_ => {
+					body_len += 1;
+					body = &input[..body_len];
+					if body.ends_with(&delim) { break }
+				}
+			}
+		}
+		Some(len)
 	} else {
 		None
 	}

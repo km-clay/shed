@@ -71,7 +71,6 @@ impl ShEnv {
 			let old = &input[range.clone()];
 			let delta: isize = new.len() as isize - old.len() as isize;
 			input.replace_range(range, new);
-			log!(INFO,input);
 
 			for span in self.input_man.spans_mut() {
 				let mut span_mut = span.borrow_mut();
@@ -162,6 +161,7 @@ impl ShEnv {
 	}
 	pub fn reset_io(&mut self) -> ShResult<()> {
 		let ctx = self.ctx_mut();
+		ctx.clear_redirs();
 		if let Some(saved) = ctx.saved_io().take() {
 			let saved_in = saved.stdin;
 			let saved_out = saved.stdout;

@@ -9,19 +9,24 @@ pub mod shellcmd;
 pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> {
 	let input = input.into();
 	shenv.new_input(&input);
+	let total_time = std::time::Instant::now();
 
+	let token_time = std::time::Instant::now();
 	let token_stream = Lexer::new(input,shenv).lex();
-	log!(INFO, token_stream);
 
 	let token_stream = expand_aliases(token_stream, shenv);
 	for token in &token_stream {
 		log!(TRACE, token);
 		log!(TRACE, "{}",token.as_raw(shenv));
 	}
+	log!(INFO, "Tokenizing done in {:?}", token_time.elapsed());
 
+	let parse_time = std::time::Instant::now();
 	let syn_tree = Parser::new(token_stream,shenv).parse()?;
-	let exec_start = std::time::Instant::now();
+	log!(INFO, "Parsing done in {:?}", parse_time.elapsed());
 	shenv.save_io()?;
+
+	let exec_time = std::time::Instant::now();
 	if let Err(e) = Executor::new(syn_tree, shenv).walk() {
 		if let ShErrKind::CleanExit = e.kind() {
 			let code = shenv.get_code();
@@ -31,7 +36,8 @@ pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> 
 			return Err(e.into())
 		}
 	}
-	log!(INFO, "Executing done in {:?}", exec_start.elapsed());
+	log!(INFO, "Executing done in {:?}", exec_time.elapsed());
+	log!(INFO, "Total time spent: {:?}", total_time.elapsed());
 	shenv.reset_io()?;
 	Ok(())
 }
@@ -187,6 +193,7 @@ fn exec_funcdef(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 fn exec_subshell(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	let snapshot = shenv.clone();
 	shenv.vars_mut().reset_params();
+	let is_bg = node.flags().contains(NdFlag::BACKGROUND);
 	let rule = node.into_rule();
 	if let NdRule::Subshell { body, argv, redirs } = rule {
 		if shenv.ctx().flags().contains(ExecFlags::NO_FORK) {
@@ -239,7 +246,7 @@ fn exec_subshell(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 						.with_children(children)
 						.with_pgid(child)
 						.build();
-					wait_fg(job, shenv)?;
+					dispatch_job(job, is_bg, shenv)?;
 				}
 			}
 		}
@@ -299,9 +306,9 @@ fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 							}
 							_ => unimplemented!()
 						};
-						shenv.vars_mut().set_var(var, &exp);
+						shenv.vars_mut().export(var, &exp);
 					} else {
-						shenv.vars_mut().set_var(var, val);
+						shenv.vars_mut().export(var, val);
 					}
 				}
 			}
@@ -336,6 +343,7 @@ fn exec_assignment(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 
 fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	log!(TRACE, "Executing pipeline");
+	let is_bg = node.flags().contains(NdFlag::BACKGROUND);
 	let rule = node.into_rule();
 	if let NdRule::Pipeline { cmds } = rule {
 		let mut prev_rpipe: Option<i32> = None;
@@ -415,7 +423,7 @@ fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 			.with_children(children)
 			.with_pgid(pgid.unwrap())
 			.build();
-		wait_fg(job, shenv)?;
+		dispatch_job(job, is_bg, shenv)?;
 	} else { unreachable!() }
 	Ok(())
 }
@@ -423,6 +431,7 @@ fn exec_pipeline(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 fn exec_cmd(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	log!(TRACE, "Executing command");
 	let blame = node.span();
+	let is_bg = node.flags().contains(NdFlag::BACKGROUND);
 	let rule = node.into_rule();
 
 	if let NdRule::Command { argv, redirs } = rule {
@@ -466,7 +475,7 @@ fn exec_cmd(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 							.with_pgid(child)
 							.build();
 						log!(TRACE, "New job: {:?}", job);
-						wait_fg(job, shenv)?;
+						dispatch_job(job, is_bg, shenv)?;
 					}
 				}
 			}

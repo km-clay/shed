@@ -150,7 +150,7 @@ pub fn borrow_fd<'a>(fd: i32) -> BorrowedFd<'a> {
 }
 
 // TODO: add more of these
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug,Clone,PartialEq,Copy)]
 pub enum RedirType {
 	Input,
 	Output,
@@ -163,8 +163,11 @@ pub enum RedirType {
 pub enum RedirTarget {
 	Fd(i32),
 	File(PathBuf),
+	HereDoc(String),
+	HereString(String),
 }
 
+#[derive(Debug,Clone)]
 pub struct RedirBldr {
 	src: Option<i32>,
 	op: Option<RedirType>,
@@ -222,8 +225,12 @@ impl FromStr for RedirBldr {
 						if chars.peek() == Some(&'<') {
 							chars.next();
 							redir_bldr = redir_bldr.with_op(RedirType::HereString);
+							break
 						} else {
 							redir_bldr = redir_bldr.with_op(RedirType::HereDoc);
+							let body = extract_heredoc_body(raw)?;
+							redir_bldr = redir_bldr.with_tgt(RedirTarget::HereDoc(body));
+							break
 						}
 					} else {
 						redir_bldr = redir_bldr.with_op(RedirType::Input);
@@ -233,8 +240,10 @@ impl FromStr for RedirBldr {
 					if chars.peek() == Some(&'>') {
 						chars.next();
 						redir_bldr = redir_bldr.with_op(RedirType::Append);
+						break
 					} else {
 						redir_bldr = redir_bldr.with_op(RedirType::Output);
+						break
 					}
 				}
 				'&' => {
@@ -275,21 +284,24 @@ impl Redir {
 pub struct CmdRedirs {
 	open: Vec<RawFd>,
 	targets_fd: Vec<Redir>,
-	targets_file: Vec<Redir>
+	targets_file: Vec<Redir>,
+	targets_text: Vec<Redir>,
 }
 
 impl CmdRedirs {
 	pub fn new(mut redirs: Vec<Redir>) -> Self {
 		let mut targets_fd = vec![];
 		let mut targets_file = vec![];
+		let mut targets_text = vec![];
 		while let Some(redir) = redirs.pop() {
 			let Redir { src: _, op: _, tgt } = &redir;
 			match tgt {
 				RedirTarget::Fd(_) => targets_fd.push(redir),
-				RedirTarget::File(_) => targets_file.push(redir)
+				RedirTarget::File(_) => targets_file.push(redir),
+				_ => targets_text.push(redir)
 			}
 		}
-		Self { open: vec![], targets_fd, targets_file }
+		Self { open: vec![], targets_fd, targets_file, targets_text }
 	}
 	pub fn close_all(&mut self) -> ShResult<()> {
 		while let Some(fd) = self.open.pop() {
@@ -303,6 +315,26 @@ impl CmdRedirs {
 	pub fn activate(&mut self) -> ShResult<()> {
 		self.open_file_tgts()?;
 		self.open_fd_tgts()?;
+		self.open_text_tgts()?;
+		Ok(())
+	}
+	pub fn open_text_tgts(&mut self) -> ShResult<()> {
+		while let Some(redir) = self.targets_text.pop() {
+			let Redir { src, op: _, tgt } = redir;
+			let (rpipe, wpipe) = c_pipe()?;
+			let src = borrow_fd(src);
+			let wpipe_fd = borrow_fd(wpipe);
+			match tgt {
+				RedirTarget::HereDoc(body) |
+				RedirTarget::HereString(body) => {
+					write(wpipe_fd, body.as_bytes())?;
+					close(wpipe)?;
+				}
+				_ => unreachable!()
+			}
+			dup2(rpipe, src.as_raw_fd())?;
+			close(rpipe)?;
+		}
 		Ok(())
 	}
 	pub fn open_file_tgts(&mut self) -> ShResult<()> {
@@ -339,6 +371,23 @@ impl CmdRedirs {
 			self.open.push(src.as_raw_fd());
 		}
 		Ok(())
+	}
+}
+
+pub fn extract_heredoc_body(body: &str) -> ShResult<String> {
+	log!(DEBUG,body);
+	if let Some(cleaned) = body.strip_prefix("<<") {
+		if let Some((delim,body)) = cleaned.split_once('\n') {
+			if let Some(body) = body.trim().strip_suffix(&delim) {
+				Ok(body.to_string())
+			} else {
+				return Err(ShErr::simple(ShErrKind::ParseErr, "Malformed closing delimiter in heredoc"))
+			}
+		} else {
+			return Err(ShErr::simple(ShErrKind::ParseErr, "Invalid heredoc delimiter"))
+		}
+	} else {
+		return Err(ShErr::simple(ShErrKind::ParseErr, "Invalid heredoc operator"))
 	}
 }
 

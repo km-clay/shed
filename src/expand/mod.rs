@@ -14,8 +14,8 @@ use crate::prelude::*;
 pub fn expand_argv(argv: Vec<Token>, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
 	let mut processed = vec![];
 	for arg in argv {
-		log!(DEBUG, "{}",arg.as_raw(shenv));
-		log!(DEBUG, processed);
+		log!(TRACE, "{}",arg.as_raw(shenv));
+		log!(TRACE, processed);
 		let mut expanded = expand_token(arg, shenv)?;
 		processed.append(&mut expanded);
 	}
@@ -24,8 +24,6 @@ pub fn expand_argv(argv: Vec<Token>, shenv: &mut ShEnv) -> ShResult<Vec<Token>> 
 
 pub fn expand_token(token: Token, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
 	let mut processed = vec![];
-	log!(INFO, "expanding argv");
-	log!(INFO, "rule: {:?}", token.rule());
 	match token.rule() {
 		TkRule::DQuote => {
 			let dquote_exp = expand_string(&token.as_raw(shenv), shenv)?;
