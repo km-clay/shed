@@ -13,9 +13,6 @@ pub fn check_delims(line: &str) -> bool {
 
 	while let Some(ch) = chars.next() {
 		case_check.push(ch);
-		if case_check.len() > 4 {
-			case_check = case_check[1..].to_string();
-		}
 		if case_check.ends_with("case") {
 			case_depth += 1;
 		}

@@ -301,7 +301,8 @@ tkrule_def!(Comment, |input: &str| {
 	if let Some('#') = chars.next() {
 		len += 1;
 		while let Some(ch) = chars.next() {
-			len += 1;
+			let chlen = ch.len_utf8();
+			len += chlen;
 			if ch == '\n' {
 				break
 			}
@@ -318,10 +319,12 @@ tkrule_def!(Whitespace, |input: &str| {
 	while let Some(ch) = chars.next() {
 		match ch {
 			'\\' => {
-				len += 1;
+				let chlen = ch.len_utf8();
+				len += chlen;
 				if let Some(ch) = chars.next() {
 					if matches!(ch, ' ' | '\t' | '\n') {
-						len += 1;
+						let chlen = ch.len_utf8();
+						len += chlen;
 					} else {
 						return None
 					}
@@ -347,17 +350,20 @@ tkrule_def!(CasePat, |input:&str| {
 	let mut len = 0;
 	let mut is_casepat = false;
 	while let Some(ch) = chars.next() {
-		len += 1;
+		let chlen = ch.len_utf8();
+		len += chlen;
 		match ch {
 			'\\' => {
-				if chars.next().is_some() {
-					len += 1;
+				if let Some(ch) = chars.next() {
+					let chlen = ch.len_utf8();
+					len += chlen;
 				}
 			}
 			')' => {
 				while let Some(ch) = chars.next() {
 					if ch == ')' {
-						len += 1;
+						let chlen = ch.len_utf8();
+						len += chlen;
 					} else {
 						break
 					}
@@ -377,20 +383,24 @@ tkrule_def!(ArithSub, |input: &str| {
 	let mut len = 0;
 	let mut is_arith_sub = false;
 	while let Some(ch) = chars.next() {
-		len += 1;
+		let chlen = ch.len_utf8();
+		len += chlen;
 		match ch {
 			'\\' => {
-				if chars.next().is_some() {
-					len += 1;
+				if let Some(ch) = chars.next() {
+					let chlen = ch.len_utf8();
+					len += chlen;
 				}
 			}
 			'`' => {
 				while let Some(ch) = chars.next() {
-					len += 1;
+					let chlen = ch.len_utf8();
+					len += chlen;
 					match ch {
 						'\\' => {
-							if chars.next().is_some() {
-								len += 1;
+							if let Some(ch) = chars.next() {
+								let chlen = ch.len_utf8();
+								len += chlen;
 							}
 						}
 						'`' => {
@@ -446,11 +456,13 @@ tkrule_def!(Subshell, |input: &str| {
 					chars.next();
 				}
 				'(' => {
-					len += 1;
+					let chlen = ch.len_utf8();
+					len += chlen;
 					paren_count += 1;
 				}
 				')' => {
-					len += 1;
+					let chlen = ch.len_utf8();
+					len += chlen;
 					paren_count -= 1;
 					if paren_count == 0 {
 						return Some(len);
@@ -670,8 +682,11 @@ tkrule_def!(Ident, |input: &str| {
 	while let Some(ch) = chars.next() {
 		match ch {
 			'\\' => {
-				chars.next();
-				len += 2;
+				len += 1;
+				if let Some(ch) = chars.next() {
+					let chlen = ch.len_utf8();
+					len += chlen;
+				}
 			}
 			'>' | '<' | '$' | ' ' | '\t' | '\n' | ';' => {
 				match len {
@@ -679,7 +694,10 @@ tkrule_def!(Ident, |input: &str| {
 					_ => return Some(len),
 				}
 			}
-			_ => len += 1
+			_ => {
+				let chlen = ch.len_utf8();
+				len += chlen;
+			}
 		}
 	}
 	match len {
@@ -702,7 +720,8 @@ tkrule_def!(Sep, |input: &str| {
 				if len == 0 {
 					return None
 				} else {
-					len += 1;
+					let chlen = ch.len_utf8();
+					len += chlen;
 				}
 			}
 			';' | '\n' => len += 1,
@@ -733,11 +752,13 @@ tkrule_def!(SQuote, |input: &str| {
 				len += 2;
 			}
 			'\'' if !quoted => {
-				len += 1;
+				let chlen = ch.len_utf8();
+				len += chlen;
 				quoted = true;
 			}
 			'\'' if quoted => {
-				len += 1;
+				let chlen = ch.len_utf8();
+				len += chlen;
 				return Some(len)
 			}
 			_ if !quoted => {
@@ -758,11 +779,15 @@ tkrule_def!(DQuote, |input: &str| {
 	while let Some(ch) = chars.next() {
 		match ch {
 			'\\' => {
-				chars.next();
-				len += 2;
+				len += 1;
+				if let Some(ch) = chars.next() {
+					let chlen = ch.len_utf8();
+					len += chlen;
+				}
 			}
 			'"' => {
-				len += 1;
+				let chlen = ch.len_utf8();
+				len += chlen;
 				quote_count += 1;
 			}
 			' ' | '\t' | ';' | '\n' if quote_count % 2 == 0 => {
@@ -776,7 +801,10 @@ tkrule_def!(DQuote, |input: &str| {
 					return None
 				}
 			}
-			_ => len += 1
+			_ => {
+				let chlen = ch.len_utf8();
+				len += chlen;
+			}
 		}
 	}
 	match len {
@@ -838,8 +866,12 @@ tkrule_def!(CmdSub, |input: &str| {
 			while let Some(ch) = chars.next() {
 				match ch {
 					'\\' => {
-						len += 2;
-						chars.next();
+						len += 1;
+						if let Some(ch) = chars.next() {
+							let chlen = ch.len_utf8();
+							len += chlen;
+							chars.next();
+						}
 					}
 					')' => {
 						len += 1;
@@ -1028,13 +1060,15 @@ tkrule_def!(RedirHeredoc, |mut input: &str| {
 		let mut body = "";
 		let mut body_len = 1;
 		while let Some(ch) = chars.next() {
-			len += 1;
+			let chlen = ch.len_utf8();
+			len += chlen;
 			match ch {
 				' ' | '\t' | '\n' | ';' if delim.is_empty() => return None,
 				_ if delim.is_empty() => {
 					delim_len += 1;
 					while let Some(ch) = chars.next() {
-						len += 1;
+						let chlen = ch.len_utf8();
+						len += chlen;
 						match ch {
 							'\n' => {
 								delim = &input[..delim_len];
@@ -1046,7 +1080,7 @@ tkrule_def!(RedirHeredoc, |mut input: &str| {
 					}
 				}
 				_ => {
-					body_len += 1;
+					body_len += chlen;
 					body = &input[..body_len];
 					if body.ends_with(&delim) { break }
 				}
@@ -1120,7 +1154,8 @@ tkrule_def!(RedirInFd, |input: &str| {
 		if !ch.is_ascii_digit() {
 			break
 		}
-		len += 1;
+		let chlen = ch.len_utf8();
+		len += chlen;
 	}
 	if len <= 2 {
 		None
@@ -1147,7 +1182,8 @@ tkrule_def!(RedirOutFd, |input: &str| {
 		if !ch.is_ascii_digit() {
 			break
 		}
-		len += 1;
+		let chlen = ch.len_utf8();
+		len += chlen;
 	}
 	if len <= 2 {
 		None
@@ -1170,7 +1206,8 @@ tkrule_def!(RedirFdOut, |input: &str| {
 				return Some(len)
 			}
 		}
-		len += 1;
+		let chlen = char.len_utf8();
+		len += chlen;
 	}
 	None
 });
@@ -1194,7 +1231,8 @@ tkrule_def!(RedirFdClobber, |input: &str| {
 				}
 			}
 		}
-		len += 1;
+		let chlen = char.len_utf8();
+		len += chlen;
 	}
 	None
 });
@@ -1218,7 +1256,8 @@ tkrule_def!(RedirFdInOut, |input: &str| {
 				}
 			}
 		}
-		len += 1;
+		let chlen = char.len_utf8();
+		len += chlen;
 	}
 	None
 });

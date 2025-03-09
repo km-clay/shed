@@ -58,6 +58,7 @@ pub fn main() {
 		log!(TRACE, "Entered loop");
 		match prompt::read_line(&mut shenv) {
 			Ok(line) => {
+				shenv.meta_mut().start_timer();
 				let _ = exec_input(line, &mut shenv).eprint();
 			}
 			Err(e) => {

@@ -196,7 +196,7 @@ pub fn format_cmd_runtime(dur: std::time::Duration) -> String {
 		result.push(string);
 	}
 	if result.is_empty() && micros > 0 {
-		let string = format!("{}ms",micros);
+		let string = format!("{}µs",micros);
 		result.push(string);
 	}
 
@@ -209,8 +209,6 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
 	let mut tokens = vec![];
 
 	while let Some(ch) = chars.next() {
-		log!(DEBUG,tokens);
-		log!(DEBUG,ch);
 		match ch {
 			'\\' => {
 				// Push any accumulated text as a token
@@ -321,7 +319,9 @@ pub fn expand_prompt(raw: &str, shenv: &mut ShEnv) -> ShResult<String> {
 			PromptTk::Text(txt) => result.push_str(&txt),
 			PromptTk::AnsiSeq(params) => result.push_str(&params),
 			PromptTk::Runtime => {
+				log!(INFO, "getting runtime");
 				if let Some(runtime) = shenv.meta().get_runtime() {
+					log!(DEBUG, runtime);
 					let runtime_fmt = format_cmd_runtime(runtime);
 					result.push_str(&runtime_fmt);
 				}

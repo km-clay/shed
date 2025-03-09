@@ -28,6 +28,7 @@ fn init_rl<'a>(shenv: &'a mut ShEnv) -> Editor<SynHelper<'a>, DefaultHistory> {
 
 pub fn read_line(shenv: &mut ShEnv) -> ShResult<String> {
 	log!(TRACE, "Entering prompt");
+	shenv.meta_mut().stop_timer();
 	let ps1 = std::env::var("PS1").unwrap_or("\\$ ".styled(Style::Green | Style::Bold));
 	let prompt = expand_prompt(&ps1,shenv)?;
 	let mut editor = init_rl(shenv);
