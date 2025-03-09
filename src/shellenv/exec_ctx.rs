@@ -4,6 +4,7 @@ bitflags! {
 	#[derive(Copy,Clone,Debug,PartialEq,PartialOrd)]
 	pub struct ExecFlags: u32 {
 		const NO_FORK = 0x00000001;
+		const IN_FUNC = 0x00000010;
 	}
 }
 

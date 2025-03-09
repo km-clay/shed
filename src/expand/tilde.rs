@@ -6,8 +6,7 @@ pub fn expand_tilde_token(tilde_sub: Token, shenv: &mut ShEnv) -> Token {
 	if result == tilde_sub_raw {
 		return tilde_sub
 	}
-	let mut tokens = Lexer::new(result,shenv).lex();
-	tokens.pop().unwrap_or(tilde_sub)
+	shenv.expand_input(&result, tilde_sub.span()).pop().unwrap_or(tilde_sub)
 }
 
 pub fn expand_tilde_string(s: &str) -> String {

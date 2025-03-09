@@ -132,6 +132,7 @@ pub use crate::{
 	expand::{
 		expand_argv,
 		expand_token,
+		prompt::expand_prompt,
 		alias::expand_aliases
 	},
 	shellenv::{

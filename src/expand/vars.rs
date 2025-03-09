@@ -20,6 +20,7 @@ pub fn expand_string(s: &str, shenv: &mut ShEnv) -> ShResult<String> {
 	while let Some(ch) = chars.next() {
 		match ch {
 			'\\' => {
+				result.push(ch);
 				if let Some(next_ch) = chars.next() {
 					result.push(next_ch)
 				}

@@ -303,15 +303,6 @@ impl CmdRedirs {
 		}
 		Self { open: vec![], targets_fd, targets_file, targets_text }
 	}
-	pub fn close_all(&mut self) -> ShResult<()> {
-		while let Some(fd) = self.open.pop() {
-			if let Err(e) = close(fd) {
-				self.open.push(fd);
-				return Err(e.into())
-			}
-		}
-		Ok(())
-	}
 	pub fn activate(&mut self) -> ShResult<()> {
 		self.open_file_tgts()?;
 		self.open_fd_tgts()?;
@@ -328,12 +319,12 @@ impl CmdRedirs {
 				RedirTarget::HereDoc(body) |
 				RedirTarget::HereString(body) => {
 					write(wpipe_fd, body.as_bytes())?;
-					close(wpipe)?;
+					close(wpipe).ok();
 				}
 				_ => unreachable!()
 			}
 			dup2(rpipe, src.as_raw_fd())?;
-			close(rpipe)?;
+			close(rpipe).ok();
 		}
 		Ok(())
 	}

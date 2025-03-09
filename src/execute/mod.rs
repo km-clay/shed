@@ -24,7 +24,9 @@ pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> 
 	let parse_time = std::time::Instant::now();
 	let syn_tree = Parser::new(token_stream,shenv).parse()?;
 	log!(INFO, "Parsing done in {:?}", parse_time.elapsed());
-	shenv.save_io()?;
+	if !shenv.ctx().flags().contains(ExecFlags::IN_FUNC) {
+		shenv.save_io()?;
+	}
 
 	let exec_time = std::time::Instant::now();
 	if let Err(e) = Executor::new(syn_tree, shenv).walk() {
@@ -32,13 +34,18 @@ pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> 
 			let code = shenv.get_code();
 			sh_quit(code);
 		} else {
-			shenv.reset_io()?;
+			if !shenv.ctx().flags().contains(ExecFlags::IN_FUNC) {
+				shenv.reset_io()?;
+			}
 			return Err(e.into())
 		}
 	}
 	log!(INFO, "Executing done in {:?}", exec_time.elapsed());
 	log!(INFO, "Total time spent: {:?}", total_time.elapsed());
-	shenv.reset_io()?;
+	if !shenv.ctx().flags().contains(ExecFlags::IN_FUNC) {
+		shenv.reset_io()?;
+	}
+	log!(INFO, "Io reset");
 	Ok(())
 }
 
@@ -151,6 +158,7 @@ fn exec_func(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 		let body = shenv.logic().get_function(&func_name).unwrap().to_string();
 		let snapshot = shenv.clone();
 		shenv.vars_mut().reset_params();
+		shenv.ctx_mut().set_flag(ExecFlags::IN_FUNC);
 		while let Some(arg) = argv_iter.next() {
 			let arg_raw = shenv.input_slice(arg.span()).to_string();
 			shenv.vars_mut().bpush_arg(&arg_raw);

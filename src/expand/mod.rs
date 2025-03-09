@@ -3,6 +3,7 @@ pub mod tilde;
 pub mod alias;
 pub mod cmdsub;
 pub mod arithmetic;
+pub mod prompt;
 
 use arithmetic::expand_arith_token;
 use cmdsub::expand_cmdsub_token;

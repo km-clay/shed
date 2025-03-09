@@ -167,11 +167,11 @@ impl ShEnv {
 			let saved_out = saved.stdout;
 			let saved_err = saved.stderr;
 			dup2(saved_in,STDIN_FILENO)?;
-			close(saved_in)?;
+			close(saved_in).ok();
 			dup2(saved_out,STDOUT_FILENO)?;
-			close(saved_out)?;
+			close(saved_out).ok();
 			dup2(saved_err,STDERR_FILENO)?;
-			close(saved_err)?;
+			close(saved_err).ok();
 		}
 		Ok(())
 	}
