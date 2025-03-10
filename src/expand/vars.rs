@@ -32,8 +32,9 @@ pub fn expand_string(s: &str, shenv: &mut ShEnv) -> ShResult<String> {
 						break
 					}
 					let ch = chars.next().unwrap();
+					log!(DEBUG,var_name);
 					match ch {
-						'{' => {
+						'{' if var_name.is_empty() => {
 							in_brace = true;
 						}
 						'}' if in_brace => {
@@ -80,7 +81,7 @@ pub fn expand_string(s: &str, shenv: &mut ShEnv) -> ShResult<String> {
 							expanded = true;
 							break
 						}
-						' ' | '\t' | '\n' | ';' => {
+						' ' | '\t' | '\n' | ';' | ',' | '{' => {
 							let value = shenv.vars().get_var(&var_name);
 							result.push_str(value);
 							result.push(ch);

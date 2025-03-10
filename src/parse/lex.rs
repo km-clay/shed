@@ -37,10 +37,11 @@ pub const SEPARATORS: [TkRule;7] = [
 	TkRule::CasePat
 ];
 
-pub const EXPANSIONS: [TkRule;6] = [
+pub const EXPANSIONS: [TkRule;7] = [
 	TkRule::DQuote,
 	TkRule::VarSub,
 	TkRule::CmdSub,
+	TkRule::BraceExp,
 	TkRule::ProcSub,
 	TkRule::TildeSub,
 	TkRule::ArithSub
@@ -223,6 +224,7 @@ pub enum TkRule {
 	BgOp,
 	RedirOp,
 	FuncName,
+	BraceExp,
 	BraceGrp,
 	ProcSub,
 	VarSub,
@@ -270,6 +272,7 @@ impl TkRule {
 		try_match!(SQuote,input);
 		try_match!(DQuote,input);
 		try_match!(FuncName,input);
+		try_match!(BraceExp,input);
 		try_match!(BraceGrp,input);
 		try_match!(TildeSub,input);
 		try_match!(Subshell,input);
@@ -293,6 +296,50 @@ impl TkRule {
 		None
 	}
 }
+
+tkrule_def!(BraceExp, |input: &str| {
+	let mut chars = input.chars().peekable();
+	let mut len = 0;
+	let mut brc_count = 0;
+	let mut is_brc_exp = false;
+
+	while let Some(ch) = chars.next() {
+		match ch {
+			'\\' => {
+				len += 1;
+				if let Some(ch) = chars.next() {
+					len += ch.len_utf8();
+				}
+			}
+			'{' => {
+				len += 1;
+				brc_count += 1;
+			}
+			'}' => {
+				if brc_count == 0 {
+					return None
+				}
+				len += 1;
+				brc_count -= 1;
+				if brc_count == 0 {
+					is_brc_exp = true;
+				}
+			}
+			' ' | '\t' | '\n' | ';' => {
+				match is_brc_exp {
+					true => return Some(len),
+					false => return None
+				}
+			}
+			_ => len += ch.len_utf8()
+		}
+	}
+
+	match is_brc_exp {
+		true => return Some(len),
+		false => return None
+	}
+});
 
 tkrule_def!(Comment, |input: &str| {
 	let mut chars = input.chars().peekable();
@@ -932,7 +979,7 @@ tkrule_def!(VarSub, |input: &str| {
 			'{' => {
 				match len {
 					0 => return None,
-					_ => {
+					1 => {
 						while let Some(ch) = chars.next() {
 							match ch {
 								'\\' => {
@@ -947,6 +994,7 @@ tkrule_def!(VarSub, |input: &str| {
 							}
 						}
 					}
+					_ => return Some(len)
 				}
 			}
 			'$' => {

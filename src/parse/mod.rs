@@ -1185,6 +1185,7 @@ ndrule_def!(Command, shenv, |tokens: &[Token], shenv: &mut ShEnv| {
 			TkRule::ArithSub |
 			TkRule::CmdSub |
 			TkRule::BraceGrp |
+			TkRule::BraceExp |
 			TkRule::VarSub => {
 				argv.push(token.clone());
 			}

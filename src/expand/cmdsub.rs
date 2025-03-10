@@ -29,5 +29,7 @@ pub fn expand_cmdsub_string(mut s: &str, shenv: &mut ShEnv) -> ShResult<String> 
 			close(w_pipe).ok();
 		}
 	}
-	Ok(read_to_string(r_pipe)?)
+	let result = read_to_string(r_pipe);
+	close(r_pipe)?;
+	Ok(result?)
 }

@@ -4,8 +4,10 @@ pub mod alias;
 pub mod cmdsub;
 pub mod arithmetic;
 pub mod prompt;
+pub mod brace;
 
 use arithmetic::expand_arith_token;
+use brace::expand_brace_token;
 use cmdsub::expand_cmdsub_token;
 use vars::{expand_string, expand_var};
 use tilde::expand_tilde_token;
@@ -42,6 +44,10 @@ pub fn expand_token(token: Token, shenv: &mut ShEnv) -> ShResult<Vec<Token>> {
 		TkRule::ArithSub => {
 			let arith_exp = expand_arith_token(token.clone(), shenv)?;
 			processed.push(arith_exp);
+		}
+		TkRule::BraceExp => {
+			let mut brace_exp = expand_brace_token(token, shenv)?;
+			processed.append(&mut brace_exp);
 		}
 		TkRule::CmdSub => {
 			let mut cmdsub_exp = expand_cmdsub_token(token.clone(), shenv)?;

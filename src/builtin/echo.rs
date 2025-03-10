@@ -68,7 +68,9 @@ pub fn echo(node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 				break
 			}
 		}
-		let argv = argv_iter.collect::<Vec<_>>().as_strings(shenv);
+		let mut argv = argv_iter.collect::<Vec<_>>().as_strings(shenv);
+		argv.retain(|arg| arg != "\n");
+		log!(DEBUG,argv);
 		let mut formatted = argv.join(" ");
 		if !echo_flags.contains(EchoFlags::NO_NEWLINE) {
 			formatted.push('\n');

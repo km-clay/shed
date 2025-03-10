@@ -83,6 +83,11 @@ pub fn sh_quit(code: i32) -> ! {
 	if let Some(termios) = crate::get_saved_termios() {
 		termios::tcsetattr(std::io::stdin(), termios::SetArg::TCSANOW, &termios).unwrap();
 	}
+	if code == 0 {
+		write_err("exit\n").ok();
+	} else {
+		write_err(format!("exit {code}\n")).ok();
+	}
 	exit(code);
 }
 

@@ -46,7 +46,7 @@ impl ArgVec for Vec<Token> {
 		let mut argv_iter = self.into_iter();
 		let mut argv_processed = vec![];
 		while let Some(arg) = argv_iter.next() {
-			let cleaned = clean_string(&arg.as_raw(shenv));
+			let cleaned = clean_string(&arg.as_raw(shenv)).trim_matches(' ').to_string();
 			argv_processed.push(cleaned);
 		}
 		argv_processed
