@@ -71,7 +71,7 @@ impl<'a> Lexer<'a> {
 					rule = TkRule::Ident
 
 				// If we are in a command right now, after this we are in arguments
-				} else if self.is_command && rule != TkRule::Whitespace && !KEYWORDS.contains(&rule) {
+				} else if self.is_command && !matches!(rule, TkRule::Comment | TkRule::Whitespace) && !KEYWORDS.contains(&rule) {
 					self.is_command = false;
 				}
 				// If we see a separator like && or ;, we are now in a command again
@@ -295,7 +295,7 @@ impl TkRule {
 }
 
 tkrule_def!(Comment, |input: &str| {
-	let mut chars = input.chars();
+	let mut chars = input.chars().peekable();
 	let mut len = 0;
 
 	if let Some('#') = chars.next() {
@@ -304,6 +304,14 @@ tkrule_def!(Comment, |input: &str| {
 			let chlen = ch.len_utf8();
 			len += chlen;
 			if ch == '\n' {
+				while let Some(ch) = chars.peek() {
+					if *ch == '\n' {
+						len += 1;
+						chars.next();
+					} else {
+						break
+					}
+				}
 				break
 			}
 		}
@@ -743,31 +751,53 @@ tkrule_def!(SQuote, |input: &str| {
 	// Double quoted strings
 	let mut chars = input.chars();
 	let mut len = 0;
-	let mut quoted = false;
+	let mut quote_count = 0;
 
 	while let Some(ch) = chars.next() {
 		match ch {
 			'\\' => {
-				chars.next();
-				len += 2;
+				len += 1;
+				if let Some(ch) = chars.next() {
+					let chlen = ch.len_utf8();
+					len += chlen;
+				}
 			}
-			'\'' if !quoted => {
+			'\'' => {
 				let chlen = ch.len_utf8();
 				len += chlen;
-				quoted = true;
+				quote_count += 1;
 			}
-			'\'' if quoted => {
+			' ' | '\t' | ';' | '\n' if quote_count % 2 == 0 => {
+				if quote_count > 0 {
+					if quote_count % 2 == 0 {
+						return Some(len)
+					} else {
+						return None
+					}
+				} else {
+					return None
+				}
+			}
+			_ => {
 				let chlen = ch.len_utf8();
 				len += chlen;
-				return Some(len)
 			}
-			_ if !quoted => {
-				return None
-			}
-			_ => len += 1
 		}
 	}
-	None
+	match len {
+		0 => None,
+		_ => {
+			if quote_count > 0 {
+				if quote_count % 2 == 0 {
+					return Some(len)
+				} else {
+					return None
+				}
+			} else {
+				return None
+			}
+		}
+	}
 });
 
 tkrule_def!(DQuote, |input: &str| {

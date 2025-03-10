@@ -1,6 +1,4 @@
-use std::os::fd::AsRawFd;
-
-use crate::{expand::{arithmetic::expand_arith_string, tilde::expand_tilde_string, vars::{expand_string, expand_var}}, prelude::*};
+use crate::{expand::{arithmetic::expand_arith_string, tilde::expand_tilde_string, vars::expand_string}, prelude::*};
 use shellenv::jobs::{ChildProc, JobBldr};
 
 pub mod shellcmd;
@@ -23,6 +21,7 @@ pub fn exec_input<S: Into<String>>(input: S, shenv: &mut ShEnv) -> ShResult<()> 
 
 	let parse_time = std::time::Instant::now();
 	let syn_tree = Parser::new(token_stream,shenv).parse()?;
+	log!(TRACE,syn_tree);
 	log!(INFO, "Parsing done in {:?}", parse_time.elapsed());
 	if !shenv.ctx().flags().contains(ExecFlags::IN_FUNC) {
 		shenv.save_io()?;
@@ -79,8 +78,6 @@ fn exec_list(list: Vec<(Option<CmdGuard>, Node)>, shenv: &mut ShEnv) -> ShResult
 	while let Some(cmd_info) = list.fpop() {
 		let guard = cmd_info.0;
 		let cmd = cmd_info.1;
-		let span = cmd.span();
-		let cmd_raw = cmd.as_raw(shenv);
 
 		if let Some(guard) = guard {
 			let code = shenv.get_code();
@@ -122,7 +119,9 @@ fn dispatch_command(mut node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 	let mut is_subsh = false;
 	let mut is_assign = false;
 	if let NdRule::Command { ref mut argv, redirs: _ } = node.rule_mut() {
-		*argv = expand_argv(argv.to_vec(), shenv)?;
+		if !shenv.ctx().flags().contains(ExecFlags::NO_EXPAND) {
+			*argv = expand_argv(argv.to_vec(), shenv)?;
+		}
 		let cmd = argv.first().unwrap().as_raw(shenv);
 		if shenv.logic().get_function(&cmd).is_some() {
 			is_func = true;
@@ -130,7 +129,9 @@ fn dispatch_command(mut node: Node, shenv: &mut ShEnv) -> ShResult<()> {
 			is_builtin = true;
 		}
 	} else if let NdRule::Subshell { body: _, ref mut argv, redirs: _ } = node.rule_mut() {
-		*argv = expand_argv(argv.to_vec(), shenv)?;
+		if !shenv.ctx().flags().contains(ExecFlags::NO_EXPAND) {
+			*argv = expand_argv(argv.to_vec(), shenv)?;
+		}
 		is_subsh = true;
 	} else if let NdRule::Assignment { assignments: _, cmd: _ } = node.rule() {
 		is_assign = true;
@@ -508,5 +509,6 @@ fn prep_execve(argv: Vec<Token>, shenv: &mut ShEnv) -> (Vec<String>, Vec<String>
 		envp.push(formatted);
 	}
 	log!(TRACE, argv_s);
+	log!(DEBUG, argv_s);
 	(argv_s, envp)
 }

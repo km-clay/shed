@@ -3,8 +3,9 @@ use crate::prelude::*;
 bitflags! {
 	#[derive(Copy,Clone,Debug,PartialEq,PartialOrd)]
 	pub struct ExecFlags: u32 {
-		const NO_FORK = 0x00000001;
-		const IN_FUNC = 0x00000010;
+		const NO_FORK   = 0b00000001;
+		const IN_FUNC   = 0b00000010;
+		const NO_EXPAND = 0b00000100;
 	}
 }
 

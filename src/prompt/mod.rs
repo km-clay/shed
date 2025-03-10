@@ -5,6 +5,7 @@ use rustyline::{config::Configurer, history::{DefaultHistory, History}, ColorMod
 pub mod readline;
 pub mod highlight;
 pub mod validate;
+pub mod comp;
 
 fn init_rl<'a>(shenv: &'a mut ShEnv) -> Editor<SynHelper<'a>, DefaultHistory> {
 	let hist_path = std::env::var("FERN_HIST").unwrap_or_default();

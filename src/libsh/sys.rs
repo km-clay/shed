@@ -1,4 +1,4 @@
-use std::{fmt::Display, os::fd::AsRawFd};
+use std::{fmt::Display, os::{fd::AsRawFd, unix::fs::PermissionsExt}};
 
 use nix::sys::termios;
 
@@ -6,10 +6,42 @@ use crate::prelude::*;
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
 
+pub fn get_path_cmds() -> ShResult<Vec<String>> {
+	let mut cmds = vec![];
+	let path_var = std::env::var("PATH")?;
+	let paths = path_var.split(':');
+
+	for path in paths {
+		let path = PathBuf::from(&path);
+		if path.is_dir() {
+			let path_files = std::fs::read_dir(&path)?;
+			for file in path_files {
+				let file_path = file?.path();
+				if file_path.is_file() {
+					if let Ok(meta) = std::fs::metadata(&file_path) {
+						let perms = meta.permissions();
+						if perms.mode() & 0o111 != 0 {
+							let file_name = file_path.file_name().unwrap();
+							cmds.push(file_name.to_str().unwrap().to_string())
+						}
+					}
+				}
+			}
+		}
+	}
+
+	Ok(cmds)
+}
+
 pub fn get_bin_path(command: &str, shenv: &ShEnv) -> Option<PathBuf> {
 	let env = shenv.vars().env();
 	let path_var = env.get("PATH")?;
 	let mut paths = path_var.split(':');
+
+	let script_check = PathBuf::from(command);
+	if script_check.is_file() {
+		return Some(script_check)
+	}
 	while let Some(raw_path) = paths.next() {
 		let mut path = PathBuf::from(raw_path);
 		path.push(command);

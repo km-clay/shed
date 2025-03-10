@@ -1,11 +1,10 @@
-use rustyline::{completion::{Completer, FilenameCompleter}, hint::{Hint, Hinter}, history::{History, SearchDirection}, Helper};
+use rustyline::{completion::{Candidate, Completer, FilenameCompleter}, hint::{Hint, Hinter}, history::{History, SearchDirection}, Helper};
 
 use crate::prelude::*;
 
 pub struct SynHelper<'a> {
-	file_comp: FilenameCompleter,
+	pub file_comp: FilenameCompleter,
 	pub shenv: &'a mut ShEnv,
-	pub commands: Vec<String>
 }
 
 impl<'a> Helper for SynHelper<'a> {}
@@ -15,7 +14,6 @@ impl<'a> SynHelper<'a> {
 		Self {
 			file_comp: FilenameCompleter::new(),
 			shenv,
-			commands: vec![]
 		}
 	}
 
@@ -35,12 +33,6 @@ impl<'a> SynHelper<'a> {
 
 
 
-impl<'a> Completer for SynHelper<'a> {
-	type Candidate = String;
-	fn complete( &self, line: &str, pos: usize, ctx: &rustyline::Context<'_>,) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
-		Ok((0,vec![]))
-	}
-}
 
 pub struct SynHint {
 	text: String,

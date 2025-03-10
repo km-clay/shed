@@ -48,6 +48,15 @@ pub fn expand_aliases(tokens: Vec<Token>, shenv: &mut ShEnv) -> Vec<Token> {
 				is_command = true;
 				processed.push(token.clone());
 			}
+			TkRule::Case | TkRule::For => {
+				processed.push(token.clone());
+				while let Some(token) = stream.next() {
+					processed.push(token.clone());
+					if token.rule() == TkRule::Sep {
+						break
+					}
+				}
+			}
 			TkRule::Ident if is_command => {
 				is_command = false;
 				let mut alias_tokens = expand_alias(token.clone(), shenv);

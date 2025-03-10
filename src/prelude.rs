@@ -98,6 +98,7 @@ pub use crate::{
 		},
 		sys::{
 			self,
+			get_path_cmds,
 			get_bin_path,
 			sh_quit,
 			read_to_string,

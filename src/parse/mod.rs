@@ -158,18 +158,18 @@ impl<'a> Parser<'a> {
 
 	pub fn parse(mut self) -> ShResult<SynTree> {
 		log!(TRACE, "Starting parse");
-		let mut lists = VecDeque::new();
+		let mut lists = vec![];
 		let token_slice = &*self.token_stream;
 		// Get the Main rule
 		if let Some(mut node) = Main::try_match(token_slice,self.shenv)? {
 			// Extract the inner lists
 			if let NdRule::Main { ref mut cmd_lists } = node.rule_mut() {
 				while let Some(node) = cmd_lists.pop() {
-					lists.bpush(node)
+					lists.push(node)
 				}
 			}
 		}
-		while let Some(node) = lists.bpop() {
+		while let Some(node) = lists.pop() {
 			// Push inner command lists to self.ast
 			self.ast.push_node(node);
 		}
