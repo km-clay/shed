@@ -52,7 +52,7 @@ impl<'a> Completer for SynHelper<'a> {
 							if let Some(selection) = fzf_comp(&comps, &mut shenv) {
 								return Ok((start, vec![selection]))
 							} else {
-								return Ok((start, comps))
+								return Ok((start, vec![]))
 							}
 						} else {
 							return Ok((start, comps))

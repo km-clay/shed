@@ -108,7 +108,7 @@ fn expand_range(range: &str) -> Vec<String> {
 	if let Some((left,right)) = range.split_once("..") {
 		// I know, I know
 		// This is checking to see if the range looks like "a..b" or "A..B"
-		// one character on both sides, both are letters, and both are uppercase OR both are lowercase
+		// one character on both sides, both are letters, AND (both are uppercase OR both are lowercase)
 		if (left.len() == 1 && right.len() == 1) &&
 			(left.chars().all(|ch| ch.is_ascii_alphanumeric() && right.chars().all(|ch| ch.is_ascii_alphanumeric()))) &&
 			(
