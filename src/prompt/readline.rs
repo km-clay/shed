@@ -1,76 +1,66 @@
-use rustyline::{completion::{Candidate, Completer, FilenameCompleter}, hint::{Hint, Hinter}, history::{History, SearchDirection}, Helper};
+use std::borrow::Cow;
 
-use crate::prelude::*;
+use rustyline::{completion::Completer, highlight::Highlighter, hint::{Hint, Hinter}, validate::{ValidationResult, Validator}, Helper};
 
-pub struct SynHelper<'a> {
-	pub file_comp: FilenameCompleter,
-	pub shenv: &'a mut ShEnv,
+use crate::{libsh::term::{Style, Styled}, prelude::*};
+
+pub struct FernReadline {
 }
 
-impl<'a> Helper for SynHelper<'a> {}
-
-impl<'a> SynHelper<'a> {
-	pub fn new(shenv: &'a mut ShEnv) -> Self {
-		Self {
-			file_comp: FilenameCompleter::new(),
-			shenv,
-		}
-	}
-
-	pub fn hist_search(&self, term: &str, hist: &dyn History) -> Option<String> {
-		let limit = hist.len();
-		let mut latest_match = None;
-		for i in 0..limit {
-			if let Some(hist_entry) = hist.get(i, SearchDirection::Forward).ok()? {
-				if hist_entry.entry.starts_with(term) {
-					latest_match = Some(hist_entry.entry.into_owned())
-				}
-			}
-		}
-		latest_match
+impl FernReadline {
+	pub fn new() -> Self {
+		Self { }
 	}
 }
 
+impl Helper for FernReadline {}
 
+impl Completer for FernReadline {
+	type Candidate = String;
+}
 
-
-pub struct SynHint {
-	text: String,
+pub struct FernHint {
+	raw: String,
 	styled: String
 }
 
-impl SynHint {
-	pub fn new(text: String) -> Self {
-		let styled = (&text).styled(Style::BrightBlack);
-		Self { text, styled }
-	}
-	pub fn empty() -> Self {
-		Self { text: String::new(), styled: String::new() }
+impl FernHint {
+	pub fn new(raw: String) -> Self {
+		let styled = (&raw).styled(Style::Dim | Style::BrightBlack);
+		Self { raw, styled }
 	}
 }
 
-impl Hint for SynHint {
+impl Hint for FernHint {
 	fn display(&self) -> &str {
-	  &self.styled
+		&self.styled
 	}
 	fn completion(&self) -> Option<&str> {
-	  if !self.text.is_empty() {
-			Some(&self.text)
+		if !self.raw.is_empty() {
+			Some(&self.raw)
 		} else {
 			None
 		}
 	}
 }
 
-impl<'a> Hinter for SynHelper<'a> {
-	type Hint = SynHint;
+impl Hinter for FernReadline {
+	type Hint = FernHint;
 	fn hint(&self, line: &str, pos: usize, ctx: &rustyline::Context<'_>) -> Option<Self::Hint> {
-		if line.is_empty() {
-			return None
-		}
-		let history = ctx.history();
-		let result = self.hist_search(line, history)?;
-		let window = result[line.len()..].trim_end().to_string();
-		Some(SynHint::new(window))
+		let ent = ctx.history().search(line, pos, rustyline::history::SearchDirection::Reverse).ok()??;
+		let entry_raw = ent.entry.get(pos..)?.to_string();
+		Some(FernHint::new(entry_raw))
+	}
+}
+
+impl Highlighter for FernReadline {
+	fn highlight<'l>(&self, line: &'l str, pos: usize) -> std::borrow::Cow<'l, str> {
+		Cow::Owned(line.to_string())
+	}
+}
+
+impl Validator for FernReadline {
+	fn validate(&self, ctx: &mut rustyline::validate::ValidationContext) -> rustyline::Result<rustyline::validate::ValidationResult> {
+		Ok(ValidationResult::Valid(None))
 	}
 }

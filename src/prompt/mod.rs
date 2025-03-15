@@ -1,59 +1,38 @@
-use crate::prelude::*;
-use readline::SynHelper;
-use rustyline::{config::Configurer, history::{DefaultHistory, History}, ColorMode, CompletionType, Config, EditMode, Editor};
-
+pub mod history;
 pub mod readline;
-pub mod highlight;
-pub mod validate;
-pub mod comp;
 
-fn init_rl<'a>(shenv: &'a mut ShEnv) -> Editor<SynHelper<'a>, DefaultHistory> {
-	let hist_path = std::env::var("FERN_HIST").unwrap_or_default();
-	let config = Config::builder()
-		.max_history_size(1000).unwrap()
-		.history_ignore_dups(true).unwrap()
-		.completion_prompt_limit(100)
-		.edit_mode(EditMode::Vi)
-		.color_mode(ColorMode::Enabled)
-		.tab_stop(2)
-		.build();
+use std::path::Path;
 
-	let mut editor = Editor::with_config(config).unwrap();
-	editor.set_completion_type(CompletionType::List);
-	editor.set_helper(Some(SynHelper::new(shenv)));
-	if !hist_path.is_empty() {
-		editor.load_history(&PathBuf::from(hist_path)).unwrap();
-	}
-	editor
+use history::FernHist;
+use readline::FernReadline;
+use rustyline::{error::ReadlineError, history::{FileHistory, History}, Config, Editor};
+
+use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*};
+
+fn init_rl<'s>() -> ShResult<'s,Editor<FernReadline,FernHist>> {
+	let hist = FernHist::default();
+	let rl = FernReadline::new();
+	let config = Config::default();
+	let mut editor = Editor::with_history(config,hist)?;
+	editor.set_helper(Some(rl));
+	Ok(editor)
 }
 
-pub fn read_line(shenv: &mut ShEnv) -> ShResult<String> {
-	log!(TRACE, "Entering prompt");
-	shenv.meta_mut().stop_timer();
-	let ps1 = std::env::var("PS1").unwrap_or("\\$ ".styled(Style::Green | Style::Bold));
-	let prompt = expand_prompt(&ps1,shenv)?;
-	let mut editor = init_rl(shenv);
+pub fn read_line<'s>() -> ShResult<'s,String> {
+	let mut editor = init_rl()?;
+	let prompt = "$ ".styled(Style::Green | Style::Bold);
 	match editor.readline(&prompt) {
 		Ok(line) => {
 			if !line.is_empty() {
-				let hist_path = std::env::var("FERN_HIST").ok();
-				editor.history_mut().add(&line).unwrap();
-				if let Some(path) = hist_path {
-					editor.history_mut().save(&PathBuf::from(path)).unwrap();
-				}
+				editor.add_history_entry(&line)?;
+				editor.save_history(&Path::new("/home/pagedmov/.fernhist"))?;
 			}
 			Ok(line)
-		},
-		Err(rustyline::error::ReadlineError::Eof) => {
-			kill(Pid::this(), Signal::SIGQUIT)?;
-			Ok(String::new())
 		}
-		Err(rustyline::error::ReadlineError::Interrupted) => {
-			Ok(String::new())
-		}
+		Err(ReadlineError::Eof) => std::process::exit(0),
+		Err(ReadlineError::Interrupted) => Ok(String::new()),
 		Err(e) => {
-			log!(ERROR, e);
-			Err(e.into())
+			return Err(e.into())
 		}
 	}
 }

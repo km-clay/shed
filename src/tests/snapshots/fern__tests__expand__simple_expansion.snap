@@ -1,0 +1,13 @@
+---
+source: src/tests/expand.rs
+expression: exp_tk.get_words()
+---
+[
+    "this",
+    "is",
+    "the",
+    "value",
+    "of",
+    "the",
+    "variable",
+]

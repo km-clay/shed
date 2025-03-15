@@ -1,0 +1,78 @@
+---
+source: src/tests/lexer.rs
+expression: tokens
+---
+[
+    Tk {
+        class: SOI,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 0..0,
+            source: "echo foo > bar.txt",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+    Tk {
+        class: Str,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 0..4,
+            source: "echo foo > bar.txt",
+        },
+        flags: TkFlags(
+            IS_CMD,
+        ),
+    },
+    Tk {
+        class: Str,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 5..8,
+            source: "echo foo > bar.txt",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+    Tk {
+        class: Redir,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 9..10,
+            source: "echo foo > bar.txt",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+    Tk {
+        class: Str,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 11..18,
+            source: "echo foo > bar.txt",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+    Tk {
+        class: EOI,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 18..18,
+            source: "echo foo > bar.txt",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+]

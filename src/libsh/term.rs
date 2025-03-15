@@ -1,9 +1,21 @@
 use std::{fmt::Display, ops::BitOr};
 
+pub trait Styled: Sized + Display {
+	fn styled<S: Into<StyleSet>>(self, style: S) -> String {
+		let styles: StyleSet = style.into();
+		let reset = Style::Reset;
+		format!("{styles}{self}{reset}")
+	}
+}
+
+impl<T: Display> Styled for T {}
+
 /// Enum representing a single ANSI style
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
+	// Undoes all styles
 	Reset,
+	// Foreground Colors
 	Black,
 	Red,
 	Green,
@@ -20,36 +32,86 @@ pub enum Style {
 	BrightMagenta,
 	BrightCyan,
 	BrightWhite,
+	RGB(u8, u8, u8),  // Custom foreground color
+
+	// Background Colors
+	BgBlack,
+	BgRed,
+	BgGreen,
+	BgYellow,
+	BgBlue,
+	BgMagenta,
+	BgCyan,
+	BgWhite,
+	BgBrightBlack,
+	BgBrightRed,
+	BgBrightGreen,
+	BgBrightYellow,
+	BgBrightBlue,
+	BgBrightMagenta,
+	BgBrightCyan,
+	BgBrightWhite,
+	BgRGB(u8, u8, u8),  // Custom background color
+
+	// Text Attributes
 	Bold,
+	Dim,
 	Italic,
 	Underline,
+	Strikethrough,
 	Reversed,
 }
 
-impl Style {
-	pub fn as_str(&self) -> &'static str {
+impl Display for Style {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Style::Reset => "\x1b[0m",
-			Style::Black => "\x1b[30m",
-			Style::Red => "\x1b[31m",
-			Style::Green => "\x1b[32m",
-			Style::Yellow => "\x1b[33m",
-			Style::Blue => "\x1b[34m",
-			Style::Magenta => "\x1b[35m",
-			Style::Cyan => "\x1b[36m",
-			Style::White => "\x1b[37m",
-			Style::BrightBlack => "\x1b[90m",
-			Style::BrightRed => "\x1b[91m",
-			Style::BrightGreen => "\x1b[92m",
-			Style::BrightYellow => "\x1b[93m",
-			Style::BrightBlue => "\x1b[94m",
-			Style::BrightMagenta => "\x1b[95m",
-			Style::BrightCyan => "\x1b[96m",
-			Style::BrightWhite => "\x1b[97m",
-			Style::Bold => "\x1b[1m",
-			Style::Italic => "\x1b[3m",
-			Style::Underline => "\x1b[4m",
-			Style::Reversed => "\x1b[7m",
+			Style::Reset => write!(f, "\x1b[0m"),
+
+			// Foreground colors
+			Style::Black => write!(f, "\x1b[30m"),
+			Style::Red => write!(f, "\x1b[31m"),
+			Style::Green => write!(f, "\x1b[32m"),
+			Style::Yellow => write!(f, "\x1b[33m"),
+			Style::Blue => write!(f, "\x1b[34m"),
+			Style::Magenta => write!(f, "\x1b[35m"),
+			Style::Cyan => write!(f, "\x1b[36m"),
+			Style::White => write!(f, "\x1b[37m"),
+			Style::BrightBlack => write!(f, "\x1b[90m"),
+			Style::BrightRed => write!(f, "\x1b[91m"),
+			Style::BrightGreen => write!(f, "\x1b[92m"),
+			Style::BrightYellow => write!(f, "\x1b[93m"),
+			Style::BrightBlue => write!(f, "\x1b[94m"),
+			Style::BrightMagenta => write!(f, "\x1b[95m"),
+			Style::BrightCyan => write!(f, "\x1b[96m"),
+			Style::BrightWhite => write!(f, "\x1b[97m"),
+			Style::RGB(r, g, b) => write!(f, "\x1b[38;2;{r};{g};{b}m"),
+
+			// Background colors
+			Style::BgBlack => write!(f, "\x1b[40m"),
+			Style::BgRed => write!(f, "\x1b[41m"),
+			Style::BgGreen => write!(f, "\x1b[42m"),
+			Style::BgYellow => write!(f, "\x1b[43m"),
+			Style::BgBlue => write!(f, "\x1b[44m"),
+			Style::BgMagenta => write!(f, "\x1b[45m"),
+			Style::BgCyan => write!(f, "\x1b[46m"),
+			Style::BgWhite => write!(f, "\x1b[47m"),
+			Style::BgBrightBlack => write!(f, "\x1b[100m"),
+			Style::BgBrightRed => write!(f, "\x1b[101m"),
+			Style::BgBrightGreen => write!(f, "\x1b[102m"),
+			Style::BgBrightYellow => write!(f, "\x1b[103m"),
+			Style::BgBrightBlue => write!(f, "\x1b[104m"),
+			Style::BgBrightMagenta => write!(f, "\x1b[105m"),
+			Style::BgBrightCyan => write!(f, "\x1b[106m"),
+			Style::BgBrightWhite => write!(f, "\x1b[107m"),
+			Style::BgRGB(r, g, b) => write!(f, "\x1b[48;2;{r};{g};{b}m"),
+
+			// Text attributes
+			Style::Bold => write!(f, "\x1b[1m"),
+			Style::Dim => write!(f, "\x1b[2m"),  // New
+			Style::Italic => write!(f, "\x1b[3m"),
+			Style::Underline => write!(f, "\x1b[4m"),
+			Style::Strikethrough => write!(f, "\x1b[9m"),  // New
+			Style::Reversed => write!(f, "\x1b[7m"),
 		}
 	}
 }
@@ -62,7 +124,7 @@ pub struct StyleSet {
 
 impl StyleSet {
 	pub fn new() -> Self {
-		Self { styles: Vec::new() }
+		Self { styles: vec![] }
 	}
 
 	pub fn add(mut self, style: Style) -> Self {
@@ -71,9 +133,14 @@ impl StyleSet {
 		}
 		self
 	}
+}
 
-	pub fn as_str(&self) -> String {
-		self.styles.iter().map(|s| s.as_str()).collect::<String>()
+impl Display for StyleSet {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		for style in &self.styles {
+			style.fmt(f)?
+		}
+		Ok(())
 	}
 }
 
@@ -81,7 +148,7 @@ impl StyleSet {
 impl BitOr for Style {
 	type Output = StyleSet;
 
-	fn bitor(self, rhs: Self) -> StyleSet {
+	fn bitor(self, rhs: Self) -> Self::Output {
 		StyleSet::new().add(self).add(rhs)
 	}
 }
@@ -90,7 +157,7 @@ impl BitOr for Style {
 impl BitOr<Style> for StyleSet {
 	type Output = StyleSet;
 
-	fn bitor(self, rhs: Style) -> StyleSet {
+	fn bitor(self, rhs: Style) -> Self::Output {
 		self.add(rhs)
 	}
 }
@@ -99,10 +166,4 @@ impl From<Style> for StyleSet {
 	fn from(style: Style) -> Self {
 		StyleSet::new().add(style)
 	}
-}
-
-/// Apply styles to a string
-pub fn style_text<Str: Display, Sty: Into<StyleSet>>(text: Str, styles: Sty) -> String {
-	let styles = styles.into();
-	format!("{}{}{}", styles.as_str(), text, Style::Reset.as_str())
 }

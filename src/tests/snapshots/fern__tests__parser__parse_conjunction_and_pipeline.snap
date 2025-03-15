@@ -1,0 +1,962 @@
+---
+source: src/tests/parser.rs
+expression: nodes
+---
+[
+    Match(
+        Node {
+            class: CmdList {
+                elements: [
+                    ConjunctNode {
+                        cmd: Node {
+                            class: Pipeline {
+                                cmds: [
+                                    Node {
+                                        class: Command {
+                                            assignments: [],
+                                            argv: [
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 0..4,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        IS_CMD,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 5..8,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                        flags: NdFlags(
+                                            0x0,
+                                        ),
+                                        redirs: [],
+                                        tokens: [
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 0..4,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    IS_CMD,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 5..8,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                    Node {
+                                        class: Command {
+                                            assignments: [],
+                                            argv: [
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 11..14,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        IS_CMD,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 15..24,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                        flags: NdFlags(
+                                            0x0,
+                                        ),
+                                        redirs: [],
+                                        tokens: [
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 11..14,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    IS_CMD,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 15..24,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                ],
+                                pipe_err: false,
+                            },
+                            flags: NdFlags(
+                                0x0,
+                            ),
+                            redirs: [],
+                            tokens: [
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 0..4,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 5..8,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Pipe,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 9..10,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 11..14,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 15..24,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                            ],
+                        },
+                        operator: And,
+                    },
+                    ConjunctNode {
+                        cmd: Node {
+                            class: Pipeline {
+                                cmds: [
+                                    Node {
+                                        class: Command {
+                                            assignments: [],
+                                            argv: [
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 28..32,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        IS_CMD,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 33..36,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                        flags: NdFlags(
+                                            0x0,
+                                        ),
+                                        redirs: [],
+                                        tokens: [
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 28..32,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    IS_CMD,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 33..36,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                    Node {
+                                        class: Command {
+                                            assignments: [],
+                                            argv: [
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 39..42,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        IS_CMD,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 43..52,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                        flags: NdFlags(
+                                            0x0,
+                                        ),
+                                        redirs: [],
+                                        tokens: [
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 39..42,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    IS_CMD,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 43..52,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                ],
+                                pipe_err: false,
+                            },
+                            flags: NdFlags(
+                                0x0,
+                            ),
+                            redirs: [],
+                            tokens: [
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 28..32,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 33..36,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Pipe,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 37..38,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 39..42,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 43..52,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                            ],
+                        },
+                        operator: Or,
+                    },
+                    ConjunctNode {
+                        cmd: Node {
+                            class: Pipeline {
+                                cmds: [
+                                    Node {
+                                        class: Command {
+                                            assignments: [],
+                                            argv: [
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 56..60,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        IS_CMD,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 61..64,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 65..68,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                        flags: NdFlags(
+                                            0x0,
+                                        ),
+                                        redirs: [],
+                                        tokens: [
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 56..60,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    IS_CMD,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 61..64,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 65..68,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                    Node {
+                                        class: Command {
+                                            assignments: [],
+                                            argv: [
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 71..74,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        IS_CMD,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 75..80,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 81..88,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 89..93,
+                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                        flags: NdFlags(
+                                            0x0,
+                                        ),
+                                        redirs: [],
+                                        tokens: [
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 71..74,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    IS_CMD,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 75..80,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 81..88,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 89..93,
+                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                ],
+                                pipe_err: false,
+                            },
+                            flags: NdFlags(
+                                0x0,
+                            ),
+                            redirs: [],
+                            tokens: [
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 56..60,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 61..64,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 65..68,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Pipe,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 69..70,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 71..74,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 75..80,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 81..88,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 89..93,
+                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                            ],
+                        },
+                        operator: Null,
+                    },
+                ],
+            },
+            flags: NdFlags(
+                0x0,
+            ),
+            redirs: [],
+            tokens: [
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 0..4,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 5..8,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Pipe,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 9..10,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 11..14,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 15..24,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: And,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 25..27,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 28..32,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 33..36,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Pipe,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 37..38,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 39..42,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 43..52,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Or,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 53..55,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 56..60,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 61..64,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 65..68,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Pipe,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 69..70,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 71..74,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 75..80,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 81..88,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 89..93,
+                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+            ],
+        },
+    ),
+]

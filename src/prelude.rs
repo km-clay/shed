@@ -1,180 +1,35 @@
-pub use std::{
-	io::{
-		self,
+// Standard Library Common IO and FS Abstractions
+pub use std::io::{
+    self,
+		BufRead,
+		BufReader,
+		BufWriter,
+		Error,
+		ErrorKind,
 		Read,
-		Write
-	},
-	cell::RefCell,
-	rc::Rc,
-	os::fd::{
-		OwnedFd,
-		BorrowedFd,
-		RawFd,
-		FromRawFd
-	},
-	collections::{
-		VecDeque,
-		HashMap,
-	},
-	ffi::{
-		CStr,
-		CString
-	},
-	path::{
-		Path,
-		PathBuf,
-	},
-	process::{
-		exit
-	},
+		Seek,
+		SeekFrom,
+		Write,
 };
-pub use bitflags::bitflags;
+pub use std::fs::{ self, File, OpenOptions };
+pub use std::path::{ Path, PathBuf };
+pub use std::ffi::{ CStr, CString };
+pub use std::process::exit;
+
+// Unix-specific IO abstractions
+pub use std::os::unix::io::{ AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd, };
+
+// Nix crate for POSIX APIs
 pub use nix::{
-	fcntl::{
-		open,
-		OFlag,
-	},
-	sys::{
-		signal::{
-			killpg,
-			kill,
-			signal,
-			pthread_sigmask,
-			SigmaskHow,
-			SigSet,
-			SigHandler,
-			Signal
-		},
-		wait::{
-			waitpid,
-			WaitStatus as WtStat,
-			WaitPidFlag as WtFlag
-		},
-		stat::Mode,
-		memfd::memfd_create,
-	},
-	errno::Errno,
-	unistd::{
-		Pid,
-		ForkResult::*,
-		fork,
-		getppid,
-		getpid,
-		getpgid,
-		getpgrp,
-		geteuid,
-		read,
-		write,
-		isatty,
-		tcgetpgrp,
-		tcsetpgrp,
-		dup,
-		dup2,
-		close,
-	},
-	libc,
+    errno::Errno,
+    fcntl::{ open, OFlag },
+    sys::{
+        signal::{ self, kill, SigHandler, Signal },
+        stat::Mode,
+        wait::{ waitpid, WaitStatus },
+    },
+		libc::{ STDIN_FILENO, STDERR_FILENO, STDOUT_FILENO },
+    unistd::{ dup, read, write, close, dup2, execvpe, fork, pipe, Pid, ForkResult },
 };
-pub use crate::{
-	libsh::{
-		term::{
-			Style,
-			style_text
-		},
-		utils::{
-			LogLevel::*,
-			ArgVec,
-			Redir,
-			RedirType,
-			RedirBldr,
-			StrOps,
-			RedirTarget,
-			CmdRedirs,
-			borrow_fd,
-			check_expansion,
-			clean_string
-		},
-		collections::{
-			VecDequeAliases
-		},
-		sys::{
-			self,
-			get_path_cmds,
-			get_bin_path,
-			sh_quit,
-			read_to_string,
-			write_err,
-			write_out,
-			c_pipe,
-			execvpe
-		},
-		error::{
-			ResultExt,
-			Blame,
-			ShErrKind,
-			ShErr,
-			ShResult
-		},
-	},
-	builtin::{
-		echo::echo,
-		cd::cd,
-		pwd::pwd,
-		read::read_builtin,
-		alias::alias,
-		control_flow::sh_flow,
-		export::export,
-		source::source,
-		jobctl::{
-			continue_job,
-			jobs
-		},
-		BUILTINS
-	},
-	expand::{
-		expand_argv,
-		expand_token,
-		prompt::expand_prompt,
-		alias::expand_aliases
-	},
-	shellenv::{
-		self,
-		dispatch_job,
-		log_level,
-		attach_tty,
-		term_ctlr,
-		take_term,
-		jobs::{
-			JobTab,
-			JobID,
-			write_jobs,
-			read_jobs
-		},
-		exec_ctx::ExecFlags,
-		shenv::ShEnv
-	},
-	execute::{
-		exec_input,
-		Executor,
-	},
-	parse::{
-		SynTree,
-		LoopKind,
-		Node,
-		CmdGuard,
-		NdFlag,
-		NdRule,
-		Parser,
-		ParseRule,
-		lex::{
-			EXPANSIONS,
-			Span,
-			Token,
-			TkRule,
-			Lexer,
-			LexRule
-		},
-	},
-	log,
-	test,
-	bp,
-};
+
+// Additional utilities, if needed, can be added here

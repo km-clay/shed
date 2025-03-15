@@ -1,0 +1,193 @@
+---
+source: src/tests/parser.rs
+expression: nodes
+---
+[
+    Match(
+        Node {
+            class: CmdList {
+                elements: [
+                    ConjunctNode {
+                        cmd: Node {
+                            class: Pipeline {
+                                cmds: [
+                                    Node {
+                                        class: Command {
+                                            assignments: [],
+                                            argv: [
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 0..4,
+                                                        source: "echo hello world",
+                                                    },
+                                                    flags: TkFlags(
+                                                        IS_CMD,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 5..10,
+                                                        source: "echo hello world",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Str,
+                                                    err_span: None,
+                                                    err: Null,
+                                                    span: Span {
+                                                        range: 11..16,
+                                                        source: "echo hello world",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                        flags: NdFlags(
+                                            0x0,
+                                        ),
+                                        redirs: [],
+                                        tokens: [
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 0..4,
+                                                    source: "echo hello world",
+                                                },
+                                                flags: TkFlags(
+                                                    IS_CMD,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 5..10,
+                                                    source: "echo hello world",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Str,
+                                                err_span: None,
+                                                err: Null,
+                                                span: Span {
+                                                    range: 11..16,
+                                                    source: "echo hello world",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                ],
+                                pipe_err: false,
+                            },
+                            flags: NdFlags(
+                                0x0,
+                            ),
+                            redirs: [],
+                            tokens: [
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 0..4,
+                                        source: "echo hello world",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 5..10,
+                                        source: "echo hello world",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    err_span: None,
+                                    err: Null,
+                                    span: Span {
+                                        range: 11..16,
+                                        source: "echo hello world",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                            ],
+                        },
+                        operator: Null,
+                    },
+                ],
+            },
+            flags: NdFlags(
+                0x0,
+            ),
+            redirs: [],
+            tokens: [
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 0..4,
+                        source: "echo hello world",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 5..10,
+                        source: "echo hello world",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    err_span: None,
+                    err: Null,
+                    span: Span {
+                        range: 11..16,
+                        source: "echo hello world",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+            ],
+        },
+    ),
+]

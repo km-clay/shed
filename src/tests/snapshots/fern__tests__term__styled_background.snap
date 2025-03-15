@@ -1,0 +1,5 @@
+---
+source: src/tests/term.rs
+expression: styled
+---
+[44m[1mtext with background[0m

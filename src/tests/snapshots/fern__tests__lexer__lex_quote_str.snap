@@ -1,0 +1,78 @@
+---
+source: src/tests/lexer.rs
+expression: tokens
+---
+[
+    Tk {
+        class: SOI,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 0..0,
+            source: "echo \"foo bar\" biz baz",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+    Tk {
+        class: Str,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 0..4,
+            source: "echo \"foo bar\" biz baz",
+        },
+        flags: TkFlags(
+            IS_CMD,
+        ),
+    },
+    Tk {
+        class: Str,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 5..14,
+            source: "echo \"foo bar\" biz baz",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+    Tk {
+        class: Str,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 15..18,
+            source: "echo \"foo bar\" biz baz",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+    Tk {
+        class: Str,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 19..22,
+            source: "echo \"foo bar\" biz baz",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+    Tk {
+        class: EOI,
+        err_span: None,
+        err: Null,
+        span: Span {
+            range: 22..22,
+            source: "echo \"foo bar\" biz baz",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+]
