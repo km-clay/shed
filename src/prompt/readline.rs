@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use rustyline::{completion::Completer, highlight::Highlighter, hint::{Hint, Hinter}, validate::{ValidationResult, Validator}, Helper};
 
-use crate::{libsh::term::{Style, Styled}, prelude::*};
+use crate::libsh::term::{Style, Styled};
 
 pub struct FernReadline {
 }

@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use bitflags::bitflags;
-use lex::{is_hard_sep, Span, Tk, TkFlags, TkRule};
+use lex::{Span, Tk, TkFlags, TkRule};
 
 use crate::{prelude::*, libsh::error::{ShErr, ShErrKind, ShResult}, procio::{IoFd, IoFile, IoInfo}};
 

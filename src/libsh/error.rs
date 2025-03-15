@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::Range, str::FromStr};
+use std::{fmt::Display, ops::Range};
 
 use crate::{parse::lex::Span, prelude::*};
 

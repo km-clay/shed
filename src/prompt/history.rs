@@ -1,4 +1,4 @@
-use std::{fs::{File, OpenOptions}, ops::{Deref, DerefMut}, path::PathBuf};
+use std::{fs::File, ops::{Deref, DerefMut}, path::PathBuf};
 
 use bitflags::bitflags;
 use rustyline::history::{History, SearchResult};

@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use nix::sys::wait::WaitPidFlag;
 
 use crate::{builtin::echo::echo, libsh::error::ShResult, prelude::*, procio::{IoFrame, IoPipe, IoStack}, state::{self, write_vars}};
 

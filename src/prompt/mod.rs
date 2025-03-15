@@ -3,9 +3,8 @@ pub mod readline;
 
 use std::path::Path;
 
-use history::FernHist;
 use readline::FernReadline;
-use rustyline::{error::ReadlineError, history::{FileHistory, History}, Config, Editor};
+use rustyline::{error::ReadlineError, history::FileHistory, Editor};
 
 use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*};
 

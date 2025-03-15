@@ -2,7 +2,7 @@ use std::{fmt::Display, ops::{Bound, Deref, Range, RangeBounds}};
 
 use bitflags::bitflags;
 
-use crate::{builtin::BUILTINS, libsh::error::{ShErr, ShErrKind}, prelude::*};
+use crate::{builtin::BUILTINS, prelude::*};
 
 pub const KEYWORDS: [&'static str;14] = [
 	"if",

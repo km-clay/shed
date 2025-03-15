@@ -1,4 +1,4 @@
-use crate::{libsh::error::{ShErr, ShErrKind}, parse::lex::{is_hard_sep, LexFlags, LexStream, Tk, Span, TkErr, TkFlags, TkState, TkRule}, prelude::*, state::read_vars};
+use crate::{parse::lex::{is_hard_sep, LexFlags, LexStream, Tk, Span, TkErr, TkFlags, TkRule}, state::read_vars};
 
 /// Variable substitution marker
 pub const VAR_SUB: char = '\u{fdd0}';

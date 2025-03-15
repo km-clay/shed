@@ -1,4 +1,6 @@
-use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*, procio::borrow_fd};
+use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*, procio::borrow_fd, state::{set_status, write_jobs}};
+
+pub const SIG_EXIT_OFFSET: i32 = 128;
 
 bitflags! {
 	#[derive(Debug, Copy, Clone)]
@@ -352,6 +354,67 @@ impl Job {
 
 pub fn term_ctlr() -> Pid {
 	tcgetpgrp(borrow_fd(0)).unwrap_or(getpgrp())
+}
+
+/// Calls attach_tty() on the shell's process group to retake control of the terminal
+pub fn take_term() -> ShResult<()> {
+	attach_tty(getpgrp())?;
+	Ok(())
+}
+
+pub fn disable_reaping() -> ShResult<()> {
+	flog!(TRACE, "Disabling reaping");
+	unsafe { signal(Signal::SIGCHLD, SigHandler::Handler(crate::signal::ignore_sigchld)) }?;
+	Ok(())
+}
+
+pub fn enable_reaping() -> ShResult<()> {
+	flog!(TRACE, "Enabling reaping");
+	unsafe { signal(Signal::SIGCHLD, SigHandler::Handler(crate::signal::handle_sigchld)) }.unwrap();
+	Ok(())
+}
+
+/// Waits on the current foreground job and updates the shell's last status code
+pub fn wait_fg(job: Job) -> ShResult<()> {
+	flog!(TRACE, "Waiting on foreground job");
+	let mut code = 0;
+	attach_tty(job.pgid())?;
+	disable_reaping()?;
+	let statuses = write_jobs(|j| j.new_fg(job))?;
+	for status in statuses {
+		match status {
+			WtStat::Exited(_, exit_code) => {
+				code = exit_code;
+			}
+			WtStat::Stopped(_, sig) => {
+				write_jobs(|j| j.fg_to_bg(status))?;
+				code = SIG_EXIT_OFFSET + sig as i32;
+			},
+			WtStat::Signaled(_, sig, _) => {
+				if sig == Signal::SIGTSTP {
+					write_jobs(|j| j.fg_to_bg(status))?;
+				}
+				code = SIG_EXIT_OFFSET + sig as i32;
+			},
+			_ => { /* Do nothing */ }
+		}
+	}
+	take_term()?;
+	set_status(code);
+	flog!(TRACE, "exit code: {}", code);
+	enable_reaping()?;
+	Ok(())
+}
+
+pub fn dispatch_job(job: Job, is_bg: bool) -> ShResult<()> {
+	if is_bg {
+		write_jobs(|j| {
+			j.insert_job(job, false)
+		})?;
+	} else {
+		wait_fg(job)?;
+	}
+	Ok(())
 }
 
 pub fn attach_tty(pgid: Pid) -> ShResult<()> {
