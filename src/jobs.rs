@@ -76,6 +76,7 @@ impl<'a> ChildProc {
 		if let Some(pgid) = pgid {
 			child.set_pgid(pgid).ok();
 		}
+		flog!(TRACE, "new child: {:?}", child);
 		Ok(child)
 	}
 	pub fn pid(&self) -> Pid {
@@ -149,12 +150,21 @@ impl JobBldr {
 			children: self.children
 		}
 	}
+	pub fn set_pgid(&mut self, pgid: Pid) {
+		self.pgid = Some(pgid);
+	}
+	pub fn pgid(&self) -> Option<Pid> {
+		self.pgid
+	}
 	pub fn with_children(self, children: Vec<ChildProc>) -> Self {
 		Self {
 			table_id: self.table_id,
 			pgid: self.pgid,
 			children
 		}
+	}
+	pub fn push_child(&mut self, child: ChildProc) {
+		self.children.push(child);
 	}
 	pub fn build(self) -> Job {
 		Job {

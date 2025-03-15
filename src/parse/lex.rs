@@ -299,7 +299,9 @@ impl<'t> LexStream<'t> {
 			}
 		}
 
-		assert!(tk != Tk::default());
+		if tk == Tk::default() {
+			return None
+		}
 
 		self.cursor = pos;
 		Some(tk)

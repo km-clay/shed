@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}};
 
-use crate::{jobs::{wait_fg, attach_tty, take_term, Job, JobCmdFlags, JobID}, libsh::error::ShResult, prelude::*, procio::borrow_fd};
+use crate::{jobs::{attach_tty, take_term, wait_fg, Job, JobCmdFlags, JobID}, libsh::error::ShResult, parse::lex::get_char, prelude::*, procio::borrow_fd};
 
 pub static JOB_TABLE: LazyLock<RwLock<JobTab>> = LazyLock::new(|| RwLock::new(JobTab::new()));
 
@@ -237,6 +237,12 @@ impl VarTab {
 		&mut self.params
 	}
 	pub fn get_var(&self, var: &str) -> String {
+		if var.chars().count() == 1 {
+			let param = self.get_param(get_char(var, 0).unwrap());
+			if !param.is_empty() {
+				return param
+			}
+		}
 		if let Some(var) = self.vars.get(var).map(|s| s.to_string()) {
 			var
 		} else {

@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
 
-use crate::{builtin::echo::echo, libsh::error::ShResult, prelude::*, procio::{IoFrame, IoPipe, IoStack}, state::{self, write_vars}};
+use crate::{builtin::echo::echo, jobs::{dispatch_job, ChildProc, Job, JobBldr}, libsh::error::ShResult, prelude::*, procio::{IoFrame, IoPipe, IoStack}, state::{self, write_vars}};
 
-use super::{lex::{Tk, TkFlags}, AssignKind, ConjunctNode, ConjunctOp, NdRule, Node, Redir, RedirType};
+use super::{lex::{Tk, TkFlags}, AssignKind, ConjunctNode, ConjunctOp, NdFlags, NdRule, Node, Redir, RedirType};
 
 pub enum AssignBehavior {
 	Export,
@@ -39,13 +39,14 @@ impl ExecArgs {
 
 pub struct Dispatcher<'t> {
 	nodes: VecDeque<Node<'t>>,
-	pub io_stack: IoStack
+	pub io_stack: IoStack,
+	pub curr_job: Option<JobBldr>
 }
 
 impl<'t> Dispatcher<'t> {
 	pub fn new(nodes: Vec<Node<'t>>) -> Self {
 		let nodes = VecDeque::from(nodes);
-		Self { nodes, io_stack: IoStack::new() }
+		Self { nodes, io_stack: IoStack::new(), curr_job: None }
 	}
 	pub fn begin_dispatch(&mut self) -> ShResult<()> {
 		flog!(TRACE, "beginning dispatch");
@@ -96,6 +97,7 @@ impl<'t> Dispatcher<'t> {
 		let NdRule::Pipeline { cmds, pipe_err } = pipeline.class else {
 			unreachable!()
 		};
+		self.curr_job = Some(JobBldr::new());
 		// Zip the commands and their respective pipes into an iterator
 		let pipes_and_cmds = get_pipe_stack(cmds.len())
 			.into_iter()
@@ -110,7 +112,13 @@ impl<'t> Dispatcher<'t> {
 			}
 			self.dispatch_node(cmd)?;
 		}
+		let job = self.finalize_job();
+		let is_bg = pipeline.flags.contains(NdFlags::BACKGROUND);
+		dispatch_job(job, is_bg)?;
 		Ok(())
+	}
+	pub fn finalize_job(&mut self) -> Job {
+		self.curr_job.take().unwrap().build()
 	}
 	pub fn exec_builtin(&mut self, mut cmd: Node<'t>) -> ShResult<()> {
 		let NdRule::Command { ref mut assignments, argv } = &mut cmd.class else {
@@ -119,8 +127,9 @@ impl<'t> Dispatcher<'t> {
 		let env_vars_to_unset = self.set_assignments(mem::take(assignments), AssignBehavior::Export);
 		let cmd_raw = cmd.get_command().unwrap();
 		flog!(TRACE, "doing builtin");
+		let curr_job_mut = self.curr_job.as_mut().unwrap();
 		let result = match cmd_raw.span.as_str() {
-			"echo" => echo(cmd, &mut self.io_stack),
+			"echo" => echo(cmd, &mut self.io_stack, curr_job_mut),
 			_ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw.span.as_str())
 		};
 
@@ -154,7 +163,8 @@ impl<'t> Dispatcher<'t> {
 		let io_frame = self.io_stack.pop_frame();
 		run_fork(
 			io_frame,
-			exec_args,
+			Some(exec_args),
+			self.curr_job.as_mut().unwrap(),
 			def_child_action,
 			def_parent_action
 		)?;
@@ -220,46 +230,61 @@ pub fn prepare_argv(argv: Vec<Tk>) -> Vec<String> {
 
 pub fn run_fork<'t,C,P>(
 	io_frame: IoFrame,
-	exec_args: ExecArgs,
+	exec_args: Option<ExecArgs>,
+	job: &mut JobBldr,
 	child_action: C,
 	parent_action: P,
 ) -> ShResult<()>
 where
-		C: Fn(IoFrame,ExecArgs) -> Errno,
-		P: Fn(IoFrame,Pid) -> ShResult<()>
+		C: Fn(IoFrame,Option<ExecArgs>),
+		P: Fn(IoFrame,&mut JobBldr,Option<&str>,Pid) -> ShResult<()>
 {
 	match unsafe { fork()? } {
 		ForkResult::Child => {
-			let cmd = &exec_args.cmd.to_str().unwrap().to_string();
-			let errno = child_action(io_frame,exec_args);
-			match errno {
-				Errno::ENOENT => eprintln!("Command not found: {}", cmd),
-				_ => eprintln!("{errno}")
-			}
-			exit(errno as i32);
+			child_action(io_frame,exec_args);
+			exit(0); // Just in case
 		}
 		ForkResult::Parent { child } => {
-			parent_action(io_frame,child)
+			let cmd = if let Some(args) = exec_args {
+				Some(args.cmd.to_str().unwrap().to_string())
+			} else {
+				None
+			};
+			parent_action(io_frame,job,cmd.as_deref(),child)
 		}
 	}
 }
 
 /// The default behavior for the child process after forking
-pub fn def_child_action<'t>(mut io_frame: IoFrame, exec_args: ExecArgs) -> Errno {
+pub fn def_child_action<'t>(mut io_frame: IoFrame, exec_args: Option<ExecArgs>) {
 	if let Err(e) = io_frame.redirect() {
 		eprintln!("{e}");
 	}
+	let exec_args = exec_args.unwrap();
+	let cmd = &exec_args.cmd.to_str().unwrap().to_string();
 	let Err(e) = execvpe(&exec_args.cmd, &exec_args.argv, &exec_args.envp);
-	e
+	match e {
+		Errno::ENOENT => eprintln!("Command not found: {}", cmd),
+		_ => eprintln!("{e}")
+	}
+	exit(e as i32)
 }
 
 /// The default behavior for the parent process after forking
-pub fn def_parent_action<'t>(io_frame: IoFrame, child: Pid) -> ShResult<()> {
-	let status = waitpid(child, Some(WtFlag::WSTOPPED))?;
-	match status {
-		WtStat::Exited(_, status) => state::set_status(status),
-		_ => unimplemented!()
-	}
+pub fn def_parent_action<'t>(
+	io_frame: IoFrame,
+	job: &mut JobBldr,
+	cmd: Option<&str>,
+	child_pid: Pid
+) -> ShResult<()> {
+	let child_pgid = if let Some(pgid) = job.pgid() {
+		pgid
+	} else {
+		job.set_pgid(child_pid);
+		child_pid
+	};
+	let child = ChildProc::new(child_pid, cmd, Some(child_pgid))?;
+	job.push_child(child);
 	Ok(())
 }
 
