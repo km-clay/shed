@@ -2,7 +2,7 @@ use std::{fmt::Display, ops::{Bound, Deref, Range, RangeBounds}};
 
 use bitflags::bitflags;
 
-use crate::{libsh::error::{ShErr, ShErrKind}, prelude::*};
+use crate::{builtin::BUILTINS, libsh::error::{ShErr, ShErrKind}, prelude::*};
 
 pub const KEYWORDS: [&'static str;14] = [
 	"if",
@@ -47,6 +47,12 @@ impl<'s> Span<'s> {
 	/// Slice the source string at the wrapped range
 	pub fn as_str(&self) -> &str {
 		&self.source[self.start..self.end]
+	}
+	pub fn get_source(&'s self) -> &'s str {
+		self.source
+	}
+	pub fn range(&self) -> Range<usize> {
+		self.range.clone()
 	}
 }
 
@@ -130,6 +136,9 @@ impl<'s> Tk<'s> {
 	pub fn is_err(&self) -> bool {
 		self.err_span.is_some()
 	}
+	pub fn source(&self) -> &'s str {
+		self.span.source
+	}
 }
 
 impl<'s> Display for Tk<'s> {
@@ -150,6 +159,8 @@ bitflags! {
 		const OPENER  = 0b0000000000000010;
 		const IS_CMD  = 0b0000000000000100;
 		const IS_OP   = 0b0000000000001000;
+		const ASSIGN  = 0b0000000000010000;
+		const BUILTIN = 0b0000000000100000;
 	}
 }
 
@@ -181,6 +192,7 @@ bitflags! {
 
 impl<'t> LexStream<'t> {
 	pub fn new(source: &'t str, flags: LexFlags) -> Self {
+		flog!(TRACE, "new lex stream");
 		let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
 		Self { source, cursor: 0, in_quote: false, flags }
 	}
@@ -346,8 +358,15 @@ impl<'t> LexStream<'t> {
 		if self.flags.contains(LexFlags::NEXT_IS_CMD) {
 			if KEYWORDS.contains(&new_tk.span.as_str()) {
 				new_tk.flags |= TkFlags::KEYWORD;
+			} else if is_assignment(&new_tk.span.as_str()) {
+				new_tk.flags |= TkFlags::ASSIGN;
 			} else {
 				new_tk.flags |= TkFlags::IS_CMD;
+				flog!(TRACE, new_tk.span.as_str());
+				if BUILTINS.contains(&new_tk.span.as_str()) {
+					new_tk.flags |= TkFlags::BUILTIN;
+				}
+				flog!(TRACE, new_tk.flags);
 				self.next_is_not_cmd();
 			}
 		}
@@ -478,6 +497,19 @@ impl<'t> Iterator for LexStream<'t> {
 
 pub fn get_char(src: &str, idx: usize) -> Option<char> {
 	src.get(idx..)?.chars().next()
+}
+
+pub fn is_assignment(text: &str) -> bool {
+	let mut chars = text.chars();
+
+	while let Some(ch) = chars.next() {
+		match ch {
+			'\\' => { chars.next(); }
+			'=' => return true,
+			_ => continue
+		}
+	}
+	false
 }
 
 /// Is '|', '&', '>', or '<'

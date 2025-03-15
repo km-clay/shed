@@ -66,7 +66,7 @@ impl<'e> FernHist {
 	pub fn new() -> Self {
 		Self { file_path: None, entries: HistEntries::new(), max_len: 1000, flags: HistFlags::empty() }
 	}
-	pub fn from_path(file_path: PathBuf) -> ShResult<'e,Self> {
+	pub fn from_path(file_path: PathBuf) -> ShResult<Self> {
 		let mut new_hist = FernHist::new();
 		new_hist.file_path = Some(file_path);
 		new_hist.load_hist()?;
@@ -76,14 +76,14 @@ impl<'e> FernHist {
 		let id = self.len() + 1;
 		HistEntry::new(body.to_string(), id)
 	}
-	pub fn init_hist_file(&mut self) -> ShResult<'e,()> {
+	pub fn init_hist_file(&mut self) -> ShResult<()> {
 		let Some(path) = self.file_path.clone() else {
 			return Ok(());
 		};
 		self.save(&path)?;
 		Ok(())
 	}
-	pub fn load_hist(&mut self) -> ShResult<'e,()> {
+	pub fn load_hist(&mut self) -> ShResult<()> {
 		let Some(file_path) = self.file_path.clone() else {
 			return Err(
 				ShErr::simple(

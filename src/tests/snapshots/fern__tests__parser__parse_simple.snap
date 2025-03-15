@@ -3,7 +3,7 @@ source: src/tests/parser.rs
 expression: nodes
 ---
 [
-    Match(
+    Ok(
         Node {
             class: CmdList {
                 elements: [

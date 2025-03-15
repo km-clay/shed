@@ -47,7 +47,11 @@ impl Hint for FernHint {
 impl Hinter for FernReadline {
 	type Hint = FernHint;
 	fn hint(&self, line: &str, pos: usize, ctx: &rustyline::Context<'_>) -> Option<Self::Hint> {
-		let ent = ctx.history().search(line, pos, rustyline::history::SearchDirection::Reverse).ok()??;
+		let ent = ctx.history().search(
+			line,
+			ctx.history().len() - 1,
+			rustyline::history::SearchDirection::Reverse
+		).ok()??;
 		let entry_raw = ent.entry.get(pos..)?.to_string();
 		Some(FernHint::new(entry_raw))
 	}

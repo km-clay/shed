@@ -6,8 +6,6 @@ pub static JOB_TABLE: LazyLock<RwLock<JobTab>> = LazyLock::new(|| RwLock::new(Jo
 
 pub static VAR_TABLE: LazyLock<RwLock<VarTab>> = LazyLock::new(|| RwLock::new(VarTab::new()));
 
-pub static ENV_TABLE: LazyLock<RwLock<EnvTab>> = LazyLock::new(|| RwLock::new(EnvTab::new()));
-
 pub struct JobTab {
 
 }
@@ -51,7 +49,11 @@ impl VarTab {
 		&mut self.params
 	}
 	pub fn get_var(&self, var: &str) -> String {
-		self.vars.get(var).map(|s| s.to_string()).unwrap_or_default()
+		if let Some(var) = self.vars.get(var).map(|s| s.to_string()) {
+			var
+		} else {
+			std::env::var(var).unwrap_or_default()
+		}
 	}
 	pub fn new_var(&mut self, var: &str, val: &str) {
 		self.vars.insert(var.to_string(), val.to_string());
@@ -61,16 +63,6 @@ impl VarTab {
 	}
 	pub fn get_param(&self, param: char) -> String {
 		self.params.get(&param).map(|s| s.to_string()).unwrap_or("0".to_string())
-	}
-}
-
-pub struct EnvTab {
-
-}
-
-impl EnvTab {
-	pub fn new() -> Self {
-		Self {}
 	}
 }
 
@@ -95,18 +87,6 @@ pub fn read_vars<T, F: FnOnce(RwLockReadGuard<VarTab>) -> T>(f: F) -> T {
 /// Write to the variable table
 pub fn write_vars<T, F: FnOnce(&mut RwLockWriteGuard<VarTab>) -> T>(f: F) -> T {
 	let lock = &mut VAR_TABLE.write().unwrap();
-	f(lock)
-}
-
-/// Read from the environment table
-pub fn read_env<T, F: FnOnce(RwLockReadGuard<EnvTab>) -> T>(f: F) -> T {
-	let lock = ENV_TABLE.read().unwrap();
-	f(lock)
-}
-
-/// Write to the environment table
-pub fn write_env<T, F: FnOnce(&mut RwLockWriteGuard<EnvTab>) -> T>(f: F) -> T {
-	let lock = &mut ENV_TABLE.write().unwrap();
 	f(lock)
 }
 

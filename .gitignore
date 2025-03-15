@@ -9,7 +9,7 @@ shell.nix
 *~
 TODO.md
 rust-toolchain.toml
-*snapshot*
+*src_old
 
 # cachix tmp file
 store-path-pre-build

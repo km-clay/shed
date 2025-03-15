@@ -3,7 +3,7 @@ source: src/tests/parser.rs
 expression: nodes
 ---
 [
-    Match(
+    Ok(
         Node {
             class: CmdList {
                 elements: [
@@ -21,7 +21,7 @@ expression: nodes
                                                     err: Null,
                                                     span: Span {
                                                         range: 0..4,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         IS_CMD,
@@ -33,7 +33,7 @@ expression: nodes
                                                     err: Null,
                                                     span: Span {
                                                         range: 5..8,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -52,7 +52,7 @@ expression: nodes
                                                 err: Null,
                                                 span: Span {
                                                     range: 0..4,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     IS_CMD,
@@ -64,7 +64,7 @@ expression: nodes
                                                 err: Null,
                                                 span: Span {
                                                     range: 5..8,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     0x0,
@@ -82,7 +82,7 @@ expression: nodes
                                                     err: Null,
                                                     span: Span {
                                                         range: 11..14,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         IS_CMD,
@@ -93,8 +93,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 15..24,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 15..25,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -113,7 +113,7 @@ expression: nodes
                                                 err: Null,
                                                 span: Span {
                                                     range: 11..14,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     IS_CMD,
@@ -124,8 +124,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 15..24,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 15..25,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     0x0,
@@ -147,7 +147,7 @@ expression: nodes
                                     err: Null,
                                     span: Span {
                                         range: 0..4,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         IS_CMD,
@@ -159,7 +159,7 @@ expression: nodes
                                     err: Null,
                                     span: Span {
                                         range: 5..8,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -171,7 +171,7 @@ expression: nodes
                                     err: Null,
                                     span: Span {
                                         range: 9..10,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -183,7 +183,7 @@ expression: nodes
                                     err: Null,
                                     span: Span {
                                         range: 11..14,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         IS_CMD,
@@ -194,8 +194,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 15..24,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 15..25,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -218,8 +218,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 28..32,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 29..33,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         IS_CMD,
@@ -230,8 +230,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 33..36,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 34..37,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -249,8 +249,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 28..32,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 29..33,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     IS_CMD,
@@ -261,8 +261,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 33..36,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 34..37,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     0x0,
@@ -279,8 +279,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 39..42,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 40..43,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         IS_CMD,
@@ -291,8 +291,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 43..52,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 44..54,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -310,8 +310,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 39..42,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 40..43,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     IS_CMD,
@@ -322,8 +322,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 43..52,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 44..54,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     0x0,
@@ -344,8 +344,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 28..32,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 29..33,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         IS_CMD,
@@ -356,8 +356,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 33..36,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 34..37,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -368,8 +368,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 37..38,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 38..39,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -380,8 +380,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 39..42,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 40..43,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         IS_CMD,
@@ -392,8 +392,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 43..52,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 44..54,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -416,8 +416,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 56..60,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 58..62,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         IS_CMD,
@@ -428,8 +428,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 61..64,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 63..66,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -440,8 +440,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 65..68,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 67..70,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -459,8 +459,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 56..60,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 58..62,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     IS_CMD,
@@ -471,8 +471,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 61..64,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 63..66,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     0x0,
@@ -483,8 +483,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 65..68,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 67..70,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     0x0,
@@ -501,8 +501,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 71..74,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 73..76,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         IS_CMD,
@@ -513,8 +513,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 75..80,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 77..82,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -525,8 +525,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 81..88,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 83..90,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -537,8 +537,8 @@ expression: nodes
                                                     err_span: None,
                                                     err: Null,
                                                     span: Span {
-                                                        range: 89..93,
-                                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                        range: 91..95,
+                                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -556,8 +556,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 71..74,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 73..76,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     IS_CMD,
@@ -568,8 +568,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 75..80,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 77..82,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     0x0,
@@ -580,8 +580,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 81..88,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 83..90,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     0x0,
@@ -592,8 +592,8 @@ expression: nodes
                                                 err_span: None,
                                                 err: Null,
                                                 span: Span {
-                                                    range: 89..93,
-                                                    source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                                    range: 91..95,
+                                                    source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                                 },
                                                 flags: TkFlags(
                                                     0x0,
@@ -614,8 +614,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 56..60,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 58..62,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         IS_CMD,
@@ -626,8 +626,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 61..64,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 63..66,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -638,8 +638,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 65..68,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 67..70,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -650,8 +650,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 69..70,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 71..72,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -662,8 +662,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 71..74,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 73..76,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         IS_CMD,
@@ -674,8 +674,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 75..80,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 77..82,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -686,8 +686,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 81..88,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 83..90,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -698,8 +698,8 @@ expression: nodes
                                     err_span: None,
                                     err: Null,
                                     span: Span {
-                                        range: 89..93,
-                                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                                        range: 91..95,
+                                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -722,7 +722,7 @@ expression: nodes
                     err: Null,
                     span: Span {
                         range: 0..4,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         IS_CMD,
@@ -734,7 +734,7 @@ expression: nodes
                     err: Null,
                     span: Span {
                         range: 5..8,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -746,7 +746,7 @@ expression: nodes
                     err: Null,
                     span: Span {
                         range: 9..10,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -758,7 +758,7 @@ expression: nodes
                     err: Null,
                     span: Span {
                         range: 11..14,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         IS_CMD,
@@ -769,8 +769,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 15..24,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 15..25,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -781,8 +781,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 25..27,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 26..28,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -793,8 +793,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 28..32,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 29..33,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         IS_CMD,
@@ -805,8 +805,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 33..36,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 34..37,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -817,8 +817,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 37..38,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 38..39,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -829,8 +829,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 39..42,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 40..43,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         IS_CMD,
@@ -841,8 +841,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 43..52,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 44..54,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -853,8 +853,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 53..55,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 55..57,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -865,8 +865,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 56..60,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 58..62,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         IS_CMD,
@@ -877,8 +877,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 61..64,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 63..66,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -889,8 +889,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 65..68,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 67..70,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -901,8 +901,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 69..70,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 71..72,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -913,8 +913,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 71..74,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 73..76,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         IS_CMD,
@@ -925,8 +925,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 75..80,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 77..82,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -937,8 +937,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 81..88,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 83..90,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,
@@ -949,8 +949,8 @@ expression: nodes
                     err_span: None,
                     err: Null,
                     span: Span {
-                        range: 89..93,
-                        source: "echo foo | sed s/foo/bar && echo bar | sed s/bar/foo || echo foo bar | sed s/foo bar/bar foo/",
+                        range: 91..95,
+                        source: "echo foo | sed s/foo/bar/ && echo bar | sed s/bar/foo/ || echo foo bar | sed s/foo bar/bar foo/",
                     },
                     flags: TkFlags(
                         0x0,

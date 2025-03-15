@@ -5,19 +5,19 @@ pub mod procio;
 pub mod parse;
 pub mod expand;
 pub mod state;
+pub mod builtin;
+pub mod jobs;
 #[cfg(test)]
 pub mod tests;
 
-use std::process::exit;
-
-use parse::{execute::{get_pipe_stack, Dispatcher}, lex::{LexFlags, LexStream}, ParseResult, ParseStream};
-use state::write_vars;
+use parse::{execute::Dispatcher, lex::{LexFlags, LexStream}, ParseStream};
+use crate::prelude::*;
 
 fn main() {
-	loop {
+	'main: loop {
 		let input = prompt::read_line().unwrap();
 		if input == "quit" { break };
-		write_vars(|v| v.new_var("foo", "bar"));
+		let start = Instant::now();
 
 		let mut tokens = vec![];
 		for token in LexStream::new(&input, LexFlags::empty()) {
@@ -31,13 +31,16 @@ fn main() {
 		let mut nodes = vec![];
 		for result in ParseStream::new(tokens) {
 			match result {
-				ParseResult::Error(e) => panic!("{}",e),
-				ParseResult::Match(node) => nodes.push(node),
-				_ => unreachable!()
+				Ok(node) => nodes.push(node),
+				Err(e) => {
+					eprintln!("{:?}",e);
+					continue 'main // Isn't rust cool
+				}
 			}
 		}
 
 		let mut dispatcher = Dispatcher::new(nodes);
 		dispatcher.begin_dispatch().unwrap();
+		flog!(INFO, "elapsed: {:?}", start.elapsed());
 	}
 }

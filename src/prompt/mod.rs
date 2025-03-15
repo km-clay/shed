@@ -9,16 +9,16 @@ use rustyline::{error::ReadlineError, history::{FileHistory, History}, Config, E
 
 use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*};
 
-fn init_rl<'s>() -> ShResult<'s,Editor<FernReadline,FernHist>> {
-	let hist = FernHist::default();
+fn init_rl<'s>() -> ShResult<Editor<FernReadline,FileHistory>> {
 	let rl = FernReadline::new();
-	let config = Config::default();
-	let mut editor = Editor::with_history(config,hist)?;
+	let mut editor = Editor::new()?;
 	editor.set_helper(Some(rl));
+	editor.load_history(&Path::new("/home/pagedmov/.fernhist"))?;
 	Ok(editor)
 }
 
-pub fn read_line<'s>() -> ShResult<'s,String> {
+pub fn read_line<'s>() -> ShResult<String> {
+	assert!(isatty(STDIN_FILENO).unwrap());
 	let mut editor = init_rl()?;
 	let prompt = "$ ".styled(Style::Green | Style::Bold);
 	match editor.readline(&prompt) {
