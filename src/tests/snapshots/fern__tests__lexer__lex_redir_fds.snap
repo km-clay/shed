@@ -24,7 +24,7 @@ expression: tokens
             source: "echo foo 1>&2",
         },
         flags: TkFlags(
-            IS_CMD,
+            IS_CMD | BUILTIN,
         ),
     },
     Tk {

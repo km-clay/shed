@@ -24,7 +24,7 @@ expression: tokens
             source: "echo foo > bar.txt",
         },
         flags: TkFlags(
-            IS_CMD,
+            IS_CMD | BUILTIN,
         ),
     },
     Tk {

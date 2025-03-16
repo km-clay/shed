@@ -24,7 +24,7 @@ expression: nodes
                                                         source: "echo foo | sed s/foo/bar",
                                                     },
                                                     flags: TkFlags(
-                                                        IS_CMD,
+                                                        IS_CMD | BUILTIN,
                                                     ),
                                                 },
                                                 Tk {
@@ -55,7 +55,7 @@ expression: nodes
                                                     source: "echo foo | sed s/foo/bar",
                                                 },
                                                 flags: TkFlags(
-                                                    IS_CMD,
+                                                    IS_CMD | BUILTIN,
                                                 ),
                                             },
                                             Tk {
@@ -150,7 +150,7 @@ expression: nodes
                                         source: "echo foo | sed s/foo/bar",
                                     },
                                     flags: TkFlags(
-                                        IS_CMD,
+                                        IS_CMD | BUILTIN,
                                     ),
                                 },
                                 Tk {
@@ -221,7 +221,7 @@ expression: nodes
                         source: "echo foo | sed s/foo/bar",
                     },
                     flags: TkFlags(
-                        IS_CMD,
+                        IS_CMD | BUILTIN,
                     ),
                 },
                 Tk {

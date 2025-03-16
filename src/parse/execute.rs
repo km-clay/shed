@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
 
-use crate::{builtin::echo::echo, jobs::{dispatch_job, ChildProc, Job, JobBldr}, libsh::error::ShResult, prelude::*, procio::{IoFrame, IoPipe, IoStack}, state::{self, write_vars}};
+use crate::{builtin::{cd::cd, echo::echo, export::export, pwd::pwd, shift::shift, source::source}, jobs::{dispatch_job, ChildProc, Job, JobBldr}, libsh::error::ShResult, prelude::*, procio::{IoFrame, IoPipe, IoStack}, state::{self, write_vars}};
 
-use super::{lex::{Tk, TkFlags}, AssignKind, ConjunctNode, ConjunctOp, NdFlags, NdRule, Node, Redir, RedirType};
+use super::{lex::{Span, Tk, TkFlags}, AssignKind, ConjunctNode, ConjunctOp, NdFlags, NdRule, Node, Redir, RedirType};
 
 pub enum AssignBehavior {
 	Export,
@@ -26,11 +26,11 @@ impl ExecArgs {
 		let envp = Self::get_envp();
 		Self { cmd, argv, envp }
 	}
-	pub fn get_cmd(argv: &[String]) -> CString {
-		CString::new(argv[0].as_str()).unwrap()
+	pub fn get_cmd(argv: &[(String,Span)]) -> CString {
+		CString::new(argv[0].0.as_str()).unwrap()
 	}
-	pub fn get_argv(argv: Vec<String>) -> Vec<CString> {
-		argv.into_iter().map(|s| CString::new(s).unwrap()).collect()
+	pub fn get_argv(argv: Vec<(String,Span)>) -> Vec<CString> {
+		argv.into_iter().map(|s| CString::new(s.0).unwrap()).collect()
 	}
 	pub fn get_envp() -> Vec<CString> {
 		std::env::vars().map(|v| CString::new(format!("{}={}",v.0,v.1)).unwrap()).collect()
@@ -128,8 +128,14 @@ impl<'t> Dispatcher<'t> {
 		let cmd_raw = cmd.get_command().unwrap();
 		flog!(TRACE, "doing builtin");
 		let curr_job_mut = self.curr_job.as_mut().unwrap();
+		let io_stack_mut = &mut self.io_stack;
 		let result = match cmd_raw.span.as_str() {
-			"echo" => echo(cmd, &mut self.io_stack, curr_job_mut),
+			"echo" => echo(cmd, io_stack_mut, curr_job_mut),
+			"cd" => cd(cmd, curr_job_mut),
+			"export" => export(cmd, curr_job_mut),
+			"pwd" => pwd(cmd, io_stack_mut, curr_job_mut),
+			"source" => source(cmd, curr_job_mut),
+			"shift" => shift(cmd, curr_job_mut),
 			_ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw.span.as_str())
 		};
 
@@ -152,12 +158,12 @@ impl<'t> Dispatcher<'t> {
 			};
 			env_vars_to_unset = self.set_assignments(assignments, assign_behavior);
 		}
-		for redir in cmd.redirs {
-			self.io_stack.push_to_frame(redir);
-		}
+
 		if argv.is_empty() {
 			return Ok(())
 		}
+
+		self.io_stack.append_to_frame(cmd.redirs);
 
 		let exec_args = ExecArgs::new(argv);
 		let io_frame = self.io_stack.pop_frame();
@@ -216,14 +222,16 @@ impl<'t> Dispatcher<'t> {
 	}
 }
 
-pub fn prepare_argv(argv: Vec<Tk>) -> Vec<String> {
+pub fn prepare_argv(argv: Vec<Tk>) -> Vec<(String,Span)> {
 	let mut args = vec![];
 
 	for arg in argv {
 		let flags = arg.flags;
 		let span = arg.span.clone();
-		let expanded = arg.expand(span, flags);
-		args.extend(expanded.get_words());
+		let expanded = arg.expand(span.clone(), flags);
+		for exp in expanded.get_words() {
+			args.push((exp,span.clone()))
+		}
 	}
 	args
 }

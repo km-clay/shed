@@ -1,219 +1,25 @@
-use std::{collections::HashMap, sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}};
+use std::{collections::{HashMap, VecDeque}, sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}};
 
-use crate::{jobs::{attach_tty, take_term, wait_fg, Job, JobCmdFlags, JobID}, libsh::error::ShResult, parse::lex::get_char, prelude::*, procio::borrow_fd};
+use crate::{exec_input, jobs::JobTab, libsh::{error::ShResult, utils::VecDequeExt}, parse::lex::get_char, prelude::*};
 
 pub static JOB_TABLE: LazyLock<RwLock<JobTab>> = LazyLock::new(|| RwLock::new(JobTab::new()));
 
 pub static VAR_TABLE: LazyLock<RwLock<VarTab>> = LazyLock::new(|| RwLock::new(VarTab::new()));
 
-pub struct JobTab {
-	fg: Option<Job>,
-	order: Vec<usize>,
-	new_updates: Vec<usize>,
-	jobs: Vec<Option<Job>>
-}
-
-impl JobTab {
-	pub fn new() -> Self {
-		Self { fg: None, order: vec![], new_updates: vec![], jobs: vec![] }
-	}
-	pub fn take_fg(&mut self) -> Option<Job> {
-		self.fg.take()
-	}
-	fn next_open_pos(&self) -> usize {
-		if let Some(position) = self.jobs.iter().position(|slot| slot.is_none()) {
-			position
-		} else {
-			self.jobs.len()
-		}
-	}
-	pub fn jobs(&self) -> &Vec<Option<Job>> {
-		&self.jobs
-	}
-	pub fn jobs_mut(&mut self) -> &mut Vec<Option<Job>> {
-		&mut self.jobs
-	}
-	pub fn curr_job(&self) -> Option<usize> {
-		self.order.last().copied()
-	}
-	pub fn prev_job(&self) -> Option<usize> {
-		self.order.last().copied()
-	}
-	fn prune_jobs(&mut self) {
-		while let Some(job) = self.jobs.last() {
-			if job.is_none() {
-				self.jobs.pop();
-			} else {
-				break
-			}
-		}
-	}
-	pub fn insert_job(&mut self, mut job: Job, silent: bool) -> ShResult<usize> {
-		self.prune_jobs();
-		let tab_pos = if let Some(id) = job.tabid() { id } else { self.next_open_pos() };
-		job.set_tabid(tab_pos);
-		self.order.push(tab_pos);
-		if !silent {
-			write(borrow_fd(1),format!("{}", job.display(&self.order, JobCmdFlags::INIT)).as_bytes())?;
-		}
-		if tab_pos == self.jobs.len() {
-			self.jobs.push(Some(job))
-		} else {
-			self.jobs[tab_pos] = Some(job);
-		}
-		Ok(tab_pos)
-	}
-	pub fn order(&self) -> &[usize] {
-		&self.order
-	}
-	pub fn query(&self, identifier: JobID) -> Option<&Job> {
-		match identifier {
-			// Match by process group ID
-			JobID::Pgid(pgid) => {
-				self.jobs.iter().find_map(|job| {
-					job.as_ref().filter(|j| j.pgid() == pgid)
-				})
-			}
-			// Match by process ID
-			JobID::Pid(pid) => {
-				self.jobs.iter().find_map(|job| {
-					job.as_ref().filter(|j| j.children().iter().any(|child| child.pid() == pid))
-				})
-			}
-			// Match by table ID (index in the job table)
-			JobID::TableID(id) => {
-				self.jobs.get(id).and_then(|job| job.as_ref())
-			}
-			// Match by command name (partial match)
-			JobID::Command(cmd) => {
-				self.jobs.iter().find_map(|job| {
-					job.as_ref().filter(|j| {
-						j.children().iter().any(|child| {
-							child.cmd().as_ref().is_some_and(|c| c.contains(&cmd))
-						})
-					})
-				})
-			}
-		}
-	}
-	pub fn query_mut(&mut self, identifier: JobID) -> Option<&mut Job> {
-		match identifier {
-			// Match by process group ID
-			JobID::Pgid(pgid) => {
-				self.jobs.iter_mut().find_map(|job| {
-					job.as_mut().filter(|j| j.pgid() == pgid)
-				})
-			}
-			// Match by process ID
-			JobID::Pid(pid) => {
-				self.jobs.iter_mut().find_map(|job| {
-					job.as_mut().filter(|j| j.children().iter().any(|child| child.pid() == pid))
-				})
-			}
-			// Match by table ID (index in the job table)
-			JobID::TableID(id) => {
-				self.jobs.get_mut(id).and_then(|job| job.as_mut())
-			}
-			// Match by command name (partial match)
-			JobID::Command(cmd) => {
-				self.jobs.iter_mut().find_map(|job| {
-					job.as_mut().filter(|j| {
-						j.children().iter().any(|child| {
-							child.cmd().as_ref().is_some_and(|c| c.contains(&cmd))
-						})
-					})
-				})
-			}
-		}
-	}
-	pub fn get_fg(&self) -> Option<&Job> {
-		self.fg.as_ref()
-	}
-	pub fn get_fg_mut(&mut self) -> Option<&mut Job> {
-		self.fg.as_mut()
-	}
-	pub fn new_fg<'a>(&mut self, job: Job) -> ShResult<Vec<WtStat>> {
-		let pgid = job.pgid();
-		self.fg = Some(job);
-		attach_tty(pgid)?;
-		let statuses = self.fg.as_mut().unwrap().wait_pgrp()?;
-		attach_tty(getpgrp())?;
-		Ok(statuses)
-	}
-	pub fn fg_to_bg(&mut self, stat: WtStat) -> ShResult<()> {
-		if self.fg.is_none() {
-			return Ok(())
-		}
-		take_term()?;
-		let fg = std::mem::take(&mut self.fg);
-		if let Some(mut job) = fg {
-			job.set_stats(stat);
-			self.insert_job(job, false)?;
-		}
-		Ok(())
-	}
-	pub fn bg_to_fg(&mut self, id: JobID) -> ShResult<()> {
-		let job = self.remove_job(id);
-		if let Some(job) = job {
-			wait_fg(job)?;
-		}
-		Ok(())
-	}
-	pub fn remove_job(&mut self, id: JobID) -> Option<Job> {
-		let tabid = self.query(id).map(|job| job.tabid().unwrap());
-		if let Some(tabid) = tabid {
-			self.jobs.get_mut(tabid).and_then(Option::take)
-		} else {
-			None
-		}
-	}
-	pub fn print_jobs(&mut self, flags: JobCmdFlags) -> ShResult<()> {
-		let jobs = if flags.contains(JobCmdFlags::NEW_ONLY) {
-			&self.jobs
-				.iter()
-				.filter(|job| job.as_ref().is_some_and(|job| self.new_updates.contains(&job.tabid().unwrap())))
-				.map(|job| job.as_ref())
-				.collect::<Vec<Option<&Job>>>()
-		} else {
-			&self.jobs
-				.iter()
-				.map(|job| job.as_ref())
-				.collect::<Vec<Option<&Job>>>()
-		};
-		let mut jobs_to_remove = vec![];
-		for job in jobs.iter().flatten() {
-			// Skip foreground job
-			let id = job.tabid().unwrap();
-			// Filter jobs based on flags
-			if flags.contains(JobCmdFlags::RUNNING) && !matches!(job.get_stats().get(id).unwrap(), WtStat::StillAlive | WtStat::Continued(_)) {
-				continue;
-			}
-			if flags.contains(JobCmdFlags::STOPPED) && !matches!(job.get_stats().get(id).unwrap(), WtStat::Stopped(_,_)) {
-				continue;
-			}
-			// Print the job in the selected format
-			write(borrow_fd(1), format!("{}\n",job.display(&self.order,flags)).as_bytes())?;
-			if job.get_stats().iter().all(|stat| matches!(stat,WtStat::Exited(_, _))) {
-				jobs_to_remove.push(JobID::TableID(id));
-			}
-		}
-		for id in jobs_to_remove {
-			self.remove_job(id);
-		}
-		Ok(())
-	}
-}
 
 pub struct VarTab {
 	vars: HashMap<String,String>,
 	params: HashMap<char,String>,
+	sh_argv: VecDeque<String>, // Using a VecDeque makes the implementation of `shift` straightforward
 }
 
 impl VarTab {
 	pub fn new() -> Self {
 		let vars = HashMap::new();
 		let params = Self::init_params();
-		Self { vars, params }
+		let mut var_tab = Self { vars, params, sh_argv: VecDeque::new() };
+		var_tab.init_sh_argv();
+		var_tab
 	}
 	fn init_params() -> HashMap<char, String> {
 		let mut params = HashMap::new();
@@ -223,6 +29,37 @@ impl VarTab {
 		params.insert('$', Pid::this().to_string()); // PID of the shell
 		params.insert('!', "".into()); // PID of the last background job (if any)
 		params
+	}
+	pub fn init_sh_argv(&mut self) {
+		for arg in env::args() {
+			self.bpush_arg(arg);
+		}
+	}
+	fn update_arg_params(&mut self) {
+		self.set_param('@', &self.sh_argv.clone().to_vec().join(" "));
+		self.set_param('#', &self.sh_argv.len().to_string());
+	}
+	/// Push an arg to the front of the arg deque
+	pub fn fpush_arg(&mut self, arg: String) {
+		self.sh_argv.push_front(arg);
+		self.update_arg_params();
+	}
+	/// Push an arg to the back of the arg deque
+	pub fn bpush_arg(&mut self, arg: String) {
+		self.sh_argv.push_back(arg);
+		self.update_arg_params();
+	}
+	/// Pop an arg from the front of the arg deque
+	pub fn fpop_arg(&mut self) -> Option<String> {
+		let arg = self.sh_argv.pop_front();
+		self.update_arg_params();
+		arg
+	}
+	/// Pop an arg from the back of the arg deque
+	pub fn bpop_arg(&mut self) -> Option<String> {
+		let arg = self.sh_argv.pop_back();
+		self.update_arg_params();
+		arg
 	}
 	pub fn vars(&self) -> &HashMap<String,String> {
 		&self.vars
@@ -256,7 +93,17 @@ impl VarTab {
 		self.params.insert(param,val.to_string());
 	}
 	pub fn get_param(&self, param: char) -> String {
-		self.params.get(&param).map(|s| s.to_string()).unwrap_or("0".to_string())
+		if param.is_ascii_digit() {
+			let argv_idx = param
+				.to_string()
+				.parse::<usize>()
+				.unwrap();
+			return self.sh_argv.get(argv_idx).map(|s| s.to_string()).unwrap_or_default()
+		} else if param == '?' {
+			self.params.get(&param).map(|s| s.to_string()).unwrap_or("0".into())
+		} else {
+			self.params.get(&param).map(|s| s.to_string()).unwrap_or_default()
+		}
 	}
 }
 
@@ -289,4 +136,15 @@ pub fn get_status() -> i32 {
 }
 pub fn set_status(code: i32) {
 	write_vars(|v| v.set_param('?', &code.to_string()))
+}
+
+pub fn source_file(path: PathBuf) -> ShResult<()> {
+	let mut file = OpenOptions::new()
+		.read(true)
+		.open(path)?;
+
+	let mut buf = String::new();
+	file.read_to_string(&mut buf)?;
+	exec_input(&buf)?;
+	Ok(())
 }

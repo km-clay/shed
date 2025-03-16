@@ -72,7 +72,7 @@ expression: tokens
             source: "if true; then echo foo; fi",
         },
         flags: TkFlags(
-            IS_CMD,
+            IS_CMD | BUILTIN,
         ),
     },
     Tk {

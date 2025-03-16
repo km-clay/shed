@@ -29,9 +29,8 @@ impl<'s> ShErr {
 		let msg = msg.into();
 		Self::Simple { kind, msg }
 	}
-	pub fn full(kind: ShErrKind, msg: impl Into<String>, span: Span<'s>) -> Self {
+	pub fn full(kind: ShErrKind, msg: impl Into<String>, span: ErrSpan) -> Self {
 		let msg = msg.into();
-		let span = span.into();
 		Self::Full { kind, msg, span }
 	}
 	pub fn unpack(self) -> (ShErrKind,String,Option<ErrSpan>) {

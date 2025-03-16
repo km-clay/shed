@@ -1,4 +1,4 @@
-use crate::{parse::lex::{is_hard_sep, LexFlags, LexStream, Tk, Span, TkErr, TkFlags, TkRule}, state::read_vars};
+use crate::{parse::lex::{is_hard_sep, LexFlags, LexStream, Tk, Span, TkFlags, TkRule}, state::read_vars};
 
 /// Variable substitution marker
 pub const VAR_SUB: char = '\u{fdd0}';
@@ -13,7 +13,7 @@ impl<'t> Tk<'t> {
 	pub fn expand(self, span: Span<'t>, flags: TkFlags) -> Self {
 		let exp = Expander::new(self).expand();
 		let class = TkRule::Expanded { exp };
-		Self { class, span, err_span: None, flags, err: TkErr::Null }
+		Self { class, span, flags, }
 	}
 	pub fn get_words(&self) -> Vec<String> {
 		match &self.class {
@@ -34,9 +34,10 @@ impl<'t> Expander {
 	}
 	pub fn expand(&'t mut self) -> Vec<String> {
 		self.raw = self.expand_raw();
+		// Unwrap here is safe because LexFlags::RAW has no error states
 		let tokens: Vec<_> = LexStream::new(&self.raw, LexFlags::RAW)
-			.filter(|tk| !matches!(tk.class, TkRule::EOI | TkRule::SOI))
-			.map(|tk| tk.to_string())
+			.filter(|tk| !matches!(tk.as_ref().unwrap().class, TkRule::EOI | TkRule::SOI))
+			.map(|tk| tk.unwrap().to_string())
 			.collect();
 		tokens
 	}
@@ -82,6 +83,8 @@ impl<'t> Expander {
 	}
 }
 
+/// Processes strings into intermediate representations that are more readable by the program
+///
 /// Clean up a single layer of escape characters, and then replace control characters like '$' with a non-character unicode representation that is unmistakable by the rest of the code
 pub fn unescape_str(raw: &str) -> String {
 	let mut chars = raw.chars();

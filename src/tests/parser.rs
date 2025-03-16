@@ -35,3 +35,15 @@ fn parse_conjunction_and_pipeline() {
 
 	insta::assert_debug_snapshot!(nodes)
 }
+
+#[test]
+fn parse_multiline() {
+	let input = "
+echo hello world
+echo foo bar
+echo boo biz";
+	let tk_stream: Vec<_> = LexStream::new(input, LexFlags::empty()).collect();
+	let nodes: Vec<_> = ParseStream::new(tk_stream).collect();
+
+	insta::assert_debug_snapshot!(nodes)
+}

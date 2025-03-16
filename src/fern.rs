@@ -11,6 +11,7 @@ pub mod signal;
 #[cfg(test)]
 pub mod tests;
 
+use libsh::error::ShResult;
 use parse::{execute::Dispatcher, lex::{LexFlags, LexStream}, ParseStream};
 use termios::{LocalFlags, Termios};
 use crate::prelude::*;
@@ -44,34 +45,32 @@ fn set_termios() {
 	}
 }
 
+pub fn exec_input(input: &str) -> ShResult<()> {
+	let mut tokens = vec![];
+	for token in LexStream::new(&input, LexFlags::empty()) {
+		tokens.push(token?);
+	}
+
+	let mut nodes = vec![];
+	for result in ParseStream::new(tokens) {
+		nodes.push(result?);
+	}
+
+	let mut dispatcher = Dispatcher::new(nodes);
+	dispatcher.begin_dispatch()?;
+	Ok(())
+}
+
 fn main() {
-	'main: loop {
+	save_termios();
+	set_termios();
+	loop {
 		let input = prompt::read_line().unwrap();
-		if input == "quit" { break };
 		let start = Instant::now();
 
-		let mut tokens = vec![];
-		for token in LexStream::new(&input, LexFlags::empty()) {
-			if token.is_err() {
-				let error = format!("{:?}: {}",token.err,token.err_span.unwrap().as_str());
-				panic!("{error}");
-			}
-			tokens.push(token);
+		if let Err(e) = exec_input(&input) {
+			eprintln!("{e}");
 		}
-
-		let mut nodes = vec![];
-		for result in ParseStream::new(tokens) {
-			match result {
-				Ok(node) => nodes.push(node),
-				Err(e) => {
-					eprintln!("{:?}",e);
-					continue 'main // Isn't rust cool
-				}
-			}
-		}
-
-		let mut dispatcher = Dispatcher::new(nodes);
-		dispatcher.begin_dispatch().unwrap();
-		flog!(INFO, "elapsed: {:?}", start.elapsed());
+		flog!(INFO, "cmd duration: {:?}", start.elapsed());
 	}
 }

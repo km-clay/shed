@@ -25,6 +25,16 @@ impl<'t> Node<'t> {
 		let command = argv.iter().find(|tk| tk.flags.contains(TkFlags::IS_CMD))?;
 		Some(command)
 	}
+	pub fn get_span(&'t self) -> Span<'t> {
+		let Some(first_tk) = self.tokens.first() else {
+			unreachable!()
+		};
+		let Some(last_tk) = self.tokens.last() else {
+			unreachable!()
+		};
+
+		Span::new(first_tk.span.start..last_tk.span.end, first_tk.span.get_source())
+	}
 }
 
 bitflags! {
@@ -267,10 +277,12 @@ impl<'t> ParseStream<'t> {
 			};
 			let conjunction = ConjunctNode { cmd: Box::new(block), operator: conjunct_op };
 			elements.push(conjunction);
-			let Some(tk) = self.next_tk() else {
-				break
-			};
-			node_tks.push(tk);
+			if conjunct_op != ConjunctOp::Null {
+				let Some(tk) = self.next_tk() else {
+					break
+				};
+				node_tks.push(tk);
+			}
 			if conjunct_op == ConjunctOp::Null {
 				break
 			}
@@ -385,7 +397,7 @@ impl<'t> ParseStream<'t> {
 								ShErr::full(
 									ShErrKind::ParseErr,
 									"Expected a filename after this redirection",
-									tk.span.clone()
+									tk.span.clone().into()
 								)
 							)
 						};
@@ -420,7 +432,7 @@ impl<'t> ParseStream<'t> {
 								ShErr::full(
 									ShErrKind::InternalErr,
 									"Error opening file for redirection",
-									path_tk.span.clone()
+									path_tk.span.clone().into()
 								)
 							)
 						};
@@ -565,7 +577,9 @@ impl<'t> Iterator for ParseStream<'t> {
 			}
 		}
 		match self.parse_cmd_list() {
-			Ok(Some(node)) => return Some(Ok(node)),
+			Ok(Some(node)) => {
+				return Some(Ok(node));
+			}
 			Ok(None) => return None,
 			Err(e) => return Some(Err(e))
 		}

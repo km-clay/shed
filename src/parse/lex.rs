@@ -2,7 +2,7 @@ use std::{fmt::Display, ops::{Bound, Deref, Range, RangeBounds}};
 
 use bitflags::bitflags;
 
-use crate::{builtin::BUILTINS, prelude::*};
+use crate::{builtin::BUILTINS, libsh::error::{ShErr, ShErrKind, ShResult}, prelude::*};
 
 pub const KEYWORDS: [&'static str;14] = [
 	"if",
@@ -87,33 +87,9 @@ impl Default for TkRule {
 	}
 }
 
-#[derive(Clone,Copy,PartialEq,Debug)]
-pub enum TkErr {
-	Null,
-	UntermQuote,
-	UntermSubsh,
-	UntermEscape,
-	UntermBrace,
-	BadRedir,
-	BadPipe,
-	HangingDelim,
-}
-
-impl Default for TkErr {
-	fn default() -> Self {
-		TkErr::Null
-	}
-}
-
-pub enum TkState {
-	Raw,
-}
-
 #[derive(Clone,Debug,PartialEq,Default)]
 pub struct Tk<'s> {
 	pub class: TkRule,
-	pub err_span: Option<Span<'s>>,
-	pub err: TkErr,
 	pub span: Span<'s>,
 	pub flags: TkFlags
 }
@@ -121,20 +97,13 @@ pub struct Tk<'s> {
 // There's one impl here and then another in expand.rs which has the expansion logic
 impl<'s> Tk<'s> {
 	pub fn new(class: TkRule, span: Span<'s>) -> Self {
-		Self { class, err_span: None, err: TkErr::Null, span, flags: TkFlags::empty() }
+		Self { class, span, flags: TkFlags::empty() }
 	}
 	pub fn to_string(&self) -> String {
 		match &self.class {
 			TkRule::Expanded { exp } => exp.join(" "),
 			_ => self.span.as_str().to_string()
 		}
-	}
-	pub fn set_err(&mut self, range: Range<usize>, slice: &'s str, err: TkErr) {
-		self.err_span = Some(Span::new(range, slice));
-		self.err = err
-	}
-	pub fn is_err(&self) -> bool {
-		self.err_span.is_some()
 	}
 	pub fn source(&self) -> &'s str {
 		self.span.source
@@ -231,7 +200,7 @@ impl<'t> LexStream<'t> {
 	pub fn next_is_not_cmd(&mut self) {
 		self.flags &= !LexFlags::NEXT_IS_CMD;
 	}
-	pub fn read_redir(&mut self) -> Option<Tk<'t>> {
+	pub fn read_redir(&mut self) -> Option<ShResult<Tk<'t>>> {
 		assert!(self.cursor <= self.source.len());
 		let slice = self.slice(self.cursor..)?;
 		let mut pos = self.cursor;
@@ -259,10 +228,13 @@ impl<'t> LexStream<'t> {
 
 
 						if !found_fd {
-							let err = TkErr::BadRedir;
-							tk = self.get_token(self.cursor..pos, TkRule::Redir);
-							tk.set_err(self.cursor..pos, self.source, err);
-							break
+							return Some(Err(
+								ShErr::full(
+									ShErrKind::ParseErr,
+									"Invalid redirection",
+									Span::new(self.cursor..pos, self.source).into()
+								)
+							));
 						} else {
 							tk = self.get_token(self.cursor..pos, TkRule::Redir);
 							break
@@ -304,9 +276,9 @@ impl<'t> LexStream<'t> {
 		}
 
 		self.cursor = pos;
-		Some(tk)
+		Some(Ok(tk))
 	}
-	pub fn read_string(&mut self) -> Tk<'t> {
+	pub fn read_string(&mut self) -> ShResult<Tk<'t>> {
 		assert!(self.cursor <= self.source.len());
 		let slice = self.slice_from_cursor().unwrap();
 		let mut pos = self.cursor;
@@ -351,10 +323,12 @@ impl<'t> LexStream<'t> {
 		}
 		let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
 		if self.in_quote && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-			new_tk.set_err(
-				quote_pos.unwrap()..pos,
-				self.source,
-				TkErr::UntermQuote
+			return Err(
+				ShErr::full(
+					ShErrKind::ParseErr,
+					"Unterminated quote",
+					new_tk.span.into(),
+				)
 			);
 		}
 		if self.flags.contains(LexFlags::NEXT_IS_CMD) {
@@ -373,7 +347,7 @@ impl<'t> LexStream<'t> {
 			}
 		}
 		self.cursor = pos;
-		new_tk
+		Ok(new_tk)
 	}
 	pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk<'t> {
 		let span = Span::new(range, self.source);
@@ -382,7 +356,7 @@ impl<'t> LexStream<'t> {
 }
 
 impl<'t> Iterator for LexStream<'t> {
-	type Item = Tk<'t>;
+	type Item = ShResult<Tk<'t>>;
 	fn next(&mut self) -> Option<Self::Item> {
 		assert!(self.cursor <= self.source.len());
 		// We are at the end of the input
@@ -394,14 +368,14 @@ impl<'t> Iterator for LexStream<'t> {
 				// Return the EOI token
 				let token = self.get_token(self.cursor..self.cursor, TkRule::EOI);
 				self.flags |= LexFlags::STALE;
-				return Some(token)
+				return Some(Ok(token))
 			}
 		}
 		// Return the SOI token
 		if self.flags.contains(LexFlags::FRESH) {
 			self.flags &= !LexFlags::FRESH;
 			let token = self.get_token(self.cursor..self.cursor, TkRule::SOI);
-			return Some(token)
+			return Some(Ok(token))
 		}
 
 		// If we are just reading raw words, short circuit here
@@ -486,13 +460,19 @@ impl<'t> Iterator for LexStream<'t> {
 			_ => {
 				if let Some(tk) = self.read_redir() {
 					self.next_is_not_cmd();
-					tk
+					match tk {
+						Ok(tk) => tk,
+						Err(e) => return Some(Err(e))
+					}
 				} else {
-					self.read_string()
+					match self.read_string() {
+						Ok(tk) => tk,
+						Err(e) => return Some(Err(e))
+					}
 				}
 			}
 		};
-		Some(token)
+		Some(Ok(token))
 	}
 }
 

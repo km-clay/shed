@@ -34,3 +34,11 @@ fn lex_with_keywords() {
 
 	insta::assert_debug_snapshot!(tokens)
 }
+
+#[test]
+fn lex_multiline() {
+	let input = "echo hello world\necho foo bar\necho boo biz";
+	let tokens: Vec<_> = LexStream::new(input, LexFlags::empty()).collect();
+
+	insta::assert_debug_snapshot!(tokens)
+}

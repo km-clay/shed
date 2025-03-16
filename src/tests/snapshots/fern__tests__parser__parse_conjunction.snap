@@ -24,7 +24,7 @@ expression: nodes
                                                         source: "echo foo && echo bar",
                                                     },
                                                     flags: TkFlags(
-                                                        IS_CMD,
+                                                        IS_CMD | BUILTIN,
                                                     ),
                                                 },
                                                 Tk {
@@ -55,7 +55,7 @@ expression: nodes
                                                     source: "echo foo && echo bar",
                                                 },
                                                 flags: TkFlags(
-                                                    IS_CMD,
+                                                    IS_CMD | BUILTIN,
                                                 ),
                                             },
                                             Tk {
@@ -89,7 +89,7 @@ expression: nodes
                                         source: "echo foo && echo bar",
                                     },
                                     flags: TkFlags(
-                                        IS_CMD,
+                                        IS_CMD | BUILTIN,
                                     ),
                                 },
                                 Tk {
@@ -125,7 +125,7 @@ expression: nodes
                                                         source: "echo foo && echo bar",
                                                     },
                                                     flags: TkFlags(
-                                                        IS_CMD,
+                                                        IS_CMD | BUILTIN,
                                                     ),
                                                 },
                                                 Tk {
@@ -156,7 +156,7 @@ expression: nodes
                                                     source: "echo foo && echo bar",
                                                 },
                                                 flags: TkFlags(
-                                                    IS_CMD,
+                                                    IS_CMD | BUILTIN,
                                                 ),
                                             },
                                             Tk {
@@ -190,7 +190,7 @@ expression: nodes
                                         source: "echo foo && echo bar",
                                     },
                                     flags: TkFlags(
-                                        IS_CMD,
+                                        IS_CMD | BUILTIN,
                                     ),
                                 },
                                 Tk {
@@ -225,7 +225,7 @@ expression: nodes
                         source: "echo foo && echo bar",
                     },
                     flags: TkFlags(
-                        IS_CMD,
+                        IS_CMD | BUILTIN,
                     ),
                 },
                 Tk {
@@ -261,7 +261,7 @@ expression: nodes
                         source: "echo foo && echo bar",
                     },
                     flags: TkFlags(
-                        IS_CMD,
+                        IS_CMD | BUILTIN,
                     ),
                 },
                 Tk {

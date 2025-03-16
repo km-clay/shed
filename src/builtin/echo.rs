@@ -15,9 +15,7 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 	let child = ChildProc::new(Pid::this(), Some("echo"), Some(child_pgid))?;
 	job.push_child(child);
 
-	for redir in node.redirs {
-		io_stack.push_to_frame(redir);
-	}
+	io_stack.append_to_frame(node.redirs);
 	let mut io_frame = io_stack.pop_frame();
 
 	io_frame.redirect()?;
@@ -26,6 +24,7 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 
 	let mut echo_output = prepare_argv(argv)
 		.into_iter()
+		.map(|a| a.0) // Extract the String from the tuple of (String,Span)
 		.skip(1) // Skip 'echo'
 		.collect::<Vec<_>>()
 		.join(" ");

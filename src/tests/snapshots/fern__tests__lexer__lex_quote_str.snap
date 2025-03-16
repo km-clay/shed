@@ -24,7 +24,7 @@ expression: tokens
             source: "echo \"foo bar\" biz baz",
         },
         flags: TkFlags(
-            IS_CMD,
+            IS_CMD | BUILTIN,
         ),
     },
     Tk {

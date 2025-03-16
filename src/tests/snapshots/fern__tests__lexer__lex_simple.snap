@@ -24,7 +24,7 @@ expression: tokens
             source: "echo hello world",
         },
         flags: TkFlags(
-            IS_CMD,
+            IS_CMD | BUILTIN,
         ),
     },
     Tk {

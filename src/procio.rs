@@ -299,6 +299,9 @@ impl<'e> IoStack {
 	pub fn push_to_frame(&mut self, redir: Redir) {
 		self.curr_frame_mut().push(redir)
 	}
+	pub fn append_to_frame(&mut self, mut other: Vec<Redir>) {
+		self.curr_frame_mut().append(&mut other)
+	}
 	/// Pop the current stack frame
 	/// This differs from using `pop()` because it always returns a stack frame
 	/// If `self.pop()` would empty the `IoStack`, it instead uses `std::mem::take()` to take the last frame
