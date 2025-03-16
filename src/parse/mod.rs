@@ -280,6 +280,20 @@ impl<'t> ParseStream<'t> {
 			None
 		}
 	}
+	/// Catches a Sep token in cases where separators are optional
+	///
+	/// e.g. both `if foo; then bar; fi` and
+	/// ```bash
+	/// if foo; then
+	/// 	bar
+	/// fi
+	/// ```
+	/// are valid syntax
+	fn catch_separator(&mut self, node_tks: &mut Vec<Tk<'t>>) {
+		if *self.next_tk_class() == TkRule::Sep {
+			node_tks.push(self.next_tk().unwrap());
+		}
+	}
 	fn next_tk_is_some(&self) -> bool {
 		self.tokens.first().is_some_and(|tk| tk.class != TkRule::EOI)
 	}
@@ -374,7 +388,6 @@ impl<'t> ParseStream<'t> {
 					&node_tks.get_span().unwrap()
 				));
 			};
-			cond.tokens.debug_tokens();
 			node_tks.extend(cond.tokens.clone());
 
 			if !self.check_keyword("then") || !self.next_tk_is_some() {
@@ -384,10 +397,10 @@ impl<'t> ParseStream<'t> {
 				));
 			}
 			node_tks.push(self.next_tk().unwrap());
+			self.catch_separator(&mut node_tks);
 
 			let mut body_blocks = vec![];
 			while let Some(body_block) = self.parse_block(true)? {
-				body_block.tokens.debug_tokens();
 				node_tks.extend(body_block.tokens.clone());
 				body_blocks.push(body_block);
 			}
@@ -399,18 +412,18 @@ impl<'t> ParseStream<'t> {
 			};
 			let cond_node = CondNode { cond: Box::new(cond), body: body_blocks };
 			cond_nodes.push(cond_node);
-			flog!(DEBUG, cond_nodes.len());
-			flog!(DEBUG, !self.check_keyword("elif") || !self.next_tk_is_some());
 
 			if !self.check_keyword("elif") || !self.next_tk_is_some() {
 				break
 			} else {
 				node_tks.push(self.next_tk().unwrap());
+				self.catch_separator(&mut node_tks);
 			}
 		}
 
 		if self.check_keyword("else") {
 			node_tks.push(self.next_tk().unwrap());
+			self.catch_separator(&mut node_tks);
 			while let Some(block) = self.parse_block(true)? {
 				else_block.push(block)
 			}
@@ -429,6 +442,7 @@ impl<'t> ParseStream<'t> {
 			));
 		}
 		node_tks.push(self.next_tk().unwrap());
+		self.catch_separator(&mut node_tks);
 
 		let node = Node {
 			class: NdRule::IfNode { cond_nodes, else_block },
@@ -436,7 +450,6 @@ impl<'t> ParseStream<'t> {
 			redirs: vec![],
 			tokens: node_tks
 		};
-		flog!(DEBUG, node);
 		Ok(Some(node))
 	}
 	fn parse_loop(&mut self) -> ShResult<Option<Node<'t>>> {
@@ -454,6 +467,7 @@ impl<'t> ParseStream<'t> {
 			.parse() // LoopKind implements FromStr
 			.unwrap();
 		node_tks.push(loop_tk);
+		self.catch_separator(&mut node_tks);
 
 		let Some(cond) = self.parse_block(true)? else {
 			return Err(parse_err_full(
@@ -470,6 +484,7 @@ impl<'t> ParseStream<'t> {
 			))
 		}
 		node_tks.push(self.next_tk().unwrap());
+		self.catch_separator(&mut node_tks);
 
 		let mut body = vec![];
 		while let Some(block) = self.parse_block(true)? {
@@ -490,6 +505,7 @@ impl<'t> ParseStream<'t> {
 			))
 		}
 		node_tks.push(self.next_tk().unwrap());
+		self.catch_separator(&mut node_tks);
 
 		cond_node = CondNode { cond: Box::new(cond), body  };
 		let loop_node = Node {
@@ -498,7 +514,6 @@ impl<'t> ParseStream<'t> {
 			redirs: vec![],
 			tokens: node_tks
 		};
-		flog!(DEBUG, loop_node);
 		Ok(Some(loop_node))
 	}
 	fn parse_pipeline(&mut self) -> ShResult<Option<Node<'t>>> {
@@ -756,12 +771,14 @@ impl<'t> Iterator for ParseStream<'t> {
 		if self.flags.contains(ParseFlags::ERROR) {
 			return None
 		}
-		if let Some(tk) = self.tokens.first() {
-			if tk.class == TkRule::EOI {
+		while let Some(tk) = self.tokens.first() {
+			if let TkRule::EOI = tk.class {
 				return None
 			}
-			if tk.class == TkRule::SOI {
+			if let TkRule::SOI | TkRule::Sep = tk.class {
 				self.next_tk();
+			} else {
+				break
 			}
 		}
 		match self.parse_cmd_list() {

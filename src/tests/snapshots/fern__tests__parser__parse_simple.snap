@@ -17,8 +17,6 @@ expression: nodes
                                             argv: [
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 0..4,
                                                         source: "echo hello world",
@@ -29,8 +27,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 5..10,
                                                         source: "echo hello world",
@@ -41,8 +37,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 11..16,
                                                         source: "echo hello world",
@@ -60,8 +54,6 @@ expression: nodes
                                         tokens: [
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 0..4,
                                                     source: "echo hello world",
@@ -72,8 +64,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 5..10,
                                                     source: "echo hello world",
@@ -84,8 +74,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 11..16,
                                                     source: "echo hello world",
@@ -106,8 +94,6 @@ expression: nodes
                             tokens: [
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 0..4,
                                         source: "echo hello world",
@@ -118,8 +104,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 5..10,
                                         source: "echo hello world",
@@ -130,8 +114,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 11..16,
                                         source: "echo hello world",
@@ -153,8 +135,6 @@ expression: nodes
             tokens: [
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 0..4,
                         source: "echo hello world",
@@ -165,8 +145,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 5..10,
                         source: "echo hello world",
@@ -177,8 +155,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 11..16,
                         source: "echo hello world",

@@ -1,0 +1,330 @@
+---
+source: src/tests/parser.rs
+expression: nodes
+---
+[
+    Ok(
+        Node {
+            class: CmdList {
+                elements: [
+                    ConjunctNode {
+                        cmd: Node {
+                            class: LoopNode {
+                                kind: While,
+                                cond_node: CondNode {
+                                    cond: Node {
+                                        class: Pipeline {
+                                            cmds: [
+                                                Node {
+                                                    class: Command {
+                                                        assignments: [],
+                                                        argv: [
+                                                            Tk {
+                                                                class: Str,
+                                                                span: Span {
+                                                                    range: 6..9,
+                                                                    source: "while foo; do bar; done",
+                                                                },
+                                                                flags: TkFlags(
+                                                                    IS_CMD,
+                                                                ),
+                                                            },
+                                                        ],
+                                                    },
+                                                    flags: NdFlags(
+                                                        0x0,
+                                                    ),
+                                                    redirs: [],
+                                                    tokens: [
+                                                        Tk {
+                                                            class: Str,
+                                                            span: Span {
+                                                                range: 6..9,
+                                                                source: "while foo; do bar; done",
+                                                            },
+                                                            flags: TkFlags(
+                                                                IS_CMD,
+                                                            ),
+                                                        },
+                                                        Tk {
+                                                            class: Sep,
+                                                            span: Span {
+                                                                range: 9..11,
+                                                                source: "while foo; do bar; done",
+                                                            },
+                                                            flags: TkFlags(
+                                                                0x0,
+                                                            ),
+                                                        },
+                                                    ],
+                                                },
+                                            ],
+                                            pipe_err: false,
+                                        },
+                                        flags: NdFlags(
+                                            0x0,
+                                        ),
+                                        redirs: [],
+                                        tokens: [
+                                            Tk {
+                                                class: Str,
+                                                span: Span {
+                                                    range: 6..9,
+                                                    source: "while foo; do bar; done",
+                                                },
+                                                flags: TkFlags(
+                                                    IS_CMD,
+                                                ),
+                                            },
+                                            Tk {
+                                                class: Sep,
+                                                span: Span {
+                                                    range: 9..11,
+                                                    source: "while foo; do bar; done",
+                                                },
+                                                flags: TkFlags(
+                                                    0x0,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                    body: [
+                                        Node {
+                                            class: Pipeline {
+                                                cmds: [
+                                                    Node {
+                                                        class: Command {
+                                                            assignments: [],
+                                                            argv: [
+                                                                Tk {
+                                                                    class: Str,
+                                                                    span: Span {
+                                                                        range: 14..17,
+                                                                        source: "while foo; do bar; done",
+                                                                    },
+                                                                    flags: TkFlags(
+                                                                        IS_CMD,
+                                                                    ),
+                                                                },
+                                                            ],
+                                                        },
+                                                        flags: NdFlags(
+                                                            0x0,
+                                                        ),
+                                                        redirs: [],
+                                                        tokens: [
+                                                            Tk {
+                                                                class: Str,
+                                                                span: Span {
+                                                                    range: 14..17,
+                                                                    source: "while foo; do bar; done",
+                                                                },
+                                                                flags: TkFlags(
+                                                                    IS_CMD,
+                                                                ),
+                                                            },
+                                                            Tk {
+                                                                class: Sep,
+                                                                span: Span {
+                                                                    range: 17..19,
+                                                                    source: "while foo; do bar; done",
+                                                                },
+                                                                flags: TkFlags(
+                                                                    0x0,
+                                                                ),
+                                                            },
+                                                        ],
+                                                    },
+                                                ],
+                                                pipe_err: false,
+                                            },
+                                            flags: NdFlags(
+                                                0x0,
+                                            ),
+                                            redirs: [],
+                                            tokens: [
+                                                Tk {
+                                                    class: Str,
+                                                    span: Span {
+                                                        range: 14..17,
+                                                        source: "while foo; do bar; done",
+                                                    },
+                                                    flags: TkFlags(
+                                                        IS_CMD,
+                                                    ),
+                                                },
+                                                Tk {
+                                                    class: Sep,
+                                                    span: Span {
+                                                        range: 17..19,
+                                                        source: "while foo; do bar; done",
+                                                    },
+                                                    flags: TkFlags(
+                                                        0x0,
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                    ],
+                                },
+                            },
+                            flags: NdFlags(
+                                0x0,
+                            ),
+                            redirs: [],
+                            tokens: [
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 0..5,
+                                        source: "while foo; do bar; done",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 6..9,
+                                        source: "while foo; do bar; done",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 9..11,
+                                        source: "while foo; do bar; done",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 11..13,
+                                        source: "while foo; do bar; done",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 14..17,
+                                        source: "while foo; do bar; done",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 17..19,
+                                        source: "while foo; do bar; done",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 19..23,
+                                        source: "while foo; do bar; done",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                            ],
+                        },
+                        operator: Null,
+                    },
+                ],
+            },
+            flags: NdFlags(
+                0x0,
+            ),
+            redirs: [],
+            tokens: [
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 0..5,
+                        source: "while foo; do bar; done",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 6..9,
+                        source: "while foo; do bar; done",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 9..11,
+                        source: "while foo; do bar; done",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 11..13,
+                        source: "while foo; do bar; done",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 14..17,
+                        source: "while foo; do bar; done",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 17..19,
+                        source: "while foo; do bar; done",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 19..23,
+                        source: "while foo; do bar; done",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+            ],
+        },
+    ),
+]

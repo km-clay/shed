@@ -3,160 +3,160 @@ source: src/tests/lexer.rs
 expression: tokens
 ---
 [
-    Tk {
-        class: SOI,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 0..0,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    Ok(
+        Tk {
+            class: SOI,
+            span: Span {
+                range: 0..0,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
-    Tk {
-        class: Str,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 0..4,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 0..4,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                IS_CMD | BUILTIN,
+            ),
         },
-        flags: TkFlags(
-            IS_CMD | BUILTIN,
-        ),
-    },
-    Tk {
-        class: Str,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 5..10,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 5..10,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
-    Tk {
-        class: Str,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 11..16,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 11..16,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
-    Tk {
-        class: Sep,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 16..17,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Sep,
+            span: Span {
+                range: 16..17,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
-    Tk {
-        class: Str,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 17..21,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 17..21,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                IS_CMD | BUILTIN,
+            ),
         },
-        flags: TkFlags(
-            IS_CMD | BUILTIN,
-        ),
-    },
-    Tk {
-        class: Str,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 22..25,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 22..25,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
-    Tk {
-        class: Str,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 26..29,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 26..29,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
-    Tk {
-        class: Sep,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 29..30,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Sep,
+            span: Span {
+                range: 29..30,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
-    Tk {
-        class: Str,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 30..34,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 30..34,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                IS_CMD | BUILTIN,
+            ),
         },
-        flags: TkFlags(
-            IS_CMD | BUILTIN,
-        ),
-    },
-    Tk {
-        class: Str,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 35..38,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 35..38,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
-    Tk {
-        class: Str,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 39..42,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 39..42,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
-    Tk {
-        class: EOI,
-        err_span: None,
-        err: Null,
-        span: Span {
-            range: 42..42,
-            source: "echo hello world\necho foo bar\necho boo biz",
+    ),
+    Ok(
+        Tk {
+            class: EOI,
+            span: Span {
+                range: 42..42,
+                source: "echo hello world\necho foo bar\necho boo biz",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
         },
-        flags: TkFlags(
-            0x0,
-        ),
-    },
+    ),
 ]

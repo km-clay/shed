@@ -9,6 +9,7 @@ fn simple_expansion() {
 	write_vars(|v| v.new_var("foo", "this is the value of the variable".into()));
 
 	let mut tokens: Vec<Tk> = LexStream::new(varsub, LexFlags::empty())
+		.map(|tk| tk.unwrap())
 		.filter(|tk| !matches!(tk.class, TkRule::EOI | TkRule::SOI))
 		.collect();
 	let var_tk = tokens.pop().unwrap();

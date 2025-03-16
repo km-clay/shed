@@ -17,8 +17,6 @@ expression: nodes
                                             argv: [
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 0..4,
                                                         source: "echo foo | sed s/foo/bar",
@@ -29,8 +27,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 5..8,
                                                         source: "echo foo | sed s/foo/bar",
@@ -48,8 +44,6 @@ expression: nodes
                                         tokens: [
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 0..4,
                                                     source: "echo foo | sed s/foo/bar",
@@ -60,8 +54,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 5..8,
                                                     source: "echo foo | sed s/foo/bar",
@@ -78,8 +70,6 @@ expression: nodes
                                             argv: [
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 11..14,
                                                         source: "echo foo | sed s/foo/bar",
@@ -90,8 +80,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 15..24,
                                                         source: "echo foo | sed s/foo/bar",
@@ -109,8 +97,6 @@ expression: nodes
                                         tokens: [
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 11..14,
                                                     source: "echo foo | sed s/foo/bar",
@@ -121,8 +107,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 15..24,
                                                     source: "echo foo | sed s/foo/bar",
@@ -143,8 +127,6 @@ expression: nodes
                             tokens: [
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 0..4,
                                         source: "echo foo | sed s/foo/bar",
@@ -155,8 +137,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 5..8,
                                         source: "echo foo | sed s/foo/bar",
@@ -167,8 +147,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Pipe,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 9..10,
                                         source: "echo foo | sed s/foo/bar",
@@ -179,8 +157,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 11..14,
                                         source: "echo foo | sed s/foo/bar",
@@ -191,8 +167,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 15..24,
                                         source: "echo foo | sed s/foo/bar",
@@ -214,8 +188,6 @@ expression: nodes
             tokens: [
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 0..4,
                         source: "echo foo | sed s/foo/bar",
@@ -226,8 +198,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 5..8,
                         source: "echo foo | sed s/foo/bar",
@@ -238,8 +208,6 @@ expression: nodes
                 },
                 Tk {
                     class: Pipe,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 9..10,
                         source: "echo foo | sed s/foo/bar",
@@ -250,8 +218,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 11..14,
                         source: "echo foo | sed s/foo/bar",
@@ -262,8 +228,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 15..24,
                         source: "echo foo | sed s/foo/bar",

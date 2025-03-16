@@ -17,8 +17,6 @@ expression: nodes
                                             argv: [
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 1..5,
                                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -29,8 +27,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 6..11,
                                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -41,8 +37,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 12..17,
                                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -60,8 +54,6 @@ expression: nodes
                                         tokens: [
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 1..5,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -72,8 +64,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 6..11,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -84,8 +74,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 12..17,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -96,8 +84,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Sep,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 17..18,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -118,8 +104,6 @@ expression: nodes
                             tokens: [
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 1..5,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -130,8 +114,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 6..11,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -142,8 +124,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 12..17,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -154,8 +134,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Sep,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 17..18,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -177,8 +155,6 @@ expression: nodes
             tokens: [
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 1..5,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -189,8 +165,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 6..11,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -201,8 +175,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 12..17,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -213,8 +185,6 @@ expression: nodes
                 },
                 Tk {
                     class: Sep,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 17..18,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -240,8 +210,6 @@ expression: nodes
                                             argv: [
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 18..22,
                                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -252,8 +220,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 23..26,
                                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -264,8 +230,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 27..30,
                                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -283,8 +247,6 @@ expression: nodes
                                         tokens: [
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 18..22,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -295,8 +257,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 23..26,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -307,8 +267,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 27..30,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -319,8 +277,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Sep,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 30..31,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -341,8 +297,6 @@ expression: nodes
                             tokens: [
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 18..22,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -353,8 +307,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 23..26,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -365,8 +317,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 27..30,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -377,8 +327,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Sep,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 30..31,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -400,8 +348,6 @@ expression: nodes
             tokens: [
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 18..22,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -412,8 +358,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 23..26,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -424,8 +368,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 27..30,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -436,8 +378,6 @@ expression: nodes
                 },
                 Tk {
                     class: Sep,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 30..31,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -463,8 +403,6 @@ expression: nodes
                                             argv: [
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 31..35,
                                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -475,8 +413,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 36..39,
                                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -487,8 +423,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 40..43,
                                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -506,8 +440,6 @@ expression: nodes
                                         tokens: [
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 31..35,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -518,8 +450,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 36..39,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -530,8 +460,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 40..43,
                                                     source: "\necho hello world\necho foo bar\necho boo biz",
@@ -552,8 +480,6 @@ expression: nodes
                             tokens: [
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 31..35,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -564,8 +490,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 36..39,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -576,8 +500,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 40..43,
                                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -599,8 +521,6 @@ expression: nodes
             tokens: [
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 31..35,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -611,8 +531,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 36..39,
                         source: "\necho hello world\necho foo bar\necho boo biz",
@@ -623,8 +541,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 40..43,
                         source: "\necho hello world\necho foo bar\necho boo biz",

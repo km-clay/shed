@@ -17,8 +17,6 @@ expression: nodes
                                             argv: [
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 0..4,
                                                         source: "echo foo && echo bar",
@@ -29,8 +27,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 5..8,
                                                         source: "echo foo && echo bar",
@@ -48,8 +44,6 @@ expression: nodes
                                         tokens: [
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 0..4,
                                                     source: "echo foo && echo bar",
@@ -60,8 +54,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 5..8,
                                                     source: "echo foo && echo bar",
@@ -82,8 +74,6 @@ expression: nodes
                             tokens: [
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 0..4,
                                         source: "echo foo && echo bar",
@@ -94,8 +84,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 5..8,
                                         source: "echo foo && echo bar",
@@ -118,8 +106,6 @@ expression: nodes
                                             argv: [
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 12..16,
                                                         source: "echo foo && echo bar",
@@ -130,8 +116,6 @@ expression: nodes
                                                 },
                                                 Tk {
                                                     class: Str,
-                                                    err_span: None,
-                                                    err: Null,
                                                     span: Span {
                                                         range: 17..20,
                                                         source: "echo foo && echo bar",
@@ -149,8 +133,6 @@ expression: nodes
                                         tokens: [
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 12..16,
                                                     source: "echo foo && echo bar",
@@ -161,8 +143,6 @@ expression: nodes
                                             },
                                             Tk {
                                                 class: Str,
-                                                err_span: None,
-                                                err: Null,
                                                 span: Span {
                                                     range: 17..20,
                                                     source: "echo foo && echo bar",
@@ -183,8 +163,6 @@ expression: nodes
                             tokens: [
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 12..16,
                                         source: "echo foo && echo bar",
@@ -195,8 +173,6 @@ expression: nodes
                                 },
                                 Tk {
                                     class: Str,
-                                    err_span: None,
-                                    err: Null,
                                     span: Span {
                                         range: 17..20,
                                         source: "echo foo && echo bar",
@@ -218,8 +194,6 @@ expression: nodes
             tokens: [
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 0..4,
                         source: "echo foo && echo bar",
@@ -230,8 +204,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 5..8,
                         source: "echo foo && echo bar",
@@ -242,8 +214,6 @@ expression: nodes
                 },
                 Tk {
                     class: And,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 9..11,
                         source: "echo foo && echo bar",
@@ -254,8 +224,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 12..16,
                         source: "echo foo && echo bar",
@@ -266,8 +234,6 @@ expression: nodes
                 },
                 Tk {
                     class: Str,
-                    err_span: None,
-                    err: Null,
                     span: Span {
                         range: 17..20,
                         source: "echo foo && echo bar",
