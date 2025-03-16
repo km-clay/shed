@@ -47,6 +47,7 @@ fn set_termios() {
 }
 
 pub fn exec_input(input: &str) -> ShResult<()> {
+	let parse_start = Instant::now();
 	let mut tokens = vec![];
 	for token in LexStream::new(&input, LexFlags::empty()) {
 		tokens.push(token?);
@@ -56,9 +57,14 @@ pub fn exec_input(input: &str) -> ShResult<()> {
 	for result in ParseStream::new(tokens) {
 		nodes.push(result?);
 	}
+	flog!(INFO, "parse duration: {:?}", parse_start.elapsed());
 
+	let exec_start = Instant::now();
 	let mut dispatcher = Dispatcher::new(nodes);
 	dispatcher.begin_dispatch()?;
+	flog!(INFO, "cmd duration: {:?}", exec_start.elapsed());
+
+	flog!(INFO, "total duration: {:?}", parse_start.elapsed());
 	Ok(())
 }
 
@@ -66,13 +72,13 @@ fn main() {
 	save_termios();
 	set_termios();
 	sig_setup();
+
+
 	loop {
 		let input = prompt::read_line().unwrap();
-		let start = Instant::now();
 
 		if let Err(e) = exec_input(&input) {
 			eprintln!("{e}");
 		}
-		flog!(INFO, "cmd duration: {:?}", start.elapsed());
 	}
 }

@@ -4,13 +4,13 @@ use bitflags::bitflags;
 use fmt::Display;
 use lex::{Span, Tk, TkFlags, TkRule};
 
-use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::TkVecUtils}, prelude::*, procio::{IoFd, IoFile, IoInfo}};
+use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::TkVecUtils}, prelude::*, procio::IoMode};
 
 pub mod lex;
 pub mod execute;
 
 
-#[derive(Debug)]
+#[derive(Clone,Debug)]
 pub struct Node<'t> {
 	pub class: NdRule<'t>,
 	pub flags: NdFlags,
@@ -39,27 +39,27 @@ impl<'t> Node<'t> {
 }
 
 bitflags! {
-#[derive(Debug)]
+#[derive(Clone,Copy,Debug)]
 	pub struct NdFlags: u32 {
 		const BACKGROUND = 0b000001;
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone,Debug)]
 pub struct Redir {
-	pub io_info: Box<dyn IoInfo>,
+	pub io_mode: IoMode,
 	pub class: RedirType
 }
 
 impl Redir {
-	pub fn new(io_info: Box<dyn IoInfo>, class: RedirType) -> Self {
-		Self { io_info, class }
+	pub fn new(io_mode: IoMode, class: RedirType) -> Self {
+		Self { io_mode, class }
 	}
 }
 
 #[derive(Default,Debug)]
 pub struct RedirBldr {
-	pub io_info: Option<Box<dyn IoInfo>>,
+	pub io_mode: Option<IoMode>,
 	pub class: Option<RedirType>,
 	pub tgt_fd: Option<RawFd>,
 }
@@ -68,20 +68,20 @@ impl RedirBldr {
 	pub fn new() -> Self {
 		Default::default()
 	}
-	pub fn with_io_info(self, io_info: Box<dyn IoInfo>) -> Self {
-		let Self { io_info: _, class, tgt_fd } = self;
-		Self { io_info: Some(io_info), class, tgt_fd }
+	pub fn with_io_mode(self, io_mode: IoMode) -> Self {
+		let Self { io_mode: _, class, tgt_fd } = self;
+		Self { io_mode: Some(io_mode), class, tgt_fd }
 	}
 	pub fn with_class(self, class: RedirType) -> Self {
-		let Self { io_info, class: _, tgt_fd } = self;
-		Self { io_info, class: Some(class), tgt_fd }
+		let Self { io_mode, class: _, tgt_fd } = self;
+		Self { io_mode, class: Some(class), tgt_fd }
 	}
 	pub fn with_tgt(self, tgt_fd: RawFd) -> Self {
-		let Self { io_info, class, tgt_fd: _ } = self;
-		Self { io_info, class, tgt_fd: Some(tgt_fd) }
+		let Self { io_mode, class, tgt_fd: _ } = self;
+		Self { io_mode, class, tgt_fd: Some(tgt_fd) }
 	}
 	pub fn build(self) -> Redir {
-		Redir::new(self.io_info.unwrap(), self.class.unwrap())
+		Redir::new(self.io_mode.unwrap(), self.class.unwrap())
 	}
 }
 
@@ -155,8 +155,8 @@ impl FromStr for RedirBldr {
 		});
 		redir = redir.with_tgt(tgt_fd);
 		if let Ok(src_fd) = src_fd.parse::<i32>() {
-			let io_info = IoFd::new(tgt_fd, src_fd);
-			redir = redir.with_io_info(Box::new(io_info));
+			let io_mode = IoMode::fd(tgt_fd, src_fd);
+			redir = redir.with_io_mode(io_mode);
 		}
 		Ok(redir)
 	}
@@ -174,13 +174,13 @@ pub enum RedirType {
 	HereString, // <<<
 }
 
-#[derive(Debug)]
+#[derive(Clone,Debug)]
 pub struct CondNode<'t> {
 	pub cond: Box<Node<'t>>,
 	pub body: Vec<Node<'t>>
 }
 
-#[derive(Debug)]
+#[derive(Clone,Debug)]
 pub struct CaseNode<'t> {
 	pub pattern: Tk<'t>,
 	pub body: Vec<Node<'t>>
@@ -193,13 +193,13 @@ pub enum ConjunctOp {
 	Null
 }
 
-#[derive(Debug)]
+#[derive(Clone,Debug)]
 pub struct ConjunctNode<'t> {
 	pub cmd: Box<Node<'t>>,
 	pub operator: ConjunctOp
 }
 
-#[derive(Debug)]
+#[derive(Clone,Copy,Debug)]
 pub enum LoopKind {
 	While,
 	Until
@@ -225,7 +225,7 @@ impl Display for LoopKind {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone,Debug)]
 pub enum AssignKind {
 	Eq,
 	PlusEq,
@@ -234,7 +234,7 @@ pub enum AssignKind {
 	DivEq,
 }
 
-#[derive(Debug)]
+#[derive(Clone,Debug)]
 pub enum NdRule<'t> {
 	IfNode { cond_nodes: Vec<CondNode<'t>>, else_block: Vec<Node<'t>> },
 	LoopNode { kind: LoopKind, cond_node: CondNode<'t> },
@@ -242,7 +242,7 @@ pub enum NdRule<'t> {
 	CaseNode { pattern: Tk<'t>, case_blocks: Vec<CaseNode<'t>> },
 	Command { assignments: Vec<Node<'t>>, argv: Vec<Tk<'t>> },
 	Pipeline { cmds: Vec<Node<'t>>, pipe_err: bool },
-	CmdList { elements: Vec<ConjunctNode<'t>> },
+	Conjunction { elements: Vec<ConjunctNode<'t>> },
 	Assignment { kind: AssignKind, var: Tk<'t>, val: Tk<'t> },
 }
 
@@ -294,12 +294,39 @@ impl<'t> ParseStream<'t> {
 			node_tks.push(self.next_tk().unwrap());
 		}
 	}
+	fn assert_separator(&mut self, node_tks: &mut Vec<Tk<'t>>) -> ShResult<()> {
+		let next_class = self.next_tk_class();
+		match next_class {
+			TkRule::EOI |
+			TkRule::Or |
+			TkRule::Bg |
+			TkRule::And |
+			TkRule::Pipe => Ok(()),
+
+			TkRule::Sep => {
+				if let Some(tk) = self.next_tk() {
+					node_tks.push(tk);
+				}
+				Ok(())
+			}
+			_ => {
+				Err(
+					ShErr::simple(ShErrKind::ParseErr, "Expected a semicolon or newline here")
+				)
+			}
+		}
+	}
 	fn next_tk_is_some(&self) -> bool {
 		self.tokens.first().is_some_and(|tk| tk.class != TkRule::EOI)
 	}
 	fn check_keyword(&self, kw: &str) -> bool {
 		self.tokens.first().is_some_and(|tk| {
 			tk.flags.contains(TkFlags::KEYWORD) && tk.span.as_str() == kw
+		})
+	}
+	fn check_redir(&self) -> bool {
+		self.tokens.first().is_some_and(|tk| {
+			tk.class == TkRule::Redir
 		})
 	}
 	/// Slice off consumed tokens
@@ -334,7 +361,7 @@ impl<'t> ParseStream<'t> {
 			Ok(None)
 		} else {
 			Ok(Some(Node {
-				class: NdRule::CmdList { elements },
+				class: NdRule::Conjunction { elements },
 				flags: NdFlags::empty(),
 				redirs: vec![],
 				tokens: node_tks
@@ -370,6 +397,7 @@ impl<'t> ParseStream<'t> {
 		let mut node_tks: Vec<Tk> = vec![];
 		let mut cond_nodes: Vec<CondNode> = vec![];
 		let mut else_block: Vec<Node> = vec![];
+		let mut redirs = vec![];
 
 		if !self.check_keyword("if") || !self.next_tk_is_some() {
 			return Ok(None)
@@ -442,12 +470,51 @@ impl<'t> ParseStream<'t> {
 			));
 		}
 		node_tks.push(self.next_tk().unwrap());
-		self.catch_separator(&mut node_tks);
+
+		while self.check_redir() {
+			let tk = self.next_tk().unwrap();
+			node_tks.push(tk.clone());
+			let redir_bldr = tk.span.as_str().parse::<RedirBldr>().unwrap();
+			if redir_bldr.io_mode.is_none() {
+				let path_tk = self.next_tk();
+
+				if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
+					self.flags |= ParseFlags::ERROR;
+					return Err(
+						ShErr::full(
+							ShErrKind::ParseErr,
+							"Expected a filename after this redirection",
+							tk.span.clone().into()
+						)
+					)
+				};
+
+				let path_tk = path_tk.unwrap();
+				node_tks.push(path_tk.clone());
+				let redir_class = redir_bldr.class.unwrap();
+				let pathbuf = PathBuf::from(path_tk.span.as_str());
+
+				let Ok(file) = get_redir_file(redir_class, pathbuf) else {
+					self.flags |= ParseFlags::ERROR;
+					return Err(parse_err_full(
+							"Error opening file for redirection",
+							&path_tk.span
+					));
+				};
+
+				let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), file);
+				let redir_bldr = redir_bldr.with_io_mode(io_mode);
+				let redir = redir_bldr.build();
+				redirs.push(redir);
+			}
+		}
+
+		self.assert_separator(&mut node_tks)?;
 
 		let node = Node {
 			class: NdRule::IfNode { cond_nodes, else_block },
 			flags: NdFlags::empty(),
-			redirs: vec![],
+			redirs,
 			tokens: node_tks
 		};
 		Ok(Some(node))
@@ -505,7 +572,7 @@ impl<'t> ParseStream<'t> {
 			))
 		}
 		node_tks.push(self.next_tk().unwrap());
-		self.catch_separator(&mut node_tks);
+		self.assert_separator(&mut node_tks)?;
 
 		cond_node = CondNode { cond: Box::new(cond), body  };
 		let loop_node = Node {
@@ -594,7 +661,7 @@ impl<'t> ParseStream<'t> {
 				TkRule::Redir => {
 					node_tks.push(tk.clone());
 					let redir_bldr = tk.span.as_str().parse::<RedirBldr>().unwrap();
-					if redir_bldr.io_info.is_none() {
+					if redir_bldr.io_mode.is_none() {
 						let path_tk = tk_iter.next();
 
 						if path_tk.is_none_or(|tk| tk.class == TkRule::EOI) {
@@ -610,29 +677,10 @@ impl<'t> ParseStream<'t> {
 
 						let path_tk = path_tk.unwrap();
 						node_tks.push(path_tk.clone());
+						let redir_class = redir_bldr.class.unwrap();
+						let pathbuf = PathBuf::from(path_tk.span.as_str());
 
-						let Ok(file) = (match redir_bldr.class.unwrap() {
-							RedirType::Input => {
-								OpenOptions::new()
-									.read(true)
-									.open(Path::new(path_tk.span.as_str()))
-							}
-							RedirType::Output => {
-								OpenOptions::new()
-									.write(true)
-									.create(true)
-									.truncate(true)
-									.open(Path::new(path_tk.span.as_str()))
-							}
-							RedirType::Append => {
-								OpenOptions::new()
-									.write(true)
-									.create(true)
-									.append(true)
-									.open(Path::new(path_tk.span.as_str()))
-							}
-							_ => unreachable!()
-						}) else {
+						let Ok(file) = get_redir_file(redir_class, pathbuf) else {
 							self.flags |= ParseFlags::ERROR;
 							return Err(parse_err_full(
 								"Error opening file for redirection",
@@ -640,8 +688,8 @@ impl<'t> ParseStream<'t> {
 							));
 						};
 
-						let io_info = IoFile::new(redir_bldr.tgt_fd.unwrap(), file);
-						let redir_bldr = redir_bldr.with_io_info(Box::new(io_info));
+						let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), file);
+						let redir_bldr = redir_bldr.with_io_mode(io_mode);
 						let redir = redir_bldr.build();
 						redirs.push(redir);
 					}
@@ -795,6 +843,32 @@ fn node_is_punctuated<'t>(tokens: &Vec<Tk>) -> bool {
 	tokens.last().is_some_and(|tk| {
 		matches!(tk.class, TkRule::Sep)
 	})
+}
+
+fn get_redir_file(class: RedirType, path: PathBuf) -> ShResult<File> {
+	let result = match class {
+		RedirType::Input => {
+			OpenOptions::new()
+				.read(true)
+				.open(Path::new(&path))
+		}
+		RedirType::Output => {
+			OpenOptions::new()
+				.write(true)
+				.create(true)
+				.truncate(true)
+				.open(Path::new(&path))
+		}
+		RedirType::Append => {
+			OpenOptions::new()
+				.write(true)
+				.create(true)
+				.append(true)
+				.open(Path::new(&path))
+		}
+		_ => unimplemented!()
+	};
+	Ok(result?)
 }
 
 fn parse_err_full<'t>(reason: &str, blame: &Span<'t>) -> ShErr {

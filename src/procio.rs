@@ -1,188 +1,67 @@
 use std::{fmt::Debug, ops::{Deref, DerefMut}};
 
-use crate::{libsh::error::ShResult, parse::{Redir, RedirType}, prelude::*};
+use crate::{libsh::{error::ShResult, utils::RedirVecUtils}, parse::{Redir, RedirType}, prelude::*};
 
 // Credit to fish-shell for many of the implementation ideas present in this module
 // https://fishshell.com/
 
+#[derive(Clone,Debug)]
 pub enum IoMode {
-	Fd,
-	File,
-	Pipe,
+	Fd { tgt_fd: RawFd, src_fd: Rc<OwnedFd> },
+	File { tgt_fd: RawFd, file: Rc<File> },
+	Pipe { tgt_fd: RawFd, pipe: Rc<OwnedFd> },
 }
 
-pub trait IoInfo: Read {
-	fn mode(&self) -> IoMode;
-	/// The fildesc that is replaced by src_fd in dup2()
-	/// e.g. `dup2(src_fd, tgt_fd)`
-	fn tgt_fd(&self) -> RawFd;
-	/// The fildesc that replaces tgt_fd in dup2()
-	/// e.g. `dup2(src_fd, tgt_fd)`
-	fn src_fd(&self) -> RawFd;
-	fn print(&self) -> String;
-	fn close(&mut self) -> ShResult<()>;
-}
-
-macro_rules! read_impl {
-	($type:path) => {
-		impl Read for $type {
-			fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-				let src_fd = self.src_fd();
-
-				Ok(read(src_fd, buf)?)
-			}
+impl IoMode {
+	pub fn fd(tgt_fd: RawFd, src_fd: RawFd) -> Self {
+		let src_fd = unsafe { OwnedFd::from_raw_fd(src_fd).into() };
+		Self::Fd { tgt_fd, src_fd }
+	}
+	pub fn file(tgt_fd: RawFd, file: File) -> Self {
+		let file = file.into();
+		Self::File { tgt_fd, file }
+	}
+	pub fn pipe(tgt_fd: RawFd, pipe: OwnedFd) -> Self {
+		let pipe = pipe.into();
+		Self::Pipe { tgt_fd, pipe }
+	}
+	pub fn tgt_fd(&self) -> RawFd {
+		match self {
+			IoMode::Fd { tgt_fd, src_fd: _ } |
+			IoMode::File { tgt_fd, file: _ } |
+			IoMode::Pipe { tgt_fd, pipe: _ } => *tgt_fd
 		}
-	};
-}
-read_impl!(IoPipe);
-read_impl!(IoFile);
-read_impl!(IoFd);
-
-
-// TODO: implement this
-impl Debug for Box<dyn IoInfo> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f,"{}",self.print())
 	}
-}
-
-/// A redirection to a raw fildesc
-/// e.g. `2>&1`
-#[derive(Debug)]
-pub struct IoFd {
-	tgt_fd: RawFd,
-	src_fd: RawFd
-}
-
-impl IoFd {
-	pub fn new(tgt_fd: RawFd, src_fd: RawFd) -> Self {
-		Self { tgt_fd, src_fd }
-	}
-}
-
-impl IoInfo for IoFd {
-	fn mode(&self) -> IoMode {
-		IoMode::Fd
-	}
-	fn tgt_fd(&self) -> RawFd {
-		self.tgt_fd
-	}
-	fn src_fd(&self) -> RawFd {
-		self.src_fd
-	}
-	fn close(&mut self) -> ShResult<()> {
-		if self.src_fd == -1 {
-			return Ok(())
+	pub fn src_fd(&self) -> RawFd {
+		match self {
+			IoMode::Fd { tgt_fd: _, src_fd } => src_fd.as_raw_fd(),
+			IoMode::File { tgt_fd: _, file } => file.as_raw_fd(),
+			IoMode::Pipe { tgt_fd: _, pipe } => pipe.as_raw_fd()
 		}
-		close(self.src_fd)?;
-		self.src_fd = -1;
-		Ok(())
 	}
-	fn print(&self) -> String {
-		format!("{:?}",self)
-	}
-}
-
-/// A redirection to a file
-/// e.g. `> file.txt`
-#[derive(Debug)]
-pub struct IoFile {
-	tgt_fd: RawFd,
-	file: File
-}
-
-impl IoFile {
-	pub fn new(tgt_fd: RawFd, file: File) -> Self {
-		Self { tgt_fd, file }
-	}
-}
-
-impl IoInfo for IoFile {
-	fn mode(&self) -> IoMode {
-		IoMode::File
-	}
-	fn tgt_fd(&self) -> RawFd {
-		self.tgt_fd
-	}
-	fn src_fd(&self) -> RawFd {
-		self.file.as_raw_fd()
-	}
-	fn close(&mut self) -> ShResult<()> {
-		// Closes on it's own when it's dropped
-		Ok(())
-	}
-	fn print(&self) -> String {
-		format!("{:?}",self)
-	}
-}
-
-/// A redirection to a pipe
-/// e.g. `echo foo | sed s/foo/bar/`
-#[derive(Debug)]
-pub struct IoPipe {
-	tgt_fd: RawFd,
-	pipe_fd: OwnedFd
-}
-
-impl IoPipe {
-	pub fn new(tgt_fd: RawFd, pipe_fd: OwnedFd) -> Self {
-		Self { tgt_fd, pipe_fd }
-	}
-	pub fn get_pipes() -> (Self, Self) {
+	pub fn get_pipes() -> (Self,Self) {
 		let (rpipe,wpipe) = pipe().unwrap();
-		let r_iopipe = Self::new(STDIN_FILENO, rpipe);
-		let w_iopipe = Self::new(STDOUT_FILENO, wpipe);
-
-		(r_iopipe,w_iopipe)
+		(
+			Self::Pipe { tgt_fd: STDIN_FILENO, pipe: rpipe.into() },
+			Self::Pipe { tgt_fd: STDOUT_FILENO, pipe: wpipe.into() }
+		)
 	}
 }
 
-impl IoInfo for IoPipe {
-	fn mode(&self) -> IoMode {
-		IoMode::Pipe
-	}
-	fn tgt_fd(&self) -> RawFd {
-		self.tgt_fd
-	}
-	fn src_fd(&self) -> RawFd {
-		self.pipe_fd.as_raw_fd()
-	}
-	fn close(&mut self) -> ShResult<()> {
-		// Closes on it's own
-		Ok(())
-	}
-	fn print(&self) -> String {
-		format!("{:?}",self)
-	}
-}
-
-pub struct FdWriter {
-	tgt: OwnedFd
-}
-
-impl FdWriter {
-	pub fn new(fd: i32) -> Self {
-		let tgt = unsafe { OwnedFd::from_raw_fd(fd) };
-		Self { tgt }
-	}
-}
-
-impl Write for FdWriter {
-	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-		Ok(write(&self.tgt, buf)?)
-	}
-	fn flush(&mut self) -> io::Result<()> {
-	  Ok(())
+impl Read for IoMode {
+	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+		let src_fd = self.src_fd();
+		Ok(read(src_fd, buf)?)
 	}
 }
 
 /// A struct wrapping three fildescs representing `stdin`, `stdout`, and `stderr` respectively
-#[derive(Debug)]
-pub struct IoGroup(OwnedFd,OwnedFd,OwnedFd);
+#[derive(Debug,Clone)]
+pub struct IoGroup(RawFd,RawFd,RawFd);
 
 /// A single stack frame used with the IoStack
 /// Each stack frame represents the redirections of a single command
-#[derive(Default,Debug)]
+#[derive(Default,Clone,Debug)]
 pub struct IoFrame {
 	redirs: Vec<Redir>,
 	saved_io: Option<IoGroup>,
@@ -196,65 +75,44 @@ impl<'e> IoFrame {
 		Self { redirs, saved_io: None }
 	}
 
-	/// This method returns a 2-tuple of `IoFrames`.
-	/// This is to be used in the case of shell structures such as `if-then` and `while-do`.
-	/// # Params
-	/// * redirs: a vector of redirections
+	/// Splits the frame into two frames
 	///
-	/// # Returns
-	/// * An `IoFrame` containing all of the redirections which target stdin
-	/// * An `IoFrame` containing all of the redirections which target stdout/stderr
-	///
-	/// # Purpose
-	/// In the case of something like `if cat; then echo foo; fi < input.txt > output.txt`
-	/// This will cleanly separate the redirections such that `cat` can receive the input from input.txt
-	/// and `echo foo` can redirect it's output to output.txt
-	pub fn cond_and_body(redirs: Vec<Redir>) -> (Self, Self) {
-		let mut output_redirs = vec![];
-		let mut input_redirs = vec![];
-		for redir in redirs {
-			match redir.class {
-				RedirType::Input => input_redirs.push(redir),
-				RedirType::Pipe => {
-					match redir.io_info.tgt_fd() {
-						STDIN_FILENO => input_redirs.push(redir),
-						STDOUT_FILENO |
-						STDERR_FILENO => output_redirs.push(redir),
-						_ => unreachable!()
-					}
-				}
-				_ => output_redirs.push(redir)
-			}
-		}
-		(Self::from_redirs(input_redirs),Self::from_redirs(output_redirs))
+	/// One frame contains input redirections, the other contains output redirections
+	/// This is used in shell structures to route redirections either *to* the condition, or *from* the body
+	/// The first field of the tuple contains input redirections (used for the condition)
+	/// The second field contains output redirections (used for the body)
+	pub fn split_frame(self) -> (Self,Self) {
+		let Self { redirs, saved_io: _ } = self;
+		let (input_redirs,output_redirs) = redirs.split_by_channel();
+		(
+			Self::from_redirs(input_redirs),
+			Self::from_redirs(output_redirs)
+		)
 	}
 	pub fn save(&'e mut self)  {
-		unsafe {
-			let saved_in = OwnedFd::from_raw_fd(dup(STDIN_FILENO).unwrap());
-			let saved_out = OwnedFd::from_raw_fd(dup(STDOUT_FILENO).unwrap());
-			let saved_err = OwnedFd::from_raw_fd(dup(STDERR_FILENO).unwrap());
-			self.saved_io = Some(IoGroup(saved_in,saved_out,saved_err));
-		}
+		let saved_in = dup(STDIN_FILENO).unwrap();
+		let saved_out = dup(STDOUT_FILENO).unwrap();
+		let saved_err = dup(STDERR_FILENO).unwrap();
+		self.saved_io = Some(IoGroup(saved_in,saved_out,saved_err));
 	}
 	pub fn redirect(&mut self) -> ShResult<()> {
 		self.save();
 		for redir in &mut self.redirs {
-			let io_info = &mut redir.io_info;
-			let tgt_fd = io_info.tgt_fd();
-			let src_fd = io_info.src_fd();
+			let io_mode = &mut redir.io_mode;
+			let tgt_fd = io_mode.tgt_fd();
+			let src_fd = io_mode.src_fd();
 			dup2(src_fd, tgt_fd)?;
-			io_info.close()?;
 		}
 		Ok(())
 	}
 	pub fn restore(&mut self) -> ShResult<()> {
-		while let Some(mut redir) = self.pop() {
-			redir.io_info.close()?;
-		}
 		if let Some(saved) = self.saved_io.take() {
-			dup2(saved.0.as_raw_fd(), STDIN_FILENO)?;
-			dup2(saved.1.as_raw_fd(), STDOUT_FILENO)?;
-			dup2(saved.2.as_raw_fd(), STDERR_FILENO)?;
+			dup2(saved.0, STDIN_FILENO)?;
+			close(saved.0)?;
+			dup2(saved.1, STDOUT_FILENO)?;
+			close(saved.1)?;
+			dup2(saved.2, STDERR_FILENO)?;
+			close(saved.2)?;
 		}
 		Ok(())
 	}

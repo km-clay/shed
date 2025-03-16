@@ -318,6 +318,7 @@ impl JobTab {
 	}
 }
 
+#[derive(Debug)]
 pub struct JobBldr {
 	table_id: Option<usize>,
 	pgid: Option<Pid>,
@@ -370,6 +371,25 @@ impl JobBldr {
 			pgid: self.pgid.unwrap_or(Pid::from_raw(0)),
 			children: self.children
 		}
+	}
+}
+
+/// A wrapper around Vec<JobBldr> with some job-specific methods
+pub struct JobStack(Vec<JobBldr>);
+
+impl JobStack {
+	pub fn new() -> Self {
+		Self(vec![])
+	}
+	pub fn new_job(&mut self) {
+		self.0.push(JobBldr::new())
+	}
+	pub fn curr_job_mut(&mut self) -> Option<&mut JobBldr> {
+		self.0.last_mut()
+	}
+	pub fn finalize_job(&mut self) -> Option<Job> {
+		let job = self.0.pop().map(|bldr| bldr.build());
+		job
 	}
 }
 

@@ -44,6 +44,12 @@ impl<'s> ShErr {
 		let span = span.into();
 		Self::Full { kind, msg, span }
 	}
+	pub fn kind(&self) -> &ShErrKind {
+		match self {
+			ShErr::Simple { kind, msg: _ } |
+			ShErr::Full { kind, msg: _, span: _ } => kind
+		}
+	}
 }
 
 impl Display for ShErr {

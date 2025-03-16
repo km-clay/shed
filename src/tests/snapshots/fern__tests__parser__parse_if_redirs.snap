@@ -23,7 +23,7 @@ expression: nodes
                                                                     class: Str,
                                                                     span: Span {
                                                                         range: 3..6,
-                                                                        source: "if foo; then echo bar; fi",
+                                                                        source: "if foo; then echo bar; fi > file.txt",
                                                                     },
                                                                     flags: TkFlags(
                                                                         IS_CMD,
@@ -40,7 +40,7 @@ expression: nodes
                                                                 class: Str,
                                                                 span: Span {
                                                                     range: 3..6,
-                                                                    source: "if foo; then echo bar; fi",
+                                                                    source: "if foo; then echo bar; fi > file.txt",
                                                                 },
                                                                 flags: TkFlags(
                                                                     IS_CMD,
@@ -50,7 +50,7 @@ expression: nodes
                                                                 class: Sep,
                                                                 span: Span {
                                                                     range: 6..8,
-                                                                    source: "if foo; then echo bar; fi",
+                                                                    source: "if foo; then echo bar; fi > file.txt",
                                                                 },
                                                                 flags: TkFlags(
                                                                     0x0,
@@ -70,7 +70,7 @@ expression: nodes
                                                     class: Str,
                                                     span: Span {
                                                         range: 3..6,
-                                                        source: "if foo; then echo bar; fi",
+                                                        source: "if foo; then echo bar; fi > file.txt",
                                                     },
                                                     flags: TkFlags(
                                                         IS_CMD,
@@ -80,7 +80,7 @@ expression: nodes
                                                     class: Sep,
                                                     span: Span {
                                                         range: 6..8,
-                                                        source: "if foo; then echo bar; fi",
+                                                        source: "if foo; then echo bar; fi > file.txt",
                                                     },
                                                     flags: TkFlags(
                                                         0x0,
@@ -100,7 +100,7 @@ expression: nodes
                                                                         class: Str,
                                                                         span: Span {
                                                                             range: 13..17,
-                                                                            source: "if foo; then echo bar; fi",
+                                                                            source: "if foo; then echo bar; fi > file.txt",
                                                                         },
                                                                         flags: TkFlags(
                                                                             IS_CMD | BUILTIN,
@@ -110,7 +110,7 @@ expression: nodes
                                                                         class: Str,
                                                                         span: Span {
                                                                             range: 18..21,
-                                                                            source: "if foo; then echo bar; fi",
+                                                                            source: "if foo; then echo bar; fi > file.txt",
                                                                         },
                                                                         flags: TkFlags(
                                                                             0x0,
@@ -127,7 +127,7 @@ expression: nodes
                                                                     class: Str,
                                                                     span: Span {
                                                                         range: 13..17,
-                                                                        source: "if foo; then echo bar; fi",
+                                                                        source: "if foo; then echo bar; fi > file.txt",
                                                                     },
                                                                     flags: TkFlags(
                                                                         IS_CMD | BUILTIN,
@@ -137,7 +137,7 @@ expression: nodes
                                                                     class: Str,
                                                                     span: Span {
                                                                         range: 18..21,
-                                                                        source: "if foo; then echo bar; fi",
+                                                                        source: "if foo; then echo bar; fi > file.txt",
                                                                     },
                                                                     flags: TkFlags(
                                                                         0x0,
@@ -147,7 +147,7 @@ expression: nodes
                                                                     class: Sep,
                                                                     span: Span {
                                                                         range: 21..23,
-                                                                        source: "if foo; then echo bar; fi",
+                                                                        source: "if foo; then echo bar; fi > file.txt",
                                                                     },
                                                                     flags: TkFlags(
                                                                         0x0,
@@ -167,7 +167,7 @@ expression: nodes
                                                         class: Str,
                                                         span: Span {
                                                             range: 13..17,
-                                                            source: "if foo; then echo bar; fi",
+                                                            source: "if foo; then echo bar; fi > file.txt",
                                                         },
                                                         flags: TkFlags(
                                                             IS_CMD | BUILTIN,
@@ -177,7 +177,7 @@ expression: nodes
                                                         class: Str,
                                                         span: Span {
                                                             range: 18..21,
-                                                            source: "if foo; then echo bar; fi",
+                                                            source: "if foo; then echo bar; fi > file.txt",
                                                         },
                                                         flags: TkFlags(
                                                             0x0,
@@ -187,7 +187,7 @@ expression: nodes
                                                         class: Sep,
                                                         span: Span {
                                                             range: 21..23,
-                                                            source: "if foo; then echo bar; fi",
+                                                            source: "if foo; then echo bar; fi > file.txt",
                                                         },
                                                         flags: TkFlags(
                                                             0x0,
@@ -203,13 +203,26 @@ expression: nodes
                             flags: NdFlags(
                                 0x0,
                             ),
-                            redirs: [],
+                            redirs: [
+                                Redir {
+                                    io_mode: File {
+                                        tgt_fd: 1,
+                                        file: File {
+                                            fd: 3,
+                                            path: "/home/pagedmov/Coding/projects/rust/fern/file.txt",
+                                            read: false,
+                                            write: true,
+                                        },
+                                    },
+                                    class: Output,
+                                },
+                            ],
                             tokens: [
                                 Tk {
                                     class: Str,
                                     span: Span {
                                         range: 0..2,
-                                        source: "if foo; then echo bar; fi",
+                                        source: "if foo; then echo bar; fi > file.txt",
                                     },
                                     flags: TkFlags(
                                         KEYWORD,
@@ -219,7 +232,7 @@ expression: nodes
                                     class: Str,
                                     span: Span {
                                         range: 3..6,
-                                        source: "if foo; then echo bar; fi",
+                                        source: "if foo; then echo bar; fi > file.txt",
                                     },
                                     flags: TkFlags(
                                         IS_CMD,
@@ -229,7 +242,7 @@ expression: nodes
                                     class: Sep,
                                     span: Span {
                                         range: 6..8,
-                                        source: "if foo; then echo bar; fi",
+                                        source: "if foo; then echo bar; fi > file.txt",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -239,7 +252,7 @@ expression: nodes
                                     class: Str,
                                     span: Span {
                                         range: 8..12,
-                                        source: "if foo; then echo bar; fi",
+                                        source: "if foo; then echo bar; fi > file.txt",
                                     },
                                     flags: TkFlags(
                                         KEYWORD,
@@ -249,7 +262,7 @@ expression: nodes
                                     class: Str,
                                     span: Span {
                                         range: 13..17,
-                                        source: "if foo; then echo bar; fi",
+                                        source: "if foo; then echo bar; fi > file.txt",
                                     },
                                     flags: TkFlags(
                                         IS_CMD | BUILTIN,
@@ -259,7 +272,7 @@ expression: nodes
                                     class: Str,
                                     span: Span {
                                         range: 18..21,
-                                        source: "if foo; then echo bar; fi",
+                                        source: "if foo; then echo bar; fi > file.txt",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -269,7 +282,7 @@ expression: nodes
                                     class: Sep,
                                     span: Span {
                                         range: 21..23,
-                                        source: "if foo; then echo bar; fi",
+                                        source: "if foo; then echo bar; fi > file.txt",
                                     },
                                     flags: TkFlags(
                                         0x0,
@@ -279,10 +292,30 @@ expression: nodes
                                     class: Str,
                                     span: Span {
                                         range: 23..25,
-                                        source: "if foo; then echo bar; fi",
+                                        source: "if foo; then echo bar; fi > file.txt",
                                     },
                                     flags: TkFlags(
                                         KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Redir,
+                                    span: Span {
+                                        range: 26..27,
+                                        source: "if foo; then echo bar; fi > file.txt",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 28..36,
+                                        source: "if foo; then echo bar; fi > file.txt",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
                                     ),
                                 },
                             ],
@@ -300,7 +333,7 @@ expression: nodes
                     class: Str,
                     span: Span {
                         range: 0..2,
-                        source: "if foo; then echo bar; fi",
+                        source: "if foo; then echo bar; fi > file.txt",
                     },
                     flags: TkFlags(
                         KEYWORD,
@@ -310,7 +343,7 @@ expression: nodes
                     class: Str,
                     span: Span {
                         range: 3..6,
-                        source: "if foo; then echo bar; fi",
+                        source: "if foo; then echo bar; fi > file.txt",
                     },
                     flags: TkFlags(
                         IS_CMD,
@@ -320,7 +353,7 @@ expression: nodes
                     class: Sep,
                     span: Span {
                         range: 6..8,
-                        source: "if foo; then echo bar; fi",
+                        source: "if foo; then echo bar; fi > file.txt",
                     },
                     flags: TkFlags(
                         0x0,
@@ -330,7 +363,7 @@ expression: nodes
                     class: Str,
                     span: Span {
                         range: 8..12,
-                        source: "if foo; then echo bar; fi",
+                        source: "if foo; then echo bar; fi > file.txt",
                     },
                     flags: TkFlags(
                         KEYWORD,
@@ -340,7 +373,7 @@ expression: nodes
                     class: Str,
                     span: Span {
                         range: 13..17,
-                        source: "if foo; then echo bar; fi",
+                        source: "if foo; then echo bar; fi > file.txt",
                     },
                     flags: TkFlags(
                         IS_CMD | BUILTIN,
@@ -350,7 +383,7 @@ expression: nodes
                     class: Str,
                     span: Span {
                         range: 18..21,
-                        source: "if foo; then echo bar; fi",
+                        source: "if foo; then echo bar; fi > file.txt",
                     },
                     flags: TkFlags(
                         0x0,
@@ -360,7 +393,7 @@ expression: nodes
                     class: Sep,
                     span: Span {
                         range: 21..23,
-                        source: "if foo; then echo bar; fi",
+                        source: "if foo; then echo bar; fi > file.txt",
                     },
                     flags: TkFlags(
                         0x0,
@@ -370,10 +403,30 @@ expression: nodes
                     class: Str,
                     span: Span {
                         range: 23..25,
-                        source: "if foo; then echo bar; fi",
+                        source: "if foo; then echo bar; fi > file.txt",
                     },
                     flags: TkFlags(
                         KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Redir,
+                    span: Span {
+                        range: 26..27,
+                        source: "if foo; then echo bar; fi > file.txt",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 28..36,
+                        source: "if foo; then echo bar; fi > file.txt",
+                    },
+                    flags: TkFlags(
+                        0x0,
                     ),
                 },
             ],

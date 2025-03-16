@@ -29,7 +29,7 @@ pub const BUILTINS: [&str;9] = [
 /// # Parameters
 /// * argv - The vector of raw argument tokens
 /// * job - A mutable reference to a `JobBldr`
-/// * io_info - An optional 2-tuple consisting of a mutable reference to an `IoStack` and a vector of `Redirs`
+/// * io_mode - An optional 2-tuple consisting of a mutable reference to an `IoStack` and a vector of `Redirs`
 ///
 /// # Behavior
 /// * Cleans, expands, and word splits the arg vector
@@ -47,7 +47,7 @@ pub const BUILTINS: [&str;9] = [
 pub fn setup_builtin<'t>(
 	argv: Vec<Tk<'t>>,
 	job: &'t mut JobBldr,
-	io_info: Option<(&mut IoStack,Vec<Redir>)>,
+	io_mode: Option<(&mut IoStack,Vec<Redir>)>,
 ) -> ShResult<(Vec<(String,Span<'t>)>, Option<IoFrame>)> {
 	let mut argv: Vec<(String,Span)> = prepare_argv(argv);
 
@@ -61,7 +61,7 @@ pub fn setup_builtin<'t>(
 	let child = ChildProc::new(Pid::this(), Some(&cmd_name), Some(child_pgid))?;
 	job.push_child(child);
 
-	let io_frame = if let Some((io_stack,redirs)) = io_info {
+	let io_frame = if let Some((io_stack,redirs)) = io_mode {
 		io_stack.append_to_frame(redirs);
 		let mut io_frame = io_stack.pop_frame();
 		io_frame.redirect()?;

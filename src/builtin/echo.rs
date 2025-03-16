@@ -9,7 +9,6 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 	let (argv,io_frame) = setup_builtin(argv, job, Some((io_stack,node.redirs)))?;
 
 	let stdout = borrow_fd(STDOUT_FILENO);
-	flog!(DEBUG, argv);
 
 	let mut echo_output = argv.into_iter()
 		.map(|a| a.0) // Extract the String from the tuple of (String,Span)
@@ -17,7 +16,6 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 		.join(" ");
 
 	echo_output.push('\n');
-	flog!(DEBUG, echo_output);
 
 	write(stdout, echo_output.as_bytes())?;
 
