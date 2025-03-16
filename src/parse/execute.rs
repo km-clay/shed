@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
 
-use crate::{builtin::{cd::cd, echo::echo, export::export, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ShErrKind, ShResult}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, write_vars}};
+use crate::{builtin::{cd::cd, echo::echo, export::export, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, exec_input, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ErrSpan, ShErr, ShErrKind, ShResult}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars}};
 
-use super::{lex::{Span, Tk, TkFlags}, AssignKind, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, Redir, RedirType};
+use super::{lex::{LexFlags, LexStream, Span, Tk, TkFlags}, AssignKind, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParseStream, Redir, RedirType};
 
 pub enum AssignBehavior {
 	Export,
@@ -61,6 +61,8 @@ impl<'t> Dispatcher<'t> {
 			NdRule::Pipeline {..} => self.exec_pipeline(node)?,
 			NdRule::IfNode {..} => self.exec_if(node)?,
 			NdRule::LoopNode {..} => self.exec_loop(node)?,
+			NdRule::BraceGrp {..} => self.exec_brc_grp(node)?,
+			NdRule::FuncDef {..} => self.exec_func_def(node)?,
 			NdRule::Command {..} => self.dispatch_cmd(node)?,
 			_ => unreachable!()
 		}
@@ -68,10 +70,12 @@ impl<'t> Dispatcher<'t> {
 	}
 	pub fn dispatch_cmd(&mut self, node: Node<'t>) -> ShResult<()> {
 		let Some(cmd) = node.get_command() else {
-			return self.exec_cmd(node)
+			return self.exec_cmd(node) // Argv is empty, probably an assignment
 		};
 		if cmd.flags.contains(TkFlags::BUILTIN) {
 			self.exec_builtin(node)
+		} else if is_func(node.get_command().cloned()) {
+			self.exec_func(node)
 		} else {
 			self.exec_cmd(node)
 		}
@@ -93,6 +97,66 @@ impl<'t> Dispatcher<'t> {
 				ConjunctOp::Null => break
 			}
 		}
+		Ok(())
+	}
+	pub fn exec_func_def(&mut self, func_def: Node<'t>) -> ShResult<()> {
+		let NdRule::FuncDef { name, body } = func_def.class else {
+			unreachable!()
+		};
+		let body_span = body.get_span();
+		let body = body_span.as_str();
+		let name = name.span.as_str().strip_suffix("()").unwrap();
+		write_logic(|l| l.insert_func(name, body));
+		Ok(())
+	}
+	pub fn exec_func(&mut self, func: Node<'t>) -> ShResult<()> {
+		let blame: ErrSpan = func.get_span().into();
+		// TODO: Find a way to store functions as pre-parsed nodes so we don't have to re-parse them
+		let NdRule::Command { assignments, mut argv } = func.class else {
+			unreachable!()
+		};
+
+		self.set_assignments(assignments, AssignBehavior::Export);
+
+		let mut io_frame = self.io_stack.pop_frame();
+		io_frame.extend(func.redirs);
+
+		let func_name = argv.remove(0).span.as_str().to_string();
+		if let Some(func_body) = read_logic(|l| l.get_func(&func_name)) {
+			let saved_sh_args = read_vars(|v| v.sh_argv().clone());
+			write_vars(|v| {
+				v.clear_args();
+				for arg in argv {
+					v.bpush_arg(arg.to_string());
+				}
+			});
+
+			let result = exec_input(&func_body, Some(io_frame));
+
+			write_vars(|v| *v.sh_argv_mut() = saved_sh_args);
+			Ok(result?)
+		} else {
+			Err(
+				ShErr::full(
+					ShErrKind::InternalErr,
+					format!("Failed to find function '{}'",func_name),
+					blame
+				)
+			)
+		}
+	}
+	pub fn exec_brc_grp(&mut self, brc_grp: Node<'t>) -> ShResult<()> {
+		let NdRule::BraceGrp { body } = brc_grp.class else {
+			unreachable!()
+		};
+		let mut io_frame = self.io_stack.pop_frame();
+		io_frame.extend(brc_grp.redirs);
+
+		for node in body {
+			self.io_stack.push_frame(io_frame.clone());
+			self.dispatch_node(node)?;
+		}
+
 		Ok(())
 	}
 	pub fn exec_loop(&mut self, loop_stmt: Node<'t>) -> ShResult<()> {
@@ -412,4 +476,11 @@ pub fn get_pipe_stack(num_cmds: usize) -> Vec<(Option<Redir>,Option<Redir>)> {
 		}
 	}
 	stack
+}
+
+pub fn is_func<'t>(tk: Option<Tk<'t>>) -> bool {
+	let Some(tk) = tk else {
+		return false
+	};
+	read_logic(|l| l.get_func(&tk.to_string())).is_some()
 }

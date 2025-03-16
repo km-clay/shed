@@ -613,6 +613,7 @@ pub fn enable_reaping() -> ShResult<()> {
 pub fn wait_fg(job: Job) -> ShResult<()> {
 	flog!(TRACE, "Waiting on foreground job");
 	let mut code = 0;
+	flog!(DEBUG,job.pgid());
 	attach_tty(job.pgid())?;
 	disable_reaping()?;
 	let statuses = write_jobs(|j| j.new_fg(job))?;

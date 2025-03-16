@@ -13,6 +13,7 @@ pub mod tests;
 
 use libsh::error::ShResult;
 use parse::{execute::Dispatcher, lex::{LexFlags, LexStream}, ParseStream};
+use procio::IoFrame;
 use signal::sig_setup;
 use termios::{LocalFlags, Termios};
 use crate::prelude::*;
@@ -46,7 +47,7 @@ fn set_termios() {
 	}
 }
 
-pub fn exec_input(input: &str) -> ShResult<()> {
+pub fn exec_input(input: &str, io_frame: Option<IoFrame>) -> ShResult<()> {
 	let parse_start = Instant::now();
 	let mut tokens = vec![];
 	for token in LexStream::new(&input, LexFlags::empty()) {
@@ -61,6 +62,9 @@ pub fn exec_input(input: &str) -> ShResult<()> {
 
 	let exec_start = Instant::now();
 	let mut dispatcher = Dispatcher::new(nodes);
+	if let Some(frame) = io_frame {
+		dispatcher.io_stack.push(frame)
+	}
 	dispatcher.begin_dispatch()?;
 	flog!(INFO, "cmd duration: {:?}", exec_start.elapsed());
 
@@ -77,7 +81,7 @@ fn main() {
 	loop {
 		let input = prompt::read_line().unwrap();
 
-		if let Err(e) = exec_input(&input) {
+		if let Err(e) = exec_input(&input,None) {
 			eprintln!("{e}");
 		}
 	}

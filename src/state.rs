@@ -1,11 +1,43 @@
-use std::{collections::{HashMap, VecDeque}, sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}};
+use std::{cell::RefCell, collections::{HashMap, VecDeque}, ops::Range, sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}};
 
-use crate::{exec_input, jobs::JobTab, libsh::{error::ShResult, utils::VecDequeExt}, parse::lex::get_char, prelude::*};
+use crate::{exec_input, jobs::JobTab, libsh::{error::ShResult, utils::VecDequeExt}, parse::{lex::{get_char, Tk}, Node}, prelude::*};
 
 pub static JOB_TABLE: LazyLock<RwLock<JobTab>> = LazyLock::new(|| RwLock::new(JobTab::new()));
 
 pub static VAR_TABLE: LazyLock<RwLock<VarTab>> = LazyLock::new(|| RwLock::new(VarTab::new()));
 
+pub static LOGIC_TABLE: LazyLock<RwLock<LogTab>> = LazyLock::new(|| RwLock::new(LogTab::new()));
+
+thread_local! {
+	pub static LAST_INPUT: RefCell<String> = RefCell::new(String::new());
+}
+
+/// The logic table for the shell
+///
+/// Contains aliases and functions
+pub struct LogTab {
+	// TODO: Find a way to store actual owned nodes instead of strings that must be re-parsed
+	functions: HashMap<String,String>,
+	aliases: HashMap<String,String>
+}
+
+impl LogTab {
+	pub fn new() -> Self {
+		Self { functions: HashMap::new(), aliases: HashMap::new() }
+	}
+	pub fn insert_func(&mut self, name: &str, body: &str) {
+		self.functions.insert(name.into(), body.into());
+	}
+	pub fn get_func(&self, name: &str) -> Option<String> {
+		self.functions.get(name).cloned()
+	}
+	pub fn insert_alias(&mut self, name: &str, body: &str) {
+		self.aliases.insert(name.into(), body.into());
+	}
+	pub fn get_alias(&self, name: &str) -> Option<String> {
+		self.aliases.get(name).cloned()
+	}
+}
 
 pub struct VarTab {
 	vars: HashMap<String,String>,
@@ -34,6 +66,15 @@ impl VarTab {
 		for arg in env::args() {
 			self.bpush_arg(arg);
 		}
+	}
+	pub fn sh_argv(&self) -> &VecDeque<String> {
+		&self.sh_argv
+	}
+	pub fn sh_argv_mut(&mut self) -> &mut VecDeque<String> {
+		&mut self.sh_argv
+	}
+	pub fn clear_args(&mut self) {
+		self.sh_argv.clear()
 	}
 	fn update_arg_params(&mut self) {
 		self.set_param('@', &self.sh_argv.clone().to_vec().join(" "));
@@ -131,6 +172,33 @@ pub fn write_vars<T, F: FnOnce(&mut RwLockWriteGuard<VarTab>) -> T>(f: F) -> T {
 	f(lock)
 }
 
+/// Read from the logic table
+pub fn read_logic<T, F: FnOnce(RwLockReadGuard<LogTab>) -> T>(f: F) -> T {
+	let lock = LOGIC_TABLE.read().unwrap();
+	f(lock)
+}
+
+/// Write to the logic table
+pub fn write_logic<T, F: FnOnce(&mut RwLockWriteGuard<LogTab>) -> T>(f: F) -> T {
+	let lock = &mut LOGIC_TABLE.write().unwrap();
+	f(lock)
+}
+
+pub fn set_last_input(input: &str) {
+	LAST_INPUT.with(|input_ref| {
+		let mut last_input = input_ref.borrow_mut();
+		last_input.clear();
+		last_input.push_str(input);
+	})
+}
+
+pub fn slice_last_input(range: Range<usize>) -> String {
+	LAST_INPUT.with(|input_ref| {
+		let input = input_ref.borrow();
+		input[range].to_string()
+	})
+}
+
 pub fn get_status() -> i32 {
 	read_vars(|v| v.get_param('?')).parse::<i32>().unwrap()
 }
@@ -145,6 +213,6 @@ pub fn source_file(path: PathBuf) -> ShResult<()> {
 
 	let mut buf = String::new();
 	file.read_to_string(&mut buf)?;
-	exec_input(&buf)?;
+	exec_input(&buf, None)?;
 	Ok(())
 }

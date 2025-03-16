@@ -76,6 +76,8 @@ pub enum TkRule {
 	Bg,
 	Sep,
 	Redir,
+	BraceGrpStart,
+	BraceGrpEnd,
 	Expanded { exp: Vec<String> },
 	Comment,
 	EOI, // End-of-Input
@@ -156,6 +158,7 @@ bitflags! {
 		const FRESH          = 0b00010000;
 		/// The lexer has no more tokens to produce
 		const STALE          = 0b00100000;
+		const IN_BRC_GRP     = 0b01000000;
 	}
 }
 
@@ -192,13 +195,26 @@ impl<'t> LexStream<'t> {
 	pub fn slice_from_cursor(&self) -> Option<&'t str> {
 		self.slice(self.cursor..)
 	}
-	/// The next string token is a command name
-	pub fn next_is_cmd(&mut self) {
-		self.flags |= LexFlags::NEXT_IS_CMD;
+	pub fn in_brc_grp(&self) -> bool {
+		self.flags.contains(LexFlags::IN_BRC_GRP)
 	}
-	/// The next string token is not a command name
-	pub fn next_is_not_cmd(&mut self) {
-		self.flags &= !LexFlags::NEXT_IS_CMD;
+	pub fn set_in_brc_grp(&mut self, is: bool) {
+		if is {
+			self.flags |= LexFlags::IN_BRC_GRP;
+		} else {
+			self.flags &= !LexFlags::IN_BRC_GRP;
+		}
+	}
+	pub fn next_is_cmd(&self) -> bool {
+		self.flags.contains(LexFlags::NEXT_IS_CMD)
+	}
+	/// Set whether the next string token is a command name
+	pub fn set_next_is_cmd(&mut self, is: bool) {
+		if is {
+			self.flags |= LexFlags::NEXT_IS_CMD;
+		} else {
+			self.flags &= !LexFlags::NEXT_IS_CMD;
+		}
 	}
 	pub fn read_redir(&mut self) -> Option<ShResult<Tk<'t>>> {
 		assert!(self.cursor <= self.source.len());
@@ -299,6 +315,24 @@ impl<'t> LexStream<'t> {
 						pos += 1;
 					}
 				}
+				'{' if pos == self.cursor && self.next_is_cmd() => {
+					pos += 1;
+					let mut tk = self.get_token(self.cursor..pos, TkRule::BraceGrpStart);
+					tk.flags |= TkFlags::IS_CMD;
+					self.set_in_brc_grp(true);
+					self.set_next_is_cmd(true);
+
+					self.cursor = pos;
+					return Ok(tk)
+				}
+				'}' if pos == self.cursor && self.in_brc_grp() => {
+					pos += 1;
+					let tk = self.get_token(self.cursor..pos, TkRule::BraceGrpEnd);
+					self.set_in_brc_grp(false);
+					self.set_next_is_cmd(true);
+					self.cursor = pos;
+					return Ok(tk)
+				}
 				'"' | '\'' => {
 					self.in_quote = true;
 					quote_pos = Some(pos);
@@ -340,7 +374,9 @@ impl<'t> LexStream<'t> {
 			);
 		}
 		if self.flags.contains(LexFlags::NEXT_IS_CMD) {
-			if KEYWORDS.contains(&new_tk.span.as_str()) {
+			flog!(DEBUG,&new_tk.span.as_str());
+			if is_keyword(&new_tk.span.as_str()) {
+				flog!(DEBUG,"is keyword");
 				new_tk.flags |= TkFlags::KEYWORD;
 			} else if is_assignment(&new_tk.span.as_str()) {
 				new_tk.flags |= TkFlags::ASSIGN;
@@ -351,7 +387,7 @@ impl<'t> LexStream<'t> {
 					new_tk.flags |= TkFlags::BUILTIN;
 				}
 				flog!(TRACE, new_tk.flags);
-				self.next_is_not_cmd();
+				self.set_next_is_cmd(false);
 			}
 		}
 		self.cursor = pos;
@@ -411,7 +447,7 @@ impl<'t> Iterator for LexStream<'t> {
 			'\r' | '\n' | ';' => {
 				let ch_idx = self.cursor;
 				self.cursor += 1;
-				self.next_is_cmd();
+				self.set_next_is_cmd(true);
 
 				while let Some(ch) = get_char(self.source, self.cursor) {
 					if is_hard_sep(ch) { // Combine consecutive separators into one, including whitespace
@@ -438,7 +474,7 @@ impl<'t> Iterator for LexStream<'t> {
 			'|' => {
 				let ch_idx = self.cursor;
 				self.cursor += 1;
-				self.next_is_cmd();
+				self.set_next_is_cmd(true);
 
 				let tk_type = if let Some('|') = get_char(self.source, self.cursor) {
 					self.cursor += 1;
@@ -455,7 +491,7 @@ impl<'t> Iterator for LexStream<'t> {
 			'&' => {
 				let ch_idx = self.cursor;
 				self.cursor += 1;
-				self.next_is_cmd();
+				self.set_next_is_cmd(true);
 
 				let tk_type = if let Some('&') = get_char(self.source, self.cursor) {
 					self.cursor += 1;
@@ -467,7 +503,7 @@ impl<'t> Iterator for LexStream<'t> {
 			}
 			_ => {
 				if let Some(tk) = self.read_redir() {
-					self.next_is_not_cmd();
+					self.set_next_is_cmd(false);
 					match tk {
 						Ok(tk) => tk,
 						Err(e) => return Some(Err(e))
@@ -515,4 +551,9 @@ pub fn is_hard_sep(ch: char) -> bool {
 /// Is whitespace, but not a newline
 pub fn is_field_sep(ch: char) -> bool {
 	matches!(ch, ' ' | '\t')
+}
+
+pub fn is_keyword(slice: &str) -> bool {
+	KEYWORDS.contains(&slice) ||
+	(slice.ends_with("()") && !slice.ends_with("\\()"))
 }

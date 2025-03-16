@@ -9,6 +9,18 @@ use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::TkVecUtils}, pre
 pub mod lex;
 pub mod execute;
 
+/// Try to match a specific parsing rule
+///
+/// # Notes
+/// * If the match fails, execution continues.
+/// * If the match succeeds, the matched node is returned.
+macro_rules! try_match {
+    ($expr:expr) => {
+			if let Some(node) = $expr {
+				return Ok(Some(node))
+			}
+    };
+}
 
 #[derive(Clone,Debug)]
 pub struct Node<'t> {
@@ -244,6 +256,8 @@ pub enum NdRule<'t> {
 	Pipeline { cmds: Vec<Node<'t>>, pipe_err: bool },
 	Conjunction { elements: Vec<ConjunctNode<'t>> },
 	Assignment { kind: AssignKind, var: Tk<'t>, val: Tk<'t> },
+	BraceGrp { body: Vec<Node<'t>> },
+	FuncDef { name: Tk<'t>, body: Box<Node<'t>> }
 }
 
 #[derive(Debug)]
@@ -269,6 +283,9 @@ impl<'t> ParseStream<'t> {
 		} else {
 			&TkRule::Null
 		}
+	}
+	fn peek_tk(&self) -> Option<&Tk<'t>> {
+		self.tokens.first()
 	}
 	fn next_tk(&mut self) -> Option<Tk<'t>> {
 		if !self.tokens.is_empty() {
@@ -301,6 +318,7 @@ impl<'t> ParseStream<'t> {
 			TkRule::Or |
 			TkRule::Bg |
 			TkRule::And |
+			TkRule::BraceGrpEnd |
 			TkRule::Pipe => Ok(()),
 
 			TkRule::Sep => {
@@ -371,24 +389,126 @@ impl<'t> ParseStream<'t> {
 	/// This tries to match on different stuff that can appear in a command position
 	/// Matches shell commands like if-then-fi, pipelines, etc.
 	/// Ordered from specialized to general, with more generally matchable stuff appearing at the bottom
-	/// The check_pipelines parameter is used to prevent infinite recursion in parse_pipeline
+	/// The check_pipelines parameter is used to prevent left-recursion issues in self.parse_pipeline()
 	fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node<'t>>> {
-		if let Some(node) = self.parse_loop()? {
-			return Ok(Some(node))
-		}
-		if let Some(node) = self.parse_if()? {
-			return Ok(Some(node))
-		}
+		try_match!(self.parse_func_def()?);
+		try_match!(self.parse_brc_grp(false /* from_func_def */)?);
+		try_match!(self.parse_loop()?);
+		try_match!(self.parse_if()?);
 		if check_pipelines {
-			if let Some(node) = self.parse_pipeline()? {
-				return Ok(Some(node))
-			}
+			try_match!(self.parse_pipeline()?);
 		} else {
-			if let Some(node) = self.parse_cmd()? {
-				return Ok(Some(node))
-			}
+			try_match!(self.parse_cmd()?);
 		}
 		Ok(None)
+	}
+	fn parse_func_def(&mut self) -> ShResult<Option<Node<'t>>> {
+		let mut node_tks: Vec<Tk> = vec![];
+		let name;
+		let body;
+
+		if !is_func_name(self.peek_tk()) {
+			return Ok(None)
+		}
+		let name_tk = self.next_tk().unwrap();
+		node_tks.push(name_tk.clone());
+		name = name_tk;
+
+		let Some(brc_grp) = self.parse_brc_grp(true /* from_func_def */)? else {
+			return Err(parse_err_full(
+					"Expected a brace group after function name",
+					&node_tks.get_span().unwrap()
+				)
+			)
+		};
+		body = Box::new(brc_grp);
+
+		let node = Node {
+			class: NdRule::FuncDef { name, body },
+			flags: NdFlags::empty(),
+			redirs: vec![],
+			tokens: node_tks
+		};
+		flog!(DEBUG,node);
+
+		Ok(Some(node))
+	}
+	fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<Node<'t>>> {
+		let mut node_tks: Vec<Tk> = vec![];
+		let mut body: Vec<Node> = vec![];
+		let mut redirs: Vec<Redir> = vec![];
+
+		if *self.next_tk_class() != TkRule::BraceGrpStart {
+			return Ok(None)
+		}
+		node_tks.push(self.next_tk().unwrap());
+
+		loop {
+			if *self.next_tk_class() == TkRule::BraceGrpEnd {
+				node_tks.push(self.next_tk().unwrap());
+				break
+			}
+			if let Some(node) = self.parse_block(true)? {
+				node_tks.extend(node.tokens.clone());
+				body.push(node);
+			}
+			if !self.next_tk_is_some() {
+				return Err(parse_err_full(
+						"Expected a closing brace for this brace group",
+						&node_tks.get_span().unwrap()
+					)
+				)
+			}
+		}
+
+		if !from_func_def {
+			while self.check_redir() {
+				let tk = self.next_tk().unwrap();
+				node_tks.push(tk.clone());
+				let redir_bldr = tk.span.as_str().parse::<RedirBldr>().unwrap();
+				if redir_bldr.io_mode.is_none() {
+					let path_tk = self.next_tk();
+
+					if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
+						self.flags |= ParseFlags::ERROR;
+						return Err(
+							ShErr::full(
+								ShErrKind::ParseErr,
+								"Expected a filename after this redirection",
+								tk.span.clone().into()
+							)
+						)
+					};
+
+					let path_tk = path_tk.unwrap();
+					node_tks.push(path_tk.clone());
+					let redir_class = redir_bldr.class.unwrap();
+					let pathbuf = PathBuf::from(path_tk.span.as_str());
+
+					let Ok(file) = get_redir_file(redir_class, pathbuf) else {
+						self.flags |= ParseFlags::ERROR;
+						return Err(parse_err_full(
+								"Error opening file for redirection",
+								&path_tk.span
+						));
+					};
+
+					let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), file);
+					let redir_bldr = redir_bldr.with_io_mode(io_mode);
+					let redir = redir_bldr.build();
+					redirs.push(redir);
+				}
+			}
+		}
+
+		let node = Node {
+			class: NdRule::BraceGrp { body },
+			flags: NdFlags::empty(),
+			redirs,
+			tokens: node_tks
+		};
+		flog!(DEBUG, node);
+		Ok(Some(node))
 	}
 	fn parse_if(&mut self) -> ShResult<Option<Node<'t>>> {
 		// Needs at last one 'if-then',
@@ -647,6 +767,7 @@ impl<'t> ParseStream<'t> {
 				TkRule::EOI |
 					TkRule::Pipe |
 					TkRule::And |
+					TkRule::BraceGrpEnd |
 					TkRule::Or => {
 						break
 					}
@@ -877,4 +998,11 @@ fn parse_err_full<'t>(reason: &str, blame: &Span<'t>) -> ShErr {
 		reason,
 		blame.clone().into()
 	)
+}
+
+fn is_func_name<'t>(tk: Option<&Tk<'t>>) -> bool {
+	tk.is_some_and(|tk| {
+		tk.flags.contains(TkFlags::KEYWORD) &&
+		(tk.span.as_str().ends_with("()") && !tk.span.as_str().ends_with("\\()"))
+	})
 }
