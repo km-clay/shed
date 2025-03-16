@@ -1,9 +1,10 @@
 use std::str::FromStr;
 
 use bitflags::bitflags;
+use fmt::Display;
 use lex::{Span, Tk, TkFlags, TkRule};
 
-use crate::{prelude::*, libsh::error::{ShErr, ShErrKind, ShResult}, procio::{IoFd, IoFile, IoInfo}};
+use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::TkVecUtils}, prelude::*, procio::{IoFd, IoFile, IoInfo}};
 
 pub mod lex;
 pub mod execute;
@@ -175,7 +176,7 @@ pub enum RedirType {
 
 #[derive(Debug)]
 pub struct CondNode<'t> {
-	pub cond: Vec<Node<'t>>,
+	pub cond: Box<Node<'t>>,
 	pub body: Vec<Node<'t>>
 }
 
@@ -204,6 +205,26 @@ pub enum LoopKind {
 	Until
 }
 
+impl FromStr for LoopKind {
+	type Err = ShErr;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"while" => Ok(Self::While),
+			"until" => Ok(Self::Until),
+			_ => Err(ShErr::simple(ShErrKind::ParseErr, format!("Invalid loop kind: {s}")))
+		}
+	}
+}
+
+impl Display for LoopKind {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			LoopKind::While => write!(f,"while"),
+			LoopKind::Until => write!(f,"until")
+		}
+	}
+}
+
 #[derive(Debug)]
 pub enum AssignKind {
 	Eq,
@@ -215,8 +236,8 @@ pub enum AssignKind {
 
 #[derive(Debug)]
 pub enum NdRule<'t> {
-	IfNode { cond_blocks: Vec<CondNode<'t>>, else_block: Vec<Node<'t>> },
-	LoopNode { kind: LoopKind, cond_block: CondNode<'t> },
+	IfNode { cond_nodes: Vec<CondNode<'t>>, else_block: Vec<Node<'t>> },
+	LoopNode { kind: LoopKind, cond_node: CondNode<'t> },
 	ForNode { vars: Vec<Tk<'t>>, arr: Vec<Tk<'t>>, body: Vec<Node<'t>> },
 	CaseNode { pattern: Tk<'t>, case_blocks: Vec<CaseNode<'t>> },
 	Command { assignments: Vec<Node<'t>>, argv: Vec<Tk<'t>> },
@@ -258,6 +279,14 @@ impl<'t> ParseStream<'t> {
 		} else {
 			None
 		}
+	}
+	fn next_tk_is_some(&self) -> bool {
+		self.tokens.first().is_some_and(|tk| tk.class != TkRule::EOI)
+	}
+	fn check_keyword(&self, kw: &str) -> bool {
+		self.tokens.first().is_some_and(|tk| {
+			tk.flags.contains(TkFlags::KEYWORD) && tk.span.as_str() == kw
+		})
 	}
 	/// Slice off consumed tokens
 	fn commit(&mut self, num_consumed: usize) {
@@ -303,6 +332,12 @@ impl<'t> ParseStream<'t> {
 	/// Ordered from specialized to general, with more generally matchable stuff appearing at the bottom
 	/// The check_pipelines parameter is used to prevent infinite recursion in parse_pipeline
 	fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node<'t>>> {
+		if let Some(node) = self.parse_loop()? {
+			return Ok(Some(node))
+		}
+		if let Some(node) = self.parse_if()? {
+			return Ok(Some(node))
+		}
 		if check_pipelines {
 			if let Some(node) = self.parse_pipeline()? {
 				return Ok(Some(node))
@@ -313,6 +348,158 @@ impl<'t> ParseStream<'t> {
 			}
 		}
 		Ok(None)
+	}
+	fn parse_if(&mut self) -> ShResult<Option<Node<'t>>> {
+		// Needs at last one 'if-then',
+		// Any number of 'elif-then',
+		// Zero or one 'else'
+		let mut node_tks: Vec<Tk> = vec![];
+		let mut cond_nodes: Vec<CondNode> = vec![];
+		let mut else_block: Vec<Node> = vec![];
+
+		if !self.check_keyword("if") || !self.next_tk_is_some() {
+			return Ok(None)
+		}
+		node_tks.push(self.next_tk().unwrap());
+
+		loop {
+			let prefix_keywrd = if cond_nodes.is_empty() {
+				"if"
+			} else {
+				"elif"
+			};
+			let Some(cond) = self.parse_block(true)? else {
+				return Err(parse_err_full(
+					&format!("Expected an expression after '{prefix_keywrd}'"),
+					&node_tks.get_span().unwrap()
+				));
+			};
+			cond.tokens.debug_tokens();
+			node_tks.extend(cond.tokens.clone());
+
+			if !self.check_keyword("then") || !self.next_tk_is_some() {
+				return Err(parse_err_full(
+					&format!("Expected 'then' after '{prefix_keywrd}' condition"),
+					&node_tks.get_span().unwrap()
+				));
+			}
+			node_tks.push(self.next_tk().unwrap());
+
+			let mut body_blocks = vec![];
+			while let Some(body_block) = self.parse_block(true)? {
+				body_block.tokens.debug_tokens();
+				node_tks.extend(body_block.tokens.clone());
+				body_blocks.push(body_block);
+			}
+			if body_blocks.is_empty() {
+				return Err(parse_err_full(
+					"Expected an expression after 'then'",
+					&node_tks.get_span().unwrap()
+				));
+			};
+			let cond_node = CondNode { cond: Box::new(cond), body: body_blocks };
+			cond_nodes.push(cond_node);
+			flog!(DEBUG, cond_nodes.len());
+			flog!(DEBUG, !self.check_keyword("elif") || !self.next_tk_is_some());
+
+			if !self.check_keyword("elif") || !self.next_tk_is_some() {
+				break
+			} else {
+				node_tks.push(self.next_tk().unwrap());
+			}
+		}
+
+		if self.check_keyword("else") {
+			node_tks.push(self.next_tk().unwrap());
+			while let Some(block) = self.parse_block(true)? {
+				else_block.push(block)
+			}
+			if else_block.is_empty() {
+				return Err(parse_err_full(
+					"Expected an expression after 'else'",
+					&node_tks.get_span().unwrap()
+				));
+			}
+		}
+
+		if !self.check_keyword("fi") || !self.next_tk_is_some() {
+			return Err(parse_err_full(
+					"Expected 'fi' after if statement",
+					&node_tks.get_span().unwrap()
+			));
+		}
+		node_tks.push(self.next_tk().unwrap());
+
+		let node = Node {
+			class: NdRule::IfNode { cond_nodes, else_block },
+			flags: NdFlags::empty(),
+			redirs: vec![],
+			tokens: node_tks
+		};
+		flog!(DEBUG, node);
+		Ok(Some(node))
+	}
+	fn parse_loop(&mut self) -> ShResult<Option<Node<'t>>> {
+		// Requires a single CondNode and a LoopKind
+		let loop_kind: LoopKind;
+		let cond_node: CondNode<'t>;
+		let mut node_tks = vec![];
+
+		if (!self.check_keyword("while") && !self.check_keyword("until")) || !self.next_tk_is_some() {
+			return Ok(None)
+		}
+		let loop_tk = self.next_tk().unwrap();
+		loop_kind = loop_tk.span
+			.as_str()
+			.parse() // LoopKind implements FromStr
+			.unwrap();
+		node_tks.push(loop_tk);
+
+		let Some(cond) = self.parse_block(true)? else {
+			return Err(parse_err_full(
+				&format!("Expected an expression after '{loop_kind}'"), // It also implements Display
+				&node_tks.get_span().unwrap()
+			))
+		};
+		node_tks.extend(cond.tokens.clone());
+
+		if !self.check_keyword("do") || !self.next_tk_is_some() {
+			return Err(parse_err_full(
+				"Expected 'do' after loop condition",
+				&node_tks.get_span().unwrap()
+			))
+		}
+		node_tks.push(self.next_tk().unwrap());
+
+		let mut body = vec![];
+		while let Some(block) = self.parse_block(true)? {
+			node_tks.extend(block.tokens.clone());
+			body.push(block);
+		}
+		if body.is_empty() {
+			return Err(parse_err_full(
+				"Expected an expression after 'do'",
+				&node_tks.get_span().unwrap()
+			))
+		};
+
+		if !self.check_keyword("done") || !self.next_tk_is_some() {
+			return Err(parse_err_full(
+				"Expected 'done' after loop body",
+				&node_tks.get_span().unwrap()
+			))
+		}
+		node_tks.push(self.next_tk().unwrap());
+
+		cond_node = CondNode { cond: Box::new(cond), body  };
+		let loop_node = Node {
+			class: NdRule::LoopNode { kind: loop_kind, cond_node },
+			flags: NdFlags::empty(),
+			redirs: vec![],
+			tokens: node_tks
+		};
+		flog!(DEBUG, loop_node);
+		Ok(Some(loop_node))
 	}
 	fn parse_pipeline(&mut self) -> ShResult<Option<Node<'t>>> {
 		let mut cmds = vec![];
@@ -356,12 +543,16 @@ impl<'t> ParseStream<'t> {
 				node_tks.push(prefix_tk.clone());
 				argv.push(prefix_tk.clone());
 				break
+
 			} else if prefix_tk.flags.contains(TkFlags::ASSIGN) {
 				let Some(assign) = self.parse_assignment(&prefix_tk) else {
 					break
 				};
 				node_tks.push(prefix_tk.clone());
 				assignments.push(assign)
+
+			} else if prefix_tk.flags.contains(TkFlags::KEYWORD) {
+				return Ok(None)
 			}
 		}
 
@@ -428,13 +619,10 @@ impl<'t> ParseStream<'t> {
 							_ => unreachable!()
 						}) else {
 							self.flags |= ParseFlags::ERROR;
-							return Err(
-								ShErr::full(
-									ShErrKind::InternalErr,
-									"Error opening file for redirection",
-									path_tk.span.clone().into()
-								)
-							)
+							return Err(parse_err_full(
+								"Error opening file for redirection",
+								&path_tk.span
+							));
 						};
 
 						let io_info = IoFile::new(redir_bldr.tgt_fd.unwrap(), file);
@@ -590,4 +778,12 @@ fn node_is_punctuated<'t>(tokens: &Vec<Tk>) -> bool {
 	tokens.last().is_some_and(|tk| {
 		matches!(tk.class, TkRule::Sep)
 	})
+}
+
+fn parse_err_full<'t>(reason: &str, blame: &Span<'t>) -> ShErr {
+	ShErr::full(
+		ShErrKind::ParseErr,
+		reason,
+		blame.clone().into()
+	)
 }

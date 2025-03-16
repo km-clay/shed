@@ -1,5 +1,7 @@
 use crate::{jobs::{ChildProc, JobBldr, JobCmdFlags, JobID}, libsh::error::{ErrSpan, ShErr, ShErrKind, ShResult}, parse::{execute::prepare_argv, lex::Span, NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state::{self, read_jobs, write_jobs}};
 
+use super::setup_builtin;
+
 pub enum JobBehavior {
 	Foregound,
 	Background
@@ -11,22 +13,12 @@ pub fn continue_job(node: Node, job: &mut JobBldr, behavior: JobBehavior) -> ShR
 		JobBehavior::Foregound => "fg",
 		JobBehavior::Background => "bg"
 	};
-	let NdRule::Command { assignments, argv } = node.class else {
+	let NdRule::Command { assignments: _, argv } = node.class else {
 		unreachable!()
 	};
 
-	let child_pgid = if let Some(pgid) = job.pgid() {
-		pgid
-	} else {
-		job.set_pgid(Pid::this());
-		Pid::this()
-	};
-	let child = ChildProc::new(Pid::this(), Some(cmd), Some(child_pgid))?;
-	job.push_child(child);
-
-	let mut argv = prepare_argv(argv)
-		.into_iter()
-		.skip(1);
+	let (argv,_) = setup_builtin(argv, job, None)?;
+	let mut argv = argv.into_iter();
 
 	if read_jobs(|j| j.get_fg().is_some()) {
 		return Err(
@@ -145,28 +137,14 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 }
 
 pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
-	let NdRule::Command { assignments, argv } = node.class else {
+	let NdRule::Command { assignments: _, argv } = node.class else {
 		unreachable!()
 	};
 
-	let child_pgid = if let Some(pgid) = job.pgid() {
-		pgid
-	} else {
-		job.set_pgid(Pid::this());
-		Pid::this()
-	};
-	let child = ChildProc::new(Pid::this(), Some("jobs"), Some(child_pgid))?;
-	job.push_child(child);
-
-	let mut argv = prepare_argv(argv)
-		.into_iter()
-		.skip(1);
-
-	let mut io_frame = io_stack.pop_frame();
-	io_frame.redirect()?;
+	let (argv,io_frame) = setup_builtin(argv, job, Some((io_stack,node.redirs)))?;
 
 	let mut flags = JobCmdFlags::empty();
-	while let Some((arg,span)) = argv.next() {
+	for (arg,span) in argv {
 		let mut chars = arg.chars().peekable();
 		if chars.peek().is_none_or(|ch| *ch != '-') {
 			return Err(
@@ -198,7 +176,7 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 		}
 	}
 	write_jobs(|j| j.print_jobs(flags))?;
-	io_frame.restore()?;
+	io_frame.unwrap().restore()?;
 	state::set_status(0);
 
 	Ok(())

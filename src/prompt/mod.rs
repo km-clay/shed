@@ -28,7 +28,10 @@ pub fn read_line<'s>() -> ShResult<String> {
 			}
 			Ok(line)
 		}
-		Err(ReadlineError::Eof) => std::process::exit(0),
+		Err(ReadlineError::Eof) => {
+			kill(Pid::this(), Signal::SIGQUIT)?;
+			Ok(String::new())
+		}
 		Err(ReadlineError::Interrupted) => Ok(String::new()),
 		Err(e) => {
 			return Err(e.into())

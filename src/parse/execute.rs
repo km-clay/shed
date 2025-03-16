@@ -133,7 +133,7 @@ impl<'t> Dispatcher<'t> {
 		let result = match cmd_raw.span.as_str() {
 			"echo" => echo(cmd, io_stack_mut, curr_job_mut),
 			"cd" => cd(cmd, curr_job_mut),
-			"export" => export(cmd, curr_job_mut),
+			"export" => export(cmd, io_stack_mut, curr_job_mut),
 			"pwd" => pwd(cmd, io_stack_mut, curr_job_mut),
 			"source" => source(cmd, curr_job_mut),
 			"shift" => shift(cmd, curr_job_mut),
@@ -147,7 +147,11 @@ impl<'t> Dispatcher<'t> {
 			env::set_var(&var, "");
 		}
 
-		Ok(result?)
+		if let Err(e) = result {
+			state::set_status(1);
+			return Err(e.into())
+		}
+		Ok(())
 	}
 	pub fn exec_cmd(&mut self, cmd: Node<'t>) -> ShResult<()> {
 		let NdRule::Command { assignments, argv } = cmd.class else {

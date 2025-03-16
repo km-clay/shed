@@ -13,6 +13,7 @@ pub mod tests;
 
 use libsh::error::ShResult;
 use parse::{execute::Dispatcher, lex::{LexFlags, LexStream}, ParseStream};
+use signal::sig_setup;
 use termios::{LocalFlags, Termios};
 use crate::prelude::*;
 
@@ -64,6 +65,7 @@ pub fn exec_input(input: &str) -> ShResult<()> {
 fn main() {
 	save_termios();
 	set_termios();
+	sig_setup();
 	loop {
 		let input = prompt::read_line().unwrap();
 		let start = Instant::now();

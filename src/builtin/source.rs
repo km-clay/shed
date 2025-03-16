@@ -1,20 +1,13 @@
-use crate::{jobs::{ChildProc, JobBldr}, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{execute::prepare_argv, NdRule, Node}, prelude::*, state::source_file};
+use crate::{jobs::{ChildProc, JobBldr}, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{execute::prepare_argv, NdRule, Node}, prelude::*, state::{self, source_file}};
+
+use super::setup_builtin;
 
 pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
 	let NdRule::Command { assignments: _, argv } = node.class else {
 		unreachable!()
 	};
 
-	let child_pgid = if let Some(pgid) = job.pgid() {
-		pgid
-	} else {
-		job.set_pgid(Pid::this());
-		Pid::this()
-	};
-	let child = ChildProc::new(Pid::this(), Some("source"), Some(child_pgid))?;
-	job.push_child(child);
-
-	let argv = prepare_argv(argv).into_iter().skip(1);
+	let (argv,_) = setup_builtin(argv, job, None)?;
 
 	for (arg,span) in argv {
 		let path = PathBuf::from(arg);
@@ -39,5 +32,6 @@ pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
 		source_file(path)?;
 	}
 
+	state::set_status(0);
 	Ok(())
 }
