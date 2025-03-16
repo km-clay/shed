@@ -286,6 +286,19 @@ impl<'t> LexStream<'t> {
 		let mut quote_pos = None;
 		while let Some(ch) = chars.next() {
 			match ch {
+				_ if self.flags.contains(LexFlags::RAW) => {
+					if ch.is_whitespace() {
+						break;
+					} else {
+						pos += ch.len_utf8()
+					}
+				}
+				'\\' => {
+					pos += 1;
+					if chars.next().is_some() {
+						pos += 1;
+					}
+				}
 				'"' | '\'' => {
 					self.in_quote = true;
 					quote_pos = Some(pos);
@@ -293,8 +306,10 @@ impl<'t> LexStream<'t> {
 					while let Some(q_ch) = chars.next() {
 						match q_ch {
 							'\\' => {
-								pos += 2;
-								chars.next();
+								pos += 1;
+								if chars.next().is_some() {
+									pos += 1;
+								}
 							}
 							_ if q_ch == ch => {
 								pos += 1;
@@ -307,13 +322,6 @@ impl<'t> LexStream<'t> {
 							// Allows spans to work for wide characters
 							_ => pos += q_ch.len_utf8()
 						}
-					}
-				}
-				_ if self.flags.contains(LexFlags::RAW) => {
-					if ch.is_whitespace() {
-						break;
-					} else {
-						pos += ch.len_utf8()
 					}
 				}
 				_ if !self.in_quote && is_op(ch) => break,

@@ -1,7 +1,11 @@
-use crate::{parse::lex::{is_hard_sep, LexFlags, LexStream, Tk, Span, TkFlags, TkRule}, state::read_vars};
+use crate::{prelude::*, parse::lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, state::read_vars};
 
 /// Variable substitution marker
 pub const VAR_SUB: char = '\u{fdd0}';
+/// Double quote '"' marker
+pub const DUB_QUOTE: char = '\u{fdd1}';
+/// Single quote '\\'' marker
+pub const SNG_QUOTE: char = '\u{fdd2}';
 
 impl<'t> Tk<'t> {
 	/// Create a new expanded token
@@ -34,12 +38,33 @@ impl<'t> Expander {
 	}
 	pub fn expand(&'t mut self) -> Vec<String> {
 		self.raw = self.expand_raw();
-		// Unwrap here is safe because LexFlags::RAW has no error states
-		let tokens: Vec<_> = LexStream::new(&self.raw, LexFlags::RAW)
-			.filter(|tk| !matches!(tk.as_ref().unwrap().class, TkRule::EOI | TkRule::SOI))
-			.map(|tk| tk.unwrap().to_string())
-			.collect();
-		tokens
+		self.split_words()
+	}
+	pub fn split_words(&mut self) -> Vec<String> {
+		let mut words = vec![];
+		let mut chars = self.raw.chars();
+		let mut cur_word = String::new();
+
+		'outer: while let Some(ch) = chars.next() {
+			match ch {
+				DUB_QUOTE | SNG_QUOTE => {
+					while let Some(q_ch) = chars.next() {
+						match q_ch {
+							_ if q_ch == ch => continue 'outer, // Isn't rust cool
+							_ => cur_word.push(q_ch)
+						}
+					}
+				}
+				_ if is_field_sep(ch) => {
+					words.push(mem::take(&mut cur_word));
+				}
+				_ => cur_word.push(ch)
+			}
+		}
+		if !cur_word.is_empty() {
+			words.push(cur_word);
+		}
+		words
 	}
 	pub fn expand_raw(&self) -> String {
 		let mut chars = self.raw.chars();
@@ -97,6 +122,8 @@ pub fn unescape_str(raw: &str) -> String {
 					result.push(next_ch)
 				}
 			}
+			'"' => result.push(DUB_QUOTE),
+			'\'' => result.push(SNG_QUOTE),
 			'$' => result.push(VAR_SUB),
 			_ => result.push(ch)
 		}
