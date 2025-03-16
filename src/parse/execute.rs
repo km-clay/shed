@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 
-use crate::{builtin::{cd::cd, echo::echo, export::export, pwd::pwd, shift::shift, source::source}, jobs::{dispatch_job, ChildProc, Job, JobBldr}, libsh::error::ShResult, prelude::*, procio::{IoFrame, IoPipe, IoStack}, state::{self, write_vars}};
+use crate::{builtin::{cd::cd, echo::echo, export::export, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, jobs::{dispatch_job, ChildProc, Job, JobBldr}, libsh::error::ShResult, prelude::*, procio::{IoFrame, IoPipe, IoStack}, state::{self, write_vars}};
 
 use super::{lex::{Span, Tk, TkFlags}, AssignKind, ConjunctNode, ConjunctOp, NdFlags, NdRule, Node, Redir, RedirType};
 
@@ -126,9 +126,10 @@ impl<'t> Dispatcher<'t> {
 		};
 		let env_vars_to_unset = self.set_assignments(mem::take(assignments), AssignBehavior::Export);
 		let cmd_raw = cmd.get_command().unwrap();
-		flog!(TRACE, "doing builtin");
 		let curr_job_mut = self.curr_job.as_mut().unwrap();
 		let io_stack_mut = &mut self.io_stack;
+
+		flog!(TRACE, "doing builtin");
 		let result = match cmd_raw.span.as_str() {
 			"echo" => echo(cmd, io_stack_mut, curr_job_mut),
 			"cd" => cd(cmd, curr_job_mut),
@@ -136,6 +137,9 @@ impl<'t> Dispatcher<'t> {
 			"pwd" => pwd(cmd, io_stack_mut, curr_job_mut),
 			"source" => source(cmd, curr_job_mut),
 			"shift" => shift(cmd, curr_job_mut),
+			"fg" => continue_job(cmd, curr_job_mut, JobBehavior::Foregound),
+			"bg" => continue_job(cmd, curr_job_mut, JobBehavior::Background),
+			"jobs" => jobs(cmd, io_stack_mut, curr_job_mut),
 			_ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw.span.as_str())
 		};
 
