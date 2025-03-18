@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
 
-use crate::{builtin::{cd::cd, echo::echo, export::export, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, exec_input, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ErrSpan, ShErr, ShErrKind, ShResult}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars}};
+use crate::{builtin::{cd::cd, echo::echo, export::export, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, exec_input, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
 
-use super::{lex::{LexFlags, LexStream, Span, Tk, TkFlags}, AssignKind, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParseStream, Redir, RedirType};
+use super::{lex::{LexFlags, LexStream, Span, Tk, TkFlags}, AssignKind, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParseStream, ParsedSrc, Redir, RedirType};
 
 pub enum AssignBehavior {
 	Export,
@@ -37,25 +37,26 @@ impl ExecArgs {
 	}
 }
 
-pub struct Dispatcher<'t> {
-	nodes: VecDeque<Node<'t>>,
+pub struct Dispatcher {
+	nodes: VecDeque<Node>,
 	pub io_stack: IoStack,
 	pub job_stack: JobStack
 }
 
-impl<'t> Dispatcher<'t> {
-	pub fn new(nodes: Vec<Node<'t>>) -> Self {
+impl Dispatcher {
+	pub fn new(nodes: Vec<Node>) -> Self {
 		let nodes = VecDeque::from(nodes);
 		Self { nodes, io_stack: IoStack::new(), job_stack: JobStack::new() }
 	}
 	pub fn begin_dispatch(&mut self) -> ShResult<()> {
 		flog!(TRACE, "beginning dispatch");
-		while let Some(list) = self.nodes.pop_front() {
-			self.dispatch_node(list)?;
+		while let Some(node) = self.nodes.pop_front() {
+			let blame = node.get_span();
+			self.dispatch_node(node).try_blame(blame)?;
 		}
 		Ok(())
 	}
-	pub fn dispatch_node(&mut self, node: Node<'t>) -> ShResult<()> {
+	pub fn dispatch_node(&mut self, node: Node) -> ShResult<()> {
 		match node.class {
 			NdRule::Conjunction {..} => self.exec_conjunction(node)?,
 			NdRule::Pipeline {..} => self.exec_pipeline(node)?,
@@ -68,7 +69,7 @@ impl<'t> Dispatcher<'t> {
 		}
 		Ok(())
 	}
-	pub fn dispatch_cmd(&mut self, node: Node<'t>) -> ShResult<()> {
+	pub fn dispatch_cmd(&mut self, node: Node) -> ShResult<()> {
 		let Some(cmd) = node.get_command() else {
 			return self.exec_cmd(node) // Argv is empty, probably an assignment
 		};
@@ -80,7 +81,7 @@ impl<'t> Dispatcher<'t> {
 			self.exec_cmd(node)
 		}
 	}
-	pub fn exec_conjunction(&mut self, conjunction: Node<'t>) -> ShResult<()> {
+	pub fn exec_conjunction(&mut self, conjunction: Node) -> ShResult<()> {
 		let NdRule::Conjunction { elements } = conjunction.class else {
 			unreachable!()
 		};
@@ -99,42 +100,51 @@ impl<'t> Dispatcher<'t> {
 		}
 		Ok(())
 	}
-	pub fn exec_func_def(&mut self, func_def: Node<'t>) -> ShResult<()> {
+	pub fn exec_func_def(&mut self, func_def: Node) -> ShResult<()> {
 		let NdRule::FuncDef { name, body } = func_def.class else {
 			unreachable!()
 		};
 		let body_span = body.get_span();
-		let body = body_span.as_str();
+		let body = body_span.as_str().to_string();
 		let name = name.span.as_str().strip_suffix("()").unwrap();
-		write_logic(|l| l.insert_func(name, body));
+
+		let mut func_parser = ParsedSrc::new(Rc::new(body));
+		func_parser.parse_src()?; // Parse the function
+
+		let func = ShFunc::new(func_parser);
+		write_logic(|l| l.insert_func(name, func)); // Store the AST
 		Ok(())
 	}
-	pub fn exec_func(&mut self, func: Node<'t>) -> ShResult<()> {
-		let blame: ErrSpan = func.get_span().into();
-		// TODO: Find a way to store functions as pre-parsed nodes so we don't have to re-parse them
+	pub fn exec_func(&mut self, func: Node) -> ShResult<()> {
+		let blame = func.get_span().clone();
 		let NdRule::Command { assignments, mut argv } = func.class else {
 			unreachable!()
 		};
 
 		self.set_assignments(assignments, AssignBehavior::Export);
 
-		let mut io_frame = self.io_stack.pop_frame();
-		io_frame.extend(func.redirs);
+		self.io_stack.append_to_frame(func.redirs);
 
 		let func_name = argv.remove(0).span.as_str().to_string();
-		if let Some(func_body) = read_logic(|l| l.get_func(&func_name)) {
-			let saved_sh_args = read_vars(|v| v.sh_argv().clone());
+		if let Some(func) = read_logic(|l| l.get_func(&func_name)) {
+			let scope_snapshot = read_vars(|v| v.clone());
+			// Set up the inner scope
 			write_vars(|v| {
+				**v = VarTab::new();
 				v.clear_args();
 				for arg in argv {
 					v.bpush_arg(arg.to_string());
 				}
 			});
 
-			let result = exec_input(&func_body, Some(io_frame));
+			if let Err(e) = self.exec_brc_grp((*func).clone()) {
+				write_vars(|v| **v = scope_snapshot);
+				return Err(e.into())
+			}
 
-			write_vars(|v| *v.sh_argv_mut() = saved_sh_args);
-			Ok(result?)
+			// Return to the outer scope
+			write_vars(|v| **v = scope_snapshot);
+			Ok(())
 		} else {
 			Err(
 				ShErr::full(
@@ -145,7 +155,7 @@ impl<'t> Dispatcher<'t> {
 			)
 		}
 	}
-	pub fn exec_brc_grp(&mut self, brc_grp: Node<'t>) -> ShResult<()> {
+	pub fn exec_brc_grp(&mut self, brc_grp: Node) -> ShResult<()> {
 		let NdRule::BraceGrp { body } = brc_grp.class else {
 			unreachable!()
 		};
@@ -153,13 +163,14 @@ impl<'t> Dispatcher<'t> {
 		io_frame.extend(brc_grp.redirs);
 
 		for node in body {
+			let blame = node.get_span();
 			self.io_stack.push_frame(io_frame.clone());
-			self.dispatch_node(node)?;
+			self.dispatch_node(node).try_blame(blame)?;
 		}
 
 		Ok(())
 	}
-	pub fn exec_loop(&mut self, loop_stmt: Node<'t>) -> ShResult<()> {
+	pub fn exec_loop(&mut self, loop_stmt: Node) -> ShResult<()> {
 		let NdRule::LoopNode { kind, cond_node } = loop_stmt.class else {
 			unreachable!();
 		};
@@ -204,7 +215,7 @@ impl<'t> Dispatcher<'t> {
 
 		Ok(())
 	}
-	pub fn exec_if(&mut self, if_stmt: Node<'t>) -> ShResult<()> {
+	pub fn exec_if(&mut self, if_stmt: Node) -> ShResult<()> {
 		let NdRule::IfNode { cond_nodes, else_block } = if_stmt.class else {
 			unreachable!();
 		};
@@ -244,7 +255,7 @@ impl<'t> Dispatcher<'t> {
 
 		Ok(())
 	}
-	pub fn exec_pipeline(&mut self, pipeline: Node<'t>) -> ShResult<()> {
+	pub fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
 		let NdRule::Pipeline { cmds, pipe_err } = pipeline.class else {
 			unreachable!()
 		};
@@ -253,6 +264,7 @@ impl<'t> Dispatcher<'t> {
 		let pipes_and_cmds = get_pipe_stack(cmds.len())
 			.into_iter()
 			.zip(cmds);
+
 
 		for ((rpipe,wpipe), cmd) in pipes_and_cmds {
 			if let Some(pipe) = rpipe {
@@ -268,7 +280,7 @@ impl<'t> Dispatcher<'t> {
 		dispatch_job(job, is_bg)?;
 		Ok(())
 	}
-	pub fn exec_builtin(&mut self, mut cmd: Node<'t>) -> ShResult<()> {
+	pub fn exec_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
 		let NdRule::Command { ref mut assignments, argv } = &mut cmd.class else {
 			unreachable!()
 		};
@@ -301,7 +313,7 @@ impl<'t> Dispatcher<'t> {
 		}
 		Ok(())
 	}
-	pub fn exec_cmd(&mut self, cmd: Node<'t>) -> ShResult<()> {
+	pub fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
 		let NdRule::Command { assignments, argv } = cmd.class else {
 			unreachable!()
 		};
@@ -337,7 +349,7 @@ impl<'t> Dispatcher<'t> {
 
 		Ok(())
 	}
-	pub fn set_assignments(&self, assigns: Vec<Node<'t>>, behavior: AssignBehavior) -> Vec<String> {
+	pub fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> Vec<String> {
 		let mut new_env_vars = vec![];
 		match behavior {
 			AssignBehavior::Export => {
@@ -420,7 +432,7 @@ where
 }
 
 /// The default behavior for the child process after forking
-pub fn def_child_action<'t>(mut io_frame: IoFrame, exec_args: Option<ExecArgs>) {
+pub fn def_child_action(mut io_frame: IoFrame, exec_args: Option<ExecArgs>) {
 	if let Err(e) = io_frame.redirect() {
 		eprintln!("{e}");
 	}
@@ -435,7 +447,7 @@ pub fn def_child_action<'t>(mut io_frame: IoFrame, exec_args: Option<ExecArgs>) 
 }
 
 /// The default behavior for the parent process after forking
-pub fn def_parent_action<'t>(
+pub fn def_parent_action(
 	io_frame: IoFrame,
 	job: &mut JobBldr,
 	cmd: Option<&str>,
@@ -478,7 +490,7 @@ pub fn get_pipe_stack(num_cmds: usize) -> Vec<(Option<Redir>,Option<Redir>)> {
 	stack
 }
 
-pub fn is_func<'t>(tk: Option<Tk<'t>>) -> bool {
+pub fn is_func(tk: Option<Tk>) -> bool {
 	let Some(tk) = tk else {
 		return false
 	};

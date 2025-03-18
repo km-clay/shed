@@ -137,7 +137,7 @@ impl DerefMut for IoFrame {
 /// Each executed command requires an `IoFrame` in order to perform redirections.
 /// As nodes are walked through by the `Dispatcher`, it pushes new frames in certain contexts, and pops frames in others.
 /// Each command calls pop_frame() in order to get the current IoFrame in order to perform redirection
-#[derive(Default)]
+#[derive(Debug,Default)]
 pub struct IoStack {
 	stack: Vec<IoFrame>,
 }

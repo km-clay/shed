@@ -12,13 +12,15 @@ pub mod signal;
 pub mod tests;
 
 use libsh::error::ShResult;
-use parse::{execute::Dispatcher, lex::{LexFlags, LexStream}, ParseStream};
+use parse::{execute::Dispatcher, lex::{LexFlags, LexStream}, Ast, ParseStream, ParsedSrc};
 use procio::IoFrame;
 use signal::sig_setup;
+use state::write_meta;
 use termios::{LocalFlags, Termios};
 use crate::prelude::*;
 
 pub static mut SAVED_TERMIOS: Option<Option<Termios>> = None;
+
 
 pub fn save_termios() {
 	unsafe {
@@ -47,28 +49,15 @@ fn set_termios() {
 	}
 }
 
-pub fn exec_input(input: &str, io_frame: Option<IoFrame>) -> ShResult<()> {
-	let parse_start = Instant::now();
-	let mut tokens = vec![];
-	for token in LexStream::new(&input, LexFlags::empty()) {
-		tokens.push(token?);
-	}
-
-	let mut nodes = vec![];
-	for result in ParseStream::new(tokens) {
-		nodes.push(result?);
-	}
-	flog!(INFO, "parse duration: {:?}", parse_start.elapsed());
+pub fn exec_input(input: String) -> ShResult<()> {
+	write_meta(|m| m.start_timer());
+	let mut parser = ParsedSrc::new(Rc::new(input));
+	parser.parse_src()?;
 
 	let exec_start = Instant::now();
-	let mut dispatcher = Dispatcher::new(nodes);
-	if let Some(frame) = io_frame {
-		dispatcher.io_stack.push(frame)
-	}
-	dispatcher.begin_dispatch()?;
-	flog!(INFO, "cmd duration: {:?}", exec_start.elapsed());
 
-	flog!(INFO, "total duration: {:?}", parse_start.elapsed());
+	let mut dispatcher = Dispatcher::new(parser.extract_nodes());
+	dispatcher.begin_dispatch()?;
 	Ok(())
 }
 
@@ -79,9 +68,15 @@ fn main() {
 
 
 	loop {
-		let input = prompt::read_line().unwrap();
+		let input = match prompt::read_line() {
+			Ok(line) => line,
+			Err(e) => {
+				eprintln!("{e}");
+				continue
+			}
+		};
 
-		if let Err(e) = exec_input(&input,None) {
+		if let Err(e) = exec_input(input) {
 			eprintln!("{e}");
 		}
 	}

@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use bitflags::bitflags;
 use fmt::Display;
-use lex::{Span, Tk, TkFlags, TkRule};
+use lex::{LexFlags, LexStream, Span, Tk, TkFlags, TkRule};
 
 use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::TkVecUtils}, prelude::*, procio::IoMode};
 
@@ -15,30 +15,78 @@ pub mod execute;
 /// * If the match fails, execution continues.
 /// * If the match succeeds, the matched node is returned.
 macro_rules! try_match {
-    ($expr:expr) => {
-			if let Some(node) = $expr {
-				return Ok(Some(node))
-			}
-    };
+	($expr:expr) => {
+		if let Some(node) = $expr {
+			return Ok(Some(node))
+		}
+	};
+}
+
+/// The parsed AST along with the source input it parsed
+///
+/// Uses Rc<String> instead of &str because the reference has to stay alive while errors are propagated upwards
+/// The string also has to stay alive in the case of pre-parsed shell function nodes, which live in the logic table
+/// Using &str for this use-case dramatically overcomplicates the code
+#[derive(Clone,Debug)]
+pub struct ParsedSrc {
+	pub src: Rc<String>,
+	pub ast: Ast
+}
+
+impl ParsedSrc {
+	pub fn new(src: Rc<String>) -> Self {
+		Self { src, ast: Ast::new(vec![]) }
+	}
+	pub fn parse_src(&mut self) -> ShResult<()> {
+		let mut tokens = vec![];
+		for token in LexStream::new(self.src.clone(), LexFlags::empty()) {
+			tokens.push(token?);
+		}
+
+		let mut nodes = vec![];
+		for result in ParseStream::new(tokens) {
+			nodes.push(result?);
+		}
+		*self.ast.tree_mut() = nodes;
+		Ok(())
+	}
+	pub fn extract_nodes(&mut self) -> Vec<Node> {
+		mem::take(self.ast.tree_mut())
+	}
 }
 
 #[derive(Clone,Debug)]
-pub struct Node<'t> {
-	pub class: NdRule<'t>,
-	pub flags: NdFlags,
-	pub redirs: Vec<Redir>,
-	pub tokens: Vec<Tk<'t>>,
+pub struct Ast(Vec<Node>);
+
+impl Ast {
+	pub fn new(tree: Vec<Node>) -> Self {
+		Self(tree)
+	}
+	pub fn into_inner(self) -> Vec<Node> {
+		self.0
+	}
+	pub fn tree_mut(&mut self) -> &mut Vec<Node> {
+		&mut self.0
+	}
 }
 
-impl<'t> Node<'t> {
-	pub fn get_command(&'t self) -> Option<&'t Tk<'t>> {
+#[derive(Clone,Debug)]
+pub struct Node {
+	pub class: NdRule,
+	pub flags: NdFlags,
+	pub redirs: Vec<Redir>,
+	pub tokens: Vec<Tk>,
+}
+
+impl Node {
+	pub fn get_command(&self) -> Option<&Tk> {
 		let NdRule::Command { assignments: _, argv } = &self.class else {
 			return None
 		};
 		let command = argv.iter().find(|tk| tk.flags.contains(TkFlags::IS_CMD))?;
 		Some(command)
 	}
-	pub fn get_span(&'t self) -> Span<'t> {
+	pub fn get_span(&self) -> Span {
 		let Some(first_tk) = self.tokens.first() else {
 			unreachable!()
 		};
@@ -187,15 +235,15 @@ pub enum RedirType {
 }
 
 #[derive(Clone,Debug)]
-pub struct CondNode<'t> {
-	pub cond: Box<Node<'t>>,
-	pub body: Vec<Node<'t>>
+pub struct CondNode {
+	pub cond: Box<Node>,
+	pub body: Vec<Node>
 }
 
 #[derive(Clone,Debug)]
-pub struct CaseNode<'t> {
-	pub pattern: Tk<'t>,
-	pub body: Vec<Node<'t>>
+pub struct CaseNode {
+	pub pattern: Tk,
+	pub body: Vec<Node>
 }
 
 #[derive(Clone,Copy,PartialEq,Debug)]
@@ -206,8 +254,8 @@ pub enum ConjunctOp {
 }
 
 #[derive(Clone,Debug)]
-pub struct ConjunctNode<'t> {
-	pub cmd: Box<Node<'t>>,
+pub struct ConjunctNode {
+	pub cmd: Box<Node>,
 	pub operator: ConjunctOp
 }
 
@@ -229,7 +277,7 @@ impl FromStr for LoopKind {
 }
 
 impl Display for LoopKind {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			LoopKind::While => write!(f,"while"),
 			LoopKind::Until => write!(f,"until")
@@ -247,22 +295,22 @@ pub enum AssignKind {
 }
 
 #[derive(Clone,Debug)]
-pub enum NdRule<'t> {
-	IfNode { cond_nodes: Vec<CondNode<'t>>, else_block: Vec<Node<'t>> },
-	LoopNode { kind: LoopKind, cond_node: CondNode<'t> },
-	ForNode { vars: Vec<Tk<'t>>, arr: Vec<Tk<'t>>, body: Vec<Node<'t>> },
-	CaseNode { pattern: Tk<'t>, case_blocks: Vec<CaseNode<'t>> },
-	Command { assignments: Vec<Node<'t>>, argv: Vec<Tk<'t>> },
-	Pipeline { cmds: Vec<Node<'t>>, pipe_err: bool },
-	Conjunction { elements: Vec<ConjunctNode<'t>> },
-	Assignment { kind: AssignKind, var: Tk<'t>, val: Tk<'t> },
-	BraceGrp { body: Vec<Node<'t>> },
-	FuncDef { name: Tk<'t>, body: Box<Node<'t>> }
+pub enum NdRule {
+	IfNode { cond_nodes: Vec<CondNode>, else_block: Vec<Node> },
+	LoopNode { kind: LoopKind, cond_node: CondNode },
+	ForNode { vars: Vec<Tk>, arr: Vec<Tk>, body: Vec<Node> },
+	CaseNode { pattern: Tk, case_blocks: Vec<CaseNode> },
+	Command { assignments: Vec<Node>, argv: Vec<Tk> },
+	Pipeline { cmds: Vec<Node>, pipe_err: bool },
+	Conjunction { elements: Vec<ConjunctNode> },
+	Assignment { kind: AssignKind, var: Tk, val: Tk },
+	BraceGrp { body: Vec<Node> },
+	FuncDef { name: Tk, body: Box<Node> }
 }
 
 #[derive(Debug)]
-pub struct ParseStream<'t> {
-	pub tokens: Vec<Tk<'t>>,
+pub struct ParseStream {
+	pub tokens: Vec<Tk>,
 	pub flags: ParseFlags
 }
 
@@ -273,8 +321,8 @@ bitflags! {
 	}
 }
 
-impl<'t> ParseStream<'t> {
-	pub fn new(tokens: Vec<Tk<'t>>) -> Self {
+impl ParseStream {
+	pub fn new(tokens: Vec<Tk>) -> Self {
 		Self { tokens, flags: ParseFlags::empty() }
 	}
 	fn next_tk_class(&self) -> &TkRule {
@@ -284,10 +332,10 @@ impl<'t> ParseStream<'t> {
 			&TkRule::Null
 		}
 	}
-	fn peek_tk(&self) -> Option<&Tk<'t>> {
+	fn peek_tk(&self) -> Option<&Tk> {
 		self.tokens.first()
 	}
-	fn next_tk(&mut self) -> Option<Tk<'t>> {
+	fn next_tk(&mut self) -> Option<Tk> {
 		if !self.tokens.is_empty() {
 			if *self.next_tk_class() == TkRule::EOI {
 				return None
@@ -306,20 +354,20 @@ impl<'t> ParseStream<'t> {
 	/// fi
 	/// ```
 	/// are valid syntax
-	fn catch_separator(&mut self, node_tks: &mut Vec<Tk<'t>>) {
+	fn catch_separator(&mut self, node_tks: &mut Vec<Tk>) {
 		if *self.next_tk_class() == TkRule::Sep {
 			node_tks.push(self.next_tk().unwrap());
 		}
 	}
-	fn assert_separator(&mut self, node_tks: &mut Vec<Tk<'t>>) -> ShResult<()> {
+	fn assert_separator(&mut self, node_tks: &mut Vec<Tk>) -> ShResult<()> {
 		let next_class = self.next_tk_class();
 		match next_class {
 			TkRule::EOI |
-			TkRule::Or |
-			TkRule::Bg |
-			TkRule::And |
-			TkRule::BraceGrpEnd |
-			TkRule::Pipe => Ok(()),
+				TkRule::Or |
+				TkRule::Bg |
+				TkRule::And |
+				TkRule::BraceGrpEnd |
+				TkRule::Pipe => Ok(()),
 
 			TkRule::Sep => {
 				if let Some(tk) = self.next_tk() {
@@ -352,7 +400,7 @@ impl<'t> ParseStream<'t> {
 		assert!(num_consumed <= self.tokens.len());
 		self.tokens = self.tokens[num_consumed..].to_vec();
 	}
-	fn parse_cmd_list(&mut self) -> ShResult<Option<Node<'t>>> {
+	fn parse_cmd_list(&mut self) -> ShResult<Option<Node>> {
 		let mut elements = vec![];
 		let mut node_tks = vec![];
 
@@ -390,7 +438,7 @@ impl<'t> ParseStream<'t> {
 	/// Matches shell commands like if-then-fi, pipelines, etc.
 	/// Ordered from specialized to general, with more generally matchable stuff appearing at the bottom
 	/// The check_pipelines parameter is used to prevent left-recursion issues in self.parse_pipeline()
-	fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node<'t>>> {
+	fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
 		try_match!(self.parse_func_def()?);
 		try_match!(self.parse_brc_grp(false /* from_func_def */)?);
 		try_match!(self.parse_loop()?);
@@ -402,7 +450,7 @@ impl<'t> ParseStream<'t> {
 		}
 		Ok(None)
 	}
-	fn parse_func_def(&mut self) -> ShResult<Option<Node<'t>>> {
+	fn parse_func_def(&mut self) -> ShResult<Option<Node>> {
 		let mut node_tks: Vec<Tk> = vec![];
 		let name;
 		let body;
@@ -418,7 +466,7 @@ impl<'t> ParseStream<'t> {
 			return Err(parse_err_full(
 					"Expected a brace group after function name",
 					&node_tks.get_span().unwrap()
-				)
+			)
 			)
 		};
 		body = Box::new(brc_grp);
@@ -429,11 +477,10 @@ impl<'t> ParseStream<'t> {
 			redirs: vec![],
 			tokens: node_tks
 		};
-		flog!(DEBUG,node);
 
 		Ok(Some(node))
 	}
-	fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<Node<'t>>> {
+	fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<Node>> {
 		let mut node_tks: Vec<Tk> = vec![];
 		let mut body: Vec<Node> = vec![];
 		let mut redirs: Vec<Redir> = vec![];
@@ -456,7 +503,7 @@ impl<'t> ParseStream<'t> {
 				return Err(parse_err_full(
 						"Expected a closing brace for this brace group",
 						&node_tks.get_span().unwrap()
-					)
+				)
 				)
 			}
 		}
@@ -507,10 +554,9 @@ impl<'t> ParseStream<'t> {
 			redirs,
 			tokens: node_tks
 		};
-		flog!(DEBUG, node);
 		Ok(Some(node))
 	}
-	fn parse_if(&mut self) -> ShResult<Option<Node<'t>>> {
+	fn parse_if(&mut self) -> ShResult<Option<Node>> {
 		// Needs at last one 'if-then',
 		// Any number of 'elif-then',
 		// Zero or one 'else'
@@ -532,16 +578,16 @@ impl<'t> ParseStream<'t> {
 			};
 			let Some(cond) = self.parse_block(true)? else {
 				return Err(parse_err_full(
-					&format!("Expected an expression after '{prefix_keywrd}'"),
-					&node_tks.get_span().unwrap()
+						&format!("Expected an expression after '{prefix_keywrd}'"),
+						&node_tks.get_span().unwrap()
 				));
 			};
 			node_tks.extend(cond.tokens.clone());
 
 			if !self.check_keyword("then") || !self.next_tk_is_some() {
 				return Err(parse_err_full(
-					&format!("Expected 'then' after '{prefix_keywrd}' condition"),
-					&node_tks.get_span().unwrap()
+						&format!("Expected 'then' after '{prefix_keywrd}' condition"),
+						&node_tks.get_span().unwrap()
 				));
 			}
 			node_tks.push(self.next_tk().unwrap());
@@ -554,8 +600,8 @@ impl<'t> ParseStream<'t> {
 			}
 			if body_blocks.is_empty() {
 				return Err(parse_err_full(
-					"Expected an expression after 'then'",
-					&node_tks.get_span().unwrap()
+						"Expected an expression after 'then'",
+						&node_tks.get_span().unwrap()
 				));
 			};
 			let cond_node = CondNode { cond: Box::new(cond), body: body_blocks };
@@ -577,8 +623,8 @@ impl<'t> ParseStream<'t> {
 			}
 			if else_block.is_empty() {
 				return Err(parse_err_full(
-					"Expected an expression after 'else'",
-					&node_tks.get_span().unwrap()
+						"Expected an expression after 'else'",
+						&node_tks.get_span().unwrap()
 				));
 			}
 		}
@@ -639,10 +685,10 @@ impl<'t> ParseStream<'t> {
 		};
 		Ok(Some(node))
 	}
-	fn parse_loop(&mut self) -> ShResult<Option<Node<'t>>> {
+	fn parse_loop(&mut self) -> ShResult<Option<Node>> {
 		// Requires a single CondNode and a LoopKind
 		let loop_kind: LoopKind;
-		let cond_node: CondNode<'t>;
+		let cond_node: CondNode;
 		let mut node_tks = vec![];
 
 		if (!self.check_keyword("while") && !self.check_keyword("until")) || !self.next_tk_is_some() {
@@ -653,57 +699,57 @@ impl<'t> ParseStream<'t> {
 			.as_str()
 			.parse() // LoopKind implements FromStr
 			.unwrap();
-		node_tks.push(loop_tk);
-		self.catch_separator(&mut node_tks);
+			node_tks.push(loop_tk);
+			self.catch_separator(&mut node_tks);
 
-		let Some(cond) = self.parse_block(true)? else {
-			return Err(parse_err_full(
-				&format!("Expected an expression after '{loop_kind}'"), // It also implements Display
-				&node_tks.get_span().unwrap()
-			))
-		};
-		node_tks.extend(cond.tokens.clone());
+			let Some(cond) = self.parse_block(true)? else {
+				return Err(parse_err_full(
+						&format!("Expected an expression after '{loop_kind}'"), // It also implements Display
+						&node_tks.get_span().unwrap()
+				))
+			};
+			node_tks.extend(cond.tokens.clone());
 
-		if !self.check_keyword("do") || !self.next_tk_is_some() {
-			return Err(parse_err_full(
-				"Expected 'do' after loop condition",
-				&node_tks.get_span().unwrap()
-			))
-		}
-		node_tks.push(self.next_tk().unwrap());
-		self.catch_separator(&mut node_tks);
+			if !self.check_keyword("do") || !self.next_tk_is_some() {
+				return Err(parse_err_full(
+						"Expected 'do' after loop condition",
+						&node_tks.get_span().unwrap()
+				))
+			}
+			node_tks.push(self.next_tk().unwrap());
+			self.catch_separator(&mut node_tks);
 
-		let mut body = vec![];
-		while let Some(block) = self.parse_block(true)? {
-			node_tks.extend(block.tokens.clone());
-			body.push(block);
-		}
-		if body.is_empty() {
-			return Err(parse_err_full(
-				"Expected an expression after 'do'",
-				&node_tks.get_span().unwrap()
-			))
-		};
+			let mut body = vec![];
+			while let Some(block) = self.parse_block(true)? {
+				node_tks.extend(block.tokens.clone());
+				body.push(block);
+			}
+			if body.is_empty() {
+				return Err(parse_err_full(
+						"Expected an expression after 'do'",
+						&node_tks.get_span().unwrap()
+				))
+			};
 
-		if !self.check_keyword("done") || !self.next_tk_is_some() {
-			return Err(parse_err_full(
-				"Expected 'done' after loop body",
-				&node_tks.get_span().unwrap()
-			))
-		}
-		node_tks.push(self.next_tk().unwrap());
-		self.assert_separator(&mut node_tks)?;
+			if !self.check_keyword("done") || !self.next_tk_is_some() {
+				return Err(parse_err_full(
+						"Expected 'done' after loop body",
+						&node_tks.get_span().unwrap()
+				))
+			}
+			node_tks.push(self.next_tk().unwrap());
+			self.assert_separator(&mut node_tks)?;
 
-		cond_node = CondNode { cond: Box::new(cond), body  };
-		let loop_node = Node {
-			class: NdRule::LoopNode { kind: loop_kind, cond_node },
-			flags: NdFlags::empty(),
-			redirs: vec![],
-			tokens: node_tks
-		};
-		Ok(Some(loop_node))
+			cond_node = CondNode { cond: Box::new(cond), body  };
+			let loop_node = Node {
+				class: NdRule::LoopNode { kind: loop_kind, cond_node },
+				flags: NdFlags::empty(),
+				redirs: vec![],
+				tokens: node_tks
+			};
+			Ok(Some(loop_node))
 	}
-	fn parse_pipeline(&mut self) -> ShResult<Option<Node<'t>>> {
+	fn parse_pipeline(&mut self) -> ShResult<Option<Node>> {
 		let mut cmds = vec![];
 		let mut node_tks = vec![];
 		while let Some(cmd) = self.parse_block(false)? {
@@ -732,7 +778,7 @@ impl<'t> ParseStream<'t> {
 			}))
 		}
 	}
-	fn parse_cmd(&mut self) -> ShResult<Option<Node<'t>>> {
+	fn parse_cmd(&mut self) -> ShResult<Option<Node>> {
 		let tk_slice = self.tokens.as_slice();
 		let mut tk_iter = tk_slice.iter();
 		let mut node_tks = vec![];
@@ -804,8 +850,8 @@ impl<'t> ParseStream<'t> {
 						let Ok(file) = get_redir_file(redir_class, pathbuf) else {
 							self.flags |= ParseFlags::ERROR;
 							return Err(parse_err_full(
-								"Error opening file for redirection",
-								&path_tk.span
+									"Error opening file for redirection",
+									&path_tk.span
 							));
 						};
 
@@ -827,7 +873,7 @@ impl<'t> ParseStream<'t> {
 			redirs,
 		}))
 	}
-	fn parse_assignment(&self, token: &Tk<'t>) -> Option<Node<'t>> {
+	fn parse_assignment(&self, token: &Tk) -> Option<Node> {
 		let mut chars = token.span.as_str().chars();
 		let mut var_name = String::new();
 		let mut name_range = token.span.start..token.span.start;
@@ -930,8 +976,8 @@ impl<'t> ParseStream<'t> {
 	}
 }
 
-impl<'t> Iterator for ParseStream<'t> {
-	type Item = ShResult<Node<'t>>;
+impl Iterator for ParseStream {
+	type Item = ShResult<Node>;
 	fn next(&mut self) -> Option<Self::Item> {
 		// Empty token vector or only SOI/EOI tokens, nothing to do
 		if self.tokens.is_empty() || self.tokens.len() == 2 {
@@ -960,7 +1006,7 @@ impl<'t> Iterator for ParseStream<'t> {
 	}
 }
 
-fn node_is_punctuated<'t>(tokens: &Vec<Tk>) -> bool {
+fn node_is_punctuated(tokens: &Vec<Tk>) -> bool {
 	tokens.last().is_some_and(|tk| {
 		matches!(tk.class, TkRule::Sep)
 	})
@@ -992,7 +1038,7 @@ fn get_redir_file(class: RedirType, path: PathBuf) -> ShResult<File> {
 	Ok(result?)
 }
 
-fn parse_err_full<'t>(reason: &str, blame: &Span<'t>) -> ShErr {
+fn parse_err_full(reason: &str, blame: &Span) -> ShErr {
 	ShErr::full(
 		ShErrKind::ParseErr,
 		reason,
@@ -1000,9 +1046,9 @@ fn parse_err_full<'t>(reason: &str, blame: &Span<'t>) -> ShErr {
 	)
 }
 
-fn is_func_name<'t>(tk: Option<&Tk<'t>>) -> bool {
+fn is_func_name(tk: Option<&Tk>) -> bool {
 	tk.is_some_and(|tk| {
 		tk.flags.contains(TkFlags::KEYWORD) &&
-		(tk.span.as_str().ends_with("()") && !tk.span.as_str().ends_with("\\()"))
+			(tk.span.as_str().ends_with("()") && !tk.span.as_str().ends_with("\\()"))
 	})
 }

@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use rustyline::{completion::Completer, highlight::Highlighter, hint::{Hint, Hinter}, validate::{ValidationResult, Validator}, Helper};
 
 use crate::{libsh::term::{Style, Styled}, parse::{lex::{LexFlags, LexStream}, ParseStream}};
+use crate::prelude::*;
 
 pub struct FernReadline {
 }
@@ -67,7 +68,7 @@ impl Validator for FernReadline {
 	fn validate(&self, ctx: &mut rustyline::validate::ValidationContext) -> rustyline::Result<rustyline::validate::ValidationResult> {
 		return Ok(ValidationResult::Valid(None));
 		let mut tokens = vec![];
-		let tk_stream = LexStream::new(ctx.input(), LexFlags::empty());
+		let tk_stream = LexStream::new(Rc::new(ctx.input().to_string()), LexFlags::empty());
 		for tk in tk_stream {
 			if tk.is_err() {
 				return Ok(ValidationResult::Incomplete)

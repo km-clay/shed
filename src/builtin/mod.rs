@@ -44,11 +44,11 @@ pub const BUILTINS: [&str;9] = [
 /// * If redirections are given to this function, the caller must call `IoFrame.restore()` on the returned `IoFrame`
 /// * If redirections are given, the second field of the resulting tuple will *always* be `Some()`
 /// * If no redirections are given, the second field will *always* be `None`
-pub fn setup_builtin<'t>(
-	argv: Vec<Tk<'t>>,
-	job: &'t mut JobBldr,
+pub fn setup_builtin(
+	argv: Vec<Tk>,
+	job: &mut JobBldr,
 	io_mode: Option<(&mut IoStack,Vec<Redir>)>,
-) -> ShResult<(Vec<(String,Span<'t>)>, Option<IoFrame>)> {
+) -> ShResult<(Vec<(String,Span)>, Option<IoFrame>)> {
 	let mut argv: Vec<(String,Span)> = prepare_argv(argv);
 
 	let child_pgid = if let Some(pgid) = job.pgid() {

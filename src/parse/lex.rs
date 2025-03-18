@@ -31,14 +31,14 @@ pub const OPENERS: [&'static str;6] = [
 ];
 
 #[derive(Clone,PartialEq,Default,Debug)]
-pub struct Span<'s> {
+pub struct Span {
 	range: Range<usize>,
-	source: &'s str
+	source: Rc<String>
 }
 
-impl<'s> Span<'s> {
+impl Span {
 	/// New `Span`. Wraps a range and a string slice that it refers to.
-	pub fn new(range: Range<usize>, source: &'s str) -> Self {
+	pub fn new(range: Range<usize>, source: Rc<String>) -> Self {
 		Span {
 			range,
 			source,
@@ -48,8 +48,8 @@ impl<'s> Span<'s> {
 	pub fn as_str(&self) -> &str {
 		&self.source[self.start..self.end]
 	}
-	pub fn get_source(&'s self) -> &'s str {
-		self.source
+	pub fn get_source(&self) -> Rc<String> {
+		self.source.clone()
 	}
 	pub fn range(&self) -> Range<usize> {
 		self.range.clone()
@@ -57,7 +57,7 @@ impl<'s> Span<'s> {
 }
 
 /// Allows simple access to the underlying range wrapped by the span
-impl<'s> Deref for Span<'s> {
+impl Deref for Span {
 	type Target = Range<usize>;
 	fn deref(&self) -> &Self::Target {
 		&self.range
@@ -90,15 +90,15 @@ impl Default for TkRule {
 }
 
 #[derive(Clone,Debug,PartialEq,Default)]
-pub struct Tk<'s> {
+pub struct Tk {
 	pub class: TkRule,
-	pub span: Span<'s>,
+	pub span: Span,
 	pub flags: TkFlags
 }
 
 // There's one impl here and then another in expand.rs which has the expansion logic
-impl<'s> Tk<'s> {
-	pub fn new(class: TkRule, span: Span<'s>) -> Self {
+impl Tk {
+	pub fn new(class: TkRule, span: Span) -> Self {
 		Self { class, span, flags: TkFlags::empty() }
 	}
 	pub fn to_string(&self) -> String {
@@ -107,12 +107,12 @@ impl<'s> Tk<'s> {
 			_ => self.span.as_str().to_string()
 		}
 	}
-	pub fn source(&self) -> &'s str {
-		self.span.source
+	pub fn source(&self) -> Rc<String> {
+		self.span.source.clone()
 	}
 }
 
-impl<'s> Display for Tk<'s> {
+impl Display for Tk {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match &self.class {
 			TkRule::Expanded { exp } => write!(f,"{}",exp.join(" ")),
@@ -135,8 +135,8 @@ bitflags! {
 	}
 }
 
-pub struct LexStream<'t> {
-	source: &'t str,
+pub struct LexStream {
+	source: Rc<String>,
 	pub cursor: usize,
 	in_quote: bool,
 	flags: LexFlags,
@@ -162,8 +162,8 @@ bitflags! {
 	}
 }
 
-impl<'t> LexStream<'t> {
-	pub fn new(source: &'t str, flags: LexFlags) -> Self {
+impl LexStream {
+	pub fn new(source: Rc<String>, flags: LexFlags) -> Self {
 		flog!(TRACE, "new lex stream");
 		let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
 		Self { source, cursor: 0, in_quote: false, flags }
@@ -178,7 +178,7 @@ impl<'t> LexStream<'t> {
 	/// `LexStream.slice(..10)`
 	/// `LexStream.slice(1..)`
 	///
-	pub fn slice<R: RangeBounds<usize>>(&self, range: R) -> Option<&'t str> {
+	pub fn slice<R: RangeBounds<usize>>(&self, range: R) -> Option<&str> {
 		// Sketchy downcast
 		let start = match range.start_bound() {
 			Bound::Included(&start) => start,
@@ -192,7 +192,7 @@ impl<'t> LexStream<'t> {
 		};
 		self.source.get(start..end)
 	}
-	pub fn slice_from_cursor(&self) -> Option<&'t str> {
+	pub fn slice_from_cursor(&self) -> Option<&str> {
 		self.slice(self.cursor..)
 	}
 	pub fn in_brc_grp(&self) -> bool {
@@ -216,7 +216,7 @@ impl<'t> LexStream<'t> {
 			self.flags &= !LexFlags::NEXT_IS_CMD;
 		}
 	}
-	pub fn read_redir(&mut self) -> Option<ShResult<Tk<'t>>> {
+	pub fn read_redir(&mut self) -> Option<ShResult<Tk>> {
 		assert!(self.cursor <= self.source.len());
 		let slice = self.slice(self.cursor..)?;
 		let mut pos = self.cursor;
@@ -248,7 +248,7 @@ impl<'t> LexStream<'t> {
 								ShErr::full(
 									ShErrKind::ParseErr,
 									"Invalid redirection",
-									Span::new(self.cursor..pos, self.source).into()
+									Span::new(self.cursor..pos, self.source.clone()).into()
 								)
 							));
 						} else {
@@ -294,9 +294,9 @@ impl<'t> LexStream<'t> {
 		self.cursor = pos;
 		Some(Ok(tk))
 	}
-	pub fn read_string(&mut self) -> ShResult<Tk<'t>> {
+	pub fn read_string(&mut self) -> ShResult<Tk> {
 		assert!(self.cursor <= self.source.len());
-		let slice = self.slice_from_cursor().unwrap();
+		let slice = self.slice_from_cursor().unwrap().to_string();
 		let mut pos = self.cursor;
 		let mut chars = slice.chars();
 		let mut quote_pos = None;
@@ -393,14 +393,14 @@ impl<'t> LexStream<'t> {
 		self.cursor = pos;
 		Ok(new_tk)
 	}
-	pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk<'t> {
-		let span = Span::new(range, self.source);
+	pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk {
+		let span = Span::new(range, self.source.clone());
 		Tk::new(class, span)
 	}
 }
 
-impl<'t> Iterator for LexStream<'t> {
-	type Item = ShResult<Tk<'t>>;
+impl Iterator for LexStream {
+	type Item = ShResult<Tk>;
 	fn next(&mut self) -> Option<Self::Item> {
 		assert!(self.cursor <= self.source.len());
 		// We are at the end of the input
@@ -432,7 +432,7 @@ impl<'t> Iterator for LexStream<'t> {
 			let pos = self.cursor;
 			if self.slice(pos..pos+2) == Some("\\\n") {
 				self.cursor += 2;
-			} else if pos < self.source.len() && is_field_sep(get_char(self.source, pos).unwrap()) {
+			} else if pos < self.source.len() && is_field_sep(get_char(&self.source, pos).unwrap()) {
 				self.cursor += 1;
 			} else {
 				break
@@ -443,13 +443,13 @@ impl<'t> Iterator for LexStream<'t> {
 			return None
 		}
 
-		let token = match get_char(self.source, self.cursor).unwrap() {
+		let token = match get_char(&self.source, self.cursor).unwrap() {
 			'\r' | '\n' | ';' => {
 				let ch_idx = self.cursor;
 				self.cursor += 1;
 				self.set_next_is_cmd(true);
 
-				while let Some(ch) = get_char(self.source, self.cursor) {
+				while let Some(ch) = get_char(&self.source, self.cursor) {
 					if is_hard_sep(ch) { // Combine consecutive separators into one, including whitespace
 						self.cursor += 1;
 					} else {
@@ -462,7 +462,7 @@ impl<'t> Iterator for LexStream<'t> {
 				let ch_idx = self.cursor;
 				self.cursor += 1;
 
-				while let Some(ch) = get_char(self.source, self.cursor) {
+				while let Some(ch) = get_char(&self.source, self.cursor) {
 					self.cursor += 1;
 					if ch == '\n' {
 						break
@@ -476,10 +476,10 @@ impl<'t> Iterator for LexStream<'t> {
 				self.cursor += 1;
 				self.set_next_is_cmd(true);
 
-				let tk_type = if let Some('|') = get_char(self.source, self.cursor) {
+				let tk_type = if let Some('|') = get_char(&self.source, self.cursor) {
 					self.cursor += 1;
 					TkRule::Or
-				} else if let Some('&') = get_char(self.source, self.cursor) {
+				} else if let Some('&') = get_char(&self.source, self.cursor) {
 					self.cursor += 1;
 					TkRule::ErrPipe
 				} else {
@@ -493,7 +493,7 @@ impl<'t> Iterator for LexStream<'t> {
 				self.cursor += 1;
 				self.set_next_is_cmd(true);
 
-				let tk_type = if let Some('&') = get_char(self.source, self.cursor) {
+				let tk_type = if let Some('&') = get_char(&self.source, self.cursor) {
 					self.cursor += 1;
 					TkRule::And
 				} else {

@@ -26,8 +26,8 @@ impl<T> VecDequeExt<T> for VecDeque<T> {
 	}
 }
 
-impl<'t> TkVecUtils<Tk<'t>> for Vec<Tk<'t>> {
-	fn get_span(&self) -> Option<Span<'t>> {
+impl TkVecUtils<Tk> for Vec<Tk> {
+	fn get_span(&self) -> Option<Span> {
 		if let Some(first_tk) = self.first() {
 			if let Some(last_tk) = self.last() {
 				Some(

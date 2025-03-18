@@ -1,4 +1,4 @@
-use crate::{jobs::{ChildProc, JobBldr, JobCmdFlags, JobID}, libsh::error::{ErrSpan, ShErr, ShErrKind, ShResult}, parse::{execute::prepare_argv, lex::Span, NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state::{self, read_jobs, write_jobs}};
+use crate::{jobs::{ChildProc, JobBldr, JobCmdFlags, JobID}, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{execute::prepare_argv, lex::Span, NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state::{self, read_jobs, write_jobs}};
 
 use super::setup_builtin;
 
@@ -8,7 +8,7 @@ pub enum JobBehavior {
 }
 
 pub fn continue_job(node: Node, job: &mut JobBldr, behavior: JobBehavior) -> ShResult<()> {
-	let blame = ErrSpan::from(node.get_span());
+	let blame = node.get_span().clone();
 	let cmd = match behavior {
 		JobBehavior::Foregound => "fg",
 		JobBehavior::Background => "bg"
