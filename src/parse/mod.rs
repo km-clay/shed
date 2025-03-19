@@ -42,6 +42,7 @@ impl ParsedSrc {
 		for token in LexStream::new(self.src.clone(), LexFlags::empty()) {
 			tokens.push(token?);
 		}
+		flog!(DEBUG,tokens);
 
 		let mut nodes = vec![];
 		for result in ParseStream::new(tokens) {

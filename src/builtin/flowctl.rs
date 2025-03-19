@@ -7,7 +7,7 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
 	};
 	let mut code = 0;
 
-	let mut argv = prepare_argv(argv);
+	let mut argv = prepare_argv(argv)?;
 	let cmd = argv.remove(0).0;
 
 	if !argv.is_empty() {

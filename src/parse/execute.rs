@@ -18,13 +18,13 @@ pub struct ExecArgs {
 }
 
 impl ExecArgs {
-	pub fn new(argv: Vec<Tk>) -> Self {
+	pub fn new(argv: Vec<Tk>) -> ShResult<Self> {
 		assert!(!argv.is_empty());
-		let argv = prepare_argv(argv);
+		let argv = prepare_argv(argv)?;
 		let cmd = Self::get_cmd(&argv);
 		let argv = Self::get_argv(argv);
 		let envp = Self::get_envp();
-		Self { cmd, argv, envp }
+		Ok(Self { cmd, argv, envp })
 	}
 	pub fn get_cmd(argv: &[(String,Span)]) -> (CString,Span) {
 		(CString::new(argv[0].0.as_str()).unwrap(),argv[0].1.clone())
@@ -197,7 +197,7 @@ impl Dispatcher {
 		self.io_stack.append_to_frame(case_stmt.redirs);
 
 		flog!(DEBUG,pattern.span.as_str());
-		let exp_pattern = pattern.clone().expand(pattern.span.clone(), pattern.flags.clone());
+		let exp_pattern = pattern.clone().expand(pattern.span.clone(), pattern.flags.clone())?;
 		let pattern_raw = exp_pattern
 			.get_words()
 			.first()
@@ -396,7 +396,7 @@ impl Dispatcher {
 
 		self.io_stack.append_to_frame(cmd.redirs);
 
-		let exec_args = ExecArgs::new(argv);
+		let exec_args = ExecArgs::new(argv)?;
 		let io_frame = self.io_stack.pop_frame();
 		run_fork(
 			io_frame,
@@ -453,18 +453,18 @@ impl Dispatcher {
 	}
 }
 
-pub fn prepare_argv(argv: Vec<Tk>) -> Vec<(String,Span)> {
+pub fn prepare_argv(argv: Vec<Tk>) -> ShResult<Vec<(String,Span)>> {
 	let mut args = vec![];
 
 	for arg in argv {
 		let flags = arg.flags;
 		let span = arg.span.clone();
-		let expanded = arg.expand(span.clone(), flags);
+		let expanded = arg.expand(span.clone(), flags)?;
 		for exp in expanded.get_words() {
 			args.push((exp,span.clone()))
 		}
 	}
-	args
+	Ok(args)
 }
 
 pub fn run_fork<'t,C,P>(

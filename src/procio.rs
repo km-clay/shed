@@ -1,6 +1,6 @@
 use std::{fmt::Debug, ops::{Deref, DerefMut}};
 
-use crate::{libsh::{error::ShResult, utils::RedirVecUtils}, parse::{Redir, RedirType}, prelude::*};
+use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::RedirVecUtils}, parse::{Redir, RedirType}, prelude::*};
 
 // Credit to fish-shell for many of the implementation ideas present in this module
 // https://fishshell.com/
@@ -10,6 +10,7 @@ pub enum IoMode {
 	Fd { tgt_fd: RawFd, src_fd: Rc<OwnedFd> },
 	File { tgt_fd: RawFd, file: Rc<File> },
 	Pipe { tgt_fd: RawFd, pipe: Rc<OwnedFd> },
+	Buffer { buf: String, pipe: Rc<OwnedFd> }
 }
 
 impl IoMode {
@@ -29,14 +30,16 @@ impl IoMode {
 		match self {
 			IoMode::Fd { tgt_fd, src_fd: _ } |
 			IoMode::File { tgt_fd, file: _ } |
-			IoMode::Pipe { tgt_fd, pipe: _ } => *tgt_fd
+			IoMode::Pipe { tgt_fd, pipe: _ } => *tgt_fd,
+			_ => panic!()
 		}
 	}
 	pub fn src_fd(&self) -> RawFd {
 		match self {
 			IoMode::Fd { tgt_fd: _, src_fd } => src_fd.as_raw_fd(),
 			IoMode::File { tgt_fd: _, file } => file.as_raw_fd(),
-			IoMode::Pipe { tgt_fd: _, pipe } => pipe.as_raw_fd()
+			IoMode::Pipe { tgt_fd: _, pipe } => pipe.as_raw_fd(),
+			_ => panic!()
 		}
 	}
 	pub fn get_pipes() -> (Self,Self) {
@@ -52,6 +55,50 @@ impl Read for IoMode {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		let src_fd = self.src_fd();
 		Ok(read(src_fd, buf)?)
+	}
+}
+
+pub struct IoBuf<R: Read> {
+	buf: Vec<u8>,
+	reader: R,
+}
+
+impl<R: Read> IoBuf<R> {
+	pub fn new(reader: R) -> Self {
+		Self {
+			buf: Vec::new(),
+			reader,
+		}
+	}
+
+	/// Reads exactly `size` bytes (or fewer if EOF) into the buffer
+	pub fn read_buffer(&mut self, size: usize) -> io::Result<()> {
+		let mut temp_buf = vec![0; size]; // Temporary buffer
+		let bytes_read = self.reader.read(&mut temp_buf)?;
+		self.buf.extend_from_slice(&temp_buf[..bytes_read]); // Append only what was read
+		Ok(())
+	}
+
+	/// Continuously reads until EOF
+	pub fn fill_buffer(&mut self) -> io::Result<()> {
+		let mut temp_buf = vec![0; 1024]; // Read in chunks
+		loop {
+			flog!(DEBUG, "reading bytes");
+			let bytes_read = self.reader.read(&mut temp_buf)?;
+			flog!(DEBUG, bytes_read);
+			if bytes_read == 0 {
+				break; // EOF reached
+			}
+			self.buf.extend_from_slice(&temp_buf[..bytes_read]);
+		}
+		Ok(())
+	}
+
+	/// Get current buffer contents as a string (if valid UTF-8)
+	pub fn as_str(&self) -> ShResult<&str> {
+		std::str::from_utf8(&self.buf).map_err(|_| {
+			ShErr::simple(ShErrKind::InternalErr, "Invalid utf-8 in IoBuf")
+		})
 	}
 }
 
@@ -73,6 +120,9 @@ impl<'e> IoFrame {
 	}
 	pub fn from_redirs(redirs: Vec<Redir>) -> Self {
 		Self { redirs, saved_io: None }
+	}
+	pub fn from_redir(redir: Redir) -> Self {
+		Self { redirs: vec![redir], saved_io: None }
 	}
 
 	/// Splits the frame into two frames

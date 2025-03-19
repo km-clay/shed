@@ -1,8 +1,8 @@
-use std::{fmt::Display, ops::{Bound, Deref, Range, RangeBounds}, str::Chars};
+use std::{collections::VecDeque, fmt::Display, iter::Peekable, ops::{Bound, Deref, Range, RangeBounds}, str::Chars};
 
 use bitflags::bitflags;
 
-use crate::{builtin::BUILTINS, libsh::error::{ShErr, ShErrKind, ShResult}, prelude::*};
+use crate::{builtin::BUILTINS, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::CharDequeUtils}, prelude::*};
 
 pub const KEYWORDS: [&'static str;14] = [
 	"if",
@@ -133,13 +133,14 @@ impl Display for Tk {
 bitflags! {
 	#[derive(Debug,Clone,Copy,PartialEq,Default)]
 	pub struct TkFlags: u32 {
-		const KEYWORD = 0b0000000000000001;
-		/// This is a keyword that opens a new block statement, like 'if' and 'while'
-		const OPENER  = 0b0000000000000010;
-		const IS_CMD  = 0b0000000000000100;
-		const IS_OP   = 0b0000000000001000;
-		const ASSIGN  = 0b0000000000010000;
-		const BUILTIN = 0b0000000000100000;
+		const KEYWORD  = 0b0000000000000001;
+		/// This is a  keyword that opens a new block statement, like 'if' and 'while'
+		const OPENER   = 0b0000000000000010;
+		const IS_CMD   = 0b0000000000000100;
+		const IS_SUBSH = 0b0000000000001000;
+		const IS_OP    = 0b0000000000010000;
+		const ASSIGN   = 0b0000000000100000;
+		const BUILTIN  = 0b0000000001000000;
 	}
 }
 
@@ -309,7 +310,7 @@ impl LexStream {
 		assert!(self.cursor <= self.source.len());
 		let slice = self.slice_from_cursor().unwrap().to_string();
 		let mut pos = self.cursor;
-		let mut chars = slice.chars();
+		let mut chars = slice.chars().peekable();
 		let mut quote_pos = None;
 
 		if let Some(count) = case_pat_lookahead(chars.clone()) {
@@ -331,9 +332,88 @@ impl LexStream {
 				}
 				'\\' => {
 					pos += 1;
-					if chars.next().is_some() {
-						pos += 1;
+					if let Some(ch) = chars.next() {
+						pos += ch.len_utf8();
 					}
+				}
+				'$' if chars.peek() == Some(&'(') => {
+					pos += 2;
+					chars.next();
+					let mut paren_stack = vec!['('];
+					let paren_pos = pos;
+					while let Some(ch) = chars.next() {
+						match ch {
+							'\\' => {
+								pos += 1;
+								if let Some(next_ch) = chars.next() {
+									pos += next_ch.len_utf8();
+								}
+							}
+							'(' => {
+								pos += 1;
+								paren_stack.push(ch);
+							}
+							')' => {
+								pos += 1;
+								paren_stack.pop();
+								if paren_stack.is_empty() {
+									break
+								}
+							}
+							_ => pos += ch.len_utf8()
+						}
+					}
+					if !paren_stack.is_empty() {
+						return Err(
+							ShErr::full(
+								ShErrKind::ParseErr,
+								"Unclosed subshell",
+								Span::new(paren_pos..paren_pos + 1, self.source.clone())
+							)
+						)
+					}
+				}
+				'(' if self.next_is_cmd() => {
+					let mut paren_stack = vec!['('];
+					let paren_pos = pos;
+					while let Some(ch) = chars.next() {
+						pos += ch.len_utf8();
+						match ch {
+							'\\' => {
+								if let Some(next_ch) = chars.next() {
+									pos += next_ch.len_utf8();
+								}
+							}
+							'(' => {
+								pos += 1;
+								paren_stack.push(ch);
+							}
+							')' => {
+								pos += 1;
+								paren_stack.pop();
+								if paren_stack.is_empty() {
+									break
+								}
+							}
+							_ => continue
+						}
+					}
+					if !paren_stack.is_empty() {
+						return Err(
+							ShErr::full(
+								ShErrKind::ParseErr,
+								"Unclosed subshell",
+								Span::new(paren_pos..paren_pos + 1, self.source.clone())
+							)
+						)
+					}
+					let mut subsh_tk = self.get_token(self.cursor..pos, TkRule::Str);
+					subsh_tk.flags |= TkFlags::IS_CMD;
+					subsh_tk.flags |= TkFlags::IS_SUBSH;
+					self.cursor = pos;
+					self.set_next_is_cmd(true);
+					flog!(DEBUG, subsh_tk);
+					return Ok(subsh_tk)
 				}
 				'{' if pos == self.cursor && self.next_is_cmd() => {
 					pos += 1;
@@ -384,6 +464,7 @@ impl LexStream {
 			}
 		}
 		let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
+		flog!(DEBUG,new_tk);
 		if self.in_quote && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
 			return Err(
 				ShErr::full(
@@ -428,6 +509,7 @@ impl LexStream {
 			}
 		}
 		self.cursor = pos;
+		flog!(DEBUG, self.slice_from_cursor());
 		Ok(new_tk)
 	}
 	pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk {
@@ -595,7 +677,23 @@ pub fn is_keyword(slice: &str) -> bool {
 	(slice.ends_with("()") && !slice.ends_with("\\()"))
 }
 
-pub fn case_pat_lookahead(mut chars: Chars) -> Option<usize> {
+pub fn lookahead(pat: &str, mut chars: Chars) -> Option<usize> {
+	let mut pos = 0;
+	let mut char_deque = VecDeque::new();
+	while let Some(ch) = chars.next() {
+		char_deque.push_back(ch);
+		if char_deque.len() > pat.len() {
+			char_deque.pop_front();
+		}
+		if char_deque.starts_with(pat) {
+			return Some(pos)
+		}
+		pos += 1;
+	}
+	None
+}
+
+pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
 	let mut pos = 0;
 	while let Some(ch) = chars.next() {
 		pos += 1;

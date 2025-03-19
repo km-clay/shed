@@ -56,7 +56,7 @@ pub fn setup_builtin(
 	job: &mut JobBldr,
 	io_mode: Option<(&mut IoStack,Vec<Redir>)>,
 ) -> ShResult<(Vec<(String,Span)>, Option<IoFrame>)> {
-	let mut argv: Vec<(String,Span)> = prepare_argv(argv);
+	let mut argv: Vec<(String,Span)> = prepare_argv(argv)?;
 
 	let child_pgid = if let Some(pgid) = job.pgid() {
 		pgid

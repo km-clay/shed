@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::{libsh::error::ShResult, parse::lex::{is_field_sep, is_hard_sep, is_keyword, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, prelude::*, state::{read_logic, read_meta, read_vars, write_meta}};
+use crate::{exec_input, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{lex::{is_field_sep, is_hard_sep, is_keyword, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, Redir, RedirType}, prelude::*, procio::{IoBuf, IoFrame, IoMode}, state::{read_logic, read_meta, read_vars, write_meta}};
 
 /// Variable substitution marker
 pub const VAR_SUB: char = '\u{fdd0}';
@@ -16,10 +16,10 @@ impl Tk {
 	/// tokens: A vector of raw tokens lexed from the expansion result
 	/// span: The span of the original token that is being expanded
 	/// flags: some TkFlags
-	pub fn expand(self, span: Span, flags: TkFlags) -> Self {
-		let exp = Expander::new(self).expand();
+	pub fn expand(self, span: Span, flags: TkFlags) -> ShResult<Self> {
+		let exp = Expander::new(self).expand()?;
 		let class = TkRule::Expanded { exp };
-		Self { class, span, flags, }
+		Ok(Self { class, span, flags, })
 	}
 	pub fn get_words(&self) -> Vec<String> {
 		match &self.class {
@@ -38,9 +38,9 @@ impl Expander {
 		let unescaped = unescape_str(raw.span.as_str());
 		Self { raw: unescaped }
 	}
-	pub fn expand(&mut self) -> Vec<String> {
-		self.raw = self.expand_raw();
-		self.split_words()
+	pub fn expand(&mut self) -> ShResult<Vec<String>> {
+		self.raw = self.expand_raw()?;
+		Ok(self.split_words())
 	}
 	pub fn split_words(&mut self) -> Vec<String> {
 		let mut words = vec![];
@@ -68,18 +68,38 @@ impl Expander {
 		}
 		words
 	}
-	pub fn expand_raw(&self) -> String {
-		let mut chars = self.raw.chars();
+	pub fn expand_raw(&self) -> ShResult<String> {
+		let mut chars = self.raw.chars().peekable();
 		let mut result = String::new();
 		let mut var_name = String::new();
 		let mut in_brace = false;
 
-		// TODO: implement error handling for unclosed braces
 		while let Some(ch) = chars.next() {
 			match ch {
 				VAR_SUB => {
 					while let Some(ch) = chars.next() {
 						match ch {
+							'(' if var_name.is_empty() => {
+								let mut paren_stack = vec!['('];
+								let mut subsh_body = String::new();
+								while let Some(ch) = chars.next() {
+									flog!(DEBUG, "looping");
+									flog!(DEBUG, subsh_body);
+									match ch {
+										'(' => {
+											paren_stack.push(ch);
+											subsh_body.push(ch);
+										}
+										')' => {
+											paren_stack.pop();
+											if paren_stack.is_empty() { break };
+											subsh_body.push(ch);
+										}
+										_ => subsh_body.push(ch)
+									}
+								}
+								result.push_str(&expand_cmd_sub(&subsh_body)?);
+							}
 							'{' => in_brace = true,
 							'}' if in_brace => {
 								let var_val = read_vars(|v| v.get_var(&var_name));
@@ -106,7 +126,44 @@ impl Expander {
 				_ => result.push(ch)
 			}
 		}
-		result
+		Ok(result)
+	}
+}
+
+/// Get the command output of a given command input as a String
+pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
+	flog!(DEBUG, "in expand_cmd_sub");
+	let (rpipe,wpipe) = IoMode::get_pipes();
+	let cmd_sub_redir = Redir::new(wpipe, RedirType::Output);
+	let mut cmd_sub_io_frame = IoFrame::from_redir(cmd_sub_redir);
+	let mut io_buf = IoBuf::new(rpipe);
+
+	match unsafe { fork()? } {
+		ForkResult::Child => {
+			if let Err(e) = cmd_sub_io_frame.redirect() {
+				eprintln!("{e}");
+				exit(1);
+			}
+
+			if let Err(e) = exec_input(raw.to_string()) {
+				eprintln!("{e}");
+				exit(1);
+			}
+			exit(0);
+		}
+		ForkResult::Parent { child } => {
+			std::mem::drop(cmd_sub_io_frame); // Closes the write pipe
+			let status = waitpid(child, Some(WtFlag::WSTOPPED))?;
+			match status {
+				WtStat::Exited(_, _) => {
+					flog!(DEBUG, "filling buffer");
+					io_buf.fill_buffer()?;
+					flog!(DEBUG, "done");
+					Ok(io_buf.as_str()?.trim().to_string())
+				}
+				_ => return Err(ShErr::simple(ShErrKind::InternalErr, "Command sub failed"))
+			}
+		}
 	}
 }
 

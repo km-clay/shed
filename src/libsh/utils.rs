@@ -8,6 +8,12 @@ pub trait VecDequeExt<T> {
 	fn to_vec(self) -> Vec<T>;
 }
 
+pub trait CharDequeUtils {
+	fn to_string(self) -> String;
+	fn ends_with(&self, pat: &str) -> bool;
+	fn starts_with(&self, pat: &str) -> bool;
+}
+
 pub trait TkVecUtils<Tk> {
 	fn get_span(&self) -> Option<Span>;
 	fn debug_tokens(&self);
@@ -23,6 +29,42 @@ pub trait RedirVecUtils<Redir> {
 impl<T> VecDequeExt<T> for VecDeque<T> {
 	fn to_vec(self) -> Vec<T> {
 		self.into_iter().collect::<Vec<T>>()
+	}
+}
+
+impl CharDequeUtils for VecDeque<char> {
+	fn to_string(mut self) -> String {
+		let mut result = String::with_capacity(self.len());
+		while let Some(ch) = self.pop_front() {
+			result.push(ch);
+		}
+		result
+	}
+
+	fn ends_with(&self, pat: &str) -> bool {
+		let pat_chars = pat.chars();
+		let self_len = self.len();
+
+		// If pattern is longer than self, return false
+		if pat_chars.clone().count() > self_len {
+			return false;
+		}
+
+		// Compare from the back
+		self.iter().rev().zip(pat_chars.rev()).all(|(c1, c2)| c1 == &c2)
+	}
+
+	fn starts_with(&self, pat: &str) -> bool {
+		let pat_chars = pat.chars();
+		let self_len = self.len();
+
+		// If pattern is longer than self, return false
+		if pat_chars.clone().count() > self_len {
+			return false;
+		}
+
+		// Compare from the front
+		self.iter().zip(pat_chars).all(|(c1, c2)| c1 == &c2)
 	}
 }
 
