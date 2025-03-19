@@ -30,7 +30,6 @@ fn get_hist_path() -> ShResult<PathBuf> {
 	} else {
 		let home = env::var("HOME")?;
 		let path = PathBuf::from(format!("{home}/.fernhist"));
-		flog!(DEBUG, path);
 		Ok(path)
 	}
 
@@ -44,7 +43,6 @@ pub fn read_line() -> ShResult<String> {
 		Ok(line) => {
 			if !line.is_empty() {
 				let hist_path = get_hist_path()?;
-				flog!(DEBUG, hist_path);
 				editor.add_history_entry(&line)?;
 				editor.save_history(&hist_path)?;
 			}

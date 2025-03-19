@@ -8,6 +8,7 @@ pub mod state;
 pub mod builtin;
 pub mod jobs;
 pub mod signal;
+#[cfg(test)]
 pub mod tests;
 
 use std::collections::HashSet;
