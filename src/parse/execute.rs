@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
 
-use crate::{builtin::{cd::cd, echo::echo, export::export, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, exec_input, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
+use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, exec_input, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
 
-use super::{lex::{LexFlags, LexStream, Span, Tk, TkFlags}, AssignKind, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParseStream, ParsedSrc, Redir, RedirType};
+use super::{lex::{LexFlags, LexStream, Span, Tk, TkFlags, KEYWORDS}, AssignKind, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParseStream, ParsedSrc, Redir, RedirType};
 
 pub enum AssignBehavior {
 	Export,
@@ -12,7 +12,7 @@ pub enum AssignBehavior {
 
 /// Arguments to the execvpe function
 pub struct ExecArgs {
-	pub cmd: CString,
+	pub cmd: (CString,Span),
 	pub argv: Vec<CString>,
 	pub envp: Vec<CString>
 }
@@ -26,8 +26,8 @@ impl ExecArgs {
 		let envp = Self::get_envp();
 		Self { cmd, argv, envp }
 	}
-	pub fn get_cmd(argv: &[(String,Span)]) -> CString {
-		CString::new(argv[0].0.as_str()).unwrap()
+	pub fn get_cmd(argv: &[(String,Span)]) -> (CString,Span) {
+		(CString::new(argv[0].0.as_str()).unwrap(),argv[0].1.clone())
 	}
 	pub fn get_argv(argv: Vec<(String,Span)>) -> Vec<CString> {
 		argv.into_iter().map(|s| CString::new(s.0).unwrap()).collect()
@@ -101,12 +101,23 @@ impl Dispatcher {
 		Ok(())
 	}
 	pub fn exec_func_def(&mut self, func_def: Node) -> ShResult<()> {
+		let blame = func_def.get_span();
 		let NdRule::FuncDef { name, body } = func_def.class else {
 			unreachable!()
 		};
 		let body_span = body.get_span();
 		let body = body_span.as_str().to_string();
 		let name = name.span.as_str().strip_suffix("()").unwrap();
+
+		if KEYWORDS.contains(&name) {
+			return Err(
+				ShErr::full(
+					ShErrKind::SyntaxErr,
+					format!("function: Forbidden function name `{name}`"),
+					blame
+				)
+			)
+		}
 
 		let mut func_parser = ParsedSrc::new(Rc::new(body));
 		func_parser.parse_src()?; // Parse the function
@@ -256,7 +267,7 @@ impl Dispatcher {
 		Ok(())
 	}
 	pub fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
-		let NdRule::Pipeline { cmds, pipe_err } = pipeline.class else {
+		let NdRule::Pipeline { cmds, pipe_err: _ } = pipeline.class else {
 			unreachable!()
 		};
 		self.job_stack.new_job();
@@ -281,7 +292,7 @@ impl Dispatcher {
 		Ok(())
 	}
 	pub fn exec_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
-		let NdRule::Command { ref mut assignments, argv } = &mut cmd.class else {
+		let NdRule::Command { ref mut assignments, argv: _ } = &mut cmd.class else {
 			unreachable!()
 		};
 		let env_vars_to_unset = self.set_assignments(mem::take(assignments), AssignBehavior::Export);
@@ -300,6 +311,7 @@ impl Dispatcher {
 			"fg" => continue_job(cmd, curr_job_mut, JobBehavior::Foregound),
 			"bg" => continue_job(cmd, curr_job_mut, JobBehavior::Background),
 			"jobs" => jobs(cmd, io_stack_mut, curr_job_mut),
+			"alias" => alias(cmd, io_stack_mut, curr_job_mut),
 			_ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw.span.as_str())
 		};
 
@@ -422,7 +434,7 @@ where
 		}
 		ForkResult::Parent { child } => {
 			let cmd = if let Some(args) = exec_args {
-				Some(args.cmd.to_str().unwrap().to_string())
+				Some(args.cmd.0.to_str().unwrap().to_string())
 			} else {
 				None
 			};
@@ -437,11 +449,29 @@ pub fn def_child_action(mut io_frame: IoFrame, exec_args: Option<ExecArgs>) {
 		eprintln!("{e}");
 	}
 	let exec_args = exec_args.unwrap();
-	let cmd = &exec_args.cmd.to_str().unwrap().to_string();
-	let Err(e) = execvpe(&exec_args.cmd, &exec_args.argv, &exec_args.envp);
+	let cmd = &exec_args.cmd.0;
+	let span = exec_args.cmd.1;
+
+	let Err(e) = execvpe(&cmd, &exec_args.argv, &exec_args.envp);
+
+	let cmd = cmd.to_str().unwrap().to_string();
 	match e {
-		Errno::ENOENT => eprintln!("Command not found: {}", cmd),
-		_ => eprintln!("{e}")
+		Errno::ENOENT => {
+			let err = ShErr::full(
+				ShErrKind::CmdNotFound(cmd),
+				"",
+				span
+			);
+			eprintln!("{err}");
+		}
+		_ => {
+			let err = ShErr::full(
+				ShErrKind::Errno,
+				format!("{e}"),
+				span
+			);
+			eprintln!("{err}");
+		}
 	}
 	exit(e as i32)
 }

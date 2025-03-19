@@ -30,7 +30,7 @@ impl<T> ShResultExt for Result<T,ShErr> {
 			return self
 		};
 		match e {
-			ShErr::Simple { kind, msg } => Err(ShErr::full(*kind, msg, new_span)),
+			ShErr::Simple { kind, msg } => Err(ShErr::full(kind.clone(), msg, new_span)),
 			ShErr::Full { kind: _, msg: _, span: _ } => self
 		}
 	}
@@ -86,7 +86,7 @@ impl ShErr {
 			if ch == '\n' {
 				total_lines += 1;
 
-				if total_len >= span.start {
+				if total_len > span.start {
 					let line = (
 						total_lines,
 						mem::take(&mut cur_line)
@@ -96,6 +96,7 @@ impl ShErr {
 				if total_len >= span.end {
 					break
 				}
+				cur_line.clear();
 			}
 		}
 
@@ -161,6 +162,7 @@ impl Display for ShErr {
 
 				for (lineno,line) in window {
 					let lineno = lineno.to_string();
+					let line = line.trim();
 					let mut prefix = format!("{padding}|");
 					prefix.replace_range(0..lineno.len(), &lineno);
 					prefix = prefix.styled(Style::Cyan | Style::Bold);
@@ -203,7 +205,7 @@ impl From<Errno> for ShErr {
 	}
 }
 
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug,Clone)]
 pub enum ShErrKind {
 	IoErr,
 	SyntaxErr,
@@ -213,8 +215,8 @@ pub enum ShErrKind {
 	ResourceLimitExceeded,
 	BadPermission,
 	Errno,
-	FileNotFound,
-	CmdNotFound,
+	FileNotFound(String),
+	CmdNotFound(String),
 	CleanExit,
 	FuncReturn,
 	LoopContinue,
@@ -233,8 +235,8 @@ impl Display for ShErrKind {
 			ShErrKind::ResourceLimitExceeded => "Resource Limit Exceeded",
 			ShErrKind::BadPermission => "Bad Permissions",
 			ShErrKind::Errno => "ERRNO",
-			ShErrKind::FileNotFound => "File Not Found",
-			ShErrKind::CmdNotFound => "Command Not Found",
+			ShErrKind::FileNotFound(file) => &format!("File not found: {file}"),
+			ShErrKind::CmdNotFound(cmd) => &format!("Command not found: {cmd}"),
 			ShErrKind::CleanExit => "",
 			ShErrKind::FuncReturn => "",
 			ShErrKind::LoopContinue => "",

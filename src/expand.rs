@@ -1,4 +1,6 @@
-use crate::{libsh::error::ShResult, parse::lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, prelude::*, state::{read_meta, read_vars, write_meta}};
+use std::collections::{HashSet, VecDeque};
+
+use crate::{libsh::error::ShResult, parse::lex::{is_field_sep, is_hard_sep, is_keyword, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, prelude::*, state::{read_logic, read_meta, read_vars, write_meta}};
 
 /// Variable substitution marker
 pub const VAR_SUB: char = '\u{fdd0}';
@@ -479,9 +481,7 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 			PromptTk::Text(txt) => result.push_str(&txt),
 			PromptTk::AnsiSeq(params) => result.push_str(&params),
 			PromptTk::Runtime => {
-				flog!(INFO, "getting runtime");
 				if let Some(runtime) = write_meta(|m| m.stop_timer()) {
-					flog!(DEBUG, runtime);
 					let runtime_fmt = format_cmd_runtime(runtime);
 					result.push_str(&runtime_fmt);
 				}
@@ -542,4 +542,105 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 	}
 
 	Ok(result)
+}
+
+/// Expand aliases in the given input string
+pub fn expand_aliases(input: String, mut already_expanded: HashSet<String>) -> String {
+	let mut result = String::new();
+	let mut cur_word = String::new();
+	let mut chars = input.chars().peekable();
+	let mut is_cmd = true;
+
+	let mut expanded_this_iter = HashSet::new();
+	while let Some(ch) = chars.next() {
+		match ch {
+			';' | '\n' => {
+				if is_cmd {
+					if !is_keyword(&cur_word) {
+						if !already_expanded.contains(&cur_word) {
+							if let Some(alias) = read_logic(|l| l.get_alias(&cur_word)) {
+								result.push_str(&alias);
+								expanded_this_iter.insert(cur_word.clone());
+								cur_word.clear();
+							} else {
+								result.push_str(&mem::take(&mut cur_word));
+							}
+						}
+					} else {
+						result.push_str(&mem::take(&mut cur_word));
+					}
+				} else {
+					result.push_str(&mem::take(&mut cur_word));
+				}
+				result.push(ch);
+				is_cmd = true;
+				while let Some(next_ch) = chars.peek() {
+					if is_hard_sep(*next_ch) {
+						result.push(chars.next().unwrap());
+					} else {
+						break
+					}
+				}
+			}
+			' ' | '\t' => {
+				if is_cmd {
+					if !is_keyword(&cur_word) {
+						if let Some(alias) = read_logic(|l| l.get_alias(&cur_word)) {
+							if !already_expanded.contains(&cur_word) {
+								result.push_str(&alias);
+								expanded_this_iter.insert(cur_word.clone());
+								cur_word.clear();
+							} else {
+								result.push_str(&mem::take(&mut cur_word));
+							}
+							is_cmd = false;
+						} else {
+							result.push_str(&mem::take(&mut cur_word));
+							is_cmd = false;
+						}
+					} else {
+						result.push_str(&mem::take(&mut cur_word));
+					}
+				} else {
+					result.push_str(&mem::take(&mut cur_word));
+				}
+				result.push(ch);
+				while let Some(next_ch) = chars.peek() {
+					if is_field_sep(*next_ch) {
+						result.push(chars.next().unwrap());
+					} else {
+						break
+					}
+				}
+			}
+			_ => cur_word.push(ch)
+		}
+	}
+	if !cur_word.is_empty() {
+		if is_cmd {
+			if !is_keyword(&cur_word) {
+				if let Some(alias) = read_logic(|l| l.get_alias(&cur_word)) {
+					if !already_expanded.contains(&cur_word) {
+						result.push_str(&alias);
+						expanded_this_iter.insert(cur_word.clone());
+						cur_word.clear();
+					} else {
+						result.push_str(&mem::take(&mut cur_word));
+					}
+				} else {
+					result.push_str(&mem::take(&mut cur_word));
+				}
+			} else {
+				result.push_str(&mem::take(&mut cur_word));
+			}
+		} else {
+			result.push_str(&mem::take(&mut cur_word));
+		}
+	}
+	if expanded_this_iter.is_empty() {
+		return result
+	} else {
+		already_expanded.extend(expanded_this_iter.into_iter());
+		return expand_aliases(result, already_expanded)
+	}
 }

@@ -611,9 +611,11 @@ pub fn enable_reaping() -> ShResult<()> {
 
 /// Waits on the current foreground job and updates the shell's last status code
 pub fn wait_fg(job: Job) -> ShResult<()> {
+	if job.children().is_empty() {
+		return Ok(()) // Nothing to do
+	}
 	flog!(TRACE, "Waiting on foreground job");
 	let mut code = 0;
-	flog!(DEBUG,job.pgid());
 	attach_tty(job.pgid())?;
 	disable_reaping()?;
 	let statuses = write_jobs(|j| j.new_fg(job))?;

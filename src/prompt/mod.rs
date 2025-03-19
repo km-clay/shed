@@ -29,7 +29,9 @@ fn get_hist_path() -> ShResult<PathBuf> {
 		Ok(PathBuf::from(path))
 	} else {
 		let home = env::var("HOME")?;
-		Ok(PathBuf::from(format!("{home}/.fernhist")))
+		let path = PathBuf::from(format!("{home}/.fernhist"));
+		flog!(DEBUG, path);
+		Ok(path)
 	}
 
 }

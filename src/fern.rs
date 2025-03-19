@@ -8,14 +8,16 @@ pub mod state;
 pub mod builtin;
 pub mod jobs;
 pub mod signal;
-#[cfg(test)]
 pub mod tests;
 
+use std::collections::HashSet;
+
+use expand::expand_aliases;
 use libsh::error::ShResult;
 use parse::{execute::Dispatcher, lex::{LexFlags, LexStream}, Ast, ParseStream, ParsedSrc};
 use procio::IoFrame;
 use signal::sig_setup;
-use state::write_meta;
+use state::{source_rc, write_logic, write_meta};
 use termios::{LocalFlags, Termios};
 use crate::prelude::*;
 
@@ -51,14 +53,12 @@ fn set_termios() {
 
 pub fn exec_input(input: String) -> ShResult<()> {
 	write_meta(|m| m.start_timer());
+	let input = expand_aliases(input, HashSet::new());
 	let mut parser = ParsedSrc::new(Rc::new(input));
 	parser.parse_src()?;
 
-	let exec_start = Instant::now();
-
 	let mut dispatcher = Dispatcher::new(parser.extract_nodes());
-	dispatcher.begin_dispatch()?;
-	Ok(())
+	dispatcher.begin_dispatch()
 }
 
 fn main() {
@@ -66,6 +66,9 @@ fn main() {
 	set_termios();
 	sig_setup();
 
+	if let Err(e) = source_rc() {
+		eprintln!("{e}");
+	}
 
 	loop {
 		let input = match prompt::read_line() {

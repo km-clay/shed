@@ -1,6 +1,8 @@
-use expand::unescape_str;
+use std::collections::HashSet;
+
+use expand::{expand_aliases, unescape_str};
 use parse::lex::{Tk, TkFlags, TkRule};
-use state::write_vars;
+use state::{write_logic, write_vars};
 use super::super::*;
 
 #[test]
@@ -8,7 +10,7 @@ fn simple_expansion() {
 	let varsub = "$foo";
 	write_vars(|v| v.new_var("foo", "this is the value of the variable".into()));
 
-	let mut tokens: Vec<Tk> = LexStream::new(varsub, LexFlags::empty())
+	let mut tokens: Vec<Tk> = LexStream::new(Rc::new(varsub.to_string()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
 		.filter(|tk| !matches!(tk.class, TkRule::EOI | TkRule::SOI))
 		.collect();
@@ -26,4 +28,55 @@ fn unescape_string() {
 	let unescaped = unescape_str(string);
 
 	insta::assert_snapshot!(unescaped)
+}
+
+#[test]
+fn expand_alias_simple() {
+	write_logic(|l| l.insert_alias("foo", "echo foo"));
+
+	let input = String::from("foo");
+
+	let result = expand_aliases(input, HashSet::new());
+	assert_eq!(result.as_str(),"echo foo")
+}
+
+#[test]
+fn expand_alias_in_if() {
+	write_logic(|l| l.insert_alias("foo", "echo foo"));
+
+	let input = String::from("if foo; then echo bar; fi");
+
+	let result = expand_aliases(input, HashSet::new());
+	assert_eq!(result.as_str(),"if echo foo; then echo bar; fi")
+}
+
+#[test]
+fn expand_multiple_aliases() {
+	write_logic(|l| l.insert_alias("foo", "echo foo"));
+	write_logic(|l| l.insert_alias("bar", "echo bar"));
+	write_logic(|l| l.insert_alias("biz", "echo biz"));
+
+	let input = String::from("foo; bar; biz");
+
+	let result = expand_aliases(input, HashSet::new());
+	assert_eq!(result.as_str(),"echo foo; echo bar; echo biz")
+}
+
+#[test]
+fn expand_recursive_alias() {
+	write_logic(|l| l.insert_alias("foo", "echo foo"));
+	write_logic(|l| l.insert_alias("bar", "foo bar"));
+
+	let input = String::from("bar");
+	let result = expand_aliases(input, HashSet::new());
+	assert_eq!(result.as_str(),"echo foo bar")
+}
+
+#[test]
+fn test_infinite_recursive_alias() {
+	write_logic(|l| l.insert_alias("foo", "foo"));
+
+	let input = String::from("foo");
+	let result = expand_aliases(input, HashSet::new());
+	assert_eq!(result.as_str(),"foo")
 }

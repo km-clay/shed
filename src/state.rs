@@ -2,7 +2,7 @@ use std::{collections::{HashMap, VecDeque}, ops::{Deref, Range}, sync::{LazyLock
 
 use nix::unistd::{gethostname, getppid, User};
 
-use crate::{exec_input, jobs::JobTab, libsh::{error::ShResult, utils::VecDequeExt}, parse::{lex::{get_char, Tk}, ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*};
+use crate::{exec_input, jobs::JobTab, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::VecDequeExt}, parse::{lex::{get_char, Tk}, ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*};
 
 pub static JOB_TABLE: LazyLock<RwLock<JobTab>> = LazyLock::new(|| RwLock::new(JobTab::new()));
 
@@ -66,6 +66,12 @@ impl LogTab {
 	}
 	pub fn get_func(&self, name: &str) -> Option<ShFunc> {
 		self.functions.get(name).cloned()
+	}
+	pub fn funcs(&self) -> &HashMap<String,ShFunc> {
+		&self.functions
+	}
+	pub fn aliases(&self) -> &HashMap<String,String> {
+		&self.aliases
 	}
 	pub fn insert_alias(&mut self, name: &str, body: &str) {
 		self.aliases.insert(name.into(), body.into());
@@ -142,7 +148,7 @@ impl VarTab {
 		env::set_var("OLDPWD", pathbuf_to_string(std::env::current_dir()));
 		env::set_var("HOME", home.clone());
 		env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
-		env::set_var("FERN_HIST",format!("{}/.fern_hist",home));
+		env::set_var("FERN_HIST",format!("{}/.fernhist",home));
 		env::set_var("FERN_RC",format!("{}/.fernrc",home));
 	}
 	pub fn init_sh_argv(&mut self) {
@@ -311,6 +317,21 @@ pub fn get_status() -> i32 {
 }
 pub fn set_status(code: i32) {
 	write_vars(|v| v.set_param('?', &code.to_string()))
+}
+
+pub fn source_rc() -> ShResult<()> {
+	let path = if let Ok(path) = env::var("FERN_RC") {
+		PathBuf::from(&path)
+	} else {
+		let home = env::var("HOME").unwrap();
+		PathBuf::from(format!("{home}/.fernrc"))
+	};
+	if !path.exists() {
+		return Err(
+			ShErr::simple(ShErrKind::InternalErr, ".fernrc not found")
+		)
+	}
+	source_file(path)
 }
 
 pub fn source_file(path: PathBuf) -> ShResult<()> {

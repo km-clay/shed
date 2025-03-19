@@ -9,8 +9,9 @@ pub mod pwd;
 pub mod source;
 pub mod shift;
 pub mod jobctl;
+pub mod alias;
 
-pub const BUILTINS: [&str;9] = [
+pub const BUILTINS: [&str;10] = [
 	"echo",
 	"cd",
 	"export",
@@ -19,7 +20,8 @@ pub const BUILTINS: [&str;9] = [
 	"shift",
 	"jobs",
 	"fg",
-	"bg"
+	"bg",
+	"alias"
 ];
 
 /// Sets up a builtin command
