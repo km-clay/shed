@@ -42,3 +42,11 @@ fn lex_multiline() {
 
 	insta::assert_debug_snapshot!(tokens)
 }
+
+#[test]
+fn lex_case() {
+	let input = "case $foo in foo) bar;; bar) foo;; biz) baz;; esac";
+	let tokens: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty()).collect();
+
+	insta::assert_debug_snapshot!(tokens)
+}

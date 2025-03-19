@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, exec_input, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
 
-use super::{lex::{LexFlags, LexStream, Span, Tk, TkFlags, KEYWORDS}, AssignKind, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParseStream, ParsedSrc, Redir, RedirType};
+use super::{lex::{LexFlags, LexStream, Span, Tk, TkFlags, KEYWORDS}, AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParseStream, ParsedSrc, Redir, RedirType};
 
 pub enum AssignBehavior {
 	Export,
@@ -62,6 +62,7 @@ impl Dispatcher {
 			NdRule::Pipeline {..} => self.exec_pipeline(node)?,
 			NdRule::IfNode {..} => self.exec_if(node)?,
 			NdRule::LoopNode {..} => self.exec_loop(node)?,
+			NdRule::CaseNode {..} => self.exec_case(node)?,
 			NdRule::BraceGrp {..} => self.exec_brc_grp(node)?,
 			NdRule::FuncDef {..} => self.exec_func_def(node)?,
 			NdRule::Command {..} => self.dispatch_cmd(node)?,
@@ -177,6 +178,39 @@ impl Dispatcher {
 			let blame = node.get_span();
 			self.io_stack.push_frame(io_frame.clone());
 			self.dispatch_node(node).try_blame(blame)?;
+		}
+
+		Ok(())
+	}
+	pub fn exec_case(&mut self, case_stmt: Node) -> ShResult<()> {
+		let NdRule::CaseNode { pattern, case_blocks } = case_stmt.class else {
+			unreachable!()
+		};
+
+		self.io_stack.append_to_frame(case_stmt.redirs);
+
+		flog!(DEBUG,pattern.span.as_str());
+		let exp_pattern = pattern.clone().expand(pattern.span.clone(), pattern.flags.clone());
+		let pattern_raw = exp_pattern
+			.get_words()
+			.first()
+			.map(|s| s.to_string())
+			.unwrap_or_default();
+		flog!(DEBUG,exp_pattern);
+
+		for block in case_blocks {
+			let CaseNode { pattern, body } = block;
+			let block_pattern_raw = pattern.span.as_str().trim_end_matches(')').trim();
+			// Split at '|' to allow for multiple patterns like `foo|bar)`
+			let block_patterns = block_pattern_raw.split('|');
+
+			for pattern in block_patterns {
+				if pattern_raw == pattern || pattern == "*" {
+					for node in &body {
+						self.dispatch_node(node.clone())?;
+					}
+				}
+			}
 		}
 
 		Ok(())

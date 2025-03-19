@@ -385,9 +385,16 @@ impl ParseStream {
 	fn next_tk_is_some(&self) -> bool {
 		self.tokens.first().is_some_and(|tk| tk.class != TkRule::EOI)
 	}
+	fn check_case_pattern(&self) -> bool {
+		self.tokens.first().is_some_and(|tk| tk.class == TkRule::CasePattern)
+	}
 	fn check_keyword(&self, kw: &str) -> bool {
 		self.tokens.first().is_some_and(|tk| {
-			tk.flags.contains(TkFlags::KEYWORD) && tk.span.as_str() == kw
+			if kw == "in" {
+				tk.span.as_str() == "in"
+			} else {
+				tk.flags.contains(TkFlags::KEYWORD) && tk.span.as_str() == kw
+			}
 		})
 	}
 	fn check_redir(&self) -> bool {
@@ -441,6 +448,7 @@ impl ParseStream {
 	fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
 		try_match!(self.parse_func_def()?);
 		try_match!(self.parse_brc_grp(false /* from_func_def */)?);
+		try_match!(self.parse_case()?);
 		try_match!(self.parse_loop()?);
 		try_match!(self.parse_if()?);
 		if check_pipelines {
@@ -556,6 +564,73 @@ impl ParseStream {
 		};
 		Ok(Some(node))
 	}
+	fn parse_case(&mut self) -> ShResult<Option<Node>> {
+		// Needs a pattern token
+		// Followed by any number of CaseNodes
+		let mut node_tks: Vec<Tk> = vec![];
+		let pattern: Tk;
+		let mut case_blocks: Vec<CaseNode> = vec![];
+		let mut redirs: Vec<Redir> = vec![];
+
+		if !self.check_keyword("case") || !self.next_tk_is_some() {
+			return Ok(None)
+		}
+		node_tks.push(self.next_tk().unwrap());
+
+		let Some(pat_tk) = self.next_tk() else {
+			return Err(parse_err_full("Expected a pattern after 'case'", &node_tks.get_span().unwrap()));
+		};
+
+		pattern = pat_tk;
+		node_tks.push(pattern.clone());
+
+		if !self.check_keyword("in") || !self.next_tk_is_some() {
+			return Err(parse_err_full("Expected 'in' after case variable name", &node_tks.get_span().unwrap()));
+		}
+		node_tks.push(self.next_tk().unwrap());
+
+		self.catch_separator(&mut node_tks);
+
+		loop {
+			if !self.check_case_pattern() || !self.next_tk_is_some() {
+				return Err(parse_err_full("Expected a case pattern here", &node_tks.get_span().unwrap()));
+			}
+			let case_pat_tk = self.next_tk().unwrap();
+			node_tks.push(case_pat_tk.clone());
+
+			let mut nodes = vec![];
+			while let Some(node) = self.parse_block(true /* check_pipelines */)? {
+				node_tks.extend(node.tokens.clone());
+				let sep = node.tokens.last().unwrap();
+				if sep.has_double_semi() {
+					nodes.push(node);
+					break
+				} else {
+					nodes.push(node);
+				}
+			}
+
+			let case_node = CaseNode { pattern: case_pat_tk, body: nodes };
+			case_blocks.push(case_node);
+
+			if self.check_keyword("esac") {
+				node_tks.push(self.next_tk().unwrap());
+				break
+			}
+
+			if !self.next_tk_is_some() {
+				return Err(parse_err_full("Expected 'esac' after case block", &node_tks.get_span().unwrap()));
+			}
+		}
+
+		let node = Node {
+			class: NdRule::CaseNode { pattern, case_blocks },
+			flags: NdFlags::empty(),
+			redirs,
+			tokens: node_tks
+		};
+		Ok(Some(node))
+	}
 	fn parse_if(&mut self) -> ShResult<Option<Node>> {
 		// Needs at last one 'if-then',
 		// Any number of 'elif-then',
@@ -563,7 +638,7 @@ impl ParseStream {
 		let mut node_tks: Vec<Tk> = vec![];
 		let mut cond_nodes: Vec<CondNode> = vec![];
 		let mut else_block: Vec<Node> = vec![];
-		let mut redirs = vec![];
+		let mut redirs: Vec<Redir> = vec![];
 
 		if !self.check_keyword("if") || !self.next_tk_is_some() {
 			return Ok(None)

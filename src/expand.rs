@@ -546,97 +546,25 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 
 /// Expand aliases in the given input string
 pub fn expand_aliases(input: String, mut already_expanded: HashSet<String>) -> String {
-	let mut result = String::new();
-	let mut cur_word = String::new();
-	let mut chars = input.chars().peekable();
-	let mut is_cmd = true;
+	let mut result = input.clone();
+	let tokens: Vec<_> = LexStream::new(Rc::new(input), LexFlags::empty()).collect();
+	let mut expanded_this_iter: Vec<String> = vec![];
 
-	let mut expanded_this_iter = HashSet::new();
-	while let Some(ch) = chars.next() {
-		match ch {
-			';' | '\n' => {
-				if is_cmd {
-					if !is_keyword(&cur_word) {
-						if !already_expanded.contains(&cur_word) {
-							if let Some(alias) = read_logic(|l| l.get_alias(&cur_word)) {
-								result.push_str(&alias);
-								expanded_this_iter.insert(cur_word.clone());
-								cur_word.clear();
-							} else {
-								result.push_str(&mem::take(&mut cur_word));
-							}
-						}
-					} else {
-						result.push_str(&mem::take(&mut cur_word));
-					}
-				} else {
-					result.push_str(&mem::take(&mut cur_word));
-				}
-				result.push(ch);
-				is_cmd = true;
-				while let Some(next_ch) = chars.peek() {
-					if is_hard_sep(*next_ch) {
-						result.push(chars.next().unwrap());
-					} else {
-						break
-					}
-				}
-			}
-			' ' | '\t' => {
-				if is_cmd {
-					if !is_keyword(&cur_word) {
-						if let Some(alias) = read_logic(|l| l.get_alias(&cur_word)) {
-							if !already_expanded.contains(&cur_word) {
-								result.push_str(&alias);
-								expanded_this_iter.insert(cur_word.clone());
-								cur_word.clear();
-							} else {
-								result.push_str(&mem::take(&mut cur_word));
-							}
-							is_cmd = false;
-						} else {
-							result.push_str(&mem::take(&mut cur_word));
-							is_cmd = false;
-						}
-					} else {
-						result.push_str(&mem::take(&mut cur_word));
-					}
-				} else {
-					result.push_str(&mem::take(&mut cur_word));
-				}
-				result.push(ch);
-				while let Some(next_ch) = chars.peek() {
-					if is_field_sep(*next_ch) {
-						result.push(chars.next().unwrap());
-					} else {
-						break
-					}
-				}
-			}
-			_ => cur_word.push(ch)
+	for token_result in tokens.into_iter().rev() {
+		let Ok(tk) = token_result else { continue };
+
+		if !tk.flags.contains(TkFlags::IS_CMD) { continue }
+
+		let raw_tk = tk.span.as_str().to_string();
+
+		if already_expanded.contains(&raw_tk) { continue }
+
+		if let Some(alias) = read_logic(|l| l.get_alias(&raw_tk)) {
+			result.replace_range(tk.span.range(), &alias);
+			expanded_this_iter.push(raw_tk);
 		}
 	}
-	if !cur_word.is_empty() {
-		if is_cmd {
-			if !is_keyword(&cur_word) {
-				if let Some(alias) = read_logic(|l| l.get_alias(&cur_word)) {
-					if !already_expanded.contains(&cur_word) {
-						result.push_str(&alias);
-						expanded_this_iter.insert(cur_word.clone());
-						cur_word.clear();
-					} else {
-						result.push_str(&mem::take(&mut cur_word));
-					}
-				} else {
-					result.push_str(&mem::take(&mut cur_word));
-				}
-			} else {
-				result.push_str(&mem::take(&mut cur_word));
-			}
-		} else {
-			result.push_str(&mem::take(&mut cur_word));
-		}
-	}
+
 	if expanded_this_iter.is_empty() {
 		return result
 	} else {

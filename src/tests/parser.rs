@@ -138,3 +138,49 @@ done";
 
 	insta::assert_debug_snapshot!(nodes)
 }
+#[test]
+fn parse_case_simple() {
+	let input = "case foo in foo) bar;; bar) foo;; biz) baz;; esac";
+	let tk_stream: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty())
+		.map(|tk| tk.unwrap())
+		.collect();
+	let nodes: Vec<_> = ParseStream::new(tk_stream).collect();
+
+	insta::assert_debug_snapshot!(nodes)
+}
+#[test]
+fn parse_case_multiline() {
+	let input = "case foo in
+	foo) bar
+	;;
+	bar) foo
+	;;
+	biz) baz
+	;;
+esac";
+	let tk_stream: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty())
+		.map(|tk| tk.unwrap())
+		.collect();
+	let nodes: Vec<_> = ParseStream::new(tk_stream).collect();
+
+	insta::assert_debug_snapshot!(nodes)
+}
+#[test]
+fn parse_case_nested() {
+	let input = "case foo in
+	foo) if true; then
+		echo foo
+	fi
+	;;
+	bar) if false; then
+		echo bar
+	fi
+	;;
+esac";
+	let tk_stream: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty())
+		.map(|tk| tk.unwrap())
+		.collect();
+	let nodes: Vec<_> = ParseStream::new(tk_stream).collect();
+
+	insta::assert_debug_snapshot!(nodes)
+}

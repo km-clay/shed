@@ -1,0 +1,186 @@
+---
+source: src/tests/lexer.rs
+expression: tokens
+---
+[
+    Ok(
+        Tk {
+            class: SOI,
+            span: Span {
+                range: 0..0,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 0..4,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                KEYWORD,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 5..9,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 10..12,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                KEYWORD,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: CasePattern,
+            span: Span {
+                range: 13..17,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 18..21,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                IS_CMD,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Sep,
+            span: Span {
+                range: 21..24,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: CasePattern,
+            span: Span {
+                range: 24..28,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 29..32,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                IS_CMD,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Sep,
+            span: Span {
+                range: 32..35,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: CasePattern,
+            span: Span {
+                range: 35..39,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 40..43,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                IS_CMD,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Sep,
+            span: Span {
+                range: 43..46,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: Str,
+            span: Span {
+                range: 46..50,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                KEYWORD,
+            ),
+        },
+    ),
+    Ok(
+        Tk {
+            class: EOI,
+            span: Span {
+                range: 50..50,
+                source: "case $foo in foo) bar;; bar) foo;; biz) baz;; esac",
+            },
+            flags: TkFlags(
+                0x0,
+            ),
+        },
+    ),
+]

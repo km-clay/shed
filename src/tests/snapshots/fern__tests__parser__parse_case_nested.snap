@@ -1,0 +1,1211 @@
+---
+source: src/tests/parser.rs
+expression: nodes
+---
+[
+    Ok(
+        Node {
+            class: Conjunction {
+                elements: [
+                    ConjunctNode {
+                        cmd: Node {
+                            class: CaseNode {
+                                pattern: Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 5..8,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                case_blocks: [
+                                    CaseNode {
+                                        pattern: Tk {
+                                            class: CasePattern,
+                                            span: Span {
+                                                range: 13..17,
+                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                            },
+                                            flags: TkFlags(
+                                                0x0,
+                                            ),
+                                        },
+                                        body: [
+                                            Node {
+                                                class: IfNode {
+                                                    cond_nodes: [
+                                                        CondNode {
+                                                            cond: Node {
+                                                                class: Pipeline {
+                                                                    cmds: [
+                                                                        Node {
+                                                                            class: Command {
+                                                                                assignments: [],
+                                                                                argv: [
+                                                                                    Tk {
+                                                                                        class: Str,
+                                                                                        span: Span {
+                                                                                            range: 21..25,
+                                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                        },
+                                                                                        flags: TkFlags(
+                                                                                            IS_CMD,
+                                                                                        ),
+                                                                                    },
+                                                                                ],
+                                                                            },
+                                                                            flags: NdFlags(
+                                                                                0x0,
+                                                                            ),
+                                                                            redirs: [],
+                                                                            tokens: [
+                                                                                Tk {
+                                                                                    class: Str,
+                                                                                    span: Span {
+                                                                                        range: 21..25,
+                                                                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                    },
+                                                                                    flags: TkFlags(
+                                                                                        IS_CMD,
+                                                                                    ),
+                                                                                },
+                                                                                Tk {
+                                                                                    class: Sep,
+                                                                                    span: Span {
+                                                                                        range: 25..27,
+                                                                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                    },
+                                                                                    flags: TkFlags(
+                                                                                        0x0,
+                                                                                    ),
+                                                                                },
+                                                                            ],
+                                                                        },
+                                                                    ],
+                                                                    pipe_err: false,
+                                                                },
+                                                                flags: NdFlags(
+                                                                    0x0,
+                                                                ),
+                                                                redirs: [],
+                                                                tokens: [
+                                                                    Tk {
+                                                                        class: Str,
+                                                                        span: Span {
+                                                                            range: 21..25,
+                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                        },
+                                                                        flags: TkFlags(
+                                                                            IS_CMD,
+                                                                        ),
+                                                                    },
+                                                                    Tk {
+                                                                        class: Sep,
+                                                                        span: Span {
+                                                                            range: 25..27,
+                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                        },
+                                                                        flags: TkFlags(
+                                                                            0x0,
+                                                                        ),
+                                                                    },
+                                                                ],
+                                                            },
+                                                            body: [
+                                                                Node {
+                                                                    class: Pipeline {
+                                                                        cmds: [
+                                                                            Node {
+                                                                                class: Command {
+                                                                                    assignments: [],
+                                                                                    argv: [
+                                                                                        Tk {
+                                                                                            class: Str,
+                                                                                            span: Span {
+                                                                                                range: 34..38,
+                                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                            },
+                                                                                            flags: TkFlags(
+                                                                                                IS_CMD | BUILTIN,
+                                                                                            ),
+                                                                                        },
+                                                                                        Tk {
+                                                                                            class: Str,
+                                                                                            span: Span {
+                                                                                                range: 39..42,
+                                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                            },
+                                                                                            flags: TkFlags(
+                                                                                                0x0,
+                                                                                            ),
+                                                                                        },
+                                                                                    ],
+                                                                                },
+                                                                                flags: NdFlags(
+                                                                                    0x0,
+                                                                                ),
+                                                                                redirs: [],
+                                                                                tokens: [
+                                                                                    Tk {
+                                                                                        class: Str,
+                                                                                        span: Span {
+                                                                                            range: 34..38,
+                                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                        },
+                                                                                        flags: TkFlags(
+                                                                                            IS_CMD | BUILTIN,
+                                                                                        ),
+                                                                                    },
+                                                                                    Tk {
+                                                                                        class: Str,
+                                                                                        span: Span {
+                                                                                            range: 39..42,
+                                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                        },
+                                                                                        flags: TkFlags(
+                                                                                            0x0,
+                                                                                        ),
+                                                                                    },
+                                                                                    Tk {
+                                                                                        class: Sep,
+                                                                                        span: Span {
+                                                                                            range: 42..44,
+                                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                        },
+                                                                                        flags: TkFlags(
+                                                                                            0x0,
+                                                                                        ),
+                                                                                    },
+                                                                                ],
+                                                                            },
+                                                                        ],
+                                                                        pipe_err: false,
+                                                                    },
+                                                                    flags: NdFlags(
+                                                                        0x0,
+                                                                    ),
+                                                                    redirs: [],
+                                                                    tokens: [
+                                                                        Tk {
+                                                                            class: Str,
+                                                                            span: Span {
+                                                                                range: 34..38,
+                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                            },
+                                                                            flags: TkFlags(
+                                                                                IS_CMD | BUILTIN,
+                                                                            ),
+                                                                        },
+                                                                        Tk {
+                                                                            class: Str,
+                                                                            span: Span {
+                                                                                range: 39..42,
+                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                            },
+                                                                            flags: TkFlags(
+                                                                                0x0,
+                                                                            ),
+                                                                        },
+                                                                        Tk {
+                                                                            class: Sep,
+                                                                            span: Span {
+                                                                                range: 42..44,
+                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                            },
+                                                                            flags: TkFlags(
+                                                                                0x0,
+                                                                            ),
+                                                                        },
+                                                                    ],
+                                                                },
+                                                            ],
+                                                        },
+                                                    ],
+                                                    else_block: [],
+                                                },
+                                                flags: NdFlags(
+                                                    0x0,
+                                                ),
+                                                redirs: [],
+                                                tokens: [
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 18..20,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            KEYWORD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 21..25,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            IS_CMD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 25..27,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 27..31,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            KEYWORD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 31..34,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 34..38,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            IS_CMD | BUILTIN,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 39..42,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 42..44,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 44..46,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            KEYWORD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 46..52,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                    CaseNode {
+                                        pattern: Tk {
+                                            class: CasePattern,
+                                            span: Span {
+                                                range: 52..56,
+                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                            },
+                                            flags: TkFlags(
+                                                0x0,
+                                            ),
+                                        },
+                                        body: [
+                                            Node {
+                                                class: IfNode {
+                                                    cond_nodes: [
+                                                        CondNode {
+                                                            cond: Node {
+                                                                class: Pipeline {
+                                                                    cmds: [
+                                                                        Node {
+                                                                            class: Command {
+                                                                                assignments: [],
+                                                                                argv: [
+                                                                                    Tk {
+                                                                                        class: Str,
+                                                                                        span: Span {
+                                                                                            range: 60..65,
+                                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                        },
+                                                                                        flags: TkFlags(
+                                                                                            IS_CMD,
+                                                                                        ),
+                                                                                    },
+                                                                                ],
+                                                                            },
+                                                                            flags: NdFlags(
+                                                                                0x0,
+                                                                            ),
+                                                                            redirs: [],
+                                                                            tokens: [
+                                                                                Tk {
+                                                                                    class: Str,
+                                                                                    span: Span {
+                                                                                        range: 60..65,
+                                                                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                    },
+                                                                                    flags: TkFlags(
+                                                                                        IS_CMD,
+                                                                                    ),
+                                                                                },
+                                                                                Tk {
+                                                                                    class: Sep,
+                                                                                    span: Span {
+                                                                                        range: 65..67,
+                                                                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                    },
+                                                                                    flags: TkFlags(
+                                                                                        0x0,
+                                                                                    ),
+                                                                                },
+                                                                            ],
+                                                                        },
+                                                                    ],
+                                                                    pipe_err: false,
+                                                                },
+                                                                flags: NdFlags(
+                                                                    0x0,
+                                                                ),
+                                                                redirs: [],
+                                                                tokens: [
+                                                                    Tk {
+                                                                        class: Str,
+                                                                        span: Span {
+                                                                            range: 60..65,
+                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                        },
+                                                                        flags: TkFlags(
+                                                                            IS_CMD,
+                                                                        ),
+                                                                    },
+                                                                    Tk {
+                                                                        class: Sep,
+                                                                        span: Span {
+                                                                            range: 65..67,
+                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                        },
+                                                                        flags: TkFlags(
+                                                                            0x0,
+                                                                        ),
+                                                                    },
+                                                                ],
+                                                            },
+                                                            body: [
+                                                                Node {
+                                                                    class: Pipeline {
+                                                                        cmds: [
+                                                                            Node {
+                                                                                class: Command {
+                                                                                    assignments: [],
+                                                                                    argv: [
+                                                                                        Tk {
+                                                                                            class: Str,
+                                                                                            span: Span {
+                                                                                                range: 74..78,
+                                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                            },
+                                                                                            flags: TkFlags(
+                                                                                                IS_CMD | BUILTIN,
+                                                                                            ),
+                                                                                        },
+                                                                                        Tk {
+                                                                                            class: Str,
+                                                                                            span: Span {
+                                                                                                range: 79..82,
+                                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                            },
+                                                                                            flags: TkFlags(
+                                                                                                0x0,
+                                                                                            ),
+                                                                                        },
+                                                                                    ],
+                                                                                },
+                                                                                flags: NdFlags(
+                                                                                    0x0,
+                                                                                ),
+                                                                                redirs: [],
+                                                                                tokens: [
+                                                                                    Tk {
+                                                                                        class: Str,
+                                                                                        span: Span {
+                                                                                            range: 74..78,
+                                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                        },
+                                                                                        flags: TkFlags(
+                                                                                            IS_CMD | BUILTIN,
+                                                                                        ),
+                                                                                    },
+                                                                                    Tk {
+                                                                                        class: Str,
+                                                                                        span: Span {
+                                                                                            range: 79..82,
+                                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                        },
+                                                                                        flags: TkFlags(
+                                                                                            0x0,
+                                                                                        ),
+                                                                                    },
+                                                                                    Tk {
+                                                                                        class: Sep,
+                                                                                        span: Span {
+                                                                                            range: 82..84,
+                                                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                                        },
+                                                                                        flags: TkFlags(
+                                                                                            0x0,
+                                                                                        ),
+                                                                                    },
+                                                                                ],
+                                                                            },
+                                                                        ],
+                                                                        pipe_err: false,
+                                                                    },
+                                                                    flags: NdFlags(
+                                                                        0x0,
+                                                                    ),
+                                                                    redirs: [],
+                                                                    tokens: [
+                                                                        Tk {
+                                                                            class: Str,
+                                                                            span: Span {
+                                                                                range: 74..78,
+                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                            },
+                                                                            flags: TkFlags(
+                                                                                IS_CMD | BUILTIN,
+                                                                            ),
+                                                                        },
+                                                                        Tk {
+                                                                            class: Str,
+                                                                            span: Span {
+                                                                                range: 79..82,
+                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                            },
+                                                                            flags: TkFlags(
+                                                                                0x0,
+                                                                            ),
+                                                                        },
+                                                                        Tk {
+                                                                            class: Sep,
+                                                                            span: Span {
+                                                                                range: 82..84,
+                                                                                source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                                            },
+                                                                            flags: TkFlags(
+                                                                                0x0,
+                                                                            ),
+                                                                        },
+                                                                    ],
+                                                                },
+                                                            ],
+                                                        },
+                                                    ],
+                                                    else_block: [],
+                                                },
+                                                flags: NdFlags(
+                                                    0x0,
+                                                ),
+                                                redirs: [],
+                                                tokens: [
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 57..59,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            KEYWORD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 60..65,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            IS_CMD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 65..67,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 67..71,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            KEYWORD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 71..74,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 74..78,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            IS_CMD | BUILTIN,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 79..82,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 82..84,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 84..86,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            KEYWORD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 86..91,
+                                                            source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                            flags: NdFlags(
+                                0x0,
+                            ),
+                            redirs: [],
+                            tokens: [
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 0..4,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 5..8,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 9..11,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 11..13,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: CasePattern,
+                                    span: Span {
+                                        range: 13..17,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 18..20,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 21..25,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 25..27,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 27..31,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 31..34,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 34..38,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD | BUILTIN,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 39..42,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 42..44,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 44..46,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 46..52,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: CasePattern,
+                                    span: Span {
+                                        range: 52..56,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 57..59,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 60..65,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 65..67,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 67..71,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 71..74,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 74..78,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD | BUILTIN,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 79..82,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 82..84,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 84..86,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 86..91,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 91..95,
+                                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                            ],
+                        },
+                        operator: Null,
+                    },
+                ],
+            },
+            flags: NdFlags(
+                0x0,
+            ),
+            redirs: [],
+            tokens: [
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 0..4,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 5..8,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 9..11,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 11..13,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: CasePattern,
+                    span: Span {
+                        range: 13..17,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 18..20,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 21..25,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 25..27,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 27..31,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 31..34,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 34..38,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        IS_CMD | BUILTIN,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 39..42,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 42..44,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 44..46,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 46..52,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: CasePattern,
+                    span: Span {
+                        range: 52..56,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 57..59,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 60..65,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 65..67,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 67..71,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 71..74,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 74..78,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        IS_CMD | BUILTIN,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 79..82,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 82..84,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 84..86,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 86..91,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 91..95,
+                        source: "case foo in\n\tfoo) if true; then\n\t\techo foo\n\tfi\n\t;;\n\tbar) if false; then\n\t\techo bar\n\tfi\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+            ],
+        },
+    ),
+]

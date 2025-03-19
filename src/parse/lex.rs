@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::{Bound, Deref, Range, RangeBounds}};
+use std::{fmt::Display, ops::{Bound, Deref, Range, RangeBounds}, str::Chars};
 
 use bitflags::bitflags;
 
@@ -76,6 +76,7 @@ pub enum TkRule {
 	Bg,
 	Sep,
 	Redir,
+	CasePattern,
 	BraceGrpStart,
 	BraceGrpEnd,
 	Expanded { exp: Vec<String> },
@@ -110,6 +111,13 @@ impl Tk {
 	pub fn source(&self) -> Rc<String> {
 		self.span.source.clone()
 	}
+	/// Used to see if a separator is ';;' for case statements
+	pub fn has_double_semi(&self) -> bool {
+		let TkRule::Sep = self.class else {
+			return false;
+		};
+		self.span.as_str().trim() == ";;"
+	}
 }
 
 impl Display for Tk {
@@ -143,6 +151,7 @@ pub struct LexStream {
 }
 
 bitflags! {
+	#[derive(Debug)]
 	pub struct LexFlags: u32 {
 		/// Return comment tokens
 		const LEX_COMMENTS   = 0b00000001;
@@ -158,7 +167,9 @@ bitflags! {
 		const FRESH          = 0b00010000;
 		/// The lexer has no more tokens to produce
 		const STALE          = 0b00100000;
+		/// The lexer's cursor is in a brace group
 		const IN_BRC_GRP     = 0b01000000;
+		const EXPECTING_IN   = 0b10000000;
 	}
 }
 
@@ -300,6 +311,15 @@ impl LexStream {
 		let mut pos = self.cursor;
 		let mut chars = slice.chars();
 		let mut quote_pos = None;
+
+		if let Some(count) = case_pat_lookahead(chars.clone()) {
+			pos += count;
+			let casepat_tk = self.get_token(self.cursor..pos, TkRule::CasePattern);
+			self.cursor = pos;
+			self.set_next_is_cmd(true);
+			return Ok(casepat_tk)
+		}
+
 		while let Some(ch) = chars.next() {
 			match ch {
 				_ if self.flags.contains(LexFlags::RAW) => {
@@ -373,21 +393,38 @@ impl LexStream {
 				)
 			);
 		}
+		// TODO: clean up this mess
 		if self.flags.contains(LexFlags::NEXT_IS_CMD) {
-			flog!(DEBUG,&new_tk.span.as_str());
 			if is_keyword(&new_tk.span.as_str()) {
-				flog!(DEBUG,"is keyword");
-				new_tk.flags |= TkFlags::KEYWORD;
+				if matches!(new_tk.span.as_str(), "case" | "select" | "for") {
+					self.flags |= LexFlags::EXPECTING_IN;
+					new_tk.flags |= TkFlags::KEYWORD;
+					self.set_next_is_cmd(false);
+				} else {
+					new_tk.flags |= TkFlags::KEYWORD;
+				}
 			} else if is_assignment(&new_tk.span.as_str()) {
 				new_tk.flags |= TkFlags::ASSIGN;
 			} else {
-				new_tk.flags |= TkFlags::IS_CMD;
-				flog!(TRACE, new_tk.span.as_str());
+				if self.flags.contains(LexFlags::EXPECTING_IN) {
+					if new_tk.span.as_str() != "in" {
+						new_tk.flags |= TkFlags::IS_CMD;
+					} else {
+						new_tk.flags |= TkFlags::KEYWORD;
+						self.flags &= !LexFlags::EXPECTING_IN;
+					}
+				} else {
+					new_tk.flags |= TkFlags::IS_CMD;
+				}
 				if BUILTINS.contains(&new_tk.span.as_str()) {
 					new_tk.flags |= TkFlags::BUILTIN;
 				}
-				flog!(TRACE, new_tk.flags);
 				self.set_next_is_cmd(false);
+			}
+		} else if self.flags.contains(LexFlags::EXPECTING_IN) {
+			if new_tk.span.as_str() == "in" {
+				new_tk.flags |= TkFlags::KEYWORD;
+				self.flags &= !LexFlags::EXPECTING_IN;
 			}
 		}
 		self.cursor = pos;
@@ -556,4 +593,19 @@ pub fn is_field_sep(ch: char) -> bool {
 pub fn is_keyword(slice: &str) -> bool {
 	KEYWORDS.contains(&slice) ||
 	(slice.ends_with("()") && !slice.ends_with("\\()"))
+}
+
+pub fn case_pat_lookahead(mut chars: Chars) -> Option<usize> {
+	let mut pos = 0;
+	while let Some(ch) = chars.next() {
+		pos += 1;
+		match ch {
+			_ if is_hard_sep(ch) => return None,
+			'\\' => { chars.next(); }
+			')' => return Some(pos),
+			'(' => return None,
+			_ => { /* continue */ }
+		}
+	}
+	None
 }

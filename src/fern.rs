@@ -14,7 +14,7 @@ use std::collections::HashSet;
 
 use expand::expand_aliases;
 use libsh::error::ShResult;
-use parse::{execute::Dispatcher, lex::{LexFlags, LexStream}, Ast, ParseStream, ParsedSrc};
+use parse::{execute::Dispatcher, lex::{LexFlags, LexStream, Tk}, Ast, ParseStream, ParsedSrc};
 use procio::IoFrame;
 use signal::sig_setup;
 use state::{source_rc, write_logic, write_meta};
