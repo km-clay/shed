@@ -1,4 +1,4 @@
-use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*, procio::borrow_fd, state::{set_status, write_jobs}};
+use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*, procio::borrow_fd, state::{self, set_status, write_jobs}};
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
 
@@ -460,7 +460,9 @@ impl Job {
 		for child in self.children.iter_mut() {
 			if child.pid == Pid::this() {
 				// TODO: figure out some way to get the exit code of builtins
-				stats.push(WtStat::Exited(child.pid, 0));
+				let code = state::get_status();
+				flog!(DEBUG,code);
+				stats.push(WtStat::Exited(child.pid, code));
 				continue
 			}
 			let result = child.wait(Some(WtFlag::WSTOPPED));
@@ -619,7 +621,9 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
 	attach_tty(job.pgid())?;
 	disable_reaping()?;
 	let statuses = write_jobs(|j| j.new_fg(job))?;
+	flog!(DEBUG,statuses);
 	for status in statuses {
+		flog!(DEBUG,status);
 		match status {
 			WtStat::Exited(_, exit_code) => {
 				code = exit_code;

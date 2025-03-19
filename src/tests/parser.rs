@@ -184,3 +184,15 @@ esac";
 
 	insta::assert_debug_snapshot!(nodes)
 }
+#[test]
+fn parse_cursed() {
+	let input = "if if if if case foo in foo) if true; then true; fi;; esac; then case foo in foo) until true; do true; done;; esac; fi; then until if case foo in foo) true;; esac; then if true; then true; fi; fi; do until until true; do true; done; do case foo in foo) true;; esac; done; done; fi; then until until case foo in foo) true;; esac; do if true; then true; fi; done; do until true; do true; done; done; fi; then until case foo in foo) case foo in foo) true;; esac;; esac; do if if true; then true; fi; then until true; do true; done; fi; done; elif until until case foo in foo) true;; esac; do if true; then true; fi; done; do case foo in foo) until true; do true; done;; esac; done; then case foo in foo) if case foo in foo) true;; esac; then if true; then true; fi; fi;; esac; else case foo in foo) until until true; do true; done; do case foo in foo) true;; esac; done;; esac; fi";
+
+	let tk_stream: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty())
+		.map(|tk| tk.unwrap())
+		.collect();
+	let nodes: Vec<_> = ParseStream::new(tk_stream).collect();
+
+	// 15,000 line snapshot file btw
+	insta::assert_debug_snapshot!(nodes)
+}

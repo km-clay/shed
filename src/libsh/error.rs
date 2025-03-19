@@ -217,10 +217,10 @@ pub enum ShErrKind {
 	Errno,
 	FileNotFound(String),
 	CmdNotFound(String),
-	CleanExit,
-	FuncReturn,
-	LoopContinue,
-	LoopBreak,
+	CleanExit(i32),
+	FuncReturn(i32),
+	LoopContinue(i32),
+	LoopBreak(i32),
 	Null
 }
 
@@ -237,10 +237,10 @@ impl Display for ShErrKind {
 			ShErrKind::Errno => "ERRNO",
 			ShErrKind::FileNotFound(file) => &format!("File not found: {file}"),
 			ShErrKind::CmdNotFound(cmd) => &format!("Command not found: {cmd}"),
-			ShErrKind::CleanExit => "",
-			ShErrKind::FuncReturn => "",
-			ShErrKind::LoopContinue => "",
-			ShErrKind::LoopBreak => "",
+			ShErrKind::CleanExit(_) => "",
+			ShErrKind::FuncReturn(_) => "",
+			ShErrKind::LoopContinue(_) => "",
+			ShErrKind::LoopBreak(_) => "",
 			ShErrKind::Null => "",
 		};
 		write!(f,"{output}")

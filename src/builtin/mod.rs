@@ -10,8 +10,9 @@ pub mod source;
 pub mod shift;
 pub mod jobctl;
 pub mod alias;
+pub mod flowctl;
 
-pub const BUILTINS: [&str;10] = [
+pub const BUILTINS: [&str;14] = [
 	"echo",
 	"cd",
 	"export",
@@ -21,7 +22,11 @@ pub const BUILTINS: [&str;10] = [
 	"jobs",
 	"fg",
 	"bg",
-	"alias"
+	"alias",
+	"return",
+	"break",
+	"continue",
+	"exit"
 ];
 
 /// Sets up a builtin command

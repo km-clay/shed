@@ -66,6 +66,7 @@ impl Highlighter for FernReadline {
 
 impl Validator for FernReadline {
 	fn validate(&self, ctx: &mut rustyline::validate::ValidationContext) -> rustyline::Result<rustyline::validate::ValidationResult> {
+		return Ok(ValidationResult::Valid(None));
 		let mut tokens = vec![];
 		let tk_stream = LexStream::new(Rc::new(ctx.input().to_string()), LexFlags::empty());
 		for tk in tk_stream {

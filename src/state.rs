@@ -315,7 +315,10 @@ pub fn write_logic<T, F: FnOnce(&mut RwLockWriteGuard<LogTab>) -> T>(f: F) -> T 
 pub fn get_status() -> i32 {
 	read_vars(|v| v.get_param('?')).parse::<i32>().unwrap()
 }
+#[track_caller]
 pub fn set_status(code: i32) {
+	flog!(DEBUG,std::panic::Location::caller());
+	flog!(DEBUG,code);
 	write_vars(|v| v.set_param('?', &code.to_string()))
 }
 

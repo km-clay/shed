@@ -615,6 +615,7 @@ impl ParseStream {
 
 			if self.check_keyword("esac") {
 				node_tks.push(self.next_tk().unwrap());
+				self.assert_separator(&mut node_tks)?;
 				break
 			}
 
@@ -622,6 +623,7 @@ impl ParseStream {
 				return Err(parse_err_full("Expected 'esac' after case block", &node_tks.get_span().unwrap()));
 			}
 		}
+
 
 		let node = Node {
 			class: NdRule::CaseNode { pattern, case_blocks },

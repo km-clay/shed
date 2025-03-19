@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 
-use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, exec_input, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
+use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, exec_input, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
 
 use super::{lex::{LexFlags, LexStream, Span, Tk, TkFlags, KEYWORDS}, AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParseStream, ParsedSrc, Redir, RedirType};
 
@@ -151,7 +151,14 @@ impl Dispatcher {
 
 			if let Err(e) = self.exec_brc_grp((*func).clone()) {
 				write_vars(|v| **v = scope_snapshot);
-				return Err(e.into())
+				match e.kind() {
+					ShErrKind::FuncReturn(code) => {
+						state::set_status(*code);
+						return Ok(())
+					}
+					_ => return Err(e.into())
+				}
+
 			}
 
 			// Return to the outer scope
@@ -233,7 +240,7 @@ impl Dispatcher {
 		body_frame.extend(out_redirs);
 
 		let CondNode { cond, body } = cond_node;
-		loop {
+		'outer: loop {
 			self.io_stack.push(cond_frame.clone());
 
 			if let Err(e) = self.dispatch_node(*cond.clone()) {
@@ -247,8 +254,14 @@ impl Dispatcher {
 				for node in &body {
 					if let Err(e) = self.dispatch_node(node.clone()) {
 						match e.kind() {
-							ShErrKind::LoopBreak => break,
-							ShErrKind::LoopContinue => continue,
+							ShErrKind::LoopBreak(code) => {
+								state::set_status(*code);
+								break 'outer
+							}
+							ShErrKind::LoopContinue(code) => {
+								state::set_status(*code);
+								continue 'outer
+							}
 							_ => return Err(e.into())
 						}
 					}
@@ -346,6 +359,10 @@ impl Dispatcher {
 			"bg" => continue_job(cmd, curr_job_mut, JobBehavior::Background),
 			"jobs" => jobs(cmd, io_stack_mut, curr_job_mut),
 			"alias" => alias(cmd, io_stack_mut, curr_job_mut),
+			"return" => flowctl(cmd, ShErrKind::FuncReturn(0)),
+			"break" => flowctl(cmd, ShErrKind::LoopBreak(0)),
+			"continue" => flowctl(cmd, ShErrKind::LoopContinue(0)),
+			"exit" => flowctl(cmd, ShErrKind::CleanExit(0)),
 			_ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw.span.as_str())
 		};
 
