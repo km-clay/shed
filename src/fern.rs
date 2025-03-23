@@ -37,6 +37,8 @@ pub fn save_termios() {
 		});
 	}
 }
+
+#[allow(static_mut_refs)]
 pub fn get_saved_termios() -> Option<Termios> {
 	unsafe {
 		// This is only used when the shell exits so it's fine

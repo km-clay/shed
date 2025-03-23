@@ -1,8 +1,8 @@
-use std::{collections::{HashMap, VecDeque}, ops::{Deref, Range}, sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}, time::Duration};
+use std::{collections::{HashMap, VecDeque}, ops::Deref, sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}, time::Duration};
 
 use nix::unistd::{gethostname, getppid, User};
 
-use crate::{exec_input, jobs::JobTab, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::VecDequeExt}, parse::{lex::{get_char, Tk}, ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*};
+use crate::{exec_input, jobs::JobTab, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::VecDequeExt}, parse::{lex::get_char, ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*};
 
 pub static JOB_TABLE: LazyLock<RwLock<JobTab>> = LazyLock::new(|| RwLock::new(JobTab::new()));
 

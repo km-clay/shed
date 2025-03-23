@@ -1,4 +1,4 @@
-use crate::{jobs::{ChildProc, JobBldr, JobCmdFlags, JobID}, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{execute::prepare_argv, lex::Span, NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state::{self, read_jobs, write_jobs}};
+use crate::{jobs::{JobBldr, JobCmdFlags, JobID}, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{lex::Span, NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state::{self, read_jobs, write_jobs}};
 
 use super::setup_builtin;
 

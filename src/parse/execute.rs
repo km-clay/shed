@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
 
-use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, exec_input, jobs::{dispatch_job, ChildProc, Job, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
+use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source}, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
 
-use super::{lex::{LexFlags, LexStream, Span, Tk, TkFlags, KEYWORDS}, AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParseStream, ParsedSrc, Redir, RedirType};
+use super::{lex::{Span, Tk, TkFlags, KEYWORDS}, AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParsedSrc, Redir, RedirType};
 
 pub enum AssignBehavior {
 	Export,
@@ -476,7 +476,7 @@ pub fn run_fork<'t,C,P>(
 ) -> ShResult<()>
 where
 		C: Fn(IoFrame,Option<ExecArgs>),
-		P: Fn(IoFrame,&mut JobBldr,Option<&str>,Pid) -> ShResult<()>
+		P: Fn(&mut JobBldr,Option<&str>,Pid) -> ShResult<()>
 {
 	match unsafe { fork()? } {
 		ForkResult::Child => {
@@ -489,7 +489,7 @@ where
 			} else {
 				None
 			};
-			parent_action(io_frame,job,cmd.as_deref(),child)
+			parent_action(job,cmd.as_deref(),child)
 		}
 	}
 }
@@ -529,7 +529,6 @@ pub fn def_child_action(mut io_frame: IoFrame, exec_args: Option<ExecArgs>) {
 
 /// The default behavior for the parent process after forking
 pub fn def_parent_action(
-	io_frame: IoFrame,
 	job: &mut JobBldr,
 	cmd: Option<&str>,
 	child_pid: Pid

@@ -1,6 +1,6 @@
 use std::{fmt::Debug, ops::{Deref, DerefMut}};
 
-use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::RedirVecUtils}, parse::{Redir, RedirType}, prelude::*};
+use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::RedirVecUtils}, parse::Redir, prelude::*};
 
 // Credit to fish-shell for many of the implementation ideas present in this module
 // https://fishshell.com/

@@ -1,8 +1,8 @@
-use std::{ops::Deref, str::FromStr, sync::{Arc, LazyLock}};
+use std::sync::{Arc, LazyLock};
 
 use fmt::Display;
 
-use crate::{libsh::error::ShResult, parse::lex::Tk, prelude::*};
+use crate::{parse::lex::Tk, prelude::*};
 
 type OptSet = Arc<[Opt]>;
 

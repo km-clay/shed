@@ -1,9 +1,9 @@
-use crate::{jobs::{ChildProc, JobBldr}, libsh::error::ShResult, parse::{NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state};
+use crate::{jobs::JobBldr, libsh::error::ShResult, parse::{NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state};
 
 use super::setup_builtin;
 
 pub fn pwd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
-	let NdRule::Command { assignments, argv } = node.class else {
+	let NdRule::Command { assignments: _, argv } = node.class else {
 		unreachable!()
 	};
 

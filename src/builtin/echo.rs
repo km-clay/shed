@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use crate::{builtin::setup_builtin, getopt::{get_opts_from_tokens, Opt, ECHO_OPTS}, jobs::{ChildProc, JobBldr}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{execute::prepare_argv, NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state};
+use crate::{builtin::setup_builtin, getopt::{get_opts_from_tokens, Opt, ECHO_OPTS}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state};
 
 bitflags! {
 	pub struct EchoFlags: u32 {

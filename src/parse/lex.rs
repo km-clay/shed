@@ -311,7 +311,6 @@ impl LexStream {
 		let slice = self.slice_from_cursor().unwrap().to_string();
 		let mut pos = self.cursor;
 		let mut chars = slice.chars().peekable();
-		let mut quote_pos = None;
 
 		if let Some(count) = case_pat_lookahead(chars.clone()) {
 			pos += count;
@@ -434,7 +433,6 @@ impl LexStream {
 				}
 				'"' | '\'' => {
 					self.in_quote = true;
-					quote_pos = Some(pos);
 					pos += 1;
 					while let Some(q_ch) = chars.next() {
 						match q_ch {

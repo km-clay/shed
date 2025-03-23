@@ -1,4 +1,4 @@
-use crate::{jobs::{ChildProc, JobBldr}, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{execute::prepare_argv, NdRule, Node}, prelude::*, state::{self, write_vars}};
+use crate::{jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node}, state::{self, write_vars}};
 
 use super::setup_builtin;
 

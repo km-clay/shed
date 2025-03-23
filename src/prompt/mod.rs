@@ -1,4 +1,3 @@
-pub mod history;
 pub mod readline;
 
 use std::path::Path;

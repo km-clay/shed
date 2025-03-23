@@ -570,7 +570,7 @@ impl ParseStream {
 		let mut node_tks: Vec<Tk> = vec![];
 		let pattern: Tk;
 		let mut case_blocks: Vec<CaseNode> = vec![];
-		let mut redirs: Vec<Redir> = vec![];
+		let redirs: Vec<Redir> = vec![];
 
 		if !self.check_keyword("case") || !self.next_tk_is_some() {
 			return Ok(None)

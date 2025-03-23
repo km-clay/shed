@@ -59,14 +59,13 @@ impl Hinter for FernReadline {
 }
 
 impl Highlighter for FernReadline {
-	fn highlight<'l>(&self, line: &'l str, pos: usize) -> std::borrow::Cow<'l, str> {
+	fn highlight<'l>(&self, line: &'l str, _pos: usize) -> std::borrow::Cow<'l, str> {
 		Cow::Owned(line.to_string())
 	}
 }
 
 impl Validator for FernReadline {
 	fn validate(&self, ctx: &mut rustyline::validate::ValidationContext) -> rustyline::Result<rustyline::validate::ValidationResult> {
-		return Ok(ValidationResult::Valid(None));
 		let mut tokens = vec![];
 		let tk_stream = LexStream::new(Arc::new(ctx.input().to_string()), LexFlags::empty());
 		for tk in tk_stream {
