@@ -10,15 +10,12 @@ pub static VAR_TABLE: LazyLock<RwLock<VarTab>> = LazyLock::new(|| RwLock::new(Va
 
 pub static META_TABLE: LazyLock<RwLock<MetaTab>> = LazyLock::new(|| RwLock::new(MetaTab::new()));
 
-
-thread_local! {
-	pub static LOGIC_TABLE: LazyLock<RwLock<LogTab>> = LazyLock::new(|| RwLock::new(LogTab::new()));
-}
+pub static LOGIC_TABLE: LazyLock<RwLock<LogTab>> = LazyLock::new(|| RwLock::new(LogTab::new()));
 
 /// A shell function
 ///
 /// Consists of the BraceGrp Node and the stored ParsedSrc that the node refers to
-/// The Node must be stored with the ParsedSrc because the tokens of the node contain an Rc<String>
+/// The Node must be stored with the ParsedSrc because the tokens of the node contain an Arc<String>
 /// Which refers to the String held in ParsedSrc
 ///
 /// Can be dereferenced to pull out the wrapped Node
@@ -298,18 +295,14 @@ pub fn write_meta<T, F: FnOnce(&mut RwLockWriteGuard<MetaTab>) -> T>(f: F) -> T 
 
 /// Read from the logic table
 pub fn read_logic<T, F: FnOnce(RwLockReadGuard<LogTab>) -> T>(f: F) -> T {
-	LOGIC_TABLE.with(|log| {
-		let lock = log.read().unwrap();
-		f(lock)
-	})
+	let lock = LOGIC_TABLE.read().unwrap();
+	f(lock)
 }
 
 /// Write to the logic table
 pub fn write_logic<T, F: FnOnce(&mut RwLockWriteGuard<LogTab>) -> T>(f: F) -> T {
-	LOGIC_TABLE.with(|log| {
-		let lock = &mut log.write().unwrap();
-		f(lock)
-	})
+	let lock = &mut LOGIC_TABLE.write().unwrap();
+	f(lock)
 }
 
 pub fn get_status() -> i32 {

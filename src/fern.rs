@@ -15,12 +15,10 @@ pub mod getopt;
 use std::collections::HashSet;
 
 use expand::expand_aliases;
-use getopt::get_opts;
 use libsh::error::ShResult;
-use parse::{execute::Dispatcher, lex::{LexFlags, LexStream, Tk}, Ast, ParseStream, ParsedSrc};
-use procio::IoFrame;
+use parse::{execute::Dispatcher, ParsedSrc};
 use signal::sig_setup;
-use state::{source_rc, write_logic, write_meta};
+use state::{source_rc, write_meta};
 use termios::{LocalFlags, Termios};
 use crate::prelude::*;
 
@@ -57,7 +55,7 @@ fn set_termios() {
 pub fn exec_input(input: String) -> ShResult<()> {
 	write_meta(|m| m.start_timer());
 	let input = expand_aliases(input, HashSet::new());
-	let mut parser = ParsedSrc::new(Rc::new(input));
+	let mut parser = ParsedSrc::new(Arc::new(input));
 	parser.parse_src()?;
 
 	let mut dispatcher = Dispatcher::new(parser.extract_nodes());

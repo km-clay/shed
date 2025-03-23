@@ -7,10 +7,10 @@ use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::RedirVecUtils}, 
 
 #[derive(Clone,Debug)]
 pub enum IoMode {
-	Fd { tgt_fd: RawFd, src_fd: Rc<OwnedFd> },
-	File { tgt_fd: RawFd, file: Rc<File> },
-	Pipe { tgt_fd: RawFd, pipe: Rc<OwnedFd> },
-	Buffer { buf: String, pipe: Rc<OwnedFd> }
+	Fd { tgt_fd: RawFd, src_fd: Arc<OwnedFd> },
+	File { tgt_fd: RawFd, file: Arc<File> },
+	Pipe { tgt_fd: RawFd, pipe: Arc<OwnedFd> },
+	Buffer { buf: String, pipe: Arc<OwnedFd> }
 }
 
 impl IoMode {

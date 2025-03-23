@@ -16,7 +16,7 @@ pub use std::path::{ Path, PathBuf };
 pub use std::ffi::{ CStr, CString };
 pub use std::process::exit;
 pub use std::time::Instant;
-pub use std::rc::Rc;
+pub use std::sync::Arc;
 pub use std::mem;
 pub use std::env;
 pub use std::fmt;

@@ -5,7 +5,7 @@ use super::super::*;
 #[test]
 fn cmd_not_found() {
 	let input = "foo";
-	let token = LexStream::new(Rc::new(input.into()), LexFlags::empty()).next().unwrap().unwrap();
+	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).next().unwrap().unwrap();
 	let err = ShErr::full(ShErrKind::CmdNotFound("foo".into()), "", token.span);
 
 	let err_fmt = format!("{err}");
@@ -15,7 +15,7 @@ fn cmd_not_found() {
 #[test]
 fn if_no_fi() {
 	let input = "if foo; then bar;";
-	let tokens = LexStream::new(Rc::new(input.into()), LexFlags::empty())
+	let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
 		.collect::<Vec<_>>();
 
@@ -29,7 +29,7 @@ fn if_no_fi() {
 #[test]
 fn if_no_then() {
 	let input = "if foo; bar; fi";
-	let tokens = LexStream::new(Rc::new(input.into()), LexFlags::empty())
+	let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
 		.collect::<Vec<_>>();
 
@@ -43,7 +43,7 @@ fn if_no_then() {
 #[test]
 fn loop_no_done() {
 	let input = "while true; do echo foo;";
-	let tokens = LexStream::new(Rc::new(input.into()), LexFlags::empty())
+	let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
 		.collect::<Vec<_>>();
 
@@ -57,7 +57,7 @@ fn loop_no_done() {
 #[test]
 fn loop_no_do() {
 	let input = "while true; echo foo; done";
-	let tokens = LexStream::new(Rc::new(input.into()), LexFlags::empty())
+	let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
 		.collect::<Vec<_>>();
 
@@ -71,7 +71,7 @@ fn loop_no_do() {
 #[test]
 fn case_no_esac() {
 	let input = "case foo in foo) bar;; bar) foo;;";
-	let tokens = LexStream::new(Rc::new(input.into()), LexFlags::empty())
+	let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
 		.collect::<Vec<_>>();
 
@@ -85,7 +85,7 @@ fn case_no_esac() {
 #[test]
 fn case_no_in() {
 	let input = "case foo foo) bar;; bar) foo;; esac";
-	let tokens = LexStream::new(Rc::new(input.into()), LexFlags::empty())
+	let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
 		.collect::<Vec<_>>();
 

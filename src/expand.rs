@@ -604,7 +604,7 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 /// Expand aliases in the given input string
 pub fn expand_aliases(input: String, mut already_expanded: HashSet<String>) -> String {
 	let mut result = input.clone();
-	let tokens: Vec<_> = LexStream::new(Rc::new(input), LexFlags::empty()).collect();
+	let tokens: Vec<_> = LexStream::new(Arc::new(input), LexFlags::empty()).collect();
 	let mut expanded_this_iter: Vec<String> = vec![];
 
 	for token_result in tokens.into_iter().rev() {

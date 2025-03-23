@@ -24,17 +24,17 @@ macro_rules! try_match {
 
 /// The parsed AST along with the source input it parsed
 ///
-/// Uses Rc<String> instead of &str because the reference has to stay alive while errors are propagated upwards
+/// Uses Arc<String> instead of &str because the reference has to stay alive while errors are propagated upwards
 /// The string also has to stay alive in the case of pre-parsed shell function nodes, which live in the logic table
 /// Using &str for this use-case dramatically overcomplicates the code
 #[derive(Clone,Debug)]
 pub struct ParsedSrc {
-	pub src: Rc<String>,
+	pub src: Arc<String>,
 	pub ast: Ast
 }
 
 impl ParsedSrc {
-	pub fn new(src: Rc<String>) -> Self {
+	pub fn new(src: Arc<String>) -> Self {
 		Self { src, ast: Ast::new(vec![]) }
 	}
 	pub fn parse_src(&mut self) -> ShResult<()> {

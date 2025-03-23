@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::rc::Arc;
 
 use crate::parse::{lex::{LexFlags, LexStream}, node_operation, Node, ParseStream};
 
@@ -15,7 +15,7 @@ pub fn get_nodes<F1>(input: &str, filter: F1) -> Vec<Node>
 		F1: Fn(&Node) -> bool
 {
 	let mut nodes = vec![];
-	let tokens = LexStream::new(Rc::new(input.into()), LexFlags::empty())
+	let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
 		.collect::<Vec<_>>();
 	let mut parsed_nodes = ParseStream::new(tokens)

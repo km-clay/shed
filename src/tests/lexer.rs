@@ -2,35 +2,35 @@ use super::super::*;
 #[test]
 fn lex_simple() {
 	let input = "echo hello world";
-	let tokens: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty()).collect();
+	let tokens: Vec<_> = LexStream::new(Arc::new(input.to_string()), LexFlags::empty()).collect();
 
 	insta::assert_debug_snapshot!(tokens)
 }
 #[test]
 fn lex_redir() {
 	let input = "echo foo > bar.txt";
-	let tokens: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty()).collect();
+	let tokens: Vec<_> = LexStream::new(Arc::new(input.to_string()), LexFlags::empty()).collect();
 
 	insta::assert_debug_snapshot!(tokens)
 }
 #[test]
 fn lex_redir_fds() {
 	let input = "echo foo 1>&2";
-	let tokens: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty()).collect();
+	let tokens: Vec<_> = LexStream::new(Arc::new(input.to_string()), LexFlags::empty()).collect();
 
 	insta::assert_debug_snapshot!(tokens)
 }
 #[test]
 fn lex_quote_str() {
 	let input = "echo \"foo bar\" biz baz";
-	let tokens: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty()).collect();
+	let tokens: Vec<_> = LexStream::new(Arc::new(input.to_string()), LexFlags::empty()).collect();
 
 	insta::assert_debug_snapshot!(tokens)
 }
 #[test]
 fn lex_with_keywords() {
 	let input = "if true; then echo foo; fi";
-	let tokens: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty()).collect();
+	let tokens: Vec<_> = LexStream::new(Arc::new(input.to_string()), LexFlags::empty()).collect();
 
 	insta::assert_debug_snapshot!(tokens)
 }
@@ -38,7 +38,7 @@ fn lex_with_keywords() {
 #[test]
 fn lex_multiline() {
 	let input = "echo hello world\necho foo bar\necho boo biz";
-	let tokens: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty()).collect();
+	let tokens: Vec<_> = LexStream::new(Arc::new(input.to_string()), LexFlags::empty()).collect();
 
 	insta::assert_debug_snapshot!(tokens)
 }
@@ -46,7 +46,7 @@ fn lex_multiline() {
 #[test]
 fn lex_case() {
 	let input = "case $foo in foo) bar;; bar) foo;; biz) baz;; esac";
-	let tokens: Vec<_> = LexStream::new(Rc::new(input.to_string()), LexFlags::empty()).collect();
+	let tokens: Vec<_> = LexStream::new(Arc::new(input.to_string()), LexFlags::empty()).collect();
 
 	insta::assert_debug_snapshot!(tokens)
 }

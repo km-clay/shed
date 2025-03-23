@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Display, iter::Peekable, ops::{Bound, Deref, Range, RangeBounds}, str::Chars};
+use std::{collections::VecDeque, fmt::Display, iter::Peekable, ops::{Bound, Deref, Range, RangeBounds}, str::Chars, sync::Arc};
 
 use bitflags::bitflags;
 
@@ -33,12 +33,12 @@ pub const OPENERS: [&'static str;6] = [
 #[derive(Clone,PartialEq,Default,Debug)]
 pub struct Span {
 	range: Range<usize>,
-	source: Rc<String>
+	source: Arc<String>
 }
 
 impl Span {
 	/// New `Span`. Wraps a range and a string slice that it refers to.
-	pub fn new(range: Range<usize>, source: Rc<String>) -> Self {
+	pub fn new(range: Range<usize>, source: Arc<String>) -> Self {
 		Span {
 			range,
 			source,
@@ -48,7 +48,7 @@ impl Span {
 	pub fn as_str(&self) -> &str {
 		&self.source[self.start..self.end]
 	}
-	pub fn get_source(&self) -> Rc<String> {
+	pub fn get_source(&self) -> Arc<String> {
 		self.source.clone()
 	}
 	pub fn range(&self) -> Range<usize> {
@@ -108,7 +108,7 @@ impl Tk {
 			_ => self.span.as_str().to_string()
 		}
 	}
-	pub fn source(&self) -> Rc<String> {
+	pub fn source(&self) -> Arc<String> {
 		self.span.source.clone()
 	}
 	/// Used to see if a separator is ';;' for case statements
@@ -145,7 +145,7 @@ bitflags! {
 }
 
 pub struct LexStream {
-	source: Rc<String>,
+	source: Arc<String>,
 	pub cursor: usize,
 	in_quote: bool,
 	flags: LexFlags,
@@ -175,7 +175,7 @@ bitflags! {
 }
 
 impl LexStream {
-	pub fn new(source: Rc<String>, flags: LexFlags) -> Self {
+	pub fn new(source: Arc<String>, flags: LexFlags) -> Self {
 		flog!(TRACE, "new lex stream");
 		let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
 		Self { source, cursor: 0, in_quote: false, flags }

@@ -120,7 +120,7 @@ impl Dispatcher {
 			)
 		}
 
-		let mut func_parser = ParsedSrc::new(Rc::new(body));
+		let mut func_parser = ParsedSrc::new(Arc::new(body));
 		func_parser.parse_src()?; // Parse the function
 
 		let func = ShFunc::new(func_parser);
