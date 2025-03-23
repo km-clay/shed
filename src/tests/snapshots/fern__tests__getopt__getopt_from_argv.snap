@@ -1,0 +1,26 @@
+---
+source: src/tests/getopt.rs
+expression: words
+---
+[
+    Tk {
+        class: Str,
+        span: Span {
+            range: 0..4,
+            source: "echo -n -e foo",
+        },
+        flags: TkFlags(
+            IS_CMD | BUILTIN,
+        ),
+    },
+    Tk {
+        class: Str,
+        span: Span {
+            range: 11..14,
+            source: "echo -n -e foo",
+        },
+        flags: TkFlags(
+            0x0,
+        ),
+    },
+]

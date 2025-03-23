@@ -412,7 +412,6 @@ impl LexStream {
 					subsh_tk.flags |= TkFlags::IS_SUBSH;
 					self.cursor = pos;
 					self.set_next_is_cmd(true);
-					flog!(DEBUG, subsh_tk);
 					return Ok(subsh_tk)
 				}
 				'{' if pos == self.cursor && self.next_is_cmd() => {
@@ -464,7 +463,6 @@ impl LexStream {
 			}
 		}
 		let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
-		flog!(DEBUG,new_tk);
 		if self.in_quote && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
 			return Err(
 				ShErr::full(
@@ -509,7 +507,6 @@ impl LexStream {
 			}
 		}
 		self.cursor = pos;
-		flog!(DEBUG, self.slice_from_cursor());
 		Ok(new_tk)
 	}
 	pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk {

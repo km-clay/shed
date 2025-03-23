@@ -317,8 +317,6 @@ pub fn get_status() -> i32 {
 }
 #[track_caller]
 pub fn set_status(code: i32) {
-	flog!(DEBUG,std::panic::Location::caller());
-	flog!(DEBUG,code);
 	write_vars(|v| v.set_param('?', &code.to_string()))
 }
 

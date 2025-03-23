@@ -42,7 +42,6 @@ impl ParsedSrc {
 		for token in LexStream::new(self.src.clone(), LexFlags::empty()) {
 			tokens.push(token?);
 		}
-		flog!(DEBUG,tokens);
 
 		let mut nodes = vec![];
 		for result in ParseStream::new(tokens) {
@@ -1129,4 +1128,92 @@ fn is_func_name(tk: Option<&Tk>) -> bool {
 		tk.flags.contains(TkFlags::KEYWORD) &&
 			(tk.span.as_str().ends_with("()") && !tk.span.as_str().ends_with("\\()"))
 	})
+}
+
+/// Perform an operation on the child nodes of a given node
+///
+/// # Parameters
+/// node: A mutable reference to a node to be operated on
+/// filter: A closure or function which checks an attribute of a child node and returns a boolean
+/// operation: The closure or function to apply to a child node which matches on the filter
+///
+/// Very useful for testing, i.e. needing to extract specific types of nodes from the AST to inspect values
+pub fn node_operation<F1,F2>(node: &mut Node, filter: &F1, operation: &mut F2)
+	where
+		F1: Fn(&Node) -> bool,
+		F2: FnMut(&mut Node)
+{
+	let check_node = |node: &mut Node, filter: &F1, operation: &mut F2| {
+		if filter(&node) {
+			operation(node);
+		} else {
+			node_operation::<F1,F2>(node, filter, operation);
+		}
+	};
+
+	if filter(node) {
+		operation(node);
+	}
+
+	match node.class {
+		NdRule::IfNode { ref mut cond_nodes, ref mut else_block } => {
+			for node in cond_nodes {
+				let CondNode { cond, body } = node;
+				check_node(cond,filter,operation);
+				for body_node in body {
+					check_node(body_node,filter,operation);
+				}
+			}
+
+			for else_node in else_block {
+				check_node(else_node,filter,operation);
+			}
+
+		}
+		NdRule::LoopNode { kind: _, ref mut cond_node } => {
+			let CondNode { cond, body } = cond_node;
+			check_node(cond,filter,operation);
+			for body_node in body {
+				check_node(body_node,filter,operation);
+			}
+		}
+		NdRule::ForNode { vars: _, arr: _, ref mut body } => {
+			for body_node in body {
+				check_node(body_node,filter,operation);
+			}
+		}
+		NdRule::CaseNode { pattern: _, ref mut case_blocks } => {
+			for block in case_blocks {
+				let CaseNode { pattern: _, body } = block;
+				for body_node in body {
+					check_node(body_node,filter,operation);
+				}
+			}
+		}
+		NdRule::Command { ref mut assignments, argv: _ } => {
+			for assign_node in assignments {
+				check_node(assign_node,filter,operation);
+			}
+		}
+		NdRule::Pipeline { ref mut cmds, pipe_err: _ } => {
+			for cmd_node in cmds {
+				check_node(cmd_node,filter,operation);
+			}
+		}
+		NdRule::Conjunction { ref mut elements } => {
+			for node in elements.iter_mut() {
+				let ConjunctNode { cmd, operator: _ } = node;
+				check_node(cmd,filter,operation);
+			}
+		}
+		NdRule::Assignment { kind: _, var: _, val: _ } => return, // No nodes to check
+		NdRule::BraceGrp { ref mut body } => {
+			for body_node in body {
+				check_node(body_node,filter,operation);
+			}
+		}
+		NdRule::FuncDef { name: _, ref mut body } => {
+			check_node(body,filter,operation)
+		}
+	}
 }

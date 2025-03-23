@@ -461,7 +461,6 @@ impl Job {
 			if child.pid == Pid::this() {
 				// TODO: figure out some way to get the exit code of builtins
 				let code = state::get_status();
-				flog!(DEBUG,code);
 				stats.push(WtStat::Exited(child.pid, code));
 				continue
 			}
@@ -621,9 +620,7 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
 	attach_tty(job.pgid())?;
 	disable_reaping()?;
 	let statuses = write_jobs(|j| j.new_fg(job))?;
-	flog!(DEBUG,statuses);
 	for status in statuses {
-		flog!(DEBUG,status);
 		match status {
 			WtStat::Exited(_, exit_code) => {
 				code = exit_code;

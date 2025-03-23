@@ -10,10 +10,12 @@ pub mod jobs;
 pub mod signal;
 #[cfg(test)]
 pub mod tests;
+pub mod getopt;
 
 use std::collections::HashSet;
 
 use expand::expand_aliases;
+use getopt::get_opts;
 use libsh::error::ShResult;
 use parse::{execute::Dispatcher, lex::{LexFlags, LexStream, Tk}, Ast, ParseStream, ParsedSrc};
 use procio::IoFrame;

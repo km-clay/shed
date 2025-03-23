@@ -1,3 +1,5 @@
+use parse::{node_operation, NdRule, Node};
+
 use super::super::*;
 
 #[test]
@@ -195,4 +197,23 @@ fn parse_cursed() {
 
 	// 15,000 line snapshot file btw
 	insta::assert_debug_snapshot!(nodes)
+}
+#[test]
+fn test_node_operation() {
+	let input = String::from("echo hello world; echo foo bar");
+	let mut check_nodes = vec![];
+	let mut tokens: Vec<Tk> = LexStream::new(input.into(), LexFlags::empty())
+		.map(|tk| tk.unwrap())
+		.collect();
+
+	let nodes = ParseStream::new(tokens)
+		.map(|nd| nd.unwrap());
+
+	for mut node in nodes {
+		node_operation(&mut node,
+			&|node: &Node| matches!(node.class, NdRule::Command {..}),
+			&mut |node: &mut Node| check_nodes.push(node.clone()),
+		);
+	}
+	insta::assert_debug_snapshot!(check_nodes)
 }

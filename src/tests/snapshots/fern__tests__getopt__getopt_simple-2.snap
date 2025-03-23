@@ -1,0 +1,9 @@
+---
+source: src/tests/getopt.rs
+expression: opts
+---
+[
+    Short(
+        'n',
+    ),
+]

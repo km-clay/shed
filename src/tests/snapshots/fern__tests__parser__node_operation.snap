@@ -1,0 +1,162 @@
+---
+source: src/tests/parser.rs
+expression: check_nodes
+---
+[
+    Node {
+        class: Command {
+            assignments: [],
+            argv: [
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 0..4,
+                        source: "echo hello world; echo foo bar",
+                    },
+                    flags: TkFlags(
+                        IS_CMD | BUILTIN,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 5..10,
+                        source: "echo hello world; echo foo bar",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 11..16,
+                        source: "echo hello world; echo foo bar",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+            ],
+        },
+        flags: NdFlags(
+            0x0,
+        ),
+        redirs: [],
+        tokens: [
+            Tk {
+                class: Str,
+                span: Span {
+                    range: 0..4,
+                    source: "echo hello world; echo foo bar",
+                },
+                flags: TkFlags(
+                    IS_CMD | BUILTIN,
+                ),
+            },
+            Tk {
+                class: Str,
+                span: Span {
+                    range: 5..10,
+                    source: "echo hello world; echo foo bar",
+                },
+                flags: TkFlags(
+                    0x0,
+                ),
+            },
+            Tk {
+                class: Str,
+                span: Span {
+                    range: 11..16,
+                    source: "echo hello world; echo foo bar",
+                },
+                flags: TkFlags(
+                    0x0,
+                ),
+            },
+            Tk {
+                class: Sep,
+                span: Span {
+                    range: 16..18,
+                    source: "echo hello world; echo foo bar",
+                },
+                flags: TkFlags(
+                    0x0,
+                ),
+            },
+        ],
+    },
+    Node {
+        class: Command {
+            assignments: [],
+            argv: [
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 18..22,
+                        source: "echo hello world; echo foo bar",
+                    },
+                    flags: TkFlags(
+                        IS_CMD | BUILTIN,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 23..26,
+                        source: "echo hello world; echo foo bar",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 27..30,
+                        source: "echo hello world; echo foo bar",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+            ],
+        },
+        flags: NdFlags(
+            0x0,
+        ),
+        redirs: [],
+        tokens: [
+            Tk {
+                class: Str,
+                span: Span {
+                    range: 18..22,
+                    source: "echo hello world; echo foo bar",
+                },
+                flags: TkFlags(
+                    IS_CMD | BUILTIN,
+                ),
+            },
+            Tk {
+                class: Str,
+                span: Span {
+                    range: 23..26,
+                    source: "echo hello world; echo foo bar",
+                },
+                flags: TkFlags(
+                    0x0,
+                ),
+            },
+            Tk {
+                class: Str,
+                span: Span {
+                    range: 27..30,
+                    source: "echo hello world; echo foo bar",
+                },
+                flags: TkFlags(
+                    0x0,
+                ),
+            },
+        ],
+    },
+]

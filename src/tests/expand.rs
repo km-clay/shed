@@ -17,7 +17,7 @@ fn simple_expansion() {
 	let var_tk = tokens.pop().unwrap();
 
 	let var_span = var_tk.span.clone();
-	let exp_tk = var_tk.expand(var_span, TkFlags::empty());
+	let exp_tk = var_tk.expand(var_span, TkFlags::empty()).unwrap();
 	write_vars(|v| v.vars_mut().clear());
 	insta::assert_debug_snapshot!(exp_tk.get_words())
 }
@@ -63,6 +63,16 @@ fn expand_multiple_aliases() {
 }
 
 #[test]
+fn alias_in_arg_position() {
+	write_logic(|l| l.insert_alias("foo", "echo foo"));
+
+	let input = String::from("echo foo");
+
+	let result = expand_aliases(input.clone(), HashSet::new());
+	assert_eq!(input,result)
+}
+
+#[test]
 fn expand_recursive_alias() {
 	write_logic(|l| l.insert_alias("foo", "echo foo"));
 	write_logic(|l| l.insert_alias("bar", "foo bar"));
@@ -74,9 +84,9 @@ fn expand_recursive_alias() {
 
 #[test]
 fn test_infinite_recursive_alias() {
-	write_logic(|l| l.insert_alias("foo", "foo"));
+	write_logic(|l| l.insert_alias("foo", "foo bar"));
 
 	let input = String::from("foo");
 	let result = expand_aliases(input, HashSet::new());
-	assert_eq!(result.as_str(),"foo")
+	assert_eq!(result.as_str(),"foo bar")
 }
