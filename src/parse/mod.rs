@@ -4,7 +4,7 @@ use bitflags::bitflags;
 use fmt::Display;
 use lex::{LexFlags, LexStream, Span, Tk, TkFlags, TkRule};
 
-use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::TkVecUtils}, prelude::*, procio::IoMode};
+use crate::{libsh::{error::{Note, ShErr, ShErrKind, ShResult}, utils::TkVecUtils}, prelude::*, procio::IoMode};
 
 pub mod lex;
 pub mod execute;
@@ -474,7 +474,7 @@ impl ParseStream {
 			return Err(parse_err_full(
 					"Expected a brace group after function name",
 					&node_tks.get_span().unwrap()
-			)
+				)
 			)
 		};
 		body = Box::new(brc_grp);
@@ -511,7 +511,7 @@ impl ParseStream {
 				return Err(parse_err_full(
 						"Expected a closing brace for this brace group",
 						&node_tks.get_span().unwrap()
-				)
+					)
 				)
 			}
 		}
@@ -545,7 +545,8 @@ impl ParseStream {
 						return Err(parse_err_full(
 								"Error opening file for redirection",
 								&path_tk.span
-						));
+							)
+						);
 					};
 
 					let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), file);
@@ -578,7 +579,17 @@ impl ParseStream {
 		node_tks.push(self.next_tk().unwrap());
 
 		let Some(pat_tk) = self.next_tk() else {
-			return Err(parse_err_full("Expected a pattern after 'case'", &node_tks.get_span().unwrap()));
+			return Err(
+				parse_err_full(
+					"Expected a pattern after 'case' keyword", &node_tks.get_span().unwrap()
+				)
+				.with_note(
+					Note::new("Patterns can be raw text, or anything that gets substituted with raw text")
+						.with_sub_notes(vec![
+							"This includes variables like '$foo' or command substitutions like '$(echo foo)'"
+						])
+					)
+			);
 		};
 
 		pattern = pat_tk;

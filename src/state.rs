@@ -2,7 +2,7 @@ use std::{collections::{HashMap, VecDeque}, ops::Deref, sync::{LazyLock, RwLock,
 
 use nix::unistd::{gethostname, getppid, User};
 
-use crate::{exec_input, jobs::JobTab, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::VecDequeExt}, parse::{lex::get_char, ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*};
+use crate::{exec_input, jobs::JobTab, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::VecDequeExt}, parse::{lex::get_char, ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, shopt::ShOpts};
 
 pub static JOB_TABLE: LazyLock<RwLock<JobTab>> = LazyLock::new(|| RwLock::new(JobTab::new()));
 
@@ -11,6 +11,8 @@ pub static VAR_TABLE: LazyLock<RwLock<VarTab>> = LazyLock::new(|| RwLock::new(Va
 pub static META_TABLE: LazyLock<RwLock<MetaTab>> = LazyLock::new(|| RwLock::new(MetaTab::new()));
 
 pub static LOGIC_TABLE: LazyLock<RwLock<LogTab>> = LazyLock::new(|| RwLock::new(LogTab::new()));
+
+pub static SHOPTS: LazyLock<RwLock<ShOpts>> = LazyLock::new(|| RwLock::new(ShOpts::default()));
 
 /// A shell function
 ///
@@ -49,6 +51,7 @@ impl Deref for ShFunc {
 /// The logic table for the shell
 ///
 /// Contains aliases and functions
+#[derive(Clone,Debug)]
 pub struct LogTab {
 	functions: HashMap<String,ShFunc>,
 	aliases: HashMap<String,String>

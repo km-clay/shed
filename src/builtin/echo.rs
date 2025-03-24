@@ -1,4 +1,13 @@
-use crate::{builtin::setup_builtin, getopt::{get_opts_from_tokens, Opt, ECHO_OPTS}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state};
+use std::sync::LazyLock;
+
+use crate::{builtin::setup_builtin, getopt::{get_opts_from_tokens, Opt, OptSet}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state};
+
+pub static ECHO_OPTS: LazyLock<OptSet> = LazyLock::new(|| {[
+	Opt::Short('n'),
+	Opt::Short('E'),
+	Opt::Short('e'),
+	Opt::Short('r'),
+].into()});
 
 bitflags! {
 	pub struct EchoFlags: u32 {

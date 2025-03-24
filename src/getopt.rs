@@ -1,17 +1,11 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use fmt::Display;
 
 use crate::{parse::lex::Tk, prelude::*};
 
-type OptSet = Arc<[Opt]>;
+pub type OptSet = Arc<[Opt]>;
 
-pub static ECHO_OPTS: LazyLock<OptSet> = LazyLock::new(|| {[
-	Opt::Short('n'),
-	Opt::Short('E'),
-	Opt::Short('e'),
-	Opt::Short('r'),
-].into()});
 
 #[derive(Clone,PartialEq,Eq,Debug)]
 pub enum Opt {
@@ -21,7 +15,6 @@ pub enum Opt {
 
 impl Opt {
 	pub fn parse(s: &str) -> Vec<Self> {
-		flog!(DEBUG, s);
 		let mut opts = vec![];
 
 		if s.starts_with("--") {
@@ -32,7 +25,6 @@ impl Opt {
 				opts.push(Self::Short(ch))
 			}
 		}
-		flog!(DEBUG,opts);
 
 		opts
 	}
@@ -53,7 +45,6 @@ pub fn get_opts(words: Vec<String>) -> (Vec<String>,Vec<Opt>) {
 	let mut non_opts = vec![];
 
 	while let Some(word) = words_iter.next() {
-		flog!(DEBUG, opts,non_opts);
 		if &word == "--" {
 			non_opts.extend(words_iter);
 			break

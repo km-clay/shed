@@ -1,4 +1,4 @@
-use crate::{jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state};
+use crate::{jobs::JobBldr, libsh::error::{Note, ShErr, ShErrKind, ShResult}, parse::{NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state};
 
 use super::setup_builtin;
 
@@ -28,6 +28,9 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
 						ShErrKind::SyntaxErr,
 						"export: Expected an assignment in export args",
 						span.into()
+					)
+					.with_note(
+						Note::new("Arguments for export should be formatted like 'foo=bar'")
 					)
 				)
 			};

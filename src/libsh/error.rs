@@ -20,8 +20,8 @@ impl<T> ShResultExt for Result<T,ShErr> {
 			return self
 		};
 		match e {
-			ShErr::Simple { kind, msg } |
-			ShErr::Full { kind, msg, span: _ } => Err(ShErr::full(kind, msg, new_span)),
+			ShErr::Simple { kind, msg, notes } |
+			ShErr::Full { kind, msg, notes, span: _ } => Err(ShErr::Full { kind: kind.clone(), msg: msg.clone(), notes: notes.clone(), span: new_span }),
 		}
 	}
 	/// Blame a span if no blame has been assigned yet
@@ -30,46 +30,97 @@ impl<T> ShResultExt for Result<T,ShErr> {
 			return self
 		};
 		match e {
-			ShErr::Simple { kind, msg } => Err(ShErr::full(kind.clone(), msg, new_span)),
-			ShErr::Full { kind: _, msg: _, span: _ } => self
+			ShErr::Simple { kind, msg, notes } => Err(ShErr::Full { kind: kind.clone(), msg: msg.clone(), notes: notes.clone(), span: new_span }),
+			ShErr::Full { kind: _, msg: _, span: _, notes: _ } => self
 		}
+	}
+}
+
+#[derive(Clone,Debug)]
+pub struct Note {
+	main: String,
+	sub_notes: Vec<Note>,
+	depth: usize
+}
+
+impl Note {
+	pub fn new(main: impl Into<String>) -> Self {
+		Self { main: main.into(), sub_notes: vec![], depth: 0 }
+	}
+
+	pub fn with_sub_notes(self, new_sub_notes: Vec<impl Into<String>>) -> Self {
+		let Self { main, mut sub_notes, depth } = self;
+		for raw_note in new_sub_notes {
+			let mut note = Note::new(raw_note);
+			note.depth = self.depth + 1;
+			sub_notes.push(note);
+		}
+		Self { main, sub_notes, depth }
+	}
+}
+
+impl Display for Note {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let note = "note".styled(Style::Green);
+		let main = &self.main;
+		if self.depth == 0 {
+			writeln!(f, "{note}: {main}")?;
+		} else {
+			let bar_break = "-".styled(Style::Cyan | Style::Bold);
+			let indent = "  ".repeat(self.depth);
+			writeln!(f, "  {indent}{bar_break} {main}")?;
+		}
+
+		for sub_note in &self.sub_notes {
+			write!(f, "{sub_note}")?;
+		}
+		Ok(())
 	}
 }
 
 #[derive(Debug)]
 pub enum ShErr {
-	Simple { kind: ShErrKind, msg: String },
-	Full { kind: ShErrKind, msg: String, span: Span }
+	Simple { kind: ShErrKind, msg: String, notes: Vec<Note> },
+	Full { kind: ShErrKind, msg: String, notes: Vec<Note>, span: Span }
 }
 
 impl ShErr {
 	pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
 		let msg = msg.into();
-		Self::Simple { kind, msg }
+		Self::Simple { kind, msg, notes: vec![] }
 	}
 	pub fn full(kind: ShErrKind, msg: impl Into<String>, span: Span) -> Self {
 		let msg = msg.into();
-		Self::Full { kind, msg, span }
+		Self::Full { kind, msg, span, notes: vec![] }
 	}
-	pub fn unpack(self) -> (ShErrKind,String,Option<Span>) {
+	pub fn unpack(self) -> (ShErrKind,String,Vec<Note>,Option<Span>) {
 		match self {
-			ShErr::Simple { kind, msg } => (kind,msg,None),
-			ShErr::Full { kind, msg, span } => (kind,msg,Some(span))
+			ShErr::Simple { kind, msg, notes } => (kind,msg,notes,None),
+			ShErr::Full { kind, msg, notes, span } => (kind,msg,notes,Some(span))
+		}
+	}
+	pub fn with_note(self, note: Note) -> Self {
+		let (kind,msg,mut notes,span) = self.unpack();
+		notes.push(note);
+		if let Some(span) = span {
+			Self::Full { kind, msg, notes, span }
+		} else {
+			Self::Simple { kind, msg, notes }
 		}
 	}
 	pub fn with_span(sherr: ShErr, span: Span) -> Self {
-		let (kind,msg,_) = sherr.unpack();
+		let (kind,msg,notes,_) = sherr.unpack();
 		let span = span.into();
-		Self::Full { kind, msg, span }
+		Self::Full { kind, msg, notes, span }
 	}
 	pub fn kind(&self) -> &ShErrKind {
 		match self {
-			ShErr::Simple { kind, msg: _ } |
-			ShErr::Full { kind, msg: _, span: _ } => kind
+			ShErr::Simple { kind, msg: _, notes: _ } |
+			ShErr::Full { kind, msg: _, notes: _, span: _ } => kind
 		}
 	}
 	pub fn get_window(&self) -> Vec<(usize,String)> {
-		let ShErr::Full { kind: _, msg: _, span } = self else {
+		let ShErr::Full { kind: _, msg: _, notes: _, span } = self else {
 			unreachable!()
 		};
 		let mut total_len: usize = 0;
@@ -111,7 +162,7 @@ impl ShErr {
 		lines
 	}
 	pub fn get_line_col(&self) -> (usize,usize) {
-		let ShErr::Full { kind: _, msg: _, span } = self else {
+		let ShErr::Full { kind: _, msg: _, notes: _, span } = self else {
 			unreachable!()
 		};
 
@@ -137,8 +188,21 @@ impl ShErr {
 impl Display for ShErr {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Self::Simple { msg, kind: _ } => writeln!(f, "{}", msg),
-			Self::Full { msg, kind, span: _ } => {
+			Self::Simple { msg, kind: _, notes } => {
+				let mut all_strings = vec![msg.to_string()];
+				let mut notes_fmt = vec![];
+				for note in notes {
+					let fmt = format!("{note}");
+					notes_fmt.push(fmt);
+				}
+				all_strings.append(&mut notes_fmt);
+				let mut output = all_strings.join("\n");
+				output.push('\n');
+
+				writeln!(f, "{}", output)
+			}
+
+			Self::Full { msg, kind, notes, span: _ } => {
 				let window = self.get_window();
 				let mut lineno_pad_count = 0;
 				for (lineno,_) in window.clone() {
@@ -174,7 +238,15 @@ impl Display for ShErr {
 				let bar_break = "-".styled(Style::Cyan | Style::Bold);
 				writeln!(f,
 					"{padding}{bar_break} {msg}",
-				)
+				)?;
+
+				for note in notes {
+
+					writeln!(f,
+						"{padding}{bar_break} {note}"
+					)?;
+				}
+				Ok(())
 			}
 		}
 	}

@@ -6,7 +6,7 @@ pub fn sh_quit(code: i32) -> ! {
 			job.killpg(Signal::SIGTERM).ok();
 		}
 	});
-	if let Some(termios) = crate::get_saved_termios() {
+	if let Some(termios) = unsafe { crate::get_saved_termios() } {
 		termios::tcsetattr(std::io::stdin(), termios::SetArg::TCSANOW, &termios).unwrap();
 	}
 	if code == 0 {
