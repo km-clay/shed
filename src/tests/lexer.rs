@@ -1,4 +1,4 @@
-use super::super::*;
+use super::*;
 #[test]
 fn lex_simple() {
 	let input = "echo hello world";

@@ -1,4 +1,4 @@
-use getopt::get_opts_from_tokens;
+use getopt::{get_opts, get_opts_from_tokens};
 use parse::NdRule;
 use tests::get_nodes;
 

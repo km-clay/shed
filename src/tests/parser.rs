@@ -1,6 +1,4 @@
-use parse::{node_operation, NdRule, Node};
-
-use super::super::*;
+use super::*;
 
 #[test]
 fn parse_simple() {
@@ -170,13 +168,30 @@ esac";
 #[test]
 fn parse_case_nested() {
 	let input = "case foo in
-	foo) if true; then
-		echo foo
-	fi
+	foo)
+		if true; then
+			while true; do
+				echo foo
+			done
+		fi
 	;;
-	bar) if false; then
-		echo bar
-	fi
+	bar)
+		if false; then
+			until false; do
+				case foo in
+					foo)
+						if true; then
+							echo foo
+						fi
+					;;
+					bar)
+						if false; then
+							echo foo
+						fi
+					;;
+				esac
+			done
+		fi
 	;;
 esac";
 	let tk_stream: Vec<_> = LexStream::new(Arc::new(input.to_string()), LexFlags::empty())

@@ -608,6 +608,7 @@ impl ParseStream {
 			}
 			let case_pat_tk = self.next_tk().unwrap();
 			node_tks.push(case_pat_tk.clone());
+			self.catch_separator(&mut node_tks);
 
 			let mut nodes = vec![];
 			while let Some(node) = self.parse_block(true /* check_pipelines */)? {

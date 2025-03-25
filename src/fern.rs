@@ -8,18 +8,18 @@ pub mod state;
 pub mod builtin;
 pub mod jobs;
 pub mod signal;
-#[cfg(test)]
-pub mod tests;
 pub mod getopt;
 pub mod shopt;
+#[cfg(test)]
+pub mod tests;
 
 use std::collections::HashSet;
 
-use expand::expand_aliases;
+use crate::expand::expand_aliases;
 use libsh::error::ShResult;
 use parse::{execute::Dispatcher, ParsedSrc};
 use signal::sig_setup;
-use state::{source_rc, write_meta};
+use state::{read_logic, source_rc, write_meta};
 use termios::{LocalFlags, Termios};
 use crate::prelude::*;
 
@@ -74,7 +74,8 @@ fn set_termios() {
 
 pub fn exec_input(input: String) -> ShResult<()> {
 	write_meta(|m| m.start_timer());
-	let input = expand_aliases(input, HashSet::new());
+	let log_tab = read_logic(|l| l.clone());
+	let input = expand_aliases(input, HashSet::new(), &log_tab);
 	let mut parser = ParsedSrc::new(Arc::new(input));
 	parser.parse_src()?;
 

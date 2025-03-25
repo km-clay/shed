@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{exec_input, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, Redir, RedirType}, prelude::*, procio::{IoBuf, IoFrame, IoMode}, state::{read_logic, read_vars, write_meta}};
+use crate::{exec_input, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, Redir, RedirType}, prelude::*, procio::{IoBuf, IoFrame, IoMode}, state::{read_logic, read_vars, write_meta, LogTab}};
 
 /// Variable substitution marker
 pub const VAR_SUB: char = '\u{fdd0}';
@@ -602,7 +602,7 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 }
 
 /// Expand aliases in the given input string
-pub fn expand_aliases(input: String, mut already_expanded: HashSet<String>) -> String {
+pub fn expand_aliases(input: String, mut already_expanded: HashSet<String>, log_tab: &LogTab) -> String {
 	let mut result = input.clone();
 	let tokens: Vec<_> = LexStream::new(Arc::new(input), LexFlags::empty()).collect();
 	let mut expanded_this_iter: Vec<String> = vec![];
@@ -611,12 +611,13 @@ pub fn expand_aliases(input: String, mut already_expanded: HashSet<String>) -> S
 		let Ok(tk) = token_result else { continue };
 
 		if !tk.flags.contains(TkFlags::IS_CMD) { continue }
+		if tk.flags.contains(TkFlags::KEYWORD) { continue }
 
 		let raw_tk = tk.span.as_str().to_string();
 
 		if already_expanded.contains(&raw_tk) { continue }
 
-		if let Some(alias) = read_logic(|l| l.get_alias(&raw_tk)) {
+		if let Some(alias) = log_tab.get_alias(&raw_tk) {
 			result.replace_range(tk.span.range(), &alias);
 			expanded_this_iter.push(raw_tk);
 		}
@@ -626,6 +627,6 @@ pub fn expand_aliases(input: String, mut already_expanded: HashSet<String>) -> S
 		return result
 	} else {
 		already_expanded.extend(expanded_this_iter.into_iter());
-		return expand_aliases(result, already_expanded)
+		return expand_aliases(result, already_expanded, log_tab)
 	}
 }

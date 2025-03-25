@@ -79,6 +79,12 @@ impl LogTab {
 	pub fn get_alias(&self, name: &str) -> Option<String> {
 		self.aliases.get(name).cloned()
 	}
+	pub fn clear_aliases(&mut self) {
+		self.aliases.clear()
+	}
+	pub fn clear_functions(&mut self) {
+		self.functions.clear()
+	}
 }
 
 #[derive(Clone)]

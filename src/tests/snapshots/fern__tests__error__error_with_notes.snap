@@ -1,0 +1,8 @@
+---
+source: src/tests/error.rs
+expression: err_fmt
+---
+Execution failed
+[32mnote[0m: Execution failed for this reason
+
+[32mnote[0m: Here is how to fix it: blah blah blah

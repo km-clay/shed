@@ -1,6 +1,22 @@
-use std::rc::Arc;
+use std::sync::Arc;
 
-use crate::parse::{lex::{LexFlags, LexStream}, node_operation, Node, ParseStream};
+pub use super::*;
+use crate::libsh::error::{
+	Note, ShErr, ShErrKind
+};
+use crate::parse::{
+	node_operation, Node, NdRule, ParseStream,
+	lex::{
+		Tk, TkFlags, TkRule, LexFlags, LexStream
+	}
+};
+use crate::expand::{
+	expand_aliases, unescape_str
+};
+use crate::state::{
+	write_logic, write_vars
+};
+
 
 pub mod lexer;
 pub mod parser;

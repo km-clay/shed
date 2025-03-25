@@ -1,9 +1,6 @@
 use std::collections::HashSet;
 
-use expand::{expand_aliases, unescape_str};
-use parse::lex::{Tk, TkFlags, TkRule};
-use state::{write_logic, write_vars};
-use super::super::*;
+use super::*;
 
 #[test]
 fn simple_expansion() {
@@ -32,61 +29,97 @@ fn unescape_string() {
 
 #[test]
 fn expand_alias_simple() {
-	write_logic(|l| l.insert_alias("foo", "echo foo"));
+	write_logic(|l| {
+		l.insert_alias("foo", "echo foo");
+		let input = String::from("foo");
 
-	let input = String::from("foo");
-
-	let result = expand_aliases(input, HashSet::new());
-	assert_eq!(result.as_str(),"echo foo")
+		let result = expand_aliases(input, HashSet::new(), &l);
+		assert_eq!(result.as_str(),"echo foo");
+		l.clear_aliases();
+	});
 }
 
 #[test]
 fn expand_alias_in_if() {
-	write_logic(|l| l.insert_alias("foo", "echo foo"));
+	write_logic(|l| {
+		l.insert_alias("foo", "echo foo");
+		let input = String::from("if foo; then echo bar; fi");
 
-	let input = String::from("if foo; then echo bar; fi");
+		let result = expand_aliases(input, HashSet::new(), &l);
+		assert_eq!(result.as_str(),"if echo foo; then echo bar; fi");
+		l.clear_aliases();
+	});
+}
 
-	let result = expand_aliases(input, HashSet::new());
-	assert_eq!(result.as_str(),"if echo foo; then echo bar; fi")
+#[test]
+fn expand_alias_multiline() {
+	write_logic(|l| {
+		l.insert_alias("foo", "echo foo");
+		l.insert_alias("bar", "echo bar");
+		let input = String::from("
+			foo
+			if true; then
+				bar
+			fi
+		");
+		let expected = String::from("
+			echo foo
+			if true; then
+				echo bar
+			fi
+		");
+
+		let result = expand_aliases(input, HashSet::new(), &l);
+		assert_eq!(result,expected)
+	});
 }
 
 #[test]
 fn expand_multiple_aliases() {
-	write_logic(|l| l.insert_alias("foo", "echo foo"));
-	write_logic(|l| l.insert_alias("bar", "echo bar"));
-	write_logic(|l| l.insert_alias("biz", "echo biz"));
+	write_logic(|l| {
+		l.insert_alias("foo", "echo foo");
+		l.insert_alias("bar", "echo bar");
+		l.insert_alias("biz", "echo biz");
+		let input = String::from("foo; bar; biz");
 
-	let input = String::from("foo; bar; biz");
-
-	let result = expand_aliases(input, HashSet::new());
-	assert_eq!(result.as_str(),"echo foo; echo bar; echo biz")
+		let result = expand_aliases(input, HashSet::new(), &l);
+		assert_eq!(result.as_str(),"echo foo; echo bar; echo biz");
+	});
 }
 
 #[test]
 fn alias_in_arg_position() {
-	write_logic(|l| l.insert_alias("foo", "echo foo"));
+	write_logic(|l| {
+		l.insert_alias("foo", "echo foo");
+		let input = String::from("echo foo");
 
-	let input = String::from("echo foo");
-
-	let result = expand_aliases(input.clone(), HashSet::new());
-	assert_eq!(input,result)
+		let result = expand_aliases(input.clone(), HashSet::new(), &l);
+		assert_eq!(input,result);
+		l.clear_aliases();
+	});
 }
 
 #[test]
 fn expand_recursive_alias() {
-	write_logic(|l| l.insert_alias("foo", "echo foo"));
-	write_logic(|l| l.insert_alias("bar", "foo bar"));
+	write_logic(|l| {
+		l.insert_alias("foo", "echo foo");
+		l.insert_alias("bar", "foo bar");
 
-	let input = String::from("bar");
-	let result = expand_aliases(input, HashSet::new());
-	assert_eq!(result.as_str(),"echo foo bar")
+		let input = String::from("bar");
+		let result = expand_aliases(input, HashSet::new(), &l);
+		assert_eq!(result.as_str(),"echo foo bar");
+	});
 }
 
 #[test]
 fn test_infinite_recursive_alias() {
-	write_logic(|l| l.insert_alias("foo", "foo bar"));
+	write_logic(|l| {
+		l.insert_alias("foo", "foo bar");
 
-	let input = String::from("foo");
-	let result = expand_aliases(input, HashSet::new());
-	assert_eq!(result.as_str(),"foo bar")
+		let input = String::from("foo");
+		let result = expand_aliases(input, HashSet::new(), &l);
+		assert_eq!(result.as_str(),"foo bar");
+		l.clear_aliases();
+	});
+
 }

@@ -1,6 +1,4 @@
-use libsh::error::{ShErr, ShErrKind};
-
-use super::super::*;
+use super::*;
 
 #[test]
 fn cmd_not_found() {
@@ -93,5 +91,32 @@ fn case_no_in() {
 	let Err(e) = node else { panic!() };
 
 	let err_fmt = format!("{e}");
+	insta::assert_snapshot!(err_fmt)
+}
+
+#[test]
+fn error_with_notes() {
+	let err = ShErr::simple(ShErrKind::ExecFail, "Execution failed")
+		.with_note(Note::new("Execution failed for this reason"))
+		.with_note(Note::new("Here is how to fix it: blah blah blah"));
+
+	let err_fmt = format!("{err}");
+	insta::assert_snapshot!(err_fmt)
+}
+
+#[test]
+fn error_with_notes_and_sub_notes() {
+	let err = ShErr::simple(ShErrKind::ExecFail, "Execution failed")
+		.with_note(Note::new("Execution failed for this reason"))
+		.with_note(
+			Note::new("Here is how to fix it:")
+				.with_sub_notes(vec![
+					"blah",
+					"blah",
+					"blah"
+				])
+		);
+
+	let err_fmt = format!("{err}");
 	insta::assert_snapshot!(err_fmt)
 }
