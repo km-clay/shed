@@ -447,7 +447,7 @@ impl Dispatcher {
 					let var = var.span.as_str();
 					let val = val.span.as_str();
 					match kind {
-						AssignKind::Eq => write_vars(|v| v.new_var(var, val)),
+						AssignKind::Eq => write_vars(|v| v.set_var(var, val, false)),
 						AssignKind::PlusEq => todo!(),
 						AssignKind::MinusEq => todo!(),
 						AssignKind::MultEq => todo!(),

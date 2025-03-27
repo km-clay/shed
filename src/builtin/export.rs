@@ -1,4 +1,4 @@
-use crate::{jobs::JobBldr, libsh::error::{Note, ShErr, ShErrKind, ShResult}, parse::{NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state};
+use crate::{jobs::JobBldr, libsh::error::ShResult, parse::{NdRule, Node}, prelude::*, procio::{borrow_fd, IoStack}, state::{self, write_vars}};
 
 use super::setup_builtin;
 
@@ -21,20 +21,12 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
 		let stdout = borrow_fd(STDOUT_FILENO);
 		write(stdout, env_output.as_bytes())?; // Write it
 	} else {
-		for (arg,span) in argv {
-			let Some((var,val)) = arg.split_once('=') else {
-				return Err(
-					ShErr::full(
-						ShErrKind::SyntaxErr,
-						"export: Expected an assignment in export args",
-						span.into()
-					)
-					.with_note(
-						Note::new("Arguments for export should be formatted like 'foo=bar'")
-					)
-				)
-			};
-			env::set_var(var, val);
+		for (arg,_) in argv {
+			if let Some((var,val)) = arg.split_once('=') {
+				write_vars(|v| v.set_var(var, val, true)); // Export an assignment like 'foo=bar'
+			} else {
+				write_vars(|v| v.export_var(&arg)); // Export an existing variable, if any
+			}
 		}
 	}
 	io_frame.unwrap().restore()?;

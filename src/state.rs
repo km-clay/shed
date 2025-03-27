@@ -87,9 +87,31 @@ impl LogTab {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
+pub struct Var {
+	export: bool,
+	value: String
+}
+
+impl Var {
+	pub fn new(value: String) -> Self {
+		Self { export: false, value }
+	}
+	pub fn mark_for_export(&mut self) {
+		self.export = true;
+	}
+}
+
+impl Deref for Var {
+	type Target = String;
+	fn deref(&self) -> &Self::Target {
+		&self.value
+	}
+}
+
+#[derive(Clone,Debug)]
 pub struct VarTab {
-	vars: HashMap<String,String>,
+	vars: HashMap<String,Var>,
 	params: HashMap<char,String>,
 	sh_argv: VecDeque<String>, // Using a VecDeque makes the implementation of `shift` straightforward
 }
@@ -201,10 +223,10 @@ impl VarTab {
 		self.update_arg_params();
 		arg
 	}
-	pub fn vars(&self) -> &HashMap<String,String> {
+	pub fn vars(&self) -> &HashMap<String,Var> {
 		&self.vars
 	}
-	pub fn vars_mut(&mut self) -> &mut HashMap<String,String> {
+	pub fn vars_mut(&mut self) -> &mut HashMap<String,Var> {
 		&mut self.vars
 	}
 	pub fn params(&self) -> &HashMap<char,String> {
@@ -212,6 +234,12 @@ impl VarTab {
 	}
 	pub fn params_mut(&mut self) -> &mut HashMap<char,String> {
 		&mut self.params
+	}
+	pub fn export_var(&mut self, var_name: &str) {
+		if let Some(var) = self.vars.get_mut(var_name) {
+			var.mark_for_export();
+			env::set_var(var_name, &var.value);
+		}
 	}
 	pub fn get_var(&self, var: &str) -> String {
 		if var.chars().count() == 1 {
@@ -226,8 +254,20 @@ impl VarTab {
 			std::env::var(var).unwrap_or_default()
 		}
 	}
-	pub fn new_var(&mut self, var: &str, val: &str) {
-		self.vars.insert(var.to_string(), val.to_string());
+	pub fn set_var(&mut self, var_name: &str, val: &str, export: bool) {
+		if let Some(var) = self.vars.get_mut(var_name) {
+			var.value = val.to_string();
+			if var.export {
+				env::set_var(var_name, val);
+			}
+		} else {
+			let mut var = Var::new(val.to_string());
+			if export {
+				var.mark_for_export();
+				env::set_var(var_name, &*var);
+			}
+			self.vars.insert(var_name.to_string(), var);
+		}
 	}
 	pub fn set_param(&mut self, param: char, val: &str) {
 		self.params.insert(param,val.to_string());
