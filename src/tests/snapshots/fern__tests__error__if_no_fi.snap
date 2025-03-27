@@ -2,8 +2,9 @@
 source: src/tests/error.rs
 expression: err_fmt
 ---
-  [36m[1m->[0m [[36m[1m1[0m;[36m[1m1[0m] - [31m[1mParse Error[0m
+[31m[1mParse Error[0m - Expected 'fi' after if statement
+  [36m[1m->[0m [[36m[1m1[0m;[36m[1m1[0m]
 [36m[1m  |[0m
 [36m[1m1 |[0m if foo; then bar;
+[36m[1m  |[0m [31m[1m^^^^^^^^^^^^^^^^^[0m
 [36m[1m  |[0m
-  [36m[1m-[0m Expected 'fi' after if statement

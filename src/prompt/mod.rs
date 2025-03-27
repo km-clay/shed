@@ -3,13 +3,40 @@ pub mod readline;
 use std::path::Path;
 
 use readline::FernReadline;
-use rustyline::{error::ReadlineError, history::FileHistory, Editor};
+use rustyline::{error::ReadlineError, history::FileHistory, ColorMode, Config, Editor};
 
-use crate::{expand::expand_prompt, libsh::{error::ShResult, term::{Style, Styled}}, prelude::*};
+use crate::{expand::expand_prompt, libsh::{error::ShResult, term::{Style, Styled}}, prelude::*, state::read_shopts};
 
+/// Initialize the line editor
 fn init_rl() -> ShResult<Editor<FernReadline,FileHistory>> {
 	let rl = FernReadline::new();
-	let mut editor = Editor::new()?;
+
+	let tab_stop = read_shopts(|s| s.prompt.tab_stop);
+	let edit_mode = read_shopts(|s| s.prompt.edit_mode).into();
+	let bell_style = read_shopts(|s| s.core.bell_style).into();
+	let ignore_dups = read_shopts(|s| s.core.hist_ignore_dupes);
+	let comp_limit = read_shopts(|s| s.prompt.comp_limit);
+	let auto_hist = read_shopts(|s| s.core.auto_hist);
+	let max_hist = read_shopts(|s| s.core.max_hist);
+	let color_mode = match read_shopts(|s| s.prompt.prompt_highlight) {
+		true => ColorMode::Enabled,
+		false => ColorMode::Disabled,
+	};
+
+	let config = Config::builder()
+		.tab_stop(tab_stop)
+		.indent_size(1)
+		.edit_mode(edit_mode)
+		.bell_style(bell_style)
+		.color_mode(color_mode)
+		.history_ignore_dups(ignore_dups).unwrap()
+		.completion_prompt_limit(comp_limit)
+		.auto_add_history(auto_hist)
+		.max_history_size(max_hist).unwrap()
+		.build();
+
+	let mut editor = Editor::with_config(config).unwrap();
+
 	editor.set_helper(Some(rl));
 	editor.load_history(&Path::new("/home/pagedmov/.fernhist"))?;
 	Ok(editor)

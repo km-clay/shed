@@ -77,7 +77,12 @@ pub fn exec_input(input: String) -> ShResult<()> {
 	let log_tab = read_logic(|l| l.clone());
 	let input = expand_aliases(input, HashSet::new(), &log_tab);
 	let mut parser = ParsedSrc::new(Arc::new(input));
-	parser.parse_src()?;
+	if let Err(errors) = parser.parse_src() {
+		for error in errors {
+			eprintln!("{error}");
+		}
+		return Ok(())
+	}
 
 	let mut dispatcher = Dispatcher::new(parser.extract_nodes());
 	dispatcher.begin_dispatch()

@@ -12,8 +12,9 @@ pub mod jobctl;
 pub mod alias;
 pub mod flowctl;
 pub mod zoltraak;
+pub mod shopt;
 
-pub const BUILTINS: [&str;15] = [
+pub const BUILTINS: [&str;16] = [
 	"echo",
 	"cd",
 	"export",
@@ -28,7 +29,8 @@ pub const BUILTINS: [&str;15] = [
 	"break",
 	"continue",
 	"exit",
-	"zoltraak"
+	"zoltraak",
+	"shopt"
 ];
 
 /// Sets up a builtin command

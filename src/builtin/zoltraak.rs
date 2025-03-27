@@ -61,6 +61,7 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
 				match flag {
 					'r' => flags |= ZoltFlags::RECURSIVE,
 					'f' => flags |= ZoltFlags::FORCE,
+					'v' => flags |= ZoltFlags::VERBOSE,
 					_ => unreachable!()
 				}
 			}
@@ -141,7 +142,7 @@ fn annihilate(path: &str, flags: ZoltFlags) -> ShResult<()> {
 		fs::remove_file(path)?;
 		if is_verbose {
 			let stderr = borrow_fd(STDERR_FILENO);
-			write(stderr, format!("removed file '{path}'").as_bytes())?;
+			write(stderr, format!("shredded file '{path}'\n").as_bytes())?;
 		}
 
 	} else if path_buf.is_dir() {
@@ -183,7 +184,7 @@ fn annihilate_recursive(dir: &str, flags: ZoltFlags) -> ShResult<()> {
 	fs::remove_dir(dir)?;
 	if is_verbose {
 		let stderr = borrow_fd(STDERR_FILENO);
-		write(stderr, format!("removed directory '{dir}'").as_bytes())?;
+		write(stderr, format!("shredded directory '{dir}'\n").as_bytes())?;
 	}
 	Ok(())
 }

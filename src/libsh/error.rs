@@ -135,8 +135,6 @@ impl ShErr {
 			total_len += ch.len_utf8();
 			cur_line.push(ch);
 			if ch == '\n' {
-				total_lines += 1;
-
 				if total_len > span.start {
 					let line = (
 						total_lines,
@@ -147,6 +145,8 @@ impl ShErr {
 				if total_len >= span.end {
 					break
 				}
+				total_lines += 1;
+
 				cur_line.clear();
 			}
 		}
@@ -183,6 +183,23 @@ impl ShErr {
 		}
 		(lineno,colno)
 	}
+	pub fn get_indicator_lines(&self) -> Option<Vec<String>> {
+		match self {
+			ShErr::Simple { kind: _, msg: _, notes: _ } => None,
+			ShErr::Full { kind: _, msg: _, notes: _, span } => {
+				let text = span.as_str();
+				let lines = text.lines();
+				let mut indicator_lines = vec![];
+
+				for line in lines {
+					let indicator_line = "^".repeat(line.len()).styled(Style::Red | Style::Bold);
+					indicator_lines.push(indicator_line);
+				}
+
+				Some(indicator_lines)
+			}
+		}
+	}
 }
 
 impl Display for ShErr {
@@ -204,26 +221,34 @@ impl Display for ShErr {
 
 			Self::Full { msg, kind, notes, span: _ } => {
 				let window = self.get_window();
+				let mut indicator_lines = self.get_indicator_lines().unwrap().into_iter();
 				let mut lineno_pad_count = 0;
 				for (lineno,_) in window.clone() {
 					if lineno.to_string().len() > lineno_pad_count {
 						lineno_pad_count = lineno.to_string().len() + 1
 					}
 				}
-				let (line,col) = self.get_line_col();
-				let line = line.styled(Style::Cyan | Style::Bold);
-				let col = col.styled(Style::Cyan | Style::Bold);
-				let kind = kind.styled(Style::Red | Style::Bold);
 				let padding = " ".repeat(lineno_pad_count);
+				writeln!(f)?;
+
+
+				let (line,col) = self.get_line_col();
+				let line_fmt = line.styled(Style::Cyan | Style::Bold);
+				let col_fmt = col.styled(Style::Cyan | Style::Bold);
+				let kind = kind.styled(Style::Red | Style::Bold);
 				let arrow = "->".styled(Style::Cyan | Style::Bold);
 				writeln!(f,
-					"{padding}{arrow} [{line};{col}] - {kind}",
+					"{kind} - {msg}",
+				)?;
+				writeln!(f,
+					"{padding}{arrow} [{line_fmt};{col_fmt}]",
 				)?;
 
 				let mut bar = format!("{padding}|");
 				bar = bar.styled(Style::Cyan | Style::Bold);
 				writeln!(f,"{bar}")?;
 
+				let mut first_ind_ln = true;
 				for (lineno,line) in window {
 					let lineno = lineno.to_string();
 					let line = line.trim();
@@ -231,18 +256,29 @@ impl Display for ShErr {
 					prefix.replace_range(0..lineno.len(), &lineno);
 					prefix = prefix.styled(Style::Cyan | Style::Bold);
 					writeln!(f,"{prefix} {line}")?;
+
+					if let Some(ind_ln) = indicator_lines.next() {
+						if first_ind_ln {
+							let ind_ln_padding = " ".repeat(col);
+							let ind_ln = format!("{ind_ln_padding}{ind_ln}");
+							writeln!(f, "{bar}{ind_ln}")?;
+							first_ind_ln = false;
+						} else {
+							writeln!(f, "{bar} {ind_ln}")?;
+						}
+					}
 				}
 
-				writeln!(f,"{bar}")?;
+				write!(f,"{bar}")?;
+
 
 				let bar_break = "-".styled(Style::Cyan | Style::Bold);
-				writeln!(f,
-					"{padding}{bar_break} {msg}",
-				)?;
-
+				if !notes.is_empty() {
+					writeln!(f)?;
+				}
 				for note in notes {
 
-					writeln!(f,
+					write!(f,
 						"{padding}{bar_break} {note}"
 					)?;
 				}

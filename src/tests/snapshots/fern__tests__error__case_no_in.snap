@@ -2,8 +2,9 @@
 source: src/tests/error.rs
 expression: err_fmt
 ---
-  [36m[1m->[0m [[36m[1m1[0m;[36m[1m1[0m] - [31m[1mParse Error[0m
+[31m[1mParse Error[0m - Expected 'in' after case variable name
+  [36m[1m->[0m [[36m[1m1[0m;[36m[1m1[0m]
 [36m[1m  |[0m
 [36m[1m1 |[0m case foo foo) bar;; bar) foo;; esac
+[36m[1m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^[0m
 [36m[1m  |[0m
-  [36m[1m-[0m Expected 'in' after case variable name

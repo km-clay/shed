@@ -2,8 +2,8 @@
 source: src/tests/error.rs
 expression: err_fmt
 ---
-  [36m[1m->[0m [[36m[1m1[0m;[36m[1m1[0m] - [31m[1mCommand not found: foo[0m
+[31m[1mCommand not found: foo[0m - 
+  [36m[1m->[0m [[36m[1m1[0m;[36m[1m1[0m]
 [36m[1m  |[0m
 [36m[1m1 |[0m foo
 [36m[1m  |[0m
-  [36m[1m-[0m

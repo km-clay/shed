@@ -37,16 +37,34 @@ impl ParsedSrc {
 	pub fn new(src: Arc<String>) -> Self {
 		Self { src, ast: Ast::new(vec![]) }
 	}
-	pub fn parse_src(&mut self) -> ShResult<()> {
+	pub fn parse_src(&mut self) -> Result<(),Vec<ShErr>> {
 		let mut tokens = vec![];
-		for token in LexStream::new(self.src.clone(), LexFlags::empty()) {
-			tokens.push(token?);
+		let mut errors = vec![];
+		for lex_result in LexStream::new(self.src.clone(), LexFlags::empty()) {
+			match lex_result {
+				Ok(token) => tokens.push(token),
+				Err(error) => errors.push(error)
+			}
+		}
+
+		if !errors.is_empty() {
+			return Err(errors)
 		}
 
 		let mut nodes = vec![];
-		for result in ParseStream::new(tokens) {
-			nodes.push(result?);
+		for parse_result in ParseStream::new(tokens) {
+			flog!(DEBUG, parse_result);
+			match parse_result  {
+				Ok(node) => nodes.push(node),
+				Err(error) => errors.push(error)
+			}
 		}
+		flog!(DEBUG, errors);
+
+		if !errors.is_empty() {
+			return Err(errors)
+		}
+
 		*self.ast.tree_mut() = nodes;
 		Ok(())
 	}
@@ -311,19 +329,11 @@ pub enum NdRule {
 #[derive(Debug)]
 pub struct ParseStream {
 	pub tokens: Vec<Tk>,
-	pub flags: ParseFlags
-}
-
-bitflags! {
-	#[derive(Debug)]
-	pub struct ParseFlags: u32 {
-		const ERROR = 0b0000001;
-	}
 }
 
 impl ParseStream {
 	pub fn new(tokens: Vec<Tk>) -> Self {
-		Self { tokens, flags: ParseFlags::empty() }
+		Self { tokens }
 	}
 	fn next_tk_class(&self) -> &TkRule {
 		if let Some(tk) = self.tokens.first() {
@@ -444,7 +454,7 @@ impl ParseStream {
 	/// This tries to match on different stuff that can appear in a command position
 	/// Matches shell commands like if-then-fi, pipelines, etc.
 	/// Ordered from specialized to general, with more generally matchable stuff appearing at the bottom
-	/// The check_pipelines parameter is used to prevent left-recursion issues in self.parse_pipeline()
+	/// The check_pipelines parameter is used to prevent left-recursion issues in self.parse_pipeln()
 	fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
 		try_match!(self.parse_func_def()?);
 		try_match!(self.parse_brc_grp(false /* from_func_def */)?);
@@ -452,7 +462,7 @@ impl ParseStream {
 		try_match!(self.parse_loop()?);
 		try_match!(self.parse_if()?);
 		if check_pipelines {
-			try_match!(self.parse_pipeline()?);
+			try_match!(self.parse_pipeln()?);
 		} else {
 			try_match!(self.parse_cmd()?);
 		}
@@ -488,6 +498,14 @@ impl ParseStream {
 
 		Ok(Some(node))
 	}
+	fn panic_mode(&mut self, node_tks: &mut Vec<Tk>) {
+		while let Some(tk) = self.next_tk() {
+			node_tks.push(tk.clone());
+			if tk.class == TkRule::Sep {
+				break
+			}
+		}
+	}
 	fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<Node>> {
 		let mut node_tks: Vec<Tk> = vec![];
 		let mut body: Vec<Node> = vec![];
@@ -508,6 +526,7 @@ impl ParseStream {
 				body.push(node);
 			}
 			if !self.next_tk_is_some() {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(
 						"Expected a closing brace for this brace group",
 						&node_tks.get_span().unwrap()
@@ -525,7 +544,6 @@ impl ParseStream {
 					let path_tk = self.next_tk();
 
 					if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
-						self.flags |= ParseFlags::ERROR;
 						return Err(
 							ShErr::full(
 								ShErrKind::ParseErr,
@@ -541,7 +559,7 @@ impl ParseStream {
 					let pathbuf = PathBuf::from(path_tk.span.as_str());
 
 					let Ok(file) = get_redir_file(redir_class, pathbuf) else {
-						self.flags |= ParseFlags::ERROR;
+						self.panic_mode(&mut node_tks);
 						return Err(parse_err_full(
 								"Error opening file for redirection",
 								&path_tk.span
@@ -579,6 +597,7 @@ impl ParseStream {
 		node_tks.push(self.next_tk().unwrap());
 
 		let Some(pat_tk) = self.next_tk() else {
+			self.panic_mode(&mut node_tks);
 			return Err(
 				parse_err_full(
 					"Expected a pattern after 'case' keyword", &node_tks.get_span().unwrap()
@@ -596,6 +615,7 @@ impl ParseStream {
 		node_tks.push(pattern.clone());
 
 		if !self.check_keyword("in") || !self.next_tk_is_some() {
+			self.panic_mode(&mut node_tks);
 			return Err(parse_err_full("Expected 'in' after case variable name", &node_tks.get_span().unwrap()));
 		}
 		node_tks.push(self.next_tk().unwrap());
@@ -604,6 +624,7 @@ impl ParseStream {
 
 		loop {
 			if !self.check_case_pattern() || !self.next_tk_is_some() {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full("Expected a case pattern here", &node_tks.get_span().unwrap()));
 			}
 			let case_pat_tk = self.next_tk().unwrap();
@@ -632,6 +653,7 @@ impl ParseStream {
 			}
 
 			if !self.next_tk_is_some() {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full("Expected 'esac' after case block", &node_tks.get_span().unwrap()));
 			}
 		}
@@ -666,6 +688,7 @@ impl ParseStream {
 				"elif"
 			};
 			let Some(cond) = self.parse_block(true)? else {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(
 						&format!("Expected an expression after '{prefix_keywrd}'"),
 						&node_tks.get_span().unwrap()
@@ -674,6 +697,7 @@ impl ParseStream {
 			node_tks.extend(cond.tokens.clone());
 
 			if !self.check_keyword("then") || !self.next_tk_is_some() {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(
 						&format!("Expected 'then' after '{prefix_keywrd}' condition"),
 						&node_tks.get_span().unwrap()
@@ -688,6 +712,7 @@ impl ParseStream {
 				body_blocks.push(body_block);
 			}
 			if body_blocks.is_empty() {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(
 						"Expected an expression after 'then'",
 						&node_tks.get_span().unwrap()
@@ -711,6 +736,7 @@ impl ParseStream {
 				else_block.push(block)
 			}
 			if else_block.is_empty() {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(
 						"Expected an expression after 'else'",
 						&node_tks.get_span().unwrap()
@@ -719,6 +745,7 @@ impl ParseStream {
 		}
 
 		if !self.check_keyword("fi") || !self.next_tk_is_some() {
+			self.panic_mode(&mut node_tks);
 			return Err(parse_err_full(
 					"Expected 'fi' after if statement",
 					&node_tks.get_span().unwrap()
@@ -734,7 +761,6 @@ impl ParseStream {
 				let path_tk = self.next_tk();
 
 				if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
-					self.flags |= ParseFlags::ERROR;
 					return Err(
 						ShErr::full(
 							ShErrKind::ParseErr,
@@ -750,7 +776,7 @@ impl ParseStream {
 				let pathbuf = PathBuf::from(path_tk.span.as_str());
 
 				let Ok(file) = get_redir_file(redir_class, pathbuf) else {
-					self.flags |= ParseFlags::ERROR;
+					self.panic_mode(&mut node_tks);
 					return Err(parse_err_full(
 							"Error opening file for redirection",
 							&path_tk.span
@@ -792,6 +818,7 @@ impl ParseStream {
 			self.catch_separator(&mut node_tks);
 
 			let Some(cond) = self.parse_block(true)? else {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(
 						&format!("Expected an expression after '{loop_kind}'"), // It also implements Display
 						&node_tks.get_span().unwrap()
@@ -800,6 +827,7 @@ impl ParseStream {
 			node_tks.extend(cond.tokens.clone());
 
 			if !self.check_keyword("do") || !self.next_tk_is_some() {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(
 						"Expected 'do' after loop condition",
 						&node_tks.get_span().unwrap()
@@ -814,6 +842,7 @@ impl ParseStream {
 				body.push(block);
 			}
 			if body.is_empty() {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(
 						"Expected an expression after 'do'",
 						&node_tks.get_span().unwrap()
@@ -821,6 +850,7 @@ impl ParseStream {
 			};
 
 			if !self.check_keyword("done") || !self.next_tk_is_some() {
+				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(
 						"Expected 'done' after loop body",
 						&node_tks.get_span().unwrap()
@@ -838,7 +868,7 @@ impl ParseStream {
 			};
 			Ok(Some(loop_node))
 	}
-	fn parse_pipeline(&mut self) -> ShResult<Option<Node>> {
+	fn parse_pipeln(&mut self) -> ShResult<Option<Node>> {
 		let mut cmds = vec![];
 		let mut node_tks = vec![];
 		while let Some(cmd) = self.parse_block(false)? {
@@ -868,7 +898,7 @@ impl ParseStream {
 		}
 	}
 	fn parse_cmd(&mut self) -> ShResult<Option<Node>> {
-		let tk_slice = self.tokens.as_slice();
+		let tk_slice = self.tokens.clone();
 		let mut tk_iter = tk_slice.iter();
 		let mut node_tks = vec![];
 		let mut redirs = vec![];
@@ -876,19 +906,23 @@ impl ParseStream {
 		let mut assignments = vec![];
 
 		while let Some(prefix_tk) = tk_iter.next() {
-			if prefix_tk.flags.contains(TkFlags::IS_CMD) {
+			let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
+			let is_assignment = prefix_tk.flags.contains(TkFlags::ASSIGN);
+			let is_keyword = prefix_tk.flags.contains(TkFlags::KEYWORD);
+
+			if is_cmd {
 				node_tks.push(prefix_tk.clone());
 				argv.push(prefix_tk.clone());
 				break
 
-			} else if prefix_tk.flags.contains(TkFlags::ASSIGN) {
+			} else if is_assignment {
 				let Some(assign) = self.parse_assignment(&prefix_tk) else {
 					break
 				};
 				node_tks.push(prefix_tk.clone());
 				assignments.push(assign)
 
-			} else if prefix_tk.flags.contains(TkFlags::KEYWORD) {
+			} else if is_keyword {
 				return Ok(None)
 			}
 		}
@@ -900,12 +934,12 @@ impl ParseStream {
 		while let Some(tk) = tk_iter.next() {
 			match tk.class {
 				TkRule::EOI |
-					TkRule::Pipe |
-					TkRule::And |
-					TkRule::BraceGrpEnd |
-					TkRule::Or => {
-						break
-					}
+				TkRule::Pipe |
+				TkRule::And |
+				TkRule::BraceGrpEnd |
+				TkRule::Or => {
+					break
+				}
 				TkRule::Sep => {
 					node_tks.push(tk.clone());
 					break
@@ -921,7 +955,6 @@ impl ParseStream {
 						let path_tk = tk_iter.next();
 
 						if path_tk.is_none_or(|tk| tk.class == TkRule::EOI) {
-							self.flags |= ParseFlags::ERROR;
 							return Err(
 								ShErr::full(
 									ShErrKind::ParseErr,
@@ -937,7 +970,7 @@ impl ParseStream {
 						let pathbuf = PathBuf::from(path_tk.span.as_str());
 
 						let Ok(file) = get_redir_file(redir_class, pathbuf) else {
-							self.flags |= ParseFlags::ERROR;
+							self.panic_mode(&mut node_tks);
 							return Err(parse_err_full(
 									"Error opening file for redirection",
 									&path_tk.span
@@ -1068,11 +1101,10 @@ impl ParseStream {
 impl Iterator for ParseStream {
 	type Item = ShResult<Node>;
 	fn next(&mut self) -> Option<Self::Item> {
+		flog!(DEBUG, "parsing");
+		flog!(DEBUG, self.tokens);
 		// Empty token vector or only SOI/EOI tokens, nothing to do
 		if self.tokens.is_empty() || self.tokens.len() == 2 {
-			return None
-		}
-		if self.flags.contains(ParseFlags::ERROR) {
 			return None
 		}
 		while let Some(tk) = self.tokens.first() {
@@ -1085,12 +1117,17 @@ impl Iterator for ParseStream {
 				break
 			}
 		}
-		match self.parse_cmd_list() {
+		let result = self.parse_cmd_list();
+		flog!(DEBUG, result);
+		flog!(DEBUG, self.tokens);
+		match result {
 			Ok(Some(node)) => {
 				return Some(Ok(node));
 			}
 			Ok(None) => return None,
-			Err(e) => return Some(Err(e))
+			Err(e) => {
+				return Some(Err(e))
+			}
 		}
 	}
 }

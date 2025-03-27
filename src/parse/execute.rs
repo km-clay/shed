@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 
-use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, source::source, zoltraak::zoltraak}, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
+use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, shopt::shopt, source::source, zoltraak::zoltraak}, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
 
 use super::{lex::{Span, Tk, TkFlags, KEYWORDS}, AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParsedSrc, Redir, RedirType};
 
@@ -121,7 +121,12 @@ impl Dispatcher {
 		}
 
 		let mut func_parser = ParsedSrc::new(Arc::new(body));
-		func_parser.parse_src()?; // Parse the function
+		if let Err(errors) = func_parser.parse_src() {
+			for error in errors {
+				eprintln!("{error}");
+			}
+			return Ok(())
+		}
 
 		let func = ShFunc::new(func_parser);
 		write_logic(|l| l.insert_func(name, func)); // Store the AST
@@ -364,6 +369,7 @@ impl Dispatcher {
 			"continue" => flowctl(cmd, ShErrKind::LoopContinue(0)),
 			"exit" => flowctl(cmd, ShErrKind::CleanExit(0)),
 			"zoltraak" => zoltraak(cmd, io_stack_mut, curr_job_mut),
+			"shopt" => shopt(cmd, io_stack_mut, curr_job_mut),
 			_ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw.span.as_str())
 		};
 

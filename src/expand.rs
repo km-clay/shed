@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{exec_input, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, Redir, RedirType}, prelude::*, procio::{IoBuf, IoFrame, IoMode}, state::{read_logic, read_vars, write_meta, LogTab}};
+use crate::{exec_input, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, Redir, RedirType}, prelude::*, procio::{IoBuf, IoFrame, IoMode}, state::{read_vars, write_meta, LogTab}};
 
 /// Variable substitution marker
 pub const VAR_SUB: char = '\u{fdd0}';

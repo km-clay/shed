@@ -314,6 +314,23 @@ pub fn write_logic<T, F: FnOnce(&mut RwLockWriteGuard<LogTab>) -> T>(f: F) -> T 
 	f(lock)
 }
 
+pub fn read_shopts<T, F: FnOnce(RwLockReadGuard<ShOpts>) -> T>(f: F) -> T {
+	let lock = SHOPTS.read().unwrap();
+	f(lock)
+}
+
+pub fn write_shopts<T, F: FnOnce(&mut RwLockWriteGuard<ShOpts>) -> T>(f: F) -> T {
+	let lock = &mut SHOPTS.write().unwrap();
+	f(lock)
+}
+
+/// This function is used internally and ideally never sees user input
+///
+/// It will panic if you give it an invalid path.
+pub fn get_shopt(path: &str) -> String {
+	read_shopts(|s| s.get(path)).unwrap().unwrap()
+}
+
 pub fn get_status() -> i32 {
 	read_vars(|v| v.get_param('?')).parse::<i32>().unwrap()
 }
