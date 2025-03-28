@@ -13,80 +13,13 @@ pub mod shopt;
 #[cfg(test)]
 pub mod tests;
 
-use std::collections::HashSet;
-
-use crate::expand::expand_aliases;
-use libsh::error::ShResult;
-use parse::{execute::Dispatcher, ParsedSrc};
-use signal::sig_setup;
-use state::{read_logic, source_rc, write_meta};
-use termios::{LocalFlags, Termios};
+use crate::libsh::sys::{save_termios, set_termios};
+use crate::parse::execute::exec_input;
+use crate::signal::sig_setup;
+use crate::state::source_rc;
 use crate::prelude::*;
 
-/// The previous state of the terminal options.
-///
-/// This variable stores the terminal settings at the start of the program and restores them when the program exits.
-/// It is initialized exactly once at the start of the program and accessed exactly once at the end of the program.
-/// It will not be mutated or accessed under any other circumstances.
-///
-/// This ended up being necessary because wrapping Termios in a thread-safe way was unreasonably tricky.
-///
-/// The possible states of this variable are:
-/// - `None`: The terminal options have not been set yet (before initialization).
-/// - `Some(None)`: There were no terminal options to save (i.e., no terminal input detected).
-/// - `Some(Some(Termios))`: The terminal options (as `Termios`) have been saved.
-///
-/// **Important:** This static variable is mutable and accessed via unsafe code. It is only safe to use because:
-/// - It is set once during program startup and accessed once during program exit.
-/// - It is not mutated or accessed after the initial setup and final read.
-///
-/// **Caution:** Future changes to this code should respect these constraints to ensure safety. Modifying or accessing this variable outside the defined lifecycle could lead to undefined behavior.
-pub(crate) static mut SAVED_TERMIOS: Option<Option<Termios>> = None;
 
-pub fn save_termios() {
-	unsafe {
-		SAVED_TERMIOS = Some(if isatty(std::io::stdin().as_raw_fd()).unwrap() {
-			let mut termios = termios::tcgetattr(std::io::stdin()).unwrap();
-			termios.local_flags &= !LocalFlags::ECHOCTL;
-			termios::tcsetattr(std::io::stdin(), nix::sys::termios::SetArg::TCSANOW, &termios).unwrap();
-			Some(termios)
-		} else {
-			None
-		});
-	}
-}
-#[allow(static_mut_refs)]
-pub unsafe fn get_saved_termios() -> Option<Termios> {
-	// SAVED_TERMIOS should *only ever* be set once and accessed once
-	// Set at the start of the program, and accessed during the exit of the program to reset the termios.
-	// Do not use this variable anywhere else
-	SAVED_TERMIOS.clone().flatten()
-}
-
-/// Set termios to not echo control characters, like ^Z for instance
-fn set_termios() {
-	if isatty(std::io::stdin().as_raw_fd()).unwrap() {
-		let mut termios = termios::tcgetattr(std::io::stdin()).unwrap();
-		termios.local_flags &= !LocalFlags::ECHOCTL;
-		termios::tcsetattr(std::io::stdin(), nix::sys::termios::SetArg::TCSANOW, &termios).unwrap();
-	}
-}
-
-pub fn exec_input(input: String) -> ShResult<()> {
-	write_meta(|m| m.start_timer());
-	let log_tab = read_logic(|l| l.clone());
-	let input = expand_aliases(input, HashSet::new(), &log_tab);
-	let mut parser = ParsedSrc::new(Arc::new(input));
-	if let Err(errors) = parser.parse_src() {
-		for error in errors {
-			eprintln!("{error}");
-		}
-		return Ok(())
-	}
-
-	let mut dispatcher = Dispatcher::new(parser.extract_nodes());
-	dispatcher.begin_dispatch()
-}
 
 fn main() {
 	save_termios();
@@ -97,7 +30,6 @@ fn main() {
 		eprintln!("{e}");
 	}
 
-	const MAX_READLINE_ERRORS: u32 = 5;
 	let mut readline_err_count: u32 = 0;
 
 	loop { // Main loop
@@ -109,7 +41,7 @@ fn main() {
 			Err(e) => {
 				eprintln!("{e}");
 				readline_err_count += 1;
-				if readline_err_count == MAX_READLINE_ERRORS {
+				if readline_err_count == 5 {
 					eprintln!("reached maximum readline error count, exiting");
 					break
 				} else {

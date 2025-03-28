@@ -45,7 +45,11 @@ pub struct Note {
 
 impl Note {
 	pub fn new(main: impl Into<String>) -> Self {
-		Self { main: main.into(), sub_notes: vec![], depth: 0 }
+		Self {
+			main: main.into(),
+			sub_notes: vec![],
+			depth: 0
+		}
 	}
 
 	pub fn with_sub_notes(self, new_sub_notes: Vec<impl Into<String>>) -> Self {
@@ -192,7 +196,7 @@ impl ShErr {
 				let mut indicator_lines = vec![];
 
 				for line in lines {
-					let indicator_line = "^".repeat(line.len()).styled(Style::Red | Style::Bold);
+					let indicator_line = "^".repeat(line.trim().len()).styled(Style::Red | Style::Bold);
 					indicator_lines.push(indicator_line);
 				}
 

@@ -1,7 +1,7 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 
-use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, shopt::shopt, source::source, zoltraak::zoltraak}, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_vars, ShFunc, VarTab}};
+use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, shopt::shopt, source::source, zoltraak::zoltraak}, expand::expand_aliases, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_meta, write_vars, ShFunc, VarTab, LOGIC_TABLE}};
 
 use super::{lex::{Span, Tk, TkFlags, KEYWORDS}, AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParsedSrc, Redir, RedirType};
 
@@ -27,7 +27,9 @@ impl ExecArgs {
 		Ok(Self { cmd, argv, envp })
 	}
 	pub fn get_cmd(argv: &[(String,Span)]) -> (CString,Span) {
-		(CString::new(argv[0].0.as_str()).unwrap(),argv[0].1.clone())
+		let cmd = argv[0].0.as_str();
+		let span = argv[0].1.clone();
+		(CString::new(cmd).unwrap(),span)
 	}
 	pub fn get_argv(argv: Vec<(String,Span)>) -> Vec<CString> {
 		argv.into_iter().map(|s| CString::new(s.0).unwrap()).collect()
@@ -35,6 +37,23 @@ impl ExecArgs {
 	pub fn get_envp() -> Vec<CString> {
 		std::env::vars().map(|v| CString::new(format!("{}={}",v.0,v.1)).unwrap()).collect()
 	}
+}
+
+pub fn exec_input(input: String) -> ShResult<()> {
+	write_meta(|m| m.start_timer());
+	let log_tab = LOGIC_TABLE.read().unwrap();
+	let input = expand_aliases(input, HashSet::new(), &log_tab);
+	mem::drop(log_tab); // Release lock ASAP
+	let mut parser = ParsedSrc::new(Arc::new(input));
+	if let Err(errors) = parser.parse_src() {
+		for error in errors {
+			eprintln!("{error}");
+		}
+		return Ok(())
+	}
+
+	let mut dispatcher = Dispatcher::new(parser.extract_nodes());
+	dispatcher.begin_dispatch()
 }
 
 pub struct Dispatcher {
@@ -430,7 +449,7 @@ impl Dispatcher {
 					let var = var.span.as_str();
 					let val = val.span.as_str();
 					match kind {
-						AssignKind::Eq => std::env::set_var(var, val),
+						AssignKind::Eq => write_vars(|v| v.set_var(var, val, true)),
 						AssignKind::PlusEq => todo!(),
 						AssignKind::MinusEq => todo!(),
 						AssignKind::MultEq => todo!(),

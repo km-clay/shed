@@ -108,6 +108,9 @@ impl Tk {
 			_ => self.span.as_str().to_string()
 		}
 	}
+	pub fn as_str(&self) -> &str {
+		self.span.as_str()
+	}
 	pub fn source(&self) -> Arc<String> {
 		self.span.source.clone()
 	}

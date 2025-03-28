@@ -8,6 +8,8 @@ pub const VAR_SUB: char = '\u{fdd0}';
 pub const DUB_QUOTE: char = '\u{fdd1}';
 /// Single quote '\\'' marker
 pub const SNG_QUOTE: char = '\u{fdd2}';
+/// Tilde sub marker
+pub const TILDE_SUB: char = '\u{fdd3}';
 
 impl Tk {
 	/// Create a new expanded token
@@ -21,6 +23,7 @@ impl Tk {
 		let class = TkRule::Expanded { exp };
 		Ok(Self { class, span, flags, })
 	}
+	/// Perform word splitting
 	pub fn get_words(&self) -> Vec<String> {
 		match &self.class {
 			TkRule::Expanded { exp } => exp.clone(),
@@ -40,6 +43,11 @@ impl Expander {
 	}
 	pub fn expand(&mut self) -> ShResult<Vec<String>> {
 		self.raw = self.expand_raw()?;
+		if let Ok(glob_exp) = expand_glob(&self.raw) {
+			if !glob_exp.is_empty() {
+				self.raw = glob_exp;
+			}
+		}
 		Ok(self.split_words())
 	}
 	pub fn split_words(&mut self) -> Vec<String> {
@@ -76,6 +84,10 @@ impl Expander {
 
 		while let Some(ch) = chars.next() {
 			match ch {
+				TILDE_SUB => {
+					let home = env::var("HOME").unwrap_or_default();
+					result.push_str(&home);
+				}
 				VAR_SUB => {
 					while let Some(ch) = chars.next() {
 						match ch {
@@ -130,6 +142,19 @@ impl Expander {
 	}
 }
 
+pub fn expand_glob(raw: &str) -> ShResult<String> {
+	let mut words = vec![];
+
+	for entry in glob::glob(raw)
+		.map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid glob pattern"))? {
+		let entry = entry
+			.map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid filename found in glob"))?;
+
+		words.push(entry.to_str().unwrap().to_string())
+	}
+	Ok(words.join(" "))
+}
+
 /// Get the command output of a given command input as a String
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
 	flog!(DEBUG, "in expand_cmd_sub");
@@ -173,9 +198,14 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
 pub fn unescape_str(raw: &str) -> String {
 	let mut chars = raw.chars();
 	let mut result = String::new();
+	let mut first_char = true;
+
 
 	while let Some(ch) = chars.next() {
 		match ch {
+			'~' if first_char => {
+				result.push(TILDE_SUB)
+			}
 			'\\' => {
 				if let Some(next_ch) = chars.next() {
 					result.push(next_ch)
@@ -215,6 +245,7 @@ pub fn unescape_str(raw: &str) -> String {
 			'$' => result.push(VAR_SUB),
 			_ => result.push(ch)
 		}
+		first_char = false;
 	}
 	result
 }
@@ -602,6 +633,8 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 }
 
 /// Expand aliases in the given input string
+///
+/// Recursively calls itself until all aliases are expanded
 pub fn expand_aliases(input: String, mut already_expanded: HashSet<String>, log_tab: &LogTab) -> String {
 	let mut result = input.clone();
 	let tokens: Vec<_> = LexStream::new(Arc::new(input), LexFlags::empty()).collect();

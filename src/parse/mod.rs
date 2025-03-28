@@ -596,10 +596,7 @@ impl ParseStream {
 		}
 		node_tks.push(self.next_tk().unwrap());
 
-		let Some(pat_tk) = self.next_tk() else {
-			self.panic_mode(&mut node_tks);
-			return Err(
-				parse_err_full(
+		let pat_err = parse_err_full(
 					"Expected a pattern after 'case' keyword", &node_tks.get_span().unwrap()
 				)
 				.with_note(
@@ -607,9 +604,16 @@ impl ParseStream {
 						.with_sub_notes(vec![
 							"This includes variables like '$foo' or command substitutions like '$(echo foo)'"
 						])
-					)
-			);
+					);
+
+		let Some(pat_tk) = self.next_tk() else {
+			self.panic_mode(&mut node_tks);
+			return Err(pat_err);
 		};
+
+		if pat_tk.span.as_str() == "in" {
+			return Err(pat_err)
+		}
 
 		pattern = pat_tk;
 		node_tks.push(pattern.clone());
