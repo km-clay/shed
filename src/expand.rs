@@ -1,6 +1,12 @@
 use std::collections::HashSet;
 
-use crate::{exec_input, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, Redir, RedirType}, prelude::*, procio::{IoBuf, IoFrame, IoMode}, state::{read_vars, write_meta, LogTab}};
+use crate::state::{read_vars, write_meta, LogTab};
+use crate::procio::{IoBuf, IoFrame, IoMode};
+use crate::prelude::*;
+use crate::parse::{Redir, RedirType};
+use crate::parse::execute::exec_input;
+use crate::parse::lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Tk, TkFlags, TkRule};
+use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 
 /// Variable substitution marker
 pub const VAR_SUB: char = '\u{fdd0}';
@@ -10,6 +16,8 @@ pub const DUB_QUOTE: char = '\u{fdd1}';
 pub const SNG_QUOTE: char = '\u{fdd2}';
 /// Tilde sub marker
 pub const TILDE_SUB: char = '\u{fdd3}';
+/// Subshell marker
+pub const SUBSH: char = '\u{fdd4}';
 
 impl Tk {
 	/// Create a new expanded token
@@ -18,7 +26,9 @@ impl Tk {
 	/// tokens: A vector of raw tokens lexed from the expansion result
 	/// span: The span of the original token that is being expanded
 	/// flags: some TkFlags
-	pub fn expand(self, span: Span, flags: TkFlags) -> ShResult<Self> {
+	pub fn expand(self) -> ShResult<Self> {
+		let flags = self.flags;
+		let span = self.span.clone();
 		let exp = Expander::new(self).expand()?;
 		let class = TkRule::Expanded { exp };
 		Ok(Self { class, span, flags, })
@@ -57,7 +67,9 @@ impl Expander {
 
 		'outer: while let Some(ch) = chars.next() {
 			match ch {
-				DUB_QUOTE | SNG_QUOTE => {
+				DUB_QUOTE |
+				SNG_QUOTE |
+				SUBSH => {
 					while let Some(q_ch) = chars.next() {
 						match q_ch {
 							_ if q_ch == ch => continue 'outer, // Isn't rust cool
@@ -119,7 +131,7 @@ impl Expander {
 								var_name.clear();
 								break
 							}
-							_ if is_hard_sep(ch) || ch == DUB_QUOTE => {
+							_ if is_hard_sep(ch) || ch == DUB_QUOTE || ch == SUBSH => {
 								let var_val = read_vars(|v| v.get_var(&var_name));
 								result.push_str(&var_val);
 								result.push(ch);
@@ -209,6 +221,35 @@ pub fn unescape_str(raw: &str) -> String {
 			'\\' => {
 				if let Some(next_ch) = chars.next() {
 					result.push(next_ch)
+				}
+			}
+			'(' => {
+				result.push(SUBSH);
+				let mut paren_count = 1;
+				while let Some(subsh_ch) = chars.next() {
+					match subsh_ch {
+						'\\' => {
+							result.push(subsh_ch);
+							if let Some(next_ch) = chars.next() {
+								result.push(next_ch)
+							}
+						}
+						'$' => result.push(VAR_SUB),
+						'(' => {
+							paren_count += 1;
+							result.push(subsh_ch)
+						}
+						')' => {
+							paren_count -= 1;
+							if paren_count == 0 {
+								result.push(SUBSH);
+							} else {
+								result.push(subsh_ch)
+							}
+							break
+						}
+						_ => result.push(subsh_ch)
+					}
 				}
 			}
 			'"' => {

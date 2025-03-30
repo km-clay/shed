@@ -39,18 +39,14 @@ impl ParsedSrc {
 	}
 	pub fn parse_src(&mut self) -> Result<(),Vec<ShErr>> {
 		let mut tokens = vec![];
-		let mut errors = vec![];
 		for lex_result in LexStream::new(self.src.clone(), LexFlags::empty()) {
 			match lex_result {
 				Ok(token) => tokens.push(token),
-				Err(error) => errors.push(error)
+				Err(error) => return Err(vec![error])
 			}
 		}
 
-		if !errors.is_empty() {
-			return Err(errors)
-		}
-
+		let mut errors = vec![];
 		let mut nodes = vec![];
 		for parse_result in ParseStream::new(tokens) {
 			flog!(DEBUG, parse_result);
@@ -59,7 +55,6 @@ impl ParsedSrc {
 				Err(error) => errors.push(error)
 			}
 		}
-		flog!(DEBUG, errors);
 
 		if !errors.is_empty() {
 			return Err(errors)
@@ -1108,7 +1103,7 @@ impl Iterator for ParseStream {
 		flog!(DEBUG, "parsing");
 		flog!(DEBUG, self.tokens);
 		// Empty token vector or only SOI/EOI tokens, nothing to do
-		if self.tokens.is_empty() || self.tokens.len() == 2 {
+		if self.tokens.is_empty() || self.tokens.len() == 1 {
 			return None
 		}
 		while let Some(tk) = self.tokens.first() {

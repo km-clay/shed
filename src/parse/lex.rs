@@ -401,6 +401,7 @@ impl LexStream {
 						}
 					}
 					if !paren_stack.is_empty() {
+						self.cursor = pos;
 						return Err(
 							ShErr::full(
 								ShErrKind::ParseErr,

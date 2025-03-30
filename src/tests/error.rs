@@ -11,6 +11,58 @@ fn cmd_not_found() {
 }
 
 #[test]
+fn unclosed_subsh() {
+	let input = "(foo";
+	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).skip(1).next().unwrap();
+	let Err(err) = token else {
+		panic!("{:?}",token);
+	};
+
+	let err_fmt = format!("{err}");
+	insta::assert_snapshot!(err_fmt)
+}
+
+#[test]
+fn unclosed_dquote() {
+	let input = "\"foo bar";
+	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).skip(1).next().unwrap();
+	let Err(err) = token else {
+		panic!();
+	};
+
+	let err_fmt = format!("{err}");
+	insta::assert_snapshot!(err_fmt)
+}
+
+#[test]
+fn unclosed_squote() {
+	let input = "'foo bar";
+	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).skip(1).next().unwrap();
+	let Err(err) = token else {
+		panic!();
+	};
+
+	let err_fmt = format!("{err}");
+	insta::assert_snapshot!(err_fmt)
+}
+
+#[test]
+fn unclosed_brc_grp() {
+	let input = "{ foo bar";
+	let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
+		.map(|tk| tk.unwrap())
+		.collect::<Vec<_>>();
+
+	let node = ParseStream::new(tokens).next().unwrap();
+	let Err(err) = node else {
+		panic!();
+	};
+
+	let err_fmt = format!("{err}");
+	insta::assert_snapshot!(err_fmt)
+}
+
+#[test]
 fn if_no_fi() {
 	let input = "if foo; then bar;";
 	let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())

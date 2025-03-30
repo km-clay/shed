@@ -184,6 +184,16 @@ impl VarTab {
 			self.bpush_arg(arg);
 		}
 	}
+	pub fn update_exports(&mut self) {
+		for var_name in self.vars.keys() {
+			let var = self.vars.get(var_name).unwrap();
+			if var.export {
+				env::set_var(var_name, &var.value);
+			} else {
+				env::set_var(var_name, "");
+			}
+		}
+	}
 	pub fn sh_argv(&self) -> &VecDeque<String> {
 		&self.sh_argv
 	}
@@ -377,6 +387,25 @@ pub fn get_status() -> i32 {
 #[track_caller]
 pub fn set_status(code: i32) {
 	write_vars(|v| v.set_param('?', &code.to_string()))
+}
+
+/// Save the current state of the logic and variable table, and the working directory path
+pub fn get_snapshots() -> (LogTab, VarTab, String) {
+	(
+		read_logic(|l| l.clone()),
+		read_vars(|v| v.clone()),
+		env::var("PWD").unwrap_or_default()
+	)
+}
+
+pub fn restore_snapshot(snapshot: (LogTab, VarTab, String)) {
+	write_logic(|l| **l = snapshot.0);
+	write_vars(|v| {
+		**v = snapshot.1;
+		v.update_exports();
+	});
+	env::set_current_dir(&snapshot.2).unwrap();
+	env::set_var("PWD", &snapshot.2);
 }
 
 pub fn source_rc() -> ShResult<()> {

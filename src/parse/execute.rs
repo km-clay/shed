@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
 
-use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, shopt::shopt, source::source, zoltraak::zoltraak}, expand::expand_aliases, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, read_logic, read_vars, write_logic, write_meta, write_vars, ShFunc, VarTab, LOGIC_TABLE}};
+use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, shopt::shopt, source::source, zoltraak::zoltraak}, expand::expand_aliases, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, get_snapshots, read_logic, read_vars, restore_snapshot, write_logic, write_meta, write_vars, ShFunc, VarTab, LOGIC_TABLE}};
 
 use super::{lex::{Span, Tk, TkFlags, KEYWORDS}, AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParsedSrc, Redir, RedirType};
 
@@ -97,6 +97,8 @@ impl Dispatcher {
 			self.exec_builtin(node)
 		} else if is_func(node.get_command().cloned()) {
 			self.exec_func(node)
+		} else if is_subsh(node.get_command().cloned()) {
+			self.exec_subsh(node)
 		} else {
 			self.exec_cmd(node)
 		}
@@ -151,7 +153,29 @@ impl Dispatcher {
 		write_logic(|l| l.insert_func(name, func)); // Store the AST
 		Ok(())
 	}
-	pub fn exec_func(&mut self, func: Node) -> ShResult<()> {
+	fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
+		let NdRule::Command { assignments, argv } = subsh.class else {
+			unreachable!()
+		};
+
+		self.set_assignments(assignments, AssignBehavior::Export);
+		self.io_stack.append_to_frame(subsh.redirs);
+		let mut argv = prepare_argv(argv)?;
+
+		let subsh = argv.remove(0);
+		let subsh_body = subsh.0.to_string();
+		flog!(DEBUG, subsh_body);
+		let snapshot = get_snapshots();
+
+		if let Err(e) = exec_input(subsh_body) {
+			restore_snapshot(snapshot);
+			return Err(e.into())
+		}
+
+		restore_snapshot(snapshot);
+		Ok(())
+	}
+	fn exec_func(&mut self, func: Node) -> ShResult<()> {
 		let blame = func.get_span().clone();
 		let NdRule::Command { assignments, mut argv } = func.class else {
 			unreachable!()
@@ -163,7 +187,7 @@ impl Dispatcher {
 
 		let func_name = argv.remove(0).span.as_str().to_string();
 		if let Some(func) = read_logic(|l| l.get_func(&func_name)) {
-			let scope_snapshot = read_vars(|v| v.clone());
+			let snapshot = get_snapshots();
 			// Set up the inner scope
 			write_vars(|v| {
 				**v = VarTab::new();
@@ -174,19 +198,21 @@ impl Dispatcher {
 			});
 
 			if let Err(e) = self.exec_brc_grp((*func).clone()) {
-				write_vars(|v| **v = scope_snapshot);
+				restore_snapshot(snapshot);
 				match e.kind() {
 					ShErrKind::FuncReturn(code) => {
 						state::set_status(*code);
 						return Ok(())
 					}
-					_ => return Err(e.into())
+					_ => return {
+						Err(e.into())
+					}
 				}
 
 			}
 
 			// Return to the outer scope
-			write_vars(|v| **v = scope_snapshot);
+			restore_snapshot(snapshot);
 			Ok(())
 		} else {
 			Err(
@@ -198,7 +224,7 @@ impl Dispatcher {
 			)
 		}
 	}
-	pub fn exec_brc_grp(&mut self, brc_grp: Node) -> ShResult<()> {
+	fn exec_brc_grp(&mut self, brc_grp: Node) -> ShResult<()> {
 		let NdRule::BraceGrp { body } = brc_grp.class else {
 			unreachable!()
 		};
@@ -213,7 +239,7 @@ impl Dispatcher {
 
 		Ok(())
 	}
-	pub fn exec_case(&mut self, case_stmt: Node) -> ShResult<()> {
+	fn exec_case(&mut self, case_stmt: Node) -> ShResult<()> {
 		let NdRule::CaseNode { pattern, case_blocks } = case_stmt.class else {
 			unreachable!()
 		};
@@ -221,7 +247,7 @@ impl Dispatcher {
 		self.io_stack.append_to_frame(case_stmt.redirs);
 
 		flog!(DEBUG,pattern.span.as_str());
-		let exp_pattern = pattern.clone().expand(pattern.span.clone(), pattern.flags.clone())?;
+		let exp_pattern = pattern.clone().expand()?;
 		let pattern_raw = exp_pattern
 			.get_words()
 			.first()
@@ -246,7 +272,7 @@ impl Dispatcher {
 
 		Ok(())
 	}
-	pub fn exec_loop(&mut self, loop_stmt: Node) -> ShResult<()> {
+	fn exec_loop(&mut self, loop_stmt: Node) -> ShResult<()> {
 		let NdRule::LoopNode { kind, cond_node } = loop_stmt.class else {
 			unreachable!();
 		};
@@ -297,7 +323,7 @@ impl Dispatcher {
 
 		Ok(())
 	}
-	pub fn exec_if(&mut self, if_stmt: Node) -> ShResult<()> {
+	fn exec_if(&mut self, if_stmt: Node) -> ShResult<()> {
 		let NdRule::IfNode { cond_nodes, else_block } = if_stmt.class else {
 			unreachable!();
 		};
@@ -337,7 +363,7 @@ impl Dispatcher {
 
 		Ok(())
 	}
-	pub fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
+	fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
 		let NdRule::Pipeline { cmds, pipe_err: _ } = pipeline.class else {
 			unreachable!()
 		};
@@ -362,7 +388,7 @@ impl Dispatcher {
 		dispatch_job(job, is_bg)?;
 		Ok(())
 	}
-	pub fn exec_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
+	fn exec_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
 		let NdRule::Command { ref mut assignments, argv: _ } = &mut cmd.class else {
 			unreachable!()
 		};
@@ -402,7 +428,7 @@ impl Dispatcher {
 		}
 		Ok(())
 	}
-	pub fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
+	fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
 		let NdRule::Command { assignments, argv } = cmd.class else {
 			unreachable!()
 		};
@@ -438,7 +464,7 @@ impl Dispatcher {
 
 		Ok(())
 	}
-	pub fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> Vec<String> {
+	fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> Vec<String> {
 		let mut new_env_vars = vec![];
 		match behavior {
 			AssignBehavior::Export => {
@@ -483,9 +509,8 @@ pub fn prepare_argv(argv: Vec<Tk>) -> ShResult<Vec<(String,Span)>> {
 	let mut args = vec![];
 
 	for arg in argv {
-		let flags = arg.flags;
 		let span = arg.span.clone();
-		let expanded = arg.expand(span.clone(), flags)?;
+		let expanded = arg.expand()?;
 		for exp in expanded.get_words() {
 			args.push((exp,span.clone()))
 		}
@@ -601,4 +626,8 @@ pub fn is_func(tk: Option<Tk>) -> bool {
 		return false
 	};
 	read_logic(|l| l.get_func(&tk.to_string())).is_some()
+}
+
+pub fn is_subsh(tk: Option<Tk>) -> bool {
+	tk.is_some_and(|tk| tk.flags.contains(TkFlags::IS_SUBSH))
 }

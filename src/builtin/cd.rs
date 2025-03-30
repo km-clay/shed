@@ -9,7 +9,7 @@ pub fn cd(node: Node, job: &mut JobBldr) -> ShResult<()> {
 
 	let (argv,_) = setup_builtin(argv,job,None)?;
 
-	let new_dir = if let Some((arg,_)) = argv.into_iter().skip(1).next() {
+	let new_dir = if let Some((arg,_)) = argv.into_iter().next() {
 		PathBuf::from(arg)
 	} else {
 		PathBuf::from(env::var("HOME").unwrap())

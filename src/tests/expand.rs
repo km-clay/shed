@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn simple_expansion() {
 	let varsub = "$foo";
-	write_vars(|v| v.set_var("foo", "this is the value of the variable".into()));
+	write_vars(|v| v.set_var("foo", "this is the value of the variable".into(), false));
 
 	let mut tokens: Vec<Tk> = LexStream::new(Arc::new(varsub.to_string()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
@@ -14,7 +14,7 @@ fn simple_expansion() {
 	let var_tk = tokens.pop().unwrap();
 
 	let var_span = var_tk.span.clone();
-	let exp_tk = var_tk.expand(var_span, TkFlags::empty()).unwrap();
+	let exp_tk = var_tk.expand().unwrap();
 	write_vars(|v| v.vars_mut().clear());
 	insta::assert_debug_snapshot!(exp_tk.get_words())
 }
