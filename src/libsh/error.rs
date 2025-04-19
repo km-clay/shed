@@ -248,8 +248,7 @@ impl Display for ShErr {
 					"{padding}{arrow} [{line_fmt};{col_fmt}]",
 				)?;
 
-				let mut bar = format!("{padding}|");
-				bar = bar.styled(Style::Cyan | Style::Bold);
+				let bar = format!("{padding}|").styled(Style::Cyan | Style::Bold);
 				writeln!(f,"{bar}")?;
 
 				let mut first_ind_ln = true;

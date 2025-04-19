@@ -30,6 +30,7 @@ pub const OPENERS: [&'static str;6] = [
 	"case"
 ];
 
+/// Span::new(10..20)
 #[derive(Clone,PartialEq,Default,Debug)]
 pub struct Span {
 	range: Range<usize>,
