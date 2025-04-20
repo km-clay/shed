@@ -25,6 +25,16 @@ pub fn alias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
 		write(stdout, alias_output.as_bytes())?; // Write it
 	} else {
 		for (arg,span) in argv {
+			if arg == "command" || arg == "builtin" {
+				return Err(
+					ShErr::full(
+						ShErrKind::ExecFail,
+						format!("alias: Cannot assign alias to reserved name '{arg}'"),
+						span
+					)
+				)
+			}
+
 			let Some((name,body)) = arg.split_once('=') else {
 				return Err(
 					ShErr::full(

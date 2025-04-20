@@ -14,7 +14,7 @@ pub mod flowctl;
 pub mod zoltraak;
 pub mod shopt;
 
-pub const BUILTINS: [&str;17] = [
+pub const BUILTINS: [&str;19] = [
 	"echo",
 	"cd",
 	"export",
@@ -31,7 +31,9 @@ pub const BUILTINS: [&str;17] = [
 	"continue",
 	"exit",
 	"zoltraak",
-	"shopt"
+	"shopt",
+	"builtin",
+	"command"
 ];
 
 /// Sets up a builtin command

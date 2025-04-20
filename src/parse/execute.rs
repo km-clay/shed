@@ -345,9 +345,9 @@ impl Dispatcher {
 				write_vars(|v| v.set_var(&var.to_string(), &val.to_string(), false));
 			}
 
-			self.io_stack.push(body_frame.clone());
 
 			for node in body.clone() {
+				self.io_stack.push(body_frame.clone());
 				if let Err(e) = self.dispatch_node(node) {
 					match e.kind() {
 						ShErrKind::LoopBreak(code) => {
@@ -433,13 +433,21 @@ impl Dispatcher {
 		Ok(())
 	}
 	fn exec_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
-		let NdRule::Command { ref mut assignments, argv: _ } = &mut cmd.class else {
+		let NdRule::Command { ref mut assignments, ref mut argv } = &mut cmd.class else {
 			unreachable!()
 		};
 		let env_vars_to_unset = self.set_assignments(mem::take(assignments), AssignBehavior::Export);
-		let cmd_raw = cmd.get_command().unwrap();
+		let cmd_raw = argv.first().unwrap();
 		let curr_job_mut = self.job_stack.curr_job_mut().unwrap();
 		let io_stack_mut = &mut self.io_stack;
+
+		if cmd_raw.as_str() == "builtin" || cmd_raw.as_str() == "command" {
+			*argv = argv.iter_mut()
+				.skip(1)
+				.map(|tk| tk.clone())
+				.collect::<Vec<Tk>>();
+			return self.dispatch_cmd(cmd)
+		}
 
 		flog!(TRACE, "doing builtin");
 		let result = match cmd_raw.span.as_str() {
