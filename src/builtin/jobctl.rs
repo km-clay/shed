@@ -95,7 +95,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 					ShErr::full(
 						ShErrKind::InternalErr,
 						"Found a job but no table id in parse_job_id()",
-						blame.into()
+						blame
 					)
 				)
 			}
@@ -121,7 +121,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 				ShErr::full(
 					ShErrKind::InternalErr,
 					"Found a job but no table id in parse_job_id()",
-					blame.into()
+					blame
 				)
 			)
 		}
@@ -130,7 +130,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 			ShErr::full(
 				ShErrKind::SyntaxErr,
 				format!("Invalid fd arg: {}", arg),
-				blame.into()
+				blame
 			)
 		)
 	}
@@ -151,12 +151,12 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 				ShErr::full(
 					ShErrKind::SyntaxErr,
 					"Invalid flag in jobs call",
-					span.into()
+					span
 				)
 			)
 		}
 		chars.next();
-		while let Some(ch) = chars.next() {
+		for ch in chars {
 			let flag = match ch {
 				'l' => JobCmdFlags::LONG,
 				'p' => JobCmdFlags::PIDS,
@@ -167,7 +167,7 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 					ShErr::full(
 						ShErrKind::SyntaxErr,
 						"Invalid flag in jobs call",
-						span.into()
+						span
 					)
 				)
 

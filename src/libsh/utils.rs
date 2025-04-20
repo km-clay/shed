@@ -71,16 +71,12 @@ impl CharDequeUtils for VecDeque<char> {
 impl TkVecUtils<Tk> for Vec<Tk> {
 	fn get_span(&self) -> Option<Span> {
 		if let Some(first_tk) = self.first() {
-			if let Some(last_tk) = self.last() {
-				Some(
-					Span::new(
-						first_tk.span.start..last_tk.span.end,
-						first_tk.source()
-					)
+			self.last().map(|last_tk| {
+				Span::new(
+					first_tk.span.start..last_tk.span.end,
+					first_tk.source()
 				)
-			} else {
-				None
-			}
+			})
 		} else {
 			None
 		}

@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn simple_expansion() {
 	let varsub = "$foo";
-	write_vars(|v| v.set_var("foo", "this is the value of the variable".into(), false));
+	write_vars(|v| v.set_var("foo", "this is the value of the variable", false));
 
 	let mut tokens: Vec<Tk> = LexStream::new(Arc::new(varsub.to_string()), LexFlags::empty())
 		.map(|tk| tk.unwrap())
@@ -13,7 +13,6 @@ fn simple_expansion() {
 		.collect();
 	let var_tk = tokens.pop().unwrap();
 
-	let var_span = var_tk.span.clone();
 	let exp_tk = var_tk.expand().unwrap();
 	write_vars(|v| v.vars_mut().clear());
 	insta::assert_debug_snapshot!(exp_tk.get_words())
@@ -33,7 +32,7 @@ fn expand_alias_simple() {
 		l.insert_alias("foo", "echo foo");
 		let input = String::from("foo");
 
-		let result = expand_aliases(input, HashSet::new(), &l);
+		let result = expand_aliases(input, HashSet::new(), l);
 		assert_eq!(result.as_str(),"echo foo");
 		l.clear_aliases();
 	});
@@ -45,7 +44,7 @@ fn expand_alias_in_if() {
 		l.insert_alias("foo", "echo foo");
 		let input = String::from("if foo; then echo bar; fi");
 
-		let result = expand_aliases(input, HashSet::new(), &l);
+		let result = expand_aliases(input, HashSet::new(), l);
 		assert_eq!(result.as_str(),"if echo foo; then echo bar; fi");
 		l.clear_aliases();
 	});
@@ -69,7 +68,7 @@ fn expand_alias_multiline() {
 			fi
 		");
 
-		let result = expand_aliases(input, HashSet::new(), &l);
+		let result = expand_aliases(input, HashSet::new(), l);
 		assert_eq!(result,expected)
 	});
 }
@@ -82,7 +81,7 @@ fn expand_multiple_aliases() {
 		l.insert_alias("biz", "echo biz");
 		let input = String::from("foo; bar; biz");
 
-		let result = expand_aliases(input, HashSet::new(), &l);
+		let result = expand_aliases(input, HashSet::new(), l);
 		assert_eq!(result.as_str(),"echo foo; echo bar; echo biz");
 	});
 }
@@ -93,7 +92,7 @@ fn alias_in_arg_position() {
 		l.insert_alias("foo", "echo foo");
 		let input = String::from("echo foo");
 
-		let result = expand_aliases(input.clone(), HashSet::new(), &l);
+		let result = expand_aliases(input.clone(), HashSet::new(), l);
 		assert_eq!(input,result);
 		l.clear_aliases();
 	});
@@ -106,7 +105,7 @@ fn expand_recursive_alias() {
 		l.insert_alias("bar", "foo bar");
 
 		let input = String::from("bar");
-		let result = expand_aliases(input, HashSet::new(), &l);
+		let result = expand_aliases(input, HashSet::new(), l);
 		assert_eq!(result.as_str(),"echo foo bar");
 	});
 }
@@ -117,7 +116,7 @@ fn test_infinite_recursive_alias() {
 		l.insert_alias("foo", "foo bar");
 
 		let input = String::from("foo");
-		let result = expand_aliases(input, HashSet::new(), &l);
+		let result = expand_aliases(input, HashSet::new(), l);
 		assert_eq!(result.as_str(),"foo bar");
 		l.clear_aliases();
 	});

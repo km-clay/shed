@@ -4,7 +4,7 @@ use crate::{getopt::{get_opts_from_tokens, Opt, OptSet}, jobs::JobBldr, libsh::e
 
 use super::setup_builtin;
 
-pub const ZOLTRAAK_OPTS: LazyLock<OptSet> = LazyLock::new(|| {
+pub static ZOLTRAAK_OPTS: LazyLock<OptSet> = LazyLock::new(|| {
 	[
 		Opt::Long("dry-run".into()),
 		Opt::Long("confirm".into()),
@@ -90,7 +90,7 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
 		}
 		if let Err(e) = annihilate(&arg, flags).blame(span) {
 			io_frame.restore()?;
-			return Err(e.into());
+			return Err(e);
 		}
 	}
 

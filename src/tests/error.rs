@@ -13,7 +13,7 @@ fn cmd_not_found() {
 #[test]
 fn unclosed_subsh() {
 	let input = "(foo";
-	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).skip(1).next().unwrap();
+	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).nth(1).unwrap();
 	let Err(err) = token else {
 		panic!("{:?}",token);
 	};
@@ -25,7 +25,7 @@ fn unclosed_subsh() {
 #[test]
 fn unclosed_dquote() {
 	let input = "\"foo bar";
-	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).skip(1).next().unwrap();
+	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).nth(1).unwrap();
 	let Err(err) = token else {
 		panic!();
 	};
@@ -37,7 +37,7 @@ fn unclosed_dquote() {
 #[test]
 fn unclosed_squote() {
 	let input = "'foo bar";
-	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).skip(1).next().unwrap();
+	let token = LexStream::new(Arc::new(input.into()), LexFlags::empty()).nth(1).unwrap();
 	let Err(err) = token else {
 		panic!();
 	};

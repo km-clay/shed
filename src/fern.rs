@@ -1,3 +1,8 @@
+#![allow(
+	clippy::derivable_impls,
+	clippy::tabs_in_doc_comments,
+	clippy::while_let_on_iterator
+)]
 pub mod prelude;
 pub mod libsh;
 pub mod prompt;

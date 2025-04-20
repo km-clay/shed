@@ -64,7 +64,7 @@ pub struct ChildProc {
 	stat: WtStat
 }
 
-impl<'a> ChildProc {
+impl ChildProc {
 	pub fn new(pid: Pid, command: Option<&str>, pgid: Option<Pid>) -> ShResult<Self> {
 		let command = command.map(|str| str.to_string());
 		let stat = if kill(pid,None).is_ok() {
@@ -86,7 +86,7 @@ impl<'a> ChildProc {
 		self.pgid
 	}
 	pub fn cmd(&self) -> Option<&str> {
-		self.command.as_ref().map(|cmd| cmd.as_str())
+		self.command.as_deref()
 	}
 	pub fn stat(&self) -> WtStat {
 		self.stat
@@ -120,6 +120,7 @@ impl<'a> ChildProc {
 	}
 }
 
+#[derive(Default,Debug)]
 pub struct JobTab {
 	fg: Option<Job>,
 	order: Vec<usize>,
@@ -129,7 +130,7 @@ pub struct JobTab {
 
 impl JobTab {
 	pub fn new() -> Self {
-		Self { fg: None, order: vec![], new_updates: vec![], jobs: vec![] }
+		Self::default()
 	}
 	pub fn take_fg(&mut self) -> Option<Job> {
 		self.fg.take()
@@ -168,7 +169,7 @@ impl JobTab {
 		job.set_tabid(tab_pos);
 		self.order.push(tab_pos);
 		if !silent {
-			write(borrow_fd(1),format!("{}", job.display(&self.order, JobCmdFlags::INIT)).as_bytes())?;
+			write(borrow_fd(1),job.display(&self.order, JobCmdFlags::INIT).as_bytes())?;
 		}
 		if tab_pos == self.jobs.len() {
 			self.jobs.push(Some(job))
@@ -246,7 +247,7 @@ impl JobTab {
 	pub fn get_fg_mut(&mut self) -> Option<&mut Job> {
 		self.fg.as_mut()
 	}
-	pub fn new_fg<'a>(&mut self, job: Job) -> ShResult<Vec<WtStat>> {
+	pub fn new_fg(&mut self, job: Job) -> ShResult<Vec<WtStat>> {
 		let pgid = job.pgid();
 		self.fg = Some(job);
 		attach_tty(pgid)?;
@@ -375,11 +376,12 @@ impl JobBldr {
 }
 
 /// A wrapper around Vec<JobBldr> with some job-specific methods
+#[derive(Default,Debug)]
 pub struct JobStack(Vec<JobBldr>);
 
 impl JobStack {
 	pub fn new() -> Self {
-		Self(vec![])
+		Self::default()
 	}
 	pub fn new_job(&mut self) {
 		self.0.push(JobBldr::new())
@@ -388,8 +390,7 @@ impl JobStack {
 		self.0.last_mut()
 	}
 	pub fn finalize_job(&mut self) -> Option<Job> {
-		let job = self.0.pop().map(|bldr| bldr.build());
-		job
+		self.0.pop().map(|bldr| bldr.build())
 	}
 }
 
@@ -453,7 +454,7 @@ impl Job {
 		self.set_stats(stat);
 		Ok(killpg(self.pgid, sig)?)
 	}
-	pub fn wait_pgrp<'a>(&mut self) -> ShResult<Vec<WtStat>> {
+	pub fn wait_pgrp(&mut self) -> ShResult<Vec<WtStat>> {
 		let mut stats = vec![];
 		flog!(TRACE, "waiting on children");
 		flog!(TRACE, self.children);
@@ -675,14 +676,14 @@ pub fn attach_tty(pgid: Pid) -> ShResult<()> {
 	new_mask.add(Signal::SIGTTIN);
 	new_mask.add(Signal::SIGTTOU);
 
-	pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&mut new_mask), Some(&mut mask_bkup))?;
+	pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&new_mask), Some(&mut mask_bkup))?;
 
 	let result = tcsetpgrp(borrow_fd(0), pgid);
 
-	pthread_sigmask(SigmaskHow::SIG_SETMASK, Some(&mut mask_bkup), Some(&mut new_mask))?;
+	pthread_sigmask(SigmaskHow::SIG_SETMASK, Some(&mask_bkup), Some(&mut new_mask))?;
 
 	match result {
-		Ok(_) => return Ok(()),
+		Ok(_) => Ok(()),
 		Err(e) => {
 			flog!(ERROR, "error while switching term control: {}",e);
 			tcsetpgrp(borrow_fd(0), getpgrp())?;

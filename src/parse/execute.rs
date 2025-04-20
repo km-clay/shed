@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
 
-use crate::{builtin::{alias::alias, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, shopt::shopt, source::source, zoltraak::zoltraak}, expand::expand_aliases, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, get_snapshots, read_logic, read_vars, restore_snapshot, write_logic, write_meta, write_vars, ShFunc, VarTab, LOGIC_TABLE}};
+use crate::{builtin::{alias::{alias, unalias}, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, shopt::shopt, source::source, zoltraak::zoltraak}, expand::expand_aliases, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, get_snapshots, read_logic, restore_snapshot, write_logic, write_meta, write_vars, ShFunc, VarTab, LOGIC_TABLE}};
 
 use super::{lex::{Span, Tk, TkFlags, KEYWORDS}, AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParsedSrc, Redir, RedirType};
 
@@ -76,11 +76,13 @@ impl Dispatcher {
 		Ok(())
 	}
 	pub fn dispatch_node(&mut self, node: Node) -> ShResult<()> {
+		flog!(DEBUG, node.class);
 		match node.class {
 			NdRule::Conjunction {..} => self.exec_conjunction(node)?,
 			NdRule::Pipeline {..} => self.exec_pipeline(node)?,
 			NdRule::IfNode {..} => self.exec_if(node)?,
 			NdRule::LoopNode {..} => self.exec_loop(node)?,
+			NdRule::ForNode {..} => self.exec_for(node)?,
 			NdRule::CaseNode {..} => self.exec_case(node)?,
 			NdRule::BraceGrp {..} => self.exec_brc_grp(node)?,
 			NdRule::FuncDef {..} => self.exec_func_def(node)?,
@@ -169,7 +171,7 @@ impl Dispatcher {
 
 		if let Err(e) = exec_input(subsh_body) {
 			restore_snapshot(snapshot);
-			return Err(e.into())
+			return Err(e)
 		}
 
 		restore_snapshot(snapshot);
@@ -205,7 +207,7 @@ impl Dispatcher {
 						return Ok(())
 					}
 					_ => return {
-						Err(e.into())
+						Err(e)
 					}
 				}
 
@@ -295,7 +297,7 @@ impl Dispatcher {
 
 			if let Err(e) = self.dispatch_node(*cond.clone()) {
 				state::set_status(1);
-				return Err(e.into());
+				return Err(e);
 			}
 
 			let status = state::get_status();
@@ -312,13 +314,55 @@ impl Dispatcher {
 								state::set_status(*code);
 								continue 'outer
 							}
-							_ => return Err(e.into())
+							_ => return Err(e)
 						}
 					}
 				}
 			} else {
 				break
 			}
+		}
+
+		Ok(())
+	}
+	fn exec_for(&mut self, for_stmt: Node) -> ShResult<()> {
+		let NdRule::ForNode { vars, arr, body } = for_stmt.class else {
+			unreachable!();
+		};
+
+		let io_frame = self.io_stack.pop_frame();
+		let (_, mut body_frame) = io_frame.split_frame();
+		let (_, out_redirs) = for_stmt.redirs.split_by_channel();
+		body_frame.extend(out_redirs);
+
+		'outer: for chunk in arr.chunks(vars.len()) {
+			let empty = Tk::default();
+			let chunk_iter = vars.iter().zip(
+				chunk.iter().chain(std::iter::repeat(&empty)) // Or however you define an empty token
+			);
+
+			for (var, val) in chunk_iter {
+				write_vars(|v| v.set_var(&var.to_string(), &val.to_string(), false));
+			}
+
+			self.io_stack.push(body_frame.clone());
+
+			for node in body.clone() {
+				if let Err(e) = self.dispatch_node(node) {
+					match e.kind() {
+						ShErrKind::LoopBreak(code) => {
+							state::set_status(*code);
+							break 'outer
+						}
+						ShErrKind::LoopContinue(code) => {
+							state::set_status(*code);
+							continue 'outer
+						}
+						_ => return Err(e)
+					}
+				}
+			}
+
 		}
 
 		Ok(())
@@ -340,7 +384,7 @@ impl Dispatcher {
 
 			if let Err(e) = self.dispatch_node(*cond) {
 				state::set_status(1);
-				return Err(e.into());
+				return Err(e);
 			}
 
 			match state::get_status() {
@@ -409,6 +453,7 @@ impl Dispatcher {
 			"bg" => continue_job(cmd, curr_job_mut, JobBehavior::Background),
 			"jobs" => jobs(cmd, io_stack_mut, curr_job_mut),
 			"alias" => alias(cmd, io_stack_mut, curr_job_mut),
+			"unalias" => unalias(cmd, io_stack_mut, curr_job_mut),
 			"return" => flowctl(cmd, ShErrKind::FuncReturn(0)),
 			"break" => flowctl(cmd, ShErrKind::LoopBreak(0)),
 			"continue" => flowctl(cmd, ShErrKind::LoopContinue(0)),
@@ -424,7 +469,7 @@ impl Dispatcher {
 
 		if let Err(e) = result {
 			state::set_status(1);
-			return Err(e.into())
+			return Err(e)
 		}
 		Ok(())
 	}
@@ -518,7 +563,7 @@ pub fn prepare_argv(argv: Vec<Tk>) -> ShResult<Vec<(String,Span)>> {
 	Ok(args)
 }
 
-pub fn run_fork<'t,C,P>(
+pub fn run_fork<C,P>(
 	io_frame: IoFrame,
 	exec_args: Option<ExecArgs>,
 	job: &mut JobBldr,
@@ -554,7 +599,7 @@ pub fn def_child_action(mut io_frame: IoFrame, exec_args: Option<ExecArgs>) {
 	let cmd = &exec_args.cmd.0;
 	let span = exec_args.cmd.1;
 
-	let Err(e) = execvpe(&cmd, &exec_args.argv, &exec_args.envp);
+	let Err(e) = execvpe(cmd, &exec_args.argv, &exec_args.envp);
 
 	let cmd = cmd.to_str().unwrap().to_string();
 	match e {

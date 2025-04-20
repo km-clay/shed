@@ -198,7 +198,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
 					flog!(DEBUG, "done");
 					Ok(io_buf.as_str()?.trim().to_string())
 				}
-				_ => return Err(ShErr::simple(ShErrKind::InternalErr, "Command sub failed"))
+				_ => Err(ShErr::simple(ShErrKind::InternalErr, "Command sub failed"))
 			}
 		}
 	}
@@ -557,7 +557,7 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
 							// Collect up to 2 more octal digits
 							for _ in 0..2 {
 								if let Some(&next_ch) = chars.peek() {
-									if next_ch >= '0' && next_ch <= '7' {
+									if ('0'..='7').contains(&next_ch) {
 										octal_str.push(chars.next().unwrap());
 									} else {
 										break;
@@ -631,7 +631,7 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 				}
 				let pathbuf = PathBuf::from(&path);
 				let mut segments = pathbuf.iter().count();
-				let mut path_iter = pathbuf.into_iter();
+				let mut path_iter = pathbuf.iter();
 				while segments > 4 {
 					path_iter.next();
 					segments -= 1;
@@ -698,9 +698,9 @@ pub fn expand_aliases(input: String, mut already_expanded: HashSet<String>, log_
 	}
 
 	if expanded_this_iter.is_empty() {
-		return result
+		result
 	} else {
-		already_expanded.extend(expanded_this_iter.into_iter());
-		return expand_aliases(result, already_expanded, log_tab)
+		already_expanded.extend(expanded_this_iter);
+		expand_aliases(result, already_expanded, log_tab)
 	}
 }

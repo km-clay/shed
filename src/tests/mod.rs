@@ -7,7 +7,7 @@ use crate::libsh::error::{
 use crate::parse::{
 	node_operation, Node, NdRule, ParseStream,
 	lex::{
-		Tk, TkFlags, TkRule, LexFlags, LexStream
+		Tk, TkRule, LexFlags, LexStream
 	}
 };
 use crate::expand::{

@@ -29,7 +29,7 @@ fn styled_background() {
 #[test]
 fn styled_set() {
 	let input = "multi-style text";
-	let style_set = StyleSet::new().add(Style::Magenta).add(Style::Italic);
+	let style_set = StyleSet::new().add_style(Style::Magenta).add_style(Style::Italic);
 	let styled = input.styled(style_set);
 	insta::assert_snapshot!(styled);
 }

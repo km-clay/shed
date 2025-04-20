@@ -4,7 +4,7 @@ use bitflags::bitflags;
 
 use crate::{builtin::BUILTINS, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::CharDequeUtils}, prelude::*};
 
-pub const KEYWORDS: [&'static str;14] = [
+pub const KEYWORDS: [&str;14] = [
 	"if",
 	"then",
 	"elif",
@@ -21,7 +21,7 @@ pub const KEYWORDS: [&'static str;14] = [
 	"esac",
 ];
 
-pub const OPENERS: [&'static str;6] = [
+pub const OPENERS: [&str;6] = [
 	"if",
 	"while",
 	"until",
@@ -102,12 +102,6 @@ pub struct Tk {
 impl Tk {
 	pub fn new(class: TkRule, span: Span) -> Self {
 		Self { class, span, flags: TkFlags::empty() }
-	}
-	pub fn to_string(&self) -> String {
-		match &self.class {
-			TkRule::Expanded { exp } => exp.join(" "),
-			_ => self.span.as_str().to_string()
-		}
 	}
 	pub fn as_str(&self) -> &str {
 		self.span.as_str()
@@ -264,7 +258,7 @@ impl LexStream {
 								ShErr::full(
 									ShErrKind::ParseErr,
 									"Invalid redirection",
-									Span::new(self.cursor..pos, self.source.clone()).into()
+									Span::new(self.cursor..pos, self.source.clone())
 								)
 							));
 						} else {
@@ -471,13 +465,13 @@ impl LexStream {
 				ShErr::full(
 					ShErrKind::ParseErr,
 					"Unterminated quote",
-					new_tk.span.into(),
+					new_tk.span,
 				)
 			);
 		}
 		// TODO: clean up this mess
 		if self.flags.contains(LexFlags::NEXT_IS_CMD) {
-			if is_keyword(&new_tk.span.as_str()) {
+			if is_keyword(new_tk.span.as_str()) {
 				if matches!(new_tk.span.as_str(), "case" | "select" | "for") {
 					self.flags |= LexFlags::EXPECTING_IN;
 					new_tk.flags |= TkFlags::KEYWORD;
@@ -485,7 +479,7 @@ impl LexStream {
 				} else {
 					new_tk.flags |= TkFlags::KEYWORD;
 				}
-			} else if is_assignment(&new_tk.span.as_str()) {
+			} else if is_assignment(new_tk.span.as_str()) {
 				new_tk.flags |= TkFlags::ASSIGN;
 			} else {
 				if self.flags.contains(LexFlags::EXPECTING_IN) {
@@ -503,11 +497,9 @@ impl LexStream {
 				}
 				self.set_next_is_cmd(false);
 			}
-		} else if self.flags.contains(LexFlags::EXPECTING_IN) {
-			if new_tk.span.as_str() == "in" {
-				new_tk.flags |= TkFlags::KEYWORD;
-				self.flags &= !LexFlags::EXPECTING_IN;
-			}
+		} else if self.flags.contains(LexFlags::EXPECTING_IN) && new_tk.span.as_str() == "in" {
+			new_tk.flags |= TkFlags::KEYWORD;
+			self.flags &= !LexFlags::EXPECTING_IN;
 		}
 		self.cursor = pos;
 		Ok(new_tk)

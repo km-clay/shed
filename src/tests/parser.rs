@@ -217,7 +217,7 @@ fn parse_cursed() {
 fn test_node_operation() {
 	let input = String::from("echo hello world; echo foo bar");
 	let mut check_nodes = vec![];
-	let mut tokens: Vec<Tk> = LexStream::new(input.into(), LexFlags::empty())
+	let tokens: Vec<Tk> = LexStream::new(input.into(), LexFlags::empty())
 		.map(|tk| tk.unwrap())
 		.collect();
 

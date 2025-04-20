@@ -127,7 +127,7 @@ impl StyleSet {
 		Self { styles: vec![] }
 	}
 
-	pub fn add(mut self, style: Style) -> Self {
+	pub fn add_style(mut self, style: Style) -> Self {
 		if !self.styles.contains(&style) {
 			self.styles.push(style);
 		}
@@ -149,7 +149,7 @@ impl BitOr for Style {
 	type Output = StyleSet;
 
 	fn bitor(self, rhs: Self) -> Self::Output {
-		StyleSet::new().add(self).add(rhs)
+		StyleSet::new().add_style(self).add_style(rhs)
 	}
 }
 
@@ -158,12 +158,12 @@ impl BitOr<Style> for StyleSet {
 	type Output = StyleSet;
 
 	fn bitor(self, rhs: Style) -> Self::Output {
-		self.add(rhs)
+		self.add_style(rhs)
 	}
 }
 
 impl From<Style> for StyleSet {
 	fn from(style: Style) -> Self {
-		StyleSet::new().add(style)
+		StyleSet::new().add_style(style)
 	}
 }

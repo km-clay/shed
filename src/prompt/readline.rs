@@ -5,12 +5,13 @@ use rustyline::{completion::Completer, highlight::Highlighter, hint::{Hint, Hint
 use crate::{libsh::term::{Style, Styled}, parse::{lex::{LexFlags, LexStream}, ParseStream}};
 use crate::prelude::*;
 
+#[derive(Default,Debug)]
 pub struct FernReadline {
 }
 
 impl FernReadline {
 	pub fn new() -> Self {
-		Self { }
+		Self::default()
 	}
 }
 
@@ -50,7 +51,7 @@ impl Hinter for FernReadline {
 	fn hint(&self, line: &str, pos: usize, ctx: &rustyline::Context<'_>) -> Option<Self::Hint> {
 		let ent = ctx.history().search(
 			line,
-			ctx.history().len() - 1,
+			ctx.history().len().saturating_sub(1),
 			rustyline::history::SearchDirection::Reverse
 		).ok()??;
 		let entry_raw = ent.entry.get(pos..)?.to_string();

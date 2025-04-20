@@ -192,7 +192,7 @@ pub struct IoStack {
 	stack: Vec<IoFrame>,
 }
 
-impl<'e> IoStack {
+impl IoStack {
 	pub fn new() -> Self {
 		Self {
 			stack: vec![IoFrame::new()],

@@ -51,7 +51,7 @@ impl Deref for ShFunc {
 /// The logic table for the shell
 ///
 /// Contains aliases and functions
-#[derive(Clone,Debug)]
+#[derive(Default,Clone,Debug)]
 pub struct LogTab {
 	functions: HashMap<String,ShFunc>,
 	aliases: HashMap<String,String>
@@ -59,7 +59,7 @@ pub struct LogTab {
 
 impl LogTab {
 	pub fn new() -> Self {
-		Self { functions: HashMap::new(), aliases: HashMap::new() }
+		Self::default()
 	}
 	pub fn insert_func(&mut self, name: &str, src: ShFunc) {
 		self.functions.insert(name.into(), src);
@@ -78,6 +78,12 @@ impl LogTab {
 	}
 	pub fn get_alias(&self, name: &str) -> Option<String> {
 		self.aliases.get(name).cloned()
+	}
+	pub fn remove_alias(&mut self, name: &str) {
+		flog!(DEBUG, self.aliases);
+		flog!(DEBUG, name);
+		self.aliases.remove(name);
+		flog!(DEBUG, self.aliases);
 	}
 	pub fn clear_aliases(&mut self) {
 		self.aliases.clear()
@@ -109,7 +115,7 @@ impl Deref for Var {
 	}
 }
 
-#[derive(Clone,Debug)]
+#[derive(Default,Clone,Debug)]
 pub struct VarTab {
 	vars: HashMap<String,Var>,
 	params: HashMap<char,String>,
@@ -299,13 +305,14 @@ impl VarTab {
 }
 
 /// A table of metadata for the shell
+#[derive(Default,Debug)]
 pub struct MetaTab {
 	runtime_start: Option<Instant>
 }
 
 impl MetaTab {
 	pub fn new() -> Self {
-		Self { runtime_start: None }
+		Self::default()
 	}
 	pub fn start_timer(&mut self) {
 		self.runtime_start = Some(Instant::now());

@@ -9,7 +9,7 @@ fn getopt_from_argv() {
 	let node = get_nodes("echo -n -e foo", |node| matches!(node.class, NdRule::Command {..}))
 		.pop()
 		.unwrap();
-	let NdRule::Command { assignments, argv } = node.class else {
+	let NdRule::Command { assignments: _, argv } = node.class else {
 		panic!()
 	};
 

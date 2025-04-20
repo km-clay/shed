@@ -16,7 +16,7 @@ pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
 				ShErr::full(
 					ShErrKind::ExecFail,
 					"source: File not found",
-					span.into()
+					span
 				)
 			);
 		}
@@ -25,7 +25,7 @@ pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
 				ShErr::full(
 					ShErrKind::ExecFail,
 					"source: Given path is not a file",
-					span.into()
+					span
 				)
 			);
 		}

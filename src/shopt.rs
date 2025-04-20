@@ -15,11 +15,11 @@ pub enum FernBellStyle {
 impl FromStr for FernBellStyle {
 	type Err = ShErr;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s.to_ascii_uppercase().as_str() {
+		match s.to_ascii_lowercase().as_str() {
 			"audible" => Ok(Self::Audible),
 			"visible" => Ok(Self::Visible),
 			"disable" => Ok(Self::Disable),
-			_ => return Err(
+			_ => Err(
 				ShErr::simple(
 					ShErrKind::SyntaxErr,
 					format!("Invalid bell style '{s}'")
@@ -29,9 +29,9 @@ impl FromStr for FernBellStyle {
 	}
 }
 
-impl Into<BellStyle> for FernBellStyle {
-	fn into(self) -> BellStyle {
-		match self {
+impl From<FernBellStyle> for BellStyle {
+	fn from(val: FernBellStyle) -> Self {
+		match val {
 			FernBellStyle::Audible => BellStyle::Audible,
 			FernBellStyle::Visible => BellStyle::Visible,
 			FernBellStyle::Disable => BellStyle::None
@@ -56,11 +56,11 @@ pub enum FernEditMode {
 	Emacs
 }
 
-impl Into<EditMode> for FernEditMode {
-	fn into(self) -> EditMode {
-		match self {
-			Self::Vi => EditMode::Vi,
-			Self::Emacs => EditMode::Emacs
+impl From<FernEditMode> for EditMode {
+	fn from(val: FernEditMode) -> Self {
+		match val {
+			FernEditMode::Vi => EditMode::Vi,
+			FernEditMode::Emacs => EditMode::Emacs
 		}
 	}
 }
@@ -71,7 +71,7 @@ impl FromStr for FernEditMode {
 		match s.to_ascii_lowercase().as_str() {
 			"vi" => Ok(Self::Vi),
 			"emacs" => Ok(Self::Emacs),
-			_ => return Err(
+			_ => Err(
 				ShErr::simple(
 					ShErrKind::SyntaxErr,
 					format!("Invalid edit mode '{s}'")
@@ -167,7 +167,7 @@ impl ShOpts {
 			"core" => self.core.get(&remainder),
 			"prompt" => self.prompt.get(&remainder),
 			_ => {
-				return Err(
+				Err(
 					ShErr::simple(
 						ShErrKind::SyntaxErr,
 						"shopt: Expected 'core' or 'prompt' in shopt key"
@@ -328,47 +328,47 @@ impl ShOptCore {
 
 		match query {
 			"dotglob" => {
-				let mut output = format!("Include hidden files in glob patterns\n");
+				let mut output = String::from("Include hidden files in glob patterns\n");
 				output.push_str(&format!("{}",self.dotglob));
 				Ok(Some(output))
 			}
 			"autocd" => {
-				let mut output = format!("Allow navigation to directories by passing the directory as a command directly\n");
+				let mut output = String::from("Allow navigation to directories by passing the directory as a command directly\n");
 				output.push_str(&format!("{}",self.autocd));
 				Ok(Some(output))
 			}
 			"hist_ignore_dupes" => {
-				let mut output = format!("Ignore consecutive duplicate command history entries\n");
+				let mut output = String::from("Ignore consecutive duplicate command history entries\n");
 				output.push_str(&format!("{}",self.hist_ignore_dupes));
 				Ok(Some(output))
 			}
 			"max_hist" => {
-				let mut output = format!("Maximum number of entries in the command history file (default '.fernhist')\n");
+				let mut output = String::from("Maximum number of entries in the command history file (default '.fernhist')\n");
 				output.push_str(&format!("{}",self.max_hist));
 				Ok(Some(output))
 			}
 			"interactive_comments" => {
-				let mut output = format!("Whether or not to allow comments in interactive mode\n");
+				let mut output = String::from("Whether or not to allow comments in interactive mode\n");
 				output.push_str(&format!("{}",self.interactive_comments));
 				Ok(Some(output))
 			}
 			"auto_hist" => {
-				let mut output = format!("Whether or not to automatically save commands to the command history file\n");
+				let mut output = String::from("Whether or not to automatically save commands to the command history file\n");
 				output.push_str(&format!("{}",self.auto_hist));
 				Ok(Some(output))
 			}
 			"bell_style" => {
-				let mut output = format!("What type of bell style to use for the bell character\n");
+				let mut output = String::from("What type of bell style to use for the bell character\n");
 				output.push_str(&format!("{}",self.bell_style));
 				Ok(Some(output))
 			}
 			"max_recurse_depth" => {
-				let mut output = format!("Maximum limit of recursive shell function calls\n");
+				let mut output = String::from("Maximum limit of recursive shell function calls\n");
 				output.push_str(&format!("{}",self.max_recurse_depth));
 				Ok(Some(output))
 			}
 			_ => {
-				return Err(
+				Err(
 					ShErr::simple(
 						ShErrKind::SyntaxErr,
 						format!("shopt: Unexpected 'core' option '{query}'")
@@ -531,32 +531,32 @@ impl ShOptPrompt {
 
 		match query {
 			"trunc_prompt_path" => {
-				let mut output = format!("Maximum number of path segments used in the '\\W' prompt escape sequence\n");
+				let mut output = String::from("Maximum number of path segments used in the '\\W' prompt escape sequence\n");
 				output.push_str(&format!("{}",self.trunc_prompt_path));
 				Ok(Some(output))
 			}
 			"edit_mode" => {
-				let mut output = format!("The style of editor shortcuts used in the line-editing of the prompt\n");
+				let mut output = String::from("The style of editor shortcuts used in the line-editing of the prompt\n");
 				output.push_str(&format!("{}",self.edit_mode));
 				Ok(Some(output))
 			}
 			"comp_limit" => {
-				let mut output = format!("Maximum number of completion candidates displayed upon pressing tab\n");
+				let mut output = String::from("Maximum number of completion candidates displayed upon pressing tab\n");
 				output.push_str(&format!("{}",self.comp_limit));
 				Ok(Some(output))
 			}
 			"prompt_highlight" => {
-				let mut output = format!("Whether to enable or disable syntax highlighting on the prompt\n");
+				let mut output = String::from("Whether to enable or disable syntax highlighting on the prompt\n");
 				output.push_str(&format!("{}",self.prompt_highlight));
 				Ok(Some(output))
 			}
 			"tab_stop" => {
-				let mut output = format!("The number of spaces used by the tab character '\\t'\n");
+				let mut output = String::from("The number of spaces used by the tab character '\\t'\n");
 				output.push_str(&format!("{}",self.tab_stop));
 				Ok(Some(output))
 			}
 			"custom" => {
-				let mut output = format!("A table of custom 'modules' executed as shell functions for prompt scripting\n");
+				let mut output = String::from("A table of custom 'modules' executed as shell functions for prompt scripting\n");
 				output.push_str("Current modules: \n");
 				for key in self.custom.keys() {
 					output.push_str(&format!("  - {key}\n"));
@@ -564,7 +564,7 @@ impl ShOptPrompt {
 				Ok(Some(output.trim().to_string()))
 			}
 			_ => {
-				return Err(
+				Err(
 					ShErr::simple(
 						ShErrKind::SyntaxErr,
 						format!("shopt: Unexpected 'core' option '{query}'")
@@ -599,7 +599,7 @@ impl Display for ShOptPrompt {
 		output.push(format!("comp_limit = {}", self.comp_limit));
 		output.push(format!("prompt_highlight = {}", self.prompt_highlight));
 		output.push(format!("tab_stop = {}", self.tab_stop));
-		output.push(format!("prompt modules: "));
+		output.push(String::from("prompt modules: "));
 		for key in self.custom.keys() {
 			output.push(format!("  - {key}"));
 		}

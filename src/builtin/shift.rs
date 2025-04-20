@@ -16,7 +16,7 @@ pub fn shift(node: Node, job: &mut JobBldr) -> ShResult<()> {
 				ShErr::full(
 					ShErrKind::ExecFail,
 					"Expected a number in shift args",
-					span.into()
+					span
 				)
 			)
 		};

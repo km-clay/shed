@@ -35,6 +35,10 @@ pub fn save_termios() {
 	}
 }
 #[allow(static_mut_refs)]
+///Access the saved termios
+///
+///# Safety
+///This function is unsafe because it accesses a public mutable static value. This function should only ever be called after save_termios() has already been called.
 pub unsafe fn get_saved_termios() -> Option<Termios> {
 	// SAVED_TERMIOS should *only ever* be set once and accessed once
 	// Set at the start of the program, and accessed during the exit of the program to reset the termios.

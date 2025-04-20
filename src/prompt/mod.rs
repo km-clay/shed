@@ -80,7 +80,7 @@ pub fn read_line() -> ShResult<String> {
 		}
 		Err(ReadlineError::Interrupted) => Ok(String::new()),
 		Err(e) => {
-			return Err(e.into())
+			Err(e.into())
 		}
 	}
 }

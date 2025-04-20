@@ -14,7 +14,7 @@ pub mod flowctl;
 pub mod zoltraak;
 pub mod shopt;
 
-pub const BUILTINS: [&str;16] = [
+pub const BUILTINS: [&str;17] = [
 	"echo",
 	"cd",
 	"export",
@@ -25,6 +25,7 @@ pub const BUILTINS: [&str;16] = [
 	"fg",
 	"bg",
 	"alias",
+	"unalias",
 	"return",
 	"break",
 	"continue",
@@ -55,11 +56,12 @@ pub const BUILTINS: [&str;16] = [
 /// * If redirections are given to this function, the caller must call `IoFrame.restore()` on the returned `IoFrame`
 /// * If redirections are given, the second field of the resulting tuple will *always* be `Some()`
 /// * If no redirections are given, the second field will *always* be `None`
+type SetupReturns = ShResult<(Vec<(String,Span)>, Option<IoFrame>)>;
 pub fn setup_builtin(
 	argv: Vec<Tk>,
 	job: &mut JobBldr,
 	io_mode: Option<(&mut IoStack,Vec<Redir>)>,
-) -> ShResult<(Vec<(String,Span)>, Option<IoFrame>)> {
+) -> SetupReturns {
 	let mut argv: Vec<(String,Span)> = prepare_argv(argv)?;
 
 	let child_pgid = if let Some(pgid) = job.pgid() {

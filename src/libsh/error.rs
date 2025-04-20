@@ -114,7 +114,6 @@ impl ShErr {
 	}
 	pub fn with_span(sherr: ShErr, span: Span) -> Self {
 		let (kind,msg,notes,_) = sherr.unpack();
-		let span = span.into();
 		Self::Full { kind, msg, notes, span }
 	}
 	pub fn kind(&self) -> &ShErrKind {
@@ -300,19 +299,19 @@ impl From<std::io::Error> for ShErr {
 
 impl From<std::env::VarError> for ShErr {
 	fn from(value: std::env::VarError) -> Self {
-		ShErr::simple(ShErrKind::InternalErr, &value.to_string())
+		ShErr::simple(ShErrKind::InternalErr, value.to_string())
 	}
 }
 
 impl From<rustyline::error::ReadlineError> for ShErr {
 	fn from(value: rustyline::error::ReadlineError) -> Self {
-		ShErr::simple(ShErrKind::ParseErr, &value.to_string())
+		ShErr::simple(ShErrKind::ParseErr, value.to_string())
 	}
 }
 
 impl From<Errno> for ShErr {
 	fn from(value: Errno) -> Self {
-		ShErr::simple(ShErrKind::Errno, &value.to_string())
+		ShErr::simple(ShErrKind::Errno, value.to_string())
 	}
 }
 
