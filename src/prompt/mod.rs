@@ -1,4 +1,5 @@
 pub mod readline;
+pub mod highlight;
 
 use std::path::Path;
 

@@ -76,7 +76,6 @@ impl Dispatcher {
 		Ok(())
 	}
 	pub fn dispatch_node(&mut self, node: Node) -> ShResult<()> {
-		flog!(DEBUG, node.class);
 		match node.class {
 			NdRule::Conjunction {..} => self.exec_conjunction(node)?,
 			NdRule::Pipeline {..} => self.exec_pipeline(node)?,
@@ -166,7 +165,6 @@ impl Dispatcher {
 
 		let subsh = argv.remove(0);
 		let subsh_body = subsh.0.to_string();
-		flog!(DEBUG, subsh_body);
 		let snapshot = get_snapshots();
 
 		if let Err(e) = exec_input(subsh_body) {
@@ -248,14 +246,12 @@ impl Dispatcher {
 
 		self.io_stack.append_to_frame(case_stmt.redirs);
 
-		flog!(DEBUG,pattern.span.as_str());
 		let exp_pattern = pattern.clone().expand()?;
 		let pattern_raw = exp_pattern
 			.get_words()
 			.first()
 			.map(|s| s.to_string())
 			.unwrap_or_default();
-		flog!(DEBUG,exp_pattern);
 
 		for block in case_blocks {
 			let CaseNode { pattern, body } = block;

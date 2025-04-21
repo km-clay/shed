@@ -1,13 +1,12 @@
 use std::borrow::Cow;
 
-use rustyline::{completion::Completer, highlight::Highlighter, hint::{Hint, Hinter}, validate::{ValidationResult, Validator}, Helper};
+use rustyline::{completion::Completer, hint::{Hint, Hinter}, validate::{ValidationResult, Validator}, Helper};
 
 use crate::{libsh::term::{Style, Styled}, parse::{lex::{LexFlags, LexStream}, ParseStream}};
 use crate::prelude::*;
 
 #[derive(Default,Debug)]
-pub struct FernReadline {
-}
+pub struct FernReadline;
 
 impl FernReadline {
 	pub fn new() -> Self {
@@ -56,12 +55,6 @@ impl Hinter for FernReadline {
 		).ok()??;
 		let entry_raw = ent.entry.get(pos..)?.to_string();
 		Some(FernHint::new(entry_raw))
-	}
-}
-
-impl Highlighter for FernReadline {
-	fn highlight<'l>(&self, line: &'l str, _pos: usize) -> std::borrow::Cow<'l, str> {
-		Cow::Owned(line.to_string())
 	}
 }
 

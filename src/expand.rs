@@ -93,6 +93,7 @@ impl Expander {
 		let mut result = String::new();
 		let mut var_name = String::new();
 		let mut in_brace = false;
+		flog!(DEBUG, self.raw);
 
 		while let Some(ch) = chars.next() {
 			match ch {
@@ -103,28 +104,19 @@ impl Expander {
 				VAR_SUB => {
 					while let Some(ch) = chars.next() {
 						match ch {
-							'(' if var_name.is_empty() => {
-								let mut paren_stack = vec!['('];
+							SUBSH if var_name.is_empty() => {
 								let mut subsh_body = String::new();
 								while let Some(ch) = chars.next() {
-									flog!(DEBUG, "looping");
-									flog!(DEBUG, subsh_body);
 									match ch {
-										'(' => {
-											paren_stack.push(ch);
-											subsh_body.push(ch);
-										}
-										')' => {
-											paren_stack.pop();
-											if paren_stack.is_empty() { break };
-											subsh_body.push(ch);
+										SUBSH => {
+											break
 										}
 										_ => subsh_body.push(ch)
 									}
 								}
 								result.push_str(&expand_cmd_sub(&subsh_body)?);
 							}
-							'{' => in_brace = true,
+							'{' if var_name.is_empty() => in_brace = true,
 							'}' if in_brace => {
 								let var_val = read_vars(|v| v.get_var(&var_name));
 								result.push_str(&var_val);
@@ -208,12 +200,13 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
 ///
 /// Clean up a single layer of escape characters, and then replace control characters like '$' with a non-character unicode representation that is unmistakable by the rest of the code
 pub fn unescape_str(raw: &str) -> String {
-	let mut chars = raw.chars();
+	let mut chars = raw.chars().peekable();
 	let mut result = String::new();
 	let mut first_char = true;
 
 
 	while let Some(ch) = chars.next() {
+		flog!(DEBUG,result);
 		match ch {
 			'~' if first_char => {
 				result.push(TILDE_SUB)
@@ -234,7 +227,7 @@ pub fn unescape_str(raw: &str) -> String {
 								result.push(next_ch)
 							}
 						}
-						'$' => result.push(VAR_SUB),
+						'$' if chars.peek() != Some(&'(') => result.push(VAR_SUB),
 						'(' => {
 							paren_count += 1;
 							result.push(subsh_ch)
@@ -243,10 +236,10 @@ pub fn unescape_str(raw: &str) -> String {
 							paren_count -= 1;
 							if paren_count == 0 {
 								result.push(SUBSH);
+								break
 							} else {
 								result.push(subsh_ch)
 							}
-							break
 						}
 						_ => result.push(subsh_ch)
 					}

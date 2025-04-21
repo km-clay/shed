@@ -109,6 +109,9 @@ impl Tk {
 	pub fn source(&self) -> Arc<String> {
 		self.span.source.clone()
 	}
+	pub fn mark(&mut self, flag: TkFlags) {
+		self.flags |= flag;
+	}
 	/// Used to see if a separator is ';;' for case statements
 	pub fn has_double_semi(&self) -> bool {
 		let TkRule::Sep = self.class else {
@@ -131,14 +134,15 @@ impl Display for Tk {
 bitflags! {
 	#[derive(Debug,Clone,Copy,PartialEq,Default)]
 	pub struct TkFlags: u32 {
-		const KEYWORD  = 0b0000000000000001;
-		/// This is a  keyword that opens a new block statement, like 'if' and 'while'
-		const OPENER   = 0b0000000000000010;
-		const IS_CMD   = 0b0000000000000100;
-		const IS_SUBSH = 0b0000000000001000;
-		const IS_OP    = 0b0000000000010000;
-		const ASSIGN   = 0b0000000000100000;
-		const BUILTIN  = 0b0000000001000000;
+		const KEYWORD   = 0b0000000000000001;
+		/// This is a   keyword that opens a new block statement, like 'if' and 'while'
+		const OPENER    = 0b0000000000000010;
+		const IS_CMD    = 0b0000000000000100;
+		const IS_SUBSH  = 0b0000000000001000;
+		const IS_CMDSUB = 0b0000000000010000;
+		const IS_OP     = 0b0000000000100000;
+		const ASSIGN    = 0b0000000001000000;
+		const BUILTIN   = 0b0000000010000000;
 	}
 }
 
@@ -360,7 +364,7 @@ impl LexStream {
 							_ => pos += ch.len_utf8()
 						}
 					}
-					if !paren_stack.is_empty() {
+					if !paren_stack.is_empty() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
 						return Err(
 							ShErr::full(
 								ShErrKind::ParseErr,
@@ -395,7 +399,7 @@ impl LexStream {
 							_ => continue
 						}
 					}
-					if !paren_stack.is_empty() {
+					if !paren_stack.is_empty() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
 						self.cursor = pos;
 						return Err(
 							ShErr::full(
@@ -469,37 +473,40 @@ impl LexStream {
 				)
 			);
 		}
-		// TODO: clean up this mess
+
+		let text = new_tk.span.as_str();
 		if self.flags.contains(LexFlags::NEXT_IS_CMD) {
-			if is_keyword(new_tk.span.as_str()) {
-				if matches!(new_tk.span.as_str(), "case" | "select" | "for") {
+			match text {
+				"case" | "select" | "for" => {
+					new_tk.mark(TkFlags::KEYWORD);
 					self.flags |= LexFlags::EXPECTING_IN;
-					new_tk.flags |= TkFlags::KEYWORD;
-					self.set_next_is_cmd(false);
-				} else {
-					new_tk.flags |= TkFlags::KEYWORD;
 				}
-			} else if is_assignment(new_tk.span.as_str()) {
-				new_tk.flags |= TkFlags::ASSIGN;
-			} else {
-				if self.flags.contains(LexFlags::EXPECTING_IN) {
-					if new_tk.span.as_str() != "in" {
-						new_tk.flags |= TkFlags::IS_CMD;
-					} else {
-						new_tk.flags |= TkFlags::KEYWORD;
-						self.flags &= !LexFlags::EXPECTING_IN;
-					}
-				} else {
+				"in" if self.flags.contains(LexFlags::EXPECTING_IN) => {
+					new_tk.mark(TkFlags::KEYWORD);
+					self.flags &= !LexFlags::EXPECTING_IN;
+				}
+				_ if is_keyword(text) => {
+					new_tk.mark(TkFlags::KEYWORD);
+				}
+				_ if is_assignment(text) => {
+					new_tk.mark(TkFlags::ASSIGN);
+				}
+				_ if is_cmd_sub(text) => {
+					new_tk.mark(TkFlags::IS_CMDSUB)
+				}
+				_ => {
 					new_tk.flags |= TkFlags::IS_CMD;
+					if BUILTINS.contains(&text) {
+						new_tk.mark(TkFlags::BUILTIN);
+					}
 				}
-				if BUILTINS.contains(&new_tk.span.as_str()) {
-					new_tk.flags |= TkFlags::BUILTIN;
-				}
-				self.set_next_is_cmd(false);
 			}
-		} else if self.flags.contains(LexFlags::EXPECTING_IN) && new_tk.span.as_str() == "in" {
-			new_tk.flags |= TkFlags::KEYWORD;
+			self.set_next_is_cmd(false);
+		} else if self.flags.contains(LexFlags::EXPECTING_IN) && text == "in" {
+			new_tk.mark(TkFlags::KEYWORD);
 			self.flags &= !LexFlags::EXPECTING_IN;
+		} else if is_cmd_sub(text) {
+			new_tk.mark(TkFlags::IS_CMDSUB)
 		}
 		self.cursor = pos;
 		Ok(new_tk)
@@ -667,6 +674,10 @@ pub fn is_field_sep(ch: char) -> bool {
 pub fn is_keyword(slice: &str) -> bool {
 	KEYWORDS.contains(&slice) ||
 	(slice.ends_with("()") && !slice.ends_with("\\()"))
+}
+
+pub fn is_cmd_sub(slice: &str) -> bool {
+	(slice.starts_with("$(") && slice.ends_with(')')) && !slice.ends_with("\\)")
 }
 
 pub fn lookahead(pat: &str, mut chars: Chars) -> Option<usize> {
