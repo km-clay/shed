@@ -253,7 +253,7 @@ impl Dispatcher {
 			.map(|s| s.to_string())
 			.unwrap_or_default();
 
-		for block in case_blocks {
+		'outer: for block in case_blocks {
 			let CaseNode { pattern, body } = block;
 			let block_pattern_raw = pattern.span.as_str().trim_end_matches(')').trim();
 			// Split at '|' to allow for multiple patterns like `foo|bar)`
@@ -264,6 +264,7 @@ impl Dispatcher {
 					for node in &body {
 						self.dispatch_node(node.clone())?;
 					}
+					break 'outer
 				}
 			}
 		}
@@ -432,7 +433,7 @@ impl Dispatcher {
 		let NdRule::Command { ref mut assignments, ref mut argv } = &mut cmd.class else {
 			unreachable!()
 		};
-		let env_vars_to_unset = self.set_assignments(mem::take(assignments), AssignBehavior::Export);
+		let env_vars_to_unset = self.set_assignments(mem::take(assignments), AssignBehavior::Export)?;
 		let cmd_raw = argv.first().unwrap();
 		let curr_job_mut = self.job_stack.curr_job_mut().unwrap();
 		let io_stack_mut = &mut self.io_stack;
@@ -488,7 +489,7 @@ impl Dispatcher {
 			} else {
 				AssignBehavior::Export
 			};
-			env_vars_to_unset = self.set_assignments(assignments, assign_behavior);
+			env_vars_to_unset = self.set_assignments(assignments, assign_behavior)?;
 		}
 
 		if argv.is_empty() {
@@ -513,7 +514,7 @@ impl Dispatcher {
 
 		Ok(())
 	}
-	fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> Vec<String> {
+	fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> ShResult<Vec<String>> {
 		let mut new_env_vars = vec![];
 		match behavior {
 			AssignBehavior::Export => {
@@ -522,9 +523,9 @@ impl Dispatcher {
 						unreachable!()
 					};
 					let var = var.span.as_str();
-					let val = val.span.as_str();
+					let val = val.expand()?.get_words().join(" ");
 					match kind {
-						AssignKind::Eq => write_vars(|v| v.set_var(var, val, true)),
+						AssignKind::Eq => write_vars(|v| v.set_var(var, &val, true)),
 						AssignKind::PlusEq => todo!(),
 						AssignKind::MinusEq => todo!(),
 						AssignKind::MultEq => todo!(),
@@ -539,9 +540,9 @@ impl Dispatcher {
 						unreachable!()
 					};
 					let var = var.span.as_str();
-					let val = val.span.as_str();
+					let val = val.expand()?.get_words().join(" ");
 					match kind {
-						AssignKind::Eq => write_vars(|v| v.set_var(var, val, false)),
+						AssignKind::Eq => write_vars(|v| v.set_var(var, &val, true)),
 						AssignKind::PlusEq => todo!(),
 						AssignKind::MinusEq => todo!(),
 						AssignKind::MultEq => todo!(),
@@ -550,7 +551,7 @@ impl Dispatcher {
 				}
 			}
 		}
-		new_env_vars
+		Ok(new_env_vars)
 	}
 }
 

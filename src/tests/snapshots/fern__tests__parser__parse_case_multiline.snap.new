@@ -1,0 +1,596 @@
+---
+source: src/tests/parser.rs
+assertion_line: 166
+expression: nodes
+---
+[
+    Ok(
+        Node {
+            class: Conjunction {
+                elements: [
+                    ConjunctNode {
+                        cmd: Node {
+                            class: CaseNode {
+                                pattern: Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 5..8,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                case_blocks: [
+                                    CaseNode {
+                                        pattern: Tk {
+                                            class: CasePattern,
+                                            span: Span {
+                                                range: 13..17,
+                                                source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                            },
+                                            flags: TkFlags(
+                                                0x0,
+                                            ),
+                                        },
+                                        body: [
+                                            Node {
+                                                class: Pipeline {
+                                                    cmds: [
+                                                        Node {
+                                                            class: Command {
+                                                                assignments: [],
+                                                                argv: [
+                                                                    Tk {
+                                                                        class: Str,
+                                                                        span: Span {
+                                                                            range: 18..21,
+                                                                            source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                                        },
+                                                                        flags: TkFlags(
+                                                                            IS_CMD,
+                                                                        ),
+                                                                    },
+                                                                ],
+                                                            },
+                                                            flags: NdFlags(
+                                                                0x0,
+                                                            ),
+                                                            redirs: [],
+                                                            tokens: [
+                                                                Tk {
+                                                                    class: Str,
+                                                                    span: Span {
+                                                                        range: 18..21,
+                                                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                                    },
+                                                                    flags: TkFlags(
+                                                                        IS_CMD,
+                                                                    ),
+                                                                },
+                                                                Tk {
+                                                                    class: Sep,
+                                                                    span: Span {
+                                                                        range: 21..27,
+                                                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                                    },
+                                                                    flags: TkFlags(
+                                                                        0x0,
+                                                                    ),
+                                                                },
+                                                            ],
+                                                        },
+                                                    ],
+                                                    pipe_err: false,
+                                                },
+                                                flags: NdFlags(
+                                                    0x0,
+                                                ),
+                                                redirs: [],
+                                                tokens: [
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 18..21,
+                                                            source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            IS_CMD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 21..27,
+                                                            source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                    CaseNode {
+                                        pattern: Tk {
+                                            class: CasePattern,
+                                            span: Span {
+                                                range: 27..31,
+                                                source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                            },
+                                            flags: TkFlags(
+                                                0x0,
+                                            ),
+                                        },
+                                        body: [
+                                            Node {
+                                                class: Pipeline {
+                                                    cmds: [
+                                                        Node {
+                                                            class: Command {
+                                                                assignments: [],
+                                                                argv: [
+                                                                    Tk {
+                                                                        class: Str,
+                                                                        span: Span {
+                                                                            range: 32..35,
+                                                                            source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                                        },
+                                                                        flags: TkFlags(
+                                                                            IS_CMD,
+                                                                        ),
+                                                                    },
+                                                                ],
+                                                            },
+                                                            flags: NdFlags(
+                                                                0x0,
+                                                            ),
+                                                            redirs: [],
+                                                            tokens: [
+                                                                Tk {
+                                                                    class: Str,
+                                                                    span: Span {
+                                                                        range: 32..35,
+                                                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                                    },
+                                                                    flags: TkFlags(
+                                                                        IS_CMD,
+                                                                    ),
+                                                                },
+                                                                Tk {
+                                                                    class: Sep,
+                                                                    span: Span {
+                                                                        range: 35..41,
+                                                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                                    },
+                                                                    flags: TkFlags(
+                                                                        0x0,
+                                                                    ),
+                                                                },
+                                                            ],
+                                                        },
+                                                    ],
+                                                    pipe_err: false,
+                                                },
+                                                flags: NdFlags(
+                                                    0x0,
+                                                ),
+                                                redirs: [],
+                                                tokens: [
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 32..35,
+                                                            source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            IS_CMD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 35..41,
+                                                            source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                    CaseNode {
+                                        pattern: Tk {
+                                            class: CasePattern,
+                                            span: Span {
+                                                range: 41..45,
+                                                source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                            },
+                                            flags: TkFlags(
+                                                0x0,
+                                            ),
+                                        },
+                                        body: [
+                                            Node {
+                                                class: Pipeline {
+                                                    cmds: [
+                                                        Node {
+                                                            class: Command {
+                                                                assignments: [],
+                                                                argv: [
+                                                                    Tk {
+                                                                        class: Str,
+                                                                        span: Span {
+                                                                            range: 46..49,
+                                                                            source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                                        },
+                                                                        flags: TkFlags(
+                                                                            IS_CMD,
+                                                                        ),
+                                                                    },
+                                                                ],
+                                                            },
+                                                            flags: NdFlags(
+                                                                0x0,
+                                                            ),
+                                                            redirs: [],
+                                                            tokens: [
+                                                                Tk {
+                                                                    class: Str,
+                                                                    span: Span {
+                                                                        range: 46..49,
+                                                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                                    },
+                                                                    flags: TkFlags(
+                                                                        IS_CMD,
+                                                                    ),
+                                                                },
+                                                                Tk {
+                                                                    class: Sep,
+                                                                    span: Span {
+                                                                        range: 49..54,
+                                                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                                    },
+                                                                    flags: TkFlags(
+                                                                        0x0,
+                                                                    ),
+                                                                },
+                                                            ],
+                                                        },
+                                                    ],
+                                                    pipe_err: false,
+                                                },
+                                                flags: NdFlags(
+                                                    0x0,
+                                                ),
+                                                redirs: [],
+                                                tokens: [
+                                                    Tk {
+                                                        class: Str,
+                                                        span: Span {
+                                                            range: 46..49,
+                                                            source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            IS_CMD,
+                                                        ),
+                                                    },
+                                                    Tk {
+                                                        class: Sep,
+                                                        span: Span {
+                                                            range: 49..54,
+                                                            source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                                        },
+                                                        flags: TkFlags(
+                                                            0x0,
+                                                        ),
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                            flags: NdFlags(
+                                0x0,
+                            ),
+                            redirs: [],
+                            tokens: [
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 0..4,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 5..8,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 9..11,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 11..13,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: CasePattern,
+                                    span: Span {
+                                        range: 13..17,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 18..21,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 21..27,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: CasePattern,
+                                    span: Span {
+                                        range: 27..31,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 32..35,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 35..41,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: CasePattern,
+                                    span: Span {
+                                        range: 41..45,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 46..49,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        IS_CMD,
+                                    ),
+                                },
+                                Tk {
+                                    class: Sep,
+                                    span: Span {
+                                        range: 49..54,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        0x0,
+                                    ),
+                                },
+                                Tk {
+                                    class: Str,
+                                    span: Span {
+                                        range: 54..58,
+                                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                                    },
+                                    flags: TkFlags(
+                                        KEYWORD,
+                                    ),
+                                },
+                            ],
+                        },
+                        operator: Null,
+                    },
+                ],
+            },
+            flags: NdFlags(
+                0x0,
+            ),
+            redirs: [],
+            tokens: [
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 0..4,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 5..8,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 9..11,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 11..13,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: CasePattern,
+                    span: Span {
+                        range: 13..17,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 18..21,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 21..27,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: CasePattern,
+                    span: Span {
+                        range: 27..31,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 32..35,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 35..41,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: CasePattern,
+                    span: Span {
+                        range: 41..45,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 46..49,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        IS_CMD,
+                    ),
+                },
+                Tk {
+                    class: Sep,
+                    span: Span {
+                        range: 49..54,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        0x0,
+                    ),
+                },
+                Tk {
+                    class: Str,
+                    span: Span {
+                        range: 54..58,
+                        source: "case foo in\n\tfoo) bar\n\t;;\n\tbar) foo\n\t;;\n\tbiz) baz\n\t;;\nesac",
+                    },
+                    flags: TkFlags(
+                        KEYWORD,
+                    ),
+                },
+            ],
+        },
+    ),
+]

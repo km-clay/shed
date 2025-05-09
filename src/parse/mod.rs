@@ -416,6 +416,7 @@ impl ParseStream {
 	/// Ordered from specialized to general, with more generally matchable stuff appearing at the bottom
 	/// The check_pipelines parameter is used to prevent left-recursion issues in self.parse_pipeln()
 	fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
+		flog!(DEBUG, self.tokens);
 		try_match!(self.parse_func_def()?);
 		try_match!(self.parse_brc_grp(false /* from_func_def */)?);
 		try_match!(self.parse_case()?);
@@ -913,59 +914,61 @@ impl ParseStream {
 			.as_str()
 			.parse() // LoopKind implements FromStr
 			.unwrap();
-			node_tks.push(loop_tk);
-			self.catch_separator(&mut node_tks);
 
-			let Some(cond) = self.parse_block(true)? else {
-				self.panic_mode(&mut node_tks);
-				return Err(parse_err_full(
-						&format!("Expected an expression after '{loop_kind}'"), // It also implements Display
-						&node_tks.get_span().unwrap()
-				))
-			};
-			node_tks.extend(cond.tokens.clone());
+		node_tks.push(loop_tk);
+		self.catch_separator(&mut node_tks);
 
-			if !self.check_keyword("do") || !self.next_tk_is_some() {
-				self.panic_mode(&mut node_tks);
-				return Err(parse_err_full(
-						"Expected 'do' after loop condition",
-						&node_tks.get_span().unwrap()
-				))
-			}
-			node_tks.push(self.next_tk().unwrap());
-			self.catch_separator(&mut node_tks);
+		flog!(DEBUG, node_tks);
+		let Some(cond) = self.parse_block(true)? else {
+			self.panic_mode(&mut node_tks);
+			return Err(parse_err_full(
+					&format!("Expected an expression after '{loop_kind}'"), // It also implements Display
+					&node_tks.get_span().unwrap()
+			))
+		};
+		node_tks.extend(cond.tokens.clone());
 
-			let mut body = vec![];
-			while let Some(block) = self.parse_block(true)? {
-				node_tks.extend(block.tokens.clone());
-				body.push(block);
-			}
-			if body.is_empty() {
-				self.panic_mode(&mut node_tks);
-				return Err(parse_err_full(
-						"Expected an expression after 'do'",
-						&node_tks.get_span().unwrap()
-				))
-			};
+		if !self.check_keyword("do") || !self.next_tk_is_some() {
+			self.panic_mode(&mut node_tks);
+			return Err(parse_err_full(
+					"Expected 'do' after loop condition",
+					&node_tks.get_span().unwrap()
+			))
+		}
+		node_tks.push(self.next_tk().unwrap());
+		self.catch_separator(&mut node_tks);
 
-			if !self.check_keyword("done") || !self.next_tk_is_some() {
-				self.panic_mode(&mut node_tks);
-				return Err(parse_err_full(
-						"Expected 'done' after loop body",
-						&node_tks.get_span().unwrap()
-				))
-			}
-			node_tks.push(self.next_tk().unwrap());
-			self.assert_separator(&mut node_tks)?;
+		let mut body = vec![];
+		while let Some(block) = self.parse_block(true)? {
+			node_tks.extend(block.tokens.clone());
+			body.push(block);
+		}
+		if body.is_empty() {
+			self.panic_mode(&mut node_tks);
+			return Err(parse_err_full(
+					"Expected an expression after 'do'",
+					&node_tks.get_span().unwrap()
+			))
+		};
 
-			cond_node = CondNode { cond: Box::new(cond), body  };
-			let loop_node = Node {
-				class: NdRule::LoopNode { kind: loop_kind, cond_node },
-				flags: NdFlags::empty(),
-				redirs: vec![],
-				tokens: node_tks
-			};
-			Ok(Some(loop_node))
+		if !self.check_keyword("done") || !self.next_tk_is_some() {
+			self.panic_mode(&mut node_tks);
+			return Err(parse_err_full(
+					"Expected 'done' after loop body",
+					&node_tks.get_span().unwrap()
+			))
+		}
+		node_tks.push(self.next_tk().unwrap());
+		self.assert_separator(&mut node_tks)?;
+
+		cond_node = CondNode { cond: Box::new(cond), body  };
+		let loop_node = Node {
+			class: NdRule::LoopNode { kind: loop_kind, cond_node },
+			flags: NdFlags::empty(),
+			redirs: vec![],
+			tokens: node_tks
+		};
+		Ok(Some(loop_node))
 	}
 	fn parse_pipeln(&mut self) -> ShResult<Option<Node>> {
 		let mut cmds = vec![];
@@ -1023,6 +1026,7 @@ impl ParseStream {
 				return Ok(None)
 			}
 		}
+		flog!(DEBUG, argv);
 
 		if argv.is_empty() && assignments.is_empty() {
 			return Ok(None)
@@ -1213,6 +1217,7 @@ impl Iterator for ParseStream {
 			}
 		}
 		let result = self.parse_cmd_list();
+		flog!(DEBUG, result);
 		match result {
 			Ok(Some(node)) => {
 				Some(Ok(node))

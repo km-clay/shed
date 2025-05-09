@@ -340,7 +340,7 @@ impl LexStream {
 				'$' if chars.peek() == Some(&'(') => {
 					pos += 2;
 					chars.next();
-					let mut paren_stack = vec!['('];
+					let mut paren_count = 0;
 					let paren_pos = pos;
 					while let Some(ch) = chars.next() {
 						match ch {
@@ -352,19 +352,19 @@ impl LexStream {
 							}
 							'(' => {
 								pos += 1;
-								paren_stack.push(ch);
+								paren_count += 1;
 							}
 							')' => {
 								pos += 1;
-								paren_stack.pop();
-								if paren_stack.is_empty() {
+								paren_count -= 1;
+								if paren_count >= 0 {
 									break
 								}
 							}
 							_ => pos += ch.len_utf8()
 						}
 					}
-					if !paren_stack.is_empty() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+					if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
 						return Err(
 							ShErr::full(
 								ShErrKind::ParseErr,
@@ -434,7 +434,7 @@ impl LexStream {
 					self.cursor = pos;
 					return Ok(tk)
 				}
-				'"' | '\'' => {
+				'\'' => {
 					self.in_quote = true;
 					pos += 1;
 					while let Some(q_ch) = chars.next() {
@@ -445,7 +445,7 @@ impl LexStream {
 									pos += 1;
 								}
 							}
-							_ if q_ch == ch => {
+							_ if q_ch == '\'' => {
 								pos += 1;
 								self.in_quote = false;
 								break
@@ -455,6 +455,58 @@ impl LexStream {
 							// instead of just assuming a length of 1.
 							// Allows spans to work for wide characters
 							_ => pos += q_ch.len_utf8()
+						}
+					}
+				}
+				'"' => {
+					self.in_quote = true;
+					pos += 1;
+					while let Some(q_ch) = chars.next() {
+						match q_ch {
+							'\\' => {
+								pos += 1;
+								if chars.next().is_some() {
+									pos += 1;
+								}
+							}
+							'$' if chars.peek() == Some(&'(') => {
+								pos += 2;
+								chars.next();
+								let mut cmdsub_count = 1;
+								while let Some(cmdsub_ch) = chars.next() {
+									match cmdsub_ch {
+										'\\' => {
+											pos += 1;
+											if chars.next().is_some() {
+												pos += 1;
+											}
+										}
+										'$' if chars.peek() == Some(&'(') => {
+											cmdsub_count += 1;
+											pos += 2;
+											chars.next();
+										}
+										')' => {
+											cmdsub_count -= 1;
+											pos += 1;
+											if cmdsub_count <= 0 {
+												break
+											}
+										}
+										_ => pos += cmdsub_ch.len_utf8(),
+									}
+								}
+							}
+							_ if q_ch == '"' => {
+								pos += 1;
+								self.in_quote = false;
+								break
+							}
+							// Any time an ambiguous character is found
+							// we must push the cursor by the length of the character
+							// instead of just assuming a length of 1.
+							// Allows spans to work for wide characters
+							_ => pos += q_ch.len_utf8(),
 						}
 					}
 				}
@@ -480,6 +532,7 @@ impl LexStream {
 				"case" | "select" | "for" => {
 					new_tk.mark(TkFlags::KEYWORD);
 					self.flags |= LexFlags::EXPECTING_IN;
+					self.set_next_is_cmd(false);
 				}
 				"in" if self.flags.contains(LexFlags::EXPECTING_IN) => {
 					new_tk.mark(TkFlags::KEYWORD);
@@ -492,16 +545,17 @@ impl LexStream {
 					new_tk.mark(TkFlags::ASSIGN);
 				}
 				_ if is_cmd_sub(text) => {
-					new_tk.mark(TkFlags::IS_CMDSUB)
+					new_tk.mark(TkFlags::IS_CMDSUB);
+					self.set_next_is_cmd(false);
 				}
 				_ => {
 					new_tk.flags |= TkFlags::IS_CMD;
 					if BUILTINS.contains(&text) {
 						new_tk.mark(TkFlags::BUILTIN);
 					}
+					self.set_next_is_cmd(false);
 				}
 			}
-			self.set_next_is_cmd(false);
 		} else if self.flags.contains(LexFlags::EXPECTING_IN) && text == "in" {
 			new_tk.mark(TkFlags::KEYWORD);
 			self.flags &= !LexFlags::EXPECTING_IN;

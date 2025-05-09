@@ -93,7 +93,7 @@ impl Expander {
 		let mut result = String::new();
 		let mut var_name = String::new();
 		let mut in_brace = false;
-		flog!(DEBUG, self.raw);
+		flog!(INFO, self.raw);
 
 		while let Some(ch) = chars.next() {
 			match ch {
@@ -103,6 +103,8 @@ impl Expander {
 				}
 				VAR_SUB => {
 					while let Some(ch) = chars.next() {
+						flog!(INFO,ch);
+						flog!(INFO,var_name);
 						match ch {
 							SUBSH if var_name.is_empty() => {
 								let mut subsh_body = String::new();
@@ -114,7 +116,9 @@ impl Expander {
 										_ => subsh_body.push(ch)
 									}
 								}
-								result.push_str(&expand_cmd_sub(&subsh_body)?);
+								let expanded = expand_cmd_sub(&subsh_body)?;
+								flog!(INFO, expanded);
+								result.push_str(&expanded);
 							}
 							'{' if var_name.is_empty() => in_brace = true,
 							'}' if in_brace => {
@@ -123,7 +127,7 @@ impl Expander {
 								var_name.clear();
 								break
 							}
-							_ if is_hard_sep(ch) || ch == DUB_QUOTE || ch == SUBSH => {
+							_ if is_hard_sep(ch) || ch == DUB_QUOTE || ch == SUBSH || ch == '/' => {
 								let var_val = read_vars(|v| v.get_var(&var_name));
 								result.push_str(&var_val);
 								result.push(ch);
@@ -162,6 +166,7 @@ pub fn expand_glob(raw: &str) -> ShResult<String> {
 /// Get the command output of a given command input as a String
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
 	flog!(DEBUG, "in expand_cmd_sub");
+	flog!(DEBUG, raw);
 	let (rpipe,wpipe) = IoMode::get_pipes();
 	let cmd_sub_redir = Redir::new(wpipe, RedirType::Output);
 	let mut cmd_sub_io_frame = IoFrame::from_redir(cmd_sub_redir);
@@ -255,7 +260,39 @@ pub fn unescape_str(raw: &str) -> String {
 								result.push(next_ch)
 							}
 						}
-						'$' => result.push(VAR_SUB),
+						'$' => {
+							result.push(VAR_SUB);
+							if chars.peek() == Some(&'(') {
+								chars.next();
+								let mut cmdsub_count = 1;
+								result.push(SUBSH);
+								while let Some(subsh_ch) = chars.next() {
+									flog!(DEBUG, subsh_ch);
+									match subsh_ch {
+										'\\' => {
+											result.push(subsh_ch);
+											if let Some(next_ch) = chars.next() {
+												result.push(next_ch)
+											}
+										}
+										'$' if chars.peek() == Some(&'(') => {
+											result.push(subsh_ch);
+											cmdsub_count += 1;
+										}
+										')' => {
+											cmdsub_count -= 1;
+											if cmdsub_count <= 0 {
+												result.push(SUBSH);
+												break
+											} else {
+												result.push(subsh_ch);
+											}
+										}
+										_ => result.push(subsh_ch),
+									}
+								}
+							}
+						}
 						'"' => {
 							result.push(DUB_QUOTE);
 							break

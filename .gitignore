@@ -3,6 +3,7 @@ target
 .idea
 *.iml
 /result*
+src/tests/snapshots
 *.log
 default.nix
 shell.nix
