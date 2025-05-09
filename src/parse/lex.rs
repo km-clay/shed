@@ -157,22 +157,23 @@ bitflags! {
 	#[derive(Debug)]
 	pub struct LexFlags: u32 {
 		/// Return comment tokens
-		const LEX_COMMENTS   = 0b00000001;
+		const LEX_COMMENTS   = 0b000000001;
 		/// Allow unfinished input
-		const LEX_UNFINISHED = 0b00000010;
+		const LEX_UNFINISHED = 0b000000010;
 		/// The next string-type token is a command name
-		const NEXT_IS_CMD    = 0b00000100;
+		const NEXT_IS_CMD    = 0b000000100;
 		/// We are in a quotation, so quoting rules apply
-		const IN_QUOTE       = 0b00001000;
+		const IN_QUOTE       = 0b000001000;
 		/// Only lex strings; used in expansions
-		const RAW            = 0b00010000;
+		const RAW            = 0b000010000;
 		/// The lexer has not produced any tokens yet
-		const FRESH          = 0b00010000;
+		const FRESH          = 0b000010000;
 		/// The lexer has no more tokens to produce
-		const STALE          = 0b00100000;
+		const STALE          = 0b000100000;
 		/// The lexer's cursor is in a brace group
-		const IN_BRC_GRP     = 0b01000000;
-		const EXPECTING_IN   = 0b10000000;
+		const IN_BRC_GRP     = 0b001000000;
+		const EXPECTING_IN   = 0b010000000;
+		const IN_CASE        = 0b100000000;
 	}
 }
 
@@ -193,7 +194,6 @@ impl LexStream {
 	/// `LexStream.slice(1..)`
 	///
 	pub fn slice<R: RangeBounds<usize>>(&self, range: R) -> Option<&str> {
-		// Sketchy downcast
 		let start = match range.start_bound() {
 			Bound::Included(&start) => start,
 			Bound::Excluded(&start) => start + 1,
@@ -314,12 +314,14 @@ impl LexStream {
 		let mut pos = self.cursor;
 		let mut chars = slice.chars().peekable();
 
-		if let Some(count) = case_pat_lookahead(chars.clone()) {
-			pos += count;
-			let casepat_tk = self.get_token(self.cursor..pos, TkRule::CasePattern);
-			self.cursor = pos;
-			self.set_next_is_cmd(true);
-			return Ok(casepat_tk)
+		if self.flags.contains(LexFlags::IN_CASE) {
+			if let Some(count) = case_pat_lookahead(chars.clone()) {
+				pos += count;
+				let casepat_tk = self.get_token(self.cursor..pos, TkRule::CasePattern);
+				self.cursor = pos;
+				self.set_next_is_cmd(true);
+				return Ok(casepat_tk)
+			}
 		}
 
 		while let Some(ch) = chars.next() {
@@ -532,6 +534,7 @@ impl LexStream {
 				"case" | "select" | "for" => {
 					new_tk.mark(TkFlags::KEYWORD);
 					self.flags |= LexFlags::EXPECTING_IN;
+					self.flags |= LexFlags::IN_CASE;
 					self.set_next_is_cmd(false);
 				}
 				"in" if self.flags.contains(LexFlags::EXPECTING_IN) => {
@@ -539,6 +542,9 @@ impl LexStream {
 					self.flags &= !LexFlags::EXPECTING_IN;
 				}
 				_ if is_keyword(text) => {
+					if text == "esac" && self.flags.contains(LexFlags::IN_CASE) {
+						self.flags &= !LexFlags::IN_CASE;
+					}
 					new_tk.mark(TkFlags::KEYWORD);
 				}
 				_ if is_assignment(text) => {

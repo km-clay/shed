@@ -1,5 +1,5 @@
 use std::{env, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, sync::Arc};
-use crate::prelude::*;
+use crate::{builtin::BUILTINS, prelude::*};
 
 use rustyline::highlight::Highlighter;
 use crate::{libsh::term::{Style, StyleSet, Styled}, parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}, state::read_logic};
@@ -70,7 +70,9 @@ impl FernHighlighter {
 			l.get_func(raw).is_some() || l.get_alias(raw).is_some()
 		});
 
-		if is_alias_or_function || is_in_path {
+		let is_builtin = BUILTINS.contains(&raw);
+
+		if is_alias_or_function || is_in_path || is_builtin {
 			raw.styled(Style::Green)
 		} else {
 			raw.styled(Style::Bold | Style::Red)

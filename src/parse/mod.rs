@@ -592,14 +592,14 @@ impl ParseStream {
 		node_tks.push(self.next_tk().unwrap());
 
 		let pat_err = parse_err_full(
-					"Expected a pattern after 'case' keyword", &node_tks.get_span().unwrap()
-				)
-				.with_note(
-					Note::new("Patterns can be raw text, or anything that gets substituted with raw text")
-						.with_sub_notes(vec![
-							"This includes variables like '$foo' or command substitutions like '$(echo foo)'"
-						])
-					);
+			"Expected a pattern after 'case' keyword", &node_tks.get_span().unwrap()
+		)
+		.with_note(
+			Note::new("Patterns can be raw text, or anything that gets substituted with raw text")
+				.with_sub_notes(vec![
+					"This includes variables like '$foo' or command substitutions like '$(echo foo)'"
+				])
+			);
 
 		let Some(pat_tk) = self.next_tk() else {
 			self.panic_mode(&mut node_tks);
@@ -1006,6 +1006,9 @@ impl ParseStream {
 		let mut assignments = vec![];
 
 		while let Some(prefix_tk) = tk_iter.next() {
+			if let TkRule::CasePattern = prefix_tk.class {
+				return Err(parse_err_full("Found case pattern in command", &prefix_tk.span))
+			}
 			let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
 			let is_assignment = prefix_tk.flags.contains(TkFlags::ASSIGN);
 			let is_keyword = prefix_tk.flags.contains(TkFlags::KEYWORD);
