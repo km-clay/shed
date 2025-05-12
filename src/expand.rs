@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use glob::Pattern;
+use regex::Regex;
 
 use crate::state::{read_vars, write_meta, write_vars, LogTab};
 use crate::procio::{IoBuf, IoFrame, IoMode};
@@ -125,10 +126,14 @@ impl Expander {
 							}
 							'{' if var_name.is_empty() => in_brace = true,
 							'}' if in_brace => {
+								flog!(DEBUG, var_name);
 								let var_val = perform_param_expansion(&var_name)?;
 								result.push_str(&var_val);
 								var_name.clear();
 								break
+							}
+							_ if in_brace => {
+								var_name.push(ch)
 							}
 							_ if is_hard_sep(ch) || ch == DUB_QUOTE || ch == SUBSH || ch == '/' => {
 								let var_val = read_vars(|v| v.get_var(&var_name));
@@ -324,6 +329,7 @@ pub fn unescape_str(raw: &str) -> String {
 	result
 }
 
+#[derive(Debug)]
 pub enum ParamExp {
 	Len, // #var_name
 	DefaultUnsetOrNull(String), // :-
@@ -459,14 +465,17 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
 			'+' |
 			'=' |
 			'?' => {
-				rest = chars.collect();
+				rest.push(ch);
+				rest.push_str(&chars.collect::<String>());
 				break
 			}
 			_ => var_name.push(ch)
 		}
 	}
 
+	flog!(DEBUG,rest);
 	if let Ok(expansion) = rest.parse::<ParamExp>() {
+		flog!(DEBUG,expansion);
 		match expansion {
 			ParamExp::Len => unreachable!(),
 			ParamExp::DefaultUnsetOrNull(default) => {
@@ -559,19 +568,133 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
 				}
 				Ok(value)
 			}
-			ParamExp::RemLongestPrefix(prefix) => todo!(),
-			ParamExp::RemShortestSuffix(suffix) => todo!(),
-			ParamExp::RemLongestSuffix(suffix) => todo!(),
-			ParamExp::ReplaceFirstMatch(search, replace) => todo!(),
-			ParamExp::ReplaceAllMatches(search, replace) => todo!(),
-			ParamExp::ReplacePrefix(search, replace) => todo!(),
-			ParamExp::ReplaceSuffix(search, replace) => todo!(),
+			ParamExp::RemLongestPrefix(prefix) => {
+				let value = vars.get_var(&var_name);
+				let pattern = Pattern::new(&prefix).unwrap();
+				for i in (0..=value.len()).rev() {
+					let sliced = &value[..i];
+					if pattern.matches(sliced) {
+						return Ok(value[i..].to_string());
+					}
+				}
+				Ok(value) // no match
+			}
+			ParamExp::RemShortestSuffix(suffix) => {
+				let value = vars.get_var(&var_name);
+				let pattern = Pattern::new(&suffix).unwrap();
+				for i in 0..=value.len() {
+					let sliced = &value[i..];
+					if pattern.matches(sliced) {
+						return Ok(value[..i].to_string());
+					}
+				}
+				Ok(value)
+			}
+			ParamExp::RemLongestSuffix(suffix) => {
+				let value = vars.get_var(&var_name);
+				let pattern = Pattern::new(&suffix).unwrap();
+				for i in (0..=value.len()).rev() {
+					let sliced = &value[i..];
+					if pattern.matches(sliced) {
+						return Ok(value[..i].to_string());
+					}
+				}
+				Ok(value)
+			}
+			ParamExp::ReplaceFirstMatch(search, replace) => {
+				let value = vars.get_var(&var_name);
+				let regex = glob_to_regex(&search, false); // unanchored pattern
+
+				if let Some(mat) = regex.find(&value) {
+					let before = &value[..mat.start()];
+					let after = &value[mat.end()..];
+					let result = format!("{}{}{}", before, replace, after);
+					Ok(result)
+				} else {
+					Ok(value)
+				}
+			}
+			ParamExp::ReplaceAllMatches(search, replace) => {
+				let value = vars.get_var(&var_name);
+				let regex = glob_to_regex(&search, false);
+				let mut result = String::new();
+				let mut last_match_end = 0;
+
+				for mat in regex.find_iter(&value) {
+					result.push_str(&value[last_match_end..mat.start()]);
+					result.push_str(&replace);
+					last_match_end = mat.end();
+				}
+
+				// Append the rest of the string
+				result.push_str(&value[last_match_end..]);
+				Ok(result)
+			}
+			ParamExp::ReplacePrefix(search, replace) => {
+				let value = vars.get_var(&var_name);
+				let pattern = Pattern::new(&search).unwrap();
+				for i in (0..=value.len()).rev() {
+					let sliced = &value[..i];
+					if pattern.matches(sliced) {
+						return Ok(format!("{}{}",replace,&value[i..]))
+					}
+				}
+				Ok(value)
+			}
+			ParamExp::ReplaceSuffix(search, replace) => {
+				let value = vars.get_var(&var_name);
+				let pattern = Pattern::new(&search).unwrap();
+				for i in (0..=value.len()).rev() {
+					let sliced = &value[i..];
+					if pattern.matches(sliced) {
+						return Ok(format!("{}{}",&value[..i],replace))
+					}
+				}
+				Ok(value)
+			}
 			ParamExp::VarNamesWithSuffix(suffix) => todo!(),
 			ParamExp::ExpandInnerVar(var_name) => todo!(),
 		}
 	} else {
 		Ok(vars.get_var(&var_name))
 	}
+}
+
+fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
+	let mut regex = String::new();
+	if anchored {
+		regex.push('^');
+	}
+	for ch in glob.chars() {
+		match ch {
+			'*' => regex.push_str(".*"),
+			'?' => regex.push('.'),
+			'.' | '+' | '(' | ')' | '|' | '^' | '$' | '[' | ']' | '{' | '}' | '\\' => {
+				regex.push('\\');
+				regex.push(ch);
+			}
+			_ => regex.push(ch),
+		}
+	}
+	if anchored {
+		regex.push('$');
+	}
+	Regex::new(&regex).unwrap()
+}
+fn glob_to_regex_unanchored(glob: &str) -> Regex {
+	let mut regex = String::new();
+	for ch in glob.chars() {
+		match ch {
+			'*' => regex.push_str(".*"),
+			'?' => regex.push('.'),
+			'.' | '+' | '(' | ')' | '|' | '^' | '$' | '[' | ']' | '{' | '}' | '\\' => {
+				regex.push('\\');
+				regex.push(ch);
+			}
+			_ => regex.push(ch),
+		}
+	}
+	Regex::new(&regex).unwrap()
 }
 
 #[derive(Debug)]

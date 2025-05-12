@@ -339,6 +339,33 @@ impl LexStream {
 						pos += ch.len_utf8();
 					}
 				}
+				'$' if chars.peek() == Some(&'{') => {
+					pos += 2;
+					chars.next();
+					let mut brace_count = 0;
+					while let Some(brc_ch) = chars.next() {
+						match brc_ch {
+							'\\' => {
+								pos += 1;
+								if let Some(next_ch) = chars.next() {
+									pos += next_ch.len_utf8()
+								}
+							}
+							'{' => {
+								pos += 1;
+								brace_count += 1;
+							}
+							'}' => {
+								pos += 1;
+								brace_count -= 1;
+								if brace_count == 0 {
+									break
+								}
+							}
+							_ => pos += ch.len_utf8()
+						}
+					}
+				}
 				'$' if chars.peek() == Some(&'(') => {
 					pos += 2;
 					chars.next();
