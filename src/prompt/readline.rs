@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use rustyline::{completion::Completer, hint::{Hint, Hinter}, validate::{ValidationResult, Validator}, Helper};
+use rustyline::{completion::Completer, hint::{Hint, Hinter}, history::SearchDirection, validate::{ValidationResult, Validator}, Helper};
 
 use crate::{libsh::term::{Style, Styled}, parse::{lex::{LexFlags, LexStream}, ParseStream}};
 use crate::prelude::*;
@@ -10,7 +10,17 @@ pub struct FernReadline;
 
 impl FernReadline {
 	pub fn new() -> Self {
-		Self::default()
+		Self
+	}
+	pub fn search_hist(value: &str, ctx: &rustyline::Context<'_>) -> Option<String> {
+		let len = ctx.history().len();
+		for i in 0..len {
+			let entry = ctx.history().get(i, SearchDirection::Reverse).unwrap().unwrap();
+			if entry.entry.starts_with(value) {
+				return Some(entry.entry.into_owned())
+			}
+		}
+		None
 	}
 }
 
@@ -48,12 +58,11 @@ impl Hint for FernHint {
 impl Hinter for FernReadline {
 	type Hint = FernHint;
 	fn hint(&self, line: &str, pos: usize, ctx: &rustyline::Context<'_>) -> Option<Self::Hint> {
-		let ent = ctx.history().search(
-			line,
-			ctx.history().len().saturating_sub(1),
-			rustyline::history::SearchDirection::Reverse
-		).ok()??;
-		let entry_raw = ent.entry.get(pos..)?.to_string();
+		if line.is_empty() {
+			return None
+		}
+		let ent = Self::search_hist(line,ctx)?;
+		let entry_raw = ent.get(pos..)?.to_string();
 		Some(FernHint::new(entry_raw))
 	}
 }

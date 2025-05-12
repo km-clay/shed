@@ -98,7 +98,6 @@ impl FernHighlighter {
 			.rev()
 			.collect::<Vec<Tk>>();
 		for token in tokens {
-			flog!(DEBUG, token.flags);
 			match token.class {
 				_ if token.flags.intersects(TkFlags::IS_CMDSUB | TkFlags::IS_SUBSH) => {
 					let styled = self.highlight_subsh(token.clone());
