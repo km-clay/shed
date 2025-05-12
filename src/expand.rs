@@ -1,6 +1,9 @@
 use std::collections::HashSet;
+use std::str::FromStr;
 
-use crate::state::{read_vars, write_meta, LogTab};
+use glob::Pattern;
+
+use crate::state::{read_vars, write_meta, write_vars, LogTab};
 use crate::procio::{IoBuf, IoFrame, IoMode};
 use crate::prelude::*;
 use crate::parse::{Redir, RedirType};
@@ -122,7 +125,7 @@ impl Expander {
 							}
 							'{' if var_name.is_empty() => in_brace = true,
 							'}' if in_brace => {
-								let var_val = read_vars(|v| v.get_var(&var_name));
+								let var_val = perform_param_expansion(&var_name)?;
 								result.push_str(&var_val);
 								var_name.clear();
 								break
@@ -319,6 +322,256 @@ pub fn unescape_str(raw: &str) -> String {
 		first_char = false;
 	}
 	result
+}
+
+pub enum ParamExp {
+	Len, // #var_name
+	DefaultUnsetOrNull(String), // :-
+	DefaultUnset(String), // -
+	SetDefaultUnsetOrNull(String), // :=
+	SetDefaultUnset(String), // =
+	AltSetNotNull(String), // :+
+	AltNotNull(String), // +
+	ErrUnsetOrNull(String), // :?
+	ErrUnset(String), // ?
+	Substr(usize), // :pos
+	SubstrLen(usize,usize), // :pos:len
+	RemShortestPrefix(String), // #pattern
+	RemLongestPrefix(String), // ##pattern
+	RemShortestSuffix(String), // %pattern
+	RemLongestSuffix(String), // %%pattern
+	ReplaceFirstMatch(String,String), // /search/replace
+	ReplaceAllMatches(String,String), // //search/replace
+	ReplacePrefix(String,String), // #search/replace
+	ReplaceSuffix(String,String), // %search/replace
+	VarNamesWithSuffix(String), // !prefix@ || !prefix*
+	ExpandInnerVar(String), // !var
+}
+
+impl FromStr for ParamExp {
+	type Err = ShErr;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		use ParamExp::*;
+
+		let parse_err = || Err(ShErr::Simple {
+			kind: ShErrKind::SyntaxErr,
+			msg: "Invalid parameter expansion".into(),
+			notes: vec![],
+		});
+
+		// Handle indirect var expansion: ${!var}
+		if let Some(var) = s.strip_prefix('!') {
+			if var.ends_with('*') || var.ends_with('@') {
+				return Ok(VarNamesWithSuffix(var.to_string()));
+			}
+			return Ok(ExpandInnerVar(var.to_string()));
+		}
+
+		// Pattern removals
+		if let Some(rest) = s.strip_prefix("##") {
+			return Ok(RemLongestPrefix(rest.to_string()));
+		} else if let Some(rest) = s.strip_prefix('#') {
+			return Ok(RemShortestPrefix(rest.to_string()));
+		}
+		if let Some(rest) = s.strip_prefix("%%") {
+			return Ok(RemLongestSuffix(rest.to_string()));
+		} else if let Some(rest) = s.strip_prefix('%') {
+			return Ok(RemShortestSuffix(rest.to_string()));
+		}
+
+		// Replacements
+		if let Some(rest) = s.strip_prefix("//") {
+			let mut parts = rest.splitn(2, '/');
+			let pattern = parts.next().unwrap_or("");
+			let repl = parts.next().unwrap_or("");
+			return Ok(ReplaceAllMatches(pattern.to_string(), repl.to_string()));
+		}
+		if let Some(rest) = s.strip_prefix('/') {
+			let mut parts = rest.splitn(2, '/');
+			let pattern = parts.next().unwrap_or("");
+			let repl = parts.next().unwrap_or("");
+			return Ok(ReplaceFirstMatch(pattern.to_string(), repl.to_string()));
+		}
+
+		// Fallback / assignment / alt
+		if let Some(rest) = s.strip_prefix(":-") {
+			return Ok(DefaultUnsetOrNull(rest.to_string()));
+		} else if let Some(rest) = s.strip_prefix('-') {
+			return Ok(DefaultUnset(rest.to_string()));
+		} else if let Some(rest) = s.strip_prefix(":+") {
+			return Ok(AltSetNotNull(rest.to_string()));
+		} else if let Some(rest) = s.strip_prefix('+') {
+			return Ok(AltNotNull(rest.to_string()));
+		} else if let Some(rest) = s.strip_prefix(":=") {
+			return Ok(SetDefaultUnsetOrNull(rest.to_string()));
+		} else if let Some(rest) = s.strip_prefix('=') {
+			return Ok(SetDefaultUnset(rest.to_string()));
+		} else if let Some(rest) = s.strip_prefix(":?") {
+			return Ok(ErrUnsetOrNull(rest.to_string()));
+		} else if let Some(rest) = s.strip_prefix('?') {
+			return Ok(ErrUnset(rest.to_string()));
+		}
+
+		// Substring
+		if let Some((pos, len)) = parse_pos_len(s) {
+			return Ok(match len {
+				Some(l) => SubstrLen(pos, l),
+				None => Substr(pos),
+			});
+		}
+
+		parse_err()
+	}
+}
+
+pub fn parse_pos_len(s: &str) -> Option<(usize, Option<usize>)> {
+	let raw = s.strip_prefix(':')?;
+	if let Some((start,len)) = raw.split_once(':') {
+		Some((
+			start.parse::<usize>().ok()?,
+			len.parse::<usize>().ok(),
+		))
+	} else {
+		Some((
+			raw.parse::<usize>().ok()?,
+			None,
+		))
+	}
+}
+
+pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
+	let vars = read_vars(|v| v.clone());
+	let mut chars = raw.chars();
+	let mut var_name = String::new();
+	let mut rest = String::new();
+	if raw.starts_with('#') {
+		return Ok(vars.get_var(raw.strip_prefix('#').unwrap()).len().to_string())
+	}
+
+	while let Some(ch) = chars.next() {
+		match ch {
+			'!' |
+			'#' |
+			'%' |
+			':' |
+			'-' |
+			'+' |
+			'=' |
+			'?' => {
+				rest = chars.collect();
+				break
+			}
+			_ => var_name.push(ch)
+		}
+	}
+
+	if let Ok(expansion) = rest.parse::<ParamExp>() {
+		match expansion {
+			ParamExp::Len => unreachable!(),
+			ParamExp::DefaultUnsetOrNull(default) => {
+				if !vars.var_exists(&var_name) || vars.get_var(&var_name).is_empty() {
+					Ok(default)
+				} else {
+					Ok(vars.get_var(&var_name))
+				}
+			}
+			ParamExp::DefaultUnset(default) => {
+				if !vars.var_exists(&var_name) {
+					Ok(default)
+				} else {
+					Ok(vars.get_var(&var_name))
+				}
+			}
+			ParamExp::SetDefaultUnsetOrNull(default) => {
+				if !vars.var_exists(&var_name) || vars.get_var(&var_name).is_empty() {
+					write_vars(|v| v.set_var(&var_name, &default, false));
+					Ok(default)
+				} else {
+					Ok(vars.get_var(&var_name))
+				}
+			}
+			ParamExp::SetDefaultUnset(default) => {
+				if !vars.var_exists(&var_name) {
+					write_vars(|v| v.set_var(&var_name, &default, false));
+					Ok(default)
+				} else {
+					Ok(vars.get_var(&var_name))
+				}
+			}
+			ParamExp::AltSetNotNull(alt) => {
+				if vars.var_exists(&var_name) && !vars.get_var(&var_name).is_empty() {
+					Ok(alt)
+				} else {
+					Ok("".into())
+				}
+			}
+			ParamExp::AltNotNull(alt) => {
+				if vars.var_exists(&var_name) {
+					Ok(alt)
+				} else {
+					Ok("".into())
+				}
+			}
+			ParamExp::ErrUnsetOrNull(err) => {
+				if !vars.var_exists(&var_name) || vars.get_var(&var_name).is_empty() {
+					Err(
+						ShErr::Simple { kind: ShErrKind::ExecFail, msg: err, notes: vec![] }
+					)
+				} else {
+					Ok(vars.get_var(&var_name))
+				}
+			}
+			ParamExp::ErrUnset(err) => {
+				if !vars.var_exists(&var_name) {
+					Err(
+						ShErr::Simple { kind: ShErrKind::ExecFail, msg: err, notes: vec![] }
+					)
+				} else {
+					Ok(vars.get_var(&var_name))
+				}
+			}
+			ParamExp::Substr(pos) => {
+				let value = vars.get_var(&var_name);
+				if let Some(substr) = value.get(pos..) {
+					Ok(substr.to_string())
+				} else {
+					Ok(value)
+				}
+			}
+			ParamExp::SubstrLen(pos, len) => {
+				let value = vars.get_var(&var_name);
+				let end = pos.saturating_add(len);
+				if let Some(substr) = value.get(pos..end) {
+					Ok(substr.to_string())
+				} else {
+					Ok(value)
+				}
+			}
+			ParamExp::RemShortestPrefix(prefix) => {
+				let value = vars.get_var(&var_name);
+				let pattern = Pattern::new(&prefix).unwrap();
+				for i in 0..=value.len() {
+					let sliced = &value[..i];
+					if pattern.matches(sliced) {
+						return Ok(value[i..].to_string())
+					}
+				}
+				Ok(value)
+			}
+			ParamExp::RemLongestPrefix(prefix) => todo!(),
+			ParamExp::RemShortestSuffix(suffix) => todo!(),
+			ParamExp::RemLongestSuffix(suffix) => todo!(),
+			ParamExp::ReplaceFirstMatch(search, replace) => todo!(),
+			ParamExp::ReplaceAllMatches(search, replace) => todo!(),
+			ParamExp::ReplacePrefix(search, replace) => todo!(),
+			ParamExp::ReplaceSuffix(search, replace) => todo!(),
+			ParamExp::VarNamesWithSuffix(suffix) => todo!(),
+			ParamExp::ExpandInnerVar(var_name) => todo!(),
+		}
+	} else {
+		Ok(vars.get_var(&var_name))
+	}
 }
 
 #[derive(Debug)]

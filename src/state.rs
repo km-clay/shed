@@ -2,7 +2,7 @@ use std::{collections::{HashMap, VecDeque}, ops::Deref, sync::{LazyLock, RwLock,
 
 use nix::unistd::{gethostname, getppid, User};
 
-use crate::{exec_input, jobs::JobTab, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::VecDequeExt}, parse::{lex::get_char, ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, shopt::ShOpts};
+use crate::{exec_input, jobs::JobTab, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::VecDequeExt}, parse::{ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, shopt::ShOpts};
 
 pub static JOB_TABLE: LazyLock<RwLock<JobTab>> = LazyLock::new(|| RwLock::new(JobTab::new()));
 
@@ -118,7 +118,7 @@ impl Deref for Var {
 #[derive(Default,Clone,Debug)]
 pub struct VarTab {
 	vars: HashMap<String,Var>,
-	params: HashMap<char,String>,
+	params: HashMap<String,String>,
 	sh_argv: VecDeque<String>, // Using a VecDeque makes the implementation of `shift` straightforward
 }
 
@@ -131,13 +131,13 @@ impl VarTab {
 		var_tab.init_sh_argv();
 		var_tab
 	}
-	fn init_params() -> HashMap<char, String> {
+	fn init_params() -> HashMap<String, String> {
 		let mut params = HashMap::new();
-		params.insert('?', "0".into());  // Last command exit status
-		params.insert('#', "0".into());  // Number of positional parameters
-		params.insert('0', std::env::current_exe().unwrap().to_str().unwrap().to_string()); // Name of the shell
-		params.insert('$', Pid::this().to_string()); // PID of the shell
-		params.insert('!', "".into()); // PID of the last background job (if any)
+		params.insert("?".into(), "0".into());  // Last command exit status
+		params.insert("#".into(), "0".into());  // Number of positional parameters
+		params.insert("0".into(), std::env::current_exe().unwrap().to_str().unwrap().to_string()); // Name of the shell
+		params.insert("$".into(), Pid::this().to_string()); // PID of the shell
+		params.insert("!".into(), "".into()); // PID of the last background job (if any)
 		params
 	}
 	fn init_env() {
@@ -214,8 +214,8 @@ impl VarTab {
 		self.bpush_arg(env::current_exe().unwrap().to_str().unwrap().to_string());
 	}
 	fn update_arg_params(&mut self) {
-		self.set_param('@', &self.sh_argv.clone().to_vec()[1..].join(" "));
-		self.set_param('#', &(self.sh_argv.len() - 1).to_string());
+		self.set_param("@", &self.sh_argv.clone().to_vec()[1..].join(" "));
+		self.set_param("#", &(self.sh_argv.len() - 1).to_string());
 	}
 	/// Push an arg to the front of the arg deque
 	pub fn fpush_arg(&mut self, arg: String) {
@@ -245,10 +245,10 @@ impl VarTab {
 	pub fn vars_mut(&mut self) -> &mut HashMap<String,Var> {
 		&mut self.vars
 	}
-	pub fn params(&self) -> &HashMap<char,String> {
+	pub fn params(&self) -> &HashMap<String,String> {
 		&self.params
 	}
-	pub fn params_mut(&mut self) -> &mut HashMap<char,String> {
+	pub fn params_mut(&mut self) -> &mut HashMap<String,String> {
 		&mut self.params
 	}
 	pub fn export_var(&mut self, var_name: &str) {
@@ -258,8 +258,9 @@ impl VarTab {
 		}
 	}
 	pub fn get_var(&self, var: &str) -> String {
-		if var.chars().count() == 1 {
-			let param = self.get_param(get_char(var, 0).unwrap());
+		if var.chars().count() == 1 ||
+		var.parse::<usize>().is_ok() {
+			let param = self.get_param(var);
 			if !param.is_empty() {
 				return param
 			}
@@ -285,21 +286,31 @@ impl VarTab {
 			self.vars.insert(var_name.to_string(), var);
 		}
 	}
-	pub fn set_param(&mut self, param: char, val: &str) {
-		self.params.insert(param,val.to_string());
+	pub fn var_exists(&self, var_name: &str) -> bool {
+		if var_name.parse::<usize>().is_ok() {
+			return self.params.contains_key(var_name);
+		}
+		self.vars.contains_key(var_name) ||
+			(
+				var_name.len() == 1 &&
+				self.params.contains_key(var_name) 
+			)
 	}
-	pub fn get_param(&self, param: char) -> String {
-		if param.is_ascii_digit() {
+	pub fn set_param(&mut self, param: &str, val: &str) {
+		self.params.insert(param.to_string(),val.to_string());
+	}
+	pub fn get_param(&self, param: &str) -> String {
+		if param.parse::<usize>().is_ok() {
 			let argv_idx = param
 				.to_string()
 				.parse::<usize>()
 				.unwrap();
 			let arg = self.sh_argv.get(argv_idx).map(|s| s.to_string()).unwrap_or_default();
 			arg
-		} else if param == '?' {
-			self.params.get(&param).map(|s| s.to_string()).unwrap_or("0".into())
+		} else if param == "?" {
+			self.params.get(param).map(|s| s.to_string()).unwrap_or("0".into())
 		} else {
-			self.params.get(&param).map(|s| s.to_string()).unwrap_or_default()
+			self.params.get(param).map(|s| s.to_string()).unwrap_or_default()
 		}
 	}
 }
@@ -389,11 +400,11 @@ pub fn get_shopt(path: &str) -> String {
 }
 
 pub fn get_status() -> i32 {
-	read_vars(|v| v.get_param('?')).parse::<i32>().unwrap()
+	read_vars(|v| v.get_param("?")).parse::<i32>().unwrap()
 }
 #[track_caller]
 pub fn set_status(code: i32) {
-	write_vars(|v| v.set_param('?', &code.to_string()))
+	write_vars(|v| v.set_param("?", &code.to_string()))
 }
 
 /// Save the current state of the logic and variable table, and the working directory path
