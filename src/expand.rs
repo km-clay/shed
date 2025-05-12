@@ -394,10 +394,22 @@ impl FromStr for ParamExp {
 			return Ok(ReplaceAllMatches(pattern.to_string(), repl.to_string()));
 		}
 		if let Some(rest) = s.strip_prefix('/') {
-			let mut parts = rest.splitn(2, '/');
-			let pattern = parts.next().unwrap_or("");
-			let repl = parts.next().unwrap_or("");
-			return Ok(ReplaceFirstMatch(pattern.to_string(), repl.to_string()));
+			if let Some(rest) = rest.strip_prefix('%') {
+				let mut parts = rest.splitn(2, '/');
+				let pattern = parts.next().unwrap_or("");
+				let repl = parts.next().unwrap_or("");
+				return Ok(ReplaceSuffix(pattern.to_string(), repl.to_string()));
+			} else if let Some(rest) = rest.strip_prefix('#') {
+				let mut parts = rest.splitn(2, '/');
+				let pattern = parts.next().unwrap_or("");
+				let repl = parts.next().unwrap_or("");
+				return Ok(ReplacePrefix(pattern.to_string(), repl.to_string()));
+			} else {
+				let mut parts = rest.splitn(2, '/');
+				let pattern = parts.next().unwrap_or("");
+				let repl = parts.next().unwrap_or("");
+				return Ok(ReplaceFirstMatch(pattern.to_string(), repl.to_string()));
+			}
 		}
 
 		// Fallback / assignment / alt
@@ -464,6 +476,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
 			'-' |
 			'+' |
 			'=' |
+			'/' |
 			'?' => {
 				rest.push(ch);
 				rest.push_str(&chars.collect::<String>());
@@ -582,7 +595,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
 			ParamExp::RemShortestSuffix(suffix) => {
 				let value = vars.get_var(&var_name);
 				let pattern = Pattern::new(&suffix).unwrap();
-				for i in 0..=value.len() {
+				for i in (0..=value.len()).rev() {
 					let sliced = &value[i..];
 					if pattern.matches(sliced) {
 						return Ok(value[..i].to_string());
@@ -593,7 +606,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
 			ParamExp::RemLongestSuffix(suffix) => {
 				let value = vars.get_var(&var_name);
 				let pattern = Pattern::new(&suffix).unwrap();
-				for i in (0..=value.len()).rev() {
+				for i in 0..=value.len() {
 					let sliced = &value[i..];
 					if pattern.matches(sliced) {
 						return Ok(value[..i].to_string());
@@ -679,21 +692,7 @@ fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
 	if anchored {
 		regex.push('$');
 	}
-	Regex::new(&regex).unwrap()
-}
-fn glob_to_regex_unanchored(glob: &str) -> Regex {
-	let mut regex = String::new();
-	for ch in glob.chars() {
-		match ch {
-			'*' => regex.push_str(".*"),
-			'?' => regex.push('.'),
-			'.' | '+' | '(' | ')' | '|' | '^' | '$' | '[' | ']' | '{' | '}' | '\\' => {
-				regex.push('\\');
-				regex.push(ch);
-			}
-			_ => regex.push(ch),
-		}
-	}
+	flog!(DEBUG, regex);
 	Regex::new(&regex).unwrap()
 }
 
