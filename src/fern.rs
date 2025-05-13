@@ -23,10 +23,58 @@ use crate::parse::execute::exec_input;
 use crate::signal::sig_setup;
 use crate::state::source_rc;
 use crate::prelude::*;
+use clap::Parser;
+use state::write_vars;
 
+#[derive(Parser,Debug)]
+struct FernArgs {
+	script: Option<String>,
+
+	#[arg(trailing_var_arg = true)]
+	script_args: Vec<String>,
+
+	#[arg(long)]
+	version: bool
+}
 
 
 fn main() {
+	let args = FernArgs::parse();
+	if args.version {
+		println!("fern {}", env!("CARGO_PKG_VERSION"));
+		return;
+	}
+
+	if let Some(path) = args.script {
+		run_script(path, args.script_args);
+	} else {
+		fern_interactive();
+	}
+}
+
+fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) {
+	let path = path.as_ref();
+	if !path.is_file() {
+		eprintln!("fern: Failed to open input file: {}", path.display());
+		exit(1);
+	}
+	let Ok(input) = fs::read_to_string(path) else {
+		eprintln!("fern: Failed to read input file: {}", path.display());
+		exit(1);
+	};
+
+	write_vars(|v| v.bpush_arg(path.to_string_lossy().to_string()));
+	for arg in args {
+		write_vars(|v| v.bpush_arg(arg))
+	}
+
+	if let Err(e) = exec_input(input) {
+		eprintln!("{e}");
+		exit(1);
+	}
+}
+
+fn fern_interactive() {
 	save_termios();
 	set_termios();
 	sig_setup();
@@ -59,5 +107,4 @@ fn main() {
 			eprintln!("{e}");
 		}
 	}
-	exit(1);
 }

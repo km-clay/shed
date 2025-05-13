@@ -11,6 +11,7 @@ debug = true
 
 [dependencies]
 bitflags = "2.8.0"
+clap = { version = "4.5.38", features = ["derive"] }
 glob = "0.3.2"
 insta = "1.42.2"
 nix = { version = "0.29.0", features = ["uio", "term", "user", "hostname", "fs", "default", "signal", "process", "event", "ioctl"] }
