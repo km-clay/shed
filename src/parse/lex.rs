@@ -2,7 +2,7 @@ use std::{collections::VecDeque, fmt::Display, iter::Peekable, ops::{Bound, Dere
 
 use bitflags::bitflags;
 
-use crate::{builtin::BUILTINS, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::CharDequeUtils}, prelude::*};
+use crate::{builtin::BUILTINS, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::CharDequeUtils}, parse::parse_err_full, prelude::*};
 
 pub const KEYWORDS: [&str;16] = [
 	"if",
@@ -327,6 +327,7 @@ impl LexStream {
 		}
 
 		while let Some(ch) = chars.next() {
+			flog!(DEBUG, "we are in the loop");
 			match ch {
 				_ if self.flags.contains(LexFlags::RAW) => {
 					if ch.is_whitespace() {
@@ -339,6 +340,61 @@ impl LexStream {
 					pos += 1;
 					if let Some(ch) = chars.next() {
 						pos += ch.len_utf8();
+					}
+				}
+				'`' => {
+					let arith_pos = pos;
+					pos += 1;
+					let mut closed = false;
+					while let Some(arith_ch) = chars.next() {
+						match arith_ch {
+							'\\' => {
+								pos += 1;
+								if let Some(ch) = chars.next() {
+									pos += ch.len_utf8();
+								}
+							}
+							'`' => {
+								pos += 1;
+								closed = true;
+								break
+							}
+							'$' if chars.peek() == Some(&'(') => {
+								pos += 2;
+								chars.next();
+								let mut cmdsub_count = 1;
+								while let Some(cmdsub_ch) = chars.next() {
+									match cmdsub_ch {
+										'$' if chars.peek() == Some(&'(') => {
+											pos += 2;
+											chars.next();
+											cmdsub_count += 1;
+										}
+										')' => {
+											pos += 1;
+											cmdsub_count -= 1;
+											if cmdsub_count == 0 {
+												break
+											}
+										}
+										_ => pos += cmdsub_ch.len_utf8()
+									}
+								}
+							}
+							_ => pos += arith_ch.len_utf8()
+						}
+					}
+					flog!(DEBUG, "we have left the loop");
+					flog!(DEBUG, closed);
+					if !closed && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+						self.cursor = pos;
+						return Err(
+							ShErr::full(
+								ShErrKind::ParseErr,
+								"Unclosed arithmetic substitution",
+								Span::new(arith_pos..arith_pos + 1, self.source.clone())
+							)
+						)
 					}
 				}
 				'$' if chars.peek() == Some(&'{') => {
@@ -396,6 +452,7 @@ impl LexStream {
 						}
 					}
 					if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+						self.cursor = pos;
 						return Err(
 							ShErr::full(
 								ShErrKind::ParseErr,
@@ -718,7 +775,10 @@ impl Iterator for LexStream {
 				} else {
 					match self.read_string() {
 						Ok(tk) => tk,
-						Err(e) => return Some(Err(e))
+						Err(e) => {
+							flog!(ERROR, e);
+							return Some(Err(e))
+						}
 					}
 				}
 			}

@@ -64,6 +64,7 @@ impl ParsedSrc {
 	pub fn parse_src(&mut self) -> Result<(),Vec<ShErr>> {
 		let mut tokens = vec![];
 		for lex_result in LexStream::new(self.src.clone(), LexFlags::empty()) {
+			flog!(DEBUG, lex_result);
 			match lex_result {
 				Ok(token) => tokens.push(token),
 				Err(error) => return Err(vec![error])

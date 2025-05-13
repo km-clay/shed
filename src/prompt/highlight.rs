@@ -1,5 +1,5 @@
 use std::{env, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, sync::Arc};
-use crate::{builtin::BUILTINS, prelude::*};
+use crate::builtin::BUILTINS;
 
 use rustyline::highlight::Highlighter;
 use crate::{libsh::term::{Style, StyleSet, Styled}, parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}, state::read_logic};

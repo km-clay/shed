@@ -1,5 +1,6 @@
 use std::collections::HashSet;
-use std::str::FromStr;
+use std::iter::Peekable;
+use std::str::{Chars, FromStr};
 
 use glob::Pattern;
 use regex::Regex;
@@ -22,6 +23,8 @@ pub const SNG_QUOTE: char = '\u{fdd2}';
 pub const TILDE_SUB: char = '\u{fdd3}';
 /// Subshell marker
 pub const SUBSH: char = '\u{fdd4}';
+/// Arithmetic substitution marker
+pub const ARITH_SUB: char = '\u{fdd5}';
 
 impl Tk {
 	/// Create a new expanded token
@@ -95,8 +98,6 @@ impl Expander {
 	pub fn expand_raw(&self) -> ShResult<String> {
 		let mut chars = self.raw.chars().peekable();
 		let mut result = String::new();
-		let mut var_name = String::new();
-		let mut in_brace = false;
 		flog!(INFO, self.raw);
 
 		while let Some(ch) = chars.next() {
@@ -105,56 +106,85 @@ impl Expander {
 					let home = env::var("HOME").unwrap_or_default();
 					result.push_str(&home);
 				}
-				VAR_SUB => {
-					while let Some(ch) = chars.next() {
-						flog!(INFO,ch);
-						flog!(INFO,var_name);
-						match ch {
-							SUBSH if var_name.is_empty() => {
-								let mut subsh_body = String::new();
-								while let Some(ch) = chars.next() {
-									match ch {
-										SUBSH => {
-											break
+				ARITH_SUB => {
+					let mut body = String::new();
+					while let Some(arith_ch) = chars.next() {
+						match arith_ch {
+							VAR_SUB => {
+								let expanded = expand_var(&mut chars)?;
+								if is_a_number(&expanded) {
+									body.push_str(&expanded);
+								} else {
+									return Err(
+										ShErr::Simple {
+											kind: ShErrKind::ParseErr,
+											msg: format!("Expected a number during substitution, found '{}'",&expanded),
+											notes: vec![],
 										}
-										_ => subsh_body.push(ch)
-									}
+									)
 								}
-								let expanded = expand_cmd_sub(&subsh_body)?;
-								flog!(INFO, expanded);
-								result.push_str(&expanded);
 							}
-							'{' if var_name.is_empty() => in_brace = true,
-							'}' if in_brace => {
-								flog!(DEBUG, var_name);
-								let var_val = perform_param_expansion(&var_name)?;
-								result.push_str(&var_val);
-								var_name.clear();
-								break
-							}
-							_ if in_brace => {
-								var_name.push(ch)
-							}
-							_ if is_hard_sep(ch) || ch == DUB_QUOTE || ch == SUBSH || ch == '/' => {
-								let var_val = read_vars(|v| v.get_var(&var_name));
-								result.push_str(&var_val);
-								result.push(ch);
-								var_name.clear();
-								break
-							}
-							_ => var_name.push(ch),
+							ARITH_SUB => break,
+							_ => body.push(arith_ch)
 						}
 					}
-					if !var_name.is_empty() {
-						let var_val = read_vars(|v| v.get_var(&var_name));
-						result.push_str(&var_val);
-						var_name.clear();
-					}
+					let expanded = expand_arithmetic(&body)?;
+					result.push_str(&expanded);
+				}
+				VAR_SUB => {
+					let expanded = expand_var(&mut chars)?;
+					result.push_str(&expanded);
 				}
 				_ => result.push(ch)
 			}
 		}
 		Ok(result)
+	}
+}
+
+pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
+	let mut var_name = String::new();
+	let mut in_brace = false;
+	while let Some(&ch) = chars.peek() {
+		match ch {
+			SUBSH if var_name.is_empty() => {
+				chars.next(); // now safe to consume
+				let mut subsh_body = String::new();
+				while let Some(c) = chars.next() {
+					if c == SUBSH { break }
+					subsh_body.push(c);
+				}
+				let expanded = expand_cmd_sub(&subsh_body)?;
+				return Ok(expanded);
+			}
+			'{' if var_name.is_empty() => {
+				chars.next(); // consume the brace
+				in_brace = true;
+			}
+			'}' if in_brace => {
+				chars.next(); // consume the brace
+				let val = perform_param_expansion(&var_name)?;
+				return Ok(val);
+			}
+			ch if in_brace => {
+				chars.next(); // safe to consume
+				var_name.push(ch);
+			}
+			ch if is_hard_sep(ch) || ch == ARITH_SUB || ch == DUB_QUOTE || ch == SUBSH || ch == '/' => {
+				let val = read_vars(|v| v.get_var(&var_name));
+				return Ok(val); 
+			}
+			_ => {
+				chars.next(); 
+				var_name.push(ch);
+			}
+		}
+	}
+	if !var_name.is_empty() {
+		let var_val = read_vars(|v| v.get_var(&var_name));
+		Ok(var_val)
+	} else {
+		Ok(String::new())
 	}
 }
 
@@ -169,6 +199,178 @@ pub fn expand_glob(raw: &str) -> ShResult<String> {
 		words.push(entry.to_str().unwrap().to_string())
 	}
 	Ok(words.join(" "))
+}
+
+pub fn is_a_number(raw: &str) -> bool {
+	let trimmed = raw.trim();
+	trimmed.parse::<i32>().is_ok() || trimmed.parse::<f64>().is_ok()
+}
+
+enum ArithTk {
+	Num(f64),
+	Op(ArithOp),
+	LParen,
+	RParen
+}
+
+impl ArithTk {
+	pub fn tokenize(raw: &str) -> ShResult<Vec<Self>> {
+		let mut tokens = Vec::new();
+		let mut chars = raw.chars().peekable();
+
+		while let Some(&ch) = chars.peek() {
+			match ch {
+				' ' | '\t' => { chars.next(); }
+				'0'..='9' | '.' => {
+					let mut num = String::new();
+					while let Some(&digit) = chars.peek() {
+						if digit.is_ascii_digit() || digit == '.' {
+							num.push(digit);
+							chars.next();
+						} else {
+							break;
+						}
+					}
+					let Ok(num) = num.parse::<f64>() else {
+						panic!()
+					};
+					tokens.push(Self::Num(num));
+				}
+				'+' | '-' | '*' | '/' | '%' => {
+					let mut buf = String::new();
+					buf.push(ch);
+					tokens.push(Self::Op(buf.parse::<ArithOp>().unwrap()));
+					chars.next();
+				}
+				'(' => { tokens.push(Self::LParen); chars.next(); }
+				')' => { tokens.push(Self::RParen); chars.next(); }
+				_ => return Err(ShErr::Simple { kind: ShErrKind::ParseErr, msg: "Invalid character in arithmetic substitution".into(), notes: vec![] })
+			}
+		}
+
+		Ok(tokens)
+	}
+
+	fn to_rpn(tokens: Vec<ArithTk>) -> ShResult<Vec<ArithTk>> {
+		let mut output = Vec::new();
+		let mut ops = Vec::new();
+
+		fn precedence(op: &ArithOp) -> usize {
+			match op {
+				ArithOp::Add | 
+				ArithOp::Sub => 1,
+				ArithOp::Mul |
+				ArithOp::Div |
+				ArithOp::Mod => 2,
+			}
+		}
+
+		for token in tokens {
+			match token {
+				ArithTk::Num(_) => output.push(token),
+				ArithTk::Op(op1) => {
+					while let Some(ArithTk::Op(op2)) = ops.last() {
+						if precedence(op2) >= precedence(&op1) {
+							output.push(ops.pop().unwrap());
+						} else {
+							break;
+						}
+					}
+					ops.push(ArithTk::Op(op1));
+				}
+				ArithTk::LParen => ops.push(ArithTk::LParen),
+				ArithTk::RParen => {
+					while let Some(top) = ops.pop() {
+						if let ArithTk::LParen = top {
+							break;
+						} else {
+							output.push(top);
+						}
+					}
+				}
+			}
+		}
+
+		while let Some(op) = ops.pop() {
+			output.push(op);
+		}
+
+		Ok(output)
+	}
+	pub fn eval_rpn(tokens: Vec<ArithTk>) -> ShResult<f64> {
+		let mut stack = Vec::new();
+
+		for token in tokens {
+			match token {
+				ArithTk::Num(n) => stack.push(n),
+				ArithTk::Op(op) => {
+					let rhs = stack.pop().ok_or(ShErr::Simple {
+						kind: ShErrKind::ParseErr,
+						msg: "Missing right-hand operand".into(),
+						notes: vec![],
+					})?;
+					let lhs = stack.pop().ok_or(ShErr::Simple {
+						kind: ShErrKind::ParseErr,
+						msg: "Missing left-hand operand".into(),
+						notes: vec![],
+					})?;
+					let result = match op {
+						ArithOp::Add => lhs + rhs,
+						ArithOp::Sub => lhs - rhs,
+						ArithOp::Mul => lhs * rhs,
+						ArithOp::Div => lhs / rhs,
+						ArithOp::Mod => lhs % rhs,
+					};
+					stack.push(result);
+				}
+				_ => return Err(ShErr::Simple {
+					kind: ShErrKind::ParseErr,
+					msg: "Unexpected token during evaluation".into(),
+					notes: vec![],
+				}),
+			}
+		}
+
+		if stack.len() != 1 {
+			return Err(ShErr::Simple {
+				kind: ShErrKind::ParseErr,
+				msg: "Invalid arithmetic expression".into(),
+				notes: vec![],
+			});
+		}
+
+		Ok(stack[0])
+	}
+}
+
+enum ArithOp {
+	Add,
+	Sub,
+	Mul,
+	Div,
+	Mod,
+}
+
+impl FromStr for ArithOp {
+	type Err = ShErr;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		assert!(s.len() == 1);
+		match s.chars().next().unwrap() {
+			'+' => Ok(Self::Add),
+			'-' => Ok(Self::Sub),
+			'*' => Ok(Self::Mul),
+			'/' => Ok(Self::Div),
+			'%' => Ok(Self::Mod),
+			_ => Err(ShErr::Simple { kind: ShErrKind::ParseErr, msg: "Invalid arithmetic operator".into(), notes: vec![] })
+		}
+	}
+}
+
+pub fn expand_arithmetic(raw: &str) -> ShResult<String> {
+	let tokens = ArithTk::tokenize(raw)?;
+	let rpn = ArithTk::to_rpn(tokens)?;
+	let result = ArithTk::eval_rpn(rpn)?;
+	Ok(result.to_string())
 }
 
 /// Get the command output of a given command input as a String
@@ -227,6 +429,63 @@ pub fn unescape_str(raw: &str) -> String {
 			'\\' => {
 				if let Some(next_ch) = chars.next() {
 					result.push(next_ch)
+				}
+			}
+			'`' => {
+				result.push(ARITH_SUB);
+				let mut closed = false;
+				while let Some(arith_ch) = chars.next() {
+					match arith_ch {
+						'\\' => {
+							result.push(arith_ch);
+							if let Some(next_ch) = chars.next() {
+								result.push(next_ch)
+							}
+						}
+						'`' => {
+							closed = true;
+							result.push(ARITH_SUB);
+							break
+						}
+						'$' if chars.peek() == Some(&'(') => {
+							result.push(VAR_SUB);
+							result.push(SUBSH);
+							chars.next();
+							let mut cmdsub_count = 1;
+							while let Some(cmdsub_ch) = chars.next() {
+								flog!(DEBUG, cmdsub_count);
+								flog!(DEBUG, cmdsub_ch);
+								match cmdsub_ch {
+									'\\' => {
+										result.push(cmdsub_ch);
+										if let Some(next_ch) = chars.next() {
+											result.push(next_ch)
+										}
+									}
+									'$' if chars.peek() == Some(&'(') => {
+										cmdsub_count += 1;
+										result.push(cmdsub_ch);
+										result.push(chars.next().unwrap());
+									}
+									')' => {
+										cmdsub_count -= 1;
+										flog!(DEBUG, cmdsub_count);
+										if cmdsub_count == 0 {
+											result.push(SUBSH);
+											break
+										} else {
+											result.push(cmdsub_ch);
+										}
+									}
+									_ => result.push(cmdsub_ch)
+								}
+							}
+						}
+						'$' => {
+							result.push(VAR_SUB);
+						}
+						_ => result.push(arith_ch)
+					}
 				}
 			}
 			'(' => {

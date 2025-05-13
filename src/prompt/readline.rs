@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use rustyline::{completion::Completer, hint::{Hint, Hinter}, history::SearchDirection, validate::{ValidationResult, Validator}, Helper};
 
 use crate::{libsh::term::{Style, Styled}, parse::{lex::{LexFlags, LexStream}, ParseStream}};
