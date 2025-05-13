@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
 
-use crate::{builtin::{alias::{alias, unalias}, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, shopt::shopt, source::source, zoltraak::zoltraak}, expand::expand_aliases, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, get_snapshots, read_logic, restore_snapshot, write_logic, write_meta, write_vars, ShFunc, VarTab, LOGIC_TABLE}};
+use crate::{builtin::{alias::{alias, unalias}, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{continue_job, jobs, JobBehavior}, pwd::pwd, shift::shift, shopt::shopt, source::source, test::double_bracket_test, zoltraak::zoltraak}, expand::expand_aliases, jobs::{dispatch_job, ChildProc, JobBldr, JobStack}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils}, prelude::*, procio::{IoFrame, IoMode, IoStack}, state::{self, get_snapshots, read_logic, restore_snapshot, write_logic, write_meta, write_vars, ShFunc, VarTab, LOGIC_TABLE}};
 
 use super::{lex::{Span, Tk, TkFlags, KEYWORDS}, AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node, ParsedSrc, Redir, RedirType};
 
@@ -86,6 +86,7 @@ impl Dispatcher {
 			NdRule::BraceGrp {..} => self.exec_brc_grp(node)?,
 			NdRule::FuncDef {..} => self.exec_func_def(node)?,
 			NdRule::Command {..} => self.dispatch_cmd(node)?,
+			NdRule::Test {..} => self.exec_test(node)?,
 			_ => unreachable!()
 		}
 		Ok(())
@@ -120,6 +121,14 @@ impl Dispatcher {
 				ConjunctOp::Or => if status == 0 { break },
 				ConjunctOp::Null => break
 			}
+		}
+		Ok(())
+	}
+	pub fn exec_test(&mut self, node: Node) -> ShResult<()> {
+		let test_result = double_bracket_test(node)?;
+		match test_result {
+			true => state::set_status(0),
+			false => state::set_status(1),
 		}
 		Ok(())
 	}
@@ -159,7 +168,7 @@ impl Dispatcher {
 			unreachable!()
 		};
 
-		self.set_assignments(assignments, AssignBehavior::Export);
+		self.set_assignments(assignments, AssignBehavior::Export)?;
 		self.io_stack.append_to_frame(subsh.redirs);
 		let mut argv = prepare_argv(argv)?;
 
@@ -181,7 +190,7 @@ impl Dispatcher {
 			unreachable!()
 		};
 
-		self.set_assignments(assignments, AssignBehavior::Export);
+		self.set_assignments(assignments, AssignBehavior::Export)?;
 
 		self.io_stack.append_to_frame(func.redirs);
 

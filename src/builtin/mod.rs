@@ -13,6 +13,7 @@ pub mod alias;
 pub mod flowctl;
 pub mod zoltraak;
 pub mod shopt;
+pub mod test; // [[ ]] thing
 
 pub const BUILTINS: [&str;19] = [
 	"echo",
@@ -33,7 +34,7 @@ pub const BUILTINS: [&str;19] = [
 	"zoltraak",
 	"shopt",
 	"builtin",
-	"command"
+	"command",
 ];
 
 /// Sets up a builtin command

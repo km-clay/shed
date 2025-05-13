@@ -9,6 +9,30 @@ use crate::{libsh::{error::{Note, ShErr, ShErrKind, ShResult}, utils::TkVecUtils
 pub mod lex;
 pub mod execute;
 
+pub const TEST_UNARY_OPS: [&str; 21] = [
+	"-a",
+	"-b",
+	"-c",
+	"-d",
+	"-e",
+	"-f",
+	"-g",
+	"-h",
+	"-L",
+	"-k",
+	"-p",
+	"-r",
+	"-s",
+	"-S",
+	"-t",
+	"-u",
+	"-w",
+	"-x",
+	"-O",
+	"-G",
+	"-N",
+];
+
 /// Try to match a specific parsing rule
 ///
 /// # Notes
@@ -277,6 +301,94 @@ pub enum LoopKind {
 	Until
 }
 
+#[derive(Clone,Debug)]
+pub enum TestCase {
+	Unary {
+		operator: Tk,
+		operand: Tk,
+		conjunct: Option<ConjunctOp>
+	}, 
+	Binary { 
+		lhs: Tk,
+		operator: Tk,
+		rhs: Tk,
+		conjunct: Option<ConjunctOp>
+	}
+}
+
+#[derive(Default,Clone,Debug)]
+pub struct TestCaseBuilder {
+	lhs: Option<Tk>,
+	operator: Option<Tk>,
+	rhs: Option<Tk>,
+	conjunct: Option<ConjunctOp>
+}
+
+impl TestCaseBuilder {
+	pub fn new() -> Self {
+		Self::default()
+	}
+	pub fn is_empty(&self) -> bool {
+		self.lhs.is_none() &&
+		self.operator.is_none() &&
+		self.rhs.is_none() &&
+		self.conjunct.is_none()
+	}
+	pub fn with_lhs(self, lhs: Tk) -> Self {
+		let Self { lhs: _, operator, rhs, conjunct } = self;
+		Self { lhs: Some(lhs), operator, rhs, conjunct }
+	}
+	pub fn with_rhs(self, rhs: Tk) -> Self {
+		let Self { lhs, operator, rhs: _, conjunct } = self;
+		Self { lhs, operator, rhs: Some(rhs), conjunct }
+	}
+	pub fn with_operator(self, operator: Tk) -> Self {
+		let Self { lhs, operator: _, rhs, conjunct } = self;
+		Self { lhs, operator: Some(operator), rhs, conjunct }
+	}
+	pub fn with_conjunction(self, conjunction: ConjunctOp) -> Self {
+		let Self { lhs, operator, rhs, conjunct: _ } = self;
+		Self { lhs, operator, rhs, conjunct: Some(conjunction) }
+	}
+	pub fn can_build(&self) -> bool {
+		self.operator.is_some() &&
+		self.rhs.is_some()
+	}
+	pub fn build(self) -> TestCase {
+		let Self { lhs, operator, rhs, conjunct } = self;
+		if let Some(lhs) = lhs {
+			TestCase::Binary { 
+				lhs,
+				operator: operator.unwrap(),
+				rhs: rhs.unwrap(),
+				conjunct 
+			}
+		} else {
+			TestCase::Unary {
+				operator: operator.unwrap(),
+				operand: rhs.unwrap(),
+				conjunct 
+			}
+		}
+	}
+	pub fn build_and_take(&mut self) -> TestCase {
+		if self.lhs.is_some() {
+			TestCase::Binary {
+				lhs: self.lhs.take().unwrap(),
+				operator: self.operator.take().unwrap(),
+				rhs: self.rhs.take().unwrap(),
+				conjunct: self.conjunct.take(),
+			}
+		} else {
+			TestCase::Unary {
+				operator: self.operator.take().unwrap(),
+				operand: self.rhs.take().unwrap(),
+				conjunct: self.conjunct.take(),
+			}
+		}
+	}
+}
+
 impl FromStr for LoopKind {
 	type Err = ShErr;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -317,6 +429,7 @@ pub enum NdRule {
 	Conjunction { elements: Vec<ConjunctNode> },
 	Assignment { kind: AssignKind, var: Tk, val: Tk },
 	BraceGrp { body: Vec<Node> },
+	Test { cases: Vec<TestCase> },
 	FuncDef { name: Tk, body: Box<Node> }
 }
 
@@ -423,6 +536,7 @@ impl ParseStream {
 		try_match!(self.parse_loop()?);
 		try_match!(self.parse_for()?);
 		try_match!(self.parse_if()?);
+		try_match!(self.parse_test()?);
 		if check_pipelines {
 			try_match!(self.parse_pipeln()?);
 		} else {
@@ -500,6 +614,88 @@ impl ParseStream {
 				break
 			}
 		}
+	}
+	fn parse_test(&mut self) -> ShResult<Option<Node>> {
+		let mut node_tks: Vec<Tk> = vec![];
+		let mut cases: Vec<TestCase> = vec![];
+		flog!(INFO, self.check_keyword("[["));
+		if !self.check_keyword("[[") || !self.next_tk_is_some() {
+			return Ok(None)
+		}
+		node_tks.push(self.next_tk().unwrap());
+		let mut case_builder = TestCaseBuilder::new();
+		while let Some(tk) = self.next_tk() {
+			flog!(DEBUG, case_builder);
+			flog!(DEBUG, tk.as_str());
+			node_tks.push(tk.clone());
+			if tk.as_str() == "]]" {
+				if case_builder.can_build() {
+					let case = case_builder.build_and_take();
+					cases.push(case);
+					break
+				} else if cases.is_empty() {
+					return Err(
+						parse_err_full("Malformed test call", &node_tks.get_span().unwrap())
+					)
+				} else {
+					break
+				}
+			}
+			if case_builder.is_empty() {
+				flog!(DEBUG, "case builder is empty");
+				match tk.as_str() {
+					_ if TEST_UNARY_OPS.contains(&tk.as_str()) => case_builder = case_builder.with_operator(tk.clone()),
+					_ => case_builder = case_builder.with_lhs(tk.clone())
+				}
+				continue
+			} else if case_builder.operator.is_some() && case_builder.rhs.is_none() {
+				flog!(DEBUG, "op is some, rhs is none");
+				case_builder = case_builder.with_rhs(tk.clone());
+				continue
+			} else if case_builder.lhs.is_some() && case_builder.operator.is_none() {
+				flog!(DEBUG, "lhs is some, op is none");
+				// we got lhs, then rhs → treat it as operator maybe?
+				case_builder = case_builder.with_operator(tk.clone());
+				continue
+			} else if let TkRule::And | TkRule::Or = tk.class {
+				flog!(DEBUG, "found conjunction");
+				flog!(DEBUG, tk.class);
+				if case_builder.can_build() {
+					if case_builder.conjunct.is_some() {
+						return Err(
+							parse_err_full("Invalid placement for logical operator in test", &node_tks.get_span().unwrap())
+						)
+					}
+					let op = match tk.class {
+						TkRule::And => ConjunctOp::And,
+						TkRule::Or => ConjunctOp::Or,
+						_ => unreachable!()
+					};
+					case_builder = case_builder.with_conjunction(op);
+					let case = case_builder.build_and_take();
+					cases.push(case);
+					flog!(DEBUG, case_builder);
+					continue
+				} else {
+					return Err(
+						parse_err_full("Invalid placement for logical operator in test", &node_tks.get_span().unwrap())
+					)
+				}
+			}
+			if case_builder.can_build() {
+				let case = case_builder.build_and_take();
+				cases.push(case);
+			} 
+		}
+		self.catch_separator(&mut node_tks);
+		let node: Node = Node { 
+			class: NdRule::Test { cases },
+			flags: NdFlags::empty(),
+			redirs: vec![],
+			tokens: node_tks 
+		};
+		flog!(DEBUG, node);
+		Ok(Some(node))
 	}
 	fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<Node>> {
 		let mut node_tks: Vec<Tk> = vec![];
@@ -1364,5 +1560,6 @@ pub fn node_operation<F1,F2>(node: &mut Node, filter: &F1, operation: &mut F2)
 		NdRule::FuncDef { name: _, ref mut body } => {
 			check_node(body,filter,operation)
 		}
+		NdRule::Test { cases: _ } => (),
 	}
 }

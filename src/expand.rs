@@ -350,7 +350,7 @@ pub enum ParamExp {
 	ReplaceAllMatches(String,String), // //search/replace
 	ReplacePrefix(String,String), // #search/replace
 	ReplaceSuffix(String,String), // %search/replace
-	VarNamesWithSuffix(String), // !prefix@ || !prefix*
+	VarNamesWithPrefix(String), // !prefix@ || !prefix*
 	ExpandInnerVar(String), // !var
 }
 
@@ -369,7 +369,7 @@ impl FromStr for ParamExp {
 		// Handle indirect var expansion: ${!var}
 		if let Some(var) = s.strip_prefix('!') {
 			if var.ends_with('*') || var.ends_with('@') {
-				return Ok(VarNamesWithSuffix(var.to_string()));
+				return Ok(VarNamesWithPrefix(var.to_string()));
 			}
 			return Ok(ExpandInnerVar(var.to_string()));
 		}
@@ -665,8 +665,19 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
 				}
 				Ok(value)
 			}
-			ParamExp::VarNamesWithSuffix(suffix) => todo!(),
-			ParamExp::ExpandInnerVar(var_name) => todo!(),
+			ParamExp::VarNamesWithPrefix(prefix) => {
+				let mut match_vars = vec![];
+				for var in vars.vars().keys() {
+					if var.starts_with(&prefix) {
+						match_vars.push(var.clone())
+					}
+				}
+				Ok(match_vars.join(" "))
+			}
+			ParamExp::ExpandInnerVar(var_name) => {
+				let value = vars.get_var(&var_name);
+				Ok(vars.get_var(&value))
+			}
 		}
 	} else {
 		Ok(vars.get_var(&var_name))

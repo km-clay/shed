@@ -4,7 +4,7 @@ use bitflags::bitflags;
 
 use crate::{builtin::BUILTINS, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::CharDequeUtils}, prelude::*};
 
-pub const KEYWORDS: [&str;14] = [
+pub const KEYWORDS: [&str;16] = [
 	"if",
 	"then",
 	"elif",
@@ -19,6 +19,8 @@ pub const KEYWORDS: [&str;14] = [
 	"done",
 	"case",
 	"esac",
+	"[[",
+	"]]"
 ];
 
 pub const OPENERS: [&str;6] = [
