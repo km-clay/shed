@@ -24,6 +24,8 @@ pub mod expand;
 pub mod term;
 pub mod error;
 pub mod getopt;
+pub mod script;
+pub mod highlight;
 
 /// Unsafe to use outside of tests
 pub fn get_nodes<F1>(input: &str, filter: F1) -> Vec<Node>

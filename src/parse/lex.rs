@@ -427,7 +427,7 @@ impl LexStream {
 				'$' if chars.peek() == Some(&'(') => {
 					pos += 2;
 					chars.next();
-					let mut paren_count = 0;
+					let mut paren_count = 1;
 					let paren_pos = pos;
 					while let Some(ch) = chars.next() {
 						match ch {
@@ -444,7 +444,7 @@ impl LexStream {
 							')' => {
 								pos += 1;
 								paren_count -= 1;
-								if paren_count >= 0 {
+								if paren_count <= 0 {
 									break
 								}
 							}
@@ -461,34 +461,38 @@ impl LexStream {
 							)
 						)
 					}
+					let mut cmdsub_tk = self.get_token(self.cursor..pos, TkRule::Str);
+					cmdsub_tk.flags |= TkFlags::IS_CMDSUB;
+					self.cursor = pos;
+					return Ok(cmdsub_tk)
 				}
 				'(' if self.next_is_cmd() => {
-					let mut paren_stack = vec!['('];
+					pos += 1;
+					let mut paren_count = 1;
 					let paren_pos = pos;
 					while let Some(ch) = chars.next() {
-						pos += ch.len_utf8();
 						match ch {
 							'\\' => {
+								pos += 1;
 								if let Some(next_ch) = chars.next() {
 									pos += next_ch.len_utf8();
 								}
 							}
 							'(' => {
 								pos += 1;
-								paren_stack.push(ch);
+								paren_count += 1;
 							}
 							')' => {
 								pos += 1;
-								paren_stack.pop();
-								if paren_stack.is_empty() {
+								paren_count -= 1;
+								if paren_count <= 0 {
 									break
 								}
 							}
-							_ => continue
+							_ => pos += ch.len_utf8()
 						}
 					}
-					if !paren_stack.is_empty() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-						self.cursor = pos;
+					if paren_count != 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
 						return Err(
 							ShErr::full(
 								ShErrKind::ParseErr,
@@ -502,6 +506,7 @@ impl LexStream {
 					subsh_tk.flags |= TkFlags::IS_SUBSH;
 					self.cursor = pos;
 					self.set_next_is_cmd(true);
+					flog!(DEBUG, "returning subsh tk");
 					return Ok(subsh_tk)
 				}
 				'{' if pos == self.cursor && self.next_is_cmd() => {
@@ -666,6 +671,8 @@ impl LexStream {
 impl Iterator for LexStream {
 	type Item = ShResult<Tk>;
 	fn next(&mut self) -> Option<Self::Item> {
+		flog!(DEBUG,self.cursor);
+		flog!(DEBUG,self.source.len());
 		assert!(self.cursor <= self.source.len());
 		// We are at the end of the input
 		if self.cursor == self.source.len() {
