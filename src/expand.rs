@@ -23,8 +23,6 @@ pub const SNG_QUOTE: char = '\u{fdd2}';
 pub const TILDE_SUB: char = '\u{fdd3}';
 /// Subshell marker
 pub const SUBSH: char = '\u{fdd4}';
-/// Arithmetic substitution marker
-pub const ARITH_SUB: char = '\u{fdd5}';
 
 impl Tk {
 	/// Create a new expanded token
@@ -59,7 +57,8 @@ impl Expander {
 		Self { raw: unescaped }
 	}
 	pub fn expand(&mut self) -> ShResult<Vec<String>> {
-		self.raw = self.expand_raw()?;
+		let mut chars = self.raw.chars().peekable();
+		self.raw = expand_raw(&mut chars)?;
 		if let Ok(glob_exp) = expand_glob(&self.raw) {
 			if !glob_exp.is_empty() {
 				self.raw = glob_exp;
@@ -95,51 +94,26 @@ impl Expander {
 		}
 		words
 	}
-	pub fn expand_raw(&self) -> ShResult<String> {
-		let mut chars = self.raw.chars().peekable();
-		let mut result = String::new();
-		flog!(INFO, self.raw);
+}
 
-		while let Some(ch) = chars.next() {
-			match ch {
-				TILDE_SUB => {
-					let home = env::var("HOME").unwrap_or_default();
-					result.push_str(&home);
-				}
-				ARITH_SUB => {
-					let mut body = String::new();
-					while let Some(arith_ch) = chars.next() {
-						match arith_ch {
-							VAR_SUB => {
-								let expanded = expand_var(&mut chars)?;
-								if is_a_number(&expanded) {
-									body.push_str(&expanded);
-								} else {
-									return Err(
-										ShErr::Simple {
-											kind: ShErrKind::ParseErr,
-											msg: format!("Expected a number during substitution, found '{}'",&expanded),
-											notes: vec![],
-										}
-									)
-								}
-							}
-							ARITH_SUB => break,
-							_ => body.push(arith_ch)
-						}
-					}
-					let expanded = expand_arithmetic(&body)?;
-					result.push_str(&expanded);
-				}
-				VAR_SUB => {
-					let expanded = expand_var(&mut chars)?;
-					result.push_str(&expanded);
-				}
-				_ => result.push(ch)
+pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
+	let mut result = String::new();
+
+	while let Some(ch) = chars.next() {
+		match ch {
+			TILDE_SUB => {
+				let home = env::var("HOME").unwrap_or_default();
+				result.push_str(&home);
 			}
+			VAR_SUB => {
+				flog!(INFO, chars);
+				let expanded = expand_var(chars)?;
+				result.push_str(&expanded);
+			}
+			_ => result.push(ch)
 		}
-		Ok(result)
 	}
+	Ok(result)
 }
 
 pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
@@ -170,8 +144,11 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 				chars.next(); // safe to consume
 				var_name.push(ch);
 			}
-			ch if is_hard_sep(ch) || ch == ARITH_SUB || ch == DUB_QUOTE || ch == SUBSH || ch == '/' => {
+			ch if is_hard_sep(ch) || !(ch.is_alphanumeric() || ch == '_' || ch == '-') => {
 				let val = read_vars(|v| v.get_var(&var_name));
+				flog!(INFO,var_name);
+				flog!(INFO,val);
+				flog!(INFO,ch);
 				return Ok(val); 
 			}
 			_ => {
@@ -182,6 +159,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 	}
 	if !var_name.is_empty() {
 		let var_val = read_vars(|v| v.get_var(&var_name));
+		flog!(INFO,var_val);
 		Ok(var_val)
 	} else {
 		Ok(String::new())
@@ -367,7 +345,14 @@ impl FromStr for ArithOp {
 }
 
 pub fn expand_arithmetic(raw: &str) -> ShResult<String> {
-	let tokens = ArithTk::tokenize(raw)?;
+	let body = raw
+		.strip_prefix('(')
+		.unwrap()
+		.strip_suffix(')')
+		.unwrap(); // Unwraps are safe here, we already checked for the parens
+	let unescaped = unescape_math(body); 
+	let expanded = expand_raw(&mut unescaped.chars().peekable())?;
+	let tokens = ArithTk::tokenize(&expanded)?;
 	let rpn = ArithTk::to_rpn(tokens)?;
 	let result = ArithTk::eval_rpn(rpn)?;
 	Ok(result.to_string())
@@ -377,6 +362,11 @@ pub fn expand_arithmetic(raw: &str) -> ShResult<String> {
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
 	flog!(DEBUG, "in expand_cmd_sub");
 	flog!(DEBUG, raw);
+	if raw.starts_with('(') && raw.ends_with(')') {
+		if let Ok(output) = expand_arithmetic(raw) {
+			return Ok(output) // It's actually an arithmetic sub
+		}
+	}
 	let (rpipe,wpipe) = IoMode::get_pipes();
 	let cmd_sub_redir = Redir::new(wpipe, RedirType::Output);
 	let mut cmd_sub_io_frame = IoFrame::from_redir(cmd_sub_redir);
@@ -429,63 +419,6 @@ pub fn unescape_str(raw: &str) -> String {
 			'\\' => {
 				if let Some(next_ch) = chars.next() {
 					result.push(next_ch)
-				}
-			}
-			'`' => {
-				result.push(ARITH_SUB);
-				let mut closed = false;
-				while let Some(arith_ch) = chars.next() {
-					match arith_ch {
-						'\\' => {
-							result.push(arith_ch);
-							if let Some(next_ch) = chars.next() {
-								result.push(next_ch)
-							}
-						}
-						'`' => {
-							closed = true;
-							result.push(ARITH_SUB);
-							break
-						}
-						'$' if chars.peek() == Some(&'(') => {
-							result.push(VAR_SUB);
-							result.push(SUBSH);
-							chars.next();
-							let mut cmdsub_count = 1;
-							while let Some(cmdsub_ch) = chars.next() {
-								flog!(DEBUG, cmdsub_count);
-								flog!(DEBUG, cmdsub_ch);
-								match cmdsub_ch {
-									'\\' => {
-										result.push(cmdsub_ch);
-										if let Some(next_ch) = chars.next() {
-											result.push(next_ch)
-										}
-									}
-									'$' if chars.peek() == Some(&'(') => {
-										cmdsub_count += 1;
-										result.push(cmdsub_ch);
-										result.push(chars.next().unwrap());
-									}
-									')' => {
-										cmdsub_count -= 1;
-										flog!(DEBUG, cmdsub_count);
-										if cmdsub_count == 0 {
-											result.push(SUBSH);
-											break
-										} else {
-											result.push(cmdsub_ch);
-										}
-									}
-									_ => result.push(cmdsub_ch)
-								}
-							}
-						}
-						'$' => {
-							result.push(VAR_SUB);
-						}
-						_ => result.push(arith_ch)
-					}
 				}
 			}
 			'(' => {
@@ -585,6 +518,59 @@ pub fn unescape_str(raw: &str) -> String {
 		}
 		first_char = false;
 	}
+	flog!(DEBUG, result);
+	result
+}
+
+pub fn unescape_math(raw: &str) -> String {
+	let mut chars = raw.chars().peekable();
+	let mut result = String::new();
+
+	while let Some(ch) = chars.next() {
+		flog!(DEBUG,result);
+		match ch {
+			'\\' => {
+				if let Some(next_ch) = chars.next() {
+					result.push(next_ch)
+				}
+			}
+			'$' => {
+				result.push(VAR_SUB);
+				if chars.peek() == Some(&'(') {
+					result.push(SUBSH);
+					chars.next();
+					let mut paren_count = 1;
+					while let Some(subsh_ch) = chars.next() {
+						match subsh_ch {
+							'\\' => {
+								result.push(subsh_ch);
+								if let Some(next_ch) = chars.next() {
+									result.push(next_ch)
+								}
+							}
+							'$' if chars.peek() != Some(&'(') => result.push(VAR_SUB),
+							'(' => {
+								paren_count += 1;
+								result.push(subsh_ch)
+							}
+							')' => {
+								paren_count -= 1;
+								if paren_count == 0 {
+									result.push(SUBSH);
+									break
+								} else {
+									result.push(subsh_ch)
+								}
+							}
+							_ => result.push(subsh_ch)
+						}
+					}
+				}
+			}
+			_ => result.push(ch)
+		}
+	}
+	flog!(INFO, result);
 	result
 }
 

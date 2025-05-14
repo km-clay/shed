@@ -493,6 +493,7 @@ impl LexStream {
 						}
 					}
 					if paren_count != 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+						self.cursor = pos;
 						return Err(
 							ShErr::full(
 								ShErrKind::ParseErr,
