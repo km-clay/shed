@@ -529,7 +529,6 @@ impl ParseStream {
 	/// Ordered from specialized to general, with more generally matchable stuff appearing at the bottom
 	/// The check_pipelines parameter is used to prevent left-recursion issues in self.parse_pipeln()
 	fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
-		flog!(DEBUG, self.tokens);
 		try_match!(self.parse_func_def()?);
 		try_match!(self.parse_brc_grp(false /* from_func_def */)?);
 		try_match!(self.parse_case()?);
@@ -618,15 +617,12 @@ impl ParseStream {
 	fn parse_test(&mut self) -> ShResult<Option<Node>> {
 		let mut node_tks: Vec<Tk> = vec![];
 		let mut cases: Vec<TestCase> = vec![];
-		flog!(INFO, self.check_keyword("[["));
 		if !self.check_keyword("[[") || !self.next_tk_is_some() {
 			return Ok(None)
 		}
 		node_tks.push(self.next_tk().unwrap());
 		let mut case_builder = TestCaseBuilder::new();
 		while let Some(tk) = self.next_tk() {
-			flog!(DEBUG, case_builder);
-			flog!(DEBUG, tk.as_str());
 			node_tks.push(tk.clone());
 			if tk.as_str() == "]]" {
 				if case_builder.can_build() {
@@ -642,24 +638,19 @@ impl ParseStream {
 				}
 			}
 			if case_builder.is_empty() {
-				flog!(DEBUG, "case builder is empty");
 				match tk.as_str() {
 					_ if TEST_UNARY_OPS.contains(&tk.as_str()) => case_builder = case_builder.with_operator(tk.clone()),
 					_ => case_builder = case_builder.with_lhs(tk.clone())
 				}
 				continue
 			} else if case_builder.operator.is_some() && case_builder.rhs.is_none() {
-				flog!(DEBUG, "op is some, rhs is none");
 				case_builder = case_builder.with_rhs(tk.clone());
 				continue
 			} else if case_builder.lhs.is_some() && case_builder.operator.is_none() {
-				flog!(DEBUG, "lhs is some, op is none");
 				// we got lhs, then rhs → treat it as operator maybe?
 				case_builder = case_builder.with_operator(tk.clone());
 				continue
 			} else if let TkRule::And | TkRule::Or = tk.class {
-				flog!(DEBUG, "found conjunction");
-				flog!(DEBUG, tk.class);
 				if case_builder.can_build() {
 					if case_builder.conjunct.is_some() {
 						return Err(
@@ -674,7 +665,6 @@ impl ParseStream {
 					case_builder = case_builder.with_conjunction(op);
 					let case = case_builder.build_and_take();
 					cases.push(case);
-					flog!(DEBUG, case_builder);
 					continue
 				} else {
 					return Err(
@@ -694,7 +684,6 @@ impl ParseStream {
 			redirs: vec![],
 			tokens: node_tks 
 		};
-		flog!(DEBUG, node);
 		Ok(Some(node))
 	}
 	fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<Node>> {
@@ -1114,7 +1103,6 @@ impl ParseStream {
 		node_tks.push(loop_tk);
 		self.catch_separator(&mut node_tks);
 
-		flog!(DEBUG, node_tks);
 		let Some(cond) = self.parse_block(true)? else {
 			self.panic_mode(&mut node_tks);
 			return Err(parse_err_full(
@@ -1225,7 +1213,6 @@ impl ParseStream {
 				return Ok(None)
 			}
 		}
-		flog!(DEBUG, argv);
 
 		if argv.is_empty() && assignments.is_empty() {
 			return Ok(None)

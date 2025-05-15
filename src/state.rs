@@ -170,7 +170,7 @@ impl VarTab {
 		let hostname = gethostname().map(|hname| hname.to_string_lossy().to_string()).unwrap_or_default();
 
 		env::set_var("IFS", " \t\n");
-		env::set_var("HOSTNAME", hostname);
+		env::set_var("HOST", hostname.clone());
 		env::set_var("UID", uid.to_string());
 		env::set_var("PPID", getppid().to_string());
 		env::set_var("TMPDIR", "/tmp");
@@ -448,6 +448,6 @@ pub fn source_file(path: PathBuf) -> ShResult<()> {
 
 	let mut buf = String::new();
 	file.read_to_string(&mut buf)?;
-	exec_input(buf)?;
+	exec_input(buf,None)?;
 	Ok(())
 }

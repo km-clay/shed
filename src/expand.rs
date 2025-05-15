@@ -5,8 +5,8 @@ use std::str::{Chars, FromStr};
 use glob::Pattern;
 use regex::Regex;
 
-use crate::state::{read_vars, write_meta, write_vars, LogTab};
-use crate::procio::{IoBuf, IoFrame, IoMode};
+use crate::state::{read_jobs, read_vars, write_jobs, write_meta, write_vars, LogTab};
+use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::prelude::*;
 use crate::parse::{Redir, RedirType};
 use crate::parse::execute::exec_input;
@@ -23,6 +23,10 @@ pub const SNG_QUOTE: char = '\u{fdd2}';
 pub const TILDE_SUB: char = '\u{fdd3}';
 /// Subshell marker
 pub const SUBSH: char = '\u{fdd4}';
+/// Input process sub marker
+pub const PROC_SUB_IN: char = '\u{fdd5}';
+/// Output process sub marker
+pub const PROC_SUB_OUT: char = '\u{fdd6}';
 
 impl Tk {
 	/// Create a new expanded token
@@ -104,6 +108,28 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 			TILDE_SUB => {
 				let home = env::var("HOME").unwrap_or_default();
 				result.push_str(&home);
+			}
+			PROC_SUB_OUT =>{
+				let mut inner = String::new();
+				while let Some(ch) = chars.next() {
+					match ch {
+						PROC_SUB_OUT => break,
+						_ => inner.push(ch)
+					}
+				}
+				let fd_path = expand_proc_sub(&inner, false)?;
+				result.push_str(&fd_path);
+			}
+			PROC_SUB_IN =>{
+				let mut inner = String::new();
+				while let Some(ch) = chars.next() {
+					match ch {
+						PROC_SUB_IN => break,
+						_ => inner.push(ch)
+					}
+				}
+				let fd_path = expand_proc_sub(&inner, true)?;
+				result.push_str(&fd_path);
 			}
 			VAR_SUB => {
 				flog!(INFO, chars);
@@ -358,6 +384,41 @@ pub fn expand_arithmetic(raw: &str) -> ShResult<String> {
 	Ok(result.to_string())
 }
 
+pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
+	// FIXME: Still a lot of issues here
+	// Seems like debugging will be a massive effort
+	let (rpipe, wpipe) = IoMode::get_pipes();
+	let rpipe_raw = rpipe.src_fd();
+	let wpipe_raw = wpipe.src_fd();
+
+	let (proc_fd, register_fd, redir_type, path) = match is_input {
+		false => (wpipe, rpipe, RedirType::Output, format!("/proc/self/fd/{}", rpipe_raw)),
+		true => (rpipe, wpipe, RedirType::Input, format!("/proc/self/fd/{}", wpipe_raw)),
+	};
+
+	match unsafe { fork()? } {
+		ForkResult::Child => {
+			let redir = Redir::new(proc_fd, redir_type);
+			let io_frame = IoFrame::from_redir(redir);
+			let mut io_stack = IoStack::new();
+			io_stack.push_frame(io_frame);
+
+			if let Err(e) = exec_input(raw.to_string(), Some(io_stack)) {
+				eprintln!("{e}");
+				exit(1);
+			}
+			exit(0);
+		}
+		ForkResult::Parent { child } => {
+			write_jobs(|j| j.register_fd(child, register_fd));
+			let registered = read_jobs(|j| j.registered_fds().to_vec());
+			flog!(DEBUG,registered);
+			// Do not wait; process may run in background
+			Ok(path)
+		}
+	}
+} 
+
 /// Get the command output of a given command input as a String
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
 	flog!(DEBUG, "in expand_cmd_sub");
@@ -369,17 +430,14 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
 	}
 	let (rpipe,wpipe) = IoMode::get_pipes();
 	let cmd_sub_redir = Redir::new(wpipe, RedirType::Output);
-	let mut cmd_sub_io_frame = IoFrame::from_redir(cmd_sub_redir);
+	let cmd_sub_io_frame = IoFrame::from_redir(cmd_sub_redir);
+	let mut io_stack = IoStack::new();
 	let mut io_buf = IoBuf::new(rpipe);
 
 	match unsafe { fork()? } {
 		ForkResult::Child => {
-			if let Err(e) = cmd_sub_io_frame.redirect() {
-				eprintln!("{e}");
-				exit(1);
-			}
-
-			if let Err(e) = exec_input(raw.to_string()) {
+			io_stack.push_frame(cmd_sub_io_frame);
+			if let Err(e) = exec_input(raw.to_string(), Some(io_stack)) {
 				eprintln!("{e}");
 				exit(1);
 			}
@@ -411,7 +469,6 @@ pub fn unescape_str(raw: &str) -> String {
 
 
 	while let Some(ch) = chars.next() {
-		flog!(DEBUG,result);
 		match ch {
 			'~' if first_char => {
 				result.push(TILDE_SUB)
@@ -464,10 +521,9 @@ pub fn unescape_str(raw: &str) -> String {
 							result.push(VAR_SUB);
 							if chars.peek() == Some(&'(') {
 								chars.next();
-								let mut cmdsub_count = 1;
+								let mut paren_count = 1;
 								result.push(SUBSH);
 								while let Some(subsh_ch) = chars.next() {
-									flog!(DEBUG, subsh_ch);
 									match subsh_ch {
 										'\\' => {
 											result.push(subsh_ch);
@@ -475,13 +531,13 @@ pub fn unescape_str(raw: &str) -> String {
 												result.push(next_ch)
 											}
 										}
-										'$' if chars.peek() == Some(&'(') => {
+										'(' => {
 											result.push(subsh_ch);
-											cmdsub_count += 1;
+											paren_count += 1;
 										}
 										')' => {
-											cmdsub_count -= 1;
-											if cmdsub_count <= 0 {
+											paren_count -= 1;
+											if paren_count <= 0 {
 												result.push(SUBSH);
 												break
 											} else {
@@ -513,12 +569,69 @@ pub fn unescape_str(raw: &str) -> String {
 					}
 				}
 			}
+			'<' if chars.peek() == Some(&'(') => {
+				chars.next();
+				let mut paren_count = 1;
+				result.push(PROC_SUB_OUT);
+				while let Some(subsh_ch) = chars.next() {
+					match subsh_ch {
+						'\\' => {
+							result.push(subsh_ch);
+							if let Some(next_ch) = chars.next() {
+								result.push(next_ch)
+							}
+						}
+						'(' => {
+							result.push(subsh_ch);
+							paren_count += 1;
+						}
+						')' => {
+							paren_count -= 1;
+							if paren_count <= 0 {
+								result.push(PROC_SUB_OUT);
+								break
+							} else {
+								result.push(subsh_ch);
+							}
+						}
+						_ => result.push(subsh_ch),
+					}
+				}
+			}
+			'>' if chars.peek() == Some(&'(') => {
+				chars.next();
+				let mut paren_count = 1;
+				result.push(PROC_SUB_IN);
+				while let Some(subsh_ch) = chars.next() {
+					match subsh_ch {
+						'\\' => {
+							result.push(subsh_ch);
+							if let Some(next_ch) = chars.next() {
+								result.push(next_ch)
+							}
+						}
+						'(' => {
+							result.push(subsh_ch);
+							paren_count += 1;
+						}
+						')' => {
+							paren_count -= 1;
+							if paren_count <= 0 {
+								result.push(PROC_SUB_IN);
+								break
+							} else {
+								result.push(subsh_ch);
+							}
+						}
+						_ => result.push(subsh_ch),
+					}
+				}
+			}
 			'$' => result.push(VAR_SUB),
 			_ => result.push(ch)
 		}
 		first_char = false;
 	}
-	flog!(DEBUG, result);
 	result
 }
 
@@ -1277,16 +1390,16 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 				}
 			}
 			PromptTk::Pwd => {
-				let mut pwd = std::env::var("PWD")?;
-				let home = std::env::var("HOME")?;
+				let mut pwd = std::env::var("PWD").unwrap();
+				let home = std::env::var("HOME").unwrap();
 				if pwd.starts_with(&home) {
 					pwd = pwd.replacen(&home, "~", 1);
 				}
 				result.push_str(&pwd);
 			}
 			PromptTk::PwdShort => {
-				let mut path = std::env::var("PWD")?;
-				let home = std::env::var("HOME")?;
+				let mut path = std::env::var("PWD").unwrap();
+				let home = std::env::var("HOME").unwrap();
 				if path.starts_with(&home) {
 					path = path.replacen(&home, "~", 1);
 				}
@@ -1305,17 +1418,17 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 				result.push_str(&path_rebuilt);
 			}
 			PromptTk::Hostname => {
-				let hostname = std::env::var("HOSTNAME")?;
+				let hostname = std::env::var("HOST").unwrap();
 				result.push_str(&hostname);
 			}
 			PromptTk::HostnameShort => todo!(),
 			PromptTk::ShellName => result.push_str("fern"),
 			PromptTk::Username => {
-				let username = std::env::var("USER")?;
+				let username = std::env::var("USER").unwrap();
 				result.push_str(&username);
 			}
 			PromptTk::PromptSymbol => {
-				let uid = std::env::var("UID")?;
+				let uid = std::env::var("UID").unwrap();
 				let symbol = if &uid == "0" {
 					'#'
 				} else {

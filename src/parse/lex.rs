@@ -2,7 +2,7 @@ use std::{collections::VecDeque, fmt::Display, iter::Peekable, ops::{Bound, Dere
 
 use bitflags::bitflags;
 
-use crate::{builtin::BUILTINS, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::CharDequeUtils}, parse::parse_err_full, prelude::*};
+use crate::{builtin::BUILTINS, libsh::{error::{ShErr, ShErrKind, ShResult}, utils::CharDequeUtils}, prelude::*};
 
 pub const KEYWORDS: [&str;16] = [
 	"if",
@@ -136,15 +136,16 @@ impl Display for Tk {
 bitflags! {
 	#[derive(Debug,Clone,Copy,PartialEq,Default)]
 	pub struct TkFlags: u32 {
-		const KEYWORD   = 0b0000000000000001;
-		/// This is a   keyword that opens a new block statement, like 'if' and 'while'
-		const OPENER    = 0b0000000000000010;
-		const IS_CMD    = 0b0000000000000100;
-		const IS_SUBSH  = 0b0000000000001000;
-		const IS_CMDSUB = 0b0000000000010000;
-		const IS_OP     = 0b0000000000100000;
-		const ASSIGN    = 0b0000000001000000;
-		const BUILTIN   = 0b0000000010000000;
+		const KEYWORD      = 0b0000000000000001;
+		/// This is a      keyword that opens a new block statement, like 'if' and 'while'
+		const OPENER       = 0b0000000000000010;
+		const IS_CMD       = 0b0000000000000100;
+		const IS_SUBSH     = 0b0000000000001000;
+		const IS_CMDSUB    = 0b0000000000010000;
+		const IS_OP        = 0b0000000000100000;
+		const ASSIGN       = 0b0000000001000000;
+		const BUILTIN      = 0b0000000010000000;
+		const IS_PROCSUB   = 0b0000000100000000;
 	}
 }
 
@@ -242,6 +243,9 @@ impl LexStream {
 		while let Some(ch) = chars.next() {
 			match ch {
 				'>' => {
+					if chars.peek() == Some(&'(') {
+						return None // It's a process sub
+					}
 					pos += 1;
 					if let Some('>') = chars.peek() {
 						chars.next();
@@ -277,6 +281,9 @@ impl LexStream {
 					}
 				}
 				'<' => {
+					if chars.peek() == Some(&'(') {
+						return None // It's a process sub
+					}
 					pos += 1;
 
 					for _ in 0..2 {
@@ -327,7 +334,6 @@ impl LexStream {
 		}
 
 		while let Some(ch) = chars.next() {
-			flog!(DEBUG, "we are in the loop");
 			match ch {
 				_ if self.flags.contains(LexFlags::RAW) => {
 					if ch.is_whitespace() {
@@ -340,61 +346,6 @@ impl LexStream {
 					pos += 1;
 					if let Some(ch) = chars.next() {
 						pos += ch.len_utf8();
-					}
-				}
-				'`' => {
-					let arith_pos = pos;
-					pos += 1;
-					let mut closed = false;
-					while let Some(arith_ch) = chars.next() {
-						match arith_ch {
-							'\\' => {
-								pos += 1;
-								if let Some(ch) = chars.next() {
-									pos += ch.len_utf8();
-								}
-							}
-							'`' => {
-								pos += 1;
-								closed = true;
-								break
-							}
-							'$' if chars.peek() == Some(&'(') => {
-								pos += 2;
-								chars.next();
-								let mut cmdsub_count = 1;
-								while let Some(cmdsub_ch) = chars.next() {
-									match cmdsub_ch {
-										'$' if chars.peek() == Some(&'(') => {
-											pos += 2;
-											chars.next();
-											cmdsub_count += 1;
-										}
-										')' => {
-											pos += 1;
-											cmdsub_count -= 1;
-											if cmdsub_count == 0 {
-												break
-											}
-										}
-										_ => pos += cmdsub_ch.len_utf8()
-									}
-								}
-							}
-							_ => pos += arith_ch.len_utf8()
-						}
-					}
-					flog!(DEBUG, "we have left the loop");
-					flog!(DEBUG, closed);
-					if !closed && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-						self.cursor = pos;
-						return Err(
-							ShErr::full(
-								ShErrKind::ParseErr,
-								"Unclosed arithmetic substitution",
-								Span::new(arith_pos..arith_pos + 1, self.source.clone())
-							)
-						)
 					}
 				}
 				'$' if chars.peek() == Some(&'{') => {
@@ -423,6 +374,90 @@ impl LexStream {
 							_ => pos += ch.len_utf8()
 						}
 					}
+				}
+				'<' if chars.peek() == Some(&'(') => {
+					pos += 2;
+					chars.next();
+					let mut paren_count = 1;
+					let paren_pos = pos;
+					while let Some(ch) = chars.next() {
+						match ch {
+							'\\' => {
+								pos += 1;
+								if let Some(next_ch) = chars.next() {
+									pos += next_ch.len_utf8();
+								}
+							}
+							'(' => {
+								pos += 1;
+								paren_count += 1;
+							}
+							')' => {
+								pos += 1;
+								paren_count -= 1;
+								if paren_count <= 0 {
+									break
+								}
+							}
+							_ => pos += ch.len_utf8()
+						}
+					}
+					if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+						self.cursor = pos;
+						return Err(
+							ShErr::full(
+								ShErrKind::ParseErr,
+								"Unclosed subshell",
+								Span::new(paren_pos..paren_pos + 1, self.source.clone())
+							)
+						)
+					}
+					let mut proc_sub_tk = self.get_token(self.cursor..pos, TkRule::Str);
+					proc_sub_tk.flags |= TkFlags::IS_PROCSUB;
+					self.cursor = pos;
+					return Ok(proc_sub_tk)
+				}
+				'>' if chars.peek() == Some(&'(') => {
+					pos += 2;
+					chars.next();
+					let mut paren_count = 1;
+					let paren_pos = pos;
+					while let Some(ch) = chars.next() {
+						match ch {
+							'\\' => {
+								pos += 1;
+								if let Some(next_ch) = chars.next() {
+									pos += next_ch.len_utf8();
+								}
+							}
+							'(' => {
+								pos += 1;
+								paren_count += 1;
+							}
+							')' => {
+								pos += 1;
+								paren_count -= 1;
+								if paren_count <= 0 {
+									break
+								}
+							}
+							_ => pos += ch.len_utf8()
+						}
+					}
+					if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+						self.cursor = pos;
+						return Err(
+							ShErr::full(
+								ShErrKind::ParseErr,
+								"Unclosed subshell",
+								Span::new(paren_pos..paren_pos + 1, self.source.clone())
+							)
+						)
+					}
+					let mut proc_sub_tk = self.get_token(self.cursor..pos, TkRule::Str);
+					proc_sub_tk.flags |= TkFlags::IS_PROCSUB;
+					self.cursor = pos;
+					return Ok(proc_sub_tk)
 				}
 				'$' if chars.peek() == Some(&'(') => {
 					pos += 2;
@@ -507,7 +542,6 @@ impl LexStream {
 					subsh_tk.flags |= TkFlags::IS_SUBSH;
 					self.cursor = pos;
 					self.set_next_is_cmd(true);
-					flog!(DEBUG, "returning subsh tk");
 					return Ok(subsh_tk)
 				}
 				'{' if pos == self.cursor && self.next_is_cmd() => {
@@ -672,8 +706,6 @@ impl LexStream {
 impl Iterator for LexStream {
 	type Item = ShResult<Tk>;
 	fn next(&mut self) -> Option<Self::Item> {
-		flog!(DEBUG,self.cursor);
-		flog!(DEBUG,self.source.len());
 		assert!(self.cursor <= self.source.len());
 		// We are at the end of the input
 		if self.cursor == self.source.len() {

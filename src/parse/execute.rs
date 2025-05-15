@@ -39,7 +39,7 @@ impl ExecArgs {
 	}
 }
 
-pub fn exec_input(input: String) -> ShResult<()> {
+pub fn exec_input(input: String, io_stack: Option<IoStack>) -> ShResult<()> {
 	write_meta(|m| m.start_timer());
 	let log_tab = LOGIC_TABLE.read().unwrap();
 	let input = expand_aliases(input, HashSet::new(), &log_tab);
@@ -53,6 +53,9 @@ pub fn exec_input(input: String) -> ShResult<()> {
 	}
 
 	let mut dispatcher = Dispatcher::new(parser.extract_nodes());
+	if let Some(mut stack) = io_stack {
+		dispatcher.io_stack.extend(stack.drain(..));
+	}
 	dispatcher.begin_dispatch()
 }
 
@@ -176,7 +179,7 @@ impl Dispatcher {
 		let subsh_body = subsh.0.to_string();
 		let snapshot = get_snapshots();
 
-		if let Err(e) = exec_input(subsh_body) {
+		if let Err(e) = exec_input(subsh_body, None) {
 			restore_snapshot(snapshot);
 			return Err(e)
 		}

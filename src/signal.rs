@@ -120,6 +120,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
 	 * We can reasonably assume that if it is not a foreground job, then it exists in the job table
 	 * If this assumption is incorrect, the code has gone wrong somewhere.
 	 */
+	write_jobs(|j| j.close_job_fds(pid));
 	if let Some((
 		pgid,
 		is_fg,
@@ -131,6 +132,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
 			let is_fg = fg_pgid.is_some_and(|fg| fg == pgid);
 			job.update_by_id(JobID::Pid(pid), status).unwrap();
 			let is_finished = !job.running();
+
 
 			if let Some(child) = job.children_mut().iter_mut().find(|chld| pid == chld.pid()) {
 				child.set_stat(status);

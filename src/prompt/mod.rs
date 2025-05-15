@@ -6,7 +6,7 @@ use std::path::Path;
 use readline::FernReadline;
 use rustyline::{error::ReadlineError, history::FileHistory, ColorMode, Config, Editor};
 
-use crate::{expand::expand_prompt, libsh::{error::ShResult, term::{Style, Styled}}, prelude::*, state::read_shopts};
+use crate::{expand::expand_prompt, libsh::error::ShResult, prelude::*, state::read_shopts};
 
 /// Initialize the line editor
 fn init_rl() -> ShResult<Editor<FernReadline,FileHistory>> {
@@ -45,7 +45,11 @@ fn init_rl() -> ShResult<Editor<FernReadline,FileHistory>> {
 
 fn get_prompt() -> ShResult<String> {
 	let Ok(prompt) = env::var("PS1") else {
-		return Ok("$ ".styled(Style::Green | Style::Bold))
+		// username@hostname
+		// short/path/to/pwd/
+		// $
+		let default = "\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$ ";
+		return Ok(format!("\n{}",expand_prompt(default)?))
 	};
 
 	Ok(format!("\n{}",expand_prompt(&prompt)?))

@@ -24,7 +24,7 @@ use crate::signal::sig_setup;
 use crate::state::source_rc;
 use crate::prelude::*;
 use clap::Parser;
-use state::write_vars;
+use state::{read_vars, write_vars};
 
 #[derive(Parser,Debug)]
 struct FernArgs {
@@ -37,8 +37,20 @@ struct FernArgs {
 	version: bool
 }
 
+/// Force evaluation of lazily-initialized values early in shell startup.
+///
+/// In particular, this ensures that the variable table is initialized, which populates
+/// environment variables from the system. If this initialization is deferred too long,
+/// features like prompt expansion may fail due to missing environment variables.
+///
+/// This function triggers initialization by calling `read_vars` with a no-op closure,
+/// which forces access to the variable table and causes its `LazyLock` constructor to run.
+fn kickstart_lazy_evals() {
+	read_vars(|_| {}); 
+}
 
 fn main() {
+	kickstart_lazy_evals();
 	let args = FernArgs::parse();
 	if args.version {
 		println!("fern {}", env!("CARGO_PKG_VERSION"));
@@ -68,7 +80,7 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) {
 		write_vars(|v| v.bpush_arg(arg))
 	}
 
-	if let Err(e) = exec_input(input) {
+	if let Err(e) = exec_input(input,None) {
 		eprintln!("{e}");
 		exit(1);
 	}
@@ -94,7 +106,7 @@ fn fern_interactive() {
 			Err(e) => {
 				eprintln!("{e}");
 				readline_err_count += 1;
-				if readline_err_count == 5 {
+				if readline_err_count == 20 {
 					eprintln!("reached maximum readline error count, exiting");
 					break
 				} else {
@@ -103,7 +115,7 @@ fn fern_interactive() {
 			}
 		};
 
-		if let Err(e) = exec_input(input) {
+		if let Err(e) = exec_input(input,None) {
 			eprintln!("{e}");
 		}
 	}

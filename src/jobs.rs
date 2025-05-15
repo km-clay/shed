@@ -1,4 +1,4 @@
-use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*, procio::borrow_fd, state::{self, set_status, write_jobs}};
+use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*, procio::{borrow_fd, IoMode}, state::{self, set_status, write_jobs}};
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
 
@@ -120,12 +120,19 @@ impl ChildProc {
 	}
 }
 
+#[derive(Clone,Debug)]
+pub struct RegisteredFd {
+	pub fd: IoMode,
+	pub owner_pid: Pid,
+}
+
 #[derive(Default,Debug)]
 pub struct JobTab {
 	fg: Option<Job>,
 	order: Vec<usize>,
 	new_updates: Vec<usize>,
-	jobs: Vec<Option<Job>>
+	jobs: Vec<Option<Job>>,
+	fd_registry: Vec<RegisteredFd>
 }
 
 impl JobTab {
@@ -153,6 +160,19 @@ impl JobTab {
 	}
 	pub fn prev_job(&self) -> Option<usize> {
 		self.order.last().copied()
+	}
+	pub fn close_job_fds(&mut self, pid: Pid) {
+		self.fd_registry.retain(|fd| fd.owner_pid != pid)
+	}
+	pub fn registered_fds(&self) -> &[RegisteredFd] {
+		&self.fd_registry
+	}
+	pub fn register_fd(&mut self, owner_pid: Pid, fd: IoMode) {
+		let registered_fd = RegisteredFd {
+			fd,
+			owner_pid
+		};
+		self.fd_registry.push(registered_fd)
 	}
 	fn prune_jobs(&mut self) {
 		while let Some(job) = self.jobs.last() {
