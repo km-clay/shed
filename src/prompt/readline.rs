@@ -3,7 +3,7 @@ use std::{arch::asm, os::fd::BorrowedFd};
 use nix::{libc::STDIN_FILENO, sys::termios::{self, Termios}, unistd::read};
 use unicode_width::UnicodeWidthStr;
 
-use crate::{libsh::error::ShResult, prelude::*};
+use crate::{libsh::{error::ShResult, sys::sh_quit}, prelude::*};
 
 #[derive(Clone,Copy,Debug)]
 pub enum Key {
@@ -17,6 +17,59 @@ pub enum Key {
 	Right,
 	Ctrl(char),
 	Unknown,
+}
+
+#[derive(Clone,Debug)]
+pub enum EditAction {
+	Return,
+	Exit(i32),
+	ClearTerm,
+	ClearLine,
+	Signal(i32),
+	MoveCursorStart,
+	MoveCursorEnd,
+	MoveCursorLeft, // Ctrl + B
+	MoveCursorRight, // Ctrl + F
+	DelWordBack,
+	DelFromCursor,
+	Backspace, // The Ctrl+H version
+	RedrawScreen,
+	HistNext,
+	HistPrev,
+	InsMode(InsAction),
+	NormMode(NormAction),
+}
+
+#[derive(Clone,Debug)]
+pub enum InsAction {
+	InsChar(char),
+	Backspace, // The backspace version
+	Delete,
+	Esc,
+	MoveLeft, // Left Arrow
+	MoveRight, // Right Arrow
+	MoveUp,
+	MoveDown
+}
+
+#[derive(Clone,Debug)]
+pub enum NormAction {
+	Count(usize),
+	Motion(Motion),
+}
+
+#[derive(Clone,Debug)]
+pub enum Motion {
+}
+
+impl EditAction {
+	pub fn is_return(&self) -> bool {
+		if let Self::Return = self {
+			true
+		} else {
+			false
+		}
+	}
 }
 
 #[derive(Debug)]
@@ -123,7 +176,7 @@ pub struct FernReader {
 	pub term: Terminal,
 	pub prompt: String,
 	pub line: LineBuf,
-	pub editor: EditMode
+	pub edit_mode: EditMode
 }
 
 impl FernReader {
@@ -132,49 +185,176 @@ impl FernReader {
 			term: Terminal::new(),
 			prompt,
 			line: Default::default(),
-			editor: Default::default()
+			edit_mode: Default::default()
 		}
 	}
-	fn pack_line(&self) -> String {
+	fn pack_line(&mut self) -> String {
 		self.line
 			.buffer
 			.iter()
 			.collect::<String>()
 	}
 	pub fn readline(&mut self) -> ShResult<String> {
-		self.display_line(false);
+		self.display_line(/*refresh: */ false);
 		loop {
-			let key = self.read_key().unwrap();
-			self.process_key(key);
-			self.display_line(true);
-			if let Key::Enter = key {
-				self.term.write_bytes(b"\r");
-				break
+			let cmds = self.get_cmds();
+			for cmd in &cmds {
+				if cmd.is_return() {
+					self.term.write_bytes(b"\r\n");
+					return Ok(self.pack_line())
+				}
+			}
+			self.process_cmds(cmds)?;
+			self.display_line(/* refresh: */ true);
+		}
+	}
+	pub fn process_cmds(&mut self, cmds: Vec<EditAction>) -> ShResult<()> {
+		for cmd in cmds {
+			match cmd {
+				EditAction::Exit(code) => {
+					self.term.write_bytes(b"\r\n");
+					sh_quit(code)
+				}
+				EditAction::ClearTerm => todo!(),
+				EditAction::ClearLine => todo!(),
+				EditAction::Signal(sig) => todo!(),
+				EditAction::MoveCursorStart => self.line.move_cursor_start(),
+				EditAction::MoveCursorEnd => self.line.move_cursor_end(),
+				EditAction::MoveCursorLeft => self.line.move_cursor_left(),
+				EditAction::MoveCursorRight => self.line.move_cursor_right(),
+				EditAction::DelWordBack => todo!(),
+				EditAction::DelFromCursor => self.line.del_from_cursor(),
+				EditAction::Backspace => todo!(),
+				EditAction::RedrawScreen => todo!(),
+				EditAction::HistNext => todo!(),
+				EditAction::HistPrev => todo!(),
+				EditAction::InsMode(ins_action) => self.process_ins_cmd(ins_action)?,
+				EditAction::NormMode(norm_action) => self.process_norm_cmd(norm_action)?,
+				EditAction::Return => unreachable!(), // handled earlier
 			}
 		}
-		Ok(self.pack_line())
+
+		Ok(())
 	}
-	pub fn process_key(&mut self, key: Key) {
+	pub fn process_ins_cmd(&mut self, cmd: InsAction) -> ShResult<()> {
+		match cmd {
+			InsAction::InsChar(ch) => self.line.insert_at_cursor(ch),
+			InsAction::Backspace => self.line.backspace_at_cursor(),
+			InsAction::Delete => todo!(),
+			InsAction::Esc => todo!(),
+			InsAction::MoveLeft => self.line.move_cursor_left(),
+			InsAction::MoveRight => self.line.move_cursor_right(),
+			InsAction::MoveUp => todo!(),
+			InsAction::MoveDown => todo!(),
+		}
+		Ok(())
+	}
+	pub fn process_norm_cmd(&mut self, cmd: NormAction) -> ShResult<()> {
+		match cmd {
+			NormAction::Count(num) => todo!(),
+			NormAction::Motion(motion) => todo!(),
+		}
+		Ok(())
+	}
+	pub fn get_cmds(&mut self) -> Vec<EditAction> {
+		match self.edit_mode {
+			EditMode::Normal => todo!(),
+			EditMode::Insert => {
+				let key = self.read_key().unwrap();
+				self.process_key(key)
+			}
+		}
+	}
+	pub fn process_key(&mut self, key: Key) -> Vec<EditAction> {
+		match self.edit_mode {
+			EditMode::Normal => todo!(),
+			EditMode::Insert => self.process_key_insert_mode(key)
+		}
+	}
+	pub fn process_key_insert_mode(&mut self, key: Key) -> Vec<EditAction> {
 		match key {
 			Key::Char(ch) => {
-				self.line.insert_at_cursor(ch);
+				vec![EditAction::InsMode(InsAction::InsChar(ch))]
 			}
 			Key::Enter => {
-				self.line.insert_at_cursor('\n');
+				vec![EditAction::Return]
 			}
-			Key::Backspace => self.line.backspace_at_cursor(),
-			Key::Esc => todo!(),
-			Key::Up => todo!(),
-			Key::Down => todo!(),
-			Key::Left => self.line.move_cursor_left(),
-			Key::Right => self.line.move_cursor_right(),
-			Key::Ctrl(ctrl) => todo!(),
-			Key::Unknown => todo!(),
+			Key::Backspace => {
+				vec![EditAction::InsMode(InsAction::Backspace)]
+			}
+			Key::Esc => {
+				vec![EditAction::InsMode(InsAction::Esc)]
+			}
+			Key::Up => {
+				vec![EditAction::InsMode(InsAction::MoveUp)]
+			}
+			Key::Down => {
+				vec![EditAction::InsMode(InsAction::MoveDown)]
+			}
+			Key::Left => {
+				vec![EditAction::InsMode(InsAction::MoveLeft)]
+			}
+			Key::Right => {
+				vec![EditAction::InsMode(InsAction::MoveRight)]
+			}
+			Key::Ctrl(ctrl) => self.process_ctrl(ctrl),
+			Key::Unknown => unimplemented!("Unknown key received: {key:?}")
+		}
+	}
+	pub fn process_ctrl(&mut self, ctrl: char) -> Vec<EditAction> {
+		match ctrl {
+			'D' => {
+				if self.line.buffer.is_empty() {
+					vec![EditAction::Exit(0)]
+				} else {
+					vec![EditAction::Return]
+				}
+			}
+			'C' => {
+				vec![EditAction::ClearLine]
+			}
+			'Z' => {
+				vec![EditAction::Signal(20)] // SIGTSTP
+			}
+			'A' => {
+				vec![EditAction::MoveCursorStart]
+			}
+			'E' => {
+				vec![EditAction::MoveCursorEnd]
+			}
+			'B' => {
+				vec![EditAction::MoveCursorLeft]
+			}
+			'F' => {
+				vec![EditAction::MoveCursorRight]
+			}
+			'U' => {
+				vec![EditAction::ClearLine]
+			}
+			'W' => {
+				vec![EditAction::DelWordBack]
+			}
+			'K' => {
+				vec![EditAction::DelFromCursor]
+			}
+			'H' => {
+				vec![EditAction::Backspace]
+			}
+			'L' => {
+				vec![EditAction::RedrawScreen]
+			}
+			'N' => {
+				vec![EditAction::HistNext]
+			}
+			'P' => {
+				vec![EditAction::HistPrev]
+			}
+			_ => unimplemented!("Unhandled control character: {ctrl}")
 		}
 	}
 	fn clear_line(&self) {
 		let prompt_lines = self.prompt.lines().count();
-		let buf_lines = self.line.count_lines().saturating_sub(1); // One of the buffer's lines will overlap with the prompt
+		let buf_lines = self.line.count_lines().saturating_sub(1); // One of the buffer's lines will overlap with the prompt. probably.
 		let total = prompt_lines + buf_lines;
 		self.term.write_bytes(b"\r\n");
 		for _ in 0..total {
@@ -182,7 +362,7 @@ impl FernReader {
 		}
 		self.term.write_bytes(b"\r\x1b[2K");
 	}
-	fn display_line(&self, refresh: bool) {
+	fn display_line(&mut self, refresh: bool) {
 		if refresh {
 			self.clear_line();
 		}
@@ -196,7 +376,8 @@ impl FernReader {
 				self.term.writeln(line);
 			}
 		}
-		self.term.write(&self.pack_line());
+		let line = self.pack_line();
+		self.term.write(&line);
 
 		let cursor_offset = self.line.cursor + last_line_len;
 		self.term.write_bytes(format!("\r\x1b[{}C", cursor_offset).as_bytes());
@@ -267,8 +448,20 @@ impl LineBuf {
 	pub fn move_cursor_left(&mut self) {
 		self.cursor = self.cursor.saturating_sub(1);
 	}
+	pub fn move_cursor_start(&mut self) {
+		self.cursor = 0;
+	}
+	pub fn move_cursor_end(&mut self) {
+		self.cursor = self.buffer.len();
+	}
 	pub fn move_cursor_right(&mut self) {
+		if self.cursor == self.buffer.len() {
+			return
+		}
 		self.cursor = self.cursor.saturating_add(1);
+	}
+	pub fn del_from_cursor(&mut self) {
+		self.buffer.truncate(self.cursor);
 	}
 }
 
