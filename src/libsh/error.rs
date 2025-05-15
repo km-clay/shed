@@ -303,12 +303,6 @@ impl From<std::env::VarError> for ShErr {
 	}
 }
 
-impl From<rustyline::error::ReadlineError> for ShErr {
-	fn from(value: rustyline::error::ReadlineError) -> Self {
-		ShErr::simple(ShErrKind::ParseErr, value.to_string())
-	}
-}
-
 impl From<Errno> for ShErr {
 	fn from(value: Errno) -> Self {
 		ShErr::simple(ShErrKind::Errno, value.to_string())
