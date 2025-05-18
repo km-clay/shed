@@ -1,5 +1,0 @@
----
-source: src/tests/term.rs
-expression: styled
----
-[1m[0mreset test[0m

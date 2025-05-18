@@ -1,5 +1,0 @@
----
-source: src/tests/term.rs
-expression: styled
----
-[38;2;255;99;71mRGB styled text[0m

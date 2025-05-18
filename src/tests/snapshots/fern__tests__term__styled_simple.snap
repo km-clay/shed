@@ -1,5 +1,0 @@
----
-source: src/tests/term.rs
-expression: styled
----
-[32mhello world[0m
