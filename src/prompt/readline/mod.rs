@@ -1,15 +1,20 @@
 use std::{arch::asm, os::fd::BorrowedFd};
 
+use line::{strip_ansi_codes, LineBuf};
 use nix::{libc::STDIN_FILENO, sys::termios::{self, Termios}, unistd::read};
+use term::Terminal;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{libsh::{error::ShResult, sys::sh_quit}, prelude::*};
+pub mod term;
+pub mod line;
 
 #[derive(Clone,Copy,Debug)]
 pub enum Key {
 	Char(char),
 	Enter,
 	Backspace,
+	Delete,
 	Esc,
 	Up,
 	Down,
@@ -64,112 +69,10 @@ pub enum Motion {
 
 impl EditAction {
 	pub fn is_return(&self) -> bool {
-		if let Self::Return = self {
-			true
-		} else {
-			false
-		}
+		matches!(self, Self::Return)
 	}
 }
 
-#[derive(Debug)]
-pub struct Terminal {
-	stdin: RawFd,
-	stdout: RawFd,
-}
-
-impl Terminal {
-	pub fn new() -> Self {
-		assert!(isatty(0).unwrap());
-		Self {
-			stdin: 0,
-			stdout: 1,
-		}
-	}
-	fn raw_mode() -> termios::Termios {
-    // Get the current terminal attributes
-    let orig_termios = unsafe { termios::tcgetattr(BorrowedFd::borrow_raw(STDIN_FILENO)).expect("Failed to get terminal attributes") };
-
-    // Make a mutable copy
-    let mut raw = orig_termios.clone();
-
-    // Apply raw mode flags
-    termios::cfmakeraw(&mut raw);
-
-    // Set the attributes immediately
-    unsafe { termios::tcsetattr(BorrowedFd::borrow_raw(STDIN_FILENO), termios::SetArg::TCSANOW, &raw) }
-        .expect("Failed to set terminal to raw mode");
-
-    // Return original attributes so they can be restored later
-    orig_termios
-	}
-	pub fn restore_termios(termios: Termios) {
-    unsafe { termios::tcsetattr(BorrowedFd::borrow_raw(STDIN_FILENO), termios::SetArg::TCSANOW, &termios) }
-        .expect("Failed to restore terminal settings");
-	}
-	pub fn with_raw_mode<F: FnOnce() -> R,R>(func: F) -> R {
-		let saved = Self::raw_mode();
-		let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(func));
-		Self::restore_termios(saved);
-
-		match result {
-			Ok(r) => r,
-			Err(e) => std::panic::resume_unwind(e)
-		}
-	}
-	pub fn read_byte(&self, buf: &mut [u8]) -> usize {
-		Self::with_raw_mode(|| {
-			let ret: usize;
-			unsafe {
-				let buf_ptr = buf.as_mut_ptr();
-				let len = buf.len();
-				asm! (
-					"syscall",
-					in("rax") 0,
-					in("rdi") self.stdin,
-					in("rsi") buf_ptr,
-					in("rdx") len,
-					lateout("rax") ret,
-					out("rcx") _,
-					out("r11") _,
-				);
-			}
-			ret
-		})
-	}
-	pub fn write_bytes(&self, buf: &[u8]) {
-		Self::with_raw_mode(|| {
-			let _ret: usize;
-			unsafe {
-				let buf_ptr = buf.as_ptr();
-				let len = buf.len();
-				asm!(
-					"syscall",
-					in("rax") 1,             
-					in("rdi") self.stdout,   
-					in("rsi") buf_ptr,       
-					in("rdx") len,           
-					lateout("rax") _ret,     
-					out("rcx") _,
-					out("r11") _,
-				);
-			}
-		});
-	}
-	pub fn write(&self, s: &str) {
-		self.write_bytes(s.as_bytes());
-	}
-	pub fn writeln(&self, s: &str) {
-		self.write(s);
-		self.write_bytes(b"\r\n");
-	}
-}
-
-impl Default for Terminal {
-	fn default() -> Self {
-		Self::new()
-	}
-}
 
 #[derive(Default,Debug)]
 pub struct FernReader {
@@ -215,17 +118,17 @@ impl FernReader {
 					self.term.write_bytes(b"\r\n");
 					sh_quit(code)
 				}
-				EditAction::ClearTerm => todo!(),
-				EditAction::ClearLine => todo!(),
+				EditAction::ClearTerm => self.term.clear(),
+				EditAction::ClearLine => self.line.clear(),
 				EditAction::Signal(sig) => todo!(),
 				EditAction::MoveCursorStart => self.line.move_cursor_start(),
 				EditAction::MoveCursorEnd => self.line.move_cursor_end(),
 				EditAction::MoveCursorLeft => self.line.move_cursor_left(),
 				EditAction::MoveCursorRight => self.line.move_cursor_right(),
-				EditAction::DelWordBack => todo!(),
+				EditAction::DelWordBack => self.line.del_word_back(),
 				EditAction::DelFromCursor => self.line.del_from_cursor(),
-				EditAction::Backspace => todo!(),
-				EditAction::RedrawScreen => todo!(),
+				EditAction::Backspace => self.line.backspace_at_cursor(),
+				EditAction::RedrawScreen => self.term.clear(),
 				EditAction::HistNext => todo!(),
 				EditAction::HistPrev => todo!(),
 				EditAction::InsMode(ins_action) => self.process_ins_cmd(ins_action)?,
@@ -240,7 +143,7 @@ impl FernReader {
 		match cmd {
 			InsAction::InsChar(ch) => self.line.insert_at_cursor(ch),
 			InsAction::Backspace => self.line.backspace_at_cursor(),
-			InsAction::Delete => todo!(),
+			InsAction::Delete => self.line.del_at_cursor(),
 			InsAction::Esc => todo!(),
 			InsAction::MoveLeft => self.line.move_cursor_left(),
 			InsAction::MoveRight => self.line.move_cursor_right(),
@@ -258,18 +161,21 @@ impl FernReader {
 	}
 	pub fn get_cmds(&mut self) -> Vec<EditAction> {
 		match self.edit_mode {
-			EditMode::Normal => todo!(),
+			EditMode::Normal => {
+				let keys = self.read_keys_normal_mode();
+				self.process_keys_normal_mode(keys)
+			}
 			EditMode::Insert => {
 				let key = self.read_key().unwrap();
-				self.process_key(key)
+				self.process_key_insert_mode(key)
 			}
 		}
 	}
-	pub fn process_key(&mut self, key: Key) -> Vec<EditAction> {
-		match self.edit_mode {
-			EditMode::Normal => todo!(),
-			EditMode::Insert => self.process_key_insert_mode(key)
-		}
+	pub fn read_keys_normal_mode(&mut self) -> Vec<Key> {
+		todo!()
+	}
+	pub fn process_keys_normal_mode(&mut self, keys: Vec<Key>) -> Vec<EditAction> {
+		todo!()
 	}
 	pub fn process_key_insert_mode(&mut self, key: Key) -> Vec<EditAction> {
 		match key {
@@ -281,6 +187,9 @@ impl FernReader {
 			}
 			Key::Backspace => {
 				vec![EditAction::InsMode(InsAction::Backspace)]
+			}
+			Key::Delete => {
+				vec![EditAction::InsMode(InsAction::Delete)]
 			}
 			Key::Esc => {
 				vec![EditAction::InsMode(InsAction::Esc)]
@@ -379,11 +288,11 @@ impl FernReader {
 		let line = self.pack_line();
 		self.term.write(&line);
 
-		let cursor_offset = self.line.cursor + last_line_len;
-		self.term.write_bytes(format!("\r\x1b[{}C", cursor_offset).as_bytes());
+		let cursor_offset = self.line.cursor() + last_line_len;
+		self.term.write(&format!("\r\x1b[{}C", cursor_offset));
 	}
 	fn read_key(&mut self) -> Option<Key> {
-		let mut buf = [0; 3];
+		let mut buf = [0; 4];
 
 		let n = self.term.read_byte(&mut buf);
 		if n == 0 {
@@ -397,7 +306,18 @@ impl FernReader {
 						(b'[', b'B') => Some(Key::Down),
 						(b'[', b'C') => Some(Key::Right),
 						(b'[', b'D') => Some(Key::Left),
-						_ => Some(Key::Esc),
+						_ => {
+							flog!(WARN, "unhandled control seq: {},{}", buf[1] as char, buf[2] as char);
+							Some(Key::Esc)
+						}
+					}
+				} else if n == 4 {
+					match (buf[1], buf[2], buf[3]) {
+						(b'[', b'3', b'~') => Some(Key::Delete),
+						_ => {
+							flog!(WARN, "unhandled control seq: {},{},{}", buf[1] as char, buf[2] as char, buf[3] as char);
+							Some(Key::Esc)
+						}
 					}
 				} else {
 					Some(Key::Esc)
@@ -421,68 +341,3 @@ pub enum EditMode {
 	Insert,
 }
 
-#[derive(Default,Debug)]
-pub struct LineBuf {
-	buffer: Vec<char>,
-	cursor: usize
-}
-
-impl LineBuf {
-	pub fn new() -> Self {
-		Self::default()
-	}
-	pub fn count_lines(&self) -> usize {
-		self.buffer.iter().filter(|&&c| c == '\n').count()
-	}
-	pub fn insert_at_cursor(&mut self, ch: char) {
-		self.buffer.insert(self.cursor, ch);
-		self.move_cursor_right();
-	}
-	pub fn backspace_at_cursor(&mut self) {
-		if self.buffer.is_empty() {
-			return
-		}
-		self.buffer.remove(self.cursor.saturating_sub(1));
-		self.move_cursor_left();
-	}
-	pub fn move_cursor_left(&mut self) {
-		self.cursor = self.cursor.saturating_sub(1);
-	}
-	pub fn move_cursor_start(&mut self) {
-		self.cursor = 0;
-	}
-	pub fn move_cursor_end(&mut self) {
-		self.cursor = self.buffer.len();
-	}
-	pub fn move_cursor_right(&mut self) {
-		if self.cursor == self.buffer.len() {
-			return
-		}
-		self.cursor = self.cursor.saturating_add(1);
-	}
-	pub fn del_from_cursor(&mut self) {
-		self.buffer.truncate(self.cursor);
-	}
-}
-
-pub fn strip_ansi_codes(s: &str) -> String {
-	let mut out = String::with_capacity(s.len());
-	let mut chars = s.chars().peekable();
-
-	while let Some(c) = chars.next() {
-		if c == '\x1b' && chars.peek() == Some(&'[') {
-			// Skip over the escape sequence
-			chars.next(); // consume '['
-			while let Some(&ch) = chars.peek() {
-				if ch.is_ascii_lowercase() || ch.is_ascii_uppercase() {
-					chars.next(); // consume final letter
-					break;
-				}
-				chars.next(); // consume intermediate characters
-			}
-		} else {
-			out.push(c);
-		}
-	}
-	out
-}
