@@ -1,7 +1,7 @@
-use std::{arch::asm, os::fd::{BorrowedFd, RawFd}};
+use std::os::fd::{BorrowedFd, RawFd};
+use nix::{libc::STDIN_FILENO, sys::termios, unistd::{isatty, read, write}};
 
-use nix::{libc::STDIN_FILENO, sys::termios, unistd::isatty};
-
+use super::keys::{KeyCode, KeyEvent, ModKeys};
 
 #[derive(Debug)]
 pub struct Terminal {
@@ -11,91 +11,86 @@ pub struct Terminal {
 
 impl Terminal {
 	pub fn new() -> Self {
-		assert!(isatty(0).unwrap());
+		assert!(isatty(STDIN_FILENO).unwrap());
 		Self {
-			stdin: 0,
+			stdin: STDIN_FILENO,
 			stdout: 1,
 		}
 	}
+
 	fn raw_mode() -> termios::Termios {
-    // Get the current terminal attributes
-    let orig_termios = unsafe { termios::tcgetattr(BorrowedFd::borrow_raw(STDIN_FILENO)).expect("Failed to get terminal attributes") };
-
-    // Make a mutable copy
-    let mut raw = orig_termios.clone();
-
-    // Apply raw mode flags
-    termios::cfmakeraw(&mut raw);
-
-    // Set the attributes immediately
-    unsafe { termios::tcsetattr(BorrowedFd::borrow_raw(STDIN_FILENO), termios::SetArg::TCSANOW, &raw) }
-        .expect("Failed to set terminal to raw mode");
-
-    // Return original attributes so they can be restored later
-    orig_termios
+		let orig = termios::tcgetattr(unsafe{BorrowedFd::borrow_raw(STDIN_FILENO)}).expect("Failed to get terminal attributes");
+		let mut raw = orig.clone();
+		termios::cfmakeraw(&mut raw);
+		termios::tcsetattr(unsafe{BorrowedFd::borrow_raw(STDIN_FILENO)}, termios::SetArg::TCSANOW, &raw)
+			.expect("Failed to set terminal to raw mode");
+		orig
 	}
+
 	pub fn restore_termios(termios: termios::Termios) {
-    unsafe { termios::tcsetattr(BorrowedFd::borrow_raw(STDIN_FILENO), termios::SetArg::TCSANOW, &termios) }
-        .expect("Failed to restore terminal settings");
+		termios::tcsetattr(unsafe{BorrowedFd::borrow_raw(STDIN_FILENO)}, termios::SetArg::TCSANOW, &termios)
+			.expect("Failed to restore terminal settings");
 	}
-	pub fn with_raw_mode<F: FnOnce() -> R,R>(func: F) -> R {
+
+	pub fn with_raw_mode<F: FnOnce() -> R, R>(func: F) -> R {
 		let saved = Self::raw_mode();
 		let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(func));
 		Self::restore_termios(saved);
-
 		match result {
 			Ok(r) => r,
-			Err(e) => std::panic::resume_unwind(e)
+			Err(e) => std::panic::resume_unwind(e),
 		}
 	}
+
 	pub fn read_byte(&self, buf: &mut [u8]) -> usize {
 		Self::with_raw_mode(|| {
-			let ret: usize;
-			unsafe {
-				let buf_ptr = buf.as_mut_ptr();
-				let len = buf.len();
-				asm! (
-					"syscall",
-					in("rax") 0,
-					in("rdi") self.stdin,
-					in("rsi") buf_ptr,
-					in("rdx") len,
-					lateout("rax") ret,
-					out("rcx") _,
-					out("r11") _,
-				);
-			}
-			ret
+			read(self.stdin, buf).expect("Failed to read from stdin")
 		})
 	}
+
 	pub fn write_bytes(&self, buf: &[u8]) {
 		Self::with_raw_mode(|| {
-			let _ret: usize;
-			unsafe {
-				let buf_ptr = buf.as_ptr();
-				let len = buf.len();
-				asm!(
-					"syscall",
-					in("rax") 1,             
-					in("rdi") self.stdout,   
-					in("rsi") buf_ptr,       
-					in("rdx") len,           
-					lateout("rax") _ret,     
-					out("rcx") _,
-					out("r11") _,
-				);
-			}
+			write(unsafe{BorrowedFd::borrow_raw(self.stdout)}, buf).expect("Failed to write to stdout");
 		});
 	}
+
+
 	pub fn write(&self, s: &str) {
 		self.write_bytes(s.as_bytes());
 	}
+
 	pub fn writeln(&self, s: &str) {
 		self.write(s);
 		self.write_bytes(b"\r\n");
 	}
+
 	pub fn clear(&self) {
 		self.write_bytes(b"\x1b[2J\x1b[H");
+	}
+
+	pub fn read_key(&self) -> KeyEvent {
+		let mut buf = [0;8];
+		let n = self.read_byte(&mut buf);
+
+		if buf[0] == 0x1b {
+			if n >= 3 && buf[1] == b'[' {
+				return match buf[2] {
+					b'A' => KeyEvent(KeyCode::Up, ModKeys::empty()),
+					b'B' => KeyEvent(KeyCode::Down, ModKeys::empty()),
+					b'C' => KeyEvent(KeyCode::Right, ModKeys::empty()),
+					b'D' => KeyEvent(KeyCode::Left, ModKeys::empty()),
+					_ => KeyEvent(KeyCode::Esc, ModKeys::empty()),
+				};
+			}
+			return KeyEvent(KeyCode::Esc, ModKeys::empty());
+		}
+
+		if let Ok(s) = core::str::from_utf8(&buf[..n]) {
+			if let Some(ch) = s.chars().next() {
+				return KeyEvent::new(ch, ModKeys::NONE);
+			}
+		}
+		KeyEvent(KeyCode::Null, ModKeys::empty())
 	}
 }
 

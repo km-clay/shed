@@ -1,94 +1,40 @@
 use std::{arch::asm, os::fd::BorrowedFd};
 
+use keys::KeyEvent;
 use line::{strip_ansi_codes, LineBuf};
+use linecmd::{Anchor, At, InputMode, LineCmd, MoveCmd, Movement, Verb, VerbCmd, ViCmd, ViCmdBuilder, Word};
 use nix::{libc::STDIN_FILENO, sys::termios::{self, Termios}, unistd::read};
 use term::Terminal;
 use unicode_width::UnicodeWidthStr;
 
-use crate::{libsh::{error::ShResult, sys::sh_quit}, prelude::*};
+use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, sys::sh_quit}, prelude::*};
 pub mod term;
 pub mod line;
-
-#[derive(Clone,Copy,Debug)]
-pub enum Key {
-	Char(char),
-	Enter,
-	Backspace,
-	Delete,
-	Esc,
-	Up,
-	Down,
-	Left,
-	Right,
-	Ctrl(char),
-	Unknown,
-}
-
-#[derive(Clone,Debug)]
-pub enum EditAction {
-	Return,
-	Exit(i32),
-	ClearTerm,
-	ClearLine,
-	Signal(i32),
-	MoveCursorStart,
-	MoveCursorEnd,
-	MoveCursorLeft, // Ctrl + B
-	MoveCursorRight, // Ctrl + F
-	DelWordBack,
-	DelFromCursor,
-	Backspace, // The Ctrl+H version
-	RedrawScreen,
-	HistNext,
-	HistPrev,
-	InsMode(InsAction),
-	NormMode(NormAction),
-}
-
-#[derive(Clone,Debug)]
-pub enum InsAction {
-	InsChar(char),
-	Backspace, // The backspace version
-	Delete,
-	Esc,
-	MoveLeft, // Left Arrow
-	MoveRight, // Right Arrow
-	MoveUp,
-	MoveDown
-}
-
-#[derive(Clone,Debug)]
-pub enum NormAction {
-	Count(usize),
-	Motion(Motion),
-}
-
-#[derive(Clone,Debug)]
-pub enum Motion {
-}
-
-impl EditAction {
-	pub fn is_return(&self) -> bool {
-		matches!(self, Self::Return)
-	}
-}
-
+pub mod keys;
+pub mod linecmd;
 
 #[derive(Default,Debug)]
 pub struct FernReader {
 	pub term: Terminal,
 	pub prompt: String,
 	pub line: LineBuf,
-	pub edit_mode: EditMode
+	pub edit_mode: InputMode,
+	pub count_arg: u16,
+	pub last_effect: Option<VerbCmd>,
+	pub last_movement: Option<MoveCmd>
 }
 
 impl FernReader {
 	pub fn new(prompt: String) -> Self {
+		let line = LineBuf::new().with_initial("The quick brown fox jumped over the lazy dog.");
 		Self {
 			term: Terminal::new(),
 			prompt,
-			line: Default::default(),
-			edit_mode: Default::default()
+			line,
+			edit_mode: Default::default(),
+			count_arg: Default::default(),
+			last_effect: Default::default(),
+			last_movement: Default::default(),
 		}
 	}
 	fn pack_line(&mut self) -> String {
@@ -100,165 +46,12 @@ impl FernReader {
 	pub fn readline(&mut self) -> ShResult<String> {
 		self.display_line(/*refresh: */ false);
 		loop {
-			let cmds = self.get_cmds();
-			for cmd in &cmds {
-				if cmd.is_return() {
-					self.term.write_bytes(b"\r\n");
-					return Ok(self.pack_line())
-				}
+			let cmd = self.next_cmd()?;
+			if cmd == LineCmd::AcceptLine {
+				return Ok(self.pack_line())
 			}
-			self.process_cmds(cmds)?;
+			self.execute_cmd(cmd)?;
 			self.display_line(/* refresh: */ true);
-		}
-	}
-	pub fn process_cmds(&mut self, cmds: Vec<EditAction>) -> ShResult<()> {
-		for cmd in cmds {
-			match cmd {
-				EditAction::Exit(code) => {
-					self.term.write_bytes(b"\r\n");
-					sh_quit(code)
-				}
-				EditAction::ClearTerm => self.term.clear(),
-				EditAction::ClearLine => self.line.clear(),
-				EditAction::Signal(sig) => todo!(),
-				EditAction::MoveCursorStart => self.line.move_cursor_start(),
-				EditAction::MoveCursorEnd => self.line.move_cursor_end(),
-				EditAction::MoveCursorLeft => self.line.move_cursor_left(),
-				EditAction::MoveCursorRight => self.line.move_cursor_right(),
-				EditAction::DelWordBack => self.line.del_word_back(),
-				EditAction::DelFromCursor => self.line.del_from_cursor(),
-				EditAction::Backspace => self.line.backspace_at_cursor(),
-				EditAction::RedrawScreen => self.term.clear(),
-				EditAction::HistNext => todo!(),
-				EditAction::HistPrev => todo!(),
-				EditAction::InsMode(ins_action) => self.process_ins_cmd(ins_action)?,
-				EditAction::NormMode(norm_action) => self.process_norm_cmd(norm_action)?,
-				EditAction::Return => unreachable!(), // handled earlier
-			}
-		}
-
-		Ok(())
-	}
-	pub fn process_ins_cmd(&mut self, cmd: InsAction) -> ShResult<()> {
-		match cmd {
-			InsAction::InsChar(ch) => self.line.insert_at_cursor(ch),
-			InsAction::Backspace => self.line.backspace_at_cursor(),
-			InsAction::Delete => self.line.del_at_cursor(),
-			InsAction::Esc => todo!(),
-			InsAction::MoveLeft => self.line.move_cursor_left(),
-			InsAction::MoveRight => self.line.move_cursor_right(),
-			InsAction::MoveUp => todo!(),
-			InsAction::MoveDown => todo!(),
-		}
-		Ok(())
-	}
-	pub fn process_norm_cmd(&mut self, cmd: NormAction) -> ShResult<()> {
-		match cmd {
-			NormAction::Count(num) => todo!(),
-			NormAction::Motion(motion) => todo!(),
-		}
-		Ok(())
-	}
-	pub fn get_cmds(&mut self) -> Vec<EditAction> {
-		match self.edit_mode {
-			EditMode::Normal => {
-				let keys = self.read_keys_normal_mode();
-				self.process_keys_normal_mode(keys)
-			}
-			EditMode::Insert => {
-				let key = self.read_key().unwrap();
-				self.process_key_insert_mode(key)
-			}
-		}
-	}
-	pub fn read_keys_normal_mode(&mut self) -> Vec<Key> {
-		todo!()
-	}
-	pub fn process_keys_normal_mode(&mut self, keys: Vec<Key>) -> Vec<EditAction> {
-		todo!()
-	}
-	pub fn process_key_insert_mode(&mut self, key: Key) -> Vec<EditAction> {
-		match key {
-			Key::Char(ch) => {
-				vec![EditAction::InsMode(InsAction::InsChar(ch))]
-			}
-			Key::Enter => {
-				vec![EditAction::Return]
-			}
-			Key::Backspace => {
-				vec![EditAction::InsMode(InsAction::Backspace)]
-			}
-			Key::Delete => {
-				vec![EditAction::InsMode(InsAction::Delete)]
-			}
-			Key::Esc => {
-				vec![EditAction::InsMode(InsAction::Esc)]
-			}
-			Key::Up => {
-				vec![EditAction::InsMode(InsAction::MoveUp)]
-			}
-			Key::Down => {
-				vec![EditAction::InsMode(InsAction::MoveDown)]
-			}
-			Key::Left => {
-				vec![EditAction::InsMode(InsAction::MoveLeft)]
-			}
-			Key::Right => {
-				vec![EditAction::InsMode(InsAction::MoveRight)]
-			}
-			Key::Ctrl(ctrl) => self.process_ctrl(ctrl),
-			Key::Unknown => unimplemented!("Unknown key received: {key:?}")
-		}
-	}
-	pub fn process_ctrl(&mut self, ctrl: char) -> Vec<EditAction> {
-		match ctrl {
-			'D' => {
-				if self.line.buffer.is_empty() {
-					vec![EditAction::Exit(0)]
-				} else {
-					vec![EditAction::Return]
-				}
-			}
-			'C' => {
-				vec![EditAction::ClearLine]
-			}
-			'Z' => {
-				vec![EditAction::Signal(20)] // SIGTSTP
-			}
-			'A' => {
-				vec![EditAction::MoveCursorStart]
-			}
-			'E' => {
-				vec![EditAction::MoveCursorEnd]
-			}
-			'B' => {
-				vec![EditAction::MoveCursorLeft]
-			}
-			'F' => {
-				vec![EditAction::MoveCursorRight]
-			}
-			'U' => {
-				vec![EditAction::ClearLine]
-			}
-			'W' => {
-				vec![EditAction::DelWordBack]
-			}
-			'K' => {
-				vec![EditAction::DelFromCursor]
-			}
-			'H' => {
-				vec![EditAction::Backspace]
-			}
-			'L' => {
-				vec![EditAction::RedrawScreen]
-			}
-			'N' => {
-				vec![EditAction::HistNext]
-			}
-			'P' => {
-				vec![EditAction::HistPrev]
-			}
-			_ => unimplemented!("Unhandled control character: {ctrl}")
 		}
 	}
 	fn clear_line(&self) {
@@ -291,53 +84,237 @@ impl FernReader {
 		let cursor_offset = self.line.cursor() + last_line_len;
 		self.term.write(&format!("\r\x1b[{}C", cursor_offset));
 	}
-	fn read_key(&mut self) -> Option<Key> {
-		let mut buf = [0; 4];
-
-		let n = self.term.read_byte(&mut buf);
-		if n == 0 {
-			return None;
-		}
-		match buf[0] {
-			b'\x1b' => {
-				if n == 3 {
-					match (buf[1], buf[2]) {
-						(b'[', b'A') => Some(Key::Up),
-						(b'[', b'B') => Some(Key::Down),
-						(b'[', b'C') => Some(Key::Right),
-						(b'[', b'D') => Some(Key::Left),
-						_ => {
-							flog!(WARN, "unhandled control seq: {},{}", buf[1] as char, buf[2] as char);
-							Some(Key::Esc)
-						}
-					}
-				} else if n == 4 {
-					match (buf[1], buf[2], buf[3]) {
-						(b'[', b'3', b'~') => Some(Key::Delete),
-						_ => {
-							flog!(WARN, "unhandled control seq: {},{},{}", buf[1] as char, buf[2] as char, buf[3] as char);
-							Some(Key::Esc)
-						}
-					}
-				} else {
-					Some(Key::Esc)
-				}
-			}
-			b'\r' | b'\n' => Some(Key::Enter),
-			0x7f => Some(Key::Backspace),
-			c if (c as char).is_ascii_control() => {
-				let ctrl = (c ^ 0x40) as char;
-				Some(Key::Ctrl(ctrl))
-			}
-			c => Some(Key::Char(c as char))
+	pub fn next_cmd(&mut self) -> ShResult<LineCmd> {
+		let vi_cmd = ViCmdBuilder::new();
+		match self.edit_mode {
+			InputMode::Normal => self.get_normal_cmd(vi_cmd),
+			InputMode::Insert => self.get_insert_cmd(vi_cmd),
+			InputMode::Visual => todo!(),
+			InputMode::Replace => todo!(),
 		}
 	}
-}
+	pub fn get_insert_cmd(&mut self, pending_cmd: ViCmdBuilder) -> ShResult<LineCmd> {
+		use keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
+		let key = self.term.read_key();
+		let cmd = match key {
+			E(K::Char(ch), M::NONE) => {
+				let cmd = pending_cmd
+					.with_verb(Verb::InsertChar(ch))
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
 
-#[derive(Default,Debug)]
-pub enum EditMode {
-	Normal,
-	#[default]
-	Insert,
+			E(K::Char('H'), M::CTRL) |
+			E(K::Backspace, M::NONE) => LineCmd::backspace(),
+
+			E(K::BackTab, M::NONE) => LineCmd::CompleteBackward,
+
+			E(K::Char('I'), M::CTRL) |
+			E(K::Tab, M::NONE) => LineCmd::Complete,
+
+			E(K::Esc, M::NONE) => {
+				self.edit_mode = InputMode::Normal;
+				let cmd = pending_cmd
+					.with_movement(Movement::BackwardChar)
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			E(K::Char('D'), M::CTRL) => LineCmd::EndOfFile,
+			_ => {
+				flog!(INFO, "unhandled key in get_insert_cmd, trying common_cmd...");
+				return self.common_cmd(key, pending_cmd)
+			}
+		};
+		Ok(cmd)
+	}
+
+	pub fn get_normal_cmd(&mut self, mut pending_cmd: ViCmdBuilder) -> ShResult<LineCmd> {
+		use keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
+		let key = self.term.read_key();
+		if let E(K::Char(digit @ '0'..='9'), M::NONE) = key {
+			pending_cmd.append_digit(digit);
+			return self.get_normal_cmd(pending_cmd);
+		}
+		let cmd = match key {
+			E(K::Char('h'), M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::BackwardChar)
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			E(K::Char('j'), M::NONE) => LineCmd::LineDownOrNextHistory,
+			E(K::Char('k'), M::NONE) => LineCmd::LineUpOrPreviousHistory,
+			E(K::Char('l'), M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::ForwardChar)
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			E(K::Char('w'), M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::ForwardWord(At::Start, Word::Normal))
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			E(K::Char('W'), M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::ForwardWord(At::Start, Word::Big))
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			E(K::Char('b'), M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::BackwardWord(Word::Normal))
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			E(K::Char('B'), M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::BackwardWord(Word::Big))
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			E(K::Char('x'), M::NONE) => {
+				let cmd = pending_cmd
+					.with_verb(Verb::DeleteOne(Anchor::After))
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			E(K::Char('i'), M::NONE) => {
+				self.edit_mode = InputMode::Insert;
+				let cmd = pending_cmd
+					.with_movement(Movement::BackwardChar)
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			E(K::Char('I'), M::NONE) => {
+				self.edit_mode = InputMode::Insert;
+				let cmd = pending_cmd
+					.with_movement(Movement::BeginningOfFirstWord)
+					.build()?;
+				LineCmd::ViCmd(cmd)
+			}
+			_ => {
+				flog!(INFO, "unhandled key in get_normal_cmd, trying common_cmd...");
+				return self.common_cmd(key, pending_cmd)
+			}
+		};
+		Ok(cmd)
+	}
+
+	pub fn common_cmd(&mut self, key: KeyEvent, pending_cmd: ViCmdBuilder) -> ShResult<LineCmd> {
+		use keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
+		match key {
+			E(K::Home, M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::BeginningOfLine)
+					.build()?;
+				Ok(LineCmd::ViCmd(cmd))
+			}
+			E(K::End, M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::EndOfLine)
+					.build()?;
+				Ok(LineCmd::ViCmd(cmd))
+			}
+			E(K::Left, M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::BackwardChar)
+					.build()?;
+				Ok(LineCmd::ViCmd(cmd))
+			}
+			E(K::Right, M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::ForwardChar)
+					.build()?;
+				Ok(LineCmd::ViCmd(cmd))
+			}
+			E(K::Delete, M::NONE) => {
+				let cmd = pending_cmd
+					.with_movement(Movement::ForwardChar)
+					.with_verb(Verb::Delete)
+					.build()?;
+				Ok(LineCmd::ViCmd(cmd))
+			}
+			E(K::Backspace, M::NONE) |
+			E(K::Char('h'), M::CTRL) => {
+				Ok(LineCmd::backspace())
+			}
+			E(K::Up, M::NONE) => Ok(LineCmd::LineUpOrPreviousHistory),
+			E(K::Down, M::NONE) => Ok(LineCmd::LineDownOrNextHistory),
+			E(K::Enter, M::NONE) => Ok(LineCmd::AcceptLine),
+			_ => Err(ShErr::simple(ShErrKind::ReadlineErr,format!("Unhandled common key event: {key:?}")))
+		}
+	}
+	pub fn exec_vi_cmd(&mut self, cmd: ViCmd) -> ShResult<()> {
+		match cmd {
+			ViCmd::MoveVerb(verb_cmd, move_cmd) => {
+				self.last_effect = Some(verb_cmd.clone());
+				self.last_movement = Some(move_cmd.clone());
+				let VerbCmd { verb_count, verb } = verb_cmd;
+				for _ in 0..verb_count {
+					self.line.exec_vi_cmd(Some(verb.clone()), Some(move_cmd.clone()))?;
+				}
+			}
+			ViCmd::Verb(verb_cmd) => {
+				self.last_effect = Some(verb_cmd.clone());
+				let VerbCmd { verb_count, verb } = verb_cmd;
+				for _ in 0..verb_count {
+					self.line.exec_vi_cmd(Some(verb.clone()), None)?;
+				}
+			}
+			ViCmd::Move(move_cmd) => {
+				self.last_movement = Some(move_cmd.clone());
+				self.line.exec_vi_cmd(None, Some(move_cmd))?;
+			}
+		}
+		Ok(())
+	}
+	pub fn execute_cmd(&mut self, cmd: LineCmd) -> ShResult<()> {
+		match cmd {
+			LineCmd::ViCmd(cmd) => self.exec_vi_cmd(cmd)?,
+			LineCmd::Abort => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::BeginningOfHistory => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::CapitalizeWord => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::ClearScreen => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Complete => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::CompleteBackward => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::CompleteHint => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::DowncaseWord => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::EndOfFile => {
+				if self.line.buffer.is_empty() {
+					sh_quit(0);
+				}  else {
+					self.line.clear();
+				}
+			}
+			LineCmd::EndOfHistory => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::ForwardSearchHistory => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::HistorySearchBackward => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::HistorySearchForward => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Insert(_) => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Interrupt => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Move(_) => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::NextHistory => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Noop => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Repaint => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Overwrite(ch) => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::PreviousHistory => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::QuotedInsert => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::ReverseSearchHistory => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Suspend => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::TransposeChars => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::TransposeWords => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Unknown => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::YankPop => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::LineUpOrPreviousHistory => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::LineDownOrNextHistory => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Newline => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::AcceptOrInsertLine { .. } => todo!("Unhandled cmd: {cmd:?}"),
+			LineCmd::Null => { /* Pass */ }
+			_ => todo!("Unhandled cmd: {cmd:?}"),
+		}
+		Ok(())
+	}
 }
 

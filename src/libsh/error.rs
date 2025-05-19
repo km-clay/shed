@@ -325,6 +325,7 @@ pub enum ShErrKind {
 	FuncReturn(i32),
 	LoopContinue(i32),
 	LoopBreak(i32),
+	ReadlineErr,
 	Null
 }
 
@@ -345,6 +346,7 @@ impl Display for ShErrKind {
 			ShErrKind::FuncReturn(_) => "",
 			ShErrKind::LoopContinue(_) => "",
 			ShErrKind::LoopBreak(_) => "",
+			ShErrKind::ReadlineErr => "Line Read Error",
 			ShErrKind::Null => "",
 		};
 		write!(f,"{output}")
