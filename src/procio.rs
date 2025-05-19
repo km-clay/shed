@@ -1,6 +1,6 @@
 use std::{fmt::Debug, ops::{Deref, DerefMut}};
 
-use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::RedirVecUtils}, parse::Redir, prelude::*};
+use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::RedirVecUtils}, parse::{get_redir_file, Redir, RedirType}, prelude::*};
 
 // Credit to fish-shell for many of the implementation ideas present in this module
 // https://fishshell.com/
@@ -8,7 +8,7 @@ use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, utils::RedirVecUtils}, 
 #[derive(Clone,Debug)]
 pub enum IoMode {
 	Fd { tgt_fd: RawFd, src_fd: Arc<OwnedFd> },
-	File { tgt_fd: RawFd, file: Arc<File> },
+	File { tgt_fd: RawFd, path: PathBuf, mode: RedirType },
 	Pipe { tgt_fd: RawFd, pipe: Arc<OwnedFd> },
 	Buffer { buf: String, pipe: Arc<OwnedFd> }
 }
@@ -18,9 +18,8 @@ impl IoMode {
 		let src_fd = unsafe { OwnedFd::from_raw_fd(src_fd).into() };
 		Self::Fd { tgt_fd, src_fd }
 	}
-	pub fn file(tgt_fd: RawFd, file: File) -> Self {
-		let file = file.into();
-		Self::File { tgt_fd, file }
+	pub fn file(tgt_fd: RawFd, path: PathBuf, mode: RedirType) -> Self {
+		Self::File { tgt_fd, path, mode }
 	}
 	pub fn pipe(tgt_fd: RawFd, pipe: OwnedFd) -> Self {
 		let pipe = pipe.into();
@@ -28,19 +27,26 @@ impl IoMode {
 	}
 	pub fn tgt_fd(&self) -> RawFd {
 		match self {
-			IoMode::Fd { tgt_fd, src_fd: _ } |
-			IoMode::File { tgt_fd, file: _ } |
-			IoMode::Pipe { tgt_fd, pipe: _ } => *tgt_fd,
+			IoMode::Fd { tgt_fd, .. } |
+			IoMode::File { tgt_fd, .. } |
+			IoMode::Pipe { tgt_fd, .. } => *tgt_fd,
 			_ => panic!()
 		}
 	}
 	pub fn src_fd(&self) -> RawFd {
 		match self {
 			IoMode::Fd { tgt_fd: _, src_fd } => src_fd.as_raw_fd(),
-			IoMode::File { tgt_fd: _, file } => file.as_raw_fd(),
+			IoMode::File {..} => panic!("Attempted to obtain src_fd from file before opening"),
 			IoMode::Pipe { tgt_fd: _, pipe } => pipe.as_raw_fd(),
 			_ => panic!()
 		}
+	}
+	pub fn open_file(mut self) -> ShResult<Self> {
+		if let IoMode::File { tgt_fd, path, mode } = self {
+			let file = get_redir_file(mode, path)?;
+			self = IoMode::Fd { tgt_fd, src_fd: Arc::new(OwnedFd::from(file)) }
+		} 
+		Ok(self)
 	}
 	pub fn get_pipes() -> (Self,Self) {
 		let (rpipe,wpipe) = pipe().unwrap();
@@ -149,6 +155,11 @@ impl<'e> IoFrame {
 		self.save();
 		for redir in &mut self.redirs {
 			let io_mode = &mut redir.io_mode;
+			flog!(DEBUG, io_mode);
+			if let IoMode::File {..} = io_mode {
+				*io_mode = io_mode.clone().open_file()?;
+			};
+			flog!(DEBUG, io_mode);
 			let tgt_fd = io_mode.tgt_fd();
 			let src_fd = io_mode.src_fd();
 			dup2(src_fd, tgt_fd)?;
