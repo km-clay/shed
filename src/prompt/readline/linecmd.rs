@@ -110,6 +110,54 @@ pub struct MoveCmd {
 	pub movement: Movement
 }
 
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
+pub struct Repeat {
+	pub movement: Option<MoveCmd>,
+	pub verb: Option<Box<VerbCmd>>,
+	pub ins_text: Option<String>
+}
+
+impl Repeat {
+	pub fn from_cmd(cmd: ViCmd) -> Self {
+		match cmd {
+			ViCmd::MoveVerb(verb_cmd, move_cmd) => {
+				Self {
+					movement: Some(move_cmd),
+					verb: Some(Box::new(verb_cmd)),
+					ins_text: None,
+				}
+			}
+			ViCmd::Verb(verb_cmd) => {
+				Self {
+					movement: None,
+					verb: Some(Box::new(verb_cmd)),
+					ins_text: None,
+				}
+			}
+			ViCmd::Move(move_cmd) => {
+				Self {
+					movement: Some(move_cmd),
+					verb: None,
+					ins_text: None,
+				}
+			}
+		}
+	}
+	pub fn set_ins_text(&mut self, ins_text: String) {
+		self.ins_text = Some(ins_text);
+	}
+	fn is_empty(&self) -> bool {
+		self.movement.is_none() && self.verb.is_none() && self.ins_text.is_none()
+	}
+	pub fn to_option(self) -> Option<Self> {
+		if self.is_empty() {
+			None
+		} else {
+			Some(self)
+		}
+	}
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Verb {
@@ -139,7 +187,9 @@ pub enum Verb {
 	InsertMode,
 	/// `J` — join lines
 	JoinLines,
+	Repeat(Repeat),
 	InsertChar(char),
+	Insert(String),
 	Breakline(Anchor),
 	Indent,
 	Dedent
@@ -161,6 +211,8 @@ impl Verb {
 			Verb::Indent |
 			Verb::InsertChar(_) |
 			Verb::Breakline(_) |
+			Verb::Repeat(_) |
+			Verb::Insert(_) |
 			Verb::ReplaceChar(_) => false,
 			Verb::Delete |
 			Verb::Change |

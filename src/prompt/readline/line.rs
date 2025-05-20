@@ -2,12 +2,14 @@ use std::ops::Range;
 
 use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prompt::readline::linecmd::Anchor};
 
-use super::linecmd::{At, CharSearch, MoveCmd, Movement, Verb, VerbCmd, Word};
+use super::linecmd::{At, CharSearch, MoveCmd, Movement, Repeat, Verb, VerbCmd, Word};
 
 
 #[derive(Default,Debug)]
 pub struct LineBuf {
 	pub buffer: Vec<char>,
+	pub inserting: bool,
+	pub last_insert: String,
 	cursor: usize
 }
 
@@ -18,6 +20,15 @@ impl LineBuf {
 	pub fn with_initial<S: ToString>(mut self, init: S) -> Self {
 		self.buffer = init.to_string().chars().collect();
 		self
+	}
+	pub fn begin_insert(&mut self) {
+		self.inserting = true;
+	}
+	pub fn finish_insert(&mut self) {
+		self.inserting = false;
+	}
+	pub fn take_ins_text(&mut self) -> String {
+		std::mem::take(&mut self.last_insert)
 	}
 	pub fn display_lines(&self) -> Vec<String> {
 		let line_bullet = "∙ ".styled(Style::Dim);
@@ -519,7 +530,20 @@ impl LineBuf {
 					}
 				}
 			}
-			Verb::InsertChar(ch) => self.insert_at_cursor(ch),
+			Verb::InsertChar(ch) => {
+				if self.inserting {
+					self.last_insert.push(ch);
+				}
+				self.insert_at_cursor(ch)
+			}
+			Verb::Insert(text) => {
+				for ch in text.chars() {
+					if self.inserting {
+						self.last_insert.push(ch);
+					}
+					self.insert_at_cursor(ch);
+				}
+			}
 			Verb::InsertMode => todo!(),
 			Verb::JoinLines => todo!(),
 			Verb::ToggleCase => todo!(),
@@ -579,6 +603,9 @@ impl LineBuf {
 					self.buffer.drain(range);
 					self.repos_cursor();
 				});
+			}
+			Verb::Repeat(rep) => {
+
 			}
 			Verb::DeleteOne(anchor) => todo!(),
 			Verb::Breakline(anchor) => todo!(),
