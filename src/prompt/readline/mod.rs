@@ -1,8 +1,8 @@
 use std::{arch::asm, os::fd::BorrowedFd};
 
 use keys::KeyEvent;
-use line::{strip_ansi_codes, LineBuf};
-use linecmd::{Anchor, At, InputMode, LineCmd, MoveCmd, Movement, Verb, VerbCmd, ViCmd, ViCmdBuilder, Word};
+use line::{strip_ansi_codes_and_escapes, LineBuf};
+use linecmd::{Anchor, At, CharSearch, InputMode, LineCmd, MoveCmd, Movement, Verb, VerbCmd, ViCmd, ViCmdBuilder, Word};
 use nix::{libc::STDIN_FILENO, sys::termios::{self, Termios}, unistd::read};
 use term::Terminal;
 use unicode_width::UnicodeWidthStr;
@@ -12,6 +12,33 @@ pub mod term;
 pub mod line;
 pub mod keys;
 pub mod linecmd;
+
+/// Add a verb to a specified ViCmdBuilder, then build it
+///
+/// Returns the built value as a LineCmd::ViCmd
+macro_rules! build_verb {
+	($cmd:expr,$verb:expr) => {{
+		$cmd.with_verb($verb).build().map(|cmd| LineCmd::ViCmd(cmd))
+	}}
+}
+
+/// Add a movement to a specified ViCmdBuilder, then build it
+///
+/// Returns the built value as a LineCmd::ViCmd
+macro_rules! build_movement {
+	($cmd:expr,$move:expr) => {{ 
+		$cmd.with_movement($move).build().map(|cmd| LineCmd::ViCmd(cmd))
+	}}
+}
+
+/// Add both a movement and a verb to a specified ViCmdBuilder, then build it
+///
+/// Returns the built value as a LineCmd::ViCmd
+macro_rules! build_moveverb {
+	($cmd:expr,$verb:expr,$move:expr) => {{
+		$cmd.with_movement($move).with_verb($verb).build().map(|cmd| LineCmd::ViCmd(cmd))
+	}}
+}
 
 #[derive(Default,Debug)]
 pub struct FernReader {
@@ -70,19 +97,50 @@ impl FernReader {
 		}
 		let mut prompt_lines = self.prompt.lines().peekable();
 		let mut last_line_len = 0;
+		let lines = self.line.display_lines();
 		while let Some(line) = prompt_lines.next() {
 			if prompt_lines.peek().is_none() {
-				last_line_len = strip_ansi_codes(line).width();
+				last_line_len = strip_ansi_codes_and_escapes(line).width();
 				self.term.write(line);
 			} else {
 				self.term.writeln(line);
 			}
 		}
-		let line = self.pack_line();
-		self.term.write(&line);
+		let num_lines = lines.len();
+		let mut lines_iter = lines.into_iter().peekable();
 
-		let cursor_offset = self.line.cursor() + last_line_len;
-		self.term.write(&format!("\r\x1b[{}C", cursor_offset));
+		while let Some(line) = lines_iter.next() {
+			if lines_iter.peek().is_some() {
+				self.term.writeln(&line);
+			} else {
+				self.term.write(&line);
+			}
+		}
+
+		if num_lines == 1 {
+			let cursor_offset = self.line.cursor() + last_line_len;
+			self.term.write(&format!("\r\x1b[{}C", cursor_offset));
+		} else {
+			let (x, y) = self.line.cursor_display_coords();
+			// Y-axis movements are 1-indexed and must move up from the bottom
+			// Therefore, add 1 to Y and subtract that number from the number of lines
+			// to find the number of times we have to push the cursor upward
+			let y = num_lines.saturating_sub(y+1);
+			if y > 0 {
+				self.term.write(&format!("\r\x1b[{}A", y))
+			}
+			self.term.write(&format!("\r\x1b[{}C", x+2)); // Factor in the line bullet thing
+		}
+		match self.edit_mode {
+			InputMode::Replace |
+			InputMode::Insert => {
+				self.term.write("\x1b[6 q")
+			}
+			InputMode::Normal |
+			InputMode::Visual => {
+				self.term.write("\x1b[2 q")
+			}
+		}
 	}
 	pub fn next_cmd(&mut self) -> ShResult<LineCmd> {
 		let vi_cmd = ViCmdBuilder::new();
@@ -97,12 +155,7 @@ impl FernReader {
 		use keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
 		let key = self.term.read_key();
 		let cmd = match key {
-			E(K::Char(ch), M::NONE) => {
-				let cmd = pending_cmd
-					.with_verb(Verb::InsertChar(ch))
-					.build()?;
-				LineCmd::ViCmd(cmd)
-			}
+			E(K::Char(ch), M::NONE) => build_verb!(pending_cmd, Verb::InsertChar(ch))?,
 
 			E(K::Char('H'), M::CTRL) |
 			E(K::Backspace, M::NONE) => LineCmd::backspace(),
@@ -114,10 +167,7 @@ impl FernReader {
 
 			E(K::Esc, M::NONE) => {
 				self.edit_mode = InputMode::Normal;
-				let cmd = pending_cmd
-					.with_movement(Movement::BackwardChar)
-					.build()?;
-				LineCmd::ViCmd(cmd)
+				build_movement!(pending_cmd, Movement::BackwardChar)?
 			}
 			E(K::Char('D'), M::CTRL) => LineCmd::EndOfFile,
 			_ => {
@@ -131,6 +181,31 @@ impl FernReader {
 	pub fn get_normal_cmd(&mut self, mut pending_cmd: ViCmdBuilder) -> ShResult<LineCmd> {
 		use keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
 		let key = self.term.read_key();
+
+		if let E(K::Char(ch), M::NONE) = key {
+			if pending_cmd.movement().is_some_and(|m| matches!(m, Movement::CharSearch(_))) {
+				let Movement::CharSearch(charsearch) = pending_cmd.movement().unwrap() else {unreachable!()};
+				match charsearch {
+					CharSearch::FindFwd(_) => {
+						let finalized = CharSearch::FindFwd(Some(ch));
+						return build_movement!(pending_cmd, Movement::CharSearch(finalized))
+					}
+					CharSearch::FwdTo(_) => {
+						let finalized = CharSearch::FwdTo(Some(ch));
+						return build_movement!(pending_cmd, Movement::CharSearch(finalized))
+					}
+					CharSearch::FindBkwd(_) => {
+						let finalized = CharSearch::FindBkwd(Some(ch));
+						return build_movement!(pending_cmd, Movement::CharSearch(finalized))
+					}
+					CharSearch::BkwdTo(_) => {
+						let finalized = CharSearch::BkwdTo(Some(ch));
+						return build_movement!(pending_cmd, Movement::CharSearch(finalized))
+					}
+				}
+			}
+		}
+
 		if let E(K::Char(digit @ '0'..='9'), M::NONE) = key {
 			pending_cmd.append_digit(digit);
 			return self.get_normal_cmd(pending_cmd);
@@ -144,55 +219,91 @@ impl FernReader {
 			}
 			E(K::Char('j'), M::NONE) => LineCmd::LineDownOrNextHistory,
 			E(K::Char('k'), M::NONE) => LineCmd::LineUpOrPreviousHistory,
-			E(K::Char('l'), M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::ForwardChar)
-					.build()?;
-				LineCmd::ViCmd(cmd)
+			E(K::Char('D'), M::NONE) => build_moveverb!(pending_cmd,Verb::Delete,Movement::EndOfLine)?,
+			E(K::Char('C'), M::NONE) => build_moveverb!(pending_cmd,Verb::Change,Movement::EndOfLine)?,
+			E(K::Char('Y'), M::NONE) => build_moveverb!(pending_cmd,Verb::Yank,Movement::EndOfLine)?,
+			E(K::Char('l'), M::NONE) => build_movement!(pending_cmd,Movement::ForwardChar)?,
+			E(K::Char('w'), M::NONE) => build_movement!(pending_cmd,Movement::ForwardWord(At::Start, Word::Normal))?,
+			E(K::Char('W'), M::NONE) => build_movement!(pending_cmd,Movement::ForwardWord(At::Start, Word::Big))?,
+			E(K::Char('b'), M::NONE) => build_movement!(pending_cmd,Movement::BackwardWord(Word::Normal))?,
+			E(K::Char('B'), M::NONE) => build_movement!(pending_cmd,Movement::BackwardWord(Word::Big))?,
+			E(K::Char('e'), M::NONE) => build_movement!(pending_cmd,Movement::ForwardWord(At::BeforeEnd, Word::Normal))?,
+			E(K::Char('E'), M::NONE) => build_movement!(pending_cmd,Movement::ForwardWord(At::BeforeEnd, Word::Big))?,
+			E(K::Char('^'), M::NONE) => build_movement!(pending_cmd,Movement::BeginningOfFirstWord)?,
+			E(K::Char('0'), M::NONE) => build_movement!(pending_cmd,Movement::BeginningOfLine)?,
+			E(K::Char('$'), M::NONE) => build_movement!(pending_cmd,Movement::EndOfLine)?,
+			E(K::Char('x'), M::NONE) => build_verb!(pending_cmd,Verb::DeleteOne(Anchor::After))?,
+			E(K::Char('o'), M::NONE) => {
+				self.edit_mode = InputMode::Insert;
+				build_verb!(pending_cmd,Verb::Breakline(Anchor::After))?
 			}
-			E(K::Char('w'), M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::ForwardWord(At::Start, Word::Normal))
-					.build()?;
-				LineCmd::ViCmd(cmd)
-			}
-			E(K::Char('W'), M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::ForwardWord(At::Start, Word::Big))
-					.build()?;
-				LineCmd::ViCmd(cmd)
-			}
-			E(K::Char('b'), M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::BackwardWord(Word::Normal))
-					.build()?;
-				LineCmd::ViCmd(cmd)
-			}
-			E(K::Char('B'), M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::BackwardWord(Word::Big))
-					.build()?;
-				LineCmd::ViCmd(cmd)
-			}
-			E(K::Char('x'), M::NONE) => {
-				let cmd = pending_cmd
-					.with_verb(Verb::DeleteOne(Anchor::After))
-					.build()?;
-				LineCmd::ViCmd(cmd)
+			E(K::Char('O'), M::NONE) => {
+				self.edit_mode = InputMode::Insert;
+				build_verb!(pending_cmd,Verb::Breakline(Anchor::Before))?
 			}
 			E(K::Char('i'), M::NONE) => {
 				self.edit_mode = InputMode::Insert;
-				let cmd = pending_cmd
-					.with_movement(Movement::BackwardChar)
-					.build()?;
-				LineCmd::ViCmd(cmd)
+				LineCmd::Null
 			}
 			E(K::Char('I'), M::NONE) => {
 				self.edit_mode = InputMode::Insert;
-				let cmd = pending_cmd
-					.with_movement(Movement::BeginningOfFirstWord)
-					.build()?;
-				LineCmd::ViCmd(cmd)
+				build_movement!(pending_cmd,Movement::BeginningOfFirstWord)?
+			}
+			E(K::Char('a'), M::NONE) => {
+				self.edit_mode = InputMode::Insert;
+				build_movement!(pending_cmd,Movement::ForwardChar)?
+			}
+			E(K::Char('A'), M::NONE) => {
+				self.edit_mode = InputMode::Insert;
+				build_movement!(pending_cmd,Movement::EndOfLine)?
+			}
+			E(K::Char('c'), M::NONE) => {
+				if pending_cmd.verb() == Some(&Verb::Change) {
+					build_moveverb!(pending_cmd,Verb::Change,Movement::WholeLine)?
+				} else {
+					pending_cmd = pending_cmd.with_verb(Verb::Change);
+					self.get_normal_cmd(pending_cmd)?
+				}
+			}
+			E(K::Char('>'), M::NONE) => {
+				if pending_cmd.verb() == Some(&Verb::Indent) {
+					build_verb!(pending_cmd,Verb::Indent)?
+				} else {
+					pending_cmd = pending_cmd.with_verb(Verb::Indent);
+					self.get_normal_cmd(pending_cmd)?
+				}
+			}
+			E(K::Char('<'), M::NONE) => {
+				if pending_cmd.verb() == Some(&Verb::Dedent) {
+					build_verb!(pending_cmd,Verb::Dedent)?
+				} else {
+					pending_cmd = pending_cmd.with_verb(Verb::Dedent);
+					self.get_normal_cmd(pending_cmd)?
+				}
+			}
+			E(K::Char('d'), M::NONE) => {
+				if pending_cmd.verb() == Some(&Verb::Delete) {
+					LineCmd::ViCmd(pending_cmd.with_movement(Movement::WholeLine).build()?)
+				} else {
+					pending_cmd = pending_cmd.with_verb(Verb::Delete);
+					self.get_normal_cmd(pending_cmd)?
+				}
+			}
+			E(K::Char('f'), M::NONE) => {
+				pending_cmd = pending_cmd.with_movement(Movement::CharSearch(CharSearch::FindFwd(None)));
+				self.get_normal_cmd(pending_cmd)?
+			}
+			E(K::Char('F'), M::NONE) => {
+				pending_cmd = pending_cmd.with_movement(Movement::CharSearch(CharSearch::FindBkwd(None)));
+				self.get_normal_cmd(pending_cmd)?
+			}
+			E(K::Char('t'), M::NONE) => {
+				pending_cmd = pending_cmd.with_movement(Movement::CharSearch(CharSearch::FwdTo(None)));
+				self.get_normal_cmd(pending_cmd)?
+			}
+			E(K::Char('T'), M::NONE) => {
+				pending_cmd = pending_cmd.with_movement(Movement::CharSearch(CharSearch::BkwdTo(None)));
+				self.get_normal_cmd(pending_cmd)?
 			}
 			_ => {
 				flog!(INFO, "unhandled key in get_normal_cmd, trying common_cmd...");
@@ -205,44 +316,18 @@ impl FernReader {
 	pub fn common_cmd(&mut self, key: KeyEvent, pending_cmd: ViCmdBuilder) -> ShResult<LineCmd> {
 		use keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
 		match key {
-			E(K::Home, M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::BeginningOfLine)
-					.build()?;
-				Ok(LineCmd::ViCmd(cmd))
-			}
-			E(K::End, M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::EndOfLine)
-					.build()?;
-				Ok(LineCmd::ViCmd(cmd))
-			}
-			E(K::Left, M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::BackwardChar)
-					.build()?;
-				Ok(LineCmd::ViCmd(cmd))
-			}
-			E(K::Right, M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::ForwardChar)
-					.build()?;
-				Ok(LineCmd::ViCmd(cmd))
-			}
-			E(K::Delete, M::NONE) => {
-				let cmd = pending_cmd
-					.with_movement(Movement::ForwardChar)
-					.with_verb(Verb::Delete)
-					.build()?;
-				Ok(LineCmd::ViCmd(cmd))
-			}
+			E(K::Home, M::NONE) => build_movement!(pending_cmd,Movement::BeginningOfLine),
+			E(K::End, M::NONE) => build_movement!(pending_cmd,Movement::EndOfLine),
+			E(K::Left, M::NONE) => build_movement!(pending_cmd,Movement::BackwardChar),
+			E(K::Right, M::NONE) => build_movement!(pending_cmd,Movement::ForwardChar),
+			E(K::Delete, M::NONE) => build_moveverb!(pending_cmd,Verb::Delete,Movement::ForwardChar),
+			E(K::Up, M::NONE) => Ok(LineCmd::LineUpOrPreviousHistory),
+			E(K::Down, M::NONE) => Ok(LineCmd::LineDownOrNextHistory),
+			E(K::Enter, M::NONE) => Ok(LineCmd::AcceptLine),
 			E(K::Backspace, M::NONE) |
 			E(K::Char('h'), M::CTRL) => {
 				Ok(LineCmd::backspace())
 			}
-			E(K::Up, M::NONE) => Ok(LineCmd::LineUpOrPreviousHistory),
-			E(K::Down, M::NONE) => Ok(LineCmd::LineDownOrNextHistory),
-			E(K::Enter, M::NONE) => Ok(LineCmd::AcceptLine),
 			_ => Err(ShErr::simple(ShErrKind::ReadlineErr,format!("Unhandled common key event: {key:?}")))
 		}
 	}
@@ -251,9 +336,13 @@ impl FernReader {
 			ViCmd::MoveVerb(verb_cmd, move_cmd) => {
 				self.last_effect = Some(verb_cmd.clone());
 				self.last_movement = Some(move_cmd.clone());
+
 				let VerbCmd { verb_count, verb } = verb_cmd;
 				for _ in 0..verb_count {
 					self.line.exec_vi_cmd(Some(verb.clone()), Some(move_cmd.clone()))?;
+				}
+				if verb == Verb::Change {
+					self.edit_mode = InputMode::Insert
 				}
 			}
 			ViCmd::Verb(verb_cmd) => {
@@ -315,6 +404,12 @@ impl FernReader {
 			_ => todo!("Unhandled cmd: {cmd:?}"),
 		}
 		Ok(())
+	}
+}
+
+impl Drop for FernReader {
+	fn drop(&mut self) {
+		self.term.write("\x1b[2 q");
 	}
 }
 

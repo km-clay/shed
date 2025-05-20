@@ -92,6 +92,25 @@ impl Terminal {
 		}
 		KeyEvent(KeyCode::Null, ModKeys::empty())
 	}
+
+	pub fn cursor_pos(&self) -> (usize, usize) {
+		self.write("\x1b[6n");
+		let mut buf = [0u8;32];
+		let n = self.read_byte(&mut buf);
+
+
+		let response = std::str::from_utf8(&buf[..n]).unwrap_or("");
+		let mut row = 0;
+		let mut col = 0;
+		if let Some(caps) = response.strip_prefix("\x1b[").and_then(|s| s.strip_suffix("R")) {
+			let mut parts = caps.split(';');
+			if let (Some(rowstr), Some(colstr)) = (parts.next(), parts.next()) {
+				row = rowstr.parse().unwrap_or(1);
+				col = colstr.parse().unwrap_or(1);
+			}
+		}
+		(row,col)
+	}
 }
 
 impl Default for Terminal {

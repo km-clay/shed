@@ -34,6 +34,18 @@ impl ViCmdBuilder {
 		let Self { verb_count, verb, move_count, movement: _ } = self;
 		Self { verb_count, verb, move_count, movement: Some(movement) }
 	}
+	pub fn verb_count(&self) -> Option<u16> {
+		self.verb_count
+	}
+	pub fn move_count(&self) -> Option<u16> {
+		self.move_count
+	}
+	pub fn movement(&self) -> Option<&Movement> {
+		self.movement.as_ref()
+	}
+	pub fn verb(&self) -> Option<&Verb> {
+		self.verb.as_ref()
+	}
 	pub fn append_digit(&mut self, digit: char) {
 		// Convert char digit to a number (assuming ASCII '0'..'9')
 		let digit_val = digit.to_digit(10).expect("digit must be 0-9") as u16;
@@ -128,6 +140,7 @@ pub enum Verb {
 	/// `J` — join lines
 	JoinLines,
 	InsertChar(char),
+	Breakline(Anchor),
 	Indent,
 	Dedent
 }
@@ -147,6 +160,7 @@ impl Verb {
 			Verb::Dedent |
 			Verb::Indent |
 			Verb::InsertChar(_) |
+			Verb::Breakline(_) |
 			Verb::ReplaceChar(_) => false,
 			Verb::Delete |
 			Verb::Change |
@@ -171,8 +185,6 @@ pub enum Movement {
 	ForwardWord(At, Word), // Forward until start/end of word
 																			/// character-search, character-search-backward, vi-char-search
 	CharSearch(CharSearch),
-	/// vi-first-print
-	ViFirstPrint,
 	/// backward-char
 	BackwardChar,
 	/// forward-char
@@ -200,7 +212,6 @@ impl Movement {
 			Self::BackwardWord(_) |
 			Self::ForwardWord(_, _) |
 			Self::CharSearch(_) |
-			Self::ViFirstPrint |
 			Self::BackwardChar |
 			Self::ForwardChar |
 			Self::LineUp |
@@ -334,10 +345,10 @@ pub enum Anchor {
 
 #[derive(Debug, Clone, Eq, PartialEq, Copy)]
 pub enum CharSearch {
-	FindFwd(char),
-	FwdTo(char),
-	FindBkwd(char),
-	BkwdTo(char)
+	FindFwd(Option<char>),
+	FwdTo(Option<char>),
+	FindBkwd(Option<char>),
+	BkwdTo(Option<char>),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Copy)]
@@ -346,13 +357,6 @@ pub enum Word {
 	Normal
 }
 
-
-const fn repeat_count(previous: RepeatCount, new: Option<RepeatCount>) -> RepeatCount {
-	match new {
-		Some(n) => n,
-		None => previous,
-	}
-}
 
 #[derive(Default,Debug,Clone,Copy,PartialEq,Eq,PartialOrd,Ord)]
 pub enum InputMode {
