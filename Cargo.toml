@@ -17,6 +17,7 @@ insta = "1.42.2"
 nix = { version = "0.29.0", features = ["uio", "term", "user", "hostname", "fs", "default", "signal", "process", "event", "ioctl"] }
 pretty_assertions = "1.4.1"
 regex = "1.11.1"
+unicode-segmentation = "1.12.0"
 unicode-width = "0.2.0"
 
 [[bin]]

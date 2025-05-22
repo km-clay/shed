@@ -1,5 +1,5 @@
-use std::os::fd::{BorrowedFd, RawFd};
-use nix::{libc::STDIN_FILENO, sys::termios, unistd::{isatty, read, write}};
+use std::{os::fd::{BorrowedFd, RawFd}, thread::sleep, time::{Duration, Instant}};
+use nix::{errno::Errno, fcntl::{fcntl, FcntlArg, OFlag}, libc::STDIN_FILENO, sys::termios, unistd::{isatty, read, write}};
 
 use super::keys::{KeyCode, KeyEvent, ModKeys};
 
@@ -48,6 +48,44 @@ impl Terminal {
 		})
 	}
 
+	/// Same as read_byte(), only non-blocking with a very short timeout
+	pub fn peek_byte(&self, buf: &mut [u8]) -> usize {
+		const TIMEOUT_DUR: Duration = Duration::from_millis(50);
+		Self::with_raw_mode(|| {
+			self.read_blocks(false);
+
+			let start = Instant::now();
+			loop {
+				match read(self.stdin, buf) {
+					Ok(n) if n > 0 => {
+						self.read_blocks(true);
+						return n
+					}
+					Ok(_) => {}
+					Err(e) if e == Errno::EAGAIN => {}
+					Err(e) => panic!("nonblocking read failed: {e}")
+				}
+
+				if start.elapsed() >= TIMEOUT_DUR {
+					self.read_blocks(true);
+					return 0
+				}
+
+				sleep(Duration::from_millis(1));
+			}
+		})
+	}
+
+	pub fn read_blocks(&self, yn: bool) {
+		let flags = OFlag::from_bits_truncate(fcntl(self.stdin, FcntlArg::F_GETFL).unwrap());
+		let new_flags = if !yn {
+			flags | OFlag::O_NONBLOCK
+		} else {
+			flags & !OFlag::O_NONBLOCK
+		};
+		fcntl(self.stdin, FcntlArg::F_SETFL(new_flags)).unwrap();
+	}
+
 	pub fn write_bytes(&self, buf: &[u8]) {
 		Self::with_raw_mode(|| {
 			write(unsafe{BorrowedFd::borrow_raw(self.stdout)}, buf).expect("Failed to write to stdout");
@@ -69,27 +107,56 @@ impl Terminal {
 	}
 
 	pub fn read_key(&self) -> KeyEvent {
-		let mut buf = [0;8];
-		let n = self.read_byte(&mut buf);
+		use core::str;
 
-		if buf[0] == 0x1b {
-			if n >= 3 && buf[1] == b'[' {
-				return match buf[2] {
-					b'A' => KeyEvent(KeyCode::Up, ModKeys::empty()),
-					b'B' => KeyEvent(KeyCode::Down, ModKeys::empty()),
-					b'C' => KeyEvent(KeyCode::Right, ModKeys::empty()),
-					b'D' => KeyEvent(KeyCode::Left, ModKeys::empty()),
-					_ => KeyEvent(KeyCode::Esc, ModKeys::empty()),
-				};
+		let mut buf = [0u8; 8];
+		let mut collected = Vec::with_capacity(5);
+
+		loop {
+			let n = self.read_byte(&mut buf[..1]); // Read one byte at a time
+			if n == 0 {
+				continue;
 			}
-			return KeyEvent(KeyCode::Esc, ModKeys::empty());
+			collected.push(buf[0]);
+
+			// ESC sequences
+			if collected[0] == 0x1b && collected.len() == 1 {
+				// Peek next byte if any
+				let n = self.peek_byte(&mut buf[..1]);
+				if n == 0 {
+					return KeyEvent(KeyCode::Esc, ModKeys::empty());
+				}
+				collected.push(buf[0]);
+
+				if buf[0] == b'[' {
+					// Read third byte
+					let _ = self.read_byte(&mut buf[..1]);
+					collected.push(buf[0]);
+
+					return match buf[0] {
+						b'A' => KeyEvent(KeyCode::Up, ModKeys::empty()),
+						b'B' => KeyEvent(KeyCode::Down, ModKeys::empty()),
+						b'C' => KeyEvent(KeyCode::Right, ModKeys::empty()),
+						b'D' => KeyEvent(KeyCode::Left, ModKeys::empty()),
+						_ => KeyEvent(KeyCode::Esc, ModKeys::empty()),
+					};
+				}
+
+				return KeyEvent(KeyCode::Esc, ModKeys::empty());
+			}
+
+			// Try parse valid UTF-8 from collected bytes
+			if let Ok(s) = str::from_utf8(&collected) {
+				return KeyEvent::new(s, ModKeys::empty());
+			}
+
+			// If it's not valid UTF-8 yet, loop to collect more bytes
+			if collected.len() >= 4 {
+				// UTF-8 max char length is 4; if it's still invalid, give up
+				break;
+			}
 		}
 
-		if let Ok(s) = core::str::from_utf8(&buf[..n]) {
-			if let Some(ch) = s.chars().next() {
-				return KeyEvent::new(ch, ModKeys::NONE);
-			}
-		}
 		KeyEvent(KeyCode::Null, ModKeys::empty())
 	}
 

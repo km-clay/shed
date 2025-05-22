@@ -3,7 +3,7 @@ pub mod highlight;
 
 use std::path::Path;
 
-use readline::FernReader;
+use readline::FernVi;
 
 use crate::{expand::expand_prompt, libsh::error::ShResult, prelude::*, state::read_shopts};
 
@@ -22,6 +22,6 @@ fn get_prompt() -> ShResult<String> {
 
 pub fn read_line() -> ShResult<String> {
 	let prompt = get_prompt()?;
-	let mut reader = FernReader::new(prompt);
+	let mut reader = FernVi::new(Some(prompt));
 	reader.readline()
 }
