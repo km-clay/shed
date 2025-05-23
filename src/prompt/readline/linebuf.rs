@@ -908,7 +908,7 @@ impl LineBuf {
 			Motion::BeginningOfBuffer => MotionKind::To(0),
 			Motion::EndOfBuffer => MotionKind::To(self.buffer.len().saturating_sub(1)),
 			Motion::Null => MotionKind::Null,
-			Motion::Builder(_) => unreachable!(),
+			_ => unreachable!(),
 		}
 	}
 	pub fn exec_verb(&mut self, verb: Verb, motion: MotionKind, register: RegisterName) -> ShResult<()> {
@@ -1100,12 +1100,8 @@ impl LineBuf {
 				self.undo_stack.push(diff);
 				return
 			};
-			dbg!("old");
-			dbg!(&edit);
 
 			edit.new.append(&mut diff.new);
-			dbg!("new");
-			dbg!(&edit);
 
 			self.undo_stack.push(edit);
 		} else {

@@ -383,6 +383,42 @@ impl ViNormal {
 						break 'motion_parse None
 					}
 				}
+				'f' => {
+					let Some(ch) = chars_clone.peek() else {
+						break 'motion_parse None
+					};
+
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::On, (*ch).into())))
+				}
+				'F' => {
+					let Some(ch) = chars_clone.peek() else {
+						break 'motion_parse None
+					};
+
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::On, (*ch).into())))
+				}
+				't' => {
+					let Some(ch) = chars_clone.peek() else {
+						break 'motion_parse None
+					};
+
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::Before, (*ch).into())))
+				}
+				'T' => {
+					let Some(ch) = chars_clone.peek() else {
+						break 'motion_parse None
+					};
+
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::Before, (*ch).into())))
+				}
+				';' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::RepeatMotion));
+				}
+				',' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::RepeatMotionRev));
+				}
 				'|' => {
 					chars = chars_clone;
 					break 'motion_parse Some(MotionCmd(1, Motion::ToColumn(count)));

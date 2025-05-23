@@ -82,11 +82,17 @@ impl ViCmd {
 	pub fn motion_count(&self) -> usize {
 		self.motion.as_ref().map(|m| m.0).unwrap_or(1)
 	}
+	pub fn is_repeatable(&self) -> bool {
+		self.verb.as_ref().is_some_and(|v| v.1.is_repeatable())
+	}
 	pub fn is_cmd_repeat(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| matches!(v.1,Verb::RepeatLast))
 	}
 	pub fn is_motion_repeat(&self) -> bool {
-		self.verb.as_ref().is_some_and(|v| matches!(v.1,Verb::RepeatMotion | Verb::RepeatMotionRev))
+		self.motion.as_ref().is_some_and(|m| matches!(m.1,Motion::RepeatMotion | Motion::RepeatMotionRev))
+	}
+	pub fn is_char_search(&self) -> bool {
+		self.motion.as_ref().is_some_and(|m| matches!(m.1, Motion::CharSearch(..)))
 	}
 	pub fn should_submit(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::AcceptLine))
@@ -112,6 +118,19 @@ pub struct VerbCmd(pub usize,pub Verb);
 #[derive(Clone,Debug)]
 pub struct MotionCmd(pub usize,pub Motion);
 
+impl MotionCmd {
+	pub fn invert_char_motion(self) -> Self {
+		let MotionCmd(count,Motion::CharSearch(dir, dest, ch)) = self else {
+			unreachable!()
+		};
+		let new_dir = match dir {
+			Direction::Forward => Direction::Backward,
+			Direction::Backward => Direction::Forward,
+		};
+		MotionCmd(count,Motion::CharSearch(new_dir, dest, ch))
+	}
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Verb {
@@ -127,8 +146,6 @@ pub enum Verb {
 	Undo,
 	Redo,
 	RepeatLast,
-	RepeatMotion,
-	RepeatMotionRev,
 	Put(Anchor),
 	OverwriteMode,
 	InsertMode,
@@ -159,6 +176,26 @@ impl Verb {
 			Self::Delete |
 			Self::Change |
 			Self::Yank
+		)
+	}
+	pub fn is_repeatable(&self) -> bool {
+		matches!(self,
+			Self::Delete |
+			Self::DeleteChar(_) |
+			Self::Change |
+			Self::ReplaceChar(_) |
+			Self::Substitute |
+			Self::ToggleCase |
+			Self::Put(_) |
+			Self::OverwriteMode |
+			Self::InsertModeLineBreak(_) |
+			Self::JoinLines |
+			Self::InsertChar(_) |
+			Self::Insert(_) |
+			Self::Breakline(_) |
+			Self::Indent |
+			Self::Dedent |
+			Self::Equalize
 		)
 	}
 	pub fn is_edit(&self) -> bool {
@@ -218,6 +255,8 @@ pub enum Motion {
 	ToColumn(usize),
 	Range(usize,usize),
 	Builder(MotionBuilder),
+	RepeatMotion,
+	RepeatMotionRev,
 	Null
 }
 

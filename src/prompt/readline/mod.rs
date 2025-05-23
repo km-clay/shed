@@ -4,7 +4,7 @@ use linebuf::{strip_ansi_codes_and_escapes, LineBuf, TermCharBuf};
 use mode::{CmdReplay, ViInsert, ViMode, ViNormal};
 use term::Terminal;
 use unicode_width::UnicodeWidthStr;
-use vicmd::{MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
+use vicmd::{Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
 
 use crate::libsh::{error::{ShErr, ShErrKind, ShResult}, term::{Style, Styled}};
 use crate::prelude::*;
@@ -142,11 +142,12 @@ impl FernVi {
 			if mode.is_repeatable() {
 				self.last_action = mode.as_replay();
 			}
+			return self.line.exec_cmd(cmd);
 		} else if cmd.is_cmd_repeat() {
 			let Some(replay) = self.last_action.clone() else {
 				return Ok(())
 			};
-			let ViCmd { register, verb, motion, raw_seq } = cmd;
+			let ViCmd { verb, .. } = cmd;
 			let VerbCmd(count,_) = verb.unwrap();
 			match replay {
 				CmdReplay::ModeReplay { cmds, mut repeat } => {
@@ -164,8 +165,12 @@ impl FernVi {
 					if count > 1 {
 						// Override the counts with the one passed to the '.' command
 						if cmd.verb.is_some() {
-							cmd.verb.as_mut().map(|v| v.0 = count);
-							cmd.motion.as_mut().map(|m| m.0 = 0);
+							if let Some(v_mut) = cmd.verb.as_mut() {
+								v_mut.0 = count
+							}
+							if let Some(m_mut) = cmd.motion.as_mut() {
+								m_mut.0 = 0
+							}
 						} else {
 							return Ok(()) // it has to have a verb to be repeatable, something weird happened
 						}
@@ -176,8 +181,8 @@ impl FernVi {
 			}
 			return Ok(())
 		} else if cmd.is_motion_repeat() {
-			match cmd.verb.as_ref().unwrap().1 {
-				Verb::RepeatMotion => {
+			match cmd.motion.as_ref().unwrap() {
+				MotionCmd(count,Motion::RepeatMotion) => {
 					let Some(motion) = self.last_movement.clone() else {
 						return Ok(())
 					};
@@ -185,15 +190,35 @@ impl FernVi {
 						register: RegisterName::default(),
 						verb: None,
 						motion: Some(motion),
-						raw_seq: ";".into()
+						raw_seq: format!("{count};")
 					};
-					self.line.exec_cmd(repeat_cmd)?;
+					return self.line.exec_cmd(repeat_cmd);
 				}
-				Verb::RepeatMotionRev => {}
+				MotionCmd(count,Motion::RepeatMotionRev) => {
+					let Some(motion) = self.last_movement.clone() else {
+						return Ok(())
+					};
+					let mut new_motion = motion.invert_char_motion();
+					new_motion.0 = *count;
+					let repeat_cmd = ViCmd {
+						register: RegisterName::default(),
+						verb: None,
+						motion: Some(new_motion),
+						raw_seq: format!("{count},")
+					};
+					return self.line.exec_cmd(repeat_cmd);
+				}
 				_ => unreachable!()
 			}
 		}
-		self.line.exec_cmd(cmd.clone())?;
-		Ok(())
+
+		if cmd.is_repeatable() {
+			self.last_action = Some(CmdReplay::Single(cmd.clone()));
+		}
+		if cmd.is_char_search() {
+			self.last_movement = cmd.motion.clone()
+		}
+
+		self.line.exec_cmd(cmd.clone())
 	}
 }
