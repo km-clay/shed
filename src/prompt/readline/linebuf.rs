@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive}, sync::Arc};
+use std::{cmp::Ordering, fmt::Display, ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive}, sync::Arc};
 
 use unicode_width::UnicodeWidthStr;
 
@@ -19,7 +19,13 @@ pub enum MotionKind {
 	To(usize),
 	Backward(usize),
 	Range(Range<usize>),
-	Null
+	Line(isize), // positive = up line, negative = down line
+	ToLine(usize), 
+	Null,
+
+	/// Absolute position based on display width of characters
+	/// Factors in the length of the prompt, and skips newlines
+	ToScreenPos(usize), 
 }
 
 impl MotionKind {
@@ -244,6 +250,7 @@ pub struct LineBuf {
 	buffer: TermCharBuf,
 	cursor: usize,
 	clamp_cursor: bool,
+	first_line_offset: usize,
 	merge_edit: bool,
 	undo_stack: Vec<Edit>,
 	redo_stack: Vec<Edit>,
@@ -260,6 +267,9 @@ impl LineBuf {
 			self.buffer.push(char.into())
 		}
 		self
+	}
+	pub fn set_first_line_offset(&mut self, offset: usize) {
+		self.first_line_offset = offset
 	}
 	pub fn set_cursor_clamp(&mut self, yn: bool) {
 		self.clamp_cursor = yn
@@ -790,10 +800,30 @@ impl LineBuf {
 	pub fn validate_range(&self, range: &Range<usize>) -> bool {
 		range.end < self.buffer.len()
 	}
-	pub fn cur_line_range(&self) -> RangeInclusive<usize> {
-		let cursor = self.cursor();
-		let mut line_start = self.backward_until(cursor, |c| c == &TermChar::Newline, false);
-		let mut line_end = self.forward_until(cursor, |c| c == &TermChar::Newline, true);
+	pub fn lines_from_cursor(&self, offset: isize) -> RangeInclusive<usize> {
+		let mut start;
+		let mut end;
+		match offset.cmp(0) {
+			Ordering::Equal => {
+				return self.cur_line_range()
+			}
+			Ordering::Greater => {
+				let this_line = self.cur_line_range();
+				start = *this_line.start();
+				end = *this_line.end();
+				for _ in 0..offset {
+					let next_ln = self.line_range_from_pos(self.num_or_len(end + 1));
+					end = *this_line.end();
+				}
+			}
+			Ordering::Less => {
+			}
+		}
+		start..=end
+	}
+	pub fn line_range_from_pos(&self, pos: usize) -> RangeInclusive<usize> {
+		let mut line_start = self.backward_until(pos, |c| c == &TermChar::Newline, false);
+		let mut line_end = self.forward_until(pos, |c| c == &TermChar::Newline, true);
 		if self.get_char(line_start.saturating_sub(1)).is_none_or(|c| c != &TermChar::Newline) {
 			line_start = 0;
 		}
@@ -803,6 +833,25 @@ impl LineBuf {
 		}
 
 		line_start..=self.num_or_len(line_end + 1)
+	}
+	pub fn cur_line_range(&self) -> RangeInclusive<usize> {
+		let cursor = self.cursor();
+		self.line_range_from_pos(cursor)
+	}
+	pub fn on_first_line(&self) -> bool {
+		let cursor = self.cursor();
+		let ln_start = self.backward_until(cursor, |c| c.matches("\n"), true);
+		!self.get_char(ln_start).is_some_and(|c| c.matches("\n"))
+	}
+	pub fn on_last_line(&self) -> bool {
+		let cursor = self.cursor();
+		let ln_end = self.forward_until(cursor, |c| c.matches("\n"), true);
+		!self.get_char(ln_end).is_some_and(|c| c.matches("\n"))
+	}
+	pub fn cur_line_col(&self) -> usize {
+		let cursor = self.cursor();
+		let ln_span = self.cur_line_range();
+		cursor.saturating_sub(*ln_span.start())
 	}
 	/// Clamp a number to the length of the buffer
 	pub fn num_or_len_minus_one(&self, num: usize) -> usize {
@@ -902,7 +951,18 @@ impl LineBuf {
 			}
 			Motion::BackwardChar => MotionKind::Backward(1),
 			Motion::ForwardChar => MotionKind::Forward(1),
-			Motion::LineUp => todo!(),
+			Motion::LineUp => {
+				if self.on_first_line() {
+					return MotionKind::Null // TODO: implement history scrolling here
+				}
+				let col = self.cur_line_col();
+				let cursor = self.cursor();
+				let mut ln_start = self.backward_until(cursor, |c| c.matches("\n"), true);
+				let ln_end = ln_start.saturating_sub(1);
+				ln_start = self.backward_until(ln_end, |c| c.matches("\n"), true);
+				let new_pos = (ln_start + col).min(ln_end);
+				MotionKind::To(new_pos)
+			}
 			Motion::LineDown => todo!(),
 			Motion::WholeBuffer => MotionKind::Range(0..self.buffer.len().saturating_sub(1)),
 			Motion::BeginningOfBuffer => MotionKind::To(0),
@@ -915,6 +975,9 @@ impl LineBuf {
 		match verb {
 			Verb::Change |
 			Verb::Delete => {
+				if self.buffer.is_empty() {
+					return Ok(())
+				}
 				let deleted;
 				match motion {
 					MotionKind::Forward(n) => {
@@ -942,9 +1005,12 @@ impl LineBuf {
 				register.write_to_register(deleted);
 			}
 			Verb::DeleteChar(anchor) => {
+				if self.buffer.is_empty() {
+					return Ok(())
+				}
 				match anchor {
 					Anchor::After => {
-						let pos = self.num_or_len(self.cursor() + 1);
+						let pos = self.cursor();
 						self.buffer.remove(pos);
 					}
 					Anchor::Before => {
@@ -989,6 +1055,7 @@ impl LineBuf {
 							.collect::<TermCharBuf>();
 						self.apply_motion(MotionKind::To(r.start));
 					}
+					MotionKind::ToScreenPos(pos) => todo!(),
 					MotionKind::Null => return Ok(())
 				}
 				register.write_to_register(yanked);

@@ -29,7 +29,6 @@ impl FernVi {
 	pub fn new(prompt: Option<String>) -> Self {
 		let prompt = prompt.unwrap_or("$ ".styled(Style::Green | Style::Bold));
 		let line = LineBuf::new().with_initial("The quick brown fox jumps over the lazy dog");//\nThe quick brown fox jumps over the lazy dog\nThe quick brown fox jumps over the lazy dog\n");
-
 		Self {
 			term: Terminal::new(),
 			line,
@@ -38,6 +37,12 @@ impl FernVi {
 			last_action: None,
 			last_movement: None,
 		}
+	}
+	pub fn calculate_prompt_offset(&self) -> usize {
+		if self.prompt.ends_with('\n') {
+			return 0
+		}
+		strip_ansi_codes_and_escapes(self.prompt.lines().last().unwrap_or_default()).width()
 	}
 	pub fn clear_line(&self) {
 		let prompt_lines = self.prompt.lines().count();
@@ -98,6 +103,7 @@ impl FernVi {
 		self.term.write(&self.mode.cursor_style());
 	}
 	pub fn readline(&mut self) -> ShResult<String> {
+		self.line.set_first_line_offset(self.calculate_prompt_offset());
 		let dims = self.term.get_dimensions()?;
 		self.line.update_term_dims(dims.0, dims.1);
 		self.print_buf(false);
