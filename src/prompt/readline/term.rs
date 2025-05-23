@@ -1,5 +1,10 @@
 use std::{os::fd::{BorrowedFd, RawFd}, thread::sleep, time::{Duration, Instant}};
-use nix::{errno::Errno, fcntl::{fcntl, FcntlArg, OFlag}, libc::STDIN_FILENO, sys::termios, unistd::{isatty, read, write}};
+use nix::{errno::Errno, fcntl::{fcntl, FcntlArg, OFlag}, libc::{self, STDIN_FILENO}, sys::termios, unistd::{isatty, read, write}};
+use nix::libc::{winsize, TIOCGWINSZ};
+use std::mem::zeroed;
+use std::io;
+
+use crate::libsh::error::ShResult;
 
 use super::keys::{KeyCode, KeyEvent, ModKeys};
 
@@ -32,6 +37,34 @@ impl Terminal {
 			.expect("Failed to restore terminal settings");
 	}
 
+
+	pub fn get_dimensions(&self) -> ShResult<(usize, usize)> {
+		if !isatty(self.stdin).unwrap_or(false) {
+			return Err(io::Error::new(io::ErrorKind::Other, "Not a TTY"))?;
+		}
+
+		let mut ws: winsize = unsafe { zeroed() };
+
+		let res = unsafe { libc::ioctl(self.stdin, TIOCGWINSZ, &mut ws) };
+		if res == -1 {
+			return Err(io::Error::last_os_error())?;
+		}
+
+		Ok((ws.ws_row as usize, ws.ws_col as usize))
+	}
+
+	pub fn save_cursor_pos(&self) {
+		self.write("\x1b[s")
+	}
+
+	pub fn restore_cursor_pos(&self) {
+		self.write("\x1b[u")
+	}
+
+	pub fn move_cursor_to(&self, (row,col): (usize,usize)) {
+		self.write(&format!("\x1b[{row};{col}H",))
+	}
+
 	pub fn with_raw_mode<F: FnOnce() -> R, R>(func: F) -> R {
 		let saved = Self::raw_mode();
 		let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(func));
@@ -45,6 +78,29 @@ impl Terminal {
 	pub fn read_byte(&self, buf: &mut [u8]) -> usize {
 		Self::with_raw_mode(|| {
 			read(self.stdin, buf).expect("Failed to read from stdin")
+		})
+	}
+
+	fn read_blocks_then_read(&self, buf: &mut [u8], timeout: Duration) -> Option<usize> {
+		Self::with_raw_mode(|| {
+			self.read_blocks(false);
+			let start = Instant::now();
+			loop {
+				match read(self.stdin, buf) {
+					Ok(n) if n > 0 => {
+						self.read_blocks(true);
+						return Some(n);
+					}
+					Ok(_) => {}
+					Err(e) if e == Errno::EAGAIN => {}
+					Err(_) => return None,
+				}
+				if start.elapsed() > timeout {
+					self.read_blocks(true);
+					return None;
+				}
+				sleep(Duration::from_millis(1));
+			}
 		})
 	}
 

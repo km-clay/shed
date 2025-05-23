@@ -1,17 +1,34 @@
 use super::{linebuf::{TermChar, TermCharBuf}, register::{append_register, read_register, write_register}};
 
-#[derive(Clone,Copy,Default,Debug)]
+#[derive(Clone,Copy,Debug)]
 pub struct RegisterName {
 	name: Option<char>,
+	count: usize,
 	append: bool
 }
 
 impl RegisterName {
+	pub fn new(name: Option<char>, count: Option<usize>) -> Self {
+		let Some(ch) = name else {
+			return Self::default()
+		};
+
+		let append = ch.is_uppercase();
+		let name = ch.to_ascii_lowercase();
+		Self {
+			name: Some(name),
+			count: count.unwrap_or(1),
+			append
+		}
+	}
 	pub fn name(&self) -> Option<char> {
 		self.name
 	}
 	pub fn is_append(&self) -> bool {
 		self.append
+	}
+	pub fn count(&self) -> usize {
+		self.count
 	}
 	pub fn write_to_register(&self, buf: TermCharBuf) {
 		if self.append {
@@ -25,29 +42,21 @@ impl RegisterName {
 	}
 }
 
+impl Default for RegisterName {
+	fn default() -> Self {
+		Self {
+			name: None,
+			count: 1,
+			append: false
+		}
+	}
+}
+
 #[derive(Clone,Default,Debug)]
 pub struct ViCmd {
-	pub wants_register: bool, // Waiting for register character
-
-	/// Register to read from/write to
-	pub register_count: Option<u16>,
 	pub register: RegisterName,
-
-	/// Verb to perform
-	pub verb_count: Option<u16>,
-	pub verb: Option<Verb>,
-
-	/// Motion to perform
-	pub motion_count: Option<u16>,
-	pub motion: Option<Motion>,
-
-	/// Count digits are held here until we know what we are counting
-	/// Once a register/verb/motion is set, the count is taken from here
-	pub pending_count: Option<u16>,
-
-	/// The actual keys the user typed for this command
-	/// Maybe display this somewhere around the prompt later?
-	/// Prompt escape sequence maybe?
+	pub verb: Option<VerbCmd>,
+	pub motion: Option<MotionCmd>,
 	pub raw_seq: String, 
 }
 
@@ -55,78 +64,53 @@ impl ViCmd {
 	pub fn new() -> Self {
 		Self::default()
 	}
-	pub fn set_register(&mut self, register: char) {
-		let append = register.is_uppercase();
-		let name = Some(register.to_ascii_lowercase());
-		let reg_name = RegisterName { name, append };
-		self.register = reg_name;
-		self.register_count = self.pending_count.take();
-		self.wants_register = false;
+	pub fn set_motion(&mut self, motion: MotionCmd) {
+		self.motion = Some(motion)
 	}
-	pub fn append_seq_char(&mut self, ch: char) {
-		self.raw_seq.push(ch)
+	pub fn set_verb(&mut self, verb: VerbCmd) {
+		self.verb = Some(verb)
 	}
-	pub fn is_empty(&self) -> bool {
-		!self.wants_register &&
-		self.register.name.is_none() &&
-		self.verb_count.is_none() &&
-		self.verb.is_none() &&
-		self.motion_count.is_none() &&
-		self.motion.is_none()
-	}
-	pub fn set_verb(&mut self, verb: Verb) {
-		self.verb = Some(verb);
-		self.verb_count = self.pending_count.take();
-	}
-	pub fn set_motion(&mut self, motion: Motion) {
-		self.motion = Some(motion);
-		self.motion_count = self.pending_count.take();
-	}
-	pub fn register(&self) -> RegisterName {
-		self.register
-	}
-	pub fn verb(&self) -> Option<&Verb> {
+	pub fn verb(&self) -> Option<&VerbCmd> {
 		self.verb.as_ref()
 	}
-	pub fn verb_count(&self) -> u16 {
-		self.verb_count.unwrap_or(1)
-	}
-	pub fn motion(&self) -> Option<&Motion> {
+	pub fn motion(&self) -> Option<&MotionCmd> {
 		self.motion.as_ref()
 	}
-	pub fn motion_count(&self) -> u16 {
-		self.motion_count.unwrap_or(1)
+	pub fn verb_count(&self) -> usize {
+		self.verb.as_ref().map(|v| v.0).unwrap_or(1)
 	}
-	pub fn append_digit(&mut self, digit: char) {
-		// Convert char digit to a number (assuming ASCII '0'..'9')
-		let digit_val = digit.to_digit(10).expect("digit must be 0-9") as u16;
-		self.pending_count = Some(match self.pending_count {
-			Some(count) => count * 10 + digit_val,
-			None => digit_val,
-		});
+	pub fn motion_count(&self) -> usize {
+		self.motion.as_ref().map(|m| m.0).unwrap_or(1)
 	}
-	pub fn is_building(&self) -> bool {
-		matches!(self.verb, Some(Verb::Builder(_))) ||
-		matches!(self.motion, Some(Motion::Builder(_))) ||
-		self.wants_register
+	pub fn is_cmd_repeat(&self) -> bool {
+		self.verb.as_ref().is_some_and(|v| matches!(v.1,Verb::RepeatLast))
 	}
-	pub fn is_complete(&self) -> bool {
-		!(
-			(self.verb.is_none() && self.motion.is_none()) ||
-			(self.verb.is_none() && self.motion.as_ref().is_some_and(|m| m.needs_verb())) ||
-			(self.motion.is_none() && self.verb.as_ref().is_some_and(|v| v.needs_motion())) ||
-			self.is_building()
-		)
+	pub fn is_motion_repeat(&self) -> bool {
+		self.verb.as_ref().is_some_and(|v| matches!(v.1,Verb::RepeatMotion | Verb::RepeatMotionRev))
 	}
 	pub fn should_submit(&self) -> bool {
-		self.verb.as_ref().is_some_and(|v| *v == Verb::AcceptLine)
+		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::AcceptLine))
+	}
+	pub fn is_undo_op(&self) -> bool {
+		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::Undo | Verb::Redo))
 	}
 	pub fn is_mode_transition(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| {
-			matches!(*v, Verb::InsertMode | Verb::NormalMode | Verb::OverwriteMode | Verb::VisualMode)
+			matches!(v.1, 
+				Verb::InsertMode |
+				Verb::InsertModeLineBreak(_) |
+				Verb::NormalMode |
+				Verb::VisualMode |
+				Verb::OverwriteMode
+			)
 		})
 	}
 }
+
+#[derive(Clone,Debug)]
+pub struct VerbCmd(pub usize,pub Verb);
+#[derive(Clone,Debug)]
+pub struct MotionCmd(pub usize,pub Motion);
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
@@ -141,10 +125,14 @@ pub enum Verb {
 	Complete,
 	CompleteBackward,
 	Undo,
+	Redo,
 	RepeatLast,
+	RepeatMotion,
+	RepeatMotionRev,
 	Put(Anchor),
 	OverwriteMode,
 	InsertMode,
+	InsertModeLineBreak(Anchor),
 	NormalMode,
 	VisualMode,
 	JoinLines,
@@ -153,6 +141,7 @@ pub enum Verb {
 	Breakline(Anchor),
 	Indent,
 	Dedent,
+	Equalize,
 	AcceptLine,
 	Builder(VerbBuilder),
 	EndOfFile
@@ -172,6 +161,28 @@ impl Verb {
 			Self::Yank
 		)
 	}
+	pub fn is_edit(&self) -> bool {
+		matches!(self,
+			Self::Delete |
+			Self::DeleteChar(_) |
+			Self::Change |
+			Self::ReplaceChar(_) |
+			Self::Substitute |
+			Self::ToggleCase |
+			Self::RepeatLast |
+			Self::Put(_) |
+			Self::OverwriteMode |
+			Self::InsertModeLineBreak(_) |
+			Self::JoinLines |
+			Self::InsertChar(_) |
+			Self::Insert(_) |
+			Self::Breakline(_) |
+			Self::EndOfFile
+		)
+	}
+	pub fn is_char_insert(&self) -> bool {
+		matches!(self, Self::InsertChar(_))
+	}
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -185,7 +196,7 @@ pub enum Motion {
 	/// end-of-line
 	EndOfLine,
 	/// backward-word, vi-prev-word
-	BackwardWord(Word), // Backward until start of word
+	BackwardWord(To, Word), // Backward until start of word
 																	 /// forward-word, vi-end-word, vi-next-word
 	ForwardWord(To, Word), // Forward until start/end of word
 																			/// character-search, character-search-backward, vi-char-search
@@ -204,6 +215,8 @@ pub enum Motion {
 	BeginningOfBuffer,
 	/// end-of-register
 	EndOfBuffer,
+	ToColumn(usize),
+	Range(usize,usize),
 	Builder(MotionBuilder),
 	Null
 }
