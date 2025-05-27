@@ -1,4 +1,4 @@
-use super::{linebuf::{TermChar, TermCharBuf}, register::{append_register, read_register, write_register}};
+use super::register::{append_register, read_register, write_register};
 
 #[derive(Clone,Copy,Debug)]
 pub struct RegisterName {
@@ -30,14 +30,14 @@ impl RegisterName {
 	pub fn count(&self) -> usize {
 		self.count
 	}
-	pub fn write_to_register(&self, buf: TermCharBuf) {
+	pub fn write_to_register(&self, buf: String) {
 		if self.append {
 			append_register(self.name, buf);
 		} else {
 			write_register(self.name, buf);
 		}
 	}
-	pub fn read_from_register(&self) -> Option<TermCharBuf> {
+	pub fn read_from_register(&self) -> Option<String> {
 		read_register(self.name)
 	}
 }
@@ -153,7 +153,7 @@ pub enum Verb {
 	NormalMode,
 	VisualMode,
 	JoinLines,
-	InsertChar(TermChar),
+	InsertChar(char),
 	Insert(String),
 	Breakline(Anchor),
 	Indent,
@@ -237,7 +237,7 @@ pub enum Motion {
 																	 /// forward-word, vi-end-word, vi-next-word
 	ForwardWord(To, Word), // Forward until start/end of word
 																			/// character-search, character-search-backward, vi-char-search
-	CharSearch(Direction,Dest,TermChar),
+	CharSearch(Direction,Dest,char),
 	/// backward-char
 	BackwardChar,
 	/// forward-char

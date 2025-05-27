@@ -3,9 +3,9 @@ pub mod highlight;
 
 use std::path::Path;
 
-use readline::FernVi;
+use readline::{FernVi, Readline};
 
-use crate::{expand::expand_prompt, libsh::error::ShResult, prelude::*, state::read_shopts};
+use crate::{expand::expand_prompt, libsh::error::ShResult, prelude::*, shopt::FernEditMode, state::read_shopts};
 
 /// Initialize the line editor
 fn get_prompt() -> ShResult<String> {
@@ -20,8 +20,13 @@ fn get_prompt() -> ShResult<String> {
 	Ok(format!("\n{}",expand_prompt(&prompt)?))
 }
 
-pub fn read_line() -> ShResult<String> {
+pub fn read_line(edit_mode: FernEditMode) -> ShResult<String> {
+	dbg!("hi");
 	let prompt = get_prompt()?;
-	let mut reader = FernVi::new(Some(prompt));
+	let mut reader: Box<dyn Readline> = match edit_mode {
+		FernEditMode::Vi => Box::new(FernVi::new(Some(prompt))),
+		FernEditMode::Emacs => todo!()
+	};
+	dbg!("there");
 	reader.readline()
 }

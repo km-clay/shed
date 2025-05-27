@@ -1,6 +1,6 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::time::Duration;
 
-use linebuf::{strip_ansi_codes_and_escapes, LineBuf, TermCharBuf};
+use linebuf::{strip_ansi_codes_and_escapes, LineBuf};
 use mode::{CmdReplay, ViInsert, ViMode, ViNormal};
 use term::Terminal;
 use unicode_width::UnicodeWidthStr;
@@ -16,6 +16,11 @@ pub mod vicmd;
 pub mod mode;
 pub mod register;
 
+/// Unified interface for different line editing methods
+pub trait Readline {
+	fn readline(&mut self) -> ShResult<String>;
+}
+
 pub struct FernVi {
 	term: Terminal,
 	line: LineBuf,
@@ -25,91 +30,29 @@ pub struct FernVi {
 	last_movement: Option<MotionCmd>,
 }
 
-impl FernVi {
-	pub fn new(prompt: Option<String>) -> Self {
-		let prompt = prompt.unwrap_or("$ ".styled(Style::Green | Style::Bold));
-		let line = LineBuf::new().with_initial("The quick brown fox jumps over the lazy dog");//\nThe quick brown fox jumps over the lazy dog\nThe quick brown fox jumps over the lazy dog\n");
-		Self {
-			term: Terminal::new(),
-			line,
-			prompt,
-			mode: Box::new(ViInsert::new()),
-			last_action: None,
-			last_movement: None,
-		}
-	}
-	pub fn calculate_prompt_offset(&self) -> usize {
-		if self.prompt.ends_with('\n') {
-			return 0
-		}
-		strip_ansi_codes_and_escapes(self.prompt.lines().last().unwrap_or_default()).width()
-	}
-	pub fn clear_line(&self) {
-		let prompt_lines = self.prompt.lines().count();
-		let last_line_len = strip_ansi_codes_and_escapes(self.prompt.lines().last().unwrap_or_default()).width();
-		let buf_lines = if self.prompt.ends_with('\n') {
-			self.line.count_lines(last_line_len)
-		} else {
-			// The prompt does not end with a newline, so one of the buffer's lines overlaps with it
-			self.line.count_lines(last_line_len).saturating_sub(1) 
-		};
-		let total = prompt_lines + buf_lines;
-		self.term.write_bytes(b"\r\n");
-		self.term.write_bytes(format!("\r\x1b[{total}B").as_bytes());
-		for _ in 0..total {
-			self.term.write_bytes(b"\r\x1b[2K\x1b[1A");
-		}
-		self.term.write_bytes(b"\r\x1b[2K");
-	}
-	pub fn print_buf(&self, refresh: bool) {
-		if refresh {
-			self.clear_line()
-		}
-		let mut prompt_lines = self.prompt.lines().peekable();
-		let mut last_line_len = 0;
-		let lines = self.line.split_lines();
-		while let Some(line) = prompt_lines.next() {
-			if prompt_lines.peek().is_none() {
-				last_line_len = strip_ansi_codes_and_escapes(line).width();
-				self.term.write(line);
-			} else {
+impl Readline for FernVi {
+	fn readline(&mut self) -> ShResult<String> {
+		/*
+		self.term.writeln("This is a line!");
+		self.term.writeln("This is a line!");
+		self.term.writeln("This is a line!");
+		let prompt_thing = "prompt thing -> ";
+		self.term.write(prompt_thing);
+		let line = "And another!";
+		let mut iters: usize = 0;
+		let mut newlines_written = 0;
+		loop {
+			iters += 1;
+			for i in 0..iters {
 				self.term.writeln(line);
 			}
+			std::thread::sleep(Duration::from_secs(1));
+			self.clear_lines(iters,prompt_thing.len() + 1);
 		}
-		let mut lines_iter = lines.into_iter().peekable();
-
-		let pos = self.term.cursor_pos();
-		while let Some(line) = lines_iter.next() {
-			if lines_iter.peek().is_some() {
-				self.term.writeln(&line);
-			} else {
-				self.term.write(&line);
-			}
-		}
-		self.term.move_cursor_to(pos);
-
-		let (x, y) = self.line.cursor_display_coords(Some(last_line_len));
-
-		if y > 0 {
-			self.term.write(&format!("\r\x1b[{}B", y));
-		}
-
-
-		let cursor_x = if y == 0 { x + last_line_len } else { x };
-
-		if cursor_x > 0 {
-			self.term.write(&format!("\r\x1b[{}C", cursor_x));
-		}
-		self.term.write(&self.mode.cursor_style());
-	}
-	pub fn readline(&mut self) -> ShResult<String> {
-		self.line.set_first_line_offset(self.calculate_prompt_offset());
-		let dims = self.term.get_dimensions()?;
-		self.line.update_term_dims(dims.0, dims.1);
-		self.print_buf(false);
+		panic!()
+		*/
+		self.print_buf(false)?;
 		loop {
-			let dims = self.term.get_dimensions()?;
-			self.line.update_term_dims(dims.0, dims.1);
 
 			let key = self.term.read_key();
 			let Some(cmd) = self.mode.handle_key(key) else {
@@ -121,8 +64,44 @@ impl FernVi {
 			}
 
 			self.exec_cmd(cmd.clone())?;
-			self.print_buf(true);
+			self.print_buf(true)?;
 		}
+	}
+}
+
+impl FernVi {
+	pub fn new(prompt: Option<String>) -> Self {
+		let prompt = prompt.unwrap_or("$ ".styled(Style::Green | Style::Bold));
+		let line = LineBuf::new().with_initial("The quick brown fox jumps over the lazy dog");//\nThe quick brown fox jumps over the lazy dog\nThe quick brown fox jumps over the lazy dog\n");
+		let term = Terminal::new();
+		Self {
+			term,
+			line,
+			prompt,
+			mode: Box::new(ViInsert::new()),
+			last_action: None,
+			last_movement: None,
+		}
+	}
+	pub fn print_buf(&mut self, refresh: bool) -> ShResult<()> {
+		let (_,width) = self.term.get_dimensions()?;
+		if refresh {
+			self.term.unwrite()?;
+		}
+		let offset = self.calculate_prompt_offset();
+		let mut line_buf = self.prompt.clone();
+		line_buf.push_str(self.line.as_str());
+
+		self.term.recorded_write(&line_buf, offset)?;
+		self.term.position_cursor(self.line.cursor_display_coords(offset,width))?;
+
+		Ok(())
+	}
+	pub fn calculate_prompt_offset(&self) -> usize {
+		if self.prompt.ends_with('\n') {
+			return 0
+		}
+		strip_ansi_codes_and_escapes(self.prompt.lines().last().unwrap_or_default()).width() + 1 // 1 indexed
 	}
 	pub fn exec_cmd(&mut self, cmd: ViCmd) -> ShResult<()> {
 		if cmd.is_mode_transition() {

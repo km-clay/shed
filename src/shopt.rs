@@ -38,8 +38,9 @@ impl Display for FernBellStyle {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub enum FernEditMode {
+	#[default]
 	Vi,
 	Emacs
 }

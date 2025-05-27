@@ -1,20 +1,18 @@
 use std::sync::Mutex;
 
-use super::linebuf::TermCharBuf;
-
 pub static REGISTERS: Mutex<Registers> = Mutex::new(Registers::new());
 
-pub fn read_register(ch: Option<char>) -> Option<TermCharBuf> {
+pub fn read_register(ch: Option<char>) -> Option<String> {
 	let lock = REGISTERS.lock().unwrap();
 	lock.get_reg(ch).map(|r| r.buf().clone())
 }
 
-pub fn write_register(ch: Option<char>, buf: TermCharBuf) {
+pub fn write_register(ch: Option<char>, buf: String) {
 	let mut lock = REGISTERS.lock().unwrap();
 	if let Some(r) = lock.get_reg_mut(ch) { r.write(buf) }
 }
 
-pub fn append_register(ch: Option<char>, buf: TermCharBuf) {
+pub fn append_register(ch: Option<char>, buf: String) {
 	let mut lock = REGISTERS.lock().unwrap();
 	if let Some(r) = lock.get_reg_mut(ch) { r.append(buf) }
 }
@@ -53,33 +51,33 @@ pub struct Registers {
 impl Registers {
 	pub const fn new() -> Self {
 		Self {
-			default: Register(TermCharBuf(vec![])),
-			a: Register(TermCharBuf(vec![])),
-			b: Register(TermCharBuf(vec![])),
-			c: Register(TermCharBuf(vec![])),
-			d: Register(TermCharBuf(vec![])),
-			e: Register(TermCharBuf(vec![])),
-			f: Register(TermCharBuf(vec![])),
-			g: Register(TermCharBuf(vec![])),
-			h: Register(TermCharBuf(vec![])),
-			i: Register(TermCharBuf(vec![])),
-			j: Register(TermCharBuf(vec![])),
-			k: Register(TermCharBuf(vec![])),
-			l: Register(TermCharBuf(vec![])),
-			m: Register(TermCharBuf(vec![])),
-			n: Register(TermCharBuf(vec![])),
-			o: Register(TermCharBuf(vec![])),
-			p: Register(TermCharBuf(vec![])),
-			q: Register(TermCharBuf(vec![])),
-			r: Register(TermCharBuf(vec![])),
-			s: Register(TermCharBuf(vec![])),
-			t: Register(TermCharBuf(vec![])),
-			u: Register(TermCharBuf(vec![])),
-			v: Register(TermCharBuf(vec![])),
-			w: Register(TermCharBuf(vec![])),
-			x: Register(TermCharBuf(vec![])),
-			y: Register(TermCharBuf(vec![])),
-			z: Register(TermCharBuf(vec![])),
+			default: Register(String::new()),
+			a: Register(String::new()),
+			b: Register(String::new()),
+			c: Register(String::new()),
+			d: Register(String::new()),
+			e: Register(String::new()),
+			f: Register(String::new()),
+			g: Register(String::new()),
+			h: Register(String::new()),
+			i: Register(String::new()),
+			j: Register(String::new()),
+			k: Register(String::new()),
+			l: Register(String::new()),
+			m: Register(String::new()),
+			n: Register(String::new()),
+			o: Register(String::new()),
+			p: Register(String::new()),
+			q: Register(String::new()),
+			r: Register(String::new()),
+			s: Register(String::new()),
+			t: Register(String::new()),
+			u: Register(String::new()),
+			v: Register(String::new()),
+			w: Register(String::new()),
+			x: Register(String::new()),
+			y: Register(String::new()),
+			z: Register(String::new()),
 		}
 	}
 	pub fn get_reg(&self, ch: Option<char>) -> Option<&Register> {
@@ -153,17 +151,16 @@ impl Registers {
 }
 
 #[derive(Clone,Default,Debug)]
-pub struct Register(TermCharBuf);
-
+pub struct Register(String);
 impl Register {
-	pub fn buf(&self) -> &TermCharBuf {
+	pub fn buf(&self) -> &String {
 		&self.0
 	}
-	pub fn write(&mut self, buf: TermCharBuf) {
+	pub fn write(&mut self, buf: String) {
 		self.0 = buf
 	}
-	pub fn append(&mut self, mut buf: TermCharBuf) {
-		self.0.0.append(&mut buf.0)
+	pub fn append(&mut self, buf: String) {
+		self.0.push_str(&buf)
 	}
 	pub fn clear(&mut self) {
 		self.0.clear()

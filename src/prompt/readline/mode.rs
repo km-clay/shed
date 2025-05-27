@@ -4,7 +4,6 @@ use std::str::Chars;
 use nix::NixPath;
 
 use super::keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
-use super::linebuf::TermChar;
 use super::vicmd::{Anchor, Bound, Dest, Direction, Motion, MotionBuilder, MotionCmd, RegisterName, TextObj, To, Verb, VerbBuilder, VerbCmd, ViCmd, Word};
 use crate::prelude::*;
 
@@ -72,14 +71,8 @@ impl ViInsert {
 impl ViMode for ViInsert {
 	fn handle_key(&mut self, key: E) -> Option<ViCmd> {
 		match key {
-			E(K::Grapheme(ch), M::NONE) => {
-				let ch = TermChar::from(ch);
-				self.pending_cmd.set_verb(VerbCmd(1,Verb::InsertChar(ch)));
-				self.pending_cmd.set_motion(MotionCmd(1,Motion::ForwardChar));
-				self.register_and_return()
-			}
 			E(K::Char(ch), M::NONE) => {
-				self.pending_cmd.set_verb(VerbCmd(1,Verb::InsertChar(TermChar::from(ch))));
+				self.pending_cmd.set_verb(VerbCmd(1,Verb::InsertChar(ch)));
 				self.pending_cmd.set_motion(MotionCmd(1,Motion::ForwardChar));
 				self.register_and_return()
 			}

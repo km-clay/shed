@@ -1,6 +1,7 @@
 use std::{os::fd::{BorrowedFd, RawFd}, thread::sleep, time::{Duration, Instant}};
 use nix::{errno::Errno, fcntl::{fcntl, FcntlArg, OFlag}, libc::{self, STDIN_FILENO}, sys::termios, unistd::{isatty, read, write}};
 use nix::libc::{winsize, TIOCGWINSZ};
+use unicode_width::UnicodeWidthChar;
 use std::mem::zeroed;
 use std::io;
 
@@ -8,10 +9,20 @@ use crate::libsh::error::ShResult;
 
 use super::keys::{KeyCode, KeyEvent, ModKeys};
 
+#[derive(Default,Debug)]
+struct WriteMap {
+	lines: usize,
+	cols: usize,
+	offset: usize
+}
+
 #[derive(Debug)]
 pub struct Terminal {
 	stdin: RawFd,
 	stdout: RawFd,
+	recording: bool,
+	write_records: WriteMap,
+	cursor_records: WriteMap
 }
 
 impl Terminal {
@@ -20,6 +31,13 @@ impl Terminal {
 		Self {
 			stdin: STDIN_FILENO,
 			stdout: 1,
+			recording: false,
+			// Records for buffer writes
+			// Used to find the start of the buffer
+			write_records: WriteMap::default(),
+			// Records for cursor movements after writes
+			// Used to find the end of the buffer
+			cursor_records: WriteMap::default(),
 		}
 	}
 
@@ -53,15 +71,24 @@ impl Terminal {
 		Ok((ws.ws_row as usize, ws.ws_col as usize))
 	}
 
-	pub fn save_cursor_pos(&self) {
+	pub fn start_recording(&mut self, offset: usize) {
+		self.recording = true;
+		self.write_records.offset = offset;
+	}
+
+	pub fn stop_recording(&mut self) {
+		self.recording = false;
+	}
+
+	pub fn save_cursor_pos(&mut self) {
 		self.write("\x1b[s")
 	}
 
-	pub fn restore_cursor_pos(&self) {
+	pub fn restore_cursor_pos(&mut self) {
 		self.write("\x1b[u")
 	}
 
-	pub fn move_cursor_to(&self, (row,col): (usize,usize)) {
+	pub fn move_cursor_to(&mut self, (row,col): (usize,usize)) {
 		self.write(&format!("\x1b[{row};{col}H",))
 	}
 
@@ -118,7 +145,7 @@ impl Terminal {
 						return n
 					}
 					Ok(_) => {}
-					Err(e) if e == Errno::EAGAIN => {}
+					Err(Errno::EAGAIN) => {}
 					Err(e) => panic!("nonblocking read failed: {e}")
 				}
 
@@ -142,23 +169,126 @@ impl Terminal {
 		fcntl(self.stdin, FcntlArg::F_SETFL(new_flags)).unwrap();
 	}
 
-	pub fn write_bytes(&self, buf: &[u8]) {
-		Self::with_raw_mode(|| {
-			write(unsafe{BorrowedFd::borrow_raw(self.stdout)}, buf).expect("Failed to write to stdout");
-		});
+	pub fn reset_records(&mut self) {
+		self.write_records = Default::default();
+		self.cursor_records = Default::default();
+	}
+
+	pub fn recorded_write(&mut self, buf: &str, offset: usize) -> ShResult<()> {
+		self.start_recording(offset);
+		self.write(buf);
+		self.stop_recording();
+		Ok(())
+	}
+
+	pub fn unwrite(&mut self) -> ShResult<()> {
+		self.unposition_cursor()?;
+		let WriteMap { lines, cols, offset } = self.write_records;
+		for _ in 0..lines {
+			self.write("\x1b[2K\x1b[A")
+		}
+		let col = offset;
+		self.write(&format!("\x1b[{col}G\x1b[0K"));
+		self.reset_records();
+		Ok(())
+	}
+
+	pub fn position_cursor(&mut self, (lines,col): (usize,usize)) -> ShResult<()> {
+		dbg!(self.cursor_pos());
+		self.cursor_records.lines = lines;
+		self.cursor_records.cols = col;
+		self.cursor_records.offset = self.cursor_pos().1;
+
+		for _ in 0..lines {
+			self.write("\x1b[A")
+		}
+
+		self.write(&format!("\x1b[{col}G"));
+
+		dbg!("done moving");
+		dbg!(self.cursor_pos());
+
+		Ok(())
+	}
+
+	pub fn unposition_cursor(&mut self) ->ShResult<()> {
+		dbg!(self.cursor_pos());
+		let WriteMap { lines, cols, offset } = self.cursor_records;
+
+		for _ in 0..lines {
+			self.write("\x1b[B")
+		}
+
+		self.write(&format!("\x1b[{offset}G"));
+
+		dbg!("done moving back");
+		dbg!(self.cursor_pos());
+
+		Ok(())
+	}
+
+	pub fn write_bytes(&mut self, buf: &[u8]) {
+		if self.recording {
+			let (_, width) = self.get_dimensions().unwrap();
+			let mut bytes = buf.iter().map(|&b| b as char).peekable();
+			while let Some(ch) = bytes.next() {
+				match ch {
+					'\n' => {
+						self.write_records.lines += 1;
+						self.write_records.cols = 0;
+					}
+					'\r' => {
+						self.write_records.cols = 0;
+					}
+					// Consume escape sequences
+					'\x1b' if bytes.peek() == Some(&'[') => {
+						bytes.next();
+						while let Some(&ch) = bytes.peek() {
+							if ch.is_ascii_alphabetic() {
+								bytes.next();
+								break
+							} else {
+								bytes.next();
+							}
+						}
+					}
+					'\t' => {
+						let tab_size = 8;
+						let next_tab = tab_size - (self.write_records.cols % tab_size);
+						self.write_records.cols += next_tab;
+						if self.write_records.cols >= width {
+							self.write_records.lines += 1;
+							self.write_records.cols = 0;
+						}
+					}
+					_ if ch.is_control() => {
+						// ignore control characters for visual width
+					}
+					_ => {
+						let ch_width = ch.width().unwrap_or(0);
+						if self.write_records.cols + ch_width > width {
+							self.write_records.lines += 1;
+							self.write_records.cols = 0;
+						}
+						self.write_records.cols += ch_width;
+					}
+				}
+			}
+		}
+		write(unsafe { BorrowedFd::borrow_raw(self.stdout) }, buf).expect("Failed to write to stdout");
 	}
 
 
-	pub fn write(&self, s: &str) {
+	pub fn write(&mut self, s: &str) {
 		self.write_bytes(s.as_bytes());
 	}
 
-	pub fn writeln(&self, s: &str) {
+	pub fn writeln(&mut self, s: &str) {
 		self.write(s);
-		self.write_bytes(b"\r\n");
+		self.write_bytes(b"\n");
 	}
 
-	pub fn clear(&self) {
+	pub fn clear(&mut self) {
 		self.write_bytes(b"\x1b[2J\x1b[H");
 	}
 
@@ -216,7 +346,7 @@ impl Terminal {
 		KeyEvent(KeyCode::Null, ModKeys::empty())
 	}
 
-	pub fn cursor_pos(&self) -> (usize, usize) {
+	pub fn cursor_pos(&mut self) -> (usize, usize) {
 		self.write("\x1b[6n");
 		let mut buf = [0u8;32];
 		let n = self.read_byte(&mut buf);

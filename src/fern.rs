@@ -24,7 +24,8 @@ use crate::signal::sig_setup;
 use crate::state::source_rc;
 use crate::prelude::*;
 use clap::Parser;
-use state::{read_vars, write_vars};
+use shopt::FernEditMode;
+use state::{read_shopts, read_vars, write_shopts, write_vars};
 
 #[derive(Parser,Debug)]
 struct FernArgs {
@@ -98,7 +99,11 @@ fn fern_interactive() {
 	let mut readline_err_count: u32 = 0;
 
 	loop { // Main loop
-		let input = match prompt::read_line() {
+		let edit_mode = write_shopts(|opt| opt.query("prompt.edit_mode"))
+			.unwrap()
+			.map(|mode| mode.parse::<FernEditMode>().unwrap_or_default())
+			.unwrap();
+		let input = match prompt::read_line(edit_mode) {
 			Ok(line) => {
 				readline_err_count = 0;
 				line
