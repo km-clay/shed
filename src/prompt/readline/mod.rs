@@ -89,12 +89,14 @@ impl FernVi {
 			self.term.unwrite()?;
 		}
 		let offset = self.calculate_prompt_offset();
+		self.line.set_first_line_offset(offset);
 		let mut line_buf = self.prompt.clone();
 		line_buf.push_str(self.line.as_str());
 
 		self.term.recorded_write(&line_buf, offset)?;
-		self.term.position_cursor(self.line.cursor_display_coords(offset,width))?;
+		self.term.position_cursor(self.line.cursor_display_coords(width))?;
 
+		self.term.write(&self.mode.cursor_style());
 		Ok(())
 	}
 	pub fn calculate_prompt_offset(&self) -> usize {

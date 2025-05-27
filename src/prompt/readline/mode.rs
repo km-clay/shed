@@ -530,6 +530,14 @@ impl ViMode for ViNormal {
 		flog!(DEBUG, key);
 		match key {
 			E(K::Char(ch), M::NONE) => self.try_parse(ch),
+			E(K::Backspace, M::NONE) => {
+				Some(ViCmd {
+					register: Default::default(),
+					verb: None,
+					motion: Some(MotionCmd(1, Motion::BackwardChar)),
+					raw_seq: "".into(),
+				})
+			}
 			E(K::Char('R'), M::CTRL) => {
 				let mut chars = self.pending_seq.chars().peekable();
 				let count = self.parse_count(&mut chars).unwrap_or(1);

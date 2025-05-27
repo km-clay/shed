@@ -100,6 +100,9 @@ impl ViCmd {
 	pub fn is_undo_op(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::Undo | Verb::Redo))
 	}
+	pub fn is_line_motion(&self) -> bool {
+		self.motion.as_ref().is_some_and(|m| matches!(m.1, Motion::LineUp | Motion::LineDown))
+	}
 	pub fn is_mode_transition(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| {
 			matches!(v.1, 

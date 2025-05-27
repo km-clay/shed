@@ -142,6 +142,7 @@ pub struct LineBuf {
 	cursor: usize,
 	clamp_cursor: bool,
 	first_line_offset: usize,
+	saved_col: Option<usize>,
 	merge_edit: bool,
 	undo_stack: Vec<Edit>,
 	redo_stack: Vec<Edit>,
@@ -154,6 +155,9 @@ impl LineBuf {
 	pub fn with_initial(mut self, initial: &str) -> Self {
 		self.buffer = initial.to_string();
 		self
+	}
+	pub fn set_first_line_offset(&mut self, offset: usize) {
+		self.first_line_offset = offset
 	}
 	pub fn as_str(&self) -> &str {
 		&self.buffer
@@ -177,7 +181,7 @@ impl LineBuf {
 		// Insert mode does let you set on the edge though, so that you can append new characters
 		// This method is used in Normal mode
 		dbg!("clamping");
-		if self.cursor == self.byte_len() {
+		if self.cursor == self.byte_len() || self.grapheme_at_cursor() == Some("\n") {
 			self.cursor_back(1);
 		}
 	}
@@ -370,12 +374,12 @@ impl LineBuf {
 		}
 		(lines,col)
 	}
-	pub fn cursor_display_coords(&self, first_ln_offset: usize, term_width: usize) -> (usize,usize) {
+	pub fn cursor_display_coords(&self, term_width: usize) -> (usize,usize) {
 		let (d_line,mut d_col) = self.display_coords(term_width);
-		let line = self.count_display_lines(first_ln_offset, term_width) - d_line;
+		let line = self.count_display_lines(self.first_line_offset, term_width) - d_line;
 
 		if line == self.count_lines() {
-			d_col += first_ln_offset;
+			d_col += self.first_line_offset;
 		}
 
 		(line,d_col)
@@ -408,6 +412,40 @@ impl LineBuf {
 	pub fn move_end(&mut self) -> bool {
 		let end = self.end_of_line();
 		self.move_to(end)
+	}
+	pub fn find_prev_line_pos(&mut self) -> Option<usize> {
+		if self.start_of_line() == 0 {
+			return None
+		};
+		let mut col = self.saved_col.unwrap_or(self.cursor_column());
+		let line = self.line_no();
+		if line == 1 {
+			col = col.saturating_sub(self.first_line_offset.saturating_sub(1))
+		}
+		if self.saved_col.is_none() {
+			self.saved_col = Some(col);
+		}
+		let (start,end) = self.select_line(line - 1).unwrap();
+		Some((start + col).min(end.saturating_sub(1)))
+	}
+	pub fn find_next_line_pos(&mut self) -> Option<usize> {
+		if self.end_of_line() == self.byte_len() {
+			return None
+		};
+		let mut col = self.saved_col.unwrap_or(self.cursor_column());
+		let line = self.line_no();
+		if line == 0 {
+			col += self.first_line_offset.saturating_sub(1);
+		}
+		if self.saved_col.is_none() {
+			self.saved_col = Some(col);
+		}
+		let (start,end) = self.select_line(line + 1).unwrap();
+		Some((start + col).min(end.saturating_sub(1)))
+	}
+	pub fn cursor_column(&self) -> usize {
+		let line_start = self.start_of_line();
+		self.buffer[line_start..self.cursor].graphemes(true).count()
 	}
 	pub fn start_of_line(&self) -> usize {
 		if let Some(i) = self.slice_to_cursor().rfind('\n') {
@@ -788,7 +826,7 @@ impl LineBuf {
 		}
 		None
 	}
-	pub fn eval_motion(&self, motion: Motion) -> MotionKind {
+	pub fn eval_motion(&mut self, motion: Motion) -> MotionKind {
 		match motion {
 			Motion::WholeLine => {
 				let (start,end) = self.this_line();
@@ -841,8 +879,18 @@ impl LineBuf {
 			}
 			Motion::BackwardChar => MotionKind::Backward(1),
 			Motion::ForwardChar => MotionKind::Forward(1),
-			Motion::LineUp => todo!(),
-			Motion::LineDown => todo!(),
+			Motion::LineUp => {
+				match self.find_prev_line_pos() {
+					None => MotionKind::Null,
+					Some(pos) => MotionKind::To(pos)
+				}
+			}
+			Motion::LineDown => {
+				match self.find_next_line_pos() {
+					None => MotionKind::Null,
+					Some(pos) => MotionKind::To(pos)
+				}
+			}
 			Motion::WholeBuffer => todo!(),
 			Motion::BeginningOfBuffer => MotionKind::To(0),
 			Motion::EndOfBuffer => MotionKind::To(self.byte_len()),
@@ -856,7 +904,7 @@ impl LineBuf {
 				}
 			}
 			Motion::Range(_, _) => todo!(),
-			Motion::Builder(motion_builder) => todo!(),
+			Motion::Builder(_) => todo!(),
 			Motion::RepeatMotion => todo!(),
 			Motion::RepeatMotionRev => todo!(),
 			Motion::Null => todo!(),
@@ -866,20 +914,19 @@ impl LineBuf {
 		match verb {
 			Verb::Change |
 			Verb::Delete => {
-				let deleted;
-				match motion {
+				let deleted = match motion {
 					MotionKind::Forward(n) => {
 						let Some(pos) = self.next_pos(n) else {
 							return Ok(())
 						}; 
 						let range = self.cursor..pos;
 						assert!(range.end < self.byte_len());
-						deleted = self.buffer.drain(range);
+						self.buffer.drain(range)
 					}
 					MotionKind::To(n) => {
 						let range = mk_range(self.cursor, n);
 						assert!(range.end < self.byte_len());
-						deleted = self.buffer.drain(range);
+						self.buffer.drain(range)
 					}
 					MotionKind::Backward(n) => {
 						let Some(back) = self.prev_pos(n) else {
@@ -887,14 +934,14 @@ impl LineBuf {
 						}; 
 						let range = back..self.cursor;
 						dbg!(&range);
-						deleted = self.buffer.drain(range);
+						self.buffer.drain(range)
 					}
 					MotionKind::Range(range) => {
-						deleted = self.buffer.drain(range.0..range.1);
+						self.buffer.drain(range.0..range.1)
 					}
 					MotionKind::Line(n) => {
 						let (start,end) = match n.cmp(&0) {
-							Ordering::Less => self.select_lines_up(n.abs() as usize),
+							Ordering::Less => self.select_lines_up(n.unsigned_abs()),
 							Ordering::Equal => self.this_line(),
 							Ordering::Greater => self.select_lines_down(n as usize)
 						};
@@ -903,7 +950,7 @@ impl LineBuf {
 							Verb::Delete => start..end.saturating_add(1),
 							_ => unreachable!()
 						};
-						deleted = self.buffer.drain(range);
+						self.buffer.drain(range)
 					}
 					MotionKind::ToLine(n) => {
 						let (start,end) = self.select_lines_to(n);
@@ -912,11 +959,11 @@ impl LineBuf {
 							Verb::Delete => start..end.saturating_add(1),
 							_ => unreachable!()
 						};
-						deleted = self.buffer.drain(range);
+						self.buffer.drain(range)
 					}
 					MotionKind::Null => return Ok(()),
 					MotionKind::ToScreenPos(n) => todo!(),
-				}
+				};
 				register.write_to_register(deleted.collect());
 				self.apply_motion(motion);
 			}
@@ -1058,6 +1105,7 @@ impl LineBuf {
 		flog!(DEBUG, cmd);
 		let clear_redos = !cmd.is_undo_op() || cmd.verb.as_ref().is_some_and(|v| v.1.is_edit());
 		let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
+		let is_line_motion = cmd.is_line_motion();
 		let is_undo_op = cmd.is_undo_op();
 
 		// Merge character inserts into one edit
@@ -1095,6 +1143,10 @@ impl LineBuf {
 
 		if before != after && !is_undo_op {
 			self.handle_edit(before, after, cursor_pos);
+		}
+
+		if !is_line_motion {
+			self.saved_col = None;
 		}
 
 		if is_char_insert {
