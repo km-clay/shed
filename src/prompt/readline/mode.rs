@@ -545,6 +545,14 @@ impl ViNormal {
 								chars = chars_clone;
 								break 'motion_parse Some(MotionCmd(count, Motion::BackwardWord(To::End, Word::Big)));
 							}
+							'k' => {
+								chars = chars_clone;
+								break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineUp));
+							}
+							'j' => {
+								chars = chars_clone;
+								break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineDown));
+							}
 							_ => return self.quit_parse()
 						}
 					} else {

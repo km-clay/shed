@@ -1,9 +1,9 @@
-use std::{cmp::Ordering, fmt::Display, ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive}, str::FromStr, sync::Arc};
+use std::{cmp::Ordering, fmt::Display, ops::{Range, RangeBounds}};
 
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::libsh::{error::ShResult, sys::sh_quit, term::{Style, Styled}};
+use crate::libsh::{error::ShResult, sys::sh_quit};
 use crate::prelude::*;
 
 use super::vicmd::{Anchor, Bound, Dest, Direction, Motion, RegisterName, TextObj, To, Verb, ViCmd, Word};
@@ -28,7 +28,7 @@ pub enum MotionKind {
 
 	/// Absolute position based on display width of characters
 	/// Factors in the length of the prompt, and skips newlines
-	ToScreenPos(usize), 
+	ScreenLine(isize)
 }
 
 impl MotionKind {
@@ -78,11 +78,6 @@ fn is_other_class_or_ws(a: &str, b: &str) -> bool {
 	} else {
 		a != b
 	}
-}
-
-pub struct UndoPayload {
-	buffer: String,
-	cursor: usize
 }
 
 #[derive(Default,Debug)]
@@ -152,6 +147,7 @@ pub struct LineBuf {
 	clamp_cursor: bool,
 	first_line_offset: usize,
 	saved_col: Option<usize>,
+	term_dims: (usize,usize), // Height, width
 	move_cursor_on_undo: bool,
 	undo_stack: Vec<Edit>,
 	redo_stack: Vec<Edit>,
@@ -170,6 +166,9 @@ impl LineBuf {
 	}
 	pub fn as_str(&self) -> &str {
 		&self.buffer
+	}
+	pub fn update_term_dims(&mut self, dims: (usize,usize)) {
+		self.term_dims = dims
 	}
 	pub fn take(&mut self) -> String {
 		let line = std::mem::take(&mut self.buffer);
@@ -237,7 +236,7 @@ impl LineBuf {
 	pub fn grapheme_at_cursor_offset(&self, offset: isize) -> Option<&str> {
 		match offset.cmp(&0) {
 			Ordering::Equal => {
-				return self.grapheme_at(self.cursor);
+				self.grapheme_at(self.cursor)
 			}
 			Ordering::Less => {
 				// Walk backward from the start of the line or buffer up to the cursor
@@ -364,7 +363,7 @@ impl LineBuf {
 		lines
 	}
 	pub fn display_coords(&self, term_width: usize) -> (usize,usize) {
-		let mut chars = self.slice_to_cursor().chars();
+		let chars = self.slice_to_cursor().chars();
 
 		let mut lines = 0;
 		let mut col = 0;
@@ -883,6 +882,8 @@ impl LineBuf {
 			Motion::ForwardChar => MotionKind::Forward(1),
 			Motion::LineUp => MotionKind::Line(-1),
 			Motion::LineDown => MotionKind::Line(1),
+			Motion::ScreenLineUp => MotionKind::ScreenLine(-1),
+			Motion::ScreenLineDown => MotionKind::ScreenLine(1),
 			Motion::WholeBuffer => todo!(),
 			Motion::BeginningOfBuffer => MotionKind::To(0),
 			Motion::EndOfBuffer => MotionKind::To(self.byte_len()),
@@ -901,6 +902,64 @@ impl LineBuf {
 			Motion::RepeatMotionRev => todo!(),
 			Motion::Null => todo!(),
 		}
+	}
+	pub fn calculate_display_offset(&self, n_lines: isize) -> Option<usize> {
+		let (start,end) = self.this_line();
+		let graphemes: Vec<(usize, usize, &str)> = self.buffer[start..end]
+			.graphemes(true)
+			.scan(start, |idx, g| {
+				let current = *idx;
+				*idx += g.len(); // Advance by number of bytes
+				Some((g.width(), current, g))
+			}).collect();
+
+		let mut cursor_line_index = 0;
+		let mut cursor_visual_col = 0;
+		let mut screen_lines = vec![];
+		let mut cur_line = vec![];
+		let mut line_width = 0;
+
+		for (width, byte_idx, grapheme) in graphemes {
+			if byte_idx == self.cursor {
+				// Save this to later find column
+				cursor_line_index = screen_lines.len();
+				cursor_visual_col = line_width;
+			}
+
+			let new_line_width = line_width + width;
+			if new_line_width > self.term_dims.1 {
+				screen_lines.push(std::mem::take(&mut cur_line));
+				cur_line.push((width, byte_idx, grapheme));
+				line_width = width;
+			} else {
+				cur_line.push((width, byte_idx, grapheme));
+				line_width = new_line_width;
+			}
+		}
+
+		if !cur_line.is_empty() {
+			screen_lines.push(cur_line);
+		}
+
+		if screen_lines.len() == 1 {
+			return None
+		}
+
+		let target_line_index = (cursor_line_index as isize + n_lines)
+			.clamp(0, (screen_lines.len() - 1) as isize) as usize;
+
+		let mut col = 0;
+		for (width, byte_idx, _) in &screen_lines[target_line_index] {
+			if col + width > cursor_visual_col {
+				return Some(*byte_idx);
+			}
+			col += width;
+		}
+
+		// If you went past the end of the line
+		screen_lines[target_line_index]
+    .last()
+    .map(|(_, byte_idx, _)| *byte_idx)
 	}
 	pub fn get_range_from_motion(&self, verb: &Verb, motion: &MotionKind) -> Option<Range<usize>> {
 		match motion {
@@ -945,8 +1004,11 @@ impl LineBuf {
 				};
 				Some(range)
 			}
-			MotionKind::Null => return None,
-			MotionKind::ToScreenPos(n) => todo!(),
+			MotionKind::Null => None,
+			MotionKind::ScreenLine(n) => {
+				let pos = self.calculate_display_offset(*n)?;
+				Some(mk_range(pos, self.cursor))
+			}
 		}
 	}
 	pub fn exec_verb(&mut self, verb: Verb, motion: MotionKind, register: RegisterName) -> ShResult<()> {
@@ -1144,11 +1206,11 @@ impl LineBuf {
 						self.cursor = start;
 					}
 					Ordering::Less => {
-						let (start,_) = self.select_lines_up(n.abs() as usize);
+						let (start,_) = self.select_lines_up(n.unsigned_abs());
 						self.cursor = start;
 					}
 					Ordering::Greater => {
-						let (_,end) = self.select_lines_down(n.abs() as usize);
+						let (_,end) = self.select_lines_down(n.unsigned_abs());
 						self.cursor = end.saturating_sub(1);
 						let (start,_) = self.this_line();
 						self.cursor = start;
@@ -1162,7 +1224,12 @@ impl LineBuf {
 				self.cursor = start;
 			}
 			MotionKind::Null => { /* Pass */ }
-			MotionKind::ToScreenPos(_) => todo!(),
+			MotionKind::ScreenLine(n) => {
+				let Some(pos) = self.calculate_display_offset(n) else {
+					return
+				};
+				self.cursor = pos;
+			}
 		}
 	}
 	pub fn edit_is_merging(&self) -> bool {

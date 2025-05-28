@@ -251,8 +251,12 @@ pub enum Motion {
 	ForwardChar,
 	/// move to the same column on the previous line
 	LineUp,
+	/// move to the same column on the previous visual line
+	ScreenLineUp,
 	/// move to the same column on the next line
 	LineDown,
+	/// move to the same column on the next visual line
+	ScreenLineDown, 
 	/// Whole user input (not really a movement but a range)
 	WholeBuffer,
 	/// beginning-of-register

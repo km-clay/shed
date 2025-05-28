@@ -85,12 +85,13 @@ impl FernVi {
 		}
 	}
 	pub fn print_buf(&mut self, refresh: bool) -> ShResult<()> {
-		let (_,width) = self.term.get_dimensions()?;
+		let (height,width) = self.term.get_dimensions()?;
 		if refresh {
 			self.term.unwrite()?;
 		}
 		let offset = self.calculate_prompt_offset();
 		self.line.set_first_line_offset(offset);
+		self.line.update_term_dims((height,width));
 		let mut line_buf = self.prompt.clone();
 		line_buf.push_str(self.line.as_str());
 
