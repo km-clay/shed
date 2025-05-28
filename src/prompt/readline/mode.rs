@@ -38,6 +38,8 @@ pub trait ViMode {
 	fn as_replay(&self) -> Option<CmdReplay>;
 	fn cursor_style(&self) -> String;
 	fn pending_seq(&self) -> Option<String>;
+	fn move_cursor_on_undo(&self) -> bool;
+	fn clamp_cursor(&self) -> bool;
 }
 
 #[derive(Default,Debug)]
@@ -58,7 +60,16 @@ impl ViInsert {
 	pub fn register_and_return(&mut self) -> Option<ViCmd> {
 		let cmd = self.take_cmd();
 		self.register_cmd(&cmd);
-		return Some(cmd)
+		Some(cmd)
+	}
+	pub fn ctrl_w_is_undo(&self) -> bool {
+		let insert_count = self.cmds.iter().filter(|cmd| {
+			matches!(cmd.verb(),Some(VerbCmd(1, Verb::InsertChar(_))))
+		}).count();
+		let backspace_count = self.cmds.iter().filter(|cmd| {
+			matches!(cmd.verb(),Some(VerbCmd(1, Verb::Delete)))
+		}).count();
+		insert_count > backspace_count
 	}
 	pub fn register_cmd(&mut self, cmd: &ViCmd) {
 		self.cmds.push(cmd.clone())
@@ -75,6 +86,17 @@ impl ViMode for ViInsert {
 				self.pending_cmd.set_verb(VerbCmd(1,Verb::InsertChar(ch)));
 				self.pending_cmd.set_motion(MotionCmd(1,Motion::ForwardChar));
 				self.register_and_return()
+			}
+			E(K::Char('W'), M::CTRL) => {
+				if self.ctrl_w_is_undo() {
+					self.pending_cmd.set_verb(VerbCmd(1,Verb::Undo));
+					self.cmds.clear();
+					Some(self.take_cmd())
+				} else {
+					self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
+					self.pending_cmd.set_motion(MotionCmd(1, Motion::BackwardWord(To::Start, Word::Normal)));
+					self.register_and_return()
+				}
 			}
 			E(K::Char('H'), M::CTRL) |
 			E(K::Backspace, M::NONE) => {
@@ -117,8 +139,113 @@ impl ViMode for ViInsert {
 	fn pending_seq(&self) -> Option<String> {
 		None
 	}
+	fn move_cursor_on_undo(&self) -> bool {
+	  true
+	}
+	fn clamp_cursor(&self) -> bool {
+	  false
+	}
 }
 
+#[derive(Default,Debug)]
+pub struct ViReplace {
+	cmds: Vec<ViCmd>,
+	pending_cmd: ViCmd,
+	repeat_count: u16
+}
+
+impl ViReplace {
+	pub fn new() -> Self {
+		Self::default()
+	}
+	pub fn with_count(mut self, repeat_count: u16) -> Self {
+		self.repeat_count = repeat_count;
+		self
+	}
+	pub fn register_and_return(&mut self) -> Option<ViCmd> {
+		let cmd = self.take_cmd();
+		self.register_cmd(&cmd);
+		Some(cmd)
+	}
+	pub fn ctrl_w_is_undo(&self) -> bool {
+		let insert_count = self.cmds.iter().filter(|cmd| {
+			matches!(cmd.verb(),Some(VerbCmd(1, Verb::ReplaceChar(_))))
+		}).count();
+		let backspace_count = self.cmds.iter().filter(|cmd| {
+			matches!(cmd.verb(),Some(VerbCmd(1, Verb::Delete)))
+		}).count();
+		insert_count > backspace_count
+	}
+	pub fn register_cmd(&mut self, cmd: &ViCmd) {
+		self.cmds.push(cmd.clone())
+	}
+	pub fn take_cmd(&mut self) -> ViCmd {
+		std::mem::take(&mut self.pending_cmd)
+	}
+}
+
+impl ViMode for ViReplace {
+	fn handle_key(&mut self, key: E) -> Option<ViCmd> {
+		match key {
+			E(K::Char(ch), M::NONE) => {
+				self.pending_cmd.set_verb(VerbCmd(1,Verb::ReplaceChar(ch)));
+				self.pending_cmd.set_motion(MotionCmd(1,Motion::ForwardChar));
+				self.register_and_return()
+			}
+			E(K::Char('W'), M::CTRL) => {
+				if self.ctrl_w_is_undo() {
+					self.pending_cmd.set_verb(VerbCmd(1,Verb::Undo));
+					self.cmds.clear();
+					Some(self.take_cmd())
+				} else {
+					self.pending_cmd.set_motion(MotionCmd(1, Motion::BackwardWord(To::Start, Word::Normal)));
+					self.register_and_return()
+				}
+			}
+			E(K::Char('H'), M::CTRL) |
+			E(K::Backspace, M::NONE) => {
+				self.pending_cmd.set_motion(MotionCmd(1,Motion::BackwardChar));
+				self.register_and_return()
+			}
+
+			E(K::BackTab, M::NONE) => {
+				self.pending_cmd.set_verb(VerbCmd(1,Verb::CompleteBackward));
+				self.register_and_return()
+			}
+
+			E(K::Char('I'), M::CTRL) |
+			E(K::Tab, M::NONE) => {
+				self.pending_cmd.set_verb(VerbCmd(1,Verb::Complete));
+				self.register_and_return()
+			}
+
+			E(K::Esc, M::NONE) => {
+				self.pending_cmd.set_verb(VerbCmd(1,Verb::NormalMode));
+				self.pending_cmd.set_motion(MotionCmd(1,Motion::BackwardChar));
+				self.register_and_return()
+			}
+			_ => common_cmds(key)
+		}
+	}
+	fn is_repeatable(&self) -> bool {
+	  true
+	}
+	fn cursor_style(&self) -> String {
+		"\x1b[4 q".to_string()
+	}
+	fn pending_seq(&self) -> Option<String> {
+		None
+	}
+	fn as_replay(&self) -> Option<CmdReplay> {
+		Some(CmdReplay::mode(self.cmds.clone(), self.repeat_count))
+	}
+	fn move_cursor_on_undo(&self) -> bool {
+	  true
+	}
+	fn clamp_cursor(&self) -> bool {
+	  true
+	}
+}
 #[derive(Default,Debug)]
 pub struct ViNormal {
 	pending_seq: String,
@@ -235,15 +362,33 @@ impl ViNormal {
 					break 'verb_parse Some(VerbCmd(count, Verb::Put(Anchor::Before)));
 				}
 				'r' => {
-					let Some(ch) = chars_clone.next() else {
-						return None
-					};
+					let ch = chars_clone.next()?;
 					return Some(
 						ViCmd {
 							register,
 							verb: Some(VerbCmd(1, Verb::ReplaceChar(ch))),
 							motion: Some(MotionCmd(count, Motion::ForwardChar)),
 							raw_seq: self.take_cmd()
+						}
+					)
+				}
+				'R' => {
+					return Some(
+						ViCmd {
+							register,
+							verb: Some(VerbCmd(count, Verb::ReplaceMode)),
+							motion: None,
+							raw_seq: self.take_cmd()
+						}
+					)
+				}
+				'~' => {
+					return Some(
+						ViCmd { 
+							register,
+							verb: Some(VerbCmd(1, Verb::ToggleCase)),
+							motion: Some(MotionCmd(count, Motion::ForwardChar)),
+							raw_seq: self.take_cmd() 
 						}
 					)
 				}
@@ -328,6 +473,36 @@ impl ViNormal {
 				'c' => {
 					chars = chars_clone;
 					break 'verb_parse Some(VerbCmd(count, Verb::Change))
+				}
+				'Y' => {
+					return Some(
+						ViCmd { 
+							register,
+							verb: Some(VerbCmd(count, Verb::Yank)),
+							motion: Some(MotionCmd(1, Motion::EndOfLine)),
+							raw_seq: self.take_cmd() 
+						}
+					)
+				}
+				'D' => {
+					return Some(
+						ViCmd { 
+							register,
+							verb: Some(VerbCmd(count, Verb::Delete)),
+							motion: Some(MotionCmd(1, Motion::EndOfLine)),
+							raw_seq: self.take_cmd() 
+						}
+					)
+				}
+				'C' => {
+					return Some(
+						ViCmd { 
+							register,
+							verb: Some(VerbCmd(count, Verb::Change)),
+							motion: Some(MotionCmd(1, Motion::EndOfLine)),
+							raw_seq: self.take_cmd() 
+						}
+					)
 				}
 				'=' => {
 					chars = chars_clone;
@@ -579,6 +754,13 @@ impl ViMode for ViNormal {
 	
 	fn pending_seq(&self) -> Option<String> {
 		Some(self.pending_seq.clone())
+	}
+
+	fn move_cursor_on_undo(&self) -> bool {
+	  false
+	}
+	fn clamp_cursor(&self) -> bool {
+	  true
 	}
 }
 

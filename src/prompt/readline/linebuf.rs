@@ -91,6 +91,7 @@ pub struct Edit {
 	pub cursor_pos: usize,
 	pub old: String,
 	pub new: String,
+	pub merging: bool,
 }
 
 impl Edit {
@@ -111,6 +112,7 @@ impl Edit {
 				cursor_pos: old_cursor_pos,
 				old: String::new(),
 				new: String::new(),
+				merging: false,
 			};
 		}
 
@@ -132,7 +134,14 @@ impl Edit {
 			cursor_pos: old_cursor_pos,
 			old,
 			new,
+			merging: false
 		}
+	}
+	pub fn start_merge(&mut self) {
+		self.merging = true
+	}
+	pub fn stop_merge(&mut self) {
+		self.merging = false
 	}
 }
 
@@ -143,7 +152,7 @@ pub struct LineBuf {
 	clamp_cursor: bool,
 	first_line_offset: usize,
 	saved_col: Option<usize>,
-	merge_edit: bool,
+	move_cursor_on_undo: bool,
 	undo_stack: Vec<Edit>,
 	redo_stack: Vec<Edit>,
 }
@@ -176,11 +185,13 @@ impl LineBuf {
 	pub fn is_empty(&self) -> bool {
 		self.buffer.is_empty()
 	}
+	pub fn set_move_cursor_on_undo(&mut self, yn: bool) {
+		self.move_cursor_on_undo = yn;
+	}
 	pub fn clamp_cursor(&mut self) {
 		// Normal mode does not allow you to sit on the edge of the buffer, you must be hovering over a character
 		// Insert mode does let you set on the edge though, so that you can append new characters
 		// This method is used in Normal mode
-		dbg!("clamping");
 		if self.cursor == self.byte_len() || self.grapheme_at_cursor() == Some("\n") {
 			self.cursor_back(1);
 		}
@@ -417,11 +428,8 @@ impl LineBuf {
 		if self.start_of_line() == 0 {
 			return None
 		};
-		let mut col = self.saved_col.unwrap_or(self.cursor_column());
+		let col = self.saved_col.unwrap_or(self.cursor_column());
 		let line = self.line_no();
-		if line == 1 {
-			col = col.saturating_sub(self.first_line_offset.saturating_sub(1))
-		}
 		if self.saved_col.is_none() {
 			self.saved_col = Some(col);
 		}
@@ -432,11 +440,8 @@ impl LineBuf {
 		if self.end_of_line() == self.byte_len() {
 			return None
 		};
-		let mut col = self.saved_col.unwrap_or(self.cursor_column());
+		let col = self.saved_col.unwrap_or(self.cursor_column());
 		let line = self.line_no();
-		if line == 0 {
-			col += self.first_line_offset.saturating_sub(1);
-		}
 		if self.saved_col.is_none() {
 			self.saved_col = Some(col);
 		}
@@ -668,9 +673,7 @@ impl LineBuf {
 										}
 									}
 									false => {
-										let last_ws = self.rfind_from(pos, |c| CharClass::from(c) == CharClass::Whitespace)?; 
-										let prev_word_end = self.rfind_from(last_ws, |c| CharClass::from(c) != CharClass::Whitespace)?;
-										match self.rfind_from(prev_word_end, |c| CharClass::from(c) == CharClass::Whitespace) {
+										match self.rfind_from(pos, |c| CharClass::from(c) == CharClass::Whitespace) {
 											Some(n) => Some(n + 1), // Land on char after whitespace
 											None => Some(0) // Start of buffer
 										}
@@ -750,24 +753,23 @@ impl LineBuf {
 					Direction::Backward => {
 						match to {
 							To::Start => {
-								if self.on_start_of_word(word) {
-									pos = pos.checked_sub(1)?;
-								}
-								let cur_graph = self.grapheme_at(pos)?;
-								let diff_class_pos = self.rfind_from(pos, |c| is_other_class_or_ws(c, cur_graph))?;
-								if let CharClass::Whitespace = self.grapheme_at(diff_class_pos)?.into() {
-									let prev_word_end = self.rfind_from(diff_class_pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
-									let cur_graph = self.grapheme_at(prev_word_end)?;
-									let Some(prev_word_start) = self.rfind_from(prev_word_end, |c| is_other_class_or_ws(c, cur_graph)) else {
-										return Some(0)
-									};
-									Some(prev_word_start + 1)
-								} else {
-									let cur_graph = self.grapheme_at(diff_class_pos)?;
-									let Some(prev_word_start) = self.rfind_from(diff_class_pos, |c| is_other_class_or_ws(c, cur_graph)) else {
-										return Some(0)
-									};
-									Some(prev_word_start + 1)
+								match self.on_start_of_word(word) {
+									true => {
+										pos = pos.checked_sub(1)?;
+										let prev_word_end = self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
+										let cur_graph = self.grapheme_at(prev_word_end)?;
+										match self.rfind_from(prev_word_end, |c| is_other_class_or_ws(c, cur_graph)) {
+											Some(n) => Some(n + 1), // Land on char after whitespace
+											None => Some(0) // Start of buffer
+										}
+									}
+									false => {
+										let cur_graph = self.grapheme_at(pos)?;
+										match self.rfind_from(pos, |c| is_other_class_or_ws(c, cur_graph)) {
+											Some(n) => Some(n + 1), // Land on char after whitespace
+											None => Some(0) // Start of buffer
+										}
+									}
 								}
 							}
 							To::End => {
@@ -879,18 +881,8 @@ impl LineBuf {
 			}
 			Motion::BackwardChar => MotionKind::Backward(1),
 			Motion::ForwardChar => MotionKind::Forward(1),
-			Motion::LineUp => {
-				match self.find_prev_line_pos() {
-					None => MotionKind::Null,
-					Some(pos) => MotionKind::To(pos)
-				}
-			}
-			Motion::LineDown => {
-				match self.find_next_line_pos() {
-					None => MotionKind::Null,
-					Some(pos) => MotionKind::To(pos)
-				}
-			}
+			Motion::LineUp => MotionKind::Line(-1),
+			Motion::LineDown => MotionKind::Line(1),
 			Motion::WholeBuffer => todo!(),
 			Motion::BeginningOfBuffer => MotionKind::To(0),
 			Motion::EndOfBuffer => MotionKind::To(self.byte_len()),
@@ -910,62 +902,63 @@ impl LineBuf {
 			Motion::Null => todo!(),
 		}
 	}
+	pub fn get_range_from_motion(&self, verb: &Verb, motion: &MotionKind) -> Option<Range<usize>> {
+		match motion {
+			MotionKind::Forward(n) => {
+				let pos = self.next_pos(*n)?;
+				let range = self.cursor..pos;
+				assert!(range.end <= self.byte_len());
+				Some(range)
+			}
+			MotionKind::To(n) => {
+				let range = mk_range(self.cursor, *n);
+				assert!(range.end <= self.byte_len());
+				Some(range)
+			}
+			MotionKind::Backward(n) => {
+				let pos = self.prev_pos(*n)?;
+				let range = pos..self.cursor;
+				Some(range)
+			}
+			MotionKind::Range(range) => {
+				Some(range.0..range.1)
+			}
+			MotionKind::Line(n) => {
+				let (start,end) = match n.cmp(&0) {
+					Ordering::Less => self.select_lines_up(n.unsigned_abs()),
+					Ordering::Equal => self.this_line(),
+					Ordering::Greater => self.select_lines_down(*n as usize)
+				};
+				let range = match verb {
+					Verb::Change => mk_range(start,end),
+					Verb::Delete => mk_range(start,(end + 1).min(self.byte_len())),
+					_ => unreachable!()
+				};
+				Some(range)
+			}
+			MotionKind::ToLine(n) => {
+				let (start,end) = self.select_lines_to(*n);
+				let range = match verb {
+					Verb::Change => start..end,
+					Verb::Delete => start..end.saturating_add(1),
+					_ => unreachable!()
+				};
+				Some(range)
+			}
+			MotionKind::Null => return None,
+			MotionKind::ToScreenPos(n) => todo!(),
+		}
+	}
 	pub fn exec_verb(&mut self, verb: Verb, motion: MotionKind, register: RegisterName) -> ShResult<()> {
 		match verb {
 			Verb::Change |
 			Verb::Delete => {
-				let deleted = match motion {
-					MotionKind::Forward(n) => {
-						let Some(pos) = self.next_pos(n) else {
-							return Ok(())
-						}; 
-						let range = self.cursor..pos;
-						assert!(range.end < self.byte_len());
-						self.buffer.drain(range)
-					}
-					MotionKind::To(n) => {
-						let range = mk_range(self.cursor, n);
-						assert!(range.end < self.byte_len());
-						self.buffer.drain(range)
-					}
-					MotionKind::Backward(n) => {
-						let Some(back) = self.prev_pos(n) else {
-							return Ok(())
-						}; 
-						let range = back..self.cursor;
-						dbg!(&range);
-						self.buffer.drain(range)
-					}
-					MotionKind::Range(range) => {
-						self.buffer.drain(range.0..range.1)
-					}
-					MotionKind::Line(n) => {
-						let (start,end) = match n.cmp(&0) {
-							Ordering::Less => self.select_lines_up(n.unsigned_abs()),
-							Ordering::Equal => self.this_line(),
-							Ordering::Greater => self.select_lines_down(n as usize)
-						};
-						let range = match verb {
-							Verb::Change => start..end,
-							Verb::Delete => start..end.saturating_add(1),
-							_ => unreachable!()
-						};
-						self.buffer.drain(range)
-					}
-					MotionKind::ToLine(n) => {
-						let (start,end) = self.select_lines_to(n);
-						let range = match verb {
-							Verb::Change => start..end,
-							Verb::Delete => start..end.saturating_add(1),
-							_ => unreachable!()
-						};
-						self.buffer.drain(range)
-					}
-					MotionKind::Null => return Ok(()),
-					MotionKind::ToScreenPos(n) => todo!(),
+				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
+					return Ok(())
 				};
+				let deleted = self.buffer.drain(range.clone());
 				register.write_to_register(deleted.collect());
-				self.apply_motion(motion);
+				self.cursor = range.start;
 			}
 			Verb::DeleteChar(anchor) => {
 				match anchor {
@@ -981,16 +974,94 @@ impl LineBuf {
 					}
 				}
 			}
-			Verb::Yank => todo!(),
-			Verb::ReplaceChar(_) => todo!(),
+			Verb::Yank => {
+				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
+					return Ok(())
+				};
+				let yanked = &self.buffer[range.clone()];
+				register.write_to_register(yanked.to_string());
+				self.cursor = range.start;
+			}
+			Verb::ReplaceChar(c) => {
+				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
+					return Ok(())
+				};
+				let new_range = format!("{c}");
+				let cursor_pos = range.end;
+				self.buffer.replace_range(range, &new_range);
+				self.cursor = cursor_pos
+			}
 			Verb::Substitute => todo!(),
-			Verb::ToggleCase => todo!(),
+			Verb::ToggleCase => {
+				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
+					return Ok(())
+				};
+				let mut new_range = String::new();
+				let slice = &self.buffer[range.clone()];
+				for ch in slice.chars() {
+					if ch.is_ascii_lowercase() {
+						new_range.push(ch.to_ascii_uppercase())
+					} else if ch.is_ascii_uppercase() {
+						new_range.push(ch.to_ascii_lowercase())
+					} else {
+						new_range.push(ch)
+					}
+				}
+				self.buffer.replace_range(range.clone(), &new_range);
+				self.cursor = range.end;
+			}
 			Verb::Complete => todo!(),
 			Verb::CompleteBackward => todo!(),
-			Verb::Undo => todo!(),
-			Verb::Redo => todo!(),
+			Verb::Undo => {
+				let Some(undo) = self.undo_stack.pop() else {
+					return Ok(())
+				};
+				flog!(DEBUG, undo);
+				let Edit { pos, cursor_pos, old, new, .. } = undo;
+				let range = pos..pos + new.len();
+				self.buffer.replace_range(range, &old);
+				let redo_cursor_pos = self.cursor;
+				if self.move_cursor_on_undo {
+					self.cursor = cursor_pos;
+				}
+				let redo = Edit { pos, cursor_pos: redo_cursor_pos, old: new, new: old, merging: false };
+				self.redo_stack.push(redo);
+			}
+			Verb::Redo => {
+				let Some(redo) = self.redo_stack.pop() else {
+					return Ok(())
+				};
+				flog!(DEBUG, redo);
+				let Edit { pos, cursor_pos, old, new, .. } = redo;
+				let range = pos..pos + new.len();
+				self.buffer.replace_range(range, &old);
+				let undo_cursor_pos = self.cursor;
+				if self.move_cursor_on_undo {
+					self.cursor = cursor_pos;
+				}
+				let undo = Edit { pos, cursor_pos: undo_cursor_pos, old: new, new: old, merging: false };
+				self.undo_stack.push(undo);
+			}
 			Verb::RepeatLast => todo!(),
-			Verb::Put(anchor) => todo!(),
+			Verb::Put(anchor) => {
+				let Some(register_content) = register.read_from_register() else {
+					return Ok(())
+				};
+				match anchor {
+					Anchor::After => {
+						for ch in register_content.chars() {
+							self.cursor_fwd(1); // Only difference is which one you start with
+							self.insert(ch);
+						}
+					}
+					Anchor::Before => {
+						for ch in register_content.chars() {
+							self.insert(ch);
+							self.cursor_fwd(1);
+						}
+					}
+				}
+			}
 			Verb::InsertModeLineBreak(anchor) => {
 				match anchor {
 					Anchor::After => {
@@ -1015,12 +1086,19 @@ impl LineBuf {
 			Verb::Breakline(anchor) => todo!(),
 			Verb::Indent => todo!(),
 			Verb::Dedent => todo!(),
-			Verb::Equalize => todo!(),
-			Verb::AcceptLine => todo!(),
+			Verb::Equalize => todo!(), // I fear this one
 			Verb::Builder(verb_builder) => todo!(),
-			Verb::EndOfFile => todo!(),
+			Verb::EndOfFile => {
+				if !self.buffer.is_empty() {
+					self.cursor = 0;
+					self.buffer.clear();
+				} else {
+					sh_quit(0)
+				}
+			}
 
-			Verb::OverwriteMode |
+			Verb::AcceptLine |
+			Verb::ReplaceMode |
 			Verb::InsertMode |
 			Verb::NormalMode |
 			Verb::VisualMode => {
@@ -1031,7 +1109,6 @@ impl LineBuf {
 		Ok(())
 	}
 	pub fn apply_motion(&mut self, motion: MotionKind) {
-		dbg!(&motion);
 		match motion {
 			MotionKind::Forward(n) => {
 				for _ in 0..n {
@@ -1048,8 +1125,11 @@ impl LineBuf {
 				}
 			}
 			MotionKind::To(n) => {
-				assert!((0..=self.byte_len()).contains(&n));
-				self.cursor = n
+				if n > self.byte_len() {
+					self.cursor = self.byte_len();
+				} else {
+					self.cursor = n
+				}
 			}
 			MotionKind::Range(range) => {
 				assert!((0..self.byte_len()).contains(&range.0));
@@ -1085,8 +1165,11 @@ impl LineBuf {
 			MotionKind::ToScreenPos(_) => todo!(),
 		}
 	}
+	pub fn edit_is_merging(&self) -> bool {
+		self.undo_stack.last().is_some_and(|edit| edit.merging)
+	}
 	pub fn handle_edit(&mut self, old: String, new: String, curs_pos: usize) {
-		if self.merge_edit {
+		if self.edit_is_merging() {
 			let diff = Edit::diff(&old, &new, curs_pos);
 			let Some(mut edit) = self.undo_stack.pop() else {
 				self.undo_stack.push(diff);
@@ -1094,6 +1177,7 @@ impl LineBuf {
 			};
 
 			edit.new.push_str(&diff.new);
+			edit.old.push_str(&diff.old);
 
 			self.undo_stack.push(edit);
 		} else {
@@ -1102,15 +1186,16 @@ impl LineBuf {
 		}
 	}
 	pub fn exec_cmd(&mut self, cmd: ViCmd) -> ShResult<()> {
-		flog!(DEBUG, cmd);
 		let clear_redos = !cmd.is_undo_op() || cmd.verb.as_ref().is_some_and(|v| v.1.is_edit());
 		let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
 		let is_line_motion = cmd.is_line_motion();
 		let is_undo_op = cmd.is_undo_op();
 
 		// Merge character inserts into one edit
-		if self.merge_edit && cmd.verb.as_ref().is_none_or(|v| !v.1.is_char_insert()) {
-			self.merge_edit = false;
+		if self.edit_is_merging() && cmd.verb.as_ref().is_none_or(|v| !v.1.is_char_insert()) {
+			if let Some(edit) = self.undo_stack.last_mut() {
+				edit.stop_merge();
+			}
 		}
 
 		let ViCmd { register, verb, motion, .. } = cmd;
@@ -1150,7 +1235,9 @@ impl LineBuf {
 		}
 
 		if is_char_insert {
-			self.merge_edit = true;
+			if let Some(edit) = self.undo_stack.last_mut() {
+				edit.start_merge();
+			}
 		}
 
 		if self.clamp_cursor {

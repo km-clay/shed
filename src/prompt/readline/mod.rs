@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use linebuf::{strip_ansi_codes_and_escapes, LineBuf};
-use mode::{CmdReplay, ViInsert, ViMode, ViNormal};
+use mode::{CmdReplay, ViInsert, ViMode, ViNormal, ViReplace};
 use term::Terminal;
 use unicode_width::UnicodeWidthStr;
 use vicmd::{Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
@@ -60,6 +60,7 @@ impl Readline for FernVi {
 			};
 
 			if cmd.should_submit() {
+				self.term.write("\n");
 				return Ok(self.line.to_string());
 			}
 
@@ -110,20 +111,23 @@ impl FernVi {
 			let count = cmd.verb_count();
 			let mut mode: Box<dyn ViMode> = match cmd.verb().unwrap().1 {
 				Verb::InsertModeLineBreak(_) |
+				Verb::Change |
 				Verb::InsertMode => {
-					self.line.set_cursor_clamp(false);
 					Box::new(ViInsert::new().with_count(count as u16))
 				}
 				Verb::NormalMode => {
-					self.line.set_cursor_clamp(true);
 					Box::new(ViNormal::new())
 				}
+				Verb::ReplaceMode => {
+					Box::new(ViReplace::new().with_count(count as u16))
+				}
 				Verb::VisualMode => todo!(),
-				Verb::OverwriteMode => todo!(),
 				_ => unreachable!()
 			};
 
 			std::mem::swap(&mut mode, &mut self.mode);
+			self.line.set_cursor_clamp(self.mode.clamp_cursor());
+			self.line.set_move_cursor_on_undo(self.mode.move_cursor_on_undo());
 			self.term.write(&mode.cursor_style());
 
 			if mode.is_repeatable() {

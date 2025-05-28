@@ -181,6 +181,7 @@ impl Terminal {
 		Ok(())
 	}
 
+	/// Rewinds terminal writing, clears lines and lands on the anchor point of the prompt
 	pub fn unwrite(&mut self) -> ShResult<()> {
 		self.unposition_cursor()?;
 		let WriteMap { lines, cols, offset } = self.write_records;
@@ -194,7 +195,6 @@ impl Terminal {
 	}
 
 	pub fn position_cursor(&mut self, (lines,col): (usize,usize)) -> ShResult<()> {
-		dbg!(self.cursor_pos());
 		self.cursor_records.lines = lines;
 		self.cursor_records.cols = col;
 		self.cursor_records.offset = self.cursor_pos().1;
@@ -205,14 +205,11 @@ impl Terminal {
 
 		self.write(&format!("\x1b[{col}G"));
 
-		dbg!("done moving");
-		dbg!(self.cursor_pos());
-
 		Ok(())
 	}
 
+	/// Rewinds cursor positioning, lands on the end of the buffer
 	pub fn unposition_cursor(&mut self) ->ShResult<()> {
-		dbg!(self.cursor_pos());
 		let WriteMap { lines, cols, offset } = self.cursor_records;
 
 		for _ in 0..lines {
@@ -220,9 +217,6 @@ impl Terminal {
 		}
 
 		self.write(&format!("\x1b[{offset}G"));
-
-		dbg!("done moving back");
-		dbg!(self.cursor_pos());
 
 		Ok(())
 	}

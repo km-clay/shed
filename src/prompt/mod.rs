@@ -10,23 +10,23 @@ use crate::{expand::expand_prompt, libsh::error::ShResult, prelude::*, shopt::Fe
 /// Initialize the line editor
 fn get_prompt() -> ShResult<String> {
 	let Ok(prompt) = env::var("PS1") else {
+		// prompt expands to:
+		//
 		// username@hostname
 		// short/path/to/pwd/
 		// $
-		let default = "\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
-		return Ok(format!("\n{}",expand_prompt(default)?))
+		let default = "\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
+		return Ok(format!("{}",expand_prompt(default)?))
 	};
 
 	Ok(format!("\n{}",expand_prompt(&prompt)?))
 }
 
 pub fn read_line(edit_mode: FernEditMode) -> ShResult<String> {
-	dbg!("hi");
 	let prompt = get_prompt()?;
 	let mut reader: Box<dyn Readline> = match edit_mode {
 		FernEditMode::Vi => Box::new(FernVi::new(Some(prompt))),
 		FernEditMode::Emacs => todo!()
 	};
-	dbg!("there");
 	reader.readline()
 }

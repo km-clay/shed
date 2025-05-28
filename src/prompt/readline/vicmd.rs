@@ -106,11 +106,12 @@ impl ViCmd {
 	pub fn is_mode_transition(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| {
 			matches!(v.1, 
+				Verb::Change |
 				Verb::InsertMode |
 				Verb::InsertModeLineBreak(_) |
 				Verb::NormalMode |
 				Verb::VisualMode |
-				Verb::OverwriteMode
+				Verb::ReplaceMode
 			)
 		})
 	}
@@ -150,7 +151,7 @@ pub enum Verb {
 	Redo,
 	RepeatLast,
 	Put(Anchor),
-	OverwriteMode,
+	ReplaceMode,
 	InsertMode,
 	InsertModeLineBreak(Anchor),
 	NormalMode,
@@ -190,7 +191,7 @@ impl Verb {
 			Self::Substitute |
 			Self::ToggleCase |
 			Self::Put(_) |
-			Self::OverwriteMode |
+			Self::ReplaceMode |
 			Self::InsertModeLineBreak(_) |
 			Self::JoinLines |
 			Self::InsertChar(_) |
@@ -211,7 +212,7 @@ impl Verb {
 			Self::ToggleCase |
 			Self::RepeatLast |
 			Self::Put(_) |
-			Self::OverwriteMode |
+			Self::ReplaceMode |
 			Self::InsertModeLineBreak(_) |
 			Self::JoinLines |
 			Self::InsertChar(_) |
@@ -221,7 +222,10 @@ impl Verb {
 		)
 	}
 	pub fn is_char_insert(&self) -> bool {
-		matches!(self, Self::InsertChar(_))
+		matches!(self, 
+			Self::InsertChar(_) |
+			Self::ReplaceChar(_)
+		)
 	}
 }
 
