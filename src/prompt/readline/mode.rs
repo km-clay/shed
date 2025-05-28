@@ -302,7 +302,6 @@ impl ViNormal {
 	}
 	pub fn try_parse(&mut self, ch: char) -> Option<ViCmd> {
 		self.pending_seq.push(ch);
-		flog!(DEBUG, self.pending_seq);
 		let mut chars = self.pending_seq.chars().peekable();
 
 		let register = 'reg_parse: {
@@ -333,7 +332,6 @@ impl ViNormal {
 			let Some(ch) = chars_clone.next() else {
 				break 'verb_parse None
 			};
-			flog!(DEBUG, "parsing verb char '{}'",ch);
 			match ch {
 				'.' => {
 					return Some(
@@ -519,7 +517,6 @@ impl ViNormal {
 			let Some(ch) = chars_clone.next() else {
 				break 'motion_parse None
 			};
-			flog!(DEBUG, "parsing motion char '{}'",ch);
 			match (ch, &verb) {
 				('d', Some(VerbCmd(_,Verb::Delete))) |
 				('c', Some(VerbCmd(_,Verb::Change))) |
@@ -692,15 +689,12 @@ impl ViNormal {
 						raw_seq: std::mem::take(&mut self.pending_seq)
 					}
 				);
-				flog!(DEBUG, cmd);
 				cmd
 			}
 			CmdState::Pending => {
-				flog!(DEBUG, "pending sequence: {}", self.pending_seq);
 				None
 			}
 			CmdState::Invalid => {
-				flog!(DEBUG, "invalid sequence: {}",self.pending_seq);
 				self.pending_seq.clear();
 				None
 			}
@@ -710,7 +704,6 @@ impl ViNormal {
 
 impl ViMode for ViNormal {
 	fn handle_key(&mut self, key: E) -> Option<ViCmd> {
-		flog!(DEBUG, key);
 		match key {
 			E(K::Char(ch), M::NONE) => self.try_parse(ch),
 			E(K::Backspace, M::NONE) => {

@@ -1144,7 +1144,12 @@ impl LineBuf {
 				self.insert(ch);
 				self.apply_motion(motion);
 			}
-			Verb::Insert(_) => todo!(),
+			Verb::Insert(str) => {
+				for ch in str.chars() {
+					self.insert(ch);
+					self.cursor_fwd(1);
+				}
+			}
 			Verb::Breakline(anchor) => todo!(),
 			Verb::Indent => todo!(),
 			Verb::Dedent => todo!(),
@@ -1203,14 +1208,23 @@ impl LineBuf {
 				match n.cmp(&0) {
 					Ordering::Equal => {
 						let (start,_) = self.this_line();
+						if start == 0 {
+							return
+						}
 						self.cursor = start;
 					}
 					Ordering::Less => {
 						let (start,_) = self.select_lines_up(n.unsigned_abs());
+						if start == 0 {
+							return
+						}
 						self.cursor = start;
 					}
 					Ordering::Greater => {
 						let (_,end) = self.select_lines_down(n.unsigned_abs());
+						if end == self.byte_len() {
+							return
+						}
 						self.cursor = end.saturating_sub(1);
 						let (start,_) = self.this_line();
 						self.cursor = start;
@@ -1263,6 +1277,10 @@ impl LineBuf {
 			if let Some(edit) = self.undo_stack.last_mut() {
 				edit.stop_merge();
 			}
+		}
+		if clear_redos {
+			flog!(DEBUG, "clearing redos");
+			flog!(DEBUG,cmd);
 		}
 
 		let ViCmd { register, verb, motion, .. } = cmd;

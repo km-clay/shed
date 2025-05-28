@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{strip_ansi_codes_and_escapes, LineBuf};
 use mode::{CmdReplay, ViInsert, ViMode, ViNormal, ViReplace};
 use term::Terminal;
@@ -55,6 +56,10 @@ impl Readline for FernVi {
 		loop {
 
 			let key = self.term.read_key();
+			if let KeyEvent(KeyCode::Char('V'), ModKeys::CTRL) = key {
+				self.handle_verbatim();
+				continue
+			}
 			let Some(cmd) = self.mode.handle_key(key) else {
 				continue
 			};
@@ -83,6 +88,68 @@ impl FernVi {
 			last_action: None,
 			last_movement: None,
 		}
+	}
+	pub fn handle_verbatim(&mut self) -> ShResult<()> {
+		let mut buf = [0u8; 8];
+		let mut collected = Vec::new();
+
+		loop {
+			let n = self.term.read_byte(&mut buf[..1]);
+			if n == 0 {
+				continue;
+			}
+			collected.push(buf[0]);
+
+			// If it starts with ESC, treat as escape sequence
+			if collected[0] == 0x1b {
+				loop {
+					let n = self.term.peek_byte(&mut buf[..1]);
+					if n == 0 {
+						break
+					}
+					collected.push(buf[0]);
+					// Ends a CSI sequence
+					if (0x40..=0x7e).contains(&buf[0]) {
+						break;
+					}
+				}
+				let Ok(seq) = std::str::from_utf8(&collected) else {
+					return Ok(())
+				};
+				let cmd = ViCmd {
+					register: Default::default(),
+					verb: Some(VerbCmd(1, Verb::Insert(seq.to_string()))),
+					motion: None,
+					raw_seq: seq.to_string(),
+				};
+				self.line.exec_cmd(cmd)?;
+			}
+
+			// Optional: handle other edge cases, e.g., raw control codes
+			if collected[0] < 0x20 || collected[0] == 0x7F {
+				let ctrl_seq = std::str::from_utf8(&collected).unwrap();
+				let cmd = ViCmd {
+					register: Default::default(),
+					verb: Some(VerbCmd(1, Verb::Insert(ctrl_seq.to_string()))),
+					motion: None,
+					raw_seq: ctrl_seq.to_string(),
+				};
+				self.line.exec_cmd(cmd)?;
+				break;
+			}
+
+			// Try to parse as UTF-8 if it's a valid Unicode sequence
+			if let Ok(s) = std::str::from_utf8(&collected) {
+				if s.chars().count() == 1 {
+					let ch = s.chars().next().unwrap();
+					// You got a literal Unicode char
+					eprintln!("Got char: {:?}", ch);
+					break;
+				}
+			}
+
+		}
+		Ok(())
 	}
 	pub fn print_buf(&mut self, refresh: bool) -> ShResult<()> {
 		let (height,width) = self.term.get_dimensions()?;
