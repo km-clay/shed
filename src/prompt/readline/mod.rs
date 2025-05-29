@@ -1,11 +1,12 @@
 use std::time::Duration;
 
+use history::History;
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{strip_ansi_codes_and_escapes, LineBuf};
 use mode::{CmdReplay, ViInsert, ViMode, ViNormal, ViReplace};
 use term::Terminal;
 use unicode_width::UnicodeWidthStr;
-use vicmd::{Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
+use vicmd::{Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
 
 use crate::libsh::{error::{ShErr, ShErrKind, ShResult}, term::{Style, Styled}};
 use crate::prelude::*;
@@ -16,6 +17,9 @@ pub mod linebuf;
 pub mod vicmd;
 pub mod mode;
 pub mod register;
+pub mod history;
+
+const LOREM_IPSUM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore\nmagna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo\nconsequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
 /// Unified interface for different line editing methods
 pub trait Readline {
@@ -25,6 +29,7 @@ pub trait Readline {
 pub struct FernVi {
 	term: Terminal,
 	line: LineBuf,
+	history: History,
 	prompt: String,
 	mode: Box<dyn ViMode>,
 	last_action: Option<CmdReplay>,
@@ -54,41 +59,68 @@ impl Readline for FernVi {
 		*/
 		self.print_buf(false)?;
 		loop {
-
 			let key = self.term.read_key();
+
 			if let KeyEvent(KeyCode::Char('V'), ModKeys::CTRL) = key {
-				self.handle_verbatim();
+				self.handle_verbatim()?;
 				continue
 			}
+
 			let Some(cmd) = self.mode.handle_key(key) else {
 				continue
 			};
 
-			if cmd.should_submit() {
-				self.term.write("\n");
-				return Ok(self.line.to_string());
+			if self.should_grab_history(&cmd) {
+				flog!(DEBUG, "scrolling");
+				self.scroll_history(cmd);
+				self.print_buf(true)?;
+				continue
 			}
 
+
+			if cmd.should_submit() {
+				self.term.write("\n");
+				let command = self.line.to_string();
+				if !command.is_empty() {
+					// We're just going to trim the command
+					// reduces clutter in the case of two history commands whose only difference is insignificant whitespace
+					self.history.push(command.trim().to_string());
+					self.history.save()?;
+				}
+				return Ok(command);
+			}
+			let line = self.line.to_string();
 			self.exec_cmd(cmd.clone())?;
+			let new_line = self.line.as_str();
+			let has_changes = line != new_line;
+			flog!(DEBUG, has_changes);
+
+			if cmd.verb().is_some_and(|v| v.1.is_edit()) && has_changes {
+				self.history.update_pending_cmd(self.line.as_str());
+			}
+
 			self.print_buf(true)?;
 		}
 	}
 }
 
 impl FernVi {
-	pub fn new(prompt: Option<String>) -> Self {
+	pub fn new(prompt: Option<String>) -> ShResult<Self> {
 		let prompt = prompt.unwrap_or("$ ".styled(Style::Green | Style::Bold));
-		let line = LineBuf::new().with_initial("The quick brown fox jumps over the lazy dog");//\nThe quick brown fox jumps over the lazy dog\nThe quick brown fox jumps over the lazy dog\n");
+		let line = LineBuf::new().with_initial(LOREM_IPSUM);
 		let term = Terminal::new();
-		Self {
+		let history = History::new()?;
+		Ok(Self {
 			term,
 			line,
+			history,
 			prompt,
 			mode: Box::new(ViInsert::new()),
 			last_action: None,
 			last_movement: None,
-		}
+		})
 	}
+	/// Ctrl+V handler
 	pub fn handle_verbatim(&mut self) -> ShResult<()> {
 		let mut buf = [0u8; 8];
 		let mut collected = Vec::new();
@@ -150,6 +182,62 @@ impl FernVi {
 
 		}
 		Ok(())
+	}
+	pub fn scroll_history(&mut self, cmd: ViCmd) {
+		let count = &cmd.motion().unwrap().0;
+		let motion = &cmd.motion().unwrap().1;
+		flog!(DEBUG,count,motion);
+		let entry = match motion {
+			Motion::LineUp => {
+				let Some(hist_entry) = self.history.scroll(-(*count as isize)) else {
+					return
+				};
+				flog!(DEBUG,"found entry");
+				flog!(DEBUG,hist_entry.command());
+				hist_entry
+			}
+			Motion::LineDown => {
+				let Some(hist_entry) = self.history.scroll(*count as isize) else {
+					return
+				};
+				flog!(DEBUG,"found entry");
+				flog!(DEBUG,hist_entry.command());
+				hist_entry
+			}
+			_ => unreachable!()
+		};
+		let col = self.line.saved_col().unwrap_or(self.line.cursor_column());
+		let mut buf = LineBuf::new().with_initial(entry.command());
+		let line_end = buf.end_of_line();
+		if let Some(dest) = self.mode.hist_scroll_start_pos() {
+			match dest {
+				To::Start => {
+					/* Already at 0 */
+				}
+				To::End => {
+					// History entries cannot be empty
+					// So this subtraction is safe (maybe)
+					buf.cursor_fwd_to(line_end + 1);
+				}
+			}
+		} else {
+			let target = (col + 1).min(line_end + 1);
+			buf.cursor_fwd_to(target);
+		}
+
+		self.line = buf
+	}
+
+	pub fn should_grab_history(&self, cmd: &ViCmd) -> bool {
+		cmd.verb().is_none() &&
+		(
+			cmd.motion().is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUp))) &&
+			self.line.start_of_line() == 0
+		) ||
+		(
+			cmd.motion().is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown))) &&
+			self.line.end_of_line() == self.line.byte_len()
+		)
 	}
 	pub fn print_buf(&mut self, refresh: bool) -> ShResult<()> {
 		let (height,width) = self.term.get_dimensions()?;
@@ -228,7 +316,7 @@ impl FernVi {
 								v_mut.0 = count
 							}
 							if let Some(m_mut) = cmd.motion.as_mut() {
-								m_mut.0 = 0
+								m_mut.0 = 1
 							}
 						} else {
 							return Ok(()) // it has to have a verb to be repeatable, something weird happened

@@ -6,6 +6,7 @@ use std::mem::zeroed;
 use std::io;
 
 use crate::libsh::error::ShResult;
+use crate::prelude::*;
 
 use super::keys::{KeyCode, KeyEvent, ModKeys};
 
@@ -195,6 +196,7 @@ impl Terminal {
 	}
 
 	pub fn position_cursor(&mut self, (lines,col): (usize,usize)) -> ShResult<()> {
+		flog!(DEBUG,lines);
 		self.cursor_records.lines = lines;
 		self.cursor_records.cols = col;
 		self.cursor_records.offset = self.cursor_pos().1;
@@ -250,7 +252,7 @@ impl Terminal {
 						let tab_size = 8;
 						let next_tab = tab_size - (self.write_records.cols % tab_size);
 						self.write_records.cols += next_tab;
-						if self.write_records.cols >= width {
+						if self.write_records.cols > width {
 							self.write_records.lines += 1;
 							self.write_records.cols = 0;
 						}

@@ -40,6 +40,7 @@ pub trait ViMode {
 	fn pending_seq(&self) -> Option<String>;
 	fn move_cursor_on_undo(&self) -> bool;
 	fn clamp_cursor(&self) -> bool;
+	fn hist_scroll_start_pos(&self) -> Option<To>;
 }
 
 #[derive(Default,Debug)]
@@ -145,6 +146,9 @@ impl ViMode for ViInsert {
 	fn clamp_cursor(&self) -> bool {
 	  false
 	}
+	fn hist_scroll_start_pos(&self) -> Option<To> {
+		Some(To::End)
+	}
 }
 
 #[derive(Default,Debug)]
@@ -245,6 +249,9 @@ impl ViMode for ViReplace {
 	fn clamp_cursor(&self) -> bool {
 	  true
 	}
+	fn hist_scroll_start_pos(&self) -> Option<To> {
+		Some(To::End)
+	}
 }
 #[derive(Default,Debug)]
 pub struct ViNormal {
@@ -295,7 +302,9 @@ impl ViNormal {
 		}
 	}
 	/// End the parse and clear the pending sequence
+	#[track_caller]
 	pub fn quit_parse(&mut self) -> Option<ViCmd> {
+		flog!(DEBUG, std::panic::Location::caller());
 		flog!(WARN, "exiting parse early with sequence: {}",self.pending_seq);
 		self.clear_cmd();
 		None
@@ -358,6 +367,14 @@ impl ViNormal {
 				'P' => {
 					chars = chars_clone;
 					break 'verb_parse Some(VerbCmd(count, Verb::Put(Anchor::Before)));
+				}
+				'>' => {
+					chars = chars_clone;
+					break 'verb_parse Some(VerbCmd(count, Verb::Indent));
+				}
+				'<' => {
+					chars = chars_clone;
+					break 'verb_parse Some(VerbCmd(count, Verb::Dedent));
 				}
 				'r' => {
 					let ch = chars_clone.next()?;
@@ -460,6 +477,16 @@ impl ViNormal {
 						}
 					)
 				}
+				'J' => {
+					return Some(
+						ViCmd { 
+							register,
+							verb: Some(VerbCmd(count, Verb::JoinLines)),
+							motion: None,            
+							raw_seq: self.take_cmd() 
+						}
+					)
+				}
 				'y' => {
 					chars = chars_clone;
 					break 'verb_parse Some(VerbCmd(count, Verb::Yank))
@@ -521,6 +548,7 @@ impl ViNormal {
 				('d', Some(VerbCmd(_,Verb::Delete))) |
 				('c', Some(VerbCmd(_,Verb::Change))) |
 				('y', Some(VerbCmd(_,Verb::Yank))) |
+				('=', Some(VerbCmd(_,Verb::Equalize))) |
 				('>', Some(VerbCmd(_,Verb::Indent))) |
 				('<', Some(VerbCmd(_,Verb::Dedent))) => break 'motion_parse Some(MotionCmd(count, Motion::WholeLine)),
 				_ => {}
@@ -762,6 +790,9 @@ impl ViMode for ViNormal {
 	}
 	fn clamp_cursor(&self) -> bool {
 	  true
+	}
+	fn hist_scroll_start_pos(&self) -> Option<To> {
+		None
 	}
 }
 
