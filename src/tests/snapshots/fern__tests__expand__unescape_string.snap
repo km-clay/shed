@@ -1,5 +1,0 @@
----
-source: src/tests/expand.rs
-expression: unescaped
----
-echo ﷐foo $bar

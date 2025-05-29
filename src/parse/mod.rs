@@ -716,43 +716,7 @@ impl ParseStream {
 		}
 
 		if !from_func_def {
-			while self.check_redir() {
-				let tk = self.next_tk().unwrap();
-				node_tks.push(tk.clone());
-				let redir_bldr = tk.span.as_str().parse::<RedirBldr>().unwrap();
-				if redir_bldr.io_mode.is_none() {
-					let path_tk = self.next_tk();
-
-					if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
-						return Err(
-							ShErr::full(
-								ShErrKind::ParseErr,
-								"Expected a filename after this redirection",
-								tk.span.clone()
-							)
-						)
-					};
-
-					let path_tk = path_tk.unwrap();
-					node_tks.push(path_tk.clone());
-					let redir_class = redir_bldr.class.unwrap();
-					let pathbuf = PathBuf::from(path_tk.span.as_str());
-
-					let Ok(file) = get_redir_file(redir_class, pathbuf) else {
-						self.panic_mode(&mut node_tks);
-						return Err(parse_err_full(
-								"Error opening file for redirection",
-								&path_tk.span
-							)
-						);
-					};
-
-					let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), file);
-					let redir_bldr = redir_bldr.with_io_mode(io_mode);
-					let redir = redir_bldr.build();
-					redirs.push(redir);
-				}
-			}
+			self.parse_redir(&mut redirs, &mut node_tks)?;
 		}
 
 		let node = Node {
@@ -762,6 +726,37 @@ impl ParseStream {
 			tokens: node_tks
 		};
 		Ok(Some(node))
+	}
+	fn parse_redir(&mut self, redirs: &mut Vec<Redir>, node_tks: &mut Vec<Tk>) -> ShResult<()> {
+		while self.check_redir() {
+			let tk = self.next_tk().unwrap();
+			node_tks.push(tk.clone());
+			let redir_bldr = tk.span.as_str().parse::<RedirBldr>().unwrap();
+			if redir_bldr.io_mode.is_none() {
+				let path_tk = self.next_tk();
+
+				if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
+					return Err(
+						ShErr::full(
+							ShErrKind::ParseErr,
+							"Expected a filename after this redirection",
+							tk.span.clone()
+						)
+					)
+				};
+
+				let path_tk = path_tk.unwrap();
+				node_tks.push(path_tk.clone());
+				let redir_class = redir_bldr.class.unwrap();
+				let pathbuf = PathBuf::from(path_tk.span.as_str());
+
+				let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), pathbuf, redir_class);
+				let redir_bldr = redir_bldr.with_io_mode(io_mode);
+				let redir = redir_bldr.build();
+				redirs.push(redir);
+			}
+		}
+		Ok(())
 	}
 	fn parse_case(&mut self) -> ShResult<Option<Node>> {
 		// Needs a pattern token
@@ -938,42 +933,7 @@ impl ParseStream {
 		}
 		node_tks.push(self.next_tk().unwrap());
 
-		while self.check_redir() {
-			let tk = self.next_tk().unwrap();
-			node_tks.push(tk.clone());
-			let redir_bldr = tk.span.as_str().parse::<RedirBldr>().unwrap();
-			if redir_bldr.io_mode.is_none() {
-				let path_tk = self.next_tk();
-
-				if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
-					return Err(
-						ShErr::full(
-							ShErrKind::ParseErr,
-							"Expected a filename after this redirection",
-							tk.span.clone()
-						)
-					)
-				};
-
-				let path_tk = path_tk.unwrap();
-				node_tks.push(path_tk.clone());
-				let redir_class = redir_bldr.class.unwrap();
-				let pathbuf = PathBuf::from(path_tk.span.as_str());
-
-				let Ok(file) = get_redir_file(redir_class, pathbuf) else {
-					self.panic_mode(&mut node_tks);
-					return Err(parse_err_full(
-							"Error opening file for redirection",
-							&path_tk.span
-					));
-				};
-
-				let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), file);
-				let redir_bldr = redir_bldr.with_io_mode(io_mode);
-				let redir = redir_bldr.build();
-				redirs.push(redir);
-			}
-		}
+		self.parse_redir(&mut redirs, &mut node_tks)?;
 
 		self.assert_separator(&mut node_tks)?;
 
@@ -1040,42 +1000,7 @@ impl ParseStream {
 		}
 		node_tks.push(self.next_tk().unwrap());
 
-		while self.check_redir() {
-			let tk = self.next_tk().unwrap();
-			node_tks.push(tk.clone());
-			let redir_bldr = tk.span.as_str().parse::<RedirBldr>().unwrap();
-			if redir_bldr.io_mode.is_none() {
-				let path_tk = self.next_tk();
-
-				if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
-					return Err(
-						ShErr::full(
-							ShErrKind::ParseErr,
-							"Expected a filename after this redirection",
-							tk.span.clone()
-						)
-					)
-				};
-
-				let path_tk = path_tk.unwrap();
-				node_tks.push(path_tk.clone());
-				let redir_class = redir_bldr.class.unwrap();
-				let pathbuf = PathBuf::from(path_tk.span.as_str());
-
-				let Ok(file) = get_redir_file(redir_class, pathbuf) else {
-					self.panic_mode(&mut node_tks);
-					return Err(parse_err_full(
-							"Error opening file for redirection",
-							&path_tk.span
-					));
-				};
-
-				let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), file);
-				let redir_bldr = redir_bldr.with_io_mode(io_mode);
-				let redir = redir_bldr.build();
-				redirs.push(redir);
-			}
-		}
+		self.parse_redir(&mut redirs, &mut node_tks)?;
 
 		let node = Node {
 			class: NdRule::ForNode { vars, arr, body },
@@ -1256,15 +1181,7 @@ impl ParseStream {
 						let redir_class = redir_bldr.class.unwrap();
 						let pathbuf = PathBuf::from(path_tk.span.as_str());
 
-						let Ok(file) = get_redir_file(redir_class, pathbuf) else {
-							self.panic_mode(&mut node_tks);
-							return Err(parse_err_full(
-									"Error opening file for redirection",
-									&path_tk.span
-							));
-						};
-
-						let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), file);
+						let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), pathbuf, redir_class);
 						let redir_bldr = redir_bldr.with_io_mode(io_mode);
 						let redir = redir_bldr.build();
 						redirs.push(redir);
@@ -1421,7 +1338,7 @@ fn node_is_punctuated(tokens: &[Tk]) -> bool {
 	})
 }
 
-fn get_redir_file(class: RedirType, path: PathBuf) -> ShResult<File> {
+pub fn get_redir_file(class: RedirType, path: PathBuf) -> ShResult<File> {
 	let result = match class {
 		RedirType::Input => {
 			OpenOptions::new()

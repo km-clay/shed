@@ -1,8 +1,0 @@
----
-source: src/tests/getopt.rs
-expression: words
----
-[
-    "echo",
-    "foo",
-]

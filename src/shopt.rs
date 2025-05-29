@@ -1,6 +1,5 @@
 use std::{collections::HashMap, fmt::Display, str::FromStr};
 
-use rustyline::{config::BellStyle, EditMode};
 
 use crate::{libsh::error::{Note, ShErr, ShErrKind, ShResult}, state::ShFunc};
 
@@ -29,17 +28,6 @@ impl FromStr for FernBellStyle {
 	}
 }
 
-impl From<FernBellStyle> for BellStyle {
-	fn from(val: FernBellStyle) -> Self {
-		match val {
-			FernBellStyle::Audible => BellStyle::Audible,
-			FernBellStyle::Visible => BellStyle::Visible,
-			FernBellStyle::Disable => BellStyle::None
-		}
-	}
-}
-
-
 impl Display for FernBellStyle {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
@@ -50,19 +38,11 @@ impl Display for FernBellStyle {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub enum FernEditMode {
+	#[default]
 	Vi,
 	Emacs
-}
-
-impl From<FernEditMode> for EditMode {
-	fn from(val: FernEditMode) -> Self {
-		match val {
-			FernEditMode::Vi => EditMode::Vi,
-			FernEditMode::Emacs => EditMode::Emacs
-		}
-	}
 }
 
 impl FromStr for FernEditMode {

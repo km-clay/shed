@@ -303,12 +303,6 @@ impl From<std::env::VarError> for ShErr {
 	}
 }
 
-impl From<rustyline::error::ReadlineError> for ShErr {
-	fn from(value: rustyline::error::ReadlineError) -> Self {
-		ShErr::simple(ShErrKind::ParseErr, value.to_string())
-	}
-}
-
 impl From<Errno> for ShErr {
 	fn from(value: Errno) -> Self {
 		ShErr::simple(ShErrKind::Errno, value.to_string())
@@ -322,6 +316,7 @@ pub enum ShErrKind {
 	ParseErr,
 	InternalErr,
 	ExecFail,
+	HistoryReadErr,
 	ResourceLimitExceeded,
 	BadPermission,
 	Errno,
@@ -331,27 +326,30 @@ pub enum ShErrKind {
 	FuncReturn(i32),
 	LoopContinue(i32),
 	LoopBreak(i32),
+	ReadlineErr,
 	Null
 }
 
 impl Display for ShErrKind {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let output = match self {
-			ShErrKind::IoErr => "I/O Error",
-			ShErrKind::SyntaxErr => "Syntax Error",
-			ShErrKind::ParseErr => "Parse Error",
-			ShErrKind::InternalErr => "Internal Error",
-			ShErrKind::ExecFail => "Execution Failed",
-			ShErrKind::ResourceLimitExceeded => "Resource Limit Exceeded",
-			ShErrKind::BadPermission => "Bad Permissions",
-			ShErrKind::Errno => "ERRNO",
-			ShErrKind::FileNotFound(file) => &format!("File not found: {file}"),
-			ShErrKind::CmdNotFound(cmd) => &format!("Command not found: {cmd}"),
-			ShErrKind::CleanExit(_) => "",
-			ShErrKind::FuncReturn(_) => "",
-			ShErrKind::LoopContinue(_) => "",
-			ShErrKind::LoopBreak(_) => "",
-			ShErrKind::Null => "",
+			Self::IoErr => "I/O Error",
+			Self::SyntaxErr => "Syntax Error",
+			Self::ParseErr => "Parse Error",
+			Self::InternalErr => "Internal Error",
+			Self::HistoryReadErr => "History Parse Error",
+			Self::ExecFail => "Execution Failed",
+			Self::ResourceLimitExceeded => "Resource Limit Exceeded",
+			Self::BadPermission => "Bad Permissions",
+			Self::Errno => "ERRNO",
+			Self::FileNotFound(file) => &format!("File not found: {file}"),
+			Self::CmdNotFound(cmd) => &format!("Command not found: {cmd}"),
+			Self::CleanExit(_) => "",
+			Self::FuncReturn(_) => "",
+			Self::LoopContinue(_) => "",
+			Self::LoopBreak(_) => "",
+			Self::ReadlineErr => "Line Read Error",
+			Self::Null => "",
 		};
 		write!(f,"{output}")
 	}
