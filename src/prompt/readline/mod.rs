@@ -107,7 +107,7 @@ impl Readline for FernVi {
 impl FernVi {
 	pub fn new(prompt: Option<String>) -> ShResult<Self> {
 		let prompt = prompt.unwrap_or("$ ".styled(Style::Green | Style::Bold));
-		let line = LineBuf::new().with_initial(LOREM_IPSUM);
+		let line = LineBuf::new();//.with_initial(LOREM_IPSUM);
 		let term = Terminal::new();
 		let history = History::new()?;
 		Ok(Self {

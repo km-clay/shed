@@ -450,7 +450,13 @@ impl Dispatcher {
 		let curr_job_mut = self.job_stack.curr_job_mut().unwrap();
 		let io_stack_mut = &mut self.io_stack;
 
-		if cmd_raw.as_str() == "builtin" || cmd_raw.as_str() == "command" {
+		if cmd_raw.as_str() == "builtin" {
+			*argv = argv.iter_mut()
+				.skip(1)
+				.map(|tk| tk.clone())
+				.collect::<Vec<Tk>>();
+			return self.exec_builtin(cmd)
+		} else if cmd_raw.as_str() == "command" {
 			*argv = argv.iter_mut()
 				.skip(1)
 				.map(|tk| tk.clone())

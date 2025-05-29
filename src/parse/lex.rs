@@ -322,6 +322,7 @@ impl LexStream {
 		let slice = self.slice_from_cursor().unwrap().to_string();
 		let mut pos = self.cursor;
 		let mut chars = slice.chars().peekable();
+		let mut can_be_subshell = chars.peek() == Some(&'(');
 
 		if self.flags.contains(LexFlags::IN_CASE) {
 			if let Some(count) = case_pat_lookahead(chars.clone()) {
@@ -501,7 +502,7 @@ impl LexStream {
 					self.cursor = pos;
 					return Ok(cmdsub_tk)
 				}
-				'(' if self.next_is_cmd() => {
+				'(' if self.next_is_cmd() && can_be_subshell => {
 					pos += 1;
 					let mut paren_count = 1;
 					let paren_pos = pos;

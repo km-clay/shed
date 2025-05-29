@@ -15,7 +15,7 @@ pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
 			return Err(
 				ShErr::full(
 					ShErrKind::ExecFail,
-					"source: File not found",
+					format!("source: File '{}' not found",path.display()),
 					span
 				)
 			);
@@ -24,7 +24,7 @@ pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
 			return Err(
 				ShErr::full(
 					ShErrKind::ExecFail,
-					"source: Given path is not a file",
+					format!("source: Given path '{}' is not a file",path.display()),
 					span
 				)
 			);

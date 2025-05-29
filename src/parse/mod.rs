@@ -691,17 +691,19 @@ impl ParseStream {
 		let mut body: Vec<Node> = vec![];
 		let mut redirs: Vec<Redir> = vec![];
 
+
 		if *self.next_tk_class() != TkRule::BraceGrpStart {
 			return Ok(None)
 		}
 		node_tks.push(self.next_tk().unwrap());
+	
 
 		loop {
 			if *self.next_tk_class() == TkRule::BraceGrpEnd {
 				node_tks.push(self.next_tk().unwrap());
 				break
 			}
-			if let Some(node) = self.parse_block(true)? {
+			if let Some(node) = self.parse_cmd_list()? {
 				node_tks.extend(node.tokens.clone());
 				body.push(node);
 			}
