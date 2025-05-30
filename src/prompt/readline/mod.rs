@@ -3,7 +3,7 @@ use std::time::Duration;
 use history::{History, SearchConstraint, SearchKind};
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{strip_ansi_codes_and_escapes, LineBuf};
-use mode::{CmdReplay, ViInsert, ViMode, ViNormal, ViReplace};
+use mode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace};
 use term::Terminal;
 use unicode_width::UnicodeWidthStr;
 use vicmd::{Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
@@ -130,10 +130,30 @@ impl FernVi {
 	}
 	pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
 		if self.line.at_end_of_buffer() && self.line.has_hint() {
-			matches!(
-				event,
-				KeyEvent(KeyCode::Right, ModKeys::NONE)
-			)
+			match self.mode.report_mode() {
+				ModeReport::Replace |
+				ModeReport::Insert => {
+					matches!(
+						event,
+						KeyEvent(KeyCode::Right, ModKeys::NONE)
+					)
+				}
+				ModeReport::Visual |
+				ModeReport::Normal => {
+					matches!(
+						event,
+						KeyEvent(KeyCode::Right, ModKeys::NONE)
+					) ||
+					(
+						self.mode.pending_seq().unwrap(/* always Some on normal mode */).is_empty() &&
+						matches!(
+							event,
+							KeyEvent(KeyCode::Char('l'), ModKeys::NONE)
+						)
+					)
+				}
+				_ => unimplemented!()
+			}
 		} else {
 			false
 		}

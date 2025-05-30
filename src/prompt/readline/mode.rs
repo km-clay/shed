@@ -7,6 +7,14 @@ use super::keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
 use super::vicmd::{Anchor, Bound, Dest, Direction, Motion, MotionBuilder, MotionCmd, RegisterName, TextObj, To, Verb, VerbBuilder, VerbCmd, ViCmd, Word};
 use crate::prelude::*;
 
+pub enum ModeReport {
+	Insert,
+	Normal,
+	Visual,
+	Replace,
+	Unknown
+}
+
 #[derive(Debug,Clone)]
 pub enum CmdReplay {
 	ModeReplay { cmds: Vec<ViCmd>, repeat: u16 },
@@ -41,6 +49,7 @@ pub trait ViMode {
 	fn move_cursor_on_undo(&self) -> bool;
 	fn clamp_cursor(&self) -> bool;
 	fn hist_scroll_start_pos(&self) -> Option<To>;
+	fn report_mode(&self) -> ModeReport;
 }
 
 #[derive(Default,Debug)]
@@ -149,6 +158,9 @@ impl ViMode for ViInsert {
 	fn hist_scroll_start_pos(&self) -> Option<To> {
 		Some(To::End)
 	}
+	fn report_mode(&self) -> ModeReport {
+	  ModeReport::Insert
+	}
 }
 
 #[derive(Default,Debug)]
@@ -251,6 +263,9 @@ impl ViMode for ViReplace {
 	}
 	fn hist_scroll_start_pos(&self) -> Option<To> {
 		Some(To::End)
+	}
+	fn report_mode(&self) -> ModeReport {
+	  ModeReport::Replace
 	}
 }
 #[derive(Default,Debug)]
@@ -793,6 +808,9 @@ impl ViMode for ViNormal {
 	}
 	fn hist_scroll_start_pos(&self) -> Option<To> {
 		None
+	}
+	fn report_mode(&self) -> ModeReport {
+	  ModeReport::Normal
 	}
 }
 

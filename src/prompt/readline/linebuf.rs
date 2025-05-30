@@ -69,14 +69,21 @@ impl From<&str> for CharClass {
 	}
 }
 
+fn is_whitespace(a: &str) -> bool {
+	CharClass::from(a) == CharClass::Whitespace
+}
 
-fn is_other_class_or_ws(a: &str, b: &str) -> bool {
+fn is_other_class(a: &str, b: &str) -> bool {
 	let a = CharClass::from(a);
 	let b = CharClass::from(b);
-	if a == CharClass::Whitespace || b == CharClass::Whitespace {
+	a != b
+}
+
+fn is_other_class_or_ws(a: &str, b: &str) -> bool {
+	if is_whitespace(a) || is_whitespace(b) {
 		true
 	} else {
-		a != b
+		is_other_class(a, b)
 	}
 }
 
@@ -243,6 +250,9 @@ impl LineBuf {
 			&self.buffer
 		}
 		
+	}
+	pub fn into_line(self) -> String {
+		self.buffer
 	}
 	pub fn slice_from_cursor_to_end_of_line(&self) -> &str {
 		let end = self.end_of_line();
@@ -780,7 +790,82 @@ impl LineBuf {
 			}
 		}
 	}
+	pub fn eval_text_object(&self, obj: TextObj, bound: Bound) -> Option<Range<usize>> {
+		flog!(DEBUG, obj);
+		flog!(DEBUG, bound);
+		match obj {
+			TextObj::Word(word) => {
+				match word {
+					Word::Big => match bound {
+						Bound::Inside => {
+							let start = self.rfind(is_whitespace)
+								.map(|pos| pos+1)
+								.unwrap_or(0);
+							let end = self.find(is_whitespace)
+								.map(|pos| pos-1)
+								.unwrap_or(self.byte_len());
+							Some(start..end)
+						}
+						Bound::Around => {
+							let start = self.rfind(is_whitespace)
+								.map(|pos| pos+1)
+								.unwrap_or(0);
+							let mut end = self.find(is_whitespace)
+								.unwrap_or(self.byte_len());
+							if end != self.byte_len() {
+								end = self.find_from(end,|c| !is_whitespace(c))
+									.map(|pos| pos-1)
+									.unwrap_or(self.byte_len())
+							}
+							Some(start..end)
+						}
+					}
+					Word::Normal => match bound {
+						Bound::Inside => {
+							let cur_graph = self.grapheme_at_cursor()?;
+							let start = self.rfind(|c| is_other_class(c, cur_graph))
+								.map(|pos| pos+1)
+								.unwrap_or(0);
+							let end = self.find(|c| is_other_class(c, cur_graph))
+								.map(|pos| pos-1)
+								.unwrap_or(self.byte_len());
+							Some(start..end)
+						}
+						Bound::Around => {
+							let cur_graph = self.grapheme_at_cursor()?;
+							let start = self.rfind(|c| is_other_class(c, cur_graph))
+								.map(|pos| pos+1)
+								.unwrap_or(0);
+							let mut end = self.find(|c| is_other_class(c, cur_graph))
+								.unwrap_or(self.byte_len());
+							if end != self.byte_len() && self.is_whitespace(end) {
+								end = self.find_from(end,|c| !is_whitespace(c))
+									.map(|pos| pos-1)
+									.unwrap_or(self.byte_len())
+							} else {
+								end -= 1;
+							}
+							Some(start..end)
+						}
+					}
+				}
+			}
+			TextObj::Line => todo!(),
+			TextObj::Sentence => todo!(),
+			TextObj::Paragraph => todo!(),
+			TextObj::DoubleQuote => todo!(),
+			TextObj::SingleQuote => todo!(),
+			TextObj::BacktickQuote => todo!(),
+			TextObj::Paren => todo!(),
+			TextObj::Bracket => todo!(),
+			TextObj::Brace => todo!(),
+			TextObj::Angle => todo!(),
+			TextObj::Tag => todo!(),
+			TextObj::Custom(_) => todo!(),
+		}
+	}
 	pub fn find_word_pos(&self, word: Word, to: To, dir: Direction) -> Option<usize> {
+		// FIXME: This uses a lot of hardcoded +1/-1 offsets, but they need to account for grapheme boundaries
 		let mut pos = self.cursor;
 		match word {
 			Word::Big => {
@@ -794,22 +879,27 @@ impl LineBuf {
 								if self.on_start_of_word(word) {
 									pos += 1;
 									if pos >= self.byte_len() {
-										return None
+										return Some(self.byte_len())
 									}
 								}
-								let ws_pos = self.find_from(pos, |c| CharClass::from(c) == CharClass::Whitespace)?;
+								let Some(ws_pos) = self.find_from(pos, |c| CharClass::from(c) == CharClass::Whitespace) else {
+									return Some(self.byte_len())
+								};
 								let word_start = self.find_from(ws_pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
 								Some(word_start)
 							}
 							To::End => {
 								if self.on_whitespace() {
-									pos = self.find_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
+									let Some(non_ws_pos) = self.find_from(pos, |c| CharClass::from(c) != CharClass::Whitespace) else {
+										return Some(self.byte_len())
+									};
+									pos = non_ws_pos
 								}
 								match self.on_end_of_word(word) {
 									true => {
 										pos += 1;
 										if pos >= self.byte_len() {
-											return None
+											return Some(self.byte_len())
 										}
 										let word_start = self.find_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
 										match self.find_from(word_start, |c| CharClass::from(c) == CharClass::Whitespace) {
@@ -831,12 +921,17 @@ impl LineBuf {
 						match to {
 							To::Start => {
 								if self.on_whitespace() {
-									pos = self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
+									let Some(non_ws_pos) = self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace) else {
+										return Some(0)
+									};
+									pos = non_ws_pos
 								}
 								match self.on_start_of_word(word) {
 									true => {
 										pos = pos.checked_sub(1)?;
-										let prev_word_end = self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
+										let Some(prev_word_end) = self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace) else {
+											return Some(0)
+										};
 										match self.rfind_from(prev_word_end, |c| CharClass::from(c) == CharClass::Whitespace) {
 											Some(n) => Some(n + 1), // Land on char after whitespace
 											None => Some(0) // Start of buffer
@@ -852,13 +947,17 @@ impl LineBuf {
 							}
 							To::End => {
 								if self.on_whitespace() {
-									return self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)
+									return Some(self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace).unwrap_or(0))
 								}
 								if self.on_end_of_word(word) {
 									pos = pos.checked_sub(1)?;
 								}
-								let last_ws = self.rfind_from(pos, |c| CharClass::from(c) == CharClass::Whitespace)?; 
-								let prev_word_end = self.rfind_from(last_ws, |c| CharClass::from(c) != CharClass::Whitespace)?;
+								let Some(last_ws) = self.rfind_from(pos, |c| CharClass::from(c) == CharClass::Whitespace) else {
+									return Some(0)
+								}; 
+								let Some(prev_word_end) = self.rfind_from(last_ws, |c| CharClass::from(c) != CharClass::Whitespace) else {
+									return Some(0)
+								};
 								Some(prev_word_end)
 							}
 						}
@@ -871,13 +970,13 @@ impl LineBuf {
 						match to {
 							To::Start => {
 								if self.on_whitespace() {
-									return self.find_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)
+									return Some(self.find_from(pos, |c| CharClass::from(c) != CharClass::Whitespace).unwrap_or(self.byte_len()))
 								}
 								if self.on_start_of_word(word) {
 									let cur_char_class = CharClass::from(self.grapheme_at_cursor()?);
 									pos += 1;
 									if pos >= self.byte_len() {
-										return None
+										return Some(self.byte_len())
 									}
 									let next_char = self.grapheme_at(self.next_pos(1)?)?;
 									let next_char_class = CharClass::from(next_char);
@@ -886,7 +985,9 @@ impl LineBuf {
 									}
 								}
 								let cur_graph = self.grapheme_at(pos)?;
-								let diff_class_pos = self.find_from(pos, |c| is_other_class_or_ws(c, cur_graph))?;
+								let Some(diff_class_pos) = self.find_from(pos, |c| is_other_class_or_ws(c, cur_graph)) else {
+									return Some(self.byte_len())
+								};
 								if let CharClass::Whitespace = CharClass::from(self.grapheme_at(diff_class_pos)?) {
 									let non_ws_pos = self.find_from(diff_class_pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
 									Some(non_ws_pos)
@@ -897,7 +998,10 @@ impl LineBuf {
 							To::End => {
 								flog!(DEBUG,self.buffer);
 								if self.on_whitespace() {
-									pos = self.find_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
+									let Some(non_ws_pos) = self.find_from(pos, |c| CharClass::from(c) != CharClass::Whitespace) else {
+										return Some(self.byte_len())
+									};
+									pos = non_ws_pos
 								}
 								match self.on_end_of_word(word) {
 									true => {
@@ -905,7 +1009,7 @@ impl LineBuf {
 										let cur_char_class = CharClass::from(self.grapheme_at_cursor()?);
 										pos += 1;
 										if pos >= self.byte_len() {
-											return None
+											return Some(self.byte_len())
 										}
 										let next_char = self.grapheme_at(self.next_pos(1)?)?;
 										let next_char_class = CharClass::from(next_char);
@@ -980,7 +1084,7 @@ impl LineBuf {
 							}
 							To::End => {
 								if self.on_whitespace() {
-									return self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)
+									return Some(self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace).unwrap_or(0))
 								}
 								if self.on_end_of_word(word) {
 									pos = pos.checked_sub(1)?;
@@ -992,7 +1096,9 @@ impl LineBuf {
 									}
 								}
 								let cur_graph = self.grapheme_at(pos)?;
-								let diff_class_pos = self.rfind_from(pos, |c|is_other_class_or_ws(c, cur_graph))?;
+								let Some(diff_class_pos) = self.rfind_from(pos, |c|is_other_class_or_ws(c, cur_graph)) else {
+									return Some(0)
+								};
 								if let CharClass::Whitespace = self.grapheme_at(diff_class_pos)?.into() {
 									let prev_word_end = self.rfind_from(diff_class_pos, |c| CharClass::from(c) != CharClass::Whitespace).unwrap_or(0);
 									Some(prev_word_end)
@@ -1016,7 +1122,6 @@ impl LineBuf {
 	/// Find the first grapheme at or after `pos` for which `op` returns true.
 	/// Returns the byte index of that grapheme in the buffer.
 	pub fn find_from<F: Fn(&str) -> bool>(&self, pos: usize, op: F) -> Option<usize> {
-		assert!(is_grapheme_boundary(&self.buffer, pos));
 
 		// Iterate over grapheme indices starting at `pos`
 		let slice = &self.slice_from(pos);
@@ -1030,7 +1135,6 @@ impl LineBuf {
 	/// Find the last grapheme at or before `pos` for which `op` returns true.
 	/// Returns the byte index of that grapheme in the buffer.
 	pub fn rfind_from<F: Fn(&str) -> bool>(&self, pos: usize, op: F) -> Option<usize> {
-		assert!(is_grapheme_boundary(&self.buffer, pos));
 
 		// Iterate grapheme boundaries backward up to pos
 		let slice = &self.slice_to(pos);
@@ -1058,7 +1162,12 @@ impl LineBuf {
 		flog!(DEBUG,motion);
 		match motion {
 			Motion::WholeLine => MotionKind::Line(0),
-			Motion::TextObj(text_obj, bound) => todo!(),
+			Motion::TextObj(text_obj, bound) => {
+				let Some(range) = self.eval_text_object(text_obj, bound) else {
+					return MotionKind::Null
+				};
+				MotionKind::range(range)
+			}
 			Motion::BeginningOfFirstWord => {
 				let (start,_) = self.this_line();
 				let first_graph_pos = self.find_from(start, |c| CharClass::from(c) != CharClass::Whitespace).unwrap_or(start);
