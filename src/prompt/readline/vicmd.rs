@@ -145,6 +145,8 @@ pub enum Verb {
 	ReplaceChar(char),
 	Substitute,
 	ToggleCase,
+	ToLower,
+	ToUpper,
 	Complete,
 	CompleteBackward,
 	Undo,
@@ -156,6 +158,9 @@ pub enum Verb {
 	InsertModeLineBreak(Anchor),
 	NormalMode,
 	VisualMode,
+	VisualModeLine,
+	VisualModeBlock,
+	SwapVisualAnchor,
 	JoinLines,
 	InsertChar(char),
 	Insert(String),
@@ -189,6 +194,8 @@ impl Verb {
 			Self::Change |
 			Self::ReplaceChar(_) |
 			Self::Substitute |
+			Self::ToLower |
+			Self::ToUpper |
 			Self::ToggleCase |
 			Self::Put(_) |
 			Self::ReplaceMode |
@@ -210,6 +217,8 @@ impl Verb {
 			Self::ReplaceChar(_) |
 			Self::Substitute |
 			Self::ToggleCase |
+			Self::ToLower |
+			Self::ToUpper |
 			Self::RepeatLast |
 			Self::Put(_) |
 			Self::ReplaceMode |

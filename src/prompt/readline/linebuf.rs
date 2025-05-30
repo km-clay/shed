@@ -16,10 +16,11 @@ pub enum CharClass {
 	Other
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MotionKind {
 	Forward(usize),
-	To(usize),
+	To(usize), // Land just before
+	On(usize), // Land directly on
 	Backward(usize),
 	Range((usize,usize)),
 	Line(isize), // positive = up line, negative = down line
@@ -29,6 +30,41 @@ pub enum MotionKind {
 	/// Absolute position based on display width of characters
 	/// Factors in the length of the prompt, and skips newlines
 	ScreenLine(isize)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionAnchor {
+	Start,
+	End
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionMode {
+	Char(SelectionAnchor),
+	Line(SelectionAnchor),
+	Block(SelectionAnchor)
+}
+
+impl SelectionMode {
+	pub fn anchor(&self) -> &SelectionAnchor {
+		match self {
+			SelectionMode::Char(anchor) |
+			SelectionMode::Line(anchor) |
+			SelectionMode::Block(anchor) => anchor
+		}
+	}
+	pub fn invert_anchor(&mut self) {
+		match self {
+			SelectionMode::Char(anchor) |
+			SelectionMode::Line(anchor) |
+			SelectionMode::Block(anchor) => {
+				*anchor = match anchor {
+					SelectionAnchor::Start => SelectionAnchor::End,
+					SelectionAnchor::End => SelectionAnchor::Start
+				}
+			}
+		}
+	}
 }
 
 impl MotionKind {
@@ -157,6 +193,8 @@ pub struct LineBuf {
 	hint: Option<String>,
 	cursor: usize,
 	clamp_cursor: bool,
+	select_mode: Option<SelectionMode>,
+	selected_range: Option<Range<usize>>,
 	first_line_offset: usize,
 	saved_col: Option<usize>,
 	term_dims: (usize,usize), // Height, width
@@ -173,6 +211,20 @@ impl LineBuf {
 	pub fn with_initial(mut self, initial: &str) -> Self {
 		self.buffer = initial.to_string();
 		self
+	}
+	pub fn selected_range(&self) -> Option<&Range<usize>> {
+		self.selected_range.as_ref()
+	}
+	pub fn is_selecting(&self) -> bool {
+		self.select_mode.is_some()
+	}
+	pub fn stop_selecting(&mut self) {
+		self.select_mode = None;
+		self.selected_range = None;
+	}
+	pub fn start_selecting(&mut self, mode: SelectionMode) {
+		self.select_mode = Some(mode);
+		self.selected_range = Some(self.cursor..(self.cursor + 1).min(self.byte_len().saturating_sub(1)))
 	}
 	pub fn has_hint(&self) -> bool {
 		self.hint.is_some()
@@ -270,6 +322,13 @@ impl LineBuf {
 	}
 	pub fn set_cursor_clamp(&mut self, yn: bool) {
 		self.clamp_cursor = yn
+	}
+	pub fn g_idx_to_byte_pos(&self, pos: usize) -> Option<usize> {
+		if pos >= self.byte_len() {
+			None
+		} else {
+			self.buffer.grapheme_indices(true).map(|(i,_)| i).nth(pos)
+		}
 	}
 	pub fn grapheme_at_cursor(&self) -> Option<&str> {
 		if self.cursor == self.byte_len() {
@@ -517,6 +576,10 @@ impl LineBuf {
 	pub fn move_end(&mut self) -> bool {
 		let end = self.end_of_line();
 		self.move_to(end)
+	}
+	/// Consume the LineBuf and return the buffer
+	pub fn pack_line(self) -> String {
+		self.buffer
 	}
 	pub fn accept_hint(&mut self) {
 		if let Some(hint) = self.hint.take() {
@@ -1014,6 +1077,10 @@ impl LineBuf {
 										let next_char = self.grapheme_at(self.next_pos(1)?)?;
 										let next_char_class = CharClass::from(next_char);
 										if cur_char_class != next_char_class && next_char_class != CharClass::Whitespace {
+											let Some(end_pos) = self.find_from(pos, |c| is_other_class_or_ws(c, next_char)) else {
+												return Some(self.byte_len())
+											};
+											pos = end_pos.saturating_sub(1);
 											return Some(pos)
 										}
 
@@ -1185,7 +1252,10 @@ impl LineBuf {
 				let Some(pos) = self.find_word_pos(word, to, Direction::Forward) else {
 					return MotionKind::Null
 				};
-				MotionKind::To(pos)
+				match to {
+					To::Start => MotionKind::To(pos),
+					To::End => MotionKind::On(pos),
+				}
 			}
 			Motion::CharSearch(direction, dest, ch) => {
 				match direction {
@@ -1230,11 +1300,15 @@ impl LineBuf {
 					MotionKind::To(pos)
 				}
 			}
-			Motion::Range(_, _) => todo!(),
+			Motion::Range(start, end) => {
+				let start = start.clamp(0, self.byte_len().saturating_sub(1));
+				let end = end.clamp(0, self.byte_len().saturating_sub(1));
+				MotionKind::range(mk_range(start, end))
+			}
 			Motion::Builder(_) => todo!(),
 			Motion::RepeatMotion => todo!(),
 			Motion::RepeatMotionRev => todo!(),
-			Motion::Null => todo!(),
+			Motion::Null => MotionKind::Null
 		}
 	}
 	pub fn calculate_display_offset(&self, n_lines: isize) -> Option<usize> {
@@ -1306,6 +1380,10 @@ impl LineBuf {
 			MotionKind::To(n) => {
 				let range = mk_range(self.cursor, *n);
 				assert!(range.end <= self.byte_len());
+				Some(range)
+			}
+			MotionKind::On(n) => {
+				let range = mk_range_inclusive(self.cursor, *n);
 				Some(range)
 			}
 			MotionKind::Backward(n) => {
@@ -1396,14 +1474,13 @@ impl LineBuf {
 		match verb {
 			Verb::Change |
 			Verb::Delete => {
-				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
+				let Some(mut range) = self.get_range_from_motion(&verb, &motion) else {
 					return Ok(())
 				};
 				let restore_col = matches!(motion, MotionKind::Line(_)) && matches!(verb, Verb::Delete);
 				if restore_col {
 					self.saved_col = Some(self.cursor_column())
 				}
-
 				let deleted = self.buffer.drain(range.clone());
 				register.write_to_register(deleted.collect());
 
@@ -1429,6 +1506,18 @@ impl LineBuf {
 					}
 				}
 			}
+			Verb::SwapVisualAnchor => {
+				if let Some(range) = self.selected_range() {
+					if let Some(mut mode) = self.select_mode {
+						mode.invert_anchor();
+						self.cursor = match mode.anchor() {
+							SelectionAnchor::Start => range.start,
+							SelectionAnchor::End => range.end,
+						};
+						self.select_mode = Some(mode);
+					}
+				}
+			}
 			Verb::Yank => {
 				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
 					return Ok(())
@@ -1447,6 +1536,38 @@ impl LineBuf {
 				self.cursor = cursor_pos
 			}
 			Verb::Substitute => todo!(),
+			Verb::ToLower => {
+				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
+					return Ok(())
+				};
+				let mut new_range = String::new();
+				let slice = &self.buffer[range.clone()];
+				for ch in slice.chars() {
+					if ch.is_ascii_uppercase() {
+						new_range.push(ch.to_ascii_lowercase())
+					} else {
+						new_range.push(ch)
+					}
+				}
+				self.buffer.replace_range(range.clone(), &new_range);
+				self.cursor = range.end;
+			}
+			Verb::ToUpper => {
+				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
+					return Ok(())
+				};
+				let mut new_range = String::new();
+				let slice = &self.buffer[range.clone()];
+				for ch in slice.chars() {
+					if ch.is_ascii_lowercase() {
+						new_range.push(ch.to_ascii_uppercase())
+					} else {
+						new_range.push(ch)
+					}
+				}
+				self.buffer.replace_range(range.clone(), &new_range);
+				self.cursor = range.end;
+			}
 			Verb::ToggleCase => {
 				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
 					return Ok(())
@@ -1539,7 +1660,6 @@ impl LineBuf {
 				let next_line = &self.buffer[nstart..nend].trim_start().to_string(); // strip leading whitespace
 				flog!(DEBUG,next_line);
 				let replace_newline_with_space = !line.ends_with([' ', '\t']);
-
 				self.cursor = end;
 				if replace_newline_with_space {
 					self.buffer.replace_range(end..end+1, " ");
@@ -1587,6 +1707,8 @@ impl LineBuf {
 			Verb::ReplaceMode |
 			Verb::InsertMode |
 			Verb::NormalMode |
+			Verb::VisualModeLine |
+			Verb::VisualModeBlock |
 			Verb::VisualMode => {
 				/* Already handled */ 
 				self.apply_motion(/*forced*/ true,motion);
@@ -1595,6 +1717,7 @@ impl LineBuf {
 		Ok(())
 	}
 	pub fn apply_motion(&mut self, forced: bool, motion: MotionKind) {
+
 		match motion {
 			MotionKind::Forward(n) => {
 				for _ in 0..n {
@@ -1618,6 +1741,7 @@ impl LineBuf {
 					}
 				}
 			}
+			MotionKind::On(n) |
 			MotionKind::To(n) => {
 				if n > self.byte_len() {
 					self.cursor = self.byte_len();
@@ -1665,6 +1789,40 @@ impl LineBuf {
 				};
 				self.cursor = pos;
 			}
+		}
+		if let Some(mut mode) = self.select_mode {
+			let Some(range) = self.selected_range.clone() else {
+				return
+			};
+			let (mut start,mut end) = (range.start,range.end);
+			match mode {
+				SelectionMode::Char(anchor) => {
+					match anchor {
+						SelectionAnchor::Start => {
+							start = self.cursor;
+						}
+						SelectionAnchor::End => {
+							end = self.cursor;
+						}
+					}
+				}
+				SelectionMode::Line(anchor) => todo!(),
+				SelectionMode::Block(anchor) => todo!(),
+			}
+			if start >= end {
+				flog!(DEBUG, "inverting anchor");
+				mode.invert_anchor();
+				flog!(DEBUG,start,end);
+				std::mem::swap(&mut start, &mut end);
+				match mode.anchor() {
+					SelectionAnchor::Start => end += 1,
+					SelectionAnchor::End => start -= 1,
+				}
+				self.select_mode = Some(mode);
+				flog!(DEBUG,start,end);
+				flog!(DEBUG,mode);
+			}
+			self.selected_range = Some(start..end);
 		}
 	}
 	pub fn edit_is_merging(&self) -> bool {
@@ -1719,7 +1877,12 @@ impl LineBuf {
 				let motion_eval = motion
 					.clone()
 					.map(|m| self.eval_motion(m.1))
-					.unwrap_or(MotionKind::Null);
+					.unwrap_or({
+						self.selected_range
+							.clone()
+							.map(MotionKind::range)
+							.unwrap_or(MotionKind::Null)
+					});
 
 				flog!(DEBUG,self.hint);
 				if let Some(verb) = verb.clone() {
@@ -1756,6 +1919,9 @@ impl LineBuf {
 			}
 		}
 
+		flog!(DEBUG, self.select_mode);
+		flog!(DEBUG, self.selected_range);
+
 		if self.clamp_cursor {
 			self.clamp_cursor();
 		}
@@ -1767,6 +1933,20 @@ impl LineBuf {
 impl Display for LineBuf {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		let mut full_buf = self.buffer.clone();
+		if let Some(range) = self.selected_range.clone() {
+			let mode = self.select_mode.unwrap();
+			match mode.anchor() {
+				SelectionAnchor::Start => {
+					let inclusive = range.start..=range.end;
+					let selected = full_buf[inclusive.clone()].styled(Style::BgWhite | Style::Black);
+					full_buf.replace_range(inclusive, &selected);
+				}
+				SelectionAnchor::End => {
+					let selected = full_buf[range.clone()].styled(Style::BgWhite | Style::Black);
+					full_buf.replace_range(range, &selected);
+				}
+			}
+		}
 		if let Some(hint) = self.hint.as_ref() {
 			full_buf.push_str(&hint.styled(Style::BrightBlack));
 		}

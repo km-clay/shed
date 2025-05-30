@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use history::{History, SearchConstraint, SearchKind};
 use keys::{KeyCode, KeyEvent, ModKeys};
-use linebuf::{strip_ansi_codes_and_escapes, LineBuf};
-use mode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace};
+use linebuf::{strip_ansi_codes_and_escapes, LineBuf, SelectionAnchor, SelectionMode};
+use mode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 use term::Terminal;
 use unicode_width::UnicodeWidthStr;
 use vicmd::{Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
@@ -307,12 +307,13 @@ impl FernVi {
 		}
 		strip_ansi_codes_and_escapes(self.prompt.lines().last().unwrap_or_default()).width() + 1 // 1 indexed
 	}
-	pub fn exec_cmd(&mut self, cmd: ViCmd) -> ShResult<()> {
+	pub fn exec_cmd(&mut self, mut cmd: ViCmd) -> ShResult<()> {
+		let mut selecting = false;
 		if cmd.is_mode_transition() {
 			let count = cmd.verb_count();
 			let mut mode: Box<dyn ViMode> = match cmd.verb().unwrap().1 {
-				Verb::InsertModeLineBreak(_) |
 				Verb::Change |
+				Verb::InsertModeLineBreak(_) |
 				Verb::InsertMode => {
 					Box::new(ViInsert::new().with_count(count as u16))
 				}
@@ -322,7 +323,11 @@ impl FernVi {
 				Verb::ReplaceMode => {
 					Box::new(ViReplace::new().with_count(count as u16))
 				}
-				Verb::VisualMode => todo!(),
+				Verb::VisualMode => {
+					selecting = true;
+					self.line.start_selecting(SelectionMode::Char(SelectionAnchor::End));
+					Box::new(ViVisual::new())
+				}
 				_ => unreachable!()
 			};
 
@@ -334,7 +339,13 @@ impl FernVi {
 			if mode.is_repeatable() {
 				self.last_action = mode.as_replay();
 			}
-			return self.line.exec_cmd(cmd);
+			self.line.exec_cmd(cmd)?;
+			if selecting {
+				self.line.start_selecting(SelectionMode::Char(SelectionAnchor::End));
+			} else {
+				self.line.stop_selecting();
+			}
+			return Ok(())
 		} else if cmd.is_cmd_repeat() {
 			let Some(replay) = self.last_action.clone() else {
 				return Ok(())
@@ -405,12 +416,26 @@ impl FernVi {
 		}
 
 		if cmd.is_repeatable() {
+			if self.mode.report_mode() == ModeReport::Visual {
+				// The motion is assigned in the line buffer execution, so we also have to assign it here
+				// in order to be able to repeat it
+				let range = self.line.selected_range().unwrap();
+				cmd.motion = Some(MotionCmd(1,Motion::Range(range.start, range.end)))
+			}
 			self.last_action = Some(CmdReplay::Single(cmd.clone()));
-		}
+		} 
+
 		if cmd.is_char_search() {
 			self.last_movement = cmd.motion.clone()
 		}
 
-		self.line.exec_cmd(cmd.clone())
+		self.line.exec_cmd(cmd.clone())?;
+
+		if self.mode.report_mode() == ModeReport::Visual && cmd.verb().is_some_and(|v| v.1.is_edit()) {
+			self.line.stop_selecting();
+			let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+			std::mem::swap(&mut mode, &mut self.mode);
+		}
+		Ok(())
 	}
 }
