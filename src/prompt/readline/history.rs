@@ -1,11 +1,30 @@
 use std::{env, fmt::{Write,Display}, fs::{self, OpenOptions}, io::Write as IoWrite, path::{Path, PathBuf}, str::FromStr, time::{Duration, SystemTime, UNIX_EPOCH}};
 
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::libsh::{error::{ShErr, ShErrKind, ShResult}, term::{Style, Styled}};
 use crate::prelude::*;
 
 use super::vicmd::Direction; // surprisingly useful
 
-#[derive(Debug)]
+#[derive(Default,Clone,Copy,Debug)]
+pub enum SearchKind {
+	Fuzzy,
+	#[default]
+	Prefix
+}
+
+#[derive(Default,Clone,Debug)]
+pub struct SearchConstraint {
+	kind: SearchKind,
+	term: String,
+}
+
+impl SearchConstraint {
+	pub fn new(kind: SearchKind, term: String) -> Self {
+		Self { kind, term }
+	}
+}
+
+#[derive(Debug,Clone)]
 pub struct HistEntry {
 	id: u32,
 	timestamp: SystemTime,
@@ -41,6 +60,9 @@ impl HistEntry {
 			}
 		}
 		escaped
+	}
+	pub fn is_new(&self) -> bool {
+		self.new
 	}
 }
 
@@ -145,6 +167,7 @@ fn read_hist_file(path: &Path) -> ShResult<Vec<HistEntry>> {
 pub struct History {
 	path: PathBuf,
 	entries: Vec<HistEntry>,
+	search_mask: Vec<HistEntry>,
 	cursor: usize,
 	search_direction: Direction,
 	ignore_dups: bool,
@@ -157,11 +180,19 @@ impl History {
 			let home = env::var("HOME").unwrap();
 			format!("{home}/.fern_history")
 		}));
-		let entries = read_hist_file(&path)?;
-		let cursor = entries.len();
+		let mut entries = read_hist_file(&path)?;
+		{
+			let id = entries.last().map(|ent| ent.id + 1).unwrap_or(0);
+			let timestamp = SystemTime::now();
+			let command = "".into();
+			entries.push(HistEntry { id, timestamp, command, new: true })
+		}
+		let search_mask = entries.clone();
+		let cursor = entries.len() - 1;
 		let mut new = Self {
 			path,
 			entries,
+			search_mask,
 			cursor,
 			search_direction: Direction::Backward,
 			ignore_dups: true,
@@ -176,19 +207,22 @@ impl History {
 	}
 
 	pub fn push_empty_entry(&mut self) {
-		let id = self.get_new_id();
-		let timestamp = SystemTime::now();
-		let command = "".into();
-		self.entries.push(HistEntry { id, timestamp, command, new: true })
+	}
+
+	pub fn cursor_entry(&self) -> Option<&HistEntry> {
+		self.search_mask.get(self.cursor)
 	}
 
 	pub fn update_pending_cmd(&mut self, command: &str) {
-		flog!(DEBUG, "updating command");
 		let Some(ent) = self.last_mut() else {
 			return
 		};
+		let cmd = command.to_string();
+		let constraint = SearchConstraint { kind: SearchKind::Prefix, term: cmd.clone() };
 
-		ent.command = command.to_string()
+
+		ent.command = cmd;
+		self.constrain_entries(constraint);
 	}
 
 	pub fn last_mut(&mut self) -> Option<&mut HistEntry> {
@@ -210,11 +244,46 @@ impl History {
 		self.max_size = size
 	}
 
+	pub fn constrain_entries(&mut self, constraint: SearchConstraint) {
+		let SearchConstraint { kind, term } = constraint;
+		match kind {
+			SearchKind::Prefix => {
+				if term.is_empty() {
+					self.search_mask = self.entries.clone();
+				} else {
+					let filtered = self.entries
+						.clone()
+						.into_iter()
+						.filter(|ent| ent.command().starts_with(&term));
+
+					self.search_mask = filtered.collect();
+				}
+				self.cursor = self.search_mask.len().saturating_sub(1);
+			}
+			SearchKind::Fuzzy => todo!(),
+		}
+	}
+
+	pub fn hint_entry(&self) -> Option<&HistEntry> {
+		let second_to_last = self.search_mask.len().checked_sub(2)?;
+		self.search_mask.get(second_to_last)
+	}
+
+	pub fn get_hint(&self) -> Option<String> {
+		if self.cursor_entry().is_some_and(|ent| ent.is_new() && !ent.command().is_empty()) {
+			let entry = self.hint_entry()?;
+			let prefix = self.cursor_entry()?.command();
+			Some(entry.command().strip_prefix(prefix)?.to_string())
+		} else {
+			None
+		}
+	}
+
 	pub fn scroll(&mut self, offset: isize) -> Option<&HistEntry> {
 		let new_idx = self.cursor
 			.saturating_add_signed(offset)
-			.clamp(0, self.entries.len());
-		let ent = self.entries.get(new_idx)?;
+			.clamp(0, self.search_mask.len().saturating_sub(1));
+		let ent = self.search_mask.get(new_idx)?;
 
 		self.cursor = new_idx;
 
@@ -244,7 +313,7 @@ impl History {
 			.append(true)
 			.open(&self.path)?;
 
-		let entries = self.entries.iter_mut().filter(|ent| ent.new);
+		let entries = self.entries.iter_mut().filter(|ent| ent.new && !ent.command.is_empty());
 		let mut data = String::new();
 		for ent in entries {
 			ent.new = false;

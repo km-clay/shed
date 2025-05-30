@@ -696,6 +696,8 @@ impl ParseStream {
 			return Ok(None)
 		}
 		node_tks.push(self.next_tk().unwrap());
+
+		self.catch_separator(&mut node_tks);
 	
 
 		loop {
@@ -707,6 +709,9 @@ impl ParseStream {
 				node_tks.extend(node.tokens.clone());
 				body.push(node);
 			}
+			dbg!(&self.tokens);
+			panic!("{body:#?}");
+			self.catch_separator(&mut node_tks);
 			if !self.next_tk_is_some() {
 				self.panic_mode(&mut node_tks);
 				return Err(parse_err_full(

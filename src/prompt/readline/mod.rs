@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use history::History;
+use history::{History, SearchConstraint, SearchKind};
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{strip_ansi_codes_and_escapes, LineBuf};
 use mode::{CmdReplay, ViInsert, ViMode, ViNormal, ViReplace};
@@ -65,6 +65,12 @@ impl Readline for FernVi {
 				self.handle_verbatim()?;
 				continue
 			}
+			if self.should_accept_hint(&key) {
+				self.line.accept_hint();
+				self.history.update_pending_cmd(self.line.as_str());
+				self.print_buf(true)?;
+				continue
+			}
 
 			let Some(cmd) = self.mode.handle_key(key) else {
 				continue
@@ -78,7 +84,9 @@ impl Readline for FernVi {
 			}
 
 
+
 			if cmd.should_submit() {
+				self.term.unposition_cursor()?;
 				self.term.write("\n");
 				let command = self.line.to_string();
 				if !command.is_empty() {
@@ -95,7 +103,7 @@ impl Readline for FernVi {
 			let has_changes = line != new_line;
 			flog!(DEBUG, has_changes);
 
-			if cmd.verb().is_some_and(|v| v.1.is_edit()) && has_changes {
+			if has_changes {
 				self.history.update_pending_cmd(self.line.as_str());
 			}
 
@@ -119,6 +127,16 @@ impl FernVi {
 			last_action: None,
 			last_movement: None,
 		})
+	}
+	pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
+		if self.line.at_end_of_buffer() && self.line.has_hint() {
+			matches!(
+				event,
+				KeyEvent(KeyCode::Right, ModKeys::NONE)
+			)
+		} else {
+			false
+		}
 	}
 	/// Ctrl+V handler
 	pub fn handle_verbatim(&mut self) -> ShResult<()> {
@@ -184,6 +202,10 @@ impl FernVi {
 		Ok(())
 	}
 	pub fn scroll_history(&mut self, cmd: ViCmd) {
+		if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
+			let constraint = SearchConstraint::new(SearchKind::Prefix, self.line.to_string());
+			self.history.constrain_entries(constraint);
+		}
 		let count = &cmd.motion().unwrap().0;
 		let motion = &cmd.motion().unwrap().1;
 		flog!(DEBUG,count,motion);
@@ -244,11 +266,14 @@ impl FernVi {
 		if refresh {
 			self.term.unwrite()?;
 		}
+		let hint = self.history.get_hint();
+		self.line.set_hint(hint);
+
 		let offset = self.calculate_prompt_offset();
 		self.line.set_first_line_offset(offset);
 		self.line.update_term_dims((height,width));
 		let mut line_buf = self.prompt.clone();
-		line_buf.push_str(self.line.as_str());
+		line_buf.push_str(&self.line.to_string());
 
 		self.term.recorded_write(&line_buf, offset)?;
 		self.term.position_cursor(self.line.cursor_display_coords(width))?;

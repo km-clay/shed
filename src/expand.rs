@@ -13,6 +13,16 @@ use crate::parse::execute::exec_input;
 use crate::parse::lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Tk, TkFlags, TkRule};
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 
+const PARAMETERS: [char;7] = [
+	'@',
+	'*',
+	'#',
+	'$',
+	'?',
+	'!',
+	'0'
+];
+
 /// Variable substitution marker
 pub const VAR_SUB: char = '\u{fdd0}';
 /// Double quote '"' marker
@@ -169,6 +179,13 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 			ch if in_brace => {
 				chars.next(); // safe to consume
 				var_name.push(ch);
+			}
+			ch if var_name.is_empty() && PARAMETERS.contains(&ch) => {
+				chars.next();
+				let parameter = format!("{ch}");
+				let val = read_vars(|v| v.get_var(&parameter));
+				flog!(DEBUG, val);
+				return Ok(val)
 			}
 			ch if is_hard_sep(ch) || !(ch.is_alphanumeric() || ch == '_' || ch == '-') => {
 				let val = read_vars(|v| v.get_var(&var_name));
@@ -627,7 +644,13 @@ pub fn unescape_str(raw: &str) -> String {
 					}
 				}
 			}
-			'$' => result.push(VAR_SUB),
+			'$' => {
+				result.push(VAR_SUB);
+				if chars.peek() == Some(&'$') {
+					chars.next();
+					result.push('$');
+				}
+			}
 			_ => result.push(ch)
 		}
 		first_char = false;

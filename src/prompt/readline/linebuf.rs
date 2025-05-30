@@ -3,7 +3,7 @@ use std::{cmp::Ordering, fmt::Display, ops::{Range, RangeBounds}};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::libsh::{error::ShResult, sys::sh_quit};
+use crate::libsh::{error::ShResult, sys::sh_quit, term::{Style, Styled}};
 use crate::prelude::*;
 
 use super::vicmd::{Anchor, Bound, Dest, Direction, Motion, RegisterName, TextObj, To, Verb, ViCmd, Word};
@@ -147,6 +147,7 @@ impl Edit {
 #[derive(Default,Debug)]
 pub struct LineBuf {
 	buffer: String,
+	hint: Option<String>,
 	cursor: usize,
 	clamp_cursor: bool,
 	first_line_offset: usize,
@@ -165,6 +166,12 @@ impl LineBuf {
 	pub fn with_initial(mut self, initial: &str) -> Self {
 		self.buffer = initial.to_string();
 		self
+	}
+	pub fn has_hint(&self) -> bool {
+		self.hint.is_some()
+	}
+	pub fn set_hint(&mut self, hint: Option<String>) {
+		self.hint = hint
 	}
 	pub fn set_first_line_offset(&mut self, offset: usize) {
 		self.first_line_offset = offset
@@ -188,6 +195,13 @@ impl LineBuf {
 	}
 	pub fn byte_len(&self) -> usize {
 		self.buffer.len()
+	}
+	pub fn at_end_of_buffer(&self) -> bool {
+		if self.clamp_cursor {
+			self.cursor == self.byte_len().saturating_sub(1)
+		} else {
+			self.cursor == self.byte_len()
+		}
 	}
 	pub fn undos(&self) -> usize {
 		self.undo_stack.len()
@@ -480,7 +494,11 @@ impl LineBuf {
 		self.move_to(0)
 	}
 	pub fn move_buf_end(&mut self) -> bool {
-		self.move_to(self.byte_len())
+		if self.clamp_cursor {
+			self.move_to(self.byte_len().saturating_sub(1))
+		} else {
+			self.move_to(self.byte_len())
+		}
 	}
 	pub fn move_home(&mut self) -> bool {
 		let start = self.start_of_line();
@@ -489,6 +507,63 @@ impl LineBuf {
 	pub fn move_end(&mut self) -> bool {
 		let end = self.end_of_line();
 		self.move_to(end)
+	}
+	pub fn accept_hint(&mut self) {
+		if let Some(hint) = self.hint.take() {
+			flog!(DEBUG, "accepting hint");
+			let old_buf = self.buffer.clone();
+			self.buffer.push_str(&hint);
+			let new_buf = self.buffer.clone();
+			self.handle_edit(old_buf, new_buf, self.cursor);
+			self.move_buf_end();
+		}
+	}
+	pub fn accept_hint_partial(&mut self, accept_to: usize) {
+		if let Some(hint) = self.hint.take() {
+			let accepted = &hint[..accept_to];
+			let remainder = &hint[accept_to..];
+			self.buffer.push_str(accepted);
+			self.hint = Some(remainder.to_string());
+		}
+	}
+	/// If we have a hint, then motions are able to extend into it
+	/// and partially accept pieces of it, instead of the whole thing
+	pub fn apply_motion_with_hint(&mut self, motion: MotionKind) {
+		let buffer_end = self.byte_len().saturating_sub(1);
+		flog!(DEBUG,self.hint);
+		if let Some(hint) = self.hint.take() {
+			self.buffer.push_str(&hint);
+			flog!(DEBUG,motion);
+			self.apply_motion(/*forced*/ true, motion);
+			flog!(DEBUG, self.cursor);
+			flog!(DEBUG, self.grapheme_at_cursor());
+			if self.cursor > buffer_end {
+				let remainder = if self.clamp_cursor {
+					self.slice_from((self.cursor + 1).min(self.byte_len()))
+				} else {
+					self.slice_from_cursor()
+				};
+				flog!(DEBUG,remainder);
+				if !remainder.is_empty() {
+					self.hint = Some(remainder.to_string());
+				}
+				let buffer = if self.clamp_cursor {
+					self.slice_to((self.cursor + 1).min(self.byte_len()))
+				} else {
+					self.slice_to_cursor()
+				};
+				flog!(DEBUG,buffer);
+				self.buffer = buffer.to_string();
+				flog!(DEBUG,self.hint);
+			} else {
+				let old_hint = self.slice_from(buffer_end + 1);
+				flog!(DEBUG,old_hint);
+				self.hint = Some(old_hint.to_string());
+				let buffer = self.slice_to(buffer_end + 1);
+				flog!(DEBUG,buffer);
+				self.buffer = buffer.to_string();
+			}
+		}
 	}
 	pub fn find_prev_line_pos(&mut self) -> Option<usize> {
 		if self.start_of_line() == 0 {
@@ -799,9 +874,15 @@ impl LineBuf {
 									return self.find_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)
 								}
 								if self.on_start_of_word(word) {
+									let cur_char_class = CharClass::from(self.grapheme_at_cursor()?);
 									pos += 1;
 									if pos >= self.byte_len() {
 										return None
+									}
+									let next_char = self.grapheme_at(self.next_pos(1)?)?;
+									let next_char_class = CharClass::from(next_char);
+									if cur_char_class != next_char_class && next_char_class != CharClass::Whitespace {
+										return Some(pos)
 									}
 								}
 								let cur_graph = self.grapheme_at(pos)?;
@@ -814,15 +895,24 @@ impl LineBuf {
 								}
 							}
 							To::End => {
+								flog!(DEBUG,self.buffer);
 								if self.on_whitespace() {
 									pos = self.find_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
 								}
 								match self.on_end_of_word(word) {
 									true => {
+										flog!(DEBUG, "on end of word");
+										let cur_char_class = CharClass::from(self.grapheme_at_cursor()?);
 										pos += 1;
 										if pos >= self.byte_len() {
 											return None
 										}
+										let next_char = self.grapheme_at(self.next_pos(1)?)?;
+										let next_char_class = CharClass::from(next_char);
+										if cur_char_class != next_char_class && next_char_class != CharClass::Whitespace {
+											return Some(pos)
+										}
+
 										let cur_graph = self.grapheme_at(pos)?;
 										match self.find_from(pos, |c| is_other_class_or_ws(c, cur_graph)) {
 											Some(n) => {
@@ -844,7 +934,9 @@ impl LineBuf {
 										}
 									}
 									false => {
+										flog!(DEBUG, "not on end of word");
 										let cur_graph = self.grapheme_at(pos)?;
+										flog!(DEBUG,cur_graph);
 										match self.find_from(pos, |c| is_other_class_or_ws(c, cur_graph)) {
 											Some(n) => Some(n.saturating_sub(1)), // Land on char before other char class
 											None => Some(self.byte_len()) // End of buffer
@@ -863,6 +955,13 @@ impl LineBuf {
 								match self.on_start_of_word(word) {
 									true => {
 										pos = pos.checked_sub(1)?;
+										let cur_char_class = CharClass::from(self.grapheme_at_cursor()?);
+										let prev_char = self.grapheme_at(self.prev_pos(1)?)?;
+										let prev_char_class = CharClass::from(prev_char);
+										let is_diff_class = cur_char_class != prev_char_class && prev_char_class != CharClass::Whitespace;
+										if is_diff_class && self.is_start_of_word(Word::Normal, self.prev_pos(1)?) {
+												return Some(pos)
+										}
 										let prev_word_end = self.rfind_from(pos, |c| CharClass::from(c) != CharClass::Whitespace)?;
 										let cur_graph = self.grapheme_at(prev_word_end)?;
 										match self.rfind_from(prev_word_end, |c| is_other_class_or_ws(c, cur_graph)) {
@@ -885,6 +984,12 @@ impl LineBuf {
 								}
 								if self.on_end_of_word(word) {
 									pos = pos.checked_sub(1)?;
+									let cur_char_class = CharClass::from(self.grapheme_at_cursor()?);
+									let prev_char = self.grapheme_at(self.prev_pos(1)?)?;
+									let prev_char_class = CharClass::from(prev_char);
+									if cur_char_class != prev_char_class && prev_char_class != CharClass::Whitespace {
+										return Some(pos)
+									}
 								}
 								let cur_graph = self.grapheme_at(pos)?;
 								let diff_class_pos = self.rfind_from(pos, |c|is_other_class_or_ws(c, cur_graph))?;
@@ -938,7 +1043,19 @@ impl LineBuf {
 		}
 		None
 	}
+	pub fn eval_motion_with_hint(&mut self, motion: Motion) -> MotionKind {
+		let Some(hint) = self.hint.as_ref() else {
+			return MotionKind::Null
+		};
+		let buffer = self.buffer.clone();
+		self.buffer.push_str(hint);
+		let motion_eval = self.eval_motion(motion);
+		self.buffer = buffer;
+		motion_eval
+	}
 	pub fn eval_motion(&mut self, motion: Motion) -> MotionKind {
+		flog!(DEBUG,self.buffer);
+		flog!(DEBUG,motion);
 		match motion {
 			Motion::WholeLine => MotionKind::Line(0),
 			Motion::TextObj(text_obj, bound) => todo!(),
@@ -1461,6 +1578,7 @@ impl LineBuf {
 			self.undo_stack.push(edit);
 		} else {
 			let diff = Edit::diff(&old, &new, curs_pos);
+			flog!(DEBUG, diff);
 			if !diff.is_empty() {
 				self.undo_stack.push(diff);
 			}
@@ -1489,15 +1607,23 @@ impl LineBuf {
 
 		for _ in 0..verb_count.unwrap_or(1) {
 			for _ in 0..motion_count.unwrap_or(1) {
-				let motion = motion
+				let motion_eval = motion
 					.clone()
 					.map(|m| self.eval_motion(m.1))
 					.unwrap_or(MotionKind::Null);
 
+				flog!(DEBUG,self.hint);
 				if let Some(verb) = verb.clone() {
-					self.exec_verb(verb.1, motion, register)?;
+					self.exec_verb(verb.1, motion_eval, register)?;
+				} else if self.has_hint() {
+					let motion_eval = motion
+						.clone()
+						.map(|m| self.eval_motion_with_hint(m.1))
+						.unwrap_or(MotionKind::Null);
+					flog!(DEBUG, "applying motion with hint");
+					self.apply_motion_with_hint(motion_eval);
 				} else {
-					self.apply_motion(/*forced*/ false,motion);
+					self.apply_motion(/*forced*/ false,motion_eval);
 				}
 			}
 		}
@@ -1531,7 +1657,11 @@ impl LineBuf {
 
 impl Display for LineBuf {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f,"{}",self.buffer)
+		let mut full_buf = self.buffer.clone();
+		if let Some(hint) = self.hint.as_ref() {
+			full_buf.push_str(&hint.styled(Style::BrightBlack));
+		}
+		write!(f,"{}",full_buf)
 	}
 }
 

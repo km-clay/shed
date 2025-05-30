@@ -198,13 +198,14 @@ impl Dispatcher {
 		self.io_stack.append_to_frame(func.redirs);
 
 		let func_name = argv.remove(0).span.as_str().to_string();
+		let argv = prepare_argv(argv)?;
 		if let Some(func) = read_logic(|l| l.get_func(&func_name)) {
 			let snapshot = get_snapshots();
 			// Set up the inner scope
 			write_vars(|v| {
 				**v = VarTab::new();
 				v.clear_args();
-				for arg in argv {
+				for (arg,_) in argv {
 					v.bpush_arg(arg.to_string());
 				}
 			});
