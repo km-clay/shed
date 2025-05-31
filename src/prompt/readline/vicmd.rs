@@ -171,6 +171,7 @@ pub enum Verb {
 	Dedent,
 	Equalize,
 	AcceptLine,
+	Rot13, // lol
 	Builder(VerbBuilder),
 	EndOfFile
 }
@@ -229,6 +230,7 @@ impl Verb {
 			Self::InsertChar(_) |
 			Self::Insert(_) |
 			Self::Breakline(_) |
+			Self::Rot13 |
 			Self::EndOfFile
 		)
 	}

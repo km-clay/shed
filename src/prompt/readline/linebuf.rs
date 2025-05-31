@@ -21,6 +21,7 @@ pub enum MotionKind {
 	Forward(usize),
 	To(usize), // Land just before
 	On(usize), // Land directly on
+	Before(usize), // Had to make a separate one for char searches, for some reason
 	Backward(usize),
 	Range((usize,usize)),
 	Line(isize), // positive = up line, negative = down line
@@ -1268,24 +1269,36 @@ impl LineBuf {
 				}
 			}
 			Motion::CharSearch(direction, dest, ch) => {
+				let ch = format!("{ch}");
+				let saved_cursor = self.cursor;
 				match direction {
 					Direction::Forward => {
-						let Some(pos) = self.slice_from_cursor().find(ch) else {
+						if self.grapheme_at_cursor().is_some_and(|c| c == ch) {
+							self.cursor_fwd(1);
+						}
+						let Some(pos) = self.find(|c| c == ch) else {
+							self.cursor = saved_cursor;
 							return MotionKind::Null
 						};
+						self.cursor = saved_cursor;
 						match dest {
-							Dest::On => MotionKind::To(pos),
-							Dest::Before => MotionKind::To(pos.saturating_sub(1)),
+							Dest::On => MotionKind::On(pos),
+							Dest::Before => MotionKind::Before(pos),
 							Dest::After => todo!(),
 						}
 					}
 					Direction::Backward => {
-						let Some(pos) = self.slice_to_cursor().rfind(ch) else {
+						if self.grapheme_at_cursor().is_some_and(|c| c == ch) {
+							self.cursor_back(1);
+						}
+						let Some(pos) = self.rfind(|c| c == ch) else {
+							self.cursor = saved_cursor;
 							return MotionKind::Null
 						};
+						self.cursor = saved_cursor;
 						match dest {
-							Dest::On => MotionKind::To(pos),
-							Dest::Before => MotionKind::To(pos + 1),
+							Dest::On => MotionKind::On(pos),
+							Dest::Before => MotionKind::Before(pos),
 							Dest::After => todo!(),
 						}
 					}
@@ -1394,6 +1407,15 @@ impl LineBuf {
 			}
 			MotionKind::On(n) => {
 				let range = mk_range_inclusive(self.cursor, *n);
+				Some(range)
+			}
+			MotionKind::Before(n) => {
+				let n = match n.cmp(&self.cursor) {
+					Ordering::Less => (n + 1).min(self.byte_len()),
+					Ordering::Equal => n.saturating_sub(1),
+					Ordering::Greater => *n
+				};
+				let range = mk_range_inclusive(n, self.cursor);
 				Some(range)
 			}
 			MotionKind::Backward(n) => {
@@ -1512,6 +1534,7 @@ impl LineBuf {
 					Anchor::Before => {
 						if self.grapheme_at(self.cursor.saturating_sub(1)).is_some() {
 							self.buffer.remove(self.cursor.saturating_sub(1));
+							self.cursor_back(1);
 						}
 					}
 				}
@@ -1550,7 +1573,8 @@ impl LineBuf {
 				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
 					return Ok(())
 				};
-				let new_range = format!("{c}");
+				let delta = range.end - range.start;
+				let new_range = format!("{c}").repeat(delta);
 				let cursor_pos = range.end;
 				self.buffer.replace_range(range, &new_range);
 				self.cursor = cursor_pos
@@ -1712,6 +1736,14 @@ impl LineBuf {
 				};
 				self.dedent_lines(range)
 			}
+			Verb::Rot13 => {
+				let Some(range) = self.get_range_from_motion(&verb, &motion) else {
+					return Ok(())
+				};
+				let slice = &self.buffer[range.clone()];
+				let rot13 = rot13(slice);
+				self.buffer.replace_range(range, &rot13);
+			}
 			Verb::Equalize => todo!(), // I fear this one
 			Verb::Builder(verb_builder) => todo!(),
 			Verb::EndOfFile => {
@@ -1761,12 +1793,31 @@ impl LineBuf {
 					}
 				}
 			}
-			MotionKind::On(n) |
-			MotionKind::To(n) => {
+			MotionKind::To(n) |
+			MotionKind::On(n) => {
 				if n > self.byte_len() {
 					self.cursor = self.byte_len();
 				} else {
 					self.cursor = n
+				}
+			}
+			MotionKind::Before(n) => {
+				if n > self.byte_len() {
+					self.cursor = self.byte_len();
+				} else {
+					match n.cmp(&self.cursor) {
+						Ordering::Less => {
+							let n = (n + 1).min(self.byte_len());
+							self.cursor = n
+						}
+						Ordering::Equal => {
+							self.cursor = n
+						}
+						Ordering::Greater => {
+							let n = n.saturating_sub(1);
+							self.cursor = n
+						}
+					}
 				}
 			}
 			MotionKind::Range(range) => {
@@ -1834,10 +1885,7 @@ impl LineBuf {
 				mode.invert_anchor();
 				flog!(DEBUG,start,end);
 				std::mem::swap(&mut start, &mut end);
-				match mode.anchor() {
-					SelectionAnchor::Start => end += 1,
-					SelectionAnchor::End => start -= 1,
-				}
+
 				self.select_mode = Some(mode);
 				flog!(DEBUG,start,end);
 				flog!(DEBUG,mode);
@@ -2001,6 +2049,22 @@ pub fn strip_ansi_codes_and_escapes(s: &str) -> String {
 		}
 	}
 	out
+}
+
+pub fn rot13(input: &str) -> String {
+	input.chars()
+		.map(|c| {
+			if c.is_ascii_lowercase() {
+				let offset = b'a';
+				(((c as u8 - offset + 13) % 26) + offset) as char
+			} else if c.is_ascii_uppercase() {
+				let offset = b'A';
+				(((c as u8 - offset + 13) % 26) + offset) as char
+			} else {
+				c
+			}
+		})
+		.collect()
 }
 
 pub fn is_grapheme_boundary(s: &str, pos: usize) -> bool {

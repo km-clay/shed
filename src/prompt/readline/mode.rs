@@ -371,6 +371,11 @@ impl ViNormal {
 									}
 								)
 							}
+							'?' => {
+								chars_clone.next();
+								chars = chars_clone;
+								break 'verb_parse Some(VerbCmd(count, Verb::Rot13));
+							}
 							_ => break 'verb_parse None
 						}
 					} else {
@@ -600,6 +605,7 @@ impl ViNormal {
 				break 'motion_parse None
 			};
 			match (ch, &verb) {
+				('?', Some(VerbCmd(_,Verb::Rot13))) |
 				('d', Some(VerbCmd(_,Verb::Delete))) |
 				('c', Some(VerbCmd(_,Verb::Change))) |
 				('y', Some(VerbCmd(_,Verb::Yank))) |
@@ -764,15 +770,14 @@ impl ViNormal {
 
 		match self.validate_combination(verb_ref, motion_ref) {
 			CmdState::Complete => {
-				let cmd = Some(
+				Some(
 					ViCmd {
 						register,
 						verb,
 						motion,
 						raw_seq: std::mem::take(&mut self.pending_seq)
 					}
-				);
-				cmd
+				)
 			}
 			CmdState::Pending => {
 				None
@@ -951,6 +956,16 @@ impl ViVisual {
 									ViCmd {
 										register,
 										verb: Some(VerbCmd(1, Verb::VisualModeSelectLast)),
+										motion: None,
+										raw_seq: self.take_cmd()
+									}
+								)
+							}
+							'?' => {
+								return Some(
+									ViCmd {
+										register,
+										verb: Some(VerbCmd(1, Verb::Rot13)),
 										motion: None,
 										raw_seq: self.take_cmd()
 									}
