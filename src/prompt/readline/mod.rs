@@ -21,6 +21,12 @@ pub mod history;
 
 const LOREM_IPSUM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore\nmagna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo\nconsequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
+/*
+ * Known issues:
+ * If the line buffer scrolls past the terminal height, shit gets fucked
+ * the cursor sometimes spazzes out during redraw, but ends up in the right place
+ */
+
 /// Unified interface for different line editing methods
 pub trait Readline {
 	fn readline(&mut self) -> ShResult<String>;
@@ -38,7 +44,7 @@ pub struct FernVi {
 
 impl Readline for FernVi {
 	fn readline(&mut self) -> ShResult<String> {
-		/*
+		/* a monument to the insanity of debugging this shit
 		self.term.writeln("This is a line!");
 		self.term.writeln("This is a line!");
 		self.term.writeln("This is a line!");

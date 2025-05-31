@@ -303,28 +303,9 @@ impl Terminal {
 
 			// ESC sequences
 			if collected[0] == 0x1b && collected.len() == 1 {
-				// Peek next byte if any
-				let n = self.peek_byte(&mut buf[..1]);
-				if n == 0 {
-					return KeyEvent(KeyCode::Esc, ModKeys::empty());
+				if let Some(code) = self.parse_esc_seq(&mut buf) {
+					return code
 				}
-				collected.push(buf[0]);
-
-				if buf[0] == b'[' {
-					// Read third byte
-					let _ = self.read_byte(&mut buf[..1]);
-					collected.push(buf[0]);
-
-					return match buf[0] {
-						b'A' => KeyEvent(KeyCode::Up, ModKeys::empty()),
-						b'B' => KeyEvent(KeyCode::Down, ModKeys::empty()),
-						b'C' => KeyEvent(KeyCode::Right, ModKeys::empty()),
-						b'D' => KeyEvent(KeyCode::Left, ModKeys::empty()),
-						_ => KeyEvent(KeyCode::Esc, ModKeys::empty()),
-					};
-				}
-
-				return KeyEvent(KeyCode::Esc, ModKeys::empty());
 			}
 
 			// Try parse valid UTF-8 from collected bytes
@@ -340,6 +321,94 @@ impl Terminal {
 		}
 
 		KeyEvent(KeyCode::Null, ModKeys::empty())
+	}
+
+	pub fn parse_esc_seq(&self, buf: &mut [u8]) -> Option<KeyEvent> {
+		let mut collected = vec![0x1b];
+
+    // Peek next byte
+    let _ = self.peek_byte(&mut buf[..1]);
+    let b1 = buf[0];
+    collected.push(b1);
+
+    match b1 {
+        b'[' => {
+            // Next byte(s) determine the sequence
+            let _ = self.peek_byte(&mut buf[..1]);
+            let b2 = buf[0];
+            collected.push(b2);
+
+            match b2 {
+                b'A' => Some(KeyEvent(KeyCode::Up, ModKeys::empty())),
+                b'B' => Some(KeyEvent(KeyCode::Down, ModKeys::empty())),
+                b'C' => Some(KeyEvent(KeyCode::Right, ModKeys::empty())),
+                b'D' => Some(KeyEvent(KeyCode::Left, ModKeys::empty())),
+                b'1'..=b'9' => {
+                    // Might be Delete/Home/etc
+                    let mut digits = vec![b2];
+
+                    // Keep reading until we hit `~` or `;` (modifiers)
+                    loop {
+                        let _ = self.peek_byte(&mut buf[..1]);
+                        let b = buf[0];
+                        collected.push(b);
+
+                        if b == b'~' {
+                            break;
+                        } else if b == b';' {
+                            // modifier-aware sequence, like `ESC [ 1 ; 5 ~`
+                            // You may want to parse the full thing
+                            break;
+                        } else if !b.is_ascii_digit() {
+                            break;
+                        } else {
+                            digits.push(b);
+                        }
+                    }
+
+                    let key = match digits.as_slice() {
+                        [b'1'] => KeyCode::Home,
+                        [b'3'] => KeyCode::Delete,
+                        [b'4'] => KeyCode::End,
+                        [b'5'] => KeyCode::PageUp,
+                        [b'6'] => KeyCode::PageDown,
+                        [b'7'] => KeyCode::Home, // xterm alternate
+                        [b'8'] => KeyCode::End,  // xterm alternate
+
+												// Function keys
+												[b'1',b'5'] => KeyCode::F(5),
+												[b'1',b'7'] => KeyCode::F(6),
+												[b'1',b'8'] => KeyCode::F(7),
+												[b'1',b'9'] => KeyCode::F(8),
+												[b'2',b'0'] => KeyCode::F(9),
+												[b'2',b'1'] => KeyCode::F(10),
+												[b'2',b'3'] => KeyCode::F(11),
+												[b'2',b'4'] => KeyCode::F(12),
+                        _ => KeyCode::Esc,
+                    };
+
+                    Some(KeyEvent(key, ModKeys::empty()))
+                }
+                _ => Some(KeyEvent(KeyCode::Esc, ModKeys::empty())),
+            }
+        }
+        b'O' => {
+            let _ = self.peek_byte(&mut buf[..1]);
+            let b2 = buf[0];
+            collected.push(b2);
+
+            let key = match b2 {
+                b'P' => KeyCode::F(1),
+                b'Q' => KeyCode::F(2),
+                b'R' => KeyCode::F(3),
+                b'S' => KeyCode::F(4),
+                _ => KeyCode::Esc,
+            };
+
+            Some(KeyEvent(key, ModKeys::empty()))
+        }
+        _ => Some(KeyEvent(KeyCode::Esc, ModKeys::empty())),
+    }
 	}
 
 	pub fn cursor_pos(&mut self) -> (usize, usize) {
