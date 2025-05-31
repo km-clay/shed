@@ -88,11 +88,11 @@ impl Readline for FernVi {
 			if cmd.should_submit() {
 				self.term.unposition_cursor()?;
 				self.term.write("\n");
-				let command = self.line.to_string();
+				let command = std::mem::take(&mut self.line).pack_line();
 				if !command.is_empty() {
 					// We're just going to trim the command
 					// reduces clutter in the case of two history commands whose only difference is insignificant whitespace
-					self.history.push(command.trim().to_string());
+					self.history.update_pending_cmd(&command);
 					self.history.save()?;
 				}
 				return Ok(command);
@@ -323,6 +323,17 @@ impl FernVi {
 				Verb::ReplaceMode => {
 					Box::new(ViReplace::new().with_count(count as u16))
 				}
+				Verb::VisualModeSelectLast => {
+					if self.mode.report_mode() != ModeReport::Visual {
+						self.line.start_selecting(SelectionMode::Char(SelectionAnchor::End));
+					}
+					let mut mode: Box<dyn ViMode> = Box::new(ViVisual::new());
+					std::mem::swap(&mut mode, &mut self.mode);
+					self.line.set_cursor_clamp(self.mode.clamp_cursor());
+					self.line.set_move_cursor_on_undo(self.mode.move_cursor_on_undo());
+					self.term.write(&mode.cursor_style());
+					return self.line.exec_cmd(cmd)
+				}
 				Verb::VisualMode => {
 					selecting = true;
 					self.line.start_selecting(SelectionMode::Char(SelectionAnchor::End));
@@ -331,7 +342,11 @@ impl FernVi {
 				_ => unreachable!()
 			};
 
+			flog!(DEBUG, self.mode.report_mode());
+			flog!(DEBUG, mode.report_mode());
 			std::mem::swap(&mut mode, &mut self.mode);
+
+			flog!(DEBUG, self.mode.report_mode());
 			self.line.set_cursor_clamp(self.mode.clamp_cursor());
 			self.line.set_move_cursor_on_undo(self.mode.move_cursor_on_undo());
 			self.term.write(&mode.cursor_style());

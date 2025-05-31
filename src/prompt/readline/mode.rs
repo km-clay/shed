@@ -358,6 +358,25 @@ impl ViNormal {
 				break 'verb_parse None
 			};
 			match ch {
+				'g' => {
+					if let Some(ch) = chars_clone.peek() {
+						match ch {
+							'v' => {
+								return Some(
+									ViCmd {
+										register,
+										verb: Some(VerbCmd(1, Verb::VisualModeSelectLast)),
+										motion: None,
+										raw_seq: self.take_cmd()
+									}
+								)
+							}
+							_ => break 'verb_parse None
+						}
+					} else {
+						break 'verb_parse None
+					}
+				}
 				'.' => {
 					return Some(
 						ViCmd {
@@ -924,6 +943,25 @@ impl ViVisual {
 				break 'verb_parse None
 			};
 			match ch {
+				'g' => {
+					if let Some(ch) = chars_clone.peek() {
+						match ch {
+							'v' => {
+								return Some(
+									ViCmd {
+										register,
+										verb: Some(VerbCmd(1, Verb::VisualModeSelectLast)),
+										motion: None,
+										raw_seq: self.take_cmd()
+									}
+								)
+							}
+							_ => break 'verb_parse None
+						}
+					} else {
+						break 'verb_parse None
+					}
+				}
 				'.' => {
 					return Some(
 						ViCmd {

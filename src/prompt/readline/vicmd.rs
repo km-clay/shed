@@ -110,6 +110,7 @@ impl ViCmd {
 				Verb::InsertMode |
 				Verb::InsertModeLineBreak(_) |
 				Verb::NormalMode |
+				Verb::VisualModeSelectLast |
 				Verb::VisualMode |
 				Verb::ReplaceMode
 			)
@@ -159,7 +160,8 @@ pub enum Verb {
 	NormalMode,
 	VisualMode,
 	VisualModeLine,
-	VisualModeBlock,
+	VisualModeBlock, // dont even know if im going to implement this
+	VisualModeSelectLast,
 	SwapVisualAnchor,
 	JoinLines,
 	InsertChar(char),
@@ -241,37 +243,22 @@ impl Verb {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Motion {
-	/// Whole current line (not really a movement but a range)
 	WholeLine,
 	TextObj(TextObj, Bound),
 	BeginningOfFirstWord,
-	/// beginning-of-line
 	BeginningOfLine,
-	/// end-of-line
 	EndOfLine,
-	/// backward-word, vi-prev-word
-	BackwardWord(To, Word), // Backward until start of word
-																	 /// forward-word, vi-end-word, vi-next-word
-	ForwardWord(To, Word), // Forward until start/end of word
-																			/// character-search, character-search-backward, vi-char-search
+	BackwardWord(To, Word), 
+	ForwardWord(To, Word), 
 	CharSearch(Direction,Dest,char),
-	/// backward-char
 	BackwardChar,
-	/// forward-char
 	ForwardChar,
-	/// move to the same column on the previous line
 	LineUp,
-	/// move to the same column on the previous visual line
 	ScreenLineUp,
-	/// move to the same column on the next line
 	LineDown,
-	/// move to the same column on the next visual line
 	ScreenLineDown, 
-	/// Whole user input (not really a movement but a range)
 	WholeBuffer,
-	/// beginning-of-register
 	BeginningOfBuffer,
-	/// end-of-register
 	EndOfBuffer,
 	ToColumn(usize),
 	Range(usize,usize),
@@ -328,7 +315,7 @@ pub enum TextObj {
 	/// `i<`, `a<`
 	Angle,
 
-	/// `it`, `at` — HTML/XML tags (if you support it)
+	/// `it`, `at` — HTML/XML tags 
 	Tag,
 
 	/// Custom user-defined objects maybe?

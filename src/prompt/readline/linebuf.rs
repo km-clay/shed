@@ -32,9 +32,10 @@ pub enum MotionKind {
 	ScreenLine(isize)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionAnchor {
 	Start,
+	#[default]
 	End
 }
 
@@ -43,6 +44,12 @@ pub enum SelectionMode {
 	Char(SelectionAnchor),
 	Line(SelectionAnchor),
 	Block(SelectionAnchor)
+}
+
+impl Default for SelectionMode {
+	fn default() -> Self {
+	  Self::Char(Default::default())
+	}
 }
 
 impl SelectionMode {
@@ -195,6 +202,7 @@ pub struct LineBuf {
 	clamp_cursor: bool,
 	select_mode: Option<SelectionMode>,
 	selected_range: Option<Range<usize>>,
+	last_selected_range: Option<Range<usize>>,
 	first_line_offset: usize,
 	saved_col: Option<usize>,
 	term_dims: (usize,usize), // Height, width
@@ -220,7 +228,9 @@ impl LineBuf {
 	}
 	pub fn stop_selecting(&mut self) {
 		self.select_mode = None;
-		self.selected_range = None;
+		if self.selected_range().is_some() {
+			self.last_selected_range = self.selected_range.take();
+		}
 	}
 	pub fn start_selecting(&mut self, mode: SelectionMode) {
 		self.select_mode = Some(mode);
@@ -1506,6 +1516,16 @@ impl LineBuf {
 					}
 				}
 			}
+			Verb::VisualModeSelectLast => {
+				if let Some(range) = self.last_selected_range.as_ref() {
+					self.selected_range = Some(range.clone());
+					let mode = self.select_mode.unwrap_or_default();
+					self.cursor = match mode.anchor() {
+						SelectionAnchor::Start => range.start,
+						SelectionAnchor::End => range.end
+					}
+				}
+			}
 			Verb::SwapVisualAnchor => {
 				if let Some(range) = self.selected_range() {
 					if let Some(mut mode) = self.select_mode {
@@ -1934,10 +1954,13 @@ impl Display for LineBuf {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		let mut full_buf = self.buffer.clone();
 		if let Some(range) = self.selected_range.clone() {
-			let mode = self.select_mode.unwrap();
+			let mode = self.select_mode.unwrap_or_default();
 			match mode.anchor() {
 				SelectionAnchor::Start => {
-					let inclusive = range.start..=range.end;
+					let mut inclusive = range.start..=range.end;
+					if *inclusive.end() == self.byte_len() {
+						inclusive = range.start..=range.end.saturating_sub(1);
+					}
 					let selected = full_buf[inclusive.clone()].styled(Style::BgWhite | Style::Black);
 					full_buf.replace_range(inclusive, &selected);
 				}

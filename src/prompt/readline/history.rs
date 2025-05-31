@@ -313,7 +313,25 @@ impl History {
 			.append(true)
 			.open(&self.path)?;
 
-		let entries = self.entries.iter_mut().filter(|ent| ent.new && !ent.command.is_empty());
+		let last_file_entry = self.entries
+			.iter()
+			.filter(|ent| !ent.new)
+			.next_back()
+			.map(|ent| ent.command.clone())
+			.unwrap_or_default();
+
+		let entries = self.entries
+			.iter_mut()
+			.filter(|ent| {
+				ent.new &&
+				!ent.command.is_empty() &&
+				if self.ignore_dups {
+					ent.command() != last_file_entry
+				} else {
+					true
+				}
+			});
+
 		let mut data = String::new();
 		for ent in entries {
 			ent.new = false;
