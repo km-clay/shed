@@ -639,39 +639,55 @@ impl ViNormal {
 								chars = chars_clone;
 								break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineDown));
 							}
+							'_' => {
+								chars = chars_clone;
+								break 'motion_parse Some(MotionCmd(count, Motion::EndOfLastWord));
+							}
+							'0' => {
+								chars = chars_clone;
+								break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfScreenLine));
+							}
+							'^' => {
+								chars = chars_clone;
+								break 'motion_parse Some(MotionCmd(count, Motion::FirstGraphicalOnScreenLine));
+							}
 							_ => return self.quit_parse()
 						}
 					} else {
 						break 'motion_parse None
 					}
 				}
+				'G' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::EndOfBuffer));
+				}
 				'f' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::On, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::On, *ch)))
 				}
 				'F' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::On, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::On, *ch)))
 				}
 				't' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::Before, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::Before, *ch)))
 				}
 				'T' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::Before, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::Before, *ch)))
 				}
 				';' => {
 					chars = chars_clone;
@@ -684,6 +700,10 @@ impl ViNormal {
 				'|' => {
 					chars = chars_clone;
 					break 'motion_parse Some(MotionCmd(1, Motion::ToColumn(count)));
+				}
+				'^' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfFirstWord));
 				}
 				'0' => {
 					chars = chars_clone;

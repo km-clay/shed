@@ -512,13 +512,22 @@ impl LineBuf {
 				}
 			}
 		}
+		if col == term_width {
+			lines += 1;
+			// Don't ask why col has to be set to zero here but one everywhere else
+			// I don't know either
+			// All I know is that it only finds the correct cursor position
+			// if I set col to 0 here, and 1 everywhere else
+			// Thank you linux terminal :)
+			col = 0;
+		}
 
 		(lines, col)
 	}
 	pub fn count_display_lines(&self, offset: usize, term_width: usize) -> usize {
 		let (lines, _) = Self::compute_display_positions(
 			self.buffer.graphemes(true),
-			offset.max(1),
+			offset,
 			self.tab_stop,
 			term_width,
 		);
@@ -528,7 +537,7 @@ impl LineBuf {
 	pub fn cursor_display_line_position(&self, offset: usize, term_width: usize) -> usize {
 		let (lines, _) = Self::compute_display_positions(
 			self.slice_to_cursor().graphemes(true),
-			offset.max(1),
+			offset,
 			self.tab_stop,
 			term_width,
 		);
@@ -546,11 +555,16 @@ impl LineBuf {
 
 	pub fn cursor_display_coords(&self, term_width: usize) -> (usize, usize) {
 		let (d_line, mut d_col) = self.display_coords(term_width);
-		let total_lines = self.count_display_lines(self.first_line_offset, term_width);
-		let logical_line = total_lines - d_line;
+		let total_lines = self.count_display_lines(0, term_width);
+		let is_first_line = self.start_of_line() == 0;
+		let mut logical_line = total_lines - d_line;
 
-		if logical_line == self.count_lines() {
+		if is_first_line {
 			d_col += self.first_line_offset;
+			if d_col > term_width {
+				logical_line = logical_line.saturating_sub(1);
+				d_col -= term_width;
+			}
 		}
 
 		(logical_line, d_col)
@@ -594,7 +608,6 @@ impl LineBuf {
 	}
 	pub fn accept_hint(&mut self) {
 		if let Some(hint) = self.hint.take() {
-			flog!(DEBUG, "accepting hint");
 			let old_buf = self.buffer.clone();
 			self.buffer.push_str(&hint);
 			let new_buf = self.buffer.clone();
@@ -937,6 +950,68 @@ impl LineBuf {
 			TextObj::Tag => todo!(),
 			TextObj::Custom(_) => todo!(),
 		}
+	}
+	pub fn get_screen_line_positions(&self) -> Vec<usize> {
+		let (start,end) = self.this_line();
+		let mut screen_starts = vec![start];
+		let line = &self.buffer[start..end];
+		let term_width = self.term_dims.1;
+		let mut col = 1;
+		if start == 0 {
+			col = self.first_line_offset
+		}
+
+		for (byte, grapheme) in line.grapheme_indices(true) {
+			let width = grapheme.width();
+			if col + width > term_width {
+				screen_starts.push(start + byte);
+				col = width;
+			} else {
+				col += width;
+			}
+		}
+
+		screen_starts
+	}
+	pub fn start_of_screen_line(&self) -> usize {
+		let screen_starts = self.get_screen_line_positions();
+		let mut screen_start = screen_starts[0];
+		let start_of_logical_line = self.start_of_line();
+		flog!(DEBUG,screen_starts);
+		flog!(DEBUG,self.cursor);
+
+		for (i,pos) in screen_starts.iter().enumerate() {
+			if *pos > self.cursor {
+				break
+			} else {
+				screen_start = screen_starts[i];
+			}
+		}
+		if screen_start != start_of_logical_line {
+			screen_start += 1; // FIXME: doesn't account for grapheme bounds
+		}
+		screen_start
+	}
+	pub fn this_screen_line(&self) -> (usize,usize) {
+		let screen_starts = self.get_screen_line_positions();
+		let mut screen_start = screen_starts[0];
+		let mut screen_end = self.end_of_line().saturating_sub(1);
+		let start_of_logical_line = self.start_of_line();
+		flog!(DEBUG,screen_starts);
+		flog!(DEBUG,self.cursor);
+
+		for (i,pos) in screen_starts.iter().enumerate() {
+			if *pos > self.cursor {
+				screen_end = screen_starts[i].saturating_sub(1);
+				break;
+			} else {
+				screen_start = screen_starts[i];
+			}
+		}
+		if screen_start != start_of_logical_line {
+			screen_start += 1; // FIXME: doesn't account for grapheme bounds
+		}
+		(screen_start,screen_end)
 	}
 	pub fn find_word_pos(&self, word: Word, to: To, dir: Direction) -> Option<usize> {
 		// FIXME: This uses a lot of hardcoded +1/-1 offsets, but they need to account for grapheme boundaries
@@ -1328,10 +1403,46 @@ impl LineBuf {
 				let end = end.clamp(0, self.byte_len().saturating_sub(1));
 				MotionKind::range(mk_range(start, end))
 			}
+			Motion::EndOfLastWord => {
+				let Some(search_start) = self.next_pos(1) else {
+					return MotionKind::Null
+				};
+				let mut last_graph_pos = None;
+				for (i,graph) in self.buffer[search_start..].grapheme_indices(true) {
+					flog!(DEBUG, last_graph_pos);
+					flog!(DEBUG, graph);
+					if graph == "\n" && last_graph_pos.is_some() {
+						return MotionKind::On(search_start + last_graph_pos.unwrap())
+					} else if !is_whitespace(graph) {
+						last_graph_pos = Some(i)
+					}
+				}
+				flog!(DEBUG,self.byte_len());
+				last_graph_pos
+					.map(|pos| MotionKind::On(search_start + pos))
+					.unwrap_or(MotionKind::Null)
+			}
+			Motion::BeginningOfScreenLine => {
+				let screen_start = self.start_of_screen_line();
+				MotionKind::On(screen_start) 
+			}
+			Motion::FirstGraphicalOnScreenLine => {
+				let (start,end) = self.this_screen_line();
+				flog!(DEBUG,start,end);
+				let slice = &self.buffer[start..=end];
+				for (i,grapheme) in slice.grapheme_indices(true) {
+					if !is_whitespace(grapheme) {
+						return MotionKind::On(start + i)
+					}
+				}
+				MotionKind::On(start)
+			}
+			Motion::HalfOfScreen => todo!(),
+			Motion::HalfOfScreenLineText => todo!(),
 			Motion::Builder(_) => todo!(),
 			Motion::RepeatMotion => todo!(),
 			Motion::RepeatMotionRev => todo!(),
-			Motion::Null => MotionKind::Null
+			Motion::Null => MotionKind::Null,
 		}
 	}
 	pub fn calculate_display_offset(&self, n_lines: isize) -> Option<usize> {
@@ -1702,7 +1813,6 @@ impl LineBuf {
 				};
 				let line = &self.buffer[start..end];
 				let next_line = &self.buffer[nstart..nend].trim_start().to_string(); // strip leading whitespace
-				flog!(DEBUG,next_line);
 				let replace_newline_with_space = !line.ends_with([' ', '\t']);
 				self.cursor = end;
 				if replace_newline_with_space {
@@ -1881,14 +1991,10 @@ impl LineBuf {
 				SelectionMode::Block(anchor) => todo!(),
 			}
 			if start >= end {
-				flog!(DEBUG, "inverting anchor");
 				mode.invert_anchor();
-				flog!(DEBUG,start,end);
 				std::mem::swap(&mut start, &mut end);
 
 				self.select_mode = Some(mode);
-				flog!(DEBUG,start,end);
-				flog!(DEBUG,mode);
 			}
 			self.selected_range = Some(start..end);
 		}
@@ -1913,7 +2019,6 @@ impl LineBuf {
 			self.undo_stack.push(edit);
 		} else {
 			let diff = Edit::diff(&old, &new, curs_pos);
-			flog!(DEBUG, diff);
 			if !diff.is_empty() {
 				self.undo_stack.push(diff);
 			}
@@ -1952,7 +2057,6 @@ impl LineBuf {
 							.unwrap_or(MotionKind::Null)
 					});
 
-				flog!(DEBUG,self.hint);
 				if let Some(verb) = verb.clone() {
 					self.exec_verb(verb.1, motion_eval, register)?;
 				} else if self.has_hint() {
@@ -1960,7 +2064,6 @@ impl LineBuf {
 						.clone()
 						.map(|m| self.eval_motion_with_hint(m.1))
 						.unwrap_or(MotionKind::Null);
-					flog!(DEBUG, "applying motion with hint");
 					self.apply_motion_with_hint(motion_eval);
 				} else {
 					self.apply_motion(/*forced*/ false,motion_eval);
@@ -1987,8 +2090,6 @@ impl LineBuf {
 			}
 		}
 
-		flog!(DEBUG, self.select_mode);
-		flog!(DEBUG, self.selected_range);
 
 		if self.clamp_cursor {
 			self.clamp_cursor();

@@ -187,25 +187,40 @@ impl Terminal {
 		self.unposition_cursor()?;
 		let WriteMap { lines, cols, offset } = self.write_records;
 		for _ in 0..lines {
-			self.write("\x1b[2K\x1b[A")
+			self.write_unrecorded("\x1b[2K\x1b[A")
 		}
 		let col = offset;
-		self.write(&format!("\x1b[{col}G\x1b[0K"));
+		self.write_unrecorded(&format!("\x1b[{col}G\x1b[0K"));
 		self.reset_records();
 		Ok(())
 	}
 
 	pub fn position_cursor(&mut self, (lines,col): (usize,usize)) -> ShResult<()> {
 		flog!(DEBUG,lines);
+		flog!(DEBUG,col);
 		self.cursor_records.lines = lines;
 		self.cursor_records.cols = col;
 		self.cursor_records.offset = self.cursor_pos().1;
 
 		for _ in 0..lines {
-			self.write("\x1b[A")
+			self.write_unrecorded("\x1b[A")
 		}
 
-		self.write(&format!("\x1b[{col}G"));
+		let (_, width) = self.get_dimensions().unwrap();
+		// holy hack spongebob
+		// basically if we've written to the edge of the terminal
+		// and the cursor is at term_width + 1 (column 1 on the next line)
+		// then we are going to manually write a newline
+		// to position the cursor correctly
+		if self.write_records.cols == width && self.cursor_records.cols == 1 {
+			self.cursor_records.lines += 1;
+			self.write_records.lines += 1;
+			self.cursor_records.cols = 1;
+			self.write_records.cols = 1;
+			write(unsafe { BorrowedFd::borrow_raw(self.stdout) }, b"\n").expect("Failed to write to stdout");
+		}
+
+		self.write_unrecorded(&format!("\x1b[{col}G"));
 
 		Ok(())
 	}
@@ -215,16 +230,16 @@ impl Terminal {
 		let WriteMap { lines, cols, offset } = self.cursor_records;
 
 		for _ in 0..lines {
-			self.write("\x1b[B")
+			self.write_unrecorded("\x1b[B")
 		}
 
-		self.write(&format!("\x1b[{offset}G"));
+		self.write_unrecorded(&format!("\x1b[{offset}G"));
 
 		Ok(())
 	}
 
-	pub fn write_bytes(&mut self, buf: &[u8]) {
-		if self.recording {
+	pub fn write_bytes(&mut self, buf: &[u8], record: bool) {
+		if self.recording && record { // The function parameter allows us to make sneaky writes while the terminal is recording
 			let (_, width) = self.get_dimensions().unwrap();
 			let mut bytes = buf.iter().map(|&b| b as char).peekable();
 			while let Some(ch) = bytes.next() {
@@ -263,29 +278,35 @@ impl Terminal {
 					_ => {
 						let ch_width = ch.width().unwrap_or(0);
 						if self.write_records.cols + ch_width > width {
+							flog!(DEBUG,ch_width,self.write_records.cols,width,self.write_records.lines);
 							self.write_records.lines += 1;
-							self.write_records.cols = 0;
+							self.write_records.cols = ch_width;
 						}
 						self.write_records.cols += ch_width;
 					}
 				}
 			}
+			flog!(DEBUG,self.write_records.cols);
 		}
 		write(unsafe { BorrowedFd::borrow_raw(self.stdout) }, buf).expect("Failed to write to stdout");
 	}
 
 
 	pub fn write(&mut self, s: &str) {
-		self.write_bytes(s.as_bytes());
+		self.write_bytes(s.as_bytes(), true);
+	}
+
+	pub fn write_unrecorded(&mut self, s: &str) {
+		self.write_bytes(s.as_bytes(), false);
 	}
 
 	pub fn writeln(&mut self, s: &str) {
 		self.write(s);
-		self.write_bytes(b"\n");
+		self.write_bytes(b"\n", true);
 	}
 
 	pub fn clear(&mut self) {
-		self.write_bytes(b"\x1b[2J\x1b[H");
+		self.write_bytes(b"\x1b[2J\x1b[H", false);
 	}
 
 	pub fn read_key(&self) -> KeyEvent {
@@ -412,7 +433,7 @@ impl Terminal {
 	}
 
 	pub fn cursor_pos(&mut self) -> (usize, usize) {
-		self.write("\x1b[6n");
+		self.write_unrecorded("\x1b[6n");
 		let mut buf = [0u8;32];
 		let n = self.read_byte(&mut buf);
 

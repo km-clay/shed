@@ -247,6 +247,7 @@ impl Verb {
 pub enum Motion {
 	WholeLine,
 	TextObj(TextObj, Bound),
+	EndOfLastWord,
 	BeginningOfFirstWord,
 	BeginningOfLine,
 	EndOfLine,
@@ -259,6 +260,10 @@ pub enum Motion {
 	ScreenLineUp,
 	LineDown,
 	ScreenLineDown, 
+	BeginningOfScreenLine,
+	FirstGraphicalOnScreenLine,
+	HalfOfScreen,
+	HalfOfScreenLineText,
 	WholeBuffer,
 	BeginningOfBuffer,
 	EndOfBuffer,
