@@ -1,12 +1,13 @@
-use std::{env, fmt::Write, io::{BufRead, BufReader, Read}, ops::{Deref, DerefMut}, os::fd::{AsFd, BorrowedFd, RawFd}};
+use std::{env, fmt::{Debug, Write}, io::{BufRead, BufReader, Read}, os::fd::{AsFd, BorrowedFd, RawFd}};
 
-use nix::{errno::Errno, libc, poll::{self, PollFlags, PollTimeout}, unistd::isatty};
+use nix::{errno::Errno, libc::{self, STDIN_FILENO}, poll::{self, PollFlags, PollTimeout}, sys::termios, unistd::isatty};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::{libsh::error::{ShErr, ShErrKind, ShResult}, prompt::readline::keys::{KeyCode, ModKeys}};
+use crate::prelude::*;
 
-use super::linebuf::LineBuf;
+use super::{keys::KeyEvent, linebuf::LineBuf};
 
 pub type Row = u16;
 pub type Col = u16;
@@ -43,7 +44,7 @@ pub fn get_win_size(fd: RawFd) -> (Col,Row) {
 				} else {
 					size.ws_row
 				};
-				(cols.into(), rows.into())
+				(cols, rows)
 			}
 			_ => (80,24)
 		}
@@ -182,7 +183,7 @@ pub struct TermBuffer {
 
 impl TermBuffer {
 	pub fn new(tty: RawFd) -> Self {
-		assert!(isatty(tty).is_ok_and(|r| r == true));
+		assert!(isatty(tty).is_ok_and(|r| r));
 		Self {
 			tty
 		}
@@ -191,7 +192,7 @@ impl TermBuffer {
 
 impl Read for TermBuffer {
 	fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-		assert!(isatty(self.tty).is_ok_and(|r| r == true));
+		assert!(isatty(self.tty).is_ok_and(|r| r));
 		loop {
 			match nix::unistd::read(self.tty, buf) {
 				Ok(n) => return Ok(n),
@@ -202,8 +203,50 @@ impl Read for TermBuffer {
 	}
 }
 
+pub struct RawModeGuard {
+	orig: termios::Termios,
+	fd: RawFd,
+}
+
+impl RawModeGuard {
+	/// Disable raw mode temporarily for a specific operation
+	pub fn disable_for<F: FnOnce() -> R, R>(&self, func: F) -> R {
+		unsafe {
+			let fd = BorrowedFd::borrow_raw(self.fd);
+			// Temporarily restore the original termios
+			termios::tcsetattr(fd, termios::SetArg::TCSANOW, &self.orig)
+				.expect("Failed to temporarily disable raw mode");
+
+			// Run the function
+			let result = func();
+
+			// Re-enable raw mode
+			let mut raw = self.orig.clone();
+			termios::cfmakeraw(&mut raw);
+			termios::tcsetattr(fd, termios::SetArg::TCSANOW, &raw)
+				.expect("Failed to re-enable raw mode");
+
+			result
+		}
+	}
+}
+
+impl Drop for RawModeGuard {
+	fn drop(&mut self) {
+		unsafe { 
+			let _ = termios::tcsetattr(BorrowedFd::borrow_raw(self.fd), termios::SetArg::TCSANOW, &self.orig);
+		}
+	}
+}
+
 pub struct TermReader {
 	buffer: BufReader<TermBuffer>
+}
+
+impl Default for TermReader {
+	fn default() -> Self {
+	  Self::new()
+	}
 }
 
 impl TermReader {
@@ -213,8 +256,22 @@ impl TermReader {
 		}
 	}
 
+	pub fn raw_mode(&self) -> RawModeGuard {
+		let fd = self.buffer.get_ref().tty;
+		let orig = termios::tcgetattr(unsafe{BorrowedFd::borrow_raw(STDIN_FILENO)}).expect("Failed to get terminal attributes");
+		let mut raw = orig.clone();
+		termios::cfmakeraw(&mut raw);
+		termios::tcsetattr(unsafe{BorrowedFd::borrow_raw(STDIN_FILENO)}, termios::SetArg::TCSANOW, &raw)
+			.expect("Failed to set terminal to raw mode");
+		RawModeGuard { orig, fd }
+	}
+
+	/// Execute some logic in raw mode
+	/// 
+	/// Saves the termios before running the given function.
+	/// If the given function panics, the panic will halt momentarily to restore the termios
 	pub fn poll(&mut self, timeout: PollTimeout) -> ShResult<bool> {
-		if self.buffer.buffer().len() > 0 {
+		if !self.buffer.buffer().is_empty() {
 			return Ok(true)
 		}
 
@@ -234,6 +291,7 @@ impl TermReader {
 	}
 
 	pub fn peek_byte(&mut self) -> std::io::Result<u8> {
+		flog!(DEBUG,"filling buffer");
 		let buf = self.buffer.fill_buf()?;
 		if buf.is_empty() {
 			Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "EOF"))
@@ -244,6 +302,113 @@ impl TermReader {
 
 	pub fn consume_byte(&mut self) {
 		self.buffer.consume(1);
+	}
+
+	pub fn read_key(&mut self) -> ShResult<KeyEvent> {
+		use core::str;
+
+		let mut collected = Vec::with_capacity(4);
+
+		loop {
+			let byte = self.next_byte()?;
+			collected.push(byte);
+
+			// If it's an escape seq, delegate to ESC sequence handler
+			if collected[0] == 0x1b && collected.len() == 1 && self.poll(PollTimeout::ZERO)? {
+				return self.parse_esc_seq();
+			}
+
+			// Try parse as valid UTF-8
+			if let Ok(s) = str::from_utf8(&collected) {
+				return Ok(KeyEvent::new(s, ModKeys::empty()));
+			}
+
+			// UTF-8 max 4 bytes — if it’s invalid at this point, bail
+			if collected.len() >= 4 {
+				break;
+			}
+		}
+
+		Ok(KeyEvent(KeyCode::Null, ModKeys::empty()))
+	}
+
+	pub fn parse_esc_seq(&mut self) -> ShResult<KeyEvent> {
+		let mut seq = vec![0x1b];
+
+		let b1 = self.peek_byte()?;
+		self.consume_byte();
+		seq.push(b1);
+
+		match b1 {
+			b'[' => {
+				let b2 = self.peek_byte()?;
+				self.consume_byte();
+				seq.push(b2);
+
+				match b2 {
+					b'A' => Ok(KeyEvent(KeyCode::Up, ModKeys::empty())),
+					b'B' => Ok(KeyEvent(KeyCode::Down, ModKeys::empty())),
+					b'C' => Ok(KeyEvent(KeyCode::Right, ModKeys::empty())),
+					b'D' => Ok(KeyEvent(KeyCode::Left, ModKeys::empty())),
+					b'1'..=b'9' => {
+						let mut digits = vec![b2];
+
+						loop {
+							let b = self.peek_byte()?;
+							seq.push(b);
+							self.consume_byte();
+
+							if b == b'~' || b == b';' {
+								break;
+							} else if b.is_ascii_digit() {
+								digits.push(b);
+							} else {
+								break;
+							}
+						}
+
+						let key = match digits.as_slice() {
+							[b'1'] => KeyCode::Home,
+							[b'3'] => KeyCode::Delete,
+							[b'4'] => KeyCode::End,
+							[b'5'] => KeyCode::PageUp,
+							[b'6'] => KeyCode::PageDown,
+							[b'7'] => KeyCode::Home, // xterm alternate
+							[b'8'] => KeyCode::End,  // xterm alternate
+
+							[b'1', b'5'] => KeyCode::F(5),
+							[b'1', b'7'] => KeyCode::F(6),
+							[b'1', b'8'] => KeyCode::F(7),
+							[b'1', b'9'] => KeyCode::F(8),
+							[b'2', b'0'] => KeyCode::F(9),
+							[b'2', b'1'] => KeyCode::F(10),
+							[b'2', b'3'] => KeyCode::F(11),
+							[b'2', b'4'] => KeyCode::F(12),
+							_ => KeyCode::Esc,
+						};
+
+						Ok(KeyEvent(key, ModKeys::empty()))
+					}
+					_ => Ok(KeyEvent(KeyCode::Esc, ModKeys::empty())),
+				}
+			}
+			b'O' => {
+				let b2 = self.peek_byte()?;
+				self.consume_byte();
+				seq.push(b2);
+
+				let key = match b2 {
+					b'P' => KeyCode::F(1),
+					b'Q' => KeyCode::F(2),
+					b'R' => KeyCode::F(3),
+					b'S' => KeyCode::F(4),
+					_ => KeyCode::Esc,
+				};
+
+				Ok(KeyEvent(key, ModKeys::empty()))
+			}
+			_ => Ok(KeyEvent(KeyCode::Esc, ModKeys::empty())),
+		}
 	}
 }
 
@@ -261,6 +426,15 @@ pub struct Layout {
 	pub end: Pos
 }
 
+impl Debug for Layout {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		writeln!(f, "Layout: ")?;
+		writeln!(f, "\tPrompt End: {:?}",self.prompt_end)?;
+		writeln!(f, "\tCursor: {:?}",self.cursor)?;
+		writeln!(f, "\tEnd: {:?}",self.end)
+	}
+}
+
 impl Layout {
 	pub fn new() -> Self {
 		let w_calc = width_calculator();
@@ -270,6 +444,12 @@ impl Layout {
 			cursor: Pos::default(),
 			end: Pos::default(),
 		}
+	}
+}
+
+impl Default for Layout {
+	fn default() -> Self {
+	  Self::new()
 	}
 }
 
@@ -297,7 +477,8 @@ impl LineWriter {
 		write_all(self.out, buf)?;
 		Ok(())
 	}
-	pub fn clear_rows(&mut self, layout: &Layout) {
+	pub fn clear_rows(&mut self, layout: &Layout) -> ShResult<()> {
+		self.buffer.clear();
 		let rows_to_clear = layout.end.row;
 		let cursor_row = layout.cursor.row;
 
@@ -307,27 +488,31 @@ impl LineWriter {
 		}
 
 		for _ in 0..rows_to_clear {
-			self.buffer.push_str("\x1b[K\x1b[A");
+			self.buffer.push_str("\x1b[2K\x1b[A");
 		}
-		self.buffer.push_str("\x1b[K");
-	}
-	pub fn move_cursor(&mut self, old: Pos, new: Pos) -> ShResult<()> {
+		self.buffer.push_str("\x1b[2K");
+		flog!(DEBUG, self.buffer);
+		write_all(self.out,self.buffer.as_str())?;
 		self.buffer.clear();
-		let err = |_| ShErr::simple(ShErrKind::InternalErr, "Failed to write to LineWriter internal buffer");
+		Ok(())
+	}
+	pub fn get_cursor_movement(&self, old: Pos, new: Pos) -> ShResult<String> {
+		let mut buffer = String::new();
+		let err = |_| ShErr::simple(ShErrKind::InternalErr, "Failed to write to cursor movement buffer");
 
 		match new.row.cmp(&old.row) {
 			std::cmp::Ordering::Greater => {
 				let shift = new.row - old.row;
 				match shift {
-					1 => self.buffer.push_str("\x1b[B"),
-					_ => write!(self.buffer, "\x1b[{shift}B").map_err(err)?
+					1 => buffer.push_str("\x1b[B"),
+					_ => write!(buffer, "\x1b[{shift}B").map_err(err)?
 				}
 			}
 			std::cmp::Ordering::Less => {
 				let shift = old.row - new.row;
 				match shift {
-					1 => self.buffer.push_str("\x1b[A"),
-					_ => write!(self.buffer, "\x1b[{shift}A").map_err(err)?
+					1 => buffer.push_str("\x1b[A"),
+					_ => write!(buffer, "\x1b[{shift}A").map_err(err)?
 				}
 			}
 			std::cmp::Ordering::Equal => { /* Do nothing */ }
@@ -337,20 +522,26 @@ impl LineWriter {
 			std::cmp::Ordering::Greater => {
 				let shift = new.col - old.col;
 				match shift {
-					1 => self.buffer.push_str("\x1b[C"),
-					_ => write!(self.buffer, "\x1b[{shift}C").map_err(err)?
+					1 => buffer.push_str("\x1b[C"),
+					_ => write!(buffer, "\x1b[{shift}C").map_err(err)?
 				}
 			}
 			std::cmp::Ordering::Less => {
 				let shift = old.col - new.col;
 				match shift {
-					1 => self.buffer.push_str("\x1b[D"),
-					_ => write!(self.buffer, "\x1b[{shift}D").map_err(err)?
+					1 => buffer.push_str("\x1b[D"),
+					_ => write!(buffer, "\x1b[{shift}D").map_err(err)?
 				}
 			}
 			std::cmp::Ordering::Equal => { /* Do nothing */ }
 		}
-		write_all(self.out, self.buffer.as_str())?;
+		Ok(buffer)
+	}
+	pub fn move_cursor(&mut self, old: Pos, new: Pos) -> ShResult<()> {
+		self.buffer.clear();
+		let movement = self.get_cursor_movement(old, new)?;
+
+		write_all(self.out, &movement)?;
 		Ok(())
 	}
 
@@ -358,13 +549,10 @@ impl LineWriter {
 		&mut self,
 		prompt: &str,
 		line: &LineBuf,
-		old_layout: &Layout,
 		new_layout: &Layout,
 	) -> ShResult<()> {
 		let err = |_| ShErr::simple(ShErrKind::InternalErr, "Failed to write to LineWriter internal buffer");
 		self.buffer.clear();
-
-		self.clear_rows(old_layout);
 
 		let end = new_layout.end;
 		let cursor = new_layout.cursor;
@@ -372,30 +560,24 @@ impl LineWriter {
 		self.buffer.push_str(prompt);
 		self.buffer.push_str(line.as_str());
 
-		if end.col == 0 
-			&& end.row > 0
-		{
+		if end.col == 0 && end.row > 0 {
 			// The line has wrapped. We need to use our own line break.
-			self.buffer.push('\n')
+			self.buffer.push('\n');
 		}
 
-		let cursor_row_offset = end.row - cursor.row;
-
-		match cursor_row_offset {
-			0 => { /* Do nothing */ }
-			1 => self.buffer.push_str("\x1b[A"),
-			_ => write!(self.buffer, "\x1b[{cursor_row_offset}A").map_err(err)?
-		}
-
-		let cursor_col = cursor.col;
-		match cursor_col {
-			0 => self.buffer.push('\r'),
-			1 => self.buffer.push_str("\x1b[C"),
-			_ => write!(self.buffer, "\x1b[{cursor_col}C").map_err(err)?
-		}
+		let movement = self.get_cursor_movement(end, cursor)?;
+		write!(self.buffer, "{}", &movement).map_err(err)?;
 
 		write_all(self.out, self.buffer.as_str())?;
 		Ok(())
+	}
+
+	pub fn get_layout_from_parts(&mut self, prompt: &str, to_cursor: &str, to_end: &str) -> Layout {
+		self.update_t_cols();
+		let prompt_end = self.calc_pos(prompt, Pos { col: 0, row: 0 });
+		let cursor = self.calc_pos(to_cursor, prompt_end);
+		let end = self.calc_pos(to_end, prompt_end);
+		Layout { w_calc: width_calculator(), prompt_end, cursor, end }
 	}
 
 	pub fn calc_pos(&self, s: &str, orig: Pos) -> Pos {
@@ -417,7 +599,7 @@ impl LineWriter {
 				pos.col = c_width;
 			}
 		}
-		if pos.col > self.t_cols {
+		if pos.col >= self.t_cols {
 			pos.row += 1;
 			pos.col = 0;
 		}
@@ -430,32 +612,47 @@ impl LineWriter {
 		self.t_cols = t_cols;
 	}
 
-	pub fn move_cursor_at_leftmost(&mut self, rdr: &mut TermReader) -> ShResult<()> {
-		if rdr.poll(PollTimeout::ZERO)? {
+	pub fn move_cursor_at_leftmost(&mut self, rdr: &mut TermReader, use_newline: bool) -> ShResult<()> {
+		let result = rdr.poll(PollTimeout::ZERO)?;
+		if result {
 			// The terminals reply is going to be stuck behind the currently buffered output
 			// So let's get out of here
 			return Ok(()) 
 		}
 
 		// Ping the cursor's position
-		self.flush_write("\x1b[6n")?;
+		self.flush_write("\x1b[6n\n")?;
 
-		// Excessively paranoid invariant checking
-		if !rdr.poll(PollTimeout::from(100u8))?
-			|| rdr.next_byte()? as char != '\x1b'
-			|| rdr.next_byte()? as char != '['
-			|| read_digits_until(rdr, ';')?.is_none() {
-				// Invariant is broken, get out
+		if !rdr.poll(PollTimeout::from(255u8))? {
 				return Ok(())
 		}
+
+		if rdr.next_byte()? as char != '\x1b' {
+				return Ok(())
+		}
+
+		if rdr.next_byte()? as char != '[' {
+				return Ok(())
+		}
+
+		if read_digits_until(rdr, ';')?.is_none() {
+				return Ok(())
+		}
+
 		// We just consumed everything up to the column number, so let's get that now
 		let col = read_digits_until(rdr, 'R')?;
 
 		// The cursor is not at the leftmost, so let's fix that
 		if col != Some(1) {
-			// We use '\n' instead of '\r' because if there's a bunch of garbage on this line,
-			// It might pollute the prompt/line buffer if those are shorter than said garbage
-			self.flush_write("\n")?;
+			if use_newline {
+				// We use '\n' instead of '\r' sometimes because if there's a bunch of garbage on this line,
+				// It might pollute the prompt/line buffer if those are shorter than said garbage
+				self.flush_write("\n")?;
+			} else {
+				// Sometimes though, we know that there's nothing to the right of the cursor after moving
+				// So we just move to the left.
+				self.flush_write("\r")?;
+			}
 		}
 
 		Ok(())

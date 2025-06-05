@@ -25,8 +25,8 @@ fn get_prompt() -> ShResult<String> {
 pub fn readline(edit_mode: FernEditMode) -> ShResult<String> {
 	let prompt = get_prompt()?;
 	let mut reader: Box<dyn Readline> = match edit_mode {
-		FernEditMode::Vi => Box::new(FernVi::new()),
+		FernEditMode::Vi => Box::new(FernVi::new(Some(prompt))),
 		FernEditMode::Emacs => todo!()
 	};
-	reader.readline(Some(prompt))
+	reader.readline()
 }
