@@ -1,6 +1,33 @@
-use crate::prompt::readline::linebuf::LineBuf;
+use crate::prompt::readline::{linebuf::LineBuf, vimode::{ViInsert, ViMode, ViNormal}};
 
 use super::super::*;
+
+fn assert_normal_cmd(cmd: &str, start: &str, cursor: usize, expected_buf: &str, expected_cursor: usize) {
+	let cmd = ViNormal::new()
+		.cmds_from_raw(cmd)
+		.pop()
+		.unwrap();
+	let mut buf = LineBuf::new().with_initial(start, cursor);
+	buf.exec_cmd(cmd).unwrap();
+	assert_eq!(buf.as_str(),expected_buf);
+	assert_eq!(buf.cursor.get(),expected_cursor);
+}
+
+#[test]
+fn vimode_insert_cmds() {
+	let raw = "abcdefghijklmnopqrstuvwxyz1234567890-=[];'<>/\\x1b";
+	let mut mode = ViInsert::new();
+	let cmds = mode.cmds_from_raw(raw);
+	insta::assert_debug_snapshot!(cmds)
+}
+
+#[test]
+fn vimode_normal_cmds() {
+	let raw = "d2wg?5b2P5x";
+	let mut mode = ViNormal::new();
+	let cmds = mode.cmds_from_raw(raw);
+	insta::assert_debug_snapshot!(cmds)
+}
 
 #[test]
 fn linebuf_empty_linebuf() {
@@ -128,4 +155,81 @@ fn linebuf_cursor_motion() {
 			"Failed at cursor position {i}: grapheme_at"
 		);
 	}
+}
+
+#[test]
+fn editor_delete_word() {
+	assert_normal_cmd(
+		"dw",
+		"The quick brown fox jumps over the lazy dog",
+		16,
+		"The quick brown jumps over the lazy dog",
+		16
+	);
+}
+
+#[test]
+fn editor_delete_backwards() {
+	assert_normal_cmd(
+		"2db",
+		"The quick brown fox jumps over the lazy dog",
+		16,
+		"The fox jumps over the lazy dog",
+		4
+	);
+}
+
+#[test]
+fn editor_rot13_five_words_backwards() {
+	assert_normal_cmd(
+		"g?5b",
+		"The quick brown fox jumps over the lazy dog",
+		31,
+		"The dhvpx oebja sbk whzcf bire the lazy dog",
+		4
+	);
+}
+
+#[test]
+fn editor_delete_word_on_whitespace() {
+	assert_normal_cmd(
+		"dw",
+		"The quick  brown fox",
+		10, // on the whitespace between "quick" and "brown"
+		"The quick brown fox",
+		10
+	);
+}
+
+#[test]
+fn editor_delete_5_words() {
+	assert_normal_cmd(
+		"5dw",
+		"The quick brown fox jumps over the lazy dog",
+		16, 
+		"The quick brown dog",
+		16
+	);
+}
+
+#[test]
+fn editor_delete_end_includes_last() {
+	assert_normal_cmd(
+		"de",
+		"The quick brown fox::::jumps over the lazy dog",
+		16,
+		"The quick brown ::::jumps over the lazy dog",
+		16
+	);
+}
+
+#[test]
+fn editor_delete_end_unicode_word() {
+	assert_normal_cmd(
+		"de",
+		"naïve café world",
+		0,
+		" café world", // deletes "naïve"
+		0
+	);
 }

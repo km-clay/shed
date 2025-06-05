@@ -2,7 +2,7 @@ use std::{ops::{Range, RangeBounds, RangeInclusive}, string::Drain};
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{term::Layout, vicmd::{Direction, Motion, MotionBehavior, RegisterName, To, Verb, ViCmd, Word}};
+use super::{term::Layout, vicmd::{Direction, Motion, MotionBehavior, MotionCmd, RegisterName, To, Verb, ViCmd, Word}};
 use crate::{libsh::error::ShResult, prelude::*};
 
 #[derive(PartialEq,Eq,Debug,Clone,Copy)]
@@ -15,18 +15,26 @@ pub enum CharClass {
 
 impl From<&str> for CharClass {
 	fn from(value: &str) -> Self {
-		if value.len() > 1 {
-			return Self::Symbol // Multi-byte grapheme
+		let mut chars = value.chars();
+
+		// Empty string fallback
+		let Some(first) = chars.next() else {
+			return Self::Other;
+		};
+
+		if first.is_alphanumeric() && chars.all(|c| c.is_ascii_punctuation() || c == '\u{0301}' || c == '\u{0308}') {
+			// Handles things like `ï`, `é`, etc., by manually allowing common diacritics
+			return CharClass::Alphanum;
 		}
 
 		if value.chars().all(char::is_alphanumeric) {
 			CharClass::Alphanum
 		} else if value.chars().all(char::is_whitespace) {
 			CharClass::Whitespace
-		} else if !value.chars().all(char::is_alphanumeric) {
+		} else if value.chars().all(|c| !c.is_alphanumeric()) {
 			CharClass::Symbol
 		} else {
-			Self::Other
+			CharClass::Other
 		}
 	}
 }
@@ -79,6 +87,7 @@ pub enum SelectMode {
 pub enum MotionKind {
 	To(usize), // Absolute position, exclusive
 	On(usize), // Absolute position, inclusive
+	Onto(usize), // Absolute position, operations include the position but motions exclude it (wtf vim)
 	Inclusive((usize,usize)), // Range, inclusive
 	Exclusive((usize,usize)), // Range, exclusive
 	Null
@@ -552,39 +561,45 @@ impl LineBuf {
 		}
 	}
 
-	pub fn dispatch_word_motion(&mut self, to: To, word: Word, dir: Direction) -> usize {
+	pub fn dispatch_word_motion(&mut self, count: usize, to: To, word: Word, dir: Direction) -> usize {
 		// Not sorry for these method names btw
-		match to {
-			To::Start => {
-				match dir {
-					Direction::Forward => self.start_of_word_forward_or_end_of_word_backward(word, dir),
-					Direction::Backward => self.end_of_word_forward_or_start_of_word_backward(word, dir)
+		let mut pos = ClampedUsize::new(self.cursor.get(), self.cursor.max, false);
+		for _ in 0..count {
+			pos.set(match to {
+				To::Start => {
+					match dir {
+						Direction::Forward => self.start_of_word_forward_or_end_of_word_backward_from(pos.get(), word, dir),
+						Direction::Backward => self.end_of_word_forward_or_start_of_word_backward_from(pos.get(), word, dir)
+					}
 				}
-			}
-			To::End => {
-				match dir {
-					Direction::Forward => self.end_of_word_forward_or_start_of_word_backward(word, dir),
-					Direction::Backward => self.start_of_word_forward_or_end_of_word_backward(word, dir),
+				To::End => {
+					match dir {
+						Direction::Forward => self.end_of_word_forward_or_start_of_word_backward_from(pos.get(), word, dir),
+						Direction::Backward => self.start_of_word_forward_or_end_of_word_backward_from(pos.get(), word, dir),
+					}
 				}
-			}
+			});
 		}
+		pos.get()
 	}
 
 	/// Finds the start of a word forward, or the end of a word backward
 	///
 	/// Finding the start of a word in the forward direction, and finding the end of a word in the backward direction
 	/// are logically the same operation, if you use a reversed iterator for the backward motion.
-	pub fn start_of_word_forward_or_end_of_word_backward(&mut self, word: Word, dir: Direction) -> usize {
-		let mut pos = self.cursor.get();
+	pub fn start_of_word_forward_or_end_of_word_backward_from(&mut self, mut pos: usize, word: Word, dir: Direction) -> usize {
 		let default = match dir {
 			Direction::Backward => 0,
 			Direction::Forward => self.grapheme_indices().len()
 		};
-		let mut indices_iter = self.directional_indices_iter(dir).peekable(); // And make it peekable
+		let mut indices_iter = self.directional_indices_iter_from(pos,dir).peekable(); // And make it peekable
 
 		match word {
 			Word::Big => {
-				let on_boundary = self.grapheme_at(pos).is_none_or(is_whitespace);
+				let Some(next) = indices_iter.peek() else {
+					return default
+				};
+				let on_boundary = self.grapheme_at(*next).is_none_or(is_whitespace);
 				flog!(DEBUG,on_boundary);
 				flog!(DEBUG,pos);
 				if on_boundary {
@@ -613,16 +628,18 @@ impl LineBuf {
 			}
 			Word::Normal => {
 				let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else { return default };
-				let Some(next_idx) = indices_iter.next() else { return default };
-				let on_boundary = self.grapheme_at(next_idx).is_none_or(|c| is_other_class_or_is_ws(c, &cur_char));
+				let Some(next_idx) = indices_iter.peek() else { return default };
+				let on_boundary = !is_whitespace(&cur_char) && self.grapheme_at(*next_idx).is_none_or(|c| is_other_class_or_is_ws(c, &cur_char));
+				flog!(DEBUG,on_boundary);
 				if on_boundary {
-					pos = next_idx
+					pos = *next_idx
 				}
 
 				let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
 					return default
 				};
 				let on_whitespace = is_whitespace(&cur_char);
+				flog!(DEBUG,on_whitespace);
 
 				// Advance until hitting whitespace or a different character class
 				if !on_whitespace {
@@ -648,6 +665,7 @@ impl LineBuf {
 							.is_some_and(|c| !is_whitespace(c))
 					}
 				).unwrap_or(default);
+				flog!(DEBUG,self.grapheme_at(non_ws_pos));
 				non_ws_pos
 			}
 		}
@@ -656,24 +674,22 @@ impl LineBuf {
 	///
 	/// Finding the end of a word in the forward direction, and finding the start of a word in the backward direction
 	/// are logically the same operation, if you use a reversed iterator for the backward motion.
-	pub fn end_of_word_forward_or_start_of_word_backward(&mut self, word: Word, dir: Direction) -> usize {
-		let mut pos = self.cursor.get();
+	pub fn end_of_word_forward_or_start_of_word_backward_from(&mut self, mut pos: usize, word: Word, dir: Direction) -> usize {
 		let default = match dir {
 			Direction::Backward => 0,
 			Direction::Forward => self.grapheme_indices().len()
 		};
 
-		let mut indices_iter = self.directional_indices_iter(dir).peekable(); 
+		let mut indices_iter = self.directional_indices_iter_from(pos,dir).peekable(); 
 
 		match word {
 			Word::Big => {
-				let Some(next_idx) = indices_iter.next() else { return default };
-				let on_boundary = self.grapheme_at(next_idx).is_none_or(is_whitespace);
+				let Some(next_idx) = indices_iter.peek() else { return default };
+				let on_boundary = self.grapheme_at(*next_idx).is_none_or(is_whitespace);
 				if on_boundary {
 					let Some(idx) = indices_iter.next() else { return default };
 					pos = idx;
 				}
-
 				// Check current grapheme
 				let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
 					return default
@@ -706,9 +722,10 @@ impl LineBuf {
 			}
 			Word::Normal => {
 				let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else { return default };
-				let Some(next_idx) = indices_iter.next() else { return default };
-				let on_boundary = self.grapheme_at(next_idx).is_none_or(|c| is_other_class_or_is_ws(c, &cur_char));
+				let Some(next_idx) = indices_iter.peek() else { return default };
+				let on_boundary = !is_whitespace(&cur_char) && self.grapheme_at(*next_idx).is_none_or(|c| is_other_class_or_is_ws(c, &cur_char));
 				if on_boundary {
+					let next_idx = indices_iter.next().unwrap();
 					pos = next_idx
 				}
 
@@ -800,7 +817,7 @@ impl LineBuf {
 	pub fn find<F: Fn(&str) -> bool>(&mut self, op: F) -> usize {
 		self.find_from(self.cursor.get(), op)
 	}
-	pub fn eval_motion(&mut self, motion: Motion) -> MotionKind {
+	pub fn eval_motion(&mut self, motion: MotionCmd) -> MotionKind {
 		let buffer = self.buffer.clone();
 		if self.has_hint() {
 			let hint = self.hint.clone().unwrap();
@@ -808,14 +825,35 @@ impl LineBuf {
 		}
 
 		let eval = match motion {
-			Motion::WholeLine => {
-				let (start,end) = self.this_line();
+			MotionCmd(count,Motion::WholeLine) => {
+				let start = self.start_of_cursor_line();
+				let end = self.find_newlines(count);
 				MotionKind::Inclusive((start,end))
 			}
-			Motion::WordMotion(to, word, dir) => MotionKind::On(self.dispatch_word_motion(to, word, dir)),
-			Motion::TextObj(text_obj, bound) => todo!(),
-			Motion::EndOfLastWord => {
+			MotionCmd(count,Motion::WordMotion(to, word, dir)) => {
+				let pos = self.dispatch_word_motion(count, to, word, dir);
+				let mut pos = ClampedUsize::new(pos,self.cursor.max,false);
+				// End-based operations must include the last character
+				// But the cursor must also stop just before it when moving
+				// So we have to do some weird shit to reconcile this behavior
+				if to == To::End {
+					match dir {
+						Direction::Forward => {
+							MotionKind::Onto(pos.get())
+						}
+						Direction::Backward => {
+							let (start,end) = ordered(self.cursor.get(),pos.get());
+							MotionKind::Inclusive((start,end))
+						}
+					}
+				} else {
+					MotionKind::On(pos.get())
+				}
+			}
+			MotionCmd(count,Motion::TextObj(text_obj, bound)) => todo!(),
+			MotionCmd(count,Motion::EndOfLastWord) => {
 				let start = self.start_of_cursor_line();
+				let mut newline_count = 0;
 				let mut indices = self.directional_indices_iter_from(start,Direction::Forward);
 				let mut last_graphical = None;
 				while let Some(idx) = indices.next() {
@@ -824,7 +862,10 @@ impl LineBuf {
 						last_graphical = Some(idx);
 					}
 					if grapheme == "\n" {
-						break
+						newline_count += 1;
+						if newline_count == count {
+							break
+						}
 					}
 				}
 				let Some(last) = last_graphical else {
@@ -832,7 +873,7 @@ impl LineBuf {
 				};
 				MotionKind::On(last)
 			}
-			Motion::BeginningOfFirstWord => {
+			MotionCmd(_,Motion::BeginningOfFirstWord) => {
 				let start = self.start_of_cursor_line();
 				let mut indices = self.directional_indices_iter_from(start,Direction::Forward);
 				let mut first_graphical = None;
@@ -852,35 +893,38 @@ impl LineBuf {
 				};
 				MotionKind::On(first)
 			}
-			Motion::BeginningOfLine => MotionKind::On(self.start_of_cursor_line()),
-			Motion::EndOfLine => MotionKind::On(self.end_of_cursor_line()),
-			Motion::CharSearch(direction, dest, ch) => todo!(),
-			Motion::BackwardChar => MotionKind::On(self.cursor.ret_sub(1)),
-			Motion::ForwardChar => MotionKind::On(self.cursor.ret_add_inclusive(1)),
-			Motion::LineUp => todo!(),
-			Motion::LineUpCharwise => todo!(),
-			Motion::ScreenLineUp => todo!(),
-			Motion::ScreenLineUpCharwise => todo!(),
-			Motion::LineDown => todo!(),
-			Motion::LineDownCharwise => todo!(),
-			Motion::ScreenLineDown => todo!(),
-			Motion::ScreenLineDownCharwise => todo!(),
-			Motion::BeginningOfScreenLine => todo!(),
-			Motion::FirstGraphicalOnScreenLine => todo!(),
-			Motion::HalfOfScreen => todo!(),
-			Motion::HalfOfScreenLineText => todo!(),
-			Motion::WholeBuffer => todo!(),
-			Motion::BeginningOfBuffer => todo!(),
-			Motion::EndOfBuffer => todo!(),
-			Motion::ToColumn(col) => todo!(),
-			Motion::ToDelimMatch => todo!(),
-			Motion::ToBrace(direction) => todo!(),
-			Motion::ToBracket(direction) => todo!(),
-			Motion::ToParen(direction) => todo!(),
-			Motion::Range(start, end) => todo!(),
-			Motion::RepeatMotion => todo!(),
-			Motion::RepeatMotionRev => todo!(),
-			Motion::Null => MotionKind::Null
+			MotionCmd(_,Motion::BeginningOfLine) => MotionKind::On(self.start_of_cursor_line()),
+			MotionCmd(count,Motion::EndOfLine) => {
+				let pos = self.find_newlines(count);
+				MotionKind::On(pos)
+			}
+			MotionCmd(count,Motion::CharSearch(direction, dest, ch)) => todo!(),
+			MotionCmd(count,Motion::BackwardChar) => MotionKind::On(self.cursor.ret_sub(1)),
+			MotionCmd(count,Motion::ForwardChar) => MotionKind::On(self.cursor.ret_add_inclusive(1)),
+			MotionCmd(count,Motion::LineUp) => todo!(),
+			MotionCmd(count,Motion::LineUpCharwise) => todo!(),
+			MotionCmd(count,Motion::ScreenLineUp) => todo!(),
+			MotionCmd(count,Motion::ScreenLineUpCharwise) => todo!(),
+			MotionCmd(count,Motion::LineDown) => todo!(),
+			MotionCmd(count,Motion::LineDownCharwise) => todo!(),
+			MotionCmd(count,Motion::ScreenLineDown) => todo!(),
+			MotionCmd(count,Motion::ScreenLineDownCharwise) => todo!(),
+			MotionCmd(count,Motion::BeginningOfScreenLine) => todo!(),
+			MotionCmd(count,Motion::FirstGraphicalOnScreenLine) => todo!(),
+			MotionCmd(count,Motion::HalfOfScreen) => todo!(),
+			MotionCmd(count,Motion::HalfOfScreenLineText) => todo!(),
+			MotionCmd(count,Motion::WholeBuffer) => todo!(),
+			MotionCmd(count,Motion::BeginningOfBuffer) => todo!(),
+			MotionCmd(count,Motion::EndOfBuffer) => todo!(),
+			MotionCmd(count,Motion::ToColumn(col)) => todo!(),
+			MotionCmd(count,Motion::ToDelimMatch) => todo!(),
+			MotionCmd(count,Motion::ToBrace(direction)) => todo!(),
+			MotionCmd(count,Motion::ToBracket(direction)) => todo!(),
+			MotionCmd(count,Motion::ToParen(direction)) => todo!(),
+			MotionCmd(count,Motion::Range(start, end)) => todo!(),
+			MotionCmd(count,Motion::RepeatMotion) => todo!(),
+			MotionCmd(count,Motion::RepeatMotionRev) => todo!(),
+			MotionCmd(count,Motion::Null) => MotionKind::Null
 		};
 
 		self.set_buffer(buffer);
@@ -925,6 +969,7 @@ impl LineBuf {
 	}
 	pub fn move_cursor(&mut self, motion: MotionKind) {
 		match motion {
+			MotionKind::Onto(pos) | // Onto follows On's behavior for cursor movements
 			MotionKind::On(pos) => self.cursor.set(pos),
 			MotionKind::To(pos) => {
 				self.cursor.set(pos);
@@ -946,28 +991,48 @@ impl LineBuf {
 			MotionKind::Null => { /* Do nothing */ }
 		}
 	}
+	pub fn range_from_motion(&mut self, motion: &MotionKind) -> Option<(usize,usize)> {
+		let range = match motion {
+			MotionKind::On(pos) => ordered(self.cursor.get(), *pos),
+			MotionKind::Onto(pos) => { 
+				// For motions which include the character at the cursor during operations
+				// but exclude the character during movements
+				let mut pos = ClampedUsize::new(*pos, self.cursor.max, false);
+				let mut cursor_pos = self.cursor;
+
+				// The end of the range must be incremented by one
+				match pos.get().cmp(&self.cursor.get()) {
+					std::cmp::Ordering::Less => cursor_pos.add(1),
+					std::cmp::Ordering::Greater => pos.add(1),
+					std::cmp::Ordering::Equal => {}
+				}
+				ordered(cursor_pos.get(),pos.get())
+			}
+			MotionKind::To(pos) => {
+				let pos = match pos.cmp(&self.cursor.get()) {
+					std::cmp::Ordering::Less => *pos + 1,
+					std::cmp::Ordering::Greater => *pos - 1,
+					std::cmp::Ordering::Equal => *pos,
+				};
+				ordered(self.cursor.get(), pos)
+			}
+			MotionKind::Inclusive((start,end)) => {
+				let (start, mut end) = ordered(*start, *end);
+				end = ClampedUsize::new(end, self.cursor.max, false).ret_add(1);
+				(start,end)
+			}
+			MotionKind::Exclusive((start,end)) => ordered(*start, *end),
+			MotionKind::Null => return None
+		};
+		Some(range)
+	}
 	pub fn exec_verb(&mut self, verb: Verb, motion: MotionKind, register: RegisterName) -> ShResult<()> {
 		match verb {
 			Verb::Delete |
 			Verb::Yank |
 			Verb::Change => {
-				let (start,end) = match motion {
-					MotionKind::On(pos) => ordered(self.cursor.get(), pos),
-					MotionKind::To(pos) => {
-						let pos = match pos.cmp(&self.cursor.get()) {
-							std::cmp::Ordering::Less => pos + 1,
-							std::cmp::Ordering::Greater => pos - 1,
-							std::cmp::Ordering::Equal => pos,
-						};
-						ordered(self.cursor.get(), pos)
-					}
-					MotionKind::Inclusive((start,end)) => {
-						let (start, mut end) = ordered(start, end);
-						end = ClampedUsize::new(end, self.cursor.max, false).ret_add(1);
-						(start,end)
-					}
-					MotionKind::Exclusive((start,end)) => ordered(start, end),
-					MotionKind::Null => return Ok(())
+				let Some((start,end)) = self.range_from_motion(&motion) else {
+					return Ok(())
 				};
 				flog!(DEBUG,start,end);
 				let register_text = if verb == Verb::Yank {
@@ -980,7 +1045,20 @@ impl LineBuf {
 				register.write_to_register(register_text);
 				self.cursor.set(start);
 			}
-			Verb::Rot13 => todo!(),
+			Verb::Rot13 => {
+				flog!(DEBUG,motion);
+				let Some((start,end)) = self.range_from_motion(&motion) else {
+					return Ok(())
+				};
+				flog!(DEBUG,start,end);
+				let slice = self.slice(start..end)
+					.unwrap_or_default();
+				flog!(DEBUG,slice);
+				let rot13 = rot13(slice);
+				flog!(DEBUG,rot13);
+				self.buffer.replace_range(start..end, &rot13);
+				self.cursor.set(start);
+			}
 			Verb::ReplaceChar(_) => todo!(),
 			Verb::ToggleCase => todo!(),
 			Verb::ToLower => todo!(),
@@ -1050,26 +1128,24 @@ impl LineBuf {
 		let cursor_pos = self.cursor.get();
 
 		for _ in 0..verb_count.unwrap_or(1) {
-			for _ in 0..motion_count.unwrap_or(1) {
-				/*
-				 * Let's evaluate the motion now
-				 * If motion is None, we will try to use self.select_range
-				 * If self.select_range is None, we will use MotionKind::Null
-				 */
-				let motion_eval = motion
-					.clone()
-					.map(|m| self.eval_motion(m.1))
-					.unwrap_or({
-						self.select_range
-							.map(MotionKind::Inclusive)
-							.unwrap_or(MotionKind::Null)
-					});
+			/*
+			 * Let's evaluate the motion now
+			 * If motion is None, we will try to use self.select_range
+			 * If self.select_range is None, we will use MotionKind::Null
+			 */
+			let motion_eval = motion
+				.clone()
+				.map(|m| self.eval_motion(m))
+				.unwrap_or({
+					self.select_range
+						.map(MotionKind::Inclusive)
+						.unwrap_or(MotionKind::Null)
+				});
 
-				if let Some(verb) = verb.clone() {
-					self.exec_verb(verb.1, motion_eval, register)?;
-				} else {
-					self.apply_motion(motion_eval);
-				}
+			if let Some(verb) = verb.clone() {
+				self.exec_verb(verb.1, motion_eval, register)?;
+			} else {
+				self.apply_motion(motion_eval);
 			}
 		}
 
@@ -1104,6 +1180,22 @@ impl LineBuf {
 	pub fn as_str(&self) -> &str {
 		&self.buffer // FIXME: this will have to be fixed up later
 	}
+}
+
+/// Rotate alphabetic characters by 13 alphabetic positions
+pub fn rot13(input: &str) -> String {
+	input.chars()
+		.map(|c| {
+			if c.is_ascii_lowercase() {
+				let offset = b'a';
+				(((c as u8 - offset + 13) % 26) + offset) as char
+			} else if c.is_ascii_uppercase() {
+				let offset = b'A';
+				(((c as u8 - offset + 13) % 26) + offset) as char
+			} else {
+				c
+			}
+		}).collect()
 }
 
 pub fn ordered(start: usize, end: usize) -> (usize,usize) {

@@ -2,8 +2,9 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 use nix::NixPath;
+use unicode_segmentation::UnicodeSegmentation;
 
-use super::keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
+use super::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use super::vicmd::{Anchor, Bound, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb, VerbCmd, ViCmd, Word};
 use crate::prelude::*;
 
@@ -51,6 +52,17 @@ pub trait ViMode {
 	fn clamp_cursor(&self) -> bool;
 	fn hist_scroll_start_pos(&self) -> Option<To>;
 	fn report_mode(&self) -> ModeReport;
+	fn cmds_from_raw(&mut self, raw: &str) -> Vec<ViCmd> {
+		let mut cmds = vec![];
+		for ch in raw.graphemes(true) {
+			let key = E::new(ch, M::NONE);
+			let Some(cmd) = self.handle_key(key) else {
+				continue
+			};
+			cmds.push(cmd)
+		}
+		cmds
+	}
 }
 
 #[derive(Default,Debug)]
@@ -135,6 +147,7 @@ impl ViMode for ViInsert {
 			_ => common_cmds(key)
 		}
 	}
+
 
 	fn is_repeatable(&self) -> bool {
 		true
