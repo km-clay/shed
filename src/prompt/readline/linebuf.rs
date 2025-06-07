@@ -92,9 +92,9 @@ pub enum MotionKind {
 	Inclusive((usize,usize)), // Range, inclusive
 	Exclusive((usize,usize)), // Range, exclusive
 
-	// Used for linewise operations like 'dj', left is the selected range, right is the cursor's new position
-	InclusiveWithTarget((usize,usize),usize), 
-	ExclusiveWithTarget((usize,usize),usize), 
+	// Used for linewise operations like 'dj', left is the selected range, right is the cursor's new position on the line
+	InclusiveWithTargetCol((usize,usize),usize), 
+	ExclusiveWithTargetCol((usize,usize),usize), 
 	Null
 }
 
@@ -198,6 +198,9 @@ impl ClampedUsize {
 			self.max
 		}
 	}
+	/// Increment the ClampedUsize value
+	///
+	/// Returns false if the attempted increment is rejected by the clamp
 	pub fn inc(&mut self) -> bool {
 		let max = self.upper_bound();
 		if self.value == max {
@@ -206,6 +209,9 @@ impl ClampedUsize {
 		self.add(1);
 		true
 	}
+	/// Decrement the ClampedUsize value
+	///
+	/// Returns false if the attempted decrement would cause underflow
 	pub fn dec(&mut self) -> bool {
 		if self.value == 0 {
 			return false;
@@ -389,6 +395,7 @@ impl LineBuf {
 			let end = self.grapheme_indices()[end];
 			self.buffer.drain(start..end).collect()
 		};
+		flog!(DEBUG,drained);
 		self.update_graphemes();
 		drained
 	}
@@ -428,154 +435,97 @@ impl LineBuf {
 			self.last_selection = self.select_range.take();
 		}
 	}
-	pub fn rfind_newlines(&mut self, n: usize) -> (usize,bool) {
-		self.rfind_newlines_from(self.cursor.get(), n)
+	pub fn total_lines(&mut self) -> usize {
+		self.buffer
+			.graphemes(true)
+			.filter(|g| *g == "\n")
+			.count()
 	}
-	pub fn find_newlines(&mut self, n: usize) -> (usize,bool) {
-		self.find_newlines_from(self.cursor.get(), n)
+	pub fn cursor_line_number(&mut self) -> usize {
+		self.slice_to_cursor()
+			.map(|slice| {
+				slice.graphemes(true)
+				.filter(|g| *g == "\n")
+				.count()
+			}).unwrap_or(0)
 	}
-	pub fn find_newlines_in_direction(&mut self, start_pos: usize, n: usize, dir: Direction) -> (usize, bool) {
-		if n == 0 {
-			return (start_pos,true)
+	pub fn nth_next_line(&mut self, n: usize) -> Option<(usize,usize)> {
+		let line_no = self.cursor_line_number() + n;
+		if line_no > self.total_lines() {
+			return None
 		}
-		let mut indices_iter = self.directional_indices_iter_from(start_pos, dir);
-		let default = match dir {
-			Direction::Backward => 0,
-			Direction::Forward => self.cursor.max
-		};
-		let mut result;
-		let mut count = 0;
-
-		// Special case: newline at start_pos
-		if self.grapheme_at(start_pos) == Some("\n") {
-			count += 1;
-			indices_iter.next();
-			if n == 1 {
-				return (start_pos,true);
-			}
-		}
-
-		while let Some(i) = indices_iter.find(|i| self.grapheme_at(*i) == Some("\n")) {
-			result = i;
-			count += 1;
-			if count == n {
-				return (result, true);
-			}
-		}
-
-		(default, false)
-	}
-	pub fn rfind_newlines_from(&mut self, start_pos: usize, n: usize) -> (usize, bool) {
-		self.find_newlines_in_direction(start_pos, n, Direction::Backward)
-	}
-	pub fn find_newlines_from(&mut self, start_pos: usize, n: usize) -> (usize, bool) {
-		self.find_newlines_in_direction(start_pos, n, Direction::Forward)
-	}
-	pub fn find_index_for(&self, byte_pos: usize) -> Option<usize> {
-		self.grapheme_indices()
-			.binary_search(&byte_pos)
-			.ok()
-	}
-	pub fn start_of_cursor_line(&mut self) -> usize {
-		let (mut pos,_) = self.rfind_newlines(1);
-		if self.grapheme_at(pos) == Some("\n") || pos != 0 {
-			pos += 1; // Don't include the newline itself
-		}
-		pos
-	}
-	pub fn end_of_cursor_line(&mut self) -> usize {
-		self.find_newlines(1).0
-	}
-	pub fn this_line(&mut self) -> (usize,usize) {
-		(
-			self.start_of_cursor_line(),
-			self.end_of_cursor_line()
-		)
+		Some(self.line_bounds(line_no))
 	}
 	pub fn nth_prev_line(&mut self, n: usize) -> Option<(usize,usize)> {
-		if self.start_of_cursor_line() == 0 {
+		let cursor_line_no = self.cursor_line_number();
+		if cursor_line_no == 0 {
 			return None
 		}
-
-		let (start,_) = self.select_lines_up(n);
-		let slice = self.slice_from_cursor()?;
-		let end = slice.find('\n').unwrap_or(self.cursor.max);
-		Some((start,end))
-	}
-	pub fn nth_next_line(&mut self, n: usize) -> Option<(usize, usize)> {
-		if self.end_of_cursor_line() == self.cursor.max {
+		let line_no = cursor_line_no.saturating_sub(n);
+		if line_no > self.total_lines() {
 			return None
 		}
+		Some(self.line_bounds(line_no))
+	}
+	pub fn this_line(&mut self) -> (usize,usize) {
+		let line_no = self.cursor_line_number();
+		self.line_bounds(line_no)
+	}
+	pub fn start_of_line(&mut self) -> usize {
+		self.this_line().0
+	}
+	pub fn end_of_line(&mut self) -> usize {
+		self.this_line().1
+	}
+	pub fn select_lines_up(&mut self, n: usize) -> Option<(usize,usize)> {
+		if self.start_of_line() == 0 {
+			return None
+		}
+		let target_line = self.cursor_line_number().saturating_sub(n);
+		let end = self.end_of_line();
+		let (start,_) = self.line_bounds(target_line);
 
-		let (_,end) = self.select_lines_down(n);
-		let end_clamped = ClampedUsize::new(end, self.cursor.max, /*exclusive:*/ true);
-		let slice = self.slice_to(end_clamped.get())?;
-		let start = slice.rfind('\n').unwrap_or(0);
 		Some((start,end))
 	}
-	/// Include the leading newline, if any
-	pub fn prev_line_with_leading_newline(&mut self) -> Option<(usize,usize)> {
-		let (mut start,end) = self.nth_prev_line(1)?;
-		start = start.saturating_sub(1);
+	pub fn select_lines_down(&mut self, n: usize) -> Option<(usize,usize)> {
+		if self.end_of_line() == self.cursor.max {
+			return None
+		}
+		let target_line = self.cursor_line_number() + n;
+		let start = self.start_of_line();
+		let (_,end) = self.line_bounds(target_line);
+		
 		Some((start,end))
 	}
-	/// Include the trailing newline, if any
-	pub fn prev_line_with_trailing_newline(&mut self) -> Option<(usize,usize)> {
-		let (start,mut end) = self.nth_prev_line(1)?;
-		end = (end + 1).min(self.cursor.max);
-		Some((start,end))
-	}
-	/// Include the leading newline, if any
-	pub fn next_line_with_leading_newline(&mut self) -> Option<(usize,usize)> {
-		let (mut start,end) = self.nth_next_line(1)?;
-		start = start.saturating_sub(1);
-		Some((start,end))
-	}
-	/// Include the trailing newline, if any
-	pub fn next_line_with_trailing_newline(&mut self) -> Option<(usize,usize)> {
-		let (start,mut end) = self.nth_next_line(1)?;
-		end = (end + 1).min(self.cursor.max);
-		Some((start,end))
-	}
-	pub fn select_lines_up(&mut self, n: usize) -> (usize,usize) {
-		let (mut start,end) = self.this_line();
-		if start == 0 {
-			return (start,end)
+	pub fn line_bounds(&mut self, n: usize) -> (usize,usize) {
+		if n > self.total_lines() {
+			panic!("Attempted to find line {n} when there are only {} lines",self.total_lines())
 		}
 
+		let mut grapheme_index = 0;
+		let mut start = 0;
+
+		// Fine the start of the line
 		for _ in 0..n {
-			let slice = self.slice_to(start - 1).unwrap();
-			if let Some(prev_nl) = slice.rfind('\n') {
-				start = self.find_index_for(prev_nl).unwrap();
-			} else {
-				start = 0;
-				break
-			}
-		}
-		(start,end)
-	}
-	pub fn select_lines_down(&mut self, n: usize) -> (usize,usize) {
-		let (start,mut end) = self.this_line();
-		if end == self.cursor.max {
-			return (start,end)
-		}
-
-		for _ in 0..=n {
-			let next_ln_start = end + 1;
-			if next_ln_start >= self.cursor.max {
-				end = self.cursor.max;
-				break
-			}
-			let slice = self.slice_from(next_ln_start).unwrap();
-			if let Some(next_nl) = slice.find('\n') {
-				end = self.find_index_for(next_nl).unwrap();
-			} else {
-				end = self.cursor.max;
-				break
+			for (_, g) in self.buffer.grapheme_indices(true).skip(grapheme_index) {
+				grapheme_index += 1;
+				if g == "\n" {
+					start = grapheme_index;
+					break;
+				}
 			}
 		}
 
-		(start,end)
+		let mut end = start;
+		// Find the end of the line
+		for (_, g) in self.buffer.grapheme_indices(true).skip(start) {
+			end += 1;
+			if g == "\n" {
+				break;
+			}
+		}
+
+		(start, end)
 	}
 	pub fn handle_edit(&mut self, old: String, new: String, curs_pos: usize) {
 		let edit_is_merging = self.undo_stack.last().is_some_and(|edit| edit.merging);
@@ -588,6 +538,8 @@ impl LineBuf {
 				self.undo_stack.push(diff);
 				return
 			};
+
+
 
 			edit.new.push_str(&diff.new);
 			edit.old.push_str(&diff.old);
@@ -830,6 +782,13 @@ impl LineBuf {
 	fn grapheme_index_for_display_col(&self, line: &str, target_col: usize) -> usize {
 		let mut col = 0;
 		for (grapheme_index, g) in line.graphemes(true).enumerate() {
+			if g == "\n" {
+				if self.cursor.exclusive {
+					return grapheme_index.saturating_sub(1)
+				} else {
+					return grapheme_index;
+				}
+			}
 			let w = g.width();
 			if col + w > target_col {
 				return grapheme_index;
@@ -840,7 +799,7 @@ impl LineBuf {
 		line.graphemes(true).count()
 	}
 	pub fn cursor_col(&mut self) -> usize {
-		let start = self.start_of_cursor_line();
+		let start = self.start_of_line();
 		let end = self.cursor.get();
 		let Some(slice) = self.slice_inclusive(start..=end) else {
 			return start
@@ -903,6 +862,24 @@ impl LineBuf {
 	pub fn find<F: Fn(&str) -> bool>(&mut self, op: F) -> usize {
 		self.find_from(self.cursor.get(), op)
 	}
+	pub fn replace_at_cursor(&mut self, new: &str) {
+		self.replace_at(self.cursor.get(), new);
+	}
+	pub fn replace_at(&mut self, pos: usize, new: &str) {
+		let Some(gr) = self.grapheme_at(pos).map(|gr| gr.to_string()) else {
+			self.buffer.push_str(new);
+			return
+		};
+		if &gr == "\n" {
+			// Do not replace the newline, push it forward instead
+			let byte_pos = self.index_byte_pos(pos);
+			self.buffer.insert_str(byte_pos, new);
+			return
+		}
+		let start = self.index_byte_pos(pos);
+		let end = start + gr.len();
+		self.buffer.replace_range(start..end, new);
+	}
 	pub fn eval_motion(&mut self, motion: MotionCmd) -> MotionKind {
 		let buffer = self.buffer.clone();
 		if self.has_hint() {
@@ -912,9 +889,33 @@ impl LineBuf {
 
 		let eval = match motion {
 			MotionCmd(count,Motion::WholeLine) => {
-				let start = self.start_of_cursor_line();
-				let end = self.find_newlines(count).0;
-				MotionKind::Inclusive((start,end))
+				let Some((start,end)) = (if count == 1 {
+					Some(self.this_line())
+				} else {
+					self.select_lines_down(count)
+				}) else {
+					return MotionKind::Null
+				};
+
+				let target_col = if let Some(col) = self.saved_col {
+					col 
+				} else {
+					let col = self.cursor_col();
+					self.saved_col = Some(col);
+					col
+				};
+
+				let Some(line) = self.slice(start..end).map(|s| s.to_string()) else {
+					return MotionKind::Null
+				};
+				flog!(DEBUG,target_col);
+				flog!(DEBUG,target_col);
+				let mut target_pos = self.grapheme_index_for_display_col(&line, target_col);
+				flog!(DEBUG,target_pos);
+				if self.cursor.exclusive && line.ends_with("\n") && self.grapheme_at(target_pos) == Some("\n") {
+					target_pos = target_pos.saturating_sub(1); // Don't land on the newline
+				}
+				MotionKind::InclusiveWithTargetCol((start,end),target_pos)
 			}
 			MotionCmd(count,Motion::WordMotion(to, word, dir)) => {
 				let pos = self.dispatch_word_motion(count, to, word, dir);
@@ -938,7 +939,7 @@ impl LineBuf {
 			}
 			MotionCmd(count,Motion::TextObj(text_obj, bound)) => todo!(),
 			MotionCmd(count,Motion::EndOfLastWord) => {
-				let start = self.start_of_cursor_line();
+				let start = self.start_of_line();
 				let mut newline_count = 0;
 				let mut indices = self.directional_indices_iter_from(start,Direction::Forward);
 				let mut last_graphical = None;
@@ -960,7 +961,7 @@ impl LineBuf {
 				MotionKind::On(last)
 			}
 			MotionCmd(_,Motion::BeginningOfFirstWord) => {
-				let start = self.start_of_cursor_line();
+				let start = self.start_of_line();
 				let mut indices = self.directional_indices_iter_from(start,Direction::Forward);
 				let mut first_graphical = None;
 				while let Some(idx) = indices.next() {
@@ -978,9 +979,16 @@ impl LineBuf {
 				};
 				MotionKind::On(first)
 			}
-			MotionCmd(_,Motion::BeginningOfLine) => MotionKind::On(self.start_of_cursor_line()),
+			MotionCmd(_,Motion::BeginningOfLine) => MotionKind::On(self.start_of_line()),
 			MotionCmd(count,Motion::EndOfLine) => {
-				let pos = self.find_newlines(count).0;
+				let pos = if count == 1 {
+					self.end_of_line() 
+				} else if let Some((_,end)) = self.select_lines_down(count) {
+					end
+				} else {
+					self.end_of_line()
+				};
+				
 				MotionKind::On(pos)
 			}
 			MotionCmd(count,Motion::CharSearch(direction, dest, ch)) => {
@@ -1008,8 +1016,29 @@ impl LineBuf {
 				}
 				MotionKind::Onto(pos.get())
 			}
-			MotionCmd(count,Motion::BackwardChar) => MotionKind::On(self.cursor.ret_sub(1)),
-			MotionCmd(count,Motion::ForwardChar) => MotionKind::On(self.cursor.ret_add_inclusive(1)),
+			MotionCmd(count,motion @ (Motion::ForwardChar | Motion::BackwardChar)) => {
+				let mut target = self.cursor;
+				target.exclusive = false;
+				for _ in 0..count {
+					match motion {
+						Motion::BackwardChar => target.sub(1),
+						Motion::ForwardChar => {
+							if self.cursor.exclusive && self.grapheme_at(target.ret_add(1)) == Some("\n") {
+								flog!(DEBUG, "returning null");
+								return MotionKind::Null
+							}
+							target.add(1);
+							continue
+						}
+						_ => unreachable!()
+					}
+					if self.grapheme_at(target.get()) == Some("\n") {
+						flog!(DEBUG, "returning null outside of match");
+						return MotionKind::Null
+					}
+				}
+				MotionKind::On(target.get())
+			}
 			MotionCmd(count,Motion::LineDown) |
 			MotionCmd(count,Motion::LineUp) => {
 				let Some((start,end)) = (match motion.1 {
@@ -1017,12 +1046,11 @@ impl LineBuf {
 					Motion::LineDown => self.nth_next_line(1),
 					_ => unreachable!()
 				}) else {
-					flog!(WARN, "failed to find target line");
 					return MotionKind::Null
 				};
 				flog!(DEBUG, self.slice(start..end));
 
-				let target_col = if let Some(col) = self.saved_col {
+				let mut target_col = if let Some(col) = self.saved_col {
 					col 
 				} else {
 					let col = self.cursor_col();
@@ -1033,15 +1061,21 @@ impl LineBuf {
 				let Some(line) = self.slice(start..end).map(|s| s.to_string()) else {
 					return MotionKind::Null
 				};
-				let target_pos = start + self.grapheme_index_for_display_col(&line, target_col);
+				flog!(DEBUG,target_col);
+				flog!(DEBUG,target_col);
+				let mut target_pos = self.grapheme_index_for_display_col(&line, target_col);
+				flog!(DEBUG,target_pos);
+				if self.cursor.exclusive && line.ends_with("\n") && self.grapheme_at(target_pos) == Some("\n") {
+					target_pos = target_pos.saturating_sub(1); // Don't land on the newline
+				}
 
 				let (start,end) = match motion.1 {
-					Motion::LineUp => (start,self.end_of_cursor_line()),
-					Motion::LineDown => (self.start_of_cursor_line(),end),
+					Motion::LineUp => (start,self.end_of_line()),
+					Motion::LineDown => (self.start_of_line(),end),
 					_ => unreachable!()
 				};
 
-				MotionKind::InclusiveWithTarget((start,end),target_pos)
+				MotionKind::InclusiveWithTargetCol((start,end),target_pos)
 			}
 			MotionCmd(count,Motion::LineDownCharwise) |
 			MotionCmd(count,Motion::LineUpCharwise) => {
@@ -1149,9 +1183,13 @@ impl LineBuf {
 					std::cmp::Ordering::Equal => { /* Do nothing */ }
 				}
 			}
-			MotionKind::InclusiveWithTarget((_,_),start) |
+			MotionKind::ExclusiveWithTargetCol((_,_),col) |
+			MotionKind::InclusiveWithTargetCol((_,_),col) => {
+				let (start,end) = self.this_line();
+				let end = end.min(col);
+				self.cursor.set(start + end)
+			}
 			MotionKind::Inclusive((start,_)) |
-			MotionKind::ExclusiveWithTarget((_,_),start) |
 			MotionKind::Exclusive((start,_)) => {
 				self.cursor.set(start)
 			}
@@ -1183,14 +1221,14 @@ impl LineBuf {
 				};
 				ordered(self.cursor.get(), pos)
 			}
-			MotionKind::InclusiveWithTarget((start,end),_) |
-			MotionKind::Inclusive((start,end)) => {
+			MotionKind::InclusiveWithTargetCol((start,end),_) |
+			MotionKind::Inclusive((start,end)) => ordered(*start, *end),
+			MotionKind::ExclusiveWithTargetCol((start,end),_) |
+			MotionKind::Exclusive((start,end)) => {
 				let (start, mut end) = ordered(*start, *end);
-				end = ClampedUsize::new(end, self.cursor.max, false).ret_add(1);
+				end = end.saturating_sub(1);
 				(start,end)
 			}
-			MotionKind::ExclusiveWithTarget((start,end),_) |
-			MotionKind::Exclusive((start,end)) => ordered(*start, *end),
 			MotionKind::Null => return None
 		};
 		Some(range)
@@ -1212,8 +1250,12 @@ impl LineBuf {
 				};
 				register.write_to_register(register_text);
 				match motion {
-					MotionKind::ExclusiveWithTarget((_,_),pos) |
-					MotionKind::InclusiveWithTarget((_,_),pos) => self.cursor.set(pos),
+					MotionKind::ExclusiveWithTargetCol((_,_),pos) |
+					MotionKind::InclusiveWithTargetCol((_,_),pos) => {
+						let (start,end) = self.this_line();
+						self.cursor.set(start);
+						self.cursor.add(end.min(pos));
+					}
 					_ => self.cursor.set(start),
 				}
 			}
@@ -1227,8 +1269,55 @@ impl LineBuf {
 				self.buffer.replace_range(start..end, &rot13);
 				self.cursor.set(start);
 			}
-			Verb::ReplaceChar(_) => todo!(),
-			Verb::ToggleCase => todo!(),
+			Verb::ReplaceChar(ch) => {
+				let mut buf = [0u8;4];
+				let new = ch.encode_utf8(&mut buf);
+				self.replace_at_cursor(new);
+				self.apply_motion(motion);
+			}
+			Verb::ToggleCaseSingle => {
+				let Some(gr) = self.grapheme_at_cursor() else {
+					return Ok(())
+				};
+				if gr.len() > 1 || gr.is_empty() {
+					return Ok(())
+				}
+				let ch = gr.chars().next().unwrap();
+				if !ch.is_alphabetic() {
+					return Ok(())
+				}
+				let mut buf = [0u8;4];
+				let new = if ch.is_ascii_lowercase() {
+					ch.to_ascii_uppercase().encode_utf8(&mut buf)
+				} else {
+					ch.to_ascii_lowercase().encode_utf8(&mut buf)
+				};
+				self.replace_at_cursor(new);
+			}
+			Verb::ToggleCaseRange => {
+				let Some((start,end)) = self.range_from_motion(&motion) else {
+					return Ok(())
+				};
+				for i in start..end {
+					let Some(gr) = self.grapheme_at(i) else {
+						continue
+					};
+					if gr.len() > 1 || gr.is_empty() {
+						continue
+					}
+					let ch = gr.chars().next().unwrap();
+					if !ch.is_alphabetic() {
+						continue
+					}
+					let mut buf = [0u8;4];
+					let new = if ch.is_ascii_lowercase() {
+						ch.to_ascii_uppercase().encode_utf8(&mut buf)
+					} else {
+						ch.to_ascii_lowercase().encode_utf8(&mut buf)
+					};
+					self.replace_at(i,new);
+				}
+			}
 			Verb::ToLower => todo!(),
 			Verb::ToUpper => todo!(),
 			Verb::Complete => todo!(),
@@ -1252,14 +1341,8 @@ impl LineBuf {
 			Verb::Indent => todo!(),
 			Verb::Dedent => todo!(),
 			Verb::Equalize => todo!(),
-			Verb::AcceptLineOrNewline => todo!(),
-			Verb::EndOfFile => {
-				if self.buffer.is_empty() {
-
-				}
-			}
 			Verb::InsertModeLineBreak(anchor) => {
-				let end = self.end_of_cursor_line();
+				let end = self.end_of_line();
 				self.insert_at(end,'\n');
 				self.cursor.set(end);
 				match anchor {
@@ -1268,16 +1351,15 @@ impl LineBuf {
 				}
 			}
 
-			Verb::ReplaceMode |
+			Verb::EndOfFile |
 			Verb::InsertMode |
 			Verb::NormalMode |
 			Verb::VisualMode |
+			Verb::ReplaceMode |
 			Verb::VisualModeLine |
 			Verb::VisualModeBlock |
-			Verb::VisualModeSelectLast => {
-				/* Already handled */ 
-				self.apply_motion(motion);
-			}
+			Verb::AcceptLineOrNewline |
+			Verb::VisualModeSelectLast => self.apply_motion(motion), // Already handled logic for these
 		}
 		Ok(())
 	}
@@ -1286,6 +1368,7 @@ impl LineBuf {
 		let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
 		let is_line_motion = cmd.is_line_motion();
 		let is_undo_op = cmd.is_undo_op();
+		let is_inplace_edit = cmd.is_inplace_edit();
 		let edit_is_merging = self.undo_stack.last().is_some_and(|edit| edit.merging);
 
 		// Merge character inserts into one edit
@@ -1297,13 +1380,13 @@ impl LineBuf {
 
 		let ViCmd { register, verb, motion, raw_seq: _ } = cmd;
 
-		let verb_count = verb.as_ref().map(|v| v.0);
+		let verb_count = verb.as_ref().map(|v| v.0).unwrap_or(1);
 		let motion_count = motion.as_ref().map(|m| m.0);
 
 		let before = self.buffer.clone();
 		let cursor_pos = self.cursor.get();
 
-		for _ in 0..verb_count.unwrap_or(1) {
+		for i in 0..verb_count {
 			/*
 			 * Let's evaluate the motion now
 			 * If motion is None, we will try to use self.select_range
@@ -1320,6 +1403,19 @@ impl LineBuf {
 
 			if let Some(verb) = verb.clone() {
 				self.exec_verb(verb.1, motion_eval, register)?;
+
+				if is_inplace_edit && i != verb_count.saturating_sub(1) {
+					/*
+					 Used to calculate motions for stuff like '5~' or '8rg'
+					 Those verbs don't have a motion, and always land on
+					 the last character that they operate on.
+					 Therefore, we increment the cursor until we hit verb_count - 1
+					 or the end of the buffer
+				 */
+					if !self.cursor.inc() {
+						break
+					}
+				}
 			} else {
 				self.apply_motion(motion_eval);
 			}

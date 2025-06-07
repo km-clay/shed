@@ -383,6 +383,21 @@ impl ViNormal {
 									}
 								)
 							}
+							'~' => {
+								chars_clone.next();
+								chars = chars_clone;
+								break 'verb_parse Some(VerbCmd(count, Verb::ToggleCaseRange));
+							}
+							'u' => {
+								chars_clone.next();
+								chars = chars_clone;
+								break 'verb_parse Some(VerbCmd(count, Verb::ToLower));
+							}
+							'U' => {
+								chars_clone.next();
+								chars = chars_clone;
+								break 'verb_parse Some(VerbCmd(count, Verb::ToUpper));
+							}
 							'?' => {
 								chars_clone.next();
 								chars = chars_clone;
@@ -465,8 +480,8 @@ impl ViNormal {
 					return Some(
 						ViCmd {
 							register,
-							verb: Some(VerbCmd(1, Verb::ReplaceChar(ch))),
-							motion: Some(MotionCmd(count, Motion::ForwardChar)),
+							verb: Some(VerbCmd(count, Verb::ReplaceChar(ch))),
+							motion: None,
 							raw_seq: self.take_cmd()
 						}
 					)
@@ -485,8 +500,8 @@ impl ViNormal {
 					return Some(
 						ViCmd { 
 							register,
-							verb: Some(VerbCmd(1, Verb::ToggleCase)),
-							motion: Some(MotionCmd(count, Motion::ForwardChar)),
+							verb: Some(VerbCmd(count, Verb::ToggleCaseSingle)),
+							motion: None,
 							raw_seq: self.take_cmd() 
 						}
 					)
@@ -654,6 +669,9 @@ impl ViNormal {
 				('c', Some(VerbCmd(_,Verb::Change))) |
 				('y', Some(VerbCmd(_,Verb::Yank))) |
 				('=', Some(VerbCmd(_,Verb::Equalize))) |
+				('u', Some(VerbCmd(_,Verb::ToLower))) |
+				('U', Some(VerbCmd(_,Verb::ToUpper))) |
+				('~', Some(VerbCmd(_,Verb::ToggleCaseRange))) |
 				('>', Some(VerbCmd(_,Verb::Indent))) |
 				('<', Some(VerbCmd(_,Verb::Dedent))) => break 'motion_parse Some(MotionCmd(count, Motion::WholeLine)),
 				_ => {}
@@ -1145,7 +1163,7 @@ impl ViVisual {
 					return Some(
 						ViCmd { 
 							register,
-							verb: Some(VerbCmd(1, Verb::ToggleCase)),
+							verb: Some(VerbCmd(1, Verb::ToggleCaseRange)),
 							motion: None,
 							raw_seq: self.take_cmd() 
 						}

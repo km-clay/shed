@@ -102,6 +102,10 @@ impl ViCmd {
 	pub fn is_undo_op(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::Undo | Verb::Redo))
 	}
+	pub fn is_inplace_edit(&self) -> bool {
+		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::ReplaceChar(_) | Verb::ToggleCaseSingle)) &&
+		self.motion.is_none()
+	}
 	pub fn is_line_motion(&self) -> bool {
 		self.motion.as_ref().is_some_and(|m| {
 			matches!(m.1, 
@@ -165,7 +169,8 @@ pub enum Verb {
 	Yank,
 	Rot13, // lol
 	ReplaceChar(char),
-	ToggleCase,
+	ToggleCaseSingle,
+	ToggleCaseRange,
 	ToLower,
 	ToUpper,
 	Complete,
@@ -203,7 +208,8 @@ impl Verb {
 			Self::ReplaceChar(_) |
 			Self::ToLower |
 			Self::ToUpper |
-			Self::ToggleCase |
+			Self::ToggleCaseRange |
+			Self::ToggleCaseSingle |
 			Self::Put(_) |
 			Self::ReplaceMode |
 			Self::InsertModeLineBreak(_) |
@@ -221,7 +227,8 @@ impl Verb {
 			Self::Delete |
 			Self::Change |
 			Self::ReplaceChar(_) |
-			Self::ToggleCase |
+			Self::ToggleCaseRange |
+			Self::ToggleCaseSingle |
 			Self::ToLower |
 			Self::ToUpper |
 			Self::RepeatLast |

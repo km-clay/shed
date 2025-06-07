@@ -2,16 +2,14 @@ use crate::prompt::readline::{linebuf::LineBuf, vimode::{ViInsert, ViMode, ViNor
 
 use super::super::*;
 
-
-fn assert_normal_cmd(cmd: &str, start: &str, cursor: usize, expected_buf: &str, expected_cursor: usize) {
+fn normal_cmd(cmd: &str, buf: &str, cursor: usize, expected_buf: &str, expected_cursor: usize) -> bool {
 	let cmd = ViNormal::new()
 		.cmds_from_raw(cmd)
 		.pop()
 		.unwrap();
-	let mut buf = LineBuf::new().with_initial(start, cursor);
+	let mut buf = LineBuf::new().with_initial(buf, cursor);
 	buf.exec_cmd(cmd).unwrap();
-	assert_eq!(buf.as_str(),expected_buf);
-	assert_eq!(buf.cursor.get(),expected_cursor);
+	buf.as_str() == expected_buf && buf.cursor.get() == expected_cursor
 }
 
 #[test]
@@ -97,7 +95,7 @@ fn linebuf_this_line() {
 	let initial = "This is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line";
 	let mut buf = LineBuf::new().with_initial(initial, 57);
 	let (start,end) = buf.this_line();
-	assert_eq!(buf.slice(start..end), Some("This is the third line"))
+	assert_eq!(buf.slice(start..end), Some("This is the third line\n"))
 }
 
 #[test]
@@ -105,7 +103,7 @@ fn linebuf_prev_line() {
 	let initial = "This is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line";
 	let mut buf = LineBuf::new().with_initial(initial, 57);
 	let (start,end) = buf.nth_prev_line(1).unwrap();
-	assert_eq!(buf.slice(start..end), Some("This is the second line"))
+	assert_eq!(buf.slice(start..end), Some("This is the second line\n"))
 }
 
 #[test]
@@ -113,7 +111,7 @@ fn linebuf_prev_line_first_line_is_empty() {
 	let initial = "\nThis is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line";
 	let mut buf = LineBuf::new().with_initial(initial, 36);
 	let (start,end) = buf.nth_prev_line(1).unwrap();
-	assert_eq!(buf.slice(start..end), Some("This is the first line"))
+	assert_eq!(buf.slice(start..end), Some("This is the first line\n"))
 }
 
 #[test]
@@ -129,7 +127,7 @@ fn linebuf_next_line_last_line_is_empty() {
 	let initial = "This is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line\n";
 	let mut buf = LineBuf::new().with_initial(initial, 57);
 	let (start,end) = buf.nth_next_line(1).unwrap();
-	assert_eq!(buf.slice(start..end), Some("This is the fourth line"))
+	assert_eq!(buf.slice(start..end), Some("This is the fourth line\n"))
 }
 
 #[test]
@@ -137,7 +135,7 @@ fn linebuf_next_line_several_trailing_newlines() {
 	let initial = "This is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line\n\n\n\n";
 	let mut buf = LineBuf::new().with_initial(initial, 81);
 	let (start,end) = buf.nth_next_line(1).unwrap();
-	assert_eq!(buf.slice(start..end), Some(""))
+	assert_eq!(buf.slice(start..end), Some("\n"))
 }
 
 #[test]
@@ -146,7 +144,7 @@ fn linebuf_next_line_only_newlines() {
 	let mut buf = LineBuf::new().with_initial(initial, 7);
 	let (start,end) = buf.nth_next_line(1).unwrap();
 	assert_eq!(start, 8);
-	assert_eq!(buf.slice(start..end), Some(""))
+	assert_eq!(buf.slice(start..end), Some("\n"))
 }
 
 #[test]
@@ -154,8 +152,8 @@ fn linebuf_prev_line_only_newlines() {
 	let initial = "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n";
 	let mut buf = LineBuf::new().with_initial(initial, 7);
 	let (start,end) = buf.nth_prev_line(1).unwrap();
+	assert_eq!(buf.slice(start..end), Some("\n"));
 	assert_eq!(start, 6);
-	assert_eq!(buf.slice(start..end), Some(""))
 }
 
 #[test]
@@ -202,90 +200,141 @@ fn linebuf_cursor_motion() {
 
 #[test]
 fn editor_delete_word() {
-	assert_normal_cmd(
+	assert!(normal_cmd(
 		"dw",
 		"The quick brown fox jumps over the lazy dog",
 		16,
 		"The quick brown jumps over the lazy dog",
 		16
-	);
+	));
 }
 
 #[test]
 fn editor_delete_backwards() {
-	assert_normal_cmd(
+	assert!(normal_cmd(
 		"2db",
 		"The quick brown fox jumps over the lazy dog",
 		16,
 		"The fox jumps over the lazy dog",
 		4
-	);
+	));
 }
 
 #[test]
 fn editor_rot13_five_words_backwards() {
-	assert_normal_cmd(
+	assert!(normal_cmd(
 		"g?5b",
 		"The quick brown fox jumps over the lazy dog",
 		31,
 		"The dhvpx oebja sbk whzcf bire the lazy dog",
 		4
-	);
+	));
 }
 
 #[test]
 fn editor_delete_word_on_whitespace() {
-	assert_normal_cmd(
+	assert!(normal_cmd(
 		"dw",
 		"The quick  brown fox",
 		10, // on the whitespace between "quick" and "brown"
 		"The quick brown fox",
 		10
-	);
+	));
 }
 
 #[test]
 fn editor_delete_5_words() {
-	assert_normal_cmd(
+	assert!(normal_cmd(
 		"5dw",
 		"The quick brown fox jumps over the lazy dog",
 		16, 
 		"The quick brown dog",
 		16
-	);
+	));
 }
 
 #[test]
 fn editor_delete_end_includes_last() {
-	assert_normal_cmd(
+	assert!(normal_cmd(
 		"de",
 		"The quick brown fox::::jumps over the lazy dog",
 		16,
 		"The quick brown ::::jumps over the lazy dog",
 		16
-	);
+	));
 }
 
 #[test]
 fn editor_delete_end_unicode_word() {
-	assert_normal_cmd(
+	assert!(normal_cmd(
 		"de",
 		"naïve café world",
 		0,
 		" café world", // deletes "naïve"
 		0
-	);
+	));
 }
 
-const LOREM_IPSUM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+#[test]
+fn editor_inplace_edit_cursor_position() {
+	assert!(normal_cmd(
+		"5~",
+		"foobar",
+		0,
+		"FOOBAr", // deletes "naïve"
+		4
+	));
+	assert!(normal_cmd(
+		"5rg",
+		"foobar",
+		0,
+		"gggggr", // deletes "naïve"
+		4
+	));
+}
+
+#[test]
+fn editor_overshooting_motions() {
+	assert!(normal_cmd(
+		"5dw",
+		"foo bar",
+		0,
+		"", // deletes "naïve"
+		0
+	));
+	assert!(normal_cmd(
+		"3db",
+		"foo bar",
+		0,
+		"foo bar", // deletes "naïve"
+		0
+	));
+	assert!(normal_cmd(
+		"3dj",
+		"foo bar",
+		0,
+		"foo bar", // deletes "naïve"
+		0
+	));
+	assert!(normal_cmd(
+		"3dk",
+		"foo bar",
+		0,
+		"foo bar", // deletes "naïve"
+		0
+	));
+}
+
+
+const LOREM_IPSUM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\nUt enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra.";
 
 #[test]
 fn editor_delete_line_up() {
-	assert_normal_cmd(
+	assert!(normal_cmd(
 		"dk",
 		LOREM_IPSUM,
 		237,
-		"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
-		126,
-	)
+		"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra.",
+		240,
+	))
 }

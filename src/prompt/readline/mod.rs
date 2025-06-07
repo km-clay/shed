@@ -94,7 +94,7 @@ impl FernVi {
 
 	pub fn get_layout(&mut self) -> Layout {
 		let line = self.editor.as_str().to_string();
-		let to_cursor = self.editor.slice_to_cursor().unwrap();
+		let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
 		self.writer.get_layout_from_parts(&self.prompt, to_cursor, &line)
 	}
 
