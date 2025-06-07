@@ -291,7 +291,6 @@ impl TermReader {
 	}
 
 	pub fn peek_byte(&mut self) -> std::io::Result<u8> {
-		flog!(DEBUG,"filling buffer");
 		let buf = self.buffer.fill_buf()?;
 		if buf.is_empty() {
 			Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "EOF"))
@@ -491,7 +490,6 @@ impl LineWriter {
 			self.buffer.push_str("\x1b[2K\x1b[A");
 		}
 		self.buffer.push_str("\x1b[2K");
-		flog!(DEBUG, self.buffer);
 		write_all(self.out,self.buffer.as_str())?;
 		self.buffer.clear();
 		Ok(())
@@ -560,7 +558,7 @@ impl LineWriter {
 		self.buffer.push_str(prompt);
 		self.buffer.push_str(line.as_str());
 
-		if end.col == 0 && end.row > 0 {
+		if end.col == 0 && end.row > 0 && !self.buffer.ends_with('\n') {
 			// The line has wrapped. We need to use our own line break.
 			self.buffer.push('\n');
 		}

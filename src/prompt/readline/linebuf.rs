@@ -1,8 +1,9 @@
 use std::{ops::{Range, RangeBounds, RangeInclusive}, string::Drain};
 
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
-use super::{term::Layout, vicmd::{Direction, Motion, MotionBehavior, MotionCmd, RegisterName, To, Verb, ViCmd, Word}};
+use super::{term::Layout, vicmd::{Anchor, Dest, Direction, Motion, MotionBehavior, MotionCmd, RegisterName, To, Verb, ViCmd, Word}};
 use crate::{libsh::error::ShResult, prelude::*};
 
 #[derive(PartialEq,Eq,Debug,Clone,Copy)]
@@ -90,6 +91,10 @@ pub enum MotionKind {
 	Onto(usize), // Absolute position, operations include the position but motions exclude it (wtf vim)
 	Inclusive((usize,usize)), // Range, inclusive
 	Exclusive((usize,usize)), // Range, exclusive
+
+	// Used for linewise operations like 'dj', left is the selected range, right is the cursor's new position
+	InclusiveWithTarget((usize,usize),usize), 
+	ExclusiveWithTarget((usize,usize),usize), 
 	Null
 }
 
@@ -338,10 +343,20 @@ impl LineBuf {
 		})?;
 		self.buffer.get(start_index..end_index)
 	}
+	pub fn slice_inclusive(&mut self, range: RangeInclusive<usize>) -> Option<&str> {
+		self.update_graphemes_lazy();
+		let start_index = self.grapheme_indices().get(*range.start()).copied()?;
+		let end_index = self.grapheme_indices().get(*range.end()).copied().or_else(|| {
+			if *range.end() == self.grapheme_indices().len() {
+				Some(self.buffer.len())
+			} else {
+				None
+			}
+		})?;
+		self.buffer.get(start_index..end_index)
+	}
 	pub fn slice_to(&mut self, end: usize) -> Option<&str> {
 		self.update_graphemes_lazy();
-		flog!(DEBUG,end);
-		flog!(DEBUG,self.grapheme_indices().len());
 		let grapheme_index = self.grapheme_indices().get(end).copied().or_else(|| {
 			if end == self.grapheme_indices().len() {
 				Some(self.buffer.len())
@@ -364,6 +379,9 @@ impl LineBuf {
 	}	
 	pub fn drain(&mut self, start: usize, end: usize) -> String {
 		let drained = if end == self.grapheme_indices().len() {
+			if start == self.grapheme_indices().len() {
+				return String::new()
+			}
 			let start = self.grapheme_indices()[start];
 			self.buffer.drain(start..).collect()
 		} else {
@@ -383,8 +401,11 @@ impl LineBuf {
 		self.update_graphemes();
 	}
 	pub fn insert_at_cursor(&mut self, ch: char) {
-		let cursor_pos = self.cursor_byte_pos();
-		self.buffer.insert(cursor_pos, ch);
+		self.insert_at(self.cursor.get(), ch);
+	}
+	pub fn insert_at(&mut self, pos: usize, ch: char) {
+		let pos = self.index_byte_pos(pos);
+		self.buffer.insert(pos, ch);
 		self.update_graphemes();
 	}
 	pub fn set_buffer(&mut self, buffer: String) {
@@ -407,55 +428,48 @@ impl LineBuf {
 			self.last_selection = self.select_range.take();
 		}
 	}
-	pub fn rfind_newlines(&mut self, n: usize) -> usize {
+	pub fn rfind_newlines(&mut self, n: usize) -> (usize,bool) {
 		self.rfind_newlines_from(self.cursor.get(), n)
 	}
-	pub fn find_newlines(&mut self, n: usize) -> usize {
+	pub fn find_newlines(&mut self, n: usize) -> (usize,bool) {
 		self.find_newlines_from(self.cursor.get(), n)
 	}
-	pub fn rfind_newlines_from(&mut self, start_pos: usize, n: usize) -> usize {
-		let Some(slice) = self.slice_to(start_pos) else {
-			return 0
+	pub fn find_newlines_in_direction(&mut self, start_pos: usize, n: usize, dir: Direction) -> (usize, bool) {
+		if n == 0 {
+			return (start_pos,true)
+		}
+		let mut indices_iter = self.directional_indices_iter_from(start_pos, dir);
+		let default = match dir {
+			Direction::Backward => 0,
+			Direction::Forward => self.cursor.max
 		};
-
-		let mut offset = slice.len();
+		let mut result;
 		let mut count = 0;
 
-		for (i, b) in slice.bytes().rev().enumerate() {
-			if b == b'\n' {
-				count += 1;
-				if count == n {
-					offset = slice.len() - i - 1;
-					break;
-				}
+		// Special case: newline at start_pos
+		if self.grapheme_at(start_pos) == Some("\n") {
+			count += 1;
+			indices_iter.next();
+			if n == 1 {
+				return (start_pos,true);
 			}
 		}
 
-		let byte_pos = if count == n {
-			offset // move to *after* the newline
-		} else {
-			0
-		};
+		while let Some(i) = indices_iter.find(|i| self.grapheme_at(*i) == Some("\n")) {
+			result = i;
+			count += 1;
+			if count == n {
+				return (result, true);
+			}
+		}
 
-		self.find_index_for(byte_pos).unwrap_or(0)
+		(default, false)
 	}
-	pub fn find_newlines_from(&mut self, start_pos: usize, n: usize) -> usize {
-		let Some(slice) = self.slice_from(start_pos) else {
-			return self.cursor.max
-		};
-
-		let mut count = 0;
-		for (i, b) in slice.bytes().enumerate() {
-			if b == b'\n' {
-				count += 1;
-				if count == n {
-					let byte_pos = self.index_byte_pos(start_pos) + i;
-					return self.find_index_for(byte_pos).unwrap_or(self.cursor.max);
-				}
-			}
-		}
-
-		self.cursor.max
+	pub fn rfind_newlines_from(&mut self, start_pos: usize, n: usize) -> (usize, bool) {
+		self.find_newlines_in_direction(start_pos, n, Direction::Backward)
+	}
+	pub fn find_newlines_from(&mut self, start_pos: usize, n: usize) -> (usize, bool) {
+		self.find_newlines_in_direction(start_pos, n, Direction::Forward)
 	}
 	pub fn find_index_for(&self, byte_pos: usize) -> Option<usize> {
 		self.grapheme_indices()
@@ -463,14 +477,14 @@ impl LineBuf {
 			.ok()
 	}
 	pub fn start_of_cursor_line(&mut self) -> usize {
-		let mut pos = self.rfind_newlines(1);
-		if pos != 0 {
+		let (mut pos,_) = self.rfind_newlines(1);
+		if self.grapheme_at(pos) == Some("\n") || pos != 0 {
 			pos += 1; // Don't include the newline itself
 		}
 		pos
 	}
 	pub fn end_of_cursor_line(&mut self) -> usize {
-		self.find_newlines(1)
+		self.find_newlines(1).0
 	}
 	pub fn this_line(&mut self) -> (usize,usize) {
 		(
@@ -478,36 +492,89 @@ impl LineBuf {
 			self.end_of_cursor_line()
 		)
 	}
-	pub fn prev_line(&mut self) -> Option<(usize,usize)> {
+	pub fn nth_prev_line(&mut self, n: usize) -> Option<(usize,usize)> {
 		if self.start_of_cursor_line() == 0 {
 			return None
 		}
-		let mut start = self.rfind_newlines(2);
-		if start != 0 {
-			start += 1;
-		}
-		let end = self.find_newlines_from(start, 1);
-		Some((start, end))
-	}
-	pub fn next_line(&mut self) -> Option<(usize,usize)> {
-		if self.end_of_cursor_line() == self.cursor.max {
-			return None;
-		}
-		let end = self.find_newlines(2);
-		let start = self.rfind_newlines_from(end, 1) + 1;
+
+		let (start,_) = self.select_lines_up(n);
+		let slice = self.slice_from_cursor()?;
+		let end = slice.find('\n').unwrap_or(self.cursor.max);
 		Some((start,end))
 	}
-	pub fn select_lines_backward(&mut self, n: usize) -> (usize,usize) {
-		let mut start = self.rfind_newlines(n);
-		if start != 0 {
-			start += 1;
+	pub fn nth_next_line(&mut self, n: usize) -> Option<(usize, usize)> {
+		if self.end_of_cursor_line() == self.cursor.max {
+			return None
 		}
-		let end = self.end_of_cursor_line();
+
+		let (_,end) = self.select_lines_down(n);
+		let end_clamped = ClampedUsize::new(end, self.cursor.max, /*exclusive:*/ true);
+		let slice = self.slice_to(end_clamped.get())?;
+		let start = slice.rfind('\n').unwrap_or(0);
+		Some((start,end))
+	}
+	/// Include the leading newline, if any
+	pub fn prev_line_with_leading_newline(&mut self) -> Option<(usize,usize)> {
+		let (mut start,end) = self.nth_prev_line(1)?;
+		start = start.saturating_sub(1);
+		Some((start,end))
+	}
+	/// Include the trailing newline, if any
+	pub fn prev_line_with_trailing_newline(&mut self) -> Option<(usize,usize)> {
+		let (start,mut end) = self.nth_prev_line(1)?;
+		end = (end + 1).min(self.cursor.max);
+		Some((start,end))
+	}
+	/// Include the leading newline, if any
+	pub fn next_line_with_leading_newline(&mut self) -> Option<(usize,usize)> {
+		let (mut start,end) = self.nth_next_line(1)?;
+		start = start.saturating_sub(1);
+		Some((start,end))
+	}
+	/// Include the trailing newline, if any
+	pub fn next_line_with_trailing_newline(&mut self) -> Option<(usize,usize)> {
+		let (start,mut end) = self.nth_next_line(1)?;
+		end = (end + 1).min(self.cursor.max);
+		Some((start,end))
+	}
+	pub fn select_lines_up(&mut self, n: usize) -> (usize,usize) {
+		let (mut start,end) = self.this_line();
+		if start == 0 {
+			return (start,end)
+		}
+
+		for _ in 0..n {
+			let slice = self.slice_to(start - 1).unwrap();
+			if let Some(prev_nl) = slice.rfind('\n') {
+				start = self.find_index_for(prev_nl).unwrap();
+			} else {
+				start = 0;
+				break
+			}
+		}
 		(start,end)
 	}
-	pub fn select_lines_forward(&mut self, n: usize) -> (usize,usize) {
-		let start = self.start_of_cursor_line();
-		let end = self.find_newlines(n);
+	pub fn select_lines_down(&mut self, n: usize) -> (usize,usize) {
+		let (start,mut end) = self.this_line();
+		if end == self.cursor.max {
+			return (start,end)
+		}
+
+		for _ in 0..=n {
+			let next_ln_start = end + 1;
+			if next_ln_start >= self.cursor.max {
+				end = self.cursor.max;
+				break
+			}
+			let slice = self.slice_from(next_ln_start).unwrap();
+			if let Some(next_nl) = slice.find('\n') {
+				end = self.find_index_for(next_nl).unwrap();
+			} else {
+				end = self.cursor.max;
+				break
+			}
+		}
+
 		(start,end)
 	}
 	pub fn handle_edit(&mut self, old: String, new: String, curs_pos: usize) {
@@ -587,6 +654,8 @@ impl LineBuf {
 	///
 	/// Finding the start of a word in the forward direction, and finding the end of a word in the backward direction
 	/// are logically the same operation, if you use a reversed iterator for the backward motion.
+	///
+	/// Tied with 'end_of_word_forward_or_start_of_word_backward_from()' for the longest method name I have ever written
 	pub fn start_of_word_forward_or_end_of_word_backward_from(&mut self, mut pos: usize, word: Word, dir: Direction) -> usize {
 		let default = match dir {
 			Direction::Backward => 0,
@@ -600,20 +669,16 @@ impl LineBuf {
 					return default
 				};
 				let on_boundary = self.grapheme_at(*next).is_none_or(is_whitespace);
-				flog!(DEBUG,on_boundary);
-				flog!(DEBUG,pos);
 				if on_boundary {
 					let Some(idx) = indices_iter.next() else { return default };
 					pos = idx;
 				}
-				flog!(DEBUG,pos);
 
 				// Check current grapheme
 				let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
 					return default
 				};
 				let on_whitespace = is_whitespace(&cur_char);
-				flog!(DEBUG,on_whitespace);
 
 				// Find the next whitespace
 				if !on_whitespace {
@@ -630,7 +695,6 @@ impl LineBuf {
 				let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else { return default };
 				let Some(next_idx) = indices_iter.peek() else { return default };
 				let on_boundary = !is_whitespace(&cur_char) && self.grapheme_at(*next_idx).is_none_or(|c| is_other_class_or_is_ws(c, &cur_char));
-				flog!(DEBUG,on_boundary);
 				if on_boundary {
 					pos = *next_idx
 				}
@@ -639,7 +703,6 @@ impl LineBuf {
 					return default
 				};
 				let on_whitespace = is_whitespace(&cur_char);
-				flog!(DEBUG,on_whitespace);
 
 				// Advance until hitting whitespace or a different character class
 				if !on_whitespace {
@@ -665,7 +728,6 @@ impl LineBuf {
 							.is_some_and(|c| !is_whitespace(c))
 					}
 				).unwrap_or(default);
-				flog!(DEBUG,self.grapheme_at(non_ws_pos));
 				non_ws_pos
 			}
 		}
@@ -765,6 +827,30 @@ impl LineBuf {
 			}
 		}
 	}
+	fn grapheme_index_for_display_col(&self, line: &str, target_col: usize) -> usize {
+		let mut col = 0;
+		for (grapheme_index, g) in line.graphemes(true).enumerate() {
+			let w = g.width();
+			if col + w > target_col {
+				return grapheme_index;
+			}
+			col += w;
+		}
+		// If we reach here, the target_col is past end of line
+		line.graphemes(true).count()
+	}
+	pub fn cursor_col(&mut self) -> usize {
+		let start = self.start_of_cursor_line();
+		let end = self.cursor.get();
+		let Some(slice) = self.slice_inclusive(start..=end) else {
+			return start
+		};
+
+		slice
+			.graphemes(true)
+			.map(|g| g.width())
+			.sum()
+	}
 	pub fn rfind_from<F: Fn(&str) -> bool>(&mut self, pos: usize, op: F) -> usize {
 		let Some(slice) = self.slice_to(pos) else {
 			return self.grapheme_indices().len()
@@ -827,12 +913,12 @@ impl LineBuf {
 		let eval = match motion {
 			MotionCmd(count,Motion::WholeLine) => {
 				let start = self.start_of_cursor_line();
-				let end = self.find_newlines(count);
+				let end = self.find_newlines(count).0;
 				MotionKind::Inclusive((start,end))
 			}
 			MotionCmd(count,Motion::WordMotion(to, word, dir)) => {
 				let pos = self.dispatch_word_motion(count, to, word, dir);
-				let mut pos = ClampedUsize::new(pos,self.cursor.max,false);
+				let pos = ClampedUsize::new(pos,self.cursor.max,false);
 				// End-based operations must include the last character
 				// But the cursor must also stop just before it when moving
 				// So we have to do some weird shit to reconcile this behavior
@@ -880,7 +966,6 @@ impl LineBuf {
 				while let Some(idx) = indices.next() {
 					let grapheme = self.grapheme_at(idx).unwrap();
 					if !is_whitespace(grapheme) {
-						flog!(DEBUG,grapheme);
 						first_graphical = Some(idx);
 						break
 					}
@@ -895,18 +980,98 @@ impl LineBuf {
 			}
 			MotionCmd(_,Motion::BeginningOfLine) => MotionKind::On(self.start_of_cursor_line()),
 			MotionCmd(count,Motion::EndOfLine) => {
-				let pos = self.find_newlines(count);
+				let pos = self.find_newlines(count).0;
 				MotionKind::On(pos)
 			}
-			MotionCmd(count,Motion::CharSearch(direction, dest, ch)) => todo!(),
+			MotionCmd(count,Motion::CharSearch(direction, dest, ch)) => {
+				let ch_str = &format!("{ch}");
+				let mut pos = self.cursor;
+				for _ in 0..count {
+					let mut indices_iter = self.directional_indices_iter_from(pos.get(), direction);
+
+					let Some(ch_pos) = indices_iter.position(|i| {
+						self.grapheme_at(i) == Some(ch_str)
+					}) else {
+						return MotionKind::Null
+					};
+					match direction {
+						Direction::Forward => pos.add(ch_pos + 1),
+						Direction::Backward => pos.sub(ch_pos.saturating_sub(1)),
+					}
+
+					if dest == Dest::Before {
+						match direction {
+							Direction::Forward => pos.sub(1),
+							Direction::Backward => pos.add(1),
+						}
+					}
+				}
+				MotionKind::Onto(pos.get())
+			}
 			MotionCmd(count,Motion::BackwardChar) => MotionKind::On(self.cursor.ret_sub(1)),
 			MotionCmd(count,Motion::ForwardChar) => MotionKind::On(self.cursor.ret_add_inclusive(1)),
-			MotionCmd(count,Motion::LineUp) => todo!(),
-			MotionCmd(count,Motion::LineUpCharwise) => todo!(),
+			MotionCmd(count,Motion::LineDown) |
+			MotionCmd(count,Motion::LineUp) => {
+				let Some((start,end)) = (match motion.1 {
+					Motion::LineUp => self.nth_prev_line(1),
+					Motion::LineDown => self.nth_next_line(1),
+					_ => unreachable!()
+				}) else {
+					flog!(WARN, "failed to find target line");
+					return MotionKind::Null
+				};
+				flog!(DEBUG, self.slice(start..end));
+
+				let target_col = if let Some(col) = self.saved_col {
+					col 
+				} else {
+					let col = self.cursor_col();
+					self.saved_col = Some(col);
+					col
+				};
+
+				let Some(line) = self.slice(start..end).map(|s| s.to_string()) else {
+					return MotionKind::Null
+				};
+				let target_pos = start + self.grapheme_index_for_display_col(&line, target_col);
+
+				let (start,end) = match motion.1 {
+					Motion::LineUp => (start,self.end_of_cursor_line()),
+					Motion::LineDown => (self.start_of_cursor_line(),end),
+					_ => unreachable!()
+				};
+
+				MotionKind::InclusiveWithTarget((start,end),target_pos)
+			}
+			MotionCmd(count,Motion::LineDownCharwise) |
+			MotionCmd(count,Motion::LineUpCharwise) => {
+				let Some((start,end)) = (match motion.1 {
+					Motion::LineUpCharwise => self.nth_prev_line(1),
+					Motion::LineDownCharwise => self.nth_next_line(1),
+					_ => unreachable!()
+				}) else {
+					return MotionKind::Null
+				};
+				flog!(DEBUG,start,end);
+				flog!(DEBUG, self.slice(start..end));
+
+				let target_col = if let Some(col) = self.saved_col {
+					col 
+				} else {
+					let col = self.cursor_col();
+					self.saved_col = Some(col);
+					col
+				};
+
+				let Some(line) = self.slice(start..end).map(|s| s.to_string()) else {
+					return MotionKind::Null
+				};
+				let target_pos = start + self.grapheme_index_for_display_col(&line, target_col);
+
+				MotionKind::On(target_pos)
+			}
 			MotionCmd(count,Motion::ScreenLineUp) => todo!(),
 			MotionCmd(count,Motion::ScreenLineUpCharwise) => todo!(),
-			MotionCmd(count,Motion::LineDown) => todo!(),
-			MotionCmd(count,Motion::LineDownCharwise) => todo!(),
 			MotionCmd(count,Motion::ScreenLineDown) => todo!(),
 			MotionCmd(count,Motion::ScreenLineDownCharwise) => todo!(),
 			MotionCmd(count,Motion::BeginningOfScreenLine) => todo!(),
@@ -984,7 +1149,9 @@ impl LineBuf {
 					std::cmp::Ordering::Equal => { /* Do nothing */ }
 				}
 			}
+			MotionKind::InclusiveWithTarget((_,_),start) |
 			MotionKind::Inclusive((start,_)) |
+			MotionKind::ExclusiveWithTarget((_,_),start) |
 			MotionKind::Exclusive((start,_)) => {
 				self.cursor.set(start)
 			}
@@ -1016,11 +1183,13 @@ impl LineBuf {
 				};
 				ordered(self.cursor.get(), pos)
 			}
+			MotionKind::InclusiveWithTarget((start,end),_) |
 			MotionKind::Inclusive((start,end)) => {
 				let (start, mut end) = ordered(*start, *end);
 				end = ClampedUsize::new(end, self.cursor.max, false).ret_add(1);
 				(start,end)
 			}
+			MotionKind::ExclusiveWithTarget((start,end),_) |
 			MotionKind::Exclusive((start,end)) => ordered(*start, *end),
 			MotionKind::Null => return None
 		};
@@ -1034,7 +1203,6 @@ impl LineBuf {
 				let Some((start,end)) = self.range_from_motion(&motion) else {
 					return Ok(())
 				};
-				flog!(DEBUG,start,end);
 				let register_text = if verb == Verb::Yank {
 					self.slice(start..end)
 						.map(|c| c.to_string())
@@ -1043,19 +1211,19 @@ impl LineBuf {
 					self.drain(start, end)
 				};
 				register.write_to_register(register_text);
-				self.cursor.set(start);
+				match motion {
+					MotionKind::ExclusiveWithTarget((_,_),pos) |
+					MotionKind::InclusiveWithTarget((_,_),pos) => self.cursor.set(pos),
+					_ => self.cursor.set(start),
+				}
 			}
 			Verb::Rot13 => {
-				flog!(DEBUG,motion);
 				let Some((start,end)) = self.range_from_motion(&motion) else {
 					return Ok(())
 				};
-				flog!(DEBUG,start,end);
 				let slice = self.slice(start..end)
 					.unwrap_or_default();
-				flog!(DEBUG,slice);
 				let rot13 = rot13(slice);
-				flog!(DEBUG,rot13);
 				self.buffer.replace_range(start..end, &rot13);
 				self.cursor.set(start);
 			}
@@ -1090,7 +1258,15 @@ impl LineBuf {
 
 				}
 			}
-			Verb::InsertModeLineBreak(anchor) => todo!(),
+			Verb::InsertModeLineBreak(anchor) => {
+				let end = self.end_of_cursor_line();
+				self.insert_at(end,'\n');
+				self.cursor.set(end);
+				match anchor {
+					Anchor::After => self.cursor.add(2),
+					Anchor::Before => { /* Do nothing */ }
+				}
+			}
 
 			Verb::ReplaceMode |
 			Verb::InsertMode |

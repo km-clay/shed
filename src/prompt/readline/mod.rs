@@ -33,36 +33,41 @@ pub struct FernVi {
 
 impl Readline for FernVi {
 	fn readline(&mut self) -> ShResult<String> {
-		self.editor = LineBuf::new().with_initial("The quick brown fox jumps over the lazy dogThe quick brown fox jumps over the a", 1004);
-		let raw_mode = self.reader.raw_mode(); // Restores termios state on drop
+		self.editor = LineBuf::new().with_initial("\nThe quick brown fox jumps over\n the lazy dogThe quick\nbrown fox jumps over the a", 1004);
+		let raw_mode_guard = self.reader.raw_mode(); // Restores termios state on drop
 
 		loop {
 			let new_layout = self.get_layout();
 			if let Some(layout) = self.old_layout.as_ref() {
-				flog!(DEBUG, "clearing???");
 				self.writer.clear_rows(layout)?;
 			}
-			raw_mode.disable_for(|| self.print_line(new_layout))?;
+			raw_mode_guard.disable_for(|| self.print_line(new_layout))?;
 			let key = self.reader.read_key()?;
 			flog!(DEBUG, key);
 
-			let Some(cmd) = self.mode.handle_key(key) else {
+			let Some(mut cmd) = self.mode.handle_key(key) else {
 				continue
 			};
+			cmd.alter_line_motion_if_no_verb();
+
+			if cmd.should_submit() {
+				raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
+				return Ok(std::mem::take(&mut self.editor.buffer))
+			}
 
 			if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
 				if self.editor.buffer.is_empty() {
-					std::mem::drop(raw_mode);
+					std::mem::drop(raw_mode_guard);
 					sh_quit(0);
 				} else {
 					self.editor.buffer.clear();
 					continue
 				}
 			}
+			flog!(DEBUG,cmd);
 
 			self.exec_cmd(cmd)?;
 
-			flog!(DEBUG,self.editor.buffer);
 		}
 	}
 }

@@ -103,7 +103,26 @@ impl ViCmd {
 		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::Undo | Verb::Redo))
 	}
 	pub fn is_line_motion(&self) -> bool {
-		self.motion.as_ref().is_some_and(|m| matches!(m.1, Motion::LineUp | Motion::LineDown))
+		self.motion.as_ref().is_some_and(|m| {
+			matches!(m.1, 
+				Motion::LineUp |
+				Motion::LineDown |
+				Motion::LineUpCharwise |
+				Motion::LineDownCharwise
+			)
+		})
+	}
+	/// If a ViCmd has a linewise motion, but no verb, we change it to charwise
+	pub fn alter_line_motion_if_no_verb(&mut self) {
+		if self.is_line_motion() && self.verb.is_none() {
+			if let Some(motion) = self.motion.as_mut() {
+				match motion.1 {
+					Motion::LineUp => motion.1 = Motion::LineUpCharwise,
+					Motion::LineDown => motion.1 = Motion::LineDownCharwise,
+					_ => unreachable!()
+				}
+			}
+		}
 	}
 	pub fn is_mode_transition(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| {

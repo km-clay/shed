@@ -2,6 +2,7 @@ use crate::prompt::readline::{linebuf::LineBuf, vimode::{ViInsert, ViMode, ViNor
 
 use super::super::*;
 
+
 fn assert_normal_cmd(cmd: &str, start: &str, cursor: usize, expected_buf: &str, expected_cursor: usize) {
 	let cmd = ViNormal::new()
 		.cmds_from_raw(cmd)
@@ -103,16 +104,58 @@ fn linebuf_this_line() {
 fn linebuf_prev_line() {
 	let initial = "This is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line";
 	let mut buf = LineBuf::new().with_initial(initial, 57);
-	let (start,end) = buf.prev_line().unwrap();
+	let (start,end) = buf.nth_prev_line(1).unwrap();
 	assert_eq!(buf.slice(start..end), Some("This is the second line"))
+}
+
+#[test]
+fn linebuf_prev_line_first_line_is_empty() {
+	let initial = "\nThis is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line";
+	let mut buf = LineBuf::new().with_initial(initial, 36);
+	let (start,end) = buf.nth_prev_line(1).unwrap();
+	assert_eq!(buf.slice(start..end), Some("This is the first line"))
 }
 
 #[test]
 fn linebuf_next_line() {
 	let initial = "This is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line";
 	let mut buf = LineBuf::new().with_initial(initial, 57);
-	let (start,end) = buf.next_line().unwrap();
+	let (start,end) = buf.nth_next_line(1).unwrap();
 	assert_eq!(buf.slice(start..end), Some("This is the fourth line"))
+}
+
+#[test]
+fn linebuf_next_line_last_line_is_empty() {
+	let initial = "This is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line\n";
+	let mut buf = LineBuf::new().with_initial(initial, 57);
+	let (start,end) = buf.nth_next_line(1).unwrap();
+	assert_eq!(buf.slice(start..end), Some("This is the fourth line"))
+}
+
+#[test]
+fn linebuf_next_line_several_trailing_newlines() {
+	let initial = "This is the first line\nThis is the second line\nThis is the third line\nThis is the fourth line\n\n\n\n";
+	let mut buf = LineBuf::new().with_initial(initial, 81);
+	let (start,end) = buf.nth_next_line(1).unwrap();
+	assert_eq!(buf.slice(start..end), Some(""))
+}
+
+#[test]
+fn linebuf_next_line_only_newlines() {
+	let initial = "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n";
+	let mut buf = LineBuf::new().with_initial(initial, 7);
+	let (start,end) = buf.nth_next_line(1).unwrap();
+	assert_eq!(start, 8);
+	assert_eq!(buf.slice(start..end), Some(""))
+}
+
+#[test]
+fn linebuf_prev_line_only_newlines() {
+	let initial = "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n";
+	let mut buf = LineBuf::new().with_initial(initial, 7);
+	let (start,end) = buf.nth_prev_line(1).unwrap();
+	assert_eq!(start, 6);
+	assert_eq!(buf.slice(start..end), Some(""))
 }
 
 #[test]
@@ -232,4 +275,17 @@ fn editor_delete_end_unicode_word() {
 		" café world", // deletes "naïve"
 		0
 	);
+}
+
+const LOREM_IPSUM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+
+#[test]
+fn editor_delete_line_up() {
+	assert_normal_cmd(
+		"dk",
+		LOREM_IPSUM,
+		237,
+		"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
+		126,
+	)
 }
