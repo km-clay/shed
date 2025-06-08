@@ -669,7 +669,7 @@ impl LineWriter for TermWriter {
 		let cursor = new_layout.cursor;
 
 		self.buffer.push_str(prompt);
-		self.buffer.push_str(line.as_str());
+		self.buffer.push_str(&line.to_string());
 
 		if end.col == 0 && end.row > 0 && !self.buffer.ends_with('\n') {
 			// The line has wrapped. We need to use our own line break.

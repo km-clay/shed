@@ -1,10 +1,10 @@
-use std::{ops::{Range, RangeBounds, RangeInclusive}, string::Drain};
+use std::{fmt::Display, ops::{Range, RangeBounds, RangeInclusive}, string::Drain};
 
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::{term::Layout, vicmd::{Anchor, Dest, Direction, Motion, MotionBehavior, MotionCmd, RegisterName, To, Verb, ViCmd, Word}};
-use crate::{libsh::error::{ShErr, ShErrKind, ShResult}, prelude::*};
+use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, term::{Style, Styled}}, prelude::*};
 
 #[derive(Default,PartialEq,Eq,Debug,Clone,Copy)]
 pub enum CharClass {
@@ -300,11 +300,31 @@ impl LineBuf {
 		self.cursor = ClampedUsize::new(cursor, self.grapheme_indices().len(), self.cursor.exclusive);
 		self
 	}
+	pub fn take_buf(&mut self) -> String {
+		std::mem::take(&mut self.buffer)
+	}
 	pub fn has_hint(&self) -> bool {
 		self.hint.is_some()
 	}
 	pub fn hint(&self) -> Option<&String> {
 		self.hint.as_ref()
+	}
+	pub fn set_hint(&mut self, hint: Option<String>) {
+		if let Some(hint) = hint {
+			let hint = hint.strip_prefix(&self.buffer).unwrap(); // If this ever panics, I will eat my hat
+			if !hint.is_empty() {
+				self.hint = Some(hint.to_string())
+			}
+		} else {
+			self.hint = None
+		}
+		flog!(DEBUG,self.hint)
+	}
+	pub fn accept_hint(&mut self) {
+		let Some(hint) = self.hint.take() else { return };
+
+		self.push_str(&hint);
+		self.cursor.add(hint.len());
 	}
 	pub fn set_cursor_clamp(&mut self, yn: bool) {
 		self.cursor.exclusive = yn;
@@ -320,11 +340,13 @@ impl LineBuf {
 			.unwrap_or(self.buffer.len())
 	}
 	/// Update self.grapheme_indices with the indices of the current buffer
+	#[track_caller]
 	pub fn update_graphemes(&mut self) {
 		let indices: Vec<_> = self.buffer
 			.grapheme_indices(true)
 			.map(|(i,_)| i)
 			.collect();
+		flog!(DEBUG,std::panic::Location::caller());
 		self.cursor.set_max(indices.len());
 		self.grapheme_indices = Some(indices)
 	}
@@ -697,9 +719,12 @@ impl LineBuf {
 					pos = *next_idx
 				}
 
-				let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
+				let Some(next_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
 					return default
 				};
+				if is_other_class_not_ws(&cur_char, &next_char) {
+					return pos
+				}
 				let on_whitespace = is_whitespace(&cur_char);
 
 				// Advance until hitting whitespace or a different character class
@@ -707,7 +732,7 @@ impl LineBuf {
 					let other_class_pos = indices_iter.find(
 						|i| {
 							self.grapheme_at(*i)
-								.is_some_and(|c| is_other_class_or_is_ws(c, &cur_char))
+								.is_some_and(|c| is_other_class_or_is_ws(c, &next_char))
 						}
 					);
 					let Some(other_class_pos) = other_class_pos else {
@@ -843,6 +868,12 @@ impl LineBuf {
 		}
 		// If we reach here, the target_col is past end of line
 		line.graphemes(true).count()
+	}
+	pub fn cursor_max(&self) -> usize {
+		self.cursor.max
+	}
+	pub fn cursor_at_max(&self) -> bool {
+		self.cursor.get() == self.cursor.upper_bound()
 	}
 	pub fn cursor_col(&mut self) -> usize {
 		let start = self.start_of_line();
@@ -1094,6 +1125,8 @@ impl LineBuf {
 				}
 				MotionKind::On(target.get())
 			}
+			MotionCmd(count, Motion::ForwardCharForced) => MotionKind::On(self.cursor.ret_add(count)),
+			MotionCmd(count, Motion::BackwardCharForced) => MotionKind::On(self.cursor.ret_sub(count)),
 			MotionCmd(count,Motion::LineDown) |
 			MotionCmd(count,Motion::LineUp) => {
 				let Some((start,end)) = (match motion.1 {
@@ -1192,10 +1225,20 @@ impl LineBuf {
 
 		if self.has_hint() {
 			let hint = self.hint.take().unwrap();
+			let saved_buffer = self.buffer.clone(); // cringe
 			self.push_str(&hint);
 			self.move_cursor(motion);
 
-			if self.cursor.get() > last_grapheme_pos {
+			let has_consumed_hint = (
+				self.cursor.exclusive && self.cursor.get() >= last_grapheme_pos
+			) || (
+				!self.cursor.exclusive && self.cursor.get() > last_grapheme_pos
+			);
+			flog!(DEBUG,has_consumed_hint);
+			flog!(DEBUG,self.cursor.get());
+			flog!(DEBUG,last_grapheme_pos);
+
+			if has_consumed_hint {
 				let buf_end = if self.cursor.exclusive {
 					self.cursor.ret_add(1)
 				} else {
@@ -1212,14 +1255,19 @@ impl LineBuf {
 				self.buffer = buffer.to_string();
 	 		} else {
 				let old_buffer = self.slice_to(last_grapheme_pos + 1).unwrap().to_string();
-				let old_hint = self.slice_from(last_grapheme_pos + 1).unwrap().to_string();
+				let Some(old_hint) = self.slice_from(last_grapheme_pos + 1) else {
+					self.set_buffer(format!("{saved_buffer}{hint}"));
+					self.hint = None;
+					return
+				};
 
-				self.hint = Some(old_hint);
+				self.hint = Some(old_hint.to_string());
 				self.set_buffer(old_buffer);
 			}
 		} else {
 			self.move_cursor(motion);
 		}
+		self.update_graphemes();
 	}
 	pub fn move_cursor(&mut self, motion: MotionKind) {
 		match motion {
@@ -1302,7 +1350,10 @@ impl LineBuf {
 						.map(|c| c.to_string())
 						.unwrap_or_default()
 				} else {
-					self.drain(start, end)
+					let drained = self.drain(start, end);
+					self.update_graphemes();
+					flog!(DEBUG,self.cursor);
+					drained
 				};
 				register.write_to_register(register_text);
 				match motion {
@@ -1513,6 +1564,20 @@ impl LineBuf {
 			Verb::Equalize => todo!(),
 			Verb::InsertModeLineBreak(anchor) => {
 				let (mut start,end) = self.this_line();
+				if start == 0 && end == self.cursor.max {
+					match anchor {
+						Anchor::After => {
+							self.push('\n');
+							self.cursor.set(self.cursor_max());
+							return Ok(())
+						}
+						Anchor::Before => {
+							self.insert_at(0, '\n');
+							self.cursor.set(0);
+							return Ok(())
+						}
+					}
+				}
 				// We want the position of the newline, or start of buffer
 				start = start.saturating_sub(1).min(self.cursor.max);
 				match anchor {
@@ -1605,15 +1670,17 @@ impl LineBuf {
 			self.redo_stack.clear();
 		}
 
-		if before != after && !is_undo_op {
-			self.handle_edit(before, after, cursor_pos);
+		if before != after {
+			if !is_undo_op {
+				self.handle_edit(before, after, cursor_pos);
+			}
 			/*
 			 * The buffer has been edited,
 			 * which invalidates the grapheme_indices vector
 			 * We set it to None now, so that self.update_graphemes_lazy()
 			 * will update it when it is needed again
 			 */
-			self.grapheme_indices = None; 
+			self.update_graphemes();
 		}
 
 		if !is_line_motion {
@@ -1630,6 +1697,18 @@ impl LineBuf {
 	}
 	pub fn as_str(&self) -> &str {
 		&self.buffer // FIXME: this will have to be fixed up later
+	}
+}
+
+impl Display for LineBuf {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let buf = self.buffer.clone();
+		write!(f,"{buf}")?;
+		if let Some(hint) = self.hint() {
+			let hint_styled = hint.styled(Style::BrightBlack);
+			write!(f,"{hint_styled}")?;
+		}
+		Ok(())
 	}
 }
 

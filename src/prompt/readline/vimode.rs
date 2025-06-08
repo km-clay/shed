@@ -119,7 +119,7 @@ impl ViMode for ViInsert {
 			E(K::Char('H'), M::CTRL) |
 			E(K::Backspace, M::NONE) => {
 				self.pending_cmd.set_verb(VerbCmd(1,Verb::Delete));
-				self.pending_cmd.set_motion(MotionCmd(1,Motion::BackwardChar));
+				self.pending_cmd.set_motion(MotionCmd(1,Motion::BackwardCharForced));
 				self.register_and_return()
 			}
 

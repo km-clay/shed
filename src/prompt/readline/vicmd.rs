@@ -264,6 +264,8 @@ pub enum Motion {
 	CharSearch(Direction,Dest,char),
 	BackwardChar,
 	ForwardChar,
+	BackwardCharForced, // These two variants can cross line boundaries
+	ForwardCharForced,
 	LineUp,
 	LineUpCharwise,
 	ScreenLineUp,

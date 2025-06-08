@@ -1,8 +1,9 @@
+use history::{History, SearchConstraint, SearchKind};
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{LineBuf, SelectAnchor, SelectMode};
 use nix::libc::STDOUT_FILENO;
 use term::{get_win_size, raw_mode, KeyReader, Layout, LineWriter, TermReader, TermWriter};
-use vicmd::{Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
+use vicmd::{Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
 use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
 use crate::libsh::{error::{ShErr, ShErrKind, ShResult}, sys::sh_quit, term::{Style, Styled}};
@@ -15,6 +16,7 @@ pub mod keys;
 pub mod vicmd;
 pub mod register;
 pub mod vimode;
+pub mod history;
 
 pub trait Readline {
 	fn readline(&mut self) -> ShResult<String>;
@@ -28,7 +30,8 @@ pub struct FernVi {
 	pub old_layout: Option<Layout>,
 	pub repeat_action: Option<CmdReplay>,
 	pub repeat_motion: Option<MotionCmd>,
-	pub editor: LineBuf
+	pub editor: LineBuf,
+	pub history: History
 }
 
 impl Readline for FernVi {
@@ -36,11 +39,8 @@ impl Readline for FernVi {
 		let raw_mode_guard = raw_mode(); // Restores termios state on drop
 
 		loop {
-			let new_layout = self.get_layout();
-			if let Some(layout) = self.old_layout.as_ref() {
-				self.writer.clear_rows(layout)?;
-			}
-			raw_mode_guard.disable_for(|| self.print_line(new_layout))?;
+			raw_mode_guard.disable_for(|| self.print_line())?;
+
 			let Some(key) = self.reader.read_key() else {
 				raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
 				std::mem::drop(raw_mode_guard);
@@ -48,15 +48,28 @@ impl Readline for FernVi {
 			};
 			flog!(DEBUG, key);
 
+			if self.should_accept_hint(&key) {
+				self.editor.accept_hint();
+				self.history.update_pending_cmd(self.editor.as_str());
+				self.print_line()?;
+				continue
+			}
+
 			let Some(mut cmd) = self.mode.handle_key(key) else {
 				continue
 			};
 			cmd.alter_line_motion_if_no_verb();
 
+			if self.should_grab_history(&cmd) {
+				self.scroll_history(cmd);
+				self.print_line()?;
+				continue
+			}
+
 			if cmd.should_submit() {
 				raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
 				std::mem::drop(raw_mode_guard);
-				return Ok(std::mem::take(&mut self.editor.buffer))
+				return Ok(self.editor.take_buf())
 			}
 
 			if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
@@ -70,21 +83,23 @@ impl Readline for FernVi {
 			}
 			flog!(DEBUG,cmd);
 
+			let before = self.editor.buffer.clone();
 			self.exec_cmd(cmd)?;
+			let after = self.editor.as_str();
 
+			if before != after {
+				self.history.update_pending_cmd(self.editor.as_str());
+			}
+
+			let hint = self.history.get_hint();
+			self.editor.set_hint(hint);
 		}
 	}
 }
 
-impl Default for FernVi {
-	fn default() -> Self {
-	  Self::new(None)
-	}
-}
-
 impl FernVi {
-	pub fn new(prompt: Option<String>) -> Self {
-		Self {
+	pub fn new(prompt: Option<String>) -> ShResult<Self> {
+		Ok(Self {
 			reader: Box::new(TermReader::new()),
 			writer: Box::new(TermWriter::new(STDOUT_FILENO)),
 			prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
@@ -92,12 +107,14 @@ impl FernVi {
 			old_layout: None,
 			repeat_action: None,
 			repeat_motion: None,
-			editor: LineBuf::new().with_initial("\nThe quick brown fox jumps over\n the lazy dogThe quick\nbrown fox jumps over the a", 1004)
-		}
+			editor: LineBuf::new(),
+			history: History::new()?
+		})
 	}
 
 	pub fn get_layout(&mut self) -> Layout {
-		let line = self.editor.as_str().to_string();
+		let line = self.editor.to_string();
+		flog!(DEBUG,line);
 		let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
 		let (cols,_) = get_win_size(STDIN_FILENO);
 		Layout::from_parts(
@@ -107,9 +124,110 @@ impl FernVi {
 			to_cursor,
 			&line
 		)
+	}	
+	pub fn scroll_history(&mut self, cmd: ViCmd) {
+		flog!(DEBUG,"scrolling");
+		/*
+		if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
+			let constraint = SearchConstraint::new(SearchKind::Prefix, self.editor.to_string());
+			self.history.constrain_entries(constraint);
+		}
+		*/
+		let count = &cmd.motion().unwrap().0;
+		let motion = &cmd.motion().unwrap().1;
+		flog!(DEBUG,count,motion);
+		flog!(DEBUG,self.history.masked_entries());
+		let entry = match motion {
+			Motion::LineUpCharwise => {
+				let Some(hist_entry) = self.history.scroll(-(*count as isize)) else {
+					return
+				};
+				flog!(DEBUG,"found entry");
+				flog!(DEBUG,hist_entry.command());
+				hist_entry
+			}
+			Motion::LineDownCharwise => {
+				let Some(hist_entry) = self.history.scroll(*count as isize) else {
+					return
+				};
+				flog!(DEBUG,"found entry");
+				flog!(DEBUG,hist_entry.command());
+				hist_entry
+			}
+			_ => unreachable!()
+		};
+		let col = self.editor.saved_col.unwrap_or(self.editor.cursor_col());
+		let mut buf = LineBuf::new().with_initial(entry.command(),0);
+		let line_end = buf.end_of_line();
+		if let Some(dest) = self.mode.hist_scroll_start_pos() {
+			match dest {
+				To::Start => {
+					/* Already at 0 */
+				}
+				To::End => {
+					// History entries cannot be empty
+					// So this subtraction is safe (maybe)
+					buf.cursor.add(line_end);
+				}
+			}
+		} else {
+			let target = (col).min(line_end);
+			buf.cursor.add(target);
+		}
+
+		self.editor = buf
+	}	
+	pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
+		flog!(DEBUG,self.editor.cursor_at_max());
+		flog!(DEBUG,self.editor.cursor);
+		if self.editor.cursor_at_max() && self.editor.has_hint() {
+			match self.mode.report_mode() {
+				ModeReport::Replace |
+				ModeReport::Insert => {
+					matches!(
+						event,
+						KeyEvent(KeyCode::Right, ModKeys::NONE)
+					)
+				}
+				ModeReport::Visual |
+				ModeReport::Normal => {
+					matches!(
+						event,
+						KeyEvent(KeyCode::Right, ModKeys::NONE)
+					) ||
+					(
+						self.mode.pending_seq().unwrap(/* always Some on normal mode */).is_empty() &&
+						matches!(
+							event,
+							KeyEvent(KeyCode::Char('l'), ModKeys::NONE)
+						)
+					)
+				}
+				_ => unimplemented!()
+			}
+		} else {
+			false
+		}
 	}
 
-	pub fn print_line(&mut self, new_layout: Layout) -> ShResult<()> {
+	pub fn should_grab_history(&mut self, cmd: &ViCmd) -> bool {
+		cmd.verb().is_none() &&
+		(
+			cmd.motion().is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUpCharwise))) &&
+			self.editor.start_of_line() == 0
+		) ||
+		(
+			cmd.motion().is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDownCharwise))) &&
+			self.editor.end_of_line() == self.editor.cursor_max() &&
+			!self.history.cursor_entry().is_some_and(|ent| ent.is_new())
+		)
+	}
+
+	pub fn print_line(&mut self) -> ShResult<()> {
+		let new_layout = self.get_layout();
+		if let Some(layout) = self.old_layout.as_ref() {
+			self.writer.clear_rows(layout)?;
+		}
 
 		self.writer.redraw(
 			&self.prompt,
