@@ -4,10 +4,11 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::{term::Layout, vicmd::{Anchor, Dest, Direction, Motion, MotionBehavior, MotionCmd, RegisterName, To, Verb, ViCmd, Word}};
-use crate::{libsh::error::ShResult, prelude::*};
+use crate::{libsh::error::{ShErr, ShErrKind, ShResult}, prelude::*};
 
-#[derive(PartialEq,Eq,Debug,Clone,Copy)]
+#[derive(Default,PartialEq,Eq,Debug,Clone,Copy)]
 pub enum CharClass {
+	#[default]
 	Alphanum,
 	Symbol,
 	Whitespace,
@@ -37,6 +38,14 @@ impl From<&str> for CharClass {
 		} else {
 			CharClass::Other
 		}
+	}
+}
+
+impl From<char> for CharClass {
+	fn from(value: char) -> Self {
+		let mut buf = [0u8; 4]; // max UTF-8 char size
+		let slice = value.encode_utf8(&mut buf); // get str slice
+		CharClass::from(slice as &str)
 	}
 }
 
@@ -97,6 +106,9 @@ pub enum MotionKind {
 	ExclusiveWithTargetCol((usize,usize),usize), 
 	Null
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MotionRange {}
 
 impl MotionKind {
 	pub fn inclusive(range: RangeInclusive<usize>) -> Self {
@@ -265,6 +277,7 @@ pub struct LineBuf {
 	pub select_range: Option<(usize,usize)>,
 	pub last_selection: Option<(usize,usize)>,
 
+	pub insert_mode_start_pos: Option<usize>,
 	pub saved_col: Option<usize>,
 
 	pub undo_stack: Vec<Edit>,
@@ -337,6 +350,12 @@ impl LineBuf {
 	pub fn grapheme_at_cursor(&mut self) -> Option<&str> {
 		self.grapheme_at(self.cursor.get())
 	}
+	pub fn mark_insert_mode_start_pos(&mut self) {
+		self.insert_mode_start_pos = Some(self.cursor.get())
+	}
+	pub fn clear_insert_mode_start_pos(&mut self) {
+		self.insert_mode_start_pos = None
+	}
 	pub fn slice(&mut self, range: Range<usize>) -> Option<&str> {
 		self.update_graphemes_lazy();
 		let start_index = self.grapheme_indices().get(range.start).copied()?;
@@ -380,9 +399,17 @@ impl LineBuf {
 	pub fn slice_to_cursor(&mut self) -> Option<&str> {
 		self.slice_to(self.cursor.get())
 	}
+	pub fn slice_to_cursor_inclusive(&mut self) -> Option<&str> {
+		self.slice_to(self.cursor.ret_add(1))
+	}
 	pub fn slice_from_cursor(&mut self) -> Option<&str> {
 		self.slice_from(self.cursor.get())
 	}	
+	pub fn remove(&mut self, pos: usize) {
+		let idx = self.index_byte_pos(pos);
+		self.buffer.remove(idx);
+		self.update_graphemes();
+	}
 	pub fn drain(&mut self, start: usize, end: usize) -> String {
 		let drained = if end == self.grapheme_indices().len() {
 			if start == self.grapheme_indices().len() {
@@ -588,7 +615,26 @@ impl LineBuf {
 				To::Start => {
 					match dir {
 						Direction::Forward => self.start_of_word_forward_or_end_of_word_backward_from(pos.get(), word, dir),
-						Direction::Backward => self.end_of_word_forward_or_start_of_word_backward_from(pos.get(), word, dir)
+						Direction::Backward => 'backward: {
+							// We also need to handle insert mode's Ctrl+W behaviors here
+							let target = self.end_of_word_forward_or_start_of_word_backward_from(pos.get(), word, dir);
+
+							// Check to see if we are in insert mode
+							let Some(start_pos) = self.insert_mode_start_pos else {
+								break 'backward target
+							};
+							// If we are in front of start_pos, and we would cross start_pos to reach target
+							// then stop at start_pos
+							if start_pos > target && self.cursor.get() > start_pos {
+								return start_pos
+							} else {
+								// We are behind start_pos, now we just reset it
+								if self.cursor.get() < start_pos {
+									self.clear_insert_mode_start_pos();
+								}
+								break 'backward target
+							}
+						}
 					}
 				}
 				To::End => {
@@ -865,6 +911,15 @@ impl LineBuf {
 	pub fn replace_at_cursor(&mut self, new: &str) {
 		self.replace_at(self.cursor.get(), new);
 	}
+	pub fn force_replace_at(&mut self, pos: usize, new: &str) {
+		let Some(gr) = self.grapheme_at(pos).map(|gr| gr.to_string()) else {
+			self.buffer.push_str(new);
+			return
+		};
+		let start = self.index_byte_pos(pos);
+		let end = start + gr.len();
+		self.buffer.replace_range(start..end, new);
+	}
 	pub fn replace_at(&mut self, pos: usize, new: &str) {
 		let Some(gr) = self.grapheme_at(pos).map(|gr| gr.to_string()) else {
 			self.buffer.push_str(new);
@@ -1112,10 +1167,10 @@ impl LineBuf {
 			MotionCmd(count,Motion::FirstGraphicalOnScreenLine) => todo!(),
 			MotionCmd(count,Motion::HalfOfScreen) => todo!(),
 			MotionCmd(count,Motion::HalfOfScreenLineText) => todo!(),
-			MotionCmd(count,Motion::WholeBuffer) => todo!(),
-			MotionCmd(count,Motion::BeginningOfBuffer) => todo!(),
-			MotionCmd(count,Motion::EndOfBuffer) => todo!(),
-			MotionCmd(count,Motion::ToColumn(col)) => todo!(),
+			MotionCmd(_count,Motion::WholeBuffer) => MotionKind::Exclusive((0,self.grapheme_indices().len())),
+			MotionCmd(_count,Motion::BeginningOfBuffer) => MotionKind::On(0),
+			MotionCmd(_count,Motion::EndOfBuffer) => MotionKind::To(self.grapheme_indices().len()),
+			MotionCmd(_count,Motion::ToColumn) => todo!(),
 			MotionCmd(count,Motion::ToDelimMatch) => todo!(),
 			MotionCmd(count,Motion::ToBrace(direction)) => todo!(),
 			MotionCmd(count,Motion::ToBracket(direction)) => todo!(),
@@ -1233,6 +1288,7 @@ impl LineBuf {
 		};
 		Some(range)
 	}
+	#[allow(clippy::unnecessary_to_owned)]
 	pub fn exec_verb(&mut self, verb: Verb, motion: MotionKind, register: RegisterName) -> ShResult<()> {
 		match verb {
 			Verb::Delete |
@@ -1318,16 +1374,101 @@ impl LineBuf {
 					self.replace_at(i,new);
 				}
 			}
-			Verb::ToLower => todo!(),
-			Verb::ToUpper => todo!(),
-			Verb::Complete => todo!(),
-			Verb::CompleteBackward => todo!(),
-			Verb::Undo => todo!(),
-			Verb::Redo => todo!(),
+			Verb::ToLower => {
+				let Some((start,end)) = self.range_from_motion(&motion) else {
+					return Ok(())
+				};
+				for i in start..end {
+					let Some(gr) = self.grapheme_at(i) else {
+						continue
+					};
+					if gr.len() > 1 || gr.is_empty() {
+						continue
+					}
+					let ch = gr.chars().next().unwrap();
+					if !ch.is_alphabetic() {
+						continue
+					}
+					let mut buf = [0u8;4];
+					let new = if ch.is_ascii_uppercase() {
+						ch.to_ascii_lowercase().encode_utf8(&mut buf)
+					} else {
+						ch.encode_utf8(&mut buf)
+					};
+					self.replace_at(i,new);
+				}
+			}
+			Verb::ToUpper => {
+				let Some((start,end)) = self.range_from_motion(&motion) else {
+					return Ok(())
+				};
+				for i in start..end {
+					let Some(gr) = self.grapheme_at(i) else {
+						continue
+					};
+					if gr.len() > 1 || gr.is_empty() {
+						continue
+					}
+					let ch = gr.chars().next().unwrap();
+					if !ch.is_alphabetic() {
+						continue
+					}
+					let mut buf = [0u8;4];
+					let new = if ch.is_ascii_lowercase() {
+						ch.to_ascii_uppercase().encode_utf8(&mut buf)
+					} else {
+						ch.encode_utf8(&mut buf)
+					};
+					self.replace_at(i,new);
+				}
+			}
+			Verb::Redo |
+			Verb::Undo => {
+				let (edit_provider,edit_receiver) = match verb {
+					Verb::Redo => (&mut self.redo_stack, &mut self.undo_stack),
+					Verb::Undo => (&mut self.undo_stack, &mut self.redo_stack),
+					_ => unreachable!()
+				};
+				let Some(edit) = edit_provider.pop() else { return Ok(()) };
+				let Edit { pos, cursor_pos, old, new, merging: _ } = edit;
+
+				self.buffer.replace_range(pos..pos + new.len(), &old);
+				let new_cursor_pos = self.cursor.get();
+				let in_insert_mode = !self.cursor.exclusive;
+
+				if in_insert_mode {
+					self.cursor.set(cursor_pos)
+				}
+				let new_edit = Edit { pos, cursor_pos: new_cursor_pos, old: new, new: old, merging: false };
+				edit_receiver.push(new_edit);
+				self.update_graphemes();
+			}
 			Verb::RepeatLast => todo!(),
 			Verb::Put(anchor) => todo!(),
 			Verb::SwapVisualAnchor => todo!(),
-			Verb::JoinLines => todo!(),
+			Verb::JoinLines => {
+				let start = self.start_of_line();
+				let Some((_,mut end)) = self.nth_next_line(1) else {
+					return Ok(())
+				};
+				end = end.saturating_sub(1); // exclude the last newline
+				let mut last_was_whitespace = false;
+				for i in start..end {
+					let Some(gr) = self.grapheme_at(i) else {
+						continue
+					};
+					if gr == "\n" {
+						if last_was_whitespace {
+							self.remove(i);
+						} else {
+							self.force_replace_at(i, " ");
+						}
+						last_was_whitespace = false;
+						continue
+					} 
+					last_was_whitespace = is_whitespace(gr);
+				}
+			}
 			Verb::InsertChar(ch) => {
 				self.insert_at_cursor(ch);
 				self.cursor.add(1);
@@ -1338,19 +1479,56 @@ impl LineBuf {
 				self.cursor.add(graphemes);
 			}
 			Verb::Breakline(anchor) => todo!(),
-			Verb::Indent => todo!(),
-			Verb::Dedent => todo!(),
+			Verb::Indent => {
+				let Some((start,end)) = self.range_from_motion(&motion) else {
+					return Ok(())
+				};
+				self.insert_at(start, '\t');
+				let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
+				while let Some(idx) = range_indices.next() {
+					let gr = self.grapheme_at(idx).unwrap();
+					if gr == "\n" {
+						let Some(idx) = range_indices.next() else {
+							self.push('\t');
+							break
+						};
+						self.insert_at(idx, '\t');
+					}
+				}
+
+				match motion {
+					MotionKind::ExclusiveWithTargetCol((_,_),pos) |
+					MotionKind::InclusiveWithTargetCol((_,_),pos) => {
+						self.cursor.set(start);
+						let end = self.end_of_line();
+						self.cursor.add(end.min(pos));
+					}
+					_ => self.cursor.set(start),
+				}
+			}
+			Verb::Dedent => {
+				let (start,end) = self.this_line();
+
+			}
 			Verb::Equalize => todo!(),
 			Verb::InsertModeLineBreak(anchor) => {
-				let end = self.end_of_line();
-				self.insert_at(end,'\n');
-				self.cursor.set(end);
+				let (mut start,end) = self.this_line();
+				// We want the position of the newline, or start of buffer
+				start = start.saturating_sub(1).min(self.cursor.max);
 				match anchor {
-					Anchor::After => self.cursor.add(2),
-					Anchor::Before => { /* Do nothing */ }
+					Anchor::After => {
+						self.cursor.set(end);
+						self.insert_at_cursor('\n');
+					}
+					Anchor::Before => {
+						self.cursor.set(start);
+						self.insert_at_cursor('\n');
+						self.cursor.add(1);
+					}
 				}
 			}
 
+			Verb::Complete |
 			Verb::EndOfFile |
 			Verb::InsertMode |
 			Verb::NormalMode |
@@ -1358,6 +1536,7 @@ impl LineBuf {
 			Verb::ReplaceMode |
 			Verb::VisualModeLine |
 			Verb::VisualModeBlock |
+			Verb::CompleteBackward |
 			Verb::AcceptLineOrNewline |
 			Verb::VisualModeSelectLast => self.apply_motion(motion), // Already handled logic for these
 		}

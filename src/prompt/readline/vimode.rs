@@ -5,6 +5,7 @@ use nix::NixPath;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
+use super::linebuf::CharClass;
 use super::vicmd::{Anchor, Bound, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb, VerbCmd, ViCmd, Word};
 use crate::prelude::*;
 
@@ -111,15 +112,9 @@ impl ViMode for ViInsert {
 				self.register_and_return()
 			}
 			E(K::Char('W'), M::CTRL) => {
-				if self.ctrl_w_is_undo() {
-					self.pending_cmd.set_verb(VerbCmd(1,Verb::Undo));
-					self.cmds.clear();
-					Some(self.take_cmd())
-				} else {
-					self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
-					self.pending_cmd.set_motion(MotionCmd(1, Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)));
-					self.register_and_return()
-				}
+				self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
+				self.pending_cmd.set_motion(MotionCmd(1, Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)));
+				self.register_and_return()
 			}
 			E(K::Char('H'), M::CTRL) |
 			E(K::Backspace, M::NONE) => {
@@ -297,6 +292,7 @@ impl ViNormal {
 	pub fn take_cmd(&mut self) -> String {
 		std::mem::take(&mut self.pending_seq)
 	}
+	#[allow(clippy::unnecessary_unwrap)]
 	fn validate_combination(&self, verb: Option<&Verb>, motion: Option<&Motion>) -> CmdState {
 		if verb.is_none() {
 			match motion {
@@ -663,7 +659,9 @@ impl ViNormal {
 			let Some(ch) = chars_clone.next() else {
 				break 'motion_parse None
 			};
+			// Double inputs like 'dd' and 'cc', and some special cases
 			match (ch, &verb) {
+				// Double inputs
 				('?', Some(VerbCmd(_,Verb::Rot13))) |
 				('d', Some(VerbCmd(_,Verb::Delete))) |
 				('c', Some(VerbCmd(_,Verb::Change))) |
@@ -674,7 +672,20 @@ impl ViNormal {
 				('~', Some(VerbCmd(_,Verb::ToggleCaseRange))) |
 				('>', Some(VerbCmd(_,Verb::Indent))) |
 				('<', Some(VerbCmd(_,Verb::Dedent))) => break 'motion_parse Some(MotionCmd(count, Motion::WholeLine)),
-				_ => {}
+
+				// Exception cases
+				('w', Some(VerbCmd(_, Verb::Change))) => {
+					// 'w' usually means 'to the start of the next word'
+					// e.g. 'dw' deleted to the start of the next word
+					// however, 'cw' only changes to the end of the current word
+					// 'caw' is used to change to the start of the next word
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Normal, Direction::Forward)));
+				}
+				('W', Some(VerbCmd(_, Verb::Change))) => {
+					// Same with 'W'
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Big, Direction::Forward)));
+				}
+				_ => { /* Nothing weird, so let's continue */ }
 			}
 			match ch {
 				'g' => {
@@ -761,7 +772,7 @@ impl ViNormal {
 				}
 				'|' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(1, Motion::ToColumn(count)));
+					break 'motion_parse Some(MotionCmd(count, Motion::ToColumn));
 				}
 				'^' => {
 					chars = chars_clone;
@@ -956,6 +967,8 @@ impl ViVisual {
 	pub fn take_cmd(&mut self) -> String {
 		std::mem::take(&mut self.pending_seq)
 	}
+
+	#[allow(clippy::unnecessary_unwrap)]
 	fn validate_combination(&self, verb: Option<&Verb>, motion: Option<&Motion>) -> CmdState {
 		if verb.is_none() {
 			match motion {
@@ -964,7 +977,7 @@ impl ViVisual {
 				None => return CmdState::Pending
 			}
 		}
-		if verb.is_some() && motion.is_none() {
+		if motion.is_none() && verb.is_some()  {
 			match verb.unwrap() {
 				Verb::Put(_) => CmdState::Complete,
 				_ => CmdState::Pending
@@ -1307,28 +1320,28 @@ impl ViVisual {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::On, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::On, *ch)))
 				}
 				'F' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::On, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::On, *ch)))
 				}
 				't' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::Before, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::Before, *ch)))
 				}
 				'T' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::Before, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::Before, *ch)))
 				}
 				';' => {
 					chars = chars_clone;
@@ -1340,7 +1353,7 @@ impl ViVisual {
 				}
 				'|' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(1, Motion::ToColumn(count)));
+					break 'motion_parse Some(MotionCmd(count, Motion::ToColumn));
 				}
 				'0' => {
 					chars = chars_clone;
@@ -1427,15 +1440,14 @@ impl ViVisual {
 
 		match self.validate_combination(verb_ref, motion_ref) {
 			CmdState::Complete => {
-				let cmd = Some(
+				Some(
 					ViCmd {
 						register,
 						verb,
 						motion,
 						raw_seq: std::mem::take(&mut self.pending_seq)
 					}
-				);
-				cmd
+				)
 			}
 			CmdState::Pending => {
 				None

@@ -279,7 +279,7 @@ pub enum Motion {
 	WholeBuffer,
 	BeginningOfBuffer,
 	EndOfBuffer,
-	ToColumn(usize),
+	ToColumn,
 	ToDelimMatch,
 	ToBrace(Direction),
 	ToBracket(Direction),
@@ -317,7 +317,7 @@ impl Motion {
 			Self::LineUpCharwise |
 			Self::ScreenLineUpCharwise |
 			Self::ScreenLineDownCharwise |
-			Self::ToColumn(_) |
+			Self::ToColumn |
 			Self::TextObj(TextObj::ForwardSentence,_) |
 			Self::TextObj(TextObj::BackwardSentence,_) |
 			Self::TextObj(TextObj::ForwardParagraph,_) |

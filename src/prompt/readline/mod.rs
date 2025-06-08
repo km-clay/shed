@@ -1,11 +1,11 @@
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{LineBuf, SelectAnchor, SelectMode};
 use nix::libc::STDOUT_FILENO;
-use term::{Layout, LineWriter, TermReader};
+use term::{get_win_size, raw_mode, KeyReader, Layout, LineWriter, TermReader, TermWriter};
 use vicmd::{Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
 use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
-use crate::libsh::{error::ShResult, sys::sh_quit, term::{Style, Styled}};
+use crate::libsh::{error::{ShErr, ShErrKind, ShResult}, sys::sh_quit, term::{Style, Styled}};
 use crate::prelude::*;
 
 pub mod term;
@@ -21,20 +21,19 @@ pub trait Readline {
 }
 
 pub struct FernVi {
-	reader: TermReader,
-	writer: LineWriter,
-	prompt: String,
-	mode: Box<dyn ViMode>,
-	old_layout: Option<Layout>,
-	repeat_action: Option<CmdReplay>,
-	repeat_motion: Option<MotionCmd>,
-	editor: LineBuf
+	pub reader: Box<dyn KeyReader>,
+	pub writer: Box<dyn LineWriter>,
+	pub prompt: String,
+	pub mode: Box<dyn ViMode>,
+	pub old_layout: Option<Layout>,
+	pub repeat_action: Option<CmdReplay>,
+	pub repeat_motion: Option<MotionCmd>,
+	pub editor: LineBuf
 }
 
 impl Readline for FernVi {
 	fn readline(&mut self) -> ShResult<String> {
-		self.editor = LineBuf::new().with_initial("\nThe quick brown fox jumps over\n the lazy dogThe quick\nbrown fox jumps over the a", 1004);
-		let raw_mode_guard = self.reader.raw_mode(); // Restores termios state on drop
+		let raw_mode_guard = raw_mode(); // Restores termios state on drop
 
 		loop {
 			let new_layout = self.get_layout();
@@ -42,7 +41,11 @@ impl Readline for FernVi {
 				self.writer.clear_rows(layout)?;
 			}
 			raw_mode_guard.disable_for(|| self.print_line(new_layout))?;
-			let key = self.reader.read_key()?;
+			let Some(key) = self.reader.read_key() else {
+				raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
+				std::mem::drop(raw_mode_guard);
+				return Err(ShErr::simple(ShErrKind::ReadlineErr, "EOF"))
+			};
 			flog!(DEBUG, key);
 
 			let Some(mut cmd) = self.mode.handle_key(key) else {
@@ -52,6 +55,7 @@ impl Readline for FernVi {
 
 			if cmd.should_submit() {
 				raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
+				std::mem::drop(raw_mode_guard);
 				return Ok(std::mem::take(&mut self.editor.buffer))
 			}
 
@@ -81,21 +85,28 @@ impl Default for FernVi {
 impl FernVi {
 	pub fn new(prompt: Option<String>) -> Self {
 		Self {
-			reader: TermReader::new(),
-			writer: LineWriter::new(STDOUT_FILENO),
+			reader: Box::new(TermReader::new()),
+			writer: Box::new(TermWriter::new(STDOUT_FILENO)),
 			prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
 			mode: Box::new(ViInsert::new()),
 			old_layout: None,
 			repeat_action: None,
 			repeat_motion: None,
-			editor: LineBuf::new()
+			editor: LineBuf::new().with_initial("\nThe quick brown fox jumps over\n the lazy dogThe quick\nbrown fox jumps over the a", 1004)
 		}
 	}
 
 	pub fn get_layout(&mut self) -> Layout {
 		let line = self.editor.as_str().to_string();
 		let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
-		self.writer.get_layout_from_parts(&self.prompt, to_cursor, &line)
+		let (cols,_) = get_win_size(STDIN_FILENO);
+		Layout::from_parts(
+			/*tab_stop:*/ 8,
+			cols,
+			&self.prompt,
+			to_cursor,
+			&line
+		)
 	}
 
 	pub fn print_line(&mut self, new_layout: Layout) -> ShResult<()> {
@@ -114,14 +125,20 @@ impl FernVi {
 
 	pub fn exec_cmd(&mut self, mut cmd: ViCmd) -> ShResult<()> {
 		let mut selecting = false;
+		let mut is_insert_mode = false;
 		if cmd.is_mode_transition() {
 			let count = cmd.verb_count();
 			let mut mode: Box<dyn ViMode> = match cmd.verb().unwrap().1 {
 				Verb::Change |
 				Verb::InsertModeLineBreak(_) |
-				Verb::InsertMode => Box::new(ViInsert::new().with_count(count as u16)),
+				Verb::InsertMode => {
+					is_insert_mode = true;
+					Box::new(ViInsert::new().with_count(count as u16))
+				}
 
-				Verb::NormalMode => Box::new(ViNormal::new()),
+				Verb::NormalMode => {
+					Box::new(ViNormal::new())
+				}
 
 				Verb::ReplaceMode => Box::new(ViReplace::new()),
 
@@ -156,6 +173,11 @@ impl FernVi {
 				self.editor.start_selecting(SelectMode::Char(SelectAnchor::End));
 			} else {
 				self.editor.stop_selecting();
+			}
+			if is_insert_mode {
+				self.editor.mark_insert_mode_start_pos();
+			} else {
+				self.editor.clear_insert_mode_start_pos();
 			}
 			return Ok(())
 		} else if cmd.is_cmd_repeat() {

@@ -1,4 +1,4 @@
-use std::{env, fmt::{Debug, Write}, io::{BufRead, BufReader, Read}, os::fd::{AsFd, BorrowedFd, RawFd}};
+use std::{env, fmt::{Debug, Write}, io::{BufRead, BufReader, Read}, iter::Peekable, os::fd::{AsFd, BorrowedFd, RawFd}, str::Chars};
 
 use nix::{errno::Errno, libc::{self, STDIN_FILENO}, poll::{self, PollFlags, PollTimeout}, sys::termios, unistd::isatty};
 use unicode_segmentation::UnicodeSegmentation;
@@ -8,6 +8,15 @@ use crate::{libsh::error::{ShErr, ShErrKind, ShResult}, prompt::readline::keys::
 use crate::prelude::*;
 
 use super::{keys::KeyEvent, linebuf::LineBuf};
+
+pub fn raw_mode() -> RawModeGuard {
+	let orig = termios::tcgetattr(unsafe{BorrowedFd::borrow_raw(STDIN_FILENO)}).expect("Failed to get terminal attributes");
+	let mut raw = orig.clone();
+	termios::cfmakeraw(&mut raw);
+	termios::tcsetattr(unsafe{BorrowedFd::borrow_raw(STDIN_FILENO)}, termios::SetArg::TCSANOW, &raw)
+		.expect("Failed to set terminal to raw mode");
+	RawModeGuard { orig, fd: STDIN_FILENO }
+}
 
 pub type Row = u16;
 pub type Col = u16;
@@ -135,6 +144,21 @@ pub trait WidthCalculator {
 	fn width(&self, text: &str) -> usize;
 }
 
+pub trait KeyReader {
+	fn read_key(&mut self) -> Option<KeyEvent>;
+}
+
+pub trait LineWriter {
+	fn clear_rows(&mut self, layout: &Layout) -> ShResult<()>;
+	fn redraw(
+		&mut self,
+		prompt: &str,
+		line: &LineBuf,
+		new_layout: &Layout,
+	) -> ShResult<()>;
+	fn flush_write(&mut self, buf: &str) -> ShResult<()>;
+}
+
 #[derive(Clone,Copy,Debug)]
 pub struct UnicodeWidth;
 
@@ -256,15 +280,6 @@ impl TermReader {
 		}
 	}
 
-	pub fn raw_mode(&self) -> RawModeGuard {
-		let fd = self.buffer.get_ref().tty;
-		let orig = termios::tcgetattr(unsafe{BorrowedFd::borrow_raw(STDIN_FILENO)}).expect("Failed to get terminal attributes");
-		let mut raw = orig.clone();
-		termios::cfmakeraw(&mut raw);
-		termios::tcsetattr(unsafe{BorrowedFd::borrow_raw(STDIN_FILENO)}, termios::SetArg::TCSANOW, &raw)
-			.expect("Failed to set terminal to raw mode");
-		RawModeGuard { orig, fd }
-	}
 
 	/// Execute some logic in raw mode
 	/// 
@@ -303,33 +318,7 @@ impl TermReader {
 		self.buffer.consume(1);
 	}
 
-	pub fn read_key(&mut self) -> ShResult<KeyEvent> {
-		use core::str;
 
-		let mut collected = Vec::with_capacity(4);
-
-		loop {
-			let byte = self.next_byte()?;
-			collected.push(byte);
-
-			// If it's an escape seq, delegate to ESC sequence handler
-			if collected[0] == 0x1b && collected.len() == 1 && self.poll(PollTimeout::ZERO)? {
-				return self.parse_esc_seq();
-			}
-
-			// Try parse as valid UTF-8
-			if let Ok(s) = str::from_utf8(&collected) {
-				return Ok(KeyEvent::new(s, ModKeys::empty()));
-			}
-
-			// UTF-8 max 4 bytes — if it’s invalid at this point, bail
-			if collected.len() >= 4 {
-				break;
-			}
-		}
-
-		Ok(KeyEvent(KeyCode::Null, ModKeys::empty()))
-	}
 
 	pub fn parse_esc_seq(&mut self) -> ShResult<KeyEvent> {
 		let mut seq = vec![0x1b];
@@ -409,6 +398,38 @@ impl TermReader {
 			_ => Ok(KeyEvent(KeyCode::Esc, ModKeys::empty())),
 		}
 	}
+
+}
+
+impl KeyReader for TermReader {
+	fn read_key(&mut self) -> Option<KeyEvent> {
+		use core::str;
+
+		let mut collected = Vec::with_capacity(4);
+
+		loop {
+			let byte = self.next_byte().ok()?;
+			flog!(DEBUG, "read byte: {:?}",byte as char);
+			collected.push(byte);
+
+			// If it's an escape seq, delegate to ESC sequence handler
+			if collected[0] == 0x1b && collected.len() == 1 && self.poll(PollTimeout::ZERO).ok()? {
+				return self.parse_esc_seq().ok();
+			}
+
+			// Try parse as valid UTF-8
+			if let Ok(s) = str::from_utf8(&collected) {
+				return Some(KeyEvent::new(s, ModKeys::empty()));
+			}
+
+			// UTF-8 max 4 bytes — if it’s invalid at this point, bail
+			if collected.len() >= 4 {
+				break;
+			}
+		}
+
+		None
+	}
 }
 
 impl AsFd for TermReader {
@@ -444,6 +465,46 @@ impl Layout {
 			end: Pos::default(),
 		}
 	}
+	pub fn from_parts(
+		tab_stop: u16,
+		term_width: u16,
+		prompt: &str,
+		to_cursor: &str,
+		to_end: &str,
+	) -> Self {
+		flog!(DEBUG,to_cursor);
+		let prompt_end = Self::calc_pos(tab_stop, term_width,	prompt, Pos { col: 0, row: 0 });
+		let cursor = Self::calc_pos(tab_stop, term_width, to_cursor, prompt_end);
+		let end = Self::calc_pos(tab_stop, term_width, to_end, prompt_end);
+		Layout { w_calc: width_calculator(), prompt_end, cursor, end }
+	}
+
+	pub fn calc_pos(tab_stop: u16, term_width: u16, s: &str, orig: Pos) -> Pos {
+		let mut pos = orig;
+		let mut esc_seq = 0;
+		for c in s.graphemes(true) {
+			if c == "\n" {
+				pos.row += 1;
+				pos.col = 0;
+			}
+			let c_width = if c == "\t" {
+				tab_stop - (pos.col % tab_stop)
+			} else {
+				width(c, &mut esc_seq)
+			};
+			pos.col += c_width;
+			if pos.col > term_width {
+				pos.row += 1;
+				pos.col = c_width;
+			}
+		}
+		if pos.col >= term_width {
+			pos.row += 1;
+			pos.col = 0;
+		}
+
+		pos
+	}
 }
 
 impl Default for Layout {
@@ -452,7 +513,7 @@ impl Default for Layout {
 	}
 }
 
-pub struct LineWriter {
+pub struct TermWriter {
 	out: RawFd,
 	t_cols: Col, // terminal width
 	buffer: String,
@@ -460,7 +521,7 @@ pub struct LineWriter {
 	tab_stop: u16,
 }
 
-impl LineWriter {
+impl TermWriter {
 	pub fn new(out: RawFd) -> Self {
 		let w_calc = width_calculator();
 		let (t_cols,_) = get_win_size(out);
@@ -471,28 +532,6 @@ impl LineWriter {
 			w_calc,
 			tab_stop: 8 // TODO: add a way to configure this
 		}
-	}
-	pub fn flush_write(&mut self, buf: &str) -> ShResult<()> {
-		write_all(self.out, buf)?;
-		Ok(())
-	}
-	pub fn clear_rows(&mut self, layout: &Layout) -> ShResult<()> {
-		self.buffer.clear();
-		let rows_to_clear = layout.end.row;
-		let cursor_row = layout.cursor.row;
-
-		let cursor_motion = rows_to_clear.saturating_sub(cursor_row);
-		if cursor_motion > 0 {
-			write!(self.buffer, "\x1b[{cursor_motion}B").unwrap()
-		}
-
-		for _ in 0..rows_to_clear {
-			self.buffer.push_str("\x1b[2K\x1b[A");
-		}
-		self.buffer.push_str("\x1b[2K");
-		write_all(self.out,self.buffer.as_str())?;
-		self.buffer.clear();
-		Ok(())
 	}
 	pub fn get_cursor_movement(&self, old: Pos, new: Pos) -> ShResult<String> {
 		let mut buffer = String::new();
@@ -543,67 +582,7 @@ impl LineWriter {
 		Ok(())
 	}
 
-	pub fn redraw(
-		&mut self,
-		prompt: &str,
-		line: &LineBuf,
-		new_layout: &Layout,
-	) -> ShResult<()> {
-		let err = |_| ShErr::simple(ShErrKind::InternalErr, "Failed to write to LineWriter internal buffer");
-		self.buffer.clear();
 
-		let end = new_layout.end;
-		let cursor = new_layout.cursor;
-
-		self.buffer.push_str(prompt);
-		self.buffer.push_str(line.as_str());
-
-		if end.col == 0 && end.row > 0 && !self.buffer.ends_with('\n') {
-			// The line has wrapped. We need to use our own line break.
-			self.buffer.push('\n');
-		}
-
-		let movement = self.get_cursor_movement(end, cursor)?;
-		write!(self.buffer, "{}", &movement).map_err(err)?;
-
-		write_all(self.out, self.buffer.as_str())?;
-		Ok(())
-	}
-
-	pub fn get_layout_from_parts(&mut self, prompt: &str, to_cursor: &str, to_end: &str) -> Layout {
-		self.update_t_cols();
-		let prompt_end = self.calc_pos(prompt, Pos { col: 0, row: 0 });
-		let cursor = self.calc_pos(to_cursor, prompt_end);
-		let end = self.calc_pos(to_end, prompt_end);
-		Layout { w_calc: width_calculator(), prompt_end, cursor, end }
-	}
-
-	pub fn calc_pos(&self, s: &str, orig: Pos) -> Pos {
-		let mut pos = orig;
-		let mut esc_seq = 0;
-		for c in s.graphemes(true) {
-			if c == "\n" {
-				pos.row += 1;
-				pos.col = 0;
-			}
-			let c_width = if c == "\t" {
-				self.tab_stop - (pos.col % self.tab_stop)
-			} else {
-				width(c, &mut esc_seq)
-			};
-			pos.col += c_width;
-			if pos.col > self.t_cols {
-				pos.row += 1;
-				pos.col = c_width;
-			}
-		}
-		if pos.col >= self.t_cols {
-			pos.row += 1;
-			pos.col = 0;
-		}
-
-		pos
-	}
 
 	pub fn update_t_cols(&mut self) {
 		let (t_cols,_) = get_win_size(self.out);
@@ -653,6 +632,59 @@ impl LineWriter {
 			}
 		}
 
+		Ok(())
+	}
+}
+
+impl LineWriter for TermWriter {
+	fn clear_rows(&mut self, layout: &Layout) -> ShResult<()> {
+		self.buffer.clear();
+		let rows_to_clear = layout.end.row;
+		let cursor_row = layout.cursor.row;
+
+		let cursor_motion = rows_to_clear.saturating_sub(cursor_row);
+		if cursor_motion > 0 {
+			write!(self.buffer, "\x1b[{cursor_motion}B").unwrap()
+		}
+
+		for _ in 0..rows_to_clear {
+			self.buffer.push_str("\x1b[2K\x1b[A");
+		}
+		self.buffer.push_str("\x1b[2K");
+		write_all(self.out,self.buffer.as_str())?;
+		self.buffer.clear();
+		Ok(())
+	}
+
+	fn redraw(
+		&mut self,
+		prompt: &str,
+		line: &LineBuf,
+		new_layout: &Layout,
+	) -> ShResult<()> {
+		let err = |_| ShErr::simple(ShErrKind::InternalErr, "Failed to write to LineWriter internal buffer");
+		self.buffer.clear();
+
+		let end = new_layout.end;
+		let cursor = new_layout.cursor;
+
+		self.buffer.push_str(prompt);
+		self.buffer.push_str(line.as_str());
+
+		if end.col == 0 && end.row > 0 && !self.buffer.ends_with('\n') {
+			// The line has wrapped. We need to use our own line break.
+			self.buffer.push('\n');
+		}
+
+		let movement = self.get_cursor_movement(end, cursor)?;
+		write!(self.buffer, "{}", &movement).map_err(err)?;
+
+		write_all(self.out, self.buffer.as_str())?;
+		Ok(())
+	}
+
+	fn flush_write(&mut self, buf: &str) -> ShResult<()> {
+		write_all(self.out, buf)?;
 		Ok(())
 	}
 }
