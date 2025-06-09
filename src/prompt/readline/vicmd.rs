@@ -1,3 +1,5 @@
+use bitflags::bitflags;
+
 use super::register::{append_register, read_register, write_register};
 
 //TODO: write tests that take edit results and cursor positions from actual neovim edits and test them against the behavior of this editor
@@ -54,12 +56,22 @@ impl Default for RegisterName {
 	}
 }
 
+bitflags! {
+	#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+	pub struct CmdFlags: u32 {
+		const VISUAL = 1<<0;
+		const VISUAL_LINE = 1<<1;
+		const VISUAL_BLOCK = 1<<2;
+	}
+}
+
 #[derive(Clone,Default,Debug)]
 pub struct ViCmd {
 	pub register: RegisterName,
 	pub verb: Option<VerbCmd>,
 	pub motion: Option<MotionCmd>,
 	pub raw_seq: String, 
+	pub flags: CmdFlags,
 }
 
 impl ViCmd {
@@ -84,6 +96,15 @@ impl ViCmd {
 	pub fn motion_count(&self) -> usize {
 		self.motion.as_ref().map(|m| m.0).unwrap_or(1)
 	}
+	pub fn normalize_counts(&mut self) {
+		let Some(verb) = self.verb.as_mut() else { return };
+		let Some(motion) = self.motion.as_mut() else { return };
+		let VerbCmd(v_count, _) = verb;
+		let MotionCmd(m_count, _) = motion;
+		let product = *v_count * *m_count;
+		verb.0 = 1;
+		motion.0 = product;
+	}
 	pub fn is_repeatable(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| v.1.is_repeatable())
 	}
@@ -103,7 +124,7 @@ impl ViCmd {
 		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::Undo | Verb::Redo))
 	}
 	pub fn is_inplace_edit(&self) -> bool {
-		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::ReplaceChar(_) | Verb::ToggleCaseSingle)) &&
+		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::ReplaceCharInplace(_,_) | Verb::ToggleCaseInplace(_))) &&
 		self.motion.is_none()
 	}
 	pub fn is_line_motion(&self) -> bool {
@@ -168,8 +189,9 @@ pub enum Verb {
 	Change,
 	Yank,
 	Rot13, // lol
-	ReplaceChar(char),
-	ToggleCaseSingle,
+	ReplaceChar(char), // char to replace with, number of chars to replace
+	ReplaceCharInplace(char,u16), // char to replace with, number of chars to replace
+	ToggleCaseInplace(u16), // Number of chars to toggle
 	ToggleCaseRange,
 	ToLower,
 	ToUpper,
@@ -191,7 +213,6 @@ pub enum Verb {
 	JoinLines,
 	InsertChar(char),
 	Insert(String),
-	Breakline(Anchor),
 	Indent,
 	Dedent,
 	Equalize,
@@ -206,17 +227,17 @@ impl Verb {
 			Self::Delete |
 			Self::Change |
 			Self::ReplaceChar(_) |
+			Self::ReplaceCharInplace(_,_) |
 			Self::ToLower |
 			Self::ToUpper |
 			Self::ToggleCaseRange |
-			Self::ToggleCaseSingle |
+			Self::ToggleCaseInplace(_) |
 			Self::Put(_) |
 			Self::ReplaceMode |
 			Self::InsertModeLineBreak(_) |
 			Self::JoinLines |
 			Self::InsertChar(_) |
 			Self::Insert(_) |
-			Self::Breakline(_) |
 			Self::Indent |
 			Self::Dedent |
 			Self::Equalize
@@ -227,8 +248,9 @@ impl Verb {
 			Self::Delete |
 			Self::Change |
 			Self::ReplaceChar(_) |
+			Self::ReplaceCharInplace(_,_) |
 			Self::ToggleCaseRange |
-			Self::ToggleCaseSingle |
+			Self::ToggleCaseInplace(_) |
 			Self::ToLower |
 			Self::ToUpper |
 			Self::RepeatLast |
@@ -238,7 +260,6 @@ impl Verb {
 			Self::JoinLines |
 			Self::InsertChar(_) |
 			Self::Insert(_) |
-			Self::Breakline(_) |
 			Self::Rot13 |
 			Self::EndOfFile
 		)
@@ -247,7 +268,8 @@ impl Verb {
 		matches!(self, 
 			Self::Change |
 			Self::InsertChar(_) |
-			Self::ReplaceChar(_)
+			Self::ReplaceChar(_) |
+			Self::ReplaceCharInplace(_,_)
 		)
 	}
 }
@@ -320,10 +342,8 @@ impl Motion {
 			Self::ScreenLineUpCharwise |
 			Self::ScreenLineDownCharwise |
 			Self::ToColumn |
-			Self::TextObj(TextObj::ForwardSentence,_) |
-			Self::TextObj(TextObj::BackwardSentence,_) |
-			Self::TextObj(TextObj::ForwardParagraph,_) |
-			Self::TextObj(TextObj::BackwardParagraph,_) |
+			Self::TextObj(TextObj::Sentence(_),_) |
+			Self::TextObj(TextObj::Paragraph(_),_) |
 			Self::CharSearch(Direction::Backward, _, _) |
 			Self::WordMotion(To::Start,_,_) |
 			Self::ToBrace(_) |
@@ -355,16 +375,11 @@ pub enum TextObj {
 	/// `iw`, `aw` — inner word, around word
 	Word(Word),
 
-	/// for stuff like 'dd'
-	Line,
-
 	/// `is`, `as` — inner sentence, around sentence
-	ForwardSentence,
-	BackwardSentence,
+	Sentence(Direction),
 
 	/// `ip`, `ap` — inner paragraph, around paragraph
-	ForwardParagraph,
-	BackwardParagraph,
+	Paragraph(Direction),
 
 	/// `i"`, `a"` — inner/around double quotes
 	DoubleQuote,

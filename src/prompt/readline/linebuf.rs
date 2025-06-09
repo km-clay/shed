@@ -1,10 +1,10 @@
-use std::{fmt::Display, ops::{Range, RangeBounds, RangeInclusive}, string::Drain};
+use std::{fmt::Display, ops::{Range, RangeInclusive}};
 
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use super::{term::Layout, vicmd::{Anchor, Dest, Direction, Motion, MotionBehavior, MotionCmd, RegisterName, To, Verb, ViCmd, Word}};
-use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}, term::{Style, Styled}}, prelude::*};
+use super::vicmd::{Anchor, Bound, CmdFlags, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb, ViCmd, Word};
+use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*};
 
 #[derive(Default,PartialEq,Eq,Debug,Clone,Copy)]
 pub enum CharClass {
@@ -75,10 +75,6 @@ fn is_other_class_or_is_ws(a: &str, b: &str) -> bool {
 	}
 }
 
-fn is_other_class_and_is_ws(a: &str, b: &str) -> bool {
-	is_other_class(a, b) && (is_whitespace(a) || is_whitespace(b))
-}
-
 #[derive(Default,Clone,Copy,PartialEq,Eq,Debug)]
 pub enum SelectAnchor {
 	#[default]
@@ -91,6 +87,28 @@ pub enum SelectMode {
 	Char(SelectAnchor),
 	Line(SelectAnchor),
 	Block(SelectAnchor),
+}
+
+impl SelectMode {
+	pub fn anchor(&self) -> &SelectAnchor {
+		match self {
+			SelectMode::Char(anchor) |
+			SelectMode::Line(anchor) |
+			SelectMode::Block(anchor) => anchor
+		}
+	}
+	pub fn invert_anchor(&mut self) {
+		match self {
+			SelectMode::Char(anchor) |
+			SelectMode::Line(anchor) |
+			SelectMode::Block(anchor) => {
+				*anchor = match anchor {
+					SelectAnchor::Start => SelectAnchor::End,
+					SelectAnchor::End => SelectAnchor::Start
+				}
+			}
+		}
+	}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -323,7 +341,12 @@ impl LineBuf {
 	pub fn accept_hint(&mut self) {
 		let Some(hint) = self.hint.take() else { return };
 
+		let old = self.buffer.clone();
+		let cursor_pos = self.cursor.get();
 		self.push_str(&hint);
+		let new = self.as_str();
+		let edit = Edit::diff(&old, new, cursor_pos);
+		self.undo_stack.push(edit);
 		self.cursor.add(hint.len());
 	}
 	pub fn set_cursor_clamp(&mut self, yn: bool) {
@@ -334,6 +357,12 @@ impl LineBuf {
 	}
 	pub fn index_byte_pos(&mut self, index: usize) -> usize {
 		self.update_graphemes_lazy();
+		self.grapheme_indices()
+			.get(index)
+			.copied()
+			.unwrap_or(self.buffer.len())
+	}
+	pub fn read_idx_byte_pos(&self, index: usize) -> usize {
 		self.grapheme_indices()
 			.get(index)
 			.copied()
@@ -628,15 +657,297 @@ impl LineBuf {
 			}
 		}
 	}
+	pub fn dispatch_text_obj(
+		&mut self,
+		count: usize,
+		text_obj: TextObj,
+		bound: Bound
+	) -> Option<(usize,usize)> {
+		match text_obj {
+			// Text groups
+			TextObj::Word(word) => self.text_obj_word(count, bound, word),
+			TextObj::Sentence(dir) => self.text_obj_sentence(count, dir, bound),
+			TextObj::Paragraph(dir) => self.text_obj_paragraph(count, dir, bound),
 
-	pub fn dispatch_word_motion(&mut self, count: usize, to: To, word: Word, dir: Direction) -> usize {
+			// Quoted blocks
+			TextObj::DoubleQuote |
+			TextObj::SingleQuote |
+			TextObj::BacktickQuote => self.text_obj_quote(count, text_obj, bound),
+
+			// Delimited blocks
+			TextObj::Paren |
+			TextObj::Bracket |
+			TextObj::Brace |
+			TextObj::Angle => self.text_obj_delim(count, text_obj, bound),
+
+			// Other stuff
+			TextObj::Tag => todo!(),
+			TextObj::Custom(_) => todo!(),
+		}
+	} 
+	pub fn text_obj_word(&mut self, count: usize, bound: Bound, word: Word) -> Option<(usize,usize)> {
+		todo!()
+	}
+	pub fn text_obj_sentence(&mut self, count: usize, dir: Direction, bound: Bound) -> Option<(usize, usize)> {
+		todo!()
+	}
+	pub fn text_obj_paragraph(&mut self, count: usize, dir: Direction, bound: Bound) -> Option<(usize, usize)> {
+		todo!()
+	}
+	pub fn text_obj_delim(&mut self, count: usize, text_obj: TextObj, bound: Bound) -> Option<(usize,usize)> {
+		let mut backward_indices = (0..self.cursor.get()).rev();
+		let (opener,closer) = match text_obj {
+			TextObj::Paren   => ("(",")"),
+			TextObj::Bracket => ("[","]"),
+			TextObj::Brace   => ("{","}"),
+			TextObj::Angle   => ("<",">"),
+			_ => unreachable!()
+		};
+
+		let mut start_pos = None;
+		let mut closer_count: u32 = 0;
+		while let Some(idx) = backward_indices.next() {
+			let gr = self.grapheme_at(idx)?.to_string();
+			if gr != closer && gr != opener { continue }
+
+			let mut escaped = false;
+			while let Some(idx) = backward_indices.next() {
+				// Keep consuming indices as long as they refer to a backslash
+				let Some("\\") = self.grapheme_at(idx) else {
+					break
+				};
+				// On each backslash, flip this boolean
+				escaped = !escaped
+			}
+
+			// If there are an even number of backslashes (or none), we are not escaped
+			// Therefore, we have found the start position
+			if !escaped {
+				if gr == closer {
+					closer_count += 1;
+				} else if closer_count == 0 {
+					start_pos = Some(idx);
+					break
+				} else {
+					closer_count = closer_count.saturating_sub(1)
+				}
+			}
+		}
+
+		let (mut start, mut end) = if let Some(pos) = start_pos {
+			let start = pos;
+			let mut forward_indices = start+1..self.cursor.max;
+			let mut end = None;  
+			let mut opener_count: u32 = 0;
+
+			while let Some(idx) = forward_indices.next() {
+				match self.grapheme_at(idx)? {
+					"\\" => { forward_indices.next(); }
+					gr if gr == opener => opener_count += 1,
+					gr if gr == closer => {
+						if opener_count == 0 {
+							end = Some(idx);
+							break
+						} else {
+							opener_count = opener_count.saturating_sub(1);
+						}
+					}
+					_ => { /* Continue */ }
+				}
+			}
+
+			(start,end?)
+		} else {
+			let mut forward_indices = self.cursor.get()..self.cursor.max;
+			let mut start = None;
+			let mut end = None;
+			let mut opener_count: u32 = 0;
+
+			while let Some(idx) = forward_indices.next() {
+				match self.grapheme_at(idx)? {
+					"\\" => { forward_indices.next(); }
+					gr if gr == opener => {
+						if opener_count == 0 {
+							start = Some(idx);
+						}
+						opener_count += 1;
+					}
+					gr if gr == closer => {
+						if opener_count == 1 {
+							end = Some(idx);
+							break
+						} else {
+							opener_count = opener_count.saturating_sub(1)
+						}
+					}
+					_ => { /* Continue */ }
+				}
+			}
+
+			(start?,end?)
+		};
+
+		match bound {
+			Bound::Inside => {
+				// Start includes the quote, so push it forward
+				start += 1;
+			}
+			Bound::Around => {
+				// End excludes the quote, so push it forward
+				end += 1;
+
+				// We also need to include any trailing whitespace
+				let end_of_line = self.end_of_line();
+				let remainder = end..end_of_line;
+				for idx in remainder {
+					let Some(gr) = self.grapheme_at(idx) else { break };
+					flog!(DEBUG, gr);
+					if is_whitespace(gr) {
+						end += 1;
+					} else {
+						break
+					}
+				}
+			}
+		}
+		
+		Some((start,end))
+	}
+	pub fn text_obj_quote(&mut self, count: usize, text_obj: TextObj, bound: Bound) -> Option<(usize,usize)> {
+		let (start,end) = self.this_line(); // Only operates on the current line
+
+		// Get the grapheme indices backward from the cursor
+		let mut backward_indices = (start..self.cursor.get()).rev();
+		let target = match text_obj {
+			TextObj::DoubleQuote => "\"",
+			TextObj::SingleQuote => "'",
+			TextObj::BacktickQuote => "`",
+			_ => unreachable!()
+		};
+		let mut start_pos = None;
+		while let Some(idx) = backward_indices.next() {
+			match self.grapheme_at(idx)? {
+				gr if gr == target => {
+					// We are going backwards, so we need to handle escapes differently
+					// These things were not meant to be read backwards, so it's a little fucked up
+					let mut escaped = false;
+					while let Some(idx) = backward_indices.next() {
+						// Keep consuming indices as long as they refer to a backslash
+						let Some("\\") = self.grapheme_at(idx) else {
+							break
+						};
+						// On each backslash, flip this boolean
+						escaped = !escaped
+					}
+
+					// If there are an even number of backslashes, we are not escaped
+					// Therefore, we have found the start position
+					if !escaped {
+						start_pos = Some(idx);
+						break
+					}
+				}
+				_ => { /* Continue */ }
+			}
+		}
+
+		// Try to find a quote backwards
+		let (mut start, mut end) = if let Some(pos) = start_pos {
+			// Found one, only one more to go
+			let start = pos;
+			let mut forward_indices = start+1..end;
+			let mut end = None;  
+
+			while let Some(idx) = forward_indices.next() {
+				match self.grapheme_at(idx)? {
+					"\\" => { forward_indices.next(); }
+					gr if gr == target => {
+						end = Some(idx);
+						break;
+					}
+					_ => { /* Continue */ }
+				}
+			}
+			let end = end?;
+
+			(start,end)
+		} else {
+			// Did not find one, have two find two of them forward now
+			let mut forward_indices = self.cursor.get()..end;
+			let mut start = None;
+			let mut end = None;
+
+			while let Some(idx) = forward_indices.next() {
+				match self.grapheme_at(idx)? {
+					"\\" => { forward_indices.next(); }
+					gr if gr == target => {
+						start = Some(idx);
+						break
+					}
+					_ => { /* Continue */ }
+				}
+			}
+			let start = start?;
+
+			while let Some(idx) = forward_indices.next() {
+				match self.grapheme_at(idx)? {
+					"\\" => { forward_indices.next(); }
+					gr if gr == target => {
+						end = Some(idx);
+						break;
+					}
+					_ => { /* Continue */ }
+				}
+			}
+			let end = end?;
+
+			(start,end)
+		};
+
+		match bound {
+			Bound::Inside => {
+				// Start includes the quote, so push it forward
+				start += 1;
+			}
+			Bound::Around => {
+				// End excludes the quote, so push it forward
+				end += 1;
+
+				// We also need to include any trailing whitespace
+				let end_of_line = self.end_of_line();
+				let remainder = end..end_of_line;
+				for idx in remainder {
+					let Some(gr) = self.grapheme_at(idx) else { break };
+					flog!(DEBUG, gr);
+					if is_whitespace(gr) {
+						end += 1;
+					} else {
+						break
+					}
+				}
+			}
+		}
+
+		Some((start, end))
+	}
+	pub fn dispatch_word_motion(
+		&mut self,
+		count: usize,
+		to: To,
+		word: Word,
+		dir: Direction,
+		include_last_char: bool
+	) -> usize {
 		// Not sorry for these method names btw
 		let mut pos = ClampedUsize::new(self.cursor.get(), self.cursor.max, false);
-		for _ in 0..count {
+		for i in 0..count {
+			// We alter 'include_last_char' to only be true on the last iteration
+			// Therefore, '5cw' will find the correct range for the first four and stop on the end of the fifth word
+			let include_last_char_and_is_last_word = include_last_char && i == count.saturating_sub(1);
 			pos.set(match to {
 				To::Start => {
 					match dir {
-						Direction::Forward => self.start_of_word_forward_or_end_of_word_backward_from(pos.get(), word, dir),
+						Direction::Forward => self.start_of_word_forward_or_end_of_word_backward_from(pos.get(), word, dir, include_last_char_and_is_last_word),
 						Direction::Backward => 'backward: {
 							// We also need to handle insert mode's Ctrl+W behaviors here
 							let target = self.end_of_word_forward_or_start_of_word_backward_from(pos.get(), word, dir);
@@ -662,7 +973,7 @@ impl LineBuf {
 				To::End => {
 					match dir {
 						Direction::Forward => self.end_of_word_forward_or_start_of_word_backward_from(pos.get(), word, dir),
-						Direction::Backward => self.start_of_word_forward_or_end_of_word_backward_from(pos.get(), word, dir),
+						Direction::Backward => self.start_of_word_forward_or_end_of_word_backward_from(pos.get(), word, dir, false),
 					}
 				}
 			});
@@ -676,7 +987,7 @@ impl LineBuf {
 	/// are logically the same operation, if you use a reversed iterator for the backward motion.
 	///
 	/// Tied with 'end_of_word_forward_or_start_of_word_backward_from()' for the longest method name I have ever written
-	pub fn start_of_word_forward_or_end_of_word_backward_from(&mut self, mut pos: usize, word: Word, dir: Direction) -> usize {
+	pub fn start_of_word_forward_or_end_of_word_backward_from(&mut self, mut pos: usize, word: Word, dir: Direction, include_last_char: bool) -> usize {
 		let default = match dir {
 			Direction::Backward => 0,
 			Direction::Forward => self.grapheme_indices().len()
@@ -691,7 +1002,12 @@ impl LineBuf {
 				let on_boundary = self.grapheme_at(*next).is_none_or(is_whitespace);
 				if on_boundary {
 					let Some(idx) = indices_iter.next() else { return default };
-					pos = idx;
+					// We have a 'cw' call, do not include the trailing whitespace
+					if include_last_char {
+						return idx;
+					} else {
+						pos = idx;
+					}
 				}
 
 				// Check current grapheme
@@ -702,9 +1018,12 @@ impl LineBuf {
 
 				// Find the next whitespace
 				if !on_whitespace {
-					let Some(_ws_pos) = indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace)) else {
+					let Some(ws_pos) = indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace)) else {
 						return default
 					};
+					if include_last_char {
+						return ws_pos
+					}
 				}
 
 				// Return the next visible grapheme position
@@ -716,7 +1035,11 @@ impl LineBuf {
 				let Some(next_idx) = indices_iter.peek() else { return default };
 				let on_boundary = !is_whitespace(&cur_char) && self.grapheme_at(*next_idx).is_none_or(|c| is_other_class_or_is_ws(c, &cur_char));
 				if on_boundary {
-					pos = *next_idx
+					if include_last_char {
+						return *next_idx
+					} else {
+						pos = *next_idx;
+					}
 				}
 
 				let Some(next_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
@@ -739,9 +1062,9 @@ impl LineBuf {
 						return default
 					};
 					// If we hit a different character class, we return here
-					if self.grapheme_at(other_class_pos).is_some_and(|c| !is_whitespace(c)) {
+					if self.grapheme_at(other_class_pos).is_some_and(|c| !is_whitespace(c)) || include_last_char {
 						return other_class_pos
-					}
+					} 
 				}
 
 				// We are now certainly on a whitespace character. Advance until a non-whitespace character.
@@ -939,6 +1262,11 @@ impl LineBuf {
 	pub fn find<F: Fn(&str) -> bool>(&mut self, op: F) -> usize {
 		self.find_from(self.cursor.get(), op)
 	}
+	pub fn insert_str_at(&mut self, pos: usize, new: &str) {
+		let idx = self.index_byte_pos(pos);
+		self.buffer.insert_str(idx, new);
+		self.update_graphemes();
+	}
 	pub fn replace_at_cursor(&mut self, new: &str) {
 		self.replace_at(self.cursor.get(), new);
 	}
@@ -966,7 +1294,7 @@ impl LineBuf {
 		let end = start + gr.len();
 		self.buffer.replace_range(start..end, new);
 	}
-	pub fn eval_motion(&mut self, motion: MotionCmd) -> MotionKind {
+	pub fn eval_motion(&mut self, verb: Option<&Verb>, motion: MotionCmd) -> MotionKind {
 		let buffer = self.buffer.clone();
 		if self.has_hint() {
 			let hint = self.hint.clone().unwrap();
@@ -1004,7 +1332,12 @@ impl LineBuf {
 				MotionKind::InclusiveWithTargetCol((start,end),target_pos)
 			}
 			MotionCmd(count,Motion::WordMotion(to, word, dir)) => {
-				let pos = self.dispatch_word_motion(count, to, word, dir);
+				// 'cw' is a weird case
+				// if you are on the word's left boundary, it will not delete whitespace after the end of the word
+				let include_last_char = verb == Some(&Verb::Change) &&
+					matches!(motion.1, Motion::WordMotion(To::Start, _, Direction::Forward));
+
+				let pos = self.dispatch_word_motion(count, to, word, dir, include_last_char);
 				let pos = ClampedUsize::new(pos,self.cursor.max,false);
 				// End-based operations must include the last character
 				// But the cursor must also stop just before it when moving
@@ -1023,7 +1356,17 @@ impl LineBuf {
 					MotionKind::On(pos.get())
 				}
 			}
-			MotionCmd(count,Motion::TextObj(text_obj, bound)) => todo!(),
+			MotionCmd(count,Motion::TextObj(text_obj, bound)) => {
+				let Some((start,end)) = self.dispatch_text_obj(count, text_obj, bound) else {
+					return MotionKind::Null
+				};
+
+				MotionKind::Inclusive((start,end))
+			}
+			MotionCmd(count,Motion::ToDelimMatch) => todo!(),
+			MotionCmd(count,Motion::ToBrace(direction)) => todo!(),
+			MotionCmd(count,Motion::ToBracket(direction)) => todo!(),
+			MotionCmd(count,Motion::ToParen(direction)) => todo!(),
 			MotionCmd(count,Motion::EndOfLastWord) => {
 				let start = self.start_of_line();
 				let mut newline_count = 0;
@@ -1204,11 +1547,21 @@ impl LineBuf {
 			MotionCmd(_count,Motion::BeginningOfBuffer) => MotionKind::On(0),
 			MotionCmd(_count,Motion::EndOfBuffer) => MotionKind::To(self.grapheme_indices().len()),
 			MotionCmd(_count,Motion::ToColumn) => todo!(),
-			MotionCmd(count,Motion::ToDelimMatch) => todo!(),
-			MotionCmd(count,Motion::ToBrace(direction)) => todo!(),
-			MotionCmd(count,Motion::ToBracket(direction)) => todo!(),
-			MotionCmd(count,Motion::ToParen(direction)) => todo!(),
-			MotionCmd(count,Motion::Range(start, end)) => todo!(),
+			MotionCmd(count,Motion::Range(start, end)) => {
+				let mut final_end = end;
+				if self.cursor.exclusive {
+					final_end += 1;
+				}
+				let delta = end - start;
+				let count = count.saturating_sub(1); // Becomes number of times to multiply the range
+
+				for _ in 0..count {
+					final_end += delta;
+				}
+
+				final_end = final_end.min(self.cursor.max);
+				MotionKind::Inclusive((start,final_end))
+			}
 			MotionCmd(count,Motion::RepeatMotion) => todo!(),
 			MotionCmd(count,Motion::RepeatMotionRev) => todo!(),
 			MotionCmd(count,Motion::Null) => MotionKind::Null
@@ -1268,6 +1621,35 @@ impl LineBuf {
 			self.move_cursor(motion);
 		}
 		self.update_graphemes();
+		self.update_select_range();
+	}
+	pub fn update_select_range(&mut self) {
+		if let Some(mut mode) = self.select_mode {
+			let Some((mut start,mut end)) = self.select_range.clone() else {
+				return
+			};
+			match mode {
+				SelectMode::Char(anchor) => {
+					match anchor {
+						SelectAnchor::Start => {
+							start = self.cursor.get();
+						}
+						SelectAnchor::End => {
+							end = self.cursor.get();
+						}
+					}
+				}
+				SelectMode::Line(anchor) => todo!(),
+				SelectMode::Block(anchor) => todo!(),
+			}
+			if start >= end {
+				mode.invert_anchor();
+				std::mem::swap(&mut start, &mut end);
+
+				self.select_mode = Some(mode);
+			}
+			self.select_range = Some((start,end));
+		}
 	}
 	pub fn move_cursor(&mut self, motion: MotionKind) {
 		match motion {
@@ -1382,24 +1764,45 @@ impl LineBuf {
 				self.replace_at_cursor(new);
 				self.apply_motion(motion);
 			}
-			Verb::ToggleCaseSingle => {
-				let Some(gr) = self.grapheme_at_cursor() else {
-					return Ok(())
-				};
-				if gr.len() > 1 || gr.is_empty() {
-					return Ok(())
+			Verb::ReplaceCharInplace(ch,count) => {
+				for i in 0..count {
+					let mut buf = [0u8;4];
+					let new = ch.encode_utf8(&mut buf);
+					self.replace_at_cursor(new);
+
+					// try to increment the cursor until we are on the last iteration
+					// or until we hit the end of the buffer
+					if i != count.saturating_sub(1) && !self.cursor.inc() {
+						break
+					}
 				}
-				let ch = gr.chars().next().unwrap();
-				if !ch.is_alphabetic() {
-					return Ok(())
+			}
+			Verb::ToggleCaseInplace(count) => {
+				for i in 0..count {
+					let Some(gr) = self.grapheme_at_cursor() else {
+						return Ok(())
+					};
+					if gr.len() > 1 || gr.is_empty() {
+						return Ok(())
+					}
+					let ch = gr.chars().next().unwrap();
+					if !ch.is_alphabetic() {
+						return Ok(())
+					}
+					let mut buf = [0u8;4];
+					let new = if ch.is_ascii_lowercase() {
+						ch.to_ascii_uppercase().encode_utf8(&mut buf)
+					} else {
+						ch.to_ascii_lowercase().encode_utf8(&mut buf)
+					};
+					self.replace_at_cursor(new);
+
+					// try to increment the cursor until we are on the last iteration
+					// or until we hit the end of the buffer
+					if i != count.saturating_sub(1) && !self.cursor.inc() {
+						break
+					}
 				}
-				let mut buf = [0u8;4];
-				let new = if ch.is_ascii_lowercase() {
-					ch.to_ascii_uppercase().encode_utf8(&mut buf)
-				} else {
-					ch.to_ascii_lowercase().encode_utf8(&mut buf)
-				};
-				self.replace_at_cursor(new);
 			}
 			Verb::ToggleCaseRange => {
 				let Some((start,end)) = self.range_from_motion(&motion) else {
@@ -1476,7 +1879,9 @@ impl LineBuf {
 			Verb::Redo |
 			Verb::Undo => {
 				let (edit_provider,edit_receiver) = match verb {
+					// Redo = pop from redo stack, push to undo stack
 					Verb::Redo => (&mut self.redo_stack, &mut self.undo_stack),
+					// Undo = pop from undo stack, push to redo stack
 					Verb::Undo => (&mut self.undo_stack, &mut self.redo_stack),
 					_ => unreachable!()
 				};
@@ -1495,8 +1900,30 @@ impl LineBuf {
 				self.update_graphemes();
 			}
 			Verb::RepeatLast => todo!(),
-			Verb::Put(anchor) => todo!(),
-			Verb::SwapVisualAnchor => todo!(),
+			Verb::Put(anchor) => {
+				let Some(content) = register.read_from_register() else {
+					return Ok(())
+				};
+				let insert_idx = match anchor {
+					Anchor::After => self.cursor.ret_add(1),
+					Anchor::Before => self.cursor.get()
+				};
+				self.insert_str_at(insert_idx, &content);
+				self.cursor.add(content.len().saturating_sub(1));
+			}
+			Verb::SwapVisualAnchor => {
+				if let Some((start,end)) = self.select_range() {
+					if let Some(mut mode) = self.select_mode {
+						mode.invert_anchor();
+						let new_cursor_pos = match mode.anchor() {
+							SelectAnchor::Start => start,
+							SelectAnchor::End => end,
+						};
+						self.cursor.set(new_cursor_pos);
+						self.select_mode = Some(mode)
+					}
+				}
+			}
 			Verb::JoinLines => {
 				let start = self.start_of_line();
 				let Some((_,mut end)) = self.nth_next_line(1) else {
@@ -1529,7 +1956,6 @@ impl LineBuf {
 				let graphemes = string.graphemes(true).count();
 				self.cursor.add(graphemes);
 			}
-			Verb::Breakline(anchor) => todo!(),
 			Verb::Indent => {
 				let Some((start,end)) = self.range_from_motion(&motion) else {
 					return Ok(())
@@ -1622,48 +2048,59 @@ impl LineBuf {
 			}
 		}
 
-		let ViCmd { register, verb, motion, raw_seq: _ } = cmd;
+		let ViCmd { register, verb, motion, flags, raw_seq: _ } = cmd;
 
-		let verb_count = verb.as_ref().map(|v| v.0).unwrap_or(1);
-		let motion_count = motion.as_ref().map(|m| m.0);
+		let verb_cmd_ref = verb.as_ref();
+		let verb_ref = verb_cmd_ref.map(|v| v.1.clone());
+		let verb_count = verb_cmd_ref.map(|v| v.0).unwrap_or(1);
 
 		let before = self.buffer.clone();
 		let cursor_pos = self.cursor.get();
 
-		for i in 0..verb_count {
-			/*
-			 * Let's evaluate the motion now
-			 * If motion is None, we will try to use self.select_range
-			 * If self.select_range is None, we will use MotionKind::Null
-			 */
-			let motion_eval = motion
+		/*
+		 * Let's evaluate the motion now
+		 * If we got some weird command like 'dvw' we will have to simulate a visual selection to get the range
+		 * If motion is None, we will try to use self.select_range
+		 * If self.select_range is None, we will use MotionKind::Null
+		 */
+		let motion_eval = if flags.intersects(CmdFlags::VISUAL | CmdFlags::VISUAL_LINE | CmdFlags::VISUAL_BLOCK) {
+			let motion = motion
 				.clone()
-				.map(|m| self.eval_motion(m))
+				.map(|m| self.eval_motion(verb_ref.as_ref(), m))
+				.unwrap_or(MotionKind::Null);
+			let mode = match flags {
+				CmdFlags::VISUAL => SelectMode::Char(SelectAnchor::End),
+				CmdFlags::VISUAL_LINE => SelectMode::Line(SelectAnchor::End),
+				CmdFlags::VISUAL_BLOCK => SelectMode::Block(SelectAnchor::End),
+				_ => unreachable!()
+			};
+			// Start a selection
+			self.start_selecting(mode);
+			// Apply the cursor motion
+			self.apply_motion(motion);
+
+			// Use the selection range created by the motion
+			self.select_range
+				.map(MotionKind::Inclusive)
+				.unwrap_or(MotionKind::Null)
+		} else {
+			motion
+				.clone()
+				.map(|m| self.eval_motion(verb_ref.as_ref(), m))
 				.unwrap_or({
 					self.select_range
 						.map(MotionKind::Inclusive)
 						.unwrap_or(MotionKind::Null)
-				});
+				})
+		};
 
-			if let Some(verb) = verb.clone() {
-				self.exec_verb(verb.1, motion_eval, register)?;
-
-				if is_inplace_edit && i != verb_count.saturating_sub(1) {
-					/*
-					 Used to calculate motions for stuff like '5~' or '8rg'
-					 Those verbs don't have a motion, and always land on
-					 the last character that they operate on.
-					 Therefore, we increment the cursor until we hit verb_count - 1
-					 or the end of the buffer
-				 */
-					if !self.cursor.inc() {
-						break
-					}
-				}
-			} else {
-				self.apply_motion(motion_eval);
-			}
+		if let Some(verb) = verb.clone() {
+			self.exec_verb(verb.1, motion_eval, register)?;
+		} else {
+			self.apply_motion(motion_eval);
 		}
+
+		/* Done executing, do some cleanup */
 
 		let after = self.buffer.clone();
 		if clear_redos {
@@ -1701,14 +2138,32 @@ impl LineBuf {
 }
 
 impl Display for LineBuf {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let buf = self.buffer.clone();
-		write!(f,"{buf}")?;
-		if let Some(hint) = self.hint() {
-			let hint_styled = hint.styled(Style::BrightBlack);
-			write!(f,"{hint_styled}")?;
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let mut full_buf = self.buffer.clone();
+		if let Some((start,end)) = self.select_range.clone() {
+			let mode = self.select_mode.unwrap();
+			let start_byte = self.read_idx_byte_pos(start);
+			let end_byte = self.read_idx_byte_pos(end);
+
+			match mode.anchor() {
+				SelectAnchor::Start => {
+					let mut inclusive = start_byte..=end_byte;
+					if *inclusive.end() == full_buf.len() {
+						inclusive = start_byte..=end_byte.saturating_sub(1);
+					}
+					let selected = full_buf[inclusive.clone()].styled(Style::BgWhite | Style::Black);
+					full_buf.replace_range(inclusive, &selected);
+				}
+				SelectAnchor::End => {
+					let selected = full_buf[start..end].styled(Style::BgWhite | Style::Black);
+					full_buf.replace_range(start_byte..end_byte, &selected);
+				}
+			}
 		}
-		Ok(())
+		if let Some(hint) = self.hint.as_ref() {
+			full_buf.push_str(&hint.styled(Style::BrightBlack));
+		}
+		write!(f,"{}",full_buf)
 	}
 }
 

@@ -3,7 +3,7 @@ use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{LineBuf, SelectAnchor, SelectMode};
 use nix::libc::STDOUT_FILENO;
 use term::{get_win_size, raw_mode, KeyReader, Layout, LineWriter, TermReader, TermWriter};
-use vicmd::{Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
+use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
 use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
 use crate::libsh::{error::{ShErr, ShErrKind, ShResult}, sys::sh_quit, term::{Style, Styled}};
@@ -107,7 +107,7 @@ impl FernVi {
 			old_layout: None,
 			repeat_action: None,
 			repeat_motion: None,
-			editor: LineBuf::new(),
+			editor: LineBuf::new().with_initial("this buffer has (some delimited) text", 0),
 			history: History::new()?
 		})
 	}
@@ -280,12 +280,12 @@ impl FernVi {
 
 			std::mem::swap(&mut mode, &mut self.mode);
 
-			self.editor.set_cursor_clamp(self.mode.clamp_cursor());
 			if mode.is_repeatable() {
 				self.repeat_action = mode.as_replay();
 			}
 
 			self.editor.exec_cmd(cmd)?;
+			self.editor.set_cursor_clamp(self.mode.clamp_cursor());
 
 			if selecting {
 				self.editor.start_selecting(SelectMode::Char(SelectAnchor::End));
@@ -345,7 +345,8 @@ impl FernVi {
 						register: RegisterName::default(),
 						verb: None,
 						motion: Some(motion),
-						raw_seq: format!("{count};")
+						raw_seq: format!("{count};"),
+						flags: CmdFlags::empty()
 					};
 					return self.editor.exec_cmd(repeat_cmd);
 				}
@@ -359,7 +360,8 @@ impl FernVi {
 						register: RegisterName::default(),
 						verb: None,
 						motion: Some(new_motion),
-						raw_seq: format!("{count},")
+						raw_seq: format!("{count},"),
+						flags: CmdFlags::empty()
 					};
 					return self.editor.exec_cmd(repeat_cmd);
 				}

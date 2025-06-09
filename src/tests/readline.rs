@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{libsh::term::{Style, Styled}, prompt::readline::{keys::{KeyCode, KeyEvent, ModKeys}, linebuf::LineBuf, term::{raw_mode, KeyReader, LineWriter}, vimode::{ViInsert, ViMode, ViNormal}, FernVi, Readline}};
+use crate::{libsh::term::{Style, Styled}, prompt::readline::{history::History, keys::{KeyCode, KeyEvent, ModKeys}, linebuf::LineBuf, term::{raw_mode, KeyReader, LineWriter}, vimode::{ViInsert, ViMode, ViNormal}, FernVi, Readline}};
 
 use pretty_assertions::assert_eq;
 
@@ -170,6 +170,7 @@ impl FernVi {
 			old_layout: None,
 			repeat_action: None,
 			repeat_motion: None,
+			history: History::new().unwrap(),
 			editor: LineBuf::new().with_initial(initial, 0)
 		}
 	}
@@ -503,6 +504,97 @@ fn editor_overshooting_motions() {
 	);
 }
 
+#[test]
+fn editor_textobj_quoted() {
+	assert_eq!(normal_cmd(
+		"di\"",
+		"this buffer has \"some \\\"quoted\" text",
+		0),
+		("this buffer has \"\" text".into(), 17)
+	);
+	assert_eq!(normal_cmd(
+		"da\"",
+		"this buffer has \"some \\\"quoted\" text",
+		0),
+		("this buffer has text".into(), 16)
+	);
+	assert_eq!(normal_cmd(
+		"di'",
+		"this buffer has 'some \\'quoted' text",
+		0),
+		("this buffer has '' text".into(), 17)
+	);
+	assert_eq!(normal_cmd(
+		"da'",
+		"this buffer has 'some \\'quoted' text",
+		0),
+		("this buffer has text".into(), 16)
+	);
+	assert_eq!(normal_cmd(
+		"di`",
+		"this buffer has `some \\`quoted` text",
+		0),
+		("this buffer has `` text".into(), 17)
+	);
+	assert_eq!(normal_cmd(
+		"da`",
+		"this buffer has `some \\`quoted` text",
+		0),
+		("this buffer has text".into(), 16)
+	);
+}
+
+#[test]
+fn editor_textobj_delimited() {
+	assert_eq!(normal_cmd(
+		"di)",
+		"this buffer has (some \\(\\)(inner) \\(\\)delimited) text",
+		0),
+		("this buffer has () text".into(), 17)
+	);
+	assert_eq!(normal_cmd(
+		"da)",
+		"this buffer has (some \\(\\)(inner) \\(\\)delimited) text",
+		0),
+		("this buffer has text".into(), 16)
+	);
+	assert_eq!(normal_cmd(
+		"di]",
+		"this buffer has [some \\[\\][inner] \\[\\]delimited] text",
+		0),
+		("this buffer has [] text".into(), 17)
+	);
+	assert_eq!(normal_cmd(
+		"da]",
+		"this buffer has [some \\[\\][inner] \\[\\]delimited] text",
+		0),
+		("this buffer has text".into(), 16)
+	);
+	assert_eq!(normal_cmd(
+		"di}",
+		"this buffer has {some \\{\\}{inner} \\{\\}delimited} text",
+		0),
+		("this buffer has {} text".into(), 17)
+	);
+	assert_eq!(normal_cmd(
+		"da}",
+		"this buffer has {some \\{\\}{inner} \\{\\}delimited} text",
+		0),
+		("this buffer has text".into(), 16)
+	);
+	assert_eq!(normal_cmd(
+		"di>",
+		"this buffer has <some \\<\\><inner> \\<\\>delimited> text",
+		0),
+		("this buffer has <> text".into(), 17)
+	);
+	assert_eq!(normal_cmd(
+		"da>",
+		"this buffer has <some \\<\\><inner> \\<\\>delimited> text",
+		0),
+		("this buffer has text".into(), 16)
+	);
+}
 
 const LOREM_IPSUM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\nUt enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra.";
 
