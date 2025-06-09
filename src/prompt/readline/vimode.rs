@@ -2,9 +2,11 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 use nix::NixPath;
+use unicode_segmentation::UnicodeSegmentation;
 
-use super::keys::{KeyEvent as E, KeyCode as K, ModKeys as M};
-use super::vicmd::{Anchor, Bound, Dest, Direction, Motion, MotionBuilder, MotionCmd, RegisterName, TextObj, To, Verb, VerbBuilder, VerbCmd, ViCmd, Word};
+use super::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
+use super::linebuf::CharClass;
+use super::vicmd::{Anchor, Bound, CmdFlags, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb, VerbCmd, ViCmd, Word};
 use crate::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +53,17 @@ pub trait ViMode {
 	fn clamp_cursor(&self) -> bool;
 	fn hist_scroll_start_pos(&self) -> Option<To>;
 	fn report_mode(&self) -> ModeReport;
+	fn cmds_from_raw(&mut self, raw: &str) -> Vec<ViCmd> {
+		let mut cmds = vec![];
+		for ch in raw.graphemes(true) {
+			let key = E::new(ch, M::NONE);
+			let Some(cmd) = self.handle_key(key) else {
+				continue
+			};
+			cmds.push(cmd)
+		}
+		cmds
+	}
 }
 
 #[derive(Default,Debug)]
@@ -69,7 +82,8 @@ impl ViInsert {
 		self
 	}
 	pub fn register_and_return(&mut self) -> Option<ViCmd> {
-		let cmd = self.take_cmd();
+		let mut cmd = self.take_cmd();
+		cmd.normalize_counts();
 		self.register_cmd(&cmd);
 		Some(cmd)
 	}
@@ -99,20 +113,14 @@ impl ViMode for ViInsert {
 				self.register_and_return()
 			}
 			E(K::Char('W'), M::CTRL) => {
-				if self.ctrl_w_is_undo() {
-					self.pending_cmd.set_verb(VerbCmd(1,Verb::Undo));
-					self.cmds.clear();
-					Some(self.take_cmd())
-				} else {
-					self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
-					self.pending_cmd.set_motion(MotionCmd(1, Motion::BackwardWord(To::Start, Word::Normal)));
-					self.register_and_return()
-				}
+				self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
+				self.pending_cmd.set_motion(MotionCmd(1, Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)));
+				self.register_and_return()
 			}
 			E(K::Char('H'), M::CTRL) |
 			E(K::Backspace, M::NONE) => {
 				self.pending_cmd.set_verb(VerbCmd(1,Verb::Delete));
-				self.pending_cmd.set_motion(MotionCmd(1,Motion::BackwardChar));
+				self.pending_cmd.set_motion(MotionCmd(1,Motion::BackwardCharForced));
 				self.register_and_return()
 			}
 
@@ -135,6 +143,7 @@ impl ViMode for ViInsert {
 			_ => common_cmds(key)
 		}
 	}
+
 
 	fn is_repeatable(&self) -> bool {
 		true
@@ -180,18 +189,10 @@ impl ViReplace {
 		self
 	}
 	pub fn register_and_return(&mut self) -> Option<ViCmd> {
-		let cmd = self.take_cmd();
+		let mut cmd = self.take_cmd();
+		cmd.normalize_counts();
 		self.register_cmd(&cmd);
 		Some(cmd)
-	}
-	pub fn ctrl_w_is_undo(&self) -> bool {
-		let insert_count = self.cmds.iter().filter(|cmd| {
-			matches!(cmd.verb(),Some(VerbCmd(1, Verb::ReplaceChar(_))))
-		}).count();
-		let backspace_count = self.cmds.iter().filter(|cmd| {
-			matches!(cmd.verb(),Some(VerbCmd(1, Verb::Delete)))
-		}).count();
-		insert_count > backspace_count
 	}
 	pub fn register_cmd(&mut self, cmd: &ViCmd) {
 		self.cmds.push(cmd.clone())
@@ -210,14 +211,9 @@ impl ViMode for ViReplace {
 				self.register_and_return()
 			}
 			E(K::Char('W'), M::CTRL) => {
-				if self.ctrl_w_is_undo() {
-					self.pending_cmd.set_verb(VerbCmd(1,Verb::Undo));
-					self.cmds.clear();
-					Some(self.take_cmd())
-				} else {
-					self.pending_cmd.set_motion(MotionCmd(1, Motion::BackwardWord(To::Start, Word::Normal)));
-					self.register_and_return()
-				}
+				self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
+				self.pending_cmd.set_motion(MotionCmd(1, Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)));
+				self.register_and_return()
 			}
 			E(K::Char('H'), M::CTRL) |
 			E(K::Backspace, M::NONE) => {
@@ -272,6 +268,7 @@ impl ViMode for ViReplace {
 #[derive(Default,Debug)]
 pub struct ViNormal {
 	pending_seq: String,
+	pending_flags: CmdFlags,
 }
 
 impl ViNormal {
@@ -284,6 +281,10 @@ impl ViNormal {
 	pub fn take_cmd(&mut self) -> String {
 		std::mem::take(&mut self.pending_seq)
 	}
+	pub fn flags(&self) -> CmdFlags {
+		self.pending_flags
+	}
+	#[allow(clippy::unnecessary_unwrap)]
 	fn validate_combination(&self, verb: Option<&Verb>, motion: Option<&Motion>) -> CmdState {
 		if verb.is_none() {
 			match motion {
@@ -294,8 +295,7 @@ impl ViNormal {
 		}
 		if verb.is_some() && motion.is_none() {
 			match verb.unwrap() {
-				Verb::Put(_) |
-				Verb::DeleteChar(_) => CmdState::Complete,
+				Verb::Put(_) => CmdState::Complete,
 				_ => CmdState::Pending
 			}
 		} else {
@@ -329,6 +329,12 @@ impl ViNormal {
 		self.pending_seq.push(ch);
 		let mut chars = self.pending_seq.chars().peekable();
 
+		/*
+		 * Parse the register
+		 *
+		 * Registers can be any letter a-z or A-Z.
+		 * While uncommon, it is possible to give a count to a register name.
+		 */
 		let register = 'reg_parse: {
 			let mut chars_clone = chars.clone();
 			let count = self.parse_count(&mut chars_clone);
@@ -337,7 +343,7 @@ impl ViNormal {
 				break 'reg_parse RegisterName::default()
 			};
 
-			let Some(reg_name)  = chars_clone.next() else {
+			let Some(reg_name) = chars_clone.next() else {
 				return None // Pending register name
 			};
 			match reg_name {
@@ -350,6 +356,17 @@ impl ViNormal {
 			RegisterName::new(Some(reg_name), count)
 		};
 
+		/* 
+		 * We will now parse the verb
+		 * If we hit an invalid sequence, we will call 'return self.quit_parse()'
+		 * self.quit_parse() will clear the pending command and return None
+		 *
+		 * If we hit an incomplete sequence, we will simply return None.
+		 * returning None leaves the pending sequence where it is
+		 *
+		 * Note that we do use a label here for the block and 'return' values from this scope
+		 * using "break 'verb_parse <value>"
+		 */
 		let verb = 'verb_parse: {
 			let mut chars_clone = chars.clone();
 			let count = self.parse_count(&mut chars_clone).unwrap_or(1);
@@ -367,9 +384,25 @@ impl ViNormal {
 										register,
 										verb: Some(VerbCmd(1, Verb::VisualModeSelectLast)),
 										motion: None,
-										raw_seq: self.take_cmd()
+										raw_seq: self.take_cmd(),
+										flags: self.flags(),
 									}
 								)
+							}
+							'~' => {
+								chars_clone.next();
+								chars = chars_clone;
+								break 'verb_parse Some(VerbCmd(count, Verb::ToggleCaseRange));
+							}
+							'u' => {
+								chars_clone.next();
+								chars = chars_clone;
+								break 'verb_parse Some(VerbCmd(count, Verb::ToLower));
+							}
+							'U' => {
+								chars_clone.next();
+								chars = chars_clone;
+								break 'verb_parse Some(VerbCmd(count, Verb::ToUpper));
 							}
 							'?' => {
 								chars_clone.next();
@@ -389,16 +422,53 @@ impl ViNormal {
 							verb: Some(VerbCmd(count, Verb::RepeatLast)),
 							motion: None,
 							raw_seq: self.take_cmd(),
+							flags: self.flags()
 						}
 					)
 				}
 				'x' => {
-					chars = chars_clone;
-					break 'verb_parse Some(VerbCmd(count, Verb::DeleteChar(Anchor::After)));
+					return Some(
+						ViCmd {
+							register,
+							verb: Some(VerbCmd(count, Verb::Delete)),
+							motion: Some(MotionCmd(1, Motion::ForwardChar)),
+							raw_seq: self.take_cmd(),
+							flags: self.flags()
+						}
+					)
 				}
 				'X' => {
-					chars = chars_clone;
-					break 'verb_parse Some(VerbCmd(count, Verb::DeleteChar(Anchor::Before)));
+					return Some(
+						ViCmd {
+							register,
+							verb: Some(VerbCmd(count, Verb::Delete)),
+							motion: Some(MotionCmd(1, Motion::BackwardChar)),
+							raw_seq: self.take_cmd(),
+							flags: self.flags()
+						}
+					)
+				}
+				's' => {
+					return Some(
+						ViCmd {
+							register,
+							verb: Some(VerbCmd(count, Verb::Change)),
+							motion: Some(MotionCmd(1, Motion::ForwardChar)),
+							raw_seq: self.take_cmd(),
+							flags: self.flags()
+						},
+					)
+				}
+				'S' => {
+					return Some(
+						ViCmd {
+							register,
+							verb: Some(VerbCmd(count, Verb::Change)),
+							motion: Some(MotionCmd(1, Motion::WholeLine)),
+							raw_seq: self.take_cmd(),
+							flags: self.flags()
+						}
+					)
 				}
 				'p' => {
 					chars = chars_clone;
@@ -421,9 +491,10 @@ impl ViNormal {
 					return Some(
 						ViCmd {
 							register,
-							verb: Some(VerbCmd(1, Verb::ReplaceChar(ch))),
-							motion: Some(MotionCmd(count, Motion::ForwardChar)),
-							raw_seq: self.take_cmd()
+							verb: Some(VerbCmd(1, Verb::ReplaceCharInplace(ch,count as u16))),
+							motion: None,
+							raw_seq: self.take_cmd(),
+							flags: self.flags()
 						}
 					)
 				}
@@ -433,7 +504,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::ReplaceMode)),
 							motion: None,
-							raw_seq: self.take_cmd()
+							raw_seq: self.take_cmd(),
+							flags: self.flags()
 						}
 					)
 				}
@@ -441,9 +513,10 @@ impl ViNormal {
 					return Some(
 						ViCmd { 
 							register,
-							verb: Some(VerbCmd(1, Verb::ToggleCase)),
-							motion: Some(MotionCmd(count, Motion::ForwardChar)),
-							raw_seq: self.take_cmd() 
+							verb: Some(VerbCmd(1, Verb::ToggleCaseInplace(count as u16))),
+							motion: None,
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -453,7 +526,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::Undo)),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -463,7 +537,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::VisualMode)),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -473,7 +548,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::VisualModeLine)),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -483,7 +559,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::InsertModeLineBreak(Anchor::After))),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -493,7 +570,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::InsertModeLineBreak(Anchor::Before))),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -503,7 +581,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::InsertMode)),
 							motion: Some(MotionCmd(1, Motion::ForwardChar)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -513,7 +592,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::InsertMode)),
 							motion: Some(MotionCmd(1, Motion::EndOfLine)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -523,7 +603,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::InsertMode)),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -533,7 +614,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::InsertMode)),
 							motion: Some(MotionCmd(1, Motion::BeginningOfFirstWord)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -543,7 +625,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::JoinLines)),
 							motion: None,            
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -565,7 +648,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::Yank)),
 							motion: Some(MotionCmd(1, Motion::EndOfLine)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -575,7 +659,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::Delete)),
 							motion: Some(MotionCmd(1, Motion::EndOfLine)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -585,7 +670,8 @@ impl ViNormal {
 							register,
 							verb: Some(VerbCmd(count, Verb::Change)),
 							motion: Some(MotionCmd(1, Motion::EndOfLine)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: self.flags()
 						}
 					)
 				}
@@ -604,59 +690,90 @@ impl ViNormal {
 			let Some(ch) = chars_clone.next() else {
 				break 'motion_parse None
 			};
+			// Double inputs like 'dd' and 'cc', and some special cases
 			match (ch, &verb) {
+				// Double inputs
 				('?', Some(VerbCmd(_,Verb::Rot13))) |
 				('d', Some(VerbCmd(_,Verb::Delete))) |
 				('c', Some(VerbCmd(_,Verb::Change))) |
 				('y', Some(VerbCmd(_,Verb::Yank))) |
 				('=', Some(VerbCmd(_,Verb::Equalize))) |
+				('u', Some(VerbCmd(_,Verb::ToLower))) |
+				('U', Some(VerbCmd(_,Verb::ToUpper))) |
+				('~', Some(VerbCmd(_,Verb::ToggleCaseRange))) |
 				('>', Some(VerbCmd(_,Verb::Indent))) |
 				('<', Some(VerbCmd(_,Verb::Dedent))) => break 'motion_parse Some(MotionCmd(count, Motion::WholeLine)),
-				_ => {}
+				('W', Some(VerbCmd(_, Verb::Change))) => {
+					// Same with 'W'
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Big, Direction::Forward)));
+				}
+				_ => { /* Nothing weird, so let's continue */ }
 			}
 			match ch {
 				'g' => {
-					if let Some(ch) = chars_clone.peek() {
-						match ch {
-							'g' => {
-								chars_clone.next();
-								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfBuffer))
-							}
-							'e' => {
-								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::BackwardWord(To::End, Word::Normal)));
-							}
-							'E' => {
-								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::BackwardWord(To::End, Word::Big)));
-							}
-							'k' => {
-								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineUp));
-							}
-							'j' => {
-								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineDown));
-							}
-							'_' => {
-								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::EndOfLastWord));
-							}
-							'0' => {
-								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfScreenLine));
-							}
-							'^' => {
-								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::FirstGraphicalOnScreenLine));
-							}
-							_ => return self.quit_parse()
-						}
-					} else {
+					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
+					};
+					match ch {
+						'g' => {
+							chars_clone.next();
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfBuffer))
+						}
+						'e' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Normal, Direction::Backward)));
+						}
+						'E' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Big, Direction::Backward)));
+						}
+						'k' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineUp));
+						}
+						'j' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineDown));
+						}
+						'_' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::EndOfLastWord));
+						}
+						'0' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfScreenLine));
+						}
+						'^' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::FirstGraphicalOnScreenLine));
+						}
+						_ => return self.quit_parse()
 					}
 				}
+				'v' => {
+					// We got 'v' after a verb
+					// Instead of normal operations, we will calculate the span based on how visual mode would see it
+					if self.flags().intersects(CmdFlags::VISUAL | CmdFlags::VISUAL_LINE | CmdFlags::VISUAL_BLOCK) {
+						// We can't have more than one of these
+						return self.quit_parse();
+					}
+					self.pending_flags |= CmdFlags::VISUAL;
+					break 'motion_parse None
+				}
+				'V' => {
+					// We got 'V' after a verb
+					// Instead of normal operations, we will calculate the span based on how visual line mode would see it
+					if self.flags().intersects(CmdFlags::VISUAL | CmdFlags::VISUAL_LINE | CmdFlags::VISUAL_BLOCK) {
+						// We can't have more than one of these
+						// I know vim can technically do this, but it doesn't really make sense to allow it
+						// since even in vim only the first one given is used
+						return self.quit_parse();
+					}
+					self.pending_flags |= CmdFlags::VISUAL;
+					break 'motion_parse None
+				}
+				// TODO: figure out how to include 'Ctrl+V' here, might need a refactor
 				'G' => {
 					chars = chars_clone;
 					break 'motion_parse Some(MotionCmd(count, Motion::EndOfBuffer));
@@ -699,7 +816,7 @@ impl ViNormal {
 				}
 				'|' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(1, Motion::ToColumn(count)));
+					break 'motion_parse Some(MotionCmd(count, Motion::ToColumn));
 				}
 				'^' => {
 					chars = chars_clone;
@@ -731,27 +848,27 @@ impl ViNormal {
 				}
 				'w' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::ForwardWord(To::Start, Word::Normal)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Normal, Direction::Forward)));
 				}
 				'W' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::ForwardWord(To::Start, Word::Big)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Big, Direction::Forward)));
 				}
 				'e' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::ForwardWord(To::End, Word::Normal)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Normal, Direction::Forward)));
 				}
 				'E' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::ForwardWord(To::End, Word::Big)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Big, Direction::Forward)));
 				}
 				'b' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::BackwardWord(To::Start, Word::Normal)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)));
 				}
 				'B' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::BackwardWord(To::Start, Word::Big)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Big, Direction::Backward)));
 				}
 				ch if ch == 'i' || ch == 'a' => {
 					let bound = match ch {
@@ -767,6 +884,7 @@ impl ViNormal {
 						'W' => TextObj::Word(Word::Big),
 						'"' => TextObj::DoubleQuote,
 						'\'' => TextObj::SingleQuote,
+						'`' => TextObj::BacktickQuote,
 						'(' | ')' | 'b' => TextObj::Paren,
 						'{' | '}' | 'B' => TextObj::Brace,
 						'[' | ']' => TextObj::Bracket,
@@ -795,7 +913,8 @@ impl ViNormal {
 						register,
 						verb,
 						motion,
-						raw_seq: std::mem::take(&mut self.pending_seq)
+						raw_seq: std::mem::take(&mut self.pending_seq),
+						flags: self.flags()
 					}
 				)
 			}
@@ -812,7 +931,7 @@ impl ViNormal {
 
 impl ViMode for ViNormal {
 	fn handle_key(&mut self, key: E) -> Option<ViCmd> {
-		match key {
+		let mut cmd = match key {
 			E(K::Char(ch), M::NONE) => self.try_parse(ch),
 			E(K::Backspace, M::NONE) => {
 				Some(ViCmd {
@@ -820,6 +939,7 @@ impl ViMode for ViNormal {
 					verb: None,
 					motion: Some(MotionCmd(1, Motion::BackwardChar)),
 					raw_seq: "".into(),
+					flags: self.flags()
 				})
 			}
 			E(K::Char('R'), M::CTRL) => {
@@ -830,7 +950,8 @@ impl ViMode for ViNormal {
 						register: RegisterName::default(),
 						verb: Some(VerbCmd(count,Verb::Redo)),
 						motion: None,
-						raw_seq: self.take_cmd()
+						raw_seq: self.take_cmd(),
+						flags: self.flags()
 					}
 				)
 			}
@@ -846,7 +967,12 @@ impl ViMode for ViNormal {
 					None
 				}
 			}
-		}
+		};
+
+		if let Some(cmd) = cmd.as_mut() {
+			cmd.normalize_counts();
+		};
+		cmd
 	}
 
 	fn is_repeatable(&self) -> bool {
@@ -894,6 +1020,8 @@ impl ViVisual {
 	pub fn take_cmd(&mut self) -> String {
 		std::mem::take(&mut self.pending_seq)
 	}
+
+	#[allow(clippy::unnecessary_unwrap)]
 	fn validate_combination(&self, verb: Option<&Verb>, motion: Option<&Motion>) -> CmdState {
 		if verb.is_none() {
 			match motion {
@@ -902,10 +1030,9 @@ impl ViVisual {
 				None => return CmdState::Pending
 			}
 		}
-		if verb.is_some() && motion.is_none() {
+		if motion.is_none() && verb.is_some()  {
 			match verb.unwrap() {
-				Verb::Put(_) |
-				Verb::DeleteChar(_) => CmdState::Complete,
+				Verb::Put(_) => CmdState::Complete,
 				_ => CmdState::Pending
 			}
 		} else {
@@ -977,7 +1104,8 @@ impl ViVisual {
 										register,
 										verb: Some(VerbCmd(1, Verb::VisualModeSelectLast)),
 										motion: None,
-										raw_seq: self.take_cmd()
+										raw_seq: self.take_cmd(),
+										flags: CmdFlags::empty()
 									}
 								)
 							}
@@ -987,7 +1115,8 @@ impl ViVisual {
 										register,
 										verb: Some(VerbCmd(1, Verb::Rot13)),
 										motion: None,
-										raw_seq: self.take_cmd()
+										raw_seq: self.take_cmd(),
+										flags: CmdFlags::empty()
 									}
 								)
 							}
@@ -1004,6 +1133,7 @@ impl ViVisual {
 							verb: Some(VerbCmd(count, Verb::RepeatLast)),
 							motion: None,
 							raw_seq: self.take_cmd(),
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1018,6 +1148,7 @@ impl ViVisual {
 							verb: Some(VerbCmd(1, Verb::Delete)),
 							motion: Some(MotionCmd(1, Motion::WholeLine)),
 							raw_seq: self.take_cmd(),
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1027,7 +1158,8 @@ impl ViVisual {
 							register,
 							verb: Some(VerbCmd(1, Verb::Yank)),
 							motion: Some(MotionCmd(1, Motion::WholeLine)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1037,7 +1169,8 @@ impl ViVisual {
 							register,
 							verb: Some(VerbCmd(1, Verb::Delete)),
 							motion: Some(MotionCmd(1, Motion::WholeLine)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1049,6 +1182,7 @@ impl ViVisual {
 							verb: Some(VerbCmd(1, Verb::Change)),
 							motion: Some(MotionCmd(1, Motion::WholeLine)),
 							raw_seq: self.take_cmd(),
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1059,6 +1193,7 @@ impl ViVisual {
 							verb: Some(VerbCmd(1, Verb::Indent)),
 							motion: Some(MotionCmd(1, Motion::WholeLine)),
 							raw_seq: self.take_cmd(),
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1069,6 +1204,7 @@ impl ViVisual {
 							verb: Some(VerbCmd(1, Verb::Dedent)),
 							motion: Some(MotionCmd(1, Motion::WholeLine)),
 							raw_seq: self.take_cmd(),
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1079,6 +1215,7 @@ impl ViVisual {
 							verb: Some(VerbCmd(1, Verb::Equalize)),
 							motion: Some(MotionCmd(1, Motion::WholeLine)),
 							raw_seq: self.take_cmd(),
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1094,7 +1231,8 @@ impl ViVisual {
 							register,
 							verb: Some(VerbCmd(1, Verb::ReplaceChar(ch))),
 							motion: None,
-							raw_seq: self.take_cmd()
+							raw_seq: self.take_cmd(),
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1102,9 +1240,10 @@ impl ViVisual {
 					return Some(
 						ViCmd { 
 							register,
-							verb: Some(VerbCmd(1, Verb::ToggleCase)),
+							verb: Some(VerbCmd(1, Verb::ToggleCaseRange)),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1114,7 +1253,8 @@ impl ViVisual {
 							register,
 							verb: Some(VerbCmd(count, Verb::ToLower)),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1124,7 +1264,8 @@ impl ViVisual {
 							register,
 							verb: Some(VerbCmd(count, Verb::ToUpper)),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1135,7 +1276,8 @@ impl ViVisual {
 							register,
 							verb: Some(VerbCmd(count, Verb::SwapVisualAnchor)),
 							motion: None,
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1145,7 +1287,8 @@ impl ViVisual {
 							register,
 							verb: Some(VerbCmd(count, Verb::InsertMode)),
 							motion: Some(MotionCmd(1, Motion::ForwardChar)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1155,7 +1298,8 @@ impl ViVisual {
 							register,
 							verb: Some(VerbCmd(count, Verb::InsertMode)),
 							motion: Some(MotionCmd(1, Motion::BeginningOfLine)),
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1165,7 +1309,8 @@ impl ViVisual {
 							register,
 							verb: Some(VerbCmd(count, Verb::JoinLines)),
 							motion: None,            
-							raw_seq: self.take_cmd() 
+							raw_seq: self.take_cmd(), 
+							flags: CmdFlags::empty()
 						}
 					)
 				}
@@ -1190,7 +1335,8 @@ impl ViVisual {
 				register,
 				verb: Some(verb),
 				motion: None,
-				raw_seq: self.take_cmd()
+				raw_seq: self.take_cmd(),
+				flags: CmdFlags::empty()
 			})
 		}
 
@@ -1220,18 +1366,22 @@ impl ViVisual {
 								break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfBuffer))
 							}
 							'e' => {
+								chars_clone.next();
 								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::BackwardWord(To::End, Word::Normal)));
+								break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Normal, Direction::Backward)));
 							}
 							'E' => {
+								chars_clone.next();
 								chars = chars_clone;
-								break 'motion_parse Some(MotionCmd(count, Motion::BackwardWord(To::End, Word::Big)));
+								break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Big, Direction::Backward)));
 							}
 							'k' => {
+								chars_clone.next();
 								chars = chars_clone;
 								break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineUp));
 							}
 							'j' => {
+								chars_clone.next();
 								chars = chars_clone;
 								break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineDown));
 							}
@@ -1246,28 +1396,28 @@ impl ViVisual {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::On, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::On, *ch)))
 				}
 				'F' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::On, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::On, *ch)))
 				}
 				't' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::Before, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Forward, Dest::Before, *ch)))
 				}
 				'T' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
 					};
 
-					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::Before, (*ch).into())))
+					break 'motion_parse Some(MotionCmd(count, Motion::CharSearch(Direction::Backward, Dest::Before, *ch)))
 				}
 				';' => {
 					chars = chars_clone;
@@ -1279,7 +1429,7 @@ impl ViVisual {
 				}
 				'|' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(1, Motion::ToColumn(count)));
+					break 'motion_parse Some(MotionCmd(count, Motion::ToColumn));
 				}
 				'0' => {
 					chars = chars_clone;
@@ -1307,27 +1457,27 @@ impl ViVisual {
 				}
 				'w' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::ForwardWord(To::Start, Word::Normal)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Normal, Direction::Forward)));
 				}
 				'W' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::ForwardWord(To::Start, Word::Big)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Big, Direction::Forward)));
 				}
 				'e' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::ForwardWord(To::End, Word::Normal)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Normal, Direction::Forward)));
 				}
 				'E' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::ForwardWord(To::End, Word::Big)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::End, Word::Big, Direction::Forward)));
 				}
 				'b' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::BackwardWord(To::Start, Word::Normal)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)));
 				}
 				'B' => {
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::BackwardWord(To::Start, Word::Big)));
+					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Big, Direction::Backward)));
 				}
 				ch if ch == 'i' || ch == 'a' => {
 					let bound = match ch {
@@ -1343,6 +1493,7 @@ impl ViVisual {
 						'W' => TextObj::Word(Word::Big),
 						'"' => TextObj::DoubleQuote,
 						'\'' => TextObj::SingleQuote,
+						'`' => TextObj::BacktickQuote,
 						'(' | ')' | 'b' => TextObj::Paren,
 						'{' | '}' | 'B' => TextObj::Brace,
 						'[' | ']' => TextObj::Bracket,
@@ -1366,15 +1517,15 @@ impl ViVisual {
 
 		match self.validate_combination(verb_ref, motion_ref) {
 			CmdState::Complete => {
-				let cmd = Some(
+				Some(
 					ViCmd {
 						register,
 						verb,
 						motion,
-						raw_seq: std::mem::take(&mut self.pending_seq)
+						raw_seq: std::mem::take(&mut self.pending_seq),
+						flags: CmdFlags::empty()
 					}
-				);
-				cmd
+				)
 			}
 			CmdState::Pending => {
 				None
@@ -1389,7 +1540,7 @@ impl ViVisual {
 
 impl ViMode for ViVisual {
 	fn handle_key(&mut self, key: E) -> Option<ViCmd> {
-		match key {
+		let mut cmd = match key {
 			E(K::Char(ch), M::NONE) => self.try_parse(ch),
 			E(K::Backspace, M::NONE) => {
 				Some(ViCmd {
@@ -1397,6 +1548,7 @@ impl ViMode for ViVisual {
 					verb: None,
 					motion: Some(MotionCmd(1, Motion::BackwardChar)),
 					raw_seq: "".into(),
+					flags: CmdFlags::empty()
 				})
 			}
 			E(K::Char('R'), M::CTRL) => {
@@ -1407,7 +1559,8 @@ impl ViMode for ViVisual {
 						register: RegisterName::default(),
 						verb: Some(VerbCmd(count,Verb::Redo)),
 						motion: None,
-						raw_seq: self.take_cmd()
+						raw_seq: self.take_cmd(),
+						flags: CmdFlags::empty()
 					}
 				)
 			}
@@ -1417,7 +1570,8 @@ impl ViMode for ViVisual {
 						register: Default::default(),
 						verb: Some(VerbCmd(1, Verb::NormalMode)),
 						motion: Some(MotionCmd(1, Motion::Null)),
-						raw_seq: self.take_cmd()
+						raw_seq: self.take_cmd(),
+						flags: CmdFlags::empty()
 				})
 			}
 			_ => {
@@ -1428,7 +1582,12 @@ impl ViMode for ViVisual {
 					None
 				}
 			}
-		}
+		};
+
+		if let Some(cmd) = cmd.as_mut() {
+			cmd.normalize_counts();
+		};
+		cmd
 	}
 
 	fn is_repeatable(&self) -> bool {
@@ -1473,11 +1632,17 @@ pub fn common_cmds(key: E) -> Option<ViCmd> {
 		E(K::Right, M::NONE) => pending_cmd.set_motion(MotionCmd(1,Motion::ForwardChar)),
 		E(K::Up, M::NONE) => pending_cmd.set_motion(MotionCmd(1,Motion::LineUp)),
 		E(K::Down, M::NONE) => pending_cmd.set_motion(MotionCmd(1,Motion::LineDown)),
-		E(K::Enter, M::NONE) => pending_cmd.set_verb(VerbCmd(1,Verb::AcceptLine)),
+		E(K::Enter, M::NONE) => pending_cmd.set_verb(VerbCmd(1,Verb::AcceptLineOrNewline)),
 		E(K::Char('D'), M::CTRL) => pending_cmd.set_verb(VerbCmd(1,Verb::EndOfFile)),
-		E(K::Delete, M::NONE) => pending_cmd.set_verb(VerbCmd(1,Verb::DeleteChar(Anchor::After))),
+		E(K::Delete, M::NONE) => {
+			pending_cmd.set_verb(VerbCmd(1,Verb::Delete));
+			pending_cmd.set_motion(MotionCmd(1, Motion::ForwardChar));
+		}
 		E(K::Backspace, M::NONE) |
-		E(K::Char('H'), M::CTRL) => pending_cmd.set_verb(VerbCmd(1,Verb::DeleteChar(Anchor::Before))),
+		E(K::Char('H'), M::CTRL) => {
+			pending_cmd.set_verb(VerbCmd(1,Verb::Delete));
+			pending_cmd.set_motion(MotionCmd(1, Motion::BackwardChar));
+		}
 		_ => return None
 	}
 	Some(pending_cmd)

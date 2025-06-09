@@ -103,7 +103,7 @@ fn fern_interactive() {
 			.unwrap()
 			.map(|mode| mode.parse::<FernEditMode>().unwrap_or_default())
 			.unwrap();
-		let input = match prompt::read_line(edit_mode) {
+		let input = match prompt::readline(edit_mode) {
 			Ok(line) => {
 				readline_err_count = 0;
 				line

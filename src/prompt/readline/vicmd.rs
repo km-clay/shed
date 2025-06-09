@@ -1,4 +1,8 @@
+use bitflags::bitflags;
+
 use super::register::{append_register, read_register, write_register};
+
+//TODO: write tests that take edit results and cursor positions from actual neovim edits and test them against the behavior of this editor
 
 #[derive(Clone,Copy,Debug)]
 pub struct RegisterName {
@@ -52,12 +56,22 @@ impl Default for RegisterName {
 	}
 }
 
+bitflags! {
+	#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+	pub struct CmdFlags: u32 {
+		const VISUAL = 1<<0;
+		const VISUAL_LINE = 1<<1;
+		const VISUAL_BLOCK = 1<<2;
+	}
+}
+
 #[derive(Clone,Default,Debug)]
 pub struct ViCmd {
 	pub register: RegisterName,
 	pub verb: Option<VerbCmd>,
 	pub motion: Option<MotionCmd>,
 	pub raw_seq: String, 
+	pub flags: CmdFlags,
 }
 
 impl ViCmd {
@@ -82,6 +96,15 @@ impl ViCmd {
 	pub fn motion_count(&self) -> usize {
 		self.motion.as_ref().map(|m| m.0).unwrap_or(1)
 	}
+	pub fn normalize_counts(&mut self) {
+		let Some(verb) = self.verb.as_mut() else { return };
+		let Some(motion) = self.motion.as_mut() else { return };
+		let VerbCmd(v_count, _) = verb;
+		let MotionCmd(m_count, _) = motion;
+		let product = *v_count * *m_count;
+		verb.0 = 1;
+		motion.0 = product;
+	}
 	pub fn is_repeatable(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| v.1.is_repeatable())
 	}
@@ -95,13 +118,36 @@ impl ViCmd {
 		self.motion.as_ref().is_some_and(|m| matches!(m.1, Motion::CharSearch(..)))
 	}
 	pub fn should_submit(&self) -> bool {
-		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::AcceptLine))
+		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::AcceptLineOrNewline))
 	}
 	pub fn is_undo_op(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::Undo | Verb::Redo))
 	}
+	pub fn is_inplace_edit(&self) -> bool {
+		self.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::ReplaceCharInplace(_,_) | Verb::ToggleCaseInplace(_))) &&
+		self.motion.is_none()
+	}
 	pub fn is_line_motion(&self) -> bool {
-		self.motion.as_ref().is_some_and(|m| matches!(m.1, Motion::LineUp | Motion::LineDown))
+		self.motion.as_ref().is_some_and(|m| {
+			matches!(m.1, 
+				Motion::LineUp |
+				Motion::LineDown |
+				Motion::LineUpCharwise |
+				Motion::LineDownCharwise
+			)
+		})
+	}
+	/// If a ViCmd has a linewise motion, but no verb, we change it to charwise
+	pub fn alter_line_motion_if_no_verb(&mut self) {
+		if self.is_line_motion() && self.verb.is_none() {
+			if let Some(motion) = self.motion.as_mut() {
+				match motion.1 {
+					Motion::LineUp => motion.1 = Motion::LineUpCharwise,
+					Motion::LineDown => motion.1 = Motion::LineDownCharwise,
+					_ => unreachable!()
+				}
+			}
+		}
 	}
 	pub fn is_mode_transition(&self) -> bool {
 		self.verb.as_ref().is_some_and(|v| {
@@ -140,12 +186,13 @@ impl MotionCmd {
 #[non_exhaustive]
 pub enum Verb {
 	Delete,
-	DeleteChar(Anchor),
 	Change,
 	Yank,
-	ReplaceChar(char),
-	Substitute,
-	ToggleCase,
+	Rot13, // lol
+	ReplaceChar(char), // char to replace with, number of chars to replace
+	ReplaceCharInplace(char,u16), // char to replace with, number of chars to replace
+	ToggleCaseInplace(u16), // Number of chars to toggle
+	ToggleCaseRange,
 	ToLower,
 	ToUpper,
 	Complete,
@@ -166,47 +213,31 @@ pub enum Verb {
 	JoinLines,
 	InsertChar(char),
 	Insert(String),
-	Breakline(Anchor),
 	Indent,
 	Dedent,
 	Equalize,
-	AcceptLine,
-	Rot13, // lol
-	Builder(VerbBuilder),
+	AcceptLineOrNewline,
 	EndOfFile
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum VerbBuilder {
-}
 
 impl Verb {
-	pub fn needs_motion(&self) -> bool {
-		matches!(self, 
-			Self::Indent |
-			Self::Dedent |
-			Self::Delete |
-			Self::Change |
-			Self::Yank
-		)
-	}
 	pub fn is_repeatable(&self) -> bool {
 		matches!(self,
 			Self::Delete |
-			Self::DeleteChar(_) |
 			Self::Change |
 			Self::ReplaceChar(_) |
-			Self::Substitute |
+			Self::ReplaceCharInplace(_,_) |
 			Self::ToLower |
 			Self::ToUpper |
-			Self::ToggleCase |
+			Self::ToggleCaseRange |
+			Self::ToggleCaseInplace(_) |
 			Self::Put(_) |
 			Self::ReplaceMode |
 			Self::InsertModeLineBreak(_) |
 			Self::JoinLines |
 			Self::InsertChar(_) |
 			Self::Insert(_) |
-			Self::Breakline(_) |
 			Self::Indent |
 			Self::Dedent |
 			Self::Equalize
@@ -215,11 +246,11 @@ impl Verb {
 	pub fn is_edit(&self) -> bool {
 		matches!(self,
 			Self::Delete |
-			Self::DeleteChar(_) |
 			Self::Change |
 			Self::ReplaceChar(_) |
-			Self::Substitute |
-			Self::ToggleCase |
+			Self::ReplaceCharInplace(_,_) |
+			Self::ToggleCaseRange |
+			Self::ToggleCaseInplace(_) |
 			Self::ToLower |
 			Self::ToUpper |
 			Self::RepeatLast |
@@ -229,7 +260,6 @@ impl Verb {
 			Self::JoinLines |
 			Self::InsertChar(_) |
 			Self::Insert(_) |
-			Self::Breakline(_) |
 			Self::Rot13 |
 			Self::EndOfFile
 		)
@@ -238,7 +268,8 @@ impl Verb {
 		matches!(self, 
 			Self::Change |
 			Self::InsertChar(_) |
-			Self::ReplaceChar(_)
+			Self::ReplaceChar(_) |
+			Self::ReplaceCharInplace(_,_)
 		)
 	}
 }
@@ -251,15 +282,20 @@ pub enum Motion {
 	BeginningOfFirstWord,
 	BeginningOfLine,
 	EndOfLine,
-	BackwardWord(To, Word), 
-	ForwardWord(To, Word), 
+	WordMotion(To,Word,Direction),
 	CharSearch(Direction,Dest,char),
 	BackwardChar,
 	ForwardChar,
+	BackwardCharForced, // These two variants can cross line boundaries
+	ForwardCharForced,
 	LineUp,
+	LineUpCharwise,
 	ScreenLineUp,
+	ScreenLineUpCharwise,
 	LineDown,
+	LineDownCharwise,
 	ScreenLineDown, 
+	ScreenLineDownCharwise, 
 	BeginningOfScreenLine,
 	FirstGraphicalOnScreenLine,
 	HalfOfScreen,
@@ -267,23 +303,65 @@ pub enum Motion {
 	WholeBuffer,
 	BeginningOfBuffer,
 	EndOfBuffer,
-	ToColumn(usize),
+	ToColumn,
+	ToDelimMatch,
+	ToBrace(Direction),
+	ToBracket(Direction),
+	ToParen(Direction),
 	Range(usize,usize),
-	Builder(MotionBuilder),
 	RepeatMotion,
 	RepeatMotionRev,
 	Null
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum MotionBuilder {
-	CharSearch(Option<Direction>,Option<Dest>,Option<char>),
-	TextObj(Option<TextObj>,Option<Bound>)
+#[derive(Clone,Copy,PartialEq,Eq,Debug)]
+pub enum MotionBehavior {
+	Exclusive,
+	Inclusive,
+	Linewise
 }
 
 impl Motion {
-	pub fn needs_verb(&self) -> bool {
-		matches!(self, Self::TextObj(_, _))
+	pub fn behavior(&self) -> MotionBehavior {
+		if self.is_linewise() {
+			MotionBehavior::Linewise
+		} else if self.is_exclusive() {
+			MotionBehavior::Exclusive
+		} else {
+			MotionBehavior::Inclusive
+		}
+	}
+	pub fn is_exclusive(&self) -> bool {
+		matches!(&self,
+			Self::BeginningOfLine |
+			Self::BeginningOfFirstWord |
+			Self::BeginningOfScreenLine |
+			Self::FirstGraphicalOnScreenLine |
+			Self::LineDownCharwise |
+			Self::LineUpCharwise |
+			Self::ScreenLineUpCharwise |
+			Self::ScreenLineDownCharwise |
+			Self::ToColumn |
+			Self::TextObj(TextObj::Sentence(_),_) |
+			Self::TextObj(TextObj::Paragraph(_),_) |
+			Self::CharSearch(Direction::Backward, _, _) |
+			Self::WordMotion(To::Start,_,_) |
+			Self::ToBrace(_) |
+			Self::ToBracket(_) |
+			Self::ToParen(_) |
+			Self::ScreenLineDown |
+			Self::ScreenLineUp |
+			Self::Range(_, _)
+		)
+	}
+	pub fn is_linewise(&self) -> bool {
+		matches!(self,
+			Self::WholeLine |
+			Self::LineUp |
+			Self::LineDown |
+			Self::ScreenLineDown |
+			Self::ScreenLineUp
+		)
 	}
 }
 
@@ -297,14 +375,11 @@ pub enum TextObj {
 	/// `iw`, `aw` — inner word, around word
 	Word(Word),
 
-	/// for stuff like 'dd'
-	Line,
-
 	/// `is`, `as` — inner sentence, around sentence
-	Sentence,
+	Sentence(Direction),
 
 	/// `ip`, `ap` — inner paragraph, around paragraph
-	Paragraph,
+	Paragraph(Direction),
 
 	/// `i"`, `a"` — inner/around double quotes
 	DoubleQuote,

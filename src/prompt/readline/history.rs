@@ -1,6 +1,6 @@
 use std::{env, fmt::{Write,Display}, fs::{self, OpenOptions}, io::Write as IoWrite, path::{Path, PathBuf}, str::FromStr, time::{Duration, SystemTime, UNIX_EPOCH}};
 
-use crate::libsh::{error::{ShErr, ShErrKind, ShResult}, term::{Style, Styled}};
+use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::prelude::*;
 
 use super::vicmd::Direction; // surprisingly useful
@@ -206,6 +206,10 @@ impl History {
 		&self.entries
 	}
 
+	pub fn masked_entries(&self) -> &[HistEntry] {
+		&self.search_mask
+	}
+
 	pub fn push_empty_entry(&mut self) {
 	}
 
@@ -245,6 +249,7 @@ impl History {
 	}
 
 	pub fn constrain_entries(&mut self, constraint: SearchConstraint) {
+		flog!(DEBUG,constraint);
 		let SearchConstraint { kind, term } = constraint;
 		match kind {
 			SearchKind::Prefix => {
@@ -273,7 +278,7 @@ impl History {
 		if self.cursor_entry().is_some_and(|ent| ent.is_new() && !ent.command().is_empty()) {
 			let entry = self.hint_entry()?;
 			let prefix = self.cursor_entry()?.command();
-			Some(entry.command().strip_prefix(prefix)?.to_string())
+			Some(entry.command().to_string())
 		} else {
 			None
 		}

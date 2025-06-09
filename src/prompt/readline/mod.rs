@@ -1,141 +1,186 @@
-use std::time::Duration;
-
 use history::{History, SearchConstraint, SearchKind};
 use keys::{KeyCode, KeyEvent, ModKeys};
-use linebuf::{strip_ansi_codes_and_escapes, LineBuf, SelectionAnchor, SelectionMode};
-use mode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
-use term::Terminal;
-use unicode_width::UnicodeWidthStr;
-use vicmd::{Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
+use linebuf::{LineBuf, SelectAnchor, SelectMode};
+use nix::libc::STDOUT_FILENO;
+use term::{get_win_size, raw_mode, KeyReader, Layout, LineWriter, TermReader, TermWriter};
+use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
+use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
-use crate::libsh::{error::{ShErr, ShErrKind, ShResult}, term::{Style, Styled}};
+use crate::libsh::{error::{ShErr, ShErrKind, ShResult}, sys::sh_quit, term::{Style, Styled}};
 use crate::prelude::*;
 
-pub mod keys;
 pub mod term;
 pub mod linebuf;
+pub mod layout;
+pub mod keys;
 pub mod vicmd;
-pub mod mode;
 pub mod register;
+pub mod vimode;
 pub mod history;
 
-const LOREM_IPSUM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore\nmagna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo\nconsequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
-
-/*
- * Known issues:
- * If the line buffer scrolls past the terminal height, shit gets fucked
- * the cursor sometimes spazzes out during redraw, but ends up in the right place
- */
-
-/// Unified interface for different line editing methods
 pub trait Readline {
 	fn readline(&mut self) -> ShResult<String>;
 }
 
 pub struct FernVi {
-	term: Terminal,
-	line: LineBuf,
-	history: History,
-	prompt: String,
-	mode: Box<dyn ViMode>,
-	last_action: Option<CmdReplay>,
-	last_movement: Option<MotionCmd>,
+	pub reader: Box<dyn KeyReader>,
+	pub writer: Box<dyn LineWriter>,
+	pub prompt: String,
+	pub mode: Box<dyn ViMode>,
+	pub old_layout: Option<Layout>,
+	pub repeat_action: Option<CmdReplay>,
+	pub repeat_motion: Option<MotionCmd>,
+	pub editor: LineBuf,
+	pub history: History
 }
 
 impl Readline for FernVi {
 	fn readline(&mut self) -> ShResult<String> {
-		/* a monument to the insanity of debugging this shit
-		self.term.writeln("This is a line!");
-		self.term.writeln("This is a line!");
-		self.term.writeln("This is a line!");
-		let prompt_thing = "prompt thing -> ";
-		self.term.write(prompt_thing);
-		let line = "And another!";
-		let mut iters: usize = 0;
-		let mut newlines_written = 0;
-		loop {
-			iters += 1;
-			for i in 0..iters {
-				self.term.writeln(line);
-			}
-			std::thread::sleep(Duration::from_secs(1));
-			self.clear_lines(iters,prompt_thing.len() + 1);
-		}
-		panic!()
-		*/
-		self.print_buf(false)?;
-		loop {
-			let key = self.term.read_key();
+		let raw_mode_guard = raw_mode(); // Restores termios state on drop
 
-			if let KeyEvent(KeyCode::Char('V'), ModKeys::CTRL) = key {
-				self.handle_verbatim()?;
-				continue
-			}
+		loop {
+			raw_mode_guard.disable_for(|| self.print_line())?;
+
+			let Some(key) = self.reader.read_key() else {
+				raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
+				std::mem::drop(raw_mode_guard);
+				return Err(ShErr::simple(ShErrKind::ReadlineErr, "EOF"))
+			};
+			flog!(DEBUG, key);
+
 			if self.should_accept_hint(&key) {
-				self.line.accept_hint();
-				self.history.update_pending_cmd(self.line.as_str());
-				self.print_buf(true)?;
+				self.editor.accept_hint();
+				self.history.update_pending_cmd(self.editor.as_str());
+				self.print_line()?;
 				continue
 			}
 
-			let Some(cmd) = self.mode.handle_key(key) else {
+			let Some(mut cmd) = self.mode.handle_key(key) else {
 				continue
 			};
+			cmd.alter_line_motion_if_no_verb();
 
 			if self.should_grab_history(&cmd) {
-				flog!(DEBUG, "scrolling");
 				self.scroll_history(cmd);
-				self.print_buf(true)?;
+				self.print_line()?;
 				continue
 			}
 
-
-
 			if cmd.should_submit() {
-				self.term.unposition_cursor()?;
-				self.term.write("\n");
-				let command = std::mem::take(&mut self.line).pack_line();
-				if !command.is_empty() {
-					// We're just going to trim the command
-					// reduces clutter in the case of two history commands whose only difference is insignificant whitespace
-					self.history.update_pending_cmd(&command);
-					self.history.save()?;
+				raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
+				std::mem::drop(raw_mode_guard);
+				return Ok(self.editor.take_buf())
+			}
+
+			if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
+				if self.editor.buffer.is_empty() {
+					std::mem::drop(raw_mode_guard);
+					sh_quit(0);
+				} else {
+					self.editor.buffer.clear();
+					continue
 				}
-				return Ok(command);
 			}
-			let line = self.line.to_string();
-			self.exec_cmd(cmd.clone())?;
-			let new_line = self.line.as_str();
-			let has_changes = line != new_line;
-			flog!(DEBUG, has_changes);
+			flog!(DEBUG,cmd);
 
-			if has_changes {
-				self.history.update_pending_cmd(self.line.as_str());
+			let before = self.editor.buffer.clone();
+			self.exec_cmd(cmd)?;
+			let after = self.editor.as_str();
+
+			if before != after {
+				self.history.update_pending_cmd(self.editor.as_str());
 			}
 
-			self.print_buf(true)?;
+			let hint = self.history.get_hint();
+			self.editor.set_hint(hint);
 		}
 	}
 }
 
 impl FernVi {
 	pub fn new(prompt: Option<String>) -> ShResult<Self> {
-		let prompt = prompt.unwrap_or("$ ".styled(Style::Green | Style::Bold));
-		let line = LineBuf::new();//.with_initial(LOREM_IPSUM);
-		let term = Terminal::new();
-		let history = History::new()?;
 		Ok(Self {
-			term,
-			line,
-			history,
-			prompt,
+			reader: Box::new(TermReader::new()),
+			writer: Box::new(TermWriter::new(STDOUT_FILENO)),
+			prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
 			mode: Box::new(ViInsert::new()),
-			last_action: None,
-			last_movement: None,
+			old_layout: None,
+			repeat_action: None,
+			repeat_motion: None,
+			editor: LineBuf::new().with_initial("this buffer has (some delimited) text", 0),
+			history: History::new()?
 		})
 	}
+
+	pub fn get_layout(&mut self) -> Layout {
+		let line = self.editor.to_string();
+		flog!(DEBUG,line);
+		let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
+		let (cols,_) = get_win_size(STDIN_FILENO);
+		Layout::from_parts(
+			/*tab_stop:*/ 8,
+			cols,
+			&self.prompt,
+			to_cursor,
+			&line
+		)
+	}	
+	pub fn scroll_history(&mut self, cmd: ViCmd) {
+		flog!(DEBUG,"scrolling");
+		/*
+		if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
+			let constraint = SearchConstraint::new(SearchKind::Prefix, self.editor.to_string());
+			self.history.constrain_entries(constraint);
+		}
+		*/
+		let count = &cmd.motion().unwrap().0;
+		let motion = &cmd.motion().unwrap().1;
+		flog!(DEBUG,count,motion);
+		flog!(DEBUG,self.history.masked_entries());
+		let entry = match motion {
+			Motion::LineUpCharwise => {
+				let Some(hist_entry) = self.history.scroll(-(*count as isize)) else {
+					return
+				};
+				flog!(DEBUG,"found entry");
+				flog!(DEBUG,hist_entry.command());
+				hist_entry
+			}
+			Motion::LineDownCharwise => {
+				let Some(hist_entry) = self.history.scroll(*count as isize) else {
+					return
+				};
+				flog!(DEBUG,"found entry");
+				flog!(DEBUG,hist_entry.command());
+				hist_entry
+			}
+			_ => unreachable!()
+		};
+		let col = self.editor.saved_col.unwrap_or(self.editor.cursor_col());
+		let mut buf = LineBuf::new().with_initial(entry.command(),0);
+		let line_end = buf.end_of_line();
+		if let Some(dest) = self.mode.hist_scroll_start_pos() {
+			match dest {
+				To::Start => {
+					/* Already at 0 */
+				}
+				To::End => {
+					// History entries cannot be empty
+					// So this subtraction is safe (maybe)
+					buf.cursor.add(line_end);
+				}
+			}
+		} else {
+			let target = (col).min(line_end);
+			buf.cursor.add(target);
+		}
+
+		self.editor = buf
+	}	
 	pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
-		if self.line.at_end_of_buffer() && self.line.has_hint() {
+		flog!(DEBUG,self.editor.cursor_at_max());
+		flog!(DEBUG,self.editor.cursor);
+		if self.editor.cursor_at_max() && self.editor.has_hint() {
 			match self.mode.report_mode() {
 				ModeReport::Replace |
 				ModeReport::Insert => {
@@ -164,211 +209,97 @@ impl FernVi {
 			false
 		}
 	}
-	/// Ctrl+V handler
-	pub fn handle_verbatim(&mut self) -> ShResult<()> {
-		let mut buf = [0u8; 8];
-		let mut collected = Vec::new();
 
-		loop {
-			let n = self.term.read_byte(&mut buf[..1]);
-			if n == 0 {
-				continue;
-			}
-			collected.push(buf[0]);
-
-			// If it starts with ESC, treat as escape sequence
-			if collected[0] == 0x1b {
-				loop {
-					let n = self.term.peek_byte(&mut buf[..1]);
-					if n == 0 {
-						break
-					}
-					collected.push(buf[0]);
-					// Ends a CSI sequence
-					if (0x40..=0x7e).contains(&buf[0]) {
-						break;
-					}
-				}
-				let Ok(seq) = std::str::from_utf8(&collected) else {
-					return Ok(())
-				};
-				let cmd = ViCmd {
-					register: Default::default(),
-					verb: Some(VerbCmd(1, Verb::Insert(seq.to_string()))),
-					motion: None,
-					raw_seq: seq.to_string(),
-				};
-				self.line.exec_cmd(cmd)?;
-			}
-
-			// Optional: handle other edge cases, e.g., raw control codes
-			if collected[0] < 0x20 || collected[0] == 0x7F {
-				let ctrl_seq = std::str::from_utf8(&collected).unwrap();
-				let cmd = ViCmd {
-					register: Default::default(),
-					verb: Some(VerbCmd(1, Verb::Insert(ctrl_seq.to_string()))),
-					motion: None,
-					raw_seq: ctrl_seq.to_string(),
-				};
-				self.line.exec_cmd(cmd)?;
-				break;
-			}
-
-			// Try to parse as UTF-8 if it's a valid Unicode sequence
-			if let Ok(s) = std::str::from_utf8(&collected) {
-				if s.chars().count() == 1 {
-					let ch = s.chars().next().unwrap();
-					// You got a literal Unicode char
-					eprintln!("Got char: {:?}", ch);
-					break;
-				}
-			}
-
-		}
-		Ok(())
-	}
-	pub fn scroll_history(&mut self, cmd: ViCmd) {
-		if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
-			let constraint = SearchConstraint::new(SearchKind::Prefix, self.line.to_string());
-			self.history.constrain_entries(constraint);
-		}
-		let count = &cmd.motion().unwrap().0;
-		let motion = &cmd.motion().unwrap().1;
-		flog!(DEBUG,count,motion);
-		let entry = match motion {
-			Motion::LineUp => {
-				let Some(hist_entry) = self.history.scroll(-(*count as isize)) else {
-					return
-				};
-				flog!(DEBUG,"found entry");
-				flog!(DEBUG,hist_entry.command());
-				hist_entry
-			}
-			Motion::LineDown => {
-				let Some(hist_entry) = self.history.scroll(*count as isize) else {
-					return
-				};
-				flog!(DEBUG,"found entry");
-				flog!(DEBUG,hist_entry.command());
-				hist_entry
-			}
-			_ => unreachable!()
-		};
-		let col = self.line.saved_col().unwrap_or(self.line.cursor_column());
-		let mut buf = LineBuf::new().with_initial(entry.command());
-		let line_end = buf.end_of_line();
-		if let Some(dest) = self.mode.hist_scroll_start_pos() {
-			match dest {
-				To::Start => {
-					/* Already at 0 */
-				}
-				To::End => {
-					// History entries cannot be empty
-					// So this subtraction is safe (maybe)
-					buf.cursor_fwd_to(line_end + 1);
-				}
-			}
-		} else {
-			let target = (col + 1).min(line_end + 1);
-			buf.cursor_fwd_to(target);
-		}
-
-		self.line = buf
-	}
-
-	pub fn should_grab_history(&self, cmd: &ViCmd) -> bool {
+	pub fn should_grab_history(&mut self, cmd: &ViCmd) -> bool {
 		cmd.verb().is_none() &&
 		(
-			cmd.motion().is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUp))) &&
-			self.line.start_of_line() == 0
+			cmd.motion().is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUpCharwise))) &&
+			self.editor.start_of_line() == 0
 		) ||
 		(
-			cmd.motion().is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown))) &&
-			self.line.end_of_line() == self.line.byte_len()
+			cmd.motion().is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDownCharwise))) &&
+			self.editor.end_of_line() == self.editor.cursor_max() &&
+			!self.history.cursor_entry().is_some_and(|ent| ent.is_new())
 		)
 	}
-	pub fn print_buf(&mut self, refresh: bool) -> ShResult<()> {
-		let (height,width) = self.term.get_dimensions()?;
-		if refresh {
-			self.term.unwrite()?;
+
+	pub fn print_line(&mut self) -> ShResult<()> {
+		let new_layout = self.get_layout();
+		if let Some(layout) = self.old_layout.as_ref() {
+			self.writer.clear_rows(layout)?;
 		}
-		let hint = self.history.get_hint();
-		self.line.set_hint(hint);
 
-		let offset = self.calculate_prompt_offset();
-		self.line.set_first_line_offset(offset);
-		self.line.update_term_dims((height,width));
-		let mut line_buf = self.prompt.clone();
-		line_buf.push_str(&self.line.to_string());
+		self.writer.redraw(
+			&self.prompt,
+			&self.editor,
+			&new_layout
+		)?;
 
-		self.term.recorded_write(&line_buf, offset)?;
-		self.term.position_cursor(self.line.cursor_display_coords(width))?;
+		self.writer.flush_write(&self.mode.cursor_style())?;
 
-		self.term.write(&self.mode.cursor_style());
+		self.old_layout = Some(new_layout);
 		Ok(())
 	}
-	pub fn calculate_prompt_offset(&self) -> usize {
-		if self.prompt.ends_with('\n') {
-			return 0
-		}
-		strip_ansi_codes_and_escapes(self.prompt.lines().last().unwrap_or_default()).width() + 1 // 1 indexed
-	}
+
 	pub fn exec_cmd(&mut self, mut cmd: ViCmd) -> ShResult<()> {
 		let mut selecting = false;
+		let mut is_insert_mode = false;
 		if cmd.is_mode_transition() {
 			let count = cmd.verb_count();
 			let mut mode: Box<dyn ViMode> = match cmd.verb().unwrap().1 {
 				Verb::Change |
 				Verb::InsertModeLineBreak(_) |
 				Verb::InsertMode => {
+					is_insert_mode = true;
 					Box::new(ViInsert::new().with_count(count as u16))
 				}
+
 				Verb::NormalMode => {
 					Box::new(ViNormal::new())
 				}
-				Verb::ReplaceMode => {
-					Box::new(ViReplace::new().with_count(count as u16))
-				}
+
+				Verb::ReplaceMode => Box::new(ViReplace::new()),
+
 				Verb::VisualModeSelectLast => {
 					if self.mode.report_mode() != ModeReport::Visual {
-						self.line.start_selecting(SelectionMode::Char(SelectionAnchor::End));
+						self.editor.start_selecting(SelectMode::Char(SelectAnchor::End));
 					}
 					let mut mode: Box<dyn ViMode> = Box::new(ViVisual::new());
 					std::mem::swap(&mut mode, &mut self.mode);
-					self.line.set_cursor_clamp(self.mode.clamp_cursor());
-					self.line.set_move_cursor_on_undo(self.mode.move_cursor_on_undo());
-					self.term.write(&mode.cursor_style());
-					return self.line.exec_cmd(cmd)
+					self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+
+					return self.editor.exec_cmd(cmd)
 				}
 				Verb::VisualMode => {
 					selecting = true;
-					self.line.start_selecting(SelectionMode::Char(SelectionAnchor::End));
 					Box::new(ViVisual::new())
 				}
+
 				_ => unreachable!()
 			};
 
-			flog!(DEBUG, self.mode.report_mode());
-			flog!(DEBUG, mode.report_mode());
 			std::mem::swap(&mut mode, &mut self.mode);
 
-			flog!(DEBUG, self.mode.report_mode());
-			self.line.set_cursor_clamp(self.mode.clamp_cursor());
-			self.line.set_move_cursor_on_undo(self.mode.move_cursor_on_undo());
-			self.term.write(&mode.cursor_style());
-
 			if mode.is_repeatable() {
-				self.last_action = mode.as_replay();
+				self.repeat_action = mode.as_replay();
 			}
-			self.line.exec_cmd(cmd)?;
+
+			self.editor.exec_cmd(cmd)?;
+			self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+
 			if selecting {
-				self.line.start_selecting(SelectionMode::Char(SelectionAnchor::End));
+				self.editor.start_selecting(SelectMode::Char(SelectAnchor::End));
 			} else {
-				self.line.stop_selecting();
+				self.editor.stop_selecting();
+			}
+			if is_insert_mode {
+				self.editor.mark_insert_mode_start_pos();
+			} else {
+				self.editor.clear_insert_mode_start_pos();
 			}
 			return Ok(())
 		} else if cmd.is_cmd_repeat() {
-			let Some(replay) = self.last_action.clone() else {
+			let Some(replay) = self.repeat_action.clone() else {
 				return Ok(())
 			};
 			let ViCmd { verb, .. } = cmd;
@@ -381,7 +312,7 @@ impl FernVi {
 					for _ in 0..repeat {
 						let cmds = cmds.clone();
 						for cmd in cmds {
-							self.line.exec_cmd(cmd)?
+							self.editor.exec_cmd(cmd)?
 						}
 					}
 				}
@@ -399,7 +330,7 @@ impl FernVi {
 							return Ok(()) // it has to have a verb to be repeatable, something weird happened
 						}
 					}
-					self.line.exec_cmd(cmd)?;
+					self.editor.exec_cmd(cmd)?;
 				}
 				_ => unreachable!("motions should be handled in the other branch")
 			}
@@ -407,19 +338,20 @@ impl FernVi {
 		} else if cmd.is_motion_repeat() {
 			match cmd.motion.as_ref().unwrap() {
 				MotionCmd(count,Motion::RepeatMotion) => {
-					let Some(motion) = self.last_movement.clone() else {
+					let Some(motion) = self.repeat_motion.clone() else {
 						return Ok(())
 					};
 					let repeat_cmd = ViCmd {
 						register: RegisterName::default(),
 						verb: None,
 						motion: Some(motion),
-						raw_seq: format!("{count};")
+						raw_seq: format!("{count};"),
+						flags: CmdFlags::empty()
 					};
-					return self.line.exec_cmd(repeat_cmd);
+					return self.editor.exec_cmd(repeat_cmd);
 				}
 				MotionCmd(count,Motion::RepeatMotionRev) => {
-					let Some(motion) = self.last_movement.clone() else {
+					let Some(motion) = self.repeat_motion.clone() else {
 						return Ok(())
 					};
 					let mut new_motion = motion.invert_char_motion();
@@ -428,9 +360,10 @@ impl FernVi {
 						register: RegisterName::default(),
 						verb: None,
 						motion: Some(new_motion),
-						raw_seq: format!("{count},")
+						raw_seq: format!("{count},"),
+						flags: CmdFlags::empty()
 					};
-					return self.line.exec_cmd(repeat_cmd);
+					return self.editor.exec_cmd(repeat_cmd);
 				}
 				_ => unreachable!()
 			}
@@ -440,23 +373,24 @@ impl FernVi {
 			if self.mode.report_mode() == ModeReport::Visual {
 				// The motion is assigned in the line buffer execution, so we also have to assign it here
 				// in order to be able to repeat it
-				let range = self.line.selected_range().unwrap();
-				cmd.motion = Some(MotionCmd(1,Motion::Range(range.start, range.end)))
+				let range = self.editor.select_range().unwrap();
+				cmd.motion = Some(MotionCmd(1,Motion::Range(range.0, range.1)))
 			}
-			self.last_action = Some(CmdReplay::Single(cmd.clone()));
+			self.repeat_action = Some(CmdReplay::Single(cmd.clone()));
 		} 
 
 		if cmd.is_char_search() {
-			self.last_movement = cmd.motion.clone()
+			self.repeat_motion = cmd.motion.clone()
 		}
 
-		self.line.exec_cmd(cmd.clone())?;
+		self.editor.exec_cmd(cmd.clone())?;
 
 		if self.mode.report_mode() == ModeReport::Visual && cmd.verb().is_some_and(|v| v.1.is_edit()) {
-			self.line.stop_selecting();
+			self.editor.stop_selecting();
 			let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
 			std::mem::swap(&mut mode, &mut self.mode);
 		}
 		Ok(())
 	}
 }
+

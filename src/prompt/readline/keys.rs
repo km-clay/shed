@@ -3,7 +3,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 // Credit to Rustyline for the design ideas in this module
 // https://github.com/kkawakam/rustyline
-#[derive(Clone,Debug)]
+#[derive(Clone,PartialEq,Eq,Debug)]
 pub struct KeyEvent(pub KeyCode, pub ModKeys);
 
 
@@ -92,7 +92,7 @@ impl KeyEvent {
 	}
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone,PartialEq,Eq,Debug)]
 pub enum KeyCode {
     UnknownEscSeq,
     Backspace,
