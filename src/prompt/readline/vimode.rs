@@ -941,6 +941,8 @@ impl ViNormal {
 					let obj = match chars_clone.next().unwrap() {
 						'w' => TextObj::Word(Word::Normal,bound),
 						'W' => TextObj::Word(Word::Big,bound),
+						's' => TextObj::WholeSentence(bound),
+						'p' => TextObj::WholeParagraph(bound),
 						'"' => TextObj::DoubleQuote(bound),
 						'\'' => TextObj::SingleQuote(bound),
 						'`' => TextObj::BacktickQuote(bound),
@@ -1602,6 +1604,8 @@ impl ViVisual {
 					let obj = match chars_clone.next().unwrap() {
 						'w' => TextObj::Word(Word::Normal,bound),
 						'W' => TextObj::Word(Word::Big,bound),
+						's' => TextObj::WholeSentence(bound),
+						'p' => TextObj::WholeParagraph(bound),
 						'"' => TextObj::DoubleQuote(bound),
 						'\'' => TextObj::SingleQuote(bound),
 						'`' => TextObj::BacktickQuote(bound),
