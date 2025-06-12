@@ -288,7 +288,13 @@ impl ViNormal {
 	fn validate_combination(&self, verb: Option<&Verb>, motion: Option<&Motion>) -> CmdState {
 		if verb.is_none() {
 			match motion {
-				Some(Motion::TextObj(_,_)) => return CmdState::Invalid,
+				Some(Motion::TextObj(obj)) => {
+					return match obj {
+						TextObj::Sentence(_) |
+						TextObj::Paragraph(_) => CmdState::Complete,
+						_ => CmdState::Invalid
+					}
+				}
 				Some(_) => return CmdState::Complete,
 				None => return CmdState::Pending
 			}
@@ -327,6 +333,7 @@ impl ViNormal {
 	}
 	pub fn try_parse(&mut self, ch: char) -> Option<ViCmd> {
 		self.pending_seq.push(ch);
+		flog!(DEBUG, "parsing {}",ch);
 		let mut chars = self.pending_seq.chars().peekable();
 
 		/*
@@ -751,6 +758,42 @@ impl ViNormal {
 						_ => return self.quit_parse()
 					}
 				}
+				']' => {
+					let Some(ch) = chars_clone.peek() else {
+						break 'motion_parse None
+					};
+					match ch {
+						')' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ToParen(Direction::Forward)))
+						}
+						'}' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ToBrace(Direction::Forward)))
+					}
+						_ => return self.quit_parse()
+					}
+				}
+				'[' => {
+					let Some(ch) = chars_clone.peek() else {
+						break 'motion_parse None
+					};
+					match ch {
+						'(' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ToParen(Direction::Backward)))
+						}
+						'{' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ToBrace(Direction::Backward)))
+					}
+						_ => return self.quit_parse()
+					}
+				}
+				'%' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::ToDelimMatch))
+				}
 				'v' => {
 					// We got 'v' after a verb
 					// Instead of normal operations, we will calculate the span based on how visual mode would see it
@@ -870,6 +913,22 @@ impl ViNormal {
 					chars = chars_clone;
 					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Big, Direction::Backward)));
 				}
+				')' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(TextObj::Sentence(Direction::Forward))));
+				}
+				'(' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(TextObj::Sentence(Direction::Backward))));
+				}
+				'}' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(TextObj::Paragraph(Direction::Forward))));
+				}
+				'{' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(TextObj::Paragraph(Direction::Backward))));
+				}
 				ch if ch == 'i' || ch == 'a' => {
 					let bound = match ch {
 						'i' => Bound::Inside,
@@ -880,19 +939,19 @@ impl ViNormal {
 						break 'motion_parse None
 					}
 					let obj = match chars_clone.next().unwrap() {
-						'w' => TextObj::Word(Word::Normal),
-						'W' => TextObj::Word(Word::Big),
-						'"' => TextObj::DoubleQuote,
-						'\'' => TextObj::SingleQuote,
-						'`' => TextObj::BacktickQuote,
-						'(' | ')' | 'b' => TextObj::Paren,
-						'{' | '}' | 'B' => TextObj::Brace,
-						'[' | ']' => TextObj::Bracket,
-						'<' | '>' => TextObj::Angle,
+						'w' => TextObj::Word(Word::Normal,bound),
+						'W' => TextObj::Word(Word::Big,bound),
+						'"' => TextObj::DoubleQuote(bound),
+						'\'' => TextObj::SingleQuote(bound),
+						'`' => TextObj::BacktickQuote(bound),
+						'(' | ')' | 'b' => TextObj::Paren(bound),
+						'{' | '}' | 'B' => TextObj::Brace(bound),
+						'[' | ']' => TextObj::Bracket(bound),
+						'<' | '>' => TextObj::Angle(bound),
 						_ => return self.quit_parse()
 					};
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(obj, bound)))
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(obj)))
 				}
 				_ => return self.quit_parse(),
 			}
@@ -1025,7 +1084,6 @@ impl ViVisual {
 	fn validate_combination(&self, verb: Option<&Verb>, motion: Option<&Motion>) -> CmdState {
 		if verb.is_none() {
 			match motion {
-				Some(Motion::TextObj(_,_)) => return CmdState::Invalid,
 				Some(_) => return CmdState::Complete,
 				None => return CmdState::Pending
 			}
@@ -1391,6 +1449,42 @@ impl ViVisual {
 						break 'motion_parse None
 					}
 				}
+				']' => {
+					let Some(ch) = chars_clone.peek() else {
+						break 'motion_parse None
+					};
+					match ch {
+						')' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ToParen(Direction::Forward)))
+						}
+						'}' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ToBrace(Direction::Forward)))
+					}
+						_ => return self.quit_parse()
+					}
+				}
+				'[' => {
+					let Some(ch) = chars_clone.peek() else {
+						break 'motion_parse None
+					};
+					match ch {
+						'(' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ToParen(Direction::Backward)))
+						}
+						'{' => {
+							chars = chars_clone;
+							break 'motion_parse Some(MotionCmd(count, Motion::ToBrace(Direction::Backward)))
+					}
+						_ => return self.quit_parse()
+					}
+				}
+				'%' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::ToDelimMatch))
+				}
 				'f' => {
 					let Some(ch) = chars_clone.peek() else {
 						break 'motion_parse None
@@ -1479,7 +1573,24 @@ impl ViVisual {
 					chars = chars_clone;
 					break 'motion_parse Some(MotionCmd(count, Motion::WordMotion(To::Start, Word::Big, Direction::Backward)));
 				}
+				')' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(TextObj::Sentence(Direction::Forward))));
+				}
+				'(' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(TextObj::Sentence(Direction::Backward))));
+				}
+				'}' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(TextObj::Paragraph(Direction::Forward))));
+				}
+				'{' => {
+					chars = chars_clone;
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(TextObj::Paragraph(Direction::Backward))));
+				}
 				ch if ch == 'i' || ch == 'a' => {
+					flog!(DEBUG, "in text_obj parse");
 					let bound = match ch {
 						'i' => Bound::Inside,
 						'a' => Bound::Around,
@@ -1489,19 +1600,20 @@ impl ViVisual {
 						break 'motion_parse None
 					}
 					let obj = match chars_clone.next().unwrap() {
-						'w' => TextObj::Word(Word::Normal),
-						'W' => TextObj::Word(Word::Big),
-						'"' => TextObj::DoubleQuote,
-						'\'' => TextObj::SingleQuote,
-						'`' => TextObj::BacktickQuote,
-						'(' | ')' | 'b' => TextObj::Paren,
-						'{' | '}' | 'B' => TextObj::Brace,
-						'[' | ']' => TextObj::Bracket,
-						'<' | '>' => TextObj::Angle,
+						'w' => TextObj::Word(Word::Normal,bound),
+						'W' => TextObj::Word(Word::Big,bound),
+						'"' => TextObj::DoubleQuote(bound),
+						'\'' => TextObj::SingleQuote(bound),
+						'`' => TextObj::BacktickQuote(bound),
+						'(' | ')' | 'b' => TextObj::Paren(bound),
+						'{' | '}' | 'B' => TextObj::Brace(bound),
+						'[' | ']' => TextObj::Bracket(bound),
+						'<' | '>' => TextObj::Angle(bound),
 						_ => return self.quit_parse()
 					};
 					chars = chars_clone;
-					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(obj, bound)))
+					flog!(DEBUG, obj, bound);
+					break 'motion_parse Some(MotionCmd(count, Motion::TextObj(obj)))
 				}
 				_ => return self.quit_parse(),
 			}
@@ -1514,6 +1626,7 @@ impl ViVisual {
 
 		let verb_ref = verb.as_ref().map(|v| &v.1);
 		let motion_ref = motion.as_ref().map(|m| &m.1);
+		flog!(DEBUG,verb_ref,motion_ref);
 
 		match self.validate_combination(verb_ref, motion_ref) {
 			CmdState::Complete => {

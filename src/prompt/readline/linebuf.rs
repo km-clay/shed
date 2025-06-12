@@ -6,6 +6,20 @@ use unicode_width::UnicodeWidthStr;
 use super::vicmd::{Anchor, Bound, CmdFlags, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb, ViCmd, Word};
 use crate::{libsh::{error::ShResult, term::{Style, Styled}}, prelude::*};
 
+const PUNCTUATION: [&str;3] = [
+	"?",
+	"!",
+	"."
+];
+
+#[derive(PartialEq,Eq,Debug,Clone,Copy)]
+pub enum Delim {
+	Paren,
+	Brace,
+	Bracket,
+	Angle
+}
+
 #[derive(Default,PartialEq,Eq,Debug,Clone,Copy)]
 pub enum CharClass {
 	#[default]
@@ -385,6 +399,36 @@ impl LineBuf {
 	pub fn grapheme_indices_owned(&self) -> Vec<usize> {
 		self.grapheme_indices.as_ref().cloned().unwrap_or_default()
 	}
+	pub fn grapheme_is_escaped(&mut self, pos: usize) -> bool {
+		let mut pos = ClampedUsize::new(pos, self.cursor.max, false);
+		let mut escaped = false;
+
+		while pos.dec() {
+			let Some(gr) = self.grapheme_at(pos.get()) else { return escaped };
+			if gr == "\\" {
+				escaped = !escaped;
+			} else {
+				return escaped
+			}
+		}
+
+		escaped
+	}
+	/// Does not update graphemes
+	/// Useful in cases where you have to check many graphemes at once
+	/// And don't want to trigger any mutable borrowing issues
+	pub fn read_grapheme_at(&self, pos: usize) -> Option<&str> {
+		let indices = self.grapheme_indices();
+		let start = indices.get(pos).copied()?;
+		let end = indices.get(pos + 1).copied().or_else(|| {
+			if pos + 1 == self.grapheme_indices().len() {
+				Some(self.buffer.len())
+			} else {
+				None
+			}
+		})?;
+		self.buffer.get(start..end)
+	}
 	pub fn grapheme_at(&mut self, pos: usize) -> Option<&str> {
 		self.update_graphemes_lazy();
 		let indices = self.grapheme_indices();
@@ -397,6 +441,34 @@ impl LineBuf {
 			}
 		})?;
 		self.buffer.get(start..end)
+	}
+	pub fn read_grapheme_before(&self, pos: usize) -> Option<&str> {
+		if pos == 0 {
+			return None
+		}
+		let pos = ClampedUsize::new(pos, self.cursor.max, false);
+		self.read_grapheme_at(pos.ret_sub(1))
+	}
+	pub fn grapheme_before(&mut self, pos: usize) -> Option<&str> {
+		if pos == 0 {
+			return None
+		}
+		let pos = ClampedUsize::new(pos, self.cursor.max, false);
+		self.grapheme_at(pos.ret_sub(1))
+	}
+	pub fn read_grapheme_after(&self, pos: usize) -> Option<&str> {
+		if pos == self.cursor.max {
+			return None
+		}
+		let pos = ClampedUsize::new(pos, self.cursor.max, false);
+		self.read_grapheme_at(pos.ret_add(1))
+	}
+	pub fn grapheme_after(&mut self, pos: usize) -> Option<&str> {
+		if pos == self.cursor.max {
+			return None
+		}
+		let pos = ClampedUsize::new(pos, self.cursor.max, false);
+		self.grapheme_at(pos.ret_add(1))
 	}
 	pub fn grapheme_at_cursor(&mut self) -> Option<&str> {
 		self.grapheme_at(self.cursor.get())
@@ -526,6 +598,57 @@ impl LineBuf {
 				.filter(|g| *g == "\n")
 				.count()
 			}).unwrap_or(0)
+	}
+	pub fn is_sentence_punctuation(&mut self, pos: usize) -> bool {
+		if let Some(gr) = self.grapheme_at(pos) {
+			if PUNCTUATION.contains(&gr) && self.grapheme_after(pos).is_some() {
+				let mut fwd_indices = (pos + 1..self.cursor.max).peekable();
+				if self.grapheme_after(pos).is_some_and(|gr| [")","]","\"","'"].contains(&gr)) {
+					while let Some(idx) = fwd_indices.peek() {
+						if self.grapheme_after(*idx).is_some_and(|gr| [")","]","\"","'"].contains(&gr)) {
+							fwd_indices.next();
+						} else {
+							break
+						}
+					}
+				}
+				if let Some(idx) = fwd_indices.next() {
+					if let Some(gr) = self.grapheme_at(idx) {
+						if is_whitespace(gr) {
+							return true
+						}
+					}
+				}
+			}
+		}
+		false
+	}
+	pub fn is_sentence_start(&mut self, pos: usize) -> bool {
+		if self.grapheme_before(pos).is_some_and(is_whitespace) {
+			let pos = pos.saturating_sub(1);
+			let mut bkwd_indices = (0..pos).rev().peekable();
+			while let Some(idx) = bkwd_indices.next() {
+				let Some(gr) = self.read_grapheme_at(idx) else { break };
+				if [")","]","\"","'"].contains(&gr) {
+					while let Some(idx) = bkwd_indices.peek() {
+						let Some(gr) = self.read_grapheme_at(*idx) else { break };
+						if [")","]","\"","'"].contains(&gr) {
+							bkwd_indices.next();
+						} else {
+							break
+						}
+					}
+				}
+				if !is_whitespace(gr)  {
+					if [".","?","!"].contains(&gr) {
+						return true
+					} else {
+						break
+					}
+				}
+			}
+		}
+		false
 	}
 	pub fn nth_next_line(&mut self, n: usize) -> Option<(usize,usize)> {
 		let line_no = self.cursor_line_number() + n;
@@ -657,50 +780,154 @@ impl LineBuf {
 			}
 		}
 	}
+	pub fn is_word_bound(&mut self, pos: usize, word: Word, dir: Direction) -> bool {
+		let clamped_pos = ClampedUsize::new(pos, self.cursor.max, true);
+		let cur_char = self.grapheme_at(clamped_pos.get()).map(|c| c.to_string()).unwrap();
+		let other_pos = match dir {
+			Direction::Forward => clamped_pos.ret_add(1),
+			Direction::Backward => clamped_pos.ret_sub(1)
+		};
+		if other_pos == clamped_pos.get() { return true }
+
+		let other_char = self.grapheme_at(other_pos).unwrap();
+		match word {
+			Word::Big => is_whitespace(other_char),
+			Word::Normal => is_other_class_or_is_ws(other_char, &cur_char)
+		}
+	}
 	pub fn dispatch_text_obj(
 		&mut self,
 		count: usize,
-		text_obj: TextObj,
-		bound: Bound
+		text_obj: TextObj
 	) -> Option<(usize,usize)> {
 		match text_obj {
 			// Text groups
-			TextObj::Word(word) => self.text_obj_word(count, bound, word),
-			TextObj::Sentence(dir) => self.text_obj_sentence(count, dir, bound),
-			TextObj::Paragraph(dir) => self.text_obj_paragraph(count, dir, bound),
+			TextObj::Word(word,bound) => self.text_obj_word(count, bound, word),
+			TextObj::Sentence(dir) => {
+				let (start,end) = self.text_obj_sentence(self.cursor.get(), count, Bound::Around)?;
+				let cursor = self.cursor.get();
+				match dir {
+					Direction::Forward => Some((cursor,end)),
+					Direction::Backward => Some((start,cursor)),
+				}
+			}
+			TextObj::Paragraph(dir) => {
+				let (start,end) = self.text_obj_paragraph(count, Bound::Around)?;
+				let cursor = self.cursor.get();
+				match dir {
+					Direction::Forward => Some((cursor,end)),
+					Direction::Backward => Some((start,cursor)),
+				}
+			}
+			TextObj::WholeSentence(bound) => self.text_obj_sentence(self.cursor.get(), count, bound),
+			TextObj::WholeParagraph(bound) => self.text_obj_paragraph(count, bound),
 
 			// Quoted blocks
-			TextObj::DoubleQuote |
-			TextObj::SingleQuote |
-			TextObj::BacktickQuote => self.text_obj_quote(count, text_obj, bound),
+			TextObj::DoubleQuote(bound) |
+			TextObj::SingleQuote(bound) |
+			TextObj::BacktickQuote(bound) => self.text_obj_quote(count, text_obj, bound),
 
 			// Delimited blocks
-			TextObj::Paren |
-			TextObj::Bracket |
-			TextObj::Brace |
-			TextObj::Angle => self.text_obj_delim(count, text_obj, bound),
+			TextObj::Paren(bound) |
+			TextObj::Bracket(bound) |
+			TextObj::Brace(bound) |
+			TextObj::Angle(bound) => self.text_obj_delim(count, text_obj, bound),
 
 			// Other stuff
-			TextObj::Tag => todo!(),
+			TextObj::Tag(bound) => todo!(),
 			TextObj::Custom(_) => todo!(),
 		}
 	} 
 	pub fn text_obj_word(&mut self, count: usize, bound: Bound, word: Word) -> Option<(usize,usize)> {
+		match bound {
+			Bound::Inside => {
+				let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
+					self.cursor.get()
+				} else {
+					self.end_of_word_forward_or_start_of_word_backward_from(self.cursor.get(), word, Direction::Backward)
+				};
+				let end = self.dispatch_word_motion(count, To::Start, word, Direction::Forward, true);
+				Some((start,end))
+			}
+			Bound::Around => {
+				let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
+					self.cursor.get()
+				} else {
+					self.end_of_word_forward_or_start_of_word_backward_from(self.cursor.get(), word, Direction::Backward)
+				};
+				let end = self.dispatch_word_motion(count, To::Start, word, Direction::Forward, false);
+				Some((start,end))
+			}
+		}
+	}
+	pub fn text_obj_sentence(&mut self, start_pos: usize, count: usize, bound: Bound) -> Option<(usize, usize)> {
+		let mut start = None;
+		let mut end = None;
+		let mut fwd_indices = start_pos..self.cursor.max;
+		while let Some(idx) = fwd_indices.next() {
+			let Some(gr) = self.grapheme_at(idx) else {
+				end = Some(self.cursor.max);
+				break
+			};
+			if PUNCTUATION.contains(&gr) && self.is_sentence_punctuation(idx) {
+				match bound {
+					Bound::Inside => {
+						end = Some(idx);
+						break
+					}
+					Bound::Around => {
+						let mut end_pos = idx;
+						while let Some(idx) = fwd_indices.next() {
+							if !self.grapheme_at(idx).is_some_and(is_whitespace) {
+								end_pos += 1;
+								break
+							} else {
+								end_pos += 1;
+							}
+						}
+						end = Some(end_pos);
+						break
+					}
+				}
+			}
+		}
+		let mut end = end.unwrap_or(self.cursor.max);
+		flog!(DEBUG, end);
+		flog!(DEBUG, self.grapheme_at(end));
+		flog!(DEBUG, self.grapheme_before(end));
+		flog!(DEBUG, self.grapheme_after(end));
+
+		let mut bkwd_indices = (0..end).rev();
+		while let Some(idx) = bkwd_indices.next() {
+			if self.is_sentence_start(idx) {
+				start = Some(idx);
+				break
+			}
+		}
+		let start = start.unwrap_or(0);
+		flog!(DEBUG, start);
+		flog!(DEBUG, self.grapheme_at(start));
+		flog!(DEBUG, self.grapheme_before(start));
+		flog!(DEBUG, self.grapheme_after(start));
+
+		if count > 1 {
+			if let Some((_,new_end)) = self.text_obj_sentence(end, count - 1, bound) {
+				end = new_end;
+			}
+		}
+
+		Some((start,end))
+	}
+	pub fn text_obj_paragraph(&mut self, count: usize, bound: Bound) -> Option<(usize, usize)> {
 		todo!()
 	}
-	pub fn text_obj_sentence(&mut self, count: usize, dir: Direction, bound: Bound) -> Option<(usize, usize)> {
-		todo!()
-	}
-	pub fn text_obj_paragraph(&mut self, count: usize, dir: Direction, bound: Bound) -> Option<(usize, usize)> {
-		todo!()
-	}
-	pub fn text_obj_delim(&mut self, count: usize, text_obj: TextObj, bound: Bound) -> Option<(usize,usize)> {
+	pub fn text_obj_delim(&mut self  , count: usize, text_obj: TextObj, bound: Bound) -> Option<(usize,usize)> {
 		let mut backward_indices = (0..self.cursor.get()).rev();
 		let (opener,closer) = match text_obj {
-			TextObj::Paren   => ("(",")"),
-			TextObj::Bracket => ("[","]"),
-			TextObj::Brace   => ("{","}"),
-			TextObj::Angle   => ("<",">"),
+			TextObj::Paren(_)   => ("(",")"),
+			TextObj::Bracket(_) => ("[","]"),
+			TextObj::Brace(_)   => ("{","}"),
+			TextObj::Angle(_)   => ("<",">"),
 			_ => unreachable!()
 		};
 
@@ -795,19 +1022,6 @@ impl LineBuf {
 			Bound::Around => {
 				// End excludes the quote, so push it forward
 				end += 1;
-
-				// We also need to include any trailing whitespace
-				let end_of_line = self.end_of_line();
-				let remainder = end..end_of_line;
-				for idx in remainder {
-					let Some(gr) = self.grapheme_at(idx) else { break };
-					flog!(DEBUG, gr);
-					if is_whitespace(gr) {
-						end += 1;
-					} else {
-						break
-					}
-				}
 			}
 		}
 		
@@ -819,9 +1033,9 @@ impl LineBuf {
 		// Get the grapheme indices backward from the cursor
 		let mut backward_indices = (start..self.cursor.get()).rev();
 		let target = match text_obj {
-			TextObj::DoubleQuote => "\"",
-			TextObj::SingleQuote => "'",
-			TextObj::BacktickQuote => "`",
+			TextObj::DoubleQuote(_) => "\"",
+			TextObj::SingleQuote(_) => "'",
+			TextObj::BacktickQuote(_) => "`",
 			_ => unreachable!()
 		};
 		let mut start_pos = None;
@@ -929,6 +1143,103 @@ impl LineBuf {
 		}
 
 		Some((start, end))
+	}
+	pub fn find_next_matching_delim(&mut self) -> Option<usize> {
+		let delims = [
+			"[", "]",
+			"{", "}",
+			"(", ")",
+			"<", ">",
+		];
+		let mut fwd_indices = self.cursor.get()..self.cursor.max;
+		let idx = fwd_indices.find(|idx| self.grapheme_at(*idx).is_some_and(|gr| delims.contains(&gr)))?;
+		let search_direction = match self.grapheme_at(idx)? {
+			"[" |
+			"{" |
+			"(" |
+			"<" => Direction::Forward,
+			"]" |
+			"}" |
+			")" |
+			">" => Direction::Backward,
+			_ => unreachable!()
+		};
+		let target_delim = match self.grapheme_at(idx)? {
+			"[" => "]",
+			"]" => "[",
+			"{" => "}",
+			"}" => "{",
+			"(" => ")",
+			")" => "(",
+			"<" => ">",
+			">" => "<",
+			_ => unreachable!()
+		};
+
+		match search_direction {
+			Direction::Forward => {
+				let mut fwd_indices = idx..self.cursor_max();
+				fwd_indices.find(|idx| self.grapheme_at(*idx).is_some_and(|gr| gr == target_delim) && !self.grapheme_is_escaped(*idx))
+			}
+			Direction::Backward => {
+				let mut bkwd_indices = 0..idx;
+				bkwd_indices.find(|idx| self.grapheme_at(*idx).is_some_and(|gr| gr == target_delim) && !self.grapheme_is_escaped(*idx))
+			}
+		}
+	}
+	pub fn find_unmatched_delim(&mut self, delim: Delim, dir: Direction) -> Option<usize> {
+		let (opener,closer) = match delim {
+			Delim::Paren => ("(",")"),
+			Delim::Brace => ("{","}"),
+			Delim::Bracket => ("[","]"),
+			Delim::Angle => ("<",">"),
+		};
+		match dir {
+			Direction::Forward => {
+				let mut fwd_indices = self.cursor.get()..self.cursor.max;
+				let mut depth = 0;
+
+				while let Some(idx) = fwd_indices.next() {
+					if self.grapheme_is_escaped(idx) { continue }
+					let gr = self.grapheme_at(idx)?;
+					match gr {
+						_ if gr == opener => depth += 1,
+						_ if gr == closer => {
+							if depth == 0 {
+								return Some(idx)
+							} else {
+								depth -= 1;
+							}
+						}
+						_ => { /* Continue */ }
+					}
+				}
+
+				None
+			}
+			Direction::Backward => {
+				let mut bkwd_indices = (0..self.cursor.get()).rev();
+				let mut depth = 0;
+
+				while let Some(idx) = bkwd_indices.next() {
+					if self.grapheme_is_escaped(idx) { continue }
+					let gr = self.grapheme_at(idx)?;
+					match gr {
+						_ if gr == closer => depth += 1,
+						_ if gr == opener => {
+							if depth == 0 {
+								return Some(idx)
+							} else {
+								depth -= 1;
+							}
+						}
+						_ => { /* Continue */ }
+					}
+				}
+
+				None
+			}
+		}
 	}
 	pub fn dispatch_word_motion(
 		&mut self,
@@ -1356,17 +1667,73 @@ impl LineBuf {
 					MotionKind::On(pos.get())
 				}
 			}
-			MotionCmd(count,Motion::TextObj(text_obj, bound)) => {
-				let Some((start,end)) = self.dispatch_text_obj(count, text_obj, bound) else {
+			MotionCmd(count,Motion::TextObj(text_obj)) => {
+				let Some((start,end)) = self.dispatch_text_obj(count, text_obj.clone()) else {
+					return MotionKind::Null
+				};
+				match text_obj {
+					TextObj::Sentence(dir) |
+					TextObj::Paragraph(dir) => {
+						match dir {
+							Direction::Forward => MotionKind::On(end),
+							Direction::Backward => {
+								let cur_sentence_start = start;
+								let mut start_pos = self.cursor.get();
+								for _ in 0..count {
+									if self.is_sentence_start(start_pos) {
+										// We know there is some punctuation before us now
+										// Let's find it
+										let mut bkwd_indices = (0..start_pos).rev();
+										let punct_pos = bkwd_indices
+											.find(|idx| self.grapheme_at(*idx).is_some_and(|gr| PUNCTUATION.contains(&gr)))
+											.unwrap();
+										if self.grapheme_before(punct_pos).is_some() {
+											let Some((new_start,_)) = self.text_obj_sentence(punct_pos - 1, count, Bound::Inside) else {
+												return MotionKind::Null
+											};
+											start_pos = new_start;
+											continue
+										} else {
+											return MotionKind::Null
+										}
+									} else {
+										start_pos = cur_sentence_start;
+									}
+								}
+								MotionKind::On(start_pos)
+							}
+						}
+					}
+					_ => {
+
+						MotionKind::Inclusive((start,end))
+					}
+				}
+			}
+			MotionCmd(_,Motion::ToDelimMatch) => {
+				// Just ignoring the count here, it does some really weird stuff in Vim
+				// try doing something like '5%' in vim, it is really strange
+				let Some(pos) = self.find_next_matching_delim() else {
+					return MotionKind::Null
+				};
+				MotionKind::On(pos)
+			}
+			MotionCmd(_,Motion::ToBrace(direction)) |
+			MotionCmd(_,Motion::ToBracket(direction)) |
+			MotionCmd(_,Motion::ToParen(direction)) => {
+				// Counts don't seem to do anything significant for these either
+				let delim = match motion.1 {
+					Motion::ToBrace(_) => Delim::Brace,
+					Motion::ToBracket(_) => Delim::Bracket,
+					Motion::ToParen(_) => Delim::Paren,
+					_ => unreachable!()
+				};
+				let Some(pos) = self.find_unmatched_delim(delim, direction) else {
 					return MotionKind::Null
 				};
 
-				MotionKind::Inclusive((start,end))
+				MotionKind::On(pos)
 			}
-			MotionCmd(count,Motion::ToDelimMatch) => todo!(),
-			MotionCmd(count,Motion::ToBrace(direction)) => todo!(),
-			MotionCmd(count,Motion::ToBracket(direction)) => todo!(),
-			MotionCmd(count,Motion::ToParen(direction)) => todo!(),
 			MotionCmd(count,Motion::EndOfLastWord) => {
 				let start = self.start_of_line();
 				let mut newline_count = 0;
@@ -1473,15 +1840,15 @@ impl LineBuf {
 			MotionCmd(count,Motion::LineDown) |
 			MotionCmd(count,Motion::LineUp) => {
 				let Some((start,end)) = (match motion.1 {
-					Motion::LineUp => self.nth_prev_line(1),
-					Motion::LineDown => self.nth_next_line(1),
+					Motion::LineUp => self.nth_prev_line(count),
+					Motion::LineDown => self.nth_next_line(count),
 					_ => unreachable!()
 				}) else {
 					return MotionKind::Null
 				};
 				flog!(DEBUG, self.slice(start..end));
 
-				let mut target_col = if let Some(col) = self.saved_col {
+				let target_col = if let Some(col) = self.saved_col {
 					col 
 				} else {
 					let col = self.cursor_col();
@@ -1511,8 +1878,8 @@ impl LineBuf {
 			MotionCmd(count,Motion::LineDownCharwise) |
 			MotionCmd(count,Motion::LineUpCharwise) => {
 				let Some((start,end)) = (match motion.1 {
-					Motion::LineUpCharwise => self.nth_prev_line(1),
-					Motion::LineDownCharwise => self.nth_next_line(1),
+					Motion::LineUpCharwise => self.nth_prev_line(count),
+					Motion::LineDownCharwise => self.nth_next_line(count),
 					_ => unreachable!()
 				}) else {
 					return MotionKind::Null
@@ -1625,7 +1992,7 @@ impl LineBuf {
 	}
 	pub fn update_select_range(&mut self) {
 		if let Some(mut mode) = self.select_mode {
-			let Some((mut start,mut end)) = self.select_range.clone() else {
+			let Some((mut start,mut end)) = self.select_range else {
 				return
 			};
 			match mode {
@@ -1674,9 +2041,16 @@ impl LineBuf {
 				let end = end.min(col);
 				self.cursor.set(start + end)
 			}
-			MotionKind::Inclusive((start,_)) |
-			MotionKind::Exclusive((start,_)) => {
-				self.cursor.set(start)
+			MotionKind::Inclusive((start,end)) |
+			MotionKind::Exclusive((start,end)) => {
+				if self.select_range().is_none() {
+					self.cursor.set(start)
+				} else {
+					let end = end.saturating_sub(1);
+					self.cursor.set(end);
+					self.select_mode = Some(SelectMode::Char(SelectAnchor::End));
+					self.select_range = Some((start,end));
+				}
 			}
 			MotionKind::Null => { /* Do nothing */ }
 		}

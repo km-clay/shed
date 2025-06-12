@@ -277,7 +277,7 @@ impl Verb {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Motion {
 	WholeLine,
-	TextObj(TextObj, Bound),
+	TextObj(TextObj),
 	EndOfLastWord,
 	BeginningOfFirstWord,
 	BeginningOfLine,
@@ -342,8 +342,8 @@ impl Motion {
 			Self::ScreenLineUpCharwise |
 			Self::ScreenLineDownCharwise |
 			Self::ToColumn |
-			Self::TextObj(TextObj::Sentence(_),_) |
-			Self::TextObj(TextObj::Paragraph(_),_) |
+			Self::TextObj(TextObj::Sentence(_)) |
+			Self::TextObj(TextObj::Paragraph(_)) |
 			Self::CharSearch(Direction::Backward, _, _) |
 			Self::WordMotion(To::Start,_,_) |
 			Self::ToBrace(_) |
@@ -373,32 +373,35 @@ pub enum Anchor {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TextObj {
 	/// `iw`, `aw` — inner word, around word
-	Word(Word),
+	Word(Word, Bound),
 
-	/// `is`, `as` — inner sentence, around sentence
+	/// `)`, `(` — forward, backward
 	Sentence(Direction),
 
-	/// `ip`, `ap` — inner paragraph, around paragraph
+	/// `}`, `{` — forward, backward
 	Paragraph(Direction),
 
+	WholeSentence(Bound),
+	WholeParagraph(Bound),
+
 	/// `i"`, `a"` — inner/around double quotes
-	DoubleQuote,
+	DoubleQuote(Bound),
 	/// `i'`, `a'`
-	SingleQuote,
+	SingleQuote(Bound),
 	/// `i\``, `a\``
-	BacktickQuote,
+	BacktickQuote(Bound),
 
 	/// `i)`, `a)` — round parens
-	Paren,
+	Paren(Bound),
 	/// `i]`, `a]`
-	Bracket,
+	Bracket(Bound),
 	/// `i}`, `a}`
-	Brace,
+	Brace(Bound),
 	/// `i<`, `a<`
-	Angle,
+	Angle(Bound),
 
 	/// `it`, `at` — HTML/XML tags 
-	Tag,
+	Tag(Bound),
 
 	/// Custom user-defined objects maybe?
 	Custom(char),

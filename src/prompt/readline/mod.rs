@@ -18,6 +18,9 @@ pub mod register;
 pub mod vimode;
 pub mod history;
 
+// Very useful for testing
+const LOREM_IPSUM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\nUt enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra."; 
+
 pub trait Readline {
 	fn readline(&mut self) -> ShResult<String>;
 }
@@ -56,8 +59,10 @@ impl Readline for FernVi {
 			}
 
 			let Some(mut cmd) = self.mode.handle_key(key) else {
+				flog!(DEBUG, "got none??");
 				continue
 			};
+			flog!(DEBUG,cmd);
 			cmd.alter_line_motion_if_no_verb();
 
 			if self.should_grab_history(&cmd) {
@@ -107,7 +112,7 @@ impl FernVi {
 			old_layout: None,
 			repeat_action: None,
 			repeat_motion: None,
-			editor: LineBuf::new().with_initial("this buffer has (some delimited) text", 0),
+			editor: LineBuf::new().with_initial(LOREM_IPSUM, 0),
 			history: History::new()?
 		})
 	}
