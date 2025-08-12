@@ -5,107 +5,105 @@ use crate::parse::{Redir, RedirType};
 use crate::prelude::*;
 
 pub trait VecDequeExt<T> {
-	fn to_vec(self) -> Vec<T>;
+  fn to_vec(self) -> Vec<T>;
 }
 
 pub trait CharDequeUtils {
-	fn to_string(self) -> String;
-	fn ends_with(&self, pat: &str) -> bool;
-	fn starts_with(&self, pat: &str) -> bool;
+  fn to_string(self) -> String;
+  fn ends_with(&self, pat: &str) -> bool;
+  fn starts_with(&self, pat: &str) -> bool;
 }
 
 pub trait TkVecUtils<Tk> {
-	fn get_span(&self) -> Option<Span>;
-	fn debug_tokens(&self);
+  fn get_span(&self) -> Option<Span>;
+  fn debug_tokens(&self);
 }
 
 pub trait RedirVecUtils<Redir> {
-	/// Splits the vector of redirections into two vectors
-	///
-	/// One vector contains input redirs, the other contains output redirs
-	fn split_by_channel(self) -> (Vec<Redir>,Vec<Redir>);
+  /// Splits the vector of redirections into two vectors
+  ///
+  /// One vector contains input redirs, the other contains output redirs
+  fn split_by_channel(self) -> (Vec<Redir>, Vec<Redir>);
 }
 
 impl<T> VecDequeExt<T> for VecDeque<T> {
-	fn to_vec(self) -> Vec<T> {
-		self.into_iter().collect::<Vec<T>>()
-	}
+  fn to_vec(self) -> Vec<T> {
+    self.into_iter().collect::<Vec<T>>()
+  }
 }
 
 impl CharDequeUtils for VecDeque<char> {
-	fn to_string(mut self) -> String {
-		let mut result = String::with_capacity(self.len());
-		while let Some(ch) = self.pop_front() {
-			result.push(ch);
-		}
-		result
-	}
+  fn to_string(mut self) -> String {
+    let mut result = String::with_capacity(self.len());
+    while let Some(ch) = self.pop_front() {
+      result.push(ch);
+    }
+    result
+  }
 
-	fn ends_with(&self, pat: &str) -> bool {
-		let pat_chars = pat.chars();
-		let self_len = self.len();
+  fn ends_with(&self, pat: &str) -> bool {
+    let pat_chars = pat.chars();
+    let self_len = self.len();
 
-		// If pattern is longer than self, return false
-		if pat_chars.clone().count() > self_len {
-			return false;
-		}
+    // If pattern is longer than self, return false
+    if pat_chars.clone().count() > self_len {
+      return false;
+    }
 
-		// Compare from the back
-		self.iter().rev().zip(pat_chars.rev()).all(|(c1, c2)| c1 == &c2)
-	}
+    // Compare from the back
+    self
+      .iter()
+      .rev()
+      .zip(pat_chars.rev())
+      .all(|(c1, c2)| c1 == &c2)
+  }
 
-	fn starts_with(&self, pat: &str) -> bool {
-		let pat_chars = pat.chars();
-		let self_len = self.len();
+  fn starts_with(&self, pat: &str) -> bool {
+    let pat_chars = pat.chars();
+    let self_len = self.len();
 
-		// If pattern is longer than self, return false
-		if pat_chars.clone().count() > self_len {
-			return false;
-		}
+    // If pattern is longer than self, return false
+    if pat_chars.clone().count() > self_len {
+      return false;
+    }
 
-		// Compare from the front
-		self.iter().zip(pat_chars).all(|(c1, c2)| c1 == &c2)
-	}
+    // Compare from the front
+    self.iter().zip(pat_chars).all(|(c1, c2)| c1 == &c2)
+  }
 }
 
 impl TkVecUtils<Tk> for Vec<Tk> {
-	fn get_span(&self) -> Option<Span> {
-		if let Some(first_tk) = self.first() {
-			self.last().map(|last_tk| {
-				Span::new(
-					first_tk.span.start..last_tk.span.end,
-					first_tk.source()
-				)
-			})
-		} else {
-			None
-		}
-	}
-	fn debug_tokens(&self) {
-		for token in self {
-			flog!(DEBUG, "token: {}",token)
-		}
-	}
+  fn get_span(&self) -> Option<Span> {
+    if let Some(first_tk) = self.first() {
+      self
+        .last()
+        .map(|last_tk| Span::new(first_tk.span.start..last_tk.span.end, first_tk.source()))
+    } else {
+      None
+    }
+  }
+  fn debug_tokens(&self) {
+    for token in self {
+      flog!(DEBUG, "token: {}", token)
+    }
+  }
 }
 
 impl RedirVecUtils<Redir> for Vec<Redir> {
-	fn split_by_channel(self) -> (Vec<Redir>,Vec<Redir>) {
-		let mut input = vec![];
-		let mut output = vec![];
-		for redir in self {
-			match redir.class {
-				RedirType::Input => input.push(redir),
-				RedirType::Pipe => {
-					match redir.io_mode.tgt_fd() {
-						STDIN_FILENO => input.push(redir),
-						STDOUT_FILENO |
-							STDERR_FILENO => output.push(redir),
-						_ => unreachable!()
-					}
-				}
-				_ => output.push(redir)
-			}
-		}
-		(input,output)
-	}
+  fn split_by_channel(self) -> (Vec<Redir>, Vec<Redir>) {
+    let mut input = vec![];
+    let mut output = vec![];
+    for redir in self {
+      match redir.class {
+        RedirType::Input => input.push(redir),
+        RedirType::Pipe => match redir.io_mode.tgt_fd() {
+          STDIN_FILENO => input.push(redir),
+          STDOUT_FILENO | STDERR_FILENO => output.push(redir),
+          _ => unreachable!(),
+        },
+        _ => output.push(redir),
+      }
+    }
+    (input, output)
+  }
 }

@@ -1,0 +1,7 @@
+max_width = 100
+tab_spaces = 2
+edition = "2021"
+
+newline_style = "Unix"
+
+wrap_comments = true

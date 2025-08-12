@@ -2,55 +2,57 @@ use std::fmt::Display;
 
 use super::term::{Style, Styled};
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Ord, Eq , Debug)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Debug)]
 #[repr(u8)]
 pub enum FernLogLevel {
-	NONE  = 0,
-	ERROR = 1,
-	WARN  = 2,
-	INFO  = 3,
-	DEBUG = 4,
-	TRACE = 5
+  NONE = 0,
+  ERROR = 1,
+  WARN = 2,
+  INFO = 3,
+  DEBUG = 4,
+  TRACE = 5,
 }
 
 impl Display for FernLogLevel {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		use FernLogLevel::*;
-		match self {
-			ERROR => write!(f,"{}","ERROR".styled(Style::Red | Style::Bold)),
-			WARN => write!(f,"{}","WARN".styled(Style::Yellow | Style::Bold)),
-			INFO => write!(f,"{}","INFO".styled(Style::Green | Style::Bold)),
-			DEBUG => write!(f,"{}","DEBUG".styled(Style::Magenta | Style::Bold)),
-			TRACE => write!(f,"{}","TRACE".styled(Style::Blue | Style::Bold)),
-			NONE => write!(f,"")
-		}
-	}
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    use FernLogLevel::*;
+    match self {
+      ERROR => write!(f, "{}", "ERROR".styled(Style::Red | Style::Bold)),
+      WARN => write!(f, "{}", "WARN".styled(Style::Yellow | Style::Bold)),
+      INFO => write!(f, "{}", "INFO".styled(Style::Green | Style::Bold)),
+      DEBUG => write!(f, "{}", "DEBUG".styled(Style::Magenta | Style::Bold)),
+      TRACE => write!(f, "{}", "TRACE".styled(Style::Blue | Style::Bold)),
+      NONE => write!(f, ""),
+    }
+  }
 }
 
 pub fn log_level() -> FernLogLevel {
-	use FernLogLevel::*;
-	let level = std::env::var("FERN_LOG_LEVEL").unwrap_or_default();
-	match level.to_lowercase().as_str() {
-		"error" => ERROR,
-		"warn" =>  WARN,
-		"info" =>  INFO,
-		"debug" => DEBUG,
-		"trace" => TRACE,
-		_ =>       NONE
-	}
+  use FernLogLevel::*;
+  let level = std::env::var("FERN_LOG_LEVEL").unwrap_or_default();
+  match level.to_lowercase().as_str() {
+    "error" => ERROR,
+    "warn" => WARN,
+    "info" => INFO,
+    "debug" => DEBUG,
+    "trace" => TRACE,
+    _ => NONE,
+  }
 }
 
 /// A structured logging macro designed for `fern`.
 ///
-/// `flog!` was implemented because `rustyline` uses `env_logger`, which clutters the debug output.
-/// This macro prints log messages in a structured format, including the log level, filename, and line number.
+/// `flog!` was implemented because `rustyline` uses `env_logger`, which
+/// clutters the debug output. This macro prints log messages in a structured
+/// format, including the log level, filename, and line number.
 ///
 /// # Usage
 ///
 /// The macro supports three types of arguments:
 ///
 /// ## 1. **Formatted Messages**
-/// Similar to `println!` or `format!`, allows embedding values inside a formatted string.
+/// Similar to `println!` or `format!`, allows embedding values inside a
+/// formatted string.
 ///
 /// ```rust
 /// flog!(ERROR, "foo is {}", foo);
@@ -73,7 +75,8 @@ pub fn log_level() -> FernLogLevel {
 /// ```
 ///
 /// ## 3. **Expressions**
-/// Logs the evaluated result of each given expression, displaying both the expression and its value.
+/// Logs the evaluated result of each given expression, displaying both the
+/// expression and its value.
 ///
 /// ```rust
 /// flog!(INFO, 1.min(2));
@@ -84,8 +87,10 @@ pub fn log_level() -> FernLogLevel {
 /// ```
 ///
 /// # Considerations
-/// - This macro uses `eprintln!()` internally, so its formatting rules must be followed.
-/// - **Literals and formatted messages** require arguments that implement [`std::fmt::Display`].
+/// - This macro uses `eprintln!()` internally, so its formatting rules must be
+///   followed.
+/// - **Literals and formatted messages** require arguments that implement
+///   [`std::fmt::Display`].
 /// - **Expressions** require arguments that implement [`std::fmt::Debug`].
 #[macro_export]
 macro_rules! flog {
