@@ -984,7 +984,7 @@ impl ParseStream {
 
     loop {
       let prefix_keywrd = if cond_nodes.is_empty() { "if" } else { "elif" };
-      let Some(cond) = self.parse_block(true)? else {
+      let Some(cond) = self.parse_cmd_list()? else {
         self.panic_mode(&mut node_tks);
         return Err(parse_err_full(
           &format!("Expected an expression after '{prefix_keywrd}'"),
@@ -1164,7 +1164,7 @@ impl ParseStream {
     node_tks.push(loop_tk);
     self.catch_separator(&mut node_tks);
 
-    let Some(cond) = self.parse_block(true)? else {
+    let Some(cond) = self.parse_cmd_list()? else {
       self.panic_mode(&mut node_tks);
       return Err(parse_err_full(
         &format!("Expected an expression after '{loop_kind}'"), // It also implements Display
