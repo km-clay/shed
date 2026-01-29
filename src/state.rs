@@ -686,7 +686,6 @@ impl MetaTab {
   pub fn stop_timer(&mut self) -> Option<Duration> {
     self
       .runtime_start
-      .take() // runtime_start returns to None
       .map(|start| start.elapsed()) // return the duration, if any
   }
 }

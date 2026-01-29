@@ -1282,11 +1282,30 @@ impl ParseStream {
         assignments.push(assign)
       } else if is_keyword {
         return Ok(None);
+      } else if prefix_tk.class == TkRule::Sep {
+        // Separator ends the prefix section - add it so commit() consumes it
+        node_tks.push(prefix_tk.clone());
+        break;
+      } else {
+        // Other non-prefix token ends the prefix section
+        break;
       }
     }
 
-    if argv.is_empty() && assignments.is_empty() {
-      return Ok(None);
+    if argv.is_empty() {
+			if assignments.is_empty() {
+				return Ok(None);
+			} else {
+				// If we have assignments but no command word,
+				// return the assignment-only command without parsing more tokens
+				self.commit(node_tks.len());
+				return Ok(Some(Node {
+					class: NdRule::Command { assignments, argv },
+					tokens: node_tks,
+					flags: NdFlags::empty(),
+					redirs,
+				}));
+			}
     }
 
     while let Some(tk) = tk_iter.next() {

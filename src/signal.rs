@@ -15,8 +15,8 @@ static GOT_SIGTSTP: AtomicBool = AtomicBool::new(false);
 static GOT_SIGCHLD: AtomicBool = AtomicBool::new(false);
 static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
 
-static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
-static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
+pub static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
+pub static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
 
 pub fn signals_pending() -> bool {
 	GOT_SIGINT.load(Ordering::SeqCst)

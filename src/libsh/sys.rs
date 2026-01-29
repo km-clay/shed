@@ -1,6 +1,6 @@
 use termios::{LocalFlags, Termios};
 
-use crate::{prelude::*, state::write_jobs};
+use crate::{prelude::*};
 ///
 /// The previous state of the terminal options.
 ///
@@ -31,64 +31,46 @@ use crate::{prelude::*, state::write_jobs};
 /// lifecycle could lead to undefined behavior.
 pub(crate) static mut SAVED_TERMIOS: Option<Option<Termios>> = None;
 
-pub fn save_termios() {
-  unsafe {
-    SAVED_TERMIOS = Some(if isatty(std::io::stdin().as_raw_fd()).unwrap() {
-      let mut termios = termios::tcgetattr(std::io::stdin()).unwrap();
-      termios.local_flags &= !LocalFlags::ECHOCTL;
-      termios::tcsetattr(
-        std::io::stdin(),
-        nix::sys::termios::SetArg::TCSANOW,
-        &termios,
-      )
-      .unwrap();
-      Some(termios)
-    } else {
-      None
-    });
-  }
-}
-#[allow(static_mut_refs)]
-///Access the saved termios
-///
-///# Safety
-///This function is unsafe because it accesses a public mutable static value.
-/// This function should only ever be called after save_termios() has already
-/// been called.
-pub unsafe fn get_saved_termios() -> Option<Termios> { unsafe {
-  // SAVED_TERMIOS should *only ever* be set once and accessed once
-  // Set at the start of the program, and accessed during the exit of the program
-  // to reset the termios. Do not use this variable anywhere else
-  SAVED_TERMIOS.clone().flatten()
-}}
-
-/// Set termios to not echo control characters, like ^Z for instance
-pub fn set_termios() {
-  if isatty(std::io::stdin().as_raw_fd()).unwrap() {
-    let mut termios = termios::tcgetattr(std::io::stdin()).unwrap();
-    termios.local_flags &= !LocalFlags::ECHOCTL;
-    termios::tcsetattr(
-      std::io::stdin(),
-      nix::sys::termios::SetArg::TCSANOW,
-      &termios,
-    )
-    .unwrap();
-  }
+#[derive(Debug)]
+pub struct TermiosGuard {
+	saved_termios: Option<Termios>
 }
 
-pub fn sh_quit(code: i32) -> ! {
-  write_jobs(|j| {
-    for job in j.jobs_mut().iter_mut().flatten() {
-      job.killpg(Signal::SIGTERM).ok();
-    }
-  });
-  if let Some(termios) = unsafe { get_saved_termios() } {
-    termios::tcsetattr(std::io::stdin(), termios::SetArg::TCSANOW, &termios).unwrap();
-  }
-  if code == 0 {
-    eprintln!("exit");
-  } else {
-    eprintln!("exit {code}");
-  }
-  exit(code);
+impl TermiosGuard {
+	pub fn new(new_termios: Termios) -> Self {
+		let mut new = Self { saved_termios: None };
+
+		if isatty(std::io::stdin().as_raw_fd()).unwrap() {
+			let current_termios = termios::tcgetattr(std::io::stdin()).unwrap();
+			new.saved_termios = Some(current_termios);
+
+			termios::tcsetattr(
+				std::io::stdin(),
+				nix::sys::termios::SetArg::TCSANOW,
+				&new_termios,
+			).unwrap();
+		}
+
+		new
+	}
+}
+
+impl Default for TermiosGuard {
+	fn default() -> Self {
+	  let mut termios = termios::tcgetattr(std::io::stdin()).unwrap();
+		termios.local_flags &= !LocalFlags::ECHOCTL;
+		Self::new(termios)
+	}
+}
+
+impl Drop for TermiosGuard {
+	fn drop(&mut self) {
+		if let Some(saved) = &self.saved_termios {
+			termios::tcsetattr(
+				std::io::stdin(),
+				nix::sys::termios::SetArg::TCSANOW,
+				saved,
+			).unwrap();
+		}
+	}
 }

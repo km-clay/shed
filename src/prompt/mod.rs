@@ -11,17 +11,19 @@ use crate::{
 /// Initialize the line editor
 fn get_prompt() -> ShResult<String> {
   let Ok(prompt) = env::var("PS1") else {
-    // prompt expands to:
+    // default prompt expands to:
     //
     // username@hostname
     // short/path/to/pwd/
     // $ _
     let default =
-      "\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
+      "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
     return expand_prompt(default);
   };
+	let sanitized = format!("\\e[0m{prompt}");
+	flog!(DEBUG, "Using prompt: {}", sanitized.replace("\n", "\\n"));
 
-  expand_prompt(&prompt)
+  expand_prompt(&sanitized)
 }
 
 pub fn readline(edit_mode: FernEditMode, initial: Option<&str>) -> ShResult<String> {

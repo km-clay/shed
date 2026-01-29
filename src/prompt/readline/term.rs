@@ -687,7 +687,7 @@ impl LineWriter for TermWriter {
     for _ in 0..rows_to_clear {
       self.buffer.push_str("\x1b[2K\x1b[A");
     }
-    self.buffer.push_str("\x1b[2K");
+    self.buffer.push_str("\x1b[2K\r"); // Clear line and return to column 0
     write_all(self.out, self.buffer.as_str())?;
     self.buffer.clear();
     Ok(())

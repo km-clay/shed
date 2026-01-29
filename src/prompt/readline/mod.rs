@@ -8,7 +8,6 @@ use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVis
 
 use crate::libsh::{
   error::{ShErr, ShErrKind, ShResult},
-  sys::sh_quit,
   term::{Style, Styled},
 };
 use crate::prelude::*;
@@ -95,7 +94,7 @@ impl Readline for FernVi {
       if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
         if self.editor.buffer.is_empty() {
           std::mem::drop(raw_mode_guard);
-          sh_quit(0);
+					return Err(ShErr::simple(ShErrKind::CleanExit(0), "exit"));
         } else {
           self.editor.buffer.clear();
           continue;

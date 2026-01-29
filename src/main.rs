@@ -18,11 +18,14 @@ pub mod state;
 #[cfg(test)]
 pub mod tests;
 
+use std::process::ExitCode;
+use std::sync::atomic::Ordering;
+
 use crate::libsh::error::ShErrKind;
-use crate::libsh::sys::{save_termios, set_termios};
+use crate::libsh::sys::TermiosGuard;
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
-use crate::signal::{check_signals, sig_setup, signals_pending};
+use crate::signal::{QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::source_rc;
 use clap::Parser;
 use shopt::FernEditMode;
@@ -53,12 +56,12 @@ fn kickstart_lazy_evals() {
   read_vars(|_| {});
 }
 
-fn main() {
+fn main() -> ExitCode {
   kickstart_lazy_evals();
   let args = FernArgs::parse();
   if args.version {
     println!("fern {}", env!("CARGO_PKG_VERSION"));
-    return;
+    return ExitCode::SUCCESS;
   }
 
   if let Some(path) = args.script {
@@ -66,17 +69,21 @@ fn main() {
   } else {
     fern_interactive();
   }
+
+	ExitCode::from(QUIT_CODE.load(Ordering::SeqCst) as u8)
 }
 
 fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) {
   let path = path.as_ref();
   if !path.is_file() {
     eprintln!("fern: Failed to open input file: {}", path.display());
-    exit(1);
+		QUIT_CODE.store(1, Ordering::SeqCst);
+		return;
   }
   let Ok(input) = fs::read_to_string(path) else {
     eprintln!("fern: Failed to read input file: {}", path.display());
-    exit(1);
+		QUIT_CODE.store(1, Ordering::SeqCst);
+		return;
   };
 
   write_vars(|v| v.cur_scope_mut().bpush_arg(path.to_string_lossy().to_string()));
@@ -86,13 +93,19 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) {
 
   if let Err(e) = exec_input(input, None) {
     eprintln!("{e}");
-    exit(1);
+		match e.kind() {
+			ShErrKind::CleanExit(code) => {
+				QUIT_CODE.store(*code, Ordering::SeqCst);
+			}
+			_ => {
+				QUIT_CODE.store(1, Ordering::SeqCst);
+			}
+		}
   }
 }
 
 fn fern_interactive() {
-  save_termios();
-  set_termios();
+	let _termios_guard = TermiosGuard::default(); // sets raw mode, restores termios on drop
   sig_setup();
 
   if let Err(e) = source_rc() {
@@ -129,37 +142,52 @@ fn fern_interactive() {
         line
       }
       Err(e) => {
-				if let ShErrKind::ReadlineIntr(partial) = e.kind()  {
-					// Did we get signaled? Check signal flags
-					// If nothing to worry about, retry the readline
-					while signals_pending() {
-						if let Err(e) = check_signals() {
-							if let ShErrKind::ClearReadline = e.kind() {
-								partial_input.clear();
-								if !signals_pending() {
-									continue 'outer;
-								}
-							};
-							eprintln!("{e}");
+				match e.kind() {
+					ShErrKind::ReadlineIntr(partial) => {
+						// Did we get signaled? Check signal flags
+						// If nothing to worry about, retry the readline with the unfinished input
+						while signals_pending() {
+							if let Err(e) = check_signals() {
+								if let ShErrKind::ClearReadline = e.kind() {
+									partial_input.clear();
+									if !signals_pending() {
+										continue 'outer;
+									}
+								};
+								eprintln!("{e}");
+							}
 						}
-					}
-					partial_input = partial.to_string();
-					continue;
-				} else {
-					eprintln!("{e}");
-					readline_err_count += 1;
-					if readline_err_count == 20 {
-						eprintln!("reached maximum readline error count, exiting");
-						break;
-					} else {
+						partial_input = partial.to_string();
 						continue;
+					}
+					ShErrKind::CleanExit(code) => {
+						QUIT_CODE.store(*code, Ordering::SeqCst);
+						return;
+					}
+					_ => {
+						eprintln!("{e}");
+						readline_err_count += 1;
+						if readline_err_count == 20 {
+							eprintln!("reached maximum readline error count, exiting");
+							break;
+						} else {
+							continue;
+						}
 					}
 				}
       }
     };
 
     if let Err(e) = exec_input(input, None) {
-      eprintln!("{e}");
+			match e.kind() {
+				ShErrKind::CleanExit(code) => {
+					QUIT_CODE.store(*code, Ordering::SeqCst);
+					return;
+				}
+				_ => {
+					eprintln!("{e}");
+				}
+			}
     }
   }
 }

@@ -11,7 +11,7 @@ use crate::parse::lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Tk, TkFl
 use crate::parse::{Redir, RedirType};
 use crate::prelude::*;
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
-use crate::state::{LogTab, VarFlags, read_jobs, read_vars, write_jobs, write_meta, write_vars};
+use crate::state::{LogTab, VarFlags, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars};
 
 const PARAMETERS: [char; 7] = ['@', '*', '#', '$', '?', '!', '0'];
 
@@ -789,13 +789,15 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
       io_stack.push_frame(cmd_sub_io_frame);
       if let Err(e) = exec_input(raw.to_string(), Some(io_stack)) {
         eprintln!("{e}");
-        exit(1);
+        unsafe { libc::_exit(1) };
       }
-      exit(0);
+      unsafe { libc::_exit(0) };
     }
     ForkResult::Parent { child } => {
       std::mem::drop(cmd_sub_io_frame); // Closes the write pipe
       let status = waitpid(child, Some(WtFlag::WSTOPPED))?;
+      // Reclaim terminal foreground in case child changed it
+      crate::jobs::take_term()?;
       match status {
         WtStat::Exited(_, _) => {
           flog!(DEBUG, "filling buffer");
@@ -1423,9 +1425,11 @@ pub enum PromptTk {
   AsciiOct(i32),
   Text(String),
   AnsiSeq(String),
+	Function(String), // Expands to the output of any defined shell function
   VisGrp,
   UserSeq,
-  Runtime,
+	RuntimeMillis,
+  RuntimeFormatted,
   Weekday,
   Dquote,
   Squote,
@@ -1442,6 +1446,8 @@ pub enum PromptTk {
   SuccessSymbol,
   FailureSymbol,
   JobCount,
+	VisGroupOpen,
+	VisGroupClose,
 }
 
 pub fn format_cmd_runtime(dur: std::time::Duration) -> String {
@@ -1646,10 +1652,46 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
             '$' => tokens.push(PromptTk::PromptSymbol),
             'n' => tokens.push(PromptTk::Text("\n".into())),
             'r' => tokens.push(PromptTk::Text("\r".into())),
-            'T' => tokens.push(PromptTk::Runtime),
+            't' => tokens.push(PromptTk::RuntimeMillis),
+            'T' => tokens.push(PromptTk::RuntimeFormatted),
             '\\' => tokens.push(PromptTk::Text("\\".into())),
             '"' => tokens.push(PromptTk::Text("\"".into())),
             '\'' => tokens.push(PromptTk::Text("'".into())),
+						'(' => tokens.push(PromptTk::VisGroupOpen),
+						')' => tokens.push(PromptTk::VisGroupClose),
+						'!' => {
+							let mut func_name = String::new();
+							let is_braced = chars.peek() == Some(&'{');
+							while let Some(ch) = chars.peek() {
+
+								match ch {
+									'}' if is_braced => {
+										chars.next();
+										break;
+									}
+									'A'..='Z' | 'a'..='z' | '0'..='9' | '_' => {
+										func_name.push(*ch);
+										chars.next();
+									}
+									_ => {
+										if is_braced {
+											// Invalid character in braced function name
+											tokens.push(PromptTk::Text(format!("\\!{{{func_name}")));
+											break;
+										} else {
+											// End of unbraced function name
+											let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
+											if func_exists {
+												tokens.push(PromptTk::Function(func_name));
+											} else {
+												tokens.push(PromptTk::Text(format!("\\!{func_name}")));
+											}
+											break;
+										}
+									}
+								}
+							}
+						}
             'e' => {
               if chars.next() == Some('[') {
                 let mut params = String::new();
@@ -1733,65 +1775,84 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
   let mut result = String::new();
 
   while let Some(token) = tokens.next() {
-    match token {
-      PromptTk::AsciiOct(_) => todo!(),
-      PromptTk::Text(txt) => result.push_str(&txt),
-      PromptTk::AnsiSeq(params) => result.push_str(&params),
-      PromptTk::Runtime => {
-        if let Some(runtime) = write_meta(|m| m.stop_timer()) {
-          let runtime_fmt = format_cmd_runtime(runtime);
-          result.push_str(&runtime_fmt);
-        }
-      }
-      PromptTk::Pwd => {
-        let mut pwd = std::env::var("PWD").unwrap();
-        let home = std::env::var("HOME").unwrap();
-        if pwd.starts_with(&home) {
-          pwd = pwd.replacen(&home, "~", 1);
-        }
-        result.push_str(&pwd);
-      }
-      PromptTk::PwdShort => {
-        let mut path = std::env::var("PWD").unwrap();
-        let home = std::env::var("HOME").unwrap();
-        if path.starts_with(&home) {
-          path = path.replacen(&home, "~", 1);
-        }
-        let pathbuf = PathBuf::from(&path);
-        let mut segments = pathbuf.iter().count();
-        let mut path_iter = pathbuf.iter();
-        while segments > 4 {
-          path_iter.next();
-          segments -= 1;
-        }
-        let path_rebuilt: PathBuf = path_iter.collect();
-        let mut path_rebuilt = path_rebuilt.to_str().unwrap().to_string();
-        if path_rebuilt.starts_with(&home) {
-          path_rebuilt = path_rebuilt.replacen(&home, "~", 1);
-        }
-        result.push_str(&path_rebuilt);
-      }
-      PromptTk::Hostname => {
-        let hostname = std::env::var("HOST").unwrap();
-        result.push_str(&hostname);
-      }
-      PromptTk::HostnameShort => todo!(),
-      PromptTk::ShellName => result.push_str("fern"),
-      PromptTk::Username => {
-        let username = std::env::var("USER").unwrap();
-        result.push_str(&username);
-      }
-      PromptTk::PromptSymbol => {
-        let uid = std::env::var("UID").unwrap();
-        let symbol = if &uid == "0" { '#' } else { '$' };
-        result.push(symbol);
-      }
-      PromptTk::ExitCode => todo!(),
-      PromptTk::SuccessSymbol => todo!(),
-      PromptTk::FailureSymbol => todo!(),
-      PromptTk::JobCount => todo!(),
-      _ => unimplemented!(),
-    }
+		match token {
+			PromptTk::AsciiOct(_) => todo!(),
+			PromptTk::Text(txt) => result.push_str(&txt),
+			PromptTk::AnsiSeq(params) => result.push_str(&params),
+			PromptTk::RuntimeMillis => {
+				if let Some(runtime) = write_meta(|m| m.stop_timer()) {
+					let runtime_millis = runtime.as_millis().to_string();
+					result.push_str(&runtime_millis);
+				}
+			}
+			PromptTk::RuntimeFormatted => {
+				if let Some(runtime) = write_meta(|m| m.stop_timer()) {
+					let runtime_fmt = format_cmd_runtime(runtime);
+					result.push_str(&runtime_fmt);
+				}
+			}
+			PromptTk::Pwd => {
+				let mut pwd = std::env::var("PWD").unwrap();
+				let home = std::env::var("HOME").unwrap();
+				if pwd.starts_with(&home) {
+					pwd = pwd.replacen(&home, "~", 1);
+				}
+				result.push_str(&pwd);
+			}
+			PromptTk::PwdShort => {
+				let mut path = std::env::var("PWD").unwrap();
+				let home = std::env::var("HOME").unwrap();
+				if path.starts_with(&home) {
+					path = path.replacen(&home, "~", 1);
+				}
+				let pathbuf = PathBuf::from(&path);
+				let mut segments = pathbuf.iter().count();
+				let mut path_iter = pathbuf.iter();
+				while segments > 4 {
+					path_iter.next();
+					segments -= 1;
+				}
+				let path_rebuilt: PathBuf = path_iter.collect();
+				let mut path_rebuilt = path_rebuilt.to_str().unwrap().to_string();
+				if path_rebuilt.starts_with(&home) {
+					path_rebuilt = path_rebuilt.replacen(&home, "~", 1);
+				}
+				result.push_str(&path_rebuilt);
+			}
+			PromptTk::Hostname => {
+				let hostname = std::env::var("HOST").unwrap();
+				result.push_str(&hostname);
+			}
+			PromptTk::HostnameShort => todo!(),
+			PromptTk::ShellName => result.push_str("fern"),
+			PromptTk::Username => {
+				let username = std::env::var("USER").unwrap();
+				result.push_str(&username);
+			}
+			PromptTk::PromptSymbol => {
+				let uid = std::env::var("UID").unwrap();
+				let symbol = if &uid == "0" { '#' } else { '$' };
+				result.push(symbol);
+			}
+			PromptTk::ExitCode => todo!(),
+			PromptTk::SuccessSymbol => todo!(),
+			PromptTk::FailureSymbol => todo!(),
+			PromptTk::JobCount => todo!(),
+			PromptTk::Function(f) => {
+				flog!(DEBUG, "Expanding prompt function: {}", f);
+				let output = expand_cmd_sub(&f)?;
+				result.push_str(&output);
+			}
+			PromptTk::VisGrp => todo!(),
+			PromptTk::UserSeq => todo!(),
+			PromptTk::Weekday => todo!(),
+			PromptTk::Dquote => todo!(),
+			PromptTk::Squote => todo!(),
+			PromptTk::Return => todo!(),
+			PromptTk::Newline => todo!(),
+			PromptTk::VisGroupOpen => todo!(),
+			PromptTk::VisGroupClose => todo!(),
+		}
   }
 
   Ok(result)
