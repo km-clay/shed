@@ -5,7 +5,6 @@ use nix::NixPath;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
-use super::linebuf::CharClass;
 use super::vicmd::{
   Anchor, Bound, CmdFlags, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb,
   VerbCmd, ViCmd, Word,

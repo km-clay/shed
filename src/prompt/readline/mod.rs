@@ -1,4 +1,4 @@
-use history::{History, SearchConstraint, SearchKind};
+use history::History;
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{LineBuf, SelectAnchor, SelectMode};
 use nix::libc::STDOUT_FILENO;

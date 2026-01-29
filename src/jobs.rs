@@ -507,6 +507,8 @@ impl Job {
     flog!(TRACE, "waiting on children");
     flog!(TRACE, self.children);
     for child in self.children.iter_mut() {
+			flog!(TRACE, "shell pid {}", Pid::this());
+			flog!(TRACE, "child pid {}", child.pid);
       if child.pid == Pid::this() {
         // TODO: figure out some way to get the exit code of builtins
         let code = state::get_status();

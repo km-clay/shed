@@ -4,7 +4,7 @@ use nix::sys::signal::{SaFlags, SigAction, sigaction};
 
 use crate::{
   jobs::{JobCmdFlags, JobID, take_term},
-  libsh::{error::{ShErr, ShErrKind, ShResult}, sys::sh_quit},
+  libsh::error::{ShErr, ShErrKind, ShResult},
   prelude::*,
   state::{read_jobs, write_jobs},
 };
@@ -249,8 +249,8 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
     } else {
       None
     }
-  }) {
-    if is_finished {
+  })
+    && is_finished {
       if is_fg {
         take_term()?;
       } else {
@@ -262,6 +262,5 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
         }
       }
     }
-  }
   Ok(())
 }

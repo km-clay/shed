@@ -2,9 +2,7 @@ use std::{
   env,
   fmt::{Debug, Write},
   io::{BufRead, BufReader, Read},
-  iter::Peekable,
   os::fd::{AsFd, BorrowedFd, RawFd},
-  str::Chars,
 };
 
 use nix::{

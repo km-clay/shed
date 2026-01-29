@@ -1,13 +1,11 @@
 pub mod highlight;
 pub mod readline;
 
-use std::path::Path;
 
 use readline::{FernVi, Readline};
 
 use crate::{
   expand::expand_prompt, libsh::error::ShResult, prelude::*, shopt::FernEditMode,
-  state::read_shopts,
 };
 
 /// Initialize the line editor
@@ -32,7 +30,7 @@ pub fn readline(edit_mode: FernEditMode, initial: Option<&str>) -> ShResult<Stri
     FernEditMode::Vi => {
 			let mut fern_vi = FernVi::new(Some(prompt))?;
 			if let Some(input) = initial {
-				fern_vi = fern_vi.with_initial(&input)
+				fern_vi = fern_vi.with_initial(input)
 			}
 			Box::new(fern_vi) as Box<dyn Readline>
 		}

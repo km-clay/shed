@@ -1,5 +1,5 @@
 use std::{
-  collections::{HashMap, VecDeque}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref}, str::FromStr, sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}, time::Duration
+  cell::RefCell, collections::{HashMap, VecDeque}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref}, str::FromStr, time::Duration
 };
 
 use nix::unistd::{gethostname, getppid, User};
@@ -17,52 +17,22 @@ use crate::{
 };
 
 pub struct Fern {
-	pub jobs: JobTab,
-	pub var_scopes: ScopeStack,
-	pub meta: MetaTab,
-	pub logic: LogTab,
-	pub shopts: ShOpts,
+	pub jobs: RefCell<JobTab>,
+	pub var_scopes: RefCell<ScopeStack>,
+	pub meta: RefCell<MetaTab>,
+	pub logic: RefCell<LogTab>,
+	pub shopts: RefCell<ShOpts>,
 }
 
 impl Fern {
 	pub fn new() -> Self {
 		Self {
-			jobs: JobTab::new(),
-			var_scopes: ScopeStack::new(),
-			meta: MetaTab::new(),
-			logic: LogTab::new(),
-			shopts: ShOpts::default(),
+			jobs: RefCell::new(JobTab::new()),
+			var_scopes: RefCell::new(ScopeStack::new()),
+			meta: RefCell::new(MetaTab::new()),
+			logic: RefCell::new(LogTab::new()),
+			shopts: RefCell::new(ShOpts::default()),
 		}
-	}
-	pub fn write_jobs(&mut self) -> &mut JobTab {
-		&mut self.jobs
-	}
-	pub fn write_vars(&mut self) -> &mut ScopeStack {
-		&mut self.var_scopes
-	}
-	pub fn write_meta(&mut self) -> &mut MetaTab {
-		&mut self.meta
-	}
-	pub fn write_logic(&mut self) -> &mut LogTab {
-		&mut self.logic
-	}
-	pub fn write_shopts(&mut self) -> &mut ShOpts {
-		&mut self.shopts
-	}
-	pub fn read_jobs(&self) -> &JobTab {
-		&self.jobs
-	}
-	pub fn read_vars(&self) -> &ScopeStack {
-		&self.var_scopes
-	}
-	pub fn read_meta(&self) -> &MetaTab {
-		&self.meta
-	}
-	pub fn read_logic(&self) -> &LogTab {
-		&self.logic
-	}
-	pub fn read_shopts(&self) -> &ShOpts {
-		&self.shopts
 	}
 }
 
@@ -257,7 +227,9 @@ impl ScopeStack {
 	}
 }
 
-pub static FERN: LazyLock<RwLock<Fern>> = LazyLock::new(|| RwLock::new(Fern::new()));
+thread_local! {
+	pub static FERN: Fern = Fern::new();
+}
 
 /// A shell function
 ///
@@ -721,69 +693,49 @@ impl MetaTab {
 
 /// Read from the job table
 pub fn read_jobs<T, F: FnOnce(&JobTab) -> T>(f: F) -> T {
-	let fern = FERN.read().unwrap();
-  let jobs = fern.read_jobs();
-  f(jobs)
+	FERN.with(|fern| f(&fern.jobs.borrow()))
 }
 
 /// Write to the job table
 pub fn write_jobs<T, F: FnOnce(&mut JobTab) -> T>(f: F) -> T {
-	let mut fern = FERN.write().unwrap();
-  let jobs = &mut fern.jobs;
-  f(jobs)
+	FERN.with(|fern| f(&mut fern.jobs.borrow_mut()))
 }
 
 /// Read from the var scope stack
 pub fn read_vars<T, F: FnOnce(&ScopeStack) -> T>(f: F) -> T {
-	let fern = FERN.read().unwrap();
-  let vars = fern.read_vars();
-  f(vars)
+	FERN.with(|fern| f(&fern.var_scopes.borrow()))
 }
 
 /// Write to the variable table
 pub fn write_vars<T, F: FnOnce(&mut ScopeStack) -> T>(f: F) -> T {
-	let mut fern = FERN.write().unwrap();
-	let vars = fern.write_vars();
-  f(vars)
+	FERN.with(|fern| f(&mut fern.var_scopes.borrow_mut()))
 }
 
 pub fn read_meta<T, F: FnOnce(&MetaTab) -> T>(f: F) -> T {
-	let fern = FERN.read().unwrap();
-	let meta = fern.read_meta();
-	f(meta)
+	FERN.with(|fern| f(&fern.meta.borrow()))
 }
 
-/// Write to the variable table
+/// Write to the meta table
 pub fn write_meta<T, F: FnOnce(&mut MetaTab) -> T>(f: F) -> T {
-	let mut fern = FERN.write().unwrap();
-	let meta = fern.write_meta();
-	f(meta)
+	FERN.with(|fern| f(&mut fern.meta.borrow_mut()))
 }
 
 /// Read from the logic table
 pub fn read_logic<T, F: FnOnce(&LogTab) -> T>(f: F) -> T {
-	let fern = FERN.read().unwrap();
-	let logic = fern.read_logic();
-	f(logic)
+	FERN.with(|fern| f(&fern.logic.borrow()))
 }
 
 /// Write to the logic table
 pub fn write_logic<T, F: FnOnce(&mut LogTab) -> T>(f: F) -> T {
-	let mut fern = FERN.write().unwrap();
-	let logic = &mut fern.logic;
-	f(logic)
+	FERN.with(|fern| f(&mut fern.logic.borrow_mut()))
 }
 
 pub fn read_shopts<T, F: FnOnce(&ShOpts) -> T>(f: F) -> T {
-	let fern = FERN.read().unwrap();
-	let shopts = fern.read_shopts();
-	f(shopts)
+	FERN.with(|fern| f(&fern.shopts.borrow()))
 }
 
 pub fn write_shopts<T, F: FnOnce(&mut ShOpts) -> T>(f: F) -> T {
-	let mut fern = FERN.write().unwrap();
-	let shopts = &mut fern.shopts;
-	f(shopts)
+	FERN.with(|fern| f(&mut fern.shopts.borrow_mut()))
 }
 
 pub fn descend_scope(argv: Option<Vec<String>>) {

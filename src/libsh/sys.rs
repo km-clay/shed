@@ -55,12 +55,12 @@ pub fn save_termios() {
 ///This function is unsafe because it accesses a public mutable static value.
 /// This function should only ever be called after save_termios() has already
 /// been called.
-pub unsafe fn get_saved_termios() -> Option<Termios> {
+pub unsafe fn get_saved_termios() -> Option<Termios> { unsafe {
   // SAVED_TERMIOS should *only ever* be set once and accessed once
   // Set at the start of the program, and accessed during the exit of the program
   // to reset the termios. Do not use this variable anywhere else
   SAVED_TERMIOS.clone().flatten()
-}
+}}
 
 /// Set termios to not echo control characters, like ^Z for instance
 pub fn set_termios() {

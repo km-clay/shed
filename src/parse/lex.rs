@@ -317,17 +317,16 @@ impl LexStream {
     let slice = self.slice_from_cursor().unwrap().to_string();
     let mut pos = self.cursor;
     let mut chars = slice.chars().peekable();
-    let mut can_be_subshell = chars.peek() == Some(&'(');
+    let can_be_subshell = chars.peek() == Some(&'(');
 
-    if self.flags.contains(LexFlags::IN_CASE) {
-      if let Some(count) = case_pat_lookahead(chars.clone()) {
+    if self.flags.contains(LexFlags::IN_CASE)
+      && let Some(count) = case_pat_lookahead(chars.clone()) {
         pos += count;
         let casepat_tk = self.get_token(self.cursor..pos, TkRule::CasePattern);
         self.cursor = pos;
         self.set_next_is_cmd(true);
         return Ok(casepat_tk);
       }
-    }
 
     while let Some(ch) = chars.next() {
       match ch {

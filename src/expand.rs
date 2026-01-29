@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::iter::Peekable;
-use std::mem::take;
 use std::str::{Chars, FromStr};
 
 use glob::Pattern;
@@ -68,11 +67,10 @@ impl Expander {
   pub fn expand(&mut self) -> ShResult<Vec<String>> {
     let mut chars = self.raw.chars().peekable();
     self.raw = expand_raw(&mut chars)?;
-    if let Ok(glob_exp) = expand_glob(&self.raw) {
-      if !glob_exp.is_empty() {
+    if let Ok(glob_exp) = expand_glob(&self.raw)
+      && !glob_exp.is_empty() {
         self.raw = glob_exp;
       }
-    }
     Ok(self.split_words())
   }
   pub fn split_words(&mut self) -> Vec<String> {
@@ -776,11 +774,10 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
   flog!(DEBUG, "in expand_cmd_sub");
   flog!(DEBUG, raw);
-  if raw.starts_with('(') && raw.ends_with(')') {
-    if let Ok(output) = expand_arithmetic(raw) {
+  if raw.starts_with('(') && raw.ends_with(')')
+    && let Ok(output) = expand_arithmetic(raw) {
       return Ok(output); // It's actually an arithmetic sub
     }
-  }
   let (rpipe, wpipe) = IoMode::get_pipes();
   let cmd_sub_redir = Redir::new(wpipe, RedirType::Output);
   let cmd_sub_io_frame = IoFrame::from_redir(cmd_sub_redir);

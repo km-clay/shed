@@ -118,12 +118,7 @@ impl ExecArgs {
 
 pub fn exec_input(input: String, io_stack: Option<IoStack>) -> ShResult<()> {
 	write_meta(|m| m.start_timer());
-	let log_tab = {
-		let fern = FERN.read().unwrap();
-		// TODO: Is there a better way to do this?
-		// The goal is mainly to not be holding a lock while executing input
-		fern.read_logic().clone()
-	};
+	let log_tab = read_logic(|l| l.clone());
 	let input = expand_aliases(input, HashSet::new(), &log_tab);
 	let mut parser = ParsedSrc::new(Arc::new(input));
 	if let Err(errors) = parser.parse_src() {

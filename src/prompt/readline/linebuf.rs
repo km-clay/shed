@@ -953,11 +953,10 @@ impl LineBuf {
     }
     let start = start.unwrap_or(0);
 
-    if count > 1 {
-      if let Some((_, new_end)) = self.text_obj_sentence(end, count - 1, bound) {
+    if count > 1
+      && let Some((_, new_end)) = self.text_obj_sentence(end, count - 1, bound) {
         end = new_end;
       }
-    }
 
     Some((start, end))
   }
@@ -2590,8 +2589,8 @@ impl LineBuf {
         self.cursor.add(content.len().saturating_sub(1));
       }
       Verb::SwapVisualAnchor => {
-        if let Some((start, end)) = self.select_range() {
-          if let Some(mut mode) = self.select_mode {
+        if let Some((start, end)) = self.select_range()
+          && let Some(mut mode) = self.select_mode {
             mode.invert_anchor();
             let new_cursor_pos = match mode.anchor() {
               SelectAnchor::Start => start,
@@ -2600,7 +2599,6 @@ impl LineBuf {
             self.cursor.set(new_cursor_pos);
             self.select_mode = Some(mode)
           }
-        }
       }
       Verb::JoinLines => {
         let start = self.start_of_line();
@@ -2748,11 +2746,10 @@ impl LineBuf {
     let edit_is_merging = self.undo_stack.last().is_some_and(|edit| edit.merging);
 
     // Merge character inserts into one edit
-    if edit_is_merging && cmd.verb.as_ref().is_none_or(|v| !v.1.is_char_insert()) {
-      if let Some(edit) = self.undo_stack.last_mut() {
+    if edit_is_merging && cmd.verb.as_ref().is_none_or(|v| !v.1.is_char_insert())
+      && let Some(edit) = self.undo_stack.last_mut() {
         edit.stop_merge();
       }
-    }
 
     let ViCmd {
       register,
@@ -2839,11 +2836,10 @@ impl LineBuf {
       self.saved_col = None;
     }
 
-    if is_char_insert {
-      if let Some(edit) = self.undo_stack.last_mut() {
+    if is_char_insert
+      && let Some(edit) = self.undo_stack.last_mut() {
         edit.start_merge();
       }
-    }
 
     Ok(())
   }
