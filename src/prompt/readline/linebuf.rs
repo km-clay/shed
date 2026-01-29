@@ -622,17 +622,25 @@ impl LineBuf {
       .map(|slice| slice.graphemes(true).filter(|g| *g == "\n").count())
       .unwrap_or(0)
   }
-  pub fn is_sentence_punctuation(&mut self, pos: usize) -> bool {
-    if let Some(gr) = self.grapheme_at(pos) {
-      if PUNCTUATION.contains(&gr) && self.grapheme_after(pos).is_some() {
+  pub fn is_sentence_punctuation(&self, pos: usize) -> bool {
+    self.next_sentence_start_from_punctuation(pos).is_some()
+  }
+
+  /// If position is at sentence-ending punctuation, returns the position of the next sentence start.
+  /// Handles closing delimiters (`)`, `]`, `"`, `'`) after punctuation.
+  #[allow(clippy::collapsible_if)]
+  pub fn next_sentence_start_from_punctuation(&self, pos: usize) -> Option<usize> {
+    if let Some(gr) = self.read_grapheme_at(pos) {
+      if PUNCTUATION.contains(&gr) && self.read_grapheme_after(pos).is_some() {
         let mut fwd_indices = (pos + 1..self.cursor.max).peekable();
+        // Skip any closing delimiters after the punctuation
         if self
-          .grapheme_after(pos)
+          .read_grapheme_after(pos)
           .is_some_and(|gr| [")", "]", "\"", "'"].contains(&gr))
         {
           while let Some(idx) = fwd_indices.peek() {
             if self
-              .grapheme_after(*idx)
+              .read_grapheme_at(*idx)
               .is_some_and(|gr| [")", "]", "\"", "'"].contains(&gr))
             {
               fwd_indices.next();
@@ -641,16 +649,32 @@ impl LineBuf {
             }
           }
         }
+        // Now we should be at whitespace - skip it to find sentence start
         if let Some(idx) = fwd_indices.next() {
-          if let Some(gr) = self.grapheme_at(idx) {
+          if let Some(gr) = self.read_grapheme_at(idx) {
             if is_whitespace(gr) {
-              return true;
+              if gr == "\n" {
+                return Some(idx);
+              }
+              // Skip remaining whitespace to find actual sentence start
+              while let Some(idx) = fwd_indices.next() {
+                if let Some(gr) = self.read_grapheme_at(idx) {
+                  if is_whitespace(gr) {
+                    if gr == "\n" {
+                      return Some(idx);
+                    }
+                    continue;
+                  } else {
+                    return Some(idx);
+                  }
+                }
+              }
             }
           }
         }
       }
     }
-    false
+    None
   }
   pub fn is_sentence_start(&mut self, pos: usize) -> bool {
     if self.grapheme_before(pos).is_some_and(is_whitespace) {
@@ -875,11 +899,7 @@ impl LineBuf {
         let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
           self.cursor.get()
         } else {
-          self.end_of_word_forward_or_start_of_word_backward_from(
-            self.cursor.get(),
-            word,
-            Direction::Backward,
-          )
+          self.start_of_word_backward(self.cursor.get(), word)
         };
         let end = self.dispatch_word_motion(count, To::Start, word, Direction::Forward, true);
         Some((start, end))
@@ -888,11 +908,7 @@ impl LineBuf {
         let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
           self.cursor.get()
         } else {
-          self.end_of_word_forward_or_start_of_word_backward_from(
-            self.cursor.get(),
-            word,
-            Direction::Backward,
-          )
+          self.start_of_word_backward(self.cursor.get(), word)
         };
         let end = self.dispatch_word_motion(count, To::Start, word, Direction::Forward, false);
         Some((start, end))
@@ -907,39 +923,26 @@ impl LineBuf {
   ) -> Option<(usize, usize)> {
     let mut start = None;
     let mut end = None;
-    let mut fwd_indices = start_pos..self.cursor.max;
+    let mut fwd_indices = (start_pos..self.cursor.max).peekable();
     while let Some(idx) = fwd_indices.next() {
-      let Some(gr) = self.grapheme_at(idx) else {
-        end = Some(self.cursor.max);
+      if self.grapheme_at(idx).is_none() {
         break;
-      };
-      if PUNCTUATION.contains(&gr) && self.is_sentence_punctuation(idx) {
+      }
+
+      if let Some(next_sentence_start) = self.next_sentence_start_from_punctuation(idx) {
         match bound {
           Bound::Inside => {
             end = Some(idx);
             break;
           }
           Bound::Around => {
-            let mut end_pos = idx;
-            while let Some(idx) = fwd_indices.next() {
-              if !self.grapheme_at(idx).is_some_and(is_whitespace) {
-                end_pos += 1;
-                break;
-              } else {
-                end_pos += 1;
-              }
-            }
-            end = Some(end_pos);
+            end = Some(next_sentence_start);
             break;
           }
         }
       }
     }
     let mut end = end.unwrap_or(self.cursor.max);
-    flog!(DEBUG, end);
-    flog!(DEBUG, self.grapheme_at(end));
-    flog!(DEBUG, self.grapheme_before(end));
-    flog!(DEBUG, self.grapheme_after(end));
 
     let mut bkwd_indices = (0..end).rev();
     while let Some(idx) = bkwd_indices.next() {
@@ -949,10 +952,6 @@ impl LineBuf {
       }
     }
     let start = start.unwrap_or(0);
-    flog!(DEBUG, start);
-    flog!(DEBUG, self.grapheme_at(start));
-    flog!(DEBUG, self.grapheme_before(start));
-    flog!(DEBUG, self.grapheme_after(start));
 
     if count > 1 {
       if let Some((_, new_end)) = self.text_obj_sentence(end, count - 1, bound) {
@@ -1321,7 +1320,6 @@ impl LineBuf {
     dir: Direction,
     include_last_char: bool,
   ) -> usize {
-    // Not sorry for these method names btw
     let mut pos = ClampedUsize::new(self.cursor.get(), self.cursor.max, false);
     for i in 0..count {
       // We alter 'include_last_char' to only be true on the last iteration
@@ -1331,16 +1329,12 @@ impl LineBuf {
       pos.set(match to {
         To::Start => {
           match dir {
-            Direction::Forward => self.start_of_word_forward_or_end_of_word_backward_from(
-              pos.get(),
-              word,
-              dir,
-              include_last_char_and_is_last_word,
-            ),
+            Direction::Forward => {
+              self.start_of_word_forward(pos.get(), word, include_last_char_and_is_last_word)
+            }
             Direction::Backward => 'backward: {
               // We also need to handle insert mode's Ctrl+W behaviors here
-              let target =
-                self.end_of_word_forward_or_start_of_word_backward_from(pos.get(), word, dir);
+              let target = self.start_of_word_backward(pos.get(), word);
 
               // Check to see if we are in insert mode
               let Some(start_pos) = self.insert_mode_start_pos else {
@@ -1361,38 +1355,18 @@ impl LineBuf {
           }
         }
         To::End => match dir {
-          Direction::Forward => {
-            self.end_of_word_forward_or_start_of_word_backward_from(pos.get(), word, dir)
-          }
-          Direction::Backward => {
-            self.start_of_word_forward_or_end_of_word_backward_from(pos.get(), word, dir, false)
-          }
+          Direction::Forward => self.end_of_word_forward(pos.get(), word),
+          Direction::Backward => self.end_of_word_backward(pos.get(), word, false),
         },
       });
     }
     pos.get()
   }
 
-  /// Finds the start of a word forward, or the end of a word backward
-  ///
-  /// Finding the start of a word in the forward direction, and finding the end
-  /// of a word in the backward direction are logically the same operation, if
-  /// you use a reversed iterator for the backward motion.
-  ///
-  /// Tied with 'end_of_word_forward_or_start_of_word_backward_from()' for the
-  /// longest method name I have ever written
-  pub fn start_of_word_forward_or_end_of_word_backward_from(
-    &mut self,
-    mut pos: usize,
-    word: Word,
-    dir: Direction,
-    include_last_char: bool,
-  ) -> usize {
-    let default = match dir {
-      Direction::Backward => 0,
-      Direction::Forward => self.grapheme_indices().len(),
-    };
-    let mut indices_iter = self.directional_indices_iter_from(pos, dir).peekable(); // And make it peekable
+  /// Find the start of the next word forward
+  pub fn start_of_word_forward(&mut self, mut pos: usize, word: Word, include_last_char: bool) -> usize {
+    let default = self.grapheme_indices().len();
+    let mut indices_iter = (pos..self.cursor.max).peekable();
 
     match word {
       Word::Big => {
@@ -1404,7 +1378,6 @@ impl LineBuf {
           let Some(idx) = indices_iter.next() else {
             return default;
           };
-          // We have a 'cw' call, do not include the trailing whitespace
           if include_last_char {
             return idx;
           } else {
@@ -1412,15 +1385,14 @@ impl LineBuf {
           }
         }
 
-        // Check current grapheme
         let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
           return default;
         };
         let on_whitespace = is_whitespace(&cur_char);
 
-        // Find the next whitespace
         if !on_whitespace {
-          let Some(ws_pos) = indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
+          let Some(ws_pos) =
+            indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
           else {
             return default;
           };
@@ -1429,11 +1401,9 @@ impl LineBuf {
           }
         }
 
-        // Return the next visible grapheme position
-        let non_ws_pos = indices_iter
+        indices_iter
           .find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
-          .unwrap_or(default);
-        non_ws_pos
+          .unwrap_or(default)
       }
       Word::Normal => {
         let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
@@ -1462,7 +1432,6 @@ impl LineBuf {
         }
         let on_whitespace = is_whitespace(&cur_char);
 
-        // Advance until hitting whitespace or a different character class
         if !on_whitespace {
           let other_class_pos = indices_iter.find(|i| {
             self
@@ -1472,7 +1441,6 @@ impl LineBuf {
           let Some(other_class_pos) = other_class_pos else {
             return default;
           };
-          // If we hit a different character class, we return here
           if self
             .grapheme_at(other_class_pos)
             .is_some_and(|c| !is_whitespace(c))
@@ -1482,79 +1450,54 @@ impl LineBuf {
           }
         }
 
-        // We are now certainly on a whitespace character. Advance until a
-        // non-whitespace character.
-        let non_ws_pos = indices_iter
+        indices_iter
           .find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
-          .unwrap_or(default);
-        non_ws_pos
+          .unwrap_or(default)
       }
     }
   }
-  /// Finds the end of a word forward, or the start of a word backward
-  ///
-  /// Finding the end of a word in the forward direction, and finding the start
-  /// of a word in the backward direction are logically the same operation, if
-  /// you use a reversed iterator for the backward motion.
-  pub fn end_of_word_forward_or_start_of_word_backward_from(
-    &mut self,
-    mut pos: usize,
-    word: Word,
-    dir: Direction,
-  ) -> usize {
-    let default = match dir {
-      Direction::Backward => 0,
-      Direction::Forward => self.grapheme_indices().len(),
-    };
 
-    let mut indices_iter = self.directional_indices_iter_from(pos, dir).peekable();
+  /// Find the end of the previous word backward
+  pub fn end_of_word_backward(&mut self, mut pos: usize, word: Word, include_last_char: bool) -> usize {
+    let default = self.grapheme_indices().len();
+    let mut indices_iter = (0..pos).rev().peekable();
 
     match word {
       Word::Big => {
-        let Some(next_idx) = indices_iter.peek() else {
+        let Some(next) = indices_iter.peek() else {
           return default;
         };
-        let on_boundary = self.grapheme_at(*next_idx).is_none_or(is_whitespace);
+        let on_boundary = self.grapheme_at(*next).is_none_or(is_whitespace);
         if on_boundary {
           let Some(idx) = indices_iter.next() else {
             return default;
           };
-          pos = idx;
+          if include_last_char {
+            return idx;
+          } else {
+            pos = idx;
+          }
         }
-        // Check current grapheme
+
         let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
           return default;
         };
         let on_whitespace = is_whitespace(&cur_char);
 
-        // Advance iterator to next visible grapheme
-        if on_whitespace {
-          let Some(_non_ws_pos) =
-            indices_iter.find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
+        if !on_whitespace {
+          let Some(ws_pos) =
+            indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
           else {
             return default;
           };
-        }
-
-        // The position of the next whitespace will tell us where the end (or start) of
-        // the word is
-        let Some(next_ws_pos) =
-          indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
-        else {
-          return default;
-        };
-        pos = next_ws_pos;
-
-        if pos == self.grapheme_indices().len() {
-          // We reached the end of the buffer
-          pos
-        } else {
-          // We hit some whitespace, so we will go back one
-          match dir {
-            Direction::Forward => pos.saturating_sub(1),
-            Direction::Backward => pos + 1,
+          if include_last_char {
+            return ws_pos;
           }
         }
+
+        indices_iter
+          .find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
+          .unwrap_or(default)
       }
       Word::Normal => {
         let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
@@ -1568,32 +1511,131 @@ impl LineBuf {
             .grapheme_at(*next_idx)
             .is_none_or(|c| is_other_class_or_is_ws(c, &cur_char));
         if on_boundary {
-          let next_idx = indices_iter.next().unwrap();
-          pos = next_idx
+          if include_last_char {
+            return *next_idx;
+          } else {
+            pos = *next_idx;
+          }
         }
 
-        // Check current grapheme
+        let Some(next_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
+          return default;
+        };
+        if is_other_class_not_ws(&cur_char, &next_char) {
+          return pos;
+        }
+        let on_whitespace = is_whitespace(&cur_char);
+
+        if !on_whitespace {
+          let other_class_pos = indices_iter.find(|i| {
+            self
+              .grapheme_at(*i)
+              .is_some_and(|c| is_other_class_or_is_ws(c, &next_char))
+          });
+          let Some(other_class_pos) = other_class_pos else {
+            return default;
+          };
+          if self
+            .grapheme_at(other_class_pos)
+            .is_some_and(|c| !is_whitespace(c))
+            || include_last_char
+          {
+            return other_class_pos;
+          }
+        }
+
+        indices_iter
+          .find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
+          .unwrap_or(default)
+      }
+    }
+  }
+
+  /// Find the end of the current/next word forward
+  pub fn end_of_word_forward(&mut self, mut pos: usize, word: Word) -> usize {
+    let default = self.cursor.max;
+    if pos >= default {
+      return default;
+    }
+    let mut fwd_indices = (pos + 1..default).peekable();
+
+    match word {
+      Word::Big => {
+        let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
+          return default;
+        };
+        let Some(next_idx) = fwd_indices.peek() else {
+          return default;
+        };
+        let on_boundary =
+          !is_whitespace(&cur_char) && self.grapheme_at(*next_idx).is_none_or(is_whitespace);
+        if on_boundary {
+          let Some(idx) = fwd_indices.next() else {
+            return default;
+          };
+          pos = idx;
+        }
+
         let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
           return default;
         };
         let on_whitespace = is_whitespace(&cur_char);
 
-        // Proceed to next visible grapheme
         if on_whitespace {
-          let Some(non_ws_pos) =
-            indices_iter.find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
+          let Some(_non_ws_pos) =
+            fwd_indices.find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
           else {
             return default;
           };
-          pos = non_ws_pos
+        }
+
+        let Some(next_ws_pos) =
+          fwd_indices.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
+        else {
+          return default;
+        };
+        pos = next_ws_pos;
+
+        if pos == self.grapheme_indices().len() {
+          pos
+        } else {
+          pos.saturating_sub(1)
+        }
+      }
+      Word::Normal => {
+        let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
+          return default;
+        };
+        let Some(next_idx) = fwd_indices.peek() else {
+          return default;
+        };
+        let on_boundary = !is_whitespace(&cur_char)
+          && self
+            .grapheme_at(*next_idx)
+            .is_none_or(|c| is_other_class_or_is_ws(c, &cur_char));
+        if on_boundary {
+          let next_idx = fwd_indices.next().unwrap();
+          pos = next_idx;
+        }
+
+        let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
+          return default;
+        };
+        let on_whitespace = is_whitespace(&cur_char);
+
+        if on_whitespace {
+          let Some(non_ws_pos) =
+            fwd_indices.find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
+          else {
+            return default;
+          };
+          pos = non_ws_pos;
         }
 
         let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
           return self.grapheme_indices().len();
         };
-        // The position of the next differing character class will tell us where the end
-        // (or start) of the word is
-        let Some(next_ws_pos) = indices_iter.find(|i| {
+        let Some(next_ws_pos) = fwd_indices.find(|i| {
           self
             .grapheme_at(*i)
             .is_some_and(|c| is_other_class_or_is_ws(c, &cur_char))
@@ -1603,18 +1645,113 @@ impl LineBuf {
         pos = next_ws_pos;
 
         if pos == self.grapheme_indices().len() {
-          // We reached the end of the buffer
           pos
         } else {
-          // We hit some other character class, so we go back one
-          match dir {
-            Direction::Forward => pos.saturating_sub(1),
-            Direction::Backward => pos + 1,
-          }
+          pos.saturating_sub(1)
         }
       }
     }
   }
+
+  /// Find the start of the current/previous word backward
+  pub fn start_of_word_backward(&mut self, mut pos: usize, word: Word) -> usize {
+    let default = 0;
+    let mut indices_iter = (0..pos).rev().peekable();
+
+    match word {
+      Word::Big => {
+        let on_boundary = 'bound_check: {
+          let Some(next_idx) = indices_iter.peek() else {
+            break 'bound_check false;
+          };
+          self.grapheme_at(*next_idx).is_none_or(is_whitespace)
+        };
+        if on_boundary {
+          let Some(idx) = indices_iter.next() else {
+            return default;
+          };
+          pos = idx;
+        }
+
+        let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
+          return default;
+        };
+        let on_whitespace = is_whitespace(&cur_char);
+
+        if on_whitespace {
+          let Some(_non_ws_pos) =
+            indices_iter.find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
+          else {
+            return default;
+          };
+        }
+
+        let Some(next_ws_pos) =
+          indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
+        else {
+          return default;
+        };
+        pos = next_ws_pos;
+
+        if pos == self.grapheme_indices().len() {
+          pos
+        } else {
+          pos + 1
+        }
+      }
+      Word::Normal => {
+        let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
+          return default;
+        };
+        let on_boundary = 'bound_check: {
+          let Some(next_idx) = indices_iter.peek() else {
+            break 'bound_check false;
+          };
+          !is_whitespace(&cur_char)
+            && self
+              .grapheme_at(*next_idx)
+              .is_some_and(|c| is_other_class_or_is_ws(c, &cur_char))
+        };
+        if on_boundary {
+          let next_idx = indices_iter.next().unwrap();
+          pos = next_idx;
+        }
+
+        let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
+          return default;
+        };
+        let on_whitespace = is_whitespace(&cur_char);
+
+        if on_whitespace {
+          let Some(non_ws_pos) =
+            indices_iter.find(|i| self.grapheme_at(*i).is_some_and(|c| !is_whitespace(c)))
+          else {
+            return default;
+          };
+          pos = non_ws_pos;
+        }
+
+        let Some(cur_char) = self.grapheme_at(pos).map(|c| c.to_string()) else {
+          return self.grapheme_indices().len();
+        };
+        let Some(next_ws_pos) = indices_iter.find(|i| {
+          self
+            .grapheme_at(*i)
+            .is_some_and(|c| is_other_class_or_is_ws(c, &cur_char))
+        }) else {
+          return default;
+        };
+        pos = next_ws_pos;
+
+        if pos == 0 {
+          pos
+        } else {
+          pos + 1
+        }
+      }
+    }
+  }
+
   fn grapheme_index_for_display_col(&self, line: &str, target_col: usize) -> usize {
     let mut col = 0;
     for (grapheme_index, g) in line.graphemes(true).enumerate() {

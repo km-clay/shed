@@ -48,7 +48,7 @@ impl Readline for FernVi {
     loop {
       raw_mode_guard.disable_for(|| self.print_line())?;
 
-      let Some(key) = self.reader.read_key() else {
+      let Some(key) = self.reader.read_key()? else {
         raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
         std::mem::drop(raw_mode_guard);
         return Err(ShErr::simple(ShErrKind::ReadlineErr, "EOF"));
@@ -116,10 +116,16 @@ impl FernVi {
       old_layout: None,
       repeat_action: None,
       repeat_motion: None,
-      editor: LineBuf::new().with_initial(LOREM_IPSUM, 0),
+      editor: LineBuf::new(),
       history: History::new()?,
     })
   }
+
+	pub fn with_initial(mut self, initial: &str) -> Self {
+		self.editor = LineBuf::new().with_initial(initial, 0);
+		self.history.update_pending_cmd(self.editor.as_str());
+		self
+	}
 
   pub fn get_layout(&mut self) -> Layout {
     let line = self.editor.to_string();
@@ -268,8 +274,10 @@ impl FernVi {
         self.repeat_action = mode.as_replay();
       }
 
-      self.editor.exec_cmd(cmd)?;
+      // Set cursor clamp BEFORE executing the command so that motions
+      // (like EndOfLine for 'A') can reach positions valid in the new mode
       self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+      self.editor.exec_cmd(cmd)?;
 
       if selecting {
         self

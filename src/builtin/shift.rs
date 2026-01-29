@@ -28,7 +28,7 @@ pub fn shift(node: Node, job: &mut JobBldr) -> ShResult<()> {
       ));
     };
     for _ in 0..count {
-      write_vars(|v| v.fpop_arg());
+      write_vars(|v| v.cur_scope_mut().fpop_arg());
     }
   }
 

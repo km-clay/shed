@@ -2,10 +2,7 @@ use crate::{
   libsh::{
     error::ShResult,
     term::{Style, Styled},
-  },
-  prelude::*,
-  procio::{borrow_fd, IoMode},
-  state::{self, set_status, write_jobs},
+  }, prelude::*, procio::{IoMode, borrow_fd}, signal::{disable_reaping, enable_reaping}, state::{self, set_status, write_jobs}
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -643,29 +640,6 @@ pub fn take_term() -> ShResult<()> {
   Ok(())
 }
 
-pub fn disable_reaping() -> ShResult<()> {
-  flog!(TRACE, "Disabling reaping");
-  unsafe {
-    signal(
-      Signal::SIGCHLD,
-      SigHandler::Handler(crate::signal::ignore_sigchld),
-    )
-  }?;
-  Ok(())
-}
-
-pub fn enable_reaping() -> ShResult<()> {
-  flog!(TRACE, "Enabling reaping");
-  unsafe {
-    signal(
-      Signal::SIGCHLD,
-      SigHandler::Handler(crate::signal::handle_sigchld),
-    )
-  }
-  .unwrap();
-  Ok(())
-}
-
 /// Waits on the current foreground job and updates the shell's last status code
 pub fn wait_fg(job: Job) -> ShResult<()> {
   if job.children().is_empty() {
@@ -674,7 +648,7 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
   flog!(TRACE, "Waiting on foreground job");
   let mut code = 0;
   attach_tty(job.pgid())?;
-  disable_reaping()?;
+  disable_reaping();
   let statuses = write_jobs(|j| j.new_fg(job))?;
   for status in statuses {
     match status {
@@ -697,7 +671,7 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
   take_term()?;
   set_status(code);
   flog!(TRACE, "exit code: {}", code);
-  enable_reaping()?;
+  enable_reaping();
   Ok(())
 }
 

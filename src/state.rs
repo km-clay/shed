@@ -1,8 +1,5 @@
 use std::{
-  collections::{HashMap, VecDeque},
-  ops::Deref,
-  sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard},
-  time::Duration,
+  collections::{HashMap, VecDeque}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref}, str::FromStr, sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}, time::Duration
 };
 
 use nix::unistd::{gethostname, getppid, User};
@@ -19,15 +16,248 @@ use crate::{
   shopt::ShOpts,
 };
 
-pub static JOB_TABLE: LazyLock<RwLock<JobTab>> = LazyLock::new(|| RwLock::new(JobTab::new()));
+pub struct Fern {
+	pub jobs: JobTab,
+	pub var_scopes: ScopeStack,
+	pub meta: MetaTab,
+	pub logic: LogTab,
+	pub shopts: ShOpts,
+}
 
-pub static VAR_TABLE: LazyLock<RwLock<VarTab>> = LazyLock::new(|| RwLock::new(VarTab::new()));
+impl Fern {
+	pub fn new() -> Self {
+		Self {
+			jobs: JobTab::new(),
+			var_scopes: ScopeStack::new(),
+			meta: MetaTab::new(),
+			logic: LogTab::new(),
+			shopts: ShOpts::default(),
+		}
+	}
+	pub fn write_jobs(&mut self) -> &mut JobTab {
+		&mut self.jobs
+	}
+	pub fn write_vars(&mut self) -> &mut ScopeStack {
+		&mut self.var_scopes
+	}
+	pub fn write_meta(&mut self) -> &mut MetaTab {
+		&mut self.meta
+	}
+	pub fn write_logic(&mut self) -> &mut LogTab {
+		&mut self.logic
+	}
+	pub fn write_shopts(&mut self) -> &mut ShOpts {
+		&mut self.shopts
+	}
+	pub fn read_jobs(&self) -> &JobTab {
+		&self.jobs
+	}
+	pub fn read_vars(&self) -> &ScopeStack {
+		&self.var_scopes
+	}
+	pub fn read_meta(&self) -> &MetaTab {
+		&self.meta
+	}
+	pub fn read_logic(&self) -> &LogTab {
+		&self.logic
+	}
+	pub fn read_shopts(&self) -> &ShOpts {
+		&self.shopts
+	}
+}
 
-pub static META_TABLE: LazyLock<RwLock<MetaTab>> = LazyLock::new(|| RwLock::new(MetaTab::new()));
+impl Default for Fern {
+	fn default() -> Self {
+		Self::new()
+	}
+}
 
-pub static LOGIC_TABLE: LazyLock<RwLock<LogTab>> = LazyLock::new(|| RwLock::new(LogTab::new()));
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+pub enum ShellParam {
+	// Global
+	Status,
+	ShPid,
+	LastJob,
+	ShellName,
 
-pub static SHOPTS: LazyLock<RwLock<ShOpts>> = LazyLock::new(|| RwLock::new(ShOpts::default()));
+	// Local
+	Pos(usize),
+	AllArgs,
+	AllArgsStr,
+	ArgCount
+}
+
+impl Display for ShellParam {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+	  match self {
+			Self::Status => write!(f, "?"),
+			Self::ShPid => write!(f, "$"),
+			Self::LastJob => write!(f, "!"),
+			Self::ShellName => write!(f, "0"),
+			Self::Pos(n) => write!(f, "{}", n),
+			Self::AllArgs => write!(f, "@"),
+			Self::AllArgsStr => write!(f, "*"),
+			Self::ArgCount => write!(f, "#"),
+		}
+	}
+}
+
+impl FromStr for ShellParam {
+	type Err = ShErr;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"?" => Ok(Self::Status),
+			"$" => Ok(Self::ShPid),
+			"!" => Ok(Self::LastJob),
+			"0" => Ok(Self::ShellName),
+			"@" => Ok(Self::AllArgs),
+			"*" => Ok(Self::AllArgsStr),
+			"#" => Ok(Self::ArgCount),
+			n if n.parse::<usize>().is_ok() => {
+				let idx = n.parse::<usize>().unwrap();
+				Ok(Self::Pos(idx))
+			}
+			_ => Err(ShErr::simple(
+				ShErrKind::InternalErr,
+				format!("Invalid shell parameter: {}", s),
+			)),
+		}
+	}
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct ScopeStack {
+	// ALWAYS keep one scope.
+	// The bottom scope is the global variable space.
+	// Scopes that come after that are pushed in functions,
+	// and only contain variables that are defined using `local`.
+	scopes: Vec<VarTab>,
+	depth: u32,
+
+	// Global parameters such as $?, $!, $$, etc
+	global_params: HashMap<String, String>,
+}
+
+impl ScopeStack {
+	pub fn new() -> Self {
+		let mut new = Self::default();
+		new.scopes.push(VarTab::new());
+		new
+	}
+	pub fn descend(&mut self, argv: Option<Vec<String>>) {
+		let mut new_vars = VarTab::new();
+		if let Some(argv) = argv {
+			for arg in argv {
+				new_vars.bpush_arg(arg);
+			}
+		}
+		self.scopes.push(new_vars);
+		self.depth += 1;
+	}
+	pub fn ascend(&mut self) {
+		if self.depth >= 1 {
+			self.scopes.pop();
+			self.depth -= 1;
+		}
+	}
+	pub fn cur_scope(&self) -> &VarTab {
+		self.scopes.last().unwrap()
+	}
+	pub fn cur_scope_mut(&mut self) -> &mut VarTab {
+		self.scopes.last_mut().unwrap()
+	}
+	pub fn unset_var(&mut self, var_name: &str) {
+		for scope in self.scopes.iter_mut().rev() {
+			if scope.var_exists(var_name) {
+				scope.unset_var(var_name);
+				return;
+			}
+		}
+	}
+	pub fn export_var(&mut self, var_name: &str) {
+		for scope in self.scopes.iter_mut().rev() {
+			if scope.var_exists(var_name) {
+				scope.export_var(var_name);
+				return;
+			}
+		}
+	}
+	pub fn var_exists(&self, var_name: &str) -> bool {
+		for scope in self.scopes.iter().rev() {
+			if scope.var_exists(var_name) {
+				return true;
+			}
+		}
+		false
+	}
+	pub fn flatten_vars(&self) -> HashMap<String, Var> {
+		let mut flat_vars = HashMap::new();
+		for scope in self.scopes.iter() {
+			for (var_name, var) in scope.vars() {
+				flat_vars.insert(var_name.clone(), var.clone());
+			}
+		}
+		flat_vars
+	}
+	pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) {
+		if flags.contains(VarFlags::LOCAL) {
+			self.set_var_local(var_name, val, flags);
+		} else {
+			self.set_var_global(var_name, val, flags);
+		}
+	}
+	fn set_var_global(&mut self, var_name: &str, val: &str, flags: VarFlags) {
+		if let Some(scope) = self.scopes.first_mut() {
+			scope.set_var(var_name, val, flags);
+		}
+	}
+	fn set_var_local(&mut self, var_name: &str, val: &str, flags: VarFlags) {
+		if let Some(scope) = self.scopes.last_mut() {
+			scope.set_var(var_name, val, flags);
+		}
+	}
+	pub fn get_var(&self, var_name: &str) -> String {
+		for scope in self.scopes.iter().rev() {
+			if scope.var_exists(var_name) {
+				return scope.get_var(var_name);
+			}
+		}
+		// Fallback to env var
+		std::env::var(var_name).unwrap_or_default()
+	}
+	pub fn get_param(&self, param: ShellParam) -> String {
+		for scope in self.scopes.iter().rev() {
+			let val = scope.get_param(param);
+			if !val.is_empty() {
+				return val;
+			}
+		}
+		// Fallback to empty string
+		"".into()
+	}
+	/// Set a shell parameter
+	/// Therefore, these are global state and we use the global scope
+	pub fn set_param(&mut self, param: ShellParam, val: &str) {
+		match param {
+			ShellParam::ShPid |
+			ShellParam::Status |
+			ShellParam::LastJob |
+			ShellParam::ShellName => {
+				self.global_params.insert(param.to_string(), val.to_string());
+			}
+			ShellParam::Pos(_) |
+			ShellParam::AllArgs |
+			ShellParam::AllArgsStr |
+			ShellParam::ArgCount => {
+				if let Some(scope) = self.scopes.first_mut() {
+					scope.set_param(param, val);
+				}
+			}
+		}
+	}
+}
+
+pub static FERN: LazyLock<RwLock<Fern>> = LazyLock::new(|| RwLock::new(Fern::new()));
 
 /// A shell function
 ///
@@ -108,35 +338,143 @@ impl LogTab {
   }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub struct VarFlags(u8);
+
+impl VarFlags {
+	pub const NONE : Self = Self(0);
+	pub const EXPORT : Self = Self(1 << 0);
+	pub const LOCAL	: Self = Self(1 << 1);
+	pub const READONLY : Self = Self(1 << 2);
+}
+
+impl BitOr for VarFlags {
+	type Output = Self;
+	fn bitor(self, rhs: Self) -> Self::Output {
+		Self(self.0 | rhs.0)
+	}
+}
+
+impl BitOrAssign for VarFlags {
+	fn bitor_assign(&mut self, rhs: Self) {
+		self.0 |= rhs.0;
+	}
+}
+
+impl BitAnd for VarFlags {
+	type Output = Self;
+	fn bitand(self, rhs: Self) -> Self::Output {
+		Self(self.0 & rhs.0)
+	}
+}
+
+impl BitAndAssign for VarFlags {
+	fn bitand_assign(&mut self, rhs: Self) {
+		self.0 &= rhs.0;
+	}
+}
+
+impl VarFlags {
+	pub fn contains(&self, flag: Self) -> bool {
+		(self.0 & flag.0) == flag.0
+	}
+	pub fn intersects(&self, flag: Self) -> bool {
+		(self.0 & flag.0) != 0
+	}
+	pub fn is_empty(&self) -> bool {
+		self.0 == 0
+	}
+
+	pub fn insert(&mut self, flag: Self) {
+		self.0 |= flag.0;
+	}
+	pub fn remove(&mut self, flag: Self) {
+		self.0 &= !flag.0;
+	}
+	pub fn toggle(&mut self, flag: Self) {
+		self.0 ^= flag.0;
+	}
+	pub fn set(&mut self, flag: Self, value: bool) {
+		if value {
+			self.insert(flag);
+		} else {
+			self.remove(flag);
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+pub enum VarKind {
+	Str(String),
+	Int(i32),
+	Arr(Vec<String>),
+	AssocArr(Vec<(String, String)>),
+}
+
+impl Display for VarKind {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			VarKind::Str(s) => write!(f, "{s}"),
+			VarKind::Int(i) => write!(f, "{i}"),
+			VarKind::Arr(items) => {
+				let mut item_iter = items.iter().peekable();
+				while let Some(item) = item_iter.next() {
+					write!(f, "{item}")?;
+					if item_iter.peek().is_some() {
+						write!(f, " ")?;
+					}
+				}
+				Ok(())
+			}
+			VarKind::AssocArr(items) => {
+				let mut item_iter = items.iter().peekable();
+				while let Some(item) = item_iter.next() {
+					let (k,v) = item;
+					write!(f, "{k}={v}")?;
+					if item_iter.peek().is_some() {
+						write!(f, " ")?;
+					}
+				}
+				Ok(())
+			}
+		}
+	}
+}
+
 #[derive(Clone, Debug)]
 pub struct Var {
-  export: bool,
-  value: String,
+  flags: VarFlags,
+  kind: VarKind,
 }
 
 impl Var {
-  pub fn new(value: String) -> Self {
+  pub fn new(kind: VarKind, flags: VarFlags) -> Self {
     Self {
-      export: false,
-      value,
+      flags,
+      kind
     }
   }
+	pub fn kind(&self) -> &VarKind {
+		&self.kind
+	}
+	pub fn kind_mut(&mut self) -> &mut VarKind {
+		&mut self.kind
+	}
   pub fn mark_for_export(&mut self) {
-    self.export = true;
+    self.flags.set(VarFlags::EXPORT, true);
   }
 }
 
-impl Deref for Var {
-  type Target = String;
-  fn deref(&self) -> &Self::Target {
-    &self.value
-  }
+impl Display for Var {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		self.kind.fmt(f)
+	}
 }
 
 #[derive(Default, Clone, Debug)]
 pub struct VarTab {
   vars: HashMap<String, Var>,
-  params: HashMap<String, String>,
+  params: HashMap<ShellParam, String>,
   sh_argv: VecDeque<String>, /* Using a VecDeque makes the implementation of `shift`
                               * straightforward */
 }
@@ -154,20 +492,19 @@ impl VarTab {
     var_tab.init_sh_argv();
     var_tab
   }
-  fn init_params() -> HashMap<String, String> {
+  fn init_params() -> HashMap<ShellParam, String> {
     let mut params = HashMap::new();
-    params.insert("?".into(), "0".into()); // Last command exit status
-    params.insert("#".into(), "0".into()); // Number of positional parameters
+    params.insert(ShellParam::ArgCount, "0".into()); // Number of positional parameters
     params.insert(
-      "0".into(),
+      ShellParam::Pos(0),
       std::env::current_exe()
         .unwrap()
         .to_str()
         .unwrap()
         .to_string(),
     ); // Name of the shell
-    params.insert("$".into(), Pid::this().to_string()); // PID of the shell
-    params.insert("!".into(), "".into()); // PID of the last background job (if any)
+    params.insert(ShellParam::ShPid, Pid::this().to_string()); // PID of the shell
+    params.insert(ShellParam::LastJob, "".into()); // PID of the last background job (if any)
     params
   }
   fn init_env() {
@@ -202,21 +539,23 @@ impl VarTab {
       .map(|hname| hname.to_string_lossy().to_string())
       .unwrap_or_default();
 
-    env::set_var("IFS", " \t\n");
-    env::set_var("HOST", hostname.clone());
-    env::set_var("UID", uid.to_string());
-    env::set_var("PPID", getppid().to_string());
-    env::set_var("TMPDIR", "/tmp");
-    env::set_var("TERM", term);
-    env::set_var("LANG", "en_US.UTF-8");
-    env::set_var("USER", username.clone());
-    env::set_var("LOGNAME", username);
-    env::set_var("PWD", pathbuf_to_string(std::env::current_dir()));
-    env::set_var("OLDPWD", pathbuf_to_string(std::env::current_dir()));
-    env::set_var("HOME", home.clone());
-    env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
-    env::set_var("FERN_HIST", format!("{}/.fernhist", home));
-    env::set_var("FERN_RC", format!("{}/.fernrc", home));
+		unsafe {
+			env::set_var("IFS", " \t\n");
+			env::set_var("HOST", hostname.clone());
+			env::set_var("UID", uid.to_string());
+			env::set_var("PPID", getppid().to_string());
+			env::set_var("TMPDIR", "/tmp");
+			env::set_var("TERM", term);
+			env::set_var("LANG", "en_US.UTF-8");
+			env::set_var("USER", username.clone());
+			env::set_var("LOGNAME", username);
+			env::set_var("PWD", pathbuf_to_string(std::env::current_dir()));
+			env::set_var("OLDPWD", pathbuf_to_string(std::env::current_dir()));
+			env::set_var("HOME", home.clone());
+			env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
+			env::set_var("FERN_HIST", format!("{}/.fernhist", home));
+			env::set_var("FERN_RC", format!("{}/.fernrc", home));
+		}
   }
   pub fn init_sh_argv(&mut self) {
     for arg in env::args() {
@@ -226,10 +565,10 @@ impl VarTab {
   pub fn update_exports(&mut self) {
     for var_name in self.vars.keys() {
       let var = self.vars.get(var_name).unwrap();
-      if var.export {
-        env::set_var(var_name, &var.value);
+      if var.flags.contains(VarFlags::EXPORT) {
+        unsafe { env::set_var(var_name, var.to_string()) };
       } else {
-        env::set_var(var_name, "");
+        unsafe { env::set_var(var_name, "") };
       }
     }
   }
@@ -247,8 +586,8 @@ impl VarTab {
     self.bpush_arg(env::current_exe().unwrap().to_str().unwrap().to_string());
   }
   fn update_arg_params(&mut self) {
-    self.set_param("@", &self.sh_argv.clone().to_vec()[1..].join(" "));
-    self.set_param("#", &(self.sh_argv.len() - 1).to_string());
+    self.set_param(ShellParam::AllArgs, &self.sh_argv.clone().to_vec()[1..].join(" "));
+    self.set_param(ShellParam::ArgCount, &(self.sh_argv.len() - 1).to_string());
   }
   /// Push an arg to the front of the arg deque
   pub fn fpush_arg(&mut self, arg: String) {
@@ -278,77 +617,84 @@ impl VarTab {
   pub fn vars_mut(&mut self) -> &mut HashMap<String, Var> {
     &mut self.vars
   }
-  pub fn params(&self) -> &HashMap<String, String> {
+  pub fn params(&self) -> &HashMap<ShellParam, String> {
     &self.params
   }
-  pub fn params_mut(&mut self) -> &mut HashMap<String, String> {
+  pub fn params_mut(&mut self) -> &mut HashMap<ShellParam, String> {
     &mut self.params
   }
   pub fn export_var(&mut self, var_name: &str) {
     if let Some(var) = self.vars.get_mut(var_name) {
       var.mark_for_export();
-      env::set_var(var_name, &var.value);
+      unsafe { env::set_var(var_name, var.to_string()) };
     }
   }
   pub fn get_var(&self, var: &str) -> String {
-    if var.chars().count() == 1 || var.parse::<usize>().is_ok() {
-      let param = self.get_param(var);
+		if let Ok(param) = var.parse::<ShellParam>() {
+      let param = self.get_param(param);
       if !param.is_empty() {
         return param;
       }
-    }
+		}
     if let Some(var) = self.vars.get(var).map(|s| s.to_string()) {
       var
     } else {
       std::env::var(var).unwrap_or_default()
     }
   }
-  pub fn set_var(&mut self, var_name: &str, val: &str, export: bool) {
+	pub fn unset_var(&mut self, var_name: &str) {
+		self.vars.remove(var_name);
+		unsafe { env::remove_var(var_name) };
+	}
+  pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) {
     if let Some(var) = self.vars.get_mut(var_name) {
-      var.value = val.to_string();
-      if var.export {
-        env::set_var(var_name, val);
+      var.kind = VarKind::Str(val.to_string());
+      if var.flags.contains(VarFlags::EXPORT) || flags.contains(VarFlags::EXPORT) {
+				if flags.contains(VarFlags::EXPORT) && !var.flags.contains(VarFlags::EXPORT) {
+					var.mark_for_export();
+				}
+        unsafe { env::set_var(var_name, val) };
       }
     } else {
-      let mut var = Var::new(val.to_string());
-      if export {
+      let mut var = Var::new(VarKind::Str(val.to_string()), VarFlags::NONE);
+      if flags.contains(VarFlags::EXPORT) {
         var.mark_for_export();
-        env::set_var(var_name, &*var);
+        unsafe { env::set_var(var_name, var.to_string()) };
       }
       self.vars.insert(var_name.to_string(), var);
     }
   }
   pub fn var_exists(&self, var_name: &str) -> bool {
-    if var_name.parse::<usize>().is_ok() {
-      return self.params.contains_key(var_name);
+    if let Ok(param) = var_name.parse::<ShellParam>() {
+      return self.params.contains_key(&param);
     }
-    self.vars.contains_key(var_name) || (var_name.len() == 1 && self.params.contains_key(var_name))
+    self.vars.contains_key(var_name)
   }
-  pub fn set_param(&mut self, param: &str, val: &str) {
-    self.params.insert(param.to_string(), val.to_string());
+  pub fn set_param(&mut self, param: ShellParam, val: &str) {
+    self.params.insert(param, val.to_string());
   }
-  pub fn get_param(&self, param: &str) -> String {
-    if param.parse::<usize>().is_ok() {
-      let argv_idx = param.to_string().parse::<usize>().unwrap();
-      let arg = self
-        .sh_argv
-        .get(argv_idx)
-        .map(|s| s.to_string())
-        .unwrap_or_default();
-      arg
-    } else if param == "?" {
-      self
-        .params
-        .get(param)
-        .map(|s| s.to_string())
-        .unwrap_or("0".into())
-    } else {
-      self
-        .params
-        .get(param)
-        .map(|s| s.to_string())
-        .unwrap_or_default()
-    }
+  pub fn get_param(&self, param: ShellParam) -> String {
+		match param {
+			ShellParam::Pos(n) => {
+				self
+					.sh_argv()
+					.get(n)
+					.map(|s| s.to_string())
+					.unwrap_or_default()
+			}
+			ShellParam::Status => {
+				self
+					.params
+					.get(&ShellParam::Status)
+					.map(|s| s.to_string())
+					.unwrap_or("0".into())
+			}
+			_ => self
+				.params
+				.get(&param)
+				.map(|s| s.to_string())
+				.unwrap_or_default(),
+		}
   }
 }
 
@@ -374,60 +720,77 @@ impl MetaTab {
 }
 
 /// Read from the job table
-pub fn read_jobs<T, F: FnOnce(RwLockReadGuard<JobTab>) -> T>(f: F) -> T {
-  let lock = JOB_TABLE.read().unwrap();
-  f(lock)
+pub fn read_jobs<T, F: FnOnce(&JobTab) -> T>(f: F) -> T {
+	let fern = FERN.read().unwrap();
+  let jobs = fern.read_jobs();
+  f(jobs)
 }
 
 /// Write to the job table
-pub fn write_jobs<T, F: FnOnce(&mut RwLockWriteGuard<JobTab>) -> T>(f: F) -> T {
-  let lock = &mut JOB_TABLE.write().unwrap();
-  f(lock)
+pub fn write_jobs<T, F: FnOnce(&mut JobTab) -> T>(f: F) -> T {
+	let mut fern = FERN.write().unwrap();
+  let jobs = &mut fern.jobs;
+  f(jobs)
 }
 
-/// Read from the variable table
-pub fn read_vars<T, F: FnOnce(RwLockReadGuard<VarTab>) -> T>(f: F) -> T {
-  let lock = VAR_TABLE.read().unwrap();
-  f(lock)
-}
-
-/// Write to the variable table
-pub fn write_vars<T, F: FnOnce(&mut RwLockWriteGuard<VarTab>) -> T>(f: F) -> T {
-  let lock = &mut VAR_TABLE.write().unwrap();
-  f(lock)
-}
-
-pub fn read_meta<T, F: FnOnce(RwLockReadGuard<MetaTab>) -> T>(f: F) -> T {
-  let lock = META_TABLE.read().unwrap();
-  f(lock)
+/// Read from the var scope stack
+pub fn read_vars<T, F: FnOnce(&ScopeStack) -> T>(f: F) -> T {
+	let fern = FERN.read().unwrap();
+  let vars = fern.read_vars();
+  f(vars)
 }
 
 /// Write to the variable table
-pub fn write_meta<T, F: FnOnce(&mut RwLockWriteGuard<MetaTab>) -> T>(f: F) -> T {
-  let lock = &mut META_TABLE.write().unwrap();
-  f(lock)
+pub fn write_vars<T, F: FnOnce(&mut ScopeStack) -> T>(f: F) -> T {
+	let mut fern = FERN.write().unwrap();
+	let vars = fern.write_vars();
+  f(vars)
+}
+
+pub fn read_meta<T, F: FnOnce(&MetaTab) -> T>(f: F) -> T {
+	let fern = FERN.read().unwrap();
+	let meta = fern.read_meta();
+	f(meta)
+}
+
+/// Write to the variable table
+pub fn write_meta<T, F: FnOnce(&mut MetaTab) -> T>(f: F) -> T {
+	let mut fern = FERN.write().unwrap();
+	let meta = fern.write_meta();
+	f(meta)
 }
 
 /// Read from the logic table
-pub fn read_logic<T, F: FnOnce(RwLockReadGuard<LogTab>) -> T>(f: F) -> T {
-  let lock = LOGIC_TABLE.read().unwrap();
-  f(lock)
+pub fn read_logic<T, F: FnOnce(&LogTab) -> T>(f: F) -> T {
+	let fern = FERN.read().unwrap();
+	let logic = fern.read_logic();
+	f(logic)
 }
 
 /// Write to the logic table
-pub fn write_logic<T, F: FnOnce(&mut RwLockWriteGuard<LogTab>) -> T>(f: F) -> T {
-  let lock = &mut LOGIC_TABLE.write().unwrap();
-  f(lock)
+pub fn write_logic<T, F: FnOnce(&mut LogTab) -> T>(f: F) -> T {
+	let mut fern = FERN.write().unwrap();
+	let logic = &mut fern.logic;
+	f(logic)
 }
 
-pub fn read_shopts<T, F: FnOnce(RwLockReadGuard<ShOpts>) -> T>(f: F) -> T {
-  let lock = SHOPTS.read().unwrap();
-  f(lock)
+pub fn read_shopts<T, F: FnOnce(&ShOpts) -> T>(f: F) -> T {
+	let fern = FERN.read().unwrap();
+	let shopts = fern.read_shopts();
+	f(shopts)
 }
 
-pub fn write_shopts<T, F: FnOnce(&mut RwLockWriteGuard<ShOpts>) -> T>(f: F) -> T {
-  let lock = &mut SHOPTS.write().unwrap();
-  f(lock)
+pub fn write_shopts<T, F: FnOnce(&mut ShOpts) -> T>(f: F) -> T {
+	let mut fern = FERN.write().unwrap();
+	let shopts = &mut fern.shopts;
+	f(shopts)
+}
+
+pub fn descend_scope(argv: Option<Vec<String>>) {
+	write_vars(|v| v.descend(argv));
+}
+pub fn ascend_scope() {
+	write_vars(|v| v.ascend());
 }
 
 /// This function is used internally and ideally never sees user input
@@ -438,31 +801,11 @@ pub fn get_shopt(path: &str) -> String {
 }
 
 pub fn get_status() -> i32 {
-  read_vars(|v| v.get_param("?")).parse::<i32>().unwrap()
+  read_vars(|v| v.get_param(ShellParam::Status)).parse::<i32>().unwrap()
 }
 #[track_caller]
 pub fn set_status(code: i32) {
-  write_vars(|v| v.set_param("?", &code.to_string()))
-}
-
-/// Save the current state of the logic and variable table, and the working
-/// directory path
-pub fn get_snapshots() -> (LogTab, VarTab, String) {
-  (
-    read_logic(|l| l.clone()),
-    read_vars(|v| v.clone()),
-    env::var("PWD").unwrap_or_default(),
-  )
-}
-
-pub fn restore_snapshot(snapshot: (LogTab, VarTab, String)) {
-  write_logic(|l| **l = snapshot.0);
-  write_vars(|v| {
-    **v = snapshot.1;
-    v.update_exports();
-  });
-  env::set_current_dir(&snapshot.2).unwrap();
-  env::set_var("PWD", &snapshot.2);
+  write_vars(|v| v.set_param(ShellParam::Status, &code.to_string()))
 }
 
 pub fn source_rc() -> ShResult<()> {

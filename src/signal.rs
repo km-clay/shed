@@ -1,79 +1,178 @@
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+
+use nix::sys::signal::{SaFlags, SigAction, sigaction};
+
 use crate::{
-  jobs::{take_term, JobCmdFlags, JobID},
-  libsh::{error::ShResult, sys::sh_quit},
+  jobs::{JobCmdFlags, JobID, take_term},
+  libsh::{error::{ShErr, ShErrKind, ShResult}, sys::sh_quit},
   prelude::*,
   state::{read_jobs, write_jobs},
 };
 
+static GOT_SIGINT: AtomicBool = AtomicBool::new(false);
+static GOT_SIGHUP: AtomicBool = AtomicBool::new(false);
+static GOT_SIGTSTP: AtomicBool = AtomicBool::new(false);
+static GOT_SIGCHLD: AtomicBool = AtomicBool::new(false);
+static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
+
+static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
+static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
+
+pub fn signals_pending() -> bool {
+	GOT_SIGINT.load(Ordering::SeqCst)
+		|| GOT_SIGHUP.load(Ordering::SeqCst)
+		|| GOT_SIGTSTP.load(Ordering::SeqCst)
+		|| (REAPING_ENABLED.load(Ordering::SeqCst)
+			&& GOT_SIGCHLD.load(Ordering::SeqCst))
+		|| SHOULD_QUIT.load(Ordering::SeqCst)
+}
+
+pub fn check_signals() -> ShResult<()> {
+	if GOT_SIGINT.swap(false, Ordering::SeqCst) {
+		interrupt()?;
+		return Err(ShErr::simple(ShErrKind::ClearReadline, ""));
+	}
+	if GOT_SIGHUP.swap(false, Ordering::SeqCst) {
+		hang_up(0);
+	}
+	if GOT_SIGTSTP.swap(false, Ordering::SeqCst) {
+		terminal_stop()?;
+	}
+	if REAPING_ENABLED.load(Ordering::SeqCst) && GOT_SIGCHLD.swap(false, Ordering::SeqCst) {
+		wait_child()?;
+	}
+	if SHOULD_QUIT.load(Ordering::SeqCst) {
+		let code = QUIT_CODE.load(Ordering::SeqCst);
+		return Err(ShErr::simple(ShErrKind::CleanExit(code), "exit"));
+	}
+	Ok(())
+}
+
+pub fn disable_reaping() {
+	REAPING_ENABLED.store(false, Ordering::SeqCst);
+}
+pub fn enable_reaping() {
+	REAPING_ENABLED.store(true, Ordering::SeqCst);
+}
+
 pub fn sig_setup() {
+	let flags = SaFlags::empty();
+
+	let actions = [
+		SigAction::new(
+			SigHandler::Handler(handle_sigchld),
+			flags,
+			SigSet::empty(),
+		),
+		SigAction::new(
+			SigHandler::Handler(handle_sigquit),
+			flags,
+			SigSet::empty(),
+		),
+		SigAction::new(
+			SigHandler::Handler(handle_sigtstp),
+			flags,
+			SigSet::empty(),
+		),
+		SigAction::new(
+			SigHandler::Handler(handle_sighup),
+			flags,
+			SigSet::empty(),
+		),
+		SigAction::new(
+			SigHandler::Handler(handle_sigint),
+			flags,
+			SigSet::empty(),
+		),
+		SigAction::new( // SIGTTIN
+			SigHandler::SigIgn,
+			flags,
+			SigSet::empty(),
+		),
+		SigAction::new( // SIGTTOU
+			SigHandler::SigIgn,
+			flags,
+			SigSet::empty(),
+		),
+	];
+
+
   unsafe {
-    signal(Signal::SIGCHLD, SigHandler::Handler(handle_sigchld)).unwrap();
-    signal(Signal::SIGQUIT, SigHandler::Handler(handle_sigquit)).unwrap();
-    signal(Signal::SIGTSTP, SigHandler::Handler(handle_sigtstp)).unwrap();
-    signal(Signal::SIGHUP, SigHandler::Handler(handle_sighup)).unwrap();
-    signal(Signal::SIGINT, SigHandler::Handler(handle_sigint)).unwrap();
-    signal(Signal::SIGTTIN, SigHandler::SigIgn).unwrap();
-    signal(Signal::SIGTTOU, SigHandler::SigIgn).unwrap();
+    sigaction(Signal::SIGCHLD, &actions[0]).unwrap();
+    sigaction(Signal::SIGQUIT, &actions[1]).unwrap();
+		sigaction(Signal::SIGTSTP, &actions[2]).unwrap();
+		sigaction(Signal::SIGHUP, &actions[3]).unwrap();
+		sigaction(Signal::SIGINT, &actions[4]).unwrap();
+		sigaction(Signal::SIGTTIN, &actions[5]).unwrap();
+		sigaction(Signal::SIGTTOU, &actions[6]).unwrap();
   }
 }
 
 extern "C" fn handle_sighup(_: libc::c_int) {
+	GOT_SIGHUP.store(true, Ordering::SeqCst);
+	SHOULD_QUIT.store(true, Ordering::SeqCst);
+	QUIT_CODE.store(128 + libc::SIGHUP, Ordering::SeqCst);
+}
+
+pub fn hang_up(_: libc::c_int) {
   write_jobs(|j| {
     for job in j.jobs_mut().iter_mut().flatten() {
       job.killpg(Signal::SIGTERM).ok();
     }
   });
-  std::process::exit(0);
 }
 
 extern "C" fn handle_sigtstp(_: libc::c_int) {
+	GOT_SIGTSTP.store(true, Ordering::SeqCst);
+}
+
+pub fn terminal_stop() -> ShResult<()> {
   write_jobs(|j| {
     if let Some(job) = j.get_fg_mut() {
-      job.killpg(Signal::SIGTSTP).ok();
-    }
-  });
+      job.killpg(Signal::SIGTSTP)
+    } else {
+			Ok(())
+		}
+  })
+	// TODO: It seems like there is supposed to be a take_term() call here
 }
 
 extern "C" fn handle_sigint(_: libc::c_int) {
-  write_jobs(|j| {
-    if let Some(job) = j.get_fg_mut() {
-      job.killpg(Signal::SIGINT).ok();
-    }
-  });
+	GOT_SIGINT.store(true, Ordering::SeqCst);
 }
 
-pub extern "C" fn ignore_sigchld(_: libc::c_int) {
-  /*
-  Do nothing
-
-  This function exists because using SIGIGN to ignore SIGCHLD
-  will cause the kernel to automatically reap the child process, which is not what we want.
-  This handler will leave the signaling process as a zombie, allowing us
-  to handle it somewhere else.
-
-  This handler is used when we want to handle SIGCHLD explicitly,
-  like in the case of handling foreground jobs
-  */
+pub fn interrupt() -> ShResult<()> {
+  write_jobs(|j| {
+    if let Some(job) = j.get_fg_mut() {
+      job.killpg(Signal::SIGINT)
+    } else {
+			Ok(())
+		}
+  })
 }
 
 extern "C" fn handle_sigquit(_: libc::c_int) {
-  sh_quit(0)
+	SHOULD_QUIT.store(true, Ordering::SeqCst);
+	QUIT_CODE.store(128 + libc::SIGQUIT, Ordering::SeqCst);
 }
 
-pub extern "C" fn handle_sigchld(_: libc::c_int) {
+extern "C" fn handle_sigchld(_: libc::c_int) {
+	GOT_SIGCHLD.store(true, Ordering::SeqCst);
+}
+
+pub fn wait_child() -> ShResult<()> {
   let flags = WtFlag::WNOHANG | WtFlag::WSTOPPED;
   while let Ok(status) = waitpid(None, Some(flags)) {
-    if let Err(e) = match status {
-      WtStat::Exited(pid, _) => child_exited(pid, status),
-      WtStat::Signaled(pid, signal, _) => child_signaled(pid, signal),
-      WtStat::Stopped(pid, signal) => child_stopped(pid, signal),
-      WtStat::Continued(pid) => child_continued(pid),
+    match status {
+      WtStat::Exited(pid, _) => child_exited(pid, status)?,
+      WtStat::Signaled(pid, signal, _) => child_signaled(pid, signal)?,
+      WtStat::Stopped(pid, signal) => child_stopped(pid, signal)?,
+      WtStat::Continued(pid) => child_continued(pid)?,
       WtStat::StillAlive => break,
       _ => unimplemented!(),
-    } {
-      eprintln!("{}", e)
     }
   }
+	Ok(())
 }
 
 pub fn child_signaled(pid: Pid, sig: Signal) -> ShResult<()> {

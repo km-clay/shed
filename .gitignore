@@ -10,6 +10,7 @@ shell.nix
 *~
 TODO.md
 rust-toolchain.toml
+/ref
 
 # cachix tmp file
 store-path-pre-build

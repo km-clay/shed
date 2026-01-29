@@ -388,7 +388,7 @@ impl From<std::env::VarError> for ShErr {
 
 impl From<Errno> for ShErr {
   fn from(value: Errno) -> Self {
-    ShErr::simple(ShErrKind::Errno, value.to_string())
+    ShErr::simple(ShErrKind::Errno(value), value.to_string())
   }
 }
 
@@ -402,14 +402,18 @@ pub enum ShErrKind {
   HistoryReadErr,
   ResourceLimitExceeded,
   BadPermission,
-  Errno,
+  Errno(Errno),
   FileNotFound(String),
   CmdNotFound(String),
+  ReadlineIntr(String),
+  ReadlineErr,
+
+	// Not really errors, more like internal signals
   CleanExit(i32),
   FuncReturn(i32),
   LoopContinue(i32),
   LoopBreak(i32),
-  ReadlineErr,
+	ClearReadline,
   Null,
 }
 
@@ -424,14 +428,16 @@ impl Display for ShErrKind {
       Self::ExecFail => "Execution Failed",
       Self::ResourceLimitExceeded => "Resource Limit Exceeded",
       Self::BadPermission => "Bad Permissions",
-      Self::Errno => "ERRNO",
+      Self::Errno(e) => &format!("Errno: {}", e.desc()),
       Self::FileNotFound(file) => &format!("File not found: {file}"),
       Self::CmdNotFound(cmd) => &format!("Command not found: {cmd}"),
       Self::CleanExit(_) => "",
       Self::FuncReturn(_) => "",
       Self::LoopContinue(_) => "",
       Self::LoopBreak(_) => "",
-      Self::ReadlineErr => "Line Read Error",
+      Self::ReadlineIntr(_) => "",
+      Self::ReadlineErr => "Readline Error",
+			Self::ClearReadline => "",
       Self::Null => "",
     };
     write!(f, "{output}")

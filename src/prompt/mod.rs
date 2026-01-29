@@ -26,11 +26,17 @@ fn get_prompt() -> ShResult<String> {
   expand_prompt(&prompt)
 }
 
-pub fn readline(edit_mode: FernEditMode) -> ShResult<String> {
+pub fn readline(edit_mode: FernEditMode, initial: Option<&str>) -> ShResult<String> {
   let prompt = get_prompt()?;
   let mut reader: Box<dyn Readline> = match edit_mode {
-    FernEditMode::Vi => Box::new(FernVi::new(Some(prompt))?),
-    FernEditMode::Emacs => todo!(),
+    FernEditMode::Vi => {
+			let mut fern_vi = FernVi::new(Some(prompt))?;
+			if let Some(input) = initial {
+				fern_vi = fern_vi.with_initial(&input)
+			}
+			Box::new(fern_vi) as Box<dyn Readline>
+		}
+    FernEditMode::Emacs => todo!(), // idk if I'm ever gonna do this one actually, I don't use emacs
   };
   reader.readline()
 }

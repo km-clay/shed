@@ -44,7 +44,7 @@ pub fn cd(node: Node, job: &mut JobBldr) -> ShResult<()> {
 
   env::set_current_dir(new_dir).unwrap();
   let new_dir = env::current_dir().unwrap();
-  env::set_var("PWD", new_dir);
+  unsafe { env::set_var("PWD", new_dir) };
 
   state::set_status(0);
   Ok(())

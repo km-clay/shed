@@ -167,7 +167,7 @@ pub trait WidthCalculator {
 }
 
 pub trait KeyReader {
-  fn read_key(&mut self) -> Option<KeyEvent>;
+  fn read_key(&mut self) -> Result<Option<KeyEvent>, ShErr>;
 }
 
 pub trait LineWriter {
@@ -232,13 +232,11 @@ impl TermBuffer {
 impl Read for TermBuffer {
   fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
     assert!(isatty(self.tty).is_ok_and(|r| r));
-    loop {
-      match nix::unistd::read(self.tty, buf) {
-        Ok(n) => return Ok(n),
-        Err(Errno::EINTR) => {}
-        Err(e) => return Err(std::io::Error::from_raw_os_error(e as i32)),
-      }
-    }
+		match nix::unistd::read(self.tty, buf) {
+			Ok(n) => Ok(n),
+			Err(Errno::EINTR) => Err(Errno::EINTR.into()),
+			Err(e) => Err(std::io::Error::from_raw_os_error(e as i32)),
+		}
   }
 }
 
@@ -420,24 +418,24 @@ impl TermReader {
 }
 
 impl KeyReader for TermReader {
-  fn read_key(&mut self) -> Option<KeyEvent> {
+  fn read_key(&mut self) -> Result<Option<KeyEvent>, ShErr> {
     use core::str;
 
     let mut collected = Vec::with_capacity(4);
 
     loop {
-      let byte = self.next_byte().ok()?;
+      let byte = self.next_byte()?;
       flog!(DEBUG, "read byte: {:?}", byte as char);
       collected.push(byte);
 
       // If it's an escape seq, delegate to ESC sequence handler
-      if collected[0] == 0x1b && collected.len() == 1 && self.poll(PollTimeout::ZERO).ok()? {
-        return self.parse_esc_seq().ok();
+      if collected[0] == 0x1b && collected.len() == 1 && self.poll(PollTimeout::ZERO)? {
+        return self.parse_esc_seq().map(Some);
       }
 
       // Try parse as valid UTF-8
       if let Ok(s) = str::from_utf8(&collected) {
-        return Some(KeyEvent::new(s, ModKeys::empty()));
+        return Ok(Some(KeyEvent::new(s, ModKeys::empty())));
       }
 
       // UTF-8 max 4 bytes — if it’s invalid at this point, bail
@@ -446,7 +444,7 @@ impl KeyReader for TermReader {
       }
     }
 
-    None
+    Ok(None)
   }
 }
 

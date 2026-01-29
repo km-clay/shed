@@ -18,10 +18,11 @@ pub mod state;
 #[cfg(test)]
 pub mod tests;
 
+use crate::libsh::error::ShErrKind;
 use crate::libsh::sys::{save_termios, set_termios};
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
-use crate::signal::sig_setup;
+use crate::signal::{check_signals, sig_setup, signals_pending};
 use crate::state::source_rc;
 use clap::Parser;
 use shopt::FernEditMode;
@@ -78,9 +79,9 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) {
     exit(1);
   };
 
-  write_vars(|v| v.bpush_arg(path.to_string_lossy().to_string()));
+  write_vars(|v| v.cur_scope_mut().bpush_arg(path.to_string_lossy().to_string()));
   for arg in args {
-    write_vars(|v| v.bpush_arg(arg))
+    write_vars(|v| v.cur_scope_mut().bpush_arg(arg))
   }
 
   if let Err(e) = exec_input(input, None) {
@@ -100,26 +101,49 @@ fn fern_interactive() {
 
   let mut readline_err_count: u32 = 0;
 
-  loop {
+	// Initialize a new string, we will use this to store
+	// partial line inputs when read() calls are interrupted by EINTR
+	let mut partial_input = String::new();
+
+  'outer: loop {
     // Main loop
     let edit_mode = write_shopts(|opt| opt.query("prompt.edit_mode"))
       .unwrap()
       .map(|mode| mode.parse::<FernEditMode>().unwrap_or_default())
       .unwrap();
-    let input = match prompt::readline(edit_mode) {
+    let input = match prompt::readline(edit_mode, Some(&partial_input)) {
       Ok(line) => {
         readline_err_count = 0;
+				partial_input.clear();
         line
       }
       Err(e) => {
-        eprintln!("{e}");
-        readline_err_count += 1;
-        if readline_err_count == 20 {
-          eprintln!("reached maximum readline error count, exiting");
-          break;
-        } else {
-          continue;
-        }
+				if let ShErrKind::ReadlineIntr(partial) = e.kind()  {
+					// Did we get signaled? Check signal flags
+					// If nothing to worry about, retry the readline
+					while signals_pending() {
+						if let Err(e) = check_signals() {
+							if let ShErrKind::ClearReadline = e.kind() {
+								partial_input.clear();
+								if !signals_pending() {
+									continue 'outer;
+								}
+							};
+							eprintln!("{e}");
+						}
+					}
+					partial_input = partial.to_string();
+					continue;
+				} else {
+					eprintln!("{e}");
+					readline_err_count += 1;
+					if readline_err_count == 20 {
+						eprintln!("reached maximum readline error count, exiting");
+						break;
+					} else {
+						continue;
+					}
+				}
       }
     };
 

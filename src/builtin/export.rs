@@ -3,8 +3,8 @@ use crate::{
   libsh::error::ShResult,
   parse::{NdRule, Node},
   prelude::*,
-  procio::{borrow_fd, IoStack},
-  state::{self, write_vars},
+  procio::{IoStack, borrow_fd},
+  state::{self, VarFlags, write_vars},
 };
 
 use super::setup_builtin;
@@ -34,7 +34,7 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
   } else {
     for (arg, _) in argv {
       if let Some((var, val)) = arg.split_once('=') {
-        write_vars(|v| v.set_var(var, val, true)); // Export an assignment like
+        write_vars(|v| v.set_var(var, val, VarFlags::EXPORT)); // Export an assignment like
                                                    // 'foo=bar'
       } else {
         write_vars(|v| v.export_var(&arg)); // Export an existing variable, if
