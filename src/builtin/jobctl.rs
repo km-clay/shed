@@ -128,7 +128,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
   } else {
     Err(ShErr::full(
       ShErrKind::SyntaxErr,
-      format!("Invalid fd arg: {}", arg),
+      format!("Invalid arg: {}", arg),
       blame,
     ))
   }

@@ -28,6 +28,8 @@ pub fn raw_mode() -> RawModeGuard {
     .expect("Failed to get terminal attributes");
   let mut raw = orig.clone();
   termios::cfmakeraw(&mut raw);
+  // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
+  raw.local_flags |= termios::LocalFlags::ISIG;
   termios::tcsetattr(
     unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) },
     termios::SetArg::TCSANOW,
@@ -230,11 +232,17 @@ impl TermBuffer {
 impl Read for TermBuffer {
   fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
     assert!(isatty(self.tty).is_ok_and(|r| r));
-		match nix::unistd::read(self.tty, buf) {
-			Ok(n) => Ok(n),
-			Err(Errno::EINTR) => Err(Errno::EINTR.into()),
-			Err(e) => Err(std::io::Error::from_raw_os_error(e as i32)),
-		}
+    flog!(DEBUG, "TermBuffer::read() ENTERING read syscall");
+    let result = nix::unistd::read(self.tty, buf);
+    flog!(DEBUG, "TermBuffer::read() EXITED read syscall: {:?}", result);
+    match result {
+      Ok(n) => Ok(n),
+      Err(Errno::EINTR) => {
+        flog!(DEBUG, "TermBuffer::read() returning EINTR");
+        Err(Errno::EINTR.into())
+      }
+      Err(e) => Err(std::io::Error::from_raw_os_error(e as i32)),
+    }
   }
 }
 
@@ -258,6 +266,8 @@ impl RawModeGuard {
       // Re-enable raw mode
       let mut raw = self.orig.clone();
       termios::cfmakeraw(&mut raw);
+      // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
+      raw.local_flags |= termios::LocalFlags::ISIG;
       termios::tcsetattr(fd, termios::SetArg::TCSANOW, &raw).expect("Failed to re-enable raw mode");
 
       result
@@ -315,7 +325,7 @@ impl TermReader {
 
   pub fn next_byte(&mut self) -> std::io::Result<u8> {
     let mut buf = [0u8];
-    self.buffer.read_exact(&mut buf)?;
+    let _n = self.buffer.read(&mut buf)?;
     Ok(buf[0])
   }
 

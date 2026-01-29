@@ -374,9 +374,9 @@ impl Display for ShErr {
 }
 
 impl From<std::io::Error> for ShErr {
-  fn from(_: std::io::Error) -> Self {
+  fn from(e: std::io::Error) -> Self {
     let msg = std::io::Error::last_os_error();
-    ShErr::simple(ShErrKind::IoErr, msg.to_string())
+    ShErr::simple(ShErrKind::IoErr(e.kind()), msg.to_string())
   }
 }
 
@@ -394,7 +394,7 @@ impl From<Errno> for ShErr {
 
 #[derive(Debug, Clone)]
 pub enum ShErrKind {
-  IoErr,
+  IoErr(io::ErrorKind),
   SyntaxErr,
   ParseErr,
   InternalErr,
@@ -420,7 +420,7 @@ pub enum ShErrKind {
 impl Display for ShErrKind {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let output = match self {
-      Self::IoErr => "I/O Error",
+      Self::IoErr(e) => &format!("I/O Error: {e}"),
       Self::SyntaxErr => "Syntax Error",
       Self::ParseErr => "Parse Error",
       Self::InternalErr => "Internal Error",

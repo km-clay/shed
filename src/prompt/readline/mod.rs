@@ -48,11 +48,22 @@ impl Readline for FernVi {
     loop {
       raw_mode_guard.disable_for(|| self.print_line())?;
 
-      let Some(key) = self.reader.read_key()? else {
-        raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
-        std::mem::drop(raw_mode_guard);
-        return Err(ShErr::simple(ShErrKind::ReadlineErr, "EOF"));
-      };
+			let key = match self.reader.read_key() {
+				Ok(Some(key)) => key,
+				Err(e) if matches!(e.kind(), ShErrKind::IoErr(std::io::ErrorKind::Interrupted)) => {
+					flog!(DEBUG, "readline interrupted");
+					let partial: String = self.editor.as_str().to_string();
+					return Err(ShErr::simple(ShErrKind::ReadlineIntr(partial), ""));
+				}
+				Err(_) | Ok(None) => {
+					flog!(DEBUG, "EOF detected");
+					raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
+					std::mem::drop(raw_mode_guard);
+					return Err(ShErr::simple(ShErrKind::ReadlineErr, "EOF"));
+				}
+
+			};
+
       flog!(DEBUG, key);
 
       if self.should_accept_hint(&key) {

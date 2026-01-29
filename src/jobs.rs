@@ -164,10 +164,26 @@ impl JobTab {
     &mut self.jobs
   }
   pub fn curr_job(&self) -> Option<usize> {
-    self.order.last().copied()
+    // Find the most recent valid job (order can have stale entries)
+    for &id in self.order.iter().rev() {
+      if self.jobs.get(id).is_some_and(|slot| slot.is_some()) {
+        return Some(id);
+      }
+    }
+    None
   }
   pub fn prev_job(&self) -> Option<usize> {
-    self.order.last().copied()
+    // Find the second most recent valid job
+    let mut found_curr = false;
+    for &id in self.order.iter().rev() {
+      if self.jobs.get(id).is_some_and(|slot| slot.is_some()) {
+        if found_curr {
+          return Some(id);
+        }
+        found_curr = true;
+      }
+    }
+    None
   }
   pub fn close_job_fds(&mut self, pid: Pid) {
     self.fd_registry.retain(|fd| fd.owner_pid != pid)
@@ -507,21 +523,25 @@ impl Job {
     flog!(TRACE, "waiting on children");
     flog!(TRACE, self.children);
     for child in self.children.iter_mut() {
-			flog!(TRACE, "shell pid {}", Pid::this());
-			flog!(TRACE, "child pid {}", child.pid);
+      flog!(TRACE, "shell pid {}", Pid::this());
+      flog!(TRACE, "child pid {}", child.pid);
       if child.pid == Pid::this() {
         // TODO: figure out some way to get the exit code of builtins
         let code = state::get_status();
         stats.push(WtStat::Exited(child.pid, code));
         continue;
       }
-      let result = child.wait(Some(WtFlag::WSTOPPED));
-      match result {
-        Ok(stat) => {
-          stats.push(stat);
+      loop {
+        let result = child.wait(Some(WtFlag::WSTOPPED));
+        match result {
+          Ok(stat) => {
+            stats.push(stat);
+            break;
+          }
+          Err(Errno::ECHILD) => break,
+          Err(Errno::EINTR) => continue, // Retry on signal interruption
+          Err(e) => return Err(e.into()),
         }
-        Err(Errno::ECHILD) => break,
-        Err(e) => return Err(e.into()),
       }
     }
     Ok(stats)
@@ -649,6 +669,7 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
   }
   flog!(TRACE, "Waiting on foreground job");
   let mut code = 0;
+  let mut was_stopped = false;
   attach_tty(job.pgid())?;
   disable_reaping();
   let statuses = write_jobs(|j| j.new_fg(job))?;
@@ -658,17 +679,23 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
         code = exit_code;
       }
       WtStat::Stopped(_, sig) => {
+        was_stopped = true;
         write_jobs(|j| j.fg_to_bg(status))?;
         code = SIG_EXIT_OFFSET + sig as i32;
       }
       WtStat::Signaled(_, sig, _) => {
         if sig == Signal::SIGTSTP {
+          was_stopped = true;
           write_jobs(|j| j.fg_to_bg(status))?;
         }
         code = SIG_EXIT_OFFSET + sig as i32;
       }
       _ => { /* Do nothing */ }
     }
+  }
+  // If job wasn't stopped (moved to bg), clear the fg slot
+  if !was_stopped {
+    write_jobs(|j| { j.take_fg(); });
   }
   take_term()?;
   set_status(code);

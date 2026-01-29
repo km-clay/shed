@@ -106,6 +106,17 @@ fn fern_interactive() {
 	let mut partial_input = String::new();
 
   'outer: loop {
+		while signals_pending() {
+			if let Err(e) = check_signals() {
+				if let ShErrKind::ClearReadline = e.kind() {
+					partial_input.clear();
+					if !signals_pending() {
+						continue 'outer;
+					}
+				};
+				eprintln!("{e}");
+			}
+		}
     // Main loop
     let edit_mode = write_shopts(|opt| opt.query("prompt.edit_mode"))
       .unwrap()
