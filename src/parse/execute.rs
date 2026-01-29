@@ -117,7 +117,6 @@ impl ExecArgs {
 }
 
 pub fn exec_input(input: String, io_stack: Option<IoStack>) -> ShResult<()> {
-	write_meta(|m| m.start_timer());
 	let log_tab = read_logic(|l| l.clone());
 	let input = expand_aliases(input, HashSet::new(), &log_tab);
 	let mut parser = ParsedSrc::new(Arc::new(input));
@@ -471,6 +470,7 @@ impl Dispatcher {
 		cond_frame.extend(in_redirs); // Condition gets input redirs
 		body_frame.extend(out_redirs); // Body gets output redirs
 
+		let mut matched = false;
 		for node in cond_nodes {
 			let CondNode { cond, body } = node;
 			self.io_stack.push(cond_frame.clone());
@@ -482,16 +482,18 @@ impl Dispatcher {
 
 			match state::get_status() {
 				0 => {
+					matched = true;
 					for body_node in body {
 						self.io_stack.push(body_frame.clone());
 						self.dispatch_node(body_node)?;
 					}
+					break; // Don't check remaining elif conditions
 				}
 				_ => continue,
 			}
 		}
 
-		if !else_block.is_empty() {
+		if !matched && !else_block.is_empty() {
 			for node in else_block {
 				self.io_stack.push(body_frame.clone());
 				self.dispatch_node(node)?;

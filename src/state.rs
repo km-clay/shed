@@ -57,6 +57,15 @@ pub enum ShellParam {
 	ArgCount
 }
 
+impl ShellParam {
+	pub fn is_global(&self) -> bool {
+		matches!(
+			self,
+			Self::Status | Self::ShPid | Self::LastJob | Self::ShellName
+		)
+	}
+}
+
 impl Display for ShellParam {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 	  match self {
@@ -158,6 +167,9 @@ impl ScopeStack {
 				return true;
 			}
 		}
+		if let Ok(param) = var_name.parse::<ShellParam>() {
+			return self.global_params.contains_key(&param.to_string());
+		}
 		false
 	}
 	pub fn flatten_vars(&self) -> HashMap<String, Var> {
@@ -187,6 +199,9 @@ impl ScopeStack {
 		}
 	}
 	pub fn get_var(&self, var_name: &str) -> String {
+		if let Ok(param) = var_name.parse::<ShellParam>() {
+			return self.get_param(param);
+		}
 		for scope in self.scopes.iter().rev() {
 			if scope.var_exists(var_name) {
 				return scope.get_var(var_name);
@@ -196,6 +211,9 @@ impl ScopeStack {
 		std::env::var(var_name).unwrap_or_default()
 	}
 	pub fn get_param(&self, param: ShellParam) -> String {
+		if param.is_global() && let Some(val) = self.global_params.get(&param.to_string()) {
+			return val.clone();
+		}
 		for scope in self.scopes.iter().rev() {
 			let val = scope.get_param(param);
 			if !val.is_empty() {
@@ -637,6 +655,7 @@ impl VarTab {
     }
   }
   pub fn var_exists(&self, var_name: &str) -> bool {
+		flog!(DEBUG, "checking existence of {}",var_name);
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.params.contains_key(&param);
     }
@@ -674,6 +693,7 @@ impl VarTab {
 #[derive(Default, Debug)]
 pub struct MetaTab {
   runtime_start: Option<Instant>,
+	runtime_stop: Option<Instant>,
 }
 
 impl MetaTab {
@@ -683,11 +703,16 @@ impl MetaTab {
   pub fn start_timer(&mut self) {
     self.runtime_start = Some(Instant::now());
   }
-  pub fn stop_timer(&mut self) -> Option<Duration> {
-    self
-      .runtime_start
-      .map(|start| start.elapsed()) // return the duration, if any
+  pub fn stop_timer(&mut self) {
+    self.runtime_stop = Some(Instant::now());
   }
+	pub fn get_time(&self) -> Option<Duration> {
+		if let (Some(start), Some(stop)) = (self.runtime_start, self.runtime_stop) {
+			Some(stop.duration_since(start))
+		} else {
+			None
+		}
+	}
 }
 
 /// Read from the job table

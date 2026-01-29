@@ -26,7 +26,7 @@ use crate::libsh::sys::TermiosGuard;
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
 use crate::signal::{QUIT_CODE, check_signals, sig_setup, signals_pending};
-use crate::state::source_rc;
+use crate::state::{source_rc, write_meta};
 use clap::Parser;
 use shopt::FernEditMode;
 use state::{read_vars, write_shopts, write_vars};
@@ -178,6 +178,7 @@ fn fern_interactive() {
       }
     };
 
+		write_meta(|m| m.start_timer());
     if let Err(e) = exec_input(input, None) {
 			match e.kind() {
 				ShErrKind::CleanExit(code) => {
@@ -189,5 +190,6 @@ fn fern_interactive() {
 				}
 			}
     }
+		write_meta(|m| m.stop_timer());
   }
 }

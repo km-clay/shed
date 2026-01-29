@@ -19,7 +19,11 @@ use crate::{
 pub enum IoMode {
   Fd {
     tgt_fd: RawFd,
-    src_fd: Arc<OwnedFd>,
+    src_fd: RawFd,  // Just the fd number - dup2 will handle it at execution time
+  },
+  OpenedFile {
+    tgt_fd: RawFd,
+    file: Arc<OwnedFd>,  // Owns the opened file descriptor
   },
   File {
     tgt_fd: RawFd,
@@ -38,7 +42,7 @@ pub enum IoMode {
 
 impl IoMode {
   pub fn fd(tgt_fd: RawFd, src_fd: RawFd) -> Self {
-    let src_fd = unsafe { OwnedFd::from_raw_fd(src_fd).into() };
+    // Just store the fd number - dup2 will use it directly at execution time
     Self::Fd { tgt_fd, src_fd }
   }
   pub fn file(tgt_fd: RawFd, path: PathBuf, mode: RedirType) -> Self {
@@ -50,26 +54,28 @@ impl IoMode {
   }
   pub fn tgt_fd(&self) -> RawFd {
     match self {
-      IoMode::Fd { tgt_fd, .. } | IoMode::File { tgt_fd, .. } | IoMode::Pipe { tgt_fd, .. } => {
-        *tgt_fd
-      }
+      IoMode::Fd { tgt_fd, .. }
+      | IoMode::OpenedFile { tgt_fd, .. }
+      | IoMode::File { tgt_fd, .. }
+      | IoMode::Pipe { tgt_fd, .. } => *tgt_fd,
       _ => panic!(),
     }
   }
   pub fn src_fd(&self) -> RawFd {
     match self {
-      IoMode::Fd { tgt_fd: _, src_fd } => src_fd.as_raw_fd(),
+      IoMode::Fd { src_fd, .. } => *src_fd,
+      IoMode::OpenedFile { file, .. } => file.as_raw_fd(),
       IoMode::File { .. } => panic!("Attempted to obtain src_fd from file before opening"),
-      IoMode::Pipe { tgt_fd: _, pipe } => pipe.as_raw_fd(),
+      IoMode::Pipe { pipe, .. } => pipe.as_raw_fd(),
       _ => panic!(),
     }
   }
   pub fn open_file(mut self) -> ShResult<Self> {
     if let IoMode::File { tgt_fd, path, mode } = self {
       let file = get_redir_file(mode, path)?;
-      self = IoMode::Fd {
+      self = IoMode::OpenedFile {
         tgt_fd,
-        src_fd: Arc::new(OwnedFd::from(file)),
+        file: Arc::new(OwnedFd::from(file)),
       }
     }
     Ok(self)

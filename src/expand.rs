@@ -803,7 +803,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
           flog!(DEBUG, "filling buffer");
           io_buf.fill_buffer()?;
           flog!(DEBUG, "done");
-          Ok(io_buf.as_str()?.trim().to_string())
+          Ok(io_buf.as_str()?.trim_end().to_string())
         }
         _ => Err(ShErr::simple(ShErrKind::InternalErr, "Command sub failed")),
       }
@@ -1615,7 +1615,7 @@ pub fn format_cmd_runtime(dur: std::time::Duration) -> String {
     let string = format!("{}s", seconds);
     result.push(string);
   }
-  if millis > 0 {
+  if result.is_empty() && millis > 0 {
     let string = format!("{}ms", millis);
     result.push(string);
   }
@@ -1780,13 +1780,13 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 			PromptTk::Text(txt) => result.push_str(&txt),
 			PromptTk::AnsiSeq(params) => result.push_str(&params),
 			PromptTk::RuntimeMillis => {
-				if let Some(runtime) = write_meta(|m| m.stop_timer()) {
+				if let Some(runtime) = write_meta(|m| m.get_time()) {
 					let runtime_millis = runtime.as_millis().to_string();
 					result.push_str(&runtime_millis);
 				}
 			}
 			PromptTk::RuntimeFormatted => {
-				if let Some(runtime) = write_meta(|m| m.stop_timer()) {
+				if let Some(runtime) = write_meta(|m| m.get_time()) {
 					let runtime_fmt = format_cmd_runtime(runtime);
 					result.push_str(&runtime_fmt);
 				}
