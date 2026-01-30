@@ -103,6 +103,11 @@ pub fn sig_setup() {
 			flags,
 			SigSet::empty(),
 		),
+		SigAction::new(
+			SigHandler::Handler(handle_sigwinch),
+			flags,
+			SigSet::empty(),
+		),
 	];
 
 
@@ -114,7 +119,17 @@ pub fn sig_setup() {
 		sigaction(Signal::SIGINT, &actions[4]).unwrap();
 		sigaction(Signal::SIGTTIN, &actions[5]).unwrap();
 		sigaction(Signal::SIGTTOU, &actions[6]).unwrap();
+		sigaction(Signal::SIGWINCH, &actions[7]).unwrap();
   }
+}
+
+extern "C" fn handle_sigwinch(_: libc::c_int) {
+	/* do nothing
+	 * this exists for the sole purpose of interrupting readline
+	 * readline will be refreshed after the interruption,
+	 * which will cause window size calculations to be re-run
+	 * and we get window resize handling for free as a result
+	 */
 }
 
 extern "C" fn handle_sighup(_: libc::c_int) {

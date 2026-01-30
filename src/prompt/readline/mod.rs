@@ -57,7 +57,6 @@ impl Readline for FernVi {
 				Err(_) | Ok(None) => {
 					flog!(DEBUG, "EOF detected");
 					raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
-					std::mem::drop(raw_mode_guard);
 					return Err(ShErr::simple(ShErrKind::ReadlineErr, "EOF"));
 				}
 
@@ -68,7 +67,6 @@ impl Readline for FernVi {
       if self.should_accept_hint(&key) {
         self.editor.accept_hint();
         self.history.update_pending_cmd(self.editor.as_str());
-        self.print_line()?;
         continue;
       }
 
@@ -81,19 +79,22 @@ impl Readline for FernVi {
 
       if self.should_grab_history(&cmd) {
         self.scroll_history(cmd);
-        self.print_line()?;
         continue;
       }
 
       if cmd.should_submit() {
         raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
-        std::mem::drop(raw_mode_guard);
-        return Ok(self.editor.take_buf());
+        let buf = self.editor.take_buf();
+        // Save command to history
+        self.history.push(buf.clone());
+        if let Err(e) = self.history.save() {
+          eprintln!("Failed to save history: {e}");
+        }
+        return Ok(buf);
       }
 
       if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
         if self.editor.buffer.is_empty() {
-          std::mem::drop(raw_mode_guard);
 					return Err(ShErr::simple(ShErrKind::CleanExit(0), "exit"));
         } else {
           self.editor.buffer.clear();

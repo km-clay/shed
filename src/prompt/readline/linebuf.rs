@@ -362,6 +362,8 @@ impl LineBuf {
       let hint = hint.strip_prefix(&self.buffer).unwrap(); // If this ever panics, I will eat my hat
       if !hint.is_empty() {
         self.hint = Some(hint.to_string())
+      } else {
+        self.hint = None
       }
     } else {
       self.hint = None

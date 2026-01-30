@@ -1,4 +1,5 @@
 use std::{
+  collections::HashSet,
   env,
   fmt::{Display, Write},
   fs::{self, OpenOptions},
@@ -194,6 +195,22 @@ fn read_hist_file(path: &Path) -> ShResult<Vec<HistEntry>> {
   Ok(raw.parse::<HistEntries>()?.0)
 }
 
+/// Deduplicate entries, keeping only the most recent occurrence of each command.
+/// Preserves chronological order (oldest to newest).
+fn dedupe_entries(entries: &[HistEntry]) -> Vec<HistEntry> {
+  let mut seen = HashSet::new();
+  // Iterate backwards (newest first), keeping first occurrence of each command
+  entries
+    .iter()
+    .rev()
+    .filter(|ent| seen.insert(ent.command.clone()))
+    .cloned()
+    .collect::<Vec<_>>()
+    .into_iter()
+    .rev() // Restore chronological order
+    .collect()
+}
+
 pub struct History {
   path: PathBuf,
   entries: Vec<HistEntry>,
@@ -222,7 +239,7 @@ impl History {
         new: true,
       })
     }
-    let search_mask = entries.clone();
+    let search_mask = dedupe_entries(&entries);
     let cursor = entries.len() - 1;
     let mut new = Self {
       path,
@@ -288,15 +305,16 @@ impl History {
     match kind {
       SearchKind::Prefix => {
         if term.is_empty() {
-          self.search_mask = self.entries.clone();
+          self.search_mask = dedupe_entries(&self.entries);
         } else {
-          let filtered = self
+          let filtered: Vec<_> = self
             .entries
-            .clone()
-            .into_iter()
-            .filter(|ent| ent.command().starts_with(&term));
+            .iter()
+            .filter(|ent| ent.command().starts_with(&term))
+            .cloned()
+            .collect();
 
-          self.search_mask = filtered.collect();
+          self.search_mask = dedupe_entries(&filtered);
         }
         self.cursor = self.search_mask.len().saturating_sub(1);
       }

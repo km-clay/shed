@@ -36,6 +36,9 @@ pub fn raw_mode() -> RawModeGuard {
     &raw,
   )
   .expect("Failed to set terminal to raw mode");
+
+	let (cols, rows) = get_win_size(STDIN_FILENO);
+
   RawModeGuard {
     orig,
     fd: STDIN_FILENO,
