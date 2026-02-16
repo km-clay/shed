@@ -1,4 +1,5 @@
 use std::{
+  collections::VecDeque,
   env,
   fmt::{Debug, Write},
   io::{BufRead, BufReader, Read},
@@ -14,6 +15,7 @@ use nix::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use vte::{Parser, Perform};
 
 use crate::prelude::*;
 use crate::{
@@ -30,6 +32,8 @@ pub fn raw_mode() -> RawModeGuard {
   termios::cfmakeraw(&mut raw);
   // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
   raw.local_flags |= termios::LocalFlags::ISIG;
+  // Keep OPOST enabled so \n is translated to \r\n on output
+  raw.output_flags |= termios::OutputFlags::OPOST;
   termios::tcsetattr(
     unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) },
     termios::SetArg::TCSANOW,
@@ -271,6 +275,8 @@ impl RawModeGuard {
       termios::cfmakeraw(&mut raw);
       // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
       raw.local_flags |= termios::LocalFlags::ISIG;
+      // Keep OPOST enabled so \n is translated to \r\n on output
+      raw.output_flags |= termios::OutputFlags::OPOST;
       termios::tcsetattr(fd, termios::SetArg::TCSANOW, &raw).expect("Failed to re-enable raw mode");
 
       result
@@ -289,6 +295,195 @@ impl Drop for RawModeGuard {
     }
   }
 }
+
+// ============================================================================
+// PollReader - non-blocking key reader using vte parser
+// ============================================================================
+
+struct KeyCollector {
+  events: VecDeque<KeyEvent>,
+}
+
+impl KeyCollector {
+  fn new() -> Self {
+    Self {
+      events: VecDeque::new(),
+    }
+  }
+
+  fn push(&mut self, event: KeyEvent) {
+    self.events.push_back(event);
+  }
+
+  fn pop(&mut self) -> Option<KeyEvent> {
+    self.events.pop_front()
+  }
+
+  /// Parse modifier bits from CSI parameter (e.g., 1;5A means Ctrl+Up)
+  fn parse_modifiers(param: u16) -> ModKeys {
+    // CSI modifiers: param = 1 + (shift) + (alt*2) + (ctrl*4) + (meta*8)
+    let bits = param.saturating_sub(1);
+    let mut mods = ModKeys::empty();
+    if bits & 1 != 0 { mods |= ModKeys::SHIFT; }
+    if bits & 2 != 0 { mods |= ModKeys::ALT; }
+    if bits & 4 != 0 { mods |= ModKeys::CTRL; }
+    mods
+  }
+}
+
+impl Default for KeyCollector {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl Perform for KeyCollector {
+  fn print(&mut self, c: char) {
+    // vte routes 0x7f (DEL) to print instead of execute
+    if c == '\x7f' {
+      self.push(KeyEvent(KeyCode::Backspace, ModKeys::empty()));
+    } else {
+      self.push(KeyEvent(KeyCode::Char(c), ModKeys::empty()));
+    }
+  }
+
+  fn execute(&mut self, byte: u8) {
+    let event = match byte {
+      0x00 => KeyEvent(KeyCode::Char(' '), ModKeys::CTRL), // Ctrl+Space / Ctrl+@
+      0x09 => KeyEvent(KeyCode::Tab, ModKeys::empty()),    // Tab (Ctrl+I)
+      0x0a => KeyEvent(KeyCode::Char('j'), ModKeys::CTRL), // Ctrl+J (linefeed)
+      0x0d => KeyEvent(KeyCode::Enter, ModKeys::empty()),  // Carriage return (Ctrl+M)
+      0x1b => KeyEvent(KeyCode::Esc, ModKeys::empty()),
+      0x7f => KeyEvent(KeyCode::Backspace, ModKeys::empty()),
+      0x01..=0x1a => {
+        // Ctrl+A through Ctrl+Z (excluding special cases above)
+        let c = (b'A' + byte - 1) as char;
+        KeyEvent(KeyCode::Char(c), ModKeys::CTRL)
+      }
+      _ => return,
+    };
+    self.push(event);
+  }
+
+  fn csi_dispatch(&mut self, params: &vte::Params, intermediates: &[u8], _ignore: bool, action: char) {
+    let params: Vec<u16> = params.iter()
+      .map(|p| p.first().copied().unwrap_or(0))
+      .collect();
+
+    let event = match (intermediates, action) {
+      // Arrow keys: CSI A/B/C/D or CSI 1;mod A/B/C/D
+      ([], 'A') => {
+        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        KeyEvent(KeyCode::Up, mods)
+      }
+      ([], 'B') => {
+        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        KeyEvent(KeyCode::Down, mods)
+      }
+      ([], 'C') => {
+        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        KeyEvent(KeyCode::Right, mods)
+      }
+      ([], 'D') => {
+        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        KeyEvent(KeyCode::Left, mods)
+      }
+      // Home/End: CSI H/F or CSI 1;mod H/F
+      ([], 'H') => {
+        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        KeyEvent(KeyCode::Home, mods)
+      }
+      ([], 'F') => {
+        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        KeyEvent(KeyCode::End, mods)
+      }
+      // Special keys with tilde: CSI num ~ or CSI num;mod ~
+      ([], '~') => {
+        let key_num = params.first().copied().unwrap_or(0);
+        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        let key = match key_num {
+          1 | 7 => KeyCode::Home,
+          2 => KeyCode::Insert,
+          3 => KeyCode::Delete,
+          4 | 8 => KeyCode::End,
+          5 => KeyCode::PageUp,
+          6 => KeyCode::PageDown,
+          15 => KeyCode::F(5),
+          17 => KeyCode::F(6),
+          18 => KeyCode::F(7),
+          19 => KeyCode::F(8),
+          20 => KeyCode::F(9),
+          21 => KeyCode::F(10),
+          23 => KeyCode::F(11),
+          24 => KeyCode::F(12),
+          _ => return,
+        };
+        KeyEvent(key, mods)
+      }
+      // SGR mouse: CSI < button;x;y M/m (ignore mouse events for now)
+      ([b'<'], 'M') | ([b'<'], 'm') => {
+        return;
+      }
+      _ => return,
+    };
+    self.push(event);
+  }
+
+  fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+    // SS3 sequences (ESC O P/Q/R/S for F1-F4)
+    if intermediates == [b'O'] {
+      let key = match byte {
+        b'P' => KeyCode::F(1),
+        b'Q' => KeyCode::F(2),
+        b'R' => KeyCode::F(3),
+        b'S' => KeyCode::F(4),
+        _ => return,
+      };
+      self.push(KeyEvent(key, ModKeys::empty()));
+    }
+  }
+}
+
+pub struct PollReader {
+  parser: Parser,
+  collector: KeyCollector,
+}
+
+impl PollReader {
+  pub fn new() -> Self {
+    Self {
+      parser: Parser::new(),
+      collector: KeyCollector::new(),
+    }
+  }
+
+  pub fn feed_bytes(&mut self, bytes: &[u8]) {
+    if bytes == [b'\x1b'] {
+      // Single escape byte - user pressed ESC key
+      self.collector.push(KeyEvent(KeyCode::Esc, ModKeys::empty()));
+      return;
+    }
+
+    // Feed all bytes through vte parser
+    self.parser.advance(&mut self.collector, bytes);
+  }
+}
+
+impl Default for PollReader {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl KeyReader for PollReader {
+  fn read_key(&mut self) -> Result<Option<KeyEvent>, ShErr> {
+    Ok(self.collector.pop())
+  }
+}
+
+// ============================================================================
+// TermReader - blocking key reader (original implementation)
+// ============================================================================
 
 pub struct TermReader {
   buffer: BufReader<TermBuffer>,

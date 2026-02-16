@@ -795,14 +795,32 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
     }
     ForkResult::Parent { child } => {
       std::mem::drop(cmd_sub_io_frame); // Closes the write pipe
-      let status = waitpid(child, Some(WtFlag::WSTOPPED))?;
+
+      // Read output first (before waiting) to avoid deadlock if child fills pipe buffer
+      flog!(DEBUG, "filling buffer");
+      loop {
+        match io_buf.fill_buffer() {
+          Ok(()) => break,
+          Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+          Err(e) => return Err(e.into()),
+        }
+      }
+      flog!(DEBUG, "done");
+
+      // Wait for child with EINTR retry
+      let status = loop {
+        match waitpid(child, Some(WtFlag::WSTOPPED)) {
+          Ok(status) => break status,
+          Err(Errno::EINTR) => continue,
+          Err(e) => return Err(e.into()),
+        }
+      };
+
       // Reclaim terminal foreground in case child changed it
       crate::jobs::take_term()?;
+
       match status {
         WtStat::Exited(_, _) => {
-          flog!(DEBUG, "filling buffer");
-          io_buf.fill_buffer()?;
-          flog!(DEBUG, "done");
           Ok(io_buf.as_str()?.trim_end().to_string())
         }
         _ => Err(ShErr::simple(ShErrKind::InternalErr, "Command sub failed")),

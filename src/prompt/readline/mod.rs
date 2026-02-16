@@ -2,12 +2,12 @@ use history::History;
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{LineBuf, SelectAnchor, SelectMode};
 use nix::libc::STDOUT_FILENO;
-use term::{get_win_size, raw_mode, KeyReader, Layout, LineWriter, TermReader, TermWriter};
+use term::{get_win_size, KeyReader, Layout, LineWriter, PollReader, TermWriter};
 use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
 use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
 use crate::libsh::{
-  error::{ShErr, ShErrKind, ShResult},
+  error::{ShErrKind, ShResult},
   term::{Style, Styled},
 };
 use crate::prelude::*;
@@ -21,15 +21,18 @@ pub mod term;
 pub mod vicmd;
 pub mod vimode;
 
-// Very useful for testing
-const LOREM_IPSUM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\nUt enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra.";
-
-pub trait Readline {
-  fn readline(&mut self) -> ShResult<String>;
+/// Non-blocking readline result
+pub enum ReadlineEvent {
+  /// A complete line was entered
+  Line(String),
+  /// Ctrl+D on empty line - request to exit
+  Eof,
+  /// No complete input yet, need more bytes
+  Pending,
 }
 
 pub struct FernVi {
-  pub reader: Box<dyn KeyReader>,
+  pub reader: PollReader,
   pub writer: Box<dyn LineWriter>,
   pub prompt: String,
   pub mode: Box<dyn ViMode>,
@@ -38,40 +41,76 @@ pub struct FernVi {
   pub repeat_motion: Option<MotionCmd>,
   pub editor: LineBuf,
   pub history: History,
+  needs_redraw: bool,
 }
 
-impl Readline for FernVi {
-  fn readline(&mut self) -> ShResult<String> {
-    let raw_mode_guard = raw_mode(); // Restores termios state on drop
-
-    loop {
-      raw_mode_guard.disable_for(|| self.print_line())?;
-
-			let key = match self.reader.read_key() {
-				Ok(Some(key)) => key,
-				Err(e) if matches!(e.kind(), ShErrKind::IoErr(std::io::ErrorKind::Interrupted)) => {
-					flog!(DEBUG, "readline interrupted");
-					let partial: String = self.editor.as_str().to_string();
-					return Err(ShErr::simple(ShErrKind::ReadlineIntr(partial), ""));
-				}
-				Err(_) | Ok(None) => {
-					flog!(DEBUG, "EOF detected");
-					raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
-					return Err(ShErr::simple(ShErrKind::ReadlineErr, "EOF"));
-				}
-
+impl FernVi {
+  pub fn new(prompt: Option<String>) -> ShResult<Self> {
+		let mut new = Self {
+				reader: PollReader::new(),
+				writer: Box::new(TermWriter::new(STDOUT_FILENO)),
+				prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
+				mode: Box::new(ViInsert::new()),
+				old_layout: None,
+				repeat_action: None,
+				repeat_motion: None,
+				editor: LineBuf::new(),
+				history: History::new()?,
+				needs_redraw: true,
 			};
+		new.print_line()?;
+		Ok(new)
+  }
 
+  pub fn with_initial(mut self, initial: &str) -> Self {
+    self.editor = LineBuf::new().with_initial(initial, 0);
+    self.history.update_pending_cmd(self.editor.as_str());
+    self
+  }
+
+  /// Feed raw bytes from stdin into the reader's buffer
+  pub fn feed_bytes(&mut self, bytes: &[u8]) {
+		log::info!("Feeding bytes: {:?}", bytes.iter().map(|b| *b as char).collect::<String>());
+    self.reader.feed_bytes(bytes);
+  }
+
+  /// Mark that the display needs to be redrawn (e.g., after SIGWINCH)
+  pub fn mark_dirty(&mut self) {
+    self.needs_redraw = true;
+  }
+
+  /// Reset readline state for a new prompt
+  pub fn reset(&mut self, prompt: Option<String>) {
+    if let Some(p) = prompt {
+      self.prompt = p;
+    }
+    self.editor.buffer.clear();
+    self.editor.cursor = Default::default();
+    self.old_layout = None;
+    self.needs_redraw = true;
+  }
+
+  /// Process any available input and return readline event
+  /// This is non-blocking - returns Pending if no complete line yet
+  pub fn process_input(&mut self) -> ShResult<ReadlineEvent> {
+    // Redraw if needed
+    if self.needs_redraw {
+      self.print_line()?;
+      self.needs_redraw = false;
+    }
+
+    // Process all available keys
+    while let Some(key) = self.reader.read_key()? {
       flog!(DEBUG, key);
 
       if self.should_accept_hint(&key) {
         self.editor.accept_hint();
         self.history.update_pending_cmd(self.editor.as_str());
+        self.needs_redraw = true;
         continue;
       }
 
       let Some(mut cmd) = self.mode.handle_key(key) else {
-        flog!(DEBUG, "got none??");
         continue;
       };
       flog!(DEBUG, cmd);
@@ -79,29 +118,30 @@ impl Readline for FernVi {
 
       if self.should_grab_history(&cmd) {
         self.scroll_history(cmd);
+        self.needs_redraw = true;
         continue;
       }
 
       if cmd.should_submit() {
-        raw_mode_guard.disable_for(|| self.writer.flush_write("\n"))?;
+        self.writer.flush_write("\n")?;
         let buf = self.editor.take_buf();
         // Save command to history
         self.history.push(buf.clone());
         if let Err(e) = self.history.save() {
           eprintln!("Failed to save history: {e}");
         }
-        return Ok(buf);
+        return Ok(ReadlineEvent::Line(buf));
       }
 
       if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
         if self.editor.buffer.is_empty() {
-					return Err(ShErr::simple(ShErrKind::CleanExit(0), "exit"));
+          return Ok(ReadlineEvent::Eof);
         } else {
           self.editor.buffer.clear();
+          self.needs_redraw = true;
           continue;
         }
       }
-      flog!(DEBUG, cmd);
 
       let before = self.editor.buffer.clone();
       self.exec_cmd(cmd)?;
@@ -113,30 +153,17 @@ impl Readline for FernVi {
 
       let hint = self.history.get_hint();
       self.editor.set_hint(hint);
+      self.needs_redraw = true;
     }
-  }
-}
 
-impl FernVi {
-  pub fn new(prompt: Option<String>) -> ShResult<Self> {
-    Ok(Self {
-      reader: Box::new(TermReader::new()),
-      writer: Box::new(TermWriter::new(STDOUT_FILENO)),
-      prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
-      mode: Box::new(ViInsert::new()),
-      old_layout: None,
-      repeat_action: None,
-      repeat_motion: None,
-      editor: LineBuf::new(),
-      history: History::new()?,
-    })
-  }
+    // Redraw if we processed any input
+    if self.needs_redraw {
+      self.print_line()?;
+      self.needs_redraw = false;
+    }
 
-	pub fn with_initial(mut self, initial: &str) -> Self {
-		self.editor = LineBuf::new().with_initial(initial, 0);
-		self.history.update_pending_cmd(self.editor.as_str());
-		self
-	}
+    Ok(ReadlineEvent::Pending)
+  }
 
   pub fn get_layout(&mut self) -> Layout {
     let line = self.editor.to_string();

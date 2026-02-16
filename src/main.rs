@@ -18,18 +18,25 @@ pub mod state;
 #[cfg(test)]
 pub mod tests;
 
+use std::os::fd::BorrowedFd;
 use std::process::ExitCode;
 use std::sync::atomic::Ordering;
 
-use crate::libsh::error::ShErrKind;
-use crate::libsh::sys::TermiosGuard;
+use nix::libc::STDIN_FILENO;
+use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+use nix::unistd::read;
+use nix::errno::Errno;
+
+use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
+use crate::prompt::get_prompt;
+use crate::prompt::readline::term::raw_mode;
+use crate::prompt::readline::{FernVi, ReadlineEvent};
 use crate::signal::{QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::{source_rc, write_meta};
 use clap::Parser;
-use shopt::FernEditMode;
-use state::{read_vars, write_shopts, write_vars};
+use state::{read_vars, write_vars};
 
 #[derive(Parser, Debug)]
 struct FernArgs {
@@ -57,6 +64,7 @@ fn kickstart_lazy_evals() {
 }
 
 fn main() -> ExitCode {
+	env_logger::init();
   kickstart_lazy_evals();
   let args = FernArgs::parse();
   if args.version {
@@ -64,26 +72,28 @@ fn main() -> ExitCode {
     return ExitCode::SUCCESS;
   }
 
-  if let Some(path) = args.script {
-    run_script(path, args.script_args);
+  if let Err(e) = if let Some(path) = args.script {
+    run_script(path, args.script_args)
   } else {
-    fern_interactive();
-  }
+    fern_interactive()
+  } {
+		eprintln!("fern: {e}");
+	};
 
 	ExitCode::from(QUIT_CODE.load(Ordering::SeqCst) as u8)
 }
 
-fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) {
+fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
   let path = path.as_ref();
   if !path.is_file() {
     eprintln!("fern: Failed to open input file: {}", path.display());
 		QUIT_CODE.store(1, Ordering::SeqCst);
-		return;
+		return Err(ShErr::simple(ShErrKind::CleanExit(1), "input file not found"));
   }
   let Ok(input) = fs::read_to_string(path) else {
     eprintln!("fern: Failed to read input file: {}", path.display());
 		QUIT_CODE.store(1, Ordering::SeqCst);
-		return;
+		return Err(ShErr::simple(ShErrKind::CleanExit(1), "failed to read input file"));
   };
 
   write_vars(|v| v.cur_scope_mut().bpush_arg(path.to_string_lossy().to_string()));
@@ -91,105 +101,125 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) {
     write_vars(|v| v.cur_scope_mut().bpush_arg(arg))
   }
 
-  if let Err(e) = exec_input(input, None) {
-    eprintln!("{e}");
-		match e.kind() {
-			ShErrKind::CleanExit(code) => {
-				QUIT_CODE.store(*code, Ordering::SeqCst);
-			}
-			_ => {
-				QUIT_CODE.store(1, Ordering::SeqCst);
-			}
-		}
-  }
+	exec_input(input, None)
 }
 
-fn fern_interactive() {
-	let _termios_guard = TermiosGuard::default(); // sets raw mode, restores termios on drop
+fn fern_interactive() -> ShResult<()> {
+  let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup();
 
   if let Err(e) = source_rc() {
     eprintln!("{e}");
   }
 
-  let mut readline_err_count: u32 = 0;
+  // Create readline instance with initial prompt
+  let mut readline = match FernVi::new(get_prompt().ok()) {
+    Ok(rl) => rl,
+    Err(e) => {
+      eprintln!("Failed to initialize readline: {e}");
+      QUIT_CODE.store(1, Ordering::SeqCst);
+			return Err(ShErr::simple(ShErrKind::CleanExit(1), "readline initialization failed"));
+    }
+  };
 
-	// Initialize a new string, we will use this to store
-	// partial line inputs when read() calls are interrupted by EINTR
-	let mut partial_input = String::new();
+  // Main poll loop
+  loop {
+    // Handle any pending signals
+    while signals_pending() {
+      if let Err(e) = check_signals() {
+        match e.kind() {
+          ShErrKind::ClearReadline => {
+            // Ctrl+C - clear current input and show new prompt
+            readline.reset(get_prompt().ok());
+          }
+          ShErrKind::CleanExit(code) => {
+            QUIT_CODE.store(*code, Ordering::SeqCst);
+						return Ok(());
+          }
+          _ => eprintln!("{e}"),
+        }
+      }
+    }
 
-  'outer: loop {
-		while signals_pending() {
-			if let Err(e) = check_signals() {
-				if let ShErrKind::ClearReadline = e.kind() {
-					partial_input.clear();
-					if !signals_pending() {
-						continue 'outer;
-					}
-				};
-				eprintln!("{e}");
-			}
-		}
-    // Main loop
-    let edit_mode = write_shopts(|opt| opt.query("prompt.edit_mode"))
-      .unwrap()
-      .map(|mode| mode.parse::<FernEditMode>().unwrap_or_default())
-      .unwrap();
-    let input = match prompt::readline(edit_mode, Some(&partial_input)) {
-      Ok(line) => {
-        readline_err_count = 0;
-				partial_input.clear();
-        line
+		readline.print_line()?;
+
+    // Poll for stdin input
+    let mut fds = [PollFd::new(
+      unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) },
+      PollFlags::POLLIN,
+    )];
+
+    match poll(&mut fds, PollTimeout::MAX) {
+      Ok(_) => {}
+      Err(Errno::EINTR) => {
+        // Interrupted by signal, loop back to handle it
+        continue;
       }
       Err(e) => {
-				match e.kind() {
-					ShErrKind::ReadlineIntr(partial) => {
-						// Did we get signaled? Check signal flags
-						// If nothing to worry about, retry the readline with the unfinished input
-						while signals_pending() {
-							if let Err(e) = check_signals() {
-								if let ShErrKind::ClearReadline = e.kind() {
-									partial_input.clear();
-									if !signals_pending() {
-										continue 'outer;
-									}
-								};
-								eprintln!("{e}");
-							}
-						}
-						partial_input = partial.to_string();
-						continue;
-					}
-					ShErrKind::CleanExit(code) => {
-						QUIT_CODE.store(*code, Ordering::SeqCst);
-						return;
-					}
-					_ => {
-						eprintln!("{e}");
-						readline_err_count += 1;
-						if readline_err_count == 20 {
-							eprintln!("reached maximum readline error count, exiting");
-							break;
-						} else {
-							continue;
-						}
-					}
-				}
+        eprintln!("poll error: {e}");
+				break;
       }
-    };
-
-		write_meta(|m| m.start_timer());
-    if let Err(e) = exec_input(input, None) {
-			match e.kind() {
-				ShErrKind::CleanExit(code) => {
-					QUIT_CODE.store(*code, Ordering::SeqCst);
-					return;
-				}
-				_ => {
-					eprintln!("{e}");
-				}
-			}
     }
-		write_meta(|m| m.stop_timer());
+
+    // Check if stdin has data
+    if fds[0].revents().is_some_and(|r| r.contains(PollFlags::POLLIN)) {
+      let mut buffer = [0u8; 1024];
+      match read(STDIN_FILENO, &mut buffer) {
+        Ok(0) => {
+          // EOF
+          break;
+        }
+        Ok(n) => {
+          readline.feed_bytes(&buffer[..n]);
+        }
+        Err(Errno::EINTR) => {
+          // Interrupted, continue to handle signals
+          continue;
+        }
+        Err(e) => {
+          eprintln!("read error: {e}");
+          break;
+        }
+      }
+    }
+
+    // Process any available input
+    match readline.process_input() {
+      Ok(ReadlineEvent::Line(input)) => {
+        write_meta(|m| m.start_timer());
+        if let Err(e) = exec_input(input, None) {
+          match e.kind() {
+            ShErrKind::CleanExit(code) => {
+              QUIT_CODE.store(*code, Ordering::SeqCst);
+              return Ok(());
+            }
+            _ => eprintln!("{e}"),
+          }
+        }
+        write_meta(|m| m.stop_timer());
+
+        // Reset for next command with fresh prompt
+        readline.reset(get_prompt().ok());
+      }
+      Ok(ReadlineEvent::Eof) => {
+        // Ctrl+D on empty line
+        QUIT_CODE.store(0, Ordering::SeqCst);
+        return Ok(());
+      }
+      Ok(ReadlineEvent::Pending) => {
+        // No complete input yet, keep polling
+      }
+      Err(e) => {
+        match e.kind() {
+          ShErrKind::CleanExit(code) => {
+            QUIT_CODE.store(*code, Ordering::SeqCst);
+            return Ok(());
+          }
+          _ => eprintln!("{e}"),
+        }
+      }
+    }
   }
+
+	Ok(())
 }
