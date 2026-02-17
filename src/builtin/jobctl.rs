@@ -143,7 +143,7 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (argv, io_frame) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
 
   let mut flags = JobCmdFlags::empty();
   for (arg, span) in argv {
@@ -175,7 +175,6 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     }
   }
   write_jobs(|j| j.print_jobs(flags))?;
-  io_frame.unwrap().restore()?;
   state::set_status(0);
 
   Ok(())

@@ -18,7 +18,7 @@ pub fn pwd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()
     unreachable!()
   };
 
-  let (_, io_frame) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (_, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
 
   let stdout = borrow_fd(STDOUT_FILENO);
 
@@ -26,7 +26,6 @@ pub fn pwd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()
   curr_dir.push('\n');
   write(stdout, curr_dir.as_bytes())?;
 
-  io_frame.unwrap().restore().unwrap();
   state::set_status(0);
   Ok(())
 }

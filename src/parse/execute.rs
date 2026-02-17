@@ -2,18 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::{
 	builtin::{
-		alias::{alias, unalias},
-		cd::cd,
-		echo::echo,
-		export::export,
-		flowctl::flowctl,
-		jobctl::{JobBehavior, continue_job, jobs},
-		pwd::pwd,
-		shift::shift,
-		shopt::shopt,
-		source::source,
-		test::double_bracket_test,
-		zoltraak::zoltraak,
+		alias::{alias, unalias}, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{JobBehavior, continue_job, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, zoltraak::zoltraak
 	},
 	expand::expand_aliases,
 	jobs::{ChildProc, JobBldr, JobStack, dispatch_job},
@@ -314,12 +303,13 @@ impl Dispatcher {
 		let NdRule::BraceGrp { body } = brc_grp.class else {
 			unreachable!()
 		};
-		let mut io_frame = self.io_stack.pop_frame();
-		io_frame.extend(brc_grp.redirs);
+		self.io_stack.append_to_frame(brc_grp.redirs);
+		let _guard = self.io_stack
+			.pop_frame()
+			.redirect()?;
 
 		for node in body {
 			let blame = node.get_span();
-			self.io_stack.push_frame(io_frame.clone());
 			self.dispatch_node(node).try_blame(blame)?;
 		}
 
@@ -335,6 +325,9 @@ impl Dispatcher {
 		};
 
 		self.io_stack.append_to_frame(case_stmt.redirs);
+		let _guard = self.io_stack
+			.pop_frame()
+			.redirect()?;
 
 		let exp_pattern = pattern.clone().expand()?;
 		let pattern_raw = exp_pattern
@@ -372,16 +365,13 @@ impl Dispatcher {
 			}
 		};
 
-		let io_frame = self.io_stack.pop_frame();
-		let (mut cond_frame, mut body_frame) = io_frame.split_frame();
-		let (in_redirs, out_redirs) = loop_stmt.redirs.split_by_channel();
-		cond_frame.extend(in_redirs);
-		body_frame.extend(out_redirs);
+		self.io_stack.append_to_frame(loop_stmt.redirs);
+		let _guard = self.io_stack
+			.pop_frame()
+			.redirect()?;
 
 		let CondNode { cond, body } = cond_node;
 		'outer: loop {
-			self.io_stack.push(cond_frame.clone());
-
 			if let Err(e) = self.dispatch_node(*cond.clone()) {
 				state::set_status(1);
 				return Err(e);
@@ -389,7 +379,6 @@ impl Dispatcher {
 
 			let status = state::get_status();
 			if keep_going(kind, status) {
-				self.io_stack.push(body_frame.clone());
 				for node in &body {
 					if let Err(e) = self.dispatch_node(node.clone()) {
 						match e.kind() {
@@ -401,7 +390,9 @@ impl Dispatcher {
 								state::set_status(*code);
 								continue 'outer;
 							}
-							_ => return Err(e),
+							_ => {
+								return Err(e);
+							}
 						}
 					}
 				}
@@ -421,15 +412,15 @@ impl Dispatcher {
 			vars.iter().map(|v| v.to_string()).collect()
 		);
 
-		let io_frame = self.io_stack.pop_frame();
-		let (_, mut body_frame) = io_frame.split_frame();
-		let (_, out_redirs) = for_stmt.redirs.split_by_channel();
-		body_frame.extend(out_redirs);
+		self.io_stack.append_to_frame(for_stmt.redirs);
+		let _guard = self.io_stack
+			.pop_frame()
+			.redirect()?;
 
 		'outer: for chunk in arr.chunks(vars.len()) {
 			let empty = Tk::default();
 			let chunk_iter = vars.iter().zip(
-				chunk.iter().chain(std::iter::repeat(&empty)), // Or however you define an empty token
+				chunk.iter().chain(std::iter::repeat(&empty)),
 			);
 
 			for (var, val) in chunk_iter {
@@ -438,7 +429,6 @@ impl Dispatcher {
 			}
 
 			for node in body.clone() {
-				self.io_stack.push(body_frame.clone());
 				if let Err(e) = self.dispatch_node(node) {
 					match e.kind() {
 						ShErrKind::LoopBreak(code) => {
@@ -465,17 +455,15 @@ impl Dispatcher {
 		else {
 			unreachable!();
 		};
-		// Pop the current frame and split it
-		let io_frame = self.io_stack.pop_frame();
-		let (mut cond_frame, mut body_frame) = io_frame.split_frame();
-		let (in_redirs, out_redirs) = if_stmt.redirs.split_by_channel();
-		cond_frame.extend(in_redirs); // Condition gets input redirs
-		body_frame.extend(out_redirs); // Body gets output redirs
+
+		self.io_stack.append_to_frame(if_stmt.redirs);
+		let _guard = self.io_stack
+			.pop_frame()
+			.redirect()?;
 
 		let mut matched = false;
 		for node in cond_nodes {
 			let CondNode { cond, body } = node;
-			self.io_stack.push(cond_frame.clone());
 
 			if let Err(e) = self.dispatch_node(*cond) {
 				state::set_status(1);
@@ -486,7 +474,6 @@ impl Dispatcher {
 				0 => {
 					matched = true;
 					for body_node in body {
-						self.io_stack.push(body_frame.clone());
 						self.dispatch_node(body_node)?;
 					}
 					break; // Don't check remaining elif conditions
@@ -497,7 +484,6 @@ impl Dispatcher {
 
 		if !matched && !else_block.is_empty() {
 			for node in else_block {
-				self.io_stack.push(body_frame.clone());
 				self.dispatch_node(node)?;
 			}
 		}
@@ -576,6 +562,7 @@ impl Dispatcher {
 			"exit" => flowctl(cmd, ShErrKind::CleanExit(0)),
 			"zoltraak" => zoltraak(cmd, io_stack_mut, curr_job_mut),
 			"shopt" => shopt(cmd, io_stack_mut, curr_job_mut),
+			"read" => read_builtin(cmd, io_stack_mut, curr_job_mut),
 			_ => unimplemented!(
 				"Have not yet added support for builtin '{}'",
 				cmd_raw.span.as_str()
@@ -613,9 +600,11 @@ impl Dispatcher {
 			log::info!("expanded argv: {:?}", exec_args.argv.iter().map(|s| s.to_str().unwrap()).collect::<Vec<_>>());
 		}
 
-		let io_frame = self.io_stack.pop_frame();
+		let _guard = self.io_stack
+			.pop_frame()
+			.redirect()?;
+
 		run_fork(
-			io_frame,
 			Some(exec_args),
 			self.job_stack.curr_job_mut().unwrap(),
 			def_child_action,
@@ -683,19 +672,18 @@ pub fn prepare_argv(argv: Vec<Tk>) -> ShResult<Vec<(String, Span)>> {
 }
 
 pub fn run_fork<C, P>(
-	io_frame: IoFrame,
 	exec_args: Option<ExecArgs>,
 	job: &mut JobBldr,
 	child_action: C,
 	parent_action: P,
 ) -> ShResult<()>
 where
-	C: Fn(IoFrame, Option<ExecArgs>),
+	C: Fn(Option<ExecArgs>),
 	P: Fn(&mut JobBldr, Option<&str>, Pid) -> ShResult<()>,
 {
 	match unsafe { fork()? } {
 		ForkResult::Child => {
-			child_action(io_frame, exec_args);
+			child_action(exec_args);
 			exit(0); // Just in case
 		}
 		ForkResult::Parent { child } => {
@@ -710,10 +698,7 @@ where
 }
 
 /// The default behavior for the child process after forking
-pub fn def_child_action(mut io_frame: IoFrame, exec_args: Option<ExecArgs>) {
-	if let Err(e) = io_frame.redirect() {
-		eprintln!("{e}");
-	}
+pub fn def_child_action(exec_args: Option<ExecArgs>) {
 	let exec_args = exec_args.unwrap();
 	let cmd = &exec_args.cmd.0;
 	let span = exec_args.cmd.1;

@@ -42,6 +42,9 @@ use state::{read_vars, write_vars};
 struct FernArgs {
   script: Option<String>,
 
+	#[arg(short)]
+	command: Option<String>,
+
   #[arg(trailing_var_arg = true)]
   script_args: Vec<String>,
 
@@ -74,6 +77,8 @@ fn main() -> ExitCode {
 
   if let Err(e) = if let Some(path) = args.script {
     run_script(path, args.script_args)
+	} else if let Some(cmd) = args.command {
+		exec_input(cmd, None, false)
   } else {
     fern_interactive()
   } {

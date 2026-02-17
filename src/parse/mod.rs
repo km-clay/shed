@@ -1150,6 +1150,7 @@ impl ParseStream {
 
     let cond_node: CondNode;
     let mut node_tks = vec![];
+		let mut redirs = vec![];
 
     if (!self.check_keyword("while") && !self.check_keyword("until")) || !self.next_tk_is_some() {
       return Ok(None);
@@ -1204,6 +1205,9 @@ impl ParseStream {
       ));
     }
     node_tks.push(self.next_tk().unwrap());
+
+    self.parse_redir(&mut redirs, &mut node_tks)?;
+
     self.assert_separator(&mut node_tks)?;
 
     cond_node = CondNode {
@@ -1216,7 +1220,7 @@ impl ParseStream {
         cond_node,
       },
       flags: NdFlags::empty(),
-      redirs: vec![],
+      redirs,
       tokens: node_tks,
     };
     Ok(Some(loop_node))

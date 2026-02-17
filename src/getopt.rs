@@ -9,7 +9,14 @@ pub type OptSet = Arc<[Opt]>;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Opt {
   Long(String),
+	LongWithArg(String,String),
   Short(char),
+	ShortWithArg(char,String),
+}
+
+pub struct OptSpec {
+	pub opt: Opt,
+	pub takes_arg: bool,
 }
 
 impl Opt {
@@ -34,6 +41,8 @@ impl Display for Opt {
     match self {
       Self::Long(opt) => write!(f, "--{}", opt),
       Self::Short(opt) => write!(f, "-{}", opt),
+			Self::LongWithArg(opt, arg) => write!(f, "--{} {}", opt, arg),
+			Self::ShortWithArg(opt, arg) => write!(f, "-{} {}", opt, arg)
     }
   }
 }
@@ -58,7 +67,7 @@ pub fn get_opts(words: Vec<String>) -> (Vec<String>, Vec<Opt>) {
   (non_opts, opts)
 }
 
-pub fn get_opts_from_tokens(tokens: Vec<Tk>) -> (Vec<Tk>, Vec<Opt>) {
+pub fn get_opts_from_tokens(tokens: Vec<Tk>, opt_specs: &[OptSpec]) -> (Vec<Tk>, Vec<Opt>) {
   let mut tokens_iter = tokens.into_iter();
   let mut opts = vec![];
   let mut non_opts = vec![];
@@ -69,10 +78,37 @@ pub fn get_opts_from_tokens(tokens: Vec<Tk>) -> (Vec<Tk>, Vec<Opt>) {
       break;
     }
     let parsed_opts = Opt::parse(&token.to_string());
+
     if parsed_opts.is_empty() {
       non_opts.push(token)
     } else {
-      opts.extend(parsed_opts);
+			for opt in parsed_opts {
+				let mut pushed = false;
+				for opt_spec in opt_specs {
+					if opt_spec.opt == opt {
+						if opt_spec.takes_arg {
+							let arg = tokens_iter.next()
+								.map(|t| t.to_string())
+								.unwrap_or_default();
+
+							let opt = match opt {
+								Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
+								Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
+								_ => unreachable!(),
+							};
+							opts.push(opt);
+							pushed = true;
+						} else {
+							opts.push(opt.clone());
+							pushed = true;
+						}
+					}
+				}
+				if !pushed {
+					non_opts.push(token.clone());
+					log::warn!("Unexpected flag '{opt}'");
+				}
+			}
     }
   }
   (non_opts, opts)

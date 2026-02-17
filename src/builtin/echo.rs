@@ -1,18 +1,15 @@
 use std::sync::LazyLock;
 
 use crate::{
-  builtin::setup_builtin, expand::expand_prompt, getopt::{Opt, OptSet, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node}, prelude::*, procio::{IoStack, borrow_fd}, state
+  builtin::setup_builtin, expand::expand_prompt, getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node}, prelude::*, procio::{IoStack, borrow_fd}, state
 };
 
-pub static ECHO_OPTS: LazyLock<OptSet> = LazyLock::new(|| {
-  [
-    Opt::Short('n'),
-    Opt::Short('E'),
-    Opt::Short('e'),
-    Opt::Short('p'),
-  ]
-  .into()
-});
+pub const ECHO_OPTS: [OptSpec;4] = [
+	OptSpec { opt: Opt::Short('n'), takes_arg: false },
+	OptSpec { opt: Opt::Short('E'), takes_arg: false },
+	OptSpec { opt: Opt::Short('e'), takes_arg: false },
+	OptSpec { opt: Opt::Short('p'), takes_arg: false },
+];
 
 bitflags! {
   pub struct EchoFlags: u32 {
@@ -33,9 +30,9 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
   assert!(!argv.is_empty());
-  let (argv, opts) = get_opts_from_tokens(argv);
+  let (argv, opts) = get_opts_from_tokens(argv, &ECHO_OPTS);
   let flags = get_echo_flags(opts).blame(blame)?;
-  let (argv, io_frame) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
 
   let output_channel = if flags.contains(EchoFlags::USE_STDERR) {
     borrow_fd(STDERR_FILENO)
@@ -57,7 +54,6 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 
   write(output_channel, echo_output.as_bytes())?;
 
-  io_frame.unwrap().restore()?;
   state::set_status(0);
   Ok(())
 }
@@ -178,24 +174,21 @@ pub fn prepare_echo_args(argv: Vec<String>, use_escape: bool, use_prompt: bool) 
 	Ok(prepared_args)
 }
 
-pub fn get_echo_flags(mut opts: Vec<Opt>) -> ShResult<EchoFlags> {
+pub fn get_echo_flags(opts: Vec<Opt>) -> ShResult<EchoFlags> {
   let mut flags = EchoFlags::empty();
 
-  while let Some(opt) = opts.pop() {
-    if !ECHO_OPTS.contains(&opt) {
-      return Err(ShErr::simple(
-        ShErrKind::ExecFail,
-        format!("echo: Unexpected flag '{opt}'"),
-      ));
-    }
-    let Opt::Short(opt) = opt else { unreachable!() };
-
+	for opt in opts {
     match opt {
-      'n' => flags |= EchoFlags::NO_NEWLINE,
-      'r' => flags |= EchoFlags::USE_STDERR,
-      'e' => flags |= EchoFlags::USE_ESCAPE,
-			'p' => flags |= EchoFlags::USE_PROMPT,
-      _ => unreachable!(),
+      Opt::Short('n') => flags |= EchoFlags::NO_NEWLINE,
+      Opt::Short('r') => flags |= EchoFlags::USE_STDERR,
+      Opt::Short('e') => flags |= EchoFlags::USE_ESCAPE,
+			Opt::Short('p') => flags |= EchoFlags::USE_PROMPT,
+			_ => {
+				return Err(ShErr::simple(
+						ShErrKind::ExecFail,
+						format!("echo: Unexpected flag '{opt}'"),
+				));
+			}
     }
   }
 

@@ -18,7 +18,7 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
     unreachable!()
   };
 
-  let (argv, io_frame) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
 
   if argv.is_empty() {
     // Display the environment variables
@@ -42,7 +42,6 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
       }
     }
   }
-  io_frame.unwrap().restore()?;
   state::set_status(0);
   Ok(())
 }

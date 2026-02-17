@@ -4,12 +4,10 @@ use std::{
 };
 
 use crate::{
-  libsh::{
+  expand::Expander, libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::RedirVecUtils,
-  },
-  parse::{get_redir_file, Redir, RedirType},
-  prelude::*,
+  }, parse::{Redir, RedirType, get_redir_file}, prelude::*
 };
 
 // Credit to fish-shell for many of the implementation ideas present in this
@@ -72,7 +70,19 @@ impl IoMode {
   }
   pub fn open_file(mut self) -> ShResult<Self> {
     if let IoMode::File { tgt_fd, path, mode } = self {
-      let file = get_redir_file(mode, path)?;
+			let path_raw = path
+				.as_os_str()
+				.to_str()
+				.unwrap_or_default()
+				.to_string();
+
+			let expanded_path = Expander::from_raw(&path_raw)?
+				.expand()?
+				.join(" "); // should just be one string, will have to find some way to handle a return of multiple
+
+			let expanded_pathbuf = PathBuf::from(expanded_path);
+
+      let file = get_redir_file(mode, expanded_pathbuf)?;
       self = IoMode::OpenedFile {
         tgt_fd,
         file: Arc::new(OwnedFd::from(file)),
@@ -145,6 +155,13 @@ impl<R: Read> IoBuf<R> {
   }
 }
 
+pub struct RedirGuard(IoFrame);
+impl Drop for RedirGuard {
+	fn drop(&mut self) {
+		self.0.restore().ok();
+	}
+}
+
 /// A struct wrapping three fildescs representing `stdin`, `stdout`, and
 /// `stderr` respectively
 #[derive(Debug, Clone)]
@@ -199,7 +216,7 @@ impl<'e> IoFrame {
     let saved_err = dup(STDERR_FILENO).unwrap();
     self.saved_io = Some(IoGroup(saved_in, saved_out, saved_err));
   }
-  pub fn redirect(&mut self) -> ShResult<()> {
+  pub fn redirect(mut self) -> ShResult<RedirGuard> {
     self.save();
     for redir in &mut self.redirs {
       let io_mode = &mut redir.io_mode;
@@ -212,7 +229,7 @@ impl<'e> IoFrame {
       let src_fd = io_mode.src_fd();
       dup2(src_fd, tgt_fd)?;
     }
-    Ok(())
+    Ok(RedirGuard(self))
   }
   pub fn restore(&mut self) -> ShResult<()> {
     if let Some(saved) = self.saved_io.take() {

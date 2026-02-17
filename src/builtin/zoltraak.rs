@@ -1,27 +1,15 @@
 use std::{os::unix::fs::OpenOptionsExt, sync::LazyLock};
 
 use crate::{
-  getopt::{get_opts_from_tokens, Opt, OptSet},
+  getopt::{Opt, OptSet, OptSpec, get_opts_from_tokens},
   jobs::JobBldr,
   libsh::error::{Note, ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
-  procio::{borrow_fd, IoStack},
+  procio::{IoStack, borrow_fd},
 };
 
 use super::setup_builtin;
-
-pub static ZOLTRAAK_OPTS: LazyLock<OptSet> = LazyLock::new(|| {
-  [
-    Opt::Long("dry-run".into()),
-    Opt::Long("confirm".into()),
-    Opt::Long("no-preserve-root".into()),
-    Opt::Short('r'),
-    Opt::Short('f'),
-    Opt::Short('v'),
-  ]
-  .into()
-});
 
 bitflags! {
   #[derive(Clone,Copy,Debug,PartialEq,Eq)]
@@ -49,37 +37,59 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
   else {
     unreachable!()
   };
+	let zolt_opts = [
+		OptSpec { opt: Opt::Long("dry-run".into()), takes_arg: false },
+		OptSpec { opt: Opt::Long("confirm".into()), takes_arg: false },
+		OptSpec { opt: Opt::Long("no-preserve-root".into()), takes_arg: false },
+		OptSpec { opt: Opt::Short('r'), takes_arg: false },
+		OptSpec { opt: Opt::Short('f'), takes_arg: false },
+		OptSpec { opt: Opt::Short('v'), takes_arg: false }
+	];
   let mut flags = ZoltFlags::empty();
 
-  let (argv, opts) = get_opts_from_tokens(argv);
+  let (argv, opts) = get_opts_from_tokens(argv, &zolt_opts);
 
   for opt in opts {
-    if !ZOLTRAAK_OPTS.contains(&opt) {
-      return Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
-        format!("zoltraak: unrecognized option '{opt}'"),
-      ));
-    }
     match opt {
       Opt::Long(flag) => match flag.as_str() {
         "no-preserve-root" => flags |= ZoltFlags::NO_PRESERVE_ROOT,
         "confirm" => flags |= ZoltFlags::CONFIRM,
         "dry-run" => flags |= ZoltFlags::DRY,
-        _ => unreachable!(),
+        _ => {
+					return Err(ShErr::simple(
+							ShErrKind::SyntaxErr,
+							format!("zoltraak: unrecognized option '{flag}'"),
+					));
+				}
       },
       Opt::Short(flag) => match flag {
         'r' => flags |= ZoltFlags::RECURSIVE,
         'f' => flags |= ZoltFlags::FORCE,
         'v' => flags |= ZoltFlags::VERBOSE,
-        _ => unreachable!(),
+        _ => {
+					return Err(ShErr::simple(
+							ShErrKind::SyntaxErr,
+							format!("zoltraak: unrecognized option '{flag}'"),
+					));
+				}
       },
+			Opt::LongWithArg(flag, _) => {
+				return Err(ShErr::simple(
+						ShErrKind::SyntaxErr,
+						format!("zoltraak: unrecognized option '{flag}'"),
+				));
+			}
+			Opt::ShortWithArg(flag, _) => {
+				return Err(ShErr::simple(
+						ShErrKind::SyntaxErr,
+						format!("zoltraak: unrecognized option '{flag}'"),
+				));
+			}
     }
   }
 
-  let (argv, io_frame) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
 
-  let mut io_frame = io_frame.unwrap();
-  io_frame.redirect()?;
 
   for (arg, span) in argv {
     if &arg == "/" && !flags.contains(ZoltFlags::NO_PRESERVE_ROOT) {
@@ -95,12 +105,10 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
       );
     }
     if let Err(e) = annihilate(&arg, flags).blame(span) {
-      io_frame.restore()?;
       return Err(e);
     }
   }
 
-  io_frame.restore()?;
 
   Ok(())
 }

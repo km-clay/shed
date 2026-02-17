@@ -18,10 +18,8 @@ pub fn shopt(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
     unreachable!()
   };
 
-  let (argv, io_frame) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
 
-  let mut io_frame = io_frame.unwrap();
-  io_frame.redirect()?;
   for (arg, span) in argv {
     let Some(mut output) = write_shopts(|s| s.query(&arg)).blame(span)? else {
       continue;
@@ -31,11 +29,9 @@ pub fn shopt(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
     output.push('\n');
 
     if let Err(e) = write(output_channel, output.as_bytes()) {
-      io_frame.restore()?;
       return Err(e.into());
     }
   }
-  io_frame.restore()?;
 
   Ok(())
 }

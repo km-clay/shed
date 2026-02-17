@@ -10,14 +10,14 @@ use nix::{
   errno::Errno,
   libc::{self, STDIN_FILENO},
   poll::{self, PollFlags, PollTimeout},
-  sys::termios,
+  sys::termios::{self, tcgetattr, tcsetattr},
   unistd::isatty,
 };
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
-use crate::prelude::*;
+use crate::{prelude::*, procio::borrow_fd};
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   prompt::readline::keys::{KeyCode, ModKeys},
@@ -282,6 +282,18 @@ impl RawModeGuard {
       result
     }
   }
+
+	pub fn with_cooked_mode<F, R>(f: F) -> R
+	where F: FnOnce() -> R {
+		let raw = tcgetattr(borrow_fd(STDIN_FILENO)).expect("Failed to get terminal attributes");
+		let mut cooked = raw.clone();
+		cooked.local_flags |= termios::LocalFlags::ICANON | termios::LocalFlags::ECHO;
+		cooked.input_flags |= termios::InputFlags::ICRNL;
+		tcsetattr(borrow_fd(STDIN_FILENO), termios::SetArg::TCSANOW, &cooked).expect("Failed to set cooked mode");
+		let res = f();
+		tcsetattr(borrow_fd(STDIN_FILENO), termios::SetArg::TCSANOW, &raw).expect("Failed to restore raw mode");
+		res
+	}
 }
 
 impl Drop for RawModeGuard {

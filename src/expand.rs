@@ -9,7 +9,7 @@ use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::parse::execute::exec_input;
 use crate::parse::lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Tk, TkFlags, TkRule};
 use crate::parse::{Redir, RedirType};
-use crate::prelude::*;
+use crate::{jobs, prelude::*};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::state::{LogTab, VarFlags, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars};
 
@@ -29,14 +29,13 @@ pub const SUBSH: char = '\u{fdd4}';
 pub const PROC_SUB_IN: char = '\u{fdd5}';
 /// Output process sub marker
 pub const PROC_SUB_OUT: char = '\u{fdd6}';
+/// Marker for null expansion
+/// This is used for when "$@" or "$*" are used in quotes and there are no arguments
+/// Without this marker, it would be handled like an empty string, which breaks some commands
+pub const NULL_EXPAND: char = '\u{fdd7}';
 
 impl Tk {
   /// Create a new expanded token
-  ///
-  /// params
-  /// tokens: A vector of raw tokens lexed from the expansion result
-  /// span: The span of the original token that is being expanded
-  /// flags: some TkFlags
   pub fn expand(self) -> ShResult<Self> {
     let flags = self.flags;
     let span = self.span.clone();
@@ -59,11 +58,14 @@ pub struct Expander {
 
 impl Expander {
   pub fn new(raw: Tk) -> ShResult<Self> {
-		let mut raw = raw.span.as_str().to_string();
-		raw = expand_braces_full(&raw)?.join(" ");
-    let unescaped = unescape_str(&raw);
-    Ok(Self { raw: unescaped })
+		let raw = raw.span.as_str();
+		Self::from_raw(&raw)
   }
+	pub fn from_raw(raw: &str) -> ShResult<Self> {
+		let raw = expand_braces_full(raw)?.join(" ");
+		let unescaped = unescape_str(&raw);
+		Ok(Self { raw: unescaped })
+	}
   pub fn expand(&mut self) -> ShResult<Vec<String>> {
     let mut chars = self.raw.chars().peekable();
     self.raw = expand_raw(&mut chars)?;
@@ -77,24 +79,40 @@ impl Expander {
     let mut words = vec![];
     let mut chars = self.raw.chars();
     let mut cur_word = String::new();
+		let mut was_quoted = false;
 
     'outer: while let Some(ch) = chars.next() {
       match ch {
         DUB_QUOTE | SNG_QUOTE | SUBSH => {
           while let Some(q_ch) = chars.next() {
             match q_ch {
-              _ if q_ch == ch => continue 'outer, // Isn't rust cool
+              _ if q_ch == ch => {
+								was_quoted = true;
+								continue 'outer; // Isn't rust cool
+							}
               _ => cur_word.push(q_ch),
             }
           }
         }
         _ if is_field_sep(ch) => {
-          words.push(mem::take(&mut cur_word));
+					if cur_word.is_empty() && !was_quoted {
+						cur_word.clear();
+					} else {
+						words.push(mem::take(&mut cur_word));
+					}
+					was_quoted = false;
         }
         _ => cur_word.push(ch),
       }
     }
-		words.push(cur_word);
+
+		if words.is_empty() && (cur_word.is_empty() && !was_quoted) {
+			return words;
+		} else {
+			words.push(cur_word);
+		}
+
+		words.retain(|w| w != &NULL_EXPAND.to_string());
     words
   }
 }
@@ -208,17 +226,16 @@ fn expand_one_brace(word: &str) -> ShResult<Vec<String>> {
 /// Extract prefix, inner, and suffix from a brace expression.
 /// "pre{a,b}post" -> Some(("pre", "a,b", "post"))
 fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
-	let mut chars = word.chars().enumerate().peekable();
+	let mut chars = word.chars().peekable();
 	let mut prefix = String::new();
 	let mut cur_quote: Option<char> = None;
-	let mut brace_start = None;
 
 	// Find the opening brace
-	while let Some((i, ch)) = chars.next() {
+	while let Some(ch) = chars.next() {
 		match ch {
 			'\\' => {
 				prefix.push(ch);
-				if let Some((_, next)) = chars.next() {
+				if let Some(next) = chars.next() {
 					prefix.push(next);
 				}
 			}
@@ -229,25 +246,22 @@ fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
 			'"' if cur_quote.is_none() => { cur_quote = Some('"'); prefix.push(ch); }
 			'"' if cur_quote == Some('"') => { cur_quote = None; prefix.push(ch); }
 			'{' if cur_quote.is_none() => {
-				brace_start = Some(i);
 				break;
 			}
 			_ => prefix.push(ch),
 		}
 	}
 
-	let brace_start = brace_start?;
-
 	// Find matching closing brace
 	let mut depth = 1;
 	let mut inner = String::new();
 	cur_quote = None;
 
-	while let Some((_, ch)) = chars.next() {
+	while let Some(ch) = chars.next() {
 		match ch {
 			'\\' => {
 				inner.push(ch);
-				if let Some((_, next)) = chars.next() {
+				if let Some(next) = chars.next() {
 					inner.push(next);
 				}
 			}
@@ -275,7 +289,7 @@ fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
 	}
 
 	// Collect suffix
-	let suffix: String = chars.map(|(_, c)| c).collect();
+	let suffix: String = chars.collect();
 
 	Some((prefix, inner, suffix))
 }
@@ -492,6 +506,11 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         chars.next();
         let parameter = format!("{ch}");
         let val = read_vars(|v| v.get_var(&parameter));
+
+				if (ch == '@' || ch == '*') && val.is_empty() {
+					return Ok(NULL_EXPAND.to_string());
+				}
+
         flog!(DEBUG, val);
         return Ok(val);
       }
@@ -815,7 +834,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
       };
 
       // Reclaim terminal foreground in case child changed it
-      crate::jobs::take_term()?;
+      jobs::take_term()?;
 
       match status {
         WtStat::Exited(_, _) => {
@@ -995,6 +1014,77 @@ pub fn unescape_str(raw: &str) -> String {
           }
         }
       }
+			'$' if chars.peek() == Some(&'\'') => {
+				chars.next();
+				result.push(SNG_QUOTE);
+				while let Some(q_ch) = chars.next() {
+					match q_ch {
+						'\'' => {
+							result.push(SNG_QUOTE);
+							break;
+						}
+						'\\' => {
+							if let Some(esc) = chars.next() {
+								match esc {
+									'n' => result.push('\n'),
+									't' => result.push('\t'),
+									'r' => result.push('\r'),
+									'\'' => result.push('\''),
+									'\\' => result.push('\\'),
+									'a' => result.push('\x07'),
+									'b' => result.push('\x08'),
+									'e' | 'E' => result.push('\x1b'),
+									'v' => result.push('\x0b'),
+									'x' => {
+										let mut hex = String::new();
+										if let Some(h1) = chars.next() {
+											hex.push(h1);
+										} else {
+											result.push_str("\\x");
+											continue;
+										}
+										if let Some(h2) = chars.next() {
+											hex.push(h2);
+										} else {
+											result.push_str(&format!("\\x{hex}"));
+											continue;
+										}
+										if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+											result.push(byte as char);
+										} else {
+											result.push_str(&format!("\\x{hex}"));
+											continue;
+										}
+									}
+									'o' => {
+										let mut oct = String::new();
+										for _ in 0..3 {
+											if let Some(o) = chars.peek() {
+												if o.is_digit(8) {
+													oct.push(*o);
+													chars.next();
+												} else {
+													break;
+												}
+											} else {
+												break;
+											}
+										}
+										if let Ok(byte) = u8::from_str_radix(&oct, 8) {
+											result.push(byte as char);
+										} else {
+											result.push_str(&format!("\\o{oct}"));
+											continue;
+										}
+									}
+									_ => result.push(esc),
+								}
+							}
+						}
+						_ => result.push(q_ch),
+					}
+				}
+			}
       '$' => {
         result.push(VAR_SUB);
         if chars.peek() == Some(&'$') {
