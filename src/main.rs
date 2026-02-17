@@ -101,7 +101,7 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
     write_vars(|v| v.cur_scope_mut().bpush_arg(arg))
   }
 
-	exec_input(input, None)
+	exec_input(input, None, false)
 }
 
 fn fern_interactive() -> ShResult<()> {
@@ -187,7 +187,7 @@ fn fern_interactive() -> ShResult<()> {
     match readline.process_input() {
       Ok(ReadlineEvent::Line(input)) => {
         write_meta(|m| m.start_timer());
-        if let Err(e) = exec_input(input, None) {
+        if let Err(e) = exec_input(input, None, true) {
           match e.kind() {
             ShErrKind::CleanExit(code) => {
               QUIT_CODE.store(*code, Ordering::SeqCst);

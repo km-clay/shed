@@ -116,7 +116,7 @@ impl ExecArgs {
 	}
 }
 
-pub fn exec_input(input: String, io_stack: Option<IoStack>) -> ShResult<()> {
+pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -> ShResult<()> {
 	let log_tab = read_logic(|l| l.clone());
 	let input = expand_aliases(input, HashSet::new(), &log_tab);
 	let mut parser = ParsedSrc::new(Arc::new(input));
@@ -127,7 +127,7 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>) -> ShResult<()> {
 		return Ok(());
 	}
 
-	let mut dispatcher = Dispatcher::new(parser.extract_nodes());
+	let mut dispatcher = Dispatcher::new(parser.extract_nodes(), interactive);
 	if let Some(mut stack) = io_stack {
 		dispatcher.io_stack.extend(stack.drain(..));
 	}
@@ -136,15 +136,17 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>) -> ShResult<()> {
 
 pub struct Dispatcher {
 	nodes: VecDeque<Node>,
+	interactive: bool,
 	pub io_stack: IoStack,
 	pub job_stack: JobStack,
 }
 
 impl Dispatcher {
-	pub fn new(nodes: Vec<Node>) -> Self {
+	pub fn new(nodes: Vec<Node>, interactive: bool) -> Self {
 		let nodes = VecDeque::from(nodes);
 		Self {
 			nodes,
+			interactive,
 			io_stack: IoStack::new(),
 			job_stack: JobStack::new(),
 		}
@@ -265,7 +267,7 @@ impl Dispatcher {
 		let subsh_body = subsh.0.to_string();
 		let _guard = ScopeGuard::shared_scope();
 
-		exec_input(subsh_body, None)?;
+		exec_input(subsh_body, None, self.interactive)?;
 
 		Ok(())
 	}
@@ -607,6 +609,10 @@ impl Dispatcher {
 		self.io_stack.append_to_frame(cmd.redirs);
 
 		let exec_args = ExecArgs::new(argv)?;
+		if self.interactive {
+			log::info!("expanded argv: {:?}", exec_args.argv.iter().map(|s| s.to_str().unwrap()).collect::<Vec<_>>());
+		}
+
 		let io_frame = self.io_stack.pop_frame();
 		run_fork(
 			io_frame,

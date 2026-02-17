@@ -94,9 +94,7 @@ impl Expander {
         _ => cur_word.push(ch),
       }
     }
-    if !cur_word.is_empty() {
-      words.push(cur_word);
-    }
+		words.push(cur_word);
     words
   }
 }
@@ -754,7 +752,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       let mut io_stack = IoStack::new();
       io_stack.push_frame(io_frame);
 
-      if let Err(e) = exec_input(raw.to_string(), Some(io_stack)) {
+      if let Err(e) = exec_input(raw.to_string(), Some(io_stack), false) {
         eprintln!("{e}");
         exit(1);
       }
@@ -787,7 +785,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
   match unsafe { fork()? } {
     ForkResult::Child => {
       io_stack.push_frame(cmd_sub_io_frame);
-      if let Err(e) = exec_input(raw.to_string(), Some(io_stack)) {
+      if let Err(e) = exec_input(raw.to_string(), Some(io_stack), false) {
         eprintln!("{e}");
         unsafe { libc::_exit(1) };
       }

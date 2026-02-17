@@ -802,6 +802,6 @@ pub fn source_file(path: PathBuf) -> ShResult<()> {
 
   let mut buf = String::new();
   file.read_to_string(&mut buf)?;
-  exec_input(buf, None)?;
+  exec_input(buf, None, false)?;
   Ok(())
 }
