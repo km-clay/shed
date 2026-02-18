@@ -32,7 +32,7 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
     code = status;
   }
 
-  flog!(DEBUG, code);
+  log::debug!("{code:?}");
 
   let kind = match kind {
     LoopContinue(_) => LoopContinue(code),

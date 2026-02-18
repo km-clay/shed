@@ -85,7 +85,7 @@ pub fn unalias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResul
     write(stdout, alias_output.as_bytes())?; // Write it
   } else {
     for (arg, span) in argv {
-      flog!(DEBUG, arg);
+      log::debug!("{arg:?}");
       if read_logic(|l| l.get_alias(&arg)).is_none() {
         return Err(ShErr::full(
           ShErrKind::SyntaxErr,

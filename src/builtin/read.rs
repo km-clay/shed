@@ -16,10 +16,10 @@ pub const READ_OPTS: [OptSpec;7] = [
 bitflags! {
 	pub struct ReadFlags: u32 {
 		const NO_ESCAPES = 	0b000001;
-		const NO_ECHO = 		0b000010;
-		const ARRAY = 			0b000100;
-		const N_CHARS = 		0b001000;
-		const TIMEOUT = 		0b010000;
+		const NO_ECHO = 		0b000010; // TODO: unused
+		const ARRAY = 			0b000100; // TODO: unused
+		const N_CHARS = 		0b001000; // TODO: unused
+		const TIMEOUT = 		0b010000; // TODO: unused
 	}
 }
 

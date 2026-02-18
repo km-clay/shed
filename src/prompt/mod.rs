@@ -18,7 +18,7 @@ pub fn get_prompt() -> ShResult<String> {
     return expand_prompt(default);
   };
 	let sanitized = format!("\\e[0m{prompt}");
-	flog!(DEBUG, "Using prompt: {}", sanitized.replace("\n", "\\n"));
+	log::debug!("Using prompt: {}", sanitized.replace("\n", "\\n"));
 
   expand_prompt(&sanitized)
 }

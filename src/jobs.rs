@@ -84,7 +84,7 @@ impl ChildProc {
     if let Some(pgid) = pgid {
       child.set_pgid(pgid).ok();
     }
-    flog!(TRACE, "new child: {:?}", child);
+    log::trace!("new child: {:?}", child);
     Ok(child)
   }
   pub fn pid(&self) -> Pid {
@@ -520,11 +520,11 @@ impl Job {
   }
   pub fn wait_pgrp(&mut self) -> ShResult<Vec<WtStat>> {
     let mut stats = vec![];
-    flog!(TRACE, "waiting on children");
-    flog!(TRACE, self.children);
+    log::trace!("waiting on children");
+    log::trace!("{:?}", self.children);
     for child in self.children.iter_mut() {
-      flog!(TRACE, "shell pid {}", Pid::this());
-      flog!(TRACE, "child pid {}", child.pid);
+      log::trace!("shell pid {}", Pid::this());
+      log::trace!("child pid {}", child.pid);
       if child.pid == Pid::this() {
         // TODO: figure out some way to get the exit code of builtins
         let code = state::get_status();
@@ -667,7 +667,7 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
   if job.children().is_empty() {
     return Ok(()); // Nothing to do
   }
-  flog!(TRACE, "Waiting on foreground job");
+  log::trace!("Waiting on foreground job");
   let mut code = 0;
   let mut was_stopped = false;
   attach_tty(job.pgid())?;
@@ -699,7 +699,7 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
   }
   take_term()?;
   set_status(code);
-  flog!(TRACE, "exit code: {}", code);
+  log::trace!("exit code: {}", code);
   enable_reaping();
   Ok(())
 }
@@ -719,7 +719,7 @@ pub fn attach_tty(pgid: Pid) -> ShResult<()> {
   if !isatty(0).unwrap_or(false) || pgid == term_ctlr() || killpg(pgid, None).is_err() {
     return Ok(());
   }
-  flog!(TRACE, "Attaching tty to pgid: {}", pgid);
+  log::trace!("Attaching tty to pgid: {}", pgid);
 
   if pgid == getpgrp() && term_ctlr() != getpgrp() {
     kill(term_ctlr(), Signal::SIGTTOU).ok();
@@ -745,7 +745,7 @@ pub fn attach_tty(pgid: Pid) -> ShResult<()> {
   match result {
     Ok(_) => Ok(()),
     Err(e) => {
-      flog!(ERROR, "error while switching term control: {}", e);
+      log::error!("error while switching term control: {}", e);
       tcsetpgrp(borrow_fd(0), getpgrp())?;
       Ok(())
     }

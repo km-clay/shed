@@ -179,7 +179,7 @@ pub trait KeyReader {
 
 pub trait LineWriter {
   fn clear_rows(&mut self, layout: &Layout) -> ShResult<()>;
-  fn redraw(&mut self, prompt: &str, line: &LineBuf, new_layout: &Layout) -> ShResult<()>;
+  fn redraw(&mut self, prompt: &str, line: &str, new_layout: &Layout) -> ShResult<()>;
   fn flush_write(&mut self, buf: &str) -> ShResult<()>;
 }
 
@@ -239,13 +239,13 @@ impl TermBuffer {
 impl Read for TermBuffer {
   fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
     assert!(isatty(self.tty).is_ok_and(|r| r));
-    flog!(DEBUG, "TermBuffer::read() ENTERING read syscall");
+    log::debug!("TermBuffer::read() ENTERING read syscall");
     let result = nix::unistd::read(self.tty, buf);
-    flog!(DEBUG, "TermBuffer::read() EXITED read syscall: {:?}", result);
+    log::debug!("TermBuffer::read() EXITED read syscall: {:?}", result);
     match result {
       Ok(n) => Ok(n),
       Err(Errno::EINTR) => {
-        flog!(DEBUG, "TermBuffer::read() returning EINTR");
+        log::debug!("TermBuffer::read() returning EINTR");
         Err(Errno::EINTR.into())
       }
       Err(e) => Err(std::io::Error::from_raw_os_error(e as i32)),
@@ -643,7 +643,7 @@ impl KeyReader for TermReader {
 
     loop {
       let byte = self.next_byte()?;
-      flog!(DEBUG, "read byte: {:?}", byte as char);
+      log::debug!("read byte: {:?}", byte as char);
       collected.push(byte);
 
       // If it's an escape seq, delegate to ESC sequence handler
@@ -706,7 +706,7 @@ impl Layout {
     to_cursor: &str,
     to_end: &str,
   ) -> Self {
-    flog!(DEBUG, to_cursor);
+    log::debug!("{to_cursor:?}");
     let prompt_end = Self::calc_pos(tab_stop, term_width, prompt, Pos { col: 0, row: 0 });
     let cursor = Self::calc_pos(tab_stop, term_width, to_cursor, prompt_end);
     let end = Self::calc_pos(tab_stop, term_width, to_end, prompt_end);
@@ -903,7 +903,7 @@ impl LineWriter for TermWriter {
     Ok(())
   }
 
-  fn redraw(&mut self, prompt: &str, line: &LineBuf, new_layout: &Layout) -> ShResult<()> {
+  fn redraw(&mut self, prompt: &str, line: &str, new_layout: &Layout) -> ShResult<()> {
     let err = |_| {
       ShErr::simple(
         ShErrKind::InternalErr,

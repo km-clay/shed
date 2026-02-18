@@ -176,7 +176,7 @@ bitflags! {
 
 impl LexStream {
   pub fn new(source: Arc<String>, flags: LexFlags) -> Self {
-    flog!(TRACE, "new lex stream");
+    log::trace!("new lex stream");
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
     Self {
       source,
@@ -405,10 +405,6 @@ impl LexStream {
               Span::new(paren_pos..paren_pos + 1, self.source.clone()),
             ));
           }
-          let mut proc_sub_tk = self.get_token(self.cursor..pos, TkRule::Str);
-          proc_sub_tk.flags |= TkFlags::IS_PROCSUB;
-          self.cursor = pos;
-          return Ok(proc_sub_tk);
         }
         '>' if chars.peek() == Some(&'(') => {
           pos += 2;
@@ -445,10 +441,6 @@ impl LexStream {
               Span::new(paren_pos..paren_pos + 1, self.source.clone()),
             ));
           }
-          let mut proc_sub_tk = self.get_token(self.cursor..pos, TkRule::Str);
-          proc_sub_tk.flags |= TkFlags::IS_PROCSUB;
-          self.cursor = pos;
-          return Ok(proc_sub_tk);
         }
         '$' if chars.peek() == Some(&'(') => {
           pos += 2;
@@ -485,10 +477,6 @@ impl LexStream {
               Span::new(paren_pos..paren_pos + 1, self.source.clone()),
             ));
           }
-          let mut cmdsub_tk = self.get_token(self.cursor..pos, TkRule::Str);
-          cmdsub_tk.flags |= TkFlags::IS_CMDSUB;
-          self.cursor = pos;
-          return Ok(cmdsub_tk);
         }
         '(' if self.next_is_cmd() && can_be_subshell => {
           pos += 1;
@@ -802,7 +790,7 @@ impl Iterator for LexStream {
           match self.read_string() {
             Ok(tk) => tk,
             Err(e) => {
-              flog!(ERROR, e);
+              log::error!("{e:?}");
               return Some(Err(e));
             }
           }

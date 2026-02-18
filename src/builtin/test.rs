@@ -247,9 +247,9 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         let rhs = rhs.expand()?.get_words().join(" ");
         conjunct_op = conjunct;
         let test_op = operator.as_str().parse::<TestOp>()?;
-        flog!(DEBUG, lhs);
-        flog!(DEBUG, rhs);
-        flog!(DEBUG, test_op);
+        log::debug!("{lhs:?}");
+        log::debug!("{rhs:?}");
+        log::debug!("{test_op:?}");
         match test_op {
           TestOp::Unary(_) => {
             return Err(ShErr::Full {
@@ -298,7 +298,7 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         }
       }
     };
-    flog!(DEBUG, last_result);
+    log::debug!("{last_result:?}");
 
     if let Some(op) = conjunct_op {
       match op {
@@ -316,6 +316,6 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
       last_result = result;
     }
   }
-  flog!(DEBUG, last_result);
+  log::debug!("{last_result:?}");
   Ok(last_result)
 }

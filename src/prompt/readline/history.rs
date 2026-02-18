@@ -53,18 +53,10 @@ impl HistEntry {
   }
   fn with_escaped_newlines(&self) -> String {
     let mut escaped = String::new();
-    let mut chars = self.command.chars();
-    while let Some(ch) = chars.next() {
+    for ch in self.command.chars() {
       match ch {
-        '\\' => {
-          escaped.push(ch);
-          if let Some(ch) = chars.next() {
-            escaped.push(ch)
-          }
-        }
-        '\n' => {
-          escaped.push_str("\\\n");
-        }
+        '\\' => escaped.push_str("\\\\"), // escape all backslashes
+        '\n' => escaped.push_str("\\\n"), // line continuation
         _ => escaped.push(ch),
       }
     }
@@ -155,8 +147,10 @@ impl FromStr for HistEntries {
           match ch {
             '\\' => {
               if let Some(esc_ch) = chars.next() {
+                // Unescape: \\ -> \, \n stays as literal n after backslash was written as \\n
                 cur_line.push(esc_ch);
               } else {
+                // Trailing backslash = line continuation in history file format
                 cur_line.push('\n');
                 feeding_lines = true;
               }
@@ -228,20 +222,17 @@ impl History {
       format!("{home}/.fern_history")
     }));
     let mut entries = read_hist_file(&path)?;
-    {
-      let id = entries.last().map(|ent| ent.id + 1).unwrap_or(0);
-      let timestamp = SystemTime::now();
-      let command = "".into();
-      entries.push(HistEntry {
-        id,
-        timestamp,
-        command,
-        new: true,
-      })
-    }
+    // Create pending entry for current input
+    let id = entries.last().map(|ent| ent.id + 1).unwrap_or(0);
+    entries.push(HistEntry {
+      id,
+      timestamp: SystemTime::now(),
+      command: String::new(),
+      new: true,
+    });
     let search_mask = dedupe_entries(&entries);
-    let cursor = entries.len() - 1;
-    let mut new = Self {
+    let cursor = search_mask.len().saturating_sub(1);
+    Ok(Self {
       path,
       entries,
       search_mask,
@@ -249,10 +240,13 @@ impl History {
       search_direction: Direction::Backward,
       ignore_dups: true,
       max_size: None,
-    };
-    new.push_empty_entry(); // Current pending command
-    Ok(new)
+    })
   }
+
+	pub fn reset(&mut self) {
+		self.search_mask = dedupe_entries(&self.entries);
+		self.cursor = self.search_mask.len().saturating_sub(1);
+	}
 
   pub fn entries(&self) -> &[HistEntry] {
     &self.entries
@@ -262,7 +256,16 @@ impl History {
     &self.search_mask
   }
 
-  pub fn push_empty_entry(&mut self) {}
+  pub fn push_empty_entry(&mut self) {
+		let timestamp = SystemTime::now();
+		let id = self.get_new_id();
+		self.entries.push(HistEntry {
+			id,
+			timestamp,
+			command: String::new(),
+			new: true,
+		});
+	}
 
   pub fn cursor_entry(&self) -> Option<&HistEntry> {
     self.search_mask.get(self.cursor)
@@ -300,7 +303,7 @@ impl History {
   }
 
   pub fn constrain_entries(&mut self, constraint: SearchConstraint) {
-    flog!(DEBUG, constraint);
+    log::debug!("{constraint:?}");
     let SearchConstraint { kind, term } = constraint;
     match kind {
       SearchKind::Prefix => {
@@ -315,6 +318,7 @@ impl History {
             .collect();
 
           self.search_mask = dedupe_entries(&filtered);
+					log::debug!("search mask len: {}", self.search_mask.len());
         }
         self.cursor = self.search_mask.len().saturating_sub(1);
       }
@@ -324,10 +328,12 @@ impl History {
 
   pub fn hint_entry(&self) -> Option<&HistEntry> {
     let second_to_last = self.search_mask.len().checked_sub(2)?;
+		log::info!("search mask: {:?}", self.search_mask.iter().map(|e| e.command()).collect::<Vec<_>>());
     self.search_mask.get(second_to_last)
   }
 
   pub fn get_hint(&self) -> Option<String> {
+		log::info!("checking cursor entry: {:?}", self.cursor_entry());
     if self
       .cursor_entry()
       .is_some_and(|ent| ent.is_new() && !ent.command().is_empty())
@@ -382,9 +388,7 @@ impl History {
 
     let last_file_entry = self
       .entries
-      .iter()
-      .filter(|ent| !ent.new)
-      .next_back()
+      .iter().rfind(|ent| !ent.new)
       .map(|ent| ent.command.clone())
       .unwrap_or_default();
 
@@ -405,6 +409,8 @@ impl History {
     }
 
     file.write_all(data.as_bytes())?;
+		self.push_empty_entry(); // Prepare for next command
+		self.reset(); // Reset search mask to include new pending entry
 
     Ok(())
   }

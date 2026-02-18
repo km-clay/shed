@@ -6,10 +6,10 @@ use term::{get_win_size, KeyReader, Layout, LineWriter, PollReader, TermWriter};
 use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd};
 use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
-use crate::libsh::{
+use crate::{libsh::{
   error::{ShErrKind, ShResult},
   term::{Style, Styled},
-};
+}, parse::lex::{self, LexFlags, Tk, TkFlags, TkRule}, prompt::readline::highlight::Highlighter};
 use crate::prelude::*;
 
 pub mod history;
@@ -20,6 +20,39 @@ pub mod register;
 pub mod term;
 pub mod vicmd;
 pub mod vimode;
+pub mod highlight;
+
+pub mod markers {
+	// token-level (derived from token class)
+	pub const COMMAND: char = '\u{fdd0}';
+	pub const BUILTIN: char = '\u{fdd1}';
+	pub const ARG: char = '\u{fdd2}';
+	pub const KEYWORD: char = '\u{fdd3}';
+	pub const OPERATOR: char = '\u{fdd4}';
+	pub const REDIRECT: char = '\u{fdd5}';
+	pub const COMMENT: char = '\u{fdd6}';
+	pub const ASSIGNMENT: char = '\u{fdd7}';
+	pub const CMD_SEP: char = '\u{fde0}';
+	pub const CASE_PAT: char = '\u{fde1}';
+	pub const SUBSH: char = '\u{fde7}';
+	pub const SUBSH_END: char = '\u{fde8}';
+
+	// sub-token (needs scanning)
+	pub const VAR_SUB: char = '\u{fdda}';
+	pub const VAR_SUB_END: char = '\u{fde3}';
+	pub const CMD_SUB: char = '\u{fdd8}';
+	pub const CMD_SUB_END: char = '\u{fde4}';
+	pub const PROC_SUB: char = '\u{fdd9}';
+	pub const PROC_SUB_END: char = '\u{fde9}';
+	pub const STRING_DQ: char = '\u{fddb}';
+	pub const STRING_DQ_END: char = '\u{fde5}';
+	pub const STRING_SQ: char = '\u{fddc}';
+	pub const STRING_SQ_END: char = '\u{fde6}';
+	pub const ESCAPE: char = '\u{fddd}';
+	pub const GLOB: char = '\u{fdde}';
+
+	pub const RESET: char = '\u{fde2}';
+}
 
 /// Non-blocking readline result
 pub enum ReadlineEvent {
@@ -35,6 +68,7 @@ pub struct FernVi {
   pub reader: PollReader,
   pub writer: Box<dyn LineWriter>,
   pub prompt: String,
+	pub highlighter: Highlighter,
   pub mode: Box<dyn ViMode>,
   pub old_layout: Option<Layout>,
   pub repeat_action: Option<CmdReplay>,
@@ -50,6 +84,7 @@ impl FernVi {
 				reader: PollReader::new(),
 				writer: Box::new(TermWriter::new(STDOUT_FILENO)),
 				prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
+				highlighter: Highlighter::new(),
 				mode: Box::new(ViInsert::new()),
 				old_layout: None,
 				repeat_action: None,
@@ -71,6 +106,9 @@ impl FernVi {
   /// Feed raw bytes from stdin into the reader's buffer
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
 		log::info!("Feeding bytes: {:?}", bytes.iter().map(|b| *b as char).collect::<String>());
+		let test_input = "echo \"hello $USER\" | grep $(whoami)";
+		let annotated = annotate_input(test_input);
+		log::info!("Annotated test input: {:?}", annotated);
     self.reader.feed_bytes(bytes);
   }
 
@@ -84,8 +122,8 @@ impl FernVi {
     if let Some(p) = prompt {
       self.prompt = p;
     }
-    self.editor.buffer.clear();
-    self.editor.cursor = Default::default();
+    self.editor = Default::default();
+		self.mode = Box::new(ViInsert::new());
     self.old_layout = None;
     self.needs_redraw = true;
   }
@@ -101,7 +139,7 @@ impl FernVi {
 
     // Process all available keys
     while let Some(key) = self.reader.read_key()? {
-      flog!(DEBUG, key);
+      log::debug!("{key:?}");
 
       if self.should_accept_hint(&key) {
         self.editor.accept_hint();
@@ -113,7 +151,7 @@ impl FernVi {
       let Some(mut cmd) = self.mode.handle_key(key) else {
         continue;
       };
-      flog!(DEBUG, cmd);
+      log::debug!("{cmd:?}");
       cmd.alter_line_motion_if_no_verb();
 
       if self.should_grab_history(&cmd) {
@@ -165,15 +203,14 @@ impl FernVi {
     Ok(ReadlineEvent::Pending)
   }
 
-  pub fn get_layout(&mut self) -> Layout {
-    let line = self.editor.to_string();
-    flog!(DEBUG, line);
+  pub fn get_layout(&mut self, line: &str) -> Layout {
+    log::debug!("{line:?}");
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
     let (cols, _) = get_win_size(STDIN_FILENO);
     Layout::from_parts(/* tab_stop: */ 8, cols, &self.prompt, to_cursor, &line)
   }
   pub fn scroll_history(&mut self, cmd: ViCmd) {
-    flog!(DEBUG, "scrolling");
+    log::debug!("scrolling");
     /*
     if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
       let constraint = SearchConstraint::new(SearchKind::Prefix, self.editor.to_string());
@@ -182,23 +219,23 @@ impl FernVi {
     */
     let count = &cmd.motion().unwrap().0;
     let motion = &cmd.motion().unwrap().1;
-    flog!(DEBUG, count, motion);
-    flog!(DEBUG, self.history.masked_entries());
+    log::debug!("{count:?}, {motion:?}");
+    log::debug!("{:?}", self.history.masked_entries());
     let entry = match motion {
       Motion::LineUpCharwise => {
         let Some(hist_entry) = self.history.scroll(-(*count as isize)) else {
           return;
         };
-        flog!(DEBUG, "found entry");
-        flog!(DEBUG, hist_entry.command());
+        log::debug!("found entry");
+        log::debug!("{:?}", hist_entry.command());
         hist_entry
       }
       Motion::LineDownCharwise => {
         let Some(hist_entry) = self.history.scroll(*count as isize) else {
           return;
         };
-        flog!(DEBUG, "found entry");
-        flog!(DEBUG, hist_entry.command());
+        log::debug!("found entry");
+        log::debug!("{:?}", hist_entry.command());
         hist_entry
       }
       _ => unreachable!(),
@@ -223,8 +260,8 @@ impl FernVi {
     self.editor = buf
   }
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
-    flog!(DEBUG, self.editor.cursor_at_max());
-    flog!(DEBUG, self.editor.cursor);
+    log::debug!("{:?}", self.editor.cursor_at_max());
+    log::debug!("{:?}", self.editor.cursor);
     if self.editor.cursor_at_max() && self.editor.has_hint() {
       match self.mode.report_mode() {
         ModeReport::Replace | ModeReport::Insert => {
@@ -255,15 +292,25 @@ impl FernVi {
         && !self.history.cursor_entry().is_some_and(|ent| ent.is_new()))
   }
 
+	pub fn line_text(&mut self) -> String {
+		let line = self.editor.to_string();
+		self.highlighter.load_input(&line);
+		self.highlighter.highlight();
+		let highlighted = self.highlighter.take();
+		let hint = self.editor.get_hint_text();
+		format!("{highlighted}{hint}")
+	}
+
   pub fn print_line(&mut self) -> ShResult<()> {
-    let new_layout = self.get_layout();
+		let line = self.line_text();
+    let new_layout = self.get_layout(&line);
     if let Some(layout) = self.old_layout.as_ref() {
       self.writer.clear_rows(layout)?;
     }
 
     self
       .writer
-      .redraw(&self.prompt, &self.editor, &new_layout)?;
+      .redraw(&self.prompt, &line, &new_layout)?;
 
     self.writer.flush_write(&self.mode.cursor_style())?;
 
@@ -425,4 +472,271 @@ impl FernVi {
     }
     Ok(())
   }
+}
+
+/// Annotate a given input with helpful markers that give quick contextual syntax information
+/// Useful for syntax highlighting and completion
+pub fn annotate_input(input: &str) -> String {
+	let mut annotated = input.to_string();
+	let input = Arc::new(input.to_string());
+	let tokens: Vec<Tk> = lex::LexStream::new(input, LexFlags::LEX_UNFINISHED)
+		.flatten()
+		.collect();
+
+	for tk in tokens.into_iter().rev() {
+		annotate_token(&mut annotated, tk);
+	}
+
+	annotated
+}
+
+pub fn marker_for(class: &TkRule) -> Option<char> {
+	match class {
+		TkRule::Pipe |
+		TkRule::ErrPipe |
+		TkRule::And |
+		TkRule::Or |
+		TkRule::Bg => Some(markers::OPERATOR),
+		TkRule::Sep => Some(markers::CMD_SEP),
+		TkRule::Redir => Some(markers::REDIRECT),
+		TkRule::CasePattern => Some(markers::CASE_PAT),
+		TkRule::BraceGrpStart => todo!(),
+		TkRule::BraceGrpEnd => todo!(),
+		TkRule::Comment => todo!(),
+		TkRule::Expanded { exp: _ } |
+		TkRule::EOI |
+		TkRule::SOI |
+		TkRule::Null |
+		TkRule::Str => None,
+	}
+}
+
+pub fn annotate_token(input: &mut String, token: Tk) {
+	if token.class != TkRule::Str
+	&& let Some(marker) = marker_for(&token.class) {
+		input.insert(token.span.end, markers::RESET);
+		input.insert(token.span.start, marker);
+		return;
+	} else if token.flags.contains(TkFlags::IS_SUBSH) {
+		let token_raw = token.span.as_str();
+		if token_raw.ends_with(')') {
+			input.insert(token.span.end, markers::SUBSH_END);
+		}
+		input.insert(token.span.start, markers::SUBSH);
+		return;
+	}
+
+
+	let token_raw = token.span.as_str();
+	let mut token_chars = token_raw
+		.char_indices()
+		.peekable();
+
+	let span_start = token.span.start;
+
+	let mut in_dub_qt = false;
+	let mut in_sng_qt = false;
+	let mut cmd_sub_depth = 0;
+	let mut proc_sub_depth = 0;
+
+	let mut insertions: Vec<(usize, char)> = vec![];
+
+	if token.flags.contains(TkFlags::BUILTIN) {
+		insertions.insert(0, (span_start, markers::BUILTIN));
+	} else if token.flags.contains(TkFlags::IS_CMD) {
+		insertions.insert(0, (span_start, markers::COMMAND));
+	}
+
+	if token.flags.contains(TkFlags::KEYWORD) {
+		insertions.insert(0, (span_start, markers::KEYWORD));
+	}
+
+	if token.flags.contains(TkFlags::ASSIGN) {
+		insertions.insert(0, (span_start, markers::ASSIGNMENT));
+	}
+
+	insertions.insert(0, (token.span.end, markers::RESET)); // reset at the end of the token
+
+	while let Some((i,ch)) = token_chars.peek() {
+		let index = *i; // we have to dereference this here because rustc is a very pedantic program
+		match ch {
+			')' if cmd_sub_depth > 0 || proc_sub_depth > 0 => {
+				token_chars.next(); // consume the paren
+				if cmd_sub_depth > 0 {
+					cmd_sub_depth -= 1;
+					if cmd_sub_depth == 0 {
+						insertions.push((span_start + index + 1, markers::CMD_SUB_END));
+					}
+				} else if proc_sub_depth > 0 {
+					proc_sub_depth -= 1;
+					if proc_sub_depth == 0 {
+						insertions.push((span_start + index + 1, markers::PROC_SUB_END));
+					}
+				}
+			}
+			'$' if !in_sng_qt => {
+				let dollar_pos = index;
+				token_chars.next(); // consume the dollar
+				if let Some((_, dollar_ch)) = token_chars.peek() {
+					match dollar_ch {
+						'(' => {
+							cmd_sub_depth += 1;
+							if cmd_sub_depth == 1 {
+								// only mark top level command subs
+								insertions.push((span_start + dollar_pos, markers::CMD_SUB));
+							}
+							token_chars.next(); // consume the paren
+						}
+						'{' if cmd_sub_depth == 0 => {
+							insertions.push((span_start + dollar_pos, markers::VAR_SUB));
+							token_chars.next(); // consume the brace
+							let mut end_pos = dollar_pos + 2; // position after ${
+							while let Some((cur_i, br_ch)) = token_chars.peek() {
+								end_pos = *cur_i;
+								// TODO: implement better parameter expansion awareness here
+								// this is a little too permissive
+								if br_ch.is_ascii_alphanumeric()
+								|| *br_ch == '_'
+								|| *br_ch == '!'
+								|| *br_ch == '#'
+								|| *br_ch == '%'
+								|| *br_ch == ':'
+								|| *br_ch == '-'
+								|| *br_ch == '+'
+								|| *br_ch == '='
+								|| *br_ch == '/' // parameter expansion symbols
+								|| *br_ch == '?' {
+									token_chars.next();
+								} else if *br_ch == '}' {
+									token_chars.next(); // consume the closing brace
+									insertions.push((span_start + end_pos + 1, markers::VAR_SUB_END));
+									break;
+								} else {
+									// malformed, insert end at current position
+									insertions.push((span_start + end_pos, markers::VAR_SUB_END));
+									break;
+								}
+							}
+						}
+						_ if cmd_sub_depth == 0 && (dollar_ch.is_ascii_alphanumeric() || *dollar_ch == '_') => {
+							insertions.push((span_start + dollar_pos, markers::VAR_SUB));
+							let mut end_pos = dollar_pos + 1;
+							// consume the var name
+							while let Some((cur_i, var_ch)) = token_chars.peek() {
+								if var_ch.is_ascii_alphanumeric() || *var_ch == '_' {
+									end_pos = *cur_i + 1;
+									token_chars.next();
+								} else {
+									break;
+								}
+							}
+							insertions.push((span_start + end_pos, markers::VAR_SUB_END));
+						}
+						_ => { /* Just a plain dollar sign, no marker needed */ }
+					}
+				}
+			}
+			ch if cmd_sub_depth > 0 || proc_sub_depth > 0 => {
+				// We are inside of a command sub or process sub right now
+				// We don't mark any of this text. It will later be recursively annotated
+				// by the syntax highlighter
+				token_chars.next(); // consume the char with no special handling
+			}
+
+			'\\' if !in_sng_qt => {
+				token_chars.next(); // consume the backslash
+				if token_chars.peek().is_some() {
+					token_chars.next(); // consume the escaped char
+				}
+			}
+			'<' | '>' if !in_dub_qt && !in_sng_qt && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
+				token_chars.next();
+				if let Some((_, proc_sub_ch)) = token_chars.peek()
+				&& *proc_sub_ch == '(' {
+					proc_sub_depth += 1;
+					token_chars.next(); // consume the paren
+					if proc_sub_depth == 1 {
+						insertions.push((span_start + index, markers::PROC_SUB));
+					}
+				}
+			}
+			'"' if !in_sng_qt => {
+				if in_dub_qt {
+					insertions.push((span_start + *i + 1, markers::STRING_DQ_END));
+				} else {
+					insertions.push((span_start + *i, markers::STRING_DQ));
+				}
+				in_dub_qt = !in_dub_qt;
+				token_chars.next(); // consume the quote
+			}
+			'\'' if !in_dub_qt => {
+				if in_sng_qt {
+					insertions.push((span_start + *i + 1, markers::STRING_SQ_END));
+				} else {
+					insertions.push((span_start + *i, markers::STRING_SQ));
+				}
+				in_sng_qt = !in_sng_qt;
+				token_chars.next(); // consume the quote
+			}
+			'[' if !in_dub_qt && !in_sng_qt => {
+				token_chars.next(); // consume the opening bracket
+				let start_pos = span_start + index;
+				let mut is_glob_pat = false;
+				const VALID_CHARS: &[char] = &['!', '^', '-'];
+
+				while let Some((cur_i, ch)) = token_chars.peek() {
+					if *ch == ']' {
+						is_glob_pat = true;
+						insertions.push((span_start + *cur_i + 1, markers::RESET));
+						insertions.push((span_start + *cur_i, markers::GLOB));
+						token_chars.next(); // consume the closing bracket
+						break;
+					} else if !ch.is_ascii_alphanumeric() && !VALID_CHARS.contains(ch) {
+						token_chars.next();
+						break;
+					} else {
+						token_chars.next();
+					}
+				}
+
+				if is_glob_pat {
+					insertions.push((start_pos + 1, markers::RESET));
+					insertions.push((start_pos, markers::GLOB));
+				}
+			}
+			'*' | '?' if (!in_dub_qt && !in_sng_qt) => {
+				insertions.push((span_start + *i, markers::GLOB));
+				token_chars.next(); // consume the glob char
+			}
+			_ => {
+				token_chars.next(); // consume the char with no special handling
+			}
+		}
+	}
+
+	// Sort by position descending, with priority ordering at same position:
+	// - RESET first (inserted first, ends up rightmost)
+	// - Regular markers middle
+	// - END markers last (inserted last, ends up leftmost)
+	// Result: [END][TOGGLE][RESET]
+	insertions.sort_by(|a, b| {
+		match b.0.cmp(&a.0) {
+			std::cmp::Ordering::Equal => {
+				let priority = |m: char| -> u8 {
+					match m {
+						markers::RESET => 0,
+						markers::VAR_SUB_END | markers::CMD_SUB_END => 2,
+						_ => 1,
+					}
+				};
+				priority(a.1).cmp(&priority(b.1))
+			}
+			other => other,
+		}
+	});
+
+	for (pos, marker) in insertions {
+		let pos = pos.max(0).min(input.len());
+		input.insert(pos, marker);
+	}
 }

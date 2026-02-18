@@ -5,15 +5,12 @@ use crate::{
 		alias::{alias, unalias}, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{JobBehavior, continue_job, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, zoltraak::zoltraak
 	},
 	expand::expand_aliases,
-	jobs::{ChildProc, JobBldr, JobStack, dispatch_job},
-	libsh::{
-		error::{ShErr, ShErrKind, ShResult, ShResultExt},
-		utils::RedirVecUtils,
-	},
+	jobs::{ChildProc, JobStack, dispatch_job},
+	libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
 	prelude::*,
-	procio::{IoFrame, IoMode, IoStack},
+	procio::{IoMode, IoStack},
 	state::{
-		self, FERN, ShFunc, VarFlags, read_logic, write_logic, write_meta, write_vars
+		self, ShFunc, VarFlags, read_logic, write_logic, write_vars
 	},
 };
 
@@ -141,7 +138,7 @@ impl Dispatcher {
 		}
 	}
 	pub fn begin_dispatch(&mut self) -> ShResult<()> {
-		flog!(TRACE, "beginning dispatch");
+		log::trace!("beginning dispatch");
 		while let Some(node) = self.nodes.pop_front() {
 			let blame = node.get_span();
 			self.dispatch_node(node).try_blame(blame)?;
@@ -543,7 +540,7 @@ impl Dispatcher {
 			return self.dispatch_cmd(cmd);
 		}
 
-		flog!(TRACE, "doing builtin");
+		log::trace!("doing builtin");
 		let result = match cmd_raw.span.as_str() {
 			"echo" => echo(cmd, io_stack_mut, curr_job_mut),
 			"cd" => cd(cmd, curr_job_mut),
@@ -596,20 +593,47 @@ impl Dispatcher {
 		self.io_stack.append_to_frame(cmd.redirs);
 
 		let exec_args = ExecArgs::new(argv)?;
-		if self.interactive {
-			log::info!("expanded argv: {:?}", exec_args.argv.iter().map(|s| s.to_str().unwrap()).collect::<Vec<_>>());
-		}
 
 		let _guard = self.io_stack
 			.pop_frame()
 			.redirect()?;
 
-		run_fork(
-			Some(exec_args),
-			self.job_stack.curr_job_mut().unwrap(),
-			def_child_action,
-			def_parent_action,
-		)?;
+		let job = self.job_stack.curr_job_mut().unwrap();
+
+		match unsafe { fork()? } {
+			ForkResult::Child => {
+				let cmd = &exec_args.cmd.0;
+				let span = exec_args.cmd.1;
+
+				let Err(e) = execvpe(cmd, &exec_args.argv, &exec_args.envp);
+
+				// execvpe only returns on error
+				let cmd_str = cmd.to_str().unwrap().to_string();
+				match e {
+					Errno::ENOENT => {
+						let err = ShErr::full(ShErrKind::CmdNotFound(cmd_str), "", span);
+						eprintln!("{err}");
+					}
+					_ => {
+						let err = ShErr::full(ShErrKind::Errno(e), format!("{e}"), span);
+						eprintln!("{err}");
+					}
+				}
+				exit(e as i32)
+			}
+			ForkResult::Parent { child } => {
+				let cmd_name = exec_args.cmd.0.to_str().unwrap();
+
+				let child_pgid = if let Some(pgid) = job.pgid() {
+					pgid
+				} else {
+					job.set_pgid(child);
+					child
+				};
+				let child_proc = ChildProc::new(child, Some(cmd_name), Some(child_pgid))?;
+				job.push_child(child_proc);
+			}
+		}
 
 		for var in env_vars_to_unset {
 			unsafe { std::env::set_var(&var, "") };
@@ -669,67 +693,6 @@ pub fn prepare_argv(argv: Vec<Tk>) -> ShResult<Vec<(String, Span)>> {
 		}
 	}
 	Ok(args)
-}
-
-pub fn run_fork<C, P>(
-	exec_args: Option<ExecArgs>,
-	job: &mut JobBldr,
-	child_action: C,
-	parent_action: P,
-) -> ShResult<()>
-where
-	C: Fn(Option<ExecArgs>),
-	P: Fn(&mut JobBldr, Option<&str>, Pid) -> ShResult<()>,
-{
-	match unsafe { fork()? } {
-		ForkResult::Child => {
-			child_action(exec_args);
-			exit(0); // Just in case
-		}
-		ForkResult::Parent { child } => {
-			let cmd = if let Some(args) = exec_args {
-				Some(args.cmd.0.to_str().unwrap().to_string())
-			} else {
-				None
-			};
-			parent_action(job, cmd.as_deref(), child)
-		}
-	}
-}
-
-/// The default behavior for the child process after forking
-pub fn def_child_action(exec_args: Option<ExecArgs>) {
-	let exec_args = exec_args.unwrap();
-	let cmd = &exec_args.cmd.0;
-	let span = exec_args.cmd.1;
-
-	let Err(e) = execvpe(cmd, &exec_args.argv, &exec_args.envp);
-
-	let cmd = cmd.to_str().unwrap().to_string();
-	match e {
-		Errno::ENOENT => {
-			let err = ShErr::full(ShErrKind::CmdNotFound(cmd), "", span);
-			eprintln!("{err}");
-		}
-		_ => {
-			let err = ShErr::full(ShErrKind::Errno(e), format!("{e}"), span);
-			eprintln!("{err}");
-		}
-	}
-	exit(e as i32)
-}
-
-/// The default behavior for the parent process after forking
-pub fn def_parent_action(job: &mut JobBldr, cmd: Option<&str>, child_pid: Pid) -> ShResult<()> {
-	let child_pgid = if let Some(pgid) = job.pgid() {
-		pgid
-	} else {
-		job.set_pgid(child_pid);
-		child_pid
-	};
-	let child = ChildProc::new(child_pid, cmd, Some(child_pgid))?;
-	job.push_child(child);
-	Ok(())
 }
 
 /// Initialize the pipes for a pipeline

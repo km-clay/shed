@@ -462,13 +462,14 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         result.push_str(&fd_path);
       }
       VAR_SUB => {
-        flog!(INFO, chars);
+        log::info!("{chars:?}");
         let expanded = expand_var(chars)?;
         result.push_str(&expanded);
       }
       _ => result.push(ch),
     }
   }
+	log::debug!("expand_raw result: {result:?}");
   Ok(result)
 }
 
@@ -511,14 +512,14 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 					return Ok(NULL_EXPAND.to_string());
 				}
 
-        flog!(DEBUG, val);
+        log::debug!("{val:?}");
         return Ok(val);
       }
       ch if is_hard_sep(ch) || !(ch.is_alphanumeric() || ch == '_' || ch == '-') => {
         let val = read_vars(|v| v.get_var(&var_name));
-        flog!(INFO, var_name);
-        flog!(INFO, val);
-        flog!(INFO, ch);
+        log::info!("{var_name:?}");
+        log::info!("{val:?}");
+        log::info!("{ch:?}");
         return Ok(val);
       }
       _ => {
@@ -529,7 +530,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   }
   if !var_name.is_empty() {
     let var_val = read_vars(|v| v.get_var(&var_name));
-    flog!(INFO, var_val);
+    log::info!("{var_val:?}");
     Ok(var_val)
   } else {
     Ok(String::new())
@@ -780,7 +781,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
     ForkResult::Parent { child } => {
       write_jobs(|j| j.register_fd(child, register_fd));
       let registered = read_jobs(|j| j.registered_fds().to_vec());
-      flog!(DEBUG, registered);
+      log::debug!("{registered:?}");
       // Do not wait; process may run in background
       Ok(path)
     }
@@ -789,8 +790,8 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 
 /// Get the command output of a given command input as a String
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
-  flog!(DEBUG, "in expand_cmd_sub");
-  flog!(DEBUG, raw);
+  log::debug!("in expand_cmd_sub");
+  log::debug!("{raw:?}");
   if raw.starts_with('(') && raw.ends_with(')')
     && let Ok(output) = expand_arithmetic(raw) {
       return Ok(output); // It's actually an arithmetic sub
@@ -814,7 +815,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
       std::mem::drop(cmd_sub_io_frame); // Closes the write pipe
 
       // Read output first (before waiting) to avoid deadlock if child fills pipe buffer
-      flog!(DEBUG, "filling buffer");
+      log::debug!("filling buffer");
       loop {
         match io_buf.fill_buffer() {
           Ok(()) => break,
@@ -822,7 +823,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
           Err(e) => return Err(e.into()),
         }
       }
-      flog!(DEBUG, "done");
+      log::debug!("done");
 
       // Wait for child with EINTR retry
       let status = loop {
@@ -1104,7 +1105,7 @@ pub fn unescape_math(raw: &str) -> String {
   let mut result = String::new();
 
   while let Some(ch) = chars.next() {
-    flog!(DEBUG, result);
+    log::debug!("{result:?}");
     match ch {
       '\\' => {
         if let Some(next_ch) = chars.next() {
@@ -1147,7 +1148,7 @@ pub fn unescape_math(raw: &str) -> String {
       _ => result.push(ch),
     }
   }
-  flog!(INFO, result);
+  log::info!("{result:?}");
   result
 }
 
@@ -1301,9 +1302,9 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
     }
   }
 
-  flog!(DEBUG, rest);
+  log::debug!("{rest:?}");
   if let Ok(expansion) = rest.parse::<ParamExp>() {
-    flog!(DEBUG, expansion);
+    log::debug!("{expansion:?}");
     match expansion {
       ParamExp::Len => unreachable!(),
       ParamExp::DefaultUnsetOrNull(default) => {
@@ -1522,7 +1523,7 @@ fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
   if anchored {
     regex.push('$');
   }
-  flog!(DEBUG, regex);
+  log::debug!("{regex:?}");
   Regex::new(&regex).unwrap()
 }
 
@@ -1945,7 +1946,7 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 			PromptTk::FailureSymbol => todo!(),
 			PromptTk::JobCount => todo!(),
 			PromptTk::Function(f) => {
-				flog!(DEBUG, "Expanding prompt function: {}", f);
+				log::debug!("Expanding prompt function: {}", f);
 				let output = expand_cmd_sub(&f)?;
 				result.push_str(&output);
 			}

@@ -137,9 +137,9 @@ impl<R: Read> IoBuf<R> {
   pub fn fill_buffer(&mut self) -> io::Result<()> {
     let mut temp_buf = vec![0; 1024]; // Read in chunks
     loop {
-      flog!(DEBUG, "reading bytes");
+      log::debug!("reading bytes");
       let bytes_read = self.reader.read(&mut temp_buf)?;
-      flog!(DEBUG, bytes_read);
+      log::debug!("{bytes_read:?}");
       if bytes_read == 0 {
         break; // EOF reached
       }
@@ -220,11 +220,11 @@ impl<'e> IoFrame {
     self.save();
     for redir in &mut self.redirs {
       let io_mode = &mut redir.io_mode;
-      flog!(DEBUG, io_mode);
+      log::debug!("{io_mode:?}");
       if let IoMode::File { .. } = io_mode {
         *io_mode = io_mode.clone().open_file()?;
       };
-      flog!(DEBUG, io_mode);
+      log::debug!("{io_mode:?}");
       let tgt_fd = io_mode.tgt_fd();
       let src_fd = io_mode.src_fd();
       dup2(src_fd, tgt_fd)?;
