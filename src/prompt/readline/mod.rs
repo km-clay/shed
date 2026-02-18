@@ -62,6 +62,30 @@ pub mod markers {
 		SUBSH_END,
 		RESET
 	];
+	pub const TOKEN_LEVEL: [char;10] = [
+		SUBSH,
+		COMMAND,
+		BUILTIN,
+		ARG,
+		KEYWORD,
+		OPERATOR,
+		REDIRECT,
+		CMD_SEP,
+		CASE_PAT,
+		ASSIGNMENT,
+	];
+	pub const SUB_TOKEN: [char;6] = [
+		VAR_SUB,
+		CMD_SUB,
+		PROC_SUB,
+		STRING_DQ,
+		STRING_SQ,
+		GLOB,
+	];
+
+	pub fn is_marker(c: char) -> bool {
+		TOKEN_LEVEL.contains(&c) || SUB_TOKEN.contains(&c) || END_MARKERS.contains(&c)
+	}
 }
 
 /// Non-blocking readline result
@@ -219,7 +243,7 @@ impl FernVi {
     log::debug!("{line:?}");
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
     let (cols, _) = get_win_size(STDIN_FILENO);
-    Layout::from_parts(/* tab_stop: */ 8, cols, &self.prompt, to_cursor, &line)
+    Layout::from_parts(/* tab_stop: */ 8, cols, &self.prompt, to_cursor, line)
   }
   pub fn scroll_history(&mut self, cmd: ViCmd) {
     log::debug!("scrolling");
@@ -305,12 +329,16 @@ impl FernVi {
   }
 
 	pub fn line_text(&mut self) -> String {
+		let start = Instant::now();
 		let line = self.editor.to_string();
 		self.highlighter.load_input(&line);
 		self.highlighter.highlight();
 		let highlighted = self.highlighter.take();
 		let hint = self.editor.get_hint_text();
-		format!("{highlighted}{hint}")
+		let complete = format!("{highlighted}{hint}");
+		let end = start.elapsed();
+		log::info!("Line styling done in: {:.2?}", end);
+		complete
 	}
 
   pub fn print_line(&mut self) -> ShResult<()> {
@@ -486,8 +514,25 @@ impl FernVi {
   }
 }
 
-/// Annotate a given input with helpful markers that give quick contextual syntax information
-/// Useful for syntax highlighting and completion
+/// Annotates shell input with invisible Unicode markers for syntax highlighting
+///
+/// Takes raw shell input and inserts non-character markers (U+FDD0-U+FDEF range)
+/// around syntax elements. These markers indicate:
+/// - Token-level context (commands, arguments, operators, keywords)
+/// - Sub-token constructs (strings, variables, command substitutions, globs)
+///
+/// The annotated string is suitable for processing by the highlighter, which
+/// interprets the markers and generates ANSI escape codes.
+///
+/// # Strategy
+/// Tokens are processed in reverse order so that later insertions don't
+/// invalidate earlier positions. Each token is annotated independently.
+///
+/// # Example
+/// ```text
+/// "echo $USER"  ->  "COMMAND echo RESET ARG VAR_SUB $USER VAR_SUB_END RESET"
+/// ```
+/// (where COMMAND, RESET, etc. are invisible Unicode markers)
 pub fn annotate_input(input: &str) -> String {
 	let mut annotated = input.to_string();
 	let input = Arc::new(input.to_string());
@@ -502,6 +547,16 @@ pub fn annotate_input(input: &str) -> String {
 	annotated
 }
 
+/// Maps token class to its corresponding marker character
+///
+/// Returns the appropriate Unicode marker for token-level syntax elements.
+/// Token-level markers are derived directly from the lexer's token classification
+/// and represent complete tokens (operators, separators, etc.).
+///
+/// Returns `None` for:
+/// - String tokens (which need sub-token scanning for variables, quotes, etc.)
+/// - Structural markers (SOI, EOI, Null)
+/// - Unimplemented features (comments, brace groups)
 pub fn marker_for(class: &TkRule) -> Option<char> {
 	match class {
 		TkRule::Pipe |
@@ -523,7 +578,48 @@ pub fn marker_for(class: &TkRule) -> Option<char> {
 	}
 }
 
+/// Annotates a single token with markers for both token-level and sub-token constructs
+///
+/// This is the core annotation function that handles the complexity of shell syntax.
+/// It uses a two-phase approach:
+///
+/// # Phase 1: Analysis (Delayed Insertion)
+/// Scans through the token character by character, recording marker insertions
+/// as `(position, marker)` pairs in a list. This avoids borrowing issues and
+/// allows context queries during the scan.
+///
+/// The analysis phase handles:
+/// - **Strings**: Single/double quoted regions (with escaping rules)
+/// - **Variables**: `$VAR` and `${VAR}` expansions
+/// - **Command substitutions**: `$(...)` with depth tracking
+/// - **Process substitutions**: `<(...)` and `>(...)`
+/// - **Globs**: `*`, `?`, `[...]` patterns (context-aware)
+/// - **Escapes**: Backslash escaping
+///
+/// # Phase 2: Application (Sorted Insertion)
+/// Markers are sorted by position (descending) to avoid index invalidation when
+/// inserting into the string. At the same position, markers are ordered:
+/// 1. RESET (rightmost)
+/// 2. Regular markers (middle)
+/// 3. END markers (leftmost)
+///
+/// This produces the pattern: `[END][TOGGLE][RESET]` at boundaries.
+///
+/// # Context Tracking
+/// The `in_context` closure queries the insertion list to determine the active
+/// syntax context at the current position. This enables context-aware decisions
+/// like "only highlight globs in arguments, not in command names".
+///
+/// # Depth Tracking
+/// Nested constructs like `$(echo $(date))` are tracked with depth counters.
+/// Only the outermost construct is marked; inner content is handled recursively
+/// by the highlighter.
 pub fn annotate_token(input: &mut String, token: Tk) {
+	// Sort by position descending, with priority ordering at same position:
+	// - RESET first (inserted first, ends up rightmost)
+	// - Regular markers middle
+	// - END markers last (inserted last, ends up leftmost)
+	// Result: [END][TOGGLE][RESET]
 	let sort_insertions = |insertions: &mut Vec<(usize, char)>| {
 		insertions.sort_by(|a, b| {
 			match b.0.cmp(&a.0) {
@@ -531,12 +627,18 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 					let priority = |m: char| -> u8 {
 						match m {
 							markers::RESET => 0,
+							markers::VAR_SUB |
 							markers::VAR_SUB_END |
+							markers::CMD_SUB |
 							markers::CMD_SUB_END |
+							markers::PROC_SUB |
 							markers::PROC_SUB_END |
+							markers::STRING_DQ |
 							markers::STRING_DQ_END |
+							markers::STRING_SQ |
 							markers::STRING_SQ_END |
 							markers::SUBSH_END => 2,
+							markers::ARG => 3,
 							_ => 1,
 						}
 					};
@@ -555,12 +657,18 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 					let priority = |m: char| -> u8 {
 						match m {
 							markers::RESET => 0,
+							markers::VAR_SUB |
 							markers::VAR_SUB_END |
+							markers::CMD_SUB |
 							markers::CMD_SUB_END |
+							markers::PROC_SUB |
 							markers::PROC_SUB_END |
+							markers::STRING_DQ |
 							markers::STRING_DQ_END |
+							markers::STRING_SQ |
 							markers::STRING_SQ_END |
 							markers::SUBSH_END => 2,
+							markers::ARG => 3, // Lowest priority - processed first, overridden by sub-tokens
 							_ => 1,
 						}
 					};
@@ -571,12 +679,9 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 		});
 		stack.retain(|(i, m)| *i <= token.span.start && !markers::END_MARKERS.contains(m));
 
-		log::error!("Checking context for token '{}', looking for '{}'", token.span.as_str(), c);
 		let Some(ctx) = stack.last() else {
 			return false;
 		};
-		log::error!("Context stack for token '{}': {:?}", token.span.as_str(), stack);
-		log::error!("Found context marker '{}' at position {}", ctx.1, ctx.0);
 
 		ctx.1 == c
 	};
@@ -788,14 +893,10 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 		}
 	}
 
-	// Sort by position descending, with priority ordering at same position:
-	// - RESET first (inserted first, ends up rightmost)
-	// - Regular markers middle
-	// - END markers last (inserted last, ends up leftmost)
-	// Result: [END][TOGGLE][RESET]
 	sort_insertions(&mut insertions);
 
 	for (pos, marker) in insertions {
+		log::info!("Inserting marker {marker:?} at position {pos}");
 		let pos = pos.max(0).min(input.len());
 		input.insert(pos, marker);
 	}

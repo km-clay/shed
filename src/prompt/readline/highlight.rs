@@ -2,6 +2,12 @@ use std::{env, path::{Path, PathBuf}};
 
 use crate::{libsh::term::{Style, StyleSet, Styled}, prompt::readline::{annotate_input, markers}, state::read_logic};
 
+/// Syntax highlighter for shell input using Unicode marker-based annotation
+///
+/// The highlighter processes annotated input strings containing invisible Unicode markers
+/// (U+FDD0-U+FDEF range) that indicate syntax elements. It generates ANSI escape codes
+/// for terminal display while maintaining a style stack for proper color restoration
+/// in nested constructs (e.g., variables inside strings inside command substitutions).
 pub struct Highlighter {
 	input: String,
 	output: String,
@@ -10,6 +16,7 @@ pub struct Highlighter {
 }
 
 impl Highlighter {
+	/// Creates a new highlighter with empty buffers and reset state
 	pub fn new() -> Self {
 		Self {
 			input: String::new(),
@@ -19,11 +26,20 @@ impl Highlighter {
 		}
 	}
 
+	/// Loads raw input text and annotates it with syntax markers
+	///
+	/// The input is passed through the annotator which inserts Unicode markers
+	/// indicating token types and sub-token constructs (strings, variables, etc.)
 	pub fn load_input(&mut self, input: &str) {
 		let input = annotate_input(input);
 		self.input = input;
 	}
 
+	/// Processes the annotated input and generates ANSI-styled output
+	///
+	/// Walks through the input character by character, interpreting markers and
+	/// applying appropriate styles. Nested constructs (command substitutions,
+	/// subshells, strings) are handled recursively with proper style restoration.
 	pub fn highlight(&mut self) {
 		let input = self.input.clone();
 		let mut input_chars = input.chars().peekable();
@@ -156,6 +172,10 @@ impl Highlighter {
 						if *ch == markers::VAR_SUB_END {
 							input_chars.next(); // consume the end marker
 							break;
+						} else if markers::is_marker(*ch) {
+							log::warn!("Unhandled marker character in variable substitution: U+{:04X}", *ch as u32);
+							input_chars.next(); // skip the marker
+							continue;
 						}
 						var_sub.push(*ch);
 						input_chars.next();
@@ -166,13 +186,21 @@ impl Highlighter {
 					self.pop_style();
 				}
 				_ => {
-					self.output.push(ch);
-					self.last_was_reset = false;
+					if markers::is_marker(ch) {
+						log::warn!("Unhandled marker character in highlighter: U+{:04X}", ch as u32);
+					} else {
+						self.output.push(ch);
+						self.last_was_reset = false;
+					}
 				}
 			}
 		}
 	}
 
+	/// Extracts the highlighted output and resets the highlighter state
+	///
+	/// Clears the input buffer, style stack, and returns the generated output
+	/// containing ANSI escape codes. The highlighter is ready for reuse after this.
 	pub fn take(&mut self) -> String {
 		log::info!("Highlighting result: {:?}", self.output);
 		self.input.clear();
@@ -180,6 +208,12 @@ impl Highlighter {
 		std::mem::take(&mut self.output)
 	}
 
+	/// Checks if a command name is valid (exists in PATH, is a function, or is an alias)
+	///
+	/// Searches:
+	/// 1. Current directory if command is a path
+	/// 2. All directories in PATH environment variable
+	/// 3. Shell functions and aliases in the current shell state
 	fn is_valid(command: &str) -> bool {
 		let path = env::var("PATH").unwrap_or_default();
 		let paths = path.split(':');
@@ -202,6 +236,10 @@ impl Highlighter {
 		false
 	}
 
+	/// Emits a reset ANSI code to the output, with deduplication
+	///
+	/// Only emits the reset if the last emitted code was not already a reset,
+	/// preventing redundant `\x1b[0m` sequences in the output.
 	fn emit_reset(&mut self) {
 		if !self.last_was_reset {
 			self.output.push_str(&Style::Reset.to_string());
@@ -209,17 +247,31 @@ impl Highlighter {
 		}
 	}
 
+	/// Emits a style ANSI code to the output
+	///
+	/// Unconditionally appends the ANSI escape sequence for the given style
+	/// and marks that we're no longer in a reset state.
 	fn emit_style(&mut self, style: &StyleSet) {
 		self.output.push_str(&style.to_string());
 		self.last_was_reset = false;
 	}
 
+	/// Pushes a new style onto the stack and emits its ANSI code
+	///
+	/// Used when entering a new syntax context (string, variable, command, etc.).
+	/// The style stack allows proper restoration when exiting nested constructs.
 	pub fn push_style(&mut self, style: impl Into<StyleSet>) {
 		let set: StyleSet = style.into();
 		self.style_stack.push(set.clone());
 		self.emit_style(&set);
 	}
 
+	/// Pops a style from the stack and restores the previous style
+	///
+	/// Used when exiting a syntax context. If there's a parent style on the stack,
+	/// it's re-emitted to restore the previous color. Otherwise, emits a reset.
+	/// This ensures colors are properly restored in nested constructs like
+	/// `"string with $VAR"` where the string color resumes after the variable.
 	pub fn pop_style(&mut self) {
 		self.style_stack.pop();
 		if let Some(style) = self.style_stack.last().cloned() {
@@ -229,11 +281,20 @@ impl Highlighter {
 		}
 	}
 
+	/// Clears all styles from the stack and emits a reset
+	///
+	/// Used at command separators and explicit reset markers to return to
+	/// the default terminal color between independent commands.
 	pub fn clear_styles(&mut self) {
 		self.style_stack.clear();
 		self.emit_reset();
 	}
 
+	/// Simple marker-to-ANSI replacement (unused in favor of stack-based highlighting)
+	///
+	/// Performs direct string replacement of markers with ANSI codes, without
+	/// handling nesting or proper color restoration. Kept for reference but not
+	/// used in the current implementation.
 	pub fn trivial_replace(&mut self) {
 		self.input = self.input
 			.replace([markers::RESET, markers::ARG], "\x1b[0m")
