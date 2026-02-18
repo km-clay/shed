@@ -191,6 +191,7 @@ fn fern_interactive() -> ShResult<()> {
     // Process any available input
     match readline.process_input() {
       Ok(ReadlineEvent::Line(input)) => {
+				let start = Instant::now();
         write_meta(|m| m.start_timer());
         if let Err(e) = exec_input(input, None, true) {
           match e.kind() {
@@ -201,10 +202,14 @@ fn fern_interactive() -> ShResult<()> {
             _ => eprintln!("{e}"),
           }
         }
+				let command_run_time = start.elapsed();
         write_meta(|m| m.stop_timer());
 
         // Reset for next command with fresh prompt
         readline.reset(get_prompt().ok());
+				let real_end = start.elapsed();
+				log::info!("Command execution time: {:.2?}", command_run_time);
+				log::info!("Total round trip time: {:.2?}", real_end);
       }
       Ok(ReadlineEvent::Eof) => {
         // Ctrl+D on empty line

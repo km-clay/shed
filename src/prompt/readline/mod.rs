@@ -52,6 +52,16 @@ pub mod markers {
 	pub const GLOB: char = '\u{fdde}';
 
 	pub const RESET: char = '\u{fde2}';
+
+	pub const END_MARKERS: [char;7] = [
+		VAR_SUB_END,
+		CMD_SUB_END,
+		PROC_SUB_END,
+		STRING_DQ_END,
+		STRING_SQ_END,
+		SUBSH_END,
+		RESET
+	];
 }
 
 /// Non-blocking readline result
@@ -161,6 +171,8 @@ impl FernVi {
       }
 
       if cmd.should_submit() {
+				self.editor.set_hint(None);
+				self.print_line()?;
         self.writer.flush_write("\n")?;
         let buf = self.editor.take_buf();
         // Save command to history
@@ -512,6 +524,63 @@ pub fn marker_for(class: &TkRule) -> Option<char> {
 }
 
 pub fn annotate_token(input: &mut String, token: Tk) {
+	let sort_insertions = |insertions: &mut Vec<(usize, char)>| {
+		insertions.sort_by(|a, b| {
+			match b.0.cmp(&a.0) {
+				std::cmp::Ordering::Equal => {
+					let priority = |m: char| -> u8 {
+						match m {
+							markers::RESET => 0,
+							markers::VAR_SUB_END |
+							markers::CMD_SUB_END |
+							markers::PROC_SUB_END |
+							markers::STRING_DQ_END |
+							markers::STRING_SQ_END |
+							markers::SUBSH_END => 2,
+							_ => 1,
+						}
+					};
+					priority(a.1).cmp(&priority(b.1))
+				}
+				other => other,
+			}
+		});
+	};
+
+	let in_context = |c: char, insertions: &[(usize, char)]| -> bool {
+		let mut stack = insertions.to_vec();
+		stack.sort_by(|a, b| {
+			match b.0.cmp(&a.0) {
+				std::cmp::Ordering::Equal => {
+					let priority = |m: char| -> u8 {
+						match m {
+							markers::RESET => 0,
+							markers::VAR_SUB_END |
+							markers::CMD_SUB_END |
+							markers::PROC_SUB_END |
+							markers::STRING_DQ_END |
+							markers::STRING_SQ_END |
+							markers::SUBSH_END => 2,
+							_ => 1,
+						}
+					};
+					priority(a.1).cmp(&priority(b.1))
+				}
+				other => other,
+			}
+		});
+		stack.retain(|(i, m)| *i <= token.span.start && !markers::END_MARKERS.contains(m));
+
+		log::error!("Checking context for token '{}', looking for '{}'", token.span.as_str(), c);
+		let Some(ctx) = stack.last() else {
+			return false;
+		};
+		log::error!("Context stack for token '{}': {:?}", token.span.as_str(), stack);
+		log::error!("Found context marker '{}' at position {}", ctx.1, ctx.0);
+
+		ctx.1 == c
+	};
+
 	if token.class != TkRule::Str
 	&& let Some(marker) = marker_for(&token.class) {
 		input.insert(token.span.end, markers::RESET);
@@ -545,6 +614,8 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 		insertions.insert(0, (span_start, markers::BUILTIN));
 	} else if token.flags.contains(TkFlags::IS_CMD) {
 		insertions.insert(0, (span_start, markers::COMMAND));
+	} else if !token.flags.contains(TkFlags::KEYWORD) && !token.flags.contains(TkFlags::ASSIGN) {
+		insertions.insert(0, (span_start, markers::ARG));
 	}
 
 	if token.flags.contains(TkFlags::KEYWORD) {
@@ -590,7 +661,7 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 						'{' if cmd_sub_depth == 0 => {
 							insertions.push((span_start + dollar_pos, markers::VAR_SUB));
 							token_chars.next(); // consume the brace
-							let mut end_pos = dollar_pos + 2; // position after ${
+							let mut end_pos; // position after ${
 							while let Some((cur_i, br_ch)) = token_chars.peek() {
 								end_pos = *cur_i;
 								// TODO: implement better parameter expansion awareness here
@@ -705,7 +776,10 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 				}
 			}
 			'*' | '?' if (!in_dub_qt && !in_sng_qt) => {
-				insertions.push((span_start + *i, markers::GLOB));
+				if !in_context(markers::COMMAND, &insertions) {
+					insertions.push((span_start + *i + 1, markers::RESET));
+					insertions.push((span_start + *i, markers::GLOB));
+				}
 				token_chars.next(); // consume the glob char
 			}
 			_ => {
@@ -719,21 +793,7 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 	// - Regular markers middle
 	// - END markers last (inserted last, ends up leftmost)
 	// Result: [END][TOGGLE][RESET]
-	insertions.sort_by(|a, b| {
-		match b.0.cmp(&a.0) {
-			std::cmp::Ordering::Equal => {
-				let priority = |m: char| -> u8 {
-					match m {
-						markers::RESET => 0,
-						markers::VAR_SUB_END | markers::CMD_SUB_END => 2,
-						_ => 1,
-					}
-				};
-				priority(a.1).cmp(&priority(b.1))
-			}
-			other => other,
-		}
-	});
+	sort_insertions(&mut insertions);
 
 	for (pos, marker) in insertions {
 		let pos = pos.max(0).min(input.len());

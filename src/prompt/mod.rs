@@ -1,4 +1,3 @@
-pub mod highlight;
 pub mod readline;
 pub mod statusline;
 
