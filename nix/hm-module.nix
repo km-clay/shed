@@ -15,6 +15,18 @@ in
       description = "The fern package to use";
     };
 
+    aliases = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {};
+      description = "The command name to use for the fern shell";
+    };
+
+    environmentVars = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {};
+      description = "Environment variables to set when fern starts";
+    };
+
     settings = {
       dotGlob = lib.mkOption {
         type = lib.types.bool;
