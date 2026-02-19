@@ -23,6 +23,7 @@
       };
 
       doCheck = false;
+      passthru.shellPath = "/bin/fern";
 
       meta = with pkgs.lib; {
         description = "A Linux shell written in Rust";
