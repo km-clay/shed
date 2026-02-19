@@ -1,0 +1,117 @@
+{ config, lib, pkgs, ... }:
+
+let
+  cfg = config.programs.fern;
+  boolToString = b:
+  if b then "true" else "false";
+in
+{
+  options.programs.fern = {
+    enable = lib.mkEnableOption "fern shell";
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.fern;
+      description = "The fern package to use";
+    };
+
+    settings = {
+      dotGlob = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Whether to include hidden files in glob patterns";
+      };
+      autocd = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Whether to automatically change into directories when they are entered as commands";
+      };
+      historyIgnoresDupes = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Whether to ignore duplicate entries in the command history";
+      };
+      maxHistoryEntries = lib.mkOption {
+        type = lib.types.int;
+        default = 1000;
+        description = "The maximum number of entries to keep in the command history";
+      };
+      interactiveComments = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Whether to allow comments in interactive mode";
+      };
+      autoHistory = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Whether to automatically add commands to the history as they are executed";
+      };
+      bellStyle = lib.mkOption {
+        type = lib.types.enum [ "none" "audible" "visible" ];
+        default = "audible";
+        description = "The style of bell to use for notifications and errors";
+      };
+      maxRecurseDepth = lib.mkOption {
+        type = lib.types.int;
+        default = 1000;
+        description = "The maximum depth to allow when recursively executing shell functions";
+      };
+
+      promptPathSegments = lib.mkOption {
+        type = lib.types.int;
+        default = 4;
+        description = "The maximum number of path segments to show in the prompt";
+      };
+      completionLimit = lib.mkOption {
+        type = lib.types.int;
+        default = 1000;
+        description = "The maximum number of completion candidates to show before truncating the list";
+      };
+      syntaxHighlighting = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Whether to enable syntax highlighting in the shell";
+      };
+      tabStop = lib.mkOption {
+        type = lib.types.int;
+        default = 4;
+        description = "The number of spaces to use for tab stop in the shell";
+      };
+
+      extraPostConfig = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Additional configuration to append to the fern configuration file";
+      };
+      extraPreConfig = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Additional configuration to prepend to the fern configuration file";
+      };
+    };
+  };
+
+  config = lib.mkIf cfg.enable {
+    home.packages = [ cfg.package ];
+
+    home.file.".fernrc".text = lib.concatLines [
+      cfg.settings.extraPreConfig
+      lib.concatLines [
+        "shopt core.dotglob=${boolToString cfg.settings.dotGlob}"
+        "shopt core.autocd=${boolToString cfg.settings.autocd}"
+        "shopt core.hist_ignore_dupes=${boolToString cfg.settings.historyIgnoresDupes}"
+        "shopt core.max_hist=${toString cfg.settings.maxHistoryEntries}"
+        "shopt core.interactive_comments=${boolToString cfg.settings.interactiveComments}"
+        "shopt core.auto_hist=${boolToString cfg.settings.autoHistory}"
+        "shopt core.bell_style=${cfg.settings.bellStyle}"
+        "shopt core.max_recurse_depth=${toString cfg.settings.maxRecurseDepth}"
+
+        "shopt prompt.trunc_prompt_path=${toString cfg.settings.promptPathSegments}"
+        "shopt prompt.comp_limit=${toString cfg.settings.completionLimit}"
+        "shopt prompt.highlight=${boolToString cfg.settings.syntaxHighlighting}"
+        "shopt prompt.tab_stop=${toString cfg.settings.tabStop}"
+      ]
+      cfg.settings.extraPostConfig
+    ];
+  };
+}

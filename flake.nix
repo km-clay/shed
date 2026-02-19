@@ -33,5 +33,12 @@
         platforms = platforms.linux;
       };
     };
-  });
+  }) // {
+    nixosModules.fern = import ./nix/module.nix;
+    homeModules.fern = import ./nix/hm-module.nix;
+
+    overlays.default = final: prev: {
+      fern = self.packages.${final.system}.default;
+    };
+  };
 }
