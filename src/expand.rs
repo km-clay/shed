@@ -909,9 +909,16 @@ pub fn unescape_str(raw: &str) -> String {
         while let Some(q_ch) = chars.next() {
           match q_ch {
             '\\' => {
-              result.push(q_ch);
               if let Some(next_ch) = chars.next() {
-                result.push(next_ch)
+								match next_ch {
+									'"' | '\\' | '`' | '$' => {
+										// discard the backslash
+									}
+									_ => {
+										result.push(q_ch);
+									}
+								}
+                result.push(next_ch);
               }
             }
             '$' => {

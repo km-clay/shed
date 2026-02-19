@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::expand::perform_param_expansion;
+use crate::expand::{perform_param_expansion, DUB_QUOTE, VAR_SUB};
 use crate::state::VarFlags;
 
 use super::*;
@@ -285,4 +285,78 @@ fn param_expansion_replacesuffix() {
   });
   let result = perform_param_expansion("foo/%o/X").unwrap();
   assert_eq!(result, "foX");
+}
+
+// ============================================================================
+// Double-Quote Escape Tests (POSIX)
+// ============================================================================
+
+#[test]
+fn dquote_escape_dollar() {
+	// "\$foo" should strip backslash, produce literal $foo (no expansion)
+	let result = unescape_str(r#""\$foo""#);
+	assert!(!result.contains(VAR_SUB), "Escaped $ should not become VAR_SUB");
+	assert!(result.contains('$'), "Literal $ should be preserved");
+	assert!(!result.contains('\\'), "Backslash should be stripped");
+}
+
+#[test]
+fn dquote_escape_backslash() {
+	// "\\" in double quotes should produce a single backslash
+	let result = unescape_str(r#""\\""#);
+	let inner: String = result.chars()
+		.filter(|&c| c != DUB_QUOTE)
+		.collect();
+	assert_eq!(inner, "\\", "Double backslash should produce single backslash");
+}
+
+#[test]
+fn dquote_escape_quote() {
+	// "\"" should produce a literal double quote
+	let result = unescape_str(r#""\"""#);
+	let inner: String = result.chars()
+		.filter(|&c| c != DUB_QUOTE)
+		.collect();
+	assert!(inner.contains('"'), "Escaped quote should produce literal quote");
+}
+
+#[test]
+fn dquote_escape_backtick() {
+	// "\`" should strip backslash, produce literal backtick
+	let result = unescape_str(r#""\`""#);
+	let inner: String = result.chars()
+		.filter(|&c| c != DUB_QUOTE)
+		.collect();
+	assert_eq!(inner, "`", "Escaped backtick should produce literal backtick");
+}
+
+#[test]
+fn dquote_escape_nonspecial_preserves_backslash() {
+	// "\a" inside double quotes should preserve the backslash (a is not special)
+	let result = unescape_str(r#""\a""#);
+	let inner: String = result.chars()
+		.filter(|&c| c != DUB_QUOTE)
+		.collect();
+	assert_eq!(inner, "\\a", "Backslash before non-special char should be preserved");
+}
+
+#[test]
+fn dquote_unescaped_dollar_expands() {
+	// "$foo" inside double quotes should produce VAR_SUB (expansion marker)
+	let result = unescape_str(r#""$foo""#);
+	assert!(result.contains(VAR_SUB), "Unescaped $ should become VAR_SUB");
+}
+
+#[test]
+fn dquote_mixed_escapes() {
+	// "hello \$world \\end" should have literal $, single backslash
+	let result = unescape_str(r#""hello \$world \\end""#);
+	assert!(!result.contains(VAR_SUB), "Escaped $ should not expand");
+	assert!(result.contains('$'), "Literal $ should be in output");
+	// Should have exactly one backslash (from \\)
+	let inner: String = result.chars()
+		.filter(|&c| c != DUB_QUOTE)
+		.collect();
+	let backslash_count = inner.chars().filter(|&c| c == '\\').count();
+	assert_eq!(backslash_count, 1, "\\\\  should produce one backslash");
 }
