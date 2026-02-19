@@ -108,8 +108,8 @@ in
 
     home.file.".fernrc".text = lib.concatLines [
       cfg.settings.extraPreConfig
-      (lib.concatLines (lib.mapAttrsToList (name: value: "export ${name}='${value}'") cfg.environmentVars))
-      (lib.concatLines (lib.mapAttrsToList (name: value: "alias ${name}='${value}'") cfg.aliases))
+      (lib.concatLines (lib.mapAttrsToList (name: value: "export ${name}=\"${value}\"") cfg.environmentVars))
+      (lib.concatLines (lib.mapAttrsToList (name: value: "alias ${name}=\"${value}\"") cfg.aliases))
       (lib.concatLines [
         "shopt core.dotglob=${boolToString cfg.settings.dotGlob}"
         "shopt core.autocd=${boolToString cfg.settings.autocd}"
