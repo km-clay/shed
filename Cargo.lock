@@ -207,6 +207,7 @@ dependencies = [
  "nix",
  "pretty_assertions",
  "regex",
+ "tempfile",
  "unicode-segmentation",
  "unicode-width",
  "vte",

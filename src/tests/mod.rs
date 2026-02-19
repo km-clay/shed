@@ -9,6 +9,7 @@ use crate::parse::{
 };
 use crate::state::{write_logic, write_vars};
 
+pub mod complete;
 pub mod error;
 pub mod expand;
 pub mod getopt;
@@ -16,7 +17,9 @@ pub mod highlight;
 pub mod lexer;
 pub mod parser;
 pub mod readline;
+pub mod redir;
 pub mod script;
+pub mod state;
 pub mod term;
 
 /// Unsafe to use outside of tests

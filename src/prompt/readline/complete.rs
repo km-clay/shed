@@ -53,7 +53,7 @@ impl Completer {
 		(before_cursor, after_cursor)
 	}
 
-	fn get_completion_context(&self, line: &str, cursor_pos: usize) -> (bool, usize) {
+	pub fn get_completion_context(&self, line: &str, cursor_pos: usize) -> (bool, usize) {
 		let annotated = annotate_input_recursive(line);
 		log::debug!("Annotated input for completion context: {:?}", annotated);
 		let mut in_cmd = false;

@@ -2,6 +2,8 @@ use getopt::{get_opts, get_opts_from_tokens};
 use parse::NdRule;
 use tests::get_nodes;
 
+use crate::builtin::echo::ECHO_OPTS;
+
 use super::super::*;
 
 #[test]
@@ -19,7 +21,7 @@ fn getopt_from_argv() {
     panic!()
   };
 
-  let (words, opts) = get_opts_from_tokens(argv);
+  let (words, opts) = get_opts_from_tokens(argv, &ECHO_OPTS);
   insta::assert_debug_snapshot!(words);
   insta::assert_debug_snapshot!(opts)
 }

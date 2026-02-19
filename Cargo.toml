@@ -24,6 +24,7 @@ vte = "0.15"
 [dev-dependencies]
 insta = "1.42.2"
 pretty_assertions = "1.4.1"
+tempfile = "3.24.0"
 
 [[bin]]
 name = "fern"

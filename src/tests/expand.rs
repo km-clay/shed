@@ -1,13 +1,14 @@
 use std::collections::HashSet;
 
 use crate::expand::perform_param_expansion;
+use crate::state::VarFlags;
 
 use super::*;
 
 #[test]
 fn simple_expansion() {
   let varsub = "$foo";
-  write_vars(|v| v.set_var("foo", "this is the value of the variable", false));
+  write_vars(|v| v.set_var("foo", "this is the value of the variable", VarFlags::NONE));
 
   let mut tokens: Vec<Tk> = LexStream::new(Arc::new(varsub.to_string()), LexFlags::empty())
     .map(|tk| tk.unwrap())
@@ -16,7 +17,6 @@ fn simple_expansion() {
   let var_tk = tokens.pop().unwrap();
 
   let exp_tk = var_tk.expand().unwrap();
-  write_vars(|v| v.vars_mut().clear());
   insta::assert_debug_snapshot!(exp_tk.get_words())
 }
 
@@ -131,175 +131,158 @@ fn test_infinite_recursive_alias() {
 #[test]
 fn param_expansion_defaultunsetornull() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
-    v.set_var("set_var", "value", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("set_var", "value", VarFlags::NONE);
   });
   let result = perform_param_expansion("unset:-default").unwrap();
   assert_eq!(result, "default");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_defaultunset() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
-    v.set_var("set_var", "value", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("set_var", "value", VarFlags::NONE);
   });
   let result = perform_param_expansion("unset-default").unwrap();
   assert_eq!(result, "default");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_setdefaultunsetornull() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
-    v.set_var("set_var", "value", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("set_var", "value", VarFlags::NONE);
   });
   let result = perform_param_expansion("unset:=assigned").unwrap();
   assert_eq!(result, "assigned");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_setdefaultunset() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
-    v.set_var("set_var", "value", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("set_var", "value", VarFlags::NONE);
   });
   let result = perform_param_expansion("unset=assigned").unwrap();
   assert_eq!(result, "assigned");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_altsetnotnull() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
-    v.set_var("set_var", "value", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("set_var", "value", VarFlags::NONE);
   });
   let result = perform_param_expansion("set_var:+alt").unwrap();
   assert_eq!(result, "alt");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_altnotnull() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
-    v.set_var("set_var", "value", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("set_var", "value", VarFlags::NONE);
   });
   let result = perform_param_expansion("set_var+alt").unwrap();
   assert_eq!(result, "alt");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_len() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("#foo").unwrap();
   assert_eq!(result, "3");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_substr() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo:1").unwrap();
   assert_eq!(result, "oo");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_substrlen() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo:0:2").unwrap();
   assert_eq!(result, "fo");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_remshortestprefix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo#f*").unwrap();
   assert_eq!(result, "oo");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_remlongestprefix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo##f*").unwrap();
   assert_eq!(result, "");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_remshortestsuffix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo%*o").unwrap();
   assert_eq!(result, "fo");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_remlongestsuffix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo%%*o").unwrap();
   assert_eq!(result, "");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_replacefirstmatch() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo/foo/X").unwrap();
   assert_eq!(result, "X");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_replaceallmatches() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo//o/X").unwrap();
   assert_eq!(result, "fXX");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_replaceprefix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo/#f/X").unwrap();
   assert_eq!(result, "Xoo");
-  write_vars(|v| v.vars_mut().clear());
 }
 
 #[test]
 fn param_expansion_replacesuffix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", false);
+    v.set_var("foo", "foo", VarFlags::NONE);
   });
   let result = perform_param_expansion("foo/%o/X").unwrap();
   assert_eq!(result, "foX");
-  write_vars(|v| v.vars_mut().clear());
 }
