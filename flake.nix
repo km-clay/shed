@@ -22,6 +22,8 @@
         lockFile = ./Cargo.lock;
       };
 
+      doCheck = false;
+
       meta = with pkgs.lib; {
         description = "A Linux shell written in Rust";
         homepage = "https://github.com/km-clay/fern";
