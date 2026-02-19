@@ -108,7 +108,9 @@ in
 
     home.file.".fernrc".text = lib.concatLines [
       cfg.settings.extraPreConfig
-      lib.concatLines [
+      (lib.concatLines (lib.mapAttrsToList (name: value: "export ${name}='${value}'") cfg.environmentVars))
+      (lib.concatLines (lib.mapAttrsToList (name: value: "alias ${name}='${value}'") cfg.aliases))
+      (lib.concatLines [
         "shopt core.dotglob=${boolToString cfg.settings.dotGlob}"
         "shopt core.autocd=${boolToString cfg.settings.autocd}"
         "shopt core.hist_ignore_dupes=${boolToString cfg.settings.historyIgnoresDupes}"
@@ -122,7 +124,7 @@ in
         "shopt prompt.comp_limit=${toString cfg.settings.completionLimit}"
         "shopt prompt.highlight=${boolToString cfg.settings.syntaxHighlighting}"
         "shopt prompt.tab_stop=${toString cfg.settings.tabStop}"
-      ]
+      ])
       cfg.settings.extraPostConfig
     ];
   };
