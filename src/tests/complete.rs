@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 use crate::prompt::readline::complete::Completer;
+use crate::prompt::readline::markers;
 use crate::state::{write_logic, write_vars, VarFlags};
 
 use super::*;
@@ -320,12 +321,12 @@ fn context_detection_command_position() {
     let completer = Completer::new();
 
     // At the beginning - command context
-    let (in_cmd, _) = completer.get_completion_context("ech", 3);
-    assert!(in_cmd, "Should be in command context at start");
+    let (ctx, _) = completer.get_completion_context("ech", 3);
+    assert!(ctx.last() == Some(&markers::COMMAND), "Should be in command context at start");
 
     // After whitespace - still command if no command yet
-    let (in_cmd, _) = completer.get_completion_context("  ech", 5);
-    assert!(in_cmd, "Should be in command context after whitespace");
+    let (ctx, _) = completer.get_completion_context("  ech", 5);
+    assert!(ctx.last() == Some(&markers::COMMAND), "Should be in command context after whitespace");
 }
 
 #[test]
@@ -333,11 +334,11 @@ fn context_detection_argument_position() {
     let completer = Completer::new();
 
     // After a complete command - argument context
-    let (in_cmd, _) = completer.get_completion_context("echo hello", 10);
-    assert!(!in_cmd, "Should be in argument context after command");
+    let (ctx, _) = completer.get_completion_context("echo hello", 10);
+    assert!(ctx.last() != Some(&markers::COMMAND), "Should be in argument context after command");
 
-    let (in_cmd, _) = completer.get_completion_context("ls -la /tmp", 11);
-    assert!(!in_cmd, "Should be in argument context");
+    let (ctx, _) = completer.get_completion_context("ls -la /tmp", 11);
+    assert!(ctx.last() != Some(&markers::COMMAND), "Should be in argument context");
 }
 
 #[test]
@@ -345,12 +346,12 @@ fn context_detection_nested_command_sub() {
     let completer = Completer::new();
 
     // Inside $() - should be command context
-    let (in_cmd, _) = completer.get_completion_context("echo \"$(ech", 11);
-    assert!(in_cmd, "Should be in command context inside $()");
+    let (ctx, _) = completer.get_completion_context("echo \"$(ech", 11);
+    assert!(ctx.last() == Some(&markers::COMMAND), "Should be in command context inside $()");
 
     // After command in $() - argument context
-    let (in_cmd, _) = completer.get_completion_context("echo \"$(echo hell", 17);
-    assert!(!in_cmd, "Should be in argument context inside $()");
+    let (ctx, _) = completer.get_completion_context("echo \"$(echo hell", 17);
+    assert!(ctx.last() != Some(&markers::COMMAND), "Should be in argument context inside $()");
 }
 
 #[test]
@@ -358,8 +359,8 @@ fn context_detection_pipe() {
     let completer = Completer::new();
 
     // After pipe - command context
-    let (in_cmd, _) = completer.get_completion_context("ls | gre", 8);
-    assert!(in_cmd, "Should be in command context after pipe");
+    let (ctx, _) = completer.get_completion_context("ls | gre", 8);
+    assert!(ctx.last() == Some(&markers::COMMAND), "Should be in command context after pipe");
 }
 
 #[test]
@@ -367,12 +368,74 @@ fn context_detection_command_sep() {
     let completer = Completer::new();
 
     // After semicolon - command context
-    let (in_cmd, _) = completer.get_completion_context("echo foo; l", 11);
-    assert!(in_cmd, "Should be in command context after semicolon");
+    let (ctx, _) = completer.get_completion_context("echo foo; l", 11);
+    assert!(ctx.last() == Some(&markers::COMMAND), "Should be in command context after semicolon");
 
     // After && - command context
-    let (in_cmd, _) = completer.get_completion_context("true && l", 9);
-    assert!(in_cmd, "Should be in command context after &&");
+    let (ctx, _) = completer.get_completion_context("true && l", 9);
+    assert!(ctx.last() == Some(&markers::COMMAND), "Should be in command context after &&");
+}
+
+#[test]
+fn context_detection_variable_substitution() {
+    let completer = Completer::new();
+
+    // $VAR at argument position - VAR_SUB should take priority over ARG
+    let (ctx, _) = completer.get_completion_context("echo $HOM", 9);
+    assert_eq!(ctx.last(), Some(&markers::VAR_SUB), "Should be in var_sub context for $HOM");
+
+    // $VAR at command position - VAR_SUB should take priority over COMMAND
+    let (ctx, _) = completer.get_completion_context("$HOM", 4);
+    assert_eq!(ctx.last(), Some(&markers::VAR_SUB), "Should be in var_sub context for bare $HOM");
+}
+
+#[test]
+fn context_detection_variable_in_double_quotes() {
+    let completer = Completer::new();
+
+    // $VAR inside double quotes
+    let (ctx, _) = completer.get_completion_context("echo \"$HOM", 10);
+    assert_eq!(ctx.last(), Some(&markers::VAR_SUB), "Should be in var_sub context inside double quotes");
+}
+
+#[test]
+fn context_detection_stack_base_is_null() {
+    let completer = Completer::new();
+
+    // Empty input - only NULL on the stack
+    let (ctx, _) = completer.get_completion_context("", 0);
+    assert_eq!(ctx, vec![markers::NULL], "Empty input should only have NULL marker");
+}
+
+#[test]
+fn context_detection_context_start_position() {
+    let completer = Completer::new();
+
+    // Command at start - ctx_start should be 0
+    let (_, ctx_start) = completer.get_completion_context("ech", 3);
+    assert_eq!(ctx_start, 0, "Command at start should have ctx_start=0");
+
+    // Argument after command - ctx_start should be at arg position
+    let (_, ctx_start) = completer.get_completion_context("echo hel", 8);
+    assert_eq!(ctx_start, 5, "Argument ctx_start should point to arg start");
+
+    // Variable sub - ctx_start should point to the $
+    let (_, ctx_start) = completer.get_completion_context("echo $HOM", 9);
+    assert_eq!(ctx_start, 5, "Var sub ctx_start should point to the $");
+}
+
+#[test]
+fn context_detection_priority_ordering() {
+    let completer = Completer::new();
+
+    // COMMAND (priority 2) should override ARG (priority 1)
+    // After a pipe, the next token is a command even though it looks like an arg
+    let (ctx, _) = completer.get_completion_context("echo foo | gr", 13);
+    assert_eq!(ctx.last(), Some(&markers::COMMAND), "COMMAND should win over ARG after pipe");
+
+    // VAR_SUB (priority 3) should override COMMAND (priority 2)
+    let (ctx, _) = completer.get_completion_context("$PA", 3);
+    assert_eq!(ctx.last(), Some(&markers::VAR_SUB), "VAR_SUB should win over COMMAND");
 }
 
 // ============================================================================

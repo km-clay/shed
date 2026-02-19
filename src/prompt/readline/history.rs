@@ -217,11 +217,17 @@ pub struct History {
 
 impl History {
   pub fn new() -> ShResult<Self> {
+    let ignore_dups = crate::state::read_shopts(|s| s.core.hist_ignore_dupes);
+    let max_hist = crate::state::read_shopts(|s| s.core.max_hist);
     let path = PathBuf::from(env::var("FERNHIST").unwrap_or({
       let home = env::var("HOME").unwrap();
       format!("{home}/.fern_history")
     }));
     let mut entries = read_hist_file(&path)?;
+    // Enforce max_hist limit on loaded entries
+    if entries.len() > max_hist {
+      entries = entries.split_off(entries.len() - max_hist);
+    }
     // Create pending entry for current input
     let id = entries.last().map(|ent| ent.id + 1).unwrap_or(0);
     entries.push(HistEntry {
@@ -238,8 +244,8 @@ impl History {
       search_mask,
       cursor,
       search_direction: Direction::Backward,
-      ignore_dups: true,
-      max_size: None,
+      ignore_dups,
+      max_size: Some(max_hist as u32),
     })
   }
 

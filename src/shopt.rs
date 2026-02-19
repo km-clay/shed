@@ -111,7 +111,7 @@ impl ShOpts {
         return Err(
           ShErr::simple(
             ShErrKind::SyntaxErr,
-            "shopt: Expected 'core' or 'prompt' in shopt key",
+            "shopt: expected 'core' or 'prompt' in shopt key",
           )
           .with_note(
             Note::new("'shopt' takes arguments separated by periods to denote namespaces")
@@ -384,9 +384,8 @@ pub struct ShOptPrompt {
   pub trunc_prompt_path: usize,
   pub edit_mode: FernEditMode,
   pub comp_limit: usize,
-  pub prompt_highlight: bool,
+  pub highlight: bool,
   pub tab_stop: usize,
-  pub custom: HashMap<String, ShFunc>, // Contains functions for prompt modules
 }
 
 impl ShOptPrompt {
@@ -419,14 +418,14 @@ impl ShOptPrompt {
         };
         self.comp_limit = val;
       }
-      "prompt_highlight" => {
+      "highlight" => {
         let Ok(val) = val.parse::<bool>() else {
           return Err(ShErr::simple(
             ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for prompt_highlight value",
+            "shopt: expected 'true' or 'false' for highlight value",
           ));
         };
-        self.prompt_highlight = val;
+        self.highlight = val;
       }
       "tab_stop" => {
         let Ok(val) = val.parse::<usize>() else {
@@ -444,19 +443,17 @@ impl ShOptPrompt {
         return Err(
           ShErr::simple(
             ShErrKind::SyntaxErr,
-            format!("shopt: Unexpected 'core' option '{opt}'"),
+            format!("shopt: Unexpected 'prompt' option '{opt}'"),
           )
-          .with_note(Note::new("options can be accessed like 'core.option_name'"))
+          .with_note(Note::new("options can be accessed like 'prompt.option_name'"))
           .with_note(
-            Note::new("'core' contains the following options").with_sub_notes(vec![
-              "dotglob",
-              "autocd",
-              "hist_ignore_dupes",
-              "max_hist",
-              "interactive_comments",
-              "auto_hist",
-              "bell_style",
-              "max_recurse_depth",
+            Note::new("'prompt' contains the following options").with_sub_notes(vec![
+							"trunc_prompt_path",
+							"edit_mode",
+							"comp_limit",
+							"highlight",
+							"tab_stop",
+							"custom",
             ]),
           ),
         )
@@ -489,26 +486,16 @@ impl ShOptPrompt {
         output.push_str(&format!("{}", self.comp_limit));
         Ok(Some(output))
       }
-      "prompt_highlight" => {
+      "highlight" => {
         let mut output =
           String::from("Whether to enable or disable syntax highlighting on the prompt\n");
-        output.push_str(&format!("{}", self.prompt_highlight));
+        output.push_str(&format!("{}", self.highlight));
         Ok(Some(output))
       }
       "tab_stop" => {
         let mut output = String::from("The number of spaces used by the tab character '\\t'\n");
         output.push_str(&format!("{}", self.tab_stop));
         Ok(Some(output))
-      }
-      "custom" => {
-        let mut output = String::from(
-          "A table of custom 'modules' executed as shell functions for prompt scripting\n",
-        );
-        output.push_str("Current modules: \n");
-        for key in self.custom.keys() {
-          output.push_str(&format!("  - {key}\n"));
-        }
-        Ok(Some(output.trim().to_string()))
       }
       _ => Err(
         ShErr::simple(
@@ -540,12 +527,8 @@ impl Display for ShOptPrompt {
     output.push(format!("trunc_prompt_path = {}", self.trunc_prompt_path));
     output.push(format!("edit_mode = {}", self.edit_mode));
     output.push(format!("comp_limit = {}", self.comp_limit));
-    output.push(format!("prompt_highlight = {}", self.prompt_highlight));
+    output.push(format!("highlight = {}", self.highlight));
     output.push(format!("tab_stop = {}", self.tab_stop));
-    output.push(String::from("prompt modules: "));
-    for key in self.custom.keys() {
-      output.push(format!("  - {key}"));
-    }
 
     let final_output = output.join("\n");
 
@@ -559,9 +542,8 @@ impl Default for ShOptPrompt {
       trunc_prompt_path: 4,
       edit_mode: FernEditMode::Vi,
       comp_limit: 100,
-      prompt_highlight: true,
+      highlight: true,
       tab_stop: 4,
-      custom: HashMap::new(),
     }
   }
 }

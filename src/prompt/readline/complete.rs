@@ -87,8 +87,8 @@ impl Completer {
 								ctx.push(markers::VAR_SUB);
 							}
 						}
-						markers::ARG => {
-							log::debug!("Found argument marker at position {}", pos);
+						markers::ARG | markers::ASSIGNMENT => {
+							log::debug!("Found argument/assignment marker at position {}", pos);
 							if last_priority < 1 {
 								ctx_start = pos;
 								ctx.push(markers::ARG);
@@ -328,6 +328,8 @@ impl Completer {
 			})
 			.collect();
 
+		let limit = crate::state::read_shopts(|s| s.prompt.comp_limit);
+		candidates.truncate(limit);
 
 		Ok(CompResult::from_candidates(candidates))
 	}

@@ -156,10 +156,10 @@ pub struct LexStream {
 }
 
 bitflags! {
-  #[derive(Debug)]
+  #[derive(Debug, Clone, Copy)]
   pub struct LexFlags: u32 {
-    /// Return comment tokens
-    const LEX_COMMENTS   = 0b000000001;
+    /// The lexer is operating in interactive mode
+    const INTERACTIVE     = 0b000000001;
     /// Allow unfinished input
     const LEX_UNFINISHED = 0b000000010;
     /// The next string-type token is a command name
@@ -740,7 +740,7 @@ impl Iterator for LexStream {
         }
         self.get_token(ch_idx..self.cursor, TkRule::Sep)
       }
-      '#' => {
+      '#' if !self.flags.contains(LexFlags::INTERACTIVE) || crate::state::read_shopts(|s| s.core.interactive_comments) => {
         let ch_idx = self.cursor;
         self.cursor += 1;
 

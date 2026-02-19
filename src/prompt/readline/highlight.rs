@@ -1,6 +1,6 @@
-use std::{env, path::{Path, PathBuf}};
+use std::{env, os::unix::fs::PermissionsExt, path::{Path, PathBuf}};
 
-use crate::{libsh::term::{Style, StyleSet, Styled}, prompt::readline::{annotate_input, markers}, state::read_logic};
+use crate::{libsh::term::{Style, StyleSet, Styled}, prompt::readline::{annotate_input, markers}, state::{read_logic, read_shopts}};
 
 /// Syntax highlighter for shell input using Unicode marker-based annotation
 ///
@@ -214,16 +214,31 @@ impl Highlighter {
 	fn is_valid(command: &str) -> bool {
 		let path = env::var("PATH").unwrap_or_default();
 		let paths = path.split(':');
-		if PathBuf::from(&command).exists() {
-			return true;
+		let cmd_path = PathBuf::from(&command);
+
+		if cmd_path.exists() {
+			// the user has given us an absolute path
+			if cmd_path.is_dir() && read_shopts(|o| o.core.autocd) {
+				// this is a directory and autocd is enabled
+				return true;
+			} else {
+				let Ok(meta) = cmd_path.metadata() else { return false };
+				// this is a file that is executable by someone
+				return meta.permissions().mode() & 0o111 == 0
+			}
 		} else {
+			// they gave us a command name
+			// now we must traverse the PATH env var
+			// and see if we find any matches
 			for path in paths {
 				let path = PathBuf::from(path).join(command);
 				if path.exists() {
-					return true;
+					let Ok(meta) = path.metadata() else { continue };
+					return meta.permissions().mode() & 0o111 != 0;
 				}
 			}
 
+			// also check shell functions and aliases for any matches
 			let found = read_logic(|l| l.get_func(command).is_some() || l.get_alias(command).is_some());
 			if found {
 				return true;

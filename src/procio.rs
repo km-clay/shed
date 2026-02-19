@@ -263,7 +263,7 @@ impl DerefMut for IoFrame {
 /// redirection
 #[derive(Debug, Default)]
 pub struct IoStack {
-  stack: Vec<IoFrame>,
+  pub stack: Vec<IoFrame>,
 }
 
 impl IoStack {

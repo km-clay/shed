@@ -121,6 +121,8 @@ impl ScopeStack {
 	pub fn new() -> Self {
 		let mut new = Self::default();
 		new.scopes.push(VarTab::new());
+		let shell_name = std::env::args().next().unwrap_or_else(|| "fern".to_string());
+		new.global_params.insert(ShellParam::ShellName.to_string(), shell_name);
 		new
 	}
 	pub fn descend(&mut self, argv: Option<Vec<String>>) {
@@ -482,14 +484,6 @@ impl VarTab {
   fn init_params() -> HashMap<ShellParam, String> {
     let mut params = HashMap::new();
     params.insert(ShellParam::ArgCount, "0".into()); // Number of positional parameters
-    params.insert(
-      ShellParam::Pos(0),
-      std::env::current_exe()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string(),
-    ); // Name of the shell
     params.insert(ShellParam::ShPid, Pid::this().to_string()); // PID of the shell
     params.insert(ShellParam::LastJob, "".into()); // PID of the last background job (if any)
     params

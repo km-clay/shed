@@ -212,7 +212,10 @@ impl FernVi {
 						self.editor.set_hint(hint);
 					}
 					None => {
-						self.writer.flush_write("\x07")?; // Bell character
+						match crate::state::read_shopts(|s| s.core.bell_style) {
+							crate::shopt::FernBellStyle::Audible => { self.writer.flush_write("\x07")?; }
+							crate::shopt::FernBellStyle::Visible | crate::shopt::FernBellStyle::Disable => {}
+						}
 					}
 				}
 
@@ -240,10 +243,12 @@ impl FernVi {
 				self.print_line()?;
         self.writer.flush_write("\n")?;
         let buf = self.editor.take_buf();
-        // Save command to history
-        self.history.push(buf.clone());
-        if let Err(e) = self.history.save() {
-          eprintln!("Failed to save history: {e}");
+        // Save command to history if auto_hist is enabled
+        if crate::state::read_shopts(|s| s.core.auto_hist) {
+          self.history.push(buf.clone());
+          if let Err(e) = self.history.save() {
+            eprintln!("Failed to save history: {e}");
+          }
         }
         return Ok(ReadlineEvent::Line(buf));
       }
@@ -283,7 +288,8 @@ impl FernVi {
   pub fn get_layout(&mut self, line: &str) -> Layout {
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
     let (cols, _) = get_win_size(STDIN_FILENO);
-    Layout::from_parts(/* tab_stop: */ 8, cols, &self.prompt, to_cursor, line)
+    let tab_stop = crate::state::read_shopts(|s| s.prompt.tab_stop) as u16;
+    Layout::from_parts(tab_stop, cols, &self.prompt, to_cursor, line)
   }
   pub fn scroll_history(&mut self, cmd: ViCmd) {
     /*
@@ -360,15 +366,16 @@ impl FernVi {
   }
 
 	pub fn line_text(&mut self) -> String {
-		let start = Instant::now();
 		let line = self.editor.to_string();
-		self.highlighter.load_input(&line);
-		self.highlighter.highlight();
-		let highlighted = self.highlighter.take();
 		let hint = self.editor.get_hint_text();
-		let complete = format!("{highlighted}{hint}");
-		let end = start.elapsed();
-		complete
+		if crate::state::read_shopts(|s| s.prompt.highlight) {
+			self.highlighter.load_input(&line);
+			self.highlighter.highlight();
+			let highlighted = self.highlighter.take();
+			format!("{highlighted}{hint}")
+		} else {
+			format!("{line}{hint}")
+		}
 	}
 
   pub fn print_line(&mut self) -> ShResult<()> {

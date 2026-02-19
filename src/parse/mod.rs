@@ -44,6 +44,7 @@ macro_rules! try_match {
 pub struct ParsedSrc {
   pub src: Arc<String>,
   pub ast: Ast,
+  pub lex_flags: LexFlags,
 }
 
 impl ParsedSrc {
@@ -51,11 +52,16 @@ impl ParsedSrc {
     Self {
       src,
       ast: Ast::new(vec![]),
+      lex_flags: LexFlags::empty(),
     }
+  }
+  pub fn with_lex_flags(mut self, flags: LexFlags) -> Self {
+    self.lex_flags = flags;
+    self
   }
   pub fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
     let mut tokens = vec![];
-    for lex_result in LexStream::new(self.src.clone(), LexFlags::empty()) {
+    for lex_result in LexStream::new(self.src.clone(), self.lex_flags) {
       match lex_result {
         Ok(token) => tokens.push(token),
         Err(error) => return Err(vec![error]),

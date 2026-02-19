@@ -554,8 +554,12 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 pub fn expand_glob(raw: &str) -> ShResult<String> {
   let mut words = vec![];
 
+  let opts = glob::MatchOptions {
+    require_literal_leading_dot: !crate::state::read_shopts(|s| s.core.dotglob),
+    ..Default::default()
+  };
   for entry in
-    glob::glob(raw).map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid glob pattern"))?
+    glob::glob_with(raw, opts).map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid glob pattern"))?
   {
     let entry =
       entry.map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid filename found in glob"))?;
@@ -1926,7 +1930,8 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 				let pathbuf = PathBuf::from(&path);
 				let mut segments = pathbuf.iter().count();
 				let mut path_iter = pathbuf.iter();
-				while segments > 4 {
+				let max_segments = crate::state::read_shopts(|s| s.prompt.trunc_prompt_path);
+				while segments > max_segments {
 					path_iter.next();
 					segments -= 1;
 				}

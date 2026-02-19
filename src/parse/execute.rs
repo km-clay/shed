@@ -20,6 +20,10 @@ use super::{
 	ParsedSrc, Redir, RedirType,
 };
 
+thread_local! {
+	static RECURSE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub struct ScopeGuard;
 
 
@@ -105,7 +109,12 @@ impl ExecArgs {
 pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -> ShResult<()> {
 	let log_tab = read_logic(|l| l.clone());
 	let input = expand_aliases(input, HashSet::new(), &log_tab);
-	let mut parser = ParsedSrc::new(Arc::new(input));
+	let lex_flags = if interactive {
+		super::lex::LexFlags::INTERACTIVE
+	} else {
+		super::lex::LexFlags::empty()
+	};
+	let mut parser = ParsedSrc::new(Arc::new(input)).with_lex_flags(lex_flags);
 	if let Err(errors) = parser.parse_src() {
 		for error in errors {
 			eprintln!("{error}");
@@ -170,6 +179,10 @@ impl Dispatcher {
 			self.exec_builtin(node)
 		} else if is_subsh(node.get_command().cloned()) {
 			self.exec_subsh(node)
+		} else if crate::state::read_shopts(|s| s.core.autocd) && Path::new(cmd.span.as_str()).is_dir() {
+			let dir = cmd.span.as_str().to_string();
+			let stack = IoStack { stack: self.io_stack.clone() };
+			exec_input(format!("cd {dir}"), Some(stack), self.interactive)
 		} else {
 			self.exec_cmd(node)
 		}
@@ -266,6 +279,21 @@ impl Dispatcher {
 			unreachable!()
 		};
 
+		let max_depth = crate::state::read_shopts(|s| s.core.max_recurse_depth);
+		let depth = RECURSE_DEPTH.with(|d| {
+			let cur = d.get();
+			d.set(cur + 1);
+			cur + 1
+		});
+		if depth > max_depth {
+			RECURSE_DEPTH.with(|d| d.set(d.get() - 1));
+			return Err(ShErr::full(
+				ShErrKind::InternalErr,
+				format!("maximum recursion depth ({max_depth}) exceeded"),
+				blame,
+			));
+		}
+
 		let env_vars = self.set_assignments(assignments, AssignBehavior::Export)?;
 		let _var_guard = VarCtxGuard::new(env_vars.into_iter().collect());
 
@@ -273,27 +301,30 @@ impl Dispatcher {
 
 		let func_name = argv.remove(0).span.as_str().to_string();
 		let argv = prepare_argv(argv)?;
-		if let Some(func) = read_logic(|l| l.get_func(&func_name)) {
+		let result = if let Some(func) = read_logic(|l| l.get_func(&func_name)) {
 			let _guard = ScopeGuard::exclusive_scope(Some(argv));
 
 			if let Err(e) = self.exec_brc_grp((*func).clone()) {
 				match e.kind() {
 					ShErrKind::FuncReturn(code) => {
 						state::set_status(*code);
-						return Ok(());
+						Ok(())
 					}
-					_ => return Err(e),
+					_ => Err(e),
 				}
+			} else {
+				Ok(())
 			}
-
-			Ok(())
 		} else {
 			Err(ShErr::full(
 					ShErrKind::InternalErr,
 					format!("Failed to find function '{}'", func_name),
 					blame,
 			))
-		}
+		};
+
+		RECURSE_DEPTH.with(|d| d.set(d.get() - 1));
+		result
 	}
 	fn exec_brc_grp(&mut self, brc_grp: Node) -> ShResult<()> {
 		let NdRule::BraceGrp { body } = brc_grp.class else {
