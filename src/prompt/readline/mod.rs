@@ -24,37 +24,41 @@ pub mod highlight;
 pub mod complete;
 
 pub mod markers {
+	use super::Marker;
+
 	// token-level (derived from token class)
-	pub const COMMAND: char = '\u{fdd0}';
-	pub const BUILTIN: char = '\u{fdd1}';
-	pub const ARG: char = '\u{fdd2}';
-	pub const KEYWORD: char = '\u{fdd3}';
-	pub const OPERATOR: char = '\u{fdd4}';
-	pub const REDIRECT: char = '\u{fdd5}';
-	pub const COMMENT: char = '\u{fdd6}';
-	pub const ASSIGNMENT: char = '\u{fdd7}';
-	pub const CMD_SEP: char = '\u{fde0}';
-	pub const CASE_PAT: char = '\u{fde1}';
-	pub const SUBSH: char = '\u{fde7}';
-	pub const SUBSH_END: char = '\u{fde8}';
+	pub const COMMAND: Marker = '\u{fdd0}';
+	pub const BUILTIN: Marker = '\u{fdd1}';
+	pub const ARG: Marker = '\u{fdd2}';
+	pub const KEYWORD: Marker = '\u{fdd3}';
+	pub const OPERATOR: Marker = '\u{fdd4}';
+	pub const REDIRECT: Marker = '\u{fdd5}';
+	pub const COMMENT: Marker = '\u{fdd6}';
+	pub const ASSIGNMENT: Marker = '\u{fdd7}';
+	pub const CMD_SEP: Marker = '\u{fde0}';
+	pub const CASE_PAT: Marker = '\u{fde1}';
+	pub const SUBSH: Marker = '\u{fde7}';
+	pub const SUBSH_END: Marker = '\u{fde8}';
 
 	// sub-token (needs scanning)
-	pub const VAR_SUB: char = '\u{fdda}';
-	pub const VAR_SUB_END: char = '\u{fde3}';
-	pub const CMD_SUB: char = '\u{fdd8}';
-	pub const CMD_SUB_END: char = '\u{fde4}';
-	pub const PROC_SUB: char = '\u{fdd9}';
-	pub const PROC_SUB_END: char = '\u{fde9}';
-	pub const STRING_DQ: char = '\u{fddb}';
-	pub const STRING_DQ_END: char = '\u{fde5}';
-	pub const STRING_SQ: char = '\u{fddc}';
-	pub const STRING_SQ_END: char = '\u{fde6}';
-	pub const ESCAPE: char = '\u{fddd}';
-	pub const GLOB: char = '\u{fdde}';
+	pub const VAR_SUB: Marker = '\u{fdda}';
+	pub const VAR_SUB_END: Marker = '\u{fde3}';
+	pub const CMD_SUB: Marker = '\u{fdd8}';
+	pub const CMD_SUB_END: Marker = '\u{fde4}';
+	pub const PROC_SUB: Marker = '\u{fdd9}';
+	pub const PROC_SUB_END: Marker = '\u{fde9}';
+	pub const STRING_DQ: Marker = '\u{fddb}';
+	pub const STRING_DQ_END: Marker = '\u{fde5}';
+	pub const STRING_SQ: Marker = '\u{fddc}';
+	pub const STRING_SQ_END: Marker = '\u{fde6}';
+	pub const ESCAPE: Marker = '\u{fddd}';
+	pub const GLOB: Marker = '\u{fdde}';
 
-	pub const RESET: char = '\u{fde2}';
+	pub const RESET: Marker = '\u{fde2}';
 
-	pub const END_MARKERS: [char;7] = [
+	pub const NULL: Marker = '\u{fdef}';
+
+	pub const END_MARKERS: [Marker;7] = [
 		VAR_SUB_END,
 		CMD_SUB_END,
 		PROC_SUB_END,
@@ -63,7 +67,7 @@ pub mod markers {
 		SUBSH_END,
 		RESET
 	];
-	pub const TOKEN_LEVEL: [char;10] = [
+	pub const TOKEN_LEVEL: [Marker;10] = [
 		SUBSH,
 		COMMAND,
 		BUILTIN,
@@ -75,7 +79,7 @@ pub mod markers {
 		CASE_PAT,
 		ASSIGNMENT,
 	];
-	pub const SUB_TOKEN: [char;6] = [
+	pub const SUB_TOKEN: [Marker;6] = [
 		VAR_SUB,
 		CMD_SUB,
 		PROC_SUB,
@@ -84,10 +88,11 @@ pub mod markers {
 		GLOB,
 	];
 
-	pub fn is_marker(c: char) -> bool {
+	pub fn is_marker(c: Marker) -> bool {
 		TOKEN_LEVEL.contains(&c) || SUB_TOKEN.contains(&c) || END_MARKERS.contains(&c)
 	}
 }
+type Marker = char;
 
 /// Non-blocking readline result
 pub enum ReadlineEvent {
@@ -639,7 +644,7 @@ pub fn annotate_input_recursive(input: &str) -> String {
 	annotated
 }
 
-pub fn get_insertions(input: &str) -> Vec<(usize, char)> {
+pub fn get_insertions(input: &str) -> Vec<(usize, Marker)> {
 	let input = Arc::new(input.to_string());
 	let tokens: Vec<Tk> = lex::LexStream::new(input, LexFlags::LEX_UNFINISHED)
 		.flatten()
@@ -662,7 +667,7 @@ pub fn get_insertions(input: &str) -> Vec<(usize, char)> {
 /// - String tokens (which need sub-token scanning for variables, quotes, etc.)
 /// - Structural markers (SOI, EOI, Null)
 /// - Unimplemented features (comments, brace groups)
-pub fn marker_for(class: &TkRule) -> Option<char> {
+pub fn marker_for(class: &TkRule) -> Option<Marker> {
 	match class {
 		TkRule::Pipe |
 		TkRule::ErrPipe |
@@ -683,17 +688,17 @@ pub fn marker_for(class: &TkRule) -> Option<char> {
 	}
 }
 
-pub fn annotate_token(token: Tk) -> Vec<(usize, char)> {
+pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
 	// Sort by position descending, with priority ordering at same position:
 	// - RESET first (inserted first, ends up rightmost)
 	// - Regular markers middle
 	// - END markers last (inserted last, ends up leftmost)
 	// Result: [END][TOGGLE][RESET]
-	let sort_insertions = |insertions: &mut Vec<(usize, char)>| {
+	let sort_insertions = |insertions: &mut Vec<(usize, Marker)>| {
 		insertions.sort_by(|a, b| {
 			match b.0.cmp(&a.0) {
 				std::cmp::Ordering::Equal => {
-					let priority = |m: char| -> u8 {
+					let priority = |m: Marker| -> u8 {
 						match m {
 							markers::RESET => 0,
 							markers::VAR_SUB |
@@ -718,12 +723,12 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, char)> {
 		});
 	};
 
-	let in_context = |c: char, insertions: &[(usize, char)]| -> bool {
+	let in_context = |c: Marker, insertions: &[(usize, Marker)]| -> bool {
 		let mut stack = insertions.to_vec();
 		stack.sort_by(|a, b| {
 			match b.0.cmp(&a.0) {
 				std::cmp::Ordering::Equal => {
-					let priority = |m: char| -> u8 {
+					let priority = |m: Marker| -> u8 {
 						match m {
 							markers::RESET => 0,
 							markers::VAR_SUB |
@@ -755,7 +760,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, char)> {
 		ctx.1 == c
 	};
 
-	let mut insertions: Vec<(usize, char)> = vec![];
+	let mut insertions: Vec<(usize, Marker)> = vec![];
 
 
 	if token.class != TkRule::Str

@@ -1,6 +1,6 @@
 use std::{env, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc};
 
-use crate::{builtin::BUILTINS, libsh::error::ShResult, parse::lex::{self, LexFlags, Tk, TkFlags}, prompt::readline::{annotate_input, annotate_input_recursive, get_insertions, markers::{self, is_marker}}, state::read_logic};
+use crate::{builtin::BUILTINS, libsh::error::{ShErr, ShErrKind, ShResult}, parse::lex::{self, LexFlags, Tk, TkFlags}, prompt::readline::{Marker, annotate_input, annotate_input_recursive, get_insertions, markers::{self, is_marker}}, state::{read_logic, read_vars}};
 
 pub enum CompCtx {
 	CmdName,
@@ -53,11 +53,11 @@ impl Completer {
 		(before_cursor, after_cursor)
 	}
 
-	pub fn get_completion_context(&self, line: &str, cursor_pos: usize) -> (bool, usize) {
+	pub fn get_completion_context(&self, line: &str, cursor_pos: usize) -> (Vec<Marker>, usize) {
 		let annotated = annotate_input_recursive(line);
 		log::debug!("Annotated input for completion context: {:?}", annotated);
-		let mut in_cmd = false;
-		let mut same_position = false; // so that arg markers do not overwrite command markers if they are in the same spot
+		let mut ctx = vec![markers::NULL];
+		let mut last_priority = 0;
 		let mut ctx_start = 0;
 		let mut pos = 0;
 
@@ -67,32 +67,47 @@ impl Completer {
 					match ch {
 						markers::COMMAND | markers::BUILTIN => {
 							log::debug!("Found command marker at position {}", pos);
-							ctx_start = pos;
-							same_position = true;
-							in_cmd = true;
+							if last_priority < 2 {
+								if last_priority > 0 {
+									ctx.pop();
+								}
+								ctx_start = pos;
+								last_priority = 2;
+								ctx.push(markers::COMMAND);
+							}
+						}
+						markers::VAR_SUB => {
+							log::debug!("Found variable substitution marker at position {}", pos);
+							if last_priority < 3 {
+								if last_priority > 0 {
+									ctx.pop();
+								}
+								ctx_start = pos;
+								last_priority = 3;
+								ctx.push(markers::VAR_SUB);
+							}
 						}
 						markers::ARG => {
 							log::debug!("Found argument marker at position {}", pos);
-							if !same_position {
+							if last_priority < 1 {
 								ctx_start = pos;
-								in_cmd = false;
+								ctx.push(markers::ARG);
 							}
 						}
 						_ => {}
 					}
 				}
 				_ => {
-					same_position = false;
+					last_priority = 0; // reset priority on normal characters
 					pos += 1; // we hit a normal character, advance our position
 					if pos >= cursor_pos {
-						log::debug!("Cursor is at position {}, current context: {}", pos, if in_cmd { "command" } else { "argument" });
 						break;
 					}
 				}
 			}
 		}
 
-		(in_cmd, ctx_start)
+		(ctx, ctx_start)
 	}
 
 	pub fn reset(&mut self) {
@@ -150,6 +165,54 @@ impl Completer {
 		}
 	}
 
+	pub fn extract_var_name(text: &str) -> Option<(String,usize,usize)> {
+		let mut chars = text.chars().peekable();
+		let mut name = String::new();
+		let mut reading_name = false;
+		let mut pos = 0;
+		let mut name_start = 0;
+		let mut name_end = 0;
+
+		while let Some(ch) = chars.next() {
+			match ch {
+				'$' => {
+					if chars.peek() == Some(&'{') {
+						continue;
+					}
+
+					reading_name = true;
+					name_start = pos + 1; // Start after the '$'
+				}
+				'{' if !reading_name => {
+					reading_name = true;
+					name_start = pos + 1;
+				}
+				ch if ch.is_alphanumeric() || ch == '_' => {
+					if reading_name {
+						name.push(ch);
+					}
+				}
+				_ => {
+					if reading_name {
+						name_end = pos; // End before the non-alphanumeric character
+						break;
+					}
+				}
+			}
+			pos += 1;
+		}
+
+		if !reading_name {
+			return None;
+		}
+
+		if name_end == 0 {
+			name_end = pos;
+		}
+
+		Some((name, name_start, name_end))
+	}
+
 	pub fn get_completed_line(&self) -> String {
 		if self.candidates.is_empty() {
 			return self.original_input.clone();
@@ -180,9 +243,8 @@ impl Completer {
 
 
 		// Look for marker at the START of what we're completing, not at cursor
-		let (is_cmd, token_start) = self.get_completion_context(&line, cursor_pos);
+		let (mut ctx, token_start) = self.get_completion_context(&line, cursor_pos);
 		self.token_span.0 = token_start; // Update start of token span based on context
-		log::debug!("Completion context: {}, token span: {:?}, token_start: {}", if is_cmd { "command" } else { "argument" }, self.token_span, token_start);
 		cur_token.span.set_range(self.token_span.0..self.token_span.1); // Update token span to reflect context
 
 		// If token contains '=', only complete after the '='
@@ -192,17 +254,80 @@ impl Completer {
 			self.token_span.0 = cur_token.span.start + eq_pos + 1;
 		}
 
+		if ctx.last().is_some_and(|m| *m == markers::VAR_SUB) {
+			let var_sub = &cur_token.as_str();
+			if let Some((var_name,start,end)) = Self::extract_var_name(var_sub) {
+				log::debug!("Extracted variable name for completion: {}", var_name);
+				if read_vars(|v| v.get_var(&var_name)).is_empty() {
+					// if we are here, we have a variable substitution that isn't complete
+					// so let's try to complete it
+					let ret: ShResult<CompResult> = read_vars(|v| {
+						let var_matches = v.flatten_vars()
+							.keys()
+							.filter(|k| k.starts_with(&var_name) && *k != &var_name)
+							.map(|k| k.to_string())
+							.collect::<Vec<_>>();
+
+						if !var_matches.is_empty() {
+							let name_start = cur_token.span.start + start;
+							let name_end = cur_token.span.start + end;
+							self.token_span = (name_start, name_end);
+							cur_token.span.set_range(self.token_span.0..self.token_span.1);
+							Ok(CompResult::from_candidates(var_matches))
+						} else {
+							Ok(CompResult::NoMatch)
+						}
+					});
+
+					if !matches!(ret, Ok(CompResult::NoMatch)) {
+						return ret;
+					} else {
+						ctx.pop();
+					}
+				} else {
+					ctx.pop();
+				}
+			}
+		}
+
+		let raw_tk = cur_token.as_str().to_string();
 		let expanded_tk = cur_token.expand()?;
 		let expanded_words = expanded_tk.get_words().into_iter().collect::<Vec<_>>();
 		let expanded = expanded_words.join("\\ ");
 
-		let candidates = if is_cmd {
-			log::debug!("Completing command: {}", &expanded);
-			Self::complete_command(&expanded)?
-		} else {
-			log::debug!("Completing filename: {}", &expanded);
-			Self::complete_filename(&expanded)
+		let mut candidates = match ctx.pop() {
+			Some(markers::COMMAND) => {
+				log::debug!("Completing command: {}", &expanded);
+				Self::complete_command(&expanded)?
+			}
+			Some(markers::ARG) => {
+				log::debug!("Completing filename: {}", &expanded);
+				Self::complete_filename(&expanded)
+			}
+			Some(m) => {
+				log::warn!("Unknown marker {:?} in completion context", m);
+				return Ok(CompResult::NoMatch);
+			}
+			None => {
+				log::warn!("No marker found in completion context");
+				return Ok(CompResult::NoMatch);
+			}
 		};
+
+		// Now we are just going to graft the completed text
+		// onto the original token. This prevents something like
+		// $SOME_PATH/
+		// from being completed into
+		// /path/to/some_path/file.txt
+		// and instead returns
+		// $SOME_PATH/file.txt
+		candidates = candidates.into_iter()
+			.map(|c| match c.strip_prefix(&expanded) {
+				Some(suffix) => format!("{raw_tk}{suffix}"),
+				None => c
+			})
+			.collect();
+
 
 		Ok(CompResult::from_candidates(candidates))
 	}

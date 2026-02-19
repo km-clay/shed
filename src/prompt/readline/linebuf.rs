@@ -53,7 +53,7 @@ impl From<&str> for CharClass {
       return CharClass::Alphanum;
     }
 
-    if value.chars().all(char::is_alphanumeric) {
+    if value.chars().all(|c| c.is_alphanumeric() || c == '_') {
       CharClass::Alphanum
     } else if value.chars().all(char::is_whitespace) {
       CharClass::Whitespace
