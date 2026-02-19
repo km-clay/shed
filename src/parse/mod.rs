@@ -1238,11 +1238,18 @@ impl ParseStream {
   fn parse_pipeln(&mut self) -> ShResult<Option<Node>> {
     let mut cmds = vec![];
     let mut node_tks = vec![];
+		let mut flags = NdFlags::empty();
+
     while let Some(cmd) = self.parse_block(false)? {
       let is_punctuated = node_is_punctuated(&cmd.tokens);
       node_tks.append(&mut cmd.tokens.clone());
       cmds.push(cmd);
-      if *self.next_tk_class() != TkRule::Pipe || is_punctuated {
+			if *self.next_tk_class() == TkRule::Bg {
+				let tk = self.next_tk().unwrap();
+				node_tks.push(tk.clone());
+				flags |= NdFlags::BACKGROUND;
+				break;
+			} else if *self.next_tk_class() != TkRule::Pipe || is_punctuated {
         break;
       } else if let Some(pipe) = self.next_tk() {
         node_tks.push(pipe)
@@ -1259,7 +1266,7 @@ impl ParseStream {
           cmds,
           pipe_err: false,
         },
-        flags: NdFlags::empty(),
+        flags,
         redirs: vec![],
         tokens: node_tks,
       }))
@@ -1271,6 +1278,7 @@ impl ParseStream {
     let mut node_tks = vec![];
     let mut redirs = vec![];
     let mut argv = vec![];
+		let mut flags = NdFlags::empty();
     let mut assignments = vec![];
 
     while let Some(prefix_tk) = tk_iter.next() {
@@ -1316,15 +1324,18 @@ impl ParseStream {
 				return Ok(Some(Node {
 					class: NdRule::Command { assignments, argv },
 					tokens: node_tks,
-					flags: NdFlags::empty(),
+					flags,
 					redirs,
 				}));
 			}
     }
 
     while let Some(tk) = tk_iter.next() {
+			if *self.next_tk_class() == TkRule::Bg {
+				break;
+			}
       match tk.class {
-        TkRule::EOI | TkRule::Pipe | TkRule::And | TkRule::BraceGrpEnd | TkRule::Or => break,
+        TkRule::EOI | TkRule::Pipe | TkRule::And | TkRule::BraceGrpEnd | TkRule::Or | TkRule::Bg => break,
         TkRule::Sep => {
           node_tks.push(tk.clone());
           break;
@@ -1370,7 +1381,7 @@ impl ParseStream {
     Ok(Some(Node {
       class: NdRule::Command { assignments, argv },
       tokens: node_tks,
-      flags: NdFlags::empty(),
+      flags,
       redirs,
     }))
   }

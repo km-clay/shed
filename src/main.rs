@@ -27,6 +27,7 @@ use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::unistd::read;
 use nix::errno::Errno;
 
+use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
@@ -34,7 +35,7 @@ use crate::prompt::get_prompt;
 use crate::prompt::readline::term::raw_mode;
 use crate::prompt::readline::{FernVi, ReadlineEvent};
 use crate::signal::{QUIT_CODE, check_signals, sig_setup, signals_pending};
-use crate::state::{source_rc, write_meta};
+use crate::state::{read_logic, source_rc, write_meta};
 use clap::Parser;
 use state::{read_vars, write_vars};
 
@@ -84,6 +85,11 @@ fn main() -> ExitCode {
   } {
 		eprintln!("fern: {e}");
 	};
+
+	if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Exit))
+	&& let Err(e) = exec_input(trap, None, false) {
+		eprintln!("fern: error running EXIT trap: {e}");
+	}
 
 	ExitCode::from(QUIT_CODE.load(Ordering::SeqCst) as u8)
 }

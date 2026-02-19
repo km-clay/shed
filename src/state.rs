@@ -5,15 +5,10 @@ use std::{
 use nix::unistd::{gethostname, getppid, User};
 
 use crate::{
-  exec_input,
-  jobs::JobTab,
-  libsh::{
+  builtin::trap::TrapTarget, exec_input, jobs::JobTab, libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::VecDequeExt,
-  },
-  parse::{ConjunctNode, NdRule, Node, ParsedSrc},
-  prelude::*,
-  shopt::ShOpts,
+  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, shopt::ShOpts
 };
 
 pub struct Fern {
@@ -292,6 +287,7 @@ impl Deref for ShFunc {
 pub struct LogTab {
   functions: HashMap<String, ShFunc>,
   aliases: HashMap<String, String>,
+	traps: HashMap<TrapTarget, String>,
 }
 
 impl LogTab {
@@ -301,6 +297,18 @@ impl LogTab {
   pub fn insert_func(&mut self, name: &str, src: ShFunc) {
     self.functions.insert(name.into(), src);
   }
+	pub fn insert_trap(&mut self, target: TrapTarget, command: String) {
+		self.traps.insert(target, command);
+	}
+	pub fn get_trap(&self, target: TrapTarget) -> Option<String> {
+		self.traps.get(&target).cloned()
+	}
+	pub fn remove_trap(&mut self, target: TrapTarget) {
+		self.traps.remove(&target);
+	}
+	pub fn traps(&self) -> &HashMap<TrapTarget, String> {
+		&self.traps
+	}
   pub fn get_func(&self, name: &str) -> Option<ShFunc> {
     self.functions.get(name).cloned()
   }
@@ -682,8 +690,12 @@ impl VarTab {
 /// A table of metadata for the shell
 #[derive(Default, Debug)]
 pub struct MetaTab {
+	// command running duration
   runtime_start: Option<Instant>,
 	runtime_stop: Option<Instant>,
+
+	// pending system messages
+	system_msg: Vec<String>
 }
 
 impl MetaTab {
@@ -702,6 +714,15 @@ impl MetaTab {
 		} else {
 			None
 		}
+	}
+	pub fn post_system_message(&mut self, message: String) {
+		self.system_msg.push(message);
+	}
+	pub fn pop_system_message(&mut self) -> Option<String> {
+		self.system_msg.pop()
+	}
+	pub fn system_msg_pending(&self) -> bool {
+		!self.system_msg.is_empty()
 	}
 }
 

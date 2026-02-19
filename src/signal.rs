@@ -1,47 +1,84 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 
 use nix::sys::signal::{SaFlags, SigAction, sigaction};
 
 use crate::{
-  jobs::{JobCmdFlags, JobID, take_term},
-  libsh::error::{ShErr, ShErrKind, ShResult},
-  prelude::*,
-  state::{read_jobs, write_jobs},
+  builtin::trap::TrapTarget, jobs::{JobCmdFlags, JobID, take_term}, libsh::error::{ShErr, ShErrKind, ShResult}, parse::execute::exec_input, prelude::*, state::{read_jobs, read_logic, write_jobs, write_meta}
 };
 
-static GOT_SIGINT: AtomicBool = AtomicBool::new(false);
-static GOT_SIGHUP: AtomicBool = AtomicBool::new(false);
-static GOT_SIGTSTP: AtomicBool = AtomicBool::new(false);
-static GOT_SIGCHLD: AtomicBool = AtomicBool::new(false);
-static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
+static SIGNALS: AtomicU64 = AtomicU64::new(0);
 
+pub static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
 pub static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
 pub static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
 
+const MISC_SIGNALS: [Signal;22] = [
+	Signal::SIGILL,
+	Signal::SIGTRAP,
+	Signal::SIGABRT,
+	Signal::SIGBUS,
+	Signal::SIGFPE,
+	Signal::SIGUSR1,
+	Signal::SIGSEGV,
+	Signal::SIGUSR2,
+	Signal::SIGPIPE,
+	Signal::SIGALRM,
+	Signal::SIGTERM,
+	Signal::SIGSTKFLT,
+	Signal::SIGCONT,
+	Signal::SIGURG,
+	Signal::SIGXCPU,
+	Signal::SIGXFSZ,
+	Signal::SIGVTALRM,
+	Signal::SIGPROF,
+	Signal::SIGWINCH,
+	Signal::SIGIO,
+	Signal::SIGPWR,
+	Signal::SIGSYS,
+];
+
 pub fn signals_pending() -> bool {
-	GOT_SIGINT.load(Ordering::SeqCst)
-		|| GOT_SIGHUP.load(Ordering::SeqCst)
-		|| GOT_SIGTSTP.load(Ordering::SeqCst)
-		|| (REAPING_ENABLED.load(Ordering::SeqCst)
-			&& GOT_SIGCHLD.load(Ordering::SeqCst))
-		|| SHOULD_QUIT.load(Ordering::SeqCst)
+	SIGNALS.load(Ordering::SeqCst) != 0 || SHOULD_QUIT.load(Ordering::SeqCst)
 }
 
 pub fn check_signals() -> ShResult<()> {
-	if GOT_SIGINT.swap(false, Ordering::SeqCst) {
+	let pending = SIGNALS.swap(0, Ordering::SeqCst);
+	let got_signal = |sig: Signal| -> bool { pending & (1 << sig as u64) != 0 };
+	let run_trap = |sig: Signal| -> ShResult<()> {
+		if let Some(command) = read_logic(|l| l.get_trap(TrapTarget::Signal(sig))) {
+			exec_input(command, None, false)?;
+		}
+		Ok(())
+	};
+
+	if got_signal(Signal::SIGINT) {
 		interrupt()?;
+		run_trap(Signal::SIGINT)?;
 		return Err(ShErr::simple(ShErrKind::ClearReadline, ""));
 	}
-	if GOT_SIGHUP.swap(false, Ordering::SeqCst) {
+	if got_signal(Signal::SIGHUP) {
+		run_trap(Signal::SIGHUP)?;
 		hang_up(0);
 	}
-	if GOT_SIGTSTP.swap(false, Ordering::SeqCst) {
+	if got_signal(Signal::SIGQUIT) {
+		run_trap(Signal::SIGQUIT)?;
+		hang_up(0);
+	}
+	if got_signal(Signal::SIGTSTP) {
+		run_trap(Signal::SIGTSTP)?;
 		terminal_stop()?;
 	}
-	if REAPING_ENABLED.load(Ordering::SeqCst) && GOT_SIGCHLD.swap(false, Ordering::SeqCst) {
+	if got_signal(Signal::SIGCHLD) && REAPING_ENABLED.load(Ordering::SeqCst) {
+		run_trap(Signal::SIGCHLD)?;
 		wait_child()?;
-	} else if GOT_SIGCHLD.load(Ordering::SeqCst) {
 	}
+
+	for sig in MISC_SIGNALS {
+		if got_signal(sig) {
+			run_trap(sig)?;
+		}
+	}
+
 	if SHOULD_QUIT.load(Ordering::SeqCst) {
 		let code = QUIT_CODE.load(Ordering::SeqCst);
 		return Err(ShErr::simple(ShErrKind::CleanExit(code), "exit"));
@@ -59,87 +96,57 @@ pub fn enable_reaping() {
 pub fn sig_setup() {
 	let flags = SaFlags::empty();
 
-	let actions = [
-		SigAction::new(
-			SigHandler::Handler(handle_sigchld),
-			flags,
-			SigSet::empty(),
-		),
-		SigAction::new(
-			SigHandler::Handler(handle_sigquit),
-			flags,
-			SigSet::empty(),
-		),
-		SigAction::new(
-			SigHandler::Handler(handle_sigtstp),
-			flags,
-			SigSet::empty(),
-		),
-		SigAction::new(
-			SigHandler::Handler(handle_sighup),
-			flags,
-			SigSet::empty(),
-		),
-		SigAction::new(
-			SigHandler::Handler(handle_sigint),
-			flags,
-			SigSet::empty(),
-		),
-		SigAction::new( // SIGTTIN
-			SigHandler::SigIgn,
-			flags,
-			SigSet::empty(),
-		),
-		SigAction::new( // SIGTTOU
-			SigHandler::SigIgn,
-			flags,
-			SigSet::empty(),
-		),
-		SigAction::new(
-			SigHandler::Handler(handle_sigwinch),
-			flags,
-			SigSet::empty(),
-		),
-	];
+	let action = SigAction::new(SigHandler::Handler(handle_signal), flags, SigSet::empty());
 
+
+  let ignore = SigAction::new(SigHandler::SigIgn, flags, SigSet::empty());
 
   unsafe {
-    sigaction(Signal::SIGCHLD, &actions[0]).unwrap();
-    sigaction(Signal::SIGQUIT, &actions[1]).unwrap();
-		sigaction(Signal::SIGTSTP, &actions[2]).unwrap();
-		sigaction(Signal::SIGHUP, &actions[3]).unwrap();
-		sigaction(Signal::SIGINT, &actions[4]).unwrap();
-		sigaction(Signal::SIGTTIN, &actions[5]).unwrap();
-		sigaction(Signal::SIGTTOU, &actions[6]).unwrap();
-		sigaction(Signal::SIGWINCH, &actions[7]).unwrap();
+    sigaction(Signal::SIGTTIN, &ignore).unwrap();
+    sigaction(Signal::SIGTTOU, &ignore).unwrap();
+
+    sigaction(Signal::SIGCHLD, &action).unwrap();
+    sigaction(Signal::SIGHUP, &action).unwrap();
+    sigaction(Signal::SIGINT, &action).unwrap();
+    sigaction(Signal::SIGQUIT, &action).unwrap();
+    sigaction(Signal::SIGILL, &action).unwrap();
+    sigaction(Signal::SIGTRAP, &action).unwrap();
+    sigaction(Signal::SIGABRT, &action).unwrap();
+    sigaction(Signal::SIGBUS, &action).unwrap();
+    sigaction(Signal::SIGFPE, &action).unwrap();
+    sigaction(Signal::SIGUSR1, &action).unwrap();
+    sigaction(Signal::SIGSEGV, &action).unwrap();
+    sigaction(Signal::SIGUSR2, &action).unwrap();
+    sigaction(Signal::SIGPIPE, &action).unwrap();
+    sigaction(Signal::SIGALRM, &action).unwrap();
+    sigaction(Signal::SIGTERM, &action).unwrap();
+    sigaction(Signal::SIGSTKFLT, &action).unwrap();
+    sigaction(Signal::SIGCONT, &action).unwrap();
+    sigaction(Signal::SIGTSTP, &action).unwrap();
+    sigaction(Signal::SIGURG, &action).unwrap();
+    sigaction(Signal::SIGXCPU, &action).unwrap();
+    sigaction(Signal::SIGXFSZ, &action).unwrap();
+    sigaction(Signal::SIGVTALRM, &action).unwrap();
+    sigaction(Signal::SIGPROF, &action).unwrap();
+    sigaction(Signal::SIGWINCH, &action).unwrap();
+    sigaction(Signal::SIGIO, &action).unwrap();
+    sigaction(Signal::SIGPWR, &action).unwrap();
+    sigaction(Signal::SIGSYS, &action).unwrap();
   }
 }
 
-extern "C" fn handle_sigwinch(_: libc::c_int) {
-	/* do nothing
-	 * this exists for the sole purpose of interrupting readline
-	 * readline will be refreshed after the interruption,
-	 * which will cause window size calculations to be re-run
-	 * and we get window resize handling for free as a result
-	 */
-}
-
-extern "C" fn handle_sighup(_: libc::c_int) {
-	GOT_SIGHUP.store(true, Ordering::SeqCst);
-	SHOULD_QUIT.store(true, Ordering::SeqCst);
-	QUIT_CODE.store(128 + libc::SIGHUP, Ordering::SeqCst);
+extern "C" fn handle_signal(sig: libc::c_int) {
+	SIGNALS.fetch_or(1 << sig, Ordering::SeqCst);
 }
 
 pub fn hang_up(_: libc::c_int) {
+	SHOULD_QUIT.store(true, Ordering::SeqCst);
+	QUIT_CODE.store(1, Ordering::SeqCst);
   write_jobs(|j| {
     for job in j.jobs_mut().iter_mut().flatten() {
       job.killpg(Signal::SIGTERM).ok();
     }
   });
-}
-
-extern "C" fn handle_sigtstp(_: libc::c_int) {
-	GOT_SIGTSTP.store(true, Ordering::SeqCst);
 }
 
 pub fn terminal_stop() -> ShResult<()> {
@@ -153,10 +160,6 @@ pub fn terminal_stop() -> ShResult<()> {
 	// TODO: It seems like there is supposed to be a take_term() call here
 }
 
-extern "C" fn handle_sigint(_: libc::c_int) {
-	GOT_SIGINT.store(true, Ordering::SeqCst);
-}
-
 pub fn interrupt() -> ShResult<()> {
   write_jobs(|j| {
     if let Some(job) = j.get_fg_mut() {
@@ -167,20 +170,11 @@ pub fn interrupt() -> ShResult<()> {
   })
 }
 
-extern "C" fn handle_sigquit(_: libc::c_int) {
-	SHOULD_QUIT.store(true, Ordering::SeqCst);
-	QUIT_CODE.store(128 + libc::SIGQUIT, Ordering::SeqCst);
-}
-
-extern "C" fn handle_sigchld(_: libc::c_int) {
-	GOT_SIGCHLD.store(true, Ordering::SeqCst);
-}
-
 pub fn wait_child() -> ShResult<()> {
   let flags = WtFlag::WNOHANG | WtFlag::WSTOPPED;
   while let Ok(status) = waitpid(None, Some(flags)) {
     match status {
-      WtStat::Exited(pid, code) => {
+      WtStat::Exited(pid, _) => {
         child_exited(pid, status)?;
       }
       WtStat::Signaled(pid, signal, _) => {
@@ -284,7 +278,8 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
         let job_order = read_jobs(|j| j.order().to_vec());
         let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
         if let Some(job) = result {
-          println!("{}", job.display(&job_order, JobCmdFlags::PIDS))
+          let job_complete_msg = job.display(&job_order, JobCmdFlags::PIDS).to_string();
+					write_meta(|m| m.post_system_message(job_complete_msg))
         }
       }
     }

@@ -17,7 +17,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
-use crate::{prelude::*, procio::borrow_fd};
+use crate::{prelude::*, procio::borrow_fd, state::{read_meta, write_meta}};
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   prompt::readline::keys::{KeyCode, ModKeys},
@@ -914,8 +914,16 @@ impl LineWriter for TermWriter {
     let end = new_layout.end;
     let cursor = new_layout.cursor;
 
+		if read_meta(|m| m.system_msg_pending()) {
+			let mut system_msg = String::new();
+			while let Some(msg) = write_meta(|m| m.pop_system_message()) {
+				writeln!(system_msg, "{msg}").map_err(err)?;
+			}
+			self.buffer.push_str(&system_msg);
+		}
+
     self.buffer.push_str(prompt);
-    self.buffer.push_str(&line.to_string());
+    self.buffer.push_str(line);
 
     if end.col == 0 && end.row > 0 && !self.buffer.ends_with('\n') {
       // The line has wrapped. We need to use our own line break.

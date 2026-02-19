@@ -22,12 +22,13 @@ pub mod source;
 pub mod test; // [[ ]] thing
 pub mod read;
 pub mod zoltraak;
+pub mod trap;
 
-pub const BUILTINS: [&str; 20] = [
+pub const BUILTINS: [&str; 21] = [
   "echo", "cd", "read", "export", "pwd", "source",
 	"shift", "jobs", "fg", "bg", "alias", "unalias",
   "return", "break", "continue", "exit", "zoltraak",
-	"shopt", "builtin", "command",
+	"shopt", "builtin", "command", "trap"
 ];
 
 /// Sets up a builtin command

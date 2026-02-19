@@ -48,7 +48,7 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 		flags.contains(EchoFlags::USE_PROMPT)
 	)?.join(" ");
 
-  if !flags.contains(EchoFlags::NO_NEWLINE) {
+  if !flags.contains(EchoFlags::NO_NEWLINE) && !echo_output.ends_with('\n') {
     echo_output.push('\n')
   }
 

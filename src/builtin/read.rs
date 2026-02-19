@@ -155,6 +155,7 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
 		}
 	}
 
+	state::set_status(0);
 	Ok(())
 }
 

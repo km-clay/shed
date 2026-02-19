@@ -2,7 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::{
 	builtin::{
-		alias::{alias, unalias}, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{JobBehavior, continue_job, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, zoltraak::zoltraak
+		alias::{alias, unalias}, cd::cd, echo::echo, export::export, flowctl::flowctl, jobctl::{JobBehavior, continue_job, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, zoltraak::zoltraak
 	},
 	expand::expand_aliases,
 	jobs::{ChildProc, JobStack, dispatch_job},
@@ -126,7 +126,16 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -
 	if let Some(mut stack) = io_stack {
 		dispatcher.io_stack.extend(stack.drain(..));
 	}
-	dispatcher.begin_dispatch()
+	let result = dispatcher.begin_dispatch();
+
+	if state::get_status() != 0
+	&& let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
+		let saved_status = state::get_status();
+		exec_input(trap, None, false)?;
+		state::set_status(saved_status);
+	}
+
+	result
 }
 
 pub struct Dispatcher {
@@ -602,6 +611,7 @@ impl Dispatcher {
 			"zoltraak" => zoltraak(cmd, io_stack_mut, curr_job_mut),
 			"shopt" => shopt(cmd, io_stack_mut, curr_job_mut),
 			"read" => read_builtin(cmd, io_stack_mut, curr_job_mut),
+			"trap" => trap(cmd, io_stack_mut, curr_job_mut),
 			_ => unimplemented!(
 				"Have not yet added support for builtin '{}'",
 				cmd_raw.span.as_str()

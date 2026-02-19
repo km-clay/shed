@@ -2,7 +2,7 @@ use crate::{
   libsh::{
     error::ShResult,
     term::{Style, Styled},
-  }, prelude::*, procio::{IoMode, borrow_fd}, signal::{disable_reaping, enable_reaping}, state::{self, set_status, write_jobs}
+  }, prelude::*, procio::{IoMode, borrow_fd}, signal::{disable_reaping, enable_reaping}, state::{self, set_status, read_jobs, write_jobs}
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -610,11 +610,7 @@ impl Job {
       let job_stat = *self.get_stats().get(i).unwrap();
       let fmt_stat = DisplayWaitStatus(job_stat).to_string();
 
-      let mut stat_line = if init {
-        "".to_string()
-      } else {
-        fmt_stat.clone()
-      };
+      let mut stat_line = fmt_stat.clone();
       stat_line = format!("{}{} ", pid, stat_line);
       stat_line = format!("{} {}", stat_line, cmd);
       stat_line = match job_stat {
