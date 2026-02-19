@@ -47,6 +47,11 @@ impl Span {
   pub fn range(&self) -> Range<usize> {
     self.range.clone()
   }
+	/// With great power comes great responsibility
+	/// Only use this in the most dire of circumstances
+	pub fn set_range(&mut self, range: Range<usize>) {
+		self.range = range;
+	}
 }
 
 /// Allows simple access to the underlying range wrapped by the span
@@ -176,7 +181,6 @@ bitflags! {
 
 impl LexStream {
   pub fn new(source: Arc<String>, flags: LexFlags) -> Self {
-    log::trace!("new lex stream");
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
     Self {
       source,
@@ -260,7 +264,7 @@ impl LexStream {
               pos += 1;
             }
 
-            if !found_fd {
+            if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
               return Some(Err(ShErr::full(
                 ShErrKind::ParseErr,
                 "Invalid redirection",
@@ -790,7 +794,6 @@ impl Iterator for LexStream {
           match self.read_string() {
             Ok(tk) => tk,
             Err(e) => {
-              log::error!("{e:?}");
               return Some(Err(e));
             }
           }

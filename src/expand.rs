@@ -59,7 +59,7 @@ pub struct Expander {
 impl Expander {
   pub fn new(raw: Tk) -> ShResult<Self> {
 		let raw = raw.span.as_str();
-		Self::from_raw(&raw)
+		Self::from_raw(raw)
   }
 	pub fn from_raw(raw: &str) -> ShResult<Self> {
 		let raw = expand_braces_full(raw)?.join(" ");
@@ -69,10 +69,24 @@ impl Expander {
   pub fn expand(&mut self) -> ShResult<Vec<String>> {
     let mut chars = self.raw.chars().peekable();
     self.raw = expand_raw(&mut chars)?;
+
+		let has_trailing_slash = self.raw.ends_with('/');
+		let has_leading_dot_slash = self.raw.starts_with("./");
+
     if let Ok(glob_exp) = expand_glob(&self.raw)
-      && !glob_exp.is_empty() {
-        self.raw = glob_exp;
-      }
+		&& !glob_exp.is_empty() {
+			self.raw = glob_exp;
+		}
+
+		if has_trailing_slash && !self.raw.ends_with('/') {
+			// glob expansion can remove trailing slashes and leading dot-slashes, but we want to preserve them
+			// so that things like tab completion don't break
+			self.raw.push('/');
+		}
+		if has_leading_dot_slash && !self.raw.starts_with("./") {
+			self.raw.insert_str(0, "./");
+		}
+
     Ok(self.split_words())
   }
   pub fn split_words(&mut self) -> Vec<String> {
@@ -462,14 +476,12 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         result.push_str(&fd_path);
       }
       VAR_SUB => {
-        log::info!("{chars:?}");
         let expanded = expand_var(chars)?;
         result.push_str(&expanded);
       }
       _ => result.push(ch),
     }
   }
-	log::debug!("expand_raw result: {result:?}");
   Ok(result)
 }
 
@@ -481,12 +493,19 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
       SUBSH if var_name.is_empty() => {
         chars.next(); // now safe to consume
         let mut subsh_body = String::new();
+				let mut found_end = false;
         while let Some(c) = chars.next() {
           if c == SUBSH {
+						found_end = true;
             break;
           }
           subsh_body.push(c);
         }
+				if !found_end {
+					// if there isnt a closing SUBSH, we are probably in some tab completion context
+					// and we got passed some unfinished input. Just treat it as literal text
+					return Ok(format!("$({subsh_body}"));
+				}
         let expanded = expand_cmd_sub(&subsh_body)?;
         return Ok(expanded);
       }
@@ -512,14 +531,10 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 					return Ok(NULL_EXPAND.to_string());
 				}
 
-        log::debug!("{val:?}");
         return Ok(val);
       }
       ch if is_hard_sep(ch) || !(ch.is_alphanumeric() || ch == '_' || ch == '-') => {
         let val = read_vars(|v| v.get_var(&var_name));
-        log::info!("{var_name:?}");
-        log::info!("{val:?}");
-        log::info!("{ch:?}");
         return Ok(val);
       }
       _ => {
@@ -530,7 +545,6 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   }
   if !var_name.is_empty() {
     let var_val = read_vars(|v| v.get_var(&var_name));
-    log::info!("{var_val:?}");
     Ok(var_val)
   } else {
     Ok(String::new())
@@ -781,7 +795,6 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
     ForkResult::Parent { child } => {
       write_jobs(|j| j.register_fd(child, register_fd));
       let registered = read_jobs(|j| j.registered_fds().to_vec());
-      log::debug!("{registered:?}");
       // Do not wait; process may run in background
       Ok(path)
     }
@@ -790,8 +803,6 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 
 /// Get the command output of a given command input as a String
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
-  log::debug!("in expand_cmd_sub");
-  log::debug!("{raw:?}");
   if raw.starts_with('(') && raw.ends_with(')')
     && let Ok(output) = expand_arithmetic(raw) {
       return Ok(output); // It's actually an arithmetic sub
@@ -815,7 +826,6 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
       std::mem::drop(cmd_sub_io_frame); // Closes the write pipe
 
       // Read output first (before waiting) to avoid deadlock if child fills pipe buffer
-      log::debug!("filling buffer");
       loop {
         match io_buf.fill_buffer() {
           Ok(()) => break,
@@ -823,7 +833,6 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
           Err(e) => return Err(e.into()),
         }
       }
-      log::debug!("done");
 
       // Wait for child with EINTR retry
       let status = loop {
@@ -1105,7 +1114,6 @@ pub fn unescape_math(raw: &str) -> String {
   let mut result = String::new();
 
   while let Some(ch) = chars.next() {
-    log::debug!("{result:?}");
     match ch {
       '\\' => {
         if let Some(next_ch) = chars.next() {
@@ -1148,7 +1156,6 @@ pub fn unescape_math(raw: &str) -> String {
       _ => result.push(ch),
     }
   }
-  log::info!("{result:?}");
   result
 }
 
@@ -1302,9 +1309,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
     }
   }
 
-  log::debug!("{rest:?}");
   if let Ok(expansion) = rest.parse::<ParamExp>() {
-    log::debug!("{expansion:?}");
     match expansion {
       ParamExp::Len => unreachable!(),
       ParamExp::DefaultUnsetOrNull(default) => {
@@ -1523,7 +1528,6 @@ fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
   if anchored {
     regex.push('$');
   }
-  log::debug!("{regex:?}");
   Regex::new(&regex).unwrap()
 }
 
@@ -1946,7 +1950,6 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 			PromptTk::FailureSymbol => todo!(),
 			PromptTk::JobCount => todo!(),
 			PromptTk::Function(f) => {
-				log::debug!("Expanding prompt function: {}", f);
 				let output = expand_cmd_sub(&f)?;
 				result.push_str(&output);
 			}

@@ -29,38 +29,30 @@ pub fn signals_pending() -> bool {
 
 pub fn check_signals() -> ShResult<()> {
 	if GOT_SIGINT.swap(false, Ordering::SeqCst) {
-		log::debug!("check_signals: processing SIGINT");
 		interrupt()?;
 		return Err(ShErr::simple(ShErrKind::ClearReadline, ""));
 	}
 	if GOT_SIGHUP.swap(false, Ordering::SeqCst) {
-		log::debug!("check_signals: processing SIGHUP");
 		hang_up(0);
 	}
 	if GOT_SIGTSTP.swap(false, Ordering::SeqCst) {
-		log::debug!("check_signals: processing SIGTSTP");
 		terminal_stop()?;
 	}
 	if REAPING_ENABLED.load(Ordering::SeqCst) && GOT_SIGCHLD.swap(false, Ordering::SeqCst) {
-		log::debug!("check_signals: processing SIGCHLD (reaping enabled)");
 		wait_child()?;
 	} else if GOT_SIGCHLD.load(Ordering::SeqCst) {
-		log::debug!("check_signals: SIGCHLD pending but reaping disabled");
 	}
 	if SHOULD_QUIT.load(Ordering::SeqCst) {
 		let code = QUIT_CODE.load(Ordering::SeqCst);
-		log::debug!("check_signals: SHOULD_QUIT set, exiting with code {}", code);
 		return Err(ShErr::simple(ShErrKind::CleanExit(code), "exit"));
 	}
 	Ok(())
 }
 
 pub fn disable_reaping() {
-	log::debug!("disable_reaping: turning off SIGCHLD processing");
 	REAPING_ENABLED.store(false, Ordering::SeqCst);
 }
 pub fn enable_reaping() {
-	log::debug!("enable_reaping: turning on SIGCHLD processing");
 	REAPING_ENABLED.store(true, Ordering::SeqCst);
 }
 
@@ -166,13 +158,10 @@ extern "C" fn handle_sigint(_: libc::c_int) {
 }
 
 pub fn interrupt() -> ShResult<()> {
-  log::debug!("interrupt: checking for fg job to send SIGINT");
   write_jobs(|j| {
     if let Some(job) = j.get_fg_mut() {
-      log::debug!("interrupt: sending SIGINT to fg job pgid {}", job.pgid());
       job.killpg(Signal::SIGINT)
     } else {
-      log::debug!("interrupt: no fg job, clearing readline");
       Ok(())
     }
   })
@@ -188,28 +177,22 @@ extern "C" fn handle_sigchld(_: libc::c_int) {
 }
 
 pub fn wait_child() -> ShResult<()> {
-  log::debug!("wait_child: starting reap loop");
   let flags = WtFlag::WNOHANG | WtFlag::WSTOPPED;
   while let Ok(status) = waitpid(None, Some(flags)) {
     match status {
       WtStat::Exited(pid, code) => {
-        log::debug!("wait_child: pid {} exited with code {}", pid, code);
         child_exited(pid, status)?;
       }
       WtStat::Signaled(pid, signal, _) => {
-        log::debug!("wait_child: pid {} signaled with {:?}", pid, signal);
         child_signaled(pid, signal)?;
       }
       WtStat::Stopped(pid, signal) => {
-        log::debug!("wait_child: pid {} stopped with {:?}", pid, signal);
         child_stopped(pid, signal)?;
       }
       WtStat::Continued(pid) => {
-        log::debug!("wait_child: pid {} continued", pid);
         child_continued(pid)?;
       }
       WtStat::StillAlive => {
-        log::debug!("wait_child: no more children to reap");
         break;
       }
       _ => unimplemented!(),

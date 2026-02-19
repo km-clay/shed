@@ -368,7 +368,6 @@ impl LineBuf {
     } else {
       self.hint = None
     }
-    log::debug!("{:?}", self.hint)
   }
   pub fn accept_hint(&mut self) {
     let Some(hint) = self.hint.take() else { return };
@@ -406,7 +405,6 @@ impl LineBuf {
   #[track_caller]
   pub fn update_graphemes(&mut self) {
     let indices: Vec<_> = self.buffer.grapheme_indices(true).map(|(i, _)| i).collect();
-    log::debug!("{:?}", std::panic::Location::caller());
     self.cursor.set_max(indices.len());
     self.grapheme_indices = Some(indices)
   }
@@ -577,7 +575,6 @@ impl LineBuf {
       let end = self.grapheme_indices()[end];
       self.buffer.drain(start..end).collect()
     };
-    log::debug!("{drained:?}");
     self.update_graphemes();
     drained
   }
@@ -1073,7 +1070,6 @@ impl LineBuf {
           let Some(gr) = self.grapheme_at(idx) else {
             break;
           };
-          log::debug!("{gr:?}");
           if is_whitespace(gr) {
             end += 1;
           } else {
@@ -1203,7 +1199,6 @@ impl LineBuf {
           let Some(gr) = self.grapheme_at(idx) else {
             break;
           };
-          log::debug!("{gr:?}");
           if is_whitespace(gr) {
             end += 1;
           } else {
@@ -1901,10 +1896,7 @@ impl LineBuf {
         let Some(line) = self.slice(start..end).map(|s| s.to_string()) else {
           return MotionKind::Null;
         };
-        log::debug!("{target_col:?}");
-        log::debug!("{target_col:?}");
         let mut target_pos = self.grapheme_index_for_display_col(&line, target_col);
-        log::debug!("{target_pos:?}");
         if self.cursor.exclusive
           && line.ends_with("\n")
           && self.grapheme_at(target_pos) == Some("\n")
@@ -2107,7 +2099,6 @@ impl LineBuf {
             Motion::BackwardChar => target.sub(1),
             Motion::ForwardChar => {
               if self.cursor.exclusive && self.grapheme_at(target.ret_add(1)) == Some("\n") {
-                log::debug!("returning null");
                 return MotionKind::Null;
               }
               target.add(1);
@@ -2116,7 +2107,6 @@ impl LineBuf {
             _ => unreachable!(),
           }
           if self.grapheme_at(target.get()) == Some("\n") {
-            log::debug!("returning null outside of match");
             return MotionKind::Null;
           }
         }
@@ -2132,7 +2122,6 @@ impl LineBuf {
         }) else {
           return MotionKind::Null;
         };
-        log::debug!("{:?}", self.slice(start..end));
 
         let target_col = if let Some(col) = self.saved_col {
           col
@@ -2145,10 +2134,7 @@ impl LineBuf {
         let Some(line) = self.slice(start..end).map(|s| s.to_string()) else {
           return MotionKind::Null;
         };
-        log::debug!("{target_col:?}");
-        log::debug!("{target_col:?}");
         let mut target_pos = self.grapheme_index_for_display_col(&line, target_col);
-        log::debug!("{target_pos:?}");
         if self.cursor.exclusive
           && line.ends_with("\n")
           && self.grapheme_at(target_pos) == Some("\n")
@@ -2173,8 +2159,6 @@ impl LineBuf {
         }) else {
           return MotionKind::Null;
         };
-        log::debug!("{start:?}, {end:?}");
-        log::debug!("{:?}", self.slice(start..end));
 
         let target_col = if let Some(col) = self.saved_col {
           col
@@ -2239,9 +2223,6 @@ impl LineBuf {
 
       let has_consumed_hint = (self.cursor.exclusive && self.cursor.get() >= last_grapheme_pos)
         || (!self.cursor.exclusive && self.cursor.get() > last_grapheme_pos);
-      log::debug!("{has_consumed_hint:?}");
-      log::debug!("{:?}", self.cursor.get());
-      log::debug!("{last_grapheme_pos:?}");
 
       if has_consumed_hint {
         let buf_end = if self.cursor.exclusive {
@@ -2403,7 +2384,6 @@ impl LineBuf {
         } else {
           let drained = self.drain(start, end);
           self.update_graphemes();
-          log::debug!("{:?}", self.cursor);
           drained
         };
         register.write_to_register(register_text);

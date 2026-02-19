@@ -84,7 +84,6 @@ impl TkVecUtils<Tk> for Vec<Tk> {
   }
   fn debug_tokens(&self) {
     for token in self {
-      log::debug!("token: {}", token)
     }
   }
 }

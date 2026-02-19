@@ -173,7 +173,6 @@ impl Highlighter {
 							input_chars.next(); // consume the end marker
 							break;
 						} else if markers::is_marker(*ch) {
-							log::warn!("Unhandled marker character in variable substitution: U+{:04X}", *ch as u32);
 							input_chars.next(); // skip the marker
 							continue;
 						}
@@ -187,7 +186,6 @@ impl Highlighter {
 				}
 				_ => {
 					if markers::is_marker(ch) {
-						log::warn!("Unhandled marker character in highlighter: U+{:04X}", ch as u32);
 					} else {
 						self.output.push(ch);
 						self.last_was_reset = false;
@@ -202,7 +200,6 @@ impl Highlighter {
 	/// Clears the input buffer, style stack, and returns the generated output
 	/// containing ANSI escape codes. The highlighter is ready for reuse after this.
 	pub fn take(&mut self) -> String {
-		log::info!("Highlighting result: {:?}", self.output);
 		self.input.clear();
 		self.clear_styles();
 		std::mem::take(&mut self.output)

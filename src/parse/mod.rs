@@ -860,6 +860,10 @@ impl ParseStream {
         let redir_bldr = redir_bldr.with_io_mode(io_mode);
         let redir = redir_bldr.build();
         redirs.push(redir);
+      } else {
+        // io_mode is already set (e.g., for fd redirections like 2>&1)
+        let redir = redir_bldr.build();
+        redirs.push(redir);
       }
     }
     Ok(())
@@ -1344,6 +1348,10 @@ impl ParseStream {
 
             let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), pathbuf, redir_class);
             let redir_bldr = redir_bldr.with_io_mode(io_mode);
+            let redir = redir_bldr.build();
+            redirs.push(redir);
+          } else {
+            // io_mode is already set (e.g., for fd redirections like 2>&1)
             let redir = redir_bldr.build();
             redirs.push(redir);
           }

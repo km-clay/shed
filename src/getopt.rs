@@ -106,7 +106,6 @@ pub fn get_opts_from_tokens(tokens: Vec<Tk>, opt_specs: &[OptSpec]) -> (Vec<Tk>,
 				}
 				if !pushed {
 					non_opts.push(token.clone());
-					log::warn!("Unexpected flag '{opt}'");
 				}
 			}
     }

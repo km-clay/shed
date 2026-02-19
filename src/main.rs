@@ -208,8 +208,6 @@ fn fern_interactive() -> ShResult<()> {
         // Reset for next command with fresh prompt
         readline.reset(get_prompt().ok());
 				let real_end = start.elapsed();
-				log::info!("Command execution time: {:.2?}", command_run_time);
-				log::info!("Total round trip time: {:.2?}", real_end);
       }
       Ok(ReadlineEvent::Eof) => {
         // Ctrl+D on empty line

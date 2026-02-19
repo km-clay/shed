@@ -138,7 +138,6 @@ impl Dispatcher {
 		}
 	}
 	pub fn begin_dispatch(&mut self) -> ShResult<()> {
-		log::trace!("beginning dispatch");
 		while let Some(node) = self.nodes.pop_front() {
 			let blame = node.get_span();
 			self.dispatch_node(node).try_blame(blame)?;
@@ -401,10 +400,23 @@ impl Dispatcher {
 		Ok(())
 	}
 	fn exec_for(&mut self, for_stmt: Node) -> ShResult<()> {
-
 		let NdRule::ForNode { vars, arr, body } = for_stmt.class else {
 			unreachable!();
 		};
+
+		let to_expanded_strings = |tks: Vec<Tk>| -> ShResult<Vec<String>> {
+			Ok(tks.into_iter()
+				.map(|tk| tk.expand().map(|tk| tk.get_words()))
+				.collect::<ShResult<Vec<Vec<String>>>>()?
+				.into_iter()
+				.flatten()
+				.collect::<Vec<_>>())
+		};
+
+		// Expand all array variables
+		let arr: Vec<String> = to_expanded_strings(arr)?;
+		let vars: Vec<String> = to_expanded_strings(vars)?;
+
 		let mut for_guard = VarCtxGuard::new(
 			vars.iter().map(|v| v.to_string()).collect()
 		);
@@ -415,7 +427,7 @@ impl Dispatcher {
 			.redirect()?;
 
 		'outer: for chunk in arr.chunks(vars.len()) {
-			let empty = Tk::default();
+			let empty = String::new();
 			let chunk_iter = vars.iter().zip(
 				chunk.iter().chain(std::iter::repeat(&empty)),
 			);
@@ -540,7 +552,6 @@ impl Dispatcher {
 			return self.dispatch_cmd(cmd);
 		}
 
-		log::trace!("doing builtin");
 		let result = match cmd_raw.span.as_str() {
 			"echo" => echo(cmd, io_stack_mut, curr_job_mut),
 			"cd" => cd(cmd, curr_job_mut),

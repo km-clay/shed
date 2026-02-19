@@ -315,10 +315,7 @@ impl LogTab {
     self.aliases.get(name).cloned()
   }
   pub fn remove_alias(&mut self, name: &str) {
-    log::debug!("{:?}", self.aliases);
-    log::debug!("{name:?}");
     self.aliases.remove(name);
-    log::debug!("{:?}", self.aliases);
   }
   pub fn clear_aliases(&mut self) {
     self.aliases.clear()
@@ -655,7 +652,6 @@ impl VarTab {
     }
   }
   pub fn var_exists(&self, var_name: &str) -> bool {
-		log::debug!("checking existence of {}", var_name);
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.params.contains_key(&param);
     }

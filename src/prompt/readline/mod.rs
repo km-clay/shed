@@ -9,7 +9,7 @@ use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVis
 use crate::{libsh::{
   error::{ShErrKind, ShResult},
   term::{Style, Styled},
-}, parse::lex::{self, LexFlags, Tk, TkFlags, TkRule}, prompt::readline::highlight::Highlighter};
+}, parse::lex::{self, LexFlags, Tk, TkFlags, TkRule}, prompt::readline::{complete::{CompResult, Completer}, highlight::Highlighter}};
 use crate::prelude::*;
 
 pub mod history;
@@ -21,6 +21,7 @@ pub mod term;
 pub mod vicmd;
 pub mod vimode;
 pub mod highlight;
+pub mod complete;
 
 pub mod markers {
 	// token-level (derived from token class)
@@ -101,15 +102,20 @@ pub enum ReadlineEvent {
 pub struct FernVi {
   pub reader: PollReader,
   pub writer: Box<dyn LineWriter>,
+
   pub prompt: String,
 	pub highlighter: Highlighter,
+	pub completer: Completer,
+
   pub mode: Box<dyn ViMode>,
-  pub old_layout: Option<Layout>,
   pub repeat_action: Option<CmdReplay>,
   pub repeat_motion: Option<MotionCmd>,
   pub editor: LineBuf,
+
+  pub old_layout: Option<Layout>,
   pub history: History,
-  needs_redraw: bool,
+
+  pub needs_redraw: bool,
 }
 
 impl FernVi {
@@ -118,6 +124,7 @@ impl FernVi {
 				reader: PollReader::new(),
 				writer: Box::new(TermWriter::new(STDOUT_FILENO)),
 				prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
+				completer: Completer::new(),
 				highlighter: Highlighter::new(),
 				mode: Box::new(ViInsert::new()),
 				old_layout: None,
@@ -139,10 +146,8 @@ impl FernVi {
 
   /// Feed raw bytes from stdin into the reader's buffer
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
-		log::info!("Feeding bytes: {:?}", bytes.iter().map(|b| *b as char).collect::<String>());
 		let test_input = "echo \"hello $USER\" | grep $(whoami)";
 		let annotated = annotate_input(test_input);
-		log::info!("Annotated test input: {:?}", annotated);
     self.reader.feed_bytes(bytes);
   }
 
@@ -173,7 +178,6 @@ impl FernVi {
 
     // Process all available keys
     while let Some(key) = self.reader.read_key()? {
-      log::debug!("{key:?}");
 
       if self.should_accept_hint(&key) {
         self.editor.accept_hint();
@@ -182,10 +186,42 @@ impl FernVi {
         continue;
       }
 
+			if let KeyEvent(KeyCode::Tab, mod_keys) = key {
+				let direction = match mod_keys {
+					ModKeys::SHIFT => -1,
+					_ => 1,
+				};
+				let line = self.editor.as_str().to_string();
+				let cursor_pos = self.editor.cursor_byte_pos();
+
+				match self.completer.complete(line, cursor_pos, direction)? {
+					Some(mut line) => {
+						let span_start = self.completer.token_span.0;
+						let new_cursor = span_start + self.completer.selected_candidate().map(|c| c.len()).unwrap_or_default();
+
+						self.editor.set_buffer(line);
+						self.editor.cursor.set(new_cursor);
+
+						self.history.update_pending_cmd(self.editor.as_str());
+						let hint = self.history.get_hint();
+						self.editor.set_hint(hint);
+					}
+					None => {
+						self.writer.flush_write("\x07")?; // Bell character
+					}
+				}
+
+				self.needs_redraw = true;
+				continue;
+			}
+
+			// if we are here, we didnt press tab
+			// so we should reset the completer state
+			self.completer.reset();
+
       let Some(mut cmd) = self.mode.handle_key(key) else {
         continue;
       };
-      log::debug!("{cmd:?}");
       cmd.alter_line_motion_if_no_verb();
 
       if self.should_grab_history(&cmd) {
@@ -240,13 +276,11 @@ impl FernVi {
   }
 
   pub fn get_layout(&mut self, line: &str) -> Layout {
-    log::debug!("{line:?}");
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
     let (cols, _) = get_win_size(STDIN_FILENO);
     Layout::from_parts(/* tab_stop: */ 8, cols, &self.prompt, to_cursor, line)
   }
   pub fn scroll_history(&mut self, cmd: ViCmd) {
-    log::debug!("scrolling");
     /*
     if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
       let constraint = SearchConstraint::new(SearchKind::Prefix, self.editor.to_string());
@@ -255,23 +289,17 @@ impl FernVi {
     */
     let count = &cmd.motion().unwrap().0;
     let motion = &cmd.motion().unwrap().1;
-    log::debug!("{count:?}, {motion:?}");
-    log::debug!("{:?}", self.history.masked_entries());
     let entry = match motion {
       Motion::LineUpCharwise => {
         let Some(hist_entry) = self.history.scroll(-(*count as isize)) else {
           return;
         };
-        log::debug!("found entry");
-        log::debug!("{:?}", hist_entry.command());
         hist_entry
       }
       Motion::LineDownCharwise => {
         let Some(hist_entry) = self.history.scroll(*count as isize) else {
           return;
         };
-        log::debug!("found entry");
-        log::debug!("{:?}", hist_entry.command());
         hist_entry
       }
       _ => unreachable!(),
@@ -296,8 +324,6 @@ impl FernVi {
     self.editor = buf
   }
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
-    log::debug!("{:?}", self.editor.cursor_at_max());
-    log::debug!("{:?}", self.editor.cursor);
     if self.editor.cursor_at_max() && self.editor.has_hint() {
       match self.mode.report_mode() {
         ModeReport::Replace | ModeReport::Insert => {
@@ -337,7 +363,6 @@ impl FernVi {
 		let hint = self.editor.get_hint_text();
 		let complete = format!("{highlighted}{hint}");
 		let end = start.elapsed();
-		log::info!("Line styling done in: {:.2?}", end);
 		complete
 	}
 
@@ -538,13 +563,93 @@ pub fn annotate_input(input: &str) -> String {
 	let input = Arc::new(input.to_string());
 	let tokens: Vec<Tk> = lex::LexStream::new(input, LexFlags::LEX_UNFINISHED)
 		.flatten()
+		.filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
 		.collect();
 
 	for tk in tokens.into_iter().rev() {
-		annotate_token(&mut annotated, tk);
+		let insertions = annotate_token(tk);
+		for (pos, marker) in insertions {
+			let pos = pos.max(0).min(annotated.len());
+			annotated.insert(pos, marker);
+		}
 	}
 
 	annotated
+}
+
+/// Recursively annotates nested constructs in the input string
+pub fn annotate_input_recursive(input: &str) -> String {
+	let mut annotated = annotate_input(input);
+	let mut chars = annotated.char_indices().peekable();
+	let mut changes = vec![];
+
+	while let Some((pos,ch)) = chars.next() {
+		match ch {
+			markers::CMD_SUB |
+			markers::SUBSH |
+			markers::PROC_SUB => {
+				let mut body = String::new();
+				let span_start = pos + ch.len_utf8();
+				let mut span_end = span_start;
+				let closing_marker = match ch {
+					markers::CMD_SUB => markers::CMD_SUB_END,
+					markers::SUBSH => markers::SUBSH_END,
+					markers::PROC_SUB => markers::PROC_SUB_END,
+					_ => unreachable!()
+				};
+				while let Some((sub_pos,sub_ch)) = chars.next() {
+					match sub_ch {
+						_ if sub_ch == closing_marker => {
+							span_end = sub_pos;
+							break;
+						}
+						_ => body.push(sub_ch),
+					}
+				}
+				let prefix = match ch {
+					markers::PROC_SUB => {
+						match chars.peek().map(|(_, c)| *c) {
+							Some('>') => ">(",
+							Some('<') => "<(",
+							_ => {
+								log::error!("Unexpected character after PROC_SUB marker: expected '>' or '<'");
+								"<("
+							}
+						}
+					}
+					markers::CMD_SUB => "$(",
+					markers::SUBSH => "(",
+					_ => unreachable!()
+				};
+
+				body = body.trim_start_matches(prefix).to_string();
+				let annotated_body = annotate_input_recursive(&body);
+				let final_str = format!("{prefix}{annotated_body})");
+				changes.push((span_start, span_end, final_str));
+			}
+			_ => {}
+		}
+	}
+
+	for change in changes.into_iter().rev() {
+		let (start, end, replacement) = change;
+		annotated.replace_range(start..end, &replacement);
+	}
+
+	annotated
+}
+
+pub fn get_insertions(input: &str) -> Vec<(usize, char)> {
+	let input = Arc::new(input.to_string());
+	let tokens: Vec<Tk> = lex::LexStream::new(input, LexFlags::LEX_UNFINISHED)
+		.flatten()
+		.collect();
+
+	let mut insertions = vec![];
+	for tk in tokens.into_iter().rev() {
+		insertions.extend(annotate_token(tk));
+	}
+	insertions
 }
 
 /// Maps token class to its corresponding marker character
@@ -578,43 +683,7 @@ pub fn marker_for(class: &TkRule) -> Option<char> {
 	}
 }
 
-/// Annotates a single token with markers for both token-level and sub-token constructs
-///
-/// This is the core annotation function that handles the complexity of shell syntax.
-/// It uses a two-phase approach:
-///
-/// # Phase 1: Analysis (Delayed Insertion)
-/// Scans through the token character by character, recording marker insertions
-/// as `(position, marker)` pairs in a list. This avoids borrowing issues and
-/// allows context queries during the scan.
-///
-/// The analysis phase handles:
-/// - **Strings**: Single/double quoted regions (with escaping rules)
-/// - **Variables**: `$VAR` and `${VAR}` expansions
-/// - **Command substitutions**: `$(...)` with depth tracking
-/// - **Process substitutions**: `<(...)` and `>(...)`
-/// - **Globs**: `*`, `?`, `[...]` patterns (context-aware)
-/// - **Escapes**: Backslash escaping
-///
-/// # Phase 2: Application (Sorted Insertion)
-/// Markers are sorted by position (descending) to avoid index invalidation when
-/// inserting into the string. At the same position, markers are ordered:
-/// 1. RESET (rightmost)
-/// 2. Regular markers (middle)
-/// 3. END markers (leftmost)
-///
-/// This produces the pattern: `[END][TOGGLE][RESET]` at boundaries.
-///
-/// # Context Tracking
-/// The `in_context` closure queries the insertion list to determine the active
-/// syntax context at the current position. This enables context-aware decisions
-/// like "only highlight globs in arguments, not in command names".
-///
-/// # Depth Tracking
-/// Nested constructs like `$(echo $(date))` are tracked with depth counters.
-/// Only the outermost construct is marked; inner content is handled recursively
-/// by the highlighter.
-pub fn annotate_token(input: &mut String, token: Tk) {
+pub fn annotate_token(token: Tk) -> Vec<(usize, char)> {
 	// Sort by position descending, with priority ordering at same position:
 	// - RESET first (inserted first, ends up rightmost)
 	// - Regular markers middle
@@ -686,18 +755,21 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 		ctx.1 == c
 	};
 
+	let mut insertions: Vec<(usize, char)> = vec![];
+
+
 	if token.class != TkRule::Str
 	&& let Some(marker) = marker_for(&token.class) {
-		input.insert(token.span.end, markers::RESET);
-		input.insert(token.span.start, marker);
-		return;
+		insertions.push((token.span.end, markers::RESET));
+		insertions.push((token.span.start, marker));
+		return insertions;
 	} else if token.flags.contains(TkFlags::IS_SUBSH) {
 		let token_raw = token.span.as_str();
 		if token_raw.ends_with(')') {
-			input.insert(token.span.end, markers::SUBSH_END);
+			insertions.push((token.span.end, markers::SUBSH_END));
 		}
-		input.insert(token.span.start, markers::SUBSH);
-		return;
+		insertions.push((token.span.start, markers::SUBSH));
+		return insertions;
 	}
 
 
@@ -712,8 +784,6 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 	let mut in_sng_qt = false;
 	let mut cmd_sub_depth = 0;
 	let mut proc_sub_depth = 0;
-
-	let mut insertions: Vec<(usize, char)> = vec![];
 
 	if token.flags.contains(TkFlags::BUILTIN) {
 		insertions.insert(0, (span_start, markers::BUILTIN));
@@ -895,9 +965,5 @@ pub fn annotate_token(input: &mut String, token: Tk) {
 
 	sort_insertions(&mut insertions);
 
-	for (pos, marker) in insertions {
-		log::info!("Inserting marker {marker:?} at position {pos}");
-		let pos = pos.max(0).min(input.len());
-		input.insert(pos, marker);
-	}
+	insertions
 }

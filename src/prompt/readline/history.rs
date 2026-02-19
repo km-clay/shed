@@ -303,7 +303,6 @@ impl History {
   }
 
   pub fn constrain_entries(&mut self, constraint: SearchConstraint) {
-    log::debug!("{constraint:?}");
     let SearchConstraint { kind, term } = constraint;
     match kind {
       SearchKind::Prefix => {
@@ -318,7 +317,6 @@ impl History {
             .collect();
 
           self.search_mask = dedupe_entries(&filtered);
-					log::debug!("search mask len: {}", self.search_mask.len());
         }
         self.cursor = self.search_mask.len().saturating_sub(1);
       }
@@ -328,12 +326,10 @@ impl History {
 
   pub fn hint_entry(&self) -> Option<&HistEntry> {
     let second_to_last = self.search_mask.len().checked_sub(2)?;
-		log::info!("search mask: {:?}", self.search_mask.iter().map(|e| e.command()).collect::<Vec<_>>());
     self.search_mask.get(second_to_last)
   }
 
   pub fn get_hint(&self) -> Option<String> {
-		log::info!("checking cursor entry: {:?}", self.cursor_entry());
     if self
       .cursor_entry()
       .is_some_and(|ent| ent.is_new() && !ent.command().is_empty())

@@ -348,14 +348,11 @@ impl ViNormal {
   /// End the parse and clear the pending sequence
   #[track_caller]
   pub fn quit_parse(&mut self) -> Option<ViCmd> {
-    log::debug!("{:?}", std::panic::Location::caller());
-    log::warn!("exiting parse early with sequence: {}", self.pending_seq);
     self.clear_cmd();
     None
   }
   pub fn try_parse(&mut self, ch: char) -> Option<ViCmd> {
     self.pending_seq.push(ch);
-    log::debug!("parsing {}", ch);
     let mut chars = self.pending_seq.chars().peekable();
 
     /*
@@ -998,8 +995,6 @@ impl ViNormal {
     };
 
     if chars.peek().is_some() {
-      log::warn!("Unused characters in Vi command parse!");
-      log::warn!("{:?}", chars)
     }
 
     let verb_ref = verb.as_ref().map(|v| &v.1);
@@ -1145,8 +1140,6 @@ impl ViVisual {
   /// End the parse and clear the pending sequence
   #[track_caller]
   pub fn quit_parse(&mut self) -> Option<ViCmd> {
-    log::debug!("{:?}", std::panic::Location::caller());
-    log::warn!("exiting parse early with sequence: {}", self.pending_seq);
     self.clear_cmd();
     None
   }
@@ -1630,7 +1623,6 @@ impl ViVisual {
           ));
         }
         ch if ch == 'i' || ch == 'a' => {
-          log::debug!("in text_obj parse");
           let bound = match ch {
             'i' => Bound::Inside,
             'a' => Bound::Around,
@@ -1654,7 +1646,6 @@ impl ViVisual {
             _ => return self.quit_parse(),
           };
           chars = chars_clone;
-          log::debug!("{obj:?}, {bound:?}");
           break 'motion_parse Some(MotionCmd(count, Motion::TextObj(obj)));
         }
         _ => return self.quit_parse(),
@@ -1662,13 +1653,10 @@ impl ViVisual {
     };
 
     if chars.peek().is_some() {
-      log::warn!("Unused characters in Vi command parse!");
-      log::warn!("{:?}", chars)
     }
 
     let verb_ref = verb.as_ref().map(|v| &v.1);
     let motion_ref = motion.as_ref().map(|m| &m.1);
-    log::debug!("{verb_ref:?}, {motion_ref:?}");
 
     match self.validate_combination(verb_ref, motion_ref) {
       CmdState::Complete => Some(ViCmd {

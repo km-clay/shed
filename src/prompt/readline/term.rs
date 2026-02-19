@@ -239,13 +239,10 @@ impl TermBuffer {
 impl Read for TermBuffer {
   fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
     assert!(isatty(self.tty).is_ok_and(|r| r));
-    log::debug!("TermBuffer::read() ENTERING read syscall");
     let result = nix::unistd::read(self.tty, buf);
-    log::debug!("TermBuffer::read() EXITED read syscall: {:?}", result);
     match result {
       Ok(n) => Ok(n),
       Err(Errno::EINTR) => {
-        log::debug!("TermBuffer::read() returning EINTR");
         Err(Errno::EINTR.into())
       }
       Err(e) => Err(std::io::Error::from_raw_os_error(e as i32)),
@@ -408,6 +405,10 @@ impl Perform for KeyCollector {
       ([], 'F') => {
         let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
         KeyEvent(KeyCode::End, mods)
+      }
+      // Shift+Tab: CSI Z
+      ([], 'Z') => {
+        KeyEvent(KeyCode::Tab, ModKeys::SHIFT)
       }
       // Special keys with tilde: CSI num ~ or CSI num;mod ~
       ([], '~') => {
@@ -643,7 +644,6 @@ impl KeyReader for TermReader {
 
     loop {
       let byte = self.next_byte()?;
-      log::debug!("read byte: {:?}", byte as char);
       collected.push(byte);
 
       // If it's an escape seq, delegate to ESC sequence handler
@@ -706,7 +706,6 @@ impl Layout {
     to_cursor: &str,
     to_end: &str,
   ) -> Self {
-    log::debug!("{to_cursor:?}");
     let prompt_end = Self::calc_pos(tab_stop, term_width, prompt, Pos { col: 0, row: 0 });
     let cursor = Self::calc_pos(tab_stop, term_width, to_cursor, prompt_end);
     let end = Self::calc_pos(tab_stop, term_width, to_end, prompt_end);
