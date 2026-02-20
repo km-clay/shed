@@ -263,6 +263,9 @@ impl Completer {
     if let Some(eq_pos) = token_str.rfind('=') {
       // Adjust span to only replace the part after '='
       self.token_span.0 = cur_token.span.start + eq_pos + 1;
+      cur_token
+        .span
+        .set_range(self.token_span.0..self.token_span.1);
     }
 
     if ctx.last().is_some_and(|m| *m == markers::VAR_SUB) {

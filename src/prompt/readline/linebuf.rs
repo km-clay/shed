@@ -824,7 +824,7 @@ impl LineBuf {
     dir: Direction,
   ) -> Box<dyn Iterator<Item = usize>> {
     self.update_graphemes_lazy();
-    let skip = if pos == 0 { 0 } else { pos + 1 };
+    let skip = pos + 1;
     match dir {
       Direction::Forward => Box::new(self.grapheme_indices().to_vec().into_iter().skip(skip))
         as Box<dyn Iterator<Item = usize>>,

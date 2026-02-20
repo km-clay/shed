@@ -1,4 +1,5 @@
-use crate::state::{LogTab, ScopeStack, ShellParam, VarFlags, VarTab};
+use std::path::PathBuf;
+use crate::state::{LogTab, MetaTab, ScopeStack, ShellParam, VarFlags, VarTab};
 
 // ============================================================================
 // ScopeStack Tests - Variable Scoping
@@ -592,4 +593,240 @@ fn shellparam_display() {
   assert_eq!(ShellParam::ArgCount.to_string(), "#");
   assert_eq!(ShellParam::Pos(1).to_string(), "1");
   assert_eq!(ShellParam::Pos(99).to_string(), "99");
+}
+
+// ============================================================================
+// MetaTab Directory Stack Tests
+// ============================================================================
+
+#[test]
+fn dirstack_push_pop() {
+  let mut meta = MetaTab::new();
+
+  meta.push_dir(PathBuf::from("/tmp"));
+  meta.push_dir(PathBuf::from("/var"));
+
+  // push_front means /var is on top, /tmp is below
+  assert_eq!(meta.dir_stack_top(), Some(&PathBuf::from("/var")));
+
+  let popped = meta.pop_dir();
+  assert_eq!(popped, Some(PathBuf::from("/var")));
+  assert_eq!(meta.dir_stack_top(), Some(&PathBuf::from("/tmp")));
+
+  let popped = meta.pop_dir();
+  assert_eq!(popped, Some(PathBuf::from("/tmp")));
+  assert_eq!(meta.pop_dir(), None);
+}
+
+#[test]
+fn dirstack_empty() {
+  let mut meta = MetaTab::new();
+
+  assert_eq!(meta.dir_stack_top(), None);
+  assert_eq!(meta.pop_dir(), None);
+  assert!(meta.dirs().is_empty());
+}
+
+#[test]
+fn dirstack_rotate_fwd() {
+  let mut meta = MetaTab::new();
+
+  // Build stack: front=[A, B, C, D]=back
+  meta.dirs_mut().push_back(PathBuf::from("/a"));
+  meta.dirs_mut().push_back(PathBuf::from("/b"));
+  meta.dirs_mut().push_back(PathBuf::from("/c"));
+  meta.dirs_mut().push_back(PathBuf::from("/d"));
+
+  // rotate_left(1): [B, C, D, A]
+  meta.rotate_dirs_fwd(1);
+  assert_eq!(meta.dir_stack_top(), Some(&PathBuf::from("/b")));
+  assert_eq!(meta.dirs().back(), Some(&PathBuf::from("/a")));
+}
+
+#[test]
+fn dirstack_rotate_bkwd() {
+  let mut meta = MetaTab::new();
+
+  // Build stack: front=[A, B, C, D]=back
+  meta.dirs_mut().push_back(PathBuf::from("/a"));
+  meta.dirs_mut().push_back(PathBuf::from("/b"));
+  meta.dirs_mut().push_back(PathBuf::from("/c"));
+  meta.dirs_mut().push_back(PathBuf::from("/d"));
+
+  // rotate_right(1): [D, A, B, C]
+  meta.rotate_dirs_bkwd(1);
+  assert_eq!(meta.dir_stack_top(), Some(&PathBuf::from("/d")));
+  assert_eq!(meta.dirs().back(), Some(&PathBuf::from("/c")));
+}
+
+#[test]
+fn dirstack_rotate_zero_is_noop() {
+  let mut meta = MetaTab::new();
+
+  meta.dirs_mut().push_back(PathBuf::from("/a"));
+  meta.dirs_mut().push_back(PathBuf::from("/b"));
+  meta.dirs_mut().push_back(PathBuf::from("/c"));
+
+  meta.rotate_dirs_fwd(0);
+  assert_eq!(meta.dir_stack_top(), Some(&PathBuf::from("/a")));
+
+  meta.rotate_dirs_bkwd(0);
+  assert_eq!(meta.dir_stack_top(), Some(&PathBuf::from("/a")));
+}
+
+#[test]
+fn dirstack_pushd_rotation_with_cwd() {
+  // Simulates what pushd +N does: insert cwd, rotate, pop new top
+  let mut meta = MetaTab::new();
+
+  // Stored stack: [/tmp, /var, /etc]
+  meta.push_dir(PathBuf::from("/etc"));
+  meta.push_dir(PathBuf::from("/var"));
+  meta.push_dir(PathBuf::from("/tmp"));
+
+  // pushd +2 with cwd=/home:
+  // push_front(cwd): [/home, /tmp, /var, /etc]
+  // rotate_left(2): [/var, /etc, /home, /tmp]
+  // pop_front(): /var = new cwd
+  let cwd = PathBuf::from("/home");
+  let dirs = meta.dirs_mut();
+  dirs.push_front(cwd);
+  dirs.rotate_left(2);
+  let new_cwd = dirs.pop_front();
+
+  assert_eq!(new_cwd, Some(PathBuf::from("/var")));
+  let remaining: Vec<_> = meta.dirs().iter().collect();
+  assert_eq!(remaining, vec![
+    &PathBuf::from("/etc"),
+    &PathBuf::from("/home"),
+    &PathBuf::from("/tmp"),
+  ]);
+}
+
+#[test]
+fn dirstack_pushd_minus_zero_with_cwd() {
+  // pushd -0: bring bottom to top
+  let mut meta = MetaTab::new();
+
+  // Stored stack: [/tmp, /var, /etc]
+  meta.push_dir(PathBuf::from("/etc"));
+  meta.push_dir(PathBuf::from("/var"));
+  meta.push_dir(PathBuf::from("/tmp"));
+
+  // pushd -0 with cwd=/home:
+  // push_front(cwd): [/home, /tmp, /var, /etc]
+  // rotate_right(0+1=1): [/etc, /home, /tmp, /var]
+  // pop_front(): /etc = new cwd
+  let cwd = PathBuf::from("/home");
+  let dirs = meta.dirs_mut();
+  dirs.push_front(cwd);
+  dirs.rotate_right(1);
+  let new_cwd = dirs.pop_front();
+
+  assert_eq!(new_cwd, Some(PathBuf::from("/etc")));
+}
+
+#[test]
+fn dirstack_pushd_plus_zero_noop() {
+  // pushd +0: should be a no-op (cwd stays the same)
+  let mut meta = MetaTab::new();
+
+  meta.push_dir(PathBuf::from("/etc"));
+  meta.push_dir(PathBuf::from("/var"));
+  meta.push_dir(PathBuf::from("/tmp"));
+
+  // pushd +0 with cwd=/home:
+  // push_front(cwd): [/home, /tmp, /var, /etc]
+  // rotate_left(0): no-op
+  // pop_front(): /home = cwd unchanged
+  let cwd = PathBuf::from("/home");
+  let dirs = meta.dirs_mut();
+  dirs.push_front(cwd.clone());
+  dirs.rotate_left(0);
+  let new_cwd = dirs.pop_front();
+
+  assert_eq!(new_cwd, Some(PathBuf::from("/home")));
+}
+
+#[test]
+fn dirstack_popd_removes_from_top() {
+  let mut meta = MetaTab::new();
+
+  meta.push_dir(PathBuf::from("/etc"));
+  meta.push_dir(PathBuf::from("/var"));
+  meta.push_dir(PathBuf::from("/tmp"));
+
+  // popd (no args) or popd +0: pop from front
+  let popped = meta.pop_dir();
+  assert_eq!(popped, Some(PathBuf::from("/tmp")));
+  assert_eq!(meta.dirs().len(), 2);
+}
+
+#[test]
+fn dirstack_popd_plus_n_offset() {
+  let mut meta = MetaTab::new();
+
+  // Stored: [/tmp, /var, /etc] (front to back)
+  meta.push_dir(PathBuf::from("/etc"));
+  meta.push_dir(PathBuf::from("/var"));
+  meta.push_dir(PathBuf::from("/tmp"));
+
+  // popd +2: full stack is [cwd, /tmp, /var, /etc]
+  // +2 = /var, which is stored index 1 (n-1 = 2-1 = 1)
+  let removed = meta.dirs_mut().remove(1); // n-1 for +N
+  assert_eq!(removed, Some(PathBuf::from("/var")));
+
+  let remaining: Vec<_> = meta.dirs().iter().collect();
+  assert_eq!(remaining, vec![
+    &PathBuf::from("/tmp"),
+    &PathBuf::from("/etc"),
+  ]);
+}
+
+#[test]
+fn dirstack_popd_minus_zero() {
+  let mut meta = MetaTab::new();
+
+  // Stored: [/tmp, /var, /etc]
+  meta.push_dir(PathBuf::from("/etc"));
+  meta.push_dir(PathBuf::from("/var"));
+  meta.push_dir(PathBuf::from("/tmp"));
+
+  // popd -0: remove bottom (back)
+  // actual = len - 1 - 0 = 2, via checked_sub(0+1) = checked_sub(1) = 2
+  let len = meta.dirs().len();
+  let actual = len.checked_sub(1).unwrap();
+  let removed = meta.dirs_mut().remove(actual);
+  assert_eq!(removed, Some(PathBuf::from("/etc")));
+}
+
+#[test]
+fn dirstack_popd_minus_n() {
+  let mut meta = MetaTab::new();
+
+  // Stored: [/tmp, /var, /etc, /usr]
+  meta.push_dir(PathBuf::from("/usr"));
+  meta.push_dir(PathBuf::from("/etc"));
+  meta.push_dir(PathBuf::from("/var"));
+  meta.push_dir(PathBuf::from("/tmp"));
+
+  // popd -1: second from bottom = /etc
+  // actual = len - (1+1) = 4 - 2 = 2
+  let len = meta.dirs().len();
+  let actual = len.checked_sub(2).unwrap(); // n+1 = 2
+  let removed = meta.dirs_mut().remove(actual);
+  assert_eq!(removed, Some(PathBuf::from("/etc")));
+}
+
+#[test]
+fn dirstack_clear() {
+  let mut meta = MetaTab::new();
+
+  meta.push_dir(PathBuf::from("/tmp"));
+  meta.push_dir(PathBuf::from("/var"));
+  meta.push_dir(PathBuf::from("/etc"));
+
+  meta.dirs_mut().clear();
+  assert!(meta.dirs().is_empty());
+  assert_eq!(meta.dir_stack_top(), None);
 }

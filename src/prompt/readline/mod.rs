@@ -6,6 +6,7 @@ use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
 use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
 use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
+use crate::libsh::sys::TTY_FILENO;
 use crate::prelude::*;
 use crate::{
   libsh::{
@@ -112,10 +113,10 @@ pub struct FernVi {
 }
 
 impl FernVi {
-  pub fn new(prompt: Option<String>) -> ShResult<Self> {
+  pub fn new(prompt: Option<String>, tty: RawFd) -> ShResult<Self> {
     let mut new = Self {
       reader: PollReader::new(),
-      writer: Box::new(TermWriter::new(STDOUT_FILENO)),
+      writer: Box::new(TermWriter::new(tty)),
       prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
       completer: Completer::new(),
       highlighter: Highlighter::new(),
@@ -294,7 +295,7 @@ impl FernVi {
 
   pub fn get_layout(&mut self, line: &str) -> Layout {
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
-    let (cols, _) = get_win_size(STDIN_FILENO);
+    let (cols, _) = get_win_size(*TTY_FILENO);
     let tab_stop = crate::state::read_shopts(|s| s.prompt.tab_stop) as u16;
     Layout::from_parts(tab_stop, cols, &self.prompt, to_cursor, line)
   }

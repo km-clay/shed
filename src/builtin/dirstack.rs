@@ -158,7 +158,7 @@ pub fn pushd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
 			let dirs = m.dirs_mut();
 			dirs.push_front(cwd);
 			match idx {
-				StackIdx::FromTop(n) => dirs.rotate_left(n + 1),
+				StackIdx::FromTop(n) => dirs.rotate_left(n),
 				StackIdx::FromBottom(n) => dirs.rotate_right(n + 1),
 			}
 			dirs.pop_front()

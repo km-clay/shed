@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use termios::{LocalFlags, Termios};
 
 use crate::prelude::*;
@@ -31,6 +33,11 @@ use crate::prelude::*;
 /// lifecycle could lead to undefined behavior.
 pub(crate) static mut SAVED_TERMIOS: Option<Option<Termios>> = None;
 
+pub static TTY_FILENO: LazyLock<RawFd> = LazyLock::new(|| {
+	open("/dev/tty", OFlag::O_RDWR, Mode::empty())
+		.expect("Failed to open /dev/tty")
+});
+
 #[derive(Debug)]
 pub struct TermiosGuard {
   saved_termios: Option<Termios>,
@@ -42,7 +49,7 @@ impl TermiosGuard {
       saved_termios: None,
     };
 
-    if isatty(std::io::stdin().as_raw_fd()).unwrap() {
+    if isatty(*TTY_FILENO).unwrap() {
       let current_termios = termios::tcgetattr(std::io::stdin()).unwrap();
       new.saved_termios = Some(current_termios);
 

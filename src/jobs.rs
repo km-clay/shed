@@ -198,6 +198,11 @@ impl JobTab {
     let registered_fd = RegisteredFd { fd, owner_pid };
     self.fd_registry.push(registered_fd)
   }
+  /// Close all registered proc sub fds. Called after fork in exec_cmd
+  /// so the parent doesn't hold pipe ends that prevent EOF.
+  pub fn drain_registered_fds(&mut self) {
+    self.fd_registry.clear();
+  }
   fn prune_jobs(&mut self) {
     while let Some(job) = self.jobs.last() {
       if job.is_none() {

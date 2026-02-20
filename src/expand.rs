@@ -829,6 +829,11 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 
   match unsafe { fork()? } {
     ForkResult::Child => {
+      // Close the parent's pipe end so the grandchild doesn't inherit it.
+      // Without this, >(cmd) hangs because the command holds its own
+      // pipe's write end open and never sees EOF.
+      drop(register_fd);
+
       let redir = Redir::new(proc_fd, redir_type);
       let io_frame = IoFrame::from_redir(redir);
       let mut io_stack = IoStack::new();
@@ -842,7 +847,6 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
     }
     ForkResult::Parent { child } => {
       write_jobs(|j| j.register_fd(child, register_fd));
-      let registered = read_jobs(|j| j.registered_fds().to_vec());
       // Do not wait; process may run in background
       Ok(path)
     }

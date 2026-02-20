@@ -366,7 +366,7 @@ fn marker_priority_reset_placement() {
 #[test]
 fn highlighter_produces_ansi_codes() {
   let mut highlighter = Highlighter::new();
-  highlighter.load_input("echo hello");
+  highlighter.load_input("echo hello", 0);
   highlighter.highlight();
   let output = highlighter.take();
 
@@ -384,7 +384,7 @@ fn highlighter_produces_ansi_codes() {
 #[test]
 fn highlighter_handles_empty_input() {
   let mut highlighter = Highlighter::new();
-  highlighter.load_input("");
+  highlighter.load_input("", 0);
   highlighter.highlight();
   let output = highlighter.take();
 
@@ -397,12 +397,12 @@ fn highlighter_command_validation() {
   let mut highlighter = Highlighter::new();
 
   // Valid command (echo exists)
-  highlighter.load_input("echo test");
+  highlighter.load_input("echo test", 0);
   highlighter.highlight();
   let valid_output = highlighter.take();
 
   // Invalid command (definitely doesn't exist)
-  highlighter.load_input("xyznotacommand123 test");
+  highlighter.load_input("xyznotacommand123 test", 0);
   highlighter.highlight();
   let invalid_output = highlighter.take();
 
@@ -419,7 +419,7 @@ fn highlighter_command_validation() {
 fn highlighter_preserves_text_content() {
   let input = "echo hello world";
   let mut highlighter = Highlighter::new();
-  highlighter.load_input(input);
+  highlighter.load_input(input, 0);
   highlighter.highlight();
   let output = highlighter.take();
 
@@ -438,7 +438,7 @@ fn highlighter_preserves_text_content() {
 #[test]
 fn highlighter_multiple_tokens() {
   let mut highlighter = Highlighter::new();
-  highlighter.load_input("ls -la | grep foo");
+  highlighter.load_input("ls -la | grep foo", 0);
   highlighter.highlight();
   let output = highlighter.take();
 
@@ -456,7 +456,7 @@ fn highlighter_multiple_tokens() {
 #[test]
 fn highlighter_string_with_variable() {
   let mut highlighter = Highlighter::new();
-  highlighter.load_input(r#"echo "hello $USER""#);
+  highlighter.load_input(r#"echo "hello $USER""#, 0);
   highlighter.highlight();
   let output = highlighter.take();
 
@@ -474,12 +474,12 @@ fn highlighter_reusable() {
   let mut highlighter = Highlighter::new();
 
   // First input
-  highlighter.load_input("echo first");
+  highlighter.load_input("echo first", 0);
   highlighter.highlight();
   let output1 = highlighter.take();
 
   // Second input (reusing same highlighter)
-  highlighter.load_input("echo second");
+  highlighter.load_input("echo second", 0);
   highlighter.highlight();
   let output2 = highlighter.take();
 

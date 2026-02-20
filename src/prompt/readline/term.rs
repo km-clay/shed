@@ -18,7 +18,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::{error::{ShErr, ShErrKind, ShResult}, sys::TTY_FILENO},
   prompt::readline::keys::{KeyCode, ModKeys},
 };
 use crate::{
@@ -30,7 +30,7 @@ use crate::{
 use super::{keys::KeyEvent, linebuf::LineBuf};
 
 pub fn raw_mode() -> RawModeGuard {
-  let orig = termios::tcgetattr(unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) })
+  let orig = termios::tcgetattr(unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) })
     .expect("Failed to get terminal attributes");
   let mut raw = orig.clone();
   termios::cfmakeraw(&mut raw);
@@ -39,17 +39,17 @@ pub fn raw_mode() -> RawModeGuard {
   // Keep OPOST enabled so \n is translated to \r\n on output
   raw.output_flags |= termios::OutputFlags::OPOST;
   termios::tcsetattr(
-    unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) },
+    unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
     termios::SetArg::TCSANOW,
     &raw,
   )
   .expect("Failed to set terminal to raw mode");
 
-  let (cols, rows) = get_win_size(STDIN_FILENO);
+  let (cols, rows) = get_win_size(*TTY_FILENO);
 
   RawModeGuard {
     orig,
-    fd: STDIN_FILENO,
+    fd: *TTY_FILENO,
   }
 }
 
@@ -286,14 +286,14 @@ impl RawModeGuard {
   where
     F: FnOnce() -> R,
   {
-    let raw = tcgetattr(borrow_fd(STDIN_FILENO)).expect("Failed to get terminal attributes");
+    let raw = tcgetattr(borrow_fd(*TTY_FILENO)).expect("Failed to get terminal attributes");
     let mut cooked = raw.clone();
     cooked.local_flags |= termios::LocalFlags::ICANON | termios::LocalFlags::ECHO;
     cooked.input_flags |= termios::InputFlags::ICRNL;
-    tcsetattr(borrow_fd(STDIN_FILENO), termios::SetArg::TCSANOW, &cooked)
+    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &cooked)
       .expect("Failed to set cooked mode");
     let res = f();
-    tcsetattr(borrow_fd(STDIN_FILENO), termios::SetArg::TCSANOW, &raw)
+    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &raw)
       .expect("Failed to restore raw mode");
     res
   }
@@ -542,16 +542,10 @@ pub struct TermReader {
   buffer: BufReader<TermBuffer>,
 }
 
-impl Default for TermReader {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
 impl TermReader {
-  pub fn new() -> Self {
+  pub fn new(tty: RawFd) -> Self {
     Self {
-      buffer: BufReader::new(TermBuffer::new(1)),
+      buffer: BufReader::new(TermBuffer::new(tty)),
     }
   }
 

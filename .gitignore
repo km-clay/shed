@@ -10,6 +10,7 @@ shell.nix
 *~
 TODO.md
 AUDIT.md
+KNOWN_ISSUES.md
 rust-toolchain.toml
 /ref
 

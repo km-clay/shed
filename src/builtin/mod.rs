@@ -26,11 +26,12 @@ pub mod test; // [[ ]] thing
 pub mod trap;
 pub mod zoltraak;
 pub mod dirstack;
+pub mod exec;
 
-pub const BUILTINS: [&str; 24] = [
+pub const BUILTINS: [&str; 25] = [
   "echo", "cd", "read", "export", "pwd", "source", "shift", "jobs", "fg", "bg", "alias", "unalias",
   "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin", "command", "trap",
-	"pushd", "popd", "dirs"
+	"pushd", "popd", "dirs", "exec",
 ];
 
 /// Sets up a builtin command

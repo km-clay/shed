@@ -29,6 +29,7 @@ use nix::unistd::read;
 
 use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::libsh::sys::TTY_FILENO;
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
 use crate::prompt::get_prompt;
@@ -51,6 +52,12 @@ struct FernArgs {
 
   #[arg(long)]
   version: bool,
+
+	#[arg(short)]
+	interactive: bool,
+
+	#[arg(long,short)]
+	login_shell: bool,
 }
 
 /// Force evaluation of lazily-initialized values early in shell startup.
@@ -70,7 +77,12 @@ fn kickstart_lazy_evals() {
 fn main() -> ExitCode {
   env_logger::init();
   kickstart_lazy_evals();
-  let args = FernArgs::parse();
+  let mut args = FernArgs::parse();
+	if env::args().next().is_some_and(|a| a.starts_with('-')) {
+		// first arg is '-fern'
+		// meaning we are in a login shell
+		args.login_shell = true;
+	}
   if args.version {
     println!("fern {}", env!("CARGO_PKG_VERSION"));
     return ExitCode::SUCCESS;
@@ -134,7 +146,7 @@ fn fern_interactive() -> ShResult<()> {
   }
 
   // Create readline instance with initial prompt
-  let mut readline = match FernVi::new(get_prompt().ok()) {
+  let mut readline = match FernVi::new(get_prompt().ok(), *TTY_FILENO) {
     Ok(rl) => rl,
     Err(e) => {
       eprintln!("Failed to initialize readline: {e}");
@@ -169,7 +181,7 @@ fn fern_interactive() -> ShResult<()> {
 
     // Poll for stdin input
     let mut fds = [PollFd::new(
-      unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) },
+      unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
       PollFlags::POLLIN,
     )];
 
@@ -191,7 +203,7 @@ fn fern_interactive() -> ShResult<()> {
       .is_some_and(|r| r.contains(PollFlags::POLLIN))
     {
       let mut buffer = [0u8; 1024];
-      match read(STDIN_FILENO, &mut buffer) {
+      match read(*TTY_FILENO, &mut buffer) {
         Ok(0) => {
           // EOF
           break;

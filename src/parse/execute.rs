@@ -2,14 +2,14 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, cd::cd, dirstack::{dirs, popd, pushd}, echo::echo, export::export, flowctl::flowctl, jobctl::{JobBehavior, continue_job, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, zoltraak::zoltraak
+    alias::{alias, unalias}, cd::cd, dirstack::{dirs, popd, pushd}, echo::echo, exec, export::export, flowctl::flowctl, jobctl::{JobBehavior, continue_job, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, zoltraak::zoltraak
   },
   expand::expand_aliases,
   jobs::{ChildProc, JobStack, dispatch_job},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   prelude::*,
   procio::{IoMode, IoStack},
-  state::{self, ShFunc, VarFlags, read_logic, write_logic, write_vars},
+  state::{self, ShFunc, VarFlags, read_logic, write_jobs, write_logic, write_vars},
 };
 
 use super::{
@@ -80,6 +80,10 @@ impl ExecArgs {
   pub fn new(argv: Vec<Tk>) -> ShResult<Self> {
     assert!(!argv.is_empty());
     let argv = prepare_argv(argv)?;
+    Self::from_expanded(argv)
+  }
+  pub fn from_expanded(argv: Vec<(String, Span)>) -> ShResult<Self> {
+    assert!(!argv.is_empty());
     let cmd = Self::get_cmd(&argv);
     let argv = Self::get_argv(argv);
     let envp = Self::get_envp();
@@ -603,6 +607,7 @@ impl Dispatcher {
 			"pushd" => pushd(cmd, io_stack_mut, curr_job_mut),
 			"popd" => popd(cmd, io_stack_mut, curr_job_mut),
 			"dirs" => dirs(cmd, io_stack_mut, curr_job_mut),
+			"exec" => exec::exec_builtin(cmd, io_stack_mut, curr_job_mut),
       _ => unimplemented!(
         "Have not yet added support for builtin '{}'",
         cmd_raw.span.as_str()
@@ -663,6 +668,11 @@ impl Dispatcher {
         exit(e as i32)
       }
       ForkResult::Parent { child } => {
+        // Close proc sub pipe fds - the child has inherited them
+        // and will access them via /proc/self/fd/N. Keeping them
+        // open here would prevent EOF on the pipe.
+        write_jobs(|j| j.drain_registered_fds());
+
         let cmd_name = exec_args.cmd.0.to_str().unwrap();
 
         let child_pgid = if let Some(pgid) = job.pgid() {
