@@ -942,11 +942,20 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
         }
       }
       '*' | '?' if (!in_dub_qt && !in_sng_qt) => {
+				let glob_ch = *ch;
+        token_chars.next(); // consume the first glob char
         if !in_context(markers::COMMAND, &insertions) {
-          insertions.push((span_start + *i + 1, markers::RESET));
-          insertions.push((span_start + *i, markers::GLOB));
+					let offset = if glob_ch == '*' && token_chars.peek().is_some_and(|(_, c)| *c == '*') {
+						// it's one of these probably: ./dir/**/*.txt
+						token_chars.next(); // consume the second *
+						2
+					} else {
+						// just a regular glob char
+						1
+					};
+          insertions.push((span_start + index + offset, markers::RESET));
+          insertions.push((span_start + index, markers::GLOB));
         }
-        token_chars.next(); // consume the glob char
       }
       _ => {
         token_chars.next(); // consume the char with no special handling
