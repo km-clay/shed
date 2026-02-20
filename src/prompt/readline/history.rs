@@ -271,13 +271,18 @@ impl History {
   }
 
   pub fn update_pending_cmd(&mut self, buf: (&str, usize)) {
+		let cursor_pos = if let Some(pending) = &self.pending {
+			pending.1
+		} else {
+			buf.1
+		};
     let cmd = buf.0.to_string();
     let constraint = SearchConstraint {
       kind: SearchKind::Prefix,
       term: cmd.clone(),
     };
 
-    self.pending = Some((cmd, buf.1));
+    self.pending = Some((cmd, cursor_pos));
     self.constrain_entries(constraint);
   }
 

@@ -384,6 +384,12 @@ impl LineBuf {
   pub fn set_cursor_clamp(&mut self, yn: bool) {
     self.cursor.exclusive = yn;
   }
+	pub fn move_cursor_to_end(&mut self) {
+		self.move_cursor(MotionKind::To(self.grapheme_indices().len()))
+	}
+	pub fn move_cursor_to_start(&mut self) {
+		self.move_cursor(MotionKind::To(0))
+	}
   pub fn cursor_byte_pos(&mut self) -> usize {
     self.index_byte_pos(self.cursor.get())
   }
@@ -2555,11 +2561,8 @@ impl LineBuf {
 
         self.buffer.replace_range(pos..pos + new.len(), &old);
         let new_cursor_pos = self.cursor.get();
-        let in_insert_mode = !self.cursor.exclusive;
 
-        if in_insert_mode {
-          self.cursor.set(cursor_pos)
-        }
+				self.cursor.set(cursor_pos);
         let new_edit = Edit {
           pos,
           cursor_pos: new_cursor_pos,

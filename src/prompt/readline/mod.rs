@@ -316,15 +316,17 @@ impl FernVi {
     let entry = self.history.scroll(count);
     log::info!("Scrolled history, got entry: {:?}", entry.as_ref());
     if let Some(entry) = entry {
-      log::info!("Setting buffer to history entry: {}", entry.command());
+			let cursor_pos = self.editor.cursor.get();
+			log::info!("Saving pending command to history: {:?} at cursor pos {}", self.editor.as_str(), cursor_pos);
       let pending = self.editor.take_buf();
       self.editor.set_buffer(entry.command().to_string());
       if self.history.pending.is_none() {
-        self.history.pending = Some((pending, self.editor.cursor.get()));
+        self.history.pending = Some((pending, cursor_pos));
       }
       self.editor.set_hint(None);
+			self.editor.move_cursor_to_end();
     } else if let Some(pending) = self.history.pending.take() {
-      log::info!("Setting buffer to pending command: {}", &pending.0);
+      log::info!("Setting buffer to pending command: {:?}", &pending);
       self.editor.set_buffer(pending.0);
       self.editor.cursor.set(pending.1);
       self.editor.set_hint(None);
