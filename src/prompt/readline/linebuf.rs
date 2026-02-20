@@ -15,7 +15,7 @@ use crate::{
     error::ShResult,
     term::{Style, Styled},
   },
-  prelude::*, prompt::readline::register::write_register,
+  prelude::*, prompt::readline::{markers, register::write_register},
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -2242,7 +2242,7 @@ impl LineBuf {
 
       if has_consumed_hint {
         let buf_end = if self.cursor.exclusive {
-          self.cursor.ret_add(1)
+          self.cursor.ret_add_inclusive(1)
         } else {
           self.cursor.get()
         };
@@ -2873,17 +2873,22 @@ impl Display for LineBuf {
       let start_byte = self.read_idx_byte_pos(start);
       let end_byte = self.read_idx_byte_pos(end);
 
+			if start_byte >= full_buf.len() || end_byte >= full_buf.len() {
+				log::warn!("Selection range '{:?}' is out of bounds for buffer of length {}, clearing selection", (start, end), full_buf.len());
+				return write!(f, "{}", full_buf);
+			}
+
       match mode.anchor() {
         SelectAnchor::Start => {
           let mut inclusive = start_byte..=end_byte;
           if *inclusive.end() == full_buf.len() {
             inclusive = start_byte..=end_byte.saturating_sub(1);
           }
-          let selected = full_buf[inclusive.clone()].styled(Style::BgWhite | Style::Black);
+          let selected = format!("{}{}{}", markers::VISUAL_MODE_START, &full_buf[inclusive.clone()], markers::VISUAL_MODE_END);
           full_buf.replace_range(inclusive, &selected);
         }
         SelectAnchor::End => {
-          let selected = full_buf[start..end].styled(Style::BgWhite | Style::Black);
+          let selected = format!("{}{}{}", markers::VISUAL_MODE_START, &full_buf[start..end], markers::VISUAL_MODE_END);
           full_buf.replace_range(start_byte..end_byte, &selected);
         }
       }

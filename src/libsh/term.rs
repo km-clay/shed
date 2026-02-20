@@ -15,6 +15,8 @@ impl<T: Display> Styled for T {}
 pub enum Style {
   // Undoes all styles
   Reset,
+	ResetFg,
+	ResetBg,
   // Foreground Colors
   Black,
   Red,
@@ -66,6 +68,8 @@ impl Display for Style {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       Style::Reset => write!(f, "\x1b[0m"),
+			Style::ResetFg => write!(f, "\x1b[39m"),
+			Style::ResetBg => write!(f, "\x1b[49m"),
 
       // Foreground colors
       Style::Black => write!(f, "\x1b[30m"),
@@ -126,6 +130,14 @@ impl StyleSet {
   pub fn new() -> Self {
     Self { styles: vec![] }
   }
+
+	pub fn styles(&self) -> &[Style] {
+		&self.styles
+	}
+
+	pub fn styles_mut(&mut self) -> &mut Vec<Style> {
+		&mut self.styles
+	}
 
   pub fn add_style(mut self, style: Style) -> Self {
     if !self.styles.contains(&style) {

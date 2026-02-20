@@ -59,6 +59,10 @@ pub mod markers {
   pub const ESCAPE: Marker = '\u{fddd}';
   pub const GLOB: Marker = '\u{fdde}';
 
+	// other
+	pub const VISUAL_MODE_START: Marker = '\u{fdea}';
+	pub const VISUAL_MODE_END: Marker = '\u{fdeb}';
+
   pub const RESET: Marker = '\u{fde2}';
 
   pub const NULL: Marker = '\u{fdef}';
@@ -77,8 +81,10 @@ pub mod markers {
   ];
   pub const SUB_TOKEN: [Marker; 6] = [VAR_SUB, CMD_SUB, PROC_SUB, STRING_DQ, STRING_SQ, GLOB];
 
+	pub const MISC: [Marker; 3] = [ESCAPE, VISUAL_MODE_START, VISUAL_MODE_END];
+
   pub fn is_marker(c: Marker) -> bool {
-    TOKEN_LEVEL.contains(&c) || SUB_TOKEN.contains(&c) || END_MARKERS.contains(&c)
+    TOKEN_LEVEL.contains(&c) || SUB_TOKEN.contains(&c) || END_MARKERS.contains(&c) || MISC.contains(&c)
   }
 }
 type Marker = char;
@@ -263,7 +269,8 @@ impl FernVi {
         if self.editor.buffer.is_empty() {
           return Ok(ReadlineEvent::Eof);
         } else {
-          self.editor.buffer.clear();
+          self.editor = LineBuf::new();
+					self.mode = Box::new(ViInsert::new());
           self.needs_redraw = true;
           continue;
         }
@@ -369,6 +376,7 @@ impl FernVi {
       self.highlighter.load_input(&line,self.editor.cursor_byte_pos());
       self.highlighter.highlight();
       let highlighted = self.highlighter.take();
+			log::info!("Highlighting line. highlighted: {:?}, hint: {:?}", highlighted, hint);
       format!("{highlighted}{hint}")
     } else {
       format!("{line}{hint}")
@@ -691,7 +699,9 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
       std::cmp::Ordering::Equal => {
         let priority = |m: Marker| -> u8 {
           match m {
-            markers::RESET => 0,
+						markers::VISUAL_MODE_END
+						| markers::VISUAL_MODE_START
+            | markers::RESET => 0,
             markers::VAR_SUB
             | markers::VAR_SUB_END
             | markers::CMD_SUB
@@ -720,7 +730,9 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
         std::cmp::Ordering::Equal => {
           let priority = |m: Marker| -> u8 {
             match m {
-              markers::RESET => 0,
+							markers::VISUAL_MODE_END
+							| markers::VISUAL_MODE_START
+              | markers::RESET => 0,
               markers::VAR_SUB
               | markers::VAR_SUB_END
               | markers::CMD_SUB
@@ -732,7 +744,8 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
               | markers::STRING_SQ
               | markers::STRING_SQ_END
               | markers::SUBSH_END => 2,
-              markers::ARG => 3, // Lowest priority - processed first, overridden by sub-tokens
+
+              | markers::ARG => 3, // Lowest priority - processed first, overridden by sub-tokens
               _ => 1,
             }
           };

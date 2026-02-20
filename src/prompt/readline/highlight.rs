@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
   libsh::term::{Style, StyleSet, Styled},
-  prompt::readline::{annotate_input, markers},
+  prompt::readline::{annotate_input, markers::{self, is_marker}},
   state::{read_logic, read_shopts},
 };
 
@@ -23,6 +23,7 @@ pub struct Highlighter {
 	linebuf_cursor_pos: usize,
   style_stack: Vec<StyleSet>,
   last_was_reset: bool,
+	in_selection: bool
 }
 
 impl Highlighter {
@@ -34,6 +35,7 @@ impl Highlighter {
 			linebuf_cursor_pos: 0,
       style_stack: Vec::new(),
       last_was_reset: true, // start as true so we don't emit a leading reset
+			in_selection: false
     }
   }
 
@@ -43,9 +45,20 @@ impl Highlighter {
   /// indicating token types and sub-token constructs (strings, variables, etc.)
   pub fn load_input(&mut self, input: &str, linebuf_cursor_pos: usize) {
     let input = annotate_input(input);
+		log::debug!("Annotated input: {:?}", input);
     self.input = input;
 		self.linebuf_cursor_pos = linebuf_cursor_pos;
   }
+
+	pub fn strip_markers(str: &str) -> String {
+		let mut out = String::new();
+		for ch in str.chars() {
+			if !is_marker(ch) {
+				out.push(ch);
+			}
+		}
+		out
+	}
 
   /// Processes the annotated input and generates ANSI-styled output
   ///
@@ -57,6 +70,14 @@ impl Highlighter {
     let mut input_chars = input.chars().peekable();
     while let Some(ch) = input_chars.next() {
       match ch {
+				markers::VISUAL_MODE_START => {
+					self.emit_style(Style::BgWhite | Style::Black);
+					self.in_selection = true;
+				}
+				markers::VISUAL_MODE_END => {
+					self.reapply_style();
+					self.in_selection = false;
+				}
         markers::STRING_DQ_END
         | markers::STRING_SQ_END
         | markers::VAR_SUB_END
@@ -77,6 +98,7 @@ impl Highlighter {
         markers::GLOB => self.push_style(Style::Blue),
 
         markers::REDIRECT | markers::OPERATOR => self.push_style(Style::Magenta | Style::Bold),
+
 
         markers::ASSIGNMENT => {
           let mut var_name = String::new();
@@ -116,7 +138,7 @@ impl Highlighter {
 							arg.push(ch);
 						}
 
-						let style = if Self::is_filename(&arg) {
+						let style = if Self::is_filename(&Self::strip_markers(&arg)) {
 							Style::White | Style::Underline
 						} else {
 							Style::White.into()
@@ -136,7 +158,7 @@ impl Highlighter {
             }
             cmd_name.push(ch);
           }
-          let style = if Self::is_valid(&cmd_name) {
+          let style = if Self::is_valid(&Self::strip_markers(&cmd_name)) {
             Style::Green.into()
           } else {
             Style::Red | Style::Bold
@@ -346,7 +368,11 @@ impl Highlighter {
   ///
   /// Unconditionally appends the ANSI escape sequence for the given style
   /// and marks that we're no longer in a reset state.
-  fn emit_style(&mut self, style: &StyleSet) {
+  fn emit_style(&mut self, style: StyleSet) {
+		let mut style = style;
+		if !style.styles().contains(&Style::BgWhite) {
+			style = style.add_style(Style::BgBlack);
+		}
     self.output.push_str(&style.to_string());
     self.last_was_reset = false;
   }
@@ -358,7 +384,9 @@ impl Highlighter {
   pub fn push_style(&mut self, style: impl Into<StyleSet>) {
     let set: StyleSet = style.into();
     self.style_stack.push(set.clone());
-    self.emit_style(&set);
+		if !self.in_selection {
+			self.emit_style(set.clone());
+		}
   }
 
   /// Pops a style from the stack and restores the previous style
@@ -371,7 +399,7 @@ impl Highlighter {
   pub fn pop_style(&mut self) {
     self.style_stack.pop();
     if let Some(style) = self.style_stack.last().cloned() {
-      self.emit_style(&style);
+      self.emit_style(style);
     } else {
       self.emit_reset();
     }
@@ -383,8 +411,18 @@ impl Highlighter {
   /// the default terminal color between independent commands.
   pub fn clear_styles(&mut self) {
     self.style_stack.clear();
-    self.emit_reset();
+		if !self.in_selection {
+			self.emit_reset();
+		}
   }
+
+	pub fn reapply_style(&mut self) {
+		if let Some(style) = self.style_stack.last().cloned() {
+			self.emit_style(style);
+		} else {
+			self.emit_reset();
+		}
+	}
 
   /// Simple marker-to-ANSI replacement (unused in favor of stack-based
   /// highlighting)
