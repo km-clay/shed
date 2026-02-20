@@ -363,7 +363,7 @@ impl FernVi {
     let line = self.editor.to_string();
     let hint = self.editor.get_hint_text();
     if crate::state::read_shopts(|s| s.prompt.highlight) {
-      self.highlighter.load_input(&line);
+      self.highlighter.load_input(&line,self.editor.cursor_byte_pos());
       self.highlighter.highlight();
       let highlighted = self.highlighter.take();
       format!("{highlighted}{hint}")

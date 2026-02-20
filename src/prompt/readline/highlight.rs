@@ -20,6 +20,7 @@ use crate::{
 pub struct Highlighter {
   input: String,
   output: String,
+	linebuf_cursor_pos: usize,
   style_stack: Vec<StyleSet>,
   last_was_reset: bool,
 }
@@ -30,6 +31,7 @@ impl Highlighter {
     Self {
       input: String::new(),
       output: String::new(),
+			linebuf_cursor_pos: 0,
       style_stack: Vec::new(),
       last_was_reset: true, // start as true so we don't emit a leading reset
     }
@@ -39,9 +41,10 @@ impl Highlighter {
   ///
   /// The input is passed through the annotator which inserts Unicode markers
   /// indicating token types and sub-token constructs (strings, variables, etc.)
-  pub fn load_input(&mut self, input: &str) {
+  pub fn load_input(&mut self, input: &str, linebuf_cursor_pos: usize) {
     let input = annotate_input(input);
     self.input = input;
+		self.linebuf_cursor_pos = linebuf_cursor_pos;
   }
 
   /// Processes the annotated input and generates ANSI-styled output
@@ -100,22 +103,28 @@ impl Highlighter {
 
         markers::ARG => {
           let mut arg = String::new();
-          let mut chars_clone = input_chars.clone();
-          while let Some(ch) = chars_clone.next() {
-            if ch == markers::RESET {
-              break;
-            }
-            arg.push(ch);
-          }
+					let is_last_arg = !input_chars.clone().any(|c| c == markers::ARG || c.is_whitespace());
 
-          let style = if Self::is_filename(&arg) {
-            Style::White | Style::Underline
-          } else {
-            Style::White.into()
-          };
+					if !is_last_arg {
+						self.push_style(Style::White);
+					} else {
+						let mut chars_clone = input_chars.clone();
+						while let Some(ch) = chars_clone.next() {
+							if ch == markers::RESET {
+								break;
+							}
+							arg.push(ch);
+						}
 
-          self.push_style(style);
-          self.last_was_reset = false;
+						let style = if Self::is_filename(&arg) {
+							Style::White | Style::Underline
+						} else {
+							Style::White.into()
+						};
+
+						self.push_style(style);
+						self.last_was_reset = false;
+					}
         }
 
         markers::COMMAND => {
@@ -180,7 +189,7 @@ impl Highlighter {
           };
 
           let mut recursive_highlighter = Self::new();
-          recursive_highlighter.load_input(inner_content);
+          recursive_highlighter.load_input(inner_content, self.linebuf_cursor_pos);
           recursive_highlighter.highlight();
           self.push_style(Style::Blue);
           self.output.push_str(prefix);
