@@ -15,7 +15,7 @@ use crate::{
     error::ShResult,
     term::{Style, Styled},
   },
-  prelude::*,
+  prelude::*, prompt::readline::register::write_register,
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -562,9 +562,9 @@ impl LineBuf {
     self.buffer.remove(idx);
     self.update_graphemes();
   }
-  pub fn drain(&mut self, start: usize, end: usize) -> String {
-    let start = start.max(0);
-    let end = end.min(self.grapheme_indices().len());
+  pub fn drain(&mut self, range: Range<usize>) -> String {
+    let start = range.start.max(0);
+    let end = range.end.min(self.grapheme_indices().len());
     let drained = if end == self.grapheme_indices().len() {
       if start == self.grapheme_indices().len() {
         return String::new();
@@ -579,6 +579,9 @@ impl LineBuf {
     self.update_graphemes();
     drained
   }
+	pub fn drain_inclusive(&mut self, range: RangeInclusive<usize>) -> String {
+		self.drain(*range.start()..range.end().saturating_add(1))
+	}
   pub fn push(&mut self, ch: char) {
     self.buffer.push(ch);
     self.update_graphemes();
@@ -2389,7 +2392,7 @@ impl LineBuf {
             .map(|c| c.to_string())
             .unwrap_or_default()
         } else {
-          let drained = self.drain(start, end);
+          let drained = self.drain(start..end);
           self.update_graphemes();
           drained
         };
@@ -2572,6 +2575,16 @@ impl LineBuf {
         let Some(content) = register.read_from_register() else {
           return Ok(());
         };
+				if let Some(range) = self.select_range {
+					let register_text = self.drain_inclusive(range.0..=range.1);
+					write_register(None, register_text); // swap deleted text into register
+
+					self.insert_str_at(range.0, &content);
+					self.cursor.set(range.0 + content.chars().count());
+					self.select_range = None;
+					self.update_graphemes();
+					return Ok(());
+				}
         let insert_idx = match anchor {
           Anchor::After => self.cursor.ret_add(1),
           Anchor::Before => self.cursor.get(),
