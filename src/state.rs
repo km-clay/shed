@@ -705,6 +705,8 @@ pub struct MetaTab {
 
   // pending system messages
   system_msg: Vec<String>,
+
+	dir_stack: VecDeque<PathBuf>
 }
 
 impl MetaTab {
@@ -733,6 +735,35 @@ impl MetaTab {
   pub fn system_msg_pending(&self) -> bool {
     !self.system_msg.is_empty()
   }
+	pub fn dir_stack_top(&self) -> Option<&PathBuf> {
+		self.dir_stack.front()
+	}
+	pub fn push_dir(&mut self, path: PathBuf) {
+		self.dir_stack.push_front(path);
+	}
+	pub fn pop_dir(&mut self) -> Option<PathBuf> {
+		self.dir_stack.pop_front()
+	}
+	pub fn remove_dir(&mut self, idx: i32) -> Option<PathBuf> {
+		if idx < 0 {
+			let neg_idx = (self.dir_stack.len() - 1).saturating_sub((-idx) as usize);
+			self.dir_stack.remove(neg_idx)
+		} else {
+			self.dir_stack.remove((idx - 1) as usize)
+		}
+	}
+	pub fn rotate_dirs_fwd(&mut self, steps: usize) {
+		self.dir_stack.rotate_left(steps);
+	}
+	pub fn rotate_dirs_bkwd(&mut self, steps: usize) {
+		self.dir_stack.rotate_right(steps);
+	}
+	pub fn dirs(&self) -> &VecDeque<PathBuf> {
+		&self.dir_stack
+	}
+	pub fn dirs_mut(&mut self) -> &mut VecDeque<PathBuf> {
+		&mut self.dir_stack
+	}
 }
 
 /// Read from the job table

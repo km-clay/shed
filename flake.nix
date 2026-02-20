@@ -1,5 +1,5 @@
 {
-  description = "A very basic flake";
+  description = "A Linux shell written in Rust";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -38,7 +38,7 @@
     homeModules.fern = import ./nix/hm-module.nix;
 
     overlays.default = final: prev: {
-      fern = self.packages.${final.system}.default;
+      fern = self.packages.${final.stdenv.hostPlatform.system}.default;
     };
   };
 }

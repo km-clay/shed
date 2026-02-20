@@ -2,20 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::{
   builtin::{
-    alias::{alias, unalias},
-    cd::cd,
-    echo::echo,
-    export::export,
-    flowctl::flowctl,
-    jobctl::{JobBehavior, continue_job, jobs},
-    pwd::pwd,
-    read::read_builtin,
-    shift::shift,
-    shopt::shopt,
-    source::source,
-    test::double_bracket_test,
-    trap::{TrapTarget, trap},
-    zoltraak::zoltraak,
+    alias::{alias, unalias}, cd::cd, dirstack::{dirs, popd, pushd}, echo::echo, export::export, flowctl::flowctl, jobctl::{JobBehavior, continue_job, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, zoltraak::zoltraak
   },
   expand::expand_aliases,
   jobs::{ChildProc, JobStack, dispatch_job},
@@ -613,6 +600,9 @@ impl Dispatcher {
       "shopt" => shopt(cmd, io_stack_mut, curr_job_mut),
       "read" => read_builtin(cmd, io_stack_mut, curr_job_mut),
       "trap" => trap(cmd, io_stack_mut, curr_job_mut),
+			"pushd" => pushd(cmd, io_stack_mut, curr_job_mut),
+			"popd" => popd(cmd, io_stack_mut, curr_job_mut),
+			"dirs" => dirs(cmd, io_stack_mut, curr_job_mut),
       _ => unimplemented!(
         "Have not yet added support for builtin '{}'",
         cmd_raw.span.as_str()
