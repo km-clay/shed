@@ -2,7 +2,11 @@ use crate::{
   libsh::{
     error::ShResult,
     term::{Style, Styled},
-  }, prelude::*, procio::{IoMode, borrow_fd}, signal::{disable_reaping, enable_reaping}, state::{self, set_status, read_jobs, write_jobs}
+  },
+  prelude::*,
+  procio::{IoMode, borrow_fd},
+  signal::{disable_reaping, enable_reaping},
+  state::{self, read_jobs, set_status, write_jobs},
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -685,7 +689,9 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
   }
   // If job wasn't stopped (moved to bg), clear the fg slot
   if !was_stopped {
-    write_jobs(|j| { j.take_fg(); });
+    write_jobs(|j| {
+      j.take_fg();
+    });
   }
   take_term()?;
   set_status(code);

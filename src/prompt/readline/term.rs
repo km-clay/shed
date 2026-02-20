@@ -17,10 +17,14 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
-use crate::{prelude::*, procio::borrow_fd, state::{read_meta, write_meta}};
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   prompt::readline::keys::{KeyCode, ModKeys},
+};
+use crate::{
+  prelude::*,
+  procio::borrow_fd,
+  state::{read_meta, write_meta},
 };
 
 use super::{keys::KeyEvent, linebuf::LineBuf};
@@ -41,7 +45,7 @@ pub fn raw_mode() -> RawModeGuard {
   )
   .expect("Failed to set terminal to raw mode");
 
-	let (cols, rows) = get_win_size(STDIN_FILENO);
+  let (cols, rows) = get_win_size(STDIN_FILENO);
 
   RawModeGuard {
     orig,
@@ -242,9 +246,7 @@ impl Read for TermBuffer {
     let result = nix::unistd::read(self.tty, buf);
     match result {
       Ok(n) => Ok(n),
-      Err(Errno::EINTR) => {
-        Err(Errno::EINTR.into())
-      }
+      Err(Errno::EINTR) => Err(Errno::EINTR.into()),
       Err(e) => Err(std::io::Error::from_raw_os_error(e as i32)),
     }
   }
@@ -280,17 +282,21 @@ impl RawModeGuard {
     }
   }
 
-	pub fn with_cooked_mode<F, R>(f: F) -> R
-	where F: FnOnce() -> R {
-		let raw = tcgetattr(borrow_fd(STDIN_FILENO)).expect("Failed to get terminal attributes");
-		let mut cooked = raw.clone();
-		cooked.local_flags |= termios::LocalFlags::ICANON | termios::LocalFlags::ECHO;
-		cooked.input_flags |= termios::InputFlags::ICRNL;
-		tcsetattr(borrow_fd(STDIN_FILENO), termios::SetArg::TCSANOW, &cooked).expect("Failed to set cooked mode");
-		let res = f();
-		tcsetattr(borrow_fd(STDIN_FILENO), termios::SetArg::TCSANOW, &raw).expect("Failed to restore raw mode");
-		res
-	}
+  pub fn with_cooked_mode<F, R>(f: F) -> R
+  where
+    F: FnOnce() -> R,
+  {
+    let raw = tcgetattr(borrow_fd(STDIN_FILENO)).expect("Failed to get terminal attributes");
+    let mut cooked = raw.clone();
+    cooked.local_flags |= termios::LocalFlags::ICANON | termios::LocalFlags::ECHO;
+    cooked.input_flags |= termios::InputFlags::ICRNL;
+    tcsetattr(borrow_fd(STDIN_FILENO), termios::SetArg::TCSANOW, &cooked)
+      .expect("Failed to set cooked mode");
+    let res = f();
+    tcsetattr(borrow_fd(STDIN_FILENO), termios::SetArg::TCSANOW, &raw)
+      .expect("Failed to restore raw mode");
+    res
+  }
 }
 
 impl Drop for RawModeGuard {
@@ -333,9 +339,15 @@ impl KeyCollector {
     // CSI modifiers: param = 1 + (shift) + (alt*2) + (ctrl*4) + (meta*8)
     let bits = param.saturating_sub(1);
     let mut mods = ModKeys::empty();
-    if bits & 1 != 0 { mods |= ModKeys::SHIFT; }
-    if bits & 2 != 0 { mods |= ModKeys::ALT; }
-    if bits & 4 != 0 { mods |= ModKeys::CTRL; }
+    if bits & 1 != 0 {
+      mods |= ModKeys::SHIFT;
+    }
+    if bits & 2 != 0 {
+      mods |= ModKeys::ALT;
+    }
+    if bits & 4 != 0 {
+      mods |= ModKeys::CTRL;
+    }
     mods
   }
 }
@@ -374,46 +386,72 @@ impl Perform for KeyCollector {
     self.push(event);
   }
 
-  fn csi_dispatch(&mut self, params: &vte::Params, intermediates: &[u8], _ignore: bool, action: char) {
-    let params: Vec<u16> = params.iter()
+  fn csi_dispatch(
+    &mut self,
+    params: &vte::Params,
+    intermediates: &[u8],
+    _ignore: bool,
+    action: char,
+  ) {
+    let params: Vec<u16> = params
+      .iter()
       .map(|p| p.first().copied().unwrap_or(0))
       .collect();
 
     let event = match (intermediates, action) {
       // Arrow keys: CSI A/B/C/D or CSI 1;mod A/B/C/D
       ([], 'A') => {
-        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        let mods = params
+          .get(1)
+          .map(|&m| Self::parse_modifiers(m))
+          .unwrap_or(ModKeys::empty());
         KeyEvent(KeyCode::Up, mods)
       }
       ([], 'B') => {
-        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        let mods = params
+          .get(1)
+          .map(|&m| Self::parse_modifiers(m))
+          .unwrap_or(ModKeys::empty());
         KeyEvent(KeyCode::Down, mods)
       }
       ([], 'C') => {
-        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        let mods = params
+          .get(1)
+          .map(|&m| Self::parse_modifiers(m))
+          .unwrap_or(ModKeys::empty());
         KeyEvent(KeyCode::Right, mods)
       }
       ([], 'D') => {
-        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        let mods = params
+          .get(1)
+          .map(|&m| Self::parse_modifiers(m))
+          .unwrap_or(ModKeys::empty());
         KeyEvent(KeyCode::Left, mods)
       }
       // Home/End: CSI H/F or CSI 1;mod H/F
       ([], 'H') => {
-        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        let mods = params
+          .get(1)
+          .map(|&m| Self::parse_modifiers(m))
+          .unwrap_or(ModKeys::empty());
         KeyEvent(KeyCode::Home, mods)
       }
       ([], 'F') => {
-        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        let mods = params
+          .get(1)
+          .map(|&m| Self::parse_modifiers(m))
+          .unwrap_or(ModKeys::empty());
         KeyEvent(KeyCode::End, mods)
       }
       // Shift+Tab: CSI Z
-      ([], 'Z') => {
-        KeyEvent(KeyCode::Tab, ModKeys::SHIFT)
-      }
+      ([], 'Z') => KeyEvent(KeyCode::Tab, ModKeys::SHIFT),
       // Special keys with tilde: CSI num ~ or CSI num;mod ~
       ([], '~') => {
         let key_num = params.first().copied().unwrap_or(0);
-        let mods = params.get(1).map(|&m| Self::parse_modifiers(m)).unwrap_or(ModKeys::empty());
+        let mods = params
+          .get(1)
+          .map(|&m| Self::parse_modifiers(m))
+          .unwrap_or(ModKeys::empty());
         let key = match key_num {
           1 | 7 => KeyCode::Home,
           2 => KeyCode::Insert,
@@ -473,7 +511,9 @@ impl PollReader {
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
     if bytes == [b'\x1b'] {
       // Single escape byte - user pressed ESC key
-      self.collector.push(KeyEvent(KeyCode::Esc, ModKeys::empty()));
+      self
+        .collector
+        .push(KeyEvent(KeyCode::Esc, ModKeys::empty()));
       return;
     }
 
@@ -914,13 +954,13 @@ impl LineWriter for TermWriter {
     let end = new_layout.end;
     let cursor = new_layout.cursor;
 
-		if read_meta(|m| m.system_msg_pending()) {
-			let mut system_msg = String::new();
-			while let Some(msg) = write_meta(|m| m.pop_system_message()) {
-				writeln!(system_msg, "{msg}").map_err(err)?;
-			}
-			self.buffer.push_str(&system_msg);
-		}
+    if read_meta(|m| m.system_msg_pending()) {
+      let mut system_msg = String::new();
+      while let Some(msg) = write_meta(|m| m.pop_system_message()) {
+        writeln!(system_msg, "{msg}").map_err(err)?;
+      }
+      self.buffer.push_str(&system_msg);
+    }
 
     self.buffer.push_str(prompt);
     self.buffer.push_str(line);

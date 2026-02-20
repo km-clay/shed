@@ -408,12 +408,12 @@ pub enum ShErrKind {
   ReadlineIntr(String),
   ReadlineErr,
 
-	// Not really errors, more like internal signals
+  // Not really errors, more like internal signals
   CleanExit(i32),
   FuncReturn(i32),
   LoopContinue(i32),
   LoopBreak(i32),
-	ClearReadline,
+  ClearReadline,
   Null,
 }
 
@@ -437,7 +437,7 @@ impl Display for ShErrKind {
       Self::LoopBreak(_) => "",
       Self::ReadlineIntr(_) => "",
       Self::ReadlineErr => "Readline Error",
-			Self::ClearReadline => "",
+      Self::ClearReadline => "",
       Self::Null => "",
     };
     write!(f, "{output}")

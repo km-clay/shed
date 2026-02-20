@@ -37,14 +37,32 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
   else {
     unreachable!()
   };
-	let zolt_opts = [
-		OptSpec { opt: Opt::Long("dry-run".into()), takes_arg: false },
-		OptSpec { opt: Opt::Long("confirm".into()), takes_arg: false },
-		OptSpec { opt: Opt::Long("no-preserve-root".into()), takes_arg: false },
-		OptSpec { opt: Opt::Short('r'), takes_arg: false },
-		OptSpec { opt: Opt::Short('f'), takes_arg: false },
-		OptSpec { opt: Opt::Short('v'), takes_arg: false }
-	];
+  let zolt_opts = [
+    OptSpec {
+      opt: Opt::Long("dry-run".into()),
+      takes_arg: false,
+    },
+    OptSpec {
+      opt: Opt::Long("confirm".into()),
+      takes_arg: false,
+    },
+    OptSpec {
+      opt: Opt::Long("no-preserve-root".into()),
+      takes_arg: false,
+    },
+    OptSpec {
+      opt: Opt::Short('r'),
+      takes_arg: false,
+    },
+    OptSpec {
+      opt: Opt::Short('f'),
+      takes_arg: false,
+    },
+    OptSpec {
+      opt: Opt::Short('v'),
+      takes_arg: false,
+    },
+  ];
   let mut flags = ZoltFlags::empty();
 
   let (argv, opts) = get_opts_from_tokens(argv, &zolt_opts);
@@ -56,40 +74,39 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
         "confirm" => flags |= ZoltFlags::CONFIRM,
         "dry-run" => flags |= ZoltFlags::DRY,
         _ => {
-					return Err(ShErr::simple(
-							ShErrKind::SyntaxErr,
-							format!("zoltraak: unrecognized option '{flag}'"),
-					));
-				}
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            format!("zoltraak: unrecognized option '{flag}'"),
+          ));
+        }
       },
       Opt::Short(flag) => match flag {
         'r' => flags |= ZoltFlags::RECURSIVE,
         'f' => flags |= ZoltFlags::FORCE,
         'v' => flags |= ZoltFlags::VERBOSE,
         _ => {
-					return Err(ShErr::simple(
-							ShErrKind::SyntaxErr,
-							format!("zoltraak: unrecognized option '{flag}'"),
-					));
-				}
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            format!("zoltraak: unrecognized option '{flag}'"),
+          ));
+        }
       },
-			Opt::LongWithArg(flag, _) => {
-				return Err(ShErr::simple(
-						ShErrKind::SyntaxErr,
-						format!("zoltraak: unrecognized option '{flag}'"),
-				));
-			}
-			Opt::ShortWithArg(flag, _) => {
-				return Err(ShErr::simple(
-						ShErrKind::SyntaxErr,
-						format!("zoltraak: unrecognized option '{flag}'"),
-				));
-			}
+      Opt::LongWithArg(flag, _) => {
+        return Err(ShErr::simple(
+          ShErrKind::SyntaxErr,
+          format!("zoltraak: unrecognized option '{flag}'"),
+        ));
+      }
+      Opt::ShortWithArg(flag, _) => {
+        return Err(ShErr::simple(
+          ShErrKind::SyntaxErr,
+          format!("zoltraak: unrecognized option '{flag}'"),
+        ));
+      }
     }
   }
 
   let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
-
 
   for (arg, span) in argv {
     if &arg == "/" && !flags.contains(ZoltFlags::NO_PRESERVE_ROOT) {
@@ -108,7 +125,6 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
       return Err(e);
     }
   }
-
 
   Ok(())
 }

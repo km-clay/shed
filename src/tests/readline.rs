@@ -1,14 +1,17 @@
 use std::collections::VecDeque;
 
 use crate::{
-  libsh::{error::ShErr, term::{Style, Styled}},
+  libsh::{
+    error::ShErr,
+    term::{Style, Styled},
+  },
   prompt::readline::{
+    FernVi,
     history::History,
     keys::{KeyCode, KeyEvent, ModKeys},
     linebuf::LineBuf,
-    term::{raw_mode, KeyReader, LineWriter},
+    term::{KeyReader, LineWriter, raw_mode},
     vimode::{ViInsert, ViMode, ViNormal},
-    FernVi,
   },
 };
 
@@ -173,8 +176,9 @@ impl LineWriter for TestWriter {
   }
 }
 
-// NOTE: FernVi structure has changed significantly and readline() method no longer exists
-// These test helpers are disabled until they can be properly updated
+// NOTE: FernVi structure has changed significantly and readline() method no
+// longer exists These test helpers are disabled until they can be properly
+// updated
 /*
 impl FernVi {
   pub fn new_test(prompt: Option<String>, input: &str, initial: &str) -> Self {
@@ -612,10 +616,10 @@ fn fernvi_test_mode_change() {
 #[test]
 fn fernvi_test_lorem_ipsum_1() {
   assert_eq!(fernvi_test(
-			"\x1bwwwwwwww5dWdBdBjjdwjdwbbbcwasdasdasdasd\x1b\r",
-			LOREM_IPSUM),
-			"Lorem ipsum dolor sit amet, incididunt ut labore et dolore magna aliqua.\nUt enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\nDuis aute irure dolor in repin voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur asdasdasdasd occaecat cupinon proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra."
-	)
+      "\x1bwwwwwwww5dWdBdBjjdwjdwbbbcwasdasdasdasd\x1b\r",
+      LOREM_IPSUM),
+      "Lorem ipsum dolor sit amet, incididunt ut labore et dolore magna aliqua.\nUt enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\nDuis aute irure dolor in repin voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur asdasdasdasd occaecat cupinon proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra."
+  )
 }
 
 #[test]
@@ -632,9 +636,9 @@ fn fernvi_test_lorem_ipsum_undo() {
 #[test]
 fn fernvi_test_lorem_ipsum_ctrl_w() {
   assert_eq!(fernvi_test(
-			"\x1bj5wiasdasdkjhaksjdhkajshd\x17wordswordswords\x17somemorewords\x17\x1b[D\x1b[D\x17\x1b\r",
-			LOREM_IPSUM),
-			"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\nUt enim ad minim am, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra."
-	)
+      "\x1bj5wiasdasdkjhaksjdhkajshd\x17wordswordswords\x17somemorewords\x17\x1b[D\x1b[D\x17\x1b\r",
+      LOREM_IPSUM),
+      "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\nUt enim ad minim am, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra."
+  )
 }
 */

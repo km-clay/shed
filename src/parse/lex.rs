@@ -47,11 +47,11 @@ impl Span {
   pub fn range(&self) -> Range<usize> {
     self.range.clone()
   }
-	/// With great power comes great responsibility
-	/// Only use this in the most dire of circumstances
-	pub fn set_range(&mut self, range: Range<usize>) {
-		self.range = range;
-	}
+  /// With great power comes great responsibility
+  /// Only use this in the most dire of circumstances
+  pub fn set_range(&mut self, range: Range<usize>) {
+    self.range = range;
+  }
 }
 
 /// Allows simple access to the underlying range wrapped by the span
@@ -324,13 +324,14 @@ impl LexStream {
     let can_be_subshell = chars.peek() == Some(&'(');
 
     if self.flags.contains(LexFlags::IN_CASE)
-      && let Some(count) = case_pat_lookahead(chars.clone()) {
-        pos += count;
-        let casepat_tk = self.get_token(self.cursor..pos, TkRule::CasePattern);
-        self.cursor = pos;
-        self.set_next_is_cmd(true);
-        return Ok(casepat_tk);
-      }
+      && let Some(count) = case_pat_lookahead(chars.clone())
+    {
+      pos += count;
+      let casepat_tk = self.get_token(self.cursor..pos, TkRule::CasePattern);
+      self.cursor = pos;
+      self.set_next_is_cmd(true);
+      return Ok(casepat_tk);
+    }
 
     while let Some(ch) = chars.next() {
       match ch {
@@ -740,7 +741,10 @@ impl Iterator for LexStream {
         }
         self.get_token(ch_idx..self.cursor, TkRule::Sep)
       }
-      '#' if !self.flags.contains(LexFlags::INTERACTIVE) || crate::state::read_shopts(|s| s.core.interactive_comments) => {
+      '#'
+        if !self.flags.contains(LexFlags::INTERACTIVE)
+          || crate::state::read_shopts(|s| s.core.interactive_comments) =>
+      {
         let ch_idx = self.cursor;
         self.cursor += 1;
 

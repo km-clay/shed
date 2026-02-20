@@ -3,7 +3,7 @@ use crate::{
   libsh::error::{ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
-  procio::{borrow_fd, IoStack},
+  procio::{IoStack, borrow_fd},
   state::write_shopts,
 };
 

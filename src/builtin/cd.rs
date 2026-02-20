@@ -43,15 +43,19 @@ pub fn cd(node: Node, job: &mut JobBldr) -> ShResult<()> {
   }
 
   if let Err(e) = env::set_current_dir(new_dir) {
-		return Err(ShErr::full(
-			ShErrKind::ExecFail,
-			format!("cd: Failed to change directory: {}", e),
-			span,
-		));
-	}
-  let new_dir = env::current_dir().map_err(
-		|e| ShErr::full(ShErrKind::ExecFail, format!("cd: Failed to get current directory: {}", e), span)
-	)?;
+    return Err(ShErr::full(
+      ShErrKind::ExecFail,
+      format!("cd: Failed to change directory: {}", e),
+      span,
+    ));
+  }
+  let new_dir = env::current_dir().map_err(|e| {
+    ShErr::full(
+      ShErrKind::ExecFail,
+      format!("cd: Failed to get current directory: {}", e),
+      span,
+    )
+  })?;
   unsafe { env::set_var("PWD", new_dir) };
 
   state::set_status(0);

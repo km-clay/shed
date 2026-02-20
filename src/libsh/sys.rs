@@ -1,6 +1,6 @@
 use termios::{LocalFlags, Termios};
 
-use crate::{prelude::*};
+use crate::prelude::*;
 ///
 /// The previous state of the terminal options.
 ///
@@ -33,44 +33,43 @@ pub(crate) static mut SAVED_TERMIOS: Option<Option<Termios>> = None;
 
 #[derive(Debug)]
 pub struct TermiosGuard {
-	saved_termios: Option<Termios>
+  saved_termios: Option<Termios>,
 }
 
 impl TermiosGuard {
-	pub fn new(new_termios: Termios) -> Self {
-		let mut new = Self { saved_termios: None };
+  pub fn new(new_termios: Termios) -> Self {
+    let mut new = Self {
+      saved_termios: None,
+    };
 
-		if isatty(std::io::stdin().as_raw_fd()).unwrap() {
-			let current_termios = termios::tcgetattr(std::io::stdin()).unwrap();
-			new.saved_termios = Some(current_termios);
+    if isatty(std::io::stdin().as_raw_fd()).unwrap() {
+      let current_termios = termios::tcgetattr(std::io::stdin()).unwrap();
+      new.saved_termios = Some(current_termios);
 
-			termios::tcsetattr(
-				std::io::stdin(),
-				nix::sys::termios::SetArg::TCSANOW,
-				&new_termios,
-			).unwrap();
-		}
+      termios::tcsetattr(
+        std::io::stdin(),
+        nix::sys::termios::SetArg::TCSANOW,
+        &new_termios,
+      )
+      .unwrap();
+    }
 
-		new
-	}
+    new
+  }
 }
 
 impl Default for TermiosGuard {
-	fn default() -> Self {
-	  let mut termios = termios::tcgetattr(std::io::stdin()).unwrap();
-		termios.local_flags &= !LocalFlags::ECHOCTL;
-		Self::new(termios)
-	}
+  fn default() -> Self {
+    let mut termios = termios::tcgetattr(std::io::stdin()).unwrap();
+    termios.local_flags &= !LocalFlags::ECHOCTL;
+    Self::new(termios)
+  }
 }
 
 impl Drop for TermiosGuard {
-	fn drop(&mut self) {
-		if let Some(saved) = &self.saved_termios {
-			termios::tcsetattr(
-				std::io::stdin(),
-				nix::sys::termios::SetArg::TCSANOW,
-				saved,
-			).unwrap();
-		}
-	}
+  fn drop(&mut self) {
+    if let Some(saved) = &self.saved_termios {
+      termios::tcsetattr(std::io::stdin(), nix::sys::termios::SetArg::TCSANOW, saved).unwrap();
+    }
+  }
 }

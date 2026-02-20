@@ -133,10 +133,10 @@ impl SelectMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MotionKind {
-  To(usize),                 // Absolute position, exclusive
-  On(usize),                 // Absolute position, inclusive
-  Onto(usize),               /* Absolute position, operations include the position but motions
-                              * exclude it (wtf vim) */
+  To(usize), // Absolute position, exclusive
+  On(usize), // Absolute position, inclusive
+  Onto(usize), /* Absolute position, operations include the position but motions
+              * exclude it (wtf vim) */
   Inclusive((usize, usize)), // Range, inclusive
   Exclusive((usize, usize)), // Range, exclusive
 
@@ -360,12 +360,12 @@ impl LineBuf {
   pub fn set_hint(&mut self, hint: Option<String>) {
     if let Some(hint) = hint {
       if let Some(hint) = hint.strip_prefix(&self.buffer) {
-				if !hint.is_empty() {
-					self.hint = Some(hint.to_string())
-				} else {
-					self.hint = None
-				}
-			}
+        if !hint.is_empty() {
+          self.hint = Some(hint.to_string())
+        } else {
+          self.hint = None
+        }
+      }
     } else {
       self.hint = None
     }
@@ -563,8 +563,8 @@ impl LineBuf {
     self.update_graphemes();
   }
   pub fn drain(&mut self, start: usize, end: usize) -> String {
-		let start = start.max(0);
-		let end = end.min(self.grapheme_indices().len());
+    let start = start.max(0);
+    let end = end.min(self.grapheme_indices().len());
     let drained = if end == self.grapheme_indices().len() {
       if start == self.grapheme_indices().len() {
         return String::new();
@@ -628,8 +628,9 @@ impl LineBuf {
     self.next_sentence_start_from_punctuation(pos).is_some()
   }
 
-  /// If position is at sentence-ending punctuation, returns the position of the next sentence start.
-  /// Handles closing delimiters (`)`, `]`, `"`, `'`) after punctuation.
+  /// If position is at sentence-ending punctuation, returns the position of the
+  /// next sentence start. Handles closing delimiters (`)`, `]`, `"`, `'`)
+  /// after punctuation.
   #[allow(clippy::collapsible_if)]
   pub fn next_sentence_start_from_punctuation(&self, pos: usize) -> Option<usize> {
     if let Some(gr) = self.read_grapheme_at(pos) {
@@ -956,9 +957,10 @@ impl LineBuf {
     let start = start.unwrap_or(0);
 
     if count > 1
-      && let Some((_, new_end)) = self.text_obj_sentence(end, count - 1, bound) {
-        end = new_end;
-      }
+      && let Some((_, new_end)) = self.text_obj_sentence(end, count - 1, bound)
+    {
+      end = new_end;
+    }
 
     Some((start, end))
   }
@@ -1363,7 +1365,12 @@ impl LineBuf {
   }
 
   /// Find the start of the next word forward
-  pub fn start_of_word_forward(&mut self, mut pos: usize, word: Word, include_last_char: bool) -> usize {
+  pub fn start_of_word_forward(
+    &mut self,
+    mut pos: usize,
+    word: Word,
+    include_last_char: bool,
+  ) -> usize {
     let default = self.grapheme_indices().len();
     let mut indices_iter = (pos..self.cursor.max).peekable();
 
@@ -1390,8 +1397,7 @@ impl LineBuf {
         let on_whitespace = is_whitespace(&cur_char);
 
         if !on_whitespace {
-          let Some(ws_pos) =
-            indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
+          let Some(ws_pos) = indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
           else {
             return default;
           };
@@ -1457,7 +1463,12 @@ impl LineBuf {
   }
 
   /// Find the end of the previous word backward
-  pub fn end_of_word_backward(&mut self, mut pos: usize, word: Word, include_last_char: bool) -> usize {
+  pub fn end_of_word_backward(
+    &mut self,
+    mut pos: usize,
+    word: Word,
+    include_last_char: bool,
+  ) -> usize {
     let default = self.grapheme_indices().len();
     let mut indices_iter = (0..pos).rev().peekable();
 
@@ -1484,8 +1495,7 @@ impl LineBuf {
         let on_whitespace = is_whitespace(&cur_char);
 
         if !on_whitespace {
-          let Some(ws_pos) =
-            indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
+          let Some(ws_pos) = indices_iter.find(|i| self.grapheme_at(*i).is_some_and(is_whitespace))
           else {
             return default;
           };
@@ -1742,11 +1752,7 @@ impl LineBuf {
         };
         pos = next_ws_pos;
 
-        if pos == 0 {
-          pos
-        } else {
-          pos + 1
-        }
+        if pos == 0 { pos } else { pos + 1 }
       }
     }
   }
@@ -1903,7 +1909,7 @@ impl LineBuf {
           && self.grapheme_at(target_pos) == Some("\n")
         {
           target_pos = target_pos.saturating_sub(1); // Don't land on the
-                                                     // newline
+          // newline
         }
         MotionKind::InclusiveWithTargetCol((start, end), target_pos)
       }
@@ -2141,7 +2147,7 @@ impl LineBuf {
           && self.grapheme_at(target_pos) == Some("\n")
         {
           target_pos = target_pos.saturating_sub(1); // Don't land on the
-                                                     // newline
+          // newline
         }
 
         let (start, end) = match motion.1 {
@@ -2575,15 +2581,16 @@ impl LineBuf {
       }
       Verb::SwapVisualAnchor => {
         if let Some((start, end)) = self.select_range()
-          && let Some(mut mode) = self.select_mode {
-            mode.invert_anchor();
-            let new_cursor_pos = match mode.anchor() {
-              SelectAnchor::Start => start,
-              SelectAnchor::End => end,
-            };
-            self.cursor.set(new_cursor_pos);
-            self.select_mode = Some(mode)
-          }
+          && let Some(mut mode) = self.select_mode
+        {
+          mode.invert_anchor();
+          let new_cursor_pos = match mode.anchor() {
+            SelectAnchor::Start => start,
+            SelectAnchor::End => end,
+          };
+          self.cursor.set(new_cursor_pos);
+          self.select_mode = Some(mode)
+        }
       }
       Verb::JoinLines => {
         let start = self.start_of_line();
@@ -2731,10 +2738,12 @@ impl LineBuf {
     let edit_is_merging = self.undo_stack.last().is_some_and(|edit| edit.merging);
 
     // Merge character inserts into one edit
-    if edit_is_merging && cmd.verb.as_ref().is_none_or(|v| !v.1.is_char_insert())
-      && let Some(edit) = self.undo_stack.last_mut() {
-        edit.stop_merge();
-      }
+    if edit_is_merging
+      && cmd.verb.as_ref().is_none_or(|v| !v.1.is_char_insert())
+      && let Some(edit) = self.undo_stack.last_mut()
+    {
+      edit.stop_merge();
+    }
 
     let ViCmd {
       register,
@@ -2821,10 +2830,9 @@ impl LineBuf {
       self.saved_col = None;
     }
 
-    if is_char_insert
-      && let Some(edit) = self.undo_stack.last_mut() {
-        edit.start_merge();
-      }
+    if is_char_insert && let Some(edit) = self.undo_stack.last_mut() {
+      edit.start_merge();
+    }
 
     Ok(())
   }
@@ -2832,9 +2840,13 @@ impl LineBuf {
     &self.buffer // FIXME: this will have to be fixed up later
   }
 
-	pub fn get_hint_text(&self) -> String {
-		self.hint.clone().map(|h| h.styled(Style::BrightBlack)).unwrap_or_default()
-	}
+  pub fn get_hint_text(&self) -> String {
+    self
+      .hint
+      .clone()
+      .map(|h| h.styled(Style::BrightBlack))
+      .unwrap_or_default()
+  }
 }
 
 impl Display for LineBuf {

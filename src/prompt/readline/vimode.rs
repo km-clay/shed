@@ -315,7 +315,7 @@ impl ViNormal {
           return match obj {
             TextObj::Sentence(_) | TextObj::Paragraph(_) => CmdState::Complete,
             _ => CmdState::Invalid,
-          }
+          };
         }
         Some(_) => return CmdState::Complete,
         None => return CmdState::Pending,
@@ -410,7 +410,7 @@ impl ViNormal {
                   motion: None,
                   raw_seq: self.take_cmd(),
                   flags: self.flags(),
-                })
+                });
               }
               '~' => {
                 chars_clone.next();
@@ -445,7 +445,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'x' => {
           return Some(ViCmd {
@@ -454,7 +454,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::ForwardChar)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'X' => {
           return Some(ViCmd {
@@ -463,7 +463,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::BackwardChar)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         's' => {
           return Some(ViCmd {
@@ -472,7 +472,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::ForwardChar)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'S' => {
           return Some(ViCmd {
@@ -481,7 +481,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'p' => {
           chars = chars_clone;
@@ -516,7 +516,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         '~' => {
           return Some(ViCmd {
@@ -525,7 +525,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'u' => {
           return Some(ViCmd {
@@ -534,7 +534,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'v' => {
           return Some(ViCmd {
@@ -543,7 +543,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'V' => {
           return Some(ViCmd {
@@ -552,7 +552,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'o' => {
           return Some(ViCmd {
@@ -561,7 +561,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'O' => {
           return Some(ViCmd {
@@ -570,7 +570,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'a' => {
           return Some(ViCmd {
@@ -579,7 +579,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::ForwardChar)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'A' => {
           return Some(ViCmd {
@@ -588,7 +588,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::EndOfLine)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'i' => {
           return Some(ViCmd {
@@ -597,7 +597,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'I' => {
           return Some(ViCmd {
@@ -606,7 +606,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::BeginningOfFirstWord)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'J' => {
           return Some(ViCmd {
@@ -615,7 +615,7 @@ impl ViNormal {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'y' => {
           chars = chars_clone;
@@ -636,7 +636,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::EndOfLine)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'D' => {
           return Some(ViCmd {
@@ -645,7 +645,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::EndOfLine)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         'C' => {
           return Some(ViCmd {
@@ -654,7 +654,7 @@ impl ViNormal {
             motion: Some(MotionCmd(1, Motion::EndOfLine)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
-          })
+          });
         }
         '=' => {
           chars = chars_clone;
@@ -684,7 +684,7 @@ impl ViNormal {
         | ('~', Some(VerbCmd(_, Verb::ToggleCaseRange)))
         | ('>', Some(VerbCmd(_, Verb::Indent)))
         | ('<', Some(VerbCmd(_, Verb::Dedent))) => {
-          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine))
+          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine));
         }
         ('W', Some(VerbCmd(_, Verb::Change))) => {
           // Same with 'W'
@@ -994,8 +994,7 @@ impl ViNormal {
       }
     };
 
-    if chars.peek().is_some() {
-    }
+    if chars.peek().is_some() {}
 
     let verb_ref = verb.as_ref().map(|v| &v.1);
     let motion_ref = motion.as_ref().map(|m| &m.1);
@@ -1185,7 +1184,7 @@ impl ViVisual {
                   motion: None,
                   raw_seq: self.take_cmd(),
                   flags: CmdFlags::empty(),
-                })
+                });
               }
               '?' => {
                 return Some(ViCmd {
@@ -1194,7 +1193,7 @@ impl ViVisual {
                   motion: None,
                   raw_seq: self.take_cmd(),
                   flags: CmdFlags::empty(),
-                })
+                });
               }
               _ => break 'verb_parse None,
             }
@@ -1209,7 +1208,7 @@ impl ViVisual {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'x' => {
           chars = chars_clone;
@@ -1222,7 +1221,7 @@ impl ViVisual {
             motion: Some(MotionCmd(1, Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'Y' => {
           return Some(ViCmd {
@@ -1231,7 +1230,7 @@ impl ViVisual {
             motion: Some(MotionCmd(1, Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'D' => {
           return Some(ViCmd {
@@ -1240,7 +1239,7 @@ impl ViVisual {
             motion: Some(MotionCmd(1, Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'R' | 'C' => {
           return Some(ViCmd {
@@ -1249,7 +1248,7 @@ impl ViVisual {
             motion: Some(MotionCmd(1, Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         '>' => {
           return Some(ViCmd {
@@ -1258,7 +1257,7 @@ impl ViVisual {
             motion: Some(MotionCmd(1, Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         '<' => {
           return Some(ViCmd {
@@ -1267,7 +1266,7 @@ impl ViVisual {
             motion: Some(MotionCmd(1, Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         '=' => {
           return Some(ViCmd {
@@ -1276,7 +1275,7 @@ impl ViVisual {
             motion: Some(MotionCmd(1, Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'p' | 'P' => {
           chars = chars_clone;
@@ -1299,7 +1298,7 @@ impl ViVisual {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'u' => {
           return Some(ViCmd {
@@ -1308,7 +1307,7 @@ impl ViVisual {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'U' => {
           return Some(ViCmd {
@@ -1317,7 +1316,7 @@ impl ViVisual {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'O' | 'o' => {
           return Some(ViCmd {
@@ -1326,7 +1325,7 @@ impl ViVisual {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'A' => {
           return Some(ViCmd {
@@ -1335,7 +1334,7 @@ impl ViVisual {
             motion: Some(MotionCmd(1, Motion::ForwardChar)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'I' => {
           return Some(ViCmd {
@@ -1344,7 +1343,7 @@ impl ViVisual {
             motion: Some(MotionCmd(1, Motion::BeginningOfLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'J' => {
           return Some(ViCmd {
@@ -1353,7 +1352,7 @@ impl ViVisual {
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
-          })
+          });
         }
         'y' => {
           chars = chars_clone;
@@ -1395,7 +1394,7 @@ impl ViVisual {
         | ('=', Some(VerbCmd(_, Verb::Equalize)))
         | ('>', Some(VerbCmd(_, Verb::Indent)))
         | ('<', Some(VerbCmd(_, Verb::Dedent))) => {
-          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine))
+          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine));
         }
         _ => {}
       }
@@ -1652,8 +1651,7 @@ impl ViVisual {
       }
     };
 
-    if chars.peek().is_some() {
-    }
+    if chars.peek().is_some() {}
 
     let verb_ref = verb.as_ref().map(|v| &v.1);
     let motion_ref = motion.as_ref().map(|m| &m.1);

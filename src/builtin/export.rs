@@ -35,10 +35,10 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
     for (arg, _) in argv {
       if let Some((var, val)) = arg.split_once('=') {
         write_vars(|v| v.set_var(var, val, VarFlags::EXPORT)); // Export an assignment like
-                                                   // 'foo=bar'
+      // 'foo=bar'
       } else {
         write_vars(|v| v.export_var(&arg)); // Export an existing variable, if
-                                            // any
+        // any
       }
     }
   }

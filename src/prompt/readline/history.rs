@@ -189,8 +189,8 @@ fn read_hist_file(path: &Path) -> ShResult<Vec<HistEntry>> {
   Ok(raw.parse::<HistEntries>()?.0)
 }
 
-/// Deduplicate entries, keeping only the most recent occurrence of each command.
-/// Preserves chronological order (oldest to newest).
+/// Deduplicate entries, keeping only the most recent occurrence of each
+/// command. Preserves chronological order (oldest to newest).
 fn dedupe_entries(entries: &[HistEntry]) -> Vec<HistEntry> {
   let mut seen = HashSet::new();
   // Iterate backwards (newest first), keeping first occurrence of each command
@@ -207,10 +207,10 @@ fn dedupe_entries(entries: &[HistEntry]) -> Vec<HistEntry> {
 
 pub struct History {
   path: PathBuf,
-	pub pending: Option<String>,
+  pub pending: Option<(String, usize)>, // command, cursor_pos
   entries: Vec<HistEntry>,
   search_mask: Vec<HistEntry>,
-	no_matches: bool,
+  no_matches: bool,
   pub cursor: usize,
   search_direction: Direction,
   ignore_dups: bool,
@@ -235,9 +235,9 @@ impl History {
     Ok(Self {
       path,
       entries,
-			pending: None,
+      pending: None,
       search_mask,
-			no_matches: false,
+      no_matches: false,
       cursor,
       search_direction: Direction::Backward,
       ignore_dups,
@@ -245,10 +245,10 @@ impl History {
     })
   }
 
-	pub fn reset(&mut self) {
-		self.search_mask = dedupe_entries(&self.entries);
-		self.cursor = self.search_mask.len();
-	}
+  pub fn reset(&mut self) {
+    self.search_mask = dedupe_entries(&self.entries);
+    self.cursor = self.search_mask.len();
+  }
 
   pub fn entries(&self) -> &[HistEntry] {
     &self.entries
@@ -270,14 +270,14 @@ impl History {
     self.cursor = self.search_mask.len();
   }
 
-  pub fn update_pending_cmd(&mut self, command: &str) {
-    let cmd = command.to_string();
+  pub fn update_pending_cmd(&mut self, buf: (&str, usize)) {
+    let cmd = buf.0.to_string();
     let constraint = SearchConstraint {
       kind: SearchKind::Prefix,
       term: cmd.clone(),
     };
 
-    self.pending = Some(cmd);
+    self.pending = Some((cmd, buf.1));
     self.constrain_entries(constraint);
   }
 
@@ -315,11 +315,11 @@ impl History {
             .collect();
 
           self.search_mask = dedupe_entries(&filtered);
-					self.no_matches = self.search_mask.is_empty();
-					if self.no_matches {
-						// If no matches, reset to full history so user can still scroll through it
-						self.search_mask = dedupe_entries(&self.entries);
-					}
+          self.no_matches = self.search_mask.is_empty();
+          if self.no_matches {
+            // If no matches, reset to full history so user can still scroll through it
+            self.search_mask = dedupe_entries(&self.entries);
+          }
         }
         self.cursor = self.search_mask.len();
       }
@@ -328,12 +328,14 @@ impl History {
   }
 
   pub fn hint_entry(&self) -> Option<&HistEntry> {
-		if self.no_matches { return None };
+    if self.no_matches {
+      return None;
+    };
     self.search_mask.last()
   }
 
   pub fn get_hint(&self) -> Option<String> {
-    if self.at_pending() && self.pending.as_ref().is_some_and(|p| !p.is_empty()) {
+    if self.at_pending() && self.pending.as_ref().is_some_and(|p| !p.0.is_empty()) {
       let entry = self.hint_entry()?;
       Some(entry.command().to_string())
     } else {
@@ -342,9 +344,15 @@ impl History {
   }
 
   pub fn scroll(&mut self, offset: isize) -> Option<&HistEntry> {
-		self.cursor = self.cursor.saturating_add_signed(offset).clamp(0, self.search_mask.len());
+    self.cursor = self
+      .cursor
+      .saturating_add_signed(offset)
+      .clamp(0, self.search_mask.len());
 
-		log::debug!("Scrolling history by offset {offset} from cursor at index {}", self.cursor);
+    log::debug!(
+      "Scrolling history by offset {offset} from cursor at index {}",
+      self.cursor
+    );
     self.search_mask.get(self.cursor)
   }
 
@@ -378,7 +386,8 @@ impl History {
 
     let last_file_entry = self
       .entries
-      .iter().rfind(|ent| !ent.new)
+      .iter()
+      .rfind(|ent| !ent.new)
       .map(|ent| ent.command.clone())
       .unwrap_or_default();
 
@@ -399,8 +408,8 @@ impl History {
     }
 
     file.write_all(data.as_bytes())?;
-		self.pending = None;
-		self.reset();
+    self.pending = None;
+    self.reset();
 
     Ok(())
   }

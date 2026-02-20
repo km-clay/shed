@@ -1160,7 +1160,7 @@ impl ParseStream {
 
     let cond_node: CondNode;
     let mut node_tks = vec![];
-		let mut redirs = vec![];
+    let mut redirs = vec![];
 
     if (!self.check_keyword("while") && !self.check_keyword("until")) || !self.next_tk_is_some() {
       return Ok(None);
@@ -1238,18 +1238,18 @@ impl ParseStream {
   fn parse_pipeln(&mut self) -> ShResult<Option<Node>> {
     let mut cmds = vec![];
     let mut node_tks = vec![];
-		let mut flags = NdFlags::empty();
+    let mut flags = NdFlags::empty();
 
     while let Some(cmd) = self.parse_block(false)? {
       let is_punctuated = node_is_punctuated(&cmd.tokens);
       node_tks.append(&mut cmd.tokens.clone());
       cmds.push(cmd);
-			if *self.next_tk_class() == TkRule::Bg {
-				let tk = self.next_tk().unwrap();
-				node_tks.push(tk.clone());
-				flags |= NdFlags::BACKGROUND;
-				break;
-			} else if *self.next_tk_class() != TkRule::Pipe || is_punctuated {
+      if *self.next_tk_class() == TkRule::Bg {
+        let tk = self.next_tk().unwrap();
+        node_tks.push(tk.clone());
+        flags |= NdFlags::BACKGROUND;
+        break;
+      } else if *self.next_tk_class() != TkRule::Pipe || is_punctuated {
         break;
       } else if let Some(pipe) = self.next_tk() {
         node_tks.push(pipe)
@@ -1278,7 +1278,7 @@ impl ParseStream {
     let mut node_tks = vec![];
     let mut redirs = vec![];
     let mut argv = vec![];
-		let mut flags = NdFlags::empty();
+    let mut flags = NdFlags::empty();
     let mut assignments = vec![];
 
     while let Some(prefix_tk) = tk_iter.next() {
@@ -1315,27 +1315,32 @@ impl ParseStream {
     }
 
     if argv.is_empty() {
-			if assignments.is_empty() {
-				return Ok(None);
-			} else {
-				// If we have assignments but no command word,
-				// return the assignment-only command without parsing more tokens
-				self.commit(node_tks.len());
-				return Ok(Some(Node {
-					class: NdRule::Command { assignments, argv },
-					tokens: node_tks,
-					flags,
-					redirs,
-				}));
-			}
+      if assignments.is_empty() {
+        return Ok(None);
+      } else {
+        // If we have assignments but no command word,
+        // return the assignment-only command without parsing more tokens
+        self.commit(node_tks.len());
+        return Ok(Some(Node {
+          class: NdRule::Command { assignments, argv },
+          tokens: node_tks,
+          flags,
+          redirs,
+        }));
+      }
     }
 
     while let Some(tk) = tk_iter.next() {
-			if *self.next_tk_class() == TkRule::Bg {
-				break;
-			}
+      if *self.next_tk_class() == TkRule::Bg {
+        break;
+      }
       match tk.class {
-        TkRule::EOI | TkRule::Pipe | TkRule::And | TkRule::BraceGrpEnd | TkRule::Or | TkRule::Bg => break,
+        TkRule::EOI
+        | TkRule::Pipe
+        | TkRule::And
+        | TkRule::BraceGrpEnd
+        | TkRule::Or
+        | TkRule::Bg => break,
         TkRule::Sep => {
           node_tks.push(tk.clone());
           break;

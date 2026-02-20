@@ -117,7 +117,7 @@ impl ShOpts {
             Note::new("'shopt' takes arguments separated by periods to denote namespaces")
               .with_sub_notes(vec!["Example: 'shopt core.autocd=true'"]),
           ),
-        )
+        );
       }
     }
     Ok(())
@@ -263,7 +263,7 @@ impl ShOptCore {
               "max_recurse_depth",
             ]),
           ),
-        )
+        );
       }
     }
     Ok(())
@@ -445,18 +445,20 @@ impl ShOptPrompt {
             ShErrKind::SyntaxErr,
             format!("shopt: Unexpected 'prompt' option '{opt}'"),
           )
-          .with_note(Note::new("options can be accessed like 'prompt.option_name'"))
+          .with_note(Note::new(
+            "options can be accessed like 'prompt.option_name'",
+          ))
           .with_note(
             Note::new("'prompt' contains the following options").with_sub_notes(vec![
-							"trunc_prompt_path",
-							"edit_mode",
-							"comp_limit",
-							"highlight",
-							"tab_stop",
-							"custom",
+              "trunc_prompt_path",
+              "edit_mode",
+              "comp_limit",
+              "highlight",
+              "tab_stop",
+              "custom",
             ]),
           ),
-        )
+        );
       }
     }
     Ok(())

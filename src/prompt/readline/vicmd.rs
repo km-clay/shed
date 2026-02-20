@@ -161,14 +161,16 @@ impl ViCmd {
   }
   /// If a ViCmd has a linewise motion, but no verb, we change it to charwise
   pub fn alter_line_motion_if_no_verb(&mut self) {
-    if self.is_line_motion() && self.verb.is_none()
-      && let Some(motion) = self.motion.as_mut() {
-        match motion.1 {
-          Motion::LineUp => motion.1 = Motion::LineUpCharwise,
-          Motion::LineDown => motion.1 = Motion::LineDownCharwise,
-          _ => unreachable!(),
-        }
+    if self.is_line_motion()
+      && self.verb.is_none()
+      && let Some(motion) = self.motion.as_mut()
+    {
+      match motion.1 {
+        Motion::LineUp => motion.1 = Motion::LineUpCharwise,
+        Motion::LineDown => motion.1 = Motion::LineDownCharwise,
+        _ => unreachable!(),
       }
+    }
   }
   pub fn is_mode_transition(&self) -> bool {
     self.verb.as_ref().is_some_and(|v| {

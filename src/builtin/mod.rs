@@ -4,7 +4,9 @@ use crate::{
   jobs::{ChildProc, JobBldr},
   libsh::error::ShResult,
   parse::{
-    Redir, execute::prepare_argv, lex::{Span, Tk}
+    Redir,
+    execute::prepare_argv,
+    lex::{Span, Tk},
   },
   procio::{IoFrame, IoStack, RedirGuard},
 };
@@ -16,19 +18,17 @@ pub mod export;
 pub mod flowctl;
 pub mod jobctl;
 pub mod pwd;
+pub mod read;
 pub mod shift;
 pub mod shopt;
 pub mod source;
 pub mod test; // [[ ]] thing
-pub mod read;
-pub mod zoltraak;
 pub mod trap;
+pub mod zoltraak;
 
 pub const BUILTINS: [&str; 21] = [
-  "echo", "cd", "read", "export", "pwd", "source",
-	"shift", "jobs", "fg", "bg", "alias", "unalias",
-  "return", "break", "continue", "exit", "zoltraak",
-	"shopt", "builtin", "command", "trap"
+  "echo", "cd", "read", "export", "pwd", "source", "shift", "jobs", "fg", "bg", "alias", "unalias",
+  "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin", "command", "trap",
 ];
 
 /// Sets up a builtin command

@@ -8,7 +8,7 @@ use regex::Regex;
 
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{ConjunctOp, NdRule, Node, TestCase, TEST_UNARY_OPS},
+  parse::{ConjunctOp, NdRule, Node, TEST_UNARY_OPS, TestCase},
   prelude::*,
 };
 
@@ -254,7 +254,7 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
               msg: "Expected a binary operator in this test call; found a unary operator".into(),
               notes: vec![],
               span: err_span,
-            })
+            });
           }
           TestOp::StringEq => rhs.trim() == lhs.trim(),
           TestOp::StringNeq => rhs.trim() != lhs.trim(),

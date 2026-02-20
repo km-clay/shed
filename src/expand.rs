@@ -7,11 +7,13 @@ use regex::Regex;
 
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::parse::execute::exec_input;
-use crate::parse::lex::{is_field_sep, is_hard_sep, LexFlags, LexStream, Tk, TkFlags, TkRule};
+use crate::parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule, is_field_sep, is_hard_sep};
 use crate::parse::{Redir, RedirType};
-use crate::{jobs, prelude::*};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
-use crate::state::{LogTab, VarFlags, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars};
+use crate::state::{
+  LogTab, VarFlags, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars,
+};
+use crate::{jobs, prelude::*};
 
 const PARAMETERS: [char; 7] = ['@', '*', '#', '$', '?', '!', '0'];
 
@@ -30,8 +32,9 @@ pub const PROC_SUB_IN: char = '\u{fdd5}';
 /// Output process sub marker
 pub const PROC_SUB_OUT: char = '\u{fdd6}';
 /// Marker for null expansion
-/// This is used for when "$@" or "$*" are used in quotes and there are no arguments
-/// Without this marker, it would be handled like an empty string, which breaks some commands
+/// This is used for when "$@" or "$*" are used in quotes and there are no
+/// arguments Without this marker, it would be handled like an empty string,
+/// which breaks some commands
 pub const NULL_EXPAND: char = '\u{fdd7}';
 
 impl Tk {
@@ -58,34 +61,35 @@ pub struct Expander {
 
 impl Expander {
   pub fn new(raw: Tk) -> ShResult<Self> {
-		let raw = raw.span.as_str();
-		Self::from_raw(raw)
+    let raw = raw.span.as_str();
+    Self::from_raw(raw)
   }
-	pub fn from_raw(raw: &str) -> ShResult<Self> {
-		let raw = expand_braces_full(raw)?.join(" ");
-		let unescaped = unescape_str(&raw);
-		Ok(Self { raw: unescaped })
-	}
+  pub fn from_raw(raw: &str) -> ShResult<Self> {
+    let raw = expand_braces_full(raw)?.join(" ");
+    let unescaped = unescape_str(&raw);
+    Ok(Self { raw: unescaped })
+  }
   pub fn expand(&mut self) -> ShResult<Vec<String>> {
     let mut chars = self.raw.chars().peekable();
     self.raw = expand_raw(&mut chars)?;
 
-		let has_trailing_slash = self.raw.ends_with('/');
-		let has_leading_dot_slash = self.raw.starts_with("./");
+    let has_trailing_slash = self.raw.ends_with('/');
+    let has_leading_dot_slash = self.raw.starts_with("./");
 
     if let Ok(glob_exp) = expand_glob(&self.raw)
-		&& !glob_exp.is_empty() {
-			self.raw = glob_exp;
-		}
+      && !glob_exp.is_empty()
+    {
+      self.raw = glob_exp;
+    }
 
-		if has_trailing_slash && !self.raw.ends_with('/') {
-			// glob expansion can remove trailing slashes and leading dot-slashes, but we want to preserve them
-			// so that things like tab completion don't break
-			self.raw.push('/');
-		}
-		if has_leading_dot_slash && !self.raw.starts_with("./") {
-			self.raw.insert_str(0, "./");
-		}
+    if has_trailing_slash && !self.raw.ends_with('/') {
+      // glob expansion can remove trailing slashes and leading dot-slashes, but we
+      // want to preserve them so that things like tab completion don't break
+      self.raw.push('/');
+    }
+    if has_leading_dot_slash && !self.raw.starts_with("./") {
+      self.raw.insert_str(0, "./");
+    }
 
     Ok(self.split_words())
   }
@@ -93,7 +97,7 @@ impl Expander {
     let mut words = vec![];
     let mut chars = self.raw.chars();
     let mut cur_word = String::new();
-		let mut was_quoted = false;
+    let mut was_quoted = false;
 
     'outer: while let Some(ch) = chars.next() {
       match ch {
@@ -101,347 +105,387 @@ impl Expander {
           while let Some(q_ch) = chars.next() {
             match q_ch {
               _ if q_ch == ch => {
-								was_quoted = true;
-								continue 'outer; // Isn't rust cool
-							}
+                was_quoted = true;
+                continue 'outer; // Isn't rust cool
+              }
               _ => cur_word.push(q_ch),
             }
           }
         }
         _ if is_field_sep(ch) => {
-					if cur_word.is_empty() && !was_quoted {
-						cur_word.clear();
-					} else {
-						words.push(mem::take(&mut cur_word));
-					}
-					was_quoted = false;
+          if cur_word.is_empty() && !was_quoted {
+            cur_word.clear();
+          } else {
+            words.push(mem::take(&mut cur_word));
+          }
+          was_quoted = false;
         }
         _ => cur_word.push(ch),
       }
     }
 
-		if words.is_empty() && (cur_word.is_empty() && !was_quoted) {
-			return words;
-		} else {
-			words.push(cur_word);
-		}
+    if words.is_empty() && (cur_word.is_empty() && !was_quoted) {
+      return words;
+    } else {
+      words.push(cur_word);
+    }
 
-		words.retain(|w| w != &NULL_EXPAND.to_string());
+    words.retain(|w| w != &NULL_EXPAND.to_string());
     words
   }
 }
 
 /// Check if a string contains valid brace expansion patterns.
-/// Returns true if there's a valid {a,b} or {1..5} pattern at the outermost level.
+/// Returns true if there's a valid {a,b} or {1..5} pattern at the outermost
+/// level.
 fn has_braces(s: &str) -> bool {
-	let mut chars = s.chars().peekable();
-	let mut depth = 0;
-	let mut found_open = false;
-	let mut has_comma = false;
-	let mut has_range = false;
-	let mut cur_quote: Option<char> = None;
+  let mut chars = s.chars().peekable();
+  let mut depth = 0;
+  let mut found_open = false;
+  let mut has_comma = false;
+  let mut has_range = false;
+  let mut cur_quote: Option<char> = None;
 
-	while let Some(ch) = chars.next() {
-		match ch {
-			'\\' => { chars.next(); }  // skip escaped char
-			'\'' if cur_quote.is_none() => cur_quote = Some('\''),
-			'\'' if cur_quote == Some('\'') => cur_quote = None,
-			'"' if cur_quote.is_none() => cur_quote = Some('"'),
-			'"' if cur_quote == Some('"') => cur_quote = None,
-			'{' if cur_quote.is_none() => {
-				if depth == 0 {
-					found_open = true;
-					has_comma = false;
-					has_range = false;
-				}
-				depth += 1;
-			}
-			'}' if cur_quote.is_none() && depth > 0 => {
-				depth -= 1;
-				if depth == 0 && found_open && (has_comma || has_range) {
-					return true;
-				}
-			}
-			',' if cur_quote.is_none() && depth == 1 => {
-				has_comma = true;
-			}
-			'.' if cur_quote.is_none() && depth == 1 => {
-				if chars.peek() == Some(&'.') {
-					chars.next();
-					has_range = true;
-				}
-			}
-			_ => {}
-		}
-	}
-	false
+  while let Some(ch) = chars.next() {
+    match ch {
+      '\\' => {
+        chars.next();
+      } // skip escaped char
+      '\'' if cur_quote.is_none() => cur_quote = Some('\''),
+      '\'' if cur_quote == Some('\'') => cur_quote = None,
+      '"' if cur_quote.is_none() => cur_quote = Some('"'),
+      '"' if cur_quote == Some('"') => cur_quote = None,
+      '{' if cur_quote.is_none() => {
+        if depth == 0 {
+          found_open = true;
+          has_comma = false;
+          has_range = false;
+        }
+        depth += 1;
+      }
+      '}' if cur_quote.is_none() && depth > 0 => {
+        depth -= 1;
+        if depth == 0 && found_open && (has_comma || has_range) {
+          return true;
+        }
+      }
+      ',' if cur_quote.is_none() && depth == 1 => {
+        has_comma = true;
+      }
+      '.' if cur_quote.is_none() && depth == 1 => {
+        if chars.peek() == Some(&'.') {
+          chars.next();
+          has_range = true;
+        }
+      }
+      _ => {}
+    }
+  }
+  false
 }
 
 /// Expand braces in a string, zsh-style: one level per call, loop until  done.
 /// Returns a Vec of expanded strings.
 fn expand_braces_full(input: &str) -> ShResult<Vec<String>> {
-	let mut results = vec![input.to_string()];
+  let mut results = vec![input.to_string()];
 
-	// Keep expanding until no results contain braces
-	loop {
-		let mut any_expanded = false;
-		let mut new_results = Vec::new();
+  // Keep expanding until no results contain braces
+  loop {
+    let mut any_expanded = false;
+    let mut new_results = Vec::new();
 
-		for word in results {
-			if has_braces(&word) {
-				any_expanded = true;
-				let expanded = expand_one_brace(&word)?;
-				new_results.extend(expanded);
-			} else {
-				new_results.push(word);
-			}
-		}
+    for word in results {
+      if has_braces(&word) {
+        any_expanded = true;
+        let expanded = expand_one_brace(&word)?;
+        new_results.extend(expanded);
+      } else {
+        new_results.push(word);
+      }
+    }
 
-		results = new_results;
-		if !any_expanded {
-			break;
-		}
-	}
+    results = new_results;
+    if !any_expanded {
+      break;
+    }
+  }
 
-	Ok(results)
+  Ok(results)
 }
 
 /// Expand the first (outermost) brace expression in a word.
 /// "pre{a,b}post" -> ["preapost", "prebpost"]
 /// "pre{1..3}post" -> ["pre1post", "pre2post", "pre3post"]
 fn expand_one_brace(word: &str) -> ShResult<Vec<String>> {
-	let (prefix, inner, suffix) = match get_brace_parts(word) {
-		Some(parts) => parts,
-		None => return Ok(vec![word.to_string()]),  // No valid braces
-	};
+  let (prefix, inner, suffix) = match get_brace_parts(word) {
+    Some(parts) => parts,
+    None => return Ok(vec![word.to_string()]), // No valid braces
+  };
 
-	// Split the inner content on top-level commas, or expand as range
-	let parts = split_brace_inner(&inner);
+  // Split the inner content on top-level commas, or expand as range
+  let parts = split_brace_inner(&inner);
 
-	// If we got back a single part with no expansion, treat as literal
-	if parts.len() == 1 && parts[0] == inner {
-		// Check if it's a range
-		if let Some(range_parts) = try_expand_range(&inner) {
-			return Ok(range_parts
-				.into_iter()
-				.map(|p| format!("{}{}{}", prefix, p, suffix))
-				.collect());
-		}
-		// Not a valid brace expression, return as-is with literal braces
-		return Ok(vec![format!("{}{{{}}}{}", prefix, inner, suffix)]);
-	}
+  // If we got back a single part with no expansion, treat as literal
+  if parts.len() == 1 && parts[0] == inner {
+    // Check if it's a range
+    if let Some(range_parts) = try_expand_range(&inner) {
+      return Ok(
+        range_parts
+          .into_iter()
+          .map(|p| format!("{}{}{}", prefix, p, suffix))
+          .collect(),
+      );
+    }
+    // Not a valid brace expression, return as-is with literal braces
+    return Ok(vec![format!("{}{{{}}}{}", prefix, inner, suffix)]);
+  }
 
-	Ok(parts
-		.into_iter()
-		.map(|p| format!("{}{}{}", prefix, p, suffix))
-		.collect())
+  Ok(
+    parts
+      .into_iter()
+      .map(|p| format!("{}{}{}", prefix, p, suffix))
+      .collect(),
+  )
 }
 
 /// Extract prefix, inner, and suffix from a brace expression.
 /// "pre{a,b}post" -> Some(("pre", "a,b", "post"))
 fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
-	let mut chars = word.chars().peekable();
-	let mut prefix = String::new();
-	let mut cur_quote: Option<char> = None;
+  let mut chars = word.chars().peekable();
+  let mut prefix = String::new();
+  let mut cur_quote: Option<char> = None;
 
-	// Find the opening brace
-	while let Some(ch) = chars.next() {
-		match ch {
-			'\\' => {
-				prefix.push(ch);
-				if let Some(next) = chars.next() {
-					prefix.push(next);
-				}
-			}
-			'\'' if cur_quote.is_none() => { cur_quote = Some('\'');
-				prefix.push(ch); }
-			'\'' if cur_quote == Some('\'') => { cur_quote = None;
-				prefix.push(ch); }
-			'"' if cur_quote.is_none() => { cur_quote = Some('"'); prefix.push(ch); }
-			'"' if cur_quote == Some('"') => { cur_quote = None; prefix.push(ch); }
-			'{' if cur_quote.is_none() => {
-				break;
-			}
-			_ => prefix.push(ch),
-		}
-	}
+  // Find the opening brace
+  while let Some(ch) = chars.next() {
+    match ch {
+      '\\' => {
+        prefix.push(ch);
+        if let Some(next) = chars.next() {
+          prefix.push(next);
+        }
+      }
+      '\'' if cur_quote.is_none() => {
+        cur_quote = Some('\'');
+        prefix.push(ch);
+      }
+      '\'' if cur_quote == Some('\'') => {
+        cur_quote = None;
+        prefix.push(ch);
+      }
+      '"' if cur_quote.is_none() => {
+        cur_quote = Some('"');
+        prefix.push(ch);
+      }
+      '"' if cur_quote == Some('"') => {
+        cur_quote = None;
+        prefix.push(ch);
+      }
+      '{' if cur_quote.is_none() => {
+        break;
+      }
+      _ => prefix.push(ch),
+    }
+  }
 
-	// Find matching closing brace
-	let mut depth = 1;
-	let mut inner = String::new();
-	cur_quote = None;
+  // Find matching closing brace
+  let mut depth = 1;
+  let mut inner = String::new();
+  cur_quote = None;
 
-	while let Some(ch) = chars.next() {
-		match ch {
-			'\\' => {
-				inner.push(ch);
-				if let Some(next) = chars.next() {
-					inner.push(next);
-				}
-			}
-			'\'' if cur_quote.is_none() => { cur_quote = Some('\''); inner.push(ch); }
-			'\'' if cur_quote == Some('\'') => { cur_quote = None; inner.push(ch); }
-			'"' if cur_quote.is_none() => { cur_quote = Some('"'); inner.push(ch); }
-			'"' if cur_quote == Some('"') => { cur_quote = None; inner.push(ch); }
-			'{' if cur_quote.is_none() => {
-				depth += 1;
-				inner.push(ch);
-			}
-			'}' if cur_quote.is_none() => {
-				depth -= 1;
-				if depth == 0 {
-					break;
-				}
-				inner.push(ch);
-			}
-			_ => inner.push(ch),
-		}
-	}
+  while let Some(ch) = chars.next() {
+    match ch {
+      '\\' => {
+        inner.push(ch);
+        if let Some(next) = chars.next() {
+          inner.push(next);
+        }
+      }
+      '\'' if cur_quote.is_none() => {
+        cur_quote = Some('\'');
+        inner.push(ch);
+      }
+      '\'' if cur_quote == Some('\'') => {
+        cur_quote = None;
+        inner.push(ch);
+      }
+      '"' if cur_quote.is_none() => {
+        cur_quote = Some('"');
+        inner.push(ch);
+      }
+      '"' if cur_quote == Some('"') => {
+        cur_quote = None;
+        inner.push(ch);
+      }
+      '{' if cur_quote.is_none() => {
+        depth += 1;
+        inner.push(ch);
+      }
+      '}' if cur_quote.is_none() => {
+        depth -= 1;
+        if depth == 0 {
+          break;
+        }
+        inner.push(ch);
+      }
+      _ => inner.push(ch),
+    }
+  }
 
-	if depth != 0 {
-		return None;  // Unbalanced braces
-	}
+  if depth != 0 {
+    return None; // Unbalanced braces
+  }
 
-	// Collect suffix
-	let suffix: String = chars.collect();
+  // Collect suffix
+  let suffix: String = chars.collect();
 
-	Some((prefix, inner, suffix))
+  Some((prefix, inner, suffix))
 }
 
 /// Split brace inner content on top-level commas.
 /// "a,b,c" -> ["a", "b", "c"]
 /// "a,{b,c},d" -> ["a", "{b,c}", "d"]
 fn split_brace_inner(inner: &str) -> Vec<String> {
-	let mut parts = Vec::new();
-	let mut current = String::new();
-	let mut chars = inner.chars().peekable();
-	let mut depth = 0;
-	let mut cur_quote: Option<char> = None;
+  let mut parts = Vec::new();
+  let mut current = String::new();
+  let mut chars = inner.chars().peekable();
+  let mut depth = 0;
+  let mut cur_quote: Option<char> = None;
 
-	while let Some(ch) = chars.next() {
-		match ch {
-			'\\' => {
-				current.push(ch);
-				if let Some(next) = chars.next() {
-					current.push(next);
-				}
-			}
-			'\'' if cur_quote.is_none() => { cur_quote = Some('\''); current.push(ch); }
-			'\'' if cur_quote == Some('\'') => { cur_quote = None; current.push(ch); }
-			'"' if cur_quote.is_none() => { cur_quote = Some('"'); current.push(ch); }
-			'"' if cur_quote == Some('"') => { cur_quote = None; current.push(ch); }
-			'{' if cur_quote.is_none() => {
-				depth += 1;
-				current.push(ch);
-			}
-			'}' if cur_quote.is_none() => {
-				depth -= 1;
-				current.push(ch);
-			}
-			',' if cur_quote.is_none() && depth == 0 => {
-				parts.push(std::mem::take(&mut current));
-			}
-			_ => current.push(ch),
-		}
-	}
+  while let Some(ch) = chars.next() {
+    match ch {
+      '\\' => {
+        current.push(ch);
+        if let Some(next) = chars.next() {
+          current.push(next);
+        }
+      }
+      '\'' if cur_quote.is_none() => {
+        cur_quote = Some('\'');
+        current.push(ch);
+      }
+      '\'' if cur_quote == Some('\'') => {
+        cur_quote = None;
+        current.push(ch);
+      }
+      '"' if cur_quote.is_none() => {
+        cur_quote = Some('"');
+        current.push(ch);
+      }
+      '"' if cur_quote == Some('"') => {
+        cur_quote = None;
+        current.push(ch);
+      }
+      '{' if cur_quote.is_none() => {
+        depth += 1;
+        current.push(ch);
+      }
+      '}' if cur_quote.is_none() => {
+        depth -= 1;
+        current.push(ch);
+      }
+      ',' if cur_quote.is_none() && depth == 0 => {
+        parts.push(std::mem::take(&mut current));
+      }
+      _ => current.push(ch),
+    }
+  }
 
-	parts.push(current);
-	parts
+  parts.push(current);
+  parts
 }
 
 /// Try to expand a range like "1..5" or "a..z" or "1..10..2"
 fn try_expand_range(inner: &str) -> Option<Vec<String>> {
-	// Look for ".." pattern
-	let parts: Vec<&str> = inner.split("..").collect();
+  // Look for ".." pattern
+  let parts: Vec<&str> = inner.split("..").collect();
 
-	match parts.len() {
-		2 => {
-			let start = parts[0];
-			let end = parts[1];
-			expand_range(start, end, 1)
-		}
-		3 => {
-			let start = parts[0];
-			let end = parts[1];
-			let step: i32 = parts[2].parse().ok()?;
-			if step == 0 { return None; }
-			expand_range(start, end, step.unsigned_abs() as usize)
-		}
-		_ => None,
-	}
+  match parts.len() {
+    2 => {
+      let start = parts[0];
+      let end = parts[1];
+      expand_range(start, end, 1)
+    }
+    3 => {
+      let start = parts[0];
+      let end = parts[1];
+      let step: i32 = parts[2].parse().ok()?;
+      if step == 0 {
+        return None;
+      }
+      expand_range(start, end, step.unsigned_abs() as usize)
+    }
+    _ => None,
+  }
 }
 
-fn expand_range(start: &str, end: &str, step: usize) ->
-Option<Vec<String>> {
-	// Try character range first
-	if is_alpha_range_bound(start) && is_alpha_range_bound(end) {
-		let start_char = start.chars().next()? as u8;
-		let end_char = end.chars().next()? as u8;
-		let reverse = end_char < start_char;
+fn expand_range(start: &str, end: &str, step: usize) -> Option<Vec<String>> {
+  // Try character range first
+  if is_alpha_range_bound(start) && is_alpha_range_bound(end) {
+    let start_char = start.chars().next()? as u8;
+    let end_char = end.chars().next()? as u8;
+    let reverse = end_char < start_char;
 
-		let (lo, hi) = if reverse {
-			(end_char, start_char)
-		} else {
-			(start_char, end_char)
-		};
+    let (lo, hi) = if reverse {
+      (end_char, start_char)
+    } else {
+      (start_char, end_char)
+    };
 
-		let chars: Vec<String> = (lo..=hi)
-			.step_by(step)
-			.map(|c| (c as char).to_string())
-			.collect();
+    let chars: Vec<String> = (lo..=hi)
+      .step_by(step)
+      .map(|c| (c as char).to_string())
+      .collect();
 
-		return Some(if reverse {
-			chars.into_iter().rev().collect()
-		} else {
-			chars
-		});
-	}
+    return Some(if reverse {
+      chars.into_iter().rev().collect()
+    } else {
+      chars
+    });
+  }
 
-	// Try numeric range
-	if is_numeric_range_bound(start) && is_numeric_range_bound(end) {
-		let start_num: i32 = start.parse().ok()?;
-		let end_num: i32 = end.parse().ok()?;
-		let reverse = end_num < start_num;
+  // Try numeric range
+  if is_numeric_range_bound(start) && is_numeric_range_bound(end) {
+    let start_num: i32 = start.parse().ok()?;
+    let end_num: i32 = end.parse().ok()?;
+    let reverse = end_num < start_num;
 
-		// Handle zero-padding
-		let pad_width = start.len().max(end.len());
-		let needs_padding = start.starts_with('0') ||
-			end.starts_with('0');
+    // Handle zero-padding
+    let pad_width = start.len().max(end.len());
+    let needs_padding = start.starts_with('0') || end.starts_with('0');
 
-		let (lo, hi) = if reverse {
-			(end_num, start_num)
-		} else {
-			(start_num, end_num)
-		};
+    let (lo, hi) = if reverse {
+      (end_num, start_num)
+    } else {
+      (start_num, end_num)
+    };
 
-		let nums: Vec<String> = (lo..=hi)
-			.step_by(step)
-			.map(|n| {
-				if needs_padding {
-					format!("{:0>width$}", n, width = pad_width)
-				} else {
-					n.to_string()
-				}
-			})
-		.collect();
+    let nums: Vec<String> = (lo..=hi)
+      .step_by(step)
+      .map(|n| {
+        if needs_padding {
+          format!("{:0>width$}", n, width = pad_width)
+        } else {
+          n.to_string()
+        }
+      })
+      .collect();
 
-		return Some(if reverse {
-			nums.into_iter().rev().collect()
-		} else {
-			nums
-		});
-	}
+    return Some(if reverse {
+      nums.into_iter().rev().collect()
+    } else {
+      nums
+    });
+  }
 
-	None
+  None
 }
-
 
 fn is_alpha_range_bound(word: &str) -> bool {
-	word.len() == 1 && word.chars().all(|c| c.is_ascii_alphabetic())
+  word.len() == 1 && word.chars().all(|c| c.is_ascii_alphabetic())
 }
 
 fn is_numeric_range_bound(word: &str) -> bool {
-	!word.is_empty() && word.chars().all(|c| c.is_ascii_digit())
+  !word.is_empty() && word.chars().all(|c| c.is_ascii_digit())
 }
 
 pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
@@ -493,19 +537,19 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
       SUBSH if var_name.is_empty() => {
         chars.next(); // now safe to consume
         let mut subsh_body = String::new();
-				let mut found_end = false;
+        let mut found_end = false;
         while let Some(c) = chars.next() {
           if c == SUBSH {
-						found_end = true;
+            found_end = true;
             break;
           }
           subsh_body.push(c);
         }
-				if !found_end {
-					// if there isnt a closing SUBSH, we are probably in some tab completion context
-					// and we got passed some unfinished input. Just treat it as literal text
-					return Ok(format!("$({subsh_body}"));
-				}
+        if !found_end {
+          // if there isnt a closing SUBSH, we are probably in some tab completion context
+          // and we got passed some unfinished input. Just treat it as literal text
+          return Ok(format!("$({subsh_body}"));
+        }
         let expanded = expand_cmd_sub(&subsh_body)?;
         return Ok(expanded);
       }
@@ -527,9 +571,9 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         let parameter = format!("{ch}");
         let val = read_vars(|v| v.get_var(&parameter));
 
-				if (ch == '@' || ch == '*') && val.is_empty() {
-					return Ok(NULL_EXPAND.to_string());
-				}
+        if (ch == '@' || ch == '*') && val.is_empty() {
+          return Ok(NULL_EXPAND.to_string());
+        }
 
         return Ok(val);
       }
@@ -558,8 +602,8 @@ pub fn expand_glob(raw: &str) -> ShResult<String> {
     require_literal_leading_dot: !crate::state::read_shopts(|s| s.core.dotglob),
     ..Default::default()
   };
-  for entry in
-    glob::glob_with(raw, opts).map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid glob pattern"))?
+  for entry in glob::glob_with(raw, opts)
+    .map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid glob pattern"))?
   {
     let entry =
       entry.map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid filename found in glob"))?;
@@ -625,7 +669,7 @@ impl ArithTk {
             kind: ShErrKind::ParseErr,
             msg: "Invalid character in arithmetic substitution".into(),
             notes: vec![],
-          })
+          });
         }
       }
     }
@@ -707,7 +751,7 @@ impl ArithTk {
             kind: ShErrKind::ParseErr,
             msg: "Unexpected token during evaluation".into(),
             notes: vec![],
-          })
+          });
         }
       }
     }
@@ -807,10 +851,12 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 
 /// Get the command output of a given command input as a String
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
-  if raw.starts_with('(') && raw.ends_with(')')
-    && let Ok(output) = expand_arithmetic(raw) {
-      return Ok(output); // It's actually an arithmetic sub
-    }
+  if raw.starts_with('(')
+    && raw.ends_with(')')
+    && let Ok(output) = expand_arithmetic(raw)
+  {
+    return Ok(output); // It's actually an arithmetic sub
+  }
   let (rpipe, wpipe) = IoMode::get_pipes();
   let cmd_sub_redir = Redir::new(wpipe, RedirType::Output);
   let cmd_sub_io_frame = IoFrame::from_redir(cmd_sub_redir);
@@ -829,7 +875,8 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
     ForkResult::Parent { child } => {
       std::mem::drop(cmd_sub_io_frame); // Closes the write pipe
 
-      // Read output first (before waiting) to avoid deadlock if child fills pipe buffer
+      // Read output first (before waiting) to avoid deadlock if child fills pipe
+      // buffer
       loop {
         match io_buf.fill_buffer() {
           Ok(()) => break,
@@ -851,9 +898,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
       jobs::take_term()?;
 
       match status {
-        WtStat::Exited(_, _) => {
-          Ok(io_buf.as_str()?.trim_end().to_string())
-        }
+        WtStat::Exited(_, _) => Ok(io_buf.as_str()?.trim_end().to_string()),
         _ => Err(ShErr::simple(ShErrKind::InternalErr, "Command sub failed")),
       }
     }
@@ -914,14 +959,14 @@ pub fn unescape_str(raw: &str) -> String {
           match q_ch {
             '\\' => {
               if let Some(next_ch) = chars.next() {
-								match next_ch {
-									'"' | '\\' | '`' | '$' => {
-										// discard the backslash
-									}
-									_ => {
-										result.push(q_ch);
-									}
-								}
+                match next_ch {
+                  '"' | '\\' | '`' | '$' => {
+                    // discard the backslash
+                  }
+                  _ => {
+                    result.push(q_ch);
+                  }
+                }
                 result.push(next_ch);
               }
             }
@@ -1035,77 +1080,77 @@ pub fn unescape_str(raw: &str) -> String {
           }
         }
       }
-			'$' if chars.peek() == Some(&'\'') => {
-				chars.next();
-				result.push(SNG_QUOTE);
-				while let Some(q_ch) = chars.next() {
-					match q_ch {
-						'\'' => {
-							result.push(SNG_QUOTE);
-							break;
-						}
-						'\\' => {
-							if let Some(esc) = chars.next() {
-								match esc {
-									'n' => result.push('\n'),
-									't' => result.push('\t'),
-									'r' => result.push('\r'),
-									'\'' => result.push('\''),
-									'\\' => result.push('\\'),
-									'a' => result.push('\x07'),
-									'b' => result.push('\x08'),
-									'e' | 'E' => result.push('\x1b'),
-									'v' => result.push('\x0b'),
-									'x' => {
-										let mut hex = String::new();
-										if let Some(h1) = chars.next() {
-											hex.push(h1);
-										} else {
-											result.push_str("\\x");
-											continue;
-										}
-										if let Some(h2) = chars.next() {
-											hex.push(h2);
-										} else {
-											result.push_str(&format!("\\x{hex}"));
-											continue;
-										}
-										if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-											result.push(byte as char);
-										} else {
-											result.push_str(&format!("\\x{hex}"));
-											continue;
-										}
-									}
-									'o' => {
-										let mut oct = String::new();
-										for _ in 0..3 {
-											if let Some(o) = chars.peek() {
-												if o.is_digit(8) {
-													oct.push(*o);
-													chars.next();
-												} else {
-													break;
-												}
-											} else {
-												break;
-											}
-										}
-										if let Ok(byte) = u8::from_str_radix(&oct, 8) {
-											result.push(byte as char);
-										} else {
-											result.push_str(&format!("\\o{oct}"));
-											continue;
-										}
-									}
-									_ => result.push(esc),
-								}
-							}
-						}
-						_ => result.push(q_ch),
-					}
-				}
-			}
+      '$' if chars.peek() == Some(&'\'') => {
+        chars.next();
+        result.push(SNG_QUOTE);
+        while let Some(q_ch) = chars.next() {
+          match q_ch {
+            '\'' => {
+              result.push(SNG_QUOTE);
+              break;
+            }
+            '\\' => {
+              if let Some(esc) = chars.next() {
+                match esc {
+                  'n' => result.push('\n'),
+                  't' => result.push('\t'),
+                  'r' => result.push('\r'),
+                  '\'' => result.push('\''),
+                  '\\' => result.push('\\'),
+                  'a' => result.push('\x07'),
+                  'b' => result.push('\x08'),
+                  'e' | 'E' => result.push('\x1b'),
+                  'v' => result.push('\x0b'),
+                  'x' => {
+                    let mut hex = String::new();
+                    if let Some(h1) = chars.next() {
+                      hex.push(h1);
+                    } else {
+                      result.push_str("\\x");
+                      continue;
+                    }
+                    if let Some(h2) = chars.next() {
+                      hex.push(h2);
+                    } else {
+                      result.push_str(&format!("\\x{hex}"));
+                      continue;
+                    }
+                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                      result.push(byte as char);
+                    } else {
+                      result.push_str(&format!("\\x{hex}"));
+                      continue;
+                    }
+                  }
+                  'o' => {
+                    let mut oct = String::new();
+                    for _ in 0..3 {
+                      if let Some(o) = chars.peek() {
+                        if o.is_digit(8) {
+                          oct.push(*o);
+                          chars.next();
+                        } else {
+                          break;
+                        }
+                      } else {
+                        break;
+                      }
+                    }
+                    if let Ok(byte) = u8::from_str_radix(&oct, 8) {
+                      result.push(byte as char);
+                    } else {
+                      result.push_str(&format!("\\o{oct}"));
+                      continue;
+                    }
+                  }
+                  _ => result.push(esc),
+                }
+              }
+            }
+            _ => result.push(q_ch),
+          }
+        }
+      }
       '$' => {
         result.push(VAR_SUB);
         if chars.peek() == Some(&'$') {
@@ -1547,10 +1592,10 @@ pub enum PromptTk {
   AsciiOct(i32),
   Text(String),
   AnsiSeq(String),
-	Function(String), // Expands to the output of any defined shell function
+  Function(String), // Expands to the output of any defined shell function
   VisGrp,
   UserSeq,
-	RuntimeMillis,
+  RuntimeMillis,
   RuntimeFormatted,
   Weekday,
   Dquote,
@@ -1568,8 +1613,8 @@ pub enum PromptTk {
   SuccessSymbol,
   FailureSymbol,
   JobCount,
-	VisGroupOpen,
-	VisGroupClose,
+  VisGroupOpen,
+  VisGroupClose,
 }
 
 pub fn format_cmd_runtime(dur: std::time::Duration) -> String {
@@ -1779,41 +1824,40 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
             '\\' => tokens.push(PromptTk::Text("\\".into())),
             '"' => tokens.push(PromptTk::Text("\"".into())),
             '\'' => tokens.push(PromptTk::Text("'".into())),
-						'(' => tokens.push(PromptTk::VisGroupOpen),
-						')' => tokens.push(PromptTk::VisGroupClose),
-						'!' => {
-							let mut func_name = String::new();
-							let is_braced = chars.peek() == Some(&'{');
-							while let Some(ch) = chars.peek() {
-
-								match ch {
-									'}' if is_braced => {
-										chars.next();
-										break;
-									}
-									'A'..='Z' | 'a'..='z' | '0'..='9' | '_' => {
-										func_name.push(*ch);
-										chars.next();
-									}
-									_ => {
-										if is_braced {
-											// Invalid character in braced function name
-											tokens.push(PromptTk::Text(format!("\\!{{{func_name}")));
-											break;
-										} else {
-											// End of unbraced function name
-											let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
-											if func_exists {
-												tokens.push(PromptTk::Function(func_name));
-											} else {
-												tokens.push(PromptTk::Text(format!("\\!{func_name}")));
-											}
-											break;
-										}
-									}
-								}
-							}
-						}
+            '(' => tokens.push(PromptTk::VisGroupOpen),
+            ')' => tokens.push(PromptTk::VisGroupClose),
+            '!' => {
+              let mut func_name = String::new();
+              let is_braced = chars.peek() == Some(&'{');
+              while let Some(ch) = chars.peek() {
+                match ch {
+                  '}' if is_braced => {
+                    chars.next();
+                    break;
+                  }
+                  'A'..='Z' | 'a'..='z' | '0'..='9' | '_' => {
+                    func_name.push(*ch);
+                    chars.next();
+                  }
+                  _ => {
+                    if is_braced {
+                      // Invalid character in braced function name
+                      tokens.push(PromptTk::Text(format!("\\!{{{func_name}")));
+                      break;
+                    } else {
+                      // End of unbraced function name
+                      let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
+                      if func_exists {
+                        tokens.push(PromptTk::Function(func_name));
+                      } else {
+                        tokens.push(PromptTk::Text(format!("\\!{func_name}")));
+                      }
+                      break;
+                    }
+                  }
+                }
+              }
+            }
             'e' => {
               if chars.next() == Some('[') {
                 let mut params = String::new();
@@ -1897,84 +1941,84 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
   let mut result = String::new();
 
   while let Some(token) = tokens.next() {
-		match token {
-			PromptTk::AsciiOct(_) => todo!(),
-			PromptTk::Text(txt) => result.push_str(&txt),
-			PromptTk::AnsiSeq(params) => result.push_str(&params),
-			PromptTk::RuntimeMillis => {
-				if let Some(runtime) = write_meta(|m| m.get_time()) {
-					let runtime_millis = runtime.as_millis().to_string();
-					result.push_str(&runtime_millis);
-				}
-			}
-			PromptTk::RuntimeFormatted => {
-				if let Some(runtime) = write_meta(|m| m.get_time()) {
-					let runtime_fmt = format_cmd_runtime(runtime);
-					result.push_str(&runtime_fmt);
-				}
-			}
-			PromptTk::Pwd => {
-				let mut pwd = std::env::var("PWD").unwrap();
-				let home = std::env::var("HOME").unwrap();
-				if pwd.starts_with(&home) {
-					pwd = pwd.replacen(&home, "~", 1);
-				}
-				result.push_str(&pwd);
-			}
-			PromptTk::PwdShort => {
-				let mut path = std::env::var("PWD").unwrap();
-				let home = std::env::var("HOME").unwrap();
-				if path.starts_with(&home) {
-					path = path.replacen(&home, "~", 1);
-				}
-				let pathbuf = PathBuf::from(&path);
-				let mut segments = pathbuf.iter().count();
-				let mut path_iter = pathbuf.iter();
-				let max_segments = crate::state::read_shopts(|s| s.prompt.trunc_prompt_path);
-				while segments > max_segments {
-					path_iter.next();
-					segments -= 1;
-				}
-				let path_rebuilt: PathBuf = path_iter.collect();
-				let mut path_rebuilt = path_rebuilt.to_str().unwrap().to_string();
-				if path_rebuilt.starts_with(&home) {
-					path_rebuilt = path_rebuilt.replacen(&home, "~", 1);
-				}
-				result.push_str(&path_rebuilt);
-			}
-			PromptTk::Hostname => {
-				let hostname = std::env::var("HOST").unwrap();
-				result.push_str(&hostname);
-			}
-			PromptTk::HostnameShort => todo!(),
-			PromptTk::ShellName => result.push_str("fern"),
-			PromptTk::Username => {
-				let username = std::env::var("USER").unwrap();
-				result.push_str(&username);
-			}
-			PromptTk::PromptSymbol => {
-				let uid = std::env::var("UID").unwrap();
-				let symbol = if &uid == "0" { '#' } else { '$' };
-				result.push(symbol);
-			}
-			PromptTk::ExitCode => todo!(),
-			PromptTk::SuccessSymbol => todo!(),
-			PromptTk::FailureSymbol => todo!(),
-			PromptTk::JobCount => todo!(),
-			PromptTk::Function(f) => {
-				let output = expand_cmd_sub(&f)?;
-				result.push_str(&output);
-			}
-			PromptTk::VisGrp => todo!(),
-			PromptTk::UserSeq => todo!(),
-			PromptTk::Weekday => todo!(),
-			PromptTk::Dquote => todo!(),
-			PromptTk::Squote => todo!(),
-			PromptTk::Return => todo!(),
-			PromptTk::Newline => todo!(),
-			PromptTk::VisGroupOpen => todo!(),
-			PromptTk::VisGroupClose => todo!(),
-		}
+    match token {
+      PromptTk::AsciiOct(_) => todo!(),
+      PromptTk::Text(txt) => result.push_str(&txt),
+      PromptTk::AnsiSeq(params) => result.push_str(&params),
+      PromptTk::RuntimeMillis => {
+        if let Some(runtime) = write_meta(|m| m.get_time()) {
+          let runtime_millis = runtime.as_millis().to_string();
+          result.push_str(&runtime_millis);
+        }
+      }
+      PromptTk::RuntimeFormatted => {
+        if let Some(runtime) = write_meta(|m| m.get_time()) {
+          let runtime_fmt = format_cmd_runtime(runtime);
+          result.push_str(&runtime_fmt);
+        }
+      }
+      PromptTk::Pwd => {
+        let mut pwd = std::env::var("PWD").unwrap();
+        let home = std::env::var("HOME").unwrap();
+        if pwd.starts_with(&home) {
+          pwd = pwd.replacen(&home, "~", 1);
+        }
+        result.push_str(&pwd);
+      }
+      PromptTk::PwdShort => {
+        let mut path = std::env::var("PWD").unwrap();
+        let home = std::env::var("HOME").unwrap();
+        if path.starts_with(&home) {
+          path = path.replacen(&home, "~", 1);
+        }
+        let pathbuf = PathBuf::from(&path);
+        let mut segments = pathbuf.iter().count();
+        let mut path_iter = pathbuf.iter();
+        let max_segments = crate::state::read_shopts(|s| s.prompt.trunc_prompt_path);
+        while segments > max_segments {
+          path_iter.next();
+          segments -= 1;
+        }
+        let path_rebuilt: PathBuf = path_iter.collect();
+        let mut path_rebuilt = path_rebuilt.to_str().unwrap().to_string();
+        if path_rebuilt.starts_with(&home) {
+          path_rebuilt = path_rebuilt.replacen(&home, "~", 1);
+        }
+        result.push_str(&path_rebuilt);
+      }
+      PromptTk::Hostname => {
+        let hostname = std::env::var("HOST").unwrap();
+        result.push_str(&hostname);
+      }
+      PromptTk::HostnameShort => todo!(),
+      PromptTk::ShellName => result.push_str("fern"),
+      PromptTk::Username => {
+        let username = std::env::var("USER").unwrap();
+        result.push_str(&username);
+      }
+      PromptTk::PromptSymbol => {
+        let uid = std::env::var("UID").unwrap();
+        let symbol = if &uid == "0" { '#' } else { '$' };
+        result.push(symbol);
+      }
+      PromptTk::ExitCode => todo!(),
+      PromptTk::SuccessSymbol => todo!(),
+      PromptTk::FailureSymbol => todo!(),
+      PromptTk::JobCount => todo!(),
+      PromptTk::Function(f) => {
+        let output = expand_cmd_sub(&f)?;
+        result.push_str(&output);
+      }
+      PromptTk::VisGrp => todo!(),
+      PromptTk::UserSeq => todo!(),
+      PromptTk::Weekday => todo!(),
+      PromptTk::Dquote => todo!(),
+      PromptTk::Squote => todo!(),
+      PromptTk::Return => todo!(),
+      PromptTk::Newline => todo!(),
+      PromptTk::VisGroupOpen => todo!(),
+      PromptTk::VisGroupClose => todo!(),
+    }
   }
 
   Ok(result)

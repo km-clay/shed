@@ -4,10 +4,13 @@ use std::{
 };
 
 use crate::{
-  expand::Expander, libsh::{
+  expand::Expander,
+  libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::RedirVecUtils,
-  }, parse::{Redir, RedirType, get_redir_file}, prelude::*
+  },
+  parse::{Redir, RedirType, get_redir_file},
+  prelude::*,
 };
 
 // Credit to fish-shell for many of the implementation ideas present in this
@@ -17,11 +20,11 @@ use crate::{
 pub enum IoMode {
   Fd {
     tgt_fd: RawFd,
-    src_fd: RawFd,  // Just the fd number - dup2 will handle it at execution time
+    src_fd: RawFd, // Just the fd number - dup2 will handle it at execution time
   },
   OpenedFile {
     tgt_fd: RawFd,
-    file: Arc<OwnedFd>,  // Owns the opened file descriptor
+    file: Arc<OwnedFd>, // Owns the opened file descriptor
   },
   File {
     tgt_fd: RawFd,
@@ -70,17 +73,12 @@ impl IoMode {
   }
   pub fn open_file(mut self) -> ShResult<Self> {
     if let IoMode::File { tgt_fd, path, mode } = self {
-			let path_raw = path
-				.as_os_str()
-				.to_str()
-				.unwrap_or_default()
-				.to_string();
+      let path_raw = path.as_os_str().to_str().unwrap_or_default().to_string();
 
-			let expanded_path = Expander::from_raw(&path_raw)?
-				.expand()?
-				.join(" "); // should just be one string, will have to find some way to handle a return of multiple
+      let expanded_path = Expander::from_raw(&path_raw)?.expand()?.join(" "); // should just be one string, will have to find some way to handle a return of
+      // multiple
 
-			let expanded_pathbuf = PathBuf::from(expanded_path);
+      let expanded_pathbuf = PathBuf::from(expanded_path);
 
       let file = get_redir_file(mode, expanded_pathbuf)?;
       self = IoMode::OpenedFile {
@@ -155,9 +153,9 @@ impl<R: Read> IoBuf<R> {
 
 pub struct RedirGuard(IoFrame);
 impl Drop for RedirGuard {
-	fn drop(&mut self) {
-		self.0.restore().ok();
-	}
+  fn drop(&mut self) {
+    self.0.restore().ok();
+  }
 }
 
 /// A struct wrapping three fildescs representing `stdin`, `stdout`, and
