@@ -207,9 +207,11 @@ fn dedupe_entries(entries: &[HistEntry]) -> Vec<HistEntry> {
 
 pub struct History {
   path: PathBuf,
+	pub pending: Option<String>,
   entries: Vec<HistEntry>,
   search_mask: Vec<HistEntry>,
-  cursor: usize,
+	no_matches: bool,
+  pub cursor: usize,
   search_direction: Direction,
   ignore_dups: bool,
   max_size: Option<u32>,
@@ -228,20 +230,14 @@ impl History {
     if entries.len() > max_hist {
       entries = entries.split_off(entries.len() - max_hist);
     }
-    // Create pending entry for current input
-    let id = entries.last().map(|ent| ent.id + 1).unwrap_or(0);
-    entries.push(HistEntry {
-      id,
-      timestamp: SystemTime::now(),
-      command: String::new(),
-      new: true,
-    });
     let search_mask = dedupe_entries(&entries);
-    let cursor = search_mask.len().saturating_sub(1);
+    let cursor = search_mask.len();
     Ok(Self {
       path,
       entries,
+			pending: None,
       search_mask,
+			no_matches: false,
       cursor,
       search_direction: Direction::Backward,
       ignore_dups,
@@ -251,7 +247,7 @@ impl History {
 
 	pub fn reset(&mut self) {
 		self.search_mask = dedupe_entries(&self.entries);
-		self.cursor = self.search_mask.len().saturating_sub(1);
+		self.cursor = self.search_mask.len();
 	}
 
   pub fn entries(&self) -> &[HistEntry] {
@@ -262,30 +258,26 @@ impl History {
     &self.search_mask
   }
 
-  pub fn push_empty_entry(&mut self) {
-		let timestamp = SystemTime::now();
-		let id = self.get_new_id();
-		self.entries.push(HistEntry {
-			id,
-			timestamp,
-			command: String::new(),
-			new: true,
-		});
-	}
-
   pub fn cursor_entry(&self) -> Option<&HistEntry> {
     self.search_mask.get(self.cursor)
   }
 
+  pub fn at_pending(&self) -> bool {
+    self.cursor >= self.search_mask.len()
+  }
+
+  pub fn reset_to_pending(&mut self) {
+    self.cursor = self.search_mask.len();
+  }
+
   pub fn update_pending_cmd(&mut self, command: &str) {
-    let Some(ent) = self.last_mut() else { return };
     let cmd = command.to_string();
     let constraint = SearchConstraint {
       kind: SearchKind::Prefix,
       term: cmd.clone(),
     };
 
-    ent.command = cmd;
+    self.pending = Some(cmd);
     self.constrain_entries(constraint);
   }
 
@@ -323,25 +315,26 @@ impl History {
             .collect();
 
           self.search_mask = dedupe_entries(&filtered);
+					self.no_matches = self.search_mask.is_empty();
+					if self.no_matches {
+						// If no matches, reset to full history so user can still scroll through it
+						self.search_mask = dedupe_entries(&self.entries);
+					}
         }
-        self.cursor = self.search_mask.len().saturating_sub(1);
+        self.cursor = self.search_mask.len();
       }
       SearchKind::Fuzzy => todo!(),
     }
   }
 
   pub fn hint_entry(&self) -> Option<&HistEntry> {
-    let second_to_last = self.search_mask.len().checked_sub(2)?;
-    self.search_mask.get(second_to_last)
+		if self.no_matches { return None };
+    self.search_mask.last()
   }
 
   pub fn get_hint(&self) -> Option<String> {
-    if self
-      .cursor_entry()
-      .is_some_and(|ent| ent.is_new() && !ent.command().is_empty())
-    {
+    if self.at_pending() && self.pending.as_ref().is_some_and(|p| !p.is_empty()) {
       let entry = self.hint_entry()?;
-      let prefix = self.cursor_entry()?.command();
       Some(entry.command().to_string())
     } else {
       None
@@ -349,15 +342,10 @@ impl History {
   }
 
   pub fn scroll(&mut self, offset: isize) -> Option<&HistEntry> {
-    let new_idx = self
-      .cursor
-      .saturating_add_signed(offset)
-      .clamp(0, self.search_mask.len().saturating_sub(1));
-    let ent = self.search_mask.get(new_idx)?;
+		self.cursor = self.cursor.saturating_add_signed(offset).clamp(0, self.search_mask.len());
 
-    self.cursor = new_idx;
-
-    Some(ent)
+		log::debug!("Scrolling history by offset {offset} from cursor at index {}", self.cursor);
+    self.search_mask.get(self.cursor)
   }
 
   pub fn push(&mut self, command: String) {
@@ -411,8 +399,8 @@ impl History {
     }
 
     file.write_all(data.as_bytes())?;
-		self.push_empty_entry(); // Prepare for next command
-		self.reset(); // Reset search mask to include new pending entry
+		self.pending = None;
+		self.reset();
 
     Ok(())
   }

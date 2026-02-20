@@ -359,12 +359,13 @@ impl LineBuf {
   }
   pub fn set_hint(&mut self, hint: Option<String>) {
     if let Some(hint) = hint {
-      let hint = hint.strip_prefix(&self.buffer).unwrap(); // If this ever panics, I will eat my hat
-      if !hint.is_empty() {
-        self.hint = Some(hint.to_string())
-      } else {
-        self.hint = None
-      }
+      if let Some(hint) = hint.strip_prefix(&self.buffer) {
+				if !hint.is_empty() {
+					self.hint = Some(hint.to_string())
+				} else {
+					self.hint = None
+				}
+			}
     } else {
       self.hint = None
     }

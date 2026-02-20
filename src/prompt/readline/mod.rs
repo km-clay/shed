@@ -170,6 +170,8 @@ impl FernVi {
 		self.mode = Box::new(ViInsert::new());
     self.old_layout = None;
     self.needs_redraw = true;
+    self.history.pending = None;
+    self.history.reset();
   }
 
   /// Process any available input and return readline event
@@ -186,6 +188,9 @@ impl FernVi {
 
       if self.should_accept_hint(&key) {
         self.editor.accept_hint();
+        if !self.history.at_pending() {
+          self.history.reset_to_pending();
+        }
         self.history.update_pending_cmd(self.editor.as_str());
         self.needs_redraw = true;
         continue;
@@ -207,6 +212,9 @@ impl FernVi {
 						self.editor.set_buffer(line);
 						self.editor.cursor.set(new_cursor);
 
+						if !self.history.at_pending() {
+							self.history.reset_to_pending();
+						}
 						self.history.update_pending_cmd(self.editor.as_str());
 						let hint = self.history.get_hint();
 						self.editor.set_hint(hint);
@@ -244,12 +252,14 @@ impl FernVi {
         self.writer.flush_write("\n")?;
         let buf = self.editor.take_buf();
         // Save command to history if auto_hist is enabled
-        if crate::state::read_shopts(|s| s.core.auto_hist) {
-          self.history.push(buf.clone());
-          if let Err(e) = self.history.save() {
-            eprintln!("Failed to save history: {e}");
-          }
-        }
+        if crate::state::read_shopts(|s| s.core.auto_hist)
+				&& !buf.is_empty() {
+					self.history.push(buf.clone());
+					if let Err(e) = self.history.save() {
+						eprintln!("Failed to save history: {e}");
+					}
+				}
+				self.history.reset();
         return Ok(ReadlineEvent::Line(buf));
       }
 
@@ -300,39 +310,30 @@ impl FernVi {
     */
     let count = &cmd.motion().unwrap().0;
     let motion = &cmd.motion().unwrap().1;
-    let entry = match motion {
+		let count = match motion {
       Motion::LineUpCharwise => {
-        let Some(hist_entry) = self.history.scroll(-(*count as isize)) else {
-          return;
-        };
-        hist_entry
+        -(*count as isize)
       }
       Motion::LineDownCharwise => {
-        let Some(hist_entry) = self.history.scroll(*count as isize) else {
-          return;
-        };
-        hist_entry
+        *count as isize
       }
       _ => unreachable!(),
     };
-    let col = self.editor.saved_col.unwrap_or(self.editor.cursor_col());
-    let mut buf = LineBuf::new().with_initial(entry.command(), 0);
-    let line_end = buf.end_of_line();
-    if let Some(dest) = self.mode.hist_scroll_start_pos() {
-      match dest {
-        To::Start => { /* Already at 0 */ }
-        To::End => {
-          // History entries cannot be empty
-          // So this subtraction is safe (maybe)
-          buf.cursor.add(line_end);
-        }
-      }
-    } else {
-      let target = (col).min(line_end);
-      buf.cursor.add(target);
-    }
-
-    self.editor = buf
+    let entry = self.history.scroll(count);
+		log::info!("Scrolled history, got entry: {:?}", entry.as_ref());
+		if let Some(entry) = entry {
+			log::info!("Setting buffer to history entry: {}", entry.command());
+			let pending = self.editor.take_buf();
+			self.editor.set_buffer(entry.command().to_string());
+			if self.history.pending.is_none() {
+				self.history.pending = Some(pending);
+			}
+			self.editor.set_hint(None);
+		} else if let Some(pending) = self.history.pending.take() {
+			log::info!("Setting buffer to pending command: {}", &pending);
+			self.editor.set_buffer(pending);
+			self.editor.set_hint(None);
+		}
   }
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
     if self.editor.cursor_at_max() && self.editor.has_hint() {
@@ -361,8 +362,7 @@ impl FernVi {
       || (cmd
         .motion()
         .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDownCharwise)))
-        && self.editor.end_of_line() == self.editor.cursor_max()
-        && !self.history.cursor_entry().is_some_and(|ent| ent.is_new()))
+        && self.editor.end_of_line() == self.editor.cursor_max())
   }
 
 	pub fn line_text(&mut self) -> String {

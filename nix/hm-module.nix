@@ -55,7 +55,7 @@ in
       };
       autoHistory = lib.mkOption {
         type = lib.types.bool;
-        default = false;
+        default = true;
         description = "Whether to automatically add commands to the history as they are executed";
       };
       bellStyle = lib.mkOption {
