@@ -18,8 +18,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
 use crate::{
-  libsh::{error::{ShErr, ShErrKind, ShResult}, sys::TTY_FILENO},
-  prompt::readline::keys::{KeyCode, ModKeys},
+  libsh::{error::{ShErr, ShErrKind, ShResult}, sys::TTY_FILENO}, prompt::readline::keys::{KeyCode, ModKeys}, shopt::FernBellStyle, state::read_shopts
 };
 use crate::{
   prelude::*,
@@ -185,6 +184,7 @@ pub trait LineWriter {
   fn clear_rows(&mut self, layout: &Layout) -> ShResult<()>;
   fn redraw(&mut self, prompt: &str, line: &str, new_layout: &Layout) -> ShResult<()>;
   fn flush_write(&mut self, buf: &str) -> ShResult<()>;
+	fn send_bell(&mut self) -> ShResult<()>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -975,4 +975,18 @@ impl LineWriter for TermWriter {
     write_all(self.out, buf)?;
     Ok(())
   }
+
+	fn send_bell(&mut self) -> ShResult<()> {
+		match read_shopts(|o| o.core.bell_style) {
+			FernBellStyle::Audible => {
+				self.flush_write("\x07")?;
+			}
+			FernBellStyle::Visible => {
+				log::warn!("Visual bell is not supported in fern shell yet");
+			}
+			FernBellStyle::Disable => { /* Do nothing */ }
+		}
+		Ok(())
+	}
+
 }

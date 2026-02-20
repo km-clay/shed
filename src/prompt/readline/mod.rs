@@ -8,6 +8,7 @@ use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVis
 
 use crate::libsh::sys::TTY_FILENO;
 use crate::prelude::*;
+use crate::state::read_shopts;
 use crate::{
   libsh::{
     error::ShResult,
@@ -222,9 +223,9 @@ impl FernVi {
             let hint = self.history.get_hint();
             self.editor.set_hint(hint);
           }
-          None => match crate::state::read_shopts(|s| s.core.bell_style) {
+          None => match read_shopts(|s| s.core.bell_style) {
             crate::shopt::FernBellStyle::Audible => {
-              self.writer.flush_write("\x07")?;
+              self.writer.send_bell().ok();
             }
             crate::shopt::FernBellStyle::Visible | crate::shopt::FernBellStyle::Disable => {}
           },
@@ -255,7 +256,7 @@ impl FernVi {
         self.writer.flush_write("\n")?;
         let buf = self.editor.take_buf();
         // Save command to history if auto_hist is enabled
-        if crate::state::read_shopts(|s| s.core.auto_hist) && !buf.is_empty() {
+        if read_shopts(|s| s.core.auto_hist) && !buf.is_empty() {
           self.history.push(buf.clone());
           if let Err(e) = self.history.save() {
             eprintln!("Failed to save history: {e}");
@@ -276,6 +277,8 @@ impl FernVi {
         }
       }
 
+			let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
+
       let before = self.editor.buffer.clone();
       self.exec_cmd(cmd)?;
       let after = self.editor.as_str();
@@ -284,7 +287,9 @@ impl FernVi {
         self
           .history
           .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
-      }
+      } else if before == after && has_edit_verb {
+				self.writer.send_bell().ok(); // bell on no-op commands with a verb (e.g., 'x' on empty line)
+			}
 
       let hint = self.history.get_hint();
       self.editor.set_hint(hint);
