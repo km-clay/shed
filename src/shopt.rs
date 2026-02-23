@@ -187,7 +187,7 @@ impl ShOptCore {
         let Ok(val) = val.parse::<usize>() else {
           return Err(ShErr::simple(
             ShErrKind::SyntaxErr,
-            "shopt: expected a positive integer for hist_ignore_dupes value",
+            "shopt: expected a positive integer for max_hist value",
           ));
         };
         self.max_hist = val;
@@ -210,16 +210,12 @@ impl ShOptCore {
         };
         self.auto_hist = val;
       }
-      "bell_style" => {
+      "bell_enabled" => {
         let Ok(val) = val.parse::<bool>() else {
           return Err(
             ShErr::simple(
               ShErrKind::SyntaxErr,
-              "shopt: expected a bell style for bell_style value",
-            )
-            .with_note(
-              Note::new("bell_style takes these options as values")
-                .with_sub_notes(vec!["audible", "visible", "disable"]),
+              "shopt: expected 'true' or 'false' for bell_enabled value",
             ),
           );
         };
@@ -249,7 +245,7 @@ impl ShOptCore {
               "max_hist",
               "interactive_comments",
               "auto_hist",
-              "bell_style",
+              "bell_enabled",
               "max_recurse_depth",
             ]),
           ),
@@ -300,7 +296,7 @@ impl ShOptCore {
         output.push_str(&format!("{}", self.auto_hist));
         Ok(Some(output))
       }
-      "bell_style" => {
+      "bell_enabled" => {
         let mut output = String::from("Whether or not to allow fern to trigger the terminal bell");
         output.push_str(&format!("{}", self.bell_enabled));
         Ok(Some(output))
@@ -324,7 +320,7 @@ impl ShOptCore {
             "max_hist",
             "interactive_comments",
             "auto_hist",
-            "bell_style",
+            "bell_enabled",
             "max_recurse_depth",
           ]),
         ),
@@ -492,19 +488,18 @@ impl ShOptPrompt {
       _ => Err(
         ShErr::simple(
           ShErrKind::SyntaxErr,
-          format!("shopt: Unexpected 'core' option '{query}'"),
+          format!("shopt: Unexpected 'prompt' option '{query}'"),
         )
-        .with_note(Note::new("options can be accessed like 'core.option_name'"))
+        .with_note(Note::new(
+          "options can be accessed like 'prompt.option_name'",
+        ))
         .with_note(
-          Note::new("'core' contains the following options").with_sub_notes(vec![
-            "dotglob",
-            "autocd",
-            "hist_ignore_dupes",
-            "max_hist",
-            "interactive_comments",
-            "auto_hist",
-            "bell_style",
-            "max_recurse_depth",
+          Note::new("'prompt' contains the following options").with_sub_notes(vec![
+            "trunc_prompt_path",
+            "edit_mode",
+            "comp_limit",
+            "highlight",
+            "tab_stop",
           ]),
         ),
       ),
