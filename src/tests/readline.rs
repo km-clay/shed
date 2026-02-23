@@ -174,6 +174,10 @@ impl LineWriter for TestWriter {
   fn flush_write(&mut self, _buf: &str) -> libsh::error::ShResult<()> {
     Ok(())
   }
+
+	fn send_bell(&mut self) -> ShResult<()> {
+		Ok(())
+	}
 }
 
 // NOTE: FernVi structure has changed significantly and readline() method no
@@ -596,6 +600,50 @@ fn editor_delete_line_up() {
 		237),
 		("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\nCurabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra.".into(), 240,)
 	)
+}
+
+#[test]
+fn editor_insert_at_line_start() {
+  // I should move cursor to position 0 when line starts with non-whitespace
+  assert_eq!(
+    normal_cmd("I", "hello world", 5),
+    ("hello world".into(), 0)
+  );
+  // I should skip leading whitespace
+  assert_eq!(
+    normal_cmd("I", "  hello world", 8),
+    ("  hello world".into(), 2)
+  );
+  // I should move to the first non-whitespace on the current line in a multiline buffer
+  assert_eq!(
+    normal_cmd("I", "first line\nsecond line", 14),
+    ("first line\nsecond line".into(), 11)
+  );
+  // I should land on position 0 when cursor is already at 0
+  assert_eq!(
+    normal_cmd("I", "hello", 0),
+    ("hello".into(), 0)
+  );
+}
+
+#[test]
+fn editor_f_char_from_position_zero() {
+  // f<char> at position 0 should skip the cursor and find the next occurrence
+  // Regression: previously at pos 0, f would match the char under the cursor itself
+  assert_eq!(
+    normal_cmd("fa", "abcaef", 0),
+    ("abcaef".into(), 3) // should find second 'a', not the 'a' at position 0
+  );
+  // f<char> from position 0 finding a char that only appears later
+  assert_eq!(
+    normal_cmd("fo", "hello world", 0),
+    ("hello world".into(), 4)
+  );
+  // f<char> from middle of buffer
+  assert_eq!(
+    normal_cmd("fd", "hello world", 5),
+    ("hello world".into(), 10)
+  );
 }
 
 // NOTE: These tests disabled because fernvi_test() helper is commented out

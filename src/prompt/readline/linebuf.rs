@@ -2055,9 +2055,10 @@ impl LineBuf {
       }
       MotionCmd(_, Motion::BeginningOfFirstWord) => {
         let start = self.start_of_line();
-        let mut indices = self.directional_indices_iter_from(start, Direction::Forward);
+        self.update_graphemes_lazy();
+        let indices = self.grapheme_indices().to_vec();
         let mut first_graphical = None;
-        while let Some(idx) = indices.next() {
+        for &idx in indices.iter().skip(start) {
           let grapheme = self.grapheme_at(idx).unwrap();
           if !is_whitespace(grapheme) {
             first_graphical = Some(idx);
