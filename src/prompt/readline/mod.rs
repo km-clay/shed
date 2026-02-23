@@ -677,15 +677,19 @@ pub fn get_insertions(input: &str) -> Vec<(usize, Marker)> {
 /// - Unimplemented features (comments, brace groups)
 pub fn marker_for(class: &TkRule) -> Option<Marker> {
   match class {
-    TkRule::Pipe | TkRule::ErrPipe | TkRule::And | TkRule::Or | TkRule::Bg => {
+    TkRule::Pipe |
+		TkRule::ErrPipe |
+		TkRule::And |
+		TkRule::Or |
+		TkRule::Bg |
+    TkRule::BraceGrpStart |
+    TkRule::BraceGrpEnd => {
       Some(markers::OPERATOR)
     }
     TkRule::Sep => Some(markers::CMD_SEP),
     TkRule::Redir => Some(markers::REDIRECT),
     TkRule::CasePattern => Some(markers::CASE_PAT),
-    TkRule::BraceGrpStart => todo!(),
-    TkRule::BraceGrpEnd => todo!(),
-    TkRule::Comment => todo!(),
+    TkRule::Comment => Some(markers::COMMENT),
     TkRule::Expanded { exp: _ } | TkRule::EOI | TkRule::SOI | TkRule::Null | TkRule::Str => None,
   }
 }

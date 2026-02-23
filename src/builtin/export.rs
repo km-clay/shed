@@ -4,7 +4,7 @@ use crate::{
   parse::{NdRule, Node},
   prelude::*,
   procio::{IoStack, borrow_fd},
-  state::{self, VarFlags, write_vars},
+  state::{self, VarFlags, read_vars, write_vars},
 };
 
 use super::setup_builtin;
@@ -39,6 +39,45 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
       } else {
         write_vars(|v| v.export_var(&arg)); // Export an existing variable, if
         // any
+      }
+    }
+  }
+  state::set_status(0);
+  Ok(())
+}
+
+pub fn local(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+  let NdRule::Command {
+    assignments: _,
+    argv,
+  } = node.class
+  else {
+    unreachable!()
+  };
+
+  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+
+  if argv.is_empty() {
+    // Display the local variables
+		let vars_output = read_vars(|v| {
+			let mut vars = v.flatten_vars()
+				.into_iter()
+				.map(|(k, v)| format!("{}={}", k, v))
+				.collect::<Vec<String>>();
+			vars.sort();
+			let mut vars_joined = vars.join("\n");
+			vars_joined.push('\n');
+			vars_joined
+		});
+
+    let stdout = borrow_fd(STDOUT_FILENO);
+    write(stdout, vars_output.as_bytes())?; // Write it
+  } else {
+    for (arg, _) in argv {
+      if let Some((var, val)) = arg.split_once('=') {
+        write_vars(|v| v.set_var(var, val, VarFlags::LOCAL));
+      } else {
+        write_vars(|v| v.set_var(&arg, "", VarFlags::LOCAL)); // Create an uninitialized local variable
       }
     }
   }

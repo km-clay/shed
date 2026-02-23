@@ -147,9 +147,7 @@ pub fn hang_up(_: libc::c_int) {
   SHOULD_QUIT.store(true, Ordering::SeqCst);
   QUIT_CODE.store(1, Ordering::SeqCst);
   write_jobs(|j| {
-    for job in j.jobs_mut().iter_mut().flatten() {
-      job.killpg(Signal::SIGTERM).ok();
-    }
+		j.hang_up();
   });
 }
 

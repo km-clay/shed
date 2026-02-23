@@ -179,3 +179,46 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
 
   Ok(())
 }
+
+pub fn disown(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+	let blame = node.get_span().clone();
+  let NdRule::Command {
+    assignments: _,
+    argv,
+  } = node.class
+  else {
+    unreachable!()
+  };
+
+  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let mut argv = argv.into_iter();
+
+  let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {
+    id
+  } else {
+    return Err(ShErr::full(ShErrKind::ExecFail, "disown: No jobs to disown", blame));
+  };
+
+  let mut tabid = curr_job_id;
+	let mut nohup = false;
+	let mut disown_all = false;
+
+	while let Some((arg, span)) = argv.next() {
+		match arg.as_str() {
+			"-h" => nohup = true,
+			"-a" => disown_all = true,
+			_ => {
+				tabid = parse_job_id(&arg, span.clone())?;
+			}
+		}
+	}
+
+	if disown_all {
+		write_jobs(|j| j.disown_all(nohup))?;
+	} else {
+		write_jobs(|j| j.disown(JobID::TableID(tabid), nohup))?;
+	}
+
+	state::set_status(0);
+	Ok(())
+}

@@ -2,7 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, cd::cd, dirstack::{dirs, popd, pushd}, echo::echo, exec, export::export, flowctl::flowctl, jobctl::{JobBehavior, continue_job, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, zoltraak::zoltraak
+    alias::{alias, unalias}, cd::cd, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, export::{export, local}, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, zoltraak::zoltraak
   },
   expand::expand_aliases,
   jobs::{ChildProc, JobStack, dispatch_job},
@@ -588,11 +588,13 @@ impl Dispatcher {
       "echo" => echo(cmd, io_stack_mut, curr_job_mut),
       "cd" => cd(cmd, curr_job_mut),
       "export" => export(cmd, io_stack_mut, curr_job_mut),
+			"local" => local(cmd, io_stack_mut, curr_job_mut),
       "pwd" => pwd(cmd, io_stack_mut, curr_job_mut),
       "source" => source(cmd, curr_job_mut),
       "shift" => shift(cmd, curr_job_mut),
       "fg" => continue_job(cmd, curr_job_mut, JobBehavior::Foregound),
       "bg" => continue_job(cmd, curr_job_mut, JobBehavior::Background),
+			"disown" => disown(cmd, io_stack_mut, curr_job_mut),
       "jobs" => jobs(cmd, io_stack_mut, curr_job_mut),
       "alias" => alias(cmd, io_stack_mut, curr_job_mut),
       "unalias" => unalias(cmd, io_stack_mut, curr_job_mut),
@@ -608,6 +610,7 @@ impl Dispatcher {
 			"popd" => popd(cmd, io_stack_mut, curr_job_mut),
 			"dirs" => dirs(cmd, io_stack_mut, curr_job_mut),
 			"exec" => exec::exec_builtin(cmd, io_stack_mut, curr_job_mut),
+			"eval" => eval::eval(cmd, io_stack_mut, curr_job_mut),
       _ => unimplemented!(
         "Have not yet added support for builtin '{}'",
         cmd_raw.span.as_str()

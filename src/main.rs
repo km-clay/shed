@@ -36,7 +36,7 @@ use crate::prompt::get_prompt;
 use crate::prompt::readline::term::raw_mode;
 use crate::prompt::readline::{FernVi, ReadlineEvent};
 use crate::signal::{QUIT_CODE, check_signals, sig_setup, signals_pending};
-use crate::state::{read_logic, source_rc, write_meta};
+use crate::state::{read_logic, source_rc, write_jobs, write_meta};
 use clap::Parser;
 use state::{read_vars, write_vars};
 
@@ -74,9 +74,25 @@ fn kickstart_lazy_evals() {
   read_vars(|_| {});
 }
 
+/// We need to make sure that even if we panic, our child processes get sighup
+fn setup_panic_handler() {
+	let default_panic_hook = std::panic::take_hook();
+	std::panic::set_hook(Box::new(move |info| {
+		let _ = state::FERN.try_with(|fern| {
+			if let Ok(mut jobs) = fern.jobs.try_borrow_mut() {
+				jobs.hang_up();
+			}
+		});
+
+		default_panic_hook(info);
+	}));
+}
+
 fn main() -> ExitCode {
   env_logger::init();
   kickstart_lazy_evals();
+	setup_panic_handler();
+
   let mut args = FernArgs::parse();
 	if env::args().next().is_some_and(|a| a.starts_with('-')) {
 		// first arg is '-fern'
@@ -84,7 +100,7 @@ fn main() -> ExitCode {
 		args.login_shell = true;
 	}
   if args.version {
-    println!("fern {}", env!("CARGO_PKG_VERSION"));
+    println!("fern {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::ARCH, std::env::consts::OS);
     return ExitCode::SUCCESS;
   }
 
@@ -104,6 +120,7 @@ fn main() -> ExitCode {
     eprintln!("fern: error running EXIT trap: {e}");
   }
 
+	write_jobs(|j| j.hang_up());
   ExitCode::from(QUIT_CODE.load(Ordering::SeqCst) as u8)
 }
 

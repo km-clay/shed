@@ -373,7 +373,7 @@ impl JobTab {
       if job
         .get_stats()
         .iter()
-        .all(|stat| matches!(stat, WtStat::Exited(_, _)))
+        .all(|stat| matches!(stat, WtStat::Exited(_, _) | WtStat::Signaled(_, _, _)))
       {
         jobs_to_remove.push(JobID::TableID(id));
       }
@@ -383,6 +383,41 @@ impl JobTab {
     }
     Ok(())
   }
+
+	pub fn hang_up(&mut self) {
+		for job in self.jobs_mut().iter_mut().flatten() {
+			if job.send_hup {
+				job.killpg(Signal::SIGHUP).ok();
+			}
+		}
+	}
+
+	pub fn disown(&mut self, id: JobID, nohup: bool) -> ShResult<()> {
+		if let Some(job) = self.query_mut(id.clone()) {
+			if nohup {
+				job.no_hup();
+			} else {
+				self.remove_job(id);
+			}
+		}
+		Ok(())
+	}
+
+	pub fn disown_all(&mut self, nohup: bool) -> ShResult<()> {
+		let mut ids_to_remove = vec![];
+		for job in self.jobs_mut().iter_mut().flatten() {
+			if nohup {
+				job.no_hup();
+			} else {
+				ids_to_remove.push(JobID::TableID(job.tabid().unwrap()));
+			}
+		}
+
+		for id in ids_to_remove {
+			self.remove_job(id);
+		}
+		Ok(())
+	}
 }
 
 #[derive(Debug)]
@@ -390,6 +425,7 @@ pub struct JobBldr {
   table_id: Option<usize>,
   pgid: Option<Pid>,
   children: Vec<ChildProc>,
+	send_hup: bool,
 }
 
 impl Default for JobBldr {
@@ -404,6 +440,7 @@ impl JobBldr {
       table_id: None,
       pgid: None,
       children: vec![],
+			send_hup: true,
     }
   }
   pub fn with_id(self, id: usize) -> Self {
@@ -411,6 +448,7 @@ impl JobBldr {
       table_id: Some(id),
       pgid: self.pgid,
       children: self.children,
+			send_hup: self.send_hup,
     }
   }
   pub fn with_pgid(self, pgid: Pid) -> Self {
@@ -418,6 +456,7 @@ impl JobBldr {
       table_id: self.table_id,
       pgid: Some(pgid),
       children: self.children,
+			send_hup: self.send_hup,
     }
   }
   pub fn set_pgid(&mut self, pgid: Pid) {
@@ -426,11 +465,16 @@ impl JobBldr {
   pub fn pgid(&self) -> Option<Pid> {
     self.pgid
   }
+	pub fn no_hup(mut self) -> Self {
+		self.send_hup = false;
+		self
+	}
   pub fn with_children(self, children: Vec<ChildProc>) -> Self {
     Self {
       table_id: self.table_id,
       pgid: self.pgid,
       children,
+			send_hup: self.send_hup,
     }
   }
   pub fn push_child(&mut self, child: ChildProc) {
@@ -441,6 +485,7 @@ impl JobBldr {
       table_id: self.table_id,
       pgid: self.pgid.unwrap_or(Pid::from_raw(0)),
       children: self.children,
+			send_hup: self.send_hup,
     }
   }
 }
@@ -469,12 +514,16 @@ pub struct Job {
   table_id: Option<usize>,
   pgid: Pid,
   children: Vec<ChildProc>,
+	send_hup: bool,
 }
 
 impl Job {
   pub fn set_tabid(&mut self, id: usize) {
     self.table_id = Some(id)
   }
+	pub fn no_hup(&mut self) {
+		self.send_hup = false;
+	}
   pub fn running(&self) -> bool {
     !self.children.iter().all(|chld| chld.exited())
   }
@@ -520,8 +569,7 @@ impl Job {
     let stat = match sig {
       Signal::SIGTSTP => WtStat::Stopped(self.pgid, Signal::SIGTSTP),
       Signal::SIGCONT => WtStat::Continued(self.pgid),
-      Signal::SIGTERM => WtStat::Signaled(self.pgid, Signal::SIGTERM, false),
-      _ => unimplemented!("{}", sig),
+      sig => WtStat::Signaled(self.pgid, sig, false),
     };
     self.set_stats(stat);
     Ok(killpg(self.pgid, sig)?)

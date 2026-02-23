@@ -27,11 +27,12 @@ pub mod trap;
 pub mod zoltraak;
 pub mod dirstack;
 pub mod exec;
+pub mod eval;
 
-pub const BUILTINS: [&str; 25] = [
-  "echo", "cd", "read", "export", "pwd", "source", "shift", "jobs", "fg", "bg", "alias", "unalias",
+pub const BUILTINS: [&str; 28] = [
+  "echo", "cd", "read", "export", "local", "pwd", "source", "shift", "jobs", "fg", "bg", "disown", "alias", "unalias",
   "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin", "command", "trap",
-	"pushd", "popd", "dirs", "exec",
+	"pushd", "popd", "dirs", "exec", "eval"
 ];
 
 /// Sets up a builtin command
