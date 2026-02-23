@@ -27,16 +27,6 @@ impl FromStr for FernBellStyle {
   }
 }
 
-impl Display for FernBellStyle {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      FernBellStyle::Audible => write!(f, "audible"),
-      FernBellStyle::Visible => write!(f, "visible"),
-      FernBellStyle::Disable => write!(f, "disable"),
-    }
-  }
-}
-
 #[derive(Default, Clone, Copy, Debug)]
 pub enum FernEditMode {
   #[default]
@@ -159,7 +149,7 @@ pub struct ShOptCore {
   pub max_hist: usize,
   pub interactive_comments: bool,
   pub auto_hist: bool,
-  pub bell_style: FernBellStyle,
+  pub bell_enabled: bool,
   pub max_recurse_depth: usize,
 }
 
@@ -221,7 +211,7 @@ impl ShOptCore {
         self.auto_hist = val;
       }
       "bell_style" => {
-        let Ok(val) = val.parse::<FernBellStyle>() else {
+        let Ok(val) = val.parse::<bool>() else {
           return Err(
             ShErr::simple(
               ShErrKind::SyntaxErr,
@@ -233,7 +223,7 @@ impl ShOptCore {
             ),
           );
         };
-        self.bell_style = val;
+        self.bell_enabled = val;
       }
       "max_recurse_depth" => {
         let Ok(val) = val.parse::<usize>() else {
@@ -311,8 +301,8 @@ impl ShOptCore {
         Ok(Some(output))
       }
       "bell_style" => {
-        let mut output = String::from("What type of bell style to use for the bell character\n");
-        output.push_str(&format!("{}", self.bell_style));
+        let mut output = String::from("Whether or not to allow fern to trigger the terminal bell");
+        output.push_str(&format!("{}", self.bell_enabled));
         Ok(Some(output))
       }
       "max_recurse_depth" => {
@@ -355,7 +345,7 @@ impl Display for ShOptCore {
       self.interactive_comments
     ));
     output.push(format!("auto_hist = {}", self.auto_hist));
-    output.push(format!("bell_style = {}", self.bell_style));
+    output.push(format!("bell_enabled = {}", self.bell_enabled));
     output.push(format!("max_recurse_depth = {}", self.max_recurse_depth));
 
     let final_output = output.join("\n");
@@ -373,7 +363,7 @@ impl Default for ShOptCore {
       max_hist: 1000,
       interactive_comments: true,
       auto_hist: true,
-      bell_style: FernBellStyle::Audible,
+      bell_enabled: true,
       max_recurse_depth: 1000,
     }
   }

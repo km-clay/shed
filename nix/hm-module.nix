@@ -58,10 +58,10 @@ in
         default = true;
         description = "Whether to automatically add commands to the history as they are executed";
       };
-      bellStyle = lib.mkOption {
-        type = lib.types.enum [ "none" "audible" "visible" ];
-        default = "audible";
-        description = "The style of bell to use for notifications and errors";
+      bellEnabled = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Whether to allow fern to ring the terminal bell on certain events (e.g. command completion, errors, etc.)";
       };
       maxRecurseDepth = lib.mkOption {
         type = lib.types.int;
@@ -117,7 +117,7 @@ in
         "shopt core.max_hist=${toString cfg.settings.maxHistoryEntries}"
         "shopt core.interactive_comments=${boolToString cfg.settings.interactiveComments}"
         "shopt core.auto_hist=${boolToString cfg.settings.autoHistory}"
-        "shopt core.bell_style=${cfg.settings.bellStyle}"
+        "shopt core.bell_enabled=${boolToString cfg.settings.bellEnabled}"
         "shopt core.max_recurse_depth=${toString cfg.settings.maxRecurseDepth}"
 
         "shopt prompt.trunc_prompt_path=${toString cfg.settings.promptPathSegments}"

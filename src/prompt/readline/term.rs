@@ -977,14 +977,8 @@ impl LineWriter for TermWriter {
   }
 
 	fn send_bell(&mut self) -> ShResult<()> {
-		match read_shopts(|o| o.core.bell_style) {
-			FernBellStyle::Audible => {
-				self.flush_write("\x07")?;
-			}
-			FernBellStyle::Visible => {
-				log::warn!("Visual bell is not supported in fern shell yet");
-			}
-			FernBellStyle::Disable => { /* Do nothing */ }
+		if read_shopts(|o| o.core.bell_enabled) {
+			self.flush_write("\x07")?;
 		}
 		Ok(())
 	}

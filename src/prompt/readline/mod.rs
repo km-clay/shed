@@ -223,11 +223,8 @@ impl FernVi {
             let hint = self.history.get_hint();
             self.editor.set_hint(hint);
           }
-          None => match read_shopts(|s| s.core.bell_style) {
-            crate::shopt::FernBellStyle::Audible => {
-              self.writer.send_bell().ok();
-            }
-            crate::shopt::FernBellStyle::Visible | crate::shopt::FernBellStyle::Disable => {}
+          None => {
+						self.writer.send_bell().ok();
           },
         }
 
