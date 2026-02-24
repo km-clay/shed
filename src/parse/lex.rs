@@ -265,6 +265,7 @@ impl LexStream {
             }
 
             if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+							self.cursor = pos;
               return Some(Err(ShErr::full(
                 ShErrKind::ParseErr,
                 "Invalid redirection",
@@ -625,6 +626,7 @@ impl LexStream {
     }
     let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
     if self.in_quote && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+			self.cursor = pos;
       return Err(ShErr::full(
         ShErrKind::ParseErr,
         "Unterminated quote",
