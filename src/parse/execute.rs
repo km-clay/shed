@@ -305,18 +305,27 @@ impl Dispatcher {
       unreachable!()
     };
 
-    let env_vars = self.set_assignments(assignments, AssignBehavior::Export)?;
-    let _var_guard = VarCtxGuard::new(env_vars.into_iter().collect());
-    self.io_stack.append_to_frame(subsh.redirs);
-    let mut argv = prepare_argv(argv)?;
+		self.run_fork("anonymous_subshell", |s| {
+			if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
+				eprintln!("{e}");
+				return;
+			};
+			s.io_stack.append_to_frame(subsh.redirs);
+			let mut argv = match prepare_argv(argv) {
+				Ok(argv) => argv,
+				Err(e) => {
+					eprintln!("{e}");
+					return;
+				}
+			};
 
-    let subsh = argv.remove(0);
-    let subsh_body = subsh.0.to_string();
-    let _guard = ScopeGuard::shared_scope();
+			let subsh = argv.remove(0);
+			let subsh_body = subsh.0.to_string();
 
-    exec_input(subsh_body, None, self.interactive)?;
-
-    Ok(())
+			if let Err(e) = exec_input(subsh_body, None, s.interactive) {
+				eprintln!("{e}");
+			};
+		})
   }
   fn exec_func(&mut self, func: Node) -> ShResult<()> {
     let blame = func.get_span().clone();
