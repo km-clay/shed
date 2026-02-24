@@ -681,7 +681,7 @@ impl Dispatcher {
   }
   fn exec_builtin(&mut self, cmd: Node) -> ShResult<()> {
 		let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
-		let cmd_raw = cmd.get_command().unwrap().to_string();
+		let cmd_raw = cmd.get_command().unwrap_or_else(|| panic!("expected command NdRule, got {:?}", &cmd.class)).to_string();
 
 		if fork_builtins {
 			log::trace!("Forking builtin: {}", cmd_raw);

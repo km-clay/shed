@@ -114,15 +114,14 @@ pub struct Node {
 
 impl Node {
   pub fn get_command(&self) -> Option<&Tk> {
-    let NdRule::Command {
+    if let NdRule::Command {
       assignments: _,
       argv,
-    } = &self.class
-    else {
-      return None;
-    };
-    let command = argv.iter().find(|tk| tk.flags.contains(TkFlags::IS_CMD))?;
-    Some(command)
+    } = &self.class {
+			argv.iter().next()
+		} else {
+      None
+    }
   }
   pub fn get_span(&self) -> Span {
     let Some(first_tk) = self.tokens.first() else {
