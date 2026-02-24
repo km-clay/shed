@@ -283,6 +283,50 @@ fn scopestack_flatten_vars() {
   assert!(flattened.contains_key("LOCAL1"));
 }
 
+#[test]
+fn scopestack_local_var_mutation() {
+  let mut stack = ScopeStack::new();
+
+  // Descend into function scope
+  stack.descend(None);
+
+  // `local foo="biz"` — create a local variable with initial value
+  stack.set_var("foo", "biz", VarFlags::LOCAL);
+  assert_eq!(stack.get_var("foo"), "biz");
+
+  // `foo="bar"` — reassign without LOCAL flag (plain assignment)
+  stack.set_var("foo", "bar", VarFlags::NONE);
+  assert_eq!(stack.get_var("foo"), "bar", "Local var should be mutated in place");
+
+  // Ascend back to global
+  stack.ascend();
+
+  // foo should not exist in global scope
+  assert_eq!(stack.get_var("foo"), "", "Local var should not leak to global scope");
+}
+
+#[test]
+fn scopestack_local_var_uninitialized() {
+  let mut stack = ScopeStack::new();
+
+  // Descend into function scope
+  stack.descend(None);
+
+  // `local foo` — declare without a value
+  stack.set_var("foo", "", VarFlags::LOCAL);
+  assert_eq!(stack.get_var("foo"), "");
+
+  // `foo="bar"` — assign a value later
+  stack.set_var("foo", "bar", VarFlags::NONE);
+  assert_eq!(stack.get_var("foo"), "bar", "Uninitialized local should be assignable");
+
+  // Ascend back to global
+  stack.ascend();
+
+  // foo should not exist in global scope
+  assert_eq!(stack.get_var("foo"), "", "Local var should not leak to global scope");
+}
+
 // ============================================================================
 // LogTab Tests - Functions and Aliases
 // ============================================================================
