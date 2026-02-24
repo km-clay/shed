@@ -32,13 +32,13 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
     code = status;
   }
 
-  let kind = match kind {
-    LoopContinue(_) => LoopContinue(code),
-    LoopBreak(_) => LoopBreak(code),
-    FuncReturn(_) => FuncReturn(code),
-    CleanExit(_) => CleanExit(code),
+  let (kind,message) = match kind {
+    LoopContinue(_) => (LoopContinue(code), "'continue' found outside of loop"),
+    LoopBreak(_) => (LoopBreak(code), "'break' found outside of loop"),
+    FuncReturn(_) => (FuncReturn(code), "'return' found outside of function"),
+    CleanExit(_) => (CleanExit(code), ""),
     _ => unreachable!(),
   };
 
-  Err(ShErr::simple(kind, ""))
+  Err(ShErr::simple(kind, message))
 }

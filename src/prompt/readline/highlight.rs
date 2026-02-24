@@ -89,7 +89,23 @@ impl Highlighter {
         markers::STRING_DQ | markers::STRING_SQ | markers::KEYWORD => {
           self.push_style(Style::Yellow)
         }
-        markers::BUILTIN => self.push_style(Style::Green),
+        markers::BUILTIN => {
+          let mut cmd_name = String::new();
+          let mut chars_clone = input_chars.clone();
+          while let Some(ch) = chars_clone.next() {
+            if ch == markers::RESET {
+              break;
+            }
+						if !is_marker(ch) {
+							cmd_name.push(ch);
+						}
+          }
+
+					match cmd_name.as_str() {
+						"continue" | "return" | "break" => self.push_style(Style::Magenta),
+						_ => self.push_style(Style::Green),
+					}
+				}
         markers::CASE_PAT => self.push_style(Style::Blue),
 
         markers::COMMENT => self.push_style(Style::BrightBlack),
@@ -157,7 +173,10 @@ impl Highlighter {
             }
             cmd_name.push(ch);
           }
-          let style = if Self::is_valid(&Self::strip_markers(&cmd_name)) {
+					log::debug!("Command name: '{}'", Self::strip_markers(&cmd_name));
+          let style = if matches!(Self::strip_markers(&cmd_name).as_str(), "break" | "continue" | "return") {
+						Style::Magenta.into()
+					} else if Self::is_valid(&Self::strip_markers(&cmd_name)) {
             Style::Green.into()
           } else {
             Style::Red | Style::Bold
