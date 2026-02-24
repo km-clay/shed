@@ -143,6 +143,8 @@ bitflags! {
 #[derive(Clone,Copy,Debug)]
   pub struct NdFlags: u32 {
     const BACKGROUND = 0b000001;
+		const FORK_BUILTINS = 0b000010;
+		const NO_FORK = 0b000100;
   }
 }
 
@@ -1378,6 +1380,7 @@ impl ParseStream {
             redirs.push(redir);
           }
         }
+				TkRule::Comment => { /* Skip comments in command position */ }
         _ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
       }
     }

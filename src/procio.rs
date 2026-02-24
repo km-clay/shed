@@ -342,6 +342,12 @@ impl DerefMut for IoStack {
   }
 }
 
+impl From<Vec<IoFrame>> for IoStack {
+	fn from(frames: Vec<IoFrame>) -> Self {
+		Self { stack: frames }
+	}
+}
+
 pub fn borrow_fd<'f>(fd: i32) -> BorrowedFd<'f> {
   unsafe { BorrowedFd::borrow_raw(fd) }
 }

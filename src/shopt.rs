@@ -370,6 +370,7 @@ pub struct ShOptPrompt {
   pub comp_limit: usize,
   pub highlight: bool,
   pub auto_indent: bool,
+  pub linebreak_on_incomplete: bool,
 }
 
 impl ShOptPrompt {
@@ -420,6 +421,15 @@ impl ShOptPrompt {
         };
         self.auto_indent = val;
       }
+      "linebreak_on_incomplete" => {
+        let Ok(val) = val.parse::<bool>() else {
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            "shopt: expected 'true' or 'false' for linebreak_on_incomplete value",
+          ));
+        };
+        self.linebreak_on_incomplete = val;
+      }
       "custom" => {
         todo!()
       }
@@ -439,6 +449,7 @@ impl ShOptPrompt {
               "comp_limit",
               "highlight",
               "auto_indent",
+              "linebreak_on_incomplete",
               "custom",
             ]),
           ),
@@ -484,6 +495,12 @@ impl ShOptPrompt {
         output.push_str(&format!("{}", self.auto_indent));
         Ok(Some(output))
       }
+      "linebreak_on_incomplete" => {
+        let mut output =
+          String::from("Whether to automatically insert a newline when the input is incomplete\n");
+        output.push_str(&format!("{}", self.linebreak_on_incomplete));
+        Ok(Some(output))
+      }
       _ => Err(
         ShErr::simple(
           ShErrKind::SyntaxErr,
@@ -499,6 +516,7 @@ impl ShOptPrompt {
             "comp_limit",
             "highlight",
             "auto_indent",
+            "linebreak_on_incomplete",
           ]),
         ),
       ),
@@ -515,6 +533,7 @@ impl Display for ShOptPrompt {
     output.push(format!("comp_limit = {}", self.comp_limit));
     output.push(format!("highlight = {}", self.highlight));
     output.push(format!("auto_indent = {}", self.auto_indent));
+    output.push(format!("linebreak_on_incomplete = {}", self.linebreak_on_incomplete));
 
     let final_output = output.join("\n");
 
@@ -530,6 +549,7 @@ impl Default for ShOptPrompt {
       comp_limit: 100,
       highlight: true,
       auto_indent: true,
+      linebreak_on_incomplete: true,
     }
   }
 }

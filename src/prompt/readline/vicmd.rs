@@ -131,7 +131,7 @@ impl ViCmd {
       .as_ref()
       .is_some_and(|m| matches!(m.1, Motion::CharSearch(..)))
   }
-  pub fn should_submit(&self) -> bool {
+  pub fn is_submit_action(&self) -> bool {
     self
       .verb
       .as_ref()

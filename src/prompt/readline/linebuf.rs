@@ -2790,6 +2790,12 @@ impl LineBuf {
           }
         }
       }
+      Verb::AcceptLineOrNewline => {
+				// If this verb has reached this function, it means we have incomplete input
+				// and therefore must insert a newline instead of accepting the input
+				self.push('\n');
+				self.cursor.add(1);
+			}
 
       Verb::Complete
       | Verb::EndOfFile
@@ -2800,7 +2806,6 @@ impl LineBuf {
       | Verb::VisualModeLine
       | Verb::VisualModeBlock
       | Verb::CompleteBackward
-      | Verb::AcceptLineOrNewline
       | Verb::VisualModeSelectLast => self.apply_motion(motion), // Already handled logic for these
     }
     Ok(())

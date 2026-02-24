@@ -50,7 +50,7 @@ in
       };
       interactiveComments = lib.mkOption {
         type = lib.types.bool;
-        default = false;
+        default = true;
         description = "Whether to allow comments in interactive mode";
       };
       autoHistory = lib.mkOption {
@@ -83,6 +83,11 @@ in
         type = lib.types.bool;
         default = true;
         description = "Whether to enable syntax highlighting in the shell";
+      };
+      linebreakOnIncomplete = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Whether to automatically insert a newline when the input is incomplete";
       };
       extraPostConfig = lib.mkOption {
         type = lib.types.str;
@@ -117,6 +122,7 @@ in
         "shopt prompt.trunc_prompt_path=${toString cfg.settings.promptPathSegments}"
         "shopt prompt.comp_limit=${toString cfg.settings.completionLimit}"
         "shopt prompt.highlight=${boolToString cfg.settings.syntaxHighlighting}"
+        "shopt prompt.linebreak_on_incomplete=${boolToString cfg.settings.linebreakOnIncomplete}"
       ])
       cfg.settings.extraPostConfig
     ];

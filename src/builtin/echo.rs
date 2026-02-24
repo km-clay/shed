@@ -32,6 +32,7 @@ pub const ECHO_OPTS: [OptSpec; 4] = [
 ];
 
 bitflags! {
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
   pub struct EchoFlags: u32 {
     const NO_NEWLINE = 0b000001;
     const USE_STDERR = 0b000010;
@@ -59,6 +60,7 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
   } else {
     borrow_fd(STDOUT_FILENO)
   };
+
 
   let mut echo_output = prepare_echo_args(
     argv
@@ -196,6 +198,7 @@ pub fn prepare_echo_args(
 
     prepared_args.push(prepared_arg);
   }
+
 
   Ok(prepared_args)
 }

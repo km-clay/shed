@@ -46,6 +46,10 @@ pub fn signals_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) != 0 || SHOULD_QUIT.load(Ordering::SeqCst)
 }
 
+pub fn sigint_pending() -> bool {
+  SIGNALS.load(Ordering::SeqCst) & (1 << Signal::SIGINT as u64) != 0
+}
+
 pub fn check_signals() -> ShResult<()> {
   let pending = SIGNALS.swap(0, Ordering::SeqCst);
   let got_signal = |sig: Signal| -> bool { pending & (1 << sig as u64) != 0 };

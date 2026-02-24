@@ -152,6 +152,7 @@ pub struct LexStream {
   source: Arc<String>,
   pub cursor: usize,
   in_quote: bool,
+	brc_grp_start: Option<usize>,
   flags: LexFlags,
 }
 
@@ -186,6 +187,7 @@ impl LexStream {
       source,
       cursor: 0,
       in_quote: false,
+			brc_grp_start: None,
       flags,
     }
   }
@@ -220,8 +222,10 @@ impl LexStream {
   pub fn set_in_brc_grp(&mut self, is: bool) {
     if is {
       self.flags |= LexFlags::IN_BRC_GRP;
+			self.brc_grp_start = Some(self.cursor);
     } else {
       self.flags &= !LexFlags::IN_BRC_GRP;
+			self.brc_grp_start = None;
     }
   }
   pub fn next_is_cmd(&self) -> bool {
@@ -698,6 +702,15 @@ impl Iterator for LexStream {
         return None;
       } else {
         // Return the EOI token
+				if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+					let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
+					self.flags |= LexFlags::STALE;
+					return Err(ShErr::full(
+						ShErrKind::ParseErr,
+						"Unclosed brace group",
+						Span::new(start..self.cursor, self.source.clone()),
+					)).into();
+				}
         let token = self.get_token(self.cursor..self.cursor, TkRule::EOI);
         self.flags |= LexFlags::STALE;
         return Some(Ok(token));
@@ -728,6 +741,14 @@ impl Iterator for LexStream {
     }
 
     if self.cursor == self.source.len() {
+			if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+				let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
+				return Err(ShErr::full(
+						ShErrKind::ParseErr,
+						"Unclosed brace group",
+						Span::new(start..self.cursor, self.source.clone()),
+				)).into();
+			}
       return None;
     }
 

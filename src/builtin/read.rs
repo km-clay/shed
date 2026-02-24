@@ -113,7 +113,13 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
               input.push(buf[0]);
             }
           }
-          Err(Errno::EINTR) => continue,
+          Err(Errno::EINTR) => {
+            if crate::signal::sigint_pending() {
+              state::set_status(130);
+              return Ok(String::new());
+            }
+            continue;
+          }
           Err(e) => {
             return Err(ShErr::simple(
               ShErrKind::ExecFail,
@@ -137,19 +143,32 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
     let mut input: Vec<u8> = vec![];
     loop {
       let mut buf = [0u8; 1];
+      log::info!("read: about to call read()");
       match read(STDIN_FILENO, &mut buf) {
         Ok(0) => {
+          log::info!("read: got EOF");
           state::set_status(1);
           break; // EOF
         }
-        Ok(_) => {
+        Ok(n) => {
+          log::info!("read: got {} bytes: {:?}", n, &buf[..1]);
           if buf[0] == read_opts.delim {
+            state::set_status(0);
             break; // Delimiter reached, stop reading
           }
           input.push(buf[0]);
         }
-        Err(Errno::EINTR) => continue,
+        Err(Errno::EINTR) => {
+          let pending = crate::signal::sigint_pending();
+          log::info!("read: got EINTR, sigint_pending={}", pending);
+          if pending {
+            state::set_status(130);
+            break;
+          }
+          continue;
+        }
         Err(e) => {
+          log::info!("read: got error: {}", e);
           return Err(ShErr::simple(
             ShErrKind::ExecFail,
             format!("read: Failed to read from stdin: {e}"),
@@ -202,7 +221,6 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
     }
   }
 
-  state::set_status(0);
   Ok(())
 }
 

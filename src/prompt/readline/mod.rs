@@ -7,6 +7,7 @@ use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
 use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
 use crate::libsh::sys::TTY_FILENO;
+use crate::parse::lex::LexStream;
 use crate::prelude::*;
 use crate::state::read_shopts;
 use crate::{
@@ -170,6 +171,31 @@ impl FernVi {
     self.history.reset();
   }
 
+	fn should_submit(&mut self) -> ShResult<bool> {
+		let input = Arc::new(self.editor.buffer.clone());
+		self.editor.calc_indent_level();
+		let lex_result1 = LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
+		let lex_result2 = LexStream::new(Arc::clone(&input), LexFlags::empty()).collect::<ShResult<Vec<_>>>();
+		let is_top_level = self.editor.auto_indent_level == 0;
+
+		let is_complete = match (lex_result1.is_err(), lex_result2.is_err()) {
+			(true, true) => {
+				return Err(lex_result2.unwrap_err());
+			}
+			(true, false) => {
+				return Err(lex_result1.unwrap_err());
+			}
+			(false, true) => {
+				false
+			}
+			(false, false) => {
+				true
+			}
+		};
+
+		Ok(is_complete && is_top_level)
+	}
+
   /// Process any available input and return readline event
   /// This is non-blocking - returns Pending if no complete line yet
   pub fn process_input(&mut self) -> ShResult<ReadlineEvent> {
@@ -247,7 +273,7 @@ impl FernVi {
         continue;
       }
 
-      if cmd.should_submit() {
+      if cmd.is_submit_action() && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete)) {
         self.editor.set_hint(None);
 				self.editor.cursor.set(self.editor.cursor_max()); // Move the cursor to the very end
         self.print_line()?; // Redraw
@@ -686,9 +712,8 @@ pub fn marker_for(class: &TkRule) -> Option<Marker> {
     }
     TkRule::Sep => Some(markers::CMD_SEP),
     TkRule::Redir => Some(markers::REDIRECT),
-    TkRule::CasePattern => Some(markers::CASE_PAT),
     TkRule::Comment => Some(markers::COMMENT),
-    TkRule::Expanded { exp: _ } | TkRule::EOI | TkRule::SOI | TkRule::Null | TkRule::Str => None,
+    TkRule::Expanded { exp: _ } | TkRule::EOI | TkRule::SOI | TkRule::Null | TkRule::Str | TkRule::CasePattern => None,
   }
 }
 
@@ -782,7 +807,12 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
     }
     insertions.push((token.span.start, markers::SUBSH));
     return insertions;
-  }
+  } else if token.class == TkRule::CasePattern {
+		insertions.push((token.span.end, markers::RESET));
+		insertions.push((token.span.end - 1, markers::CASE_PAT));
+		insertions.push((token.span.start, markers::OPERATOR));
+		return insertions;
+	}
 
   let token_raw = token.span.as_str();
   let mut token_chars = token_raw.char_indices().peekable();

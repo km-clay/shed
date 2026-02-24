@@ -1576,7 +1576,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
   }
 }
 
-fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
+pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
   let mut regex = String::new();
   if anchored {
     regex.push('^');
