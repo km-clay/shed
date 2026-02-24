@@ -84,12 +84,6 @@ in
         default = true;
         description = "Whether to enable syntax highlighting in the shell";
       };
-      tabStop = lib.mkOption {
-        type = lib.types.int;
-        default = 4;
-        description = "The number of spaces to use for tab stop in the shell";
-      };
-
       extraPostConfig = lib.mkOption {
         type = lib.types.str;
         default = "";
@@ -123,7 +117,6 @@ in
         "shopt prompt.trunc_prompt_path=${toString cfg.settings.promptPathSegments}"
         "shopt prompt.comp_limit=${toString cfg.settings.completionLimit}"
         "shopt prompt.highlight=${boolToString cfg.settings.syntaxHighlighting}"
-        "shopt prompt.tab_stop=${toString cfg.settings.tabStop}"
       ])
       cfg.settings.extraPostConfig
     ];

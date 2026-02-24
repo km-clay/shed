@@ -265,11 +265,12 @@ impl LexStream {
             }
 
             if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+							let span_start = self.cursor;
 							self.cursor = pos;
               return Some(Err(ShErr::full(
                 ShErrKind::ParseErr,
                 "Invalid redirection",
-                Span::new(self.cursor..pos, self.source.clone()),
+                Span::new(span_start..pos, self.source.clone()),
               )));
             } else {
               tk = self.get_token(self.cursor..pos, TkRule::Redir);

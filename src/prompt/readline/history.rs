@@ -9,7 +9,7 @@ use std::{
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::{libsh::error::{ShErr, ShErrKind, ShResult}, prompt::readline::linebuf::LineBuf};
 use crate::prelude::*;
 
 use super::vicmd::Direction; // surprisingly useful
@@ -207,7 +207,7 @@ fn dedupe_entries(entries: &[HistEntry]) -> Vec<HistEntry> {
 
 pub struct History {
   path: PathBuf,
-  pub pending: Option<(String, usize)>, // command, cursor_pos
+  pub pending: Option<LineBuf>, // command, cursor_pos
   entries: Vec<HistEntry>,
   search_mask: Vec<HistEntry>,
   no_matches: bool,
@@ -272,7 +272,7 @@ impl History {
 
   pub fn update_pending_cmd(&mut self, buf: (&str, usize)) {
 		let cursor_pos = if let Some(pending) = &self.pending {
-			pending.1
+			pending.cursor.get()
 		} else {
 			buf.1
 		};
@@ -282,7 +282,10 @@ impl History {
       term: cmd.clone(),
     };
 
-    self.pending = Some((cmd, cursor_pos));
+		if let Some(pending) = &mut self.pending {
+			pending.set_buffer(cmd);
+			pending.cursor.set(cursor_pos);
+		}
     self.constrain_entries(constraint);
   }
 
@@ -340,7 +343,7 @@ impl History {
   }
 
   pub fn get_hint(&self) -> Option<String> {
-    if self.at_pending() && self.pending.as_ref().is_some_and(|p| !p.0.is_empty()) {
+    if self.at_pending() && self.pending.as_ref().is_some_and(|p| !p.buffer.is_empty()) {
       let entry = self.hint_entry()?;
       Some(entry.command().to_string())
     } else {

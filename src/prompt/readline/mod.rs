@@ -249,7 +249,8 @@ impl FernVi {
 
       if cmd.should_submit() {
         self.editor.set_hint(None);
-        self.print_line()?;
+				self.editor.cursor.set(self.editor.cursor_max()); // Move the cursor to the very end
+        self.print_line()?; // Redraw
         self.writer.flush_write("\n")?;
         let buf = self.editor.take_buf();
         // Save command to history if auto_hist is enabled
@@ -305,8 +306,7 @@ impl FernVi {
   pub fn get_layout(&mut self, line: &str) -> Layout {
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
     let (cols, _) = get_win_size(*TTY_FILENO);
-    let tab_stop = crate::state::read_shopts(|s| s.prompt.tab_stop) as u16;
-    Layout::from_parts(tab_stop, cols, &self.prompt, to_cursor, line)
+    Layout::from_parts(cols, &self.prompt, to_cursor, line)
   }
   pub fn scroll_history(&mut self, cmd: ViCmd) {
     /*
@@ -324,19 +324,21 @@ impl FernVi {
     };
     let entry = self.history.scroll(count);
     if let Some(entry) = entry {
-			let cursor_pos = self.editor.cursor.get();
-      let pending = self.editor.take_buf();
+			let editor = std::mem::take(&mut self.editor);
       self.editor.set_buffer(entry.command().to_string());
       if self.history.pending.is_none() {
-        self.history.pending = Some((pending, cursor_pos));
+        self.history.pending = Some(editor);
       }
       self.editor.set_hint(None);
 			self.editor.move_cursor_to_end();
     } else if let Some(pending) = self.history.pending.take() {
-      self.editor.set_buffer(pending.0);
-      self.editor.cursor.set(pending.1);
-      self.editor.set_hint(None);
-    }
+      self.editor = pending;
+    } else {
+			// If we are here it should mean we are on our pending command
+			// And the user tried to scroll history down
+			// Since there is no "future" history, we should just bell and do nothing
+			self.writer.send_bell().ok();
+		}
   }
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
     if self.editor.cursor_at_max() && self.editor.has_hint() {

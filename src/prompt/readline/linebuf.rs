@@ -14,8 +14,7 @@ use crate::{
   libsh::{
     error::ShResult,
     term::{Style, Styled},
-  },
-  prelude::*, prompt::readline::{markers, register::write_register},
+  }, parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}, prelude::*, prompt::readline::{markers, register::write_register}, state::read_shopts
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -327,6 +326,7 @@ pub struct LineBuf {
 
   pub insert_mode_start_pos: Option<usize>,
   pub saved_col: Option<usize>,
+	pub auto_indent_level: usize,
 
   pub undo_stack: Vec<Edit>,
   pub redo_stack: Vec<Edit>,
@@ -409,7 +409,6 @@ impl LineBuf {
       .unwrap_or(self.buffer.len())
   }
   /// Update self.grapheme_indices with the indices of the current buffer
-  #[track_caller]
   pub fn update_graphemes(&mut self) {
     let indices: Vec<_> = self.buffer.grapheme_indices(true).map(|(i, _)| i).collect();
     self.cursor.set_max(indices.len());
@@ -1884,6 +1883,29 @@ impl LineBuf {
     let end = start + gr.len();
     self.buffer.replace_range(start..end, new);
   }
+	pub fn calc_indent_level(&mut self) {
+		let input = Arc::new(self.buffer.clone());
+		let Ok(tokens) = LexStream::new(input, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>() else {
+			log::error!("Failed to lex buffer for indent calculation");
+			return;
+		};
+		let mut level: usize = 0;
+		for tk in tokens {
+			if tk.flags.contains(TkFlags::KEYWORD) {
+				match tk.as_str() {
+					"then" | "do" => level += 1,
+					"done" | "fi" | "esac" => level = level.saturating_sub(1),
+					_ => { /* Continue */ }
+				}
+			} else if tk.class == TkRule::BraceGrpStart {
+				level += 1;
+			} else if tk.class == TkRule::BraceGrpEnd {
+				level = level.saturating_sub(1);
+			}
+		}
+
+		self.auto_indent_level = level;
+	}
   pub fn eval_motion(&mut self, verb: Option<&Verb>, motion: MotionCmd) -> MotionKind {
     let buffer = self.buffer.clone();
     if self.has_hint() {
@@ -2669,12 +2691,13 @@ impl LineBuf {
         }
       }
       Verb::Dedent => {
-        let Some((start, end)) = self.range_from_motion(&motion) else {
+        let Some((start, mut end)) = self.range_from_motion(&motion) else {
           return Ok(());
         };
         if self.grapheme_at(start) == Some("\t") {
           self.remove(start);
         }
+				end = end.min(self.grapheme_indices().len().saturating_sub(1));
         let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
         while let Some(idx) = range_indices.next() {
           let gr = self.grapheme_at(idx).unwrap();
@@ -2704,14 +2727,32 @@ impl LineBuf {
       Verb::Equalize => todo!(),
       Verb::InsertModeLineBreak(anchor) => {
         let (mut start, end) = self.this_line();
+				let auto_indent = read_shopts(|o| o.prompt.auto_indent);
         if start == 0 && end == self.cursor.max {
           match anchor {
             Anchor::After => {
               self.push('\n');
+							if auto_indent {
+								log::debug!("Calculating indent level for new line");
+								self.calc_indent_level();
+								log::debug!("Auto-indent level: {}", self.auto_indent_level);
+								let tabs = (0..self.auto_indent_level).map(|_| '\t');
+								for tab in tabs {
+									log::debug!("Pushing tab for auto-indent");
+									self.push(tab);
+								}
+							}
               self.cursor.set(self.cursor_max());
               return Ok(());
             }
             Anchor::Before => {
+							if auto_indent {
+								self.calc_indent_level();
+								let tabs = (0..self.auto_indent_level).map(|_| '\t');
+								for tab in tabs {
+									self.insert_at(0, tab);
+								}
+							}
               self.insert_at(0, '\n');
               self.cursor.set(0);
               return Ok(());
@@ -2724,11 +2765,28 @@ impl LineBuf {
           Anchor::After => {
             self.cursor.set(end);
             self.insert_at_cursor('\n');
+            self.cursor.add(1);
+						if auto_indent {
+							self.calc_indent_level();
+							let tabs = (0..self.auto_indent_level).map(|_| '\t');
+							for tab in tabs {
+								self.insert_at_cursor(tab);
+								self.cursor.add(1);
+							}
+						}
           }
           Anchor::Before => {
             self.cursor.set(start);
             self.insert_at_cursor('\n');
             self.cursor.add(1);
+						if auto_indent {
+							self.calc_indent_level();
+							let tabs = (0..self.auto_indent_level).map(|_| '\t');
+							for tab in tabs {
+								self.insert_at_cursor(tab);
+								self.cursor.add(1);
+							}
+						}
           }
         }
       }

@@ -107,6 +107,30 @@ fn write_all(fd: RawFd, buf: &str) -> nix::Result<()> {
   Ok(())
 }
 
+/// Check if a string ends with a newline, ignoring any trailing ANSI escape sequences.
+fn ends_with_newline(s: &str) -> bool {
+  let bytes = s.as_bytes();
+  let mut i = bytes.len();
+  while i > 0 {
+    // ANSI CSI sequences end with an alphabetic byte (e.g. \x1b[0m)
+    if bytes[i - 1].is_ascii_alphabetic() {
+      let term = i - 1;
+      let mut j = term;
+      // Walk back past parameter bytes (digits and ';')
+      while j > 0 && (bytes[j - 1].is_ascii_digit() || bytes[j - 1] == b';') {
+        j -= 1;
+      }
+      // Check for CSI introducer \x1b[
+      if j >= 2 && bytes[j - 1] == b'[' && bytes[j - 2] == 0x1b {
+        i = j - 2;
+        continue;
+      }
+    }
+    break;
+  }
+  i > 0 && bytes[i - 1] == b'\n'
+}
+
 // Big credit to rustyline for this
 fn width(s: &str, esc_seq: &mut u8) -> u16 {
   let w_calc = width_calculator();
@@ -734,15 +758,14 @@ impl Layout {
     }
   }
   pub fn from_parts(
-    tab_stop: u16,
     term_width: u16,
     prompt: &str,
     to_cursor: &str,
     to_end: &str,
   ) -> Self {
-    let prompt_end = Self::calc_pos(tab_stop, term_width, prompt, Pos { col: 0, row: 0 });
-    let cursor = Self::calc_pos(tab_stop, term_width, to_cursor, prompt_end);
-    let end = Self::calc_pos(tab_stop, term_width, to_end, prompt_end);
+    let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 });
+    let cursor = Self::calc_pos(term_width, to_cursor, prompt_end);
+    let end = Self::calc_pos(term_width, to_end, prompt_end);
     Layout {
       w_calc: width_calculator(),
       prompt_end,
@@ -751,7 +774,8 @@ impl Layout {
     }
   }
 
-  pub fn calc_pos(tab_stop: u16, term_width: u16, s: &str, orig: Pos) -> Pos {
+  pub fn calc_pos(term_width: u16, s: &str, orig: Pos) -> Pos {
+    const TAB_STOP: u16 = 8;
     let mut pos = orig;
     let mut esc_seq = 0;
     for c in s.graphemes(true) {
@@ -760,7 +784,7 @@ impl Layout {
         pos.col = 0;
       }
       let c_width = if c == "\t" {
-        tab_stop - (pos.col % tab_stop)
+        TAB_STOP - (pos.col % TAB_STOP)
       } else {
         width(c, &mut esc_seq)
       };
@@ -790,7 +814,6 @@ pub struct TermWriter {
   t_cols: Col, // terminal width
   buffer: String,
   w_calc: Box<dyn WidthCalculator>,
-  tab_stop: u16,
 }
 
 impl TermWriter {
@@ -802,7 +825,6 @@ impl TermWriter {
       t_cols,
       buffer: String::new(),
       w_calc,
-      tab_stop: 8, // TODO: add a way to configure this
     }
   }
   pub fn get_cursor_movement(&self, old: Pos, new: Pos) -> ShResult<String> {
@@ -959,7 +981,7 @@ impl LineWriter for TermWriter {
     self.buffer.push_str(prompt);
     self.buffer.push_str(line);
 
-    if end.col == 0 && end.row > 0 && !self.buffer.ends_with('\n') {
+    if end.col == 0 && end.row > 0 && !ends_with_newline(&self.buffer) {
       // The line has wrapped. We need to use our own line break.
       self.buffer.push('\n');
     }

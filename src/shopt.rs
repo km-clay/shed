@@ -371,7 +371,7 @@ pub struct ShOptPrompt {
   pub edit_mode: FernEditMode,
   pub comp_limit: usize,
   pub highlight: bool,
-  pub tab_stop: usize,
+	pub auto_indent: bool
 }
 
 impl ShOptPrompt {
@@ -413,15 +413,15 @@ impl ShOptPrompt {
         };
         self.highlight = val;
       }
-      "tab_stop" => {
-        let Ok(val) = val.parse::<usize>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected a positive integer for tab_stop value",
-          ));
-        };
-        self.tab_stop = val;
-      }
+			"auto_indent" => {
+				let Ok(val) = val.parse::<bool>() else {
+					return Err(ShErr::simple(
+						ShErrKind::SyntaxErr,
+						"shopt: expected 'true' or 'false' for auto_indent value",
+					));
+				};
+				self.auto_indent = val;
+			}
       "custom" => {
         todo!()
       }
@@ -440,7 +440,7 @@ impl ShOptPrompt {
               "edit_mode",
               "comp_limit",
               "highlight",
-              "tab_stop",
+              "auto_indent",
               "custom",
             ]),
           ),
@@ -480,11 +480,11 @@ impl ShOptPrompt {
         output.push_str(&format!("{}", self.highlight));
         Ok(Some(output))
       }
-      "tab_stop" => {
-        let mut output = String::from("The number of spaces used by the tab character '\\t'\n");
-        output.push_str(&format!("{}", self.tab_stop));
-        Ok(Some(output))
-      }
+			"auto_indent" => {
+				let mut output = String::from("Whether to automatically indent new lines in multiline commands\n");
+				output.push_str(&format!("{}", self.auto_indent));
+				Ok(Some(output))
+			}
       _ => Err(
         ShErr::simple(
           ShErrKind::SyntaxErr,
@@ -499,7 +499,7 @@ impl ShOptPrompt {
             "edit_mode",
             "comp_limit",
             "highlight",
-            "tab_stop",
+						"auto_indent",
           ]),
         ),
       ),
@@ -515,7 +515,7 @@ impl Display for ShOptPrompt {
     output.push(format!("edit_mode = {}", self.edit_mode));
     output.push(format!("comp_limit = {}", self.comp_limit));
     output.push(format!("highlight = {}", self.highlight));
-    output.push(format!("tab_stop = {}", self.tab_stop));
+		output.push(format!("auto_indent = {}", self.auto_indent));
 
     let final_output = output.join("\n");
 
@@ -530,7 +530,7 @@ impl Default for ShOptPrompt {
       edit_mode: FernEditMode::Vi,
       comp_limit: 100,
       highlight: true,
-      tab_stop: 4,
+			auto_indent: true
     }
   }
 }
