@@ -194,10 +194,11 @@ impl ScopeStack {
     flat_vars
   }
   pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) {
-    if flags.contains(VarFlags::LOCAL) {
+    let is_local = self.is_local_var(var_name);
+    if flags.contains(VarFlags::LOCAL) || is_local {
       self.set_var_local(var_name, val, flags);
-    } else {
-      self.set_var_global(var_name, val, flags);
+		} else {
+			self.set_var_global(var_name, val, flags);
     }
   }
   fn set_var_global(&mut self, var_name: &str, val: &str, flags: VarFlags) {
@@ -222,6 +223,21 @@ impl ScopeStack {
     // Fallback to env var
     std::env::var(var_name).unwrap_or_default()
   }
+	pub fn is_local_var(&self, var_name: &str) -> bool {
+		self.scopes
+			.last()
+			.is_some_and(|s|
+				s.get_var_flags(var_name).is_some_and(|flags| flags.contains(VarFlags::LOCAL))
+			)
+	}
+	pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
+		for scope in self.scopes.iter().rev() {
+			if scope.var_exists(var_name) {
+				return scope.get_var_flags(var_name);
+			}
+		}
+		None
+	}
   pub fn get_param(&self, param: ShellParam) -> String {
     if param.is_global()
       && let Some(val) = self.global_params.get(&param.to_string())
@@ -644,6 +660,9 @@ impl VarTab {
       std::env::var(var).unwrap_or_default()
     }
   }
+	pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
+		self.vars.get(var_name).map(|var| var.flags)
+	}
   pub fn unset_var(&mut self, var_name: &str) {
     self.vars.remove(var_name);
     unsafe { env::remove_var(var_name) };
@@ -658,7 +677,7 @@ impl VarTab {
         unsafe { env::set_var(var_name, val) };
       }
     } else {
-      let mut var = Var::new(VarKind::Str(val.to_string()), VarFlags::NONE);
+      let mut var = Var::new(VarKind::Str(val.to_string()), flags);
       if flags.contains(VarFlags::EXPORT) {
         var.mark_for_export();
         unsafe { env::set_var(var_name, var.to_string()) };

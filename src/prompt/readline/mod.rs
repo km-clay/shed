@@ -323,10 +323,8 @@ impl FernVi {
       _ => unreachable!(),
     };
     let entry = self.history.scroll(count);
-    log::info!("Scrolled history, got entry: {:?}", entry.as_ref());
     if let Some(entry) = entry {
 			let cursor_pos = self.editor.cursor.get();
-			log::info!("Saving pending command to history: {:?} at cursor pos {}", self.editor.as_str(), cursor_pos);
       let pending = self.editor.take_buf();
       self.editor.set_buffer(entry.command().to_string());
       if self.history.pending.is_none() {
@@ -335,7 +333,6 @@ impl FernVi {
       self.editor.set_hint(None);
 			self.editor.move_cursor_to_end();
     } else if let Some(pending) = self.history.pending.take() {
-      log::info!("Setting buffer to pending command: {:?}", &pending);
       self.editor.set_buffer(pending.0);
       self.editor.cursor.set(pending.1);
       self.editor.set_hint(None);
@@ -378,7 +375,6 @@ impl FernVi {
       self.highlighter.load_input(&line,self.editor.cursor_byte_pos());
       self.highlighter.highlight();
       let highlighted = self.highlighter.take();
-			log::info!("Highlighting line. highlighted: {:?}, hint: {:?}", highlighted, hint);
       format!("{highlighted}{hint}")
     } else {
       format!("{line}{hint}")

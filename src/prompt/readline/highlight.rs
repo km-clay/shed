@@ -45,7 +45,6 @@ impl Highlighter {
   /// indicating token types and sub-token constructs (strings, variables, etc.)
   pub fn load_input(&mut self, input: &str, linebuf_cursor_pos: usize) {
     let input = annotate_input(input);
-		log::debug!("Annotated input: {:?}", input);
     self.input = input;
 		self.linebuf_cursor_pos = linebuf_cursor_pos;
   }
