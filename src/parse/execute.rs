@@ -2,7 +2,7 @@ use std::{collections::{HashSet, VecDeque}, os::unix::fs::PermissionsExt};
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, cd::cd, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, export::{export, local}, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, zoltraak::zoltraak
+    alias::{alias, unalias}, cd::cd, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, true_builtin, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
   },
   expand::{expand_aliases, glob_to_regex},
   jobs::{ChildProc, JobStack, dispatch_job},
@@ -90,7 +90,7 @@ impl Drop for VarCtxGuard {
   fn drop(&mut self) {
     write_vars(|v| {
       for var in &self.vars {
-        v.unset_var(var);
+        v.unset_var(var).ok();
       }
     });
   }
@@ -569,7 +569,7 @@ impl Dispatcher {
 					.zip(chunk.iter().chain(std::iter::repeat(&empty)));
 
 				for (var, val) in chunk_iter {
-					write_vars(|v| v.set_var(&var.to_string(), &val.to_string(), VarFlags::NONE));
+					write_vars(|v| v.set_var(&var.to_string(), &val.to_string(), VarFlags::NONE))?;
 					for_guard.vars.insert(var.to_string());
 				}
 
@@ -769,6 +769,16 @@ impl Dispatcher {
 			"dirs" => dirs(cmd, io_stack_mut, curr_job_mut),
 			"exec" => exec::exec_builtin(cmd, io_stack_mut, curr_job_mut),
 			"eval" => eval::eval(cmd, io_stack_mut, curr_job_mut),
+			"readonly" => readonly(cmd, io_stack_mut, curr_job_mut),
+			"unset" => unset(cmd, io_stack_mut, curr_job_mut),
+			"true" | ":" => {
+				state::set_status(0);
+				Ok(())
+			},
+			"false" => {
+				state::set_status(1);
+				Ok(())
+			},
 			_ => unimplemented!(
 				"Have not yet added support for builtin '{}'",
 				cmd_raw
@@ -885,7 +895,7 @@ impl Dispatcher {
           let var = var.span.as_str();
           let val = val.expand()?.get_words().join(" ");
           match kind {
-            AssignKind::Eq => write_vars(|v| v.set_var(var, &val, VarFlags::EXPORT)),
+            AssignKind::Eq => write_vars(|v| v.set_var(var, &val, VarFlags::EXPORT))?,
             AssignKind::PlusEq => todo!(),
             AssignKind::MinusEq => todo!(),
             AssignKind::MultEq => todo!(),
@@ -902,7 +912,7 @@ impl Dispatcher {
           let var = var.span.as_str();
           let val = val.expand()?.get_words().join(" ");
           match kind {
-            AssignKind::Eq => write_vars(|v| v.set_var(var, &val, VarFlags::NONE)),
+            AssignKind::Eq => write_vars(|v| v.set_var(var, &val, VarFlags::NONE))?,
             AssignKind::PlusEq => todo!(),
             AssignKind::MinusEq => todo!(),
             AssignKind::MultEq => todo!(),

@@ -8,13 +8,13 @@ use crate::{
     execute::prepare_argv,
     lex::{Span, Tk},
   },
-  procio::{IoFrame, IoStack, RedirGuard},
+  procio::{IoFrame, IoStack, RedirGuard}, state,
 };
 
 pub mod alias;
 pub mod cd;
 pub mod echo;
-pub mod export;
+pub mod varcmds;
 pub mod flowctl;
 pub mod jobctl;
 pub mod pwd;
@@ -29,10 +29,10 @@ pub mod dirstack;
 pub mod exec;
 pub mod eval;
 
-pub const BUILTINS: [&str; 28] = [
+pub const BUILTINS: [&str; 33] = [
   "echo", "cd", "read", "export", "local", "pwd", "source", "shift", "jobs", "fg", "bg", "disown", "alias", "unalias",
   "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin", "command", "trap",
-	"pushd", "popd", "dirs", "exec", "eval"
+	"pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly", "unset"
 ];
 
 /// Sets up a builtin command
@@ -92,4 +92,19 @@ pub fn setup_builtin(
   // We return the io_frame because the caller needs to also call
   // io_frame.restore()
   Ok((argv, guard))
+}
+
+pub fn true_builtin() -> ShResult<()> {
+	state::set_status(0);
+	Ok(())
+}
+
+pub fn false_builtin() -> ShResult<()> {
+	state::set_status(1);
+	Ok(())
+}
+
+pub fn noop_builtin() -> ShResult<()> {
+	state::set_status(0);
+	Ok(())
 }

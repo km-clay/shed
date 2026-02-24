@@ -151,13 +151,16 @@ impl ScopeStack {
   pub fn cur_scope_mut(&mut self) -> &mut VarTab {
     self.scopes.last_mut().unwrap()
   }
-  pub fn unset_var(&mut self, var_name: &str) {
+  pub fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
     for scope in self.scopes.iter_mut().rev() {
       if scope.var_exists(var_name) {
-        scope.unset_var(var_name);
-        return;
+        return scope.unset_var(var_name);
       }
     }
+		Err(ShErr::simple(
+			ShErrKind::ExecFail,
+			format!("Variable '{}' not found", var_name)
+		))
   }
   pub fn export_var(&mut self, var_name: &str) {
     for scope in self.scopes.iter_mut().rev() {
@@ -187,22 +190,26 @@ impl ScopeStack {
     }
     flat_vars
   }
-  pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) {
+  pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) -> ShResult<()> {
     let is_local = self.is_local_var(var_name);
     if flags.contains(VarFlags::LOCAL) || is_local {
-      self.set_var_local(var_name, val, flags);
+      self.set_var_local(var_name, val, flags)
 		} else {
-			self.set_var_global(var_name, val, flags);
+			self.set_var_global(var_name, val, flags)
     }
   }
-  fn set_var_global(&mut self, var_name: &str, val: &str, flags: VarFlags) {
+  fn set_var_global(&mut self, var_name: &str, val: &str, flags: VarFlags) -> ShResult<()> {
     if let Some(scope) = self.scopes.first_mut() {
-      scope.set_var(var_name, val, flags);
+      scope.set_var(var_name, val, flags)
+    } else {
+      Ok(())
     }
   }
-  fn set_var_local(&mut self, var_name: &str, val: &str, flags: VarFlags) {
+  fn set_var_local(&mut self, var_name: &str, val: &str, flags: VarFlags) -> ShResult<()> {
     if let Some(scope) = self.scopes.last_mut() {
-      scope.set_var(var_name, val, flags);
+      scope.set_var(var_name, val, flags)
+    } else {
+      Ok(())
     }
   }
   pub fn get_var(&self, var_name: &str) -> String {
@@ -477,6 +484,9 @@ impl Var {
   pub fn mark_for_export(&mut self) {
     self.flags.set(VarFlags::EXPORT, true);
   }
+	pub fn flags(&self) -> VarFlags {
+		self.flags
+	}
 }
 
 impl Display for Var {
@@ -654,13 +664,27 @@ impl VarTab {
 	pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
 		self.vars.get(var_name).map(|var| var.flags)
 	}
-  pub fn unset_var(&mut self, var_name: &str) {
+  pub fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
+		if let Some(var) = self.vars.get(var_name) && var.flags.contains(VarFlags::READONLY) {
+			return Err(ShErr::simple(
+				ShErrKind::ExecFail,
+				format!("cannot unset readonly variable '{}'", var_name)
+			));
+		}
     self.vars.remove(var_name);
     unsafe { env::remove_var(var_name) };
+		Ok(())
   }
-  pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) {
+  pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) -> ShResult<()> {
     if let Some(var) = self.vars.get_mut(var_name) {
+			if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {
+				return Err(ShErr::simple(
+					ShErrKind::ExecFail,
+					format!("Variable '{}' is readonly", var_name)
+				));
+			}
       var.kind = VarKind::Str(val.to_string());
+      var.flags |= flags;
       if var.flags.contains(VarFlags::EXPORT) || flags.contains(VarFlags::EXPORT) {
         if flags.contains(VarFlags::EXPORT) && !var.flags.contains(VarFlags::EXPORT) {
           var.mark_for_export();
@@ -675,6 +699,7 @@ impl VarTab {
       }
       self.vars.insert(var_name.to_string(), var);
     }
+		Ok(())
   }
   pub fn var_exists(&self, var_name: &str) -> bool {
     if let Ok(param) = var_name.parse::<ShellParam>() {
