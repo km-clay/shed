@@ -285,6 +285,8 @@ impl History {
 		if let Some(pending) = &mut self.pending {
 			pending.set_buffer(cmd);
 			pending.cursor.set(cursor_pos);
+		} else {
+			self.pending = Some(LineBuf::new().with_initial(&cmd, cursor_pos));
 		}
     self.constrain_entries(constraint);
   }
@@ -357,10 +359,6 @@ impl History {
       .saturating_add_signed(offset)
       .clamp(0, self.search_mask.len());
 
-    log::debug!(
-      "Scrolling history by offset {offset} from cursor at index {}",
-      self.cursor
-    );
     self.search_mask.get(self.cursor)
   }
 

@@ -11,7 +11,7 @@ use crate::parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule, is_field_sep, 
 use crate::parse::{Redir, RedirType};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::state::{
-  LogTab, VarFlags, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars,
+  LogTab, VarFlags, read_logic, read_vars, write_jobs, write_meta, write_vars,
 };
 use crate::{jobs, prelude::*};
 
@@ -36,7 +36,9 @@ pub const PROC_SUB_OUT: char = '\u{fdd6}';
 /// arguments Without this marker, it would be handled like an empty string,
 /// which breaks some commands
 pub const NULL_EXPAND: char = '\u{fdd7}';
-
+/// Explicit marker for argument separation
+/// This is used to join the arguments given by "$@", and preserves exact formatting
+/// of the original arguments, including quoting
 pub const ARG_SEP: char = '\u{fdd8}';
 
 impl Tk {
