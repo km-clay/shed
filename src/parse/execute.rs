@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::{collections::{HashSet, VecDeque}, os::unix::fs::PermissionsExt};
 
 use crate::{
   builtin::{
@@ -9,7 +9,7 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   prelude::*,
   procio::{IoMode, IoStack},
-  state::{self, ShFunc, VarFlags, read_logic, write_jobs, write_logic, write_vars},
+  state::{self, ShFunc, VarFlags, read_logic, read_shopts, write_jobs, write_logic, write_vars},
 };
 
 use super::{
@@ -20,6 +20,38 @@ use super::{
 
 thread_local! {
   static RECURSE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub fn is_in_path(name: &str) -> bool {
+	if name.starts_with("./") || name.starts_with("../") || name.starts_with('/') {
+		let path = Path::new(name);
+		if path.exists() && path.is_file() && !path.is_dir() {
+			let meta = match path.metadata() {
+				Ok(m) => m,
+				Err(_) => return false,
+			};
+			if meta.permissions().mode() & 0o111 != 0 {
+				return true;
+			}
+		}
+		false
+	} else {
+		let Ok(path) = env::var("PATH") else { return false };
+		let paths = path.split(':');
+		for path in paths {
+			let full_path = Path::new(path).join(name);
+			if full_path.exists() && full_path.is_file() && !full_path.is_dir() {
+				let meta = match full_path.metadata() {
+					Ok(m) => m,
+					Err(_) => continue,
+				};
+				if meta.permissions().mode() & 0o111 != 0 {
+					return true;
+				}
+			}
+		}
+		false
+	}
 }
 
 pub struct ScopeGuard;
@@ -190,8 +222,9 @@ impl Dispatcher {
       self.exec_builtin(node)
     } else if is_subsh(node.get_command().cloned()) {
       self.exec_subsh(node)
-    } else if crate::state::read_shopts(|s| s.core.autocd) && Path::new(cmd.span.as_str()).is_dir()
-    {
+    } else if read_shopts(|s| s.core.autocd)
+		&& Path::new(cmd.span.as_str()).is_dir()
+		&& !is_in_path(cmd.span.as_str()) {
       let dir = cmd.span.as_str().to_string();
       let stack = IoStack {
         stack: self.io_stack.clone(),
@@ -293,7 +326,7 @@ impl Dispatcher {
       unreachable!()
     };
 
-    let max_depth = crate::state::read_shopts(|s| s.core.max_recurse_depth);
+    let max_depth = read_shopts(|s| s.core.max_recurse_depth);
     let depth = RECURSE_DEPTH.with(|d| {
       let cur = d.get();
       d.set(cur + 1);
