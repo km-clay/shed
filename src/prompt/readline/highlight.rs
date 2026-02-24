@@ -184,14 +184,16 @@ impl Highlighter {
             input_chars.next();
           }
 
+          let inner_clean = Self::strip_markers(&inner);
+
           // Determine prefix from content (handles both <( and >( for proc subs)
           let prefix = match ch {
             markers::CMD_SUB => "$(",
             markers::SUBSH => "(",
             markers::PROC_SUB => {
-              if inner.starts_with("<(") {
+              if inner_clean.starts_with("<(") {
                 "<("
-              } else if inner.starts_with(">(") {
+              } else if inner_clean.starts_with(">(") {
                 ">("
               } else {
                 "<("
@@ -199,14 +201,13 @@ impl Highlighter {
             }
             _ => unreachable!(),
           };
-
           let inner_content = if incomplete {
-            inner.strip_prefix(prefix).unwrap_or(&inner)
+            inner_clean.strip_prefix(prefix).unwrap_or(&inner_clean)
           } else {
-            inner
+            inner_clean
               .strip_prefix(prefix)
               .and_then(|s| s.strip_suffix(")"))
-              .unwrap_or(&inner)
+              .unwrap_or(&inner_clean)
           };
 
           let mut recursive_highlighter = Self::new();

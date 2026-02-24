@@ -155,7 +155,9 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -
     return Ok(());
   }
 
-  let mut dispatcher = Dispatcher::new(parser.extract_nodes(), interactive);
+	let nodes = parser.extract_nodes();
+
+  let mut dispatcher = Dispatcher::new(nodes, interactive);
   if let Some(mut stack) = io_stack {
     dispatcher.io_stack.extend(stack.drain(..));
   }

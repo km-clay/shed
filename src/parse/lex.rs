@@ -659,6 +659,9 @@ impl LexStream {
         }
         _ if is_cmd_sub(text) => {
           new_tk.mark(TkFlags::IS_CMDSUB);
+					if self.next_is_cmd() {
+						new_tk.mark(TkFlags::IS_CMD);
+					}
           self.set_next_is_cmd(false);
         }
         _ => {
@@ -846,11 +849,26 @@ pub fn is_field_sep(ch: char) -> bool {
 }
 
 pub fn is_keyword(slice: &str) -> bool {
-  KEYWORDS.contains(&slice) || (slice.ends_with("()") && !slice.ends_with("\\()"))
+  KEYWORDS.contains(&slice) || ends_with_unescaped(slice, "()")
 }
 
 pub fn is_cmd_sub(slice: &str) -> bool {
-  (slice.starts_with("$(") && slice.ends_with(')')) && !slice.ends_with("\\)")
+  slice.starts_with("$(") && ends_with_unescaped(slice,")")
+}
+
+pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
+	slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
+}
+
+pub fn pos_is_escaped(slice: &str, pos: usize) -> bool {
+	let bytes = slice.as_bytes();
+	let mut escaped = false;
+	let mut i = pos;
+	while i > 0 && bytes[i - 1] == b'\\' {
+		escaped = !escaped;
+		i -= 1;
+	}
+	escaped
 }
 
 pub fn lookahead(pat: &str, mut chars: Chars) -> Option<usize> {
