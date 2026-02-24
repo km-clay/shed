@@ -9,7 +9,7 @@ use crate::{
     error::{ShErr, ShErrKind, ShResult},
     utils::RedirVecUtils,
   },
-  parse::{Redir, RedirType, get_redir_file},
+  parse::{get_redir_file, Redir, RedirType},
   prelude::*,
 };
 
@@ -39,9 +39,9 @@ pub enum IoMode {
     buf: String,
     pipe: Arc<OwnedFd>,
   },
-	Close {
-		tgt_fd: RawFd,
-	}
+  Close {
+    tgt_fd: RawFd,
+  },
 }
 
 impl IoMode {
@@ -79,7 +79,7 @@ impl IoMode {
       let path_raw = path.as_os_str().to_str().unwrap_or_default().to_string();
 
       let expanded_path = Expander::from_raw(&path_raw)?.expand()?.join(" "); // should just be one string, will have to find some way to handle a return of
-      // multiple
+                                                                              // multiple
 
       let expanded_pathbuf = PathBuf::from(expanded_path);
 
@@ -157,17 +157,17 @@ impl<R: Read> IoBuf<R> {
 pub struct RedirGuard(IoFrame);
 
 impl RedirGuard {
-	pub fn persist(mut self) {
-		if let Some(saved) = self.0.saved_io.take() {
-			close(saved.0).ok();
-			close(saved.1).ok();
-			close(saved.2).ok();
-		}
+  pub fn persist(mut self) {
+    if let Some(saved) = self.0.saved_io.take() {
+      close(saved.0).ok();
+      close(saved.1).ok();
+      close(saved.2).ok();
+    }
 
-		// the guard is dropped here
-		// but since we took the saved fds
-		// the drop does not restore them
-	}
+    // the guard is dropped here
+    // but since we took the saved fds
+    // the drop does not restore them
+  }
 }
 
 impl Drop for RedirGuard {

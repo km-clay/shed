@@ -3,12 +3,12 @@ use std::sync::LazyLock;
 use crate::{
   builtin::setup_builtin,
   expand::expand_prompt,
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{get_opts_from_tokens, Opt, OptSpec},
   jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
-  procio::{IoStack, borrow_fd},
+  procio::{borrow_fd, IoStack},
   state,
 };
 

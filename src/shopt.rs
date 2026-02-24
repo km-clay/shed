@@ -212,12 +212,10 @@ impl ShOptCore {
       }
       "bell_enabled" => {
         let Ok(val) = val.parse::<bool>() else {
-          return Err(
-            ShErr::simple(
-              ShErrKind::SyntaxErr,
-              "shopt: expected 'true' or 'false' for bell_enabled value",
-            ),
-          );
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            "shopt: expected 'true' or 'false' for bell_enabled value",
+          ));
         };
         self.bell_enabled = val;
       }
@@ -371,7 +369,7 @@ pub struct ShOptPrompt {
   pub edit_mode: FernEditMode,
   pub comp_limit: usize,
   pub highlight: bool,
-	pub auto_indent: bool
+  pub auto_indent: bool,
 }
 
 impl ShOptPrompt {
@@ -413,15 +411,15 @@ impl ShOptPrompt {
         };
         self.highlight = val;
       }
-			"auto_indent" => {
-				let Ok(val) = val.parse::<bool>() else {
-					return Err(ShErr::simple(
-						ShErrKind::SyntaxErr,
-						"shopt: expected 'true' or 'false' for auto_indent value",
-					));
-				};
-				self.auto_indent = val;
-			}
+      "auto_indent" => {
+        let Ok(val) = val.parse::<bool>() else {
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            "shopt: expected 'true' or 'false' for auto_indent value",
+          ));
+        };
+        self.auto_indent = val;
+      }
       "custom" => {
         todo!()
       }
@@ -480,11 +478,12 @@ impl ShOptPrompt {
         output.push_str(&format!("{}", self.highlight));
         Ok(Some(output))
       }
-			"auto_indent" => {
-				let mut output = String::from("Whether to automatically indent new lines in multiline commands\n");
-				output.push_str(&format!("{}", self.auto_indent));
-				Ok(Some(output))
-			}
+      "auto_indent" => {
+        let mut output =
+          String::from("Whether to automatically indent new lines in multiline commands\n");
+        output.push_str(&format!("{}", self.auto_indent));
+        Ok(Some(output))
+      }
       _ => Err(
         ShErr::simple(
           ShErrKind::SyntaxErr,
@@ -499,7 +498,7 @@ impl ShOptPrompt {
             "edit_mode",
             "comp_limit",
             "highlight",
-						"auto_indent",
+            "auto_indent",
           ]),
         ),
       ),
@@ -515,7 +514,7 @@ impl Display for ShOptPrompt {
     output.push(format!("edit_mode = {}", self.edit_mode));
     output.push(format!("comp_limit = {}", self.comp_limit));
     output.push(format!("highlight = {}", self.highlight));
-		output.push(format!("auto_indent = {}", self.auto_indent));
+    output.push(format!("auto_indent = {}", self.auto_indent));
 
     let final_output = output.join("\n");
 
@@ -530,7 +529,7 @@ impl Default for ShOptPrompt {
       edit_mode: FernEditMode::Vi,
       comp_limit: 100,
       highlight: true,
-			auto_indent: true
+      auto_indent: true,
     }
   }
 }

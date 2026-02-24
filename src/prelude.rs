@@ -19,17 +19,17 @@ pub use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, 
 pub use bitflags::bitflags;
 pub use nix::{
   errno::Errno,
-  fcntl::{OFlag, open},
+  fcntl::{open, OFlag},
   libc::{self, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
   sys::{
-    signal::{self, SigHandler, SigSet, SigmaskHow, Signal, kill, killpg, pthread_sigmask, signal},
+    signal::{self, kill, killpg, pthread_sigmask, signal, SigHandler, SigSet, SigmaskHow, Signal},
     stat::Mode,
     termios::{self},
-    wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid},
+    wait::{waitpid, WaitPidFlag as WtFlag, WaitStatus as WtStat},
   },
   unistd::{
-    ForkResult, Pid, close, dup, dup2, execvpe, fork, getpgid, getpgrp, isatty, pipe, read,
-    setpgid, tcgetpgrp, tcsetpgrp, write,
+    close, dup, dup2, execvpe, fork, getpgid, getpgrp, isatty, pipe, read, setpgid, tcgetpgrp,
+    tcsetpgrp, write, ForkResult, Pid,
   },
 };
 

@@ -4,7 +4,7 @@ use crate::{
   builtin::setup_builtin,
   jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node, execute::ExecArgs},
+  parse::{execute::ExecArgs, NdRule, Node},
   procio::IoStack,
   state,
 };
@@ -40,11 +40,7 @@ pub fn exec_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> Sh
   // execvpe only returns on error
   let cmd_str = cmd.to_str().unwrap().to_string();
   match e {
-    Errno::ENOENT => {
-      Err(ShErr::full(ShErrKind::CmdNotFound(cmd_str), "", span))
-    }
-    _ => {
-      Err(ShErr::full(ShErrKind::Errno(e), format!("{e}"), span))
-    }
+    Errno::ENOENT => Err(ShErr::full(ShErrKind::CmdNotFound(cmd_str), "", span)),
+    _ => Err(ShErr::full(ShErrKind::Errno(e), format!("{e}"), span)),
   }
 }

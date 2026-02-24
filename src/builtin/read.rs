@@ -7,13 +7,13 @@ use nix::{
 
 use crate::{
   builtin::setup_builtin,
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{get_opts_from_tokens, Opt, OptSpec},
   jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
-  procio::{IoStack, borrow_fd},
+  procio::{borrow_fd, IoStack},
   prompt::readline::term::RawModeGuard,
-  state::{self, VarFlags, read_vars, write_vars},
+  state::{self, read_vars, write_vars, VarFlags},
 };
 
 pub const READ_OPTS: [OptSpec; 7] = [

@@ -34,8 +34,7 @@ use crate::prelude::*;
 pub(crate) static mut SAVED_TERMIOS: Option<Option<Termios>> = None;
 
 pub static TTY_FILENO: LazyLock<RawFd> = LazyLock::new(|| {
-	open("/dev/tty", OFlag::O_RDWR, Mode::empty())
-		.expect("Failed to open /dev/tty")
+  open("/dev/tty", OFlag::O_RDWR, Mode::empty()).expect("Failed to open /dev/tty")
 });
 
 #[derive(Debug)]

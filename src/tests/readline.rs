@@ -6,12 +6,12 @@ use crate::{
     term::{Style, Styled},
   },
   prompt::readline::{
-    FernVi,
     history::History,
     keys::{KeyCode, KeyEvent, ModKeys},
     linebuf::LineBuf,
-    term::{KeyReader, LineWriter, raw_mode},
+    term::{raw_mode, KeyReader, LineWriter},
     vimode::{ViInsert, ViMode, ViNormal},
+    FernVi,
   },
 };
 
@@ -175,9 +175,9 @@ impl LineWriter for TestWriter {
     Ok(())
   }
 
-	fn send_bell(&mut self) -> ShResult<()> {
-		Ok(())
-	}
+  fn send_bell(&mut self) -> ShResult<()> {
+    Ok(())
+  }
 }
 
 // NOTE: FernVi structure has changed significantly and readline() method no
@@ -605,31 +605,27 @@ fn editor_delete_line_up() {
 #[test]
 fn editor_insert_at_line_start() {
   // I should move cursor to position 0 when line starts with non-whitespace
-  assert_eq!(
-    normal_cmd("I", "hello world", 5),
-    ("hello world".into(), 0)
-  );
+  assert_eq!(normal_cmd("I", "hello world", 5), ("hello world".into(), 0));
   // I should skip leading whitespace
   assert_eq!(
     normal_cmd("I", "  hello world", 8),
     ("  hello world".into(), 2)
   );
-  // I should move to the first non-whitespace on the current line in a multiline buffer
+  // I should move to the first non-whitespace on the current line in a multiline
+  // buffer
   assert_eq!(
     normal_cmd("I", "first line\nsecond line", 14),
     ("first line\nsecond line".into(), 11)
   );
   // I should land on position 0 when cursor is already at 0
-  assert_eq!(
-    normal_cmd("I", "hello", 0),
-    ("hello".into(), 0)
-  );
+  assert_eq!(normal_cmd("I", "hello", 0), ("hello".into(), 0));
 }
 
 #[test]
 fn editor_f_char_from_position_zero() {
   // f<char> at position 0 should skip the cursor and find the next occurrence
-  // Regression: previously at pos 0, f would match the char under the cursor itself
+  // Regression: previously at pos 0, f would match the char under the cursor
+  // itself
   assert_eq!(
     normal_cmd("fa", "abcaef", 0),
     ("abcaef".into(), 3) // should find second 'a', not the 'a' at position 0

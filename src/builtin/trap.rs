@@ -11,7 +11,7 @@ use crate::{
   jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{NdRule, Node},
-  procio::{IoStack, borrow_fd},
+  procio::{borrow_fd, IoStack},
   state::{self, read_logic, write_logic},
 };
 

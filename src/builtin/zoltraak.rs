@@ -1,12 +1,12 @@
 use std::{os::unix::fs::OpenOptionsExt, sync::LazyLock};
 
 use crate::{
-  getopt::{Opt, OptSet, OptSpec, get_opts_from_tokens},
+  getopt::{get_opts_from_tokens, Opt, OptSet, OptSpec},
   jobs::JobBldr,
   libsh::error::{Note, ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
-  procio::{IoStack, borrow_fd},
+  procio::{borrow_fd, IoStack},
 };
 
 use super::setup_builtin;

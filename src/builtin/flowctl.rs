@@ -1,6 +1,6 @@
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node, execute::prepare_argv},
+  parse::{execute::prepare_argv, NdRule, Node},
   prelude::*,
 };
 

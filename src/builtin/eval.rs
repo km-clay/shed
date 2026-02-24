@@ -4,7 +4,7 @@ use crate::{
   builtin::setup_builtin,
   jobs::JobBldr,
   libsh::error::ShResult,
-  parse::{NdRule, Node, execute::exec_input},
+  parse::{execute::exec_input, NdRule, Node},
   procio::IoStack,
   state,
 };
@@ -25,10 +25,11 @@ pub fn eval(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     return Ok(());
   }
 
-	let joined_argv = expanded_argv.into_iter()
-		.map(|(s, _)| s)
-		.collect::<Vec<_>>()
-		.join(" ");
+  let joined_argv = expanded_argv
+    .into_iter()
+    .map(|(s, _)| s)
+    .collect::<Vec<_>>()
+    .join(" ");
 
-	exec_input(joined_argv, None, false)
+  exec_input(joined_argv, None, false)
 }

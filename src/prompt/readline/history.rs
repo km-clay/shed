@@ -9,8 +9,11 @@ use std::{
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::{libsh::error::{ShErr, ShErrKind, ShResult}, prompt::readline::linebuf::LineBuf};
 use crate::prelude::*;
+use crate::{
+  libsh::error::{ShErr, ShErrKind, ShResult},
+  prompt::readline::linebuf::LineBuf,
+};
 
 use super::vicmd::Direction; // surprisingly useful
 
@@ -271,23 +274,23 @@ impl History {
   }
 
   pub fn update_pending_cmd(&mut self, buf: (&str, usize)) {
-		let cursor_pos = if let Some(pending) = &self.pending {
-			pending.cursor.get()
-		} else {
-			buf.1
-		};
+    let cursor_pos = if let Some(pending) = &self.pending {
+      pending.cursor.get()
+    } else {
+      buf.1
+    };
     let cmd = buf.0.to_string();
     let constraint = SearchConstraint {
       kind: SearchKind::Prefix,
       term: cmd.clone(),
     };
 
-		if let Some(pending) = &mut self.pending {
-			pending.set_buffer(cmd);
-			pending.cursor.set(cursor_pos);
-		} else {
-			self.pending = Some(LineBuf::new().with_initial(&cmd, cursor_pos));
-		}
+    if let Some(pending) = &mut self.pending {
+      pending.set_buffer(cmd);
+      pending.cursor.set(cursor_pos);
+    } else {
+      self.pending = Some(LineBuf::new().with_initial(&cmd, cursor_pos));
+    }
     self.constrain_entries(constraint);
   }
 

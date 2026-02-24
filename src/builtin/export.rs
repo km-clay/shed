@@ -3,8 +3,8 @@ use crate::{
   libsh::error::ShResult,
   parse::{NdRule, Node},
   prelude::*,
-  procio::{IoStack, borrow_fd},
-  state::{self, VarFlags, read_vars, write_vars},
+  procio::{borrow_fd, IoStack},
+  state::{self, read_vars, write_vars, VarFlags},
 };
 
 use super::setup_builtin;
@@ -35,10 +35,10 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
     for (arg, _) in argv {
       if let Some((var, val)) = arg.split_once('=') {
         write_vars(|v| v.set_var(var, val, VarFlags::EXPORT)); // Export an assignment like
-      // 'foo=bar'
+                                                               // 'foo=bar'
       } else {
         write_vars(|v| v.export_var(&arg)); // Export an existing variable, if
-        // any
+                                            // any
       }
     }
   }
@@ -59,16 +59,17 @@ pub fn local(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
 
   if argv.is_empty() {
     // Display the local variables
-		let vars_output = read_vars(|v| {
-			let mut vars = v.flatten_vars()
-				.into_iter()
-				.map(|(k, v)| format!("{}={}", k, v))
-				.collect::<Vec<String>>();
-			vars.sort();
-			let mut vars_joined = vars.join("\n");
-			vars_joined.push('\n');
-			vars_joined
-		});
+    let vars_output = read_vars(|v| {
+      let mut vars = v
+        .flatten_vars()
+        .into_iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<String>>();
+      vars.sort();
+      let mut vars_joined = vars.join("\n");
+      vars_joined.push('\n');
+      vars_joined
+    });
 
     let stdout = borrow_fd(STDOUT_FILENO);
     write(stdout, vars_output.as_bytes())?; // Write it

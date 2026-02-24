@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use crate::state::{LogTab, MetaTab, ScopeStack, ShellParam, VarFlags, VarTab};
+use std::path::PathBuf;
 
 // ============================================================================
 // ScopeStack Tests - Variable Scoping
@@ -11,8 +11,8 @@ fn scopestack_new() {
 
   // Should start with one global scope
   assert!(stack.var_exists("PATH") || !stack.var_exists("PATH")); // Just check
-  // it doesn't
-  // panic
+                                                                  // it doesn't
+                                                                  // panic
 }
 
 #[test]
@@ -296,13 +296,21 @@ fn scopestack_local_var_mutation() {
 
   // `foo="bar"` — reassign without LOCAL flag (plain assignment)
   stack.set_var("foo", "bar", VarFlags::NONE);
-  assert_eq!(stack.get_var("foo"), "bar", "Local var should be mutated in place");
+  assert_eq!(
+    stack.get_var("foo"),
+    "bar",
+    "Local var should be mutated in place"
+  );
 
   // Ascend back to global
   stack.ascend();
 
   // foo should not exist in global scope
-  assert_eq!(stack.get_var("foo"), "", "Local var should not leak to global scope");
+  assert_eq!(
+    stack.get_var("foo"),
+    "",
+    "Local var should not leak to global scope"
+  );
 }
 
 #[test]
@@ -318,13 +326,21 @@ fn scopestack_local_var_uninitialized() {
 
   // `foo="bar"` — assign a value later
   stack.set_var("foo", "bar", VarFlags::NONE);
-  assert_eq!(stack.get_var("foo"), "bar", "Uninitialized local should be assignable");
+  assert_eq!(
+    stack.get_var("foo"),
+    "bar",
+    "Uninitialized local should be assignable"
+  );
 
   // Ascend back to global
   stack.ascend();
 
   // foo should not exist in global scope
-  assert_eq!(stack.get_var("foo"), "", "Local var should not leak to global scope");
+  assert_eq!(
+    stack.get_var("foo"),
+    "",
+    "Local var should not leak to global scope"
+  );
 }
 
 // ============================================================================
@@ -740,11 +756,14 @@ fn dirstack_pushd_rotation_with_cwd() {
 
   assert_eq!(new_cwd, Some(PathBuf::from("/var")));
   let remaining: Vec<_> = meta.dirs().iter().collect();
-  assert_eq!(remaining, vec![
-    &PathBuf::from("/etc"),
-    &PathBuf::from("/home"),
-    &PathBuf::from("/tmp"),
-  ]);
+  assert_eq!(
+    remaining,
+    vec![
+      &PathBuf::from("/etc"),
+      &PathBuf::from("/home"),
+      &PathBuf::from("/tmp"),
+    ]
+  );
 }
 
 #[test]
@@ -821,10 +840,10 @@ fn dirstack_popd_plus_n_offset() {
   assert_eq!(removed, Some(PathBuf::from("/var")));
 
   let remaining: Vec<_> = meta.dirs().iter().collect();
-  assert_eq!(remaining, vec![
-    &PathBuf::from("/tmp"),
-    &PathBuf::from("/etc"),
-  ]);
+  assert_eq!(
+    remaining,
+    vec![&PathBuf::from("/tmp"), &PathBuf::from("/etc"),]
+  );
 }
 
 #[test]

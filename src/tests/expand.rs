@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::expand::{DUB_QUOTE, VAR_SUB, perform_param_expansion};
+use crate::expand::{perform_param_expansion, DUB_QUOTE, VAR_SUB};
 use crate::state::VarFlags;
 
 use super::*;

@@ -18,7 +18,13 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
 use crate::{
-  libsh::{error::{ShErr, ShErrKind, ShResult}, sys::TTY_FILENO}, prompt::readline::keys::{KeyCode, ModKeys}, shopt::FernBellStyle, state::read_shopts
+  libsh::{
+    error::{ShErr, ShErrKind, ShResult},
+    sys::TTY_FILENO,
+  },
+  prompt::readline::keys::{KeyCode, ModKeys},
+  shopt::FernBellStyle,
+  state::read_shopts,
 };
 use crate::{
   prelude::*,
@@ -107,7 +113,8 @@ fn write_all(fd: RawFd, buf: &str) -> nix::Result<()> {
   Ok(())
 }
 
-/// Check if a string ends with a newline, ignoring any trailing ANSI escape sequences.
+/// Check if a string ends with a newline, ignoring any trailing ANSI escape
+/// sequences.
 fn ends_with_newline(s: &str) -> bool {
   let bytes = s.as_bytes();
   let mut i = bytes.len();
@@ -208,7 +215,7 @@ pub trait LineWriter {
   fn clear_rows(&mut self, layout: &Layout) -> ShResult<()>;
   fn redraw(&mut self, prompt: &str, line: &str, new_layout: &Layout) -> ShResult<()>;
   fn flush_write(&mut self, buf: &str) -> ShResult<()>;
-	fn send_bell(&mut self) -> ShResult<()>;
+  fn send_bell(&mut self) -> ShResult<()>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -757,12 +764,7 @@ impl Layout {
       end: Pos::default(),
     }
   }
-  pub fn from_parts(
-    term_width: u16,
-    prompt: &str,
-    to_cursor: &str,
-    to_end: &str,
-  ) -> Self {
+  pub fn from_parts(term_width: u16, prompt: &str, to_cursor: &str, to_end: &str) -> Self {
     let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 });
     let cursor = Self::calc_pos(term_width, to_cursor, prompt_end);
     let end = Self::calc_pos(term_width, to_end, prompt_end);
@@ -998,11 +1000,10 @@ impl LineWriter for TermWriter {
     Ok(())
   }
 
-	fn send_bell(&mut self) -> ShResult<()> {
-		if read_shopts(|o| o.core.bell_enabled) {
-			self.flush_write("\x07")?;
-		}
-		Ok(())
-	}
-
+  fn send_bell(&mut self) -> ShResult<()> {
+    if read_shopts(|o| o.core.bell_enabled) {
+      self.flush_write("\x07")?;
+    }
+    Ok(())
+  }
 }
