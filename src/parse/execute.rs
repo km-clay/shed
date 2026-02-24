@@ -730,7 +730,7 @@ impl Dispatcher {
       if cmd.flags.contains(NdFlags::FORK_BUILTINS) {
         cmd.flags |= NdFlags::NO_FORK;
       }
-      return self.dispatch_cmd(cmd);
+      return self.exec_cmd(cmd);
     }
 		match cmd_raw.as_str() {
 			"echo" => echo(cmd, io_stack_mut, curr_job_mut),
