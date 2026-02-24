@@ -6,13 +6,13 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub enum FernBellStyle {
+pub enum ShedBellStyle {
   Audible,
   Visible,
   Disable,
 }
 
-impl FromStr for FernBellStyle {
+impl FromStr for ShedBellStyle {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s.to_ascii_lowercase().as_str() {
@@ -28,13 +28,13 @@ impl FromStr for FernBellStyle {
 }
 
 #[derive(Default, Clone, Copy, Debug)]
-pub enum FernEditMode {
+pub enum ShedEditMode {
   #[default]
   Vi,
   Emacs,
 }
 
-impl FromStr for FernEditMode {
+impl FromStr for ShedEditMode {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s.to_ascii_lowercase().as_str() {
@@ -48,11 +48,11 @@ impl FromStr for FernEditMode {
   }
 }
 
-impl Display for FernEditMode {
+impl Display for ShedEditMode {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      FernEditMode::Vi => write!(f, "vi"),
-      FernEditMode::Emacs => write!(f, "emacs"),
+      ShedEditMode::Vi => write!(f, "vi"),
+      ShedEditMode::Emacs => write!(f, "emacs"),
     }
   }
 }
@@ -277,7 +277,7 @@ impl ShOptCore {
       }
       "max_hist" => {
         let mut output = String::from(
-          "Maximum number of entries in the command history file (default '.fernhist')\n",
+          "Maximum number of entries in the command history file (default '.shedhist')\n",
         );
         output.push_str(&format!("{}", self.max_hist));
         Ok(Some(output))
@@ -295,7 +295,7 @@ impl ShOptCore {
         Ok(Some(output))
       }
       "bell_enabled" => {
-        let mut output = String::from("Whether or not to allow fern to trigger the terminal bell");
+        let mut output = String::from("Whether or not to allow shed to trigger the terminal bell");
         output.push_str(&format!("{}", self.bell_enabled));
         Ok(Some(output))
       }
@@ -366,7 +366,7 @@ impl Default for ShOptCore {
 #[derive(Clone, Debug)]
 pub struct ShOptPrompt {
   pub trunc_prompt_path: usize,
-  pub edit_mode: FernEditMode,
+  pub edit_mode: ShedEditMode,
   pub comp_limit: usize,
   pub highlight: bool,
   pub auto_indent: bool,
@@ -386,7 +386,7 @@ impl ShOptPrompt {
         self.trunc_prompt_path = val;
       }
       "edit_mode" => {
-        let Ok(val) = val.parse::<FernEditMode>() else {
+        let Ok(val) = val.parse::<ShedEditMode>() else {
           return Err(ShErr::simple(
             ShErrKind::SyntaxErr,
             "shopt: expected 'vi' or 'emacs' for edit_mode value",
@@ -545,7 +545,7 @@ impl Default for ShOptPrompt {
   fn default() -> Self {
     ShOptPrompt {
       trunc_prompt_path: 4,
-      edit_mode: FernEditMode::Vi,
+      edit_mode: ShedEditMode::Vi,
       comp_limit: 100,
       highlight: true,
       auto_indent: true,

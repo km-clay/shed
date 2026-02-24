@@ -1,30 +1,30 @@
 { config, lib, pkgs, ... }:
 
 let
-  cfg = config.programs.fern;
+  cfg = config.programs.shed;
   boolToString = b:
   if b then "true" else "false";
 in
 {
-  options.programs.fern = {
-    enable = lib.mkEnableOption "fern shell";
+  options.programs.shed = {
+    enable = lib.mkEnableOption "shed shell";
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.fern;
-      description = "The fern package to use";
+      default = pkgs.shed;
+      description = "The shed package to use";
     };
 
     aliases = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = {};
-      description = "The command name to use for the fern shell";
+      description = "Aliases to set when shed starts (e.g. ls='ls --color=auto')";
     };
 
     environmentVars = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = {};
-      description = "Environment variables to set when fern starts";
+      description = "Environment variables to set when shed starts";
     };
 
     settings = {
@@ -61,7 +61,7 @@ in
       bellEnabled = lib.mkOption {
         type = lib.types.bool;
         default = true;
-        description = "Whether to allow fern to ring the terminal bell on certain events (e.g. command completion, errors, etc.)";
+        description = "Whether to allow shed to ring the terminal bell on certain events (e.g. command completion, errors, etc.)";
       };
       maxRecurseDepth = lib.mkOption {
         type = lib.types.int;
@@ -92,12 +92,12 @@ in
       extraPostConfig = lib.mkOption {
         type = lib.types.str;
         default = "";
-        description = "Additional configuration to append to the fern configuration file";
+        description = "Additional configuration to append to the shed configuration file";
       };
       extraPreConfig = lib.mkOption {
         type = lib.types.str;
         default = "";
-        description = "Additional configuration to prepend to the fern configuration file";
+        description = "Additional configuration to prepend to the shed configuration file";
       };
     };
   };
@@ -105,7 +105,7 @@ in
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
 
-    home.file.".fernrc".text = lib.concatLines [
+    home.file.".shedrc".text = lib.concatLines [
       cfg.settings.extraPreConfig
       (lib.concatLines (lib.mapAttrsToList (name: value: "export ${name}=\"${value}\"") cfg.environmentVars))
       (lib.concatLines (lib.mapAttrsToList (name: value: "alias ${name}=\"${value}\"") cfg.aliases))

@@ -16,7 +16,7 @@ use crate::{
   }, parse::{ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, shopt::ShOpts
 };
 
-pub struct Fern {
+pub struct Shed {
   pub jobs: RefCell<JobTab>,
   pub var_scopes: RefCell<ScopeStack>,
   pub meta: RefCell<MetaTab>,
@@ -24,7 +24,7 @@ pub struct Fern {
   pub shopts: RefCell<ShOpts>,
 }
 
-impl Fern {
+impl Shed {
   pub fn new() -> Self {
     Self {
       jobs: RefCell::new(JobTab::new()),
@@ -36,7 +36,7 @@ impl Fern {
   }
 }
 
-impl Default for Fern {
+impl Default for Shed {
   fn default() -> Self {
     Self::new()
   }
@@ -123,7 +123,7 @@ impl ScopeStack {
     new.scopes.push(VarTab::new());
     let shell_name = std::env::args()
       .next()
-      .unwrap_or_else(|| "fern".to_string());
+      .unwrap_or_else(|| "shed".to_string());
     new
       .global_params
       .insert(ShellParam::ShellName.to_string(), shell_name);
@@ -273,7 +273,7 @@ impl ScopeStack {
 }
 
 thread_local! {
-  pub static FERN: Fern = Fern::new();
+  pub static FERN: Shed = Shed::new();
 }
 
 /// A shell function
@@ -569,8 +569,8 @@ impl VarTab {
       env::set_var("OLDPWD", pathbuf_to_string(std::env::current_dir()));
       env::set_var("HOME", home.clone());
       env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
-      env::set_var("FERN_HIST", format!("{}/.fernhist", home));
-      env::set_var("FERN_RC", format!("{}/.fernrc", home));
+      env::set_var("FERN_HIST", format!("{}/.shedhist", home));
+      env::set_var("FERN_RC", format!("{}/.shedrc", home));
     }
   }
   pub fn init_sh_argv(&mut self) {
@@ -803,49 +803,49 @@ impl MetaTab {
 
 /// Read from the job table
 pub fn read_jobs<T, F: FnOnce(&JobTab) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&fern.jobs.borrow()))
+  FERN.with(|shed| f(&shed.jobs.borrow()))
 }
 
 /// Write to the job table
 pub fn write_jobs<T, F: FnOnce(&mut JobTab) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&mut fern.jobs.borrow_mut()))
+  FERN.with(|shed| f(&mut shed.jobs.borrow_mut()))
 }
 
 /// Read from the var scope stack
 pub fn read_vars<T, F: FnOnce(&ScopeStack) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&fern.var_scopes.borrow()))
+  FERN.with(|shed| f(&shed.var_scopes.borrow()))
 }
 
 /// Write to the variable table
 pub fn write_vars<T, F: FnOnce(&mut ScopeStack) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&mut fern.var_scopes.borrow_mut()))
+  FERN.with(|shed| f(&mut shed.var_scopes.borrow_mut()))
 }
 
 pub fn read_meta<T, F: FnOnce(&MetaTab) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&fern.meta.borrow()))
+  FERN.with(|shed| f(&shed.meta.borrow()))
 }
 
 /// Write to the meta table
 pub fn write_meta<T, F: FnOnce(&mut MetaTab) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&mut fern.meta.borrow_mut()))
+  FERN.with(|shed| f(&mut shed.meta.borrow_mut()))
 }
 
 /// Read from the logic table
 pub fn read_logic<T, F: FnOnce(&LogTab) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&fern.logic.borrow()))
+  FERN.with(|shed| f(&shed.logic.borrow()))
 }
 
 /// Write to the logic table
 pub fn write_logic<T, F: FnOnce(&mut LogTab) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&mut fern.logic.borrow_mut()))
+  FERN.with(|shed| f(&mut shed.logic.borrow_mut()))
 }
 
 pub fn read_shopts<T, F: FnOnce(&ShOpts) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&fern.shopts.borrow()))
+  FERN.with(|shed| f(&shed.shopts.borrow()))
 }
 
 pub fn write_shopts<T, F: FnOnce(&mut ShOpts) -> T>(f: F) -> T {
-  FERN.with(|fern| f(&mut fern.shopts.borrow_mut()))
+  FERN.with(|shed| f(&mut shed.shopts.borrow_mut()))
 }
 
 pub fn descend_scope(argv: Option<Vec<String>>) {
@@ -877,10 +877,10 @@ pub fn source_rc() -> ShResult<()> {
     PathBuf::from(&path)
   } else {
     let home = env::var("HOME").unwrap();
-    PathBuf::from(format!("{home}/.fernrc"))
+    PathBuf::from(format!("{home}/.shedrc"))
   };
   if !path.exists() {
-    return Err(ShErr::simple(ShErrKind::InternalErr, ".fernrc not found"));
+    return Err(ShErr::simple(ShErrKind::InternalErr, ".shedrc not found"));
   }
   source_file(path)
 }

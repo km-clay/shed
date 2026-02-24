@@ -101,7 +101,7 @@ pub enum ReadlineEvent {
   Pending,
 }
 
-pub struct FernVi {
+pub struct ShedVi {
   pub reader: PollReader,
   pub writer: Box<dyn LineWriter>,
 
@@ -120,7 +120,7 @@ pub struct FernVi {
   pub needs_redraw: bool,
 }
 
-impl FernVi {
+impl ShedVi {
   pub fn new(prompt: Option<String>, tty: RawFd) -> ShResult<Self> {
     let mut new = Self {
       reader: PollReader::new(),

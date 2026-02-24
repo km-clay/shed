@@ -1,16 +1,16 @@
 { config, lib, pkgs, ... }:
 
 let
-  cfg = config.programs.fern;
+  cfg = config.programs.shed;
 in
 {
-  options.programs.fern = {
-    enable = lib.mkEnableOption "fern shell";
+  options.programs.shed = {
+    enable = lib.mkEnableOption "shed shell";
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.fern;
-      description = "The fern package to use";
+      default = pkgs.shed;
+      description = "The shed package to use";
     };
   };
 

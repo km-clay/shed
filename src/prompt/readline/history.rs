@@ -226,7 +226,7 @@ impl History {
     let max_hist = crate::state::read_shopts(|s| s.core.max_hist);
     let path = PathBuf::from(env::var("FERNHIST").unwrap_or({
       let home = env::var("HOME").unwrap();
-      format!("{home}/.fern_history")
+      format!("{home}/.shed_history")
     }));
     let mut entries = read_hist_file(&path)?;
     // Enforce max_hist limit on loaded entries

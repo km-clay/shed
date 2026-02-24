@@ -195,25 +195,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
-name = "fern"
-version = "0.3.0"
-dependencies = [
- "bitflags",
- "clap",
- "env_logger",
- "glob",
- "insta",
- "log",
- "nix",
- "pretty_assertions",
- "regex",
- "tempfile",
- "unicode-segmentation",
- "unicode-width",
- "vte",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -436,6 +417,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "shed"
+version = "0.3.0"
+dependencies = [
+ "bitflags",
+ "clap",
+ "env_logger",
+ "glob",
+ "insta",
+ "log",
+ "nix",
+ "pretty_assertions",
+ "regex",
+ "tempfile",
+ "unicode-segmentation",
+ "unicode-width",
+ "vte",
 ]
 
 [[package]]

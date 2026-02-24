@@ -23,7 +23,7 @@ use crate::{
     sys::TTY_FILENO,
   },
   prompt::readline::keys::{KeyCode, ModKeys},
-  shopt::FernBellStyle,
+  shopt::ShedBellStyle,
   state::read_shopts,
 };
 use crate::{

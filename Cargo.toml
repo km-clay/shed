@@ -1,5 +1,5 @@
 [package]
-name = "fern"
+name = "shed"
 description = "A linux shell written in rust"
 publish = false
 version = "0.3.0"
@@ -27,4 +27,4 @@ pretty_assertions = "1.4.1"
 tempfile = "3.24.0"
 
 [[bin]]
-name = "fern"
+name = "shed"

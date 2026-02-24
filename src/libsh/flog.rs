@@ -4,7 +4,7 @@ use super::term::{Style, Styled};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Debug)]
 #[repr(u8)]
-pub enum FernLogLevel {
+pub enum ShedLogLevel {
   NONE = 0,
   ERROR = 1,
   WARN = 2,
@@ -13,9 +13,9 @@ pub enum FernLogLevel {
   TRACE = 5,
 }
 
-impl Display for FernLogLevel {
+impl Display for ShedLogLevel {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    use FernLogLevel::*;
+    use ShedLogLevel::*;
     match self {
       ERROR => write!(f, "{}", "ERROR".styled(Style::Red | Style::Bold)),
       WARN => write!(f, "{}", "WARN".styled(Style::Yellow | Style::Bold)),
@@ -27,8 +27,8 @@ impl Display for FernLogLevel {
   }
 }
 
-pub fn log_level() -> FernLogLevel {
-  use FernLogLevel::*;
+pub fn log_level() -> ShedLogLevel {
+  use ShedLogLevel::*;
   let level = std::env::var("FERN_LOG_LEVEL").unwrap_or_default();
   match level.to_lowercase().as_str() {
     "error" => ERROR,
@@ -40,7 +40,7 @@ pub fn log_level() -> FernLogLevel {
   }
 }
 
-/// A structured logging macro designed for `fern`.
+/// A structured logging macro designed for `shed`.
 ///
 /// `flog!` was implemented because `rustyline` uses `env_logger`, which
 /// clutters the debug output. This macro prints log messages in a structured

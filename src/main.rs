@@ -33,14 +33,14 @@ use crate::parse::execute::exec_input;
 use crate::prelude::*;
 use crate::prompt::get_prompt;
 use crate::prompt::readline::term::{RawModeGuard, raw_mode};
-use crate::prompt::readline::{FernVi, ReadlineEvent};
+use crate::prompt::readline::{ShedVi, ReadlineEvent};
 use crate::signal::{QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::{read_logic, source_rc, write_jobs, write_meta};
 use clap::Parser;
 use state::{read_vars, write_vars};
 
 #[derive(Parser, Debug)]
-struct FernArgs {
+struct ShedArgs {
 	script: Option<String>,
 
 	#[arg(short)]
@@ -77,8 +77,8 @@ fn kickstart_lazy_evals() {
 fn setup_panic_handler() {
 	let default_panic_hook = std::panic::take_hook();
 	std::panic::set_hook(Box::new(move |info| {
-		let _ = state::FERN.try_with(|fern| {
-			if let Ok(mut jobs) = fern.jobs.try_borrow_mut() {
+		let _ = state::FERN.try_with(|shed| {
+			if let Ok(mut jobs) = shed.jobs.try_borrow_mut() {
 				jobs.hang_up();
 			}
 		});
@@ -92,14 +92,14 @@ fn main() -> ExitCode {
 	kickstart_lazy_evals();
 	setup_panic_handler();
 
-	let mut args = FernArgs::parse();
+	let mut args = ShedArgs::parse();
 	if env::args().next().is_some_and(|a| a.starts_with('-')) {
-		// first arg is '-fern'
+		// first arg is '-shed'
 		// meaning we are in a login shell
 		args.login_shell = true;
 	}
 	if args.version {
-		println!("fern {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::ARCH, std::env::consts::OS);
+		println!("shed {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::ARCH, std::env::consts::OS);
 		return ExitCode::SUCCESS;
 	}
 
@@ -108,14 +108,14 @@ fn main() -> ExitCode {
 	} else if let Some(cmd) = args.command {
 		exec_input(cmd, None, false)
 	} else {
-		fern_interactive()
+		shed_interactive()
 	} {
-		eprintln!("fern: {e}");
+		eprintln!("shed: {e}");
 	};
 
 	if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Exit))
 	&& let Err(e) = exec_input(trap, None, false) {
-		eprintln!("fern: error running EXIT trap: {e}");
+		eprintln!("shed: error running EXIT trap: {e}");
 	}
 
 	write_jobs(|j| j.hang_up());
@@ -125,7 +125,7 @@ fn main() -> ExitCode {
 fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
 	let path = path.as_ref();
 	if !path.is_file() {
-		eprintln!("fern: Failed to open input file: {}", path.display());
+		eprintln!("shed: Failed to open input file: {}", path.display());
 		QUIT_CODE.store(1, Ordering::SeqCst);
 		return Err(ShErr::simple(
 				ShErrKind::CleanExit(1),
@@ -133,7 +133,7 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
 		));
 	}
 	let Ok(input) = fs::read_to_string(path) else {
-		eprintln!("fern: Failed to read input file: {}", path.display());
+		eprintln!("shed: Failed to read input file: {}", path.display());
 		QUIT_CODE.store(1, Ordering::SeqCst);
 		return Err(ShErr::simple(
 				ShErrKind::CleanExit(1),
@@ -152,7 +152,7 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
 	exec_input(input, None, false)
 }
 
-fn fern_interactive() -> ShResult<()> {
+fn shed_interactive() -> ShResult<()> {
 	let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
 	sig_setup();
 
@@ -161,7 +161,7 @@ fn fern_interactive() -> ShResult<()> {
 	}
 
 	// Create readline instance with initial prompt
-	let mut readline = match FernVi::new(get_prompt().ok(), *TTY_FILENO) {
+	let mut readline = match ShedVi::new(get_prompt().ok(), *TTY_FILENO) {
 		Ok(rl) => rl,
 		Err(e) => {
 			eprintln!("Failed to initialize readline: {e}");

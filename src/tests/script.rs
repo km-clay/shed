@@ -4,25 +4,25 @@ use pretty_assertions::assert_eq;
 
 use super::super::*;
 fn get_script_output(name: &str, args: &[&str]) -> Output {
-  // Resolve the path to the fern binary.
+  // Resolve the path to the shed binary.
   // Do not question me.
-  let mut fern_path = env::current_exe().expect("Failed to get test executable"); // The path to the test executable
-  fern_path.pop(); // Hocus pocus
-  fern_path.pop();
-  fern_path.push("fern"); // Abra Kadabra
+  let mut shed_path = env::current_exe().expect("Failed to get test executable"); // The path to the test executable
+  shed_path.pop(); // Hocus pocus
+  shed_path.pop();
+  shed_path.push("shed"); // Abra Kadabra
 
-  if !fern_path.is_file() {
-    fern_path.pop();
-    fern_path.pop();
-    fern_path.push("release");
-    fern_path.push("fern");
+  if !shed_path.is_file() {
+    shed_path.pop();
+    shed_path.pop();
+    shed_path.push("release");
+    shed_path.push("shed");
   }
 
-  if !fern_path.is_file() {
+  if !shed_path.is_file() {
     panic!("where the hell is the binary")
   }
 
-  process::Command::new(fern_path) // Alakazam
+  process::Command::new(shed_path) // Alakazam
     .arg(name)
     .args(args)
     .output()

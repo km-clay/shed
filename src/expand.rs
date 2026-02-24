@@ -2002,7 +2002,7 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
         result.push_str(&hostname);
       }
       PromptTk::HostnameShort => todo!(),
-      PromptTk::ShellName => result.push_str("fern"),
+      PromptTk::ShellName => result.push_str("shed"),
       PromptTk::Username => {
         let username = std::env::var("USER").unwrap();
         result.push_str(&username);
