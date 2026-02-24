@@ -359,10 +359,12 @@ impl Dispatcher {
 
     let func_name = argv.remove(0).span.as_str().to_string();
     let argv = prepare_argv(argv)?;
-    let result = if let Some(func) = read_logic(|l| l.get_func(&func_name)) {
+    let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&func_name)) {
       let _guard = ScopeGuard::exclusive_scope(Some(argv));
 
-      if let Err(e) = self.exec_brc_grp((*func).clone()) {
+			func_body.body_mut().flags = func.flags;
+
+      if let Err(e) = self.exec_brc_grp(func_body.body().clone()) {
         match e.kind() {
           ShErrKind::FuncReturn(code) => {
             state::set_status(*code);
@@ -385,7 +387,6 @@ impl Dispatcher {
     result
   }
   fn exec_brc_grp(&mut self, brc_grp: Node) -> ShResult<()> {
-		let blame = brc_grp.get_span().clone();
     let NdRule::BraceGrp { body } = brc_grp.class else {
       unreachable!()
     };
@@ -411,7 +412,7 @@ impl Dispatcher {
 				}
 			})
 		} else {
-			brc_grp_logic(self).try_blame(blame)
+			brc_grp_logic(self)
 		}
   }
   fn exec_case(&mut self, case_stmt: Node) -> ShResult<()> {

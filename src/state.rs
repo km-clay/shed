@@ -271,11 +271,9 @@ thread_local! {
 
 /// A shell function
 ///
-/// Consists of the BraceGrp Node and the stored ParsedSrc that the node refers
-/// to The Node must be stored with the ParsedSrc because the tokens of the node
+/// Consists of the BraceGrp Node and the stored ParsedSrc that the node refers to.
+/// The Node must be stored with the ParsedSrc because the tokens of the node
 /// contain an Arc<String> Which refers to the String held in ParsedSrc
-///
-/// Can be dereferenced to pull out the wrapped Node
 #[derive(Clone, Debug)]
 pub struct ShFunc(Node);
 
@@ -294,13 +292,12 @@ impl ShFunc {
     let ConjunctNode { cmd, operator: _ } = conjunct_node;
     *cmd
   }
-}
-
-impl Deref for ShFunc {
-  type Target = Node;
-  fn deref(&self) -> &Self::Target {
-    &self.0
-  }
+	pub fn body(&self) -> &Node {
+		&self.0
+	}
+	pub fn body_mut(&mut self) -> &mut Node {
+		&mut self.0
+	}
 }
 
 /// The logic table for the shell

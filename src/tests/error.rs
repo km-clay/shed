@@ -59,12 +59,10 @@ fn unclosed_squote() {
 fn unclosed_brc_grp() {
   let input = "{ foo bar";
   let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
-    .map(|tk| tk.unwrap())
-    .collect::<Vec<_>>();
+    .collect::<ShResult<Vec<_>>>();
 
-  let node = ParseStream::new(tokens).next().unwrap();
-  let Err(err) = node else {
-    panic!();
+  let Err(err) = tokens else {
+    panic!("Expected an error, got {:?}", tokens);
   };
 
   let err_fmt = format!("{err}");
