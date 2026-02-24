@@ -37,6 +37,8 @@ pub const PROC_SUB_OUT: char = '\u{fdd6}';
 /// which breaks some commands
 pub const NULL_EXPAND: char = '\u{fdd7}';
 
+pub const ARG_SEP: char = '\u{fdd8}';
+
 impl Tk {
   /// Create a new expanded token
   pub fn expand(self) -> ShResult<Self> {
@@ -104,6 +106,9 @@ impl Expander {
         DUB_QUOTE | SNG_QUOTE | SUBSH => {
           while let Some(q_ch) = chars.next() {
             match q_ch {
+							ARG_SEP if ch == DUB_QUOTE => {
+								words.push(mem::take(&mut cur_word));
+							}
               _ if q_ch == ch => {
                 was_quoted = true;
                 continue 'outer; // Isn't rust cool
@@ -112,7 +117,7 @@ impl Expander {
             }
           }
         }
-        _ if is_field_sep(ch) => {
+        _ if is_field_sep(ch) || ch == ARG_SEP => {
           if cur_word.is_empty() && !was_quoted {
             cur_word.clear();
           } else {
