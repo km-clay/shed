@@ -164,6 +164,7 @@ impl ShedVi {
       history: History::new()?,
       needs_redraw: true,
     };
+		new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
     new.print_line(false)?;
     Ok(new)
   }

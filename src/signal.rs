@@ -280,7 +280,6 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
     if is_fg {
       take_term()?;
     } else {
-      println!();
       let job_order = read_jobs(|j| j.order().to_vec());
       let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
       if let Some(job) = result {
