@@ -199,6 +199,11 @@ impl ShedVi {
     self.history.reset();
   }
 
+	pub fn update_prompt(&mut self, prompt: String) {
+		self.prompt = prompt;
+		self.needs_redraw = true;
+	}
+
 	fn should_submit(&mut self) -> ShResult<bool> {
 		let input = Arc::new(self.editor.buffer.clone());
 		self.editor.calc_indent_level();

@@ -12,7 +12,7 @@ use crate::parse::{Redir, RedirType};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::prompt::readline::markers;
 use crate::state::{
-  LogTab, VarFlags, read_logic, read_vars, write_jobs, write_meta, write_vars,
+  LogTab, VarFlags, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars
 };
 use crate::{jobs, prelude::*};
 
@@ -1809,6 +1809,7 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
             'n' => tokens.push(PromptTk::Text("\n".into())),
             'r' => tokens.push(PromptTk::Text("\r".into())),
             't' => tokens.push(PromptTk::RuntimeMillis),
+						'j' => tokens.push(PromptTk::JobCount),
             'T' => tokens.push(PromptTk::RuntimeFormatted),
             '\\' => tokens.push(PromptTk::Text("\\".into())),
             '"' => tokens.push(PromptTk::Text("\"".into())),
@@ -2004,7 +2005,10 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
       PromptTk::ExitCode => todo!(),
       PromptTk::SuccessSymbol => todo!(),
       PromptTk::FailureSymbol => todo!(),
-      PromptTk::JobCount => todo!(),
+      PromptTk::JobCount => {
+				let count = read_jobs(|j| j.jobs().iter().filter(|j| j.as_ref().is_some_and(|j| j.get_stats().iter().all(|st| matches!(st, WtStat::StillAlive)))).count());
+				result.push_str(&count.to_string());
+			}
       PromptTk::Function(f) => {
 				log::debug!("Expanding prompt function: {f}");
         let output = expand_cmd_sub(&f)?;

@@ -192,6 +192,7 @@ fn shed_interactive() -> ShResult<()> {
 			}
 		}
 
+		readline.update_prompt(get_prompt().unwrap_or_default());
 		readline.print_line(false)?;
 
 		// Poll for stdin input
