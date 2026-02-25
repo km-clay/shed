@@ -145,18 +145,14 @@ impl Prompt {
 		let Ok(ps1_expanded) = expand_prompt(&ps1_raw) else {
 			return Self::default();
 		};
+		let psr_raw = env::var("PSR").ok();
+		let psr_expanded = psr_raw.clone().map(|r| expand_prompt(&r)).transpose().ok().flatten();
 		Self {
 			ps1_expanded,
 			ps1_raw,
-			psr_expanded: None,
-			psr_raw: None,
+			psr_expanded,
+			psr_raw,
 		}
-	}
-	pub fn with_psr(mut self, psr_raw: String) -> ShResult<Self> {
-		let psr_expanded = expand_prompt(&psr_raw)?;
-		self.psr_expanded = Some(psr_expanded);
-		self.psr_raw = Some(psr_raw);
-		Ok(self)
 	}
 
 	pub fn get_ps1(&self) -> &str {
@@ -517,6 +513,7 @@ impl ShedVi {
     let new_layout = self.get_layout(&line);
 		let pending_seq = self.mode.pending_seq();
 		let mut prompt_string_right = self.prompt.psr_expanded.clone();
+		log::debug!("prompt_string_right before truncation: {prompt_string_right:?}");
 
 		if prompt_string_right.as_ref().is_some_and(|psr| psr.lines().count() > 1) {
 			log::warn!("PSR has multiple lines, truncating to one line");
