@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use fmt::Display;
 
-use crate::{parse::lex::Tk, prelude::*};
+use crate::{libsh::error::ShResult, parse::lex::Tk, prelude::*};
 
 pub type OptSet = Arc<[Opt]>;
 
@@ -67,8 +67,12 @@ pub fn get_opts(words: Vec<String>) -> (Vec<String>, Vec<Opt>) {
   (non_opts, opts)
 }
 
-pub fn get_opts_from_tokens(tokens: Vec<Tk>, opt_specs: &[OptSpec]) -> (Vec<Tk>, Vec<Opt>) {
-  let mut tokens_iter = tokens.into_iter();
+pub fn get_opts_from_tokens(tokens: Vec<Tk>, opt_specs: &[OptSpec]) -> ShResult<(Vec<Tk>, Vec<Opt>)> {
+  let mut tokens_iter = tokens
+		.into_iter()
+		.map(|t| t.expand())
+		.collect::<ShResult<Vec<_>>>()?
+		.into_iter();
   let mut opts = vec![];
   let mut non_opts = vec![];
 
@@ -111,5 +115,5 @@ pub fn get_opts_from_tokens(tokens: Vec<Tk>, opt_specs: &[OptSpec]) -> (Vec<Tk>,
       }
     }
   }
-  (non_opts, opts)
+  Ok((non_opts, opts))
 }

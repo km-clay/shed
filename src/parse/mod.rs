@@ -936,7 +936,7 @@ impl ParseStream {
       self.catch_separator(&mut node_tks);
 
       let mut nodes = vec![];
-      while let Some(node) = self.parse_block(true /* check_pipelines */)? {
+      while let Some(node) = self.parse_cmd_list()? {
         node_tks.extend(node.tokens.clone());
         let sep = node.tokens.last().unwrap();
         if sep.has_double_semi() {
@@ -1015,7 +1015,7 @@ impl ParseStream {
       self.catch_separator(&mut node_tks);
 
       let mut body_blocks = vec![];
-      while let Some(body_block) = self.parse_block(true)? {
+      while let Some(body_block) = self.parse_cmd_list()? {
         node_tks.extend(body_block.tokens.clone());
         body_blocks.push(body_block);
       }
@@ -1043,7 +1043,7 @@ impl ParseStream {
     if self.check_keyword("else") {
       node_tks.push(self.next_tk().unwrap());
       self.catch_separator(&mut node_tks);
-      while let Some(block) = self.parse_block(true)? {
+      while let Some(block) = self.parse_cmd_list()? {
         else_block.push(block)
       }
       if else_block.is_empty() {
@@ -1133,7 +1133,7 @@ impl ParseStream {
     node_tks.push(self.next_tk().unwrap());
     self.catch_separator(&mut node_tks);
 
-    while let Some(node) = self.parse_block(true)? {
+    while let Some(node) = self.parse_cmd_list()? {
       body.push(node)
     }
 
@@ -1196,7 +1196,7 @@ impl ParseStream {
     self.catch_separator(&mut node_tks);
 
     let mut body = vec![];
-    while let Some(block) = self.parse_block(true)? {
+    while let Some(block) = self.parse_cmd_list()? {
       node_tks.extend(block.tokens.clone());
       body.push(block);
     }

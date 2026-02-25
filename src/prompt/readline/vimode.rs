@@ -451,7 +451,7 @@ impl ViNormal {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(count, Verb::Delete)),
-            motion: Some(MotionCmd(1, Motion::ForwardChar)),
+            motion: Some(MotionCmd(1, Motion::ForwardCharForced)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
           });
@@ -478,7 +478,7 @@ impl ViNormal {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(count, Verb::Change)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            motion: Some(MotionCmd(1, Motion::WholeLineExclusive)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
           });
@@ -684,7 +684,7 @@ impl ViNormal {
         | ('~', Some(VerbCmd(_, Verb::ToggleCaseRange)))
         | ('>', Some(VerbCmd(_, Verb::Indent)))
         | ('<', Some(VerbCmd(_, Verb::Dedent))) => {
-          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine));
+          break 'motion_parse Some(MotionCmd(count, Motion::WholeLineInclusive));
         }
         ('W', Some(VerbCmd(_, Verb::Change))) => {
           // Same with 'W'
@@ -1218,7 +1218,7 @@ impl ViVisual {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(1, Verb::Delete)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            motion: Some(MotionCmd(1, Motion::WholeLineInclusive)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -1227,7 +1227,7 @@ impl ViVisual {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(1, Verb::Yank)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            motion: Some(MotionCmd(1, Motion::WholeLineInclusive)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -1236,7 +1236,7 @@ impl ViVisual {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(1, Verb::Delete)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            motion: Some(MotionCmd(1, Motion::WholeLineInclusive)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -1245,7 +1245,7 @@ impl ViVisual {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(1, Verb::Change)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            motion: Some(MotionCmd(1, Motion::WholeLineExclusive)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -1254,7 +1254,7 @@ impl ViVisual {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(1, Verb::Indent)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            motion: Some(MotionCmd(1, Motion::WholeLineInclusive)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -1263,7 +1263,7 @@ impl ViVisual {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(1, Verb::Dedent)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            motion: Some(MotionCmd(1, Motion::WholeLineInclusive)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -1272,7 +1272,7 @@ impl ViVisual {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(1, Verb::Equalize)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            motion: Some(MotionCmd(1, Motion::WholeLineInclusive)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -1389,13 +1389,15 @@ impl ViVisual {
       };
       match (ch, &verb) {
         ('d', Some(VerbCmd(_, Verb::Delete)))
-        | ('c', Some(VerbCmd(_, Verb::Change)))
         | ('y', Some(VerbCmd(_, Verb::Yank)))
         | ('=', Some(VerbCmd(_, Verb::Equalize)))
         | ('>', Some(VerbCmd(_, Verb::Indent)))
         | ('<', Some(VerbCmd(_, Verb::Dedent))) => {
-          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine));
+          break 'motion_parse Some(MotionCmd(count, Motion::WholeLineInclusive));
         }
+        ('c', Some(VerbCmd(_, Verb::Change))) => {
+					break 'motion_parse Some(MotionCmd(count, Motion::WholeLineExclusive));
+				}
         _ => {}
       }
       match ch {

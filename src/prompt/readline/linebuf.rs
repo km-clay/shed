@@ -496,6 +496,12 @@ impl LineBuf {
   pub fn grapheme_at_cursor(&mut self) -> Option<&str> {
     self.grapheme_at(self.cursor.get())
   }
+	pub fn grapheme_before_cursor(&mut self) -> Option<&str> {
+		if self.cursor.get() == 0 {
+			return None;
+		}
+		self.grapheme_at(self.cursor.ret_sub(1))
+	}
   pub fn mark_insert_mode_start_pos(&mut self) {
     self.insert_mode_start_pos = Some(self.cursor.get())
   }
@@ -1884,7 +1890,11 @@ impl LineBuf {
     self.buffer.replace_range(start..end, new);
   }
 	pub fn calc_indent_level(&mut self) {
-		let input = Arc::new(self.buffer.clone());
+		let to_cursor = self
+			.slice_to_cursor()
+			.map(|s| s.to_string())
+			.unwrap_or(self.buffer.clone());
+		let input = Arc::new(to_cursor);
 		let Ok(tokens) = LexStream::new(input, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>() else {
 			log::error!("Failed to lex buffer for indent calculation");
 			return;
@@ -1914,14 +1924,20 @@ impl LineBuf {
     }
 
     let eval = match motion {
-      MotionCmd(count, Motion::WholeLine) => {
-        let Some((start, end)) = (if count == 1 {
+      MotionCmd(count, motion @ (Motion::WholeLineInclusive | Motion::WholeLineExclusive)) => {
+				let exclusive = matches!(motion, Motion::WholeLineExclusive);
+
+        let Some((start, mut end)) = (if count == 1 {
           Some(self.this_line())
         } else {
           self.select_lines_down(count)
         }) else {
           return MotionKind::Null;
         };
+
+				if exclusive && self.grapheme_before(end).is_some_and(|gr| gr == "\n") {
+					end = end.saturating_sub(1);
+				}
 
         let target_col = if let Some(col) = self.saved_col {
           col
@@ -1938,6 +1954,7 @@ impl LineBuf {
         if self.cursor.exclusive
           && line.ends_with("\n")
           && self.grapheme_at(target_pos) == Some("\n")
+          && line != "\n" // Allow landing on newline for empty lines
         {
           target_pos = target_pos.saturating_sub(1); // Don't land on the
           // newline
@@ -2098,7 +2115,7 @@ impl LineBuf {
       MotionCmd(_, Motion::BeginningOfLine) => MotionKind::On(self.start_of_line()),
       MotionCmd(count, Motion::EndOfLine) => {
         let pos = if count == 1 {
-          self.end_of_line()
+					self.end_of_line()
         } else if let Some((_, end)) = self.select_lines_down(count) {
           end
         } else {
@@ -2171,12 +2188,14 @@ impl LineBuf {
         };
 
         let Some(line) = self.slice(start..end).map(|s| s.to_string()) else {
+					log::warn!("Failed to get line slice for motion, start: {start}, end: {end}");
           return MotionKind::Null;
         };
         let mut target_pos = self.grapheme_index_for_display_col(&line, target_col);
         if self.cursor.exclusive
           && line.ends_with("\n")
           && self.grapheme_at(target_pos) == Some("\n")
+          && line != "\n" // Allow landing on newline for empty lines
         {
           target_pos = target_pos.saturating_sub(1); // Don't land on the
           // newline
@@ -2187,6 +2206,7 @@ impl LineBuf {
           Motion::LineDown => (self.start_of_line(), end),
           _ => unreachable!(),
         };
+
 
         MotionKind::InclusiveWithTargetCol((start, end), target_pos)
       }
@@ -2412,9 +2432,15 @@ impl LineBuf {
   ) -> ShResult<()> {
     match verb {
       Verb::Delete | Verb::Yank | Verb::Change => {
-        let Some((start, end)) = self.range_from_motion(&motion) else {
+        let Some((mut start, mut end)) = self.range_from_motion(&motion) else {
           return Ok(());
         };
+
+				let mut do_indent = false;
+				if verb == Verb::Change && (start,end) == self.this_line() {
+					do_indent = read_shopts(|o| o.prompt.auto_indent);
+				}
+
         let register_text = if verb == Verb::Yank {
           self
             .slice(start..end)
@@ -2426,15 +2452,18 @@ impl LineBuf {
           drained
         };
         register.write_to_register(register_text);
-        match motion {
-          MotionKind::ExclusiveWithTargetCol((_, _), pos)
-          | MotionKind::InclusiveWithTargetCol((_, _), pos) => {
-            let (start, end) = self.this_line();
-            self.cursor.set(start);
-            self.cursor.add(end.min(pos));
-          }
-          _ => self.cursor.set(start),
-        }
+				self.cursor.set(start);
+				if do_indent {
+					self.calc_indent_level();
+					let tabs = (0..self.auto_indent_level).map(|_| '\t');
+					for tab in tabs {
+						self.insert_at_cursor(tab);
+						self.cursor.add(1);
+					}
+				} else if verb != Verb::Change
+				&& let MotionKind::InclusiveWithTargetCol((_,_), col) = motion {
+					self.cursor.add(col);
+				}
       }
       Verb::Rot13 => {
         let Some((start, end)) = self.range_from_motion(&motion) else {
@@ -2667,7 +2696,11 @@ impl LineBuf {
         let Some((start, end)) = self.range_from_motion(&motion) else {
           return Ok(());
         };
+				let move_cursor = self.cursor.get() == start;
         self.insert_at(start, '\t');
+				if move_cursor {
+					self.cursor.add(1);
+				}
         let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
         while let Some(idx) = range_indices.next() {
           let gr = self.grapheme_at(idx).unwrap();
@@ -2733,12 +2766,9 @@ impl LineBuf {
             Anchor::After => {
               self.push('\n');
 							if auto_indent {
-								log::debug!("Calculating indent level for new line");
 								self.calc_indent_level();
-								log::debug!("Auto-indent level: {}", self.auto_indent_level);
 								let tabs = (0..self.auto_indent_level).map(|_| '\t');
 								for tab in tabs {
-									log::debug!("Pushing tab for auto-indent");
 									self.push(tab);
 								}
 							}
@@ -2793,8 +2823,24 @@ impl LineBuf {
       Verb::AcceptLineOrNewline => {
 				// If this verb has reached this function, it means we have incomplete input
 				// and therefore must insert a newline instead of accepting the input
-				self.push('\n');
+				if self.cursor.exclusive {
+					// in this case we are in normal/visual mode, so we don't insert anything
+					// and just move down a line
+					let motion = self.eval_motion(None, MotionCmd(1, Motion::LineDownCharwise));
+					self.apply_motion(motion);
+					return Ok(());
+				}
+				let auto_indent = read_shopts(|o| o.prompt.auto_indent);
+				self.insert_at_cursor('\n');
 				self.cursor.add(1);
+				if auto_indent {
+					self.calc_indent_level();
+					let tabs = (0..self.auto_indent_level).map(|_| '\t');
+					for tab in tabs {
+						self.insert_at_cursor(tab);
+						self.cursor.add(1);
+					}
+				}
 			}
 
       Verb::Complete
@@ -2813,7 +2859,7 @@ impl LineBuf {
   pub fn exec_cmd(&mut self, cmd: ViCmd) -> ShResult<()> {
     let clear_redos = !cmd.is_undo_op() || cmd.verb.as_ref().is_some_and(|v| v.1.is_edit());
     let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
-    let is_line_motion = cmd.is_line_motion();
+    let is_line_motion = cmd.is_line_motion() || cmd.verb.as_ref().is_some_and(|v| v.1 == Verb::AcceptLineOrNewline);
     let is_undo_op = cmd.is_undo_op();
     let edit_is_merging = self.undo_stack.last().is_some_and(|edit| edit.merging);
 
@@ -2885,6 +2931,14 @@ impl LineBuf {
     } else {
       self.apply_motion(motion_eval);
     }
+
+		if self.cursor.exclusive
+		&& self.grapheme_at_cursor().is_some_and(|gr| gr == "\n")
+		&& self.grapheme_before_cursor().is_some_and(|gr| gr != "\n") {
+			// we landed on a newline, and we aren't inbetween two newlines.
+			self.cursor.sub(1);
+			self.update_select_range();
+		}
 
     /* Done executing, do some cleanup */
 

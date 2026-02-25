@@ -65,7 +65,7 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
   ];
   let mut flags = ZoltFlags::empty();
 
-  let (argv, opts) = get_opts_from_tokens(argv, &zolt_opts);
+  let (argv, opts) = get_opts_from_tokens(argv, &zolt_opts)?;
 
   for opt in opts {
     match opt {

@@ -7,7 +7,7 @@ use std::{
 use crate::{
   libsh::term::{Style, StyleSet, Styled},
   prompt::readline::{annotate_input, markers::{self, is_marker}},
-  state::{read_logic, read_shopts},
+  state::{read_logic, read_meta, read_shopts},
 };
 
 /// Syntax highlighter for shell input using Unicode marker-based annotation
@@ -173,7 +173,6 @@ impl Highlighter {
             }
             cmd_name.push(ch);
           }
-					log::debug!("Command name: '{}'", Self::strip_markers(&cmd_name));
           let style = if matches!(Self::strip_markers(&cmd_name).as_str(), "break" | "continue" | "return") {
 						Style::Magenta.into()
 					} else if Self::is_valid(&Self::strip_markers(&cmd_name)) {
@@ -291,54 +290,35 @@ impl Highlighter {
   /// 2. All directories in PATH environment variable
   /// 3. Shell functions and aliases in the current shell state
   fn is_valid(command: &str) -> bool {
-    let path = env::var("PATH").unwrap_or_default();
-    let paths = path.split(':');
-    let cmd_path = PathBuf::from(&command);
+    let cmd_path = Path::new(&command);
 
-    if cmd_path.exists() {
+    if cmd_path.is_absolute() {
       // the user has given us an absolute path
       if cmd_path.is_dir() && read_shopts(|o| o.core.autocd) {
         // this is a directory and autocd is enabled
-        return true;
+        true
       } else {
         let Ok(meta) = cmd_path.metadata() else {
           return false;
         };
         // this is a file that is executable by someone
-        return meta.permissions().mode() & 0o111 == 0;
+        meta.permissions().mode() & 0o111 != 0
       }
     } else {
-      // they gave us a command name
-      // now we must traverse the PATH env var
-      // and see if we find any matches
-      for path in paths {
-        let path = PathBuf::from(path).join(command);
-        if path.exists() {
-          let Ok(meta) = path.metadata() else { continue };
-          return meta.permissions().mode() & 0o111 != 0;
-        }
-      }
-
-      // also check shell functions and aliases for any matches
-      let found = read_logic(|l| l.get_func(command).is_some() || l.get_alias(command).is_some());
-      if found {
-        return true;
-      }
-    }
-
-    false
+			read_meta(|m| m.cached_cmds().get(command).is_some())
+		}
   }
 
   fn is_filename(arg: &str) -> bool {
-    let path = PathBuf::from(arg);
+    let path = Path::new(arg);
 
-    if path.exists() {
+    if path.is_absolute() && path.exists() {
       return true;
     }
 
-    if let Some(parent_dir) = path.parent()
-      && let Ok(entries) = parent_dir.read_dir()
-    {
+		if path.is_absolute()
+    && let Some(parent_dir) = path.parent()
+		&& let Ok(entries) = parent_dir.read_dir() {
       let files = entries
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
@@ -354,22 +334,17 @@ impl Highlighter {
           return true;
         }
       }
-    };
+		}
 
-    if let Ok(this_dir) = env::current_dir()
-      && let Ok(entries) = this_dir.read_dir()
-    {
-      let this_dir_files = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-      for file in this_dir_files {
-        if file.starts_with(arg) {
-          return true;
-        }
-      }
-    };
-    false
+		read_meta(|m| {
+			let files = m.cwd_cache();
+			for file in files {
+				if file.starts_with(arg) {
+					return true;
+				}
+			}
+			false
+		})
   }
 
   /// Emits a reset ANSI code to the output, with deduplication

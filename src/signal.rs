@@ -15,6 +15,7 @@ static SIGNALS: AtomicU64 = AtomicU64::new(0);
 
 pub static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
 pub static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
+pub static GOT_SIGWINCH: AtomicBool = AtomicBool::new(false);
 pub static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
 
 const MISC_SIGNALS: [Signal; 22] = [
@@ -81,6 +82,10 @@ pub fn check_signals() -> ShResult<()> {
     run_trap(Signal::SIGCHLD)?;
     wait_child()?;
   }
+	if got_signal(Signal::SIGWINCH) {
+		GOT_SIGWINCH.store(true, Ordering::SeqCst);
+		run_trap(Signal::SIGWINCH)?;
+	}
 
   for sig in MISC_SIGNALS {
     if got_signal(sig) {

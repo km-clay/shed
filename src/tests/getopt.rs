@@ -21,7 +21,7 @@ fn getopt_from_argv() {
     panic!()
   };
 
-  let (words, opts) = get_opts_from_tokens(argv, &ECHO_OPTS);
+  let (words, opts) = get_opts_from_tokens(argv, &ECHO_OPTS).expect("failed to get opts");
   insta::assert_debug_snapshot!(words);
   insta::assert_debug_snapshot!(opts)
 }

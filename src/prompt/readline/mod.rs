@@ -129,11 +129,78 @@ pub enum ReadlineEvent {
   Pending,
 }
 
+pub struct Prompt {
+	ps1_expanded: String,
+	ps1_raw: String,
+	psr_expanded: Option<String>,
+	psr_raw: Option<String>,
+}
+
+impl Prompt {
+	const DEFAULT_PS1: &str = "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
+	pub fn new() -> Self {
+		let Ok(ps1_raw) = env::var("PS1") else {
+			return Self::default();
+		};
+		let Ok(ps1_expanded) = expand_prompt(&ps1_raw) else {
+			return Self::default();
+		};
+		Self {
+			ps1_expanded,
+			ps1_raw,
+			psr_expanded: None,
+			psr_raw: None,
+		}
+	}
+	pub fn with_psr(mut self, psr_raw: String) -> ShResult<Self> {
+		let psr_expanded = expand_prompt(&psr_raw)?;
+		self.psr_expanded = Some(psr_expanded);
+		self.psr_raw = Some(psr_raw);
+		Ok(self)
+	}
+
+	pub fn get_ps1(&self) -> &str {
+		&self.ps1_expanded
+	}
+	pub fn set_ps1(&mut self, ps1_raw: String) -> ShResult<()> {
+		self.ps1_expanded = expand_prompt(&ps1_raw)?;
+		self.ps1_raw = ps1_raw;
+		Ok(())
+	}
+	pub fn set_psr(&mut self, psr_raw: String) -> ShResult<()> {
+		self.psr_expanded = Some(expand_prompt(&psr_raw)?);
+		self.psr_raw = Some(psr_raw);
+		Ok(())
+	}
+	pub fn get_psr(&self) -> Option<&str> {
+		self.psr_expanded.as_deref()
+	}
+
+	pub fn refresh(&mut self) -> ShResult<()> {
+		self.ps1_expanded = expand_prompt(&self.ps1_raw)?;
+		if let Some(psr_raw) = &self.psr_raw {
+			self.psr_expanded = Some(expand_prompt(psr_raw)?);
+		}
+		Ok(())
+	}
+}
+
+impl Default for Prompt {
+	fn default() -> Self {
+		Self {
+			ps1_expanded: expand_prompt(Self::DEFAULT_PS1).unwrap_or_else(|_| Self::DEFAULT_PS1.to_string()),
+			ps1_raw: Self::DEFAULT_PS1.to_string(),
+			psr_expanded: None,
+			psr_raw: None,
+		}
+	}
+}
+
 pub struct ShedVi {
   pub reader: PollReader,
   pub writer: TermWriter,
 
-  pub prompt: String,
+  pub prompt: Prompt,
   pub highlighter: Highlighter,
   pub completer: Completer,
 
@@ -149,11 +216,11 @@ pub struct ShedVi {
 }
 
 impl ShedVi {
-  pub fn new(prompt: Option<String>, tty: RawFd) -> ShResult<Self> {
+  pub fn new(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
     let mut new = Self {
       reader: PollReader::new(),
       writer: TermWriter::new(tty),
-      prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
+      prompt,
       completer: Completer::new(),
       highlighter: Highlighter::new(),
       mode: Box::new(ViInsert::new()),
@@ -187,11 +254,10 @@ impl ShedVi {
     self.needs_redraw = true;
   }
 
+
   /// Reset readline state for a new prompt
-  pub fn reset(&mut self, prompt: Option<String>) {
-    if let Some(p) = prompt {
-      self.prompt = p;
-    }
+  pub fn reset(&mut self, prompt: Prompt) {
+		self.prompt = prompt;
     self.editor = Default::default();
     self.mode = Box::new(ViInsert::new());
     self.old_layout = None;
@@ -200,9 +266,12 @@ impl ShedVi {
     self.history.reset();
   }
 
-	pub fn update_prompt(&mut self, prompt: String) {
-		self.prompt = prompt;
-		self.needs_redraw = true;
+	pub fn prompt(&self) -> &Prompt {
+		&self.prompt
+	}
+
+	pub fn prompt_mut(&mut self) -> &mut Prompt {
+		&mut self.prompt
 	}
 
 	fn should_submit(&mut self) -> ShResult<bool> {
@@ -366,7 +435,7 @@ impl ShedVi {
   pub fn get_layout(&mut self, line: &str) -> Layout {
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
     let (cols, _) = get_win_size(*TTY_FILENO);
-    Layout::from_parts(cols, &self.prompt, to_cursor, line)
+    Layout::from_parts(cols, self.prompt.get_ps1(), to_cursor, line)
   }
   pub fn scroll_history(&mut self, cmd: ViCmd) {
     /*
@@ -457,6 +526,7 @@ impl ShedVi {
 		}
 
 		let row0_used = self.prompt
+			.get_ps1()
 			.lines()
 			.next()
 			.map(|l| Layout::calc_pos(self.writer.t_cols, l, Pos { col: 0, row: 0 }))
@@ -469,7 +539,7 @@ impl ShedVi {
       self.writer.clear_rows(layout)?;
     }
 
-    self.writer.redraw(&self.prompt, &line, &new_layout)?;
+    self.writer.redraw(self.prompt.get_ps1(), &line, &new_layout)?;
 
 		let seq_fits = pending_seq.as_ref().is_some_and(|seq| row0_used + 1 < self.writer.t_cols as usize - seq.width());
 		let psr_fits = prompt_string_right.as_ref().is_some_and(|psr| new_layout.end.col as usize + 1 < self.writer.t_cols as usize - psr.width());

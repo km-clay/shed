@@ -1,16 +1,11 @@
 use std::{
-  cell::RefCell,
-  collections::{HashMap, VecDeque},
-  fmt::Display,
-  ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref},
-  str::FromStr,
-  time::Duration,
+  cell::RefCell, collections::{HashMap, HashSet, VecDeque}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref}, os::unix::fs::PermissionsExt, str::FromStr, time::Duration
 };
 
 use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
-  builtin::trap::TrapTarget, exec_input, jobs::JobTab, libsh::{
+  builtin::{BUILTINS, trap::TrapTarget}, exec_input, jobs::JobTab, libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::VecDequeExt,
   }, parse::{ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, prompt::readline::markers, shopt::ShOpts
@@ -741,13 +736,107 @@ pub struct MetaTab {
   // pending system messages
   system_msg: Vec<String>,
 
-	dir_stack: VecDeque<PathBuf>
+	// pushd/popd stack
+	dir_stack: VecDeque<PathBuf>,
+
+	old_path: Option<String>,
+	old_pwd: Option<String>,
+	// valid command cache
+	path_cache: HashSet<String>,
+	cwd_cache: HashSet<String>
 }
 
 impl MetaTab {
   pub fn new() -> Self {
     Self::default()
   }
+	pub fn cached_cmds(&self) -> &HashSet<String> {
+		&self.path_cache
+	}
+	pub fn cwd_cache(&self) -> &HashSet<String> {
+		&self.cwd_cache
+	}
+	pub fn try_rehash_commands(&mut self) {
+		let path = env::var("PATH").unwrap_or_default();
+		let cwd = env::var("PWD").unwrap_or_default();
+		if self.old_path.as_ref().is_some_and(|old| *old == path)
+		&& self.old_pwd.as_ref().is_some_and(|old| *old == cwd) {
+			log::trace!("PATH and PWD unchanged, skipping rehash");
+			return;
+		}
+
+		log::debug!("Rehashing commands for PATH: '{}' and PWD: '{}'", path, cwd);
+
+		self.path_cache.clear();
+		self.old_path = Some(path.clone());
+		self.old_pwd = Some(cwd.clone());
+		let paths = path.split(":")
+			.map(PathBuf::from);
+
+		for path in paths {
+			if let Ok(entries) = path.read_dir() {
+				for entry in entries.flatten() {
+          let Ok(meta) = entry.metadata() else { continue };
+          let is_exec = meta.permissions().mode() & 0o111 != 0;
+
+					if let Ok(file_type) = entry.file_type()
+					&& file_type.is_file() && is_exec
+					&& let Some(name) = entry.file_name().to_str() {
+						self.path_cache.insert(name.to_string());
+					}
+				}
+			}
+		}
+		if let Ok(entries) = Path::new(&cwd).read_dir() {
+			for entry in entries.flatten() {
+				let Ok(meta) = entry.metadata() else { continue };
+				let is_exec = meta.permissions().mode() & 0o111 != 0;
+
+				if let Ok(file_type) = entry.file_type()
+				&& file_type.is_file() && is_exec
+				&& let Some(name) = entry.file_name().to_str() {
+					self.path_cache.insert(format!("./{}", name));
+				}
+			}
+		}
+
+		read_logic(|l| {
+			let funcs = l.funcs();
+			let aliases = l.aliases();
+			for func in funcs.keys() {
+				self.path_cache.insert(func.clone());
+			}
+			for alias in aliases.keys() {
+				self.path_cache.insert(alias.clone());
+			}
+		});
+
+		for cmd in BUILTINS {
+			self.path_cache.insert(cmd.to_string());
+		}
+	}
+	pub fn try_rehash_cwd_listing(&mut self) {
+		let cwd = env::var("PWD").unwrap_or_default();
+		if self.old_pwd.as_ref().is_some_and(|old| *old == cwd) {
+			log::trace!("PWD unchanged, skipping rehash of cwd listing");
+			return;
+		}
+
+		log::debug!("Rehashing cwd listing for PWD: '{}'", cwd);
+
+		if let Ok(entries) = Path::new(&cwd).read_dir() {
+			for entry in entries.flatten() {
+				let Ok(meta) = entry.metadata() else { continue };
+				let is_exec = meta.permissions().mode() & 0o111 != 0;
+
+				if let Ok(file_type) = entry.file_type()
+				&& file_type.is_file() && is_exec
+				&& let Some(name) = entry.file_name().to_str() {
+					self.cwd_cache.insert(name.to_string());
+				}
+			}
+		}
+	}
   pub fn start_timer(&mut self) {
     self.runtime_start = Some(Instant::now());
   }

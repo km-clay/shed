@@ -299,7 +299,8 @@ impl Verb {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Motion {
-  WholeLine,
+  WholeLineInclusive, // whole line including the linebreak
+  WholeLineExclusive, // whole line excluding the linebreak
   TextObj(TextObj),
   EndOfLastWord,
   BeginningOfFirstWord,
@@ -381,7 +382,7 @@ impl Motion {
   pub fn is_linewise(&self) -> bool {
     matches!(
       self,
-      Self::WholeLine | Self::LineUp | Self::LineDown | Self::ScreenLineDown | Self::ScreenLineUp
+      Self::WholeLineInclusive | Self::WholeLineExclusive | Self::LineUp | Self::LineDown | Self::ScreenLineDown | Self::ScreenLineUp
     )
   }
 }

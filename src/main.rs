@@ -33,8 +33,8 @@ use crate::parse::execute::exec_input;
 use crate::prelude::*;
 use crate::prompt::get_prompt;
 use crate::prompt::readline::term::{LineWriter, RawModeGuard, raw_mode};
-use crate::prompt::readline::{ShedVi, ReadlineEvent};
-use crate::signal::{QUIT_CODE, check_signals, sig_setup, signals_pending};
+use crate::prompt::readline::{Prompt, ReadlineEvent, ShedVi};
+use crate::signal::{GOT_SIGWINCH, QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::{read_logic, source_rc, write_jobs, write_meta};
 use clap::Parser;
 use state::{read_vars, write_vars};
@@ -161,7 +161,7 @@ fn shed_interactive() -> ShResult<()> {
 	}
 
 	// Create readline instance with initial prompt
-	let mut readline = match ShedVi::new(get_prompt().ok(), *TTY_FILENO) {
+	let mut readline = match ShedVi::new(Prompt::new(), *TTY_FILENO) {
 		Ok(rl) => rl,
 		Err(e) => {
 			eprintln!("Failed to initialize readline: {e}");
@@ -175,13 +175,18 @@ fn shed_interactive() -> ShResult<()> {
 
 	// Main poll loop
 	loop {
+		write_meta(|m| {
+			m.try_rehash_commands();
+			m.try_rehash_cwd_listing();
+		});
+
 		// Handle any pending signals
 		while signals_pending() {
 			if let Err(e) = check_signals() {
 				match e.kind() {
 					ShErrKind::ClearReadline => {
 						// Ctrl+C - clear current input and show new prompt
-						readline.reset(get_prompt().ok());
+						readline.reset(Prompt::new());
 					}
 					ShErrKind::CleanExit(code) => {
 						QUIT_CODE.store(*code, Ordering::SeqCst);
@@ -192,7 +197,12 @@ fn shed_interactive() -> ShResult<()> {
 			}
 		}
 
-		readline.update_prompt(get_prompt().unwrap_or_default());
+		if GOT_SIGWINCH.swap(false, Ordering::SeqCst) {
+			log::info!("Window size change detected, updating readline dimensions");
+			readline.writer.update_t_cols();
+		}
+
+		readline.prompt_mut().refresh();
 		readline.print_line(false)?;
 
 		// Poll for stdin input
@@ -255,7 +265,7 @@ fn shed_interactive() -> ShResult<()> {
 				readline.writer.flush_write("\n")?;
 
 				// Reset for next command with fresh prompt
-				readline.reset(get_prompt().ok());
+				readline.reset(Prompt::new());
 				let real_end = start.elapsed();
 				log::info!("Total round trip time: {:.2?}", real_end);
 			}

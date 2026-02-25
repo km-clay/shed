@@ -73,13 +73,15 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
     unreachable!()
   };
 
-  let (argv, opts) = get_opts_from_tokens(argv, &READ_OPTS);
+  let (argv, opts) = get_opts_from_tokens(argv, &READ_OPTS)?;
   let read_opts = get_read_flags(opts).blame(blame.clone())?;
   let (argv, _) = setup_builtin(argv, job, None).blame(blame.clone())?;
 
   if let Some(prompt) = read_opts.prompt {
     write(borrow_fd(STDOUT_FILENO), prompt.as_bytes())?;
   }
+
+	log::info!("read_builtin: starting read with delim={}", read_opts.delim as char);
 
   let input = if isatty(STDIN_FILENO)? {
     // Restore default terminal settings
@@ -143,15 +145,12 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
     let mut input: Vec<u8> = vec![];
     loop {
       let mut buf = [0u8; 1];
-      log::info!("read: about to call read()");
       match read(STDIN_FILENO, &mut buf) {
         Ok(0) => {
-          log::info!("read: got EOF");
           state::set_status(1);
           break; // EOF
         }
         Ok(n) => {
-          log::info!("read: got {} bytes: {:?}", n, &buf[..1]);
           if buf[0] == read_opts.delim {
             state::set_status(0);
             break; // Delimiter reached, stop reading
@@ -160,7 +159,6 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
         }
         Err(Errno::EINTR) => {
           let pending = crate::signal::sigint_pending();
-          log::info!("read: got EINTR, sigint_pending={}", pending);
           if pending {
             state::set_status(130);
             break;
@@ -168,7 +166,6 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
           continue;
         }
         Err(e) => {
-          log::info!("read: got error: {}", e);
           return Err(ShErr::simple(
             ShErrKind::ExecFail,
             format!("read: Failed to read from stdin: {e}"),
@@ -186,8 +183,8 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
 
   if argv.is_empty() {
     write_vars(|v| {
-      v.set_var("REPLY", &input, VarFlags::NONE);
-    });
+      v.set_var("REPLY", &input, VarFlags::NONE)
+    })?;
   } else {
     // get our field separator
     let mut field_sep = read_vars(|v| v.get_var("IFS"));
@@ -199,7 +196,7 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
     for (i, arg) in argv.iter().enumerate() {
       if i == argv.len() - 1 {
         // Last arg, stuff the rest of the input into it
-        write_vars(|v| v.set_var(&arg.0, &remaining, VarFlags::NONE));
+        write_vars(|v| v.set_var(&arg.0, &remaining, VarFlags::NONE))?;
         break;
       }
 
@@ -209,13 +206,13 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
       if let Some(idx) = trimmed.find(|c: char| field_sep.contains(c)) {
         // We found a field separator, split at the char index
         let (field, rest) = trimmed.split_at(idx);
-        write_vars(|v| v.set_var(&arg.0, field, VarFlags::NONE));
+        write_vars(|v| v.set_var(&arg.0, field, VarFlags::NONE))?;
 
         // note that this doesn't account for consecutive IFS characters, which is what
         // that trim above is for
         remaining = rest.to_string();
       } else {
-        write_vars(|v| v.set_var(&arg.0, trimmed, VarFlags::NONE));
+        write_vars(|v| v.set_var(&arg.0, trimmed, VarFlags::NONE))?;
         remaining.clear();
       }
     }

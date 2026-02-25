@@ -11,8 +11,7 @@ pub fn get_prompt() -> ShResult<String> {
     // username@hostname
     // short/path/to/pwd/
     // $ _
-    let default =
-      "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
+    let default = "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
     return expand_prompt(default);
   };
   let sanitized = format!("\\e[0m{prompt}");

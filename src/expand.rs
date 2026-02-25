@@ -2010,7 +2010,6 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 				result.push_str(&count.to_string());
 			}
       PromptTk::Function(f) => {
-				log::debug!("Expanding prompt function: {f}");
         let output = expand_cmd_sub(&f)?;
         result.push_str(&output);
       }
