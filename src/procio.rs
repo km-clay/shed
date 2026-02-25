@@ -185,7 +185,7 @@ pub struct IoGroup(RawFd, RawFd, RawFd);
 /// Each stack frame represents the redirections of a single command
 #[derive(Default, Clone, Debug)]
 pub struct IoFrame {
-  redirs: Vec<Redir>,
+  pub redirs: Vec<Redir>,
   saved_io: Option<IoGroup>,
 }
 

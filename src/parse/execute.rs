@@ -6,7 +6,7 @@ use crate::{
   },
   expand::{expand_aliases, glob_to_regex},
   jobs::{ChildProc, JobStack, dispatch_job},
-  libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
+  libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils},
   prelude::*,
   procio::{IoMode, IoStack},
   state::{self, ShFunc, VarFlags, read_logic, read_shopts, write_jobs, write_logic, write_vars},
@@ -667,6 +667,7 @@ impl Dispatcher {
     };
     self.job_stack.new_job();
 		let fork_builtin = cmds.len() > 1; // If there's more than one command, we need to fork builtins
+		let (mut in_redirs, mut out_redirs) = self.io_stack.pop_frame().redirs.split_by_channel();
 
     // Zip the commands and their respective pipes into an iterator
     let pipes_and_cmds = get_pipe_stack(cmds.len()).into_iter().zip(cmds);
@@ -674,14 +675,23 @@ impl Dispatcher {
     for ((rpipe, wpipe), mut cmd) in pipes_and_cmds {
       if let Some(pipe) = rpipe {
         self.io_stack.push_to_frame(pipe);
-      }
+      } else {
+				for redir in std::mem::take(&mut in_redirs) {
+					self.io_stack.push_to_frame(redir);
+				}
+			}
       if let Some(pipe) = wpipe {
         self.io_stack.push_to_frame(pipe);
-      }
+      } else {
+				for redir in std::mem::take(&mut out_redirs) {
+					self.io_stack.push_to_frame(redir);
+				}
+			}
 
 			if fork_builtin {
 				cmd.flags |= NdFlags::FORK_BUILTINS;
 			}
+			log::debug!("current io_frame stack: {:#?}", self.io_stack.curr_frame());
       self.dispatch_node(cmd)?;
     }
     let job = self.job_stack.finalize_job().unwrap();
