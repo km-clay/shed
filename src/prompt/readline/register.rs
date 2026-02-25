@@ -1,23 +1,81 @@
-use std::sync::Mutex;
+use std::{fmt::Display, sync::Mutex};
 
 pub static REGISTERS: Mutex<Registers> = Mutex::new(Registers::new());
 
-pub fn read_register(ch: Option<char>) -> Option<String> {
+pub fn read_register(ch: Option<char>) -> Option<RegisterContent> {
   let lock = REGISTERS.lock().unwrap();
-  lock.get_reg(ch).map(|r| r.buf().clone())
+  lock.get_reg(ch).map(|r| r.content().clone())
 }
 
-pub fn write_register(ch: Option<char>, buf: String) {
+pub fn write_register(ch: Option<char>, buf: RegisterContent) {
   let mut lock = REGISTERS.lock().unwrap();
   if let Some(r) = lock.get_reg_mut(ch) {
     r.write(buf)
   }
 }
 
-pub fn append_register(ch: Option<char>, buf: String) {
+pub fn append_register(ch: Option<char>, buf: RegisterContent) {
   let mut lock = REGISTERS.lock().unwrap();
   if let Some(r) = lock.get_reg_mut(ch) {
     r.append(buf)
+  }
+}
+
+#[derive(Default, Clone, Debug)]
+pub enum RegisterContent {
+  Span(String),
+  Line(String),
+  #[default]
+  Empty,
+}
+
+impl Display for RegisterContent {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::Span(s) => write!(f, "{}", s),
+      Self::Line(s) => write!(f, "{}", s),
+      Self::Empty => write!(f, ""),
+    }
+  }
+}
+
+impl RegisterContent {
+  pub fn clear(&mut self) {
+    match self {
+      Self::Span(s) => s.clear(),
+      Self::Line(s) => s.clear(),
+      Self::Empty => {}
+    }
+  }
+  pub fn len(&self) -> usize {
+    match self {
+      Self::Span(s) => s.len(),
+      Self::Line(s) => s.len(),
+      Self::Empty => 0,
+    }
+  }
+  pub fn is_empty(&self) -> bool {
+    match self {
+      Self::Span(s) => s.is_empty(),
+      Self::Line(s) => s.is_empty(),
+      Self::Empty => true,
+    }
+  }
+  pub fn is_line(&self) -> bool {
+    matches!(self, Self::Line(_))
+  }
+  pub fn is_span(&self) -> bool {
+    matches!(self, Self::Span(_))
+  }
+  pub fn as_str(&self) -> &str {
+    match self {
+      Self::Span(s) => s,
+      Self::Line(s) => s,
+      Self::Empty => "",
+    }
+  }
+  pub fn char_count(&self) -> usize {
+    self.as_str().chars().count()
   }
 }
 
@@ -55,33 +113,33 @@ pub struct Registers {
 impl Registers {
   pub const fn new() -> Self {
     Self {
-      default: Register(String::new()),
-      a: Register(String::new()),
-      b: Register(String::new()),
-      c: Register(String::new()),
-      d: Register(String::new()),
-      e: Register(String::new()),
-      f: Register(String::new()),
-      g: Register(String::new()),
-      h: Register(String::new()),
-      i: Register(String::new()),
-      j: Register(String::new()),
-      k: Register(String::new()),
-      l: Register(String::new()),
-      m: Register(String::new()),
-      n: Register(String::new()),
-      o: Register(String::new()),
-      p: Register(String::new()),
-      q: Register(String::new()),
-      r: Register(String::new()),
-      s: Register(String::new()),
-      t: Register(String::new()),
-      u: Register(String::new()),
-      v: Register(String::new()),
-      w: Register(String::new()),
-      x: Register(String::new()),
-      y: Register(String::new()),
-      z: Register(String::new()),
+      default: Register::new(),
+      a: Register::new(),
+      b: Register::new(),
+      c: Register::new(),
+      d: Register::new(),
+      e: Register::new(),
+      f: Register::new(),
+      g: Register::new(),
+      h: Register::new(),
+      i: Register::new(),
+      j: Register::new(),
+      k: Register::new(),
+      l: Register::new(),
+      m: Register::new(),
+      n: Register::new(),
+      o: Register::new(),
+      p: Register::new(),
+      q: Register::new(),
+      r: Register::new(),
+      s: Register::new(),
+      t: Register::new(),
+      u: Register::new(),
+      v: Register::new(),
+      w: Register::new(),
+      x: Register::new(),
+      y: Register::new(),
+      z: Register::new(),
     }
   }
   pub fn get_reg(&self, ch: Option<char>) -> Option<&Register> {
@@ -155,18 +213,39 @@ impl Registers {
 }
 
 #[derive(Clone, Default, Debug)]
-pub struct Register(String);
+pub struct Register {
+  content: RegisterContent,
+}
+
 impl Register {
-  pub fn buf(&self) -> &String {
-    &self.0
+  pub const fn new() -> Self {
+    Self {
+      content: RegisterContent::Span(String::new()),
+    }
   }
-  pub fn write(&mut self, buf: String) {
-    self.0 = buf
+  pub fn content(&self) -> &RegisterContent {
+    &self.content
   }
-  pub fn append(&mut self, buf: String) {
-    self.0.push_str(&buf)
+  pub fn write(&mut self, buf: RegisterContent) {
+    self.content = buf
+  }
+  pub fn append(&mut self, buf: RegisterContent) {
+    match buf {
+      RegisterContent::Empty => {}
+      RegisterContent::Span(ref s) | RegisterContent::Line(ref s) => match &mut self.content {
+        RegisterContent::Empty => self.content = buf,
+        RegisterContent::Span(existing) => existing.push_str(s),
+        RegisterContent::Line(existing) => existing.push_str(s),
+      },
+    }
   }
   pub fn clear(&mut self) {
-    self.0.clear()
+    self.content.clear()
+  }
+  pub fn is_line(&self) -> bool {
+    self.content.is_line()
+  }
+  pub fn is_span(&self) -> bool {
+    self.content.is_span()
   }
 }

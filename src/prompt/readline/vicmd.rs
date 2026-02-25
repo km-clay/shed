@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 
-use super::register::{append_register, read_register, write_register};
+use super::register::{append_register, read_register, write_register, RegisterContent};
 
 //TODO: write tests that take edit results and cursor positions from actual
 // neovim edits and test them against the behavior of this editor
@@ -35,14 +35,14 @@ impl RegisterName {
   pub fn count(&self) -> usize {
     self.count
   }
-  pub fn write_to_register(&self, buf: String) {
+  pub fn write_to_register(&self, buf: RegisterContent) {
     if self.append {
       append_register(self.name, buf);
     } else {
       write_register(self.name, buf);
     }
   }
-  pub fn read_from_register(&self) -> Option<String> {
+  pub fn read_from_register(&self) -> Option<RegisterContent> {
     read_register(self.name)
   }
 }

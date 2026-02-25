@@ -14,7 +14,7 @@ use crate::{
   libsh::{
     error::ShResult,
     term::{Style, Styled},
-  }, parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}, prelude::*, prompt::readline::{markers, register::write_register}, state::read_shopts
+  }, parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}, prelude::*, prompt::readline::{markers, register::{write_register, RegisterContent}}, state::read_shopts
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -2441,7 +2441,7 @@ impl LineBuf {
 					do_indent = read_shopts(|o| o.prompt.auto_indent);
 				}
 
-        let register_text = if verb == Verb::Yank {
+        let text = if verb == Verb::Yank {
           self
             .slice(start..end)
             .map(|c| c.to_string())
@@ -2451,7 +2451,16 @@ impl LineBuf {
           self.update_graphemes();
           drained
         };
-        register.write_to_register(register_text);
+        let is_linewise = matches!(
+          motion,
+          MotionKind::InclusiveWithTargetCol(..) | MotionKind::ExclusiveWithTargetCol(..)
+        );
+        let register_content = if is_linewise {
+          RegisterContent::Line(text)
+        } else {
+          RegisterContent::Span(text)
+        };
+        register.write_to_register(register_content);
 				self.cursor.set(start);
 				if do_indent {
 					self.calc_indent_level();
@@ -2630,22 +2639,46 @@ impl LineBuf {
         let Some(content) = register.read_from_register() else {
           return Ok(());
         };
+        if content.is_empty() {
+          return Ok(());
+        }
 				if let Some(range) = self.select_range {
 					let register_text = self.drain_inclusive(range.0..=range.1);
-					write_register(None, register_text); // swap deleted text into register
+					write_register(None, RegisterContent::Span(register_text)); // swap deleted text into register
 
-					self.insert_str_at(range.0, &content);
-					self.cursor.set(range.0 + content.chars().count());
+					let text = content.as_str();
+					self.insert_str_at(range.0, text);
+					self.cursor.set(range.0 + content.char_count());
 					self.select_range = None;
 					self.update_graphemes();
 					return Ok(());
 				}
-        let insert_idx = match anchor {
-          Anchor::After => self.cursor.ret_add(1),
-          Anchor::Before => self.cursor.get(),
-        };
-        self.insert_str_at(insert_idx, &content);
-        self.cursor.add(content.len().saturating_sub(1));
+        match content {
+          RegisterContent::Span(ref text) => {
+            let insert_idx = match anchor {
+              Anchor::After => self.cursor.ret_add(1),
+              Anchor::Before => self.cursor.get(),
+            };
+            self.insert_str_at(insert_idx, text);
+            self.cursor.add(text.len().saturating_sub(1));
+          }
+          RegisterContent::Line(ref text) => {
+            let insert_idx = match anchor {
+              Anchor::After => self.end_of_line(),
+              Anchor::Before => self.start_of_line(),
+            };
+            let needs_newline = self.grapheme_before(insert_idx).is_some_and(|gr| gr != "\n");
+            if needs_newline {
+              let full = format!("\n{}", text);
+              self.insert_str_at(insert_idx, &full);
+              self.cursor.set(insert_idx + 1);
+            } else {
+              self.insert_str_at(insert_idx, text);
+              self.cursor.set(insert_idx);
+            }
+          }
+          RegisterContent::Empty => {}
+        }
       }
       Verb::SwapVisualAnchor => {
         if let Some((start, end)) = self.select_range()
