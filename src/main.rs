@@ -34,7 +34,7 @@ use crate::prelude::*;
 use crate::prompt::get_prompt;
 use crate::prompt::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::prompt::readline::{Prompt, ReadlineEvent, ShedVi};
-use crate::signal::{GOT_SIGWINCH, QUIT_CODE, check_signals, sig_setup, signals_pending};
+use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::{read_logic, source_rc, write_jobs, write_meta};
 use clap::Parser;
 use state::{read_vars, write_vars};
@@ -186,7 +186,7 @@ fn shed_interactive() -> ShResult<()> {
 				match e.kind() {
 					ShErrKind::ClearReadline => {
 						// Ctrl+C - clear current input and show new prompt
-						readline.reset(Prompt::new());
+						readline.reset();
 					}
 					ShErrKind::CleanExit(code) => {
 						QUIT_CODE.store(*code, Ordering::SeqCst);
@@ -200,9 +200,14 @@ fn shed_interactive() -> ShResult<()> {
 		if GOT_SIGWINCH.swap(false, Ordering::SeqCst) {
 			log::info!("Window size change detected, updating readline dimensions");
 			readline.writer.update_t_cols();
+			readline.prompt_mut().refresh()?;
 		}
 
-		readline.prompt_mut().refresh();
+		if JOB_DONE.swap(false, Ordering::SeqCst) {
+			// update the prompt so any job count escape sequences update dynamically
+			readline.prompt_mut().refresh()?;
+		}
+
 		readline.print_line(false)?;
 
 		// Poll for stdin input
@@ -265,7 +270,7 @@ fn shed_interactive() -> ShResult<()> {
 				readline.writer.flush_write("\n")?;
 
 				// Reset for next command with fresh prompt
-				readline.reset(Prompt::new());
+				readline.reset();
 				let real_end = start.elapsed();
 				log::info!("Total round trip time: {:.2?}", real_end);
 			}

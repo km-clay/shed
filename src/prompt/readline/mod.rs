@@ -256,8 +256,8 @@ impl ShedVi {
 
 
   /// Reset readline state for a new prompt
-  pub fn reset(&mut self, prompt: Prompt) {
-		self.prompt = prompt;
+  pub fn reset(&mut self) {
+		self.prompt = Prompt::new();
     self.editor = Default::default();
     self.mode = Box::new(ViInsert::new());
     self.old_layout = None;
@@ -516,9 +516,7 @@ impl ShedVi {
     let line = self.line_text();
     let new_layout = self.get_layout(&line);
 		let pending_seq = self.mode.pending_seq();
-		let mut prompt_string_right = env::var("PSR")
-			.map(|psr| expand_prompt(&psr).unwrap())
-			.ok();
+		let mut prompt_string_right = self.prompt.psr_expanded.clone();
 
 		if prompt_string_right.as_ref().is_some_and(|psr| psr.lines().count() > 1) {
 			log::warn!("PSR has multiple lines, truncating to one line");

@@ -16,6 +16,7 @@ static SIGNALS: AtomicU64 = AtomicU64::new(0);
 pub static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
 pub static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
 pub static GOT_SIGWINCH: AtomicBool = AtomicBool::new(false);
+pub static JOB_DONE: AtomicBool = AtomicBool::new(false);
 pub static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
 
 const MISC_SIGNALS: [Signal; 22] = [
@@ -285,6 +286,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
     if is_fg {
       take_term()?;
     } else {
+			JOB_DONE.store(true, Ordering::SeqCst);
       let job_order = read_jobs(|j| j.order().to_vec());
       let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
       if let Some(job) = result {

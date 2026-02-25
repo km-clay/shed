@@ -346,7 +346,6 @@ impl ViNormal {
     }
   }
   /// End the parse and clear the pending sequence
-  #[track_caller]
   pub fn quit_parse(&mut self) -> Option<ViCmd> {
     self.clear_cmd();
     None
@@ -1137,7 +1136,6 @@ impl ViVisual {
     }
   }
   /// End the parse and clear the pending sequence
-  #[track_caller]
   pub fn quit_parse(&mut self) -> Option<ViCmd> {
     self.clear_cmd();
     None

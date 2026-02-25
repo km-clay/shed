@@ -1,5 +1,5 @@
 use std::{
-  cell::RefCell, collections::{HashMap, HashSet, VecDeque}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref}, os::unix::fs::PermissionsExt, str::FromStr, time::Duration
+  cell::RefCell, collections::{HashMap, HashSet, VecDeque, hash_map::Entry}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref}, os::unix::fs::PermissionsExt, str::FromStr, time::Duration
 };
 
 use nix::unistd::{User, gethostname, getppid};
@@ -183,6 +183,12 @@ impl ScopeStack {
         flat_vars.insert(var_name.clone(), var.clone());
       }
     }
+		for var in env::vars() {
+			if let Entry::Vacant(e) = flat_vars.entry(var.0) {
+				e.insert(Var::new(VarKind::Str(var.1), VarFlags::EXPORT));
+			}
+		}
+
     flat_vars
   }
   pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) -> ShResult<()> {
@@ -953,7 +959,6 @@ pub fn get_status() -> i32 {
     .parse::<i32>()
     .unwrap()
 }
-#[track_caller]
 pub fn set_status(code: i32) {
   write_vars(|v| v.set_param(ShellParam::Status, &code.to_string()))
 }
