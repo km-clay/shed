@@ -776,11 +776,10 @@ impl MetaTab {
 		for path in paths {
 			if let Ok(entries) = path.read_dir() {
 				for entry in entries.flatten() {
-          let Ok(meta) = entry.metadata() else { continue };
+          let Ok(meta) = std::fs::metadata(entry.path()) else { continue };
           let is_exec = meta.permissions().mode() & 0o111 != 0;
 
-					if let Ok(file_type) = entry.file_type()
-					&& file_type.is_file() && is_exec
+					if meta.is_file() && is_exec
 					&& let Some(name) = entry.file_name().to_str() {
 						self.path_cache.insert(name.to_string());
 					}
@@ -789,11 +788,10 @@ impl MetaTab {
 		}
 		if let Ok(entries) = Path::new(&cwd).read_dir() {
 			for entry in entries.flatten() {
-				let Ok(meta) = entry.metadata() else { continue };
+				let Ok(meta) = std::fs::metadata(entry.path()) else { continue };
 				let is_exec = meta.permissions().mode() & 0o111 != 0;
 
-				if let Ok(file_type) = entry.file_type()
-				&& file_type.is_file() && is_exec
+				if meta.is_file() && is_exec
 				&& let Some(name) = entry.file_name().to_str() {
 					self.path_cache.insert(format!("./{}", name));
 				}
@@ -826,11 +824,10 @@ impl MetaTab {
 
 		if let Ok(entries) = Path::new(&cwd).read_dir() {
 			for entry in entries.flatten() {
-				let Ok(meta) = entry.metadata() else { continue };
+				let Ok(meta) = std::fs::metadata(entry.path()) else { continue };
 				let is_exec = meta.permissions().mode() & 0o111 != 0;
 
-				if let Ok(file_type) = entry.file_type()
-				&& file_type.is_file() && is_exec
+				if meta.is_file() && is_exec
 				&& let Some(name) = entry.file_name().to_str() {
 					self.cwd_cache.insert(name.to_string());
 				}
