@@ -63,8 +63,8 @@ pub type Col = u16;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Pos {
-  col: Col,
-  row: Row,
+  pub col: Col,
+  pub row: Row,
 }
 
 // I'd like to thank rustyline for this idea
@@ -138,6 +138,11 @@ fn ends_with_newline(s: &str) -> bool {
   i > 0 && bytes[i - 1] == b'\n'
 }
 
+pub fn calc_str_width(s: &str) -> u16 {
+	let mut esc_seq = 0;
+	s.graphemes(true).map(|g| width(g, &mut esc_seq)).sum()
+}
+
 // Big credit to rustyline for this
 fn width(s: &str, esc_seq: &mut u8) -> u16 {
   let w_calc = width_calculator();
@@ -155,10 +160,11 @@ fn width(s: &str, esc_seq: &mut u8) -> u16 {
 			/*} else if s == "m" {
 			// last
 			 *esc_seq = 0;*/
-	} else {
-		// not supported
-		*esc_seq = 0;
-	}
+		} else {
+			// not supported
+			*esc_seq = 0;
+		}
+
     0
   } else if s == "\x1b" {
     *esc_seq = 1;
@@ -813,7 +819,7 @@ impl Default for Layout {
 
 pub struct TermWriter {
   out: RawFd,
-  t_cols: Col, // terminal width
+  pub t_cols: Col, // terminal width
   buffer: String,
   w_calc: Box<dyn WidthCalculator>,
 }

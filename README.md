@@ -6,7 +6,7 @@ A Unix shell written in Rust. The name is a nod to the two oldest Unix utilities
 
 ### Line Editor
 
-shed includes a built-in vim emulator as its line editor, written from scratch — not a readline wrapper or external library. It aims to provide a more precise vim editing experience at the shell prompt.
+`shed` includes a built-in `vim` emulator as its line editor, written from scratch — not a readline wrapper or external library. It aims to provide a more precise vim-like editing experience at the shell prompt.
 
 - **Normal mode** — motions (`w`, `b`, `e`, `f`, `t`, `%`, `0`, `$`, etc.), verbs (`d`, `c`, `y`, `p`, `r`, `x`, `~`, etc.), text objects (`iw`, `aw`, `i"`, `a{`, `is`, etc.), registers, `.` repeat, `;`/`,` repeat, and counts
 - **Insert mode** — insert, append, replace, with Ctrl+W word deletion and undo/redo
@@ -127,3 +127,7 @@ imports = [ shed.homeModules.shed ];
 ## Status
 
 `shed` is experimental software and is currently under active development. It covers most day-to-day interactive shell usage and a good portion of POSIX shell scripting, but it is not yet fully POSIX-compliant.
+
+## Why shed?
+
+This originally started as an educational hobby project, but over the course of about a year or so it's taken the form of an actual daily-drivable shell. I mainly wanted to create a shell where line editing is more frictionless than standard choices. I use vim a lot so I've built up a lot of muscle memory, and a fair amount of that muscle memory does not apply to vi modes in `bash`/`zsh`. For instance, the standard vi mode in `zsh` does not support selection via text objects. I wanted to create a line editor that includes even the obscure stuff like 'g?'.

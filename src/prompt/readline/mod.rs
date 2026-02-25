@@ -3,12 +3,15 @@ use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{LineBuf, SelectAnchor, SelectMode};
 use nix::libc::STDOUT_FILENO;
 use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
+use unicode_width::UnicodeWidthStr;
 use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
 use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
+use crate::expand::expand_prompt;
 use crate::libsh::sys::TTY_FILENO;
 use crate::parse::lex::LexStream;
 use crate::prelude::*;
+use crate::prompt::readline::term::{Pos, calc_str_width};
 use crate::state::read_shopts;
 use crate::{
   libsh::{
@@ -33,41 +36,66 @@ pub mod vimode;
 pub mod markers {
   use super::Marker;
 
+	/* Highlight Markers */
+
   // token-level (derived from token class)
-  pub const COMMAND: Marker = '\u{fdd0}';
-  pub const BUILTIN: Marker = '\u{fdd1}';
-  pub const ARG: Marker = '\u{fdd2}';
-  pub const KEYWORD: Marker = '\u{fdd3}';
-  pub const OPERATOR: Marker = '\u{fdd4}';
-  pub const REDIRECT: Marker = '\u{fdd5}';
-  pub const COMMENT: Marker = '\u{fdd6}';
-  pub const ASSIGNMENT: Marker = '\u{fdd7}';
-  pub const CMD_SEP: Marker = '\u{fde0}';
-  pub const CASE_PAT: Marker = '\u{fde1}';
-  pub const SUBSH: Marker = '\u{fde7}';
-  pub const SUBSH_END: Marker = '\u{fde8}';
+  pub const COMMAND: Marker = '\u{e100}';
+  pub const BUILTIN: Marker = '\u{e101}';
+  pub const ARG: Marker = '\u{e102}';
+  pub const KEYWORD: Marker = '\u{e103}';
+  pub const OPERATOR: Marker = '\u{e104}';
+  pub const REDIRECT: Marker = '\u{e105}';
+  pub const COMMENT: Marker = '\u{e106}';
+  pub const ASSIGNMENT: Marker = '\u{e107}';
+  pub const CMD_SEP: Marker = '\u{e108}';
+  pub const CASE_PAT: Marker = '\u{e109}';
+  pub const SUBSH: Marker = '\u{e10a}';
+  pub const SUBSH_END: Marker = '\u{e10b}';
 
   // sub-token (needs scanning)
-  pub const VAR_SUB: Marker = '\u{fdda}';
-  pub const VAR_SUB_END: Marker = '\u{fde3}';
-  pub const CMD_SUB: Marker = '\u{fdd8}';
-  pub const CMD_SUB_END: Marker = '\u{fde4}';
-  pub const PROC_SUB: Marker = '\u{fdd9}';
-  pub const PROC_SUB_END: Marker = '\u{fde9}';
-  pub const STRING_DQ: Marker = '\u{fddb}';
-  pub const STRING_DQ_END: Marker = '\u{fde5}';
-  pub const STRING_SQ: Marker = '\u{fddc}';
-  pub const STRING_SQ_END: Marker = '\u{fde6}';
-  pub const ESCAPE: Marker = '\u{fddd}';
-  pub const GLOB: Marker = '\u{fdde}';
+  pub const VAR_SUB: Marker = '\u{e10c}';
+  pub const VAR_SUB_END: Marker = '\u{e10d}';
+  pub const CMD_SUB: Marker = '\u{e10e}';
+  pub const CMD_SUB_END: Marker = '\u{e10f}';
+  pub const PROC_SUB: Marker = '\u{e110}';
+  pub const PROC_SUB_END: Marker = '\u{e111}';
+  pub const STRING_DQ: Marker = '\u{e112}';
+  pub const STRING_DQ_END: Marker = '\u{e113}';
+  pub const STRING_SQ: Marker = '\u{e114}';
+  pub const STRING_SQ_END: Marker = '\u{e115}';
+  pub const ESCAPE: Marker = '\u{e116}';
+  pub const GLOB: Marker = '\u{e117}';
 
 	// other
-	pub const VISUAL_MODE_START: Marker = '\u{fdea}';
-	pub const VISUAL_MODE_END: Marker = '\u{fdeb}';
+	pub const VISUAL_MODE_START: Marker = '\u{e118}';
+	pub const VISUAL_MODE_END: Marker = '\u{e119}';
 
-  pub const RESET: Marker = '\u{fde2}';
+  pub const RESET: Marker = '\u{e11a}';
 
-  pub const NULL: Marker = '\u{fdef}';
+  pub const NULL: Marker = '\u{e11b}';
+
+	/* Expansion Markers */
+	/// Double quote '"' marker
+	pub const DUB_QUOTE: Marker = '\u{e001}';
+	/// Single quote '\\'' marker
+	pub const SNG_QUOTE: Marker = '\u{e002}';
+	/// Tilde sub marker
+	pub const TILDE_SUB: Marker = '\u{e003}';
+	/// Input process sub marker
+	pub const PROC_SUB_IN: Marker = '\u{e005}';
+	/// Output process sub marker
+	pub const PROC_SUB_OUT: Marker = '\u{e006}';
+	/// Marker for null expansion
+	/// This is used for when "$@" or "$*" are used in quotes and there are no
+	/// arguments Without this marker, it would be handled like an empty string,
+	/// which breaks some commands
+	pub const NULL_EXPAND: Marker = '\u{e007}';
+	/// Explicit marker for argument separation
+	/// This is used to join the arguments given by "$@", and preserves exact formatting
+	/// of the original arguments, including quoting
+	pub const ARG_SEP: Marker = '\u{e008}';
+
+	pub const VI_SEQ_EXP: Marker = '\u{e009}';
 
   pub const END_MARKERS: [Marker; 7] = [
     VAR_SUB_END,
@@ -86,7 +114,7 @@ pub mod markers {
 	pub const MISC: [Marker; 3] = [ESCAPE, VISUAL_MODE_START, VISUAL_MODE_END];
 
   pub fn is_marker(c: Marker) -> bool {
-    TOKEN_LEVEL.contains(&c) || SUB_TOKEN.contains(&c) || END_MARKERS.contains(&c) || MISC.contains(&c)
+		c >= '\u{e000}' && c <= '\u{efff}'
   }
 }
 type Marker = char;
@@ -103,7 +131,7 @@ pub enum ReadlineEvent {
 
 pub struct ShedVi {
   pub reader: PollReader,
-  pub writer: Box<dyn LineWriter>,
+  pub writer: TermWriter,
 
   pub prompt: String,
   pub highlighter: Highlighter,
@@ -124,7 +152,7 @@ impl ShedVi {
   pub fn new(prompt: Option<String>, tty: RawFd) -> ShResult<Self> {
     let mut new = Self {
       reader: PollReader::new(),
-      writer: Box::new(TermWriter::new(tty)),
+      writer: TermWriter::new(tty),
       prompt: prompt.unwrap_or("$ ".styled(Style::Green)),
       completer: Completer::new(),
       highlighter: Highlighter::new(),
@@ -136,7 +164,7 @@ impl ShedVi {
       history: History::new()?,
       needs_redraw: true,
     };
-    new.print_line()?;
+    new.print_line(false)?;
     Ok(new)
   }
 
@@ -201,7 +229,7 @@ impl ShedVi {
   pub fn process_input(&mut self) -> ShResult<ReadlineEvent> {
     // Redraw if needed
     if self.needs_redraw {
-      self.print_line()?;
+      self.print_line(false)?;
       self.needs_redraw = false;
     }
 
@@ -276,7 +304,7 @@ impl ShedVi {
       if cmd.is_submit_action() && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete)) {
         self.editor.set_hint(None);
 				self.editor.cursor.set(self.editor.cursor_max()); // Move the cursor to the very end
-        self.print_line()?; // Redraw
+        self.print_line(true)?; // Redraw
         self.writer.flush_write("\n")?;
         let buf = self.editor.take_buf();
         // Save command to history if auto_hist is enabled
@@ -322,7 +350,7 @@ impl ShedVi {
 
     // Redraw if we processed any input
     if self.needs_redraw {
-      self.print_line()?;
+      self.print_line(false)?;
       self.needs_redraw = false;
     }
 
@@ -409,14 +437,52 @@ impl ShedVi {
     }
   }
 
-  pub fn print_line(&mut self) -> ShResult<()> {
+  pub fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
     let line = self.line_text();
     let new_layout = self.get_layout(&line);
+		let pending_seq = self.mode.pending_seq();
+		let mut prompt_string_right = env::var("PSR")
+			.map(|psr| expand_prompt(&psr).unwrap())
+			.ok();
+
+		if prompt_string_right.as_ref().is_some_and(|psr| psr.lines().count() > 1) {
+			log::warn!("PSR has multiple lines, truncating to one line");
+			prompt_string_right = prompt_string_right.map(|psr| psr.lines().next().unwrap_or_default().to_string());
+		}
+
+		let row0_used = self.prompt
+			.lines()
+			.next()
+			.map(|l| Layout::calc_pos(self.writer.t_cols, l, Pos { col: 0, row: 0 }))
+			.map(|p| p.col)
+			.unwrap_or_default() as usize;
+		let one_line = new_layout.end.row == 0;
+
+
     if let Some(layout) = self.old_layout.as_ref() {
       self.writer.clear_rows(layout)?;
     }
 
     self.writer.redraw(&self.prompt, &line, &new_layout)?;
+
+		let seq_fits = pending_seq.as_ref().is_some_and(|seq| row0_used + 1 < self.writer.t_cols as usize - seq.width());
+		let psr_fits = prompt_string_right.as_ref().is_some_and(|psr| new_layout.end.col as usize + 1 < self.writer.t_cols as usize - psr.width());
+
+		if !final_draw && let Some(seq) = pending_seq && !seq.is_empty() && !(prompt_string_right.is_some() && one_line) && seq_fits {
+			let to_col = self.writer.t_cols - calc_str_width(&seq);
+			let up = new_layout.cursor.row; // rows to move up from cursor to top line of prompt
+
+			let move_up = if up > 0 { format!("\x1b[{up}A") } else { String::new() };
+
+			// Save cursor, move up to top row, move right to column, write sequence, restore cursor
+			self.writer.flush_write(&format!("\x1b[s{move_up}\x1b[{to_col}G{seq}\x1b[u"))?;
+		} else if !final_draw && let Some(psr) = prompt_string_right && psr_fits {
+			let to_col = self.writer.t_cols - calc_str_width(&psr);
+			let down = new_layout.end.row - new_layout.cursor.row;
+			let move_down = if down > 0 { format!("\x1b[{down}B") } else { String::new() };
+
+			self.writer.flush_write(&format!("\x1b[s{move_down}\x1b[{to_col}G{psr}\x1b[u"))?;
+		}
 
     self.writer.flush_write(&self.mode.cursor_style())?;
 

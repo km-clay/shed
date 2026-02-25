@@ -10,10 +10,10 @@ use std::{
 use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
-  builtin::trap::TrapTarget, exec_input, expand::ARG_SEP, jobs::JobTab, libsh::{
+  builtin::trap::TrapTarget, exec_input, jobs::JobTab, libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::VecDequeExt,
-  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, shopt::ShOpts
+  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, prompt::readline::markers, shopt::ShOpts
 };
 
 pub struct Shed {
@@ -604,7 +604,7 @@ impl VarTab {
   fn update_arg_params(&mut self) {
     self.set_param(
       ShellParam::AllArgs,
-      &self.sh_argv.clone().to_vec()[1..].join(&ARG_SEP.to_string()),
+      &self.sh_argv.clone().to_vec()[1..].join(&markers::ARG_SEP.to_string()),
     );
     self.set_param(ShellParam::ArgCount, &(self.sh_argv.len() - 1).to_string());
   }

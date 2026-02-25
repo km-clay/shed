@@ -32,7 +32,7 @@ use crate::libsh::sys::TTY_FILENO;
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
 use crate::prompt::get_prompt;
-use crate::prompt::readline::term::{RawModeGuard, raw_mode};
+use crate::prompt::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::prompt::readline::{ShedVi, ReadlineEvent};
 use crate::signal::{QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::{read_logic, source_rc, write_jobs, write_meta};
@@ -192,7 +192,7 @@ fn shed_interactive() -> ShResult<()> {
 			}
 		}
 
-		readline.print_line()?;
+		readline.print_line(false)?;
 
 		// Poll for stdin input
 		let mut fds = [PollFd::new(
@@ -251,6 +251,7 @@ fn shed_interactive() -> ShResult<()> {
 				let command_run_time = start.elapsed();
 				log::info!("Command executed in {:.2?}", command_run_time);
 				write_meta(|m| m.stop_timer());
+				readline.writer.flush_write("\n")?;
 
 				// Reset for next command with fresh prompt
 				readline.reset(get_prompt().ok());
@@ -271,7 +272,7 @@ fn shed_interactive() -> ShResult<()> {
 					return Ok(());
 				}
 				_ => eprintln!("{e}"),
-			},
+			}
 		}
 	}
 

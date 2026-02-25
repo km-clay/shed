@@ -10,6 +10,7 @@ use crate::parse::execute::exec_input;
 use crate::parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule, is_field_sep, is_hard_sep};
 use crate::parse::{Redir, RedirType};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
+use crate::prompt::readline::markers;
 use crate::state::{
   LogTab, VarFlags, read_logic, read_vars, write_jobs, write_meta, write_vars,
 };
@@ -17,29 +18,6 @@ use crate::{jobs, prelude::*};
 
 const PARAMETERS: [char; 7] = ['@', '*', '#', '$', '?', '!', '0'];
 
-/// Variable substitution marker
-pub const VAR_SUB: char = '\u{fdd0}';
-/// Double quote '"' marker
-pub const DUB_QUOTE: char = '\u{fdd1}';
-/// Single quote '\\'' marker
-pub const SNG_QUOTE: char = '\u{fdd2}';
-/// Tilde sub marker
-pub const TILDE_SUB: char = '\u{fdd3}';
-/// Subshell marker
-pub const SUBSH: char = '\u{fdd4}';
-/// Input process sub marker
-pub const PROC_SUB_IN: char = '\u{fdd5}';
-/// Output process sub marker
-pub const PROC_SUB_OUT: char = '\u{fdd6}';
-/// Marker for null expansion
-/// This is used for when "$@" or "$*" are used in quotes and there are no
-/// arguments Without this marker, it would be handled like an empty string,
-/// which breaks some commands
-pub const NULL_EXPAND: char = '\u{fdd7}';
-/// Explicit marker for argument separation
-/// This is used to join the arguments given by "$@", and preserves exact formatting
-/// of the original arguments, including quoting
-pub const ARG_SEP: char = '\u{fdd8}';
 
 impl Tk {
   /// Create a new expanded token
@@ -105,10 +83,10 @@ impl Expander {
 
     'outer: while let Some(ch) = chars.next() {
       match ch {
-        DUB_QUOTE | SNG_QUOTE | SUBSH => {
+        markers::DUB_QUOTE | markers::SNG_QUOTE | markers::SUBSH => {
           while let Some(q_ch) = chars.next() {
             match q_ch {
-							ARG_SEP if ch == DUB_QUOTE => {
+							markers::ARG_SEP if ch == markers::DUB_QUOTE => {
 								words.push(mem::take(&mut cur_word));
 							}
               _ if q_ch == ch => {
@@ -119,7 +97,7 @@ impl Expander {
             }
           }
         }
-        _ if is_field_sep(ch) || ch == ARG_SEP => {
+        _ if is_field_sep(ch) || ch == markers::ARG_SEP => {
           if cur_word.is_empty() && !was_quoted {
             cur_word.clear();
           } else {
@@ -137,7 +115,7 @@ impl Expander {
       words.push(cur_word);
     }
 
-    words.retain(|w| w != &NULL_EXPAND.to_string());
+    words.retain(|w| w != &markers::NULL_EXPAND.to_string());
     words
   }
 }
@@ -500,33 +478,33 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 
   while let Some(ch) = chars.next() {
     match ch {
-      TILDE_SUB => {
+      markers::TILDE_SUB => {
         let home = env::var("HOME").unwrap_or_default();
         result.push_str(&home);
       }
-      PROC_SUB_OUT => {
+      markers::PROC_SUB_OUT => {
         let mut inner = String::new();
         while let Some(ch) = chars.next() {
           match ch {
-            PROC_SUB_OUT => break,
+            markers::PROC_SUB_OUT => break,
             _ => inner.push(ch),
           }
         }
         let fd_path = expand_proc_sub(&inner, false)?;
         result.push_str(&fd_path);
       }
-      PROC_SUB_IN => {
+      markers::PROC_SUB_IN => {
         let mut inner = String::new();
         while let Some(ch) = chars.next() {
           match ch {
-            PROC_SUB_IN => break,
+            markers::PROC_SUB_IN => break,
             _ => inner.push(ch),
           }
         }
         let fd_path = expand_proc_sub(&inner, true)?;
         result.push_str(&fd_path);
       }
-      VAR_SUB => {
+      markers::VAR_SUB => {
         let expanded = expand_var(chars)?;
         result.push_str(&expanded);
       }
@@ -541,12 +519,12 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   let mut in_brace = false;
   while let Some(&ch) = chars.peek() {
     match ch {
-      SUBSH if var_name.is_empty() => {
+      markers::SUBSH if var_name.is_empty() => {
         chars.next(); // now safe to consume
         let mut subsh_body = String::new();
         let mut found_end = false;
         while let Some(c) = chars.next() {
-          if c == SUBSH {
+          if c == markers::SUBSH {
             found_end = true;
             break;
           }
@@ -579,7 +557,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         let val = read_vars(|v| v.get_var(&parameter));
 
         if (ch == '@' || ch == '*') && val.is_empty() {
-          return Ok(NULL_EXPAND.to_string());
+          return Ok(markers::NULL_EXPAND.to_string());
         }
 
         return Ok(val);
@@ -929,14 +907,14 @@ pub fn unescape_str(raw: &str) -> String {
 
   while let Some(ch) = chars.next() {
     match ch {
-      '~' if first_char => result.push(TILDE_SUB),
+      '~' if first_char => result.push(markers::TILDE_SUB),
       '\\' => {
         if let Some(next_ch) = chars.next() {
           result.push(next_ch)
         }
       }
       '(' => {
-        result.push(SUBSH);
+        result.push(markers::SUBSH);
         let mut paren_count = 1;
         while let Some(subsh_ch) = chars.next() {
           match subsh_ch {
@@ -946,7 +924,7 @@ pub fn unescape_str(raw: &str) -> String {
                 result.push(next_ch)
               }
             }
-            '$' if chars.peek() != Some(&'(') => result.push(VAR_SUB),
+            '$' if chars.peek() != Some(&'(') => result.push(markers::VAR_SUB),
             '(' => {
               paren_count += 1;
               result.push(subsh_ch)
@@ -954,7 +932,7 @@ pub fn unescape_str(raw: &str) -> String {
             ')' => {
               paren_count -= 1;
               if paren_count == 0 {
-                result.push(SUBSH);
+                result.push(markers::SUBSH);
                 break;
               } else {
                 result.push(subsh_ch)
@@ -965,7 +943,7 @@ pub fn unescape_str(raw: &str) -> String {
         }
       }
       '"' => {
-        result.push(DUB_QUOTE);
+        result.push(markers::DUB_QUOTE);
         while let Some(q_ch) = chars.next() {
           match q_ch {
             '\\' => {
@@ -982,11 +960,11 @@ pub fn unescape_str(raw: &str) -> String {
               }
             }
             '$' => {
-              result.push(VAR_SUB);
+              result.push(markers::VAR_SUB);
               if chars.peek() == Some(&'(') {
                 chars.next();
                 let mut paren_count = 1;
-                result.push(SUBSH);
+                result.push(markers::SUBSH);
                 while let Some(subsh_ch) = chars.next() {
                   match subsh_ch {
                     '\\' => {
@@ -1002,7 +980,7 @@ pub fn unescape_str(raw: &str) -> String {
                     ')' => {
                       paren_count -= 1;
                       if paren_count <= 0 {
-                        result.push(SUBSH);
+                        result.push(markers::SUBSH);
                         break;
                       } else {
                         result.push(subsh_ch);
@@ -1014,7 +992,7 @@ pub fn unescape_str(raw: &str) -> String {
               }
             }
             '"' => {
-              result.push(DUB_QUOTE);
+              result.push(markers::DUB_QUOTE);
               break;
             }
             _ => result.push(q_ch),
@@ -1022,11 +1000,11 @@ pub fn unescape_str(raw: &str) -> String {
         }
       }
       '\'' => {
-        result.push(SNG_QUOTE);
+        result.push(markers::SNG_QUOTE);
         while let Some(q_ch) = chars.next() {
           match q_ch {
             '\'' => {
-              result.push(SNG_QUOTE);
+              result.push(markers::SNG_QUOTE);
               break;
             }
             _ => result.push(q_ch),
@@ -1036,7 +1014,7 @@ pub fn unescape_str(raw: &str) -> String {
       '<' if chars.peek() == Some(&'(') => {
         chars.next();
         let mut paren_count = 1;
-        result.push(PROC_SUB_OUT);
+        result.push(markers::PROC_SUB_OUT);
         while let Some(subsh_ch) = chars.next() {
           match subsh_ch {
             '\\' => {
@@ -1052,7 +1030,7 @@ pub fn unescape_str(raw: &str) -> String {
             ')' => {
               paren_count -= 1;
               if paren_count <= 0 {
-                result.push(PROC_SUB_OUT);
+                result.push(markers::PROC_SUB_OUT);
                 break;
               } else {
                 result.push(subsh_ch);
@@ -1065,7 +1043,7 @@ pub fn unescape_str(raw: &str) -> String {
       '>' if chars.peek() == Some(&'(') => {
         chars.next();
         let mut paren_count = 1;
-        result.push(PROC_SUB_IN);
+        result.push(markers::PROC_SUB_IN);
         while let Some(subsh_ch) = chars.next() {
           match subsh_ch {
             '\\' => {
@@ -1081,7 +1059,7 @@ pub fn unescape_str(raw: &str) -> String {
             ')' => {
               paren_count -= 1;
               if paren_count <= 0 {
-                result.push(PROC_SUB_IN);
+                result.push(markers::PROC_SUB_IN);
                 break;
               } else {
                 result.push(subsh_ch);
@@ -1093,11 +1071,11 @@ pub fn unescape_str(raw: &str) -> String {
       }
       '$' if chars.peek() == Some(&'\'') => {
         chars.next();
-        result.push(SNG_QUOTE);
+        result.push(markers::SNG_QUOTE);
         while let Some(q_ch) = chars.next() {
           match q_ch {
             '\'' => {
-              result.push(SNG_QUOTE);
+              result.push(markers::SNG_QUOTE);
               break;
             }
             '\\' => {
@@ -1163,7 +1141,7 @@ pub fn unescape_str(raw: &str) -> String {
         }
       }
       '$' => {
-        result.push(VAR_SUB);
+        result.push(markers::VAR_SUB);
         if chars.peek() == Some(&'$') {
           chars.next();
           result.push('$');
@@ -1188,9 +1166,9 @@ pub fn unescape_math(raw: &str) -> String {
         }
       }
       '$' => {
-        result.push(VAR_SUB);
+        result.push(markers::VAR_SUB);
         if chars.peek() == Some(&'(') {
-          result.push(SUBSH);
+          result.push(markers::SUBSH);
           chars.next();
           let mut paren_count = 1;
           while let Some(subsh_ch) = chars.next() {
@@ -1201,7 +1179,7 @@ pub fn unescape_math(raw: &str) -> String {
                   result.push(next_ch)
                 }
               }
-              '$' if chars.peek() != Some(&'(') => result.push(VAR_SUB),
+              '$' if chars.peek() != Some(&'(') => result.push(markers::VAR_SUB),
               '(' => {
                 paren_count += 1;
                 result.push(subsh_ch)
@@ -1209,7 +1187,7 @@ pub fn unescape_math(raw: &str) -> String {
               ')' => {
                 paren_count -= 1;
                 if paren_count == 0 {
-                  result.push(SUBSH);
+                  result.push(markers::SUBSH);
                   break;
                 } else {
                   result.push(subsh_ch)
@@ -1840,10 +1818,12 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
             '!' => {
               let mut func_name = String::new();
               let is_braced = chars.peek() == Some(&'{');
+              let mut handled = false;
               while let Some(ch) = chars.peek() {
                 match ch {
                   '}' if is_braced => {
                     chars.next();
+                    handled = true;
                     break;
                   }
                   'A'..='Z' | 'a'..='z' | '0'..='9' | '_' => {
@@ -1851,21 +1831,30 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
                     chars.next();
                   }
                   _ => {
+                    handled = true;
                     if is_braced {
                       // Invalid character in braced function name
                       tokens.push(PromptTk::Text(format!("\\!{{{func_name}")));
-                      break;
                     } else {
                       // End of unbraced function name
                       let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
                       if func_exists {
-                        tokens.push(PromptTk::Function(func_name));
+                        tokens.push(PromptTk::Function(func_name.clone()));
                       } else {
                         tokens.push(PromptTk::Text(format!("\\!{func_name}")));
                       }
-                      break;
                     }
+                    break;
                   }
+                }
+              }
+              // Handle end-of-input: function name collected but loop ended without pushing
+              if !handled && !func_name.is_empty() {
+                let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
+                if func_exists {
+                  tokens.push(PromptTk::Function(func_name));
+                } else {
+                  tokens.push(PromptTk::Text(format!("\\!{func_name}")));
                 }
               }
             }
@@ -2017,6 +2006,7 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
       PromptTk::FailureSymbol => todo!(),
       PromptTk::JobCount => todo!(),
       PromptTk::Function(f) => {
+				log::debug!("Expanding prompt function: {f}");
         let output = expand_cmd_sub(&f)?;
         result.push_str(&output);
       }
