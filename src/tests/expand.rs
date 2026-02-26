@@ -2,14 +2,14 @@ use std::collections::HashSet;
 
 use crate::expand::perform_param_expansion;
 use crate::prompt::readline::markers;
-use crate::state::VarFlags;
+use crate::state::{VarFlags, VarKind};
 
 use super::*;
 
 #[test]
 fn simple_expansion() {
   let varsub = "$foo";
-  write_vars(|v| v.set_var("foo", "this is the value of the variable", VarFlags::NONE));
+  write_vars(|v| v.set_var("foo", VarKind::Str("this is the value of the variable".into()), VarFlags::NONE));
 
   let mut tokens: Vec<Tk> = LexStream::new(Arc::new(varsub.to_string()), LexFlags::empty())
     .map(|tk| tk.unwrap())
@@ -132,8 +132,8 @@ fn test_infinite_recursive_alias() {
 #[test]
 fn param_expansion_defaultunsetornull() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
-    v.set_var("set_var", "value", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
+    v.set_var("set_var", VarKind::Str("value".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("unset:-default").unwrap();
   assert_eq!(result, "default");
@@ -142,8 +142,8 @@ fn param_expansion_defaultunsetornull() {
 #[test]
 fn param_expansion_defaultunset() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
-    v.set_var("set_var", "value", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
+    v.set_var("set_var", VarKind::Str("value".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("unset-default").unwrap();
   assert_eq!(result, "default");
@@ -152,8 +152,8 @@ fn param_expansion_defaultunset() {
 #[test]
 fn param_expansion_setdefaultunsetornull() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
-    v.set_var("set_var", "value", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
+    v.set_var("set_var", VarKind::Str("value".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("unset:=assigned").unwrap();
   assert_eq!(result, "assigned");
@@ -162,8 +162,8 @@ fn param_expansion_setdefaultunsetornull() {
 #[test]
 fn param_expansion_setdefaultunset() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
-    v.set_var("set_var", "value", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
+    v.set_var("set_var", VarKind::Str("value".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("unset=assigned").unwrap();
   assert_eq!(result, "assigned");
@@ -172,8 +172,8 @@ fn param_expansion_setdefaultunset() {
 #[test]
 fn param_expansion_altsetnotnull() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
-    v.set_var("set_var", "value", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
+    v.set_var("set_var", VarKind::Str("value".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("set_var:+alt").unwrap();
   assert_eq!(result, "alt");
@@ -182,8 +182,8 @@ fn param_expansion_altsetnotnull() {
 #[test]
 fn param_expansion_altnotnull() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
-    v.set_var("set_var", "value", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
+    v.set_var("set_var", VarKind::Str("value".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("set_var+alt").unwrap();
   assert_eq!(result, "alt");
@@ -192,7 +192,7 @@ fn param_expansion_altnotnull() {
 #[test]
 fn param_expansion_len() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("#foo").unwrap();
   assert_eq!(result, "3");
@@ -201,7 +201,7 @@ fn param_expansion_len() {
 #[test]
 fn param_expansion_substr() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo:1").unwrap();
   assert_eq!(result, "oo");
@@ -210,7 +210,7 @@ fn param_expansion_substr() {
 #[test]
 fn param_expansion_substrlen() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo:0:2").unwrap();
   assert_eq!(result, "fo");
@@ -219,7 +219,7 @@ fn param_expansion_substrlen() {
 #[test]
 fn param_expansion_remshortestprefix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo#f*").unwrap();
   assert_eq!(result, "oo");
@@ -228,7 +228,7 @@ fn param_expansion_remshortestprefix() {
 #[test]
 fn param_expansion_remlongestprefix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo##f*").unwrap();
   assert_eq!(result, "");
@@ -237,7 +237,7 @@ fn param_expansion_remlongestprefix() {
 #[test]
 fn param_expansion_remshortestsuffix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo%*o").unwrap();
   assert_eq!(result, "fo");
@@ -246,7 +246,7 @@ fn param_expansion_remshortestsuffix() {
 #[test]
 fn param_expansion_remlongestsuffix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo%%*o").unwrap();
   assert_eq!(result, "");
@@ -255,7 +255,7 @@ fn param_expansion_remlongestsuffix() {
 #[test]
 fn param_expansion_replacefirstmatch() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo/foo/X").unwrap();
   assert_eq!(result, "X");
@@ -264,7 +264,7 @@ fn param_expansion_replacefirstmatch() {
 #[test]
 fn param_expansion_replaceallmatches() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo//o/X").unwrap();
   assert_eq!(result, "fXX");
@@ -273,7 +273,7 @@ fn param_expansion_replaceallmatches() {
 #[test]
 fn param_expansion_replaceprefix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo/#f/X").unwrap();
   assert_eq!(result, "Xoo");
@@ -282,7 +282,7 @@ fn param_expansion_replaceprefix() {
 #[test]
 fn param_expansion_replacesuffix() {
   write_vars(|v| {
-    v.set_var("foo", "foo", VarFlags::NONE);
+    v.set_var("foo", VarKind::Str("foo".into()), VarFlags::NONE);
   });
   let result = perform_param_expansion("foo/%o/X").unwrap();
   assert_eq!(result, "foX");

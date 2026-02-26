@@ -1,5 +1,5 @@
 use std::{
-  cell::RefCell, collections::{HashMap, HashSet, VecDeque, hash_map::Entry}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref}, os::unix::fs::PermissionsExt, str::FromStr, time::Duration
+  cell::RefCell, cmp::Ordering, collections::{HashMap, HashSet, VecDeque, hash_map::Entry}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref}, os::unix::fs::PermissionsExt, str::FromStr, time::Duration
 };
 
 use nix::unistd::{User, gethostname, getppid};
@@ -8,7 +8,7 @@ use crate::{
   builtin::{BUILTINS, trap::TrapTarget}, exec_input, jobs::JobTab, libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::VecDequeExt,
-  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, readline::markers, shopt::ShOpts
+  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc, lex::{LexFlags, LexStream, Tk}}, prelude::*, readline::markers, shopt::ShOpts
 };
 
 pub struct Shed {
@@ -191,7 +191,7 @@ impl ScopeStack {
 
     flat_vars
   }
-  pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) -> ShResult<()> {
+  pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     let is_local = self.is_local_var(var_name);
     if flags.contains(VarFlags::LOCAL) || is_local {
       self.set_var_local(var_name, val, flags)
@@ -199,20 +199,61 @@ impl ScopeStack {
 			self.set_var_global(var_name, val, flags)
     }
   }
-  fn set_var_global(&mut self, var_name: &str, val: &str, flags: VarFlags) -> ShResult<()> {
+  fn set_var_global(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if let Some(scope) = self.scopes.first_mut() {
       scope.set_var(var_name, val, flags)
     } else {
       Ok(())
     }
   }
-  fn set_var_local(&mut self, var_name: &str, val: &str, flags: VarFlags) -> ShResult<()> {
+  fn set_var_local(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if let Some(scope) = self.scopes.last_mut() {
       scope.set_var(var_name, val, flags)
     } else {
       Ok(())
     }
   }
+	pub fn index_var(&self, var_name: &str, idx: isize) -> ShResult<String> {
+		for scope in self.scopes.iter().rev() {
+			if scope.var_exists(var_name)
+			&& let Some(var) = scope.vars().get(var_name) {
+				match var.kind() {
+					VarKind::Arr(items) => {
+						let idx = match idx.cmp(&0) {
+							Ordering::Less => {
+								if items.len() >= idx.unsigned_abs() {
+									items.len() - idx.unsigned_abs()
+								} else {
+									return Err(ShErr::simple(
+										ShErrKind::ExecFail,
+										format!("Index {} out of bounds for array '{}'", idx, var_name)
+									));
+								}
+							}
+							Ordering::Equal => idx as usize,
+							Ordering::Greater => idx as usize
+						};
+
+						if let Some(item) = items.get(idx) {
+							return Ok(item.clone());
+						} else {
+							return Err(ShErr::simple(
+								ShErrKind::ExecFail,
+								format!("Index {} out of bounds for array '{}'", idx, var_name)
+							));
+						}
+					}
+					_ => {
+						return Err(ShErr::simple(
+							ShErrKind::ExecFail,
+							format!("Variable '{}' is not an array", var_name)
+						));
+					}
+				}
+			}
+		}
+		Ok("".into())
+	}
   pub fn get_var(&self, var_name: &str) -> String {
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.get_param(param);
@@ -434,6 +475,30 @@ pub enum VarKind {
   Int(i32),
   Arr(Vec<String>),
   AssocArr(Vec<(String, String)>),
+}
+
+impl VarKind {
+	pub fn arr_from_tk(tk: Tk) -> ShResult<Self> {
+		let raw = tk.as_str();
+		if !raw.starts_with('(') || !raw.ends_with(')') {
+			return Err(ShErr::simple(
+				ShErrKind::ParseErr,
+				format!("Invalid array syntax: {}", raw),
+			));
+		}
+		let raw = raw[1..raw.len() - 1].to_string();
+
+		let mut words = vec![];
+		let tokens = LexStream::new(Arc::new(raw), LexFlags::empty())
+			.collect::<ShResult<Vec<Tk>>>()?;
+
+		for token in tokens {
+			let tk_words = token.expand()?.get_words();
+			words.extend(tk_words);
+		}
+
+		Ok(Self::Arr(words))
+	}
 }
 
 impl Display for VarKind {
@@ -676,7 +741,7 @@ impl VarTab {
     unsafe { env::remove_var(var_name) };
 		Ok(())
   }
-  pub fn set_var(&mut self, var_name: &str, val: &str, flags: VarFlags) -> ShResult<()> {
+  pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if let Some(var) = self.vars.get_mut(var_name) {
 			if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {
 				return Err(ShErr::simple(
@@ -684,16 +749,16 @@ impl VarTab {
 					format!("Variable '{}' is readonly", var_name)
 				));
 			}
-      var.kind = VarKind::Str(val.to_string());
+      var.kind = val;
       var.flags |= flags;
       if var.flags.contains(VarFlags::EXPORT) || flags.contains(VarFlags::EXPORT) {
         if flags.contains(VarFlags::EXPORT) && !var.flags.contains(VarFlags::EXPORT) {
           var.mark_for_export();
         }
-        unsafe { env::set_var(var_name, val) };
+        unsafe { env::set_var(var_name, var.kind.to_string()) };
       }
     } else {
-      let mut var = Var::new(VarKind::Str(val.to_string()), flags);
+      let mut var = Var::new(val, flags);
       if flags.contains(VarFlags::EXPORT) {
         var.mark_for_export();
         unsafe { env::set_var(var_name, var.to_string()) };
@@ -771,7 +836,7 @@ impl MetaTab {
 			return;
 		}
 
-		log::debug!("Rehashing commands for PATH: '{}' and PWD: '{}'", path, cwd);
+		log::trace!("Rehashing commands for PATH: '{}' and PWD: '{}'", path, cwd);
 
 		self.path_cache.clear();
 		self.old_path = Some(path.clone());

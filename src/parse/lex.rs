@@ -357,7 +357,7 @@ impl LexStream {
         '$' if chars.peek() == Some(&'{') => {
           pos += 2;
           chars.next();
-          let mut brace_count = 0;
+          let mut brace_count = 1;
           while let Some(brc_ch) = chars.next() {
             match brc_ch {
               '\\' => {
@@ -624,6 +624,35 @@ impl LexStream {
             }
           }
         }
+				'=' if chars.peek() == Some(&'(') => {
+					pos += 1; // '='
+					let mut depth = 1;
+					chars.next();
+					pos += 1; // '('
+					// looks like an array
+					while let Some(arr_ch) = chars.next() {
+						match arr_ch {
+							'\\' => {
+								pos += 1;
+								if let Some(next_ch) = chars.next() {
+									pos += next_ch.len_utf8();
+								}
+							}
+							'(' => {
+								depth += 1;
+								pos += 1;
+							}
+							')' => {
+								depth -= 1;
+								pos += 1;
+								if depth == 0 {
+									break;
+								}
+							}
+							_ => pos += arr_ch.len_utf8(),
+						}
+					}
+				}
         _ if !self.in_quote && is_op(ch) => break,
         _ if is_hard_sep(ch) => break,
         _ => pos += ch.len_utf8(),

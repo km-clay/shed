@@ -9,7 +9,7 @@ use crate::{
   libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils},
   prelude::*,
   procio::{IoMode, IoStack},
-  state::{self, ShFunc, VarFlags, read_logic, read_shopts, write_jobs, write_logic, write_vars},
+  state::{self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_vars},
 };
 
 use super::{
@@ -569,7 +569,7 @@ impl Dispatcher {
 					.zip(chunk.iter().chain(std::iter::repeat(&empty)));
 
 				for (var, val) in chunk_iter {
-					write_vars(|v| v.set_var(&var.to_string(), &val.to_string(), VarFlags::NONE))?;
+					write_vars(|v| v.set_var(&var.to_string(), VarKind::Str(val.to_string()), VarFlags::NONE))?;
 					for_guard.vars.insert(var.to_string());
 				}
 
@@ -899,13 +899,18 @@ impl Dispatcher {
     match behavior {
       AssignBehavior::Export => {
         for assign in assigns {
+					let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
           let NdRule::Assignment { kind, var, val } = assign.class else {
             unreachable!()
           };
           let var = var.span.as_str();
-          let val = val.expand()?.get_words().join(" ");
+					let val = if is_arr {
+						VarKind::arr_from_tk(val)?
+					} else {
+						VarKind::Str(val.expand()?.get_words().join(" "))
+					};
           match kind {
-            AssignKind::Eq => write_vars(|v| v.set_var(var, &val, VarFlags::EXPORT))?,
+            AssignKind::Eq => write_vars(|v| v.set_var(var, val, VarFlags::EXPORT))?,
             AssignKind::PlusEq => todo!(),
             AssignKind::MinusEq => todo!(),
             AssignKind::MultEq => todo!(),
@@ -916,13 +921,18 @@ impl Dispatcher {
       }
       AssignBehavior::Set => {
         for assign in assigns {
+					let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
           let NdRule::Assignment { kind, var, val } = assign.class else {
             unreachable!()
           };
           let var = var.span.as_str();
-          let val = val.expand()?.get_words().join(" ");
+					let val = if is_arr {
+						VarKind::arr_from_tk(val)?
+					} else {
+						VarKind::Str(val.expand()?.get_words().join(" "))
+					};
           match kind {
-            AssignKind::Eq => write_vars(|v| v.set_var(var, &val, VarFlags::NONE))?,
+            AssignKind::Eq => write_vars(|v| v.set_var(var, val, VarFlags::NONE))?,
             AssignKind::PlusEq => todo!(),
             AssignKind::MinusEq => todo!(),
             AssignKind::MultEq => todo!(),

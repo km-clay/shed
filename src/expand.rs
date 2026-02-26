@@ -12,7 +12,7 @@ use crate::parse::{Redir, RedirType};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::readline::markers;
 use crate::state::{
-  LogTab, VarFlags, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars
+  LogTab, VarFlags, VarKind, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars
 };
 use crate::{jobs, prelude::*};
 
@@ -516,7 +516,12 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 
 pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   let mut var_name = String::new();
-  let mut in_brace = false;
+  let mut brace_depth: i32 = 0;
+	let mut inner_brace_depth: i32 = 0;
+	let mut bracket_depth: i32 = 0;
+	let mut idx_brace_depth: i32 = 0;
+	let mut idx_raw = String::new();
+	let mut idx = None;
   while let Some(&ch) = chars.peek() {
     match ch {
       markers::SUBSH if var_name.is_empty() => {
@@ -538,17 +543,42 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         let expanded = expand_cmd_sub(&subsh_body)?;
         return Ok(expanded);
       }
-      '{' if var_name.is_empty() => {
+      '{' if var_name.is_empty() && brace_depth == 0 => {
         chars.next(); // consume the brace
-        in_brace = true;
+        brace_depth += 1;
       }
-      '}' if in_brace => {
+      '}' if brace_depth > 0 && bracket_depth == 0 && inner_brace_depth == 0 => {
         chars.next(); // consume the brace
-        let val = perform_param_expansion(&var_name)?;
+        log::debug!("expand_var closing brace, var_name: {:?}", var_name);
+        let val = if let Some(idx) = idx {
+					read_vars(|v| v.index_var(&var_name, idx))?
+				} else {
+					perform_param_expansion(&var_name)?
+				};
         return Ok(val);
       }
-      ch if in_brace => {
+			'[' if brace_depth > 0 && bracket_depth == 0 && inner_brace_depth == 0 => {
+				chars.next(); // consume the bracket
+				bracket_depth += 1;
+			}
+			']' if bracket_depth > 0 && idx_brace_depth == 0 => {
+				bracket_depth -= 1;
+				chars.next(); // consume the bracket
+				if bracket_depth == 0 {
+					let expanded_idx = expand_raw(&mut idx_raw.chars().peekable())?;
+					idx = Some(expanded_idx.parse::<isize>().map_err(|_| ShErr::simple(ShErrKind::ParseErr, format!("Array index must be a number, got '{expanded_idx}'")))?);
+				}
+			}
+			ch if bracket_depth > 0 => {
+				chars.next(); // safe to consume
+				if ch == '{' { idx_brace_depth += 1; }
+				if ch == '}' { idx_brace_depth -= 1; }
+				idx_raw.push(ch);
+			}
+      ch if brace_depth > 0 => {
         chars.next(); // safe to consume
+        if ch == '{' { inner_brace_depth += 1; }
+        if ch == '}' { inner_brace_depth -= 1; }
         var_name.push(ch);
       }
       ch if var_name.is_empty() && PARAMETERS.contains(&ch) => {
@@ -1151,6 +1181,7 @@ pub fn unescape_str(raw: &str) -> String {
     }
     first_char = false;
   }
+
   result
 }
 
@@ -1359,53 +1390,59 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::Len => unreachable!(),
       ParamExp::DefaultUnsetOrNull(default) => {
         if !vars.var_exists(&var_name) || vars.get_var(&var_name).is_empty() {
-          Ok(default)
+          log::debug!("DefaultUnsetOrNull default: {:?}", default);
+          let result = expand_raw(&mut default.chars().peekable());
+          log::debug!("DefaultUnsetOrNull expanded: {:?}", result);
+          result
         } else {
           Ok(vars.get_var(&var_name))
         }
       }
       ParamExp::DefaultUnset(default) => {
         if !vars.var_exists(&var_name) {
-          Ok(default)
+          expand_raw(&mut default.chars().peekable())
         } else {
           Ok(vars.get_var(&var_name))
         }
       }
       ParamExp::SetDefaultUnsetOrNull(default) => {
         if !vars.var_exists(&var_name) || vars.get_var(&var_name).is_empty() {
-          write_vars(|v| v.set_var(&var_name, &default, VarFlags::NONE));
-          Ok(default)
+          let expanded = expand_raw(&mut default.chars().peekable())?;
+          write_vars(|v| v.set_var(&var_name, VarKind::Str(expanded.clone()), VarFlags::NONE));
+          Ok(expanded)
         } else {
           Ok(vars.get_var(&var_name))
         }
       }
       ParamExp::SetDefaultUnset(default) => {
         if !vars.var_exists(&var_name) {
-          write_vars(|v| v.set_var(&var_name, &default, VarFlags::NONE));
-          Ok(default)
+          let expanded = expand_raw(&mut default.chars().peekable())?;
+          write_vars(|v| v.set_var(&var_name, VarKind::Str(expanded.clone()), VarFlags::NONE));
+          Ok(expanded)
         } else {
           Ok(vars.get_var(&var_name))
         }
       }
       ParamExp::AltSetNotNull(alt) => {
         if vars.var_exists(&var_name) && !vars.get_var(&var_name).is_empty() {
-          Ok(alt)
+          expand_raw(&mut alt.chars().peekable())
         } else {
           Ok("".into())
         }
       }
       ParamExp::AltNotNull(alt) => {
         if vars.var_exists(&var_name) {
-          Ok(alt)
+          expand_raw(&mut alt.chars().peekable())
         } else {
           Ok("".into())
         }
       }
       ParamExp::ErrUnsetOrNull(err) => {
         if !vars.var_exists(&var_name) || vars.get_var(&var_name).is_empty() {
+          let expanded = expand_raw(&mut err.chars().peekable())?;
           Err(ShErr::Simple {
             kind: ShErrKind::ExecFail,
-            msg: err,
+            msg: expanded,
             notes: vec![],
           })
         } else {
@@ -1414,9 +1451,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
       ParamExp::ErrUnset(err) => {
         if !vars.var_exists(&var_name) {
+          let expanded = expand_raw(&mut err.chars().peekable())?;
           Err(ShErr::Simple {
             kind: ShErrKind::ExecFail,
-            msg: err,
+            msg: expanded,
             notes: vec![],
           })
         } else {

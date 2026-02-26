@@ -1,4 +1,4 @@
-use std::{env, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc};
+use std::{env, fmt::Debug, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc};
 
 use crate::{
   builtin::BUILTINS,
@@ -10,6 +10,317 @@ use crate::{
   },
   state::{read_logic, read_vars},
 };
+
+pub fn complete_users(start: &str) -> Vec<String> {
+	let Ok(passwd) = std::fs::read_to_string("/etc/passwd") else {
+		return vec![];
+	};
+	passwd
+		.lines()
+		.filter_map(|line| line.split(':').next())
+		.filter(|username| username.starts_with(start))
+		.map(|s| s.to_string())
+		.collect()
+}
+
+pub fn complete_vars(start: &str) -> Vec<String> {
+	let Some((var_name, start, end)) = extract_var_name(start) else {
+		return vec![]
+	};
+	if !read_vars(|v| v.get_var(&var_name)).is_empty() {
+		return vec![]
+	}
+	// if we are here, we have a variable substitution that isn't complete
+	// so let's try to complete it
+	read_vars(|v| {
+		v.flatten_vars()
+			.keys()
+			.filter(|k| k.starts_with(&var_name) && *k != &var_name)
+			.map(|k| k.to_string())
+			.collect::<Vec<_>>()
+
+	})
+}
+
+pub fn extract_var_name(text: &str) -> Option<(String, usize, usize)> {
+	let mut chars = text.chars().peekable();
+	let mut name = String::new();
+	let mut reading_name = false;
+	let mut pos = 0;
+	let mut name_start = 0;
+	let mut name_end = 0;
+
+	while let Some(ch) = chars.next() {
+		match ch {
+			'$' => {
+				if chars.peek() == Some(&'{') {
+					continue;
+				}
+
+				reading_name = true;
+				name_start = pos + 1; // Start after the '$'
+				}
+			'{' if !reading_name => {
+				reading_name = true;
+				name_start = pos + 1;
+			}
+			ch if ch.is_alphanumeric() || ch == '_' => {
+				if reading_name {
+					name.push(ch);
+				}
+			}
+			_ => {
+				if reading_name {
+					name_end = pos; // End before the non-alphanumeric character
+					break;
+				}
+			}
+		}
+		pos += 1;
+	}
+
+	if !reading_name {
+		return None;
+	}
+
+	if name_end == 0 {
+		name_end = pos;
+	}
+
+	Some((name, name_start, name_end))
+}
+
+fn complete_commands(start: &str) -> Vec<String> {
+	let mut candidates = vec![];
+
+	let path = env::var("PATH").unwrap_or_default();
+	let paths = path.split(':').map(PathBuf::from).collect::<Vec<_>>();
+	for path in paths {
+		// Skip directories that don't exist (common in PATH)
+		let Ok(entries) = std::fs::read_dir(path) else {
+			continue;
+		};
+		for entry in entries {
+			let Ok(entry) = entry else {
+				continue;
+			};
+			let Ok(meta) = entry.metadata() else {
+				continue;
+			};
+
+			let file_name = entry.file_name().to_string_lossy().to_string();
+
+			if meta.is_file()
+				&& (meta.permissions().mode() & 0o111) != 0
+					&& file_name.starts_with(start)
+			{
+				candidates.push(file_name);
+			}
+		}
+	}
+
+	let builtin_candidates = BUILTINS
+		.iter()
+		.filter(|b| b.starts_with(start))
+		.map(|s| s.to_string());
+
+	candidates.extend(builtin_candidates);
+
+	read_logic(|l| {
+		let func_table = l.funcs();
+		let matches = func_table
+			.keys()
+			.filter(|k| k.starts_with(start))
+			.map(|k| k.to_string());
+
+		candidates.extend(matches);
+
+		let aliases = l.aliases();
+		let matches = aliases
+			.keys()
+			.filter(|k| k.starts_with(start))
+			.map(|k| k.to_string());
+
+		candidates.extend(matches);
+	});
+
+	// Deduplicate (same command may appear in multiple PATH dirs)
+	candidates.sort();
+	candidates.dedup();
+
+	candidates
+}
+
+fn complete_dirs(start: &str) -> Vec<String> {
+	let filenames = complete_filename(start);
+	filenames.into_iter().filter(|f| std::fs::metadata(f).map(|m| m.is_dir()).unwrap_or(false)).collect()
+}
+
+fn complete_filename(start: &str) -> Vec<String> {
+	let mut candidates = vec![];
+	let has_dotslash = start.starts_with("./");
+
+	// Split path into directory and filename parts
+	// Use "." if start is empty (e.g., after "foo=")
+	let path = PathBuf::from(if start.is_empty() { "." } else { start });
+	let (dir, prefix) = if start.ends_with('/') || start.is_empty() {
+		// Completing inside a directory: "src/" → dir="src/", prefix=""
+		(path, "")
+	} else if let Some(parent) = path.parent()
+		&& !parent.as_os_str().is_empty()
+	{
+		// Has directory component: "src/ma" → dir="src", prefix="ma"
+		(
+			parent.to_path_buf(),
+			path.file_name().unwrap().to_str().unwrap_or(""),
+		)
+	} else {
+		// No directory: "fil" → dir=".", prefix="fil"
+		(PathBuf::from("."), start)
+	};
+
+	let Ok(entries) = std::fs::read_dir(&dir) else {
+		return candidates;
+	};
+
+	for entry in entries.flatten() {
+		let file_name = entry.file_name();
+		let file_str = file_name.to_string_lossy();
+
+		// Skip hidden files unless explicitly requested
+		if !prefix.starts_with('.') && file_str.starts_with('.') {
+			continue;
+		}
+
+		if file_str.starts_with(prefix) {
+			// Reconstruct full path
+			let mut full_path = dir.join(&file_name);
+
+			// Add trailing slash for directories
+			if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+				full_path.push(""); // adds trailing /
+			}
+
+			let mut path_raw = full_path.to_string_lossy().to_string();
+			if path_raw.starts_with("./") && !has_dotslash {
+				path_raw = path_raw.trim_start_matches("./").to_string();
+			}
+
+			candidates.push(path_raw);
+		}
+	}
+
+	candidates.sort();
+	candidates
+}
+
+#[derive(Default,Debug,Clone)]
+pub struct BashCompSpec {
+	/// -F: The name of a function to generate the possible completions.
+	pub function: Option<String>,
+	/// -W: The list of words
+	pub wordlist: Option<Vec<String>>,
+	/// -f: complete file names
+	pub files: bool,
+	/// -d: complete directory names
+	pub dirs: bool,
+	/// -c: complete command names
+	pub commands: bool,
+	/// -u: complete user names
+	pub users: bool,
+	/// -v complete variable names
+	pub vars: bool,
+	/// -A signal: complete signal names
+	pub signals: bool
+}
+
+impl BashCompSpec {
+	pub fn new() -> Self {
+		Self::default()
+	}
+	pub fn with_func(mut self, func: String) -> Self {
+		self.function = Some(func);
+		self
+	}
+	pub fn with_wordlist(mut self, wordlist: Vec<String>) -> Self {
+		self.wordlist = Some(wordlist);
+		self
+	}
+	pub fn files(mut self, enable: bool) -> Self {
+		self.files = enable;
+		self
+	}
+	pub fn dirs(mut self, enable: bool) -> Self {
+		self.dirs = enable;
+		self
+	}
+	pub fn commands(mut self, enable: bool) -> Self {
+		self.commands = enable;
+		self
+	}
+	pub fn users(mut self, enable: bool) -> Self {
+		self.users = enable;
+		self
+	}
+	pub fn vars(mut self, enable: bool) -> Self {
+		self.vars = enable;
+		self
+	}
+	pub fn signals(mut self, enable: bool) -> Self {
+		self.signals = enable;
+		self
+	}
+	pub fn exec_comp_func(&self) -> Vec<String> {
+
+		todo!()
+	}
+}
+
+impl CompSpec for BashCompSpec {
+	fn complete(&self, ctx: &CompContext) -> Vec<String> {
+		let mut candidates = vec![];
+		let prefix = &ctx.words[ctx.cword];
+
+		if self.files {
+			candidates.extend(complete_filename(prefix));
+		}
+		if self.dirs {
+			candidates.extend(complete_dirs(prefix));
+		}
+		if self.commands {
+			candidates.extend(complete_commands(prefix));
+		}
+		if self.vars {
+			candidates.extend(complete_vars(prefix));
+		}
+		if self.users {
+			candidates.extend(complete_users(prefix));
+		}
+		if let Some(words) = &self.wordlist {
+			candidates.extend(
+				words
+					.iter()
+					.filter(|w| w.starts_with(prefix))
+					.cloned(),
+			);
+		}
+		if let Some(func) = &self.function {
+		}
+
+		candidates
+	}
+}
+
+pub trait CompSpec: Debug {
+	fn complete(&self, ctx: &CompContext) -> Vec<String>;
+}
+
+pub struct CompContext {
+	pub words: Vec<String>,
+	pub cword: usize,
+	pub line: String,
+	pub cursor_pos: usize
+}
 
 pub enum CompCtx {
   CmdName,
@@ -170,53 +481,6 @@ impl Completer {
     }
   }
 
-  pub fn extract_var_name(text: &str) -> Option<(String, usize, usize)> {
-    let mut chars = text.chars().peekable();
-    let mut name = String::new();
-    let mut reading_name = false;
-    let mut pos = 0;
-    let mut name_start = 0;
-    let mut name_end = 0;
-
-    while let Some(ch) = chars.next() {
-      match ch {
-        '$' => {
-          if chars.peek() == Some(&'{') {
-            continue;
-          }
-
-          reading_name = true;
-          name_start = pos + 1; // Start after the '$'
-        }
-        '{' if !reading_name => {
-          reading_name = true;
-          name_start = pos + 1;
-        }
-        ch if ch.is_alphanumeric() || ch == '_' => {
-          if reading_name {
-            name.push(ch);
-          }
-        }
-        _ => {
-          if reading_name {
-            name_end = pos; // End before the non-alphanumeric character
-            break;
-          }
-        }
-      }
-      pos += 1;
-    }
-
-    if !reading_name {
-      return None;
-    }
-
-    if name_end == 0 {
-      name_end = pos;
-    }
-
-    Some((name, name_start, name_end))
-  }
 
   pub fn get_completed_line(&self) -> String {
     if self.candidates.is_empty() {
@@ -243,7 +507,7 @@ impl Completer {
       let end = tk.span.end;
       (start..=end).contains(&cursor_pos)
     }) else {
-      let candidates = Self::complete_filename("./"); // Default to filename completion if no token is found
+      let candidates = complete_filename("./"); // Default to filename completion if no token is found
       let end_pos = line.len();
       self.token_span = (end_pos, end_pos);
       return Ok(CompResult::from_candidates(candidates));
@@ -270,40 +534,6 @@ impl Completer {
 
     if ctx.last().is_some_and(|m| *m == markers::VAR_SUB) {
       let var_sub = &cur_token.as_str();
-      if let Some((var_name, start, end)) = Self::extract_var_name(var_sub) {
-        if read_vars(|v| v.get_var(&var_name)).is_empty() {
-          // if we are here, we have a variable substitution that isn't complete
-          // so let's try to complete it
-          let ret: ShResult<CompResult> = read_vars(|v| {
-            let var_matches = v
-              .flatten_vars()
-              .keys()
-              .filter(|k| k.starts_with(&var_name) && *k != &var_name)
-              .map(|k| k.to_string())
-              .collect::<Vec<_>>();
-
-            if !var_matches.is_empty() {
-              let name_start = cur_token.span.start + start;
-              let name_end = cur_token.span.start + end;
-              self.token_span = (name_start, name_end);
-              cur_token
-                .span
-                .set_range(self.token_span.0..self.token_span.1);
-              Ok(CompResult::from_candidates(var_matches))
-            } else {
-              Ok(CompResult::NoMatch)
-            }
-          });
-
-          if !matches!(ret, Ok(CompResult::NoMatch)) {
-            return ret;
-          } else {
-            ctx.pop();
-          }
-        } else {
-          ctx.pop();
-        }
-      }
     }
 
     let raw_tk = cur_token.as_str().to_string();
@@ -312,8 +542,8 @@ impl Completer {
     let expanded = expanded_words.join("\\ ");
 
     let mut candidates = match ctx.pop() {
-      Some(markers::COMMAND) => Self::complete_command(&expanded)?,
-      Some(markers::ARG) => Self::complete_filename(&expanded),
+      Some(markers::COMMAND) => complete_commands(&expanded),
+      Some(markers::ARG) => complete_filename(&expanded),
       Some(_) => {
         return Ok(CompResult::NoMatch);
       }
@@ -343,124 +573,6 @@ impl Completer {
     Ok(CompResult::from_candidates(candidates))
   }
 
-  fn complete_command(start: &str) -> ShResult<Vec<String>> {
-    let mut candidates = vec![];
-
-    let path = env::var("PATH").unwrap_or_default();
-    let paths = path.split(':').map(PathBuf::from).collect::<Vec<_>>();
-    for path in paths {
-      // Skip directories that don't exist (common in PATH)
-      let Ok(entries) = std::fs::read_dir(path) else {
-        continue;
-      };
-      for entry in entries {
-        let Ok(entry) = entry else {
-          continue;
-        };
-        let Ok(meta) = entry.metadata() else {
-          continue;
-        };
-
-        let file_name = entry.file_name().to_string_lossy().to_string();
-
-        if meta.is_file()
-          && (meta.permissions().mode() & 0o111) != 0
-          && file_name.starts_with(start)
-        {
-          candidates.push(file_name);
-        }
-      }
-    }
-
-    let builtin_candidates = BUILTINS
-      .iter()
-      .filter(|b| b.starts_with(start))
-      .map(|s| s.to_string());
-
-    candidates.extend(builtin_candidates);
-
-    read_logic(|l| {
-      let func_table = l.funcs();
-      let matches = func_table
-        .keys()
-        .filter(|k| k.starts_with(start))
-        .map(|k| k.to_string());
-
-      candidates.extend(matches);
-
-      let aliases = l.aliases();
-      let matches = aliases
-        .keys()
-        .filter(|k| k.starts_with(start))
-        .map(|k| k.to_string());
-
-      candidates.extend(matches);
-    });
-
-    // Deduplicate (same command may appear in multiple PATH dirs)
-    candidates.sort();
-    candidates.dedup();
-
-    Ok(candidates)
-  }
-
-  fn complete_filename(start: &str) -> Vec<String> {
-    let mut candidates = vec![];
-    let has_dotslash = start.starts_with("./");
-
-    // Split path into directory and filename parts
-    // Use "." if start is empty (e.g., after "foo=")
-    let path = PathBuf::from(if start.is_empty() { "." } else { start });
-    let (dir, prefix) = if start.ends_with('/') || start.is_empty() {
-      // Completing inside a directory: "src/" → dir="src/", prefix=""
-      (path, "")
-    } else if let Some(parent) = path.parent()
-      && !parent.as_os_str().is_empty()
-    {
-      // Has directory component: "src/ma" → dir="src", prefix="ma"
-      (
-        parent.to_path_buf(),
-        path.file_name().unwrap().to_str().unwrap_or(""),
-      )
-    } else {
-      // No directory: "fil" → dir=".", prefix="fil"
-      (PathBuf::from("."), start)
-    };
-
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-      return candidates;
-    };
-
-    for entry in entries.flatten() {
-      let file_name = entry.file_name();
-      let file_str = file_name.to_string_lossy();
-
-      // Skip hidden files unless explicitly requested
-      if !prefix.starts_with('.') && file_str.starts_with('.') {
-        continue;
-      }
-
-      if file_str.starts_with(prefix) {
-        // Reconstruct full path
-        let mut full_path = dir.join(&file_name);
-
-        // Add trailing slash for directories
-        if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-          full_path.push(""); // adds trailing /
-        }
-
-        let mut path_raw = full_path.to_string_lossy().to_string();
-        if path_raw.starts_with("./") && !has_dotslash {
-          path_raw = path_raw.trim_start_matches("./").to_string();
-        }
-
-        candidates.push(path_raw);
-      }
-    }
-
-    candidates.sort();
-    candidates
-  }
 }
 
 impl Default for Completer {

@@ -4,7 +4,7 @@ use crate::{
   parse::{NdRule, Node},
   prelude::*,
   procio::{IoStack, borrow_fd},
-  state::{self, VarFlags, read_vars, write_vars},
+  state::{self, VarFlags, VarKind, read_vars, write_vars},
 };
 
 use super::setup_builtin;
@@ -40,9 +40,9 @@ pub fn readonly(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
   } else {
     for (arg, _) in argv {
       if let Some((var, val)) = arg.split_once('=') {
-        write_vars(|v| v.set_var(var, val, VarFlags::READONLY))?;
+        write_vars(|v| v.set_var(var, VarKind::Str(val.to_string()), VarFlags::READONLY))?;
       } else {
-        write_vars(|v| v.set_var(&arg, "", VarFlags::READONLY))?;
+        write_vars(|v| v.set_var(&arg, VarKind::Str(String::new()), VarFlags::READONLY))?;
       }
     }
   }
@@ -111,7 +111,7 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
   } else {
     for (arg, _) in argv {
       if let Some((var, val)) = arg.split_once('=') {
-        write_vars(|v| v.set_var(var, val, VarFlags::EXPORT))?;
+        write_vars(|v| v.set_var(var, VarKind::Str(val.to_string()), VarFlags::EXPORT))?;
       } else {
         write_vars(|v| v.export_var(&arg)); // Export an existing variable, if
                                             // any
@@ -152,9 +152,9 @@ pub fn local(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
   } else {
     for (arg, _) in argv {
       if let Some((var, val)) = arg.split_once('=') {
-        write_vars(|v| v.set_var(var, val, VarFlags::LOCAL))?;
+        write_vars(|v| v.set_var(var, VarKind::Str(val.to_string()), VarFlags::LOCAL))?;
       } else {
-        write_vars(|v| v.set_var(&arg, "", VarFlags::LOCAL))?;
+        write_vars(|v| v.set_var(&arg, VarKind::Str(String::new()), VarFlags::LOCAL))?;
       }
     }
   }

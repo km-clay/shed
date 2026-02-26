@@ -144,6 +144,7 @@ bitflags! {
     const BACKGROUND = 0b000001;
 		const FORK_BUILTINS = 0b000010;
 		const NO_FORK = 0b000100;
+		const ARR_ASSIGN = 0b001000;
   }
 }
 
@@ -1472,22 +1473,28 @@ impl ParseStream {
         }
       }
     }
-    if assign_kind.is_none() || var_name.is_empty() {
-      None
-    } else {
+		if let Some(assign_kind) = assign_kind && !var_name.is_empty() {
       let var = Tk::new(TkRule::Str, Span::new(name_range, token.source()));
       let val = Tk::new(TkRule::Str, Span::new(val_range, token.source()));
+			let flags = if var_val.starts_with('(') && var_val.ends_with(')') {
+				NdFlags::ARR_ASSIGN
+			} else {
+				NdFlags::empty()
+			};
+
       Some(Node {
         class: NdRule::Assignment {
-          kind: assign_kind.unwrap(),
+          kind: assign_kind,
           var,
           val,
         },
         tokens: vec![token.clone()],
-        flags: NdFlags::empty(),
+        flags,
         redirs: vec![],
       })
-    }
+    } else {
+			None
+		}
   }
 }
 

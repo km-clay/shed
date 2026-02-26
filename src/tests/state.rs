@@ -1,4 +1,4 @@
-use crate::state::{LogTab, MetaTab, ScopeStack, ShellParam, VarFlags, VarTab};
+use crate::state::{LogTab, MetaTab, ScopeStack, ShellParam, VarFlags, VarKind, VarTab};
 use std::path::PathBuf;
 
 // ============================================================================
@@ -20,7 +20,7 @@ fn scopestack_descend_ascend() {
   let mut stack = ScopeStack::new();
 
   // Set a global variable
-  stack.set_var("GLOBAL", "value1", VarFlags::NONE);
+  stack.set_var("GLOBAL", VarKind::Str("value1".into()), VarFlags::NONE);
   assert_eq!(stack.get_var("GLOBAL"), "value1");
 
   // Descend into a new scope
@@ -30,7 +30,7 @@ fn scopestack_descend_ascend() {
   assert_eq!(stack.get_var("GLOBAL"), "value1");
 
   // Set a local variable
-  stack.set_var("LOCAL", "value2", VarFlags::LOCAL);
+  stack.set_var("LOCAL", VarKind::Str("value2".into()), VarFlags::LOCAL);
   assert_eq!(stack.get_var("LOCAL"), "value2");
 
   // Ascend back to global scope
@@ -48,14 +48,14 @@ fn scopestack_variable_shadowing() {
   let mut stack = ScopeStack::new();
 
   // Set global variable
-  stack.set_var("VAR", "global", VarFlags::NONE);
+  stack.set_var("VAR", VarKind::Str("global".into()), VarFlags::NONE);
   assert_eq!(stack.get_var("VAR"), "global");
 
   // Descend into local scope
   stack.descend(None);
 
   // Set local variable with same name
-  stack.set_var("VAR", "local", VarFlags::LOCAL);
+  stack.set_var("VAR", VarKind::Str("local".into()), VarFlags::LOCAL);
   assert_eq!(stack.get_var("VAR"), "local", "Local should shadow global");
 
   // Ascend back
@@ -77,10 +77,10 @@ fn scopestack_local_vs_global_flag() {
   stack.descend(None);
 
   // Set with LOCAL flag - should go in current scope
-  stack.set_var("LOCAL_VAR", "local", VarFlags::LOCAL);
+  stack.set_var("LOCAL_VAR", VarKind::Str("local".into()), VarFlags::LOCAL);
 
   // Set without LOCAL flag - should go in global scope
-  stack.set_var("GLOBAL_VAR", "global", VarFlags::NONE);
+  stack.set_var("GLOBAL_VAR", VarKind::Str("global".into()), VarFlags::NONE);
 
   // Both visible from local scope
   assert_eq!(stack.get_var("LOCAL_VAR"), "local");
@@ -98,15 +98,15 @@ fn scopestack_local_vs_global_flag() {
 fn scopestack_multiple_levels() {
   let mut stack = ScopeStack::new();
 
-  stack.set_var("LEVEL0", "global", VarFlags::NONE);
+  stack.set_var("LEVEL0", VarKind::Str("global".into()), VarFlags::NONE);
 
   // Level 1
   stack.descend(None);
-  stack.set_var("LEVEL1", "first", VarFlags::LOCAL);
+  stack.set_var("LEVEL1", VarKind::Str("first".into()), VarFlags::LOCAL);
 
   // Level 2
   stack.descend(None);
-  stack.set_var("LEVEL2", "second", VarFlags::LOCAL);
+  stack.set_var("LEVEL2", VarKind::Str("second".into()), VarFlags::LOCAL);
 
   // All variables visible from deepest scope
   assert_eq!(stack.get_var("LEVEL0"), "global");
@@ -130,7 +130,7 @@ fn scopestack_multiple_levels() {
 fn scopestack_cannot_ascend_past_global() {
   let mut stack = ScopeStack::new();
 
-  stack.set_var("VAR", "value", VarFlags::NONE);
+  stack.set_var("VAR", VarKind::Str("value".into()), VarFlags::NONE);
 
   // Try to ascend from global scope (should be no-op)
   stack.ascend();
@@ -202,7 +202,7 @@ fn scopestack_global_parameters() {
 fn scopestack_unset_var() {
   let mut stack = ScopeStack::new();
 
-  stack.set_var("VAR", "value", VarFlags::NONE);
+  stack.set_var("VAR", VarKind::Str("value".into()), VarFlags::NONE);
   assert_eq!(stack.get_var("VAR"), "value");
 
   stack.unset_var("VAR");
@@ -215,11 +215,11 @@ fn scopestack_unset_finds_innermost() {
   let mut stack = ScopeStack::new();
 
   // Set global
-  stack.set_var("VAR", "global", VarFlags::NONE);
+  stack.set_var("VAR", VarKind::Str("global".into()), VarFlags::NONE);
 
   // Descend and shadow
   stack.descend(None);
-  stack.set_var("VAR", "local", VarFlags::LOCAL);
+  stack.set_var("VAR", VarKind::Str("local".into()), VarFlags::LOCAL);
   assert_eq!(stack.get_var("VAR"), "local");
 
   // Unset should remove local, revealing global
@@ -231,7 +231,7 @@ fn scopestack_unset_finds_innermost() {
 fn scopestack_export_var() {
   let mut stack = ScopeStack::new();
 
-  stack.set_var("VAR", "value", VarFlags::NONE);
+  stack.set_var("VAR", VarKind::Str("value".into()), VarFlags::NONE);
 
   // Export the variable
   stack.export_var("VAR");
@@ -246,7 +246,7 @@ fn scopestack_var_exists() {
 
   assert!(!stack.var_exists("NONEXISTENT"));
 
-  stack.set_var("EXISTS", "yes", VarFlags::NONE);
+  stack.set_var("EXISTS", VarKind::Str("yes".into()), VarFlags::NONE);
   assert!(stack.var_exists("EXISTS"));
 
   stack.descend(None);
@@ -255,7 +255,7 @@ fn scopestack_var_exists() {
     "Global var should be visible in local scope"
   );
 
-  stack.set_var("LOCAL", "yes", VarFlags::LOCAL);
+  stack.set_var("LOCAL", VarKind::Str("yes".into()), VarFlags::LOCAL);
   assert!(stack.var_exists("LOCAL"));
 
   stack.ascend();
@@ -269,11 +269,11 @@ fn scopestack_var_exists() {
 fn scopestack_flatten_vars() {
   let mut stack = ScopeStack::new();
 
-  stack.set_var("GLOBAL1", "g1", VarFlags::NONE);
-  stack.set_var("GLOBAL2", "g2", VarFlags::NONE);
+  stack.set_var("GLOBAL1", VarKind::Str("g1".into()), VarFlags::NONE);
+  stack.set_var("GLOBAL2", VarKind::Str("g2".into()), VarFlags::NONE);
 
   stack.descend(None);
-  stack.set_var("LOCAL1", "l1", VarFlags::LOCAL);
+  stack.set_var("LOCAL1", VarKind::Str("l1".into()), VarFlags::LOCAL);
 
   let flattened = stack.flatten_vars();
 
@@ -291,11 +291,11 @@ fn scopestack_local_var_mutation() {
   stack.descend(None);
 
   // `local foo="biz"` — create a local variable with initial value
-  stack.set_var("foo", "biz", VarFlags::LOCAL);
+  stack.set_var("foo", VarKind::Str("biz".into()), VarFlags::LOCAL);
   assert_eq!(stack.get_var("foo"), "biz");
 
   // `foo="bar"` — reassign without LOCAL flag (plain assignment)
-  stack.set_var("foo", "bar", VarFlags::NONE);
+  stack.set_var("foo", VarKind::Str("bar".into()), VarFlags::NONE);
   assert_eq!(
     stack.get_var("foo"),
     "bar",
@@ -321,11 +321,11 @@ fn scopestack_local_var_uninitialized() {
   stack.descend(None);
 
   // `local foo` — declare without a value
-  stack.set_var("foo", "", VarFlags::LOCAL);
+  stack.set_var("foo", VarKind::Str("".into()), VarFlags::LOCAL);
   assert_eq!(stack.get_var("foo"), "");
 
   // `foo="bar"` — assign a value later
-  stack.set_var("foo", "bar", VarFlags::NONE);
+  stack.set_var("foo", VarKind::Str("bar".into()), VarFlags::NONE);
   assert_eq!(
     stack.get_var("foo"),
     "bar",
@@ -441,7 +441,7 @@ fn vartab_new() {
 fn vartab_set_get_var() {
   let mut vartab = VarTab::new();
 
-  vartab.set_var("TEST", "value", VarFlags::NONE);
+  vartab.set_var("TEST", VarKind::Str("value".into()), VarFlags::NONE);
   assert_eq!(vartab.get_var("TEST"), "value");
 }
 
@@ -449,10 +449,10 @@ fn vartab_set_get_var() {
 fn vartab_overwrite_var() {
   let mut vartab = VarTab::new();
 
-  vartab.set_var("VAR", "value1", VarFlags::NONE);
+  vartab.set_var("VAR", VarKind::Str("value1".into()), VarFlags::NONE);
   assert_eq!(vartab.get_var("VAR"), "value1");
 
-  vartab.set_var("VAR", "value2", VarFlags::NONE);
+  vartab.set_var("VAR", VarKind::Str("value2".into()), VarFlags::NONE);
   assert_eq!(vartab.get_var("VAR"), "value2");
 }
 
@@ -462,7 +462,7 @@ fn vartab_var_exists() {
 
   assert!(!vartab.var_exists("TEST"));
 
-  vartab.set_var("TEST", "value", VarFlags::NONE);
+  vartab.set_var("TEST", VarKind::Str("value".into()), VarFlags::NONE);
   assert!(vartab.var_exists("TEST"));
 }
 
@@ -470,7 +470,7 @@ fn vartab_var_exists() {
 fn vartab_unset_var() {
   let mut vartab = VarTab::new();
 
-  vartab.set_var("VAR", "value", VarFlags::NONE);
+  vartab.set_var("VAR", VarKind::Str("value".into()), VarFlags::NONE);
   assert!(vartab.var_exists("VAR"));
 
   vartab.unset_var("VAR");
@@ -482,7 +482,7 @@ fn vartab_unset_var() {
 fn vartab_export_var() {
   let mut vartab = VarTab::new();
 
-  vartab.set_var("VAR", "value", VarFlags::NONE);
+  vartab.set_var("VAR", VarKind::Str("value".into()), VarFlags::NONE);
   vartab.export_var("VAR");
 
   // Variable should still be accessible

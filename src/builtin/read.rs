@@ -13,7 +13,7 @@ use crate::{
   parse::{NdRule, Node},
   procio::{borrow_fd, IoStack},
   readline::term::RawModeGuard,
-  state::{self, read_vars, write_vars, VarFlags},
+  state::{self, read_vars, write_vars, VarFlags, VarKind},
 };
 
 pub const READ_OPTS: [OptSpec; 7] = [
@@ -183,7 +183,7 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
 
   if argv.is_empty() {
     write_vars(|v| {
-      v.set_var("REPLY", &input, VarFlags::NONE)
+      v.set_var("REPLY", VarKind::Str(input.clone()), VarFlags::NONE)
     })?;
   } else {
     // get our field separator
@@ -196,7 +196,7 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
     for (i, arg) in argv.iter().enumerate() {
       if i == argv.len() - 1 {
         // Last arg, stuff the rest of the input into it
-        write_vars(|v| v.set_var(&arg.0, &remaining, VarFlags::NONE))?;
+        write_vars(|v| v.set_var(&arg.0, VarKind::Str(remaining.clone()), VarFlags::NONE))?;
         break;
       }
 
@@ -206,13 +206,13 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
       if let Some(idx) = trimmed.find(|c: char| field_sep.contains(c)) {
         // We found a field separator, split at the char index
         let (field, rest) = trimmed.split_at(idx);
-        write_vars(|v| v.set_var(&arg.0, field, VarFlags::NONE))?;
+        write_vars(|v| v.set_var(&arg.0, VarKind::Str(field.to_string()), VarFlags::NONE))?;
 
         // note that this doesn't account for consecutive IFS characters, which is what
         // that trim above is for
         remaining = rest.to_string();
       } else {
-        write_vars(|v| v.set_var(&arg.0, trimmed, VarFlags::NONE))?;
+        write_vars(|v| v.set_var(&arg.0, VarKind::Str(trimmed.to_string()), VarFlags::NONE))?;
         remaining.clear();
       }
     }
