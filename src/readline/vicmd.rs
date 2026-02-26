@@ -182,6 +182,7 @@ impl ViCmd {
           | Verb::NormalMode
           | Verb::VisualModeSelectLast
           | Verb::VisualMode
+          | Verb::VisualModeLine
           | Verb::ReplaceMode
       )
     })

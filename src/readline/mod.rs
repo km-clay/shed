@@ -561,7 +561,7 @@ impl ShedVi {
   }
 
   pub fn exec_cmd(&mut self, mut cmd: ViCmd) -> ShResult<()> {
-    let mut selecting = false;
+    let mut select_mode = None;
     let mut is_insert_mode = false;
     if cmd.is_mode_transition() {
       let count = cmd.verb_count();
@@ -588,7 +588,11 @@ impl ShedVi {
           return self.editor.exec_cmd(cmd);
         }
         Verb::VisualMode => {
-          selecting = true;
+          select_mode = Some(SelectMode::Char(SelectAnchor::End));
+          Box::new(ViVisual::new())
+        }
+        Verb::VisualModeLine => {
+          select_mode = Some(SelectMode::Line(SelectAnchor::End));
           Box::new(ViVisual::new())
         }
 
@@ -606,10 +610,8 @@ impl ShedVi {
       self.editor.set_cursor_clamp(self.mode.clamp_cursor());
       self.editor.exec_cmd(cmd)?;
 
-      if selecting {
-        self
-          .editor
-          .start_selecting(SelectMode::Char(SelectAnchor::End));
+      if let Some(sel_mode) = select_mode {
+        self.editor.start_selecting(sel_mode);
       } else {
         self.editor.stop_selecting();
       }

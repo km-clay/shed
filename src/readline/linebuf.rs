@@ -321,7 +321,7 @@ pub struct LineBuf {
   pub cursor: ClampedUsize,                 // Used to index grapheme_indices
 
   pub select_mode: Option<SelectMode>,
-  pub select_range: Option<(usize, usize)>,
+  select_range: Option<(usize, usize)>,
   pub last_selection: Option<(usize, usize)>,
 
   pub insert_mode_start_pos: Option<usize>,
@@ -542,6 +542,9 @@ impl LineBuf {
   }
   pub fn slice_to(&mut self, end: usize) -> Option<&str> {
     self.update_graphemes_lazy();
+		self.read_slice_to(end)
+  }
+  pub fn read_slice_to(&self, end: usize) -> Option<&str> {
     let grapheme_index = self.grapheme_indices().get(end).copied().or_else(|| {
       if end == self.grapheme_indices().len() {
         Some(self.buffer.len())
@@ -558,6 +561,9 @@ impl LineBuf {
   }
   pub fn slice_to_cursor(&mut self) -> Option<&str> {
     self.slice_to(self.cursor.get())
+  }
+  pub fn read_slice_to_cursor(&self) -> Option<&str> {
+    self.read_slice_to(self.cursor.get())
   }
   pub fn slice_to_cursor_inclusive(&mut self) -> Option<&str> {
     self.slice_to(self.cursor.ret_add(1))
@@ -614,14 +620,31 @@ impl LineBuf {
     self.update_graphemes();
   }
   pub fn select_range(&self) -> Option<(usize, usize)> {
-    self.select_range
+		match self.select_mode? {
+			SelectMode::Char(_) => {
+				self.select_range
+			}
+			SelectMode::Line(_) => {
+				let (start, end) = self.select_range?;
+				let start = self.pos_line_number(start);
+				let end = self.pos_line_number(end);
+				let (select_start,_) = self.line_bounds(start);
+				let (_,select_end) = self.line_bounds(end);
+				if self.read_grapheme_before(select_end).is_some_and(|gr| gr == "\n") {
+					Some((select_start, select_end - 1))
+				} else {
+					Some((select_start, select_end))
+				}
+			}
+			SelectMode::Block(_) => todo!(),
+		}
   }
   pub fn start_selecting(&mut self, mode: SelectMode) {
+		let range_start = self.cursor;
+		let mut range_end = self.cursor;
+		range_end.add(1);
+		self.select_range = Some((range_start.get(), range_end.get()));
     self.select_mode = Some(mode);
-    let range_start = self.cursor;
-    let mut range_end = self.cursor;
-    range_end.add(1);
-    self.select_range = Some((range_start.get(), range_end.get()));
   }
   pub fn stop_selecting(&mut self) {
     self.select_mode = None;
@@ -629,12 +652,18 @@ impl LineBuf {
       self.last_selection = self.select_range.take();
     }
   }
-  pub fn total_lines(&mut self) -> usize {
+  pub fn total_lines(&self) -> usize {
     self.buffer.graphemes(true).filter(|g| *g == "\n").count()
   }
-  pub fn cursor_line_number(&mut self) -> usize {
+
+	pub fn pos_line_number(&self, pos: usize) -> usize {
+		self.read_slice_to(pos)
+			.map(|slice| slice.graphemes(true).filter(|g| *g == "\n").count())
+			.unwrap_or(0)
+	}
+  pub fn cursor_line_number(&self) -> usize {
     self
-      .slice_to_cursor()
+      .read_slice_to_cursor()
       .map(|slice| slice.graphemes(true).filter(|g| *g == "\n").count())
       .unwrap_or(0)
   }
@@ -772,7 +801,7 @@ impl LineBuf {
 
     Some((start, end))
   }
-  pub fn line_bounds(&mut self, n: usize) -> (usize, usize) {
+  pub fn line_bounds(&self, n: usize) -> (usize, usize) {
     if n > self.total_lines() {
       panic!(
         "Attempted to find line {n} when there are only {} lines",
@@ -2321,7 +2350,7 @@ impl LineBuf {
         return;
       };
       match mode {
-        SelectMode::Char(anchor) => match anchor {
+        SelectMode::Line(anchor) | SelectMode::Char(anchor) => match anchor {
           SelectAnchor::Start => {
             start = self.cursor.get();
           }
@@ -2329,14 +2358,6 @@ impl LineBuf {
             end = self.cursor.get();
           }
         },
-        SelectMode::Line(anchor) => match anchor {
-					SelectAnchor::Start => {
-						start = self.start_of_line();
-					}
-					SelectAnchor::End => {
-						end = self.end_of_line();
-					}
-				}
         SelectMode::Block(anchor) => todo!(),
       }
       if start >= end {
@@ -2381,7 +2402,7 @@ impl LineBuf {
 				}
 			}
 			MotionKind::Exclusive((start,end)) => {
-				if self.select_range().is_none() {
+				if self.select_range.is_none() {
 					self.cursor.set(start)
 				} else {
 					let end = end.saturating_sub(1);
@@ -2395,7 +2416,14 @@ impl LineBuf {
   }
   pub fn range_from_motion(&mut self, motion: &MotionKind) -> Option<(usize, usize)> {
     let range = match motion {
-      MotionKind::On(pos) => ordered(self.cursor.get(), *pos),
+      MotionKind::On(pos) => {
+				let cursor_pos = self.cursor.get();
+				if cursor_pos == *pos {
+					ordered(cursor_pos, pos + 1) // scary
+				} else {
+					ordered(cursor_pos, *pos)
+				}
+			}
       MotionKind::Onto(pos) => {
         // For motions which include the character at the cursor during operations
         // but exclude the character during movements
@@ -2439,20 +2467,29 @@ impl LineBuf {
   ) -> ShResult<()> {
     match verb {
       Verb::Delete | Verb::Yank | Verb::Change => {
+				log::debug!("Executing verb: {verb:?} with motion: {motion:?}");
         let Some((mut start, mut end)) = self.range_from_motion(&motion) else {
+					log::debug!("No range from motion, nothing to do");
           return Ok(());
         };
+				log::debug!("Initial range from motion: ({start}, {end})");
+				log::debug!("self.grapheme_indices().len(): {}", self.grapheme_indices().len());
 
 				let mut do_indent = false;
 				if verb == Verb::Change && (start,end) == self.this_line() {
 					do_indent = read_shopts(|o| o.prompt.auto_indent);
 				}
 
-        let text = if verb == Verb::Yank {
+        let mut text = if verb == Verb::Yank {
           self
             .slice(start..end)
             .map(|c| c.to_string())
             .unwrap_or_default()
+				} else if start == self.grapheme_indices().len() && end == self.grapheme_indices().len() {
+					// user is in normal mode and pressed 'x' on the last char in the buffer
+					let drained = self.drain(end.saturating_sub(1)..end);
+					self.update_graphemes();
+					drained
         } else {
           let drained = self.drain(start..end);
           self.update_graphemes();
@@ -2460,9 +2497,13 @@ impl LineBuf {
         };
         let is_linewise = matches!(
           motion,
-          MotionKind::InclusiveWithTargetCol(..) | MotionKind::ExclusiveWithTargetCol(..)
-        );
+          MotionKind::InclusiveWithTargetCol(..) |
+					MotionKind::ExclusiveWithTargetCol(..)
+        ) || matches!(self.select_mode, Some(SelectMode::Line(_)));
         let register_content = if is_linewise {
+					if !text.ends_with('\n') && !text.is_empty() {
+						text.push('\n');
+					}
           RegisterContent::Line(text)
         } else {
           RegisterContent::Span(text)
@@ -2649,7 +2690,7 @@ impl LineBuf {
         if content.is_empty() {
           return Ok(());
         }
-				if let Some(range) = self.select_range {
+				if let Some(range) = self.select_range() {
 					let register_text = self.drain_inclusive(range.0..=range.1);
 					write_register(None, RegisterContent::Span(register_text)); // swap deleted text into register
 
@@ -2688,7 +2729,7 @@ impl LineBuf {
         }
       }
       Verb::SwapVisualAnchor => {
-        if let Some((start, end)) = self.select_range()
+        if let Some((start, end)) = self.select_range
           && let Some(mut mode) = self.select_mode
         {
           mode.invert_anchor();
@@ -2960,7 +3001,7 @@ impl LineBuf {
           .map(|m| self.eval_motion(verb_ref.as_ref(), m))
           .unwrap_or({
             self
-              .select_range
+              .select_range()
               .map(MotionKind::Inclusive)
               .unwrap_or(MotionKind::Null)
           })
@@ -3028,15 +3069,11 @@ impl LineBuf {
 impl Display for LineBuf {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let mut full_buf = self.buffer.clone();
-    if let Some((start, end)) = self.select_range {
+    if let Some((start, end)) = self.select_range() {
       let mode = self.select_mode.unwrap();
       let start_byte = self.read_idx_byte_pos(start);
-      let end_byte = self.read_idx_byte_pos(end);
+      let end_byte = self.read_idx_byte_pos(end).min(full_buf.len());
 
-			if start_byte >= full_buf.len() || end_byte >= full_buf.len() {
-				log::warn!("Selection range '{:?}' is out of bounds for buffer of length {}, clearing selection", (start, end), full_buf.len());
-				return write!(f, "{}", full_buf);
-			}
 
       match mode.anchor() {
         SelectAnchor::Start => {
@@ -3044,11 +3081,13 @@ impl Display for LineBuf {
           if *inclusive.end() == full_buf.len() {
             inclusive = start_byte..=end_byte.saturating_sub(1);
           }
-          let selected = format!("{}{}{}", markers::VISUAL_MODE_START, &full_buf[inclusive.clone()], markers::VISUAL_MODE_END);
+          let selected = format!("{}{}{}", markers::VISUAL_MODE_START, &full_buf[inclusive.clone()], markers::VISUAL_MODE_END)
+						.replace("\n", format!("\n{}",markers::VISUAL_MODE_START).as_str());
           full_buf.replace_range(inclusive, &selected);
         }
         SelectAnchor::End => {
-          let selected = format!("{}{}{}", markers::VISUAL_MODE_START, &full_buf[start..end], markers::VISUAL_MODE_END);
+          let selected = format!("{}{}{}", markers::VISUAL_MODE_START, &full_buf[start_byte..end_byte], markers::VISUAL_MODE_END)
+						.replace("\n", format!("\n{}",markers::VISUAL_MODE_START).as_str());
           full_buf.replace_range(start_byte..end_byte, &selected);
         }
       }

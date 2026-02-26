@@ -117,12 +117,12 @@ fn enumerate_lines(s: &str, left_pad: usize) -> String {
 				let trail_pad = left_pad.saturating_sub(prefix_len);
 				if i == total_lines - 1 {
 					// Don't add a newline to the last line
-					write!(acc, "\x1b[90m{}{num} |\x1b[0m {}{ln}",
+					write!(acc, "\x1b[0m\x1b[90m{}{num} |\x1b[0m {}{ln}",
 						" ".repeat(num_pad),
 						" ".repeat(trail_pad),
 					).unwrap();
 				} else {
-					writeln!(acc, "\x1b[90m{}{num} |\x1b[0m {}{ln}",
+					writeln!(acc, "\x1b[0m\x1b[90m{}{num} |\x1b[0m {}{ln}",
 						" ".repeat(num_pad),
 						" ".repeat(trail_pad),
 					).unwrap();

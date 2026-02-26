@@ -1018,6 +1018,15 @@ impl ViNormal {
 impl ViMode for ViNormal {
   fn handle_key(&mut self, key: E) -> Option<ViCmd> {
     let mut cmd = match key {
+			E(K::Char('V'), M::NONE) => {
+				Some(ViCmd {
+					register: Default::default(),
+					verb: Some(VerbCmd(1, Verb::VisualModeLine)),
+					motion: None,
+					raw_seq: "".into(),
+					flags: self.flags(),
+				})
+			}
       E(K::Char(ch), M::NONE) => self.try_parse(ch),
       E(K::Backspace, M::NONE) => Some(ViCmd {
         register: Default::default(),
@@ -1041,15 +1050,6 @@ impl ViMode for ViNormal {
         self.clear_cmd();
         None
       }
-			E(K::Char('V'), M::SHIFT) => {
-				Some(ViCmd {
-					register: Default::default(),
-					verb: Some(VerbCmd(1, Verb::VisualModeLine)),
-					motion: None,
-					raw_seq: "".into(),
-					flags: self.flags() | CmdFlags::VISUAL_LINE,
-				})
-			}
       _ => {
         if let Some(cmd) = common_cmds(key) {
           self.clear_cmd();
