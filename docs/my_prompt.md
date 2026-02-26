@@ -4,6 +4,10 @@ This is the `shed` code for the prompt that I currently use. Note that the scrip
 
 Also note that in `shed`, the `echo` builtin has a new `-p` flag which expands prompt escape sequences. This allows you to access these escape sequences in any context.
 
+The end result is the prompt that appears in the README:
+
+<img width="506" height="407" alt="shed" src="https://github.com/user-attachments/assets/5333dd47-ae1b-45cd-8729-b623f586b10e" />
+
 ```bash
 prompt_topline() {
   local user_and_host="\e[0m\e[1m$USER\e[1;36m@\e[1;31m$HOST\e[0m"
