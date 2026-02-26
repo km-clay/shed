@@ -8,7 +8,7 @@ use crate::{
   builtin::{BUILTINS, trap::TrapTarget}, exec_input, jobs::JobTab, libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::VecDequeExt,
-  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, prompt::readline::markers, shopt::ShOpts
+  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc}, prelude::*, readline::markers, shopt::ShOpts
 };
 
 pub struct Shed {

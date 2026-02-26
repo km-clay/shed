@@ -14,7 +14,7 @@ use crate::{
   libsh::{
     error::ShResult,
     term::{Style, Styled},
-  }, parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}, prelude::*, prompt::readline::{markers, register::{write_register, RegisterContent}}, state::read_shopts
+  }, parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}, prelude::*, readline::{markers, register::{write_register, RegisterContent}}, state::read_shopts
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];

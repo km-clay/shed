@@ -11,7 +11,7 @@ use crate::expand::expand_prompt;
 use crate::libsh::sys::TTY_FILENO;
 use crate::parse::lex::LexStream;
 use crate::prelude::*;
-use crate::prompt::readline::term::{Pos, calc_str_width};
+use crate::readline::term::{Pos, calc_str_width};
 use crate::state::read_shopts;
 use crate::{
   libsh::{
@@ -19,7 +19,7 @@ use crate::{
     term::{Style, Styled},
   },
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
-  prompt::readline::{complete::Completer, highlight::Highlighter},
+  readline::{complete::Completer, highlight::Highlighter},
 };
 
 pub mod complete;

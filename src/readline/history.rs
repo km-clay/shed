@@ -12,7 +12,7 @@ use std::{
 use crate::prelude::*;
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
-  prompt::readline::linebuf::LineBuf,
+  readline::linebuf::LineBuf,
 };
 
 use super::vicmd::Direction; // surprisingly useful

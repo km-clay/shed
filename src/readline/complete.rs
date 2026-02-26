@@ -4,7 +4,7 @@ use crate::{
   builtin::BUILTINS,
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::lex::{self, LexFlags, Tk, TkFlags},
-  prompt::readline::{
+  readline::{
     Marker, annotate_input, annotate_input_recursive, get_insertions,
     markers::{self, is_marker},
   },

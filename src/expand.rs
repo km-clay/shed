@@ -10,7 +10,7 @@ use crate::parse::execute::exec_input;
 use crate::parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule, is_field_sep, is_hard_sep};
 use crate::parse::{Redir, RedirType};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
-use crate::prompt::readline::markers;
+use crate::readline::markers;
 use crate::state::{
   LogTab, VarFlags, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars
 };

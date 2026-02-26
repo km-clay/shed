@@ -22,7 +22,7 @@ use crate::{
     error::{ShErr, ShErrKind, ShResult},
     sys::TTY_FILENO,
   },
-  prompt::readline::keys::{KeyCode, ModKeys},
+  readline::keys::{KeyCode, ModKeys},
   shopt::ShedBellStyle,
   state::read_shopts,
 };

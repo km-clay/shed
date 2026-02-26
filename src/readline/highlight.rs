@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
   libsh::term::{Style, StyleSet, Styled},
-  prompt::readline::{annotate_input, markers::{self, is_marker}},
+  readline::{annotate_input, markers::{self, is_marker}},
   state::{read_logic, read_meta, read_shopts},
 };
 

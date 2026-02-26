@@ -12,7 +12,7 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   procio::{borrow_fd, IoStack},
-  prompt::readline::term::RawModeGuard,
+  readline::term::RawModeGuard,
   state::{self, read_vars, write_vars, VarFlags},
 };
 
