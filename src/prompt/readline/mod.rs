@@ -513,7 +513,6 @@ impl ShedVi {
     let new_layout = self.get_layout(&line);
 		let pending_seq = self.mode.pending_seq();
 		let mut prompt_string_right = self.prompt.psr_expanded.clone();
-		log::debug!("prompt_string_right before truncation: {prompt_string_right:?}");
 
 		if prompt_string_right.as_ref().is_some_and(|psr| psr.lines().count() > 1) {
 			log::warn!("PSR has multiple lines, truncating to one line");
@@ -524,7 +523,7 @@ impl ShedVi {
 			.get_ps1()
 			.lines()
 			.next()
-			.map(|l| Layout::calc_pos(self.writer.t_cols, l, Pos { col: 0, row: 0 }))
+			.map(|l| Layout::calc_pos(self.writer.t_cols, l, Pos { col: 0, row: 0 }, 0))
 			.map(|p| p.col)
 			.unwrap_or_default() as usize;
 		let one_line = new_layout.end.row == 0;
@@ -537,7 +536,7 @@ impl ShedVi {
     self.writer.redraw(self.prompt.get_ps1(), &line, &new_layout)?;
 
 		let seq_fits = pending_seq.as_ref().is_some_and(|seq| row0_used + 1 < self.writer.t_cols as usize - seq.width());
-		let psr_fits = prompt_string_right.as_ref().is_some_and(|psr| new_layout.end.col as usize + 1 < self.writer.t_cols as usize - psr.width());
+		let psr_fits = prompt_string_right.as_ref().is_some_and(|psr| new_layout.end.col as usize + 1 < (self.writer.t_cols as usize).saturating_sub(psr.width()));
 
 		if !final_draw && let Some(seq) = pending_seq && !seq.is_empty() && !(prompt_string_right.is_some() && one_line) && seq_fits {
 			let to_col = self.writer.t_cols - calc_str_width(&seq);

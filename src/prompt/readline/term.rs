@@ -100,6 +100,38 @@ pub fn get_win_size(fd: RawFd) -> (Col, Row) {
   }
 }
 
+fn enumerate_lines(s: &str, left_pad: usize) -> String {
+	let total_lines = s.lines().count();
+	let max_num_len = total_lines.to_string().len();
+	s.lines()
+		.enumerate()
+		.fold(String::new(), |mut acc, (i, ln)| {
+			if i == 0 {
+				acc.push_str(ln);
+				acc.push('\n');
+			} else {
+				let num = (i + 1).to_string();
+				let num_pad = max_num_len - num.len();
+				// " 2 | " — num + padding + " | "
+				let prefix_len = max_num_len + 3; // "N | "
+				let trail_pad = left_pad.saturating_sub(prefix_len);
+				if i == total_lines - 1 {
+					// Don't add a newline to the last line
+					write!(acc, "\x1b[90m{}{num} |\x1b[0m {}{ln}",
+						" ".repeat(num_pad),
+						" ".repeat(trail_pad),
+					).unwrap();
+				} else {
+					writeln!(acc, "\x1b[90m{}{num} |\x1b[0m {}{ln}",
+						" ".repeat(num_pad),
+						" ".repeat(trail_pad),
+					).unwrap();
+				}
+			}
+			acc
+		})
+}
+
 fn write_all(fd: RawFd, buf: &str) -> nix::Result<()> {
   let mut bytes = buf.as_bytes();
   while !bytes.is_empty() {
@@ -771,9 +803,9 @@ impl Layout {
     }
   }
   pub fn from_parts(term_width: u16, prompt: &str, to_cursor: &str, to_end: &str) -> Self {
-    let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 });
-    let cursor = Self::calc_pos(term_width, to_cursor, prompt_end);
-    let end = Self::calc_pos(term_width, to_end, prompt_end);
+    let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 }, 0);
+    let cursor = Self::calc_pos(term_width, to_cursor, prompt_end, prompt_end.col);
+    let end = Self::calc_pos(term_width, to_end, prompt_end, prompt_end.col);
     Layout {
       w_calc: width_calculator(),
       prompt_end,
@@ -782,14 +814,14 @@ impl Layout {
     }
   }
 
-  pub fn calc_pos(term_width: u16, s: &str, orig: Pos) -> Pos {
+  pub fn calc_pos(term_width: u16, s: &str, orig: Pos, left_margin: u16) -> Pos {
     const TAB_STOP: u16 = 8;
     let mut pos = orig;
     let mut esc_seq = 0;
     for c in s.graphemes(true) {
       if c == "\n" {
         pos.row += 1;
-        pos.col = 0;
+        pos.col = left_margin;
       }
       let c_width = if c == "\t" {
         TAB_STOP - (pos.col % TAB_STOP)
@@ -799,12 +831,12 @@ impl Layout {
       pos.col += c_width;
       if pos.col > term_width {
         pos.row += 1;
-        pos.col = c_width;
+        pos.col = left_margin + c_width;
       }
     }
     if pos.col >= term_width {
       pos.row += 1;
-      pos.col = 0;
+      pos.col = left_margin;
     }
 
     pos
@@ -987,7 +1019,14 @@ impl LineWriter for TermWriter {
     }
 
     self.buffer.push_str(prompt);
-    self.buffer.push_str(line);
+    let multiline = line.contains('\n');
+    if multiline {
+      let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0);
+      let display_line = enumerate_lines(line, prompt_end.col as usize);
+      self.buffer.push_str(&display_line);
+    } else {
+      self.buffer.push_str(line);
+    }
 
     if end.col == 0 && end.row > 0 && !ends_with_newline(&self.buffer) {
       // The line has wrapped. We need to use our own line break.

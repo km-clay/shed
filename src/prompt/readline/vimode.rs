@@ -1041,6 +1041,15 @@ impl ViMode for ViNormal {
         self.clear_cmd();
         None
       }
+			E(K::Char('V'), M::SHIFT) => {
+				Some(ViCmd {
+					register: Default::default(),
+					verb: Some(VerbCmd(1, Verb::VisualModeLine)),
+					motion: None,
+					raw_seq: "".into(),
+					flags: self.flags() | CmdFlags::VISUAL_LINE,
+				})
+			}
       _ => {
         if let Some(cmd) = common_cmds(key) {
           self.clear_cmd();

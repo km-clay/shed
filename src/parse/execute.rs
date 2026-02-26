@@ -691,7 +691,6 @@ impl Dispatcher {
 			if fork_builtin {
 				cmd.flags |= NdFlags::FORK_BUILTINS;
 			}
-			log::debug!("current io_frame stack: {:#?}", self.io_stack.curr_frame());
       self.dispatch_node(cmd)?;
     }
     let job = self.job_stack.finalize_job().unwrap();
@@ -812,6 +811,7 @@ impl Dispatcher {
 		let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
     if argv.is_empty() {
+			state::set_status(0);
       return Ok(());
     }
 

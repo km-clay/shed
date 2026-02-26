@@ -2329,7 +2329,14 @@ impl LineBuf {
             end = self.cursor.get();
           }
         },
-        SelectMode::Line(anchor) => todo!(),
+        SelectMode::Line(anchor) => match anchor {
+					SelectAnchor::Start => {
+						start = self.start_of_line();
+					}
+					SelectAnchor::End => {
+						end = self.end_of_line();
+					}
+				}
         SelectMode::Block(anchor) => todo!(),
       }
       if start >= end {
@@ -3008,11 +3015,13 @@ impl LineBuf {
   }
 
   pub fn get_hint_text(&self) -> String {
-    self
+    let text = self
       .hint
       .clone()
-      .map(|h| h.styled(Style::BrightBlack))
-      .unwrap_or_default()
+			.map(|h| format!("\x1b[90m{h}\x1b[0m"))
+      .unwrap_or_default();
+
+		text.replace("\n", "\n\x1b[90m")
   }
 }
 
