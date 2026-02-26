@@ -545,13 +545,13 @@ impl ShedVi {
 			let move_up = if up > 0 { format!("\x1b[{up}A") } else { String::new() };
 
 			// Save cursor, move up to top row, move right to column, write sequence, restore cursor
-			self.writer.flush_write(&format!("\x1b[s{move_up}\x1b[{to_col}G{seq}\x1b[u"))?;
+			self.writer.flush_write(&format!("\x1b7{move_up}\x1b[{to_col}G{seq}\x1b8"))?;
 		} else if !final_draw && let Some(psr) = prompt_string_right && psr_fits {
 			let to_col = self.writer.t_cols - calc_str_width(&psr);
 			let down = new_layout.end.row - new_layout.cursor.row;
 			let move_down = if down > 0 { format!("\x1b[{down}B") } else { String::new() };
 
-			self.writer.flush_write(&format!("\x1b[s{move_down}\x1b[{to_col}G{psr}\x1b[u"))?;
+			self.writer.flush_write(&format!("\x1b7{move_down}\x1b[{to_col}G{psr}\x1b8"))?;
 		}
 
     self.writer.flush_write(&self.mode.cursor_style())?;
