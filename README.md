@@ -12,7 +12,7 @@ A Unix shell written in Rust. The name is a nod to both `sh` and `ed`. It's a sh
 
 - **Normal mode** - motions (`w`, `b`, `e`, `f`, `t`, `%`, `0`, `$`, etc.), verbs (`d`, `c`, `y`, `p`, `r`, `x`, `~`, etc.), text objects (`iw`, `aw`, `i"`, `a{`, `is`, etc.), registers, `.` repeat, `;`/`,` repeat, and counts
 - **Insert mode** - insert, append, replace, with Ctrl+W word deletion and undo/redo
-- **Visual mode** - character-wise selection with operator support
+- **Visual mode** - character-wise and visual line selection with operator support
 - **Real-time syntax highlighting** - commands, keywords, strings, variables, redirections, and operators are colored as you type
 - **Tab completion** - context-aware completion for commands, file paths, and variables
 
