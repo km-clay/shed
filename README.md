@@ -2,6 +2,8 @@
 
 A Unix shell written in Rust. The name is a nod to both `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing.
 
+<img width="506" height="407" alt="shed" src="https://github.com/user-attachments/assets/5333dd47-ae1b-45cd-8729-b623f586b10e" />
+
 ## Features
 
 ### Line Editor
