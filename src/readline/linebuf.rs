@@ -14,7 +14,14 @@ use crate::{
   libsh::{
     error::ShResult,
     term::{Style, Styled},
-  }, parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}, prelude::*, readline::{markers, register::{write_register, RegisterContent}}, state::read_shopts
+  },
+  parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
+  prelude::*,
+  readline::{
+    markers,
+    register::{RegisterContent, write_register},
+  },
+  state::read_shopts,
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -326,7 +333,7 @@ pub struct LineBuf {
 
   pub insert_mode_start_pos: Option<usize>,
   pub saved_col: Option<usize>,
-	pub auto_indent_level: usize,
+  pub auto_indent_level: usize,
 
   pub undo_stack: Vec<Edit>,
   pub redo_stack: Vec<Edit>,
@@ -384,12 +391,12 @@ impl LineBuf {
   pub fn set_cursor_clamp(&mut self, yn: bool) {
     self.cursor.exclusive = yn;
   }
-	pub fn move_cursor_to_end(&mut self) {
-		self.move_cursor(MotionKind::To(self.grapheme_indices().len()))
-	}
-	pub fn move_cursor_to_start(&mut self) {
-		self.move_cursor(MotionKind::To(0))
-	}
+  pub fn move_cursor_to_end(&mut self) {
+    self.move_cursor(MotionKind::To(self.grapheme_indices().len()))
+  }
+  pub fn move_cursor_to_start(&mut self) {
+    self.move_cursor(MotionKind::To(0))
+  }
   pub fn cursor_byte_pos(&mut self) -> usize {
     self.index_byte_pos(self.cursor.get())
   }
@@ -496,12 +503,12 @@ impl LineBuf {
   pub fn grapheme_at_cursor(&mut self) -> Option<&str> {
     self.grapheme_at(self.cursor.get())
   }
-	pub fn grapheme_before_cursor(&mut self) -> Option<&str> {
-		if self.cursor.get() == 0 {
-			return None;
-		}
-		self.grapheme_at(self.cursor.ret_sub(1))
-	}
+  pub fn grapheme_before_cursor(&mut self) -> Option<&str> {
+    if self.cursor.get() == 0 {
+      return None;
+    }
+    self.grapheme_at(self.cursor.ret_sub(1))
+  }
   pub fn mark_insert_mode_start_pos(&mut self) {
     self.insert_mode_start_pos = Some(self.cursor.get())
   }
@@ -542,7 +549,7 @@ impl LineBuf {
   }
   pub fn slice_to(&mut self, end: usize) -> Option<&str> {
     self.update_graphemes_lazy();
-		self.read_slice_to(end)
+    self.read_slice_to(end)
   }
   pub fn read_slice_to(&self, end: usize) -> Option<&str> {
     let grapheme_index = self.grapheme_indices().get(end).copied().or_else(|| {
@@ -596,9 +603,9 @@ impl LineBuf {
     self.update_graphemes();
     drained
   }
-	pub fn drain_inclusive(&mut self, range: RangeInclusive<usize>) -> String {
-		self.drain(*range.start()..range.end().saturating_add(1))
-	}
+  pub fn drain_inclusive(&mut self, range: RangeInclusive<usize>) -> String {
+    self.drain(*range.start()..range.end().saturating_add(1))
+  }
   pub fn push(&mut self, ch: char) {
     self.buffer.push(ch);
     self.update_graphemes();
@@ -620,30 +627,31 @@ impl LineBuf {
     self.update_graphemes();
   }
   pub fn select_range(&self) -> Option<(usize, usize)> {
-		match self.select_mode? {
-			SelectMode::Char(_) => {
-				self.select_range
-			}
-			SelectMode::Line(_) => {
-				let (start, end) = self.select_range?;
-				let start = self.pos_line_number(start);
-				let end = self.pos_line_number(end);
-				let (select_start,_) = self.line_bounds(start);
-				let (_,select_end) = self.line_bounds(end);
-				if self.read_grapheme_before(select_end).is_some_and(|gr| gr == "\n") {
-					Some((select_start, select_end - 1))
-				} else {
-					Some((select_start, select_end))
-				}
-			}
-			SelectMode::Block(_) => todo!(),
-		}
+    match self.select_mode? {
+      SelectMode::Char(_) => self.select_range,
+      SelectMode::Line(_) => {
+        let (start, end) = self.select_range?;
+        let start = self.pos_line_number(start);
+        let end = self.pos_line_number(end);
+        let (select_start, _) = self.line_bounds(start);
+        let (_, select_end) = self.line_bounds(end);
+        if self
+          .read_grapheme_before(select_end)
+          .is_some_and(|gr| gr == "\n")
+        {
+          Some((select_start, select_end - 1))
+        } else {
+          Some((select_start, select_end))
+        }
+      }
+      SelectMode::Block(_) => todo!(),
+    }
   }
   pub fn start_selecting(&mut self, mode: SelectMode) {
-		let range_start = self.cursor;
-		let mut range_end = self.cursor;
-		range_end.add(1);
-		self.select_range = Some((range_start.get(), range_end.get()));
+    let range_start = self.cursor;
+    let mut range_end = self.cursor;
+    range_end.add(1);
+    self.select_range = Some((range_start.get(), range_end.get()));
     self.select_mode = Some(mode);
   }
   pub fn stop_selecting(&mut self) {
@@ -656,11 +664,12 @@ impl LineBuf {
     self.buffer.graphemes(true).filter(|g| *g == "\n").count()
   }
 
-	pub fn pos_line_number(&self, pos: usize) -> usize {
-		self.read_slice_to(pos)
-			.map(|slice| slice.graphemes(true).filter(|g| *g == "\n").count())
-			.unwrap_or(0)
-	}
+  pub fn pos_line_number(&self, pos: usize) -> usize {
+    self
+      .read_slice_to(pos)
+      .map(|slice| slice.graphemes(true).filter(|g| *g == "\n").count())
+      .unwrap_or(0)
+  }
   pub fn cursor_line_number(&self) -> usize {
     self
       .read_slice_to_cursor()
@@ -771,14 +780,14 @@ impl LineBuf {
     }
     Some(self.line_bounds(line_no))
   }
-	pub fn this_line_exclusive(&mut self) -> (usize, usize) {
-		let line_no = self.cursor_line_number();
-		let (start, mut end) = self.line_bounds(line_no);
-		if self.read_grapheme_before(end).is_some_and(|gr| gr == "\n") {
-			end = end.saturating_sub(1);
-		}
-		(start, end)
-	}
+  pub fn this_line_exclusive(&mut self) -> (usize, usize) {
+    let line_no = self.cursor_line_number();
+    let (start, mut end) = self.line_bounds(line_no);
+    if self.read_grapheme_before(end).is_some_and(|gr| gr == "\n") {
+      end = end.saturating_sub(1);
+    }
+    (start, end)
+  }
   pub fn this_line(&mut self) -> (usize, usize) {
     let line_no = self.cursor_line_number();
     self.line_bounds(line_no)
@@ -789,9 +798,9 @@ impl LineBuf {
   pub fn end_of_line(&mut self) -> usize {
     self.this_line().1
   }
-	pub fn end_of_line_exclusive(&mut self) -> usize {
-		self.this_line_exclusive().1
-	}
+  pub fn end_of_line_exclusive(&mut self) -> usize {
+    self.this_line_exclusive().1
+  }
   pub fn select_lines_up(&mut self, n: usize) -> Option<(usize, usize)> {
     if self.start_of_line() == 0 {
       return None;
@@ -1929,33 +1938,34 @@ impl LineBuf {
     let end = start + gr.len();
     self.buffer.replace_range(start..end, new);
   }
-	pub fn calc_indent_level(&mut self) {
-		let to_cursor = self
-			.slice_to_cursor()
-			.map(|s| s.to_string())
-			.unwrap_or(self.buffer.clone());
-		let input = Arc::new(to_cursor);
-		let Ok(tokens) = LexStream::new(input, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>() else {
-			log::error!("Failed to lex buffer for indent calculation");
-			return;
-		};
-		let mut level: usize = 0;
-		for tk in tokens {
-			if tk.flags.contains(TkFlags::KEYWORD) {
-				match tk.as_str() {
-					"then" | "do" | "in" => level += 1,
-					"done" | "fi" | "esac" => level = level.saturating_sub(1),
-					_ => { /* Continue */ }
-				}
-			} else if tk.class == TkRule::BraceGrpStart {
-				level += 1;
-			} else if tk.class == TkRule::BraceGrpEnd {
-				level = level.saturating_sub(1);
-			}
-		}
+  pub fn calc_indent_level(&mut self) {
+    let to_cursor = self
+      .slice_to_cursor()
+      .map(|s| s.to_string())
+      .unwrap_or(self.buffer.clone());
+    let input = Arc::new(to_cursor);
+    let Ok(tokens) = LexStream::new(input, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()
+    else {
+      log::error!("Failed to lex buffer for indent calculation");
+      return;
+    };
+    let mut level: usize = 0;
+    for tk in tokens {
+      if tk.flags.contains(TkFlags::KEYWORD) {
+        match tk.as_str() {
+          "then" | "do" | "in" => level += 1,
+          "done" | "fi" | "esac" => level = level.saturating_sub(1),
+          _ => { /* Continue */ }
+        }
+      } else if tk.class == TkRule::BraceGrpStart {
+        level += 1;
+      } else if tk.class == TkRule::BraceGrpEnd {
+        level = level.saturating_sub(1);
+      }
+    }
 
-		self.auto_indent_level = level;
-	}
+    self.auto_indent_level = level;
+  }
   pub fn eval_motion(&mut self, verb: Option<&Verb>, motion: MotionCmd) -> MotionKind {
     let buffer = self.buffer.clone();
     if self.has_hint() {
@@ -1965,7 +1975,7 @@ impl LineBuf {
 
     let eval = match motion {
       MotionCmd(count, motion @ (Motion::WholeLineInclusive | Motion::WholeLineExclusive)) => {
-				let exclusive = matches!(motion, Motion::WholeLineExclusive);
+        let exclusive = matches!(motion, Motion::WholeLineExclusive);
 
         let Some((start, mut end)) = (if count == 1 {
           Some(self.this_line())
@@ -1975,9 +1985,9 @@ impl LineBuf {
           return MotionKind::Null;
         };
 
-				if exclusive && self.grapheme_before(end).is_some_and(|gr| gr == "\n") {
-					end = end.saturating_sub(1);
-				}
+        if exclusive && self.grapheme_before(end).is_some_and(|gr| gr == "\n") {
+          end = end.saturating_sub(1);
+        }
 
         let target_col = if let Some(col) = self.saved_col {
           col
@@ -1994,7 +2004,8 @@ impl LineBuf {
         if self.cursor.exclusive
           && line.ends_with("\n")
           && self.grapheme_at(target_pos) == Some("\n")
-          && line != "\n" // Allow landing on newline for empty lines
+          && line != "\n"
+        // Allow landing on newline for empty lines
         {
           target_pos = target_pos.saturating_sub(1); // Don't land on the
           // newline
@@ -2155,7 +2166,7 @@ impl LineBuf {
       MotionCmd(_, Motion::BeginningOfLine) => MotionKind::On(self.start_of_line()),
       MotionCmd(count, Motion::EndOfLine) => {
         let pos = if count == 1 {
-					self.end_of_line()
+          self.end_of_line()
         } else if let Some((_, end)) = self.select_lines_down(count) {
           end
         } else {
@@ -2228,14 +2239,15 @@ impl LineBuf {
         };
 
         let Some(line) = self.slice(start..end).map(|s| s.to_string()) else {
-					log::warn!("Failed to get line slice for motion, start: {start}, end: {end}");
+          log::warn!("Failed to get line slice for motion, start: {start}, end: {end}");
           return MotionKind::Null;
         };
         let mut target_pos = self.grapheme_index_for_display_col(&line, target_col);
         if self.cursor.exclusive
           && line.ends_with("\n")
           && self.grapheme_at(target_pos) == Some("\n")
-          && line != "\n" // Allow landing on newline for empty lines
+          && line != "\n"
+        // Allow landing on newline for empty lines
         {
           target_pos = target_pos.saturating_sub(1); // Don't land on the
           // newline
@@ -2246,7 +2258,6 @@ impl LineBuf {
           Motion::LineDown => (self.start_of_line(), end),
           _ => unreachable!(),
         };
-
 
         MotionKind::InclusiveWithTargetCol((start, end), target_pos)
       }
@@ -2428,13 +2439,13 @@ impl LineBuf {
   pub fn range_from_motion(&mut self, motion: &MotionKind) -> Option<(usize, usize)> {
     let range = match motion {
       MotionKind::On(pos) => {
-				let cursor_pos = self.cursor.get();
-				if cursor_pos == *pos {
-					ordered(cursor_pos, pos + 1) // scary
-				} else {
-					ordered(cursor_pos, *pos)
-				}
-			}
+        let cursor_pos = self.cursor.get();
+        if cursor_pos == *pos {
+          ordered(cursor_pos, pos + 1) // scary
+        } else {
+          ordered(cursor_pos, *pos)
+        }
+      }
       MotionKind::Onto(pos) => {
         // For motions which include the character at the cursor during operations
         // but exclude the character during movements
@@ -2478,29 +2489,32 @@ impl LineBuf {
   ) -> ShResult<()> {
     match verb {
       Verb::Delete | Verb::Yank | Verb::Change => {
-				log::debug!("Executing verb: {verb:?} with motion: {motion:?}");
+        log::debug!("Executing verb: {verb:?} with motion: {motion:?}");
         let Some((mut start, mut end)) = self.range_from_motion(&motion) else {
-					log::debug!("No range from motion, nothing to do");
+          log::debug!("No range from motion, nothing to do");
           return Ok(());
         };
-				log::debug!("Initial range from motion: ({start}, {end})");
-				log::debug!("self.grapheme_indices().len(): {}", self.grapheme_indices().len());
+        log::debug!("Initial range from motion: ({start}, {end})");
+        log::debug!(
+          "self.grapheme_indices().len(): {}",
+          self.grapheme_indices().len()
+        );
 
-				let mut do_indent = false;
-				if verb == Verb::Change && (start,end) == self.this_line_exclusive() {
-					do_indent = read_shopts(|o| o.prompt.auto_indent);
-				}
+        let mut do_indent = false;
+        if verb == Verb::Change && (start, end) == self.this_line_exclusive() {
+          do_indent = read_shopts(|o| o.prompt.auto_indent);
+        }
 
         let mut text = if verb == Verb::Yank {
           self
             .slice(start..end)
             .map(|c| c.to_string())
             .unwrap_or_default()
-				} else if start == self.grapheme_indices().len() && end == self.grapheme_indices().len() {
-					// user is in normal mode and pressed 'x' on the last char in the buffer
-					let drained = self.drain(end.saturating_sub(1)..end);
-					self.update_graphemes();
-					drained
+        } else if start == self.grapheme_indices().len() && end == self.grapheme_indices().len() {
+          // user is in normal mode and pressed 'x' on the last char in the buffer
+          let drained = self.drain(end.saturating_sub(1)..end);
+          self.update_graphemes();
+          drained
         } else {
           let drained = self.drain(start..end);
           self.update_graphemes();
@@ -2508,30 +2522,30 @@ impl LineBuf {
         };
         let is_linewise = matches!(
           motion,
-          MotionKind::InclusiveWithTargetCol(..) |
-					MotionKind::ExclusiveWithTargetCol(..)
+          MotionKind::InclusiveWithTargetCol(..) | MotionKind::ExclusiveWithTargetCol(..)
         ) || matches!(self.select_mode, Some(SelectMode::Line(_)));
         let register_content = if is_linewise {
-					if !text.ends_with('\n') && !text.is_empty() {
-						text.push('\n');
-					}
+          if !text.ends_with('\n') && !text.is_empty() {
+            text.push('\n');
+          }
           RegisterContent::Line(text)
         } else {
           RegisterContent::Span(text)
         };
         register.write_to_register(register_content);
-				self.cursor.set(start);
-				if do_indent {
-					self.calc_indent_level();
-					let tabs = (0..self.auto_indent_level).map(|_| '\t');
-					for tab in tabs {
-						self.insert_at_cursor(tab);
-						self.cursor.add(1);
-					}
-				} else if verb != Verb::Change
-				&& let MotionKind::InclusiveWithTargetCol((_,_), col) = motion {
-					self.cursor.add(col);
-				}
+        self.cursor.set(start);
+        if do_indent {
+          self.calc_indent_level();
+          let tabs = (0..self.auto_indent_level).map(|_| '\t');
+          for tab in tabs {
+            self.insert_at_cursor(tab);
+            self.cursor.add(1);
+          }
+        } else if verb != Verb::Change
+          && let MotionKind::InclusiveWithTargetCol((_, _), col) = motion
+        {
+          self.cursor.add(col);
+        }
       }
       Verb::Rot13 => {
         let Some((start, end)) = self.range_from_motion(&motion) else {
@@ -2682,7 +2696,7 @@ impl LineBuf {
         self.buffer.replace_range(pos..pos + new.len(), &old);
         let new_cursor_pos = self.cursor.get();
 
-				self.cursor.set(cursor_pos);
+        self.cursor.set(cursor_pos);
         let new_edit = Edit {
           pos,
           cursor_pos: new_cursor_pos,
@@ -2701,17 +2715,17 @@ impl LineBuf {
         if content.is_empty() {
           return Ok(());
         }
-				if let Some(range) = self.select_range() {
-					let register_text = self.drain_inclusive(range.0..=range.1);
-					write_register(None, RegisterContent::Span(register_text)); // swap deleted text into register
+        if let Some(range) = self.select_range() {
+          let register_text = self.drain_inclusive(range.0..=range.1);
+          write_register(None, RegisterContent::Span(register_text)); // swap deleted text into register
 
-					let text = content.as_str();
-					self.insert_str_at(range.0, text);
-					self.cursor.set(range.0 + content.char_count());
-					self.select_range = None;
-					self.update_graphemes();
-					return Ok(());
-				}
+          let text = content.as_str();
+          self.insert_str_at(range.0, text);
+          self.cursor.set(range.0 + content.char_count());
+          self.select_range = None;
+          self.update_graphemes();
+          return Ok(());
+        }
         match content {
           RegisterContent::Span(ref text) => {
             let insert_idx = match anchor {
@@ -2726,7 +2740,9 @@ impl LineBuf {
               Anchor::After => self.end_of_line(),
               Anchor::Before => self.start_of_line(),
             };
-            let needs_newline = self.grapheme_before(insert_idx).is_some_and(|gr| gr != "\n");
+            let needs_newline = self
+              .grapheme_before(insert_idx)
+              .is_some_and(|gr| gr != "\n");
             if needs_newline {
               let full = format!("\n{}", text);
               self.insert_str_at(insert_idx, &full);
@@ -2788,11 +2804,11 @@ impl LineBuf {
         let Some((start, end)) = self.range_from_motion(&motion) else {
           return Ok(());
         };
-				let move_cursor = self.cursor.get() == start;
+        let move_cursor = self.cursor.get() == start;
         self.insert_at(start, '\t');
-				if move_cursor {
-					self.cursor.add(1);
-				}
+        if move_cursor {
+          self.cursor.add(1);
+        }
         let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
         while let Some(idx) = range_indices.next() {
           let gr = self.grapheme_at(idx).unwrap();
@@ -2822,7 +2838,7 @@ impl LineBuf {
         if self.grapheme_at(start) == Some("\t") {
           self.remove(start);
         }
-				end = end.min(self.grapheme_indices().len().saturating_sub(1));
+        end = end.min(self.grapheme_indices().len().saturating_sub(1));
         let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
         while let Some(idx) = range_indices.next() {
           let gr = self.grapheme_at(idx).unwrap();
@@ -2852,29 +2868,29 @@ impl LineBuf {
       Verb::Equalize => todo!(),
       Verb::InsertModeLineBreak(anchor) => {
         let (mut start, end) = self.this_line();
-				let auto_indent = read_shopts(|o| o.prompt.auto_indent);
+        let auto_indent = read_shopts(|o| o.prompt.auto_indent);
         if start == 0 && end == self.cursor.max {
           match anchor {
             Anchor::After => {
               self.push('\n');
-							if auto_indent {
-								self.calc_indent_level();
-								let tabs = (0..self.auto_indent_level).map(|_| '\t');
-								for tab in tabs {
-									self.push(tab);
-								}
-							}
+              if auto_indent {
+                self.calc_indent_level();
+                let tabs = (0..self.auto_indent_level).map(|_| '\t');
+                for tab in tabs {
+                  self.push(tab);
+                }
+              }
               self.cursor.set(self.cursor_max());
               return Ok(());
             }
             Anchor::Before => {
-							if auto_indent {
-								self.calc_indent_level();
-								let tabs = (0..self.auto_indent_level).map(|_| '\t');
-								for tab in tabs {
-									self.insert_at(0, tab);
-								}
-							}
+              if auto_indent {
+                self.calc_indent_level();
+                let tabs = (0..self.auto_indent_level).map(|_| '\t');
+                for tab in tabs {
+                  self.insert_at(0, tab);
+                }
+              }
               self.insert_at(0, '\n');
               self.cursor.set(0);
               return Ok(());
@@ -2888,52 +2904,52 @@ impl LineBuf {
             self.cursor.set(end);
             self.insert_at_cursor('\n');
             self.cursor.add(1);
-						if auto_indent {
-							self.calc_indent_level();
-							let tabs = (0..self.auto_indent_level).map(|_| '\t');
-							for tab in tabs {
-								self.insert_at_cursor(tab);
-								self.cursor.add(1);
-							}
-						}
+            if auto_indent {
+              self.calc_indent_level();
+              let tabs = (0..self.auto_indent_level).map(|_| '\t');
+              for tab in tabs {
+                self.insert_at_cursor(tab);
+                self.cursor.add(1);
+              }
+            }
           }
           Anchor::Before => {
             self.cursor.set(start);
             self.insert_at_cursor('\n');
             self.cursor.add(1);
-						if auto_indent {
-							self.calc_indent_level();
-							let tabs = (0..self.auto_indent_level).map(|_| '\t');
-							for tab in tabs {
-								self.insert_at_cursor(tab);
-								self.cursor.add(1);
-							}
-						}
+            if auto_indent {
+              self.calc_indent_level();
+              let tabs = (0..self.auto_indent_level).map(|_| '\t');
+              for tab in tabs {
+                self.insert_at_cursor(tab);
+                self.cursor.add(1);
+              }
+            }
           }
         }
       }
       Verb::AcceptLineOrNewline => {
-				// If this verb has reached this function, it means we have incomplete input
-				// and therefore must insert a newline instead of accepting the input
-				if self.cursor.exclusive {
-					// in this case we are in normal/visual mode, so we don't insert anything
-					// and just move down a line
-					let motion = self.eval_motion(None, MotionCmd(1, Motion::LineDownCharwise));
-					self.apply_motion(motion);
-					return Ok(());
-				}
-				let auto_indent = read_shopts(|o| o.prompt.auto_indent);
-				self.insert_at_cursor('\n');
-				self.cursor.add(1);
-				if auto_indent {
-					self.calc_indent_level();
-					let tabs = (0..self.auto_indent_level).map(|_| '\t');
-					for tab in tabs {
-						self.insert_at_cursor(tab);
-						self.cursor.add(1);
-					}
-				}
-			}
+        // If this verb has reached this function, it means we have incomplete input
+        // and therefore must insert a newline instead of accepting the input
+        if self.cursor.exclusive {
+          // in this case we are in normal/visual mode, so we don't insert anything
+          // and just move down a line
+          let motion = self.eval_motion(None, MotionCmd(1, Motion::LineDownCharwise));
+          self.apply_motion(motion);
+          return Ok(());
+        }
+        let auto_indent = read_shopts(|o| o.prompt.auto_indent);
+        self.insert_at_cursor('\n');
+        self.cursor.add(1);
+        if auto_indent {
+          self.calc_indent_level();
+          let tabs = (0..self.auto_indent_level).map(|_| '\t');
+          for tab in tabs {
+            self.insert_at_cursor(tab);
+            self.cursor.add(1);
+          }
+        }
+      }
 
       Verb::Complete
       | Verb::EndOfFile
@@ -2951,7 +2967,11 @@ impl LineBuf {
   pub fn exec_cmd(&mut self, cmd: ViCmd) -> ShResult<()> {
     let clear_redos = !cmd.is_undo_op() || cmd.verb.as_ref().is_some_and(|v| v.1.is_edit());
     let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
-    let is_line_motion = cmd.is_line_motion() || cmd.verb.as_ref().is_some_and(|v| v.1 == Verb::AcceptLineOrNewline);
+    let is_line_motion = cmd.is_line_motion()
+      || cmd
+        .verb
+        .as_ref()
+        .is_some_and(|v| v.1 == Verb::AcceptLineOrNewline);
     let is_undo_op = cmd.is_undo_op();
     let edit_is_merging = self.undo_stack.last().is_some_and(|edit| edit.merging);
 
@@ -3024,13 +3044,14 @@ impl LineBuf {
       self.apply_motion(motion_eval);
     }
 
-		if self.cursor.exclusive
-		&& self.grapheme_at_cursor().is_some_and(|gr| gr == "\n")
-		&& self.grapheme_before_cursor().is_some_and(|gr| gr != "\n") {
-			// we landed on a newline, and we aren't inbetween two newlines.
-			self.cursor.sub(1);
-			self.update_select_range();
-		}
+    if self.cursor.exclusive
+      && self.grapheme_at_cursor().is_some_and(|gr| gr == "\n")
+      && self.grapheme_before_cursor().is_some_and(|gr| gr != "\n")
+    {
+      // we landed on a newline, and we aren't inbetween two newlines.
+      self.cursor.sub(1);
+      self.update_select_range();
+    }
 
     /* Done executing, do some cleanup */
 
@@ -3070,10 +3091,10 @@ impl LineBuf {
     let text = self
       .hint
       .clone()
-			.map(|h| format!("\x1b[90m{h}\x1b[0m"))
+      .map(|h| format!("\x1b[90m{h}\x1b[0m"))
       .unwrap_or_default();
 
-		text.replace("\n", "\n\x1b[90m")
+    text.replace("\n", "\n\x1b[90m")
   }
 }
 
@@ -3085,20 +3106,29 @@ impl Display for LineBuf {
       let start_byte = self.read_idx_byte_pos(start);
       let end_byte = self.read_idx_byte_pos(end).min(full_buf.len());
 
-
       match mode.anchor() {
         SelectAnchor::Start => {
           let mut inclusive = start_byte..=end_byte;
           if *inclusive.end() == full_buf.len() {
             inclusive = start_byte..=end_byte.saturating_sub(1);
           }
-          let selected = format!("{}{}{}", markers::VISUAL_MODE_START, &full_buf[inclusive.clone()], markers::VISUAL_MODE_END)
-						.replace("\n", format!("\n{}",markers::VISUAL_MODE_START).as_str());
+          let selected = format!(
+            "{}{}{}",
+            markers::VISUAL_MODE_START,
+            &full_buf[inclusive.clone()],
+            markers::VISUAL_MODE_END
+          )
+          .replace("\n", format!("\n{}", markers::VISUAL_MODE_START).as_str());
           full_buf.replace_range(inclusive, &selected);
         }
         SelectAnchor::End => {
-          let selected = format!("{}{}{}", markers::VISUAL_MODE_START, &full_buf[start_byte..end_byte], markers::VISUAL_MODE_END)
-						.replace("\n", format!("\n{}",markers::VISUAL_MODE_START).as_str());
+          let selected = format!(
+            "{}{}{}",
+            markers::VISUAL_MODE_START,
+            &full_buf[start_byte..end_byte],
+            markers::VISUAL_MODE_END
+          )
+          .replace("\n", format!("\n{}", markers::VISUAL_MODE_START).as_str());
           full_buf.replace_range(start_byte..end_byte, &selected);
         }
       }

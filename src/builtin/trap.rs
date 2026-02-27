@@ -11,7 +11,7 @@ use crate::{
   jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{NdRule, Node},
-  procio::{borrow_fd, IoStack},
+  procio::{IoStack, borrow_fd},
   state::{self, read_logic, write_logic},
 };
 
@@ -59,12 +59,10 @@ impl FromStr for TrapTarget {
       "IO" => Ok(TrapTarget::Signal(Signal::SIGIO)),
       "PWR" => Ok(TrapTarget::Signal(Signal::SIGPWR)),
       "SYS" => Ok(TrapTarget::Signal(Signal::SIGSYS)),
-      _ => {
-        Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("invalid trap target '{}'", s),
-        ))
-      }
+      _ => Err(ShErr::simple(
+        ShErrKind::ExecFail,
+        format!("invalid trap target '{}'", s),
+      )),
     }
   }
 }

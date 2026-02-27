@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::parse::{
-  lex::{LexFlags, LexStream},
   NdRule, Node, ParseStream, Redir, RedirType,
+  lex::{LexFlags, LexStream},
 };
 use crate::procio::{IoFrame, IoMode, IoStack};
 

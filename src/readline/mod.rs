@@ -36,12 +36,12 @@ pub mod vimode;
 pub mod markers {
   use super::Marker;
 
-	/*
-	 * These are invisible Unicode characters used to annotate
-	 * strings with various contextual metadata.
-	 */
+  /*
+   * These are invisible Unicode characters used to annotate
+   * strings with various contextual metadata.
+   */
 
-	/* Highlight Markers */
+  /* Highlight Markers */
 
   // token-level (derived from token class)
   pub const COMMAND: Marker = '\u{e100}';
@@ -71,36 +71,36 @@ pub mod markers {
   pub const ESCAPE: Marker = '\u{e116}';
   pub const GLOB: Marker = '\u{e117}';
 
-	// other
-	pub const VISUAL_MODE_START: Marker = '\u{e118}';
-	pub const VISUAL_MODE_END: Marker = '\u{e119}';
+  // other
+  pub const VISUAL_MODE_START: Marker = '\u{e118}';
+  pub const VISUAL_MODE_END: Marker = '\u{e119}';
 
   pub const RESET: Marker = '\u{e11a}';
 
   pub const NULL: Marker = '\u{e11b}';
 
-	/* Expansion Markers */
-	/// Double quote '"' marker
-	pub const DUB_QUOTE: Marker = '\u{e001}';
-	/// Single quote '\\'' marker
-	pub const SNG_QUOTE: Marker = '\u{e002}';
-	/// Tilde sub marker
-	pub const TILDE_SUB: Marker = '\u{e003}';
-	/// Input process sub marker
-	pub const PROC_SUB_IN: Marker = '\u{e005}';
-	/// Output process sub marker
-	pub const PROC_SUB_OUT: Marker = '\u{e006}';
-	/// Marker for null expansion
-	/// This is used for when "$@" or "$*" are used in quotes and there are no
-	/// arguments Without this marker, it would be handled like an empty string,
-	/// which breaks some commands
-	pub const NULL_EXPAND: Marker = '\u{e007}';
-	/// Explicit marker for argument separation
-	/// This is used to join the arguments given by "$@", and preserves exact formatting
-	/// of the original arguments, including quoting
-	pub const ARG_SEP: Marker = '\u{e008}';
+  /* Expansion Markers */
+  /// Double quote '"' marker
+  pub const DUB_QUOTE: Marker = '\u{e001}';
+  /// Single quote '\\'' marker
+  pub const SNG_QUOTE: Marker = '\u{e002}';
+  /// Tilde sub marker
+  pub const TILDE_SUB: Marker = '\u{e003}';
+  /// Input process sub marker
+  pub const PROC_SUB_IN: Marker = '\u{e005}';
+  /// Output process sub marker
+  pub const PROC_SUB_OUT: Marker = '\u{e006}';
+  /// Marker for null expansion
+  /// This is used for when "$@" or "$*" are used in quotes and there are no
+  /// arguments Without this marker, it would be handled like an empty string,
+  /// which breaks some commands
+  pub const NULL_EXPAND: Marker = '\u{e007}';
+  /// Explicit marker for argument separation
+  /// This is used to join the arguments given by "$@", and preserves exact
+  /// formatting of the original arguments, including quoting
+  pub const ARG_SEP: Marker = '\u{e008}';
 
-	pub const VI_SEQ_EXP: Marker = '\u{e009}';
+  pub const VI_SEQ_EXP: Marker = '\u{e009}';
 
   pub const END_MARKERS: [Marker; 7] = [
     VAR_SUB_END,
@@ -116,10 +116,10 @@ pub mod markers {
   ];
   pub const SUB_TOKEN: [Marker; 6] = [VAR_SUB, CMD_SUB, PROC_SUB, STRING_DQ, STRING_SQ, GLOB];
 
-	pub const MISC: [Marker; 3] = [ESCAPE, VISUAL_MODE_START, VISUAL_MODE_END];
+  pub const MISC: [Marker; 3] = [ESCAPE, VISUAL_MODE_START, VISUAL_MODE_END];
 
   pub fn is_marker(c: Marker) -> bool {
-		('\u{e000}'..'\u{efff}').contains(&c)
+    ('\u{e000}'..'\u{efff}').contains(&c)
   }
 }
 type Marker = char;
@@ -135,66 +135,73 @@ pub enum ReadlineEvent {
 }
 
 pub struct Prompt {
-	ps1_expanded: String,
-	ps1_raw: String,
-	psr_expanded: Option<String>,
-	psr_raw: Option<String>,
+  ps1_expanded: String,
+  ps1_raw: String,
+  psr_expanded: Option<String>,
+  psr_raw: Option<String>,
 }
 
 impl Prompt {
-	const DEFAULT_PS1: &str = "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
-	pub fn new() -> Self {
-		let Ok(ps1_raw) = env::var("PS1") else {
-			return Self::default();
-		};
-		let Ok(ps1_expanded) = expand_prompt(&ps1_raw) else {
-			return Self::default();
-		};
-		let psr_raw = env::var("PSR").ok();
-		let psr_expanded = psr_raw.clone().map(|r| expand_prompt(&r)).transpose().ok().flatten();
-		Self {
-			ps1_expanded,
-			ps1_raw,
-			psr_expanded,
-			psr_raw,
-		}
-	}
+  const DEFAULT_PS1: &str =
+    "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
+  pub fn new() -> Self {
+    let Ok(ps1_raw) = env::var("PS1") else {
+      return Self::default();
+    };
+    let Ok(ps1_expanded) = expand_prompt(&ps1_raw) else {
+      return Self::default();
+    };
+    let psr_raw = env::var("PSR").ok();
+    let psr_expanded = psr_raw
+      .clone()
+      .map(|r| expand_prompt(&r))
+      .transpose()
+      .ok()
+      .flatten();
+    Self {
+      ps1_expanded,
+      ps1_raw,
+      psr_expanded,
+      psr_raw,
+    }
+  }
 
-	pub fn get_ps1(&self) -> &str {
-		&self.ps1_expanded
-	}
-	pub fn set_ps1(&mut self, ps1_raw: String) -> ShResult<()> {
-		self.ps1_expanded = expand_prompt(&ps1_raw)?;
-		self.ps1_raw = ps1_raw;
-		Ok(())
-	}
-	pub fn set_psr(&mut self, psr_raw: String) -> ShResult<()> {
-		self.psr_expanded = Some(expand_prompt(&psr_raw)?);
-		self.psr_raw = Some(psr_raw);
-		Ok(())
-	}
-	pub fn get_psr(&self) -> Option<&str> {
-		self.psr_expanded.as_deref()
-	}
+  pub fn get_ps1(&self) -> &str {
+    &self.ps1_expanded
+  }
+  pub fn set_ps1(&mut self, ps1_raw: String) -> ShResult<()> {
+    self.ps1_expanded = expand_prompt(&ps1_raw)?;
+    self.ps1_raw = ps1_raw;
+    Ok(())
+  }
+  pub fn set_psr(&mut self, psr_raw: String) -> ShResult<()> {
+    self.psr_expanded = Some(expand_prompt(&psr_raw)?);
+    self.psr_raw = Some(psr_raw);
+    Ok(())
+  }
+  pub fn get_psr(&self) -> Option<&str> {
+    self.psr_expanded.as_deref()
+  }
 
-	pub fn refresh(&mut self) -> ShResult<()> {
-		self.ps1_expanded = expand_prompt(&self.ps1_raw)?;
-		if let Some(psr_raw) = &self.psr_raw {
-			self.psr_expanded = Some(expand_prompt(psr_raw)?);
-		}
-		Ok(())
-	}
+  pub fn refresh(&mut self) -> ShResult<()> {
+    self.ps1_expanded = expand_prompt(&self.ps1_raw)?;
+    if let Some(psr_raw) = &self.psr_raw {
+      self.psr_expanded = Some(expand_prompt(psr_raw)?);
+    }
+    Ok(())
+  }
 }
 
 impl Default for Prompt {
-	fn default() -> Self {
-		Self {
-			ps1_expanded: expand_prompt(Self::DEFAULT_PS1).unwrap_or_else(|_| Self::DEFAULT_PS1.to_string()),
-			ps1_raw: Self::DEFAULT_PS1.to_string(),
-			psr_expanded: None,
-			psr_raw: None,
-		}
-	}
+  fn default() -> Self {
+    Self {
+      ps1_expanded: expand_prompt(Self::DEFAULT_PS1)
+        .unwrap_or_else(|_| Self::DEFAULT_PS1.to_string()),
+      ps1_raw: Self::DEFAULT_PS1.to_string(),
+      psr_expanded: None,
+      psr_raw: None,
+    }
+  }
 }
 
 pub struct ShedVi {
@@ -232,7 +239,7 @@ impl ShedVi {
       history: History::new()?,
       needs_redraw: true,
     };
-		new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
+    new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
     new.print_line(false)?;
     Ok(new)
   }
@@ -255,58 +262,55 @@ impl ShedVi {
     self.needs_redraw = true;
   }
 
-
   /// Reset readline state for a new prompt
   pub fn reset(&mut self, full_redraw: bool) -> ShResult<()> {
-		// Clear old display before resetting state — old_layout must survive
-		// so print_line can call clear_rows with the full multi-line layout
-		self.prompt = Prompt::new();
+    // Clear old display before resetting state — old_layout must survive
+    // so print_line can call clear_rows with the full multi-line layout
+    self.prompt = Prompt::new();
     self.editor = Default::default();
     self.mode = Box::new(ViInsert::new());
     self.needs_redraw = true;
-		if full_redraw {
-			self.old_layout = None;
-		}
+    if full_redraw {
+      self.old_layout = None;
+    }
     self.history.pending = None;
     self.history.reset();
-		self.print_line(false)
+    self.print_line(false)
   }
 
-	pub fn prompt(&self) -> &Prompt {
-		&self.prompt
-	}
+  pub fn prompt(&self) -> &Prompt {
+    &self.prompt
+  }
 
-	pub fn prompt_mut(&mut self) -> &mut Prompt {
-		&mut self.prompt
-	}
+  pub fn prompt_mut(&mut self) -> &mut Prompt {
+    &mut self.prompt
+  }
 
-	fn should_submit(&mut self) -> ShResult<bool> {
-		if self.mode.report_mode() == ModeReport::Normal {
-			return Ok(true);
-		}
-		let input = Arc::new(self.editor.buffer.clone());
-		self.editor.calc_indent_level();
-		let lex_result1 = LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
-		let lex_result2 = LexStream::new(Arc::clone(&input), LexFlags::empty()).collect::<ShResult<Vec<_>>>();
-		let is_top_level = self.editor.auto_indent_level == 0;
+  fn should_submit(&mut self) -> ShResult<bool> {
+    if self.mode.report_mode() == ModeReport::Normal {
+      return Ok(true);
+    }
+    let input = Arc::new(self.editor.buffer.clone());
+    self.editor.calc_indent_level();
+    let lex_result1 =
+      LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
+    let lex_result2 =
+      LexStream::new(Arc::clone(&input), LexFlags::empty()).collect::<ShResult<Vec<_>>>();
+    let is_top_level = self.editor.auto_indent_level == 0;
 
-		let is_complete = match (lex_result1.is_err(), lex_result2.is_err()) {
-			(true, true) => {
-				return Err(lex_result2.unwrap_err());
-			}
-			(true, false) => {
-				return Err(lex_result1.unwrap_err());
-			}
-			(false, true) => {
-				false
-			}
-			(false, false) => {
-				true
-			}
-		};
+    let is_complete = match (lex_result1.is_err(), lex_result2.is_err()) {
+      (true, true) => {
+        return Err(lex_result2.unwrap_err());
+      }
+      (true, false) => {
+        return Err(lex_result1.unwrap_err());
+      }
+      (false, true) => false,
+      (false, false) => true,
+    };
 
-		Ok(is_complete && is_top_level)
-	}
+    Ok(is_complete && is_top_level)
+  }
 
   /// Process any available input and return readline event
   /// This is non-blocking - returns Pending if no complete line yet
@@ -362,8 +366,8 @@ impl ShedVi {
             self.editor.set_hint(hint);
           }
           None => {
-						self.writer.send_bell().ok();
-          },
+            self.writer.send_bell().ok();
+          }
         }
 
         self.needs_redraw = true;
@@ -385,9 +389,11 @@ impl ShedVi {
         continue;
       }
 
-      if cmd.is_submit_action() && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete)) {
+      if cmd.is_submit_action()
+        && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
+      {
         self.editor.set_hint(None);
-				self.editor.cursor.set(self.editor.cursor_max()); // Move the cursor to the very end
+        self.editor.cursor.set(self.editor.cursor_max()); // Move the cursor to the very end
         self.print_line(true)?; // Redraw
         self.writer.flush_write("\n")?;
         let buf = self.editor.take_buf();
@@ -407,13 +413,13 @@ impl ShedVi {
           return Ok(ReadlineEvent::Eof);
         } else {
           self.editor = LineBuf::new();
-					self.mode = Box::new(ViInsert::new());
+          self.mode = Box::new(ViInsert::new());
           self.needs_redraw = true;
           continue;
         }
       }
 
-			let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
+      let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
 
       let before = self.editor.buffer.clone();
       self.exec_cmd(cmd)?;
@@ -424,8 +430,8 @@ impl ShedVi {
           .history
           .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
       } else if before == after && has_edit_verb {
-				self.writer.send_bell().ok(); // bell on no-op commands with a verb (e.g., 'x' on empty line)
-			}
+        self.writer.send_bell().ok(); // bell on no-op commands with a verb (e.g., 'x' on empty line)
+      }
 
       let hint = self.history.get_hint();
       self.editor.set_hint(hint);
@@ -462,21 +468,21 @@ impl ShedVi {
     };
     let entry = self.history.scroll(count);
     if let Some(entry) = entry {
-			let editor = std::mem::take(&mut self.editor);
+      let editor = std::mem::take(&mut self.editor);
       self.editor.set_buffer(entry.command().to_string());
       if self.history.pending.is_none() {
         self.history.pending = Some(editor);
       }
       self.editor.set_hint(None);
-			self.editor.move_cursor_to_end();
+      self.editor.move_cursor_to_end();
     } else if let Some(pending) = self.history.pending.take() {
       self.editor = pending;
     } else {
-			// If we are here it should mean we are on our pending command
-			// And the user tried to scroll history down
-			// Since there is no "future" history, we should just bell and do nothing
-			self.writer.send_bell().ok();
-		}
+      // If we are here it should mean we are on our pending command
+      // And the user tried to scroll history down
+      // Since there is no "future" history, we should just bell and do nothing
+      self.writer.send_bell().ok();
+    }
   }
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
     if self.editor.cursor_at_max() && self.editor.has_hint() {
@@ -512,7 +518,9 @@ impl ShedVi {
     let line = self.editor.to_string();
     let hint = self.editor.get_hint_text();
     if crate::state::read_shopts(|s| s.prompt.highlight) {
-      self.highlighter.load_input(&line,self.editor.cursor_byte_pos());
+      self
+        .highlighter
+        .load_input(&line, self.editor.cursor_byte_pos());
       self.highlighter.highlight();
       let highlighted = self.highlighter.take();
       format!("{highlighted}{hint}")
@@ -524,53 +532,84 @@ impl ShedVi {
   pub fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
     let line = self.line_text();
     let new_layout = self.get_layout(&line);
-		let pending_seq = self.mode.pending_seq();
-		let mut prompt_string_right = self.prompt.psr_expanded.clone();
+    let pending_seq = self.mode.pending_seq();
+    let mut prompt_string_right = self.prompt.psr_expanded.clone();
 
-		if prompt_string_right.as_ref().is_some_and(|psr| psr.lines().count() > 1) {
-			log::warn!("PSR has multiple lines, truncating to one line");
-			prompt_string_right = prompt_string_right.map(|psr| psr.lines().next().unwrap_or_default().to_string());
-		}
+    if prompt_string_right
+      .as_ref()
+      .is_some_and(|psr| psr.lines().count() > 1)
+    {
+      log::warn!("PSR has multiple lines, truncating to one line");
+      prompt_string_right =
+        prompt_string_right.map(|psr| psr.lines().next().unwrap_or_default().to_string());
+    }
 
-		let row0_used = self.prompt
-			.get_ps1()
-			.lines()
-			.next()
-			.map(|l| Layout::calc_pos(self.writer.t_cols, l, Pos { col: 0, row: 0 }, 0))
-			.map(|p| p.col)
-			.unwrap_or_default() as usize;
-		let one_line = new_layout.end.row == 0;
-
+    let row0_used = self
+      .prompt
+      .get_ps1()
+      .lines()
+      .next()
+      .map(|l| Layout::calc_pos(self.writer.t_cols, l, Pos { col: 0, row: 0 }, 0))
+      .map(|p| p.col)
+      .unwrap_or_default() as usize;
+    let one_line = new_layout.end.row == 0;
 
     if let Some(layout) = self.old_layout.as_ref() {
       self.writer.clear_rows(layout)?;
     }
 
-    self.writer.redraw(self.prompt.get_ps1(), &line, &new_layout)?;
+    self
+      .writer
+      .redraw(self.prompt.get_ps1(), &line, &new_layout)?;
 
-		let seq_fits = pending_seq.as_ref().is_some_and(|seq| row0_used + 1 < self.writer.t_cols as usize - seq.width());
-		let psr_fits = prompt_string_right.as_ref().is_some_and(|psr| new_layout.end.col as usize + 1 < (self.writer.t_cols as usize).saturating_sub(psr.width()));
+    let seq_fits = pending_seq
+      .as_ref()
+      .is_some_and(|seq| row0_used + 1 < self.writer.t_cols as usize - seq.width());
+    let psr_fits = prompt_string_right.as_ref().is_some_and(|psr| {
+      new_layout.end.col as usize + 1 < (self.writer.t_cols as usize).saturating_sub(psr.width())
+    });
 
-		if !final_draw && let Some(seq) = pending_seq && !seq.is_empty() && !(prompt_string_right.is_some() && one_line) && seq_fits {
-			let to_col = self.writer.t_cols - calc_str_width(&seq);
-			let up = new_layout.cursor.row; // rows to move up from cursor to top line of prompt
+    if !final_draw
+      && let Some(seq) = pending_seq
+      && !seq.is_empty()
+      && !(prompt_string_right.is_some() && one_line)
+      && seq_fits
+    {
+      let to_col = self.writer.t_cols - calc_str_width(&seq);
+      let up = new_layout.cursor.row; // rows to move up from cursor to top line of prompt
 
-			let move_up = if up > 0 { format!("\x1b[{up}A") } else { String::new() };
+      let move_up = if up > 0 {
+        format!("\x1b[{up}A")
+      } else {
+        String::new()
+      };
 
-			// Save cursor, move up to top row, move right to column, write sequence, restore cursor
-			self.writer.flush_write(&format!("\x1b7{move_up}\x1b[{to_col}G{seq}\x1b8"))?;
-		} else if !final_draw && let Some(psr) = prompt_string_right && psr_fits {
-			let to_col = self.writer.t_cols - calc_str_width(&psr);
-			let down = new_layout.end.row - new_layout.cursor.row;
-			let move_down = if down > 0 { format!("\x1b[{down}B") } else { String::new() };
+      // Save cursor, move up to top row, move right to column, write sequence,
+      // restore cursor
+      self
+        .writer
+        .flush_write(&format!("\x1b7{move_up}\x1b[{to_col}G{seq}\x1b8"))?;
+    } else if !final_draw
+      && let Some(psr) = prompt_string_right
+      && psr_fits
+    {
+      let to_col = self.writer.t_cols - calc_str_width(&psr);
+      let down = new_layout.end.row - new_layout.cursor.row;
+      let move_down = if down > 0 {
+        format!("\x1b[{down}B")
+      } else {
+        String::new()
+      };
 
-			self.writer.flush_write(&format!("\x1b7{move_down}\x1b[{to_col}G{psr}\x1b8"))?;
-		}
+      self
+        .writer
+        .flush_write(&format!("\x1b7{move_down}\x1b[{to_col}G{psr}\x1b8"))?;
+    }
 
     self.writer.flush_write(&self.mode.cursor_style())?;
 
     self.old_layout = Some(new_layout);
-		self.needs_redraw = false;
+    self.needs_redraw = false;
     Ok(())
   }
 
@@ -853,19 +892,22 @@ pub fn get_insertions(input: &str) -> Vec<(usize, Marker)> {
 /// - Unimplemented features (comments, brace groups)
 pub fn marker_for(class: &TkRule) -> Option<Marker> {
   match class {
-    TkRule::Pipe |
-		TkRule::ErrPipe |
-		TkRule::And |
-		TkRule::Or |
-		TkRule::Bg |
-    TkRule::BraceGrpStart |
-    TkRule::BraceGrpEnd => {
-      Some(markers::OPERATOR)
-    }
+    TkRule::Pipe
+    | TkRule::ErrPipe
+    | TkRule::And
+    | TkRule::Or
+    | TkRule::Bg
+    | TkRule::BraceGrpStart
+    | TkRule::BraceGrpEnd => Some(markers::OPERATOR),
     TkRule::Sep => Some(markers::CMD_SEP),
     TkRule::Redir => Some(markers::REDIRECT),
     TkRule::Comment => Some(markers::COMMENT),
-    TkRule::Expanded { exp: _ } | TkRule::EOI | TkRule::SOI | TkRule::Null | TkRule::Str | TkRule::CasePattern => None,
+    TkRule::Expanded { exp: _ }
+    | TkRule::EOI
+    | TkRule::SOI
+    | TkRule::Null
+    | TkRule::Str
+    | TkRule::CasePattern => None,
   }
 }
 
@@ -880,9 +922,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
       std::cmp::Ordering::Equal => {
         let priority = |m: Marker| -> u8 {
           match m {
-						markers::VISUAL_MODE_END
-						| markers::VISUAL_MODE_START
-            | markers::RESET => 0,
+            markers::VISUAL_MODE_END | markers::VISUAL_MODE_START | markers::RESET => 0,
             markers::VAR_SUB
             | markers::VAR_SUB_END
             | markers::CMD_SUB
@@ -911,9 +951,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
         std::cmp::Ordering::Equal => {
           let priority = |m: Marker| -> u8 {
             match m {
-							markers::VISUAL_MODE_END
-							| markers::VISUAL_MODE_START
-              | markers::RESET => 0,
+              markers::VISUAL_MODE_END | markers::VISUAL_MODE_START | markers::RESET => 0,
               markers::VAR_SUB
               | markers::VAR_SUB_END
               | markers::CMD_SUB
@@ -926,7 +964,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
               | markers::STRING_SQ_END
               | markers::SUBSH_END => 2,
 
-              | markers::ARG => 3, // Lowest priority - processed first, overridden by sub-tokens
+              markers::ARG => 3, // Lowest priority - processed first, overridden by sub-tokens
               _ => 1,
             }
           };
@@ -960,11 +998,11 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
     insertions.push((token.span.start, markers::SUBSH));
     return insertions;
   } else if token.class == TkRule::CasePattern {
-		insertions.push((token.span.end, markers::RESET));
-		insertions.push((token.span.end - 1, markers::CASE_PAT));
-		insertions.push((token.span.start, markers::OPERATOR));
-		return insertions;
-	}
+    insertions.push((token.span.end, markers::RESET));
+    insertions.push((token.span.end - 1, markers::CASE_PAT));
+    insertions.push((token.span.start, markers::OPERATOR));
+    return insertions;
+  }
 
   let token_raw = token.span.as_str();
   let mut token_chars = token_raw.char_indices().peekable();
@@ -1144,17 +1182,17 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
         }
       }
       '*' | '?' if (!in_dub_qt && !in_sng_qt) => {
-				let glob_ch = *ch;
+        let glob_ch = *ch;
         token_chars.next(); // consume the first glob char
         if !in_context(markers::COMMAND, &insertions) {
-					let offset = if glob_ch == '*' && token_chars.peek().is_some_and(|(_, c)| *c == '*') {
-						// it's one of these probably: ./dir/**/*.txt
-						token_chars.next(); // consume the second *
-						2
-					} else {
-						// just a regular glob char
-						1
-					};
+          let offset = if glob_ch == '*' && token_chars.peek().is_some_and(|(_, c)| *c == '*') {
+            // it's one of these probably: ./dir/**/*.txt
+            token_chars.next(); // consume the second *
+            2
+          } else {
+            // just a regular glob char
+            1
+          };
           insertions.push((span_start + index + offset, markers::RESET));
           insertions.push((span_start + index, markers::GLOB));
         }

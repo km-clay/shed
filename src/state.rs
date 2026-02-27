@@ -1,14 +1,34 @@
 use std::{
-  cell::RefCell, cmp::Ordering, collections::{HashMap, HashSet, VecDeque, hash_map::Entry}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref}, os::unix::fs::PermissionsExt, str::FromStr, time::Duration
+  cell::RefCell,
+  cmp::Ordering,
+  collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
+  fmt::Display,
+  ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref},
+  os::unix::fs::PermissionsExt,
+  str::FromStr,
+  time::Duration,
 };
 
 use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
-  builtin::{BUILTINS, trap::TrapTarget}, exec_input, jobs::JobTab, libsh::{
+  builtin::{BUILTINS, trap::TrapTarget},
+  exec_input,
+  jobs::JobTab,
+  libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::VecDequeExt,
-  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc, lex::{LexFlags, LexStream, Tk}}, prelude::*, readline::{complete::{BashCompSpec, CompSpec}, markers}, shopt::ShOpts
+  },
+  parse::{
+    ConjunctNode, NdRule, Node, ParsedSrc,
+    lex::{LexFlags, LexStream, Tk},
+  },
+  prelude::*,
+  readline::{
+    complete::{BashCompSpec, CompSpec},
+    markers,
+  },
+  shopt::ShOpts,
 };
 
 pub struct Shed {
@@ -152,10 +172,10 @@ impl ScopeStack {
         return scope.unset_var(var_name);
       }
     }
-		Err(ShErr::simple(
-			ShErrKind::ExecFail,
-			format!("Variable '{}' not found", var_name)
-		))
+    Err(ShErr::simple(
+      ShErrKind::ExecFail,
+      format!("Variable '{}' not found", var_name),
+    ))
   }
   pub fn export_var(&mut self, var_name: &str) {
     for scope in self.scopes.iter_mut().rev() {
@@ -183,11 +203,11 @@ impl ScopeStack {
         flat_vars.insert(var_name.clone(), var.clone());
       }
     }
-		for var in env::vars() {
-			if let Entry::Vacant(e) = flat_vars.entry(var.0) {
-				e.insert(Var::new(VarKind::Str(var.1), VarFlags::EXPORT));
-			}
-		}
+    for var in env::vars() {
+      if let Entry::Vacant(e) = flat_vars.entry(var.0) {
+        e.insert(Var::new(VarKind::Str(var.1), VarFlags::EXPORT));
+      }
+    }
 
     flat_vars
   }
@@ -195,128 +215,136 @@ impl ScopeStack {
     let is_local = self.is_local_var(var_name);
     if flags.contains(VarFlags::LOCAL) || is_local {
       self.set_var_local(var_name, val, flags)
-		} else {
-			self.set_var_global(var_name, val, flags)
+    } else {
+      self.set_var_global(var_name, val, flags)
     }
   }
-  pub fn set_var_indexed(&mut self, var_name: &str, idx: ArrIndex, val: String, flags: VarFlags) -> ShResult<()> {
+  pub fn set_var_indexed(
+    &mut self,
+    var_name: &str,
+    idx: ArrIndex,
+    val: String,
+    flags: VarFlags,
+  ) -> ShResult<()> {
     let is_local = self.is_local_var(var_name);
     if flags.contains(VarFlags::LOCAL) || is_local {
-      let Some(scope) = self.scopes.last_mut() else { return Ok(()) };
+      let Some(scope) = self.scopes.last_mut() else {
+        return Ok(());
+      };
       scope.set_index(var_name, idx, val)
     } else {
-      let Some(scope) = self.scopes.first_mut() else { return Ok(()) };
+      let Some(scope) = self.scopes.first_mut() else {
+        return Ok(());
+      };
       scope.set_index(var_name, idx, val)
     }
   }
   fn set_var_global(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     let Some(scope) = self.scopes.first_mut() else {
-      return Ok(())
+      return Ok(());
     };
     scope.set_var(var_name, val, flags)
   }
   fn set_var_local(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     let Some(scope) = self.scopes.last_mut() else {
-      return Ok(())
+      return Ok(());
     };
     scope.set_var(var_name, val, flags)
   }
-	pub fn get_arr_elems(&self, var_name: &str) -> ShResult<Vec<String>> {
-		for scope in self.scopes.iter().rev() {
-			if scope.var_exists(var_name)
-			&& let Some(var) = scope.vars().get(var_name) {
-				match var.kind() {
-					VarKind::Arr(items) => {
-						let mut item_vec = items.clone()
-							.into_iter()
-							.collect::<Vec<(usize, String)>>();
+  pub fn get_arr_elems(&self, var_name: &str) -> ShResult<Vec<String>> {
+    for scope in self.scopes.iter().rev() {
+      if scope.var_exists(var_name)
+        && let Some(var) = scope.vars().get(var_name)
+      {
+        match var.kind() {
+          VarKind::Arr(items) => {
+            let mut item_vec = items.clone().into_iter().collect::<Vec<(usize, String)>>();
 
-						item_vec.sort_by_key(|(idx, _)| *idx); // sort by index
+            item_vec.sort_by_key(|(idx, _)| *idx); // sort by index
 
-						return Ok(item_vec.into_iter()
-							.map(|(_,s)| s)
-							.collect())
-					}
-					_ => {
-						return Err(ShErr::simple(
-							ShErrKind::ExecFail,
-							format!("Variable '{}' is not an array", var_name)
-						));
-					}
-				}
-			}
-		}
-		Err(ShErr::simple(
-			ShErrKind::ExecFail,
-			format!("Variable '{}' not found", var_name)
-		))
-	}
-	pub fn index_var(&self, var_name: &str, idx: ArrIndex) -> ShResult<String> {
-		for scope in self.scopes.iter().rev() {
-			if scope.var_exists(var_name)
-			&& let Some(var) = scope.vars().get(var_name) {
-				match var.kind() {
-					VarKind::Arr(items) => {
-						let idx = match idx {
-							ArrIndex::Literal(n) => {
-								n
-							}
-							ArrIndex::FromBack(n) => {
-								if items.len() >= n {
-									items.len() - n
-								} else {
-									return Err(ShErr::simple(
-										ShErrKind::ExecFail,
-										format!("Index {} out of bounds for array '{}'", n, var_name)
-									));
-								}
-							}
-							_ => return Err(ShErr::simple(
-								ShErrKind::ExecFail,
-								format!("Cannot index all elements of array '{}'", var_name)
-							)),
-						};
+            return Ok(item_vec.into_iter().map(|(_, s)| s).collect());
+          }
+          _ => {
+            return Err(ShErr::simple(
+              ShErrKind::ExecFail,
+              format!("Variable '{}' is not an array", var_name),
+            ));
+          }
+        }
+      }
+    }
+    Err(ShErr::simple(
+      ShErrKind::ExecFail,
+      format!("Variable '{}' not found", var_name),
+    ))
+  }
+  pub fn index_var(&self, var_name: &str, idx: ArrIndex) -> ShResult<String> {
+    for scope in self.scopes.iter().rev() {
+      if scope.var_exists(var_name)
+        && let Some(var) = scope.vars().get(var_name)
+      {
+        match var.kind() {
+          VarKind::Arr(items) => {
+            let idx = match idx {
+              ArrIndex::Literal(n) => n,
+              ArrIndex::FromBack(n) => {
+                if items.len() >= n {
+                  items.len() - n
+                } else {
+                  return Err(ShErr::simple(
+                    ShErrKind::ExecFail,
+                    format!("Index {} out of bounds for array '{}'", n, var_name),
+                  ));
+                }
+              }
+              _ => {
+                return Err(ShErr::simple(
+                  ShErrKind::ExecFail,
+                  format!("Cannot index all elements of array '{}'", var_name),
+                ));
+              }
+            };
 
-						if let Some(item) = items.get(&idx) {
-							return Ok(item.clone());
-						} else {
-							return Err(ShErr::simple(
-								ShErrKind::ExecFail,
-								format!("Index {} out of bounds for array '{}'", idx, var_name)
-							));
-						}
-					}
-					_ => {
-						return Err(ShErr::simple(
-							ShErrKind::ExecFail,
-							format!("Variable '{}' is not an array", var_name)
-						));
-					}
-				}
-			}
-		}
-		Ok("".into())
-	}
-	pub fn try_get_var(&self, var_name: &str) -> Option<String> {
-		// This version of get_var() is mainly used internally
-		// so that we have access to Option methods
-		if let Ok(param) = var_name.parse::<ShellParam>() {
-			let val = self.get_param(param);
-			if !val.is_empty() {
-				return Some(val);
-			} else {
-				return None;
-			}
-		}
+            if let Some(item) = items.get(&idx) {
+              return Ok(item.clone());
+            } else {
+              return Err(ShErr::simple(
+                ShErrKind::ExecFail,
+                format!("Index {} out of bounds for array '{}'", idx, var_name),
+              ));
+            }
+          }
+          _ => {
+            return Err(ShErr::simple(
+              ShErrKind::ExecFail,
+              format!("Variable '{}' is not an array", var_name),
+            ));
+          }
+        }
+      }
+    }
+    Ok("".into())
+  }
+  pub fn try_get_var(&self, var_name: &str) -> Option<String> {
+    // This version of get_var() is mainly used internally
+    // so that we have access to Option methods
+    if let Ok(param) = var_name.parse::<ShellParam>() {
+      let val = self.get_param(param);
+      if !val.is_empty() {
+        return Some(val);
+      } else {
+        return None;
+      }
+    }
 
-		for scope in self.scopes.iter().rev() {
-			if scope.var_exists(var_name) {
-				return Some(scope.get_var(var_name));
-			}
-		}
+    for scope in self.scopes.iter().rev() {
+      if scope.var_exists(var_name) {
+        return Some(scope.get_var(var_name));
+      }
+    }
 
-		None
-	}
+    None
+  }
   pub fn get_var(&self, var_name: &str) -> String {
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.get_param(param);
@@ -329,21 +357,20 @@ impl ScopeStack {
     // Fallback to env var
     std::env::var(var_name).unwrap_or_default()
   }
-	pub fn is_local_var(&self, var_name: &str) -> bool {
-		self.scopes
-			.last()
-			.is_some_and(|s|
-				s.get_var_flags(var_name).is_some_and(|flags| flags.contains(VarFlags::LOCAL))
-			)
-	}
-	pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
-		for scope in self.scopes.iter().rev() {
-			if scope.var_exists(var_name) {
-				return scope.get_var_flags(var_name);
-			}
-		}
-		None
-	}
+  pub fn is_local_var(&self, var_name: &str) -> bool {
+    self.scopes.last().is_some_and(|s| {
+      s.get_var_flags(var_name)
+        .is_some_and(|flags| flags.contains(VarFlags::LOCAL))
+    })
+  }
+  pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
+    for scope in self.scopes.iter().rev() {
+      if scope.var_exists(var_name) {
+        return scope.get_var_flags(var_name);
+      }
+    }
+    None
+  }
   pub fn get_param(&self, param: ShellParam) -> String {
     if param.is_global()
       && let Some(val) = self.global_params.get(&param.to_string())
@@ -383,9 +410,9 @@ thread_local! {
 
 /// A shell function
 ///
-/// Consists of the BraceGrp Node and the stored ParsedSrc that the node refers to.
-/// The Node must be stored with the ParsedSrc because the tokens of the node
-/// contain an Arc<String> Which refers to the String held in ParsedSrc
+/// Consists of the BraceGrp Node and the stored ParsedSrc that the node refers
+/// to. The Node must be stored with the ParsedSrc because the tokens of the
+/// node contain an Arc<String> Which refers to the String held in ParsedSrc
 #[derive(Clone, Debug)]
 pub struct ShFunc(Node);
 
@@ -404,12 +431,12 @@ impl ShFunc {
     let ConjunctNode { cmd, operator: _ } = conjunct_node;
     *cmd
   }
-	pub fn body(&self) -> &Node {
-		&self.0
-	}
-	pub fn body_mut(&mut self) -> &mut Node {
-		&mut self.0
-	}
+  pub fn body(&self) -> &Node {
+    &self.0
+  }
+  pub fn body_mut(&mut self) -> &mut Node {
+    &mut self.0
+  }
 }
 
 /// The logic table for the shell
@@ -534,86 +561,81 @@ impl VarFlags {
 
 #[derive(Clone, Debug)]
 pub enum ArrIndex {
-	Literal(usize),
-	FromBack(usize),
-	AllJoined,
-	AllSplit
+  Literal(usize),
+  FromBack(usize),
+  AllJoined,
+  AllSplit,
 }
 
 impl FromStr for ArrIndex {
-	type Err = ShErr;
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s {
-			"@" => Ok(Self::AllSplit),
-			"*" => Ok(Self::AllJoined),
-			_ if s.starts_with('-') && s[1..].chars().all(|c| c.is_digit(1)) => {
-				let idx = s[1..].parse::<usize>().unwrap();
-				Ok(Self::FromBack(idx))
-			}
-			_ if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) => {
-				let idx = s.parse::<usize>().unwrap();
-				Ok(Self::Literal(idx))
-			}
-			_ => Err(ShErr::simple(
-					ShErrKind::ParseErr,
-					format!("Invalid array index: {}", s)
-			))
-		}
-	}
+  type Err = ShErr;
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match s {
+      "@" => Ok(Self::AllSplit),
+      "*" => Ok(Self::AllJoined),
+      _ if s.starts_with('-') && s[1..].chars().all(|c| c.is_digit(1)) => {
+        let idx = s[1..].parse::<usize>().unwrap();
+        Ok(Self::FromBack(idx))
+      }
+      _ if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) => {
+        let idx = s.parse::<usize>().unwrap();
+        Ok(Self::Literal(idx))
+      }
+      _ => Err(ShErr::simple(
+        ShErrKind::ParseErr,
+        format!("Invalid array index: {}", s),
+      )),
+    }
+  }
 }
 
 pub fn hashmap_to_vec(map: HashMap<usize, String>) -> Vec<String> {
-	let mut items = map.into_iter()
-		.collect::<Vec<(usize, String)>>();
-	items.sort_by_key(|(idx, _)| *idx);
+  let mut items = map.into_iter().collect::<Vec<(usize, String)>>();
+  items.sort_by_key(|(idx, _)| *idx);
 
-	items.into_iter()
-		.map(|(_,i)| i)
-		.collect()
+  items.into_iter().map(|(_, i)| i).collect()
 }
 
 #[derive(Clone, Debug)]
 pub enum VarKind {
-	Str(String),
-	Int(i32),
-	Arr(HashMap<usize,String>),
-	AssocArr(Vec<(String, String)>),
+  Str(String),
+  Int(i32),
+  Arr(HashMap<usize, String>),
+  AssocArr(Vec<(String, String)>),
 }
 
 impl VarKind {
-	pub fn arr_from_tk(tk: Tk) -> ShResult<Self> {
-		let raw = tk.as_str();
-		if !raw.starts_with('(') || !raw.ends_with(')') {
-			return Err(ShErr::simple(
-					ShErrKind::ParseErr,
-					format!("Invalid array syntax: {}", raw),
-			));
-		}
-		let raw = raw[1..raw.len() - 1].to_string();
+  pub fn arr_from_tk(tk: Tk) -> ShResult<Self> {
+    let raw = tk.as_str();
+    if !raw.starts_with('(') || !raw.ends_with(')') {
+      return Err(ShErr::simple(
+        ShErrKind::ParseErr,
+        format!("Invalid array syntax: {}", raw),
+      ));
+    }
+    let raw = raw[1..raw.len() - 1].to_string();
 
-		let tokens: HashMap<usize,String> = LexStream::new(Arc::new(raw), LexFlags::empty())
-			.map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
-			.try_fold(vec![], |mut acc, wrds| {
-				match wrds {
-					Ok(wrds) => acc.extend(wrds),
-					Err(e) => return Err(e),
-				}
-				Ok(acc)
-			})?
-			.into_iter()
-			.enumerate()
-			.collect();
+    let tokens: HashMap<usize, String> = LexStream::new(Arc::new(raw), LexFlags::empty())
+      .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
+      .try_fold(vec![], |mut acc, wrds| {
+        match wrds {
+          Ok(wrds) => acc.extend(wrds),
+          Err(e) => return Err(e),
+        }
+        Ok(acc)
+      })?
+      .into_iter()
+      .enumerate()
+      .collect();
 
-		Ok(Self::Arr(tokens))
-	}
+    Ok(Self::Arr(tokens))
+  }
 
-	pub fn arr_from_vec(vec: Vec<String>) -> Self {
-		let tokens: HashMap<usize,String> = vec.into_iter()
-			.enumerate()
-			.collect();
+  pub fn arr_from_vec(vec: Vec<String>) -> Self {
+    let tokens: HashMap<usize, String> = vec.into_iter().enumerate().collect();
 
-		Self::Arr(tokens)
-	}
+    Self::Arr(tokens)
+  }
 }
 
 impl Display for VarKind {
@@ -622,7 +644,7 @@ impl Display for VarKind {
       VarKind::Str(s) => write!(f, "{s}"),
       VarKind::Int(i) => write!(f, "{i}"),
       VarKind::Arr(items) => {
-				let items = hashmap_to_vec(items.clone());
+        let items = hashmap_to_vec(items.clone());
         let mut item_iter = items.iter().peekable();
         while let Some(item) = item_iter.next() {
           write!(f, "{item}")?;
@@ -666,9 +688,9 @@ impl Var {
   pub fn mark_for_export(&mut self) {
     self.flags.set(VarFlags::EXPORT, true);
   }
-	pub fn flags(&self) -> VarFlags {
-		self.flags
-	}
+  pub fn flags(&self) -> VarFlags {
+    self.flags
+  }
 }
 
 impl Display for Var {
@@ -843,66 +865,69 @@ impl VarTab {
       std::env::var(var).unwrap_or_default()
     }
   }
-	pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
-		self.vars.get(var_name).map(|var| var.flags)
-	}
+  pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
+    self.vars.get(var_name).map(|var| var.flags)
+  }
   pub fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
-		if let Some(var) = self.vars.get(var_name) && var.flags.contains(VarFlags::READONLY) {
-			return Err(ShErr::simple(
-				ShErrKind::ExecFail,
-				format!("cannot unset readonly variable '{}'", var_name)
-			));
-		}
+    if let Some(var) = self.vars.get(var_name)
+      && var.flags.contains(VarFlags::READONLY)
+    {
+      return Err(ShErr::simple(
+        ShErrKind::ExecFail,
+        format!("cannot unset readonly variable '{}'", var_name),
+      ));
+    }
     self.vars.remove(var_name);
     unsafe { env::remove_var(var_name) };
-		Ok(())
+    Ok(())
   }
-	pub fn set_index(&mut self, var_name: &str, idx: ArrIndex, val: String) -> ShResult<()> {
-		if self.var_exists(var_name)
-			&& let Some(var) = self.vars_mut().get_mut(var_name) {
-				match var.kind_mut() {
-					VarKind::Arr(items) => {
-						let idx = match idx {
-							ArrIndex::Literal(n) => {
-								n
-							}
-							ArrIndex::FromBack(n) => {
-								if items.len() >= n {
-									items.len() - n
-								} else {
-									return Err(ShErr::simple(
-											ShErrKind::ExecFail,
-											format!("Index {} out of bounds for array '{}'", n, var_name)
-									));
-								}
-							}
-							_ => return Err(ShErr::simple(
-									ShErrKind::ExecFail,
-									format!("Cannot index all elements of array '{}'", var_name)
-							)),
-						};
+  pub fn set_index(&mut self, var_name: &str, idx: ArrIndex, val: String) -> ShResult<()> {
+    if self.var_exists(var_name)
+      && let Some(var) = self.vars_mut().get_mut(var_name)
+    {
+      match var.kind_mut() {
+        VarKind::Arr(items) => {
+          let idx = match idx {
+            ArrIndex::Literal(n) => n,
+            ArrIndex::FromBack(n) => {
+              if items.len() >= n {
+                items.len() - n
+              } else {
+                return Err(ShErr::simple(
+                  ShErrKind::ExecFail,
+                  format!("Index {} out of bounds for array '{}'", n, var_name),
+                ));
+              }
+            }
+            _ => {
+              return Err(ShErr::simple(
+                ShErrKind::ExecFail,
+                format!("Cannot index all elements of array '{}'", var_name),
+              ));
+            }
+          };
 
-						items.insert(idx, val);
-						return Ok(());
-					}
-					_ => {
-						return Err(ShErr::simple(
-								ShErrKind::ExecFail,
-								format!("Variable '{}' is not an array", var_name)
-						));
-					}
-				}
-			}
-		Ok(())
-	}
+          items.insert(idx, val);
+          return Ok(());
+        }
+        _ => {
+          return Err(ShErr::simple(
+            ShErrKind::ExecFail,
+            format!("Variable '{}' is not an array", var_name),
+          ));
+        }
+      }
+    }
+    Ok(())
+  }
   pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if let Some(var) = self.vars.get_mut(var_name) {
-			if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {
-				return Err(ShErr::simple(
-					ShErrKind::ExecFail,
-					format!("Variable '{}' is readonly", var_name)
-				));
-			}
+      if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {
+        return Err(ShErr::simple(
+          ShErrKind::ExecFail,
+          format!("Variable '{}' is readonly", var_name),
+        ));
+      }
       var.kind = val;
       var.flags |= flags;
       if var.flags.contains(VarFlags::EXPORT) || flags.contains(VarFlags::EXPORT) {
@@ -919,7 +944,7 @@ impl VarTab {
       }
       self.vars.insert(var_name.to_string(), var);
     }
-		Ok(())
+    Ok(())
   }
   pub fn var_exists(&self, var_name: &str) -> bool {
     if let Ok(param) = var_name.parse::<ShellParam>() {
@@ -961,121 +986,170 @@ pub struct MetaTab {
   // pending system messages
   system_msg: Vec<String>,
 
-	// pushd/popd stack
-	dir_stack: VecDeque<PathBuf>,
+  // pushd/popd stack
+  dir_stack: VecDeque<PathBuf>,
 
-	old_path: Option<String>,
-	old_pwd: Option<String>,
-	// valid command cache
-	path_cache: HashSet<String>,
-	cwd_cache: HashSet<String>,
-	// programmable completion specs
-	comp_specs: HashMap<String, Box<dyn CompSpec>>,
+  old_path: Option<String>,
+  old_pwd: Option<String>,
+  // valid command cache
+  path_cache: HashSet<String>,
+  cwd_cache: HashSet<String>,
+  // programmable completion specs
+  comp_specs: HashMap<String, Box<dyn CompSpec>>,
 }
 
 impl MetaTab {
   pub fn new() -> Self {
-    Self::default()
+    Self {
+      comp_specs: Self::get_builtin_comp_specs(),
+      ..Default::default()
+    }
   }
-	pub fn cached_cmds(&self) -> &HashSet<String> {
-		&self.path_cache
-	}
-	pub fn cwd_cache(&self) -> &HashSet<String> {
-		&self.cwd_cache
-	}
-	pub fn comp_specs(&self) -> &HashMap<String, Box<dyn CompSpec>> {
-		&self.comp_specs
-	}
-	pub fn comp_specs_mut(&mut self) -> &mut HashMap<String, Box<dyn CompSpec>> {
-		&mut self.comp_specs
-	}
-	pub fn get_comp_spec(&self, cmd: &str) -> Option<Box<dyn CompSpec>> {
-		self.comp_specs.get(cmd).map(|spec| spec.clone())
-	}
-	pub fn set_comp_spec(&mut self, cmd: String, spec: Box<dyn CompSpec>) {
-		self.comp_specs.insert(cmd, spec);
-	}
-	pub fn remove_comp_spec(&mut self, cmd: &str) -> bool {
-		self.comp_specs.remove(cmd).is_some()
-	}
-	pub fn try_rehash_commands(&mut self) {
-		let path = env::var("PATH").unwrap_or_default();
-		let cwd = env::var("PWD").unwrap_or_default();
-		if self.old_path.as_ref().is_some_and(|old| *old == path)
-		&& self.old_pwd.as_ref().is_some_and(|old| *old == cwd) {
-			log::trace!("PATH and PWD unchanged, skipping rehash");
-			return;
-		}
+  pub fn get_builtin_comp_specs() -> HashMap<String, Box<dyn CompSpec>> {
+    let mut map = HashMap::new();
 
-		log::trace!("Rehashing commands for PATH: '{}' and PWD: '{}'", path, cwd);
+    map.insert(
+      "cd".into(),
+      Box::new(BashCompSpec::new().dirs(true)) as Box<dyn CompSpec>,
+    );
+    map.insert(
+      "pushd".into(),
+      Box::new(BashCompSpec::new().dirs(true)) as Box<dyn CompSpec>,
+    );
+    map.insert(
+      "popd".into(),
+      Box::new(BashCompSpec::new().dirs(true)) as Box<dyn CompSpec>,
+    );
+    map.insert(
+      "source".into(),
+      Box::new(BashCompSpec::new().files(true)) as Box<dyn CompSpec>,
+    );
+    map.insert(
+      "bg".into(),
+      Box::new(BashCompSpec::new().jobs(true)) as Box<dyn CompSpec>,
+    );
+    map.insert(
+      "fg".into(),
+      Box::new(BashCompSpec::new().jobs(true)) as Box<dyn CompSpec>,
+    );
+    map.insert(
+      "disown".into(),
+      Box::new(BashCompSpec::new().jobs(true)) as Box<dyn CompSpec>,
+    );
 
-		self.path_cache.clear();
-		self.old_path = Some(path.clone());
-		self.old_pwd = Some(cwd.clone());
-		let paths = path.split(":")
-			.map(PathBuf::from);
+    map
+  }
+  pub fn cached_cmds(&self) -> &HashSet<String> {
+    &self.path_cache
+  }
+  pub fn cwd_cache(&self) -> &HashSet<String> {
+    &self.cwd_cache
+  }
+  pub fn comp_specs(&self) -> &HashMap<String, Box<dyn CompSpec>> {
+    &self.comp_specs
+  }
+  pub fn comp_specs_mut(&mut self) -> &mut HashMap<String, Box<dyn CompSpec>> {
+    &mut self.comp_specs
+  }
+  pub fn get_comp_spec(&self, cmd: &str) -> Option<Box<dyn CompSpec>> {
+    self.comp_specs.get(cmd).map(|spec| spec.clone())
+  }
+  pub fn set_comp_spec(&mut self, cmd: String, spec: Box<dyn CompSpec>) {
+    self.comp_specs.insert(cmd, spec);
+  }
+  pub fn remove_comp_spec(&mut self, cmd: &str) -> bool {
+    self.comp_specs.remove(cmd).is_some()
+  }
+  pub fn try_rehash_commands(&mut self) {
+    let path = env::var("PATH").unwrap_or_default();
+    let cwd = env::var("PWD").unwrap_or_default();
+    if self.old_path.as_ref().is_some_and(|old| *old == path)
+      && self.old_pwd.as_ref().is_some_and(|old| *old == cwd)
+    {
+      log::trace!("PATH and PWD unchanged, skipping rehash");
+      return;
+    }
 
-		for path in paths {
-			if let Ok(entries) = path.read_dir() {
-				for entry in entries.flatten() {
-          let Ok(meta) = std::fs::metadata(entry.path()) else { continue };
+    log::trace!("Rehashing commands for PATH: '{}' and PWD: '{}'", path, cwd);
+
+    self.path_cache.clear();
+    self.old_path = Some(path.clone());
+    self.old_pwd = Some(cwd.clone());
+    let paths = path.split(":").map(PathBuf::from);
+
+    for path in paths {
+      if let Ok(entries) = path.read_dir() {
+        for entry in entries.flatten() {
+          let Ok(meta) = std::fs::metadata(entry.path()) else {
+            continue;
+          };
           let is_exec = meta.permissions().mode() & 0o111 != 0;
 
-					if meta.is_file() && is_exec
-					&& let Some(name) = entry.file_name().to_str() {
-						self.path_cache.insert(name.to_string());
-					}
-				}
-			}
-		}
-		if let Ok(entries) = Path::new(&cwd).read_dir() {
-			for entry in entries.flatten() {
-				let Ok(meta) = std::fs::metadata(entry.path()) else { continue };
-				let is_exec = meta.permissions().mode() & 0o111 != 0;
+          if meta.is_file()
+            && is_exec
+            && let Some(name) = entry.file_name().to_str()
+          {
+            self.path_cache.insert(name.to_string());
+          }
+        }
+      }
+    }
+    if let Ok(entries) = Path::new(&cwd).read_dir() {
+      for entry in entries.flatten() {
+        let Ok(meta) = std::fs::metadata(entry.path()) else {
+          continue;
+        };
+        let is_exec = meta.permissions().mode() & 0o111 != 0;
 
-				if meta.is_file() && is_exec
-				&& let Some(name) = entry.file_name().to_str() {
-					self.path_cache.insert(format!("./{}", name));
-				}
-			}
-		}
+        if meta.is_file()
+          && is_exec
+          && let Some(name) = entry.file_name().to_str()
+        {
+          self.path_cache.insert(format!("./{}", name));
+        }
+      }
+    }
 
-		read_logic(|l| {
-			let funcs = l.funcs();
-			let aliases = l.aliases();
-			for func in funcs.keys() {
-				self.path_cache.insert(func.clone());
-			}
-			for alias in aliases.keys() {
-				self.path_cache.insert(alias.clone());
-			}
-		});
+    read_logic(|l| {
+      let funcs = l.funcs();
+      let aliases = l.aliases();
+      for func in funcs.keys() {
+        self.path_cache.insert(func.clone());
+      }
+      for alias in aliases.keys() {
+        self.path_cache.insert(alias.clone());
+      }
+    });
 
-		for cmd in BUILTINS {
-			self.path_cache.insert(cmd.to_string());
-		}
-	}
-	pub fn try_rehash_cwd_listing(&mut self) {
-		let cwd = env::var("PWD").unwrap_or_default();
-		if self.old_pwd.as_ref().is_some_and(|old| *old == cwd) {
-			log::trace!("PWD unchanged, skipping rehash of cwd listing");
-			return;
-		}
+    for cmd in BUILTINS {
+      self.path_cache.insert(cmd.to_string());
+    }
+  }
+  pub fn try_rehash_cwd_listing(&mut self) {
+    let cwd = env::var("PWD").unwrap_or_default();
+    if self.old_pwd.as_ref().is_some_and(|old| *old == cwd) {
+      log::trace!("PWD unchanged, skipping rehash of cwd listing");
+      return;
+    }
 
-		log::debug!("Rehashing cwd listing for PWD: '{}'", cwd);
+    log::debug!("Rehashing cwd listing for PWD: '{}'", cwd);
 
-		if let Ok(entries) = Path::new(&cwd).read_dir() {
-			for entry in entries.flatten() {
-				let Ok(meta) = std::fs::metadata(entry.path()) else { continue };
-				let is_exec = meta.permissions().mode() & 0o111 != 0;
+    if let Ok(entries) = Path::new(&cwd).read_dir() {
+      for entry in entries.flatten() {
+        let Ok(meta) = std::fs::metadata(entry.path()) else {
+          continue;
+        };
+        let is_exec = meta.permissions().mode() & 0o111 != 0;
 
-				if meta.is_file() && is_exec
-				&& let Some(name) = entry.file_name().to_str() {
-					self.cwd_cache.insert(name.to_string());
-				}
-			}
-		}
-	}
+        if meta.is_file()
+          && is_exec
+          && let Some(name) = entry.file_name().to_str()
+        {
+          self.cwd_cache.insert(name.to_string());
+        }
+      }
+    }
+  }
   pub fn start_timer(&mut self) {
     self.runtime_start = Some(Instant::now());
   }
@@ -1098,35 +1172,35 @@ impl MetaTab {
   pub fn system_msg_pending(&self) -> bool {
     !self.system_msg.is_empty()
   }
-	pub fn dir_stack_top(&self) -> Option<&PathBuf> {
-		self.dir_stack.front()
-	}
-	pub fn push_dir(&mut self, path: PathBuf) {
-		self.dir_stack.push_front(path);
-	}
-	pub fn pop_dir(&mut self) -> Option<PathBuf> {
-		self.dir_stack.pop_front()
-	}
-	pub fn remove_dir(&mut self, idx: i32) -> Option<PathBuf> {
-		if idx < 0 {
-			let neg_idx = (self.dir_stack.len() - 1).saturating_sub((-idx) as usize);
-			self.dir_stack.remove(neg_idx)
-		} else {
-			self.dir_stack.remove((idx - 1) as usize)
-		}
-	}
-	pub fn rotate_dirs_fwd(&mut self, steps: usize) {
-		self.dir_stack.rotate_left(steps);
-	}
-	pub fn rotate_dirs_bkwd(&mut self, steps: usize) {
-		self.dir_stack.rotate_right(steps);
-	}
-	pub fn dirs(&self) -> &VecDeque<PathBuf> {
-		&self.dir_stack
-	}
-	pub fn dirs_mut(&mut self) -> &mut VecDeque<PathBuf> {
-		&mut self.dir_stack
-	}
+  pub fn dir_stack_top(&self) -> Option<&PathBuf> {
+    self.dir_stack.front()
+  }
+  pub fn push_dir(&mut self, path: PathBuf) {
+    self.dir_stack.push_front(path);
+  }
+  pub fn pop_dir(&mut self) -> Option<PathBuf> {
+    self.dir_stack.pop_front()
+  }
+  pub fn remove_dir(&mut self, idx: i32) -> Option<PathBuf> {
+    if idx < 0 {
+      let neg_idx = (self.dir_stack.len() - 1).saturating_sub((-idx) as usize);
+      self.dir_stack.remove(neg_idx)
+    } else {
+      self.dir_stack.remove((idx - 1) as usize)
+    }
+  }
+  pub fn rotate_dirs_fwd(&mut self, steps: usize) {
+    self.dir_stack.rotate_left(steps);
+  }
+  pub fn rotate_dirs_bkwd(&mut self, steps: usize) {
+    self.dir_stack.rotate_right(steps);
+  }
+  pub fn dirs(&self) -> &VecDeque<PathBuf> {
+    &self.dir_stack
+  }
+  pub fn dirs_mut(&mut self) -> &mut VecDeque<PathBuf> {
+    &mut self.dir_stack
+  }
 }
 
 /// Read from the job table
@@ -1151,63 +1225,67 @@ pub fn write_vars<T, F: FnOnce(&mut ScopeStack) -> T>(f: F) -> T {
 
 /// Parse `arr[idx]` into (name, raw_index_expr). Pure parsing, no expansion.
 pub fn parse_arr_bracket(var_name: &str) -> Option<(String, String)> {
-	let mut chars = var_name.chars();
-	let mut name = String::new();
-	let mut idx_raw = String::new();
-	let mut bracket_depth = 0;
+  let mut chars = var_name.chars();
+  let mut name = String::new();
+  let mut idx_raw = String::new();
+  let mut bracket_depth = 0;
 
-	while let Some(ch) = chars.next() {
-		match ch {
-			'\\' => { chars.next(); }
-			'[' => {
-				bracket_depth += 1;
-				if bracket_depth > 1 {
-					idx_raw.push(ch);
-				}
-			}
-			']' => {
-				if bracket_depth > 0 {
-					bracket_depth -= 1;
-					if bracket_depth == 0 {
-						if idx_raw.is_empty() {
-							return None;
-						}
-						break;
-					}
-				}
-				idx_raw.push(ch);
-			}
-			_ if bracket_depth > 0 => idx_raw.push(ch),
-			_ => name.push(ch),
-		}
-	}
+  while let Some(ch) = chars.next() {
+    match ch {
+      '\\' => {
+        chars.next();
+      }
+      '[' => {
+        bracket_depth += 1;
+        if bracket_depth > 1 {
+          idx_raw.push(ch);
+        }
+      }
+      ']' => {
+        if bracket_depth > 0 {
+          bracket_depth -= 1;
+          if bracket_depth == 0 {
+            if idx_raw.is_empty() {
+              return None;
+            }
+            break;
+          }
+        }
+        idx_raw.push(ch);
+      }
+      _ if bracket_depth > 0 => idx_raw.push(ch),
+      _ => name.push(ch),
+    }
+  }
 
-	if name.is_empty() || idx_raw.is_empty() {
-		None
-	} else {
-		Some((name, idx_raw))
-	}
+  if name.is_empty() || idx_raw.is_empty() {
+    None
+  } else {
+    Some((name, idx_raw))
+  }
 }
 
 /// Expand the raw index expression and parse it into an ArrIndex.
 pub fn expand_arr_index(idx_raw: &str) -> ShResult<ArrIndex> {
-	let expanded = LexStream::new(Arc::new(idx_raw.to_string()), LexFlags::empty())
-		.map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
-		.try_fold(vec![], |mut acc, wrds| {
-			match wrds {
-				Ok(wrds) => acc.extend(wrds),
-				Err(e) => return Err(e),
-			}
-			Ok(acc)
-		})?
-		.into_iter()
-		.next()
-		.ok_or_else(|| ShErr::simple(ShErrKind::ParseErr, "Empty array index"))?;
+  let expanded = LexStream::new(Arc::new(idx_raw.to_string()), LexFlags::empty())
+    .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
+    .try_fold(vec![], |mut acc, wrds| {
+      match wrds {
+        Ok(wrds) => acc.extend(wrds),
+        Err(e) => return Err(e),
+      }
+      Ok(acc)
+    })?
+    .into_iter()
+    .next()
+    .ok_or_else(|| ShErr::simple(ShErrKind::ParseErr, "Empty array index"))?;
 
-	expanded.parse::<ArrIndex>().map_err(|_| ShErr::simple(
-		ShErrKind::ParseErr,
-		format!("Invalid array index: {}", expanded)
-	))
+  expanded.parse::<ArrIndex>().map_err(|_| {
+    ShErr::simple(
+      ShErrKind::ParseErr,
+      format!("Invalid array index: {}", expanded),
+    )
+  })
 }
 
 pub fn read_meta<T, F: FnOnce(&MetaTab) -> T>(f: F) -> T {

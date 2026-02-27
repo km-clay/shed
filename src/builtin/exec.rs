@@ -4,7 +4,7 @@ use crate::{
   builtin::setup_builtin,
   jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{execute::ExecArgs, NdRule, Node},
+  parse::{NdRule, Node, execute::ExecArgs},
   procio::IoStack,
   state,
 };

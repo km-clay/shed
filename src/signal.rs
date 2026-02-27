@@ -83,10 +83,10 @@ pub fn check_signals() -> ShResult<()> {
     run_trap(Signal::SIGCHLD)?;
     wait_child()?;
   }
-	if got_signal(Signal::SIGWINCH) {
-		GOT_SIGWINCH.store(true, Ordering::SeqCst);
-		run_trap(Signal::SIGWINCH)?;
-	}
+  if got_signal(Signal::SIGWINCH) {
+    GOT_SIGWINCH.store(true, Ordering::SeqCst);
+    run_trap(Signal::SIGWINCH)?;
+  }
 
   for sig in MISC_SIGNALS {
     if got_signal(sig) {
@@ -157,7 +157,7 @@ pub fn hang_up(_: libc::c_int) {
   SHOULD_QUIT.store(true, Ordering::SeqCst);
   QUIT_CODE.store(1, Ordering::SeqCst);
   write_jobs(|j| {
-		j.hang_up();
+    j.hang_up();
   });
 }
 
@@ -286,7 +286,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
     if is_fg {
       take_term()?;
     } else {
-			JOB_DONE.store(true, Ordering::SeqCst);
+      JOB_DONE.store(true, Ordering::SeqCst);
       let job_order = read_jobs(|j| j.order().to_vec());
       let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
       if let Some(job) = result {

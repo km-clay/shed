@@ -1,12 +1,12 @@
 use crate::{
   builtin::setup_builtin,
   expand::expand_prompt,
-  getopt::{get_opts_from_tokens, Opt, OptSpec},
+  getopt::{Opt, OptSpec, get_opts_from_tokens},
   jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
-  procio::{borrow_fd, IoStack},
+  procio::{IoStack, borrow_fd},
   state,
 };
 
@@ -30,7 +30,7 @@ pub const ECHO_OPTS: [OptSpec; 4] = [
 ];
 
 bitflags! {
-	#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
   pub struct EchoFlags: u32 {
     const NO_NEWLINE = 0b000001;
     const USE_STDERR = 0b000010;
@@ -58,7 +58,6 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
   } else {
     borrow_fd(STDOUT_FILENO)
   };
-
 
   let mut echo_output = prepare_echo_args(
     argv
@@ -196,7 +195,6 @@ pub fn prepare_echo_args(
 
     prepared_args.push(prepared_arg);
   }
-
 
   Ok(prepared_args)
 }

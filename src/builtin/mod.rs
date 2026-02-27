@@ -8,13 +8,17 @@ use crate::{
     execute::prepare_argv,
     lex::{Span, Tk},
   },
-  procio::{IoStack, RedirGuard}, state,
+  procio::{IoStack, RedirGuard},
+  state,
 };
 
 pub mod alias;
 pub mod cd;
+pub mod complete;
+pub mod dirstack;
 pub mod echo;
-pub mod varcmds;
+pub mod eval;
+pub mod exec;
 pub mod flowctl;
 pub mod jobctl;
 pub mod pwd;
@@ -24,16 +28,14 @@ pub mod shopt;
 pub mod source;
 pub mod test; // [[ ]] thing
 pub mod trap;
+pub mod varcmds;
 pub mod zoltraak;
-pub mod dirstack;
-pub mod exec;
-pub mod eval;
-pub mod complete;
 
 pub const BUILTINS: [&str; 35] = [
-  "echo", "cd", "read", "export", "local", "pwd", "source", "shift", "jobs", "fg", "bg", "disown", "alias", "unalias",
-  "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin", "command", "trap",
-	"pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly", "unset", "complete", "compgen"
+  "echo", "cd", "read", "export", "local", "pwd", "source", "shift", "jobs", "fg", "bg", "disown",
+  "alias", "unalias", "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin",
+  "command", "trap", "pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly",
+  "unset", "complete", "compgen",
 ];
 
 /// Sets up a builtin command
@@ -96,16 +98,16 @@ pub fn setup_builtin(
 }
 
 pub fn true_builtin() -> ShResult<()> {
-	state::set_status(0);
-	Ok(())
+  state::set_status(0);
+  Ok(())
 }
 
 pub fn false_builtin() -> ShResult<()> {
-	state::set_status(1);
-	Ok(())
+  state::set_status(1);
+  Ok(())
 }
 
 pub fn noop_builtin() -> ShResult<()> {
-	state::set_status(0);
-	Ok(())
+  state::set_status(0);
+  Ok(())
 }

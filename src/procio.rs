@@ -9,7 +9,7 @@ use crate::{
     error::{ShErr, ShErrKind, ShResult},
     utils::RedirVecUtils,
   },
-  parse::{get_redir_file, Redir, RedirType},
+  parse::{Redir, RedirType, get_redir_file},
   prelude::*,
 };
 
@@ -79,7 +79,7 @@ impl IoMode {
       let path_raw = path.as_os_str().to_str().unwrap_or_default().to_string();
 
       let expanded_path = Expander::from_raw(&path_raw)?.expand()?.join(" "); // should just be one string, will have to find some way to handle a return of
-                                                                              // multiple
+      // multiple
 
       let expanded_pathbuf = PathBuf::from(expanded_path);
 
@@ -343,9 +343,9 @@ impl DerefMut for IoStack {
 }
 
 impl From<Vec<IoFrame>> for IoStack {
-	fn from(frames: Vec<IoFrame>) -> Self {
-		Self { stack: frames }
-	}
+  fn from(frames: Vec<IoFrame>) -> Self {
+    Self { stack: frames }
+  }
 }
 
 pub fn borrow_fd<'f>(fd: i32) -> BorrowedFd<'f> {

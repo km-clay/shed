@@ -83,14 +83,14 @@ impl ShOpts {
     }
   }
 
-	pub fn display_opts(&mut self) -> ShResult<String> {
-		let output = [
-			format!("core:\n{}", self.query("core")?.unwrap_or_default()),
-			format!("prompt:\n{}",self.query("prompt")?.unwrap_or_default())
-		];
+  pub fn display_opts(&mut self) -> ShResult<String> {
+    let output = [
+      format!("core:\n{}", self.query("core")?.unwrap_or_default()),
+      format!("prompt:\n{}", self.query("prompt")?.unwrap_or_default()),
+    ];
 
-		Ok(output.join("\n"))
-	}
+    Ok(output.join("\n"))
+  }
 
   pub fn set(&mut self, opt: &str, val: &str) -> ShResult<()> {
     let mut query = opt.split('.');
@@ -542,7 +542,10 @@ impl Display for ShOptPrompt {
     output.push(format!("comp_limit = {}", self.comp_limit));
     output.push(format!("highlight = {}", self.highlight));
     output.push(format!("auto_indent = {}", self.auto_indent));
-    output.push(format!("linebreak_on_incomplete = {}", self.linebreak_on_incomplete));
+    output.push(format!(
+      "linebreak_on_incomplete = {}",
+      self.linebreak_on_incomplete
+    ));
 
     let final_output = output.join("\n");
 

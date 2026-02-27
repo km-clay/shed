@@ -1,12 +1,12 @@
 use std::os::unix::fs::OpenOptionsExt;
 
 use crate::{
-  getopt::{get_opts_from_tokens, Opt, OptSpec},
+  getopt::{Opt, OptSpec, get_opts_from_tokens},
   jobs::JobBldr,
   libsh::error::{Note, ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
-  procio::{borrow_fd, IoStack},
+  procio::{IoStack, borrow_fd},
 };
 
 use super::setup_builtin;

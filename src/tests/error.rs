@@ -58,8 +58,8 @@ fn unclosed_squote() {
 #[test]
 fn unclosed_brc_grp() {
   let input = "{ foo bar";
-  let tokens = LexStream::new(Arc::new(input.into()), LexFlags::empty())
-    .collect::<ShResult<Vec<_>>>();
+  let tokens =
+    LexStream::new(Arc::new(input.into()), LexFlags::empty()).collect::<ShResult<Vec<_>>>();
 
   let Err(err) = tokens else {
     panic!("Expected an error, got {:?}", tokens);

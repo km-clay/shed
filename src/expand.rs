@@ -12,12 +12,12 @@ use crate::parse::{Redir, RedirType};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::readline::markers;
 use crate::state::{
-  ArrIndex, LogTab, VarFlags, VarKind, read_jobs, read_logic, read_vars, write_jobs, write_meta, write_vars
+  ArrIndex, LogTab, VarFlags, VarKind, read_jobs, read_logic, read_vars, write_jobs, write_meta,
+  write_vars,
 };
 use crate::{jobs, prelude::*};
 
 const PARAMETERS: [char; 7] = ['@', '*', '#', '$', '?', '!', '0'];
-
 
 impl Tk {
   /// Create a new expanded token
@@ -80,16 +80,16 @@ impl Expander {
     let mut chars = self.raw.chars();
     let mut cur_word = String::new();
     let mut was_quoted = false;
-		let ifs = env::var("IFS").unwrap_or_else(|_| " \t\n".to_string());
+    let ifs = env::var("IFS").unwrap_or_else(|_| " \t\n".to_string());
 
     'outer: while let Some(ch) = chars.next() {
       match ch {
         markers::DUB_QUOTE | markers::SNG_QUOTE | markers::SUBSH => {
           while let Some(q_ch) = chars.next() {
             match q_ch {
-							markers::ARG_SEP if ch == markers::DUB_QUOTE => {
-								words.push(mem::take(&mut cur_word));
-							}
+              markers::ARG_SEP if ch == markers::DUB_QUOTE => {
+                words.push(mem::take(&mut cur_word));
+              }
               _ if q_ch == ch => {
                 was_quoted = true;
                 continue 'outer; // Isn't rust cool
@@ -518,11 +518,11 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   let mut var_name = String::new();
   let mut brace_depth: i32 = 0;
-	let mut inner_brace_depth: i32 = 0;
-	let mut bracket_depth: i32 = 0;
-	let mut idx_brace_depth: i32 = 0;
-	let mut idx_raw = String::new();
-	let mut idx = None;
+  let mut inner_brace_depth: i32 = 0;
+  let mut bracket_depth: i32 = 0;
+  let mut idx_brace_depth: i32 = 0;
+  let mut idx_raw = String::new();
+  let mut idx = None;
   while let Some(&ch) = chars.peek() {
     match ch {
       markers::SUBSH if var_name.is_empty() => {
@@ -551,51 +551,63 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
       '}' if brace_depth > 0 && bracket_depth == 0 && inner_brace_depth == 0 => {
         chars.next(); // consume the brace
         let val = if let Some(idx) = idx {
-					match idx {
-						ArrIndex::AllSplit => {
-							let arg_sep = markers::ARG_SEP.to_string();
-							read_vars(|v| v.get_arr_elems(&var_name))?.join(&arg_sep)
-						}
-						ArrIndex::AllJoined => {
-							let ifs = read_vars(|v| v.try_get_var("IFS"))
-								.unwrap_or_else(|| " \t\n".to_string())
-								.chars()
-								.next()
-								.unwrap_or(' ')
-								.to_string();
+          match idx {
+            ArrIndex::AllSplit => {
+              let arg_sep = markers::ARG_SEP.to_string();
+              read_vars(|v| v.get_arr_elems(&var_name))?.join(&arg_sep)
+            }
+            ArrIndex::AllJoined => {
+              let ifs = read_vars(|v| v.try_get_var("IFS"))
+                .unwrap_or_else(|| " \t\n".to_string())
+                .chars()
+                .next()
+                .unwrap_or(' ')
+                .to_string();
 
-							read_vars(|v| v.get_arr_elems(&var_name))?.join(&ifs)
-						},
-						_ => read_vars(|v| v.index_var(&var_name, idx))?
-					}
-
-				} else {
-					perform_param_expansion(&var_name)?
-				};
+              read_vars(|v| v.get_arr_elems(&var_name))?.join(&ifs)
+            }
+            _ => read_vars(|v| v.index_var(&var_name, idx))?,
+          }
+        } else {
+          perform_param_expansion(&var_name)?
+        };
         return Ok(val);
       }
-			'[' if brace_depth > 0 && bracket_depth == 0 && inner_brace_depth == 0 => {
-				chars.next(); // consume the bracket
-				bracket_depth += 1;
-			}
-			']' if bracket_depth > 0 && idx_brace_depth == 0 => {
-				bracket_depth -= 1;
-				chars.next(); // consume the bracket
-				if bracket_depth == 0 {
-					let expanded_idx = expand_raw(&mut idx_raw.chars().peekable())?;
-					idx = Some(expanded_idx.parse::<ArrIndex>().map_err(|_| ShErr::simple(ShErrKind::ParseErr, format!("Array index must be a number, got '{expanded_idx}'")))?);
-				}
-			}
-			ch if bracket_depth > 0 => {
-				chars.next(); // safe to consume
-				if ch == '{' { idx_brace_depth += 1; }
-				if ch == '}' { idx_brace_depth -= 1; }
-				idx_raw.push(ch);
-			}
+      '[' if brace_depth > 0 && bracket_depth == 0 && inner_brace_depth == 0 => {
+        chars.next(); // consume the bracket
+        bracket_depth += 1;
+      }
+      ']' if bracket_depth > 0 && idx_brace_depth == 0 => {
+        bracket_depth -= 1;
+        chars.next(); // consume the bracket
+        if bracket_depth == 0 {
+          let expanded_idx = expand_raw(&mut idx_raw.chars().peekable())?;
+          idx = Some(expanded_idx.parse::<ArrIndex>().map_err(|_| {
+            ShErr::simple(
+              ShErrKind::ParseErr,
+              format!("Array index must be a number, got '{expanded_idx}'"),
+            )
+          })?);
+        }
+      }
+      ch if bracket_depth > 0 => {
+        chars.next(); // safe to consume
+        if ch == '{' {
+          idx_brace_depth += 1;
+        }
+        if ch == '}' {
+          idx_brace_depth -= 1;
+        }
+        idx_raw.push(ch);
+      }
       ch if brace_depth > 0 => {
         chars.next(); // safe to consume
-        if ch == '{' { inner_brace_depth += 1; }
-        if ch == '}' { inner_brace_depth -= 1; }
+        if ch == '{' {
+          inner_brace_depth += 1;
+        }
+        if ch == '}' {
+          inner_brace_depth -= 1;
+        }
         var_name.push(ch);
       }
       ch if var_name.is_empty() && PARAMETERS.contains(&ch) => {
@@ -1411,12 +1423,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           None => expand_raw(&mut default.chars().peekable()),
         }
       }
-      ParamExp::DefaultUnset(default) => {
-        match vars.try_get_var(&var_name) {
-          Some(val) => Ok(val),
-          None => expand_raw(&mut default.chars().peekable()),
-        }
-      }
+      ParamExp::DefaultUnset(default) => match vars.try_get_var(&var_name) {
+        Some(val) => Ok(val),
+        None => expand_raw(&mut default.chars().peekable()),
+      },
       ParamExp::SetDefaultUnsetOrNull(default) => {
         match vars.try_get_var(&var_name).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val),
@@ -1427,28 +1437,22 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           }
         }
       }
-      ParamExp::SetDefaultUnset(default) => {
-        match vars.try_get_var(&var_name) {
-          Some(val) => Ok(val),
-          None => {
-            let expanded = expand_raw(&mut default.chars().peekable())?;
-            write_vars(|v| v.set_var(&var_name, VarKind::Str(expanded.clone()), VarFlags::NONE))?;
-            Ok(expanded)
-          }
+      ParamExp::SetDefaultUnset(default) => match vars.try_get_var(&var_name) {
+        Some(val) => Ok(val),
+        None => {
+          let expanded = expand_raw(&mut default.chars().peekable())?;
+          write_vars(|v| v.set_var(&var_name, VarKind::Str(expanded.clone()), VarFlags::NONE))?;
+          Ok(expanded)
         }
-      }
-      ParamExp::AltSetNotNull(alt) => {
-        match vars.try_get_var(&var_name).filter(|v| !v.is_empty()) {
-          Some(_) => expand_raw(&mut alt.chars().peekable()),
-          None => Ok("".into()),
-        }
-      }
-      ParamExp::AltNotNull(alt) => {
-        match vars.try_get_var(&var_name) {
-          Some(_) => expand_raw(&mut alt.chars().peekable()),
-          None => Ok("".into()),
-        }
-      }
+      },
+      ParamExp::AltSetNotNull(alt) => match vars.try_get_var(&var_name).filter(|v| !v.is_empty()) {
+        Some(_) => expand_raw(&mut alt.chars().peekable()),
+        None => Ok("".into()),
+      },
+      ParamExp::AltNotNull(alt) => match vars.try_get_var(&var_name) {
+        Some(_) => expand_raw(&mut alt.chars().peekable()),
+        None => Ok("".into()),
+      },
       ParamExp::ErrUnsetOrNull(err) => {
         match vars.try_get_var(&var_name).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val),
@@ -1462,19 +1466,17 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           }
         }
       }
-      ParamExp::ErrUnset(err) => {
-        match vars.try_get_var(&var_name) {
-          Some(val) => Ok(val),
-          None => {
-            let expanded = expand_raw(&mut err.chars().peekable())?;
-            Err(ShErr::Simple {
-              kind: ShErrKind::ExecFail,
-              msg: expanded,
-              notes: vec![],
-            })
-          }
+      ParamExp::ErrUnset(err) => match vars.try_get_var(&var_name) {
+        Some(val) => Ok(val),
+        None => {
+          let expanded = expand_raw(&mut err.chars().peekable())?;
+          Err(ShErr::Simple {
+            kind: ShErrKind::ExecFail,
+            msg: expanded,
+            notes: vec![],
+          })
         }
-      }
+      },
       ParamExp::Substr(pos) => {
         let value = vars.get_var(&var_name);
         if let Some(substr) = value.get(pos..) {
@@ -1861,7 +1863,7 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
             'n' => tokens.push(PromptTk::Text("\n".into())),
             'r' => tokens.push(PromptTk::Text("\r".into())),
             't' => tokens.push(PromptTk::RuntimeMillis),
-						'j' => tokens.push(PromptTk::JobCount),
+            'j' => tokens.push(PromptTk::JobCount),
             'T' => tokens.push(PromptTk::RuntimeFormatted),
             '\\' => tokens.push(PromptTk::Text("\\".into())),
             '"' => tokens.push(PromptTk::Text("\"".into())),
@@ -2058,9 +2060,20 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
       PromptTk::SuccessSymbol => todo!(),
       PromptTk::FailureSymbol => todo!(),
       PromptTk::JobCount => {
-				let count = read_jobs(|j| j.jobs().iter().filter(|j| j.as_ref().is_some_and(|j| j.get_stats().iter().all(|st| matches!(st, WtStat::StillAlive)))).count());
-				result.push_str(&count.to_string());
-			}
+        let count = read_jobs(|j| {
+          j.jobs()
+            .iter()
+            .filter(|j| {
+              j.as_ref().is_some_and(|j| {
+                j.get_stats()
+                  .iter()
+                  .all(|st| matches!(st, WtStat::StillAlive))
+              })
+            })
+            .count()
+        });
+        result.push_str(&count.to_string());
+      }
       PromptTk::Function(f) => {
         let output = expand_cmd_sub(&f)?;
         result.push_str(&output);

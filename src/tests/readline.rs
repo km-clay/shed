@@ -1,12 +1,19 @@
 use std::collections::VecDeque;
 
 use crate::{
-  expand::expand_prompt, libsh::{
+  expand::expand_prompt,
+  libsh::{
     error::ShErr,
     term::{Style, Styled},
-  }, prompt::readline::{
-    Prompt, ShedVi, history::History, keys::{KeyCode, KeyEvent, ModKeys}, linebuf::LineBuf, term::{KeyReader, LineWriter, raw_mode}, vimode::{ViInsert, ViMode, ViNormal}
-  }
+  },
+  prompt::readline::{
+    Prompt, ShedVi,
+    history::History,
+    keys::{KeyCode, KeyEvent, ModKeys},
+    linebuf::LineBuf,
+    term::{KeyReader, LineWriter, raw_mode},
+    vimode::{ViInsert, ViMode, ViNormal},
+  },
 };
 
 use pretty_assertions::assert_eq;
@@ -251,9 +258,13 @@ fn linebuf_ascii_content() {
 
 #[test]
 fn expand_default_prompt() {
-	let prompt = expand_prompt("\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ".into()).unwrap();
+  let prompt = expand_prompt(
+    "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m "
+      .into(),
+  )
+  .unwrap();
 
-	insta::assert_debug_snapshot!(prompt)
+  insta::assert_debug_snapshot!(prompt)
 }
 
 #[test]

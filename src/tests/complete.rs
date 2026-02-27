@@ -6,7 +6,7 @@ use tempfile::TempDir;
 
 use crate::prompt::readline::complete::Completer;
 use crate::prompt::readline::markers;
-use crate::state::{write_logic, write_vars, VarFlags};
+use crate::state::{VarFlags, write_logic, write_vars};
 
 use super::*;
 
@@ -192,10 +192,12 @@ fn complete_filename_with_slash() {
 
   // Should complete files in subdir/
   if result.is_some() {
-    assert!(completer
-      .candidates
-      .iter()
-      .any(|c| c.contains("nested.txt")));
+    assert!(
+      completer
+        .candidates
+        .iter()
+        .any(|c| c.contains("nested.txt"))
+    );
   }
 }
 
@@ -702,10 +704,12 @@ fn complete_special_characters_in_filename() {
 
   if result.is_some() {
     // Should handle special chars in filenames
-    assert!(completer
-      .candidates
-      .iter()
-      .any(|c| c.contains("file-with-dash") || c.contains("file_with_underscore")));
+    assert!(
+      completer
+        .candidates
+        .iter()
+        .any(|c| c.contains("file-with-dash") || c.contains("file_with_underscore"))
+    );
   }
 }
 

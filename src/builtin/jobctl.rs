@@ -1,9 +1,9 @@
 use crate::{
   jobs::{JobBldr, JobCmdFlags, JobID},
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{lex::Span, NdRule, Node},
+  parse::{NdRule, Node, lex::Span},
   prelude::*,
-  procio::{borrow_fd, IoStack},
+  procio::{IoStack, borrow_fd},
   state::{self, read_jobs, write_jobs},
 };
 

@@ -4,8 +4,9 @@ use super::*;
 use crate::expand::{expand_aliases, unescape_str};
 use crate::libsh::error::{Note, ShErr, ShErrKind};
 use crate::parse::{
+  NdRule, Node, ParseStream,
   lex::{LexFlags, LexStream, Tk, TkRule},
-  node_operation, NdRule, Node, ParseStream,
+  node_operation,
 };
 use crate::state::{write_logic, write_vars};
 

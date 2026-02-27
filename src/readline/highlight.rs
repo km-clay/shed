@@ -6,7 +6,10 @@ use std::{
 
 use crate::{
   libsh::term::{Style, StyleSet, Styled},
-  readline::{annotate_input, markers::{self, is_marker}},
+  readline::{
+    annotate_input,
+    markers::{self, is_marker},
+  },
   state::{read_logic, read_meta, read_shopts},
 };
 
@@ -20,10 +23,10 @@ use crate::{
 pub struct Highlighter {
   input: String,
   output: String,
-	linebuf_cursor_pos: usize,
+  linebuf_cursor_pos: usize,
   style_stack: Vec<StyleSet>,
   last_was_reset: bool,
-	in_selection: bool
+  in_selection: bool,
 }
 
 impl Highlighter {
@@ -32,10 +35,10 @@ impl Highlighter {
     Self {
       input: String::new(),
       output: String::new(),
-			linebuf_cursor_pos: 0,
+      linebuf_cursor_pos: 0,
       style_stack: Vec::new(),
       last_was_reset: true, // start as true so we don't emit a leading reset
-			in_selection: false
+      in_selection: false,
     }
   }
 
@@ -46,18 +49,18 @@ impl Highlighter {
   pub fn load_input(&mut self, input: &str, linebuf_cursor_pos: usize) {
     let input = annotate_input(input);
     self.input = input;
-		self.linebuf_cursor_pos = linebuf_cursor_pos;
+    self.linebuf_cursor_pos = linebuf_cursor_pos;
   }
 
-	pub fn strip_markers(str: &str) -> String {
-		let mut out = String::new();
-		for ch in str.chars() {
-			if !is_marker(ch) {
-				out.push(ch);
-			}
-		}
-		out
-	}
+  pub fn strip_markers(str: &str) -> String {
+    let mut out = String::new();
+    for ch in str.chars() {
+      if !is_marker(ch) {
+        out.push(ch);
+      }
+    }
+    out
+  }
 
   /// Processes the annotated input and generates ANSI-styled output
   ///
@@ -69,14 +72,14 @@ impl Highlighter {
     let mut input_chars = input.chars().peekable();
     while let Some(ch) = input_chars.next() {
       match ch {
-				markers::VISUAL_MODE_START => {
-					self.emit_style(Style::BgWhite | Style::Black);
-					self.in_selection = true;
-				}
-				markers::VISUAL_MODE_END => {
-					self.reapply_style();
-					self.in_selection = false;
-				}
+        markers::VISUAL_MODE_START => {
+          self.emit_style(Style::BgWhite | Style::Black);
+          self.in_selection = true;
+        }
+        markers::VISUAL_MODE_END => {
+          self.reapply_style();
+          self.in_selection = false;
+        }
         markers::STRING_DQ_END
         | markers::STRING_SQ_END
         | markers::VAR_SUB_END
@@ -96,16 +99,16 @@ impl Highlighter {
             if ch == markers::RESET {
               break;
             }
-						if !is_marker(ch) {
-							cmd_name.push(ch);
-						}
+            if !is_marker(ch) {
+              cmd_name.push(ch);
+            }
           }
 
-					match cmd_name.as_str() {
-						"continue" | "return" | "break" => self.push_style(Style::Magenta),
-						_ => self.push_style(Style::Green),
-					}
-				}
+          match cmd_name.as_str() {
+            "continue" | "return" | "break" => self.push_style(Style::Magenta),
+            _ => self.push_style(Style::Green),
+          }
+        }
         markers::CASE_PAT => self.push_style(Style::Blue),
 
         markers::COMMENT => self.push_style(Style::BrightBlack),
@@ -113,7 +116,6 @@ impl Highlighter {
         markers::GLOB => self.push_style(Style::Blue),
 
         markers::REDIRECT | markers::OPERATOR => self.push_style(Style::Magenta | Style::Bold),
-
 
         markers::ASSIGNMENT => {
           let mut var_name = String::new();
@@ -140,28 +142,30 @@ impl Highlighter {
 
         markers::ARG => {
           let mut arg = String::new();
-					let is_last_arg = !input_chars.clone().any(|c| c == markers::ARG || c.is_whitespace());
+          let is_last_arg = !input_chars
+            .clone()
+            .any(|c| c == markers::ARG || c.is_whitespace());
 
-					if !is_last_arg {
-						self.push_style(Style::White);
-					} else {
-						let mut chars_clone = input_chars.clone();
-						while let Some(ch) = chars_clone.next() {
-							if ch == markers::RESET {
-								break;
-							}
-							arg.push(ch);
-						}
+          if !is_last_arg {
+            self.push_style(Style::White);
+          } else {
+            let mut chars_clone = input_chars.clone();
+            while let Some(ch) = chars_clone.next() {
+              if ch == markers::RESET {
+                break;
+              }
+              arg.push(ch);
+            }
 
-						let style = if Self::is_filename(&Self::strip_markers(&arg)) {
-							Style::White | Style::Underline
-						} else {
-							Style::White.into()
-						};
+            let style = if Self::is_filename(&Self::strip_markers(&arg)) {
+              Style::White | Style::Underline
+            } else {
+              Style::White.into()
+            };
 
-						self.push_style(style);
-						self.last_was_reset = false;
-					}
+            self.push_style(style);
+            self.last_was_reset = false;
+          }
         }
 
         markers::COMMAND => {
@@ -173,9 +177,12 @@ impl Highlighter {
             }
             cmd_name.push(ch);
           }
-          let style = if matches!(Self::strip_markers(&cmd_name).as_str(), "break" | "continue" | "return") {
-						Style::Magenta.into()
-					} else if Self::is_valid(&Self::strip_markers(&cmd_name)) {
+          let style = if matches!(
+            Self::strip_markers(&cmd_name).as_str(),
+            "break" | "continue" | "return"
+          ) {
+            Style::Magenta.into()
+          } else if Self::is_valid(&Self::strip_markers(&cmd_name)) {
             Style::Green.into()
           } else {
             Style::Red | Style::Bold
@@ -292,21 +299,21 @@ impl Highlighter {
   fn is_valid(command: &str) -> bool {
     let cmd_path = Path::new(&command);
 
-		if cmd_path.is_dir() && read_shopts(|o| o.core.autocd) {
-			// this is a directory and autocd is enabled
-			return true;
-		}
+    if cmd_path.is_dir() && read_shopts(|o| o.core.autocd) {
+      // this is a directory and autocd is enabled
+      return true;
+    }
 
-		if cmd_path.is_absolute() {
-			// the user has given us an absolute path
-			let Ok(meta) = cmd_path.metadata() else {
-				return false;
-			};
-			// this is a file that is executable by someone
-			meta.permissions().mode() & 0o111 != 0
-		} else {
-			read_meta(|m| m.cached_cmds().get(command).is_some())
-		}
+    if cmd_path.is_absolute() {
+      // the user has given us an absolute path
+      let Ok(meta) = cmd_path.metadata() else {
+        return false;
+      };
+      // this is a file that is executable by someone
+      meta.permissions().mode() & 0o111 != 0
+    } else {
+      read_meta(|m| m.cached_cmds().get(command).is_some())
+    }
   }
 
   fn is_filename(arg: &str) -> bool {
@@ -316,9 +323,10 @@ impl Highlighter {
       return true;
     }
 
-		if path.is_absolute()
-    && let Some(parent_dir) = path.parent()
-		&& let Ok(entries) = parent_dir.read_dir() {
+    if path.is_absolute()
+      && let Some(parent_dir) = path.parent()
+      && let Ok(entries) = parent_dir.read_dir()
+    {
       let files = entries
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
@@ -334,17 +342,17 @@ impl Highlighter {
           return true;
         }
       }
-		}
+    }
 
-		read_meta(|m| {
-			let files = m.cwd_cache();
-			for file in files {
-				if file.starts_with(arg) {
-					return true;
-				}
-			}
-			false
-		})
+    read_meta(|m| {
+      let files = m.cwd_cache();
+      for file in files {
+        if file.starts_with(arg) {
+          return true;
+        }
+      }
+      false
+    })
   }
 
   /// Emits a reset ANSI code to the output, with deduplication
@@ -363,10 +371,10 @@ impl Highlighter {
   /// Unconditionally appends the ANSI escape sequence for the given style
   /// and marks that we're no longer in a reset state.
   fn emit_style(&mut self, style: StyleSet) {
-		let mut style = style;
-		if !style.styles().contains(&Style::BgWhite) {
-			style = style.add_style(Style::BgBlack);
-		}
+    let mut style = style;
+    if !style.styles().contains(&Style::BgWhite) {
+      style = style.add_style(Style::BgBlack);
+    }
     self.output.push_str(&style.to_string());
     self.last_was_reset = false;
   }
@@ -378,9 +386,9 @@ impl Highlighter {
   pub fn push_style(&mut self, style: impl Into<StyleSet>) {
     let set: StyleSet = style.into();
     self.style_stack.push(set.clone());
-		if !self.in_selection {
-			self.emit_style(set.clone());
-		}
+    if !self.in_selection {
+      self.emit_style(set.clone());
+    }
   }
 
   /// Pops a style from the stack and restores the previous style
@@ -405,18 +413,18 @@ impl Highlighter {
   /// the default terminal color between independent commands.
   pub fn clear_styles(&mut self) {
     self.style_stack.clear();
-		if !self.in_selection {
-			self.emit_reset();
-		}
+    if !self.in_selection {
+      self.emit_reset();
+    }
   }
 
-	pub fn reapply_style(&mut self) {
-		if let Some(style) = self.style_stack.last().cloned() {
-			self.emit_style(style);
-		} else {
-			self.emit_reset();
-		}
-	}
+  pub fn reapply_style(&mut self) {
+    if let Some(style) = self.style_stack.last().cloned() {
+      self.emit_style(style);
+    } else {
+      self.emit_reset();
+    }
+  }
 
   /// Simple marker-to-ANSI replacement (unused in favor of stack-based
   /// highlighting)

@@ -26,7 +26,7 @@ pub fn readonly(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
       let mut vars = v
         .flatten_vars()
         .into_iter()
-				.filter(|(_, v)| v.flags().contains(VarFlags::READONLY))
+        .filter(|(_, v)| v.flags().contains(VarFlags::READONLY))
         .map(|(k, v)| format!("{}={}", k, v))
         .collect::<Vec<String>>();
       vars.sort();
@@ -47,12 +47,12 @@ pub fn readonly(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
     }
   }
 
-	state::set_status(0);
-	Ok(())
+  state::set_status(0);
+  Ok(())
 }
 
 pub fn unset(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
-	let blame = node.get_span().clone();
+  let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
     argv,
@@ -63,27 +63,27 @@ pub fn unset(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
 
   let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
 
-	if argv.is_empty() {
-		return Err(ShErr::full(
-			ShErrKind::SyntaxErr,
-			"unset: Expected at least one argument",
-			blame
-		));
-	}
+  if argv.is_empty() {
+    return Err(ShErr::full(
+      ShErrKind::SyntaxErr,
+      "unset: Expected at least one argument",
+      blame,
+    ));
+  }
 
-	for (arg,span) in argv {
-		if !read_vars(|v| v.var_exists(&arg)) {
-			return Err(ShErr::full(
-				ShErrKind::ExecFail,
-				format!("unset: No such variable '{arg}'"),
-				span
-			));
-		}
-		write_vars(|v| v.unset_var(&arg))?;
-	}
+  for (arg, span) in argv {
+    if !read_vars(|v| v.var_exists(&arg)) {
+      return Err(ShErr::full(
+        ShErrKind::ExecFail,
+        format!("unset: No such variable '{arg}'"),
+        span,
+      ));
+    }
+    write_vars(|v| v.unset_var(&arg))?;
+  }
 
-	state::set_status(0);
-	Ok(())
+  state::set_status(0);
+  Ok(())
 }
 
 pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
@@ -114,7 +114,7 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
         write_vars(|v| v.set_var(var, VarKind::Str(val.to_string()), VarFlags::EXPORT))?;
       } else {
         write_vars(|v| v.export_var(&arg)); // Export an existing variable, if
-                                            // any
+        // any
       }
     }
   }

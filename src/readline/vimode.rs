@@ -1020,15 +1020,13 @@ impl ViNormal {
 impl ViMode for ViNormal {
   fn handle_key(&mut self, key: E) -> Option<ViCmd> {
     let mut cmd = match key {
-			E(K::Char('V'), M::NONE) => {
-				Some(ViCmd {
-					register: Default::default(),
-					verb: Some(VerbCmd(1, Verb::VisualModeLine)),
-					motion: None,
-					raw_seq: "".into(),
-					flags: self.flags(),
-				})
-			}
+      E(K::Char('V'), M::NONE) => Some(ViCmd {
+        register: Default::default(),
+        verb: Some(VerbCmd(1, Verb::VisualModeLine)),
+        motion: None,
+        raw_seq: "".into(),
+        flags: self.flags(),
+      }),
       E(K::Char(ch), M::NONE) => self.try_parse(ch),
       E(K::Backspace, M::NONE) => Some(ViCmd {
         register: Default::default(),
@@ -1405,8 +1403,8 @@ impl ViVisual {
           break 'motion_parse Some(MotionCmd(count, Motion::WholeLineInclusive));
         }
         ('c', Some(VerbCmd(_, Verb::Change))) => {
-					break 'motion_parse Some(MotionCmd(count, Motion::WholeLineExclusive));
-				}
+          break 'motion_parse Some(MotionCmd(count, Motion::WholeLineExclusive));
+        }
         _ => {}
       }
       match ch {

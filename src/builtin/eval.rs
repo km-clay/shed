@@ -2,7 +2,7 @@ use crate::{
   builtin::setup_builtin,
   jobs::JobBldr,
   libsh::error::ShResult,
-  parse::{execute::exec_input, NdRule, Node},
+  parse::{NdRule, Node, execute::exec_input},
   procio::IoStack,
   state,
 };

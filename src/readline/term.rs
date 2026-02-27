@@ -101,35 +101,41 @@ pub fn get_win_size(fd: RawFd) -> (Col, Row) {
 }
 
 fn enumerate_lines(s: &str, left_pad: usize) -> String {
-	let total_lines = s.lines().count();
-	let max_num_len = total_lines.to_string().len();
-	s.lines()
-		.enumerate()
-		.fold(String::new(), |mut acc, (i, ln)| {
-			if i == 0 {
-				acc.push_str(ln);
-				acc.push('\n');
-			} else {
-				let num = (i + 1).to_string();
-				let num_pad = max_num_len - num.len();
-				// " 2 | " — num + padding + " | "
-				let prefix_len = max_num_len + 3; // "N | "
-				let trail_pad = left_pad.saturating_sub(prefix_len);
-				if i == total_lines - 1 {
-					// Don't add a newline to the last line
-					write!(acc, "\x1b[0m\x1b[90m{}{num} |\x1b[0m {}{ln}",
-						" ".repeat(num_pad),
-						" ".repeat(trail_pad),
-					).unwrap();
-				} else {
-					writeln!(acc, "\x1b[0m\x1b[90m{}{num} |\x1b[0m {}{ln}",
-						" ".repeat(num_pad),
-						" ".repeat(trail_pad),
-					).unwrap();
-				}
-			}
-			acc
-		})
+  let total_lines = s.lines().count();
+  let max_num_len = total_lines.to_string().len();
+  s.lines()
+    .enumerate()
+    .fold(String::new(), |mut acc, (i, ln)| {
+      if i == 0 {
+        acc.push_str(ln);
+        acc.push('\n');
+      } else {
+        let num = (i + 1).to_string();
+        let num_pad = max_num_len - num.len();
+        // " 2 | " — num + padding + " | "
+        let prefix_len = max_num_len + 3; // "N | "
+        let trail_pad = left_pad.saturating_sub(prefix_len);
+        if i == total_lines - 1 {
+          // Don't add a newline to the last line
+          write!(
+            acc,
+            "\x1b[0m\x1b[90m{}{num} |\x1b[0m {}{ln}",
+            " ".repeat(num_pad),
+            " ".repeat(trail_pad),
+          )
+          .unwrap();
+        } else {
+          writeln!(
+            acc,
+            "\x1b[0m\x1b[90m{}{num} |\x1b[0m {}{ln}",
+            " ".repeat(num_pad),
+            " ".repeat(trail_pad),
+          )
+          .unwrap();
+        }
+      }
+      acc
+    })
 }
 
 fn write_all(fd: RawFd, buf: &str) -> nix::Result<()> {
@@ -171,8 +177,8 @@ fn ends_with_newline(s: &str) -> bool {
 }
 
 pub fn calc_str_width(s: &str) -> u16 {
-	let mut esc_seq = 0;
-	s.graphemes(true).map(|g| width(g, &mut esc_seq)).sum()
+  let mut esc_seq = 0;
+  s.graphemes(true).map(|g| width(g, &mut esc_seq)).sum()
 }
 
 // Big credit to rustyline for this

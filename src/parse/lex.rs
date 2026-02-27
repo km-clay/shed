@@ -152,7 +152,7 @@ pub struct LexStream {
   source: Arc<String>,
   pub cursor: usize,
   in_quote: bool,
-	brc_grp_start: Option<usize>,
+  brc_grp_start: Option<usize>,
   flags: LexFlags,
 }
 
@@ -187,7 +187,7 @@ impl LexStream {
       source,
       cursor: 0,
       in_quote: false,
-			brc_grp_start: None,
+      brc_grp_start: None,
       flags,
     }
   }
@@ -222,10 +222,10 @@ impl LexStream {
   pub fn set_in_brc_grp(&mut self, is: bool) {
     if is {
       self.flags |= LexFlags::IN_BRC_GRP;
-			self.brc_grp_start = Some(self.cursor);
+      self.brc_grp_start = Some(self.cursor);
     } else {
       self.flags &= !LexFlags::IN_BRC_GRP;
-			self.brc_grp_start = None;
+      self.brc_grp_start = None;
     }
   }
   pub fn next_is_cmd(&self) -> bool {
@@ -269,8 +269,8 @@ impl LexStream {
             }
 
             if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-							let span_start = self.cursor;
-							self.cursor = pos;
+              let span_start = self.cursor;
+              self.cursor = pos;
               return Some(Err(ShErr::full(
                 ShErrKind::ParseErr,
                 "Invalid redirection",
@@ -624,35 +624,35 @@ impl LexStream {
             }
           }
         }
-				'=' if chars.peek() == Some(&'(') => {
-					pos += 1; // '='
-					let mut depth = 1;
-					chars.next();
-					pos += 1; // '('
-					// looks like an array
-					while let Some(arr_ch) = chars.next() {
-						match arr_ch {
-							'\\' => {
-								pos += 1;
-								if let Some(next_ch) = chars.next() {
-									pos += next_ch.len_utf8();
-								}
-							}
-							'(' => {
-								depth += 1;
-								pos += 1;
-							}
-							')' => {
-								depth -= 1;
-								pos += 1;
-								if depth == 0 {
-									break;
-								}
-							}
-							_ => pos += arr_ch.len_utf8(),
-						}
-					}
-				}
+        '=' if chars.peek() == Some(&'(') => {
+          pos += 1; // '='
+          let mut depth = 1;
+          chars.next();
+          pos += 1; // '('
+          // looks like an array
+          while let Some(arr_ch) = chars.next() {
+            match arr_ch {
+              '\\' => {
+                pos += 1;
+                if let Some(next_ch) = chars.next() {
+                  pos += next_ch.len_utf8();
+                }
+              }
+              '(' => {
+                depth += 1;
+                pos += 1;
+              }
+              ')' => {
+                depth -= 1;
+                pos += 1;
+                if depth == 0 {
+                  break;
+                }
+              }
+              _ => pos += arr_ch.len_utf8(),
+            }
+          }
+        }
         _ if !self.in_quote && is_op(ch) => break,
         _ if is_hard_sep(ch) => break,
         _ => pos += ch.len_utf8(),
@@ -660,7 +660,7 @@ impl LexStream {
     }
     let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
     if self.in_quote && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-			self.cursor = pos;
+      self.cursor = pos;
       return Err(ShErr::full(
         ShErrKind::ParseErr,
         "Unterminated quote",
@@ -692,9 +692,9 @@ impl LexStream {
         }
         _ if is_cmd_sub(text) => {
           new_tk.mark(TkFlags::IS_CMDSUB);
-					if self.next_is_cmd() {
-						new_tk.mark(TkFlags::IS_CMD);
-					}
+          if self.next_is_cmd() {
+            new_tk.mark(TkFlags::IS_CMD);
+          }
           self.set_next_is_cmd(false);
         }
         _ => {
@@ -731,15 +731,16 @@ impl Iterator for LexStream {
         return None;
       } else {
         // Return the EOI token
-				if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-					let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
-					self.flags |= LexFlags::STALE;
-					return Err(ShErr::full(
-						ShErrKind::ParseErr,
-						"Unclosed brace group",
-						Span::new(start..self.cursor, self.source.clone()),
-					)).into();
-				}
+        if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+          let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
+          self.flags |= LexFlags::STALE;
+          return Err(ShErr::full(
+            ShErrKind::ParseErr,
+            "Unclosed brace group",
+            Span::new(start..self.cursor, self.source.clone()),
+          ))
+          .into();
+        }
         let token = self.get_token(self.cursor..self.cursor, TkRule::EOI);
         self.flags |= LexFlags::STALE;
         return Some(Ok(token));
@@ -770,14 +771,15 @@ impl Iterator for LexStream {
     }
 
     if self.cursor == self.source.len() {
-			if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-				let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
-				return Err(ShErr::full(
-						ShErrKind::ParseErr,
-						"Unclosed brace group",
-						Span::new(start..self.cursor, self.source.clone()),
-				)).into();
-			}
+      if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+        let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
+        return Err(ShErr::full(
+          ShErrKind::ParseErr,
+          "Unclosed brace group",
+          Span::new(start..self.cursor, self.source.clone()),
+        ))
+        .into();
+      }
       return None;
     }
 
@@ -899,26 +901,27 @@ pub fn is_field_sep(ch: char) -> bool {
 }
 
 pub fn is_keyword(slice: &str) -> bool {
-  KEYWORDS.contains(&slice) || (ends_with_unescaped(slice, "()") && !ends_with_unescaped(slice, "=()"))
+  KEYWORDS.contains(&slice)
+    || (ends_with_unescaped(slice, "()") && !ends_with_unescaped(slice, "=()"))
 }
 
 pub fn is_cmd_sub(slice: &str) -> bool {
-  slice.starts_with("$(") && ends_with_unescaped(slice,")")
+  slice.starts_with("$(") && ends_with_unescaped(slice, ")")
 }
 
 pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
-	slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
+  slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
 }
 
 pub fn pos_is_escaped(slice: &str, pos: usize) -> bool {
-	let bytes = slice.as_bytes();
-	let mut escaped = false;
-	let mut i = pos;
-	while i > 0 && bytes[i - 1] == b'\\' {
-		escaped = !escaped;
-		i -= 1;
-	}
-	escaped
+  let bytes = slice.as_bytes();
+  let mut escaped = false;
+  let mut i = pos;
+  while i > 0 && bytes[i - 1] == b'\\' {
+    escaped = !escaped;
+    i -= 1;
+  }
+  escaped
 }
 
 pub fn lookahead(pat: &str, mut chars: Chars) -> Option<usize> {

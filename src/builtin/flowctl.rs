@@ -1,6 +1,6 @@
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{execute::prepare_argv, NdRule, Node},
+  parse::{NdRule, Node, execute::prepare_argv},
 };
 
 pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
@@ -31,7 +31,7 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
     code = status;
   }
 
-  let (kind,message) = match kind {
+  let (kind, message) = match kind {
     LoopContinue(_) => (LoopContinue(code), "'continue' found outside of loop"),
     LoopBreak(_) => (LoopBreak(code), "'break' found outside of loop"),
     FuncReturn(_) => (FuncReturn(code), "'return' found outside of function"),

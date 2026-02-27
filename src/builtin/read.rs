@@ -7,13 +7,13 @@ use nix::{
 
 use crate::{
   builtin::setup_builtin,
-  getopt::{get_opts_from_tokens, Opt, OptSpec},
+  getopt::{Opt, OptSpec, get_opts_from_tokens},
   jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
-  procio::{borrow_fd, IoStack},
+  procio::{IoStack, borrow_fd},
   readline::term::RawModeGuard,
-  state::{self, read_vars, write_vars, VarFlags, VarKind},
+  state::{self, VarFlags, VarKind, read_vars, write_vars},
 };
 
 pub const READ_OPTS: [OptSpec; 7] = [
@@ -81,7 +81,10 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
     write(borrow_fd(STDOUT_FILENO), prompt.as_bytes())?;
   }
 
-	log::info!("read_builtin: starting read with delim={}", read_opts.delim as char);
+  log::info!(
+    "read_builtin: starting read with delim={}",
+    read_opts.delim as char
+  );
 
   let input = if isatty(STDIN_FILENO)? {
     // Restore default terminal settings
@@ -182,9 +185,7 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
   };
 
   if argv.is_empty() {
-    write_vars(|v| {
-      v.set_var("REPLY", VarKind::Str(input.clone()), VarFlags::NONE)
-    })?;
+    write_vars(|v| v.set_var("REPLY", VarKind::Str(input.clone()), VarFlags::NONE))?;
   } else {
     // get our field separator
     let mut field_sep = read_vars(|v| v.get_var("IFS"));

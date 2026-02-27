@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 
-use super::register::{append_register, read_register, write_register, RegisterContent};
+use super::register::{RegisterContent, append_register, read_register, write_register};
 
 //TODO: write tests that take edit results and cursor positions from actual
 // neovim edits and test them against the behavior of this editor
@@ -383,7 +383,12 @@ impl Motion {
   pub fn is_linewise(&self) -> bool {
     matches!(
       self,
-      Self::WholeLineInclusive | Self::WholeLineExclusive | Self::LineUp | Self::LineDown | Self::ScreenLineDown | Self::ScreenLineUp
+      Self::WholeLineInclusive
+        | Self::WholeLineExclusive
+        | Self::LineUp
+        | Self::LineDown
+        | Self::ScreenLineDown
+        | Self::ScreenLineUp
     )
   }
 }

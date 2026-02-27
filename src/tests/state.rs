@@ -11,8 +11,8 @@ fn scopestack_new() {
 
   // Should start with one global scope
   assert!(stack.var_exists("PATH") || !stack.var_exists("PATH")); // Just check
-                                                                  // it doesn't
-                                                                  // panic
+  // it doesn't
+  // panic
 }
 
 #[test]

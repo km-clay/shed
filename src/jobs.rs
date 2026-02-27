@@ -4,7 +4,7 @@ use crate::{
     term::{Style, Styled},
   },
   prelude::*,
-  procio::{borrow_fd, IoMode},
+  procio::{IoMode, borrow_fd},
   signal::{disable_reaping, enable_reaping},
   state::{self, read_jobs, set_status, write_jobs},
 };
@@ -631,6 +631,9 @@ impl Job {
       }
     }
     Ok(())
+  }
+  pub fn name(&self) -> Option<&str> {
+    self.children().first().and_then(|child| child.cmd())
   }
   pub fn display(&self, job_order: &[usize], flags: JobCmdFlags) -> String {
     let long = flags.contains(JobCmdFlags::LONG);

@@ -1,15 +1,40 @@
-use std::{collections::{HashSet, VecDeque}, os::unix::fs::PermissionsExt};
+use std::{
+  collections::{HashSet, VecDeque},
+  os::unix::fs::PermissionsExt,
+};
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, true_builtin, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
+    alias::{alias, unalias},
+    cd::cd,
+    complete::{compgen_builtin, complete_builtin},
+    dirstack::{dirs, popd, pushd},
+    echo::echo,
+    eval, exec,
+    flowctl::flowctl,
+    jobctl::{JobBehavior, continue_job, disown, jobs},
+    pwd::pwd,
+    read::read_builtin,
+    shift::shift,
+    shopt::shopt,
+    source::source,
+    test::double_bracket_test,
+    trap::{TrapTarget, trap},
+    true_builtin,
+    varcmds::{export, local, readonly, unset},
+    zoltraak::zoltraak,
   },
   expand::{expand_aliases, glob_to_regex},
   jobs::{ChildProc, JobStack, dispatch_job},
-  libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, utils::RedirVecUtils},
+  libsh::{
+    error::{ShErr, ShErrKind, ShResult, ShResultExt},
+    utils::RedirVecUtils,
+  },
   prelude::*,
   procio::{IoMode, IoStack},
-  state::{self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_vars},
+  state::{
+    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_vars,
+  },
 };
 
 use super::{
@@ -23,35 +48,37 @@ thread_local! {
 }
 
 pub fn is_in_path(name: &str) -> bool {
-	if name.starts_with("./") || name.starts_with("../") || name.starts_with('/') {
-		let path = Path::new(name);
-		if path.exists() && path.is_file() && !path.is_dir() {
-			let meta = match path.metadata() {
-				Ok(m) => m,
-				Err(_) => return false,
-			};
-			if meta.permissions().mode() & 0o111 != 0 {
-				return true;
-			}
-		}
-		false
-	} else {
-		let Ok(path) = env::var("PATH") else { return false };
-		let paths = path.split(':');
-		for path in paths {
-			let full_path = Path::new(path).join(name);
-			if full_path.exists() && full_path.is_file() && !full_path.is_dir() {
-				let meta = match full_path.metadata() {
-					Ok(m) => m,
-					Err(_) => continue,
-				};
-				if meta.permissions().mode() & 0o111 != 0 {
-					return true;
-				}
-			}
-		}
-		false
-	}
+  if name.starts_with("./") || name.starts_with("../") || name.starts_with('/') {
+    let path = Path::new(name);
+    if path.exists() && path.is_file() && !path.is_dir() {
+      let meta = match path.metadata() {
+        Ok(m) => m,
+        Err(_) => return false,
+      };
+      if meta.permissions().mode() & 0o111 != 0 {
+        return true;
+      }
+    }
+    false
+  } else {
+    let Ok(path) = env::var("PATH") else {
+      return false;
+    };
+    let paths = path.split(':');
+    for path in paths {
+      let full_path = Path::new(path).join(name);
+      if full_path.exists() && full_path.is_file() && !full_path.is_dir() {
+        let meta = match full_path.metadata() {
+          Ok(m) => m,
+          Err(_) => continue,
+        };
+        if meta.permissions().mode() & 0o111 != 0 {
+          return true;
+        }
+      }
+    }
+    false
+  }
 }
 
 pub struct ScopeGuard;
@@ -155,7 +182,7 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -
     return Ok(());
   }
 
-	let nodes = parser.extract_nodes();
+  let nodes = parser.extract_nodes();
 
   let mut dispatcher = Dispatcher::new(nodes, interactive);
   if let Some(mut stack) = io_stack {
@@ -225,8 +252,9 @@ impl Dispatcher {
     } else if is_subsh(node.get_command().cloned()) {
       self.exec_subsh(node)
     } else if read_shopts(|s| s.core.autocd)
-		&& Path::new(cmd.span.as_str()).is_dir()
-		&& !is_in_path(cmd.span.as_str()) {
+      && Path::new(cmd.span.as_str()).is_dir()
+      && !is_in_path(cmd.span.as_str())
+    {
       let dir = cmd.span.as_str().to_string();
       let stack = IoStack {
         stack: self.io_stack.clone(),
@@ -305,27 +333,27 @@ impl Dispatcher {
       unreachable!()
     };
 
-		self.run_fork("anonymous_subshell", |s| {
-			if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
-				eprintln!("{e}");
-				return;
-			};
-			s.io_stack.append_to_frame(subsh.redirs);
-			let mut argv = match prepare_argv(argv) {
-				Ok(argv) => argv,
-				Err(e) => {
-					eprintln!("{e}");
-					return;
-				}
-			};
+    self.run_fork("anonymous_subshell", |s| {
+      if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
+        eprintln!("{e}");
+        return;
+      };
+      s.io_stack.append_to_frame(subsh.redirs);
+      let mut argv = match prepare_argv(argv) {
+        Ok(argv) => argv,
+        Err(e) => {
+          eprintln!("{e}");
+          return;
+        }
+      };
 
-			let subsh = argv.remove(0);
-			let subsh_body = subsh.0.to_string();
+      let subsh = argv.remove(0);
+      let subsh_body = subsh.0.to_string();
 
-			if let Err(e) = exec_input(subsh_body, None, s.interactive) {
-				eprintln!("{e}");
-			};
-		})
+      if let Err(e) = exec_input(subsh_body, None, s.interactive) {
+        eprintln!("{e}");
+      };
+    })
   }
   fn exec_func(&mut self, func: Node) -> ShResult<()> {
     let blame = func.get_span().clone();
@@ -362,7 +390,7 @@ impl Dispatcher {
     let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&func_name)) {
       let _guard = ScopeGuard::exclusive_scope(Some(argv));
 
-			func_body.body_mut().flags = func.flags;
+      func_body.body_mut().flags = func.flags;
 
       if let Err(e) = self.exec_brc_grp(func_body.body().clone()) {
         match e.kind() {
@@ -390,33 +418,32 @@ impl Dispatcher {
     let NdRule::BraceGrp { body } = brc_grp.class else {
       unreachable!()
     };
-		let fork_builtins = brc_grp.flags.contains(NdFlags::FORK_BUILTINS);
+    let fork_builtins = brc_grp.flags.contains(NdFlags::FORK_BUILTINS);
 
     self.io_stack.append_to_frame(brc_grp.redirs);
-		let _guard = self.io_stack.pop_frame().redirect()?;
-		let brc_grp_logic = |s: &mut Self| -> ShResult<()> {
+    let _guard = self.io_stack.pop_frame().redirect()?;
+    let brc_grp_logic = |s: &mut Self| -> ShResult<()> {
+      for node in body {
+        let blame = node.get_span();
+        s.dispatch_node(node).try_blame(blame)?;
+      }
 
-			for node in body {
-				let blame = node.get_span();
-				s.dispatch_node(node).try_blame(blame)?;
-			}
+      Ok(())
+    };
 
-			Ok(())
-		};
-
-		if fork_builtins {
-			log::trace!("Forking brace group");
-			self.run_fork("brace group", |s| {
-				if let Err(e) = brc_grp_logic(s) {
-					eprintln!("{e}");
-				}
-			})
-		} else {
-			brc_grp_logic(self)
-		}
+    if fork_builtins {
+      log::trace!("Forking brace group");
+      self.run_fork("brace group", |s| {
+        if let Err(e) = brc_grp_logic(s) {
+          eprintln!("{e}");
+        }
+      })
+    } else {
+      brc_grp_logic(self)
+    }
   }
   fn exec_case(&mut self, case_stmt: Node) -> ShResult<()> {
-		let blame = case_stmt.get_span().clone();
+    let blame = case_stmt.get_span().clone();
     let NdRule::CaseNode {
       pattern,
       case_blocks,
@@ -425,52 +452,52 @@ impl Dispatcher {
       unreachable!()
     };
 
-		let fork_builtins = case_stmt.flags.contains(NdFlags::FORK_BUILTINS);
+    let fork_builtins = case_stmt.flags.contains(NdFlags::FORK_BUILTINS);
 
-		self.io_stack.append_to_frame(case_stmt.redirs);
-		let _guard = self.io_stack.pop_frame().redirect()?;
+    self.io_stack.append_to_frame(case_stmt.redirs);
+    let _guard = self.io_stack.pop_frame().redirect()?;
 
-		let case_logic = |s: &mut Self| -> ShResult<()> {
-			let exp_pattern = pattern.clone().expand()?;
-			let pattern_raw = exp_pattern
-				.get_words()
-				.first()
-				.map(|s| s.to_string())
-				.unwrap_or_default();
+    let case_logic = |s: &mut Self| -> ShResult<()> {
+      let exp_pattern = pattern.clone().expand()?;
+      let pattern_raw = exp_pattern
+        .get_words()
+        .first()
+        .map(|s| s.to_string())
+        .unwrap_or_default();
 
-			'outer: for block in case_blocks {
-				let CaseNode { pattern, body } = block;
-				let block_pattern_raw = pattern.span.as_str().trim_end_matches(')').trim();
-				// Split at '|' to allow for multiple patterns like `foo|bar)`
-				let block_patterns = block_pattern_raw.split('|');
+      'outer: for block in case_blocks {
+        let CaseNode { pattern, body } = block;
+        let block_pattern_raw = pattern.span.as_str().trim_end_matches(')').trim();
+        // Split at '|' to allow for multiple patterns like `foo|bar)`
+        let block_patterns = block_pattern_raw.split('|');
 
-				for pattern in block_patterns {
-					let pattern_regex = glob_to_regex(pattern, false);
-					if pattern_regex.is_match(&pattern_raw) {
-						for node in &body {
-							s.dispatch_node(node.clone())?;
-						}
-						break 'outer;
-					}
-				}
-			}
+        for pattern in block_patterns {
+          let pattern_regex = glob_to_regex(pattern, false);
+          if pattern_regex.is_match(&pattern_raw) {
+            for node in &body {
+              s.dispatch_node(node.clone())?;
+            }
+            break 'outer;
+          }
+        }
+      }
 
-			Ok(())
-		};
+      Ok(())
+    };
 
-		if fork_builtins {
-			log::trace!("Forking builtin: case");
-			self.run_fork("case", |s| {
-				if let Err(e) = case_logic(s) {
-					eprintln!("{e}");
-				}
-			})
-		} else {
-			case_logic(self).try_blame(blame)
-		}
+    if fork_builtins {
+      log::trace!("Forking builtin: case");
+      self.run_fork("case", |s| {
+        if let Err(e) = case_logic(s) {
+          eprintln!("{e}");
+        }
+      })
+    } else {
+      case_logic(self).try_blame(blame)
+    }
   }
   fn exec_loop(&mut self, loop_stmt: Node) -> ShResult<()> {
-		let blame = loop_stmt.get_span().clone();
+    let blame = loop_stmt.get_span().clone();
     let NdRule::LoopNode { kind, cond_node } = loop_stmt.class else {
       unreachable!();
     };
@@ -481,64 +508,64 @@ impl Dispatcher {
       }
     };
 
-		let fork_builtins = loop_stmt.flags.contains(NdFlags::FORK_BUILTINS);
+    let fork_builtins = loop_stmt.flags.contains(NdFlags::FORK_BUILTINS);
 
-		self.io_stack.append_to_frame(loop_stmt.redirs);
-		let _guard = self.io_stack.pop_frame().redirect()?;
+    self.io_stack.append_to_frame(loop_stmt.redirs);
+    let _guard = self.io_stack.pop_frame().redirect()?;
 
-		let loop_logic = |s: &mut Self| -> ShResult<()> {
-			let CondNode { cond, body } = cond_node;
-			'outer: loop {
-				if let Err(e) = s.dispatch_node(*cond.clone()) {
-					state::set_status(1);
-					return Err(e);
-				}
+    let loop_logic = |s: &mut Self| -> ShResult<()> {
+      let CondNode { cond, body } = cond_node;
+      'outer: loop {
+        if let Err(e) = s.dispatch_node(*cond.clone()) {
+          state::set_status(1);
+          return Err(e);
+        }
 
-				let status = state::get_status();
-				if keep_going(kind, status) {
-					for node in &body {
-						if let Err(e) = s.dispatch_node(node.clone()) {
-							match e.kind() {
-								ShErrKind::LoopBreak(code) => {
-									state::set_status(*code);
-									break 'outer;
-								}
-								ShErrKind::LoopContinue(code) => {
-									state::set_status(*code);
-									continue 'outer;
-								}
-								_ => {
-									return Err(e);
-								}
-							}
-						}
-					}
-				} else {
-					break;
-				}
-			}
+        let status = state::get_status();
+        if keep_going(kind, status) {
+          for node in &body {
+            if let Err(e) = s.dispatch_node(node.clone()) {
+              match e.kind() {
+                ShErrKind::LoopBreak(code) => {
+                  state::set_status(*code);
+                  break 'outer;
+                }
+                ShErrKind::LoopContinue(code) => {
+                  state::set_status(*code);
+                  continue 'outer;
+                }
+                _ => {
+                  return Err(e);
+                }
+              }
+            }
+          }
+        } else {
+          break;
+        }
+      }
 
-			Ok(())
-		};
+      Ok(())
+    };
 
-		if fork_builtins {
-			log::trace!("Forking builtin: loop");
-			self.run_fork("loop", |s| {
-				if let Err(e) = loop_logic(s) {
-					eprintln!("{e}");
-				}
-			})
-		} else {
-			loop_logic(self).try_blame(blame)
-		}
+    if fork_builtins {
+      log::trace!("Forking builtin: loop");
+      self.run_fork("loop", |s| {
+        if let Err(e) = loop_logic(s) {
+          eprintln!("{e}");
+        }
+      })
+    } else {
+      loop_logic(self).try_blame(blame)
+    }
   }
   fn exec_for(&mut self, for_stmt: Node) -> ShResult<()> {
-		let blame = for_stmt.get_span().clone();
+    let blame = for_stmt.get_span().clone();
     let NdRule::ForNode { vars, arr, body } = for_stmt.class else {
       unreachable!();
     };
 
-		let fork_builtins = for_stmt.flags.contains(NdFlags::FORK_BUILTINS);
+    let fork_builtins = for_stmt.flags.contains(NdFlags::FORK_BUILTINS);
 
     let to_expanded_strings = |tks: Vec<Tk>| -> ShResult<Vec<String>> {
       Ok(
@@ -552,60 +579,66 @@ impl Dispatcher {
       )
     };
 
-		self.io_stack.append_to_frame(for_stmt.redirs);
-		let _guard = self.io_stack.pop_frame().redirect()?;
+    self.io_stack.append_to_frame(for_stmt.redirs);
+    let _guard = self.io_stack.pop_frame().redirect()?;
 
-		let for_logic = |s: &mut Self| -> ShResult<()> {
-			// Expand all array variables
-			let arr: Vec<String> = to_expanded_strings(arr)?;
-			let vars: Vec<String> = to_expanded_strings(vars)?;
+    let for_logic = |s: &mut Self| -> ShResult<()> {
+      // Expand all array variables
+      let arr: Vec<String> = to_expanded_strings(arr)?;
+      let vars: Vec<String> = to_expanded_strings(vars)?;
 
-			let mut for_guard = VarCtxGuard::new(vars.iter().map(|v| v.to_string()).collect());
+      let mut for_guard = VarCtxGuard::new(vars.iter().map(|v| v.to_string()).collect());
 
-			'outer: for chunk in arr.chunks(vars.len()) {
-				let empty = String::new();
-				let chunk_iter = vars
-					.iter()
-					.zip(chunk.iter().chain(std::iter::repeat(&empty)));
+      'outer: for chunk in arr.chunks(vars.len()) {
+        let empty = String::new();
+        let chunk_iter = vars
+          .iter()
+          .zip(chunk.iter().chain(std::iter::repeat(&empty)));
 
-				for (var, val) in chunk_iter {
-					write_vars(|v| v.set_var(&var.to_string(), VarKind::Str(val.to_string()), VarFlags::NONE))?;
-					for_guard.vars.insert(var.to_string());
-				}
+        for (var, val) in chunk_iter {
+          write_vars(|v| {
+            v.set_var(
+              &var.to_string(),
+              VarKind::Str(val.to_string()),
+              VarFlags::NONE,
+            )
+          })?;
+          for_guard.vars.insert(var.to_string());
+        }
 
-				for node in body.clone() {
-					if let Err(e) = s.dispatch_node(node) {
-						match e.kind() {
-							ShErrKind::LoopBreak(code) => {
-								state::set_status(*code);
-								break 'outer;
-							}
-							ShErrKind::LoopContinue(code) => {
-								state::set_status(*code);
-								continue 'outer;
-							}
-							_ => return Err(e),
-						}
-					}
-				}
-			}
+        for node in body.clone() {
+          if let Err(e) = s.dispatch_node(node) {
+            match e.kind() {
+              ShErrKind::LoopBreak(code) => {
+                state::set_status(*code);
+                break 'outer;
+              }
+              ShErrKind::LoopContinue(code) => {
+                state::set_status(*code);
+                continue 'outer;
+              }
+              _ => return Err(e),
+            }
+          }
+        }
+      }
 
-			Ok(())
-		};
+      Ok(())
+    };
 
-		if fork_builtins {
-			log::trace!("Forking builtin: for");
-			self.run_fork("for", |s| {
-				if let Err(e) = for_logic(s) {
-					eprintln!("{e}");
-				}
-			})
-		} else {
-			for_logic(self).try_blame(blame)
-		}
+    if fork_builtins {
+      log::trace!("Forking builtin: for");
+      self.run_fork("for", |s| {
+        if let Err(e) = for_logic(s) {
+          eprintln!("{e}");
+        }
+      })
+    } else {
+      for_logic(self).try_blame(blame)
+    }
   }
   fn exec_if(&mut self, if_stmt: Node) -> ShResult<()> {
-		let blame = if_stmt.get_span().clone();
+    let blame = if_stmt.get_span().clone();
     let NdRule::IfNode {
       cond_nodes,
       else_block,
@@ -613,61 +646,61 @@ impl Dispatcher {
     else {
       unreachable!();
     };
-		let fork_builtins = if_stmt.flags.contains(NdFlags::FORK_BUILTINS);
+    let fork_builtins = if_stmt.flags.contains(NdFlags::FORK_BUILTINS);
 
     self.io_stack.append_to_frame(if_stmt.redirs);
-		let _guard = self.io_stack.pop_frame().redirect()?;
+    let _guard = self.io_stack.pop_frame().redirect()?;
 
-		let if_logic = |s: &mut Self| -> ShResult<()> {
-			let mut matched = false;
-			for node in cond_nodes {
-				let CondNode { cond, body } = node;
+    let if_logic = |s: &mut Self| -> ShResult<()> {
+      let mut matched = false;
+      for node in cond_nodes {
+        let CondNode { cond, body } = node;
 
-				if let Err(e) = s.dispatch_node(*cond) {
-					state::set_status(1);
-					return Err(e);
-				}
+        if let Err(e) = s.dispatch_node(*cond) {
+          state::set_status(1);
+          return Err(e);
+        }
 
-				match state::get_status() {
-					0 => {
-						matched = true;
-						for body_node in body {
-							s.dispatch_node(body_node)?;
-						}
-						break; // Don't check remaining elif conditions
-					}
-					_ => continue,
-				}
-			}
+        match state::get_status() {
+          0 => {
+            matched = true;
+            for body_node in body {
+              s.dispatch_node(body_node)?;
+            }
+            break; // Don't check remaining elif conditions
+          }
+          _ => continue,
+        }
+      }
 
-			if !matched && !else_block.is_empty() {
-				for node in else_block {
-					s.dispatch_node(node)?;
-				}
-			}
+      if !matched && !else_block.is_empty() {
+        for node in else_block {
+          s.dispatch_node(node)?;
+        }
+      }
 
-			Ok(())
-		};
+      Ok(())
+    };
 
-		if fork_builtins {
-			log::trace!("Forking builtin: if");
-			self.run_fork("if", |s| {
-				if let Err(e) = if_logic(s) {
-					eprintln!("{e}");
-					state::set_status(1);
-				}
-			})
-		} else {
-			if_logic(self).try_blame(blame)
-		}
+    if fork_builtins {
+      log::trace!("Forking builtin: if");
+      self.run_fork("if", |s| {
+        if let Err(e) = if_logic(s) {
+          eprintln!("{e}");
+          state::set_status(1);
+        }
+      })
+    } else {
+      if_logic(self).try_blame(blame)
+    }
   }
   fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
     let NdRule::Pipeline { cmds, pipe_err: _ } = pipeline.class else {
       unreachable!()
     };
     self.job_stack.new_job();
-		let fork_builtin = cmds.len() > 1; // If there's more than one command, we need to fork builtins
-		let (mut in_redirs, mut out_redirs) = self.io_stack.pop_frame().redirs.split_by_channel();
+    let fork_builtin = cmds.len() > 1; // If there's more than one command, we need to fork builtins
+    let (mut in_redirs, mut out_redirs) = self.io_stack.pop_frame().redirs.split_by_channel();
 
     // Zip the commands and their respective pipes into an iterator
     let pipes_and_cmds = get_pipe_stack(cmds.len()).into_iter().zip(cmds);
@@ -676,21 +709,21 @@ impl Dispatcher {
       if let Some(pipe) = rpipe {
         self.io_stack.push_to_frame(pipe);
       } else {
-				for redir in std::mem::take(&mut in_redirs) {
-					self.io_stack.push_to_frame(redir);
-				}
-			}
+        for redir in std::mem::take(&mut in_redirs) {
+          self.io_stack.push_to_frame(redir);
+        }
+      }
       if let Some(pipe) = wpipe {
         self.io_stack.push_to_frame(pipe);
       } else {
-				for redir in std::mem::take(&mut out_redirs) {
-					self.io_stack.push_to_frame(redir);
-				}
-			}
+        for redir in std::mem::take(&mut out_redirs) {
+          self.io_stack.push_to_frame(redir);
+        }
+      }
 
-			if fork_builtin {
-				cmd.flags |= NdFlags::FORK_BUILTINS;
-			}
+      if fork_builtin {
+        cmd.flags |= NdFlags::FORK_BUILTINS;
+      }
       self.dispatch_node(cmd)?;
     }
     let job = self.job_stack.finalize_job().unwrap();
@@ -699,32 +732,35 @@ impl Dispatcher {
     Ok(())
   }
   fn exec_builtin(&mut self, cmd: Node) -> ShResult<()> {
-		let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
-		let cmd_raw = cmd.get_command().unwrap_or_else(|| panic!("expected command NdRule, got {:?}", &cmd.class)).to_string();
+    let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
+    let cmd_raw = cmd
+      .get_command()
+      .unwrap_or_else(|| panic!("expected command NdRule, got {:?}", &cmd.class))
+      .to_string();
 
-		if fork_builtins {
-			log::trace!("Forking builtin: {}", cmd_raw);
-			let _guard = self.io_stack.pop_frame().redirect()?;
-			self.run_fork(&cmd_raw, |s| {
-				if let Err(e) = s.dispatch_builtin(cmd) {
-					eprintln!("{e}");
-				}
-			})
-		} else {
-			let result = self.dispatch_builtin(cmd);
+    if fork_builtins {
+      log::trace!("Forking builtin: {}", cmd_raw);
+      let _guard = self.io_stack.pop_frame().redirect()?;
+      self.run_fork(&cmd_raw, |s| {
+        if let Err(e) = s.dispatch_builtin(cmd) {
+          eprintln!("{e}");
+        }
+      })
+    } else {
+      let result = self.dispatch_builtin(cmd);
 
-			if let Err(e) = result {
-				let code = state::get_status();
-				if code == 0 {
-					state::set_status(1);
-				}
-				return Err(e);
-			}
-			Ok(())
-		}
+      if let Err(e) = result {
+        let code = state::get_status();
+        if code == 0 {
+          state::set_status(1);
+        }
+        return Err(e);
+      }
+      Ok(())
+    }
   }
-	fn dispatch_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
-		let cmd_raw = cmd.get_command().unwrap().to_string();
+  fn dispatch_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
+    let cmd_raw = cmd.get_command().unwrap().to_string();
     let NdRule::Command { assignments, argv } = &mut cmd.class else {
       unreachable!()
     };
@@ -751,51 +787,48 @@ impl Dispatcher {
       }
       return self.exec_cmd(cmd);
     }
-		match cmd_raw.as_str() {
-			"echo" => echo(cmd, io_stack_mut, curr_job_mut),
-			"cd" => cd(cmd, curr_job_mut),
-			"export" => export(cmd, io_stack_mut, curr_job_mut),
-			"local" => local(cmd, io_stack_mut, curr_job_mut),
-			"pwd" => pwd(cmd, io_stack_mut, curr_job_mut),
-			"source" => source(cmd, curr_job_mut),
-			"shift" => shift(cmd, curr_job_mut),
-			"fg" => continue_job(cmd, curr_job_mut, JobBehavior::Foregound),
-			"bg" => continue_job(cmd, curr_job_mut, JobBehavior::Background),
-			"disown" => disown(cmd, io_stack_mut, curr_job_mut),
-			"jobs" => jobs(cmd, io_stack_mut, curr_job_mut),
-			"alias" => alias(cmd, io_stack_mut, curr_job_mut),
-			"unalias" => unalias(cmd, io_stack_mut, curr_job_mut),
-			"return" => flowctl(cmd, ShErrKind::FuncReturn(0)),
-			"break" => flowctl(cmd, ShErrKind::LoopBreak(0)),
-			"continue" => flowctl(cmd, ShErrKind::LoopContinue(0)),
-			"exit" => flowctl(cmd, ShErrKind::CleanExit(0)),
-			"zoltraak" => zoltraak(cmd, io_stack_mut, curr_job_mut),
-			"shopt" => shopt(cmd, io_stack_mut, curr_job_mut),
-			"read" => read_builtin(cmd, io_stack_mut, curr_job_mut),
-			"trap" => trap(cmd, io_stack_mut, curr_job_mut),
-			"pushd" => pushd(cmd, io_stack_mut, curr_job_mut),
-			"popd" => popd(cmd, io_stack_mut, curr_job_mut),
-			"dirs" => dirs(cmd, io_stack_mut, curr_job_mut),
-			"exec" => exec::exec_builtin(cmd, io_stack_mut, curr_job_mut),
-			"eval" => eval::eval(cmd, io_stack_mut, curr_job_mut),
-			"readonly" => readonly(cmd, io_stack_mut, curr_job_mut),
-			"unset" => unset(cmd, io_stack_mut, curr_job_mut),
-			"complete" => complete_builtin(cmd, io_stack_mut, curr_job_mut),
-			"compgen" => compgen_builtin(cmd, io_stack_mut, curr_job_mut),
-			"true" | ":" => {
-				state::set_status(0);
-				Ok(())
-			},
-			"false" => {
-				state::set_status(1);
-				Ok(())
-			},
-			_ => unimplemented!(
-				"Have not yet added support for builtin '{}'",
-				cmd_raw
-			),
-		}
-	}
+    match cmd_raw.as_str() {
+      "echo" => echo(cmd, io_stack_mut, curr_job_mut),
+      "cd" => cd(cmd, curr_job_mut),
+      "export" => export(cmd, io_stack_mut, curr_job_mut),
+      "local" => local(cmd, io_stack_mut, curr_job_mut),
+      "pwd" => pwd(cmd, io_stack_mut, curr_job_mut),
+      "source" => source(cmd, curr_job_mut),
+      "shift" => shift(cmd, curr_job_mut),
+      "fg" => continue_job(cmd, curr_job_mut, JobBehavior::Foregound),
+      "bg" => continue_job(cmd, curr_job_mut, JobBehavior::Background),
+      "disown" => disown(cmd, io_stack_mut, curr_job_mut),
+      "jobs" => jobs(cmd, io_stack_mut, curr_job_mut),
+      "alias" => alias(cmd, io_stack_mut, curr_job_mut),
+      "unalias" => unalias(cmd, io_stack_mut, curr_job_mut),
+      "return" => flowctl(cmd, ShErrKind::FuncReturn(0)),
+      "break" => flowctl(cmd, ShErrKind::LoopBreak(0)),
+      "continue" => flowctl(cmd, ShErrKind::LoopContinue(0)),
+      "exit" => flowctl(cmd, ShErrKind::CleanExit(0)),
+      "zoltraak" => zoltraak(cmd, io_stack_mut, curr_job_mut),
+      "shopt" => shopt(cmd, io_stack_mut, curr_job_mut),
+      "read" => read_builtin(cmd, io_stack_mut, curr_job_mut),
+      "trap" => trap(cmd, io_stack_mut, curr_job_mut),
+      "pushd" => pushd(cmd, io_stack_mut, curr_job_mut),
+      "popd" => popd(cmd, io_stack_mut, curr_job_mut),
+      "dirs" => dirs(cmd, io_stack_mut, curr_job_mut),
+      "exec" => exec::exec_builtin(cmd, io_stack_mut, curr_job_mut),
+      "eval" => eval::eval(cmd, io_stack_mut, curr_job_mut),
+      "readonly" => readonly(cmd, io_stack_mut, curr_job_mut),
+      "unset" => unset(cmd, io_stack_mut, curr_job_mut),
+      "complete" => complete_builtin(cmd, io_stack_mut, curr_job_mut),
+      "compgen" => compgen_builtin(cmd, io_stack_mut, curr_job_mut),
+      "true" | ":" => {
+        state::set_status(0);
+        Ok(())
+      }
+      "false" => {
+        state::set_status(1);
+        Ok(())
+      }
+      _ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw),
+    }
+  }
   fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
     let NdRule::Command { assignments, argv } = cmd.class else {
       unreachable!()
@@ -810,10 +843,10 @@ impl Dispatcher {
       env_vars_to_unset = self.set_assignments(assignments, assign_behavior)?;
     }
 
-		let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
+    let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
     if argv.is_empty() {
-			state::set_status(0);
+      state::set_status(0);
       return Ok(());
     }
 
@@ -823,30 +856,30 @@ impl Dispatcher {
     let _guard = self.io_stack.pop_frame().redirect()?;
     let job = self.job_stack.curr_job_mut().unwrap();
 
-		let child_logic = || -> ! {
-			let cmd = &exec_args.cmd.0;
-			let span = exec_args.cmd.1;
+    let child_logic = || -> ! {
+      let cmd = &exec_args.cmd.0;
+      let span = exec_args.cmd.1;
 
-			let Err(e) = execvpe(cmd, &exec_args.argv, &exec_args.envp);
+      let Err(e) = execvpe(cmd, &exec_args.argv, &exec_args.envp);
 
-			// execvpe only returns on error
-			let cmd_str = cmd.to_str().unwrap().to_string();
-			match e {
-				Errno::ENOENT => {
-					let err = ShErr::full(ShErrKind::CmdNotFound(cmd_str), "", span);
-					eprintln!("{err}");
-				}
-				_ => {
-					let err = ShErr::full(ShErrKind::Errno(e), format!("{e}"), span);
-					eprintln!("{err}");
-				}
-			}
-			exit(e as i32)
-		};
+      // execvpe only returns on error
+      let cmd_str = cmd.to_str().unwrap().to_string();
+      match e {
+        Errno::ENOENT => {
+          let err = ShErr::full(ShErrKind::CmdNotFound(cmd_str), "", span);
+          eprintln!("{err}");
+        }
+        _ => {
+          let err = ShErr::full(ShErrKind::Errno(e), format!("{e}"), span);
+          eprintln!("{err}");
+        }
+      }
+      exit(e as i32)
+    };
 
-		if no_fork {
-			child_logic();
-		}
+    if no_fork {
+      child_logic();
+    }
 
     match unsafe { fork()? } {
       ForkResult::Child => child_logic(),
@@ -875,27 +908,27 @@ impl Dispatcher {
 
     Ok(())
   }
-	fn run_fork(&mut self, name: &str, f: impl FnOnce(&mut Self)) -> ShResult<()> {
-		match unsafe { fork()? } {
-			ForkResult::Child => {
-				f(self);
-				exit(state::get_status())
-			}
-			ForkResult::Parent { child } => {
-				write_jobs(|j| j.drain_registered_fds());
-				let job = self.job_stack.curr_job_mut().unwrap();
-				let child_pgid = if let Some(pgid) = job.pgid() {
-					pgid
-				} else {
-					job.set_pgid(child);
-					child
-				};
-				let child_proc = ChildProc::new(child, Some(name), Some(child_pgid))?;
-				job.push_child(child_proc);
-				Ok(())
-			}
-		}
-	}
+  fn run_fork(&mut self, name: &str, f: impl FnOnce(&mut Self)) -> ShResult<()> {
+    match unsafe { fork()? } {
+      ForkResult::Child => {
+        f(self);
+        exit(state::get_status())
+      }
+      ForkResult::Parent { child } => {
+        write_jobs(|j| j.drain_registered_fds());
+        let job = self.job_stack.curr_job_mut().unwrap();
+        let child_pgid = if let Some(pgid) = job.pgid() {
+          pgid
+        } else {
+          job.set_pgid(child);
+          child
+        };
+        let child_proc = ChildProc::new(child, Some(name), Some(child_pgid))?;
+        job.push_child(child_proc);
+        Ok(())
+      }
+    }
+  }
   fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> ShResult<Vec<String>> {
     let mut new_env_vars = vec![];
     let flags = match behavior {
@@ -917,9 +950,7 @@ impl Dispatcher {
 
       // Parse and expand array index BEFORE entering write_vars borrow
       let indexed = state::parse_arr_bracket(var)
-        .map(|(name, idx_raw)| {
-          state::expand_arr_index(&idx_raw).map(|idx| (name, idx))
-        })
+        .map(|(name, idx_raw)| state::expand_arr_index(&idx_raw).map(|idx| (name, idx)))
         .transpose()?;
 
       match kind {
