@@ -83,6 +83,15 @@ impl ShOpts {
     }
   }
 
+	pub fn display_opts(&mut self) -> ShResult<String> {
+		let output = [
+			format!("core:\n{}", self.query("core")?.unwrap_or_default()),
+			format!("prompt:\n{}",self.query("prompt")?.unwrap_or_default())
+		];
+
+		Ok(output.join("\n"))
+	}
+
   pub fn set(&mut self, opt: &str, val: &str) -> ShResult<()> {
     let mut query = opt.split('.');
     let Some(key) = query.next() else {
