@@ -1,9 +1,8 @@
 use std::{
   cell::RefCell,
-  cmp::Ordering,
   collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
   fmt::Display,
-  ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref},
+  ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign},
   os::unix::fs::PermissionsExt,
   str::FromStr,
   time::Duration,
@@ -1052,7 +1051,7 @@ impl MetaTab {
     &mut self.comp_specs
   }
   pub fn get_comp_spec(&self, cmd: &str) -> Option<Box<dyn CompSpec>> {
-    self.comp_specs.get(cmd).map(|spec| spec.clone())
+    self.comp_specs.get(cmd).cloned()
   }
   pub fn set_comp_spec(&mut self, cmd: String, spec: Box<dyn CompSpec>) {
     self.comp_specs.insert(cmd, spec);

@@ -7,7 +7,7 @@ use regex::Regex;
 
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::parse::execute::exec_input;
-use crate::parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule, is_field_sep, is_hard_sep};
+use crate::parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule, is_hard_sep};
 use crate::parse::{Redir, RedirType};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::readline::markers;

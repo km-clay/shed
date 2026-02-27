@@ -1,7 +1,6 @@
 use std::fmt::Display;
 
 use crate::{
-  getopt::Opt,
   libsh::term::{Style, Styled},
   parse::lex::Span,
   prelude::*,
@@ -423,7 +422,7 @@ impl Display for ShErrKind {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let output = match self {
       Self::IoErr(e) => &format!("I/O Error: {e}"),
-      Self::InvalidOpt => &format!("Invalid option"),
+      Self::InvalidOpt => "Invalid option",
       Self::SyntaxErr => "Syntax Error",
       Self::ParseErr => "Parse Error",
       Self::InternalErr => "Internal Error",

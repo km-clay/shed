@@ -1,25 +1,22 @@
 use std::{
-  collections::HashSet, env, fmt::Debug, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc,
+  collections::HashSet, fmt::Debug, path::PathBuf, sync::Arc,
 };
 
 use crate::{
-  builtin::{
-    BUILTINS,
-    complete::{CompFlags, CompOptFlags, CompOpts},
-  },
+  builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   libsh::{
-    error::{ShErr, ShErrKind, ShResult},
+    error::ShResult,
     utils::TkVecUtils,
   },
   parse::{
     execute::{VarCtxGuard, exec_input},
-    lex::{self, LexFlags, Tk, TkFlags, TkRule, ends_with_unescaped},
+    lex::{self, LexFlags, Tk, TkRule, ends_with_unescaped},
   },
   readline::{
-    Marker, annotate_input, annotate_input_recursive, get_insertions,
+    Marker, annotate_input_recursive,
     markers::{self, is_marker},
   },
-  state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_vars, write_vars},
+  state::{VarFlags, VarKind, read_jobs, read_meta, read_vars, write_vars},
 };
 
 pub fn complete_jobs(start: &str) -> Vec<String> {

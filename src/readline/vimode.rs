@@ -9,7 +9,6 @@ use super::vicmd::{
   Anchor, Bound, CmdFlags, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb,
   VerbCmd, ViCmd, Word,
 };
-use crate::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModeReport {
@@ -995,7 +994,7 @@ impl ViNormal {
       }
     };
 
-    if chars.peek().is_some() {}
+    chars.peek().is_some();
 
     let verb_ref = verb.as_ref().map(|v| &v.1);
     let motion_ref = motion.as_ref().map(|m| &m.1);
@@ -1660,7 +1659,7 @@ impl ViVisual {
       }
     };
 
-    if chars.peek().is_some() {}
+    chars.peek().is_some();
 
     let verb_ref = verb.as_ref().map(|v| &v.1);
     let motion_ref = motion.as_ref().map(|m| &m.1);

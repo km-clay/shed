@@ -1,7 +1,6 @@
 use history::History;
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{LineBuf, SelectAnchor, SelectMode};
-use nix::libc::STDOUT_FILENO;
 use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
 use unicode_width::UnicodeWidthStr;
 use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
@@ -14,10 +13,7 @@ use crate::prelude::*;
 use crate::readline::term::{Pos, calc_str_width};
 use crate::state::read_shopts;
 use crate::{
-  libsh::{
-    error::ShResult,
-    term::{Style, Styled},
-  },
+  libsh::error::ShResult,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
   readline::{complete::Completer, highlight::Highlighter},
 };

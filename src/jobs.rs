@@ -6,7 +6,7 @@ use crate::{
   prelude::*,
   procio::{IoMode, borrow_fd},
   signal::{disable_reaping, enable_reaping},
-  state::{self, read_jobs, set_status, write_jobs},
+  state::{self, set_status, write_jobs},
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -168,12 +168,7 @@ impl JobTab {
   }
   pub fn curr_job(&self) -> Option<usize> {
     // Find the most recent valid job (order can have stale entries)
-    for &id in self.order.iter().rev() {
-      if self.jobs.get(id).is_some_and(|slot| slot.is_some()) {
-        return Some(id);
-      }
-    }
-    None
+    self.order.iter().rev().find(|&&id| self.jobs.get(id).is_some_and(|slot| slot.is_some())).copied()
   }
   pub fn prev_job(&self) -> Option<usize> {
     // Find the second most recent valid job
@@ -794,7 +789,7 @@ pub fn attach_tty(pgid: Pid) -> ShResult<()> {
 
   match result {
     Ok(_) => Ok(()),
-    Err(e) => {
+    Err(_e) => {
       tcsetpgrp(borrow_fd(0), getpgrp())?;
       Ok(())
     }

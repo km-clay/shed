@@ -11,10 +11,7 @@ use super::vicmd::{
   ViCmd, Word,
 };
 use crate::{
-  libsh::{
-    error::ShResult,
-    term::{Style, Styled},
-  },
+  libsh::error::ShResult,
   parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
   prelude::*,
   readline::{
@@ -950,7 +947,7 @@ impl LineBuf {
       | TextObj::Angle(bound) => self.text_obj_delim(count, text_obj, bound),
 
       // Other stuff
-      TextObj::Tag(bound) => todo!(),
+      TextObj::Tag(_bound) => todo!(),
       TextObj::Custom(_) => todo!(),
     }
   }
@@ -1027,12 +1024,12 @@ impl LineBuf {
 
     Some((start, end))
   }
-  pub fn text_obj_paragraph(&mut self, count: usize, bound: Bound) -> Option<(usize, usize)> {
+  pub fn text_obj_paragraph(&mut self, _count: usize, _bound: Bound) -> Option<(usize, usize)> {
     todo!()
   }
   pub fn text_obj_delim(
     &mut self,
-    count: usize,
+    _count: usize,
     text_obj: TextObj,
     bound: Bound,
   ) -> Option<(usize, usize)> {
@@ -1149,7 +1146,7 @@ impl LineBuf {
   }
   pub fn text_obj_quote(
     &mut self,
-    count: usize,
+    _count: usize,
     text_obj: TextObj,
     bound: Bound,
   ) -> Option<(usize, usize)> {
@@ -2285,14 +2282,14 @@ impl LineBuf {
 
         MotionKind::On(target_pos)
       }
-      MotionCmd(count, Motion::ScreenLineUp) => todo!(),
-      MotionCmd(count, Motion::ScreenLineUpCharwise) => todo!(),
-      MotionCmd(count, Motion::ScreenLineDown) => todo!(),
-      MotionCmd(count, Motion::ScreenLineDownCharwise) => todo!(),
-      MotionCmd(count, Motion::BeginningOfScreenLine) => todo!(),
-      MotionCmd(count, Motion::FirstGraphicalOnScreenLine) => todo!(),
-      MotionCmd(count, Motion::HalfOfScreen) => todo!(),
-      MotionCmd(count, Motion::HalfOfScreenLineText) => todo!(),
+      MotionCmd(_count, Motion::ScreenLineUp) => todo!(),
+      MotionCmd(_count, Motion::ScreenLineUpCharwise) => todo!(),
+      MotionCmd(_count, Motion::ScreenLineDown) => todo!(),
+      MotionCmd(_count, Motion::ScreenLineDownCharwise) => todo!(),
+      MotionCmd(_count, Motion::BeginningOfScreenLine) => todo!(),
+      MotionCmd(_count, Motion::FirstGraphicalOnScreenLine) => todo!(),
+      MotionCmd(_count, Motion::HalfOfScreen) => todo!(),
+      MotionCmd(_count, Motion::HalfOfScreenLineText) => todo!(),
       MotionCmd(_count, Motion::WholeBuffer) => {
         MotionKind::Exclusive((0, self.grapheme_indices().len()))
       }
@@ -2314,9 +2311,9 @@ impl LineBuf {
         final_end = final_end.min(self.cursor.max);
         MotionKind::Exclusive((start, final_end))
       }
-      MotionCmd(count, Motion::RepeatMotion) => todo!(),
-      MotionCmd(count, Motion::RepeatMotionRev) => todo!(),
-      MotionCmd(count, Motion::Null) => MotionKind::Null,
+      MotionCmd(_count, Motion::RepeatMotion) => todo!(),
+      MotionCmd(_count, Motion::RepeatMotionRev) => todo!(),
+      MotionCmd(_count, Motion::Null) => MotionKind::Null,
     };
 
     self.set_buffer(buffer);
@@ -2380,7 +2377,7 @@ impl LineBuf {
             end = self.cursor.get();
           }
         },
-        SelectMode::Block(anchor) => todo!(),
+        SelectMode::Block(_anchor) => todo!(),
       }
       if start >= end {
         mode.invert_anchor();
@@ -2490,7 +2487,7 @@ impl LineBuf {
     match verb {
       Verb::Delete | Verb::Yank | Verb::Change => {
         log::debug!("Executing verb: {verb:?} with motion: {motion:?}");
-        let Some((mut start, mut end)) = self.range_from_motion(&motion) else {
+        let Some((start, end)) = self.range_from_motion(&motion) else {
           log::debug!("No range from motion, nothing to do");
           return Ok(());
         };

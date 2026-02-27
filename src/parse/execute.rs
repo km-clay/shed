@@ -20,7 +20,6 @@ use crate::{
     source::source,
     test::double_bracket_test,
     trap::{TrapTarget, trap},
-    true_builtin,
     varcmds::{export, local, readonly, unset},
     zoltraak::zoltraak,
   },

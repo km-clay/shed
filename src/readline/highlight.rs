@@ -1,16 +1,15 @@
 use std::{
-  env,
   os::unix::fs::PermissionsExt,
   path::{Path, PathBuf},
 };
 
 use crate::{
-  libsh::term::{Style, StyleSet, Styled},
+  libsh::term::{Style, StyleSet},
   readline::{
     annotate_input,
     markers::{self, is_marker},
   },
-  state::{read_logic, read_meta, read_shopts},
+  state::{read_meta, read_shopts},
 };
 
 /// Syntax highlighter for shell input using Unicode marker-based annotation

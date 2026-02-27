@@ -8,7 +8,7 @@ use std::{
 
 use nix::{
   errno::Errno,
-  libc::{self, STDIN_FILENO},
+  libc::{self},
   poll::{self, PollFlags, PollTimeout},
   sys::termios::{self, tcgetattr, tcsetattr},
   unistd::isatty,
@@ -23,16 +23,14 @@ use crate::{
     sys::TTY_FILENO,
   },
   readline::keys::{KeyCode, ModKeys},
-  shopt::ShedBellStyle,
   state::read_shopts,
 };
 use crate::{
-  prelude::*,
   procio::borrow_fd,
   state::{read_meta, write_meta},
 };
 
-use super::{keys::KeyEvent, linebuf::LineBuf};
+use super::keys::KeyEvent;
 
 pub fn raw_mode() -> RawModeGuard {
   let orig = termios::tcgetattr(unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) })
@@ -50,7 +48,7 @@ pub fn raw_mode() -> RawModeGuard {
   )
   .expect("Failed to set terminal to raw mode");
 
-  let (cols, rows) = get_win_size(*TTY_FILENO);
+  let (_cols, _rows) = get_win_size(*TTY_FILENO);
 
   RawModeGuard {
     orig,

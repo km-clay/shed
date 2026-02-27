@@ -84,7 +84,7 @@ impl TkVecUtils<Tk> for Vec<Tk> {
     }
   }
   fn debug_tokens(&self) {
-    for token in self {}
+    for _token in self {}
   }
   fn split_at_separators(&self) -> Vec<Vec<Tk>> {
     let mut splits = vec![];

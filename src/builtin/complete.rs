@@ -205,7 +205,7 @@ pub fn complete_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -
 }
 
 pub fn compgen_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
-  let blame = node.get_span().clone();
+  let _blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
     argv,

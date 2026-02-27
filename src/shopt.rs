@@ -1,9 +1,6 @@
-use std::{collections::HashMap, fmt::Display, str::FromStr};
+use std::{fmt::Display, str::FromStr};
 
-use crate::{
-  libsh::error::{Note, ShErr, ShErrKind, ShResult},
-  state::ShFunc,
-};
+use crate::libsh::error::{Note, ShErr, ShErrKind, ShResult};
 
 #[derive(Clone, Copy, Debug)]
 pub enum ShedBellStyle {

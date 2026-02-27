@@ -1281,7 +1281,7 @@ impl ParseStream {
     let mut node_tks = vec![];
     let mut redirs = vec![];
     let mut argv = vec![];
-    let mut flags = NdFlags::empty();
+    let flags = NdFlags::empty();
     let mut assignments = vec![];
 
     while let Some(prefix_tk) = tk_iter.next() {
