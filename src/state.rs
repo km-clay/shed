@@ -1035,6 +1035,14 @@ impl MetaTab {
       "disown".into(),
       Box::new(BashCompSpec::new().jobs(true)) as Box<dyn CompSpec>,
     );
+		map.insert(
+			"alias".into(),
+			Box::new(BashCompSpec::new().aliases(true)) as Box<dyn CompSpec>,
+		);
+		map.insert(
+			"trap".into(),
+			Box::new(BashCompSpec::new().signals(true)) as Box<dyn CompSpec>,
+		);
 
     map
   }

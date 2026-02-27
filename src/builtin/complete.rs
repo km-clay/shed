@@ -12,7 +12,7 @@ use crate::{
   state::{self, read_meta, write_meta},
 };
 
-pub const COMPGEN_OPTS: [OptSpec; 9] = [
+pub const COMPGEN_OPTS: [OptSpec; 11] = [
   OptSpec {
     opt: Opt::Short('F'),
     takes_arg: true,
@@ -46,12 +46,20 @@ pub const COMPGEN_OPTS: [OptSpec; 9] = [
     takes_arg: false,
   },
   OptSpec {
+    opt: Opt::Short('a'),
+    takes_arg: false,
+  },
+  OptSpec {
+    opt: Opt::Short('S'),
+    takes_arg: false,
+  },
+  OptSpec {
     opt: Opt::Short('o'),
     takes_arg: true,
   },
 ];
 
-pub const COMP_OPTS: [OptSpec; 12] = [
+pub const COMP_OPTS: [OptSpec; 14] = [
   OptSpec {
     opt: Opt::Short('F'),
     takes_arg: true,
@@ -97,6 +105,14 @@ pub const COMP_OPTS: [OptSpec; 12] = [
     takes_arg: false,
   },
   OptSpec {
+    opt: Opt::Short('a'),
+    takes_arg: false,
+  },
+  OptSpec {
+    opt: Opt::Short('S'),
+    takes_arg: false,
+  },
+  OptSpec {
     opt: Opt::Short('o'),
     takes_arg: true,
   },
@@ -105,20 +121,22 @@ pub const COMP_OPTS: [OptSpec; 12] = [
 bitflags! {
   #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
   pub struct CompFlags: u32 {
-    const FILES  = 0b0000000001;
-    const DIRS   = 0b0000000010;
-    const CMDS   = 0b0000000100;
-    const USERS  = 0b0000001000;
-    const VARS   = 0b0000010000;
-    const JOBS   = 0b0000100000;
-    const PRINT  = 0b0001000000;
-    const REMOVE = 0b0010000000;
+    const FILES   = 0b0000000001;
+    const DIRS    = 0b0000000010;
+    const CMDS    = 0b0000000100;
+    const USERS   = 0b0000001000;
+    const VARS    = 0b0000010000;
+    const JOBS    = 0b0000100000;
+    const ALIAS   = 0b0001000000;
+    const SIGNALS = 0b0010000000;
+    const PRINT   = 0b0100000000;
+    const REMOVE  = 0b1000000000;
   }
   #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
   pub struct CompOptFlags: u32 {
-    const DEFAULT = 0b0000000001;
+    const DEFAULT  = 0b0000000001;
     const DIRNAMES = 0b0000000010;
-    const NOSPACE = 0b0000000100;
+    const NOSPACE  = 0b0000000100;
   }
 }
 
@@ -274,6 +292,8 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
         }
       },
 
+			Opt::Short('a') => comp_opts.flags |= CompFlags::ALIAS,
+			Opt::Short('S') => comp_opts.flags |= CompFlags::SIGNALS,
       Opt::Short('r') => comp_opts.flags |= CompFlags::REMOVE,
       Opt::Short('j') => comp_opts.flags |= CompFlags::JOBS,
       Opt::Short('p') => comp_opts.flags |= CompFlags::PRINT,

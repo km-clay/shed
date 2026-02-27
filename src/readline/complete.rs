@@ -2,6 +2,8 @@ use std::{
   collections::HashSet, fmt::Debug, path::PathBuf, sync::Arc,
 };
 
+use nix::sys::signal::Signal;
+
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   libsh::{
@@ -16,8 +18,30 @@ use crate::{
     Marker, annotate_input_recursive,
     markers::{self, is_marker},
   },
-  state::{VarFlags, VarKind, read_jobs, read_meta, read_vars, write_vars},
+  state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_vars, write_vars},
 };
+
+pub fn complete_signals(start: &str) -> Vec<String> {
+	Signal::iterator()
+		.map(|s| {
+			s.to_string()
+				.strip_prefix("SIG")
+				.unwrap_or(s.as_ref())
+				.to_string()
+		})
+		.filter(|s| s.starts_with(start))
+		.collect()
+}
+
+pub fn complete_aliases(start: &str) -> Vec<String> {
+	read_logic(|l| {
+		l.aliases()
+			.iter()
+			.filter(|a| a.0.starts_with(start))
+			.map(|a| a.0.clone())
+			.collect()
+	})
+}
 
 pub fn complete_jobs(start: &str) -> Vec<String> {
   if let Some(prefix) = start.strip_prefix('%') {
@@ -227,6 +251,8 @@ pub struct BashCompSpec {
   pub signals: bool,
   /// -j: complete job pids or names
   pub jobs: bool,
+	/// -a: complete aliases
+	pub aliases: bool,
 
   pub flags: CompOptFlags,
   /// The original command
@@ -277,6 +303,10 @@ impl BashCompSpec {
     self.jobs = enable;
     self
   }
+	pub fn aliases(mut self, enable: bool) -> Self {
+		self.aliases = enable;
+		self
+	}
   pub fn from_comp_opts(opts: CompOpts) -> Self {
     let CompOpts {
       func,
@@ -294,6 +324,7 @@ impl BashCompSpec {
       users: flags.contains(CompFlags::USERS),
       vars: flags.contains(CompFlags::VARS),
       jobs: flags.contains(CompFlags::JOBS),
+			aliases: flags.contains(CompFlags::ALIAS),
       flags: opt_flags,
       signals: false, // TODO: implement signal completion
       source: String::new(),
@@ -390,6 +421,12 @@ impl CompSpec for BashCompSpec {
     if self.jobs {
       candidates.extend(complete_jobs(&expanded));
     }
+		if self.aliases {
+			candidates.extend(complete_aliases(&expanded));
+		}
+		if self.signals {
+			candidates.extend(complete_signals(&expanded));
+		}
     if let Some(words) = &self.wordlist {
       candidates.extend(words.iter().filter(|w| w.starts_with(&expanded)).cloned());
     }
