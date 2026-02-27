@@ -15,7 +15,6 @@ use crate::{
     error::{ShErr, ShErrKind, ShResult},
     utils::CharDequeUtils,
   },
-  prelude::*,
 };
 
 pub const KEYWORDS: [&str; 16] = [

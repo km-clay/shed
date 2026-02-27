@@ -441,3 +441,9 @@ impl Highlighter {
       .replace(markers::OPERATOR, "\x1b[35m");
   }
 }
+
+impl Default for Highlighter {
+	fn default() -> Self {
+		Self::new()
+	}
+}

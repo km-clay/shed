@@ -857,18 +857,15 @@ pub struct TermWriter {
   out: RawFd,
   pub t_cols: Col, // terminal width
   buffer: String,
-  w_calc: Box<dyn WidthCalculator>,
 }
 
 impl TermWriter {
   pub fn new(out: RawFd) -> Self {
-    let w_calc = width_calculator();
     let (t_cols, _) = get_win_size(out);
     Self {
       out,
       t_cols,
       buffer: String::new(),
-      w_calc,
     }
   }
   pub fn get_cursor_movement(&self, old: Pos, new: Pos) -> ShResult<String> {

@@ -1,7 +1,6 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
-use nix::NixPath;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
@@ -994,7 +993,7 @@ impl ViNormal {
       }
     };
 
-    chars.peek().is_some();
+		let _ = chars; // suppresses unused warnings, creates an error if we decide to use chars later
 
     let verb_ref = verb.as_ref().map(|v| &v.1);
     let motion_ref = motion.as_ref().map(|m| &m.1);
@@ -1659,7 +1658,7 @@ impl ViVisual {
       }
     };
 
-    chars.peek().is_some();
+		let _ = chars; // suppresses unused warnings, creates an error if we decide to use chars later
 
     let verb_ref = verb.as_ref().map(|v| &v.1);
     let motion_ref = motion.as_ref().map(|m| &m.1);

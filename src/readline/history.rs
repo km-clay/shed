@@ -9,13 +9,10 @@ use std::{
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::prelude::*;
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   readline::linebuf::LineBuf,
 };
-
-use super::vicmd::Direction; // surprisingly useful
 
 #[derive(Default, Clone, Copy, Debug)]
 pub enum SearchKind {
@@ -215,7 +212,7 @@ pub struct History {
   search_mask: Vec<HistEntry>,
   no_matches: bool,
   pub cursor: usize,
-  search_direction: Direction,
+  //search_direction: Direction,
   ignore_dups: bool,
   max_size: Option<u32>,
 }
@@ -242,7 +239,7 @@ impl History {
       search_mask,
       no_matches: false,
       cursor,
-      search_direction: Direction::Backward,
+      //search_direction: Direction::Backward,
       ignore_dups,
       max_size: Some(max_hist as u32),
     })
