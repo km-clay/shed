@@ -24,7 +24,7 @@ pub fn complete_users(start: &str) -> Vec<String> {
 }
 
 pub fn complete_vars(start: &str) -> Vec<String> {
-	let Some((var_name, start, end)) = extract_var_name(start) else {
+	let Some((var_name, name_start, _end)) = extract_var_name(start) else {
 		return vec![]
 	};
 	if !read_vars(|v| v.get_var(&var_name)).is_empty() {
@@ -32,11 +32,12 @@ pub fn complete_vars(start: &str) -> Vec<String> {
 	}
 	// if we are here, we have a variable substitution that isn't complete
 	// so let's try to complete it
+	let prefix = &start[..name_start]; // e.g. "$" or "${"
 	read_vars(|v| {
 		v.flatten_vars()
 			.keys()
 			.filter(|k| k.starts_with(&var_name) && *k != &var_name)
-			.map(|k| k.to_string())
+			.map(|k| format!("{prefix}{k}"))
 			.collect::<Vec<_>>()
 
 	})
@@ -526,7 +527,6 @@ impl Completer {
   }
 
 	pub fn build_comp_ctx(&self, tks: &[Tk], line: &str, cursor_pos: usize) -> ShResult<CompContext> {
-		log::debug!("build_comp_ctx: cursor_pos={}, tokens={}", cursor_pos, tks.len());
 		let mut ctx = CompContext {
 			words: vec![],
 			cword: 0,
@@ -540,33 +540,24 @@ impl Completer {
 			.cloned()
 			.collect::<Vec<_>>()
 			.split_at_separators();
-		log::debug!("build_comp_ctx: {} segments after split", segments.len());
 
 		if segments.is_empty() {
-			log::debug!("build_comp_ctx: no segments found");
 			return Ok(ctx);
 		}
 
 		let relevant_pos = segments
 		.iter()
-		.position(|tks| tks.iter().next().is_some_and(|tk|{ log::debug!("checking span: {}", tk.span.start); tk.span.start > cursor_pos }))
-		.map(|i| i.saturating_sub(1)) // take the pos before it
+		.position(|tks| tks.iter().next().is_some_and(|tk| tk.span.start > cursor_pos))
+		.map(|i| i.saturating_sub(1))
 		.unwrap_or(segments.len().saturating_sub(1));
 
 		let mut relevant = segments[relevant_pos].to_vec();
 
-		log::debug!("build_comp_ctx: relevant segment has {} tokens: {:?}",
-			relevant.len(),
-			relevant.iter().map(|tk| tk.as_str()).collect::<Vec<_>>()
-		);
-
 		let cword = if let Some(pos) = relevant.iter().position(|tk| {
 			cursor_pos >= tk.span.start && cursor_pos <= tk.span.end
 		}) {
-			// Cursor is inside or at the end of an existing token
 			pos
 		} else {
-			// Cursor is in whitespace — find where to insert an empty token
 			let insert_pos = relevant.iter()
 				.position(|tk| tk.span.start > cursor_pos)
 				.unwrap_or(relevant.len());
@@ -581,8 +572,6 @@ impl Completer {
 			insert_pos
 		};
 
-		log::debug!("build_comp_ctx: cword={} ('{}')", cword, relevant[cword].as_str());
-
 		ctx.words = relevant;
 		ctx.cword = cword;
 
@@ -590,22 +579,15 @@ impl Completer {
 	}
 
 	pub fn try_comp_spec(&self, ctx: &CompContext) -> ShResult<CompResult> {
-		let cmd = ctx.cmd().unwrap_or("<empty>");
-		log::debug!("try_comp_spec: looking up spec for '{}'", cmd);
-
 		let Some(cmd) = ctx.cmd() else {
-			log::debug!("try_comp_spec: no command in context");
 			return Ok(CompResult::NoMatch);
 		};
 
 		let Some(spec) = read_meta(|m| m.get_comp_spec(cmd)) else {
-			log::debug!("try_comp_spec: no spec registered for '{}'", cmd);
 			return Ok(CompResult::NoMatch);
 		};
 
-		log::debug!("try_comp_spec: found spec for '{}', executing", cmd);
 		let candidates = spec.complete(ctx)?;
-		log::debug!("try_comp_spec: got {} candidates: {:?}", candidates.len(), candidates);
 		if candidates.is_empty() {
 			Ok(CompResult::NoMatch)
 		} else {
@@ -614,7 +596,6 @@ impl Completer {
 	}
 
   pub fn get_candidates(&mut self, line: String, cursor_pos: usize) -> ShResult<CompResult> {
-    log::debug!("get_candidates: line='{}', cursor_pos={}", line, cursor_pos);
     let source = Arc::new(line.clone());
     let tokens =
       lex::LexStream::new(source, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()?;
@@ -631,13 +612,11 @@ impl Completer {
     // Try programmable completion first
     let res = self.try_comp_spec(&ctx)?;
     if !matches!(res, CompResult::NoMatch) {
-      log::debug!("get_candidates: comp_spec matched, returning");
       return Ok(res);
     }
 
     // Get the current token from CompContext
     let Some(mut cur_token) = ctx.words.get(ctx.cword).cloned() else {
-      log::debug!("get_candidates: no current token, falling back to filename completion");
       let candidates = complete_filename("./");
       let end_pos = line.len();
       self.token_span = (end_pos, end_pos);
@@ -646,10 +625,16 @@ impl Completer {
 
     self.token_span = (cur_token.span.start, cur_token.span.end);
 
+    // Use marker-based context detection for sub-token awareness (e.g. VAR_SUB inside a token)
+    let (mut marker_ctx, token_start) = self.get_completion_context(&line, cursor_pos);
+    self.token_span.0 = token_start;
+    cur_token
+      .span
+      .set_range(self.token_span.0..self.token_span.1);
+
     // If token contains '=', only complete after the '='
     let token_str = cur_token.span.as_str();
     if let Some(eq_pos) = token_str.rfind('=') {
-      log::debug!("get_candidates: assignment token, completing after '='");
       self.token_span.0 = cur_token.span.start + eq_pos + 1;
       cur_token
         .span
@@ -657,33 +642,38 @@ impl Completer {
     }
 
     let raw_tk = cur_token.as_str().to_string();
-    let is_cmd = cur_token.flags.contains(TkFlags::IS_CMD)
-      || cur_token.flags.contains(TkFlags::BUILTIN)
-      || ctx.cword == 0;
     let expanded_tk = cur_token.expand()?;
     let expanded_words = expanded_tk.get_words().into_iter().collect::<Vec<_>>();
     let expanded = expanded_words.join("\\ ");
 
-    log::debug!("get_candidates: is_cmd={}, raw='{}', expanded='{}'", is_cmd, raw_tk, expanded);
-
-    let mut candidates = if is_cmd {
-      complete_commands(&expanded)
-    } else {
-      complete_filename(&expanded)
+    let last_marker = marker_ctx.last().copied();
+    let mut candidates = match marker_ctx.pop() {
+      Some(markers::COMMAND) => complete_commands(&expanded),
+      Some(markers::VAR_SUB) => {
+        let var_candidates = complete_vars(&raw_tk);
+        if var_candidates.is_empty() {
+          complete_filename(&expanded)
+        } else {
+          var_candidates
+        }
+      }
+      Some(markers::ARG) => complete_filename(&expanded),
+      _ => complete_filename(&expanded),
     };
-    log::debug!("get_candidates: {} candidates from default completion", candidates.len());
 
-    // Graft the completed text onto the original token.
-    // This prevents something like $SOME_PATH/ from being
-    // completed into /path/to/some_path/file.txt
-    // and instead returns $SOME_PATH/file.txt
-    candidates = candidates
-      .into_iter()
-      .map(|c| match c.strip_prefix(&expanded) {
-        Some(suffix) => format!("{raw_tk}{suffix}"),
-        None => c,
-      })
-      .collect();
+    // Graft unexpanded prefix onto candidates to preserve things like $SOME_PATH/file.txt
+    // Skip for var completions — complete_vars already returns the full $VAR form
+    let is_var_completion = last_marker == Some(markers::VAR_SUB) && !candidates.is_empty()
+      && candidates.iter().any(|c| c.starts_with('$'));
+    if !is_var_completion {
+      candidates = candidates
+        .into_iter()
+        .map(|c| match c.strip_prefix(&expanded) {
+          Some(suffix) => format!("{raw_tk}{suffix}"),
+          None => c,
+        })
+        .collect();
+    }
 
     let limit = crate::state::read_shopts(|s| s.prompt.comp_limit);
     candidates.truncate(limit);

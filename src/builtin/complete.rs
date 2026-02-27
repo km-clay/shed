@@ -196,8 +196,6 @@ pub fn compgen_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) ->
 	let comp_spec = BashCompSpec::from_comp_opts(comp_opts)
 		.with_source(src);
 
-	log::debug!("compgen: prefix='{}', spec={:?}", prefix.as_str(), comp_spec);
-
 	let dummy_ctx = CompContext {
 		words: vec![prefix.clone()],
 		cword: 0,
@@ -206,7 +204,6 @@ pub fn compgen_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) ->
 	};
 
 	let results = comp_spec.complete(&dummy_ctx)?;
-	log::debug!("compgen: {} results: {:?}", results.len(), results);
 
 	let stdout = borrow_fd(STDOUT_FILENO);
 	for result in &results {
