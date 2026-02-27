@@ -1,6 +1,6 @@
 # shed
 
-A Linux shell written in Rust. The name is a nod to both `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing.
+A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing.
 
 <img width="506" height="407" alt="shed" src="https://github.com/user-attachments/assets/5333dd47-ae1b-45cd-8729-b623f586b10e" />
 
@@ -66,10 +66,6 @@ shed's scripting language contains all of the essentials.
 - `fg`, `bg`, `jobs`, `disown` with flags (`-l`, `-p`, `-r`, `-s`, `-h`, `-a`)
 - Process group management and proper signal forwarding
 
-### Builtins
-
-`echo`, `cd`, `pwd`, `read`, `export`, `local`, `readonly`, `unset`, `source`, `eval`, `exec`, `shift`, `alias`, `unalias`, `trap`, `jobs`, `fg`, `bg`, `disown`, `pushd`, `popd`, `dirs`, `shopt`, `builtin`, `command`, `return`, `break`, `continue`, `exit`, `true`, `false`, `:`
-
 ### Configuration
 
 Shell options are managed through `shopt`:
@@ -91,6 +87,7 @@ The rc file is loaded from `~/.shedrc` on startup.
 Requires Rust (edition 2024).
 
 ```sh
+git clone https://github.com/km-clay/shed.git
 cargo build --release
 ```
 
@@ -98,7 +95,7 @@ The binary will be at `target/release/shed`.
 
 ### Nix
 
-A flake is provided with a NixOS module and a Home Manager module.
+A flake is provided with a NixOS module, a Home Manager module, and a simple overlay that adds `pkgs.shed`.
 
 ```sh
 # Build and run directly
@@ -124,6 +121,16 @@ Or with Home Manager:
 
 ```nix
 imports = [ shed.homeModules.shed ];
+```
+
+And the overlay:
+
+```nix
+pkgs = import nixpkgs {
+	overlays = [
+		shed.overlays.default
+	];
+};
 ```
 
 ## Status
