@@ -898,51 +898,49 @@ impl Dispatcher {
 	}
   fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> ShResult<Vec<String>> {
     let mut new_env_vars = vec![];
-    match behavior {
-      AssignBehavior::Export => {
-        for assign in assigns {
-					let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
-          let NdRule::Assignment { kind, var, val } = assign.class else {
-            unreachable!()
-          };
-          let var = var.span.as_str();
-					let val = if is_arr {
-						VarKind::arr_from_tk(val)?
-					} else {
-						VarKind::Str(val.expand()?.get_words().join(" "))
-					};
-          match kind {
-            AssignKind::Eq => write_vars(|v| v.set_var(var, val, VarFlags::EXPORT))?,
-            AssignKind::PlusEq => todo!(),
-            AssignKind::MinusEq => todo!(),
-            AssignKind::MultEq => todo!(),
-            AssignKind::DivEq => todo!(),
+    let flags = match behavior {
+      AssignBehavior::Export => VarFlags::EXPORT,
+      AssignBehavior::Set => VarFlags::NONE,
+    };
+
+    for assign in assigns {
+      let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
+      let NdRule::Assignment { kind, var, val } = assign.class else {
+        unreachable!()
+      };
+      let var = var.span.as_str();
+      let val = if is_arr {
+        VarKind::arr_from_tk(val)?
+      } else {
+        VarKind::Str(val.expand()?.get_words().join(" "))
+      };
+
+      // Parse and expand array index BEFORE entering write_vars borrow
+      let indexed = state::parse_arr_bracket(var)
+        .map(|(name, idx_raw)| {
+          state::expand_arr_index(&idx_raw).map(|idx| (name, idx))
+        })
+        .transpose()?;
+
+      match kind {
+        AssignKind::Eq => {
+          if let Some((name, idx)) = indexed {
+            write_vars(|v| v.set_var_indexed(&name, idx, val.to_string(), flags))?;
+          } else {
+            write_vars(|v| v.set_var(var, val, flags))?;
           }
-          new_env_vars.push(var.to_string());
         }
+        AssignKind::PlusEq => todo!(),
+        AssignKind::MinusEq => todo!(),
+        AssignKind::MultEq => todo!(),
+        AssignKind::DivEq => todo!(),
       }
-      AssignBehavior::Set => {
-        for assign in assigns {
-					let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
-          let NdRule::Assignment { kind, var, val } = assign.class else {
-            unreachable!()
-          };
-          let var = var.span.as_str();
-					let val = if is_arr {
-						VarKind::arr_from_tk(val)?
-					} else {
-						VarKind::Str(val.expand()?.get_words().join(" "))
-					};
-          match kind {
-            AssignKind::Eq => write_vars(|v| v.set_var(var, val, VarFlags::NONE))?,
-            AssignKind::PlusEq => todo!(),
-            AssignKind::MinusEq => todo!(),
-            AssignKind::MultEq => todo!(),
-            AssignKind::DivEq => todo!(),
-          }
-        }
+
+      if matches!(behavior, AssignBehavior::Export) {
+        new_env_vars.push(var.to_string());
       }
     }
+
     Ok(new_env_vars)
   }
 }

@@ -191,82 +191,6 @@ impl ScopeStack {
 
     flat_vars
   }
-	fn parse_arr_index(&self, var_name: &str) -> ShResult<Option<(String,ArrIndex)>> {
-		let mut chars = var_name.chars();
-		let mut var_name = String::new();
-		let mut idx_raw = String::new();
-		let mut bracket_depth = 0;
-
-		while let Some(ch) = chars.next() {
-			match ch {
-				'\\' => {
-					// Skip the next character, as it's escaped
-					chars.next();
-				}
-				'[' => {
-					bracket_depth += 1;
-					if bracket_depth > 1 {
-						idx_raw.push(ch);
-					}
-				}
-				']' => {
-					if bracket_depth > 0 {
-						bracket_depth -= 1;
-						if bracket_depth == 0 {
-							if idx_raw.is_empty() {
-								return Ok(None);
-							}
-							break;
-						}
-					}
-
-					idx_raw.push(ch);
-				}
-				_ if bracket_depth > 0 => {
-					idx_raw.push(ch);
-				}
-				_ => {
-					var_name.push(ch);
-				}
-			}
-		}
-		if idx_raw.is_empty() {
-			Ok(None)
-		} else {
-			if var_name.is_empty() {
-				return Ok(None);
-			}
-
-			if !self.var_exists(&var_name) {
-				return Err(ShErr::simple(
-					ShErrKind::ExecFail,
-					format!("Variable '{}' not found", var_name)
-				));
-			}
-
-			let expanded = LexStream::new(Arc::new(idx_raw), LexFlags::empty())
-				.map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
-				.try_fold(vec![], |mut acc, wrds| {
-					match wrds {
-						Ok(wrds) => acc.extend(wrds),
-						Err(e) => return Err(e),
-					}
-					Ok(acc)
-				})?
-				.into_iter()
-				.next();
-
-			let Some(exp) = expanded else {
-				return Ok(None)
-			};
-			let idx = exp.parse::<ArrIndex>().map_err(|_| ShErr::simple(
-				ShErrKind::ParseErr,
-				format!("Invalid array index: {}", exp)
-			))?;
-
-			Ok(Some((var_name, idx)))
-		}
-	}
   pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     let is_local = self.is_local_var(var_name);
     if flags.contains(VarFlags::LOCAL) || is_local {
@@ -275,29 +199,27 @@ impl ScopeStack {
 			self.set_var_global(var_name, val, flags)
     }
   }
+  pub fn set_var_indexed(&mut self, var_name: &str, idx: ArrIndex, val: String, flags: VarFlags) -> ShResult<()> {
+    let is_local = self.is_local_var(var_name);
+    if flags.contains(VarFlags::LOCAL) || is_local {
+      let Some(scope) = self.scopes.last_mut() else { return Ok(()) };
+      scope.set_index(var_name, idx, val)
+    } else {
+      let Some(scope) = self.scopes.first_mut() else { return Ok(()) };
+      scope.set_index(var_name, idx, val)
+    }
+  }
   fn set_var_global(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
-		let idx_result = self.parse_arr_index(var_name);
     let Some(scope) = self.scopes.first_mut() else {
       return Ok(())
     };
-
-		if let Ok(Some((var,idx))) = idx_result {
-			scope.set_index(&var, idx, val.to_string())
-		} else {
-			scope.set_var(var_name, val, flags)
-		}
+    scope.set_var(var_name, val, flags)
   }
   fn set_var_local(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
-		let idx_result = self.parse_arr_index(var_name);
     let Some(scope) = self.scopes.last_mut() else {
       return Ok(())
     };
-
-		if let Ok(Some((var,idx))) = idx_result {
-			scope.set_index(&var, idx, val.to_string())
-		} else {
-			scope.set_var(var_name, val, flags)
-		}
+    scope.set_var(var_name, val, flags)
   }
 	pub fn get_arr_elems(&self, var_name: &str) -> ShResult<Vec<String>> {
 		for scope in self.scopes.iter().rev() {
@@ -1225,6 +1147,67 @@ pub fn read_vars<T, F: FnOnce(&ScopeStack) -> T>(f: F) -> T {
 /// Write to the variable table
 pub fn write_vars<T, F: FnOnce(&mut ScopeStack) -> T>(f: F) -> T {
   FERN.with(|shed| f(&mut shed.var_scopes.borrow_mut()))
+}
+
+/// Parse `arr[idx]` into (name, raw_index_expr). Pure parsing, no expansion.
+pub fn parse_arr_bracket(var_name: &str) -> Option<(String, String)> {
+	let mut chars = var_name.chars();
+	let mut name = String::new();
+	let mut idx_raw = String::new();
+	let mut bracket_depth = 0;
+
+	while let Some(ch) = chars.next() {
+		match ch {
+			'\\' => { chars.next(); }
+			'[' => {
+				bracket_depth += 1;
+				if bracket_depth > 1 {
+					idx_raw.push(ch);
+				}
+			}
+			']' => {
+				if bracket_depth > 0 {
+					bracket_depth -= 1;
+					if bracket_depth == 0 {
+						if idx_raw.is_empty() {
+							return None;
+						}
+						break;
+					}
+				}
+				idx_raw.push(ch);
+			}
+			_ if bracket_depth > 0 => idx_raw.push(ch),
+			_ => name.push(ch),
+		}
+	}
+
+	if name.is_empty() || idx_raw.is_empty() {
+		None
+	} else {
+		Some((name, idx_raw))
+	}
+}
+
+/// Expand the raw index expression and parse it into an ArrIndex.
+pub fn expand_arr_index(idx_raw: &str) -> ShResult<ArrIndex> {
+	let expanded = LexStream::new(Arc::new(idx_raw.to_string()), LexFlags::empty())
+		.map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
+		.try_fold(vec![], |mut acc, wrds| {
+			match wrds {
+				Ok(wrds) => acc.extend(wrds),
+				Err(e) => return Err(e),
+			}
+			Ok(acc)
+		})?
+		.into_iter()
+		.next()
+		.ok_or_else(|| ShErr::simple(ShErrKind::ParseErr, "Empty array index"))?;
+
+	expanded.parse::<ArrIndex>().map_err(|_| ShErr::simple(
+		ShErrKind::ParseErr,
+		format!("Invalid array index: {}", expanded)
+	))
 }
 
 pub fn read_meta<T, F: FnOnce(&MetaTab) -> T>(f: F) -> T {
