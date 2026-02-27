@@ -899,7 +899,7 @@ pub fn is_field_sep(ch: char) -> bool {
 }
 
 pub fn is_keyword(slice: &str) -> bool {
-  KEYWORDS.contains(&slice) || ends_with_unescaped(slice, "()")
+  KEYWORDS.contains(&slice) || (ends_with_unescaped(slice, "()") && !ends_with_unescaped(slice, "=()"))
 }
 
 pub fn is_cmd_sub(slice: &str) -> bool {

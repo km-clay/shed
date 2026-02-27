@@ -36,6 +36,11 @@ pub mod vimode;
 pub mod markers {
   use super::Marker;
 
+	/*
+	 * These are invisible Unicode characters used to annotate
+	 * strings with various contextual metadata.
+	 */
+
 	/* Highlight Markers */
 
   // token-level (derived from token class)
@@ -114,7 +119,7 @@ pub mod markers {
 	pub const MISC: [Marker; 3] = [ESCAPE, VISUAL_MODE_START, VISUAL_MODE_END];
 
   pub fn is_marker(c: Marker) -> bool {
-		c >= '\u{e000}' && c <= '\u{efff}'
+		('\u{e000}'..'\u{efff}').contains(&c)
   }
 }
 type Marker = char;
@@ -1103,7 +1108,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
         in_sng_qt = !in_sng_qt;
         token_chars.next(); // consume the quote
       }
-      '[' if !in_dub_qt && !in_sng_qt => {
+      '[' if !in_dub_qt && !in_sng_qt && !token.flags.contains(TkFlags::ASSIGN) => {
         token_chars.next(); // consume the opening bracket
         let start_pos = span_start + index;
         let mut is_glob_pat = false;

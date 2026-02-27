@@ -9,7 +9,6 @@ use regex::Regex;
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{ConjunctOp, NdRule, Node, TestCase, TEST_UNARY_OPS},
-  prelude::*,
 };
 
 #[derive(Debug, Clone)]

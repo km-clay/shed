@@ -150,7 +150,7 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
           state::set_status(1);
           break; // EOF
         }
-        Ok(n) => {
+        Ok(_) => {
           if buf[0] == read_opts.delim {
             state::set_status(0);
             break; // Delimiter reached, stop reading

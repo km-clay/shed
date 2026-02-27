@@ -8,7 +8,7 @@ use crate::{
   builtin::{BUILTINS, trap::TrapTarget}, exec_input, jobs::JobTab, libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::VecDequeExt,
-  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc, lex::{LexFlags, LexStream, Tk}}, prelude::*, readline::markers, shopt::ShOpts
+  }, parse::{ConjunctNode, NdRule, Node, ParsedSrc, lex::{LexFlags, LexStream, Tk}}, prelude::*, readline::{complete::{BashCompSpec, CompSpec}, markers}, shopt::ShOpts
 };
 
 pub struct Shed {
@@ -191,6 +191,82 @@ impl ScopeStack {
 
     flat_vars
   }
+	fn parse_arr_index(&self, var_name: &str) -> ShResult<Option<(String,ArrIndex)>> {
+		let mut chars = var_name.chars();
+		let mut var_name = String::new();
+		let mut idx_raw = String::new();
+		let mut bracket_depth = 0;
+
+		while let Some(ch) = chars.next() {
+			match ch {
+				'\\' => {
+					// Skip the next character, as it's escaped
+					chars.next();
+				}
+				'[' => {
+					bracket_depth += 1;
+					if bracket_depth > 1 {
+						idx_raw.push(ch);
+					}
+				}
+				']' => {
+					if bracket_depth > 0 {
+						bracket_depth -= 1;
+						if bracket_depth == 0 {
+							if idx_raw.is_empty() {
+								return Ok(None);
+							}
+							break;
+						}
+					}
+
+					idx_raw.push(ch);
+				}
+				_ if bracket_depth > 0 => {
+					idx_raw.push(ch);
+				}
+				_ => {
+					var_name.push(ch);
+				}
+			}
+		}
+		if idx_raw.is_empty() {
+			Ok(None)
+		} else {
+			if var_name.is_empty() {
+				return Ok(None);
+			}
+
+			if !self.var_exists(&var_name) {
+				return Err(ShErr::simple(
+					ShErrKind::ExecFail,
+					format!("Variable '{}' not found", var_name)
+				));
+			}
+
+			let expanded = LexStream::new(Arc::new(idx_raw), LexFlags::empty())
+				.map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
+				.try_fold(vec![], |mut acc, wrds| {
+					match wrds {
+						Ok(wrds) => acc.extend(wrds),
+						Err(e) => return Err(e),
+					}
+					Ok(acc)
+				})?
+				.into_iter()
+				.next();
+
+			let Some(exp) = expanded else {
+				return Ok(None)
+			};
+			let idx = exp.parse::<ArrIndex>().map_err(|_| ShErr::simple(
+				ShErrKind::ParseErr,
+				format!("Invalid array index: {}", exp)
+			))?;
+
+			Ok(Some((var_name, idx)))
+		}
+	}
   pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     let is_local = self.is_local_var(var_name);
     if flags.contains(VarFlags::LOCAL) || is_local {
@@ -200,41 +276,86 @@ impl ScopeStack {
     }
   }
   fn set_var_global(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
-    if let Some(scope) = self.scopes.first_mut() {
-      scope.set_var(var_name, val, flags)
-    } else {
-      Ok(())
-    }
+		let idx_result = self.parse_arr_index(var_name);
+    let Some(scope) = self.scopes.first_mut() else {
+      return Ok(())
+    };
+
+		if let Ok(Some((var,idx))) = idx_result {
+			scope.set_index(&var, idx, val.to_string())
+		} else {
+			scope.set_var(var_name, val, flags)
+		}
   }
   fn set_var_local(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
-    if let Some(scope) = self.scopes.last_mut() {
-      scope.set_var(var_name, val, flags)
-    } else {
-      Ok(())
-    }
+		let idx_result = self.parse_arr_index(var_name);
+    let Some(scope) = self.scopes.last_mut() else {
+      return Ok(())
+    };
+
+		if let Ok(Some((var,idx))) = idx_result {
+			scope.set_index(&var, idx, val.to_string())
+		} else {
+			scope.set_var(var_name, val, flags)
+		}
   }
-	pub fn index_var(&self, var_name: &str, idx: isize) -> ShResult<String> {
+	pub fn get_arr_elems(&self, var_name: &str) -> ShResult<Vec<String>> {
 		for scope in self.scopes.iter().rev() {
 			if scope.var_exists(var_name)
 			&& let Some(var) = scope.vars().get(var_name) {
 				match var.kind() {
 					VarKind::Arr(items) => {
-						let idx = match idx.cmp(&0) {
-							Ordering::Less => {
-								if items.len() >= idx.unsigned_abs() {
-									items.len() - idx.unsigned_abs()
+						let mut item_vec = items.clone()
+							.into_iter()
+							.collect::<Vec<(usize, String)>>();
+
+						item_vec.sort_by_key(|(idx, _)| *idx); // sort by index
+
+						return Ok(item_vec.into_iter()
+							.map(|(_,s)| s)
+							.collect())
+					}
+					_ => {
+						return Err(ShErr::simple(
+							ShErrKind::ExecFail,
+							format!("Variable '{}' is not an array", var_name)
+						));
+					}
+				}
+			}
+		}
+		Err(ShErr::simple(
+			ShErrKind::ExecFail,
+			format!("Variable '{}' not found", var_name)
+		))
+	}
+	pub fn index_var(&self, var_name: &str, idx: ArrIndex) -> ShResult<String> {
+		for scope in self.scopes.iter().rev() {
+			if scope.var_exists(var_name)
+			&& let Some(var) = scope.vars().get(var_name) {
+				match var.kind() {
+					VarKind::Arr(items) => {
+						let idx = match idx {
+							ArrIndex::Literal(n) => {
+								n
+							}
+							ArrIndex::FromBack(n) => {
+								if items.len() >= n {
+									items.len() - n
 								} else {
 									return Err(ShErr::simple(
 										ShErrKind::ExecFail,
-										format!("Index {} out of bounds for array '{}'", idx, var_name)
+										format!("Index {} out of bounds for array '{}'", n, var_name)
 									));
 								}
 							}
-							Ordering::Equal => idx as usize,
-							Ordering::Greater => idx as usize
+							_ => return Err(ShErr::simple(
+								ShErrKind::ExecFail,
+								format!("Cannot index all elements of array '{}'", var_name)
+							)),
 						};
 
-						if let Some(item) = items.get(idx) {
+						if let Some(item) = items.get(&idx) {
 							return Ok(item.clone());
 						} else {
 							return Err(ShErr::simple(
@@ -253,6 +374,26 @@ impl ScopeStack {
 			}
 		}
 		Ok("".into())
+	}
+	pub fn try_get_var(&self, var_name: &str) -> Option<String> {
+		// This version of get_var() is mainly used internally
+		// so that we have access to Option methods
+		if let Ok(param) = var_name.parse::<ShellParam>() {
+			let val = self.get_param(param);
+			if !val.is_empty() {
+				return Some(val);
+			} else {
+				return None;
+			}
+		}
+
+		for scope in self.scopes.iter().rev() {
+			if scope.var_exists(var_name) {
+				return Some(scope.get_var(var_name));
+			}
+		}
+
+		None
 	}
   pub fn get_var(&self, var_name: &str) -> String {
     if let Ok(param) = var_name.parse::<ShellParam>() {
@@ -470,11 +611,51 @@ impl VarFlags {
 }
 
 #[derive(Clone, Debug)]
+pub enum ArrIndex {
+	Literal(usize),
+	FromBack(usize),
+	AllJoined,
+	AllSplit
+}
+
+impl FromStr for ArrIndex {
+	type Err = ShErr;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"@" => Ok(Self::AllSplit),
+			"*" => Ok(Self::AllJoined),
+			_ if s.starts_with('-') && s[1..].chars().all(|c| c.is_digit(1)) => {
+				let idx = s[1..].parse::<usize>().unwrap();
+				Ok(Self::FromBack(idx))
+			}
+			_ if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) => {
+				let idx = s.parse::<usize>().unwrap();
+				Ok(Self::Literal(idx))
+			}
+			_ => Err(ShErr::simple(
+					ShErrKind::ParseErr,
+					format!("Invalid array index: {}", s)
+			))
+		}
+	}
+}
+
+pub fn hashmap_to_vec(map: HashMap<usize, String>) -> Vec<String> {
+	let mut items = map.into_iter()
+		.collect::<Vec<(usize, String)>>();
+	items.sort_by_key(|(idx, _)| *idx);
+
+	items.into_iter()
+		.map(|(_,i)| i)
+		.collect()
+}
+
+#[derive(Clone, Debug)]
 pub enum VarKind {
-  Str(String),
-  Int(i32),
-  Arr(Vec<String>),
-  AssocArr(Vec<(String, String)>),
+	Str(String),
+	Int(i32),
+	Arr(HashMap<usize,String>),
+	AssocArr(Vec<(String, String)>),
 }
 
 impl VarKind {
@@ -482,22 +663,34 @@ impl VarKind {
 		let raw = tk.as_str();
 		if !raw.starts_with('(') || !raw.ends_with(')') {
 			return Err(ShErr::simple(
-				ShErrKind::ParseErr,
-				format!("Invalid array syntax: {}", raw),
+					ShErrKind::ParseErr,
+					format!("Invalid array syntax: {}", raw),
 			));
 		}
 		let raw = raw[1..raw.len() - 1].to_string();
 
-		let mut words = vec![];
-		let tokens = LexStream::new(Arc::new(raw), LexFlags::empty())
-			.collect::<ShResult<Vec<Tk>>>()?;
+		let tokens: HashMap<usize,String> = LexStream::new(Arc::new(raw), LexFlags::empty())
+			.map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
+			.try_fold(vec![], |mut acc, wrds| {
+				match wrds {
+					Ok(wrds) => acc.extend(wrds),
+					Err(e) => return Err(e),
+				}
+				Ok(acc)
+			})?
+			.into_iter()
+			.enumerate()
+			.collect();
 
-		for token in tokens {
-			let tk_words = token.expand()?.get_words();
-			words.extend(tk_words);
-		}
+		Ok(Self::Arr(tokens))
+	}
 
-		Ok(Self::Arr(words))
+	pub fn arr_from_vec(vec: Vec<String>) -> Self {
+		let tokens: HashMap<usize,String> = vec.into_iter()
+			.enumerate()
+			.collect();
+
+		Self::Arr(tokens)
 	}
 }
 
@@ -507,6 +700,7 @@ impl Display for VarKind {
       VarKind::Str(s) => write!(f, "{s}"),
       VarKind::Int(i) => write!(f, "{i}"),
       VarKind::Arr(items) => {
+				let items = hashmap_to_vec(items.clone());
         let mut item_iter = items.iter().peekable();
         while let Some(item) = item_iter.next() {
           write!(f, "{item}")?;
@@ -741,6 +935,44 @@ impl VarTab {
     unsafe { env::remove_var(var_name) };
 		Ok(())
   }
+	pub fn set_index(&mut self, var_name: &str, idx: ArrIndex, val: String) -> ShResult<()> {
+		if self.var_exists(var_name)
+			&& let Some(var) = self.vars_mut().get_mut(var_name) {
+				match var.kind_mut() {
+					VarKind::Arr(items) => {
+						let idx = match idx {
+							ArrIndex::Literal(n) => {
+								n
+							}
+							ArrIndex::FromBack(n) => {
+								if items.len() >= n {
+									items.len() - n
+								} else {
+									return Err(ShErr::simple(
+											ShErrKind::ExecFail,
+											format!("Index {} out of bounds for array '{}'", n, var_name)
+									));
+								}
+							}
+							_ => return Err(ShErr::simple(
+									ShErrKind::ExecFail,
+									format!("Cannot index all elements of array '{}'", var_name)
+							)),
+						};
+
+						items.insert(idx, val);
+						return Ok(());
+					}
+					_ => {
+						return Err(ShErr::simple(
+								ShErrKind::ExecFail,
+								format!("Variable '{}' is not an array", var_name)
+						));
+					}
+				}
+			}
+		Ok(())
+	}
   pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if let Some(var) = self.vars.get_mut(var_name) {
 			if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {
@@ -814,7 +1046,9 @@ pub struct MetaTab {
 	old_pwd: Option<String>,
 	// valid command cache
 	path_cache: HashSet<String>,
-	cwd_cache: HashSet<String>
+	cwd_cache: HashSet<String>,
+	// programmable completion specs
+	comp_specs: HashMap<String, Box<dyn CompSpec>>,
 }
 
 impl MetaTab {
@@ -826,6 +1060,21 @@ impl MetaTab {
 	}
 	pub fn cwd_cache(&self) -> &HashSet<String> {
 		&self.cwd_cache
+	}
+	pub fn comp_specs(&self) -> &HashMap<String, Box<dyn CompSpec>> {
+		&self.comp_specs
+	}
+	pub fn comp_specs_mut(&mut self) -> &mut HashMap<String, Box<dyn CompSpec>> {
+		&mut self.comp_specs
+	}
+	pub fn get_comp_spec(&self, cmd: &str) -> Option<Box<dyn CompSpec>> {
+		self.comp_specs.get(cmd).map(|spec| spec.clone())
+	}
+	pub fn set_comp_spec(&mut self, cmd: String, spec: Box<dyn CompSpec>) {
+		self.comp_specs.insert(cmd, spec);
+	}
+	pub fn remove_comp_spec(&mut self, cmd: &str) -> bool {
+		self.comp_specs.remove(cmd).is_some()
 	}
 	pub fn try_rehash_commands(&mut self) {
 		let path = env::var("PATH").unwrap_or_default();

@@ -8,7 +8,7 @@ use crate::{
     execute::prepare_argv,
     lex::{Span, Tk},
   },
-  procio::{IoFrame, IoStack, RedirGuard}, state,
+  procio::{IoStack, RedirGuard}, state,
 };
 
 pub mod alias;
@@ -28,11 +28,12 @@ pub mod zoltraak;
 pub mod dirstack;
 pub mod exec;
 pub mod eval;
+pub mod complete;
 
-pub const BUILTINS: [&str; 33] = [
+pub const BUILTINS: [&str; 35] = [
   "echo", "cd", "read", "export", "local", "pwd", "source", "shift", "jobs", "fg", "bg", "disown", "alias", "unalias",
   "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin", "command", "trap",
-	"pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly", "unset"
+	"pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly", "unset", "complete", "compgen"
 ];
 
 /// Sets up a builtin command

@@ -1,5 +1,3 @@
-use nix::{errno::Errno, unistd::execvpe};
-
 use crate::{
   builtin::setup_builtin,
   jobs::JobBldr,

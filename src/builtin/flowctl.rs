@@ -1,7 +1,6 @@
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{execute::prepare_argv, NdRule, Node},
-  prelude::*,
 };
 
 pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {

@@ -1,5 +1,3 @@
-use std::sync::LazyLock;
-
 use crate::{
   builtin::setup_builtin,
   expand::expand_prompt,

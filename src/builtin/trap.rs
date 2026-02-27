@@ -60,10 +60,10 @@ impl FromStr for TrapTarget {
       "PWR" => Ok(TrapTarget::Signal(Signal::SIGPWR)),
       "SYS" => Ok(TrapTarget::Signal(Signal::SIGSYS)),
       _ => {
-        return Err(ShErr::simple(
+        Err(ShErr::simple(
           ShErrKind::ExecFail,
           format!("invalid trap target '{}'", s),
-        ));
+        ))
       }
     }
   }
@@ -117,7 +117,6 @@ impl Display for TrapTarget {
 }
 
 pub fn trap(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
-  let span = node.get_span();
   let NdRule::Command {
     assignments: _,
     argv,

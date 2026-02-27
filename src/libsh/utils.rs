@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::parse::lex::{Span, Tk};
+use crate::parse::lex::{Span, Tk, TkRule};
 use crate::parse::{Redir, RedirType};
 use crate::prelude::*;
 
@@ -17,6 +17,7 @@ pub trait CharDequeUtils {
 pub trait TkVecUtils<Tk> {
   fn get_span(&self) -> Option<Span>;
   fn debug_tokens(&self);
+	fn split_at_separators(&self) -> Vec<Vec<Tk>>;
 }
 
 pub trait RedirVecUtils<Redir> {
@@ -85,6 +86,29 @@ impl TkVecUtils<Tk> for Vec<Tk> {
   fn debug_tokens(&self) {
     for token in self {}
   }
+	fn split_at_separators(&self) -> Vec<Vec<Tk>> {
+		let mut splits = vec![];
+		let mut cur_split = vec![];
+		for tk in self {
+			match tk.class {
+				TkRule::Pipe |
+				TkRule::ErrPipe |
+				TkRule::And |
+				TkRule::Or |
+				TkRule::Bg |
+				TkRule::Sep => {
+					splits.push(std::mem::take(&mut cur_split));
+				}
+				_ => cur_split.push(tk.clone()),
+			}
+		}
+
+		if !cur_split.is_empty() {
+			splits.push(cur_split);
+		}
+
+		splits
+	}
 }
 
 impl RedirVecUtils<Redir> for Vec<Redir> {

@@ -1,7 +1,7 @@
-use std::{os::unix::fs::OpenOptionsExt, sync::LazyLock};
+use std::os::unix::fs::OpenOptionsExt;
 
 use crate::{
-  getopt::{get_opts_from_tokens, Opt, OptSet, OptSpec},
+  getopt::{get_opts_from_tokens, Opt, OptSpec},
   jobs::JobBldr,
   libsh::error::{Note, ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
@@ -121,9 +121,7 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
         ),
       );
     }
-    if let Err(e) = annihilate(&arg, flags).blame(span) {
-      return Err(e);
-    }
+    annihilate(&arg, flags).blame(span)?
   }
 
   Ok(())

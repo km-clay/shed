@@ -2,7 +2,7 @@ use std::{collections::{HashSet, VecDeque}, os::unix::fs::PermissionsExt};
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, cd::cd, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, true_builtin, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
+    alias::{alias, unalias}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, true_builtin, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
   },
   expand::{expand_aliases, glob_to_regex},
   jobs::{ChildProc, JobStack, dispatch_job},
@@ -78,11 +78,11 @@ impl Drop for ScopeGuard {
 /// Used to throw away variables that exist in temporary contexts
 /// such as 'VAR=value <command> <args>'
 /// or for-loop variables
-struct VarCtxGuard {
+pub struct VarCtxGuard {
   vars: HashSet<String>,
 }
 impl VarCtxGuard {
-  fn new(vars: HashSet<String>) -> Self {
+  pub fn new(vars: HashSet<String>) -> Self {
     Self { vars }
   }
 }
@@ -780,6 +780,8 @@ impl Dispatcher {
 			"eval" => eval::eval(cmd, io_stack_mut, curr_job_mut),
 			"readonly" => readonly(cmd, io_stack_mut, curr_job_mut),
 			"unset" => unset(cmd, io_stack_mut, curr_job_mut),
+			"complete" => complete_builtin(cmd, io_stack_mut, curr_job_mut),
+			"compgen" => compgen_builtin(cmd, io_stack_mut, curr_job_mut),
 			"true" | ":" => {
 				state::set_status(0);
 				Ok(())

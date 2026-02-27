@@ -132,7 +132,7 @@ impl Highlighter {
             }
           }
 
-          self.output.push_str(&var_name);
+          self.output.push_str(&Self::strip_markers(&var_name));
           self.push_style(Style::Blue);
           self.output.push('=');
           self.pop_style();
