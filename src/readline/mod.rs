@@ -257,14 +257,19 @@ impl ShedVi {
 
 
   /// Reset readline state for a new prompt
-  pub fn reset(&mut self) {
+  pub fn reset(&mut self, full_redraw: bool) -> ShResult<()> {
+		// Clear old display before resetting state — old_layout must survive
+		// so print_line can call clear_rows with the full multi-line layout
 		self.prompt = Prompt::new();
     self.editor = Default::default();
     self.mode = Box::new(ViInsert::new());
-    self.old_layout = None;
     self.needs_redraw = true;
+		if full_redraw {
+			self.old_layout = None;
+		}
     self.history.pending = None;
     self.history.reset();
+		self.print_line(false)
   }
 
 	pub fn prompt(&self) -> &Prompt {
@@ -276,6 +281,9 @@ impl ShedVi {
 	}
 
 	fn should_submit(&mut self) -> ShResult<bool> {
+		if self.mode.report_mode() == ModeReport::Normal {
+			return Ok(true);
+		}
 		let input = Arc::new(self.editor.buffer.clone());
 		self.editor.calc_indent_level();
 		let lex_result1 = LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
@@ -562,6 +570,7 @@ impl ShedVi {
     self.writer.flush_write(&self.mode.cursor_style())?;
 
     self.old_layout = Some(new_layout);
+		self.needs_redraw = false;
     Ok(())
   }
 

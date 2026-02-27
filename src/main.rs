@@ -76,7 +76,7 @@ fn kickstart_lazy_evals() {
 fn setup_panic_handler() {
 	let default_panic_hook = std::panic::take_hook();
 	std::panic::set_hook(Box::new(move |info| {
-		let _ = state::FERN.try_with(|shed| {
+		let _ = state::SHED.try_with(|shed| {
 			if let Ok(mut jobs) = shed.jobs.try_borrow_mut() {
 				jobs.hang_up();
 			}
@@ -185,7 +185,7 @@ fn shed_interactive() -> ShResult<()> {
 				match e.kind() {
 					ShErrKind::ClearReadline => {
 						// Ctrl+C - clear current input and show new prompt
-						readline.reset();
+						readline.reset(false)?;
 					}
 					ShErrKind::CleanExit(code) => {
 						QUIT_CODE.store(*code, Ordering::SeqCst);
@@ -269,7 +269,7 @@ fn shed_interactive() -> ShResult<()> {
 				readline.writer.flush_write("\n")?;
 
 				// Reset for next command with fresh prompt
-				readline.reset();
+				readline.reset(true)?;
 				let real_end = start.elapsed();
 				log::info!("Total round trip time: {:.2?}", real_end);
 			}

@@ -29,7 +29,7 @@ impl Display for ShedLogLevel {
 
 pub fn log_level() -> ShedLogLevel {
   use ShedLogLevel::*;
-  let level = std::env::var("FERN_LOG_LEVEL").unwrap_or_default();
+  let level = std::env::var("SHED_LOG_LEVEL").unwrap_or_default();
   match level.to_lowercase().as_str() {
     "error" => ERROR,
     "warn" => WARN,

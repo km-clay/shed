@@ -1,9 +1,9 @@
 use std::{collections::HashSet, env, fmt::Debug, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc};
 
 use crate::{
-  builtin::{BUILTINS, complete::{CompFlags, CompOpts}},
+  builtin::{BUILTINS, complete::{CompFlags, CompOptFlags, CompOpts}},
   libsh::{error::{ShErr, ShErrKind, ShResult}, utils::TkVecUtils},
-  parse::{execute::{VarCtxGuard, exec_input}, lex::{self, LexFlags, Tk, TkFlags, TkRule}},
+  parse::{execute::{VarCtxGuard, exec_input}, lex::{self, LexFlags, Tk, TkFlags, TkRule, ends_with_unescaped}},
   readline::{
     Marker, annotate_input, annotate_input_recursive, get_insertions,
     markers::{self, is_marker},
@@ -167,6 +167,12 @@ fn complete_filename(start: &str) -> Vec<String> {
 	candidates
 }
 
+pub enum CompSpecResult {
+	NoSpec,														// No compspec registered
+	NoMatch { flags: CompOptFlags },	// Compspec found but no candidates matched, returns behavior flags
+	Match(CompResult)									// Compspec found and candidates returned
+}
+
 #[derive(Default,Debug,Clone)]
 pub struct BashCompSpec {
 	/// -F: The name of a function to generate the possible completions.
@@ -186,6 +192,7 @@ pub struct BashCompSpec {
 	/// -A signal: complete signal names
 	pub signals: bool,
 
+	pub flags: CompOptFlags,
 	/// The original command
 	pub source: String
 }
@@ -231,7 +238,7 @@ impl BashCompSpec {
 		self
 	}
 	pub fn from_comp_opts(opts: CompOpts) -> Self {
-		let CompOpts { func, wordlist, action: _, flags } = opts;
+		let CompOpts { func, wordlist, action: _, flags, opt_flags } = opts;
 		Self {
 			function: func,
 			wordlist,
@@ -240,6 +247,7 @@ impl BashCompSpec {
 			commands: flags.contains(CompFlags::CMDS),
 			users: flags.contains(CompFlags::USERS),
 			vars: flags.contains(CompFlags::VARS),
+			flags: opt_flags,
 			signals: false, // TODO: implement signal completion
 			source: String::new()
 		}
@@ -320,11 +328,18 @@ impl CompSpec for BashCompSpec {
 	fn source(&self) -> &str {
 	  &self.source
 	}
+
+	fn get_flags(&self) -> CompOptFlags {
+		self.flags
+	}
 }
 
 pub trait CompSpec: Debug + CloneCompSpec {
 	fn complete(&self, ctx: &CompContext) -> ShResult<Vec<String>>;
 	fn source(&self) -> &str;
+	fn get_flags(&self) -> CompOptFlags {
+		CompOptFlags::empty()
+	}
 }
 
 pub trait CloneCompSpec {
@@ -376,23 +391,20 @@ impl CompResult {
   }
 }
 
+#[derive(Default,Debug,Clone)]
 pub struct Completer {
   pub candidates: Vec<String>,
   pub selected_idx: usize,
   pub original_input: String,
   pub token_span: (usize, usize),
   pub active: bool,
+	pub dirs_only: bool,
+	pub no_space: bool
 }
 
 impl Completer {
   pub fn new() -> Self {
-    Self {
-      candidates: vec![],
-      selected_idx: 0,
-      original_input: String::new(),
-      token_span: (0, 0),
-      active: false,
-    }
+		Self::default()
   }
 
   pub fn slice_line(line: &str, cursor_pos: usize) -> (&str, &str) {
@@ -487,11 +499,29 @@ impl Completer {
     self.get_completed_line()
   }
 
+	pub fn add_spaces(&mut self) {
+		if !self.no_space {
+			self.candidates = std::mem::take(&mut self.candidates)
+				.into_iter()
+				.map(|c| {
+					if !ends_with_unescaped(&c, "/") 		// directory
+					&& !ends_with_unescaped(&c, "=") 		// '='-type arg
+					&& !ends_with_unescaped(&c, " ") {	// already has a space
+						format!("{} ", c)
+					} else {
+						c
+					}
+				})
+				.collect()
+		}
+	}
+
   pub fn start_completion(&mut self, line: String, cursor_pos: usize) -> ShResult<Option<String>> {
     let result = self.get_candidates(line.clone(), cursor_pos)?;
     match result {
       CompResult::Many { candidates } => {
         self.candidates = candidates.clone();
+				self.add_spaces();
         self.selected_idx = 0;
         self.original_input = line;
         self.active = true;
@@ -500,6 +530,7 @@ impl Completer {
       }
       CompResult::Single { result } => {
         self.candidates = vec![result.clone()];
+				self.add_spaces();
         self.selected_idx = 0;
         self.original_input = line;
         self.active = false;
@@ -578,20 +609,20 @@ impl Completer {
 		Ok(ctx)
 	}
 
-	pub fn try_comp_spec(&self, ctx: &CompContext) -> ShResult<CompResult> {
+	pub fn try_comp_spec(&self, ctx: &CompContext) -> ShResult<CompSpecResult> {
 		let Some(cmd) = ctx.cmd() else {
-			return Ok(CompResult::NoMatch);
+			return Ok(CompSpecResult::NoSpec);
 		};
 
 		let Some(spec) = read_meta(|m| m.get_comp_spec(cmd)) else {
-			return Ok(CompResult::NoMatch);
+			return Ok(CompSpecResult::NoSpec);
 		};
 
 		let candidates = spec.complete(ctx)?;
 		if candidates.is_empty() {
-			Ok(CompResult::NoMatch)
+			Ok(CompSpecResult::NoMatch { flags: spec.get_flags() })
 		} else {
-			Ok(CompResult::from_candidates(candidates))
+			Ok(CompSpecResult::Match(CompResult::from_candidates(candidates)))
 		}
 	}
 
@@ -610,10 +641,26 @@ impl Completer {
     }
 
     // Try programmable completion first
-    let res = self.try_comp_spec(&ctx)?;
-    if !matches!(res, CompResult::NoMatch) {
-      return Ok(res);
-    }
+
+		match self.try_comp_spec(&ctx)? {
+			CompSpecResult::NoMatch { flags } => {
+				if flags.contains(CompOptFlags::DIRNAMES) {
+					self.dirs_only = true;
+				} else if flags.contains(CompOptFlags::DEFAULT) {
+					/* fall through */
+				} else {
+					return Ok(CompResult::NoMatch);
+				}
+
+				if flags.contains(CompOptFlags::NOSPACE) {
+					self.no_space = true;
+				}
+			}
+			CompSpecResult::Match(comp_result) => {
+				return Ok(comp_result);
+			}
+			CompSpecResult::NoSpec => { /* carry on */ }
+		}
 
     // Get the current token from CompContext
     let Some(mut cur_token) = ctx.words.get(ctx.cword).cloned() else {
@@ -648,6 +695,7 @@ impl Completer {
 
     let last_marker = marker_ctx.last().copied();
     let mut candidates = match marker_ctx.pop() {
+			_ if self.dirs_only => complete_dirs(&expanded),
       Some(markers::COMMAND) => complete_commands(&expanded),
       Some(markers::VAR_SUB) => {
         let var_candidates = complete_vars(&raw_tk);
@@ -681,10 +729,4 @@ impl Completer {
     Ok(CompResult::from_candidates(candidates))
   }
 
-}
-
-impl Default for Completer {
-  fn default() -> Self {
-    Self::new()
-  }
 }

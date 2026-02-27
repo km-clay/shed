@@ -378,7 +378,7 @@ impl ScopeStack {
 }
 
 thread_local! {
-  pub static FERN: Shed = Shed::new();
+  pub static SHED: Shed = Shed::new();
 }
 
 /// A shell function
@@ -751,8 +751,8 @@ impl VarTab {
       env::set_var("OLDPWD", pathbuf_to_string(std::env::current_dir()));
       env::set_var("HOME", home.clone());
       env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
-      env::set_var("FERN_HIST", format!("{}/.shedhist", home));
-      env::set_var("FERN_RC", format!("{}/.shedrc", home));
+      env::set_var("SHED_HIST", format!("{}/.shedhist", home));
+      env::set_var("SHED_RC", format!("{}/.shedrc", home));
     }
   }
   pub fn init_sh_argv(&mut self) {
@@ -1131,22 +1131,22 @@ impl MetaTab {
 
 /// Read from the job table
 pub fn read_jobs<T, F: FnOnce(&JobTab) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&shed.jobs.borrow()))
+  SHED.with(|shed| f(&shed.jobs.borrow()))
 }
 
 /// Write to the job table
 pub fn write_jobs<T, F: FnOnce(&mut JobTab) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&mut shed.jobs.borrow_mut()))
+  SHED.with(|shed| f(&mut shed.jobs.borrow_mut()))
 }
 
 /// Read from the var scope stack
 pub fn read_vars<T, F: FnOnce(&ScopeStack) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&shed.var_scopes.borrow()))
+  SHED.with(|shed| f(&shed.var_scopes.borrow()))
 }
 
 /// Write to the variable table
 pub fn write_vars<T, F: FnOnce(&mut ScopeStack) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&mut shed.var_scopes.borrow_mut()))
+  SHED.with(|shed| f(&mut shed.var_scopes.borrow_mut()))
 }
 
 /// Parse `arr[idx]` into (name, raw_index_expr). Pure parsing, no expansion.
@@ -1211,30 +1211,30 @@ pub fn expand_arr_index(idx_raw: &str) -> ShResult<ArrIndex> {
 }
 
 pub fn read_meta<T, F: FnOnce(&MetaTab) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&shed.meta.borrow()))
+  SHED.with(|shed| f(&shed.meta.borrow()))
 }
 
 /// Write to the meta table
 pub fn write_meta<T, F: FnOnce(&mut MetaTab) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&mut shed.meta.borrow_mut()))
+  SHED.with(|shed| f(&mut shed.meta.borrow_mut()))
 }
 
 /// Read from the logic table
 pub fn read_logic<T, F: FnOnce(&LogTab) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&shed.logic.borrow()))
+  SHED.with(|shed| f(&shed.logic.borrow()))
 }
 
 /// Write to the logic table
 pub fn write_logic<T, F: FnOnce(&mut LogTab) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&mut shed.logic.borrow_mut()))
+  SHED.with(|shed| f(&mut shed.logic.borrow_mut()))
 }
 
 pub fn read_shopts<T, F: FnOnce(&ShOpts) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&shed.shopts.borrow()))
+  SHED.with(|shed| f(&shed.shopts.borrow()))
 }
 
 pub fn write_shopts<T, F: FnOnce(&mut ShOpts) -> T>(f: F) -> T {
-  FERN.with(|shed| f(&mut shed.shopts.borrow_mut()))
+  SHED.with(|shed| f(&mut shed.shopts.borrow_mut()))
 }
 
 pub fn descend_scope(argv: Option<Vec<String>>) {
@@ -1261,7 +1261,7 @@ pub fn set_status(code: i32) {
 }
 
 pub fn source_rc() -> ShResult<()> {
-  let path = if let Ok(path) = env::var("FERN_RC") {
+  let path = if let Ok(path) = env::var("SHED_RC") {
     PathBuf::from(&path)
   } else {
     let home = env::var("HOME").unwrap();

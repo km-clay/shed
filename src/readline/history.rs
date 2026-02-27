@@ -224,7 +224,7 @@ impl History {
   pub fn new() -> ShResult<Self> {
     let ignore_dups = crate::state::read_shopts(|s| s.core.hist_ignore_dupes);
     let max_hist = crate::state::read_shopts(|s| s.core.max_hist);
-    let path = PathBuf::from(env::var("FERNHIST").unwrap_or({
+    let path = PathBuf::from(env::var("SHEDHIST").unwrap_or({
       let home = env::var("HOME").unwrap();
       format!("{home}/.shed_history")
     }));

@@ -771,6 +771,14 @@ impl LineBuf {
     }
     Some(self.line_bounds(line_no))
   }
+	pub fn this_line_exclusive(&mut self) -> (usize, usize) {
+		let line_no = self.cursor_line_number();
+		let (start, mut end) = self.line_bounds(line_no);
+		if self.read_grapheme_before(end).is_some_and(|gr| gr == "\n") {
+			end = end.saturating_sub(1);
+		}
+		(start, end)
+	}
   pub fn this_line(&mut self) -> (usize, usize) {
     let line_no = self.cursor_line_number();
     self.line_bounds(line_no)
@@ -781,6 +789,9 @@ impl LineBuf {
   pub fn end_of_line(&mut self) -> usize {
     self.this_line().1
   }
+	pub fn end_of_line_exclusive(&mut self) -> usize {
+		self.this_line_exclusive().1
+	}
   pub fn select_lines_up(&mut self, n: usize) -> Option<(usize, usize)> {
     if self.start_of_line() == 0 {
       return None;
@@ -1932,7 +1943,7 @@ impl LineBuf {
 		for tk in tokens {
 			if tk.flags.contains(TkFlags::KEYWORD) {
 				match tk.as_str() {
-					"then" | "do" => level += 1,
+					"then" | "do" | "in" => level += 1,
 					"done" | "fi" | "esac" => level = level.saturating_sub(1),
 					_ => { /* Continue */ }
 				}
@@ -2476,7 +2487,7 @@ impl LineBuf {
 				log::debug!("self.grapheme_indices().len(): {}", self.grapheme_indices().len());
 
 				let mut do_indent = false;
-				if verb == Verb::Change && (start,end) == self.this_line() {
+				if verb == Verb::Change && (start,end) == self.this_line_exclusive() {
 					do_indent = read_shopts(|o| o.prompt.auto_indent);
 				}
 

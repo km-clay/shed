@@ -675,7 +675,6 @@ impl ViNormal {
         // Double inputs
         ('?', Some(VerbCmd(_, Verb::Rot13)))
         | ('d', Some(VerbCmd(_, Verb::Delete)))
-        | ('c', Some(VerbCmd(_, Verb::Change)))
         | ('y', Some(VerbCmd(_, Verb::Yank)))
         | ('=', Some(VerbCmd(_, Verb::Equalize)))
         | ('u', Some(VerbCmd(_, Verb::ToLower)))
@@ -684,6 +683,9 @@ impl ViNormal {
         | ('>', Some(VerbCmd(_, Verb::Indent)))
         | ('<', Some(VerbCmd(_, Verb::Dedent))) => {
           break 'motion_parse Some(MotionCmd(count, Motion::WholeLineInclusive));
+        }
+        ('c', Some(VerbCmd(_, Verb::Change))) => {
+          break 'motion_parse Some(MotionCmd(count, Motion::WholeLineExclusive));
         }
         ('W', Some(VerbCmd(_, Verb::Change))) => {
           // Same with 'W'

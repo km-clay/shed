@@ -3,7 +3,7 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 
 use crate::{builtin::setup_builtin, getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node}, procio::{IoStack, borrow_fd}, readline::complete::{BashCompSpec, CompContext, CompSpec}, state::{self, read_meta, write_meta}};
 
-pub const COMPGEN_OPTS: [OptSpec;7] = [
+pub const COMPGEN_OPTS: [OptSpec;8] = [
 	OptSpec {
 		opt: Opt::Short('F'),
 		takes_arg: true
@@ -31,10 +31,14 @@ pub const COMPGEN_OPTS: [OptSpec;7] = [
 	OptSpec {
 		opt: Opt::Short('v'),
 		takes_arg: false
+	},
+	OptSpec {
+		opt: Opt::Short('o'),
+		takes_arg: true
 	}
 ];
 
-pub const COMP_OPTS: [OptSpec;10] = [
+pub const COMP_OPTS: [OptSpec;11] = [
 	OptSpec {
 		opt: Opt::Short('F'),
 		takes_arg: true
@@ -74,6 +78,10 @@ pub const COMP_OPTS: [OptSpec;10] = [
 	OptSpec {
 		opt: Opt::Short('v'),
 		takes_arg: false
+	},
+	OptSpec {
+		opt: Opt::Short('o'),
+		takes_arg: true
 	}
 ];
 
@@ -88,6 +96,12 @@ bitflags! {
 		const PRINT  = 0b0000100000;
 		const REMOVE = 0b0001000000;
 	}
+	#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+	pub struct CompOptFlags: u32 {
+		const DEFAULT = 0b0000000001;
+		const DIRNAMES = 0b0000000010;
+		const NOSPACE = 0b0000000100;
+	}
 }
 
 #[derive(Default, Debug, Clone)]
@@ -95,7 +109,8 @@ pub struct CompOpts {
 	pub func: Option<String>,
 	pub wordlist: Option<Vec<String>>,
 	pub action: Option<String>,
-	pub flags: CompFlags
+	pub flags: CompFlags,
+	pub opt_flags: CompOptFlags,
 }
 
 pub fn complete_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
@@ -228,6 +243,20 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
 			},
 			Opt::ShortWithArg('A',action) => {
 				comp_opts.action = Some(action);
+			}
+			Opt::ShortWithArg('o', opt_flag) => {
+				match opt_flag.as_str() {
+					"default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
+					"dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
+					"nospace" => comp_opts.opt_flags |= CompOptFlags::NOSPACE,
+					_ => {
+						return Err(ShErr::full(
+							ShErrKind::InvalidOpt,
+							format!("complete: invalid option: {}", opt_flag),
+							Default::default()
+						));
+					}
+				}
 			}
 
 			Opt::Short('r') => comp_opts.flags |= CompFlags::REMOVE,

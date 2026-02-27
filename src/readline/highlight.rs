@@ -292,19 +292,19 @@ impl Highlighter {
   fn is_valid(command: &str) -> bool {
     let cmd_path = Path::new(&command);
 
-    if cmd_path.is_absolute() {
-      // the user has given us an absolute path
-      if cmd_path.is_dir() && read_shopts(|o| o.core.autocd) {
-        // this is a directory and autocd is enabled
-        true
-      } else {
-        let Ok(meta) = cmd_path.metadata() else {
-          return false;
-        };
-        // this is a file that is executable by someone
-        meta.permissions().mode() & 0o111 != 0
-      }
-    } else {
+		if cmd_path.is_dir() && read_shopts(|o| o.core.autocd) {
+			// this is a directory and autocd is enabled
+			return true;
+		}
+
+		if cmd_path.is_absolute() {
+			// the user has given us an absolute path
+			let Ok(meta) = cmd_path.metadata() else {
+				return false;
+			};
+			// this is a file that is executable by someone
+			meta.permissions().mode() & 0o111 != 0
+		} else {
 			read_meta(|m| m.cached_cmds().get(command).is_some())
 		}
   }
