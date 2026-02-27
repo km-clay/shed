@@ -4,6 +4,24 @@ let
   cfg = config.programs.shed;
   boolToString = b:
   if b then "true" else "false";
+
+  mkCompleteCmd = name: cfg: let
+    flags = lib.concatStrings [
+      (lib.optionalString cfg.files " -f")
+      (lib.optionalString cfg.dirs " -d")
+      (lib.optionalString cfg.commands " -c")
+      (lib.optionalString cfg.variables " -v")
+      (lib.optionalString cfg.users " -u")
+      (lib.optionalString cfg.jobs " -j")
+      (lib.optionalString cfg.aliases " -a")
+      (lib.optionalString cfg.signals " -S")
+      (lib.optionalString cfg.noSpace " -n")
+      (lib.optionalString (cfg.function != null) " -F ${cfg.function}")
+      (lib.optionalString (cfg.fallback != "no") " -o ${cfg.fallback}")
+      (lib.optionalString (cfg.wordList != []) " -W '${lib.concatStringsSep " " cfg.wordList}'")
+
+    ];
+  in "complete${flags} ${name}";
 in
 {
   options.programs.shed = {
@@ -19,6 +37,76 @@ in
       type = lib.types.attrsOf lib.types.str;
       default = {};
       description = "Aliases to set when shed starts (e.g. ls='ls --color=auto')";
+    };
+
+    extraCompletion = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule {
+        options = {
+          files = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Complete file names in the current directory";
+          };
+          dirs = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Complete directory names in the current directory";
+          };
+          commands = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Complete executable commands in the PATH";
+          };
+          variables = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Complete variable names";
+          };
+          users = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Complete user names from /etc/passwd";
+          };
+          jobs = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Complete job names or pids from the current shell session";
+          };
+          aliases = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Complete alias names defined in the current shell session";
+          };
+          signals = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Complete signal names for commands like kill";
+          };
+          wordList = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [];
+            description = "Complete from a custom list of words";
+          };
+          function = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            description = "Complete using a custom shell function (should be defined in extraCompletionPreConfig)";
+          };
+          noSpace = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Don't append a space after completion";
+          };
+          fallback = lib.mkOption {
+            type = lib.types.enum [ "no" "default" "dirnames" ];
+            default = "no";
+            description = "Fallback behavior when no matches are found: 'no' means no fallback, 'default' means fall back to the default shell completion behavior, and 'directories' means fall back to completing directory names";
+          };
+
+        };
+      });
+      default = {};
+      description = "Additional completion scripts to source when shed starts (e.g. for custom tools or functions)";
     };
 
     environmentVars = lib.mkOption {
@@ -102,7 +190,11 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  config =
+  let
+    completeLines = lib.concatLines (lib.mapAttrsToList mkCompleteCmd cfg.extraCompletion);
+  in
+  lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
 
     home.file.".shedrc".text = lib.concatLines [
@@ -123,6 +215,7 @@ in
         "shopt prompt.comp_limit=${toString cfg.settings.completionLimit}"
         "shopt prompt.highlight=${boolToString cfg.settings.syntaxHighlighting}"
         "shopt prompt.linebreak_on_incomplete=${boolToString cfg.settings.linebreakOnIncomplete}"
+        completeLines
       ])
       cfg.settings.extraPostConfig
     ];
