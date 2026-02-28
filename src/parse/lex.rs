@@ -912,6 +912,35 @@ pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
   slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
 }
 
+pub fn split_all_unescaped(slice: &str, pat: &str) -> Vec<String> {
+	let mut cursor = 0;
+	let mut splits = vec![];
+	while let Some(split) = split_at_unescaped(&slice[cursor..], pat) {
+		cursor += split.0.len() + pat.len();
+		splits.push(split.0);
+	}
+	if let Some(remaining) = slice.get(cursor..) {
+		splits.push(remaining.to_string());
+	}
+	splits
+}
+
+pub fn split_at_unescaped(slice: &str, pat: &str) -> Option<(String,String)> {
+	let mut window_start = 0;
+	let mut window_end = pat.len();
+	if window_end > slice.len() {
+		return None;
+	}
+	while window_end <= slice.len() {
+		if &slice[window_start..window_end] == pat && !pos_is_escaped(slice, window_start) {
+			return Some((slice[..window_start].to_string(), slice[window_end..].to_string()));
+		}
+		window_start += 1;
+		window_end += 1;
+	}
+	None
+}
+
 pub fn pos_is_escaped(slice: &str, pos: usize) -> bool {
   let bytes = slice.as_bytes();
   let mut escaped = false;

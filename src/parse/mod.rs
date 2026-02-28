@@ -955,6 +955,7 @@ impl ParseStream {
       };
       case_blocks.push(case_node);
 
+      self.catch_separator(&mut node_tks);
       if self.check_keyword("esac") {
         node_tks.push(self.next_tk().unwrap());
         self.assert_separator(&mut node_tks)?;
@@ -1057,6 +1058,7 @@ impl ParseStream {
       }
     }
 
+    self.catch_separator(&mut node_tks);
     if !self.check_keyword("fi") || !self.next_tk_is_some() {
       self.panic_mode(&mut node_tks);
       return Err(parse_err_full(
@@ -1139,6 +1141,7 @@ impl ParseStream {
       body.push(node)
     }
 
+    self.catch_separator(&mut node_tks);
     if !self.check_keyword("done") || !self.next_tk_is_some() {
       self.panic_mode(&mut node_tks);
       return Err(parse_err_full(
@@ -1210,6 +1213,7 @@ impl ParseStream {
       ));
     };
 
+    self.catch_separator(&mut node_tks);
     if !self.check_keyword("done") || !self.next_tk_is_some() {
       self.panic_mode(&mut node_tks);
       return Err(parse_err_full(

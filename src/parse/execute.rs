@@ -5,23 +5,7 @@ use std::{
 
 use crate::{
   builtin::{
-    alias::{alias, unalias},
-    cd::cd,
-    complete::{compgen_builtin, complete_builtin},
-    dirstack::{dirs, popd, pushd},
-    echo::echo,
-    eval, exec,
-    flowctl::flowctl,
-    jobctl::{JobBehavior, continue_job, disown, jobs},
-    pwd::pwd,
-    read::read_builtin,
-    shift::shift,
-    shopt::shopt,
-    source::source,
-    test::double_bracket_test,
-    trap::{TrapTarget, trap},
-    varcmds::{export, local, readonly, unset},
-    zoltraak::zoltraak,
+    alias::{alias, unalias}, arrops::{arr_pop, arr_fpop, arr_push, arr_fpush, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, map, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
   },
   expand::{expand_aliases, glob_to_regex},
   jobs::{ChildProc, JobStack, dispatch_job},
@@ -817,6 +801,12 @@ impl Dispatcher {
       "unset" => unset(cmd, io_stack_mut, curr_job_mut),
       "complete" => complete_builtin(cmd, io_stack_mut, curr_job_mut),
       "compgen" => compgen_builtin(cmd, io_stack_mut, curr_job_mut),
+			"map" => map::map(cmd, io_stack_mut, curr_job_mut),
+			"pop" => arr_pop(cmd, io_stack_mut, curr_job_mut),
+			"fpop" => arr_fpop(cmd, io_stack_mut, curr_job_mut),
+			"push" => arr_push(cmd, io_stack_mut, curr_job_mut),
+			"fpush" => arr_fpush(cmd, io_stack_mut, curr_job_mut),
+			"rotate" => arr_rotate(cmd, io_stack_mut, curr_job_mut),
       "true" | ":" => {
         state::set_status(0);
         Ok(())

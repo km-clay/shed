@@ -1947,13 +1947,23 @@ impl LineBuf {
       return;
     };
     let mut level: usize = 0;
+		let mut last_keyword: Option<String> = None;
     for tk in tokens {
       if tk.flags.contains(TkFlags::KEYWORD) {
         match tk.as_str() {
-          "then" | "do" | "in" => level += 1,
+					"in" => {
+						if last_keyword.as_deref() == Some("case") {
+							level += 1;
+						} else {
+							// 'in' is also used in for loops, but we already increment level on 'do' for those
+							// so we just skip it here
+						}
+					}
+          "then" | "do" => level += 1,
           "done" | "fi" | "esac" => level = level.saturating_sub(1),
           _ => { /* Continue */ }
         }
+				last_keyword = Some(tk.to_string());
       } else if tk.class == TkRule::BraceGrpStart {
         level += 1;
       } else if tk.class == TkRule::BraceGrpEnd {

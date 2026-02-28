@@ -30,12 +30,14 @@ pub mod test; // [[ ]] thing
 pub mod trap;
 pub mod varcmds;
 pub mod zoltraak;
+pub mod map;
+pub mod arrops;
 
-pub const BUILTINS: [&str; 35] = [
+pub const BUILTINS: [&str; 41] = [
   "echo", "cd", "read", "export", "local", "pwd", "source", "shift", "jobs", "fg", "bg", "disown",
   "alias", "unalias", "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin",
   "command", "trap", "pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly",
-  "unset", "complete", "compgen",
+  "unset", "complete", "compgen", "map", "pop", "fpop", "push", "fpush", "rotate"
 ];
 
 /// Sets up a builtin command

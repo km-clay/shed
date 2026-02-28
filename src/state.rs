@@ -11,7 +11,7 @@ use std::{
 use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
-  builtin::{BUILTINS, trap::TrapTarget},
+  builtin::{BUILTINS, map::MapNode, trap::TrapTarget},
   exec_input,
   jobs::JobTab,
   libsh::{
@@ -257,11 +257,7 @@ impl ScopeStack {
       {
         match var.kind() {
           VarKind::Arr(items) => {
-            let mut item_vec = items.clone().into_iter().collect::<Vec<(usize, String)>>();
-
-            item_vec.sort_by_key(|(idx, _)| *idx); // sort by index
-
-            return Ok(item_vec.into_iter().map(|(_, s)| s).collect());
+            return Ok(items.iter().cloned().collect());
           }
           _ => {
             return Err(ShErr::simple(
@@ -269,6 +265,25 @@ impl ScopeStack {
               format!("Variable '{}' is not an array", var_name),
             ));
           }
+        }
+      }
+    }
+    Err(ShErr::simple(
+      ShErrKind::ExecFail,
+      format!("Variable '{}' not found", var_name),
+    ))
+  }
+  pub fn get_arr_mut(&mut self, var_name: &str) -> ShResult<&mut VecDeque<String>> {
+    for scope in self.scopes.iter_mut().rev() {
+      if scope.var_exists(var_name)
+        && let Some(var) = scope.vars_mut().get_mut(var_name)
+      {
+        match var.kind_mut() {
+          VarKind::Arr(items) => return Ok(items),
+          _ => return Err(ShErr::simple(
+            ShErrKind::ExecFail,
+            format!("Variable '{}' is not an array", var_name),
+          )),
         }
       }
     }
@@ -304,7 +319,7 @@ impl ScopeStack {
               }
             };
 
-            if let Some(item) = items.get(&idx) {
+            if let Some(item) = items.get(idx) {
               return Ok(item.clone());
             } else {
               return Err(ShErr::simple(
@@ -324,6 +339,38 @@ impl ScopeStack {
     }
     Ok("".into())
   }
+	pub fn remove_map(&mut self, map_name: &str) -> Option<MapNode> {
+		for scope in self.scopes.iter_mut().rev() {
+			if scope.get_map(map_name).is_some() {
+				return scope.remove_map(map_name);
+			}
+		}
+		None
+	}
+	pub fn get_map(&self, map_name: &str) -> Option<&MapNode> {
+		for scope in self.scopes.iter().rev() {
+			if let Some(map) = scope.get_map(map_name) {
+				return Some(map)
+			}
+		}
+		None
+	}
+	pub fn get_map_mut(&mut self, map_name: &str) -> Option<&mut MapNode> {
+		for scope in self.scopes.iter_mut().rev() {
+			if let Some(map) = scope.get_map_mut(map_name) {
+				return Some(map)
+			}
+		}
+		None
+	}
+	pub fn set_map(&mut self, map_name: &str, map: MapNode, local: bool) {
+		if local
+		&& let Some(scope) = self.scopes.last_mut() {
+				scope.set_map(map_name, map);
+		} else if let Some(scope) = self.scopes.first_mut() {
+			scope.set_map(map_name, map);
+		}
+	}
   pub fn try_get_var(&self, var_name: &str) -> Option<String> {
     // This version of get_var() is mainly used internally
     // so that we have access to Option methods
@@ -588,18 +635,11 @@ impl FromStr for ArrIndex {
   }
 }
 
-pub fn hashmap_to_vec(map: HashMap<usize, String>) -> Vec<String> {
-  let mut items = map.into_iter().collect::<Vec<(usize, String)>>();
-  items.sort_by_key(|(idx, _)| *idx);
-
-  items.into_iter().map(|(_, i)| i).collect()
-}
-
 #[derive(Clone, Debug)]
 pub enum VarKind {
   Str(String),
   Int(i32),
-  Arr(HashMap<usize, String>),
+  Arr(VecDeque<String>),
   AssocArr(Vec<(String, String)>),
 }
 
@@ -614,7 +654,7 @@ impl VarKind {
     }
     let raw = raw[1..raw.len() - 1].to_string();
 
-    let tokens: HashMap<usize, String> = LexStream::new(Arc::new(raw), LexFlags::empty())
+    let tokens: VecDeque<String> = LexStream::new(Arc::new(raw), LexFlags::empty())
       .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
       .try_fold(vec![], |mut acc, wrds| {
         match wrds {
@@ -624,16 +664,13 @@ impl VarKind {
         Ok(acc)
       })?
       .into_iter()
-      .enumerate()
       .collect();
 
     Ok(Self::Arr(tokens))
   }
 
   pub fn arr_from_vec(vec: Vec<String>) -> Self {
-    let tokens: HashMap<usize, String> = vec.into_iter().enumerate().collect();
-
-    Self::Arr(tokens)
+    Self::Arr(VecDeque::from(vec))
   }
 }
 
@@ -643,7 +680,6 @@ impl Display for VarKind {
       VarKind::Str(s) => write!(f, "{s}"),
       VarKind::Int(i) => write!(f, "{i}"),
       VarKind::Arr(items) => {
-        let items = hashmap_to_vec(items.clone());
         let mut item_iter = items.iter().peekable();
         while let Some(item) = item_iter.next() {
           write!(f, "{item}")?;
@@ -702,8 +738,9 @@ impl Display for Var {
 pub struct VarTab {
   vars: HashMap<String, Var>,
   params: HashMap<ShellParam, String>,
-  sh_argv: VecDeque<String>, /* Using a VecDeque makes the implementation of `shift`
-                              * straightforward */
+  sh_argv: VecDeque<String>, /* Using a VecDeque makes the implementation of `shift` straightforward */
+
+	maps: HashMap<String, MapNode>
 }
 
 impl VarTab {
@@ -715,6 +752,7 @@ impl VarTab {
       vars,
       params,
       sh_argv: VecDeque::new(),
+			maps: HashMap::new(),
     };
     var_tab.init_sh_argv();
     var_tab
@@ -833,6 +871,24 @@ impl VarTab {
     self.update_arg_params();
     arg
   }
+	pub fn set_map(&mut self, map_name: &str, map: MapNode) {
+		self.maps.insert(map_name.to_string(), map);
+	}
+	pub fn remove_map(&mut self, map_name: &str) -> Option<MapNode> {
+		self.maps.remove(map_name)
+	}
+	pub fn get_map(&self, map_name: &str) -> Option<&MapNode> {
+		self.maps.get(map_name)
+	}
+	pub fn get_map_mut(&mut self, map_name: &str) -> Option<&mut MapNode> {
+		self.maps.get_mut(map_name)
+	}
+	pub fn maps(&self) -> &HashMap<String, MapNode> {
+		&self.maps
+	}
+	pub fn maps_mut(&mut self) -> &mut HashMap<String, MapNode> {
+		&mut self.maps
+	}
   pub fn vars(&self) -> &HashMap<String, Var> {
     &self.vars
   }
@@ -906,7 +962,10 @@ impl VarTab {
             }
           };
 
-          items.insert(idx, val);
+          if idx >= items.len() {
+            items.resize(idx + 1, String::new());
+          }
+          items[idx] = val;
           return Ok(());
         }
         _ => {
@@ -945,6 +1004,9 @@ impl VarTab {
     }
     Ok(())
   }
+	pub fn map_exists(&self, map_name: &str) -> bool {
+		self.maps.contains_key(map_name)
+	}
   pub fn var_exists(&self, var_name: &str) -> bool {
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.params.contains_key(&param);
