@@ -255,8 +255,14 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
               span: err_span,
             });
           }
-          TestOp::StringEq => rhs.trim() == lhs.trim(),
-          TestOp::StringNeq => rhs.trim() != lhs.trim(),
+          TestOp::StringEq => {
+            let pattern = crate::expand::glob_to_regex(rhs.trim(), true);
+            pattern.is_match(lhs.trim())
+          }
+          TestOp::StringNeq => {
+            let pattern = crate::expand::glob_to_regex(rhs.trim(), true);
+            !pattern.is_match(lhs.trim())
+          }
           TestOp::IntNeq
           | TestOp::IntGt
           | TestOp::IntLt

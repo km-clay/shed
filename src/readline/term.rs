@@ -835,12 +835,12 @@ impl Layout {
       pos.col += c_width;
       if pos.col > term_width {
         pos.row += 1;
-        pos.col = left_margin + c_width;
+        pos.col = c_width;
       }
     }
     if pos.col >= term_width {
       pos.row += 1;
-      pos.col = left_margin;
+      pos.col = 0;
     }
 
     pos

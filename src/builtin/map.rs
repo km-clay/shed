@@ -147,7 +147,7 @@ impl MapNode {
 		match self {
 			MapNode::Branch(map) => map.keys().map(|k| k.to_string()).collect(),
 			MapNode::Array(nodes) => nodes.iter().filter_map(|n| n.display(false, false).ok()).collect(),
-			MapNode::Leaf(s) => vec![s.clone()],
+			MapNode::Leaf(s) => vec![],
 		}
 	}
 
