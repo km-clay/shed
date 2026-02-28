@@ -211,12 +211,18 @@ impl ScopeStack {
     flat_vars
   }
   pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
-    let is_local = self.is_local_var(var_name);
-    if flags.contains(VarFlags::LOCAL) || is_local {
-      self.set_var_local(var_name, val, flags)
-    } else {
-      self.set_var_global(var_name, val, flags)
+    if flags.contains(VarFlags::LOCAL) {
+      return self.set_var_local(var_name, val, flags);
     }
+    // Dynamic scoping: walk scopes from innermost to outermost,
+    // update the nearest scope that already has this variable
+    for scope in self.scopes.iter_mut().rev() {
+      if scope.var_exists(var_name) {
+        return scope.set_var(var_name, val, flags);
+      }
+    }
+    // Not found in any scope — create in global scope
+    self.set_var_global(var_name, val, flags)
   }
   pub fn set_var_indexed(
     &mut self,
@@ -225,18 +231,23 @@ impl ScopeStack {
     val: String,
     flags: VarFlags,
   ) -> ShResult<()> {
-    let is_local = self.is_local_var(var_name);
-    if flags.contains(VarFlags::LOCAL) || is_local {
+    if flags.contains(VarFlags::LOCAL) {
       let Some(scope) = self.scopes.last_mut() else {
         return Ok(());
       };
-      scope.set_index(var_name, idx, val)
-    } else {
-      let Some(scope) = self.scopes.first_mut() else {
-        return Ok(());
-      };
-      scope.set_index(var_name, idx, val)
+      return scope.set_index(var_name, idx, val);
     }
+    // Dynamic scoping: find nearest scope with this variable
+    for scope in self.scopes.iter_mut().rev() {
+      if scope.var_exists(var_name) {
+        return scope.set_index(var_name, idx, val);
+      }
+    }
+    // Not found — create in global scope
+    let Some(scope) = self.scopes.first_mut() else {
+      return Ok(());
+    };
+    scope.set_index(var_name, idx, val)
   }
   fn set_var_global(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     let Some(scope) = self.scopes.first_mut() else {

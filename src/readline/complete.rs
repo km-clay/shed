@@ -228,7 +228,7 @@ pub enum CompSpecResult {
   NoSpec, // No compspec registered
   NoMatch { flags: CompOptFlags }, /* Compspec found but no candidates matched, returns
            * behavior flags */
-  Match(CompResult), // Compspec found and candidates returned
+  Match { result: CompResult, flags: CompOptFlags }, // Compspec found and candidates returned
 }
 
 #[derive(Default, Debug, Clone)]
@@ -433,6 +433,7 @@ impl CompSpec for BashCompSpec {
     if self.function.is_some() {
       candidates.extend(self.exec_comp_func(ctx)?);
     }
+		candidates.sort_by_key(|c| c.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
 
     Ok(candidates)
   }
@@ -511,7 +512,7 @@ pub struct Completer {
   pub token_span: (usize, usize),
   pub active: bool,
   pub dirs_only: bool,
-  pub no_space: bool,
+  pub add_space: bool,
 }
 
 impl Completer {
@@ -612,7 +613,7 @@ impl Completer {
   }
 
   pub fn add_spaces(&mut self) {
-    if !self.no_space {
+    if self.add_space {
       self.candidates = std::mem::take(&mut self.candidates)
         .into_iter()
         .map(|c| {
@@ -744,9 +745,10 @@ impl Completer {
         flags: spec.get_flags(),
       })
     } else {
-      Ok(CompSpecResult::Match(CompResult::from_candidates(
-        candidates,
-      )))
+      Ok(CompSpecResult::Match {
+        result: CompResult::from_candidates(candidates),
+        flags: spec.get_flags(),
+      })
     }
   }
 
@@ -776,12 +778,15 @@ impl Completer {
           return Ok(CompResult::NoMatch);
         }
 
-        if flags.contains(CompOptFlags::NOSPACE) {
-          self.no_space = true;
+        if flags.contains(CompOptFlags::SPACE) {
+          self.add_space = true;
         }
       }
-      CompSpecResult::Match(comp_result) => {
-        return Ok(comp_result);
+      CompSpecResult::Match { result, flags } => {
+        if flags.contains(CompOptFlags::SPACE) {
+          self.add_space = true;
+        }
+        return Ok(result);
       }
       CompSpecResult::NoSpec => { /* carry on */ }
     }

@@ -136,7 +136,7 @@ bitflags! {
   pub struct CompOptFlags: u32 {
     const DEFAULT  = 0b0000000001;
     const DIRNAMES = 0b0000000010;
-    const NOSPACE  = 0b0000000100;
+    const SPACE    = 0b0000000100;
   }
 }
 
@@ -282,7 +282,7 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
       Opt::ShortWithArg('o', opt_flag) => match opt_flag.as_str() {
         "default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
         "dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
-        "nospace" => comp_opts.opt_flags |= CompOptFlags::NOSPACE,
+        "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
         _ => {
           return Err(ShErr::full(
             ShErrKind::InvalidOpt,

@@ -5,12 +5,13 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 use serde_json::{Map, Value};
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node, lex::{split_all_unescaped, split_at_unescaped}}, procio::{IoStack, borrow_fd}, state::{self, read_vars, write_vars}
+  expand::expand_cmd_sub, getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node, lex::{split_all_unescaped, split_at_unescaped}}, procio::{IoStack, borrow_fd}, state::{self, read_vars, write_vars}
 };
 
 #[derive(Debug, Clone)]
 pub enum MapNode {
-	Leaf(String),
+	DynamicLeaf(String), // eval'd on access
+	StaticLeaf(String), // static value
 	Array(Vec<MapNode>),
 	Branch(HashMap<String, MapNode>),
 }
@@ -40,7 +41,7 @@ impl From<MapNode> for serde_json::Value {
 					.collect();
 				Value::Array(arr)
 			}
-			MapNode::Leaf(leaf) => {
+			MapNode::StaticLeaf(leaf) | MapNode::DynamicLeaf(leaf) => {
 				Value::String(leaf)
 			}
 		}
@@ -66,8 +67,8 @@ impl From<Value> for MapNode {
 					.collect();
 				MapNode::Array(nodes)
 			}
-			Value::String(s) => MapNode::Leaf(s),
-			v => MapNode::Leaf(v.to_string())
+			Value::String(s) => MapNode::StaticLeaf(s),
+			v => MapNode::StaticLeaf(v.to_string())
 		}
 	}
 }
@@ -77,7 +78,7 @@ impl MapNode {
 		match path {
 			[] => Some(self),
 			[key, rest @ ..] => match self {
-				MapNode::Leaf(_) => None,
+				MapNode::StaticLeaf(_) | MapNode::DynamicLeaf(_) => None,
 				MapNode::Array(map_nodes) => {
 					let idx: usize = key.parse().ok()?;
 					map_nodes.get(idx)?.get(rest)
@@ -91,7 +92,7 @@ impl MapNode {
 		match path {
 			[] => *self = value,
 			[key, rest @ ..] => {
-				if matches!(self, MapNode::Leaf(_)) {
+				if matches!(self, MapNode::StaticLeaf(_) | MapNode::DynamicLeaf(_)) {
 					// promote leaf to branch if we still have path left to traverse
 					*self = Self::default();
 				}
@@ -147,7 +148,7 @@ impl MapNode {
 		match self {
 			MapNode::Branch(map) => map.keys().map(|k| k.to_string()).collect(),
 			MapNode::Array(nodes) => nodes.iter().filter_map(|n| n.display(false, false).ok()).collect(),
-			MapNode::Leaf(s) => vec![],
+			MapNode::StaticLeaf(_) | MapNode::DynamicLeaf(_) => vec![],
 		}
 	}
 
@@ -173,7 +174,8 @@ impl MapNode {
 			}
 		} else {
 			match self {
-				MapNode::Leaf(leaf) => Ok(leaf.clone()),
+				MapNode::StaticLeaf(leaf) => Ok(leaf.clone()),
+				MapNode::DynamicLeaf(cmd) => expand_cmd_sub(cmd),
 				MapNode::Array(nodes) => {
 					let mut s = String::new();
 					for node in nodes {
@@ -195,7 +197,7 @@ impl MapNode {
 
 use super::setup_builtin;
 
-fn map_opts_spec() -> [OptSpec; 5] {
+fn map_opts_spec() -> [OptSpec; 6] {
 	[
 		OptSpec {
 			opt: Opt::Short('r'),
@@ -211,6 +213,10 @@ fn map_opts_spec() -> [OptSpec; 5] {
 		},
 		OptSpec {
 			opt: Opt::Long("pretty".into()),
+			takes_arg: false
+		},
+		OptSpec {
+			opt: Opt::Short('F'),
 			takes_arg: false
 		},
 		OptSpec {
@@ -233,6 +239,7 @@ bitflags! {
 		const JSON   = 0b000100;
 		const LOCAL	 = 0b001000;
 		const PRETTY = 0b010000;
+		const FUNC   = 0b100000;
 	}
 }
 
@@ -260,16 +267,20 @@ pub fn map(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()
 			};
 
 			let is_json = map_opts.flags.contains(MapFlags::JSON);
+			let is_func = map_opts.flags.contains(MapFlags::FUNC);
+			let make_leaf = |s: String| {
+				if is_func { MapNode::DynamicLeaf(s) } else { MapNode::StaticLeaf(s) }
+			};
 			let found = write_vars(|v| {
 				if let Some(map) = v.get_map_mut(name) {
 					if is_json {
 						if let Ok(parsed) = serde_json::from_str::<Value>(&rhs) {
 							map.set(&path[1..], parsed.into());
 						} else {
-							map.set(&path[1..], MapNode::Leaf(rhs.clone()));
+							map.set(&path[1..], make_leaf(rhs.clone()));
 						}
 					} else {
-						map.set(&path[1..], MapNode::Leaf(rhs.clone()));
+						map.set(&path[1..], make_leaf(rhs.clone()));
 					}
 					true
 				} else {
@@ -283,7 +294,7 @@ pub fn map(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()
 					let node: MapNode = parsed.into();
 					new.set(&path[1..], node);
 				} else {
-					new.set(&path[1..], MapNode::Leaf(rhs));
+					new.set(&path[1..], make_leaf(rhs));
 				}
 				write_vars(|v| v.set_map(name, new, map_opts.flags.contains(MapFlags::LOCAL)));
 			}
@@ -325,19 +336,17 @@ pub fn map(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()
 					format!("map not found: {}", name)
 				));
 			}
-			let Some(output) = read_vars(|v| {
+			let Some(node) = read_vars(|v| {
 				v.get_map(name)
-					.and_then(|map| map.get(&path[1..])
-						.and_then(|n| {
-							if keys {
-								Some(n.keys().join(" "))
-							} else {
-								n.display(json, pretty).ok()
-							}
-						}))
+					.and_then(|map| map.get(&path[1..]).cloned())
 			}) else {
 				state::set_status(1);
 				continue;
+			};
+			let output = if keys {
+				node.keys().join(" ")
+			} else {
+				node.display(json, pretty)?
 			};
 
 			let stdout = borrow_fd(STDOUT_FILENO);
@@ -362,6 +371,7 @@ pub fn get_map_opts(opts: Vec<Opt>) -> MapOpts {
 			Opt::Short('k') => map_opts.flags |= MapFlags::KEYS,
 			Opt::Short('l') => map_opts.flags |= MapFlags::LOCAL,
 			Opt::Long(ref s) if s == "pretty" => map_opts.flags |= MapFlags::PRETTY,
+			Opt::Short('F') => map_opts.flags |= MapFlags::FUNC,
 			_ => unreachable!()
 		}
 	}

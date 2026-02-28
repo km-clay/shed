@@ -780,27 +780,16 @@ impl AsFd for TermReader {
   }
 }
 
+#[derive(Debug)]
 pub struct Layout {
-  pub w_calc: Box<dyn WidthCalculator>,
   pub prompt_end: Pos,
   pub cursor: Pos,
   pub end: Pos,
 }
 
-impl Debug for Layout {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    writeln!(f, "Layout: ")?;
-    writeln!(f, "\tPrompt End: {:?}", self.prompt_end)?;
-    writeln!(f, "\tCursor: {:?}", self.cursor)?;
-    writeln!(f, "\tEnd: {:?}", self.end)
-  }
-}
-
 impl Layout {
   pub fn new() -> Self {
-    let w_calc = width_calculator();
     Self {
-      w_calc,
       prompt_end: Pos::default(),
       cursor: Pos::default(),
       end: Pos::default(),
@@ -811,7 +800,6 @@ impl Layout {
     let cursor = Self::calc_pos(term_width, to_cursor, prompt_end, prompt_end.col);
     let end = Self::calc_pos(term_width, to_end, prompt_end, prompt_end.col);
     Layout {
-      w_calc: width_calculator(),
       prompt_end,
       cursor,
       end,
