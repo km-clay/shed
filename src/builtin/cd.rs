@@ -18,7 +18,8 @@ pub fn cd(node: Node, job: &mut JobBldr) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, _) = setup_builtin(argv, job, None)?;
+  let (argv, _) = setup_builtin(Some(argv), job, None)?;
+  let argv = argv.unwrap();
 
   let new_dir = if let Some((arg, _)) = argv.into_iter().next() {
     PathBuf::from(arg)

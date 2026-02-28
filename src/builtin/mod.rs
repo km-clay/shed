@@ -67,13 +67,13 @@ pub const BUILTINS: [&str; 41] = [
 /// * If redirections are given, the second field of the resulting tuple will
 ///   *always* be `Some()`
 /// * If no redirections are given, the second field will *always* be `None`
-type SetupReturns = ShResult<(Vec<(String, Span)>, Option<RedirGuard>)>;
+type SetupReturns = ShResult<(Option<Vec<(String, Span)>>, Option<RedirGuard>)>;
 pub fn setup_builtin(
-  argv: Vec<Tk>,
+  argv: Option<Vec<Tk>>,
   job: &mut JobBldr,
   io_mode: Option<(&mut IoStack, Vec<Redir>)>,
 ) -> SetupReturns {
-  let mut argv: Vec<(String, Span)> = prepare_argv(argv)?;
+  let mut argv = argv.map(|argv| prepare_argv(argv)).transpose()?;
 
   let child_pgid = if let Some(pgid) = job.pgid() {
     pgid
@@ -81,18 +81,22 @@ pub fn setup_builtin(
     job.set_pgid(Pid::this());
     Pid::this()
   };
-  let cmd_name = argv.remove(0).0;
+  let cmd_name = argv
+		.as_mut()
+		.and_then(|argv| {
+			if argv.is_empty() {
+				None
+			} else {
+				Some(argv.remove(0).0)
+			}
+		}).unwrap_or_else(|| String::new());
   let child = ChildProc::new(Pid::this(), Some(&cmd_name), Some(child_pgid))?;
   job.push_child(child);
 
-  let guard = if let Some((io_stack, redirs)) = io_mode {
-    io_stack.append_to_frame(redirs);
-    let io_frame = io_stack.pop_frame();
-    let guard = io_frame.redirect()?;
-    Some(guard)
-  } else {
-    None
-  };
+	let guard = io_mode.map(|(io,rdrs)| {
+		io.append_to_frame(rdrs);
+		io.pop_frame().redirect()
+	}).transpose()?;
 
   // We return the io_frame because the caller needs to also call
   // io_frame.restore()

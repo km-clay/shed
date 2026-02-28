@@ -7,7 +7,7 @@ use regex::Regex;
 
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::parse::execute::exec_input;
-use crate::parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule, is_hard_sep};
+use crate::parse::lex::{LexFlags, LexStream, QuoteState, Tk, TkFlags, TkRule, is_hard_sep};
 use crate::parse::{Redir, RedirType};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::readline::markers;
@@ -130,18 +130,16 @@ fn has_braces(s: &str) -> bool {
   let mut found_open = false;
   let mut has_comma = false;
   let mut has_range = false;
-  let mut cur_quote: Option<char> = None;
+  let mut qt_state = QuoteState::default();
 
   while let Some(ch) = chars.next() {
     match ch {
       '\\' => {
         chars.next();
       } // skip escaped char
-      '\'' if cur_quote.is_none() => cur_quote = Some('\''),
-      '\'' if cur_quote == Some('\'') => cur_quote = None,
-      '"' if cur_quote.is_none() => cur_quote = Some('"'),
-      '"' if cur_quote == Some('"') => cur_quote = None,
-      '{' if cur_quote.is_none() => {
+      '\'' => qt_state.toggle_single(),
+      '"' => qt_state.toggle_double(),
+      '{' if qt_state.in_quote() => {
         if depth == 0 {
           found_open = true;
           has_comma = false;
@@ -149,16 +147,16 @@ fn has_braces(s: &str) -> bool {
         }
         depth += 1;
       }
-      '}' if cur_quote.is_none() && depth > 0 => {
+      '}' if qt_state.outside() && depth > 0 => {
         depth -= 1;
         if depth == 0 && found_open && (has_comma || has_range) {
           return true;
         }
       }
-      ',' if cur_quote.is_none() && depth == 1 => {
+      ',' if qt_state.outside() && depth == 1 => {
         has_comma = true;
       }
-      '.' if cur_quote.is_none() && depth == 1 => {
+      '.' if qt_state.outside() && depth == 1 => {
         if chars.peek() == Some(&'.') {
           chars.next();
           has_range = true;
@@ -239,7 +237,7 @@ fn expand_one_brace(word: &str) -> ShResult<Vec<String>> {
 fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
   let mut chars = word.chars().peekable();
   let mut prefix = String::new();
-  let mut cur_quote: Option<char> = None;
+  let mut qt_state = QuoteState::default();
 
   // Find the opening brace
   while let Some(ch) = chars.next() {
@@ -250,23 +248,15 @@ fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
           prefix.push(next);
         }
       }
-      '\'' if cur_quote.is_none() => {
-        cur_quote = Some('\'');
-        prefix.push(ch);
-      }
-      '\'' if cur_quote == Some('\'') => {
-        cur_quote = None;
-        prefix.push(ch);
-      }
-      '"' if cur_quote.is_none() => {
-        cur_quote = Some('"');
-        prefix.push(ch);
-      }
-      '"' if cur_quote == Some('"') => {
-        cur_quote = None;
-        prefix.push(ch);
-      }
-      '{' if cur_quote.is_none() => {
+			'\'' => {
+				qt_state.toggle_single();
+				prefix.push(ch);
+			}
+			'"' => {
+				qt_state.toggle_double();
+				prefix.push(ch);
+			}
+      '{' if qt_state.outside() => {
         break;
       }
       _ => prefix.push(ch),
@@ -276,7 +266,7 @@ fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
   // Find matching closing brace
   let mut depth = 1;
   let mut inner = String::new();
-  cur_quote = None;
+  qt_state = QuoteState::default();
 
   while let Some(ch) = chars.next() {
     match ch {
@@ -286,27 +276,19 @@ fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
           inner.push(next);
         }
       }
-      '\'' if cur_quote.is_none() => {
-        cur_quote = Some('\'');
-        inner.push(ch);
-      }
-      '\'' if cur_quote == Some('\'') => {
-        cur_quote = None;
-        inner.push(ch);
-      }
-      '"' if cur_quote.is_none() => {
-        cur_quote = Some('"');
-        inner.push(ch);
-      }
-      '"' if cur_quote == Some('"') => {
-        cur_quote = None;
-        inner.push(ch);
-      }
-      '{' if cur_quote.is_none() => {
+			'\'' => {
+				qt_state.toggle_single();
+				inner.push(ch);
+			}
+			'"' => {
+				qt_state.toggle_double();
+				inner.push(ch);
+			}
+      '{' if qt_state.outside() => {
         depth += 1;
         inner.push(ch);
       }
-      '}' if cur_quote.is_none() => {
+      '}' if qt_state.outside() => {
         depth -= 1;
         if depth == 0 {
           break;
@@ -335,7 +317,7 @@ fn split_brace_inner(inner: &str) -> Vec<String> {
   let mut current = String::new();
   let mut chars = inner.chars().peekable();
   let mut depth = 0;
-  let mut cur_quote: Option<char> = None;
+  let mut qt_state = QuoteState::default();
 
   while let Some(ch) = chars.next() {
     match ch {
@@ -345,31 +327,23 @@ fn split_brace_inner(inner: &str) -> Vec<String> {
           current.push(next);
         }
       }
-      '\'' if cur_quote.is_none() => {
-        cur_quote = Some('\'');
-        current.push(ch);
-      }
-      '\'' if cur_quote == Some('\'') => {
-        cur_quote = None;
-        current.push(ch);
-      }
-      '"' if cur_quote.is_none() => {
-        cur_quote = Some('"');
-        current.push(ch);
-      }
-      '"' if cur_quote == Some('"') => {
-        cur_quote = None;
-        current.push(ch);
-      }
-      '{' if cur_quote.is_none() => {
+			'\'' => {
+				qt_state.toggle_single();
+				current.push(ch);
+			}
+			'"' => {
+				qt_state.toggle_double();
+				current.push(ch);
+			}
+      '{' if qt_state.outside() => {
         depth += 1;
         current.push(ch);
       }
-      '}' if cur_quote.is_none() => {
+      '}' if qt_state.outside() => {
         depth -= 1;
         current.push(ch);
       }
-      ',' if cur_quote.is_none() && depth == 0 => {
+      ',' if qt_state.outside() && depth == 0 => {
         parts.push(std::mem::take(&mut current));
       }
       _ => current.push(ch),
@@ -556,6 +530,11 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
               let arg_sep = markers::ARG_SEP.to_string();
               read_vars(|v| v.get_arr_elems(&var_name))?.join(&arg_sep)
             }
+						ArrIndex::ArgCount => {
+							read_vars(|v| v.get_arr_elems(&var_name))
+								.map(|elems| elems.len().to_string())
+								.unwrap_or_else(|_| "0".to_string())
+						}
             ArrIndex::AllJoined => {
               let ifs = read_vars(|v| v.try_get_var("IFS"))
                 .unwrap_or_else(|| " \t\n".to_string())

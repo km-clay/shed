@@ -17,7 +17,8 @@ pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, _) = setup_builtin(argv, job, None)?;
+  let (argv, _) = setup_builtin(Some(argv), job, None)?;
+  let argv = argv.unwrap();
 
   for (arg, span) in argv {
     let path = PathBuf::from(arg);

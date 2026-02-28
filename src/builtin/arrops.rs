@@ -1,3 +1,5 @@
+use std::iter::Peekable;
+
 use crate::{
   getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node}, prelude::*, procio::{IoStack, borrow_fd}, state::{self, VarFlags, VarKind, write_vars}
 };
@@ -51,7 +53,8 @@ fn arr_pop_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: End
 
 	let (argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
 	let arr_op_opts = get_arr_op_opts(opts)?;
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
   let stdout = borrow_fd(STDOUT_FILENO);
 	let mut status = 0;
 
@@ -91,7 +94,8 @@ fn arr_push_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: En
 
 	let (argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
 	let _arr_op_opts = get_arr_op_opts(opts)?;
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
 
 	let mut argv = argv.into_iter();
 	let Some((name, _)) = argv.next() else {
@@ -140,7 +144,8 @@ pub fn arr_rotate(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShRe
 
 	let (argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
 	let arr_op_opts = get_arr_op_opts(opts)?;
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
 
 	for (arg, _) in argv {
 		write_vars(|v| -> ShResult<()> {

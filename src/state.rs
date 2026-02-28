@@ -620,6 +620,7 @@ impl VarFlags {
 pub enum ArrIndex {
   Literal(usize),
   FromBack(usize),
+	ArgCount,
   AllJoined,
   AllSplit,
 }
@@ -630,6 +631,7 @@ impl FromStr for ArrIndex {
     match s {
       "@" => Ok(Self::AllSplit),
       "*" => Ok(Self::AllJoined),
+			"#" => Ok(Self::ArgCount),
       _ if s.starts_with('-') && s[1..].chars().all(|c| c.is_digit(1)) => {
         let idx = s[1..].parse::<usize>().unwrap();
         Ok(Self::FromBack(idx))

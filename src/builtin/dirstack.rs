@@ -127,7 +127,8 @@ pub fn pushd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
 
   let mut dir = None;
   let mut rotate_idx = None;
@@ -213,7 +214,8 @@ pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
 
   let mut remove_idx = None;
   let mut no_cd = false;
@@ -316,7 +318,8 @@ pub fn dirs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
 
   let mut abbreviate_home = true;
   let mut one_per_line = false;

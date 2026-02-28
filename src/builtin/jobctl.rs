@@ -28,7 +28,8 @@ pub fn continue_job(node: Node, job: &mut JobBldr, behavior: JobBehavior) -> ShR
     unreachable!()
   };
 
-  let (argv, _) = setup_builtin(argv, job, None)?;
+  let (argv, _) = setup_builtin(Some(argv), job, None)?;
+  let argv = argv.unwrap();
   let mut argv = argv.into_iter();
 
   if read_jobs(|j| j.get_fg().is_some()) {
@@ -143,7 +144,8 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
 
   let mut flags = JobCmdFlags::empty();
   for (arg, span) in argv {
@@ -190,7 +192,8 @@ pub fn disown(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
   let mut argv = argv.into_iter();
 
   let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {

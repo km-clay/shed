@@ -16,7 +16,8 @@ pub fn shift(node: Node, job: &mut JobBldr) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, _) = setup_builtin(argv, job, None)?;
+  let (argv, _) = setup_builtin(Some(argv), job, None)?;
+  let argv = argv.unwrap();
   let mut argv = argv.into_iter();
 
   if let Some((arg, span)) = argv.next() {

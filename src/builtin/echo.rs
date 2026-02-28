@@ -51,7 +51,8 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
   assert!(!argv.is_empty());
   let (argv, opts) = get_opts_from_tokens(argv, &ECHO_OPTS)?;
   let flags = get_echo_flags(opts).blame(blame)?;
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
 
   let output_channel = if flags.contains(EchoFlags::USE_STDERR) {
     borrow_fd(STDERR_FILENO)

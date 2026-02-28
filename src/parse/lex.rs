@@ -24,6 +24,46 @@ pub const KEYWORDS: [&str; 16] = [
 
 pub const OPENERS: [&str; 6] = ["if", "while", "until", "for", "select", "case"];
 
+/// Used to track whether the lexer is currently inside a quote, and if so, which type
+#[derive(Default,Debug)]
+pub enum QuoteState {
+	#[default]
+	Outside,
+	Single,
+	Double
+}
+
+impl QuoteState {
+	pub fn outside(&self) -> bool {
+		matches!(self, QuoteState::Outside)
+	}
+	pub fn in_single(&self) -> bool {
+		matches!(self, QuoteState::Single)
+	}
+	pub fn in_double(&self) -> bool {
+		matches!(self, QuoteState::Double)
+	}
+	pub fn in_quote(&self) -> bool {
+		!self.outside()
+	}
+	/// Toggles whether we are in a double quote. If self = QuoteState::Single, this does nothing, since double quotes inside single quotes are just literal characters
+	pub fn toggle_double(&mut self) {
+		match self {
+			QuoteState::Outside => *self = QuoteState::Double,
+			QuoteState::Double => *self = QuoteState::Outside,
+			_ => {}
+		}
+	}
+	/// Toggles whether we are in a single quote. If self == QuoteState::Double, this does nothing, since single quotes are not interpreted inside double quotes
+	pub fn toggle_single(&mut self) {
+		match self {
+			QuoteState::Outside => *self = QuoteState::Single,
+			QuoteState::Single => *self = QuoteState::Outside,
+			_ => {}
+		}
+	}
+}
+
 /// Span::new(10..20)
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct Span {
@@ -150,7 +190,7 @@ bitflags! {
 pub struct LexStream {
   source: Arc<String>,
   pub cursor: usize,
-  in_quote: bool,
+  quote_state: QuoteState,
   brc_grp_start: Option<usize>,
   flags: LexFlags,
 }
@@ -183,11 +223,11 @@ impl LexStream {
   pub fn new(source: Arc<String>, flags: LexFlags) -> Self {
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
     Self {
+      flags,
       source,
       cursor: 0,
-      in_quote: false,
+      quote_state: QuoteState::default(),
       brc_grp_start: None,
-      flags,
     }
   }
   /// Returns a slice of the source input using the given range
@@ -353,6 +393,47 @@ impl LexStream {
             pos += ch.len_utf8();
           }
         }
+				'\'' => {
+					pos += 1;
+					self.quote_state.toggle_single();
+				}
+				_ if self.quote_state.in_single() => pos += ch.len_utf8(),
+        '$' if chars.peek() == Some(&'(') => {
+          pos += 2;
+          chars.next();
+          let mut paren_count = 1;
+          let paren_pos = pos;
+          while let Some(ch) = chars.next() {
+            match ch {
+              '\\' => {
+                pos += 1;
+                if let Some(next_ch) = chars.next() {
+                  pos += next_ch.len_utf8();
+                }
+              }
+              '(' => {
+                pos += 1;
+                paren_count += 1;
+              }
+              ')' => {
+                pos += 1;
+                paren_count -= 1;
+                if paren_count <= 0 {
+                  break;
+                }
+              }
+              _ => pos += ch.len_utf8(),
+            }
+          }
+          if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+            self.cursor = pos;
+            return Err(ShErr::full(
+              ShErrKind::ParseErr,
+              "Unclosed subshell",
+              Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+            ));
+          }
+        }
         '$' if chars.peek() == Some(&'{') => {
           pos += 2;
           chars.next();
@@ -380,6 +461,11 @@ impl LexStream {
             }
           }
         }
+				'"' => {
+					pos += 1;
+					self.quote_state.toggle_double();
+				}
+				_ if self.quote_state.in_double() => pos += ch.len_utf8(),
         '<' if chars.peek() == Some(&'(') => {
           pos += 2;
           chars.next();
@@ -417,42 +503,6 @@ impl LexStream {
           }
         }
         '>' if chars.peek() == Some(&'(') => {
-          pos += 2;
-          chars.next();
-          let mut paren_count = 1;
-          let paren_pos = pos;
-          while let Some(ch) = chars.next() {
-            match ch {
-              '\\' => {
-                pos += 1;
-                if let Some(next_ch) = chars.next() {
-                  pos += next_ch.len_utf8();
-                }
-              }
-              '(' => {
-                pos += 1;
-                paren_count += 1;
-              }
-              ')' => {
-                pos += 1;
-                paren_count -= 1;
-                if paren_count <= 0 {
-                  break;
-                }
-              }
-              _ => pos += ch.len_utf8(),
-            }
-          }
-          if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-            self.cursor = pos;
-            return Err(ShErr::full(
-              ShErrKind::ParseErr,
-              "Unclosed subshell",
-              Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-            ));
-          }
-        }
-        '$' if chars.peek() == Some(&'(') => {
           pos += 2;
           chars.next();
           let mut paren_count = 1;
@@ -547,82 +597,6 @@ impl LexStream {
           self.cursor = pos;
           return Ok(tk);
         }
-        '\'' => {
-          self.in_quote = true;
-          pos += 1;
-          while let Some(q_ch) = chars.next() {
-            match q_ch {
-              '\\' => {
-                pos += 1;
-                if chars.next().is_some() {
-                  pos += 1;
-                }
-              }
-              _ if q_ch == '\'' => {
-                pos += 1;
-                self.in_quote = false;
-                break;
-              }
-              // Any time an ambiguous character is found
-              // we must push the cursor by the length of the character
-              // instead of just assuming a length of 1.
-              // Allows spans to work for wide characters
-              _ => pos += q_ch.len_utf8(),
-            }
-          }
-        }
-        '"' => {
-          self.in_quote = true;
-          pos += 1;
-          while let Some(q_ch) = chars.next() {
-            match q_ch {
-              '\\' => {
-                pos += 1;
-                if chars.next().is_some() {
-                  pos += 1;
-                }
-              }
-              '$' if chars.peek() == Some(&'(') => {
-                pos += 2;
-                chars.next();
-                let mut cmdsub_count = 1;
-                while let Some(cmdsub_ch) = chars.next() {
-                  match cmdsub_ch {
-                    '\\' => {
-                      pos += 1;
-                      if chars.next().is_some() {
-                        pos += 1;
-                      }
-                    }
-                    '$' if chars.peek() == Some(&'(') => {
-                      cmdsub_count += 1;
-                      pos += 2;
-                      chars.next();
-                    }
-                    ')' => {
-                      cmdsub_count -= 1;
-                      pos += 1;
-                      if cmdsub_count <= 0 {
-                        break;
-                      }
-                    }
-                    _ => pos += cmdsub_ch.len_utf8(),
-                  }
-                }
-              }
-              _ if q_ch == '"' => {
-                pos += 1;
-                self.in_quote = false;
-                break;
-              }
-              // Any time an ambiguous character is found
-              // we must push the cursor by the length of the character
-              // instead of just assuming a length of 1.
-              // Allows spans to work for wide characters
-              _ => pos += q_ch.len_utf8(),
-            }
-          }
-        }
         '=' if chars.peek() == Some(&'(') => {
           pos += 1; // '='
           let mut depth = 1;
@@ -652,13 +626,12 @@ impl LexStream {
             }
           }
         }
-        _ if !self.in_quote && is_op(ch) => break,
         _ if is_hard_sep(ch) => break,
         _ => pos += ch.len_utf8(),
       }
     }
     let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
-    if self.in_quote && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+    if self.quote_state.in_quote() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
       self.cursor = pos;
       return Err(ShErr::full(
         ShErrKind::ParseErr,
@@ -912,6 +885,8 @@ pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
   slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
 }
 
+/// Splits a string by a pattern, but only if the pattern is not escaped by a backslash
+/// and not in quotes.
 pub fn split_all_unescaped(slice: &str, pat: &str) -> Vec<String> {
 	let mut cursor = 0;
 	let mut splits = vec![];
@@ -925,19 +900,71 @@ pub fn split_all_unescaped(slice: &str, pat: &str) -> Vec<String> {
 	splits
 }
 
+/// Splits a string at the first occurrence of a pattern, but only if the pattern is not escaped by a backslash
+/// and not in quotes. Returns None if the pattern is not found or only found escaped.
 pub fn split_at_unescaped(slice: &str, pat: &str) -> Option<(String,String)> {
-	let mut window_start = 0;
-	let mut window_end = pat.len();
-	if window_end > slice.len() {
-		return None;
-	}
-	while window_end <= slice.len() {
-		if &slice[window_start..window_end] == pat && !pos_is_escaped(slice, window_start) {
-			return Some((slice[..window_start].to_string(), slice[window_end..].to_string()));
+	let mut chars = slice.char_indices().peekable();
+	let mut qt_state = QuoteState::default();
+
+	while let Some((i, ch)) = chars.next() {
+		match ch {
+			'\\' => { chars.next(); continue; }
+			'\'' => qt_state.toggle_single(),
+			'"' => qt_state.toggle_double(),
+			_ if qt_state.in_quote() => continue,
+			_ => {}
 		}
-		window_start += 1;
-		window_end += 1;
+
+		if slice[i..].starts_with(pat) {
+			let before = slice[..i].to_string();
+			let after = slice[i + pat.len()..].to_string();
+			return Some((before, after));
+		}
 	}
+
+
+	None
+}
+
+pub fn split_tk(tk: &Tk, pat: &str) -> Vec<Tk> {
+	let slice = tk.as_str();
+	let mut cursor = 0;
+	let mut splits = vec![];
+	while let Some(split) = split_at_unescaped(&slice[cursor..], pat) {
+		let before_span = Span::new(tk.span.start + cursor..tk.span.start + cursor + split.0.len(), tk.source().clone());
+		splits.push(Tk::new(tk.class.clone(), before_span));
+		cursor += split.0.len() + pat.len();
+	}
+	if slice.get(cursor..).is_some_and(|s| !s.is_empty()) {
+		let remaining_span = Span::new(tk.span.start + cursor..tk.span.end, tk.source().clone());
+		splits.push(Tk::new(tk.class.clone(), remaining_span));
+	}
+	splits
+}
+
+pub fn split_tk_at(tk: &Tk, pat: &str) -> Option<(Tk, Tk)> {
+	let slice = tk.as_str();
+	let mut chars = slice.char_indices().peekable();
+	let mut qt_state = QuoteState::default();
+
+	while let Some((i, ch)) = chars.next() {
+		match ch {
+			'\\' => { chars.next(); continue; }
+			'\'' => qt_state.toggle_single(),
+			'"' => qt_state.toggle_double(),
+			_ if qt_state.in_quote() => continue,
+			_ => {}
+		}
+
+		if slice[i..].starts_with(pat) {
+			let before_span = Span::new(tk.span.start..tk.span.start + i, tk.source().clone());
+			let after_span = Span::new(tk.span.start + i + pat.len()..tk.span.end, tk.source().clone());
+			let before_tk = Tk::new(tk.class.clone(), before_span);
+			let after_tk = Tk::new(tk.class.clone(), after_span);
+			return Some((before_tk, after_tk));
+		}
+	}
+
 	None
 }
 

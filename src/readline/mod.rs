@@ -8,7 +8,7 @@ use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVis
 
 use crate::expand::expand_prompt;
 use crate::libsh::sys::TTY_FILENO;
-use crate::parse::lex::LexStream;
+use crate::parse::lex::{LexStream, QuoteState};
 use crate::prelude::*;
 use crate::readline::term::{Pos, calc_str_width};
 use crate::state::read_shopts;
@@ -339,8 +339,14 @@ impl ShedVi {
         let line = self.editor.as_str().to_string();
         let cursor_pos = self.editor.cursor_byte_pos();
 
-        match self.completer.complete(line, cursor_pos, direction)? {
-          Some(line) => {
+        match self.completer.complete(line, cursor_pos, direction) {
+					Err(e) => {
+						self.writer.flush_write(&format!("\n{e}\n\n"))?;
+
+						// Printing the error invalidates the layout
+						self.old_layout = None;
+					}
+          Ok(Some(line)) => {
             let span_start = self.completer.token_span.0;
             let new_cursor = span_start
               + self
@@ -361,7 +367,7 @@ impl ShedVi {
             let hint = self.history.get_hint();
             self.editor.set_hint(hint);
           }
-          None => {
+          Ok(None) => {
             self.writer.send_bell().ok();
           }
         }
@@ -1005,8 +1011,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
 
   let span_start = token.span.start;
 
-  let mut in_dub_qt = false;
-  let mut in_sng_qt = false;
+	let mut qt_state = QuoteState::default();
   let mut cmd_sub_depth = 0;
   let mut proc_sub_depth = 0;
 
@@ -1045,7 +1050,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
           }
         }
       }
-      '$' if !in_sng_qt => {
+      '$' if !qt_state.in_single() => {
         let dollar_pos = index;
         token_chars.next(); // consume the dollar
         if let Some((_, dollar_ch)) = token_chars.peek() {
@@ -1115,13 +1120,13 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
         token_chars.next(); // consume the char with no special handling
       }
 
-      '\\' if !in_sng_qt => {
+      '\\' if !qt_state.in_single() => {
         token_chars.next(); // consume the backslash
         if token_chars.peek().is_some() {
           token_chars.next(); // consume the escaped char
         }
       }
-      '<' | '>' if !in_dub_qt && !in_sng_qt && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
+      '<' | '>' if !qt_state.in_quote() && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
         token_chars.next();
         if let Some((_, proc_sub_ch)) = token_chars.peek()
           && *proc_sub_ch == '('
@@ -1133,25 +1138,25 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
           }
         }
       }
-      '"' if !in_sng_qt => {
-        if in_dub_qt {
+      '"' if !qt_state.in_single() => {
+        if qt_state.in_double() {
           insertions.push((span_start + *i + 1, markers::STRING_DQ_END));
         } else {
           insertions.push((span_start + *i, markers::STRING_DQ));
         }
-        in_dub_qt = !in_dub_qt;
+				qt_state.toggle_double();
         token_chars.next(); // consume the quote
       }
-      '\'' if !in_dub_qt => {
-        if in_sng_qt {
+      '\'' if !qt_state.in_double() => {
+        if qt_state.in_single() {
           insertions.push((span_start + *i + 1, markers::STRING_SQ_END));
         } else {
           insertions.push((span_start + *i, markers::STRING_SQ));
         }
-        in_sng_qt = !in_sng_qt;
+				qt_state.toggle_single();
         token_chars.next(); // consume the quote
       }
-      '[' if !in_dub_qt && !in_sng_qt && !token.flags.contains(TkFlags::ASSIGN) => {
+      '[' if !qt_state.in_quote() && !token.flags.contains(TkFlags::ASSIGN) => {
         token_chars.next(); // consume the opening bracket
         let start_pos = span_start + index;
         let mut is_glob_pat = false;
@@ -1177,7 +1182,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
           insertions.push((start_pos, markers::GLOB));
         }
       }
-      '*' | '?' if (!in_dub_qt && !in_sng_qt) => {
+      '*' | '?' if !qt_state.in_quote() => {
         let glob_ch = *ch;
         token_chars.next(); // consume the first glob char
         if !in_context(markers::COMMAND, &insertions) {

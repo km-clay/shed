@@ -75,7 +75,8 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
 
   let (argv, opts) = get_opts_from_tokens(argv, &READ_OPTS)?;
   let read_opts = get_read_flags(opts).blame(blame.clone())?;
-  let (argv, _) = setup_builtin(argv, job, None).blame(blame.clone())?;
+  let (argv, _) = setup_builtin(Some(argv), job, None).blame(blame.clone())?;
+  let argv = argv.unwrap();
 
   if let Some(prompt) = read_opts.prompt {
     write(borrow_fd(STDOUT_FILENO), prompt.as_bytes())?;

@@ -1035,6 +1035,7 @@ impl ParseStream {
       };
       cond_nodes.push(cond_node);
 
+			self.catch_separator(&mut node_tks);
       if !self.check_keyword("elif") || !self.next_tk_is_some() {
         break;
       } else {
@@ -1043,6 +1044,7 @@ impl ParseStream {
       }
     }
 
+		self.catch_separator(&mut node_tks);
     if self.check_keyword("else") {
       node_tks.push(self.next_tk().unwrap());
       self.catch_separator(&mut node_tks);

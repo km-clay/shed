@@ -123,7 +123,8 @@ pub fn trap(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
 
   if argv.is_empty() {
     let stdout = borrow_fd(STDOUT_FILENO);

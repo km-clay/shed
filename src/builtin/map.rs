@@ -5,7 +5,7 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 use serde_json::{Map, Value};
 
 use crate::{
-  expand::expand_cmd_sub, getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node, lex::{split_all_unescaped, split_at_unescaped}}, procio::{IoStack, borrow_fd}, state::{self, read_vars, write_vars}
+  expand::expand_cmd_sub, getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node, lex::{split_tk, split_tk_at}}, procio::{IoStack, borrow_fd}, state::{self, read_vars, write_vars}
 };
 
 #[derive(Debug, Clone)]
@@ -252,17 +252,23 @@ pub fn map(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()
     unreachable!()
   };
 
-	let (argv, opts) = get_opts_from_tokens(argv, &map_opts_spec())?;
+	let (mut argv, opts) = get_opts_from_tokens(argv, &map_opts_spec())?;
 	let map_opts = get_map_opts(opts);
-  let (argv, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (_, _guard) = setup_builtin(None, job, Some((io_stack, node.redirs)))?;
+	if !argv.is_empty() {
+		argv.remove(0); // remove "map" command from argv
+	}
 
-	for (arg,_) in argv {
-		if let Some((lhs,rhs)) = split_at_unescaped(&arg, "=") {
-			let path = split_all_unescaped(&lhs, ".");
+	for arg in argv {
+		if let Some((lhs,rhs)) = split_tk_at(&arg, "=") {
+			let path = split_tk(&lhs, ".")
+				.into_iter()
+				.map(|s| s.expand().map(|exp| exp.get_words().join(" ")))
+				.collect::<ShResult<Vec<String>>>()?;
 			let Some(name) = path.first() else {
 				return Err(ShErr::simple(
 					ShErrKind::InternalErr,
-					format!("invalid map path: {}", lhs)
+					format!("invalid map path: {}", lhs.as_str())
 				));
 			};
 
@@ -271,39 +277,42 @@ pub fn map(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()
 			let make_leaf = |s: String| {
 				if is_func { MapNode::DynamicLeaf(s) } else { MapNode::StaticLeaf(s) }
 			};
-			let found = write_vars(|v| {
+			let expanded = rhs.expand()?.get_words().join(" ");
+			let found = write_vars(|v| -> ShResult<bool> {
 				if let Some(map) = v.get_map_mut(name) {
 					if is_json {
-						if let Ok(parsed) = serde_json::from_str::<Value>(&rhs) {
+						if let Ok(parsed) = serde_json::from_str::<Value>(expanded.as_str()) {
 							map.set(&path[1..], parsed.into());
 						} else {
-							map.set(&path[1..], make_leaf(rhs.clone()));
+							map.set(&path[1..], make_leaf(expanded.clone()));
 						}
 					} else {
-						map.set(&path[1..], make_leaf(rhs.clone()));
+						map.set(&path[1..], make_leaf(expanded.clone()));
 					}
-					true
+					Ok(true)
 				} else {
-					false
+					Ok(false)
 				}
 			});
 
-			if !found {
+			if !found? {
 				let mut new = MapNode::default();
-				if is_json && let Ok(parsed) = serde_json::from_str::<Value>(&rhs) {
+				if is_json /*&& let Ok(parsed) = serde_json::from_str::<Value>(rhs.as_str()) */{
+					let parsed = serde_json::from_str::<Value>(expanded.as_str()).unwrap();
 					let node: MapNode = parsed.into();
 					new.set(&path[1..], node);
 				} else {
-					new.set(&path[1..], make_leaf(rhs));
+					new.set(&path[1..], make_leaf(expanded));
 				}
 				write_vars(|v| v.set_map(name, new, map_opts.flags.contains(MapFlags::LOCAL)));
 			}
 		} else {
-			let path = split_all_unescaped(&arg, ".");
+			let expanded = arg.expand()?.get_words().join(" ");
+			let path: Vec<String> = expanded.split('.').map(|s| s.to_string()).collect();
 			let Some(name) = path.first() else {
 				return Err(ShErr::simple(
 					ShErrKind::InternalErr,
-					format!("invalid map path: {}", &arg)
+					format!("invalid map path: {}", expanded)
 				));
 			};
 

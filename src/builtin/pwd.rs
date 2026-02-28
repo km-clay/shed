@@ -18,7 +18,7 @@ pub fn pwd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()
     unreachable!()
   };
 
-  let (_, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (_, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
 
   let stdout = borrow_fd(STDOUT_FILENO);
 

@@ -18,7 +18,8 @@ pub fn exec_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> Sh
     unreachable!()
   };
 
-  let (expanded_argv, guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (expanded_argv, guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let expanded_argv = expanded_argv.unwrap();
   if let Some(g) = guard {
     // Persist redirections so they affect the entire shell,
     // not just this command call

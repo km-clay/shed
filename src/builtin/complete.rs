@@ -168,7 +168,8 @@ pub fn complete_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -
 
   let (argv, opts) = get_opts_from_tokens(argv, &COMP_OPTS)?;
   let comp_opts = get_comp_opts(opts)?;
-  let (argv, _) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (argv, _) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
+  let argv = argv.unwrap();
 
   if comp_opts.flags.contains(CompFlags::PRINT) {
     if argv.is_empty() {
@@ -242,7 +243,7 @@ pub fn compgen_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) ->
   let (argv, opts) = get_opts_from_tokens(argv, &COMPGEN_OPTS)?;
   let prefix = argv.clone().into_iter().nth(1).unwrap_or_default();
   let comp_opts = get_comp_opts(opts)?;
-  let (_, _guard) = setup_builtin(argv, job, Some((io_stack, node.redirs)))?;
+  let (_, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
 
   let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
 
