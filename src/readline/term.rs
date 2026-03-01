@@ -780,7 +780,7 @@ impl AsFd for TermReader {
   }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Layout {
   pub prompt_end: Pos,
   pub cursor: Pos,

@@ -13,7 +13,9 @@ use crate::{
 
 pub type ShResult<T> = Result<T, ShErr>;
 
-pub struct ColorRng;
+pub struct ColorRng {
+	last_color: Option<Color>,
+}
 
 impl ColorRng {
 	fn get_colors() -> &'static [Color] {
@@ -39,6 +41,16 @@ impl ColorRng {
 			Color::Fixed(105), // medium purple
 		]
 	}
+
+	pub fn last_color(&mut self) -> Color {
+		if let Some(color) = self.last_color.take() {
+			return color;
+		} else {
+			let color = self.next().unwrap_or(Color::White);
+			self.last_color = Some(color);
+			color
+		}
+	}
 }
 
 impl Iterator for ColorRng {
@@ -51,11 +63,19 @@ impl Iterator for ColorRng {
 }
 
 thread_local! {
-	static COLOR_RNG: RefCell<ColorRng> = const { RefCell::new(ColorRng) };
+	static COLOR_RNG: RefCell<ColorRng> = const { RefCell::new(ColorRng { last_color: None }) };
 }
 
 pub fn next_color() -> Color {
-	COLOR_RNG.with(|rng| rng.borrow_mut().next().unwrap())
+	COLOR_RNG.with(|rng| {
+		let color = rng.borrow_mut().next().unwrap();
+		rng.borrow_mut().last_color = Some(color);
+		color
+	})
+}
+
+pub fn last_color() -> Color {
+	COLOR_RNG.with(|rng| rng.borrow_mut().last_color())
 }
 
 pub trait ShResultExt {
@@ -145,14 +165,14 @@ impl ShErr {
 		Self { kind, src_span: None, labels: vec![], sources: vec![], notes: vec![msg.into()] }
 	}
 	pub fn at(kind: ShErrKind, span: Span, msg: impl Into<String>) -> Self {
-		let color = next_color();
+		let color = last_color(); // use last_color to ensure the same color is used for the label and the message given
 		let src = span.span_source().clone();
 		let msg: String = msg.into();
 		Self::new(kind, span.clone())
 			.with_label(src, ariadne::Label::new(span).with_color(color).with_message(msg))
 	}
 	pub fn labeled(self, span: Span, msg: impl Into<String>) -> Self {
-		let color = next_color();
+		let color = last_color();
 		let src = span.span_source().clone();
 		let msg: String = msg.into();
 		self.with_label(src, ariadne::Label::new(span).with_color(color).with_message(msg))
@@ -230,7 +250,7 @@ impl ShErr {
 	}
 	pub fn print_error(&self) {
 		let default = || {
-			eprintln!("{}", self.kind);
+			eprintln!("\n{}", self.kind);
 			for note in &self.notes {
 				eprintln!("note: {note}");
 			}
@@ -245,6 +265,7 @@ impl ShErr {
 				.cloned()
 				.ok_or_else(|| format!("Failed to fetch source '{}'", src.name()))
 		});
+		eprintln!();
 		if report.eprint(cache).is_err() {
 			default();
 		}

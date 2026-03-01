@@ -341,7 +341,7 @@ impl ShedVi {
 
         match self.completer.complete(line, cursor_pos, direction) {
 					Err(e) => {
-						self.writer.flush_write(&format!("\n{e}\n\n"))?;
+						e.print_error();
 
 						// Printing the error invalidates the layout
 						self.old_layout = None;

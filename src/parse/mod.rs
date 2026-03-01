@@ -7,7 +7,7 @@ use lex::{LexFlags, LexStream, Span, SpanSource, Tk, TkFlags, TkRule};
 
 use crate::{
   libsh::{
-    error::{ShErr, ShErrKind, ShResult, next_color},
+    error::{ShErr, ShErrKind, ShResult, last_color, next_color},
     utils::{NodeVecUtils, TkVecUtils},
   },
   prelude::*,
@@ -135,7 +135,7 @@ impl Node {
     }
   }
 	pub fn get_context(&self, msg: String) -> (SpanSource, Label<Span>) {
-		let color = next_color();
+		let color = last_color();
 		let span = self.get_span().clone();
 		(
 			span.clone().source().clone(),
@@ -1745,7 +1745,7 @@ pub fn get_redir_file(class: RedirType, path: PathBuf) -> ShResult<File> {
 }
 
 fn parse_err_full(reason: &str, blame: &Span, context: LabelCtx) -> ShErr {
-	let color = next_color();
+	let color = last_color();
 	ShErr::new(ShErrKind::ParseErr, blame.clone())
 		.with_label(
 			blame.span_source().clone(),

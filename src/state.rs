@@ -467,9 +467,7 @@ thread_local! {
 
 /// A shell function
 ///
-/// Consists of the BraceGrp Node and the stored ParsedSrc that the node refers
-/// to. The Node must be stored with the ParsedSrc because the tokens of the
-/// node contain an Arc<String> Which refers to the String held in ParsedSrc
+/// Wraps the BraceGrp Node that forms the body of the function, and provides some helper methods to extract it from the parse tree
 #[derive(Clone, Debug)]
 pub struct ShFunc(Node);
 

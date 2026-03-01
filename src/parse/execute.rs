@@ -315,6 +315,7 @@ impl Dispatcher {
     Ok(())
   }
   fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
+		let blame = subsh.get_span().clone();
     let NdRule::Command { assignments, argv } = subsh.class else {
       unreachable!()
     };
@@ -328,7 +329,7 @@ impl Dispatcher {
       let mut argv = match prepare_argv(argv) {
         Ok(argv) => argv,
         Err(e) => {
-          e.print_error();
+          e.try_blame(blame).print_error();
           return;
         }
       };
@@ -376,7 +377,7 @@ impl Dispatcher {
 
 		blame.rename(func_name.clone());
 
-    let argv = prepare_argv(argv)?;
+    let argv = prepare_argv(argv).try_blame(blame.clone())?;
     let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&func_name)) {
       let _guard = ScopeGuard::exclusive_scope(Some(argv));
 			func_body.body_mut().propagate_context(func_ctx);
@@ -833,6 +834,7 @@ impl Dispatcher {
 		}
   }
   fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
+		let blame = cmd.get_span().clone();
     let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = cmd.class else {
       unreachable!()
@@ -856,7 +858,7 @@ impl Dispatcher {
 
     self.io_stack.append_to_frame(cmd.redirs);
 
-    let exec_args = ExecArgs::new(argv)?;
+    let exec_args = ExecArgs::new(argv).blame(blame)?;
     let _guard = self.io_stack.pop_frame().redirect()?;
     let job = self.job_stack.curr_job_mut().unwrap();
 

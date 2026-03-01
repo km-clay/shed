@@ -433,6 +433,13 @@ impl CompSpec for BashCompSpec {
     if self.function.is_some() {
       candidates.extend(self.exec_comp_func(ctx)?);
     }
+		candidates = candidates.into_iter()
+			.map(|c| {
+				let stripped = c.strip_prefix(&expanded).unwrap_or_default();
+				format!("{prefix}{stripped}")
+			})
+		.collect();
+
 		candidates.sort_by_key(|c| c.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
 
     Ok(candidates)
@@ -766,8 +773,25 @@ impl Completer {
       self.token_span = (cursor_pos, cursor_pos);
     }
 
-    // Try programmable completion first
+    // Use marker-based context detection for sub-token awareness (e.g. VAR_SUB
+    // inside a token). Run this before comp specs so variable completions take
+    // priority over programmable completion.
+    let (mut marker_ctx, token_start) = self.get_completion_context(&line, cursor_pos);
 
+    if marker_ctx.last() == Some(&markers::VAR_SUB) {
+      if let Some(cur) = ctx.words.get(ctx.cword) {
+        self.token_span.0 = token_start;
+        let mut span = cur.span.clone();
+        span.set_range(token_start..self.token_span.1);
+        let raw_tk = span.as_str();
+        let candidates = complete_vars(raw_tk);
+        if !candidates.is_empty() {
+          return Ok(CompResult::from_candidates(candidates));
+        }
+      }
+    }
+
+    // Try programmable completion
     match self.try_comp_spec(&ctx)? {
       CompSpecResult::NoMatch { flags } => {
         if flags.contains(CompOptFlags::DIRNAMES) {
@@ -801,9 +825,6 @@ impl Completer {
 
     self.token_span = (cur_token.span.range().start, cur_token.span.range().end);
 
-    // Use marker-based context detection for sub-token awareness (e.g. VAR_SUB
-    // inside a token)
-    let (mut marker_ctx, token_start) = self.get_completion_context(&line, cursor_pos);
     self.token_span.0 = token_start;
     cur_token
       .span
@@ -828,12 +849,9 @@ impl Completer {
       _ if self.dirs_only => complete_dirs(&expanded),
       Some(markers::COMMAND) => complete_commands(&expanded),
       Some(markers::VAR_SUB) => {
-        let var_candidates = complete_vars(&raw_tk);
-        if var_candidates.is_empty() {
-          complete_filename(&expanded)
-        } else {
-          var_candidates
-        }
+        // Variable completion already tried above and had no matches,
+        // fall through to filename completion
+        complete_filename(&expanded)
       }
       Some(markers::ARG) => complete_filename(&expanded),
       _ => complete_filename(&expanded),

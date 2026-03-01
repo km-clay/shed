@@ -1,6 +1,9 @@
+use std::collections::VecDeque;
+
+use ariadne::Span;
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node}, prelude::*, procio::{IoStack, borrow_fd}, state::{self, VarFlags, VarKind, write_vars}
+  getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node}, prelude::*, procio::{IoStack, borrow_fd}, state::{self, VarFlags, VarKind, read_vars, write_vars}
 };
 
 use super::setup_builtin;
@@ -102,15 +105,19 @@ fn arr_push_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: En
 		return Err(ShErr::at(ShErrKind::ExecFail, blame, "push: missing array name".to_string()));
 	};
 
-	for (val, _) in argv {
+	for (val, span) in argv {
 		let push_val = val.clone();
-		if let Err(e) = write_vars(|v| v.get_arr_mut(&name).map(|arr| match end {
-			End::Front => arr.push_front(push_val),
-			End::Back => arr.push_back(push_val),
-		})) {
-			state::set_status(1);
-			return Err(e);
-		};
+		write_vars(|v| {
+			if let Ok(arr) = v.get_arr_mut(&name) {
+				match end {
+					End::Front => arr.push_front(push_val),
+					End::Back => arr.push_back(push_val),
+				}
+				Ok(())
+			} else {
+				v.set_var(&name, VarKind::Arr(VecDeque::from([push_val])), VarFlags::NONE)
+			}
+		}).blame(span)?;
 	}
 
   state::set_status(0);
