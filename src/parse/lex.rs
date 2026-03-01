@@ -354,10 +354,10 @@ impl LexStream {
             if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
               let span_start = self.cursor;
               self.cursor = pos;
-              return Some(Err(ShErr::full(
+              return Some(Err(ShErr::at(
                 ShErrKind::ParseErr,
-                "Invalid redirection",
                 Span::new(span_start..pos, self.source.clone()),
+                "Invalid redirection",
               )));
             } else {
               tk = self.get_token(self.cursor..pos, TkRule::Redir);
@@ -471,10 +471,10 @@ impl LexStream {
           }
           if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
             self.cursor = pos;
-            return Err(ShErr::full(
+            return Err(ShErr::at(
               ShErrKind::ParseErr,
-              "Unclosed subshell",
               Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+              "Unclosed subshell",
             ));
           }
         }
@@ -539,10 +539,10 @@ impl LexStream {
           }
           if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
             self.cursor = pos;
-            return Err(ShErr::full(
+            return Err(ShErr::at(
               ShErrKind::ParseErr,
-              "Unclosed subshell",
               Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+              "Unclosed subshell",
             ));
           }
         }
@@ -575,10 +575,10 @@ impl LexStream {
           }
           if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
             self.cursor = pos;
-            return Err(ShErr::full(
+            return Err(ShErr::at(
               ShErrKind::ParseErr,
-              "Unclosed subshell",
               Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+              "Unclosed subshell",
             ));
           }
         }
@@ -610,10 +610,10 @@ impl LexStream {
           }
           if paren_count != 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
             self.cursor = pos;
-            return Err(ShErr::full(
+            return Err(ShErr::at(
               ShErrKind::ParseErr,
-              "Unclosed subshell",
               Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+              "Unclosed subshell",
             ));
           }
           let mut subsh_tk = self.get_token(self.cursor..pos, TkRule::Str);
@@ -677,10 +677,10 @@ impl LexStream {
     let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
     if self.quote_state.in_quote() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
       self.cursor = pos;
-      return Err(ShErr::full(
+      return Err(ShErr::at(
         ShErrKind::ParseErr,
-        "Unterminated quote",
         new_tk.span,
+        "Unterminated quote",
       ));
     }
 
@@ -750,10 +750,10 @@ impl Iterator for LexStream {
         if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
           let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
           self.flags |= LexFlags::STALE;
-          return Err(ShErr::full(
+          return Err(ShErr::at(
             ShErrKind::ParseErr,
-            "Unclosed brace group",
             Span::new(start..self.cursor, self.source.clone()),
+            "Unclosed brace group",
           ))
           .into();
         }
@@ -789,10 +789,10 @@ impl Iterator for LexStream {
     if self.cursor == self.source.len() {
       if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
         let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
-        return Err(ShErr::full(
+        return Err(ShErr::at(
           ShErrKind::ParseErr,
-          "Unclosed brace group",
           Span::new(start..self.cursor, self.source.clone()),
+          "Unclosed brace group",
         ))
         .into();
       }

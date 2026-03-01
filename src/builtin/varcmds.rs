@@ -75,20 +75,12 @@ pub fn unset(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
   let argv = argv.unwrap();
 
   if argv.is_empty() {
-    return Err(ShErr::full(
-      ShErrKind::SyntaxErr,
-      "unset: Expected at least one argument",
-      blame,
-    ));
+    return Err(ShErr::at(ShErrKind::SyntaxErr, blame, "unset: Expected at least one argument"));
   }
 
   for (arg, span) in argv {
     if !read_vars(|v| v.var_exists(&arg)) {
-      return Err(ShErr::full(
-        ShErrKind::ExecFail,
-        format!("unset: No such variable '{arg}'"),
-        span,
-      ));
+      return Err(ShErr::at(ShErrKind::ExecFail, span, format!("unset: No such variable '{arg}'")));
     }
     write_vars(|v| v.unset_var(&arg))?;
   }

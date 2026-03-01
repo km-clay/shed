@@ -21,11 +21,7 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
     let (arg, span) = argv.into_iter().next().unwrap();
 
     let Ok(status) = arg.parse::<i32>() else {
-      return Err(ShErr::full(
-        ShErrKind::SyntaxErr,
-        format!("{cmd}: Expected a number"),
-        span,
-      ));
+      return Err(ShErr::at(ShErrKind::SyntaxErr, span, format!("{cmd}: Expected a number")));
     };
 
     code = status;

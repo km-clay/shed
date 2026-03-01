@@ -2,7 +2,8 @@ use std::{
   cell::Cell, collections::{HashSet, VecDeque}, os::unix::fs::PermissionsExt
 };
 
-use ariadne::{Fmt, Label};
+
+use ariadne::{Fmt, Label, Span as AriadneSpan};
 
 use crate::{
   builtin::{
@@ -294,10 +295,10 @@ impl Dispatcher {
     let name = name.span.as_str().strip_suffix("()").unwrap();
 
     if KEYWORDS.contains(&name) {
-      return Err(ShErr::full(
+      return Err(ShErr::at(
         ShErrKind::SyntaxErr,
-        format!("function: Forbidden function name `{name}`"),
         blame,
+        format!("function: Forbidden function name `{name}`"),
       ));
     }
 
@@ -342,6 +343,8 @@ impl Dispatcher {
   }
   fn exec_func(&mut self, func: Node) -> ShResult<()> {
     let mut blame = func.get_span().clone();
+		let func_name = func.get_command().unwrap().to_string();
+		let func_ctx = func.get_context(format!("in call to function '{}'",func_name.fg(next_color())));
     let NdRule::Command {
       assignments,
       mut argv,
@@ -358,24 +361,25 @@ impl Dispatcher {
     });
     if depth > max_depth {
       RECURSE_DEPTH.with(|d| d.set(d.get() - 1));
-      return Err(ShErr::full(
+      return Err(ShErr::at(
         ShErrKind::InternalErr,
-        format!("maximum recursion depth ({max_depth}) exceeded"),
         blame,
+        format!("maximum recursion depth ({max_depth}) exceeded"),
       ));
     }
 
     let env_vars = self.set_assignments(assignments, AssignBehavior::Export)?;
+    let func_name = argv.remove(0).to_string();
     let _var_guard = VarCtxGuard::new(env_vars.into_iter().collect());
 
     self.io_stack.append_to_frame(func.redirs);
 
-    let func_name = argv.remove(0).span.as_str().to_string();
 		blame.rename(func_name.clone());
 
     let argv = prepare_argv(argv)?;
     let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&func_name)) {
       let _guard = ScopeGuard::exclusive_scope(Some(argv));
+			func_body.body_mut().propagate_context(func_ctx);
       func_body.body_mut().flags = func.flags;
 
       if let Err(e) = self.exec_brc_grp(func_body.body().clone()) {
@@ -384,16 +388,16 @@ impl Dispatcher {
             state::set_status(*code);
             Ok(())
           }
-          _ => Err(e),
+          _ => Err(e)
         }
       } else {
         Ok(())
       }
     } else {
-      Err(ShErr::full(
+      Err(ShErr::at(
         ShErrKind::InternalErr,
-        format!("Failed to find function '{}'", func_name),
         blame,
+        format!("Failed to find function '{}'", func_name),
       ))
     };
 
@@ -747,6 +751,7 @@ impl Dispatcher {
   }
   fn dispatch_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
     let cmd_raw = cmd.get_command().unwrap().to_string();
+		let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = &mut cmd.class else {
       unreachable!()
     };
@@ -773,7 +778,7 @@ impl Dispatcher {
       }
       return self.exec_cmd(cmd);
     }
-    match cmd_raw.as_str() {
+    let result = match cmd_raw.as_str() {
       "echo" => echo(cmd, io_stack_mut, curr_job_mut),
       "cd" => cd(cmd, curr_job_mut),
       "export" => export(cmd, io_stack_mut, curr_job_mut),
@@ -819,7 +824,13 @@ impl Dispatcher {
         Ok(())
       }
       _ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw),
-    }
+    };
+
+		if let Err(e) = result {
+			Err(e.with_context(context))
+		} else {
+			Ok(())
+		}
   }
   fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
     let context = cmd.context.clone();
@@ -859,20 +870,13 @@ impl Dispatcher {
       let cmd_str = cmd.to_str().unwrap().to_string();
       match e {
         Errno::ENOENT => {
-          let source = span.span_source().clone();
-					let color = next_color();
-          ShErr::full(ShErrKind::CmdNotFound, "", span.clone())
-						.with_label(
-							source,
-							Label::new(span)
-								.with_color(color)
-								.with_message(format!("{}: command not found", cmd_str.fg(color)))
-						)
+          ShErr::new(ShErrKind::CmdNotFound, span.clone())
+						.labeled(span, format!("{cmd_str}: command not found"))
 						.with_context(context)
 						.print_error();
         }
         _ => {
-          ShErr::full(ShErrKind::Errno(e), format!("{e}"), span)
+          ShErr::at(ShErrKind::Errno(e), span, format!("{e}"))
 						.with_context(context)
 						.print_error();
         }

@@ -1,4 +1,5 @@
-use ariadne::{Fmt, Label, Span};
+use ariadne::Fmt;
+use yansi::Color;
 
 use crate::{
   jobs::JobBldr,
@@ -12,7 +13,6 @@ use super::setup_builtin;
 
 pub fn cd(node: Node, job: &mut JobBldr) -> ShResult<()> {
   let span = node.get_span();
-	let src = span.source();
   let NdRule::Command {
     assignments: _,
     argv,
@@ -32,39 +32,28 @@ pub fn cd(node: Node, job: &mut JobBldr) -> ShResult<()> {
   };
 
   if !new_dir.exists() {
-		let color = next_color();
 		let mut err = ShErr::new(
 			ShErrKind::ExecFail,
 			span.clone(),
-		).with_label(src.clone(), Label::new(cd_span.clone()).with_color(color).with_message("Failed to change directory"));
+		).labeled(cd_span.clone(), "Failed to change directory");
 		if let Some(span) = arg_span {
-			let color = next_color();
-			err = err.with_label(src.clone(), Label::new(span).with_color(color).with_message(format!("No such file or directory '{}'", new_dir.display().fg(color))));
+			err = err.labeled(span, format!("No such file or directory '{}'", new_dir.display().fg(next_color())));
 		}
 		return Err(err);
   }
 
   if !new_dir.is_dir() {
-    return Err(ShErr::full(
-      ShErrKind::ExecFail,
-      format!("cd: Not a directory '{}'", new_dir.display()),
-      span,
-    ));
+    return Err(ShErr::new(ShErrKind::ExecFail, span.clone())
+      .labeled(cd_span.clone(), format!("cd: Not a directory '{}'", new_dir.display().fg(next_color()))));
   }
 
   if let Err(e) = env::set_current_dir(new_dir) {
-    return Err(ShErr::full(
-      ShErrKind::ExecFail,
-      format!("cd: Failed to change directory: {}", e),
-      span,
-    ));
+    return Err(ShErr::new(ShErrKind::ExecFail, span.clone())
+      .labeled(cd_span.clone(), format!("cd: Failed to change directory: '{}'", e.fg(Color::Red))));
   }
   let new_dir = env::current_dir().map_err(|e| {
-    ShErr::full(
-      ShErrKind::ExecFail,
-      format!("cd: Failed to get current directory: {}", e),
-      span,
-    )
+    ShErr::new(ShErrKind::ExecFail, span.clone())
+      .labeled(cd_span.clone(), format!("cd: Failed to get current directory: '{}'", e.fg(Color::Red)))
   })?;
   unsafe { env::set_var("PWD", new_dir) };
 

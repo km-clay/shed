@@ -704,7 +704,11 @@ pub fn term_ctlr() -> Pid {
 /// Calls attach_tty() on the shell's process group to retake control of the
 /// terminal
 pub fn take_term() -> ShResult<()> {
+	// take the terminal back
   attach_tty(getpgrp())?;
+
+	// send SIGWINCH to tell readline to update its window size in case it changed while we were in the background
+	killpg(getpgrp(), Signal::SIGWINCH)?;
   Ok(())
 }
 

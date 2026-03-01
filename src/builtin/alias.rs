@@ -38,19 +38,11 @@ pub fn alias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
   } else {
     for (arg, span) in argv {
       if arg == "command" || arg == "builtin" {
-        return Err(ShErr::full(
-          ShErrKind::ExecFail,
-          format!("alias: Cannot assign alias to reserved name '{arg}'"),
-          span,
-        ));
+        return Err(ShErr::at(ShErrKind::ExecFail, span, format!("alias: Cannot assign alias to reserved name '{arg}'")));
       }
 
       let Some((name, body)) = arg.split_once('=') else {
-        return Err(ShErr::full(
-          ShErrKind::SyntaxErr,
-          "alias: Expected an assignment in alias args",
-          span,
-        ));
+        return Err(ShErr::at(ShErrKind::SyntaxErr, span, "alias: Expected an assignment in alias args"));
       };
       write_logic(|l| l.insert_alias(name, body));
     }
@@ -88,11 +80,7 @@ pub fn unalias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResul
   } else {
     for (arg, span) in argv {
       if read_logic(|l| l.get_alias(&arg)).is_none() {
-        return Err(ShErr::full(
-          ShErrKind::SyntaxErr,
-          format!("unalias: alias '{arg}' not found"),
-          span,
-        ));
+        return Err(ShErr::at(ShErrKind::SyntaxErr, span, format!("unalias: alias '{arg}' not found")));
       };
       write_logic(|l| l.remove_alias(&arg))
     }

@@ -84,6 +84,7 @@ fn arr_pop_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: End
 }
 
 fn arr_push_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: End) -> ShResult<()> {
+	let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
     argv,
@@ -99,7 +100,7 @@ fn arr_push_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: En
 
 	let mut argv = argv.into_iter();
 	let Some((name, _)) = argv.next() else {
-		return Err(ShErr::simple(ShErrKind::ExecFail, "push: missing array name".to_string()));
+		return Err(ShErr::at(ShErrKind::ExecFail, blame, "push: missing array name".to_string()));
 	};
 
 	for (val, _) in argv {

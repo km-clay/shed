@@ -33,17 +33,13 @@ pub fn continue_job(node: Node, job: &mut JobBldr, behavior: JobBehavior) -> ShR
   let mut argv = argv.into_iter();
 
   if read_jobs(|j| j.get_fg().is_some()) {
-    return Err(ShErr::full(
-      ShErrKind::InternalErr,
-      format!("Somehow called '{}' with an existing foreground job", cmd),
-      blame,
-    ));
+    return Err(ShErr::at(ShErrKind::InternalErr, blame, format!("Somehow called '{}' with an existing foreground job", cmd)));
   }
 
   let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {
     id
   } else {
-    return Err(ShErr::full(ShErrKind::ExecFail, "No jobs found", blame));
+    return Err(ShErr::at(ShErrKind::ExecFail, blame, "No jobs found"));
   };
 
   let tabid = match argv.next() {
@@ -57,11 +53,7 @@ pub fn continue_job(node: Node, job: &mut JobBldr, behavior: JobBehavior) -> ShR
     if query_result.is_some() {
       Ok(j.remove_job(id.clone()).unwrap())
     } else {
-      Err(ShErr::full(
-        ShErrKind::ExecFail,
-        format!("Job id `{}' not found", tabid),
-        blame,
-      ))
+      Err(ShErr::at(ShErrKind::ExecFail, blame.clone(), format!("Job id `{}' not found", tabid)))
     }
   })?;
 
@@ -96,11 +88,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
       });
       match result {
         Some(id) => Ok(id),
-        None => Err(ShErr::full(
-          ShErrKind::InternalErr,
-          "Found a job but no table id in parse_job_id()",
-          blame,
-        )),
+        None => Err(ShErr::at(ShErrKind::InternalErr, blame, "Found a job but no table id in parse_job_id()")),
       }
     }
   } else if arg.chars().all(|ch| ch.is_ascii_digit()) {
@@ -120,18 +108,10 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 
     match result {
       Some(id) => Ok(id),
-      None => Err(ShErr::full(
-        ShErrKind::InternalErr,
-        "Found a job but no table id in parse_job_id()",
-        blame,
-      )),
+      None => Err(ShErr::at(ShErrKind::InternalErr, blame, "Found a job but no table id in parse_job_id()")),
     }
   } else {
-    Err(ShErr::full(
-      ShErrKind::SyntaxErr,
-      format!("Invalid arg: {}", arg),
-      blame,
-    ))
+    Err(ShErr::at(ShErrKind::SyntaxErr, blame, format!("Invalid arg: {}", arg)))
   }
 }
 
@@ -151,11 +131,7 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
   for (arg, span) in argv {
     let mut chars = arg.chars().peekable();
     if chars.peek().is_none_or(|ch| *ch != '-') {
-      return Err(ShErr::full(
-        ShErrKind::SyntaxErr,
-        "Invalid flag in jobs call",
-        span,
-      ));
+      return Err(ShErr::at(ShErrKind::SyntaxErr, span, "Invalid flag in jobs call"));
     }
     chars.next();
     for ch in chars {
@@ -166,11 +142,7 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
         'r' => JobCmdFlags::RUNNING,
         's' => JobCmdFlags::STOPPED,
         _ => {
-          return Err(ShErr::full(
-            ShErrKind::SyntaxErr,
-            "Invalid flag in jobs call",
-            span,
-          ));
+          return Err(ShErr::at(ShErrKind::SyntaxErr, span, "Invalid flag in jobs call"));
         }
       };
       flags |= flag
@@ -199,11 +171,7 @@ pub fn disown(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
   let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {
     id
   } else {
-    return Err(ShErr::full(
-      ShErrKind::ExecFail,
-      "disown: No jobs to disown",
-      blame,
-    ));
+    return Err(ShErr::at(ShErrKind::ExecFail, blame, "disown: No jobs to disown"));
   };
 
   let mut tabid = curr_job_id;

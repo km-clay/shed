@@ -7,7 +7,7 @@ fn cmd_not_found() {
     .next()
     .unwrap()
     .unwrap();
-  let err = ShErr::full(ShErrKind::CmdNotFound("foo".into()), "", token.span);
+  let err = ShErr::at(ShErrKind::CmdNotFound, token.span, "");
 
   let err_fmt = format!("{err}");
   insta::assert_snapshot!(err_fmt)

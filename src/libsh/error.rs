@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use ariadne::Color;
 use ariadne::{Report, ReportKind};
@@ -13,7 +13,9 @@ use crate::{
 
 pub type ShResult<T> = Result<T, ShErr>;
 
-pub struct ColorRng;
+pub struct ColorRng {
+	last_color: Option<Color>,
+}
 
 impl ColorRng {
 	fn get_colors() -> &'static [Color] {
@@ -51,7 +53,7 @@ impl Iterator for ColorRng {
 }
 
 thread_local! {
-	static COLOR_RNG: RefCell<ColorRng> = const { RefCell::new(ColorRng) };
+	static COLOR_RNG: RefCell<ColorRng> = const { RefCell::new(ColorRng { last_color: None }) };
 }
 
 pub fn next_color() -> Color {
@@ -144,8 +146,18 @@ impl ShErr {
 	pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
 		Self { kind, src_span: None, labels: vec![], sources: vec![], notes: vec![msg.into()] }
 	}
-	pub fn full(kind: ShErrKind, msg: impl Into<String>, span: Span) -> Self {
-		Self { kind, src_span: Some(span), labels: vec![], sources: vec![], notes: vec![msg.into()] }
+	pub fn at(kind: ShErrKind, span: Span, msg: impl Into<String>) -> Self {
+		let color = next_color();
+		let src = span.span_source().clone();
+		let msg: String = msg.into();
+		Self::new(kind, span.clone())
+			.with_label(src, ariadne::Label::new(span).with_color(color).with_message(msg))
+	}
+	pub fn labeled(self, span: Span, msg: impl Into<String>) -> Self {
+		let color = next_color();
+		let src = span.span_source().clone();
+		let msg: String = msg.into();
+		self.with_label(src, ariadne::Label::new(span).with_color(color).with_message(msg))
 	}
 	pub fn blame(self, span: Span) -> Self {
 		let ShErr { kind, src_span: _, labels, sources, notes } = self;
@@ -172,7 +184,7 @@ impl ShErr {
 		labels.push(label);
 		Self { kind, src_span, labels, sources, notes }
 	}
-	pub fn with_context(self, ctx: Vec<(SpanSource, ariadne::Label<Span>)>) -> Self {
+	pub fn with_context(self, ctx: VecDeque<(SpanSource, ariadne::Label<Span>)>) -> Self {
 		let ShErr { kind, src_span, mut labels, mut sources, notes } = self;
 		for (src, label) in ctx {
 			sources.push(src);

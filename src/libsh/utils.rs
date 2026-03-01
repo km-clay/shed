@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
 
+use ariadne::Span as AriadneSpan;
+
 use crate::parse::lex::{Span, Tk, TkRule};
-use crate::parse::{Redir, RedirType};
+use crate::parse::{Node, Redir, RedirType};
 use crate::prelude::*;
 
 pub trait VecDequeExt<T> {
@@ -25,6 +27,10 @@ pub trait RedirVecUtils<Redir> {
   ///
   /// One vector contains input redirs, the other contains output redirs
   fn split_by_channel(self) -> (Vec<Redir>, Vec<Redir>);
+}
+
+pub trait NodeVecUtils<Node> {
+	fn get_span(&self) -> Option<Span>;
 }
 
 impl<T> VecDequeExt<T> for VecDeque<T> {
@@ -122,5 +128,19 @@ impl RedirVecUtils<Redir> for Vec<Redir> {
       }
     }
     (input, output)
+  }
+}
+
+impl NodeVecUtils<Node> for Vec<Node> {
+  fn get_span(&self) -> Option<Span> {
+    if let Some(first_nd) = self.first()
+		&& let Some(last_nd) = self.last() {
+			let first_start = first_nd.get_span().range().start;
+			let last_end = last_nd.get_span().range().end;
+			if first_start <= last_end {
+				return Some(Span::new(first_start..last_end, first_nd.get_span().source().content()));
+			}
+    }
+		None
   }
 }

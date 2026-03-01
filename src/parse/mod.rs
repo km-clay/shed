@@ -1,6 +1,6 @@
-use std::{fmt::Debug, str::FromStr, sync::Arc};
+use std::{collections::VecDeque, fmt::Debug, str::FromStr, sync::Arc};
 
-use ariadne::{Fmt, Label};
+use ariadne::{Fmt, Label, Span as AriadneSpan};
 use bitflags::bitflags;
 use fmt::Display;
 use lex::{LexFlags, LexStream, Span, SpanSource, Tk, TkFlags, TkRule};
@@ -9,7 +9,7 @@ use yansi::Color;
 use crate::{
   libsh::{
     error::{Note, ShErr, ShErrKind, ShResult, next_color},
-    utils::TkVecUtils,
+    utils::{NodeVecUtils, TkVecUtils},
   },
   prelude::*,
   procio::IoMode,
@@ -56,7 +56,7 @@ impl ParsedSrc {
       src,
       ast: Ast::new(vec![]),
       lex_flags: LexFlags::empty(),
-      context: vec![],
+      context: VecDeque::new(),
     }
   }
   pub fn with_lex_flags(mut self, flags: LexFlags) -> Self {
@@ -97,7 +97,7 @@ impl ParsedSrc {
   }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct Ast(Vec<Node>);
 
 impl Ast {
@@ -112,7 +112,7 @@ impl Ast {
   }
 }
 
-pub type LabelCtx = Vec<(SpanSource, Label<Span>)>;
+pub type LabelCtx = VecDeque<(SpanSource, Label<Span>)>;
 
 #[derive(Clone, Debug)]
 pub struct Node {
@@ -135,6 +135,108 @@ impl Node {
       None
     }
   }
+	pub fn get_context(&self, msg: String) -> (SpanSource, Label<Span>) {
+		let color = next_color();
+		let span = self.get_span().clone();
+		(
+			span.clone().source().clone(),
+			Label::new(span).with_color(color).with_message(msg)
+		)
+	}
+	fn walk_tree<F: Fn(&mut Node)>(&mut self, f: &F) {
+		f(self);
+
+		match self.class {
+			NdRule::IfNode {
+				ref mut cond_nodes,
+				ref mut else_block,
+			} => {
+				for node in cond_nodes {
+					let CondNode { cond, body } = node;
+					cond.walk_tree(f);
+					for body_node in body {
+						body_node.walk_tree(f);
+					}
+				}
+
+				for else_node in else_block {
+					else_node.walk_tree(f);
+				}
+			}
+			NdRule::LoopNode {
+				kind: _,
+				ref mut cond_node,
+			} => {
+				let CondNode { cond, body } = cond_node;
+				cond.walk_tree(f);
+				for body_node in body {
+					body_node.walk_tree(f);
+				}
+			}
+			NdRule::ForNode {
+				vars: _,
+				arr: _,
+				ref mut body,
+			} => {
+				for body_node in body {
+					body_node.walk_tree(f);
+				}
+			}
+			NdRule::CaseNode {
+				pattern: _,
+				ref mut case_blocks,
+			} => {
+				for block in case_blocks {
+					let CaseNode { pattern: _, body } = block;
+					for body_node in body {
+						body_node.walk_tree(f);
+					}
+				}
+			}
+			NdRule::Command {
+				ref mut assignments,
+				argv: _,
+			} => {
+				for assign_node in assignments {
+					assign_node.walk_tree(f);
+				}
+			}
+			NdRule::Pipeline {
+				ref mut cmds,
+				pipe_err: _,
+			} => {
+				for cmd_node in cmds {
+					cmd_node.walk_tree(f);
+				}
+			}
+			NdRule::Conjunction { ref mut elements } => {
+				for node in elements.iter_mut() {
+					let ConjunctNode { cmd, operator: _ } = node;
+					cmd.walk_tree(f);
+				}
+			}
+			NdRule::Assignment {
+				kind: _,
+				var: _,
+				val: _,
+			} => (), // No nodes to check
+			NdRule::BraceGrp { ref mut body } => {
+				for body_node in body {
+					body_node.walk_tree(f);
+				}
+			}
+			NdRule::FuncDef {
+				name: _,
+				ref mut body,
+			} => {
+				body.walk_tree(f);
+			}
+			NdRule::Test { cases: _ } => (),
+		}
+	}
+	pub fn propagate_context(&mut self, ctx: (SpanSource, Label<Span>)) {
+		self.walk_tree(&|nd| nd.context.push_back(ctx.clone()));
+	}
   pub fn get_span(&self) -> Span {
     let Some(first_tk) = self.tokens.first() else {
       unreachable!()
@@ -565,7 +667,7 @@ impl Debug for ParseStream {
 
 impl ParseStream {
   pub fn new(tokens: Vec<Tk>) -> Self {
-    Self { tokens, context: vec![] }
+    Self { tokens, context: VecDeque::new() }
   }
   pub fn with_context(tokens: Vec<Tk>, context: LabelCtx) -> Self {
     Self { tokens, context }
@@ -726,7 +828,7 @@ impl ParseStream {
 		src.rename(name_raw.clone());
 		let color = next_color();
 		// Push a placeholder context so child nodes inherit it
-		self.context.push((
+		self.context.push_back((
 			src.clone(),
 			Label::new(name_tk.span.clone().with_name(name_raw.clone()))
 				.with_message(format!("in function '{}' defined here", name_raw.clone().fg(color)))
@@ -734,7 +836,7 @@ impl ParseStream {
 		));
 
     let Some(brc_grp) = self.parse_brc_grp(true /* from_func_def */)? else {
-			self.context.pop();
+			self.context.pop_back();
       return Err(parse_err_full(
         "Expected a brace group after function name",
         &node_tks.get_span().unwrap(),
@@ -743,14 +845,7 @@ impl ParseStream {
     };
     body = Box::new(brc_grp);
 		// Replace placeholder with full-span label
-		self.context.pop();
-		let full_span = body.get_span();
-		self.context.push((
-			src,
-			Label::new(full_span.with_name(name_raw.clone()))
-				.with_message(format!("in function '{}' called here", name_raw.fg(color)))
-				.with_color(color),
-		));
+		self.context.pop_back();
 
     let node = Node {
       class: NdRule::FuncDef { name, body },
@@ -760,7 +855,7 @@ impl ParseStream {
 			context: self.context.clone()
     };
 
-		self.context.pop();
+		self.context.pop_back();
     Ok(Some(node))
   }
   fn panic_mode(&mut self, node_tks: &mut Vec<Tk>) {
@@ -906,10 +1001,10 @@ impl ParseStream {
         let path_tk = self.next_tk();
 
         if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
-          return Err(ShErr::full(
+          return Err(ShErr::at(
             ShErrKind::ParseErr,
-            "Expected a filename after this redirection",
             tk.span.clone(),
+            "Expected a filename after this redirection",
           ));
         };
 
@@ -1412,6 +1507,14 @@ impl ParseStream {
         // If we have assignments but no command word,
         // return the assignment-only command without parsing more tokens
         self.commit(node_tks.len());
+				let mut context = self.context.clone();
+				let assignments_span = assignments.get_span().unwrap();
+				context.push_back((
+					assignments_span.source().clone(),
+					Label::new(assignments_span)
+						.with_message("in variable assignment defined here".to_string())
+						.with_color(next_color())
+				));
         return Ok(Some(Node {
           class: NdRule::Command { assignments, argv },
           tokens: node_tks,
@@ -1448,10 +1551,11 @@ impl ParseStream {
             let path_tk = tk_iter.next();
 
             if path_tk.is_none_or(|tk| tk.class == TkRule::EOI) {
-              return Err(ShErr::full(
+							self.panic_mode(&mut node_tks);
+              return Err(ShErr::at(
                 ShErrKind::ParseErr,
-                "Expected a filename after this redirection",
                 tk.span.clone(),
+                "Expected a filename after this redirection",
               ));
             };
 

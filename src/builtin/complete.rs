@@ -206,11 +206,7 @@ pub fn complete_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -
 
   if argv.is_empty() {
     state::set_status(1);
-    return Err(ShErr::full(
-      ShErrKind::ExecFail,
-      "complete: no command specified",
-      blame,
-    ));
+    return Err(ShErr::at(ShErrKind::ExecFail, blame, "complete: no command specified"));
   }
 
   let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
@@ -285,11 +281,8 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
         "dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
         "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
         _ => {
-          return Err(ShErr::full(
-            ShErrKind::InvalidOpt,
-            format!("complete: invalid option: {}", opt_flag),
-            Default::default(),
-          ));
+          let span: crate::parse::lex::Span = Default::default();
+          return Err(ShErr::at(ShErrKind::InvalidOpt, span, format!("complete: invalid option: {}", opt_flag)));
         }
       },
 

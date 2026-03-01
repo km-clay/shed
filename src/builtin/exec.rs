@@ -1,4 +1,3 @@
-use ariadne::Label;
 use nix::{errno::Errno, unistd::execvpe};
 
 use crate::{
@@ -43,13 +42,9 @@ pub fn exec_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> Sh
   let cmd_str = cmd.to_str().unwrap().to_string();
   match e {
     Errno::ENOENT => Err(
-			ShErr::full(ShErrKind::CmdNotFound, "", span.clone())
-				.with_label(
-					span.span_source().clone(),
-					Label::new(span.clone())
-						.with_message(format!("exec: command not found: {}", cmd_str))
-				)
+			ShErr::new(ShErrKind::CmdNotFound, span.clone())
+				.labeled(span, format!("exec: command not found: {}", cmd_str))
 		),
-    _ => Err(ShErr::full(ShErrKind::Errno(e), format!("{e}"), span)),
+    _ => Err(ShErr::at(ShErrKind::Errno(e), span, format!("{e}"))),
   }
 }

@@ -23,18 +23,10 @@ pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
   for (arg, span) in argv {
     let path = PathBuf::from(arg);
     if !path.exists() {
-      return Err(ShErr::full(
-        ShErrKind::ExecFail,
-        format!("source: File '{}' not found", path.display()),
-        span,
-      ));
+      return Err(ShErr::at(ShErrKind::ExecFail, span, format!("source: File '{}' not found", path.display())));
     }
     if !path.is_file() {
-      return Err(ShErr::full(
-        ShErrKind::ExecFail,
-        format!("source: Given path '{}' is not a file", path.display()),
-        span,
-      ));
+      return Err(ShErr::at(ShErrKind::ExecFail, span, format!("source: Given path '{}' is not a file", path.display())));
     }
     source_file(path)?;
   }

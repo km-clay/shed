@@ -47,26 +47,18 @@ fn print_dirs() -> ShResult<()> {
 
 fn change_directory(target: &PathBuf, blame: Span) -> ShResult<()> {
   if !target.is_dir() {
-    return Err(ShErr::full(
-      ShErrKind::ExecFail,
-      format!("not a directory: {}", target.display()),
-      blame,
-    ));
+    return Err(
+      ShErr::at(ShErrKind::ExecFail, blame, format!("not a directory: {}", target.display()))
+    );
   }
 
   if let Err(e) = env::set_current_dir(target) {
-    return Err(ShErr::full(
-      ShErrKind::ExecFail,
-      format!("Failed to change directory: {}", e),
-      blame,
-    ));
+    return Err(
+      ShErr::at(ShErrKind::ExecFail, blame, format!("Failed to change directory: {}", e))
+    );
   }
   let new_dir = env::current_dir().map_err(|e| {
-    ShErr::full(
-      ShErrKind::ExecFail,
-      format!("Failed to get current directory: {}", e),
-      blame,
-    )
+    ShErr::at(ShErrKind::ExecFail, blame, format!("Failed to get current directory: {}", e))
   })?;
   unsafe { env::set_var("PWD", new_dir) };
   Ok(())
@@ -82,32 +74,24 @@ fn parse_stack_idx(arg: &str, blame: Span, cmd: &str) -> ShResult<StackIdx> {
   };
 
   if digits.is_empty() {
-    return Err(ShErr::full(
-      ShErrKind::ExecFail,
-      format!(
+    return Err(
+      ShErr::at(ShErrKind::ExecFail, blame, format!(
         "{cmd}: missing index after '{}'",
         if from_top { "+" } else { "-" }
-      ),
-      blame,
-    ));
+      ))
+    );
   }
 
   for ch in digits.chars() {
     if !ch.is_ascii_digit() {
-      return Err(ShErr::full(
-        ShErrKind::ExecFail,
-        format!("{cmd}: invalid argument: {arg}"),
-        blame,
-      ));
+      return Err(
+        ShErr::at(ShErrKind::ExecFail, blame, format!("{cmd}: invalid argument: {arg}"))
+      );
     }
   }
 
   let n = digits.parse::<usize>().map_err(|e| {
-    ShErr::full(
-      ShErrKind::ExecFail,
-      format!("{cmd}: invalid index: {e}"),
-      blame,
-    )
+    ShErr::at(ShErrKind::ExecFail, blame, format!("{cmd}: invalid index: {e}"))
   })?;
 
   if from_top {
@@ -142,26 +126,20 @@ pub fn pushd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
     } else if arg == "-n" {
       no_cd = true;
     } else if arg.starts_with('-') {
-      return Err(ShErr::full(
-        ShErrKind::ExecFail,
-        format!("pushd: invalid option: {arg}"),
-        blame.clone(),
-      ));
+      return Err(
+        ShErr::at(ShErrKind::ExecFail, blame, format!("pushd: invalid option: {arg}"))
+      );
     } else {
       if dir.is_some() {
-        return Err(ShErr::full(
-          ShErrKind::ExecFail,
-          "pushd: too many arguments".to_string(),
-          blame.clone(),
-        ));
+        return Err(
+          ShErr::at(ShErrKind::ExecFail, blame, "pushd: too many arguments")
+        );
       }
       let target = PathBuf::from(&arg);
       if !target.is_dir() {
-        return Err(ShErr::full(
-          ShErrKind::ExecFail,
-          format!("pushd: not a directory: {arg}"),
-          blame.clone(),
-        ));
+        return Err(
+          ShErr::at(ShErrKind::ExecFail, blame, format!("pushd: not a directory: {arg}"))
+        );
       }
       dir = Some(target);
     }
@@ -228,11 +206,9 @@ pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     } else if arg == "-n" {
       no_cd = true;
     } else if arg.starts_with('-') {
-      return Err(ShErr::full(
-        ShErrKind::ExecFail,
-        format!("popd: invalid option: {arg}"),
-        blame.clone(),
-      ));
+      return Err(
+        ShErr::at(ShErrKind::ExecFail, blame, format!("popd: invalid option: {arg}"))
+      );
     }
   }
 
@@ -245,11 +221,9 @@ pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
           if let Some(dir) = dir {
             change_directory(&dir, blame.clone())?;
           } else {
-            return Err(ShErr::full(
-              ShErrKind::ExecFail,
-              "popd: directory stack empty".to_string(),
-              blame.clone(),
-            ));
+            return Err(
+              ShErr::at(ShErrKind::ExecFail, blame, "popd: directory stack empty")
+            );
           }
         }
       }
@@ -259,11 +233,9 @@ pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
           let dirs = m.dirs_mut();
           let idx = n - 1;
           if idx >= dirs.len() {
-            return Err(ShErr::full(
-              ShErrKind::ExecFail,
-              format!("popd: directory index out of range: +{n}"),
-              blame.clone(),
-            ));
+            return Err(
+              ShErr::at(ShErrKind::ExecFail, blame.clone(), format!("popd: directory index out of range: +{n}"))
+            );
           }
           dirs.remove(idx);
           Ok(())
@@ -273,11 +245,7 @@ pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
         write_meta(|m| -> ShResult<()> {
           let dirs = m.dirs_mut();
           let actual = dirs.len().checked_sub(n + 1).ok_or_else(|| {
-            ShErr::full(
-              ShErrKind::ExecFail,
-              format!("popd: directory index out of range: -{n}"),
-              blame.clone(),
-            )
+            ShErr::at(ShErrKind::ExecFail, blame.clone(), format!("popd: directory index out of range: -{n}"))
           })?;
           dirs.remove(actual);
           Ok(())
@@ -297,11 +265,9 @@ pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
       change_directory(&dir, blame.clone())?;
       print_dirs()?;
     } else {
-      return Err(ShErr::full(
-        ShErrKind::ExecFail,
-        "popd: directory stack empty".to_string(),
-        blame.clone(),
-      ));
+      return Err(
+        ShErr::at(ShErrKind::ExecFail, blame, "popd: directory stack empty")
+      );
     }
   }
 
@@ -340,18 +306,14 @@ pub fn dirs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
         target_idx = Some(parse_stack_idx(&arg, blame.clone(), "dirs")?);
       }
       _ if arg.starts_with('-') => {
-        return Err(ShErr::full(
-          ShErrKind::ExecFail,
-          format!("dirs: invalid option: {arg}"),
-          blame.clone(),
-        ));
+        return Err(
+          ShErr::at(ShErrKind::ExecFail, blame, format!("dirs: invalid option: {arg}"))
+        );
       }
       _ => {
-        return Err(ShErr::full(
-          ShErrKind::ExecFail,
-          format!("dirs: unexpected argument: {arg}"),
-          blame.clone(),
-        ));
+        return Err(
+          ShErr::at(ShErrKind::ExecFail, blame, format!("dirs: unexpected argument: {arg}"))
+        );
       }
     }
   }
@@ -396,17 +358,15 @@ pub fn dirs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     if let Some(dir) = target {
       dirs = vec![dir.clone()];
     } else {
-      return Err(ShErr::full(
-        ShErrKind::ExecFail,
-        format!(
+      return Err(
+        ShErr::at(ShErrKind::ExecFail, blame, format!(
           "dirs: directory index out of range: {}",
           match idx {
             StackIdx::FromTop(n) => format!("+{n}"),
             StackIdx::FromBottom(n) => format!("-{n}"),
           }
-        ),
-        blame.clone(),
-      ));
+        ))
+      );
     }
   }
 

@@ -138,11 +138,7 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         let operand = operand.expand()?.get_words().join(" ");
         conjunct_op = conjunct;
         let TestOp::Unary(op) = TestOp::from_str(operator.as_str())? else {
-					return Err(ShErr::full(
-						ShErrKind::SyntaxErr,
-						"Invalid unary operator",
-						err_span,
-					));
+					return Err(ShErr::at(ShErrKind::SyntaxErr, err_span, "Invalid unary operator"));
         };
         match op {
           UnaryOp::Exists => {
@@ -245,11 +241,7 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         let test_op = operator.as_str().parse::<TestOp>()?;
         match test_op {
           TestOp::Unary(_) => {
-						return Err(ShErr::full(
-							ShErrKind::SyntaxErr,
-							"Expected a binary operator in this test call; found a unary operator",
-							err_span,
-						));
+						return Err(ShErr::at(ShErrKind::SyntaxErr, err_span, "Expected a binary operator in this test call; found a unary operator"));
           }
           TestOp::StringEq => {
             let pattern = crate::expand::glob_to_regex(rhs.trim(), true);
@@ -265,11 +257,7 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
           | TestOp::IntGe
           | TestOp::IntLe
           | TestOp::IntEq => {
-						let err = ShErr::full(
-							ShErrKind::SyntaxErr,
-							format!("Expected an integer with '{}' operator", operator),
-							err_span.clone(),
-						);
+						let err = ShErr::at(ShErrKind::SyntaxErr, err_span.clone(), format!("Expected an integer with '{}' operator", operator));
             let Ok(lhs) = lhs.trim().parse::<i32>() else {
               return Err(err);
             };
