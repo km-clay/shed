@@ -1,6 +1,8 @@
+use ariadne::Fmt;
+
 use crate::{
   jobs::JobBldr,
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::{ShErr, ShErrKind, ShResult, next_color},
   parse::{NdRule, Node},
   prelude::*,
   procio::{IoStack, borrow_fd},
@@ -80,7 +82,7 @@ pub fn unalias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResul
   } else {
     for (arg, span) in argv {
       if read_logic(|l| l.get_alias(&arg)).is_none() {
-        return Err(ShErr::at(ShErrKind::SyntaxErr, span, format!("unalias: alias '{arg}' not found")));
+        return Err(ShErr::at(ShErrKind::SyntaxErr, span, format!("unalias: alias '{}' not found",arg.fg(next_color()))));
       };
       write_logic(|l| l.remove_alias(&arg))
     }

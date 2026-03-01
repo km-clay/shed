@@ -4,11 +4,10 @@ use ariadne::{Fmt, Label, Span as AriadneSpan};
 use bitflags::bitflags;
 use fmt::Display;
 use lex::{LexFlags, LexStream, Span, SpanSource, Tk, TkFlags, TkRule};
-use yansi::Color;
 
 use crate::{
   libsh::{
-    error::{Note, ShErr, ShErrKind, ShResult, next_color},
+    error::{ShErr, ShErrKind, ShResult, next_color},
     utils::{NodeVecUtils, TkVecUtils},
   },
   prelude::*,

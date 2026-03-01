@@ -2173,11 +2173,11 @@ impl LineBuf {
       MotionCmd(_, Motion::BeginningOfLine) => MotionKind::On(self.start_of_line()),
       MotionCmd(count, Motion::EndOfLine) => {
         let pos = if count == 1 {
-          self.end_of_line()
+          self.end_of_line_exclusive()
         } else if let Some((_, end)) = self.select_lines_down(count) {
           end
         } else {
-          self.end_of_line()
+          self.end_of_line_exclusive()
         };
 
         MotionKind::On(pos)

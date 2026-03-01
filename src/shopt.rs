@@ -1,6 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::libsh::error::{Note, ShErr, ShErrKind, ShResult};
+use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 
 #[derive(Clone, Copy, Debug)]
 pub enum ShedBellStyle {

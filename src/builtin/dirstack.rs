@@ -1,11 +1,13 @@
 use std::{env, path::PathBuf};
 
+use ariadne::Fmt;
 use nix::{libc::STDOUT_FILENO, unistd::write};
+use yansi::Color;
 
 use crate::{
   builtin::setup_builtin,
   jobs::JobBldr,
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::{ShErr, ShErrKind, ShResult, next_color},
   parse::{NdRule, Node, lex::Span},
   procio::{IoStack, borrow_fd},
   state::{self, read_meta, write_meta},
@@ -48,17 +50,17 @@ fn print_dirs() -> ShResult<()> {
 fn change_directory(target: &PathBuf, blame: Span) -> ShResult<()> {
   if !target.is_dir() {
     return Err(
-      ShErr::at(ShErrKind::ExecFail, blame, format!("not a directory: {}", target.display()))
+      ShErr::at(ShErrKind::ExecFail, blame, format!("not a directory: '{}'", target.display().fg(next_color())))
     );
   }
 
   if let Err(e) = env::set_current_dir(target) {
     return Err(
-      ShErr::at(ShErrKind::ExecFail, blame, format!("Failed to change directory: {}", e))
+      ShErr::at(ShErrKind::ExecFail, blame, format!("Failed to change directory: '{}'", e.fg(Color::Red)))
     );
   }
   let new_dir = env::current_dir().map_err(|e| {
-    ShErr::at(ShErrKind::ExecFail, blame, format!("Failed to get current directory: {}", e))
+    ShErr::at(ShErrKind::ExecFail, blame, format!("Failed to get current directory: '{}'", e.fg(Color::Red)))
   })?;
   unsafe { env::set_var("PWD", new_dir) };
   Ok(())
@@ -85,13 +87,13 @@ fn parse_stack_idx(arg: &str, blame: Span, cmd: &str) -> ShResult<StackIdx> {
   for ch in digits.chars() {
     if !ch.is_ascii_digit() {
       return Err(
-        ShErr::at(ShErrKind::ExecFail, blame, format!("{cmd}: invalid argument: {arg}"))
+        ShErr::at(ShErrKind::ExecFail, blame, format!("{cmd}: invalid argument: '{}'",arg.fg(next_color())))
       );
     }
   }
 
   let n = digits.parse::<usize>().map_err(|e| {
-    ShErr::at(ShErrKind::ExecFail, blame, format!("{cmd}: invalid index: {e}"))
+    ShErr::at(ShErrKind::ExecFail, blame, format!("{cmd}: invalid index: '{}'",e.fg(next_color())))
   })?;
 
   if from_top {
@@ -127,7 +129,7 @@ pub fn pushd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
       no_cd = true;
     } else if arg.starts_with('-') {
       return Err(
-        ShErr::at(ShErrKind::ExecFail, blame, format!("pushd: invalid option: {arg}"))
+        ShErr::at(ShErrKind::ExecFail, blame, format!("pushd: invalid option: '{}'", arg.fg(next_color())))
       );
     } else {
       if dir.is_some() {
@@ -138,7 +140,7 @@ pub fn pushd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
       let target = PathBuf::from(&arg);
       if !target.is_dir() {
         return Err(
-          ShErr::at(ShErrKind::ExecFail, blame, format!("pushd: not a directory: {arg}"))
+          ShErr::at(ShErrKind::ExecFail, blame, format!("pushd: not a directory: '{}'", target.display().fg(next_color())))
         );
       }
       dir = Some(target);
@@ -207,7 +209,7 @@ pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
       no_cd = true;
     } else if arg.starts_with('-') {
       return Err(
-        ShErr::at(ShErrKind::ExecFail, blame, format!("popd: invalid option: {arg}"))
+        ShErr::at(ShErrKind::ExecFail, blame, format!("popd: invalid option: '{}'", arg.fg(next_color())))
       );
     }
   }
@@ -307,12 +309,12 @@ pub fn dirs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
       }
       _ if arg.starts_with('-') => {
         return Err(
-          ShErr::at(ShErrKind::ExecFail, blame, format!("dirs: invalid option: {arg}"))
+          ShErr::at(ShErrKind::ExecFail, blame, format!("dirs: invalid option: '{}'", arg.fg(next_color())))
         );
       }
       _ => {
         return Err(
-          ShErr::at(ShErrKind::ExecFail, blame, format!("dirs: unexpected argument: {arg}"))
+          ShErr::at(ShErrKind::ExecFail, blame, format!("dirs: unexpected argument: '{}'", arg.fg(next_color())))
         );
       }
     }

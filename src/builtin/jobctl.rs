@@ -1,6 +1,8 @@
+use ariadne::Fmt;
+
 use crate::{
   jobs::{JobBldr, JobCmdFlags, JobID},
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::{ShErr, ShErrKind, ShResult, next_color},
   parse::{NdRule, Node, lex::Span},
   prelude::*,
   procio::{IoStack, borrow_fd},
@@ -16,6 +18,8 @@ pub enum JobBehavior {
 
 pub fn continue_job(node: Node, job: &mut JobBldr, behavior: JobBehavior) -> ShResult<()> {
   let blame = node.get_span().clone();
+	let cmd_tk = node.get_command();
+	let cmd_span = cmd_tk.unwrap().span.clone();
   let cmd = match behavior {
     JobBehavior::Foregound => "fg",
     JobBehavior::Background => "bg",
@@ -33,13 +37,13 @@ pub fn continue_job(node: Node, job: &mut JobBldr, behavior: JobBehavior) -> ShR
   let mut argv = argv.into_iter();
 
   if read_jobs(|j| j.get_fg().is_some()) {
-    return Err(ShErr::at(ShErrKind::InternalErr, blame, format!("Somehow called '{}' with an existing foreground job", cmd)));
+    return Err(ShErr::at(ShErrKind::InternalErr, cmd_span, format!("Somehow called '{}' with an existing foreground job", cmd)));
   }
 
   let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {
     id
   } else {
-    return Err(ShErr::at(ShErrKind::ExecFail, blame, "No jobs found"));
+    return Err(ShErr::at(ShErrKind::ExecFail, cmd_span, "No jobs found"));
   };
 
   let tabid = match argv.next() {
@@ -111,7 +115,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
       None => Err(ShErr::at(ShErrKind::InternalErr, blame, "Found a job but no table id in parse_job_id()")),
     }
   } else {
-    Err(ShErr::at(ShErrKind::SyntaxErr, blame, format!("Invalid arg: {}", arg)))
+    Err(ShErr::at(ShErrKind::SyntaxErr, blame, format!("Invalid arg: {}", arg.fg(next_color()))))
   }
 }
 

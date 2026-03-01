@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use ariadne::Color;
 use ariadne::{Report, ReportKind};
-use rand::{RngExt, TryRng};
+use rand::TryRng;
 
 use crate::{
   libsh::term::{Style, Styled},
@@ -13,9 +13,7 @@ use crate::{
 
 pub type ShResult<T> = Result<T, ShErr>;
 
-pub struct ColorRng {
-	last_color: Option<Color>,
-}
+pub struct ColorRng;
 
 impl ColorRng {
 	fn get_colors() -> &'static [Color] {
@@ -53,7 +51,7 @@ impl Iterator for ColorRng {
 }
 
 thread_local! {
-	static COLOR_RNG: RefCell<ColorRng> = const { RefCell::new(ColorRng { last_color: None }) };
+	static COLOR_RNG: RefCell<ColorRng> = const { RefCell::new(ColorRng) };
 }
 
 pub fn next_color() -> Color {

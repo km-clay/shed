@@ -2,7 +2,7 @@ use std::{
   collections::VecDeque,
   fmt::Display,
   iter::Peekable,
-  ops::{Bound, Deref, Range, RangeBounds},
+  ops::{Bound, Range, RangeBounds},
   str::Chars,
   sync::Arc,
 };

@@ -1,4 +1,3 @@
-use std::iter::Peekable;
 
 use crate::{
   getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node}, prelude::*, procio::{IoStack, borrow_fd}, state::{self, VarFlags, VarKind, write_vars}

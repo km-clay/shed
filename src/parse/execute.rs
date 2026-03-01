@@ -3,7 +3,7 @@ use std::{
 };
 
 
-use ariadne::{Fmt, Label, Span as AriadneSpan};
+use ariadne::Fmt;
 
 use crate::{
   builtin::{
