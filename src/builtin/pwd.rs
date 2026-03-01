@@ -1,24 +1,19 @@
 use crate::{
-  jobs::JobBldr,
   libsh::error::ShResult,
   parse::{NdRule, Node},
   prelude::*,
-  procio::{IoStack, borrow_fd},
+  procio::borrow_fd,
   state,
 };
 
-use super::setup_builtin;
-
-pub fn pwd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn pwd(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
-    argv,
+    argv: _,
   } = node.class
   else {
     unreachable!()
   };
-
-  let (_, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
 
   let stdout = borrow_fd(STDOUT_FILENO);
 

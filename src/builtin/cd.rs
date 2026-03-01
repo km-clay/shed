@@ -2,16 +2,13 @@ use ariadne::Fmt;
 use yansi::Color;
 
 use crate::{
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, next_color},
-  parse::{NdRule, Node},
+  parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   state::{self},
 };
 
-use super::setup_builtin;
-
-pub fn cd(node: Node, job: &mut JobBldr) -> ShResult<()> {
+pub fn cd(node: Node) -> ShResult<()> {
   let span = node.get_span();
   let NdRule::Command {
     assignments: _,
@@ -22,8 +19,8 @@ pub fn cd(node: Node, job: &mut JobBldr) -> ShResult<()> {
   };
 	let cd_span = argv.first().unwrap().span.clone();
 
-  let (argv, _) = setup_builtin(Some(argv), job, None)?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   let (new_dir,arg_span) = if let Some((arg, span)) = argv.into_iter().next() {
     (PathBuf::from(arg),Some(span))

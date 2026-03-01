@@ -1,15 +1,12 @@
 use crate::{
-  jobs::JobBldr,
   libsh::error::{ShResult, ShResultExt},
-  parse::{NdRule, Node},
+  parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
-  procio::{IoStack, borrow_fd},
+  procio::borrow_fd,
   state::{self, write_shopts},
 };
 
-use super::setup_builtin;
-
-pub fn shopt(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn shopt(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -18,8 +15,8 @@ pub fn shopt(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   if argv.is_empty() {
     let mut output = write_shopts(|s| s.display_opts())?;

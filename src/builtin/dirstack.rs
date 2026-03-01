@@ -5,11 +5,9 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 use yansi::Color;
 
 use crate::{
-  builtin::setup_builtin,
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, next_color},
-  parse::{NdRule, Node, lex::Span},
-  procio::{IoStack, borrow_fd},
+  parse::{NdRule, Node, execute::prepare_argv, lex::Span},
+  procio::borrow_fd,
   state::{self, read_meta, write_meta},
 };
 
@@ -103,7 +101,7 @@ fn parse_stack_idx(arg: &str, blame: Span, cmd: &str) -> ShResult<StackIdx> {
   }
 }
 
-pub fn pushd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn pushd(node: Node) -> ShResult<()> {
   let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -113,8 +111,8 @@ pub fn pushd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   let mut dir = None;
   let mut rotate_idx = None;
@@ -184,7 +182,7 @@ pub fn pushd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
   Ok(())
 }
 
-pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn popd(node: Node) -> ShResult<()> {
   let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -194,8 +192,8 @@ pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   let mut remove_idx = None;
   let mut no_cd = false;
@@ -276,7 +274,7 @@ pub fn popd(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
   Ok(())
 }
 
-pub fn dirs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn dirs(node: Node) -> ShResult<()> {
   let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -286,8 +284,8 @@ pub fn dirs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   let mut abbreviate_home = true;
   let mut one_per_line = false;

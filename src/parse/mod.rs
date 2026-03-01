@@ -44,6 +44,7 @@ macro_rules! try_match {
 #[derive(Clone, Debug)]
 pub struct ParsedSrc {
   pub src: Arc<String>,
+	pub name: String,
   pub ast: Ast,
   pub lex_flags: LexFlags,
   pub context: LabelCtx,
@@ -53,11 +54,16 @@ impl ParsedSrc {
   pub fn new(src: Arc<String>) -> Self {
     Self {
       src,
+			name: "<stdin>".into(),
       ast: Ast::new(vec![]),
       lex_flags: LexFlags::empty(),
       context: VecDeque::new(),
     }
   }
+	pub fn with_name(mut self, name: String) -> Self {
+		self.name = name;
+		self
+	}
   pub fn with_lex_flags(mut self, flags: LexFlags) -> Self {
     self.lex_flags = flags;
     self
@@ -68,7 +74,7 @@ impl ParsedSrc {
   }
   pub fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
     let mut tokens = vec![];
-    for lex_result in LexStream::new(self.src.clone(), self.lex_flags) {
+    for lex_result in LexStream::new(self.src.clone(), self.lex_flags).with_name(self.name.clone()) {
       match lex_result {
         Ok(token) => tokens.push(token),
         Err(error) => return Err(vec![error]),
@@ -244,9 +250,9 @@ impl Node {
       unreachable!()
     };
 
-    Span::new(
+    Span::from_span_source(
       first_tk.span.range().start..last_tk.span.range().end,
-      first_tk.span.get_source(),
+      first_tk.span.span_source().clone(),
     )
   }
 }

@@ -8,10 +8,11 @@ use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   libsh::{
     error::ShResult,
+    guards::var_ctx_guard,
     utils::TkVecUtils,
   },
   parse::{
-    execute::{VarCtxGuard, exec_input},
+    execute::exec_input,
     lex::{self, LexFlags, Tk, TkRule, ends_with_unescaped},
   },
   readline::{
@@ -341,7 +342,7 @@ impl BashCompSpec {
     ] {
       vars_to_unset.insert(var.to_string());
     }
-    let _guard = VarCtxGuard::new(vars_to_unset);
+    let _guard = var_ctx_guard(vars_to_unset);
 
     let CompContext {
       words,
@@ -391,7 +392,7 @@ impl BashCompSpec {
       "{} {cmd_name} {cword_str} {pword_str}",
       self.function.as_ref().unwrap()
     );
-    exec_input(input, None, false)?;
+    exec_input(input, None, false, Some("comp_function".into()))?;
 
     Ok(read_vars(|v| v.get_arr_elems("COMPREPLY")).unwrap_or_default())
   }
@@ -532,7 +533,7 @@ impl Completer {
     (before_cursor, after_cursor)
   }
 
-  pub fn get_completion_context(&self, line: &str, cursor_pos: usize) -> (Vec<Marker>, usize) {
+  pub fn get_subtoken_completion(&self, line: &str, cursor_pos: usize) -> (Vec<Marker>, usize) {
     let annotated = annotate_input_recursive(line);
     let mut ctx = vec![markers::NULL];
     let mut last_priority = 0;
@@ -776,20 +777,19 @@ impl Completer {
     // Use marker-based context detection for sub-token awareness (e.g. VAR_SUB
     // inside a token). Run this before comp specs so variable completions take
     // priority over programmable completion.
-    let (mut marker_ctx, token_start) = self.get_completion_context(&line, cursor_pos);
+    let (mut marker_ctx, token_start) = self.get_subtoken_completion(&line, cursor_pos);
 
-    if marker_ctx.last() == Some(&markers::VAR_SUB) {
-      if let Some(cur) = ctx.words.get(ctx.cword) {
-        self.token_span.0 = token_start;
-        let mut span = cur.span.clone();
-        span.set_range(token_start..self.token_span.1);
-        let raw_tk = span.as_str();
-        let candidates = complete_vars(raw_tk);
-        if !candidates.is_empty() {
-          return Ok(CompResult::from_candidates(candidates));
-        }
-      }
-    }
+    if marker_ctx.last() == Some(&markers::VAR_SUB)
+		&& let Some(cur) = ctx.words.get(ctx.cword) {
+			self.token_span.0 = token_start;
+			let mut span = cur.span.clone();
+			span.set_range(token_start..self.token_span.1);
+			let raw_tk = span.as_str();
+			let candidates = complete_vars(raw_tk);
+			if !candidates.is_empty() {
+				return Ok(CompResult::from_candidates(candidates));
+			}
+		}
 
     // Try programmable completion
     match self.try_comp_spec(&ctx)? {

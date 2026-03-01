@@ -6,12 +6,10 @@ use nix::{
 };
 
 use crate::{
-  builtin::setup_builtin,
   getopt::{Opt, OptSpec, get_opts_from_tokens},
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
-  parse::{NdRule, Node},
-  procio::{IoStack, borrow_fd},
+  parse::{NdRule, Node, execute::prepare_argv},
+  procio::borrow_fd,
   readline::term::RawModeGuard,
   state::{self, VarFlags, VarKind, read_vars, write_vars},
 };
@@ -63,7 +61,7 @@ pub struct ReadOpts {
   flags: ReadFlags,
 }
 
-pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn read_builtin(node: Node) -> ShResult<()> {
   let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -75,8 +73,8 @@ pub fn read_builtin(node: Node, _io_stack: &mut IoStack, job: &mut JobBldr) -> S
 
   let (argv, opts) = get_opts_from_tokens(argv, &READ_OPTS)?;
   let read_opts = get_read_flags(opts).blame(blame.clone())?;
-  let (argv, _) = setup_builtin(Some(argv), job, None).blame(blame.clone())?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   if let Some(prompt) = read_opts.prompt {
     write(borrow_fd(STDOUT_FILENO), prompt.as_bytes())?;

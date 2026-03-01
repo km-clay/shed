@@ -1,12 +1,15 @@
+use scopeguard::defer;
+
 use crate::{
   libsh::{
-    error::ShResult,
+    error::{ShErr, ShErrKind, ShResult},
+    sys::TTY_FILENO,
     term::{Style, Styled},
   },
   prelude::*,
   procio::{IoMode, borrow_fd},
   signal::{disable_reaping, enable_reaping},
-  state::{self, set_status, write_jobs},
+  state::{self, ShellParam, set_status, write_jobs, write_vars},
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -53,6 +56,21 @@ impl fmt::Display for DisplayWaitStatus {
       }
     }
   }
+}
+
+pub fn code_from_status(stat: &WtStat) -> Option<i32> {
+	match stat {
+		WtStat::Exited(_, exit_code) => {
+			Some(*exit_code)
+		}
+		WtStat::Stopped(_, sig) => {
+			Some(SIG_EXIT_OFFSET + *sig as i32)
+		}
+		WtStat::Signaled(_, sig, _) => {
+			Some(SIG_EXIT_OFFSET + *sig as i32)
+		}
+		_ => { None }
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -200,7 +218,7 @@ impl JobTab {
   }
   fn prune_jobs(&mut self) {
     while let Some(job) = self.jobs.last() {
-      if job.is_none() {
+      if job.is_none() || job.as_ref().unwrap().is_done() {
         self.jobs.pop();
       } else {
         break;
@@ -215,6 +233,7 @@ impl JobTab {
       self.next_open_pos()
     };
     job.set_tabid(tab_pos);
+		let last_pid = job.children().last().map(|c| c.pid());
     self.order.push(tab_pos);
     if !silent {
       write(
@@ -227,6 +246,11 @@ impl JobTab {
     } else {
       self.jobs[tab_pos] = Some(job);
     }
+
+		if let Some(pid) = last_pid {
+			write_vars(|v| v.set_param(ShellParam::LastJob, &pid.to_string()))
+		}
+
     Ok(tab_pos)
   }
   pub fn order(&self) -> &[usize] {
@@ -257,6 +281,25 @@ impl JobTab {
       }),
     }
   }
+	pub fn update_by_id(&mut self, id: JobID, stat: WtStat) -> ShResult<()> {
+		let Some(job) = self.query_mut(id.clone()) else {
+			return Ok(())
+		};
+		match id {
+			JobID::Pid(pid) => {
+				let Some(child) = job.children_mut().iter_mut().find(|c| c.pid() == pid) else {
+					return Ok(())
+				};
+				child.set_stat(stat);
+			}
+			JobID::Pgid(_) |
+			JobID::TableID(_) |
+			JobID::Command(_) => {
+				job.set_stats(stat);
+			}
+		}
+		Ok(())
+	}
   pub fn query_mut(&mut self, identifier: JobID) -> Option<&mut Job> {
     match identifier {
       // Match by process group ID
@@ -315,6 +358,17 @@ impl JobTab {
     }
     Ok(())
   }
+	pub fn wait_all_bg(&mut self) -> ShResult<()> {
+		disable_reaping();
+		defer! {
+			enable_reaping();
+		}
+		for job in self.jobs.iter_mut() {
+			let Some(job) = job else { continue };
+			job.wait_pgrp()?;
+		}
+		Ok(())
+	}
   pub fn remove_job(&mut self, id: JobID) -> Option<Job> {
     let tabid = self.query(id).map(|job| job.tabid().unwrap());
     if let Some(tabid) = tabid {
@@ -560,6 +614,12 @@ impl Job {
   pub fn children_mut(&mut self) -> &mut Vec<ChildProc> {
     &mut self.children
   }
+	pub fn is_done(&self) -> bool {
+		self
+			.children
+			.iter()
+			.all(|chld| chld.exited() || chld.stat() == WtStat::Signaled(chld.pid(), Signal::SIGHUP, true))
+	}
   pub fn killpg(&mut self, sig: Signal) -> ShResult<()> {
     let stat = match sig {
       Signal::SIGTSTP => WtStat::Stopped(self.pgid, Signal::SIGTSTP),
@@ -653,7 +713,9 @@ impl Job {
     let padding_count = symbol.len() + id.to_string().len() + 3;
     let padding = " ".repeat(padding_count);
 
-    let mut output = format!("[{}]{}\t", id + 1, symbol);
+    let mut output = String::new();
+		let id_box = format!("[{}]{}", id + 1, symbol);
+		output.push_str(&format!("{id_box}\t"));
     for (i, cmd) in self.get_cmds().iter().enumerate() {
       let pid = if pids || init {
         let mut pid = self.get_pids().get(i).unwrap().to_string();
@@ -676,8 +738,12 @@ impl Job {
         },
         _ => stat_line.styled(Style::Cyan),
       };
+			if i != 0 {
+				let padding = " ".repeat(id_box.len() - 1);
+        stat_line = format!("{padding}{}", stat_line);
+			}
       if i != self.get_cmds().len() - 1 {
-        stat_line = format!("{} |", stat_line);
+				stat_line.push_str(" |");
       }
 
       let stat_final = if long {
@@ -698,7 +764,7 @@ impl Job {
 }
 
 pub fn term_ctlr() -> Pid {
-  tcgetpgrp(borrow_fd(0)).unwrap_or(getpgrp())
+  tcgetpgrp(borrow_fd(*TTY_FILENO)).unwrap_or(getpgrp())
 }
 
 /// Calls attach_tty() on the shell's process group to retake control of the
@@ -712,6 +778,55 @@ pub fn take_term() -> ShResult<()> {
   Ok(())
 }
 
+pub fn wait_bg(id: JobID) -> ShResult<()> {
+	disable_reaping();
+	defer! {
+		enable_reaping();
+	};
+	match id {
+		JobID::Pid(pid) => {
+			let stat = loop {
+				match waitpid(pid, None) {
+					Ok(stat) => break stat,
+					Err(Errno::EINTR) => continue, // Retry on signal interruption
+					Err(Errno::ECHILD) => return Ok(()), // No such child, treat as already reaped
+					Err(e) => return Err(e.into()),
+				}
+			};
+			write_jobs(|j| j.update_by_id(id, stat))?;
+			set_status(code_from_status(&stat).unwrap_or(0));
+		}
+		_ => {
+			let Some(mut job) = write_jobs(|j| j.remove_job(id.clone())) else {
+				return Err(ShErr::simple(ShErrKind::ExecFail, format!("wait: No such job with id {:?}", id)));
+			};
+			let statuses = job.wait_pgrp()?;
+			let mut was_stopped = false;
+			let mut code = 0;
+			for status in statuses {
+				code = code_from_status(&status).unwrap_or(0);
+				match status {
+					WtStat::Stopped(_, _) => {
+						was_stopped = true;
+					}
+					WtStat::Signaled(_, sig, _) => {
+						if sig == Signal::SIGTSTP {
+							was_stopped = true;
+						}
+					}
+					_ => { /* Do nothing */ }
+				}
+			}
+
+			if was_stopped {
+				write_jobs(|j| j.insert_job(job, false))?;
+			}
+			set_status(code);
+		}
+	}
+	Ok(())
+}
+
 /// Waits on the current foreground job and updates the shell's last status code
 pub fn wait_fg(job: Job) -> ShResult<()> {
   if job.children().is_empty() {
@@ -721,23 +836,22 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
   let mut was_stopped = false;
   attach_tty(job.pgid())?;
   disable_reaping();
+	defer! {
+		enable_reaping();
+	}
   let statuses = write_jobs(|j| j.new_fg(job))?;
   for status in statuses {
+		code = code_from_status(&status).unwrap_or(0);
     match status {
-      WtStat::Exited(_, exit_code) => {
-        code = exit_code;
-      }
-      WtStat::Stopped(_, sig) => {
+      WtStat::Stopped(_, _) => {
         was_stopped = true;
         write_jobs(|j| j.fg_to_bg(status))?;
-        code = SIG_EXIT_OFFSET + sig as i32;
       }
       WtStat::Signaled(_, sig, _) => {
         if sig == Signal::SIGTSTP {
           was_stopped = true;
           write_jobs(|j| j.fg_to_bg(status))?;
         }
-        code = SIG_EXIT_OFFSET + sig as i32;
       }
       _ => { /* Do nothing */ }
     }
@@ -750,7 +864,6 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
   }
   take_term()?;
   set_status(code);
-  enable_reaping();
   Ok(())
 }
 
@@ -766,7 +879,7 @@ pub fn dispatch_job(job: Job, is_bg: bool) -> ShResult<()> {
 pub fn attach_tty(pgid: Pid) -> ShResult<()> {
   // If we aren't attached to a terminal, the pgid already controls it, or the
   // process group does not exist Then return ok
-  if !isatty(0).unwrap_or(false) || pgid == term_ctlr() || killpg(pgid, None).is_err() {
+  if !isatty(*TTY_FILENO).unwrap_or(false) || pgid == term_ctlr() || killpg(pgid, None).is_err() {
     return Ok(());
   }
 
@@ -783,7 +896,7 @@ pub fn attach_tty(pgid: Pid) -> ShResult<()> {
 
   pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&new_mask), Some(&mut mask_bkup))?;
 
-  let result = tcsetpgrp(borrow_fd(0), pgid);
+  let result = tcsetpgrp(borrow_fd(*TTY_FILENO), pgid);
 
   pthread_sigmask(
     SigmaskHow::SIG_SETMASK,
@@ -794,7 +907,7 @@ pub fn attach_tty(pgid: Pid) -> ShResult<()> {
   match result {
     Ok(_) => Ok(()),
     Err(_e) => {
-      tcsetpgrp(borrow_fd(0), getpgrp())?;
+      tcsetpgrp(borrow_fd(*TTY_FILENO), getpgrp())?;
       Ok(())
     }
   }

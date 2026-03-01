@@ -28,7 +28,7 @@ use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::unistd::read;
 
 use crate::builtin::trap::TrapTarget;
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::libsh::error::{self, ShErr, ShErrKind, ShResult};
 use crate::libsh::sys::TTY_FILENO;
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
@@ -112,7 +112,7 @@ fn main() -> ExitCode {
   if let Err(e) = if let Some(path) = args.script {
     run_script(path, args.script_args)
   } else if let Some(cmd) = args.command {
-    exec_input(cmd, None, false)
+    exec_input(cmd, None, false, None)
   } else {
     shed_interactive()
   } {
@@ -120,8 +120,7 @@ fn main() -> ExitCode {
   };
 
   if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Exit))
-    && let Err(e) = exec_input(trap, None, false)
-  {
+	&& let Err(e) = exec_input(trap, None, false, Some("trap".into())) {
     eprintln!("shed: error running EXIT trap: {e}");
   }
 
@@ -131,6 +130,7 @@ fn main() -> ExitCode {
 
 fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
   let path = path.as_ref();
+	let path_raw = path.to_string_lossy().to_string();
   if !path.is_file() {
     eprintln!("shed: Failed to open input file: {}", path.display());
     QUIT_CODE.store(1, Ordering::SeqCst);
@@ -156,7 +156,7 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
     write_vars(|v| v.cur_scope_mut().bpush_arg(arg))
   }
 
-  exec_input(input, None, false)
+  exec_input(input, None, false, Some(path_raw))
 }
 
 fn shed_interactive() -> ShResult<()> {
@@ -186,6 +186,7 @@ fn shed_interactive() -> ShResult<()> {
       m.try_rehash_commands();
       m.try_rehash_cwd_listing();
     });
+		error::clear_color();
 
     // Handle any pending signals
     while signals_pending() {
@@ -265,7 +266,7 @@ fn shed_interactive() -> ShResult<()> {
       Ok(ReadlineEvent::Line(input)) => {
         let start = Instant::now();
         write_meta(|m| m.start_timer());
-        if let Err(e) = RawModeGuard::with_cooked_mode(|| exec_input(input, None, true)) {
+        if let Err(e) = RawModeGuard::with_cooked_mode(|| exec_input(input, None, true, Some("<stdin>".into()))) {
           match e.kind() {
             ShErrKind::CleanExit(code) => {
               QUIT_CODE.store(*code, Ordering::SeqCst);

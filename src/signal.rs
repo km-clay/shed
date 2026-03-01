@@ -57,7 +57,7 @@ pub fn check_signals() -> ShResult<()> {
   let got_signal = |sig: Signal| -> bool { pending & (1 << sig as u64) != 0 };
   let run_trap = |sig: Signal| -> ShResult<()> {
     if let Some(command) = read_logic(|l| l.get_trap(TrapTarget::Signal(sig))) {
-      exec_input(command, None, false)?;
+      exec_input(command, None, false, Some("trap".into()))?;
     }
     Ok(())
   };
@@ -146,6 +146,22 @@ pub fn sig_setup() {
     sigaction(Signal::SIGIO, &action).unwrap();
     sigaction(Signal::SIGPWR, &action).unwrap();
     sigaction(Signal::SIGSYS, &action).unwrap();
+  }
+}
+
+/// Reset all signal dispositions to SIG_DFL.
+/// Called in child processes before exec so that the shell's custom
+/// handlers and SIG_IGN dispositions don't leak into child programs.
+pub fn reset_signals() {
+  let default = SigAction::new(SigHandler::SigDfl, SaFlags::empty(), SigSet::empty());
+  unsafe {
+    for sig in Signal::iterator() {
+      // SIGKILL and SIGSTOP can't be caught/changed
+      if sig == Signal::SIGKILL || sig == Signal::SIGSTOP {
+        continue;
+      }
+      let _ = sigaction(sig, &default);
+    }
   }
 }
 

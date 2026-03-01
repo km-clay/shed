@@ -154,39 +154,19 @@ impl<R: Read> IoBuf<R> {
   }
 }
 
-pub struct RedirGuard(IoFrame);
-
-impl RedirGuard {
-  pub fn persist(mut self) {
-    if let Some(saved) = self.0.saved_io.take() {
-      close(saved.0).ok();
-      close(saved.1).ok();
-      close(saved.2).ok();
-    }
-
-    // the guard is dropped here
-    // but since we took the saved fds
-    // the drop does not restore them
-  }
-}
-
-impl Drop for RedirGuard {
-  fn drop(&mut self) {
-    self.0.restore().ok();
-  }
-}
+pub use crate::libsh::guards::RedirGuard;
 
 /// A struct wrapping three fildescs representing `stdin`, `stdout`, and
 /// `stderr` respectively
 #[derive(Debug, Clone)]
-pub struct IoGroup(RawFd, RawFd, RawFd);
+pub struct IoGroup(pub(crate) RawFd, pub(crate) RawFd, pub(crate) RawFd);
 
 /// A single stack frame used with the IoStack
 /// Each stack frame represents the redirections of a single command
 #[derive(Default, Clone, Debug)]
 pub struct IoFrame {
   pub redirs: Vec<Redir>,
-  saved_io: Option<IoGroup>,
+  pub(crate) saved_io: Option<IoGroup>,
 }
 
 impl<'e> IoFrame {
@@ -241,7 +221,7 @@ impl<'e> IoFrame {
       let src_fd = io_mode.src_fd();
       dup2(src_fd, tgt_fd)?;
     }
-    Ok(RedirGuard(self))
+    Ok(RedirGuard::new(self))
   }
   pub fn restore(&mut self) -> ShResult<()> {
     if let Some(saved) = self.saved_io.take() {

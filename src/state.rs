@@ -20,7 +20,7 @@ use crate::{
   },
   parse::{
     ConjunctNode, NdRule, Node, ParsedSrc,
-    lex::{LexFlags, LexStream, Tk},
+    lex::{LexFlags, LexStream, Span, Tk},
   },
   prelude::*,
   readline::{
@@ -465,16 +465,31 @@ thread_local! {
   pub static SHED: Shed = Shed::new();
 }
 
+#[derive(Clone, Debug)]
+pub struct ShAlias {
+	pub body: String,
+	pub source: Span
+}
+
+impl Display for ShAlias {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.body)
+	}
+}
+
 /// A shell function
 ///
 /// Wraps the BraceGrp Node that forms the body of the function, and provides some helper methods to extract it from the parse tree
 #[derive(Clone, Debug)]
-pub struct ShFunc(Node);
+pub struct ShFunc {
+	pub body: Node,
+	pub source: Span
+}
 
 impl ShFunc {
-  pub fn new(mut src: ParsedSrc) -> Self {
+  pub fn new(mut src: ParsedSrc, source: Span) -> Self {
     let body = Self::extract_brc_grp_hack(src.extract_nodes());
-    Self(body)
+    Self{ body, source }
   }
   fn extract_brc_grp_hack(mut tree: Vec<Node>) -> Node {
     // FIXME: find a better way to do this
@@ -487,10 +502,10 @@ impl ShFunc {
     *cmd
   }
   pub fn body(&self) -> &Node {
-    &self.0
+    &self.body
   }
   pub fn body_mut(&mut self) -> &mut Node {
-    &mut self.0
+    &mut self.body
   }
 }
 
@@ -500,7 +515,7 @@ impl ShFunc {
 #[derive(Default, Clone, Debug)]
 pub struct LogTab {
   functions: HashMap<String, ShFunc>,
-  aliases: HashMap<String, String>,
+  aliases: HashMap<String, ShAlias>,
   traps: HashMap<TrapTarget, String>,
 }
 
@@ -529,13 +544,13 @@ impl LogTab {
   pub fn funcs(&self) -> &HashMap<String, ShFunc> {
     &self.functions
   }
-  pub fn aliases(&self) -> &HashMap<String, String> {
+  pub fn aliases(&self) -> &HashMap<String, ShAlias> {
     &self.aliases
   }
-  pub fn insert_alias(&mut self, name: &str, body: &str) {
-    self.aliases.insert(name.into(), body.into());
+  pub fn insert_alias(&mut self, name: &str, body: &str, source: Span) {
+    self.aliases.insert(name.into(), ShAlias { body: body.into(), source });
   }
-  pub fn get_alias(&self, name: &str) -> Option<String> {
+  pub fn get_alias(&self, name: &str) -> Option<ShAlias> {
     self.aliases.get(name).cloned()
   }
   pub fn remove_alias(&mut self, name: &str) {
@@ -1140,6 +1155,29 @@ impl MetaTab {
   pub fn remove_comp_spec(&mut self, cmd: &str) -> bool {
     self.comp_specs.remove(cmd).is_some()
   }
+	pub fn get_cmds_in_path() -> Vec<String> {
+    let path = env::var("PATH").unwrap_or_default();
+    let paths = path.split(":").map(PathBuf::from);
+		let mut cmds = vec![];
+		for path in paths {
+			if let Ok(entries) = path.read_dir() {
+				for entry in entries.flatten() {
+					let Ok(meta) = std::fs::metadata(entry.path()) else {
+						continue;
+					};
+					let is_exec = meta.permissions().mode() & 0o111 != 0;
+
+					if meta.is_file()
+						&& is_exec
+						&& let Some(name) = entry.file_name().to_str()
+					{
+						cmds.push(name.to_string());
+					}
+				}
+			}
+		}
+		cmds
+	}
   pub fn try_rehash_commands(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
     let cwd = env::var("PWD").unwrap_or_default();
@@ -1155,25 +1193,10 @@ impl MetaTab {
     self.path_cache.clear();
     self.old_path = Some(path.clone());
     self.old_pwd = Some(cwd.clone());
-    let paths = path.split(":").map(PathBuf::from);
-
-    for path in paths {
-      if let Ok(entries) = path.read_dir() {
-        for entry in entries.flatten() {
-          let Ok(meta) = std::fs::metadata(entry.path()) else {
-            continue;
-          };
-          let is_exec = meta.permissions().mode() & 0o111 != 0;
-
-          if meta.is_file()
-            && is_exec
-            && let Some(name) = entry.file_name().to_str()
-          {
-            self.path_cache.insert(name.to_string());
-          }
-        }
-      }
-    }
+		let cmds_in_path = Self::get_cmds_in_path();
+		for cmd in cmds_in_path {
+			self.path_cache.insert(cmd);
+		}
     if let Ok(entries) = Path::new(&cwd).read_dir() {
       for entry in entries.flatten() {
         let Ok(meta) = std::fs::metadata(entry.path()) else {
@@ -1432,10 +1455,11 @@ pub fn source_rc() -> ShResult<()> {
 }
 
 pub fn source_file(path: PathBuf) -> ShResult<()> {
+	let source_name = path.to_string_lossy().to_string();
   let mut file = OpenOptions::new().read(true).open(path)?;
 
   let mut buf = String::new();
   file.read_to_string(&mut buf)?;
-  exec_input(buf, None, false)?;
+  exec_input(buf, None, false, Some(source_name))?;
   Ok(())
 }

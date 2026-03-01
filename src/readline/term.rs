@@ -10,51 +10,23 @@ use nix::{
   errno::Errno,
   libc::{self},
   poll::{self, PollFlags, PollTimeout},
-  sys::termios::{self, tcgetattr, tcsetattr},
   unistd::isatty,
 };
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
+pub use crate::libsh::guards::{RawModeGuard, raw_mode};
 use crate::{
-  libsh::{
-    error::{ShErr, ShErrKind, ShResult},
-    sys::TTY_FILENO,
-  },
+  libsh::error::{ShErr, ShErrKind, ShResult},
   readline::keys::{KeyCode, ModKeys},
   state::read_shopts,
 };
 use crate::{
-  procio::borrow_fd,
   state::{read_meta, write_meta},
 };
 
 use super::keys::KeyEvent;
-
-pub fn raw_mode() -> RawModeGuard {
-  let orig = termios::tcgetattr(unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) })
-    .expect("Failed to get terminal attributes");
-  let mut raw = orig.clone();
-  termios::cfmakeraw(&mut raw);
-  // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
-  raw.local_flags |= termios::LocalFlags::ISIG;
-  // Keep OPOST enabled so \n is translated to \r\n on output
-  raw.output_flags |= termios::OutputFlags::OPOST;
-  termios::tcsetattr(
-    unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
-    termios::SetArg::TCSANOW,
-    &raw,
-  )
-  .expect("Failed to set terminal to raw mode");
-
-  let (_cols, _rows) = get_win_size(*TTY_FILENO);
-
-  RawModeGuard {
-    orig,
-    fd: *TTY_FILENO,
-  }
-}
 
 pub type Row = u16;
 pub type Col = u16;
@@ -321,65 +293,6 @@ impl Read for TermBuffer {
       Ok(n) => Ok(n),
       Err(Errno::EINTR) => Err(Errno::EINTR.into()),
       Err(e) => Err(std::io::Error::from_raw_os_error(e as i32)),
-    }
-  }
-}
-
-pub struct RawModeGuard {
-  orig: termios::Termios,
-  fd: RawFd,
-}
-
-impl RawModeGuard {
-  /// Disable raw mode temporarily for a specific operation
-  pub fn disable_for<F: FnOnce() -> R, R>(&self, func: F) -> R {
-    unsafe {
-      let fd = BorrowedFd::borrow_raw(self.fd);
-      // Temporarily restore the original termios
-      termios::tcsetattr(fd, termios::SetArg::TCSANOW, &self.orig)
-        .expect("Failed to temporarily disable raw mode");
-
-      // Run the function
-      let result = func();
-
-      // Re-enable raw mode
-      let mut raw = self.orig.clone();
-      termios::cfmakeraw(&mut raw);
-      // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
-      raw.local_flags |= termios::LocalFlags::ISIG;
-      // Keep OPOST enabled so \n is translated to \r\n on output
-      raw.output_flags |= termios::OutputFlags::OPOST;
-      termios::tcsetattr(fd, termios::SetArg::TCSANOW, &raw).expect("Failed to re-enable raw mode");
-
-      result
-    }
-  }
-
-  pub fn with_cooked_mode<F, R>(f: F) -> R
-  where
-    F: FnOnce() -> R,
-  {
-    let raw = tcgetattr(borrow_fd(*TTY_FILENO)).expect("Failed to get terminal attributes");
-    let mut cooked = raw.clone();
-    cooked.local_flags |= termios::LocalFlags::ICANON | termios::LocalFlags::ECHO;
-    cooked.input_flags |= termios::InputFlags::ICRNL;
-    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &cooked)
-      .expect("Failed to set cooked mode");
-    let res = f();
-    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &raw)
-      .expect("Failed to restore raw mode");
-    res
-  }
-}
-
-impl Drop for RawModeGuard {
-  fn drop(&mut self) {
-    unsafe {
-      let _ = termios::tcsetattr(
-        BorrowedFd::borrow_raw(self.fd),
-        termios::SetArg::TCSANOW,
-        &self.orig,
-      );
     }
   }
 }

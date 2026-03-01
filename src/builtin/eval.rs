@@ -1,13 +1,10 @@
 use crate::{
-  builtin::setup_builtin,
-  jobs::JobBldr,
   libsh::error::ShResult,
-  parse::{NdRule, Node, execute::exec_input},
-  procio::IoStack,
+  parse::{NdRule, Node, execute::{exec_input, prepare_argv}},
   state,
 };
 
-pub fn eval(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn eval(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -16,8 +13,8 @@ pub fn eval(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (expanded_argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let expanded_argv = expanded_argv.unwrap();
+  let mut expanded_argv = prepare_argv(argv)?;
+  if !expanded_argv.is_empty() { expanded_argv.remove(0); }
 
   if expanded_argv.is_empty() {
     state::set_status(0);
@@ -30,5 +27,5 @@ pub fn eval(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     .collect::<Vec<_>>()
     .join(" ");
 
-  exec_input(joined_argv, None, false)
+  exec_input(joined_argv, None, false, Some("eval".into()))
 }

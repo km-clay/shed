@@ -1,17 +1,14 @@
 use ariadne::Fmt;
 
 use crate::{
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, next_color},
-  parse::{NdRule, Node},
+  parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
-  procio::{IoStack, borrow_fd},
+  procio::borrow_fd,
   state::{self, read_logic, write_logic},
 };
 
-use super::setup_builtin;
-
-pub fn alias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn alias(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -20,8 +17,8 @@ pub fn alias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-	let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   if argv.is_empty() {
     // Display the environment variables
@@ -46,14 +43,14 @@ pub fn alias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
       let Some((name, body)) = arg.split_once('=') else {
         return Err(ShErr::at(ShErrKind::SyntaxErr, span, "alias: Expected an assignment in alias args"));
       };
-      write_logic(|l| l.insert_alias(name, body));
+      write_logic(|l| l.insert_alias(name, body, span.clone()));
     }
   }
   state::set_status(0);
   Ok(())
 }
 
-pub fn unalias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn unalias(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -62,8 +59,8 @@ pub fn unalias(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResul
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   if argv.is_empty() {
     // Display the environment variables

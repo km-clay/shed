@@ -785,6 +785,10 @@ impl LineBuf {
     }
     (start, end)
   }
+	pub fn this_line_content(&mut self) -> Option<&str> {
+		let (start,end) = self.this_line_exclusive();
+		self.slice(start..end)
+	}
   pub fn this_line(&mut self) -> (usize, usize) {
     let line_no = self.cursor_line_number();
     self.line_bounds(line_no)
@@ -2801,6 +2805,25 @@ impl LineBuf {
       Verb::InsertChar(ch) => {
         self.insert_at_cursor(ch);
         self.cursor.add(1);
+				let before = self.auto_indent_level;
+				if read_shopts(|o| o.prompt.auto_indent)
+				&& let Some(line_content) = self.this_line_content() {
+					match line_content.trim() {
+						"esac" | "done" | "fi" | "}" => {
+							self.calc_indent_level();
+							if self.auto_indent_level < before {
+								let delta = before - self.auto_indent_level;
+								let line_start = self.start_of_line();
+								for _ in 0..delta {
+									if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
+										self.remove(line_start);
+									}
+								}
+							}
+						}
+						_ => { /* nothing to see here */ }
+					}
+				}
       }
       Verb::Insert(string) => {
         self.push_str(&string);

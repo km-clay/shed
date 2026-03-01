@@ -1,13 +1,10 @@
 use crate::{
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node},
+  parse::{NdRule, Node, execute::prepare_argv},
   state::{self, write_vars},
 };
 
-use super::setup_builtin;
-
-pub fn shift(node: Node, job: &mut JobBldr) -> ShResult<()> {
+pub fn shift(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -16,8 +13,8 @@ pub fn shift(node: Node, job: &mut JobBldr) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, _) = setup_builtin(Some(argv), job, None)?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
   let mut argv = argv.into_iter();
 
   if let Some((arg, span)) = argv.next() {

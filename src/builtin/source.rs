@@ -1,14 +1,11 @@
 use crate::{
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node},
+  parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   state::{self, source_file},
 };
 
-use super::setup_builtin;
-
-pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
+pub fn source(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -17,8 +14,8 @@ pub fn source(node: Node, job: &mut JobBldr) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, _) = setup_builtin(Some(argv), job, None)?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   for (arg, span) in argv {
     let path = PathBuf::from(arg);

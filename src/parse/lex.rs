@@ -101,12 +101,21 @@ impl Span {
 		let source = SpanSource { name: "<stdin>".into(), content: source };
     Span { range, source }
   }
+  pub fn from_span_source(range: Range<usize>, source: SpanSource) -> Self {
+    Span { range, source }
+  }
 	pub fn rename(&mut self, name: String) {
 		self.source.name = name;
 	}
 	pub fn with_name(mut self, name: String) -> Self {
 		self.source.name = name;
 		self
+	}
+	pub fn line_and_col(&self) -> (usize,usize) {
+		let content = self.source.content();
+		let source = ariadne::Source::from(content.as_str());
+		let (_, line, col) = source.get_byte_line(self.range.start).unwrap();
+		(line, col)
 	}
   /// Slice the source string at the wrapped range
   pub fn as_str(&self) -> &str {
@@ -234,7 +243,9 @@ bitflags! {
 pub struct LexStream {
   source: Arc<String>,
   pub cursor: usize,
+	pub name: String,
   quote_state: QuoteState,
+  brc_grp_depth: usize,
   brc_grp_start: Option<usize>,
   flags: LexFlags,
 }
@@ -243,23 +254,21 @@ bitflags! {
   #[derive(Debug, Clone, Copy)]
   pub struct LexFlags: u32 {
     /// The lexer is operating in interactive mode
-    const INTERACTIVE     = 0b000000001;
+    const INTERACTIVE    = 0b0000000001;
     /// Allow unfinished input
-    const LEX_UNFINISHED = 0b000000010;
+    const LEX_UNFINISHED = 0b0000000010;
     /// The next string-type token is a command name
-    const NEXT_IS_CMD    = 0b000000100;
+    const NEXT_IS_CMD    = 0b0000000100;
     /// We are in a quotation, so quoting rules apply
-    const IN_QUOTE       = 0b000001000;
+    const IN_QUOTE       = 0b0000001000;
     /// Only lex strings; used in expansions
-    const RAW            = 0b000010000;
+    const RAW            = 0b0000010000;
     /// The lexer has not produced any tokens yet
-    const FRESH          = 0b000010000;
+    const FRESH          = 0b0000100000;
     /// The lexer has no more tokens to produce
-    const STALE          = 0b000100000;
-    /// The lexer's cursor is in a brace group
-    const IN_BRC_GRP     = 0b001000000;
-    const EXPECTING_IN   = 0b010000000;
-    const IN_CASE        = 0b100000000;
+    const STALE          = 0b0001000000;
+    const EXPECTING_IN   = 0b0010000000;
+    const IN_CASE        = 0b0100000000;
   }
 }
 
@@ -269,8 +278,10 @@ impl LexStream {
     Self {
       flags,
       source,
+			name: "<stdin>".into(),
       cursor: 0,
       quote_state: QuoteState::default(),
+      brc_grp_depth: 0,
       brc_grp_start: None,
     }
   }
@@ -296,18 +307,25 @@ impl LexStream {
     };
     self.source.get(start..end)
   }
+	pub fn with_name(mut self, name: String) -> Self {
+		self.name = name;
+		self
+	}
   pub fn slice_from_cursor(&self) -> Option<&str> {
     self.slice(self.cursor..)
   }
   pub fn in_brc_grp(&self) -> bool {
-    self.flags.contains(LexFlags::IN_BRC_GRP)
+    self.brc_grp_depth > 0
   }
-  pub fn set_in_brc_grp(&mut self, is: bool) {
-    if is {
-      self.flags |= LexFlags::IN_BRC_GRP;
+  pub fn enter_brc_grp(&mut self) {
+    if self.brc_grp_depth == 0 {
       self.brc_grp_start = Some(self.cursor);
-    } else {
-      self.flags &= !LexFlags::IN_BRC_GRP;
+    }
+    self.brc_grp_depth += 1;
+  }
+  pub fn leave_brc_grp(&mut self) {
+    self.brc_grp_depth -= 1;
+    if self.brc_grp_depth == 0 {
       self.brc_grp_start = None;
     }
   }
@@ -627,7 +645,7 @@ impl LexStream {
           pos += 1;
           let mut tk = self.get_token(self.cursor..pos, TkRule::BraceGrpStart);
           tk.flags |= TkFlags::IS_CMD;
-          self.set_in_brc_grp(true);
+          self.enter_brc_grp();
           self.set_next_is_cmd(true);
 
           self.cursor = pos;
@@ -636,7 +654,7 @@ impl LexStream {
         '}' if pos == self.cursor && self.in_brc_grp() => {
           pos += 1;
           let tk = self.get_token(self.cursor..pos, TkRule::BraceGrpEnd);
-          self.set_in_brc_grp(false);
+          self.leave_brc_grp();
           self.set_next_is_cmd(true);
           self.cursor = pos;
           return Ok(tk);
@@ -731,7 +749,8 @@ impl LexStream {
     Ok(new_tk)
   }
   pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk {
-    let span = Span::new(range, self.source.clone());
+    let mut span = Span::new(range, self.source.clone());
+		span.rename(self.name.clone());
     Tk::new(class, span)
   }
 }

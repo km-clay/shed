@@ -5,6 +5,7 @@ use ariadne::Color;
 use ariadne::{Report, ReportKind};
 use rand::TryRng;
 
+use crate::procio::RedirGuard;
 use crate::{
   libsh::term::{Style, Styled},
   parse::lex::{Span, SpanSource},
@@ -44,7 +45,7 @@ impl ColorRng {
 
 	pub fn last_color(&mut self) -> Color {
 		if let Some(color) = self.last_color.take() {
-			return color;
+			color
 		} else {
 			let color = self.next().unwrap_or(Color::White);
 			self.last_color = Some(color);
@@ -76,6 +77,10 @@ pub fn next_color() -> Color {
 
 pub fn last_color() -> Color {
 	COLOR_RNG.with(|rng| rng.borrow_mut().last_color())
+}
+
+pub fn clear_color() {
+	COLOR_RNG.with(|rng| rng.borrow_mut().last_color = None);
 }
 
 pub trait ShResultExt {
@@ -154,15 +159,25 @@ pub struct ShErr {
 	src_span: Option<Span>,
 	labels: Vec<ariadne::Label<Span>>,
 	sources: Vec<SpanSource>,
-	notes: Vec<String>
+	notes: Vec<String>,
+
+	/// If we propagate through a redirect boundary, we take ownership of
+	/// the RedirGuard(s) so that redirections stay alive until the error
+	/// is printed.  Multiple guards can accumulate as the error bubbles
+	/// through nested redirect scopes.
+	io_guards: Vec<RedirGuard>
 }
 
 impl ShErr {
 	pub fn new(kind: ShErrKind, span: Span) -> Self {
-		Self { kind, src_span: Some(span), labels: vec![], sources: vec![], notes: vec![] }
+		Self { kind, src_span: Some(span), labels: vec![], sources: vec![], notes: vec![], io_guards: vec![] }
 	}
 	pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
-		Self { kind, src_span: None, labels: vec![], sources: vec![], notes: vec![msg.into()] }
+		Self { kind, src_span: None, labels: vec![], sources: vec![], notes: vec![msg.into()], io_guards: vec![] }
+	}
+	pub fn with_redirs(mut self, guard: RedirGuard) -> Self {
+		self.io_guards.push(guard);
+		self
 	}
 	pub fn at(kind: ShErrKind, span: Span, msg: impl Into<String>) -> Self {
 		let color = last_color(); // use last_color to ensure the same color is used for the label and the message given
@@ -178,12 +193,12 @@ impl ShErr {
 		self.with_label(src, ariadne::Label::new(span).with_color(color).with_message(msg))
 	}
 	pub fn blame(self, span: Span) -> Self {
-		let ShErr { kind, src_span: _, labels, sources, notes } = self;
-		Self { kind, src_span: Some(span), labels, sources, notes }
+		let ShErr { kind, src_span: _, labels, sources, notes, io_guards } = self;
+		Self { kind, src_span: Some(span), labels, sources, notes, io_guards }
 	}
 	pub fn try_blame(self, span: Span) -> Self {
 		match self {
-			ShErr { kind, src_span: None, labels, sources, notes } => Self { kind, src_span: Some(span), labels, sources, notes },
+			ShErr { kind, src_span: None, labels, sources, notes, io_guards } => Self { kind, src_span: Some(span), labels, sources, notes, io_guards },
 			_ => self
 		}
 	}
@@ -197,23 +212,23 @@ impl ShErr {
 		self
 	}
 	pub fn with_label(self, source: SpanSource, label: ariadne::Label<Span>) -> Self {
-		let ShErr { kind, src_span, mut labels, mut sources, notes } = self;
+		let ShErr { kind, src_span, mut labels, mut sources, notes, io_guards } = self;
 		sources.push(source);
 		labels.push(label);
-		Self { kind, src_span, labels, sources, notes }
+		Self { kind, src_span, labels, sources, notes, io_guards }
 	}
 	pub fn with_context(self, ctx: VecDeque<(SpanSource, ariadne::Label<Span>)>) -> Self {
-		let ShErr { kind, src_span, mut labels, mut sources, notes } = self;
+		let ShErr { kind, src_span, mut labels, mut sources, notes, io_guards } = self;
 		for (src, label) in ctx {
 			sources.push(src);
 			labels.push(label);
 		}
-		Self { kind, src_span, labels, sources, notes }
+		Self { kind, src_span, labels, sources, notes, io_guards }
 	}
 	pub fn with_note(self, note: impl Into<String>) -> Self {
-		let ShErr { kind, src_span, labels, sources, mut notes } = self;
+		let ShErr { kind, src_span, labels, sources, mut notes, io_guards } = self;
 		notes.push(note.into());
-		Self { kind, src_span, labels, sources, notes }
+		Self { kind, src_span, labels, sources, notes, io_guards }
 	}
 	pub fn build_report(&self) -> Option<Report<'_, Span>> {
 		let span = self.src_span.as_ref()?;
@@ -313,8 +328,7 @@ pub enum ShErrKind {
   ResourceLimitExceeded,
   BadPermission,
   Errno(Errno),
-  FileNotFound,
-  CmdNotFound,
+	NotFound,
   ReadlineErr,
 
   // Not really errors, more like internal signals
@@ -339,8 +353,7 @@ impl Display for ShErrKind {
       Self::ResourceLimitExceeded => "Resource Limit Exceeded",
       Self::BadPermission => "Bad Permissions",
       Self::Errno(e) => &format!("Errno: {}", e.desc()),
-      Self::FileNotFound => "File not found",
-      Self::CmdNotFound => "Command not found",
+      Self::NotFound => "Not Found",
       Self::CleanExit(_) => "",
       Self::FuncReturn(_) => "Syntax Error",
       Self::LoopContinue(_) => "Syntax Error",

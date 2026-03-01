@@ -7,11 +7,9 @@ use nix::{
 };
 
 use crate::{
-  builtin::setup_builtin,
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node},
-  procio::{IoStack, borrow_fd},
+  parse::{NdRule, Node, execute::prepare_argv},
+  procio::borrow_fd,
   state::{self, read_logic, write_logic},
 };
 
@@ -114,7 +112,7 @@ impl Display for TrapTarget {
   }
 }
 
-pub fn trap(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn trap(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -123,8 +121,8 @@ pub fn trap(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   if argv.is_empty() {
     let stdout = borrow_fd(STDOUT_FILENO);

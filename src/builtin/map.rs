@@ -5,7 +5,7 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 use serde_json::{Map, Value};
 
 use crate::{
-  expand::expand_cmd_sub, getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node, lex::{split_tk, split_tk_at}}, procio::{IoStack, borrow_fd}, state::{self, read_vars, write_vars}
+  expand::expand_cmd_sub, getopt::{Opt, OptSpec, get_opts_from_tokens}, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node, lex::{split_tk, split_tk_at}}, procio::borrow_fd, state::{self, read_vars, write_vars}
 };
 
 #[derive(Debug, Clone)]
@@ -195,8 +195,6 @@ impl MapNode {
 	}
 }
 
-use super::setup_builtin;
-
 fn map_opts_spec() -> [OptSpec; 6] {
 	[
 		OptSpec {
@@ -243,7 +241,7 @@ bitflags! {
 	}
 }
 
-pub fn map(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn map(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -254,7 +252,6 @@ pub fn map(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()
 
 	let (mut argv, opts) = get_opts_from_tokens(argv, &map_opts_spec())?;
 	let map_opts = get_map_opts(opts);
-  let (_, _guard) = setup_builtin(None, job, Some((io_stack, node.redirs)))?;
 	if !argv.is_empty() {
 		argv.remove(0); // remove "map" command from argv
 	}

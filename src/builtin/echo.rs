@@ -1,12 +1,10 @@
 use crate::{
-  builtin::setup_builtin,
   expand::expand_prompt,
   getopt::{Opt, OptSpec, get_opts_from_tokens},
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
-  parse::{NdRule, Node},
+  parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
-  procio::{IoStack, borrow_fd},
+  procio::borrow_fd,
   state,
 };
 
@@ -39,7 +37,7 @@ bitflags! {
   }
 }
 
-pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn echo(node: Node) -> ShResult<()> {
   let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -51,8 +49,8 @@ pub fn echo(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
   assert!(!argv.is_empty());
   let (argv, opts) = get_opts_from_tokens(argv, &ECHO_OPTS)?;
   let flags = get_echo_flags(opts).blame(blame)?;
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   let output_channel = if flags.contains(EchoFlags::USE_STDERR) {
     borrow_fd(STDERR_FILENO)

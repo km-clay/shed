@@ -2,14 +2,11 @@ use std::os::unix::fs::OpenOptionsExt;
 
 use crate::{
   getopt::{Opt, OptSpec, get_opts_from_tokens},
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
-  parse::{NdRule, Node},
+  parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
-  procio::{IoStack, borrow_fd},
+  procio::borrow_fd,
 };
-
-use super::setup_builtin;
 
 bitflags! {
   #[derive(Clone,Copy,Debug,PartialEq,Eq)]
@@ -29,7 +26,7 @@ bitflags! {
 /// The file given as an argument is completely destroyed. The command works by
 /// shredding all of the data contained in the file, before truncating the
 /// length of the file to 0 to ensure that not even any metadata remains.
-pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn zoltraak(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -106,8 +103,8 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
     }
   }
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   for (arg, span) in argv {
     if &arg == "/" && !flags.contains(ZoltFlags::NO_PRESERVE_ROOT) {

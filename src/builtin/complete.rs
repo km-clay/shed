@@ -2,12 +2,10 @@ use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 
 use crate::{
-  builtin::setup_builtin,
   getopt::{Opt, OptSpec, get_opts_from_tokens},
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node},
-  procio::{IoStack, borrow_fd},
+  parse::{NdRule, Node, execute::prepare_argv},
+  procio::borrow_fd,
   readline::complete::{BashCompSpec, CompContext, CompSpec},
   state::{self, read_meta, write_meta},
 };
@@ -149,7 +147,7 @@ pub struct CompOpts {
   pub opt_flags: CompOptFlags,
 }
 
-pub fn complete_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn complete_builtin(node: Node) -> ShResult<()> {
   let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -168,8 +166,8 @@ pub fn complete_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -
 
   let (argv, opts) = get_opts_from_tokens(argv, &COMP_OPTS)?;
   let comp_opts = get_comp_opts(opts)?;
-  let (argv, _) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   if comp_opts.flags.contains(CompFlags::PRINT) {
     if argv.is_empty() {
@@ -219,7 +217,7 @@ pub fn complete_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -
   Ok(())
 }
 
-pub fn compgen_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn compgen_builtin(node: Node) -> ShResult<()> {
   let _blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -239,7 +237,6 @@ pub fn compgen_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) ->
   let (argv, opts) = get_opts_from_tokens(argv, &COMPGEN_OPTS)?;
   let prefix = argv.clone().into_iter().nth(1).unwrap_or_default();
   let comp_opts = get_comp_opts(opts)?;
-  let (_, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
 
   let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
 

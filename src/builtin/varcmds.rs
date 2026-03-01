@@ -1,15 +1,12 @@
 use crate::{
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node, lex::split_tk_at},
+  parse::{NdRule, Node, execute::prepare_argv, lex::split_tk_at},
   prelude::*,
-  procio::{IoStack, borrow_fd},
+  procio::borrow_fd,
   state::{self, VarFlags, VarKind, read_vars, write_vars},
 };
 
-use super::setup_builtin;
-
-pub fn readonly(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn readonly(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -17,8 +14,6 @@ pub fn readonly(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
   else {
     unreachable!()
   };
-
-  let (_, _guard) = setup_builtin(None, job, Some((io_stack, node.redirs)))?;
 
   // Remove "readonly" from argv
   let argv = if !argv.is_empty() { &argv[1..] } else { &argv[..] };
@@ -61,7 +56,7 @@ pub fn readonly(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
   Ok(())
 }
 
-pub fn unset(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn unset(node: Node) -> ShResult<()> {
   let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -71,8 +66,8 @@ pub fn unset(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   if argv.is_empty() {
     return Err(ShErr::at(ShErrKind::SyntaxErr, blame, "unset: Expected at least one argument"));
@@ -89,7 +84,7 @@ pub fn unset(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
   Ok(())
 }
 
-pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn export(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -97,8 +92,6 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
   else {
     unreachable!()
   };
-
-  let (_, _guard) = setup_builtin(None, job, Some((io_stack, node.redirs)))?;
 
   // Remove "export" from argv
   let argv = if !argv.is_empty() { &argv[1..] } else { &argv[..] };
@@ -134,7 +127,7 @@ pub fn export(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
   Ok(())
 }
 
-pub fn local(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn local(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -142,8 +135,6 @@ pub fn local(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<
   else {
     unreachable!()
   };
-
-  let (_, _guard) = setup_builtin(None, job, Some((io_stack, node.redirs)))?;
 
   // Remove "local" from argv
   let argv = if !argv.is_empty() { &argv[1..] } else { &argv[..] };

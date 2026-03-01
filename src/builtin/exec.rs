@@ -1,15 +1,12 @@
 use nix::{errno::Errno, unistd::execvpe};
 
 use crate::{
-  builtin::setup_builtin,
-  jobs::JobBldr,
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node, execute::ExecArgs},
-  procio::IoStack,
+  parse::{NdRule, Node, execute::{ExecArgs, prepare_argv}},
   state,
 };
 
-pub fn exec_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn exec_builtin(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -18,13 +15,8 @@ pub fn exec_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> Sh
     unreachable!()
   };
 
-  let (expanded_argv, guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let expanded_argv = expanded_argv.unwrap();
-  if let Some(g) = guard {
-    // Persist redirections so they affect the entire shell,
-    // not just this command call
-    g.persist()
-  }
+  let mut expanded_argv = prepare_argv(argv)?;
+  if !expanded_argv.is_empty() { expanded_argv.remove(0); }
 
   if expanded_argv.is_empty() {
     state::set_status(0);
@@ -42,7 +34,7 @@ pub fn exec_builtin(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> Sh
   let cmd_str = cmd.to_str().unwrap().to_string();
   match e {
     Errno::ENOENT => Err(
-			ShErr::new(ShErrKind::CmdNotFound, span.clone())
+			ShErr::new(ShErrKind::NotFound, span.clone())
 				.labeled(span, format!("exec: command not found: {}", cmd_str))
 		),
     _ => Err(ShErr::at(ShErrKind::Errno(e), span, format!("{e}"))),

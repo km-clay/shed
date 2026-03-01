@@ -1,14 +1,5 @@
-use nix::unistd::Pid;
-
 use crate::{
-  jobs::{ChildProc, JobBldr},
   libsh::error::ShResult,
-  parse::{
-    Redir,
-    execute::prepare_argv,
-    lex::{Span, Tk},
-  },
-  procio::{IoStack, RedirGuard},
   state,
 };
 
@@ -32,76 +23,14 @@ pub mod varcmds;
 pub mod zoltraak;
 pub mod map;
 pub mod arrops;
+pub mod intro;
 
-pub const BUILTINS: [&str; 41] = [
+pub const BUILTINS: [&str; 43] = [
   "echo", "cd", "read", "export", "local", "pwd", "source", "shift", "jobs", "fg", "bg", "disown",
   "alias", "unalias", "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin",
   "command", "trap", "pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly",
-  "unset", "complete", "compgen", "map", "pop", "fpop", "push", "fpush", "rotate"
+  "unset", "complete", "compgen", "map", "pop", "fpop", "push", "fpush", "rotate", "wait", "type"
 ];
-
-/// Sets up a builtin command
-///
-/// Prepares a builtin for execution by processing arguments, setting up
-/// redirections, and registering the command as a child process in the given
-/// `JobBldr`
-///
-/// # Parameters
-/// * argv - The vector of raw argument tokens
-/// * job - A mutable reference to a `JobBldr`
-/// * io_mode - An optional 2-tuple consisting of a mutable reference to an
-///   `IoStack` and a vector of `Redirs`
-///
-/// # Behavior
-/// * Cleans, expands, and word splits the arg vector
-/// * Adds a new `ChildProc` to the job builder
-/// * Performs redirections, if any.
-///
-/// # Returns
-/// * The processed arg vector
-/// * The popped `IoFrame`, if any
-///
-/// # Notes
-/// * If redirections are given to this function, the caller must call
-///   `IoFrame.restore()` on the returned `IoFrame`
-/// * If redirections are given, the second field of the resulting tuple will
-///   *always* be `Some()`
-/// * If no redirections are given, the second field will *always* be `None`
-type SetupReturns = ShResult<(Option<Vec<(String, Span)>>, Option<RedirGuard>)>;
-pub fn setup_builtin(
-  argv: Option<Vec<Tk>>,
-  job: &mut JobBldr,
-  io_mode: Option<(&mut IoStack, Vec<Redir>)>,
-) -> SetupReturns {
-  let mut argv = argv.map(|argv| prepare_argv(argv)).transpose()?;
-
-  let child_pgid = if let Some(pgid) = job.pgid() {
-    pgid
-  } else {
-    job.set_pgid(Pid::this());
-    Pid::this()
-  };
-  let cmd_name = argv
-		.as_mut()
-		.and_then(|argv| {
-			if argv.is_empty() {
-				None
-			} else {
-				Some(argv.remove(0).0)
-			}
-		}).unwrap_or_else(|| String::new());
-  let child = ChildProc::new(Pid::this(), Some(&cmd_name), Some(child_pgid))?;
-  job.push_child(child);
-
-	let guard = io_mode.map(|(io,rdrs)| {
-		io.append_to_frame(rdrs);
-		io.pop_frame().redirect()
-	}).transpose()?;
-
-  // We return the io_frame because the caller needs to also call
-  // io_frame.restore()
-  Ok((argv, guard))
-}
 
 pub fn true_builtin() -> ShResult<()> {
   state::set_status(0);

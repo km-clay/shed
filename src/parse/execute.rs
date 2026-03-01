@@ -7,12 +7,13 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, map, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
+    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, map, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
   },
   expand::{expand_aliases, glob_to_regex},
-  jobs::{ChildProc, JobStack, dispatch_job},
+  jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
   libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
+    guards::{scope_guard, var_ctx_guard},
     utils::RedirVecUtils,
   },
   prelude::*,
@@ -66,48 +67,6 @@ pub fn is_in_path(name: &str) -> bool {
   }
 }
 
-pub struct ScopeGuard;
-
-impl ScopeGuard {
-  pub fn exclusive_scope(args: Option<Vec<(String, Span)>>) -> Self {
-    let argv = args.map(|a| a.into_iter().map(|(s, _)| s).collect::<Vec<_>>());
-    write_vars(|v| v.descend(argv));
-    Self
-  }
-  pub fn shared_scope() -> Self {
-    // used in environments that inherit from the parent, like subshells
-    write_vars(|v| v.descend(None));
-    Self
-  }
-}
-
-impl Drop for ScopeGuard {
-  fn drop(&mut self) {
-    write_vars(|v| v.ascend());
-  }
-}
-
-/// Used to throw away variables that exist in temporary contexts
-/// such as 'VAR=value <command> <args>'
-/// or for-loop variables
-pub struct VarCtxGuard {
-  vars: HashSet<String>,
-}
-impl VarCtxGuard {
-  pub fn new(vars: HashSet<String>) -> Self {
-    Self { vars }
-  }
-}
-impl Drop for VarCtxGuard {
-  fn drop(&mut self) {
-    write_vars(|v| {
-      for var in &self.vars {
-        v.unset_var(var).ok();
-      }
-    });
-  }
-}
-
 pub enum AssignBehavior {
   Export,
   Set,
@@ -151,7 +110,7 @@ impl ExecArgs {
   }
 }
 
-pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -> ShResult<()> {
+pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool, source_name: Option<String>) -> ShResult<()> {
   let log_tab = read_logic(|l| l.clone());
   let input = expand_aliases(input, HashSet::new(), &log_tab);
   let lex_flags = if interactive {
@@ -159,7 +118,8 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -
   } else {
     super::lex::LexFlags::empty()
   };
-  let mut parser = ParsedSrc::new(Arc::new(input)).with_lex_flags(lex_flags);
+	let source_name = source_name.unwrap_or("<stdin>".into());
+  let mut parser = ParsedSrc::new(Arc::new(input)).with_lex_flags(lex_flags).with_name(source_name.clone());
   if let Err(errors) = parser.parse_src() {
     for error in errors {
       error.print_error();
@@ -169,7 +129,7 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -
 
   let nodes = parser.extract_nodes();
 
-  let mut dispatcher = Dispatcher::new(nodes, interactive);
+  let mut dispatcher = Dispatcher::new(nodes, interactive, source_name.clone());
   if let Some(mut stack) = io_stack {
     dispatcher.io_stack.extend(stack.drain(..));
   }
@@ -179,7 +139,7 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -
     && let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error))
   {
     let saved_status = state::get_status();
-    exec_input(trap, None, false)?;
+    exec_input(trap, None, false, Some(source_name))?;
     state::set_status(saved_status);
   }
 
@@ -189,16 +149,18 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -
 pub struct Dispatcher {
   nodes: VecDeque<Node>,
   interactive: bool,
+	source_name: String,
   pub io_stack: IoStack,
   pub job_stack: JobStack,
 }
 
 impl Dispatcher {
-  pub fn new(nodes: Vec<Node>, interactive: bool) -> Self {
+  pub fn new(nodes: Vec<Node>, interactive: bool, source_name: String) -> Self {
     let nodes = VecDeque::from(nodes);
     Self {
       nodes,
       interactive,
+			source_name,
       io_stack: IoStack::new(),
       job_stack: JobStack::new(),
     }
@@ -244,7 +206,7 @@ impl Dispatcher {
       let stack = IoStack {
         stack: self.io_stack.clone(),
       };
-      exec_input(format!("cd {dir}"), Some(stack), self.interactive)
+      exec_input(format!("cd {dir}"), Some(stack), self.interactive, Some(self.source_name.clone()))
     } else {
       self.exec_cmd(node)
     }
@@ -310,7 +272,7 @@ impl Dispatcher {
       return Ok(());
     }
 
-    let func = ShFunc::new(func_parser);
+    let func = ShFunc::new(func_parser,blame);
     write_logic(|l| l.insert_func(name, func)); // Store the AST
     Ok(())
   }
@@ -319,6 +281,7 @@ impl Dispatcher {
     let NdRule::Command { assignments, argv } = subsh.class else {
       unreachable!()
     };
+		let name = self.source_name.clone();
 
     self.run_fork("anonymous_subshell", |s| {
       if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
@@ -337,7 +300,7 @@ impl Dispatcher {
       let subsh = argv.remove(0);
       let subsh_body = subsh.0.to_string();
 
-      if let Err(e) = exec_input(subsh_body, None, s.interactive) {
+      if let Err(e) = exec_input(subsh_body, None, s.interactive, Some(name)) {
         e.print_error();
       };
     })
@@ -371,7 +334,7 @@ impl Dispatcher {
 
     let env_vars = self.set_assignments(assignments, AssignBehavior::Export)?;
     let func_name = argv.remove(0).to_string();
-    let _var_guard = VarCtxGuard::new(env_vars.into_iter().collect());
+    let _var_guard = var_ctx_guard(env_vars.into_iter().collect());
 
     self.io_stack.append_to_frame(func.redirs);
 
@@ -379,7 +342,7 @@ impl Dispatcher {
 
     let argv = prepare_argv(argv).try_blame(blame.clone())?;
     let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&func_name)) {
-      let _guard = ScopeGuard::exclusive_scope(Some(argv));
+      let _guard = scope_guard(Some(argv));
 			func_body.body_mut().propagate_context(func_ctx);
       func_body.body_mut().flags = func.flags;
 
@@ -412,7 +375,7 @@ impl Dispatcher {
     let fork_builtins = brc_grp.flags.contains(NdFlags::FORK_BUILTINS);
 
     self.io_stack.append_to_frame(brc_grp.redirs);
-    let _guard = self.io_stack.pop_frame().redirect()?;
+    let guard = self.io_stack.pop_frame().redirect()?;
     let brc_grp_logic = |s: &mut Self| -> ShResult<()> {
       for node in body {
         let blame = node.get_span();
@@ -430,7 +393,7 @@ impl Dispatcher {
         }
       })
     } else {
-      brc_grp_logic(self)
+      brc_grp_logic(self).map_err(|e| e.with_redirs(guard))
     }
   }
   fn exec_case(&mut self, case_stmt: Node) -> ShResult<()> {
@@ -446,7 +409,7 @@ impl Dispatcher {
     let fork_builtins = case_stmt.flags.contains(NdFlags::FORK_BUILTINS);
 
     self.io_stack.append_to_frame(case_stmt.redirs);
-    let _guard = self.io_stack.pop_frame().redirect()?;
+    let guard = self.io_stack.pop_frame().redirect()?;
 
     let case_logic = |s: &mut Self| -> ShResult<()> {
       let exp_pattern = pattern.clone().expand()?;
@@ -484,7 +447,7 @@ impl Dispatcher {
         }
       })
     } else {
-      case_logic(self).try_blame(blame)
+      case_logic(self).try_blame(blame).map_err(|e| e.with_redirs(guard))
     }
   }
   fn exec_loop(&mut self, loop_stmt: Node) -> ShResult<()> {
@@ -502,7 +465,7 @@ impl Dispatcher {
     let fork_builtins = loop_stmt.flags.contains(NdFlags::FORK_BUILTINS);
 
     self.io_stack.append_to_frame(loop_stmt.redirs);
-    let _guard = self.io_stack.pop_frame().redirect()?;
+    let guard = self.io_stack.pop_frame().redirect()?;
 
     let loop_logic = |s: &mut Self| -> ShResult<()> {
       let CondNode { cond, body } = cond_node;
@@ -547,7 +510,7 @@ impl Dispatcher {
         }
       })
     } else {
-      loop_logic(self).try_blame(blame)
+      loop_logic(self).try_blame(blame).map_err(|e| e.with_redirs(guard))
     }
   }
   fn exec_for(&mut self, for_stmt: Node) -> ShResult<()> {
@@ -571,14 +534,14 @@ impl Dispatcher {
     };
 
     self.io_stack.append_to_frame(for_stmt.redirs);
-    let _guard = self.io_stack.pop_frame().redirect()?;
+    let guard = self.io_stack.pop_frame().redirect()?;
 
     let for_logic = |s: &mut Self| -> ShResult<()> {
       // Expand all array variables
       let arr: Vec<String> = to_expanded_strings(arr)?;
       let vars: Vec<String> = to_expanded_strings(vars)?;
 
-      let mut for_guard = VarCtxGuard::new(vars.iter().map(|v| v.to_string()).collect());
+      let mut for_guard = var_ctx_guard(vars.iter().map(|v| v.to_string()).collect());
 
       'outer: for chunk in arr.chunks(vars.len()) {
         let empty = String::new();
@@ -594,7 +557,7 @@ impl Dispatcher {
               VarFlags::NONE,
             )
           })?;
-          for_guard.vars.insert(var.to_string());
+          for_guard.insert(var.to_string());
         }
 
         for node in body.clone() {
@@ -625,7 +588,7 @@ impl Dispatcher {
         }
       })
     } else {
-      for_logic(self).try_blame(blame)
+      for_logic(self).try_blame(blame).map_err(|e| e.with_redirs(guard))
     }
   }
   fn exec_if(&mut self, if_stmt: Node) -> ShResult<()> {
@@ -640,7 +603,7 @@ impl Dispatcher {
     let fork_builtins = if_stmt.flags.contains(NdFlags::FORK_BUILTINS);
 
     self.io_stack.append_to_frame(if_stmt.redirs);
-    let _guard = self.io_stack.pop_frame().redirect()?;
+    let guard = self.io_stack.pop_frame().redirect()?;
 
     let if_logic = |s: &mut Self| -> ShResult<()> {
       let mut matched = false;
@@ -682,7 +645,7 @@ impl Dispatcher {
         }
       })
     } else {
-      if_logic(self).try_blame(blame)
+      if_logic(self).try_blame(blame).map_err(|e| e.with_redirs(guard))
     }
   }
   fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
@@ -695,6 +658,9 @@ impl Dispatcher {
 
     // Zip the commands and their respective pipes into an iterator
     let pipes_and_cmds = get_pipe_stack(cmds.len()).into_iter().zip(cmds);
+
+    let is_bg = pipeline.flags.contains(NdFlags::BACKGROUND);
+    let mut tty_attached = false;
 
     for ((rpipe, wpipe), mut cmd) in pipes_and_cmds {
       if let Some(pipe) = rpipe {
@@ -716,9 +682,18 @@ impl Dispatcher {
         cmd.flags |= NdFlags::FORK_BUILTINS;
       }
       self.dispatch_node(cmd)?;
+
+      // Give the pipeline terminal control as soon as the first child
+      // establishes the PGID, so later children (e.g. nvim) don't get
+      // SIGTTOU when they try to modify terminal attributes.
+      if !tty_attached && !is_bg {
+        if let Some(pgid) = self.job_stack.curr_job_mut().unwrap().pgid() {
+          attach_tty(pgid).ok();
+          tty_attached = true;
+        }
+      }
     }
     let job = self.job_stack.finalize_job().unwrap();
-    let is_bg = pipeline.flags.contains(NdFlags::BACKGROUND);
     dispatch_job(job, is_bg)?;
     Ok(())
   }
@@ -757,10 +732,9 @@ impl Dispatcher {
       unreachable!()
     };
     let env_vars = self.set_assignments(mem::take(assignments), AssignBehavior::Export)?;
-    let _var_guard = VarCtxGuard::new(env_vars.into_iter().collect());
+    let _var_guard = var_ctx_guard(env_vars.into_iter().collect());
 
-    let curr_job_mut = self.job_stack.curr_job_mut().unwrap();
-    let io_stack_mut = &mut self.io_stack;
+    // Handle builtin/command recursion before redirect/job setup
     if cmd_raw.as_str() == "builtin" {
       *argv = argv
         .iter_mut()
@@ -779,43 +753,71 @@ impl Dispatcher {
       }
       return self.exec_cmd(cmd);
     }
+
+    // Set up redirections here so we can attach the guard to propagated errors.
+    self.io_stack.append_to_frame(mem::take(&mut cmd.redirs));
+    let redir_guard = self.io_stack.pop_frame().redirect()?;
+
+    // Register ChildProc in current job
+    let job = self.job_stack.curr_job_mut().unwrap();
+    let child_pgid = if let Some(pgid) = job.pgid() {
+      pgid
+    } else {
+      job.set_pgid(Pid::this());
+      Pid::this()
+    };
+    let child = ChildProc::new(Pid::this(), Some(&cmd_raw), Some(child_pgid))?;
+    job.push_child(child);
+
+    // Handle exec specially — persist redirections before dispatch
+    if cmd_raw.as_str() == "exec" {
+      redir_guard.persist();
+      let result = exec::exec_builtin(cmd);
+      return if let Err(e) = result {
+        Err(e.with_context(context))
+      } else {
+        Ok(())
+      };
+    }
+
     let result = match cmd_raw.as_str() {
-      "echo" => echo(cmd, io_stack_mut, curr_job_mut),
-      "cd" => cd(cmd, curr_job_mut),
-      "export" => export(cmd, io_stack_mut, curr_job_mut),
-      "local" => local(cmd, io_stack_mut, curr_job_mut),
-      "pwd" => pwd(cmd, io_stack_mut, curr_job_mut),
-      "source" => source(cmd, curr_job_mut),
-      "shift" => shift(cmd, curr_job_mut),
-      "fg" => continue_job(cmd, curr_job_mut, JobBehavior::Foregound),
-      "bg" => continue_job(cmd, curr_job_mut, JobBehavior::Background),
-      "disown" => disown(cmd, io_stack_mut, curr_job_mut),
-      "jobs" => jobs(cmd, io_stack_mut, curr_job_mut),
-      "alias" => alias(cmd, io_stack_mut, curr_job_mut),
-      "unalias" => unalias(cmd, io_stack_mut, curr_job_mut),
+      "echo" => echo(cmd),
+      "cd" => cd(cmd),
+      "export" => export(cmd),
+      "local" => local(cmd),
+      "pwd" => pwd(cmd),
+      "source" => source(cmd),
+      "shift" => shift(cmd),
+      "fg" => continue_job(cmd, JobBehavior::Foregound),
+      "bg" => continue_job(cmd, JobBehavior::Background),
+      "disown" => disown(cmd),
+      "jobs" => jobs(cmd),
+      "alias" => alias(cmd),
+      "unalias" => unalias(cmd),
       "return" => flowctl(cmd, ShErrKind::FuncReturn(0)),
       "break" => flowctl(cmd, ShErrKind::LoopBreak(0)),
       "continue" => flowctl(cmd, ShErrKind::LoopContinue(0)),
       "exit" => flowctl(cmd, ShErrKind::CleanExit(0)),
-      "zoltraak" => zoltraak(cmd, io_stack_mut, curr_job_mut),
-      "shopt" => shopt(cmd, io_stack_mut, curr_job_mut),
-      "read" => read_builtin(cmd, io_stack_mut, curr_job_mut),
-      "trap" => trap(cmd, io_stack_mut, curr_job_mut),
-      "pushd" => pushd(cmd, io_stack_mut, curr_job_mut),
-      "popd" => popd(cmd, io_stack_mut, curr_job_mut),
-      "dirs" => dirs(cmd, io_stack_mut, curr_job_mut),
-      "exec" => exec::exec_builtin(cmd, io_stack_mut, curr_job_mut),
-      "eval" => eval::eval(cmd, io_stack_mut, curr_job_mut),
-      "readonly" => readonly(cmd, io_stack_mut, curr_job_mut),
-      "unset" => unset(cmd, io_stack_mut, curr_job_mut),
-      "complete" => complete_builtin(cmd, io_stack_mut, curr_job_mut),
-      "compgen" => compgen_builtin(cmd, io_stack_mut, curr_job_mut),
-			"map" => map::map(cmd, io_stack_mut, curr_job_mut),
-			"pop" => arr_pop(cmd, io_stack_mut, curr_job_mut),
-			"fpop" => arr_fpop(cmd, io_stack_mut, curr_job_mut),
-			"push" => arr_push(cmd, io_stack_mut, curr_job_mut),
-			"fpush" => arr_fpush(cmd, io_stack_mut, curr_job_mut),
-			"rotate" => arr_rotate(cmd, io_stack_mut, curr_job_mut),
+      "zoltraak" => zoltraak(cmd),
+      "shopt" => shopt(cmd),
+      "read" => read_builtin(cmd),
+      "trap" => trap(cmd),
+      "pushd" => pushd(cmd),
+      "popd" => popd(cmd),
+      "dirs" => dirs(cmd),
+      "eval" => eval::eval(cmd),
+      "readonly" => readonly(cmd),
+      "unset" => unset(cmd),
+      "complete" => complete_builtin(cmd),
+      "compgen" => compgen_builtin(cmd),
+			"map" => map::map(cmd),
+			"pop" => arr_pop(cmd),
+			"fpop" => arr_fpop(cmd),
+			"push" => arr_push(cmd),
+			"fpush" => arr_fpush(cmd),
+			"rotate" => arr_rotate(cmd),
+			"wait" => jobctl::wait(cmd),
+			"type" => intro::type_builtin(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -828,7 +830,7 @@ impl Dispatcher {
     };
 
 		if let Err(e) = result {
-			Err(e.with_context(context))
+			Err(e.with_context(context).with_redirs(redir_guard))
 		} else {
 			Ok(())
 		}
@@ -861,8 +863,21 @@ impl Dispatcher {
     let exec_args = ExecArgs::new(argv).blame(blame)?;
     let _guard = self.io_stack.pop_frame().redirect()?;
     let job = self.job_stack.curr_job_mut().unwrap();
+    let existing_pgid = job.pgid();
 
-    let child_logic = || -> ! {
+    let child_logic = |pgid: Option<Pid>| -> ! {
+      // Put ourselves in the correct process group before exec.
+      // For the first child in a pipeline pgid is None, so we
+      // become our own group leader (setpgid(0,0)).  For later
+      // children we join the leader's group.
+      let _ = setpgid(Pid::from_raw(0), pgid.unwrap_or(Pid::from_raw(0)));
+
+      // Reset signal dispositions before exec.  SIG_IGN is preserved
+      // across execvpe, so the shell's ignored SIGTTIN/SIGTTOU would
+      // leak into child processes and break programs like nvim that
+      // need default terminal-stop behavior.
+      crate::signal::reset_signals();
+
       let cmd = &exec_args.cmd.0;
       let span = exec_args.cmd.1;
 
@@ -872,7 +887,7 @@ impl Dispatcher {
       let cmd_str = cmd.to_str().unwrap().to_string();
       match e {
         Errno::ENOENT => {
-          ShErr::new(ShErrKind::CmdNotFound, span.clone())
+          ShErr::new(ShErrKind::NotFound, span.clone())
 						.labeled(span, format!("{cmd_str}: command not found"))
 						.with_context(context)
 						.print_error();
@@ -887,11 +902,11 @@ impl Dispatcher {
     };
 
     if no_fork {
-      child_logic();
+      child_logic(existing_pgid);
     }
 
     match unsafe { fork()? } {
-      ForkResult::Child => child_logic(),
+      ForkResult::Child => child_logic(existing_pgid),
       ForkResult::Parent { child } => {
         // Close proc sub pipe fds - the child has inherited them
         // and will access them via /proc/self/fd/N. Keeping them
@@ -900,7 +915,7 @@ impl Dispatcher {
 
         let cmd_name = exec_args.cmd.0.to_str().unwrap();
 
-        let child_pgid = if let Some(pgid) = job.pgid() {
+        let child_pgid = if let Some(pgid) = existing_pgid {
           pgid
         } else {
           job.set_pgid(child);
@@ -918,15 +933,18 @@ impl Dispatcher {
     Ok(())
   }
   fn run_fork(&mut self, name: &str, f: impl FnOnce(&mut Self)) -> ShResult<()> {
+    let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     match unsafe { fork()? } {
       ForkResult::Child => {
+        let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
+        crate::signal::reset_signals();
         f(self);
         exit(state::get_status())
       }
       ForkResult::Parent { child } => {
         write_jobs(|j| j.drain_registered_fds());
         let job = self.job_stack.curr_job_mut().unwrap();
-        let child_pgid = if let Some(pgid) = job.pgid() {
+        let child_pgid = if let Some(pgid) = existing_pgid {
           pgid
         } else {
           job.set_pgid(child);

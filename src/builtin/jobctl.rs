@@ -1,22 +1,20 @@
 use ariadne::Fmt;
 
 use crate::{
-  jobs::{JobBldr, JobCmdFlags, JobID},
+  jobs::{JobCmdFlags, JobID, wait_bg},
   libsh::error::{ShErr, ShErrKind, ShResult, next_color},
-  parse::{NdRule, Node, lex::Span},
+  parse::{NdRule, Node, execute::prepare_argv, lex::Span},
   prelude::*,
-  procio::{IoStack, borrow_fd},
+  procio::borrow_fd,
   state::{self, read_jobs, write_jobs},
 };
-
-use super::setup_builtin;
 
 pub enum JobBehavior {
   Foregound,
   Background,
 }
 
-pub fn continue_job(node: Node, job: &mut JobBldr, behavior: JobBehavior) -> ShResult<()> {
+pub fn continue_job(node: Node, behavior: JobBehavior) -> ShResult<()> {
   let blame = node.get_span().clone();
 	let cmd_tk = node.get_command();
 	let cmd_span = cmd_tk.unwrap().span.clone();
@@ -32,8 +30,8 @@ pub fn continue_job(node: Node, job: &mut JobBldr, behavior: JobBehavior) -> ShR
     unreachable!()
   };
 
-  let (argv, _) = setup_builtin(Some(argv), job, None)?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
   let mut argv = argv.into_iter();
 
   if read_jobs(|j| j.get_fg().is_some()) {
@@ -84,7 +82,12 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
   if arg.starts_with('%') {
     let arg = arg.strip_prefix('%').unwrap();
     if arg.chars().all(|ch| ch.is_ascii_digit()) {
-      Ok(arg.parse::<usize>().unwrap())
+			let num = arg.parse::<usize>().unwrap_or_default();
+			if num == 0 {
+				Err(ShErr::at(ShErrKind::SyntaxErr, blame, format!("Invalid job id: {}", arg.fg(next_color()))))
+			} else {
+				Ok(num.saturating_sub(1))
+			}
     } else {
       let result = write_jobs(|j| {
         let query_result = j.query(JobID::Command(arg.into()));
@@ -119,7 +122,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
   }
 }
 
-pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn jobs(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -128,8 +131,8 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
   let mut flags = JobCmdFlags::empty();
   for (arg, span) in argv {
@@ -158,7 +161,45 @@ pub fn jobs(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<(
   Ok(())
 }
 
-pub fn disown(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn wait(node: Node) -> ShResult<()> {
+	let blame = node.get_span().clone();
+	let NdRule::Command {
+		assignments: _,
+		argv,
+	} = node.class
+	else {
+		unreachable!()
+	};
+
+	let mut argv = prepare_argv(argv)?;
+	if !argv.is_empty() { argv.remove(0); }
+	if read_jobs(|j| j.curr_job().is_none()) {
+		state::set_status(0);
+		return Err(ShErr::at(ShErrKind::ExecFail, blame, "wait: No jobs found"));
+	}
+	let argv = argv.into_iter()
+		.map(|arg| {
+			if arg.0.as_str().chars().all(|ch| ch.is_ascii_digit()) {
+				Ok(JobID::Pid(Pid::from_raw(arg.0.parse::<i32>().unwrap())))
+			} else {
+				Ok(JobID::TableID(parse_job_id(&arg.0, arg.1)?))
+			}
+		})
+		.collect::<ShResult<Vec<JobID>>>()?;
+
+	if argv.is_empty() {
+		write_jobs(|j| j.wait_all_bg())?;
+	} else {
+		for arg in argv {
+			wait_bg(arg)?;
+		}
+	}
+
+	// don't set status here, the status of the waited-on job should be the status of the wait builtin
+	Ok(())
+}
+
+pub fn disown(node: Node) -> ShResult<()> {
   let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -168,8 +209,8 @@ pub fn disown(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult
     unreachable!()
   };
 
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
   let mut argv = argv.into_iter();
 
   let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {

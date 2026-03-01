@@ -1,12 +1,8 @@
 use std::collections::VecDeque;
 
-use ariadne::Span;
-
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens}, jobs::JobBldr, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node}, prelude::*, procio::{IoStack, borrow_fd}, state::{self, VarFlags, VarKind, read_vars, write_vars}
+  getopt::{Opt, OptSpec, get_opts_from_tokens}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node, execute::prepare_argv}, prelude::*, procio::borrow_fd, state::{self, VarFlags, VarKind, write_vars}
 };
-
-use super::setup_builtin;
 
 fn arr_op_optspec() -> Vec<OptSpec> {
 	vec![
@@ -44,7 +40,7 @@ impl Default for ArrOpOpts {
 #[derive(Clone, Copy)]
 enum End { Front, Back }
 
-fn arr_pop_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: End) -> ShResult<()> {
+fn arr_pop_inner(node: Node, end: End) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -55,8 +51,8 @@ fn arr_pop_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: End
 
 	let (argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
 	let arr_op_opts = get_arr_op_opts(opts)?;
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
   let stdout = borrow_fd(STDOUT_FILENO);
 	let mut status = 0;
 
@@ -85,7 +81,7 @@ fn arr_pop_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: End
   Ok(())
 }
 
-fn arr_push_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: End) -> ShResult<()> {
+fn arr_push_inner(node: Node, end: End) -> ShResult<()> {
 	let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
@@ -97,8 +93,8 @@ fn arr_push_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: En
 
 	let (argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
 	let _arr_op_opts = get_arr_op_opts(opts)?;
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
 	let mut argv = argv.into_iter();
 	let Some((name, _)) = argv.next() else {
@@ -124,23 +120,23 @@ fn arr_push_inner(node: Node, io_stack: &mut IoStack, job: &mut JobBldr, end: En
   Ok(())
 }
 
-pub fn arr_pop(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
-	arr_pop_inner(node, io_stack, job, End::Back)
+pub fn arr_pop(node: Node) -> ShResult<()> {
+	arr_pop_inner(node, End::Back)
 }
 
-pub fn arr_fpop(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
-	arr_pop_inner(node, io_stack, job, End::Front)
+pub fn arr_fpop(node: Node) -> ShResult<()> {
+	arr_pop_inner(node, End::Front)
 }
 
-pub fn arr_push(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
-	arr_push_inner(node, io_stack, job, End::Back)
+pub fn arr_push(node: Node) -> ShResult<()> {
+	arr_push_inner(node, End::Back)
 }
 
-pub fn arr_fpush(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
-	arr_push_inner(node, io_stack, job, End::Front)
+pub fn arr_fpush(node: Node) -> ShResult<()> {
+	arr_push_inner(node, End::Front)
 }
 
-pub fn arr_rotate(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResult<()> {
+pub fn arr_rotate(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
     argv,
@@ -151,8 +147,8 @@ pub fn arr_rotate(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShRe
 
 	let (argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
 	let arr_op_opts = get_arr_op_opts(opts)?;
-  let (argv, _guard) = setup_builtin(Some(argv), job, Some((io_stack, node.redirs)))?;
-  let argv = argv.unwrap();
+  let mut argv = prepare_argv(argv)?;
+  if !argv.is_empty() { argv.remove(0); }
 
 	for (arg, _) in argv {
 		write_vars(|v| -> ShResult<()> {
