@@ -1,7 +1,8 @@
 #![allow(
   clippy::derivable_impls,
   clippy::tabs_in_doc_comments,
-  clippy::while_let_on_iterator
+  clippy::while_let_on_iterator,
+	clippy::result_large_err
 )]
 pub mod builtin;
 pub mod expand;
@@ -87,6 +88,7 @@ fn setup_panic_handler() {
 }
 
 fn main() -> ExitCode {
+  yansi::enable();
   env_logger::init();
   kickstart_lazy_evals();
   setup_panic_handler();
@@ -162,7 +164,7 @@ fn shed_interactive() -> ShResult<()> {
   sig_setup();
 
   if let Err(e) = source_rc() {
-    eprintln!("{e}");
+    e.print_error();
   }
 
   // Create readline instance with initial prompt
@@ -197,7 +199,7 @@ fn shed_interactive() -> ShResult<()> {
             QUIT_CODE.store(*code, Ordering::SeqCst);
             return Ok(());
           }
-          _ => eprintln!("{e}"),
+          _ => e.print_error(),
         }
       }
     }
@@ -269,7 +271,7 @@ fn shed_interactive() -> ShResult<()> {
               QUIT_CODE.store(*code, Ordering::SeqCst);
               return Ok(());
             }
-            _ => eprintln!("{e}"),
+            _ => e.print_error(),
           }
         }
         let command_run_time = start.elapsed();
@@ -295,7 +297,7 @@ fn shed_interactive() -> ShResult<()> {
           QUIT_CODE.store(*code, Ordering::SeqCst);
           return Ok(());
         }
-        _ => eprintln!("{e}"),
+        _ => e.print_error(),
       },
     }
   }

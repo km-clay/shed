@@ -1,12 +1,14 @@
-use std::str::FromStr;
+use std::{fmt::Debug, str::FromStr, sync::Arc};
 
+use ariadne::{Fmt, Label};
 use bitflags::bitflags;
 use fmt::Display;
-use lex::{LexFlags, LexStream, Span, Tk, TkFlags, TkRule};
+use lex::{LexFlags, LexStream, Span, SpanSource, Tk, TkFlags, TkRule};
+use yansi::Color;
 
 use crate::{
   libsh::{
-    error::{Note, ShErr, ShErrKind, ShResult},
+    error::{Note, ShErr, ShErrKind, ShResult, next_color},
     utils::TkVecUtils,
   },
   prelude::*,
@@ -45,6 +47,7 @@ pub struct ParsedSrc {
   pub src: Arc<String>,
   pub ast: Ast,
   pub lex_flags: LexFlags,
+  pub context: LabelCtx,
 }
 
 impl ParsedSrc {
@@ -53,10 +56,15 @@ impl ParsedSrc {
       src,
       ast: Ast::new(vec![]),
       lex_flags: LexFlags::empty(),
+      context: vec![],
     }
   }
   pub fn with_lex_flags(mut self, flags: LexFlags) -> Self {
     self.lex_flags = flags;
+    self
+  }
+  pub fn with_context(mut self, ctx: LabelCtx) -> Self {
+    self.context = ctx;
     self
   }
   pub fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
@@ -70,7 +78,7 @@ impl ParsedSrc {
 
     let mut errors = vec![];
     let mut nodes = vec![];
-    for parse_result in ParseStream::new(tokens) {
+    for parse_result in ParseStream::with_context(tokens, self.context.clone()) {
       match parse_result {
         Ok(node) => nodes.push(node),
         Err(error) => errors.push(error),
@@ -104,12 +112,15 @@ impl Ast {
   }
 }
 
+pub type LabelCtx = Vec<(SpanSource, Label<Span>)>;
+
 #[derive(Clone, Debug)]
 pub struct Node {
   pub class: NdRule,
   pub flags: NdFlags,
   pub redirs: Vec<Redir>,
   pub tokens: Vec<Tk>,
+	pub context: LabelCtx,
 }
 
 impl Node {
@@ -133,7 +144,7 @@ impl Node {
     };
 
     Span::new(
-      first_tk.span.start..last_tk.span.end,
+      first_tk.span.range().start..last_tk.span.range().end,
       first_tk.span.get_source(),
     )
   }
@@ -539,14 +550,25 @@ pub enum NdRule {
   },
 }
 
-#[derive(Debug)]
 pub struct ParseStream {
   pub tokens: Vec<Tk>,
+	pub context: LabelCtx
+}
+
+impl Debug for ParseStream {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("ParseStream")
+			.field("tokens", &self.tokens)
+			.finish()
+	}
 }
 
 impl ParseStream {
   pub fn new(tokens: Vec<Tk>) -> Self {
-    Self { tokens }
+    Self { tokens, context: vec![] }
+  }
+  pub fn with_context(tokens: Vec<Tk>, context: LabelCtx) -> Self {
+    Self { tokens, context }
   }
   fn next_tk_class(&self) -> &TkRule {
     if let Some(tk) = self.tokens.first() {
@@ -684,6 +706,7 @@ impl ParseStream {
         class: NdRule::Conjunction { elements },
         flags: NdFlags::empty(),
         redirs: vec![],
+        context: self.context.clone(),
         tokens: node_tks,
       }))
     }
@@ -697,23 +720,47 @@ impl ParseStream {
     }
     let name_tk = self.next_tk().unwrap();
     node_tks.push(name_tk.clone());
-    let name = name_tk;
+    let name = name_tk.clone();
+		let name_raw = name.to_string();
+		let mut src = name_tk.span.span_source().clone();
+		src.rename(name_raw.clone());
+		let color = next_color();
+		// Push a placeholder context so child nodes inherit it
+		self.context.push((
+			src.clone(),
+			Label::new(name_tk.span.clone().with_name(name_raw.clone()))
+				.with_message(format!("in function '{}' defined here", name_raw.clone().fg(color)))
+				.with_color(color),
+		));
 
     let Some(brc_grp) = self.parse_brc_grp(true /* from_func_def */)? else {
+			self.context.pop();
       return Err(parse_err_full(
         "Expected a brace group after function name",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     };
     body = Box::new(brc_grp);
+		// Replace placeholder with full-span label
+		self.context.pop();
+		let full_span = body.get_span();
+		self.context.push((
+			src,
+			Label::new(full_span.with_name(name_raw.clone()))
+				.with_message(format!("in function '{}' called here", name_raw.fg(color)))
+				.with_color(color),
+		));
 
     let node = Node {
       class: NdRule::FuncDef { name, body },
       flags: NdFlags::empty(),
       redirs: vec![],
       tokens: node_tks,
+			context: self.context.clone()
     };
 
+		self.context.pop();
     Ok(Some(node))
   }
   fn panic_mode(&mut self, node_tks: &mut Vec<Tk>) {
@@ -743,6 +790,7 @@ impl ParseStream {
           return Err(parse_err_full(
             "Malformed test call",
             &node_tks.get_span().unwrap(),
+						self.context.clone()
           ));
         } else {
           break;
@@ -769,6 +817,7 @@ impl ParseStream {
             return Err(parse_err_full(
               "Invalid placement for logical operator in test",
               &node_tks.get_span().unwrap(),
+							self.context.clone()
             ));
           }
           let op = match tk.class {
@@ -784,6 +833,7 @@ impl ParseStream {
           return Err(parse_err_full(
             "Invalid placement for logical operator in test",
             &node_tks.get_span().unwrap(),
+						self.context.clone()
           ));
         }
       }
@@ -797,6 +847,7 @@ impl ParseStream {
       class: NdRule::Test { cases },
       flags: NdFlags::empty(),
       redirs: vec![],
+      context: self.context.clone(),
       tokens: node_tks,
     };
     Ok(Some(node))
@@ -828,6 +879,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected a closing brace for this brace group",
           &node_tks.get_span().unwrap(),
+					self.context.clone()
         ));
       }
     }
@@ -840,6 +892,7 @@ impl ParseStream {
       class: NdRule::BraceGrp { body },
       flags: NdFlags::empty(),
       redirs,
+      context: self.context.clone(),
       tokens: node_tks,
     };
     Ok(Some(node))
@@ -893,12 +946,10 @@ impl ParseStream {
     let pat_err = parse_err_full(
       "Expected a pattern after 'case' keyword",
       &node_tks.get_span().unwrap(),
+			self.context.clone()
     )
     .with_note(
-      Note::new("Patterns can be raw text, or anything that gets substituted with raw text")
-        .with_sub_notes(vec![
-          "This includes variables like '$foo' or command substitutions like '$(echo foo)'",
-        ]),
+      "Patterns can be raw text, or anything that gets substituted with raw text"
     );
 
     let Some(pat_tk) = self.next_tk() else {
@@ -919,6 +970,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected 'in' after case variable name",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -931,6 +983,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected a case pattern here",
           &node_tks.get_span().unwrap(),
+					self.context.clone()
         ));
       }
       let case_pat_tk = self.next_tk().unwrap();
@@ -967,6 +1020,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected 'esac' after case block",
           &node_tks.get_span().unwrap(),
+					self.context.clone()
         ));
       }
     }
@@ -978,10 +1032,17 @@ impl ParseStream {
       },
       flags: NdFlags::empty(),
       redirs,
+      context: self.context.clone(),
       tokens: node_tks,
     };
     Ok(Some(node))
   }
+	fn make_err(&self, span: lex::Span, label: Label<lex::Span>) -> ShErr {
+		let src = span.span_source().clone();
+		ShErr::new(ShErrKind::ParseErr, span)
+			.with_label(src, label)
+			.with_context(self.context.clone())
+	}
   fn parse_if(&mut self) -> ShResult<Option<Node>> {
     // Needs at last one 'if-then',
     // Any number of 'elif-then',
@@ -1000,10 +1061,14 @@ impl ParseStream {
       let prefix_keywrd = if cond_nodes.is_empty() { "if" } else { "elif" };
       let Some(cond) = self.parse_cmd_list()? else {
         self.panic_mode(&mut node_tks);
-        return Err(parse_err_full(
-          &format!("Expected an expression after '{prefix_keywrd}'"),
-          &node_tks.get_span().unwrap(),
-        ));
+				let span = node_tks.get_span().unwrap();
+				let color = next_color();
+				return Err(self.make_err(span.clone(),
+					Label::new(span)
+						.with_message(format!("Expected an expression after '{}'", prefix_keywrd.fg(color)))
+						.with_color(color)
+				));
+
       };
       node_tks.extend(cond.tokens.clone());
 
@@ -1012,6 +1077,7 @@ impl ParseStream {
         return Err(parse_err_full(
           &format!("Expected 'then' after '{prefix_keywrd}' condition"),
           &node_tks.get_span().unwrap(),
+					self.context.clone()
         ));
       }
       node_tks.push(self.next_tk().unwrap());
@@ -1027,6 +1093,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected an expression after 'then'",
           &node_tks.get_span().unwrap(),
+					self.context.clone()
         ));
       };
       let cond_node = CondNode {
@@ -1056,6 +1123,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected an expression after 'else'",
           &node_tks.get_span().unwrap(),
+					self.context.clone()
         ));
       }
     }
@@ -1066,6 +1134,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected 'fi' after if statement",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1081,6 +1150,7 @@ impl ParseStream {
       },
       flags: NdFlags::empty(),
       redirs,
+      context: self.context.clone(),
       tokens: node_tks,
     };
     Ok(Some(node))
@@ -1120,6 +1190,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "This for loop is missing a variable",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     }
     if arr.is_empty() {
@@ -1127,6 +1198,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "This for loop is missing an array",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     }
     if !self.check_keyword("do") || !self.next_tk_is_some() {
@@ -1134,6 +1206,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Missing a 'do' for this for loop",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1149,6 +1222,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Missing a 'done' after this for loop",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1159,6 +1233,7 @@ impl ParseStream {
       class: NdRule::ForNode { vars, arr, body },
       flags: NdFlags::empty(),
       redirs,
+      context: self.context.clone(),
       tokens: node_tks,
     };
     Ok(Some(node))
@@ -1188,6 +1263,7 @@ impl ParseStream {
       return Err(parse_err_full(
         &format!("Expected an expression after '{loop_kind}'"), // It also implements Display
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     };
     node_tks.extend(cond.tokens.clone());
@@ -1197,6 +1273,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected 'do' after loop condition",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1212,6 +1289,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected an expression after 'do'",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     };
 
@@ -1221,6 +1299,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected 'done' after loop body",
         &node_tks.get_span().unwrap(),
+				self.context.clone()
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1240,6 +1319,7 @@ impl ParseStream {
       },
       flags: NdFlags::empty(),
       redirs,
+      context: self.context.clone(),
       tokens: node_tks,
     };
     Ok(Some(loop_node))
@@ -1277,6 +1357,7 @@ impl ParseStream {
         },
         flags,
         redirs: vec![],
+        context: self.context.clone(),
         tokens: node_tks,
       }))
     }
@@ -1295,6 +1376,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Found case pattern in command",
           &prefix_tk.span,
+					self.context.clone()
         ));
       }
       let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
@@ -1335,6 +1417,7 @@ impl ParseStream {
           tokens: node_tks,
           flags,
           redirs,
+          context: self.context.clone(),
         }));
       }
     }
@@ -1398,16 +1481,17 @@ impl ParseStream {
       tokens: node_tks,
       flags,
       redirs,
+      context: self.context.clone(),
     }))
   }
   fn parse_assignment(&self, token: &Tk) -> Option<Node> {
     let mut chars = token.span.as_str().chars();
     let mut var_name = String::new();
-    let mut name_range = token.span.start..token.span.start;
+    let mut name_range = token.span.range().start..token.span.range().start;
     let mut var_val = String::new();
-    let mut val_range = token.span.end..token.span.end;
+    let mut val_range = token.span.range().end..token.span.range().end;
     let mut assign_kind = None;
-    let mut pos = token.span.start;
+    let mut pos = token.span.range().start;
 
     while let Some(ch) = chars.next() {
       if assign_kind.is_some() {
@@ -1500,6 +1584,7 @@ impl ParseStream {
         tokens: vec![token.clone()],
         flags,
         redirs: vec![],
+        context: self.context.clone(),
       })
     } else {
       None
@@ -1556,8 +1641,14 @@ pub fn get_redir_file(class: RedirType, path: PathBuf) -> ShResult<File> {
   Ok(result?)
 }
 
-fn parse_err_full(reason: &str, blame: &Span) -> ShErr {
-  ShErr::full(ShErrKind::ParseErr, reason, blame.clone())
+fn parse_err_full(reason: &str, blame: &Span, context: LabelCtx) -> ShErr {
+	let color = next_color();
+	ShErr::new(ShErrKind::ParseErr, blame.clone())
+		.with_label(
+			blame.span_source().clone(),
+			Label::new(blame.clone()).with_message(reason).with_color(color)
+		)
+		.with_context(context)
 }
 
 fn is_func_name(tk: Option<&Tk>) -> bool {

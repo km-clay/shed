@@ -975,7 +975,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
         other => other,
       }
     });
-    stack.retain(|(i, m)| *i <= token.span.start && !markers::END_MARKERS.contains(m));
+    stack.retain(|(i, m)| *i <= token.span.range().start && !markers::END_MARKERS.contains(m));
 
     let Some(ctx) = stack.last() else {
       return false;
@@ -989,27 +989,27 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   if token.class != TkRule::Str
     && let Some(marker) = marker_for(&token.class)
   {
-    insertions.push((token.span.end, markers::RESET));
-    insertions.push((token.span.start, marker));
+    insertions.push((token.span.range().end, markers::RESET));
+    insertions.push((token.span.range().start, marker));
     return insertions;
   } else if token.flags.contains(TkFlags::IS_SUBSH) {
     let token_raw = token.span.as_str();
     if token_raw.ends_with(')') {
-      insertions.push((token.span.end, markers::SUBSH_END));
+      insertions.push((token.span.range().end, markers::SUBSH_END));
     }
-    insertions.push((token.span.start, markers::SUBSH));
+    insertions.push((token.span.range().start, markers::SUBSH));
     return insertions;
   } else if token.class == TkRule::CasePattern {
-    insertions.push((token.span.end, markers::RESET));
-    insertions.push((token.span.end - 1, markers::CASE_PAT));
-    insertions.push((token.span.start, markers::OPERATOR));
+    insertions.push((token.span.range().end, markers::RESET));
+    insertions.push((token.span.range().end - 1, markers::CASE_PAT));
+    insertions.push((token.span.range().start, markers::OPERATOR));
     return insertions;
   }
 
   let token_raw = token.span.as_str();
   let mut token_chars = token_raw.char_indices().peekable();
 
-  let span_start = token.span.start;
+  let span_start = token.span.range().start;
 
 	let mut qt_state = QuoteState::default();
   let mut cmd_sub_depth = 0;
@@ -1031,7 +1031,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
     insertions.insert(0, (span_start, markers::ASSIGNMENT));
   }
 
-  insertions.insert(0, (token.span.end, markers::RESET)); // reset at the end of the token
+  insertions.insert(0, (token.span.range().end, markers::RESET)); // reset at the end of the token
 
   while let Some((i, ch)) = token_chars.peek() {
     let index = *i; // we have to dereference this here because rustc is a very pedantic program

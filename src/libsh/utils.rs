@@ -78,7 +78,7 @@ impl TkVecUtils<Tk> for Vec<Tk> {
     if let Some(first_tk) = self.first() {
       self
         .last()
-        .map(|last_tk| Span::new(first_tk.span.start..last_tk.span.end, first_tk.source()))
+        .map(|last_tk| Span::new(first_tk.span.range().start..last_tk.span.range().end, first_tk.source()))
     } else {
       None
     }

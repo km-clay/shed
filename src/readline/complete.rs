@@ -696,7 +696,7 @@ impl Completer {
         tks
           .iter()
           .next()
-          .is_some_and(|tk| tk.span.start > cursor_pos)
+          .is_some_and(|tk| tk.span.range().start > cursor_pos)
       })
       .map(|i| i.saturating_sub(1))
       .unwrap_or(segments.len().saturating_sub(1));
@@ -705,13 +705,13 @@ impl Completer {
 
     let cword = if let Some(pos) = relevant
       .iter()
-      .position(|tk| cursor_pos >= tk.span.start && cursor_pos <= tk.span.end)
+      .position(|tk| cursor_pos >= tk.span.range().start && cursor_pos <= tk.span.range().end)
     {
       pos
     } else {
       let insert_pos = relevant
         .iter()
-        .position(|tk| tk.span.start > cursor_pos)
+        .position(|tk| tk.span.range().start > cursor_pos)
         .unwrap_or(relevant.len());
 
       let mut new_tk = Tk::default();
@@ -761,7 +761,7 @@ impl Completer {
 
     // Set token_span from CompContext's current word
     if let Some(cur) = ctx.words.get(ctx.cword) {
-      self.token_span = (cur.span.start, cur.span.end);
+      self.token_span = (cur.span.range().start, cur.span.range().end);
     } else {
       self.token_span = (cursor_pos, cursor_pos);
     }
@@ -799,7 +799,7 @@ impl Completer {
       return Ok(CompResult::from_candidates(candidates));
     };
 
-    self.token_span = (cur_token.span.start, cur_token.span.end);
+    self.token_span = (cur_token.span.range().start, cur_token.span.range().end);
 
     // Use marker-based context detection for sub-token awareness (e.g. VAR_SUB
     // inside a token)
@@ -812,7 +812,7 @@ impl Completer {
     // If token contains '=', only complete after the '='
     let token_str = cur_token.span.as_str();
     if let Some(eq_pos) = token_str.rfind('=') {
-      self.token_span.0 = cur_token.span.start + eq_pos + 1;
+      self.token_span.0 = cur_token.span.range().start + eq_pos + 1;
       cur_token
         .span
         .set_range(self.token_span.0..self.token_span.1);

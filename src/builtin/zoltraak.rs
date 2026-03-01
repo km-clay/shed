@@ -117,8 +117,7 @@ pub fn zoltraak(node: Node, io_stack: &mut IoStack, job: &mut JobBldr) -> ShResu
           "zoltraak: Attempted to destroy root directory '/'",
         )
         .with_note(
-          Note::new("If you really want to do this, you can use the --no-preserve-root flag")
-            .with_sub_notes(vec!["Example: 'zoltraak --no-preserve-root /'"]),
+          "If you really want to do this, you can use the --no-preserve-root flag"
         ),
       );
     }
@@ -181,8 +180,7 @@ fn annihilate(path: &str, flags: ZoltFlags) -> ShResult<()> {
           format!("zoltraak: '{path}' is a directory"),
         )
         .with_note(
-          Note::new("Use the '-r' flag to recursively shred directories")
-            .with_sub_notes(vec!["Example: 'zoltraak -r directory'"]),
+          "Use the '-r' flag to recursively shred directories"
         ),
       );
     }

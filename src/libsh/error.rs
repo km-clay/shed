@@ -1,12 +1,62 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::Display;
+use ariadne::Color;
+use ariadne::{Report, ReportKind};
+use rand::{RngExt, TryRng};
 
 use crate::{
   libsh::term::{Style, Styled},
-  parse::lex::Span,
+  parse::lex::{Span, SpanSource},
   prelude::*,
 };
 
 pub type ShResult<T> = Result<T, ShErr>;
+
+pub struct ColorRng;
+
+impl ColorRng {
+	fn get_colors() -> &'static [Color] {
+		&[
+			Color::Red,
+			Color::Cyan,
+			Color::Blue,
+			Color::Green,
+			Color::Yellow,
+			Color::Magenta,
+			Color::Fixed(208), // orange
+			Color::Fixed(39),  // deep sky blue
+			Color::Fixed(170), // orchid / magenta-pink
+			Color::Fixed(76),  // chartreuse
+			Color::Fixed(51),  // aqua
+			Color::Fixed(226), // bright yellow
+			Color::Fixed(99),  // slate blue
+			Color::Fixed(214), // light orange
+			Color::Fixed(48),  // spring green
+			Color::Fixed(201), // hot pink
+			Color::Fixed(81),  // steel blue
+			Color::Fixed(220), // gold
+			Color::Fixed(105), // medium purple
+		]
+	}
+}
+
+impl Iterator for ColorRng {
+	type Item = Color;
+	fn next(&mut self) -> Option<Self::Item> {
+		let colors = Self::get_colors();
+		let idx = rand::rngs::SysRng.try_next_u32().ok()? as usize % colors.len();
+		Some(colors[idx])
+	}
+}
+
+thread_local! {
+	static COLOR_RNG: RefCell<ColorRng> = const { RefCell::new(ColorRng) };
+}
+
+pub fn next_color() -> Color {
+	COLOR_RNG.with(|rng| rng.borrow_mut().next().unwrap())
+}
 
 pub trait ShResultExt {
   fn blame(self, span: Span) -> Self;
@@ -16,39 +66,11 @@ pub trait ShResultExt {
 impl<T> ShResultExt for Result<T, ShErr> {
   /// Blame a span for an error
   fn blame(self, new_span: Span) -> Self {
-    let Err(e) = self else { return self };
-    match e {
-      ShErr::Simple { kind, msg, notes }
-      | ShErr::Full {
-        kind,
-        msg,
-        notes,
-        span: _,
-      } => Err(ShErr::Full {
-        kind: kind.clone(),
-        msg: msg.clone(),
-        notes: notes.clone(),
-        span: new_span,
-      }),
-    }
+		self.map_err(|e| e.blame(new_span))
   }
   /// Blame a span if no blame has been assigned yet
   fn try_blame(self, new_span: Span) -> Self {
-    let Err(e) = &self else { return self };
-    match e {
-      ShErr::Simple { kind, msg, notes } => Err(ShErr::Full {
-        kind: kind.clone(),
-        msg: msg.clone(),
-        notes: notes.clone(),
-        span: new_span,
-      }),
-      ShErr::Full {
-        kind: _,
-        msg: _,
-        span: _,
-        notes: _,
-      } => self,
-    }
+		self.map_err(|e| e.try_blame(new_span))
   }
 }
 
@@ -107,270 +129,126 @@ impl Display for Note {
 }
 
 #[derive(Debug)]
-pub enum ShErr {
-  Simple {
-    kind: ShErrKind,
-    msg: String,
-    notes: Vec<Note>,
-  },
-  Full {
-    kind: ShErrKind,
-    msg: String,
-    notes: Vec<Note>,
-    span: Span,
-  },
+pub struct ShErr {
+	kind: ShErrKind,
+	src_span: Option<Span>,
+	labels: Vec<ariadne::Label<Span>>,
+	sources: Vec<SpanSource>,
+	notes: Vec<String>
 }
 
 impl ShErr {
-  pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
-    let msg = msg.into();
-    Self::Simple {
-      kind,
-      msg,
-      notes: vec![],
-    }
-  }
-  pub fn full(kind: ShErrKind, msg: impl Into<String>, span: Span) -> Self {
-    let msg = msg.into();
-    Self::Full {
-      kind,
-      msg,
-      span,
-      notes: vec![],
-    }
-  }
-  pub fn unpack(self) -> (ShErrKind, String, Vec<Note>, Option<Span>) {
-    match self {
-      ShErr::Simple { kind, msg, notes } => (kind, msg, notes, None),
-      ShErr::Full {
-        kind,
-        msg,
-        notes,
-        span,
-      } => (kind, msg, notes, Some(span)),
-    }
-  }
-  pub fn with_note(self, note: Note) -> Self {
-    let (kind, msg, mut notes, span) = self.unpack();
-    notes.push(note);
-    if let Some(span) = span {
-      Self::Full {
-        kind,
-        msg,
-        notes,
-        span,
-      }
-    } else {
-      Self::Simple { kind, msg, notes }
-    }
-  }
-  pub fn with_span(sherr: ShErr, span: Span) -> Self {
-    let (kind, msg, notes, _) = sherr.unpack();
-    Self::Full {
-      kind,
-      msg,
-      notes,
-      span,
-    }
-  }
-  pub fn kind(&self) -> &ShErrKind {
-    match self {
-      ShErr::Simple {
-        kind,
-        msg: _,
-        notes: _,
-      }
-      | ShErr::Full {
-        kind,
-        msg: _,
-        notes: _,
-        span: _,
-      } => kind,
-    }
-  }
-  pub fn get_window(&self) -> Vec<(usize, String)> {
-    let ShErr::Full {
-      kind: _,
-      msg: _,
-      notes: _,
-      span,
-    } = self
-    else {
-      unreachable!()
-    };
-    let mut total_len: usize = 0;
-    let mut total_lines: usize = 1;
-    let mut lines = vec![];
-    let mut cur_line = String::new();
+	pub fn new(kind: ShErrKind, span: Span) -> Self {
+		Self { kind, src_span: Some(span), labels: vec![], sources: vec![], notes: vec![] }
+	}
+	pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
+		Self { kind, src_span: None, labels: vec![], sources: vec![], notes: vec![msg.into()] }
+	}
+	pub fn full(kind: ShErrKind, msg: impl Into<String>, span: Span) -> Self {
+		Self { kind, src_span: Some(span), labels: vec![], sources: vec![], notes: vec![msg.into()] }
+	}
+	pub fn blame(self, span: Span) -> Self {
+		let ShErr { kind, src_span: _, labels, sources, notes } = self;
+		Self { kind, src_span: Some(span), labels, sources, notes }
+	}
+	pub fn try_blame(self, span: Span) -> Self {
+		match self {
+			ShErr { kind, src_span: None, labels, sources, notes } => Self { kind, src_span: Some(span), labels, sources, notes },
+			_ => self
+		}
+	}
+	pub fn kind(&self) -> &ShErrKind {
+		&self.kind
+	}
+	pub fn rename(mut self, name: impl Into<String>) -> Self {
+		if let Some(span) = self.src_span.as_mut() {
+			span.rename(name.into());
+		}
+		self
+	}
+	pub fn with_label(self, source: SpanSource, label: ariadne::Label<Span>) -> Self {
+		let ShErr { kind, src_span, mut labels, mut sources, notes } = self;
+		sources.push(source);
+		labels.push(label);
+		Self { kind, src_span, labels, sources, notes }
+	}
+	pub fn with_context(self, ctx: Vec<(SpanSource, ariadne::Label<Span>)>) -> Self {
+		let ShErr { kind, src_span, mut labels, mut sources, notes } = self;
+		for (src, label) in ctx {
+			sources.push(src);
+			labels.push(label);
+		}
+		Self { kind, src_span, labels, sources, notes }
+	}
+	pub fn with_note(self, note: impl Into<String>) -> Self {
+		let ShErr { kind, src_span, labels, sources, mut notes } = self;
+		notes.push(note.into());
+		Self { kind, src_span, labels, sources, notes }
+	}
+	pub fn build_report(&self) -> Option<Report<'_, Span>> {
+		let span = self.src_span.as_ref()?;
+		let mut report = Report::build(ReportKind::Error, span.clone())
+			.with_config(ariadne::Config::default().with_color(true));
+		let msg = if self.notes.is_empty() {
+			self.kind.to_string()
+		} else {
+			format!("{} - {}", self.kind, self.notes.first().unwrap())
+		};
+		report = report.with_message(msg);
 
-    let src = span.get_source();
-    let mut chars = src.chars();
+		for label in self.labels.clone() {
+			report = report.with_label(label);
+		}
+		for note in &self.notes {
+			report = report.with_note(note);
+		}
 
-    while let Some(ch) = chars.next() {
-      total_len += ch.len_utf8();
-      cur_line.push(ch);
-      if ch == '\n' {
-        if total_len > span.start {
-          let line = (total_lines, mem::take(&mut cur_line));
-          lines.push(line);
-        }
-        if total_len >= span.end {
-          break;
-        }
-        total_lines += 1;
+		Some(report.finish())
+	}
+	fn collect_sources(&self) -> HashMap<SpanSource, String> {
+		let mut source_map = HashMap::new();
+		if let Some(span) = &self.src_span {
+			let src = span.span_source().clone();
+			source_map.entry(src.clone())
+				.or_insert_with(|| src.content().to_string());
+		}
+		for src in &self.sources {
+			source_map.entry(src.clone())
+				.or_insert_with(|| src.content().to_string());
+		}
+		source_map
+	}
+	pub fn print_error(&self) {
+		let default = || {
+			eprintln!("{}", self.kind);
+			for note in &self.notes {
+				eprintln!("note: {note}");
+			}
+		};
+		let Some(report) = self.build_report() else {
+			return default();
+		};
 
-        cur_line.clear();
-      }
-    }
-
-    if !cur_line.is_empty() {
-      let line = (total_lines, mem::take(&mut cur_line));
-      lines.push(line);
-    }
-
-    lines
-  }
-  pub fn get_line_col(&self) -> (usize, usize) {
-    let ShErr::Full {
-      kind: _,
-      msg: _,
-      notes: _,
-      span,
-    } = self
-    else {
-      unreachable!()
-    };
-
-    let mut lineno = 1;
-    let mut colno = 1;
-    let src = span.get_source();
-    let mut chars = src.chars().enumerate();
-    while let Some((pos, ch)) = chars.next() {
-      if pos >= span.start {
-        break;
-      }
-      if ch == '\n' {
-        lineno += 1;
-        colno = 1;
-      } else {
-        colno += 1;
-      }
-    }
-    (lineno, colno)
-  }
-  pub fn get_indicator_lines(&self) -> Option<Vec<String>> {
-    match self {
-      ShErr::Simple {
-        kind: _,
-        msg: _,
-        notes: _,
-      } => None,
-      ShErr::Full {
-        kind: _,
-        msg: _,
-        notes: _,
-        span,
-      } => {
-        let text = span.as_str();
-        let lines = text.lines();
-        let mut indicator_lines = vec![];
-
-        for line in lines {
-          let indicator_line = "^"
-            .repeat(line.trim().len())
-            .styled(Style::Red | Style::Bold);
-          indicator_lines.push(indicator_line);
-        }
-
-        Some(indicator_lines)
-      }
-    }
-  }
+		let sources = self.collect_sources();
+		let cache = ariadne::FnCache::new(move |src: &SpanSource| {
+			sources.get(src)
+				.cloned()
+				.ok_or_else(|| format!("Failed to fetch source '{}'", src.name()))
+		});
+		if report.eprint(cache).is_err() {
+			default();
+		}
+	}
 }
 
 impl Display for ShErr {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Self::Simple {
-        msg,
-        kind: _,
-        notes,
-      } => {
-        let mut all_strings = vec![msg.to_string()];
-        let mut notes_fmt = vec![];
-        for note in notes {
-          let fmt = format!("{note}");
-          notes_fmt.push(fmt);
-        }
-        all_strings.append(&mut notes_fmt);
-        let mut output = all_strings.join("\n");
-        output.push('\n');
-
-        writeln!(f, "{}", output)
-      }
-
-      Self::Full {
-        msg,
-        kind,
-        notes,
-        span: _,
-      } => {
-        let window = self.get_window();
-        let mut indicator_lines = self.get_indicator_lines().unwrap().into_iter();
-        let mut lineno_pad_count = 0;
-        for (lineno, _) in window.clone() {
-          if lineno.to_string().len() > lineno_pad_count {
-            lineno_pad_count = lineno.to_string().len() + 1
-          }
-        }
-        let padding = " ".repeat(lineno_pad_count);
-        writeln!(f)?;
-
-        let (line, col) = self.get_line_col();
-        let line_fmt = line.styled(Style::Cyan | Style::Bold);
-        let col_fmt = col.styled(Style::Cyan | Style::Bold);
-        let kind = kind.styled(Style::Red | Style::Bold);
-        let arrow = "->".styled(Style::Cyan | Style::Bold);
-        writeln!(f, "{kind} - {msg}",)?;
-        writeln!(f, "{padding}{arrow} [{line_fmt};{col_fmt}]",)?;
-
-        let bar = format!("{padding}|").styled(Style::Cyan | Style::Bold);
-        writeln!(f, "{bar}")?;
-
-        let mut first_ind_ln = true;
-        for (lineno, line) in window {
-          let lineno = lineno.to_string();
-          let line = line.trim();
-          let mut prefix = format!("{padding}|");
-          prefix.replace_range(0..lineno.len(), &lineno);
-          prefix = prefix.styled(Style::Cyan | Style::Bold);
-          writeln!(f, "{prefix} {line}")?;
-
-          if let Some(ind_ln) = indicator_lines.next() {
-            if first_ind_ln {
-              let ind_ln_padding = " ".repeat(col);
-              let ind_ln = format!("{ind_ln_padding}{ind_ln}");
-              writeln!(f, "{bar}{ind_ln}")?;
-              first_ind_ln = false;
-            } else {
-              writeln!(f, "{bar} {ind_ln}")?;
-            }
-          }
-        }
-
-        write!(f, "{bar}")?;
-
-        let bar_break = "-".styled(Style::Cyan | Style::Bold);
-        if !notes.is_empty() {
-          writeln!(f)?;
-        }
-        for note in notes {
-          write!(f, "{padding}{bar_break} {note}")?;
-        }
-        Ok(())
-      }
-    }
-  }
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.notes.is_empty() {
+			write!(f, "{}", self.kind)
+		} else {
+			write!(f, "{} - {}", self.kind, self.notes.first().unwrap())
+		}
+	}
 }
 
 impl From<std::io::Error> for ShErr {
@@ -404,9 +282,8 @@ pub enum ShErrKind {
   ResourceLimitExceeded,
   BadPermission,
   Errno(Errno),
-  FileNotFound(String),
-  CmdNotFound(String),
-  ReadlineIntr(String),
+  FileNotFound,
+  CmdNotFound,
   ReadlineErr,
 
   // Not really errors, more like internal signals
@@ -431,13 +308,12 @@ impl Display for ShErrKind {
       Self::ResourceLimitExceeded => "Resource Limit Exceeded",
       Self::BadPermission => "Bad Permissions",
       Self::Errno(e) => &format!("Errno: {}", e.desc()),
-      Self::FileNotFound(file) => &format!("File not found: {file}"),
-      Self::CmdNotFound(cmd) => &format!("Command not found: {cmd}"),
+      Self::FileNotFound => "File not found",
+      Self::CmdNotFound => "Command not found",
       Self::CleanExit(_) => "",
       Self::FuncReturn(_) => "Syntax Error",
       Self::LoopContinue(_) => "Syntax Error",
       Self::LoopBreak(_) => "Syntax Error",
-      Self::ReadlineIntr(_) => "",
       Self::ReadlineErr => "Readline Error",
       Self::ClearReadline => "",
       Self::Null => "",

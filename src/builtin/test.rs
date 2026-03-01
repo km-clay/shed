@@ -61,11 +61,10 @@ impl FromStr for UnaryOp {
       "-t" => Ok(Self::Terminal),
       "-n" => Ok(Self::NonNull),
       "-z" => Ok(Self::Null),
-      _ => Err(ShErr::Simple {
-        kind: ShErrKind::SyntaxErr,
-        msg: "Invalid test operator".into(),
-        notes: vec![],
-      }),
+			_ => Err(ShErr::simple(
+				ShErrKind::SyntaxErr,
+				"Invalid test operator",
+			)),
     }
   }
 }
@@ -98,11 +97,10 @@ impl FromStr for TestOp {
       "-ge" => Ok(Self::IntGe),
       "-le" => Ok(Self::IntLe),
       _ if TEST_UNARY_OPS.contains(&s) => Ok(Self::Unary(s.parse::<UnaryOp>()?)),
-      _ => Err(ShErr::Simple {
-        kind: ShErrKind::SyntaxErr,
-        msg: "Invalid test operator".into(),
-        notes: vec![],
-      }),
+			_ => Err(ShErr::simple(
+				ShErrKind::SyntaxErr,
+				"Invalid test operator",
+			)),
     }
   }
 }
@@ -140,12 +138,11 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         let operand = operand.expand()?.get_words().join(" ");
         conjunct_op = conjunct;
         let TestOp::Unary(op) = TestOp::from_str(operator.as_str())? else {
-          return Err(ShErr::Full {
-            kind: ShErrKind::SyntaxErr,
-            msg: "Invalid unary operator".into(),
-            notes: vec![],
-            span: err_span,
-          });
+					return Err(ShErr::full(
+						ShErrKind::SyntaxErr,
+						"Invalid unary operator",
+						err_span,
+					));
         };
         match op {
           UnaryOp::Exists => {
@@ -248,12 +245,11 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         let test_op = operator.as_str().parse::<TestOp>()?;
         match test_op {
           TestOp::Unary(_) => {
-            return Err(ShErr::Full {
-              kind: ShErrKind::SyntaxErr,
-              msg: "Expected a binary operator in this test call; found a unary operator".into(),
-              notes: vec![],
-              span: err_span,
-            });
+						return Err(ShErr::full(
+							ShErrKind::SyntaxErr,
+							"Expected a binary operator in this test call; found a unary operator",
+							err_span,
+						));
           }
           TestOp::StringEq => {
             let pattern = crate::expand::glob_to_regex(rhs.trim(), true);
@@ -269,12 +265,11 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
           | TestOp::IntGe
           | TestOp::IntLe
           | TestOp::IntEq => {
-            let err = ShErr::Full {
-              kind: ShErrKind::SyntaxErr,
-              msg: format!("Expected an integer with '{}' operator", operator.as_str()),
-              notes: vec![],
-              span: err_span.clone(),
-            };
+						let err = ShErr::full(
+							ShErrKind::SyntaxErr,
+							format!("Expected an integer with '{}' operator", operator),
+							err_span.clone(),
+						);
             let Ok(lhs) = lhs.trim().parse::<i32>() else {
               return Err(err);
             };

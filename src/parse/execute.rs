@@ -1,16 +1,17 @@
 use std::{
-  collections::{HashSet, VecDeque},
-  os::unix::fs::PermissionsExt,
+  cell::Cell, collections::{HashSet, VecDeque}, os::unix::fs::PermissionsExt
 };
+
+use ariadne::{Fmt, Label};
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, arrops::{arr_pop, arr_fpop, arr_push, arr_fpush, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, map, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
+    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, jobctl::{JobBehavior, continue_job, disown, jobs}, map, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
   },
   expand::{expand_aliases, glob_to_regex},
   jobs::{ChildProc, JobStack, dispatch_job},
   libsh::{
-    error::{ShErr, ShErrKind, ShResult, ShResultExt},
+    error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
     utils::RedirVecUtils,
   },
   prelude::*,
@@ -27,7 +28,7 @@ use super::{
 };
 
 thread_local! {
-  static RECURSE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+  static RECURSE_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
 pub fn is_in_path(name: &str) -> bool {
@@ -160,7 +161,7 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool) -
   let mut parser = ParsedSrc::new(Arc::new(input)).with_lex_flags(lex_flags);
   if let Err(errors) = parser.parse_src() {
     for error in errors {
-      eprintln!("{error}");
+      error.print_error();
     }
     return Ok(());
   }
@@ -284,6 +285,7 @@ impl Dispatcher {
   }
   pub fn exec_func_def(&mut self, func_def: Node) -> ShResult<()> {
     let blame = func_def.get_span();
+    let ctx = func_def.context.clone();
     let NdRule::FuncDef { name, body } = func_def.class else {
       unreachable!()
     };
@@ -299,10 +301,10 @@ impl Dispatcher {
       ));
     }
 
-    let mut func_parser = ParsedSrc::new(Arc::new(body));
+    let mut func_parser = ParsedSrc::new(Arc::new(body)).with_context(ctx);
     if let Err(errors) = func_parser.parse_src() {
       for error in errors {
-        eprintln!("{error}");
+        error.print_error();
       }
       return Ok(());
     }
@@ -318,14 +320,14 @@ impl Dispatcher {
 
     self.run_fork("anonymous_subshell", |s| {
       if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
-        eprintln!("{e}");
+        e.print_error();
         return;
       };
       s.io_stack.append_to_frame(subsh.redirs);
       let mut argv = match prepare_argv(argv) {
         Ok(argv) => argv,
         Err(e) => {
-          eprintln!("{e}");
+          e.print_error();
           return;
         }
       };
@@ -334,12 +336,12 @@ impl Dispatcher {
       let subsh_body = subsh.0.to_string();
 
       if let Err(e) = exec_input(subsh_body, None, s.interactive) {
-        eprintln!("{e}");
+        e.print_error();
       };
     })
   }
   fn exec_func(&mut self, func: Node) -> ShResult<()> {
-    let blame = func.get_span().clone();
+    let mut blame = func.get_span().clone();
     let NdRule::Command {
       assignments,
       mut argv,
@@ -369,10 +371,11 @@ impl Dispatcher {
     self.io_stack.append_to_frame(func.redirs);
 
     let func_name = argv.remove(0).span.as_str().to_string();
+		blame.rename(func_name.clone());
+
     let argv = prepare_argv(argv)?;
     let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&func_name)) {
       let _guard = ScopeGuard::exclusive_scope(Some(argv));
-
       func_body.body_mut().flags = func.flags;
 
       if let Err(e) = self.exec_brc_grp(func_body.body().clone()) {
@@ -381,7 +384,7 @@ impl Dispatcher {
             state::set_status(*code);
             Ok(())
           }
-          _ => Err(e).blame(blame),
+          _ => Err(e),
         }
       } else {
         Ok(())
@@ -418,7 +421,7 @@ impl Dispatcher {
       log::trace!("Forking brace group");
       self.run_fork("brace group", |s| {
         if let Err(e) = brc_grp_logic(s) {
-          eprintln!("{e}");
+          e.print_error();
         }
       })
     } else {
@@ -472,7 +475,7 @@ impl Dispatcher {
       log::trace!("Forking builtin: case");
       self.run_fork("case", |s| {
         if let Err(e) = case_logic(s) {
-          eprintln!("{e}");
+          e.print_error();
         }
       })
     } else {
@@ -535,7 +538,7 @@ impl Dispatcher {
       log::trace!("Forking builtin: loop");
       self.run_fork("loop", |s| {
         if let Err(e) = loop_logic(s) {
-          eprintln!("{e}");
+          e.print_error();
         }
       })
     } else {
@@ -613,7 +616,7 @@ impl Dispatcher {
       log::trace!("Forking builtin: for");
       self.run_fork("for", |s| {
         if let Err(e) = for_logic(s) {
-          eprintln!("{e}");
+          e.print_error();
         }
       })
     } else {
@@ -669,7 +672,7 @@ impl Dispatcher {
       log::trace!("Forking builtin: if");
       self.run_fork("if", |s| {
         if let Err(e) = if_logic(s) {
-          eprintln!("{e}");
+          e.print_error();
           state::set_status(1);
         }
       })
@@ -726,7 +729,7 @@ impl Dispatcher {
       let _guard = self.io_stack.pop_frame().redirect()?;
       self.run_fork(&cmd_raw, |s| {
         if let Err(e) = s.dispatch_builtin(cmd) {
-          eprintln!("{e}");
+          e.print_error();
         }
       })
     } else {
@@ -819,6 +822,7 @@ impl Dispatcher {
     }
   }
   fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
+    let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = cmd.class else {
       unreachable!()
     };
@@ -855,12 +859,22 @@ impl Dispatcher {
       let cmd_str = cmd.to_str().unwrap().to_string();
       match e {
         Errno::ENOENT => {
-          let err = ShErr::full(ShErrKind::CmdNotFound(cmd_str), "", span);
-          eprintln!("{err}");
+          let source = span.span_source().clone();
+					let color = next_color();
+          ShErr::full(ShErrKind::CmdNotFound, "", span.clone())
+						.with_label(
+							source,
+							Label::new(span)
+								.with_color(color)
+								.with_message(format!("{}: command not found", cmd_str.fg(color)))
+						)
+						.with_context(context)
+						.print_error();
         }
         _ => {
-          let err = ShErr::full(ShErrKind::Errno(e), format!("{e}"), span);
-          eprintln!("{err}");
+          ShErr::full(ShErrKind::Errno(e), format!("{e}"), span)
+						.with_context(context)
+						.print_error();
         }
       }
       exit(e as i32)

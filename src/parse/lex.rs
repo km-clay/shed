@@ -64,24 +64,59 @@ impl QuoteState {
 	}
 }
 
+#[derive(Clone, PartialEq, Default, Debug, Eq, Hash)]
+pub struct SpanSource {
+	name: String,
+	content: Arc<String>
+}
+
+impl SpanSource {
+	pub fn name(&self) -> &str {
+		&self.name
+	}
+	pub fn content(&self) -> Arc<String> {
+		self.content.clone()
+	}
+	pub fn rename(&mut self, name: String) {
+		self.name = name;
+	}
+}
+
+impl Display for SpanSource {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.name)
+	}
+}
+
 /// Span::new(10..20)
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct Span {
   range: Range<usize>,
-  source: Arc<String>,
+  source: SpanSource
 }
 
 impl Span {
   /// New `Span`. Wraps a range and a string slice that it refers to.
   pub fn new(range: Range<usize>, source: Arc<String>) -> Self {
+		let source = SpanSource { name: "<stdin>".into(), content: source };
     Span { range, source }
   }
+	pub fn rename(&mut self, name: String) {
+		self.source.name = name;
+	}
+	pub fn with_name(mut self, name: String) -> Self {
+		self.source.name = name;
+		self
+	}
   /// Slice the source string at the wrapped range
   pub fn as_str(&self) -> &str {
-    &self.source[self.start..self.end]
+    &self.source.content[self.range().start..self.range().end]
   }
   pub fn get_source(&self) -> Arc<String> {
-    self.source.clone()
+    self.source.content.clone()
+  }
+  pub fn span_source(&self) -> &SpanSource {
+    &self.source
   }
   pub fn range(&self) -> Range<usize> {
     self.range.clone()
@@ -93,14 +128,23 @@ impl Span {
   }
 }
 
-/// Allows simple access to the underlying range wrapped by the span
-impl Deref for Span {
-  type Target = Range<usize>;
-  fn deref(&self) -> &Self::Target {
-    &self.range
-  }
+impl ariadne::Span for Span {
+	type SourceId = SpanSource;
+
+	fn source(&self) -> &Self::SourceId {
+		&self.source
+	}
+
+	fn start(&self) -> usize {
+		self.range.start
+	}
+
+	fn end(&self) -> usize {
+		self.range.end
+	}
 }
 
+/// Allows simple access to the underlying range wrapped by the span
 #[derive(Clone, PartialEq, Debug)]
 pub enum TkRule {
   Null,
@@ -148,7 +192,7 @@ impl Tk {
     self.span.as_str()
   }
   pub fn source(&self) -> Arc<String> {
-    self.span.source.clone()
+    self.span.source.content.clone()
   }
   pub fn mark(&mut self, flag: TkFlags) {
     self.flags |= flag;
@@ -931,12 +975,12 @@ pub fn split_tk(tk: &Tk, pat: &str) -> Vec<Tk> {
 	let mut cursor = 0;
 	let mut splits = vec![];
 	while let Some(split) = split_at_unescaped(&slice[cursor..], pat) {
-		let before_span = Span::new(tk.span.start + cursor..tk.span.start + cursor + split.0.len(), tk.source().clone());
+		let before_span = Span::new(tk.span.range().start + cursor..tk.span.range().start + cursor + split.0.len(), tk.source().clone());
 		splits.push(Tk::new(tk.class.clone(), before_span));
 		cursor += split.0.len() + pat.len();
 	}
 	if slice.get(cursor..).is_some_and(|s| !s.is_empty()) {
-		let remaining_span = Span::new(tk.span.start + cursor..tk.span.end, tk.source().clone());
+		let remaining_span = Span::new(tk.span.range().start + cursor..tk.span.range().end, tk.source().clone());
 		splits.push(Tk::new(tk.class.clone(), remaining_span));
 	}
 	splits
@@ -957,8 +1001,8 @@ pub fn split_tk_at(tk: &Tk, pat: &str) -> Option<(Tk, Tk)> {
 		}
 
 		if slice[i..].starts_with(pat) {
-			let before_span = Span::new(tk.span.start..tk.span.start + i, tk.source().clone());
-			let after_span = Span::new(tk.span.start + i + pat.len()..tk.span.end, tk.source().clone());
+			let before_span = Span::new(tk.span.range().start..tk.span.range().start + i, tk.source().clone());
+			let after_span = Span::new(tk.span.range().start + i + pat.len()..tk.span.range().end, tk.source().clone());
 			let before_tk = Tk::new(tk.class.clone(), before_span);
 			let after_tk = Tk::new(tk.class.clone(), after_span);
 			return Some((before_tk, after_tk));

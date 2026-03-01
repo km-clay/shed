@@ -70,11 +70,10 @@ impl HistEntry {
 impl FromStr for HistEntry {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    let err = Err(ShErr::Simple {
-      kind: ShErrKind::HistoryReadErr,
-      msg: format!("Bad formatting on history entry '{s}'"),
-      notes: vec![],
-    });
+		let err = Err(ShErr::simple(
+			ShErrKind::HistoryReadErr,
+			format!("Bad formatting on history entry '{s}'"),
+		));
 
     //: 248972349;148;echo foo; echo bar
     let Some(cleaned) = s.strip_prefix(": ") else {
@@ -133,11 +132,10 @@ impl FromStr for HistEntries {
 
     while let Some((i, line)) = lines.next() {
       if !line.starts_with(": ") {
-        return Err(ShErr::Simple {
-          kind: ShErrKind::HistoryReadErr,
-          msg: format!("Bad formatting on line {i}"),
-          notes: vec![],
-        });
+				return Err(ShErr::simple(
+					ShErrKind::HistoryReadErr,
+					format!("Bad formatting on line {i}"),
+				));
       }
       let mut chars = line.chars().peekable();
       let mut feeding_lines = true;
@@ -163,11 +161,10 @@ impl FromStr for HistEntries {
         }
         if feeding_lines {
           let Some((_, line)) = lines.next() else {
-            return Err(ShErr::Simple {
-              kind: ShErrKind::HistoryReadErr,
-              msg: format!("Bad formatting on line {i}"),
-              notes: vec![],
-            });
+						return Err(ShErr::simple(
+							ShErrKind::HistoryReadErr,
+							format!("Bad formatting on line {i}"),
+						));
           };
           chars = line.chars().peekable();
         }

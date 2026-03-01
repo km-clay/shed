@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::BitOr};
+use std::{cell::RefCell, fmt::Display, ops::BitOr};
 
 pub trait Styled: Sized + Display {
   fn styled<S: Into<StyleSet>>(self, style: S) -> String {

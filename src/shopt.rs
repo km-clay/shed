@@ -109,10 +109,6 @@ impl ShOpts {
             ShErrKind::SyntaxErr,
             "shopt: expected 'core' or 'prompt' in shopt key",
           )
-          .with_note(
-            Note::new("'shopt' takes arguments separated by periods to denote namespaces")
-              .with_sub_notes(vec!["Example: 'shopt core.autocd=true'"]),
-          ),
         );
       }
     }
@@ -138,10 +134,6 @@ impl ShOpts {
           ShErrKind::SyntaxErr,
           "shopt: Expected 'core' or 'prompt' in shopt key",
         )
-        .with_note(
-          Note::new("'shopt' takes arguments separated by periods to denote namespaces")
-            .with_sub_notes(vec!["Example: 'shopt core.autocd=true'"]),
-        ),
       ),
     }
   }
@@ -240,19 +232,6 @@ impl ShOptCore {
             ShErrKind::SyntaxErr,
             format!("shopt: Unexpected 'core' option '{opt}'"),
           )
-          .with_note(Note::new("options can be accessed like 'core.option_name'"))
-          .with_note(
-            Note::new("'core' contains the following options").with_sub_notes(vec![
-              "dotglob",
-              "autocd",
-              "hist_ignore_dupes",
-              "max_hist",
-              "interactive_comments",
-              "auto_hist",
-              "bell_enabled",
-              "max_recurse_depth",
-            ]),
-          ),
         );
       }
     }
@@ -315,19 +294,6 @@ impl ShOptCore {
           ShErrKind::SyntaxErr,
           format!("shopt: Unexpected 'core' option '{query}'"),
         )
-        .with_note(Note::new("options can be accessed like 'core.option_name'"))
-        .with_note(
-          Note::new("'core' contains the following options").with_sub_notes(vec![
-            "dotglob",
-            "autocd",
-            "hist_ignore_dupes",
-            "max_hist",
-            "interactive_comments",
-            "auto_hist",
-            "bell_enabled",
-            "max_recurse_depth",
-          ]),
-        ),
       ),
     }
   }
@@ -445,20 +411,6 @@ impl ShOptPrompt {
             ShErrKind::SyntaxErr,
             format!("shopt: Unexpected 'prompt' option '{opt}'"),
           )
-          .with_note(Note::new(
-            "options can be accessed like 'prompt.option_name'",
-          ))
-          .with_note(
-            Note::new("'prompt' contains the following options").with_sub_notes(vec![
-              "trunc_prompt_path",
-              "edit_mode",
-              "comp_limit",
-              "highlight",
-              "auto_indent",
-              "linebreak_on_incomplete",
-              "custom",
-            ]),
-          ),
         );
       }
     }
@@ -512,19 +464,6 @@ impl ShOptPrompt {
           ShErrKind::SyntaxErr,
           format!("shopt: Unexpected 'prompt' option '{query}'"),
         )
-        .with_note(Note::new(
-          "options can be accessed like 'prompt.option_name'",
-        ))
-        .with_note(
-          Note::new("'prompt' contains the following options").with_sub_notes(vec![
-            "trunc_prompt_path",
-            "edit_mode",
-            "comp_limit",
-            "highlight",
-            "auto_indent",
-            "linebreak_on_incomplete",
-          ]),
-        ),
       ),
     }
   }

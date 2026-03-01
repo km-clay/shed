@@ -688,11 +688,10 @@ impl ArithTk {
           chars.next();
         }
         _ => {
-          return Err(ShErr::Simple {
-            kind: ShErrKind::ParseErr,
-            msg: "Invalid character in arithmetic substitution".into(),
-            notes: vec![],
-          });
+          return Err(ShErr::simple(
+            ShErrKind::ParseErr,
+            "Invalid character in arithmetic substitution",
+					));
         }
       }
     }
@@ -750,16 +749,14 @@ impl ArithTk {
       match token {
         ArithTk::Num(n) => stack.push(n),
         ArithTk::Op(op) => {
-          let rhs = stack.pop().ok_or(ShErr::Simple {
-            kind: ShErrKind::ParseErr,
-            msg: "Missing right-hand operand".into(),
-            notes: vec![],
-          })?;
-          let lhs = stack.pop().ok_or(ShErr::Simple {
-            kind: ShErrKind::ParseErr,
-            msg: "Missing left-hand operand".into(),
-            notes: vec![],
-          })?;
+					let rhs = stack.pop().ok_or(ShErr::simple(
+						ShErrKind::ParseErr,
+						"Missing right-hand operand",
+					))?;
+					let lhs = stack.pop().ok_or(ShErr::simple(
+						ShErrKind::ParseErr,
+						"Missing left-hand operand",
+					))?;
           let result = match op {
             ArithOp::Add => lhs + rhs,
             ArithOp::Sub => lhs - rhs,
@@ -770,21 +767,19 @@ impl ArithTk {
           stack.push(result);
         }
         _ => {
-          return Err(ShErr::Simple {
-            kind: ShErrKind::ParseErr,
-            msg: "Unexpected token during evaluation".into(),
-            notes: vec![],
-          });
+					return Err(ShErr::simple(
+						ShErrKind::ParseErr,
+						"Unexpected token during evaluation",
+					));
         }
       }
     }
 
     if stack.len() != 1 {
-      return Err(ShErr::Simple {
-        kind: ShErrKind::ParseErr,
-        msg: "Invalid arithmetic expression".into(),
-        notes: vec![],
-      });
+			return Err(ShErr::simple(
+				ShErrKind::ParseErr,
+				"Invalid arithmetic expression",
+			));
     }
 
     Ok(stack[0])
@@ -809,11 +804,10 @@ impl FromStr for ArithOp {
       '*' => Ok(Self::Mul),
       '/' => Ok(Self::Div),
       '%' => Ok(Self::Mod),
-      _ => Err(ShErr::Simple {
-        kind: ShErrKind::ParseErr,
-        msg: "Invalid arithmetic operator".into(),
-        notes: vec![],
-      }),
+			_ => Err(ShErr::simple(
+				ShErrKind::ParseErr,
+				"Invalid arithmetic operator",
+			)),
     }
   }
 }
@@ -863,7 +857,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       io_stack.push_frame(io_frame);
 
       if let Err(e) = exec_input(raw.to_string(), Some(io_stack), false) {
-        eprintln!("{e}");
+        e.print_error();
         exit(1);
       }
       exit(0);
@@ -894,7 +888,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
     ForkResult::Child => {
       io_stack.push_frame(cmd_sub_io_frame);
       if let Err(e) = exec_input(raw.to_string(), Some(io_stack), false) {
-        eprintln!("{e}");
+        e.print_error();
         unsafe { libc::_exit(1) };
       }
       unsafe { libc::_exit(0) };
@@ -1275,11 +1269,10 @@ impl FromStr for ParamExp {
     use ParamExp::*;
 
     let parse_err = || {
-      Err(ShErr::Simple {
-        kind: ShErrKind::SyntaxErr,
-        msg: "Invalid parameter expansion".into(),
-        notes: vec![],
-      })
+			Err(ShErr::simple(
+				ShErrKind::SyntaxErr,
+				"Invalid parameter expansion",
+			)	)
     };
 
     // Handle indirect var expansion: ${!var}
@@ -1437,11 +1430,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           Some(val) => Ok(val),
           None => {
             let expanded = expand_raw(&mut err.chars().peekable())?;
-            Err(ShErr::Simple {
-              kind: ShErrKind::ExecFail,
-              msg: expanded,
-              notes: vec![],
-            })
+						Err(ShErr::simple(
+							ShErrKind::ExecFail,
+							expanded,
+						))
           }
         }
       }
@@ -1449,11 +1441,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Some(val) => Ok(val),
         None => {
           let expanded = expand_raw(&mut err.chars().peekable())?;
-          Err(ShErr::Simple {
-            kind: ShErrKind::ExecFail,
-            msg: expanded,
-            notes: vec![],
-          })
+					Err(ShErr::simple(
+						ShErrKind::ExecFail,
+						expanded,
+					))
         }
       },
       ParamExp::Substr(pos) => {
