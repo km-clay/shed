@@ -11,7 +11,7 @@ use crate::libsh::sys::TTY_FILENO;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::prelude::*;
 use crate::readline::term::{Pos, calc_str_width};
-use crate::state::read_shopts;
+use crate::state::{ShellParam, read_shopts};
 use crate::{
   libsh::error::ShResult,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
@@ -987,8 +987,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   let mut insertions: Vec<(usize, Marker)> = vec![];
 
   if token.class != TkRule::Str
-    && let Some(marker) = marker_for(&token.class)
-  {
+	&& let Some(marker) = marker_for(&token.class) {
     insertions.push((token.span.range().end, markers::RESET));
     insertions.push((token.span.range().start, marker));
     return insertions;
@@ -1082,6 +1081,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
 								|| *br_ch == '='
 								|| *br_ch == '/' // parameter expansion symbols
 								|| *br_ch == '?'
+								|| *br_ch == '$' // we're in some expansion like $foo$bar or ${foo$bar}
                 {
                   token_chars.next();
                 } else if *br_ch == '}' {
@@ -1100,7 +1100,9 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
               let mut end_pos = dollar_pos + 1;
               // consume the var name
               while let Some((cur_i, var_ch)) = token_chars.peek() {
-                if var_ch.is_ascii_alphanumeric() || *var_ch == '_' {
+                if var_ch.is_ascii_alphanumeric()
+								|| ShellParam::from_char(var_ch).is_some()
+								|| *var_ch == '_' {
                   end_pos = *cur_i + 1;
                   token_chars.next();
                 } else {

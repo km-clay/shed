@@ -86,6 +86,7 @@ pub fn clear_color() {
 pub trait ShResultExt {
   fn blame(self, span: Span) -> Self;
   fn try_blame(self, span: Span) -> Self;
+	fn promote_err(self, span: Span) -> Self;
 }
 
 impl<T> ShResultExt for Result<T, ShErr> {
@@ -97,6 +98,9 @@ impl<T> ShResultExt for Result<T, ShErr> {
   fn try_blame(self, new_span: Span) -> Self {
 		self.map_err(|e| e.try_blame(new_span))
   }
+	fn promote_err(self, span: Span) -> Self {
+		self.map_err(|e| e.promote(span))
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -174,6 +178,12 @@ impl ShErr {
 	}
 	pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
 		Self { kind, src_span: None, labels: vec![], sources: vec![], notes: vec![msg.into()], io_guards: vec![] }
+	}
+	pub fn promote(mut self, span: Span) -> Self {
+		if let Some(note) = self.notes.pop() {
+			self = self.labeled(span, note)
+		}
+		self
 	}
 	pub fn with_redirs(mut self, guard: RedirGuard) -> Self {
 		self.io_guards.push(guard);

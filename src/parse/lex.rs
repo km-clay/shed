@@ -1061,11 +1061,13 @@ pub fn lookahead(pat: &str, mut chars: Chars) -> Option<usize> {
 pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
   let mut pos = 0;
   while let Some(ch) = chars.next() {
-    pos += 1;
+    pos += ch.len_utf8();
     match ch {
       _ if is_hard_sep(ch) => return None,
       '\\' => {
-        chars.next();
+        if let Some(esc) = chars.next() {
+          pos += esc.len_utf8();
+        }
       }
       ')' => return Some(pos),
       '(' => return None,

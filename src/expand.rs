@@ -2,10 +2,11 @@ use std::collections::HashSet;
 use std::iter::Peekable;
 use std::str::{Chars, FromStr};
 
+use ariadne::Fmt;
 use glob::Pattern;
 use regex::Regex;
 
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color};
 use crate::parse::execute::exec_input;
 use crate::parse::lex::{LexFlags, LexStream, QuoteState, Tk, TkFlags, TkRule, is_hard_sep};
 use crate::parse::{Redir, RedirType};
@@ -24,7 +25,9 @@ impl Tk {
   pub fn expand(self) -> ShResult<Self> {
     let flags = self.flags;
     let span = self.span.clone();
-    let exp = Expander::new(self)?.expand()?;
+    let exp = Expander::new(self)?
+			.expand()
+			.promote_err(span.clone())?;
     let class = TkRule::Expanded { exp };
     Ok(Self { class, span, flags })
   }
@@ -646,10 +649,11 @@ enum ArithTk {
   Op(ArithOp),
   LParen,
   RParen,
+	Var(String)
 }
 
 impl ArithTk {
-  pub fn tokenize(raw: &str) -> ShResult<Vec<Self>> {
+  pub fn tokenize(raw: &str) -> ShResult<Option<Vec<Self>>> {
     let mut tokens = Vec::new();
     let mut chars = raw.chars().peekable();
 
@@ -687,16 +691,28 @@ impl ArithTk {
           tokens.push(Self::RParen);
           chars.next();
         }
+				_ if ch.is_alphabetic() || ch == '_' => {
+					chars.next();
+					let mut var_name = ch.to_string();
+					while let Some(ch) = chars.peek() {
+						match ch {
+							_ if ch.is_alphabetic() || *ch == '_' => {
+								var_name.push(*ch);
+								chars.next();
+							}
+							_ => break
+						}
+					}
+
+					tokens.push(Self::Var(var_name));
+				}
         _ => {
-          return Err(ShErr::simple(
-            ShErrKind::ParseErr,
-            "Invalid character in arithmetic substitution",
-					));
+          return Ok(None);
         }
       }
     }
 
-    Ok(tokens)
+    Ok(Some(tokens))
   }
 
   fn to_rpn(tokens: Vec<ArithTk>) -> ShResult<Vec<ArithTk>> {
@@ -733,6 +749,22 @@ impl ArithTk {
             }
           }
         }
+				ArithTk::Var(var) => {
+					let Some(val) = read_vars(|v| v.try_get_var(&var)) else {
+						return Err(ShErr::simple(
+							ShErrKind::NotFound,
+							format!("Undefined variable in arithmetic expression: '{}'",var.fg(next_color())),
+						));
+					};
+					let Ok(num) = val.parse::<f64>() else {
+						return Err(ShErr::simple(
+							ShErrKind::ParseErr,
+							format!("Variable '{}' does not contain a number", var.fg(next_color())),
+						));
+					};
+
+					output.push(ArithTk::Num(num));
+				}
       }
     }
 
@@ -812,14 +844,16 @@ impl FromStr for ArithOp {
   }
 }
 
-pub fn expand_arithmetic(raw: &str) -> ShResult<String> {
+pub fn expand_arithmetic(raw: &str) -> ShResult<Option<String>> {
   let body = raw.strip_prefix('(').unwrap().strip_suffix(')').unwrap(); // Unwraps are safe here, we already checked for the parens
   let unescaped = unescape_math(body);
   let expanded = expand_raw(&mut unescaped.chars().peekable())?;
-  let tokens = ArithTk::tokenize(&expanded)?;
+  let Some(tokens) = ArithTk::tokenize(&expanded)? else {
+		return Ok(None);
+	};
   let rpn = ArithTk::to_rpn(tokens)?;
   let result = ArithTk::eval_rpn(rpn)?;
-  Ok(result.to_string())
+  Ok(Some(result.to_string()))
 }
 
 pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
@@ -874,7 +908,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
   if raw.starts_with('(')
     && raw.ends_with(')')
-    && let Ok(output) = expand_arithmetic(raw)
+    && let Some(output) = expand_arithmetic(raw)?
   {
     return Ok(output); // It's actually an arithmetic sub
   }
@@ -1583,11 +1617,19 @@ pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
   if anchored {
     regex.push('^');
   }
-  for ch in glob.chars() {
+  let mut chars = glob.chars();
+  while let Some(ch) = chars.next() {
     match ch {
+      '\\' => {
+        // Shell escape: next char is literal
+        if let Some(esc) = chars.next() {
+          regex.push('\\');
+          regex.push(esc);
+        }
+      }
       '*' => regex.push_str(".*"),
       '?' => regex.push('.'),
-      '.' | '+' | '(' | ')' | '|' | '^' | '$' | '[' | ']' | '{' | '}' | '\\' => {
+      '.' | '+' | '(' | ')' | '|' | '^' | '$' | '[' | ']' | '{' | '}' => {
         regex.push('\\');
         regex.push(ch);
       }

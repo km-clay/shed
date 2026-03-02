@@ -2897,7 +2897,7 @@ impl LineBuf {
       }
       Verb::Equalize => todo!(),
       Verb::InsertModeLineBreak(anchor) => {
-        let (mut start, end) = self.this_line();
+        let (mut start, end) = self.this_line_exclusive();
         let auto_indent = read_shopts(|o| o.prompt.auto_indent);
         if start == 0 && end == self.cursor.max {
           match anchor {

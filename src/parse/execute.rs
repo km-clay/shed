@@ -7,7 +7,7 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, map, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
+    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, map, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
   },
   expand::{expand_aliases, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -818,6 +818,7 @@ impl Dispatcher {
 			"rotate" => arr_rotate(cmd),
 			"wait" => jobctl::wait(cmd),
 			"type" => intro::type_builtin(cmd),
+			"getopts" => getopts(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -937,7 +938,6 @@ impl Dispatcher {
     match unsafe { fork()? } {
       ForkResult::Child => {
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
-        crate::signal::reset_signals();
         f(self);
         exit(state::get_status())
       }

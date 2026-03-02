@@ -78,6 +78,19 @@ impl ShellParam {
       Self::Status | Self::ShPid | Self::LastJob | Self::ShellName
     )
   }
+
+	pub fn from_char(c: &char) -> Option<Self> {
+		match c {
+			'?' => Some(Self::Status),
+			'$' => Some(Self::ShPid),
+			'!' => Some(Self::LastJob),
+			'0' => Some(Self::ShellName),
+			'@' => Some(Self::AllArgs),
+			'*' => Some(Self::AllArgsStr),
+			'#' => Some(Self::ArgCount),
+			_ => None,
+		}
+	}
 }
 
 impl Display for ShellParam {
@@ -164,6 +177,9 @@ impl ScopeStack {
   }
   pub fn cur_scope_mut(&mut self) -> &mut VarTab {
     self.scopes.last_mut().unwrap()
+  }
+  pub fn sh_argv(&self) -> &VecDeque<String> {
+    self.cur_scope().sh_argv()
   }
   pub fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
     for scope in self.scopes.iter_mut().rev() {
@@ -1075,6 +1091,8 @@ pub struct MetaTab {
 
   // pushd/popd stack
   dir_stack: VecDeque<PathBuf>,
+	// getopts char offset for opts like -abc
+	getopts_offset: usize,
 
   old_path: Option<String>,
   old_pwd: Option<String>,
@@ -1083,6 +1101,7 @@ pub struct MetaTab {
   cwd_cache: HashSet<String>,
   // programmable completion specs
   comp_specs: HashMap<String, Box<dyn CompSpec>>,
+
 }
 
 impl MetaTab {
@@ -1092,6 +1111,17 @@ impl MetaTab {
       ..Default::default()
     }
   }
+	pub fn getopts_char_offset(&self) -> usize {
+		self.getopts_offset
+	}
+	pub fn inc_getopts_char_offset(&mut self) -> usize {
+		let offset = self.getopts_offset;
+		self.getopts_offset += 1;
+		offset
+	}
+	pub fn reset_getopts_char_offset(&mut self) {
+		self.getopts_offset = 0;
+	}
   pub fn get_builtin_comp_specs() -> HashMap<String, Box<dyn CompSpec>> {
     let mut map = HashMap::new();
 
