@@ -218,6 +218,8 @@ pub enum Verb {
   ReplaceCharInplace(char, u16), // char to replace with, number of chars to replace
   ToggleCaseInplace(u16),        // Number of chars to toggle
   ToggleCaseRange,
+	IncrementNumber(u16),
+	DecrementNumber(u16),
   ToLower,
   ToUpper,
   Complete,

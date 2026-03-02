@@ -828,6 +828,48 @@ impl TermWriter {
     self.t_cols = t_cols;
   }
 
+	/// Called before the prompt is drawn. If we are not on column 1, push a vid-inverted '%' and then a '\n\r'.
+	///
+	/// Aping zsh with this but it's a nice feature.
+	pub fn fix_cursor_column(&mut self, rdr: &mut TermReader) -> ShResult<()> {
+		let Some((_,c)) = self.get_cursor_pos(rdr)? else {
+			return Ok(());
+		};
+
+		if c != 1 {
+			self.flush_write("\x1b[7m%\x1b[0m\n\r")?;
+		}
+		Ok(())
+	}
+
+	pub fn get_cursor_pos(&mut self, rdr: &mut TermReader) -> ShResult<Option<(usize, usize)>> {
+    // Ping the cursor's position
+    self.flush_write("\x1b[6n")?;
+
+    if !rdr.poll(PollTimeout::from(255u8))? {
+      return Ok(None);
+    }
+
+    if rdr.next_byte()? as char != '\x1b' {
+      return Ok(None);
+    }
+
+    if rdr.next_byte()? as char != '[' {
+      return Ok(None);
+    }
+
+    let row = read_digits_until(rdr, ';')?;
+
+    let col = read_digits_until(rdr, 'R')?;
+		let pos = if let Some(row) = row && let Some(col) = col {
+			Some((row as usize, col as usize))
+		} else {
+			None
+		};
+
+		Ok(pos)
+	}
+
   pub fn move_cursor_at_leftmost(
     &mut self,
     rdr: &mut TermReader,

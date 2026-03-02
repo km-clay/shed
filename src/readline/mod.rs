@@ -11,7 +11,7 @@ use crate::libsh::sys::TTY_FILENO;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::prelude::*;
 use crate::readline::complete::FuzzyCompleter;
-use crate::readline::term::{Pos, calc_str_width};
+use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::state::{ShellParam, read_shopts};
 use crate::{
   libsh::error::ShResult,
@@ -259,6 +259,10 @@ impl ShedVi {
     self.needs_redraw = true;
   }
 
+	pub fn fix_column(&mut self) -> ShResult<()> {
+		self.writer.fix_cursor_column(&mut TermReader::new(*TTY_FILENO))
+	}
+
   /// Reset readline state for a new prompt
   pub fn reset(&mut self, full_redraw: bool) -> ShResult<()> {
     // Clear old display before resetting state — old_layout must survive
@@ -327,6 +331,8 @@ impl ShedVi {
             let span_start = self.completer.token_span().0;
             let new_cursor = span_start + candidate.len();
             let line = self.completer.get_completed_line(&candidate);
+						log::debug!("Completer accepted candidate: {candidate}");
+						log::debug!("New line after completion: {line}");
             self.editor.set_buffer(line);
             self.editor.cursor.set(new_cursor);
             // Don't reset yet — clear() needs old_layout to erase the selector.
@@ -341,12 +347,12 @@ impl ShedVi {
             self.editor.set_hint(hint);
 						self.completer.clear(&mut self.writer)?;
 						self.needs_redraw = true;
+						self.completer.reset();
 						continue;
           }
           CompResponse::Dismiss => {
 						self.completer.clear(&mut self.writer)?;
-            // Don't reset yet — clear() needs old_layout to erase the selector.
-            // The next print_line() will call clear(), then we can reset.
+						self.completer.reset();
 						continue;
           }
           CompResponse::Consumed => {

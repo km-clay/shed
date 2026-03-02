@@ -1025,6 +1025,29 @@ impl ViMode for ViNormal {
         raw_seq: "".into(),
         flags: self.flags(),
       }),
+			E(K::Char('A'), M::CTRL) => {
+				let count = self.parse_count(&mut self.pending_seq.chars().peekable()).unwrap_or(1) as u16;
+				self.pending_seq.clear();
+				Some(ViCmd {
+					register: Default::default(),
+					verb: Some(VerbCmd(1, Verb::IncrementNumber(count))),
+					motion: None,
+					raw_seq: "".into(),
+					flags: self.flags(),
+				})
+			},
+			E(K::Char('X'), M::CTRL) => {
+				let count = self.parse_count(&mut self.pending_seq.chars().peekable()).unwrap_or(1) as u16;
+				self.pending_seq.clear();
+				Some(ViCmd {
+					register: Default::default(),
+					verb: Some(VerbCmd(1, Verb::DecrementNumber(count))),
+					motion: None,
+					raw_seq: "".into(),
+					flags: self.flags(),
+				})
+			},
+
       E(K::Char(ch), M::NONE) => self.try_parse(ch),
       E(K::Backspace, M::NONE) => Some(ViCmd {
         register: Default::default(),

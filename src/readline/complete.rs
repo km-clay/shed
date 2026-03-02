@@ -8,16 +8,14 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   libsh::{
-    error::ShResult,
-    guards::var_ctx_guard,
-    utils::TkVecUtils,
+    error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils
   },
   parse::{
     execute::exec_input,
     lex::{self, LexFlags, Tk, TkRule, ends_with_unescaped},
   },
   readline::{
-    Marker, annotate_input_recursive, keys::{KeyCode as C, KeyEvent as K, ModKeys as M}, linebuf::{ClampedUsize, LineBuf}, markers::{self, is_marker}, term::{LineWriter, TermWriter}, vimode::{ViInsert, ViMode}
+    Marker, annotate_input_recursive, keys::{KeyCode as C, KeyEvent as K, ModKeys as M}, linebuf::{ClampedUsize, LineBuf}, markers::{self, is_marker}, term::{LineWriter, TermWriter, calc_str_width, get_win_size}, vimode::{ViInsert, ViMode}
   },
   state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_vars, write_vars},
 };
@@ -529,11 +527,7 @@ pub trait Completer {
 	fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()>;
 	fn clear(&mut self, _writer: &mut TermWriter) -> ShResult<()> { Ok(()) }
 	fn handle_key(&mut self, key: K) -> ShResult<CompResponse>;
-	fn get_completed_line(&self, candidate: &str) -> String {
-		let (start, end) = self.token_span();
-		let orig = self.original_input();
-		format!("{}{}{}", &orig[..start], candidate, &orig[end..])
-	}
+	fn get_completed_line(&self, candidate: &str) -> String;
 }
 
 #[derive(Default, Debug, Clone)]
@@ -622,13 +616,41 @@ pub struct FuzzyLayout {
 #[derive(Default, Debug, Clone)]
 pub struct QueryEditor {
 	mode: ViInsert,
+	scroll_offset: usize,
+	available_width: usize,
 	linebuf: LineBuf
 }
 
 impl QueryEditor {
 	pub fn clear(&mut self) {
-		self.linebuf = LineBuf::default();
+		self.linebuf = LineBuf::new();
 		self.mode = ViInsert::default();
+		self.scroll_offset = 0;
+	}
+	pub fn set_available_width(&mut self, width: usize) {
+		self.available_width = width;
+	}
+	pub fn update_scroll_offset(&mut self) {
+		self.linebuf.update_graphemes();
+		let cursor_pos = self.linebuf.cursor.get();
+		if cursor_pos < self.scroll_offset + 1 {
+			self.scroll_offset = self.linebuf.cursor.ret_sub(1);
+		}
+		if cursor_pos >= self.scroll_offset + self.available_width.saturating_sub(1) {
+			self.scroll_offset = self.linebuf.cursor.ret_sub(self.available_width.saturating_sub(1));
+		}
+		let max_offset = self.linebuf.grapheme_indices().len().saturating_sub(self.available_width);
+		self.scroll_offset = self.scroll_offset.min(max_offset);
+	}
+	pub fn get_window(&mut self) -> String {
+		self.linebuf.update_graphemes();
+		let buf_len = self.linebuf.grapheme_indices().len();
+		if buf_len <= self.available_width {
+			return self.linebuf.as_str().to_string();
+		}
+		let start = self.scroll_offset.min(buf_len.saturating_sub(self.available_width));
+		let end = (start + self.available_width).min(buf_len);
+		self.linebuf.slice(start..end).unwrap_or("").to_string()
 	}
 	pub fn handle_key(&mut self, key: K) -> ShResult<()> {
 		let Some(cmd) = self.mode.handle_key(key) else {
@@ -653,6 +675,22 @@ pub struct FuzzyCompleter {
 }
 
 impl FuzzyCompleter {
+	const BOT_LEFT: &str = "\x1b[90m╰\x1b[0m";
+	const BOT_RIGHT: &str = "\x1b[90m╯\x1b[0m";
+	const TOP_LEFT: &str = "\x1b[90m╭\x1b[0m";
+	const TOP_RIGHT: &str = "\x1b[90m╮\x1b[0m";
+	const HOR_LINE: &str = "\x1b[90m─\x1b[0m";
+	const VERT_LINE: &str = "\x1b[90m│\x1b[0m";
+	const SELECTOR_GRAY: &str = "\x1b[90m▌\x1b[0m";
+	const SELECTOR_HL: &str = "\x1b[38;2;200;0;120m▌\x1b[1;39;48;5;237m";
+	const PROMPT_ARROW: &str = "\x1b[1;36m>\x1b[0m";
+	const TREE_LEFT: &str = "\x1b[90m├\x1b[0m";
+	const TREE_RIGHT: &str = "\x1b[90m┤\x1b[0m";
+	//const TREE_BOT: &str = "\x1b[90m┴\x1b[0m";
+	//const TREE_TOP: &str = "\x1b[90m┬\x1b[0m";
+	//const CROSS: &str = "\x1b[90m┼\x1b[0m";
+
+
 	fn get_window(&mut self) -> &[ScoredCandidate] {
 		let height = self.filtered.len().min(self.max_height);
 
@@ -707,6 +745,22 @@ impl Default for FuzzyCompleter {
 }
 
 impl Completer for FuzzyCompleter {
+	fn get_completed_line(&self, _candidate: &str) -> String {
+		log::debug!("Getting completed line for candidate: {}", _candidate);
+
+    let selected = &self.filtered[self.cursor.get()].content;
+		log::debug!("Selected candidate: {}", selected);
+    let (start, end) = self.completer.token_span;
+		log::debug!("Token span: ({}, {})", start, end);
+    let ret = format!(
+      "{}{}{}",
+      &self.completer.original_input[..start],
+      selected,
+      &self.completer.original_input[end..]
+    );
+		log::debug!("Completed line: {}", ret);
+		ret
+	}
 	fn complete(&mut self, line: String, cursor_pos: usize, direction: i32) -> ShResult<Option<String>> {
 		self.completer.complete(line, cursor_pos, direction)?;
 		let candidates: Vec<_> = self.completer.candidates.clone();
@@ -714,12 +768,16 @@ impl Completer for FuzzyCompleter {
 			self.completer.reset();
 			self.active = false;
 			return Ok(None);
+		} else if candidates.len() == 1 {
+			self.filtered = candidates.into_iter().map(ScoredCandidate::from).collect();
+			let completed = self.get_completed_line(&self.filtered[0].content);
+			self.active = false;
+			return Ok(Some(completed));
 		}
 		self.active = true;
 		self.candidates = candidates;
 		self.score_candidates();
-		self.completer.reset();
-		Ok(None) // FuzzyCompleter itself doesn't directly return a completed line, it manages the state of the filtered candidates and selection
+		Ok(None)
 	}
 
 	fn handle_key(&mut self, key: K) -> ShResult<CompResponse> {
@@ -730,13 +788,11 @@ impl Completer for FuzzyCompleter {
 				Ok(CompResponse::Dismiss)
 			}
 			K(C::Enter, M::NONE) => {
+				self.active = false;
 				if let Some(selected) = self.filtered.get(self.cursor.get()).map(|c| c.content.clone()) {
-					self.active = false;
-					self.query.clear();
-					self.filtered.clear();
 					Ok(CompResponse::Accept(selected))
 				} else {
-					Ok(CompResponse::Passthrough)
+					Ok(CompResponse::Dismiss)
 				}
 			}
 			K(C::Tab, M::SHIFT) |
@@ -761,16 +817,17 @@ impl Completer for FuzzyCompleter {
 	fn clear(&mut self, writer: &mut TermWriter) -> ShResult<()> {
 		if let Some(layout) = self.old_layout.take() {
 			let mut buf = String::new();
-			// Cursor is on the query line. Move down to the last candidate.
-			if layout.rows > 0 {
-				write!(buf, "\x1b[{}B", layout.rows).unwrap();
+			// Cursor is on the prompt line. Move down to the bottom border.
+			let lines_below_prompt = layout.rows.saturating_sub(2);
+			if lines_below_prompt > 0 {
+				write!(buf, "\x1b[{}B", lines_below_prompt).unwrap();
 			}
-			// Erase each line and move up, back to the query line
+			// Erase each line moving up, back to the top border
 			for _ in 0..layout.rows {
 				buf.push_str("\x1b[2K\x1b[A");
 			}
-			// Erase the query line, then move up to the prompt line
-			buf.push_str("\x1b[2K\x1b[A");
+			// Erase the top border line
+			buf.push_str("\x1b[2K");
 			writer.flush_write(&buf)?;
 		}
 		Ok(())
@@ -779,31 +836,89 @@ impl Completer for FuzzyCompleter {
 		if !self.active {
 			return Ok(());
 		}
+		let (cols,_) = get_win_size(*TTY_FILENO);
 
 		let mut buf = String::new();
 		let cursor_pos = self.cursor.get();
 		let offset = self.scroll_offset;
-		let query = self.query.linebuf.as_str().to_string();
+		self.query.set_available_width(cols.saturating_sub(6) as usize);
+		self.query.update_scroll_offset();
+		let query = self.query.get_window();
+		let num_filtered = format!("\x1b[33m{}\x1b[0m",self.filtered.len());
+		let num_candidates = format!("\x1b[33m{}\x1b[0m",self.candidates.len());
 		let visible = self.get_window();
-		buf.push_str("\n\r> ");
-		buf.push_str(&query);
+		let mut rows = 0;
+		let top_bar = format!("\n{}{}{}",
+			Self::TOP_LEFT,
+			Self::HOR_LINE.to_string().repeat(cols.saturating_sub(2) as usize),
+			Self::TOP_RIGHT
+		);
+		buf.push_str(&top_bar);
+		rows += 1;
+		for _ in 0..rows {
+		}
+
+		let prompt = format!("{} {} {}", Self::VERT_LINE, Self::PROMPT_ARROW, &query);
+		let cols_used = calc_str_width(&prompt);
+		let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
+		let prompt_line_final = format!("{}{}{}", prompt, right_pad, Self::VERT_LINE);
+		buf.push_str(&prompt_line_final);
+		rows += 1;
+
+		let sep_line_left = format!("{}{}{}/{}",
+			Self::TREE_LEFT,
+			Self::HOR_LINE.repeat(2),
+			&num_filtered,
+			&num_candidates
+		);
+		let cols_used = calc_str_width(&sep_line_left);
+		let right_pad = Self::HOR_LINE.repeat(cols.saturating_sub(cols_used + 1) as usize);
+		let sep_line_final = format!("{}{}{}", sep_line_left, right_pad, Self::TREE_RIGHT);
+		buf.push_str(&sep_line_final);
+		rows += 1;
+
 
 		for (i, candidate) in visible.iter().enumerate() {
-			buf.push_str("\n\r");
-			if i + offset == cursor_pos {
-				buf.push_str("\x1b[7m");
-				buf.push_str(&candidate.content);
-				buf.push_str("\x1b[0m");
+			let selector = if i + offset == cursor_pos {
+				Self::SELECTOR_HL
 			} else {
-				buf.push_str(&candidate.content);
+				Self::SELECTOR_GRAY
+			};
+			let mut content = candidate.content.clone();
+			let col_lim = cols.saturating_sub(3);
+			if calc_str_width(&content) > col_lim {
+				content.truncate(col_lim.saturating_sub(6) as usize); // ui bars + elipses length
+				content.push_str("...");
 			}
+			let left = format!("{} {}{}\x1b[0m",
+				Self::VERT_LINE,
+				&selector,
+				&content
+			);
+			let cols_used = calc_str_width(&left);
+			let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
+			let hl_cand_line = format!("{}{}{}", left, right_pad, Self::VERT_LINE);
+			buf.push_str(&hl_cand_line);
+			rows += 1;
 		}
+
+		let bot_bar = format!("{}{}{}",
+			Self::BOT_LEFT,
+			Self::HOR_LINE.to_string().repeat(cols.saturating_sub(2) as usize),
+			Self::BOT_RIGHT
+		);
+		buf.push_str(&bot_bar);
+		rows += 1;
+
 		let new_layout = FuzzyLayout {
-			rows: visible.len() as u16, // +1 for the query line
+			rows, // +1 for the query line
 		};
 
-		// Move cursor back up to the query line and position after "> " + query text
-		write!(buf, "\x1b[{}A\r\x1b[{}C", new_layout.rows, self.query.linebuf.as_str().width() + 2).unwrap();
+		// Move cursor back up to the prompt line (skip: separator + candidates + bottom border)
+		let lines_below_prompt = new_layout.rows.saturating_sub(2); // total rows minus top_bar and prompt
+		let cursor_in_window = self.query.linebuf.cursor.get().saturating_sub(self.query.scroll_offset);
+		let cursor_col = cursor_in_window + 4; // "| > ".len() == 4
+		write!(buf, "\x1b[{}A\r\x1b[{}C", lines_below_prompt, cursor_col).unwrap();
 		writer.flush_write(&buf)?;
 		self.old_layout = Some(new_layout);
 
@@ -838,6 +953,9 @@ pub struct SimpleCompleter {
 }
 
 impl Completer for SimpleCompleter {
+	fn get_completed_line(&self, _candidate: &str) -> String {
+		self.get_completed_line()
+	}
 	fn complete(&mut self, line: String, cursor_pos: usize, direction: i32) -> ShResult<Option<String>> {
 		if self.active {
 			Ok(Some(self.cycle_completion(direction)))
@@ -1046,7 +1164,7 @@ impl SimpleCompleter {
 
     let cword = if let Some(pos) = relevant
       .iter()
-      .position(|tk| cursor_pos >= tk.span.range().start && cursor_pos < tk.span.range().end)
+      .position(|tk| cursor_pos >= tk.span.range().start && cursor_pos <= tk.span.range().end)
     {
       pos
     } else {

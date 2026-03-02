@@ -338,7 +338,12 @@ pub struct LineBuf {
 
 impl LineBuf {
   pub fn new() -> Self {
-    Self::default()
+		let mut new = Self {
+			grapheme_indices: Some(vec![]), // We know the buffer is empty, so this keeps us safe from unwrapping None
+			..Default::default()
+		};
+		new.update_graphemes();
+		new
   }
   /// Only update self.grapheme_indices if it is None
   pub fn update_graphemes_lazy(&mut self) {
@@ -418,7 +423,17 @@ impl LineBuf {
     self.cursor.set_max(indices.len());
     self.grapheme_indices = Some(indices)
   }
+	#[track_caller]
   pub fn grapheme_indices(&self) -> &[usize] {
+		if self.grapheme_indices.is_none() {
+			let caller = std::panic::Location::caller();
+			panic!(
+				"grapheme_indices is None. This likely means you forgot to call update_graphemes() before calling a method that relies on grapheme_indices, or you called a method that relies on grapheme_indices from another method that also relies on grapheme_indices without updating graphemes in between. Caller: {}:{}:{}",
+				caller.file(),
+				caller.line(),
+				caller.column(),
+			);
+		}
     self.grapheme_indices.as_ref().unwrap()
   }
   pub fn grapheme_indices_owned(&self) -> Vec<usize> {
@@ -777,6 +792,19 @@ impl LineBuf {
     }
     Some(self.line_bounds(line_no))
   }
+	pub fn this_word(&mut self, word: Word) -> (usize, usize) {
+		let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
+			self.cursor.get()
+		} else {
+			self.start_of_word_backward(self.cursor.get(), word)
+		};
+		let end = if self.is_word_bound(self.cursor.get(), word, Direction::Forward) {
+			self.cursor.get()
+		} else {
+			self.end_of_word_forward(self.cursor.get(), word)
+		};
+		(start, end)
+	}
   pub fn this_line_exclusive(&mut self) -> (usize, usize) {
     let line_no = self.cursor_line_number();
     let (start, mut end) = self.line_bounds(line_no);
@@ -2983,6 +3011,55 @@ impl LineBuf {
           }
         }
       }
+			Verb::IncrementNumber(n) |
+			Verb::DecrementNumber(n) => {
+				let inc = if matches!(verb, Verb::IncrementNumber(_)) { n as i64 } else { -(n as i64) };
+				let (s, e) = self.this_word(Word::Normal);
+				let end = (e + 1).min(self.grapheme_indices().len()); // inclusive → exclusive, capped at buffer len
+				let word = self.slice(s..end).unwrap_or_default().to_lowercase();
+
+				let byte_start = self.index_byte_pos(s);
+				let byte_end = if end >= self.grapheme_indices().len() {
+					self.buffer.len()
+				} else {
+					self.index_byte_pos(end)
+				};
+
+				if word.starts_with("0x") {
+					let body = word.strip_prefix("0x").unwrap();
+					let width = body.len();
+					if let Ok(num) = i64::from_str_radix(body, 16) {
+						let new_num = num + inc;
+						self.buffer.replace_range(byte_start..byte_end, &format!("0x{new_num:0>width$x}"));
+						self.update_graphemes();
+						self.cursor.set(s);
+					}
+				} else if word.starts_with("0b") {
+					let body = word.strip_prefix("0b").unwrap();
+					let width = body.len();
+					if let Ok(num) = i64::from_str_radix(body, 2) {
+						let new_num = num + inc;
+						self.buffer.replace_range(byte_start..byte_end, &format!("0b{new_num:0>width$b}"));
+						self.update_graphemes();
+						self.cursor.set(s);
+					}
+				} else if word.starts_with("0o") {
+					let body = word.strip_prefix("0o").unwrap();
+					let width = body.len();
+					if let Ok(num) = i64::from_str_radix(body, 8) {
+						let new_num = num + inc;
+						self.buffer.replace_range(byte_start..byte_end, &format!("0o{new_num:0>width$o}"));
+						self.update_graphemes();
+						self.cursor.set(s);
+					}
+				} else if let Ok(num) = word.parse::<i64>() {
+					let width = word.len();
+					let new_num = num + inc;
+					self.buffer.replace_range(byte_start..byte_end, &format!("{new_num:0>width$}"));
+					self.update_graphemes();
+					self.cursor.set(s);
+				}
+			}
 
       Verb::Complete
       | Verb::EndOfFile

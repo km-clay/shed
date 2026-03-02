@@ -278,7 +278,8 @@ fn shed_interactive() -> ShResult<()> {
         let command_run_time = start.elapsed();
         log::info!("Command executed in {:.2?}", command_run_time);
         write_meta(|m| m.stop_timer());
-        readline.writer.flush_write("\n")?;
+				readline.fix_column()?;
+				readline.writer.flush_write("\n\r")?;
 
         // Reset for next command with fresh prompt
         readline.reset(true)?;
