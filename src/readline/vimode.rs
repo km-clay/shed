@@ -66,7 +66,7 @@ pub trait ViMode {
   }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct ViInsert {
   cmds: Vec<ViCmd>,
   pending_cmd: ViCmd,

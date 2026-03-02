@@ -332,11 +332,8 @@ impl JobTab {
     self.fg.as_mut()
   }
   pub fn new_fg(&mut self, job: Job) -> ShResult<Vec<WtStat>> {
-    let pgid = job.pgid();
     self.fg = Some(job);
-    attach_tty(pgid)?;
     let statuses = self.fg.as_mut().unwrap().wait_pgrp()?;
-    attach_tty(getpgrp())?;
     Ok(statuses)
   }
   pub fn fg_to_bg(&mut self, stat: WtStat) -> ShResult<()> {
@@ -354,7 +351,7 @@ impl JobTab {
   pub fn bg_to_fg(&mut self, id: JobID) -> ShResult<()> {
     let job = self.remove_job(id);
     if let Some(job) = job {
-      wait_fg(job)?;
+      wait_fg(job, true)?;
     }
     Ok(())
   }
@@ -828,13 +825,15 @@ pub fn wait_bg(id: JobID) -> ShResult<()> {
 }
 
 /// Waits on the current foreground job and updates the shell's last status code
-pub fn wait_fg(job: Job) -> ShResult<()> {
+pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
   if job.children().is_empty() {
     return Ok(()); // Nothing to do
   }
   let mut code = 0;
   let mut was_stopped = false;
-  attach_tty(job.pgid())?;
+  if interactive {
+    attach_tty(job.pgid())?;
+  }
   disable_reaping();
 	defer! {
 		enable_reaping();
@@ -862,16 +861,18 @@ pub fn wait_fg(job: Job) -> ShResult<()> {
       j.take_fg();
     });
   }
-  take_term()?;
+  if interactive {
+    take_term()?;
+  }
   set_status(code);
   Ok(())
 }
 
-pub fn dispatch_job(job: Job, is_bg: bool) -> ShResult<()> {
+pub fn dispatch_job(job: Job, is_bg: bool, interactive: bool) -> ShResult<()> {
   if is_bg {
     write_jobs(|j| j.insert_job(job, false))?;
   } else {
-    wait_fg(job)?;
+    wait_fg(job, interactive)?;
   }
   Ok(())
 }

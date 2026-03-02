@@ -1,8 +1,9 @@
 use std::{
-  collections::HashSet, fmt::Debug, path::PathBuf, sync::Arc,
+  collections::HashSet, fmt::{Write,Debug}, path::PathBuf, sync::Arc,
 };
 
 use nix::sys::signal::Signal;
+use unicode_width::UnicodeWidthStr;
 
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
@@ -16,8 +17,7 @@ use crate::{
     lex::{self, LexFlags, Tk, TkRule, ends_with_unescaped},
   },
   readline::{
-    Marker, annotate_input_recursive,
-    markers::{self, is_marker},
+    Marker, annotate_input_recursive, keys::{KeyCode as C, KeyEvent as K, ModKeys as M}, linebuf::{ClampedUsize, LineBuf}, markers::{self, is_marker}, term::{LineWriter, TermWriter}, vimode::{ViInsert, ViMode}
   },
   state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_vars, write_vars},
 };
@@ -512,8 +512,322 @@ impl CompResult {
   }
 }
 
+pub enum CompResponse {
+	Passthrough, // key falls through
+	Accept(String), // user accepted completion
+	Dismiss, // user canceled completion
+	Consumed // key was handled, but completion remains active
+}
+
+pub trait Completer {
+	fn complete(&mut self, line: String, cursor_pos: usize, direction: i32) -> ShResult<Option<String>>;
+	fn reset(&mut self);
+	fn is_active(&self) -> bool;
+	fn selected_candidate(&self) -> Option<String>;
+	fn token_span(&self) -> (usize, usize);
+	fn original_input(&self) -> &str;
+	fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()>;
+	fn clear(&mut self, _writer: &mut TermWriter) -> ShResult<()> { Ok(()) }
+	fn handle_key(&mut self, key: K) -> ShResult<CompResponse>;
+	fn get_completed_line(&self, candidate: &str) -> String {
+		let (start, end) = self.token_span();
+		let orig = self.original_input();
+		format!("{}{}{}", &orig[..start], candidate, &orig[end..])
+	}
+}
+
 #[derive(Default, Debug, Clone)]
-pub struct Completer {
+pub struct ScoredCandidate {
+	content: String,
+	score: Option<i32>,
+}
+
+impl ScoredCandidate {
+	const BONUS_BOUNDARY: i32 = 10;
+	const BONUS_CONSECUTIVE: i32 = 8;
+	const BONUS_FIRST_CHAR: i32 = 5;
+	const PENALTY_GAP_START: i32 = 3;
+	const PENALTY_GAP_EXTEND: i32 = 1;
+
+	pub fn new(content: String) -> Self {
+		Self { content, score: None }
+	}
+	fn is_word_bound(prev: char, curr: char) -> bool {
+		match prev {
+			'/' | '_' | '-' | '.' | ' ' => true,
+			c if c.is_lowercase() && curr.is_uppercase() => true, // camelCase boundary
+			_ => false,
+		}
+	}
+	pub fn fuzzy_score(&mut self, other: &str) -> i32 {
+		if other.is_empty() {
+			self.score = Some(0);
+			return 0;
+		}
+
+		let query_chars: Vec<char> = other.chars().collect();
+		let content_chars: Vec<char> = self.content.chars().collect();
+		let mut indices = vec![];
+		let mut qi = 0;
+		for (ci, c_ch) in self.content.chars().enumerate() {
+			if qi < query_chars.len() && c_ch.eq_ignore_ascii_case(&query_chars[qi]) {
+				indices.push(ci);
+				qi += 1;
+			}
+		}
+
+		if indices.len() != query_chars.len() {
+			self.score = Some(i32::MIN);
+			return i32::MIN;
+		}
+
+		let mut score: i32 = 0;
+
+		for (i, &idx) in indices.iter().enumerate() {
+			if idx == 0 {
+				score += Self::BONUS_FIRST_CHAR;
+			}
+
+
+			if idx == 0 || Self::is_word_bound(content_chars[idx - 1], content_chars[idx])  {
+				score += Self::BONUS_BOUNDARY;
+			}
+
+			if i > 0 {
+				let gap = idx - indices[i - 1] - 1;
+				if gap == 0 {
+					score += Self::BONUS_CONSECUTIVE;
+				} else {
+					score -= Self::PENALTY_GAP_START + (gap as i32 - 1) * Self::PENALTY_GAP_EXTEND;
+				}
+			}
+		}
+
+		self.score = Some(score);
+		score
+	}
+}
+
+impl From<String> for ScoredCandidate {
+	fn from(content: String) -> Self {
+		Self { content, score: None }
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct FuzzyLayout {
+	rows: u16
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct QueryEditor {
+	mode: ViInsert,
+	linebuf: LineBuf
+}
+
+impl QueryEditor {
+	pub fn clear(&mut self) {
+		self.linebuf = LineBuf::default();
+		self.mode = ViInsert::default();
+	}
+	pub fn handle_key(&mut self, key: K) -> ShResult<()> {
+		let Some(cmd) = self.mode.handle_key(key) else {
+			return Ok(())
+		};
+		self.linebuf.exec_cmd(cmd)
+	}
+}
+
+
+#[derive(Clone, Debug)]
+pub struct FuzzyCompleter {
+	completer: SimpleCompleter,
+	query: QueryEditor,
+	filtered: Vec<ScoredCandidate>,
+	candidates: Vec<String>,
+	cursor: ClampedUsize,
+	old_layout: Option<FuzzyLayout>,
+	max_height: usize,
+	scroll_offset: usize,
+	active: bool
+}
+
+impl FuzzyCompleter {
+	fn get_window(&mut self) -> &[ScoredCandidate] {
+		let height = self.filtered.len().min(self.max_height);
+
+		self.update_scroll_offset();
+
+		&self.filtered[self.scroll_offset..self.scroll_offset + height]
+	}
+	pub fn update_scroll_offset(&mut self) {
+		let height = self.filtered.len().min(self.max_height);
+		if self.cursor.get() < self.scroll_offset + 1 {
+			self.scroll_offset = self.cursor.ret_sub(1);
+		}
+		if self.cursor.get() >= self.scroll_offset + height.saturating_sub(1) {
+			self.scroll_offset = self.cursor.ret_sub(height.saturating_sub(2));
+		}
+		self.scroll_offset = self.scroll_offset.min(self.filtered.len().saturating_sub(height));
+	}
+	pub fn score_candidates(&mut self) {
+		let mut scored: Vec<_> = self.candidates
+			.clone()
+			.into_iter()
+			.filter_map(|c| {
+				let mut sc = ScoredCandidate::new(c);
+				let score = sc.fuzzy_score(self.query.linebuf.as_str());
+				if score > i32::MIN {
+					Some(sc)
+				} else {
+					None
+				}
+			}).collect();
+		scored.sort_by_key(|sc| sc.score.unwrap_or(i32::MIN));
+		scored.reverse();
+		self.cursor.set_max(scored.len());
+		self.filtered = scored;
+	}
+}
+
+impl Default for FuzzyCompleter {
+	fn default() -> Self {
+	  Self {
+			max_height: 8,
+			completer: SimpleCompleter::default(),
+			query: QueryEditor::default(),
+			filtered: vec![],
+			candidates: vec![],
+			cursor: ClampedUsize::new(0, 0, true),
+			old_layout: None,
+			scroll_offset: 0,
+			active: false,
+		}
+	}
+}
+
+impl Completer for FuzzyCompleter {
+	fn complete(&mut self, line: String, cursor_pos: usize, direction: i32) -> ShResult<Option<String>> {
+		self.completer.complete(line, cursor_pos, direction)?;
+		let candidates: Vec<_> = self.completer.candidates.clone();
+		if candidates.is_empty() {
+			self.completer.reset();
+			self.active = false;
+			return Ok(None);
+		}
+		self.active = true;
+		self.candidates = candidates;
+		self.score_candidates();
+		self.completer.reset();
+		Ok(None) // FuzzyCompleter itself doesn't directly return a completed line, it manages the state of the filtered candidates and selection
+	}
+
+	fn handle_key(&mut self, key: K) -> ShResult<CompResponse> {
+		match key {
+			K(C::Esc, M::NONE) => {
+				self.active = false;
+				self.filtered.clear();
+				Ok(CompResponse::Dismiss)
+			}
+			K(C::Enter, M::NONE) => {
+				if let Some(selected) = self.filtered.get(self.cursor.get()).map(|c| c.content.clone()) {
+					self.active = false;
+					self.query.clear();
+					self.filtered.clear();
+					Ok(CompResponse::Accept(selected))
+				} else {
+					Ok(CompResponse::Passthrough)
+				}
+			}
+			K(C::Tab, M::SHIFT) |
+			K(C::Up, M::NONE) => {
+				self.cursor.sub(1);
+				self.update_scroll_offset();
+				Ok(CompResponse::Consumed)
+			}
+			K(C::Tab, M::NONE) |
+			K(C::Down, M::NONE) => {
+				self.cursor.add(1);
+				self.update_scroll_offset();
+				Ok(CompResponse::Consumed)
+			}
+			_ => {
+				self.query.handle_key(key)?;
+				self.score_candidates();
+				Ok(CompResponse::Consumed)
+			}
+		}
+	}
+	fn clear(&mut self, writer: &mut TermWriter) -> ShResult<()> {
+		if let Some(layout) = self.old_layout.take() {
+			let mut buf = String::new();
+			// Cursor is on the query line. Move down to the last candidate.
+			if layout.rows > 0 {
+				write!(buf, "\x1b[{}B", layout.rows).unwrap();
+			}
+			// Erase each line and move up, back to the query line
+			for _ in 0..layout.rows {
+				buf.push_str("\x1b[2K\x1b[A");
+			}
+			// Erase the query line, then move up to the prompt line
+			buf.push_str("\x1b[2K\x1b[A");
+			writer.flush_write(&buf)?;
+		}
+		Ok(())
+	}
+	fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()> {
+		if !self.active {
+			return Ok(());
+		}
+
+		let mut buf = String::new();
+		let cursor_pos = self.cursor.get();
+		let offset = self.scroll_offset;
+		let query = self.query.linebuf.as_str().to_string();
+		let visible = self.get_window();
+		buf.push_str("\n\r> ");
+		buf.push_str(&query);
+
+		for (i, candidate) in visible.iter().enumerate() {
+			buf.push_str("\n\r");
+			if i + offset == cursor_pos {
+				buf.push_str("\x1b[7m");
+				buf.push_str(&candidate.content);
+				buf.push_str("\x1b[0m");
+			} else {
+				buf.push_str(&candidate.content);
+			}
+		}
+		let new_layout = FuzzyLayout {
+			rows: visible.len() as u16, // +1 for the query line
+		};
+
+		// Move cursor back up to the query line and position after "> " + query text
+		write!(buf, "\x1b[{}A\r\x1b[{}C", new_layout.rows, self.query.linebuf.as_str().width() + 2).unwrap();
+		writer.flush_write(&buf)?;
+		self.old_layout = Some(new_layout);
+
+		Ok(())
+	}
+	fn reset(&mut self) {
+		*self = Self::default();
+	}
+	fn token_span(&self) -> (usize, usize) {
+		self.completer.token_span()
+	}
+	fn is_active(&self) -> bool {
+	  self.active
+	}
+	fn selected_candidate(&self) -> Option<String> {
+		self.filtered.get(self.cursor.get()).map(|c| c.content.clone())
+	}
+	fn original_input(&self) -> &str {
+		&self.completer.original_input
+	}
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct SimpleCompleter {
   pub candidates: Vec<String>,
   pub selected_idx: usize,
   pub original_input: String,
@@ -523,7 +837,45 @@ pub struct Completer {
   pub add_space: bool,
 }
 
-impl Completer {
+impl Completer for SimpleCompleter {
+	fn complete(&mut self, line: String, cursor_pos: usize, direction: i32) -> ShResult<Option<String>> {
+		if self.active {
+			Ok(Some(self.cycle_completion(direction)))
+		} else {
+			self.start_completion(line, cursor_pos)
+		}
+	}
+
+	fn reset(&mut self) {
+		*self = Self::default();
+	}
+
+	fn is_active(&self) -> bool {
+		self.active
+	}
+
+	fn selected_candidate(&self) -> Option<String> {
+		self.candidates.get(self.selected_idx).cloned()
+	}
+
+	fn token_span(&self) -> (usize, usize) {
+		self.token_span
+	}
+
+	fn draw(&mut self, _writer: &mut TermWriter) -> ShResult<()> {
+		Ok(())
+	}
+
+	fn original_input(&self) -> &str {
+		&self.original_input
+	}
+
+	fn handle_key(&mut self, _key: K) -> ShResult<CompResponse> {
+		Ok(CompResponse::Passthrough)
+	}
+}
+
+impl SimpleCompleter {
   pub fn new() -> Self {
     Self::default()
   }
@@ -569,6 +921,12 @@ impl Completer {
               ctx.push(markers::ARG);
             }
           }
+          markers::RESET => {
+            if ctx.len() > 1 {
+              ctx.pop();
+              last_priority = 0;
+            }
+          }
           _ => {}
         },
         _ => {
@@ -582,31 +940,6 @@ impl Completer {
     }
 
     (ctx, ctx_start)
-  }
-
-  pub fn reset(&mut self) {
-    self.candidates.clear();
-    self.selected_idx = 0;
-    self.original_input.clear();
-    self.token_span = (0, 0);
-    self.active = false;
-  }
-
-  pub fn complete(
-    &mut self,
-    line: String,
-    cursor_pos: usize,
-    direction: i32,
-  ) -> ShResult<Option<String>> {
-    if self.active {
-      Ok(Some(self.cycle_completion(direction)))
-    } else {
-      self.start_completion(line, cursor_pos)
-    }
-  }
-
-  pub fn selected_candidate(&self) -> Option<String> {
-    self.candidates.get(self.selected_idx).cloned()
   }
 
   pub fn cycle_completion(&mut self, direction: i32) -> String {
@@ -713,7 +1046,7 @@ impl Completer {
 
     let cword = if let Some(pos) = relevant
       .iter()
-      .position(|tk| cursor_pos >= tk.span.range().start && cursor_pos <= tk.span.range().end)
+      .position(|tk| cursor_pos >= tk.span.range().start && cursor_pos < tk.span.range().end)
     {
       pos
     } else {
@@ -825,10 +1158,12 @@ impl Completer {
 
     self.token_span = (cur_token.span.range().start, cur_token.span.range().end);
 
-    self.token_span.0 = token_start;
-    cur_token
-      .span
-      .set_range(self.token_span.0..self.token_span.1);
+    if token_start >= self.token_span.0 && token_start <= self.token_span.1 {
+      self.token_span.0 = token_start;
+      cur_token
+        .span
+        .set_range(self.token_span.0..self.token_span.1);
+    }
 
     // If token contains '=', only complete after the '='
     let token_str = cur_token.span.as_str();

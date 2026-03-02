@@ -16,7 +16,7 @@ use crate::state::{
   ArrIndex, LogTab, VarFlags, VarKind, read_jobs, read_logic, read_vars, write_jobs, write_meta,
   write_vars,
 };
-use crate::{jobs, prelude::*};
+use crate::prelude::*;
 
 const PARAMETERS: [char; 7] = ['@', '*', '#', '$', '?', '!', '0'];
 
@@ -948,9 +948,6 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
           Err(e) => return Err(e.into()),
         }
       };
-
-      // Reclaim terminal foreground in case child changed it
-      jobs::take_term()?;
 
       match status {
         WtStat::Exited(_, _) => Ok(io_buf.as_str()?.trim_end().to_string()),

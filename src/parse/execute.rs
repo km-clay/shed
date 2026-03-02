@@ -152,6 +152,7 @@ pub struct Dispatcher {
 	source_name: String,
   pub io_stack: IoStack,
   pub job_stack: JobStack,
+  fg_job: bool,
 }
 
 impl Dispatcher {
@@ -163,6 +164,7 @@ impl Dispatcher {
 			source_name,
       io_stack: IoStack::new(),
       job_stack: JobStack::new(),
+      fg_job: true,
     }
   }
   pub fn begin_dispatch(&mut self) -> ShResult<()> {
@@ -660,6 +662,7 @@ impl Dispatcher {
     let pipes_and_cmds = get_pipe_stack(cmds.len()).into_iter().zip(cmds);
 
     let is_bg = pipeline.flags.contains(NdFlags::BACKGROUND);
+    self.fg_job = !is_bg && self.interactive;
     let mut tty_attached = false;
 
     for ((rpipe, wpipe), mut cmd) in pipes_and_cmds {
@@ -686,15 +689,16 @@ impl Dispatcher {
       // Give the pipeline terminal control as soon as the first child
       // establishes the PGID, so later children (e.g. nvim) don't get
       // SIGTTOU when they try to modify terminal attributes.
-      if !tty_attached && !is_bg {
-        if let Some(pgid) = self.job_stack.curr_job_mut().unwrap().pgid() {
-          attach_tty(pgid).ok();
-          tty_attached = true;
-        }
-      }
+      // Only for interactive (top-level) pipelines — command substitution
+      // and other non-interactive contexts must not steal the terminal.
+      if !tty_attached && !is_bg && self.interactive
+			&& let Some(pgid) = self.job_stack.curr_job_mut().unwrap().pgid() {
+				attach_tty(pgid).ok();
+				tty_attached = true;
+			}
     }
     let job = self.job_stack.finalize_job().unwrap();
-    dispatch_job(job, is_bg)?;
+    dispatch_job(job, is_bg, self.interactive)?;
     Ok(())
   }
   fn exec_builtin(&mut self, cmd: Node) -> ShResult<()> {
@@ -866,17 +870,36 @@ impl Dispatcher {
     let job = self.job_stack.curr_job_mut().unwrap();
     let existing_pgid = job.pgid();
 
+    let fg_job = self.fg_job;
     let child_logic = |pgid: Option<Pid>| -> ! {
       // Put ourselves in the correct process group before exec.
       // For the first child in a pipeline pgid is None, so we
       // become our own group leader (setpgid(0,0)).  For later
       // children we join the leader's group.
-      let _ = setpgid(Pid::from_raw(0), pgid.unwrap_or(Pid::from_raw(0)));
+      let our_pgid = pgid.unwrap_or(Pid::from_raw(0));
+      let _ = setpgid(Pid::from_raw(0), our_pgid);
+
+      // For foreground jobs, take the terminal BEFORE resetting
+      // signals.  SIGTTOU is still SIG_IGN (inherited from the shell),
+			// so tcsetpgrp won't stop us.  This prevents a race
+      // where the child exec's and tries to read stdin before the
+      // parent has called tcsetpgrp — which would deliver SIGTTIN
+      // (now SIG_DFL after reset_signals) and stop the child.
+      if fg_job {
+        let tty_pgid = if our_pgid == Pid::from_raw(0) {
+          nix::unistd::getpid()
+        } else {
+          our_pgid
+        };
+        let _ = tcsetpgrp(
+          unsafe { BorrowedFd::borrow_raw(*crate::libsh::sys::TTY_FILENO) },
+          tty_pgid,
+        );
+      }
 
       // Reset signal dispositions before exec.  SIG_IGN is preserved
       // across execvpe, so the shell's ignored SIGTTIN/SIGTTOU would
-      // leak into child processes and break programs like nvim that
-      // need default terminal-stop behavior.
+      // leak into child processes.
       crate::signal::reset_signals();
 
       let cmd = &exec_args.cmd.0;

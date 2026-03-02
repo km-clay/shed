@@ -10,12 +10,13 @@ use crate::expand::expand_prompt;
 use crate::libsh::sys::TTY_FILENO;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::prelude::*;
+use crate::readline::complete::FuzzyCompleter;
 use crate::readline::term::{Pos, calc_str_width};
 use crate::state::{ShellParam, read_shopts};
 use crate::{
   libsh::error::ShResult,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
-  readline::{complete::Completer, highlight::Highlighter},
+  readline::{complete::{CompResponse, Completer}, highlight::Highlighter},
 };
 
 pub mod complete;
@@ -206,7 +207,7 @@ pub struct ShedVi {
 
   pub prompt: Prompt,
   pub highlighter: Highlighter,
-  pub completer: Completer,
+  pub completer: Box<dyn Completer>,
 
   pub mode: Box<dyn ViMode>,
   pub repeat_action: Option<CmdReplay>,
@@ -225,7 +226,7 @@ impl ShedVi {
       reader: PollReader::new(),
       writer: TermWriter::new(tty),
       prompt,
-      completer: Completer::new(),
+      completer: Box::new(FuzzyCompleter::default()),
       highlighter: Highlighter::new(),
       mode: Box::new(ViInsert::new()),
       old_layout: None,
@@ -319,6 +320,44 @@ impl ShedVi {
 
     // Process all available keys
     while let Some(key) = self.reader.read_key()? {
+      // If completer is active, delegate input to it
+      if self.completer.is_active() {
+        match self.completer.handle_key(key.clone())? {
+          CompResponse::Accept(candidate) => {
+            let span_start = self.completer.token_span().0;
+            let new_cursor = span_start + candidate.len();
+            let line = self.completer.get_completed_line(&candidate);
+            self.editor.set_buffer(line);
+            self.editor.cursor.set(new_cursor);
+            // Don't reset yet — clear() needs old_layout to erase the selector.
+
+            if !self.history.at_pending() {
+              self.history.reset_to_pending();
+            }
+            self
+              .history
+              .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+            let hint = self.history.get_hint();
+            self.editor.set_hint(hint);
+						self.completer.clear(&mut self.writer)?;
+						self.needs_redraw = true;
+						continue;
+          }
+          CompResponse::Dismiss => {
+						self.completer.clear(&mut self.writer)?;
+            // Don't reset yet — clear() needs old_layout to erase the selector.
+            // The next print_line() will call clear(), then we can reset.
+						continue;
+          }
+          CompResponse::Consumed => {
+						/* just redraw */
+						self.needs_redraw = true;
+						continue;
+					}
+          CompResponse::Passthrough => { /* fall through to normal handling below */ }
+        }
+      }
+
       if self.should_accept_hint(&key) {
         self.editor.accept_hint();
         if !self.history.at_pending() {
@@ -347,7 +386,7 @@ impl ShedVi {
 						self.old_layout = None;
 					}
           Ok(Some(line)) => {
-            let span_start = self.completer.token_span.0;
+            let span_start = self.completer.token_span().0;
             let new_cursor = span_start
               + self
                 .completer
@@ -556,6 +595,8 @@ impl ShedVi {
       .unwrap_or_default() as usize;
     let one_line = new_layout.end.row == 0;
 
+    self.completer.clear(&mut self.writer)?;
+
     if let Some(layout) = self.old_layout.as_ref() {
       self.writer.clear_rows(layout)?;
     }
@@ -609,6 +650,8 @@ impl ShedVi {
     }
 
     self.writer.flush_write(&self.mode.cursor_style())?;
+
+    self.completer.draw(&mut self.writer)?;
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;

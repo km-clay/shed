@@ -80,11 +80,6 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
     write(borrow_fd(STDOUT_FILENO), prompt.as_bytes())?;
   }
 
-  log::info!(
-    "read_builtin: starting read with delim={}",
-    read_opts.delim as char
-  );
-
   let input = if isatty(STDIN_FILENO)? {
     // Restore default terminal settings
     RawModeGuard::with_cooked_mode(|| {

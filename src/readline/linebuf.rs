@@ -162,7 +162,7 @@ impl MotionKind {
   }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct Edit {
   pub pos: usize,
   pub cursor_pos: usize,
@@ -235,7 +235,7 @@ impl Edit {
 pub struct ClampedUsize {
   value: usize,
   max: usize,
-  exclusive: bool,
+  pub exclusive: bool,
 }
 
 impl ClampedUsize {
@@ -317,7 +317,7 @@ impl ClampedUsize {
   }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct LineBuf {
   pub buffer: String,
   pub hint: Option<String>,
@@ -2817,6 +2817,9 @@ impl LineBuf {
 								for _ in 0..delta {
 									if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
 										self.remove(line_start);
+										if !self.cursor_at_max() {
+											self.cursor.sub(1);
+										}
 									}
 								}
 							}

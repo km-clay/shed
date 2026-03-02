@@ -2,7 +2,7 @@ use std::{env, os::unix::fs::PermissionsExt, path::Path};
 
 use ariadne::{Fmt, Span};
 
-use crate::{builtin::BUILTINS, libsh::error::{ShErr, ShErrKind, ShResult, next_color}, parse::{NdRule, Node, execute::prepare_argv, lex::KEYWORDS}, state::{self, ShAlias, ShFunc, read_logic, read_vars}};
+use crate::{builtin::BUILTINS, libsh::error::{ShErr, ShErrKind, ShResult, next_color}, parse::{NdRule, Node, execute::prepare_argv, lex::KEYWORDS}, state::{self, ShAlias, ShFunc, read_logic}};
 
 pub fn type_builtin(node: Node) -> ShResult<()> {
   let NdRule::Command {
