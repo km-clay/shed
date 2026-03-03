@@ -418,6 +418,7 @@ impl ShedVi {
 				} else if matches.len() == 1 && matches[0].compare(&self.pending_keymap) == KeyMapMatch::IsExact {
 					// We have a single exact match. Execute it.
 					let keymap = matches[0].clone();
+					log::debug!("[keymap] self.pending_keymap={:?}", self.pending_keymap);
 					log::debug!("[keymap] exact match: {:?} -> {:?}", keymap.keys, keymap.action);
 					self.pending_keymap.clear();
 					let action = keymap.action_expanded();

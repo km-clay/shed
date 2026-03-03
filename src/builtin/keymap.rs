@@ -96,6 +96,7 @@ impl KeyMap {
 		expand_keymap(&self.action)
 	}
 	pub fn compare(&self, other: &[KeyEvent]) -> KeyMapMatch {
+		log::debug!("Comparing keymap keys {:?} with input {:?}", self.keys_expanded(), other);
 		let ours = self.keys_expanded();
 		if other == ours {
 			KeyMapMatch::IsExact

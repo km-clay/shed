@@ -2145,6 +2145,7 @@ pub fn expand_aliases(
 }
 
 pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
+	log::debug!("Expanding keymap for '{}'", s);
 	let mut keys = Vec::new();
 	let mut chars = s.chars().collect::<VecDeque<char>>();
 	while let Some(ch) = chars.pop_front() {
@@ -2164,8 +2165,13 @@ pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
 							}
 						}
 						'>' => {
+							log::debug!("Found key alias '{}'", alias);
 							if alias.eq_ignore_ascii_case("leader") {
-								let leader = read_shopts(|o| o.prompt.leader.clone());
+								let mut leader = read_shopts(|o| o.prompt.leader.clone());
+								if leader == "\\" {
+									leader.push('\\');
+								}
+								log::debug!("Expanding leader key to '{}'", leader);
 								keys.extend(expand_keymap(&leader));
 							} else if let Some(key) = parse_key_alias(&alias) {
 								keys.push(key);
@@ -2182,6 +2188,7 @@ pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
 		}
 	}
 
+	log::debug!("Expanded keymap '{}' to {:?}", s, keys);
 	keys
 }
 
