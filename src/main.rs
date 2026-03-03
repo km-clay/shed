@@ -27,6 +27,7 @@ use nix::errno::Errno;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::unistd::read;
 
+use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{self, ShErr, ShErrKind, ShResult};
 use crate::libsh::sys::TTY_FILENO;
@@ -193,8 +194,8 @@ fn shed_interactive() -> ShResult<()> {
       if let Err(e) = check_signals() {
         match e.kind() {
           ShErrKind::ClearReadline => {
-            // Ctrl+C - clear current input and show new prompt
-            readline.reset(false)?;
+            // Ctrl+C - clear current input and redraw
+            readline.reset_active_widget(false)?;
           }
           ShErrKind::CleanExit(code) => {
             QUIT_CODE.store(*code, Ordering::SeqCst);
@@ -207,8 +208,11 @@ fn shed_interactive() -> ShResult<()> {
 
     if GOT_SIGWINCH.swap(false, Ordering::SeqCst) {
       log::info!("Window size change detected, updating readline dimensions");
+      // Restore cursor to saved row before clearing, since the terminal
+      // may have moved it during resize/rewrap
       readline.writer.update_t_cols();
       readline.prompt_mut().refresh()?;
+      readline.mark_dirty();
     }
 
     if JOB_DONE.swap(false, Ordering::SeqCst) {
@@ -224,7 +228,13 @@ fn shed_interactive() -> ShResult<()> {
       PollFlags::POLLIN,
     )];
 
-    match poll(&mut fds, PollTimeout::MAX) {
+    let timeout = if readline.pending_keymap.is_empty() {
+      PollTimeout::MAX
+    } else {
+      PollTimeout::from(1000u16)
+    };
+
+    match poll(&mut fds, timeout) {
       Ok(_) => {}
       Err(Errno::EINTR) => {
         // Interrupted by signal, loop back to handle it
@@ -234,6 +244,89 @@ fn shed_interactive() -> ShResult<()> {
         eprintln!("poll error: {e}");
         break;
       }
+    }
+
+    // Timeout — resolve pending keymap ambiguity
+    if !readline.pending_keymap.is_empty()
+      && fds[0].revents().is_none_or(|r| !r.contains(PollFlags::POLLIN))
+    {
+      log::debug!("[keymap timeout] resolving pending={:?}", readline.pending_keymap);
+      let keymap_flags = readline.curr_keymap_flags();
+      let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &readline.pending_keymap));
+      // If there's an exact match, fire it; otherwise flush as normal keys
+      let exact = matches.iter().find(|km| km.compare(&readline.pending_keymap) == KeyMapMatch::IsExact);
+      if let Some(km) = exact {
+        log::debug!("[keymap timeout] firing exact match: {:?} -> {:?}", km.keys, km.action);
+        let action = km.action_expanded();
+        readline.pending_keymap.clear();
+        for key in action {
+          if let Some(event) = readline.handle_key(key)? {
+            match event {
+              ReadlineEvent::Line(input) => {
+                let start = Instant::now();
+                write_meta(|m| m.start_timer());
+                if let Err(e) = RawModeGuard::with_cooked_mode(|| exec_input(input, None, true, Some("<stdin>".into()))) {
+                  match e.kind() {
+                    ShErrKind::CleanExit(code) => {
+                      QUIT_CODE.store(*code, Ordering::SeqCst);
+                      return Ok(());
+                    }
+                    _ => e.print_error(),
+                  }
+                }
+                let command_run_time = start.elapsed();
+                log::info!("Command executed in {:.2?}", command_run_time);
+                write_meta(|m| m.stop_timer());
+                readline.fix_column()?;
+                readline.writer.flush_write("\n\r")?;
+                readline.reset(true)?;
+                break;
+              }
+              ReadlineEvent::Eof => {
+                QUIT_CODE.store(0, Ordering::SeqCst);
+                return Ok(());
+              }
+              ReadlineEvent::Pending => {}
+            }
+          }
+        }
+      } else {
+        log::debug!("[keymap timeout] no exact match, flushing {} keys as normal input", readline.pending_keymap.len());
+        let buffered = std::mem::take(&mut readline.pending_keymap);
+        for key in buffered {
+          if let Some(event) = readline.handle_key(key)? {
+            match event {
+              ReadlineEvent::Line(input) => {
+                let start = Instant::now();
+                write_meta(|m| m.start_timer());
+                if let Err(e) = RawModeGuard::with_cooked_mode(|| exec_input(input, None, true, Some("<stdin>".into()))) {
+                  match e.kind() {
+                    ShErrKind::CleanExit(code) => {
+                      QUIT_CODE.store(*code, Ordering::SeqCst);
+                      return Ok(());
+                    }
+                    _ => e.print_error(),
+                  }
+                }
+                let command_run_time = start.elapsed();
+                log::info!("Command executed in {:.2?}", command_run_time);
+                write_meta(|m| m.stop_timer());
+                readline.fix_column()?;
+                readline.writer.flush_write("\n\r")?;
+                readline.reset(true)?;
+                break;
+              }
+              ReadlineEvent::Eof => {
+                QUIT_CODE.store(0, Ordering::SeqCst);
+                return Ok(());
+              }
+              ReadlineEvent::Pending => {}
+            }
+          }
+        }
+      }
+      readline.print_line(false)?;
+      continue;
     }
 
     // Check if stdin has data

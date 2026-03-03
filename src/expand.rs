@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::iter::Peekable;
 use std::str::{Chars, FromStr};
 
@@ -11,10 +11,10 @@ use crate::parse::execute::exec_input;
 use crate::parse::lex::{LexFlags, LexStream, QuoteState, Tk, TkFlags, TkRule, is_hard_sep};
 use crate::parse::{Redir, RedirType};
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
+use crate::readline::keys::{KeyCode, KeyEvent, ModKeys};
 use crate::readline::markers;
 use crate::state::{
-  ArrIndex, LogTab, VarFlags, VarKind, read_jobs, read_logic, read_vars, write_jobs, write_meta,
-  write_vars,
+  ArrIndex, LogTab, VarFlags, VarKind, read_jobs, read_logic, read_shopts, read_vars, write_jobs, write_meta, write_vars
 };
 use crate::prelude::*;
 
@@ -2142,4 +2142,82 @@ pub fn expand_aliases(
     already_expanded.extend(expanded_this_iter);
     expand_aliases(result, already_expanded, log_tab)
   }
+}
+
+pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
+	let mut keys = Vec::new();
+	let mut chars = s.chars().collect::<VecDeque<char>>();
+	while let Some(ch) = chars.pop_front() {
+		match ch {
+			'\\' => {
+				if let Some(next_ch) = chars.pop_front() {
+					keys.push(KeyEvent(KeyCode::Char(next_ch), ModKeys::NONE));
+				}
+			}
+			'<' => {
+				let mut alias = String::new();
+				while let Some(a_ch) = chars.pop_front() {
+					match a_ch {
+						'\\' => {
+							if let Some(esc_ch) = chars.pop_front() {
+								alias.push(esc_ch);
+							}
+						}
+						'>' => {
+							if alias.eq_ignore_ascii_case("leader") {
+								let leader = read_shopts(|o| o.prompt.leader.clone());
+								keys.extend(expand_keymap(&leader));
+							} else if let Some(key) = parse_key_alias(&alias) {
+								keys.push(key);
+							}
+							break;
+						}
+						_ => alias.push(a_ch),
+					}
+				}
+			}
+			_ => {
+				keys.push(KeyEvent(KeyCode::Char(ch), ModKeys::NONE));
+			}
+		}
+	}
+
+	keys
+}
+
+pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
+	let parts: Vec<&str> = alias.split('-').collect();
+	let (mods_parts, key_name) = parts.split_at(parts.len() - 1);
+	let mut mods = ModKeys::NONE;
+	for m in mods_parts {
+		match m.to_uppercase().as_str() {
+			"C" => mods |= ModKeys::CTRL,
+			"A" | "M" => mods |= ModKeys::ALT,
+			"S" => mods |= ModKeys::SHIFT,
+			_ => return None,
+		}
+	}
+
+	let key = match *key_name.first()? {
+		"CR" => KeyCode::Char('\r'),
+		"ENTER" | "RETURN" => KeyCode::Enter,
+		"ESC" | "ESCAPE" => KeyCode::Esc,
+		"TAB" => KeyCode::Tab,
+		"BS" | "BACKSPACE" => KeyCode::Backspace,
+		"DEL" | "DELETE" => KeyCode::Delete,
+		"INS" | "INSERT" => KeyCode::Insert,
+		"SPACE" => KeyCode::Char(' '),
+		"UP" => KeyCode::Up,
+		"DOWN" => KeyCode::Down,
+		"LEFT" => KeyCode::Left,
+		"RIGHT" => KeyCode::Right,
+		"HOME" => KeyCode::Home,
+		"END" => KeyCode::End,
+		"PGUP" | "PAGEUP" => KeyCode::PageUp,
+		"PGDN" | "PAGEDOWN" => KeyCode::PageDown,
+		k if k.len() == 1 => KeyCode::Char(k.chars().next().unwrap()),
+		_ => return None
+	};
+
+	Some(KeyEvent(key, mods))
 }

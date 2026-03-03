@@ -63,6 +63,7 @@ bitflags! {
     const VISUAL = 1<<0;
     const VISUAL_LINE = 1<<1;
     const VISUAL_BLOCK = 1<<2;
+    const EXIT_CUR_MODE = 1<<3;
   }
 }
 
@@ -177,6 +178,7 @@ impl ViCmd {
       matches!(
         v.1,
         Verb::Change
+					| Verb::ExMode
           | Verb::InsertMode
           | Verb::InsertModeLineBreak(_)
           | Verb::NormalMode
@@ -184,7 +186,7 @@ impl ViCmd {
           | Verb::VisualMode
           | Verb::VisualModeLine
           | Verb::ReplaceMode
-      )
+      ) || self.flags.contains(CmdFlags::EXIT_CUR_MODE)
     })
   }
 }
@@ -245,6 +247,15 @@ pub enum Verb {
   Equalize,
   AcceptLineOrNewline,
   EndOfFile,
+  // Ex-mode verbs
+  ExMode,
+  ShellCmd(String),
+  Normal(String),
+  Read(ReadSrc),
+  Write(WriteDest),
+  Substitute(String, String, super::vimode::ex::SubFlags),
+  RepeatSubstitute,
+  RepeatGlobal,
 }
 
 impl Verb {
@@ -290,6 +301,8 @@ impl Verb {
         | Self::Insert(_)
         | Self::Rot13
         | Self::EndOfFile
+				| Self::IncrementNumber(_)
+				| Self::DecrementNumber(_)
     )
   }
   pub fn is_char_insert(&self) -> bool {
@@ -339,6 +352,9 @@ pub enum Motion {
   RepeatMotion,
   RepeatMotionRev,
   Null,
+  // Ex-mode motions
+  Global(Val),
+  NotGlobal(Val),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -466,4 +482,31 @@ pub enum Dest {
 pub enum To {
   Start,
   End,
+}
+
+// Ex-mode types
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ReadSrc {
+  File(std::path::PathBuf),
+  Cmd(String),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum WriteDest {
+  File(std::path::PathBuf),
+  FileAppend(std::path::PathBuf),
+  Cmd(String),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Val {
+  Str(String),
+  Regex(String),
+}
+
+impl Val {
+  pub fn new_str(s: String) -> Self {
+    Self::Str(s)
+  }
 }

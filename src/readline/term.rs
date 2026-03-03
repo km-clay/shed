@@ -698,6 +698,8 @@ pub struct Layout {
   pub prompt_end: Pos,
   pub cursor: Pos,
   pub end: Pos,
+  pub psr_end: Option<Pos>,
+  pub t_cols: u16,
 }
 
 impl Layout {
@@ -706,6 +708,8 @@ impl Layout {
       prompt_end: Pos::default(),
       cursor: Pos::default(),
       end: Pos::default(),
+      psr_end: None,
+      t_cols: 0,
     }
   }
   pub fn from_parts(term_width: u16, prompt: &str, to_cursor: &str, to_end: &str) -> Self {
@@ -716,6 +720,8 @@ impl Layout {
       prompt_end,
       cursor,
       end,
+      psr_end: None,
+      t_cols: term_width,
     }
   }
 
@@ -925,7 +931,14 @@ impl TermWriter {
 impl LineWriter for TermWriter {
   fn clear_rows(&mut self, layout: &Layout) -> ShResult<()> {
     self.buffer.clear();
-    let rows_to_clear = layout.end.row;
+    // Account for lines that may have wrapped due to terminal resize.
+    // If a PSR was drawn, the last row extended to the old terminal width.
+    // When the terminal shrinks, that row wraps into extra physical rows.
+    let mut rows_to_clear = layout.end.row;
+    if layout.psr_end.is_some() && layout.t_cols > self.t_cols && self.t_cols > 0 {
+      let extra = (layout.t_cols.saturating_sub(1)) / self.t_cols;
+      rows_to_clear += extra;
+    }
     let cursor_row = layout.cursor.row;
 
     let cursor_motion = rows_to_clear.saturating_sub(cursor_row);
@@ -950,6 +963,7 @@ impl LineWriter for TermWriter {
       )
     };
     self.buffer.clear();
+		self.buffer.push_str("\x1b[J"); // Clear from cursor to end of screen to erase any remnants of the old line after the prompt
 
     let end = new_layout.end;
     let cursor = new_layout.cursor;

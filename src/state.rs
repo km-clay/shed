@@ -11,7 +11,7 @@ use std::{
 use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
-  builtin::{BUILTINS, map::MapNode, trap::TrapTarget},
+  builtin::{BUILTINS, keymap::{KeyMap, KeyMapFlags, KeyMapMatch}, map::MapNode, trap::TrapTarget},
   exec_input,
   jobs::JobTab,
   libsh::{
@@ -24,8 +24,7 @@ use crate::{
   },
   prelude::*,
   readline::{
-    complete::{BashCompSpec, CompSpec},
-    markers,
+    complete::{BashCompSpec, CompSpec}, keys::KeyEvent, markers
   },
   shopt::ShOpts,
 };
@@ -533,12 +532,36 @@ pub struct LogTab {
   functions: HashMap<String, ShFunc>,
   aliases: HashMap<String, ShAlias>,
   traps: HashMap<TrapTarget, String>,
+	keymaps: Vec<KeyMap>
 }
 
 impl LogTab {
   pub fn new() -> Self {
     Self::default()
   }
+	pub fn insert_keymap(&mut self, keymap: KeyMap) {
+		let mut found_dup = false;
+		for map in self.keymaps.iter_mut() {
+			if map.keys == keymap.keys {
+				*map = keymap.clone();
+				found_dup = true;
+				break;
+			}
+		}
+		if !found_dup {
+			self.keymaps.push(keymap);
+		}
+	}
+	pub fn remove_keymap(&mut self, keys: &str) {
+		self.keymaps.retain(|km| km.keys != keys);
+	}
+	pub fn keymaps_filtered(&self, flags: KeyMapFlags, pending: &[KeyEvent]) -> Vec<KeyMap> {
+		self.keymaps
+			.iter()
+			.filter(|km| km.flags.intersects(flags) && km.compare(pending) != KeyMapMatch::NoMatch)
+			.cloned()
+			.collect()
+	}
   pub fn insert_func(&mut self, name: &str, src: ShFunc) {
     self.functions.insert(name.into(), src);
   }

@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use history::History;
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{LineBuf, SelectAnchor, SelectMode};
@@ -6,13 +7,15 @@ use unicode_width::UnicodeWidthStr;
 use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
 use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
 
+use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::expand_prompt;
 use crate::libsh::sys::TTY_FILENO;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::prelude::*;
 use crate::readline::complete::FuzzyCompleter;
 use crate::readline::term::{Pos, TermReader, calc_str_width};
-use crate::state::{ShellParam, read_shopts};
+use crate::readline::vimode::ViEx;
+use crate::state::{ShellParam, read_logic, read_shopts};
 use crate::{
   libsh::error::ShResult,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
@@ -210,6 +213,7 @@ pub struct ShedVi {
   pub completer: Box<dyn Completer>,
 
   pub mode: Box<dyn ViMode>,
+	pub pending_keymap: Vec<KeyEvent>,
   pub repeat_action: Option<CmdReplay>,
   pub repeat_motion: Option<MotionCmd>,
   pub editor: LineBuf,
@@ -229,6 +233,7 @@ impl ShedVi {
       completer: Box::new(FuzzyCompleter::default()),
       highlighter: Highlighter::new(),
       mode: Box::new(ViInsert::new()),
+			pending_keymap: Vec::new(),
       old_layout: None,
       repeat_action: None,
       repeat_motion: None,
@@ -263,6 +268,16 @@ impl ShedVi {
 		self.writer.fix_cursor_column(&mut TermReader::new(*TTY_FILENO))
 	}
 
+	pub fn reset_active_widget(&mut self, full_redraw: bool) -> ShResult<()> {
+		if self.completer.is_active() {
+			self.completer.reset_stay_active();
+			self.needs_redraw = true;
+			Ok(())
+		} else {
+			self.reset(full_redraw)
+		}
+	}
+
   /// Reset readline state for a new prompt
   pub fn reset(&mut self, full_redraw: bool) -> ShResult<()> {
     // Clear old display before resetting state — old_layout must survive
@@ -286,6 +301,24 @@ impl ShedVi {
   pub fn prompt_mut(&mut self) -> &mut Prompt {
     &mut self.prompt
   }
+
+	pub fn curr_keymap_flags(&self) -> KeyMapFlags {
+		let mut flags = KeyMapFlags::empty();
+		match self.mode.report_mode() {
+			ModeReport::Insert => flags |= KeyMapFlags::INSERT,
+			ModeReport::Normal => flags |= KeyMapFlags::NORMAL,
+			ModeReport::Ex => flags |= KeyMapFlags::EX,
+			ModeReport::Visual => flags |= KeyMapFlags::VISUAL,
+			ModeReport::Replace => flags |= KeyMapFlags::REPLACE,
+			ModeReport::Unknown => todo!(),
+		}
+
+		if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty()) {
+			flags |= KeyMapFlags::OP_PENDING;
+		}
+
+		flags
+	}
 
   fn should_submit(&mut self) -> ShResult<bool> {
     if self.mode.report_mode() == ModeReport::Normal {
@@ -326,6 +359,7 @@ impl ShedVi {
     while let Some(key) = self.reader.read_key()? {
       // If completer is active, delegate input to it
       if self.completer.is_active() {
+				self.print_line(false)?;
         match self.completer.handle_key(key.clone())? {
           CompResponse::Accept(candidate) => {
             let span_start = self.completer.token_span().0;
@@ -351,6 +385,8 @@ impl ShedVi {
 						continue;
           }
           CompResponse::Dismiss => {
+            let hint = self.history.get_hint();
+            self.editor.set_hint(hint);
 						self.completer.clear(&mut self.writer)?;
 						self.completer.reset();
 						continue;
@@ -362,127 +398,48 @@ impl ShedVi {
 					}
           CompResponse::Passthrough => { /* fall through to normal handling below */ }
         }
-      }
+			} else {
+				let keymap_flags = self.curr_keymap_flags();
+				self.pending_keymap.push(key.clone());
+				log::debug!("[keymap] pending={:?} flags={:?}", self.pending_keymap, keymap_flags);
 
-      if self.should_accept_hint(&key) {
-        self.editor.accept_hint();
-        if !self.history.at_pending() {
-          self.history.reset_to_pending();
-        }
-        self
-          .history
-          .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
-        self.needs_redraw = true;
-        continue;
-      }
-
-      if let KeyEvent(KeyCode::Tab, mod_keys) = key {
-        let direction = match mod_keys {
-          ModKeys::SHIFT => -1,
-          _ => 1,
-        };
-        let line = self.editor.as_str().to_string();
-        let cursor_pos = self.editor.cursor_byte_pos();
-
-        match self.completer.complete(line, cursor_pos, direction) {
-					Err(e) => {
-						e.print_error();
-
-						// Printing the error invalidates the layout
-						self.old_layout = None;
+				let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
+				log::debug!("[keymap] {} matches found", matches.len());
+				if matches.is_empty() {
+					// No matches. Drain the buffered keys and execute them.
+					log::debug!("[keymap] no matches, flushing {} buffered keys", self.pending_keymap.len());
+					for key in std::mem::take(&mut self.pending_keymap) {
+						if let Some(event) = self.handle_key(key)? {
+							return Ok(event);
+						}
 					}
-          Ok(Some(line)) => {
-            let span_start = self.completer.token_span().0;
-            let new_cursor = span_start
-              + self
-                .completer
-                .selected_candidate()
-                .map(|c| c.len())
-                .unwrap_or_default();
+					self.needs_redraw = true;
+					continue;
+				} else if matches.len() == 1 && matches[0].compare(&self.pending_keymap) == KeyMapMatch::IsExact {
+					// We have a single exact match. Execute it.
+					let keymap = matches[0].clone();
+					log::debug!("[keymap] exact match: {:?} -> {:?}", keymap.keys, keymap.action);
+					self.pending_keymap.clear();
+					let action = keymap.action_expanded();
+					log::debug!("[keymap] expanded action: {:?}", action);
+					for key in action {
+						if let Some(event) = self.handle_key(key)? {
+							return Ok(event);
+						}
+					}
+					self.needs_redraw = true;
+					continue;
+				} else {
+					// There is ambiguity. Allow the timeout in the main loop to handle this.
+					log::debug!("[keymap] ambiguous: {} matches, waiting for more input", matches.len());
+					continue;
+				}
+			}
 
-            self.editor.set_buffer(line);
-            self.editor.cursor.set(new_cursor);
 
-            if !self.history.at_pending() {
-              self.history.reset_to_pending();
-            }
-            self
-              .history
-              .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
-            let hint = self.history.get_hint();
-            self.editor.set_hint(hint);
-          }
-          Ok(None) => {
-            self.writer.send_bell().ok();
-          }
-        }
-
-        self.needs_redraw = true;
-        continue;
+      if let Some(event) = self.handle_key(key)? {
+        return Ok(event);
       }
-
-      // if we are here, we didnt press tab
-      // so we should reset the completer state
-      self.completer.reset();
-
-      let Some(mut cmd) = self.mode.handle_key(key) else {
-        continue;
-      };
-      cmd.alter_line_motion_if_no_verb();
-
-      if self.should_grab_history(&cmd) {
-        self.scroll_history(cmd);
-        self.needs_redraw = true;
-        continue;
-      }
-
-      if cmd.is_submit_action()
-        && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
-      {
-        self.editor.set_hint(None);
-        self.editor.cursor.set(self.editor.cursor_max()); // Move the cursor to the very end
-        self.print_line(true)?; // Redraw
-        self.writer.flush_write("\n")?;
-        let buf = self.editor.take_buf();
-        // Save command to history if auto_hist is enabled
-        if read_shopts(|s| s.core.auto_hist) && !buf.is_empty() {
-          self.history.push(buf.clone());
-          if let Err(e) = self.history.save() {
-            eprintln!("Failed to save history: {e}");
-          }
-        }
-        self.history.reset();
-        return Ok(ReadlineEvent::Line(buf));
-      }
-
-      if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
-        if self.editor.buffer.is_empty() {
-          return Ok(ReadlineEvent::Eof);
-        } else {
-          self.editor = LineBuf::new();
-          self.mode = Box::new(ViInsert::new());
-          self.needs_redraw = true;
-          continue;
-        }
-      }
-
-      let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
-
-      let before = self.editor.buffer.clone();
-      self.exec_cmd(cmd)?;
-      let after = self.editor.as_str();
-
-      if before != after {
-        self
-          .history
-          .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
-      } else if before == after && has_edit_verb {
-        self.writer.send_bell().ok(); // bell on no-op commands with a verb (e.g., 'x' on empty line)
-      }
-
-      let hint = self.history.get_hint();
-      self.editor.set_hint(hint);
-      self.needs_redraw = true;
     }
 
     // Redraw if we processed any input
@@ -493,6 +450,143 @@ impl ShedVi {
 
     Ok(ReadlineEvent::Pending)
   }
+
+  pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
+    if self.should_accept_hint(&key) {
+      self.editor.accept_hint();
+      if !self.history.at_pending() {
+        self.history.reset_to_pending();
+      }
+      self
+        .history
+        .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+      self.needs_redraw = true;
+      return Ok(None);
+    }
+
+    if let KeyEvent(KeyCode::Tab, mod_keys) = key {
+      let direction = match mod_keys {
+        ModKeys::SHIFT => -1,
+        _ => 1,
+      };
+      let line = self.editor.as_str().to_string();
+      let cursor_pos = self.editor.cursor_byte_pos();
+
+      match self.completer.complete(line, cursor_pos, direction) {
+        Err(e) => {
+          e.print_error();
+          // Printing the error invalidates the layout
+          self.old_layout = None;
+        }
+        Ok(Some(line)) => {
+          let span_start = self.completer.token_span().0;
+          let new_cursor = span_start
+            + self
+              .completer
+              .selected_candidate()
+              .map(|c| c.len())
+              .unwrap_or_default();
+
+          self.editor.set_buffer(line);
+          self.editor.cursor.set(new_cursor);
+
+          if !self.history.at_pending() {
+            self.history.reset_to_pending();
+          }
+          self
+            .history
+            .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+          let hint = self.history.get_hint();
+          self.editor.set_hint(hint);
+        }
+        Ok(None) => {
+          self.writer.send_bell().ok();
+          if self.completer.is_active() {
+            self.editor.set_hint(None);
+          }
+        }
+      }
+
+      self.needs_redraw = true;
+      return Ok(None);
+    }
+
+    let Ok(cmd) = self.mode.handle_key_fallible(key) else {
+      // it's an ex mode error
+      self.mode = Box::new(ViNormal::new()) as Box<dyn ViMode>;
+      return Ok(None);
+    };
+
+    let Some(mut cmd) = cmd else {
+      log::debug!("[readline] mode.handle_key returned None");
+      return Ok(None);
+    };
+    log::debug!("[readline] got cmd: verb={:?} motion={:?} flags={:?}", cmd.verb, cmd.motion, cmd.flags);
+    cmd.alter_line_motion_if_no_verb();
+
+    if self.should_grab_history(&cmd) {
+      self.scroll_history(cmd);
+      self.needs_redraw = true;
+      return Ok(None);
+    }
+
+    if cmd.is_submit_action()
+      && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
+    {
+      self.editor.set_hint(None);
+      self.editor.cursor.set(self.editor.cursor_max());
+      self.print_line(true)?;
+      self.writer.flush_write("\n")?;
+      let buf = self.editor.take_buf();
+      if read_shopts(|s| s.core.auto_hist) && !buf.is_empty() {
+        self.history.push(buf.clone());
+        if let Err(e) = self.history.save() {
+          eprintln!("Failed to save history: {e}");
+        }
+      }
+      self.history.reset();
+      return Ok(Some(ReadlineEvent::Line(buf)));
+    }
+
+    if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
+      if self.editor.buffer.is_empty() {
+        return Ok(Some(ReadlineEvent::Eof));
+      } else {
+        self.editor = LineBuf::new();
+        self.mode = Box::new(ViInsert::new());
+        self.needs_redraw = true;
+        return Ok(None);
+      }
+    }
+
+    let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
+
+    let before = self.editor.buffer.clone();
+    self.exec_cmd(cmd)?;
+    let after = self.editor.as_str();
+
+    if before != after {
+      self
+        .history
+        .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+    } else if before == after && has_edit_verb {
+      self.writer.send_bell().ok();
+    }
+
+    let hint = self.history.get_hint();
+
+    self.editor.set_hint(hint);
+    self.needs_redraw = true;
+    Ok(None)
+  }
+
+	pub fn update_layout(&mut self) {
+		let text = self.line_text();
+		let new = self.get_layout(&text);
+		if let Some(old) = self.old_layout.as_mut() {
+			*old = new;
+		}
+	}
 
   pub fn get_layout(&mut self, line: &str) -> Layout {
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
@@ -578,7 +672,7 @@ impl ShedVi {
 
   pub fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
     let line = self.line_text();
-    let new_layout = self.get_layout(&line);
+    let mut new_layout = self.get_layout(&line);
     let pending_seq = self.mode.pending_seq();
     let mut prompt_string_right = self.prompt.psr_expanded.clone();
 
@@ -590,6 +684,7 @@ impl ShedVi {
       prompt_string_right =
         prompt_string_right.map(|psr| psr.lines().next().unwrap_or_default().to_string());
     }
+		let mut buf = String::new();
 
     let row0_used = self
       .prompt
@@ -623,7 +718,7 @@ impl ShedVi {
       && !seq.is_empty()
       && !(prompt_string_right.is_some() && one_line)
       && seq_fits
-    {
+			&& self.mode.report_mode() != ModeReport::Ex {
       let to_col = self.writer.t_cols - calc_str_width(&seq);
       let up = new_layout.cursor.row; // rows to move up from cursor to top line of prompt
 
@@ -635,13 +730,10 @@ impl ShedVi {
 
       // Save cursor, move up to top row, move right to column, write sequence,
       // restore cursor
-      self
-        .writer
-        .flush_write(&format!("\x1b7{move_up}\x1b[{to_col}G{seq}\x1b8"))?;
+			write!(buf, "\x1b7{move_up}\x1b[{to_col}G{seq}\x1b8").unwrap();
     } else if !final_draw
       && let Some(psr) = prompt_string_right
-      && psr_fits
-    {
+      && psr_fits {
       let to_col = self.writer.t_cols - calc_str_width(&psr);
       let down = new_layout.end.row - new_layout.cursor.row;
       let move_down = if down > 0 {
@@ -650,17 +742,37 @@ impl ShedVi {
         String::new()
       };
 
-      self
-        .writer
-        .flush_write(&format!("\x1b7{move_down}\x1b[{to_col}G{psr}\x1b8"))?;
+      write!(buf, "\x1b7{move_down}\x1b[{to_col}G{psr}\x1b8").unwrap();
+
+      // Record where the PSR ends so clear_rows can account for wrapping
+      // if the terminal shrinks.
+      let psr_start = Pos { row: new_layout.end.row, col: to_col };
+      new_layout.psr_end = Some(Layout::calc_pos(self.writer.t_cols, &psr, psr_start, 0));
     }
 
-    self.writer.flush_write(&self.mode.cursor_style())?;
+		if let ModeReport::Ex = self.mode.report_mode() {
+			let pending_seq = self.mode.pending_seq().unwrap_or_default();
+			write!(buf, "\n: {pending_seq}").unwrap();
+			new_layout.end.row += 1;
+		}
 
+    write!(buf, "{}", &self.mode.cursor_style()).unwrap();
+
+		self.writer.flush_write(&buf)?;
+    // Tell the completer the width of the prompt line above its \n so it can
+    // account for wrapping when clearing after a resize.
+    let preceding_width = if new_layout.psr_end.is_some() {
+      self.writer.t_cols
+    } else {
+      // Without PSR, use the content width on the cursor's row
+      (new_layout.end.col + 1).max(new_layout.cursor.col + 1)
+    };
+    self.completer.set_prompt_line_context(preceding_width, new_layout.cursor.col);
     self.completer.draw(&mut self.writer)?;
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;
+    // Save physical cursor row so SIGWINCH can restore it
     Ok(())
   }
 
@@ -669,39 +781,46 @@ impl ShedVi {
     let mut is_insert_mode = false;
     if cmd.is_mode_transition() {
       let count = cmd.verb_count();
-      let mut mode: Box<dyn ViMode> = match cmd.verb().unwrap().1 {
-        Verb::Change | Verb::InsertModeLineBreak(_) | Verb::InsertMode => {
-          is_insert_mode = true;
-          Box::new(ViInsert::new().with_count(count as u16))
-        }
+      let mut mode: Box<dyn ViMode> = if let ModeReport::Ex = self.mode.report_mode() && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
+				Box::new(ViNormal::new())
+			} else {
+				match cmd.verb().unwrap().1 {
+					Verb::Change | Verb::InsertModeLineBreak(_) | Verb::InsertMode => {
+						is_insert_mode = true;
+						Box::new(ViInsert::new().with_count(count as u16))
+					}
 
-        Verb::NormalMode => Box::new(ViNormal::new()),
+					Verb::ExMode => Box::new(ViEx::new()),
 
-        Verb::ReplaceMode => Box::new(ViReplace::new()),
+					Verb::NormalMode => Box::new(ViNormal::new()),
 
-        Verb::VisualModeSelectLast => {
-          if self.mode.report_mode() != ModeReport::Visual {
-            self
-              .editor
-              .start_selecting(SelectMode::Char(SelectAnchor::End));
-          }
-          let mut mode: Box<dyn ViMode> = Box::new(ViVisual::new());
-          std::mem::swap(&mut mode, &mut self.mode);
-          self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+					Verb::ReplaceMode => Box::new(ViReplace::new()),
 
-          return self.editor.exec_cmd(cmd);
-        }
-        Verb::VisualMode => {
-          select_mode = Some(SelectMode::Char(SelectAnchor::End));
-          Box::new(ViVisual::new())
-        }
-        Verb::VisualModeLine => {
-          select_mode = Some(SelectMode::Line(SelectAnchor::End));
-          Box::new(ViVisual::new())
-        }
+					Verb::VisualModeSelectLast => {
+						if self.mode.report_mode() != ModeReport::Visual {
+							self
+								.editor
+								.start_selecting(SelectMode::Char(SelectAnchor::End));
+						}
+						let mut mode: Box<dyn ViMode> = Box::new(ViVisual::new());
+						std::mem::swap(&mut mode, &mut self.mode);
+						self.editor.set_cursor_clamp(self.mode.clamp_cursor());
 
-        _ => unreachable!(),
-      };
+						return self.editor.exec_cmd(cmd);
+					}
+					Verb::VisualMode => {
+						select_mode = Some(SelectMode::Char(SelectAnchor::End));
+						Box::new(ViVisual::new())
+					}
+					Verb::VisualModeLine => {
+						select_mode = Some(SelectMode::Line(SelectAnchor::End));
+						Box::new(ViVisual::new())
+					}
+
+					_ => unreachable!(),
+				}
+			};
+
 
       std::mem::swap(&mut mode, &mut self.mode);
 
@@ -818,6 +937,13 @@ impl ShedVi {
       let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
       std::mem::swap(&mut mode, &mut self.mode);
     }
+
+    if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
+      let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+      std::mem::swap(&mut mode, &mut self.mode);
+      self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+    }
+
     Ok(())
   }
 }

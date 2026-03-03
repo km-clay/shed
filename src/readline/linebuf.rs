@@ -1,6 +1,5 @@
 use std::{
-  fmt::Display,
-  ops::{Range, RangeInclusive},
+  collections::HashSet, fmt::Display, ops::{Range, RangeInclusive}
 };
 
 use unicode_segmentation::UnicodeSegmentation;
@@ -11,14 +10,15 @@ use super::vicmd::{
   ViCmd, Word,
 };
 use crate::{
-  libsh::error::ShResult,
-  parse::lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
+  libsh::{error::ShResult, guards::var_ctx_guard},
+  parse::{execute::exec_input, lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}},
   prelude::*,
   readline::{
     markers,
     register::{RegisterContent, write_register},
+    term::RawModeGuard,
   },
-  state::read_shopts,
+  state::{VarFlags, VarKind, read_shopts, read_vars, write_vars},
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -2336,7 +2336,13 @@ impl LineBuf {
         MotionKind::Exclusive((0, self.grapheme_indices().len()))
       }
       MotionCmd(_count, Motion::BeginningOfBuffer) => MotionKind::On(0),
-      MotionCmd(_count, Motion::EndOfBuffer) => MotionKind::To(self.grapheme_indices().len()),
+      MotionCmd(_count, Motion::EndOfBuffer) => {
+				if self.cursor.exclusive {
+					MotionKind::On(self.grapheme_indices().len().saturating_sub(1))
+				} else {
+					MotionKind::On(self.grapheme_indices().len())
+				}
+			},
       MotionCmd(_count, Motion::ToColumn) => todo!(),
       MotionCmd(count, Motion::Range(start, end)) => {
         let mut final_end = end;
@@ -2355,7 +2361,9 @@ impl LineBuf {
       }
       MotionCmd(_count, Motion::RepeatMotion) => todo!(),
       MotionCmd(_count, Motion::RepeatMotionRev) => todo!(),
-      MotionCmd(_count, Motion::Null) => MotionKind::Null,
+      MotionCmd(_count, Motion::Null)
+      | MotionCmd(_count, Motion::Global(_))
+      | MotionCmd(_count, Motion::NotGlobal(_)) => MotionKind::Null,
     };
 
     self.set_buffer(buffer);
@@ -2528,16 +2536,9 @@ impl LineBuf {
   ) -> ShResult<()> {
     match verb {
       Verb::Delete | Verb::Yank | Verb::Change => {
-        log::debug!("Executing verb: {verb:?} with motion: {motion:?}");
         let Some((start, end)) = self.range_from_motion(&motion) else {
-          log::debug!("No range from motion, nothing to do");
           return Ok(());
         };
-        log::debug!("Initial range from motion: ({start}, {end})");
-        log::debug!(
-          "self.grapheme_indices().len(): {}",
-          self.grapheme_indices().len()
-        );
 
         let mut do_indent = false;
         if verb == Verb::Change && (start, end) == self.this_line_exclusive() {
@@ -3014,8 +3015,16 @@ impl LineBuf {
 			Verb::IncrementNumber(n) |
 			Verb::DecrementNumber(n) => {
 				let inc = if matches!(verb, Verb::IncrementNumber(_)) { n as i64 } else { -(n as i64) };
-				let (s, e) = self.this_word(Word::Normal);
-				let end = (e + 1).min(self.grapheme_indices().len()); // inclusive → exclusive, capped at buffer len
+				let (s, e) = self.select_range().unwrap_or(self.this_word(Word::Normal));
+				let end = if self.select_range().is_some() {
+					if e < self.grapheme_indices().len() - 1 {
+						e
+					} else {
+						e + 1
+					}
+				} else {
+					(e + 1).min(self.grapheme_indices().len())
+				}; // inclusive → exclusive, capped at buffer len
 				let word = self.slice(s..end).unwrap_or_default().to_lowercase();
 
 				let byte_start = self.index_byte_pos(s);
@@ -3062,6 +3071,7 @@ impl LineBuf {
 			}
 
       Verb::Complete
+			| Verb::ExMode
       | Verb::EndOfFile
       | Verb::InsertMode
       | Verb::NormalMode
@@ -3071,6 +3081,38 @@ impl LineBuf {
       | Verb::VisualModeBlock
       | Verb::CompleteBackward
       | Verb::VisualModeSelectLast => self.apply_motion(motion), // Already handled logic for these
+
+      Verb::ShellCmd(cmd) => {
+				let mut vars = HashSet::new();
+				vars.insert("BUFFER".into());
+				vars.insert("CURSOR".into());
+				let _guard = var_ctx_guard(vars);
+
+				let mut buf = self.as_str().to_string();
+				let mut cursor = self.cursor.get();
+
+				write_vars(|v| {
+					v.set_var("BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
+					v.set_var("CURSOR", VarKind::Str(cursor.to_string()), VarFlags::EXPORT)
+				})?;
+
+				RawModeGuard::with_cooked_mode(|| exec_input(cmd, None, true, Some("<ex-mode-cmd>".into())))?;
+
+				read_vars(|v| {
+					buf = v.get_var("BUFFER");
+					cursor = v.get_var("CURSOR").parse().unwrap_or(cursor);
+				});
+
+				self.set_buffer(buf);
+				self.cursor.set_max(self.buffer.graphemes(true).count());
+				self.cursor.set(cursor);
+			}
+      Verb::Normal(_)
+      | Verb::Read(_)
+      | Verb::Write(_)
+      | Verb::Substitute(..)
+      | Verb::RepeatSubstitute
+      | Verb::RepeatGlobal => {} // Ex-mode verbs handled elsewhere
     }
     Ok(())
   }

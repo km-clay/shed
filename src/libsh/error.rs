@@ -180,10 +180,15 @@ impl ShErr {
 		Self { kind, src_span: None, labels: vec![], sources: vec![], notes: vec![msg.into()], io_guards: vec![] }
 	}
 	pub fn promote(mut self, span: Span) -> Self {
-		if let Some(note) = self.notes.pop() {
-			self = self.labeled(span, note)
+		if self.notes.is_empty() {
+			return self
 		}
-		self
+		let first = self.notes[0].clone();
+		if self.notes.len() > 1 {
+			self.notes = self.notes[1..].to_vec();
+		}
+
+		self.labeled(span, first)
 	}
 	pub fn with_redirs(mut self, guard: RedirGuard) -> Self {
 		self.io_guards.push(guard);
@@ -340,6 +345,7 @@ pub enum ShErrKind {
   Errno(Errno),
 	NotFound,
   ReadlineErr,
+  ExCommand,
 
   // Not really errors, more like internal signals
   CleanExit(i32),
@@ -369,6 +375,7 @@ impl Display for ShErrKind {
       Self::LoopContinue(_) => "Syntax Error",
       Self::LoopBreak(_) => "Syntax Error",
       Self::ReadlineErr => "Readline Error",
+      Self::ExCommand => "Ex Command Error",
       Self::ClearReadline => "",
       Self::Null => "",
     };

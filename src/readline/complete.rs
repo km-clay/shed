@@ -520,12 +520,14 @@ pub enum CompResponse {
 pub trait Completer {
 	fn complete(&mut self, line: String, cursor_pos: usize, direction: i32) -> ShResult<Option<String>>;
 	fn reset(&mut self);
+	fn reset_stay_active(&mut self);
 	fn is_active(&self) -> bool;
 	fn selected_candidate(&self) -> Option<String>;
 	fn token_span(&self) -> (usize, usize);
 	fn original_input(&self) -> &str;
 	fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()>;
 	fn clear(&mut self, _writer: &mut TermWriter) -> ShResult<()> { Ok(()) }
+	fn set_prompt_line_context(&mut self, _line_width: u16, _cursor_col: u16) {}
 	fn handle_key(&mut self, key: K) -> ShResult<CompResponse>;
 	fn get_completed_line(&self, candidate: &str) -> String;
 }
@@ -610,7 +612,14 @@ impl From<String> for ScoredCandidate {
 
 #[derive(Debug, Clone)]
 pub struct FuzzyLayout {
-	rows: u16
+	rows: u16,
+	cols: u16,
+	cursor_col: u16,
+	/// Width of the prompt line above the `\n` that starts the fuzzy window.
+	/// If PSR was drawn, this is `t_cols`; otherwise the content width.
+	preceding_line_width: u16,
+	/// Cursor column on the prompt line before the fuzzy window was drawn.
+	preceding_cursor_col: u16,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -671,7 +680,11 @@ pub struct FuzzyCompleter {
 	old_layout: Option<FuzzyLayout>,
 	max_height: usize,
 	scroll_offset: usize,
-	active: bool
+	active: bool,
+	/// Context from the prompt: width of the line above the fuzzy window
+	prompt_line_width: u16,
+	/// Context from the prompt: cursor column on the line above the fuzzy window
+	prompt_cursor_col: u16,
 }
 
 impl FuzzyCompleter {
@@ -740,11 +753,23 @@ impl Default for FuzzyCompleter {
 			old_layout: None,
 			scroll_offset: 0,
 			active: false,
+			prompt_line_width: 0,
+			prompt_cursor_col: 0,
 		}
 	}
 }
 
 impl Completer for FuzzyCompleter {
+	fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
+		self.prompt_line_width = line_width;
+		self.prompt_cursor_col = cursor_col;
+	}
+	fn reset_stay_active(&mut self) {
+		if self.is_active() {
+			self.query.clear();
+			self.score_candidates();
+		}
+	}
 	fn get_completed_line(&self, _candidate: &str) -> String {
 		log::debug!("Getting completed line for candidate: {}", _candidate);
 
@@ -782,6 +807,7 @@ impl Completer for FuzzyCompleter {
 
 	fn handle_key(&mut self, key: K) -> ShResult<CompResponse> {
 		match key {
+			K(C::Char('D'), M::CTRL) |
 			K(C::Esc, M::NONE) => {
 				self.active = false;
 				self.filtered.clear();
@@ -816,18 +842,48 @@ impl Completer for FuzzyCompleter {
 	}
 	fn clear(&mut self, writer: &mut TermWriter) -> ShResult<()> {
 		if let Some(layout) = self.old_layout.take() {
+			let (new_cols, _) = get_win_size(*TTY_FILENO);
+			// The fuzzy window is one continuous auto-wrapped block (no hard
+			// newlines between rows). After a resize the terminal re-joins
+			// soft wraps and re-wraps as a flat buffer.
+			let total_cells = layout.rows as u32 * layout.cols as u32;
+			let physical_rows = if new_cols > 0 {
+				((total_cells + new_cols as u32 - 1) / new_cols as u32) as u16
+			} else {
+				layout.rows
+			};
+			let cursor_offset = layout.cols as u32 + layout.cursor_col as u32;
+			let cursor_phys_row = if new_cols > 0 {
+				(cursor_offset / new_cols as u32) as u16
+			} else {
+				1
+			};
+			let lines_below = physical_rows.saturating_sub(cursor_phys_row + 1);
+
+			// The prompt line above the \n may have wrapped (e.g. due to PSR
+			// filling to t_cols). Compute how many extra rows that adds
+			// between the prompt cursor and the fuzzy content.
+			let gap_extra = if new_cols > 0 && layout.preceding_line_width > new_cols {
+				let wrap_rows = ((layout.preceding_line_width as u32 + new_cols as u32 - 1)
+					/ new_cols as u32) as u16;
+				let cursor_wrap_row = layout.preceding_cursor_col / new_cols;
+				wrap_rows.saturating_sub(cursor_wrap_row + 1)
+			} else {
+				0
+			};
+
 			let mut buf = String::new();
-			// Cursor is on the prompt line. Move down to the bottom border.
-			let lines_below_prompt = layout.rows.saturating_sub(2);
-			if lines_below_prompt > 0 {
-				write!(buf, "\x1b[{}B", lines_below_prompt).unwrap();
+			if lines_below > 0 {
+				write!(buf, "\x1b[{}B", lines_below).unwrap();
 			}
-			// Erase each line moving up, back to the top border
-			for _ in 0..layout.rows {
+			for _ in 0..physical_rows {
 				buf.push_str("\x1b[2K\x1b[A");
 			}
-			// Erase the top border line
 			buf.push_str("\x1b[2K");
+			// Clear extra rows from prompt line wrapping (PSR)
+			for _ in 0..gap_extra {
+				buf.push_str("\x1b[A\x1b[2K");
+			}
 			writer.flush_write(&buf)?;
 		}
 		Ok(())
@@ -847,10 +903,11 @@ impl Completer for FuzzyCompleter {
 		let num_filtered = format!("\x1b[33m{}\x1b[0m",self.filtered.len());
 		let num_candidates = format!("\x1b[33m{}\x1b[0m",self.candidates.len());
 		let visible = self.get_window();
-		let mut rows = 0;
-		let top_bar = format!("\n{}{}{}",
+		let mut rows: u16 = 0;
+		let top_bar = format!("\n{}{} \x1b[1mComplete\x1b[0m {}{}",
 			Self::TOP_LEFT,
-			Self::HOR_LINE.to_string().repeat(cols.saturating_sub(2) as usize),
+			Self::HOR_LINE,
+			Self::HOR_LINE.repeat(cols.saturating_sub(13) as usize),
 			Self::TOP_RIGHT
 		);
 		buf.push_str(&top_bar);
@@ -910,15 +967,19 @@ impl Completer for FuzzyCompleter {
 		buf.push_str(&bot_bar);
 		rows += 1;
 
-		let new_layout = FuzzyLayout {
-			rows, // +1 for the query line
-		};
-
 		// Move cursor back up to the prompt line (skip: separator + candidates + bottom border)
-		let lines_below_prompt = new_layout.rows.saturating_sub(2); // total rows minus top_bar and prompt
+		let lines_below_prompt = rows.saturating_sub(2); // total rows minus top_bar and prompt
 		let cursor_in_window = self.query.linebuf.cursor.get().saturating_sub(self.query.scroll_offset);
-		let cursor_col = cursor_in_window + 4; // "| > ".len() == 4
+		let cursor_col = (cursor_in_window + 4) as u16; // "| > ".len() == 4
 		write!(buf, "\x1b[{}A\r\x1b[{}C", lines_below_prompt, cursor_col).unwrap();
+
+		let new_layout = FuzzyLayout {
+			rows,
+			cols: cols as u16,
+			cursor_col,
+			preceding_line_width: self.prompt_line_width,
+			preceding_cursor_col: self.prompt_cursor_col,
+		};
 		writer.flush_write(&buf)?;
 		self.old_layout = Some(new_layout);
 
@@ -953,6 +1014,11 @@ pub struct SimpleCompleter {
 }
 
 impl Completer for SimpleCompleter {
+	fn reset_stay_active(&mut self) {
+		let active = self.is_active();
+		self.reset();
+		self.active = active;
+	}
 	fn get_completed_line(&self, _candidate: &str) -> String {
 		self.get_completed_line()
 	}

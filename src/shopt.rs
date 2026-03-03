@@ -343,6 +343,7 @@ pub struct ShOptPrompt {
   pub highlight: bool,
   pub auto_indent: bool,
   pub linebreak_on_incomplete: bool,
+  pub leader: String,
 }
 
 impl ShOptPrompt {
@@ -402,6 +403,9 @@ impl ShOptPrompt {
         };
         self.linebreak_on_incomplete = val;
       }
+      "leader" => {
+        self.leader = val.to_string();
+      }
       "custom" => {
         todo!()
       }
@@ -459,6 +463,12 @@ impl ShOptPrompt {
         output.push_str(&format!("{}", self.linebreak_on_incomplete));
         Ok(Some(output))
       }
+      "leader" => {
+        let mut output =
+          String::from("The leader key sequence used in keymap bindings\n");
+        output.push_str(&self.leader);
+        Ok(Some(output))
+      }
       _ => Err(
         ShErr::simple(
           ShErrKind::SyntaxErr,
@@ -482,6 +492,7 @@ impl Display for ShOptPrompt {
       "linebreak_on_incomplete = {}",
       self.linebreak_on_incomplete
     ));
+    output.push(format!("leader = {}", self.leader));
 
     let final_output = output.join("\n");
 
@@ -498,6 +509,7 @@ impl Default for ShOptPrompt {
       highlight: true,
       auto_indent: true,
       linebreak_on_incomplete: true,
+      leader: "\\".to_string(),
     }
   }
 }
