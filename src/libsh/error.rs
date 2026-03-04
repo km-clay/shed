@@ -87,6 +87,7 @@ pub trait ShResultExt {
   fn blame(self, span: Span) -> Self;
   fn try_blame(self, span: Span) -> Self;
 	fn promote_err(self, span: Span) -> Self;
+	fn is_flow_control(&self) -> bool;
 }
 
 impl<T> ShResultExt for Result<T, ShErr> {
@@ -100,6 +101,9 @@ impl<T> ShResultExt for Result<T, ShErr> {
   }
 	fn promote_err(self, span: Span) -> Self {
 		self.map_err(|e| e.promote(span))
+	}
+	fn is_flow_control(&self) -> bool {
+		self.as_ref().is_err_and(|e| e.is_flow_control())
 	}
 }
 
@@ -178,6 +182,9 @@ impl ShErr {
 	}
 	pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
 		Self { kind, src_span: None, labels: vec![], sources: vec![], notes: vec![msg.into()], io_guards: vec![] }
+	}
+	pub fn is_flow_control(&self) -> bool {
+		self.kind.is_flow_control()
 	}
 	pub fn promote(mut self, span: Span) -> Self {
 		if self.notes.is_empty() {
@@ -354,6 +361,18 @@ pub enum ShErrKind {
   LoopBreak(i32),
   ClearReadline,
   Null,
+}
+
+impl ShErrKind {
+	pub fn is_flow_control(&self) -> bool {
+		matches!(self,
+			Self::CleanExit(_) |
+			Self::FuncReturn(_) |
+			Self::LoopContinue(_) |
+			Self::LoopBreak(_) |
+			Self::ClearReadline
+		)
+	}
 }
 
 impl Display for ShErrKind {

@@ -11,22 +11,15 @@ use std::{
 use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
-  builtin::{BUILTINS, keymap::{KeyMap, KeyMapFlags, KeyMapMatch}, map::MapNode, trap::TrapTarget},
-  exec_input,
-  jobs::JobTab,
-  libsh::{
+  builtin::{BUILTINS, keymap::{KeyMap, KeyMapFlags, KeyMapMatch}, map::MapNode, trap::TrapTarget}, exec_input, expand::expand_keymap, jobs::JobTab, libsh::{
     error::{ShErr, ShErrKind, ShResult},
     utils::VecDequeExt,
-  },
-  parse::{
+  }, parse::{
     ConjunctNode, NdRule, Node, ParsedSrc,
     lex::{LexFlags, LexStream, Span, Tk},
-  },
-  prelude::*,
-  readline::{
+  }, prelude::*, readline::{
     complete::{BashCompSpec, CompSpec}, keys::KeyEvent, markers
-  },
-  shopt::ShOpts,
+  }, shopt::ShOpts
 };
 
 pub struct Shed {
@@ -417,6 +410,11 @@ impl ScopeStack {
 
     None
   }
+	pub fn take_var(&mut self, var_name: &str) -> String {
+		let var = self.get_var(var_name);
+		self.unset_var(var_name).ok();
+		var
+	}
   pub fn get_var(&self, var_name: &str) -> String {
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.get_param(param);
@@ -1125,6 +1123,8 @@ pub struct MetaTab {
   // programmable completion specs
   comp_specs: HashMap<String, Box<dyn CompSpec>>,
 
+	// pending keys from widget function
+	pending_widget_keys: Vec<KeyEvent>
 }
 
 impl MetaTab {
@@ -1134,6 +1134,17 @@ impl MetaTab {
       ..Default::default()
     }
   }
+	pub fn set_pending_widget_keys(&mut self, keys: &str) {
+		let exp = expand_keymap(keys);
+		self.pending_widget_keys = exp;
+	}
+	pub fn take_pending_widget_keys(&mut self) -> Option<Vec<KeyEvent>> {
+		if self.pending_widget_keys.is_empty() {
+			None
+		} else {
+			Some(std::mem::take(&mut self.pending_widget_keys))
+		}
+	}
 	pub fn getopts_char_offset(&self) -> usize {
 		self.getopts_offset
 	}

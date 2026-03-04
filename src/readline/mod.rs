@@ -11,11 +11,11 @@ use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::expand_prompt;
 use crate::libsh::sys::TTY_FILENO;
 use crate::parse::lex::{LexStream, QuoteState};
-use crate::prelude::*;
+use crate::{prelude::*, state};
 use crate::readline::complete::FuzzyCompleter;
 use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::readline::vimode::ViEx;
-use crate::state::{ShellParam, read_logic, read_shopts};
+use crate::state::{ShellParam, read_logic, read_shopts, write_meta};
 use crate::{
   libsh::error::ShResult,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
@@ -148,6 +148,9 @@ impl Prompt {
     let Ok(ps1_raw) = env::var("PS1") else {
       return Self::default();
     };
+		// PS1 expansion may involve running commands (e.g., for \h or \W), which can modify shell state
+		let saved_status = state::get_status();
+
     let Ok(ps1_expanded) = expand_prompt(&ps1_raw) else {
       return Self::default();
     };
@@ -158,6 +161,9 @@ impl Prompt {
       .transpose()
       .ok()
       .flatten();
+
+		// Restore shell state after prompt expansion, since it may have been modified by command substitutions in the prompt
+		state::set_status(saved_status);
     Self {
       ps1_expanded,
       ps1_raw,
@@ -213,10 +219,12 @@ pub struct ShedVi {
   pub completer: Box<dyn Completer>,
 
   pub mode: Box<dyn ViMode>,
+	pub saved_mode: Option<Box<dyn ViMode>>,
 	pub pending_keymap: Vec<KeyEvent>,
   pub repeat_action: Option<CmdReplay>,
   pub repeat_motion: Option<MotionCmd>,
   pub editor: LineBuf,
+	pub next_is_escaped: bool,
 
   pub old_layout: Option<Layout>,
   pub history: History,
@@ -233,6 +241,8 @@ impl ShedVi {
       completer: Box::new(FuzzyCompleter::default()),
       highlighter: Highlighter::new(),
       mode: Box::new(ViInsert::new()),
+			next_is_escaped: false,
+			saved_mode: None,
 			pending_keymap: Vec::new(),
       old_layout: None,
       repeat_action: None,
@@ -365,8 +375,6 @@ impl ShedVi {
             let span_start = self.completer.token_span().0;
             let new_cursor = span_start + candidate.len();
             let line = self.completer.get_completed_line(&candidate);
-						log::debug!("Completer accepted candidate: {candidate}");
-						log::debug!("New line after completion: {line}");
             self.editor.set_buffer(line);
             self.editor.cursor.set(new_cursor);
             // Don't reset yet — clear() needs old_layout to erase the selector.
@@ -401,13 +409,10 @@ impl ShedVi {
 			} else {
 				let keymap_flags = self.curr_keymap_flags();
 				self.pending_keymap.push(key.clone());
-				log::debug!("[keymap] pending={:?} flags={:?}", self.pending_keymap, keymap_flags);
 
 				let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
-				log::debug!("[keymap] {} matches found", matches.len());
 				if matches.is_empty() {
 					// No matches. Drain the buffered keys and execute them.
-					log::debug!("[keymap] no matches, flushing {} buffered keys", self.pending_keymap.len());
 					for key in std::mem::take(&mut self.pending_keymap) {
 						if let Some(event) = self.handle_key(key)? {
 							return Ok(event);
@@ -418,11 +423,8 @@ impl ShedVi {
 				} else if matches.len() == 1 && matches[0].compare(&self.pending_keymap) == KeyMapMatch::IsExact {
 					// We have a single exact match. Execute it.
 					let keymap = matches[0].clone();
-					log::debug!("[keymap] self.pending_keymap={:?}", self.pending_keymap);
-					log::debug!("[keymap] exact match: {:?} -> {:?}", keymap.keys, keymap.action);
 					self.pending_keymap.clear();
 					let action = keymap.action_expanded();
-					log::debug!("[keymap] expanded action: {:?}", action);
 					for key in action {
 						if let Some(event) = self.handle_key(key)? {
 							return Ok(event);
@@ -432,7 +434,6 @@ impl ShedVi {
 					continue;
 				} else {
 					// There is ambiguity. Allow the timeout in the main loop to handle this.
-					log::debug!("[keymap] ambiguous: {} matches, waiting for more input", matches.len());
 					continue;
 				}
 			}
@@ -512,6 +513,13 @@ impl ShedVi {
       return Ok(None);
     }
 
+		if let KeyEvent(KeyCode::Char('\\'), ModKeys::NONE) = key
+		&& !self.next_is_escaped {
+			self.next_is_escaped = true;
+		} else {
+			self.next_is_escaped = false;
+		}
+
     let Ok(cmd) = self.mode.handle_key_fallible(key) else {
       // it's an ex mode error
       self.mode = Box::new(ViNormal::new()) as Box<dyn ViMode>;
@@ -519,10 +527,8 @@ impl ShedVi {
     };
 
     let Some(mut cmd) = cmd else {
-      log::debug!("[readline] mode.handle_key returned None");
       return Ok(None);
     };
-    log::debug!("[readline] got cmd: verb={:?} motion={:?} flags={:?}", cmd.verb, cmd.motion, cmd.flags);
     cmd.alter_line_motion_if_no_verb();
 
     if self.should_grab_history(&cmd) {
@@ -532,8 +538,9 @@ impl ShedVi {
     }
 
     if cmd.is_submit_action()
-      && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
-    {
+		&& !self.next_is_escaped
+		&& !self.editor.buffer.ends_with('\\')
+		&& (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete)) {
       self.editor.set_hint(None);
       self.editor.cursor.set(self.editor.cursor_max());
       self.print_line(true)?;
@@ -564,6 +571,11 @@ impl ShedVi {
 
     let before = self.editor.buffer.clone();
     self.exec_cmd(cmd)?;
+		if let Some(keys) = write_meta(|m| m.take_pending_widget_keys()) {
+			for key in keys {
+				self.handle_key(key)?;
+			}
+		}
     let after = self.editor.as_str();
 
     if before != after {
@@ -637,6 +649,7 @@ impl ShedVi {
             || (self.mode.pending_seq().unwrap(/* always Some on normal mode */).is_empty()
               && matches!(event, KeyEvent(KeyCode::Char('l'), ModKeys::NONE)))
         }
+				ModeReport::Ex => false,
         _ => unimplemented!(),
       }
     } else {
@@ -783,7 +796,11 @@ impl ShedVi {
     if cmd.is_mode_transition() {
       let count = cmd.verb_count();
       let mut mode: Box<dyn ViMode> = if let ModeReport::Ex = self.mode.report_mode() && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
-				Box::new(ViNormal::new())
+				if let Some(saved) = self.saved_mode.take() {
+					saved
+				} else {
+					Box::new(ViNormal::new())
+				}
 			} else {
 				match cmd.verb().unwrap().1 {
 					Verb::Change | Verb::InsertModeLineBreak(_) | Verb::InsertMode => {
@@ -791,7 +808,9 @@ impl ShedVi {
 						Box::new(ViInsert::new().with_count(count as u16))
 					}
 
-					Verb::ExMode => Box::new(ViEx::new()),
+					Verb::ExMode => {
+						Box::new(ViEx::new())
+					}
 
 					Verb::NormalMode => Box::new(ViNormal::new()),
 
@@ -824,6 +843,11 @@ impl ShedVi {
 
 
       std::mem::swap(&mut mode, &mut self.mode);
+
+			if self.mode.report_mode() == ModeReport::Ex {
+				self.saved_mode = Some(mode);
+				return Ok(());
+			}
 
       if mode.is_repeatable() {
         self.repeat_action = mode.as_replay();
@@ -917,12 +941,22 @@ impl ShedVi {
       }
     }
 
+		if self.mode.report_mode() == ModeReport::Visual
+		&& self.editor.select_range().is_none() {
+			self.editor.stop_selecting();
+			let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+			std::mem::swap(&mut mode, &mut self.mode);
+		}
+
     if cmd.is_repeatable() {
       if self.mode.report_mode() == ModeReport::Visual {
         // The motion is assigned in the line buffer execution, so we also have to
         // assign it here in order to be able to repeat it
-        let range = self.editor.select_range().unwrap();
-        cmd.motion = Some(MotionCmd(1, Motion::Range(range.0, range.1)))
+        if let Some(range) = self.editor.select_range() {
+					cmd.motion = Some(MotionCmd(1, Motion::Range(range.0, range.1)))
+				} else {
+					log::warn!("You're in visual mode with no select range??");
+				};
       }
       self.repeat_action = Some(CmdReplay::Single(cmd.clone()));
     }
@@ -939,8 +973,20 @@ impl ShedVi {
       std::mem::swap(&mut mode, &mut self.mode);
     }
 
+		if self.mode.report_mode() != ModeReport::Visual && self.editor.select_range().is_some() {
+			self.editor.stop_selecting();
+		}
+
     if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
-      let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+      let mut mode: Box<dyn ViMode> = if self.mode.report_mode() == ModeReport::Ex {
+				if let Some(saved) = self.saved_mode.take() {
+					saved
+				} else {
+					Box::new(ViNormal::new())
+				}
+			} else {
+				Box::new(ViNormal::new())
+			};
       std::mem::swap(&mut mode, &mut self.mode);
       self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     }
@@ -975,6 +1021,8 @@ pub fn annotate_input(input: &str) -> String {
     .flatten()
     .filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
     .collect();
+
+	log::debug!("Annotating input with tokens: {tokens:#?}");
 
   for tk in tokens.into_iter().rev() {
     let insertions = annotate_token(tk);
@@ -1019,7 +1067,6 @@ pub fn annotate_input_recursive(input: &str) -> String {
             Some('>') => ">(",
             Some('<') => "<(",
             _ => {
-              log::error!("Unexpected character after PROC_SUB marker: expected '>' or '<'");
               "<("
             }
           },

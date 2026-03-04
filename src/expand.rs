@@ -14,7 +14,7 @@ use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::readline::keys::{KeyCode, KeyEvent, ModKeys};
 use crate::readline::markers;
 use crate::state::{
-  ArrIndex, LogTab, VarFlags, VarKind, read_jobs, read_logic, read_shopts, read_vars, write_jobs, write_meta, write_vars
+  self, ArrIndex, LogTab, VarFlags, VarKind, read_jobs, read_logic, read_shopts, read_vars, write_jobs, write_meta, write_vars
 };
 use crate::prelude::*;
 
@@ -925,7 +925,8 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
         e.print_error();
         unsafe { libc::_exit(1) };
       }
-      unsafe { libc::_exit(0) };
+			let status = state::get_status();
+      unsafe { libc::_exit(status) };
     }
     ForkResult::Parent { child } => {
       std::mem::drop(cmd_sub_io_frame); // Closes the write pipe
@@ -950,7 +951,10 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
       };
 
       match status {
-        WtStat::Exited(_, _) => Ok(io_buf.as_str()?.trim_end().to_string()),
+        WtStat::Exited(_, code) => {
+					state::set_status(code);
+					Ok(io_buf.as_str()?.trim_end().to_string())
+				},
         _ => Err(ShErr::simple(ShErrKind::InternalErr, "Command sub failed")),
       }
     }
@@ -1386,8 +1390,11 @@ impl FromStr for ParamExp {
 pub fn parse_pos_len(s: &str) -> Option<(usize, Option<usize>)> {
   let raw = s.strip_prefix(':')?;
   if let Some((start, len)) = raw.split_once(':') {
+		let start = expand_raw(&mut start.chars().peekable()).unwrap_or_else(|_| start.to_string());
+		let len = expand_raw(&mut len.chars().peekable()).unwrap_or_else(|_| len.to_string());
     Some((start.parse::<usize>().ok()?, len.parse::<usize>().ok()))
   } else {
+		let raw = expand_raw(&mut raw.chars().peekable()).unwrap_or_else(|_| raw.to_string());
     Some((raw.parse::<usize>().ok()?, None))
   }
 }
@@ -1620,8 +1627,9 @@ pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
       '\\' => {
         // Shell escape: next char is literal
         if let Some(esc) = chars.next() {
-          regex.push('\\');
-          regex.push(esc);
+          // Some characters have special meaning after \ in regex
+          // (e.g. \< is word boundary), so use hex escape for safety
+          regex.push_str(&format!("\\x{:02x}", esc as u32));
         }
       }
       '*' => regex.push_str(".*"),
@@ -2145,7 +2153,6 @@ pub fn expand_aliases(
 }
 
 pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
-	log::debug!("Expanding keymap for '{}'", s);
 	let mut keys = Vec::new();
 	let mut chars = s.chars().collect::<VecDeque<char>>();
 	while let Some(ch) = chars.pop_front() {
@@ -2165,13 +2172,11 @@ pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
 							}
 						}
 						'>' => {
-							log::debug!("Found key alias '{}'", alias);
 							if alias.eq_ignore_ascii_case("leader") {
 								let mut leader = read_shopts(|o| o.prompt.leader.clone());
 								if leader == "\\" {
 									leader.push('\\');
 								}
-								log::debug!("Expanding leader key to '{}'", leader);
 								keys.extend(expand_keymap(&leader));
 							} else if let Some(key) = parse_key_alias(&alias) {
 								keys.push(key);
@@ -2188,7 +2193,6 @@ pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
 		}
 	}
 
-	log::debug!("Expanded keymap '{}' to {:?}", s, keys);
 	keys
 }
 

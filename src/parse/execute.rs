@@ -7,7 +7,7 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::read_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
+    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::{self, read_builtin}, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
   },
   expand::{expand_aliases, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -423,13 +423,16 @@ impl Dispatcher {
 
       'outer: for block in case_blocks {
         let CaseNode { pattern, body } = block;
-        let block_pattern_raw = pattern.span.as_str().trim_end_matches(')').trim();
+        let block_pattern_raw = pattern.span.as_str().strip_suffix(')').unwrap_or(pattern.span.as_str()).trim();
+        log::debug!("[case] raw block pattern: {:?}", block_pattern_raw);
         // Split at '|' to allow for multiple patterns like `foo|bar)`
         let block_patterns = block_pattern_raw.split('|');
 
         for pattern in block_patterns {
           let pattern_regex = glob_to_regex(pattern, false);
+          log::debug!("[case] testing input {:?} against pattern {:?} (regex: {:?})", pattern_raw, pattern, pattern_regex);
           if pattern_regex.is_match(&pattern_raw) {
+            log::debug!("[case] matched pattern {:?}", pattern);
             for node in &body {
               s.dispatch_node(node.clone())?;
             }
@@ -824,6 +827,7 @@ impl Dispatcher {
 			"type" => intro::type_builtin(cmd),
 			"getopts" => getopts(cmd),
 			"keymap" => keymap::keymap(cmd),
+			"read_key" => read::read_key(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -836,6 +840,9 @@ impl Dispatcher {
     };
 
 		if let Err(e) = result {
+			if !e.is_flow_control() {
+				state::set_status(1);
+			}
 			Err(e.with_context(context).with_redirs(redir_guard))
 		} else {
 			Ok(())
@@ -860,7 +867,6 @@ impl Dispatcher {
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
     if argv.is_empty() {
-      state::set_status(0);
       return Ok(());
     }
 

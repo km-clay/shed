@@ -129,6 +129,15 @@ impl ViVisual {
             flags: CmdFlags::empty(),
           });
         }
+				':' => {
+					return Some(ViCmd {
+						register,
+						verb: Some(VerbCmd(count, Verb::ExMode)),
+						motion: None,
+						raw_seq: self.take_cmd(),
+						flags: CmdFlags::empty(),
+					})
+				}
         'x' => {
           chars = chars_clone;
           break 'verb_parse Some(VerbCmd(count, Verb::Delete));

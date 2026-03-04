@@ -18,7 +18,7 @@ use crate::{
     register::{RegisterContent, write_register},
     term::RawModeGuard,
   },
-  state::{VarFlags, VarKind, read_shopts, read_vars, write_vars},
+  state::{VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars},
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -926,6 +926,7 @@ impl LineBuf {
   }
   pub fn is_word_bound(&mut self, pos: usize, word: Word, dir: Direction) -> bool {
     let clamped_pos = ClampedUsize::new(pos, self.cursor.max, true);
+		log::debug!("clamped_pos: {}", clamped_pos.get());
     let cur_char = self
       .grapheme_at(clamped_pos.get())
       .map(|c| c.to_string())
@@ -996,7 +997,11 @@ impl LineBuf {
         } else {
           self.start_of_word_backward(self.cursor.get(), word)
         };
-        let end = self.dispatch_word_motion(count, To::Start, word, Direction::Forward, true);
+				let end = if self.is_word_bound(self.cursor.get(), word, Direction::Forward) {
+					self.cursor.get()
+				} else {
+						self.end_of_word_forward(self.cursor.get(), word)
+				};
         Some((start, end))
       }
       Bound::Around => {
@@ -3083,29 +3088,45 @@ impl LineBuf {
       | Verb::VisualModeSelectLast => self.apply_motion(motion), // Already handled logic for these
 
       Verb::ShellCmd(cmd) => {
+				log::debug!("Executing ex-mode command from widget: {cmd}");
 				let mut vars = HashSet::new();
-				vars.insert("BUFFER".into());
-				vars.insert("CURSOR".into());
+				vars.insert("_BUFFER".into());
+				vars.insert("_CURSOR".into());
+				vars.insert("_ANCHOR".into());
 				let _guard = var_ctx_guard(vars);
 
 				let mut buf = self.as_str().to_string();
 				let mut cursor = self.cursor.get();
+				let mut anchor = self.select_range().map(|r| if r.0 != cursor { r.0 } else { r.1 }).unwrap_or(cursor);
 
 				write_vars(|v| {
-					v.set_var("BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
-					v.set_var("CURSOR", VarKind::Str(cursor.to_string()), VarFlags::EXPORT)
+					v.set_var("_BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
+					v.set_var("_CURSOR", VarKind::Str(cursor.to_string()), VarFlags::EXPORT)?;
+					v.set_var("_ANCHOR", VarKind::Str(anchor.to_string()), VarFlags::EXPORT)
 				})?;
 
 				RawModeGuard::with_cooked_mode(|| exec_input(cmd, None, true, Some("<ex-mode-cmd>".into())))?;
 
-				read_vars(|v| {
-					buf = v.get_var("BUFFER");
-					cursor = v.get_var("CURSOR").parse().unwrap_or(cursor);
+				let keys = write_vars(|v| {
+					buf = v.take_var("_BUFFER");
+					cursor = v.take_var("_CURSOR").parse().unwrap_or(cursor);
+					anchor = v.take_var("_ANCHOR").parse().unwrap_or(anchor);
+					v.take_var("_KEYS")
 				});
 
 				self.set_buffer(buf);
+				self.update_graphemes();
 				self.cursor.set_max(self.buffer.graphemes(true).count());
 				self.cursor.set(cursor);
+				log::debug!("[ShellCmd] post-widget: cursor={}, anchor={}, select_range={:?}", cursor, anchor, self.select_range);
+				if anchor != cursor && self.select_range.is_some() {
+					self.select_range = Some(ordered(cursor, anchor));
+				}
+				if !keys.is_empty() {
+					log::debug!("Pending widget keys from shell command: {keys}");
+					write_meta(|m| m.set_pending_widget_keys(&keys))
+				}
+
 			}
       Verb::Normal(_)
       | Verb::Read(_)

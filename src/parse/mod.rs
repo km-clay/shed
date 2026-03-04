@@ -9,9 +9,7 @@ use crate::{
   libsh::{
     error::{ShErr, ShErrKind, ShResult, last_color, next_color},
     utils::{NodeVecUtils, TkVecUtils},
-  },
-  prelude::*,
-  procio::IoMode,
+  }, parse::lex::clean_input, prelude::*, procio::IoMode
 };
 
 pub mod execute;
@@ -52,6 +50,11 @@ pub struct ParsedSrc {
 
 impl ParsedSrc {
   pub fn new(src: Arc<String>) -> Self {
+    let src = if src.contains("\\\n") || src.contains('\r') {
+      Arc::new(clean_input(&src))
+    } else {
+      src
+    };
     Self {
       src,
 			name: "<stdin>".into(),

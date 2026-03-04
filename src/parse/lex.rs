@@ -272,6 +272,26 @@ bitflags! {
   }
 }
 
+pub fn clean_input(input: &str) -> String {
+	let mut chars = input.chars().peekable();
+	let mut output = String::new();
+	while let Some(ch) = chars.next() {
+		match ch {
+			'\\' if chars.peek() == Some(&'\n') => {
+				chars.next();
+			}
+			'\r' => {
+				if chars.peek() == Some(&'\n') {
+					chars.next();
+				}
+				output.push('\n');
+			}
+			_ => output.push(ch),
+		}
+	}
+	output
+}
+
 impl LexStream {
   pub fn new(source: Arc<String>, flags: LexFlags) -> Self {
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
@@ -825,12 +845,15 @@ impl Iterator for LexStream {
         self.set_next_is_cmd(true);
 
         while let Some(ch) = get_char(&self.source, self.cursor) {
-          if is_hard_sep(ch) {
-            // Combine consecutive separators into one, including whitespace
-            self.cursor += 1;
-          } else {
-            break;
-          }
+					match ch {
+						'\\' => {
+							self.cursor = (self.cursor + 2).min(self.source.len());
+						}
+						_ if is_hard_sep(ch) => {
+							self.cursor += 1;
+						}
+						_ => break,
+					}
         }
         self.get_token(ch_idx..self.cursor, TkRule::Sep)
       }
@@ -1060,6 +1083,7 @@ pub fn lookahead(pat: &str, mut chars: Chars) -> Option<usize> {
 
 pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
   let mut pos = 0;
+	let mut qt_state = QuoteState::default();
   while let Some(ch) = chars.next() {
     pos += ch.len_utf8();
     match ch {
@@ -1069,8 +1093,14 @@ pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
           pos += esc.len_utf8();
         }
       }
-      ')' => return Some(pos),
-      '(' => return None,
+			'\'' => {
+				qt_state.toggle_single();
+			}
+			'"' => {
+				qt_state.toggle_double();
+			}
+      ')' if qt_state.outside() => return Some(pos),
+      '(' if qt_state.outside() => return None,
       _ => { /* continue */ }
     }
   }

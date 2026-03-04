@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+
 // Credit to Rustyline for the design ideas in this module
 // https://github.com/kkawakam/rustyline
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -87,6 +89,109 @@ impl KeyEvent {
       }
     }
   }
+	pub fn as_vim_seq(&self) -> ShResult<String> {
+		let mut seq = String::new();
+		let KeyEvent(event, mods) = self;
+		let mut needs_angle_bracket = false;
+
+		if mods.contains(ModKeys::CTRL) {
+			seq.push_str("C-");
+			needs_angle_bracket = true;
+		}
+		if mods.contains(ModKeys::ALT) {
+			seq.push_str("A-");
+			needs_angle_bracket = true;
+		}
+		if mods.contains(ModKeys::SHIFT) {
+			seq.push_str("S-");
+			needs_angle_bracket = true;
+		}
+
+		match event {
+			KeyCode::UnknownEscSeq => return Err(ShErr::simple(
+				ShErrKind::ParseErr,
+				"Cannot convert unknown escape sequence to Vim key sequence".to_string(),
+			)),
+			KeyCode::Backspace => {
+				seq.push_str("BS");
+				needs_angle_bracket = true;
+			}
+			KeyCode::BackTab => {
+				seq.push_str("S-Tab");
+				needs_angle_bracket = true;
+			}
+			KeyCode::BracketedPasteStart => todo!(),
+			KeyCode::BracketedPasteEnd => todo!(),
+			KeyCode::Delete => {
+				seq.push_str("Del");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Down => {
+				seq.push_str("Down");
+				needs_angle_bracket = true;
+			}
+			KeyCode::End => {
+				seq.push_str("End");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Enter => {
+				seq.push_str("Enter");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Esc => {
+				seq.push_str("Esc");
+				needs_angle_bracket = true;
+			}
+
+			KeyCode::F(f) => {
+				seq.push_str(&format!("F{}", f));
+				needs_angle_bracket = true;
+			}
+			KeyCode::Home => {
+				seq.push_str("Home");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Insert => {
+				seq.push_str("Insert");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Left => {
+				seq.push_str("Left");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Null => todo!(),
+			KeyCode::PageDown => {
+				seq.push_str("PgDn");
+				needs_angle_bracket = true;
+			}
+			KeyCode::PageUp => {
+				seq.push_str("PgUp");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Right => {
+				seq.push_str("Right");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Tab => {
+				seq.push_str("Tab");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Up => {
+				seq.push_str("Up");
+				needs_angle_bracket = true;
+			}
+			KeyCode::Char(ch) => {
+				seq.push(*ch);
+			}
+			KeyCode::Grapheme(gr) => seq.push_str(gr),
+		}
+
+		if needs_angle_bracket {
+			Ok(format!("<{}>", seq))
+		} else {
+			Ok(seq)
+		}
+	}
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
