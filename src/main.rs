@@ -115,7 +115,7 @@ fn main() -> ExitCode {
   } else if let Some(cmd) = args.command {
     exec_input(cmd, None, false, None)
   } else {
-    shed_interactive()
+    shed_interactive(args)
   } {
     eprintln!("shed: {e}");
   };
@@ -160,9 +160,9 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
   exec_input(input, None, false, Some(path_raw))
 }
 
-fn shed_interactive() -> ShResult<()> {
+fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
-  sig_setup();
+  sig_setup(args.login_shell);
 
   if let Err(e) = source_rc() {
     e.print_error();

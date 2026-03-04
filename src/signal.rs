@@ -108,7 +108,7 @@ pub fn enable_reaping() {
   REAPING_ENABLED.store(true, Ordering::SeqCst);
 }
 
-pub fn sig_setup() {
+pub fn sig_setup(is_login: bool) {
   let flags = SaFlags::empty();
 
   let action = SigAction::new(SigHandler::Handler(handle_signal), flags, SigSet::empty());
@@ -147,6 +147,12 @@ pub fn sig_setup() {
     sigaction(Signal::SIGPWR, &action).unwrap();
     sigaction(Signal::SIGSYS, &action).unwrap();
   }
+
+
+    if is_login {
+        setpgid(Pid::from_raw(0), Pid::from_raw(0));
+        take_term().ok();
+    }
 }
 
 /// Reset all signal dispositions to SIG_DFL.
