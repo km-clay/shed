@@ -5,6 +5,11 @@ let
   boolToString = b:
   if b then "true" else "false";
 
+  mkFunctionDef = name: body: ''
+${name}() {
+${body}
+}'';
+
   mkKeymapCmd = cfg: let
     flags = "-${lib.concatStrings cfg.modes}";
     keys = "'${cfg.keys}'";
@@ -44,7 +49,13 @@ in
     aliases = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = {};
-      description = "Aliases to set when shed starts (e.g. ls='ls --color=auto')";
+      description = "Aliases to set when shed starts";
+    };
+
+    functions = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {};
+      description = "Shell functions to set when shed starts";
     };
 
     keymaps = lib.mkOption {
@@ -231,6 +242,7 @@ in
   let
     completeLines = lib.concatLines (lib.mapAttrsToList mkCompleteCmd cfg.extraCompletion);
     keymapLines = lib.concatLines (map mkKeymapCmd cfg.keymaps);
+    functionLines = lib.concatLines (lib.mapAttrsToList mkFunctionDef cfg.functions);
   in
   lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
@@ -254,6 +266,7 @@ in
         "shopt prompt.comp_limit=${toString cfg.settings.completionLimit}"
         "shopt prompt.highlight=${boolToString cfg.settings.syntaxHighlighting}"
         "shopt prompt.linebreak_on_incomplete=${boolToString cfg.settings.linebreakOnIncomplete}"
+        functionLines
         completeLines
         keymapLines
       ])
