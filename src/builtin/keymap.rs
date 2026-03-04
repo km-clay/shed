@@ -11,6 +11,7 @@ bitflags! {
 		const EX 					= 0b0001000;
 		const OP_PENDING 	= 0b0010000;
 		const REPLACE 		= 0b0100000;
+		const VERBATIM 		= 0b1000000;
 	}
 }
 

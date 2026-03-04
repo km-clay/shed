@@ -64,6 +64,10 @@ impl ViMode for ViInsert {
         ));
         self.register_and_return()
       }
+      E(K::Char('V'), M::CTRL) => {
+        self.pending_cmd.set_verb(VerbCmd(1, Verb::VerbatimMode));
+        self.register_and_return()
+      }
       E(K::Char('H'), M::CTRL) | E(K::Backspace, M::NONE) => {
         self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
         self

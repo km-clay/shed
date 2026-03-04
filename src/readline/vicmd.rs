@@ -178,6 +178,7 @@ impl ViCmd {
       matches!(
         v.1,
         Verb::Change
+					| Verb::VerbatimMode
 					| Verb::ExMode
           | Verb::InsertMode
           | Verb::InsertModeLineBreak(_)
@@ -231,6 +232,7 @@ pub enum Verb {
   RepeatLast,
   Put(Anchor),
   ReplaceMode,
+	VerbatimMode,
   InsertMode,
   InsertModeLineBreak(Anchor),
   NormalMode,

@@ -13,12 +13,14 @@ pub mod normal;
 pub mod replace;
 pub mod visual;
 pub mod ex;
+pub mod verbatim;
 
 pub use ex::ViEx;
 pub use insert::ViInsert;
 pub use normal::ViNormal;
 pub use replace::ViReplace;
 pub use visual::ViVisual;
+pub use verbatim::ViVerbatim;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModeReport {
@@ -27,6 +29,7 @@ pub enum ModeReport {
 	Ex,
   Visual,
   Replace,
+	Verbatim,
   Unknown,
 }
 
@@ -38,6 +41,7 @@ impl Display for ModeReport {
 			ModeReport::Ex => write!(f, "COMMAND"),
 			ModeReport::Visual => write!(f, "VISUAL"),
 			ModeReport::Replace => write!(f, "REPLACE"),
+			ModeReport::Verbatim => write!(f, "VERBATIM"),
 			ModeReport::Unknown => write!(f, "UNKNOWN"),
 		}
 	}

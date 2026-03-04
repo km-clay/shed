@@ -1991,13 +1991,19 @@ impl LineBuf {
       .slice_to_cursor()
       .map(|s| s.to_string())
       .unwrap_or(self.buffer.clone());
+
+    let mut level: usize = 0;
+
+		if to_cursor.ends_with("\\\n") {
+			level += 1; // Line continuation, so we need to add an extra level
+		}
+
     let input = Arc::new(to_cursor);
     let Ok(tokens) = LexStream::new(input, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()
     else {
       log::error!("Failed to lex buffer for indent calculation");
       return;
     };
-    let mut level: usize = 0;
 		let mut last_keyword: Option<String> = None;
     for tk in tokens {
       if tk.flags.contains(TkFlags::KEYWORD) {
@@ -3095,6 +3101,7 @@ impl LineBuf {
       | Verb::InsertMode
       | Verb::NormalMode
       | Verb::VisualMode
+			| Verb::VerbatimMode
       | Verb::ReplaceMode
       | Verb::VisualModeLine
       | Verb::VisualModeBlock

@@ -15,7 +15,7 @@ use crate::parse::lex::{LexStream, QuoteState};
 use crate::{prelude::*, state};
 use crate::readline::complete::FuzzyCompleter;
 use crate::readline::term::{Pos, TermReader, calc_str_width};
-use crate::readline::vimode::ViEx;
+use crate::readline::vimode::{ViEx, ViVerbatim};
 use crate::state::{AutoCmdKind, ShellParam, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta, write_vars};
 use crate::{
   libsh::error::ShResult,
@@ -269,7 +269,8 @@ impl ShedVi {
 
   /// Feed raw bytes from stdin into the reader's buffer
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
-    self.reader.feed_bytes(bytes);
+		let verbatim = self.mode.report_mode() == ModeReport::Verbatim;
+    self.reader.feed_bytes(bytes, verbatim);
   }
 
   /// Mark that the display needs to be redrawn (e.g., after SIGWINCH)
@@ -323,6 +324,7 @@ impl ShedVi {
 			ModeReport::Ex => flags |= KeyMapFlags::EX,
 			ModeReport::Visual => flags |= KeyMapFlags::VISUAL,
 			ModeReport::Replace => flags |= KeyMapFlags::REPLACE,
+			ModeReport::Verbatim => flags |= KeyMapFlags::VERBATIM,
 			ModeReport::Unknown => todo!(),
 		}
 
@@ -835,6 +837,10 @@ impl ShedVi {
 						Box::new(ViEx::new())
 					}
 
+					Verb::VerbatimMode => {
+						Box::new(ViVerbatim::new().with_count(count as u16))
+					}
+
 					Verb::NormalMode => Box::new(ViNormal::new()),
 
 					Verb::ReplaceMode => Box::new(ViReplace::new()),
@@ -863,10 +869,9 @@ impl ShedVi {
 				}
 			};
 
-
 			self.swap_mode(&mut mode);
 
-			if self.mode.report_mode() == ModeReport::Ex {
+			if matches!(self.mode.report_mode(), ModeReport::Ex | ModeReport::Verbatim) {
 				self.saved_mode = Some(mode);
 				write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE))?;
 				self.prompt.refresh()?;
@@ -1007,7 +1012,7 @@ impl ShedVi {
 		}
 
     if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
-      let mut mode: Box<dyn ViMode> = if self.mode.report_mode() == ModeReport::Ex {
+      let mut mode: Box<dyn ViMode> = if matches!(self.mode.report_mode(), ModeReport::Ex | ModeReport::Verbatim) {
 				if let Some(saved) = self.saved_mode.take() {
 					saved
 				} else {

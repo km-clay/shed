@@ -21,7 +21,7 @@ impl KeyEvent {
 
     // If more than one grapheme, it's not a single key event
     if graphemes.next().is_some() {
-      return E(K::Null, mods); // Or panic, or wrap in Grapheme if desired
+      return E(K::Null, mods);
     }
 
     let mut chars = first.chars();
@@ -184,6 +184,7 @@ impl KeyEvent {
 				seq.push(*ch);
 			}
 			KeyCode::Grapheme(gr) => seq.push_str(gr),
+			KeyCode::Verbatim(s) => seq.push_str(s),
 		}
 
 		if needs_angle_bracket {
@@ -203,6 +204,7 @@ pub enum KeyCode {
   BracketedPasteEnd,
   Char(char),
   Grapheme(Arc<str>),
+	Verbatim(Arc<str>), // For sequences that should be treated as literal input, not parsed into a KeyCode
   Delete,
   Down,
   End,

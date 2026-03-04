@@ -3,7 +3,7 @@ use std::{
   env,
   fmt::{Debug, Write},
   io::{BufRead, BufReader, Read},
-  os::fd::{AsFd, BorrowedFd, RawFd},
+  os::fd::{AsFd, BorrowedFd, RawFd}, sync::Arc,
 };
 
 use nix::{
@@ -457,6 +457,27 @@ impl Perform for KeyCollector {
         };
         KeyEvent(key, mods)
       }
+			([],'u') => {
+				let codepoint = params.first().copied().unwrap_or(0);
+				let mods = params
+					.get(1)
+					.map(|&m| Self::parse_modifiers(m))
+					.unwrap_or(ModKeys::empty());
+				let key = match codepoint {
+					9 => KeyCode::Tab,
+					13 => KeyCode::Enter,
+					27 => KeyCode::Esc,
+					127 => KeyCode::Backspace,
+					_ => {
+						if let Some(ch) = char::from_u32(codepoint as u32) {
+							KeyCode::Char(ch)
+						} else {
+							return
+						}
+					}
+				};
+				KeyEvent(key, mods)
+			}
       // SGR mouse: CSI < button;x;y M/m (ignore mouse events for now)
       ([b'<'], 'M') | ([b'<'], 'm') => {
         return;
@@ -494,17 +515,19 @@ impl PollReader {
     }
   }
 
-  pub fn feed_bytes(&mut self, bytes: &[u8]) {
-    if bytes == [b'\x1b'] {
+  pub fn feed_bytes(&mut self, bytes: &[u8], verbatim: bool) {
+		if verbatim {
+			let seq = String::from_utf8_lossy(bytes).to_string();
+			self.collector.push(KeyEvent(KeyCode::Verbatim(Arc::from(seq.as_str())), ModKeys::empty()));
+		} else if bytes == [b'\x1b'] {
       // Single escape byte - user pressed ESC key
       self
         .collector
         .push(KeyEvent(KeyCode::Esc, ModKeys::empty()));
-      return;
-    }
-
-    // Feed all bytes through vte parser
-    self.parser.advance(&mut self.collector, bytes);
+    } else {
+			// Feed all bytes through vte parser
+			self.parser.advance(&mut self.collector, bytes);
+		}
   }
 }
 

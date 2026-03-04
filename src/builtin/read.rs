@@ -284,7 +284,7 @@ pub fn read_key(node: Node) -> ShResult<()> {
 			}
 			Ok(n) => {
 				let mut reader = PollReader::new();
-				reader.feed_bytes(&buf[..n]);
+				reader.feed_bytes(&buf[..n], false);
 				let Some(key) = reader.read_key()? else {
 					state::set_status(1);
 					return Ok(());
