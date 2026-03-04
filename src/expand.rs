@@ -500,6 +500,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   let mut idx_brace_depth: i32 = 0;
   let mut idx_raw = String::new();
   let mut idx = None;
+  let mut in_operator = false;
   while let Some(&ch) = chars.peek() {
     match ch {
       markers::SUBSH if var_name.is_empty() => {
@@ -555,7 +556,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         };
         return Ok(val);
       }
-      '[' if brace_depth > 0 && bracket_depth == 0 && inner_brace_depth == 0 => {
+      '[' if brace_depth > 0 && bracket_depth == 0 && inner_brace_depth == 0 && !in_operator => {
         chars.next(); // consume the bracket
         bracket_depth += 1;
       }
@@ -589,6 +590,9 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         }
         if ch == '}' {
           inner_brace_depth -= 1;
+        }
+        if !in_operator && matches!(ch, '#' | '%' | ':' | '/' | '-' | '+' | '=' | '?' | '!') {
+          in_operator = true;
         }
         var_name.push(ch);
       }

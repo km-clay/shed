@@ -1087,10 +1087,25 @@ pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
   while let Some(ch) = chars.next() {
     pos += ch.len_utf8();
     match ch {
-      _ if is_hard_sep(ch) => return None,
+      _ if qt_state.outside() && is_hard_sep(ch) => return None,
       '\\' => {
         if let Some(esc) = chars.next() {
           pos += esc.len_utf8();
+        }
+      }
+      '$' if qt_state.outside() && chars.peek() == Some(&'\'') => {
+        // $'...' ANSI-C quoting — skip through to closing quote
+        chars.next(); // consume opening '
+        pos += 1;
+        while let Some(c) = chars.next() {
+          pos += c.len_utf8();
+          if c == '\\' {
+            if let Some(esc) = chars.next() {
+              pos += esc.len_utf8();
+            }
+          } else if c == '\'' {
+            break;
+          }
         }
       }
 			'\'' => {
