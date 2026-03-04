@@ -42,14 +42,17 @@ pub trait NodeVecUtils<Node> {
 
 impl AutoCmdVecUtils for Vec<AutoCmd> {
 	fn exec(&self) {
+		let saved_status = crate::state::get_status();
 		for cmd in self {
 			let AutoCmd { pattern: _, command } = cmd;
 			if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
 				e.print_error();
 			}
 		}
+		crate::state::set_status(saved_status);
 	}
 	fn exec_with(&self, other_pattern: &str) {
+		let saved_status = crate::state::get_status();
 		for cmd in self {
 			let AutoCmd { pattern, command } = cmd;
 			if let Some(pat) = pattern
@@ -62,6 +65,7 @@ impl AutoCmdVecUtils for Vec<AutoCmd> {
 				e.print_error();
 			}
 		}
+		crate::state::set_status(saved_status);
 	}
 }
 

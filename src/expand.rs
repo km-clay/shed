@@ -1726,6 +1726,32 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
   }
 }
 
+/// Expand a case pattern: performs variable/command expansion while preserving
+/// glob metacharacters that were inside quotes as literals (by backslash-escaping them).
+/// Unquoted glob chars (*, ?, [) pass through for glob_to_regex to interpret.
+pub fn expand_case_pattern(raw: &str) -> ShResult<String> {
+  let unescaped = unescape_str(raw);
+  let expanded = expand_raw(&mut unescaped.chars().peekable())?;
+
+  let mut result = String::new();
+  let mut in_quote = false;
+  let mut chars = expanded.chars();
+
+  while let Some(ch) = chars.next() {
+    match ch {
+      markers::DUB_QUOTE | markers::SNG_QUOTE => {
+        in_quote = !in_quote;
+      }
+      '*' | '?' | '[' | ']' if in_quote => {
+        result.push('\\');
+        result.push(ch);
+      }
+      _ => result.push(ch),
+    }
+  }
+  Ok(result)
+}
+
 pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
   let mut regex = String::new();
   if anchored {
@@ -1744,7 +1770,17 @@ pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
       }
       '*' => regex.push_str(".*"),
       '?' => regex.push('.'),
-      '.' | '+' | '(' | ')' | '|' | '^' | '$' | '[' | ']' | '{' | '}' => {
+      '[' => {
+        // Pass through character class [...] as-is (glob and regex syntax match)
+        regex.push('[');
+        while let Some(bc) = chars.next() {
+          regex.push(bc);
+          if bc == ']' {
+            break;
+          }
+        }
+      }
+      '.' | '+' | '(' | ')' | '|' | '^' | '$' | '{' | '}' => {
         regex.push('\\');
         regex.push(ch);
       }
