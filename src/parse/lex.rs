@@ -846,7 +846,7 @@ impl Iterator for LexStream {
 
         while let Some(ch) = get_char(&self.source, self.cursor) {
 					match ch {
-						'\\' => {
+						'\\' if get_char(&self.source, self.cursor + 1) == Some('\n') => {
 							self.cursor = (self.cursor + 2).min(self.source.len());
 						}
 						_ if is_hard_sep(ch) => {
