@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::libsh::error::ShResult;
@@ -26,6 +28,19 @@ pub enum ModeReport {
   Visual,
   Replace,
   Unknown,
+}
+
+impl Display for ModeReport {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			ModeReport::Insert => write!(f, "INSERT"),
+			ModeReport::Normal => write!(f, "NORMAL"),
+			ModeReport::Ex => write!(f, "COMMAND"),
+			ModeReport::Visual => write!(f, "VISUAL"),
+			ModeReport::Replace => write!(f, "REPLACE"),
+			ModeReport::Unknown => write!(f, "UNKNOWN"),
+		}
+	}
 }
 
 #[derive(Debug, Clone)]

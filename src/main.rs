@@ -31,12 +31,13 @@ use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{self, ShErr, ShErrKind, ShResult};
 use crate::libsh::sys::TTY_FILENO;
+use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
-use crate::state::{read_logic, source_rc, write_jobs, write_meta};
+use crate::state::{AutoCmdKind, read_logic, source_rc, write_jobs, write_meta};
 use clap::Parser;
 use state::{read_vars, write_vars};
 
@@ -357,9 +358,14 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     // Process any available input
     match readline.process_input() {
       Ok(ReadlineEvent::Line(input)) => {
+				let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
+				let post_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
+
+				pre_exec.exec_with(&input);
+
         let start = Instant::now();
         write_meta(|m| m.start_timer());
-        if let Err(e) = RawModeGuard::with_cooked_mode(|| exec_input(input, None, true, Some("<stdin>".into()))) {
+        if let Err(e) = RawModeGuard::with_cooked_mode(|| exec_input(input.clone(), None, true, Some("<stdin>".into()))) {
           match e.kind() {
             ShErrKind::CleanExit(code) => {
               QUIT_CODE.store(*code, Ordering::SeqCst);
@@ -371,6 +377,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
         let command_run_time = start.elapsed();
         log::info!("Command executed in {:.2?}", command_run_time);
         write_meta(|m| m.stop_timer());
+
+				post_exec.exec_with(&input);
+
 				readline.fix_column()?;
 				readline.writer.flush_write("\n\r")?;
 

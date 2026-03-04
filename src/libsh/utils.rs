@@ -2,9 +2,11 @@ use std::collections::VecDeque;
 
 use ariadne::Span as AriadneSpan;
 
+use crate::parse::execute::exec_input;
 use crate::parse::lex::{Span, Tk, TkRule};
 use crate::parse::{Node, Redir, RedirType};
 use crate::prelude::*;
+use crate::state::AutoCmd;
 
 pub trait VecDequeExt<T> {
   fn to_vec(self) -> Vec<T>;
@@ -22,6 +24,11 @@ pub trait TkVecUtils<Tk> {
   fn split_at_separators(&self) -> Vec<Vec<Tk>>;
 }
 
+pub trait AutoCmdVecUtils {
+	fn exec(&self);
+	fn exec_with(&self, pattern: &str);
+}
+
 pub trait RedirVecUtils<Redir> {
   /// Splits the vector of redirections into two vectors
   ///
@@ -31,6 +38,31 @@ pub trait RedirVecUtils<Redir> {
 
 pub trait NodeVecUtils<Node> {
 	fn get_span(&self) -> Option<Span>;
+}
+
+impl AutoCmdVecUtils for Vec<AutoCmd> {
+	fn exec(&self) {
+		for cmd in self {
+			let AutoCmd { pattern: _, command } = cmd;
+			if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
+				e.print_error();
+			}
+		}
+	}
+	fn exec_with(&self, other_pattern: &str) {
+		for cmd in self {
+			let AutoCmd { pattern, command } = cmd;
+			if let Some(pat) = pattern
+			&& !pat.is_match(other_pattern) {
+				log::trace!("autocmd pattern '{}' did not match '{}', skipping", pat, other_pattern);
+				continue;
+			}
+
+			if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
+				e.print_error();
+			}
+		}
+	}
 }
 
 impl<T> VecDequeExt<T> for VecDeque<T> {

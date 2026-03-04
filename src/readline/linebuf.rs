@@ -18,7 +18,7 @@ use crate::{
     register::{RegisterContent, write_register},
     term::RawModeGuard,
   },
-  state::{VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars},
+  state::{VarFlags, VarKind, read_shopts, write_meta, write_vars},
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -297,6 +297,20 @@ impl ClampedUsize {
   pub fn sub(&mut self, value: usize) {
     self.value = self.value.saturating_sub(value)
   }
+	pub fn wrap_add(&mut self, value: usize) {
+		self.value = self.ret_wrap_add(value);
+	}
+	pub fn wrap_sub(&mut self, value: usize) {
+		self.value = self.ret_wrap_sub(value);
+	}
+	pub fn ret_wrap_add(&self, value: usize) -> usize {
+		let max = self.upper_bound();
+		(self.value + value) % (max + 1)
+	}
+	pub fn ret_wrap_sub(&self, value: usize) -> usize {
+		let max = self.upper_bound();
+		(self.value + (max + 1) - (value % (max + 1))) % (max + 1)
+	}
   /// Add a value to the wrapped usize, return the result
   ///
   /// Returns the result instead of mutating the inner value
@@ -2774,7 +2788,7 @@ impl LineBuf {
         match content {
           RegisterContent::Span(ref text) => {
             let insert_idx = match anchor {
-              Anchor::After => self.cursor.ret_add(1),
+              Anchor::After => self.cursor.get().saturating_add(1).min(self.grapheme_indices().len()),
               Anchor::Before => self.cursor.get(),
             };
             self.insert_str_at(insert_idx, text);

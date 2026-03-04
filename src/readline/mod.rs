@@ -10,12 +10,13 @@ use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVis
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::expand_prompt;
 use crate::libsh::sys::TTY_FILENO;
+use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::{prelude::*, state};
 use crate::readline::complete::FuzzyCompleter;
 use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::readline::vimode::ViEx;
-use crate::state::{ShellParam, read_logic, read_shopts, write_meta};
+use crate::state::{AutoCmdKind, ShellParam, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta, write_vars};
 use crate::{
   libsh::error::ShResult,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
@@ -251,6 +252,8 @@ impl ShedVi {
       history: History::new()?,
       needs_redraw: true,
     };
+		write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(new.mode.report_mode().to_string()), VarFlags::NONE))?;
+		new.prompt.refresh()?;
     new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
     new.print_line(false)?;
     Ok(new)
@@ -294,7 +297,7 @@ impl ShedVi {
     // so print_line can call clear_rows with the full multi-line layout
     self.prompt = Prompt::new();
     self.editor = Default::default();
-    self.mode = Box::new(ViInsert::new());
+		self.swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn ViMode>));
     self.needs_redraw = true;
     if full_redraw {
       self.old_layout = None;
@@ -716,6 +719,9 @@ impl ShedVi {
       self.writer.clear_rows(layout)?;
     }
 
+		let pre_prompt = read_logic(|l| l.get_autocmds(AutoCmdKind::PrePrompt));
+		pre_prompt.exec();
+
     self
       .writer
       .redraw(self.prompt.get_ps1(), &line, &new_layout)?;
@@ -786,15 +792,28 @@ impl ShedVi {
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;
-    // Save physical cursor row so SIGWINCH can restore it
+
+		let post_prompt = read_logic(|l| l.get_autocmds(AutoCmdKind::PostPrompt));
+		post_prompt.exec();
+
     Ok(())
   }
+
+	pub fn swap_mode(&mut self, mode: &mut Box<dyn ViMode>) {
+		std::mem::swap(&mut self.mode, mode);
+		self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+		write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE)).ok();
+		self.prompt.refresh().ok();
+	}
 
   pub fn exec_cmd(&mut self, mut cmd: ViCmd) -> ShResult<()> {
     let mut select_mode = None;
     let mut is_insert_mode = false;
     if cmd.is_mode_transition() {
       let count = cmd.verb_count();
+			let pre_mode_change = read_logic(|l| l.get_autocmds(AutoCmdKind::PreModeChange));
+			pre_mode_change.exec();
+
       let mut mode: Box<dyn ViMode> = if let ModeReport::Ex = self.mode.report_mode() && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
 				if let Some(saved) = self.saved_mode.take() {
 					saved
@@ -823,8 +842,7 @@ impl ShedVi {
 								.start_selecting(SelectMode::Char(SelectAnchor::End));
 						}
 						let mut mode: Box<dyn ViMode> = Box::new(ViVisual::new());
-						std::mem::swap(&mut mode, &mut self.mode);
-						self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+						self.swap_mode(&mut mode);
 
 						return self.editor.exec_cmd(cmd);
 					}
@@ -842,10 +860,12 @@ impl ShedVi {
 			};
 
 
-      std::mem::swap(&mut mode, &mut self.mode);
+			self.swap_mode(&mut mode);
 
 			if self.mode.report_mode() == ModeReport::Ex {
 				self.saved_mode = Some(mode);
+				write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE))?;
+				self.prompt.refresh()?;
 				return Ok(());
 			}
 
@@ -868,6 +888,13 @@ impl ShedVi {
       } else {
         self.editor.clear_insert_mode_start_pos();
       }
+
+			write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE))?;
+			self.prompt.refresh()?;
+
+			let post_mode_change = read_logic(|l| l.get_autocmds(AutoCmdKind::PostModeChange));
+			post_mode_change.exec();
+
       return Ok(());
     } else if cmd.is_cmd_repeat() {
       let Some(replay) = self.repeat_action.clone() else {
@@ -945,7 +972,7 @@ impl ShedVi {
 		&& self.editor.select_range().is_none() {
 			self.editor.stop_selecting();
 			let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
-			std::mem::swap(&mut mode, &mut self.mode);
+			self.swap_mode(&mut mode);
 		}
 
     if cmd.is_repeatable() {
@@ -970,7 +997,7 @@ impl ShedVi {
     if self.mode.report_mode() == ModeReport::Visual && cmd.verb().is_some_and(|v| v.1.is_edit()) {
       self.editor.stop_selecting();
       let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
-      std::mem::swap(&mut mode, &mut self.mode);
+			self.swap_mode(&mut mode);
     }
 
 		if self.mode.report_mode() != ModeReport::Visual && self.editor.select_range().is_some() {
@@ -987,8 +1014,7 @@ impl ShedVi {
 			} else {
 				Box::new(ViNormal::new())
 			};
-      std::mem::swap(&mut mode, &mut self.mode);
-      self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+			self.swap_mode(&mut mode);
     }
 
     Ok(())

@@ -8,7 +8,7 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::execute::exec_input,
   prelude::*,
-  state::{read_jobs, read_logic, write_jobs, write_meta},
+  state::{AutoCmd, AutoCmdKind, read_jobs, read_logic, write_jobs, write_meta},
 };
 
 static SIGNALS: AtomicU64 = AtomicU64::new(0);
@@ -150,7 +150,7 @@ pub fn sig_setup(is_login: bool) {
 
 
     if is_login {
-        setpgid(Pid::from_raw(0), Pid::from_raw(0));
+        let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
         take_term().ok();
     }
 }
@@ -307,15 +307,29 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   {
     if is_fg {
       take_term()?;
-    } else {
-      JOB_DONE.store(true, Ordering::SeqCst);
-      let job_order = read_jobs(|j| j.order().to_vec());
-      let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
-      if let Some(job) = result {
-        let job_complete_msg = job.display(&job_order, JobCmdFlags::PIDS).to_string();
-        write_meta(|m| m.post_system_message(job_complete_msg))
-      }
-    }
+		} else {
+			JOB_DONE.store(true, Ordering::SeqCst);
+			let job_order = read_jobs(|j| j.order().to_vec());
+			let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
+			if let Some(job) = result {
+				let job_complete_msg = job.display(&job_order, JobCmdFlags::PIDS).to_string();
+
+				let post_job_hooks = read_logic(|l| l.get_autocmds(AutoCmdKind::OnJobFinish));
+				for cmd in post_job_hooks {
+					let AutoCmd { pattern, command } = cmd;
+					if let Some(pat) = pattern
+					&& job.get_cmds().iter().all(|p| !pat.is_match(p)) {
+						continue;
+					}
+
+					if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
+						e.print_error();
+					}
+				}
+
+				write_meta(|m| m.post_system_message(job_complete_msg))
+			}
+		}
   }
   Ok(())
 }

@@ -9,11 +9,11 @@ use std::{
 };
 
 use nix::unistd::{User, gethostname, getppid};
+use regex::Regex;
 
 use crate::{
   builtin::{BUILTINS, keymap::{KeyMap, KeyMapFlags, KeyMapMatch}, map::MapNode, trap::TrapTarget}, exec_input, expand::expand_keymap, jobs::JobTab, libsh::{
-    error::{ShErr, ShErrKind, ShResult},
-    utils::VecDequeExt,
+    error::{ShErr, ShErrKind, ShResult}, utils::VecDequeExt
   }, parse::{
     ConjunctNode, NdRule, Node, ParsedSrc,
     lex::{LexFlags, LexStream, Span, Tk},
@@ -522,6 +522,62 @@ impl ShFunc {
   }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum AutoCmdKind {
+	PreCmd,
+	PostCmd,
+	PreChangeDir,
+	PostChangeDir,
+	OnJobFinish,
+	PrePrompt,
+	PostPrompt,
+	PreModeChange,
+	PostModeChange
+}
+
+impl Display for AutoCmdKind {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::PreCmd => write!(f, "pre-cmd"),
+			Self::PostCmd => write!(f, "post-cmd"),
+			Self::PreChangeDir => write!(f, "pre-change-dir"),
+			Self::PostChangeDir => write!(f, "post-change-dir"),
+			Self::OnJobFinish => write!(f, "on-job-finish"),
+			Self::PrePrompt => write!(f, "pre-prompt"),
+			Self::PostPrompt => write!(f, "post-prompt"),
+			Self::PreModeChange => write!(f, "pre-mode-change"),
+			Self::PostModeChange => write!(f, "post-mode-change"),
+		}
+	}
+}
+
+impl FromStr for AutoCmdKind {
+	type Err = ShErr;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"pre-cmd" => Ok(Self::PreCmd),
+			"post-cmd" => Ok(Self::PostCmd),
+			"pre-change-dir" => Ok(Self::PreChangeDir),
+			"post-change-dir" => Ok(Self::PostChangeDir),
+			"on-job-finish" => Ok(Self::OnJobFinish),
+			"pre-prompt" => Ok(Self::PrePrompt),
+			"post-prompt" => Ok(Self::PostPrompt),
+			"pre-mode-change" => Ok(Self::PreModeChange),
+			"post-mode-change" => Ok(Self::PostModeChange),
+			_ => Err(ShErr::simple(
+				ShErrKind::ParseErr,
+				format!("Invalid autocmd kind: {}", s),
+			)),
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct AutoCmd {
+	pub pattern: Option<Regex>,
+	pub command: String,
+}
+
 /// The logic table for the shell
 ///
 /// Contains aliases and functions
@@ -530,13 +586,35 @@ pub struct LogTab {
   functions: HashMap<String, ShFunc>,
   aliases: HashMap<String, ShAlias>,
   traps: HashMap<TrapTarget, String>,
-	keymaps: Vec<KeyMap>
+	keymaps: Vec<KeyMap>,
+	autocmds: HashMap<AutoCmdKind, Vec<AutoCmd>>
 }
 
 impl LogTab {
   pub fn new() -> Self {
     Self::default()
   }
+	pub fn autocmds(&self) -> &HashMap<AutoCmdKind, Vec<AutoCmd>> {
+		&self.autocmds
+	}
+	pub fn autocmds_mut(&mut self) -> &mut HashMap<AutoCmdKind, Vec<AutoCmd>> {
+		&mut self.autocmds
+	}
+	pub fn insert_autocmd(&mut self, kind: AutoCmdKind, cmd: AutoCmd) {
+		self.autocmds.entry(kind).or_default().push(cmd);
+	}
+	pub fn get_autocmds(&self, kind: AutoCmdKind) -> Vec<AutoCmd> {
+		self.autocmds.get(&kind).cloned().unwrap_or_default()
+	}
+	pub fn clear_autocmds(&mut self, kind: AutoCmdKind) {
+		self.autocmds.remove(&kind);
+	}
+	pub fn keymaps(&self) -> &Vec<KeyMap> {
+		&self.keymaps
+	}
+	pub fn keymaps_mut(&mut self) -> &mut Vec<KeyMap> {
+		&mut self.keymaps
+	}
 	pub fn insert_keymap(&mut self, keymap: KeyMap) {
 		let mut found_dup = false;
 		for map in self.keymaps.iter_mut() {
@@ -795,6 +873,18 @@ impl Display for Var {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     self.kind.fmt(f)
   }
+}
+
+impl From<String> for Var {
+	fn from(value: String) -> Self {
+		Self::new(VarKind::Str(value), VarFlags::NONE)
+	}
+}
+
+impl From<&str> for Var {
+	fn from(value: &str) -> Self {
+		Self::new(VarKind::Str(value.into()), VarFlags::NONE)
+	}
 }
 
 #[derive(Default, Clone, Debug)]
@@ -1494,6 +1584,65 @@ pub fn ascend_scope() {
 /// It will panic if you give it an invalid path.
 pub fn get_shopt(path: &str) -> String {
   read_shopts(|s| s.get(path)).unwrap().unwrap()
+}
+
+pub fn with_vars<F,H,V,T>(vars: H, f: F) -> T
+where
+	F: FnOnce() -> T,
+	H: Into<HashMap<String,V>>,
+	V: Into<Var> {
+
+	let snapshot = read_vars(|v| v.clone());
+	let vars = vars.into();
+	for (name, val) in vars {
+		let val = val.into();
+		write_vars(|v| v.set_var(&name, val.kind, val.flags).unwrap());
+	}
+	let _guard = scopeguard::guard(snapshot, |snap| {
+		write_vars(|v| *v = snap);
+	});
+	f()
+}
+
+pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
+	let dir = dir.as_ref();
+	let dir_raw = &dir.display().to_string();
+	let pre_cd = read_logic(|l| l.get_autocmds(AutoCmdKind::PreChangeDir));
+	let post_cd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostChangeDir));
+
+	let current_dir = env::current_dir()?.display().to_string();
+	with_vars([("_NEW_DIR".into(), dir_raw.as_str()), ("_OLD_DIR".into(), current_dir.as_str())], || {
+		for cmd in pre_cd {
+			let AutoCmd { command, pattern } = cmd;
+			if let Some(pat) = pattern
+			&& !pat.is_match(dir_raw) {
+				continue;
+			}
+
+			if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd (pre-changedir)".to_string())) {
+				e.print_error();
+			};
+		}
+	});
+
+
+	env::set_current_dir(dir)?;
+
+	with_vars([("_NEW_DIR".into(), dir_raw.as_str()), ("_OLD_DIR".into(), current_dir.as_str())], || {
+		for cmd in post_cd {
+			let AutoCmd { command, pattern } = cmd;
+			if let Some(pat) = pattern
+			&& !pat.is_match(dir_raw) {
+				continue;
+			}
+
+			if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd (post-changedir)".to_string())) {
+				e.print_error();
+			};
+		}
+	});
+
+	Ok(())
 }
 
 pub fn get_status() -> i32 {

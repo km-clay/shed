@@ -4,7 +4,6 @@ use nix::{
   libc::{STDIN_FILENO, STDOUT_FILENO},
   unistd::{isatty, read, write},
 };
-use yansi::Paint;
 
 use crate::{
   expand::expand_keymap, getopt::{Opt, OptSpec, get_opts_from_tokens}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, sys::TTY_FILENO}, parse::{NdRule, Node, execute::prepare_argv}, procio::borrow_fd, readline::term::{KeyReader, PollReader, RawModeGuard}, state::{self, VarFlags, VarKind, read_vars, write_vars}

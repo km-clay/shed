@@ -5,9 +5,17 @@ let
   boolToString = b:
   if b then "true" else "false";
 
-  mkFunctionDef = name: body: ''
+  mkAutoCmd = cfg:
+    lib.concatLines (map (hook: "autocmd ${hook} ${lib.optionalString (cfg.pattern != null) "-p \"${cfg.pattern}\""} '${cfg.command}'") cfg.hooks);
+
+
+  mkFunctionDef = name: body:
+  let
+    indented = "\t" + lib.concatStringsSep "\n\t" (lib.splitString "\n" body);
+  in
+    ''
 ${name}() {
-${body}
+${indented}
 }'';
 
   mkKeymapCmd = cfg: let
@@ -56,6 +64,39 @@ in
       type = lib.types.attrsOf lib.types.str;
       default = {};
       description = "Shell functions to set when shed starts";
+    };
+
+    autocmds = lib.mkOption {
+      type = lib.types.listOf (lib.types.submodule {
+        options = {
+          hooks = lib.mkOption {
+            type = lib.types.addCheck (lib.types.listOf (lib.types.enum [
+              "pre-cmd"
+              "post-cmd"
+              "pre-change-dir"
+              "post-change-dir"
+              "on-job-finish"
+              "pre-prompt"
+              "post-prompt"
+              "pre-mode-change"
+              "post-mode-change"
+            ])) (list: list != []);
+            description = "The events that trigger this autocmd";
+          };
+          pattern = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            description = "A regex pattern to use in the hook to determine whether it runs or not. What it's compared to differs by hook, for instance 'pre-change-dir' compares it to the new directory, pre-cmd compares it to the command, etc";
+          };
+          command = lib.mkOption {
+            type = lib.types.addCheck lib.types.str (cmd: cmd != "");
+            description = "The shell command to execute when the hook is triggered and the pattern (if provided) matches";
+          };
+        };
+
+      });
+      default = [];
+      description = "Custom autocmds to set when shed starts";
     };
 
     keymaps = lib.mkOption {
@@ -243,6 +284,7 @@ in
     completeLines = lib.concatLines (lib.mapAttrsToList mkCompleteCmd cfg.extraCompletion);
     keymapLines = lib.concatLines (map mkKeymapCmd cfg.keymaps);
     functionLines = lib.concatLines (lib.mapAttrsToList mkFunctionDef cfg.functions);
+    autocmdLines = lib.concatLines (map mkAutoCmd cfg.autocmds);
   in
   lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
@@ -269,6 +311,7 @@ in
         functionLines
         completeLines
         keymapLines
+        autocmdLines
       ])
       cfg.settings.extraPostConfig
     ];

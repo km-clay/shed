@@ -1,5 +1,5 @@
 use crate::{
-  expand::expand_keymap, getopt::{Opt, OptSpec, get_opts_from_tokens}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node, execute::prepare_argv}, prelude::*, readline::{keys::KeyEvent, vimode::ModeReport}, state::{self, write_logic}
+  expand::expand_keymap, getopt::{Opt, OptSpec, get_opts_from_tokens}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node, execute::prepare_argv}, prelude::*, readline::keys::KeyEvent, state::{self, write_logic}
 };
 
 bitflags! {

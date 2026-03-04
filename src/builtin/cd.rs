@@ -44,7 +44,7 @@ pub fn cd(node: Node) -> ShResult<()> {
       .labeled(cd_span.clone(), format!("cd: Not a directory '{}'", new_dir.display().fg(next_color()))));
   }
 
-  if let Err(e) = env::set_current_dir(new_dir) {
+  if let Err(e) = state::change_dir(new_dir) {
     return Err(ShErr::new(ShErrKind::ExecFail, span.clone())
       .labeled(cd_span.clone(), format!("cd: Failed to change directory: '{}'", e.fg(Color::Red))));
   }

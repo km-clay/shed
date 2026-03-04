@@ -26,13 +26,14 @@ pub mod arrops;
 pub mod intro;
 pub mod getopts;
 pub mod keymap;
+pub mod autocmd;
 
-pub const BUILTINS: [&str; 46] = [
+pub const BUILTINS: [&str; 47] = [
   "echo", "cd", "read", "export", "local", "pwd", "source", "shift", "jobs", "fg", "bg", "disown",
   "alias", "unalias", "return", "break", "continue", "exit", "zoltraak", "shopt", "builtin",
   "command", "trap", "pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly",
   "unset", "complete", "compgen", "map", "pop", "fpop", "push", "fpush", "rotate", "wait", "type",
-	"getopts", "keymap", "read_key"
+	"getopts", "keymap", "read_key", "autocmd"
 ];
 
 pub fn true_builtin() -> ShResult<()> {

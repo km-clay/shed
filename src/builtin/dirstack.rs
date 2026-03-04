@@ -52,7 +52,7 @@ fn change_directory(target: &PathBuf, blame: Span) -> ShResult<()> {
     );
   }
 
-  if let Err(e) = env::set_current_dir(target) {
+  if let Err(e) = state::change_dir(target) {
     return Err(
       ShErr::at(ShErrKind::ExecFail, blame, format!("Failed to change directory: '{}'", e.fg(Color::Red)))
     );

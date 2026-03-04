@@ -7,9 +7,9 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::{self, read_builtin}, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
+    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::{self, read_builtin}, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
   },
-  expand::{expand_aliases, glob_to_regex},
+  expand::{Expander, expand_aliases, expand_raw, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
   libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
@@ -19,7 +19,7 @@ use crate::{
   prelude::*,
   procio::{IoMode, IoStack},
   state::{
-    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_vars,
+    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_vars
   },
 };
 
@@ -429,10 +429,13 @@ impl Dispatcher {
         let block_patterns = block_pattern_raw.split('|');
 
         for pattern in block_patterns {
-          let pattern_regex = glob_to_regex(pattern, false);
-          log::debug!("[case] testing input {:?} against pattern {:?} (regex: {:?})", pattern_raw, pattern, pattern_regex);
+					log::debug!("[case] testing pattern {:?} against input {:?}", pattern, pattern_raw);
+					let pattern_exp = Expander::from_raw(pattern)?.expand()?.join(" ");
+					log::debug!("[case] expanded pattern: {:?}", pattern_exp);
+          let pattern_regex = glob_to_regex(&pattern_exp, false);
+          log::debug!("[case] testing input {:?} against pattern {:?} (regex: {:?})", pattern_raw, pattern_exp, pattern_regex);
           if pattern_regex.is_match(&pattern_raw) {
-            log::debug!("[case] matched pattern {:?}", pattern);
+            log::debug!("[case] matched pattern {:?}", pattern_exp);
             for node in &body {
               s.dispatch_node(node.clone())?;
             }
@@ -828,6 +831,7 @@ impl Dispatcher {
 			"getopts" => getopts(cmd),
 			"keymap" => keymap::keymap(cmd),
 			"read_key" => read::read_key(cmd),
+			"autocmd" => autocmd(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())

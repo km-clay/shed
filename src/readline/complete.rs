@@ -3,7 +3,6 @@ use std::{
 };
 
 use nix::sys::signal::Signal;
-use unicode_width::UnicodeWidthStr;
 
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
@@ -823,13 +822,13 @@ impl Completer for FuzzyCompleter {
 			}
 			K(C::Tab, M::SHIFT) |
 			K(C::Up, M::NONE) => {
-				self.cursor.sub(1);
+				self.cursor.wrap_sub(1);
 				self.update_scroll_offset();
 				Ok(CompResponse::Consumed)
 			}
 			K(C::Tab, M::NONE) |
 			K(C::Down, M::NONE) => {
-				self.cursor.add(1);
+				self.cursor.wrap_add(1);
 				self.update_scroll_offset();
 				Ok(CompResponse::Consumed)
 			}
@@ -848,7 +847,7 @@ impl Completer for FuzzyCompleter {
 			// soft wraps and re-wraps as a flat buffer.
 			let total_cells = layout.rows as u32 * layout.cols as u32;
 			let physical_rows = if new_cols > 0 {
-				((total_cells + new_cols as u32 - 1) / new_cols as u32) as u16
+				total_cells.div_ceil(new_cols as u32) as u16
 			} else {
 				layout.rows
 			};
@@ -864,8 +863,7 @@ impl Completer for FuzzyCompleter {
 			// filling to t_cols). Compute how many extra rows that adds
 			// between the prompt cursor and the fuzzy content.
 			let gap_extra = if new_cols > 0 && layout.preceding_line_width > new_cols {
-				let wrap_rows = ((layout.preceding_line_width as u32 + new_cols as u32 - 1)
-					/ new_cols as u32) as u16;
+				let wrap_rows = (layout.preceding_line_width as u32).div_ceil(new_cols as u32) as u16;
 				let cursor_wrap_row = layout.preceding_cursor_col / new_cols;
 				wrap_rows.saturating_sub(cursor_wrap_row + 1)
 			} else {
@@ -975,7 +973,7 @@ impl Completer for FuzzyCompleter {
 
 		let new_layout = FuzzyLayout {
 			rows,
-			cols: cols as u16,
+			cols,
 			cursor_col,
 			preceding_line_width: self.prompt_line_width,
 			preceding_cursor_col: self.prompt_cursor_col,
