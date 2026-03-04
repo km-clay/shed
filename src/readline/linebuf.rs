@@ -2885,6 +2885,8 @@ impl LineBuf {
       Verb::Insert(string) => {
         self.push_str(&string);
         let graphemes = string.graphemes(true).count();
+				log::debug!("Inserted string: {string:?}, graphemes: {graphemes}");
+				log::debug!("buffer after insert: {:?}", self.buffer);
         self.cursor.add(graphemes);
       }
       Verb::Indent => {

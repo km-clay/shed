@@ -1026,7 +1026,7 @@ pub fn unescape_str(raw: &str) -> String {
                 result.push(next_ch);
               }
             }
-            '$' => {
+            '$' if chars.peek() != Some(&'\'') => {
               result.push(markers::VAR_SUB);
               if chars.peek() == Some(&'(') {
                 chars.next();
@@ -1058,6 +1058,76 @@ pub fn unescape_str(raw: &str) -> String {
                 }
               }
             }
+						'$' => {
+							log::debug!("Found ANSI-C quoting");
+							chars.next();
+							while let Some(q_ch) = chars.next() {
+								match q_ch {
+									'\'' => {
+										break;
+									}
+									'\\' => {
+										if let Some(esc) = chars.next() {
+											match esc {
+												'n' => result.push('\n'),
+												't' => result.push('\t'),
+												'r' => result.push('\r'),
+												'\'' => result.push('\''),
+												'\\' => result.push('\\'),
+												'a' => result.push('\x07'),
+												'b' => result.push('\x08'),
+												'e' | 'E' => result.push('\x1b'),
+												'v' => result.push('\x0b'),
+												'x' => {
+													let mut hex = String::new();
+													if let Some(h1) = chars.next() {
+														hex.push(h1);
+													} else {
+														result.push_str("\\x");
+														continue;
+													}
+													if let Some(h2) = chars.next() {
+														hex.push(h2);
+													} else {
+														result.push_str(&format!("\\x{hex}"));
+														continue;
+													}
+													if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+														result.push(byte as char);
+													} else {
+														result.push_str(&format!("\\x{hex}"));
+														continue;
+													}
+												}
+												'o' => {
+													let mut oct = String::new();
+													for _ in 0..3 {
+														if let Some(o) = chars.peek() {
+															if o.is_digit(8) {
+																oct.push(*o);
+																chars.next();
+															} else {
+																break;
+															}
+														} else {
+															break;
+														}
+													}
+													if let Ok(byte) = u8::from_str_radix(&oct, 8) {
+														result.push(byte as char);
+													} else {
+														result.push_str(&format!("\\o{oct}"));
+														continue;
+													}
+												}
+												_ => result.push(esc),
+											}
+										}
+									}
+									_ => result.push(q_ch),
+								}
+							}
+						}
             '"' => {
               result.push(markers::DUB_QUOTE);
               break;
@@ -1145,6 +1215,7 @@ pub fn unescape_str(raw: &str) -> String {
         }
       }
       '$' if chars.peek() == Some(&'\'') => {
+				log::debug!("Found ANSI-C quoting");
         chars.next();
         result.push(markers::SNG_QUOTE);
         while let Some(q_ch) = chars.next() {
@@ -1318,6 +1389,8 @@ impl FromStr for ParamExp {
 			)	)
     };
 
+		log::debug!("Parsing parameter expansion: '{:?}'", s);
+
     // Handle indirect var expansion: ${!var}
     if let Some(var) = s.strip_prefix('!') {
       if var.ends_with('*') || var.ends_with('@') {
@@ -1333,6 +1406,7 @@ impl FromStr for ParamExp {
       return Ok(RemShortestPrefix(rest.to_string()));
     }
     if let Some(rest) = s.strip_prefix("%%") {
+			log::debug!("Matched longest suffix pattern: '{}'", rest);
       return Ok(RemLongestSuffix(rest.to_string()));
     } else if let Some(rest) = s.strip_prefix('%') {
       return Ok(RemShortestSuffix(rest.to_string()));
@@ -1512,7 +1586,9 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
       ParamExp::RemShortestPrefix(prefix) => {
         let value = vars.get_var(&var_name);
-        let pattern = Pattern::new(&prefix).unwrap();
+        let unescaped = unescape_str(&prefix);
+        let expanded = expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix);
+        let pattern = Pattern::new(&expanded).unwrap();
         for i in 0..=value.len() {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
@@ -1523,7 +1599,9 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
       ParamExp::RemLongestPrefix(prefix) => {
         let value = vars.get_var(&var_name);
-        let pattern = Pattern::new(&prefix).unwrap();
+        let unescaped = unescape_str(&prefix);
+        let expanded = expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix);
+        let pattern = Pattern::new(&expanded).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
@@ -1534,7 +1612,9 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
       ParamExp::RemShortestSuffix(suffix) => {
         let value = vars.get_var(&var_name);
-        let pattern = Pattern::new(&suffix).unwrap();
+        let unescaped = unescape_str(&suffix);
+        let expanded = expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix);
+        let pattern = Pattern::new(&expanded).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
@@ -1545,7 +1625,9 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
       ParamExp::RemLongestSuffix(suffix) => {
         let value = vars.get_var(&var_name);
-        let pattern = Pattern::new(&suffix).unwrap();
+        let unescaped = unescape_str(&suffix);
+        let expanded_suffix = expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix.clone());
+        let pattern = Pattern::new(&expanded_suffix).unwrap();
         for i in 0..=value.len() {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
@@ -1556,12 +1638,16 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
       ParamExp::ReplaceFirstMatch(search, replace) => {
         let value = vars.get_var(&var_name);
-        let regex = glob_to_regex(&search, false); // unanchored pattern
+        let search = unescape_str(&search);
+        let replace = unescape_str(&replace);
+        let expanded_search = expand_raw(&mut search.chars().peekable()).unwrap_or(search);
+        let expanded_replace = expand_raw(&mut replace.chars().peekable()).unwrap_or(replace);
+        let regex = glob_to_regex(&expanded_search, false); // unanchored pattern
 
         if let Some(mat) = regex.find(&value) {
           let before = &value[..mat.start()];
           let after = &value[mat.end()..];
-          let result = format!("{}{}{}", before, replace, after);
+          let result = format!("{}{}{}", before, expanded_replace, after);
           Ok(result)
         } else {
           Ok(value)
@@ -1569,13 +1655,17 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
       ParamExp::ReplaceAllMatches(search, replace) => {
         let value = vars.get_var(&var_name);
-        let regex = glob_to_regex(&search, false);
+        let search = unescape_str(&search);
+        let replace = unescape_str(&replace);
+        let expanded_search = expand_raw(&mut search.chars().peekable()).unwrap_or(search);
+        let expanded_replace = expand_raw(&mut replace.chars().peekable()).unwrap_or(replace);
+        let regex = glob_to_regex(&expanded_search, false);
         let mut result = String::new();
         let mut last_match_end = 0;
 
         for mat in regex.find_iter(&value) {
           result.push_str(&value[last_match_end..mat.start()]);
-          result.push_str(&replace);
+          result.push_str(&expanded_replace);
           last_match_end = mat.end();
         }
 
@@ -1585,22 +1675,30 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
       ParamExp::ReplacePrefix(search, replace) => {
         let value = vars.get_var(&var_name);
-        let pattern = Pattern::new(&search).unwrap();
+        let search = unescape_str(&search);
+        let replace = unescape_str(&replace);
+        let expanded_search = expand_raw(&mut search.chars().peekable()).unwrap_or(search);
+        let expanded_replace = expand_raw(&mut replace.chars().peekable()).unwrap_or(replace);
+        let pattern = Pattern::new(&expanded_search).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
-            return Ok(format!("{}{}", replace, &value[i..]));
+            return Ok(format!("{}{}", expanded_replace, &value[i..]));
           }
         }
         Ok(value)
       }
       ParamExp::ReplaceSuffix(search, replace) => {
         let value = vars.get_var(&var_name);
-        let pattern = Pattern::new(&search).unwrap();
+        let search = unescape_str(&search);
+        let replace = unescape_str(&replace);
+        let expanded_search = expand_raw(&mut search.chars().peekable()).unwrap_or(search);
+        let expanded_replace = expand_raw(&mut replace.chars().peekable()).unwrap_or(replace);
+        let pattern = Pattern::new(&expanded_search).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
-            return Ok(format!("{}{}", &value[..i], replace));
+            return Ok(format!("{}{}", &value[..i], expanded_replace));
           }
         }
         Ok(value)

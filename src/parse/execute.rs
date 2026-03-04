@@ -424,18 +424,13 @@ impl Dispatcher {
       'outer: for block in case_blocks {
         let CaseNode { pattern, body } = block;
         let block_pattern_raw = pattern.span.as_str().strip_suffix(')').unwrap_or(pattern.span.as_str()).trim();
-        log::debug!("[case] raw block pattern: {:?}", block_pattern_raw);
         // Split at '|' to allow for multiple patterns like `foo|bar)`
         let block_patterns = block_pattern_raw.split('|');
 
         for pattern in block_patterns {
-					log::debug!("[case] testing pattern {:?} against input {:?}", pattern, pattern_raw);
 					let pattern_exp = Expander::from_raw(pattern)?.expand()?.join(" ");
-					log::debug!("[case] expanded pattern: {:?}", pattern_exp);
           let pattern_regex = glob_to_regex(&pattern_exp, false);
-          log::debug!("[case] testing input {:?} against pattern {:?} (regex: {:?})", pattern_raw, pattern_exp, pattern_regex);
           if pattern_regex.is_match(&pattern_raw) {
-            log::debug!("[case] matched pattern {:?}", pattern_exp);
             for node in &body {
               s.dispatch_node(node.clone())?;
             }

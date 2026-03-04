@@ -215,13 +215,12 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       // Restore cursor to saved row before clearing, since the terminal
       // may have moved it during resize/rewrap
       readline.writer.update_t_cols();
-      readline.prompt_mut().refresh()?;
       readline.mark_dirty();
     }
 
     if JOB_DONE.swap(false, Ordering::SeqCst) {
       // update the prompt so any job count escape sequences update dynamically
-      readline.prompt_mut().refresh()?;
+      readline.prompt_mut().refresh();
     }
 
     readline.print_line(false)?;
@@ -388,6 +387,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
         // Reset for next command with fresh prompt
         readline.reset(true)?;
+
         let real_end = start.elapsed();
         log::info!("Total round trip time: {:.2?}", real_end);
       }

@@ -140,6 +140,7 @@ pub struct Prompt {
   ps1_raw: String,
   psr_expanded: Option<String>,
   psr_raw: Option<String>,
+  dirty: bool,
 }
 
 impl Prompt {
@@ -170,32 +171,54 @@ impl Prompt {
       ps1_raw,
       psr_expanded,
       psr_raw,
+      dirty: false,
     }
   }
 
-  pub fn get_ps1(&self) -> &str {
+  pub fn get_ps1(&mut self) -> &str {
+    if self.dirty {
+      self.refresh_now();
+    }
     &self.ps1_expanded
   }
   pub fn set_ps1(&mut self, ps1_raw: String) -> ShResult<()> {
-    self.ps1_expanded = expand_prompt(&ps1_raw)?;
     self.ps1_raw = ps1_raw;
+    self.dirty = true;
     Ok(())
   }
   pub fn set_psr(&mut self, psr_raw: String) -> ShResult<()> {
-    self.psr_expanded = Some(expand_prompt(&psr_raw)?);
     self.psr_raw = Some(psr_raw);
+    self.dirty = true;
     Ok(())
   }
-  pub fn get_psr(&self) -> Option<&str> {
+  pub fn get_psr(&mut self) -> Option<&str> {
+    if self.dirty {
+      self.refresh_now();
+    }
     self.psr_expanded.as_deref()
   }
 
-  pub fn refresh(&mut self) -> ShResult<()> {
-    self.ps1_expanded = expand_prompt(&self.ps1_raw)?;
-    if let Some(psr_raw) = &self.psr_raw {
-      self.psr_expanded = Some(expand_prompt(psr_raw)?);
+  /// Mark the prompt as needing re-expansion on next access.
+  pub fn invalidate(&mut self) {
+    self.dirty = true;
+  }
+
+  fn refresh_now(&mut self) {
+    let saved_status = state::get_status();
+    if let Ok(expanded) = expand_prompt(&self.ps1_raw) {
+      self.ps1_expanded = expanded;
     }
-    Ok(())
+    if let Some(psr_raw) = &self.psr_raw {
+      if let Ok(expanded) = expand_prompt(psr_raw) {
+        self.psr_expanded = Some(expanded);
+      }
+    }
+    state::set_status(saved_status);
+    self.dirty = false;
+  }
+
+  pub fn refresh(&mut self) {
+    self.invalidate();
   }
 }
 
@@ -207,6 +230,7 @@ impl Default for Prompt {
       ps1_raw: Self::DEFAULT_PS1.to_string(),
       psr_expanded: None,
       psr_raw: None,
+      dirty: false,
     }
   }
 }
@@ -253,7 +277,7 @@ impl ShedVi {
       needs_redraw: true,
     };
 		write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(new.mode.report_mode().to_string()), VarFlags::NONE))?;
-		new.prompt.refresh()?;
+		new.prompt.refresh();
     new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
     new.print_line(false)?;
     Ok(new)
@@ -296,7 +320,7 @@ impl ShedVi {
   pub fn reset(&mut self, full_redraw: bool) -> ShResult<()> {
     // Clear old display before resetting state — old_layout must survive
     // so print_line can call clear_rows with the full multi-line layout
-    self.prompt = Prompt::new();
+    self.prompt.refresh();
     self.editor = Default::default();
 		self.swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn ViMode>));
     self.needs_redraw = true;
@@ -598,14 +622,6 @@ impl ShedVi {
     Ok(None)
   }
 
-	pub fn update_layout(&mut self) {
-		let text = self.line_text();
-		let new = self.get_layout(&text);
-		if let Some(old) = self.old_layout.as_mut() {
-			*old = new;
-		}
-	}
-
   pub fn get_layout(&mut self, line: &str) -> Layout {
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
     let (cols, _) = get_win_size(*TTY_FILENO);
@@ -654,8 +670,7 @@ impl ShedVi {
             || (self.mode.pending_seq().unwrap(/* always Some on normal mode */).is_empty()
               && matches!(event, KeyEvent(KeyCode::Char('l'), ModKeys::NONE)))
         }
-				ModeReport::Ex => false,
-        _ => unimplemented!(),
+				ModeReport::Ex | ModeReport::Verbatim | ModeReport::Unknown => false,
       }
     } else {
       false
@@ -677,21 +692,19 @@ impl ShedVi {
   pub fn line_text(&mut self) -> String {
     let line = self.editor.to_string();
     let hint = self.editor.get_hint_text();
-    if crate::state::read_shopts(|s| s.prompt.highlight) {
-      self
-        .highlighter
-        .load_input(&line, self.editor.cursor_byte_pos());
-      self.highlighter.highlight();
-      let highlighted = self.highlighter.take();
-      format!("{highlighted}{hint}")
-    } else {
-      format!("{line}{hint}")
-    }
+		let do_hl = state::read_shopts(|s| s.prompt.highlight);
+		self.highlighter.only_visual(!do_hl);
+		self.highlighter.load_input(&line, self.editor.cursor_byte_pos());
+		self.highlighter.expand_control_chars();
+		self.highlighter.highlight();
+		let highlighted = self.highlighter.take();
+		format!("{highlighted}{hint}")
   }
 
   pub fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
     let line = self.line_text();
     let mut new_layout = self.get_layout(&line);
+
     let pending_seq = self.mode.pending_seq();
     let mut prompt_string_right = self.prompt.psr_expanded.clone();
 
@@ -710,7 +723,7 @@ impl ShedVi {
       .get_ps1()
       .lines()
       .next()
-      .map(|l| Layout::calc_pos(self.writer.t_cols, l, Pos { col: 0, row: 0 }, 0))
+      .map(|l| Layout::calc_pos(self.writer.t_cols, l, Pos { col: 0, row: 0 }, 0, false))
       .map(|p| p.col)
       .unwrap_or_default() as usize;
     let one_line = new_layout.end.row == 0;
@@ -769,7 +782,7 @@ impl ShedVi {
       // Record where the PSR ends so clear_rows can account for wrapping
       // if the terminal shrinks.
       let psr_start = Pos { row: new_layout.end.row, col: to_col };
-      new_layout.psr_end = Some(Layout::calc_pos(self.writer.t_cols, &psr, psr_start, 0));
+      new_layout.psr_end = Some(Layout::calc_pos(self.writer.t_cols, &psr, psr_start, 0, false));
     }
 
 		if let ModeReport::Ex = self.mode.report_mode() {
@@ -781,6 +794,7 @@ impl ShedVi {
     write!(buf, "{}", &self.mode.cursor_style()).unwrap();
 
 		self.writer.flush_write(&buf)?;
+
     // Tell the completer the width of the prompt line above its \n so it can
     // account for wrapping when clearing after a resize.
     let preceding_width = if new_layout.psr_end.is_some() {
@@ -808,7 +822,7 @@ impl ShedVi {
 		std::mem::swap(&mut self.mode, mode);
 		self.editor.set_cursor_clamp(self.mode.clamp_cursor());
 		write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE)).ok();
-		self.prompt.refresh().ok();
+		self.prompt.refresh();
 
 		let post_mode_change = read_logic(|l| l.get_autocmds(AutoCmdKind::PostModeChange));
 		post_mode_change.exec();
@@ -820,7 +834,7 @@ impl ShedVi {
     if cmd.is_mode_transition() {
       let count = cmd.verb_count();
 
-      let mut mode: Box<dyn ViMode> = if let ModeReport::Ex = self.mode.report_mode() && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
+      let mut mode: Box<dyn ViMode> = if matches!(self.mode.report_mode(), ModeReport::Ex | ModeReport::Verbatim)  && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
 				if let Some(saved) = self.saved_mode.take() {
 					saved
 				} else {
@@ -874,7 +888,7 @@ impl ShedVi {
 			if matches!(self.mode.report_mode(), ModeReport::Ex | ModeReport::Verbatim) {
 				self.saved_mode = Some(mode);
 				write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE))?;
-				self.prompt.refresh()?;
+				self.prompt.refresh();
 				return Ok(());
 			}
 
@@ -899,7 +913,7 @@ impl ShedVi {
       }
 
 			write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE))?;
-			self.prompt.refresh()?;
+			self.prompt.refresh();
 
 
       return Ok(());
@@ -1055,7 +1069,6 @@ pub fn annotate_input(input: &str) -> String {
     .filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
     .collect();
 
-	log::debug!("Annotating input with tokens: {tokens:#?}");
 
   for tk in tokens.into_iter().rev() {
     let insertions = annotate_token(tk);

@@ -24,6 +24,7 @@ impl ViMode for ViVerbatim {
   fn handle_key(&mut self, key: E) -> Option<ViCmd> {
     match key {
 			E(K::Verbatim(seq),_mods) => {
+				log::debug!("Received verbatim key sequence: {:?}", seq);
 				let cmd = ViCmd { register: RegisterName::default(),
 					verb: Some(VerbCmd(1,Verb::Insert(seq.to_string()))),
 					motion: None,
@@ -61,6 +62,6 @@ impl ViMode for ViVerbatim {
     Some(To::End)
   }
   fn report_mode(&self) -> ModeReport {
-    ModeReport::Insert
+    ModeReport::Verbatim
   }
 }

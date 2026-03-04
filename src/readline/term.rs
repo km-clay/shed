@@ -736,9 +736,9 @@ impl Layout {
     }
   }
   pub fn from_parts(term_width: u16, prompt: &str, to_cursor: &str, to_end: &str) -> Self {
-    let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 }, 0);
-    let cursor = Self::calc_pos(term_width, to_cursor, prompt_end, prompt_end.col);
-    let end = Self::calc_pos(term_width, to_end, prompt_end, prompt_end.col);
+    let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 }, 0, false);
+    let cursor = Self::calc_pos(term_width, to_cursor, prompt_end, prompt_end.col, true);
+    let end = Self::calc_pos(term_width, to_end, prompt_end, prompt_end.col, false);
     Layout {
       prompt_end,
       cursor,
@@ -748,7 +748,15 @@ impl Layout {
     }
   }
 
-  pub fn calc_pos(term_width: u16, s: &str, orig: Pos, left_margin: u16) -> Pos {
+	fn is_ctl_char(gr: &str) -> bool {
+		gr.len() > 0 &&
+		gr.as_bytes()[0] <= 0x1F &&
+		gr != "\n" &&
+		gr != "\t" &&
+		gr != "\r"
+	}
+
+  pub fn calc_pos(term_width: u16, s: &str, orig: Pos, left_margin: u16, raw_calc: bool) -> Pos {
     const TAB_STOP: u16 = 8;
     let mut pos = orig;
     let mut esc_seq = 0;
@@ -759,6 +767,8 @@ impl Layout {
       }
       let c_width = if c == "\t" {
         TAB_STOP - (pos.col % TAB_STOP)
+			} else if raw_calc && Self::is_ctl_char(c) {
+				2
       } else {
         width(c, &mut esc_seq)
       };
@@ -1002,7 +1012,7 @@ impl LineWriter for TermWriter {
     self.buffer.push_str(prompt);
     let multiline = line.contains('\n');
     if multiline {
-      let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0);
+      let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
       let display_line = enumerate_lines(line, prompt_end.col as usize);
       self.buffer.push_str(&display_line);
     } else {

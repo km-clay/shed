@@ -26,6 +26,7 @@ pub struct Highlighter {
   style_stack: Vec<StyleSet>,
   last_was_reset: bool,
   in_selection: bool,
+	only_hl_visual: bool
 }
 
 impl Highlighter {
@@ -38,8 +39,12 @@ impl Highlighter {
       style_stack: Vec::new(),
       last_was_reset: true, // start as true so we don't emit a leading reset
       in_selection: false,
+			only_hl_visual: false
     }
   }
+	pub fn only_visual(&mut self, only_visual: bool) {
+		self.only_hl_visual = only_visual;
+	}
 
   /// Loads raw input text and annotates it with syntax markers
   ///
@@ -61,6 +66,26 @@ impl Highlighter {
     out
   }
 
+	pub fn expand_control_chars(&mut self) {
+		let mut expanded = String::new();
+		let mut chars = self.input.chars().peekable();
+
+		while let Some(ch) = chars.next() {
+			match ch {
+				'\n' | '\t' | '\r' => expanded.push(ch),
+				c if c as u32 <= 0x1F => {
+					let display = (c as u8 + b'@') as char;
+					expanded.push_str("\x1b[7m^");
+					expanded.push(display);
+					expanded.push_str("\x1b[0m");
+				}
+				_ => expanded.push(ch),
+			}
+		}
+
+		self.input = expanded;
+	}
+
   /// Processes the annotated input and generates ANSI-styled output
   ///
   /// Walks through the input character by character, interpreting markers and
@@ -79,6 +104,9 @@ impl Highlighter {
           self.reapply_style();
           self.in_selection = false;
         }
+				_ if self.only_hl_visual => {
+					self.output.push(ch);
+				}
         markers::STRING_DQ_END
         | markers::STRING_SQ_END
         | markers::VAR_SUB_END
