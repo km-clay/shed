@@ -5,6 +5,14 @@ let
   boolToString = b:
   if b then "true" else "false";
 
+  mkKeymapCmd = cfg: let
+    flags = "-${lib.concatStrings cfg.modes}";
+    keys = "'${cfg.keys}'";
+    action = "'${cfg.command}'";
+  in
+    "keymap ${flags} ${keys} ${action}";
+
+
   mkCompleteCmd = name: cfg: let
     flags = lib.concatStrings [
       (lib.optionalString cfg.files " -f")
@@ -37,6 +45,30 @@ in
       type = lib.types.attrsOf lib.types.str;
       default = {};
       description = "Aliases to set when shed starts (e.g. ls='ls --color=auto')";
+    };
+
+    keymaps = lib.mkOption {
+      type = lib.types.listOf (lib.types.submodule {
+        options = {
+          modes = lib.mkOption {
+            type = lib.types.listOf (lib.types.enum [ "n" "i" "x" "v" "o" "r" ]);
+            default = [];
+            description = "The editing modes this keymap can be used in";
+          };
+          keys = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+            description = "The sequence of keys that trigger this keymap";
+          };
+          command = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+            description = "The sequence of characters to send to the line editor when the keymap is triggered.";
+          };
+        };
+      });
+      default = {};
+      description = "Custom keymaps to set when shed starts";
     };
 
     extraCompletion = lib.mkOption {
@@ -157,6 +189,11 @@ in
         description = "The maximum depth to allow when recursively executing shell functions";
       };
 
+      leaderKey = lib.mkOption {
+        type = lib.types.str;
+        default = "\\\\";
+        description = "The leader key to use for custom keymaps (e.g. if set to '\\\\', then a keymap with keys='x' would be triggered by '\\x')";
+      };
       promptPathSegments = lib.mkOption {
         type = lib.types.int;
         default = 4;
@@ -193,6 +230,7 @@ in
   config =
   let
     completeLines = lib.concatLines (lib.mapAttrsToList mkCompleteCmd cfg.extraCompletion);
+    keymapLines = lib.concatLines (map mkKeymapCmd cfg.keymaps);
   in
   lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
@@ -211,11 +249,13 @@ in
         "shopt core.bell_enabled=${boolToString cfg.settings.bellEnabled}"
         "shopt core.max_recurse_depth=${toString cfg.settings.maxRecurseDepth}"
 
+        "shopt prompt.leader='${cfg.settings.leaderKey}'"
         "shopt prompt.trunc_prompt_path=${toString cfg.settings.promptPathSegments}"
         "shopt prompt.comp_limit=${toString cfg.settings.completionLimit}"
         "shopt prompt.highlight=${boolToString cfg.settings.syntaxHighlighting}"
         "shopt prompt.linebreak_on_incomplete=${boolToString cfg.settings.linebreakOnIncomplete}"
         completeLines
+        keymapLines
       ])
       cfg.settings.extraPostConfig
     ];
