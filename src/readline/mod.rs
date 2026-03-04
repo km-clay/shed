@@ -800,10 +800,16 @@ impl ShedVi {
   }
 
 	pub fn swap_mode(&mut self, mode: &mut Box<dyn ViMode>) {
+		let pre_mode_change = read_logic(|l| l.get_autocmds(AutoCmdKind::PreModeChange));
+		pre_mode_change.exec();
+
 		std::mem::swap(&mut self.mode, mode);
 		self.editor.set_cursor_clamp(self.mode.clamp_cursor());
 		write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE)).ok();
 		self.prompt.refresh().ok();
+
+		let post_mode_change = read_logic(|l| l.get_autocmds(AutoCmdKind::PostModeChange));
+		post_mode_change.exec();
 	}
 
   pub fn exec_cmd(&mut self, mut cmd: ViCmd) -> ShResult<()> {
@@ -811,8 +817,6 @@ impl ShedVi {
     let mut is_insert_mode = false;
     if cmd.is_mode_transition() {
       let count = cmd.verb_count();
-			let pre_mode_change = read_logic(|l| l.get_autocmds(AutoCmdKind::PreModeChange));
-			pre_mode_change.exec();
 
       let mut mode: Box<dyn ViMode> = if let ModeReport::Ex = self.mode.report_mode() && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
 				if let Some(saved) = self.saved_mode.take() {
@@ -892,8 +896,6 @@ impl ShedVi {
 			write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE))?;
 			self.prompt.refresh()?;
 
-			let post_mode_change = read_logic(|l| l.get_autocmds(AutoCmdKind::PostModeChange));
-			post_mode_change.exec();
 
       return Ok(());
     } else if cmd.is_cmd_repeat() {
@@ -1377,6 +1379,12 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
           token_chars.next(); // consume the escaped char
         }
       }
+			'\\' if qt_state.in_single() => {
+				token_chars.next();
+				if let Some(&(_,'\'')) = token_chars.peek() {
+					token_chars.next(); // consume the escaped single quote
+				}
+			}
       '<' | '>' if !qt_state.in_quote() && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
         token_chars.next();
         if let Some((_, proc_sub_ch)) = token_chars.peek()

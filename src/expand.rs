@@ -1070,6 +1070,14 @@ pub fn unescape_str(raw: &str) -> String {
         result.push(markers::SNG_QUOTE);
         while let Some(q_ch) = chars.next() {
           match q_ch {
+						'\\' => {
+							if chars.peek() == Some(&'\'') {
+								result.push('\'');
+								chars.next();
+							} else {
+								result.push('\\');
+							}
+						}
             '\'' => {
               result.push(markers::SNG_QUOTE);
               break;

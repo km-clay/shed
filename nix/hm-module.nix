@@ -80,6 +80,7 @@ in
               "post-prompt"
               "pre-mode-change"
               "post-mode-change"
+              "on-exit"
             ])) (list: list != []);
             description = "The events that trigger this autocmd";
           };

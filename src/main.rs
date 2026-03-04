@@ -118,13 +118,16 @@ fn main() -> ExitCode {
   } else {
     shed_interactive(args)
   } {
-    eprintln!("shed: {e}");
+		e.print_error();
   };
 
   if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Exit))
 	&& let Err(e) = exec_input(trap, None, false, Some("trap".into())) {
-    eprintln!("shed: error running EXIT trap: {e}");
+		e.print_error();
   }
+
+	let on_exit_autocmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnExit));
+	on_exit_autocmds.exec();
 
   write_jobs(|j| j.hang_up());
   ExitCode::from(QUIT_CODE.load(Ordering::SeqCst) as u8)

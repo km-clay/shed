@@ -532,7 +532,8 @@ pub enum AutoCmdKind {
 	PrePrompt,
 	PostPrompt,
 	PreModeChange,
-	PostModeChange
+	PostModeChange,
+	OnExit
 }
 
 impl Display for AutoCmdKind {
@@ -547,6 +548,7 @@ impl Display for AutoCmdKind {
 			Self::PostPrompt => write!(f, "post-prompt"),
 			Self::PreModeChange => write!(f, "pre-mode-change"),
 			Self::PostModeChange => write!(f, "post-mode-change"),
+			Self::OnExit => write!(f, "on-exit"),
 		}
 	}
 }
@@ -564,6 +566,7 @@ impl FromStr for AutoCmdKind {
 			"post-prompt" => Ok(Self::PostPrompt),
 			"pre-mode-change" => Ok(Self::PreModeChange),
 			"post-mode-change" => Ok(Self::PostModeChange),
+			"on-exit" => Ok(Self::OnExit),
 			_ => Err(ShErr::simple(
 				ShErrKind::ParseErr,
 				format!("Invalid autocmd kind: {}", s),
