@@ -44,8 +44,8 @@ Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, s
 
 `shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
 
-<img width="773" height="505" alt="shed_comp" src="https://github.com/user-attachments/assets/d317387e-4c33-406a-817f-1c183afab749" />
-<img width="773" height="536" alt="shed_search" src="https://github.com/user-attachments/assets/5109eb14-5c33-46bb-ab39-33c60ca039a8" />
+<img width="380" height="270" alt="shed_comp" src="https://github.com/user-attachments/assets/d317387e-4c33-406a-817f-1c183afab749" />
+<img width="380" height="270" alt="shed_search" src="https://github.com/user-attachments/assets/5109eb14-5c33-46bb-ab39-33c60ca039a8" />
 
 
 ### Keymaps
