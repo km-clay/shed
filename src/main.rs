@@ -34,6 +34,7 @@ use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
+use crate::procio::IoMode;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
@@ -84,6 +85,21 @@ fn setup_panic_handler() {
         jobs.hang_up();
       }
     });
+
+		let data_dir = env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+			let home = env::var("HOME").unwrap();
+			format!("{home}/.local/share")
+		});
+		let log_dir = Path::new(&data_dir).join("shed").join("log");
+		std::fs::create_dir_all(&log_dir).unwrap();
+		let log_file_path = log_dir.join("panic.log");
+		let mut log_file = parse::get_redir_file(parse::RedirType::Output, log_file_path).unwrap();
+
+		let panic_info_raw = info.to_string();
+		log_file.write_all(panic_info_raw.as_bytes()).unwrap();
+
+		let backtrace = std::backtrace::Backtrace::force_capture();
+		log_file.write_all(format!("\nBacktrace:\n{:?}", backtrace).as_bytes()).unwrap();
 
     default_panic_hook(info);
   }));

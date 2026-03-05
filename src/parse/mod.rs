@@ -1736,18 +1736,19 @@ fn node_is_punctuated(tokens: &[Tk]) -> bool {
     .is_some_and(|tk| matches!(tk.class, TkRule::Sep))
 }
 
-pub fn get_redir_file(class: RedirType, path: PathBuf) -> ShResult<File> {
+pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<File> {
+	let path = path.as_ref();
   let result = match class {
     RedirType::Input => OpenOptions::new().read(true).open(Path::new(&path)),
     RedirType::Output => OpenOptions::new()
       .write(true)
       .create(true)
       .truncate(true)
-      .open(Path::new(&path)),
+      .open(path),
     RedirType::Append => OpenOptions::new()
       .create(true)
       .append(true)
-      .open(Path::new(&path)),
+      .open(path),
     _ => unimplemented!(),
   };
   Ok(result?)
