@@ -702,7 +702,7 @@ impl Dispatcher {
     }
   }
   fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
-    let NdRule::Pipeline { cmds, pipe_err: _ } = pipeline.class else {
+    let NdRule::Pipeline { cmds } = pipeline.class else {
       unreachable!()
     };
     self.job_stack.new_job();
@@ -726,6 +726,10 @@ impl Dispatcher {
       }
       if let Some(pipe) = wpipe {
         self.io_stack.push_to_frame(pipe);
+				if cmd.flags.contains(NdFlags::PIPE_ERR) {
+					let err_redir = Redir::new(IoMode::Fd { tgt_fd: STDERR_FILENO, src_fd: STDOUT_FILENO }, RedirType::Output);
+					self.io_stack.push_to_frame(err_redir);
+				}
       } else {
         for redir in std::mem::take(&mut out_redirs) {
           self.io_stack.push_to_frame(redir);

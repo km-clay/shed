@@ -216,7 +216,6 @@ impl Node {
       }
       NdRule::Pipeline {
         ref mut cmds,
-        pipe_err: _,
       } => {
         for cmd_node in cmds {
           cmd_node.walk_tree(f);
@@ -272,6 +271,7 @@ bitflags! {
     const FORK_BUILTINS = 0b000010;
     const NO_FORK = 0b000100;
     const ARR_ASSIGN = 0b001000;
+		const PIPE_ERR = 0b010000;
   }
 }
 
@@ -642,8 +642,7 @@ pub enum NdRule {
     argv: Vec<Tk>,
   },
   Pipeline {
-    cmds: Vec<Node>,
-    pipe_err: bool,
+    cmds: Vec<Node>
   },
   Conjunction {
     elements: Vec<ConjunctNode>,
@@ -1446,16 +1445,19 @@ impl ParseStream {
     let mut node_tks = vec![];
     let mut flags = NdFlags::empty();
 
-    while let Some(cmd) = self.parse_block(false)? {
+    while let Some(mut cmd) = self.parse_block(false)? {
       let is_punctuated = node_is_punctuated(&cmd.tokens);
       node_tks.append(&mut cmd.tokens.clone());
+			if *self.next_tk_class() == TkRule::ErrPipe {
+				cmd.flags |= NdFlags::PIPE_ERR;
+			}
       cmds.push(cmd);
       if *self.next_tk_class() == TkRule::Bg {
         let tk = self.next_tk().unwrap();
         node_tks.push(tk.clone());
         flags |= NdFlags::BACKGROUND;
         break;
-      } else if *self.next_tk_class() != TkRule::Pipe || is_punctuated {
+      } else if (!matches!(*self.next_tk_class(),TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated {
         break;
       } else if let Some(pipe) = self.next_tk() {
         node_tks.push(pipe)
@@ -1470,7 +1472,6 @@ impl ParseStream {
         // TODO: implement pipe_err support
         class: NdRule::Pipeline {
           cmds,
-          pipe_err: false,
         },
         flags,
         redirs: vec![],
@@ -1554,6 +1555,7 @@ impl ParseStream {
       match tk.class {
         TkRule::EOI
         | TkRule::Pipe
+				| TkRule::ErrPipe
         | TkRule::And
         | TkRule::BraceGrpEnd
         | TkRule::Or
@@ -1867,7 +1869,6 @@ where
     }
     NdRule::Pipeline {
       ref mut cmds,
-      pipe_err: _,
     } => {
       for cmd_node in cmds {
         check_node(cmd_node, filter, operation);
