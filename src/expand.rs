@@ -1076,7 +1076,6 @@ pub fn unescape_str(raw: &str) -> String {
               }
             }
             '$' => {
-              log::debug!("Found ANSI-C quoting");
               chars.next();
               while let Some(q_ch) = chars.next() {
                 match q_ch {
@@ -1232,7 +1231,6 @@ pub fn unescape_str(raw: &str) -> String {
         }
       }
       '$' if chars.peek() == Some(&'\'') => {
-        log::debug!("Found ANSI-C quoting");
         chars.next();
         result.push(markers::SNG_QUOTE);
         while let Some(q_ch) = chars.next() {
@@ -1406,7 +1404,6 @@ impl FromStr for ParamExp {
       ))
     };
 
-    log::debug!("Parsing parameter expansion: '{:?}'", s);
 
     // Handle indirect var expansion: ${!var}
     if let Some(var) = s.strip_prefix('!') {
@@ -1423,7 +1420,6 @@ impl FromStr for ParamExp {
       return Ok(RemShortestPrefix(rest.to_string()));
     }
     if let Some(rest) = s.strip_prefix("%%") {
-      log::debug!("Matched longest suffix pattern: '{}'", rest);
       return Ok(RemLongestSuffix(rest.to_string()));
     } else if let Some(rest) = s.strip_prefix('%') {
       return Ok(RemShortestSuffix(rest.to_string()));
@@ -2363,7 +2359,7 @@ pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
     }
   }
 
-  let key = match *key_name.first()? {
+  let key = match key_name.first()?.to_uppercase().as_str() {
     "CR" => KeyCode::Char('\r'),
     "ENTER" | "RETURN" => KeyCode::Enter,
     "ESC" | "ESCAPE" => KeyCode::Esc,
@@ -2378,6 +2374,7 @@ pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
     "RIGHT" => KeyCode::Right,
     "HOME" => KeyCode::Home,
     "END" => KeyCode::End,
+		"CMD" => KeyCode::ExMode,
     "PGUP" | "PAGEUP" => KeyCode::PageUp,
     "PGDN" | "PAGEDOWN" => KeyCode::PageDown,
     k if k.len() == 1 => KeyCode::Char(k.chars().next().unwrap()),

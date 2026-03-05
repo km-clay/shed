@@ -15,13 +15,11 @@ use crate::{
   libsh::{error::ShResult, guards::var_ctx_guard},
   parse::{
     execute::exec_input,
-    lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
+    lex::{LexFlags, LexStream, QuoteState, Tk, TkFlags, TkRule},
   },
   prelude::*,
   readline::{
-    markers,
-    register::{RegisterContent, write_register},
-    term::RawModeGuard,
+    history::History, markers, register::{RegisterContent, write_register}, term::RawModeGuard
   },
   state::{VarFlags, VarKind, read_shopts, write_meta, write_vars},
 };
@@ -299,6 +297,13 @@ impl ClampedUsize {
     let max = self.upper_bound();
     self.value = (self.value + value).clamp(0, max)
   }
+	pub fn add_signed(&mut self, value: isize) {
+		if value.is_negative() {
+			self.sub(value.wrapping_abs() as usize);
+		} else {
+			self.add(value as usize);
+		}
+	}
   pub fn sub(&mut self, value: usize) {
     self.value = self.value.saturating_sub(value)
   }
@@ -645,6 +650,10 @@ impl LineBuf {
     self.buffer.push_str(slice);
     self.update_graphemes();
   }
+	pub fn insert_str_at_cursor(&mut self, slice: &str) {
+		let pos = self.index_byte_pos(self.cursor.get());
+		self.insert_str_at(pos, slice);
+	}
   pub fn insert_at_cursor(&mut self, ch: char) {
     self.insert_at(self.cursor.get(), ch);
   }
@@ -2893,7 +2902,7 @@ impl LineBuf {
         }
       }
       Verb::Insert(string) => {
-        self.push_str(&string);
+        self.insert_str_at_cursor(&string);
         let graphemes = string.graphemes(true).count();
         log::debug!("Inserted string: {string:?}, graphemes: {graphemes}");
         log::debug!("buffer after insert: {:?}", self.buffer);
@@ -3317,6 +3326,73 @@ impl LineBuf {
 
     Ok(())
   }
+
+	pub fn attempt_history_expansion(&mut self, hist: &History) -> bool {
+		self.update_graphemes();
+		let mut changes: Vec<(Range<usize>,String)> = vec![];
+		let mut graphemes = self.buffer.grapheme_indices(true);
+		let mut qt_state = QuoteState::default();
+
+		while let Some((i,gr)) = graphemes.next() {
+			match gr {
+				"\\" => {
+					graphemes.next();
+				}
+				"'" => qt_state.toggle_single(),
+				"\"" => qt_state.toggle_double(),
+				"!" if !qt_state.in_single() => {
+					let start = i;
+					match graphemes.next() {
+						Some((_,"!")) => {
+							// we have "!!", which expands to the previous command
+							if let Some(prev) = hist.last() {
+								let raw = prev.command();
+								changes.push((start..start+2, raw.to_string()));
+							}
+						}
+						Some((_,"$")) => {
+							// we have "!$", which expands to the last word of the previous command
+							if let Some(prev) = hist.last() {
+								let raw = prev.command();
+								if let Some(last_word) = raw.split_whitespace().last() {
+									changes.push((start..start+2, last_word.to_string()));
+								}
+							}
+						}
+						Some((j,gr)) if !is_whitespace(gr) => {
+							let mut end = j + gr.len();
+							while let Some((k, gr2)) = graphemes.next() {
+								if is_whitespace(gr2) { break; }
+								end = k + gr2.len();
+							}
+							let token = &self.buffer[j..end];
+							let cmd = hist.resolve_hist_token(token).unwrap_or(token.into());
+							changes.push((start..end, cmd));
+						}
+						_ => { /* not a hist expansion */ }
+					}
+				}
+				_ => { /* carry on */ }
+			}
+		}
+
+		let ret = !changes.is_empty();
+
+		let buf_len = self.grapheme_indices().len();
+
+		for (range,change) in changes.into_iter().rev() {
+			self.buffer.replace_range(range, &change);
+		}
+		self.update_graphemes();
+
+		let new_len = self.grapheme_indices().len();
+		let delta = new_len as isize - buf_len as isize;
+
+		self.cursor.set_max(new_len);
+		self.cursor.add_signed(delta);
+		ret
+	}
+
   pub fn as_str(&self) -> &str {
     &self.buffer // FIXME: this will have to be fixed up later
   }

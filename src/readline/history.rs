@@ -1,17 +1,10 @@
 use std::{
-  collections::HashSet,
-  env,
-  fmt::{Display, Write},
-  fs::{self, OpenOptions},
-  io::Write as IoWrite,
-  path::{Path, PathBuf},
-  str::FromStr,
-  time::{Duration, SystemTime, UNIX_EPOCH},
+  cmp::Ordering, collections::HashSet, env, fmt::{Display, Write}, fs::{self, OpenOptions}, io::Write as IoWrite, path::{Path, PathBuf}, str::FromStr, time::{Duration, SystemTime, UNIX_EPOCH}
 };
 
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
-  readline::linebuf::LineBuf,
+  readline::{complete::FuzzySelector, linebuf::LineBuf},
 };
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -207,6 +200,7 @@ pub struct History {
   pub pending: Option<LineBuf>, // command, cursor_pos
   entries: Vec<HistEntry>,
   search_mask: Vec<HistEntry>,
+	pub fuzzy_finder: FuzzySelector,
   no_matches: bool,
   pub cursor: usize,
   //search_direction: Direction,
@@ -232,6 +226,7 @@ impl History {
     Ok(Self {
       path,
       entries,
+			fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
       pending: None,
       search_mask,
       no_matches: false,
@@ -241,6 +236,20 @@ impl History {
       max_size: Some(max_hist as u32),
     })
   }
+
+	pub fn start_search(&mut self, initial: &str) -> Option<String> {
+		if self.search_mask.is_empty() {
+			None
+		} else if self.search_mask.len() == 1 {
+			Some(self.search_mask[0].command().to_string())
+		} else {
+			self.fuzzy_finder.set_query(initial.to_string());
+			let raw_entries = self.search_mask.clone().into_iter()
+				.map(|ent| ent.command().to_string());
+			self.fuzzy_finder.activate(raw_entries.collect());
+			None
+		}
+	}
 
   pub fn reset(&mut self) {
     self.search_mask = dedupe_entries(&self.entries);
@@ -291,6 +300,36 @@ impl History {
   pub fn last_mut(&mut self) -> Option<&mut HistEntry> {
     self.entries.last_mut()
   }
+	pub fn last(&self) -> Option<&HistEntry> {
+		self.entries.last()
+	}
+
+	pub fn resolve_hist_token(&self, token: &str) -> Option<String> {
+		let token = token.strip_prefix('!').unwrap_or(token).to_string();
+		if let Ok(num) = token.parse::<i32>() && num != 0 {
+			match num.cmp(&0) {
+				Ordering::Less => {
+					if num.unsigned_abs() > self.entries.len() as u32 {
+						return None;
+					}
+
+					let rev_idx = self.entries.len() - num.unsigned_abs() as usize;
+					self.entries.get(rev_idx)
+						.map(|e| e.command().to_string())
+				}
+				Ordering::Greater => {
+					self.entries.get(num as usize)
+						.map(|e| e.command().to_string())
+				}
+				_ => unreachable!()
+			}
+		} else {
+			let mut rev_search = self.entries.iter();
+			rev_search
+				.rfind(|e| e.command().starts_with(&token))
+				.map(|e| e.command().to_string())
+		}
+	}
 
   pub fn get_new_id(&self) -> u32 {
     let Some(ent) = self.entries.last() else {

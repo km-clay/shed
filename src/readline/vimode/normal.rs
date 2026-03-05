@@ -756,6 +756,15 @@ impl ViMode for ViNormal {
         raw_seq: "".into(),
         flags: self.flags(),
       }),
+			E(K::ExMode, _) => {
+				return Some(ViCmd {
+					register: Default::default(),
+					verb: Some(VerbCmd(1, Verb::ExMode)),
+					motion: None,
+					raw_seq: self.take_cmd(),
+					flags: self.flags(),
+				});
+			}
       E(K::Char('A'), M::CTRL) => {
         let count = self
           .parse_count(&mut self.pending_seq.chars().peekable())

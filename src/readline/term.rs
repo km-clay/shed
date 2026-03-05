@@ -69,7 +69,7 @@ pub fn get_win_size(fd: RawFd) -> (Col, Row) {
   }
 }
 
-fn enumerate_lines(s: &str, left_pad: usize) -> String {
+fn enumerate_lines(s: &str, left_pad: usize, show_numbers: bool) -> String {
   let total_lines = s.lines().count();
   let max_num_len = total_lines.to_string().len();
   s.lines()
@@ -84,23 +84,15 @@ fn enumerate_lines(s: &str, left_pad: usize) -> String {
         // " 2 | " — num + padding + " | "
         let prefix_len = max_num_len + 3; // "N | "
         let trail_pad = left_pad.saturating_sub(prefix_len);
-        if i == total_lines - 1 {
-          // Don't add a newline to the last line
-          write!(
-            acc,
-            "\x1b[0m\x1b[90m{}{num} |\x1b[0m {}{ln}",
-            " ".repeat(num_pad),
-            " ".repeat(trail_pad),
-          )
-          .unwrap();
+        let prefix = if show_numbers {
+          format!("\x1b[0m\x1b[90m{}{num} |\x1b[0m ", " ".repeat(num_pad))
         } else {
-          writeln!(
-            acc,
-            "\x1b[0m\x1b[90m{}{num} |\x1b[0m {}{ln}",
-            " ".repeat(num_pad),
-            " ".repeat(trail_pad),
-          )
-          .unwrap();
+          " ".repeat(prefix_len + 1).to_string()
+        };
+        if i == total_lines - 1 {
+          write!(acc, "{prefix}{}{ln}", " ".repeat(trail_pad)).unwrap();
+        } else {
+          writeln!(acc, "{prefix}{}{ln}", " ".repeat(trail_pad)).unwrap();
         }
       }
       acc
@@ -1013,7 +1005,8 @@ impl LineWriter for TermWriter {
     let multiline = line.contains('\n');
     if multiline {
       let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
-      let display_line = enumerate_lines(line, prompt_end.col as usize);
+      let show_numbers = read_shopts(|o| o.prompt.line_numbers);
+      let display_line = enumerate_lines(line, prompt_end.col as usize, show_numbers);
       self.buffer.push_str(&display_line);
     } else {
       self.buffer.push_str(line);

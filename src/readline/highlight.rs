@@ -105,14 +105,17 @@ impl Highlighter {
           self.in_selection = false;
         }
         _ if self.only_hl_visual => {
-          self.output.push(ch);
+					if !is_marker(ch) {
+						self.output.push(ch);
+					}
         }
         markers::STRING_DQ_END
         | markers::STRING_SQ_END
         | markers::VAR_SUB_END
         | markers::CMD_SUB_END
         | markers::PROC_SUB_END
-        | markers::SUBSH_END => self.pop_style(),
+        | markers::SUBSH_END
+        | markers::HIST_EXP_END => self.pop_style(),
 
         markers::CMD_SEP | markers::RESET => self.clear_styles(),
 
@@ -275,6 +278,23 @@ impl Highlighter {
             self.pop_style();
           }
           self.last_was_reset = false;
+        }
+        markers::HIST_EXP => {
+          let mut hist_exp = String::new();
+          while let Some(ch) = input_chars.peek() {
+            if *ch == markers::HIST_EXP_END {
+              input_chars.next();
+              break;
+            } else if markers::is_marker(*ch) {
+              input_chars.next();
+              continue;
+            }
+            hist_exp.push(*ch);
+            input_chars.next();
+          }
+          self.push_style(Style::Blue);
+          self.output.push_str(&hist_exp);
+          self.pop_style();
         }
         markers::VAR_SUB => {
           let mut var_sub = String::new();

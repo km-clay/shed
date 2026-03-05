@@ -12,11 +12,11 @@ use crate::expand::expand_prompt;
 use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::lex::{LexStream, QuoteState};
-use crate::readline::complete::FuzzyCompleter;
+use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::readline::vimode::{ViEx, ViVerbatim};
 use crate::state::{
-  AutoCmdKind, ShellParam, VarFlags, VarKind, read_logic, read_shopts, write_meta, write_vars,
+  AutoCmdKind, ShellParam, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta, write_vars
 };
 use crate::{
   libsh::error::ShResult,
@@ -76,6 +76,8 @@ pub mod markers {
   pub const STRING_SQ_END: Marker = '\u{e115}';
   pub const ESCAPE: Marker = '\u{e116}';
   pub const GLOB: Marker = '\u{e117}';
+  pub const HIST_EXP: Marker = '\u{e11c}';
+  pub const HIST_EXP_END: Marker = '\u{e11d}';
 
   // other
   pub const VISUAL_MODE_START: Marker = '\u{e118}';
@@ -409,11 +411,51 @@ impl ShedVi {
 
     // Process all available keys
     while let Some(key) = self.reader.read_key()? {
-      // If completer is active, delegate input to it
-      if self.completer.is_active() {
+      // If completer or history search are active, delegate input to it
+			if self.history.fuzzy_finder.is_active() {
+				self.print_line(false)?;
+				match self.history.fuzzy_finder.handle_key(key)? {
+					SelectorResponse::Accept(cmd) => {
+						let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
+
+						self.editor.set_buffer(cmd.to_string());
+						self.editor.move_cursor_to_end();
+						self.history.update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+						self.editor.set_hint(None);
+						self.history.fuzzy_finder.clear(&mut self.writer)?;
+						self.history.fuzzy_finder.reset();
+
+						with_vars([("_HIST_ENTRY".into(), cmd.clone())], || {
+							post_cmds.exec_with(&cmd);
+						});
+
+						write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE)).ok();
+						self.prompt.refresh();
+						self.needs_redraw = true;
+						continue;
+					}
+					SelectorResponse::Dismiss => {
+						let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryClose));
+						post_cmds.exec();
+
+						self.editor.set_hint(None);
+						self.history.fuzzy_finder.clear(&mut self.writer)?;
+						write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE)).ok();
+						self.prompt.refresh();
+						self.needs_redraw = true;
+						continue;
+					}
+					SelectorResponse::Consumed => {
+						self.needs_redraw = true;
+						continue;
+					}
+				}
+			} else if self.completer.is_active() {
         self.print_line(false)?;
         match self.completer.handle_key(key.clone())? {
           CompResponse::Accept(candidate) => {
+						let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
+
             let span_start = self.completer.token_span().0;
             let new_cursor = span_start + candidate.len();
             let line = self.completer.get_completed_line(&candidate);
@@ -432,12 +474,22 @@ impl ShedVi {
             self.completer.clear(&mut self.writer)?;
             self.needs_redraw = true;
             self.completer.reset();
+
+						with_vars([("_COMP_CANDIDATE".into(), candidate.clone())], || {
+							post_cmds.exec_with(&candidate);
+						});
+
             continue;
           }
           CompResponse::Dismiss => {
+						let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionCancel));
+						post_cmds.exec();
+
             let hint = self.history.get_hint();
             self.editor.set_hint(hint);
             self.completer.clear(&mut self.writer)?;
+						write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE)).ok();
+						self.prompt.refresh();
             self.completer.reset();
             continue;
           }
@@ -486,6 +538,9 @@ impl ShedVi {
         return Ok(event);
       }
     }
+		if !self.completer.is_active() && !self.history.fuzzy_finder.is_active() {
+			write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str(self.mode.report_mode().to_string()), VarFlags::NONE)).ok();
+		}
 
     // Redraw if we processed any input
     if self.needs_redraw {
@@ -498,6 +553,7 @@ impl ShedVi {
 
   pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
     if self.should_accept_hint(&key) {
+			log::debug!("Accepting hint on key {key:?} in mode {:?}", self.mode.report_mode());
       self.editor.accept_hint();
       if !self.history.at_pending() {
         self.history.reset_to_pending();
@@ -510,6 +566,12 @@ impl ShedVi {
     }
 
     if let KeyEvent(KeyCode::Tab, mod_keys) = key {
+			if self.editor.attempt_history_expansion(&self.history) {
+				// If history expansion occurred, don't attempt completion yet
+				// allow the user to see the expanded command and accept or edit it before completing
+				return Ok(None);
+			}
+
       let direction = match mod_keys {
         ModKeys::SHIFT => -1,
         _ => 1,
@@ -524,7 +586,14 @@ impl ShedVi {
           self.old_layout = None;
         }
         Ok(Some(line)) => {
+					let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
+					let cand = self.completer.selected_candidate().unwrap_or_default();
+					with_vars([("_COMP_CANDIDATE".into(), cand.clone())], || {
+						post_cmds.exec_with(&cand);
+					});
+
           let span_start = self.completer.token_span().0;
+
           let new_cursor = span_start
             + self
               .completer
@@ -532,7 +601,7 @@ impl ShedVi {
               .map(|c| c.len())
               .unwrap_or_default();
 
-          self.editor.set_buffer(line);
+          self.editor.set_buffer(line.clone());
           self.editor.cursor.set(new_cursor);
 
           if !self.history.at_pending() {
@@ -543,10 +612,19 @@ impl ShedVi {
             .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
           let hint = self.history.get_hint();
           self.editor.set_hint(hint);
+
+
         }
         Ok(None) => {
+					let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
+
+					post_cmds.exec();
+
           self.writer.send_bell().ok();
           if self.completer.is_active() {
+						write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str("COMPLETE".to_string()), VarFlags::NONE)).ok();
+						self.prompt.refresh();
+						self.needs_redraw = true;
             self.editor.set_hint(None);
           }
         }
@@ -554,7 +632,34 @@ impl ShedVi {
 
       self.needs_redraw = true;
       return Ok(None);
-    }
+    } else if let KeyEvent(KeyCode::Char('R'), ModKeys::CTRL) = key {
+			let initial = self.editor.as_str();
+			match self.history.start_search(initial) {
+				Some(entry) => {
+					let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
+					with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
+						post_cmds.exec_with(&entry);
+					});
+
+					self.editor.set_buffer(entry);
+					self.editor.move_cursor_to_end();
+					self.history.update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+					self.editor.set_hint(None);
+				}
+				None => {
+					let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
+					post_cmds.exec();
+
+					self.writer.send_bell().ok();
+					if self.history.fuzzy_finder.is_active() {
+						write_vars(|v| v.set_var("SHED_VI_MODE", VarKind::Str("SEARCH".to_string()), VarFlags::NONE)).ok();
+						self.prompt.refresh();
+						self.needs_redraw = true;
+						self.editor.set_hint(None);
+					}
+				}
+			}
+		}
 
     if let KeyEvent(KeyCode::Char('\\'), ModKeys::NONE) = key
       && !self.next_is_escaped
@@ -586,6 +691,12 @@ impl ShedVi {
       && !self.editor.buffer.ends_with('\\')
       && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
     {
+			if self.editor.attempt_history_expansion(&self.history) {
+				// If history expansion occurred, don't submit yet
+				// allow the user to see the expanded command and accept or edit it before submitting
+				return Ok(None);
+			}
+
       self.editor.set_hint(None);
       self.editor.cursor.set(self.editor.cursor_max());
       self.print_line(true)?;
@@ -747,6 +858,7 @@ impl ShedVi {
     let one_line = new_layout.end.row == 0;
 
     self.completer.clear(&mut self.writer)?;
+    self.history.fuzzy_finder.clear(&mut self.writer)?;
 
     if let Some(layout) = self.old_layout.as_ref() {
       self.writer.clear_rows(layout)?;
@@ -836,6 +948,9 @@ impl ShedVi {
       .completer
       .set_prompt_line_context(preceding_width, new_layout.cursor.col);
     self.completer.draw(&mut self.writer)?;
+
+		self.history.fuzzy_finder.set_prompt_line_context(preceding_width, new_layout.cursor.col);
+		self.history.fuzzy_finder.draw(&mut self.writer)?;
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;
@@ -1527,6 +1642,35 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
           };
           insertions.push((span_start + index + offset, markers::RESET));
           insertions.push((span_start + index, markers::GLOB));
+        }
+      }
+      '!' if !qt_state.in_single() && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
+        let bang_pos = index;
+        token_chars.next(); // consume the '!'
+        if let Some((_, next_ch)) = token_chars.peek() {
+          match next_ch {
+            '!' | '$' => {
+              // !! or !$
+              token_chars.next();
+              insertions.push((span_start + bang_pos, markers::HIST_EXP));
+              insertions.push((span_start + bang_pos + 2, markers::HIST_EXP_END));
+            }
+            c if c.is_ascii_alphanumeric() || *c == '-' => {
+              // !word, !-N, !N
+              let mut end_pos = bang_pos + 1;
+              while let Some((cur_i, wch)) = token_chars.peek() {
+                if wch.is_ascii_alphanumeric() || *wch == '_' || *wch == '-' {
+                  end_pos = *cur_i + 1;
+                  token_chars.next();
+                } else {
+                  break;
+                }
+              }
+              insertions.push((span_start + bang_pos, markers::HIST_EXP));
+              insertions.push((span_start + end_pos, markers::HIST_EXP_END));
+            }
+            _ => { /* lone ! before non-expansion char, ignore */ }
+          }
         }
       }
       _ => {

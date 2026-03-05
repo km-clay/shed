@@ -81,6 +81,12 @@ in
               "pre-mode-change"
               "post-mode-change"
               "on-exit"
+              "on-history-open"
+              "on-history-close"
+              "on-history-select"
+              "on-completion-start"
+              "on-completion-cancel"
+              "on-completion-select"
             ])) (list: list != []);
             description = "The events that trigger this autocmd";
           };

@@ -550,6 +550,12 @@ pub enum AutoCmdKind {
   PostPrompt,
   PreModeChange,
   PostModeChange,
+	OnHistoryOpen,
+	OnHistoryClose,
+	OnHistorySelect,
+	OnCompletionStart,
+	OnCompletionCancel,
+	OnCompletionSelect,
   OnExit,
 }
 
@@ -565,6 +571,12 @@ impl Display for AutoCmdKind {
       Self::PostPrompt => write!(f, "post-prompt"),
       Self::PreModeChange => write!(f, "pre-mode-change"),
       Self::PostModeChange => write!(f, "post-mode-change"),
+			Self::OnHistoryOpen => write!(f, "on-history-open"),
+			Self::OnHistoryClose => write!(f, "on-history-close"),
+			Self::OnHistorySelect => write!(f, "on-history-select"),
+			Self::OnCompletionStart => write!(f, "on-completion-start"),
+			Self::OnCompletionCancel => write!(f, "on-completion-cancel"),
+			Self::OnCompletionSelect => write!(f, "on-completion-select"),
       Self::OnExit => write!(f, "on-exit"),
     }
   }
@@ -583,6 +595,12 @@ impl FromStr for AutoCmdKind {
       "post-prompt" => Ok(Self::PostPrompt),
       "pre-mode-change" => Ok(Self::PreModeChange),
       "post-mode-change" => Ok(Self::PostModeChange),
+			"on-history-open" => Ok(Self::OnHistoryOpen),
+			"on-history-close" => Ok(Self::OnHistoryClose),
+			"on-history-select" => Ok(Self::OnHistorySelect),
+			"on-completion-start" => Ok(Self::OnCompletionStart),
+			"on-completion-cancel" => Ok(Self::OnCompletionCancel),
+			"on-completion-select" => Ok(Self::OnCompletionSelect),
       "on-exit" => Ok(Self::OnExit),
       _ => Err(ShErr::simple(
         ShErrKind::ParseErr,
