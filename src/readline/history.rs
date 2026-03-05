@@ -217,12 +217,13 @@ impl History {
       format!("{home}/.shed_history")
     }));
     let mut entries = read_hist_file(&path)?;
-    // Enforce max_hist limit on loaded entries
-    if entries.len() > max_hist {
-      entries = entries.split_off(entries.len() - max_hist);
+    // Enforce max_hist limit on loaded entries (negative = unlimited)
+    if max_hist >= 0 && entries.len() > max_hist as usize {
+      entries = entries.split_off(entries.len() - max_hist as usize);
     }
     let search_mask = dedupe_entries(&entries);
     let cursor = search_mask.len();
+    let max_size = if max_hist < 0 { None } else { Some(max_hist as u32) };
     Ok(Self {
       path,
       entries,
@@ -233,7 +234,7 @@ impl History {
       cursor,
       //search_direction: Direction::Backward,
       ignore_dups,
-      max_size: Some(max_hist as u32),
+      max_size,
     })
   }
 

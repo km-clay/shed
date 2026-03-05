@@ -140,7 +140,7 @@ pub struct ShOptCore {
   pub dotglob: bool,
   pub autocd: bool,
   pub hist_ignore_dupes: bool,
-  pub max_hist: usize,
+  pub max_hist: isize,
   pub interactive_comments: bool,
   pub auto_hist: bool,
   pub bell_enabled: bool,
@@ -178,10 +178,10 @@ impl ShOptCore {
         self.hist_ignore_dupes = val;
       }
       "max_hist" => {
-        let Ok(val) = val.parse::<usize>() else {
+        let Ok(val) = val.parse::<isize>() else {
           return Err(ShErr::simple(
             ShErrKind::SyntaxErr,
-            "shopt: expected a positive integer for max_hist value",
+            "shopt: expected an integer for max_hist value (-1 for unlimited)",
           ));
         };
         self.max_hist = val;
@@ -256,7 +256,7 @@ impl ShOptCore {
       }
       "max_hist" => {
         let mut output = String::from(
-          "Maximum number of entries in the command history file (default '.shedhist')\n",
+          "Maximum number of entries in the command history file (-1 for unlimited)\n",
         );
         output.push_str(&format!("{}", self.max_hist));
         Ok(Some(output))
@@ -318,7 +318,7 @@ impl Default for ShOptCore {
       dotglob: false,
       autocd: false,
       hist_ignore_dupes: true,
-      max_hist: 1000,
+      max_hist: 10_000,
       interactive_comments: true,
       auto_hist: true,
       bell_enabled: true,

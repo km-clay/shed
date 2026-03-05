@@ -224,7 +224,7 @@ in
       };
       maxHistoryEntries = lib.mkOption {
         type = lib.types.int;
-        default = 1000;
+        default = 10000;
         description = "The maximum number of entries to keep in the command history";
       };
       interactiveComments = lib.mkOption {
