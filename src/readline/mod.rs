@@ -212,14 +212,7 @@ impl Prompt {
 
   fn refresh_now(&mut self) {
     let saved_status = state::get_status();
-    if let Ok(expanded) = expand_prompt(&self.ps1_raw) {
-      self.ps1_expanded = expanded;
-    }
-    if let Some(psr_raw) = &self.psr_raw
-      && let Ok(expanded) = expand_prompt(psr_raw)
-    {
-      self.psr_expanded = Some(expanded);
-    }
+		*self = Self::new();
     state::set_status(saved_status);
     self.dirty = false;
   }
