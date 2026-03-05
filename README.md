@@ -2,7 +2,7 @@
 
 A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing.
 
-<img width="506" height="407" alt="shed" src="https://github.com/user-attachments/assets/5333dd47-ae1b-45cd-8729-b623f586b10e" />
+<img width="506" height="407" alt="shed" src="https://github.com/user-attachments/assets/3945f663-a361-4418-bf20-0c4eaa2a36d2" />
 
 ## Features
 
@@ -44,8 +44,9 @@ Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, s
 
 `shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
 
-<img width="773" height="505" alt="shed_comp" src="https://github.com/user-attachments/assets/0078ef5a-ba01-479a-831e-96ae5a25b4e3" />
-<img width="773" height="536" alt="shed_search" src="https://github.com/user-attachments/assets/7169dacc-a92b-48f7-bf45-0f14a6d38a10" />
+<img width="773" height="505" alt="shed_comp" src="https://github.com/user-attachments/assets/d317387e-4c33-406a-817f-1c183afab749" />
+<img width="773" height="536" alt="shed_search" src="https://github.com/user-attachments/assets/5109eb14-5c33-46bb-ab39-33c60ca039a8" />
+
 
 ### Keymaps
 
