@@ -178,8 +178,8 @@ impl ViCmd {
       matches!(
         v.1,
         Verb::Change
-					| Verb::VerbatimMode
-					| Verb::ExMode
+          | Verb::VerbatimMode
+          | Verb::ExMode
           | Verb::InsertMode
           | Verb::InsertModeLineBreak(_)
           | Verb::NormalMode
@@ -221,8 +221,8 @@ pub enum Verb {
   ReplaceCharInplace(char, u16), // char to replace with, number of chars to replace
   ToggleCaseInplace(u16),        // Number of chars to toggle
   ToggleCaseRange,
-	IncrementNumber(u16),
-	DecrementNumber(u16),
+  IncrementNumber(u16),
+  DecrementNumber(u16),
   ToLower,
   ToUpper,
   Complete,
@@ -232,7 +232,7 @@ pub enum Verb {
   RepeatLast,
   Put(Anchor),
   ReplaceMode,
-	VerbatimMode,
+  VerbatimMode,
   InsertMode,
   InsertModeLineBreak(Anchor),
   NormalMode,
@@ -303,8 +303,8 @@ impl Verb {
         | Self::Insert(_)
         | Self::Rot13
         | Self::EndOfFile
-				| Self::IncrementNumber(_)
-				| Self::DecrementNumber(_)
+        | Self::IncrementNumber(_)
+        | Self::DecrementNumber(_)
     )
   }
   pub fn is_char_insert(&self) -> bool {

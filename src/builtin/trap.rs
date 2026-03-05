@@ -122,7 +122,9 @@ pub fn trap(node: Node) -> ShResult<()> {
   };
 
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   if argv.is_empty() {
     let stdout = borrow_fd(STDOUT_FILENO);

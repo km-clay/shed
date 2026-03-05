@@ -16,7 +16,11 @@ pub fn readonly(node: Node) -> ShResult<()> {
   };
 
   // Remove "readonly" from argv
-  let argv = if !argv.is_empty() { &argv[1..] } else { &argv[..] };
+  let argv = if !argv.is_empty() {
+    &argv[1..]
+  } else {
+    &argv[..]
+  };
 
   if argv.is_empty() {
     // Display the local variables
@@ -67,15 +71,25 @@ pub fn unset(node: Node) -> ShResult<()> {
   };
 
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   if argv.is_empty() {
-    return Err(ShErr::at(ShErrKind::SyntaxErr, blame, "unset: Expected at least one argument"));
+    return Err(ShErr::at(
+      ShErrKind::SyntaxErr,
+      blame,
+      "unset: Expected at least one argument",
+    ));
   }
 
   for (arg, span) in argv {
     if !read_vars(|v| v.var_exists(&arg)) {
-      return Err(ShErr::at(ShErrKind::ExecFail, span, format!("unset: No such variable '{arg}'")));
+      return Err(ShErr::at(
+        ShErrKind::ExecFail,
+        span,
+        format!("unset: No such variable '{arg}'"),
+      ));
     }
     write_vars(|v| v.unset_var(&arg))?;
   }
@@ -94,7 +108,11 @@ pub fn export(node: Node) -> ShResult<()> {
   };
 
   // Remove "export" from argv
-  let argv = if !argv.is_empty() { &argv[1..] } else { &argv[..] };
+  let argv = if !argv.is_empty() {
+    &argv[1..]
+  } else {
+    &argv[..]
+  };
 
   if argv.is_empty() {
     // Display the environment variables
@@ -137,7 +155,11 @@ pub fn local(node: Node) -> ShResult<()> {
   };
 
   // Remove "local" from argv
-  let argv = if !argv.is_empty() { &argv[1..] } else { &argv[..] };
+  let argv = if !argv.is_empty() {
+    &argv[1..]
+  } else {
+    &argv[..]
+  };
 
   if argv.is_empty() {
     // Display the local variables

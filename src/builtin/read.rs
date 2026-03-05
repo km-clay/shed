@@ -6,7 +6,16 @@ use nix::{
 };
 
 use crate::{
-  expand::expand_keymap, getopt::{Opt, OptSpec, get_opts_from_tokens}, libsh::{error::{ShErr, ShErrKind, ShResult, ShResultExt}, sys::TTY_FILENO}, parse::{NdRule, Node, execute::prepare_argv}, procio::borrow_fd, readline::term::{KeyReader, PollReader, RawModeGuard}, state::{self, VarFlags, VarKind, read_vars, write_vars}
+  expand::expand_keymap,
+  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  libsh::{
+    error::{ShErr, ShErrKind, ShResult, ShResultExt},
+    sys::TTY_FILENO,
+  },
+  parse::{NdRule, Node, execute::prepare_argv},
+  procio::borrow_fd,
+  readline::term::{KeyReader, PollReader, RawModeGuard},
+  state::{self, VarFlags, VarKind, read_vars, write_vars},
 };
 
 pub const READ_OPTS: [OptSpec; 7] = [
@@ -40,19 +49,19 @@ pub const READ_OPTS: [OptSpec; 7] = [
   }, // read until delimiter
 ];
 
-pub const READ_KEY_OPTS: [OptSpec;3] = [
-	OptSpec {
-		opt: Opt::Short('v'), // var name
-		takes_arg: true
-	},
-	OptSpec {
-		opt: Opt::Short('w'), // char whitelist
-		takes_arg: true
-	},
-	OptSpec {
-		opt: Opt::Short('b'), // char blacklist
-		takes_arg: true
-	}
+pub const READ_KEY_OPTS: [OptSpec; 3] = [
+  OptSpec {
+    opt: Opt::Short('v'), // var name
+    takes_arg: true,
+  },
+  OptSpec {
+    opt: Opt::Short('w'), // char whitelist
+    takes_arg: true,
+  },
+  OptSpec {
+    opt: Opt::Short('b'), // char blacklist
+    takes_arg: true,
+  },
 ];
 
 bitflags! {
@@ -84,7 +93,9 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
   let (argv, opts) = get_opts_from_tokens(argv, &READ_OPTS)?;
   let read_opts = get_read_flags(opts).blame(blame.clone())?;
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   if let Some(prompt) = read_opts.prompt {
     write(borrow_fd(STDOUT_FILENO), prompt.as_bytes())?;
@@ -257,96 +268,98 @@ pub fn get_read_flags(opts: Vec<Opt>) -> ShResult<ReadOpts> {
 }
 
 pub struct ReadKeyOpts {
-	var_name: Option<String>,
-	char_whitelist: Option<String>,
-	char_blacklist: Option<String>
+  var_name: Option<String>,
+  char_whitelist: Option<String>,
+  char_blacklist: Option<String>,
 }
 
 pub fn read_key(node: Node) -> ShResult<()> {
-	let blame = node.get_span().clone();
-	let NdRule::Command { argv, .. } = node.class else { unreachable!() };
+  let blame = node.get_span().clone();
+  let NdRule::Command { argv, .. } = node.class else {
+    unreachable!()
+  };
 
-	if !isatty(*TTY_FILENO)? {
-		state::set_status(1);
-		return Ok(());
-	}
+  if !isatty(*TTY_FILENO)? {
+    state::set_status(1);
+    return Ok(());
+  }
 
-	let (_, opts) = get_opts_from_tokens(argv, &READ_KEY_OPTS).blame(blame.clone())?;
-	let read_key_opts = get_read_key_opts(opts).blame(blame.clone())?;
+  let (_, opts) = get_opts_from_tokens(argv, &READ_KEY_OPTS).blame(blame.clone())?;
+  let read_key_opts = get_read_key_opts(opts).blame(blame.clone())?;
 
-	let key = {
-		let _raw = crate::readline::term::raw_mode();
-		let mut buf = [0u8; 16];
-		match read(*TTY_FILENO, &mut buf) {
-			Ok(0) => {
-				state::set_status(1);
-				return Ok(());
-			}
-			Ok(n) => {
-				let mut reader = PollReader::new();
-				reader.feed_bytes(&buf[..n], false);
-				let Some(key) = reader.read_key()? else {
-					state::set_status(1);
-					return Ok(());
-				};
-				key
-			},
-			Err(Errno::EINTR) => {
-				state::set_status(130);
-				return Ok(());
-			}
-			Err(e) => return Err(ShErr::simple(ShErrKind::ExecFail, format!("read_key: {e}"))),
-		}
-	};
+  let key = {
+    let _raw = crate::readline::term::raw_mode();
+    let mut buf = [0u8; 16];
+    match read(*TTY_FILENO, &mut buf) {
+      Ok(0) => {
+        state::set_status(1);
+        return Ok(());
+      }
+      Ok(n) => {
+        let mut reader = PollReader::new();
+        reader.feed_bytes(&buf[..n], false);
+        let Some(key) = reader.read_key()? else {
+          state::set_status(1);
+          return Ok(());
+        };
+        key
+      }
+      Err(Errno::EINTR) => {
+        state::set_status(130);
+        return Ok(());
+      }
+      Err(e) => return Err(ShErr::simple(ShErrKind::ExecFail, format!("read_key: {e}"))),
+    }
+  };
 
-	let vim_seq = key.as_vim_seq()?;
+  let vim_seq = key.as_vim_seq()?;
 
-	if let Some(wl) = read_key_opts.char_whitelist {
-		let allowed = expand_keymap(&wl);
-		if !allowed.contains(&key) {
-			state::set_status(1);
-			return Ok(());
-		}
-	}
+  if let Some(wl) = read_key_opts.char_whitelist {
+    let allowed = expand_keymap(&wl);
+    if !allowed.contains(&key) {
+      state::set_status(1);
+      return Ok(());
+    }
+  }
 
-	if let Some(bl) = read_key_opts.char_blacklist {
-		let disallowed = expand_keymap(&bl);
-		if disallowed.contains(&key) {
-			state::set_status(1);
-			return Ok(());
-		}
-	}
+  if let Some(bl) = read_key_opts.char_blacklist {
+    let disallowed = expand_keymap(&bl);
+    if disallowed.contains(&key) {
+      state::set_status(1);
+      return Ok(());
+    }
+  }
 
-	if let Some(var) = read_key_opts.var_name {
-		write_vars(|v| v.set_var(&var, VarKind::Str(vim_seq), VarFlags::NONE))?;
-	} else {
-		write(borrow_fd(STDOUT_FILENO), vim_seq.as_bytes())?;
-	}
+  if let Some(var) = read_key_opts.var_name {
+    write_vars(|v| v.set_var(&var, VarKind::Str(vim_seq), VarFlags::NONE))?;
+  } else {
+    write(borrow_fd(STDOUT_FILENO), vim_seq.as_bytes())?;
+  }
 
-	state::set_status(0);
-	Ok(())
+  state::set_status(0);
+  Ok(())
 }
 
 pub fn get_read_key_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
-	let mut read_key_opts = ReadKeyOpts {
-		var_name: None,
-		char_whitelist: None,
-		char_blacklist: None
-	};
+  let mut read_key_opts = ReadKeyOpts {
+    var_name: None,
+    char_whitelist: None,
+    char_blacklist: None,
+  };
 
-	for opt in opts {
-		match opt {
-			Opt::ShortWithArg('v', var_name) => read_key_opts.var_name = Some(var_name),
-			Opt::ShortWithArg('w', char_whitelist) => read_key_opts.char_whitelist = Some(char_whitelist),
-			Opt::ShortWithArg('b', char_blacklist) => read_key_opts.char_blacklist = Some(char_blacklist),
-			_ => {
-				return Err(ShErr::simple(
-					ShErrKind::ExecFail,
-					format!("read_key: Unexpected flag '{opt}'")
-				));
-			}
-		}
-	}
+  for opt in opts {
+    match opt {
+      Opt::ShortWithArg('v', var_name) => read_key_opts.var_name = Some(var_name),
+      Opt::ShortWithArg('w', char_whitelist) => read_key_opts.char_whitelist = Some(char_whitelist),
+      Opt::ShortWithArg('b', char_blacklist) => read_key_opts.char_blacklist = Some(char_blacklist),
+      _ => {
+        return Err(ShErr::simple(
+          ShErrKind::ExecFail,
+          format!("read_key: Unexpected flag '{opt}'"),
+        ));
+      }
+    }
+  }
 
-	Ok(read_key_opts)
+  Ok(read_key_opts)
 }

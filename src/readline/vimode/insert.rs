@@ -1,8 +1,6 @@
-use super::{common_cmds, CmdReplay, ModeReport, ViMode};
+use super::{CmdReplay, ModeReport, ViMode, common_cmds};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
-use crate::readline::vicmd::{
-  Direction, Motion, MotionCmd, To, Verb, VerbCmd, ViCmd, Word,
-};
+use crate::readline::vicmd::{Direction, Motion, MotionCmd, To, Verb, VerbCmd, ViCmd, Word};
 
 #[derive(Default, Clone, Debug)]
 pub struct ViInsert {

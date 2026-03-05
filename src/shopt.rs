@@ -104,12 +104,10 @@ impl ShOpts {
       "core" => self.core.set(&remainder, val)?,
       "prompt" => self.prompt.set(&remainder, val)?,
       _ => {
-        return Err(
-          ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'core' or 'prompt' in shopt key",
-          )
-        );
+        return Err(ShErr::simple(
+          ShErrKind::SyntaxErr,
+          "shopt: expected 'core' or 'prompt' in shopt key",
+        ));
       }
     }
     Ok(())
@@ -129,12 +127,10 @@ impl ShOpts {
     match key {
       "core" => self.core.get(&remainder),
       "prompt" => self.prompt.get(&remainder),
-      _ => Err(
-        ShErr::simple(
-          ShErrKind::SyntaxErr,
-          "shopt: Expected 'core' or 'prompt' in shopt key",
-        )
-      ),
+      _ => Err(ShErr::simple(
+        ShErrKind::SyntaxErr,
+        "shopt: Expected 'core' or 'prompt' in shopt key",
+      )),
     }
   }
 }
@@ -227,12 +223,10 @@ impl ShOptCore {
         self.max_recurse_depth = val;
       }
       _ => {
-        return Err(
-          ShErr::simple(
-            ShErrKind::SyntaxErr,
-            format!("shopt: Unexpected 'core' option '{opt}'"),
-          )
-        );
+        return Err(ShErr::simple(
+          ShErrKind::SyntaxErr,
+          format!("shopt: Unexpected 'core' option '{opt}'"),
+        ));
       }
     }
     Ok(())
@@ -289,12 +283,10 @@ impl ShOptCore {
         output.push_str(&format!("{}", self.max_recurse_depth));
         Ok(Some(output))
       }
-      _ => Err(
-        ShErr::simple(
-          ShErrKind::SyntaxErr,
-          format!("shopt: Unexpected 'core' option '{query}'"),
-        )
-      ),
+      _ => Err(ShErr::simple(
+        ShErrKind::SyntaxErr,
+        format!("shopt: Unexpected 'core' option '{query}'"),
+      )),
     }
   }
 }
@@ -344,6 +336,7 @@ pub struct ShOptPrompt {
   pub auto_indent: bool,
   pub linebreak_on_incomplete: bool,
   pub leader: String,
+  pub line_numbers: bool,
 }
 
 impl ShOptPrompt {
@@ -406,16 +399,23 @@ impl ShOptPrompt {
       "leader" => {
         self.leader = val.to_string();
       }
+      "line_numbers" => {
+        let Ok(val) = val.parse::<bool>() else {
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            "shopt: expected 'true' or 'false' for line_numbers value",
+          ));
+        };
+        self.line_numbers = val;
+      }
       "custom" => {
         todo!()
       }
       _ => {
-        return Err(
-          ShErr::simple(
-            ShErrKind::SyntaxErr,
-            format!("shopt: Unexpected 'prompt' option '{opt}'"),
-          )
-        );
+        return Err(ShErr::simple(
+          ShErrKind::SyntaxErr,
+          format!("shopt: Unexpected 'prompt' option '{opt}'"),
+        ));
       }
     }
     Ok(())
@@ -464,17 +464,19 @@ impl ShOptPrompt {
         Ok(Some(output))
       }
       "leader" => {
-        let mut output =
-          String::from("The leader key sequence used in keymap bindings\n");
+        let mut output = String::from("The leader key sequence used in keymap bindings\n");
         output.push_str(&self.leader);
         Ok(Some(output))
       }
-      _ => Err(
-        ShErr::simple(
-          ShErrKind::SyntaxErr,
-          format!("shopt: Unexpected 'prompt' option '{query}'"),
-        )
-      ),
+      "line_numbers" => {
+        let mut output = String::from("Whether to display line numbers in multiline input\n");
+        output.push_str(&format!("{}", self.line_numbers));
+        Ok(Some(output))
+      }
+      _ => Err(ShErr::simple(
+        ShErrKind::SyntaxErr,
+        format!("shopt: Unexpected 'prompt' option '{query}'"),
+      )),
     }
   }
 }
@@ -493,6 +495,7 @@ impl Display for ShOptPrompt {
       self.linebreak_on_incomplete
     ));
     output.push(format!("leader = {}", self.leader));
+    output.push(format!("line_numbers = {}", self.line_numbers));
 
     let final_output = output.join("\n");
 
@@ -510,6 +513,7 @@ impl Default for ShOptPrompt {
       auto_indent: true,
       linebreak_on_incomplete: true,
       leader: "\\".to_string(),
+      line_numbers: true,
     }
   }
 }

@@ -1,15 +1,37 @@
 use std::{
-  cell::Cell, collections::{HashSet, VecDeque}, os::unix::fs::PermissionsExt
+  cell::Cell,
+  collections::{HashSet, VecDeque},
+  os::unix::fs::PermissionsExt,
 };
-
 
 use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::{self, read_builtin}, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
+    alias::{alias, unalias},
+    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
+    autocmd::autocmd,
+    cd::cd,
+    complete::{compgen_builtin, complete_builtin},
+    dirstack::{dirs, popd, pushd},
+    echo::echo,
+    eval, exec,
+    flowctl::flowctl,
+    getopts::getopts,
+    intro,
+    jobctl::{self, JobBehavior, continue_job, disown, jobs},
+    keymap, map,
+    pwd::pwd,
+    read::{self, read_builtin},
+    shift::shift,
+    shopt::shopt,
+    source::source,
+    test::double_bracket_test,
+    trap::{TrapTarget, trap},
+    varcmds::{export, local, readonly, unset},
+    zoltraak::zoltraak,
   },
-  expand::{Expander, expand_aliases, expand_case_pattern, expand_raw, glob_to_regex},
+  expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
   libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
@@ -19,7 +41,7 @@ use crate::{
   prelude::*,
   procio::{IoMode, IoStack},
   state::{
-    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_vars
+    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_vars,
   },
 };
 
@@ -110,7 +132,12 @@ impl ExecArgs {
   }
 }
 
-pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool, source_name: Option<String>) -> ShResult<()> {
+pub fn exec_input(
+  input: String,
+  io_stack: Option<IoStack>,
+  interactive: bool,
+  source_name: Option<String>,
+) -> ShResult<()> {
   let log_tab = read_logic(|l| l.clone());
   let input = expand_aliases(input, HashSet::new(), &log_tab);
   let lex_flags = if interactive {
@@ -118,8 +145,10 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool, s
   } else {
     super::lex::LexFlags::empty()
   };
-	let source_name = source_name.unwrap_or("<stdin>".into());
-  let mut parser = ParsedSrc::new(Arc::new(input)).with_lex_flags(lex_flags).with_name(source_name.clone());
+  let source_name = source_name.unwrap_or("<stdin>".into());
+  let mut parser = ParsedSrc::new(Arc::new(input))
+    .with_lex_flags(lex_flags)
+    .with_name(source_name.clone());
   if let Err(errors) = parser.parse_src() {
     for error in errors {
       error.print_error();
@@ -149,7 +178,7 @@ pub fn exec_input(input: String, io_stack: Option<IoStack>, interactive: bool, s
 pub struct Dispatcher {
   nodes: VecDeque<Node>,
   interactive: bool,
-	source_name: String,
+  source_name: String,
   pub io_stack: IoStack,
   pub job_stack: JobStack,
   fg_job: bool,
@@ -161,7 +190,7 @@ impl Dispatcher {
     Self {
       nodes,
       interactive,
-			source_name,
+      source_name,
       io_stack: IoStack::new(),
       job_stack: JobStack::new(),
       fg_job: true,
@@ -208,7 +237,12 @@ impl Dispatcher {
       let stack = IoStack {
         stack: self.io_stack.clone(),
       };
-      exec_input(format!("cd {dir}"), Some(stack), self.interactive, Some(self.source_name.clone()))
+      exec_input(
+        format!("cd {dir}"),
+        Some(stack),
+        self.interactive,
+        Some(self.source_name.clone()),
+      )
     } else {
       self.exec_cmd(node)
     }
@@ -274,16 +308,16 @@ impl Dispatcher {
       return Ok(());
     }
 
-    let func = ShFunc::new(func_parser,blame);
+    let func = ShFunc::new(func_parser, blame);
     write_logic(|l| l.insert_func(name, func)); // Store the AST
     Ok(())
   }
   fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
-		let blame = subsh.get_span().clone();
+    let blame = subsh.get_span().clone();
     let NdRule::Command { assignments, argv } = subsh.class else {
       unreachable!()
     };
-		let name = self.source_name.clone();
+    let name = self.source_name.clone();
 
     self.run_fork("anonymous_subshell", |s| {
       if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
@@ -309,8 +343,11 @@ impl Dispatcher {
   }
   fn exec_func(&mut self, func: Node) -> ShResult<()> {
     let mut blame = func.get_span().clone();
-		let func_name = func.get_command().unwrap().to_string();
-		let func_ctx = func.get_context(format!("in call to function '{}'",func_name.fg(next_color())));
+    let func_name = func.get_command().unwrap().to_string();
+    let func_ctx = func.get_context(format!(
+      "in call to function '{}'",
+      func_name.fg(next_color())
+    ));
     let NdRule::Command {
       assignments,
       mut argv,
@@ -340,12 +377,12 @@ impl Dispatcher {
 
     self.io_stack.append_to_frame(func.redirs);
 
-		blame.rename(func_name.clone());
+    blame.rename(func_name.clone());
 
     let argv = prepare_argv(argv).try_blame(blame.clone())?;
     let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&func_name)) {
       let _guard = scope_guard(Some(argv));
-			func_body.body_mut().propagate_context(func_ctx);
+      func_body.body_mut().propagate_context(func_ctx);
       func_body.body_mut().flags = func.flags;
 
       if let Err(e) = self.exec_brc_grp(func_body.body().clone()) {
@@ -354,7 +391,7 @@ impl Dispatcher {
             state::set_status(*code);
             Ok(())
           }
-          _ => Err(e)
+          _ => Err(e),
         }
       } else {
         Ok(())
@@ -423,12 +460,17 @@ impl Dispatcher {
 
       'outer: for block in case_blocks {
         let CaseNode { pattern, body } = block;
-        let block_pattern_raw = pattern.span.as_str().strip_suffix(')').unwrap_or(pattern.span.as_str()).trim();
+        let block_pattern_raw = pattern
+          .span
+          .as_str()
+          .strip_suffix(')')
+          .unwrap_or(pattern.span.as_str())
+          .trim();
         // Split at '|' to allow for multiple patterns like `foo|bar)`
         let block_patterns = block_pattern_raw.split('|');
 
         for pattern in block_patterns {
-					let pattern_exp = expand_case_pattern(pattern)?;
+          let pattern_exp = expand_case_pattern(pattern)?;
           let pattern_regex = glob_to_regex(&pattern_exp, false);
           if pattern_regex.is_match(&pattern_raw) {
             for node in &body {
@@ -450,7 +492,9 @@ impl Dispatcher {
         }
       })
     } else {
-      case_logic(self).try_blame(blame).map_err(|e| e.with_redirs(guard))
+      case_logic(self)
+        .try_blame(blame)
+        .map_err(|e| e.with_redirs(guard))
     }
   }
   fn exec_loop(&mut self, loop_stmt: Node) -> ShResult<()> {
@@ -513,7 +557,9 @@ impl Dispatcher {
         }
       })
     } else {
-      loop_logic(self).try_blame(blame).map_err(|e| e.with_redirs(guard))
+      loop_logic(self)
+        .try_blame(blame)
+        .map_err(|e| e.with_redirs(guard))
     }
   }
   fn exec_for(&mut self, for_stmt: Node) -> ShResult<()> {
@@ -591,7 +637,9 @@ impl Dispatcher {
         }
       })
     } else {
-      for_logic(self).try_blame(blame).map_err(|e| e.with_redirs(guard))
+      for_logic(self)
+        .try_blame(blame)
+        .map_err(|e| e.with_redirs(guard))
     }
   }
   fn exec_if(&mut self, if_stmt: Node) -> ShResult<()> {
@@ -648,7 +696,9 @@ impl Dispatcher {
         }
       })
     } else {
-      if_logic(self).try_blame(blame).map_err(|e| e.with_redirs(guard))
+      if_logic(self)
+        .try_blame(blame)
+        .map_err(|e| e.with_redirs(guard))
     }
   }
   fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
@@ -692,11 +742,14 @@ impl Dispatcher {
       // SIGTTOU when they try to modify terminal attributes.
       // Only for interactive (top-level) pipelines — command substitution
       // and other non-interactive contexts must not steal the terminal.
-      if !tty_attached && !is_bg && self.interactive
-			&& let Some(pgid) = self.job_stack.curr_job_mut().unwrap().pgid() {
-				attach_tty(pgid).ok();
-				tty_attached = true;
-			}
+      if !tty_attached
+        && !is_bg
+        && self.interactive
+        && let Some(pgid) = self.job_stack.curr_job_mut().unwrap().pgid()
+      {
+        attach_tty(pgid).ok();
+        tty_attached = true;
+      }
     }
     let job = self.job_stack.finalize_job().unwrap();
     dispatch_job(job, is_bg, self.interactive)?;
@@ -732,7 +785,7 @@ impl Dispatcher {
   }
   fn dispatch_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
     let cmd_raw = cmd.get_command().unwrap().to_string();
-		let context = cmd.context.clone();
+    let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = &mut cmd.class else {
       unreachable!()
     };
@@ -815,18 +868,18 @@ impl Dispatcher {
       "unset" => unset(cmd),
       "complete" => complete_builtin(cmd),
       "compgen" => compgen_builtin(cmd),
-			"map" => map::map(cmd),
-			"pop" => arr_pop(cmd),
-			"fpop" => arr_fpop(cmd),
-			"push" => arr_push(cmd),
-			"fpush" => arr_fpush(cmd),
-			"rotate" => arr_rotate(cmd),
-			"wait" => jobctl::wait(cmd),
-			"type" => intro::type_builtin(cmd),
-			"getopts" => getopts(cmd),
-			"keymap" => keymap::keymap(cmd),
-			"read_key" => read::read_key(cmd),
-			"autocmd" => autocmd(cmd),
+      "map" => map::map(cmd),
+      "pop" => arr_pop(cmd),
+      "fpop" => arr_fpop(cmd),
+      "push" => arr_push(cmd),
+      "fpush" => arr_fpush(cmd),
+      "rotate" => arr_rotate(cmd),
+      "wait" => jobctl::wait(cmd),
+      "type" => intro::type_builtin(cmd),
+      "getopts" => getopts(cmd),
+      "keymap" => keymap::keymap(cmd),
+      "read_key" => read::read_key(cmd),
+      "autocmd" => autocmd(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -838,17 +891,17 @@ impl Dispatcher {
       _ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw),
     };
 
-		if let Err(e) = result {
-			if !e.is_flow_control() {
-				state::set_status(1);
-			}
-			Err(e.with_context(context).with_redirs(redir_guard))
-		} else {
-			Ok(())
-		}
+    if let Err(e) = result {
+      if !e.is_flow_control() {
+        state::set_status(1);
+      }
+      Err(e.with_context(context).with_redirs(redir_guard))
+    } else {
+      Ok(())
+    }
   }
   fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
-		let blame = cmd.get_span().clone();
+    let blame = cmd.get_span().clone();
     let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = cmd.class else {
       unreachable!()
@@ -887,7 +940,7 @@ impl Dispatcher {
 
       // For foreground jobs, take the terminal BEFORE resetting
       // signals.  SIGTTOU is still SIG_IGN (inherited from the shell),
-			// so tcsetpgrp won't stop us.  This prevents a race
+      // so tcsetpgrp won't stop us.  This prevents a race
       // where the child exec's and tries to read stdin before the
       // parent has called tcsetpgrp — which would deliver SIGTTIN
       // (now SIG_DFL after reset_signals) and stop the child.
@@ -918,14 +971,14 @@ impl Dispatcher {
       match e {
         Errno::ENOENT => {
           ShErr::new(ShErrKind::NotFound, span.clone())
-						.labeled(span, format!("{cmd_str}: command not found"))
-						.with_context(context)
-						.print_error();
+            .labeled(span, format!("{cmd_str}: command not found"))
+            .with_context(context)
+            .print_error();
         }
         _ => {
           ShErr::at(ShErrKind::Errno(e), span, format!("{e}"))
-						.with_context(context)
-						.print_error();
+            .with_context(context)
+            .print_error();
         }
       }
       exit(e as i32)

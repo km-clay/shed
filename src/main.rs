@@ -2,7 +2,7 @@
   clippy::derivable_impls,
   clippy::tabs_in_doc_comments,
   clippy::while_let_on_iterator,
-	clippy::result_large_err
+  clippy::result_large_err
 )]
 pub mod builtin;
 pub mod expand;
@@ -34,7 +34,6 @@ use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
-use crate::procio::IoMode;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
@@ -86,20 +85,22 @@ fn setup_panic_handler() {
       }
     });
 
-		let data_dir = env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
-			let home = env::var("HOME").unwrap();
-			format!("{home}/.local/share")
-		});
-		let log_dir = Path::new(&data_dir).join("shed").join("log");
-		std::fs::create_dir_all(&log_dir).unwrap();
-		let log_file_path = log_dir.join("panic.log");
-		let mut log_file = parse::get_redir_file(parse::RedirType::Output, log_file_path).unwrap();
+    let data_dir = env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+      let home = env::var("HOME").unwrap();
+      format!("{home}/.local/share")
+    });
+    let log_dir = Path::new(&data_dir).join("shed").join("log");
+    std::fs::create_dir_all(&log_dir).unwrap();
+    let log_file_path = log_dir.join("panic.log");
+    let mut log_file = parse::get_redir_file(parse::RedirType::Output, log_file_path).unwrap();
 
-		let panic_info_raw = info.to_string();
-		log_file.write_all(panic_info_raw.as_bytes()).unwrap();
+    let panic_info_raw = info.to_string();
+    log_file.write_all(panic_info_raw.as_bytes()).unwrap();
 
-		let backtrace = std::backtrace::Backtrace::force_capture();
-		log_file.write_all(format!("\nBacktrace:\n{:?}", backtrace).as_bytes()).unwrap();
+    let backtrace = std::backtrace::Backtrace::force_capture();
+    log_file
+      .write_all(format!("\nBacktrace:\n{:?}", backtrace).as_bytes())
+      .unwrap();
 
     default_panic_hook(info);
   }));
@@ -134,16 +135,17 @@ fn main() -> ExitCode {
   } else {
     shed_interactive(args)
   } {
-		e.print_error();
+    e.print_error();
   };
 
   if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Exit))
-	&& let Err(e) = exec_input(trap, None, false, Some("trap".into())) {
-		e.print_error();
+    && let Err(e) = exec_input(trap, None, false, Some("trap".into()))
+  {
+    e.print_error();
   }
 
-	let on_exit_autocmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnExit));
-	on_exit_autocmds.exec();
+  let on_exit_autocmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnExit));
+  on_exit_autocmds.exec();
 
   write_jobs(|j| j.hang_up());
   ExitCode::from(QUIT_CODE.load(Ordering::SeqCst) as u8)
@@ -151,7 +153,7 @@ fn main() -> ExitCode {
 
 fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
   let path = path.as_ref();
-	let path_raw = path.to_string_lossy().to_string();
+  let path_raw = path.to_string_lossy().to_string();
   if !path.is_file() {
     eprintln!("shed: Failed to open input file: {}", path.display());
     QUIT_CODE.store(1, Ordering::SeqCst);
@@ -207,7 +209,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       m.try_rehash_commands();
       m.try_rehash_cwd_listing();
     });
-		error::clear_color();
+    error::clear_color();
 
     // Handle any pending signals
     while signals_pending() {
@@ -267,15 +269,26 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
     // Timeout — resolve pending keymap ambiguity
     if !readline.pending_keymap.is_empty()
-      && fds[0].revents().is_none_or(|r| !r.contains(PollFlags::POLLIN))
+      && fds[0]
+        .revents()
+        .is_none_or(|r| !r.contains(PollFlags::POLLIN))
     {
-      log::debug!("[keymap timeout] resolving pending={:?}", readline.pending_keymap);
+      log::debug!(
+        "[keymap timeout] resolving pending={:?}",
+        readline.pending_keymap
+      );
       let keymap_flags = readline.curr_keymap_flags();
       let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &readline.pending_keymap));
       // If there's an exact match, fire it; otherwise flush as normal keys
-      let exact = matches.iter().find(|km| km.compare(&readline.pending_keymap) == KeyMapMatch::IsExact);
+      let exact = matches
+        .iter()
+        .find(|km| km.compare(&readline.pending_keymap) == KeyMapMatch::IsExact);
       if let Some(km) = exact {
-        log::debug!("[keymap timeout] firing exact match: {:?} -> {:?}", km.keys, km.action);
+        log::debug!(
+          "[keymap timeout] firing exact match: {:?} -> {:?}",
+          km.keys,
+          km.action
+        );
         let action = km.action_expanded();
         readline.pending_keymap.clear();
         for key in action {
@@ -284,7 +297,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
               ReadlineEvent::Line(input) => {
                 let start = Instant::now();
                 write_meta(|m| m.start_timer());
-                if let Err(e) = RawModeGuard::with_cooked_mode(|| exec_input(input, None, true, Some("<stdin>".into()))) {
+                if let Err(e) = RawModeGuard::with_cooked_mode(|| {
+                  exec_input(input, None, true, Some("<stdin>".into()))
+                }) {
                   match e.kind() {
                     ShErrKind::CleanExit(code) => {
                       QUIT_CODE.store(*code, Ordering::SeqCst);
@@ -310,7 +325,10 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
           }
         }
       } else {
-        log::debug!("[keymap timeout] no exact match, flushing {} keys as normal input", readline.pending_keymap.len());
+        log::debug!(
+          "[keymap timeout] no exact match, flushing {} keys as normal input",
+          readline.pending_keymap.len()
+        );
         let buffered = std::mem::take(&mut readline.pending_keymap);
         for key in buffered {
           if let Some(event) = readline.handle_key(key)? {
@@ -318,7 +336,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
               ReadlineEvent::Line(input) => {
                 let start = Instant::now();
                 write_meta(|m| m.start_timer());
-                if let Err(e) = RawModeGuard::with_cooked_mode(|| exec_input(input, None, true, Some("<stdin>".into()))) {
+                if let Err(e) = RawModeGuard::with_cooked_mode(|| {
+                  exec_input(input, None, true, Some("<stdin>".into()))
+                }) {
                   match e.kind() {
                     ShErrKind::CleanExit(code) => {
                       QUIT_CODE.store(*code, Ordering::SeqCst);
@@ -376,14 +396,16 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     // Process any available input
     match readline.process_input() {
       Ok(ReadlineEvent::Line(input)) => {
-				let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
-				let post_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
+        let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
+        let post_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
 
-				pre_exec.exec_with(&input);
+        pre_exec.exec_with(&input);
 
         let start = Instant::now();
         write_meta(|m| m.start_timer());
-        if let Err(e) = RawModeGuard::with_cooked_mode(|| exec_input(input.clone(), None, true, Some("<stdin>".into()))) {
+        if let Err(e) = RawModeGuard::with_cooked_mode(|| {
+          exec_input(input.clone(), None, true, Some("<stdin>".into()))
+        }) {
           match e.kind() {
             ShErrKind::CleanExit(code) => {
               QUIT_CODE.store(*code, Ordering::SeqCst);
@@ -396,10 +418,10 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
         log::info!("Command executed in {:.2?}", command_run_time);
         write_meta(|m| m.stop_timer());
 
-				post_exec.exec_with(&input);
+        post_exec.exec_with(&input);
 
-				readline.fix_column()?;
-				readline.writer.flush_write("\n\r")?;
+        readline.fix_column()?;
+        readline.writer.flush_write("\n\r")?;
 
         // Reset for next command with fresh prompt
         readline.reset(true)?;

@@ -2,7 +2,10 @@ use nix::{errno::Errno, unistd::execvpe};
 
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node, execute::{ExecArgs, prepare_argv}},
+  parse::{
+    NdRule, Node,
+    execute::{ExecArgs, prepare_argv},
+  },
   state,
 };
 
@@ -16,7 +19,9 @@ pub fn exec_builtin(node: Node) -> ShResult<()> {
   };
 
   let mut expanded_argv = prepare_argv(argv)?;
-  if !expanded_argv.is_empty() { expanded_argv.remove(0); }
+  if !expanded_argv.is_empty() {
+    expanded_argv.remove(0);
+  }
 
   if expanded_argv.is_empty() {
     state::set_status(0);
@@ -34,9 +39,9 @@ pub fn exec_builtin(node: Node) -> ShResult<()> {
   let cmd_str = cmd.to_str().unwrap().to_string();
   match e {
     Errno::ENOENT => Err(
-			ShErr::new(ShErrKind::NotFound, span.clone())
-				.labeled(span, format!("exec: command not found: {}", cmd_str))
-		),
+      ShErr::new(ShErrKind::NotFound, span.clone())
+        .labeled(span, format!("exec: command not found: {}", cmd_str)),
+    ),
     _ => Err(ShErr::at(ShErrKind::Errno(e), span, format!("{e}"))),
   }
 }

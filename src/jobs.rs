@@ -59,18 +59,12 @@ impl fmt::Display for DisplayWaitStatus {
 }
 
 pub fn code_from_status(stat: &WtStat) -> Option<i32> {
-	match stat {
-		WtStat::Exited(_, exit_code) => {
-			Some(*exit_code)
-		}
-		WtStat::Stopped(_, sig) => {
-			Some(SIG_EXIT_OFFSET + *sig as i32)
-		}
-		WtStat::Signaled(_, sig, _) => {
-			Some(SIG_EXIT_OFFSET + *sig as i32)
-		}
-		_ => { None }
-	}
+  match stat {
+    WtStat::Exited(_, exit_code) => Some(*exit_code),
+    WtStat::Stopped(_, sig) => Some(SIG_EXIT_OFFSET + *sig as i32),
+    WtStat::Signaled(_, sig, _) => Some(SIG_EXIT_OFFSET + *sig as i32),
+    _ => None,
+  }
 }
 
 #[derive(Clone, Debug)]
@@ -186,7 +180,12 @@ impl JobTab {
   }
   pub fn curr_job(&self) -> Option<usize> {
     // Find the most recent valid job (order can have stale entries)
-    self.order.iter().rev().find(|&&id| self.jobs.get(id).is_some_and(|slot| slot.is_some())).copied()
+    self
+      .order
+      .iter()
+      .rev()
+      .find(|&&id| self.jobs.get(id).is_some_and(|slot| slot.is_some()))
+      .copied()
   }
   pub fn prev_job(&self) -> Option<usize> {
     // Find the second most recent valid job
@@ -233,7 +232,7 @@ impl JobTab {
       self.next_open_pos()
     };
     job.set_tabid(tab_pos);
-		let last_pid = job.children().last().map(|c| c.pid());
+    let last_pid = job.children().last().map(|c| c.pid());
     self.order.push(tab_pos);
     if !silent {
       write(
@@ -247,9 +246,9 @@ impl JobTab {
       self.jobs[tab_pos] = Some(job);
     }
 
-		if let Some(pid) = last_pid {
-			write_vars(|v| v.set_param(ShellParam::LastJob, &pid.to_string()))
-		}
+    if let Some(pid) = last_pid {
+      write_vars(|v| v.set_param(ShellParam::LastJob, &pid.to_string()))
+    }
 
     Ok(tab_pos)
   }
@@ -281,25 +280,23 @@ impl JobTab {
       }),
     }
   }
-	pub fn update_by_id(&mut self, id: JobID, stat: WtStat) -> ShResult<()> {
-		let Some(job) = self.query_mut(id.clone()) else {
-			return Ok(())
-		};
-		match id {
-			JobID::Pid(pid) => {
-				let Some(child) = job.children_mut().iter_mut().find(|c| c.pid() == pid) else {
-					return Ok(())
-				};
-				child.set_stat(stat);
-			}
-			JobID::Pgid(_) |
-			JobID::TableID(_) |
-			JobID::Command(_) => {
-				job.set_stats(stat);
-			}
-		}
-		Ok(())
-	}
+  pub fn update_by_id(&mut self, id: JobID, stat: WtStat) -> ShResult<()> {
+    let Some(job) = self.query_mut(id.clone()) else {
+      return Ok(());
+    };
+    match id {
+      JobID::Pid(pid) => {
+        let Some(child) = job.children_mut().iter_mut().find(|c| c.pid() == pid) else {
+          return Ok(());
+        };
+        child.set_stat(stat);
+      }
+      JobID::Pgid(_) | JobID::TableID(_) | JobID::Command(_) => {
+        job.set_stats(stat);
+      }
+    }
+    Ok(())
+  }
   pub fn query_mut(&mut self, identifier: JobID) -> Option<&mut Job> {
     match identifier {
       // Match by process group ID
@@ -355,17 +352,17 @@ impl JobTab {
     }
     Ok(())
   }
-	pub fn wait_all_bg(&mut self) -> ShResult<()> {
-		disable_reaping();
-		defer! {
-			enable_reaping();
-		}
-		for job in self.jobs.iter_mut() {
-			let Some(job) = job else { continue };
-			job.wait_pgrp()?;
-		}
-		Ok(())
-	}
+  pub fn wait_all_bg(&mut self) -> ShResult<()> {
+    disable_reaping();
+    defer! {
+      enable_reaping();
+    }
+    for job in self.jobs.iter_mut() {
+      let Some(job) = job else { continue };
+      job.wait_pgrp()?;
+    }
+    Ok(())
+  }
   pub fn remove_job(&mut self, id: JobID) -> Option<Job> {
     let tabid = self.query(id).map(|job| job.tabid().unwrap());
     if let Some(tabid) = tabid {
@@ -611,12 +608,11 @@ impl Job {
   pub fn children_mut(&mut self) -> &mut Vec<ChildProc> {
     &mut self.children
   }
-	pub fn is_done(&self) -> bool {
-		self
-			.children
-			.iter()
-			.all(|chld| chld.exited() || chld.stat() == WtStat::Signaled(chld.pid(), Signal::SIGHUP, true))
-	}
+  pub fn is_done(&self) -> bool {
+    self.children.iter().all(|chld| {
+      chld.exited() || chld.stat() == WtStat::Signaled(chld.pid(), Signal::SIGHUP, true)
+    })
+  }
   pub fn killpg(&mut self, sig: Signal) -> ShResult<()> {
     let stat = match sig {
       Signal::SIGTSTP => WtStat::Stopped(self.pgid, Signal::SIGTSTP),
@@ -711,8 +707,8 @@ impl Job {
     let padding = " ".repeat(padding_count);
 
     let mut output = String::new();
-		let id_box = format!("[{}]{}", id + 1, symbol);
-		output.push_str(&format!("{id_box}\t"));
+    let id_box = format!("[{}]{}", id + 1, symbol);
+    output.push_str(&format!("{id_box}\t"));
     for (i, cmd) in self.get_cmds().iter().enumerate() {
       let pid = if pids || init {
         let mut pid = self.get_pids().get(i).unwrap().to_string();
@@ -735,12 +731,12 @@ impl Job {
         },
         _ => stat_line.styled(Style::Cyan),
       };
-			if i != 0 {
-				let padding = " ".repeat(id_box.len() - 1);
+      if i != 0 {
+        let padding = " ".repeat(id_box.len() - 1);
         stat_line = format!("{padding}{}", stat_line);
-			}
+      }
       if i != self.get_cmds().len() - 1 {
-				stat_line.push_str(" |");
+        stat_line.push_str(" |");
       }
 
       let stat_final = if long {
@@ -767,61 +763,64 @@ pub fn term_ctlr() -> Pid {
 /// Calls attach_tty() on the shell's process group to retake control of the
 /// terminal
 pub fn take_term() -> ShResult<()> {
-	// take the terminal back
+  // take the terminal back
   attach_tty(getpgrp())?;
 
-	// send SIGWINCH to tell readline to update its window size in case it changed while we were in the background
-	killpg(getpgrp(), Signal::SIGWINCH)?;
+  // send SIGWINCH to tell readline to update its window size in case it changed while we were in the background
+  killpg(getpgrp(), Signal::SIGWINCH)?;
   Ok(())
 }
 
 pub fn wait_bg(id: JobID) -> ShResult<()> {
-	disable_reaping();
-	defer! {
-		enable_reaping();
-	};
-	match id {
-		JobID::Pid(pid) => {
-			let stat = loop {
-				match waitpid(pid, None) {
-					Ok(stat) => break stat,
-					Err(Errno::EINTR) => continue, // Retry on signal interruption
-					Err(Errno::ECHILD) => return Ok(()), // No such child, treat as already reaped
-					Err(e) => return Err(e.into()),
-				}
-			};
-			write_jobs(|j| j.update_by_id(id, stat))?;
-			set_status(code_from_status(&stat).unwrap_or(0));
-		}
-		_ => {
-			let Some(mut job) = write_jobs(|j| j.remove_job(id.clone())) else {
-				return Err(ShErr::simple(ShErrKind::ExecFail, format!("wait: No such job with id {:?}", id)));
-			};
-			let statuses = job.wait_pgrp()?;
-			let mut was_stopped = false;
-			let mut code = 0;
-			for status in statuses {
-				code = code_from_status(&status).unwrap_or(0);
-				match status {
-					WtStat::Stopped(_, _) => {
-						was_stopped = true;
-					}
-					WtStat::Signaled(_, sig, _) => {
-						if sig == Signal::SIGTSTP {
-							was_stopped = true;
-						}
-					}
-					_ => { /* Do nothing */ }
-				}
-			}
+  disable_reaping();
+  defer! {
+    enable_reaping();
+  };
+  match id {
+    JobID::Pid(pid) => {
+      let stat = loop {
+        match waitpid(pid, None) {
+          Ok(stat) => break stat,
+          Err(Errno::EINTR) => continue, // Retry on signal interruption
+          Err(Errno::ECHILD) => return Ok(()), // No such child, treat as already reaped
+          Err(e) => return Err(e.into()),
+        }
+      };
+      write_jobs(|j| j.update_by_id(id, stat))?;
+      set_status(code_from_status(&stat).unwrap_or(0));
+    }
+    _ => {
+      let Some(mut job) = write_jobs(|j| j.remove_job(id.clone())) else {
+        return Err(ShErr::simple(
+          ShErrKind::ExecFail,
+          format!("wait: No such job with id {:?}", id),
+        ));
+      };
+      let statuses = job.wait_pgrp()?;
+      let mut was_stopped = false;
+      let mut code = 0;
+      for status in statuses {
+        code = code_from_status(&status).unwrap_or(0);
+        match status {
+          WtStat::Stopped(_, _) => {
+            was_stopped = true;
+          }
+          WtStat::Signaled(_, sig, _) => {
+            if sig == Signal::SIGTSTP {
+              was_stopped = true;
+            }
+          }
+          _ => { /* Do nothing */ }
+        }
+      }
 
-			if was_stopped {
-				write_jobs(|j| j.insert_job(job, false))?;
-			}
-			set_status(code);
-		}
-	}
-	Ok(())
+      if was_stopped {
+        write_jobs(|j| j.insert_job(job, false))?;
+      }
+      set_status(code);
+    }
+  }
+  Ok(())
 }
 
 /// Waits on the current foreground job and updates the shell's last status code
@@ -835,12 +834,12 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
     attach_tty(job.pgid())?;
   }
   disable_reaping();
-	defer! {
-		enable_reaping();
-	}
+  defer! {
+    enable_reaping();
+  }
   let statuses = write_jobs(|j| j.new_fg(job))?;
   for status in statuses {
-		code = code_from_status(&status).unwrap_or(0);
+    code = code_from_status(&status).unwrap_or(0);
     match status {
       WtStat::Stopped(_, _) => {
         was_stopped = true;

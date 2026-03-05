@@ -15,15 +15,25 @@ pub fn source(node: Node) -> ShResult<()> {
   };
 
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   for (arg, span) in argv {
     let path = PathBuf::from(arg);
     if !path.exists() {
-      return Err(ShErr::at(ShErrKind::ExecFail, span, format!("source: File '{}' not found", path.display())));
+      return Err(ShErr::at(
+        ShErrKind::ExecFail,
+        span,
+        format!("source: File '{}' not found", path.display()),
+      ));
     }
     if !path.is_file() {
-      return Err(ShErr::at(ShErrKind::ExecFail, span, format!("source: Given path '{}' is not a file", path.display())));
+      return Err(ShErr::at(
+        ShErrKind::ExecFail,
+        span,
+        format!("source: Given path '{}' is not a file", path.display()),
+      ));
     }
     source_file(path)?;
   }

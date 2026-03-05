@@ -25,98 +25,101 @@ pub const KEYWORDS: [&str; 16] = [
 pub const OPENERS: [&str; 6] = ["if", "while", "until", "for", "select", "case"];
 
 /// Used to track whether the lexer is currently inside a quote, and if so, which type
-#[derive(Default,Debug)]
+#[derive(Default, Debug)]
 pub enum QuoteState {
-	#[default]
-	Outside,
-	Single,
-	Double
+  #[default]
+  Outside,
+  Single,
+  Double,
 }
 
 impl QuoteState {
-	pub fn outside(&self) -> bool {
-		matches!(self, QuoteState::Outside)
-	}
-	pub fn in_single(&self) -> bool {
-		matches!(self, QuoteState::Single)
-	}
-	pub fn in_double(&self) -> bool {
-		matches!(self, QuoteState::Double)
-	}
-	pub fn in_quote(&self) -> bool {
-		!self.outside()
-	}
-	/// Toggles whether we are in a double quote. If self = QuoteState::Single, this does nothing, since double quotes inside single quotes are just literal characters
-	pub fn toggle_double(&mut self) {
-		match self {
-			QuoteState::Outside => *self = QuoteState::Double,
-			QuoteState::Double => *self = QuoteState::Outside,
-			_ => {}
-		}
-	}
-	/// Toggles whether we are in a single quote. If self == QuoteState::Double, this does nothing, since single quotes are not interpreted inside double quotes
-	pub fn toggle_single(&mut self) {
-		match self {
-			QuoteState::Outside => *self = QuoteState::Single,
-			QuoteState::Single => *self = QuoteState::Outside,
-			_ => {}
-		}
-	}
+  pub fn outside(&self) -> bool {
+    matches!(self, QuoteState::Outside)
+  }
+  pub fn in_single(&self) -> bool {
+    matches!(self, QuoteState::Single)
+  }
+  pub fn in_double(&self) -> bool {
+    matches!(self, QuoteState::Double)
+  }
+  pub fn in_quote(&self) -> bool {
+    !self.outside()
+  }
+  /// Toggles whether we are in a double quote. If self = QuoteState::Single, this does nothing, since double quotes inside single quotes are just literal characters
+  pub fn toggle_double(&mut self) {
+    match self {
+      QuoteState::Outside => *self = QuoteState::Double,
+      QuoteState::Double => *self = QuoteState::Outside,
+      _ => {}
+    }
+  }
+  /// Toggles whether we are in a single quote. If self == QuoteState::Double, this does nothing, since single quotes are not interpreted inside double quotes
+  pub fn toggle_single(&mut self) {
+    match self {
+      QuoteState::Outside => *self = QuoteState::Single,
+      QuoteState::Single => *self = QuoteState::Outside,
+      _ => {}
+    }
+  }
 }
 
 #[derive(Clone, PartialEq, Default, Debug, Eq, Hash)]
 pub struct SpanSource {
-	name: String,
-	content: Arc<String>
+  name: String,
+  content: Arc<String>,
 }
 
 impl SpanSource {
-	pub fn name(&self) -> &str {
-		&self.name
-	}
-	pub fn content(&self) -> Arc<String> {
-		self.content.clone()
-	}
-	pub fn rename(&mut self, name: String) {
-		self.name = name;
-	}
+  pub fn name(&self) -> &str {
+    &self.name
+  }
+  pub fn content(&self) -> Arc<String> {
+    self.content.clone()
+  }
+  pub fn rename(&mut self, name: String) {
+    self.name = name;
+  }
 }
 
 impl Display for SpanSource {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", self.name)
-	}
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", self.name)
+  }
 }
 
 /// Span::new(10..20)
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct Span {
   range: Range<usize>,
-  source: SpanSource
+  source: SpanSource,
 }
 
 impl Span {
   /// New `Span`. Wraps a range and a string slice that it refers to.
   pub fn new(range: Range<usize>, source: Arc<String>) -> Self {
-		let source = SpanSource { name: "<stdin>".into(), content: source };
+    let source = SpanSource {
+      name: "<stdin>".into(),
+      content: source,
+    };
     Span { range, source }
   }
   pub fn from_span_source(range: Range<usize>, source: SpanSource) -> Self {
     Span { range, source }
   }
-	pub fn rename(&mut self, name: String) {
-		self.source.name = name;
-	}
-	pub fn with_name(mut self, name: String) -> Self {
-		self.source.name = name;
-		self
-	}
-	pub fn line_and_col(&self) -> (usize,usize) {
-		let content = self.source.content();
-		let source = ariadne::Source::from(content.as_str());
-		let (_, line, col) = source.get_byte_line(self.range.start).unwrap();
-		(line, col)
-	}
+  pub fn rename(&mut self, name: String) {
+    self.source.name = name;
+  }
+  pub fn with_name(mut self, name: String) -> Self {
+    self.source.name = name;
+    self
+  }
+  pub fn line_and_col(&self) -> (usize, usize) {
+    let content = self.source.content();
+    let source = ariadne::Source::from(content.as_str());
+    let (_, line, col) = source.get_byte_line(self.range.start).unwrap();
+    (line, col)
+  }
   /// Slice the source string at the wrapped range
   pub fn as_str(&self) -> &str {
     &self.source.content[self.range().start..self.range().end]
@@ -138,19 +141,19 @@ impl Span {
 }
 
 impl ariadne::Span for Span {
-	type SourceId = SpanSource;
+  type SourceId = SpanSource;
 
-	fn source(&self) -> &Self::SourceId {
-		&self.source
-	}
+  fn source(&self) -> &Self::SourceId {
+    &self.source
+  }
 
-	fn start(&self) -> usize {
-		self.range.start
-	}
+  fn start(&self) -> usize {
+    self.range.start
+  }
 
-	fn end(&self) -> usize {
-		self.range.end
-	}
+  fn end(&self) -> usize {
+    self.range.end
+  }
 }
 
 /// Allows simple access to the underlying range wrapped by the span
@@ -243,7 +246,7 @@ bitflags! {
 pub struct LexStream {
   source: Arc<String>,
   pub cursor: usize,
-	pub name: String,
+  pub name: String,
   quote_state: QuoteState,
   brc_grp_depth: usize,
   brc_grp_start: Option<usize>,
@@ -273,23 +276,23 @@ bitflags! {
 }
 
 pub fn clean_input(input: &str) -> String {
-	let mut chars = input.chars().peekable();
-	let mut output = String::new();
-	while let Some(ch) = chars.next() {
-		match ch {
-			'\\' if chars.peek() == Some(&'\n') => {
-				chars.next();
-			}
-			'\r' => {
-				if chars.peek() == Some(&'\n') {
-					chars.next();
-				}
-				output.push('\n');
-			}
-			_ => output.push(ch),
-		}
-	}
-	output
+  let mut chars = input.chars().peekable();
+  let mut output = String::new();
+  while let Some(ch) = chars.next() {
+    match ch {
+      '\\' if chars.peek() == Some(&'\n') => {
+        chars.next();
+      }
+      '\r' => {
+        if chars.peek() == Some(&'\n') {
+          chars.next();
+        }
+        output.push('\n');
+      }
+      _ => output.push(ch),
+    }
+  }
+  output
 }
 
 impl LexStream {
@@ -298,7 +301,7 @@ impl LexStream {
     Self {
       flags,
       source,
-			name: "<stdin>".into(),
+      name: "<stdin>".into(),
       cursor: 0,
       quote_state: QuoteState::default(),
       brc_grp_depth: 0,
@@ -327,10 +330,10 @@ impl LexStream {
     };
     self.source.get(start..end)
   }
-	pub fn with_name(mut self, name: String) -> Self {
-		self.name = name;
-		self
-	}
+  pub fn with_name(mut self, name: String) -> Self {
+    self.name = name;
+    self
+  }
   pub fn slice_from_cursor(&self) -> Option<&str> {
     self.slice(self.cursor..)
   }
@@ -475,11 +478,11 @@ impl LexStream {
             pos += ch.len_utf8();
           }
         }
-				'\'' => {
-					pos += 1;
-					self.quote_state.toggle_single();
-				}
-				_ if self.quote_state.in_single() => pos += ch.len_utf8(),
+        '\'' => {
+          pos += 1;
+          self.quote_state.toggle_single();
+        }
+        _ if self.quote_state.in_single() => pos += ch.len_utf8(),
         '$' if chars.peek() == Some(&'(') => {
           pos += 2;
           chars.next();
@@ -543,11 +546,11 @@ impl LexStream {
             }
           }
         }
-				'"' => {
-					pos += 1;
-					self.quote_state.toggle_double();
-				}
-				_ if self.quote_state.in_double() => pos += ch.len_utf8(),
+        '"' => {
+          pos += 1;
+          self.quote_state.toggle_double();
+        }
+        _ if self.quote_state.in_double() => pos += ch.len_utf8(),
         '<' if chars.peek() == Some(&'(') => {
           pos += 2;
           chars.next();
@@ -770,7 +773,7 @@ impl LexStream {
   }
   pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk {
     let mut span = Span::new(range, self.source.clone());
-		span.rename(self.name.clone());
+    span.rename(self.name.clone());
     Tk::new(class, span)
   }
 }
@@ -845,15 +848,15 @@ impl Iterator for LexStream {
         self.set_next_is_cmd(true);
 
         while let Some(ch) = get_char(&self.source, self.cursor) {
-					match ch {
-						'\\' if get_char(&self.source, self.cursor + 1) == Some('\n') => {
-							self.cursor = (self.cursor + 2).min(self.source.len());
-						}
-						_ if is_hard_sep(ch) => {
-							self.cursor += 1;
-						}
-						_ => break,
-					}
+          match ch {
+            '\\' if get_char(&self.source, self.cursor + 1) == Some('\n') => {
+              self.cursor = (self.cursor + 2).min(self.source.len());
+            }
+            _ if is_hard_sep(ch) => {
+              self.cursor += 1;
+            }
+            _ => break,
+          }
         }
         self.get_token(ch_idx..self.cursor, TkRule::Sep)
       }
@@ -974,84 +977,101 @@ pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
 /// Splits a string by a pattern, but only if the pattern is not escaped by a backslash
 /// and not in quotes.
 pub fn split_all_unescaped(slice: &str, pat: &str) -> Vec<String> {
-	let mut cursor = 0;
-	let mut splits = vec![];
-	while let Some(split) = split_at_unescaped(&slice[cursor..], pat) {
-		cursor += split.0.len() + pat.len();
-		splits.push(split.0);
-	}
-	if let Some(remaining) = slice.get(cursor..) {
-		splits.push(remaining.to_string());
-	}
-	splits
+  let mut cursor = 0;
+  let mut splits = vec![];
+  while let Some(split) = split_at_unescaped(&slice[cursor..], pat) {
+    cursor += split.0.len() + pat.len();
+    splits.push(split.0);
+  }
+  if let Some(remaining) = slice.get(cursor..) {
+    splits.push(remaining.to_string());
+  }
+  splits
 }
 
 /// Splits a string at the first occurrence of a pattern, but only if the pattern is not escaped by a backslash
 /// and not in quotes. Returns None if the pattern is not found or only found escaped.
-pub fn split_at_unescaped(slice: &str, pat: &str) -> Option<(String,String)> {
-	let mut chars = slice.char_indices().peekable();
-	let mut qt_state = QuoteState::default();
+pub fn split_at_unescaped(slice: &str, pat: &str) -> Option<(String, String)> {
+  let mut chars = slice.char_indices().peekable();
+  let mut qt_state = QuoteState::default();
 
-	while let Some((i, ch)) = chars.next() {
-		match ch {
-			'\\' => { chars.next(); continue; }
-			'\'' => qt_state.toggle_single(),
-			'"' => qt_state.toggle_double(),
-			_ if qt_state.in_quote() => continue,
-			_ => {}
-		}
+  while let Some((i, ch)) = chars.next() {
+    match ch {
+      '\\' => {
+        chars.next();
+        continue;
+      }
+      '\'' => qt_state.toggle_single(),
+      '"' => qt_state.toggle_double(),
+      _ if qt_state.in_quote() => continue,
+      _ => {}
+    }
 
-		if slice[i..].starts_with(pat) {
-			let before = slice[..i].to_string();
-			let after = slice[i + pat.len()..].to_string();
-			return Some((before, after));
-		}
-	}
+    if slice[i..].starts_with(pat) {
+      let before = slice[..i].to_string();
+      let after = slice[i + pat.len()..].to_string();
+      return Some((before, after));
+    }
+  }
 
-
-	None
+  None
 }
 
 pub fn split_tk(tk: &Tk, pat: &str) -> Vec<Tk> {
-	let slice = tk.as_str();
-	let mut cursor = 0;
-	let mut splits = vec![];
-	while let Some(split) = split_at_unescaped(&slice[cursor..], pat) {
-		let before_span = Span::new(tk.span.range().start + cursor..tk.span.range().start + cursor + split.0.len(), tk.source().clone());
-		splits.push(Tk::new(tk.class.clone(), before_span));
-		cursor += split.0.len() + pat.len();
-	}
-	if slice.get(cursor..).is_some_and(|s| !s.is_empty()) {
-		let remaining_span = Span::new(tk.span.range().start + cursor..tk.span.range().end, tk.source().clone());
-		splits.push(Tk::new(tk.class.clone(), remaining_span));
-	}
-	splits
+  let slice = tk.as_str();
+  let mut cursor = 0;
+  let mut splits = vec![];
+  while let Some(split) = split_at_unescaped(&slice[cursor..], pat) {
+    let before_span = Span::new(
+      tk.span.range().start + cursor..tk.span.range().start + cursor + split.0.len(),
+      tk.source().clone(),
+    );
+    splits.push(Tk::new(tk.class.clone(), before_span));
+    cursor += split.0.len() + pat.len();
+  }
+  if slice.get(cursor..).is_some_and(|s| !s.is_empty()) {
+    let remaining_span = Span::new(
+      tk.span.range().start + cursor..tk.span.range().end,
+      tk.source().clone(),
+    );
+    splits.push(Tk::new(tk.class.clone(), remaining_span));
+  }
+  splits
 }
 
 pub fn split_tk_at(tk: &Tk, pat: &str) -> Option<(Tk, Tk)> {
-	let slice = tk.as_str();
-	let mut chars = slice.char_indices().peekable();
-	let mut qt_state = QuoteState::default();
+  let slice = tk.as_str();
+  let mut chars = slice.char_indices().peekable();
+  let mut qt_state = QuoteState::default();
 
-	while let Some((i, ch)) = chars.next() {
-		match ch {
-			'\\' => { chars.next(); continue; }
-			'\'' => qt_state.toggle_single(),
-			'"' => qt_state.toggle_double(),
-			_ if qt_state.in_quote() => continue,
-			_ => {}
-		}
+  while let Some((i, ch)) = chars.next() {
+    match ch {
+      '\\' => {
+        chars.next();
+        continue;
+      }
+      '\'' => qt_state.toggle_single(),
+      '"' => qt_state.toggle_double(),
+      _ if qt_state.in_quote() => continue,
+      _ => {}
+    }
 
-		if slice[i..].starts_with(pat) {
-			let before_span = Span::new(tk.span.range().start..tk.span.range().start + i, tk.source().clone());
-			let after_span = Span::new(tk.span.range().start + i + pat.len()..tk.span.range().end, tk.source().clone());
-			let before_tk = Tk::new(tk.class.clone(), before_span);
-			let after_tk = Tk::new(tk.class.clone(), after_span);
-			return Some((before_tk, after_tk));
-		}
-	}
+    if slice[i..].starts_with(pat) {
+      let before_span = Span::new(
+        tk.span.range().start..tk.span.range().start + i,
+        tk.source().clone(),
+      );
+      let after_span = Span::new(
+        tk.span.range().start + i + pat.len()..tk.span.range().end,
+        tk.source().clone(),
+      );
+      let before_tk = Tk::new(tk.class.clone(), before_span);
+      let after_tk = Tk::new(tk.class.clone(), after_span);
+      return Some((before_tk, after_tk));
+    }
+  }
 
-	None
+  None
 }
 
 pub fn pos_is_escaped(slice: &str, pos: usize) -> bool {
@@ -1083,7 +1103,7 @@ pub fn lookahead(pat: &str, mut chars: Chars) -> Option<usize> {
 
 pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
   let mut pos = 0;
-	let mut qt_state = QuoteState::default();
+  let mut qt_state = QuoteState::default();
   while let Some(ch) = chars.next() {
     pos += ch.len_utf8();
     match ch {
@@ -1108,12 +1128,12 @@ pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
           }
         }
       }
-			'\'' => {
-				qt_state.toggle_single();
-			}
-			'"' => {
-				qt_state.toggle_double();
-			}
+      '\'' => {
+        qt_state.toggle_single();
+      }
+      '"' => {
+        qt_state.toggle_double();
+      }
       ')' if qt_state.outside() => return Some(pos),
       '(' if qt_state.outside() => return None,
       _ => { /* continue */ }

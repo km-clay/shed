@@ -1,5 +1,7 @@
 use std::{
-  collections::HashSet, fmt::Display, ops::{Range, RangeInclusive}
+  collections::HashSet,
+  fmt::Display,
+  ops::{Range, RangeInclusive},
 };
 
 use unicode_segmentation::UnicodeSegmentation;
@@ -11,7 +13,10 @@ use super::vicmd::{
 };
 use crate::{
   libsh::{error::ShResult, guards::var_ctx_guard},
-  parse::{execute::exec_input, lex::{LexFlags, LexStream, Tk, TkFlags, TkRule}},
+  parse::{
+    execute::exec_input,
+    lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
+  },
   prelude::*,
   readline::{
     markers,
@@ -297,20 +302,20 @@ impl ClampedUsize {
   pub fn sub(&mut self, value: usize) {
     self.value = self.value.saturating_sub(value)
   }
-	pub fn wrap_add(&mut self, value: usize) {
-		self.value = self.ret_wrap_add(value);
-	}
-	pub fn wrap_sub(&mut self, value: usize) {
-		self.value = self.ret_wrap_sub(value);
-	}
-	pub fn ret_wrap_add(&self, value: usize) -> usize {
-		let max = self.upper_bound();
-		(self.value + value) % (max + 1)
-	}
-	pub fn ret_wrap_sub(&self, value: usize) -> usize {
-		let max = self.upper_bound();
-		(self.value + (max + 1) - (value % (max + 1))) % (max + 1)
-	}
+  pub fn wrap_add(&mut self, value: usize) {
+    self.value = self.ret_wrap_add(value);
+  }
+  pub fn wrap_sub(&mut self, value: usize) {
+    self.value = self.ret_wrap_sub(value);
+  }
+  pub fn ret_wrap_add(&self, value: usize) -> usize {
+    let max = self.upper_bound();
+    (self.value + value) % (max + 1)
+  }
+  pub fn ret_wrap_sub(&self, value: usize) -> usize {
+    let max = self.upper_bound();
+    (self.value + (max + 1) - (value % (max + 1))) % (max + 1)
+  }
   /// Add a value to the wrapped usize, return the result
   ///
   /// Returns the result instead of mutating the inner value
@@ -352,12 +357,12 @@ pub struct LineBuf {
 
 impl LineBuf {
   pub fn new() -> Self {
-		let mut new = Self {
-			grapheme_indices: Some(vec![]), // We know the buffer is empty, so this keeps us safe from unwrapping None
-			..Default::default()
-		};
-		new.update_graphemes();
-		new
+    let mut new = Self {
+      grapheme_indices: Some(vec![]), // We know the buffer is empty, so this keeps us safe from unwrapping None
+      ..Default::default()
+    };
+    new.update_graphemes();
+    new
   }
   /// Only update self.grapheme_indices if it is None
   pub fn update_graphemes_lazy(&mut self) {
@@ -437,17 +442,17 @@ impl LineBuf {
     self.cursor.set_max(indices.len());
     self.grapheme_indices = Some(indices)
   }
-	#[track_caller]
+  #[track_caller]
   pub fn grapheme_indices(&self) -> &[usize] {
-		if self.grapheme_indices.is_none() {
-			let caller = std::panic::Location::caller();
-			panic!(
-				"grapheme_indices is None. This likely means you forgot to call update_graphemes() before calling a method that relies on grapheme_indices, or you called a method that relies on grapheme_indices from another method that also relies on grapheme_indices without updating graphemes in between. Caller: {}:{}:{}",
-				caller.file(),
-				caller.line(),
-				caller.column(),
-			);
-		}
+    if self.grapheme_indices.is_none() {
+      let caller = std::panic::Location::caller();
+      panic!(
+        "grapheme_indices is None. This likely means you forgot to call update_graphemes() before calling a method that relies on grapheme_indices, or you called a method that relies on grapheme_indices from another method that also relies on grapheme_indices without updating graphemes in between. Caller: {}:{}:{}",
+        caller.file(),
+        caller.line(),
+        caller.column(),
+      );
+    }
     self.grapheme_indices.as_ref().unwrap()
   }
   pub fn grapheme_indices_owned(&self) -> Vec<usize> {
@@ -806,19 +811,19 @@ impl LineBuf {
     }
     Some(self.line_bounds(line_no))
   }
-	pub fn this_word(&mut self, word: Word) -> (usize, usize) {
-		let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
-			self.cursor.get()
-		} else {
-			self.start_of_word_backward(self.cursor.get(), word)
-		};
-		let end = if self.is_word_bound(self.cursor.get(), word, Direction::Forward) {
-			self.cursor.get()
-		} else {
-			self.end_of_word_forward(self.cursor.get(), word)
-		};
-		(start, end)
-	}
+  pub fn this_word(&mut self, word: Word) -> (usize, usize) {
+    let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
+      self.cursor.get()
+    } else {
+      self.start_of_word_backward(self.cursor.get(), word)
+    };
+    let end = if self.is_word_bound(self.cursor.get(), word, Direction::Forward) {
+      self.cursor.get()
+    } else {
+      self.end_of_word_forward(self.cursor.get(), word)
+    };
+    (start, end)
+  }
   pub fn this_line_exclusive(&mut self) -> (usize, usize) {
     let line_no = self.cursor_line_number();
     let (start, mut end) = self.line_bounds(line_no);
@@ -827,10 +832,10 @@ impl LineBuf {
     }
     (start, end)
   }
-	pub fn this_line_content(&mut self) -> Option<&str> {
-		let (start,end) = self.this_line_exclusive();
-		self.slice(start..end)
-	}
+  pub fn this_line_content(&mut self) -> Option<&str> {
+    let (start, end) = self.this_line_exclusive();
+    self.slice(start..end)
+  }
   pub fn this_line(&mut self) -> (usize, usize) {
     let line_no = self.cursor_line_number();
     self.line_bounds(line_no)
@@ -940,7 +945,7 @@ impl LineBuf {
   }
   pub fn is_word_bound(&mut self, pos: usize, word: Word, dir: Direction) -> bool {
     let clamped_pos = ClampedUsize::new(pos, self.cursor.max, true);
-		log::debug!("clamped_pos: {}", clamped_pos.get());
+    log::debug!("clamped_pos: {}", clamped_pos.get());
     let cur_char = self
       .grapheme_at(clamped_pos.get())
       .map(|c| c.to_string())
@@ -1011,11 +1016,11 @@ impl LineBuf {
         } else {
           self.start_of_word_backward(self.cursor.get(), word)
         };
-				let end = if self.is_word_bound(self.cursor.get(), word, Direction::Forward) {
-					self.cursor.get()
-				} else {
-						self.end_of_word_forward(self.cursor.get(), word)
-				};
+        let end = if self.is_word_bound(self.cursor.get(), word, Direction::Forward) {
+          self.cursor.get()
+        } else {
+          self.end_of_word_forward(self.cursor.get(), word)
+        };
         Some((start, end))
       }
       Bound::Around => {
@@ -1994,9 +1999,9 @@ impl LineBuf {
 
     let mut level: usize = 0;
 
-		if to_cursor.ends_with("\\\n") {
-			level += 1; // Line continuation, so we need to add an extra level
-		}
+    if to_cursor.ends_with("\\\n") {
+      level += 1; // Line continuation, so we need to add an extra level
+    }
 
     let input = Arc::new(to_cursor);
     let Ok(tokens) = LexStream::new(input, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()
@@ -2004,23 +2009,23 @@ impl LineBuf {
       log::error!("Failed to lex buffer for indent calculation");
       return;
     };
-		let mut last_keyword: Option<String> = None;
+    let mut last_keyword: Option<String> = None;
     for tk in tokens {
       if tk.flags.contains(TkFlags::KEYWORD) {
         match tk.as_str() {
-					"in" => {
-						if last_keyword.as_deref() == Some("case") {
-							level += 1;
-						} else {
-							// 'in' is also used in for loops, but we already increment level on 'do' for those
-							// so we just skip it here
-						}
-					}
+          "in" => {
+            if last_keyword.as_deref() == Some("case") {
+              level += 1;
+            } else {
+              // 'in' is also used in for loops, but we already increment level on 'do' for those
+              // so we just skip it here
+            }
+          }
           "then" | "do" => level += 1,
           "done" | "fi" | "esac" => level = level.saturating_sub(1),
           _ => { /* Continue */ }
         }
-				last_keyword = Some(tk.to_string());
+        last_keyword = Some(tk.to_string());
       } else if tk.class == TkRule::BraceGrpStart {
         level += 1;
       } else if tk.class == TkRule::BraceGrpEnd {
@@ -2362,12 +2367,12 @@ impl LineBuf {
       }
       MotionCmd(_count, Motion::BeginningOfBuffer) => MotionKind::On(0),
       MotionCmd(_count, Motion::EndOfBuffer) => {
-				if self.cursor.exclusive {
-					MotionKind::On(self.grapheme_indices().len().saturating_sub(1))
-				} else {
-					MotionKind::On(self.grapheme_indices().len())
-				}
-			},
+        if self.cursor.exclusive {
+          MotionKind::On(self.grapheme_indices().len().saturating_sub(1))
+        } else {
+          MotionKind::On(self.grapheme_indices().len())
+        }
+      }
       MotionCmd(_count, Motion::ToColumn) => todo!(),
       MotionCmd(count, Motion::Range(start, end)) => {
         let mut final_end = end;
@@ -2794,7 +2799,11 @@ impl LineBuf {
         match content {
           RegisterContent::Span(ref text) => {
             let insert_idx = match anchor {
-              Anchor::After => self.cursor.get().saturating_add(1).min(self.grapheme_indices().len()),
+              Anchor::After => self
+                .cursor
+                .get()
+                .saturating_add(1)
+                .min(self.grapheme_indices().len()),
               Anchor::Before => self.cursor.get(),
             };
             self.insert_str_at(insert_idx, text);
@@ -2859,34 +2868,35 @@ impl LineBuf {
       Verb::InsertChar(ch) => {
         self.insert_at_cursor(ch);
         self.cursor.add(1);
-				let before = self.auto_indent_level;
-				if read_shopts(|o| o.prompt.auto_indent)
-				&& let Some(line_content) = self.this_line_content() {
-					match line_content.trim() {
-						"esac" | "done" | "fi" | "}" => {
-							self.calc_indent_level();
-							if self.auto_indent_level < before {
-								let delta = before - self.auto_indent_level;
-								let line_start = self.start_of_line();
-								for _ in 0..delta {
-									if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
-										self.remove(line_start);
-										if !self.cursor_at_max() {
-											self.cursor.sub(1);
-										}
-									}
-								}
-							}
-						}
-						_ => { /* nothing to see here */ }
-					}
-				}
+        let before = self.auto_indent_level;
+        if read_shopts(|o| o.prompt.auto_indent)
+          && let Some(line_content) = self.this_line_content()
+        {
+          match line_content.trim() {
+            "esac" | "done" | "fi" | "}" => {
+              self.calc_indent_level();
+              if self.auto_indent_level < before {
+                let delta = before - self.auto_indent_level;
+                let line_start = self.start_of_line();
+                for _ in 0..delta {
+                  if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
+                    self.remove(line_start);
+                    if !self.cursor_at_max() {
+                      self.cursor.sub(1);
+                    }
+                  }
+                }
+              }
+            }
+            _ => { /* nothing to see here */ }
+          }
+        }
       }
       Verb::Insert(string) => {
         self.push_str(&string);
         let graphemes = string.graphemes(true).count();
-				log::debug!("Inserted string: {string:?}, graphemes: {graphemes}");
-				log::debug!("buffer after insert: {:?}", self.buffer);
+        log::debug!("Inserted string: {string:?}, graphemes: {graphemes}");
+        log::debug!("buffer after insert: {:?}", self.buffer);
         self.cursor.add(graphemes);
       }
       Verb::Indent => {
@@ -3039,71 +3049,82 @@ impl LineBuf {
           }
         }
       }
-			Verb::IncrementNumber(n) |
-			Verb::DecrementNumber(n) => {
-				let inc = if matches!(verb, Verb::IncrementNumber(_)) { n as i64 } else { -(n as i64) };
-				let (s, e) = self.select_range().unwrap_or(self.this_word(Word::Normal));
-				let end = if self.select_range().is_some() {
-					if e < self.grapheme_indices().len() - 1 {
-						e
-					} else {
-						e + 1
-					}
-				} else {
-					(e + 1).min(self.grapheme_indices().len())
-				}; // inclusive → exclusive, capped at buffer len
-				let word = self.slice(s..end).unwrap_or_default().to_lowercase();
+      Verb::IncrementNumber(n) | Verb::DecrementNumber(n) => {
+        let inc = if matches!(verb, Verb::IncrementNumber(_)) {
+          n as i64
+        } else {
+          -(n as i64)
+        };
+        let (s, e) = self.select_range().unwrap_or(self.this_word(Word::Normal));
+        let end = if self.select_range().is_some() {
+          if e < self.grapheme_indices().len() - 1 {
+            e
+          } else {
+            e + 1
+          }
+        } else {
+          (e + 1).min(self.grapheme_indices().len())
+        }; // inclusive → exclusive, capped at buffer len
+        let word = self.slice(s..end).unwrap_or_default().to_lowercase();
 
-				let byte_start = self.index_byte_pos(s);
-				let byte_end = if end >= self.grapheme_indices().len() {
-					self.buffer.len()
-				} else {
-					self.index_byte_pos(end)
-				};
+        let byte_start = self.index_byte_pos(s);
+        let byte_end = if end >= self.grapheme_indices().len() {
+          self.buffer.len()
+        } else {
+          self.index_byte_pos(end)
+        };
 
-				if word.starts_with("0x") {
-					let body = word.strip_prefix("0x").unwrap();
-					let width = body.len();
-					if let Ok(num) = i64::from_str_radix(body, 16) {
-						let new_num = num + inc;
-						self.buffer.replace_range(byte_start..byte_end, &format!("0x{new_num:0>width$x}"));
-						self.update_graphemes();
-						self.cursor.set(s);
-					}
-				} else if word.starts_with("0b") {
-					let body = word.strip_prefix("0b").unwrap();
-					let width = body.len();
-					if let Ok(num) = i64::from_str_radix(body, 2) {
-						let new_num = num + inc;
-						self.buffer.replace_range(byte_start..byte_end, &format!("0b{new_num:0>width$b}"));
-						self.update_graphemes();
-						self.cursor.set(s);
-					}
-				} else if word.starts_with("0o") {
-					let body = word.strip_prefix("0o").unwrap();
-					let width = body.len();
-					if let Ok(num) = i64::from_str_radix(body, 8) {
-						let new_num = num + inc;
-						self.buffer.replace_range(byte_start..byte_end, &format!("0o{new_num:0>width$o}"));
-						self.update_graphemes();
-						self.cursor.set(s);
-					}
-				} else if let Ok(num) = word.parse::<i64>() {
-					let width = word.len();
-					let new_num = num + inc;
-					self.buffer.replace_range(byte_start..byte_end, &format!("{new_num:0>width$}"));
-					self.update_graphemes();
-					self.cursor.set(s);
-				}
-			}
+        if word.starts_with("0x") {
+          let body = word.strip_prefix("0x").unwrap();
+          let width = body.len();
+          if let Ok(num) = i64::from_str_radix(body, 16) {
+            let new_num = num + inc;
+            self
+              .buffer
+              .replace_range(byte_start..byte_end, &format!("0x{new_num:0>width$x}"));
+            self.update_graphemes();
+            self.cursor.set(s);
+          }
+        } else if word.starts_with("0b") {
+          let body = word.strip_prefix("0b").unwrap();
+          let width = body.len();
+          if let Ok(num) = i64::from_str_radix(body, 2) {
+            let new_num = num + inc;
+            self
+              .buffer
+              .replace_range(byte_start..byte_end, &format!("0b{new_num:0>width$b}"));
+            self.update_graphemes();
+            self.cursor.set(s);
+          }
+        } else if word.starts_with("0o") {
+          let body = word.strip_prefix("0o").unwrap();
+          let width = body.len();
+          if let Ok(num) = i64::from_str_radix(body, 8) {
+            let new_num = num + inc;
+            self
+              .buffer
+              .replace_range(byte_start..byte_end, &format!("0o{new_num:0>width$o}"));
+            self.update_graphemes();
+            self.cursor.set(s);
+          }
+        } else if let Ok(num) = word.parse::<i64>() {
+          let width = word.len();
+          let new_num = num + inc;
+          self
+            .buffer
+            .replace_range(byte_start..byte_end, &format!("{new_num:0>width$}"));
+          self.update_graphemes();
+          self.cursor.set(s);
+        }
+      }
 
       Verb::Complete
-			| Verb::ExMode
+      | Verb::ExMode
       | Verb::EndOfFile
       | Verb::InsertMode
       | Verb::NormalMode
       | Verb::VisualMode
-			| Verb::VerbatimMode
+      | Verb::VerbatimMode
       | Verb::ReplaceMode
       | Verb::VisualModeLine
       | Verb::VisualModeBlock
@@ -3111,46 +3132,63 @@ impl LineBuf {
       | Verb::VisualModeSelectLast => self.apply_motion(motion), // Already handled logic for these
 
       Verb::ShellCmd(cmd) => {
-				log::debug!("Executing ex-mode command from widget: {cmd}");
-				let mut vars = HashSet::new();
-				vars.insert("_BUFFER".into());
-				vars.insert("_CURSOR".into());
-				vars.insert("_ANCHOR".into());
-				let _guard = var_ctx_guard(vars);
+        log::debug!("Executing ex-mode command from widget: {cmd}");
+        let mut vars = HashSet::new();
+        vars.insert("_BUFFER".into());
+        vars.insert("_CURSOR".into());
+        vars.insert("_ANCHOR".into());
+        let _guard = var_ctx_guard(vars);
 
-				let mut buf = self.as_str().to_string();
-				let mut cursor = self.cursor.get();
-				let mut anchor = self.select_range().map(|r| if r.0 != cursor { r.0 } else { r.1 }).unwrap_or(cursor);
+        let mut buf = self.as_str().to_string();
+        let mut cursor = self.cursor.get();
+        let mut anchor = self
+          .select_range()
+          .map(|r| if r.0 != cursor { r.0 } else { r.1 })
+          .unwrap_or(cursor);
 
-				write_vars(|v| {
-					v.set_var("_BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
-					v.set_var("_CURSOR", VarKind::Str(cursor.to_string()), VarFlags::EXPORT)?;
-					v.set_var("_ANCHOR", VarKind::Str(anchor.to_string()), VarFlags::EXPORT)
-				})?;
+        write_vars(|v| {
+          v.set_var("_BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
+          v.set_var(
+            "_CURSOR",
+            VarKind::Str(cursor.to_string()),
+            VarFlags::EXPORT,
+          )?;
+          v.set_var(
+            "_ANCHOR",
+            VarKind::Str(anchor.to_string()),
+            VarFlags::EXPORT,
+          )
+        })?;
 
-				RawModeGuard::with_cooked_mode(|| exec_input(cmd, None, true, Some("<ex-mode-cmd>".into())))?;
+        RawModeGuard::with_cooked_mode(|| {
+          exec_input(cmd, None, true, Some("<ex-mode-cmd>".into()))
+        })?;
 
-				let keys = write_vars(|v| {
-					buf = v.take_var("_BUFFER");
-					cursor = v.take_var("_CURSOR").parse().unwrap_or(cursor);
-					anchor = v.take_var("_ANCHOR").parse().unwrap_or(anchor);
-					v.take_var("_KEYS")
-				});
+        let keys = write_vars(|v| {
+          buf = v.take_var("_BUFFER");
+          cursor = v.take_var("_CURSOR").parse().unwrap_or(cursor);
+          anchor = v.take_var("_ANCHOR").parse().unwrap_or(anchor);
+          v.take_var("_KEYS")
+        });
 
-				self.set_buffer(buf);
-				self.update_graphemes();
-				self.cursor.set_max(self.buffer.graphemes(true).count());
-				self.cursor.set(cursor);
-				log::debug!("[ShellCmd] post-widget: cursor={}, anchor={}, select_range={:?}", cursor, anchor, self.select_range);
-				if anchor != cursor && self.select_range.is_some() {
-					self.select_range = Some(ordered(cursor, anchor));
-				}
-				if !keys.is_empty() {
-					log::debug!("Pending widget keys from shell command: {keys}");
-					write_meta(|m| m.set_pending_widget_keys(&keys))
-				}
-
-			}
+        self.set_buffer(buf);
+        self.update_graphemes();
+        self.cursor.set_max(self.buffer.graphemes(true).count());
+        self.cursor.set(cursor);
+        log::debug!(
+          "[ShellCmd] post-widget: cursor={}, anchor={}, select_range={:?}",
+          cursor,
+          anchor,
+          self.select_range
+        );
+        if anchor != cursor && self.select_range.is_some() {
+          self.select_range = Some(ordered(cursor, anchor));
+        }
+        if !keys.is_empty() {
+          log::debug!("Pending widget keys from shell command: {keys}");
+          write_meta(|m| m.set_pending_widget_keys(&keys))
+        }
+      }
       Verb::Normal(_)
       | Verb::Read(_)
       | Verb::Write(_)

@@ -167,7 +167,9 @@ pub fn complete_builtin(node: Node) -> ShResult<()> {
   let (argv, opts) = get_opts_from_tokens(argv, &COMP_OPTS)?;
   let comp_opts = get_comp_opts(opts)?;
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   if comp_opts.flags.contains(CompFlags::PRINT) {
     if argv.is_empty() {
@@ -204,7 +206,11 @@ pub fn complete_builtin(node: Node) -> ShResult<()> {
 
   if argv.is_empty() {
     state::set_status(1);
-    return Err(ShErr::at(ShErrKind::ExecFail, blame, "complete: no command specified"));
+    return Err(ShErr::at(
+      ShErrKind::ExecFail,
+      blame,
+      "complete: no command specified",
+    ));
   }
 
   let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
@@ -279,12 +285,16 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
         "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
         _ => {
           let span: crate::parse::lex::Span = Default::default();
-          return Err(ShErr::at(ShErrKind::InvalidOpt, span, format!("complete: invalid option: {}", opt_flag)));
+          return Err(ShErr::at(
+            ShErrKind::InvalidOpt,
+            span,
+            format!("complete: invalid option: {}", opt_flag),
+          ));
         }
       },
 
-			Opt::Short('a') => comp_opts.flags |= CompFlags::ALIAS,
-			Opt::Short('S') => comp_opts.flags |= CompFlags::SIGNALS,
+      Opt::Short('a') => comp_opts.flags |= CompFlags::ALIAS,
+      Opt::Short('S') => comp_opts.flags |= CompFlags::SIGNALS,
       Opt::Short('r') => comp_opts.flags |= CompFlags::REMOVE,
       Opt::Short('j') => comp_opts.flags |= CompFlags::JOBS,
       Opt::Short('p') => comp_opts.flags |= CompFlags::PRINT,

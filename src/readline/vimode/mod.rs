@@ -4,47 +4,45 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::libsh::error::ShResult;
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
-use crate::readline::vicmd::{
-  Motion, MotionCmd, To, Verb, VerbCmd, ViCmd,
-};
+use crate::readline::vicmd::{Motion, MotionCmd, To, Verb, VerbCmd, ViCmd};
 
+pub mod ex;
 pub mod insert;
 pub mod normal;
 pub mod replace;
-pub mod visual;
-pub mod ex;
 pub mod verbatim;
+pub mod visual;
 
 pub use ex::ViEx;
 pub use insert::ViInsert;
 pub use normal::ViNormal;
 pub use replace::ViReplace;
-pub use visual::ViVisual;
 pub use verbatim::ViVerbatim;
+pub use visual::ViVisual;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModeReport {
   Insert,
   Normal,
-	Ex,
+  Ex,
   Visual,
   Replace,
-	Verbatim,
+  Verbatim,
   Unknown,
 }
 
 impl Display for ModeReport {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			ModeReport::Insert => write!(f, "INSERT"),
-			ModeReport::Normal => write!(f, "NORMAL"),
-			ModeReport::Ex => write!(f, "COMMAND"),
-			ModeReport::Visual => write!(f, "VISUAL"),
-			ModeReport::Replace => write!(f, "REPLACE"),
-			ModeReport::Verbatim => write!(f, "VERBATIM"),
-			ModeReport::Unknown => write!(f, "UNKNOWN"),
-		}
-	}
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      ModeReport::Insert => write!(f, "INSERT"),
+      ModeReport::Normal => write!(f, "NORMAL"),
+      ModeReport::Ex => write!(f, "COMMAND"),
+      ModeReport::Visual => write!(f, "VISUAL"),
+      ModeReport::Replace => write!(f, "REPLACE"),
+      ModeReport::Verbatim => write!(f, "VERBATIM"),
+      ModeReport::Unknown => write!(f, "UNKNOWN"),
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -73,13 +71,17 @@ pub enum CmdState {
 }
 
 pub trait ViMode {
-	fn handle_key_fallible(&mut self, key: E) -> ShResult<Option<ViCmd>> { Ok(self.handle_key(key)) }
+  fn handle_key_fallible(&mut self, key: E) -> ShResult<Option<ViCmd>> {
+    Ok(self.handle_key(key))
+  }
   fn handle_key(&mut self, key: E) -> Option<ViCmd>;
   fn is_repeatable(&self) -> bool;
   fn as_replay(&self) -> Option<CmdReplay>;
   fn cursor_style(&self) -> String;
   fn pending_seq(&self) -> Option<String>;
-	fn pending_cursor(&self) -> Option<usize> { None }
+  fn pending_cursor(&self) -> Option<usize> {
+    None
+  }
   fn move_cursor_on_undo(&self) -> bool;
   fn clamp_cursor(&self) -> bool;
   fn hist_scroll_start_pos(&self) -> Option<To>;

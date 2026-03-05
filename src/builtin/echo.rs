@@ -50,7 +50,9 @@ pub fn echo(node: Node) -> ShResult<()> {
   let (argv, opts) = get_opts_from_tokens(argv, &ECHO_OPTS)?;
   let flags = get_echo_flags(opts).blame(blame)?;
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   let output_channel = if flags.contains(EchoFlags::USE_STDERR) {
     borrow_fd(STDERR_FILENO)

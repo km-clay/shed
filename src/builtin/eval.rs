@@ -1,6 +1,9 @@
 use crate::{
   libsh::error::ShResult,
-  parse::{NdRule, Node, execute::{exec_input, prepare_argv}},
+  parse::{
+    NdRule, Node,
+    execute::{exec_input, prepare_argv},
+  },
   state,
 };
 
@@ -14,7 +17,9 @@ pub fn eval(node: Node) -> ShResult<()> {
   };
 
   let mut expanded_argv = prepare_argv(argv)?;
-  if !expanded_argv.is_empty() { expanded_argv.remove(0); }
+  if !expanded_argv.is_empty() {
+    expanded_argv.remove(0);
+  }
 
   if expanded_argv.is_empty() {
     state::set_status(0);

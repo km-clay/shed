@@ -16,7 +16,9 @@ pub fn shopt(node: Node) -> ShResult<()> {
   };
 
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   if argv.is_empty() {
     let mut output = write_shopts(|s| s.display_opts())?;

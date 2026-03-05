@@ -1,9 +1,9 @@
-use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
-use std::fmt::Display;
 use ariadne::Color;
 use ariadne::{Report, ReportKind};
 use rand::TryRng;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::fmt::Display;
 
 use crate::procio::RedirGuard;
 use crate::{
@@ -15,96 +15,96 @@ use crate::{
 pub type ShResult<T> = Result<T, ShErr>;
 
 pub struct ColorRng {
-	last_color: Option<Color>,
+  last_color: Option<Color>,
 }
 
 impl ColorRng {
-	fn get_colors() -> &'static [Color] {
-		&[
-			Color::Red,
-			Color::Cyan,
-			Color::Blue,
-			Color::Green,
-			Color::Yellow,
-			Color::Magenta,
-			Color::Fixed(208), // orange
-			Color::Fixed(39),  // deep sky blue
-			Color::Fixed(170), // orchid / magenta-pink
-			Color::Fixed(76),  // chartreuse
-			Color::Fixed(51),  // aqua
-			Color::Fixed(226), // bright yellow
-			Color::Fixed(99),  // slate blue
-			Color::Fixed(214), // light orange
-			Color::Fixed(48),  // spring green
-			Color::Fixed(201), // hot pink
-			Color::Fixed(81),  // steel blue
-			Color::Fixed(220), // gold
-			Color::Fixed(105), // medium purple
-		]
-	}
+  fn get_colors() -> &'static [Color] {
+    &[
+      Color::Red,
+      Color::Cyan,
+      Color::Blue,
+      Color::Green,
+      Color::Yellow,
+      Color::Magenta,
+      Color::Fixed(208), // orange
+      Color::Fixed(39),  // deep sky blue
+      Color::Fixed(170), // orchid / magenta-pink
+      Color::Fixed(76),  // chartreuse
+      Color::Fixed(51),  // aqua
+      Color::Fixed(226), // bright yellow
+      Color::Fixed(99),  // slate blue
+      Color::Fixed(214), // light orange
+      Color::Fixed(48),  // spring green
+      Color::Fixed(201), // hot pink
+      Color::Fixed(81),  // steel blue
+      Color::Fixed(220), // gold
+      Color::Fixed(105), // medium purple
+    ]
+  }
 
-	pub fn last_color(&mut self) -> Color {
-		if let Some(color) = self.last_color.take() {
-			color
-		} else {
-			let color = self.next().unwrap_or(Color::White);
-			self.last_color = Some(color);
-			color
-		}
-	}
+  pub fn last_color(&mut self) -> Color {
+    if let Some(color) = self.last_color.take() {
+      color
+    } else {
+      let color = self.next().unwrap_or(Color::White);
+      self.last_color = Some(color);
+      color
+    }
+  }
 }
 
 impl Iterator for ColorRng {
-	type Item = Color;
-	fn next(&mut self) -> Option<Self::Item> {
-		let colors = Self::get_colors();
-		let idx = rand::rngs::SysRng.try_next_u32().ok()? as usize % colors.len();
-		Some(colors[idx])
-	}
+  type Item = Color;
+  fn next(&mut self) -> Option<Self::Item> {
+    let colors = Self::get_colors();
+    let idx = rand::rngs::SysRng.try_next_u32().ok()? as usize % colors.len();
+    Some(colors[idx])
+  }
 }
 
 thread_local! {
-	static COLOR_RNG: RefCell<ColorRng> = const { RefCell::new(ColorRng { last_color: None }) };
+  static COLOR_RNG: RefCell<ColorRng> = const { RefCell::new(ColorRng { last_color: None }) };
 }
 
 pub fn next_color() -> Color {
-	COLOR_RNG.with(|rng| {
-		let color = rng.borrow_mut().next().unwrap();
-		rng.borrow_mut().last_color = Some(color);
-		color
-	})
+  COLOR_RNG.with(|rng| {
+    let color = rng.borrow_mut().next().unwrap();
+    rng.borrow_mut().last_color = Some(color);
+    color
+  })
 }
 
 pub fn last_color() -> Color {
-	COLOR_RNG.with(|rng| rng.borrow_mut().last_color())
+  COLOR_RNG.with(|rng| rng.borrow_mut().last_color())
 }
 
 pub fn clear_color() {
-	COLOR_RNG.with(|rng| rng.borrow_mut().last_color = None);
+  COLOR_RNG.with(|rng| rng.borrow_mut().last_color = None);
 }
 
 pub trait ShResultExt {
   fn blame(self, span: Span) -> Self;
   fn try_blame(self, span: Span) -> Self;
-	fn promote_err(self, span: Span) -> Self;
-	fn is_flow_control(&self) -> bool;
+  fn promote_err(self, span: Span) -> Self;
+  fn is_flow_control(&self) -> bool;
 }
 
 impl<T> ShResultExt for Result<T, ShErr> {
   /// Blame a span for an error
   fn blame(self, new_span: Span) -> Self {
-		self.map_err(|e| e.blame(new_span))
+    self.map_err(|e| e.blame(new_span))
   }
   /// Blame a span if no blame has been assigned yet
   fn try_blame(self, new_span: Span) -> Self {
-		self.map_err(|e| e.try_blame(new_span))
+    self.map_err(|e| e.try_blame(new_span))
   }
-	fn promote_err(self, span: Span) -> Self {
-		self.map_err(|e| e.promote(span))
-	}
-	fn is_flow_control(&self) -> bool {
-		self.as_ref().is_err_and(|e| e.is_flow_control())
-	}
+  fn promote_err(self, span: Span) -> Self {
+    self.map_err(|e| e.promote(span))
+  }
+  fn is_flow_control(&self) -> bool {
+    self.as_ref().is_err_and(|e| e.is_flow_control())
+  }
 }
 
 #[derive(Clone, Debug)]
@@ -163,160 +163,256 @@ impl Display for Note {
 
 #[derive(Debug)]
 pub struct ShErr {
-	kind: ShErrKind,
-	src_span: Option<Span>,
-	labels: Vec<ariadne::Label<Span>>,
-	sources: Vec<SpanSource>,
-	notes: Vec<String>,
+  kind: ShErrKind,
+  src_span: Option<Span>,
+  labels: Vec<ariadne::Label<Span>>,
+  sources: Vec<SpanSource>,
+  notes: Vec<String>,
 
-	/// If we propagate through a redirect boundary, we take ownership of
-	/// the RedirGuard(s) so that redirections stay alive until the error
-	/// is printed.  Multiple guards can accumulate as the error bubbles
-	/// through nested redirect scopes.
-	io_guards: Vec<RedirGuard>
+  /// If we propagate through a redirect boundary, we take ownership of
+  /// the RedirGuard(s) so that redirections stay alive until the error
+  /// is printed.  Multiple guards can accumulate as the error bubbles
+  /// through nested redirect scopes.
+  io_guards: Vec<RedirGuard>,
 }
 
 impl ShErr {
-	pub fn new(kind: ShErrKind, span: Span) -> Self {
-		Self { kind, src_span: Some(span), labels: vec![], sources: vec![], notes: vec![], io_guards: vec![] }
-	}
-	pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
-		Self { kind, src_span: None, labels: vec![], sources: vec![], notes: vec![msg.into()], io_guards: vec![] }
-	}
-	pub fn is_flow_control(&self) -> bool {
-		self.kind.is_flow_control()
-	}
-	pub fn promote(mut self, span: Span) -> Self {
-		if self.notes.is_empty() {
-			return self
-		}
-		let first = self.notes[0].clone();
-		if self.notes.len() > 1 {
-			self.notes = self.notes[1..].to_vec();
-		}
+  pub fn new(kind: ShErrKind, span: Span) -> Self {
+    Self {
+      kind,
+      src_span: Some(span),
+      labels: vec![],
+      sources: vec![],
+      notes: vec![],
+      io_guards: vec![],
+    }
+  }
+  pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
+    Self {
+      kind,
+      src_span: None,
+      labels: vec![],
+      sources: vec![],
+      notes: vec![msg.into()],
+      io_guards: vec![],
+    }
+  }
+  pub fn is_flow_control(&self) -> bool {
+    self.kind.is_flow_control()
+  }
+  pub fn promote(mut self, span: Span) -> Self {
+    if self.notes.is_empty() {
+      return self;
+    }
+    let first = self.notes[0].clone();
+    if self.notes.len() > 1 {
+      self.notes = self.notes[1..].to_vec();
+    }
 
-		self.labeled(span, first)
-	}
-	pub fn with_redirs(mut self, guard: RedirGuard) -> Self {
-		self.io_guards.push(guard);
-		self
-	}
-	pub fn at(kind: ShErrKind, span: Span, msg: impl Into<String>) -> Self {
-		let color = last_color(); // use last_color to ensure the same color is used for the label and the message given
-		let src = span.span_source().clone();
-		let msg: String = msg.into();
-		Self::new(kind, span.clone())
-			.with_label(src, ariadne::Label::new(span).with_color(color).with_message(msg))
-	}
-	pub fn labeled(self, span: Span, msg: impl Into<String>) -> Self {
-		let color = last_color();
-		let src = span.span_source().clone();
-		let msg: String = msg.into();
-		self.with_label(src, ariadne::Label::new(span).with_color(color).with_message(msg))
-	}
-	pub fn blame(self, span: Span) -> Self {
-		let ShErr { kind, src_span: _, labels, sources, notes, io_guards } = self;
-		Self { kind, src_span: Some(span), labels, sources, notes, io_guards }
-	}
-	pub fn try_blame(self, span: Span) -> Self {
-		match self {
-			ShErr { kind, src_span: None, labels, sources, notes, io_guards } => Self { kind, src_span: Some(span), labels, sources, notes, io_guards },
-			_ => self
-		}
-	}
-	pub fn kind(&self) -> &ShErrKind {
-		&self.kind
-	}
-	pub fn rename(mut self, name: impl Into<String>) -> Self {
-		if let Some(span) = self.src_span.as_mut() {
-			span.rename(name.into());
-		}
-		self
-	}
-	pub fn with_label(self, source: SpanSource, label: ariadne::Label<Span>) -> Self {
-		let ShErr { kind, src_span, mut labels, mut sources, notes, io_guards } = self;
-		sources.push(source);
-		labels.push(label);
-		Self { kind, src_span, labels, sources, notes, io_guards }
-	}
-	pub fn with_context(self, ctx: VecDeque<(SpanSource, ariadne::Label<Span>)>) -> Self {
-		let ShErr { kind, src_span, mut labels, mut sources, notes, io_guards } = self;
-		for (src, label) in ctx {
-			sources.push(src);
-			labels.push(label);
-		}
-		Self { kind, src_span, labels, sources, notes, io_guards }
-	}
-	pub fn with_note(self, note: impl Into<String>) -> Self {
-		let ShErr { kind, src_span, labels, sources, mut notes, io_guards } = self;
-		notes.push(note.into());
-		Self { kind, src_span, labels, sources, notes, io_guards }
-	}
-	pub fn build_report(&self) -> Option<Report<'_, Span>> {
-		let span = self.src_span.as_ref()?;
-		let mut report = Report::build(ReportKind::Error, span.clone())
-			.with_config(ariadne::Config::default().with_color(true));
-		let msg = if self.notes.is_empty() {
-			self.kind.to_string()
-		} else {
-			format!("{} - {}", self.kind, self.notes.first().unwrap())
-		};
-		report = report.with_message(msg);
+    self.labeled(span, first)
+  }
+  pub fn with_redirs(mut self, guard: RedirGuard) -> Self {
+    self.io_guards.push(guard);
+    self
+  }
+  pub fn at(kind: ShErrKind, span: Span, msg: impl Into<String>) -> Self {
+    let color = last_color(); // use last_color to ensure the same color is used for the label and the message given
+    let src = span.span_source().clone();
+    let msg: String = msg.into();
+    Self::new(kind, span.clone()).with_label(
+      src,
+      ariadne::Label::new(span)
+        .with_color(color)
+        .with_message(msg),
+    )
+  }
+  pub fn labeled(self, span: Span, msg: impl Into<String>) -> Self {
+    let color = last_color();
+    let src = span.span_source().clone();
+    let msg: String = msg.into();
+    self.with_label(
+      src,
+      ariadne::Label::new(span)
+        .with_color(color)
+        .with_message(msg),
+    )
+  }
+  pub fn blame(self, span: Span) -> Self {
+    let ShErr {
+      kind,
+      src_span: _,
+      labels,
+      sources,
+      notes,
+      io_guards,
+    } = self;
+    Self {
+      kind,
+      src_span: Some(span),
+      labels,
+      sources,
+      notes,
+      io_guards,
+    }
+  }
+  pub fn try_blame(self, span: Span) -> Self {
+    match self {
+      ShErr {
+        kind,
+        src_span: None,
+        labels,
+        sources,
+        notes,
+        io_guards,
+      } => Self {
+        kind,
+        src_span: Some(span),
+        labels,
+        sources,
+        notes,
+        io_guards,
+      },
+      _ => self,
+    }
+  }
+  pub fn kind(&self) -> &ShErrKind {
+    &self.kind
+  }
+  pub fn rename(mut self, name: impl Into<String>) -> Self {
+    if let Some(span) = self.src_span.as_mut() {
+      span.rename(name.into());
+    }
+    self
+  }
+  pub fn with_label(self, source: SpanSource, label: ariadne::Label<Span>) -> Self {
+    let ShErr {
+      kind,
+      src_span,
+      mut labels,
+      mut sources,
+      notes,
+      io_guards,
+    } = self;
+    sources.push(source);
+    labels.push(label);
+    Self {
+      kind,
+      src_span,
+      labels,
+      sources,
+      notes,
+      io_guards,
+    }
+  }
+  pub fn with_context(self, ctx: VecDeque<(SpanSource, ariadne::Label<Span>)>) -> Self {
+    let ShErr {
+      kind,
+      src_span,
+      mut labels,
+      mut sources,
+      notes,
+      io_guards,
+    } = self;
+    for (src, label) in ctx {
+      sources.push(src);
+      labels.push(label);
+    }
+    Self {
+      kind,
+      src_span,
+      labels,
+      sources,
+      notes,
+      io_guards,
+    }
+  }
+  pub fn with_note(self, note: impl Into<String>) -> Self {
+    let ShErr {
+      kind,
+      src_span,
+      labels,
+      sources,
+      mut notes,
+      io_guards,
+    } = self;
+    notes.push(note.into());
+    Self {
+      kind,
+      src_span,
+      labels,
+      sources,
+      notes,
+      io_guards,
+    }
+  }
+  pub fn build_report(&self) -> Option<Report<'_, Span>> {
+    let span = self.src_span.as_ref()?;
+    let mut report = Report::build(ReportKind::Error, span.clone())
+      .with_config(ariadne::Config::default().with_color(true));
+    let msg = if self.notes.is_empty() {
+      self.kind.to_string()
+    } else {
+      format!("{} - {}", self.kind, self.notes.first().unwrap())
+    };
+    report = report.with_message(msg);
 
-		for label in self.labels.clone() {
-			report = report.with_label(label);
-		}
-		for note in &self.notes {
-			report = report.with_note(note);
-		}
+    for label in self.labels.clone() {
+      report = report.with_label(label);
+    }
+    for note in &self.notes {
+      report = report.with_note(note);
+    }
 
-		Some(report.finish())
-	}
-	fn collect_sources(&self) -> HashMap<SpanSource, String> {
-		let mut source_map = HashMap::new();
-		if let Some(span) = &self.src_span {
-			let src = span.span_source().clone();
-			source_map.entry(src.clone())
-				.or_insert_with(|| src.content().to_string());
-		}
-		for src in &self.sources {
-			source_map.entry(src.clone())
-				.or_insert_with(|| src.content().to_string());
-		}
-		source_map
-	}
-	pub fn print_error(&self) {
-		let default = || {
-			eprintln!("\n{}", self.kind);
-			for note in &self.notes {
-				eprintln!("note: {note}");
-			}
-		};
-		let Some(report) = self.build_report() else {
-			return default();
-		};
+    Some(report.finish())
+  }
+  fn collect_sources(&self) -> HashMap<SpanSource, String> {
+    let mut source_map = HashMap::new();
+    if let Some(span) = &self.src_span {
+      let src = span.span_source().clone();
+      source_map
+        .entry(src.clone())
+        .or_insert_with(|| src.content().to_string());
+    }
+    for src in &self.sources {
+      source_map
+        .entry(src.clone())
+        .or_insert_with(|| src.content().to_string());
+    }
+    source_map
+  }
+  pub fn print_error(&self) {
+    let default = || {
+      eprintln!("\n{}", self.kind);
+      for note in &self.notes {
+        eprintln!("note: {note}");
+      }
+    };
+    let Some(report) = self.build_report() else {
+      return default();
+    };
 
-		let sources = self.collect_sources();
-		let cache = ariadne::FnCache::new(move |src: &SpanSource| {
-			sources.get(src)
-				.cloned()
-				.ok_or_else(|| format!("Failed to fetch source '{}'", src.name()))
-		});
-		eprintln!();
-		if report.eprint(cache).is_err() {
-			default();
-		}
-	}
+    let sources = self.collect_sources();
+    let cache = ariadne::FnCache::new(move |src: &SpanSource| {
+      sources
+        .get(src)
+        .cloned()
+        .ok_or_else(|| format!("Failed to fetch source '{}'", src.name()))
+    });
+    eprintln!();
+    if report.eprint(cache).is_err() {
+      default();
+    }
+  }
 }
 
 impl Display for ShErr {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		if self.notes.is_empty() {
-			write!(f, "{}", self.kind)
-		} else {
-			write!(f, "{} - {}", self.kind, self.notes.first().unwrap())
-		}
-	}
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    if self.notes.is_empty() {
+      write!(f, "{}", self.kind)
+    } else {
+      write!(f, "{} - {}", self.kind, self.notes.first().unwrap())
+    }
+  }
 }
 
 impl From<std::io::Error> for ShErr {
@@ -350,7 +446,7 @@ pub enum ShErrKind {
   ResourceLimitExceeded,
   BadPermission,
   Errno(Errno),
-	NotFound,
+  NotFound,
   ReadlineErr,
   ExCommand,
 
@@ -364,15 +460,16 @@ pub enum ShErrKind {
 }
 
 impl ShErrKind {
-	pub fn is_flow_control(&self) -> bool {
-		matches!(self,
-			Self::CleanExit(_) |
-			Self::FuncReturn(_) |
-			Self::LoopContinue(_) |
-			Self::LoopBreak(_) |
-			Self::ClearReadline
-		)
-	}
+  pub fn is_flow_control(&self) -> bool {
+    matches!(
+      self,
+      Self::CleanExit(_)
+        | Self::FuncReturn(_)
+        | Self::LoopContinue(_)
+        | Self::LoopBreak(_)
+        | Self::ClearReadline
+    )
+  }
 }
 
 impl Display for ShErrKind {

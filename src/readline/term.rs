@@ -3,7 +3,8 @@ use std::{
   env,
   fmt::{Debug, Write},
   io::{BufRead, BufReader, Read},
-  os::fd::{AsFd, BorrowedFd, RawFd}, sync::Arc,
+  os::fd::{AsFd, BorrowedFd, RawFd},
+  sync::Arc,
 };
 
 use nix::{
@@ -17,13 +18,11 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
 pub use crate::libsh::guards::{RawModeGuard, raw_mode};
+use crate::state::{read_meta, write_meta};
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   readline::keys::{KeyCode, ModKeys},
   state::read_shopts,
-};
-use crate::{
-  state::{read_meta, write_meta},
 };
 
 use super::keys::KeyEvent;
@@ -165,13 +164,13 @@ fn width(s: &str, esc_seq: &mut u8) -> u16 {
     0
   } else if *esc_seq == 2 {
     if s == ";" || (s.as_bytes()[0] >= b'0' && s.as_bytes()[0] <= b'9') {
-			/*} else if s == "m" {
-			// last
-			 *esc_seq = 0;*/
-		} else {
-			// not supported
-			*esc_seq = 0;
-		}
+      /*} else if s == "m" {
+      // last
+       *esc_seq = 0;*/
+    } else {
+      // not supported
+      *esc_seq = 0;
+    }
 
     0
   } else if s == "\x1b" {
@@ -457,27 +456,27 @@ impl Perform for KeyCollector {
         };
         KeyEvent(key, mods)
       }
-			([],'u') => {
-				let codepoint = params.first().copied().unwrap_or(0);
-				let mods = params
-					.get(1)
-					.map(|&m| Self::parse_modifiers(m))
-					.unwrap_or(ModKeys::empty());
-				let key = match codepoint {
-					9 => KeyCode::Tab,
-					13 => KeyCode::Enter,
-					27 => KeyCode::Esc,
-					127 => KeyCode::Backspace,
-					_ => {
-						if let Some(ch) = char::from_u32(codepoint as u32) {
-							KeyCode::Char(ch)
-						} else {
-							return
-						}
-					}
-				};
-				KeyEvent(key, mods)
-			}
+      ([], 'u') => {
+        let codepoint = params.first().copied().unwrap_or(0);
+        let mods = params
+          .get(1)
+          .map(|&m| Self::parse_modifiers(m))
+          .unwrap_or(ModKeys::empty());
+        let key = match codepoint {
+          9 => KeyCode::Tab,
+          13 => KeyCode::Enter,
+          27 => KeyCode::Esc,
+          127 => KeyCode::Backspace,
+          _ => {
+            if let Some(ch) = char::from_u32(codepoint as u32) {
+              KeyCode::Char(ch)
+            } else {
+              return;
+            }
+          }
+        };
+        KeyEvent(key, mods)
+      }
       // SGR mouse: CSI < button;x;y M/m (ignore mouse events for now)
       ([b'<'], 'M') | ([b'<'], 'm') => {
         return;
@@ -516,18 +515,21 @@ impl PollReader {
   }
 
   pub fn feed_bytes(&mut self, bytes: &[u8], verbatim: bool) {
-		if verbatim {
-			let seq = String::from_utf8_lossy(bytes).to_string();
-			self.collector.push(KeyEvent(KeyCode::Verbatim(Arc::from(seq.as_str())), ModKeys::empty()));
-		} else if bytes == [b'\x1b'] {
+    if verbatim {
+      let seq = String::from_utf8_lossy(bytes).to_string();
+      self.collector.push(KeyEvent(
+        KeyCode::Verbatim(Arc::from(seq.as_str())),
+        ModKeys::empty(),
+      ));
+    } else if bytes == [b'\x1b'] {
       // Single escape byte - user pressed ESC key
       self
         .collector
         .push(KeyEvent(KeyCode::Esc, ModKeys::empty()));
     } else {
-			// Feed all bytes through vte parser
-			self.parser.advance(&mut self.collector, bytes);
-		}
+      // Feed all bytes through vte parser
+      self.parser.advance(&mut self.collector, bytes);
+    }
   }
 }
 
@@ -748,13 +750,9 @@ impl Layout {
     }
   }
 
-	fn is_ctl_char(gr: &str) -> bool {
-		gr.len() > 0 &&
-		gr.as_bytes()[0] <= 0x1F &&
-		gr != "\n" &&
-		gr != "\t" &&
-		gr != "\r"
-	}
+  fn is_ctl_char(gr: &str) -> bool {
+    !gr.is_empty() && gr.as_bytes()[0] <= 0x1F && gr != "\n" && gr != "\t" && gr != "\r"
+  }
 
   pub fn calc_pos(term_width: u16, s: &str, orig: Pos, left_margin: u16, raw_calc: bool) -> Pos {
     const TAB_STOP: u16 = 8;
@@ -767,8 +765,8 @@ impl Layout {
       }
       let c_width = if c == "\t" {
         TAB_STOP - (pos.col % TAB_STOP)
-			} else if raw_calc && Self::is_ctl_char(c) {
-				2
+      } else if raw_calc && Self::is_ctl_char(c) {
+        2
       } else {
         width(c, &mut esc_seq)
       };
@@ -867,21 +865,21 @@ impl TermWriter {
     self.t_cols = t_cols;
   }
 
-	/// Called before the prompt is drawn. If we are not on column 1, push a vid-inverted '%' and then a '\n\r'.
-	///
-	/// Aping zsh with this but it's a nice feature.
-	pub fn fix_cursor_column(&mut self, rdr: &mut TermReader) -> ShResult<()> {
-		let Some((_,c)) = self.get_cursor_pos(rdr)? else {
-			return Ok(());
-		};
+  /// Called before the prompt is drawn. If we are not on column 1, push a vid-inverted '%' and then a '\n\r'.
+  ///
+  /// Aping zsh with this but it's a nice feature.
+  pub fn fix_cursor_column(&mut self, rdr: &mut TermReader) -> ShResult<()> {
+    let Some((_, c)) = self.get_cursor_pos(rdr)? else {
+      return Ok(());
+    };
 
-		if c != 1 {
-			self.flush_write("\x1b[7m%\x1b[0m\n\r")?;
-		}
-		Ok(())
-	}
+    if c != 1 {
+      self.flush_write("\x1b[7m%\x1b[0m\n\r")?;
+    }
+    Ok(())
+  }
 
-	pub fn get_cursor_pos(&mut self, rdr: &mut TermReader) -> ShResult<Option<(usize, usize)>> {
+  pub fn get_cursor_pos(&mut self, rdr: &mut TermReader) -> ShResult<Option<(usize, usize)>> {
     // Ping the cursor's position
     self.flush_write("\x1b[6n")?;
 
@@ -900,14 +898,16 @@ impl TermWriter {
     let row = read_digits_until(rdr, ';')?;
 
     let col = read_digits_until(rdr, 'R')?;
-		let pos = if let Some(row) = row && let Some(col) = col {
-			Some((row as usize, col as usize))
-		} else {
-			None
-		};
+    let pos = if let Some(row) = row
+      && let Some(col) = col
+    {
+      Some((row as usize, col as usize))
+    } else {
+      None
+    };
 
-		Ok(pos)
-	}
+    Ok(pos)
+  }
 
   pub fn move_cursor_at_leftmost(
     &mut self,
@@ -996,7 +996,7 @@ impl LineWriter for TermWriter {
       )
     };
     self.buffer.clear();
-		self.buffer.push_str("\x1b[J"); // Clear from cursor to end of screen to erase any remnants of the old line after the prompt
+    self.buffer.push_str("\x1b[J"); // Clear from cursor to end of screen to erase any remnants of the old line after the prompt
 
     let end = new_layout.end;
     let cursor = new_layout.cursor;

@@ -10,13 +10,14 @@ use crate::libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color};
 use crate::parse::execute::exec_input;
 use crate::parse::lex::{LexFlags, LexStream, QuoteState, Tk, TkFlags, TkRule, is_hard_sep};
 use crate::parse::{Redir, RedirType};
+use crate::prelude::*;
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
 use crate::readline::keys::{KeyCode, KeyEvent, ModKeys};
 use crate::readline::markers;
 use crate::state::{
-  self, ArrIndex, LogTab, VarFlags, VarKind, read_jobs, read_logic, read_shopts, read_vars, write_jobs, write_meta, write_vars
+  self, ArrIndex, LogTab, VarFlags, VarKind, read_jobs, read_logic, read_shopts, read_vars,
+  write_jobs, write_meta, write_vars,
 };
-use crate::prelude::*;
 
 const PARAMETERS: [char; 7] = ['@', '*', '#', '$', '?', '!', '0'];
 
@@ -25,9 +26,7 @@ impl Tk {
   pub fn expand(self) -> ShResult<Self> {
     let flags = self.flags;
     let span = self.span.clone();
-    let exp = Expander::new(self)?
-			.expand()
-			.promote_err(span.clone())?;
+    let exp = Expander::new(self)?.expand().promote_err(span.clone())?;
     let class = TkRule::Expanded { exp };
     Ok(Self { class, span, flags })
   }
@@ -251,14 +250,14 @@ fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
           prefix.push(next);
         }
       }
-			'\'' => {
-				qt_state.toggle_single();
-				prefix.push(ch);
-			}
-			'"' => {
-				qt_state.toggle_double();
-				prefix.push(ch);
-			}
+      '\'' => {
+        qt_state.toggle_single();
+        prefix.push(ch);
+      }
+      '"' => {
+        qt_state.toggle_double();
+        prefix.push(ch);
+      }
       '{' if qt_state.outside() => {
         break;
       }
@@ -279,14 +278,14 @@ fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
           inner.push(next);
         }
       }
-			'\'' => {
-				qt_state.toggle_single();
-				inner.push(ch);
-			}
-			'"' => {
-				qt_state.toggle_double();
-				inner.push(ch);
-			}
+      '\'' => {
+        qt_state.toggle_single();
+        inner.push(ch);
+      }
+      '"' => {
+        qt_state.toggle_double();
+        inner.push(ch);
+      }
       '{' if qt_state.outside() => {
         depth += 1;
         inner.push(ch);
@@ -330,14 +329,14 @@ fn split_brace_inner(inner: &str) -> Vec<String> {
           current.push(next);
         }
       }
-			'\'' => {
-				qt_state.toggle_single();
-				current.push(ch);
-			}
-			'"' => {
-				qt_state.toggle_double();
-				current.push(ch);
-			}
+      '\'' => {
+        qt_state.toggle_single();
+        current.push(ch);
+      }
+      '"' => {
+        qt_state.toggle_double();
+        current.push(ch);
+      }
       '{' if qt_state.outside() => {
         depth += 1;
         current.push(ch);
@@ -534,11 +533,9 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
               let arg_sep = markers::ARG_SEP.to_string();
               read_vars(|v| v.get_arr_elems(&var_name))?.join(&arg_sep)
             }
-						ArrIndex::ArgCount => {
-							read_vars(|v| v.get_arr_elems(&var_name))
-								.map(|elems| elems.len().to_string())
-								.unwrap_or_else(|_| "0".to_string())
-						}
+            ArrIndex::ArgCount => read_vars(|v| v.get_arr_elems(&var_name))
+              .map(|elems| elems.len().to_string())
+              .unwrap_or_else(|_| "0".to_string()),
             ArrIndex::AllJoined => {
               let ifs = read_vars(|v| v.try_get_var("IFS"))
                 .unwrap_or_else(|| " \t\n".to_string())
@@ -653,7 +650,7 @@ enum ArithTk {
   Op(ArithOp),
   LParen,
   RParen,
-	Var(String)
+  Var(String),
 }
 
 impl ArithTk {
@@ -695,21 +692,21 @@ impl ArithTk {
           tokens.push(Self::RParen);
           chars.next();
         }
-				_ if ch.is_alphabetic() || ch == '_' => {
-					chars.next();
-					let mut var_name = ch.to_string();
-					while let Some(ch) = chars.peek() {
-						match ch {
-							_ if ch.is_alphabetic() || *ch == '_' => {
-								var_name.push(*ch);
-								chars.next();
-							}
-							_ => break
-						}
-					}
+        _ if ch.is_alphabetic() || ch == '_' => {
+          chars.next();
+          let mut var_name = ch.to_string();
+          while let Some(ch) = chars.peek() {
+            match ch {
+              _ if ch.is_alphabetic() || *ch == '_' => {
+                var_name.push(*ch);
+                chars.next();
+              }
+              _ => break,
+            }
+          }
 
-					tokens.push(Self::Var(var_name));
-				}
+          tokens.push(Self::Var(var_name));
+        }
         _ => {
           return Ok(None);
         }
@@ -753,22 +750,28 @@ impl ArithTk {
             }
           }
         }
-				ArithTk::Var(var) => {
-					let Some(val) = read_vars(|v| v.try_get_var(&var)) else {
-						return Err(ShErr::simple(
-							ShErrKind::NotFound,
-							format!("Undefined variable in arithmetic expression: '{}'",var.fg(next_color())),
-						));
-					};
-					let Ok(num) = val.parse::<f64>() else {
-						return Err(ShErr::simple(
-							ShErrKind::ParseErr,
-							format!("Variable '{}' does not contain a number", var.fg(next_color())),
-						));
-					};
+        ArithTk::Var(var) => {
+          let Some(val) = read_vars(|v| v.try_get_var(&var)) else {
+            return Err(ShErr::simple(
+              ShErrKind::NotFound,
+              format!(
+                "Undefined variable in arithmetic expression: '{}'",
+                var.fg(next_color())
+              ),
+            ));
+          };
+          let Ok(num) = val.parse::<f64>() else {
+            return Err(ShErr::simple(
+              ShErrKind::ParseErr,
+              format!(
+                "Variable '{}' does not contain a number",
+                var.fg(next_color())
+              ),
+            ));
+          };
 
-					output.push(ArithTk::Num(num));
-				}
+          output.push(ArithTk::Num(num));
+        }
       }
     }
 
@@ -785,14 +788,14 @@ impl ArithTk {
       match token {
         ArithTk::Num(n) => stack.push(n),
         ArithTk::Op(op) => {
-					let rhs = stack.pop().ok_or(ShErr::simple(
-						ShErrKind::ParseErr,
-						"Missing right-hand operand",
-					))?;
-					let lhs = stack.pop().ok_or(ShErr::simple(
-						ShErrKind::ParseErr,
-						"Missing left-hand operand",
-					))?;
+          let rhs = stack.pop().ok_or(ShErr::simple(
+            ShErrKind::ParseErr,
+            "Missing right-hand operand",
+          ))?;
+          let lhs = stack.pop().ok_or(ShErr::simple(
+            ShErrKind::ParseErr,
+            "Missing left-hand operand",
+          ))?;
           let result = match op {
             ArithOp::Add => lhs + rhs,
             ArithOp::Sub => lhs - rhs,
@@ -803,19 +806,19 @@ impl ArithTk {
           stack.push(result);
         }
         _ => {
-					return Err(ShErr::simple(
-						ShErrKind::ParseErr,
-						"Unexpected token during evaluation",
-					));
+          return Err(ShErr::simple(
+            ShErrKind::ParseErr,
+            "Unexpected token during evaluation",
+          ));
         }
       }
     }
 
     if stack.len() != 1 {
-			return Err(ShErr::simple(
-				ShErrKind::ParseErr,
-				"Invalid arithmetic expression",
-			));
+      return Err(ShErr::simple(
+        ShErrKind::ParseErr,
+        "Invalid arithmetic expression",
+      ));
     }
 
     Ok(stack[0])
@@ -840,10 +843,10 @@ impl FromStr for ArithOp {
       '*' => Ok(Self::Mul),
       '/' => Ok(Self::Div),
       '%' => Ok(Self::Mod),
-			_ => Err(ShErr::simple(
-				ShErrKind::ParseErr,
-				"Invalid arithmetic operator",
-			)),
+      _ => Err(ShErr::simple(
+        ShErrKind::ParseErr,
+        "Invalid arithmetic operator",
+      )),
     }
   }
 }
@@ -853,8 +856,8 @@ pub fn expand_arithmetic(raw: &str) -> ShResult<Option<String>> {
   let unescaped = unescape_math(body);
   let expanded = expand_raw(&mut unescaped.chars().peekable())?;
   let Some(tokens) = ArithTk::tokenize(&expanded)? else {
-		return Ok(None);
-	};
+    return Ok(None);
+  };
   let rpn = ArithTk::to_rpn(tokens)?;
   let result = ArithTk::eval_rpn(rpn)?;
   Ok(Some(result.to_string()))
@@ -894,7 +897,12 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       let mut io_stack = IoStack::new();
       io_stack.push_frame(io_frame);
 
-      if let Err(e) = exec_input(raw.to_string(), Some(io_stack), false, Some("process_sub".into())) {
+      if let Err(e) = exec_input(
+        raw.to_string(),
+        Some(io_stack),
+        false,
+        Some("process_sub".into()),
+      ) {
         e.print_error();
         exit(1);
       }
@@ -925,11 +933,16 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
   match unsafe { fork()? } {
     ForkResult::Child => {
       io_stack.push_frame(cmd_sub_io_frame);
-      if let Err(e) = exec_input(raw.to_string(), Some(io_stack), false, Some("command_sub".into())) {
+      if let Err(e) = exec_input(
+        raw.to_string(),
+        Some(io_stack),
+        false,
+        Some("command_sub".into()),
+      ) {
         e.print_error();
         unsafe { libc::_exit(1) };
       }
-			let status = state::get_status();
+      let status = state::get_status();
       unsafe { libc::_exit(status) };
     }
     ForkResult::Parent { child } => {
@@ -956,9 +969,9 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
 
       match status {
         WtStat::Exited(_, code) => {
-					state::set_status(code);
-					Ok(io_buf.as_str()?.trim_end().to_string())
-				},
+          state::set_status(code);
+          Ok(io_buf.as_str()?.trim_end().to_string())
+        }
         _ => Err(ShErr::simple(ShErrKind::InternalErr, "Command sub failed")),
       }
     }
@@ -1062,76 +1075,76 @@ pub fn unescape_str(raw: &str) -> String {
                 }
               }
             }
-						'$' => {
-							log::debug!("Found ANSI-C quoting");
-							chars.next();
-							while let Some(q_ch) = chars.next() {
-								match q_ch {
-									'\'' => {
-										break;
-									}
-									'\\' => {
-										if let Some(esc) = chars.next() {
-											match esc {
-												'n' => result.push('\n'),
-												't' => result.push('\t'),
-												'r' => result.push('\r'),
-												'\'' => result.push('\''),
-												'\\' => result.push('\\'),
-												'a' => result.push('\x07'),
-												'b' => result.push('\x08'),
-												'e' | 'E' => result.push('\x1b'),
-												'v' => result.push('\x0b'),
-												'x' => {
-													let mut hex = String::new();
-													if let Some(h1) = chars.next() {
-														hex.push(h1);
-													} else {
-														result.push_str("\\x");
-														continue;
-													}
-													if let Some(h2) = chars.next() {
-														hex.push(h2);
-													} else {
-														result.push_str(&format!("\\x{hex}"));
-														continue;
-													}
-													if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-														result.push(byte as char);
-													} else {
-														result.push_str(&format!("\\x{hex}"));
-														continue;
-													}
-												}
-												'o' => {
-													let mut oct = String::new();
-													for _ in 0..3 {
-														if let Some(o) = chars.peek() {
-															if o.is_digit(8) {
-																oct.push(*o);
-																chars.next();
-															} else {
-																break;
-															}
-														} else {
-															break;
-														}
-													}
-													if let Ok(byte) = u8::from_str_radix(&oct, 8) {
-														result.push(byte as char);
-													} else {
-														result.push_str(&format!("\\o{oct}"));
-														continue;
-													}
-												}
-												_ => result.push(esc),
-											}
-										}
-									}
-									_ => result.push(q_ch),
-								}
-							}
-						}
+            '$' => {
+              log::debug!("Found ANSI-C quoting");
+              chars.next();
+              while let Some(q_ch) = chars.next() {
+                match q_ch {
+                  '\'' => {
+                    break;
+                  }
+                  '\\' => {
+                    if let Some(esc) = chars.next() {
+                      match esc {
+                        'n' => result.push('\n'),
+                        't' => result.push('\t'),
+                        'r' => result.push('\r'),
+                        '\'' => result.push('\''),
+                        '\\' => result.push('\\'),
+                        'a' => result.push('\x07'),
+                        'b' => result.push('\x08'),
+                        'e' | 'E' => result.push('\x1b'),
+                        'v' => result.push('\x0b'),
+                        'x' => {
+                          let mut hex = String::new();
+                          if let Some(h1) = chars.next() {
+                            hex.push(h1);
+                          } else {
+                            result.push_str("\\x");
+                            continue;
+                          }
+                          if let Some(h2) = chars.next() {
+                            hex.push(h2);
+                          } else {
+                            result.push_str(&format!("\\x{hex}"));
+                            continue;
+                          }
+                          if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                            result.push(byte as char);
+                          } else {
+                            result.push_str(&format!("\\x{hex}"));
+                            continue;
+                          }
+                        }
+                        'o' => {
+                          let mut oct = String::new();
+                          for _ in 0..3 {
+                            if let Some(o) = chars.peek() {
+                              if o.is_digit(8) {
+                                oct.push(*o);
+                                chars.next();
+                              } else {
+                                break;
+                              }
+                            } else {
+                              break;
+                            }
+                          }
+                          if let Ok(byte) = u8::from_str_radix(&oct, 8) {
+                            result.push(byte as char);
+                          } else {
+                            result.push_str(&format!("\\o{oct}"));
+                            continue;
+                          }
+                        }
+                        _ => result.push(esc),
+                      }
+                    }
+                  }
+                  _ => result.push(q_ch),
+                }
+              }
+            }
             '"' => {
               result.push(markers::DUB_QUOTE);
               break;
@@ -1144,14 +1157,14 @@ pub fn unescape_str(raw: &str) -> String {
         result.push(markers::SNG_QUOTE);
         while let Some(q_ch) = chars.next() {
           match q_ch {
-						'\\' => {
-							if chars.peek() == Some(&'\'') {
-								result.push('\'');
-								chars.next();
-							} else {
-								result.push('\\');
-							}
-						}
+            '\\' => {
+              if chars.peek() == Some(&'\'') {
+                result.push('\'');
+                chars.next();
+              } else {
+                result.push('\\');
+              }
+            }
             '\'' => {
               result.push(markers::SNG_QUOTE);
               break;
@@ -1219,7 +1232,7 @@ pub fn unescape_str(raw: &str) -> String {
         }
       }
       '$' if chars.peek() == Some(&'\'') => {
-				log::debug!("Found ANSI-C quoting");
+        log::debug!("Found ANSI-C quoting");
         chars.next();
         result.push(markers::SNG_QUOTE);
         while let Some(q_ch) = chars.next() {
@@ -1387,13 +1400,13 @@ impl FromStr for ParamExp {
     use ParamExp::*;
 
     let parse_err = || {
-			Err(ShErr::simple(
-				ShErrKind::SyntaxErr,
-				"Invalid parameter expansion",
-			)	)
+      Err(ShErr::simple(
+        ShErrKind::SyntaxErr,
+        "Invalid parameter expansion",
+      ))
     };
 
-		log::debug!("Parsing parameter expansion: '{:?}'", s);
+    log::debug!("Parsing parameter expansion: '{:?}'", s);
 
     // Handle indirect var expansion: ${!var}
     if let Some(var) = s.strip_prefix('!') {
@@ -1410,7 +1423,7 @@ impl FromStr for ParamExp {
       return Ok(RemShortestPrefix(rest.to_string()));
     }
     if let Some(rest) = s.strip_prefix("%%") {
-			log::debug!("Matched longest suffix pattern: '{}'", rest);
+      log::debug!("Matched longest suffix pattern: '{}'", rest);
       return Ok(RemLongestSuffix(rest.to_string()));
     } else if let Some(rest) = s.strip_prefix('%') {
       return Ok(RemShortestSuffix(rest.to_string()));
@@ -1476,11 +1489,11 @@ impl FromStr for ParamExp {
 pub fn parse_pos_len(s: &str) -> Option<(usize, Option<usize>)> {
   let raw = s.strip_prefix(':')?;
   if let Some((start, len)) = raw.split_once(':') {
-		let start = expand_raw(&mut start.chars().peekable()).unwrap_or_else(|_| start.to_string());
-		let len = expand_raw(&mut len.chars().peekable()).unwrap_or_else(|_| len.to_string());
+    let start = expand_raw(&mut start.chars().peekable()).unwrap_or_else(|_| start.to_string());
+    let len = expand_raw(&mut len.chars().peekable()).unwrap_or_else(|_| len.to_string());
     Some((start.parse::<usize>().ok()?, len.parse::<usize>().ok()))
   } else {
-		let raw = expand_raw(&mut raw.chars().peekable()).unwrap_or_else(|_| raw.to_string());
+    let raw = expand_raw(&mut raw.chars().peekable()).unwrap_or_else(|_| raw.to_string());
     Some((raw.parse::<usize>().ok()?, None))
   }
 }
@@ -1554,10 +1567,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           Some(val) => Ok(val),
           None => {
             let expanded = expand_raw(&mut err.chars().peekable())?;
-						Err(ShErr::simple(
-							ShErrKind::ExecFail,
-							expanded,
-						))
+            Err(ShErr::simple(ShErrKind::ExecFail, expanded))
           }
         }
       }
@@ -1565,10 +1575,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Some(val) => Ok(val),
         None => {
           let expanded = expand_raw(&mut err.chars().peekable())?;
-					Err(ShErr::simple(
-						ShErrKind::ExecFail,
-						expanded,
-					))
+          Err(ShErr::simple(ShErrKind::ExecFail, expanded))
         }
       },
       ParamExp::Substr(pos) => {
@@ -1630,7 +1637,8 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::RemLongestSuffix(suffix) => {
         let value = vars.get_var(&var_name);
         let unescaped = unescape_str(&suffix);
-        let expanded_suffix = expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix.clone());
+        let expanded_suffix =
+          expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix.clone());
         let pattern = Pattern::new(&expanded_suffix).unwrap();
         for i in 0..=value.len() {
           let sliced = &value[i..];
@@ -2299,82 +2307,82 @@ pub fn expand_aliases(
 }
 
 pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
-	let mut keys = Vec::new();
-	let mut chars = s.chars().collect::<VecDeque<char>>();
-	while let Some(ch) = chars.pop_front() {
-		match ch {
-			'\\' => {
-				if let Some(next_ch) = chars.pop_front() {
-					keys.push(KeyEvent(KeyCode::Char(next_ch), ModKeys::NONE));
-				}
-			}
-			'<' => {
-				let mut alias = String::new();
-				while let Some(a_ch) = chars.pop_front() {
-					match a_ch {
-						'\\' => {
-							if let Some(esc_ch) = chars.pop_front() {
-								alias.push(esc_ch);
-							}
-						}
-						'>' => {
-							if alias.eq_ignore_ascii_case("leader") {
-								let mut leader = read_shopts(|o| o.prompt.leader.clone());
-								if leader == "\\" {
-									leader.push('\\');
-								}
-								keys.extend(expand_keymap(&leader));
-							} else if let Some(key) = parse_key_alias(&alias) {
-								keys.push(key);
-							}
-							break;
-						}
-						_ => alias.push(a_ch),
-					}
-				}
-			}
-			_ => {
-				keys.push(KeyEvent(KeyCode::Char(ch), ModKeys::NONE));
-			}
-		}
-	}
+  let mut keys = Vec::new();
+  let mut chars = s.chars().collect::<VecDeque<char>>();
+  while let Some(ch) = chars.pop_front() {
+    match ch {
+      '\\' => {
+        if let Some(next_ch) = chars.pop_front() {
+          keys.push(KeyEvent(KeyCode::Char(next_ch), ModKeys::NONE));
+        }
+      }
+      '<' => {
+        let mut alias = String::new();
+        while let Some(a_ch) = chars.pop_front() {
+          match a_ch {
+            '\\' => {
+              if let Some(esc_ch) = chars.pop_front() {
+                alias.push(esc_ch);
+              }
+            }
+            '>' => {
+              if alias.eq_ignore_ascii_case("leader") {
+                let mut leader = read_shopts(|o| o.prompt.leader.clone());
+                if leader == "\\" {
+                  leader.push('\\');
+                }
+                keys.extend(expand_keymap(&leader));
+              } else if let Some(key) = parse_key_alias(&alias) {
+                keys.push(key);
+              }
+              break;
+            }
+            _ => alias.push(a_ch),
+          }
+        }
+      }
+      _ => {
+        keys.push(KeyEvent(KeyCode::Char(ch), ModKeys::NONE));
+      }
+    }
+  }
 
-	keys
+  keys
 }
 
 pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
-	let parts: Vec<&str> = alias.split('-').collect();
-	let (mods_parts, key_name) = parts.split_at(parts.len() - 1);
-	let mut mods = ModKeys::NONE;
-	for m in mods_parts {
-		match m.to_uppercase().as_str() {
-			"C" => mods |= ModKeys::CTRL,
-			"A" | "M" => mods |= ModKeys::ALT,
-			"S" => mods |= ModKeys::SHIFT,
-			_ => return None,
-		}
-	}
+  let parts: Vec<&str> = alias.split('-').collect();
+  let (mods_parts, key_name) = parts.split_at(parts.len() - 1);
+  let mut mods = ModKeys::NONE;
+  for m in mods_parts {
+    match m.to_uppercase().as_str() {
+      "C" => mods |= ModKeys::CTRL,
+      "A" | "M" => mods |= ModKeys::ALT,
+      "S" => mods |= ModKeys::SHIFT,
+      _ => return None,
+    }
+  }
 
-	let key = match *key_name.first()? {
-		"CR" => KeyCode::Char('\r'),
-		"ENTER" | "RETURN" => KeyCode::Enter,
-		"ESC" | "ESCAPE" => KeyCode::Esc,
-		"TAB" => KeyCode::Tab,
-		"BS" | "BACKSPACE" => KeyCode::Backspace,
-		"DEL" | "DELETE" => KeyCode::Delete,
-		"INS" | "INSERT" => KeyCode::Insert,
-		"SPACE" => KeyCode::Char(' '),
-		"UP" => KeyCode::Up,
-		"DOWN" => KeyCode::Down,
-		"LEFT" => KeyCode::Left,
-		"RIGHT" => KeyCode::Right,
-		"HOME" => KeyCode::Home,
-		"END" => KeyCode::End,
-		"PGUP" | "PAGEUP" => KeyCode::PageUp,
-		"PGDN" | "PAGEDOWN" => KeyCode::PageDown,
-		k if k.len() == 1 => KeyCode::Char(k.chars().next().unwrap()),
-		_ => return None
-	};
+  let key = match *key_name.first()? {
+    "CR" => KeyCode::Char('\r'),
+    "ENTER" | "RETURN" => KeyCode::Enter,
+    "ESC" | "ESCAPE" => KeyCode::Esc,
+    "TAB" => KeyCode::Tab,
+    "BS" | "BACKSPACE" => KeyCode::Backspace,
+    "DEL" | "DELETE" => KeyCode::Delete,
+    "INS" | "INSERT" => KeyCode::Insert,
+    "SPACE" => KeyCode::Char(' '),
+    "UP" => KeyCode::Up,
+    "DOWN" => KeyCode::Down,
+    "LEFT" => KeyCode::Left,
+    "RIGHT" => KeyCode::Right,
+    "HOME" => KeyCode::Home,
+    "END" => KeyCode::End,
+    "PGUP" | "PAGEUP" => KeyCode::PageUp,
+    "PGDN" | "PAGEDOWN" => KeyCode::PageDown,
+    k if k.len() == 1 => KeyCode::Char(k.chars().next().unwrap()),
+    _ => return None,
+  };
 
-	Some(KeyEvent(key, mods))
+  Some(KeyEvent(key, mods))
 }

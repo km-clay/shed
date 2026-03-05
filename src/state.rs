@@ -12,14 +12,30 @@ use nix::unistd::{User, gethostname, getppid};
 use regex::Regex;
 
 use crate::{
-  builtin::{BUILTINS, keymap::{KeyMap, KeyMapFlags, KeyMapMatch}, map::MapNode, trap::TrapTarget}, exec_input, expand::expand_keymap, jobs::JobTab, libsh::{
-    error::{ShErr, ShErrKind, ShResult}, utils::VecDequeExt
-  }, parse::{
+  builtin::{
+    BUILTINS,
+    keymap::{KeyMap, KeyMapFlags, KeyMapMatch},
+    map::MapNode,
+    trap::TrapTarget,
+  },
+  exec_input,
+  expand::expand_keymap,
+  jobs::JobTab,
+  libsh::{
+    error::{ShErr, ShErrKind, ShResult},
+    utils::VecDequeExt,
+  },
+  parse::{
     ConjunctNode, NdRule, Node, ParsedSrc,
     lex::{LexFlags, LexStream, Span, Tk},
-  }, prelude::*, readline::{
-    complete::{BashCompSpec, CompSpec}, keys::KeyEvent, markers
-  }, shopt::ShOpts
+  },
+  prelude::*,
+  readline::{
+    complete::{BashCompSpec, CompSpec},
+    keys::KeyEvent,
+    markers,
+  },
+  shopt::ShOpts,
 };
 
 pub struct Shed {
@@ -71,18 +87,18 @@ impl ShellParam {
     )
   }
 
-	pub fn from_char(c: &char) -> Option<Self> {
-		match c {
-			'?' => Some(Self::Status),
-			'$' => Some(Self::ShPid),
-			'!' => Some(Self::LastJob),
-			'0' => Some(Self::ShellName),
-			'@' => Some(Self::AllArgs),
-			'*' => Some(Self::AllArgsStr),
-			'#' => Some(Self::ArgCount),
-			_ => None,
-		}
-	}
+  pub fn from_char(c: &char) -> Option<Self> {
+    match c {
+      '?' => Some(Self::Status),
+      '$' => Some(Self::ShPid),
+      '!' => Some(Self::LastJob),
+      '0' => Some(Self::ShellName),
+      '@' => Some(Self::AllArgs),
+      '*' => Some(Self::AllArgsStr),
+      '#' => Some(Self::ArgCount),
+      _ => None,
+    }
+  }
 }
 
 impl Display for ShellParam {
@@ -299,10 +315,12 @@ impl ScopeStack {
       {
         match var.kind_mut() {
           VarKind::Arr(items) => return Ok(items),
-          _ => return Err(ShErr::simple(
-            ShErrKind::ExecFail,
-            format!("Variable '{}' is not an array", var_name),
-          )),
+          _ => {
+            return Err(ShErr::simple(
+              ShErrKind::ExecFail,
+              format!("Variable '{}' is not an array", var_name),
+            ));
+          }
         }
       }
     }
@@ -358,38 +376,37 @@ impl ScopeStack {
     }
     Ok("".into())
   }
-	pub fn remove_map(&mut self, map_name: &str) -> Option<MapNode> {
-		for scope in self.scopes.iter_mut().rev() {
-			if scope.get_map(map_name).is_some() {
-				return scope.remove_map(map_name);
-			}
-		}
-		None
-	}
-	pub fn get_map(&self, map_name: &str) -> Option<&MapNode> {
-		for scope in self.scopes.iter().rev() {
-			if let Some(map) = scope.get_map(map_name) {
-				return Some(map)
-			}
-		}
-		None
-	}
-	pub fn get_map_mut(&mut self, map_name: &str) -> Option<&mut MapNode> {
-		for scope in self.scopes.iter_mut().rev() {
-			if let Some(map) = scope.get_map_mut(map_name) {
-				return Some(map)
-			}
-		}
-		None
-	}
-	pub fn set_map(&mut self, map_name: &str, map: MapNode, local: bool) {
-		if local
-		&& let Some(scope) = self.scopes.last_mut() {
-				scope.set_map(map_name, map);
-		} else if let Some(scope) = self.scopes.first_mut() {
-			scope.set_map(map_name, map);
-		}
-	}
+  pub fn remove_map(&mut self, map_name: &str) -> Option<MapNode> {
+    for scope in self.scopes.iter_mut().rev() {
+      if scope.get_map(map_name).is_some() {
+        return scope.remove_map(map_name);
+      }
+    }
+    None
+  }
+  pub fn get_map(&self, map_name: &str) -> Option<&MapNode> {
+    for scope in self.scopes.iter().rev() {
+      if let Some(map) = scope.get_map(map_name) {
+        return Some(map);
+      }
+    }
+    None
+  }
+  pub fn get_map_mut(&mut self, map_name: &str) -> Option<&mut MapNode> {
+    for scope in self.scopes.iter_mut().rev() {
+      if let Some(map) = scope.get_map_mut(map_name) {
+        return Some(map);
+      }
+    }
+    None
+  }
+  pub fn set_map(&mut self, map_name: &str, map: MapNode, local: bool) {
+    if local && let Some(scope) = self.scopes.last_mut() {
+      scope.set_map(map_name, map);
+    } else if let Some(scope) = self.scopes.first_mut() {
+      scope.set_map(map_name, map);
+    }
+  }
   pub fn try_get_var(&self, var_name: &str) -> Option<String> {
     // This version of get_var() is mainly used internally
     // so that we have access to Option methods
@@ -410,11 +427,11 @@ impl ScopeStack {
 
     None
   }
-	pub fn take_var(&mut self, var_name: &str) -> String {
-		let var = self.get_var(var_name);
-		self.unset_var(var_name).ok();
-		var
-	}
+  pub fn take_var(&mut self, var_name: &str) -> String {
+    let var = self.get_var(var_name);
+    self.unset_var(var_name).ok();
+    var
+  }
   pub fn get_var(&self, var_name: &str) -> String {
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.get_param(param);
@@ -480,14 +497,14 @@ thread_local! {
 
 #[derive(Clone, Debug)]
 pub struct ShAlias {
-	pub body: String,
-	pub source: Span
+  pub body: String,
+  pub source: Span,
 }
 
 impl Display for ShAlias {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}", self.body)
-	}
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{}", self.body)
+  }
 }
 
 /// A shell function
@@ -495,14 +512,14 @@ impl Display for ShAlias {
 /// Wraps the BraceGrp Node that forms the body of the function, and provides some helper methods to extract it from the parse tree
 #[derive(Clone, Debug)]
 pub struct ShFunc {
-	pub body: Node,
-	pub source: Span
+  pub body: Node,
+  pub source: Span,
 }
 
 impl ShFunc {
   pub fn new(mut src: ParsedSrc, source: Span) -> Self {
     let body = Self::extract_brc_grp_hack(src.extract_nodes());
-    Self{ body, source }
+    Self { body, source }
   }
   fn extract_brc_grp_hack(mut tree: Vec<Node>) -> Node {
     // FIXME: find a better way to do this
@@ -524,61 +541,61 @@ impl ShFunc {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AutoCmdKind {
-	PreCmd,
-	PostCmd,
-	PreChangeDir,
-	PostChangeDir,
-	OnJobFinish,
-	PrePrompt,
-	PostPrompt,
-	PreModeChange,
-	PostModeChange,
-	OnExit
+  PreCmd,
+  PostCmd,
+  PreChangeDir,
+  PostChangeDir,
+  OnJobFinish,
+  PrePrompt,
+  PostPrompt,
+  PreModeChange,
+  PostModeChange,
+  OnExit,
 }
 
 impl Display for AutoCmdKind {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::PreCmd => write!(f, "pre-cmd"),
-			Self::PostCmd => write!(f, "post-cmd"),
-			Self::PreChangeDir => write!(f, "pre-change-dir"),
-			Self::PostChangeDir => write!(f, "post-change-dir"),
-			Self::OnJobFinish => write!(f, "on-job-finish"),
-			Self::PrePrompt => write!(f, "pre-prompt"),
-			Self::PostPrompt => write!(f, "post-prompt"),
-			Self::PreModeChange => write!(f, "pre-mode-change"),
-			Self::PostModeChange => write!(f, "post-mode-change"),
-			Self::OnExit => write!(f, "on-exit"),
-		}
-	}
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      Self::PreCmd => write!(f, "pre-cmd"),
+      Self::PostCmd => write!(f, "post-cmd"),
+      Self::PreChangeDir => write!(f, "pre-change-dir"),
+      Self::PostChangeDir => write!(f, "post-change-dir"),
+      Self::OnJobFinish => write!(f, "on-job-finish"),
+      Self::PrePrompt => write!(f, "pre-prompt"),
+      Self::PostPrompt => write!(f, "post-prompt"),
+      Self::PreModeChange => write!(f, "pre-mode-change"),
+      Self::PostModeChange => write!(f, "post-mode-change"),
+      Self::OnExit => write!(f, "on-exit"),
+    }
+  }
 }
 
 impl FromStr for AutoCmdKind {
-	type Err = ShErr;
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s {
-			"pre-cmd" => Ok(Self::PreCmd),
-			"post-cmd" => Ok(Self::PostCmd),
-			"pre-change-dir" => Ok(Self::PreChangeDir),
-			"post-change-dir" => Ok(Self::PostChangeDir),
-			"on-job-finish" => Ok(Self::OnJobFinish),
-			"pre-prompt" => Ok(Self::PrePrompt),
-			"post-prompt" => Ok(Self::PostPrompt),
-			"pre-mode-change" => Ok(Self::PreModeChange),
-			"post-mode-change" => Ok(Self::PostModeChange),
-			"on-exit" => Ok(Self::OnExit),
-			_ => Err(ShErr::simple(
-				ShErrKind::ParseErr,
-				format!("Invalid autocmd kind: {}", s),
-			)),
-		}
-	}
+  type Err = ShErr;
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match s {
+      "pre-cmd" => Ok(Self::PreCmd),
+      "post-cmd" => Ok(Self::PostCmd),
+      "pre-change-dir" => Ok(Self::PreChangeDir),
+      "post-change-dir" => Ok(Self::PostChangeDir),
+      "on-job-finish" => Ok(Self::OnJobFinish),
+      "pre-prompt" => Ok(Self::PrePrompt),
+      "post-prompt" => Ok(Self::PostPrompt),
+      "pre-mode-change" => Ok(Self::PreModeChange),
+      "post-mode-change" => Ok(Self::PostModeChange),
+      "on-exit" => Ok(Self::OnExit),
+      _ => Err(ShErr::simple(
+        ShErrKind::ParseErr,
+        format!("Invalid autocmd kind: {}", s),
+      )),
+    }
+  }
 }
 
 #[derive(Clone, Debug)]
 pub struct AutoCmd {
-	pub pattern: Option<Regex>,
-	pub command: String,
+  pub pattern: Option<Regex>,
+  pub command: String,
 }
 
 /// The logic table for the shell
@@ -589,58 +606,59 @@ pub struct LogTab {
   functions: HashMap<String, ShFunc>,
   aliases: HashMap<String, ShAlias>,
   traps: HashMap<TrapTarget, String>,
-	keymaps: Vec<KeyMap>,
-	autocmds: HashMap<AutoCmdKind, Vec<AutoCmd>>
+  keymaps: Vec<KeyMap>,
+  autocmds: HashMap<AutoCmdKind, Vec<AutoCmd>>,
 }
 
 impl LogTab {
   pub fn new() -> Self {
     Self::default()
   }
-	pub fn autocmds(&self) -> &HashMap<AutoCmdKind, Vec<AutoCmd>> {
-		&self.autocmds
-	}
-	pub fn autocmds_mut(&mut self) -> &mut HashMap<AutoCmdKind, Vec<AutoCmd>> {
-		&mut self.autocmds
-	}
-	pub fn insert_autocmd(&mut self, kind: AutoCmdKind, cmd: AutoCmd) {
-		self.autocmds.entry(kind).or_default().push(cmd);
-	}
-	pub fn get_autocmds(&self, kind: AutoCmdKind) -> Vec<AutoCmd> {
-		self.autocmds.get(&kind).cloned().unwrap_or_default()
-	}
-	pub fn clear_autocmds(&mut self, kind: AutoCmdKind) {
-		self.autocmds.remove(&kind);
-	}
-	pub fn keymaps(&self) -> &Vec<KeyMap> {
-		&self.keymaps
-	}
-	pub fn keymaps_mut(&mut self) -> &mut Vec<KeyMap> {
-		&mut self.keymaps
-	}
-	pub fn insert_keymap(&mut self, keymap: KeyMap) {
-		let mut found_dup = false;
-		for map in self.keymaps.iter_mut() {
-			if map.keys == keymap.keys {
-				*map = keymap.clone();
-				found_dup = true;
-				break;
-			}
-		}
-		if !found_dup {
-			self.keymaps.push(keymap);
-		}
-	}
-	pub fn remove_keymap(&mut self, keys: &str) {
-		self.keymaps.retain(|km| km.keys != keys);
-	}
-	pub fn keymaps_filtered(&self, flags: KeyMapFlags, pending: &[KeyEvent]) -> Vec<KeyMap> {
-		self.keymaps
-			.iter()
-			.filter(|km| km.flags.intersects(flags) && km.compare(pending) != KeyMapMatch::NoMatch)
-			.cloned()
-			.collect()
-	}
+  pub fn autocmds(&self) -> &HashMap<AutoCmdKind, Vec<AutoCmd>> {
+    &self.autocmds
+  }
+  pub fn autocmds_mut(&mut self) -> &mut HashMap<AutoCmdKind, Vec<AutoCmd>> {
+    &mut self.autocmds
+  }
+  pub fn insert_autocmd(&mut self, kind: AutoCmdKind, cmd: AutoCmd) {
+    self.autocmds.entry(kind).or_default().push(cmd);
+  }
+  pub fn get_autocmds(&self, kind: AutoCmdKind) -> Vec<AutoCmd> {
+    self.autocmds.get(&kind).cloned().unwrap_or_default()
+  }
+  pub fn clear_autocmds(&mut self, kind: AutoCmdKind) {
+    self.autocmds.remove(&kind);
+  }
+  pub fn keymaps(&self) -> &Vec<KeyMap> {
+    &self.keymaps
+  }
+  pub fn keymaps_mut(&mut self) -> &mut Vec<KeyMap> {
+    &mut self.keymaps
+  }
+  pub fn insert_keymap(&mut self, keymap: KeyMap) {
+    let mut found_dup = false;
+    for map in self.keymaps.iter_mut() {
+      if map.keys == keymap.keys {
+        *map = keymap.clone();
+        found_dup = true;
+        break;
+      }
+    }
+    if !found_dup {
+      self.keymaps.push(keymap);
+    }
+  }
+  pub fn remove_keymap(&mut self, keys: &str) {
+    self.keymaps.retain(|km| km.keys != keys);
+  }
+  pub fn keymaps_filtered(&self, flags: KeyMapFlags, pending: &[KeyEvent]) -> Vec<KeyMap> {
+    self
+      .keymaps
+      .iter()
+      .filter(|km| km.flags.intersects(flags) && km.compare(pending) != KeyMapMatch::NoMatch)
+      .cloned()
+      .collect()
+  }
   pub fn insert_func(&mut self, name: &str, src: ShFunc) {
     self.functions.insert(name.into(), src);
   }
@@ -666,7 +684,13 @@ impl LogTab {
     &self.aliases
   }
   pub fn insert_alias(&mut self, name: &str, body: &str, source: Span) {
-    self.aliases.insert(name.into(), ShAlias { body: body.into(), source });
+    self.aliases.insert(
+      name.into(),
+      ShAlias {
+        body: body.into(),
+        source,
+      },
+    );
   }
   pub fn get_alias(&self, name: &str) -> Option<ShAlias> {
     self.aliases.get(name).cloned()
@@ -751,7 +775,7 @@ impl VarFlags {
 pub enum ArrIndex {
   Literal(usize),
   FromBack(usize),
-	ArgCount,
+  ArgCount,
   AllJoined,
   AllSplit,
 }
@@ -762,7 +786,7 @@ impl FromStr for ArrIndex {
     match s {
       "@" => Ok(Self::AllSplit),
       "*" => Ok(Self::AllJoined),
-			"#" => Ok(Self::ArgCount),
+      "#" => Ok(Self::ArgCount),
       _ if s.starts_with('-') && s[1..].chars().all(|c| c.is_digit(1)) => {
         let idx = s[1..].parse::<usize>().unwrap();
         Ok(Self::FromBack(idx))
@@ -879,15 +903,15 @@ impl Display for Var {
 }
 
 impl From<String> for Var {
-	fn from(value: String) -> Self {
-		Self::new(VarKind::Str(value), VarFlags::NONE)
-	}
+  fn from(value: String) -> Self {
+    Self::new(VarKind::Str(value), VarFlags::NONE)
+  }
 }
 
 impl From<&str> for Var {
-	fn from(value: &str) -> Self {
-		Self::new(VarKind::Str(value.into()), VarFlags::NONE)
-	}
+  fn from(value: &str) -> Self {
+    Self::new(VarKind::Str(value.into()), VarFlags::NONE)
+  }
 }
 
 #[derive(Default, Clone, Debug)]
@@ -896,7 +920,7 @@ pub struct VarTab {
   params: HashMap<ShellParam, String>,
   sh_argv: VecDeque<String>, /* Using a VecDeque makes the implementation of `shift` straightforward */
 
-	maps: HashMap<String, MapNode>
+  maps: HashMap<String, MapNode>,
 }
 
 impl VarTab {
@@ -908,7 +932,7 @@ impl VarTab {
       vars,
       params,
       sh_argv: VecDeque::new(),
-			maps: HashMap::new(),
+      maps: HashMap::new(),
     };
     var_tab.init_sh_argv();
     var_tab
@@ -1027,24 +1051,24 @@ impl VarTab {
     self.update_arg_params();
     arg
   }
-	pub fn set_map(&mut self, map_name: &str, map: MapNode) {
-		self.maps.insert(map_name.to_string(), map);
-	}
-	pub fn remove_map(&mut self, map_name: &str) -> Option<MapNode> {
-		self.maps.remove(map_name)
-	}
-	pub fn get_map(&self, map_name: &str) -> Option<&MapNode> {
-		self.maps.get(map_name)
-	}
-	pub fn get_map_mut(&mut self, map_name: &str) -> Option<&mut MapNode> {
-		self.maps.get_mut(map_name)
-	}
-	pub fn maps(&self) -> &HashMap<String, MapNode> {
-		&self.maps
-	}
-	pub fn maps_mut(&mut self) -> &mut HashMap<String, MapNode> {
-		&mut self.maps
-	}
+  pub fn set_map(&mut self, map_name: &str, map: MapNode) {
+    self.maps.insert(map_name.to_string(), map);
+  }
+  pub fn remove_map(&mut self, map_name: &str) -> Option<MapNode> {
+    self.maps.remove(map_name)
+  }
+  pub fn get_map(&self, map_name: &str) -> Option<&MapNode> {
+    self.maps.get(map_name)
+  }
+  pub fn get_map_mut(&mut self, map_name: &str) -> Option<&mut MapNode> {
+    self.maps.get_mut(map_name)
+  }
+  pub fn maps(&self) -> &HashMap<String, MapNode> {
+    &self.maps
+  }
+  pub fn maps_mut(&mut self) -> &mut HashMap<String, MapNode> {
+    &mut self.maps
+  }
   pub fn vars(&self) -> &HashMap<String, Var> {
     &self.vars
   }
@@ -1160,9 +1184,9 @@ impl VarTab {
     }
     Ok(())
   }
-	pub fn map_exists(&self, map_name: &str) -> bool {
-		self.maps.contains_key(map_name)
-	}
+  pub fn map_exists(&self, map_name: &str) -> bool {
+    self.maps.contains_key(map_name)
+  }
   pub fn var_exists(&self, var_name: &str) -> bool {
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.params.contains_key(&param);
@@ -1205,8 +1229,8 @@ pub struct MetaTab {
 
   // pushd/popd stack
   dir_stack: VecDeque<PathBuf>,
-	// getopts char offset for opts like -abc
-	getopts_offset: usize,
+  // getopts char offset for opts like -abc
+  getopts_offset: usize,
 
   old_path: Option<String>,
   old_pwd: Option<String>,
@@ -1216,8 +1240,8 @@ pub struct MetaTab {
   // programmable completion specs
   comp_specs: HashMap<String, Box<dyn CompSpec>>,
 
-	// pending keys from widget function
-	pending_widget_keys: Vec<KeyEvent>
+  // pending keys from widget function
+  pending_widget_keys: Vec<KeyEvent>,
 }
 
 impl MetaTab {
@@ -1227,28 +1251,28 @@ impl MetaTab {
       ..Default::default()
     }
   }
-	pub fn set_pending_widget_keys(&mut self, keys: &str) {
-		let exp = expand_keymap(keys);
-		self.pending_widget_keys = exp;
-	}
-	pub fn take_pending_widget_keys(&mut self) -> Option<Vec<KeyEvent>> {
-		if self.pending_widget_keys.is_empty() {
-			None
-		} else {
-			Some(std::mem::take(&mut self.pending_widget_keys))
-		}
-	}
-	pub fn getopts_char_offset(&self) -> usize {
-		self.getopts_offset
-	}
-	pub fn inc_getopts_char_offset(&mut self) -> usize {
-		let offset = self.getopts_offset;
-		self.getopts_offset += 1;
-		offset
-	}
-	pub fn reset_getopts_char_offset(&mut self) {
-		self.getopts_offset = 0;
-	}
+  pub fn set_pending_widget_keys(&mut self, keys: &str) {
+    let exp = expand_keymap(keys);
+    self.pending_widget_keys = exp;
+  }
+  pub fn take_pending_widget_keys(&mut self) -> Option<Vec<KeyEvent>> {
+    if self.pending_widget_keys.is_empty() {
+      None
+    } else {
+      Some(std::mem::take(&mut self.pending_widget_keys))
+    }
+  }
+  pub fn getopts_char_offset(&self) -> usize {
+    self.getopts_offset
+  }
+  pub fn inc_getopts_char_offset(&mut self) -> usize {
+    let offset = self.getopts_offset;
+    self.getopts_offset += 1;
+    offset
+  }
+  pub fn reset_getopts_char_offset(&mut self) {
+    self.getopts_offset = 0;
+  }
   pub fn get_builtin_comp_specs() -> HashMap<String, Box<dyn CompSpec>> {
     let mut map = HashMap::new();
 
@@ -1280,14 +1304,14 @@ impl MetaTab {
       "disown".into(),
       Box::new(BashCompSpec::new().jobs(true)) as Box<dyn CompSpec>,
     );
-		map.insert(
-			"alias".into(),
-			Box::new(BashCompSpec::new().aliases(true)) as Box<dyn CompSpec>,
-		);
-		map.insert(
-			"trap".into(),
-			Box::new(BashCompSpec::new().signals(true)) as Box<dyn CompSpec>,
-		);
+    map.insert(
+      "alias".into(),
+      Box::new(BashCompSpec::new().aliases(true)) as Box<dyn CompSpec>,
+    );
+    map.insert(
+      "trap".into(),
+      Box::new(BashCompSpec::new().signals(true)) as Box<dyn CompSpec>,
+    );
 
     map
   }
@@ -1312,29 +1336,29 @@ impl MetaTab {
   pub fn remove_comp_spec(&mut self, cmd: &str) -> bool {
     self.comp_specs.remove(cmd).is_some()
   }
-	pub fn get_cmds_in_path() -> Vec<String> {
+  pub fn get_cmds_in_path() -> Vec<String> {
     let path = env::var("PATH").unwrap_or_default();
     let paths = path.split(":").map(PathBuf::from);
-		let mut cmds = vec![];
-		for path in paths {
-			if let Ok(entries) = path.read_dir() {
-				for entry in entries.flatten() {
-					let Ok(meta) = std::fs::metadata(entry.path()) else {
-						continue;
-					};
-					let is_exec = meta.permissions().mode() & 0o111 != 0;
+    let mut cmds = vec![];
+    for path in paths {
+      if let Ok(entries) = path.read_dir() {
+        for entry in entries.flatten() {
+          let Ok(meta) = std::fs::metadata(entry.path()) else {
+            continue;
+          };
+          let is_exec = meta.permissions().mode() & 0o111 != 0;
 
-					if meta.is_file()
-						&& is_exec
-						&& let Some(name) = entry.file_name().to_str()
-					{
-						cmds.push(name.to_string());
-					}
-				}
-			}
-		}
-		cmds
-	}
+          if meta.is_file()
+            && is_exec
+            && let Some(name) = entry.file_name().to_str()
+          {
+            cmds.push(name.to_string());
+          }
+        }
+      }
+    }
+    cmds
+  }
   pub fn try_rehash_commands(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
     let cwd = env::var("PWD").unwrap_or_default();
@@ -1350,10 +1374,10 @@ impl MetaTab {
     self.path_cache.clear();
     self.old_path = Some(path.clone());
     self.old_pwd = Some(cwd.clone());
-		let cmds_in_path = Self::get_cmds_in_path();
-		for cmd in cmds_in_path {
-			self.path_cache.insert(cmd);
-		}
+    let cmds_in_path = Self::get_cmds_in_path();
+    for cmd in cmds_in_path {
+      self.path_cache.insert(cmd);
+    }
     if let Ok(entries) = Path::new(&cwd).read_dir() {
       for entry in entries.flatten() {
         let Ok(meta) = std::fs::metadata(entry.path()) else {
@@ -1589,63 +1613,86 @@ pub fn get_shopt(path: &str) -> String {
   read_shopts(|s| s.get(path)).unwrap().unwrap()
 }
 
-pub fn with_vars<F,H,V,T>(vars: H, f: F) -> T
+pub fn with_vars<F, H, V, T>(vars: H, f: F) -> T
 where
-	F: FnOnce() -> T,
-	H: Into<HashMap<String,V>>,
-	V: Into<Var> {
-
-	let snapshot = read_vars(|v| v.clone());
-	let vars = vars.into();
-	for (name, val) in vars {
-		let val = val.into();
-		write_vars(|v| v.set_var(&name, val.kind, val.flags).unwrap());
-	}
-	let _guard = scopeguard::guard(snapshot, |snap| {
-		write_vars(|v| *v = snap);
-	});
-	f()
+  F: FnOnce() -> T,
+  H: Into<HashMap<String, V>>,
+  V: Into<Var>,
+{
+  let snapshot = read_vars(|v| v.clone());
+  let vars = vars.into();
+  for (name, val) in vars {
+    let val = val.into();
+    write_vars(|v| v.set_var(&name, val.kind, val.flags).unwrap());
+  }
+  let _guard = scopeguard::guard(snapshot, |snap| {
+    write_vars(|v| *v = snap);
+  });
+  f()
 }
 
 pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
-	let dir = dir.as_ref();
-	let dir_raw = &dir.display().to_string();
-	let pre_cd = read_logic(|l| l.get_autocmds(AutoCmdKind::PreChangeDir));
-	let post_cd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostChangeDir));
+  let dir = dir.as_ref();
+  let dir_raw = &dir.display().to_string();
+  let pre_cd = read_logic(|l| l.get_autocmds(AutoCmdKind::PreChangeDir));
+  let post_cd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostChangeDir));
 
-	let current_dir = env::current_dir()?.display().to_string();
-	with_vars([("_NEW_DIR".into(), dir_raw.as_str()), ("_OLD_DIR".into(), current_dir.as_str())], || {
-		for cmd in pre_cd {
-			let AutoCmd { command, pattern } = cmd;
-			if let Some(pat) = pattern
-			&& !pat.is_match(dir_raw) {
-				continue;
-			}
+  let current_dir = env::current_dir()?.display().to_string();
+  with_vars(
+    [
+      ("_NEW_DIR".into(), dir_raw.as_str()),
+      ("_OLD_DIR".into(), current_dir.as_str()),
+    ],
+    || {
+      for cmd in pre_cd {
+        let AutoCmd { command, pattern } = cmd;
+        if let Some(pat) = pattern
+          && !pat.is_match(dir_raw)
+        {
+          continue;
+        }
 
-			if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd (pre-changedir)".to_string())) {
-				e.print_error();
-			};
-		}
-	});
+        if let Err(e) = exec_input(
+          command.clone(),
+          None,
+          false,
+          Some("autocmd (pre-changedir)".to_string()),
+        ) {
+          e.print_error();
+        };
+      }
+    },
+  );
 
+  env::set_current_dir(dir)?;
 
-	env::set_current_dir(dir)?;
+  with_vars(
+    [
+      ("_NEW_DIR".into(), dir_raw.as_str()),
+      ("_OLD_DIR".into(), current_dir.as_str()),
+    ],
+    || {
+      for cmd in post_cd {
+        let AutoCmd { command, pattern } = cmd;
+        if let Some(pat) = pattern
+          && !pat.is_match(dir_raw)
+        {
+          continue;
+        }
 
-	with_vars([("_NEW_DIR".into(), dir_raw.as_str()), ("_OLD_DIR".into(), current_dir.as_str())], || {
-		for cmd in post_cd {
-			let AutoCmd { command, pattern } = cmd;
-			if let Some(pat) = pattern
-			&& !pat.is_match(dir_raw) {
-				continue;
-			}
+        if let Err(e) = exec_input(
+          command.clone(),
+          None,
+          false,
+          Some("autocmd (post-changedir)".to_string()),
+        ) {
+          e.print_error();
+        };
+      }
+    },
+  );
 
-			if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd (post-changedir)".to_string())) {
-				e.print_error();
-			};
-		}
-	});
-
-	Ok(())
+  Ok(())
 }
 
 pub fn get_status() -> i32 {
@@ -1671,7 +1718,7 @@ pub fn source_rc() -> ShResult<()> {
 }
 
 pub fn source_file(path: PathBuf) -> ShResult<()> {
-	let source_name = path.to_string_lossy().to_string();
+  let source_name = path.to_string_lossy().to_string();
   let mut file = OpenOptions::new().read(true).open(path)?;
 
   let mut buf = String::new();

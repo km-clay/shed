@@ -18,7 +18,9 @@ pub fn alias(node: Node) -> ShResult<()> {
   };
 
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   if argv.is_empty() {
     // Display the environment variables
@@ -37,11 +39,19 @@ pub fn alias(node: Node) -> ShResult<()> {
   } else {
     for (arg, span) in argv {
       if arg == "command" || arg == "builtin" {
-        return Err(ShErr::at(ShErrKind::ExecFail, span, format!("alias: Cannot assign alias to reserved name '{arg}'")));
+        return Err(ShErr::at(
+          ShErrKind::ExecFail,
+          span,
+          format!("alias: Cannot assign alias to reserved name '{arg}'"),
+        ));
       }
 
       let Some((name, body)) = arg.split_once('=') else {
-        return Err(ShErr::at(ShErrKind::SyntaxErr, span, "alias: Expected an assignment in alias args"));
+        return Err(ShErr::at(
+          ShErrKind::SyntaxErr,
+          span,
+          "alias: Expected an assignment in alias args",
+        ));
       };
       write_logic(|l| l.insert_alias(name, body, span.clone()));
     }
@@ -60,7 +70,9 @@ pub fn unalias(node: Node) -> ShResult<()> {
   };
 
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   if argv.is_empty() {
     // Display the environment variables
@@ -79,7 +91,11 @@ pub fn unalias(node: Node) -> ShResult<()> {
   } else {
     for (arg, span) in argv {
       if read_logic(|l| l.get_alias(&arg)).is_none() {
-        return Err(ShErr::at(ShErrKind::SyntaxErr, span, format!("unalias: alias '{}' not found",arg.fg(next_color()))));
+        return Err(ShErr::at(
+          ShErrKind::SyntaxErr,
+          span,
+          format!("unalias: alias '{}' not found", arg.fg(next_color())),
+        ));
       };
       write_logic(|l| l.remove_alias(&arg))
     }

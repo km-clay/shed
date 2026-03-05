@@ -144,7 +144,8 @@ impl RawModeGuard {
     F: FnOnce() -> R,
   {
     let current = tcgetattr(borrow_fd(*TTY_FILENO)).expect("Failed to get terminal attributes");
-    let orig = ORIG_TERMIOS.with(|cell| cell.borrow().clone())
+    let orig = ORIG_TERMIOS
+      .with(|cell| cell.borrow().clone())
       .expect("with_cooked_mode called before raw_mode()");
     tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &orig)
       .expect("Failed to restore cooked mode");

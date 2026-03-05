@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
-use super::{common_cmds, CmdReplay, CmdState, ModeReport, ViMode};
+use super::{CmdReplay, CmdState, ModeReport, ViMode, common_cmds};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::vicmd::{
   Anchor, Bound, CmdFlags, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb,
@@ -309,15 +309,15 @@ impl ViNormal {
             flags: self.flags(),
           });
         }
-				':' => {
-					return Some(ViCmd {
-						register,
-						verb: Some(VerbCmd(count, Verb::ExMode)),
-						motion: None,
-						raw_seq: self.take_cmd(),
-						flags: self.flags(),
-					})
-				}
+        ':' => {
+          return Some(ViCmd {
+            register,
+            verb: Some(VerbCmd(count, Verb::ExMode)),
+            motion: None,
+            raw_seq: self.take_cmd(),
+            flags: self.flags(),
+          });
+        }
         'i' => {
           return Some(ViCmd {
             register,
@@ -724,7 +724,7 @@ impl ViNormal {
       }
     };
 
-		let _ = chars; // suppresses unused warnings, creates an error if we decide to use chars later
+    let _ = chars; // suppresses unused warnings, creates an error if we decide to use chars later
 
     let verb_ref = verb.as_ref().map(|v| &v.1);
     let motion_ref = motion.as_ref().map(|m| &m.1);
@@ -756,28 +756,32 @@ impl ViMode for ViNormal {
         raw_seq: "".into(),
         flags: self.flags(),
       }),
-			E(K::Char('A'), M::CTRL) => {
-				let count = self.parse_count(&mut self.pending_seq.chars().peekable()).unwrap_or(1) as u16;
-				self.pending_seq.clear();
-				Some(ViCmd {
-					register: Default::default(),
-					verb: Some(VerbCmd(1, Verb::IncrementNumber(count))),
-					motion: None,
-					raw_seq: "".into(),
-					flags: self.flags(),
-				})
-			},
-			E(K::Char('X'), M::CTRL) => {
-				let count = self.parse_count(&mut self.pending_seq.chars().peekable()).unwrap_or(1) as u16;
-				self.pending_seq.clear();
-				Some(ViCmd {
-					register: Default::default(),
-					verb: Some(VerbCmd(1, Verb::DecrementNumber(count))),
-					motion: None,
-					raw_seq: "".into(),
-					flags: self.flags(),
-				})
-			},
+      E(K::Char('A'), M::CTRL) => {
+        let count = self
+          .parse_count(&mut self.pending_seq.chars().peekable())
+          .unwrap_or(1) as u16;
+        self.pending_seq.clear();
+        Some(ViCmd {
+          register: Default::default(),
+          verb: Some(VerbCmd(1, Verb::IncrementNumber(count))),
+          motion: None,
+          raw_seq: "".into(),
+          flags: self.flags(),
+        })
+      }
+      E(K::Char('X'), M::CTRL) => {
+        let count = self
+          .parse_count(&mut self.pending_seq.chars().peekable())
+          .unwrap_or(1) as u16;
+        self.pending_seq.clear();
+        Some(ViCmd {
+          register: Default::default(),
+          verb: Some(VerbCmd(1, Verb::DecrementNumber(count))),
+          motion: None,
+          raw_seq: "".into(),
+          flags: self.flags(),
+        })
+      }
 
       E(K::Char(ch), M::NONE) => self.try_parse(ch),
       E(K::Backspace, M::NONE) => Some(ViCmd {

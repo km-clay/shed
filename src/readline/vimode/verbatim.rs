@@ -1,39 +1,40 @@
-use super::{common_cmds, CmdReplay, ModeReport, ViMode};
-use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
-use crate::readline::register::Register;
-use crate::readline::vicmd::{
-  CmdFlags, Direction, Motion, MotionCmd, RegisterName, To, Verb, VerbCmd, ViCmd, Word
-};
+use super::{CmdReplay, ModeReport, ViMode, common_cmds};
+use crate::readline::keys::{KeyCode as K, KeyEvent as E};
+use crate::readline::vicmd::{CmdFlags, RegisterName, To, Verb, VerbCmd, ViCmd};
 
 #[derive(Default, Clone, Debug)]
 pub struct ViVerbatim {
-	sent_cmd: Vec<ViCmd>,
-	repeat_count: u16
+  sent_cmd: Vec<ViCmd>,
+  repeat_count: u16,
 }
 
 impl ViVerbatim {
   pub fn new() -> Self {
     Self::default()
   }
-	pub fn with_count(self, repeat_count: u16) -> Self {
-		Self { repeat_count, ..self }
-	}
+  pub fn with_count(self, repeat_count: u16) -> Self {
+    Self {
+      repeat_count,
+      ..self
+    }
+  }
 }
 
 impl ViMode for ViVerbatim {
   fn handle_key(&mut self, key: E) -> Option<ViCmd> {
     match key {
-			E(K::Verbatim(seq),_mods) => {
-				log::debug!("Received verbatim key sequence: {:?}", seq);
-				let cmd = ViCmd { register: RegisterName::default(),
-					verb: Some(VerbCmd(1,Verb::Insert(seq.to_string()))),
-					motion: None,
-					raw_seq: seq.to_string(),
-					flags: CmdFlags::EXIT_CUR_MODE
-				};
-				self.sent_cmd.push(cmd.clone());
-				Some(cmd)
-			}
+      E(K::Verbatim(seq), _mods) => {
+        log::debug!("Received verbatim key sequence: {:?}", seq);
+        let cmd = ViCmd {
+          register: RegisterName::default(),
+          verb: Some(VerbCmd(1, Verb::Insert(seq.to_string()))),
+          motion: None,
+          raw_seq: seq.to_string(),
+          flags: CmdFlags::EXIT_CUR_MODE,
+        };
+        self.sent_cmd.push(cmd.clone());
+        Some(cmd)
+      }
       _ => common_cmds(key),
     }
   }

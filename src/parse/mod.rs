@@ -9,7 +9,10 @@ use crate::{
   libsh::{
     error::{ShErr, ShErrKind, ShResult, last_color, next_color},
     utils::{NodeVecUtils, TkVecUtils},
-  }, parse::lex::clean_input, prelude::*, procio::IoMode
+  },
+  parse::lex::clean_input,
+  prelude::*,
+  procio::IoMode,
 };
 
 pub mod execute;
@@ -42,7 +45,7 @@ macro_rules! try_match {
 #[derive(Clone, Debug)]
 pub struct ParsedSrc {
   pub src: Arc<String>,
-	pub name: String,
+  pub name: String,
   pub ast: Ast,
   pub lex_flags: LexFlags,
   pub context: LabelCtx,
@@ -57,16 +60,16 @@ impl ParsedSrc {
     };
     Self {
       src,
-			name: "<stdin>".into(),
+      name: "<stdin>".into(),
       ast: Ast::new(vec![]),
       lex_flags: LexFlags::empty(),
       context: VecDeque::new(),
     }
   }
-	pub fn with_name(mut self, name: String) -> Self {
-		self.name = name;
-		self
-	}
+  pub fn with_name(mut self, name: String) -> Self {
+    self.name = name;
+    self
+  }
   pub fn with_lex_flags(mut self, flags: LexFlags) -> Self {
     self.lex_flags = flags;
     self
@@ -77,7 +80,8 @@ impl ParsedSrc {
   }
   pub fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
     let mut tokens = vec![];
-    for lex_result in LexStream::new(self.src.clone(), self.lex_flags).with_name(self.name.clone()) {
+    for lex_result in LexStream::new(self.src.clone(), self.lex_flags).with_name(self.name.clone())
+    {
       match lex_result {
         Ok(token) => tokens.push(token),
         Err(error) => return Err(vec![error]),
@@ -128,7 +132,7 @@ pub struct Node {
   pub flags: NdFlags,
   pub redirs: Vec<Redir>,
   pub tokens: Vec<Tk>,
-	pub context: LabelCtx,
+  pub context: LabelCtx,
 }
 
 impl Node {
@@ -143,108 +147,108 @@ impl Node {
       None
     }
   }
-	pub fn get_context(&self, msg: String) -> (SpanSource, Label<Span>) {
-		let color = last_color();
-		let span = self.get_span().clone();
-		(
-			span.clone().source().clone(),
-			Label::new(span).with_color(color).with_message(msg)
-		)
-	}
-	fn walk_tree<F: Fn(&mut Node)>(&mut self, f: &F) {
-		f(self);
+  pub fn get_context(&self, msg: String) -> (SpanSource, Label<Span>) {
+    let color = last_color();
+    let span = self.get_span().clone();
+    (
+      span.clone().source().clone(),
+      Label::new(span).with_color(color).with_message(msg),
+    )
+  }
+  fn walk_tree<F: Fn(&mut Node)>(&mut self, f: &F) {
+    f(self);
 
-		match self.class {
-			NdRule::IfNode {
-				ref mut cond_nodes,
-				ref mut else_block,
-			} => {
-				for node in cond_nodes {
-					let CondNode { cond, body } = node;
-					cond.walk_tree(f);
-					for body_node in body {
-						body_node.walk_tree(f);
-					}
-				}
+    match self.class {
+      NdRule::IfNode {
+        ref mut cond_nodes,
+        ref mut else_block,
+      } => {
+        for node in cond_nodes {
+          let CondNode { cond, body } = node;
+          cond.walk_tree(f);
+          for body_node in body {
+            body_node.walk_tree(f);
+          }
+        }
 
-				for else_node in else_block {
-					else_node.walk_tree(f);
-				}
-			}
-			NdRule::LoopNode {
-				kind: _,
-				ref mut cond_node,
-			} => {
-				let CondNode { cond, body } = cond_node;
-				cond.walk_tree(f);
-				for body_node in body {
-					body_node.walk_tree(f);
-				}
-			}
-			NdRule::ForNode {
-				vars: _,
-				arr: _,
-				ref mut body,
-			} => {
-				for body_node in body {
-					body_node.walk_tree(f);
-				}
-			}
-			NdRule::CaseNode {
-				pattern: _,
-				ref mut case_blocks,
-			} => {
-				for block in case_blocks {
-					let CaseNode { pattern: _, body } = block;
-					for body_node in body {
-						body_node.walk_tree(f);
-					}
-				}
-			}
-			NdRule::Command {
-				ref mut assignments,
-				argv: _,
-			} => {
-				for assign_node in assignments {
-					assign_node.walk_tree(f);
-				}
-			}
-			NdRule::Pipeline {
-				ref mut cmds,
-				pipe_err: _,
-			} => {
-				for cmd_node in cmds {
-					cmd_node.walk_tree(f);
-				}
-			}
-			NdRule::Conjunction { ref mut elements } => {
-				for node in elements.iter_mut() {
-					let ConjunctNode { cmd, operator: _ } = node;
-					cmd.walk_tree(f);
-				}
-			}
-			NdRule::Assignment {
-				kind: _,
-				var: _,
-				val: _,
-			} => (), // No nodes to check
-			NdRule::BraceGrp { ref mut body } => {
-				for body_node in body {
-					body_node.walk_tree(f);
-				}
-			}
-			NdRule::FuncDef {
-				name: _,
-				ref mut body,
-			} => {
-				body.walk_tree(f);
-			}
-			NdRule::Test { cases: _ } => (),
-		}
-	}
-	pub fn propagate_context(&mut self, ctx: (SpanSource, Label<Span>)) {
-		self.walk_tree(&|nd| nd.context.push_back(ctx.clone()));
-	}
+        for else_node in else_block {
+          else_node.walk_tree(f);
+        }
+      }
+      NdRule::LoopNode {
+        kind: _,
+        ref mut cond_node,
+      } => {
+        let CondNode { cond, body } = cond_node;
+        cond.walk_tree(f);
+        for body_node in body {
+          body_node.walk_tree(f);
+        }
+      }
+      NdRule::ForNode {
+        vars: _,
+        arr: _,
+        ref mut body,
+      } => {
+        for body_node in body {
+          body_node.walk_tree(f);
+        }
+      }
+      NdRule::CaseNode {
+        pattern: _,
+        ref mut case_blocks,
+      } => {
+        for block in case_blocks {
+          let CaseNode { pattern: _, body } = block;
+          for body_node in body {
+            body_node.walk_tree(f);
+          }
+        }
+      }
+      NdRule::Command {
+        ref mut assignments,
+        argv: _,
+      } => {
+        for assign_node in assignments {
+          assign_node.walk_tree(f);
+        }
+      }
+      NdRule::Pipeline {
+        ref mut cmds,
+        pipe_err: _,
+      } => {
+        for cmd_node in cmds {
+          cmd_node.walk_tree(f);
+        }
+      }
+      NdRule::Conjunction { ref mut elements } => {
+        for node in elements.iter_mut() {
+          let ConjunctNode { cmd, operator: _ } = node;
+          cmd.walk_tree(f);
+        }
+      }
+      NdRule::Assignment {
+        kind: _,
+        var: _,
+        val: _,
+      } => (), // No nodes to check
+      NdRule::BraceGrp { ref mut body } => {
+        for body_node in body {
+          body_node.walk_tree(f);
+        }
+      }
+      NdRule::FuncDef {
+        name: _,
+        ref mut body,
+      } => {
+        body.walk_tree(f);
+      }
+      NdRule::Test { cases: _ } => (),
+    }
+  }
+  pub fn propagate_context(&mut self, ctx: (SpanSource, Label<Span>)) {
+    self.walk_tree(&|nd| nd.context.push_back(ctx.clone()));
+  }
   pub fn get_span(&self) -> Span {
     let Some(first_tk) = self.tokens.first() else {
       unreachable!()
@@ -662,20 +666,23 @@ pub enum NdRule {
 
 pub struct ParseStream {
   pub tokens: Vec<Tk>,
-	pub context: LabelCtx
+  pub context: LabelCtx,
 }
 
 impl Debug for ParseStream {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("ParseStream")
-			.field("tokens", &self.tokens)
-			.finish()
-	}
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("ParseStream")
+      .field("tokens", &self.tokens)
+      .finish()
+  }
 }
 
 impl ParseStream {
   pub fn new(tokens: Vec<Tk>) -> Self {
-    Self { tokens, context: VecDeque::new() }
+    Self {
+      tokens,
+      context: VecDeque::new(),
+    }
   }
   pub fn with_context(tokens: Vec<Tk>, context: LabelCtx) -> Self {
     Self { tokens, context }
@@ -831,39 +838,42 @@ impl ParseStream {
     let name_tk = self.next_tk().unwrap();
     node_tks.push(name_tk.clone());
     let name = name_tk.clone();
-		let name_raw = name.to_string();
-		let mut src = name_tk.span.span_source().clone();
-		src.rename(name_raw.clone());
-		let color = next_color();
-		// Push a placeholder context so child nodes inherit it
-		self.context.push_back((
-			src.clone(),
-			Label::new(name_tk.span.clone().with_name(name_raw.clone()))
-				.with_message(format!("in function '{}' defined here", name_raw.clone().fg(color)))
-				.with_color(color),
-		));
+    let name_raw = name.to_string();
+    let mut src = name_tk.span.span_source().clone();
+    src.rename(name_raw.clone());
+    let color = next_color();
+    // Push a placeholder context so child nodes inherit it
+    self.context.push_back((
+      src.clone(),
+      Label::new(name_tk.span.clone().with_name(name_raw.clone()))
+        .with_message(format!(
+          "in function '{}' defined here",
+          name_raw.clone().fg(color)
+        ))
+        .with_color(color),
+    ));
 
     let Some(brc_grp) = self.parse_brc_grp(true /* from_func_def */)? else {
-			self.context.pop_back();
+      self.context.pop_back();
       return Err(parse_err_full(
         "Expected a brace group after function name",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     };
     body = Box::new(brc_grp);
-		// Replace placeholder with full-span label
-		self.context.pop_back();
+    // Replace placeholder with full-span label
+    self.context.pop_back();
 
     let node = Node {
       class: NdRule::FuncDef { name, body },
       flags: NdFlags::empty(),
       redirs: vec![],
       tokens: node_tks,
-			context: self.context.clone()
+      context: self.context.clone(),
     };
 
-		self.context.pop_back();
+    self.context.pop_back();
     Ok(Some(node))
   }
   fn panic_mode(&mut self, node_tks: &mut Vec<Tk>) {
@@ -893,7 +903,7 @@ impl ParseStream {
           return Err(parse_err_full(
             "Malformed test call",
             &node_tks.get_span().unwrap(),
-						self.context.clone()
+            self.context.clone(),
           ));
         } else {
           break;
@@ -920,7 +930,7 @@ impl ParseStream {
             return Err(parse_err_full(
               "Invalid placement for logical operator in test",
               &node_tks.get_span().unwrap(),
-							self.context.clone()
+              self.context.clone(),
             ));
           }
           let op = match tk.class {
@@ -936,7 +946,7 @@ impl ParseStream {
           return Err(parse_err_full(
             "Invalid placement for logical operator in test",
             &node_tks.get_span().unwrap(),
-						self.context.clone()
+            self.context.clone(),
           ));
         }
       }
@@ -982,7 +992,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected a closing brace for this brace group",
           &node_tks.get_span().unwrap(),
-					self.context.clone()
+          self.context.clone(),
         ));
       }
     }
@@ -1049,11 +1059,9 @@ impl ParseStream {
     let pat_err = parse_err_full(
       "Expected a pattern after 'case' keyword",
       &node_tks.get_span().unwrap(),
-			self.context.clone()
+      self.context.clone(),
     )
-    .with_note(
-      "Patterns can be raw text, or anything that gets substituted with raw text"
-    );
+    .with_note("Patterns can be raw text, or anything that gets substituted with raw text");
 
     let Some(pat_tk) = self.next_tk() else {
       self.panic_mode(&mut node_tks);
@@ -1073,7 +1081,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected 'in' after case variable name",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1086,7 +1094,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected a case pattern here",
           &node_tks.get_span().unwrap(),
-					self.context.clone()
+          self.context.clone(),
         ));
       }
       let case_pat_tk = self.next_tk().unwrap();
@@ -1123,7 +1131,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected 'esac' after case block",
           &node_tks.get_span().unwrap(),
-					self.context.clone()
+          self.context.clone(),
         ));
       }
     }
@@ -1140,12 +1148,12 @@ impl ParseStream {
     };
     Ok(Some(node))
   }
-	fn make_err(&self, span: lex::Span, label: Label<lex::Span>) -> ShErr {
-		let src = span.span_source().clone();
-		ShErr::new(ShErrKind::ParseErr, span)
-			.with_label(src, label)
-			.with_context(self.context.clone())
-	}
+  fn make_err(&self, span: lex::Span, label: Label<lex::Span>) -> ShErr {
+    let src = span.span_source().clone();
+    ShErr::new(ShErrKind::ParseErr, span)
+      .with_label(src, label)
+      .with_context(self.context.clone())
+  }
   fn parse_if(&mut self) -> ShResult<Option<Node>> {
     // Needs at last one 'if-then',
     // Any number of 'elif-then',
@@ -1164,14 +1172,19 @@ impl ParseStream {
       let prefix_keywrd = if cond_nodes.is_empty() { "if" } else { "elif" };
       let Some(cond) = self.parse_cmd_list()? else {
         self.panic_mode(&mut node_tks);
-				let span = node_tks.get_span().unwrap();
-				let color = next_color();
-				return Err(self.make_err(span.clone(),
-					Label::new(span)
-						.with_message(format!("Expected an expression after '{}'", prefix_keywrd.fg(color)))
-						.with_color(color)
-				));
-
+        let span = node_tks.get_span().unwrap();
+        let color = next_color();
+        return Err(
+          self.make_err(
+            span.clone(),
+            Label::new(span)
+              .with_message(format!(
+                "Expected an expression after '{}'",
+                prefix_keywrd.fg(color)
+              ))
+              .with_color(color),
+          ),
+        );
       };
       node_tks.extend(cond.tokens.clone());
 
@@ -1180,7 +1193,7 @@ impl ParseStream {
         return Err(parse_err_full(
           &format!("Expected 'then' after '{prefix_keywrd}' condition"),
           &node_tks.get_span().unwrap(),
-					self.context.clone()
+          self.context.clone(),
         ));
       }
       node_tks.push(self.next_tk().unwrap());
@@ -1196,7 +1209,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected an expression after 'then'",
           &node_tks.get_span().unwrap(),
-					self.context.clone()
+          self.context.clone(),
         ));
       };
       let cond_node = CondNode {
@@ -1205,7 +1218,7 @@ impl ParseStream {
       };
       cond_nodes.push(cond_node);
 
-			self.catch_separator(&mut node_tks);
+      self.catch_separator(&mut node_tks);
       if !self.check_keyword("elif") || !self.next_tk_is_some() {
         break;
       } else {
@@ -1214,7 +1227,7 @@ impl ParseStream {
       }
     }
 
-		self.catch_separator(&mut node_tks);
+    self.catch_separator(&mut node_tks);
     if self.check_keyword("else") {
       node_tks.push(self.next_tk().unwrap());
       self.catch_separator(&mut node_tks);
@@ -1226,7 +1239,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Expected an expression after 'else'",
           &node_tks.get_span().unwrap(),
-					self.context.clone()
+          self.context.clone(),
         ));
       }
     }
@@ -1237,7 +1250,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected 'fi' after if statement",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1293,7 +1306,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "This for loop is missing a variable",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     }
     if arr.is_empty() {
@@ -1301,7 +1314,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "This for loop is missing an array",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     }
     if !self.check_keyword("do") || !self.next_tk_is_some() {
@@ -1309,7 +1322,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Missing a 'do' for this for loop",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1325,7 +1338,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Missing a 'done' after this for loop",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1366,7 +1379,7 @@ impl ParseStream {
       return Err(parse_err_full(
         &format!("Expected an expression after '{loop_kind}'"), // It also implements Display
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     };
     node_tks.extend(cond.tokens.clone());
@@ -1376,7 +1389,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected 'do' after loop condition",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1392,7 +1405,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected an expression after 'do'",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     };
 
@@ -1402,7 +1415,7 @@ impl ParseStream {
       return Err(parse_err_full(
         "Expected 'done' after loop body",
         &node_tks.get_span().unwrap(),
-				self.context.clone()
+        self.context.clone(),
       ));
     }
     node_tks.push(self.next_tk().unwrap());
@@ -1479,7 +1492,7 @@ impl ParseStream {
         return Err(parse_err_full(
           "Found case pattern in command",
           &prefix_tk.span,
-					self.context.clone()
+          self.context.clone(),
         ));
       }
       let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
@@ -1515,14 +1528,14 @@ impl ParseStream {
         // If we have assignments but no command word,
         // return the assignment-only command without parsing more tokens
         self.commit(node_tks.len());
-				let mut context = self.context.clone();
-				let assignments_span = assignments.get_span().unwrap();
-				context.push_back((
-					assignments_span.source().clone(),
-					Label::new(assignments_span)
-						.with_message("in variable assignment defined here".to_string())
-						.with_color(next_color())
-				));
+        let mut context = self.context.clone();
+        let assignments_span = assignments.get_span().unwrap();
+        context.push_back((
+          assignments_span.source().clone(),
+          Label::new(assignments_span)
+            .with_message("in variable assignment defined here".to_string())
+            .with_color(next_color()),
+        ));
         return Ok(Some(Node {
           class: NdRule::Command { assignments, argv },
           tokens: node_tks,
@@ -1559,7 +1572,7 @@ impl ParseStream {
             let path_tk = tk_iter.next();
 
             if path_tk.is_none_or(|tk| tk.class == TkRule::EOI) {
-							self.panic_mode(&mut node_tks);
+              self.panic_mode(&mut node_tks);
               return Err(ShErr::at(
                 ShErrKind::ParseErr,
                 tk.span.clone(),
@@ -1737,7 +1750,7 @@ fn node_is_punctuated(tokens: &[Tk]) -> bool {
 }
 
 pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<File> {
-	let path = path.as_ref();
+  let path = path.as_ref();
   let result = match class {
     RedirType::Input => OpenOptions::new().read(true).open(Path::new(&path)),
     RedirType::Output => OpenOptions::new()
@@ -1745,23 +1758,22 @@ pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<Fil
       .create(true)
       .truncate(true)
       .open(path),
-    RedirType::Append => OpenOptions::new()
-      .create(true)
-      .append(true)
-      .open(path),
+    RedirType::Append => OpenOptions::new().create(true).append(true).open(path),
     _ => unimplemented!(),
   };
   Ok(result?)
 }
 
 fn parse_err_full(reason: &str, blame: &Span, context: LabelCtx) -> ShErr {
-	let color = last_color();
-	ShErr::new(ShErrKind::ParseErr, blame.clone())
-		.with_label(
-			blame.span_source().clone(),
-			Label::new(blame.clone()).with_message(reason).with_color(color)
-		)
-		.with_context(context)
+  let color = last_color();
+  ShErr::new(ShErrKind::ParseErr, blame.clone())
+    .with_label(
+      blame.span_source().clone(),
+      Label::new(blame.clone())
+        .with_message(reason)
+        .with_color(color),
+    )
+    .with_context(context)
 }
 
 fn is_func_name(tk: Option<&Tk>) -> bool {

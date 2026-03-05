@@ -1,44 +1,50 @@
 use std::{
-  collections::HashSet, fmt::{Write,Debug}, path::PathBuf, sync::Arc,
+  collections::HashSet,
+  fmt::{Debug, Write},
+  path::PathBuf,
+  sync::Arc,
 };
 
 use nix::sys::signal::Signal;
 
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
-  libsh::{
-    error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils
-  },
+  libsh::{error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils},
   parse::{
     execute::exec_input,
     lex::{self, LexFlags, Tk, TkRule, ends_with_unescaped},
   },
   readline::{
-    Marker, annotate_input_recursive, keys::{KeyCode as C, KeyEvent as K, ModKeys as M}, linebuf::{ClampedUsize, LineBuf}, markers::{self, is_marker}, term::{LineWriter, TermWriter, calc_str_width, get_win_size}, vimode::{ViInsert, ViMode}
+    Marker, annotate_input_recursive,
+    keys::{KeyCode as C, KeyEvent as K, ModKeys as M},
+    linebuf::{ClampedUsize, LineBuf},
+    markers::{self, is_marker},
+    term::{LineWriter, TermWriter, calc_str_width, get_win_size},
+    vimode::{ViInsert, ViMode},
   },
   state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_vars, write_vars},
 };
 
 pub fn complete_signals(start: &str) -> Vec<String> {
-	Signal::iterator()
-		.map(|s| {
-			s.to_string()
-				.strip_prefix("SIG")
-				.unwrap_or(s.as_ref())
-				.to_string()
-		})
-		.filter(|s| s.starts_with(start))
-		.collect()
+  Signal::iterator()
+    .map(|s| {
+      s.to_string()
+        .strip_prefix("SIG")
+        .unwrap_or(s.as_ref())
+        .to_string()
+    })
+    .filter(|s| s.starts_with(start))
+    .collect()
 }
 
 pub fn complete_aliases(start: &str) -> Vec<String> {
-	read_logic(|l| {
-		l.aliases()
-			.iter()
-			.filter(|a| a.0.starts_with(start))
-			.map(|a| a.0.clone())
-			.collect()
-	})
+  read_logic(|l| {
+    l.aliases()
+      .iter()
+      .filter(|a| a.0.starts_with(start))
+      .map(|a| a.0.clone())
+      .collect()
+  })
 }
 
 pub fn complete_jobs(start: &str) -> Vec<String> {
@@ -224,9 +230,14 @@ fn complete_filename(start: &str) -> Vec<String> {
 
 pub enum CompSpecResult {
   NoSpec, // No compspec registered
-  NoMatch { flags: CompOptFlags }, /* Compspec found but no candidates matched, returns
+  NoMatch {
+    flags: CompOptFlags,
+  }, /* Compspec found but no candidates matched, returns
            * behavior flags */
-  Match { result: CompResult, flags: CompOptFlags }, // Compspec found and candidates returned
+  Match {
+    result: CompResult,
+    flags: CompOptFlags,
+  }, // Compspec found and candidates returned
 }
 
 #[derive(Default, Debug, Clone)]
@@ -249,8 +260,8 @@ pub struct BashCompSpec {
   pub signals: bool,
   /// -j: complete job pids or names
   pub jobs: bool,
-	/// -a: complete aliases
-	pub aliases: bool,
+  /// -a: complete aliases
+  pub aliases: bool,
 
   pub flags: CompOptFlags,
   /// The original command
@@ -301,10 +312,10 @@ impl BashCompSpec {
     self.jobs = enable;
     self
   }
-	pub fn aliases(mut self, enable: bool) -> Self {
-		self.aliases = enable;
-		self
-	}
+  pub fn aliases(mut self, enable: bool) -> Self {
+    self.aliases = enable;
+    self
+  }
   pub fn from_comp_opts(opts: CompOpts) -> Self {
     let CompOpts {
       func,
@@ -322,7 +333,7 @@ impl BashCompSpec {
       users: flags.contains(CompFlags::USERS),
       vars: flags.contains(CompFlags::VARS),
       jobs: flags.contains(CompFlags::JOBS),
-			aliases: flags.contains(CompFlags::ALIAS),
+      aliases: flags.contains(CompFlags::ALIAS),
       flags: opt_flags,
       signals: false, // TODO: implement signal completion
       source: String::new(),
@@ -419,26 +430,27 @@ impl CompSpec for BashCompSpec {
     if self.jobs {
       candidates.extend(complete_jobs(&expanded));
     }
-		if self.aliases {
-			candidates.extend(complete_aliases(&expanded));
-		}
-		if self.signals {
-			candidates.extend(complete_signals(&expanded));
-		}
+    if self.aliases {
+      candidates.extend(complete_aliases(&expanded));
+    }
+    if self.signals {
+      candidates.extend(complete_signals(&expanded));
+    }
     if let Some(words) = &self.wordlist {
       candidates.extend(words.iter().filter(|w| w.starts_with(&expanded)).cloned());
     }
     if self.function.is_some() {
       candidates.extend(self.exec_comp_func(ctx)?);
     }
-		candidates = candidates.into_iter()
-			.map(|c| {
-				let stripped = c.strip_prefix(&expanded).unwrap_or_default();
-				format!("{prefix}{stripped}")
-			})
-		.collect();
+    candidates = candidates
+      .into_iter()
+      .map(|c| {
+        let stripped = c.strip_prefix(&expanded).unwrap_or_default();
+        format!("{prefix}{stripped}")
+      })
+      .collect();
 
-		candidates.sort_by_key(|c| c.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
+    candidates.sort_by_key(|c| c.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
 
     Ok(candidates)
   }
@@ -510,494 +522,528 @@ impl CompResult {
 }
 
 pub enum CompResponse {
-	Passthrough, // key falls through
-	Accept(String), // user accepted completion
-	Dismiss, // user canceled completion
-	Consumed // key was handled, but completion remains active
+  Passthrough,    // key falls through
+  Accept(String), // user accepted completion
+  Dismiss,        // user canceled completion
+  Consumed,       // key was handled, but completion remains active
 }
 
 pub trait Completer {
-	fn complete(&mut self, line: String, cursor_pos: usize, direction: i32) -> ShResult<Option<String>>;
-	fn reset(&mut self);
-	fn reset_stay_active(&mut self);
-	fn is_active(&self) -> bool;
-	fn selected_candidate(&self) -> Option<String>;
-	fn token_span(&self) -> (usize, usize);
-	fn original_input(&self) -> &str;
-	fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()>;
-	fn clear(&mut self, _writer: &mut TermWriter) -> ShResult<()> { Ok(()) }
-	fn set_prompt_line_context(&mut self, _line_width: u16, _cursor_col: u16) {}
-	fn handle_key(&mut self, key: K) -> ShResult<CompResponse>;
-	fn get_completed_line(&self, candidate: &str) -> String;
+  fn complete(
+    &mut self,
+    line: String,
+    cursor_pos: usize,
+    direction: i32,
+  ) -> ShResult<Option<String>>;
+  fn reset(&mut self);
+  fn reset_stay_active(&mut self);
+  fn is_active(&self) -> bool;
+  fn selected_candidate(&self) -> Option<String>;
+  fn token_span(&self) -> (usize, usize);
+  fn original_input(&self) -> &str;
+  fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()>;
+  fn clear(&mut self, _writer: &mut TermWriter) -> ShResult<()> {
+    Ok(())
+  }
+  fn set_prompt_line_context(&mut self, _line_width: u16, _cursor_col: u16) {}
+  fn handle_key(&mut self, key: K) -> ShResult<CompResponse>;
+  fn get_completed_line(&self, candidate: &str) -> String;
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct ScoredCandidate {
-	content: String,
-	score: Option<i32>,
+  content: String,
+  score: Option<i32>,
 }
 
 impl ScoredCandidate {
-	const BONUS_BOUNDARY: i32 = 10;
-	const BONUS_CONSECUTIVE: i32 = 8;
-	const BONUS_FIRST_CHAR: i32 = 5;
-	const PENALTY_GAP_START: i32 = 3;
-	const PENALTY_GAP_EXTEND: i32 = 1;
+  const BONUS_BOUNDARY: i32 = 10;
+  const BONUS_CONSECUTIVE: i32 = 8;
+  const BONUS_FIRST_CHAR: i32 = 5;
+  const PENALTY_GAP_START: i32 = 3;
+  const PENALTY_GAP_EXTEND: i32 = 1;
 
-	pub fn new(content: String) -> Self {
-		Self { content, score: None }
-	}
-	fn is_word_bound(prev: char, curr: char) -> bool {
-		match prev {
-			'/' | '_' | '-' | '.' | ' ' => true,
-			c if c.is_lowercase() && curr.is_uppercase() => true, // camelCase boundary
-			_ => false,
-		}
-	}
-	pub fn fuzzy_score(&mut self, other: &str) -> i32 {
-		if other.is_empty() {
-			self.score = Some(0);
-			return 0;
-		}
+  pub fn new(content: String) -> Self {
+    Self {
+      content,
+      score: None,
+    }
+  }
+  fn is_word_bound(prev: char, curr: char) -> bool {
+    match prev {
+      '/' | '_' | '-' | '.' | ' ' => true,
+      c if c.is_lowercase() && curr.is_uppercase() => true, // camelCase boundary
+      _ => false,
+    }
+  }
+  pub fn fuzzy_score(&mut self, other: &str) -> i32 {
+    if other.is_empty() {
+      self.score = Some(0);
+      return 0;
+    }
 
-		let query_chars: Vec<char> = other.chars().collect();
-		let content_chars: Vec<char> = self.content.chars().collect();
-		let mut indices = vec![];
-		let mut qi = 0;
-		for (ci, c_ch) in self.content.chars().enumerate() {
-			if qi < query_chars.len() && c_ch.eq_ignore_ascii_case(&query_chars[qi]) {
-				indices.push(ci);
-				qi += 1;
-			}
-		}
+    let query_chars: Vec<char> = other.chars().collect();
+    let content_chars: Vec<char> = self.content.chars().collect();
+    let mut indices = vec![];
+    let mut qi = 0;
+    for (ci, c_ch) in self.content.chars().enumerate() {
+      if qi < query_chars.len() && c_ch.eq_ignore_ascii_case(&query_chars[qi]) {
+        indices.push(ci);
+        qi += 1;
+      }
+    }
 
-		if indices.len() != query_chars.len() {
-			self.score = Some(i32::MIN);
-			return i32::MIN;
-		}
+    if indices.len() != query_chars.len() {
+      self.score = Some(i32::MIN);
+      return i32::MIN;
+    }
 
-		let mut score: i32 = 0;
+    let mut score: i32 = 0;
 
-		for (i, &idx) in indices.iter().enumerate() {
-			if idx == 0 {
-				score += Self::BONUS_FIRST_CHAR;
-			}
+    for (i, &idx) in indices.iter().enumerate() {
+      if idx == 0 {
+        score += Self::BONUS_FIRST_CHAR;
+      }
 
+      if idx == 0 || Self::is_word_bound(content_chars[idx - 1], content_chars[idx]) {
+        score += Self::BONUS_BOUNDARY;
+      }
 
-			if idx == 0 || Self::is_word_bound(content_chars[idx - 1], content_chars[idx])  {
-				score += Self::BONUS_BOUNDARY;
-			}
+      if i > 0 {
+        let gap = idx - indices[i - 1] - 1;
+        if gap == 0 {
+          score += Self::BONUS_CONSECUTIVE;
+        } else {
+          score -= Self::PENALTY_GAP_START + (gap as i32 - 1) * Self::PENALTY_GAP_EXTEND;
+        }
+      }
+    }
 
-			if i > 0 {
-				let gap = idx - indices[i - 1] - 1;
-				if gap == 0 {
-					score += Self::BONUS_CONSECUTIVE;
-				} else {
-					score -= Self::PENALTY_GAP_START + (gap as i32 - 1) * Self::PENALTY_GAP_EXTEND;
-				}
-			}
-		}
-
-		self.score = Some(score);
-		score
-	}
+    self.score = Some(score);
+    score
+  }
 }
 
 impl From<String> for ScoredCandidate {
-	fn from(content: String) -> Self {
-		Self { content, score: None }
-	}
+  fn from(content: String) -> Self {
+    Self {
+      content,
+      score: None,
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
 pub struct FuzzyLayout {
-	rows: u16,
-	cols: u16,
-	cursor_col: u16,
-	/// Width of the prompt line above the `\n` that starts the fuzzy window.
-	/// If PSR was drawn, this is `t_cols`; otherwise the content width.
-	preceding_line_width: u16,
-	/// Cursor column on the prompt line before the fuzzy window was drawn.
-	preceding_cursor_col: u16,
+  rows: u16,
+  cols: u16,
+  cursor_col: u16,
+  /// Width of the prompt line above the `\n` that starts the fuzzy window.
+  /// If PSR was drawn, this is `t_cols`; otherwise the content width.
+  preceding_line_width: u16,
+  /// Cursor column on the prompt line before the fuzzy window was drawn.
+  preceding_cursor_col: u16,
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct QueryEditor {
-	mode: ViInsert,
-	scroll_offset: usize,
-	available_width: usize,
-	linebuf: LineBuf
+  mode: ViInsert,
+  scroll_offset: usize,
+  available_width: usize,
+  linebuf: LineBuf,
 }
 
 impl QueryEditor {
-	pub fn clear(&mut self) {
-		self.linebuf = LineBuf::new();
-		self.mode = ViInsert::default();
-		self.scroll_offset = 0;
-	}
-	pub fn set_available_width(&mut self, width: usize) {
-		self.available_width = width;
-	}
-	pub fn update_scroll_offset(&mut self) {
-		self.linebuf.update_graphemes();
-		let cursor_pos = self.linebuf.cursor.get();
-		if cursor_pos < self.scroll_offset + 1 {
-			self.scroll_offset = self.linebuf.cursor.ret_sub(1);
-		}
-		if cursor_pos >= self.scroll_offset + self.available_width.saturating_sub(1) {
-			self.scroll_offset = self.linebuf.cursor.ret_sub(self.available_width.saturating_sub(1));
-		}
-		let max_offset = self.linebuf.grapheme_indices().len().saturating_sub(self.available_width);
-		self.scroll_offset = self.scroll_offset.min(max_offset);
-	}
-	pub fn get_window(&mut self) -> String {
-		self.linebuf.update_graphemes();
-		let buf_len = self.linebuf.grapheme_indices().len();
-		if buf_len <= self.available_width {
-			return self.linebuf.as_str().to_string();
-		}
-		let start = self.scroll_offset.min(buf_len.saturating_sub(self.available_width));
-		let end = (start + self.available_width).min(buf_len);
-		self.linebuf.slice(start..end).unwrap_or("").to_string()
-	}
-	pub fn handle_key(&mut self, key: K) -> ShResult<()> {
-		let Some(cmd) = self.mode.handle_key(key) else {
-			return Ok(())
-		};
-		self.linebuf.exec_cmd(cmd)
-	}
+  pub fn clear(&mut self) {
+    self.linebuf = LineBuf::new();
+    self.mode = ViInsert::default();
+    self.scroll_offset = 0;
+  }
+  pub fn set_available_width(&mut self, width: usize) {
+    self.available_width = width;
+  }
+  pub fn update_scroll_offset(&mut self) {
+    self.linebuf.update_graphemes();
+    let cursor_pos = self.linebuf.cursor.get();
+    if cursor_pos < self.scroll_offset + 1 {
+      self.scroll_offset = self.linebuf.cursor.ret_sub(1);
+    }
+    if cursor_pos >= self.scroll_offset + self.available_width.saturating_sub(1) {
+      self.scroll_offset = self
+        .linebuf
+        .cursor
+        .ret_sub(self.available_width.saturating_sub(1));
+    }
+    let max_offset = self
+      .linebuf
+      .grapheme_indices()
+      .len()
+      .saturating_sub(self.available_width);
+    self.scroll_offset = self.scroll_offset.min(max_offset);
+  }
+  pub fn get_window(&mut self) -> String {
+    self.linebuf.update_graphemes();
+    let buf_len = self.linebuf.grapheme_indices().len();
+    if buf_len <= self.available_width {
+      return self.linebuf.as_str().to_string();
+    }
+    let start = self
+      .scroll_offset
+      .min(buf_len.saturating_sub(self.available_width));
+    let end = (start + self.available_width).min(buf_len);
+    self.linebuf.slice(start..end).unwrap_or("").to_string()
+  }
+  pub fn handle_key(&mut self, key: K) -> ShResult<()> {
+    let Some(cmd) = self.mode.handle_key(key) else {
+      return Ok(());
+    };
+    self.linebuf.exec_cmd(cmd)
+  }
 }
-
 
 #[derive(Clone, Debug)]
 pub struct FuzzyCompleter {
-	completer: SimpleCompleter,
-	query: QueryEditor,
-	filtered: Vec<ScoredCandidate>,
-	candidates: Vec<String>,
-	cursor: ClampedUsize,
-	old_layout: Option<FuzzyLayout>,
-	max_height: usize,
-	scroll_offset: usize,
-	active: bool,
-	/// Context from the prompt: width of the line above the fuzzy window
-	prompt_line_width: u16,
-	/// Context from the prompt: cursor column on the line above the fuzzy window
-	prompt_cursor_col: u16,
+  completer: SimpleCompleter,
+  query: QueryEditor,
+  filtered: Vec<ScoredCandidate>,
+  candidates: Vec<String>,
+  cursor: ClampedUsize,
+  old_layout: Option<FuzzyLayout>,
+  max_height: usize,
+  scroll_offset: usize,
+  active: bool,
+  /// Context from the prompt: width of the line above the fuzzy window
+  prompt_line_width: u16,
+  /// Context from the prompt: cursor column on the line above the fuzzy window
+  prompt_cursor_col: u16,
 }
 
 impl FuzzyCompleter {
-	const BOT_LEFT: &str = "\x1b[90m╰\x1b[0m";
-	const BOT_RIGHT: &str = "\x1b[90m╯\x1b[0m";
-	const TOP_LEFT: &str = "\x1b[90m╭\x1b[0m";
-	const TOP_RIGHT: &str = "\x1b[90m╮\x1b[0m";
-	const HOR_LINE: &str = "\x1b[90m─\x1b[0m";
-	const VERT_LINE: &str = "\x1b[90m│\x1b[0m";
-	const SELECTOR_GRAY: &str = "\x1b[90m▌\x1b[0m";
-	const SELECTOR_HL: &str = "\x1b[38;2;200;0;120m▌\x1b[1;39;48;5;237m";
-	const PROMPT_ARROW: &str = "\x1b[1;36m>\x1b[0m";
-	const TREE_LEFT: &str = "\x1b[90m├\x1b[0m";
-	const TREE_RIGHT: &str = "\x1b[90m┤\x1b[0m";
-	//const TREE_BOT: &str = "\x1b[90m┴\x1b[0m";
-	//const TREE_TOP: &str = "\x1b[90m┬\x1b[0m";
-	//const CROSS: &str = "\x1b[90m┼\x1b[0m";
+  const BOT_LEFT: &str = "\x1b[90m╰\x1b[0m";
+  const BOT_RIGHT: &str = "\x1b[90m╯\x1b[0m";
+  const TOP_LEFT: &str = "\x1b[90m╭\x1b[0m";
+  const TOP_RIGHT: &str = "\x1b[90m╮\x1b[0m";
+  const HOR_LINE: &str = "\x1b[90m─\x1b[0m";
+  const VERT_LINE: &str = "\x1b[90m│\x1b[0m";
+  const SELECTOR_GRAY: &str = "\x1b[90m▌\x1b[0m";
+  const SELECTOR_HL: &str = "\x1b[38;2;200;0;120m▌\x1b[1;39;48;5;237m";
+  const PROMPT_ARROW: &str = "\x1b[1;36m>\x1b[0m";
+  const TREE_LEFT: &str = "\x1b[90m├\x1b[0m";
+  const TREE_RIGHT: &str = "\x1b[90m┤\x1b[0m";
+  //const TREE_BOT: &str = "\x1b[90m┴\x1b[0m";
+  //const TREE_TOP: &str = "\x1b[90m┬\x1b[0m";
+  //const CROSS: &str = "\x1b[90m┼\x1b[0m";
 
+  fn get_window(&mut self) -> &[ScoredCandidate] {
+    let height = self.filtered.len().min(self.max_height);
 
-	fn get_window(&mut self) -> &[ScoredCandidate] {
-		let height = self.filtered.len().min(self.max_height);
+    self.update_scroll_offset();
 
-		self.update_scroll_offset();
-
-		&self.filtered[self.scroll_offset..self.scroll_offset + height]
-	}
-	pub fn update_scroll_offset(&mut self) {
-		let height = self.filtered.len().min(self.max_height);
-		if self.cursor.get() < self.scroll_offset + 1 {
-			self.scroll_offset = self.cursor.ret_sub(1);
-		}
-		if self.cursor.get() >= self.scroll_offset + height.saturating_sub(1) {
-			self.scroll_offset = self.cursor.ret_sub(height.saturating_sub(2));
-		}
-		self.scroll_offset = self.scroll_offset.min(self.filtered.len().saturating_sub(height));
-	}
-	pub fn score_candidates(&mut self) {
-		let mut scored: Vec<_> = self.candidates
-			.clone()
-			.into_iter()
-			.filter_map(|c| {
-				let mut sc = ScoredCandidate::new(c);
-				let score = sc.fuzzy_score(self.query.linebuf.as_str());
-				if score > i32::MIN {
-					Some(sc)
-				} else {
-					None
-				}
-			}).collect();
-		scored.sort_by_key(|sc| sc.score.unwrap_or(i32::MIN));
-		scored.reverse();
-		self.cursor.set_max(scored.len());
-		self.filtered = scored;
-	}
+    &self.filtered[self.scroll_offset..self.scroll_offset + height]
+  }
+  pub fn update_scroll_offset(&mut self) {
+    let height = self.filtered.len().min(self.max_height);
+    if self.cursor.get() < self.scroll_offset + 1 {
+      self.scroll_offset = self.cursor.ret_sub(1);
+    }
+    if self.cursor.get() >= self.scroll_offset + height.saturating_sub(1) {
+      self.scroll_offset = self.cursor.ret_sub(height.saturating_sub(2));
+    }
+    self.scroll_offset = self
+      .scroll_offset
+      .min(self.filtered.len().saturating_sub(height));
+  }
+  pub fn score_candidates(&mut self) {
+    let mut scored: Vec<_> = self
+      .candidates
+      .clone()
+      .into_iter()
+      .filter_map(|c| {
+        let mut sc = ScoredCandidate::new(c);
+        let score = sc.fuzzy_score(self.query.linebuf.as_str());
+        if score > i32::MIN { Some(sc) } else { None }
+      })
+      .collect();
+    scored.sort_by_key(|sc| sc.score.unwrap_or(i32::MIN));
+    scored.reverse();
+    self.cursor.set_max(scored.len());
+    self.filtered = scored;
+  }
 }
 
 impl Default for FuzzyCompleter {
-	fn default() -> Self {
-	  Self {
-			max_height: 8,
-			completer: SimpleCompleter::default(),
-			query: QueryEditor::default(),
-			filtered: vec![],
-			candidates: vec![],
-			cursor: ClampedUsize::new(0, 0, true),
-			old_layout: None,
-			scroll_offset: 0,
-			active: false,
-			prompt_line_width: 0,
-			prompt_cursor_col: 0,
-		}
-	}
+  fn default() -> Self {
+    Self {
+      max_height: 8,
+      completer: SimpleCompleter::default(),
+      query: QueryEditor::default(),
+      filtered: vec![],
+      candidates: vec![],
+      cursor: ClampedUsize::new(0, 0, true),
+      old_layout: None,
+      scroll_offset: 0,
+      active: false,
+      prompt_line_width: 0,
+      prompt_cursor_col: 0,
+    }
+  }
 }
 
 impl Completer for FuzzyCompleter {
-	fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
-		self.prompt_line_width = line_width;
-		self.prompt_cursor_col = cursor_col;
-	}
-	fn reset_stay_active(&mut self) {
-		if self.is_active() {
-			self.query.clear();
-			self.score_candidates();
-		}
-	}
-	fn get_completed_line(&self, _candidate: &str) -> String {
-		log::debug!("Getting completed line for candidate: {}", _candidate);
+  fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
+    self.prompt_line_width = line_width;
+    self.prompt_cursor_col = cursor_col;
+  }
+  fn reset_stay_active(&mut self) {
+    if self.is_active() {
+      self.query.clear();
+      self.score_candidates();
+    }
+  }
+  fn get_completed_line(&self, _candidate: &str) -> String {
+    log::debug!("Getting completed line for candidate: {}", _candidate);
 
     let selected = &self.filtered[self.cursor.get()].content;
-		log::debug!("Selected candidate: {}", selected);
+    log::debug!("Selected candidate: {}", selected);
     let (start, end) = self.completer.token_span;
-		log::debug!("Token span: ({}, {})", start, end);
+    log::debug!("Token span: ({}, {})", start, end);
     let ret = format!(
       "{}{}{}",
       &self.completer.original_input[..start],
       selected,
       &self.completer.original_input[end..]
     );
-		log::debug!("Completed line: {}", ret);
-		ret
-	}
-	fn complete(&mut self, line: String, cursor_pos: usize, direction: i32) -> ShResult<Option<String>> {
-		self.completer.complete(line, cursor_pos, direction)?;
-		let candidates: Vec<_> = self.completer.candidates.clone();
-		if candidates.is_empty() {
-			self.completer.reset();
-			self.active = false;
-			return Ok(None);
-		} else if candidates.len() == 1 {
-			self.filtered = candidates.into_iter().map(ScoredCandidate::from).collect();
-			let completed = self.get_completed_line(&self.filtered[0].content);
-			self.active = false;
-			return Ok(Some(completed));
-		}
-		self.active = true;
-		self.candidates = candidates;
-		self.score_candidates();
-		Ok(None)
-	}
+    log::debug!("Completed line: {}", ret);
+    ret
+  }
+  fn complete(
+    &mut self,
+    line: String,
+    cursor_pos: usize,
+    direction: i32,
+  ) -> ShResult<Option<String>> {
+    self.completer.complete(line, cursor_pos, direction)?;
+    let candidates: Vec<_> = self.completer.candidates.clone();
+    if candidates.is_empty() {
+      self.completer.reset();
+      self.active = false;
+      return Ok(None);
+    } else if candidates.len() == 1 {
+      self.filtered = candidates.into_iter().map(ScoredCandidate::from).collect();
+      let completed = self.get_completed_line(&self.filtered[0].content);
+      self.active = false;
+      return Ok(Some(completed));
+    }
+    self.active = true;
+    self.candidates = candidates;
+    self.score_candidates();
+    Ok(None)
+  }
 
-	fn handle_key(&mut self, key: K) -> ShResult<CompResponse> {
-		match key {
-			K(C::Char('D'), M::CTRL) |
-			K(C::Esc, M::NONE) => {
-				self.active = false;
-				self.filtered.clear();
-				Ok(CompResponse::Dismiss)
-			}
-			K(C::Enter, M::NONE) => {
-				self.active = false;
-				if let Some(selected) = self.filtered.get(self.cursor.get()).map(|c| c.content.clone()) {
-					Ok(CompResponse::Accept(selected))
-				} else {
-					Ok(CompResponse::Dismiss)
-				}
-			}
-			K(C::Tab, M::SHIFT) |
-			K(C::Up, M::NONE) => {
-				self.cursor.wrap_sub(1);
-				self.update_scroll_offset();
-				Ok(CompResponse::Consumed)
-			}
-			K(C::Tab, M::NONE) |
-			K(C::Down, M::NONE) => {
-				self.cursor.wrap_add(1);
-				self.update_scroll_offset();
-				Ok(CompResponse::Consumed)
-			}
-			_ => {
-				self.query.handle_key(key)?;
-				self.score_candidates();
-				Ok(CompResponse::Consumed)
-			}
-		}
-	}
-	fn clear(&mut self, writer: &mut TermWriter) -> ShResult<()> {
-		if let Some(layout) = self.old_layout.take() {
-			let (new_cols, _) = get_win_size(*TTY_FILENO);
-			// The fuzzy window is one continuous auto-wrapped block (no hard
-			// newlines between rows). After a resize the terminal re-joins
-			// soft wraps and re-wraps as a flat buffer.
-			let total_cells = layout.rows as u32 * layout.cols as u32;
-			let physical_rows = if new_cols > 0 {
-				total_cells.div_ceil(new_cols as u32) as u16
-			} else {
-				layout.rows
-			};
-			let cursor_offset = layout.cols as u32 + layout.cursor_col as u32;
-			let cursor_phys_row = if new_cols > 0 {
-				(cursor_offset / new_cols as u32) as u16
-			} else {
-				1
-			};
-			let lines_below = physical_rows.saturating_sub(cursor_phys_row + 1);
+  fn handle_key(&mut self, key: K) -> ShResult<CompResponse> {
+    match key {
+      K(C::Char('D'), M::CTRL) | K(C::Esc, M::NONE) => {
+        self.active = false;
+        self.filtered.clear();
+        Ok(CompResponse::Dismiss)
+      }
+      K(C::Enter, M::NONE) => {
+        self.active = false;
+        if let Some(selected) = self
+          .filtered
+          .get(self.cursor.get())
+          .map(|c| c.content.clone())
+        {
+          Ok(CompResponse::Accept(selected))
+        } else {
+          Ok(CompResponse::Dismiss)
+        }
+      }
+      K(C::Tab, M::SHIFT) | K(C::Up, M::NONE) => {
+        self.cursor.wrap_sub(1);
+        self.update_scroll_offset();
+        Ok(CompResponse::Consumed)
+      }
+      K(C::Tab, M::NONE) | K(C::Down, M::NONE) => {
+        self.cursor.wrap_add(1);
+        self.update_scroll_offset();
+        Ok(CompResponse::Consumed)
+      }
+      _ => {
+        self.query.handle_key(key)?;
+        self.score_candidates();
+        Ok(CompResponse::Consumed)
+      }
+    }
+  }
+  fn clear(&mut self, writer: &mut TermWriter) -> ShResult<()> {
+    if let Some(layout) = self.old_layout.take() {
+      let (new_cols, _) = get_win_size(*TTY_FILENO);
+      // The fuzzy window is one continuous auto-wrapped block (no hard
+      // newlines between rows). After a resize the terminal re-joins
+      // soft wraps and re-wraps as a flat buffer.
+      let total_cells = layout.rows as u32 * layout.cols as u32;
+      let physical_rows = if new_cols > 0 {
+        total_cells.div_ceil(new_cols as u32) as u16
+      } else {
+        layout.rows
+      };
+      let cursor_offset = layout.cols as u32 + layout.cursor_col as u32;
+      let cursor_phys_row = if new_cols > 0 {
+        (cursor_offset / new_cols as u32) as u16
+      } else {
+        1
+      };
+      let lines_below = physical_rows.saturating_sub(cursor_phys_row + 1);
 
-			// The prompt line above the \n may have wrapped (e.g. due to PSR
-			// filling to t_cols). Compute how many extra rows that adds
-			// between the prompt cursor and the fuzzy content.
-			let gap_extra = if new_cols > 0 && layout.preceding_line_width > new_cols {
-				let wrap_rows = (layout.preceding_line_width as u32).div_ceil(new_cols as u32) as u16;
-				let cursor_wrap_row = layout.preceding_cursor_col / new_cols;
-				wrap_rows.saturating_sub(cursor_wrap_row + 1)
-			} else {
-				0
-			};
+      // The prompt line above the \n may have wrapped (e.g. due to PSR
+      // filling to t_cols). Compute how many extra rows that adds
+      // between the prompt cursor and the fuzzy content.
+      let gap_extra = if new_cols > 0 && layout.preceding_line_width > new_cols {
+        let wrap_rows = (layout.preceding_line_width as u32).div_ceil(new_cols as u32) as u16;
+        let cursor_wrap_row = layout.preceding_cursor_col / new_cols;
+        wrap_rows.saturating_sub(cursor_wrap_row + 1)
+      } else {
+        0
+      };
 
-			let mut buf = String::new();
-			if lines_below > 0 {
-				write!(buf, "\x1b[{}B", lines_below).unwrap();
-			}
-			for _ in 0..physical_rows {
-				buf.push_str("\x1b[2K\x1b[A");
-			}
-			buf.push_str("\x1b[2K");
-			// Clear extra rows from prompt line wrapping (PSR)
-			for _ in 0..gap_extra {
-				buf.push_str("\x1b[A\x1b[2K");
-			}
-			writer.flush_write(&buf)?;
-		}
-		Ok(())
-	}
-	fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()> {
-		if !self.active {
-			return Ok(());
-		}
-		let (cols,_) = get_win_size(*TTY_FILENO);
+      let mut buf = String::new();
+      if lines_below > 0 {
+        write!(buf, "\x1b[{}B", lines_below).unwrap();
+      }
+      for _ in 0..physical_rows {
+        buf.push_str("\x1b[2K\x1b[A");
+      }
+      buf.push_str("\x1b[2K");
+      // Clear extra rows from prompt line wrapping (PSR)
+      for _ in 0..gap_extra {
+        buf.push_str("\x1b[A\x1b[2K");
+      }
+      writer.flush_write(&buf)?;
+    }
+    Ok(())
+  }
+  fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()> {
+    if !self.active {
+      return Ok(());
+    }
+    let (cols, _) = get_win_size(*TTY_FILENO);
 
-		let mut buf = String::new();
-		let cursor_pos = self.cursor.get();
-		let offset = self.scroll_offset;
-		self.query.set_available_width(cols.saturating_sub(6) as usize);
-		self.query.update_scroll_offset();
-		let query = self.query.get_window();
-		let num_filtered = format!("\x1b[33m{}\x1b[0m",self.filtered.len());
-		let num_candidates = format!("\x1b[33m{}\x1b[0m",self.candidates.len());
-		let visible = self.get_window();
-		let mut rows: u16 = 0;
-		let top_bar = format!("\n{}{} \x1b[1mComplete\x1b[0m {}{}",
-			Self::TOP_LEFT,
-			Self::HOR_LINE,
-			Self::HOR_LINE.repeat(cols.saturating_sub(13) as usize),
-			Self::TOP_RIGHT
-		);
-		buf.push_str(&top_bar);
-		rows += 1;
-		for _ in 0..rows {
-		}
+    let mut buf = String::new();
+    let cursor_pos = self.cursor.get();
+    let offset = self.scroll_offset;
+    self
+      .query
+      .set_available_width(cols.saturating_sub(6) as usize);
+    self.query.update_scroll_offset();
+    let query = self.query.get_window();
+    let num_filtered = format!("\x1b[33m{}\x1b[0m", self.filtered.len());
+    let num_candidates = format!("\x1b[33m{}\x1b[0m", self.candidates.len());
+    let visible = self.get_window();
+    let mut rows: u16 = 0;
+    let top_bar = format!(
+      "\n{}{} \x1b[1mComplete\x1b[0m {}{}",
+      Self::TOP_LEFT,
+      Self::HOR_LINE,
+      Self::HOR_LINE.repeat(cols.saturating_sub(13) as usize),
+      Self::TOP_RIGHT
+    );
+    buf.push_str(&top_bar);
+    rows += 1;
+    for _ in 0..rows {}
 
-		let prompt = format!("{} {} {}", Self::VERT_LINE, Self::PROMPT_ARROW, &query);
-		let cols_used = calc_str_width(&prompt);
-		let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
-		let prompt_line_final = format!("{}{}{}", prompt, right_pad, Self::VERT_LINE);
-		buf.push_str(&prompt_line_final);
-		rows += 1;
+    let prompt = format!("{} {} {}", Self::VERT_LINE, Self::PROMPT_ARROW, &query);
+    let cols_used = calc_str_width(&prompt);
+    let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
+    let prompt_line_final = format!("{}{}{}", prompt, right_pad, Self::VERT_LINE);
+    buf.push_str(&prompt_line_final);
+    rows += 1;
 
-		let sep_line_left = format!("{}{}{}/{}",
-			Self::TREE_LEFT,
-			Self::HOR_LINE.repeat(2),
-			&num_filtered,
-			&num_candidates
-		);
-		let cols_used = calc_str_width(&sep_line_left);
-		let right_pad = Self::HOR_LINE.repeat(cols.saturating_sub(cols_used + 1) as usize);
-		let sep_line_final = format!("{}{}{}", sep_line_left, right_pad, Self::TREE_RIGHT);
-		buf.push_str(&sep_line_final);
-		rows += 1;
+    let sep_line_left = format!(
+      "{}{}{}/{}",
+      Self::TREE_LEFT,
+      Self::HOR_LINE.repeat(2),
+      &num_filtered,
+      &num_candidates
+    );
+    let cols_used = calc_str_width(&sep_line_left);
+    let right_pad = Self::HOR_LINE.repeat(cols.saturating_sub(cols_used + 1) as usize);
+    let sep_line_final = format!("{}{}{}", sep_line_left, right_pad, Self::TREE_RIGHT);
+    buf.push_str(&sep_line_final);
+    rows += 1;
 
+    for (i, candidate) in visible.iter().enumerate() {
+      let selector = if i + offset == cursor_pos {
+        Self::SELECTOR_HL
+      } else {
+        Self::SELECTOR_GRAY
+      };
+      let mut content = candidate.content.clone();
+      let col_lim = cols.saturating_sub(3);
+      if calc_str_width(&content) > col_lim {
+        content.truncate(col_lim.saturating_sub(6) as usize); // ui bars + elipses length
+        content.push_str("...");
+      }
+      let left = format!("{} {}{}\x1b[0m", Self::VERT_LINE, &selector, &content);
+      let cols_used = calc_str_width(&left);
+      let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
+      let hl_cand_line = format!("{}{}{}", left, right_pad, Self::VERT_LINE);
+      buf.push_str(&hl_cand_line);
+      rows += 1;
+    }
 
-		for (i, candidate) in visible.iter().enumerate() {
-			let selector = if i + offset == cursor_pos {
-				Self::SELECTOR_HL
-			} else {
-				Self::SELECTOR_GRAY
-			};
-			let mut content = candidate.content.clone();
-			let col_lim = cols.saturating_sub(3);
-			if calc_str_width(&content) > col_lim {
-				content.truncate(col_lim.saturating_sub(6) as usize); // ui bars + elipses length
-				content.push_str("...");
-			}
-			let left = format!("{} {}{}\x1b[0m",
-				Self::VERT_LINE,
-				&selector,
-				&content
-			);
-			let cols_used = calc_str_width(&left);
-			let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
-			let hl_cand_line = format!("{}{}{}", left, right_pad, Self::VERT_LINE);
-			buf.push_str(&hl_cand_line);
-			rows += 1;
-		}
+    let bot_bar = format!(
+      "{}{}{}",
+      Self::BOT_LEFT,
+      Self::HOR_LINE
+        .to_string()
+        .repeat(cols.saturating_sub(2) as usize),
+      Self::BOT_RIGHT
+    );
+    buf.push_str(&bot_bar);
+    rows += 1;
 
-		let bot_bar = format!("{}{}{}",
-			Self::BOT_LEFT,
-			Self::HOR_LINE.to_string().repeat(cols.saturating_sub(2) as usize),
-			Self::BOT_RIGHT
-		);
-		buf.push_str(&bot_bar);
-		rows += 1;
+    // Move cursor back up to the prompt line (skip: separator + candidates + bottom border)
+    let lines_below_prompt = rows.saturating_sub(2); // total rows minus top_bar and prompt
+    let cursor_in_window = self
+      .query
+      .linebuf
+      .cursor
+      .get()
+      .saturating_sub(self.query.scroll_offset);
+    let cursor_col = (cursor_in_window + 4) as u16; // "| > ".len() == 4
+    write!(buf, "\x1b[{}A\r\x1b[{}C", lines_below_prompt, cursor_col).unwrap();
 
-		// Move cursor back up to the prompt line (skip: separator + candidates + bottom border)
-		let lines_below_prompt = rows.saturating_sub(2); // total rows minus top_bar and prompt
-		let cursor_in_window = self.query.linebuf.cursor.get().saturating_sub(self.query.scroll_offset);
-		let cursor_col = (cursor_in_window + 4) as u16; // "| > ".len() == 4
-		write!(buf, "\x1b[{}A\r\x1b[{}C", lines_below_prompt, cursor_col).unwrap();
+    let new_layout = FuzzyLayout {
+      rows,
+      cols,
+      cursor_col,
+      preceding_line_width: self.prompt_line_width,
+      preceding_cursor_col: self.prompt_cursor_col,
+    };
+    writer.flush_write(&buf)?;
+    self.old_layout = Some(new_layout);
 
-		let new_layout = FuzzyLayout {
-			rows,
-			cols,
-			cursor_col,
-			preceding_line_width: self.prompt_line_width,
-			preceding_cursor_col: self.prompt_cursor_col,
-		};
-		writer.flush_write(&buf)?;
-		self.old_layout = Some(new_layout);
-
-		Ok(())
-	}
-	fn reset(&mut self) {
-		*self = Self::default();
-	}
-	fn token_span(&self) -> (usize, usize) {
-		self.completer.token_span()
-	}
-	fn is_active(&self) -> bool {
-	  self.active
-	}
-	fn selected_candidate(&self) -> Option<String> {
-		self.filtered.get(self.cursor.get()).map(|c| c.content.clone())
-	}
-	fn original_input(&self) -> &str {
-		&self.completer.original_input
-	}
+    Ok(())
+  }
+  fn reset(&mut self) {
+    *self = Self::default();
+  }
+  fn token_span(&self) -> (usize, usize) {
+    self.completer.token_span()
+  }
+  fn is_active(&self) -> bool {
+    self.active
+  }
+  fn selected_candidate(&self) -> Option<String> {
+    self
+      .filtered
+      .get(self.cursor.get())
+      .map(|c| c.content.clone())
+  }
+  fn original_input(&self) -> &str {
+    &self.completer.original_input
+  }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -1012,49 +1058,54 @@ pub struct SimpleCompleter {
 }
 
 impl Completer for SimpleCompleter {
-	fn reset_stay_active(&mut self) {
-		let active = self.is_active();
-		self.reset();
-		self.active = active;
-	}
-	fn get_completed_line(&self, _candidate: &str) -> String {
-		self.get_completed_line()
-	}
-	fn complete(&mut self, line: String, cursor_pos: usize, direction: i32) -> ShResult<Option<String>> {
-		if self.active {
-			Ok(Some(self.cycle_completion(direction)))
-		} else {
-			self.start_completion(line, cursor_pos)
-		}
-	}
+  fn reset_stay_active(&mut self) {
+    let active = self.is_active();
+    self.reset();
+    self.active = active;
+  }
+  fn get_completed_line(&self, _candidate: &str) -> String {
+    self.get_completed_line()
+  }
+  fn complete(
+    &mut self,
+    line: String,
+    cursor_pos: usize,
+    direction: i32,
+  ) -> ShResult<Option<String>> {
+    if self.active {
+      Ok(Some(self.cycle_completion(direction)))
+    } else {
+      self.start_completion(line, cursor_pos)
+    }
+  }
 
-	fn reset(&mut self) {
-		*self = Self::default();
-	}
+  fn reset(&mut self) {
+    *self = Self::default();
+  }
 
-	fn is_active(&self) -> bool {
-		self.active
-	}
+  fn is_active(&self) -> bool {
+    self.active
+  }
 
-	fn selected_candidate(&self) -> Option<String> {
-		self.candidates.get(self.selected_idx).cloned()
-	}
+  fn selected_candidate(&self) -> Option<String> {
+    self.candidates.get(self.selected_idx).cloned()
+  }
 
-	fn token_span(&self) -> (usize, usize) {
-		self.token_span
-	}
+  fn token_span(&self) -> (usize, usize) {
+    self.token_span
+  }
 
-	fn draw(&mut self, _writer: &mut TermWriter) -> ShResult<()> {
-		Ok(())
-	}
+  fn draw(&mut self, _writer: &mut TermWriter) -> ShResult<()> {
+    Ok(())
+  }
 
-	fn original_input(&self) -> &str {
-		&self.original_input
-	}
+  fn original_input(&self) -> &str {
+    &self.original_input
+  }
 
-	fn handle_key(&mut self, _key: K) -> ShResult<CompResponse> {
-		Ok(CompResponse::Passthrough)
-	}
+  fn handle_key(&mut self, _key: K) -> ShResult<CompResponse> {
+    Ok(CompResponse::Passthrough)
+  }
 }
 
 impl SimpleCompleter {
@@ -1295,16 +1346,17 @@ impl SimpleCompleter {
     let (mut marker_ctx, token_start) = self.get_subtoken_completion(&line, cursor_pos);
 
     if marker_ctx.last() == Some(&markers::VAR_SUB)
-		&& let Some(cur) = ctx.words.get(ctx.cword) {
-			self.token_span.0 = token_start;
-			let mut span = cur.span.clone();
-			span.set_range(token_start..self.token_span.1);
-			let raw_tk = span.as_str();
-			let candidates = complete_vars(raw_tk);
-			if !candidates.is_empty() {
-				return Ok(CompResult::from_candidates(candidates));
-			}
-		}
+      && let Some(cur) = ctx.words.get(ctx.cword)
+    {
+      self.token_span.0 = token_start;
+      let mut span = cur.span.clone();
+      span.set_range(token_start..self.token_span.1);
+      let raw_tk = span.as_str();
+      let candidates = complete_vars(raw_tk);
+      if !candidates.is_empty() {
+        return Ok(CompResult::from_candidates(candidates));
+      }
+    }
 
     // Try programmable completion
     match self.try_comp_spec(&ctx)? {

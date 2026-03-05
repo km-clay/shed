@@ -104,7 +104,9 @@ pub fn zoltraak(node: Node) -> ShResult<()> {
   }
 
   let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() { argv.remove(0); }
+  if !argv.is_empty() {
+    argv.remove(0);
+  }
 
   for (arg, span) in argv {
     if &arg == "/" && !flags.contains(ZoltFlags::NO_PRESERVE_ROOT) {
@@ -113,9 +115,7 @@ pub fn zoltraak(node: Node) -> ShResult<()> {
           ShErrKind::ExecFail,
           "zoltraak: Attempted to destroy root directory '/'",
         )
-        .with_note(
-          "If you really want to do this, you can use the --no-preserve-root flag"
-        ),
+        .with_note("If you really want to do this, you can use the --no-preserve-root flag"),
       );
     }
     annihilate(&arg, flags).blame(span)?
@@ -176,9 +176,7 @@ fn annihilate(path: &str, flags: ZoltFlags) -> ShResult<()> {
           ShErrKind::ExecFail,
           format!("zoltraak: '{path}' is a directory"),
         )
-        .with_note(
-          "Use the '-r' flag to recursively shred directories"
-        ),
+        .with_note("Use the '-r' flag to recursively shred directories"),
       );
     }
   }

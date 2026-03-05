@@ -25,8 +25,8 @@ pub trait TkVecUtils<Tk> {
 }
 
 pub trait AutoCmdVecUtils {
-	fn exec(&self);
-	fn exec_with(&self, pattern: &str);
+  fn exec(&self);
+  fn exec_with(&self, pattern: &str);
 }
 
 pub trait RedirVecUtils<Redir> {
@@ -37,36 +37,44 @@ pub trait RedirVecUtils<Redir> {
 }
 
 pub trait NodeVecUtils<Node> {
-	fn get_span(&self) -> Option<Span>;
+  fn get_span(&self) -> Option<Span>;
 }
 
 impl AutoCmdVecUtils for Vec<AutoCmd> {
-	fn exec(&self) {
-		let saved_status = crate::state::get_status();
-		for cmd in self {
-			let AutoCmd { pattern: _, command } = cmd;
-			if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
-				e.print_error();
-			}
-		}
-		crate::state::set_status(saved_status);
-	}
-	fn exec_with(&self, other_pattern: &str) {
-		let saved_status = crate::state::get_status();
-		for cmd in self {
-			let AutoCmd { pattern, command } = cmd;
-			if let Some(pat) = pattern
-			&& !pat.is_match(other_pattern) {
-				log::trace!("autocmd pattern '{}' did not match '{}', skipping", pat, other_pattern);
-				continue;
-			}
+  fn exec(&self) {
+    let saved_status = crate::state::get_status();
+    for cmd in self {
+      let AutoCmd {
+        pattern: _,
+        command,
+      } = cmd;
+      if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
+        e.print_error();
+      }
+    }
+    crate::state::set_status(saved_status);
+  }
+  fn exec_with(&self, other_pattern: &str) {
+    let saved_status = crate::state::get_status();
+    for cmd in self {
+      let AutoCmd { pattern, command } = cmd;
+      if let Some(pat) = pattern
+        && !pat.is_match(other_pattern)
+      {
+        log::trace!(
+          "autocmd pattern '{}' did not match '{}', skipping",
+          pat,
+          other_pattern
+        );
+        continue;
+      }
 
-			if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
-				e.print_error();
-			}
-		}
-		crate::state::set_status(saved_status);
-	}
+      if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
+        e.print_error();
+      }
+    }
+    crate::state::set_status(saved_status);
+  }
 }
 
 impl<T> VecDequeExt<T> for VecDeque<T> {
@@ -118,9 +126,12 @@ impl CharDequeUtils for VecDeque<char> {
 impl TkVecUtils<Tk> for Vec<Tk> {
   fn get_span(&self) -> Option<Span> {
     if let Some(first_tk) = self.first() {
-      self
-        .last()
-        .map(|last_tk| Span::new(first_tk.span.range().start..last_tk.span.range().end, first_tk.source()))
+      self.last().map(|last_tk| {
+        Span::new(
+          first_tk.span.range().start..last_tk.span.range().end,
+          first_tk.source(),
+        )
+      })
     } else {
       None
     }
@@ -170,13 +181,17 @@ impl RedirVecUtils<Redir> for Vec<Redir> {
 impl NodeVecUtils<Node> for Vec<Node> {
   fn get_span(&self) -> Option<Span> {
     if let Some(first_nd) = self.first()
-		&& let Some(last_nd) = self.last() {
-			let first_start = first_nd.get_span().range().start;
-			let last_end = last_nd.get_span().range().end;
-			if first_start <= last_end {
-				return Some(Span::new(first_start..last_end, first_nd.get_span().source().content()));
-			}
+      && let Some(last_nd) = self.last()
+    {
+      let first_start = first_nd.get_span().range().start;
+      let last_end = last_nd.get_span().range().end;
+      if first_start <= last_end {
+        return Some(Span::new(
+          first_start..last_end,
+          first_nd.get_span().source().content(),
+        ));
+      }
     }
-		None
+    None
   }
 }
