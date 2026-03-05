@@ -16,8 +16,6 @@ pub mod readline;
 pub mod shopt;
 pub mod signal;
 pub mod state;
-#[cfg(test)]
-pub mod tests;
 
 use std::os::fd::BorrowedFd;
 use std::process::ExitCode;
