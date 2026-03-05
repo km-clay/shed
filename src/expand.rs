@@ -1033,7 +1033,7 @@ pub fn unescape_str(raw: &str) -> String {
             '\\' => {
               if let Some(next_ch) = chars.next() {
                 match next_ch {
-                  '"' | '\\' | '`' | '$' => {
+                  '"' | '\\' | '`' | '$' | '!' => {
                     // discard the backslash
                   }
                   _ => {
@@ -2037,7 +2037,7 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
             '\'' => tokens.push(PromptTk::Text("'".into())),
             '(' => tokens.push(PromptTk::VisGroupOpen),
             ')' => tokens.push(PromptTk::VisGroupClose),
-            '!' => {
+            '@' => {
               let mut func_name = String::new();
               let is_braced = chars.peek() == Some(&'{');
               let mut handled = false;
@@ -2056,14 +2056,14 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
                     handled = true;
                     if is_braced {
                       // Invalid character in braced function name
-                      tokens.push(PromptTk::Text(format!("\\!{{{func_name}")));
+                      tokens.push(PromptTk::Text(format!("\\@{{{func_name}")));
                     } else {
                       // End of unbraced function name
                       let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
                       if func_exists {
                         tokens.push(PromptTk::Function(func_name.clone()));
                       } else {
-                        tokens.push(PromptTk::Text(format!("\\!{func_name}")));
+                        tokens.push(PromptTk::Text(format!("\\@{func_name}")));
                       }
                     }
                     break;
@@ -2076,7 +2076,7 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
                 if func_exists {
                   tokens.push(PromptTk::Function(func_name));
                 } else {
-                  tokens.push(PromptTk::Text(format!("\\!{func_name}")));
+                  tokens.push(PromptTk::Text(format!("\\@{func_name}")));
                 }
               }
             }

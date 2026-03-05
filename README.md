@@ -29,16 +29,20 @@ The prompt string supports escape sequences for dynamic content:
 | `\t`, `\T` | Last command runtime (milliseconds / human-readable) |
 | `\s` | Shell name |
 | `\e[...` | ANSI escape sequences for colors and styling |
-| `\!name` | Execute a shell function and embed its output |
+| `\@name` | Execute a shell function and embed its output |
 
-The `\!` escape is particularly useful. It lets you embed the output of any shell function directly in your prompt. Define a function that prints something, then reference it in your prompt string:
+The `\@` escape is particularly useful. It lets you embed the output of any shell function directly in your prompt. Define a function that prints something, then reference it in your prompt string:
 
 ```sh
 gitbranch() { git branch --show-current 2>/dev/null; }
-export PS1='\u@\h \W \!gitbranch \$ '
+export PS1='\u@\h \W \@gitbranch \$ '
 ```
 
 Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, similar to how the `-e` flag expands conventional escape sequences.
+
+### I Can't Believe It's Not `fzf`!
+
+`shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
 
 ### Shell Language
 
