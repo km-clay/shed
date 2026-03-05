@@ -868,13 +868,18 @@ impl Iterator for LexStream {
         self.cursor += 1;
 
         while let Some(ch) = get_char(&self.source, self.cursor) {
-          self.cursor += 1;
+          self.cursor += ch.len_utf8();
           if ch == '\n' {
             break;
           }
         }
 
-        self.get_token(ch_idx..self.cursor, TkRule::Comment)
+        if self.flags.contains(LexFlags::LEX_UNFINISHED) {
+          self.get_token(ch_idx..self.cursor, TkRule::Comment)
+        } else {
+					// After consuming the comment, we call next() recursively. This effectively filters out comment tokens.
+          return self.next();
+        }
       }
       '|' => {
         let ch_idx = self.cursor;

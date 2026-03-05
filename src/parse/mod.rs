@@ -87,6 +87,7 @@ impl ParsedSrc {
         Err(error) => return Err(vec![error]),
       }
     }
+		log::debug!("Tokens: {:#?}", tokens);
 
     let mut errors = vec![];
     let mut nodes = vec![];
@@ -1595,7 +1596,6 @@ impl ParseStream {
             redirs.push(redir);
           }
         }
-        TkRule::Comment => { /* Skip comments in command position */ }
         _ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
       }
     }
