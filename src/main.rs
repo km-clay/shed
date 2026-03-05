@@ -216,7 +216,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       if let Err(e) = check_signals() {
         match e.kind() {
           ShErrKind::ClearReadline => {
-            // Ctrl+C - clear current input and redraw
+            // We got Ctrl+C - clear current input and redraw
             readline.reset_active_widget(false)?;
           }
           ShErrKind::CleanExit(code) => {

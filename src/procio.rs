@@ -1,5 +1,6 @@
 use std::{
   fmt::Debug,
+  iter::Map,
   ops::{Deref, DerefMut},
 };
 
@@ -220,12 +221,6 @@ impl<'e> IoFrame {
       let tgt_fd = io_mode.tgt_fd();
       let src_fd = io_mode.src_fd();
       dup2(src_fd, tgt_fd)?;
-      // Close the original pipe fd after dup2 — it's been duplicated to
-      // tgt_fd and keeping it open prevents SIGPIPE delivery in pipelines.
-      // We replace the IoMode to drop the Arc<OwnedFd>, which closes the fd.
-      if matches!(io_mode, IoMode::Pipe { .. }) {
-        *io_mode = IoMode::Close { tgt_fd };
-      }
     }
     Ok(RedirGuard::new(self))
   }
@@ -336,4 +331,57 @@ impl From<Vec<IoFrame>> for IoStack {
 
 pub fn borrow_fd<'f>(fd: i32) -> BorrowedFd<'f> {
   unsafe { BorrowedFd::borrow_raw(fd) }
+}
+
+pub struct PipeGenerator {
+  num_cmds: usize,
+  cursor: usize,
+  last_rpipe: Option<Redir>,
+}
+
+impl PipeGenerator {
+  pub fn new(num_cmds: usize) -> Self {
+    Self {
+      num_cmds,
+      cursor: 0,
+      last_rpipe: None,
+    }
+  }
+  pub fn as_io_frames(self) -> Map<Self, fn((Option<Redir>, Option<Redir>)) -> IoFrame> {
+    self.map(|(r, w)| {
+      let mut frame = IoFrame::new();
+      if let Some(r) = r {
+        frame.push(r);
+      }
+      if let Some(w) = w {
+        frame.push(w);
+      }
+      frame
+    })
+  }
+}
+
+impl Iterator for PipeGenerator {
+  type Item = (Option<Redir>, Option<Redir>);
+  fn next(&mut self) -> Option<Self::Item> {
+    if self.cursor == self.num_cmds {
+      return None;
+    }
+    if self.cursor + 1 == self.num_cmds {
+      if self.num_cmds == 1 {
+        return None;
+      } else {
+        self.cursor += 1;
+        return Some((self.last_rpipe.take(), None));
+      }
+    }
+    let (r, w) = IoMode::get_pipes();
+    let mut rpipe = Some(Redir::new(r, RedirType::Input));
+    std::mem::swap(&mut self.last_rpipe, &mut rpipe);
+
+    let wpipe = Redir::new(w, RedirType::Output);
+
+    self.cursor += 1;
+    Some((rpipe, Some(wpipe)))
+  }
 }

@@ -87,7 +87,6 @@ impl ParsedSrc {
         Err(error) => return Err(vec![error]),
       }
     }
-    log::debug!("Tokens: {:#?}", tokens);
 
     let mut errors = vec![];
     let mut nodes = vec![];
@@ -214,9 +213,7 @@ impl Node {
           assign_node.walk_tree(f);
         }
       }
-      NdRule::Pipeline {
-        ref mut cmds,
-      } => {
+      NdRule::Pipeline { ref mut cmds } => {
         for cmd_node in cmds {
           cmd_node.walk_tree(f);
         }
@@ -271,7 +268,7 @@ bitflags! {
     const FORK_BUILTINS = 0b000010;
     const NO_FORK = 0b000100;
     const ARR_ASSIGN = 0b001000;
-		const PIPE_ERR = 0b010000;
+    const PIPE_ERR = 0b010000;
   }
 }
 
@@ -642,7 +639,7 @@ pub enum NdRule {
     argv: Vec<Tk>,
   },
   Pipeline {
-    cmds: Vec<Node>
+    cmds: Vec<Node>,
   },
   Conjunction {
     elements: Vec<ConjunctNode>,
@@ -778,16 +775,16 @@ impl ParseStream {
   /// appearing at the bottom The check_pipelines parameter is used to prevent
   /// left-recursion issues in self.parse_pipeln()
   fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
-    try_match!(self.parse_func_def()?);
-    try_match!(self.parse_brc_grp(false /* from_func_def */)?);
-    try_match!(self.parse_case()?);
-    try_match!(self.parse_loop()?);
-    try_match!(self.parse_for()?);
-    try_match!(self.parse_if()?);
-    try_match!(self.parse_test()?);
     if check_pipelines {
       try_match!(self.parse_pipeln()?);
     } else {
+      try_match!(self.parse_func_def()?);
+      try_match!(self.parse_brc_grp(false /* from_func_def */)?);
+      try_match!(self.parse_case()?);
+      try_match!(self.parse_loop()?);
+      try_match!(self.parse_for()?);
+      try_match!(self.parse_if()?);
+      try_match!(self.parse_test()?);
       try_match!(self.parse_cmd()?);
     }
     Ok(None)
@@ -1448,16 +1445,17 @@ impl ParseStream {
     while let Some(mut cmd) = self.parse_block(false)? {
       let is_punctuated = node_is_punctuated(&cmd.tokens);
       node_tks.append(&mut cmd.tokens.clone());
-			if *self.next_tk_class() == TkRule::ErrPipe {
-				cmd.flags |= NdFlags::PIPE_ERR;
-			}
+      if *self.next_tk_class() == TkRule::ErrPipe {
+        cmd.flags |= NdFlags::PIPE_ERR;
+      }
       cmds.push(cmd);
       if *self.next_tk_class() == TkRule::Bg {
         let tk = self.next_tk().unwrap();
         node_tks.push(tk.clone());
         flags |= NdFlags::BACKGROUND;
         break;
-      } else if (!matches!(*self.next_tk_class(),TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated {
+      } else if (!matches!(*self.next_tk_class(), TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated
+      {
         break;
       } else if let Some(pipe) = self.next_tk() {
         node_tks.push(pipe)
@@ -1470,9 +1468,7 @@ impl ParseStream {
     } else {
       Ok(Some(Node {
         // TODO: implement pipe_err support
-        class: NdRule::Pipeline {
-          cmds,
-        },
+        class: NdRule::Pipeline { cmds },
         flags,
         redirs: vec![],
         context: self.context.clone(),
@@ -1555,7 +1551,7 @@ impl ParseStream {
       match tk.class {
         TkRule::EOI
         | TkRule::Pipe
-				| TkRule::ErrPipe
+        | TkRule::ErrPipe
         | TkRule::And
         | TkRule::BraceGrpEnd
         | TkRule::Or
@@ -1867,9 +1863,7 @@ where
         check_node(assign_node, filter, operation);
       }
     }
-    NdRule::Pipeline {
-      ref mut cmds,
-    } => {
+    NdRule::Pipeline { ref mut cmds } => {
       for cmd_node in cmds {
         check_node(cmd_node, filter, operation);
       }

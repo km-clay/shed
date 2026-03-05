@@ -126,7 +126,7 @@ in
           };
         };
       });
-      default = {};
+      default = [];
       description = "Custom keymaps to set when shed starts";
     };
 
