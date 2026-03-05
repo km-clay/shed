@@ -44,6 +44,55 @@ Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, s
 
 `shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
 
+<img width="773" height="505" alt="shed_comp" src="https://github.com/user-attachments/assets/0078ef5a-ba01-479a-831e-96ae5a25b4e3" />
+<img width="773" height="536" alt="shed_search" src="https://github.com/user-attachments/assets/7169dacc-a92b-48f7-bf45-0f14a6d38a10" />
+
+### Keymaps
+
+The `keymap` builtin lets you bind key sequences to actions in any editor mode:
+
+```sh
+keymap -i 'jk' '<Esc>'                           # exit insert mode with jk
+keymap -n '<C-L>' '<CMD>clear<CR>'               # Ctrl+L runs clear in normal mode
+keymap -i '<C-O>' '<CMD>my_function<CR>'         # Ctrl+O runs a shell function
+keymap -n 'ys' '<CMD>function1<CR><CMD>function2<CR>' # Chain two functions together
+keymap -nv '<Leader>y' '"+y'                     # Leader+y yanks to clipboard
+```
+
+Mode flags: `-n` normal, `-i` insert, `-v` visual, `-x` ex, `-o` operator-pending, `-r` replace. Flags can be combined (`-ni` binds in both normal and insert).
+The leader key can be defined using `shopt prompt.leader=<some_key>`.
+
+Keys use vim-style notation: `<C-X>` (Ctrl), `<A-X>` (Alt), `<S-X>` (Shift), `<CR>`, `<Esc>`, `<Tab>`, `<Space>`, `<BS>`, arrow keys, etc. `<CMD>...<CR>` executes a shell command inline.
+
+Use `keymap --remove <keys>` to remove a binding.
+
+Shell commands run via keymaps have read-write access to the line editor state through special variables: `$_BUFFER` (current line contents), `$_CURSOR` (cursor position), `$_ANCHOR` (visual selection anchor), and `$_KEYS` (inject key sequences back into the editor). Modifying these variables from within the command updates the editor when it returns.
+
+### Autocmds
+
+The `autocmd` builtin registers shell commands to run on specific events:
+
+```sh
+autocmd post-change-dir 'echo "now in $PWD"'
+autocmd on-exit 'echo goodbye'
+autocmd pre-cmd -p 'sudo' 'echo "running with sudo"'
+```
+
+Available events:
+
+| Event | When it fires |
+|-------|---------------|
+| `pre-cmd`, `post-cmd` | Before/after command execution |
+| `pre-change-dir`, `post-change-dir` | Before/after `cd` |
+| `pre-prompt`, `post-prompt` | Before/after prompt display |
+| `pre-mode-change`, `post-mode-change` | Before/after vi mode switch |
+| `on-history-open`, `on-history-close`, `on-history-select` | History search UI events |
+| `on-completion-start`, `on-completion-cancel`, `on-completion-select` | Tab completion events |
+| `on-job-finish` | Background job completes |
+| `on-exit` | Shell is exiting |
+
+Use `-p <pattern>` to filter by regex, and `-c` to clear all autocmds for an event. The pattern matched by `-p` changes by context, and not all autocmds have a pattern to match.
+
 ### Shell Language
 
 shed's scripting language contains all of the essentials.
