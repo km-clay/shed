@@ -66,6 +66,57 @@ impl Highlighter {
     out
   }
 
+  pub fn strip_markers_keep_visual(str: &str) -> String {
+    let mut out = String::new();
+    for ch in str.chars() {
+      if ch == markers::VISUAL_MODE_START || ch == markers::VISUAL_MODE_END {
+        out.push(ch); // preserve visual markers
+      } else if !is_marker(ch) {
+        out.push(ch);
+      }
+    }
+    out
+  }
+
+  /// Strip a prefix from a string, skipping over visual markers during matching.
+  /// Visual markers that appear after the prefix are preserved in the result.
+  fn strip_prefix_skip_visual(text: &str, prefix: &str) -> String {
+    let mut chars = text.chars();
+    let mut prefix_chars = prefix.chars().peekable();
+
+    // Walk through text, matching prefix chars while skipping visual markers
+    while prefix_chars.peek().is_some() {
+      match chars.next() {
+        Some(c) if c == markers::VISUAL_MODE_START || c == markers::VISUAL_MODE_END => continue,
+        Some(c) if Some(&c) == prefix_chars.peek() => { prefix_chars.next(); }
+        _ => return text.to_string(), // mismatch, return original
+      }
+    }
+    // Remaining chars (including any visual markers) form the result
+    chars.collect()
+  }
+
+  /// Strip a suffix from a string, skipping over visual markers during matching.
+  fn strip_suffix_skip_visual(text: &str, suffix: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let suffix_chars: Vec<char> = suffix.chars().collect();
+    let mut ti = chars.len();
+    let mut si = suffix_chars.len();
+
+    while si > 0 {
+      if ti == 0 { return text.to_string(); }
+      ti -= 1;
+      if chars[ti] == markers::VISUAL_MODE_START || chars[ti] == markers::VISUAL_MODE_END {
+        continue; // skip visual markers
+      }
+      si -= 1;
+      if chars[ti] != suffix_chars[si] {
+        return text.to_string(); // mismatch
+      }
+    }
+    chars[..ti].iter().collect()
+  }
+
   pub fn expand_control_chars(&mut self) {
     let mut expanded = String::new();
     let mut chars = self.input.chars().peekable();
@@ -157,6 +208,16 @@ impl Highlighter {
             }
             match *ch {
               markers::RESET => break,
+              markers::VISUAL_MODE_START => {
+                self.emit_style(Style::BgWhite | Style::Black);
+                self.in_selection = true;
+                input_chars.next();
+              }
+              markers::VISUAL_MODE_END => {
+                self.reapply_style();
+                self.in_selection = false;
+                input_chars.next();
+              }
               _ => {
                 var_name.push(*ch);
                 input_chars.next();
@@ -229,48 +290,71 @@ impl Highlighter {
             markers::PROC_SUB => markers::PROC_SUB_END,
             _ => unreachable!(),
           };
+          // Save selection state at entry — the collection loop will update
+          // self.in_selection as it encounters visual markers, but the recursive
+          // highlighter needs the state as of the start of the body.
+          let selection_at_entry = self.in_selection;
           while let Some(ch) = input_chars.peek() {
             if *ch == end_marker {
               incomplete = false;
-              input_chars.next(); // consume the end marker
+              input_chars.next();
               break;
+            }
+            if *ch == markers::VISUAL_MODE_START {
+              self.in_selection = true;
+            } else if *ch == markers::VISUAL_MODE_END {
+              self.in_selection = false;
             }
             inner.push(*ch);
             input_chars.next();
           }
 
-          let inner_clean = Self::strip_markers(&inner);
+          // strip_markers_keep_visual preserves VISUAL_MODE_START/END
+          let inner_clean = Self::strip_markers_keep_visual(&inner);
+          // Use stripped version (no visual markers) for prefix/suffix detection
+          let inner_plain = Self::strip_markers(&inner);
 
-          // Determine prefix from content (handles both <( and >( for proc subs)
           let prefix = match ch {
             markers::CMD_SUB => "$(",
             markers::SUBSH => "(",
             markers::PROC_SUB => {
-              if inner_clean.starts_with("<(") {
+              if inner_plain.starts_with("<(") {
                 "<("
-              } else if inner_clean.starts_with(">(") {
+              } else if inner_plain.starts_with(">(") {
                 ">("
               } else {
                 "<("
-              } // fallback
+              }
             }
             _ => unreachable!(),
           };
+
+          // Strip prefix/suffix from the visual-marker-aware version
           let inner_content = if incomplete {
-            inner_clean.strip_prefix(prefix).unwrap_or(&inner_clean)
+            Self::strip_prefix_skip_visual(&inner_clean, prefix)
           } else {
-            inner_clean
-              .strip_prefix(prefix)
-              .and_then(|s| s.strip_suffix(")"))
-              .unwrap_or(&inner_clean)
+            let stripped = Self::strip_prefix_skip_visual(&inner_clean, prefix);
+            Self::strip_suffix_skip_visual(&stripped, ")")
           };
 
           let mut recursive_highlighter = Self::new();
-          recursive_highlighter.load_input(inner_content, self.linebuf_cursor_pos);
+          recursive_highlighter.in_selection = selection_at_entry;
+          if recursive_highlighter.in_selection {
+            recursive_highlighter.emit_style(Style::BgWhite | Style::Black);
+          }
+          recursive_highlighter.load_input(&inner_content, self.linebuf_cursor_pos);
           recursive_highlighter.highlight();
-          self.push_style(Style::Blue);
-          self.output.push_str(prefix);
-          self.pop_style();
+          // Read back visual state — selection may have started/ended inside
+          self.in_selection = recursive_highlighter.in_selection;
+          self.style_stack.append(&mut recursive_highlighter.style_stack);
+          if selection_at_entry {
+            self.emit_style(Style::BgWhite | Style::Black);
+            self.output.push_str(prefix);
+          } else {
+            self.push_style(Style::Blue);
+            self.output.push_str(prefix);
+            self.pop_style();
+          }
           self.output.push_str(&recursive_highlighter.take());
           if !incomplete {
             self.push_style(Style::Blue);
@@ -285,6 +369,16 @@ impl Highlighter {
             if *ch == markers::HIST_EXP_END {
               input_chars.next();
               break;
+            } else if *ch == markers::VISUAL_MODE_START {
+              self.emit_style(Style::BgWhite | Style::Black);
+              self.in_selection = true;
+              input_chars.next();
+              continue;
+            } else if *ch == markers::VISUAL_MODE_END {
+              self.reapply_style();
+              self.in_selection = false;
+              input_chars.next();
+              continue;
             } else if markers::is_marker(*ch) {
               input_chars.next();
               continue;
@@ -302,6 +396,16 @@ impl Highlighter {
             if *ch == markers::VAR_SUB_END {
               input_chars.next(); // consume the end marker
               break;
+            } else if *ch == markers::VISUAL_MODE_START {
+              self.emit_style(Style::BgWhite | Style::Black);
+              self.in_selection = true;
+              input_chars.next();
+              continue;
+            } else if *ch == markers::VISUAL_MODE_END {
+              self.reapply_style();
+              self.in_selection = false;
+              input_chars.next();
+              continue;
             } else if markers::is_marker(*ch) {
               input_chars.next(); // skip the marker
               continue;
@@ -447,10 +551,12 @@ impl Highlighter {
   /// variable.
   pub fn pop_style(&mut self) {
     self.style_stack.pop();
-    if let Some(style) = self.style_stack.last().cloned() {
-      self.emit_style(style);
-    } else {
-      self.emit_reset();
+    if !self.in_selection {
+      if let Some(style) = self.style_stack.last().cloned() {
+        self.emit_style(style);
+      } else {
+        self.emit_reset();
+      }
     }
   }
 
