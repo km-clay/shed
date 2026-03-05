@@ -1,3 +1,7 @@
+# An implementation of the 'nvim-surround' plugin by kylechui
+# that uses shed's keymap system to alter line editor state
+
+
 _get_surround_target() {
 	# get the delimiters to surround our selection with
 	read_key -v _s_ch
