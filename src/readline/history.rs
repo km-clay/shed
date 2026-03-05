@@ -1,10 +1,19 @@
 use std::{
-  cmp::Ordering, collections::HashSet, env, fmt::{Display, Write}, fs::{self, OpenOptions}, io::Write as IoWrite, path::{Path, PathBuf}, str::FromStr, time::{Duration, SystemTime, UNIX_EPOCH}
+  cmp::Ordering,
+  collections::HashSet,
+  env,
+  fmt::{Display, Write},
+  fs::{self, OpenOptions},
+  io::Write as IoWrite,
+  path::{Path, PathBuf},
+  str::FromStr,
+  time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   readline::{complete::FuzzySelector, linebuf::LineBuf},
+  state::read_meta,
 };
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -28,16 +37,13 @@ impl SearchConstraint {
 
 #[derive(Debug, Clone)]
 pub struct HistEntry {
-  id: u32,
+  runtime: Duration,
   timestamp: SystemTime,
   command: String,
   new: bool,
 }
 
 impl HistEntry {
-  pub fn id(&self) -> u32 {
-    self.id
-  }
   pub fn timestamp(&self) -> &SystemTime {
     &self.timestamp
   }
@@ -73,24 +79,25 @@ impl FromStr for HistEntry {
       return err;
     };
     //248972349;148;echo foo; echo bar
-    let Some((timestamp, id_and_command)) = cleaned.split_once(';') else {
+    let Some((timestamp, runtime_and_cmd)) = cleaned.split_once(';') else {
       return err;
     };
     //("248972349","148;echo foo; echo bar")
-    let Some((id, command)) = id_and_command.split_once(';') else {
+    let Some((runtime, command)) = runtime_and_cmd.split_once(';') else {
       return err;
     };
     //("148","echo foo; echo bar")
     let Ok(ts_seconds) = timestamp.parse::<u64>() else {
       return err;
     };
-    let Ok(id) = id.parse::<u32>() else {
+    let Ok(runtime) = runtime.parse::<u64>() else {
       return err;
     };
+    let runtime = Duration::from_secs(runtime);
     let timestamp = UNIX_EPOCH + Duration::from_secs(ts_seconds);
     let command = command.to_string();
     Ok(Self {
-      id,
+      runtime,
       timestamp,
       command,
       new: false,
@@ -103,13 +110,14 @@ impl Display for HistEntry {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let command = self.with_escaped_newlines();
     let HistEntry {
-      id,
+      runtime,
       timestamp,
       command: _,
       new: _,
     } = self;
     let timestamp = timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs();
-    writeln!(f, ": {timestamp};{id};{command}")
+    let runtime = runtime.as_secs();
+    writeln!(f, ": {timestamp};{runtime};{command}")
   }
 }
 
@@ -200,7 +208,7 @@ pub struct History {
   pub pending: Option<LineBuf>, // command, cursor_pos
   entries: Vec<HistEntry>,
   search_mask: Vec<HistEntry>,
-	pub fuzzy_finder: FuzzySelector,
+  pub fuzzy_finder: FuzzySelector,
   no_matches: bool,
   pub cursor: usize,
   //search_direction: Direction,
@@ -223,11 +231,15 @@ impl History {
     }
     let search_mask = dedupe_entries(&entries);
     let cursor = search_mask.len();
-    let max_size = if max_hist < 0 { None } else { Some(max_hist as u32) };
+    let max_size = if max_hist < 0 {
+      None
+    } else {
+      Some(max_hist as u32)
+    };
     Ok(Self {
       path,
       entries,
-			fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
+      fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
       pending: None,
       search_mask,
       no_matches: false,
@@ -238,19 +250,22 @@ impl History {
     })
   }
 
-	pub fn start_search(&mut self, initial: &str) -> Option<String> {
-		if self.search_mask.is_empty() {
-			None
-		} else if self.search_mask.len() == 1 {
-			Some(self.search_mask[0].command().to_string())
-		} else {
-			self.fuzzy_finder.set_query(initial.to_string());
-			let raw_entries = self.search_mask.clone().into_iter()
-				.map(|ent| ent.command().to_string());
-			self.fuzzy_finder.activate(raw_entries.collect());
-			None
-		}
-	}
+  pub fn start_search(&mut self, initial: &str) -> Option<String> {
+    if self.search_mask.is_empty() {
+      None
+    } else if self.search_mask.len() == 1 {
+      Some(self.search_mask[0].command().to_string())
+    } else {
+      self.fuzzy_finder.set_query(initial.to_string());
+      let raw_entries = self
+        .search_mask
+        .clone()
+        .into_iter()
+        .map(|ent| ent.command().to_string());
+      self.fuzzy_finder.activate(raw_entries.collect());
+      None
+    }
+  }
 
   pub fn reset(&mut self) {
     self.search_mask = dedupe_entries(&self.entries);
@@ -301,42 +316,36 @@ impl History {
   pub fn last_mut(&mut self) -> Option<&mut HistEntry> {
     self.entries.last_mut()
   }
-	pub fn last(&self) -> Option<&HistEntry> {
-		self.entries.last()
-	}
+  pub fn last(&self) -> Option<&HistEntry> {
+    self.entries.last()
+  }
 
-	pub fn resolve_hist_token(&self, token: &str) -> Option<String> {
-		let token = token.strip_prefix('!').unwrap_or(token).to_string();
-		if let Ok(num) = token.parse::<i32>() && num != 0 {
-			match num.cmp(&0) {
-				Ordering::Less => {
-					if num.unsigned_abs() > self.entries.len() as u32 {
-						return None;
-					}
+  pub fn resolve_hist_token(&self, token: &str) -> Option<String> {
+    let token = token.strip_prefix('!').unwrap_or(token).to_string();
+    if let Ok(num) = token.parse::<i32>()
+      && num != 0
+    {
+      match num.cmp(&0) {
+        Ordering::Less => {
+          if num.unsigned_abs() > self.entries.len() as u32 {
+            return None;
+          }
 
-					let rev_idx = self.entries.len() - num.unsigned_abs() as usize;
-					self.entries.get(rev_idx)
-						.map(|e| e.command().to_string())
-				}
-				Ordering::Greater => {
-					self.entries.get(num as usize)
-						.map(|e| e.command().to_string())
-				}
-				_ => unreachable!()
-			}
-		} else {
-			let mut rev_search = self.entries.iter();
-			rev_search
-				.rfind(|e| e.command().starts_with(&token))
-				.map(|e| e.command().to_string())
-		}
-	}
-
-  pub fn get_new_id(&self) -> u32 {
-    let Some(ent) = self.entries.last() else {
-      return 0;
-    };
-    ent.id + 1
+          let rev_idx = self.entries.len() - num.unsigned_abs() as usize;
+          self.entries.get(rev_idx).map(|e| e.command().to_string())
+        }
+        Ordering::Greater => self
+          .entries
+          .get(num as usize)
+          .map(|e| e.command().to_string()),
+        _ => unreachable!(),
+      }
+    } else {
+      let mut rev_search = self.entries.iter();
+      rev_search
+        .rfind(|e| e.command().starts_with(&token))
+        .map(|e| e.command().to_string())
+    }
   }
 
   pub fn ignore_dups(&mut self, yn: bool) {
@@ -401,12 +410,12 @@ impl History {
 
   pub fn push(&mut self, command: String) {
     let timestamp = SystemTime::now();
-    let id = self.get_new_id();
+    let runtime = read_meta(|m| m.get_time()).unwrap_or_default();
     if self.ignore_dups && self.is_dup(&command) {
       return;
     }
     self.entries.push(HistEntry {
-      id,
+      runtime,
       timestamp,
       command,
       new: true,

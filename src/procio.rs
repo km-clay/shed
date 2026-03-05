@@ -92,7 +92,7 @@ impl IoMode {
     Ok(self)
   }
   pub fn get_pipes() -> (Self, Self) {
-    let (rpipe, wpipe) = pipe().unwrap();
+    let (rpipe, wpipe) = nix::unistd::pipe2(OFlag::O_CLOEXEC).unwrap();
     (
       Self::Pipe {
         tgt_fd: STDIN_FILENO,
@@ -220,6 +220,12 @@ impl<'e> IoFrame {
       let tgt_fd = io_mode.tgt_fd();
       let src_fd = io_mode.src_fd();
       dup2(src_fd, tgt_fd)?;
+      // Close the original pipe fd after dup2 — it's been duplicated to
+      // tgt_fd and keeping it open prevents SIGPIPE delivery in pipelines.
+      // We replace the IoMode to drop the Arc<OwnedFd>, which closes the fd.
+      if matches!(io_mode, IoMode::Pipe { .. }) {
+        *io_mode = IoMode::Close { tgt_fd };
+      }
     }
     Ok(RedirGuard::new(self))
   }

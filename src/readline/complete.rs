@@ -713,7 +713,7 @@ pub struct FuzzySelector {
   filtered: Vec<ScoredCandidate>,
   candidates: Vec<String>,
   cursor: ClampedUsize,
-	number_candidates: bool,
+  number_candidates: bool,
   old_layout: Option<FuzzyLayout>,
   max_height: usize,
   scroll_offset: usize,
@@ -749,7 +749,7 @@ impl FuzzySelector {
       filtered: vec![],
       candidates: vec![],
       cursor: ClampedUsize::new(0, 0, true),
-			number_candidates: false,
+      number_candidates: false,
       old_layout: None,
       scroll_offset: 0,
       active: false,
@@ -759,12 +759,12 @@ impl FuzzySelector {
     }
   }
 
-	pub fn number_candidates(self, enable: bool) -> Self {
-		Self {
-			number_candidates: enable,
-			..self
-		}
-	}
+  pub fn number_candidates(self, enable: bool) -> Self {
+    Self {
+      number_candidates: enable,
+      ..self
+    }
+  }
 
   pub fn activate(&mut self, candidates: Vec<String>) {
     self.active = true;
@@ -772,11 +772,11 @@ impl FuzzySelector {
     self.score_candidates();
   }
 
-	pub fn set_query(&mut self, query: String) {
-		self.query.linebuf = LineBuf::new().with_initial(&query, query.len());
-		self.query.update_scroll_offset();
-		self.score_candidates();
-	}
+  pub fn set_query(&mut self, query: String) {
+    self.query.linebuf = LineBuf::new().with_initial(&query, query.len());
+    self.query.update_scroll_offset();
+    self.score_candidates();
+  }
 
   pub fn reset(&mut self) {
     self.query.clear();
@@ -812,7 +812,9 @@ impl FuzzySelector {
   }
 
   fn candidate_height(&self, idx: usize) -> usize {
-    self.filtered.get(idx)
+    self
+      .filtered
+      .get(idx)
       .map(|c| c.content.trim_end().lines().count().max(1))
       .unwrap_or(1)
   }
@@ -929,9 +931,15 @@ impl FuzzySelector {
     let num_candidates = format!("\x1b[33m{}\x1b[0m", self.candidates.len());
     let title = self.title.clone();
     let title_width = title.len() as u16;
-		let number_candidates = self.number_candidates;
-		let min_pad = self.candidates.len().to_string().len().saturating_add(1).max(6);
-		let max_height = self.max_height;
+    let number_candidates = self.number_candidates;
+    let min_pad = self
+      .candidates
+      .len()
+      .to_string()
+      .len()
+      .saturating_add(1)
+      .max(6);
+    let max_height = self.max_height;
     let visible = self.get_window();
     let mut rows: u16 = 0;
     let top_bar = format!(
@@ -966,51 +974,63 @@ impl FuzzySelector {
     buf.push_str(&sep_line_final);
     rows += 1;
 
-		let mut lines_drawn = 0;
+    let mut lines_drawn = 0;
     for (i, candidate) in visible.iter().enumerate() {
-			if lines_drawn >= max_height {
-				break;
-			}
+      if lines_drawn >= max_height {
+        break;
+      }
       let selector = if i + offset == cursor_pos {
         Self::SELECTOR_HL
       } else {
         Self::SELECTOR_GRAY
       };
-			let mut drew_number = false;
-			for line in candidate.content.trim_end().lines() {
-				if lines_drawn >= max_height {
-					break;
-				}
-				let mut line = line.trim_end().replace('\t', "    ");
-				let col_lim = if number_candidates{
-					cols.saturating_sub(3 + min_pad as u16)
-				} else {
-					cols.saturating_sub(3)
-				};
-				if calc_str_width(&line) > col_lim {
-					line.truncate(col_lim.saturating_sub(6) as usize);
-					line.push_str("...");
-				}
-				let left = if number_candidates {
-					if !drew_number {
-						let this_num = i + offset + 1;
-						let right_pad = " ".repeat(min_pad.saturating_sub(this_num.to_string().len()));
-						format!("{} {}\x1b[33m{}\x1b[39m{right_pad}{}\x1b[0m",  Self::VERT_LINE, &selector,i + offset + 1, &line)
-					} else {
-						let right_pad = " ".repeat(min_pad);
-						format!("{} {}{}{}\x1b[0m",  Self::VERT_LINE, &selector,right_pad, &line)
-					}
-				} else {
-					format!("{} {}{}\x1b[0m", Self::VERT_LINE, &selector, &line)
-				};
-				let cols_used = calc_str_width(&left);
-				let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
-				let hl_cand_line = format!("{}{}{}", left, right_pad, Self::VERT_LINE);
-				buf.push_str(&hl_cand_line);
-				rows += 1;
-				drew_number = true;
-				lines_drawn += 1;
-			}
+      let mut drew_number = false;
+      for line in candidate.content.trim_end().lines() {
+        if lines_drawn >= max_height {
+          break;
+        }
+        let mut line = line.trim_end().replace('\t', "    ");
+        let col_lim = if number_candidates {
+          cols.saturating_sub(3 + min_pad as u16)
+        } else {
+          cols.saturating_sub(3)
+        };
+        if calc_str_width(&line) > col_lim {
+          line.truncate(col_lim.saturating_sub(6) as usize);
+          line.push_str("...");
+        }
+        let left = if number_candidates {
+          if !drew_number {
+            let this_num = i + offset + 1;
+            let right_pad = " ".repeat(min_pad.saturating_sub(this_num.to_string().len()));
+            format!(
+              "{} {}\x1b[33m{}\x1b[39m{right_pad}{}\x1b[0m",
+              Self::VERT_LINE,
+              &selector,
+              i + offset + 1,
+              &line
+            )
+          } else {
+            let right_pad = " ".repeat(min_pad);
+            format!(
+              "{} {}{}{}\x1b[0m",
+              Self::VERT_LINE,
+              &selector,
+              right_pad,
+              &line
+            )
+          }
+        } else {
+          format!("{} {}{}\x1b[0m", Self::VERT_LINE, &selector, &line)
+        };
+        let cols_used = calc_str_width(&left);
+        let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
+        let hl_cand_line = format!("{}{}{}", left, right_pad, Self::VERT_LINE);
+        buf.push_str(&hl_cand_line);
+        rows += 1;
+        drew_number = true;
+        lines_drawn += 1;
+      }
     }
 
     let bot_bar = format!(
@@ -1100,7 +1120,9 @@ impl Default for FuzzyCompleter {
 
 impl Completer for FuzzyCompleter {
   fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
-    self.selector.set_prompt_line_context(line_width, cursor_col);
+    self
+      .selector
+      .set_prompt_line_context(line_width, cursor_col);
   }
   fn reset_stay_active(&mut self) {
     self.selector.reset_stay_active();

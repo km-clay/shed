@@ -114,10 +114,10 @@ impl KeyEvent {
           "Cannot convert unknown escape sequence to Vim key sequence".to_string(),
         ));
       }
-			KeyCode::ExMode => {
-				seq.push_str("CMD");
-				needs_angle_bracket = true;
-			}
+      KeyCode::ExMode => {
+        seq.push_str("CMD");
+        needs_angle_bracket = true;
+      }
       KeyCode::Backspace => {
         seq.push_str("BS");
         needs_angle_bracket = true;
@@ -227,8 +227,8 @@ pub enum KeyCode {
   Tab,
   Up,
 
-	// weird stuff
-	ExMode, // keycode emitted by the <cmd> byte alias in vim keymaps
+  // weird stuff
+  ExMode, // keycode emitted by the <cmd> byte alias in vim keymaps
 }
 
 bitflags::bitflags! {

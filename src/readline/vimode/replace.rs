@@ -41,15 +41,13 @@ impl ViMode for ViReplace {
           .set_motion(MotionCmd(1, Motion::ForwardChar));
         self.register_and_return()
       }
-			E(K::ExMode, _) => {
-				Some(ViCmd {
-					register: Default::default(),
-					verb: Some(VerbCmd(1, Verb::ExMode)),
-					motion: None,
-					raw_seq: String::new(),
-					flags: Default::default(),
-				})
-			}
+      E(K::ExMode, _) => Some(ViCmd {
+        register: Default::default(),
+        verb: Some(VerbCmd(1, Verb::ExMode)),
+        motion: None,
+        raw_seq: String::new(),
+        flags: Default::default(),
+      }),
       E(K::Char('W'), M::CTRL) => {
         self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
         self.pending_cmd.set_motion(MotionCmd(

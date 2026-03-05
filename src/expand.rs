@@ -1404,7 +1404,6 @@ impl FromStr for ParamExp {
       ))
     };
 
-
     // Handle indirect var expansion: ${!var}
     if let Some(var) = s.strip_prefix('!') {
       if var.ends_with('*') || var.ends_with('@') {
@@ -2374,7 +2373,7 @@ pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
     "RIGHT" => KeyCode::Right,
     "HOME" => KeyCode::Home,
     "END" => KeyCode::End,
-		"CMD" => KeyCode::ExMode,
+    "CMD" => KeyCode::ExMode,
     "PGUP" | "PAGEUP" => KeyCode::PageUp,
     "PGDN" | "PAGEDOWN" => KeyCode::PageDown,
     k if k.len() == 1 => KeyCode::Char(k.chars().next().unwrap()),

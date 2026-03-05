@@ -105,9 +105,9 @@ impl Highlighter {
           self.in_selection = false;
         }
         _ if self.only_hl_visual => {
-					if !is_marker(ch) {
-						self.output.push(ch);
-					}
+          if !is_marker(ch) {
+            self.output.push(ch);
+          }
         }
         markers::STRING_DQ_END
         | markers::STRING_SQ_END

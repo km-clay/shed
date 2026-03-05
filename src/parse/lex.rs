@@ -877,7 +877,7 @@ impl Iterator for LexStream {
         if self.flags.contains(LexFlags::LEX_UNFINISHED) {
           self.get_token(ch_idx..self.cursor, TkRule::Comment)
         } else {
-					// After consuming the comment, we call next() recursively. This effectively filters out comment tokens.
+          // After consuming the comment, we call next() recursively. This effectively filters out comment tokens.
           return self.next();
         }
       }

@@ -37,7 +37,7 @@ use crate::prelude::*;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
-use crate::state::{AutoCmdKind, read_logic, source_rc, write_jobs, write_meta};
+use crate::state::{AutoCmdKind, read_logic, read_shopts, source_rc, write_jobs, write_meta};
 use clap::Parser;
 use state::{read_vars, write_vars};
 
@@ -292,36 +292,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
         let action = km.action_expanded();
         readline.pending_keymap.clear();
         for key in action {
-          if let Some(event) = readline.handle_key(key)? {
-            match event {
-              ReadlineEvent::Line(input) => {
-                let start = Instant::now();
-                write_meta(|m| m.start_timer());
-                if let Err(e) = RawModeGuard::with_cooked_mode(|| {
-                  exec_input(input, None, true, Some("<stdin>".into()))
-                }) {
-                  match e.kind() {
-                    ShErrKind::CleanExit(code) => {
-                      QUIT_CODE.store(*code, Ordering::SeqCst);
-                      return Ok(());
-                    }
-                    _ => e.print_error(),
-                  }
-                }
-                let command_run_time = start.elapsed();
-                log::info!("Command executed in {:.2?}", command_run_time);
-                write_meta(|m| m.stop_timer());
-                readline.fix_column()?;
-                readline.writer.flush_write("\n\r")?;
-                readline.reset(true)?;
-                break;
-              }
-              ReadlineEvent::Eof => {
-                QUIT_CODE.store(0, Ordering::SeqCst);
-                return Ok(());
-              }
-              ReadlineEvent::Pending => {}
-            }
+          let event = readline.handle_key(key).transpose();
+          if let Some(event) = event {
+            handle_readline_event(&mut readline, event)?;
           }
         }
       } else {
@@ -331,36 +304,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
         );
         let buffered = std::mem::take(&mut readline.pending_keymap);
         for key in buffered {
-          if let Some(event) = readline.handle_key(key)? {
-            match event {
-              ReadlineEvent::Line(input) => {
-                let start = Instant::now();
-                write_meta(|m| m.start_timer());
-                if let Err(e) = RawModeGuard::with_cooked_mode(|| {
-                  exec_input(input, None, true, Some("<stdin>".into()))
-                }) {
-                  match e.kind() {
-                    ShErrKind::CleanExit(code) => {
-                      QUIT_CODE.store(*code, Ordering::SeqCst);
-                      return Ok(());
-                    }
-                    _ => e.print_error(),
-                  }
-                }
-                let command_run_time = start.elapsed();
-                log::info!("Command executed in {:.2?}", command_run_time);
-                write_meta(|m| m.stop_timer());
-                readline.fix_column()?;
-                readline.writer.flush_write("\n\r")?;
-                readline.reset(true)?;
-                break;
-              }
-              ReadlineEvent::Eof => {
-                QUIT_CODE.store(0, Ordering::SeqCst);
-                return Ok(());
-              }
-              ReadlineEvent::Pending => {}
-            }
+          let event = readline.handle_key(key).transpose();
+          if let Some(event) = event {
+            handle_readline_event(&mut readline, event)?;
           }
         }
       }
@@ -394,58 +340,76 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
 
     // Process any available input
-    match readline.process_input() {
-      Ok(ReadlineEvent::Line(input)) => {
-        let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
-        let post_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
-
-        pre_exec.exec_with(&input);
-
-        let start = Instant::now();
-        write_meta(|m| m.start_timer());
-        if let Err(e) = RawModeGuard::with_cooked_mode(|| {
-          exec_input(input.clone(), None, true, Some("<stdin>".into()))
-        }) {
-          match e.kind() {
-            ShErrKind::CleanExit(code) => {
-              QUIT_CODE.store(*code, Ordering::SeqCst);
-              return Ok(());
-            }
-            _ => e.print_error(),
-          }
-        }
-        let command_run_time = start.elapsed();
-        log::info!("Command executed in {:.2?}", command_run_time);
-        write_meta(|m| m.stop_timer());
-
-        post_exec.exec_with(&input);
-
-        readline.fix_column()?;
-        readline.writer.flush_write("\n\r")?;
-
-        // Reset for next command with fresh prompt
-        readline.reset(true)?;
-
-        let real_end = start.elapsed();
-        log::info!("Total round trip time: {:.2?}", real_end);
-      }
-      Ok(ReadlineEvent::Eof) => {
-        // Ctrl+D on empty line
-        QUIT_CODE.store(0, Ordering::SeqCst);
-        return Ok(());
-      }
-      Ok(ReadlineEvent::Pending) => {
-        // No complete input yet, keep polling
-      }
-      Err(e) => match e.kind() {
-        ShErrKind::CleanExit(code) => {
-          QUIT_CODE.store(*code, Ordering::SeqCst);
-          return Ok(());
-        }
-        _ => e.print_error(),
-      },
+    let event = readline.process_input();
+    match handle_readline_event(&mut readline, event)? {
+      true => return Ok(()),
+      false => { /* continue looping */ }
     }
   }
 
   Ok(())
+}
+
+fn handle_readline_event(readline: &mut ShedVi, event: ShResult<ReadlineEvent>) -> ShResult<bool> {
+  match event {
+    Ok(ReadlineEvent::Line(input)) => {
+      let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
+      let post_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
+
+      pre_exec.exec_with(&input);
+
+      let start = Instant::now();
+      write_meta(|m| m.start_timer());
+      if let Err(e) = RawModeGuard::with_cooked_mode(|| {
+        exec_input(input.clone(), None, true, Some("<stdin>".into()))
+      }) {
+        match e.kind() {
+          ShErrKind::CleanExit(code) => {
+            QUIT_CODE.store(*code, Ordering::SeqCst);
+            return Ok(true);
+          }
+          _ => e.print_error(),
+        }
+      }
+      let command_run_time = start.elapsed();
+      log::info!("Command executed in {:.2?}", command_run_time);
+      write_meta(|m| m.stop_timer());
+
+      post_exec.exec_with(&input);
+
+      if read_shopts(|s| s.core.auto_hist) && !input.is_empty() {
+        readline.history.push(input.clone());
+        readline.history.save()?;
+      }
+
+      readline.fix_column()?;
+      readline.writer.flush_write("\n\r")?;
+
+      // Reset for next command with fresh prompt
+      readline.reset(true)?;
+
+      let real_end = start.elapsed();
+      log::info!("Total round trip time: {:.2?}", real_end);
+      Ok(false)
+    }
+    Ok(ReadlineEvent::Eof) => {
+      // Ctrl+D on empty line
+      QUIT_CODE.store(0, Ordering::SeqCst);
+      Ok(true)
+    }
+    Ok(ReadlineEvent::Pending) => {
+      // No complete input yet, keep polling
+      Ok(false)
+    }
+    Err(e) => match e.kind() {
+      ShErrKind::CleanExit(code) => {
+        QUIT_CODE.store(*code, Ordering::SeqCst);
+        Ok(true)
+      }
+      _ => {
+        e.print_error();
+        Ok(false)
+      }
+    },
+  }
 }

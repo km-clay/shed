@@ -614,15 +614,15 @@ impl ViMode for ViVisual {
         raw_seq: "".into(),
         flags: CmdFlags::empty(),
       }),
-			E(K::ExMode, _) => {
-				return Some(ViCmd {
-					register: Default::default(),
-					verb: Some(VerbCmd(1, Verb::ExMode)),
-					motion: None,
-					raw_seq: String::new(),
-					flags: Default::default(),
-				});
-			}
+      E(K::ExMode, _) => {
+        return Some(ViCmd {
+          register: Default::default(),
+          verb: Some(VerbCmd(1, Verb::ExMode)),
+          motion: None,
+          raw_seq: String::new(),
+          flags: Default::default(),
+        });
+      }
       E(K::Char('A'), M::CTRL) => {
         let count = self
           .parse_count(&mut self.pending_seq.chars().peekable())

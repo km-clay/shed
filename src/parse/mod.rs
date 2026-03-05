@@ -87,7 +87,7 @@ impl ParsedSrc {
         Err(error) => return Err(vec![error]),
       }
     }
-		log::debug!("Tokens: {:#?}", tokens);
+    log::debug!("Tokens: {:#?}", tokens);
 
     let mut errors = vec![];
     let mut nodes = vec![];
