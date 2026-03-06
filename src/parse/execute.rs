@@ -5,31 +5,11 @@ use std::{
 };
 
 use ariadne::Fmt;
+use nix::sys::resource;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias},
-    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
-    autocmd::autocmd,
-    cd::cd,
-    complete::{compgen_builtin, complete_builtin},
-    dirstack::{dirs, popd, pushd},
-    echo::echo,
-    eval, exec,
-    flowctl::flowctl,
-    getopts::getopts,
-    intro,
-    jobctl::{self, JobBehavior, continue_job, disown, jobs},
-    keymap, map,
-    pwd::pwd,
-    read::{self, read_builtin},
-    shift::shift,
-    shopt::shopt,
-    source::source,
-    test::double_bracket_test,
-    trap::{TrapTarget, trap},
-    varcmds::{export, local, readonly, unset},
-    zoltraak::zoltraak,
+    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::{self, read_builtin}, resource::ulimit, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -130,6 +110,64 @@ impl ExecArgs {
       .map(|v| CString::new(format!("{}={}", v.0, v.1)).unwrap())
       .collect()
   }
+}
+
+/// Execute a `-c` command string, optimizing single simple commands to exec
+/// directly without forking. This avoids process group issues where grandchild
+/// processes (e.g. nvim spawning opencode) lose their controlling terminal.
+pub fn exec_dash_c(input: String) -> ShResult<()> {
+  let log_tab = read_logic(|l| l.clone());
+  let expanded = expand_aliases(input, HashSet::new(), &log_tab);
+  let source_name = "<shed -c>".to_string();
+  let mut parser = ParsedSrc::new(Arc::new(expanded))
+    .with_lex_flags(super::lex::LexFlags::empty())
+    .with_name(source_name.clone());
+  if let Err(errors) = parser.parse_src() {
+    for error in errors {
+      error.print_error();
+    }
+    return Ok(());
+  }
+
+  let mut nodes = parser.extract_nodes();
+
+  // Single simple command: exec directly without forking.
+  // The parser wraps single commands as Conjunction → Pipeline → Command.
+  // Unwrap all layers to check, then set NO_FORK on the inner Command.
+  if nodes.len() == 1 {
+    let is_single_cmd = match &nodes[0].class {
+      NdRule::Command { .. } => true,
+      NdRule::Pipeline { cmds } => cmds.len() == 1 && matches!(cmds[0].class, NdRule::Command { .. }),
+      NdRule::Conjunction { elements } => {
+        elements.len() == 1 && match &elements[0].cmd.class {
+          NdRule::Pipeline { cmds } => cmds.len() == 1 && matches!(cmds[0].class, NdRule::Command { .. }),
+          NdRule::Command { .. } => true,
+          _ => false,
+        }
+      }
+      _ => false,
+    };
+    if is_single_cmd {
+      // Unwrap to the inner Command node
+      let mut node = nodes.remove(0);
+      loop {
+        match node.class {
+          NdRule::Conjunction { mut elements } => { node = *elements.remove(0).cmd; }
+          NdRule::Pipeline { mut cmds } => { node = cmds.remove(0); }
+          NdRule::Command { .. } => break,
+          _ => break,
+        }
+      }
+      node.flags |= NdFlags::NO_FORK;
+      nodes.push(node);
+    }
+  }
+
+  let mut dispatcher = Dispatcher::new(nodes, false, source_name);
+  // exec_cmd expects a job on the stack (normally set up by exec_pipeline).
+  // For the NO_FORK exec-in-place path, create one so it doesn't panic.
+  dispatcher.job_stack.new_job();
+  dispatcher.begin_dispatch()
 }
 
 pub fn exec_input(
@@ -909,6 +947,7 @@ impl Dispatcher {
       "keymap" => keymap::keymap(cmd),
       "read_key" => read::read_key(cmd),
       "autocmd" => autocmd(cmd),
+			"ulimit" => ulimit(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -946,7 +985,6 @@ impl Dispatcher {
     }
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
-
     if argv.is_empty() {
       return Ok(());
     }
@@ -959,36 +997,34 @@ impl Dispatcher {
     let existing_pgid = job.pgid();
 
     let fg_job = self.fg_job;
+    let interactive = self.interactive;
     let child_logic = |pgid: Option<Pid>| -> ! {
-      // Put ourselves in the correct process group before exec.
-      // For the first child in a pipeline pgid is None, so we
-      // become our own group leader (setpgid(0,0)).  For later
-      // children we join the leader's group.
-      let our_pgid = pgid.unwrap_or(Pid::from_raw(0));
-      let _ = setpgid(Pid::from_raw(0), our_pgid);
+      // For non-interactive exec-in-place (e.g. shed -c), skip process group
+      // and terminal setup — just transparently replace the current process.
+      if interactive || !no_fork {
+        // Put ourselves in the correct process group before exec.
+        // For the first child in a pipeline pgid is None, so we
+        // become our own group leader (setpgid(0,0)).  For later
+        // children we join the leader's group.
+        let our_pgid = pgid.unwrap_or(Pid::from_raw(0));
+        let _ = setpgid(Pid::from_raw(0), our_pgid);
 
-      // For foreground jobs, take the terminal BEFORE resetting
-      // signals.  SIGTTOU is still SIG_IGN (inherited from the shell),
-      // so tcsetpgrp won't stop us.  This prevents a race
-      // where the child exec's and tries to read stdin before the
-      // parent has called tcsetpgrp — which would deliver SIGTTIN
-      // (now SIG_DFL after reset_signals) and stop the child.
-      if fg_job {
-        let tty_pgid = if our_pgid == Pid::from_raw(0) {
-          nix::unistd::getpid()
-        } else {
-          our_pgid
-        };
-        let _ = tcsetpgrp(
-          unsafe { BorrowedFd::borrow_raw(*crate::libsh::sys::TTY_FILENO) },
-          tty_pgid,
-        );
+        if fg_job {
+          let tty_pgid = if our_pgid == Pid::from_raw(0) {
+            nix::unistd::getpid()
+          } else {
+            our_pgid
+          };
+          let _ = tcsetpgrp(
+            unsafe { BorrowedFd::borrow_raw(*crate::libsh::sys::TTY_FILENO) },
+            tty_pgid,
+          );
+        }
       }
 
-      // Reset signal dispositions before exec.  SIG_IGN is preserved
-      // across execvpe, so the shell's ignored SIGTTIN/SIGTTOU would
-      // leak into child processes.
-      crate::signal::reset_signals();
+      if interactive || !no_fork {
+        crate::signal::reset_signals(fg_job);
+      }
 
       let cmd = &exec_args.cmd.0;
       let span = exec_args.cmd.1;

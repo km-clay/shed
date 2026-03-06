@@ -30,7 +30,7 @@ use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{self, ShErr, ShErrKind, ShResult};
 use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::utils::AutoCmdVecUtils;
-use crate::parse::execute::exec_input;
+use crate::parse::execute::{exec_dash_c, exec_input};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
@@ -130,7 +130,7 @@ fn main() -> ExitCode {
   if let Err(e) = if let Some(path) = args.script {
     run_script(path, args.script_args)
   } else if let Some(cmd) = args.command {
-    exec_input(cmd, None, false, None)
+    exec_dash_c(cmd)
   } else {
     let res = shed_interactive(args);
 		write(borrow_fd(*TTY_FILENO), b"\x1b[?2004l").ok(); // disable bracketed paste mode on exit

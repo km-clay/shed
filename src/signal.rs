@@ -154,10 +154,10 @@ pub fn sig_setup(is_login: bool) {
   }
 }
 
-/// Reset all signal dispositions to SIG_DFL.
+/// Reset signal dispositions to SIG_DFL.
 /// Called in child processes before exec so that the shell's custom
 /// handlers and SIG_IGN dispositions don't leak into child programs.
-pub fn reset_signals() {
+pub fn reset_signals(is_fg: bool) {
   let default = SigAction::new(SigHandler::SigDfl, SaFlags::empty(), SigSet::empty());
   unsafe {
     for sig in Signal::iterator() {
@@ -165,6 +165,10 @@ pub fn reset_signals() {
       if sig == Signal::SIGKILL || sig == Signal::SIGSTOP {
         continue;
       }
+			if is_fg && (sig == Signal::SIGTTIN || sig == Signal::SIGTTOU) {
+				log::debug!("Not resetting SIGTTIN/SIGTTOU in foreground child");
+				continue;
+			}
       let _ = sigaction(sig, &default);
     }
   }
