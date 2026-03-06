@@ -444,6 +444,8 @@ impl Perform for KeyCollector {
           21 => KeyCode::F(10),
           23 => KeyCode::F(11),
           24 => KeyCode::F(12),
+					200 => KeyCode::BracketedPasteStart,
+					201 => KeyCode::BracketedPasteEnd,
           _ => return,
         };
         KeyEvent(key, mods)
@@ -496,6 +498,8 @@ impl Perform for KeyCollector {
 pub struct PollReader {
   parser: Parser,
   collector: KeyCollector,
+	byte_buf: VecDeque<u8>,
+	pub verbatim: bool,
 }
 
 impl PollReader {
@@ -503,25 +507,32 @@ impl PollReader {
     Self {
       parser: Parser::new(),
       collector: KeyCollector::new(),
+			byte_buf: VecDeque::new(),
+			verbatim: false,
     }
   }
 
-  pub fn feed_bytes(&mut self, bytes: &[u8], verbatim: bool) {
-    if verbatim {
-      let seq = String::from_utf8_lossy(bytes).to_string();
-      self.collector.push(KeyEvent(
-        KeyCode::Verbatim(Arc::from(seq.as_str())),
-        ModKeys::empty(),
-      ));
-    } else if bytes == [b'\x1b'] {
-      // Single escape byte - user pressed ESC key
-      self
-        .collector
-        .push(KeyEvent(KeyCode::Esc, ModKeys::empty()));
-    } else {
-      // Feed all bytes through vte parser
-      self.parser.advance(&mut self.collector, bytes);
-    }
+	pub fn handle_bracket_paste(&mut self) -> Option<KeyEvent> {
+		let end_marker = b"\x1b[201~";
+		let mut raw = vec![];
+		while let Some(byte) = self.byte_buf.pop_front() {
+			raw.push(byte);
+			if raw.ends_with(end_marker) {
+				// Strip the end marker from the raw sequence
+				raw.truncate(raw.len() - end_marker.len());
+				let paste = String::from_utf8_lossy(&raw).to_string();
+				self.verbatim = false;
+				return Some(KeyEvent(KeyCode::Verbatim(paste.into()), ModKeys::empty()));
+			}
+		}
+
+		self.verbatim = true;
+		self.byte_buf.extend(raw);
+		None
+	}
+
+  pub fn feed_bytes(&mut self, bytes: &[u8]) {
+		self.byte_buf.extend(bytes);
   }
 }
 
@@ -533,7 +544,34 @@ impl Default for PollReader {
 
 impl KeyReader for PollReader {
   fn read_key(&mut self) -> Result<Option<KeyEvent>, ShErr> {
-    Ok(self.collector.pop())
+		if self.verbatim {
+			if let Some(paste) = self.handle_bracket_paste() {
+				return Ok(Some(paste));
+			}
+			// If we're in verbatim mode but haven't seen the end marker yet, don't attempt to parse keys
+			return Ok(None);
+		} else if self.byte_buf.len() == 1
+			&& self.byte_buf.front() == Some(&b'\x1b') {
+			// User pressed escape
+			self.byte_buf.pop_front(); // Consume the escape byte
+			return Ok(Some(KeyEvent(KeyCode::Esc, ModKeys::empty())));
+		}
+		while let Some(byte) = self.byte_buf.pop_front() {
+			self.parser.advance(&mut self.collector, &[byte]);
+			if let Some(key) = self.collector.pop() {
+				match key {
+					KeyEvent(KeyCode::BracketedPasteStart, _) => {
+						if let Some(paste) = self.handle_bracket_paste() {
+							return Ok(Some(paste));
+						} else {
+							continue;
+						}
+					}
+					_ => return Ok(Some(key))
+				}
+			}
+		}
+    Ok(None)
   }
 }
 

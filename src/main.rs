@@ -32,6 +32,7 @@ use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::exec_input;
 use crate::prelude::*;
+use crate::procio::borrow_fd;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
@@ -131,7 +132,9 @@ fn main() -> ExitCode {
   } else if let Some(cmd) = args.command {
     exec_input(cmd, None, false, None)
   } else {
-    shed_interactive(args)
+    let res = shed_interactive(args);
+		write(borrow_fd(*TTY_FILENO), b"\x1b[?2004l").ok(); // disable bracketed paste mode on exit
+		res
   } {
     e.print_error();
   };
@@ -200,6 +203,8 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       ));
     }
   };
+
+	readline.writer.flush_write("\x1b[?2004h")?; // enable bracketed paste mode
 
   // Main poll loop
   loop {

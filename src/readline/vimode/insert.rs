@@ -61,6 +61,10 @@ impl ViMode for ViInsert {
         raw_seq: String::new(),
         flags: Default::default(),
       }),
+			E(K::Verbatim(seq), _) => {
+				self.pending_cmd.set_verb(VerbCmd(1, Verb::Insert(seq.to_string())));
+				self.register_and_return()
+			}
       E(K::Char('W'), M::CTRL) => {
         self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
         self.pending_cmd.set_motion(MotionCmd(

@@ -300,8 +300,7 @@ impl ShedVi {
 
   /// Feed raw bytes from stdin into the reader's buffer
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
-    let verbatim = self.mode.report_mode() == ModeReport::Verbatim;
-    self.reader.feed_bytes(bytes, verbatim);
+		self.reader.feed_bytes(bytes);
   }
 
   /// Mark that the display needs to be redrawn (e.g., after SIGWINCH)
@@ -405,6 +404,7 @@ impl ShedVi {
 
     // Process all available keys
     while let Some(key) = self.reader.read_key()? {
+			log::debug!("Read key: {key:?} in mode {:?}, self.reader.verbatim = {}", self.mode.report_mode(), self.reader.verbatim);
       // If completer or history search are active, delegate input to it
       if self.history.fuzzy_finder.is_active() {
         self.print_line(false)?;
@@ -1048,7 +1048,7 @@ impl ShedVi {
 
           Verb::ExMode => Box::new(ViEx::new()),
 
-          Verb::VerbatimMode => Box::new(ViVerbatim::new().with_count(count as u16)),
+          Verb::VerbatimMode => Box::new(ViVerbatim::read_one().with_count(count as u16)),
 
           Verb::NormalMode => Box::new(ViNormal::new()),
 

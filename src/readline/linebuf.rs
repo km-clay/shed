@@ -2184,7 +2184,7 @@ impl LineBuf {
         let Some(pos) = self.find_next_matching_delim() else {
           return MotionKind::Null;
         };
-        MotionKind::On(pos)
+        MotionKind::Onto(pos)
       }
       MotionCmd(_, Motion::ToBrace(direction))
       | MotionCmd(_, Motion::ToBracket(direction))
