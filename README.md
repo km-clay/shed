@@ -16,6 +16,8 @@ A Linux shell written in Rust. The name is a nod to the original Unix utilities 
 - **Real-time syntax highlighting** - commands, keywords, strings, variables, redirections, and operators are colored as you type
 - **Tab completion** - context-aware completion for commands, file paths, and variables
 
+---
+
 ### Prompt
 
 The prompt string supports escape sequences for dynamic content:
@@ -40,6 +42,8 @@ export PS1='\u@\h \W \@gitbranch \$ '
 
 Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, similar to how the `-e` flag expands conventional escape sequences.
 
+---
+
 ### I Can't Believe It's Not `fzf`!
 
 `shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
@@ -47,6 +51,7 @@ Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, s
 <img width="380" height="270" alt="shed_comp" src="https://github.com/user-attachments/assets/d317387e-4c33-406a-817f-1c183afab749" />
 <img width="380" height="270" alt="shed_search" src="https://github.com/user-attachments/assets/5109eb14-5c33-46bb-ab39-33c60ca039a8" />
 
+---
 
 ### Keymaps
 
@@ -68,6 +73,8 @@ Keys use vim-style notation: `<C-X>` (Ctrl), `<A-X>` (Alt), `<S-X>` (Shift), `<C
 Use `keymap --remove <keys>` to remove a binding.
 
 Shell commands run via keymaps have read-write access to the line editor state through special variables: `$_BUFFER` (current line contents), `$_CURSOR` (cursor position), `$_ANCHOR` (visual selection anchor), and `$_KEYS` (inject key sequences back into the editor). Modifying these variables from within the command updates the editor when it returns.
+
+---
 
 ### Autocmds
 
@@ -94,6 +101,8 @@ Available events:
 
 Use `-p <pattern>` to filter by regex, and `-c` to clear all autocmds for an event. The pattern matched by `-p` changes by context, and not all autocmds have a pattern to match.
 
+---
+
 ### Shell Language
 
 shed's scripting language contains all of the essentials.
@@ -113,12 +122,16 @@ shed's scripting language contains all of the essentials.
 - **Subshells** - `(...)` for isolated execution
 - **Variable attributes** - `export`, `local`, `readonly`
 
+---
+
 ### Job Control
 
 - Background execution with `&`
 - Suspend foreground jobs with Ctrl+Z
 - `fg`, `bg`, `jobs`, `disown` with flags (`-l`, `-p`, `-r`, `-s`, `-h`, `-a`)
 - Process group management and proper signal forwarding
+
+---
 
 ### Configuration
 
@@ -133,6 +146,8 @@ shopt core.max_hist=5000        # history size
 ```
 
 The rc file is loaded from `~/.shedrc` on startup.
+
+---
 
 ## Building
 
