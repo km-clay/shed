@@ -4,7 +4,7 @@ use std::{
   fmt::{Debug, Write},
   io::{BufRead, BufReader, Read},
   os::fd::{AsFd, BorrowedFd, RawFd},
-  sync::Arc,
+  sync::Arc, time::Instant,
 };
 
 use nix::{
@@ -822,6 +822,7 @@ impl Default for Layout {
 }
 
 pub struct TermWriter {
+	last_bell: Option<Instant>,
   out: RawFd,
   pub t_cols: Col, // terminal width
   buffer: String,
@@ -831,6 +832,7 @@ impl TermWriter {
   pub fn new(out: RawFd) -> Self {
     let (t_cols, _) = get_win_size(out);
     Self {
+			last_bell: None,
       out,
       t_cols,
       buffer: String::new(),
@@ -1067,10 +1069,24 @@ impl LineWriter for TermWriter {
     Ok(())
   }
 
-  fn send_bell(&mut self) -> ShResult<()> {
-    if read_shopts(|o| o.core.bell_enabled) {
-      self.flush_write("\x07")?;
-    }
-    Ok(())
-  }
+	fn send_bell(&mut self) -> ShResult<()> {
+		if read_shopts(|o| o.core.bell_enabled) {
+			// we use a cooldown because I don't like having my ears assaulted by 1 million bells
+			// whenever i finish clearing the line using backspace.
+			let now = Instant::now();
+
+			// surprisingly, a fixed cooldown like '100' is actually more annoying than 1 million bells.
+			// I've found this range of 50-150 to be the best balance
+			let cooldown = rand::random_range(50..150);
+			let should_send = match self.last_bell {
+				None => true,
+				Some(time) => now.duration_since(time).as_millis() > cooldown,
+			};
+			if should_send {
+				self.flush_write("\x07")?;
+				self.last_bell = Some(now);
+			}
+		}
+		Ok(())
+	}
 }

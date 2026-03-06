@@ -223,9 +223,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
             readline.reset_active_widget(false)?;
           }
           ShErrKind::CleanExit(code) => {
-            QUIT_CODE.store(*code, Ordering::SeqCst);
-            return Ok(());
-          }
+						QUIT_CODE.store(*code, Ordering::SeqCst);
+						return Ok(());
+					}
           _ => e.print_error(),
         }
       }

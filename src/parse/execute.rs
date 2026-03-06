@@ -313,7 +313,7 @@ impl Dispatcher {
     Ok(())
   }
   fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
-    let blame = subsh.get_span().clone();
+		let _blame = subsh.get_span().clone();
     let NdRule::Command { assignments, argv } = subsh.class else {
       unreachable!()
     };
