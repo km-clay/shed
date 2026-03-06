@@ -1,11 +1,5 @@
 use std::{
-  cell::RefCell,
-  collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
-  fmt::Display,
-  ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign},
-  os::unix::fs::PermissionsExt,
-  str::FromStr,
-  time::Duration,
+  cell::RefCell, collections::{HashMap, HashSet, VecDeque, hash_map::Entry}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign}, os::unix::fs::PermissionsExt, str::FromStr, time::Duration
 };
 
 use nix::unistd::{User, gethostname, getppid};
@@ -920,17 +914,45 @@ impl Display for Var {
   }
 }
 
-impl From<String> for Var {
-  fn from(value: String) -> Self {
-    Self::new(VarKind::Str(value), VarFlags::NONE)
-  }
+impl From<Vec<String>> for Var {
+	fn from(value: Vec<String>) -> Self {
+	  Self::new(VarKind::Arr(value.into()), VarFlags::NONE)
+	}
 }
 
-impl From<&str> for Var {
-  fn from(value: &str) -> Self {
-    Self::new(VarKind::Str(value.into()), VarFlags::NONE)
-  }
+impl From<&[String]> for Var {
+	fn from(value: &[String]) -> Self {
+		let mut new = VecDeque::new();
+		new.extend(value.iter().cloned());
+	  Self::new(VarKind::Arr(new), VarFlags::NONE)
+	}
 }
+
+macro_rules! impl_var_from {
+    ($($t:ty),*) => {
+			$(impl From<$t> for Var {
+				fn from(value: $t) -> Self {
+					Self::new(VarKind::Str(value.to_string()), VarFlags::NONE)
+				}
+			})*
+    };
+}
+
+impl_var_from!(
+	i8,
+	i16,
+	i32,
+	i64,
+	isize,
+	u8,
+	u16,
+	u32,
+	u64,
+	usize,
+	String,
+	&str,
+	bool
+);
 
 #[derive(Default, Clone, Debug)]
 pub struct VarTab {

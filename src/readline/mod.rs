@@ -16,8 +16,7 @@ use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::readline::vimode::{ViEx, ViVerbatim};
 use crate::state::{
-  AutoCmdKind, ShellParam, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta,
-  write_vars,
+  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta, write_vars
 };
 use crate::{
   libsh::error::ShResult,
@@ -319,6 +318,10 @@ impl ShedVi {
       self.completer.reset_stay_active();
       self.needs_redraw = true;
       Ok(())
+		} else if self.history.fuzzy_finder.is_active() {
+			self.history.fuzzy_finder.reset_stay_active();
+			self.needs_redraw = true;
+			Ok(())
     } else {
       self.reset(full_redraw)
     }
@@ -646,10 +649,16 @@ impl ShedVi {
         }
         Ok(None) => {
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
+					let candidates = self.completer.all_candidates();
+					let num_candidates = candidates.len();
+					with_vars([
+						("_NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
+						("_MATCHES".into(), Into::<Var>::into(candidates)),
+						("_SEARCH_STR".into(), Into::<Var>::into(self.completer.token())),
+					], || {
+						post_cmds.exec();
+					});
 
-          post_cmds.exec();
-
-          self.writer.send_bell().ok();
           if self.completer.is_active() {
             write_vars(|v| {
               v.set_var(
@@ -662,7 +671,9 @@ impl ShedVi {
             self.prompt.refresh();
             self.needs_redraw = true;
             self.editor.set_hint(None);
-          }
+          } else {
+						self.writer.send_bell().ok();
+					}
         }
       }
 
@@ -673,7 +684,9 @@ impl ShedVi {
       match self.history.start_search(initial) {
         Some(entry) => {
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
-          with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
+          with_vars([
+						("_HIST_ENTRY".into(), entry.clone()),
+					], || {
             post_cmds.exec_with(&entry);
           });
 
@@ -686,9 +699,26 @@ impl ShedVi {
         }
         None => {
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
-          post_cmds.exec();
+					let entries = self.history.fuzzy_finder.candidates();
+					let matches = self.history.fuzzy_finder
+						.filtered()
+						.iter()
+						.cloned()
+						.map(|sc| sc.content)
+						.collect::<Vec<_>>();
 
-          self.writer.send_bell().ok();
+					let num_entries = entries.len();
+					let num_matches = matches.len();
+					with_vars([
+						("_ENTRIES".into(),Into::<Var>::into(entries)),
+						("_NUM_ENTRIES".into(),Into::<Var>::into(num_entries)),
+						("_MATCHES".into(),Into::<Var>::into(matches)),
+						("_NUM_MATCHES".into(),Into::<Var>::into(num_matches)),
+						("_SEARCH_STR".into(), Into::<Var>::into(initial)),
+					], || {
+						post_cmds.exec();
+					});
+
           if self.history.fuzzy_finder.is_active() {
             write_vars(|v| {
               v.set_var(
@@ -701,7 +731,9 @@ impl ShedVi {
             self.prompt.refresh();
             self.needs_redraw = true;
             self.editor.set_hint(None);
-          }
+          } else {
+						self.writer.send_bell().ok();
+					}
         }
       }
     }

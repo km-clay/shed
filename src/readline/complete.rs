@@ -544,9 +544,15 @@ pub trait Completer {
   fn reset(&mut self);
   fn reset_stay_active(&mut self);
   fn is_active(&self) -> bool;
+	fn all_candidates(&self) -> Vec<String> { vec![] }
   fn selected_candidate(&self) -> Option<String>;
   fn token_span(&self) -> (usize, usize);
   fn original_input(&self) -> &str;
+	fn token(&self) -> &str {
+		let orig = self.original_input();
+		let (s,e) = self.token_span();
+		orig.get(s..e).unwrap_or(orig)
+	}
   fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()>;
   fn clear(&mut self, _writer: &mut TermWriter) -> ShResult<()> {
     Ok(())
@@ -558,8 +564,8 @@ pub trait Completer {
 
 #[derive(Default, Debug, Clone)]
 pub struct ScoredCandidate {
-  content: String,
-  score: Option<i32>,
+  pub content: String,
+  pub score: Option<i32>,
 }
 
 impl ScoredCandidate {
@@ -765,6 +771,22 @@ impl FuzzySelector {
       ..self
     }
   }
+
+	pub fn candidates(&self) -> &[String] {
+		&self.candidates
+	}
+
+	pub fn filtered(&self) -> &[ScoredCandidate] {
+		&self.filtered
+	}
+
+	pub fn filtered_len(&self) -> usize {
+		self.filtered.len()
+	}
+
+	pub fn candidates_len(&self) -> usize {
+		self.candidates.len()
+	}
 
   pub fn activate(&mut self, candidates: Vec<String>) {
     self.active = true;
@@ -1119,6 +1141,9 @@ impl Default for FuzzyCompleter {
 }
 
 impl Completer for FuzzyCompleter {
+	fn all_candidates(&self) -> Vec<String> {
+		self.selector.candidates.clone()
+	}
   fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
     self
       .selector
@@ -1209,6 +1234,9 @@ pub struct SimpleCompleter {
 }
 
 impl Completer for SimpleCompleter {
+	fn all_candidates(&self) -> Vec<String> {
+	  self.candidates.clone()
+	}
   fn reset_stay_active(&mut self) {
     let active = self.is_active();
     self.reset();
