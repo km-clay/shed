@@ -341,6 +341,30 @@ pub fn read_key(node: Node) -> ShResult<()> {
   Ok(())
 }
 
+pub fn get_read_key_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
+  let mut read_key_opts = ReadKeyOpts {
+    var_name: None,
+    char_whitelist: None,
+    char_blacklist: None,
+  };
+
+  for opt in opts {
+    match opt {
+      Opt::ShortWithArg('v', var_name) => read_key_opts.var_name = Some(var_name),
+      Opt::ShortWithArg('w', char_whitelist) => read_key_opts.char_whitelist = Some(char_whitelist),
+      Opt::ShortWithArg('b', char_blacklist) => read_key_opts.char_blacklist = Some(char_blacklist),
+      _ => {
+        return Err(ShErr::simple(
+          ShErrKind::ExecFail,
+          format!("read_key: Unexpected flag '{opt}'"),
+        ));
+      }
+    }
+  }
+
+  Ok(read_key_opts)
+}
+
 #[cfg(test)]
 mod tests {
   use crate::state::{self, read_vars, write_vars, VarFlags, VarKind};
@@ -467,28 +491,4 @@ mod tests {
     let flags = get_read_flags(vec![Opt::ShortWithArg('d', ",".into())]).unwrap();
     assert_eq!(flags.delim, b',');
   }
-}
-
-pub fn get_read_key_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
-  let mut read_key_opts = ReadKeyOpts {
-    var_name: None,
-    char_whitelist: None,
-    char_blacklist: None,
-  };
-
-  for opt in opts {
-    match opt {
-      Opt::ShortWithArg('v', var_name) => read_key_opts.var_name = Some(var_name),
-      Opt::ShortWithArg('w', char_whitelist) => read_key_opts.char_whitelist = Some(char_whitelist),
-      Opt::ShortWithArg('b', char_blacklist) => read_key_opts.char_blacklist = Some(char_blacklist),
-      _ => {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("read_key: Unexpected flag '{opt}'"),
-        ));
-      }
-    }
-  }
-
-  Ok(read_key_opts)
 }

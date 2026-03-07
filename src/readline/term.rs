@@ -4,7 +4,7 @@ use std::{
   fmt::{Debug, Write},
   io::{BufRead, BufReader, Read},
   os::fd::{AsFd, BorrowedFd, RawFd},
-  sync::Arc, time::Instant,
+  time::Instant,
 };
 
 use nix::{

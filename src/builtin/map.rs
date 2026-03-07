@@ -368,6 +368,25 @@ pub fn map(node: Node) -> ShResult<()> {
   Ok(())
 }
 
+pub fn get_map_opts(opts: Vec<Opt>) -> MapOpts {
+  let mut map_opts = MapOpts {
+    flags: MapFlags::empty(),
+  };
+
+  for opt in opts {
+    match opt {
+      Opt::Short('r') => map_opts.flags |= MapFlags::REMOVE,
+      Opt::Short('j') => map_opts.flags |= MapFlags::JSON,
+      Opt::Short('k') => map_opts.flags |= MapFlags::KEYS,
+      Opt::Short('l') => map_opts.flags |= MapFlags::LOCAL,
+      Opt::Long(ref s) if s == "pretty" => map_opts.flags |= MapFlags::PRETTY,
+      Opt::Short('F') => map_opts.flags |= MapFlags::FUNC,
+      _ => unreachable!(),
+    }
+  }
+  map_opts
+}
+
 #[cfg(test)]
 mod tests {
   use super::{MapNode, MapFlags, get_map_opts};
@@ -600,23 +619,4 @@ mod tests {
     test_input("map mymap.key=val").unwrap();
     assert_eq!(state::get_status(), 0);
   }
-}
-
-pub fn get_map_opts(opts: Vec<Opt>) -> MapOpts {
-  let mut map_opts = MapOpts {
-    flags: MapFlags::empty(),
-  };
-
-  for opt in opts {
-    match opt {
-      Opt::Short('r') => map_opts.flags |= MapFlags::REMOVE,
-      Opt::Short('j') => map_opts.flags |= MapFlags::JSON,
-      Opt::Short('k') => map_opts.flags |= MapFlags::KEYS,
-      Opt::Short('l') => map_opts.flags |= MapFlags::LOCAL,
-      Opt::Long(ref s) if s == "pretty" => map_opts.flags |= MapFlags::PRETTY,
-      Opt::Short('F') => map_opts.flags |= MapFlags::FUNC,
-      _ => unreachable!(),
-    }
-  }
-  map_opts
 }

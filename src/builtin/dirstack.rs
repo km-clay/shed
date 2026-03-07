@@ -5,7 +5,7 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 use yansi::Color;
 
 use crate::{
-  libsh::{error::{ShErr, ShErrKind, ShResult, next_color}, sys::TTY_FILENO},
+  libsh::error::{ShErr, ShErrKind, ShResult, next_color},
   parse::{NdRule, Node, execute::prepare_argv, lex::Span},
   procio::borrow_fd,
   state::{self, read_meta, write_meta},

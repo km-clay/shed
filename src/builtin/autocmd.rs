@@ -114,7 +114,7 @@ pub fn autocmd(node: Node) -> ShResult<()> {
 
 #[cfg(test)]
 mod tests {
-  use crate::state::{self, AutoCmdKind, read_logic, write_logic};
+  use crate::state::{self, AutoCmdKind, read_logic};
   use crate::testutil::{TestGuard, test_input};
 
   // ===================== Registration =====================
@@ -253,7 +253,7 @@ mod tests {
       "on-exit",
     ];
     for kind in kinds {
-      test_input(&format!("autocmd {kind} 'true'")).unwrap();
+      test_input(format!("autocmd {kind} 'true'")).unwrap();
     }
   }
 

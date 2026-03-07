@@ -1,9 +1,8 @@
 use ariadne::Fmt;
 use nix::sys::resource::{Resource, getrlimit, setrlimit};
-use yansi::Color;
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens, get_opts_from_tokens_strict}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color}, parse::{NdRule, Node, execute::prepare_argv}, prelude::*, state::{self}
+  getopt::{Opt, OptSpec, get_opts_from_tokens_strict}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color}, parse::{NdRule, Node}, state::{self}
 };
 
 fn ulimit_opt_spec() -> [OptSpec;5] {

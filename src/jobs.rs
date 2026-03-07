@@ -6,7 +6,6 @@ use crate::{
   libsh::{
     error::{ShErr, ShErrKind, ShResult},
     sys::TTY_FILENO,
-    term::{Style, Styled},
   },
   prelude::*,
   procio::{IoMode, borrow_fd},

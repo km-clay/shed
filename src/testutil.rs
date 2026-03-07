@@ -41,7 +41,7 @@ pub struct TestGuard {
 	old_cwd: PathBuf,
 	saved_env: HashMap<String, String>,
 	pty_master: OwnedFd,
-	pty_slave: OwnedFd,
+	_pty_slave: OwnedFd,
 
 	cleanups: Vec<Box<dyn FnOnce()>>
 }
@@ -96,7 +96,7 @@ impl TestGuard {
 			old_cwd,
 			saved_env,
 			pty_master,
-			pty_slave,
+			_pty_slave: pty_slave,
 			cleanups: vec![],
 		}
 	}

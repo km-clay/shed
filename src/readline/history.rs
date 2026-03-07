@@ -472,7 +472,7 @@ mod tests {
   use super::*;
   use crate::{state, testutil::TestGuard};
   use scopeguard::guard;
-  use std::{env, fs, path::Path, sync::Mutex};
+  use std::{env, fs, path::Path};
   use tempfile::tempdir;
 
   fn with_env_var(key: &str, val: &str) -> impl Drop {

@@ -333,6 +333,7 @@ pub fn borrow_fd<'f>(fd: i32) -> BorrowedFd<'f> {
   unsafe { BorrowedFd::borrow_raw(fd) }
 }
 
+type PipeFrames = Map<PipeGenerator, fn((Option<Redir>, Option<Redir>)) -> IoFrame>;
 pub struct PipeGenerator {
   num_cmds: usize,
   cursor: usize,
@@ -347,7 +348,7 @@ impl PipeGenerator {
       last_rpipe: None,
     }
   }
-  pub fn as_io_frames(self) -> Map<Self, fn((Option<Redir>, Option<Redir>)) -> IoFrame> {
+  pub fn as_io_frames(self) -> PipeFrames {
     self.map(|(r, w)| {
       let mut frame = IoFrame::new();
       if let Some(r) = r {
