@@ -1,9 +1,9 @@
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	env,
 	os::fd::{AsRawFd, OwnedFd},
 	path::PathBuf,
-	sync::{self, MutexGuard},
+	sync::{self, Arc, MutexGuard},
 };
 
 use nix::{
@@ -14,10 +14,7 @@ use nix::{
 };
 
 use crate::{
-	libsh::error::ShResult,
-	parse::{Redir, RedirType, execute::exec_input},
-	procio::{IoFrame, IoMode, RedirGuard},
-	state::{MetaTab, SHED},
+	expand::expand_aliases, libsh::error::ShResult, parse::{ParsedSrc, Redir, RedirType, execute::exec_input, lex::LexFlags}, procio::{IoFrame, IoMode, RedirGuard}, state::{MetaTab, SHED, read_logic}
 };
 
 static TEST_MUTEX: sync::Mutex<()> = sync::Mutex::new(());
@@ -151,5 +148,97 @@ impl Drop for TestGuard {
 			cleanup();
 		}
 		SHED.with(|s| s.restore());
+	}
+}
+
+pub fn get_ast(input: &str) -> ShResult<Vec<crate::parse::Node>> {
+		let log_tab = read_logic(|l| l.clone());
+		let input = expand_aliases(input.into(), HashSet::new(), &log_tab);
+
+		let source_name = "test_input".to_string();
+		let mut parser = ParsedSrc::new(Arc::new(input))
+			.with_lex_flags(LexFlags::empty())
+			.with_name(source_name.clone());
+
+		parser.parse_src().map_err(|e| e.into_iter().next().unwrap())?;
+
+		Ok(parser.extract_nodes())
+}
+
+impl crate::parse::Node {
+	pub fn assert_structure(&mut self, expected: &mut impl Iterator<Item = NdKind>) -> Result<(), String> {
+		let mut full_structure = vec![];
+		let mut before = vec![];
+		let mut after = vec![];
+		let mut offender = None;
+
+		self.walk_tree(&mut |s| {
+			let expected_rule = expected.next();
+			full_structure.push(s.class.as_nd_kind());
+
+			if offender.is_none() && expected_rule.as_ref().map_or(true, |e| *e != s.class.as_nd_kind()) {
+				offender = Some((s.class.as_nd_kind(), expected_rule));
+			} else if offender.is_none() {
+				before.push(s.class.as_nd_kind());
+			} else {
+				after.push(s.class.as_nd_kind());
+			}
+		});
+
+		assert!(expected.next().is_none(), "Expected structure has more nodes than actual structure");
+
+		if let Some((nd_kind, expected_rule)) = offender {
+			let expected_rule = expected_rule.map_or("(none — expected array too short)".into(), |e| format!("{e:?}"));
+			let full_structure_hint = full_structure.into_iter()
+				.map(|s| format!("\tNdKind::{s:?},"))
+				.collect::<Vec<String>>()
+				.join("\n");
+			let full_structure_hint = format!("let expected = &mut [\n{full_structure_hint}\n].into_iter();");
+
+			let output = [
+				"Structure assertion failed!\n".into(),
+				format!("Expected node type '{:?}', found '{:?}'", expected_rule, nd_kind),
+				format!("Before offender: {:?}", before),
+				format!("After offender: {:?}\n", after),
+				format!("hint: here is the full structure as an array\n {full_structure_hint}"),
+			].join("\n");
+
+			Err(output)
+		} else {
+			Ok(())
+		}
+	}
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum NdKind {
+  IfNode,
+  LoopNode,
+  ForNode,
+  CaseNode,
+  Command,
+  Pipeline,
+  Conjunction,
+  Assignment,
+  BraceGrp,
+  Test,
+  FuncDef,
+}
+
+impl crate::parse::NdRule {
+	pub fn as_nd_kind(&self) -> NdKind {
+		match self {
+			Self::IfNode { .. } => NdKind::IfNode,
+			Self::LoopNode { .. } => NdKind::LoopNode,
+			Self::ForNode { .. } => NdKind::ForNode,
+			Self::CaseNode { .. } => NdKind::CaseNode,
+			Self::Command { .. } => NdKind::Command,
+			Self::Pipeline { .. } => NdKind::Pipeline,
+			Self::Conjunction { .. } => NdKind::Conjunction,
+			Self::Assignment { .. } => NdKind::Assignment,
+			Self::BraceGrp { .. } => NdKind::BraceGrp,
+			Self::Test { .. } => NdKind::Test,
+			Self::FuncDef { .. } => NdKind::FuncDef,
+		}
 	}
 }

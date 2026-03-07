@@ -250,6 +250,7 @@ pub struct LexStream {
   quote_state: QuoteState,
   brc_grp_depth: usize,
   brc_grp_start: Option<usize>,
+  case_depth: usize,
   flags: LexFlags,
 }
 
@@ -271,7 +272,6 @@ bitflags! {
     /// The lexer has no more tokens to produce
     const STALE          = 0b0001000000;
     const EXPECTING_IN   = 0b0010000000;
-    const IN_CASE        = 0b0100000000;
   }
 }
 
@@ -306,6 +306,7 @@ impl LexStream {
       quote_state: QuoteState::default(),
       brc_grp_depth: 0,
       brc_grp_start: None,
+      case_depth: 0,
     }
   }
   /// Returns a slice of the source input using the given range
@@ -453,7 +454,7 @@ impl LexStream {
     let mut chars = slice.chars().peekable();
     let can_be_subshell = chars.peek() == Some(&'(');
 
-    if self.flags.contains(LexFlags::IN_CASE)
+    if self.case_depth > 0
       && let Some(count) = case_pat_lookahead(chars.clone())
     {
       pos += count;
@@ -731,7 +732,7 @@ impl LexStream {
         "case" | "select" | "for" => {
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::EXPECTING_IN;
-          self.flags |= LexFlags::IN_CASE;
+          self.case_depth += 1;
           self.set_next_is_cmd(false);
         }
         "in" if self.flags.contains(LexFlags::EXPECTING_IN) => {
@@ -739,8 +740,8 @@ impl LexStream {
           self.flags &= !LexFlags::EXPECTING_IN;
         }
         _ if is_keyword(text) => {
-          if text == "esac" && self.flags.contains(LexFlags::IN_CASE) {
-            self.flags &= !LexFlags::IN_CASE;
+          if text == "esac" && self.case_depth > 0 {
+            self.case_depth -= 1;
           }
           new_tk.mark(TkFlags::KEYWORD);
         }
