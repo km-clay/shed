@@ -1,8 +1,8 @@
 use ariadne::Fmt;
-use nix::sys::resource::{Resource, getrlimit, setrlimit};
+use nix::{libc::STDOUT_FILENO, sys::{resource::{Resource, getrlimit, setrlimit}, stat::{Mode, umask}}, unistd::write};
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens_strict}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color}, parse::{NdRule, Node}, state::{self}
+  getopt::{Opt, OptSpec, get_opts_from_tokens_strict}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color}, parse::{NdRule, Node}, procio::borrow_fd, state::{self}
 };
 
 fn ulimit_opt_spec() -> [OptSpec;5] {
@@ -167,6 +167,216 @@ pub fn ulimit(node: Node) -> ShResult<()> {
   Ok(())
 }
 
+pub fn umask_builtin(node: Node) -> ShResult<()> {
+	let span = node.get_span();
+	let NdRule::Command {
+		assignments: _,
+		argv,
+	} = node.class else {	unreachable!() };
+
+	let (argv, opts) = get_opts_from_tokens_strict(
+		argv,
+		&[OptSpec { opt: Opt::Short('S'), takes_arg: false }],
+	)?;
+	let argv = &argv[1..]; // skip command name
+
+	let old = umask(Mode::empty());
+	umask(old);
+	let mut old_bits = old.bits();
+
+	if !argv.is_empty() {
+		if argv.len() > 1 {
+			return Err(ShErr::at(
+				ShErrKind::ParseErr,
+				span.clone(),
+				format!("umask takes at most one argument, got {}", argv.len()),
+			));
+		}
+		let arg = argv[0].clone();
+		let raw = arg.as_str();
+		if raw.chars().any(|c| c.is_ascii_digit()) {
+			let mode_raw = u32::from_str_radix(raw, 8).map_err(|_| ShErr::at(
+				ShErrKind::ParseErr,
+				span.clone(),
+				format!("invalid numeric umask: {}", raw.fg(next_color())),
+			))?;
+
+			let mode = Mode::from_bits(mode_raw).ok_or_else(|| ShErr::at(
+				ShErrKind::ParseErr,
+				span.clone(),
+				format!("invalid umask value: {}", raw.fg(next_color())),
+			))?;
+
+			umask(mode);
+		} else {
+			let parts = raw.split(',');
+
+			for part in parts {
+				if let Some((who,bits)) = part.split_once('=') {
+					let mut new_bits = 0;
+					if bits.contains('r') {
+						new_bits |= 4;
+					}
+					if bits.contains('w') {
+						new_bits |= 2;
+					}
+					if bits.contains('x') {
+						new_bits |= 1;
+					}
+
+					for ch in who.chars() {
+						match ch {
+							'o' => {
+								old_bits &= !0o7;
+								old_bits |= !new_bits & 0o7;
+							}
+							'g' => {
+								old_bits &= !(0o7 << 3);
+								old_bits |= (!new_bits & 0o7) << 3;
+							}
+							'u' => {
+								old_bits &= !(0o7 << 6);
+								old_bits |= (!new_bits & 0o7) << 6;
+							}
+							'a' => {
+								let denied = !new_bits & 0o7;
+								old_bits = denied | (denied << 3) | (denied << 6);
+							}
+							_ => {
+								return Err(ShErr::at(
+									ShErrKind::ParseErr,
+									span.clone(),
+									format!("invalid umask 'who' character: {}", ch.fg(next_color())),
+								));
+							}
+						}
+					}
+
+					umask(Mode::from_bits_truncate(old_bits));
+				} else if let Some((who,bits)) = part.split_once('+') {
+					let mut new_bits = 0;
+					if bits.contains('r') {
+						new_bits |= 4;
+					}
+					if bits.contains('w') {
+						new_bits |= 2;
+					}
+					if bits.contains('x') {
+						new_bits |= 1;
+					}
+
+					for ch in who.chars() {
+						match ch {
+							'o' => {
+								old_bits &= !(new_bits & 0o7);
+							}
+							'g' => {
+								old_bits &= !((new_bits & 0o7) << 3);
+							}
+							'u' => {
+								old_bits &= !((new_bits & 0o7) << 6);
+							}
+							'a' => {
+								let mask = new_bits & 0o7;
+								old_bits &= !(mask | (mask << 3) | (mask << 6));
+							}
+							_ => {
+								return Err(ShErr::at(
+									ShErrKind::ParseErr,
+									span.clone(),
+									format!("invalid umask 'who' character: {}", ch.fg(next_color())),
+								));
+							}
+						}
+					}
+
+					umask(Mode::from_bits_truncate(old_bits));
+				} else if let Some((who,bits)) = part.split_once('-') {
+					let mut new_bits = 0;
+					if bits.contains('r') {
+						new_bits |= 4;
+					}
+					if bits.contains('w') {
+						new_bits |= 2;
+					}
+					if bits.contains('x') {
+						new_bits |= 1;
+					}
+
+					for ch in who.chars() {
+						match ch {
+							'o' => {
+								old_bits |= new_bits & 0o7;
+							}
+							'g' => {
+								old_bits |= (new_bits << 3) & (0o7 << 3);
+							}
+							'u' => {
+								old_bits |= (new_bits << 6) & (0o7 << 6);
+							}
+							'a' => {
+								old_bits |= (new_bits | (new_bits << 3) | (new_bits << 6)) & 0o777;
+							}
+							_ => {
+								return Err(ShErr::at(
+									ShErrKind::ParseErr,
+									span.clone(),
+									format!("invalid umask 'who' character: {}", ch.fg(next_color())),
+								));
+							}
+						}
+					}
+
+					umask(Mode::from_bits_truncate(old_bits));
+				} else {
+					return Err(ShErr::at(
+						ShErrKind::ParseErr,
+						span.clone(),
+						format!("invalid symbolic umask part: {}", part.fg(next_color())),
+					));
+				}
+			}
+		}
+
+	} else if !opts.is_empty() {
+		let u = (old_bits >> 6) & 0o7;
+		let g = (old_bits >> 3) & 0o7;
+		let o = old_bits & 0o7;
+		let mut u_str = String::from("u=");
+		let mut g_str = String::from("g=");
+		let mut o_str = String::from("o=");
+		let stuff = [
+			(u, &mut u_str),
+			(g, &mut g_str),
+			(o, &mut o_str),
+		];
+		for (bits, out) in stuff.into_iter() {
+			if bits & 4 == 0 {
+				out.push('r');
+			}
+			if bits & 2 == 0 {
+				out.push('w');
+			}
+			if bits & 1 == 0 {
+				out.push('x');
+			}
+		}
+
+		let msg = [u_str,g_str,o_str].join(",");
+		let stdout = borrow_fd(STDOUT_FILENO);
+		write(stdout, msg.as_bytes())?;
+		write(stdout, b"\n")?;
+	} else {
+		let raw = format!("{:04o}\n", old_bits);
+
+		let stdout = borrow_fd(STDOUT_FILENO);
+		write(stdout, raw.as_bytes())?;
+	}
+
+	state::set_status(0);
+	Ok(())
+}
+
 #[cfg(test)]
 mod tests {
   use super::get_ulimit_opts;
@@ -174,6 +384,7 @@ mod tests {
   use crate::state;
   use crate::testutil::{TestGuard, test_input};
   use nix::sys::resource::{Resource, getrlimit};
+  use nix::sys::stat::{Mode, umask};
 
   // ===================== Pure: option parsing =====================
 
@@ -259,6 +470,146 @@ mod tests {
   fn ulimit_status_zero() {
     let _g = TestGuard::new();
     test_input("ulimit -c 0").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  // ===================== umask =====================
+
+  fn with_umask(mask: u32, f: impl FnOnce()) {
+    let saved = umask(Mode::from_bits_truncate(mask));
+    f();
+    umask(saved);
+  }
+
+  #[test]
+  fn umask_display_octal() {
+    let g = TestGuard::new();
+    with_umask(0o022, || {
+      test_input("umask").unwrap();
+    });
+    assert_eq!(g.read_output(), "0022\n");
+  }
+
+  #[test]
+  fn umask_display_symbolic() {
+    let g = TestGuard::new();
+    with_umask(0o022, || {
+      test_input("umask -S").unwrap();
+    });
+    assert_eq!(g.read_output(), "u=rwx,g=rx,o=rx\n");
+  }
+
+  #[test]
+  fn umask_display_symbolic_all_denied() {
+    let g = TestGuard::new();
+    with_umask(0o777, || {
+      test_input("umask -S").unwrap();
+    });
+    assert_eq!(g.read_output(), "u=,g=,o=\n");
+  }
+
+  #[test]
+  fn umask_display_symbolic_none_denied() {
+    let g = TestGuard::new();
+    with_umask(0o000, || {
+      test_input("umask -S").unwrap();
+    });
+    assert_eq!(g.read_output(), "u=rwx,g=rwx,o=rwx\n");
+  }
+
+  #[test]
+  fn umask_set_octal() {
+    let _g = TestGuard::new();
+    let saved = umask(Mode::from_bits_truncate(0o022));
+    test_input("umask 077").unwrap();
+    let cur = umask(saved);
+    assert_eq!(cur.bits(), 0o077);
+  }
+
+  #[test]
+  fn umask_set_symbolic_equals() {
+    let _g = TestGuard::new();
+    let saved = umask(Mode::from_bits_truncate(0o000));
+    test_input("umask u=rwx,g=rx,o=rx").unwrap();
+    let cur = umask(saved);
+    assert_eq!(cur.bits(), 0o022);
+  }
+
+  #[test]
+  fn umask_set_symbolic_plus() {
+    let _g = TestGuard::new();
+    let saved = umask(Mode::from_bits_truncate(0o077));
+    test_input("umask g+r").unwrap();
+    let cur = umask(saved);
+    // 0o077 with g+r (clear read bit in group) → 0o037
+    assert_eq!(cur.bits(), 0o037);
+  }
+
+  #[test]
+  fn umask_set_symbolic_minus() {
+    let _g = TestGuard::new();
+    let saved = umask(Mode::from_bits_truncate(0o022));
+    test_input("umask o-r").unwrap();
+    let cur = umask(saved);
+    // 0o022 with o-r (set read bit in other) → 0o026
+    assert_eq!(cur.bits(), 0o026);
+  }
+
+  #[test]
+  fn umask_set_symbolic_all() {
+    let _g = TestGuard::new();
+    let saved = umask(Mode::from_bits_truncate(0o000));
+    test_input("umask a=rx").unwrap();
+    let cur = umask(saved);
+    // a=rx → deny w for all → 0o222
+    assert_eq!(cur.bits(), 0o222);
+  }
+
+  #[test]
+  fn umask_set_symbolic_plus_all() {
+    let _g = TestGuard::new();
+    let saved = umask(Mode::from_bits_truncate(0o777));
+    test_input("umask a+rwx").unwrap();
+    let cur = umask(saved);
+    assert_eq!(cur.bits(), 0o000);
+  }
+
+  #[test]
+  fn umask_set_symbolic_minus_all() {
+    let _g = TestGuard::new();
+    let saved = umask(Mode::from_bits_truncate(0o000));
+    test_input("umask a-rwx").unwrap();
+    let cur = umask(saved);
+    assert_eq!(cur.bits(), 0o777);
+  }
+
+  #[test]
+  fn umask_invalid_octal() {
+    let _g = TestGuard::new();
+    let result = test_input("umask 999");
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn umask_too_many_args() {
+    let _g = TestGuard::new();
+    let result = test_input("umask 022 077");
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn umask_invalid_who() {
+    let _g = TestGuard::new();
+    let result = test_input("umask z=rwx");
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn umask_status_zero() {
+    let _g = TestGuard::new();
+    with_umask(0o022, || {
+      test_input("umask").unwrap();
+    });
     assert_eq!(state::get_status(), 0);
   }
 }
