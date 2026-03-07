@@ -466,3 +466,125 @@ impl History {
     Ok(())
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::{state, testutil::TestGuard};
+  use scopeguard::guard;
+  use std::{env, fs, path::Path, sync::Mutex};
+  use tempfile::tempdir;
+
+  fn with_env_var(key: &str, val: &str) -> impl Drop {
+    let prev = env::var(key).ok();
+    unsafe {
+      env::set_var(key, val);
+    }
+    guard(prev, move |p| match p {
+      Some(v) => unsafe {
+        env::set_var(key, v)
+      },
+      None => unsafe {
+        env::remove_var(key)
+      },
+    })
+  }
+
+  /// Temporarily mutate shell options for a test and restore the
+  /// previous values when the returned guard is dropped.
+  fn with_shopts(modifier: impl FnOnce(&mut crate::shopt::ShOpts)) -> impl Drop {
+    let original = state::read_shopts(|s| s.clone());
+    state::write_shopts(|s| modifier(s));
+    guard(original, |orig| {
+      state::write_shopts(|s| *s = orig);
+    })
+  }
+
+  fn write_history_file(path: &Path) {
+    fs::write(
+      path,
+      [
+        ": 1;1;first\n",
+        ": 2;1;second\n",
+        ": 3;1;third\n",
+      ]
+      .concat(),
+    )
+    .unwrap();
+  }
+
+  #[test]
+  fn history_new_respects_max_hist_limit() {
+    let _lock = TestGuard::new();
+    let tmp = tempdir().unwrap();
+    let hist_path = tmp.path().join("history");
+    write_history_file(&hist_path);
+
+    let _env_guard = with_env_var("SHEDHIST", hist_path.to_str().unwrap());
+    let _opts_guard = with_shopts(|s| {
+      s.core.max_hist = 2;
+      s.core.hist_ignore_dupes = true;
+    });
+
+    let history = History::new().unwrap();
+
+    assert_eq!(history.entries.len(), 2);
+    assert_eq!(history.search_mask.len(), 2);
+    assert_eq!(history.cursor, 2);
+    assert_eq!(history.max_size, Some(2));
+    assert!(history.ignore_dups);
+    assert!(history.pending.is_none());
+    assert_eq!(history.entries[0].command(), "second");
+    assert_eq!(history.entries[1].command(), "third");
+  }
+
+  #[test]
+  fn history_new_keeps_all_when_unlimited() {
+    let _lock = TestGuard::new();
+    let tmp = tempdir().unwrap();
+    let hist_path = tmp.path().join("history");
+    write_history_file(&hist_path);
+
+    let _env_guard = with_env_var("SHEDHIST", hist_path.to_str().unwrap());
+    let _opts_guard = with_shopts(|s| {
+      s.core.max_hist = -1;
+      s.core.hist_ignore_dupes = false;
+    });
+
+    let history = History::new().unwrap();
+
+    assert_eq!(history.entries.len(), 3);
+    assert_eq!(history.search_mask.len(), 3);
+    assert_eq!(history.cursor, 3);
+    assert_eq!(history.max_size, None);
+    assert!(!history.ignore_dups);
+  }
+
+  #[test]
+  fn history_new_dedupes_search_mask_to_latest_occurrence() {
+    let _lock = TestGuard::new();
+    let tmp = tempdir().unwrap();
+    let hist_path = tmp.path().join("history");
+    fs::write(
+      &hist_path,
+      [
+        ": 1;1;repeat\n",
+        ": 2;1;unique\n",
+        ": 3;1;repeat\n",
+      ]
+      .concat(),
+    )
+    .unwrap();
+
+    let _env_guard = with_env_var("SHEDHIST", hist_path.to_str().unwrap());
+    let _opts_guard = with_shopts(|s| {
+      s.core.max_hist = 10;
+    });
+
+    let history = History::new().unwrap();
+
+    let masked: Vec<_> = history.search_mask.iter().map(|e| e.command()).collect();
+    assert_eq!(masked, vec!["unique", "repeat"]);
+    assert_eq!(history.cursor, history.search_mask.len());
+  }
+}

@@ -145,6 +145,7 @@ pub struct ShOptCore {
   pub auto_hist: bool,
   pub bell_enabled: bool,
   pub max_recurse_depth: usize,
+  pub xpg_echo: bool,
 }
 
 impl ShOptCore {
@@ -184,6 +185,12 @@ impl ShOptCore {
             "shopt: expected an integer for max_hist value (-1 for unlimited)",
           ));
         };
+				if val < -1 {
+					return Err(ShErr::simple(
+						ShErrKind::SyntaxErr,
+						"shopt: expected a non-negative integer or -1 for max_hist value",
+					));
+				}
         self.max_hist = val;
       }
       "interactive_comments" => {
@@ -221,6 +228,15 @@ impl ShOptCore {
           ));
         };
         self.max_recurse_depth = val;
+      }
+      "xpg_echo" => {
+        let Ok(val) = val.parse::<bool>() else {
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            "shopt: expected 'true' or 'false' for xpg_echo value",
+          ));
+        };
+        self.xpg_echo = val;
       }
       _ => {
         return Err(ShErr::simple(
@@ -283,6 +299,11 @@ impl ShOptCore {
         output.push_str(&format!("{}", self.max_recurse_depth));
         Ok(Some(output))
       }
+      "xpg_echo" => {
+        let mut output = String::from("Whether echo expands escape sequences by default\n");
+        output.push_str(&format!("{}", self.xpg_echo));
+        Ok(Some(output))
+      }
       _ => Err(ShErr::simple(
         ShErrKind::SyntaxErr,
         format!("shopt: Unexpected 'core' option '{query}'"),
@@ -305,6 +326,7 @@ impl Display for ShOptCore {
     output.push(format!("auto_hist = {}", self.auto_hist));
     output.push(format!("bell_enabled = {}", self.bell_enabled));
     output.push(format!("max_recurse_depth = {}", self.max_recurse_depth));
+    output.push(format!("xpg_echo = {}", self.xpg_echo));
 
     let final_output = output.join("\n");
 
@@ -323,6 +345,7 @@ impl Default for ShOptCore {
       auto_hist: true,
       bell_enabled: true,
       max_recurse_depth: 1000,
+      xpg_echo: false,
     }
   }
 }
@@ -515,5 +538,130 @@ impl Default for ShOptPrompt {
       leader: "\\".to_string(),
       line_numbers: true,
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn all_core_fields_covered() {
+      let ShOptCore {
+          dotglob, autocd, hist_ignore_dupes, max_hist,
+          interactive_comments, auto_hist, bell_enabled, max_recurse_depth,
+          xpg_echo,
+      } = ShOptCore::default();
+      // If a field is added to the struct, this destructure fails to compile.
+      let _ = (
+				dotglob,
+				autocd,
+				hist_ignore_dupes,
+				max_hist,
+				interactive_comments,
+				auto_hist,
+				bell_enabled,
+				max_recurse_depth,
+				xpg_echo,
+			);
+  }
+
+  #[test]
+  fn set_and_get_core_bool() {
+    let mut opts = ShOpts::default();
+    assert!(!opts.core.dotglob);
+
+    opts.set("core.dotglob", "true").unwrap();
+    assert!(opts.core.dotglob);
+
+    opts.set("core.dotglob", "false").unwrap();
+    assert!(!opts.core.dotglob);
+  }
+
+  #[test]
+  fn set_and_get_core_int() {
+    let mut opts = ShOpts::default();
+    assert_eq!(opts.core.max_hist, 10_000);
+
+    opts.set("core.max_hist", "500").unwrap();
+    assert_eq!(opts.core.max_hist, 500);
+
+    opts.set("core.max_hist", "-1").unwrap();
+    assert_eq!(opts.core.max_hist, -1);
+
+		assert!(opts.set("core.max_hist", "-500").is_err());
+  }
+
+  #[test]
+  fn set_and_get_prompt_opts() {
+    let mut opts = ShOpts::default();
+
+    opts.set("prompt.edit_mode", "emacs").unwrap();
+    assert!(matches!(opts.prompt.edit_mode, ShedEditMode::Emacs));
+
+    opts.set("prompt.edit_mode", "vi").unwrap();
+    assert!(matches!(opts.prompt.edit_mode, ShedEditMode::Vi));
+
+    opts.set("prompt.comp_limit", "50").unwrap();
+    assert_eq!(opts.prompt.comp_limit, 50);
+
+    opts.set("prompt.leader", "space").unwrap();
+    assert_eq!(opts.prompt.leader, "space");
+  }
+
+  #[test]
+  fn query_set_returns_none() {
+    let mut opts = ShOpts::default();
+    let result = opts.query("core.autocd=true").unwrap();
+    assert!(result.is_none());
+    assert!(opts.core.autocd);
+  }
+
+  #[test]
+  fn query_get_returns_some() {
+    let opts = ShOpts::default();
+    let result = opts.get("core.dotglob").unwrap();
+    assert!(result.is_some());
+    let text = result.unwrap();
+    assert!(text.contains("false"));
+  }
+
+  #[test]
+  fn invalid_category_errors() {
+    let mut opts = ShOpts::default();
+    assert!(opts.set("bogus.dotglob", "true").is_err());
+    assert!(opts.get("bogus.dotglob").is_err());
+  }
+
+  #[test]
+  fn invalid_option_errors() {
+    let mut opts = ShOpts::default();
+    assert!(opts.set("core.nonexistent", "true").is_err());
+    assert!(opts.set("prompt.nonexistent", "true").is_err());
+  }
+
+  #[test]
+  fn invalid_value_errors() {
+    let mut opts = ShOpts::default();
+    assert!(opts.set("core.dotglob", "notabool").is_err());
+    assert!(opts.set("core.max_hist", "notanint").is_err());
+    assert!(opts.set("core.max_recurse_depth", "-5").is_err());
+    assert!(opts.set("prompt.edit_mode", "notepad").is_err());
+    assert!(opts.set("prompt.comp_limit", "abc").is_err());
+  }
+
+  #[test]
+  fn get_category_lists_all() {
+    let opts = ShOpts::default();
+    let core_output = opts.get("core").unwrap().unwrap();
+    assert!(core_output.contains("dotglob"));
+    assert!(core_output.contains("autocd"));
+    assert!(core_output.contains("max_hist"));
+    assert!(core_output.contains("bell_enabled"));
+
+    let prompt_output = opts.get("prompt").unwrap().unwrap();
+    assert!(prompt_output.contains("edit_mode"));
+    assert!(prompt_output.contains("comp_limit"));
+    assert!(prompt_output.contains("highlight"));
   }
 }

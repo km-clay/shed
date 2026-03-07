@@ -141,7 +141,7 @@ fn has_braces(s: &str) -> bool {
       } // skip escaped char
       '\'' => qt_state.toggle_single(),
       '"' => qt_state.toggle_double(),
-      '{' if qt_state.in_quote() => {
+      '{' if qt_state.outside() => {
         if depth == 0 {
           found_open = true;
           has_comma = false;
@@ -638,11 +638,6 @@ pub fn expand_glob(raw: &str) -> ShResult<String> {
     words.push(entry.to_str().unwrap().to_string())
   }
   Ok(words.join(" "))
-}
-
-pub fn is_a_number(raw: &str) -> bool {
-  let trimmed = raw.trim();
-  trimmed.parse::<i32>().is_ok() || trimmed.parse::<f64>().is_ok()
 }
 
 enum ArithTk {
@@ -2381,4 +2376,1200 @@ pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
   };
 
   Some(KeyEvent(key, mods))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::time::Duration;
+  use crate::readline::keys::{KeyCode, KeyEvent, ModKeys};
+  use crate::state::{write_vars, read_vars, ArrIndex, VarKind, VarFlags};
+  use crate::parse::lex::Span;
+  use crate::testutil::{TestGuard, test_input};
+
+  // ===================== has_braces =====================
+
+  #[test]
+  fn has_braces_simple_comma() {
+    assert!(has_braces("{a,b,c}"));
+  }
+
+  #[test]
+  fn has_braces_range() {
+    assert!(has_braces("{1..5}"));
+  }
+
+  #[test]
+  fn has_braces_no_braces() {
+    assert!(!has_braces("hello"));
+  }
+
+  #[test]
+  fn has_braces_single_item() {
+    assert!(!has_braces("{hello}"));
+  }
+
+  #[test]
+  fn has_braces_with_prefix_suffix() {
+    assert!(has_braces("pre{a,b}post"));
+  }
+
+  #[test]
+  fn has_braces_nested() {
+    assert!(has_braces("{a,{b,c}}"));
+  }
+
+  #[test]
+  fn has_braces_quoted_single() {
+    assert!(!has_braces("'{a,b}'"));
+  }
+
+  #[test]
+  fn has_braces_quoted_double() {
+    assert!(!has_braces("\"{a,b}\""));
+  }
+
+  #[test]
+  fn has_braces_escaped() {
+    assert!(!has_braces("\\{a,b\\}"));
+  }
+
+  // ===================== split_brace_inner =====================
+
+  #[test]
+  fn split_inner_simple() {
+    assert_eq!(split_brace_inner("a,b,c"), vec!["a", "b", "c"]);
+  }
+
+  #[test]
+  fn split_inner_nested_braces() {
+    assert_eq!(split_brace_inner("a,{b,c},d"), vec!["a", "{b,c}", "d"]);
+  }
+
+  #[test]
+  fn split_inner_no_comma() {
+    assert_eq!(split_brace_inner("abc"), vec!["abc"]);
+  }
+
+  #[test]
+  fn split_inner_empty_parts() {
+    assert_eq!(split_brace_inner(",a,"), vec!["", "a", ""]);
+  }
+
+  // ===================== try_expand_range / expand_range =====================
+
+  #[test]
+  fn range_numeric() {
+    assert_eq!(
+      try_expand_range("1..5").unwrap(),
+      vec!["1", "2", "3", "4", "5"]
+    );
+  }
+
+  #[test]
+  fn range_alpha() {
+    assert_eq!(
+      try_expand_range("a..e").unwrap(),
+      vec!["a", "b", "c", "d", "e"]
+    );
+  }
+
+  #[test]
+  fn range_with_step() {
+    assert_eq!(
+      try_expand_range("1..10..2").unwrap(),
+      vec!["1", "3", "5", "7", "9"]
+    );
+  }
+
+  #[test]
+  fn range_reverse_numeric() {
+    assert_eq!(
+      try_expand_range("5..1").unwrap(),
+      vec!["5", "4", "3", "2", "1"]
+    );
+  }
+
+  #[test]
+  fn range_reverse_alpha() {
+    assert_eq!(
+      try_expand_range("e..a").unwrap(),
+      vec!["e", "d", "c", "b", "a"]
+    );
+  }
+
+  #[test]
+  fn range_zero_padded() {
+    assert_eq!(
+      try_expand_range("01..05").unwrap(),
+      vec!["01", "02", "03", "04", "05"]
+    );
+  }
+
+  #[test]
+  fn range_invalid() {
+    assert!(try_expand_range("abc").is_none());
+  }
+
+  #[test]
+  fn range_zero_step() {
+    assert!(try_expand_range("1..5..0").is_none());
+  }
+
+  #[test]
+  fn range_single_char() {
+    assert_eq!(expand_range("a", "a", 1).unwrap(), vec!["a"]);
+  }
+
+  // ===================== expand_braces_full =====================
+
+  #[test]
+  fn braces_simple_list() {
+    assert_eq!(
+      expand_braces_full("{a,b,c}").unwrap(),
+      vec!["a", "b", "c"]
+    );
+  }
+
+  #[test]
+  fn braces_with_prefix_suffix() {
+    assert_eq!(
+      expand_braces_full("pre{a,b}post").unwrap(),
+      vec!["preapost", "prebpost"]
+    );
+  }
+
+  #[test]
+  fn braces_nested() {
+    assert_eq!(
+      expand_braces_full("{a,{b,c}}").unwrap(),
+      vec!["a", "b", "c"]
+    );
+  }
+
+  #[test]
+  fn braces_numeric_range() {
+    assert_eq!(
+      expand_braces_full("{1..5}").unwrap(),
+      vec!["1", "2", "3", "4", "5"]
+    );
+  }
+
+  #[test]
+  fn braces_range_with_step() {
+    assert_eq!(
+      expand_braces_full("{1..10..2}").unwrap(),
+      vec!["1", "3", "5", "7", "9"]
+    );
+  }
+
+  #[test]
+  fn braces_alpha_range() {
+    assert_eq!(
+      expand_braces_full("{a..f}").unwrap(),
+      vec!["a", "b", "c", "d", "e", "f"]
+    );
+  }
+
+  #[test]
+  fn braces_reverse_range() {
+    assert_eq!(
+      expand_braces_full("{5..1}").unwrap(),
+      vec!["5", "4", "3", "2", "1"]
+    );
+  }
+
+  #[test]
+  fn braces_reverse_alpha() {
+    assert_eq!(
+      expand_braces_full("{z..v}").unwrap(),
+      vec!["z", "y", "x", "w", "v"]
+    );
+  }
+
+  #[test]
+  fn braces_zero_padded() {
+    assert_eq!(
+      expand_braces_full("{01..05}").unwrap(),
+      vec!["01", "02", "03", "04", "05"]
+    );
+  }
+
+  #[test]
+  fn braces_no_expansion() {
+    assert_eq!(expand_braces_full("hello").unwrap(), vec!["hello"]);
+  }
+
+  #[test]
+  fn braces_multiple_groups() {
+    assert_eq!(
+      expand_braces_full("{a,b}{1,2}").unwrap(),
+      vec!["a1", "a2", "b1", "b2"]
+    );
+  }
+
+  #[test]
+  fn braces_empty_element() {
+    let result = expand_braces_full("pre{,a}post").unwrap();
+    assert_eq!(result, vec!["prepost", "preapost"]);
+  }
+
+	#[test]
+	fn braces_cursed() {
+		let result = expand_braces_full("foo{a,{1,2,3,{1..4},5},c}{5..1}bar").unwrap();
+		assert_eq!(result, vec![ "fooa5bar", "fooa4bar", "fooa3bar", "fooa2bar", "fooa1bar", "foo15bar", "foo14bar", "foo13bar", "foo12bar", "foo11bar", "foo25bar", "foo24bar", "foo23bar", "foo22bar", "foo21bar", "foo35bar", "foo34bar", "foo33bar", "foo32bar", "foo31bar", "foo15bar", "foo14bar", "foo13bar", "foo12bar", "foo11bar", "foo25bar", "foo24bar", "foo23bar", "foo22bar", "foo21bar", "foo35bar", "foo34bar", "foo33bar", "foo32bar", "foo31bar", "foo45bar", "foo44bar", "foo43bar", "foo42bar", "foo41bar", "foo55bar", "foo54bar", "foo53bar", "foo52bar", "foo51bar", "fooc5bar", "fooc4bar", "fooc3bar", "fooc2bar", "fooc1bar", ])
+	}
+
+  // ===================== Arithmetic =====================
+
+  #[test]
+  fn arith_addition() {
+    assert_eq!(expand_arithmetic("(1+2)").unwrap().unwrap(), "3");
+  }
+
+  #[test]
+  fn arith_subtraction() {
+    assert_eq!(expand_arithmetic("(10-3)").unwrap().unwrap(), "7");
+  }
+
+  #[test]
+  fn arith_multiplication() {
+    assert_eq!(expand_arithmetic("(3*4)").unwrap().unwrap(), "12");
+  }
+
+  #[test]
+  fn arith_division() {
+    assert_eq!(expand_arithmetic("(10/2)").unwrap().unwrap(), "5");
+  }
+
+  #[test]
+  fn arith_modulo() {
+    assert_eq!(expand_arithmetic("(10%3)").unwrap().unwrap(), "1");
+  }
+
+  #[test]
+  fn arith_precedence() {
+    assert_eq!(expand_arithmetic("(2+3*4)").unwrap().unwrap(), "14");
+  }
+
+  #[test]
+  fn arith_parens() {
+    assert_eq!(expand_arithmetic("((2+3)*4)").unwrap().unwrap(), "20");
+  }
+
+  #[test]
+  fn arith_nested_parens() {
+    assert_eq!(expand_arithmetic("((1+2)*(3+4))").unwrap().unwrap(), "21");
+  }
+
+  #[test]
+  fn arith_spaces() {
+    assert_eq!(expand_arithmetic("( 1 + 2 )").unwrap().unwrap(), "3");
+  }
+
+  // ===================== glob_to_regex =====================
+
+  #[test]
+  fn glob_star_matches_anything() {
+    let re = glob_to_regex("*", false);
+    assert!(re.is_match("anything"));
+    assert!(re.is_match(""));
+  }
+
+  #[test]
+  fn glob_question_matches_single() {
+    let re = glob_to_regex("?", true);
+    assert!(re.is_match("a"));
+    assert!(!re.is_match("ab"));
+    assert!(!re.is_match(""));
+  }
+
+  #[test]
+  fn glob_star_dot_ext() {
+    let re = glob_to_regex("*.txt", true);
+    assert!(re.is_match("hello.txt"));
+    assert!(re.is_match(".txt"));
+    assert!(!re.is_match("hello.rs"));
+  }
+
+  #[test]
+  fn glob_char_class() {
+    let re = glob_to_regex("[abc]", true);
+    assert!(re.is_match("a"));
+    assert!(re.is_match("b"));
+    assert!(!re.is_match("d"));
+  }
+
+  #[test]
+  fn glob_dot_escaped() {
+    let re = glob_to_regex("foo.bar", true);
+    assert!(re.is_match("foo.bar"));
+    assert!(!re.is_match("fooXbar"));
+  }
+
+  #[test]
+  fn glob_special_chars_escaped() {
+    let re = glob_to_regex("a+b(c)", true);
+    assert!(re.is_match("a+b(c)"));
+    assert!(!re.is_match("ab"));
+  }
+
+  #[test]
+  fn glob_anchored_vs_unanchored() {
+    let anchored = glob_to_regex("hello", true);
+    assert!(anchored.is_match("hello"));
+    assert!(!anchored.is_match("say hello"));
+
+    let unanchored = glob_to_regex("hello", false);
+    assert!(unanchored.is_match("hello"));
+    assert!(unanchored.is_match("say hello world"));
+  }
+
+  // ===================== ParamExp parsing =====================
+
+  #[test]
+  fn param_exp_default_unset_or_null() {
+    let exp: ParamExp = ":-default".parse().unwrap();
+    assert!(matches!(exp, ParamExp::DefaultUnsetOrNull(ref d) if d == "default"));
+  }
+
+  #[test]
+  fn param_exp_default_unset() {
+    let exp: ParamExp = "-fallback".parse().unwrap();
+    assert!(matches!(exp, ParamExp::DefaultUnset(ref d) if d == "fallback"));
+  }
+
+  #[test]
+  fn param_exp_set_default_unset_or_null() {
+    let exp: ParamExp = ":=val".parse().unwrap();
+    assert!(matches!(exp, ParamExp::SetDefaultUnsetOrNull(ref v) if v == "val"));
+  }
+
+  #[test]
+  fn param_exp_set_default_unset() {
+    let exp: ParamExp = "=val".parse().unwrap();
+    assert!(matches!(exp, ParamExp::SetDefaultUnset(ref v) if v == "val"));
+  }
+
+  #[test]
+  fn param_exp_alt_set_not_null() {
+    let exp: ParamExp = ":+alt".parse().unwrap();
+    assert!(matches!(exp, ParamExp::AltSetNotNull(ref a) if a == "alt"));
+  }
+
+  #[test]
+  fn param_exp_alt_not_null() {
+    let exp: ParamExp = "+alt".parse().unwrap();
+    assert!(matches!(exp, ParamExp::AltNotNull(ref a) if a == "alt"));
+  }
+
+  #[test]
+  fn param_exp_err_unset_or_null() {
+    let exp: ParamExp = ":?errmsg".parse().unwrap();
+    assert!(matches!(exp, ParamExp::ErrUnsetOrNull(ref e) if e == "errmsg"));
+  }
+
+  #[test]
+  fn param_exp_err_unset() {
+    let exp: ParamExp = "?errmsg".parse().unwrap();
+    assert!(matches!(exp, ParamExp::ErrUnset(ref e) if e == "errmsg"));
+  }
+
+  #[test]
+  fn param_exp_len() {
+    let exp: ParamExp = "##pattern".parse().unwrap();
+    assert!(matches!(exp, ParamExp::RemLongestPrefix(ref p) if p == "pattern"));
+  }
+
+  #[test]
+  fn param_exp_rem_shortest_prefix() {
+    let exp: ParamExp = "#pat".parse().unwrap();
+    assert!(matches!(exp, ParamExp::RemShortestPrefix(ref p) if p == "pat"));
+  }
+
+  #[test]
+  fn param_exp_rem_longest_prefix() {
+    let exp: ParamExp = "##pat".parse().unwrap();
+    assert!(matches!(exp, ParamExp::RemLongestPrefix(ref p) if p == "pat"));
+  }
+
+  #[test]
+  fn param_exp_rem_shortest_suffix() {
+    let exp: ParamExp = "%pat".parse().unwrap();
+    assert!(matches!(exp, ParamExp::RemShortestSuffix(ref p) if p == "pat"));
+  }
+
+  #[test]
+  fn param_exp_rem_longest_suffix() {
+    let exp: ParamExp = "%%pat".parse().unwrap();
+    assert!(matches!(exp, ParamExp::RemLongestSuffix(ref p) if p == "pat"));
+  }
+
+  #[test]
+  fn param_exp_replace_first() {
+    let exp: ParamExp = "/old/new".parse().unwrap();
+    assert!(matches!(exp, ParamExp::ReplaceFirstMatch(ref s, ref r) if s == "old" && r == "new"));
+  }
+
+  #[test]
+  fn param_exp_replace_all() {
+    let exp: ParamExp = "//old/new".parse().unwrap();
+    assert!(matches!(exp, ParamExp::ReplaceAllMatches(ref s, ref r) if s == "old" && r == "new"));
+  }
+
+  #[test]
+  fn param_exp_replace_prefix() {
+    let exp: ParamExp = "/#old/new".parse().unwrap();
+    assert!(matches!(exp, ParamExp::ReplacePrefix(ref s, ref r) if s == "old" && r == "new"));
+  }
+
+  #[test]
+  fn param_exp_replace_suffix() {
+    let exp: ParamExp = "/%old/new".parse().unwrap();
+    assert!(matches!(exp, ParamExp::ReplaceSuffix(ref s, ref r) if s == "old" && r == "new"));
+  }
+
+  #[test]
+  fn param_exp_indirect() {
+    let exp: ParamExp = "!var".parse().unwrap();
+    assert!(matches!(exp, ParamExp::ExpandInnerVar(ref v) if v == "var"));
+  }
+
+  #[test]
+  fn param_exp_var_names_prefix() {
+    let exp: ParamExp = "!prefix*".parse().unwrap();
+    assert!(matches!(exp, ParamExp::VarNamesWithPrefix(ref p) if p == "prefix*"));
+  }
+
+  #[test]
+  fn param_exp_substr() {
+    let exp: ParamExp = ":2".parse().unwrap();
+    assert!(matches!(exp, ParamExp::Substr(2)));
+  }
+
+  #[test]
+  fn param_exp_substr_len() {
+    let exp: ParamExp = ":1:3".parse().unwrap();
+    assert!(matches!(exp, ParamExp::SubstrLen(1, 3)));
+  }
+
+  // ===================== unescape_str =====================
+
+  #[test]
+  fn unescape_backslash() {
+    let result = unescape_str("hello\\nworld");
+    assert_eq!(result, "hellonworld");
+  }
+
+  #[test]
+  fn unescape_tilde_at_start() {
+    let result = unescape_str("~/foo");
+    assert!(result.starts_with(markers::TILDE_SUB));
+    assert!(result.ends_with("/foo"));
+  }
+
+  #[test]
+  fn unescape_tilde_not_at_start() {
+    let result = unescape_str("a~b");
+    assert!(!result.contains(markers::TILDE_SUB));
+    assert!(result.contains('~'));
+  }
+
+  #[test]
+  fn unescape_dollar_becomes_var_sub() {
+    let result = unescape_str("$foo");
+    assert!(result.starts_with(markers::VAR_SUB));
+    assert!(result.ends_with("foo"));
+  }
+
+  #[test]
+  fn unescape_single_quotes() {
+    let result = unescape_str("'hello'");
+    let expected = format!("{}hello{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
+    assert_eq!(result, expected);
+  }
+
+  #[test]
+  fn unescape_double_quotes() {
+    let result = unescape_str("\"hello\"");
+    let expected = format!("{}hello{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
+    assert_eq!(result, expected);
+  }
+
+  #[test]
+  fn unescape_dollar_single_quote_newline() {
+    let result = unescape_str("$'\\n'");
+    let expected = format!("{}\n{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
+    assert_eq!(result, expected);
+  }
+
+  #[test]
+  fn unescape_dollar_single_quote_tab() {
+    let result = unescape_str("$'\\t'");
+    let expected = format!("{}\t{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
+    assert_eq!(result, expected);
+  }
+
+  #[test]
+  fn unescape_dollar_single_quote_escape() {
+    let result = unescape_str("$'\\e'");
+    let expected = format!("{}\x1b{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
+    assert_eq!(result, expected);
+  }
+
+  #[test]
+  fn unescape_dollar_single_quote_hex() {
+    let result = unescape_str("$'\\x41'");
+    let expected = format!("{}A{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
+    assert_eq!(result, expected);
+  }
+
+  #[test]
+  fn unescape_dollar_single_quote_backslash() {
+    let result = unescape_str("$'\\\\'");
+    let expected = format!("{}\\{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
+    assert_eq!(result, expected);
+  }
+
+  // ===================== tokenize_prompt =====================
+
+  #[test]
+  fn prompt_username() {
+    let tokens = tokenize_prompt("\\u");
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::Username));
+  }
+
+  #[test]
+  fn prompt_hostname() {
+    let tokens = tokenize_prompt("\\h");
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::Hostname));
+  }
+
+  #[test]
+  fn prompt_pwd() {
+    let tokens = tokenize_prompt("\\w");
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::Pwd));
+  }
+
+  #[test]
+  fn prompt_pwd_short() {
+    let tokens = tokenize_prompt("\\W");
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::PwdShort));
+  }
+
+  #[test]
+  fn prompt_symbol() {
+    let tokens = tokenize_prompt("\\$");
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::PromptSymbol));
+  }
+
+  #[test]
+  fn prompt_newline() {
+    let tokens = tokenize_prompt("\\n");
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "\n"));
+  }
+
+  #[test]
+  fn prompt_shell_name() {
+    let tokens = tokenize_prompt("\\s");
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::ShellName));
+  }
+
+  #[test]
+  fn prompt_literal_backslash() {
+    let tokens = tokenize_prompt("\\\\");
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "\\"));
+  }
+
+  #[test]
+  fn prompt_mixed() {
+    let tokens = tokenize_prompt("\\u@\\h \\w\\$ ");
+    // \u, Text("@"), \h, Text(" "), \w, \$, Text(" ")
+    assert_eq!(tokens.len(), 7);
+    assert!(matches!(tokens[0], PromptTk::Username));
+    assert!(matches!(tokens[1], PromptTk::Text(ref t) if t == "@"));
+    assert!(matches!(tokens[2], PromptTk::Hostname));
+    assert!(matches!(tokens[3], PromptTk::Text(ref t) if t == " "));
+    assert!(matches!(tokens[4], PromptTk::Pwd));
+    assert!(matches!(tokens[5], PromptTk::PromptSymbol));
+    assert!(matches!(tokens[6], PromptTk::Text(ref t) if t == " "));
+  }
+
+  #[test]
+  fn prompt_ansi_sequence() {
+    let tokens = tokenize_prompt("\\e[31m");
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::AnsiSeq(ref s) if s == "\x1b[31m"));
+  }
+
+  #[test]
+  fn prompt_octal() {
+    let tokens = tokenize_prompt("\\141"); // 'a' in octal
+    assert_eq!(tokens.len(), 1);
+    assert!(matches!(tokens[0], PromptTk::AsciiOct(97)));
+  }
+
+  // ===================== format_cmd_runtime =====================
+
+  #[test]
+  fn runtime_millis() {
+    let dur = Duration::from_millis(500);
+    assert_eq!(format_cmd_runtime(dur), "500ms");
+  }
+
+  #[test]
+  fn runtime_seconds() {
+    let dur = Duration::from_secs(5);
+    assert_eq!(format_cmd_runtime(dur), "5s");
+  }
+
+  #[test]
+  fn runtime_minutes_and_seconds() {
+    let dur = Duration::from_secs(125);
+    assert_eq!(format_cmd_runtime(dur), "2m 5s");
+  }
+
+  #[test]
+  fn runtime_hours() {
+    let dur = Duration::from_secs(3661);
+    assert_eq!(format_cmd_runtime(dur), "1h 1m 1s");
+  }
+
+  #[test]
+  fn runtime_micros() {
+    let dur = Duration::from_micros(500);
+    assert_eq!(format_cmd_runtime(dur), "500µs");
+  }
+
+  // ===================== parse_key_alias =====================
+
+  #[test]
+  fn key_alias_cr() {
+    let key = parse_key_alias("CR").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Char('\r'), ModKeys::NONE));
+  }
+
+  #[test]
+  fn key_alias_enter() {
+    let key = parse_key_alias("ENTER").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Enter, ModKeys::NONE));
+  }
+
+  #[test]
+  fn key_alias_esc() {
+    let key = parse_key_alias("ESC").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Esc, ModKeys::NONE));
+  }
+
+  #[test]
+  fn key_alias_tab() {
+    let key = parse_key_alias("TAB").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Tab, ModKeys::NONE));
+  }
+
+  #[test]
+  fn key_alias_backspace() {
+    let key = parse_key_alias("BS").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Backspace, ModKeys::NONE));
+  }
+
+  #[test]
+  fn key_alias_space() {
+    let key = parse_key_alias("SPACE").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Char(' '), ModKeys::NONE));
+  }
+
+  #[test]
+  fn key_alias_arrows() {
+    assert_eq!(parse_key_alias("UP").unwrap(), KeyEvent(KeyCode::Up, ModKeys::NONE));
+    assert_eq!(parse_key_alias("DOWN").unwrap(), KeyEvent(KeyCode::Down, ModKeys::NONE));
+    assert_eq!(parse_key_alias("LEFT").unwrap(), KeyEvent(KeyCode::Left, ModKeys::NONE));
+    assert_eq!(parse_key_alias("RIGHT").unwrap(), KeyEvent(KeyCode::Right, ModKeys::NONE));
+  }
+
+  #[test]
+  fn key_alias_ctrl_modifier() {
+    let key = parse_key_alias("C-a").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Char('A'), ModKeys::CTRL));
+  }
+
+  #[test]
+  fn key_alias_ctrl_shift_alt_modifier() {
+    let key = parse_key_alias("C-S-A-b").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Char('B'), ModKeys::CTRL | ModKeys::SHIFT | ModKeys::ALT));
+  }
+
+  #[test]
+  fn key_alias_alt_modifier() {
+    let key = parse_key_alias("M-x").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Char('X'), ModKeys::ALT));
+  }
+
+  #[test]
+  fn key_alias_shift_modifier() {
+    let key = parse_key_alias("S-TAB").unwrap();
+    assert_eq!(key, KeyEvent(KeyCode::Tab, ModKeys::SHIFT));
+  }
+
+  #[test]
+  fn key_alias_invalid() {
+    assert!(parse_key_alias("INVALID_KEY").is_none());
+  }
+
+  // ===================== expand_keymap =====================
+
+  #[test]
+  fn keymap_single_char() {
+    let keys = expand_keymap("a");
+    assert_eq!(keys, vec![KeyEvent(KeyCode::Char('a'), ModKeys::NONE)]);
+  }
+
+  #[test]
+  fn keymap_sequence() {
+    let keys = expand_keymap("abc");
+    assert_eq!(keys.len(), 3);
+    assert_eq!(keys[0], KeyEvent(KeyCode::Char('a'), ModKeys::NONE));
+    assert_eq!(keys[1], KeyEvent(KeyCode::Char('b'), ModKeys::NONE));
+    assert_eq!(keys[2], KeyEvent(KeyCode::Char('c'), ModKeys::NONE));
+  }
+
+  #[test]
+  fn keymap_ctrl_key() {
+    let keys = expand_keymap("<C-a>");
+    assert_eq!(keys, vec![KeyEvent(KeyCode::Char('A'), ModKeys::CTRL)]);
+  }
+
+  #[test]
+  fn keymap_escaped_char() {
+    let keys = expand_keymap("\\<");
+    assert_eq!(keys, vec![KeyEvent(KeyCode::Char('<'), ModKeys::NONE)]);
+  }
+
+  #[test]
+  fn keymap_mixed() {
+    let keys = expand_keymap("a<CR>b");
+    assert_eq!(keys.len(), 3);
+    assert_eq!(keys[0], KeyEvent(KeyCode::Char('a'), ModKeys::NONE));
+    assert_eq!(keys[1], KeyEvent(KeyCode::Char('\r'), ModKeys::NONE));
+    assert_eq!(keys[2], KeyEvent(KeyCode::Char('b'), ModKeys::NONE));
+  }
+
+  // ===================== Variable Expansion (TestGuard) =====================
+
+  #[test]
+  fn var_expansion_basic() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("MYVAR", VarKind::Str("hello".into()), VarFlags::NONE)).unwrap();
+
+    let raw = unescape_str("$MYVAR");
+    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    assert_eq!(result, "hello");
+  }
+
+  #[test]
+  fn var_expansion_braced() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("FOO", VarKind::Str("bar".into()), VarFlags::NONE)).unwrap();
+
+    let raw = unescape_str("${FOO}");
+    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    assert_eq!(result, "bar");
+  }
+
+  #[test]
+  fn var_expansion_unset_empty() {
+    let _guard = TestGuard::new();
+
+    let raw = unescape_str("$NONEXISTENT");
+    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    assert_eq!(result, "");
+  }
+
+  #[test]
+  fn var_expansion_concatenated() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("A", VarKind::Str("hello".into()), VarFlags::NONE)).unwrap();
+    write_vars(|v| v.set_var("B", VarKind::Str("world".into()), VarFlags::NONE)).unwrap();
+
+    let raw = unescape_str("${A}_${B}");
+    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    assert_eq!(result, "hello_world");
+  }
+
+  // ===================== Parameter Expansion (TestGuard) =====================
+
+  #[test]
+  fn param_default_unset_or_null_unset() {
+    let _guard = TestGuard::new();
+    let result = perform_param_expansion("UNSET:-fallback").unwrap();
+    assert_eq!(result, "fallback");
+  }
+
+  #[test]
+  fn param_default_unset_or_null_null() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("EMPTY", VarKind::Str("".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("EMPTY:-fallback").unwrap();
+    assert_eq!(result, "fallback");
+  }
+
+  #[test]
+  fn param_default_unset_or_null_set() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("SET", VarKind::Str("value".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("SET:-fallback").unwrap();
+    assert_eq!(result, "value");
+  }
+
+  #[test]
+  fn param_default_unset_only() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("EMPTY", VarKind::Str("".into()), VarFlags::NONE)).unwrap();
+
+    // ${EMPTY-fallback} — EMPTY is set (even if null), so returns null
+    let result = perform_param_expansion("EMPTY-fallback").unwrap();
+    assert_eq!(result, "");
+  }
+
+  #[test]
+  fn param_alt_set_not_null() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("SET", VarKind::Str("value".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("SET:+alt").unwrap();
+    assert_eq!(result, "alt");
+  }
+
+  #[test]
+  fn param_alt_unset() {
+    let _guard = TestGuard::new();
+
+    let result = perform_param_expansion("UNSET:+alt").unwrap();
+    assert_eq!(result, "");
+  }
+
+  #[test]
+  fn param_err_unset() {
+    let _guard = TestGuard::new();
+
+    let result = perform_param_expansion("UNSET:?variable not set");
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn param_length() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("STR", VarKind::Str("hello".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("#STR").unwrap();
+    assert_eq!(result, "5");
+  }
+
+  #[test]
+  fn param_substr() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("STR", VarKind::Str("hello world".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("STR:6").unwrap();
+    assert_eq!(result, "world");
+  }
+
+  #[test]
+  fn param_substr_len() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("STR", VarKind::Str("hello world".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("STR:0:5").unwrap();
+    assert_eq!(result, "hello");
+  }
+
+  #[test]
+  fn param_remove_shortest_prefix() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("PATH", VarKind::Str("/usr/local/bin".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("PATH#*/").unwrap();
+    assert_eq!(result, "usr/local/bin");
+  }
+
+  #[test]
+  fn param_remove_longest_prefix() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("PATH", VarKind::Str("/usr/local/bin".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("PATH##*/").unwrap();
+    assert_eq!(result, "bin");
+  }
+
+  #[test]
+  fn param_remove_shortest_suffix() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("FILE", VarKind::Str("file.tar.gz".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("FILE%.*").unwrap();
+    assert_eq!(result, "file.tar");
+  }
+
+  #[test]
+  fn param_remove_longest_suffix() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("FILE", VarKind::Str("file.tar.gz".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("FILE%%.*").unwrap();
+    assert_eq!(result, "file");
+  }
+
+  #[test]
+  fn param_replace_first() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("STR", VarKind::Str("hello hello".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("STR/hello/world").unwrap();
+    assert_eq!(result, "world hello");
+  }
+
+  #[test]
+  fn param_replace_all() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("STR", VarKind::Str("hello hello".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("STR//hello/world").unwrap();
+    assert_eq!(result, "world world");
+  }
+
+  #[test]
+  fn param_indirect() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("REF", VarKind::Str("TARGET".into()), VarFlags::NONE)).unwrap();
+    write_vars(|v| v.set_var("TARGET", VarKind::Str("value".into()), VarFlags::NONE)).unwrap();
+
+    let result = perform_param_expansion("!REF").unwrap();
+    assert_eq!(result, "value");
+  }
+
+  #[test]
+  fn param_set_default_assigns() {
+    let _guard = TestGuard::new();
+
+    let result = perform_param_expansion("NEWVAR:=assigned").unwrap();
+    assert_eq!(result, "assigned");
+
+    // Verify it was actually set
+    let val = read_vars(|v| v.get_var("NEWVAR"));
+    assert_eq!(val, "assigned");
+  }
+
+  // ===================== Command Substitution (TestGuard) =====================
+
+  #[test]
+  fn cmd_sub_echo() {
+    let _guard = TestGuard::new();
+    let result = expand_cmd_sub("echo hello").unwrap();
+    assert_eq!(result, "hello");
+  }
+
+  #[test]
+  fn cmd_sub_trailing_newlines_stripped() {
+    let _guard = TestGuard::new();
+    let result = expand_cmd_sub("printf 'hello\\n\\n'").unwrap();
+    assert_eq!(result, "hello");
+  }
+
+  #[test]
+  fn cmd_sub_arithmetic() {
+    let result = expand_cmd_sub("(1+2)").unwrap();
+    assert_eq!(result, "3");
+  }
+
+  // ===================== Tilde Expansion (TestGuard) =====================
+
+  #[test]
+  fn tilde_expansion_home() {
+    let _guard = TestGuard::new();
+    let home = std::env::var("HOME").unwrap();
+
+    let raw = unescape_str("~/foo");
+    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    assert_eq!(result, format!("{}/foo", home));
+  }
+
+  #[test]
+  fn tilde_expansion_bare() {
+    let _guard = TestGuard::new();
+    let home = std::env::var("HOME").unwrap();
+
+    let raw = unescape_str("~");
+    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    assert_eq!(result, home);
+  }
+
+  // ===================== Word Splitting (TestGuard) =====================
+
+  #[test]
+  fn word_split_default_ifs() {
+    let _guard = TestGuard::new();
+
+    let mut exp = Expander { raw: "hello world\tfoo".to_string() };
+    let words = exp.split_words();
+    assert_eq!(words, vec!["hello", "world", "foo"]);
+  }
+
+  #[test]
+  fn word_split_custom_ifs() {
+    let _guard = TestGuard::new();
+    unsafe { std::env::set_var("IFS", ":"); }
+
+    let mut exp = Expander { raw: "a:b:c".to_string() };
+    let words = exp.split_words();
+    assert_eq!(words, vec!["a", "b", "c"]);
+  }
+
+  #[test]
+  fn word_split_empty_ifs() {
+    let _guard = TestGuard::new();
+    unsafe { std::env::set_var("IFS", ""); }
+
+    let mut exp = Expander { raw: "hello world".to_string() };
+    let words = exp.split_words();
+    assert_eq!(words, vec!["hello world"]);
+  }
+
+  #[test]
+  fn word_split_quoted_no_split() {
+    let _guard = TestGuard::new();
+
+    let raw = format!("{}hello world{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
+    let mut exp = Expander { raw };
+    let words = exp.split_words();
+    assert_eq!(words, vec!["hello world"]);
+  }
+
+  // ===================== Arithmetic with Variables (TestGuard) =====================
+
+  #[test]
+  fn arith_with_variable() {
+    let _guard = TestGuard::new();
+    write_vars(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::NONE)).unwrap();
+
+    // expand_arithmetic processes the body after stripping outer parens
+    // unescape_math converts $x into marker+x
+    let body = "$x+3";
+    let unescaped = unescape_math(body);
+    let expanded = expand_raw(&mut unescaped.chars().peekable()).unwrap();
+    let tokens = ArithTk::tokenize(&expanded).unwrap().unwrap();
+    let rpn = ArithTk::to_rpn(tokens).unwrap();
+    let result = ArithTk::eval_rpn(rpn).unwrap();
+    assert_eq!(result, 8.0);
+  }
+
+  // ===================== Array Indexing (TestGuard) =====================
+
+  #[test]
+  fn array_index_first() {
+    let _guard = TestGuard::new();
+    write_vars(|v| {
+      v.set_var("arr", VarKind::arr_from_vec(vec!["a".into(), "b".into(), "c".into()]), VarFlags::NONE)
+    }).unwrap();
+
+    let val = read_vars(|v| v.index_var("arr", ArrIndex::Literal(0))).unwrap();
+    assert_eq!(val, "a");
+  }
+
+  #[test]
+  fn array_index_second() {
+    let _guard = TestGuard::new();
+    write_vars(|v| {
+      v.set_var("arr", VarKind::arr_from_vec(vec!["x".into(), "y".into(), "z".into()]), VarFlags::NONE)
+    }).unwrap();
+
+    let val = read_vars(|v| v.index_var("arr", ArrIndex::Literal(1))).unwrap();
+    assert_eq!(val, "y");
+  }
+
+  #[test]
+  fn array_all_elems() {
+    let _guard = TestGuard::new();
+    write_vars(|v| {
+      v.set_var("arr", VarKind::arr_from_vec(vec!["a".into(), "b".into(), "c".into()]), VarFlags::NONE)
+    }).unwrap();
+
+    let elems = read_vars(|v| v.get_arr_elems("arr")).unwrap();
+    assert_eq!(elems, vec!["a", "b", "c"]);
+  }
+
+  #[test]
+  fn array_elem_count() {
+    let _guard = TestGuard::new();
+    write_vars(|v| {
+      v.set_var("arr", VarKind::arr_from_vec(vec!["a".into(), "b".into(), "c".into()]), VarFlags::NONE)
+    }).unwrap();
+
+    let elems = read_vars(|v| v.get_arr_elems("arr")).unwrap();
+    assert_eq!(elems.len(), 3);
+  }
+
+  // ===================== Alias Expansion (TestGuard) =====================
+
+  #[test]
+  fn alias_simple() {
+    let _guard = TestGuard::new();
+    let dummy_span = Span::default();
+    crate::state::SHED.with(|s| {
+      s.logic.borrow_mut().insert_alias("ll", "ls -la", dummy_span.clone());
+    });
+
+    let log_tab = crate::state::SHED.with(|s| s.logic.borrow().clone());
+    let result = expand_aliases("ll".to_string(), HashSet::new(), &log_tab);
+    assert_eq!(result, "ls -la");
+  }
+
+  #[test]
+  fn alias_circular_prevention() {
+    let _guard = TestGuard::new();
+    let dummy_span = Span::default();
+    crate::state::SHED.with(|s| {
+      s.logic.borrow_mut().insert_alias("foo", "foo --verbose", dummy_span.clone());
+    });
+
+    let log_tab = crate::state::SHED.with(|s| s.logic.borrow().clone());
+    let result = expand_aliases("foo".to_string(), HashSet::new(), &log_tab);
+    // After first expansion: "foo --verbose", then "foo" is in already_expanded
+    // so it won't expand again
+    assert_eq!(result, "foo --verbose");
+  }
+
+  // ===================== Direct Input Tests (TestGuard) =====================
+
+	#[test]
+	fn index_simple() {
+		let guard = TestGuard::new();
+		write_vars(|v| v.set_var("arr", VarKind::Arr(VecDeque::from(["foo".into(), "bar".into(), "biz".into()])), VarFlags::NONE)).unwrap();
+
+		test_input("echo $arr").unwrap();
+
+		let out = guard.read_output();
+		assert_eq!(out, "foo bar biz\n");
+	}
+
+	#[test]
+	fn index_cursed() {
+		let guard = TestGuard::new();
+		write_vars(|v| v.set_var("arr", VarKind::Arr(VecDeque::from(["foo".into(), "bar".into(), "biz".into()])), VarFlags::NONE)).unwrap();
+		write_vars(|v| v.set_var("i", VarKind::Arr(VecDeque::from(["0".into(), "1".into(), "2".into()])), VarFlags::NONE)).unwrap();
+
+		test_input("echo $echo ${var:-${arr[$(($(echo ${i[0]}) + 1))]}}").unwrap();
+
+		let out = guard.read_output();
+		assert_eq!(out, "bar\n");
+	}
 }

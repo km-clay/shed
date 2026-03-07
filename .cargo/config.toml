@@ -1,0 +1,6 @@
+[env]
+# we need to use one thread for tests
+# so that they arent stepping on eachother's toes
+# plus it matches the single-threaded behavior of the program
+# more closely anyway
+RUST_TEST_THREADS = "1"

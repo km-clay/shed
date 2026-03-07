@@ -111,3 +111,202 @@ pub fn autocmd(node: Node) -> ShResult<()> {
   state::set_status(0);
   Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+  use crate::state::{self, AutoCmdKind, read_logic, write_logic};
+  use crate::testutil::{TestGuard, test_input};
+
+  // ===================== Registration =====================
+
+  #[test]
+  fn register_pre_cmd() {
+    let _guard = TestGuard::new();
+    test_input("autocmd pre-cmd 'echo hello'").unwrap();
+
+    let cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].command, "echo hello");
+    assert!(cmds[0].pattern.is_none());
+  }
+
+  #[test]
+  fn register_post_cmd() {
+    let _guard = TestGuard::new();
+    test_input("autocmd post-cmd 'echo done'").unwrap();
+
+    let cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].command, "echo done");
+  }
+
+  #[test]
+  fn register_multiple_same_kind() {
+    let _guard = TestGuard::new();
+    test_input("autocmd pre-cmd 'echo first'").unwrap();
+    test_input("autocmd pre-cmd 'echo second'").unwrap();
+
+    let cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
+    assert_eq!(cmds.len(), 2);
+    assert_eq!(cmds[0].command, "echo first");
+    assert_eq!(cmds[1].command, "echo second");
+  }
+
+  #[test]
+  fn register_different_kinds() {
+    let _guard = TestGuard::new();
+    test_input("autocmd pre-cmd 'echo pre'").unwrap();
+    test_input("autocmd post-cmd 'echo post'").unwrap();
+
+    assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd)).len(), 1);
+    assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd)).len(), 1);
+  }
+
+  // ===================== Pattern =====================
+
+  #[test]
+  fn register_with_pattern() {
+    let _guard = TestGuard::new();
+    test_input("autocmd -p '^git' pre-cmd 'echo git cmd'").unwrap();
+
+    let cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
+    assert_eq!(cmds.len(), 1);
+    assert!(cmds[0].pattern.is_some());
+    let pat = cmds[0].pattern.as_ref().unwrap();
+    assert!(pat.is_match("git status"));
+    assert!(!pat.is_match("echo git"));
+  }
+
+  #[test]
+  fn invalid_regex_pattern() {
+    let _guard = TestGuard::new();
+    let result = test_input("autocmd -p '[invalid' pre-cmd 'echo bad'");
+    assert!(result.is_err());
+  }
+
+  // ===================== Clear =====================
+
+  #[test]
+  fn clear_autocmds() {
+    let _guard = TestGuard::new();
+    test_input("autocmd pre-cmd 'echo a'").unwrap();
+    test_input("autocmd pre-cmd 'echo b'").unwrap();
+    assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd)).len(), 2);
+
+    test_input("autocmd -c pre-cmd").unwrap();
+    assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd)).len(), 0);
+  }
+
+  #[test]
+  fn clear_only_affects_specified_kind() {
+    let _guard = TestGuard::new();
+    test_input("autocmd pre-cmd 'echo pre'").unwrap();
+    test_input("autocmd post-cmd 'echo post'").unwrap();
+
+    test_input("autocmd -c pre-cmd").unwrap();
+    assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd)).len(), 0);
+    assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd)).len(), 1);
+  }
+
+  #[test]
+  fn clear_empty_is_noop() {
+    let _guard = TestGuard::new();
+    // Clearing when nothing is registered should not error
+    test_input("autocmd -c pre-cmd").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  // ===================== Error Cases =====================
+
+  #[test]
+  fn missing_kind() {
+    let _guard = TestGuard::new();
+    let result = test_input("autocmd");
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn invalid_kind() {
+    let _guard = TestGuard::new();
+    let result = test_input("autocmd not-a-real-kind 'echo hi'");
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn missing_command() {
+    let _guard = TestGuard::new();
+    let result = test_input("autocmd pre-cmd");
+    assert!(result.is_err());
+  }
+
+  // ===================== All valid kind strings =====================
+
+  #[test]
+  fn all_kinds_parse() {
+    let _guard = TestGuard::new();
+    let kinds = [
+      "pre-cmd", "post-cmd", "pre-change-dir", "post-change-dir",
+      "on-job-finish", "pre-prompt", "post-prompt",
+      "pre-mode-change", "post-mode-change",
+      "on-history-open", "on-history-close", "on-history-select",
+      "on-completion-start", "on-completion-cancel", "on-completion-select",
+      "on-exit",
+    ];
+    for kind in kinds {
+      test_input(&format!("autocmd {kind} 'true'")).unwrap();
+    }
+  }
+
+  // ===================== Execution =====================
+
+  #[test]
+  fn exec_fires_autocmd() {
+    let guard = TestGuard::new();
+    // Register a post-change-dir autocmd and trigger it via cd
+    test_input("autocmd post-change-dir 'echo changed'").unwrap();
+    guard.read_output();
+
+    test_input("cd /tmp").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("changed"));
+  }
+
+  #[test]
+  fn exec_with_pattern_match() {
+    let guard = TestGuard::new();
+    // Pattern that matches "cd" commands
+    test_input("autocmd -p '/tmp' post-change-dir 'echo matched'").unwrap();
+    guard.read_output();
+
+    test_input("cd /tmp").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("matched"));
+  }
+
+  #[test]
+  fn exec_with_pattern_no_match() {
+    let guard = TestGuard::new();
+    // Pattern that won't match /tmp
+    test_input("autocmd -p '^/usr' post-change-dir 'echo nope'").unwrap();
+    guard.read_output();
+
+    test_input("cd /tmp").unwrap();
+    let out = guard.read_output();
+    assert!(!out.contains("nope"));
+  }
+
+  #[test]
+  fn exec_preserves_status() {
+    let _guard = TestGuard::new();
+    // autocmd exec should restore the status code from before it ran
+    test_input("autocmd post-change-dir 'false'").unwrap();
+
+    test_input("true").unwrap();
+    assert_eq!(state::get_status(), 0);
+
+    test_input("cd /tmp").unwrap();
+    // cd itself succeeds, autocmd runs `false` but status should be
+    // restored to cd's success
+    assert_eq!(state::get_status(), 0);
+  }
+}

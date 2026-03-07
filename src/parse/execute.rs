@@ -5,11 +5,10 @@ use std::{
 };
 
 use ariadne::Fmt;
-use nix::sys::resource;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::{self, read_builtin}, resource::ulimit, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}, zoltraak::zoltraak
+    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::{self, read_builtin}, resource::ulimit, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -450,7 +449,6 @@ impl Dispatcher {
     let fork_builtins = brc_grp.flags.contains(NdFlags::FORK_BUILTINS);
 
     self.io_stack.append_to_frame(brc_grp.redirs);
-    if self.interactive {}
     let guard = self.io_stack.pop_frame().redirect()?;
     let brc_grp_logic = |s: &mut Self| -> ShResult<()> {
       for node in body {
@@ -911,7 +909,7 @@ impl Dispatcher {
       "export" => export(cmd),
       "local" => local(cmd),
       "pwd" => pwd(cmd),
-      "source" => source(cmd),
+      "source" | "." => source(cmd),
       "shift" => shift(cmd),
       "fg" => continue_job(cmd, JobBehavior::Foregound),
       "bg" => continue_job(cmd, JobBehavior::Background),
@@ -923,7 +921,6 @@ impl Dispatcher {
       "break" => flowctl(cmd, ShErrKind::LoopBreak(0)),
       "continue" => flowctl(cmd, ShErrKind::LoopContinue(0)),
       "exit" => flowctl(cmd, ShErrKind::CleanExit(0)),
-      "zoltraak" => zoltraak(cmd),
       "shopt" => shopt(cmd),
       "read" => read_builtin(cmd),
       "trap" => trap(cmd),

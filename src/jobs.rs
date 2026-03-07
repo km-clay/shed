@@ -1,4 +1,6 @@
+use ariadne::Fmt;
 use scopeguard::defer;
+use yansi::Color;
 
 use crate::{
   libsh::{
@@ -149,7 +151,7 @@ pub struct RegisteredFd {
   pub owner_pid: Pid,
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct JobTab {
   fg: Option<Job>,
   order: Vec<usize>,
@@ -724,12 +726,12 @@ impl Job {
       stat_line = format!("{}{} ", pid, stat_line);
       stat_line = format!("{} {}", stat_line, cmd);
       stat_line = match job_stat {
-        WtStat::Stopped(..) | WtStat::Signaled(..) => stat_line.styled(Style::Magenta),
+        WtStat::Stopped(..) | WtStat::Signaled(..) => stat_line.fg(Color::Magenta).to_string(),
         WtStat::Exited(_, code) => match code {
-          0 => stat_line.styled(Style::Green),
-          _ => stat_line.styled(Style::Red),
+          0 => stat_line.fg(Color::Green).to_string(),
+          _ => stat_line.fg(Color::Red).to_string(),
         },
-        _ => stat_line.styled(Style::Cyan),
+        _ => stat_line.fg(Color::Cyan).to_string(),
       };
       if i != 0 {
         let padding = " ".repeat(id_box.len() - 1);

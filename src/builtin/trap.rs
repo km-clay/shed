@@ -167,3 +167,146 @@ pub fn trap(node: Node) -> ShResult<()> {
   state::set_status(0);
   Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+  use super::TrapTarget;
+  use std::str::FromStr;
+  use nix::sys::signal::Signal;
+  use crate::state::{self, read_logic};
+  use crate::testutil::{TestGuard, test_input};
+
+  // ===================== Pure: TrapTarget parsing =====================
+
+  #[test]
+  fn parse_exit() {
+    assert_eq!(TrapTarget::from_str("EXIT").unwrap(), TrapTarget::Exit);
+  }
+
+  #[test]
+  fn parse_err() {
+    assert_eq!(TrapTarget::from_str("ERR").unwrap(), TrapTarget::Error);
+  }
+
+  #[test]
+  fn parse_signal_int() {
+    assert_eq!(
+      TrapTarget::from_str("INT").unwrap(),
+      TrapTarget::Signal(Signal::SIGINT)
+    );
+  }
+
+  #[test]
+  fn parse_signal_term() {
+    assert_eq!(
+      TrapTarget::from_str("TERM").unwrap(),
+      TrapTarget::Signal(Signal::SIGTERM)
+    );
+  }
+
+  #[test]
+  fn parse_signal_usr1() {
+    assert_eq!(
+      TrapTarget::from_str("USR1").unwrap(),
+      TrapTarget::Signal(Signal::SIGUSR1)
+    );
+  }
+
+  #[test]
+  fn parse_invalid() {
+    assert!(TrapTarget::from_str("BOGUS").is_err());
+  }
+
+  // ===================== Pure: Display round-trip =====================
+
+  #[test]
+  fn display_exit() {
+    assert_eq!(TrapTarget::Exit.to_string(), "EXIT");
+  }
+
+  #[test]
+  fn display_err() {
+    assert_eq!(TrapTarget::Error.to_string(), "ERR");
+  }
+
+  #[test]
+  fn display_signal_roundtrip() {
+    for name in &["INT", "QUIT", "TERM", "USR1", "USR2", "ALRM", "CHLD", "WINCH"] {
+      let target = TrapTarget::from_str(name).unwrap();
+      assert_eq!(target.to_string(), *name);
+    }
+  }
+
+  // ===================== Integration: registration =====================
+
+  #[test]
+  fn trap_registers_exit() {
+    let _g = TestGuard::new();
+    test_input("trap 'echo bye' EXIT").unwrap();
+    let cmd = read_logic(|l| l.get_trap(TrapTarget::Exit));
+    assert_eq!(cmd.unwrap(), "echo bye");
+  }
+
+  #[test]
+  fn trap_registers_signal() {
+    let _g = TestGuard::new();
+    test_input("trap 'echo caught' INT").unwrap();
+    let cmd = read_logic(|l| l.get_trap(TrapTarget::Signal(Signal::SIGINT)));
+    assert_eq!(cmd.unwrap(), "echo caught");
+  }
+
+  #[test]
+  fn trap_multiple_signals() {
+    let _g = TestGuard::new();
+    test_input("trap 'handle' INT TERM").unwrap();
+    let int = read_logic(|l| l.get_trap(TrapTarget::Signal(Signal::SIGINT)));
+    let term = read_logic(|l| l.get_trap(TrapTarget::Signal(Signal::SIGTERM)));
+    assert_eq!(int.unwrap(), "handle");
+    assert_eq!(term.unwrap(), "handle");
+  }
+
+  #[test]
+  fn trap_remove() {
+    let _g = TestGuard::new();
+    test_input("trap 'echo hi' EXIT").unwrap();
+    assert!(read_logic(|l| l.get_trap(TrapTarget::Exit)).is_some());
+    test_input("trap - EXIT").unwrap();
+    assert!(read_logic(|l| l.get_trap(TrapTarget::Exit)).is_none());
+  }
+
+  #[test]
+  fn trap_display() {
+    let guard = TestGuard::new();
+    test_input("trap 'echo bye' EXIT").unwrap();
+    test_input("trap").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("echo bye"));
+    assert!(out.contains("EXIT"));
+  }
+
+  // ===================== Error cases =====================
+
+  #[test]
+  fn trap_single_arg_usage() {
+    let _g = TestGuard::new();
+    // Single arg prints usage and sets status 1
+    test_input("trap 'echo hi'").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
+
+  #[test]
+  fn trap_invalid_signal() {
+    let _g = TestGuard::new();
+    let result = test_input("trap 'echo hi' BOGUS");
+    assert!(result.is_err());
+  }
+
+  // ===================== Status =====================
+
+  #[test]
+  fn trap_status_zero() {
+    let _g = TestGuard::new();
+    test_input("trap 'echo bye' EXIT").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+}

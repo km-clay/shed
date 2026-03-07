@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use ariadne::Fmt;
 use fmt::Display;
 
-use crate::{libsh::error::ShResult, parse::lex::Tk, prelude::*};
+use crate::{libsh::error::{ShErr, ShErrKind, ShResult, next_color}, parse::lex::Tk, prelude::*};
 
 pub type OptSet = Arc<[Opt]>;
 
@@ -67,10 +68,21 @@ pub fn get_opts(words: Vec<String>) -> (Vec<String>, Vec<Opt>) {
   (non_opts, opts)
 }
 
+pub fn get_opts_from_tokens_strict(
+	tokens: Vec<Tk>,
+	opt_specs: &[OptSpec],
+) -> ShResult<(Vec<Tk>, Vec<Opt>)> {
+	sort_tks(tokens, opt_specs, true)
+}
+
 pub fn get_opts_from_tokens(
   tokens: Vec<Tk>,
   opt_specs: &[OptSpec],
 ) -> ShResult<(Vec<Tk>, Vec<Opt>)> {
+	sort_tks(tokens, opt_specs, false)
+}
+
+pub fn sort_tks(tokens: Vec<Tk>, opt_specs: &[OptSpec], strict: bool) -> ShResult<(Vec<Tk>, Vec<Opt>)> {
   let mut tokens_iter = tokens
     .into_iter()
     .map(|t| t.expand())
@@ -113,10 +125,218 @@ pub fn get_opts_from_tokens(
           }
         }
         if !pushed {
-          non_opts.push(token.clone());
+					if strict {
+						return Err(ShErr::simple(
+							ShErrKind::ParseErr,
+							format!("Unknown option: {}", opt.to_string().fg(next_color())),
+						));
+					} else {
+						non_opts.push(token.clone());
+					}
         }
       }
     }
   }
   Ok((non_opts, opts))
+}
+
+
+#[cfg(test)]
+mod tests {
+  use crate::parse::lex::{LexFlags, LexStream};
+
+use super::*;
+
+  #[test]
+  fn parse_short_single() {
+    let opts = Opt::parse("-a");
+    assert_eq!(opts, vec![Opt::Short('a')]);
+  }
+
+  #[test]
+  fn parse_short_combined() {
+    let opts = Opt::parse("-abc");
+    assert_eq!(opts, vec![Opt::Short('a'), Opt::Short('b'), Opt::Short('c')]);
+  }
+
+  #[test]
+  fn parse_long() {
+    let opts = Opt::parse("--verbose");
+    assert_eq!(opts, vec![Opt::Long("verbose".into())]);
+  }
+
+  #[test]
+  fn parse_non_option() {
+    let opts = Opt::parse("hello");
+    assert!(opts.is_empty());
+  }
+
+  #[test]
+  fn get_opts_basic() {
+    let words = vec!["file.txt".into(), "-v".into(), "--help".into(), "arg".into()];
+    let (non_opts, opts) = get_opts(words);
+    assert_eq!(non_opts, vec!["file.txt", "arg"]);
+    assert_eq!(opts, vec![Opt::Short('v'), Opt::Long("help".into())]);
+  }
+
+  #[test]
+  fn get_opts_double_dash_stops_parsing() {
+    let words = vec!["-a".into(), "--".into(), "-b".into(), "--foo".into()];
+    let (non_opts, opts) = get_opts(words);
+    assert_eq!(opts, vec![Opt::Short('a')]);
+    assert_eq!(non_opts, vec!["-b", "--foo"]);
+  }
+
+  #[test]
+  fn get_opts_combined_short() {
+    let words = vec!["-abc".into(), "file".into()];
+    let (non_opts, opts) = get_opts(words);
+    assert_eq!(opts, vec![Opt::Short('a'), Opt::Short('b'), Opt::Short('c')]);
+    assert_eq!(non_opts, vec!["file"]);
+  }
+
+  #[test]
+  fn get_opts_no_flags() {
+    let words = vec!["foo".into(), "bar".into()];
+    let (non_opts, opts) = get_opts(words);
+    assert!(opts.is_empty());
+    assert_eq!(non_opts, vec!["foo", "bar"]);
+  }
+
+  #[test]
+  fn get_opts_empty_input() {
+    let (non_opts, opts) = get_opts(vec![]);
+    assert!(opts.is_empty());
+    assert!(non_opts.is_empty());
+  }
+
+  #[test]
+  fn display_formatting() {
+    assert_eq!(Opt::Short('v').to_string(), "-v");
+    assert_eq!(Opt::Long("help".into()).to_string(), "--help");
+    assert_eq!(Opt::ShortWithArg('o', "file".into()).to_string(), "-o file");
+    assert_eq!(Opt::LongWithArg("output".into(), "file".into()).to_string(), "--output file");
+  }
+
+	fn lex(input: &str) -> Vec<Tk> {
+		LexStream::new(Arc::new(input.to_string()), LexFlags::empty())
+			.collect::<ShResult<Vec<Tk>>>()
+			.unwrap()
+	}
+
+	#[test]
+	fn get_opts_from_tks() {
+		let tokens = lex("file.txt --help -v arg");
+
+		let opt_spec = vec![
+			OptSpec { opt: Opt::Short('v'), takes_arg: false },
+			OptSpec { opt: Opt::Long("help".into()), takes_arg: false },
+		];
+
+		let (non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
+
+		let mut opts = opts.into_iter();
+		assert!(opts.any(|o| o == Opt::Short('v') || o == Opt::Long("help".into())));
+		assert!(opts.any(|o| o == Opt::Short('v') || o == Opt::Long("help".into())));
+
+		let mut non_opts = non_opts.into_iter().map(|s| s.to_string());
+		assert!(non_opts.any(|s| s == "file.txt" || s == "arg"));
+		assert!(non_opts.any(|s| s == "file.txt" || s == "arg"));
+	}
+
+	#[test]
+	fn tks_short_with_arg() {
+		let tokens = lex("-o output.txt file.txt");
+
+		let opt_spec = vec![
+			OptSpec { opt: Opt::Short('o'), takes_arg: true },
+		];
+
+		let (non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
+
+		assert_eq!(opts, vec![Opt::ShortWithArg('o', "output.txt".into())]);
+		let non_opts: Vec<String> = non_opts.into_iter().map(|s| s.to_string()).collect();
+		assert!(non_opts.contains(&"file.txt".to_string()));
+	}
+
+	#[test]
+	fn tks_long_with_arg() {
+		let tokens = lex("--output result.txt input.txt");
+
+		let opt_spec = vec![
+			OptSpec { opt: Opt::Long("output".into()), takes_arg: true },
+		];
+
+		let (non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
+
+		assert_eq!(opts, vec![Opt::LongWithArg("output".into(), "result.txt".into())]);
+		let non_opts: Vec<String> = non_opts.into_iter().map(|s| s.to_string()).collect();
+		assert!(non_opts.contains(&"input.txt".to_string()));
+	}
+
+	#[test]
+	fn tks_double_dash_stops() {
+		let tokens = lex("-v -- -a --foo");
+
+		let opt_spec = vec![
+			OptSpec { opt: Opt::Short('v'), takes_arg: false },
+			OptSpec { opt: Opt::Short('a'), takes_arg: false },
+		];
+
+		let (non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
+
+		assert_eq!(opts, vec![Opt::Short('v')]);
+		let non_opts: Vec<String> = non_opts.into_iter().map(|s| s.to_string()).collect();
+		assert!(non_opts.contains(&"-a".to_string()));
+		assert!(non_opts.contains(&"--foo".to_string()));
+	}
+
+	#[test]
+	fn tks_combined_short_with_spec() {
+		let tokens = lex("-abc");
+
+		let opt_spec = vec![
+			OptSpec { opt: Opt::Short('a'), takes_arg: false },
+			OptSpec { opt: Opt::Short('b'), takes_arg: false },
+			OptSpec { opt: Opt::Short('c'), takes_arg: false },
+		];
+
+		let (_non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
+
+		assert_eq!(opts, vec![Opt::Short('a'), Opt::Short('b'), Opt::Short('c')]);
+	}
+
+	#[test]
+	fn tks_unknown_opt_becomes_non_opt() {
+		let tokens = lex("-v -x file");
+
+		let opt_spec = vec![
+			OptSpec { opt: Opt::Short('v'), takes_arg: false },
+		];
+
+		let (non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
+
+		assert_eq!(opts, vec![Opt::Short('v')]);
+		// -x is not in spec, so its token goes to non_opts
+		assert!(non_opts.into_iter().map(|s| s.to_string()).any(|s| s == "-x" || s == "file"));
+	}
+
+	#[test]
+	fn tks_mixed_short_and_long_with_args() {
+		let tokens = lex("-n 5 --output file.txt input");
+
+		let opt_spec = vec![
+			OptSpec { opt: Opt::Short('n'), takes_arg: true },
+			OptSpec { opt: Opt::Long("output".into()), takes_arg: true },
+		];
+
+		let (non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
+
+		assert_eq!(opts, vec![
+			Opt::ShortWithArg('n', "5".into()),
+			Opt::LongWithArg("output".into(), "file.txt".into()),
+		]);
+		let non_opts: Vec<String> = non_opts.into_iter().map(|s| s.to_string()).collect();
+		assert!(non_opts.contains(&"input".to_string()));
+	}
 }

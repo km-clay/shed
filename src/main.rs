@@ -17,6 +17,9 @@ pub mod shopt;
 pub mod signal;
 pub mod state;
 
+#[cfg(test)]
+pub mod testutil;
+
 use std::os::fd::BorrowedFd;
 use std::process::ExitCode;
 use std::sync::atomic::Ordering;
@@ -361,11 +364,13 @@ fn handle_readline_event(readline: &mut ShedVi, event: ShResult<ReadlineEvent>) 
 
       pre_exec.exec_with(&input);
 
+      // Time this command and temporarily restore cooked terminal mode while it runs.
       let start = Instant::now();
       write_meta(|m| m.start_timer());
       if let Err(e) = RawModeGuard::with_cooked_mode(|| {
         exec_input(input.clone(), None, true, Some("<stdin>".into()))
       }) {
+        // CleanExit signals an intentional shell exit; any other error is printed.
         match e.kind() {
           ShErrKind::CleanExit(code) => {
             QUIT_CODE.store(*code, Ordering::SeqCst);

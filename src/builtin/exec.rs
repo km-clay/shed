@@ -45,3 +45,24 @@ pub fn exec_builtin(node: Node) -> ShResult<()> {
     _ => Err(ShErr::at(ShErrKind::Errno(e), span, format!("{e}"))),
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use crate::state;
+  use crate::testutil::{TestGuard, test_input};
+	// Testing exec is a bit tricky since it replaces the current process, so we just test that it correctly handles the case of no arguments and the case of a nonexistent command. We can't really test that it successfully executes a command since that would replace the test process itself.
+
+  #[test]
+  fn exec_no_args_succeeds() {
+    let _g = TestGuard::new();
+    test_input("exec").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn exec_nonexistent_command_fails() {
+    let _g = TestGuard::new();
+    let result = test_input("exec _____________no_such_______command_xyz_____________hopefully______this_doesnt______exist_____somewhere_in___your______PATH__________________");
+    assert!(result.is_err());
+  }
+}

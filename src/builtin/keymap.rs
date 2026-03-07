@@ -59,7 +59,7 @@ impl KeyMapOpts {
     }
     Ok(Self { remove, flags })
   }
-  pub fn keymap_opts() -> [OptSpec; 6] {
+  pub fn keymap_opts() -> [OptSpec; 7] {
     [
       OptSpec {
         opt: Opt::Short('n'), // normal mode
@@ -81,6 +81,10 @@ impl KeyMapOpts {
         opt: Opt::Short('o'), // operator-pending mode
         takes_arg: false,
       },
+			OptSpec {
+				opt: Opt::Long("remove".into()),
+				takes_arg: true,
+			},
       OptSpec {
         opt: Opt::Short('r'), // replace mode
         takes_arg: false,
@@ -171,4 +175,170 @@ pub fn keymap(node: Node) -> ShResult<()> {
 
   state::set_status(0);
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::getopt::Opt;
+  use crate::expand::expand_keymap;
+  use crate::state::{self, read_logic};
+  use crate::testutil::{TestGuard, test_input};
+
+  // ===================== KeyMapOpts parsing =====================
+
+  #[test]
+  fn opts_normal_mode() {
+    let opts = KeyMapOpts::from_opts(&[Opt::Short('n')]).unwrap();
+    assert!(opts.flags.contains(KeyMapFlags::NORMAL));
+  }
+
+  #[test]
+  fn opts_insert_mode() {
+    let opts = KeyMapOpts::from_opts(&[Opt::Short('i')]).unwrap();
+    assert!(opts.flags.contains(KeyMapFlags::INSERT));
+  }
+
+  #[test]
+  fn opts_multiple_modes() {
+    let opts = KeyMapOpts::from_opts(&[Opt::Short('n'), Opt::Short('i')]).unwrap();
+    assert!(opts.flags.contains(KeyMapFlags::NORMAL));
+    assert!(opts.flags.contains(KeyMapFlags::INSERT));
+  }
+
+  #[test]
+  fn opts_no_mode_errors() {
+    let result = KeyMapOpts::from_opts(&[]);
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn opts_remove() {
+    let opts = KeyMapOpts::from_opts(&[
+      Opt::Short('n'),
+      Opt::LongWithArg("remove".into(), "jk".into()),
+    ]).unwrap();
+    assert_eq!(opts.remove, Some("jk".into()));
+  }
+
+  #[test]
+  fn opts_duplicate_remove_errors() {
+    let result = KeyMapOpts::from_opts(&[
+      Opt::Short('n'),
+      Opt::LongWithArg("remove".into(), "jk".into()),
+      Opt::LongWithArg("remove".into(), "kj".into()),
+    ]);
+    assert!(result.is_err());
+  }
+
+  // ===================== KeyMap::compare =====================
+
+  #[test]
+  fn compare_exact_match() {
+    let km = KeyMap {
+      flags: KeyMapFlags::NORMAL,
+      keys: "jk".into(),
+      action: "<ESC>".into(),
+    };
+    let keys = expand_keymap("jk");
+    assert_eq!(km.compare(&keys), KeyMapMatch::IsExact);
+  }
+
+  #[test]
+  fn compare_prefix_match() {
+    let km = KeyMap {
+      flags: KeyMapFlags::NORMAL,
+      keys: "jk".into(),
+      action: "<ESC>".into(),
+    };
+    let keys = expand_keymap("j");
+    assert_eq!(km.compare(&keys), KeyMapMatch::IsPrefix);
+  }
+
+  #[test]
+  fn compare_no_match() {
+    let km = KeyMap {
+      flags: KeyMapFlags::NORMAL,
+      keys: "jk".into(),
+      action: "<ESC>".into(),
+    };
+    let keys = expand_keymap("zz");
+    assert_eq!(km.compare(&keys), KeyMapMatch::NoMatch);
+  }
+
+  // ===================== Registration via test_input =====================
+
+  #[test]
+  fn keymap_register() {
+    let _g = TestGuard::new();
+    test_input("keymap -n jk '<ESC>'").unwrap();
+
+    let maps = read_logic(|l| l.keymaps_filtered(
+      KeyMapFlags::NORMAL,
+      &expand_keymap("jk"),
+    ));
+    assert!(!maps.is_empty());
+  }
+
+  #[test]
+  fn keymap_register_insert() {
+    let _g = TestGuard::new();
+    test_input("keymap -i jk '<ESC>'").unwrap();
+
+    let maps = read_logic(|l| l.keymaps_filtered(
+      KeyMapFlags::INSERT,
+      &expand_keymap("jk"),
+    ));
+    assert!(!maps.is_empty());
+  }
+
+  #[test]
+  fn keymap_overwrite() {
+    let _g = TestGuard::new();
+    test_input("keymap -n jk '<ESC>'").unwrap();
+    test_input("keymap -n jk 'dd'").unwrap();
+
+    let maps = read_logic(|l| l.keymaps_filtered(
+      KeyMapFlags::NORMAL,
+      &expand_keymap("jk"),
+    ));
+    assert_eq!(maps.len(), 1);
+    assert_eq!(maps[0].action, "dd");
+  }
+
+  #[test]
+  fn keymap_remove() {
+    let _g = TestGuard::new();
+    test_input("keymap -n jk '<ESC>'").unwrap();
+    test_input("keymap -n --remove jk").unwrap();
+
+    let maps = read_logic(|l| l.keymaps_filtered(
+      KeyMapFlags::NORMAL,
+      &expand_keymap("jk"),
+    ));
+    assert!(maps.is_empty());
+  }
+
+  #[test]
+  fn keymap_status_zero() {
+    let _g = TestGuard::new();
+    test_input("keymap -n jk '<ESC>'").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  // ===================== Error cases =====================
+
+  #[test]
+  fn keymap_missing_keys() {
+    let _g = TestGuard::new();
+    let result = test_input("keymap -n");
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn keymap_missing_action() {
+    let _g = TestGuard::new();
+    let result = test_input("keymap -n jk");
+    assert!(result.is_err());
+  }
 }

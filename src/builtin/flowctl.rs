@@ -41,3 +41,105 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
 
   Err(ShErr::simple(kind, message))
 }
+
+#[cfg(test)]
+mod tests {
+  use crate::libsh::error::ShErrKind;
+  use crate::state;
+  use crate::testutil::{TestGuard, test_input};
+
+  // ===================== break =====================
+
+  #[test]
+  fn break_exits_loop() {
+    let guard = TestGuard::new();
+    test_input("for i in 1 2 3; do echo $i; break; done").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out.trim(), "1");
+  }
+
+  #[test]
+  fn break_outside_loop_errors() {
+    let _g = TestGuard::new();
+    let result = test_input("break");
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn break_non_numeric_errors() {
+    let _g = TestGuard::new();
+    let result = test_input("for i in 1; do break abc; done");
+    assert!(result.is_err());
+  }
+
+  // ===================== continue =====================
+
+  #[test]
+  fn continue_skips_iteration() {
+    let guard = TestGuard::new();
+    test_input("for i in 1 2 3; do if [[ $i == 2 ]]; then continue; fi; echo $i; done").unwrap();
+    let out = guard.read_output();
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines, vec!["1", "3"]);
+  }
+
+  #[test]
+  fn continue_outside_loop_errors() {
+    let _g = TestGuard::new();
+    let result = test_input("continue");
+    assert!(result.is_err());
+  }
+
+  // ===================== return =====================
+
+  #[test]
+  fn return_exits_function() {
+    let guard = TestGuard::new();
+    test_input("f() { echo before; return; echo after; }").unwrap();
+    test_input("f").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out.trim(), "before");
+  }
+
+  #[test]
+  fn return_with_status() {
+    let _g = TestGuard::new();
+    test_input("f() { return 42; }").unwrap();
+    test_input("f").unwrap();
+    assert_eq!(state::get_status(), 42);
+  }
+
+  #[test]
+  fn return_outside_function_errors() {
+    let _g = TestGuard::new();
+    let result = test_input("return");
+    assert!(result.is_err());
+  }
+
+  // ===================== exit =====================
+
+  #[test]
+  fn exit_returns_clean_exit() {
+    let _g = TestGuard::new();
+    let result = test_input("exit 0");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err.kind(), ShErrKind::CleanExit(0)));
+  }
+
+  #[test]
+  fn exit_with_code() {
+    let _g = TestGuard::new();
+    let result = test_input("exit 5");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err.kind(), ShErrKind::CleanExit(5)));
+  }
+
+  #[test]
+  fn exit_non_numeric_errors() {
+    let _g = TestGuard::new();
+    let result = test_input("exit abc");
+    assert!(result.is_err());
+  }
+}

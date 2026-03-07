@@ -251,3 +251,217 @@ pub fn getopts(node: Node) -> ShResult<()> {
     getopts_inner(&opts_spec, &opt_var.0, &pos_params, span)
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use crate::state::{self, read_vars};
+  use crate::testutil::{TestGuard, test_input};
+
+  fn get_var(name: &str) -> String {
+    read_vars(|v| v.get_var(name))
+  }
+
+  // ===================== Spec parsing =====================
+
+  #[test]
+  fn parse_simple_spec() {
+    use super::GetOptsSpec;
+    use std::str::FromStr;
+    let spec = GetOptsSpec::from_str("abc").unwrap();
+    assert!(!spec.silent_err);
+    assert_eq!(spec.opt_specs.len(), 3);
+  }
+
+  #[test]
+  fn parse_spec_with_args() {
+    use super::GetOptsSpec;
+    use std::str::FromStr;
+    let spec = GetOptsSpec::from_str("a:bc:").unwrap();
+    assert!(!spec.silent_err);
+    assert!(spec.opt_specs[0].takes_arg); // a:
+    assert!(!spec.opt_specs[1].takes_arg); // b
+    assert!(spec.opt_specs[2].takes_arg); // c:
+  }
+
+  #[test]
+  fn parse_silent_spec() {
+    use super::GetOptsSpec;
+    use std::str::FromStr;
+    let spec = GetOptsSpec::from_str(":ab").unwrap();
+    assert!(spec.silent_err);
+    assert_eq!(spec.opt_specs.len(), 2);
+  }
+
+  #[test]
+  fn parse_invalid_char() {
+    use super::GetOptsSpec;
+    use std::str::FromStr;
+    let result = GetOptsSpec::from_str("a@b");
+    assert!(result.is_err());
+  }
+
+  // ===================== Basic option matching =====================
+
+  #[test]
+  fn getopts_simple_flag() {
+    let _g = TestGuard::new();
+    test_input("getopts ab opt -a").unwrap();
+    assert_eq!(get_var("opt"), "a");
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn getopts_second_flag() {
+    let _g = TestGuard::new();
+    test_input("getopts ab opt -b").unwrap();
+    assert_eq!(get_var("opt"), "b");
+  }
+
+  // ===================== Option with argument =====================
+
+  #[test]
+  fn getopts_option_with_separate_arg() {
+    let _g = TestGuard::new();
+    test_input("getopts a: opt -a value").unwrap();
+    assert_eq!(get_var("opt"), "a");
+    assert_eq!(get_var("OPTARG"), "value");
+  }
+
+  #[test]
+  fn getopts_option_with_attached_arg() {
+    let _g = TestGuard::new();
+    test_input("getopts a: opt -avalue").unwrap();
+    assert_eq!(get_var("opt"), "a");
+    assert_eq!(get_var("OPTARG"), "value");
+  }
+
+  // ===================== Bundled options =====================
+
+  #[test]
+  fn getopts_bundled_flags() {
+    let _g = TestGuard::new();
+
+    // First call gets 'a' from -ab
+    test_input("getopts abc opt -ab").unwrap();
+    assert_eq!(get_var("opt"), "a");
+
+    // Second call gets 'b' from same -ab
+    test_input("getopts abc opt -ab").unwrap();
+    assert_eq!(get_var("opt"), "b");
+  }
+
+  // ===================== OPTIND advancement =====================
+
+  #[test]
+  fn getopts_advances_optind() {
+    let _g = TestGuard::new();
+    test_input("getopts ab opt -a").unwrap();
+
+    let optind: usize = get_var("OPTIND").parse().unwrap();
+    assert_eq!(optind, 2); // Advanced past -a
+  }
+
+  #[test]
+  fn getopts_arg_option_advances_by_two() {
+    let _g = TestGuard::new();
+    test_input("getopts a: opt -a val").unwrap();
+
+    let optind: usize = get_var("OPTIND").parse().unwrap();
+    assert_eq!(optind, 3); // Advanced past both -a and val
+  }
+
+  // ===================== Multiple calls (loop simulation) =====================
+
+  #[test]
+  fn getopts_multiple_separate_args() {
+    let _g = TestGuard::new();
+
+    test_input("getopts ab opt -a -b").unwrap();
+    assert_eq!(get_var("opt"), "a");
+    assert_eq!(state::get_status(), 0);
+
+    test_input("getopts ab opt -a -b").unwrap();
+    assert_eq!(get_var("opt"), "b");
+    assert_eq!(state::get_status(), 0);
+
+    // Third call: no more options
+    test_input("getopts ab opt -a -b").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
+
+  // ===================== End of options =====================
+
+  #[test]
+  fn getopts_no_options_returns_1() {
+    let _g = TestGuard::new();
+    test_input("getopts ab opt foo").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
+
+  #[test]
+  fn getopts_double_dash_stops() {
+    let _g = TestGuard::new();
+    test_input("getopts ab opt -- -a").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
+
+  #[test]
+  fn getopts_bare_dash_stops() {
+    let _g = TestGuard::new();
+    test_input("getopts ab opt -").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
+
+  // ===================== Unknown option =====================
+
+  #[test]
+  fn getopts_unknown_option() {
+    let _g = TestGuard::new();
+    test_input("getopts ab opt -z").unwrap();
+    assert_eq!(get_var("opt"), "?");
+    assert_eq!(state::get_status(), 0);
+  }
+
+  // ===================== Silent error mode =====================
+
+  #[test]
+  fn getopts_silent_unknown_sets_optarg() {
+    let _g = TestGuard::new();
+    test_input("getopts :ab opt -z").unwrap();
+    assert_eq!(get_var("opt"), "?");
+    assert_eq!(get_var("OPTARG"), "z");
+  }
+
+  #[test]
+  fn getopts_silent_missing_arg() {
+    let _g = TestGuard::new();
+    test_input("getopts :a: opt -a").unwrap();
+    assert_eq!(get_var("opt"), ":");
+    assert_eq!(get_var("OPTARG"), "a");
+  }
+
+  // ===================== Missing required argument (non-silent) =====================
+
+  #[test]
+  fn getopts_missing_arg_non_silent() {
+    let _g = TestGuard::new();
+    test_input("getopts a: opt -a").unwrap();
+    assert_eq!(get_var("opt"), "?");
+  }
+
+  // ===================== Error cases =====================
+
+  #[test]
+  fn getopts_missing_spec() {
+    let _g = TestGuard::new();
+    let result = test_input("getopts");
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn getopts_missing_varname() {
+    let _g = TestGuard::new();
+    let result = test_input("getopts ab");
+    assert!(result.is_err());
+  }
+}

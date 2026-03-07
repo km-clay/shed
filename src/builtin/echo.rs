@@ -5,7 +5,7 @@ use crate::{
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   procio::borrow_fd,
-  state,
+  state::{self, read_shopts},
 };
 
 pub const ECHO_OPTS: [OptSpec; 4] = [
@@ -31,7 +31,7 @@ bitflags! {
   #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
   pub struct EchoFlags: u32 {
     const NO_NEWLINE = 0b000001;
-    const USE_STDERR = 0b000010;
+		const NO_ESCAPE  = 0b000010;
     const USE_ESCAPE = 0b000100;
     const USE_PROMPT = 0b001000;
   }
@@ -54,18 +54,17 @@ pub fn echo(node: Node) -> ShResult<()> {
     argv.remove(0);
   }
 
-  let output_channel = if flags.contains(EchoFlags::USE_STDERR) {
-    borrow_fd(STDERR_FILENO)
-  } else {
-    borrow_fd(STDOUT_FILENO)
-  };
+  let output_channel = borrow_fd(STDOUT_FILENO);
+	let xpg_echo = read_shopts(|o| o.core.xpg_echo); // If true, echo expands escape sequences by default, and -E opts out
+
+	let use_escape = (xpg_echo && !flags.contains(EchoFlags::NO_ESCAPE)) || flags.contains(EchoFlags::USE_ESCAPE);
 
   let mut echo_output = prepare_echo_args(
     argv
       .into_iter()
       .map(|a| a.0) // Extract the String from the tuple of (String,Span)
       .collect::<Vec<_>>(),
-    flags.contains(EchoFlags::USE_ESCAPE),
+		use_escape,
     flags.contains(EchoFlags::USE_PROMPT),
   )?
   .join(" ");
@@ -206,9 +205,9 @@ pub fn get_echo_flags(opts: Vec<Opt>) -> ShResult<EchoFlags> {
   for opt in opts {
     match opt {
       Opt::Short('n') => flags |= EchoFlags::NO_NEWLINE,
-      Opt::Short('r') => flags |= EchoFlags::USE_STDERR,
       Opt::Short('e') => flags |= EchoFlags::USE_ESCAPE,
       Opt::Short('p') => flags |= EchoFlags::USE_PROMPT,
+			Opt::Short('E') => flags |= EchoFlags::NO_ESCAPE,
       _ => {
         return Err(ShErr::simple(
           ShErrKind::ExecFail,
@@ -219,4 +218,255 @@ pub fn get_echo_flags(opts: Vec<Opt>) -> ShResult<EchoFlags> {
   }
 
   Ok(flags)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::prepare_echo_args;
+  use crate::state::{self, write_shopts};
+  use crate::testutil::{TestGuard, test_input};
+
+  // ===================== Pure: prepare_echo_args =====================
+
+  #[test]
+  fn prepare_no_escape() {
+    let result = prepare_echo_args(vec!["hello\\nworld".into()], false, false).unwrap();
+    assert_eq!(result, vec!["hello\\nworld"]);
+  }
+
+  #[test]
+  fn prepare_escape_newline() {
+    let result = prepare_echo_args(vec!["hello\\nworld".into()], true, false).unwrap();
+    assert_eq!(result, vec!["hello\nworld"]);
+  }
+
+  #[test]
+  fn prepare_escape_tab() {
+    let result = prepare_echo_args(vec!["a\\tb".into()], true, false).unwrap();
+    assert_eq!(result, vec!["a\tb"]);
+  }
+
+  #[test]
+  fn prepare_escape_carriage_return() {
+    let result = prepare_echo_args(vec!["a\\rb".into()], true, false).unwrap();
+    assert_eq!(result, vec!["a\rb"]);
+  }
+
+  #[test]
+  fn prepare_escape_bell() {
+    let result = prepare_echo_args(vec!["a\\ab".into()], true, false).unwrap();
+    assert_eq!(result, vec!["a\x07b"]);
+  }
+
+  #[test]
+  fn prepare_escape_backspace() {
+    let result = prepare_echo_args(vec!["a\\bb".into()], true, false).unwrap();
+    assert_eq!(result, vec!["a\x08b"]);
+  }
+
+  #[test]
+  fn prepare_escape_escape_char() {
+    let result = prepare_echo_args(vec!["a\\eb".into()], true, false).unwrap();
+    assert_eq!(result, vec!["a\x1bb"]);
+  }
+
+  #[test]
+  fn prepare_escape_upper_e() {
+    let result = prepare_echo_args(vec!["a\\Eb".into()], true, false).unwrap();
+    assert_eq!(result, vec!["a\x1bb"]);
+  }
+
+  #[test]
+  fn prepare_escape_backslash() {
+    let result = prepare_echo_args(vec!["a\\\\b".into()], true, false).unwrap();
+    assert_eq!(result, vec!["a\\b"]);
+  }
+
+  #[test]
+  fn prepare_escape_hex() {
+    let result = prepare_echo_args(vec!["\\x41".into()], true, false).unwrap();
+    assert_eq!(result, vec!["A"]);
+  }
+
+  #[test]
+  fn prepare_escape_hex_lowercase() {
+    let result = prepare_echo_args(vec!["\\x61".into()], true, false).unwrap();
+    assert_eq!(result, vec!["a"]);
+  }
+
+  #[test]
+  fn prepare_escape_octal() {
+    let result = prepare_echo_args(vec!["\\0101".into()], true, false).unwrap();
+    assert_eq!(result, vec!["A"]); // octal 101 = 65 = 'A'
+  }
+
+  #[test]
+  fn prepare_escape_multiple() {
+    let result = prepare_echo_args(vec!["a\\nb\\tc".into()], true, false).unwrap();
+    assert_eq!(result, vec!["a\nb\tc"]);
+  }
+
+  #[test]
+  fn prepare_multiple_args() {
+    let result = prepare_echo_args(
+      vec!["hello".into(), "world".into()],
+      false,
+      false,
+    ).unwrap();
+    assert_eq!(result, vec!["hello", "world"]);
+  }
+
+  #[test]
+  fn prepare_trailing_backslash() {
+    let result = prepare_echo_args(vec!["hello\\".into()], true, false).unwrap();
+    assert_eq!(result, vec!["hello\\"]);
+  }
+
+  #[test]
+  fn prepare_unknown_escape_literal() {
+    // Unknown escape like \z should keep the backslash
+    let result = prepare_echo_args(vec!["\\z".into()], true, false).unwrap();
+    assert_eq!(result, vec!["\\z"]);
+  }
+
+  // ===================== Integration: basic echo =====================
+
+  #[test]
+  fn echo_simple() {
+    let guard = TestGuard::new();
+    test_input("echo hello").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello\n");
+  }
+
+  #[test]
+  fn echo_multiple_args() {
+    let guard = TestGuard::new();
+    test_input("echo hello world").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello world\n");
+  }
+
+  #[test]
+  fn echo_no_args() {
+    let guard = TestGuard::new();
+    test_input("echo").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "\n");
+  }
+
+  #[test]
+  fn echo_status_zero() {
+    let _g = TestGuard::new();
+    test_input("echo hello").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  // ===================== Integration: -n flag =====================
+
+  #[test]
+  fn echo_no_newline() {
+    let guard = TestGuard::new();
+    test_input("echo -n hello").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello");
+  }
+
+  #[test]
+  fn echo_no_newline_no_args() {
+    let guard = TestGuard::new();
+    test_input("echo -n").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "");
+  }
+
+  // ===================== Integration: -e flag =====================
+
+  #[test]
+  fn echo_escape_newline() {
+    let guard = TestGuard::new();
+    test_input("echo -e 'hello\\nworld'").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello\nworld\n");
+  }
+
+  #[test]
+  fn echo_escape_tab() {
+    let guard = TestGuard::new();
+    test_input("echo -e 'a\\tb'").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "a\tb\n");
+  }
+
+  #[test]
+  fn echo_no_escape_by_default() {
+    let guard = TestGuard::new();
+    test_input("echo 'hello\\nworld'").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello\\nworld\n");
+  }
+
+  // ===================== Integration: -E flag + xpg_echo =====================
+
+  #[test]
+  fn echo_xpg_echo_expands_by_default() {
+    let guard = TestGuard::new();
+    write_shopts(|o| o.core.xpg_echo = true);
+
+    test_input("echo 'hello\\nworld'").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello\nworld\n");
+  }
+
+  #[test]
+  fn echo_xpg_echo_suppressed_by_big_e() {
+    let guard = TestGuard::new();
+    write_shopts(|o| o.core.xpg_echo = true);
+
+    test_input("echo -E 'hello\\nworld'").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello\\nworld\n");
+  }
+
+  #[test]
+  fn echo_small_e_overrides_without_xpg() {
+    let guard = TestGuard::new();
+    write_shopts(|o| o.core.xpg_echo = false);
+
+    test_input("echo -e 'a\\tb'").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "a\tb\n");
+  }
+
+  #[test]
+  fn echo_big_e_noop_without_xpg() {
+    let guard = TestGuard::new();
+    write_shopts(|o| o.core.xpg_echo = false);
+
+    // -E without xpg_echo is a no-op — escapes already off
+    test_input("echo -E 'hello\\nworld'").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello\\nworld\n");
+  }
+
+  // ===================== Integration: combined flags =====================
+
+  #[test]
+  fn echo_n_and_e() {
+    let guard = TestGuard::new();
+    test_input("echo -n -e 'a\\nb'").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "a\nb");
+  }
+
+  #[test]
+  fn echo_xpg_n_suppresses_newline() {
+    let guard = TestGuard::new();
+    write_shopts(|o| o.core.xpg_echo = true);
+
+    test_input("echo -n 'hello\\nworld'").unwrap();
+    let out = guard.read_output();
+    // xpg_echo expands \n, -n suppresses trailing newline
+    assert_eq!(out, "hello\nworld");
+  }
 }

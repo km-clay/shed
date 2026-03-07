@@ -101,6 +101,21 @@ pub fn complete_vars(start: &str) -> Vec<String> {
   })
 }
 
+pub fn complete_vars_raw(raw: &str) -> Vec<String> {
+  if !read_vars(|v| v.get_var(raw)).is_empty() {
+    return vec![];
+  }
+  // if we are here, we have a variable substitution that isn't complete
+  // so let's try to complete it
+  read_vars(|v| {
+    v.flatten_vars()
+      .keys()
+      .filter(|k| k.starts_with(raw) && *k != raw)
+      .map(|k| k.to_string())
+      .collect::<Vec<_>>()
+  })
+}
+
 pub fn extract_var_name(text: &str) -> Option<(String, usize, usize)> {
   let mut chars = text.chars().peekable();
   let mut name = String::new();
@@ -422,7 +437,7 @@ impl CompSpec for BashCompSpec {
       candidates.extend(complete_commands(&expanded));
     }
     if self.vars {
-      candidates.extend(complete_vars(&expanded));
+      candidates.extend(complete_vars_raw(&expanded));
     }
     if self.users {
       candidates.extend(complete_users(&expanded));

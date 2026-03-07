@@ -18,9 +18,9 @@ use crate::{
 pub mod execute;
 pub mod lex;
 
-pub const TEST_UNARY_OPS: [&str; 21] = [
-  "-a", "-b", "-c", "-d", "-e", "-f", "-g", "-h", "-L", "-k", "-p", "-r", "-s", "-S", "-t", "-u",
-  "-w", "-x", "-O", "-G", "-N",
+pub const TEST_UNARY_OPS: [&str; 23] = [
+  "-a", "-b", "-c", "-d", "-e", "-f", "-g", "-h", "-L", "-k", "-n", "-p", "-r", "-s", "-S", "-t",
+  "-u", "-w", "-x", "-z", "-O", "-G", "-N",
 ];
 
 /// Try to match a specific parsing rule

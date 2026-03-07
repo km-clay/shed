@@ -212,7 +212,8 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
     for (i, arg) in argv.iter().enumerate() {
       if i == argv.len() - 1 {
         // Last arg, stuff the rest of the input into it
-        write_vars(|v| v.set_var(&arg.0, VarKind::Str(remaining.clone()), VarFlags::NONE))?;
+        let trimmed = remaining.trim_start_matches(|c: char| field_sep.contains(c));
+        write_vars(|v| v.set_var(&arg.0, VarKind::Str(trimmed.to_string()), VarFlags::NONE))?;
         break;
       }
 
@@ -338,6 +339,134 @@ pub fn read_key(node: Node) -> ShResult<()> {
 
   state::set_status(0);
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use crate::state::{self, read_vars, write_vars, VarFlags, VarKind};
+  use crate::testutil::{TestGuard, test_input};
+
+  // ===================== Basic read into REPLY =====================
+
+  #[test]
+  fn read_pipe_into_reply() {
+    let _g = TestGuard::new();
+    test_input("read < <(echo hello)").unwrap();
+    let val = read_vars(|v| v.get_var("REPLY"));
+    assert_eq!(val, "hello");
+  }
+
+  #[test]
+  fn read_pipe_into_named_var() {
+    let _g = TestGuard::new();
+    test_input("read myvar < <(echo world)").unwrap();
+    let val = read_vars(|v| v.get_var("myvar"));
+    assert_eq!(val, "world");
+  }
+
+  // ===================== Field splitting =====================
+
+  #[test]
+  fn read_two_vars() {
+    let _g = TestGuard::new();
+    test_input("read a b < <(echo 'hello world')").unwrap();
+    assert_eq!(read_vars(|v| v.get_var("a")), "hello");
+    assert_eq!(read_vars(|v| v.get_var("b")), "world");
+  }
+
+  #[test]
+  fn read_last_var_gets_remainder() {
+    let _g = TestGuard::new();
+    test_input("read a b < <(echo 'one two three four')").unwrap();
+    assert_eq!(read_vars(|v| v.get_var("a")), "one");
+    assert_eq!(read_vars(|v| v.get_var("b")), "two three four");
+  }
+
+  #[test]
+  fn read_more_vars_than_fields() {
+    let _g = TestGuard::new();
+    test_input("read a b c < <(echo 'only')").unwrap();
+    assert_eq!(read_vars(|v| v.get_var("a")), "only");
+    // b and c get empty strings since there are no more fields
+    assert_eq!(read_vars(|v| v.get_var("b")), "");
+    assert_eq!(read_vars(|v| v.get_var("c")), "");
+  }
+
+  // ===================== Custom IFS =====================
+
+  #[test]
+  fn read_custom_ifs() {
+    let _g = TestGuard::new();
+    write_vars(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::NONE)).unwrap();
+
+    test_input("read x y z < <(echo 'a:b:c')").unwrap();
+    assert_eq!(read_vars(|v| v.get_var("x")), "a");
+    assert_eq!(read_vars(|v| v.get_var("y")), "b");
+    assert_eq!(read_vars(|v| v.get_var("z")), "c");
+  }
+
+  #[test]
+  fn read_custom_ifs_remainder() {
+    let _g = TestGuard::new();
+    write_vars(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::NONE)).unwrap();
+
+    test_input("read x y < <(echo 'a:b:c:d')").unwrap();
+    assert_eq!(read_vars(|v| v.get_var("x")), "a");
+    assert_eq!(read_vars(|v| v.get_var("y")), "b:c:d");
+  }
+
+  // ===================== Custom delimiter =====================
+
+  #[test]
+  fn read_custom_delim() {
+    let _g = TestGuard::new();
+    // -d sets the delimiter; printf sends "hello,world" — read stops at ','
+    test_input("read -d , myvar < <(echo -n 'hello,world')").unwrap();
+    assert_eq!(read_vars(|v| v.get_var("myvar")), "hello");
+  }
+
+  // ===================== Status =====================
+
+  #[test]
+  fn read_status_zero() {
+    let _g = TestGuard::new();
+    test_input("read < <(echo hello)").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn read_eof_status_one() {
+    let _g = TestGuard::new();
+    // Empty input / EOF should set status 1
+    test_input("read < <(echo -n '')").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
+
+  // ===================== Flag parsing (pure) =====================
+
+  #[test]
+  fn flags_raw_mode() {
+    use super::get_read_flags;
+    use crate::getopt::Opt;
+    let flags = get_read_flags(vec![Opt::Short('r')]).unwrap();
+    assert!(flags.flags.contains(super::ReadFlags::NO_ESCAPES));
+  }
+
+  #[test]
+  fn flags_prompt() {
+    use super::get_read_flags;
+    use crate::getopt::Opt;
+    let flags = get_read_flags(vec![Opt::ShortWithArg('p', "Enter: ".into())]).unwrap();
+    assert_eq!(flags.prompt, Some("Enter: ".into()));
+  }
+
+  #[test]
+  fn flags_delimiter() {
+    use super::get_read_flags;
+    use crate::getopt::Opt;
+    let flags = get_read_flags(vec![Opt::ShortWithArg('d', ",".into())]).unwrap();
+    assert_eq!(flags.delim, b',');
+  }
 }
 
 pub fn get_read_key_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
