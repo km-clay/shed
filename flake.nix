@@ -22,8 +22,11 @@
         lockFile = ./Cargo.lock;
       };
 
-      doCheck = false;
       passthru.shellPath = "/bin/shed";
+
+      checkPhase = ''
+        cargo test -- --test-threads=1
+      '';
 
       meta = with pkgs.lib; {
         description = "A Linux shell written in Rust";

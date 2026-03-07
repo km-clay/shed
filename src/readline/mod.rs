@@ -488,6 +488,16 @@ impl ShedVi {
             self.needs_redraw = true;
             self.completer.reset();
 
+            write_vars(|v| {
+              v.set_var(
+                "SHED_VI_MODE",
+                VarKind::Str(self.mode.report_mode().to_string()),
+                VarFlags::NONE,
+              )
+            })
+            .ok();
+            self.prompt.refresh();
+
             with_vars([("_COMP_CANDIDATE".into(), candidate.clone())], || {
               post_cmds.exec_with(&candidate);
             });
@@ -642,6 +652,13 @@ impl ShedVi {
             .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
           let hint = self.history.get_hint();
           self.editor.set_hint(hint);
+					write_vars(|v| {
+						v.set_var(
+							"SHED_VI_MODE",
+							VarKind::Str(self.mode.report_mode().to_string()),
+							VarFlags::NONE,
+						)
+					}).ok();
 
           // If we are here, we hit a case where pressing tab returned a single candidate
           // So we can just go ahead and reset the completer after this

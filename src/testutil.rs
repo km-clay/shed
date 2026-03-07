@@ -32,7 +32,7 @@ pub fn has_cmd(cmd: &str) -> bool {
 }
 
 pub fn test_input(input: impl Into<String>) -> ShResult<()> {
-	exec_input(input.into(), None, true, None)
+	exec_input(input.into(), None, false, None)
 }
 
 pub struct TestGuard {

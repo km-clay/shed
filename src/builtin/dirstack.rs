@@ -429,7 +429,7 @@ pub fn dirs(node: Node) -> ShResult<()> {
 #[cfg(test)]
 pub mod tests {
 	use std::{env, path::PathBuf};
-	use crate::{parse::execute::exec_input, state::{self, read_meta}, testutil::TestGuard};
+	use crate::{state::{self, read_meta}, testutil::{TestGuard, test_input}};
 	use pretty_assertions::{assert_ne,assert_eq};
 use tempfile::TempDir;
 
@@ -438,7 +438,7 @@ use tempfile::TempDir;
 		let g = TestGuard::new();
 		let current_dir = env::current_dir().unwrap();
 
-		exec_input("pushd /tmp".into(), None, true, None).unwrap();
+		test_input("pushd /tmp").unwrap();
 
 		let new_dir = env::current_dir().unwrap();
 
@@ -461,7 +461,7 @@ use tempfile::TempDir;
 		let tempdir = TempDir::new().unwrap();
 		let tempdir_raw = tempdir.path().to_path_buf().to_string_lossy().to_string();
 
-		exec_input(format!("pushd {tempdir_raw}"), None, true, None).unwrap();
+		test_input(format!("pushd {tempdir_raw}")).unwrap();
 
 		let dir_stack = read_meta(|m| m.dirs().clone());
 		assert_eq!(dir_stack.len(), 1);
@@ -470,7 +470,7 @@ use tempfile::TempDir;
 		assert_eq!(env::current_dir().unwrap(), tempdir.path());
 		g.read_output(); // consume output of pushd
 
-		exec_input("popd".into(), None, true, None).unwrap();
+		test_input("popd").unwrap();
 
 		assert_eq!(env::current_dir().unwrap(), current_dir);
 		let out = g.read_output();
@@ -482,7 +482,7 @@ use tempfile::TempDir;
 	fn test_popd_empty_stack() {
 		let _g = TestGuard::new();
 
-		exec_input("popd".into(), None, false, None).unwrap_err();
+		test_input("popd").unwrap_err();
 		assert_ne!(state::get_status(), 0);
 	}
 
@@ -495,8 +495,8 @@ use tempfile::TempDir;
 		let path1 = tmp1.path().to_path_buf();
 		let path2 = tmp2.path().to_path_buf();
 
-		exec_input(format!("pushd {}", path1.display()), None, false, None).unwrap();
-		exec_input(format!("pushd {}", path2.display()), None, false, None).unwrap();
+		test_input(format!("pushd {}", path1.display())).unwrap();
+		test_input(format!("pushd {}", path2.display())).unwrap();
 		g.read_output();
 
 		assert_eq!(env::current_dir().unwrap(), path2);
@@ -505,10 +505,10 @@ use tempfile::TempDir;
 		assert_eq!(stack[0], path1);
 		assert_eq!(stack[1], original);
 
-		exec_input("popd".into(), None, false, None).unwrap();
+		test_input("popd").unwrap();
 		assert_eq!(env::current_dir().unwrap(), path1);
 
-		exec_input("popd".into(), None, false, None).unwrap();
+		test_input("popd").unwrap();
 		assert_eq!(env::current_dir().unwrap(), original);
 
 		let stack = read_meta(|m| m.dirs().clone());
@@ -526,13 +526,13 @@ use tempfile::TempDir;
 
 		// Build stack: cwd=original, then pushd path1, pushd path2
 		// Stack after: cwd=path2, [path1, original]
-		exec_input(format!("pushd {}", path1.display()), None, false, None).unwrap();
-		exec_input(format!("pushd {}", path2.display()), None, false, None).unwrap();
+		test_input(format!("pushd {}", path1.display())).unwrap();
+		test_input(format!("pushd {}", path2.display())).unwrap();
 		g.read_output();
 
 		// pushd +1 rotates: [path2, path1, original] -> rotate_left(1) -> [path1, original, path2]
 		// pop front -> cwd=path1, stack=[original, path2]
-		exec_input("pushd +1".into(), None, false, None).unwrap();
+		test_input("pushd +1").unwrap();
 		assert_eq!(env::current_dir().unwrap(), path1);
 
 		let stack = read_meta(|m| m.dirs().clone());
@@ -548,7 +548,7 @@ use tempfile::TempDir;
 		let tmp = TempDir::new().unwrap();
 		let path = tmp.path().to_path_buf();
 
-		exec_input(format!("pushd -n {}", path.display()), None, false, None).unwrap();
+		test_input(format!("pushd -n {}", path.display())).unwrap();
 
 		// -n means don't cd, but the dir should still be on the stack
 		assert_eq!(env::current_dir().unwrap(), original);
@@ -559,10 +559,10 @@ use tempfile::TempDir;
 		let _g = TestGuard::new();
 		let tmp = TempDir::new().unwrap();
 
-		exec_input(format!("pushd {}", tmp.path().display()), None, false, None).unwrap();
+		test_input(format!("pushd {}", tmp.path().display())).unwrap();
 		assert_eq!(read_meta(|m| m.dirs().len()), 1);
 
-		exec_input("dirs -c".into(), None, false, None).unwrap();
+		test_input("dirs -c").unwrap();
 		assert_eq!(read_meta(|m| m.dirs().len()), 0);
 	}
 
@@ -573,10 +573,10 @@ use tempfile::TempDir;
 		let tmp = TempDir::new().unwrap();
 		let path = tmp.path().to_path_buf();
 
-		exec_input(format!("pushd {}", path.display()), None, false, None).unwrap();
+		test_input(format!("pushd {}", path.display())).unwrap();
 		g.read_output();
 
-		exec_input("dirs -p".into(), None, false, None).unwrap();
+		test_input("dirs -p").unwrap();
 		let out = g.read_output();
 		let lines: Vec<&str> = out.split('\n').filter(|l| !l.is_empty()).collect();
 		assert_eq!(lines.len(), 2);
@@ -594,11 +594,11 @@ use tempfile::TempDir;
 		let path2 = tmp2.path().to_path_buf();
 
 		// Stack: cwd=path2, [path1, original]
-		exec_input(format!("pushd {}", path1.display()), None, false, None).unwrap();
-		exec_input(format!("pushd {}", path2.display()), None, false, None).unwrap();
+		test_input(format!("pushd {}", path1.display())).unwrap();
+		test_input(format!("pushd {}", path2.display())).unwrap();
 
 		// popd +1 removes index (1-1)=0 from stored dirs, i.e. path1
-		exec_input("popd +1".into(), None, false, None).unwrap();
+		test_input("popd +1").unwrap();
 		assert_eq!(env::current_dir().unwrap(), path2); // no cd
 
 		let stack = read_meta(|m| m.dirs().clone());
@@ -610,7 +610,7 @@ use tempfile::TempDir;
 	fn test_pushd_nonexistent_dir() {
 		let _g = TestGuard::new();
 
-		let result = exec_input("pushd /nonexistent_dir_12345".into(), None, false, None);
+		let result = test_input("pushd /nonexistent_dir_12345");
 		assert!(result.is_err());
 	}
 }

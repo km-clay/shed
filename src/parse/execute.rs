@@ -411,7 +411,8 @@ impl Dispatcher {
 
     blame.rename(func_name.clone());
 
-    let argv = prepare_argv(argv).try_blame(blame.clone())?;
+    let mut argv = prepare_argv(argv).try_blame(blame.clone())?;
+    argv.insert(0, (func_name.clone(), blame.clone()));
     let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&func_name)) {
       let _guard = scope_guard(Some(argv));
       func_body.body_mut().propagate_context(func_ctx);

@@ -226,7 +226,7 @@ fn complete_filename(start: &str) -> Vec<String> {
       let mut full_path = dir.join(&file_name);
 
       // Add trailing slash for directories
-      if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+      if entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
         full_path.push(""); // adds trailing /
       }
 

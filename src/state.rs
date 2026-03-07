@@ -195,7 +195,7 @@ impl ScopeStack {
     new
   }
   pub fn descend(&mut self, argv: Option<Vec<String>>) {
-    let mut new_vars = VarTab::new();
+    let mut new_vars = VarTab::bare();
     if let Some(argv) = argv {
       for arg in argv {
         new_vars.bpush_arg(arg);
@@ -493,6 +493,13 @@ impl ScopeStack {
       && let Some(val) = self.global_params.get(&param.to_string())
     {
       return val.clone();
+    }
+    // Positional params are scope-local; only check the current scope
+    if matches!(param, ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount) {
+      if let Some(scope) = self.scopes.last() {
+        return scope.get_param(param);
+      }
+      return "".into();
     }
     for scope in self.scopes.iter().rev() {
       let val = scope.get_param(param);
@@ -996,6 +1003,14 @@ pub struct VarTab {
 }
 
 impl VarTab {
+  pub fn bare() -> Self {
+    Self {
+      vars: HashMap::new(),
+      params: HashMap::new(),
+      sh_argv: VecDeque::new(),
+      maps: HashMap::new(),
+    }
+  }
   pub fn new() -> Self {
     let vars = HashMap::new();
     let params = Self::init_params();
