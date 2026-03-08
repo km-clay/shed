@@ -3489,6 +3489,9 @@ impl LineBuf {
 impl Display for LineBuf {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let mut full_buf = self.buffer.clone();
+    if full_buf.is_empty() {
+      return write!(f, "{}", full_buf);
+    }
     if let Some((start, end)) = self.select_range() {
       let mode = self.select_mode.unwrap();
       let start_byte = self.read_idx_byte_pos(start);
@@ -3497,7 +3500,7 @@ impl Display for LineBuf {
       match mode.anchor() {
         SelectAnchor::Start => {
           let mut inclusive = start_byte..=end_byte;
-          if *inclusive.end() == full_buf.len() {
+          if *inclusive.end() >= full_buf.len() {
             inclusive = start_byte..=end_byte.saturating_sub(1);
           }
           let selected = format!(

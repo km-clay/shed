@@ -225,5 +225,6 @@ vi_test! {
 	vi_dollar_single     : "h"                  => "$"            => "h", 0;
 	vi_caret_no_ws       : "hello"              => "$^"           => "hello", 0;
 	vi_f_last_char       : "hello"              => "fo"           => "hello", 4;
-	vi_r_on_space        : "hello world"        => "5|r-"         => "hell- world", 4
+	vi_r_on_space        : "hello world"        => "5|r-"         => "hell- world", 4;
+	vi_vw_doesnt_crash   : ""        						=> "vw"           => "", 0
 }
