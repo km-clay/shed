@@ -213,7 +213,7 @@ impl ViVisual {
           let ch = chars_clone.next()?;
           return Some(ViCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::ReplaceChar(ch))),
+            verb: Some(VerbCmd(1, Verb::ReplaceCharInplace(ch,1))),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -232,6 +232,24 @@ impl ViVisual {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(count, Verb::ToLower)),
+            motion: None,
+            raw_seq: self.take_cmd(),
+            flags: CmdFlags::empty(),
+          });
+        }
+        's' => {
+          return Some(ViCmd {
+            register,
+            verb: Some(VerbCmd(count, Verb::Delete)),
+            motion: None,
+            raw_seq: self.take_cmd(),
+            flags: CmdFlags::empty(),
+          });
+        }
+        'S' => {
+          return Some(ViCmd {
+            register,
+            verb: Some(VerbCmd(count, Verb::Change)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -283,8 +301,13 @@ impl ViVisual {
           });
         }
         'y' => {
-          chars = chars_clone;
-          break 'verb_parse Some(VerbCmd(count, Verb::Yank));
+					return Some(ViCmd {
+						register,
+						verb: Some(VerbCmd(count, Verb::Yank)),
+						motion: None,
+						raw_seq: self.take_cmd(),
+						flags: CmdFlags::empty(),
+					});
         }
         'd' => {
           chars = chars_clone;
@@ -335,7 +358,7 @@ impl ViVisual {
               'g' => {
                 chars_clone.next();
                 chars = chars_clone;
-                break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfBuffer));
+                break 'motion_parse Some(MotionCmd(count, Motion::StartOfBuffer));
               }
               'e' => {
                 chars_clone.next();

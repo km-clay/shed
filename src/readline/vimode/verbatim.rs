@@ -4,19 +4,11 @@ use crate::readline::vicmd::{CmdFlags, RegisterName, To, Verb, VerbCmd, ViCmd};
 
 #[derive(Default, Clone, Debug)]
 pub struct ViVerbatim {
-	pending_seq: String,
   sent_cmd: Vec<ViCmd>,
   repeat_count: u16,
-	read_one: bool
 }
 
 impl ViVerbatim {
-	pub fn read_one() -> Self {
-		Self {
-			read_one: true,
-			..Self::default()
-		}
-	}
   pub fn new() -> Self {
     Self::default()
   }
@@ -31,7 +23,7 @@ impl ViVerbatim {
 impl ViMode for ViVerbatim {
   fn handle_key(&mut self, key: E) -> Option<ViCmd> {
     match key {
-      E(K::Verbatim(seq), _mods) if self.read_one => {
+      E(K::Verbatim(seq), _mods) => {
         log::debug!("Received verbatim key sequence: {:?}", seq);
         let cmd = ViCmd {
           register: RegisterName::default(),
@@ -43,22 +35,6 @@ impl ViMode for ViVerbatim {
         self.sent_cmd.push(cmd.clone());
         Some(cmd)
       }
-			E(K::Verbatim(seq), _mods) => {
-				self.pending_seq.push_str(&seq);
-				None
-			}
-			E(K::BracketedPasteEnd, _mods) => {
-				log::debug!("Received verbatim paste: {:?}", self.pending_seq);
-				let cmd = ViCmd {
-					register: RegisterName::default(),
-					verb: Some(VerbCmd(1, Verb::Insert(self.pending_seq.clone()))),
-					motion: None,
-					raw_seq: std::mem::take(&mut self.pending_seq),
-					flags: CmdFlags::EXIT_CUR_MODE,
-				};
-				self.sent_cmd.push(cmd.clone());
-				Some(cmd)
-			}
       _ => common_cmds(key),
     }
   }

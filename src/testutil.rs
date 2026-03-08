@@ -1,7 +1,7 @@
 use std::{
 	collections::{HashMap, HashSet},
 	env,
-	os::fd::{AsRawFd, OwnedFd},
+	os::fd::{AsRawFd, BorrowedFd, OwnedFd},
 	path::PathBuf,
 	sync::{self, Arc, MutexGuard},
 };
@@ -14,7 +14,7 @@ use nix::{
 };
 
 use crate::{
-	expand::expand_aliases, libsh::error::ShResult, parse::{ParsedSrc, Redir, RedirType, execute::exec_input, lex::LexFlags}, procio::{IoFrame, IoMode, RedirGuard}, state::{MetaTab, SHED, read_logic}
+	expand::expand_aliases, libsh::error::ShResult, parse::{ParsedSrc, Redir, RedirType, execute::exec_input, lex::LexFlags}, procio::{IoFrame, IoMode, RedirGuard}, readline::register::{restore_registers, save_registers}, state::{MetaTab, SHED, read_logic}
 };
 
 static TEST_MUTEX: sync::Mutex<()> = sync::Mutex::new(());
@@ -38,7 +38,7 @@ pub struct TestGuard {
 	old_cwd: PathBuf,
 	saved_env: HashMap<String, String>,
 	pty_master: OwnedFd,
-	_pty_slave: OwnedFd,
+	pty_slave: OwnedFd,
 
 	cleanups: Vec<Box<dyn FnOnce()>>
 }
@@ -87,15 +87,20 @@ impl TestGuard {
 		let old_cwd = env::current_dir().unwrap();
 		let saved_env = env::vars().collect();
 		SHED.with(|s| s.save());
+		save_registers();
 		Self {
 			_lock,
 			_redir_guard,
 			old_cwd,
 			saved_env,
 			pty_master,
-			_pty_slave: pty_slave,
+			pty_slave,
 			cleanups: vec![],
 		}
+	}
+
+	pub fn pty_slave(&self) -> BorrowedFd {
+		unsafe { BorrowedFd::borrow_raw(self.pty_slave.as_raw_fd()) }
 	}
 
 	pub fn add_cleanup(&mut self, f: impl FnOnce() + 'static) {
@@ -148,6 +153,7 @@ impl Drop for TestGuard {
 			cleanup();
 		}
 		SHED.with(|s| s.restore());
+		restore_registers();
 	}
 }
 
@@ -221,6 +227,7 @@ pub enum NdKind {
   Conjunction,
   Assignment,
   BraceGrp,
+	Negate,
   Test,
   FuncDef,
 }
@@ -228,6 +235,7 @@ pub enum NdKind {
 impl crate::parse::NdRule {
 	pub fn as_nd_kind(&self) -> NdKind {
 		match self {
+			Self::Negate { .. } => NdKind::Negate,
 			Self::IfNode { .. } => NdKind::IfNode,
 			Self::LoopNode { .. } => NdKind::LoopNode,
 			Self::ForNode { .. } => NdKind::ForNode,

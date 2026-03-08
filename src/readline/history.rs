@@ -217,18 +217,36 @@ pub struct History {
 }
 
 impl History {
+  pub fn empty() -> Self {
+    Self {
+      path: PathBuf::new(),
+      pending: None,
+      entries: Vec::new(),
+      search_mask: Vec::new(),
+      fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
+      no_matches: false,
+      cursor: 0,
+      //search_direction: Direction::Backward,
+      ignore_dups: false,
+      max_size: None,
+    }
+  }
   pub fn new() -> ShResult<Self> {
     let ignore_dups = crate::state::read_shopts(|s| s.core.hist_ignore_dupes);
     let max_hist = crate::state::read_shopts(|s| s.core.max_hist);
+
     let path = PathBuf::from(env::var("SHEDHIST").unwrap_or({
       let home = env::var("HOME").unwrap();
       format!("{home}/.shed_history")
     }));
+
     let mut entries = read_hist_file(&path)?;
+
     // Enforce max_hist limit on loaded entries (negative = unlimited)
     if max_hist >= 0 && entries.len() > max_hist as usize {
       entries = entries.split_off(entries.len() - max_hist as usize);
     }
+
     let search_mask = dedupe_entries(&entries);
     let cursor = search_mask.len();
     let max_size = if max_hist < 0 {
@@ -236,6 +254,7 @@ impl History {
     } else {
       Some(max_hist as u32)
     };
+
     Ok(Self {
       path,
       entries,

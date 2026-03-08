@@ -499,6 +499,7 @@ pub struct PollReader {
   parser: Parser,
   collector: KeyCollector,
 	byte_buf: VecDeque<u8>,
+	pub verbatim_single: bool,
 	pub verbatim: bool,
 }
 
@@ -508,6 +509,7 @@ impl PollReader {
       parser: Parser::new(),
       collector: KeyCollector::new(),
 			byte_buf: VecDeque::new(),
+			verbatim_single: false,
 			verbatim: false,
     }
   }
@@ -531,6 +533,15 @@ impl PollReader {
 		None
 	}
 
+	pub fn read_one_verbatim(&mut self) -> Option<KeyEvent> {
+		if self.byte_buf.is_empty() {
+			return None;
+		}
+		let bytes: Vec<u8> = self.byte_buf.drain(..).collect();
+		let verbatim_str = String::from_utf8_lossy(&bytes).to_string();
+		Some(KeyEvent(KeyCode::Verbatim(verbatim_str.into()), ModKeys::empty()))
+	}
+
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
 		self.byte_buf.extend(bytes);
   }
@@ -544,17 +555,28 @@ impl Default for PollReader {
 
 impl KeyReader for PollReader {
   fn read_key(&mut self) -> Result<Option<KeyEvent>, ShErr> {
+		if self.verbatim_single {
+			if let Some(key) = self.read_one_verbatim() {
+				self.verbatim_single = false;
+				return Ok(Some(key));
+			}
+			return Ok(None);
+		}
 		if self.verbatim {
 			if let Some(paste) = self.handle_bracket_paste() {
 				return Ok(Some(paste));
 			}
 			// If we're in verbatim mode but haven't seen the end marker yet, don't attempt to parse keys
 			return Ok(None);
-		} else if self.byte_buf.len() == 1
-			&& self.byte_buf.front() == Some(&b'\x1b') {
-			// User pressed escape
-			self.byte_buf.pop_front(); // Consume the escape byte
-			return Ok(Some(KeyEvent(KeyCode::Esc, ModKeys::empty())));
+		} else if self.byte_buf.front() == Some(&b'\x1b') {
+			// Escape: if it's the only byte, or the next byte isn't a valid
+			// escape sequence prefix ([ or O), emit a standalone Escape
+			if self.byte_buf.len() == 1
+				|| !matches!(self.byte_buf.get(1), Some(b'[') | Some(b'O'))
+			{
+				self.byte_buf.pop_front();
+				return Ok(Some(KeyEvent(KeyCode::Esc, ModKeys::empty())));
+			}
 		}
 		while let Some(byte) = self.byte_buf.pop_front() {
 			self.parser.advance(&mut self.collector, &[byte]);

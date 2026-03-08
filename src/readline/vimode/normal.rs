@@ -434,7 +434,7 @@ impl ViNormal {
             'g' => {
               chars_clone.next();
               chars = chars_clone;
-              break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfBuffer));
+              break 'motion_parse Some(MotionCmd(count, Motion::StartOfBuffer));
             }
             'e' => {
               chars = chars_clone;

@@ -343,7 +343,7 @@ pub enum Motion {
   HalfOfScreen,
   HalfOfScreenLineText,
   WholeBuffer,
-  BeginningOfBuffer,
+  StartOfBuffer,
   EndOfBuffer,
   ToColumn,
   ToDelimMatch,

@@ -250,6 +250,7 @@ impl Dispatcher {
       NdRule::CaseNode { .. } => self.exec_case(node)?,
       NdRule::BraceGrp { .. } => self.exec_brc_grp(node)?,
       NdRule::FuncDef { .. } => self.exec_func_def(node)?,
+			NdRule::Negate { .. } => self.exec_negated(node)?,
       NdRule::Command { .. } => self.dispatch_cmd(node)?,
       NdRule::Test { .. } => self.exec_test(node)?,
       _ => unreachable!(),
@@ -284,6 +285,16 @@ impl Dispatcher {
       self.exec_cmd(node)
     }
   }
+	pub fn exec_negated(&mut self, node: Node) -> ShResult<()> {
+		let NdRule::Negate { cmd } = node.class else {
+			unreachable!()
+		};
+		self.dispatch_node(*cmd)?;
+		let status = state::get_status();
+		state::set_status(if status == 0 { 1 } else { 0 });
+
+		Ok(())
+	}
   pub fn exec_conjunction(&mut self, conjunction: Node) -> ShResult<()> {
     let NdRule::Conjunction { elements } = conjunction.class else {
       unreachable!()
@@ -578,6 +589,7 @@ impl Dispatcher {
             }
           }
         } else {
+          state::set_status(0);
           break;
         }
       }
@@ -714,9 +726,13 @@ impl Dispatcher {
         }
       }
 
-      if !matched && !else_block.is_empty() {
-        for node in else_block {
-          s.dispatch_node(node)?;
+      if !matched {
+        if !else_block.is_empty() {
+          for node in else_block {
+            s.dispatch_node(node)?;
+          }
+        } else {
+          state::set_status(0);
         }
       }
 
@@ -1194,4 +1210,192 @@ pub fn is_func(tk: Option<Tk>) -> bool {
 
 pub fn is_subsh(tk: Option<Tk>) -> bool {
   tk.is_some_and(|tk| tk.flags.contains(TkFlags::IS_SUBSH))
+}
+
+#[cfg(test)]
+mod tests {
+  use crate::state;
+  use crate::testutil::{TestGuard, test_input};
+
+  // ===================== while/until status =====================
+
+  #[test]
+  fn while_loop_status_zero_after_completion() {
+    let _g = TestGuard::new();
+    test_input("while false; do :; done").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn while_loop_status_zero_after_iterations() {
+    let _g = TestGuard::new();
+    test_input("X=0; while [[ $X -lt 3 ]]; do X=$((X+1)); done").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn until_loop_status_zero_after_completion() {
+    let _g = TestGuard::new();
+    test_input("until true; do :; done").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn until_loop_status_zero_after_iterations() {
+    let _g = TestGuard::new();
+    test_input("X=3; until [[ $X -le 0 ]]; do X=$((X-1)); done").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn while_break_preserves_status() {
+    let _g = TestGuard::new();
+    test_input("while true; do break; done").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn while_body_status_propagates() {
+    let _g = TestGuard::new();
+    test_input("X=0; while [[ $X -lt 1 ]]; do X=$((X+1)); false; done").unwrap();
+    // Loop body ended with `false` (status 1), but the loop itself
+    // completed normally when the condition failed, so status should be 0
+    assert_eq!(state::get_status(), 0);
+  }
+
+  // ===================== if/elif/else status =====================
+
+  #[test]
+  fn if_true_body_status() {
+    let _g = TestGuard::new();
+    test_input("if true; then echo ok; fi").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn if_false_no_else_status() {
+    let _g = TestGuard::new();
+    test_input("if false; then echo ok; fi").unwrap();
+    // No branch taken, POSIX says status is 0
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn if_else_branch_status() {
+    let _g = TestGuard::new();
+    test_input("if false; then true; else false; fi").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
+
+  // ===================== for loop status =====================
+
+  #[test]
+  fn for_loop_empty_list_status() {
+    let _g = TestGuard::new();
+    test_input("for x in; do echo $x; done").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn for_loop_body_status() {
+    let _g = TestGuard::new();
+    test_input("for x in a b c; do true; done").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  // ===================== case status =====================
+
+  #[test]
+  fn case_match_status() {
+    let _g = TestGuard::new();
+    test_input("case foo in foo) true;; esac").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  #[test]
+  fn case_no_match_status() {
+    let _g = TestGuard::new();
+    test_input("case foo in bar) true;; esac").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+	// ===================== other stuff =====================
+
+	#[test]
+	fn for_loop_var_zip() {
+		let g = TestGuard::new();
+		test_input("for a b in 1 2 3 4 5 6; do echo $a $b; done").unwrap();
+		let out = g.read_output();
+		assert_eq!(out, "1 2\n3 4\n5 6\n");
+	}
+
+	#[test]
+	fn for_loop_unsets_zipped() {
+		let g = TestGuard::new();
+		test_input("for a b c d in 1 2 3 4 5 6; do echo $a $b $c $d; done").unwrap();
+		let out = g.read_output();
+		assert_eq!(out, "1 2 3 4\n5 6\n");
+	}
+
+	// ===================== negation (!) status =====================
+
+	#[test]
+	fn negate_true() {
+		let _g = TestGuard::new();
+		test_input("! true").unwrap();
+		assert_eq!(state::get_status(), 1);
+	}
+
+	#[test]
+	fn negate_false() {
+		let _g = TestGuard::new();
+		test_input("! false").unwrap();
+		assert_eq!(state::get_status(), 0);
+	}
+
+	#[test]
+	fn double_negate_true() {
+		let _g = TestGuard::new();
+		test_input("! ! true").unwrap();
+		assert_eq!(state::get_status(), 0);
+	}
+
+	#[test]
+	fn double_negate_false() {
+		let _g = TestGuard::new();
+		test_input("! ! false").unwrap();
+		assert_eq!(state::get_status(), 1);
+	}
+
+	#[test]
+	fn negate_pipeline_last_cmd() {
+		let _g = TestGuard::new();
+		// pipeline status = last cmd (false) = 1, negated → 0
+		test_input("! true | false").unwrap();
+		assert_eq!(state::get_status(), 0);
+	}
+
+	#[test]
+	fn negate_pipeline_last_cmd_true() {
+		let _g = TestGuard::new();
+		// pipeline status = last cmd (true) = 0, negated → 1
+		test_input("! false | true").unwrap();
+		assert_eq!(state::get_status(), 1);
+	}
+
+	#[test]
+	fn negate_in_conjunction() {
+		let _g = TestGuard::new();
+		// ! binds to pipeline, not conjunction: (! (true && false)) && true
+		test_input("! (true && false) && true").unwrap();
+		assert_eq!(state::get_status(), 0);
+	}
+
+	#[test]
+	fn negate_in_if_condition() {
+		let g = TestGuard::new();
+		test_input("if ! false; then echo yes; fi").unwrap();
+		assert_eq!(state::get_status(), 0);
+		assert_eq!(g.read_output(), "yes\n");
+	}
 }

@@ -823,7 +823,7 @@ impl LineBuf {
     }
     Some(self.line_bounds(line_no))
   }
-  pub fn this_word(&mut self, word: Word) -> (usize, usize) {
+	pub fn word_at(&mut self, pos: usize, word: Word) -> (usize,usize) {
     let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
       self.cursor.get()
     } else {
@@ -835,7 +835,35 @@ impl LineBuf {
       self.end_of_word_forward(self.cursor.get(), word)
     };
     (start, end)
+	}
+  pub fn this_word(&mut self, word: Word) -> (usize, usize) {
+		self.word_at(self.cursor.get(), word)
   }
+
+	pub fn number_at_cursor(&mut self) -> Option<(usize,usize)> {
+		self.number_at(self.cursor.get())
+	}
+	pub fn number_at(&mut self, pos: usize) -> Option<(usize,usize)> {
+		// A number is a sequence of digits, possibly containing one dot, and possibly starting with a minus sign
+		let is_number_char = |c: &str| c == "." || c == "-" || c.chars().all(|c| c.is_ascii_digit());
+		let is_digit = |gr: &str| gr.chars().all(|c| c.is_ascii_digit());
+		if self.grapheme_at(pos).is_some_and(|gr| !is_number_char(gr)) {
+			return None;
+		}
+		let mut fwd_indices = self.directional_indices_iter_from(pos, Direction::Forward);
+		let mut bkwd_indices = self.directional_indices_iter_from(pos, Direction::Backward);
+
+		// Find the digit span, then check if preceded by '-'
+		let mut start = bkwd_indices.find(|i| !self.grapheme_at(*i).is_some_and(is_digit))
+				.map(|i| i + 1).unwrap_or(0);
+		let end = fwd_indices.find(|i| !self.grapheme_at(*i).is_some_and(is_digit))
+				.map(|i| i - 1).unwrap_or(self.cursor.max);  // inclusive end
+
+		// Check for leading minus
+		if start > 0 && self.grapheme_at(start - 1) == Some("-") { start -= 1; }
+
+		Some((start, end))
+	}
   pub fn this_line_exclusive(&mut self) -> (usize, usize) {
     let line_no = self.cursor_line_number();
     let (start, mut end) = self.line_bounds(line_no);
@@ -947,17 +975,14 @@ impl LineBuf {
     dir: Direction,
   ) -> Box<dyn Iterator<Item = usize>> {
     self.update_graphemes_lazy();
-    let skip = pos + 1;
+		let len = self.grapheme_indices().len();
     match dir {
-      Direction::Forward => Box::new(self.grapheme_indices().to_vec().into_iter().skip(skip))
-        as Box<dyn Iterator<Item = usize>>,
-      Direction::Backward => Box::new(self.grapheme_indices().to_vec().into_iter().take(pos).rev())
-        as Box<dyn Iterator<Item = usize>>,
+      Direction::Forward => Box::new(pos + 1..len) as Box<dyn Iterator<Item = usize>>,
+      Direction::Backward => Box::new((0..pos).rev()) as Box<dyn Iterator<Item = usize>>,
     }
   }
   pub fn is_word_bound(&mut self, pos: usize, word: Word, dir: Direction) -> bool {
     let clamped_pos = ClampedUsize::new(pos, self.cursor.max, true);
-    log::debug!("clamped_pos: {}", clamped_pos.get());
     let cur_char = self
       .grapheme_at(clamped_pos.get())
       .map(|c| c.to_string())
@@ -1193,20 +1218,6 @@ impl LineBuf {
       Bound::Around => {
         // End excludes the quote, so push it forward
         end += 1;
-
-        // We also need to include any trailing whitespace
-        let end_of_line = self.end_of_line();
-        let remainder = end..end_of_line;
-        for idx in remainder {
-          let Some(gr) = self.grapheme_at(idx) else {
-            break;
-          };
-          if is_whitespace(gr) {
-            end += 1;
-          } else {
-            break;
-          }
-        }
       }
     }
 
@@ -1793,6 +1804,11 @@ impl LineBuf {
   /// Find the start of the current/previous word backward
   pub fn start_of_word_backward(&mut self, mut pos: usize, word: Word) -> usize {
     let default = 0;
+    // In insert mode, cursor can be one past the last grapheme; step back so
+    // grapheme_at(pos) doesn't return None and bail to 0
+    if pos > 0 && self.grapheme_at(pos).is_none() {
+      pos -= 1;
+    }
     let mut indices_iter = (0..pos).rev().peekable();
 
     match word {
@@ -2000,10 +2016,12 @@ impl LineBuf {
       return;
     }
     let start = self.index_byte_pos(pos);
-    let end = start + gr.len();
+    let end = start + (new.len().max(gr.len()));
     self.buffer.replace_range(start..end, new);
   }
   pub fn calc_indent_level(&mut self) {
+		// FIXME: This implementation is extremely naive but it kind of sort of works for now
+		// Need to re-implement it and write tests
     let to_cursor = self
       .slice_to_cursor()
       .map(|s| s.to_string())
@@ -2377,15 +2395,28 @@ impl LineBuf {
       MotionCmd(_count, Motion::WholeBuffer) => {
         MotionKind::Exclusive((0, self.grapheme_indices().len()))
       }
-      MotionCmd(_count, Motion::BeginningOfBuffer) => MotionKind::On(0),
-      MotionCmd(_count, Motion::EndOfBuffer) => {
-        if self.cursor.exclusive {
-          MotionKind::On(self.grapheme_indices().len().saturating_sub(1))
-        } else {
-          MotionKind::On(self.grapheme_indices().len())
-        }
+      MotionCmd(_count, Motion::StartOfBuffer) => {
+        MotionKind::InclusiveWithTargetCol((0, self.end_of_line()), 0)
       }
-      MotionCmd(_count, Motion::ToColumn) => todo!(),
+      MotionCmd(_count, Motion::EndOfBuffer) => {
+        let end = self.grapheme_indices().len();
+        MotionKind::InclusiveWithTargetCol((self.start_of_line(), end), 0)
+      }
+      MotionCmd(count, Motion::ToColumn) => {
+				let s = self.start_of_line();
+				let mut end = s;
+				for _ in 0..count {
+					let Some(gr) = self.grapheme_at(end) else {
+						end = self.grapheme_indices().len();
+						break;
+					};
+					if gr == "\n" {
+						break;
+					}
+					end += 1;
+				}
+				MotionKind::On(end.saturating_sub(1)) // count starts at 1, columns are "zero-indexed", so we subtract one
+			}
       MotionCmd(count, Motion::Range(start, end)) => {
         let mut final_end = end;
         if self.cursor.exclusive {
@@ -2607,8 +2638,8 @@ impl LineBuf {
           MotionKind::InclusiveWithTargetCol(..) | MotionKind::ExclusiveWithTargetCol(..)
         ) || matches!(self.select_mode, Some(SelectMode::Line(_)));
         let register_content = if is_linewise {
-          if !text.ends_with('\n') && !text.is_empty() {
-            text.push('\n');
+          if text.ends_with('\n') && !text.is_empty() {
+            text = text.strip_suffix('\n').unwrap().to_string();
           }
           RegisterContent::Line(text)
         } else {
@@ -2645,19 +2676,27 @@ impl LineBuf {
         self.apply_motion(motion);
       }
       Verb::ReplaceCharInplace(ch, count) => {
-        for i in 0..count {
-          let mut buf = [0u8; 4];
-          let new = ch.encode_utf8(&mut buf);
-          self.replace_at_cursor(new);
+				if let Some((start,end)) = self.select_range() {
+					let end = (end + 1).min(self.grapheme_indices().len()); // inclusive
+					let replaced = ch.to_string().repeat(end.saturating_sub(start));
+					self.replace_at(start, &replaced);
+					self.cursor.set(start);
+				} else {
+					for i in 0..count {
+						let mut buf = [0u8; 4];
+						let new = ch.encode_utf8(&mut buf);
+						self.replace_at_cursor(new);
 
-          // try to increment the cursor until we are on the last iteration
-          // or until we hit the end of the buffer
-          if i != count.saturating_sub(1) && !self.cursor.inc() {
-            break;
-          }
-        }
+						// try to increment the cursor until we are on the last iteration
+						// or until we hit the end of the buffer
+						if i != count.saturating_sub(1) && !self.cursor.inc() {
+							break;
+						}
+					}
+				}
       }
       Verb::ToggleCaseInplace(count) => {
+				let mut did_something = false;
         for i in 0..count {
           let Some(gr) = self.grapheme_at_cursor() else {
             return Ok(());
@@ -2679,10 +2718,14 @@ impl LineBuf {
 
           // try to increment the cursor until we are on the last iteration
           // or until we hit the end of the buffer
+					did_something = true;
           if i != count.saturating_sub(1) && !self.cursor.inc() {
             break;
           }
         }
+				if did_something {
+					self.cursor.inc();
+				}
       }
       Verb::ToggleCaseRange => {
         let Some((start, end)) = self.range_from_motion(&motion) else {
@@ -2707,6 +2750,7 @@ impl LineBuf {
           };
           self.replace_at(i, new);
         }
+				self.cursor.set(start);
       }
       Verb::ToLower => {
         let Some((start, end)) = self.range_from_motion(&motion) else {
@@ -2731,6 +2775,7 @@ impl LineBuf {
           };
           self.replace_at(i, new);
         }
+				self.cursor.set(start);
       }
       Verb::ToUpper => {
         let Some((start, end)) = self.range_from_motion(&motion) else {
@@ -2755,6 +2800,7 @@ impl LineBuf {
           };
           self.replace_at(i, new);
         }
+				self.cursor.set(start);
       }
       Verb::Redo | Verb::Undo => {
         let (edit_provider, edit_receiver) = match verb {
@@ -2810,33 +2856,50 @@ impl LineBuf {
         }
         match content {
           RegisterContent::Span(ref text) => {
-            let insert_idx = match anchor {
-              Anchor::After => self
-                .cursor
-                .get()
-                .saturating_add(1)
-                .min(self.grapheme_indices().len()),
-              Anchor::Before => self.cursor.get(),
+            match anchor {
+							Anchor::After => {
+								let insert_idx = self
+									.cursor
+									.get()
+									.saturating_add(1)
+									.min(self.grapheme_indices().len());
+								let offset = text.len().max(1);
+
+								self.insert_str_at(insert_idx, text);
+								self.cursor.add(offset);
+							},
+							Anchor::Before => {
+								let insert_idx = self.cursor.get();
+								self.insert_str_at(insert_idx, text);
+								self.cursor.add(text.len().saturating_sub(1));
+							},
             };
-            self.insert_str_at(insert_idx, text);
-            self.cursor.add(text.len().saturating_sub(1));
           }
           RegisterContent::Line(ref text) => {
             let insert_idx = match anchor {
               Anchor::After => self.end_of_line(),
               Anchor::Before => self.start_of_line(),
             };
-            let needs_newline = self
-              .grapheme_before(insert_idx)
-              .is_some_and(|gr| gr != "\n");
-            if needs_newline {
-              let full = format!("\n{}", text);
-              self.insert_str_at(insert_idx, &full);
-              self.cursor.set(insert_idx + 1);
-            } else {
-              self.insert_str_at(insert_idx, text);
-              self.cursor.set(insert_idx);
-            }
+						let mut full = text.to_string();
+						let mut offset = 0;
+
+						match anchor {
+							Anchor::After => {
+								if self.grapheme_before(insert_idx).is_none_or(|gr| gr != "\n") {
+									full = format!("\n{text}");
+									offset += 1;
+								}
+								if self.grapheme_at(insert_idx).is_some_and(|gr| gr != "\n") {
+									full = format!("{full}\n");
+								}
+							}
+							Anchor::Before => {
+								full = format!("{full}\n");
+							}
+						}
+
+						self.insert_str_at(insert_idx, &full);
+						self.cursor.set(insert_idx + offset);
           }
           RegisterContent::Empty => {}
         }
@@ -2872,6 +2935,7 @@ impl LineBuf {
               self.force_replace_at(i, " ");
             }
             last_was_whitespace = false;
+						self.cursor.set(i);
             continue;
           }
           last_was_whitespace = is_whitespace(gr);
@@ -2907,8 +2971,6 @@ impl LineBuf {
       Verb::Insert(string) => {
         self.insert_str_at_cursor(&string);
         let graphemes = string.graphemes(true).count();
-        log::debug!("Inserted string: {string:?}, graphemes: {graphemes}");
-        log::debug!("buffer after insert: {:?}", self.buffer);
         self.cursor.add(graphemes);
       }
       Verb::Indent => {
@@ -3067,7 +3129,13 @@ impl LineBuf {
         } else {
           -(n as i64)
         };
-        let (s, e) = self.select_range().unwrap_or(self.this_word(Word::Normal));
+        let (s, e) = if let Some(r) = self.select_range() {
+					r
+				} else if let Some(r) = self.number_at_cursor() {
+					r
+				} else {
+					return Ok(());
+				};
         let end = if self.select_range().is_some() {
           if e < self.grapheme_indices().len() - 1 {
             e
@@ -3122,9 +3190,21 @@ impl LineBuf {
         } else if let Ok(num) = word.parse::<i64>() {
           let width = word.len();
           let new_num = num + inc;
+					let num_fmt = if new_num < 0 {
+						let abs = new_num.unsigned_abs();
+						let digit_width = if num < 0 { width - 1 } else { width };
+						format!("-{abs:0>digit_width$}")
+					} else if num < 0 {
+						// Was negative, now positive — pad to width-1 since
+						// the minus sign is gone (e.g. -001 + 2 = 00001)
+						let digit_width = width - 1;
+						format!("{new_num:0>digit_width$}")
+					} else {
+						format!("{new_num:0>width$}")
+					};
           self
             .buffer
-            .replace_range(byte_start..byte_end, &format!("{new_num:0>width$}"));
+            .replace_range(byte_start..byte_end, &num_fmt);
           self.update_graphemes();
           self.cursor.set(s);
         }
@@ -3144,7 +3224,6 @@ impl LineBuf {
       | Verb::VisualModeSelectLast => self.apply_motion(motion), // Already handled logic for these
 
       Verb::ShellCmd(cmd) => {
-        log::debug!("Executing ex-mode command from widget: {cmd}");
         let mut vars = HashSet::new();
         vars.insert("_BUFFER".into());
         vars.insert("_CURSOR".into());
@@ -3187,17 +3266,10 @@ impl LineBuf {
         self.update_graphemes();
         self.cursor.set_max(self.buffer.graphemes(true).count());
         self.cursor.set(cursor);
-        log::debug!(
-          "[ShellCmd] post-widget: cursor={}, anchor={}, select_range={:?}",
-          cursor,
-          anchor,
-          self.select_range
-        );
         if anchor != cursor && self.select_range.is_some() {
           self.select_range = Some(ordered(cursor, anchor));
         }
         if !keys.is_empty() {
-          log::debug!("Pending widget keys from shell command: {keys}");
           write_meta(|m| m.set_pending_widget_keys(&keys))
         }
       }

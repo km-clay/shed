@@ -13,6 +13,10 @@ impl ViInsert {
   pub fn new() -> Self {
     Self::default()
   }
+	pub fn record_cmd(mut self, cmd: ViCmd) -> Self {
+		self.cmds.push(cmd);
+		self
+	}
   pub fn with_count(mut self, repeat_count: u16) -> Self {
     self.repeat_count = repeat_count;
     self

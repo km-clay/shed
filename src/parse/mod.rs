@@ -87,6 +87,7 @@ impl ParsedSrc {
         Err(error) => return Err(vec![error]),
       }
     }
+		log::trace!("Tokens: {:#?}", tokens);
 
     let mut errors = vec![];
     let mut nodes = vec![];
@@ -240,6 +241,9 @@ impl Node {
       } => {
         body.walk_tree(f);
       }
+			NdRule::Negate { ref mut cmd } => {
+				cmd.walk_tree(f);
+			}
       NdRule::Test { cases: _ } => (),
     }
   }
@@ -630,6 +634,9 @@ pub enum NdRule {
     arr: Vec<Tk>,
     body: Vec<Node>,
   },
+	Negate {
+		cmd: Box<Node>,
+	},
   CaseNode {
     pattern: Tk,
     case_blocks: Vec<CaseNode>,
@@ -784,6 +791,7 @@ impl ParseStream {
       try_match!(self.parse_loop()?);
       try_match!(self.parse_for()?);
       try_match!(self.parse_if()?);
+      try_match!(self.parse_negate()?);
       try_match!(self.parse_test()?);
       try_match!(self.parse_cmd()?);
     }
@@ -1151,6 +1159,40 @@ impl ParseStream {
       .with_label(src, label)
       .with_context(self.context.clone())
   }
+	fn parse_negate(&mut self) -> ShResult<Option<Node>> {
+    let mut node_tks: Vec<Tk> = vec![];
+
+		if !self.check_keyword("!") || !self.next_tk_is_some() {
+			return Ok(None);
+		}
+		node_tks.push(self.next_tk().unwrap());
+
+		let Some(cmd) = self.parse_block(true)? else {
+			self.panic_mode(&mut node_tks);
+			let span = node_tks.get_span().unwrap();
+			let color = next_color();
+			return Err(
+				self.make_err(
+					span.clone(),
+					Label::new(span)
+						.with_message("Expected a command after '!'")
+						.with_color(color),
+				),
+			);
+		};
+
+		node_tks.extend(cmd.tokens.clone());
+		self.catch_separator(&mut node_tks);
+
+		let node = Node {
+			class: NdRule::Negate { cmd: Box::new(cmd) },
+			flags: NdFlags::empty(),
+			redirs: vec![],
+			context: self.context.clone(),
+			tokens: node_tks,
+		};
+		Ok(Some(node))
+	}
   fn parse_if(&mut self) -> ShResult<Option<Node>> {
     // Needs at last one 'if-then',
     // Any number of 'elif-then',
@@ -1888,6 +1930,8 @@ where
       name: _,
       ref mut body,
     } => check_node(body, filter, operation),
+
+		NdRule::Negate { ref mut cmd } => check_node(cmd, filter, operation),
     NdRule::Test { cases: _ } => (),
   }
 }
