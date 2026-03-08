@@ -130,6 +130,15 @@ fn main() -> ExitCode {
     return ExitCode::SUCCESS;
   }
 
+	// Increment SHLVL, or set to 1 if not present or invalid.
+	// This var represents how many nested shell instances we're in
+	if let Ok(var) = env::var("SHLVL")
+	&& let Ok(lvl) = var.parse::<u32>() {
+		unsafe { env::set_var("SHLVL", (lvl + 1).to_string()) };
+	} else {
+		unsafe { env::set_var("SHLVL", "1") };
+	}
+
   if let Err(e) = if let Some(path) = args.script {
     run_script(path, args.script_args)
   } else if let Some(cmd) = args.command {

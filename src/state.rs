@@ -315,6 +315,34 @@ impl ScopeStack {
     };
     scope.set_var(var_name, val, flags)
   }
+	pub fn get_magic_var(&self, var_name: &str) -> Option<String> {
+		match var_name {
+			"SECONDS" => {
+				let shell_time = read_meta(|m| m.shell_time());
+				let secs = Instant::now().duration_since(shell_time).as_secs();
+				Some(secs.to_string())
+			}
+			"EPOCHREALTIME" => {
+				let epoch = std::time::SystemTime::now()
+					.duration_since(std::time::UNIX_EPOCH)
+					.unwrap_or(Duration::from_secs(0))
+					.as_secs_f64();
+				Some(epoch.to_string())
+			}
+			"EPOCHSECONDS" => {
+				let epoch = std::time::SystemTime::now()
+					.duration_since(std::time::UNIX_EPOCH)
+					.unwrap_or(Duration::from_secs(0))
+					.as_secs();
+				Some(epoch.to_string())
+			}
+			"RANDOM" => {
+				let random = rand::random_range(0..32768);
+				Some(random.to_string())
+			}
+			_ => None
+		}
+	}
   pub fn get_arr_elems(&self, var_name: &str) -> ShResult<Vec<String>> {
     for scope in self.scopes.iter().rev() {
       if scope.var_exists(var_name)
@@ -440,7 +468,9 @@ impl ScopeStack {
   pub fn try_get_var(&self, var_name: &str) -> Option<String> {
     // This version of get_var() is mainly used internally
     // so that we have access to Option methods
-    if let Ok(param) = var_name.parse::<ShellParam>() {
+		if let Some(magic) = self.get_magic_var(var_name) {
+			return Some(magic);
+		} else if let Ok(param) = var_name.parse::<ShellParam>() {
       let val = self.get_param(param);
       if !val.is_empty() {
         return Some(val);
@@ -463,6 +493,9 @@ impl ScopeStack {
     var
   }
   pub fn get_var(&self, var_name: &str) -> String {
+		if let Some(magic) = self.get_magic_var(var_name) {
+			return magic;
+		}
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.get_param(param);
     }
@@ -1305,8 +1338,11 @@ impl VarTab {
 }
 
 /// A table of metadata for the shell
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct MetaTab {
+	// Time when the shell was started, used for calculating shell uptime
+	shell_time: Instant,
+
   // command running duration
   runtime_start: Option<Instant>,
   runtime_stop: Option<Instant>,
@@ -1331,6 +1367,25 @@ pub struct MetaTab {
   pending_widget_keys: Vec<KeyEvent>,
 }
 
+impl Default for MetaTab {
+	fn default() -> Self {
+		Self {
+			shell_time: Instant::now(),
+			runtime_start: None,
+			runtime_stop: None,
+			system_msg: vec![],
+			dir_stack: VecDeque::new(),
+			getopts_offset: 0,
+			old_path: None,
+			old_pwd: None,
+			path_cache: HashSet::new(),
+			cwd_cache: HashSet::new(),
+			comp_specs: HashMap::new(),
+			pending_widget_keys: vec![],
+		}
+	}
+}
+
 impl MetaTab {
   pub fn new() -> Self {
     Self {
@@ -1338,6 +1393,9 @@ impl MetaTab {
       ..Default::default()
     }
   }
+	pub fn shell_time(&self) -> Instant {
+		self.shell_time
+	}
   pub fn set_pending_widget_keys(&mut self, keys: &str) {
     let exp = expand_keymap(keys);
     self.pending_widget_keys = exp;

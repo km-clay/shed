@@ -258,6 +258,9 @@ impl Dispatcher {
     Ok(())
   }
   pub fn dispatch_cmd(&mut self, node: Node) -> ShResult<()> {
+		let (line, _) = node.get_span().clone().line_and_col();
+		write_vars(|v| v.set_var("LINENO", VarKind::Str((line + 1).to_string()), VarFlags::NONE))?;
+
     let Some(cmd) = node.get_command() else {
       return self.exec_cmd(node); // Argv is empty, probably an assignment
     };
