@@ -249,7 +249,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       // may have moved it during resize/rewrap
       readline.writer.update_t_cols();
       readline.mark_dirty();
-    }
+		}
 
     if JOB_DONE.swap(false, Ordering::SeqCst) {
       // update the prompt so any job count escape sequences update dynamically

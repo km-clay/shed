@@ -250,7 +250,7 @@ mod tests {
       "pre-mode-change", "post-mode-change",
       "on-history-open", "on-history-close", "on-history-select",
       "on-completion-start", "on-completion-cancel", "on-completion-select",
-      "on-exit",
+      "on-exit"
     ];
     for kind in kinds {
       test_input(format!("autocmd {kind} 'true'")).unwrap();

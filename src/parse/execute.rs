@@ -767,8 +767,16 @@ impl Dispatcher {
     self.job_stack.new_job();
     if cmds.len() == 1 {
       self.fg_job = !is_bg && self.interactive;
-      let cmd = cmds.into_iter().next().unwrap();
-      self.dispatch_node(cmd)?;
+      let mut cmd = cmds.into_iter().next().unwrap();
+      if is_bg && !matches!(cmd.class, NdRule::Command { .. }) {
+        self.run_fork(&cmd.get_command().map(|t| t.to_string()).unwrap_or_default(), |s| {
+          if let Err(e) = s.dispatch_node(cmd) {
+            e.print_error();
+          }
+        })?;
+      } else {
+        self.dispatch_node(cmd)?;
+      }
 
       // Give the pipeline terminal control as soon as the first child
       // establishes the PGID, so later children (e.g. nvim) don't get
@@ -1103,6 +1111,7 @@ impl Dispatcher {
     match unsafe { fork()? } {
       ForkResult::Child => {
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
+        self.interactive = false;
         f(self);
         exit(state::get_status())
       }
@@ -1400,5 +1409,16 @@ mod tests {
 		test_input("if ! false; then echo yes; fi").unwrap();
 		assert_eq!(state::get_status(), 0);
 		assert_eq!(g.read_output(), "yes\n");
+	}
+
+	#[test]
+	fn empty_var_in_test() {
+		let _g = TestGuard::new();
+		// POSIX specifies that a quoted unset variable expands to an empty string, so the shell actually sees `[ -n "" ]`, which returns false
+		test_input("[ -n \"$EMPTYVAR_PROBABLY_NOT_SET_TO_ANYTHING\" ]").unwrap();
+		assert_eq!(state::get_status(), 1);
+		// Without quotes, word splitting causes an empty var to be removed entirely, so the shell actually sees `[ -n ]`, testing the value of ']', which returns true
+		test_input("[ -n $EMPTYVAR_PROBABLY_NOT_SET_TO_ANYTHING ]").unwrap();
+		assert_eq!(state::get_status(), 0);
 	}
 }
