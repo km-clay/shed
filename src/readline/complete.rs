@@ -1,7 +1,7 @@
 use std::{
   collections::HashSet,
   fmt::{Debug, Write},
-  path::PathBuf,
+  path::{Path, PathBuf},
   sync::Arc,
 };
 
@@ -22,7 +22,7 @@ use crate::{
     term::{LineWriter, TermWriter, calc_str_width, get_win_size},
     vimode::{ViInsert, ViMode},
   },
-  state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_vars, write_vars},
+  state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars},
 };
 
 pub fn complete_signals(start: &str) -> Vec<String> {
@@ -172,6 +172,11 @@ fn complete_commands(start: &str) -> Vec<String> {
       .cloned()
       .collect()
   });
+
+	if read_shopts(|o| o.core.autocd) {
+		let dirs = complete_dirs(start);
+		candidates.extend(dirs);
+	}
 
   candidates.sort();
   candidates

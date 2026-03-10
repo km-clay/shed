@@ -360,6 +360,8 @@ pub struct ShOptPrompt {
   pub linebreak_on_incomplete: bool,
   pub leader: String,
   pub line_numbers: bool,
+  pub screensaver_cmd: String,
+  pub screensaver_idle_time: usize,
 }
 
 impl ShOptPrompt {
@@ -431,6 +433,18 @@ impl ShOptPrompt {
         };
         self.line_numbers = val;
       }
+      "screensaver_cmd" => {
+        self.screensaver_cmd = val.to_string();
+      }
+      "screensaver_idle_time" => {
+        let Ok(val) = val.parse::<usize>() else {
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            "shopt: expected a positive integer for screensaver_idle_time value",
+          ));
+        };
+        self.screensaver_idle_time = val;
+      }
       "custom" => {
         todo!()
       }
@@ -496,6 +510,16 @@ impl ShOptPrompt {
         output.push_str(&format!("{}", self.line_numbers));
         Ok(Some(output))
       }
+      "screensaver_cmd" => {
+        let mut output = String::from("Command to execute as a screensaver after idle timeout\n");
+        output.push_str(&self.screensaver_cmd);
+        Ok(Some(output))
+      }
+      "screensaver_idle_time" => {
+        let mut output = String::from("Idle time in seconds before running screensaver_cmd (0 = disabled)\n");
+        output.push_str(&format!("{}", self.screensaver_idle_time));
+        Ok(Some(output))
+      }
       _ => Err(ShErr::simple(
         ShErrKind::SyntaxErr,
         format!("shopt: Unexpected 'prompt' option '{query}'"),
@@ -519,6 +543,8 @@ impl Display for ShOptPrompt {
     ));
     output.push(format!("leader = {}", self.leader));
     output.push(format!("line_numbers = {}", self.line_numbers));
+    output.push(format!("screensaver_cmd = {}", self.screensaver_cmd));
+    output.push(format!("screensaver_idle_time = {}", self.screensaver_idle_time));
 
     let final_output = output.join("\n");
 
@@ -537,6 +563,8 @@ impl Default for ShOptPrompt {
       linebreak_on_incomplete: true,
       leader: "\\".to_string(),
       line_numbers: true,
+      screensaver_cmd: String::new(),
+      screensaver_idle_time: 0,
     }
   }
 }

@@ -31,6 +31,7 @@ use nix::unistd::read;
 use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{self, ShErr, ShErrKind, ShResult};
+use crate::libsh::guards::scope_guard;
 use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_input};
@@ -39,7 +40,7 @@ use crate::procio::borrow_fd;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
-use crate::state::{AutoCmdKind, read_logic, read_shopts, source_rc, write_jobs, write_meta};
+use crate::state::{AutoCmdKind, read_logic, read_shopts, source_rc, write_jobs, write_meta, write_shopts};
 use clap::Parser;
 use state::{read_vars, write_vars};
 
@@ -264,14 +265,38 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       PollFlags::POLLIN,
     )];
 
+		let mut exec_if_timeout = None;
+
     let timeout = if readline.pending_keymap.is_empty() {
-      PollTimeout::MAX
+			let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone());
+			let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
+			if screensaver_idle_time > 0 && !screensaver_cmd.is_empty() {
+				exec_if_timeout = Some(screensaver_cmd);
+				PollTimeout::from((screensaver_idle_time * 1000) as u16)
+			} else {
+				PollTimeout::MAX
+			}
     } else {
-      PollTimeout::from(1000u16)
+			PollTimeout::from(1000u16)
     };
 
     match poll(&mut fds, timeout) {
-      Ok(_) => {}
+			Ok(0) => {
+				// We timed out.
+				if let Some(cmd) = exec_if_timeout {
+					let prepared = ReadlineEvent::Line(cmd);
+					let saved_hist_opt = read_shopts(|o| o.core.auto_hist);
+					let _guard = scopeguard::guard(saved_hist_opt, |opt| {
+						write_shopts(|o| o.core.auto_hist = opt);
+					});
+					write_shopts(|o| o.core.auto_hist = false); // don't save screensaver command to history
+
+					match handle_readline_event(&mut readline, Ok(prepared))? {
+						true => return Ok(()),
+						false => continue
+					}
+				}
+			}
       Err(Errno::EINTR) => {
         // Interrupted by signal, loop back to handle it
         continue;
@@ -280,6 +305,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
         eprintln!("poll error: {e}");
         break;
       }
+      Ok(_) => {}
     }
 
     // Timeout — resolve pending keymap ambiguity
