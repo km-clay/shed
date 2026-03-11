@@ -42,7 +42,7 @@ use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::{AutoCmdKind, read_logic, read_shopts, source_rc, write_jobs, write_meta, write_shopts};
 use clap::Parser;
-use state::{read_vars, write_vars};
+use state::write_vars;
 
 #[derive(Parser, Debug)]
 struct ShedArgs {
@@ -62,20 +62,6 @@ struct ShedArgs {
 
   #[arg(long, short)]
   login_shell: bool,
-}
-
-/// Force evaluation of lazily-initialized values early in shell startup.
-///
-/// In particular, this ensures that the variable table is initialized, which
-/// populates environment variables from the system. If this initialization is
-/// deferred too long, features like prompt expansion may fail due to missing
-/// environment variables.
-///
-/// This function triggers initialization by calling `read_vars` with a no-op
-/// closure, which forces access to the variable table and causes its `LazyLock`
-/// constructor to run.
-fn kickstart_lazy_evals() {
-  read_vars(|_| {});
 }
 
 /// We need to make sure that even if we panic, our child processes get sighup
@@ -112,7 +98,6 @@ fn setup_panic_handler() {
 fn main() -> ExitCode {
   yansi::enable();
   env_logger::init();
-  kickstart_lazy_evals();
   setup_panic_handler();
 
   let mut args = ShedArgs::parse();

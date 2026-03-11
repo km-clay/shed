@@ -8,21 +8,17 @@ use std::{
 use nix::sys::signal::Signal;
 
 use crate::{
-  builtin::complete::{CompFlags, CompOptFlags, CompOpts},
-  libsh::{error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils},
-  parse::{
+  builtin::complete::{CompFlags, CompOptFlags, CompOpts}, expand::escape_str, libsh::{error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils}, parse::{
     execute::exec_input,
     lex::{self, LexFlags, Tk, TkRule, ends_with_unescaped},
-  },
-  readline::{
+  }, readline::{
     Marker, annotate_input_recursive,
     keys::{KeyCode as C, KeyEvent as K, ModKeys as M},
     linebuf::{ClampedUsize, LineBuf},
     markers::{self, is_marker},
     term::{LineWriter, TermWriter, calc_str_width, get_win_size},
     vimode::{ViInsert, ViMode},
-  },
-  state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars},
+  }, state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars}
 };
 
 pub fn complete_signals(start: &str) -> Vec<String> {
@@ -1176,13 +1172,14 @@ impl Completer for FuzzyCompleter {
     log::debug!("Getting completed line for candidate: {}", _candidate);
 
     let selected = self.selector.selected_candidate().unwrap_or_default();
+		let escaped = escape_str(&selected, false);
     log::debug!("Selected candidate: {}", selected);
     let (start, end) = self.completer.token_span;
     log::debug!("Token span: ({}, {})", start, end);
     let ret = format!(
       "{}{}{}",
       &self.completer.original_input[..start],
-      selected,
+      escaped,
       &self.completer.original_input[end..]
     );
     log::debug!("Completed line: {}", ret);
@@ -1435,11 +1432,12 @@ impl SimpleCompleter {
     }
 
     let selected = &self.candidates[self.selected_idx];
+		let escaped = escape_str(selected, false);
     let (start, end) = self.token_span;
     format!(
       "{}{}{}",
       &self.original_input[..start],
-      selected,
+      escaped,
       &self.original_input[end..]
     )
   }

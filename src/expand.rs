@@ -86,6 +86,11 @@ impl Expander {
 
     'outer: while let Some(ch) = chars.next() {
       match ch {
+        markers::ESCAPE => {
+          if let Some(next_ch) = chars.next() {
+            cur_word.push(next_ch);
+          }
+        }
         markers::DUB_QUOTE | markers::SNG_QUOTE | markers::SUBSH => {
           while let Some(q_ch) = chars.next() {
             match q_ch {
@@ -634,8 +639,10 @@ pub fn expand_glob(raw: &str) -> ShResult<String> {
   {
     let entry =
       entry.map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid filename found in glob"))?;
+		let entry_raw = entry.to_str().ok_or_else(|| ShErr::simple(ShErrKind::SyntaxErr, "Non-UTF8 filename found in glob"))?;
+		let escaped = escape_str(entry_raw, true);
 
-    words.push(entry.to_str().unwrap().to_string())
+    words.push(escaped)
   }
   Ok(words.join(" "))
 }
@@ -989,6 +996,7 @@ pub fn unescape_str(raw: &str) -> String {
       '~' if first_char => result.push(markers::TILDE_SUB),
       '\\' => {
         if let Some(next_ch) = chars.next() {
+          result.push(markers::ESCAPE);
           result.push(next_ch)
         }
       }
@@ -1309,6 +1317,62 @@ pub fn unescape_str(raw: &str) -> String {
   }
 
   result
+}
+
+/// Opposite of unescape_str - escapes a string to be executed as literal text
+/// Used for completion results, and glob filename matches.
+pub fn escape_str(raw: &str, use_marker: bool) -> String {
+	let mut result = String::new();
+	let mut chars = raw.chars();
+
+	while let Some(ch) = chars.next() {
+		match ch {
+			'\''|
+			'"' |
+			'\\' |
+			'|' |
+			'&' |
+			';' |
+			'(' |
+			')' |
+			'<' |
+			'>' |
+			'$' |
+			'*' |
+			'!' |
+			'`' |
+			'{' |
+			'?' |
+			'[' |
+			'#' |
+			' ' |
+			'\t'|
+			'\n' => {
+				if use_marker {
+					result.push(markers::ESCAPE);
+				} else {
+					result.push('\\');
+				}
+				result.push(ch);
+				continue;
+			}
+			'~' if result.is_empty() => {
+				if use_marker {
+					result.push(markers::ESCAPE);
+				} else {
+					result.push('\\');
+				}
+				result.push(ch);
+				continue;
+			}
+			_ => {
+				result.push(ch);
+				continue;
+			}
+		}
+	}
+
+	result
 }
 
 pub fn unescape_math(raw: &str) -> String {
@@ -2858,7 +2922,8 @@ mod tests {
   #[test]
   fn unescape_backslash() {
     let result = unescape_str("hello\\nworld");
-    assert_eq!(result, "hellonworld");
+    let expected = format!("hello{}nworld", markers::ESCAPE);
+    assert_eq!(result, expected);
   }
 
   #[test]
