@@ -980,6 +980,11 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
   }
 }
 
+/// Strip ESCAPE markers from a string, leaving the characters they protect intact.
+fn strip_escape_markers(s: &str) -> String {
+  s.replace(markers::ESCAPE, "")
+}
+
 /// Processes strings into intermediate representations that are more readable
 /// by the program
 ///
@@ -1652,7 +1657,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::RemShortestPrefix(prefix) => {
         let value = vars.get_var(&var_name);
         let unescaped = unescape_str(&prefix);
-        let expanded = expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix);
+        let expanded = strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix));
         let pattern = Pattern::new(&expanded).unwrap();
         for i in 0..=value.len() {
           let sliced = &value[..i];
@@ -1665,7 +1670,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::RemLongestPrefix(prefix) => {
         let value = vars.get_var(&var_name);
         let unescaped = unescape_str(&prefix);
-        let expanded = expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix);
+        let expanded = strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix));
         let pattern = Pattern::new(&expanded).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
@@ -1678,7 +1683,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::RemShortestSuffix(suffix) => {
         let value = vars.get_var(&var_name);
         let unescaped = unescape_str(&suffix);
-        let expanded = expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix);
+        let expanded = strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix));
         let pattern = Pattern::new(&expanded).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
@@ -1692,7 +1697,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = vars.get_var(&var_name);
         let unescaped = unescape_str(&suffix);
         let expanded_suffix =
-          expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix.clone());
+          strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix.clone()));
         let pattern = Pattern::new(&expanded_suffix).unwrap();
         for i in 0..=value.len() {
           let sliced = &value[i..];
@@ -1706,8 +1711,8 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = vars.get_var(&var_name);
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
-        let expanded_search = expand_raw(&mut search.chars().peekable()).unwrap_or(search);
-        let expanded_replace = expand_raw(&mut replace.chars().peekable()).unwrap_or(replace);
+        let expanded_search = strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
+        let expanded_replace = strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
         let regex = glob_to_regex(&expanded_search, false); // unanchored pattern
 
         if let Some(mat) = regex.find(&value) {
@@ -1723,8 +1728,8 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = vars.get_var(&var_name);
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
-        let expanded_search = expand_raw(&mut search.chars().peekable()).unwrap_or(search);
-        let expanded_replace = expand_raw(&mut replace.chars().peekable()).unwrap_or(replace);
+        let expanded_search = strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
+        let expanded_replace = strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
         let regex = glob_to_regex(&expanded_search, false);
         let mut result = String::new();
         let mut last_match_end = 0;
@@ -1743,8 +1748,8 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = vars.get_var(&var_name);
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
-        let expanded_search = expand_raw(&mut search.chars().peekable()).unwrap_or(search);
-        let expanded_replace = expand_raw(&mut replace.chars().peekable()).unwrap_or(replace);
+        let expanded_search = strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
+        let expanded_replace = strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
         let pattern = Pattern::new(&expanded_search).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
@@ -1758,8 +1763,8 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = vars.get_var(&var_name);
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
-        let expanded_search = expand_raw(&mut search.chars().peekable()).unwrap_or(search);
-        let expanded_replace = expand_raw(&mut replace.chars().peekable()).unwrap_or(replace);
+        let expanded_search = strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
+        let expanded_replace = strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
         let pattern = Pattern::new(&expanded_search).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
@@ -1803,6 +1808,11 @@ pub fn expand_case_pattern(raw: &str) -> ShResult<String> {
     match ch {
       markers::DUB_QUOTE | markers::SNG_QUOTE => {
         in_quote = !in_quote;
+      }
+      markers::ESCAPE => {
+        if let Some(next_ch) = chars.next() {
+          result.push(next_ch);
+        }
       }
       '*' | '?' | '[' | ']' if in_quote => {
         result.push('\\');
@@ -3517,6 +3527,63 @@ mod tests {
     let mut exp = Expander { raw };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello world"]);
+  }
+
+  // ===================== Escaped Word Splitting =====================
+
+  #[test]
+  fn word_split_escaped_space() {
+    let _guard = TestGuard::new();
+
+    let raw = format!("hello{}world", unescape_str("\\ "));
+    let mut exp = Expander { raw };
+    let words = exp.split_words();
+    assert_eq!(words, vec!["hello world"]);
+  }
+
+  #[test]
+  fn word_split_escaped_tab() {
+    let _guard = TestGuard::new();
+
+    let raw = format!("hello{}world", unescape_str("\\\t"));
+    let mut exp = Expander { raw };
+    let words = exp.split_words();
+    assert_eq!(words, vec!["hello\tworld"]);
+  }
+
+  #[test]
+  fn word_split_escaped_custom_ifs() {
+    let _guard = TestGuard::new();
+    unsafe { std::env::set_var("IFS", ":"); }
+
+    let raw = format!("a{}b:c", unescape_str("\\:"));
+    let mut exp = Expander { raw };
+    let words = exp.split_words();
+    assert_eq!(words, vec!["a:b", "c"]);
+  }
+
+  // ===================== Parameter Expansion with Escapes (TestGuard) =====================
+
+  #[test]
+  fn param_exp_prefix_removal_escaped() {
+    let guard = TestGuard::new();
+    write_vars(|v| v.set_var("branch", VarKind::Str("## main".into()), VarFlags::NONE)).unwrap();
+
+    test_input("echo \"${branch#\\#\\# }\"").unwrap();
+
+    let out = guard.read_output();
+    assert_eq!(out, "main\n");
+  }
+
+  #[test]
+  fn param_exp_suffix_removal_escaped() {
+    let guard = TestGuard::new();
+    write_vars(|v| v.set_var("val", VarKind::Str("hello world!!".into()), VarFlags::NONE)).unwrap();
+
+    test_input("echo \"${val%\\!\\!}\"").unwrap();
+
+    let out = guard.read_output();
+    assert_eq!(out, "hello world\n");
   }
 
   // ===================== Arithmetic with Variables (TestGuard) =====================
