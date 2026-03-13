@@ -1045,7 +1045,7 @@ impl VarTab {
     }
   }
   pub fn new() -> Self {
-    let vars = HashMap::new();
+    let vars = Self::init_sh_vars();
     let params = Self::init_params();
     Self::init_env();
     let mut var_tab = Self {
@@ -1064,6 +1064,11 @@ impl VarTab {
     params.insert(ShellParam::LastJob, "".into()); // PID of the last background job (if any)
     params
   }
+	fn init_sh_vars() -> HashMap<String,Var> {
+		let mut vars = HashMap::new();
+		vars.insert("COMP_WORDBREAKS".into(), " \t\n\"'@><=;|&(".into());
+		vars
+	}
   fn init_env() {
     let pathbuf_to_string =
       |pb: Result<PathBuf, std::io::Error>| pb.unwrap_or_default().to_string_lossy().to_string();

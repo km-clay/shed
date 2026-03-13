@@ -6,6 +6,7 @@ use std::{
 };
 
 use nix::sys::signal::Signal;
+use unicode_width::UnicodeWidthStr;
 
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts}, expand::escape_str, libsh::{error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils}, parse::{
@@ -1172,10 +1173,11 @@ impl Completer for FuzzyCompleter {
     log::debug!("Getting completed line for candidate: {}", _candidate);
 
     let selected = self.selector.selected_candidate().unwrap_or_default();
-		let escaped = escape_str(&selected, false);
-    log::debug!("Selected candidate: {}", selected);
-    let (start, end) = self.completer.token_span;
-    log::debug!("Token span: ({}, {})", start, end);
+    let (mut start, end) = self.completer.token_span;
+		let slice = self.completer.original_input.get(start..end).unwrap_or_default();
+		start += slice.width();
+		let completion = selected.strip_prefix(slice).unwrap_or(&selected);
+		let escaped = escape_str(completion, false);
     let ret = format!(
       "{}{}{}",
       &self.completer.original_input[..start],
@@ -1432,8 +1434,11 @@ impl SimpleCompleter {
     }
 
     let selected = &self.candidates[self.selected_idx];
-		let escaped = escape_str(selected, false);
-    let (start, end) = self.token_span;
+    let (mut start, end) = self.token_span;
+		let slice = self.original_input.get(start..end).unwrap_or("");
+		start += slice.width();
+		let completion = selected.strip_prefix(slice).unwrap_or(selected);
+		let escaped = escape_str(completion, false);
     format!(
       "{}{}{}",
       &self.original_input[..start],
@@ -1596,14 +1601,14 @@ impl SimpleCompleter {
         .set_range(self.token_span.0..self.token_span.1);
     }
 
-    // If token contains '=', only complete after the '='
+    // If token contains any COMP_WORDBREAKS, break the word
     let token_str = cur_token.span.as_str();
-    if let Some(eq_pos) = token_str.rfind('=') {
-      self.token_span.0 = cur_token.span.range().start + eq_pos + 1;
-      cur_token
-        .span
-        .set_range(self.token_span.0..self.token_span.1);
-    }
+
+		let word_breaks = read_vars(|v| v.try_get_var("COMP_WORDBREAKS")).unwrap_or("=".into());
+		if let Some(break_pos) = token_str.rfind(|c: char| word_breaks.contains(c)) {
+			self.token_span.0 = cur_token.span.range().start + break_pos + 1;
+			cur_token.span.set_range(self.token_span.0..self.token_span.1);
+		}
 
     let raw_tk = cur_token.as_str().to_string();
     let expanded_tk = cur_token.expand()?;

@@ -1055,6 +1055,7 @@ impl ShedVi {
       let pending_seq = self.mode.pending_seq().unwrap_or_default();
       write!(buf, "\n: {pending_seq}").unwrap();
       new_layout.end.row += 1;
+			new_layout.cursor.row += 1;
     }
 
     write!(buf, "{}", &self.mode.cursor_style()).unwrap();
