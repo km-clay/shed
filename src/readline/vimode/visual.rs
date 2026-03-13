@@ -213,7 +213,7 @@ impl ViVisual {
           let ch = chars_clone.next()?;
           return Some(ViCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::ReplaceCharInplace(ch,1))),
+            verb: Some(VerbCmd(1, Verb::ReplaceCharInplace(ch, 1))),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -301,13 +301,13 @@ impl ViVisual {
           });
         }
         'y' => {
-					return Some(ViCmd {
-						register,
-						verb: Some(VerbCmd(count, Verb::Yank)),
-						motion: None,
-						raw_seq: self.take_cmd(),
-						flags: CmdFlags::empty(),
-					});
+          return Some(ViCmd {
+            register,
+            verb: Some(VerbCmd(count, Verb::Yank)),
+            motion: None,
+            raw_seq: self.take_cmd(),
+            flags: CmdFlags::empty(),
+          });
         }
         'd' => {
           chars = chars_clone;

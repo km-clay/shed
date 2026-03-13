@@ -185,7 +185,7 @@ mod tests {
     let out = guard.read_output();
     assert!(out.contains("cat"));
     assert!(out.contains("is"));
-    assert!(out.contains("/"));  // Should show a path
+    assert!(out.contains("/")); // Should show a path
   }
 
   // ===================== Not found =====================

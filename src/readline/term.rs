@@ -444,8 +444,8 @@ impl Perform for KeyCollector {
           21 => KeyCode::F(10),
           23 => KeyCode::F(11),
           24 => KeyCode::F(12),
-					200 => KeyCode::BracketedPasteStart,
-					201 => KeyCode::BracketedPasteEnd,
+          200 => KeyCode::BracketedPasteStart,
+          201 => KeyCode::BracketedPasteEnd,
           _ => return,
         };
         KeyEvent(key, mods)
@@ -498,9 +498,9 @@ impl Perform for KeyCollector {
 pub struct PollReader {
   parser: Parser,
   collector: KeyCollector,
-	byte_buf: VecDeque<u8>,
-	pub verbatim_single: bool,
-	pub verbatim: bool,
+  byte_buf: VecDeque<u8>,
+  pub verbatim_single: bool,
+  pub verbatim: bool,
 }
 
 impl PollReader {
@@ -508,42 +508,45 @@ impl PollReader {
     Self {
       parser: Parser::new(),
       collector: KeyCollector::new(),
-			byte_buf: VecDeque::new(),
-			verbatim_single: false,
-			verbatim: false,
+      byte_buf: VecDeque::new(),
+      verbatim_single: false,
+      verbatim: false,
     }
   }
 
-	pub fn handle_bracket_paste(&mut self) -> Option<KeyEvent> {
-		let end_marker = b"\x1b[201~";
-		let mut raw = vec![];
-		while let Some(byte) = self.byte_buf.pop_front() {
-			raw.push(byte);
-			if raw.ends_with(end_marker) {
-				// Strip the end marker from the raw sequence
-				raw.truncate(raw.len() - end_marker.len());
-				let paste = String::from_utf8_lossy(&raw).to_string();
-				self.verbatim = false;
-				return Some(KeyEvent(KeyCode::Verbatim(paste.into()), ModKeys::empty()));
-			}
-		}
+  pub fn handle_bracket_paste(&mut self) -> Option<KeyEvent> {
+    let end_marker = b"\x1b[201~";
+    let mut raw = vec![];
+    while let Some(byte) = self.byte_buf.pop_front() {
+      raw.push(byte);
+      if raw.ends_with(end_marker) {
+        // Strip the end marker from the raw sequence
+        raw.truncate(raw.len() - end_marker.len());
+        let paste = String::from_utf8_lossy(&raw).to_string();
+        self.verbatim = false;
+        return Some(KeyEvent(KeyCode::Verbatim(paste.into()), ModKeys::empty()));
+      }
+    }
 
-		self.verbatim = true;
-		self.byte_buf.extend(raw);
-		None
-	}
+    self.verbatim = true;
+    self.byte_buf.extend(raw);
+    None
+  }
 
-	pub fn read_one_verbatim(&mut self) -> Option<KeyEvent> {
-		if self.byte_buf.is_empty() {
-			return None;
-		}
-		let bytes: Vec<u8> = self.byte_buf.drain(..).collect();
-		let verbatim_str = String::from_utf8_lossy(&bytes).to_string();
-		Some(KeyEvent(KeyCode::Verbatim(verbatim_str.into()), ModKeys::empty()))
-	}
+  pub fn read_one_verbatim(&mut self) -> Option<KeyEvent> {
+    if self.byte_buf.is_empty() {
+      return None;
+    }
+    let bytes: Vec<u8> = self.byte_buf.drain(..).collect();
+    let verbatim_str = String::from_utf8_lossy(&bytes).to_string();
+    Some(KeyEvent(
+      KeyCode::Verbatim(verbatim_str.into()),
+      ModKeys::empty(),
+    ))
+  }
 
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
-		self.byte_buf.extend(bytes);
+    self.byte_buf.extend(bytes);
   }
 }
 
@@ -555,44 +558,42 @@ impl Default for PollReader {
 
 impl KeyReader for PollReader {
   fn read_key(&mut self) -> Result<Option<KeyEvent>, ShErr> {
-		if self.verbatim_single {
-			if let Some(key) = self.read_one_verbatim() {
-				self.verbatim_single = false;
-				return Ok(Some(key));
-			}
-			return Ok(None);
-		}
-		if self.verbatim {
-			if let Some(paste) = self.handle_bracket_paste() {
-				return Ok(Some(paste));
-			}
-			// If we're in verbatim mode but haven't seen the end marker yet, don't attempt to parse keys
-			return Ok(None);
-		} else if self.byte_buf.front() == Some(&b'\x1b') {
-			// Escape: if it's the only byte, or the next byte isn't a valid
-			// escape sequence prefix ([ or O), emit a standalone Escape
-			if self.byte_buf.len() == 1
-				|| !matches!(self.byte_buf.get(1), Some(b'[') | Some(b'O'))
-			{
-				self.byte_buf.pop_front();
-				return Ok(Some(KeyEvent(KeyCode::Esc, ModKeys::empty())));
-			}
-		}
-		while let Some(byte) = self.byte_buf.pop_front() {
-			self.parser.advance(&mut self.collector, &[byte]);
-			if let Some(key) = self.collector.pop() {
-				match key {
-					KeyEvent(KeyCode::BracketedPasteStart, _) => {
-						if let Some(paste) = self.handle_bracket_paste() {
-							return Ok(Some(paste));
-						} else {
-							continue;
-						}
-					}
-					_ => return Ok(Some(key))
-				}
-			}
-		}
+    if self.verbatim_single {
+      if let Some(key) = self.read_one_verbatim() {
+        self.verbatim_single = false;
+        return Ok(Some(key));
+      }
+      return Ok(None);
+    }
+    if self.verbatim {
+      if let Some(paste) = self.handle_bracket_paste() {
+        return Ok(Some(paste));
+      }
+      // If we're in verbatim mode but haven't seen the end marker yet, don't attempt to parse keys
+      return Ok(None);
+    } else if self.byte_buf.front() == Some(&b'\x1b') {
+      // Escape: if it's the only byte, or the next byte isn't a valid
+      // escape sequence prefix ([ or O), emit a standalone Escape
+      if self.byte_buf.len() == 1 || !matches!(self.byte_buf.get(1), Some(b'[') | Some(b'O')) {
+        self.byte_buf.pop_front();
+        return Ok(Some(KeyEvent(KeyCode::Esc, ModKeys::empty())));
+      }
+    }
+    while let Some(byte) = self.byte_buf.pop_front() {
+      self.parser.advance(&mut self.collector, &[byte]);
+      if let Some(key) = self.collector.pop() {
+        match key {
+          KeyEvent(KeyCode::BracketedPasteStart, _) => {
+            if let Some(paste) = self.handle_bracket_paste() {
+              return Ok(Some(paste));
+            } else {
+              continue;
+            }
+          }
+          _ => return Ok(Some(key)),
+        }
+      }
+    }
     Ok(None)
   }
 }
@@ -844,7 +845,7 @@ impl Default for Layout {
 }
 
 pub struct TermWriter {
-	last_bell: Option<Instant>,
+  last_bell: Option<Instant>,
   out: RawFd,
   pub t_cols: Col, // terminal width
   buffer: String,
@@ -854,7 +855,7 @@ impl TermWriter {
   pub fn new(out: RawFd) -> Self {
     let (t_cols, _) = get_win_size(out);
     Self {
-			last_bell: None,
+      last_bell: None,
       out,
       t_cols,
       buffer: String::new(),
@@ -1091,24 +1092,24 @@ impl LineWriter for TermWriter {
     Ok(())
   }
 
-	fn send_bell(&mut self) -> ShResult<()> {
-		if read_shopts(|o| o.core.bell_enabled) {
-			// we use a cooldown because I don't like having my ears assaulted by 1 million bells
-			// whenever i finish clearing the line using backspace.
-			let now = Instant::now();
+  fn send_bell(&mut self) -> ShResult<()> {
+    if read_shopts(|o| o.core.bell_enabled) {
+      // we use a cooldown because I don't like having my ears assaulted by 1 million bells
+      // whenever i finish clearing the line using backspace.
+      let now = Instant::now();
 
-			// surprisingly, a fixed cooldown like '100' is actually more annoying than 1 million bells.
-			// I've found this range of 50-150 to be the best balance
-			let cooldown = rand::random_range(50..150);
-			let should_send = match self.last_bell {
-				None => true,
-				Some(time) => now.duration_since(time).as_millis() > cooldown,
-			};
-			if should_send {
-				self.flush_write("\x07")?;
-				self.last_bell = Some(now);
-			}
-		}
-		Ok(())
-	}
+      // surprisingly, a fixed cooldown like '100' is actually more annoying than 1 million bells.
+      // I've found this range of 50-150 to be the best balance
+      let cooldown = rand::random_range(50..150);
+      let should_send = match self.last_bell {
+        None => true,
+        Some(time) => now.duration_since(time).as_millis() > cooldown,
+      };
+      if should_send {
+        self.flush_write("\x07")?;
+        self.last_bell = Some(now);
+      }
+    }
+    Ok(())
+  }
 }

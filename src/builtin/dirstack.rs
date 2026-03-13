@@ -12,12 +12,13 @@ use crate::{
 };
 
 pub fn truncate_home_path(path: String) -> String {
-	if let Ok(home) = env::var("HOME")
-	&& path.starts_with(&home) {
-		let new = path.strip_prefix(&home).unwrap();
-		return format!("~{new}");
-	}
-	path.to_string()
+  if let Ok(home) = env::var("HOME")
+    && path.starts_with(&home)
+  {
+    let new = path.strip_prefix(&home).unwrap();
+    return format!("~{new}");
+  }
+  path.to_string()
 }
 
 enum StackIdx {
@@ -376,8 +377,7 @@ pub fn dirs(node: Node) -> ShResult<()> {
       .map(|d| d.to_string_lossy().to_string());
 
     if abbreviate_home {
-      stack.map(truncate_home_path)
-        .collect()
+      stack.map(truncate_home_path).collect()
     } else {
       stack.collect()
     }
@@ -428,189 +428,198 @@ pub fn dirs(node: Node) -> ShResult<()> {
 
 #[cfg(test)]
 pub mod tests {
-	use std::{env, path::PathBuf};
-	use crate::{state::{self, read_meta}, testutil::{TestGuard, test_input}};
-	use pretty_assertions::{assert_ne,assert_eq};
-use tempfile::TempDir;
+  use crate::{
+    state::{self, read_meta},
+    testutil::{TestGuard, test_input},
+  };
+  use pretty_assertions::{assert_eq, assert_ne};
+  use std::{env, path::PathBuf};
+  use tempfile::TempDir;
 
-	#[test]
-	fn test_pushd_interactive() {
-		let g = TestGuard::new();
-		let current_dir = env::current_dir().unwrap();
+  #[test]
+  fn test_pushd_interactive() {
+    let g = TestGuard::new();
+    let current_dir = env::current_dir().unwrap();
 
-		test_input("pushd /tmp").unwrap();
+    test_input("pushd /tmp").unwrap();
 
-		let new_dir = env::current_dir().unwrap();
+    let new_dir = env::current_dir().unwrap();
 
-		assert_ne!(new_dir, current_dir);
-		assert_eq!(new_dir, PathBuf::from("/tmp"));
+    assert_ne!(new_dir, current_dir);
+    assert_eq!(new_dir, PathBuf::from("/tmp"));
 
-		let dir_stack = read_meta(|m| m.dirs().clone());
-		assert_eq!(dir_stack.len(), 1);
-		assert_eq!(dir_stack[0], current_dir);
+    let dir_stack = read_meta(|m| m.dirs().clone());
+    assert_eq!(dir_stack.len(), 1);
+    assert_eq!(dir_stack[0], current_dir);
 
-		let out = g.read_output();
-		let path = super::truncate_home_path(current_dir.to_string_lossy().to_string());
-		assert_eq!(out, format!("/tmp {path}\n"));
-	}
+    let out = g.read_output();
+    let path = super::truncate_home_path(current_dir.to_string_lossy().to_string());
+    assert_eq!(out, format!("/tmp {path}\n"));
+  }
 
-	#[test]
-	fn test_popd_interactive() {
-		let g = TestGuard::new();
-		let current_dir = env::current_dir().unwrap();
-		let tempdir = TempDir::new().unwrap();
-		let tempdir_raw = tempdir.path().to_path_buf().to_string_lossy().to_string();
+  #[test]
+  fn test_popd_interactive() {
+    let g = TestGuard::new();
+    let current_dir = env::current_dir().unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let tempdir_raw = tempdir.path().to_path_buf().to_string_lossy().to_string();
 
-		test_input(format!("pushd {tempdir_raw}")).unwrap();
+    test_input(format!("pushd {tempdir_raw}")).unwrap();
 
-		let dir_stack = read_meta(|m| m.dirs().clone());
-		assert_eq!(dir_stack.len(), 1);
-		assert_eq!(dir_stack[0], current_dir);
+    let dir_stack = read_meta(|m| m.dirs().clone());
+    assert_eq!(dir_stack.len(), 1);
+    assert_eq!(dir_stack[0], current_dir);
 
-		assert_eq!(env::current_dir().unwrap(), tempdir.path());
-		g.read_output(); // consume output of pushd
+    assert_eq!(env::current_dir().unwrap(), tempdir.path());
+    g.read_output(); // consume output of pushd
 
-		test_input("popd").unwrap();
+    test_input("popd").unwrap();
 
-		assert_eq!(env::current_dir().unwrap(), current_dir);
-		let out = g.read_output();
-		let path = super::truncate_home_path(current_dir.to_string_lossy().to_string());
-		assert_eq!(out, format!("{path}\n"));
-	}
+    assert_eq!(env::current_dir().unwrap(), current_dir);
+    let out = g.read_output();
+    let path = super::truncate_home_path(current_dir.to_string_lossy().to_string());
+    assert_eq!(out, format!("{path}\n"));
+  }
 
-	#[test]
-	fn test_popd_empty_stack() {
-		let _g = TestGuard::new();
+  #[test]
+  fn test_popd_empty_stack() {
+    let _g = TestGuard::new();
 
-		test_input("popd").unwrap_err();
-		assert_ne!(state::get_status(), 0);
-	}
+    test_input("popd").unwrap_err();
+    assert_ne!(state::get_status(), 0);
+  }
 
-	#[test]
-	fn test_pushd_multiple_then_popd() {
-		let g = TestGuard::new();
-		let original = env::current_dir().unwrap();
-		let tmp1 = TempDir::new().unwrap();
-		let tmp2 = TempDir::new().unwrap();
-		let path1 = tmp1.path().to_path_buf();
-		let path2 = tmp2.path().to_path_buf();
+  #[test]
+  fn test_pushd_multiple_then_popd() {
+    let g = TestGuard::new();
+    let original = env::current_dir().unwrap();
+    let tmp1 = TempDir::new().unwrap();
+    let tmp2 = TempDir::new().unwrap();
+    let path1 = tmp1.path().to_path_buf();
+    let path2 = tmp2.path().to_path_buf();
 
-		test_input(format!("pushd {}", path1.display())).unwrap();
-		test_input(format!("pushd {}", path2.display())).unwrap();
-		g.read_output();
+    test_input(format!("pushd {}", path1.display())).unwrap();
+    test_input(format!("pushd {}", path2.display())).unwrap();
+    g.read_output();
 
-		assert_eq!(env::current_dir().unwrap(), path2);
-		let stack = read_meta(|m| m.dirs().clone());
-		assert_eq!(stack.len(), 2);
-		assert_eq!(stack[0], path1);
-		assert_eq!(stack[1], original);
+    assert_eq!(env::current_dir().unwrap(), path2);
+    let stack = read_meta(|m| m.dirs().clone());
+    assert_eq!(stack.len(), 2);
+    assert_eq!(stack[0], path1);
+    assert_eq!(stack[1], original);
 
-		test_input("popd").unwrap();
-		assert_eq!(env::current_dir().unwrap(), path1);
+    test_input("popd").unwrap();
+    assert_eq!(env::current_dir().unwrap(), path1);
 
-		test_input("popd").unwrap();
-		assert_eq!(env::current_dir().unwrap(), original);
+    test_input("popd").unwrap();
+    assert_eq!(env::current_dir().unwrap(), original);
 
-		let stack = read_meta(|m| m.dirs().clone());
-		assert_eq!(stack.len(), 0);
-	}
+    let stack = read_meta(|m| m.dirs().clone());
+    assert_eq!(stack.len(), 0);
+  }
 
-	#[test]
-	fn test_pushd_rotate_plus() {
-		let g = TestGuard::new();
-		let original = env::current_dir().unwrap();
-		let tmp1 = TempDir::new().unwrap();
-		let tmp2 = TempDir::new().unwrap();
-		let path1 = tmp1.path().to_path_buf();
-		let path2 = tmp2.path().to_path_buf();
+  #[test]
+  fn test_pushd_rotate_plus() {
+    let g = TestGuard::new();
+    let original = env::current_dir().unwrap();
+    let tmp1 = TempDir::new().unwrap();
+    let tmp2 = TempDir::new().unwrap();
+    let path1 = tmp1.path().to_path_buf();
+    let path2 = tmp2.path().to_path_buf();
 
-		// Build stack: cwd=original, then pushd path1, pushd path2
-		// Stack after: cwd=path2, [path1, original]
-		test_input(format!("pushd {}", path1.display())).unwrap();
-		test_input(format!("pushd {}", path2.display())).unwrap();
-		g.read_output();
+    // Build stack: cwd=original, then pushd path1, pushd path2
+    // Stack after: cwd=path2, [path1, original]
+    test_input(format!("pushd {}", path1.display())).unwrap();
+    test_input(format!("pushd {}", path2.display())).unwrap();
+    g.read_output();
 
-		// pushd +1 rotates: [path2, path1, original] -> rotate_left(1) -> [path1, original, path2]
-		// pop front -> cwd=path1, stack=[original, path2]
-		test_input("pushd +1").unwrap();
-		assert_eq!(env::current_dir().unwrap(), path1);
+    // pushd +1 rotates: [path2, path1, original] -> rotate_left(1) -> [path1, original, path2]
+    // pop front -> cwd=path1, stack=[original, path2]
+    test_input("pushd +1").unwrap();
+    assert_eq!(env::current_dir().unwrap(), path1);
 
-		let stack = read_meta(|m| m.dirs().clone());
-		assert_eq!(stack.len(), 2);
-		assert_eq!(stack[0], original);
-		assert_eq!(stack[1], path2);
-	}
+    let stack = read_meta(|m| m.dirs().clone());
+    assert_eq!(stack.len(), 2);
+    assert_eq!(stack[0], original);
+    assert_eq!(stack[1], path2);
+  }
 
-	#[test]
-	fn test_pushd_no_cd_flag() {
-		let _g = TestGuard::new();
-		let original = env::current_dir().unwrap();
-		let tmp = TempDir::new().unwrap();
-		let path = tmp.path().to_path_buf();
+  #[test]
+  fn test_pushd_no_cd_flag() {
+    let _g = TestGuard::new();
+    let original = env::current_dir().unwrap();
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().to_path_buf();
 
-		test_input(format!("pushd -n {}", path.display())).unwrap();
+    test_input(format!("pushd -n {}", path.display())).unwrap();
 
-		// -n means don't cd, but the dir should still be on the stack
-		assert_eq!(env::current_dir().unwrap(), original);
-	}
+    // -n means don't cd, but the dir should still be on the stack
+    assert_eq!(env::current_dir().unwrap(), original);
+  }
 
-	#[test]
-	fn test_dirs_clear() {
-		let _g = TestGuard::new();
-		let tmp = TempDir::new().unwrap();
+  #[test]
+  fn test_dirs_clear() {
+    let _g = TestGuard::new();
+    let tmp = TempDir::new().unwrap();
 
-		test_input(format!("pushd {}", tmp.path().display())).unwrap();
-		assert_eq!(read_meta(|m| m.dirs().len()), 1);
+    test_input(format!("pushd {}", tmp.path().display())).unwrap();
+    assert_eq!(read_meta(|m| m.dirs().len()), 1);
 
-		test_input("dirs -c").unwrap();
-		assert_eq!(read_meta(|m| m.dirs().len()), 0);
-	}
+    test_input("dirs -c").unwrap();
+    assert_eq!(read_meta(|m| m.dirs().len()), 0);
+  }
 
-	#[test]
-	fn test_dirs_one_per_line() {
-		let g = TestGuard::new();
-		let original = env::current_dir().unwrap();
-		let tmp = TempDir::new().unwrap();
-		let path = tmp.path().to_path_buf();
+  #[test]
+  fn test_dirs_one_per_line() {
+    let g = TestGuard::new();
+    let original = env::current_dir().unwrap();
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().to_path_buf();
 
-		test_input(format!("pushd {}", path.display())).unwrap();
-		g.read_output();
+    test_input(format!("pushd {}", path.display())).unwrap();
+    g.read_output();
 
-		test_input("dirs -p").unwrap();
-		let out = g.read_output();
-		let lines: Vec<&str> = out.split('\n').filter(|l| !l.is_empty()).collect();
-		assert_eq!(lines.len(), 2);
-		assert_eq!(lines[0], super::truncate_home_path(path.to_string_lossy().to_string()));
-		assert_eq!(lines[1], super::truncate_home_path(original.to_string_lossy().to_string()));
-	}
+    test_input("dirs -p").unwrap();
+    let out = g.read_output();
+    let lines: Vec<&str> = out.split('\n').filter(|l| !l.is_empty()).collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(
+      lines[0],
+      super::truncate_home_path(path.to_string_lossy().to_string())
+    );
+    assert_eq!(
+      lines[1],
+      super::truncate_home_path(original.to_string_lossy().to_string())
+    );
+  }
 
-	#[test]
-	fn test_popd_indexed_from_top() {
-		let _g = TestGuard::new();
-		let original = env::current_dir().unwrap();
-		let tmp1 = TempDir::new().unwrap();
-		let tmp2 = TempDir::new().unwrap();
-		let path1 = tmp1.path().to_path_buf();
-		let path2 = tmp2.path().to_path_buf();
+  #[test]
+  fn test_popd_indexed_from_top() {
+    let _g = TestGuard::new();
+    let original = env::current_dir().unwrap();
+    let tmp1 = TempDir::new().unwrap();
+    let tmp2 = TempDir::new().unwrap();
+    let path1 = tmp1.path().to_path_buf();
+    let path2 = tmp2.path().to_path_buf();
 
-		// Stack: cwd=path2, [path1, original]
-		test_input(format!("pushd {}", path1.display())).unwrap();
-		test_input(format!("pushd {}", path2.display())).unwrap();
+    // Stack: cwd=path2, [path1, original]
+    test_input(format!("pushd {}", path1.display())).unwrap();
+    test_input(format!("pushd {}", path2.display())).unwrap();
 
-		// popd +1 removes index (1-1)=0 from stored dirs, i.e. path1
-		test_input("popd +1").unwrap();
-		assert_eq!(env::current_dir().unwrap(), path2); // no cd
+    // popd +1 removes index (1-1)=0 from stored dirs, i.e. path1
+    test_input("popd +1").unwrap();
+    assert_eq!(env::current_dir().unwrap(), path2); // no cd
 
-		let stack = read_meta(|m| m.dirs().clone());
-		assert_eq!(stack.len(), 1);
-		assert_eq!(stack[0], original);
-	}
+    let stack = read_meta(|m| m.dirs().clone());
+    assert_eq!(stack.len(), 1);
+    assert_eq!(stack[0], original);
+  }
 
-	#[test]
-	fn test_pushd_nonexistent_dir() {
-		let _g = TestGuard::new();
+  #[test]
+  fn test_pushd_nonexistent_dir() {
+    let _g = TestGuard::new();
 
-		let result = test_input("pushd /nonexistent_dir_12345");
-		assert!(result.is_err());
-	}
+    let result = test_input("pushd /nonexistent_dir_12345");
+    assert!(result.is_err());
+  }
 }

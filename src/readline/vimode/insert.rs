@@ -13,10 +13,10 @@ impl ViInsert {
   pub fn new() -> Self {
     Self::default()
   }
-	pub fn record_cmd(mut self, cmd: ViCmd) -> Self {
-		self.cmds.push(cmd);
-		self
-	}
+  pub fn record_cmd(mut self, cmd: ViCmd) -> Self {
+    self.cmds.push(cmd);
+    self
+  }
   pub fn with_count(mut self, repeat_count: u16) -> Self {
     self.repeat_count = repeat_count;
     self
@@ -65,10 +65,12 @@ impl ViMode for ViInsert {
         raw_seq: String::new(),
         flags: Default::default(),
       }),
-			E(K::Verbatim(seq), _) => {
-				self.pending_cmd.set_verb(VerbCmd(1, Verb::Insert(seq.to_string())));
-				self.register_and_return()
-			}
+      E(K::Verbatim(seq), _) => {
+        self
+          .pending_cmd
+          .set_verb(VerbCmd(1, Verb::Insert(seq.to_string())));
+        self.register_and_return()
+      }
       E(K::Char('W'), M::CTRL) => {
         self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
         self.pending_cmd.set_motion(MotionCmd(

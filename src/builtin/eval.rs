@@ -37,7 +37,7 @@ pub fn eval(node: Node) -> ShResult<()> {
 
 #[cfg(test)]
 mod tests {
-  use crate::state::{self, read_vars, write_vars, VarFlags, VarKind};
+  use crate::state::{self, VarFlags, VarKind, read_vars, write_vars};
   use crate::testutil::{TestGuard, test_input};
 
   // ===================== Basic =====================
@@ -80,7 +80,8 @@ mod tests {
   #[test]
   fn eval_expands_variable() {
     let guard = TestGuard::new();
-    write_vars(|v| v.set_var("CMD", VarKind::Str("echo evaluated".into()), VarFlags::NONE)).unwrap();
+    write_vars(|v| v.set_var("CMD", VarKind::Str("echo evaluated".into()), VarFlags::NONE))
+      .unwrap();
 
     test_input("eval $CMD").unwrap();
     let out = guard.read_output();

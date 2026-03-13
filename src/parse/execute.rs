@@ -8,7 +8,28 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
+    alias::{alias, unalias},
+    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
+    autocmd::autocmd,
+    cd::cd,
+    complete::{compgen_builtin, complete_builtin},
+    dirstack::{dirs, popd, pushd},
+    echo::echo,
+    eval, exec,
+    flowctl::flowctl,
+    getopts::getopts,
+    intro,
+    jobctl::{self, JobBehavior, continue_job, disown, jobs},
+    keymap, map,
+    pwd::pwd,
+    read::{self, read_builtin},
+    resource::{ulimit, umask_builtin},
+    shift::shift,
+    shopt::shopt,
+    source::source,
+    test::double_bracket_test,
+    trap::{TrapTarget, trap},
+    varcmds::{export, local, readonly, unset},
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -136,13 +157,18 @@ pub fn exec_dash_c(input: String) -> ShResult<()> {
   if nodes.len() == 1 {
     let is_single_cmd = match &nodes[0].class {
       NdRule::Command { .. } => true,
-      NdRule::Pipeline { cmds } => cmds.len() == 1 && matches!(cmds[0].class, NdRule::Command { .. }),
+      NdRule::Pipeline { cmds } => {
+        cmds.len() == 1 && matches!(cmds[0].class, NdRule::Command { .. })
+      }
       NdRule::Conjunction { elements } => {
-        elements.len() == 1 && match &elements[0].cmd.class {
-          NdRule::Pipeline { cmds } => cmds.len() == 1 && matches!(cmds[0].class, NdRule::Command { .. }),
-          NdRule::Command { .. } => true,
-          _ => false,
-        }
+        elements.len() == 1
+          && match &elements[0].cmd.class {
+            NdRule::Pipeline { cmds } => {
+              cmds.len() == 1 && matches!(cmds[0].class, NdRule::Command { .. })
+            }
+            NdRule::Command { .. } => true,
+            _ => false,
+          }
       }
       _ => false,
     };
@@ -151,8 +177,12 @@ pub fn exec_dash_c(input: String) -> ShResult<()> {
       let mut node = nodes.remove(0);
       loop {
         match node.class {
-          NdRule::Conjunction { mut elements } => { node = *elements.remove(0).cmd; }
-          NdRule::Pipeline { mut cmds } => { node = cmds.remove(0); }
+          NdRule::Conjunction { mut elements } => {
+            node = *elements.remove(0).cmd;
+          }
+          NdRule::Pipeline { mut cmds } => {
+            node = cmds.remove(0);
+          }
           NdRule::Command { .. } => break,
           _ => break,
         }
@@ -250,7 +280,7 @@ impl Dispatcher {
       NdRule::CaseNode { .. } => self.exec_case(node)?,
       NdRule::BraceGrp { .. } => self.exec_brc_grp(node)?,
       NdRule::FuncDef { .. } => self.exec_func_def(node)?,
-			NdRule::Negate { .. } => self.exec_negated(node)?,
+      NdRule::Negate { .. } => self.exec_negated(node)?,
       NdRule::Command { .. } => self.dispatch_cmd(node)?,
       NdRule::Test { .. } => self.exec_test(node)?,
       _ => unreachable!(),
@@ -258,8 +288,14 @@ impl Dispatcher {
     Ok(())
   }
   pub fn dispatch_cmd(&mut self, node: Node) -> ShResult<()> {
-		let (line, _) = node.get_span().clone().line_and_col();
-		write_vars(|v| v.set_var("LINENO", VarKind::Str((line + 1).to_string()), VarFlags::NONE))?;
+    let (line, _) = node.get_span().clone().line_and_col();
+    write_vars(|v| {
+      v.set_var(
+        "LINENO",
+        VarKind::Str((line + 1).to_string()),
+        VarFlags::NONE,
+      )
+    })?;
 
     let Some(cmd) = node.get_command() else {
       return self.exec_cmd(node); // Argv is empty, probably an assignment
@@ -288,16 +324,16 @@ impl Dispatcher {
       self.exec_cmd(node)
     }
   }
-	pub fn exec_negated(&mut self, node: Node) -> ShResult<()> {
-		let NdRule::Negate { cmd } = node.class else {
-			unreachable!()
-		};
-		self.dispatch_node(*cmd)?;
-		let status = state::get_status();
-		state::set_status(if status == 0 { 1 } else { 0 });
+  pub fn exec_negated(&mut self, node: Node) -> ShResult<()> {
+    let NdRule::Negate { cmd } = node.class else {
+      unreachable!()
+    };
+    self.dispatch_node(*cmd)?;
+    let status = state::get_status();
+    state::set_status(if status == 0 { 1 } else { 0 });
 
-		Ok(())
-	}
+    Ok(())
+  }
   pub fn exec_conjunction(&mut self, conjunction: Node) -> ShResult<()> {
     let NdRule::Conjunction { elements } = conjunction.class else {
       unreachable!()
@@ -364,7 +400,7 @@ impl Dispatcher {
     Ok(())
   }
   fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
-		let _blame = subsh.get_span().clone();
+    let _blame = subsh.get_span().clone();
     let NdRule::Command { assignments, argv } = subsh.class else {
       unreachable!()
     };
@@ -769,11 +805,14 @@ impl Dispatcher {
       self.fg_job = !is_bg && self.interactive;
       let mut cmd = cmds.into_iter().next().unwrap();
       if is_bg && !matches!(cmd.class, NdRule::Command { .. }) {
-        self.run_fork(&cmd.get_command().map(|t| t.to_string()).unwrap_or_default(), |s| {
-          if let Err(e) = s.dispatch_node(cmd) {
-            e.print_error();
-          }
-        })?;
+        self.run_fork(
+          &cmd.get_command().map(|t| t.to_string()).unwrap_or_default(),
+          |s| {
+            if let Err(e) = s.dispatch_node(cmd) {
+              e.print_error();
+            }
+          },
+        )?;
       } else {
         self.dispatch_node(cmd)?;
       }
@@ -972,8 +1011,8 @@ impl Dispatcher {
       "keymap" => keymap::keymap(cmd),
       "read_key" => read::read_key(cmd),
       "autocmd" => autocmd(cmd),
-			"ulimit" => ulimit(cmd),
-			"umask" => umask_builtin(cmd),
+      "ulimit" => ulimit(cmd),
+      "umask" => umask_builtin(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -1331,94 +1370,94 @@ mod tests {
     assert_eq!(state::get_status(), 0);
   }
 
-	// ===================== other stuff =====================
+  // ===================== other stuff =====================
 
-	#[test]
-	fn for_loop_var_zip() {
-		let g = TestGuard::new();
-		test_input("for a b in 1 2 3 4 5 6; do echo $a $b; done").unwrap();
-		let out = g.read_output();
-		assert_eq!(out, "1 2\n3 4\n5 6\n");
-	}
+  #[test]
+  fn for_loop_var_zip() {
+    let g = TestGuard::new();
+    test_input("for a b in 1 2 3 4 5 6; do echo $a $b; done").unwrap();
+    let out = g.read_output();
+    assert_eq!(out, "1 2\n3 4\n5 6\n");
+  }
 
-	#[test]
-	fn for_loop_unsets_zipped() {
-		let g = TestGuard::new();
-		test_input("for a b c d in 1 2 3 4 5 6; do echo $a $b $c $d; done").unwrap();
-		let out = g.read_output();
-		assert_eq!(out, "1 2 3 4\n5 6\n");
-	}
+  #[test]
+  fn for_loop_unsets_zipped() {
+    let g = TestGuard::new();
+    test_input("for a b c d in 1 2 3 4 5 6; do echo $a $b $c $d; done").unwrap();
+    let out = g.read_output();
+    assert_eq!(out, "1 2 3 4\n5 6\n");
+  }
 
-	// ===================== negation (!) status =====================
+  // ===================== negation (!) status =====================
 
-	#[test]
-	fn negate_true() {
-		let _g = TestGuard::new();
-		test_input("! true").unwrap();
-		assert_eq!(state::get_status(), 1);
-	}
+  #[test]
+  fn negate_true() {
+    let _g = TestGuard::new();
+    test_input("! true").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
 
-	#[test]
-	fn negate_false() {
-		let _g = TestGuard::new();
-		test_input("! false").unwrap();
-		assert_eq!(state::get_status(), 0);
-	}
+  #[test]
+  fn negate_false() {
+    let _g = TestGuard::new();
+    test_input("! false").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
 
-	#[test]
-	fn double_negate_true() {
-		let _g = TestGuard::new();
-		test_input("! ! true").unwrap();
-		assert_eq!(state::get_status(), 0);
-	}
+  #[test]
+  fn double_negate_true() {
+    let _g = TestGuard::new();
+    test_input("! ! true").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
 
-	#[test]
-	fn double_negate_false() {
-		let _g = TestGuard::new();
-		test_input("! ! false").unwrap();
-		assert_eq!(state::get_status(), 1);
-	}
+  #[test]
+  fn double_negate_false() {
+    let _g = TestGuard::new();
+    test_input("! ! false").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
 
-	#[test]
-	fn negate_pipeline_last_cmd() {
-		let _g = TestGuard::new();
-		// pipeline status = last cmd (false) = 1, negated → 0
-		test_input("! true | false").unwrap();
-		assert_eq!(state::get_status(), 0);
-	}
+  #[test]
+  fn negate_pipeline_last_cmd() {
+    let _g = TestGuard::new();
+    // pipeline status = last cmd (false) = 1, negated → 0
+    test_input("! true | false").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
 
-	#[test]
-	fn negate_pipeline_last_cmd_true() {
-		let _g = TestGuard::new();
-		// pipeline status = last cmd (true) = 0, negated → 1
-		test_input("! false | true").unwrap();
-		assert_eq!(state::get_status(), 1);
-	}
+  #[test]
+  fn negate_pipeline_last_cmd_true() {
+    let _g = TestGuard::new();
+    // pipeline status = last cmd (true) = 0, negated → 1
+    test_input("! false | true").unwrap();
+    assert_eq!(state::get_status(), 1);
+  }
 
-	#[test]
-	fn negate_in_conjunction() {
-		let _g = TestGuard::new();
-		// ! binds to pipeline, not conjunction: (! (true && false)) && true
-		test_input("! (true && false) && true").unwrap();
-		assert_eq!(state::get_status(), 0);
-	}
+  #[test]
+  fn negate_in_conjunction() {
+    let _g = TestGuard::new();
+    // ! binds to pipeline, not conjunction: (! (true && false)) && true
+    test_input("! (true && false) && true").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
 
-	#[test]
-	fn negate_in_if_condition() {
-		let g = TestGuard::new();
-		test_input("if ! false; then echo yes; fi").unwrap();
-		assert_eq!(state::get_status(), 0);
-		assert_eq!(g.read_output(), "yes\n");
-	}
+  #[test]
+  fn negate_in_if_condition() {
+    let g = TestGuard::new();
+    test_input("if ! false; then echo yes; fi").unwrap();
+    assert_eq!(state::get_status(), 0);
+    assert_eq!(g.read_output(), "yes\n");
+  }
 
-	#[test]
-	fn empty_var_in_test() {
-		let _g = TestGuard::new();
-		// POSIX specifies that a quoted unset variable expands to an empty string, so the shell actually sees `[ -n "" ]`, which returns false
-		test_input("[ -n \"$EMPTYVAR_PROBABLY_NOT_SET_TO_ANYTHING\" ]").unwrap();
-		assert_eq!(state::get_status(), 1);
-		// Without quotes, word splitting causes an empty var to be removed entirely, so the shell actually sees `[ -n ]`, testing the value of ']', which returns true
-		test_input("[ -n $EMPTYVAR_PROBABLY_NOT_SET_TO_ANYTHING ]").unwrap();
-		assert_eq!(state::get_status(), 0);
-	}
+  #[test]
+  fn empty_var_in_test() {
+    let _g = TestGuard::new();
+    // POSIX specifies that a quoted unset variable expands to an empty string, so the shell actually sees `[ -n "" ]`, which returns false
+    test_input("[ -n \"$EMPTYVAR_PROBABLY_NOT_SET_TO_ANYTHING\" ]").unwrap();
+    assert_eq!(state::get_status(), 1);
+    // Without quotes, word splitting causes an empty var to be removed entirely, so the shell actually sees `[ -n ]`, testing the value of ']', which returns true
+    test_input("[ -n $EMPTYVAR_PROBABLY_NOT_SET_TO_ANYTHING ]").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
 }

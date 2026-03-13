@@ -88,7 +88,9 @@ impl Highlighter {
     while prefix_chars.peek().is_some() {
       match chars.next() {
         Some(c) if c == markers::VISUAL_MODE_START || c == markers::VISUAL_MODE_END => continue,
-        Some(c) if Some(&c) == prefix_chars.peek() => { prefix_chars.next(); }
+        Some(c) if Some(&c) == prefix_chars.peek() => {
+          prefix_chars.next();
+        }
         _ => return text.to_string(), // mismatch, return original
       }
     }
@@ -104,7 +106,9 @@ impl Highlighter {
     let mut si = suffix_chars.len();
 
     while si > 0 {
-      if ti == 0 { return text.to_string(); }
+      if ti == 0 {
+        return text.to_string();
+      }
       ti -= 1;
       if chars[ti] == markers::VISUAL_MODE_START || chars[ti] == markers::VISUAL_MODE_END {
         continue; // skip visual markers
@@ -346,7 +350,9 @@ impl Highlighter {
           recursive_highlighter.highlight();
           // Read back visual state — selection may have started/ended inside
           self.in_selection = recursive_highlighter.in_selection;
-          self.style_stack.append(&mut recursive_highlighter.style_stack);
+          self
+            .style_stack
+            .append(&mut recursive_highlighter.style_stack);
           if selection_at_entry {
             self.emit_style(Style::BgWhite | Style::Black);
             self.output.push_str(prefix);

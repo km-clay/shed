@@ -94,7 +94,10 @@ impl FromStr for TestOp {
       "-ge" => Ok(Self::IntGe),
       "-le" => Ok(Self::IntLe),
       _ if TEST_UNARY_OPS.contains(&s) => Ok(Self::Unary(s.parse::<UnaryOp>()?)),
-      _ => Err(ShErr::simple(ShErrKind::SyntaxErr, format!("Invalid test operator '{}'", s))),
+      _ => Err(ShErr::simple(
+        ShErrKind::SyntaxErr,
+        format!("Invalid test operator '{}'", s),
+      )),
     }
   }
 }
@@ -121,7 +124,7 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
   };
   let mut last_result = false;
   let mut conjunct_op: Option<ConjunctOp>;
-	log::trace!("test cases: {:#?}", cases);
+  log::trace!("test cases: {:#?}", cases);
 
   for case in cases {
     let result = match case {
@@ -305,10 +308,10 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
 
 #[cfg(test)]
 mod tests {
-  use std::fs;
-  use tempfile::{TempDir, NamedTempFile};
   use crate::state;
   use crate::testutil::{TestGuard, test_input};
+  use std::fs;
+  use tempfile::{NamedTempFile, TempDir};
 
   // ===================== Unary: file tests =====================
 
@@ -590,9 +593,10 @@ mod tests {
   fn parse_unary_ops() {
     use super::UnaryOp;
     use std::str::FromStr;
-    for op in ["-e", "-d", "-f", "-h", "-L", "-r", "-w", "-x", "-s",
-               "-p", "-S", "-b", "-c", "-k", "-O", "-G", "-N", "-u",
-               "-g", "-t", "-n", "-z"] {
+    for op in [
+      "-e", "-d", "-f", "-h", "-L", "-r", "-w", "-x", "-s", "-p", "-S", "-b", "-c", "-k", "-O",
+      "-G", "-N", "-u", "-g", "-t", "-n", "-z",
+    ] {
       assert!(UnaryOp::from_str(op).is_ok(), "failed to parse {op}");
     }
   }

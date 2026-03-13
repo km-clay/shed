@@ -7,17 +7,17 @@ pub static SAVED_REGISTERS: Mutex<Option<Registers>> = Mutex::new(None);
 
 #[cfg(test)]
 pub fn save_registers() {
-	let mut saved = SAVED_REGISTERS.lock().unwrap();
-	*saved = Some(REGISTERS.lock().unwrap().clone());
+  let mut saved = SAVED_REGISTERS.lock().unwrap();
+  *saved = Some(REGISTERS.lock().unwrap().clone());
 }
 
 #[cfg(test)]
 pub fn restore_registers() {
-	let mut saved = SAVED_REGISTERS.lock().unwrap();
-	if let Some(ref registers) = *saved {
-		*REGISTERS.lock().unwrap() = registers.clone();
-	}
-	*saved = None;
+  let mut saved = SAVED_REGISTERS.lock().unwrap();
+  if let Some(ref registers) = *saved {
+    *REGISTERS.lock().unwrap() = registers.clone();
+  }
+  *saved = None;
 }
 
 pub fn read_register(ch: Option<char>) -> Option<RegisterContent> {

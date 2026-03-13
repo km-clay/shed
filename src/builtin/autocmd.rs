@@ -159,7 +159,10 @@ mod tests {
     test_input("autocmd post-cmd 'echo post'").unwrap();
 
     assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd)).len(), 1);
-    assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd)).len(), 1);
+    assert_eq!(
+      read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd)).len(),
+      1
+    );
   }
 
   // ===================== Pattern =====================
@@ -205,7 +208,10 @@ mod tests {
 
     test_input("autocmd -c pre-cmd").unwrap();
     assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd)).len(), 0);
-    assert_eq!(read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd)).len(), 1);
+    assert_eq!(
+      read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd)).len(),
+      1
+    );
   }
 
   #[test]
@@ -245,12 +251,22 @@ mod tests {
   fn all_kinds_parse() {
     let _guard = TestGuard::new();
     let kinds = [
-      "pre-cmd", "post-cmd", "pre-change-dir", "post-change-dir",
-      "on-job-finish", "pre-prompt", "post-prompt",
-      "pre-mode-change", "post-mode-change",
-      "on-history-open", "on-history-close", "on-history-select",
-      "on-completion-start", "on-completion-cancel", "on-completion-select",
-      "on-exit"
+      "pre-cmd",
+      "post-cmd",
+      "pre-change-dir",
+      "post-change-dir",
+      "on-job-finish",
+      "pre-prompt",
+      "post-prompt",
+      "pre-mode-change",
+      "post-mode-change",
+      "on-history-open",
+      "on-history-close",
+      "on-history-select",
+      "on-completion-start",
+      "on-completion-cancel",
+      "on-completion-select",
+      "on-exit",
     ];
     for kind in kinds {
       test_input(format!("autocmd {kind} 'true'")).unwrap();

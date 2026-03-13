@@ -81,10 +81,10 @@ impl KeyMapOpts {
         opt: Opt::Short('o'), // operator-pending mode
         takes_arg: false,
       },
-			OptSpec {
-				opt: Opt::Long("remove".into()),
-				takes_arg: true,
-			},
+      OptSpec {
+        opt: Opt::Long("remove".into()),
+        takes_arg: true,
+      },
       OptSpec {
         opt: Opt::Short('r'), // replace mode
         takes_arg: false,
@@ -180,8 +180,8 @@ pub fn keymap(node: Node) -> ShResult<()> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::getopt::Opt;
   use crate::expand::expand_keymap;
+  use crate::getopt::Opt;
   use crate::state::{self, read_logic};
   use crate::testutil::{TestGuard, test_input};
 
@@ -217,7 +217,8 @@ mod tests {
     let opts = KeyMapOpts::from_opts(&[
       Opt::Short('n'),
       Opt::LongWithArg("remove".into(), "jk".into()),
-    ]).unwrap();
+    ])
+    .unwrap();
     assert_eq!(opts.remove, Some("jk".into()));
   }
 
@@ -273,10 +274,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("keymap -n jk '<ESC>'").unwrap();
 
-    let maps = read_logic(|l| l.keymaps_filtered(
-      KeyMapFlags::NORMAL,
-      &expand_keymap("jk"),
-    ));
+    let maps = read_logic(|l| l.keymaps_filtered(KeyMapFlags::NORMAL, &expand_keymap("jk")));
     assert!(!maps.is_empty());
   }
 
@@ -285,10 +283,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("keymap -i jk '<ESC>'").unwrap();
 
-    let maps = read_logic(|l| l.keymaps_filtered(
-      KeyMapFlags::INSERT,
-      &expand_keymap("jk"),
-    ));
+    let maps = read_logic(|l| l.keymaps_filtered(KeyMapFlags::INSERT, &expand_keymap("jk")));
     assert!(!maps.is_empty());
   }
 
@@ -298,10 +293,7 @@ mod tests {
     test_input("keymap -n jk '<ESC>'").unwrap();
     test_input("keymap -n jk 'dd'").unwrap();
 
-    let maps = read_logic(|l| l.keymaps_filtered(
-      KeyMapFlags::NORMAL,
-      &expand_keymap("jk"),
-    ));
+    let maps = read_logic(|l| l.keymaps_filtered(KeyMapFlags::NORMAL, &expand_keymap("jk")));
     assert_eq!(maps.len(), 1);
     assert_eq!(maps[0].action, "dd");
   }
@@ -312,10 +304,7 @@ mod tests {
     test_input("keymap -n jk '<ESC>'").unwrap();
     test_input("keymap -n --remove jk").unwrap();
 
-    let maps = read_logic(|l| l.keymaps_filtered(
-      KeyMapFlags::NORMAL,
-      &expand_keymap("jk"),
-    ));
+    let maps = read_logic(|l| l.keymaps_filtered(KeyMapFlags::NORMAL, &expand_keymap("jk")));
     assert!(maps.is_empty());
   }
 

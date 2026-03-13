@@ -87,7 +87,7 @@ impl ParsedSrc {
         Err(error) => return Err(vec![error]),
       }
     }
-		log::trace!("Tokens: {:#?}", tokens);
+    log::trace!("Tokens: {:#?}", tokens);
 
     let mut errors = vec![];
     let mut nodes = vec![];
@@ -241,9 +241,9 @@ impl Node {
       } => {
         body.walk_tree(f);
       }
-			NdRule::Negate { ref mut cmd } => {
-				cmd.walk_tree(f);
-			}
+      NdRule::Negate { ref mut cmd } => {
+        cmd.walk_tree(f);
+      }
       NdRule::Test { cases: _ } => (),
     }
   }
@@ -634,9 +634,9 @@ pub enum NdRule {
     arr: Vec<Tk>,
     body: Vec<Node>,
   },
-	Negate {
-		cmd: Box<Node>,
-	},
+  Negate {
+    cmd: Box<Node>,
+  },
   CaseNode {
     pattern: Tk,
     case_blocks: Vec<CaseNode>,
@@ -1159,40 +1159,40 @@ impl ParseStream {
       .with_label(src, label)
       .with_context(self.context.clone())
   }
-	fn parse_negate(&mut self) -> ShResult<Option<Node>> {
+  fn parse_negate(&mut self) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
 
-		if !self.check_keyword("!") || !self.next_tk_is_some() {
-			return Ok(None);
-		}
-		node_tks.push(self.next_tk().unwrap());
+    if !self.check_keyword("!") || !self.next_tk_is_some() {
+      return Ok(None);
+    }
+    node_tks.push(self.next_tk().unwrap());
 
-		let Some(cmd) = self.parse_block(true)? else {
-			self.panic_mode(&mut node_tks);
-			let span = node_tks.get_span().unwrap();
-			let color = next_color();
-			return Err(
-				self.make_err(
-					span.clone(),
-					Label::new(span)
-						.with_message("Expected a command after '!'")
-						.with_color(color),
-				),
-			);
-		};
+    let Some(cmd) = self.parse_block(true)? else {
+      self.panic_mode(&mut node_tks);
+      let span = node_tks.get_span().unwrap();
+      let color = next_color();
+      return Err(
+        self.make_err(
+          span.clone(),
+          Label::new(span)
+            .with_message("Expected a command after '!'")
+            .with_color(color),
+        ),
+      );
+    };
 
-		node_tks.extend(cmd.tokens.clone());
-		self.catch_separator(&mut node_tks);
+    node_tks.extend(cmd.tokens.clone());
+    self.catch_separator(&mut node_tks);
 
-		let node = Node {
-			class: NdRule::Negate { cmd: Box::new(cmd) },
-			flags: NdFlags::empty(),
-			redirs: vec![],
-			context: self.context.clone(),
-			tokens: node_tks,
-		};
-		Ok(Some(node))
-	}
+    let node = Node {
+      class: NdRule::Negate { cmd: Box::new(cmd) },
+      flags: NdFlags::empty(),
+      redirs: vec![],
+      context: self.context.clone(),
+      tokens: node_tks,
+    };
+    Ok(Some(node))
+  }
   fn parse_if(&mut self) -> ShResult<Option<Node>> {
     // Needs at last one 'if-then',
     // Any number of 'elif-then',
@@ -1931,393 +1931,400 @@ where
       ref mut body,
     } => check_node(body, filter, operation),
 
-		NdRule::Negate { ref mut cmd } => check_node(cmd, filter, operation),
+    NdRule::Negate { ref mut cmd } => check_node(cmd, filter, operation),
     NdRule::Test { cases: _ } => (),
   }
 }
 
 #[cfg(test)]
 pub mod tests {
-	use crate::testutil::{NdKind, get_ast};
+  use crate::testutil::{NdKind, get_ast};
 
-	#[test]
-	fn parse_hello_world() {
-		let input = "echo hello world";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_hello_world() {
+    let input = "echo hello world";
+    let expected = &mut [NdKind::Conjunction, NdKind::Pipeline, NdKind::Command].into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_if_statement() {
-		let input = "if echo foo; then echo bar; fi";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::IfNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_if_statement() {
+    let input = "if echo foo; then echo bar; fi";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::IfNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_pipeline() {
-		let input = "ls | grep foo | wc -l";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Command,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_pipeline() {
+    let input = "ls | grep foo | wc -l";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Command,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_conjunction_and() {
-		let input = "echo foo && echo bar";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_conjunction_and() {
+    let input = "echo foo && echo bar";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_while_loop() {
-		let input = "while true; do echo hello; done";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::LoopNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_while_loop() {
+    let input = "while true; do echo hello; done";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::LoopNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_for_loop() {
-		let input = "for i in a b c; do echo $i; done";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::ForNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_for_loop() {
+    let input = "for i in a b c; do echo $i; done";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::ForNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_case_statement() {
-		let input = "case foo in bar) echo bar;; baz) echo baz;; esac";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::CaseNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_case_statement() {
+    let input = "case foo in bar) echo bar;; baz) echo baz;; esac";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::CaseNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_func_def() {
-		let input = "foo() { echo hello; }";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::FuncDef,
-			NdKind::BraceGrp,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_func_def() {
+    let input = "foo() { echo hello; }";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::FuncDef,
+      NdKind::BraceGrp,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_assignment() {
-		let input = "FOO=bar";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Assignment,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_assignment() {
+    let input = "FOO=bar";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Assignment,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_assignment_with_command() {
-		let input = "FOO=bar echo hello";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Assignment,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_assignment_with_command() {
+    let input = "FOO=bar echo hello";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Assignment,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_if_elif_else() {
-		let input = "if true; then echo a; elif false; then echo b; else echo c; fi";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::IfNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_if_elif_else() {
+    let input = "if true; then echo a; elif false; then echo b; else echo c; fi";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::IfNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_brace_group() {
-		let input = "{ echo hello; echo world; }";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::BraceGrp,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_brace_group() {
+    let input = "{ echo hello; echo world; }";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::BraceGrp,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_nested_if_in_while() {
-		let input = "while true; do if false; then echo no; fi; done";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::LoopNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::IfNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_nested_if_in_while() {
+    let input = "while true; do if false; then echo no; fi; done";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::LoopNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::IfNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_test_bracket() {
-		let input = "[[ -n hello ]]";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Test,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_test_bracket() {
+    let input = "[[ -n hello ]]";
+    let expected = &mut [NdKind::Conjunction, NdKind::Pipeline, NdKind::Test].into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_nested_func_with_if_and_loop() {
-		let input = "setup() {
+  #[test]
+  fn parse_nested_func_with_if_and_loop() {
+    let input = "setup() {
 			for f in a b c; do
 				if [[ -n $f ]]; then
 					echo $f
 				fi
 			done
 		}";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::FuncDef,
-			NdKind::BraceGrp,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::ForNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::IfNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Test,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::FuncDef,
+      NdKind::BraceGrp,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::ForNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::IfNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Test,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_pipeline_with_brace_groups() {
-		let input = "{ echo foo; echo bar; } | { grep foo; wc -l; }";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::BraceGrp,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::BraceGrp,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_pipeline_with_brace_groups() {
+    let input = "{ echo foo; echo bar; } | { grep foo; wc -l; }";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::BraceGrp,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::BraceGrp,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_deeply_nested_if() {
-		let input = "if true; then
+  #[test]
+  fn parse_deeply_nested_if() {
+    let input = "if true; then
 			if false; then
 				if true; then
 					echo deep
 				fi
 			fi
 		fi";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::IfNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::IfNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::IfNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::IfNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::IfNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::IfNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_case_with_multiple_commands() {
-		let input = "case $1 in
+  #[test]
+  fn parse_case_with_multiple_commands() {
+    let input = "case $1 in
 			start)
 				echo starting
 				run_server
@@ -2330,36 +2337,37 @@ pub mod tests {
 				echo unknown
 			;;
 		esac";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::CaseNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::CaseNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_func_with_case_and_conjunction() {
-		let input = "dispatch() {
+  #[test]
+  fn parse_func_with_case_and_conjunction() {
+    let input = "dispatch() {
 			case $1 in
 				build)
 					make clean && make all
@@ -2369,187 +2377,193 @@ pub mod tests {
 				;;
 			esac
 		}";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::FuncDef,
-			NdKind::BraceGrp,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::CaseNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::FuncDef,
+      NdKind::BraceGrp,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::CaseNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_while_with_pipeline_and_assignment() {
-		let input = "while read line; do
+  #[test]
+  fn parse_while_with_pipeline_and_assignment() {
+    let input = "while read line; do
 			FOO=bar echo $line | grep pattern | wc -l
 		done";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::LoopNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Assignment,
-			NdKind::Command,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::LoopNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Assignment,
+      NdKind::Command,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_nested_loops() {
-		let input = "for i in 1 2 3; do
+  #[test]
+  fn parse_nested_loops() {
+    let input = "for i in 1 2 3; do
 			for j in a b c; do
 				while true; do
 					echo $i $j
 				done
 			done
 		done";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::ForNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::ForNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::LoopNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::ForNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::ForNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::LoopNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_complex_conjunction_chain() {
-		let input = "mkdir -p dir && cd dir && touch file || echo failed && echo done";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+  #[test]
+  fn parse_complex_conjunction_chain() {
+    let input = "mkdir -p dir && cd dir && touch file || echo failed && echo done";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_func_defining_inner_func() {
-		let input = "outer() {
+  #[test]
+  fn parse_func_defining_inner_func() {
+    let input = "outer() {
 			inner() {
 				echo hello from inner
 			}
 			inner
 		}";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::FuncDef,
-			NdKind::BraceGrp,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::FuncDef,
-			NdKind::BraceGrp,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::FuncDef,
+      NdKind::BraceGrp,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::FuncDef,
+      NdKind::BraceGrp,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_multiline_if_elif_with_pipelines() {
-		let input = "if cat /etc/passwd | grep root; then
+  #[test]
+  fn parse_multiline_if_elif_with_pipelines() {
+    let input = "if cat /etc/passwd | grep root; then
 			echo found root
 		elif ls /tmp | wc -l; then
 			echo tmp has files
 		else
 			echo fallback | tee log.txt
 		fi";
-		let expected = &mut [
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::IfNode,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Conjunction,
-			NdKind::Pipeline,
-			NdKind::Command,
-			NdKind::Command,
-		].into_iter();
-		let ast = get_ast(input).unwrap();
-		let mut node = ast[0].clone();
-		if let Err(e) = node.assert_structure(expected) {
-			panic!("{}", e);
-		}
-	}
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::IfNode,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
 
-	#[test]
-	fn parse_cursed_input() {
-		let input = "if if while if if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; then if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; elif while while :; do :; done; do until :; do :; done; done; then while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; elif until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; then until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; else case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; fi; do while case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; then until while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do until while :; do :; done; do until :; do :; done; done; done; elif until until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; done; then case foo in; foo) case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac;; bar) if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi;; biz) if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi;; esac; elif case foo in; foo) while while :; do :; done; do until :; do :; done; done;; bar) while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done;; biz) until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done;; esac; then if until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; then case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; elif case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; then if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; elif if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; else while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; fi; else if until while :; do :; done; do until :; do :; done; done; then until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; elif case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; then case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; elif if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; then if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; else while while :; do :; done; do until :; do :; done; done; fi; fi; then while while while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; do while until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; done; done; elif until until case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; do if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; done; do until if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; do while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; done; then case foo in; foo) case foo in; foo) while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done;; bar) until while :; do :; done; do until :; do :; done; done;; biz) until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done;; esac;; bar) case foo in; foo) case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac;; bar) case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac;; biz) if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi;; esac;; biz) if if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; then while while :; do :; done; do until :; do :; done; done; elif while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; then until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; elif until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; then case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; else case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; fi;; esac; elif if if if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; elif while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; then while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; elif until while :; do :; done; do until :; do :; done; done; then until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; else case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; fi; then while case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; do if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; done; elif while if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; do while while :; do :; done; do until :; do :; done; done; done; then until while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; elif until until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; done; then case foo in; foo) case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac;; bar) if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi;; biz) if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi;; esac; else case foo in; foo) while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done;; bar) while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done;; biz) until while :; do :; done; do until :; do :; done; done;; esac; fi; then if if until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; then case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; elif case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; then if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; elif if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; then while while :; do :; done; do until :; do :; done; done; else while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; fi; then if until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; then until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; elif case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; then case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; elif if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; else while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; fi; elif while while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do until while :; do :; done; do until :; do :; done; done; done; then while until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; done; elif until case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; do if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; done; then until if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; do while while :; do :; done; do until :; do :; done; done; done; else case foo in; foo) while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done;; bar) until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done;; biz) until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done;; esac; fi; else while case foo in; foo) case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac;; bar) case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac;; biz) if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi;; esac; do if if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; elif while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; then until while :; do :; done; do until :; do :; done; done; elif until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; then case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; else case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; fi; done; fi";
-		assert!(get_ast(input).is_ok()); // lets spare our sanity and just say that "ok" means "it parsed correctly"
-	}
+  #[test]
+  fn parse_cursed_input() {
+    let input = "if if while if if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; then if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; elif while while :; do :; done; do until :; do :; done; done; then while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; elif until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; then until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; else case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; fi; do while case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; then until while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do until while :; do :; done; do until :; do :; done; done; done; elif until until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; done; then case foo in; foo) case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac;; bar) if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi;; biz) if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi;; esac; elif case foo in; foo) while while :; do :; done; do until :; do :; done; done;; bar) while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done;; biz) until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done;; esac; then if until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; then case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; elif case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; then if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; elif if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; else while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; fi; else if until while :; do :; done; do until :; do :; done; done; then until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; elif case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; then case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; elif if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; then if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; else while while :; do :; done; do until :; do :; done; done; fi; fi; then while while while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; do while until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; done; done; elif until until case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; do if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; done; do until if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; do while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; done; then case foo in; foo) case foo in; foo) while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done;; bar) until while :; do :; done; do until :; do :; done; done;; biz) until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done;; esac;; bar) case foo in; foo) case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac;; bar) case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac;; biz) if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi;; esac;; biz) if if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; then while while :; do :; done; do until :; do :; done; done; elif while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; then until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; elif until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; then case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; else case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; fi;; esac; elif if if if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; elif while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; then while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; elif until while :; do :; done; do until :; do :; done; done; then until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; else case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; fi; then while case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; do if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; done; elif while if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; do while while :; do :; done; do until :; do :; done; done; done; then until while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; elif until until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; done; then case foo in; foo) case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac;; bar) if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi;; biz) if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi;; esac; else case foo in; foo) while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done;; bar) while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done;; biz) until while :; do :; done; do until :; do :; done; done;; esac; fi; then if if until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; then case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; elif case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; then if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; elif if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; then while while :; do :; done; do until :; do :; done; done; else while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; fi; then if until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; then until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; elif case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; then case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; elif if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; else while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; fi; elif while while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do until while :; do :; done; do until :; do :; done; done; done; then while until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; done; elif until case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; do if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; done; then until if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; do while while :; do :; done; do until :; do :; done; done; done; else case foo in; foo) while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done;; bar) until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done;; biz) until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done;; esac; fi; else while case foo in; foo) case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac;; bar) case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac;; biz) if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi;; esac; do if if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; elif while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; then until while :; do :; done; do until :; do :; done; done; elif until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; then case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; else case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; fi; done; fi";
+    assert!(get_ast(input).is_ok()); // lets spare our sanity and just say that "ok" means "it parsed correctly"
+  }
 }

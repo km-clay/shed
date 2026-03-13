@@ -245,8 +245,16 @@ mod tests {
     test_input("readonly a=1 b=2").unwrap();
     assert_eq!(read_vars(|v| v.get_var("a")), "1");
     assert_eq!(read_vars(|v| v.get_var("b")), "2");
-    assert!(read_vars(|v| v.get_var_flags("a")).unwrap().contains(VarFlags::READONLY));
-    assert!(read_vars(|v| v.get_var_flags("b")).unwrap().contains(VarFlags::READONLY));
+    assert!(
+      read_vars(|v| v.get_var_flags("a"))
+        .unwrap()
+        .contains(VarFlags::READONLY)
+    );
+    assert!(
+      read_vars(|v| v.get_var_flags("b"))
+        .unwrap()
+        .contains(VarFlags::READONLY)
+    );
   }
 
   #[test]
@@ -385,7 +393,11 @@ mod tests {
     let _g = TestGuard::new();
     test_input("local mylocal").unwrap();
     assert_eq!(read_vars(|v| v.get_var("mylocal")), "");
-    assert!(read_vars(|v| v.get_var_flags("mylocal")).unwrap().contains(VarFlags::LOCAL));
+    assert!(
+      read_vars(|v| v.get_var_flags("mylocal"))
+        .unwrap()
+        .contains(VarFlags::LOCAL)
+    );
   }
 
   #[test]

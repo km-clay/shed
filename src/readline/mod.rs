@@ -15,7 +15,8 @@ use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::readline::vimode::{ViEx, ViVerbatim};
 use crate::state::{
-  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta, write_vars
+  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta,
+  write_vars,
 };
 use crate::{
   libsh::error::ShResult,
@@ -240,7 +241,7 @@ impl Default for Prompt {
 pub struct ShedVi {
   pub reader: PollReader,
   pub writer: TermWriter,
-	pub tty: RawFd,
+  pub tty: RawFd,
 
   pub prompt: Prompt,
   pub highlighter: Highlighter,
@@ -266,7 +267,7 @@ impl ShedVi {
       reader: PollReader::new(),
       writer: TermWriter::new(tty),
       prompt,
-			tty,
+      tty,
       completer: Box::new(FuzzyCompleter::default()),
       highlighter: Highlighter::new(),
       mode: Box::new(ViInsert::new()),
@@ -293,37 +294,37 @@ impl ShedVi {
     Ok(new)
   }
 
-	pub fn new_no_hist(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
-		let mut new = Self {
-			reader: PollReader::new(),
-			writer: TermWriter::new(tty),
-			tty,
-			prompt,
-			completer: Box::new(FuzzyCompleter::default()),
-			highlighter: Highlighter::new(),
-			mode: Box::new(ViInsert::new()),
-			next_is_escaped: false,
-			saved_mode: None,
-			pending_keymap: Vec::new(),
-			old_layout: None,
-			repeat_action: None,
-			repeat_motion: None,
-			editor: LineBuf::new(),
-			history: History::empty(),
-			needs_redraw: true,
-		};
-		write_vars(|v| {
-			v.set_var(
-				"SHED_VI_MODE",
-				VarKind::Str(new.mode.report_mode().to_string()),
-				VarFlags::NONE,
-			)
-		})?;
-		new.prompt.refresh();
-		new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
-		new.print_line(false)?;
-		Ok(new)
-	}
+  pub fn new_no_hist(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
+    let mut new = Self {
+      reader: PollReader::new(),
+      writer: TermWriter::new(tty),
+      tty,
+      prompt,
+      completer: Box::new(FuzzyCompleter::default()),
+      highlighter: Highlighter::new(),
+      mode: Box::new(ViInsert::new()),
+      next_is_escaped: false,
+      saved_mode: None,
+      pending_keymap: Vec::new(),
+      old_layout: None,
+      repeat_action: None,
+      repeat_motion: None,
+      editor: LineBuf::new(),
+      history: History::empty(),
+      needs_redraw: true,
+    };
+    write_vars(|v| {
+      v.set_var(
+        "SHED_VI_MODE",
+        VarKind::Str(new.mode.report_mode().to_string()),
+        VarFlags::NONE,
+      )
+    })?;
+    new.prompt.refresh();
+    new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
+    new.print_line(false)?;
+    Ok(new)
+  }
 
   pub fn with_initial(mut self, initial: &str) -> Self {
     self.editor = LineBuf::new().with_initial(initial, 0);
@@ -335,7 +336,7 @@ impl ShedVi {
 
   /// Feed raw bytes from stdin into the reader's buffer
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
-		self.reader.feed_bytes(bytes);
+    self.reader.feed_bytes(bytes);
   }
 
   /// Mark that the display needs to be redrawn (e.g., after SIGWINCH)
@@ -354,10 +355,10 @@ impl ShedVi {
       self.completer.reset_stay_active();
       self.needs_redraw = true;
       Ok(())
-		} else if self.history.fuzzy_finder.is_active() {
-			self.history.fuzzy_finder.reset_stay_active();
-			self.needs_redraw = true;
-			Ok(())
+    } else if self.history.fuzzy_finder.is_active() {
+      self.history.fuzzy_finder.reset_stay_active();
+      self.needs_redraw = true;
+      Ok(())
     } else {
       self.reset(full_redraw)
     }
@@ -443,7 +444,11 @@ impl ShedVi {
 
     // Process all available keys
     while let Some(key) = self.reader.read_key()? {
-			log::debug!("Read key: {key:?} in mode {:?}, self.reader.verbatim = {}", self.mode.report_mode(), self.reader.verbatim);
+      log::debug!(
+        "Read key: {key:?} in mode {:?}, self.reader.verbatim = {}",
+        self.mode.report_mode(),
+        self.reader.verbatim
+      );
       // If completer or history search are active, delegate input to it
       if self.history.fuzzy_finder.is_active() {
         self.print_line(false)?;
@@ -688,13 +693,14 @@ impl ShedVi {
             .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
           let hint = self.history.get_hint();
           self.editor.set_hint(hint);
-					write_vars(|v| {
-						v.set_var(
-							"SHED_VI_MODE",
-							VarKind::Str(self.mode.report_mode().to_string()),
-							VarFlags::NONE,
-						)
-					}).ok();
+          write_vars(|v| {
+            v.set_var(
+              "SHED_VI_MODE",
+              VarKind::Str(self.mode.report_mode().to_string()),
+              VarFlags::NONE,
+            )
+          })
+          .ok();
 
           // If we are here, we hit a case where pressing tab returned a single candidate
           // So we can just go ahead and reset the completer after this
@@ -702,15 +708,21 @@ impl ShedVi {
         }
         Ok(None) => {
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
-					let candidates = self.completer.all_candidates();
-					let num_candidates = candidates.len();
-					with_vars([
-						("_NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
-						("_MATCHES".into(), Into::<Var>::into(candidates)),
-						("_SEARCH_STR".into(), Into::<Var>::into(self.completer.token())),
-					], || {
-						post_cmds.exec();
-					});
+          let candidates = self.completer.all_candidates();
+          let num_candidates = candidates.len();
+          with_vars(
+            [
+              ("_NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
+              ("_MATCHES".into(), Into::<Var>::into(candidates)),
+              (
+                "_SEARCH_STR".into(),
+                Into::<Var>::into(self.completer.token()),
+              ),
+            ],
+            || {
+              post_cmds.exec();
+            },
+          );
 
           if self.completer.is_active() {
             write_vars(|v| {
@@ -725,22 +737,21 @@ impl ShedVi {
             self.needs_redraw = true;
             self.editor.set_hint(None);
           } else {
-						self.writer.send_bell().ok();
-					}
+            self.writer.send_bell().ok();
+          }
         }
       }
 
       self.needs_redraw = true;
       return Ok(None);
     } else if let KeyEvent(KeyCode::Char('R'), ModKeys::CTRL) = key
-			&& self.mode.report_mode() == ModeReport::Insert {
+      && self.mode.report_mode() == ModeReport::Insert
+    {
       let initial = self.editor.as_str();
       match self.history.start_search(initial) {
         Some(entry) => {
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
-          with_vars([
-						("_HIST_ENTRY".into(), entry.clone()),
-					], || {
+          with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
             post_cmds.exec_with(&entry);
           });
 
@@ -753,25 +764,30 @@ impl ShedVi {
         }
         None => {
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
-					let entries = self.history.fuzzy_finder.candidates();
-					let matches = self.history.fuzzy_finder
-						.filtered()
-						.iter()
-						.cloned()
-						.map(|sc| sc.content)
-						.collect::<Vec<_>>();
+          let entries = self.history.fuzzy_finder.candidates();
+          let matches = self
+            .history
+            .fuzzy_finder
+            .filtered()
+            .iter()
+            .cloned()
+            .map(|sc| sc.content)
+            .collect::<Vec<_>>();
 
-					let num_entries = entries.len();
-					let num_matches = matches.len();
-					with_vars([
-						("_ENTRIES".into(),Into::<Var>::into(entries)),
-						("_NUM_ENTRIES".into(),Into::<Var>::into(num_entries)),
-						("_MATCHES".into(),Into::<Var>::into(matches)),
-						("_NUM_MATCHES".into(),Into::<Var>::into(num_matches)),
-						("_SEARCH_STR".into(), Into::<Var>::into(initial)),
-					], || {
-						post_cmds.exec();
-					});
+          let num_entries = entries.len();
+          let num_matches = matches.len();
+          with_vars(
+            [
+              ("_ENTRIES".into(), Into::<Var>::into(entries)),
+              ("_NUM_ENTRIES".into(), Into::<Var>::into(num_entries)),
+              ("_MATCHES".into(), Into::<Var>::into(matches)),
+              ("_NUM_MATCHES".into(), Into::<Var>::into(num_matches)),
+              ("_SEARCH_STR".into(), Into::<Var>::into(initial)),
+            ],
+            || {
+              post_cmds.exec();
+            },
+          );
 
           if self.history.fuzzy_finder.is_active() {
             write_vars(|v| {
@@ -786,8 +802,8 @@ impl ShedVi {
             self.needs_redraw = true;
             self.editor.set_hint(None);
           } else {
-						self.writer.send_bell().ok();
-					}
+            self.writer.send_bell().ok();
+          }
         }
       }
     }
@@ -1055,7 +1071,7 @@ impl ShedVi {
       let pending_seq = self.mode.pending_seq().unwrap_or_default();
       write!(buf, "\n: {pending_seq}").unwrap();
       new_layout.end.row += 1;
-			new_layout.cursor.row += 1;
+      new_layout.cursor.row += 1;
     }
 
     write!(buf, "{}", &self.mode.cursor_style()).unwrap();
@@ -1129,7 +1145,11 @@ impl ShedVi {
       match cmd.verb().unwrap().1 {
         Verb::Change | Verb::InsertModeLineBreak(_) | Verb::InsertMode => {
           is_insert_mode = true;
-          Box::new(ViInsert::new().with_count(count as u16).record_cmd(cmd.clone()))
+          Box::new(
+            ViInsert::new()
+              .with_count(count as u16)
+              .record_cmd(cmd.clone()),
+          )
         }
 
         Verb::ExMode => Box::new(ViEx::new()),
@@ -1217,17 +1237,17 @@ impl ShedVi {
     Ok(())
   }
 
-	pub fn clone_mode(&self) -> Box<dyn ViMode> {
-		match self.mode.report_mode() {
-			ModeReport::Normal => Box::new(ViNormal::new()),
-			ModeReport::Insert => Box::new(ViInsert::new()),
-			ModeReport::Visual => Box::new(ViVisual::new()),
-			ModeReport::Ex => Box::new(ViEx::new()),
-			ModeReport::Replace => Box::new(ViReplace::new()),
-			ModeReport::Verbatim => Box::new(ViVerbatim::new()),
-			ModeReport::Unknown => unreachable!(),
-		}
-	}
+  pub fn clone_mode(&self) -> Box<dyn ViMode> {
+    match self.mode.report_mode() {
+      ModeReport::Normal => Box::new(ViNormal::new()),
+      ModeReport::Insert => Box::new(ViInsert::new()),
+      ModeReport::Visual => Box::new(ViVisual::new()),
+      ModeReport::Ex => Box::new(ViEx::new()),
+      ModeReport::Replace => Box::new(ViReplace::new()),
+      ModeReport::Verbatim => Box::new(ViVerbatim::new()),
+      ModeReport::Unknown => unreachable!(),
+    }
+  }
 
   pub fn exec_cmd(&mut self, mut cmd: ViCmd, from_replay: bool) -> ShResult<()> {
     if cmd.is_mode_transition() {
@@ -1244,35 +1264,39 @@ impl ShedVi {
             repeat = count as u16;
           }
 
-					let old_mode = self.mode.report_mode();
+          let old_mode = self.mode.report_mode();
 
           for _ in 0..repeat {
             let cmds = cmds.clone();
             for (i, cmd) in cmds.iter().enumerate() {
-							log::debug!("Replaying command {cmd:?} in mode {:?}, replay {i}/{repeat}", self.mode.report_mode());
+              log::debug!(
+                "Replaying command {cmd:?} in mode {:?}, replay {i}/{repeat}",
+                self.mode.report_mode()
+              );
               self.exec_cmd(cmd.clone(), true)?;
               // After the first command, start merging so all subsequent
               // edits fold into one undo entry (e.g. cw + inserted chars)
               if i == 0
-							&& let Some(edit) = self.editor.undo_stack.last_mut() {
-								edit.start_merge();
-							}
+                && let Some(edit) = self.editor.undo_stack.last_mut()
+              {
+                edit.start_merge();
+              }
             }
             // Stop merging at the end of the replay
             if let Some(edit) = self.editor.undo_stack.last_mut() {
               edit.stop_merge();
             }
 
-						let old_mode_clone = match old_mode {
-							ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn ViMode>,
-							ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn ViMode>,
-							ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn ViMode>,
-							ModeReport::Ex => Box::new(ViEx::new()) as Box<dyn ViMode>,
-							ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn ViMode>,
-							ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn ViMode>,
-							ModeReport::Unknown => unreachable!(),
-						};
-						self.mode = old_mode_clone;
+            let old_mode_clone = match old_mode {
+              ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn ViMode>,
+              ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn ViMode>,
+              ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn ViMode>,
+              ModeReport::Ex => Box::new(ViEx::new()) as Box<dyn ViMode>,
+              ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn ViMode>,
+              ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn ViMode>,
+              ModeReport::Unknown => unreachable!(),
+            };
+            self.mode = old_mode_clone;
           }
         }
         CmdReplay::Single(mut cmd) => {
@@ -1354,7 +1378,11 @@ impl ShedVi {
 
     self.editor.exec_cmd(cmd.clone())?;
 
-    if self.mode.report_mode() == ModeReport::Visual && cmd.verb().is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank) {
+    if self.mode.report_mode() == ModeReport::Visual
+      && cmd
+        .verb()
+        .is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank)
+    {
       self.editor.stop_selecting();
       let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
       self.swap_mode(&mut mode);
@@ -1503,7 +1531,7 @@ pub fn get_insertions(input: &str) -> Vec<(usize, Marker)> {
 pub fn marker_for(class: &TkRule) -> Option<Marker> {
   match class {
     TkRule::Pipe
-		| TkRule::Bang
+    | TkRule::Bang
     | TkRule::ErrPipe
     | TkRule::And
     | TkRule::Or

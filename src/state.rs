@@ -1,5 +1,11 @@
 use std::{
-  cell::RefCell, collections::{HashMap, HashSet, VecDeque, hash_map::Entry}, fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign}, os::unix::fs::PermissionsExt, str::FromStr, time::Duration
+  cell::RefCell,
+  collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
+  fmt::Display,
+  ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign},
+  os::unix::fs::PermissionsExt,
+  str::FromStr,
+  time::Duration,
 };
 
 use nix::unistd::{User, gethostname, getppid};
@@ -36,7 +42,7 @@ thread_local! {
   pub static SHED: Shed = Shed::new();
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct Shed {
   pub jobs: RefCell<JobTab>,
   pub var_scopes: RefCell<ScopeStack>,
@@ -44,8 +50,8 @@ pub struct Shed {
   pub logic: RefCell<LogTab>,
   pub shopts: RefCell<ShOpts>,
 
-	#[cfg(test)]
-	saved: RefCell<Option<Box<Self>>>,
+  #[cfg(test)]
+  saved: RefCell<Option<Box<Self>>>,
 }
 
 impl Shed {
@@ -57,8 +63,8 @@ impl Shed {
       logic: RefCell::new(LogTab::new()),
       shopts: RefCell::new(ShOpts::default()),
 
-			#[cfg(test)]
-			saved: RefCell::new(None),
+      #[cfg(test)]
+      saved: RefCell::new(None),
     }
   }
 }
@@ -71,27 +77,27 @@ impl Default for Shed {
 
 #[cfg(test)]
 impl Shed {
-	pub fn save(&self) {
-		let saved = Self {
-			jobs: RefCell::new(self.jobs.borrow().clone()),
-			var_scopes: RefCell::new(self.var_scopes.borrow().clone()),
-			meta: RefCell::new(self.meta.borrow().clone()),
-			logic: RefCell::new(self.logic.borrow().clone()),
-			shopts: RefCell::new(self.shopts.borrow().clone()),
-			saved: RefCell::new(None),
-		};
-		*self.saved.borrow_mut() = Some(Box::new(saved));
-	}
+  pub fn save(&self) {
+    let saved = Self {
+      jobs: RefCell::new(self.jobs.borrow().clone()),
+      var_scopes: RefCell::new(self.var_scopes.borrow().clone()),
+      meta: RefCell::new(self.meta.borrow().clone()),
+      logic: RefCell::new(self.logic.borrow().clone()),
+      shopts: RefCell::new(self.shopts.borrow().clone()),
+      saved: RefCell::new(None),
+    };
+    *self.saved.borrow_mut() = Some(Box::new(saved));
+  }
 
-	pub fn restore(&self) {
-		if let Some(saved) = self.saved.take() {
-			*self.jobs.borrow_mut() = saved.jobs.into_inner();
-			*self.var_scopes.borrow_mut() = saved.var_scopes.into_inner();
-			*self.meta.borrow_mut() = saved.meta.into_inner();
-			*self.logic.borrow_mut() = saved.logic.into_inner();
-			*self.shopts.borrow_mut() = saved.shopts.into_inner();
-		}
-	}
+  pub fn restore(&self) {
+    if let Some(saved) = self.saved.take() {
+      *self.jobs.borrow_mut() = saved.jobs.into_inner();
+      *self.var_scopes.borrow_mut() = saved.var_scopes.into_inner();
+      *self.meta.borrow_mut() = saved.meta.into_inner();
+      *self.logic.borrow_mut() = saved.logic.into_inner();
+      *self.shopts.borrow_mut() = saved.shopts.into_inner();
+    }
+  }
 }
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
@@ -315,34 +321,34 @@ impl ScopeStack {
     };
     scope.set_var(var_name, val, flags)
   }
-	pub fn get_magic_var(&self, var_name: &str) -> Option<String> {
-		match var_name {
-			"SECONDS" => {
-				let shell_time = read_meta(|m| m.shell_time());
-				let secs = Instant::now().duration_since(shell_time).as_secs();
-				Some(secs.to_string())
-			}
-			"EPOCHREALTIME" => {
-				let epoch = std::time::SystemTime::now()
-					.duration_since(std::time::UNIX_EPOCH)
-					.unwrap_or(Duration::from_secs(0))
-					.as_secs_f64();
-				Some(epoch.to_string())
-			}
-			"EPOCHSECONDS" => {
-				let epoch = std::time::SystemTime::now()
-					.duration_since(std::time::UNIX_EPOCH)
-					.unwrap_or(Duration::from_secs(0))
-					.as_secs();
-				Some(epoch.to_string())
-			}
-			"RANDOM" => {
-				let random = rand::random_range(0..32768);
-				Some(random.to_string())
-			}
-			_ => None
-		}
-	}
+  pub fn get_magic_var(&self, var_name: &str) -> Option<String> {
+    match var_name {
+      "SECONDS" => {
+        let shell_time = read_meta(|m| m.shell_time());
+        let secs = Instant::now().duration_since(shell_time).as_secs();
+        Some(secs.to_string())
+      }
+      "EPOCHREALTIME" => {
+        let epoch = std::time::SystemTime::now()
+          .duration_since(std::time::UNIX_EPOCH)
+          .unwrap_or(Duration::from_secs(0))
+          .as_secs_f64();
+        Some(epoch.to_string())
+      }
+      "EPOCHSECONDS" => {
+        let epoch = std::time::SystemTime::now()
+          .duration_since(std::time::UNIX_EPOCH)
+          .unwrap_or(Duration::from_secs(0))
+          .as_secs();
+        Some(epoch.to_string())
+      }
+      "RANDOM" => {
+        let random = rand::random_range(0..32768);
+        Some(random.to_string())
+      }
+      _ => None,
+    }
+  }
   pub fn get_arr_elems(&self, var_name: &str) -> ShResult<Vec<String>> {
     for scope in self.scopes.iter().rev() {
       if scope.var_exists(var_name)
@@ -468,9 +474,9 @@ impl ScopeStack {
   pub fn try_get_var(&self, var_name: &str) -> Option<String> {
     // This version of get_var() is mainly used internally
     // so that we have access to Option methods
-		if let Some(magic) = self.get_magic_var(var_name) {
-			return Some(magic);
-		} else if let Ok(param) = var_name.parse::<ShellParam>() {
+    if let Some(magic) = self.get_magic_var(var_name) {
+      return Some(magic);
+    } else if let Ok(param) = var_name.parse::<ShellParam>() {
       let val = self.get_param(param);
       if !val.is_empty() {
         return Some(val);
@@ -493,9 +499,9 @@ impl ScopeStack {
     var
   }
   pub fn get_var(&self, var_name: &str) -> String {
-		if let Some(magic) = self.get_magic_var(var_name) {
-			return magic;
-		}
+    if let Some(magic) = self.get_magic_var(var_name) {
+      return magic;
+    }
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.get_param(param);
     }
@@ -528,7 +534,10 @@ impl ScopeStack {
       return val.clone();
     }
     // Positional params are scope-local; only check the current scope
-    if matches!(param, ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount) {
+    if matches!(
+      param,
+      ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount
+    ) {
       if let Some(scope) = self.scopes.last() {
         return scope.get_param(param);
       }
@@ -987,17 +996,17 @@ impl Display for Var {
 }
 
 impl From<Vec<String>> for Var {
-	fn from(value: Vec<String>) -> Self {
-	  Self::new(VarKind::Arr(value.into()), VarFlags::NONE)
-	}
+  fn from(value: Vec<String>) -> Self {
+    Self::new(VarKind::Arr(value.into()), VarFlags::NONE)
+  }
 }
 
 impl From<&[String]> for Var {
-	fn from(value: &[String]) -> Self {
-		let mut new = VecDeque::new();
-		new.extend(value.iter().cloned());
-	  Self::new(VarKind::Arr(new), VarFlags::NONE)
-	}
+  fn from(value: &[String]) -> Self {
+    let mut new = VecDeque::new();
+    new.extend(value.iter().cloned());
+    Self::new(VarKind::Arr(new), VarFlags::NONE)
+  }
 }
 
 macro_rules! impl_var_from {
@@ -1011,19 +1020,7 @@ macro_rules! impl_var_from {
 }
 
 impl_var_from!(
-	i8,
-	i16,
-	i32,
-	i64,
-	isize,
-	u8,
-	u16,
-	u32,
-	u64,
-	usize,
-	String,
-	&str,
-	bool
+  i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, String, &str, bool
 );
 
 #[derive(Default, Clone, Debug)]
@@ -1064,11 +1061,11 @@ impl VarTab {
     params.insert(ShellParam::LastJob, "".into()); // PID of the last background job (if any)
     params
   }
-	fn init_sh_vars() -> HashMap<String,Var> {
-		let mut vars = HashMap::new();
-		vars.insert("COMP_WORDBREAKS".into(), " \t\n\"'@><=;|&(".into());
-		vars
-	}
+  fn init_sh_vars() -> HashMap<String, Var> {
+    let mut vars = HashMap::new();
+    vars.insert("COMP_WORDBREAKS".into(), " \t\n\"'@><=;|&(".into());
+    vars
+  }
   fn init_env() {
     let pathbuf_to_string =
       |pb: Result<PathBuf, std::io::Error>| pb.unwrap_or_default().to_string_lossy().to_string();
@@ -1345,8 +1342,8 @@ impl VarTab {
 /// A table of metadata for the shell
 #[derive(Clone, Debug)]
 pub struct MetaTab {
-	// Time when the shell was started, used for calculating shell uptime
-	shell_time: Instant,
+  // Time when the shell was started, used for calculating shell uptime
+  shell_time: Instant,
 
   // command running duration
   runtime_start: Option<Instant>,
@@ -1373,22 +1370,22 @@ pub struct MetaTab {
 }
 
 impl Default for MetaTab {
-	fn default() -> Self {
-		Self {
-			shell_time: Instant::now(),
-			runtime_start: None,
-			runtime_stop: None,
-			system_msg: vec![],
-			dir_stack: VecDeque::new(),
-			getopts_offset: 0,
-			old_path: None,
-			old_pwd: None,
-			path_cache: HashSet::new(),
-			cwd_cache: HashSet::new(),
-			comp_specs: HashMap::new(),
-			pending_widget_keys: vec![],
-		}
-	}
+  fn default() -> Self {
+    Self {
+      shell_time: Instant::now(),
+      runtime_start: None,
+      runtime_stop: None,
+      system_msg: vec![],
+      dir_stack: VecDeque::new(),
+      getopts_offset: 0,
+      old_path: None,
+      old_pwd: None,
+      path_cache: HashSet::new(),
+      cwd_cache: HashSet::new(),
+      comp_specs: HashMap::new(),
+      pending_widget_keys: vec![],
+    }
+  }
 }
 
 impl MetaTab {
@@ -1398,9 +1395,9 @@ impl MetaTab {
       ..Default::default()
     }
   }
-	pub fn shell_time(&self) -> Instant {
-		self.shell_time
-	}
+  pub fn shell_time(&self) -> Instant {
+    self.shell_time
+  }
   pub fn set_pending_widget_keys(&mut self, keys: &str) {
     let exp = expand_keymap(keys);
     self.pending_widget_keys = exp;

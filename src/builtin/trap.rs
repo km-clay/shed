@@ -171,10 +171,10 @@ pub fn trap(node: Node) -> ShResult<()> {
 #[cfg(test)]
 mod tests {
   use super::TrapTarget;
-  use std::str::FromStr;
-  use nix::sys::signal::Signal;
   use crate::state::{self, read_logic};
   use crate::testutil::{TestGuard, test_input};
+  use nix::sys::signal::Signal;
+  use std::str::FromStr;
 
   // ===================== Pure: TrapTarget parsing =====================
 
@@ -231,7 +231,9 @@ mod tests {
 
   #[test]
   fn display_signal_roundtrip() {
-    for name in &["INT", "QUIT", "TERM", "USR1", "USR2", "ALRM", "CHLD", "WINCH"] {
+    for name in &[
+      "INT", "QUIT", "TERM", "USR1", "USR2", "ALRM", "CHLD", "WINCH",
+    ] {
       let target = TrapTarget::from_str(name).unwrap();
       assert_eq!(target.to_string(), *name);
     }

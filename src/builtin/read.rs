@@ -367,7 +367,7 @@ pub fn get_read_key_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
 
 #[cfg(test)]
 mod tests {
-  use crate::state::{self, read_vars, write_vars, VarFlags, VarKind};
+  use crate::state::{self, VarFlags, VarKind, read_vars, write_vars};
   use crate::testutil::{TestGuard, test_input};
 
   // ===================== Basic read into REPLY =====================

@@ -38,28 +38,30 @@ pub fn alias(node: Node) -> ShResult<()> {
     write(stdout, alias_output.as_bytes())?; // Write it
   } else {
     for (arg, span) in argv {
-
       let Some((name, body)) = arg.split_once('=') else {
-				let Some(alias) = read_logic(|l| l.get_alias(&arg)) else {
-					return Err(ShErr::at(
-						ShErrKind::SyntaxErr,
-						span,
-						"alias: Expected an assignment in alias args",
-					));
-				};
+        let Some(alias) = read_logic(|l| l.get_alias(&arg)) else {
+          return Err(ShErr::at(
+            ShErrKind::SyntaxErr,
+            span,
+            "alias: Expected an assignment in alias args",
+          ));
+        };
 
-				let alias_output = format!("{arg}='{alias}'");
+        let alias_output = format!("{arg}='{alias}'");
 
-				let stdout = borrow_fd(STDOUT_FILENO);
-				write(stdout, alias_output.as_bytes())?; // Write it
-				state::set_status(0);
-				return Ok(());
+        let stdout = borrow_fd(STDOUT_FILENO);
+        write(stdout, alias_output.as_bytes())?; // Write it
+        state::set_status(0);
+        return Ok(());
       };
       if name == "command" || name == "builtin" {
         return Err(ShErr::at(
           ShErrKind::ExecFail,
           span,
-          format!("alias: Cannot assign alias to reserved name '{}'", name.fg(next_color())),
+          format!(
+            "alias: Cannot assign alias to reserved name '{}'",
+            name.fg(next_color())
+          ),
         ));
       }
       write_logic(|l| l.insert_alias(name, body, span.clone()));
@@ -118,7 +120,7 @@ pub fn unalias(node: Node) -> ShResult<()> {
 mod tests {
   use crate::state::{self, read_logic};
   use crate::testutil::{TestGuard, test_input};
-	use pretty_assertions::assert_eq;
+  use pretty_assertions::assert_eq;
 
   #[test]
   fn alias_set_and_expand() {

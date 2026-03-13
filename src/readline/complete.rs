@@ -9,17 +9,24 @@ use nix::sys::signal::Signal;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-  builtin::complete::{CompFlags, CompOptFlags, CompOpts}, expand::escape_str, libsh::{error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils}, parse::{
+  builtin::complete::{CompFlags, CompOptFlags, CompOpts},
+  expand::escape_str,
+  libsh::{error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils},
+  parse::{
     execute::exec_input,
     lex::{self, LexFlags, Tk, TkRule, ends_with_unescaped},
-  }, readline::{
+  },
+  readline::{
     Marker, annotate_input_recursive,
     keys::{KeyCode as C, KeyEvent as K, ModKeys as M},
     linebuf::{ClampedUsize, LineBuf},
     markers::{self, is_marker},
     term::{LineWriter, TermWriter, calc_str_width, get_win_size},
     vimode::{ViInsert, ViMode},
-  }, state::{VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars}
+  },
+  state::{
+    VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars,
+  },
 };
 
 pub fn complete_signals(start: &str) -> Vec<String> {
@@ -170,10 +177,10 @@ fn complete_commands(start: &str) -> Vec<String> {
       .collect()
   });
 
-	if read_shopts(|o| o.core.autocd) {
-		let dirs = complete_dirs(start);
-		candidates.extend(dirs);
-	}
+  if read_shopts(|o| o.core.autocd) {
+    let dirs = complete_dirs(start);
+    candidates.extend(dirs);
+  }
 
   candidates.sort();
   candidates
@@ -561,15 +568,17 @@ pub trait Completer {
   fn reset(&mut self);
   fn reset_stay_active(&mut self);
   fn is_active(&self) -> bool;
-	fn all_candidates(&self) -> Vec<String> { vec![] }
+  fn all_candidates(&self) -> Vec<String> {
+    vec![]
+  }
   fn selected_candidate(&self) -> Option<String>;
   fn token_span(&self) -> (usize, usize);
   fn original_input(&self) -> &str;
-	fn token(&self) -> &str {
-		let orig = self.original_input();
-		let (s,e) = self.token_span();
-		orig.get(s..e).unwrap_or(orig)
-	}
+  fn token(&self) -> &str {
+    let orig = self.original_input();
+    let (s, e) = self.token_span();
+    orig.get(s..e).unwrap_or(orig)
+  }
   fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()>;
   fn clear(&mut self, _writer: &mut TermWriter) -> ShResult<()> {
     Ok(())
@@ -789,21 +798,21 @@ impl FuzzySelector {
     }
   }
 
-	pub fn candidates(&self) -> &[String] {
-		&self.candidates
-	}
+  pub fn candidates(&self) -> &[String] {
+    &self.candidates
+  }
 
-	pub fn filtered(&self) -> &[ScoredCandidate] {
-		&self.filtered
-	}
+  pub fn filtered(&self) -> &[ScoredCandidate] {
+    &self.filtered
+  }
 
-	pub fn filtered_len(&self) -> usize {
-		self.filtered.len()
-	}
+  pub fn filtered_len(&self) -> usize {
+    self.filtered.len()
+  }
 
-	pub fn candidates_len(&self) -> usize {
-		self.candidates.len()
-	}
+  pub fn candidates_len(&self) -> usize {
+    self.candidates.len()
+  }
 
   pub fn activate(&mut self, candidates: Vec<String>) {
     self.active = true;
@@ -1158,9 +1167,9 @@ impl Default for FuzzyCompleter {
 }
 
 impl Completer for FuzzyCompleter {
-	fn all_candidates(&self) -> Vec<String> {
-		self.selector.candidates.clone()
-	}
+  fn all_candidates(&self) -> Vec<String> {
+    self.selector.candidates.clone()
+  }
   fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
     self
       .selector
@@ -1174,10 +1183,14 @@ impl Completer for FuzzyCompleter {
 
     let selected = self.selector.selected_candidate().unwrap_or_default();
     let (mut start, end) = self.completer.token_span;
-		let slice = self.completer.original_input.get(start..end).unwrap_or_default();
-		start += slice.width();
-		let completion = selected.strip_prefix(slice).unwrap_or(&selected);
-		let escaped = escape_str(completion, false);
+    let slice = self
+      .completer
+      .original_input
+      .get(start..end)
+      .unwrap_or_default();
+    start += slice.width();
+    let completion = selected.strip_prefix(slice).unwrap_or(&selected);
+    let escaped = escape_str(completion, false);
     let ret = format!(
       "{}{}{}",
       &self.completer.original_input[..start],
@@ -1253,9 +1266,9 @@ pub struct SimpleCompleter {
 }
 
 impl Completer for SimpleCompleter {
-	fn all_candidates(&self) -> Vec<String> {
-	  self.candidates.clone()
-	}
+  fn all_candidates(&self) -> Vec<String> {
+    self.candidates.clone()
+  }
   fn reset_stay_active(&mut self) {
     let active = self.is_active();
     self.reset();
@@ -1435,10 +1448,10 @@ impl SimpleCompleter {
 
     let selected = &self.candidates[self.selected_idx];
     let (mut start, end) = self.token_span;
-		let slice = self.original_input.get(start..end).unwrap_or("");
-		start += slice.width();
-		let completion = selected.strip_prefix(slice).unwrap_or(selected);
-		let escaped = escape_str(completion, false);
+    let slice = self.original_input.get(start..end).unwrap_or("");
+    start += slice.width();
+    let completion = selected.strip_prefix(slice).unwrap_or(selected);
+    let escaped = escape_str(completion, false);
     format!(
       "{}{}{}",
       &self.original_input[..start],
@@ -1604,11 +1617,13 @@ impl SimpleCompleter {
     // If token contains any COMP_WORDBREAKS, break the word
     let token_str = cur_token.span.as_str();
 
-		let word_breaks = read_vars(|v| v.try_get_var("COMP_WORDBREAKS")).unwrap_or("=".into());
-		if let Some(break_pos) = token_str.rfind(|c: char| word_breaks.contains(c)) {
-			self.token_span.0 = cur_token.span.range().start + break_pos + 1;
-			cur_token.span.set_range(self.token_span.0..self.token_span.1);
-		}
+    let word_breaks = read_vars(|v| v.try_get_var("COMP_WORDBREAKS")).unwrap_or("=".into());
+    if let Some(break_pos) = token_str.rfind(|c: char| word_breaks.contains(c)) {
+      self.token_span.0 = cur_token.span.range().start + break_pos + 1;
+      cur_token
+        .span
+        .set_range(self.token_span.0..self.token_span.1);
+    }
 
     let raw_tk = cur_token.as_str().to_string();
     let expanded_tk = cur_token.expand()?;
@@ -1654,12 +1669,12 @@ impl SimpleCompleter {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::os::fd::AsRawFd;
   use crate::{
     readline::{Prompt, ShedVi},
     state::{VarFlags, VarKind, write_vars},
     testutil::TestGuard,
   };
+  use std::os::fd::AsRawFd;
 
   fn test_vi(initial: &str) -> (ShedVi, TestGuard) {
     let g = TestGuard::new();
@@ -1793,13 +1808,20 @@ mod tests {
     let _ = comp.get_candidates(line.clone(), cursor);
 
     let eq_idx = line.find('=').unwrap();
-    assert_eq!(comp.token_span.0, eq_idx + 1, "token_span.0 ({}) should be right after '=' ({})", comp.token_span.0, eq_idx);
+    assert_eq!(
+      comp.token_span.0,
+      eq_idx + 1,
+      "token_span.0 ({}) should be right after '=' ({})",
+      comp.token_span.0,
+      eq_idx
+    );
   }
 
   #[test]
   fn wordbreak_colon_when_set() {
     let _g = TestGuard::new();
-    write_vars(|v| v.set_var("COMP_WORDBREAKS", VarKind::Str("=:".into()), VarFlags::NONE)).unwrap();
+    write_vars(|v| v.set_var("COMP_WORDBREAKS", VarKind::Str("=:".into()), VarFlags::NONE))
+      .unwrap();
 
     let mut comp = SimpleCompleter::new();
     let line = "scp host:foo".to_string();
@@ -1807,13 +1829,20 @@ mod tests {
     let _ = comp.get_candidates(line.clone(), cursor);
 
     let colon_idx = line.find(':').unwrap();
-    assert_eq!(comp.token_span.0, colon_idx + 1, "token_span.0 ({}) should be right after ':' ({})", comp.token_span.0, colon_idx);
+    assert_eq!(
+      comp.token_span.0,
+      colon_idx + 1,
+      "token_span.0 ({}) should be right after ':' ({})",
+      comp.token_span.0,
+      colon_idx
+    );
   }
 
   #[test]
   fn wordbreak_rightmost_wins() {
     let _g = TestGuard::new();
-    write_vars(|v| v.set_var("COMP_WORDBREAKS", VarKind::Str("=:".into()), VarFlags::NONE)).unwrap();
+    write_vars(|v| v.set_var("COMP_WORDBREAKS", VarKind::Str("=:".into()), VarFlags::NONE))
+      .unwrap();
 
     let mut comp = SimpleCompleter::new();
     let line = "cmd --opt=host:val".to_string();
@@ -1821,7 +1850,11 @@ mod tests {
     let _ = comp.get_candidates(line.clone(), cursor);
 
     let colon_idx = line.rfind(':').unwrap();
-    assert_eq!(comp.token_span.0, colon_idx + 1, "should break at rightmost wordbreak char");
+    assert_eq!(
+      comp.token_span.0,
+      colon_idx + 1,
+      "should break at rightmost wordbreak char"
+    );
   }
 
   // ===================== SimpleCompleter cycling =====================
@@ -1884,7 +1917,10 @@ mod tests {
   #[test]
   fn escape_str_all_shell_metacharacters() {
     use crate::expand::escape_str;
-    for ch in ['\'', '"', '\\', '|', '&', ';', '(', ')', '<', '>', '$', '*', '!', '`', '{', '?', '[', '#', ' ', '\t', '\n'] {
+    for ch in [
+      '\'', '"', '\\', '|', '&', ';', '(', ')', '<', '>', '$', '*', '!', '`', '{', '?', '[', '#',
+      ' ', '\t', '\n',
+    ] {
       let input = format!("a{ch}b");
       let escaped = escape_str(&input, false);
       let expected = format!("a\\{ch}b");

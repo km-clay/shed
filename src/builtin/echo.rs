@@ -31,7 +31,7 @@ bitflags! {
   #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
   pub struct EchoFlags: u32 {
     const NO_NEWLINE = 0b000001;
-		const NO_ESCAPE  = 0b000010;
+    const NO_ESCAPE  = 0b000010;
     const USE_ESCAPE = 0b000100;
     const USE_PROMPT = 0b001000;
   }
@@ -55,16 +55,17 @@ pub fn echo(node: Node) -> ShResult<()> {
   }
 
   let output_channel = borrow_fd(STDOUT_FILENO);
-	let xpg_echo = read_shopts(|o| o.core.xpg_echo); // If true, echo expands escape sequences by default, and -E opts out
+  let xpg_echo = read_shopts(|o| o.core.xpg_echo); // If true, echo expands escape sequences by default, and -E opts out
 
-	let use_escape = (xpg_echo && !flags.contains(EchoFlags::NO_ESCAPE)) || flags.contains(EchoFlags::USE_ESCAPE);
+  let use_escape =
+    (xpg_echo && !flags.contains(EchoFlags::NO_ESCAPE)) || flags.contains(EchoFlags::USE_ESCAPE);
 
   let mut echo_output = prepare_echo_args(
     argv
       .into_iter()
       .map(|a| a.0) // Extract the String from the tuple of (String,Span)
       .collect::<Vec<_>>(),
-		use_escape,
+    use_escape,
     flags.contains(EchoFlags::USE_PROMPT),
   )?
   .join(" ");
@@ -207,7 +208,7 @@ pub fn get_echo_flags(opts: Vec<Opt>) -> ShResult<EchoFlags> {
       Opt::Short('n') => flags |= EchoFlags::NO_NEWLINE,
       Opt::Short('e') => flags |= EchoFlags::USE_ESCAPE,
       Opt::Short('p') => flags |= EchoFlags::USE_PROMPT,
-			Opt::Short('E') => flags |= EchoFlags::NO_ESCAPE,
+      Opt::Short('E') => flags |= EchoFlags::NO_ESCAPE,
       _ => {
         return Err(ShErr::simple(
           ShErrKind::ExecFail,
@@ -308,11 +309,7 @@ mod tests {
 
   #[test]
   fn prepare_multiple_args() {
-    let result = prepare_echo_args(
-      vec!["hello".into(), "world".into()],
-      false,
-      false,
-    ).unwrap();
+    let result = prepare_echo_args(vec!["hello".into(), "world".into()], false, false).unwrap();
     assert_eq!(result, vec!["hello", "world"]);
   }
 

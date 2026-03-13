@@ -639,8 +639,10 @@ pub fn expand_glob(raw: &str) -> ShResult<String> {
   {
     let entry =
       entry.map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid filename found in glob"))?;
-		let entry_raw = entry.to_str().ok_or_else(|| ShErr::simple(ShErrKind::SyntaxErr, "Non-UTF8 filename found in glob"))?;
-		let escaped = escape_str(entry_raw, true);
+    let entry_raw = entry
+      .to_str()
+      .ok_or_else(|| ShErr::simple(ShErrKind::SyntaxErr, "Non-UTF8 filename found in glob"))?;
+    let escaped = escape_str(entry_raw, true);
 
     words.push(escaped)
   }
@@ -1327,57 +1329,38 @@ pub fn unescape_str(raw: &str) -> String {
 /// Opposite of unescape_str - escapes a string to be executed as literal text
 /// Used for completion results, and glob filename matches.
 pub fn escape_str(raw: &str, use_marker: bool) -> String {
-	let mut result = String::new();
-	let mut chars = raw.chars();
+  let mut result = String::new();
+  let mut chars = raw.chars();
 
-	while let Some(ch) = chars.next() {
-		match ch {
-			'\''|
-			'"' |
-			'\\' |
-			'|' |
-			'&' |
-			';' |
-			'(' |
-			')' |
-			'<' |
-			'>' |
-			'$' |
-			'*' |
-			'!' |
-			'`' |
-			'{' |
-			'?' |
-			'[' |
-			'#' |
-			' ' |
-			'\t'|
-			'\n' => {
-				if use_marker {
-					result.push(markers::ESCAPE);
-				} else {
-					result.push('\\');
-				}
-				result.push(ch);
-				continue;
-			}
-			'~' if result.is_empty() => {
-				if use_marker {
-					result.push(markers::ESCAPE);
-				} else {
-					result.push('\\');
-				}
-				result.push(ch);
-				continue;
-			}
-			_ => {
-				result.push(ch);
-				continue;
-			}
-		}
-	}
+  while let Some(ch) = chars.next() {
+    match ch {
+      '\'' | '"' | '\\' | '|' | '&' | ';' | '(' | ')' | '<' | '>' | '$' | '*' | '!' | '`' | '{'
+      | '?' | '[' | '#' | ' ' | '\t' | '\n' => {
+        if use_marker {
+          result.push(markers::ESCAPE);
+        } else {
+          result.push('\\');
+        }
+        result.push(ch);
+        continue;
+      }
+      '~' if result.is_empty() => {
+        if use_marker {
+          result.push(markers::ESCAPE);
+        } else {
+          result.push('\\');
+        }
+        result.push(ch);
+        continue;
+      }
+      _ => {
+        result.push(ch);
+        continue;
+      }
+    }
+  }
 
-	result
+  result
 }
 
 pub fn unescape_math(raw: &str) -> String {
@@ -1657,7 +1640,8 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::RemShortestPrefix(prefix) => {
         let value = vars.get_var(&var_name);
         let unescaped = unescape_str(&prefix);
-        let expanded = strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix));
+        let expanded =
+          strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix));
         let pattern = Pattern::new(&expanded).unwrap();
         for i in 0..=value.len() {
           let sliced = &value[..i];
@@ -1670,7 +1654,8 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::RemLongestPrefix(prefix) => {
         let value = vars.get_var(&var_name);
         let unescaped = unescape_str(&prefix);
-        let expanded = strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix));
+        let expanded =
+          strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix));
         let pattern = Pattern::new(&expanded).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
@@ -1683,7 +1668,8 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::RemShortestSuffix(suffix) => {
         let value = vars.get_var(&var_name);
         let unescaped = unescape_str(&suffix);
-        let expanded = strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix));
+        let expanded =
+          strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix));
         let pattern = Pattern::new(&expanded).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
@@ -1696,8 +1682,9 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::RemLongestSuffix(suffix) => {
         let value = vars.get_var(&var_name);
         let unescaped = unescape_str(&suffix);
-        let expanded_suffix =
-          strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix.clone()));
+        let expanded_suffix = strip_escape_markers(
+          &expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix.clone()),
+        );
         let pattern = Pattern::new(&expanded_suffix).unwrap();
         for i in 0..=value.len() {
           let sliced = &value[i..];
@@ -1711,8 +1698,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = vars.get_var(&var_name);
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
-        let expanded_search = strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
-        let expanded_replace = strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
+        let expanded_search =
+          strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
+        let expanded_replace =
+          strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
         let regex = glob_to_regex(&expanded_search, false); // unanchored pattern
 
         if let Some(mat) = regex.find(&value) {
@@ -1728,8 +1717,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = vars.get_var(&var_name);
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
-        let expanded_search = strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
-        let expanded_replace = strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
+        let expanded_search =
+          strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
+        let expanded_replace =
+          strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
         let regex = glob_to_regex(&expanded_search, false);
         let mut result = String::new();
         let mut last_match_end = 0;
@@ -1748,8 +1739,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = vars.get_var(&var_name);
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
-        let expanded_search = strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
-        let expanded_replace = strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
+        let expanded_search =
+          strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
+        let expanded_replace =
+          strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
         let pattern = Pattern::new(&expanded_search).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
@@ -1763,8 +1756,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = vars.get_var(&var_name);
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
-        let expanded_search = strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
-        let expanded_replace = strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
+        let expanded_search =
+          strip_escape_markers(&expand_raw(&mut search.chars().peekable()).unwrap_or(search));
+        let expanded_replace =
+          strip_escape_markers(&expand_raw(&mut replace.chars().peekable()).unwrap_or(replace));
         let pattern = Pattern::new(&expanded_search).unwrap();
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
@@ -2455,11 +2450,11 @@ pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::time::Duration;
-  use crate::readline::keys::{KeyCode, KeyEvent, ModKeys};
-  use crate::state::{write_vars, read_vars, ArrIndex, VarKind, VarFlags};
   use crate::parse::lex::Span;
+  use crate::readline::keys::{KeyCode, KeyEvent, ModKeys};
+  use crate::state::{ArrIndex, VarFlags, VarKind, read_vars, write_vars};
   use crate::testutil::{TestGuard, test_input};
+  use std::time::Duration;
 
   // ===================== has_braces =====================
 
@@ -2599,10 +2594,7 @@ mod tests {
 
   #[test]
   fn braces_simple_list() {
-    assert_eq!(
-      expand_braces_full("{a,b,c}").unwrap(),
-      vec!["a", "b", "c"]
-    );
+    assert_eq!(expand_braces_full("{a,b,c}").unwrap(), vec!["a", "b", "c"]);
   }
 
   #[test]
@@ -2688,11 +2680,23 @@ mod tests {
     assert_eq!(result, vec!["prepost", "preapost"]);
   }
 
-	#[test]
-	fn braces_cursed() {
-		let result = expand_braces_full("foo{a,{1,2,3,{1..4},5},c}{5..1}bar").unwrap();
-		assert_eq!(result, vec![ "fooa5bar", "fooa4bar", "fooa3bar", "fooa2bar", "fooa1bar", "foo15bar", "foo14bar", "foo13bar", "foo12bar", "foo11bar", "foo25bar", "foo24bar", "foo23bar", "foo22bar", "foo21bar", "foo35bar", "foo34bar", "foo33bar", "foo32bar", "foo31bar", "foo15bar", "foo14bar", "foo13bar", "foo12bar", "foo11bar", "foo25bar", "foo24bar", "foo23bar", "foo22bar", "foo21bar", "foo35bar", "foo34bar", "foo33bar", "foo32bar", "foo31bar", "foo45bar", "foo44bar", "foo43bar", "foo42bar", "foo41bar", "foo55bar", "foo54bar", "foo53bar", "foo52bar", "foo51bar", "fooc5bar", "fooc4bar", "fooc3bar", "fooc2bar", "fooc1bar", ])
-	}
+  #[test]
+  fn braces_cursed() {
+    let result = expand_braces_full("foo{a,{1,2,3,{1..4},5},c}{5..1}bar").unwrap();
+    assert_eq!(
+      result,
+      vec![
+        "fooa5bar", "fooa4bar", "fooa3bar", "fooa2bar", "fooa1bar", "foo15bar", "foo14bar",
+        "foo13bar", "foo12bar", "foo11bar", "foo25bar", "foo24bar", "foo23bar", "foo22bar",
+        "foo21bar", "foo35bar", "foo34bar", "foo33bar", "foo32bar", "foo31bar", "foo15bar",
+        "foo14bar", "foo13bar", "foo12bar", "foo11bar", "foo25bar", "foo24bar", "foo23bar",
+        "foo22bar", "foo21bar", "foo35bar", "foo34bar", "foo33bar", "foo32bar", "foo31bar",
+        "foo45bar", "foo44bar", "foo43bar", "foo42bar", "foo41bar", "foo55bar", "foo54bar",
+        "foo53bar", "foo52bar", "foo51bar", "fooc5bar", "fooc4bar", "fooc3bar", "fooc2bar",
+        "fooc1bar",
+      ]
+    )
+  }
 
   // ===================== Arithmetic =====================
 
@@ -3164,10 +3168,22 @@ mod tests {
 
   #[test]
   fn key_alias_arrows() {
-    assert_eq!(parse_key_alias("UP").unwrap(), KeyEvent(KeyCode::Up, ModKeys::NONE));
-    assert_eq!(parse_key_alias("DOWN").unwrap(), KeyEvent(KeyCode::Down, ModKeys::NONE));
-    assert_eq!(parse_key_alias("LEFT").unwrap(), KeyEvent(KeyCode::Left, ModKeys::NONE));
-    assert_eq!(parse_key_alias("RIGHT").unwrap(), KeyEvent(KeyCode::Right, ModKeys::NONE));
+    assert_eq!(
+      parse_key_alias("UP").unwrap(),
+      KeyEvent(KeyCode::Up, ModKeys::NONE)
+    );
+    assert_eq!(
+      parse_key_alias("DOWN").unwrap(),
+      KeyEvent(KeyCode::Down, ModKeys::NONE)
+    );
+    assert_eq!(
+      parse_key_alias("LEFT").unwrap(),
+      KeyEvent(KeyCode::Left, ModKeys::NONE)
+    );
+    assert_eq!(
+      parse_key_alias("RIGHT").unwrap(),
+      KeyEvent(KeyCode::Right, ModKeys::NONE)
+    );
   }
 
   #[test]
@@ -3179,7 +3195,13 @@ mod tests {
   #[test]
   fn key_alias_ctrl_shift_alt_modifier() {
     let key = parse_key_alias("C-S-A-b").unwrap();
-    assert_eq!(key, KeyEvent(KeyCode::Char('B'), ModKeys::CTRL | ModKeys::SHIFT | ModKeys::ALT));
+    assert_eq!(
+      key,
+      KeyEvent(
+        KeyCode::Char('B'),
+        ModKeys::CTRL | ModKeys::SHIFT | ModKeys::ALT
+      )
+    );
   }
 
   #[test]
@@ -3371,7 +3393,14 @@ mod tests {
   #[test]
   fn param_remove_shortest_prefix() {
     let _guard = TestGuard::new();
-    write_vars(|v| v.set_var("PATH", VarKind::Str("/usr/local/bin".into()), VarFlags::NONE)).unwrap();
+    write_vars(|v| {
+      v.set_var(
+        "PATH",
+        VarKind::Str("/usr/local/bin".into()),
+        VarFlags::NONE,
+      )
+    })
+    .unwrap();
 
     let result = perform_param_expansion("PATH#*/").unwrap();
     assert_eq!(result, "usr/local/bin");
@@ -3380,7 +3409,14 @@ mod tests {
   #[test]
   fn param_remove_longest_prefix() {
     let _guard = TestGuard::new();
-    write_vars(|v| v.set_var("PATH", VarKind::Str("/usr/local/bin".into()), VarFlags::NONE)).unwrap();
+    write_vars(|v| {
+      v.set_var(
+        "PATH",
+        VarKind::Str("/usr/local/bin".into()),
+        VarFlags::NONE,
+      )
+    })
+    .unwrap();
 
     let result = perform_param_expansion("PATH##*/").unwrap();
     assert_eq!(result, "bin");
@@ -3494,7 +3530,9 @@ mod tests {
   fn word_split_default_ifs() {
     let _guard = TestGuard::new();
 
-    let mut exp = Expander { raw: "hello world\tfoo".to_string() };
+    let mut exp = Expander {
+      raw: "hello world\tfoo".to_string(),
+    };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello", "world", "foo"]);
   }
@@ -3502,9 +3540,13 @@ mod tests {
   #[test]
   fn word_split_custom_ifs() {
     let _guard = TestGuard::new();
-    unsafe { std::env::set_var("IFS", ":"); }
+    unsafe {
+      std::env::set_var("IFS", ":");
+    }
 
-    let mut exp = Expander { raw: "a:b:c".to_string() };
+    let mut exp = Expander {
+      raw: "a:b:c".to_string(),
+    };
     let words = exp.split_words();
     assert_eq!(words, vec!["a", "b", "c"]);
   }
@@ -3512,9 +3554,13 @@ mod tests {
   #[test]
   fn word_split_empty_ifs() {
     let _guard = TestGuard::new();
-    unsafe { std::env::set_var("IFS", ""); }
+    unsafe {
+      std::env::set_var("IFS", "");
+    }
 
-    let mut exp = Expander { raw: "hello world".to_string() };
+    let mut exp = Expander {
+      raw: "hello world".to_string(),
+    };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello world"]);
   }
@@ -3554,7 +3600,9 @@ mod tests {
   #[test]
   fn word_split_escaped_custom_ifs() {
     let _guard = TestGuard::new();
-    unsafe { std::env::set_var("IFS", ":"); }
+    unsafe {
+      std::env::set_var("IFS", ":");
+    }
 
     let raw = format!("a{}b:c", unescape_str("\\:"));
     let mut exp = Expander { raw };
@@ -3610,8 +3658,13 @@ mod tests {
   fn array_index_first() {
     let _guard = TestGuard::new();
     write_vars(|v| {
-      v.set_var("arr", VarKind::arr_from_vec(vec!["a".into(), "b".into(), "c".into()]), VarFlags::NONE)
-    }).unwrap();
+      v.set_var(
+        "arr",
+        VarKind::arr_from_vec(vec!["a".into(), "b".into(), "c".into()]),
+        VarFlags::NONE,
+      )
+    })
+    .unwrap();
 
     let val = read_vars(|v| v.index_var("arr", ArrIndex::Literal(0))).unwrap();
     assert_eq!(val, "a");
@@ -3621,8 +3674,13 @@ mod tests {
   fn array_index_second() {
     let _guard = TestGuard::new();
     write_vars(|v| {
-      v.set_var("arr", VarKind::arr_from_vec(vec!["x".into(), "y".into(), "z".into()]), VarFlags::NONE)
-    }).unwrap();
+      v.set_var(
+        "arr",
+        VarKind::arr_from_vec(vec!["x".into(), "y".into(), "z".into()]),
+        VarFlags::NONE,
+      )
+    })
+    .unwrap();
 
     let val = read_vars(|v| v.index_var("arr", ArrIndex::Literal(1))).unwrap();
     assert_eq!(val, "y");
@@ -3632,8 +3690,13 @@ mod tests {
   fn array_all_elems() {
     let _guard = TestGuard::new();
     write_vars(|v| {
-      v.set_var("arr", VarKind::arr_from_vec(vec!["a".into(), "b".into(), "c".into()]), VarFlags::NONE)
-    }).unwrap();
+      v.set_var(
+        "arr",
+        VarKind::arr_from_vec(vec!["a".into(), "b".into(), "c".into()]),
+        VarFlags::NONE,
+      )
+    })
+    .unwrap();
 
     let elems = read_vars(|v| v.get_arr_elems("arr")).unwrap();
     assert_eq!(elems, vec!["a", "b", "c"]);
@@ -3643,8 +3706,13 @@ mod tests {
   fn array_elem_count() {
     let _guard = TestGuard::new();
     write_vars(|v| {
-      v.set_var("arr", VarKind::arr_from_vec(vec!["a".into(), "b".into(), "c".into()]), VarFlags::NONE)
-    }).unwrap();
+      v.set_var(
+        "arr",
+        VarKind::arr_from_vec(vec!["a".into(), "b".into(), "c".into()]),
+        VarFlags::NONE,
+      )
+    })
+    .unwrap();
 
     let elems = read_vars(|v| v.get_arr_elems("arr")).unwrap();
     assert_eq!(elems.len(), 3);
@@ -3657,7 +3725,9 @@ mod tests {
     let _guard = TestGuard::new();
     let dummy_span = Span::default();
     crate::state::SHED.with(|s| {
-      s.logic.borrow_mut().insert_alias("ll", "ls -la", dummy_span.clone());
+      s.logic
+        .borrow_mut()
+        .insert_alias("ll", "ls -la", dummy_span.clone());
     });
 
     let log_tab = crate::state::SHED.with(|s| s.logic.borrow().clone());
@@ -3670,7 +3740,9 @@ mod tests {
     let _guard = TestGuard::new();
     let dummy_span = Span::default();
     crate::state::SHED.with(|s| {
-      s.logic.borrow_mut().insert_alias("foo", "foo --verbose", dummy_span.clone());
+      s.logic
+        .borrow_mut()
+        .insert_alias("foo", "foo --verbose", dummy_span.clone());
     });
 
     let log_tab = crate::state::SHED.with(|s| s.logic.borrow().clone());
@@ -3682,26 +3754,47 @@ mod tests {
 
   // ===================== Direct Input Tests (TestGuard) =====================
 
-	#[test]
-	fn index_simple() {
-		let guard = TestGuard::new();
-		write_vars(|v| v.set_var("arr", VarKind::Arr(VecDeque::from(["foo".into(), "bar".into(), "biz".into()])), VarFlags::NONE)).unwrap();
+  #[test]
+  fn index_simple() {
+    let guard = TestGuard::new();
+    write_vars(|v| {
+      v.set_var(
+        "arr",
+        VarKind::Arr(VecDeque::from(["foo".into(), "bar".into(), "biz".into()])),
+        VarFlags::NONE,
+      )
+    })
+    .unwrap();
 
-		test_input("echo $arr").unwrap();
+    test_input("echo $arr").unwrap();
 
-		let out = guard.read_output();
-		assert_eq!(out, "foo bar biz\n");
-	}
+    let out = guard.read_output();
+    assert_eq!(out, "foo bar biz\n");
+  }
 
-	#[test]
-	fn index_cursed() {
-		let guard = TestGuard::new();
-		write_vars(|v| v.set_var("arr", VarKind::Arr(VecDeque::from(["foo".into(), "bar".into(), "biz".into()])), VarFlags::NONE)).unwrap();
-		write_vars(|v| v.set_var("i", VarKind::Arr(VecDeque::from(["0".into(), "1".into(), "2".into()])), VarFlags::NONE)).unwrap();
+  #[test]
+  fn index_cursed() {
+    let guard = TestGuard::new();
+    write_vars(|v| {
+      v.set_var(
+        "arr",
+        VarKind::Arr(VecDeque::from(["foo".into(), "bar".into(), "biz".into()])),
+        VarFlags::NONE,
+      )
+    })
+    .unwrap();
+    write_vars(|v| {
+      v.set_var(
+        "i",
+        VarKind::Arr(VecDeque::from(["0".into(), "1".into(), "2".into()])),
+        VarFlags::NONE,
+      )
+    })
+    .unwrap();
 
-		test_input("echo $echo ${var:-${arr[$(($(echo ${i[0]}) + 1))]}}").unwrap();
+    test_input("echo $echo ${var:-${arr[$(($(echo ${i[0]}) + 1))]}}").unwrap();
 
-		let out = guard.read_output();
-		assert_eq!(out, "bar\n");
-	}
+    let out = guard.read_output();
+    assert_eq!(out, "bar\n");
+  }
 }

@@ -389,154 +389,166 @@ impl Iterator for PipeGenerator {
 
 #[cfg(test)]
 pub mod tests {
-	use crate::testutil::{TestGuard, has_cmd, has_cmds, test_input};
-	use pretty_assertions::assert_eq;
+  use crate::testutil::{TestGuard, has_cmd, has_cmds, test_input};
+  use pretty_assertions::assert_eq;
 
-	#[test]
-	fn pipeline_simple() {
-		if !has_cmd("sed") { return };
-		let g = TestGuard::new();
+  #[test]
+  fn pipeline_simple() {
+    if !has_cmd("sed") {
+      return;
+    };
+    let g = TestGuard::new();
 
-		test_input("echo foo | sed 's/foo/bar/'").unwrap();
+    test_input("echo foo | sed 's/foo/bar/'").unwrap();
 
-		let out = g.read_output();
-		assert_eq!(out, "bar\n");
-	}
+    let out = g.read_output();
+    assert_eq!(out, "bar\n");
+  }
 
-	#[test]
-	fn pipeline_multi() {
-		if !has_cmds(&[
-			"cut",
-			"sed"
-		]) { return; }
-		let g = TestGuard::new();
+  #[test]
+  fn pipeline_multi() {
+    if !has_cmds(&["cut", "sed"]) {
+      return;
+    }
+    let g = TestGuard::new();
 
-		test_input("echo foo bar baz | cut -d ' ' -f 2 | sed 's/a/A/'").unwrap();
+    test_input("echo foo bar baz | cut -d ' ' -f 2 | sed 's/a/A/'").unwrap();
 
-		let out = g.read_output();
-		assert_eq!(out, "bAr\n");
-	}
+    let out = g.read_output();
+    assert_eq!(out, "bAr\n");
+  }
 
-	#[test]
-	fn rube_goldberg_pipeline() {
-		if !has_cmds(&[
-			"sed",
-			"cat",
-		]) { return }
-		let g = TestGuard::new();
+  #[test]
+  fn rube_goldberg_pipeline() {
+    if !has_cmds(&["sed", "cat"]) {
+      return;
+    }
+    let g = TestGuard::new();
 
-		test_input("{ echo foo; echo bar } | if cat; then :; else echo failed; fi | (read line && echo $line | sed 's/foo/baz/'; sed 's/bar/buzz/')").unwrap();
+    test_input("{ echo foo; echo bar } | if cat; then :; else echo failed; fi | (read line && echo $line | sed 's/foo/baz/'; sed 's/bar/buzz/')").unwrap();
 
-		let out = g.read_output();
-		assert_eq!(out, "baz\nbuzz\n");
-	}
+    let out = g.read_output();
+    assert_eq!(out, "baz\nbuzz\n");
+  }
 
-	#[test]
-	fn simple_file_redir() {
-		let mut g = TestGuard::new();
+  #[test]
+  fn simple_file_redir() {
+    let mut g = TestGuard::new();
 
-		test_input("echo this is in a file > /tmp/simple_file_redir.txt").unwrap();
+    test_input("echo this is in a file > /tmp/simple_file_redir.txt").unwrap();
 
-		g.add_cleanup(|| { std::fs::remove_file("/tmp/simple_file_redir.txt").ok(); });
-		let contents = std::fs::read_to_string("/tmp/simple_file_redir.txt").unwrap();
+    g.add_cleanup(|| {
+      std::fs::remove_file("/tmp/simple_file_redir.txt").ok();
+    });
+    let contents = std::fs::read_to_string("/tmp/simple_file_redir.txt").unwrap();
 
-		assert_eq!(contents, "this is in a file\n");
-	}
+    assert_eq!(contents, "this is in a file\n");
+  }
 
-	#[test]
-	fn append_file_redir() {
-		let dir = tempfile::TempDir::new().unwrap();
-		let path = dir.path().join("append.txt");
-		let _g = TestGuard::new();
+  #[test]
+  fn append_file_redir() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("append.txt");
+    let _g = TestGuard::new();
 
-		test_input(format!("echo first > {}", path.display())).unwrap();
-		test_input(format!("echo second >> {}", path.display())).unwrap();
+    test_input(format!("echo first > {}", path.display())).unwrap();
+    test_input(format!("echo second >> {}", path.display())).unwrap();
 
-		let contents = std::fs::read_to_string(&path).unwrap();
-		assert_eq!(contents, "first\nsecond\n");
-	}
+    let contents = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(contents, "first\nsecond\n");
+  }
 
-	#[test]
-	fn input_redir() {
-		if !has_cmd("cat") { return; }
-		let dir = tempfile::TempDir::new().unwrap();
-		let path = dir.path().join("input.txt");
-		std::fs::write(&path, "hello from file\n").unwrap();
-		let g = TestGuard::new();
+  #[test]
+  fn input_redir() {
+    if !has_cmd("cat") {
+      return;
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("input.txt");
+    std::fs::write(&path, "hello from file\n").unwrap();
+    let g = TestGuard::new();
 
-		test_input(format!("cat < {}", path.display())).unwrap();
+    test_input(format!("cat < {}", path.display())).unwrap();
 
-		let out = g.read_output();
-		assert_eq!(out, "hello from file\n");
-	}
+    let out = g.read_output();
+    assert_eq!(out, "hello from file\n");
+  }
 
-	#[test]
-	fn stderr_redir_to_file() {
-		let dir = tempfile::TempDir::new().unwrap();
-		let path = dir.path().join("err.txt");
-		let g = TestGuard::new();
+  #[test]
+  fn stderr_redir_to_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("err.txt");
+    let g = TestGuard::new();
 
-		test_input(format!("echo error msg 2> {} >&2", path.display())).unwrap();
+    test_input(format!("echo error msg 2> {} >&2", path.display())).unwrap();
 
-		let contents = std::fs::read_to_string(&path).unwrap();
-		assert_eq!(contents, "error msg\n");
-		// stdout should be empty since we redirected to stderr
-		let out = g.read_output();
-		assert_eq!(out, "");
-	}
+    let contents = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(contents, "error msg\n");
+    // stdout should be empty since we redirected to stderr
+    let out = g.read_output();
+    assert_eq!(out, "");
+  }
 
-	#[test]
-	fn pipe_and_stderr() {
-		if !has_cmd("cat") { return; }
-		let g = TestGuard::new();
+  #[test]
+  fn pipe_and_stderr() {
+    if !has_cmd("cat") {
+      return;
+    }
+    let g = TestGuard::new();
 
-		test_input("echo on stderr >&2 |& cat").unwrap();
+    test_input("echo on stderr >&2 |& cat").unwrap();
 
-		let out = g.read_output();
-		assert_eq!(out, "on stderr\n");
-	}
+    let out = g.read_output();
+    assert_eq!(out, "on stderr\n");
+  }
 
-	#[test]
-	fn output_redir_clobber() {
-		let dir = tempfile::TempDir::new().unwrap();
-		let path = dir.path().join("clobber.txt");
-		let _g = TestGuard::new();
+  #[test]
+  fn output_redir_clobber() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("clobber.txt");
+    let _g = TestGuard::new();
 
-		test_input(format!("echo first > {}", path.display())).unwrap();
-		test_input(format!("echo second > {}", path.display())).unwrap();
+    test_input(format!("echo first > {}", path.display())).unwrap();
+    test_input(format!("echo second > {}", path.display())).unwrap();
 
-		let contents = std::fs::read_to_string(&path).unwrap();
-		assert_eq!(contents, "second\n");
-	}
+    let contents = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(contents, "second\n");
+  }
 
-	#[test]
-	fn pipeline_preserves_exit_status() {
-		if !has_cmd("cat") { return; }
-		let _g = TestGuard::new();
+  #[test]
+  fn pipeline_preserves_exit_status() {
+    if !has_cmd("cat") {
+      return;
+    }
+    let _g = TestGuard::new();
 
-		test_input("false | cat").unwrap();
+    test_input("false | cat").unwrap();
 
-		// Pipeline exit status is the last command
-		let status = crate::state::get_status();
-		assert_eq!(status, 0);
+    // Pipeline exit status is the last command
+    let status = crate::state::get_status();
+    assert_eq!(status, 0);
 
-		test_input("cat < /dev/null | false").unwrap();
+    test_input("cat < /dev/null | false").unwrap();
 
-		let status = crate::state::get_status();
-		assert_ne!(status, 0);
-	}
+    let status = crate::state::get_status();
+    assert_ne!(status, 0);
+  }
 
-	#[test]
-	fn fd_duplication() {
-		let dir = tempfile::TempDir::new().unwrap();
-		let path = dir.path().join("dup.txt");
-		let _g = TestGuard::new();
+  #[test]
+  fn fd_duplication() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("dup.txt");
+    let _g = TestGuard::new();
 
-		// Redirect stdout to file, then dup stderr to stdout — both should go to file
-		test_input(format!("{{ echo out; echo err >&2 }} > {} 2>&1", path.display())).unwrap();
+    // Redirect stdout to file, then dup stderr to stdout — both should go to file
+    test_input(format!(
+      "{{ echo out; echo err >&2 }} > {} 2>&1",
+      path.display()
+    ))
+    .unwrap();
 
-		let contents = std::fs::read_to_string(&path).unwrap();
-		assert!(contents.contains("out"));
-		assert!(contents.contains("err"));
-	}
+    let contents = std::fs::read_to_string(&path).unwrap();
+    assert!(contents.contains("out"));
+    assert!(contents.contains("err"));
+  }
 }

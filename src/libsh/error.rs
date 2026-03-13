@@ -1,10 +1,10 @@
 use ariadne::{Color, Fmt};
 use ariadne::{Report, ReportKind};
 use rand::TryRng;
-use yansi::Paint;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
+use yansi::Paint;
 
 use crate::procio::RedirGuard;
 use crate::{
@@ -150,7 +150,7 @@ impl Display for Note {
       writeln!(f, "{note}: {main}")?;
     } else {
       let bar_break = Fmt::fg("-", Color::Cyan);
-			let bar_break = bar_break.bold();
+      let bar_break = bar_break.bold();
       let indent = "  ".repeat(self.depth);
       writeln!(f, "  {indent}{bar_break} {main}")?;
     }

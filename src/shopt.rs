@@ -185,12 +185,12 @@ impl ShOptCore {
             "shopt: expected an integer for max_hist value (-1 for unlimited)",
           ));
         };
-				if val < -1 {
-					return Err(ShErr::simple(
-						ShErrKind::SyntaxErr,
-						"shopt: expected a non-negative integer or -1 for max_hist value",
-					));
-				}
+        if val < -1 {
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            "shopt: expected a non-negative integer or -1 for max_hist value",
+          ));
+        }
         self.max_hist = val;
       }
       "interactive_comments" => {
@@ -516,7 +516,8 @@ impl ShOptPrompt {
         Ok(Some(output))
       }
       "screensaver_idle_time" => {
-        let mut output = String::from("Idle time in seconds before running screensaver_cmd (0 = disabled)\n");
+        let mut output =
+          String::from("Idle time in seconds before running screensaver_cmd (0 = disabled)\n");
         output.push_str(&format!("{}", self.screensaver_idle_time));
         Ok(Some(output))
       }
@@ -544,7 +545,10 @@ impl Display for ShOptPrompt {
     output.push(format!("leader = {}", self.leader));
     output.push(format!("line_numbers = {}", self.line_numbers));
     output.push(format!("screensaver_cmd = {}", self.screensaver_cmd));
-    output.push(format!("screensaver_idle_time = {}", self.screensaver_idle_time));
+    output.push(format!(
+      "screensaver_idle_time = {}",
+      self.screensaver_idle_time
+    ));
 
     let final_output = output.join("\n");
 
@@ -575,23 +579,29 @@ mod tests {
 
   #[test]
   fn all_core_fields_covered() {
-      let ShOptCore {
-          dotglob, autocd, hist_ignore_dupes, max_hist,
-          interactive_comments, auto_hist, bell_enabled, max_recurse_depth,
-          xpg_echo,
-      } = ShOptCore::default();
-      // If a field is added to the struct, this destructure fails to compile.
-      let _ = (
-				dotglob,
-				autocd,
-				hist_ignore_dupes,
-				max_hist,
-				interactive_comments,
-				auto_hist,
-				bell_enabled,
-				max_recurse_depth,
-				xpg_echo,
-			);
+    let ShOptCore {
+      dotglob,
+      autocd,
+      hist_ignore_dupes,
+      max_hist,
+      interactive_comments,
+      auto_hist,
+      bell_enabled,
+      max_recurse_depth,
+      xpg_echo,
+    } = ShOptCore::default();
+    // If a field is added to the struct, this destructure fails to compile.
+    let _ = (
+      dotglob,
+      autocd,
+      hist_ignore_dupes,
+      max_hist,
+      interactive_comments,
+      auto_hist,
+      bell_enabled,
+      max_recurse_depth,
+      xpg_echo,
+    );
   }
 
   #[test]
@@ -617,7 +627,7 @@ mod tests {
     opts.set("core.max_hist", "-1").unwrap();
     assert_eq!(opts.core.max_hist, -1);
 
-		assert!(opts.set("core.max_hist", "-500").is_err());
+    assert!(opts.set("core.max_hist", "-500").is_err());
   }
 
   #[test]

@@ -19,7 +19,7 @@ use crate::{
 
 pub const KEYWORDS: [&str; 17] = [
   "if", "then", "elif", "else", "fi", "while", "until", "select", "for", "in", "do", "done",
-  "case", "esac", "[[", "]]", "!"
+  "case", "esac", "[[", "]]", "!",
 ];
 
 pub const OPENERS: [&str; 6] = ["if", "while", "until", "for", "select", "case"];
@@ -166,7 +166,7 @@ pub enum TkRule {
   ErrPipe,
   And,
   Or,
-	Bang,
+  Bang,
   Bg,
   Sep,
   Redir,
@@ -883,14 +883,14 @@ impl Iterator for LexStream {
           return self.next();
         }
       }
-			'!' if self.next_is_cmd() => {
-				self.cursor += 1;
-				let tk_type = TkRule::Bang;
+      '!' if self.next_is_cmd() => {
+        self.cursor += 1;
+        let tk_type = TkRule::Bang;
 
-				let mut tk = self.get_token((self.cursor - 1)..self.cursor, tk_type);
-				tk.flags |= TkFlags::KEYWORD;
-				tk
-			}
+        let mut tk = self.get_token((self.cursor - 1)..self.cursor, tk_type);
+        tk.flags |= TkFlags::KEYWORD;
+        tk
+      }
       '|' => {
         let ch_idx = self.cursor;
         self.cursor += 1;

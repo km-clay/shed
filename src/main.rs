@@ -40,7 +40,9 @@ use crate::procio::borrow_fd;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
-use crate::state::{AutoCmdKind, read_logic, read_shopts, source_rc, write_jobs, write_meta, write_shopts};
+use crate::state::{
+  AutoCmdKind, read_logic, read_shopts, source_rc, write_jobs, write_meta, write_shopts,
+};
 use clap::Parser;
 use state::write_vars;
 
@@ -116,14 +118,15 @@ fn main() -> ExitCode {
     return ExitCode::SUCCESS;
   }
 
-	// Increment SHLVL, or set to 1 if not present or invalid.
-	// This var represents how many nested shell instances we're in
-	if let Ok(var) = env::var("SHLVL")
-	&& let Ok(lvl) = var.parse::<u32>() {
-		unsafe { env::set_var("SHLVL", (lvl + 1).to_string()) };
-	} else {
-		unsafe { env::set_var("SHLVL", "1") };
-	}
+  // Increment SHLVL, or set to 1 if not present or invalid.
+  // This var represents how many nested shell instances we're in
+  if let Ok(var) = env::var("SHLVL")
+    && let Ok(lvl) = var.parse::<u32>()
+  {
+    unsafe { env::set_var("SHLVL", (lvl + 1).to_string()) };
+  } else {
+    unsafe { env::set_var("SHLVL", "1") };
+  }
 
   if let Err(e) = if let Some(path) = args.script {
     run_script(path, args.script_args)
@@ -131,8 +134,8 @@ fn main() -> ExitCode {
     exec_dash_c(cmd)
   } else {
     let res = shed_interactive(args);
-		write(borrow_fd(*TTY_FILENO), b"\x1b[?2004l").ok(); // disable bracketed paste mode on exit
-		res
+    write(borrow_fd(*TTY_FILENO), b"\x1b[?2004l").ok(); // disable bracketed paste mode on exit
+    res
   } {
     e.print_error();
   };
@@ -202,7 +205,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
   };
 
-	readline.writer.flush_write("\x1b[?2004h")?; // enable bracketed paste mode
+  readline.writer.flush_write("\x1b[?2004h")?; // enable bracketed paste mode
 
   // Main poll loop
   loop {
@@ -221,9 +224,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
             readline.reset_active_widget(false)?;
           }
           ShErrKind::CleanExit(code) => {
-						QUIT_CODE.store(*code, Ordering::SeqCst);
-						return Ok(());
-					}
+            QUIT_CODE.store(*code, Ordering::SeqCst);
+            return Ok(());
+          }
           _ => e.print_error(),
         }
       }
@@ -235,7 +238,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       // may have moved it during resize/rewrap
       readline.writer.update_t_cols();
       readline.mark_dirty();
-		}
+    }
 
     if JOB_DONE.swap(false, Ordering::SeqCst) {
       // update the prompt so any job count escape sequences update dynamically
@@ -250,38 +253,38 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       PollFlags::POLLIN,
     )];
 
-		let mut exec_if_timeout = None;
+    let mut exec_if_timeout = None;
 
     let timeout = if readline.pending_keymap.is_empty() {
-			let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone());
-			let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
-			if screensaver_idle_time > 0 && !screensaver_cmd.is_empty() {
-				exec_if_timeout = Some(screensaver_cmd);
-				PollTimeout::from((screensaver_idle_time * 1000) as u16)
-			} else {
-				PollTimeout::MAX
-			}
+      let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone());
+      let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
+      if screensaver_idle_time > 0 && !screensaver_cmd.is_empty() {
+        exec_if_timeout = Some(screensaver_cmd);
+        PollTimeout::from((screensaver_idle_time * 1000) as u16)
+      } else {
+        PollTimeout::MAX
+      }
     } else {
-			PollTimeout::from(1000u16)
+      PollTimeout::from(1000u16)
     };
 
     match poll(&mut fds, timeout) {
-			Ok(0) => {
-				// We timed out.
-				if let Some(cmd) = exec_if_timeout {
-					let prepared = ReadlineEvent::Line(cmd);
-					let saved_hist_opt = read_shopts(|o| o.core.auto_hist);
-					let _guard = scopeguard::guard(saved_hist_opt, |opt| {
-						write_shopts(|o| o.core.auto_hist = opt);
-					});
-					write_shopts(|o| o.core.auto_hist = false); // don't save screensaver command to history
+      Ok(0) => {
+        // We timed out.
+        if let Some(cmd) = exec_if_timeout {
+          let prepared = ReadlineEvent::Line(cmd);
+          let saved_hist_opt = read_shopts(|o| o.core.auto_hist);
+          let _guard = scopeguard::guard(saved_hist_opt, |opt| {
+            write_shopts(|o| o.core.auto_hist = opt);
+          });
+          write_shopts(|o| o.core.auto_hist = false); // don't save screensaver command to history
 
-					match handle_readline_event(&mut readline, Ok(prepared))? {
-						true => return Ok(()),
-						false => continue
-					}
-				}
-			}
+          match handle_readline_event(&mut readline, Ok(prepared))? {
+            true => return Ok(()),
+            false => continue,
+          }
+        }
+      }
       Err(Errno::EINTR) => {
         // Interrupted by signal, loop back to handle it
         continue;

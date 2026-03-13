@@ -229,9 +229,9 @@ pub fn get_arr_op_opts(opts: Vec<Opt>) -> ShResult<ArrOpOpts> {
 
 #[cfg(test)]
 mod tests {
-  use std::collections::VecDeque;
-  use crate::state::{self, read_vars, write_vars, VarFlags, VarKind};
+  use crate::state::{self, VarFlags, VarKind, read_vars, write_vars};
   use crate::testutil::{TestGuard, test_input};
+  use std::collections::VecDeque;
 
   fn set_arr(name: &str, elems: &[&str]) {
     let arr = VecDeque::from_iter(elems.iter().map(|s| s.to_string()));

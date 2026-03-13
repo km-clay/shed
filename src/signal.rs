@@ -165,10 +165,10 @@ pub fn reset_signals(is_fg: bool) {
       if sig == Signal::SIGKILL || sig == Signal::SIGSTOP {
         continue;
       }
-			if is_fg && (sig == Signal::SIGTTIN || sig == Signal::SIGTTOU) {
-				log::debug!("Not resetting SIGTTIN/SIGTTOU in foreground child");
-				continue;
-			}
+      if is_fg && (sig == Signal::SIGTTIN || sig == Signal::SIGTTOU) {
+        log::debug!("Not resetting SIGTTIN/SIGTTOU in foreground child");
+        continue;
+      }
       let _ = sigaction(sig, &default);
     }
   }

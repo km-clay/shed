@@ -176,20 +176,20 @@ pub fn complete_builtin(node: Node) -> ShResult<()> {
       read_meta(|m| -> ShResult<()> {
         let specs = m.comp_specs().values();
         for spec in specs {
-					let stdout = borrow_fd(STDOUT_FILENO);
-					write(stdout, spec.source().as_bytes())?;
+          let stdout = borrow_fd(STDOUT_FILENO);
+          write(stdout, spec.source().as_bytes())?;
         }
-				Ok(())
+        Ok(())
       })?;
     } else {
       read_meta(|m| -> ShResult<()> {
         for (cmd, _) in &argv {
           if let Some(spec) = m.comp_specs().get(cmd) {
-						let stdout = borrow_fd(STDOUT_FILENO);
-						write(stdout, spec.source().as_bytes())?;
+            let stdout = borrow_fd(STDOUT_FILENO);
+            write(stdout, spec.source().as_bytes())?;
           }
         }
-				Ok(())
+        Ok(())
       })?;
     }
 
@@ -316,10 +316,10 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
 
 #[cfg(test)]
 mod tests {
+  use crate::state::{self, VarFlags, VarKind, read_meta, write_vars};
+  use crate::testutil::{TestGuard, test_input};
   use std::fs;
   use tempfile::TempDir;
-  use crate::state::{self, read_meta, write_vars, VarFlags, VarKind};
-  use crate::testutil::{TestGuard, test_input};
 
   // ===================== complete: Registration =====================
 

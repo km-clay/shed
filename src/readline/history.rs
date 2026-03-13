@@ -500,12 +500,8 @@ mod tests {
       env::set_var(key, val);
     }
     guard(prev, move |p| match p {
-      Some(v) => unsafe {
-        env::set_var(key, v)
-      },
-      None => unsafe {
-        env::remove_var(key)
-      },
+      Some(v) => unsafe { env::set_var(key, v) },
+      None => unsafe { env::remove_var(key) },
     })
   }
 
@@ -522,12 +518,7 @@ mod tests {
   fn write_history_file(path: &Path) {
     fs::write(
       path,
-      [
-        ": 1;1;first\n",
-        ": 2;1;second\n",
-        ": 3;1;third\n",
-      ]
-      .concat(),
+      [": 1;1;first\n", ": 2;1;second\n", ": 3;1;third\n"].concat(),
     )
     .unwrap();
   }
@@ -586,12 +577,7 @@ mod tests {
     let hist_path = tmp.path().join("history");
     fs::write(
       &hist_path,
-      [
-        ": 1;1;repeat\n",
-        ": 2;1;unique\n",
-        ": 3;1;repeat\n",
-      ]
-      .concat(),
+      [": 1;1;repeat\n", ": 2;1;unique\n", ": 3;1;repeat\n"].concat(),
     )
     .unwrap();
 

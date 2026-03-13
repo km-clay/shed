@@ -141,6 +141,12 @@ impl SelectMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum CaseTransform {
+  Toggle,
+  Lower,
+  Upper,
+}
+
 pub enum MotionKind {
   To(usize), // Absolute position, exclusive
   On(usize), // Absolute position, inclusive
@@ -823,7 +829,7 @@ impl LineBuf {
     }
     Some(self.line_bounds(line_no))
   }
-	pub fn word_at(&mut self, pos: usize, word: Word) -> (usize,usize) {
+  pub fn word_at(&mut self, pos: usize, word: Word) -> (usize, usize) {
     let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
       self.cursor.get()
     } else {
@@ -835,35 +841,41 @@ impl LineBuf {
       self.end_of_word_forward(self.cursor.get(), word)
     };
     (start, end)
-	}
+  }
   pub fn this_word(&mut self, word: Word) -> (usize, usize) {
-		self.word_at(self.cursor.get(), word)
+    self.word_at(self.cursor.get(), word)
   }
 
-	pub fn number_at_cursor(&mut self) -> Option<(usize,usize)> {
-		self.number_at(self.cursor.get())
-	}
-	pub fn number_at(&mut self, pos: usize) -> Option<(usize,usize)> {
-		// A number is a sequence of digits, possibly containing one dot, and possibly starting with a minus sign
-		let is_number_char = |c: &str| c == "." || c == "-" || c.chars().all(|c| c.is_ascii_digit());
-		let is_digit = |gr: &str| gr.chars().all(|c| c.is_ascii_digit());
-		if self.grapheme_at(pos).is_some_and(|gr| !is_number_char(gr)) {
-			return None;
-		}
-		let mut fwd_indices = self.directional_indices_iter_from(pos, Direction::Forward);
-		let mut bkwd_indices = self.directional_indices_iter_from(pos, Direction::Backward);
+  pub fn number_at_cursor(&mut self) -> Option<(usize, usize)> {
+    self.number_at(self.cursor.get())
+  }
+  pub fn number_at(&mut self, pos: usize) -> Option<(usize, usize)> {
+    // A number is a sequence of digits, possibly containing one dot, and possibly starting with a minus sign
+    let is_number_char = |c: &str| c == "." || c == "-" || c.chars().all(|c| c.is_ascii_digit());
+    let is_digit = |gr: &str| gr.chars().all(|c| c.is_ascii_digit());
+    if self.grapheme_at(pos).is_some_and(|gr| !is_number_char(gr)) {
+      return None;
+    }
+    let mut fwd_indices = self.directional_indices_iter_from(pos, Direction::Forward);
+    let mut bkwd_indices = self.directional_indices_iter_from(pos, Direction::Backward);
 
-		// Find the digit span, then check if preceded by '-'
-		let mut start = bkwd_indices.find(|i| !self.grapheme_at(*i).is_some_and(is_digit))
-				.map(|i| i + 1).unwrap_or(0);
-		let end = fwd_indices.find(|i| !self.grapheme_at(*i).is_some_and(is_digit))
-				.map(|i| i - 1).unwrap_or(self.cursor.max);  // inclusive end
+    // Find the digit span, then check if preceded by '-'
+    let mut start = bkwd_indices
+      .find(|i| !self.grapheme_at(*i).is_some_and(is_digit))
+      .map(|i| i + 1)
+      .unwrap_or(0);
+    let end = fwd_indices
+      .find(|i| !self.grapheme_at(*i).is_some_and(is_digit))
+      .map(|i| i - 1)
+      .unwrap_or(self.cursor.max); // inclusive end
 
-		// Check for leading minus
-		if start > 0 && self.grapheme_at(start - 1) == Some("-") { start -= 1; }
+    // Check for leading minus
+    if start > 0 && self.grapheme_at(start - 1) == Some("-") {
+      start -= 1;
+    }
 
-		Some((start, end))
-	}
+    Some((start, end))
+  }
   pub fn this_line_exclusive(&mut self) -> (usize, usize) {
     let line_no = self.cursor_line_number();
     let (start, mut end) = self.line_bounds(line_no);
@@ -975,7 +987,7 @@ impl LineBuf {
     dir: Direction,
   ) -> Box<dyn Iterator<Item = usize>> {
     self.update_graphemes_lazy();
-		let len = self.grapheme_indices().len();
+    let len = self.grapheme_indices().len();
     match dir {
       Direction::Forward => Box::new(pos + 1..len) as Box<dyn Iterator<Item = usize>>,
       Direction::Backward => Box::new((0..pos).rev()) as Box<dyn Iterator<Item = usize>>,
@@ -2020,8 +2032,8 @@ impl LineBuf {
     self.buffer.replace_range(start..end, new);
   }
   pub fn calc_indent_level(&mut self) {
-		// FIXME: This implementation is extremely naive but it kind of sort of works for now
-		// Need to re-implement it and write tests
+    // FIXME: This implementation is extremely naive but it kind of sort of works for now
+    // Need to re-implement it and write tests
     let to_cursor = self
       .slice_to_cursor()
       .map(|s| s.to_string())
@@ -2403,20 +2415,20 @@ impl LineBuf {
         MotionKind::InclusiveWithTargetCol((self.start_of_line(), end), 0)
       }
       MotionCmd(count, Motion::ToColumn) => {
-				let s = self.start_of_line();
-				let mut end = s;
-				for _ in 0..count {
-					let Some(gr) = self.grapheme_at(end) else {
-						end = self.grapheme_indices().len();
-						break;
-					};
-					if gr == "\n" {
-						break;
-					}
-					end += 1;
-				}
-				MotionKind::On(end.saturating_sub(1)) // count starts at 1, columns are "zero-indexed", so we subtract one
-			}
+        let s = self.start_of_line();
+        let mut end = s;
+        for _ in 0..count {
+          let Some(gr) = self.grapheme_at(end) else {
+            end = self.grapheme_indices().len();
+            break;
+          };
+          if gr == "\n" {
+            break;
+          }
+          end += 1;
+        }
+        MotionKind::On(end.saturating_sub(1)) // count starts at 1, columns are "zero-indexed", so we subtract one
+      }
       MotionCmd(count, Motion::Range(start, end)) => {
         let mut final_end = end;
         if self.cursor.exclusive {
@@ -2600,6 +2612,592 @@ impl LineBuf {
     };
     Some(range)
   }
+  fn verb_ydc(&mut self, motion: MotionKind, register: RegisterName, verb: Verb) -> ShResult<()> {
+    let Some((start, end)) = self.range_from_motion(&motion) else {
+      return Ok(());
+    };
+
+    let mut do_indent = false;
+    if verb == Verb::Change && (start, end) == self.this_line_exclusive() {
+      do_indent = read_shopts(|o| o.prompt.auto_indent);
+    }
+
+    let mut text = if verb == Verb::Yank {
+      self
+        .slice(start..end)
+        .map(|c| c.to_string())
+        .unwrap_or_default()
+    } else if start == self.grapheme_indices().len() && end == self.grapheme_indices().len() {
+      // user is in normal mode and pressed 'x' on the last char in the buffer
+      let drained = self.drain(end.saturating_sub(1)..end);
+      self.update_graphemes();
+      drained
+    } else {
+      let drained = self.drain(start..end);
+      self.update_graphemes();
+      drained
+    };
+    let is_linewise = matches!(
+      motion,
+      MotionKind::InclusiveWithTargetCol(..) | MotionKind::ExclusiveWithTargetCol(..)
+    ) || matches!(self.select_mode, Some(SelectMode::Line(_)));
+    let register_content = if is_linewise {
+      if text.ends_with('\n') && !text.is_empty() {
+        text = text.strip_suffix('\n').unwrap().to_string();
+      }
+      RegisterContent::Line(text)
+    } else {
+      RegisterContent::Span(text)
+    };
+    register.write_to_register(register_content);
+    self.cursor.set(start);
+    if do_indent {
+      self.calc_indent_level();
+      let tabs = (0..self.auto_indent_level).map(|_| '\t');
+      for tab in tabs {
+        self.insert_at_cursor(tab);
+        self.cursor.add(1);
+      }
+    } else if verb != Verb::Change
+      && let MotionKind::InclusiveWithTargetCol((_, _), col) = motion
+    {
+      self.cursor.add(col);
+    }
+    Ok(())
+  }
+  fn verb_rot13(&mut self, motion: MotionKind) -> ShResult<()> {
+    let Some((start, end)) = self.range_from_motion(&motion) else {
+      return Ok(());
+    };
+    let slice = self.slice(start..end).unwrap_or_default();
+    let rot13 = rot13(slice);
+    self.buffer.replace_range(start..end, &rot13);
+    self.cursor.set(start);
+    Ok(())
+  }
+  fn verb_replace_char(&mut self, motion: MotionKind, ch: char) -> ShResult<()> {
+    let mut buf = [0u8; 4];
+    let new = ch.encode_utf8(&mut buf);
+    self.replace_at_cursor(new);
+    self.apply_motion(motion);
+    Ok(())
+  }
+  pub fn verb_replace_char_inplace(&mut self, ch: char, count: u16) -> ShResult<()> {
+    if let Some((start, end)) = self.select_range() {
+      let end = (end + 1).min(self.grapheme_indices().len()); // inclusive
+      let replaced = ch.to_string().repeat(end.saturating_sub(start));
+      self.replace_at(start, &replaced);
+      self.cursor.set(start);
+    } else {
+      for i in 0..count {
+        let mut buf = [0u8; 4];
+        let new = ch.encode_utf8(&mut buf);
+        self.replace_at_cursor(new);
+
+        // try to increment the cursor until we are on the last iteration
+        // or until we hit the end of the buffer
+        if i != count.saturating_sub(1) && !self.cursor.inc() {
+          break;
+        }
+      }
+    }
+    Ok(())
+  }
+  fn verb_toggle_case_inplace(&mut self, count: u16) {
+    let mut did_something = false;
+    for i in 0..count {
+      let Some(gr) = self.grapheme_at_cursor() else {
+        return;
+      };
+      if gr.len() > 1 || gr.is_empty() {
+        return;
+      }
+      let ch = gr.chars().next().unwrap();
+      if !ch.is_alphabetic() {
+        return;
+      }
+      let mut buf = [0u8; 4];
+      let new = if ch.is_ascii_lowercase() {
+        ch.to_ascii_uppercase().encode_utf8(&mut buf)
+      } else {
+        ch.to_ascii_lowercase().encode_utf8(&mut buf)
+      };
+      self.replace_at_cursor(new);
+      did_something = true;
+      if i != count.saturating_sub(1) && !self.cursor.inc() {
+        break;
+      }
+    }
+    if did_something {
+      self.cursor.inc();
+    }
+  }
+  fn verb_case_transform(&mut self, motion: MotionKind, transform: CaseTransform) -> ShResult<()> {
+    let Some((start, end)) = self.range_from_motion(&motion) else {
+      return Ok(());
+    };
+    for i in start..end {
+      let Some(gr) = self.grapheme_at(i) else {
+        continue;
+      };
+      if gr.len() > 1 || gr.is_empty() {
+        continue;
+      }
+      let ch = gr.chars().next().unwrap();
+      if !ch.is_alphabetic() {
+        continue;
+      }
+      let mut buf = [0u8; 4];
+      let new = match transform {
+        CaseTransform::Toggle => {
+          if ch.is_ascii_lowercase() {
+            ch.to_ascii_uppercase().encode_utf8(&mut buf)
+          } else {
+            ch.to_ascii_lowercase().encode_utf8(&mut buf)
+          }
+        }
+        CaseTransform::Lower => {
+          if ch.is_ascii_uppercase() {
+            ch.to_ascii_lowercase().encode_utf8(&mut buf)
+          } else {
+            ch.encode_utf8(&mut buf)
+          }
+        }
+        CaseTransform::Upper => {
+          if ch.is_ascii_lowercase() {
+            ch.to_ascii_uppercase().encode_utf8(&mut buf)
+          } else {
+            ch.encode_utf8(&mut buf)
+          }
+        }
+      };
+      self.replace_at(i, new);
+    }
+    self.cursor.set(start);
+    Ok(())
+  }
+  fn verb_undo_redo(&mut self, verb: Verb) -> ShResult<()> {
+    let (edit_provider, edit_receiver) = match verb {
+      Verb::Redo => (&mut self.redo_stack, &mut self.undo_stack),
+      Verb::Undo => (&mut self.undo_stack, &mut self.redo_stack),
+      _ => unreachable!(),
+    };
+    let Some(edit) = edit_provider.pop() else {
+      return Ok(());
+    };
+    let Edit {
+      pos,
+      cursor_pos,
+      old,
+      new,
+      merging: _,
+    } = edit;
+    self.buffer.replace_range(pos..pos + new.len(), &old);
+    let new_cursor_pos = self.cursor.get();
+    self.cursor.set(cursor_pos);
+    edit_receiver.push(Edit {
+      pos,
+      cursor_pos: new_cursor_pos,
+      old: new,
+      new: old,
+      merging: false,
+    });
+    self.update_graphemes();
+    Ok(())
+  }
+  fn verb_put(&mut self, anchor: Anchor, register: RegisterName) -> ShResult<()> {
+    let Some(content) = register.read_from_register() else {
+      return Ok(());
+    };
+    if content.is_empty() {
+      return Ok(());
+    }
+    if let Some(range) = self.select_range() {
+      let register_text = self.drain_inclusive(range.0..=range.1);
+      write_register(None, RegisterContent::Span(register_text));
+      let text = content.as_str();
+      self.insert_str_at(range.0, text);
+      self.cursor.set(range.0 + content.char_count());
+      self.select_range = None;
+      self.update_graphemes();
+      return Ok(());
+    }
+    match content {
+      RegisterContent::Span(ref text) => match anchor {
+        Anchor::After => {
+          let insert_idx = self
+            .cursor
+            .get()
+            .saturating_add(1)
+            .min(self.grapheme_indices().len());
+          let offset = text.len().max(1);
+          self.insert_str_at(insert_idx, text);
+          self.cursor.add(offset);
+        }
+        Anchor::Before => {
+          let insert_idx = self.cursor.get();
+          self.insert_str_at(insert_idx, text);
+          self.cursor.add(text.len().saturating_sub(1));
+        }
+      },
+      RegisterContent::Line(ref text) => {
+        let insert_idx = match anchor {
+          Anchor::After => self.end_of_line(),
+          Anchor::Before => self.start_of_line(),
+        };
+        let mut full = text.to_string();
+        let mut offset = 0;
+        match anchor {
+          Anchor::After => {
+            if self.grapheme_before(insert_idx).is_none_or(|gr| gr != "\n") {
+              full = format!("\n{text}");
+              offset += 1;
+            }
+            if self.grapheme_at(insert_idx).is_some_and(|gr| gr != "\n") {
+              full = format!("{full}\n");
+            }
+          }
+          Anchor::Before => {
+            full = format!("{full}\n");
+          }
+        }
+        self.insert_str_at(insert_idx, &full);
+        self.cursor.set(insert_idx + offset);
+      }
+      RegisterContent::Empty => {}
+    }
+    Ok(())
+  }
+  fn verb_swap_visual_anchor(&mut self) {
+    if let Some((start, end)) = self.select_range
+      && let Some(mut mode) = self.select_mode
+    {
+      mode.invert_anchor();
+      let new_cursor_pos = match mode.anchor() {
+        SelectAnchor::Start => start,
+        SelectAnchor::End => end,
+      };
+      self.cursor.set(new_cursor_pos);
+      self.select_mode = Some(mode)
+    }
+  }
+  fn verb_join_lines(&mut self) -> ShResult<()> {
+    let start = self.start_of_line();
+    let Some((_, mut end)) = self.nth_next_line(1) else {
+      return Ok(());
+    };
+    end = end.saturating_sub(1);
+    let mut last_was_whitespace = false;
+    for i in start..end {
+      let Some(gr) = self.grapheme_at(i) else {
+        continue;
+      };
+      if gr == "\n" {
+        if last_was_whitespace {
+          self.remove(i);
+        } else {
+          self.force_replace_at(i, " ");
+        }
+        last_was_whitespace = false;
+        let strip_pos = if self.grapheme_at(i) == Some(" ") {
+          i + 1
+        } else {
+          i
+        };
+        while self.grapheme_at(strip_pos) == Some("\t") {
+          self.remove(strip_pos);
+        }
+        self.cursor.set(i);
+        continue;
+      }
+      last_was_whitespace = is_whitespace(gr);
+    }
+    Ok(())
+  }
+  fn verb_insert_char(&mut self, ch: char) {
+    self.insert_at_cursor(ch);
+    self.cursor.add(1);
+    let before = self.auto_indent_level;
+    if read_shopts(|o| o.prompt.auto_indent)
+      && let Some(line_content) = self.this_line_content()
+    {
+      match line_content.trim() {
+        "esac" | "done" | "fi" | "}" => {
+          self.calc_indent_level();
+          if self.auto_indent_level < before {
+            let delta = before - self.auto_indent_level;
+            let line_start = self.start_of_line();
+            for _ in 0..delta {
+              if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
+                self.remove(line_start);
+                if !self.cursor_at_max() {
+                  self.cursor.sub(1);
+                }
+              }
+            }
+          }
+        }
+        _ => {}
+      }
+    }
+  }
+  fn verb_insert(&mut self, string: String) {
+    self.insert_str_at_cursor(&string);
+    let graphemes = string.graphemes(true).count();
+    self.cursor.add(graphemes);
+  }
+  fn verb_indent(&mut self, motion: MotionKind) -> ShResult<()> {
+    let Some((start, end)) = self.range_from_motion(&motion) else {
+      return Ok(());
+    };
+    self.insert_at(start, '\t');
+    self.update_graphemes();
+    let end = end.clamp(0, self.grapheme_indices().len());
+    let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
+    while let Some(idx) = range_indices.next() {
+      let gr = self.grapheme_at(idx).unwrap();
+      if gr == "\n" {
+        let Some(idx) = range_indices.next() else {
+          self.push('\t');
+          break;
+        };
+        self.insert_at(idx, '\t');
+      }
+    }
+    match motion {
+      MotionKind::ExclusiveWithTargetCol((_, _), pos)
+      | MotionKind::InclusiveWithTargetCol((_, _), pos) => {
+        self.cursor.set(start);
+        let end = self.end_of_line();
+        self.cursor.add(end.min(pos + 1));
+      }
+      _ => self.cursor.set(start),
+    }
+    Ok(())
+  }
+  fn verb_dedent(&mut self, motion: MotionKind) -> ShResult<()> {
+    let Some((start, mut end)) = self.range_from_motion(&motion) else {
+      return Ok(());
+    };
+    if self.grapheme_at(start) == Some("\t") {
+      self.remove(start);
+    }
+    end = end.min(self.grapheme_indices().len().saturating_sub(1));
+    let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
+    while let Some(idx) = range_indices.next() {
+      let gr = self.grapheme_at(idx).unwrap();
+      if gr == "\n" {
+        let Some(idx) = range_indices.next() else {
+          if self.grapheme_at(self.grapheme_indices().len().saturating_sub(1)) == Some("\t") {
+            self.remove(self.grapheme_indices().len().saturating_sub(1));
+          }
+          break;
+        };
+        if self.grapheme_at(idx) == Some("\t") {
+          self.remove(idx);
+        }
+      }
+    }
+    match motion {
+      MotionKind::ExclusiveWithTargetCol((_, _), pos)
+      | MotionKind::InclusiveWithTargetCol((_, _), pos) => {
+        self.cursor.set(start);
+        let end = self.end_of_line();
+        self.cursor.add(end.min(pos));
+      }
+      _ => self.cursor.set(start),
+    }
+    Ok(())
+  }
+  fn verb_insert_mode_line_break(&mut self, anchor: Anchor) -> ShResult<()> {
+    let (mut start, end) = self.this_line_exclusive();
+    let auto_indent = read_shopts(|o| o.prompt.auto_indent);
+    if start == 0 && end == self.cursor.max {
+      match anchor {
+        Anchor::After => {
+          self.push('\n');
+          if auto_indent {
+            self.calc_indent_level();
+            for _ in 0..self.auto_indent_level {
+              self.push('\t');
+            }
+          }
+          self.cursor.set(self.cursor_max());
+          return Ok(());
+        }
+        Anchor::Before => {
+          if auto_indent {
+            self.calc_indent_level();
+            for _ in 0..self.auto_indent_level {
+              self.insert_at(0, '\t');
+            }
+          }
+          self.insert_at(0, '\n');
+          self.cursor.set(0);
+          return Ok(());
+        }
+      }
+    }
+    start = start.saturating_sub(1).min(self.cursor.max);
+    match anchor {
+      Anchor::After => {
+        self.cursor.set(end);
+        self.insert_newline_with_indent(auto_indent);
+      }
+      Anchor::Before => {
+        self.cursor.set(start);
+        self.insert_newline_with_indent(auto_indent);
+      }
+    }
+    Ok(())
+  }
+  fn insert_newline_with_indent(&mut self, auto_indent: bool) {
+    self.insert_at_cursor('\n');
+    self.cursor.add(1);
+    if auto_indent {
+      self.calc_indent_level();
+      for _ in 0..self.auto_indent_level {
+        self.insert_at_cursor('\t');
+        self.cursor.add(1);
+      }
+    }
+  }
+  fn verb_accept_line_or_newline(&mut self) -> ShResult<()> {
+    if self.cursor.exclusive {
+      let motion = self.eval_motion(None, MotionCmd(1, Motion::LineDownCharwise));
+      self.apply_motion(motion);
+      return Ok(());
+    }
+    let auto_indent = read_shopts(|o| o.prompt.auto_indent);
+    self.insert_newline_with_indent(auto_indent);
+    Ok(())
+  }
+  fn verb_adjust_number(&mut self, inc: i64) -> ShResult<()> {
+    let (s, e) = if let Some(r) = self.select_range() {
+      r
+    } else if let Some(r) = self.number_at_cursor() {
+      r
+    } else {
+      return Ok(());
+    };
+    let end = if self.select_range().is_some() {
+      if e < self.grapheme_indices().len() - 1 {
+        e
+      } else {
+        e + 1
+      }
+    } else {
+      (e + 1).min(self.grapheme_indices().len())
+    };
+    let word = self.slice(s..end).unwrap_or_default().to_lowercase();
+    let byte_start = self.index_byte_pos(s);
+    let byte_end = if end >= self.grapheme_indices().len() {
+      self.buffer.len()
+    } else {
+      self.index_byte_pos(end)
+    };
+
+    if word.starts_with("0x") {
+      let body = word.strip_prefix("0x").unwrap();
+      let width = body.len();
+      if let Ok(num) = i64::from_str_radix(body, 16) {
+        let new_num = num + inc;
+        self
+          .buffer
+          .replace_range(byte_start..byte_end, &format!("0x{new_num:0>width$x}"));
+        self.update_graphemes();
+        self.cursor.set(s);
+      }
+    } else if word.starts_with("0b") {
+      let body = word.strip_prefix("0b").unwrap();
+      let width = body.len();
+      if let Ok(num) = i64::from_str_radix(body, 2) {
+        let new_num = num + inc;
+        self
+          .buffer
+          .replace_range(byte_start..byte_end, &format!("0b{new_num:0>width$b}"));
+        self.update_graphemes();
+        self.cursor.set(s);
+      }
+    } else if word.starts_with("0o") {
+      let body = word.strip_prefix("0o").unwrap();
+      let width = body.len();
+      if let Ok(num) = i64::from_str_radix(body, 8) {
+        let new_num = num + inc;
+        self
+          .buffer
+          .replace_range(byte_start..byte_end, &format!("0o{new_num:0>width$o}"));
+        self.update_graphemes();
+        self.cursor.set(s);
+      }
+    } else if let Ok(num) = word.parse::<i64>() {
+      let width = word.len();
+      let new_num = num + inc;
+      let num_fmt = if new_num < 0 {
+        let abs = new_num.unsigned_abs();
+        let digit_width = if num < 0 { width - 1 } else { width };
+        format!("-{abs:0>digit_width$}")
+      } else if num < 0 {
+        let digit_width = width - 1;
+        format!("{new_num:0>digit_width$}")
+      } else {
+        format!("{new_num:0>width$}")
+      };
+      self.buffer.replace_range(byte_start..byte_end, &num_fmt);
+      self.update_graphemes();
+      self.cursor.set(s);
+    }
+    Ok(())
+  }
+  fn verb_shell_cmd(&mut self, cmd: String) -> ShResult<()> {
+    let mut vars = HashSet::new();
+    vars.insert("_BUFFER".into());
+    vars.insert("_CURSOR".into());
+    vars.insert("_ANCHOR".into());
+    let _guard = var_ctx_guard(vars);
+
+    let mut buf = self.as_str().to_string();
+    let mut cursor = self.cursor.get();
+    let mut anchor = self
+      .select_range()
+      .map(|r| if r.0 != cursor { r.0 } else { r.1 })
+      .unwrap_or(cursor);
+
+    write_vars(|v| {
+      v.set_var("_BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
+      v.set_var(
+        "_CURSOR",
+        VarKind::Str(cursor.to_string()),
+        VarFlags::EXPORT,
+      )?;
+      v.set_var(
+        "_ANCHOR",
+        VarKind::Str(anchor.to_string()),
+        VarFlags::EXPORT,
+      )
+    })?;
+
+    RawModeGuard::with_cooked_mode(|| exec_input(cmd, None, true, Some("<ex-mode-cmd>".into())))?;
+
+    let keys = write_vars(|v| {
+      buf = v.take_var("_BUFFER");
+      cursor = v.take_var("_CURSOR").parse().unwrap_or(cursor);
+      anchor = v.take_var("_ANCHOR").parse().unwrap_or(anchor);
+      v.take_var("_KEYS")
+    });
+
+    self.set_buffer(buf);
+    self.update_graphemes();
+    self.cursor.set_max(self.buffer.graphemes(true).count());
+    self.cursor.set(cursor);
+    if anchor != cursor && self.select_range.is_some() {
+      self.select_range = Some(ordered(cursor, anchor));
+    }
+    if !keys.is_empty() {
+      write_meta(|m| m.set_pending_widget_keys(&keys))
+    }
+    Ok(())
+  }
   #[allow(clippy::unnecessary_to_owned)]
   pub fn exec_verb(
     &mut self,
@@ -2608,608 +3206,28 @@ impl LineBuf {
     register: RegisterName,
   ) -> ShResult<()> {
     match verb {
-      Verb::Delete | Verb::Yank | Verb::Change => {
-        let Some((start, end)) = self.range_from_motion(&motion) else {
-          return Ok(());
-        };
-
-        let mut do_indent = false;
-        if verb == Verb::Change && (start, end) == self.this_line_exclusive() {
-          do_indent = read_shopts(|o| o.prompt.auto_indent);
-        }
-
-        let mut text = if verb == Verb::Yank {
-          self
-            .slice(start..end)
-            .map(|c| c.to_string())
-            .unwrap_or_default()
-        } else if start == self.grapheme_indices().len() && end == self.grapheme_indices().len() {
-          // user is in normal mode and pressed 'x' on the last char in the buffer
-          let drained = self.drain(end.saturating_sub(1)..end);
-          self.update_graphemes();
-          drained
-        } else {
-          let drained = self.drain(start..end);
-          self.update_graphemes();
-          drained
-        };
-        let is_linewise = matches!(
-          motion,
-          MotionKind::InclusiveWithTargetCol(..) | MotionKind::ExclusiveWithTargetCol(..)
-        ) || matches!(self.select_mode, Some(SelectMode::Line(_)));
-        let register_content = if is_linewise {
-          if text.ends_with('\n') && !text.is_empty() {
-            text = text.strip_suffix('\n').unwrap().to_string();
-          }
-          RegisterContent::Line(text)
-        } else {
-          RegisterContent::Span(text)
-        };
-        register.write_to_register(register_content);
-        self.cursor.set(start);
-        if do_indent {
-          self.calc_indent_level();
-          let tabs = (0..self.auto_indent_level).map(|_| '\t');
-          for tab in tabs {
-            self.insert_at_cursor(tab);
-            self.cursor.add(1);
-          }
-        } else if verb != Verb::Change
-          && let MotionKind::InclusiveWithTargetCol((_, _), col) = motion
-        {
-          self.cursor.add(col);
-        }
-      }
-      Verb::Rot13 => {
-        let Some((start, end)) = self.range_from_motion(&motion) else {
-          return Ok(());
-        };
-        let slice = self.slice(start..end).unwrap_or_default();
-        let rot13 = rot13(slice);
-        self.buffer.replace_range(start..end, &rot13);
-        self.cursor.set(start);
-      }
-      Verb::ReplaceChar(ch) => {
-        let mut buf = [0u8; 4];
-        let new = ch.encode_utf8(&mut buf);
-        self.replace_at_cursor(new);
-        self.apply_motion(motion);
-      }
-      Verb::ReplaceCharInplace(ch, count) => {
-				if let Some((start,end)) = self.select_range() {
-					let end = (end + 1).min(self.grapheme_indices().len()); // inclusive
-					let replaced = ch.to_string().repeat(end.saturating_sub(start));
-					self.replace_at(start, &replaced);
-					self.cursor.set(start);
-				} else {
-					for i in 0..count {
-						let mut buf = [0u8; 4];
-						let new = ch.encode_utf8(&mut buf);
-						self.replace_at_cursor(new);
-
-						// try to increment the cursor until we are on the last iteration
-						// or until we hit the end of the buffer
-						if i != count.saturating_sub(1) && !self.cursor.inc() {
-							break;
-						}
-					}
-				}
-      }
-      Verb::ToggleCaseInplace(count) => {
-				let mut did_something = false;
-        for i in 0..count {
-          let Some(gr) = self.grapheme_at_cursor() else {
-            return Ok(());
-          };
-          if gr.len() > 1 || gr.is_empty() {
-            return Ok(());
-          }
-          let ch = gr.chars().next().unwrap();
-          if !ch.is_alphabetic() {
-            return Ok(());
-          }
-          let mut buf = [0u8; 4];
-          let new = if ch.is_ascii_lowercase() {
-            ch.to_ascii_uppercase().encode_utf8(&mut buf)
-          } else {
-            ch.to_ascii_lowercase().encode_utf8(&mut buf)
-          };
-          self.replace_at_cursor(new);
-
-          // try to increment the cursor until we are on the last iteration
-          // or until we hit the end of the buffer
-					did_something = true;
-          if i != count.saturating_sub(1) && !self.cursor.inc() {
-            break;
-          }
-        }
-				if did_something {
-					self.cursor.inc();
-				}
-      }
-      Verb::ToggleCaseRange => {
-        let Some((start, end)) = self.range_from_motion(&motion) else {
-          return Ok(());
-        };
-        for i in start..end {
-          let Some(gr) = self.grapheme_at(i) else {
-            continue;
-          };
-          if gr.len() > 1 || gr.is_empty() {
-            continue;
-          }
-          let ch = gr.chars().next().unwrap();
-          if !ch.is_alphabetic() {
-            continue;
-          }
-          let mut buf = [0u8; 4];
-          let new = if ch.is_ascii_lowercase() {
-            ch.to_ascii_uppercase().encode_utf8(&mut buf)
-          } else {
-            ch.to_ascii_lowercase().encode_utf8(&mut buf)
-          };
-          self.replace_at(i, new);
-        }
-				self.cursor.set(start);
-      }
-      Verb::ToLower => {
-        let Some((start, end)) = self.range_from_motion(&motion) else {
-          return Ok(());
-        };
-        for i in start..end {
-          let Some(gr) = self.grapheme_at(i) else {
-            continue;
-          };
-          if gr.len() > 1 || gr.is_empty() {
-            continue;
-          }
-          let ch = gr.chars().next().unwrap();
-          if !ch.is_alphabetic() {
-            continue;
-          }
-          let mut buf = [0u8; 4];
-          let new = if ch.is_ascii_uppercase() {
-            ch.to_ascii_lowercase().encode_utf8(&mut buf)
-          } else {
-            ch.encode_utf8(&mut buf)
-          };
-          self.replace_at(i, new);
-        }
-				self.cursor.set(start);
-      }
-      Verb::ToUpper => {
-        let Some((start, end)) = self.range_from_motion(&motion) else {
-          return Ok(());
-        };
-        for i in start..end {
-          let Some(gr) = self.grapheme_at(i) else {
-            continue;
-          };
-          if gr.len() > 1 || gr.is_empty() {
-            continue;
-          }
-          let ch = gr.chars().next().unwrap();
-          if !ch.is_alphabetic() {
-            continue;
-          }
-          let mut buf = [0u8; 4];
-          let new = if ch.is_ascii_lowercase() {
-            ch.to_ascii_uppercase().encode_utf8(&mut buf)
-          } else {
-            ch.encode_utf8(&mut buf)
-          };
-          self.replace_at(i, new);
-        }
-				self.cursor.set(start);
-      }
-      Verb::Redo | Verb::Undo => {
-        let (edit_provider, edit_receiver) = match verb {
-          // Redo = pop from redo stack, push to undo stack
-          Verb::Redo => (&mut self.redo_stack, &mut self.undo_stack),
-          // Undo = pop from undo stack, push to redo stack
-          Verb::Undo => (&mut self.undo_stack, &mut self.redo_stack),
-          _ => unreachable!(),
-        };
-        let Some(edit) = edit_provider.pop() else {
-          return Ok(());
-        };
-        let Edit {
-          pos,
-          cursor_pos,
-          old,
-          new,
-          merging: _,
-        } = edit;
-
-        self.buffer.replace_range(pos..pos + new.len(), &old);
-        let new_cursor_pos = self.cursor.get();
-
-        self.cursor.set(cursor_pos);
-        let new_edit = Edit {
-          pos,
-          cursor_pos: new_cursor_pos,
-          old: new,
-          new: old,
-          merging: false,
-        };
-        edit_receiver.push(new_edit);
-        self.update_graphemes();
-      }
-      Verb::RepeatLast => todo!(),
-      Verb::Put(anchor) => {
-        let Some(content) = register.read_from_register() else {
-          return Ok(());
-        };
-        if content.is_empty() {
-          return Ok(());
-        }
-        if let Some(range) = self.select_range() {
-          let register_text = self.drain_inclusive(range.0..=range.1);
-          write_register(None, RegisterContent::Span(register_text)); // swap deleted text into register
-
-          let text = content.as_str();
-          self.insert_str_at(range.0, text);
-          self.cursor.set(range.0 + content.char_count());
-          self.select_range = None;
-          self.update_graphemes();
-          return Ok(());
-        }
-        match content {
-          RegisterContent::Span(ref text) => {
-            match anchor {
-							Anchor::After => {
-								let insert_idx = self
-									.cursor
-									.get()
-									.saturating_add(1)
-									.min(self.grapheme_indices().len());
-								let offset = text.len().max(1);
-
-								self.insert_str_at(insert_idx, text);
-								self.cursor.add(offset);
-							},
-							Anchor::Before => {
-								let insert_idx = self.cursor.get();
-								self.insert_str_at(insert_idx, text);
-								self.cursor.add(text.len().saturating_sub(1));
-							},
-            };
-          }
-          RegisterContent::Line(ref text) => {
-            let insert_idx = match anchor {
-              Anchor::After => self.end_of_line(),
-              Anchor::Before => self.start_of_line(),
-            };
-						let mut full = text.to_string();
-						let mut offset = 0;
-
-						match anchor {
-							Anchor::After => {
-								if self.grapheme_before(insert_idx).is_none_or(|gr| gr != "\n") {
-									full = format!("\n{text}");
-									offset += 1;
-								}
-								if self.grapheme_at(insert_idx).is_some_and(|gr| gr != "\n") {
-									full = format!("{full}\n");
-								}
-							}
-							Anchor::Before => {
-								full = format!("{full}\n");
-							}
-						}
-
-						self.insert_str_at(insert_idx, &full);
-						self.cursor.set(insert_idx + offset);
-          }
-          RegisterContent::Empty => {}
-        }
-      }
-      Verb::SwapVisualAnchor => {
-        if let Some((start, end)) = self.select_range
-          && let Some(mut mode) = self.select_mode
-        {
-          mode.invert_anchor();
-          let new_cursor_pos = match mode.anchor() {
-            SelectAnchor::Start => start,
-            SelectAnchor::End => end,
-          };
-          self.cursor.set(new_cursor_pos);
-          self.select_mode = Some(mode)
-        }
-      }
-      Verb::JoinLines => {
-        let start = self.start_of_line();
-        let Some((_, mut end)) = self.nth_next_line(1) else {
-          return Ok(());
-        };
-        end = end.saturating_sub(1); // exclude the last newline
-        let mut last_was_whitespace = false;
-        for i in start..end {
-          let Some(gr) = self.grapheme_at(i) else {
-            continue;
-          };
-          if gr == "\n" {
-            if last_was_whitespace {
-              self.remove(i);
-            } else {
-              self.force_replace_at(i, " ");
-            }
-            last_was_whitespace = false;
-						self.cursor.set(i);
-            continue;
-          }
-          last_was_whitespace = is_whitespace(gr);
-        }
-      }
-      Verb::InsertChar(ch) => {
-        self.insert_at_cursor(ch);
-        self.cursor.add(1);
-        let before = self.auto_indent_level;
-        if read_shopts(|o| o.prompt.auto_indent)
-          && let Some(line_content) = self.this_line_content()
-        {
-          match line_content.trim() {
-            "esac" | "done" | "fi" | "}" => {
-              self.calc_indent_level();
-              if self.auto_indent_level < before {
-                let delta = before - self.auto_indent_level;
-                let line_start = self.start_of_line();
-                for _ in 0..delta {
-                  if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
-                    self.remove(line_start);
-                    if !self.cursor_at_max() {
-                      self.cursor.sub(1);
-                    }
-                  }
-                }
-              }
-            }
-            _ => { /* nothing to see here */ }
-          }
-        }
-      }
-      Verb::Insert(string) => {
-        self.insert_str_at_cursor(&string);
-        let graphemes = string.graphemes(true).count();
-        self.cursor.add(graphemes);
-      }
-      Verb::Indent => {
-        let Some((start, end)) = self.range_from_motion(&motion) else {
-          return Ok(());
-        };
-        let move_cursor = self.cursor.get() == start;
-        self.insert_at(start, '\t');
-        if move_cursor {
-          self.cursor.add(1);
-        }
-        let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
-        while let Some(idx) = range_indices.next() {
-          let gr = self.grapheme_at(idx).unwrap();
-          if gr == "\n" {
-            let Some(idx) = range_indices.next() else {
-              self.push('\t');
-              break;
-            };
-            self.insert_at(idx, '\t');
-          }
-        }
-
-        match motion {
-          MotionKind::ExclusiveWithTargetCol((_, _), pos)
-          | MotionKind::InclusiveWithTargetCol((_, _), pos) => {
-            self.cursor.set(start);
-            let end = self.end_of_line();
-            self.cursor.add(end.min(pos));
-          }
-          _ => self.cursor.set(start),
-        }
-      }
-      Verb::Dedent => {
-        let Some((start, mut end)) = self.range_from_motion(&motion) else {
-          return Ok(());
-        };
-        if self.grapheme_at(start) == Some("\t") {
-          self.remove(start);
-        }
-        end = end.min(self.grapheme_indices().len().saturating_sub(1));
-        let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
-        while let Some(idx) = range_indices.next() {
-          let gr = self.grapheme_at(idx).unwrap();
-          if gr == "\n" {
-            let Some(idx) = range_indices.next() else {
-              if self.grapheme_at(self.grapheme_indices().len().saturating_sub(1)) == Some("\t") {
-                self.remove(self.grapheme_indices().len().saturating_sub(1));
-              }
-              break;
-            };
-            if self.grapheme_at(idx) == Some("\t") {
-              self.remove(idx);
-            }
-          }
-        }
-
-        match motion {
-          MotionKind::ExclusiveWithTargetCol((_, _), pos)
-          | MotionKind::InclusiveWithTargetCol((_, _), pos) => {
-            self.cursor.set(start);
-            let end = self.end_of_line();
-            self.cursor.add(end.min(pos));
-          }
-          _ => self.cursor.set(start),
-        }
-      }
-      Verb::Equalize => todo!(),
-      Verb::InsertModeLineBreak(anchor) => {
-        let (mut start, end) = self.this_line_exclusive();
-        let auto_indent = read_shopts(|o| o.prompt.auto_indent);
-        if start == 0 && end == self.cursor.max {
-          match anchor {
-            Anchor::After => {
-              self.push('\n');
-              if auto_indent {
-                self.calc_indent_level();
-                let tabs = (0..self.auto_indent_level).map(|_| '\t');
-                for tab in tabs {
-                  self.push(tab);
-                }
-              }
-              self.cursor.set(self.cursor_max());
-              return Ok(());
-            }
-            Anchor::Before => {
-              if auto_indent {
-                self.calc_indent_level();
-                let tabs = (0..self.auto_indent_level).map(|_| '\t');
-                for tab in tabs {
-                  self.insert_at(0, tab);
-                }
-              }
-              self.insert_at(0, '\n');
-              self.cursor.set(0);
-              return Ok(());
-            }
-          }
-        }
-        // We want the position of the newline, or start of buffer
-        start = start.saturating_sub(1).min(self.cursor.max);
-        match anchor {
-          Anchor::After => {
-            self.cursor.set(end);
-            self.insert_at_cursor('\n');
-            self.cursor.add(1);
-            if auto_indent {
-              self.calc_indent_level();
-              let tabs = (0..self.auto_indent_level).map(|_| '\t');
-              for tab in tabs {
-                self.insert_at_cursor(tab);
-                self.cursor.add(1);
-              }
-            }
-          }
-          Anchor::Before => {
-            self.cursor.set(start);
-            self.insert_at_cursor('\n');
-            self.cursor.add(1);
-            if auto_indent {
-              self.calc_indent_level();
-              let tabs = (0..self.auto_indent_level).map(|_| '\t');
-              for tab in tabs {
-                self.insert_at_cursor(tab);
-                self.cursor.add(1);
-              }
-            }
-          }
-        }
-      }
-      Verb::AcceptLineOrNewline => {
-        // If this verb has reached this function, it means we have incomplete input
-        // and therefore must insert a newline instead of accepting the input
-        if self.cursor.exclusive {
-          // in this case we are in normal/visual mode, so we don't insert anything
-          // and just move down a line
-          let motion = self.eval_motion(None, MotionCmd(1, Motion::LineDownCharwise));
-          self.apply_motion(motion);
-          return Ok(());
-        }
-        let auto_indent = read_shopts(|o| o.prompt.auto_indent);
-        self.insert_at_cursor('\n');
-        self.cursor.add(1);
-        if auto_indent {
-          self.calc_indent_level();
-          let tabs = (0..self.auto_indent_level).map(|_| '\t');
-          for tab in tabs {
-            self.insert_at_cursor(tab);
-            self.cursor.add(1);
-          }
-        }
-      }
-      Verb::IncrementNumber(n) | Verb::DecrementNumber(n) => {
-        let inc = if matches!(verb, Verb::IncrementNumber(_)) {
-          n as i64
-        } else {
-          -(n as i64)
-        };
-        let (s, e) = if let Some(r) = self.select_range() {
-					r
-				} else if let Some(r) = self.number_at_cursor() {
-					r
-				} else {
-					return Ok(());
-				};
-        let end = if self.select_range().is_some() {
-          if e < self.grapheme_indices().len() - 1 {
-            e
-          } else {
-            e + 1
-          }
-        } else {
-          (e + 1).min(self.grapheme_indices().len())
-        }; // inclusive → exclusive, capped at buffer len
-        let word = self.slice(s..end).unwrap_or_default().to_lowercase();
-
-        let byte_start = self.index_byte_pos(s);
-        let byte_end = if end >= self.grapheme_indices().len() {
-          self.buffer.len()
-        } else {
-          self.index_byte_pos(end)
-        };
-
-        if word.starts_with("0x") {
-          let body = word.strip_prefix("0x").unwrap();
-          let width = body.len();
-          if let Ok(num) = i64::from_str_radix(body, 16) {
-            let new_num = num + inc;
-            self
-              .buffer
-              .replace_range(byte_start..byte_end, &format!("0x{new_num:0>width$x}"));
-            self.update_graphemes();
-            self.cursor.set(s);
-          }
-        } else if word.starts_with("0b") {
-          let body = word.strip_prefix("0b").unwrap();
-          let width = body.len();
-          if let Ok(num) = i64::from_str_radix(body, 2) {
-            let new_num = num + inc;
-            self
-              .buffer
-              .replace_range(byte_start..byte_end, &format!("0b{new_num:0>width$b}"));
-            self.update_graphemes();
-            self.cursor.set(s);
-          }
-        } else if word.starts_with("0o") {
-          let body = word.strip_prefix("0o").unwrap();
-          let width = body.len();
-          if let Ok(num) = i64::from_str_radix(body, 8) {
-            let new_num = num + inc;
-            self
-              .buffer
-              .replace_range(byte_start..byte_end, &format!("0o{new_num:0>width$o}"));
-            self.update_graphemes();
-            self.cursor.set(s);
-          }
-        } else if let Ok(num) = word.parse::<i64>() {
-          let width = word.len();
-          let new_num = num + inc;
-					let num_fmt = if new_num < 0 {
-						let abs = new_num.unsigned_abs();
-						let digit_width = if num < 0 { width - 1 } else { width };
-						format!("-{abs:0>digit_width$}")
-					} else if num < 0 {
-						// Was negative, now positive — pad to width-1 since
-						// the minus sign is gone (e.g. -001 + 2 = 00001)
-						let digit_width = width - 1;
-						format!("{new_num:0>digit_width$}")
-					} else {
-						format!("{new_num:0>width$}")
-					};
-          self
-            .buffer
-            .replace_range(byte_start..byte_end, &num_fmt);
-          self.update_graphemes();
-          self.cursor.set(s);
-        }
-      }
-
+      Verb::Delete | Verb::Yank | Verb::Change => self.verb_ydc(motion, register, verb)?,
+      Verb::Rot13                              => self.verb_rot13(motion)?,
+      Verb::ReplaceChar(ch)                    => self.verb_replace_char(motion, ch)?,
+      Verb::ReplaceCharInplace(ch, count)      => self.verb_replace_char_inplace(ch, count)?,
+      Verb::ToggleCaseInplace(count)           => self.verb_toggle_case_inplace(count),
+      Verb::ToggleCaseRange                    => self.verb_case_transform(motion, CaseTransform::Toggle)?,
+      Verb::ToLower                            => self.verb_case_transform(motion, CaseTransform::Lower)?,
+      Verb::ToUpper                            => self.verb_case_transform(motion, CaseTransform::Upper)?,
+      Verb::Redo | Verb::Undo                  => self.verb_undo_redo(verb)?,
+      Verb::RepeatLast                         => todo!(),
+      Verb::Put(anchor)                        => self.verb_put(anchor, register)?,
+      Verb::SwapVisualAnchor                   => self.verb_swap_visual_anchor(),
+      Verb::JoinLines                          => self.verb_join_lines()?,
+      Verb::InsertChar(ch)                     => self.verb_insert_char(ch),
+      Verb::Insert(string)                     => self.verb_insert(string),
+      Verb::Indent                             => self.verb_indent(motion)?,
+      Verb::Dedent                             => self.verb_dedent(motion)?,
+      Verb::Equalize                           => todo!(),
+      Verb::InsertModeLineBreak(anchor)        => self.verb_insert_mode_line_break(anchor)?,
+      Verb::AcceptLineOrNewline                => self.verb_accept_line_or_newline()?,
+      Verb::IncrementNumber(n)                 => self.verb_adjust_number(n as i64)?,
+      Verb::DecrementNumber(n)                 => self.verb_adjust_number(-(n as i64))?,
       Verb::Complete
       | Verb::ExMode
       | Verb::EndOfFile
@@ -3221,64 +3239,14 @@ impl LineBuf {
       | Verb::VisualModeLine
       | Verb::VisualModeBlock
       | Verb::CompleteBackward
-      | Verb::VisualModeSelectLast => self.apply_motion(motion), // Already handled logic for these
-
-      Verb::ShellCmd(cmd) => {
-        let mut vars = HashSet::new();
-        vars.insert("_BUFFER".into());
-        vars.insert("_CURSOR".into());
-        vars.insert("_ANCHOR".into());
-        let _guard = var_ctx_guard(vars);
-
-        let mut buf = self.as_str().to_string();
-        let mut cursor = self.cursor.get();
-        let mut anchor = self
-          .select_range()
-          .map(|r| if r.0 != cursor { r.0 } else { r.1 })
-          .unwrap_or(cursor);
-
-        write_vars(|v| {
-          v.set_var("_BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
-          v.set_var(
-            "_CURSOR",
-            VarKind::Str(cursor.to_string()),
-            VarFlags::EXPORT,
-          )?;
-          v.set_var(
-            "_ANCHOR",
-            VarKind::Str(anchor.to_string()),
-            VarFlags::EXPORT,
-          )
-        })?;
-
-        RawModeGuard::with_cooked_mode(|| {
-          exec_input(cmd, None, true, Some("<ex-mode-cmd>".into()))
-        })?;
-
-        let keys = write_vars(|v| {
-          buf = v.take_var("_BUFFER");
-          cursor = v.take_var("_CURSOR").parse().unwrap_or(cursor);
-          anchor = v.take_var("_ANCHOR").parse().unwrap_or(anchor);
-          v.take_var("_KEYS")
-        });
-
-        self.set_buffer(buf);
-        self.update_graphemes();
-        self.cursor.set_max(self.buffer.graphemes(true).count());
-        self.cursor.set(cursor);
-        if anchor != cursor && self.select_range.is_some() {
-          self.select_range = Some(ordered(cursor, anchor));
-        }
-        if !keys.is_empty() {
-          write_meta(|m| m.set_pending_widget_keys(&keys))
-        }
-      }
+      | Verb::VisualModeSelectLast => self.apply_motion(motion),
+      Verb::ShellCmd(cmd) => self.verb_shell_cmd(cmd)?,
       Verb::Normal(_)
       | Verb::Read(_)
       | Verb::Write(_)
       | Verb::Substitute(..)
       | Verb::RepeatSubstitute
-      | Verb::RepeatGlobal => {} // Ex-mode verbs handled elsewhere
+      | Verb::RepeatGlobal => {}
     }
     Ok(())
   }

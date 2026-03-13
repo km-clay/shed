@@ -389,7 +389,7 @@ pub fn get_map_opts(opts: Vec<Opt>) -> MapOpts {
 
 #[cfg(test)]
 mod tests {
-  use super::{MapNode, MapFlags, get_map_opts};
+  use super::{MapFlags, MapNode, get_map_opts};
   use crate::getopt::Opt;
   use crate::state::{self, read_vars};
   use crate::testutil::{TestGuard, test_input};
@@ -433,10 +433,7 @@ mod tests {
   #[test]
   fn mapnode_remove_nested() {
     let mut root = MapNode::default();
-    root.set(
-      &["a".into(), "b".into()],
-      MapNode::StaticLeaf("val".into()),
-    );
+    root.set(&["a".into(), "b".into()], MapNode::StaticLeaf("val".into()));
     root.remove(&["a".into(), "b".into()]);
     assert!(root.get(&["a".into(), "b".into()]).is_none());
     // Parent branch should still exist

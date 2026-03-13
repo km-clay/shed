@@ -27,10 +27,10 @@ pub fn pwd(node: Node) -> ShResult<()> {
 
 #[cfg(test)]
 mod tests {
-  use std::env;
-  use tempfile::TempDir;
   use crate::state;
   use crate::testutil::{TestGuard, test_input};
+  use std::env;
+  use tempfile::TempDir;
 
   #[test]
   fn pwd_prints_cwd() {
