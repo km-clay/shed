@@ -1650,3 +1650,441 @@ impl SimpleCompleter {
     Ok(CompResult::from_candidates(candidates))
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::os::fd::AsRawFd;
+  use crate::{
+    readline::{Prompt, ShedVi},
+    state::{VarFlags, VarKind, write_vars},
+    testutil::TestGuard,
+  };
+
+  fn test_vi(initial: &str) -> (ShedVi, TestGuard) {
+    let g = TestGuard::new();
+    let prompt = Prompt::default();
+    let vi = ShedVi::new_no_hist(prompt, g.pty_slave().as_raw_fd())
+      .unwrap()
+      .with_initial(initial);
+    (vi, g)
+  }
+
+  // ===================== extract_var_name =====================
+
+  #[test]
+  fn extract_var_simple() {
+    let (name, start, end) = extract_var_name("$HOME").unwrap();
+    assert_eq!(name, "HOME");
+    assert_eq!(start, 1);
+    assert_eq!(end, 5);
+  }
+
+  #[test]
+  fn extract_var_braced() {
+    let (name, start, end) = extract_var_name("${PATH}").unwrap();
+    assert_eq!(name, "PATH");
+    // '$' hits continue (no pos++), '{' is at pos=0, so name_start = 1
+    assert_eq!(start, 1);
+    assert_eq!(end, 5);
+  }
+
+  #[test]
+  fn extract_var_partial() {
+    let (name, start, _end) = extract_var_name("$HO").unwrap();
+    assert_eq!(name, "HO");
+    assert_eq!(start, 1);
+  }
+
+  #[test]
+  fn extract_var_none() {
+    assert!(extract_var_name("hello").is_none());
+  }
+
+  // ===================== ScoredCandidate::fuzzy_score =====================
+
+  #[test]
+  fn fuzzy_exact_match() {
+    let mut c = ScoredCandidate::new("hello".into());
+    let score = c.fuzzy_score("hello");
+    assert!(score > 0);
+  }
+
+  #[test]
+  fn fuzzy_prefix_match() {
+    let mut c = ScoredCandidate::new("hello_world".into());
+    let score = c.fuzzy_score("hello");
+    assert!(score > 0);
+  }
+
+  #[test]
+  fn fuzzy_no_match() {
+    let mut c = ScoredCandidate::new("abc".into());
+    let score = c.fuzzy_score("xyz");
+    assert_eq!(score, i32::MIN);
+  }
+
+  #[test]
+  fn fuzzy_empty_query() {
+    let mut c = ScoredCandidate::new("anything".into());
+    let score = c.fuzzy_score("");
+    assert_eq!(score, 0);
+  }
+
+  #[test]
+  fn fuzzy_boundary_bonus() {
+    let mut a = ScoredCandidate::new("foo_bar".into());
+    let mut b = ScoredCandidate::new("fxxxbxr".into());
+    let score_a = a.fuzzy_score("fbr");
+    let score_b = b.fuzzy_score("fbr");
+    // word-boundary match should score higher
+    assert!(score_a > score_b);
+  }
+
+  // ===================== CompResult::from_candidates =====================
+
+  #[test]
+  fn comp_result_no_match() {
+    let result = CompResult::from_candidates(vec![]);
+    assert!(matches!(result, CompResult::NoMatch));
+  }
+
+  #[test]
+  fn comp_result_single() {
+    let result = CompResult::from_candidates(vec!["foo".into()]);
+    assert!(matches!(result, CompResult::Single { .. }));
+  }
+
+  #[test]
+  fn comp_result_many() {
+    let result = CompResult::from_candidates(vec!["foo".into(), "bar".into()]);
+    assert!(matches!(result, CompResult::Many { .. }));
+  }
+
+  // ===================== complete_signals =====================
+
+  #[test]
+  fn complete_signals_int() {
+    let results = complete_signals("INT");
+    assert!(results.contains(&"INT".to_string()));
+  }
+
+  #[test]
+  fn complete_signals_empty() {
+    let results = complete_signals("");
+    assert!(!results.is_empty());
+  }
+
+  #[test]
+  fn complete_signals_no_match() {
+    let results = complete_signals("ZZZZZZZ");
+    assert!(results.is_empty());
+  }
+
+  // ===================== COMP_WORDBREAKS =====================
+
+  #[test]
+  fn wordbreak_equals_default() {
+    let _g = TestGuard::new();
+    let mut comp = SimpleCompleter::new();
+
+    let line = "cmd --foo=bar".to_string();
+    let cursor = line.len();
+    let _ = comp.get_candidates(line.clone(), cursor);
+
+    let eq_idx = line.find('=').unwrap();
+    assert_eq!(comp.token_span.0, eq_idx + 1, "token_span.0 ({}) should be right after '=' ({})", comp.token_span.0, eq_idx);
+  }
+
+  #[test]
+  fn wordbreak_colon_when_set() {
+    let _g = TestGuard::new();
+    write_vars(|v| v.set_var("COMP_WORDBREAKS", VarKind::Str("=:".into()), VarFlags::NONE)).unwrap();
+
+    let mut comp = SimpleCompleter::new();
+    let line = "scp host:foo".to_string();
+    let cursor = line.len();
+    let _ = comp.get_candidates(line.clone(), cursor);
+
+    let colon_idx = line.find(':').unwrap();
+    assert_eq!(comp.token_span.0, colon_idx + 1, "token_span.0 ({}) should be right after ':' ({})", comp.token_span.0, colon_idx);
+  }
+
+  #[test]
+  fn wordbreak_rightmost_wins() {
+    let _g = TestGuard::new();
+    write_vars(|v| v.set_var("COMP_WORDBREAKS", VarKind::Str("=:".into()), VarFlags::NONE)).unwrap();
+
+    let mut comp = SimpleCompleter::new();
+    let line = "cmd --opt=host:val".to_string();
+    let cursor = line.len();
+    let _ = comp.get_candidates(line.clone(), cursor);
+
+    let colon_idx = line.rfind(':').unwrap();
+    assert_eq!(comp.token_span.0, colon_idx + 1, "should break at rightmost wordbreak char");
+  }
+
+  // ===================== SimpleCompleter cycling =====================
+
+  #[test]
+  fn cycle_wraps_forward() {
+    let _g = TestGuard::new();
+    let mut comp = SimpleCompleter {
+      candidates: vec!["aaa".into(), "bbb".into(), "ccc".into()],
+      selected_idx: 2,
+      original_input: "".into(),
+      token_span: (0, 0),
+      active: true,
+      dirs_only: false,
+      add_space: false,
+    };
+    comp.cycle_completion(1);
+    assert_eq!(comp.selected_idx, 0);
+  }
+
+  #[test]
+  fn cycle_wraps_backward() {
+    let _g = TestGuard::new();
+    let mut comp = SimpleCompleter {
+      candidates: vec!["aaa".into(), "bbb".into(), "ccc".into()],
+      selected_idx: 0,
+      original_input: "".into(),
+      token_span: (0, 0),
+      active: true,
+      dirs_only: false,
+      add_space: false,
+    };
+    comp.cycle_completion(-1);
+    assert_eq!(comp.selected_idx, 2);
+  }
+
+  // ===================== Completion escaping =====================
+
+  #[test]
+  fn escape_str_special_chars() {
+    use crate::expand::escape_str;
+    let escaped = escape_str("hello world", false);
+    assert_eq!(escaped, "hello\\ world");
+  }
+
+  #[test]
+  fn escape_str_multiple_specials() {
+    use crate::expand::escape_str;
+    let escaped = escape_str("a&b|c", false);
+    assert_eq!(escaped, "a\\&b\\|c");
+  }
+
+  #[test]
+  fn escape_str_no_specials() {
+    use crate::expand::escape_str;
+    let escaped = escape_str("hello", false);
+    assert_eq!(escaped, "hello");
+  }
+
+  #[test]
+  fn escape_str_all_shell_metacharacters() {
+    use crate::expand::escape_str;
+    for ch in ['\'', '"', '\\', '|', '&', ';', '(', ')', '<', '>', '$', '*', '!', '`', '{', '?', '[', '#', ' ', '\t', '\n'] {
+      let input = format!("a{ch}b");
+      let escaped = escape_str(&input, false);
+      let expected = format!("a\\{ch}b");
+      assert_eq!(escaped, expected, "failed to escape {:?}", ch);
+    }
+  }
+
+  #[test]
+  fn escape_str_kitchen_sink() {
+    use crate::expand::escape_str;
+    let input = "f$le (with) 'spaces' & {braces} | pipes; #hash ~tilde `backtick` !bang";
+    let escaped = escape_str(input, false);
+    assert_eq!(
+      escaped,
+      "f\\$le\\ \\(with\\)\\ \\'spaces\\'\\ \\&\\ \\{braces}\\ \\|\\ pipes\\;\\ \\#hash\\ ~tilde\\ \\`backtick\\`\\ \\!bang"
+    );
+  }
+
+  #[test]
+  fn completed_line_only_escapes_new_text() {
+    let _g = TestGuard::new();
+    // Simulate: user typed "echo hel", completion candidate is "hello world"
+    let comp = SimpleCompleter {
+      candidates: vec!["hello world".into()],
+      selected_idx: 0,
+      original_input: "echo hel".into(),
+      token_span: (5, 8), // "hel" spans bytes 5..8
+      active: true,
+      dirs_only: false,
+      add_space: false,
+    };
+    let result = comp.get_completed_line();
+    // "hel" is the user's text (not escaped), "lo world" is new (escaped)
+    assert_eq!(result, "echo hello\\ world");
+  }
+
+  #[test]
+  fn completed_line_no_new_text() {
+    let _g = TestGuard::new();
+    // User typed the full token, nothing new to escape
+    let comp = SimpleCompleter {
+      candidates: vec!["hello".into()],
+      selected_idx: 0,
+      original_input: "echo hello".into(),
+      token_span: (5, 10),
+      active: true,
+      dirs_only: false,
+      add_space: false,
+    };
+    let result = comp.get_completed_line();
+    assert_eq!(result, "echo hello");
+  }
+
+  #[test]
+  fn completed_line_appends_suffix_with_escape() {
+    let _g = TestGuard::new();
+    // User typed "echo hel", candidate is "hello world" (from filesystem)
+    // strip_prefix("hel") => "lo world", which gets escaped
+    let comp = SimpleCompleter {
+      candidates: vec!["hello world".into()],
+      selected_idx: 0,
+      original_input: "echo hel".into(),
+      token_span: (5, 8),
+      active: true,
+      dirs_only: false,
+      add_space: false,
+    };
+    let result = comp.get_completed_line();
+    assert_eq!(result, "echo hello\\ world");
+  }
+
+  #[test]
+  fn completed_line_suffix_only_escapes_new_part() {
+    let _g = TestGuard::new();
+    // User typed "echo hello", candidate is "hello world&done"
+    // strip_prefix("hello") => " world&done", only that gets escaped
+    let comp = SimpleCompleter {
+      candidates: vec!["hello world&done".into()],
+      selected_idx: 0,
+      original_input: "echo hello".into(),
+      token_span: (5, 10),
+      active: true,
+      dirs_only: false,
+      add_space: false,
+    };
+    let result = comp.get_completed_line();
+    // "hello" is preserved as-is, " world&done" gets escaped
+    assert_eq!(result, "echo hello\\ world\\&done");
+  }
+
+  #[test]
+  fn tab_escapes_special_in_filename() {
+    let tmp = std::env::temp_dir().join("shed_test_tab_esc");
+    let _ = std::fs::create_dir_all(&tmp);
+    std::fs::write(tmp.join("hello world.txt"), "").unwrap();
+
+    let (mut vi, _g) = test_vi("");
+    std::env::set_current_dir(&tmp).unwrap();
+
+    vi.feed_bytes(b"echo hello\t");
+    let _ = vi.process_input();
+
+    let line = vi.editor.as_str().to_string();
+    assert!(
+      line.contains("hello\\ world.txt"),
+      "expected escaped space in completion: {line:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+  }
+
+  #[test]
+  fn tab_does_not_escape_user_text() {
+    let tmp = std::env::temp_dir().join("shed_test_tab_noesc");
+    let _ = std::fs::create_dir_all(&tmp);
+    std::fs::write(tmp.join("my file.txt"), "").unwrap();
+
+    let (mut vi, _g) = test_vi("");
+    std::env::set_current_dir(&tmp).unwrap();
+
+    // User types "echo my\ " with the space already escaped
+    vi.feed_bytes(b"echo my\\ \t");
+    let _ = vi.process_input();
+
+    let line = vi.editor.as_str().to_string();
+    // The user's "my\ " should be preserved, not double-escaped to "my\\\ "
+    assert!(
+      !line.contains("my\\\\ "),
+      "user text should not be double-escaped: {line:?}"
+    );
+    assert!(
+      line.contains("my\\ file.txt"),
+      "expected completion with preserved user escape: {line:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+  }
+
+  // ===================== Integration tests (pty) =====================
+
+  #[test]
+  fn tab_completes_filename() {
+    let tmp = std::env::temp_dir().join("shed_test_tab_fn");
+    let _ = std::fs::create_dir_all(&tmp);
+    std::fs::write(tmp.join("unique_shed_test_file.txt"), "").unwrap();
+
+    let (mut vi, _g) = test_vi("");
+    std::env::set_current_dir(&tmp).unwrap();
+
+    // Type "echo unique_shed_test" then press Tab
+    vi.feed_bytes(b"echo unique_shed_test\t");
+    let _ = vi.process_input();
+
+    let line = vi.editor.as_str().to_string();
+    assert!(
+      line.contains("unique_shed_test_file.txt"),
+      "expected completion in line: {line:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+  }
+
+  #[test]
+  fn tab_completes_directory_with_slash() {
+    let tmp = std::env::temp_dir().join("shed_test_tab_dir");
+    let _ = std::fs::create_dir_all(tmp.join("mysubdir"));
+
+    let (mut vi, _g) = test_vi("");
+    std::env::set_current_dir(&tmp).unwrap();
+
+    vi.feed_bytes(b"cd mysub\t");
+    let _ = vi.process_input();
+
+    let line = vi.editor.as_str().to_string();
+    assert!(
+      line.contains("mysubdir/"),
+      "expected dir completion with trailing slash: {line:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+  }
+
+  #[test]
+  fn tab_after_equals() {
+    let tmp = std::env::temp_dir().join("shed_test_tab_eq");
+    let _ = std::fs::create_dir_all(&tmp);
+    std::fs::write(tmp.join("eqfile.txt"), "").unwrap();
+
+    let (mut vi, _g) = test_vi("");
+    std::env::set_current_dir(&tmp).unwrap();
+
+    vi.feed_bytes(b"cmd --opt=eqf\t");
+    let _ = vi.process_input();
+
+    let line = vi.editor.as_str().to_string();
+    assert!(
+      line.contains("--opt=eqfile.txt"),
+      "expected completion after '=': {line:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+  }
+}
