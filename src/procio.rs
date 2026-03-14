@@ -10,7 +10,7 @@ use crate::{
     error::{ShErr, ShErrKind, ShResult},
     utils::RedirVecUtils,
   },
-  parse::{Redir, RedirType, get_redir_file},
+  parse::{Redir, RedirType, get_redir_file, lex::TkFlags},
   prelude::*,
 };
 
@@ -79,8 +79,7 @@ impl IoMode {
     if let IoMode::File { tgt_fd, path, mode } = self {
       let path_raw = path.as_os_str().to_str().unwrap_or_default().to_string();
 
-      let expanded_path = Expander::from_raw(&path_raw)?.expand()?.join(" "); // should just be one string, will have to find some way to handle a return of
-      // multiple
+      let expanded_path = Expander::from_raw(&path_raw, TkFlags::empty())?.expand()?.join(" "); // should just be one string, will have to find some way to handle a return of multiple paths
 
       let expanded_pathbuf = PathBuf::from(expanded_path);
 
@@ -92,6 +91,11 @@ impl IoMode {
     }
     Ok(self)
   }
+	pub fn loaded_pipe(tgt_fd: RawFd, buf: &[u8]) -> ShResult<Self> {
+		let (rpipe, wpipe) = nix::unistd::pipe2(OFlag::O_CLOEXEC).unwrap();
+		write(wpipe, buf)?;
+		Ok(Self::Pipe { tgt_fd, pipe: rpipe.into() })
+	}
   pub fn get_pipes() -> (Self, Self) {
     let (rpipe, wpipe) = nix::unistd::pipe2(OFlag::O_CLOEXEC).unwrap();
     (

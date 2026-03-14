@@ -1430,6 +1430,8 @@ pub fn annotate_input(input: &str) -> String {
   for tk in tokens.into_iter().rev() {
     let insertions = annotate_token(tk);
     for (pos, marker) in insertions {
+			log::info!("pos: {pos}, marker: {marker:?}");
+			log::info!("before: {annotated:?}");
       let pos = pos.max(0).min(annotated.len());
       annotated.insert(pos, marker);
     }
@@ -1610,6 +1612,12 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   };
 
   let mut insertions: Vec<(usize, Marker)> = vec![];
+
+  // Heredoc tokens have spans covering the body content far from the <<
+  // operator, which breaks position tracking after marker insertions
+  if token.flags.contains(TkFlags::IS_HEREDOC) {
+    return insertions;
+  }
 
   if token.class != TkRule::Str
     && let Some(marker) = marker_for(&token.class)

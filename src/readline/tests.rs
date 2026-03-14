@@ -2,9 +2,14 @@
 use std::os::fd::AsRawFd;
 
 use crate::{
-  readline::{Prompt, ShedVi},
+  readline::{Prompt, ShedVi, annotate_input},
   testutil::TestGuard,
 };
+
+fn assert_annotated(input: &str, expected: &str) {
+  let result = annotate_input(input);
+  assert_eq!(result, expected, "\nInput: {input:?}");
+}
 
 /// Tests for our vim logic emulation. Each test consists of an initial text, a sequence of keys to feed, and the expected final text and cursor position.
 macro_rules! vi_test {
@@ -25,6 +30,202 @@ macro_rules! vi_test {
 
     };
 }
+
+// ===================== Annotation Tests =====================
+
+#[test]
+fn annotate_simple_command() {
+  assert_annotated("echo hello",
+    "\u{e101}echo\u{e11a} \u{e102}hello\u{e11a}");
+}
+
+#[test]
+fn annotate_pipeline() {
+  assert_annotated("ls | grep foo",
+    "\u{e100}ls\u{e11a} \u{e104}|\u{e11a} \u{e100}grep\u{e11a} \u{e102}foo\u{e11a}");
+}
+
+#[test]
+fn annotate_conjunction() {
+  assert_annotated("echo foo && echo bar",
+    "\u{e101}echo\u{e11a} \u{e102}foo\u{e11a} \u{e104}&&\u{e11a} \u{e101}echo\u{e11a} \u{e102}bar\u{e11a}");
+}
+
+#[test]
+fn annotate_redirect_output() {
+  assert_annotated("echo hello > file.txt",
+    "\u{e101}echo\u{e11a} \u{e102}hello\u{e11a} \u{e105}>\u{e11a} \u{e102}file.txt\u{e11a}");
+}
+
+#[test]
+fn annotate_redirect_append() {
+  assert_annotated("echo hello >> file.txt",
+    "\u{e101}echo\u{e11a} \u{e102}hello\u{e11a} \u{e105}>>\u{e11a} \u{e102}file.txt\u{e11a}");
+}
+
+#[test]
+fn annotate_redirect_input() {
+  assert_annotated("cat < file.txt",
+    "\u{e100}cat\u{e11a} \u{e105}<\u{e11a} \u{e102}file.txt\u{e11a}");
+}
+
+#[test]
+fn annotate_fd_redirect() {
+  assert_annotated("cmd 2>&1",
+    "\u{e100}cmd\u{e11a} \u{e105}2>&1\u{e11a}");
+}
+
+#[test]
+fn annotate_variable_sub() {
+  assert_annotated("echo $HOME",
+    "\u{e101}echo\u{e11a} \u{e102}\u{e10c}$HOME\u{e10d}\u{e11a}");
+}
+
+#[test]
+fn annotate_variable_brace_sub() {
+  assert_annotated("echo ${HOME}",
+    "\u{e101}echo\u{e11a} \u{e102}\u{e10c}${HOME}\u{e10d}\u{e11a}");
+}
+
+#[test]
+fn annotate_command_sub() {
+  assert_annotated("echo $(ls)",
+    "\u{e101}echo\u{e11a} \u{e102}\u{e10e}$(ls)\u{e10f}\u{e11a}");
+}
+
+#[test]
+fn annotate_single_quoted_string() {
+  assert_annotated("echo 'hello world'",
+    "\u{e101}echo\u{e11a} \u{e102}\u{e114}'hello world'\u{e115}\u{e11a}");
+}
+
+#[test]
+fn annotate_double_quoted_string() {
+  assert_annotated("echo \"hello world\"",
+    "\u{e101}echo\u{e11a} \u{e102}\u{e112}\"hello world\"\u{e113}\u{e11a}");
+}
+
+#[test]
+fn annotate_assignment() {
+  assert_annotated("FOO=bar",
+    "\u{e107}FOO=bar\u{e11a}");
+}
+
+#[test]
+fn annotate_assignment_with_command() {
+  assert_annotated("FOO=bar echo hello",
+    "\u{e107}FOO=bar\u{e11a} \u{e101}echo\u{e11a} \u{e102}hello\u{e11a}");
+}
+
+#[test]
+fn annotate_if_statement() {
+  assert_annotated("if true; then echo yes; fi",
+    "\u{e103}if\u{e11a} \u{e101}true\u{e11a}\u{e108}; \u{e11a}\u{e103}then\u{e11a} \u{e101}echo\u{e11a} \u{e102}yes\u{e11a}\u{e108}; \u{e11a}\u{e103}fi\u{e11a}");
+}
+
+#[test]
+fn annotate_for_loop() {
+  assert_annotated("for i in a b c; do echo $i; done",
+    "\u{e103}for\u{e11a} \u{e102}i\u{e11a} \u{e103}in\u{e11a} \u{e102}a\u{e11a} \u{e102}b\u{e11a} \u{e102}c\u{e11a}\u{e108}; \u{e11a}\u{e103}do\u{e11a} \u{e101}echo\u{e11a} \u{e102}\u{e10c}$i\u{e10d}\u{e11a}\u{e108}; \u{e11a}\u{e103}done\u{e11a}");
+}
+
+#[test]
+fn annotate_while_loop() {
+  assert_annotated("while true; do echo hello; done",
+    "\u{e103}while\u{e11a} \u{e101}true\u{e11a}\u{e108}; \u{e11a}\u{e103}do\u{e11a} \u{e101}echo\u{e11a} \u{e102}hello\u{e11a}\u{e108}; \u{e11a}\u{e103}done\u{e11a}");
+}
+
+#[test]
+fn annotate_case_statement() {
+  assert_annotated("case foo in bar) echo bar;; esac",
+    "\u{e103}case\u{e11a} \u{e102}foo\u{e11a} \u{e103}in\u{e11a} \u{e104}bar\u{e109})\u{e11a} \u{e101}echo\u{e11a} \u{e102}bar\u{e11a}\u{e108};; \u{e11a}\u{e103}esac\u{e11a}");
+}
+
+#[test]
+fn annotate_brace_group() {
+  assert_annotated("{ echo hello; }",
+    "\u{e104}{\u{e11a} \u{e101}echo\u{e11a} \u{e102}hello\u{e11a}\u{e108}; \u{e11a}\u{e104}}\u{e11a}");
+}
+
+#[test]
+fn annotate_comment() {
+  assert_annotated("echo hello # this is a comment",
+    "\u{e101}echo\u{e11a} \u{e102}hello\u{e11a} \u{e106}# this is a comment\u{e11a}");
+}
+
+#[test]
+fn annotate_semicolon_sep() {
+  assert_annotated("echo foo; echo bar",
+    "\u{e101}echo\u{e11a} \u{e102}foo\u{e11a}\u{e108}; \u{e11a}\u{e101}echo\u{e11a} \u{e102}bar\u{e11a}");
+}
+
+#[test]
+fn annotate_escaped_char() {
+  assert_annotated("echo hello\\ world",
+    "\u{e101}echo\u{e11a} \u{e102}hello\\ world\u{e11a}");
+}
+
+#[test]
+fn annotate_glob() {
+  assert_annotated("ls *.txt",
+    "\u{e100}ls\u{e11a} \u{e102}\u{e117}*\u{e11a}.txt\u{e11a}");
+}
+
+#[test]
+fn annotate_heredoc_operator() {
+  assert_annotated("cat <<EOF",
+    "\u{e100}cat\u{e11a} \u{e105}<<\u{e11a}\u{e102}EOF\u{e11a}");
+}
+
+#[test]
+fn annotate_herestring_operator() {
+  assert_annotated("cat <<< hello",
+    "\u{e100}cat\u{e11a} \u{e105}<<<\u{e11a} \u{e102}hello\u{e11a}");
+}
+
+#[test]
+fn annotate_nested_command_sub() {
+  assert_annotated("echo $(echo $(ls))",
+    "\u{e101}echo\u{e11a} \u{e102}\u{e10e}$(echo $(ls))\u{e10f}\u{e11a}");
+}
+
+#[test]
+fn annotate_var_in_double_quotes() {
+  assert_annotated("echo \"hello $USER\"",
+    "\u{e101}echo\u{e11a} \u{e102}\u{e112}\"hello \u{e10c}$USER\u{e10d}\"\u{e113}\u{e11a}");
+}
+
+#[test]
+fn annotate_func_def() {
+  assert_annotated("foo() { echo hello; }",
+    "\u{e103}foo()\u{e11a} \u{e104}{\u{e11a} \u{e101}echo\u{e11a} \u{e102}hello\u{e11a}\u{e108}; \u{e11a}\u{e104}}\u{e11a}");
+}
+
+#[test]
+fn annotate_negate() {
+  assert_annotated("! echo hello",
+    "\u{e104}!\u{e11a} \u{e101}echo\u{e11a} \u{e102}hello\u{e11a}");
+}
+
+#[test]
+fn annotate_or_conjunction() {
+  assert_annotated("false || echo fallback",
+    "\u{e101}false\u{e11a} \u{e104}||\u{e11a} \u{e101}echo\u{e11a} \u{e102}fallback\u{e11a}");
+}
+
+#[test]
+fn annotate_complex_pipeline() {
+  assert_annotated("cat file.txt | grep pattern | wc -l",
+    "\u{e100}cat\u{e11a} \u{e102}file.txt\u{e11a} \u{e104}|\u{e11a} \u{e100}grep\u{e11a} \u{e102}pattern\u{e11a} \u{e104}|\u{e11a} \u{e100}wc\u{e11a} \u{e102}-l\u{e11a}");
+}
+
+#[test]
+fn annotate_multiple_redirects() {
+  assert_annotated("cmd > out.txt 2> err.txt",
+    "\u{e100}cmd\u{e11a} \u{e105}>\u{e11a} \u{e102}out.txt\u{e11a} \u{e105}2>\u{e11a} \u{e102}err.txt\u{e11a}");
+}
+
+// ===================== Vi Tests =====================
 
 fn test_vi(initial: &str) -> (ShedVi, TestGuard) {
   let g = TestGuard::new();

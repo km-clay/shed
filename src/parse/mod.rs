@@ -341,7 +341,7 @@ impl RedirBldr {
 }
 
 impl FromStr for RedirBldr {
-  type Err = ();
+  type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     let mut chars = s.chars().peekable();
     let mut src_fd = String::new();
@@ -381,7 +381,10 @@ impl FromStr for RedirBldr {
             }
           }
           if src_fd.is_empty() {
-            return Err(());
+						return Err(ShErr::simple(
+							ShErrKind::ParseErr,
+							format!("Invalid character '{}' in redirection operator", ch),
+						));
           }
         }
         _ if ch.is_ascii_digit() && tgt_fd.is_empty() => {
@@ -395,7 +398,10 @@ impl FromStr for RedirBldr {
             }
           }
         }
-        _ => return Err(()),
+				_ => return Err(ShErr::simple(
+					ShErrKind::ParseErr,
+					format!("Invalid character '{}' in redirection operator", ch),
+				)),
       }
     }
 
@@ -415,6 +421,59 @@ impl FromStr for RedirBldr {
   }
 }
 
+impl TryFrom<Tk> for RedirBldr {
+	type Error = ShErr;
+	fn try_from(tk: Tk) -> Result<Self, Self::Error> {
+		if tk.flags.contains(TkFlags::IS_HEREDOC) {
+			let flags = tk.flags;
+			let mut heredoc_body = if flags.contains(TkFlags::LIT_HEREDOC) {
+				tk.as_str().to_string()
+			} else {
+				tk.expand()?.get_words().first().map(|s| s.as_str()).unwrap_or_default().to_string()
+			};
+
+			if flags.contains(TkFlags::TAB_HEREDOC) {
+				let lines = heredoc_body.lines();
+				let mut min_tabs = usize::MAX;
+				for line in lines {
+					if line.is_empty() { continue; }
+					let line_len = line.len();
+					let after_strip = line.trim_start_matches('\t').len();
+					let delta = line_len - after_strip;
+					min_tabs = min_tabs.min(delta);
+				}
+				if min_tabs == usize::MAX {
+					// let's avoid possibly allocating a string with 18 quintillion tabs
+					min_tabs = 0;
+				}
+
+				if min_tabs > 0 {
+					let stripped = heredoc_body.lines()
+						.fold(vec![], |mut acc, ln| {
+							if ln.is_empty() {
+								acc.push("");
+								return acc;
+							}
+							let stripped_ln = ln.strip_prefix(&"\t".repeat(min_tabs)).unwrap();
+							acc.push(stripped_ln);
+							acc
+						})
+					.join("\n");
+					heredoc_body = stripped + "\n";
+				}
+			}
+
+			Ok(RedirBldr {
+				io_mode: Some(IoMode::loaded_pipe(0, heredoc_body.as_bytes())?),
+				class: Some(RedirType::HereDoc),
+				tgt_fd: Some(0)
+			})
+		} else {
+			Self::from_str(tk.as_str())
+		}
+	}
+}
+
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum RedirType {
   Null,       // Default
@@ -424,6 +483,7 @@ pub enum RedirType {
   Output,     // >
   Append,     // >>
   HereDoc,    // <<
+	IndentHereDoc, // <<-, strips leading tabs
   HereString, // <<<
 }
 
@@ -1038,36 +1098,65 @@ impl ParseStream {
     };
     Ok(Some(node))
   }
+  fn build_redir<F: FnMut() -> Option<Tk>>(
+    redir_tk: &Tk,
+    mut next: F,
+    node_tks: &mut Vec<Tk>,
+    context: LabelCtx,
+  ) -> ShResult<Redir> {
+    let redir_bldr = RedirBldr::try_from(redir_tk.clone()).unwrap();
+		let next_tk = if redir_bldr.io_mode.is_none() { next() } else { None };
+    if redir_bldr.io_mode.is_some() {
+      return Ok(redir_bldr.build());
+    }
+    let Some(redir_type) = redir_bldr.class else {
+      return Err(parse_err_full(
+        "Malformed redirection operator",
+        &redir_tk.span,
+        context.clone(),
+      ));
+    };
+    match redir_type {
+      RedirType::HereString => {
+        if next_tk.as_ref().is_none_or(|tk| tk.class == TkRule::EOI) {
+          return Err(ShErr::at(
+            ShErrKind::ParseErr,
+            next_tk.unwrap_or(redir_tk.clone()).span.clone(),
+            "Expected a string after this redirection",
+          ));
+        }
+        let mut string = next_tk
+          .unwrap()
+          .expand()?
+          .get_words()
+          .join(" ");
+        string.push('\n');
+        let io_mode = IoMode::loaded_pipe(redir_bldr.tgt_fd.unwrap_or(0), string.as_bytes())?;
+        Ok(redir_bldr.with_io_mode(io_mode).build())
+      }
+      _ => {
+        if next_tk.as_ref().is_none_or(|tk| tk.class == TkRule::EOI) {
+          return Err(ShErr::at(
+            ShErrKind::ParseErr,
+            redir_tk.span.clone(),
+            "Expected a filename after this redirection",
+          ));
+        }
+        let path_tk = next_tk.unwrap();
+        node_tks.push(path_tk.clone());
+        let pathbuf = PathBuf::from(path_tk.span.as_str());
+        let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), pathbuf, redir_type);
+        Ok(redir_bldr.with_io_mode(io_mode).build())
+      }
+    }
+  }
   fn parse_redir(&mut self, redirs: &mut Vec<Redir>, node_tks: &mut Vec<Tk>) -> ShResult<()> {
     while self.check_redir() {
       let tk = self.next_tk().unwrap();
       node_tks.push(tk.clone());
-      let redir_bldr = tk.span.as_str().parse::<RedirBldr>().unwrap();
-      if redir_bldr.io_mode.is_none() {
-        let path_tk = self.next_tk();
-
-        if path_tk.clone().is_none_or(|tk| tk.class == TkRule::EOI) {
-          return Err(ShErr::at(
-            ShErrKind::ParseErr,
-            tk.span.clone(),
-            "Expected a filename after this redirection",
-          ));
-        };
-
-        let path_tk = path_tk.unwrap();
-        node_tks.push(path_tk.clone());
-        let redir_class = redir_bldr.class.unwrap();
-        let pathbuf = PathBuf::from(path_tk.span.as_str());
-
-        let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), pathbuf, redir_class);
-        let redir_bldr = redir_bldr.with_io_mode(io_mode);
-        let redir = redir_bldr.build();
-        redirs.push(redir);
-      } else {
-        // io_mode is already set (e.g., for fd redirections like 2>&1)
-        let redir = redir_bldr.build();
-        redirs.push(redir);
-      }
+			let ctx = self.context.clone();
+      let redir = Self::build_redir(&tk, || self.next_tk(), node_tks, ctx)?;
+      redirs.push(redir);
     }
     Ok(())
   }
@@ -1631,33 +1720,9 @@ impl ParseStream {
         }
         TkRule::Redir => {
           node_tks.push(tk.clone());
-          let redir_bldr = tk.span.as_str().parse::<RedirBldr>().unwrap();
-          if redir_bldr.io_mode.is_none() {
-            let path_tk = tk_iter.next();
-
-            if path_tk.is_none_or(|tk| tk.class == TkRule::EOI) {
-              self.panic_mode(&mut node_tks);
-              return Err(ShErr::at(
-                ShErrKind::ParseErr,
-                tk.span.clone(),
-                "Expected a filename after this redirection",
-              ));
-            };
-
-            let path_tk = path_tk.unwrap();
-            node_tks.push(path_tk.clone());
-            let redir_class = redir_bldr.class.unwrap();
-            let pathbuf = PathBuf::from(path_tk.span.as_str());
-
-            let io_mode = IoMode::file(redir_bldr.tgt_fd.unwrap(), pathbuf, redir_class);
-            let redir_bldr = redir_bldr.with_io_mode(io_mode);
-            let redir = redir_bldr.build();
-            redirs.push(redir);
-          } else {
-            // io_mode is already set (e.g., for fd redirections like 2>&1)
-            let redir = redir_bldr.build();
-            redirs.push(redir);
-          }
+					let ctx = self.context.clone();
+          let redir = Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx)?;
+          redirs.push(redir);
         }
         _ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
       }
@@ -1822,7 +1887,7 @@ pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<Fil
       .truncate(true)
       .open(path),
     RedirType::Append => OpenOptions::new().create(true).append(true).open(path),
-    _ => unimplemented!(),
+    _ => unimplemented!("Unimplemented redir type: {:?}", class),
   };
   Ok(result?)
 }
@@ -2593,5 +2658,248 @@ pub mod tests {
   fn parse_stray_keyword_in_brace_group() {
     let input = "{ echo bar case foo in bar) echo fizz ;; buzz) echo buzz ;; esac }";
     assert!(get_ast(input).is_err());
+  }
+
+  // ===================== Heredocs =====================
+
+  #[test]
+  fn parse_basic_heredoc() {
+    let input = "cat <<EOF\nhello world\nEOF";
+    let expected = &mut [NdKind::Conjunction, NdKind::Pipeline, NdKind::Command].into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
+
+  #[test]
+  fn parse_heredoc_with_tab_strip() {
+    let input = "cat <<-EOF\n\t\thello\n\t\tworld\nEOF";
+    let expected = &mut [NdKind::Conjunction, NdKind::Pipeline, NdKind::Command].into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
+
+  #[test]
+  fn parse_literal_heredoc() {
+    let input = "cat <<'EOF'\nhello $world\nEOF";
+    let expected = &mut [NdKind::Conjunction, NdKind::Pipeline, NdKind::Command].into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
+
+  #[test]
+  fn parse_herestring() {
+    let input = "cat <<< \"hello world\"";
+    let expected = &mut [NdKind::Conjunction, NdKind::Pipeline, NdKind::Command].into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
+
+  #[test]
+  fn parse_heredoc_in_pipeline() {
+    let input = "cat <<EOF | grep hello\nhello world\ngoodbye world\nEOF";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
+
+  #[test]
+  fn parse_heredoc_in_conjunction() {
+    let input = "cat <<EOF && echo done\nhello\nEOF";
+    let expected = &mut [
+      NdKind::Conjunction,
+      NdKind::Pipeline,
+      NdKind::Command,
+      NdKind::Pipeline,
+      NdKind::Command,
+    ]
+    .into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
+
+  #[test]
+  fn parse_heredoc_double_quoted_delimiter() {
+    let input = "cat <<\"EOF\"\nhello $world\nEOF";
+    let expected = &mut [NdKind::Conjunction, NdKind::Pipeline, NdKind::Command].into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
+
+  #[test]
+  fn parse_heredoc_empty_body() {
+    let input = "cat <<EOF\nEOF";
+    let expected = &mut [NdKind::Conjunction, NdKind::Pipeline, NdKind::Command].into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
+
+  #[test]
+  fn parse_heredoc_multiword_delimiter() {
+    // delimiter should only be the first word
+    let input = "cat <<DELIM\nsome content\nDELIM";
+    let expected = &mut [NdKind::Conjunction, NdKind::Pipeline, NdKind::Command].into_iter();
+    let ast = get_ast(input).unwrap();
+    let mut node = ast[0].clone();
+    if let Err(e) = node.assert_structure(expected) {
+      panic!("{}", e);
+    }
+  }
+
+  #[test]
+  fn parse_two_heredocs_on_one_line() {
+    let input = "cat <<A; cat <<B\nfoo\nA\nbar\nB";
+    let ast = get_ast(input).unwrap();
+    assert_eq!(ast.len(), 2);
+  }
+
+  // ===================== Heredoc Execution =====================
+
+  use crate::testutil::{TestGuard, test_input};
+  use crate::state::{VarFlags, VarKind, write_vars};
+
+  #[test]
+  fn heredoc_basic_output() {
+    let guard = TestGuard::new();
+    test_input("cat <<EOF\nhello world\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello world\n");
+  }
+
+  #[test]
+  fn heredoc_multiline_output() {
+    let guard = TestGuard::new();
+    test_input("cat <<EOF\nline one\nline two\nline three\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "line one\nline two\nline three\n");
+  }
+
+  #[test]
+  fn heredoc_variable_expansion() {
+    let guard = TestGuard::new();
+    write_vars(|v| v.set_var("NAME", VarKind::Str("world".into()), VarFlags::NONE)).unwrap();
+    test_input("cat <<EOF\nhello $NAME\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello world\n");
+  }
+
+  #[test]
+  fn heredoc_literal_no_expansion() {
+    let guard = TestGuard::new();
+    write_vars(|v| v.set_var("NAME", VarKind::Str("world".into()), VarFlags::NONE)).unwrap();
+    test_input("cat <<'EOF'\nhello $NAME\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello $NAME\n");
+  }
+
+  #[test]
+  fn heredoc_tab_stripping() {
+    let guard = TestGuard::new();
+    test_input("cat <<-EOF\n\t\thello\n\t\tworld\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello\nworld\n");
+  }
+
+  #[test]
+  fn heredoc_tab_stripping_uneven() {
+    let guard = TestGuard::new();
+    test_input("cat <<-EOF\n\t\t\thello\n\tworld\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "\t\thello\nworld\n");
+  }
+
+  #[test]
+  fn heredoc_empty_body() {
+    let guard = TestGuard::new();
+    test_input("cat <<EOF\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "");
+  }
+
+  #[test]
+  fn heredoc_in_pipeline() {
+    let guard = TestGuard::new();
+    test_input("cat <<EOF | grep hello\nhello world\ngoodbye world\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello world\n");
+  }
+
+  #[test]
+  fn herestring_basic() {
+    let guard = TestGuard::new();
+    test_input("cat <<< \"hello world\"".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello world\n");
+  }
+
+  #[test]
+  fn herestring_variable_expansion() {
+    let guard = TestGuard::new();
+    write_vars(|v| v.set_var("MSG", VarKind::Str("hi there".into()), VarFlags::NONE)).unwrap();
+    test_input("cat <<< $MSG".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hi there\n");
+  }
+
+  #[test]
+  fn heredoc_double_quoted_delimiter_is_literal() {
+    let guard = TestGuard::new();
+    write_vars(|v| v.set_var("X", VarKind::Str("val".into()), VarFlags::NONE)).unwrap();
+    test_input("cat <<\"EOF\"\nhello $X\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello $X\n");
+  }
+
+  #[test]
+  fn heredoc_preserves_blank_lines() {
+    let guard = TestGuard::new();
+    test_input("cat <<EOF\nfirst\n\nsecond\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "first\n\nsecond\n");
+  }
+
+  #[test]
+  fn heredoc_tab_strip_preserves_empty_lines() {
+    let guard = TestGuard::new();
+    test_input("cat <<-EOF\n\thello\n\n\tworld\nEOF".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "hello\n\nworld\n");
+  }
+
+  #[test]
+  fn heredoc_two_on_one_line() {
+    let guard = TestGuard::new();
+    test_input("cat <<A; cat <<B\nfoo\nA\nbar\nB".to_string()).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "foo\nbar\n");
   }
 }

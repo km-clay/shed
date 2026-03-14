@@ -40,18 +40,19 @@ impl Tk {
 }
 
 pub struct Expander {
+	flags: TkFlags,
   raw: String,
 }
 
 impl Expander {
   pub fn new(raw: Tk) -> ShResult<Self> {
-    let raw = raw.span.as_str();
-    Self::from_raw(raw)
+    let tk_raw = raw.span.as_str();
+    Self::from_raw(tk_raw, raw.flags)
   }
-  pub fn from_raw(raw: &str) -> ShResult<Self> {
+  pub fn from_raw(raw: &str, flags: TkFlags) -> ShResult<Self> {
     let raw = expand_braces_full(raw)?.join(" ");
     let unescaped = unescape_str(&raw);
-    Ok(Self { raw: unescaped })
+    Ok(Self { raw: unescaped, flags })
   }
   pub fn expand(&mut self) -> ShResult<Vec<String>> {
     let mut chars = self.raw.chars().peekable();
@@ -75,7 +76,11 @@ impl Expander {
       self.raw.insert_str(0, "./");
     }
 
-    Ok(self.split_words())
+		if self.flags.contains(TkFlags::IS_HEREDOC) {
+			Ok(vec![self.raw.clone()])
+		} else {
+			Ok(self.split_words())
+		}
   }
   pub fn split_words(&mut self) -> Vec<String> {
     let mut words = vec![];
@@ -3532,6 +3537,7 @@ mod tests {
 
     let mut exp = Expander {
       raw: "hello world\tfoo".to_string(),
+			flags: TkFlags::empty()
     };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello", "world", "foo"]);
@@ -3546,6 +3552,7 @@ mod tests {
 
     let mut exp = Expander {
       raw: "a:b:c".to_string(),
+			flags: TkFlags::empty()
     };
     let words = exp.split_words();
     assert_eq!(words, vec!["a", "b", "c"]);
@@ -3560,6 +3567,7 @@ mod tests {
 
     let mut exp = Expander {
       raw: "hello world".to_string(),
+			flags: TkFlags::empty()
     };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello world"]);
@@ -3570,7 +3578,10 @@ mod tests {
     let _guard = TestGuard::new();
 
     let raw = format!("{}hello world{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
-    let mut exp = Expander { raw };
+    let mut exp = Expander {
+			raw,
+			flags: TkFlags::empty()
+		};
     let words = exp.split_words();
     assert_eq!(words, vec!["hello world"]);
   }
@@ -3582,7 +3593,10 @@ mod tests {
     let _guard = TestGuard::new();
 
     let raw = format!("hello{}world", unescape_str("\\ "));
-    let mut exp = Expander { raw };
+    let mut exp = Expander {
+			raw,
+			flags: TkFlags::empty()
+		};
     let words = exp.split_words();
     assert_eq!(words, vec!["hello world"]);
   }
@@ -3592,7 +3606,10 @@ mod tests {
     let _guard = TestGuard::new();
 
     let raw = format!("hello{}world", unescape_str("\\\t"));
-    let mut exp = Expander { raw };
+    let mut exp = Expander {
+			raw,
+			flags: TkFlags::empty()
+		};
     let words = exp.split_words();
     assert_eq!(words, vec!["hello\tworld"]);
   }
@@ -3605,7 +3622,10 @@ mod tests {
     }
 
     let raw = format!("a{}b:c", unescape_str("\\:"));
-    let mut exp = Expander { raw };
+    let mut exp = Expander {
+			raw,
+			flags: TkFlags::empty()
+		};
     let words = exp.split_words();
     assert_eq!(words, vec!["a:b", "c"]);
   }
