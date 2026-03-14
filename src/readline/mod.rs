@@ -253,7 +253,6 @@ pub struct ShedVi {
   pub repeat_action: Option<CmdReplay>,
   pub repeat_motion: Option<MotionCmd>,
   pub editor: LineBuf,
-  pub next_is_escaped: bool,
 
   pub old_layout: Option<Layout>,
   pub history: History,
@@ -271,7 +270,6 @@ impl ShedVi {
       completer: Box::new(FuzzyCompleter::default()),
       highlighter: Highlighter::new(),
       mode: Box::new(ViInsert::new()),
-      next_is_escaped: false,
       saved_mode: None,
       pending_keymap: Vec::new(),
       old_layout: None,
@@ -303,7 +301,6 @@ impl ShedVi {
       completer: Box::new(FuzzyCompleter::default()),
       highlighter: Highlighter::new(),
       mode: Box::new(ViInsert::new()),
-      next_is_escaped: false,
       saved_mode: None,
       pending_keymap: Vec::new(),
       old_layout: None,
@@ -417,7 +414,7 @@ impl ShedVi {
       LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
     let lex_result2 =
       LexStream::new(Arc::clone(&input), LexFlags::empty()).collect::<ShResult<Vec<_>>>();
-    let is_top_level = self.editor.auto_indent_level == 0;
+    let is_top_level = self.editor.indent_ctx.ctx().is_empty();
 
     let is_complete = match (lex_result1.is_err(), lex_result2.is_err()) {
       (true, true) => {
@@ -808,14 +805,6 @@ impl ShedVi {
       }
     }
 
-    if let KeyEvent(KeyCode::Char('\\'), ModKeys::NONE) = key
-      && !self.next_is_escaped
-    {
-      self.next_is_escaped = true;
-    } else {
-      self.next_is_escaped = false;
-    }
-
     let Ok(cmd) = self.mode.handle_key_fallible(key) else {
       // it's an ex mode error
       self.mode = Box::new(ViNormal::new()) as Box<dyn ViMode>;
@@ -834,8 +823,7 @@ impl ShedVi {
     }
 
     if cmd.is_submit_action()
-      && !self.next_is_escaped
-      && !self.editor.buffer.ends_with('\\')
+      && !self.editor.cursor_is_escaped()
       && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
     {
       if self.editor.attempt_history_expansion(&self.history) {

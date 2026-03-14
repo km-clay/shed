@@ -15,7 +15,7 @@ use crate::{
   libsh::{error::ShResult, guards::var_ctx_guard},
   parse::{
     execute::exec_input,
-    lex::{LexFlags, LexStream, QuoteState, Tk},
+    lex::{LexFlags, LexStream, QuoteState, Tk, TkRule},
   },
   prelude::*,
   readline::{
@@ -351,13 +351,22 @@ impl ClampedUsize {
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct DepthCalc {
+pub struct IndentCtx {
 	depth: usize,
 	ctx: Vec<Tk>,
+	in_escaped_line: bool
 }
 
-impl DepthCalc {
+impl IndentCtx {
 	pub fn new() -> Self { Self::default() }
+
+	pub fn depth(&self) -> usize {
+		self.depth
+	}
+
+	pub fn ctx(&self) -> &[Tk] {
+		&self.ctx
+	}
 
 	pub fn descend(&mut self, tk: Tk) {
 		self.ctx.push(tk);
@@ -369,20 +378,28 @@ impl DepthCalc {
 		self.ctx.pop();
 	}
 
+	pub fn reset(&mut self) {
+		std::mem::take(self);
+	}
+
 	pub fn check_tk(&mut self, tk: Tk) {
 		if tk.is_opener() {
 			self.descend(tk);
 		} else if self.ctx.last().is_some_and(|t| tk.is_closer_for(t)) {
 			self.ascend();
+		} else if matches!(tk.class, TkRule::Sep) && self.in_escaped_line {
+			self.in_escaped_line = false;
+			self.depth = self.depth.saturating_sub(1);
 		}
 	}
 
 	pub fn calculate(&mut self, input: &str) -> usize {
-    if input.ends_with("\\\n") {
-      self.depth += 1; // Line continuation, so we need to add an extra level
-    }
-		let input = Arc::new(input.to_string());
-    let Ok(tokens) = LexStream::new(input.clone(), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>() else {
+		self.depth = 0;
+		self.ctx.clear();
+		self.in_escaped_line = false;
+
+		let input_arc = Arc::new(input.to_string());
+    let Ok(tokens) = LexStream::new(input_arc, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>() else {
 			log::error!("Lexing failed during depth calculation: {:?}", input);
 			return 0;
 		};
@@ -390,6 +407,11 @@ impl DepthCalc {
 		for tk in tokens {
 			self.check_tk(tk);
 		}
+
+    if input.ends_with("\\\n") {
+			self.in_escaped_line = true;
+      self.depth += 1;
+    }
 
 		self.depth
 	}
@@ -408,7 +430,7 @@ pub struct LineBuf {
 
   pub insert_mode_start_pos: Option<usize>,
   pub saved_col: Option<usize>,
-  pub auto_indent_level: usize,
+  pub indent_ctx: IndentCtx,
 
   pub undo_stack: Vec<Edit>,
   pub redo_stack: Vec<Edit>,
@@ -662,6 +684,17 @@ impl LineBuf {
   pub fn read_slice_to_cursor(&self) -> Option<&str> {
     self.read_slice_to(self.cursor.get())
   }
+	pub fn cursor_is_escaped(&mut self) -> bool {
+		let Some(to_cursor) = self.slice_to_cursor() else {
+			return false;
+		};
+
+		// count the number of backslashes
+		let delta = to_cursor.len() - to_cursor.trim_end_matches('\\').len();
+
+		// an even number of backslashes means each one is escaped
+		delta % 2 != 0
+	}
   pub fn slice_to_cursor_inclusive(&mut self) -> Option<&str> {
     self.slice_to(self.cursor.ret_add(1))
   }
@@ -2076,15 +2109,13 @@ impl LineBuf {
     let end = start + (new.len().max(gr.len()));
     self.buffer.replace_range(start..end, new);
   }
-  pub fn calc_indent_level(&mut self) {
+  pub fn calc_indent_level(&mut self) -> usize {
     let to_cursor = self
       .slice_to_cursor()
       .map(|s| s.to_string())
       .unwrap_or(self.buffer.clone());
 
-		let mut calc = DepthCalc::new();
-
-    self.auto_indent_level = calc.calculate(&to_cursor);
+    self.indent_ctx.calculate(&to_cursor)
   }
   pub fn eval_motion(&mut self, verb: Option<&Verb>, motion: MotionCmd) -> MotionKind {
     let buffer = self.buffer.clone();
@@ -2661,8 +2692,8 @@ impl LineBuf {
     register.write_to_register(register_content);
     self.cursor.set(start);
     if do_indent {
-      self.calc_indent_level();
-      let tabs = (0..self.auto_indent_level).map(|_| '\t');
+      let depth = self.calc_indent_level();
+      let tabs = (0..depth).map(|_| '\t');
       for tab in tabs {
         self.insert_at_cursor(tab);
         self.cursor.add(1);
@@ -2897,17 +2928,29 @@ impl LineBuf {
     };
     end = end.saturating_sub(1);
     let mut last_was_whitespace = false;
-    for i in start..end {
+		let mut last_was_escape = false;
+		let mut i = start;
+    while i < end {
       let Some(gr) = self.grapheme_at(i) else {
+				i += 1;
         continue;
       };
       if gr == "\n" {
         if last_was_whitespace {
           self.remove(i);
+					end -= 1;
         } else {
           self.force_replace_at(i, " ");
         }
+				if last_was_escape {
+					// if we are here, then we just joined an escaped newline
+					// semantically, echo foo\\nbar == echo foo bar
+					// so a joined line should remove the escape.
+					self.remove(i - 1);
+					end -= 1;
+				}
         last_was_whitespace = false;
+				last_was_escape = false;
         let strip_pos = if self.grapheme_at(i) == Some(" ") {
           i + 1
         } else {
@@ -2915,22 +2958,39 @@ impl LineBuf {
         };
         while self.grapheme_at(strip_pos) == Some("\t") {
           self.remove(strip_pos);
+					end -= 1;
         }
         self.cursor.set(i);
+				i += 1;
         continue;
-      }
-      last_was_whitespace = is_whitespace(gr);
+      } else if gr == "\\" {
+				if last_was_whitespace && last_was_escape {
+					// if we are here, then the pattern of the last three chars was this:
+					// ' \\', a space and two backslashes.
+					// This means the "last" was an escaped backslash, not whitespace.
+					last_was_whitespace = false;
+				}
+				last_was_escape = !last_was_escape;
+			} else {
+				last_was_whitespace = is_whitespace(gr);
+				last_was_escape = false;
+			}
+			i += 1;
     }
     Ok(())
   }
   fn verb_insert_char(&mut self, ch: char) {
     self.insert_at_cursor(ch);
     self.cursor.add(1);
-    let before = self.auto_indent_level;
+    let before_escaped = self.indent_ctx.in_escaped_line;
+    let before = self.indent_ctx.depth();
 		if read_shopts(|o| o.prompt.auto_indent) {
-			self.calc_indent_level();
-			if self.auto_indent_level < before {
-				let delta = before - self.auto_indent_level;
+			let after = self.calc_indent_level();
+			// Only dedent if the depth decrease came from a closer, not from
+			// a line continuation bonus going away
+			if after < before
+			&& !(before_escaped && !self.indent_ctx.in_escaped_line) {
+				let delta = before - after;
 				let line_start = self.start_of_line();
 				for _ in 0..delta {
 					if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
@@ -3021,8 +3081,8 @@ impl LineBuf {
         Anchor::After => {
           self.push('\n');
           if auto_indent {
-            self.calc_indent_level();
-            for _ in 0..self.auto_indent_level {
+            let depth = self.calc_indent_level();
+            for _ in 0..depth {
               self.push('\t');
             }
           }
@@ -3031,8 +3091,8 @@ impl LineBuf {
         }
         Anchor::Before => {
           if auto_indent {
-            self.calc_indent_level();
-            for _ in 0..self.auto_indent_level {
+            let depth = self.calc_indent_level();
+            for _ in 0..depth {
               self.insert_at(0, '\t');
             }
           }
@@ -3059,8 +3119,8 @@ impl LineBuf {
     self.insert_at_cursor('\n');
     self.cursor.add(1);
     if auto_indent {
-      self.calc_indent_level();
-      for _ in 0..self.auto_indent_level {
+      let depth = self.calc_indent_level();
+      for _ in 0..depth {
         self.insert_at_cursor('\t');
         self.cursor.add(1);
       }

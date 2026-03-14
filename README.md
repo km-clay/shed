@@ -8,7 +8,7 @@ A Linux shell written in Rust. The name is a nod to the original Unix utilities 
 
 ### Line Editor
 
-`shed` includes a built-in `vim` emulator as its line editor, written from scratch. It aims to provide a more precise vim-like editing experience at the shell prompt.
+`shed` includes a built-in `vim` emulator as its line editor, written from scratch. It aims to provide a more precise vim-like editing experience at the shell prompt than conventional `vi` mode implementations.
 
 - **Normal mode** - motions (`w`, `b`, `e`, `f`, `t`, `%`, `0`, `$`, etc.), verbs (`d`, `c`, `y`, `p`, `r`, `x`, `~`, etc.), text objects (`iw`, `aw`, `i"`, `a{`, `is`, etc.), registers, `.` repeat, `;`/`,` repeat, and counts
 - **Insert mode** - insert, append, replace, with Ctrl+W word deletion and undo/redo
