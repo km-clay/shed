@@ -15,7 +15,7 @@ use crate::{
   libsh::{error::ShResult, guards::var_ctx_guard},
   parse::{
     execute::exec_input,
-    lex::{LexFlags, LexStream, QuoteState, Tk, TkFlags, TkRule},
+    lex::{LexFlags, LexStream, QuoteState, Tk},
   },
   prelude::*,
   readline::{
@@ -348,6 +348,51 @@ impl ClampedUsize {
   pub fn ret_sub(&self, value: usize) -> usize {
     self.value.saturating_sub(value)
   }
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct DepthCalc {
+	depth: usize,
+	ctx: Vec<Tk>,
+}
+
+impl DepthCalc {
+	pub fn new() -> Self { Self::default() }
+
+	pub fn descend(&mut self, tk: Tk) {
+		self.ctx.push(tk);
+		self.depth += 1;
+	}
+
+	pub fn ascend(&mut self) {
+		self.depth = self.depth.saturating_sub(1);
+		self.ctx.pop();
+	}
+
+	pub fn check_tk(&mut self, tk: Tk) {
+		if tk.is_opener() {
+			self.descend(tk);
+		} else if self.ctx.last().is_some_and(|t| tk.is_closer_for(t)) {
+			self.ascend();
+		}
+	}
+
+	pub fn calculate(&mut self, input: &str) -> usize {
+    if input.ends_with("\\\n") {
+      self.depth += 1; // Line continuation, so we need to add an extra level
+    }
+		let input = Arc::new(input.to_string());
+    let Ok(tokens) = LexStream::new(input.clone(), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>() else {
+			log::error!("Lexing failed during depth calculation: {:?}", input);
+			return 0;
+		};
+
+		for tk in tokens {
+			self.check_tk(tk);
+		}
+
+		self.depth
+	}
 }
 
 #[derive(Default, Clone, Debug)]
@@ -829,7 +874,7 @@ impl LineBuf {
     }
     Some(self.line_bounds(line_no))
   }
-  pub fn word_at(&mut self, pos: usize, word: Word) -> (usize, usize) {
+  pub fn word_at(&mut self, _pos: usize, word: Word) -> (usize, usize) {
     let start = if self.is_word_bound(self.cursor.get(), word, Direction::Backward) {
       self.cursor.get()
     } else {
@@ -2032,50 +2077,14 @@ impl LineBuf {
     self.buffer.replace_range(start..end, new);
   }
   pub fn calc_indent_level(&mut self) {
-    // FIXME: This implementation is extremely naive but it kind of sort of works for now
-    // Need to re-implement it and write tests
     let to_cursor = self
       .slice_to_cursor()
       .map(|s| s.to_string())
       .unwrap_or(self.buffer.clone());
 
-    let mut level: usize = 0;
+		let mut calc = DepthCalc::new();
 
-    if to_cursor.ends_with("\\\n") {
-      level += 1; // Line continuation, so we need to add an extra level
-    }
-
-    let input = Arc::new(to_cursor);
-    let Ok(tokens) = LexStream::new(input, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()
-    else {
-      log::error!("Failed to lex buffer for indent calculation");
-      return;
-    };
-    let mut last_keyword: Option<String> = None;
-    for tk in tokens {
-      if tk.flags.contains(TkFlags::KEYWORD) {
-        match tk.as_str() {
-          "in" => {
-            if last_keyword.as_deref() == Some("case") {
-              level += 1;
-            } else {
-              // 'in' is also used in for loops, but we already increment level on 'do' for those
-              // so we just skip it here
-            }
-          }
-          "then" | "do" => level += 1,
-          "done" | "fi" | "esac" => level = level.saturating_sub(1),
-          _ => { /* Continue */ }
-        }
-        last_keyword = Some(tk.to_string());
-      } else if tk.class == TkRule::BraceGrpStart {
-        level += 1;
-      } else if tk.class == TkRule::BraceGrpEnd {
-        level = level.saturating_sub(1);
-      }
-    }
-
-    self.auto_indent_level = level;
+    self.auto_indent_level = calc.calculate(&to_cursor);
   }
   pub fn eval_motion(&mut self, verb: Option<&Verb>, motion: MotionCmd) -> MotionKind {
     let buffer = self.buffer.clone();
@@ -2918,34 +2927,28 @@ impl LineBuf {
     self.insert_at_cursor(ch);
     self.cursor.add(1);
     let before = self.auto_indent_level;
-    if read_shopts(|o| o.prompt.auto_indent)
-      && let Some(line_content) = self.this_line_content()
-    {
-      match line_content.trim() {
-        "esac" | "done" | "fi" | "}" => {
-          self.calc_indent_level();
-          if self.auto_indent_level < before {
-            let delta = before - self.auto_indent_level;
-            let line_start = self.start_of_line();
-            for _ in 0..delta {
-              if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
-                self.remove(line_start);
-                if !self.cursor_at_max() {
-                  self.cursor.sub(1);
-                }
-              }
-            }
-          }
-        }
-        _ => {}
-      }
-    }
+		if read_shopts(|o| o.prompt.auto_indent) {
+			self.calc_indent_level();
+			if self.auto_indent_level < before {
+				let delta = before - self.auto_indent_level;
+				let line_start = self.start_of_line();
+				for _ in 0..delta {
+					if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
+						self.remove(line_start);
+						if !self.cursor_at_max() {
+							self.cursor.sub(1);
+						}
+					}
+				}
+			}
+		}
   }
   fn verb_insert(&mut self, string: String) {
     self.insert_str_at_cursor(&string);
     let graphemes = string.graphemes(true).count();
     self.cursor.add(graphemes);
   }
+  #[allow(clippy::unnecessary_to_owned)]
   fn verb_indent(&mut self, motion: MotionKind) -> ShResult<()> {
     let Some((start, end)) = self.range_from_motion(&motion) else {
       return Ok(());
@@ -2975,6 +2978,7 @@ impl LineBuf {
     }
     Ok(())
   }
+	#[allow(clippy::unnecessary_to_owned)]
   fn verb_dedent(&mut self, motion: MotionKind) -> ShResult<()> {
     let Some((start, mut end)) = self.range_from_motion(&motion) else {
       return Ok(());
@@ -3198,7 +3202,6 @@ impl LineBuf {
     }
     Ok(())
   }
-  #[allow(clippy::unnecessary_to_owned)]
   pub fn exec_verb(
     &mut self,
     verb: Verb,
@@ -3285,10 +3288,10 @@ impl LineBuf {
 
     /*
      * Let's evaluate the motion now
-     * If we got some weird command like 'dvw' we will have to simulate a visual
-     * selection to get the range If motion is None, we will try to use
-     * self.select_range If self.select_range is None, we will use
-     * MotionKind::Null
+     * If we got some weird command like 'dvw' we will
+		 * have to simulate a visual selection to get the range
+		 * If motion is None, we will try to use self.select_range
+		 * If self.select_range is None, we will use MotionKind::Null
      */
     let motion_eval =
       if flags.intersects(CmdFlags::VISUAL | CmdFlags::VISUAL_LINE | CmdFlags::VISUAL_BLOCK) {

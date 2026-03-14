@@ -1,7 +1,7 @@
 use std::{
   collections::HashSet,
   fmt::{Debug, Write},
-  path::{Path, PathBuf},
+  path::PathBuf,
   sync::Arc,
 };
 

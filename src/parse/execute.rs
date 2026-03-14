@@ -803,7 +803,7 @@ impl Dispatcher {
     self.job_stack.new_job();
     if cmds.len() == 1 {
       self.fg_job = !is_bg && self.interactive;
-      let mut cmd = cmds.into_iter().next().unwrap();
+      let cmd = cmds.into_iter().next().unwrap();
       if is_bg && !matches!(cmd.class, NdRule::Command { .. }) {
         self.run_fork(
           &cmd.get_command().map(|t| t.to_string()).unwrap_or_default(),

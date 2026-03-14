@@ -98,7 +98,7 @@ impl TestGuard {
     }
   }
 
-  pub fn pty_slave(&self) -> BorrowedFd {
+  pub fn pty_slave(&self) -> BorrowedFd<'_> {
     unsafe { BorrowedFd::borrow_raw(self.pty_slave.as_raw_fd()) }
   }
 
@@ -191,7 +191,7 @@ impl crate::parse::Node {
       if offender.is_none()
         && expected_rule
           .as_ref()
-          .map_or(true, |e| *e != s.class.as_nd_kind())
+          .is_none_or(|e| *e != s.class.as_nd_kind())
       {
         offender = Some((s.class.as_nd_kind(), expected_rule));
       } else if offender.is_none() {

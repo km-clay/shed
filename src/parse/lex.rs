@@ -217,6 +217,32 @@ impl Tk {
     };
     self.span.as_str().trim() == ";;"
   }
+
+	pub fn is_opener(&self) -> bool {
+		OPENERS.contains(&self.as_str()) ||
+		matches!(self.class, TkRule::BraceGrpStart) ||
+		matches!(self.class, TkRule::CasePattern)
+	}
+	pub fn is_closer(&self) -> bool {
+		matches!(self.as_str(), "fi" | "done" | "esac") ||
+		self.has_double_semi() ||
+		matches!(self.class, TkRule::BraceGrpEnd)
+	}
+
+	pub fn is_closer_for(&self, other: &Tk) -> bool {
+		if (matches!(other.class, TkRule::BraceGrpStart) && matches!(self.class, TkRule::BraceGrpEnd))
+		|| (matches!(other.class, TkRule::CasePattern) && self.has_double_semi()) {
+			return true;
+		}
+		match other.as_str() {
+			"for"   |
+			"while" |
+			"until" => matches!(self.as_str(), "done"),
+			"if"    => matches!(self.as_str(), "fi"),
+			"case"  => matches!(self.as_str(), "esac"),
+			_ => false
+		}
+	}
 }
 
 impl Display for Tk {

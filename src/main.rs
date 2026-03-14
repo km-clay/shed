@@ -31,7 +31,6 @@ use nix::unistd::read;
 use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{self, ShErr, ShErrKind, ShResult};
-use crate::libsh::guards::scope_guard;
 use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_input};
