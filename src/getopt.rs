@@ -95,14 +95,16 @@ pub fn sort_tks(
     .into_iter()
     .map(|t| t.expand())
     .collect::<ShResult<Vec<_>>>()?
-    .into_iter();
+    .into_iter()
+		.peekable();
   let mut opts = vec![];
   let mut non_opts = vec![];
 
   while let Some(token) = tokens_iter.next() {
     if &token.to_string() == "--" {
-      non_opts.extend(tokens_iter);
-      break;
+			non_opts.push(token);
+			non_opts.extend(tokens_iter);
+			break;
     }
     let parsed_opts = Opt::parse(&token.to_string());
 

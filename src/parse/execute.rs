@@ -319,24 +319,19 @@ impl Dispatcher {
     };
 
     let mut elem_iter = elements.into_iter();
+		let mut skip = false;
     while let Some(element) = elem_iter.next() {
       let ConjunctNode { cmd, operator } = element;
-      self.dispatch_node(*cmd)?;
+			if !skip {
+				self.dispatch_node(*cmd)?;
+			}
 
       let status = state::get_status();
-      match operator {
-        ConjunctOp::And => {
-          if status != 0 {
-            break;
-          }
-        }
-        ConjunctOp::Or => {
-          if status == 0 {
-            break;
-          }
-        }
+      skip = match operator {
+        ConjunctOp::And => status != 0,
+        ConjunctOp::Or => status == 0,
         ConjunctOp::Null => break,
-      }
+      };
     }
     Ok(())
   }
@@ -356,7 +351,7 @@ impl Dispatcher {
     };
     let body_span = body.get_span();
     let body = body_span.as_str().to_string();
-    let name = name.span.as_str().strip_suffix("()").unwrap();
+    let name = name.span.as_str().strip_suffix("()").unwrap_or(name.span.as_str());
 
     if KEYWORDS.contains(&name) {
       return Err(ShErr::at(

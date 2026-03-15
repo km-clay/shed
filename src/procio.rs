@@ -12,7 +12,7 @@ use crate::{
     utils::RedirVecUtils,
   },
   parse::{Redir, RedirType, get_redir_file, lex::TkFlags},
-  prelude::*,
+  prelude::*, state,
 };
 
 // Credit to fish-shell for many of the implementation ideas present in this
@@ -48,8 +48,9 @@ pub enum IoMode {
     pipe: Arc<OwnedFd>,
   },
   Buffer {
+		tgt_fd: RawFd,
     buf: String,
-    pipe: Arc<OwnedFd>,
+		flags: TkFlags, // so we can see if its a heredoc or not
   },
   Close {
     tgt_fd: RawFd,
@@ -109,10 +110,8 @@ impl IoMode {
     }
     Ok(self)
   }
-	pub fn loaded_pipe(tgt_fd: RawFd, buf: &[u8]) -> ShResult<Self> {
-		let (rpipe, wpipe) = nix::unistd::pipe2(OFlag::O_CLOEXEC).unwrap();
-		write(wpipe, buf)?;
-		Ok(Self::Pipe { tgt_fd, pipe: rpipe.into() })
+	pub fn buffer(tgt_fd: RawFd, buf: String, flags: TkFlags) -> ShResult<Self> {
+		Ok(Self::Buffer { tgt_fd, buf, flags })
 	}
   pub fn get_pipes() -> (Self, Self) {
     let (rpipe, wpipe) = nix::unistd::pipe2(OFlag::O_CLOEXEC).unwrap();
@@ -245,25 +244,74 @@ impl<'e> IoFrame {
   fn apply_redirs(&mut self) -> ShResult<()> {
     for redir in &mut self.redirs {
       let io_mode = &mut redir.io_mode;
-      if let IoMode::Close { tgt_fd } = io_mode {
-        if *tgt_fd == *TTY_FILENO {
-          // Don't let user close the shell's tty fd.
-          continue;
-        }
-        close(*tgt_fd).ok();
-        continue;
-      }
-      if let IoMode::File { .. } = io_mode {
-        match io_mode.clone().open_file() {
-          Ok(file) => *io_mode = file,
-          Err(e) => {
-            if let Some(span) = redir.span.as_ref() {
-              return Err(e.promote(span.clone()));
-            }
-            return Err(e)
-          }
-        }
-      };
+			match io_mode {
+				IoMode::Close { tgt_fd } => {
+					if *tgt_fd == *TTY_FILENO {
+						// Don't let user close the shell's tty fd.
+						continue;
+					}
+					close(*tgt_fd).ok();
+					continue;
+				}
+				IoMode::File { .. } => {
+					match io_mode.clone().open_file() {
+						Ok(file) => *io_mode = file,
+						Err(e) => {
+							if let Some(span) = redir.span.as_ref() {
+								return Err(e.promote(span.clone()));
+							}
+							return Err(e)
+						}
+					}
+				}
+				IoMode::Buffer { tgt_fd, buf, flags } => {
+					let (rpipe, wpipe) = nix::unistd::pipe()?;
+					let mut text = if flags.contains(TkFlags::LIT_HEREDOC) {
+						buf.clone()
+					} else {
+						let words = Expander::from_raw(buf, *flags)?.expand()?;
+						if flags.contains(TkFlags::IS_HEREDOC) {
+							words.into_iter().next().unwrap_or_default()
+						} else {
+							let ifs = state::get_separator();
+							words.join(&ifs).trim().to_string() + "\n"
+						}
+					};
+					if flags.contains(TkFlags::TAB_HEREDOC) {
+						let lines = text.lines();
+						let mut min_tabs = usize::MAX;
+						for line in lines {
+							if line.is_empty() { continue; }
+							let line_len = line.len();
+							let after_strip = line.trim_start_matches('\t').len();
+							let delta = line_len - after_strip;
+							min_tabs = min_tabs.min(delta);
+						}
+						if min_tabs == usize::MAX {
+							// let's avoid possibly allocating a string with 18 quintillion tabs
+							min_tabs = 0;
+						}
+
+						if min_tabs > 0 {
+							let stripped = text.lines()
+								.fold(vec![], |mut acc, ln| {
+									if ln.is_empty() {
+										acc.push("");
+										return acc;
+									}
+									let stripped_ln = ln.strip_prefix(&"\t".repeat(min_tabs)).unwrap();
+									acc.push(stripped_ln);
+									acc
+								})
+							.join("\n");
+							text = stripped + "\n";
+						}
+					}
+					write(wpipe, text.as_bytes())?;
+					*io_mode = IoMode::Pipe { tgt_fd: *tgt_fd, pipe: rpipe.into() };
+				}
+				_ => {}
+			}
       let tgt_fd = io_mode.tgt_fd();
       let src_fd = io_mode.src_fd();
       if let Err(e) = dup2(src_fd, tgt_fd) {

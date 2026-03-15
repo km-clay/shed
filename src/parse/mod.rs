@@ -444,45 +444,9 @@ impl TryFrom<Tk> for RedirBldr {
 		let span = tk.span.clone();
 		if tk.flags.contains(TkFlags::IS_HEREDOC) {
 			let flags = tk.flags;
-			let mut heredoc_body = if flags.contains(TkFlags::LIT_HEREDOC) {
-				tk.as_str().to_string()
-			} else {
-				tk.expand()?.get_words().first().map(|s| s.as_str()).unwrap_or_default().to_string()
-			};
-
-			if flags.contains(TkFlags::TAB_HEREDOC) {
-				let lines = heredoc_body.lines();
-				let mut min_tabs = usize::MAX;
-				for line in lines {
-					if line.is_empty() { continue; }
-					let line_len = line.len();
-					let after_strip = line.trim_start_matches('\t').len();
-					let delta = line_len - after_strip;
-					min_tabs = min_tabs.min(delta);
-				}
-				if min_tabs == usize::MAX {
-					// let's avoid possibly allocating a string with 18 quintillion tabs
-					min_tabs = 0;
-				}
-
-				if min_tabs > 0 {
-					let stripped = heredoc_body.lines()
-						.fold(vec![], |mut acc, ln| {
-							if ln.is_empty() {
-								acc.push("");
-								return acc;
-							}
-							let stripped_ln = ln.strip_prefix(&"\t".repeat(min_tabs)).unwrap();
-							acc.push(stripped_ln);
-							acc
-						})
-					.join("\n");
-					heredoc_body = stripped + "\n";
-				}
-			}
 
 			Ok(RedirBldr {
-				io_mode: Some(IoMode::loaded_pipe(0, heredoc_body.as_bytes())?),
+				io_mode: Some(IoMode::buffer(0, tk.to_string(), flags)?),
 				class: Some(RedirType::HereDoc),
 				tgt_fd: Some(0),
 				span: Some(span)
@@ -921,13 +885,26 @@ impl ParseStream {
     let mut node_tks: Vec<Tk> = vec![];
     let body;
 
-    if !is_func_name(self.peek_tk()) {
+    // Two forms: "name()" as one token, or "name" followed by "()" as separate tokens
+    let spaced_form = !is_func_name(self.peek_tk())
+      && self.peek_tk().is_some_and(|tk| tk.flags.contains(TkFlags::IS_CMD))
+      && is_func_parens(self.tokens.get(1));
+
+    if !is_func_name(self.peek_tk()) && !spaced_form {
       return Ok(None);
     }
+
     let name_tk = self.next_tk().unwrap();
     node_tks.push(name_tk.clone());
     let name = name_tk.clone();
-    let name_raw = name.to_string();
+    let name_raw = if spaced_form {
+      // Consume the "()" token
+      let parens_tk = self.next_tk().unwrap();
+      node_tks.push(parens_tk);
+      name.to_string()
+    } else {
+      name.to_string()
+    };
     let mut src = name_tk.span.span_source().clone();
     src.rename(name_raw.clone());
     let color = next_color();
@@ -1155,7 +1132,7 @@ impl ParseStream {
           .get_words()
           .join(" ");
         string.push('\n');
-        let io_mode = IoMode::loaded_pipe(redir_bldr.tgt_fd.unwrap_or(0), string.as_bytes())?;
+        let io_mode = IoMode::buffer(redir_bldr.tgt_fd.unwrap_or(0), string, redir_tk.flags)?;
         Ok(redir_bldr.with_io_mode(io_mode).build())
       }
       _ => {
@@ -1955,6 +1932,12 @@ fn is_func_name(tk: Option<&Tk>) -> bool {
   tk.is_some_and(|tk| {
     tk.flags.contains(TkFlags::KEYWORD)
       && (tk.span.as_str().ends_with("()") && !tk.span.as_str().ends_with("\\()"))
+  })
+}
+
+fn is_func_parens(tk: Option<&Tk>) -> bool {
+  tk.is_some_and(|tk| {
+    tk.flags.contains(TkFlags::KEYWORD) && tk.span.as_str() == "()"
   })
 }
 

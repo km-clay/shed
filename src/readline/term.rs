@@ -481,13 +481,19 @@ impl Perform for KeyCollector {
   }
 
   fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
-    // SS3 sequences (ESC O P/Q/R/S for F1-F4)
+    // SS3 sequences
     if intermediates == [b'O'] {
       let key = match byte {
         b'P' => KeyCode::F(1),
         b'Q' => KeyCode::F(2),
         b'R' => KeyCode::F(3),
         b'S' => KeyCode::F(4),
+				b'A' => KeyCode::Up,
+				b'B' => KeyCode::Down,
+				b'C' => KeyCode::Right,
+				b'D' => KeyCode::Left,
+				b'H' => KeyCode::Home,
+				b'F' => KeyCode::End,
         _ => return,
       };
       self.push(KeyEvent(key, ModKeys::empty()));

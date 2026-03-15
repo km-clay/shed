@@ -875,6 +875,16 @@ impl LexStream {
             ));
           }
         }
+        '(' if can_be_subshell && chars.peek() == Some(&')') => {
+          // standalone "()" — function definition marker
+          pos += 2;
+          chars.next();
+          let mut tk = self.get_token(self.cursor..pos, TkRule::Str);
+          tk.mark(TkFlags::KEYWORD);
+          self.cursor = pos;
+          self.set_next_is_cmd(true);
+          return Ok(tk);
+        }
         '(' if self.next_is_cmd() && can_be_subshell => {
           pos += 1;
           let mut paren_count = 1;

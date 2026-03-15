@@ -51,7 +51,11 @@ impl Expander {
   }
   pub fn from_raw(raw: &str, flags: TkFlags) -> ShResult<Self> {
     let raw = expand_braces_full(raw)?.join(" ");
-    let unescaped = unescape_str(&raw);
+		let unescaped = if flags.contains(TkFlags::IS_HEREDOC) {
+			unescape_heredoc(&raw)
+		} else {
+			unescape_str(&raw)
+		};
     Ok(Self { raw: unescaped, flags })
   }
   pub fn expand(&mut self) -> ShResult<Vec<String>> {
@@ -1159,6 +1163,25 @@ pub fn unescape_str(raw: &str) -> String {
                 }
               }
             }
+            '`' => {
+              result.push(markers::VAR_SUB);
+              result.push(markers::SUBSH);
+              while let Some(bt_ch) = chars.next() {
+                match bt_ch {
+                  '\\' => {
+                    result.push(bt_ch);
+                    if let Some(next_ch) = chars.next() {
+                      result.push(next_ch);
+                    }
+                  }
+                  '`' => {
+                    result.push(markers::SUBSH);
+                    break;
+                  }
+                  _ => result.push(bt_ch),
+                }
+              }
+            }
             '"' => {
               result.push(markers::DUB_QUOTE);
               break;
@@ -1323,12 +1346,121 @@ pub fn unescape_str(raw: &str) -> String {
           result.push('$');
         }
       }
+      '`' => {
+        result.push(markers::VAR_SUB);
+        result.push(markers::SUBSH);
+        while let Some(bt_ch) = chars.next() {
+          match bt_ch {
+            '\\' => {
+              result.push(bt_ch);
+              if let Some(next_ch) = chars.next() {
+                result.push(next_ch);
+              }
+            }
+            '`' => {
+              result.push(markers::SUBSH);
+              break;
+            }
+            _ => result.push(bt_ch),
+          }
+        }
+      }
       _ => result.push(ch),
     }
     first_char = false;
   }
 
   result
+}
+
+/// Like unescape_str but for heredoc bodies. Only processes:
+/// - $var / ${var} / $(cmd) substitution markers
+/// - Backslash escapes (only before $, `, \, and newline)
+/// Everything else (quotes, tildes, globs, process subs, etc.) is literal.
+pub fn unescape_heredoc(raw: &str) -> String {
+	let mut chars = raw.chars().peekable();
+	let mut result = String::new();
+
+	while let Some(ch) = chars.next() {
+		match ch {
+			'\\' => {
+				match chars.peek() {
+					Some('$') | Some('`') | Some('\\') | Some('\n') => {
+						let next_ch = chars.next().unwrap();
+						if next_ch == '\n' {
+							// line continuation — discard both backslash and newline
+							continue;
+						}
+						result.push(markers::ESCAPE);
+						result.push(next_ch);
+					}
+					_ => {
+						// backslash is literal
+						result.push('\\');
+					}
+				}
+			}
+			'$' if chars.peek() == Some(&'(') => {
+				result.push(markers::VAR_SUB);
+				chars.next(); // consume '('
+				result.push(markers::SUBSH);
+				let mut paren_count = 1;
+				while let Some(subsh_ch) = chars.next() {
+					match subsh_ch {
+						'\\' => {
+							result.push(subsh_ch);
+							if let Some(next_ch) = chars.next() {
+								result.push(next_ch);
+							}
+						}
+						'(' => {
+							paren_count += 1;
+							result.push(subsh_ch);
+						}
+						')' => {
+							paren_count -= 1;
+							if paren_count == 0 {
+								result.push(markers::SUBSH);
+								break;
+							} else {
+								result.push(subsh_ch);
+							}
+						}
+						_ => result.push(subsh_ch),
+					}
+				}
+			}
+			'$' => {
+				result.push(markers::VAR_SUB);
+				if chars.peek() == Some(&'$') {
+					chars.next();
+					result.push('$');
+				}
+			}
+			'`' => {
+				result.push(markers::VAR_SUB);
+				result.push(markers::SUBSH);
+				while let Some(bt_ch) = chars.next() {
+					match bt_ch {
+						'\\' => {
+							result.push(bt_ch);
+							if let Some(next_ch) = chars.next() {
+								result.push(next_ch);
+							}
+						}
+						'`' => {
+							result.push(markers::SUBSH);
+							break;
+						}
+						_ => result.push(bt_ch),
+					}
+				}
+			}
+			_ => result.push(ch),
+		}
+	}
+
+	result
 }
 
 /// Opposite of unescape_str - escapes a string to be executed as literal text
