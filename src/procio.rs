@@ -8,6 +8,7 @@ use crate::{
   expand::Expander,
   libsh::{
     error::{ShErr, ShErrKind, ShResult},
+    sys::TTY_FILENO,
     utils::RedirVecUtils,
   },
   parse::{Redir, RedirType, get_redir_file, lex::TkFlags},
@@ -16,6 +17,16 @@ use crate::{
 
 // Credit to fish-shell for many of the implementation ideas present in this
 // module https://fishshell.com/
+
+/// Minimum fd number for shell-internal file descriptors.
+/// User-visible fds (0-9) are kept clear so `exec 3>&-` etc. work as expected.
+const MIN_INTERNAL_FD: RawFd = 10;
+
+/// Like `dup()`, but places the new fd at `MIN_INTERNAL_FD` or above so it
+/// doesn't collide with user-managed fds.
+fn dup_high(fd: RawFd) -> nix::Result<RawFd> {
+  fcntl(fd, FcntlArg::F_DUPFD_CLOEXEC(MIN_INTERNAL_FD))
+}
 
 #[derive(Clone, Debug)]
 pub enum IoMode {
@@ -84,9 +95,16 @@ impl IoMode {
       let expanded_pathbuf = PathBuf::from(expanded_path);
 
       let file = get_redir_file(mode, expanded_pathbuf)?;
+      // Move the opened fd above the user-accessible range so it never
+      // collides with the target fd (e.g. `3>/tmp/foo` where open() returns 3,
+      // causing dup2(3,3) to be a no-op and then OwnedFd drop closes it).
+      let raw = file.as_raw_fd();
+      let high = fcntl(raw, FcntlArg::F_DUPFD_CLOEXEC(MIN_INTERNAL_FD))
+        .map_err(ShErr::from)?;
+      drop(file); // closes the original low fd
       self = IoMode::OpenedFile {
         tgt_fd,
-        file: Arc::new(OwnedFd::from(file)),
+        file: Arc::new(unsafe { OwnedFd::from_raw_fd(high) }),
       }
     }
     Ok(self)
@@ -210,23 +228,53 @@ impl<'e> IoFrame {
     )
   }
   pub fn save(&'e mut self) {
-    let saved_in = dup(STDIN_FILENO).unwrap();
-    let saved_out = dup(STDOUT_FILENO).unwrap();
-    let saved_err = dup(STDERR_FILENO).unwrap();
+    let saved_in = dup_high(STDIN_FILENO).unwrap();
+    let saved_out = dup_high(STDOUT_FILENO).unwrap();
+    let saved_err = dup_high(STDERR_FILENO).unwrap();
     self.saved_io = Some(IoGroup(saved_in, saved_out, saved_err));
   }
   pub fn redirect(mut self) -> ShResult<RedirGuard> {
     self.save();
+    if let Err(e) = self.apply_redirs() {
+      // Restore saved fds before propagating the error so they don't leak.
+      self.restore().ok();
+      return Err(e);
+    }
+    Ok(RedirGuard::new(self))
+  }
+  fn apply_redirs(&mut self) -> ShResult<()> {
     for redir in &mut self.redirs {
       let io_mode = &mut redir.io_mode;
+      if let IoMode::Close { tgt_fd } = io_mode {
+        if *tgt_fd == *TTY_FILENO {
+          // Don't let user close the shell's tty fd.
+          continue;
+        }
+        close(*tgt_fd).ok();
+        continue;
+      }
       if let IoMode::File { .. } = io_mode {
-        *io_mode = io_mode.clone().open_file()?;
+        match io_mode.clone().open_file() {
+          Ok(file) => *io_mode = file,
+          Err(e) => {
+            if let Some(span) = redir.span.as_ref() {
+              return Err(e.promote(span.clone()));
+            }
+            return Err(e)
+          }
+        }
       };
       let tgt_fd = io_mode.tgt_fd();
       let src_fd = io_mode.src_fd();
-      dup2(src_fd, tgt_fd)?;
+      if let Err(e) = dup2(src_fd, tgt_fd) {
+        if let Some(span) = redir.span.as_ref() {
+          return Err(ShErr::from(e).promote(span.clone()));
+        } else {
+          return Err(e.into());
+        }
+      }
     }
-    Ok(RedirGuard::new(self))
+    Ok(())
   }
   pub fn restore(&mut self) -> ShResult<()> {
     if let Some(saved) = self.saved_io.take() {
@@ -338,6 +386,8 @@ pub fn borrow_fd<'f>(fd: i32) -> BorrowedFd<'f> {
 }
 
 type PipeFrames = Map<PipeGenerator, fn((Option<Redir>, Option<Redir>)) -> IoFrame>;
+
+/// An iterator that lazily creates a specific number of pipes.
 pub struct PipeGenerator {
   num_cmds: usize,
   cursor: usize,

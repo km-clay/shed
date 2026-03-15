@@ -147,11 +147,9 @@ impl RawModeGuard {
     let orig = ORIG_TERMIOS
       .with(|cell| cell.borrow().clone())
       .expect("with_cooked_mode called before raw_mode()");
-    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &orig)
-      .expect("Failed to restore cooked mode");
+    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &orig).ok();
     let res = f();
-    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &current)
-      .expect("Failed to restore raw mode");
+    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &current).ok();
     res
   }
 }

@@ -411,37 +411,51 @@ impl LexStream {
             return None; // It's a process sub
           }
           pos += 1;
+					if let Some('|') = chars.peek() {
+						// noclobber force '>|'
+						chars.next();
+						pos += 1;
+						tk = self.get_token(self.cursor..pos, TkRule::Redir);
+						break
+					}
+
           if let Some('>') = chars.peek() {
             chars.next();
             pos += 1;
           }
-          if let Some('&') = chars.peek() {
-            chars.next();
-            pos += 1;
-
-            let mut found_fd = false;
-            while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
-              chars.next();
-              found_fd = true;
-              pos += 1;
-            }
-
-            if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-              let span_start = self.cursor;
-              self.cursor = pos;
-              return Some(Err(ShErr::at(
-                ShErrKind::ParseErr,
-                Span::new(span_start..pos, self.source.clone()),
-                "Invalid redirection",
-              )));
-            } else {
-              tk = self.get_token(self.cursor..pos, TkRule::Redir);
-              break;
-            }
-          } else {
+          let Some('&') = chars.peek() else {
             tk = self.get_token(self.cursor..pos, TkRule::Redir);
             break;
-          }
+          };
+
+					chars.next();
+					pos += 1;
+
+					let mut found_fd = false;
+					if chars.peek().is_some_and(|ch| *ch == '-') {
+						chars.next();
+						found_fd = true;
+						pos += 1;
+					} else {
+						while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+							chars.next();
+							found_fd = true;
+							pos += 1;
+						}
+					}
+
+					if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+						let span_start = self.cursor;
+						self.cursor = pos;
+						return Some(Err(ShErr::at(
+							ShErrKind::ParseErr,
+							Span::new(span_start..pos, self.source.clone()),
+							"Invalid redirection",
+						)));
+					} else {
+						tk = self.get_token(self.cursor..pos, TkRule::Redir);
+						break;
+					}
         }
         '<' => {
           if chars.peek() == Some(&'(') {
@@ -449,53 +463,92 @@ impl LexStream {
           }
           pos += 1;
 
-					if let Some('<') = chars.peek() {
-						chars.next();
-						pos += 1;
+					match chars.peek() {
+						Some('<') => {
+							chars.next();
+							pos += 1;
 
-						match chars.peek() {
-							Some('<') => {
-								chars.next();
-								pos += 1;
-							}
-
-							Some(ch) => {
-								let mut ch = *ch;
-								while is_field_sep(ch) {
-									let Some(next_ch) = chars.next() else {
-										// Incomplete input — fall through to emit << as Redir
-										break;
-									};
-									pos += next_ch.len_utf8();
-									ch = next_ch;
+							match chars.peek() {
+								Some('<') => {
+									chars.next();
+									pos += 1;
 								}
 
-								if is_field_sep(ch) {
-									// Ran out of input while skipping whitespace — fall through
-								} else {
-									let saved_cursor = self.cursor;
-									match self.read_heredoc(pos) {
-										Ok(Some(heredoc_tk)) => {
-											// cursor is set to after the delimiter word;
-											// heredoc_skip is set to after the body
-											pos = self.cursor;
-											self.cursor = saved_cursor;
-											tk = heredoc_tk;
+								Some(ch) => {
+									let mut ch = *ch;
+									while is_field_sep(ch) {
+										let Some(next_ch) = chars.next() else {
+											// Incomplete input — fall through to emit << as Redir
 											break;
+										};
+										pos += next_ch.len_utf8();
+										ch = next_ch;
+									}
+
+									if is_field_sep(ch) {
+										// Ran out of input while skipping whitespace — fall through
+									} else {
+										let saved_cursor = self.cursor;
+										match self.read_heredoc(pos) {
+											Ok(Some(heredoc_tk)) => {
+												// cursor is set to after the delimiter word;
+												// heredoc_skip is set to after the body
+												pos = self.cursor;
+												self.cursor = saved_cursor;
+												tk = heredoc_tk;
+												break;
+											}
+											Ok(None) => {
+												// Incomplete heredoc — restore cursor and fall through
+												self.cursor = saved_cursor;
+											}
+											Err(e) => return Some(Err(e)),
 										}
-										Ok(None) => {
-											// Incomplete heredoc — restore cursor and fall through
-											self.cursor = saved_cursor;
-										}
-										Err(e) => return Some(Err(e)),
 									}
 								}
-							}
-							_ => {
-								// No delimiter yet — input is incomplete
-								// Fall through to emit the << as a Redir token
+								_ => {
+									// No delimiter yet — input is incomplete
+									// Fall through to emit the << as a Redir token
+								}
 							}
 						}
+						Some('>') => {
+							chars.next();
+							pos += 1;
+							tk = self.get_token(self.cursor..pos, TkRule::Redir);
+							break;
+						}
+						Some('&') => {
+							chars.next();
+							pos += 1;
+
+							let mut found_fd = false;
+							if chars.peek().is_some_and(|ch| *ch == '-') {
+								chars.next();
+								found_fd = true;
+								pos += 1;
+							} else {
+								while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+									chars.next();
+									found_fd = true;
+									pos += 1;
+								}
+							}
+
+							if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+								let span_start = self.cursor;
+								self.cursor = pos;
+								return Some(Err(ShErr::at(
+											ShErrKind::ParseErr,
+											Span::new(span_start..pos, self.source.clone()),
+											"Invalid redirection",
+								)));
+							} else {
+								tk = self.get_token(self.cursor..pos, TkRule::Redir);
+								break;
+							}
+						}
+						_ => {}
 					}
 
           tk = self.get_token(self.cursor..pos, TkRule::Redir);
@@ -1049,11 +1102,10 @@ impl Iterator for LexStream {
 
         // If a heredoc was parsed on this line, skip past the body
         // Only on newline — ';' is a command separator within the same line
-        if ch == '\n' || ch == '\r' {
-          if let Some(skip) = self.heredoc_skip.take() {
-            self.cursor = skip;
-          }
-        }
+        if (ch == '\n' || ch == '\r')
+				&& let Some(skip) = self.heredoc_skip.take() {
+					self.cursor = skip;
+				}
 
         while let Some(ch) = get_char(&self.source, self.cursor) {
           match ch {

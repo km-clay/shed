@@ -146,6 +146,7 @@ pub struct ShOptCore {
   pub bell_enabled: bool,
   pub max_recurse_depth: usize,
   pub xpg_echo: bool,
+  pub noclobber: bool,
 }
 
 impl ShOptCore {
@@ -238,6 +239,15 @@ impl ShOptCore {
         };
         self.xpg_echo = val;
       }
+      "noclobber" => {
+        let Ok(val) = val.parse::<bool>() else {
+          return Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            "shopt: expected 'true' or 'false' for noclobber value",
+          ));
+        };
+        self.noclobber = val;
+      }
       _ => {
         return Err(ShErr::simple(
           ShErrKind::SyntaxErr,
@@ -304,6 +314,11 @@ impl ShOptCore {
         output.push_str(&format!("{}", self.xpg_echo));
         Ok(Some(output))
       }
+      "noclobber" => {
+        let mut output = String::from("Prevent > from overwriting existing files (use >| to override)\n");
+        output.push_str(&format!("{}", self.noclobber));
+        Ok(Some(output))
+      }
       _ => Err(ShErr::simple(
         ShErrKind::SyntaxErr,
         format!("shopt: Unexpected 'core' option '{query}'"),
@@ -327,6 +342,7 @@ impl Display for ShOptCore {
     output.push(format!("bell_enabled = {}", self.bell_enabled));
     output.push(format!("max_recurse_depth = {}", self.max_recurse_depth));
     output.push(format!("xpg_echo = {}", self.xpg_echo));
+    output.push(format!("noclobber = {}", self.noclobber));
 
     let final_output = output.join("\n");
 
@@ -346,6 +362,7 @@ impl Default for ShOptCore {
       bell_enabled: true,
       max_recurse_depth: 1000,
       xpg_echo: false,
+      noclobber: false,
     }
   }
 }
@@ -589,6 +606,7 @@ mod tests {
       bell_enabled,
       max_recurse_depth,
       xpg_echo,
+      noclobber,
     } = ShOptCore::default();
     // If a field is added to the struct, this destructure fails to compile.
     let _ = (
@@ -601,6 +619,7 @@ mod tests {
       bell_enabled,
       max_recurse_depth,
       xpg_echo,
+      noclobber,
     );
   }
 

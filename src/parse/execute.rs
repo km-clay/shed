@@ -8,28 +8,7 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias},
-    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
-    autocmd::autocmd,
-    cd::cd,
-    complete::{compgen_builtin, complete_builtin},
-    dirstack::{dirs, popd, pushd},
-    echo::echo,
-    eval, exec,
-    flowctl::flowctl,
-    getopts::getopts,
-    intro,
-    jobctl::{self, JobBehavior, continue_job, disown, jobs},
-    keymap, map,
-    pwd::pwd,
-    read::{self, read_builtin},
-    resource::{ulimit, umask_builtin},
-    shift::shift,
-    shopt::shopt,
-    source::source,
-    test::double_bracket_test,
-    trap::{TrapTarget, trap},
-    varcmds::{export, local, readonly, unset},
+    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, seek::seek, map, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -888,7 +867,10 @@ impl Dispatcher {
 
     if fork_builtins {
       log::trace!("Forking builtin: {}", cmd_raw);
-      let _guard = self.io_stack.pop_frame().redirect()?;
+      let guard = self.io_stack.pop_frame().redirect()?;
+			if cmd_raw.as_str() == "exec" {
+				guard.persist();
+			}
       self.run_fork(&cmd_raw, |s| {
         if let Err(e) = s.dispatch_builtin(cmd) {
           e.print_error();
@@ -1013,6 +995,7 @@ impl Dispatcher {
       "autocmd" => autocmd(cmd),
       "ulimit" => ulimit(cmd),
       "umask" => umask_builtin(cmd),
+			"seek" => seek(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())

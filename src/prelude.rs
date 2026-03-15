@@ -19,7 +19,7 @@ pub use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, 
 pub use bitflags::bitflags;
 pub use nix::{
   errno::Errno,
-  fcntl::{OFlag, open},
+  fcntl::{FcntlArg, OFlag, fcntl, open},
   libc::{self, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
   sys::{
     signal::{self, SigHandler, SigSet, SigmaskHow, Signal, kill, killpg, pthread_sigmask, signal},

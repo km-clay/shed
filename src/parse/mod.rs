@@ -12,7 +12,7 @@ use crate::{
   },
   parse::lex::clean_input,
   prelude::*,
-  procio::IoMode,
+  procio::IoMode, state::read_shopts,
 };
 
 pub mod execute;
@@ -280,12 +280,17 @@ bitflags! {
 pub struct Redir {
   pub io_mode: IoMode,
   pub class: RedirType,
+	pub span: Option<Span>
 }
 
 impl Redir {
   pub fn new(io_mode: IoMode, class: RedirType) -> Self {
-    Self { io_mode, class }
+    Self { io_mode, class, span: None }
   }
+	pub fn with_span(mut self, span: Span) -> Self {
+		self.span = Some(span);
+		self
+	}
 }
 
 #[derive(Default, Debug)]
@@ -293,6 +298,7 @@ pub struct RedirBldr {
   pub io_mode: Option<IoMode>,
   pub class: Option<RedirType>,
   pub tgt_fd: Option<RawFd>,
+	pub span: Option<Span>,
 }
 
 impl RedirBldr {
@@ -300,43 +306,36 @@ impl RedirBldr {
     Default::default()
   }
   pub fn with_io_mode(self, io_mode: IoMode) -> Self {
-    let Self {
-      io_mode: _,
-      class,
-      tgt_fd,
-    } = self;
-    Self {
-      io_mode: Some(io_mode),
-      class,
-      tgt_fd,
-    }
+		Self {
+			io_mode: Some(io_mode),
+			..self
+		}
   }
   pub fn with_class(self, class: RedirType) -> Self {
-    let Self {
-      io_mode,
-      class: _,
-      tgt_fd,
-    } = self;
-    Self {
-      io_mode,
-      class: Some(class),
-      tgt_fd,
-    }
+		Self {
+			class: Some(class),
+			..self
+		}
   }
   pub fn with_tgt(self, tgt_fd: RawFd) -> Self {
-    let Self {
-      io_mode,
-      class,
-      tgt_fd: _,
-    } = self;
-    Self {
-      io_mode,
-      class,
-      tgt_fd: Some(tgt_fd),
-    }
+		Self {
+			tgt_fd: Some(tgt_fd),
+			..self
+		}
   }
+	pub fn with_span(self, span: Span) -> Self {
+		Self {
+			span: Some(span),
+			..self
+		}
+	}
   pub fn build(self) -> Redir {
-    Redir::new(self.io_mode.unwrap(), self.class.unwrap())
+    let new = Redir::new(self.io_mode.unwrap(), self.class.unwrap());
+		if let Some(span) = self.span {
+			new.with_span(span)
+		} else {
+			new
+		}
   }
 }
 
@@ -355,16 +354,24 @@ impl FromStr for RedirBldr {
           if let Some('>') = chars.peek() {
             chars.next();
             redir = redir.with_class(RedirType::Append);
-          }
+          } else if let Some('|') = chars.peek() {
+						chars.next();
+						redir = redir.with_class(RedirType::OutputForce);
+					}
         }
         '<' => {
           redir = redir.with_class(RedirType::Input);
           let mut count = 0;
 
-          while count < 2 && matches!(chars.peek(), Some('<')) {
-            chars.next();
-            count += 1;
-          }
+					if chars.peek() == Some(&'>') {
+						chars.next(); // consume the '>'
+						redir = redir.with_class(RedirType::ReadWrite);
+					} else {
+						while count < 2 && matches!(chars.peek(), Some('<')) {
+							chars.next();
+							count += 1;
+						}
+					}
 
           redir = match count {
             1 => redir.with_class(RedirType::HereDoc),
@@ -373,13 +380,18 @@ impl FromStr for RedirBldr {
           };
         }
         '&' => {
-          while let Some(next_ch) = chars.next() {
-            if next_ch.is_ascii_digit() {
-              src_fd.push(next_ch)
-            } else {
-              break;
-            }
-          }
+					if chars.peek() == Some(&'-') {
+						chars.next();
+						src_fd.push('-');
+					} else {
+						while let Some(next_ch) = chars.next() {
+							if next_ch.is_ascii_digit() {
+								src_fd.push(next_ch)
+							} else {
+								break;
+							}
+						}
+					}
           if src_fd.is_empty() {
 						return Err(ShErr::simple(
 							ShErrKind::ParseErr,
@@ -405,15 +417,20 @@ impl FromStr for RedirBldr {
       }
     }
 
-    // FIXME: I am 99.999999999% sure that tgt_fd and src_fd are backwards here
     let tgt_fd = tgt_fd
       .parse::<i32>()
       .unwrap_or_else(|_| match redir.class.unwrap() {
-        RedirType::Input | RedirType::HereDoc | RedirType::HereString => 0,
+        RedirType::Input |
+				RedirType::ReadWrite |
+				RedirType::HereDoc |
+				RedirType::HereString => 0,
         _ => 1,
       });
     redir = redir.with_tgt(tgt_fd);
-    if let Ok(src_fd) = src_fd.parse::<i32>() {
+		if src_fd.as_str() == "-" {
+			let io_mode = IoMode::Close { tgt_fd };
+			redir = redir.with_io_mode(io_mode);
+		} else if let Ok(src_fd) = src_fd.parse::<i32>() {
       let io_mode = IoMode::fd(tgt_fd, src_fd);
       redir = redir.with_io_mode(io_mode);
     }
@@ -424,6 +441,7 @@ impl FromStr for RedirBldr {
 impl TryFrom<Tk> for RedirBldr {
 	type Error = ShErr;
 	fn try_from(tk: Tk) -> Result<Self, Self::Error> {
+		let span = tk.span.clone();
 		if tk.flags.contains(TkFlags::IS_HEREDOC) {
 			let flags = tk.flags;
 			let mut heredoc_body = if flags.contains(TkFlags::LIT_HEREDOC) {
@@ -466,10 +484,14 @@ impl TryFrom<Tk> for RedirBldr {
 			Ok(RedirBldr {
 				io_mode: Some(IoMode::loaded_pipe(0, heredoc_body.as_bytes())?),
 				class: Some(RedirType::HereDoc),
-				tgt_fd: Some(0)
+				tgt_fd: Some(0),
+				span: Some(span)
 			})
 		} else {
-			Self::from_str(tk.as_str())
+			match Self::from_str(tk.as_str()) {
+				Ok(bldr) => Ok(bldr.with_span(span)),
+				Err(e) => Err(e.promote(span)),
+			}
 		}
 	}
 }
@@ -481,10 +503,12 @@ pub enum RedirType {
   PipeAnd,    // |&, redirs stderr and stdout
   Input,      // <
   Output,     // >
+	OutputForce,// >|
   Append,     // >>
   HereDoc,    // <<
 	IndentHereDoc, // <<-, strips leading tabs
   HereString, // <<<
+	ReadWrite,  // <>, fd is opened for reading and writing
 }
 
 #[derive(Clone, Debug)]
@@ -1881,11 +1905,34 @@ pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<Fil
   let path = path.as_ref();
   let result = match class {
     RedirType::Input => OpenOptions::new().read(true).open(Path::new(&path)),
-    RedirType::Output => OpenOptions::new()
-      .write(true)
-      .create(true)
-      .truncate(true)
-      .open(path),
+		RedirType::Output => {
+			if read_shopts(|o| o.core.noclobber) && path.is_file() {
+				return Err(ShErr::simple(
+					ShErrKind::ExecFail,
+					format!("shopt core.noclobber is set, refusing to overwrite existing file `{}`", path.display()),
+				));
+			}
+			OpenOptions::new()
+				.write(true)
+				.create(true)
+				.truncate(true)
+				.open(path)
+		},
+		RedirType::ReadWrite => {
+			OpenOptions::new()
+				.write(true)
+				.read(true)
+				.create(true)
+				.truncate(false)
+				.open(path)
+		}
+		RedirType::OutputForce => {
+			OpenOptions::new()
+				.write(true)
+				.create(true)
+				.truncate(true)
+				.open(path)
+		}
     RedirType::Append => OpenOptions::new().create(true).append(true).open(path),
     _ => unimplemented!("Unimplemented redir type: {:?}", class),
   };
