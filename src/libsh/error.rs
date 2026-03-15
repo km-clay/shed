@@ -201,7 +201,7 @@ impl ShErr {
   pub fn is_flow_control(&self) -> bool {
     self.kind.is_flow_control()
   }
-	/// Promotes a shell error from a simple error to an error that blames a span
+  /// Promotes a shell error from a simple error to an error that blames a span
   pub fn promote(mut self, span: Span) -> Self {
     if self.notes.is_empty() {
       return self;
@@ -210,8 +210,8 @@ impl ShErr {
     if self.notes.len() > 1 {
       self.notes = self.notes[1..].to_vec();
     } else {
-			self.notes = vec![];
-		}
+      self.notes = vec![];
+    }
 
     self.labeled(span, first)
   }

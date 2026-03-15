@@ -315,7 +315,8 @@ impl ShOptCore {
         Ok(Some(output))
       }
       "noclobber" => {
-        let mut output = String::from("Prevent > from overwriting existing files (use >| to override)\n");
+        let mut output =
+          String::from("Prevent > from overwriting existing files (use >| to override)\n");
         output.push_str(&format!("{}", self.noclobber));
         Ok(Some(output))
       }

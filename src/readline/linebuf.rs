@@ -352,69 +352,73 @@ impl ClampedUsize {
 
 #[derive(Default, Clone, Debug)]
 pub struct IndentCtx {
-	depth: usize,
-	ctx: Vec<Tk>,
-	in_escaped_line: bool
+  depth: usize,
+  ctx: Vec<Tk>,
+  in_escaped_line: bool,
 }
 
 impl IndentCtx {
-	pub fn new() -> Self { Self::default() }
+  pub fn new() -> Self {
+    Self::default()
+  }
 
-	pub fn depth(&self) -> usize {
-		self.depth
-	}
+  pub fn depth(&self) -> usize {
+    self.depth
+  }
 
-	pub fn ctx(&self) -> &[Tk] {
-		&self.ctx
-	}
+  pub fn ctx(&self) -> &[Tk] {
+    &self.ctx
+  }
 
-	pub fn descend(&mut self, tk: Tk) {
-		self.ctx.push(tk);
-		self.depth += 1;
-	}
+  pub fn descend(&mut self, tk: Tk) {
+    self.ctx.push(tk);
+    self.depth += 1;
+  }
 
-	pub fn ascend(&mut self) {
-		self.depth = self.depth.saturating_sub(1);
-		self.ctx.pop();
-	}
+  pub fn ascend(&mut self) {
+    self.depth = self.depth.saturating_sub(1);
+    self.ctx.pop();
+  }
 
-	pub fn reset(&mut self) {
-		std::mem::take(self);
-	}
+  pub fn reset(&mut self) {
+    std::mem::take(self);
+  }
 
-	pub fn check_tk(&mut self, tk: Tk) {
-		if tk.is_opener() {
-			self.descend(tk);
-		} else if self.ctx.last().is_some_and(|t| tk.is_closer_for(t)) {
-			self.ascend();
-		} else if matches!(tk.class, TkRule::Sep) && self.in_escaped_line {
-			self.in_escaped_line = false;
-			self.depth = self.depth.saturating_sub(1);
-		}
-	}
+  pub fn check_tk(&mut self, tk: Tk) {
+    if tk.is_opener() {
+      self.descend(tk);
+    } else if self.ctx.last().is_some_and(|t| tk.is_closer_for(t)) {
+      self.ascend();
+    } else if matches!(tk.class, TkRule::Sep) && self.in_escaped_line {
+      self.in_escaped_line = false;
+      self.depth = self.depth.saturating_sub(1);
+    }
+  }
 
-	pub fn calculate(&mut self, input: &str) -> usize {
-		self.depth = 0;
-		self.ctx.clear();
-		self.in_escaped_line = false;
+  pub fn calculate(&mut self, input: &str) -> usize {
+    self.depth = 0;
+    self.ctx.clear();
+    self.in_escaped_line = false;
 
-		let input_arc = Arc::new(input.to_string());
-    let Ok(tokens) = LexStream::new(input_arc, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>() else {
-			log::error!("Lexing failed during depth calculation: {:?}", input);
-			return 0;
-		};
+    let input_arc = Arc::new(input.to_string());
+    let Ok(tokens) =
+      LexStream::new(input_arc, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()
+    else {
+      log::error!("Lexing failed during depth calculation: {:?}", input);
+      return 0;
+    };
 
-		for tk in tokens {
-			self.check_tk(tk);
-		}
+    for tk in tokens {
+      self.check_tk(tk);
+    }
 
     if input.ends_with("\\\n") {
-			self.in_escaped_line = true;
+      self.in_escaped_line = true;
       self.depth += 1;
     }
 
-		self.depth
-	}
+    self.depth
+  }
 }
 
 #[derive(Default, Clone, Debug)]
@@ -684,17 +688,17 @@ impl LineBuf {
   pub fn read_slice_to_cursor(&self) -> Option<&str> {
     self.read_slice_to(self.cursor.get())
   }
-	pub fn cursor_is_escaped(&mut self) -> bool {
-		let Some(to_cursor) = self.slice_to_cursor() else {
-			return false;
-		};
+  pub fn cursor_is_escaped(&mut self) -> bool {
+    let Some(to_cursor) = self.slice_to_cursor() else {
+      return false;
+    };
 
-		// count the number of backslashes
-		let delta = to_cursor.len() - to_cursor.trim_end_matches('\\').len();
+    // count the number of backslashes
+    let delta = to_cursor.len() - to_cursor.trim_end_matches('\\').len();
 
-		// an even number of backslashes means each one is escaped
-		delta % 2 != 0
-	}
+    // an even number of backslashes means each one is escaped
+    delta % 2 != 0
+  }
   pub fn slice_to_cursor_inclusive(&mut self) -> Option<&str> {
     self.slice_to(self.cursor.ret_add(1))
   }
@@ -2928,29 +2932,29 @@ impl LineBuf {
     };
     end = end.saturating_sub(1);
     let mut last_was_whitespace = false;
-		let mut last_was_escape = false;
-		let mut i = start;
+    let mut last_was_escape = false;
+    let mut i = start;
     while i < end {
       let Some(gr) = self.grapheme_at(i) else {
-				i += 1;
+        i += 1;
         continue;
       };
       if gr == "\n" {
         if last_was_whitespace {
           self.remove(i);
-					end -= 1;
+          end -= 1;
         } else {
           self.force_replace_at(i, " ");
         }
-				if last_was_escape {
-					// if we are here, then we just joined an escaped newline
-					// semantically, echo foo\\nbar == echo foo bar
-					// so a joined line should remove the escape.
-					self.remove(i - 1);
-					end -= 1;
-				}
+        if last_was_escape {
+          // if we are here, then we just joined an escaped newline
+          // semantically, echo foo\\nbar == echo foo bar
+          // so a joined line should remove the escape.
+          self.remove(i - 1);
+          end -= 1;
+        }
         last_was_whitespace = false;
-				last_was_escape = false;
+        last_was_escape = false;
         let strip_pos = if self.grapheme_at(i) == Some(" ") {
           i + 1
         } else {
@@ -2958,24 +2962,24 @@ impl LineBuf {
         };
         while self.grapheme_at(strip_pos) == Some("\t") {
           self.remove(strip_pos);
-					end -= 1;
+          end -= 1;
         }
         self.cursor.set(i);
-				i += 1;
+        i += 1;
         continue;
       } else if gr == "\\" {
-				if last_was_whitespace && last_was_escape {
-					// if we are here, then the pattern of the last three chars was this:
-					// ' \\', a space and two backslashes.
-					// This means the "last" was an escaped backslash, not whitespace.
-					last_was_whitespace = false;
-				}
-				last_was_escape = !last_was_escape;
-			} else {
-				last_was_whitespace = is_whitespace(gr);
-				last_was_escape = false;
-			}
-			i += 1;
+        if last_was_whitespace && last_was_escape {
+          // if we are here, then the pattern of the last three chars was this:
+          // ' \\', a space and two backslashes.
+          // This means the "last" was an escaped backslash, not whitespace.
+          last_was_whitespace = false;
+        }
+        last_was_escape = !last_was_escape;
+      } else {
+        last_was_whitespace = is_whitespace(gr);
+        last_was_escape = false;
+      }
+      i += 1;
     }
     Ok(())
   }
@@ -2984,24 +2988,23 @@ impl LineBuf {
     self.cursor.add(1);
     let before_escaped = self.indent_ctx.in_escaped_line;
     let before = self.indent_ctx.depth();
-		if read_shopts(|o| o.prompt.auto_indent) {
-			let after = self.calc_indent_level();
-			// Only dedent if the depth decrease came from a closer, not from
-			// a line continuation bonus going away
-			if after < before
-			&& !(before_escaped && !self.indent_ctx.in_escaped_line) {
-				let delta = before - after;
-				let line_start = self.start_of_line();
-				for _ in 0..delta {
-					if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
-						self.remove(line_start);
-						if !self.cursor_at_max() {
-							self.cursor.sub(1);
-						}
-					}
-				}
-			}
-		}
+    if read_shopts(|o| o.prompt.auto_indent) {
+      let after = self.calc_indent_level();
+      // Only dedent if the depth decrease came from a closer, not from
+      // a line continuation bonus going away
+      if after < before && !(before_escaped && !self.indent_ctx.in_escaped_line) {
+        let delta = before - after;
+        let line_start = self.start_of_line();
+        for _ in 0..delta {
+          if self.grapheme_at(line_start).is_some_and(|gr| gr == "\t") {
+            self.remove(line_start);
+            if !self.cursor_at_max() {
+              self.cursor.sub(1);
+            }
+          }
+        }
+      }
+    }
   }
   fn verb_insert(&mut self, string: String) {
     self.insert_str_at_cursor(&string);
@@ -3038,7 +3041,7 @@ impl LineBuf {
     }
     Ok(())
   }
-	#[allow(clippy::unnecessary_to_owned)]
+  #[allow(clippy::unnecessary_to_owned)]
   fn verb_dedent(&mut self, motion: MotionKind) -> ShResult<()> {
     let Some((start, mut end)) = self.range_from_motion(&motion) else {
       return Ok(());
@@ -3270,27 +3273,27 @@ impl LineBuf {
   ) -> ShResult<()> {
     match verb {
       Verb::Delete | Verb::Yank | Verb::Change => self.verb_ydc(motion, register, verb)?,
-      Verb::Rot13                              => self.verb_rot13(motion)?,
-      Verb::ReplaceChar(ch)                    => self.verb_replace_char(motion, ch)?,
-      Verb::ReplaceCharInplace(ch, count)      => self.verb_replace_char_inplace(ch, count)?,
-      Verb::ToggleCaseInplace(count)           => self.verb_toggle_case_inplace(count),
-      Verb::ToggleCaseRange                    => self.verb_case_transform(motion, CaseTransform::Toggle)?,
-      Verb::ToLower                            => self.verb_case_transform(motion, CaseTransform::Lower)?,
-      Verb::ToUpper                            => self.verb_case_transform(motion, CaseTransform::Upper)?,
-      Verb::Redo | Verb::Undo                  => self.verb_undo_redo(verb)?,
-      Verb::RepeatLast                         => todo!(),
-      Verb::Put(anchor)                        => self.verb_put(anchor, register)?,
-      Verb::SwapVisualAnchor                   => self.verb_swap_visual_anchor(),
-      Verb::JoinLines                          => self.verb_join_lines()?,
-      Verb::InsertChar(ch)                     => self.verb_insert_char(ch),
-      Verb::Insert(string)                     => self.verb_insert(string),
-      Verb::Indent                             => self.verb_indent(motion)?,
-      Verb::Dedent                             => self.verb_dedent(motion)?,
-      Verb::Equalize                           => todo!(),
-      Verb::InsertModeLineBreak(anchor)        => self.verb_insert_mode_line_break(anchor)?,
-      Verb::AcceptLineOrNewline                => self.verb_accept_line_or_newline()?,
-      Verb::IncrementNumber(n)                 => self.verb_adjust_number(n as i64)?,
-      Verb::DecrementNumber(n)                 => self.verb_adjust_number(-(n as i64))?,
+      Verb::Rot13 => self.verb_rot13(motion)?,
+      Verb::ReplaceChar(ch) => self.verb_replace_char(motion, ch)?,
+      Verb::ReplaceCharInplace(ch, count) => self.verb_replace_char_inplace(ch, count)?,
+      Verb::ToggleCaseInplace(count) => self.verb_toggle_case_inplace(count),
+      Verb::ToggleCaseRange => self.verb_case_transform(motion, CaseTransform::Toggle)?,
+      Verb::ToLower => self.verb_case_transform(motion, CaseTransform::Lower)?,
+      Verb::ToUpper => self.verb_case_transform(motion, CaseTransform::Upper)?,
+      Verb::Redo | Verb::Undo => self.verb_undo_redo(verb)?,
+      Verb::RepeatLast => todo!(),
+      Verb::Put(anchor) => self.verb_put(anchor, register)?,
+      Verb::SwapVisualAnchor => self.verb_swap_visual_anchor(),
+      Verb::JoinLines => self.verb_join_lines()?,
+      Verb::InsertChar(ch) => self.verb_insert_char(ch),
+      Verb::Insert(string) => self.verb_insert(string),
+      Verb::Indent => self.verb_indent(motion)?,
+      Verb::Dedent => self.verb_dedent(motion)?,
+      Verb::Equalize => todo!(),
+      Verb::InsertModeLineBreak(anchor) => self.verb_insert_mode_line_break(anchor)?,
+      Verb::AcceptLineOrNewline => self.verb_accept_line_or_newline()?,
+      Verb::IncrementNumber(n) => self.verb_adjust_number(n as i64)?,
+      Verb::DecrementNumber(n) => self.verb_adjust_number(-(n as i64))?,
       Verb::Complete
       | Verb::ExMode
       | Verb::EndOfFile
@@ -3349,9 +3352,9 @@ impl LineBuf {
     /*
      * Let's evaluate the motion now
      * If we got some weird command like 'dvw' we will
-		 * have to simulate a visual selection to get the range
-		 * If motion is None, we will try to use self.select_range
-		 * If self.select_range is None, we will use MotionKind::Null
+     * have to simulate a visual selection to get the range
+     * If motion is None, we will try to use self.select_range
+     * If self.select_range is None, we will use MotionKind::Null
      */
     let motion_eval =
       if flags.intersects(CmdFlags::VISUAL | CmdFlags::VISUAL_LINE | CmdFlags::VISUAL_BLOCK) {

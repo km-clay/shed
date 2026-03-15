@@ -1330,14 +1330,14 @@ impl VarTab {
         .get(&ShellParam::Status)
         .map(|s| s.to_string())
         .unwrap_or("0".into()),
-			ShellParam::AllArgsStr => {
-				let ifs = get_separator();
-				self
-					.params
-					.get(&ShellParam::AllArgs)
-					.map(|s| s.replace(markers::ARG_SEP, &ifs).to_string())
-					.unwrap_or_default()
-			}
+      ShellParam::AllArgsStr => {
+        let ifs = get_separator();
+        self
+          .params
+          .get(&ShellParam::AllArgs)
+          .map(|s| s.replace(markers::ARG_SEP, &ifs).to_string())
+          .unwrap_or_default()
+      }
 
       _ => self
         .params
@@ -1852,12 +1852,12 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
 }
 
 pub fn get_separator() -> String {
-	env::var("IFS")
-		.unwrap_or(String::from(" "))
-		.chars()
-		.next()
-		.unwrap()
-		.to_string()
+  env::var("IFS")
+    .unwrap_or(String::from(" "))
+    .chars()
+    .next()
+    .unwrap()
+    .to_string()
 }
 
 pub fn get_status() -> i32 {

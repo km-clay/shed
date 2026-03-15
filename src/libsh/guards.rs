@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::os::fd::{BorrowedFd, RawFd};
 
 use nix::sys::termios::{self, LocalFlags, Termios, tcgetattr, tcsetattr};
-use nix::unistd::isatty;
+use nix::unistd::{isatty, write};
 use scopeguard::guard;
 
 thread_local! {
@@ -150,6 +150,7 @@ impl RawModeGuard {
     tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &orig).ok();
     let res = f();
     tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &current).ok();
+    unsafe { write(BorrowedFd::borrow_raw(*TTY_FILENO), b"\x1b[?1l\x1b>").ok() };
     res
   }
 }
@@ -157,11 +158,12 @@ impl RawModeGuard {
 impl Drop for RawModeGuard {
   fn drop(&mut self) {
     unsafe {
-      let _ = termios::tcsetattr(
+      termios::tcsetattr(
         BorrowedFd::borrow_raw(self.fd),
         termios::SetArg::TCSANOW,
         &self.orig,
-      );
+      )
+      .ok();
     }
   }
 }

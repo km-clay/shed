@@ -294,12 +294,14 @@ impl Read for TermBuffer {
 
 struct KeyCollector {
   events: VecDeque<KeyEvent>,
+  ss3_pending: bool,
 }
 
 impl KeyCollector {
   fn new() -> Self {
     Self {
       events: VecDeque::new(),
+      ss3_pending: false,
     }
   }
 
@@ -337,7 +339,55 @@ impl Default for KeyCollector {
 
 impl Perform for KeyCollector {
   fn print(&mut self, c: char) {
+    log::trace!("print: {c:?}");
     // vte routes 0x7f (DEL) to print instead of execute
+    if self.ss3_pending {
+      self.ss3_pending = false;
+      match c {
+        'A' => {
+          self.push(KeyEvent(KeyCode::Up, ModKeys::empty()));
+          return;
+        }
+        'B' => {
+          self.push(KeyEvent(KeyCode::Down, ModKeys::empty()));
+          return;
+        }
+        'C' => {
+          self.push(KeyEvent(KeyCode::Right, ModKeys::empty()));
+          return;
+        }
+        'D' => {
+          self.push(KeyEvent(KeyCode::Left, ModKeys::empty()));
+          return;
+        }
+        'H' => {
+          self.push(KeyEvent(KeyCode::Home, ModKeys::empty()));
+          return;
+        }
+        'F' => {
+          self.push(KeyEvent(KeyCode::End, ModKeys::empty()));
+          return;
+        }
+        'P' => {
+          self.push(KeyEvent(KeyCode::F(1), ModKeys::empty()));
+          return;
+        }
+        'Q' => {
+          self.push(KeyEvent(KeyCode::F(2), ModKeys::empty()));
+          return;
+        }
+        'R' => {
+          self.push(KeyEvent(KeyCode::F(3), ModKeys::empty()));
+          return;
+        }
+        'S' => {
+          self.push(KeyEvent(KeyCode::F(4), ModKeys::empty()));
+          return;
+        }
+        _ => {}
+      }
+    }
+
     if c == '\x7f' {
       self.push(KeyEvent(KeyCode::Backspace, ModKeys::empty()));
     } else {
@@ -346,6 +396,7 @@ impl Perform for KeyCollector {
   }
 
   fn execute(&mut self, byte: u8) {
+    log::trace!("execute: {byte:#04x}");
     let event = match byte {
       0x00 => KeyEvent(KeyCode::Char(' '), ModKeys::CTRL), // Ctrl+Space / Ctrl+@
       0x09 => KeyEvent(KeyCode::Tab, ModKeys::empty()),    // Tab (Ctrl+I)
@@ -370,6 +421,9 @@ impl Perform for KeyCollector {
     _ignore: bool,
     action: char,
   ) {
+    log::trace!(
+      "CSI dispatch: params={params:?}, intermediates={intermediates:?}, action={action:?}"
+    );
     let params: Vec<u16> = params
       .iter()
       .map(|p| p.first().copied().unwrap_or(0))
@@ -481,22 +535,11 @@ impl Perform for KeyCollector {
   }
 
   fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+    log::trace!("ESC dispatch: intermediates={intermediates:?}, byte={byte:#04x}");
     // SS3 sequences
-    if intermediates == [b'O'] {
-      let key = match byte {
-        b'P' => KeyCode::F(1),
-        b'Q' => KeyCode::F(2),
-        b'R' => KeyCode::F(3),
-        b'S' => KeyCode::F(4),
-				b'A' => KeyCode::Up,
-				b'B' => KeyCode::Down,
-				b'C' => KeyCode::Right,
-				b'D' => KeyCode::Left,
-				b'H' => KeyCode::Home,
-				b'F' => KeyCode::End,
-        _ => return,
-      };
-      self.push(KeyEvent(key, ModKeys::empty()));
+    if byte == b'O' {
+      self.ss3_pending = true;
+      return;
     }
   }
 }

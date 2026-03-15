@@ -40,7 +40,7 @@ impl Tk {
 }
 
 pub struct Expander {
-	flags: TkFlags,
+  flags: TkFlags,
   raw: String,
 }
 
@@ -51,12 +51,15 @@ impl Expander {
   }
   pub fn from_raw(raw: &str, flags: TkFlags) -> ShResult<Self> {
     let raw = expand_braces_full(raw)?.join(" ");
-		let unescaped = if flags.contains(TkFlags::IS_HEREDOC) {
-			unescape_heredoc(&raw)
-		} else {
-			unescape_str(&raw)
-		};
-    Ok(Self { raw: unescaped, flags })
+    let unescaped = if flags.contains(TkFlags::IS_HEREDOC) {
+      unescape_heredoc(&raw)
+    } else {
+      unescape_str(&raw)
+    };
+    Ok(Self {
+      raw: unescaped,
+      flags,
+    })
   }
   pub fn expand(&mut self) -> ShResult<Vec<String>> {
     let mut chars = self.raw.chars().peekable();
@@ -80,11 +83,11 @@ impl Expander {
       self.raw.insert_str(0, "./");
     }
 
-		if self.flags.contains(TkFlags::IS_HEREDOC) {
-			Ok(vec![self.raw.clone()])
-		} else {
-			Ok(self.split_words())
-		}
+    if self.flags.contains(TkFlags::IS_HEREDOC) {
+      Ok(vec![self.raw.clone()])
+    } else {
+      Ok(self.split_words())
+    }
   }
   pub fn split_words(&mut self) -> Vec<String> {
     let mut words = vec![];
@@ -1378,89 +1381,89 @@ pub fn unescape_str(raw: &str) -> String {
 /// - Backslash escapes (only before $, `, \, and newline)
 /// Everything else (quotes, tildes, globs, process subs, etc.) is literal.
 pub fn unescape_heredoc(raw: &str) -> String {
-	let mut chars = raw.chars().peekable();
-	let mut result = String::new();
+  let mut chars = raw.chars().peekable();
+  let mut result = String::new();
 
-	while let Some(ch) = chars.next() {
-		match ch {
-			'\\' => {
-				match chars.peek() {
-					Some('$') | Some('`') | Some('\\') | Some('\n') => {
-						let next_ch = chars.next().unwrap();
-						if next_ch == '\n' {
-							// line continuation — discard both backslash and newline
-							continue;
-						}
-						result.push(markers::ESCAPE);
-						result.push(next_ch);
-					}
-					_ => {
-						// backslash is literal
-						result.push('\\');
-					}
-				}
-			}
-			'$' if chars.peek() == Some(&'(') => {
-				result.push(markers::VAR_SUB);
-				chars.next(); // consume '('
-				result.push(markers::SUBSH);
-				let mut paren_count = 1;
-				while let Some(subsh_ch) = chars.next() {
-					match subsh_ch {
-						'\\' => {
-							result.push(subsh_ch);
-							if let Some(next_ch) = chars.next() {
-								result.push(next_ch);
-							}
-						}
-						'(' => {
-							paren_count += 1;
-							result.push(subsh_ch);
-						}
-						')' => {
-							paren_count -= 1;
-							if paren_count == 0 {
-								result.push(markers::SUBSH);
-								break;
-							} else {
-								result.push(subsh_ch);
-							}
-						}
-						_ => result.push(subsh_ch),
-					}
-				}
-			}
-			'$' => {
-				result.push(markers::VAR_SUB);
-				if chars.peek() == Some(&'$') {
-					chars.next();
-					result.push('$');
-				}
-			}
-			'`' => {
-				result.push(markers::VAR_SUB);
-				result.push(markers::SUBSH);
-				while let Some(bt_ch) = chars.next() {
-					match bt_ch {
-						'\\' => {
-							result.push(bt_ch);
-							if let Some(next_ch) = chars.next() {
-								result.push(next_ch);
-							}
-						}
-						'`' => {
-							result.push(markers::SUBSH);
-							break;
-						}
-						_ => result.push(bt_ch),
-					}
-				}
-			}
-			_ => result.push(ch),
-		}
-	}
+  while let Some(ch) = chars.next() {
+    match ch {
+      '\\' => {
+        match chars.peek() {
+          Some('$') | Some('`') | Some('\\') | Some('\n') => {
+            let next_ch = chars.next().unwrap();
+            if next_ch == '\n' {
+              // line continuation — discard both backslash and newline
+              continue;
+            }
+            result.push(markers::ESCAPE);
+            result.push(next_ch);
+          }
+          _ => {
+            // backslash is literal
+            result.push('\\');
+          }
+        }
+      }
+      '$' if chars.peek() == Some(&'(') => {
+        result.push(markers::VAR_SUB);
+        chars.next(); // consume '('
+        result.push(markers::SUBSH);
+        let mut paren_count = 1;
+        while let Some(subsh_ch) = chars.next() {
+          match subsh_ch {
+            '\\' => {
+              result.push(subsh_ch);
+              if let Some(next_ch) = chars.next() {
+                result.push(next_ch);
+              }
+            }
+            '(' => {
+              paren_count += 1;
+              result.push(subsh_ch);
+            }
+            ')' => {
+              paren_count -= 1;
+              if paren_count == 0 {
+                result.push(markers::SUBSH);
+                break;
+              } else {
+                result.push(subsh_ch);
+              }
+            }
+            _ => result.push(subsh_ch),
+          }
+        }
+      }
+      '$' => {
+        result.push(markers::VAR_SUB);
+        if chars.peek() == Some(&'$') {
+          chars.next();
+          result.push('$');
+        }
+      }
+      '`' => {
+        result.push(markers::VAR_SUB);
+        result.push(markers::SUBSH);
+        while let Some(bt_ch) = chars.next() {
+          match bt_ch {
+            '\\' => {
+              result.push(bt_ch);
+              if let Some(next_ch) = chars.next() {
+                result.push(next_ch);
+              }
+            }
+            '`' => {
+              result.push(markers::SUBSH);
+              break;
+            }
+            _ => result.push(bt_ch),
+          }
+        }
+      }
+      _ => result.push(ch),
+    }
+  }
 
-	result
+  result
 }
 
 /// Opposite of unescape_str - escapes a string to be executed as literal text
@@ -3669,7 +3672,7 @@ mod tests {
 
     let mut exp = Expander {
       raw: "hello world\tfoo".to_string(),
-			flags: TkFlags::empty()
+      flags: TkFlags::empty(),
     };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello", "world", "foo"]);
@@ -3684,7 +3687,7 @@ mod tests {
 
     let mut exp = Expander {
       raw: "a:b:c".to_string(),
-			flags: TkFlags::empty()
+      flags: TkFlags::empty(),
     };
     let words = exp.split_words();
     assert_eq!(words, vec!["a", "b", "c"]);
@@ -3699,7 +3702,7 @@ mod tests {
 
     let mut exp = Expander {
       raw: "hello world".to_string(),
-			flags: TkFlags::empty()
+      flags: TkFlags::empty(),
     };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello world"]);
@@ -3711,9 +3714,9 @@ mod tests {
 
     let raw = format!("{}hello world{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
     let mut exp = Expander {
-			raw,
-			flags: TkFlags::empty()
-		};
+      raw,
+      flags: TkFlags::empty(),
+    };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello world"]);
   }
@@ -3726,9 +3729,9 @@ mod tests {
 
     let raw = format!("hello{}world", unescape_str("\\ "));
     let mut exp = Expander {
-			raw,
-			flags: TkFlags::empty()
-		};
+      raw,
+      flags: TkFlags::empty(),
+    };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello world"]);
   }
@@ -3739,9 +3742,9 @@ mod tests {
 
     let raw = format!("hello{}world", unescape_str("\\\t"));
     let mut exp = Expander {
-			raw,
-			flags: TkFlags::empty()
-		};
+      raw,
+      flags: TkFlags::empty(),
+    };
     let words = exp.split_words();
     assert_eq!(words, vec!["hello\tworld"]);
   }
@@ -3755,9 +3758,9 @@ mod tests {
 
     let raw = format!("a{}b:c", unescape_str("\\:"));
     let mut exp = Expander {
-			raw,
-			flags: TkFlags::empty()
-		};
+      raw,
+      flags: TkFlags::empty(),
+    };
     let words = exp.split_words();
     assert_eq!(words, vec!["a:b", "c"]);
   }

@@ -441,11 +441,6 @@ impl ShedVi {
 
     // Process all available keys
     while let Some(key) = self.reader.read_key()? {
-      log::debug!(
-        "Read key: {key:?} in mode {:?}, self.reader.verbatim = {}",
-        self.mode.report_mode(),
-        self.reader.verbatim
-      );
       // If completer or history search are active, delegate input to it
       if self.history.fuzzy_finder.is_active() {
         self.print_line(false)?;
@@ -628,10 +623,6 @@ impl ShedVi {
 
   pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
     if self.should_accept_hint(&key) {
-      log::debug!(
-        "Accepting hint on key {key:?} in mode {:?}",
-        self.mode.report_mode()
-      );
       self.editor.accept_hint();
       if !self.history.at_pending() {
         self.history.reset_to_pending();
@@ -1257,10 +1248,6 @@ impl ShedVi {
           for _ in 0..repeat {
             let cmds = cmds.clone();
             for (i, cmd) in cmds.iter().enumerate() {
-              log::debug!(
-                "Replaying command {cmd:?} in mode {:?}, replay {i}/{repeat}",
-                self.mode.report_mode()
-              );
               self.exec_cmd(cmd.clone(), true)?;
               // After the first command, start merging so all subsequent
               // edits fold into one undo entry (e.g. cw + inserted chars)
@@ -1430,8 +1417,6 @@ pub fn annotate_input(input: &str) -> String {
   for tk in tokens.into_iter().rev() {
     let insertions = annotate_token(tk);
     for (pos, marker) in insertions {
-			log::info!("pos: {pos}, marker: {marker:?}");
-			log::info!("before: {annotated:?}");
       let pos = pos.max(0).min(annotated.len());
       annotated.insert(pos, marker);
     }

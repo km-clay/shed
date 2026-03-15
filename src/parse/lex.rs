@@ -218,31 +218,30 @@ impl Tk {
     self.span.as_str().trim() == ";;"
   }
 
-	pub fn is_opener(&self) -> bool {
-		OPENERS.contains(&self.as_str()) ||
-		matches!(self.class, TkRule::BraceGrpStart) ||
-		matches!(self.class, TkRule::CasePattern)
-	}
-	pub fn is_closer(&self) -> bool {
-		matches!(self.as_str(), "fi" | "done" | "esac") ||
-		self.has_double_semi() ||
-		matches!(self.class, TkRule::BraceGrpEnd)
-	}
+  pub fn is_opener(&self) -> bool {
+    OPENERS.contains(&self.as_str())
+      || matches!(self.class, TkRule::BraceGrpStart)
+      || matches!(self.class, TkRule::CasePattern)
+  }
+  pub fn is_closer(&self) -> bool {
+    matches!(self.as_str(), "fi" | "done" | "esac")
+      || self.has_double_semi()
+      || matches!(self.class, TkRule::BraceGrpEnd)
+  }
 
-	pub fn is_closer_for(&self, other: &Tk) -> bool {
-		if (matches!(other.class, TkRule::BraceGrpStart) && matches!(self.class, TkRule::BraceGrpEnd))
-		|| (matches!(other.class, TkRule::CasePattern) && self.has_double_semi()) {
-			return true;
-		}
-		match other.as_str() {
-			"for"   |
-			"while" |
-			"until" => matches!(self.as_str(), "done"),
-			"if"    => matches!(self.as_str(), "fi"),
-			"case"  => matches!(self.as_str(), "esac"),
-			_ => false
-		}
-	}
+  pub fn is_closer_for(&self, other: &Tk) -> bool {
+    if (matches!(other.class, TkRule::BraceGrpStart) && matches!(self.class, TkRule::BraceGrpEnd))
+      || (matches!(other.class, TkRule::CasePattern) && self.has_double_semi())
+    {
+      return true;
+    }
+    match other.as_str() {
+      "for" | "while" | "until" => matches!(self.as_str(), "done"),
+      "if" => matches!(self.as_str(), "fi"),
+      "case" => matches!(self.as_str(), "esac"),
+      _ => false,
+    }
+  }
 }
 
 impl Display for Tk {
@@ -267,9 +266,9 @@ bitflags! {
     const ASSIGN       = 0b0000000001000000;
     const BUILTIN      = 0b0000000010000000;
     const IS_PROCSUB   = 0b0000000100000000;
-		const IS_HEREDOC   = 0b0000001000000000;
-		const LIT_HEREDOC  = 0b0000010000000000;
-		const TAB_HEREDOC  = 0b0000100000000000;
+    const IS_HEREDOC   = 0b0000001000000000;
+    const LIT_HEREDOC  = 0b0000010000000000;
+    const TAB_HEREDOC  = 0b0000100000000000;
   }
 }
 
@@ -322,10 +321,9 @@ pub struct LexStream {
   brc_grp_depth: usize,
   brc_grp_start: Option<usize>,
   case_depth: usize,
-	heredoc_skip: Option<usize>,
+  heredoc_skip: Option<usize>,
   flags: LexFlags,
 }
-
 
 impl LexStream {
   pub fn new(source: Arc<String>, flags: LexFlags) -> Self {
@@ -338,7 +336,7 @@ impl LexStream {
       quote_state: QuoteState::default(),
       brc_grp_depth: 0,
       brc_grp_start: None,
-			heredoc_skip: None,
+      heredoc_skip: None,
       case_depth: 0,
     }
   }
@@ -411,13 +409,13 @@ impl LexStream {
             return None; // It's a process sub
           }
           pos += 1;
-					if let Some('|') = chars.peek() {
-						// noclobber force '>|'
-						chars.next();
-						pos += 1;
-						tk = self.get_token(self.cursor..pos, TkRule::Redir);
-						break
-					}
+          if let Some('|') = chars.peek() {
+            // noclobber force '>|'
+            chars.next();
+            pos += 1;
+            tk = self.get_token(self.cursor..pos, TkRule::Redir);
+            break;
+          }
 
           if let Some('>') = chars.peek() {
             chars.next();
@@ -428,34 +426,34 @@ impl LexStream {
             break;
           };
 
-					chars.next();
-					pos += 1;
+          chars.next();
+          pos += 1;
 
-					let mut found_fd = false;
-					if chars.peek().is_some_and(|ch| *ch == '-') {
-						chars.next();
-						found_fd = true;
-						pos += 1;
-					} else {
-						while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
-							chars.next();
-							found_fd = true;
-							pos += 1;
-						}
-					}
+          let mut found_fd = false;
+          if chars.peek().is_some_and(|ch| *ch == '-') {
+            chars.next();
+            found_fd = true;
+            pos += 1;
+          } else {
+            while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+              chars.next();
+              found_fd = true;
+              pos += 1;
+            }
+          }
 
-					if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-						let span_start = self.cursor;
-						self.cursor = pos;
-						return Some(Err(ShErr::at(
-							ShErrKind::ParseErr,
-							Span::new(span_start..pos, self.source.clone()),
-							"Invalid redirection",
-						)));
-					} else {
-						tk = self.get_token(self.cursor..pos, TkRule::Redir);
-						break;
-					}
+          if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+            let span_start = self.cursor;
+            self.cursor = pos;
+            return Some(Err(ShErr::at(
+              ShErrKind::ParseErr,
+              Span::new(span_start..pos, self.source.clone()),
+              "Invalid redirection",
+            )));
+          } else {
+            tk = self.get_token(self.cursor..pos, TkRule::Redir);
+            break;
+          }
         }
         '<' => {
           if chars.peek() == Some(&'(') {
@@ -463,93 +461,93 @@ impl LexStream {
           }
           pos += 1;
 
-					match chars.peek() {
-						Some('<') => {
-							chars.next();
-							pos += 1;
+          match chars.peek() {
+            Some('<') => {
+              chars.next();
+              pos += 1;
 
-							match chars.peek() {
-								Some('<') => {
-									chars.next();
-									pos += 1;
-								}
+              match chars.peek() {
+                Some('<') => {
+                  chars.next();
+                  pos += 1;
+                }
 
-								Some(ch) => {
-									let mut ch = *ch;
-									while is_field_sep(ch) {
-										let Some(next_ch) = chars.next() else {
-											// Incomplete input — fall through to emit << as Redir
-											break;
-										};
-										pos += next_ch.len_utf8();
-										ch = next_ch;
-									}
+                Some(ch) => {
+                  let mut ch = *ch;
+                  while is_field_sep(ch) {
+                    let Some(next_ch) = chars.next() else {
+                      // Incomplete input — fall through to emit << as Redir
+                      break;
+                    };
+                    pos += next_ch.len_utf8();
+                    ch = next_ch;
+                  }
 
-									if is_field_sep(ch) {
-										// Ran out of input while skipping whitespace — fall through
-									} else {
-										let saved_cursor = self.cursor;
-										match self.read_heredoc(pos) {
-											Ok(Some(heredoc_tk)) => {
-												// cursor is set to after the delimiter word;
-												// heredoc_skip is set to after the body
-												pos = self.cursor;
-												self.cursor = saved_cursor;
-												tk = heredoc_tk;
-												break;
-											}
-											Ok(None) => {
-												// Incomplete heredoc — restore cursor and fall through
-												self.cursor = saved_cursor;
-											}
-											Err(e) => return Some(Err(e)),
-										}
-									}
-								}
-								_ => {
-									// No delimiter yet — input is incomplete
-									// Fall through to emit the << as a Redir token
-								}
-							}
-						}
-						Some('>') => {
-							chars.next();
-							pos += 1;
-							tk = self.get_token(self.cursor..pos, TkRule::Redir);
-							break;
-						}
-						Some('&') => {
-							chars.next();
-							pos += 1;
+                  if is_field_sep(ch) {
+                    // Ran out of input while skipping whitespace — fall through
+                  } else {
+                    let saved_cursor = self.cursor;
+                    match self.read_heredoc(pos) {
+                      Ok(Some(heredoc_tk)) => {
+                        // cursor is set to after the delimiter word;
+                        // heredoc_skip is set to after the body
+                        pos = self.cursor;
+                        self.cursor = saved_cursor;
+                        tk = heredoc_tk;
+                        break;
+                      }
+                      Ok(None) => {
+                        // Incomplete heredoc — restore cursor and fall through
+                        self.cursor = saved_cursor;
+                      }
+                      Err(e) => return Some(Err(e)),
+                    }
+                  }
+                }
+                _ => {
+                  // No delimiter yet — input is incomplete
+                  // Fall through to emit the << as a Redir token
+                }
+              }
+            }
+            Some('>') => {
+              chars.next();
+              pos += 1;
+              tk = self.get_token(self.cursor..pos, TkRule::Redir);
+              break;
+            }
+            Some('&') => {
+              chars.next();
+              pos += 1;
 
-							let mut found_fd = false;
-							if chars.peek().is_some_and(|ch| *ch == '-') {
-								chars.next();
-								found_fd = true;
-								pos += 1;
-							} else {
-								while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
-									chars.next();
-									found_fd = true;
-									pos += 1;
-								}
-							}
+              let mut found_fd = false;
+              if chars.peek().is_some_and(|ch| *ch == '-') {
+                chars.next();
+                found_fd = true;
+                pos += 1;
+              } else {
+                while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+                  chars.next();
+                  found_fd = true;
+                  pos += 1;
+                }
+              }
 
-							if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-								let span_start = self.cursor;
-								self.cursor = pos;
-								return Some(Err(ShErr::at(
-											ShErrKind::ParseErr,
-											Span::new(span_start..pos, self.source.clone()),
-											"Invalid redirection",
-								)));
-							} else {
-								tk = self.get_token(self.cursor..pos, TkRule::Redir);
-								break;
-							}
-						}
-						_ => {}
-					}
+              if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+                let span_start = self.cursor;
+                self.cursor = pos;
+                return Some(Err(ShErr::at(
+                  ShErrKind::ParseErr,
+                  Span::new(span_start..pos, self.source.clone()),
+                  "Invalid redirection",
+                )));
+              } else {
+                tk = self.get_token(self.cursor..pos, TkRule::Redir);
+                break;
+              }
+            }
+            _ => {}
+          }
 
           tk = self.get_token(self.cursor..pos, TkRule::Redir);
           break;
@@ -574,130 +572,133 @@ impl LexStream {
     self.cursor = pos;
     Some(Ok(tk))
   }
-	pub fn read_heredoc(&mut self, mut pos: usize) -> ShResult<Option<Tk>> {
-		let slice = self.slice(pos..).unwrap_or_default().to_string();
-		let mut chars = slice.chars();
-		let mut delim = String::new();
-		let mut flags = TkFlags::empty();
-		let mut first_char = true;
-		// Parse the delimiter word, stripping quotes
-		while let Some(ch) = chars.next() {
-			match ch {
-				'-' if first_char => {
-					pos += 1;
-					flags |= TkFlags::TAB_HEREDOC;
-				}
-				'\"' => {
-					pos += 1;
-					self.quote_state.toggle_double();
-					flags |= TkFlags::LIT_HEREDOC;
-				}
-				'\'' => {
-					pos += 1;
-					self.quote_state.toggle_single();
-					flags |= TkFlags::LIT_HEREDOC;
-				}
-				_ if self.quote_state.in_quote() => {
-					pos += ch.len_utf8();
-					delim.push(ch);
-				}
-				ch if is_hard_sep(ch) => {
-					break;
-				}
-				ch => {
-					pos += ch.len_utf8();
-					delim.push(ch);
-				}
-			}
-			first_char = false;
-		}
+  pub fn read_heredoc(&mut self, mut pos: usize) -> ShResult<Option<Tk>> {
+    let slice = self.slice(pos..).unwrap_or_default().to_string();
+    let mut chars = slice.chars();
+    let mut delim = String::new();
+    let mut flags = TkFlags::empty();
+    let mut first_char = true;
+    // Parse the delimiter word, stripping quotes
+    while let Some(ch) = chars.next() {
+      match ch {
+        '-' if first_char => {
+          pos += 1;
+          flags |= TkFlags::TAB_HEREDOC;
+        }
+        '\"' => {
+          pos += 1;
+          self.quote_state.toggle_double();
+          flags |= TkFlags::LIT_HEREDOC;
+        }
+        '\'' => {
+          pos += 1;
+          self.quote_state.toggle_single();
+          flags |= TkFlags::LIT_HEREDOC;
+        }
+        _ if self.quote_state.in_quote() => {
+          pos += ch.len_utf8();
+          delim.push(ch);
+        }
+        ch if is_hard_sep(ch) => {
+          break;
+        }
+        ch => {
+          pos += ch.len_utf8();
+          delim.push(ch);
+        }
+      }
+      first_char = false;
+    }
 
-		// pos is now right after the delimiter word — this is where
-		// the cursor should return so the rest of the line gets lexed
-		let cursor_after_delim = pos;
+    // pos is now right after the delimiter word — this is where
+    // the cursor should return so the rest of the line gets lexed
+    let cursor_after_delim = pos;
 
-		// Re-slice from cursor_after_delim so iterator and pos are in sync
-		// (the old chars iterator consumed the hard_sep without advancing pos)
-		let rest = self.slice(cursor_after_delim..).unwrap_or_default().to_string();
-		let mut chars = rest.chars();
+    // Re-slice from cursor_after_delim so iterator and pos are in sync
+    // (the old chars iterator consumed the hard_sep without advancing pos)
+    let rest = self
+      .slice(cursor_after_delim..)
+      .unwrap_or_default()
+      .to_string();
+    let mut chars = rest.chars();
 
-		// Scan forward to the newline (or use heredoc_skip from a previous heredoc)
-		let body_start = if let Some(skip) = self.heredoc_skip {
-			// A previous heredoc on this line already read its body;
-			// our body starts where that one ended
-			let skip_offset = skip - cursor_after_delim;
-			for _ in 0..skip_offset {
-				chars.next();
-			}
-			skip
-		} else {
-			// Skip the rest of the current line to find where the body begins
-			let mut scan = pos;
-			let mut found_newline = false;
-			while let Some(ch) = chars.next() {
-				scan += ch.len_utf8();
-				if ch == '\n' {
-					found_newline = true;
-					break;
-				}
-			}
-			if !found_newline {
-				if self.flags.contains(LexFlags::LEX_UNFINISHED) {
-					return Ok(None);
-				} else {
-					return Err(ShErr::at(
-						ShErrKind::ParseErr,
-						Span::new(pos..pos, self.source.clone()),
-						"Heredoc delimiter not found",
-					));
-				}
-			}
-			scan
-		};
+    // Scan forward to the newline (or use heredoc_skip from a previous heredoc)
+    let body_start = if let Some(skip) = self.heredoc_skip {
+      // A previous heredoc on this line already read its body;
+      // our body starts where that one ended
+      let skip_offset = skip - cursor_after_delim;
+      for _ in 0..skip_offset {
+        chars.next();
+      }
+      skip
+    } else {
+      // Skip the rest of the current line to find where the body begins
+      let mut scan = pos;
+      let mut found_newline = false;
+      while let Some(ch) = chars.next() {
+        scan += ch.len_utf8();
+        if ch == '\n' {
+          found_newline = true;
+          break;
+        }
+      }
+      if !found_newline {
+        if self.flags.contains(LexFlags::LEX_UNFINISHED) {
+          return Ok(None);
+        } else {
+          return Err(ShErr::at(
+            ShErrKind::ParseErr,
+            Span::new(pos..pos, self.source.clone()),
+            "Heredoc delimiter not found",
+          ));
+        }
+      }
+      scan
+    };
 
-		pos = body_start;
-		let start = pos;
+    pos = body_start;
+    let start = pos;
 
-		// Read lines until we find one that matches the delimiter exactly
-		let mut line = String::new();
-		let mut line_start = pos;
-		while let Some(ch) = chars.next() {
-			pos += ch.len_utf8();
-			if ch == '\n' {
-				let trimmed = line.trim_end_matches('\r');
-				if trimmed == delim {
-					let mut tk = self.get_token(start..line_start, TkRule::Redir);
-					tk.flags |= TkFlags::IS_HEREDOC | flags;
-					self.heredoc_skip = Some(pos);
-					self.cursor = cursor_after_delim;
-					return Ok(Some(tk));
-				}
-				line.clear();
-				line_start = pos;
-			} else {
-				line.push(ch);
-			}
-		}
-		// Check the last line (no trailing newline)
-		let trimmed = line.trim_end_matches('\r');
-		if trimmed == delim {
-			let mut tk = self.get_token(start..line_start, TkRule::Redir);
-			tk.flags |= TkFlags::IS_HEREDOC | flags;
-			self.heredoc_skip = Some(pos);
-			self.cursor = cursor_after_delim;
-			return Ok(Some(tk));
-		}
+    // Read lines until we find one that matches the delimiter exactly
+    let mut line = String::new();
+    let mut line_start = pos;
+    while let Some(ch) = chars.next() {
+      pos += ch.len_utf8();
+      if ch == '\n' {
+        let trimmed = line.trim_end_matches('\r');
+        if trimmed == delim {
+          let mut tk = self.get_token(start..line_start, TkRule::Redir);
+          tk.flags |= TkFlags::IS_HEREDOC | flags;
+          self.heredoc_skip = Some(pos);
+          self.cursor = cursor_after_delim;
+          return Ok(Some(tk));
+        }
+        line.clear();
+        line_start = pos;
+      } else {
+        line.push(ch);
+      }
+    }
+    // Check the last line (no trailing newline)
+    let trimmed = line.trim_end_matches('\r');
+    if trimmed == delim {
+      let mut tk = self.get_token(start..line_start, TkRule::Redir);
+      tk.flags |= TkFlags::IS_HEREDOC | flags;
+      self.heredoc_skip = Some(pos);
+      self.cursor = cursor_after_delim;
+      return Ok(Some(tk));
+    }
 
-		if !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-			Err(ShErr::at(
-				ShErrKind::ParseErr,
-				Span::new(start..pos, self.source.clone()),
-				format!("Heredoc delimiter '{}' not found", delim),
-			))
-		} else {
-			Ok(None)
-		}
-	}
+    if !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+      Err(ShErr::at(
+        ShErrKind::ParseErr,
+        Span::new(start..pos, self.source.clone()),
+        format!("Heredoc delimiter '{}' not found", delim),
+      ))
+    } else {
+      Ok(None)
+    }
+  }
   pub fn read_string(&mut self) -> ShResult<Tk> {
     assert!(self.cursor <= self.source.len());
     let slice = self.slice_from_cursor().unwrap().to_string();
@@ -1113,9 +1114,10 @@ impl Iterator for LexStream {
         // If a heredoc was parsed on this line, skip past the body
         // Only on newline — ';' is a command separator within the same line
         if (ch == '\n' || ch == '\r')
-				&& let Some(skip) = self.heredoc_skip.take() {
-					self.cursor = skip;
-				}
+          && let Some(skip) = self.heredoc_skip.take()
+        {
+          self.cursor = skip;
+        }
 
         while let Some(ch) = get_char(&self.source, self.cursor) {
           match ch {

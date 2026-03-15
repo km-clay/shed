@@ -1,91 +1,101 @@
-use nix::{libc::STDOUT_FILENO, unistd::{Whence, lseek, write}};
+use nix::{
+  libc::STDOUT_FILENO,
+  unistd::{Whence, lseek, write},
+};
 
-use crate::{getopt::{Opt, OptSpec, get_opts_from_tokens}, libsh::error::{ShErr, ShErrKind, ShResult}, parse::{NdRule, Node, execute::prepare_argv}, procio::borrow_fd, state};
+use crate::{
+  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  libsh::error::{ShErr, ShErrKind, ShResult},
+  parse::{NdRule, Node, execute::prepare_argv},
+  procio::borrow_fd,
+  state,
+};
 
-pub const LSEEK_OPTS: [OptSpec;2] = [
-	OptSpec {
-		opt: Opt::Short('c'),
-		takes_arg: false
-	},
-	OptSpec {
-		opt: Opt::Short('e'),
-		takes_arg: false
-	},
+pub const LSEEK_OPTS: [OptSpec; 2] = [
+  OptSpec {
+    opt: Opt::Short('c'),
+    takes_arg: false,
+  },
+  OptSpec {
+    opt: Opt::Short('e'),
+    takes_arg: false,
+  },
 ];
 
 pub struct LseekOpts {
-	cursor_rel: bool,
-	end_rel: bool
+  cursor_rel: bool,
+  end_rel: bool,
 }
 
 pub fn seek(node: Node) -> ShResult<()> {
-	let NdRule::Command {
-		assignments: _,
-		argv,
-	} = node.class else { unreachable!() };
+  let NdRule::Command {
+    assignments: _,
+    argv,
+  } = node.class
+  else {
+    unreachable!()
+  };
 
-	let (argv, opts) = get_opts_from_tokens(argv, &LSEEK_OPTS)?;
-	let lseek_opts = get_lseek_opts(opts)?;
-	let mut argv = prepare_argv(argv)?.into_iter();
-	argv.next(); // drop 'seek'
+  let (argv, opts) = get_opts_from_tokens(argv, &LSEEK_OPTS)?;
+  let lseek_opts = get_lseek_opts(opts)?;
+  let mut argv = prepare_argv(argv)?.into_iter();
+  argv.next(); // drop 'seek'
 
-	let Some(fd) = argv.next() else {
-		return Err(ShErr::simple(
-			ShErrKind::ExecFail,
-			"lseek: Missing required argument 'fd'",
-		));
-	};
-	let Ok(fd) = fd.0.parse::<u32>() else {
-		return Err(ShErr::at(
-			ShErrKind::ExecFail,
-			fd.1,
-			"Invalid file descriptor",
-		).with_note("file descriptors are integers"));
-	};
+  let Some(fd) = argv.next() else {
+    return Err(ShErr::simple(
+      ShErrKind::ExecFail,
+      "lseek: Missing required argument 'fd'",
+    ));
+  };
+  let Ok(fd) = fd.0.parse::<u32>() else {
+    return Err(
+      ShErr::at(ShErrKind::ExecFail, fd.1, "Invalid file descriptor")
+        .with_note("file descriptors are integers"),
+    );
+  };
 
-	let Some(offset) = argv.next() else {
-		return Err(ShErr::simple(
-			ShErrKind::ExecFail,
-			"lseek: Missing required argument 'offset'",
-		));
-	};
-	let Ok(offset) = offset.0.parse::<i64>() else {
-		return Err(ShErr::at(
-			ShErrKind::ExecFail,
-			offset.1,
-			"Invalid offset",
-		).with_note("offset can be a positive or negative integer"));
-	};
+  let Some(offset) = argv.next() else {
+    return Err(ShErr::simple(
+      ShErrKind::ExecFail,
+      "lseek: Missing required argument 'offset'",
+    ));
+  };
+  let Ok(offset) = offset.0.parse::<i64>() else {
+    return Err(
+      ShErr::at(ShErrKind::ExecFail, offset.1, "Invalid offset")
+        .with_note("offset can be a positive or negative integer"),
+    );
+  };
 
-	let whence = if lseek_opts.cursor_rel {
-		Whence::SeekCur
-	} else if lseek_opts.end_rel {
-		Whence::SeekEnd
-	} else {
-		Whence::SeekSet
-	};
+  let whence = if lseek_opts.cursor_rel {
+    Whence::SeekCur
+  } else if lseek_opts.end_rel {
+    Whence::SeekEnd
+  } else {
+    Whence::SeekSet
+  };
 
-	match lseek(fd as i32, offset, whence) {
-		Ok(new_offset) => {
-			let stdout = borrow_fd(STDOUT_FILENO);
-			let buf = new_offset.to_string() + "\n";
-			write(stdout, buf.as_bytes())?;
-		}
-		Err(e) => {
-			state::set_status(1);
-			return Err(e.into())
-		}
-	}
+  match lseek(fd as i32, offset, whence) {
+    Ok(new_offset) => {
+      let stdout = borrow_fd(STDOUT_FILENO);
+      let buf = new_offset.to_string() + "\n";
+      write(stdout, buf.as_bytes())?;
+    }
+    Err(e) => {
+      state::set_status(1);
+      return Err(e.into());
+    }
+  }
 
-	state::set_status(0);
-	Ok(())
+  state::set_status(0);
+  Ok(())
 }
 
 pub fn get_lseek_opts(opts: Vec<Opt>) -> ShResult<LseekOpts> {
-	let mut lseek_opts = LseekOpts {
-		cursor_rel: false,
-		end_rel: false,
-	};
+  let mut lseek_opts = LseekOpts {
+    cursor_rel: false,
+    end_rel: false,
+  };
 
   for opt in opts {
     match opt {
