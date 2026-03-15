@@ -421,7 +421,7 @@ impl IndentCtx {
   }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct LineBuf {
   pub buffer: String,
   pub hint: Option<String>,
@@ -438,6 +438,28 @@ pub struct LineBuf {
 
   pub undo_stack: Vec<Edit>,
   pub redo_stack: Vec<Edit>,
+}
+
+impl Default for LineBuf {
+	fn default() -> Self {
+		Self {
+			buffer: String::new(),
+			hint: None,
+			grapheme_indices: Some(vec![]),
+			cursor: ClampedUsize::new(0, 0, false),
+
+			select_mode: None,
+			select_range: None,
+			last_selection: None,
+
+			insert_mode_start_pos: None,
+			saved_col: None,
+			indent_ctx: IndentCtx::new(),
+
+			undo_stack: vec![],
+			redo_stack: vec![],
+		}
+	}
 }
 
 impl LineBuf {

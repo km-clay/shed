@@ -1,0 +1,76 @@
+*arith* *arithmetic* *arithmetic-expansion*
+
+#ARITHMETIC EXPANSION#
+
+Arithmetic expansion evaluates a mathematical expression and substitutes
+the result. The expression is subject to parameter expansion and command
+substitution before evaluation.
+
+  `$((expression))`
+
+      Example:
+        `echo $((2 + 3))`       # prints: 5
+        `x=$((width * height))`
+
+==============================================================================
+1. Operators                                   *arith-operators*
+
+  The following operators are supported, listed from highest to lowest
+  precedence:
+
+  `( )`                                        *arith-parens*
+
+      Grouping. Override default precedence.
+
+      Example:
+        `echo $(( (2+3) * 4 ))`  # prints: 20
+
+  `*` `/` `%`                                  *arith-muldivmod*
+
+      Multiplication, division, and modulo (remainder).
+
+      Example:
+        `echo $((10 / 3))`       # prints: 3
+        `echo $((10 % 3))`       # prints: 1
+
+  `+` `-`                                      *arith-addsub*
+
+      Addition and subtraction.
+
+      Example:
+        `echo $((10 - 3 + 1))`   # prints: 8
+
+==============================================================================
+2. Variables in Expressions                    *arith-variables*
+
+  Variables can be referenced by name inside arithmetic expressions.
+  They are expanded and converted to numbers.
+
+      `x=10`
+      `echo $(($x + 5))`        # prints: 15
+      `echo $((x + 5))`         # also works
+
+  If a variable is unset or not a valid number, an error is reported.
+
+==============================================================================
+3. Nesting                                     *arith-nesting*
+
+  Arithmetic expressions can be nested with parentheses to any depth:
+
+      `echo $(( (1+2) * (3+4) ))`  # prints: 21
+
+  Arithmetic expansion can also appear inside other expansions:
+
+      `echo "Total: $((price * qty))"`
+
+==============================================================================
+4. Whitespace                                  *arith-whitespace*
+
+  Whitespace inside `$((...))` is ignored and can be used freely for
+  readability:
+
+      `echo $((2+3))`           # prints: 5
+      `echo $(( 2 + 3 ))`       # same result
+
+==============================================================================
+See also: |param| |redirect| |glob|

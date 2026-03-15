@@ -64,6 +64,7 @@ bitflags! {
     const VISUAL_LINE = 1<<1;
     const VISUAL_BLOCK = 1<<2;
     const EXIT_CUR_MODE = 1<<3;
+		const IS_EX_CMD = 1<<4;
   }
 }
 

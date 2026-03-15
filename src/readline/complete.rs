@@ -739,7 +739,7 @@ impl QueryEditor {
   }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct FuzzySelector {
   query: QueryEditor,
   filtered: Vec<ScoredCandidate>,

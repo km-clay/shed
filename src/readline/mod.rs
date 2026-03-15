@@ -132,6 +132,18 @@ pub mod markers {
   pub fn is_marker(c: Marker) -> bool {
     ('\u{e000}'..'\u{efff}').contains(&c)
   }
+
+	// Help command formatting markers
+	pub const TAG: Marker = '\u{e180}';
+	pub const REFERENCE: Marker = '\u{e181}';
+	pub const HEADER: Marker = '\u{e182}';
+	pub const CODE: Marker = '\u{e183}';
+	/// angle brackets
+	pub const KEYWORD_1: Marker = '\u{e184}';
+	/// curly brackets
+	pub const KEYWORD_2: Marker = '\u{e185}';
+	/// square brackets
+	pub const KEYWORD_3: Marker = '\u{e186}';
 }
 type Marker = char;
 
@@ -256,6 +268,7 @@ pub struct ShedVi {
 
   pub old_layout: Option<Layout>,
   pub history: History,
+	pub ex_history: History,
 
   pub needs_redraw: bool,
 }
@@ -277,6 +290,7 @@ impl ShedVi {
       repeat_motion: None,
       editor: LineBuf::new(),
       history: History::new()?,
+			ex_history: History::empty(),
       needs_redraw: true,
     };
     write_vars(|v| {
@@ -308,6 +322,7 @@ impl ShedVi {
       repeat_motion: None,
       editor: LineBuf::new(),
       history: History::empty(),
+			ex_history: History::empty(),
       needs_redraw: true,
     };
     write_vars(|v| {
@@ -798,7 +813,8 @@ impl ShedVi {
 
     let Ok(cmd) = self.mode.handle_key_fallible(key) else {
       // it's an ex mode error
-      self.mode = Box::new(ViNormal::new()) as Box<dyn ViMode>;
+      self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn ViMode>));
+
       return Ok(None);
     };
 
@@ -844,9 +860,22 @@ impl ShedVi {
     }
 
     let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
+    let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
+		let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
+		log::debug!("is_ex_cmd: {is_ex_cmd}");
+    if is_shell_cmd {
+      self.old_layout = None;
+    }
+		if is_ex_cmd {
+			self.ex_history.push(cmd.raw_seq.clone());
+			self.ex_history.reset();
+			log::debug!("ex_history: {:?}", self.ex_history.entries());
+		}
 
     let before = self.editor.buffer.clone();
+
     self.exec_cmd(cmd, false)?;
+
     if let Some(keys) = write_meta(|m| m.take_pending_widget_keys()) {
       for key in keys {
         self.handle_key(key)?;
@@ -1131,7 +1160,7 @@ impl ShedVi {
           )
         }
 
-        Verb::ExMode => Box::new(ViEx::new()),
+        Verb::ExMode => Box::new(ViEx::new(self.ex_history.clone())),
 
         Verb::VerbatimMode => {
           self.reader.verbatim_single = true;
@@ -1221,7 +1250,7 @@ impl ShedVi {
       ModeReport::Normal => Box::new(ViNormal::new()),
       ModeReport::Insert => Box::new(ViInsert::new()),
       ModeReport::Visual => Box::new(ViVisual::new()),
-      ModeReport::Ex => Box::new(ViEx::new()),
+      ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())),
       ModeReport::Replace => Box::new(ViReplace::new()),
       ModeReport::Verbatim => Box::new(ViVerbatim::new()),
       ModeReport::Unknown => unreachable!(),
@@ -1266,7 +1295,7 @@ impl ShedVi {
               ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn ViMode>,
               ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn ViMode>,
               ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn ViMode>,
-              ModeReport::Ex => Box::new(ViEx::new()) as Box<dyn ViMode>,
+              ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())) as Box<dyn ViMode>,
               ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn ViMode>,
               ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn ViMode>,
               ModeReport::Unknown => unreachable!(),

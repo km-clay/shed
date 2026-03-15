@@ -1,0 +1,155 @@
+*glob* *globbing* *pathname-expansion* *filename-expansion*
+
+#PATHNAME EXPANSION#
+
+After word splitting, the shell scans each word for the characters `*`,
+`?`, and `[`. If any appear (and are not quoted), the word is treated as a
+pattern and replaced with an alphabetically sorted list of matching file
+names. If no files match, the pattern is left unchanged.
+
+==============================================================================
+1. Wildcards                                   *glob-wildcards*
+
+  `*`                                          *glob-star*
+
+      Matches any string of zero or more characters, except that it does
+      not match a leading `.` (see |glob-dotglob|) or a `/`.
+
+      Example:
+        `echo *.txt`             # all .txt files
+        `ls src/*.rs`            # all .rs files in src/
+
+  `?`                                          *glob-question*
+
+      Matches exactly one character, with the same restrictions as `*`.
+
+      Example:
+        `ls file?.txt`           # file1.txt, fileA.txt, etc.
+
+  `[...]`                                      *glob-bracket*
+
+      Matches any one of the enclosed characters. A range can be specified
+      with a hyphen.
+
+      `[abc]`      matches `a`, `b`, or `c`
+      `[a-z]`      matches any lowercase letter
+      `[0-9]`      matches any digit
+      `[A-Za-z]`   matches any letter
+
+  `[!...]` `[^...]`                            *glob-bracket-negate*
+
+      Matches any character NOT in the set.
+
+      Example:
+        `ls [!.]*.txt`           # .txt files not starting with dot
+        `echo file[^0-9].txt`    # files without a digit
+
+==============================================================================
+2. Hidden Files                                *glob-dotglob*
+
+  By default, patterns do not match files whose names begin with `.`
+  (hidden files). A leading dot must be matched explicitly:
+
+      `echo .*`                  # only hidden files
+      `echo .* *`               # hidden and non-hidden files
+
+  The `dotglob` shell option changes this behavior:
+
+      `shopt core.dotglob true`
+
+  When enabled, `*` and `?` will also match files starting with `.`.
+
+==============================================================================
+3. Brace Expansion                             *brace* *brace-expansion*
+
+  Brace expansion is performed before globbing and generates multiple
+  words from a single pattern. It is not a POSIX feature.
+
+  `{a,b,c}`                                   *brace-list*
+
+      Comma-separated list. Each item becomes a separate word.
+
+      Example:
+        `echo {a,b,c}`           # prints: a b c
+        `echo file.{txt,log}`    # prints: file.txt file.log
+        `mkdir -p src/{bin,lib}`
+
+  `{N..M}`                                    *brace-range*
+
+      Numeric or character range.
+
+      Example:
+        `echo {1..5}`            # prints: 1 2 3 4 5
+        `echo {a..f}`            # prints: a b c d e f
+        `echo {5..1}`            # prints: 5 4 3 2 1
+
+  `{N..M..S}`                                 *brace-range-step*
+
+      Numeric range with step {S}.
+
+      Example:
+        `echo {0..10..2}`        # prints: 0 2 4 6 8 10
+        `echo {1..20..5}`        # prints: 1 6 11 16
+
+  `{01..10}`                                  *brace-range-pad*
+
+      Zero-padded ranges. If either endpoint has leading zeros, all
+      generated values are padded to the same width.
+
+      Example:
+        `echo {01..05}`          # prints: 01 02 03 04 05
+        `echo {001..3}`          # prints: 001 002 003
+
+  Brace expansion can be nested and combined with other expansions:
+
+      `echo {a,b{1..3},c}`      # prints: a b1 b2 b3 c
+
+==============================================================================
+4. Quoting and Escaping                        *glob-quoting*
+
+  Glob characters lose their special meaning when quoted:
+
+      `echo "*"`                 # prints literal *
+      `echo '*.txt'`            # prints literal *.txt
+      `echo \*`                 # prints literal *
+
+  This is important when passing patterns to commands like `find` or
+  `grep` where you want the command (not the shell) to interpret the
+  pattern.
+
+==============================================================================
+5. Tilde Expansion                             *tilde* *tilde-expansion*
+
+  Tilde expansion is performed before pathname expansion.
+
+  `~`                                          *tilde-home*
+
+      Expands to the value of `$HOME`.
+
+  `~/path`                                     *tilde-home-path*
+
+      Expands `~` to `$HOME`, then appends the path.
+
+      Example:
+        `cd ~/projects`
+        `ls ~/.config`
+
+  `~user`                                      *tilde-user*
+
+      Expands to the home directory of {user}.
+
+      Example:
+        `ls ~root`               # /root
+        `cat ~nobody/.profile`
+
+  `~uid`                                       *tilde-uid*
+
+      Expands to the home directory of the user with numeric uid {uid}.
+      This is a shed-specific extension.
+
+      Example:
+        `echo ~0`                # /root (uid 0)
+        `echo ~1000`             # first normal user's home
+
+==============================================================================
+See also: |param| |redirect| |arith|

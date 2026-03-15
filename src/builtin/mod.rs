@@ -25,13 +25,14 @@ pub mod source;
 pub mod test; // [[ ]] thing
 pub mod trap;
 pub mod varcmds;
+pub mod help;
 
-pub const BUILTINS: [&str; 50] = [
+pub const BUILTINS: [&str; 51] = [
   "echo", "cd", "read", "export", "local", "pwd", "source", ".", "shift", "jobs", "fg", "bg",
   "disown", "alias", "unalias", "return", "break", "continue", "exit", "shopt", "builtin",
   "command", "trap", "pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly",
   "unset", "complete", "compgen", "map", "pop", "fpop", "push", "fpush", "rotate", "wait", "type",
-  "getopts", "keymap", "read_key", "autocmd", "ulimit", "umask", "seek",
+  "getopts", "keymap", "read_key", "autocmd", "ulimit", "umask", "seek", "help",
 ];
 
 pub fn true_builtin() -> ShResult<()> {

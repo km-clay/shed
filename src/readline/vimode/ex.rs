@@ -6,6 +6,7 @@ use itertools::Itertools;
 
 use crate::bitflags;
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
 use crate::readline::vicmd::{
@@ -33,16 +34,64 @@ bitflags! {
 struct ExEditor {
   buf: LineBuf,
   mode: ViInsert,
+	history: History
 }
 
 impl ExEditor {
+	pub fn new(history: History) -> Self {
+		let mut new = Self {
+			history,
+			..Default::default()
+		};
+		new.buf.update_graphemes();
+		new
+	}
   pub fn clear(&mut self) {
     *self = Self::default()
   }
+  pub fn should_grab_history(&mut self, cmd: &ViCmd) -> bool {
+    cmd.verb().is_none()
+      && (cmd
+        .motion()
+        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUpCharwise)))
+        && self.buf.start_of_line() == 0)
+      || (cmd
+        .motion()
+        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDownCharwise)))
+        && self.buf.end_of_line() == self.buf.cursor_max())
+  }
+  pub fn scroll_history(&mut self, cmd: ViCmd) {
+    let count = &cmd.motion().unwrap().0;
+    let motion = &cmd.motion().unwrap().1;
+    let count = match motion {
+      Motion::LineUpCharwise => -(*count as isize),
+      Motion::LineDownCharwise => *count as isize,
+      _ => unreachable!(),
+    };
+    let entry = self.history.scroll(count);
+    if let Some(entry) = entry {
+      let buf = std::mem::take(&mut self.buf);
+      self.buf.set_buffer(entry.command().to_string());
+      if self.history.pending.is_none() {
+        self.history.pending = Some(buf);
+      }
+      self.buf.set_hint(None);
+      self.buf.move_cursor_to_end();
+    } else if let Some(pending) = self.history.pending.take() {
+      self.buf = pending;
+    }
+  }
   pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<()> {
-    let Some(cmd) = self.mode.handle_key(key) else {
+    let Some(mut cmd) = self.mode.handle_key(key) else {
       return Ok(());
     };
+		cmd.alter_line_motion_if_no_verb();
+		log::debug!("ExEditor got cmd: {:?}", cmd);
+		if self.should_grab_history(&cmd) {
+			log::debug!("Grabbing history for cmd: {:?}", cmd);
+			self.scroll_history(cmd);
+			return Ok(())
+		}
     self.buf.exec_cmd(cmd)
   }
 }
@@ -53,8 +102,8 @@ pub struct ViEx {
 }
 
 impl ViEx {
-  pub fn new() -> Self {
-    Self::default()
+  pub fn new(history: History) -> Self {
+		Self { pending_cmd: ExEditor::new(history) }
   }
 }
 
@@ -62,18 +111,14 @@ impl ViMode for ViEx {
   // Ex mode can return errors, so we use this fallible method instead of the normal one
   fn handle_key_fallible(&mut self, key: KeyEvent) -> ShResult<Option<ViCmd>> {
     use crate::readline::keys::{KeyCode as C, KeyEvent as E, ModKeys as M};
-    log::debug!("[ViEx] handle_key_fallible: key={:?}", key);
     match key {
       E(C::Char('\r'), M::NONE) | E(C::Enter, M::NONE) => {
         let input = self.pending_cmd.buf.as_str();
-        log::debug!("[ViEx] Enter pressed, pending_cmd={:?}", input);
         match parse_ex_cmd(input) {
           Ok(cmd) => {
-            log::debug!("[ViEx] parse_ex_cmd Ok: {:?}", cmd);
             Ok(cmd)
           }
           Err(e) => {
-            log::debug!("[ViEx] parse_ex_cmd Err: {:?}", e);
             let msg = e.unwrap_or(format!("Not an editor command: {}", input));
             write_meta(|m| m.post_system_message(msg.clone()));
             Err(ShErr::simple(ShErrKind::ParseErr, msg))
@@ -81,12 +126,10 @@ impl ViMode for ViEx {
         }
       }
       E(C::Char('C'), M::CTRL) => {
-        log::debug!("[ViEx] Ctrl-C, clearing");
         self.pending_cmd.clear();
         Ok(None)
       }
       E(C::Esc, M::NONE) => {
-        log::debug!("[ViEx] Esc, returning to normal mode");
         Ok(Some(ViCmd {
           register: RegisterName::default(),
           verb: Some(VerbCmd(1, Verb::NormalMode)),
@@ -96,14 +139,12 @@ impl ViMode for ViEx {
         }))
       }
       _ => {
-        log::debug!("[ViEx] forwarding key to ExEditor");
         self.pending_cmd.handle_key(key).map(|_| None)
       }
     }
   }
   fn handle_key(&mut self, key: KeyEvent) -> Option<ViCmd> {
     let result = self.handle_key_fallible(key);
-    log::debug!("[ViEx] handle_key result: {:?}", result);
     result.ok().flatten()
   }
   fn is_repeatable(&self) -> bool {
@@ -177,7 +218,7 @@ fn parse_ex_cmd(raw: &str) -> Result<Option<ViCmd>, Option<String>> {
     verb,
     motion,
     raw_seq: raw.to_string(),
-    flags: CmdFlags::EXIT_CUR_MODE,
+    flags: CmdFlags::EXIT_CUR_MODE | CmdFlags::IS_EX_CMD,
   }))
 }
 
@@ -224,6 +265,10 @@ fn parse_ex_command(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Opt
       let cmd = unescape_shell_cmd(&cmd);
       Ok(Some(Verb::ShellCmd(cmd)))
     }
+		_ if "help".starts_with(&cmd_name) => {
+			let cmd = "help ".to_string() + chars.collect::<String>().trim();
+			Ok(Some(Verb::ShellCmd(cmd)))
+		}
     "normal!" => parse_normal(chars),
     _ if "delete".starts_with(&cmd_name) => Ok(Some(Verb::Delete)),
     _ if "yank".starts_with(&cmd_name) => Ok(Some(Verb::Yank)),

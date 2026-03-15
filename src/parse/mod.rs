@@ -88,7 +88,6 @@ impl ParsedSrc {
         Err(error) => return Err(vec![error]),
       }
     }
-    log::trace!("Tokens: {:#?}", tokens);
 
     let mut errors = vec![];
     let mut nodes = vec![];
@@ -1038,7 +1037,6 @@ impl ParseStream {
     Ok(Some(node))
   }
   fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<Node>> {
-    log::debug!("Trying to parse a brace group");
     let mut node_tks: Vec<Tk> = vec![];
     let mut body: Vec<Node> = vec![];
     let mut redirs: Vec<Redir> = vec![];
@@ -1051,7 +1049,6 @@ impl ParseStream {
     self.catch_separator(&mut node_tks);
 
     loop {
-      log::debug!("Parsing a brace group body");
       if *self.next_tk_class() == TkRule::BraceGrpEnd {
         node_tks.push(self.next_tk().unwrap());
         break;
@@ -1078,7 +1075,6 @@ impl ParseStream {
       }
       self.catch_separator(&mut node_tks);
       if !self.next_tk_is_some() {
-        log::debug!("Hit end of input while parsing a brace group body, entering panic mode");
         self.panic_mode(&mut node_tks);
         return Err(parse_err_full(
           "Expected a closing brace for this brace group",
@@ -1088,15 +1084,11 @@ impl ParseStream {
       }
     }
 
-    log::debug!(
-      "Finished parsing brace group body, now looking for redirections if it's not a function definition"
-    );
 
     if !from_func_def {
       self.parse_redir(&mut redirs, &mut node_tks)?;
     }
 
-    log::debug!("Finished parsing brace group redirections, constructing node");
 
     let node = Node {
       class: NdRule::BraceGrp { body },

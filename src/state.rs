@@ -1098,6 +1098,8 @@ impl VarTab {
       .map(|hname| hname.to_string_lossy().to_string())
       .unwrap_or_default();
 
+		let help_paths = format!("/usr/share/shed/doc:{home}/.local/share/shed/doc");
+
     unsafe {
       env::set_var("IFS", " \t\n");
       env::set_var("HOST", hostname.clone());
@@ -1114,6 +1116,7 @@ impl VarTab {
       env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
       env::set_var("SHED_HIST", format!("{}/.shedhist", home));
       env::set_var("SHED_RC", format!("{}/.shedrc", home));
+			env::set_var("SHED_HPATH", help_paths);
     }
   }
   pub fn init_sh_argv(&mut self) {

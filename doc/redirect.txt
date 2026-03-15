@@ -1,0 +1,181 @@
+*redirect* *redirection* *redir*
+
+#REDIRECTION#
+
+Redirections allow you to control where a command reads its input from and
+where it sends its output. A redirection applies to a specific file
+descriptor; if no descriptor number is given, output redirections default
+to stdout (fd 1) and input redirections default to stdin (fd 0).
+
+==============================================================================
+1. Output Redirection                          *redir-output*
+
+  `command > file`                             *redir-out*
+
+      Redirect stdout to {file}, creating it if it does not exist or
+      truncating it if it does.
+
+      Example:
+        `echo hello > out.txt`
+        `ls 2> errors.txt`       # redirect stderr
+
+  `command >| file`                            *redir-out-force*
+
+      Like `>` but overrides the {noclobber} option. If {noclobber} is set,
+      `>` will refuse to overwrite an existing file; `>|` forces the
+      overwrite.
+
+  `command >> file`                            *redir-append*
+
+      Append stdout to {file}, creating it if it does not exist.
+
+      Example:
+        `echo line >> log.txt`
+
+==============================================================================
+2. Input Redirection                           *redir-input*
+
+  `command < file`                             *redir-in*
+
+      Redirect {file} to stdin.
+
+      Example:
+        `sort < unsorted.txt`
+
+==============================================================================
+3. Read-Write Redirection                      *redir-readwrite*
+
+  `command <> file`                            *redir-rw*
+
+      Open {file} for both reading and writing on the specified file
+      descriptor (default fd 0). The file is created if it does not exist
+      but is not truncated.
+
+      Useful with the `seek` builtin for random-access file operations.
+
+      Example:
+        `exec 3<> data.bin`
+        `seek 3 0 set`           # seek to beginning
+
+==============================================================================
+4. File Descriptor Duplication                 *redir-dup*
+
+  `command N>&M`                               *redir-dup-out*
+
+      Duplicate output file descriptor {M} onto {N}. After this, writing
+      to fd {N} goes to the same place as fd {M}.
+
+      Example:
+        `command > out.txt 2>&1`  # stderr goes where stdout goes
+
+  `command N<&M`                               *redir-dup-in*
+
+      Duplicate input file descriptor {M} onto {N}.
+
+  `command N>&-`                               *redir-close-out*
+  `command N<&-`                               *redir-close-in*
+
+      Close file descriptor {N}.
+
+      Example:
+        `exec 3>&-`              # close fd 3
+
+==============================================================================
+5. Pipelines                                   *redir-pipe*
+
+  `command1 | command2`                        *pipe*
+
+      Connect stdout of {command1} to stdin of {command2}. Both commands
+      run concurrently.
+
+      Example:
+        `cat file.txt | grep pattern | sort`
+
+  `command1 |& command2`                       *pipe-and*
+
+      Connect both stdout and stderr of {command1} to stdin of {command2}.
+      Equivalent to `command1 2>&1 | command2`.
+
+==============================================================================
+6. Here Documents                              *heredoc*
+
+  `command << DELIM`                           *redir-heredoc*
+
+      Read input from the script body until a line containing only {DELIM}
+      is found. The text between is fed to stdin of {command}.
+
+      Parameter expansion, command substitution, and arithmetic expansion
+      are performed in the body unless the delimiter is quoted.
+
+      Example:
+        `cat << EOF`
+        `Hello $USER`
+        `EOF`
+
+  `command << 'DELIM'`                         *redir-heredoc-literal*
+
+      Quoting the delimiter (single or double quotes) suppresses all
+      expansion in the heredoc body. The text is passed literally.
+
+      Example:
+        `cat << 'EOF'`
+        `This $variable is not expanded`
+        `EOF`
+
+  `command <<- DELIM`                          *redir-heredoc-indent*
+
+      Like `<<` but strips leading tab characters from each line of the
+      body and from the closing delimiter. This allows heredocs to be
+      indented for readability without affecting the content.
+
+      Example:
+        `if true; then`
+        `	cat <<- EOF`
+        `	indented content`
+        `	EOF`
+        `fi`
+
+==============================================================================
+7. Here Strings                                *herestring*
+
+  `command <<< word`                           *redir-herestring*
+
+      Feed {word} as a single string to stdin of {command}, with a
+      trailing newline appended. {word} is subject to the usual expansions.
+
+      Example:
+        `read first rest <<< "hello world"`
+        `bc <<< "2 + 2"`
+
+==============================================================================
+8. File Descriptor Numbers                     *redir-fd*
+
+  Any redirection operator can be prefixed with a file descriptor number:
+
+      `2> file`       redirect stderr to file
+      `3< file`       open file on fd 3
+      `4>> file`      append to file on fd 4
+      `5<> file`      open file read-write on fd 5
+
+  Standard file descriptors:
+
+      0   stdin
+      1   stdout
+      2   stderr
+
+  File descriptors 3 and above are available for general use with `exec`.
+
+==============================================================================
+9. Combining Redirections                      *redir-combine*
+
+  Multiple redirections can appear on a single command, processed left
+  to right:
+
+      `command > out.txt 2>&1`   # stdout to file, stderr to same file
+      `command 2>&1 > out.txt`   # different! stderr to terminal,
+                                 # stdout to file
+
+  Order matters: each redirection is applied in sequence.
+
+==============================================================================
+See also: |param| |glob| |arith|

@@ -1,0 +1,197 @@
+*param* *parameter-expansion* *param-expansion*
+
+#PARAMETER EXPANSION#
+
+The shell provides several forms of parameter expansion for working with
+variables. In each form, {word} is subject to tilde expansion, parameter
+expansion, command substitution, and arithmetic expansion.
+
+If {parameter} is unset or null, the behavior depends on the operator used.
+"Unset" means the variable has never been assigned. "Null" means the variable
+is set but its value is the empty string.
+
+==============================================================================
+1. Basic Forms                                  *param-basic*
+
+  `$var`           Value of {var}
+  `${var}`         Same, with explicit braces (needed for `${var}foo`)
+
+Braces are required when {var} is followed by characters that could be part
+of the name, or when using any of the operators below.
+
+==============================================================================
+2. Default Values                               *param-default*
+
+  `${var:-word}`                                *param-default-val*
+
+      Use default value. If {var} is unset or null, expand to {word}.
+      Otherwise, expand to the value of {var}.
+
+      Example:
+        `name=${1:-world}`
+        `echo "hello $name"`    # prints "hello world" if \$1 is unset
+
+  `${var-word}`                                 *param-default-nonnull*
+
+      Like `:-` but only substitutes {word} if {var} is completely unset,
+      not if it is null.
+
+==============================================================================
+3. Assign Defaults                              *param-assign*
+
+  `${var:=word}`                                *param-assign-val*
+
+      Assign default value. If {var} is unset or null, assign {word} to
+      {var} and then expand to the new value.
+
+      Note: This cannot be used with positional parameters or special
+      parameters.
+
+      Example:
+        `echo ${cache:=/tmp/cache}`    # sets and uses \$cache
+
+  `${var=word}`                                 *param-assign-nonnull*
+
+      Like `:=` but only assigns if {var} is completely unset.
+
+==============================================================================
+4. Error on Unset                               *param-error*
+
+  `${var:?word}`                                *param-error-val*
+
+      Display error. If {var} is unset or null, print {word} to stderr
+      and exit (in a non-interactive shell). If {word} is omitted, a
+      default message is printed.
+
+      Example:
+        `input=${1:?usage: myscript \<filename\>}`
+
+  `${var?word}`                                 *param-error-nonnull*
+
+      Like `:?` but only errors if {var} is completely unset.
+
+==============================================================================
+5. Alternate Value                              *param-alt*
+
+  `${var:+word}`                                *param-alt-val*
+
+      Use alternate value. If {var} is unset or null, expand to nothing.
+      Otherwise, expand to {word}.
+
+      Example:
+        `echo ${verbose:+--verbose}`   # flag only if \$verbose is set
+
+  `${var+word}`                                 *param-alt-nonnull*
+
+      Like `:+` but substitutes {word} only if {var} is set (even if null).
+
+==============================================================================
+6. String Length                                *param-length*
+
+  `${#var}`                                     *param-strlen*
+
+      Expands to the length of the value of {var} in characters.
+
+      Example:
+        `str="hello"`
+        `echo ${#str}`         # prints 5
+
+==============================================================================
+7. Substring Removal                            *param-substring*
+
+  `${var#pattern}`                              *param-trim-short-left*
+
+      Remove shortest matching prefix. Removes the shortest match of
+      {pattern} from the beginning of the value of {var}.
+
+  `${var##pattern}`                             *param-trim-long-left*
+
+      Remove longest matching prefix.
+
+      Example:
+        `path="/home/user/file.txt"`
+        `echo ${path##*/}`     # prints "file.txt"
+
+  `${var%pattern}`                              *param-trim-short-right*
+
+      Remove shortest matching suffix. Removes the shortest match of
+      {pattern} from the end of the value of {var}.
+
+  `${var%%pattern}`                             *param-trim-long-right*
+
+      Remove longest matching suffix.
+
+      Example:
+        `file="archive.tar.gz"`
+        `echo ${file%%.*}`     # prints "archive"
+        `echo ${file%.*}`      # prints "archive.tar"
+
+==============================================================================
+8. Search and Replace                           *param-replace*
+
+  `${var/pattern/replacement}`                  *param-replace-first*
+
+      Replace first match. Replaces the first occurrence of {pattern}
+      in the value of {var} with {replacement}.
+
+  `${var//pattern/replacement}`                 *param-replace-all*
+
+      Replace all matches.
+
+      Example:
+        `str="hello world"`
+        `echo ${str/o/0}`      # prints "hell0 world"
+        `echo ${str//o/0}`     # prints "hell0 w0rld"
+
+  `${var/#pattern/replacement}`                 *param-replace-prefix*
+
+      Replace if matching at the beginning.
+
+  `${var/%pattern/replacement}`                 *param-replace-suffix*
+
+      Replace if matching at the end.
+
+==============================================================================
+9. Case Modification                            *param-case*
+
+  `${var^}`                                     *param-upper-first*
+
+      Uppercase the first character of {var}.
+
+  `${var^^}`                                    *param-upper-all*
+
+      Uppercase all characters.
+
+  `${var,}`                                     *param-lower-first*
+
+      Lowercase the first character of {var}.
+
+  `${var,,}`                                    *param-lower-all*
+
+      Lowercase all characters.
+
+      Example:
+        `name="john doe"`
+        `echo ${name^}`        # prints "John doe"
+        `echo ${name^^}`       # prints "JOHN DOE"
+
+==============================================================================
+10. Substrings                                  *param-slice*
+
+  `${var:offset}`                               *param-slice-from*
+
+      Substring starting at {offset} (0-indexed).
+
+  `${var:offset:length}`                        *param-slice-range*
+
+      Substring of {length} characters starting at {offset}.
+
+      Negative offsets count from the end (note the space before the minus
+      to distinguish from `:-`):
+
+        `str="hello world"`
+        `echo ${str: -5}`      # prints "world"
+        `echo ${str:0:5}`      # prints "hello"
+
+==============================================================================
+See also: |redirect| |glob| |arith|

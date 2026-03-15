@@ -203,6 +203,7 @@ fn dedupe_entries(entries: &[HistEntry]) -> Vec<HistEntry> {
     .collect()
 }
 
+#[derive(Default,Clone,Debug)]
 pub struct History {
   path: PathBuf,
   pub pending: Option<LineBuf>, // command, cursor_pos
@@ -214,6 +215,7 @@ pub struct History {
   //search_direction: Direction,
   ignore_dups: bool,
   max_size: Option<u32>,
+	stateless: bool
 }
 
 impl History {
@@ -229,6 +231,7 @@ impl History {
       //search_direction: Direction::Backward,
       ignore_dups: false,
       max_size: None,
+			stateless: true,
     }
   }
   pub fn new() -> ShResult<Self> {
@@ -266,6 +269,7 @@ impl History {
       //search_direction: Direction::Backward,
       ignore_dups,
       max_size,
+			stateless: false,
     })
   }
 
@@ -450,6 +454,9 @@ impl History {
   }
 
   pub fn save(&mut self) -> ShResult<()> {
+		if self.stateless {
+			return Ok(());
+		}
     let mut file = OpenOptions::new()
       .create(true)
       .append(true)
