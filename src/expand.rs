@@ -4,6 +4,7 @@ use std::str::{Chars, FromStr};
 
 use ariadne::Fmt;
 use glob::Pattern;
+use nix::unistd::{Uid, User};
 use regex::Regex;
 
 use crate::libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color};
@@ -473,7 +474,26 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   while let Some(ch) = chars.next() {
     match ch {
       markers::TILDE_SUB => {
-        let home = env::var("HOME").unwrap_or_default();
+				let mut username = String::new();
+				while chars.peek().is_some_and(|ch| *ch != '/') {
+					let ch = chars.next().unwrap();
+					username.push(ch);
+				}
+				let home = if username.is_empty() {
+					env::var("HOME").unwrap_or_default()
+				}
+				else if let Ok(result) = User::from_name(&username)
+				&& let Some(user) = result {
+					user.dir.to_string_lossy().to_string()
+				}
+				else if let Ok(id) = username.parse::<u32>()
+				&& let Ok(result) = User::from_uid(Uid::from_raw(id))
+				&& let Some(user) = result {
+					user.dir.to_string_lossy().to_string()
+				}
+				else {
+					format!("~{username}")
+				};
         result.push_str(&home);
       }
       markers::PROC_SUB_OUT => {
