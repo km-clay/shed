@@ -8,7 +8,7 @@ use std::{
   time::Duration,
 };
 
-use nix::unistd::{User, gethostname, getppid};
+use nix::unistd::{User, gethostname, getppid, getuid};
 use regex::Regex;
 
 use crate::{
@@ -1872,17 +1872,37 @@ pub fn set_status(code: i32) {
   write_vars(|v| v.set_param(ShellParam::Status, &code.to_string()))
 }
 
-pub fn source_rc() -> ShResult<()> {
-  let path = if let Ok(path) = env::var("SHED_RC") {
+pub fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<()> {
+	let etc_path = PathBuf::from(format!("/etc/shed/{name}"));
+	if etc_path.is_file()
+	&& let Err(e) = source_file(etc_path) {
+		e.print_error();
+	}
+
+  let path = if let Some(name) = env_var_name
+	&& let Ok(path) = env::var(name) {
     PathBuf::from(&path)
+	} else if let Some(home) = get_home() {
+		home.join(format!(".{name}"))
   } else {
-    let home = env::var("HOME").unwrap();
-    PathBuf::from(format!("{home}/.shedrc"))
+		return Err(ShErr::simple(ShErrKind::InternalErr, "could not determine home path"));
   };
-  if !path.exists() {
-    return Err(ShErr::simple(ShErrKind::InternalErr, ".shedrc not found"));
+  if !path.is_file() {
+		return Ok(())
   }
   source_file(path)
+}
+
+pub fn source_rc() -> ShResult<()> {
+	source_runtime_file("shedrc", Some("SHED_RC"))
+}
+
+pub fn source_login() -> ShResult<()> {
+	source_runtime_file("shed_profile", Some("SHED_PROFILE"))
+}
+
+pub fn source_env() -> ShResult<()> {
+	source_runtime_file("shedenv", Some("SHED_ENV"))
 }
 
 pub fn source_file(path: PathBuf) -> ShResult<()> {
@@ -1893,4 +1913,34 @@ pub fn source_file(path: PathBuf) -> ShResult<()> {
   file.read_to_string(&mut buf)?;
   exec_input(buf, None, false, Some(source_name))?;
   Ok(())
+}
+
+#[track_caller]
+pub fn get_home_unchecked() -> PathBuf {
+	if let Some(home) = get_home() {
+		home
+	} else {
+		let caller = std::panic::Location::caller();
+		panic!("get_home_unchecked: could not determine home directory (called from {}:{})", caller.file(), caller.line())
+	}
+}
+
+#[track_caller]
+pub fn get_home_str_unchecked() -> String {
+	if let Some(home) = get_home() {
+		home.to_string_lossy().to_string()
+	} else {
+		let caller = std::panic::Location::caller();
+		panic!("get_home_str_unchecked: could not determine home directory (called from {}:{})", caller.file(), caller.line())
+	}
+}
+
+pub fn get_home() -> Option<PathBuf> {
+	env::var("HOME").ok().map(PathBuf::from).or_else(|| {
+		User::from_uid(getuid()).ok().flatten().map(|u| u.dir)
+	})
+}
+
+pub fn get_home_str() -> Option<String> {
+	get_home().map(|h| h.to_string_lossy().to_string())
 }

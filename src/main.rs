@@ -40,7 +40,7 @@ use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::{
-  AutoCmdKind, read_logic, read_shopts, source_rc, write_jobs, write_meta, write_shopts,
+  AutoCmdKind, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;
@@ -127,6 +127,10 @@ fn main() -> ExitCode {
   } else {
     unsafe { env::set_var("SHLVL", "1") };
   }
+
+	if let Err(e) = source_env() {
+		e.print_error();
+	}
 
   if let Err(e) = if let Some(cmd) = args.command {
     exec_dash_c(cmd)
@@ -216,6 +220,11 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
 fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup(args.login_shell);
+
+	if args.login_shell
+	&& let Err(e) = source_login() {
+		e.print_error();
+	}
 
   if let Err(e) = source_rc() {
     e.print_error();
