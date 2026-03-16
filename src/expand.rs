@@ -474,32 +474,31 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   while let Some(ch) = chars.next() {
     match ch {
       markers::TILDE_SUB => {
-				let mut username = String::new();
-				while chars.peek().is_some_and(|ch| *ch != '/') {
-					let ch = chars.next().unwrap();
-					username.push(ch);
-				}
+        let mut username = String::new();
+        while chars.peek().is_some_and(|ch| *ch != '/') {
+          let ch = chars.next().unwrap();
+          username.push(ch);
+        }
 
-				let home = if username.is_empty() {
-					// standard '~' expansion
-					env::var("HOME").unwrap_or_default()
-				}
-				else if let Ok(result) = User::from_name(&username)
-				&& let Some(user) = result {
-					// username expansion like '~user'
-					user.dir.to_string_lossy().to_string()
-				}
-				else if let Ok(id) = username.parse::<u32>()
-				&& let Ok(result) = User::from_uid(Uid::from_raw(id))
-				&& let Some(user) = result {
-					// uid expansion like '~1000'
-					// shed only feature btw B)
-					user.dir.to_string_lossy().to_string()
-				}
-				else {
-					// no match, use literal
-					format!("~{username}")
-				};
+        let home = if username.is_empty() {
+          // standard '~' expansion
+          env::var("HOME").unwrap_or_default()
+        } else if let Ok(result) = User::from_name(&username)
+          && let Some(user) = result
+        {
+          // username expansion like '~user'
+          user.dir.to_string_lossy().to_string()
+        } else if let Ok(id) = username.parse::<u32>()
+          && let Ok(result) = User::from_uid(Uid::from_raw(id))
+          && let Some(user) = result
+        {
+          // uid expansion like '~1000'
+          // shed only feature btw B)
+          user.dir.to_string_lossy().to_string()
+        } else {
+          // no match, use literal
+          format!("~{username}")
+        };
 
         result.push_str(&home);
       }
@@ -1584,10 +1583,10 @@ pub fn unescape_math(raw: &str) -> String {
 #[derive(Debug)]
 pub enum ParamExp {
   Len,                               // #var_name
-	ToUpperFirst,											 // ^var_name
-	ToUpperAll,												 // ^^var_name
-	ToLowerFirst,											 // ,var_name
-	ToLowerAll,												 // ,,var_name
+  ToUpperFirst,                      // ^var_name
+  ToUpperAll,                        // ^^var_name
+  ToLowerFirst,                      // ,var_name
+  ToLowerAll,                        // ,,var_name
   DefaultUnsetOrNull(String),        // :-
   DefaultUnset(String),              // -
   SetDefaultUnsetOrNull(String),     // :=
@@ -1623,10 +1622,18 @@ impl FromStr for ParamExp {
       ))
     };
 
-		if s == "^^" { return Ok(ToUpperAll) }
-		if s == "^" { return Ok(ToUpperFirst) }
-		if s == ",," { return Ok(ToLowerAll) }
-		if s == "," { return Ok(ToLowerFirst) }
+    if s == "^^" {
+      return Ok(ToUpperAll);
+    }
+    if s == "^" {
+      return Ok(ToUpperFirst);
+    }
+    if s == ",," {
+      return Ok(ToLowerAll);
+    }
+    if s == "," {
+      return Ok(ToLowerFirst);
+    }
 
     // Handle indirect var expansion: ${!var}
     if let Some(var) = s.strip_prefix('!') {
@@ -1745,32 +1752,32 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
   if let Ok(expansion) = rest.parse::<ParamExp>() {
     match expansion {
       ParamExp::Len => unreachable!(),
-			ParamExp::ToUpperAll => {
-				let value = vars.get_var(&var_name);
-				Ok(value.to_uppercase())
-			}
-			ParamExp::ToUpperFirst => {
-				let value = vars.get_var(&var_name);
-				let mut chars = value.chars();
-				let first = chars.next()
-					.map(|c| c.to_uppercase()
-						.to_string())
-					.unwrap_or_default();
-				Ok(first + chars.as_str())
-
-			}
-			ParamExp::ToLowerAll => {
-				let value = vars.get_var(&var_name);
-				Ok(value.to_lowercase())
-			}
-			ParamExp::ToLowerFirst => {
-				let value = vars.get_var(&var_name);
-				let mut chars = value.chars();
-				let first = chars.next()
-					.map(|c| c.to_lowercase().to_string())
-					.unwrap_or_default();
-				Ok(first + chars.as_str())
-			}
+      ParamExp::ToUpperAll => {
+        let value = vars.get_var(&var_name);
+        Ok(value.to_uppercase())
+      }
+      ParamExp::ToUpperFirst => {
+        let value = vars.get_var(&var_name);
+        let mut chars = value.chars();
+        let first = chars
+          .next()
+          .map(|c| c.to_uppercase().to_string())
+          .unwrap_or_default();
+        Ok(first + chars.as_str())
+      }
+      ParamExp::ToLowerAll => {
+        let value = vars.get_var(&var_name);
+        Ok(value.to_lowercase())
+      }
+      ParamExp::ToLowerFirst => {
+        let value = vars.get_var(&var_name);
+        let mut chars = value.chars();
+        let first = chars
+          .next()
+          .map(|c| c.to_lowercase().to_string())
+          .unwrap_or_default();
+        Ok(first + chars.as_str())
+      }
       ParamExp::DefaultUnsetOrNull(default) => {
         match vars.try_get_var(&var_name).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val),

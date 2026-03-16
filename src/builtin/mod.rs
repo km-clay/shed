@@ -11,6 +11,7 @@ pub mod eval;
 pub mod exec;
 pub mod flowctl;
 pub mod getopts;
+pub mod help;
 pub mod intro;
 pub mod jobctl;
 pub mod keymap;
@@ -25,7 +26,6 @@ pub mod source;
 pub mod test; // [[ ]] thing
 pub mod trap;
 pub mod varcmds;
-pub mod help;
 
 pub const BUILTINS: [&str; 51] = [
   "echo", "cd", "read", "export", "local", "pwd", "source", ".", "shift", "jobs", "fg", "bg",

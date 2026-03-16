@@ -12,6 +12,7 @@ use super::vicmd::{
   ViCmd, Word,
 };
 use crate::{
+  expand::expand_cmd_sub,
   libsh::{error::ShResult, guards::var_ctx_guard},
   parse::{
     execute::exec_input,
@@ -23,6 +24,7 @@ use crate::{
     markers,
     register::{RegisterContent, write_register},
     term::RawModeGuard,
+    vicmd::ReadSrc,
   },
   state::{VarFlags, VarKind, read_shopts, write_meta, write_vars},
 };
@@ -441,33 +443,30 @@ pub struct LineBuf {
 }
 
 impl Default for LineBuf {
-	fn default() -> Self {
-		Self {
-			buffer: String::new(),
-			hint: None,
-			grapheme_indices: Some(vec![]),
-			cursor: ClampedUsize::new(0, 0, false),
+  fn default() -> Self {
+    Self {
+      buffer: String::new(),
+      hint: None,
+      grapheme_indices: Some(vec![]),
+      cursor: ClampedUsize::new(0, 0, false),
 
-			select_mode: None,
-			select_range: None,
-			last_selection: None,
+      select_mode: None,
+      select_range: None,
+      last_selection: None,
 
-			insert_mode_start_pos: None,
-			saved_col: None,
-			indent_ctx: IndentCtx::new(),
+      insert_mode_start_pos: None,
+      saved_col: None,
+      indent_ctx: IndentCtx::new(),
 
-			undo_stack: vec![],
-			redo_stack: vec![],
-		}
-	}
+      undo_stack: vec![],
+      redo_stack: vec![],
+    }
+  }
 }
 
 impl LineBuf {
   pub fn new() -> Self {
-    let mut new = Self {
-      grapheme_indices: Some(vec![]), // We know the buffer is empty, so this keeps us safe from unwrapping None
-      ..Default::default()
-    };
+    let mut new = Self::default();
     new.update_graphemes();
     new
   }
@@ -3329,12 +3328,39 @@ impl LineBuf {
       | Verb::CompleteBackward
       | Verb::VisualModeSelectLast => self.apply_motion(motion),
       Verb::ShellCmd(cmd) => self.verb_shell_cmd(cmd)?,
-      Verb::Normal(_)
-      | Verb::Read(_)
-      | Verb::Write(_)
-      | Verb::Substitute(..)
-      | Verb::RepeatSubstitute
-      | Verb::RepeatGlobal => {}
+      Verb::Read(src) => match src {
+        ReadSrc::File(path_buf) => {
+          if !path_buf.is_file() {
+            write_meta(|m| m.post_system_message(format!("{} is not a file", path_buf.display())));
+            return Ok(());
+          }
+          let Ok(contents) = std::fs::read_to_string(&path_buf) else {
+            write_meta(|m| {
+              m.post_system_message(format!("Failed to read file {}", path_buf.display()))
+            });
+            return Ok(());
+          };
+          let grapheme_count = contents.graphemes(true).count();
+          self.insert_str_at_cursor(&contents);
+          self.cursor.add(grapheme_count);
+        }
+        ReadSrc::Cmd(cmd) => {
+          let output = match expand_cmd_sub(&cmd) {
+            Ok(out) => out,
+            Err(e) => {
+              e.print_error();
+              return Ok(());
+            }
+          };
+
+          let grapheme_count = output.graphemes(true).count();
+          self.insert_str_at_cursor(&output);
+          self.cursor.add(grapheme_count);
+        }
+      },
+      Verb::Write(dest) => {}
+      Verb::Edit(path) => {}
+      Verb::Normal(_) | Verb::Substitute(..) | Verb::RepeatSubstitute | Verb::RepeatGlobal => {}
     }
     Ok(())
   }

@@ -1084,11 +1084,9 @@ impl ParseStream {
       }
     }
 
-
     if !from_func_def {
       self.parse_redir(&mut redirs, &mut node_tks)?;
     }
-
 
     let node = Node {
       class: NdRule::BraceGrp { body },

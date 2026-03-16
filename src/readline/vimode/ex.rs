@@ -5,6 +5,7 @@ use std::str::Chars;
 use itertools::Itertools;
 
 use crate::bitflags;
+use crate::expand::{Expander, expand_raw};
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
@@ -14,7 +15,7 @@ use crate::readline::vicmd::{
   WriteDest,
 };
 use crate::readline::vimode::{ModeReport, ViInsert, ViMode};
-use crate::state::write_meta;
+use crate::state::{get_home, write_meta};
 
 bitflags! {
   #[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -34,18 +35,18 @@ bitflags! {
 struct ExEditor {
   buf: LineBuf,
   mode: ViInsert,
-	history: History
+  history: History,
 }
 
 impl ExEditor {
-	pub fn new(history: History) -> Self {
-		let mut new = Self {
-			history,
-			..Default::default()
-		};
-		new.buf.update_graphemes();
-		new
-	}
+  pub fn new(history: History) -> Self {
+    let mut new = Self {
+      history,
+      ..Default::default()
+    };
+    new.buf.update_graphemes();
+    new
+  }
   pub fn clear(&mut self) {
     *self = Self::default()
   }
@@ -85,13 +86,13 @@ impl ExEditor {
     let Some(mut cmd) = self.mode.handle_key(key) else {
       return Ok(());
     };
-		cmd.alter_line_motion_if_no_verb();
-		log::debug!("ExEditor got cmd: {:?}", cmd);
-		if self.should_grab_history(&cmd) {
-			log::debug!("Grabbing history for cmd: {:?}", cmd);
-			self.scroll_history(cmd);
-			return Ok(())
-		}
+    cmd.alter_line_motion_if_no_verb();
+    log::debug!("ExEditor got cmd: {:?}", cmd);
+    if self.should_grab_history(&cmd) {
+      log::debug!("Grabbing history for cmd: {:?}", cmd);
+      self.scroll_history(cmd);
+      return Ok(());
+    }
     self.buf.exec_cmd(cmd)
   }
 }
@@ -103,7 +104,9 @@ pub struct ViEx {
 
 impl ViEx {
   pub fn new(history: History) -> Self {
-		Self { pending_cmd: ExEditor::new(history) }
+    Self {
+      pending_cmd: ExEditor::new(history),
+    }
   }
 }
 
@@ -115,9 +118,7 @@ impl ViMode for ViEx {
       E(C::Char('\r'), M::NONE) | E(C::Enter, M::NONE) => {
         let input = self.pending_cmd.buf.as_str();
         match parse_ex_cmd(input) {
-          Ok(cmd) => {
-            Ok(cmd)
-          }
+          Ok(cmd) => Ok(cmd),
           Err(e) => {
             let msg = e.unwrap_or(format!("Not an editor command: {}", input));
             write_meta(|m| m.post_system_message(msg.clone()));
@@ -129,18 +130,14 @@ impl ViMode for ViEx {
         self.pending_cmd.clear();
         Ok(None)
       }
-      E(C::Esc, M::NONE) => {
-        Ok(Some(ViCmd {
-          register: RegisterName::default(),
-          verb: Some(VerbCmd(1, Verb::NormalMode)),
-          motion: None,
-          flags: CmdFlags::empty(),
-          raw_seq: "".into(),
-        }))
-      }
-      _ => {
-        self.pending_cmd.handle_key(key).map(|_| None)
-      }
+      E(C::Esc, M::NONE) => Ok(Some(ViCmd {
+        register: RegisterName::default(),
+        verb: Some(VerbCmd(1, Verb::NormalMode)),
+        motion: None,
+        flags: CmdFlags::empty(),
+        raw_seq: "".into(),
+      })),
+      _ => self.pending_cmd.handle_key(key).map(|_| None),
     }
   }
   fn handle_key(&mut self, key: KeyEvent) -> Option<ViCmd> {
@@ -248,7 +245,7 @@ fn parse_ex_command(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Opt
   let mut cmd_name = String::new();
 
   while let Some(ch) = chars.peek() {
-    if ch == &'!' {
+    if cmd_name.is_empty() && ch == &'!' {
       cmd_name.push(*ch);
       chars.next();
       break;
@@ -265,16 +262,17 @@ fn parse_ex_command(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Opt
       let cmd = unescape_shell_cmd(&cmd);
       Ok(Some(Verb::ShellCmd(cmd)))
     }
-		_ if "help".starts_with(&cmd_name) => {
-			let cmd = "help ".to_string() + chars.collect::<String>().trim();
-			Ok(Some(Verb::ShellCmd(cmd)))
-		}
+    _ if "help".starts_with(&cmd_name) => {
+      let cmd = "help ".to_string() + chars.collect::<String>().trim();
+      Ok(Some(Verb::ShellCmd(cmd)))
+    }
     "normal!" => parse_normal(chars),
     _ if "delete".starts_with(&cmd_name) => Ok(Some(Verb::Delete)),
     _ if "yank".starts_with(&cmd_name) => Ok(Some(Verb::Yank)),
     _ if "put".starts_with(&cmd_name) => Ok(Some(Verb::Put(Anchor::After))),
     _ if "read".starts_with(&cmd_name) => parse_read(chars),
     _ if "write".starts_with(&cmd_name) => parse_write(chars),
+    _ if "edit".starts_with(&cmd_name) => parse_edit(chars),
     _ if "substitute".starts_with(&cmd_name) => parse_substitute(chars),
     _ => Err(None),
   }
@@ -287,6 +285,19 @@ fn parse_normal(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Option<
 
   let seq: String = chars.collect();
   Ok(Some(Verb::Normal(seq)))
+}
+
+fn parse_edit(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Option<String>> {
+  chars
+    .peeking_take_while(|c| c.is_whitespace())
+    .for_each(drop);
+
+  let arg: String = chars.collect();
+  if arg.trim().is_empty() {
+    return Err(Some("Expected file path after ':edit'".into()));
+  }
+  let arg_path = get_path(arg.trim())?;
+  Ok(Some(Verb::Edit(arg_path)))
 }
 
 fn parse_read(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Option<String>> {
@@ -311,23 +322,15 @@ fn parse_read(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Option<St
   if is_shell_read {
     Ok(Some(Verb::Read(ReadSrc::Cmd(arg))))
   } else {
-    let arg_path = get_path(arg.trim());
+    let arg_path = get_path(arg.trim())?;
     Ok(Some(Verb::Read(ReadSrc::File(arg_path))))
   }
 }
 
-fn get_path(path: &str) -> PathBuf {
-  if let Some(stripped) = path.strip_prefix("~/")
-    && let Some(home) = std::env::var_os("HOME")
-  {
-    return PathBuf::from(home).join(stripped);
-  }
-  if path == "~"
-    && let Some(home) = std::env::var_os("HOME")
-  {
-    return PathBuf::from(home);
-  }
-  PathBuf::from(path)
+fn get_path(path: &str) -> Result<PathBuf, Option<String>> {
+  let expanded = expand_raw(&mut path.chars().peekable())
+    .map_err(|e| Some(format!("Error expanding path: {}", e)))?;
+  Ok(PathBuf::from(&expanded))
 }
 
 fn parse_write(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Option<String>> {
@@ -350,7 +353,7 @@ fn parse_write(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Option<S
   }
 
   let arg: String = chars.collect();
-  let arg_path = get_path(arg.trim());
+  let arg_path = get_path(arg.trim())?;
 
   let dest = if is_file_append {
     WriteDest::FileAppend(arg_path)

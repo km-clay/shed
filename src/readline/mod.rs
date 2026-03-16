@@ -133,17 +133,17 @@ pub mod markers {
     ('\u{e000}'..'\u{efff}').contains(&c)
   }
 
-	// Help command formatting markers
-	pub const TAG: Marker = '\u{e180}';
-	pub const REFERENCE: Marker = '\u{e181}';
-	pub const HEADER: Marker = '\u{e182}';
-	pub const CODE: Marker = '\u{e183}';
-	/// angle brackets
-	pub const KEYWORD_1: Marker = '\u{e184}';
-	/// curly brackets
-	pub const KEYWORD_2: Marker = '\u{e185}';
-	/// square brackets
-	pub const KEYWORD_3: Marker = '\u{e186}';
+  // Help command formatting markers
+  pub const TAG: Marker = '\u{e180}';
+  pub const REFERENCE: Marker = '\u{e181}';
+  pub const HEADER: Marker = '\u{e182}';
+  pub const CODE: Marker = '\u{e183}';
+  /// angle brackets
+  pub const KEYWORD_1: Marker = '\u{e184}';
+  /// curly brackets
+  pub const KEYWORD_2: Marker = '\u{e185}';
+  /// square brackets
+  pub const KEYWORD_3: Marker = '\u{e186}';
 }
 type Marker = char;
 
@@ -268,7 +268,7 @@ pub struct ShedVi {
 
   pub old_layout: Option<Layout>,
   pub history: History,
-	pub ex_history: History,
+  pub ex_history: History,
 
   pub needs_redraw: bool,
 }
@@ -290,7 +290,7 @@ impl ShedVi {
       repeat_motion: None,
       editor: LineBuf::new(),
       history: History::new()?,
-			ex_history: History::empty(),
+      ex_history: History::empty(),
       needs_redraw: true,
     };
     write_vars(|v| {
@@ -322,7 +322,7 @@ impl ShedVi {
       repeat_motion: None,
       editor: LineBuf::new(),
       history: History::empty(),
-			ex_history: History::empty(),
+      ex_history: History::empty(),
       needs_redraw: true,
     };
     write_vars(|v| {
@@ -861,16 +861,16 @@ impl ShedVi {
 
     let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
     let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
-		let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
-		log::debug!("is_ex_cmd: {is_ex_cmd}");
+    let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
+    log::debug!("is_ex_cmd: {is_ex_cmd}");
     if is_shell_cmd {
       self.old_layout = None;
     }
-		if is_ex_cmd {
-			self.ex_history.push(cmd.raw_seq.clone());
-			self.ex_history.reset();
-			log::debug!("ex_history: {:?}", self.ex_history.entries());
-		}
+    if is_ex_cmd {
+      self.ex_history.push(cmd.raw_seq.clone());
+      self.ex_history.reset();
+      log::debug!("ex_history: {:?}", self.ex_history.entries());
+    }
 
     let before = self.editor.buffer.clone();
 

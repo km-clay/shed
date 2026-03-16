@@ -1098,7 +1098,7 @@ impl VarTab {
       .map(|hname| hname.to_string_lossy().to_string())
       .unwrap_or_default();
 
-		let help_paths = format!("/usr/share/shed/doc:{home}/.local/share/shed/doc");
+    let help_paths = format!("/usr/share/shed/doc:{home}/.local/share/shed/doc");
 
     unsafe {
       env::set_var("IFS", " \t\n");
@@ -1116,7 +1116,7 @@ impl VarTab {
       env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
       env::set_var("SHED_HIST", format!("{}/.shedhist", home));
       env::set_var("SHED_RC", format!("{}/.shedrc", home));
-			env::set_var("SHED_HPATH", help_paths);
+      env::set_var("SHED_HPATH", help_paths);
     }
   }
   pub fn init_sh_argv(&mut self) {
@@ -1873,36 +1873,41 @@ pub fn set_status(code: i32) {
 }
 
 pub fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<()> {
-	let etc_path = PathBuf::from(format!("/etc/shed/{name}"));
-	if etc_path.is_file()
-	&& let Err(e) = source_file(etc_path) {
-		e.print_error();
-	}
+  let etc_path = PathBuf::from(format!("/etc/shed/{name}"));
+  if etc_path.is_file()
+    && let Err(e) = source_file(etc_path)
+  {
+    e.print_error();
+  }
 
   let path = if let Some(name) = env_var_name
-	&& let Ok(path) = env::var(name) {
+    && let Ok(path) = env::var(name)
+  {
     PathBuf::from(&path)
-	} else if let Some(home) = get_home() {
-		home.join(format!(".{name}"))
+  } else if let Some(home) = get_home() {
+    home.join(format!(".{name}"))
   } else {
-		return Err(ShErr::simple(ShErrKind::InternalErr, "could not determine home path"));
+    return Err(ShErr::simple(
+      ShErrKind::InternalErr,
+      "could not determine home path",
+    ));
   };
   if !path.is_file() {
-		return Ok(())
+    return Ok(());
   }
   source_file(path)
 }
 
 pub fn source_rc() -> ShResult<()> {
-	source_runtime_file("shedrc", Some("SHED_RC"))
+  source_runtime_file("shedrc", Some("SHED_RC"))
 }
 
 pub fn source_login() -> ShResult<()> {
-	source_runtime_file("shed_profile", Some("SHED_PROFILE"))
+  source_runtime_file("shed_profile", Some("SHED_PROFILE"))
 }
 
 pub fn source_env() -> ShResult<()> {
-	source_runtime_file("shedenv", Some("SHED_ENV"))
+  source_runtime_file("shedenv", Some("SHED_ENV"))
 }
 
 pub fn source_file(path: PathBuf) -> ShResult<()> {
@@ -1917,30 +1922,39 @@ pub fn source_file(path: PathBuf) -> ShResult<()> {
 
 #[track_caller]
 pub fn get_home_unchecked() -> PathBuf {
-	if let Some(home) = get_home() {
-		home
-	} else {
-		let caller = std::panic::Location::caller();
-		panic!("get_home_unchecked: could not determine home directory (called from {}:{})", caller.file(), caller.line())
-	}
+  if let Some(home) = get_home() {
+    home
+  } else {
+    let caller = std::panic::Location::caller();
+    panic!(
+      "get_home_unchecked: could not determine home directory (called from {}:{})",
+      caller.file(),
+      caller.line()
+    )
+  }
 }
 
 #[track_caller]
 pub fn get_home_str_unchecked() -> String {
-	if let Some(home) = get_home() {
-		home.to_string_lossy().to_string()
-	} else {
-		let caller = std::panic::Location::caller();
-		panic!("get_home_str_unchecked: could not determine home directory (called from {}:{})", caller.file(), caller.line())
-	}
+  if let Some(home) = get_home() {
+    home.to_string_lossy().to_string()
+  } else {
+    let caller = std::panic::Location::caller();
+    panic!(
+      "get_home_str_unchecked: could not determine home directory (called from {}:{})",
+      caller.file(),
+      caller.line()
+    )
+  }
 }
 
 pub fn get_home() -> Option<PathBuf> {
-	env::var("HOME").ok().map(PathBuf::from).or_else(|| {
-		User::from_uid(getuid()).ok().flatten().map(|u| u.dir)
-	})
+  env::var("HOME")
+    .ok()
+    .map(PathBuf::from)
+    .or_else(|| User::from_uid(getuid()).ok().flatten().map(|u| u.dir))
 }
 
 pub fn get_home_str() -> Option<String> {
-	get_home().map(|h| h.to_string_lossy().to_string())
+  get_home().map(|h| h.to_string_lossy().to_string())
 }

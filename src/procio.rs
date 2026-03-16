@@ -115,11 +115,14 @@ impl IoMode {
   pub fn buffer(tgt_fd: RawFd, buf: String, flags: TkFlags) -> ShResult<Self> {
     Ok(Self::Buffer { tgt_fd, buf, flags })
   }
-	pub fn loaded_pipe(tgt_fd: RawFd, buf: &[u8]) -> ShResult<Self> {
-		let (rpipe, wpipe) = nix::unistd::pipe()?;
-		write(wpipe, buf)?;
-		Ok(Self::Pipe { tgt_fd, pipe: rpipe.into() })
-	}
+  pub fn loaded_pipe(tgt_fd: RawFd, buf: &[u8]) -> ShResult<Self> {
+    let (rpipe, wpipe) = nix::unistd::pipe()?;
+    write(wpipe, buf)?;
+    Ok(Self::Pipe {
+      tgt_fd,
+      pipe: rpipe.into(),
+    })
+  }
   pub fn get_pipes() -> (Self, Self) {
     let (rpipe, wpipe) = nix::unistd::pipe2(OFlag::O_CLOEXEC).unwrap();
     (

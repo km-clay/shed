@@ -1,4 +1,8 @@
+use std::path::PathBuf;
+
 use bitflags::bitflags;
+
+use crate::readline::vimode::ex::SubFlags;
 
 use super::register::{RegisterContent, append_register, read_register, write_register};
 
@@ -64,7 +68,7 @@ bitflags! {
     const VISUAL_LINE = 1<<1;
     const VISUAL_BLOCK = 1<<2;
     const EXIT_CUR_MODE = 1<<3;
-		const IS_EX_CMD = 1<<4;
+    const IS_EX_CMD = 1<<4;
   }
 }
 
@@ -256,7 +260,8 @@ pub enum Verb {
   Normal(String),
   Read(ReadSrc),
   Write(WriteDest),
-  Substitute(String, String, super::vimode::ex::SubFlags),
+  Edit(PathBuf),
+  Substitute(String, String, SubFlags),
   RepeatSubstitute,
   RepeatGlobal,
 }

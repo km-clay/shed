@@ -40,7 +40,8 @@ use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
 use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::{
-  AutoCmdKind, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
+  AutoCmdKind, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs,
+  write_meta, write_shopts,
 };
 use clap::Parser;
 use state::write_vars;
@@ -59,8 +60,8 @@ struct ShedArgs {
   #[arg(short)]
   interactive: bool,
 
-	#[arg(short)]
-	stdin: bool,
+  #[arg(short)]
+  stdin: bool,
 
   #[arg(long, short)]
   login_shell: bool,
@@ -128,16 +129,16 @@ fn main() -> ExitCode {
     unsafe { env::set_var("SHLVL", "1") };
   }
 
-	if let Err(e) = source_env() {
-		e.print_error();
-	}
+  if let Err(e) = source_env() {
+    e.print_error();
+  }
 
   if let Err(e) = if let Some(cmd) = args.command {
     exec_dash_c(cmd)
   } else if args.stdin || !isatty(STDIN_FILENO).unwrap_or(false) {
-		read_commands(args.script_args)
-	} else if !args.script_args.is_empty() {
-		let path = args.script_args.remove(0);
+    read_commands(args.script_args)
+  } else if !args.script_args.is_empty() {
+    let path = args.script_args.remove(0);
     run_script(path, args.script_args)
   } else {
     let res = shed_interactive(args);
@@ -161,29 +162,29 @@ fn main() -> ExitCode {
 }
 
 fn read_commands(args: Vec<String>) -> ShResult<()> {
-	let mut input = vec![];
-	let mut read_buf = [0u8;4096];
-	loop {
-		match read(STDIN_FILENO, &mut read_buf) {
-			Ok(0) => break,
-			Ok(n) => input.extend_from_slice(&read_buf[..n]),
-			Err(Errno::EINTR) => continue,
-			Err(e) => {
-				QUIT_CODE.store(1, Ordering::SeqCst);
-				return Err(ShErr::simple(
-					ShErrKind::CleanExit(1),
-					format!("error reading from stdin: {e}"),
-				));
-			}
-		}
-	}
+  let mut input = vec![];
+  let mut read_buf = [0u8; 4096];
+  loop {
+    match read(STDIN_FILENO, &mut read_buf) {
+      Ok(0) => break,
+      Ok(n) => input.extend_from_slice(&read_buf[..n]),
+      Err(Errno::EINTR) => continue,
+      Err(e) => {
+        QUIT_CODE.store(1, Ordering::SeqCst);
+        return Err(ShErr::simple(
+          ShErrKind::CleanExit(1),
+          format!("error reading from stdin: {e}"),
+        ));
+      }
+    }
+  }
 
-	let commands = String::from_utf8_lossy(&input).to_string();
+  let commands = String::from_utf8_lossy(&input).to_string();
   for arg in args {
     write_vars(|v| v.cur_scope_mut().bpush_arg(arg))
   }
 
-	exec_input(commands, None, false, None)
+  exec_input(commands, None, false, None)
 }
 
 fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
@@ -221,10 +222,11 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup(args.login_shell);
 
-	if args.login_shell
-	&& let Err(e) = source_login() {
-		e.print_error();
-	}
+  if args.login_shell
+    && let Err(e) = source_login()
+  {
+    e.print_error();
+  }
 
   if let Err(e) = source_rc() {
     e.print_error();
