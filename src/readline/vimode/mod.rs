@@ -3,7 +3,9 @@ use std::fmt::Display;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::libsh::error::ShResult;
+use crate::readline::history::History;
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
+use crate::readline::linebuf::LineBuf;
 use crate::readline::vicmd::{Motion, MotionCmd, To, Verb, VerbCmd, ViCmd};
 
 pub mod ex;
@@ -79,9 +81,9 @@ pub trait ViMode {
   fn as_replay(&self) -> Option<CmdReplay>;
   fn cursor_style(&self) -> String;
   fn pending_seq(&self) -> Option<String>;
-  fn pending_cursor(&self) -> Option<usize> {
-    None
-  }
+  fn pending_cursor(&self) -> Option<usize> { None }
+	fn editor(&mut self) -> Option<&mut LineBuf> { None }
+	fn history(&mut self) -> Option<&mut History> { None }
   fn move_cursor_on_undo(&self) -> bool;
   fn clamp_cursor(&self) -> bool;
   fn hist_scroll_start_pos(&self) -> Option<To>;

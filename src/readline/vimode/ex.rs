@@ -7,6 +7,8 @@ use itertools::Itertools;
 use crate::bitflags;
 use crate::expand::{Expander, expand_raw};
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::parse::lex::TkFlags;
+use crate::readline::complete::SimpleCompleter;
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
@@ -151,6 +153,14 @@ impl ViMode for ViEx {
   fn as_replay(&self) -> Option<super::CmdReplay> {
     None
   }
+
+	fn editor(&mut self) -> Option<&mut LineBuf> {
+		Some(&mut self.pending_cmd.buf)
+	}
+
+	fn history(&mut self) -> Option<&mut History> {
+		Some(&mut self.pending_cmd.history)
+	}
 
   fn cursor_style(&self) -> String {
     "\x1b[3 q".to_string()
@@ -328,8 +338,13 @@ fn parse_read(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Option<St
 }
 
 fn get_path(path: &str) -> Result<PathBuf, Option<String>> {
-  let expanded = expand_raw(&mut path.chars().peekable())
-    .map_err(|e| Some(format!("Error expanding path: {}", e)))?;
+	log::debug!("Expanding path: {}", path);
+  let expanded = Expander::from_raw(path, TkFlags::empty())
+    .map_err(|e| Some(format!("Error expanding path: {}", e)))?
+		.expand()
+    .map_err(|e| Some(format!("Error expanding path: {}", e)))?
+		.join(" ");
+	log::debug!("Expanded path: {}", expanded);
   Ok(PathBuf::from(&expanded))
 }
 

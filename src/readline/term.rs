@@ -893,6 +893,7 @@ impl Default for Layout {
   }
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct TermWriter {
   last_bell: Option<Instant>,
   out: RawFd,

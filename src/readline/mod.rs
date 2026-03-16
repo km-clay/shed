@@ -346,6 +346,18 @@ impl ShedVi {
     self
   }
 
+	/// A mutable reference to the currently focused editor
+	/// This includes the main LineBuf, and sub-editors for modes like Ex mode.
+	pub fn focused_editor(&mut self) -> &mut LineBuf {
+		self.mode.editor().unwrap_or(&mut self.editor)
+	}
+
+	/// A mutable reference to the currently focused history, if any.
+	/// This includes the main history struct, and history for sub-editors like Ex mode.
+	pub fn focused_history(&mut self) -> &mut History {
+		self.mode.history().unwrap_or(&mut self.history)
+	}
+
   /// Feed raw bytes from stdin into the reader's buffer
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
     self.reader.feed_bytes(bytes);
@@ -367,8 +379,8 @@ impl ShedVi {
       self.completer.reset_stay_active();
       self.needs_redraw = true;
       Ok(())
-    } else if self.history.fuzzy_finder.is_active() {
-      self.history.fuzzy_finder.reset_stay_active();
+    } else if self.focused_history().fuzzy_finder.is_active() {
+      self.focused_history().fuzzy_finder.reset_stay_active();
       self.needs_redraw = true;
       Ok(())
     } else {
@@ -457,20 +469,28 @@ impl ShedVi {
     // Process all available keys
     while let Some(key) = self.reader.read_key()? {
       // If completer or history search are active, delegate input to it
-      if self.history.fuzzy_finder.is_active() {
+      if self.focused_history().fuzzy_finder.is_active() {
         self.print_line(false)?;
-        match self.history.fuzzy_finder.handle_key(key)? {
+        match self.focused_history().fuzzy_finder.handle_key(key)? {
           SelectorResponse::Accept(cmd) => {
             let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
 
-            self.editor.set_buffer(cmd.to_string());
-            self.editor.move_cursor_to_end();
+						{
+							let editor = self.focused_editor();
+							editor.set_buffer(cmd.to_string());
+							editor.move_cursor_to_end();
+						}
+
             self
               .history
               .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
-            self.editor.set_hint(None);
-            self.history.fuzzy_finder.clear(&mut self.writer)?;
-            self.history.fuzzy_finder.reset();
+						self.editor.set_hint(None);
+						{
+							let mut writer = std::mem::take(&mut self.writer);
+							self.focused_history().fuzzy_finder.clear(&mut writer)?;
+							self.writer = writer;
+						}
+            self.focused_history().fuzzy_finder.reset();
 
             with_vars([("_HIST_ENTRY".into(), cmd.clone())], || {
               post_cmds.exec_with(&cmd);
@@ -493,7 +513,11 @@ impl ShedVi {
             post_cmds.exec();
 
             self.editor.set_hint(None);
-            self.history.fuzzy_finder.clear(&mut self.writer)?;
+						{
+							let mut writer = std::mem::take(&mut self.writer);
+							self.focused_history().fuzzy_finder.clear(&mut writer)?;
+							self.writer = writer;
+						}
             write_vars(|v| {
               v.set_var(
                 "SHED_VI_MODE",
@@ -520,8 +544,8 @@ impl ShedVi {
             let span_start = self.completer.token_span().0;
             let new_cursor = span_start + candidate.len();
             let line = self.completer.get_completed_line(&candidate);
-            self.editor.set_buffer(line);
-            self.editor.cursor.set(new_cursor);
+            self.focused_editor().set_buffer(line);
+            self.focused_editor().cursor.set(new_cursor);
             // Don't reset yet — clear() needs old_layout to erase the selector.
 
             if !self.history.at_pending() {
@@ -650,7 +674,8 @@ impl ShedVi {
     }
 
     if let KeyEvent(KeyCode::Tab, mod_keys) = key {
-      if self.editor.attempt_history_expansion(&self.history) {
+			if self.mode.report_mode() != ModeReport::Ex
+      && self.editor.attempt_history_expansion(&self.history) {
         // If history expansion occurred, don't attempt completion yet
         // allow the user to see the expanded command and accept or edit it before completing
         return Ok(None);
@@ -660,8 +685,8 @@ impl ShedVi {
         ModKeys::SHIFT => -1,
         _ => 1,
       };
-      let line = self.editor.as_str().to_string();
-      let cursor_pos = self.editor.cursor_byte_pos();
+      let line = self.focused_editor().as_str().to_string();
+      let cursor_pos = self.focused_editor().cursor_byte_pos();
 
       match self.completer.complete(line, cursor_pos, direction) {
         Err(e) => {
@@ -685,8 +710,8 @@ impl ShedVi {
               .map(|c| c.len())
               .unwrap_or_default();
 
-          self.editor.set_buffer(line.clone());
-          self.editor.cursor.set(new_cursor);
+          self.focused_editor().set_buffer(line.clone());
+          self.focused_editor().cursor.set(new_cursor);
 
           if !self.history.at_pending() {
             self.history.reset_to_pending();
@@ -748,18 +773,18 @@ impl ShedVi {
       self.needs_redraw = true;
       return Ok(None);
     } else if let KeyEvent(KeyCode::Char('R'), ModKeys::CTRL) = key
-      && self.mode.report_mode() == ModeReport::Insert
+      && matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex)
     {
-      let initial = self.editor.as_str();
-      match self.history.start_search(initial) {
+      let initial = self.focused_editor().as_str().to_string();
+      match self.focused_history().start_search(&initial) {
         Some(entry) => {
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
           with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
             post_cmds.exec_with(&entry);
           });
 
-          self.editor.set_buffer(entry);
-          self.editor.move_cursor_to_end();
+          self.focused_editor().set_buffer(entry);
+          self.focused_editor().move_cursor_to_end();
           self
             .history
             .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
@@ -767,9 +792,9 @@ impl ShedVi {
         }
         None => {
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
-          let entries = self.history.fuzzy_finder.candidates();
+          let entries = self.focused_history().fuzzy_finder.candidates().to_vec();
           let matches = self
-            .history
+            .focused_history()
             .fuzzy_finder
             .filtered()
             .iter()
@@ -792,7 +817,7 @@ impl ShedVi {
             },
           );
 
-          if self.history.fuzzy_finder.is_active() {
+          if self.focused_history().fuzzy_finder.is_active() {
             write_vars(|v| {
               v.set_var(
                 "SHED_VI_MODE",
@@ -849,10 +874,10 @@ impl ShedVi {
     }
 
     if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
-      if self.editor.buffer.is_empty() {
+      if self.focused_editor().buffer.is_empty() {
         return Ok(Some(ReadlineEvent::Eof));
       } else {
-        self.editor = LineBuf::new();
+        *self.focused_editor() = LineBuf::new();
         self.mode = Box::new(ViInsert::new());
         self.needs_redraw = true;
         return Ok(None);
@@ -1007,7 +1032,11 @@ impl ShedVi {
     let one_line = new_layout.end.row == 0;
 
     self.completer.clear(&mut self.writer)?;
-    self.history.fuzzy_finder.clear(&mut self.writer)?;
+		{
+			let mut writer = std::mem::take(&mut self.writer);
+			self.focused_history().fuzzy_finder.clear(&mut writer)?;
+			self.writer = writer;
+		}
 
     if let Some(layout) = self.old_layout.as_ref() {
       self.writer.clear_rows(layout)?;
@@ -1100,10 +1129,15 @@ impl ShedVi {
     self.completer.draw(&mut self.writer)?;
 
     self
-      .history
+      .focused_history()
       .fuzzy_finder
       .set_prompt_line_context(preceding_width, new_layout.cursor.col);
-    self.history.fuzzy_finder.draw(&mut self.writer)?;
+
+		{
+			let mut writer = std::mem::take(&mut self.writer);
+			self.focused_history().fuzzy_finder.draw(&mut writer)?;
+			self.writer = writer;
+		}
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;

@@ -12,21 +12,15 @@ use super::vicmd::{
   ViCmd, Word,
 };
 use crate::{
-  expand::expand_cmd_sub,
-  libsh::{error::ShResult, guards::var_ctx_guard},
-  parse::{
-    execute::exec_input,
-    lex::{LexFlags, LexStream, QuoteState, Tk, TkRule},
-  },
-  prelude::*,
-  readline::{
+  expand::expand_cmd_sub, libsh::{error::ShResult, guards::var_ctx_guard}, parse::{
+    Redir, RedirType, execute::exec_input, lex::{LexFlags, LexStream, QuoteState, Tk, TkFlags, TkRule}
+  }, prelude::*, procio::{IoFrame, IoMode, IoStack}, readline::{
     history::History,
     markers,
     register::{RegisterContent, write_register},
     term::RawModeGuard,
-    vicmd::ReadSrc,
-  },
-  state::{VarFlags, VarKind, read_shopts, write_meta, write_vars},
+    vicmd::{ReadSrc, WriteDest},
+  }, state::{VarFlags, VarKind, read_shopts, write_meta, write_vars}
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -3358,8 +3352,54 @@ impl LineBuf {
           self.cursor.add(grapheme_count);
         }
       },
-      Verb::Write(dest) => {}
-      Verb::Edit(path) => {}
+      Verb::Write(dest) => {
+				match dest {
+					WriteDest::FileAppend(ref path_buf) |
+					WriteDest::File(ref path_buf) => {
+						let Ok(mut file) = (if matches!(dest, WriteDest::File(_)) {
+							OpenOptions::new()
+								.create(true)
+								.truncate(true)
+								.write(true)
+								.open(path_buf)
+						} else {
+							OpenOptions::new()
+								.create(true)
+								.append(true)
+								.open(path_buf)
+						}) else {
+								write_meta(|m| {
+									m.post_system_message(format!("Failed to open file {}", path_buf.display()))
+								});
+								return Ok(());
+							};
+						if let Err(e) = file.write_all(self.as_str().as_bytes()) {
+							write_meta(|m| {
+								m.post_system_message(format!("Failed to write to file {}: {e}", path_buf.display()))
+							});
+						}
+						return Ok(());
+					}
+					WriteDest::Cmd(cmd) => {
+						let buf = self.as_str().to_string();
+						let io_mode = IoMode::Buffer {
+							tgt_fd: STDIN_FILENO,
+							buf,
+							flags: TkFlags::IS_HEREDOC | TkFlags::LIT_HEREDOC,
+						};
+						let redir = Redir::new(io_mode, RedirType::Input);
+						let mut frame = IoFrame::new();
+						frame.push(redir);
+						let mut stack = IoStack::new();
+						stack.push_frame(frame);
+						exec_input(cmd, Some(stack), false, Some("ex write".into()))?;
+					}
+				}
+			}
+      Verb::Edit(path) => {
+				let input = format!("$EDITOR {}",path.display());
+				exec_input(input, None, true, Some("ex edit".into()))?;
+			}
       Verb::Normal(_) | Verb::Substitute(..) | Verb::RepeatSubstitute | Verb::RepeatGlobal => {}
     }
     Ok(())
