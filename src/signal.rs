@@ -3,7 +3,7 @@ use std::{
   sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
 };
 
-use nix::sys::signal::{SaFlags, SigAction, sigaction};
+use nix::{sys::signal::{SaFlags, SigAction, sigaction}, unistd::getpid};
 
 use crate::{
   builtin::trap::TrapTarget,
@@ -21,17 +21,22 @@ static SIGNALS: AtomicU64 = AtomicU64::new(0);
 
 pub static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
 pub static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
-pub static GOT_SIGWINCH: AtomicBool = AtomicBool::new(false);
 pub static JOB_DONE: AtomicBool = AtomicBool::new(false);
 pub static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
 
-const MISC_SIGNALS: [Signal; 22] = [
+/// Window size change signal
+pub static GOT_SIGWINCH: AtomicBool = AtomicBool::new(false);
+
+/// SIGUSR1 tells the prompt that it needs to fully refresh.
+/// Useful for dynamic prompt content and asynchronous refreshing
+pub static GOT_SIGUSR1: AtomicBool = AtomicBool::new(false);
+
+const MISC_SIGNALS: [Signal; 21] = [
   Signal::SIGILL,
   Signal::SIGTRAP,
   Signal::SIGABRT,
   Signal::SIGBUS,
   Signal::SIGFPE,
-  Signal::SIGUSR1,
   Signal::SIGSEGV,
   Signal::SIGUSR2,
   Signal::SIGPIPE,
@@ -71,7 +76,7 @@ pub fn check_signals() -> ShResult<()> {
   if got_signal(Signal::SIGINT) {
     interrupt()?;
     run_trap(Signal::SIGINT)?;
-    return Err(ShErr::simple(ShErrKind::ClearReadline, ""));
+    return Err(ShErr::simple(ShErrKind::Interrupt, ""));
   }
   if got_signal(Signal::SIGHUP) {
     run_trap(Signal::SIGHUP)?;
@@ -93,6 +98,10 @@ pub fn check_signals() -> ShResult<()> {
     GOT_SIGWINCH.store(true, Ordering::SeqCst);
     run_trap(Signal::SIGWINCH)?;
   }
+	if got_signal(Signal::SIGUSR1) {
+		GOT_SIGUSR1.store(true, Ordering::SeqCst);
+		run_trap(Signal::SIGUSR1)?;
+	}
 
   for sig in MISC_SIGNALS {
     if got_signal(sig) {
@@ -323,6 +332,14 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
       if let Some(job) = result {
         let job_complete_msg = job.display(&job_order, JobCmdFlags::PIDS).to_string();
         let statuses = job.get_stats();
+
+				for status in &statuses {
+					if let WtStat::Signaled(_, sig, _) = status
+					&& *sig == Signal::SIGINT {
+						// Necessary to interrupt stuff like shell loops
+						kill(getpid(), Signal::SIGINT).ok();
+					}
+				}
 
         if let Some(pipe_status) = Job::pipe_status(&statuses) {
           let pipe_status = pipe_status

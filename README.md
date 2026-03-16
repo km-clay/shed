@@ -1,6 +1,6 @@
 # shed
 
-A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing.
+A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing and general interactive UX improvements over existing shells. <small>Btw if you don't use `vim` this probably isn't your shell.</small>
 
 <img width="506" height="407" alt="shed" src="https://github.com/user-attachments/assets/3945f663-a361-4418-bf20-0c4eaa2a36d2" />
 
@@ -39,6 +39,8 @@ The `\@` escape is particularly useful. It lets you embed the output of any shel
 gitbranch() { git branch --show-current 2>/dev/null; }
 export PS1='\u@\h \W \@gitbranch \$ '
 ```
+
+If `shed` receives `SIGUSR1` while in interactive mode, it will refresh and redraw the prompt. This can be used to create asynchronous, dynamic prompt content.
 
 Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, similar to how the `-e` flag expands conventional escape sequences.
 

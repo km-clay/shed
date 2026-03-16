@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use ariadne::Fmt;
+use nix::unistd::getpid;
 use scopeguard::defer;
 use yansi::Color;
 
@@ -872,7 +873,12 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
         write_jobs(|j| j.fg_to_bg(*status))?;
       }
       WtStat::Signaled(_, sig, _) => {
-        if *sig == Signal::SIGTSTP {
+				if *sig == Signal::SIGINT {
+					// interrupt propagates to the shell
+					// necessary for interrupting stuff like
+					// while/for loops
+					kill(getpid(), Signal::SIGINT)?;
+				} else if *sig == Signal::SIGTSTP {
           was_stopped = true;
           write_jobs(|j| j.fg_to_bg(*status))?;
         }

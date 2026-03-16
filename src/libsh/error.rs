@@ -459,7 +459,7 @@ pub enum ShErrKind {
   FuncReturn(i32),
   LoopContinue(i32),
   LoopBreak(i32),
-  ClearReadline,
+  Interrupt,
   Null,
 }
 
@@ -471,7 +471,7 @@ impl ShErrKind {
         | Self::FuncReturn(_)
         | Self::LoopContinue(_)
         | Self::LoopBreak(_)
-        | Self::ClearReadline
+        | Self::Interrupt
     )
   }
 }
@@ -496,7 +496,7 @@ impl Display for ShErrKind {
       Self::LoopBreak(_) => "Syntax Error",
       Self::ReadlineErr => "Readline Error",
       Self::ExCommand => "Ex Command Error",
-      Self::ClearReadline => "",
+      Self::Interrupt => "",
       Self::Null => "",
     };
     write!(f, "{output}")

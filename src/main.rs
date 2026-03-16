@@ -38,7 +38,7 @@ use crate::prelude::*;
 use crate::procio::borrow_fd;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{Prompt, ReadlineEvent, ShedVi};
-use crate::signal::{GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
+use crate::signal::{GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending};
 use crate::state::{
   AutoCmdKind, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs,
   write_meta, write_shopts,
@@ -259,7 +259,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     while signals_pending() {
       if let Err(e) = check_signals() {
         match e.kind() {
-          ShErrKind::ClearReadline => {
+          ShErrKind::Interrupt => {
             // We got Ctrl+C - clear current input and redraw
             readline.reset_active_widget(false)?;
           }
@@ -285,9 +285,16 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       readline.prompt_mut().refresh();
     }
 
+		if GOT_SIGUSR1.swap(false, Ordering::SeqCst) {
+			log::info!("SIGUSR1 received: refreshing readline state");
+			readline.mark_dirty();
+			readline.prompt_mut().refresh();
+		}
+
     readline.print_line(false)?;
 
-    // Poll for stdin input
+    // Poll for
+		// stdin input
     let mut fds = [PollFd::new(
       unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
       PollFlags::POLLIN,
@@ -435,6 +442,10 @@ fn handle_readline_event(readline: &mut ShedVi, event: ShResult<ReadlineEvent>) 
       }) {
         // CleanExit signals an intentional shell exit; any other error is printed.
         match e.kind() {
+					ShErrKind::Interrupt => {
+						// We got Ctrl+C during command execution
+						// Just fall through here
+					}
           ShErrKind::CleanExit(code) => {
             QUIT_CODE.store(*code, Ordering::SeqCst);
             return Ok(true);
