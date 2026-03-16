@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use ariadne::Fmt;
 use scopeguard::defer;
 use yansi::Color;
@@ -10,7 +12,7 @@ use crate::{
   prelude::*,
   procio::{IoMode, borrow_fd},
   signal::{disable_reaping, enable_reaping},
-  state::{self, ShellParam, set_status, write_jobs, write_vars},
+  state::{self, ShellParam, Var, VarFlags, VarKind, set_status, write_jobs, write_vars},
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -596,6 +598,26 @@ impl Job {
       .map(|chld| chld.stat())
       .collect::<Vec<WtStat>>()
   }
+	pub fn pipe_status(stats: &[WtStat]) -> Option<Vec<i32>> {
+		if stats.iter()
+			.any(|stat| matches!(stat, WtStat::StillAlive | WtStat::Continued(_) | WtStat::PtraceSyscall(_)))
+		|| stats.len() <= 1 {
+			return None;
+		}
+		Some(stats.iter()
+			.map(|stat| {
+				match stat {
+					WtStat::Exited(_, code) => *code,
+					WtStat::Signaled(_, signal, _) => SIG_EXIT_OFFSET + *signal as i32,
+					WtStat::Stopped(_, signal) => SIG_EXIT_OFFSET + *signal as i32,
+					WtStat::PtraceEvent(_, signal, _) => SIG_EXIT_OFFSET + *signal as i32,
+					WtStat::PtraceSyscall(_) |
+					WtStat::Continued(_) |
+					WtStat::StillAlive => unreachable!()
+				}
+			})
+			.collect())
+	}
   pub fn get_pids(&self) -> Vec<Pid> {
     self
       .children
@@ -839,22 +861,30 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
     enable_reaping();
   }
   let statuses = write_jobs(|j| j.new_fg(job))?;
-  for status in statuses {
-    code = code_from_status(&status).unwrap_or(0);
+  for status in &statuses {
+    code = code_from_status(status).unwrap_or(0);
     match status {
       WtStat::Stopped(_, _) => {
         was_stopped = true;
-        write_jobs(|j| j.fg_to_bg(status))?;
+        write_jobs(|j| j.fg_to_bg(*status))?;
       }
       WtStat::Signaled(_, sig, _) => {
-        if sig == Signal::SIGTSTP {
+        if *sig == Signal::SIGTSTP {
           was_stopped = true;
-          write_jobs(|j| j.fg_to_bg(status))?;
+          write_jobs(|j| j.fg_to_bg(*status))?;
         }
       }
       _ => { /* Do nothing */ }
     }
   }
+	if let Some(pipe_status) = Job::pipe_status(&statuses) {
+		let pipe_status = pipe_status
+			.into_iter()
+			.map(|s| s.to_string())
+			.collect::<VecDeque<String>>();
+
+		write_vars(|v| v.set_var("PIPESTATUS", VarKind::Arr(pipe_status), VarFlags::NONE))?;
+	}
   // If job wasn't stopped (moved to bg), clear the fg slot
   if !was_stopped {
     write_jobs(|j| {

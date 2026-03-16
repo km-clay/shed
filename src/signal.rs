@@ -1,14 +1,14 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use std::{collections::VecDeque, sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering}};
 
 use nix::sys::signal::{SaFlags, SigAction, sigaction};
 
 use crate::{
   builtin::trap::TrapTarget,
-  jobs::{JobCmdFlags, JobID, take_term},
+  jobs::{Job, JobCmdFlags, JobID, take_term},
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::execute::exec_input,
   prelude::*,
-  state::{AutoCmd, AutoCmdKind, read_jobs, read_logic, write_jobs, write_meta},
+  state::{AutoCmd, AutoCmdKind, VarFlags, VarKind, read_jobs, read_logic, write_jobs, write_meta, write_vars},
 };
 
 static SIGNALS: AtomicU64 = AtomicU64::new(0);
@@ -316,6 +316,16 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
       let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
       if let Some(job) = result {
         let job_complete_msg = job.display(&job_order, JobCmdFlags::PIDS).to_string();
+				let statuses = job.get_stats();
+
+				if let Some(pipe_status) = Job::pipe_status(&statuses) {
+					let pipe_status = pipe_status
+						.into_iter()
+						.map(|s| s.to_string())
+						.collect::<VecDeque<String>>();
+
+					write_vars(|v| v.set_var("PIPESTATUS", VarKind::Arr(pipe_status), VarFlags::NONE))?;
+				}
 
         let post_job_hooks = read_logic(|l| l.get_autocmds(AutoCmdKind::OnJobFinish));
         for cmd in post_job_hooks {
