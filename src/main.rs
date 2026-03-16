@@ -47,8 +47,6 @@ use state::write_vars;
 
 #[derive(Parser, Debug)]
 struct ShedArgs {
-  script: Option<String>,
-
   #[arg(short)]
   command: Option<String>,
 
@@ -60,6 +58,9 @@ struct ShedArgs {
 
   #[arg(short)]
   interactive: bool,
+
+	#[arg(short)]
+	stdin: bool,
 
   #[arg(long, short)]
   login_shell: bool,
@@ -127,10 +128,13 @@ fn main() -> ExitCode {
     unsafe { env::set_var("SHLVL", "1") };
   }
 
-  if let Err(e) = if let Some(path) = args.script {
-    run_script(path, args.script_args)
-  } else if let Some(cmd) = args.command {
+  if let Err(e) = if let Some(cmd) = args.command {
     exec_dash_c(cmd)
+  } else if args.stdin || !isatty(STDIN_FILENO).unwrap_or(false) {
+		read_commands(args.script_args)
+	} else if !args.script_args.is_empty() {
+		let path = args.script_args.remove(0);
+    run_script(path, args.script_args)
   } else {
     let res = shed_interactive(args);
     write(borrow_fd(*TTY_FILENO), b"\x1b[?2004l").ok(); // disable bracketed paste mode on exit
@@ -150,6 +154,32 @@ fn main() -> ExitCode {
 
   write_jobs(|j| j.hang_up());
   ExitCode::from(QUIT_CODE.load(Ordering::SeqCst) as u8)
+}
+
+fn read_commands(args: Vec<String>) -> ShResult<()> {
+	let mut input = vec![];
+	let mut read_buf = [0u8;4096];
+	loop {
+		match read(STDIN_FILENO, &mut read_buf) {
+			Ok(0) => break,
+			Ok(n) => input.extend_from_slice(&read_buf[..n]),
+			Err(Errno::EINTR) => continue,
+			Err(e) => {
+				QUIT_CODE.store(1, Ordering::SeqCst);
+				return Err(ShErr::simple(
+					ShErrKind::CleanExit(1),
+					format!("error reading from stdin: {e}"),
+				));
+			}
+		}
+	}
+
+	let commands = String::from_utf8_lossy(&input).to_string();
+  for arg in args {
+    write_vars(|v| v.cur_scope_mut().bpush_arg(arg))
+  }
+
+	exec_input(commands, None, false, None)
 }
 
 fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
