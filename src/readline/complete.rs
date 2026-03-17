@@ -1,6 +1,6 @@
 use std::{
   collections::HashSet,
-  fmt::{Debug, Write},
+  fmt::{Debug, Display, Write},
   path::PathBuf,
   sync::Arc,
 };
@@ -29,7 +29,103 @@ use crate::{
   },
 };
 
-pub fn complete_signals(start: &str) -> Vec<String> {
+#[derive(Debug, Clone)]
+pub struct Candidate(pub String);
+
+impl Eq for Candidate {}
+
+impl PartialEq for Candidate {
+	fn eq(&self, other: &Self) -> bool {
+		self.0 == other.0
+	}
+}
+
+impl PartialOrd for Candidate {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for Candidate {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.0.cmp(&other.0)
+	}
+}
+
+impl From<String> for Candidate {
+	fn from(value: String) -> Self {
+	  Self(value)
+	}
+}
+
+impl From<&String> for Candidate {
+	fn from(value: &String) -> Self {
+		Self(value.clone())
+	}
+}
+
+impl From<&str> for Candidate {
+	fn from(value: &str) -> Self {
+		Self(value.to_string())
+	}
+}
+
+impl Display for Candidate {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", &self.0)
+	}
+}
+
+impl AsRef<str> for Candidate {
+	fn as_ref(&self) -> &str {
+		&self.0
+	}
+}
+
+impl std::ops::Deref for Candidate {
+	type Target = str;
+	fn deref(&self) -> &str {
+		&self.0
+	}
+}
+
+impl Candidate {
+	pub fn is_match(&self, other: &str) -> bool {
+		let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
+		if ignore_case {
+			let other_lower = other.to_lowercase();
+			let self_lower = self.0.to_lowercase();
+			self_lower.starts_with(&other_lower)
+		} else {
+			self.0.starts_with(other)
+		}
+	}
+	pub fn as_str(&self) -> &str {
+		&self.0
+	}
+	pub fn as_bytes(&self) -> &[u8] {
+		self.0.as_bytes()
+	}
+	pub fn starts_with(&self, pat: char) -> bool {
+		self.0.starts_with(pat)
+	}
+	pub fn strip_prefix(&self, prefix: &str) -> Option<String> {
+		let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
+		if ignore_case {
+			let old_len = self.0.len();
+			let prefix_lower = prefix.to_lowercase();
+			let self_lower = self.0.to_lowercase();
+			let stripped = self_lower.strip_prefix(&prefix_lower)?;
+			let new_len = stripped.len();
+			let delta = old_len - new_len;
+			Some(self.0[delta..].to_string())
+		} else {
+			self.0.strip_prefix(prefix).map(|s| s.to_string())
+		}
+	}
+}
+
+pub fn complete_signals(start: &str) -> Vec<Candidate> {
   Signal::iterator()
     .map(|s| {
       s.to_string()
@@ -37,29 +133,31 @@ pub fn complete_signals(start: &str) -> Vec<String> {
         .unwrap_or(s.as_ref())
         .to_string()
     })
-    .filter(|s| s.starts_with(start))
+		.map(Candidate::from)
+    .filter(|s| s.is_match(start))
     .collect()
 }
 
-pub fn complete_aliases(start: &str) -> Vec<String> {
+pub fn complete_aliases(start: &str) -> Vec<Candidate> {
   read_logic(|l| {
     l.aliases()
-      .iter()
-      .filter(|a| a.0.starts_with(start))
-      .map(|a| a.0.clone())
+			.keys()
+			.map(Candidate::from)
+      .filter(|a| a.is_match(start))
       .collect()
   })
 }
 
-pub fn complete_jobs(start: &str) -> Vec<String> {
+pub fn complete_jobs(start: &str) -> Vec<Candidate> {
   if let Some(prefix) = start.strip_prefix('%') {
     read_jobs(|j| {
       j.jobs()
         .iter()
         .filter_map(|j| j.as_ref())
         .filter_map(|j| j.name())
-        .filter(|name| name.starts_with(prefix))
-        .map(|name| format!("%{name}"))
+				.map(Candidate::from)
+        .filter(|name| name.is_match(prefix))
+        .map(|name| format!("%{name}").into())
         .collect()
     })
   } else {
@@ -67,26 +165,26 @@ pub fn complete_jobs(start: &str) -> Vec<String> {
       j.jobs()
         .iter()
         .filter_map(|j| j.as_ref())
-        .map(|j| j.pgid().to_string())
-        .filter(|pgid| pgid.starts_with(start))
+        .map(|j| Candidate::from(j.pgid().to_string()))
+        .filter(|pgid| pgid.is_match(start))
         .collect()
     })
   }
 }
 
-pub fn complete_users(start: &str) -> Vec<String> {
+pub fn complete_users(start: &str) -> Vec<Candidate> {
   let Ok(passwd) = std::fs::read_to_string("/etc/passwd") else {
     return vec![];
   };
   passwd
     .lines()
     .filter_map(|line| line.split(':').next())
-    .filter(|username| username.starts_with(start))
-    .map(|s| s.to_string())
+		.map(Candidate::from)
+    .filter(|username| username.is_match(start))
     .collect()
 }
 
-pub fn complete_vars(start: &str) -> Vec<String> {
+pub fn complete_vars(start: &str) -> Vec<Candidate> {
   let Some((var_name, name_start, _end)) = extract_var_name(start) else {
     return vec![];
   };
@@ -101,11 +199,12 @@ pub fn complete_vars(start: &str) -> Vec<String> {
       .keys()
       .filter(|k| k.starts_with(&var_name) && *k != &var_name)
       .map(|k| format!("{prefix}{k}"))
+			.map(Candidate::from)
       .collect::<Vec<_>>()
   })
 }
 
-pub fn complete_vars_raw(raw: &str) -> Vec<String> {
+pub fn complete_vars_raw(raw: &str) -> Vec<Candidate> {
   if !read_vars(|v| v.get_var(raw)).is_empty() {
     return vec![];
   }
@@ -115,7 +214,7 @@ pub fn complete_vars_raw(raw: &str) -> Vec<String> {
     v.flatten_vars()
       .keys()
       .filter(|k| k.starts_with(raw) && *k != raw)
-      .map(|k| k.to_string())
+      .map(Candidate::from)
       .collect::<Vec<_>>()
   })
 }
@@ -168,12 +267,12 @@ pub fn extract_var_name(text: &str) -> Option<(String, usize, usize)> {
   Some((name, name_start, name_end))
 }
 
-fn complete_commands(start: &str) -> Vec<String> {
-  let mut candidates: Vec<String> = read_meta(|m| {
+fn complete_commands(start: &str) -> Vec<Candidate> {
+  let mut candidates: Vec<Candidate> = read_meta(|m| {
     m.cached_cmds()
       .iter()
-      .filter(|c| c.starts_with(start))
-      .cloned()
+			.map(Candidate::from)
+      .filter(|c| c.is_match(start))
       .collect()
   });
 
@@ -186,15 +285,16 @@ fn complete_commands(start: &str) -> Vec<String> {
   candidates
 }
 
-fn complete_dirs(start: &str) -> Vec<String> {
+fn complete_dirs(start: &str) -> Vec<Candidate> {
   let filenames = complete_filename(start);
+
   filenames
     .into_iter()
-    .filter(|f| std::fs::metadata(f).map(|m| m.is_dir()).unwrap_or(false))
+    .filter(|f| std::fs::metadata(&f.0).map(|m| m.is_dir()).unwrap_or(false))
     .collect()
 }
 
-fn complete_filename(start: &str) -> Vec<String> {
+fn complete_filename(start: &str) -> Vec<Candidate> {
   let mut candidates = vec![];
   let has_dotslash = start.starts_with("./");
 
@@ -202,18 +302,18 @@ fn complete_filename(start: &str) -> Vec<String> {
   // Use "." if start is empty (e.g., after "foo=")
   let path = PathBuf::from(if start.is_empty() { "." } else { start });
   let (dir, prefix) = if start.ends_with('/') || start.is_empty() {
-    // Completing inside a directory: "src/" → dir="src/", prefix=""
+    // Completing inside a directory: "src/" -> dir="src/", prefix=""
     (path, "")
   } else if let Some(parent) = path.parent()
     && !parent.as_os_str().is_empty()
   {
-    // Has directory component: "src/ma" → dir="src", prefix="ma"
+    // Has directory component: "src/ma" -> dir="src", prefix="ma"
     (
       parent.to_path_buf(),
       path.file_name().unwrap().to_str().unwrap_or(""),
     )
   } else {
-    // No directory: "fil" → dir=".", prefix="fil"
+    // No directory: "fil" -> dir=".", prefix="fil"
     (PathBuf::from("."), start)
   };
 
@@ -223,14 +323,16 @@ fn complete_filename(start: &str) -> Vec<String> {
 
   for entry in entries.flatten() {
     let file_name = entry.file_name();
-    let file_str = file_name.to_string_lossy();
+    let file_str: Candidate = file_name.to_string_lossy().to_string().into();
+
+
 
     // Skip hidden files unless explicitly requested
-    if !prefix.starts_with('.') && file_str.starts_with('.') {
+    if !prefix.starts_with('.') && file_str.0.starts_with('.') {
       continue;
     }
 
-    if file_str.starts_with(prefix) {
+    if file_str.is_match(prefix) {
       // Reconstruct full path
       let mut full_path = dir.join(&file_name);
 
@@ -244,7 +346,7 @@ fn complete_filename(start: &str) -> Vec<String> {
         path_raw = path_raw.trim_start_matches("./").to_string();
       }
 
-      candidates.push(path_raw);
+      candidates.push(path_raw.into());
     }
   }
 
@@ -363,7 +465,7 @@ impl BashCompSpec {
       source: String::new(),
     }
   }
-  pub fn exec_comp_func(&self, ctx: &CompContext) -> ShResult<Vec<String>> {
+  pub fn exec_comp_func(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {
     let mut vars_to_unset = HashSet::new();
     for var in [
       "COMP_WORDS",
@@ -426,13 +528,19 @@ impl BashCompSpec {
     );
     exec_input(input, None, false, Some("comp_function".into()))?;
 
-    Ok(read_vars(|v| v.get_arr_elems("COMPREPLY")).unwrap_or_default())
+		let comp_reply = read_vars(|v| v.get_arr_elems("COMPREPLY"))
+		.unwrap_or_default()
+		.into_iter()
+		.map(Candidate::from)
+		.collect();
+
+    Ok(comp_reply)
   }
 }
 
 impl CompSpec for BashCompSpec {
-  fn complete(&self, ctx: &CompContext) -> ShResult<Vec<String>> {
-    let mut candidates = vec![];
+  fn complete(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {
+    let mut candidates: Vec<Candidate> = vec![];
     let prefix = &ctx.words[ctx.cword];
 
     let expanded = prefix.clone().expand()?.get_words().join(" ");
@@ -461,7 +569,7 @@ impl CompSpec for BashCompSpec {
       candidates.extend(complete_signals(&expanded));
     }
     if let Some(words) = &self.wordlist {
-      candidates.extend(words.iter().filter(|w| w.starts_with(&expanded)).cloned());
+      candidates.extend(words.iter().map(Candidate::from).filter(|w| w.is_match(&expanded)));
     }
     if self.function.is_some() {
       candidates.extend(self.exec_comp_func(ctx)?);
@@ -469,12 +577,12 @@ impl CompSpec for BashCompSpec {
     candidates = candidates
       .into_iter()
       .map(|c| {
-        let stripped = c.strip_prefix(&expanded).unwrap_or_default();
-        format!("{prefix}{stripped}")
+        let stripped = c.0.strip_prefix(&expanded).unwrap_or_default();
+        format!("{prefix}{stripped}").into()
       })
       .collect();
 
-    candidates.sort_by_key(|c| c.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
+    candidates.sort_by_key(|c| c.0.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
 
     Ok(candidates)
   }
@@ -489,7 +597,7 @@ impl CompSpec for BashCompSpec {
 }
 
 pub trait CompSpec: Debug + CloneCompSpec {
-  fn complete(&self, ctx: &CompContext) -> ShResult<Vec<String>>;
+  fn complete(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>>;
   fn source(&self) -> &str;
   fn get_flags(&self) -> CompOptFlags {
     CompOptFlags::empty()
@@ -527,17 +635,17 @@ impl CompContext {
 
 pub enum CompResult {
   NoMatch,
-  Single { result: String },
-  Many { candidates: Vec<String> },
+  Single { result: Candidate },
+  Many { candidates: Vec<Candidate> },
 }
 
 impl CompResult {
-  pub fn from_candidates(candidates: Vec<String>) -> Self {
+  pub fn from_candidates(mut candidates: Vec<Candidate>) -> Self {
     if candidates.is_empty() {
       Self::NoMatch
     } else if candidates.len() == 1 {
       Self::Single {
-        result: candidates[0].clone(),
+        result: candidates.remove(0)
       }
     } else {
       Self::Many { candidates }
@@ -568,7 +676,7 @@ pub trait Completer {
   fn reset(&mut self);
   fn reset_stay_active(&mut self);
   fn is_active(&self) -> bool;
-  fn all_candidates(&self) -> Vec<String> {
+  fn all_candidates(&self) -> Vec<Candidate> {
     vec![]
   }
   fn selected_candidate(&self) -> Option<String>;
@@ -671,6 +779,15 @@ impl From<String> for ScoredCandidate {
   }
 }
 
+impl From<Candidate> for ScoredCandidate {
+  fn from(candidate: Candidate) -> Self {
+    Self {
+      content: candidate.0,
+      score: None,
+    }
+  }
+}
+
 #[derive(Debug, Clone)]
 pub struct FuzzyLayout {
   rows: u16,
@@ -743,7 +860,7 @@ impl QueryEditor {
 pub struct FuzzySelector {
   query: QueryEditor,
   filtered: Vec<ScoredCandidate>,
-  candidates: Vec<String>,
+  candidates: Vec<Candidate>,
   cursor: ClampedUsize,
   number_candidates: bool,
   old_layout: Option<FuzzyLayout>,
@@ -798,7 +915,7 @@ impl FuzzySelector {
     }
   }
 
-  pub fn candidates(&self) -> &[String] {
+  pub fn candidates(&self) -> &[Candidate] {
     &self.candidates
   }
 
@@ -814,7 +931,7 @@ impl FuzzySelector {
     self.candidates.len()
   }
 
-  pub fn activate(&mut self, candidates: Vec<String>) {
+  pub fn activate(&mut self, candidates: Vec<Candidate>) {
     self.active = true;
     self.candidates = candidates;
     self.score_candidates();
@@ -913,7 +1030,7 @@ impl FuzzySelector {
       .clone()
       .into_iter()
       .filter_map(|c| {
-        let mut sc = ScoredCandidate::new(c);
+        let mut sc = ScoredCandidate::new(c.to_string());
         let score = sc.fuzzy_score(self.query.linebuf.as_str());
         if score > i32::MIN { Some(sc) } else { None }
       })
@@ -1167,7 +1284,7 @@ impl Default for FuzzyCompleter {
 }
 
 impl Completer for FuzzyCompleter {
-  fn all_candidates(&self) -> Vec<String> {
+  fn all_candidates(&self) -> Vec<Candidate> {
     self.selector.candidates.clone()
   }
   fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
@@ -1188,12 +1305,34 @@ impl Completer for FuzzyCompleter {
       .original_input
       .get(start..end)
       .unwrap_or_default();
-    start += slice.width();
-    let completion = selected.strip_prefix(slice).unwrap_or(&selected);
-    let escaped = escape_str(completion, false);
+    let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
+    let (prefix, completion) = if ignore_case {
+      // Replace the filename part (after last /) with the candidate's casing
+      // but preserve any unexpanded prefix like $VAR/
+      if let Some(last_sep) = slice.rfind('/') {
+        let prefix_end = start + last_sep + 1;
+        let trailing_slash = selected.ends_with('/');
+        let trimmed = selected.trim_end_matches('/');
+        let mut basename = trimmed.rsplit('/').next().unwrap_or(&selected).to_string();
+        if trailing_slash {
+          basename.push('/');
+        }
+        (
+          self.completer.original_input[..prefix_end].to_string(),
+          basename,
+        )
+      } else {
+        (self.completer.original_input[..start].to_string(), selected.clone())
+      }
+    } else {
+      start += slice.width();
+      let completion = selected.strip_prefix(slice).unwrap_or(&selected);
+      (self.completer.original_input[..start].to_string(), completion.to_string())
+    };
+    let escaped = escape_str(&completion, false);
     let ret = format!(
       "{}{}{}",
-      &self.completer.original_input[..start],
+      prefix,
       escaped,
       &self.completer.original_input[end..]
     );
@@ -1256,7 +1395,7 @@ impl Completer for FuzzyCompleter {
 
 #[derive(Default, Debug, Clone)]
 pub struct SimpleCompleter {
-  pub candidates: Vec<String>,
+  pub candidates: Vec<Candidate>,
   pub selected_idx: usize,
   pub original_input: String,
   pub token_span: (usize, usize),
@@ -1266,7 +1405,7 @@ pub struct SimpleCompleter {
 }
 
 impl Completer for SimpleCompleter {
-  fn all_candidates(&self) -> Vec<String> {
+  fn all_candidates(&self) -> Vec<Candidate> {
     self.candidates.clone()
   }
   fn reset_stay_active(&mut self) {
@@ -1299,7 +1438,7 @@ impl Completer for SimpleCompleter {
   }
 
   fn selected_candidate(&self) -> Option<String> {
-    self.candidates.get(self.selected_idx).cloned()
+    self.candidates.get(self.selected_idx).map(|c| c.to_string())
   }
 
   fn token_span(&self) -> (usize, usize) {
@@ -1407,7 +1546,7 @@ impl SimpleCompleter {
 					&& !ends_with_unescaped(&c, " ")
           {
             // already has a space
-            format!("{} ", c)
+            Candidate::from(format!("{} ", c))
           } else {
             c
           }
@@ -1449,12 +1588,32 @@ impl SimpleCompleter {
     let selected = &self.candidates[self.selected_idx];
     let (mut start, end) = self.token_span;
     let slice = self.original_input.get(start..end).unwrap_or("");
-    start += slice.width();
-    let completion = selected.strip_prefix(slice).unwrap_or(selected);
-    let escaped = escape_str(completion, false);
+    let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
+    let (prefix, completion) = if ignore_case {
+      if let Some(last_sep) = slice.rfind('/') {
+        let prefix_end = start + last_sep + 1;
+        let trailing_slash = selected.ends_with('/');
+        let trimmed = selected.trim_end_matches('/');
+        let mut basename = trimmed.rsplit('/').next().unwrap_or(selected.as_str()).to_string();
+        if trailing_slash {
+          basename.push('/');
+        }
+        (
+          self.original_input[..prefix_end].to_string(),
+          basename,
+        )
+      } else {
+        (self.original_input[..start].to_string(), selected.to_string())
+      }
+    } else {
+      start += slice.width();
+      let completion = selected.strip_prefix(slice).unwrap_or(selected.to_string());
+      (self.original_input[..start].to_string(), completion)
+    };
+    let escaped = escape_str(&completion, false);
     format!(
       "{}{}{}",
-      &self.original_input[..start],
+      prefix,
       escaped,
       &self.original_input[end..]
     )
@@ -1649,11 +1808,12 @@ impl SimpleCompleter {
     let is_var_completion = last_marker == Some(markers::VAR_SUB)
       && !candidates.is_empty()
       && candidates.iter().any(|c| c.starts_with('$'));
-    if !is_var_completion {
+    let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
+    if !is_var_completion && !ignore_case {
       candidates = candidates
         .into_iter()
         .map(|c| match c.strip_prefix(&expanded) {
-          Some(suffix) => format!("{raw_tk}{suffix}"),
+          Some(suffix) => Candidate::from(format!("{raw_tk}{suffix}")),
           None => c,
         })
         .collect();
@@ -1781,7 +1941,7 @@ mod tests {
   #[test]
   fn complete_signals_int() {
     let results = complete_signals("INT");
-    assert!(results.contains(&"INT".to_string()));
+    assert!(results.contains(&Candidate::from("INT")));
   }
 
   #[test]

@@ -2,6 +2,35 @@ use std::{fmt::Display, str::FromStr};
 
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 
+/// Escapes a string for embedding inside single quotes.
+/// Only escapes unescaped `\` and `'` characters.
+pub fn escape_for_single_quote(s: &str) -> String {
+  let mut result = String::with_capacity(s.len());
+  let mut chars = s.chars().peekable();
+  while let Some(ch) = chars.next() {
+    if ch == '\\' {
+      match chars.peek() {
+        Some(&'\\') | Some(&'\'') => {
+          // Already escaped — pass through both characters
+          result.push(ch);
+          result.push(chars.next().unwrap());
+        }
+        _ => {
+          // Lone backslash — escape it
+          result.push('\\');
+          result.push('\\');
+        }
+      }
+    } else if ch == '\'' {
+      result.push('\\');
+      result.push('\'');
+    } else {
+      result.push(ch);
+    }
+  }
+  result
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum ShedBellStyle {
   Audible,
@@ -24,34 +53,97 @@ impl FromStr for ShedBellStyle {
   }
 }
 
-#[derive(Default, Clone, Copy, Debug)]
-pub enum ShedEditMode {
-  #[default]
-  Vi,
-  Emacs,
-}
-
-impl FromStr for ShedEditMode {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s.to_ascii_lowercase().as_str() {
-      "vi" => Ok(Self::Vi),
-      "emacs" => Ok(Self::Emacs),
-      _ => Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
-        format!("Invalid edit mode '{s}'"),
-      )),
+/// Generates a shopt group struct with `set`, `get`, `Display`, and `Default` impls.
+///
+/// Doc comments on each field become the description shown by `shopt get`.
+/// Every field type must implement `FromStr + Display`.
+///
+/// Optional per-field validation: `#[validate(|val| expr)]` runs after parsing
+/// and must return `Result<(), String>` where the error string is the message.
+macro_rules! shopt_group {
+  (
+    $(#[$struct_meta:meta])*
+    pub struct $name:ident ($group_name:literal) {
+      $(
+        $(#[doc = $desc:literal])*
+        $(#[validate($validator:expr)])?
+        $field:ident : $ty:ty = $default:expr
+      ),* $(,)?
     }
-  }
-}
-
-impl Display for ShedEditMode {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      ShedEditMode::Vi => write!(f, "vi"),
-      ShedEditMode::Emacs => write!(f, "emacs"),
+  ) => {
+    $(#[$struct_meta])*
+    pub struct $name {
+      $(pub $field: $ty,)*
     }
-  }
+
+    impl Default for $name {
+      fn default() -> Self {
+        Self {
+          $($field: $default,)*
+        }
+      }
+    }
+
+    impl $name {
+      pub fn set(&mut self, opt: &str, val: &str) -> ShResult<()> {
+        match opt {
+          $(
+            stringify!($field) => {
+              let parsed = val.parse::<$ty>().map_err(|_| {
+                ShErr::simple(
+                  ShErrKind::SyntaxErr,
+                  format!("shopt: invalid value '{}' for {}.{}", val, $group_name, opt),
+                )
+              })?;
+              $(
+                let validate: fn(&$ty) -> Result<(), String> = $validator;
+                validate(&parsed).map_err(|msg| {
+                  ShErr::simple(ShErrKind::SyntaxErr, format!("shopt: {msg}"))
+                })?;
+              )?
+              self.$field = parsed;
+            }
+          )*
+          _ => {
+            return Err(ShErr::simple(
+              ShErrKind::SyntaxErr,
+              format!("shopt: unexpected '{}' option '{opt}'", $group_name),
+            ));
+          }
+        }
+        Ok(())
+      }
+
+      pub fn get(&self, query: &str) -> ShResult<Option<String>> {
+        if query.is_empty() {
+          return Ok(Some(format!("{self}")));
+        }
+        match query {
+          $(
+            stringify!($field) => {
+              let desc = concat!($($desc, "\n",)*);
+              let output = format!("{}{}", desc, self.$field);
+              Ok(Some(output))
+            }
+          )*
+          _ => Err(ShErr::simple(
+            ShErrKind::SyntaxErr,
+            format!("shopt: unexpected '{}' option '{query}'", $group_name),
+          )),
+        }
+      }
+    }
+
+    impl Display for $name {
+      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let output = [
+          $(format!("{}.{}='{}'", $group_name, stringify!($field),
+            $crate::shopt::escape_for_single_quote(&self.$field.to_string())),)*
+        ];
+        writeln!(f, "{}", output.join("\n"))
+      }
+    }
+  };
 }
 
 #[derive(Clone, Debug)]
@@ -82,8 +174,8 @@ impl ShOpts {
 
   pub fn display_opts(&mut self) -> ShResult<String> {
     let output = [
-      format!("core:\n{}", self.query("core")?.unwrap_or_default()),
-      format!("prompt:\n{}", self.query("prompt")?.unwrap_or_default()),
+      self.query("core")?.unwrap_or_default().to_string(),
+      self.query("prompt")?.unwrap_or_default().to_string(),
     ];
 
     Ok(output.join("\n"))
@@ -135,459 +227,78 @@ impl ShOpts {
   }
 }
 
-#[derive(Clone, Debug)]
-pub struct ShOptCore {
-  pub dotglob: bool,
-  pub autocd: bool,
-  pub hist_ignore_dupes: bool,
-  pub max_hist: isize,
-  pub interactive_comments: bool,
-  pub auto_hist: bool,
-  pub bell_enabled: bool,
-  pub max_recurse_depth: usize,
-  pub xpg_echo: bool,
-  pub noclobber: bool,
-}
+shopt_group! {
+  #[derive(Clone, Debug)]
+  pub struct ShOptCore ("core") {
+    /// Include hidden files in glob patterns
+    dotglob: bool = false,
 
-impl ShOptCore {
-  pub fn set(&mut self, opt: &str, val: &str) -> ShResult<()> {
-    match opt {
-      "dotglob" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for dotglob value",
-          ));
-        };
-        self.dotglob = val;
-      }
-      "autocd" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for autocd value",
-          ));
-        };
-        self.autocd = val;
-      }
-      "hist_ignore_dupes" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for hist_ignore_dupes value",
-          ));
-        };
-        self.hist_ignore_dupes = val;
-      }
-      "max_hist" => {
-        let Ok(val) = val.parse::<isize>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected an integer for max_hist value (-1 for unlimited)",
-          ));
-        };
-        if val < -1 {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected a non-negative integer or -1 for max_hist value",
-          ));
-        }
-        self.max_hist = val;
-      }
-      "interactive_comments" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for interactive_comments value",
-          ));
-        };
-        self.interactive_comments = val;
-      }
-      "auto_hist" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for auto_hist value",
-          ));
-        };
-        self.auto_hist = val;
-      }
-      "bell_enabled" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for bell_enabled value",
-          ));
-        };
-        self.bell_enabled = val;
-      }
-      "max_recurse_depth" => {
-        let Ok(val) = val.parse::<usize>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected a positive integer for max_recurse_depth value",
-          ));
-        };
-        self.max_recurse_depth = val;
-      }
-      "xpg_echo" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for xpg_echo value",
-          ));
-        };
-        self.xpg_echo = val;
-      }
-      "noclobber" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for noclobber value",
-          ));
-        };
-        self.noclobber = val;
-      }
-      _ => {
-        return Err(ShErr::simple(
-          ShErrKind::SyntaxErr,
-          format!("shopt: Unexpected 'core' option '{opt}'"),
-        ));
-      }
-    }
-    Ok(())
-  }
-  pub fn get(&self, query: &str) -> ShResult<Option<String>> {
-    if query.is_empty() {
-      return Ok(Some(format!("{self}")));
-    }
+    /// Allow navigation to directories by passing the directory as a command directly
+    autocd: bool = false,
 
-    match query {
-      "dotglob" => {
-        let mut output = String::from("Include hidden files in glob patterns\n");
-        output.push_str(&format!("{}", self.dotglob));
-        Ok(Some(output))
-      }
-      "autocd" => {
-        let mut output = String::from(
-          "Allow navigation to directories by passing the directory as a command directly\n",
-        );
-        output.push_str(&format!("{}", self.autocd));
-        Ok(Some(output))
-      }
-      "hist_ignore_dupes" => {
-        let mut output = String::from("Ignore consecutive duplicate command history entries\n");
-        output.push_str(&format!("{}", self.hist_ignore_dupes));
-        Ok(Some(output))
-      }
-      "max_hist" => {
-        let mut output = String::from(
-          "Maximum number of entries in the command history file (-1 for unlimited)\n",
-        );
-        output.push_str(&format!("{}", self.max_hist));
-        Ok(Some(output))
-      }
-      "interactive_comments" => {
-        let mut output = String::from("Whether or not to allow comments in interactive mode\n");
-        output.push_str(&format!("{}", self.interactive_comments));
-        Ok(Some(output))
-      }
-      "auto_hist" => {
-        let mut output = String::from(
-          "Whether or not to automatically save commands to the command history file\n",
-        );
-        output.push_str(&format!("{}", self.auto_hist));
-        Ok(Some(output))
-      }
-      "bell_enabled" => {
-        let mut output = String::from("Whether or not to allow shed to trigger the terminal bell");
-        output.push_str(&format!("{}", self.bell_enabled));
-        Ok(Some(output))
-      }
-      "max_recurse_depth" => {
-        let mut output = String::from("Maximum limit of recursive shell function calls\n");
-        output.push_str(&format!("{}", self.max_recurse_depth));
-        Ok(Some(output))
-      }
-      "xpg_echo" => {
-        let mut output = String::from("Whether echo expands escape sequences by default\n");
-        output.push_str(&format!("{}", self.xpg_echo));
-        Ok(Some(output))
-      }
-      "noclobber" => {
-        let mut output =
-          String::from("Prevent > from overwriting existing files (use >| to override)\n");
-        output.push_str(&format!("{}", self.noclobber));
-        Ok(Some(output))
-      }
-      _ => Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
-        format!("shopt: Unexpected 'core' option '{query}'"),
-      )),
-    }
+    /// Ignore consecutive duplicate command history entries
+    hist_ignore_dupes: bool = true,
+
+    /// Maximum number of entries in the command history file (-1 for unlimited)
+    #[validate(|v: &isize| if *v < -1 {
+      Err("expected a non-negative integer or -1 for max_hist value".into())
+    } else {
+      Ok(())
+    })]
+    max_hist: isize = 10_000,
+
+    /// Whether or not to allow comments in interactive mode
+    interactive_comments: bool = true,
+
+    /// Whether or not to automatically save commands to the command history file
+    auto_hist: bool = true,
+
+    /// Whether or not to allow shed to trigger the terminal bell
+    bell_enabled: bool = true,
+
+    /// Maximum limit of recursive shell function calls
+    max_recurse_depth: usize = 1000,
+
+    /// Whether echo expands escape sequences by default
+    xpg_echo: bool = false,
+
+    /// Prevent > from overwriting existing files (use >| to override)
+    noclobber: bool = false,
   }
 }
 
-impl Display for ShOptCore {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let mut output = vec![];
-    output.push(format!("dotglob = {}", self.dotglob));
-    output.push(format!("autocd = {}", self.autocd));
-    output.push(format!("hist_ignore_dupes = {}", self.hist_ignore_dupes));
-    output.push(format!("max_hist = {}", self.max_hist));
-    output.push(format!(
-      "interactive_comments = {}",
-      self.interactive_comments
-    ));
-    output.push(format!("auto_hist = {}", self.auto_hist));
-    output.push(format!("bell_enabled = {}", self.bell_enabled));
-    output.push(format!("max_recurse_depth = {}", self.max_recurse_depth));
-    output.push(format!("xpg_echo = {}", self.xpg_echo));
-    output.push(format!("noclobber = {}", self.noclobber));
+shopt_group! {
+  #[derive(Clone, Debug)]
+  pub struct ShOptPrompt ("prompt") {
+    /// Maximum number of path segments used in the '\W' prompt escape sequence
+    trunc_prompt_path: usize = 4,
 
-    let final_output = output.join("\n");
+    /// Maximum number of completion candidates displayed upon pressing tab
+    comp_limit: usize = 100,
 
-    writeln!(f, "{final_output}")
-  }
-}
+    /// Whether to enable or disable syntax highlighting on the prompt
+    highlight: bool = true,
 
-impl Default for ShOptCore {
-  fn default() -> Self {
-    ShOptCore {
-      dotglob: false,
-      autocd: false,
-      hist_ignore_dupes: true,
-      max_hist: 10_000,
-      interactive_comments: true,
-      auto_hist: true,
-      bell_enabled: true,
-      max_recurse_depth: 1000,
-      xpg_echo: false,
-      noclobber: false,
-    }
-  }
-}
+    /// Whether to automatically indent new lines in multiline commands
+    auto_indent: bool = true,
 
-#[derive(Clone, Debug)]
-pub struct ShOptPrompt {
-  pub trunc_prompt_path: usize,
-  pub edit_mode: ShedEditMode,
-  pub comp_limit: usize,
-  pub highlight: bool,
-  pub auto_indent: bool,
-  pub linebreak_on_incomplete: bool,
-  pub leader: String,
-  pub line_numbers: bool,
-  pub screensaver_cmd: String,
-  pub screensaver_idle_time: usize,
-}
+    /// Whether to automatically insert a newline when the input is incomplete
+    linebreak_on_incomplete: bool = true,
 
-impl ShOptPrompt {
-  pub fn set(&mut self, opt: &str, val: &str) -> ShResult<()> {
-    match opt {
-      "trunc_prompt_path" => {
-        let Ok(val) = val.parse::<usize>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected a positive integer for trunc_prompt_path value",
-          ));
-        };
-        self.trunc_prompt_path = val;
-      }
-      "edit_mode" => {
-        let Ok(val) = val.parse::<ShedEditMode>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'vi' or 'emacs' for edit_mode value",
-          ));
-        };
-        self.edit_mode = val;
-      }
-      "comp_limit" => {
-        let Ok(val) = val.parse::<usize>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected a positive integer for comp_limit value",
-          ));
-        };
-        self.comp_limit = val;
-      }
-      "highlight" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for highlight value",
-          ));
-        };
-        self.highlight = val;
-      }
-      "auto_indent" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for auto_indent value",
-          ));
-        };
-        self.auto_indent = val;
-      }
-      "linebreak_on_incomplete" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for linebreak_on_incomplete value",
-          ));
-        };
-        self.linebreak_on_incomplete = val;
-      }
-      "leader" => {
-        self.leader = val.to_string();
-      }
-      "line_numbers" => {
-        let Ok(val) = val.parse::<bool>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected 'true' or 'false' for line_numbers value",
-          ));
-        };
-        self.line_numbers = val;
-      }
-      "screensaver_cmd" => {
-        self.screensaver_cmd = val.to_string();
-      }
-      "screensaver_idle_time" => {
-        let Ok(val) = val.parse::<usize>() else {
-          return Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            "shopt: expected a positive integer for screensaver_idle_time value",
-          ));
-        };
-        self.screensaver_idle_time = val;
-      }
-      "custom" => {
-        todo!()
-      }
-      _ => {
-        return Err(ShErr::simple(
-          ShErrKind::SyntaxErr,
-          format!("shopt: Unexpected 'prompt' option '{opt}'"),
-        ));
-      }
-    }
-    Ok(())
-  }
-  pub fn get(&self, query: &str) -> ShResult<Option<String>> {
-    if query.is_empty() {
-      return Ok(Some(format!("{self}")));
-    }
+    /// The leader key sequence used in keymap bindings
+    leader: String = " ".to_string(),
 
-    match query {
-      "trunc_prompt_path" => {
-        let mut output = String::from(
-          "Maximum number of path segments used in the '\\W' prompt escape sequence\n",
-        );
-        output.push_str(&format!("{}", self.trunc_prompt_path));
-        Ok(Some(output))
-      }
-      "edit_mode" => {
-        let mut output =
-          String::from("The style of editor shortcuts used in the line-editing of the prompt\n");
-        output.push_str(&format!("{}", self.edit_mode));
-        Ok(Some(output))
-      }
-      "comp_limit" => {
-        let mut output =
-          String::from("Maximum number of completion candidates displayed upon pressing tab\n");
-        output.push_str(&format!("{}", self.comp_limit));
-        Ok(Some(output))
-      }
-      "highlight" => {
-        let mut output =
-          String::from("Whether to enable or disable syntax highlighting on the prompt\n");
-        output.push_str(&format!("{}", self.highlight));
-        Ok(Some(output))
-      }
-      "auto_indent" => {
-        let mut output =
-          String::from("Whether to automatically indent new lines in multiline commands\n");
-        output.push_str(&format!("{}", self.auto_indent));
-        Ok(Some(output))
-      }
-      "linebreak_on_incomplete" => {
-        let mut output =
-          String::from("Whether to automatically insert a newline when the input is incomplete\n");
-        output.push_str(&format!("{}", self.linebreak_on_incomplete));
-        Ok(Some(output))
-      }
-      "leader" => {
-        let mut output = String::from("The leader key sequence used in keymap bindings\n");
-        output.push_str(&self.leader);
-        Ok(Some(output))
-      }
-      "line_numbers" => {
-        let mut output = String::from("Whether to display line numbers in multiline input\n");
-        output.push_str(&format!("{}", self.line_numbers));
-        Ok(Some(output))
-      }
-      "screensaver_cmd" => {
-        let mut output = String::from("Command to execute as a screensaver after idle timeout\n");
-        output.push_str(&self.screensaver_cmd);
-        Ok(Some(output))
-      }
-      "screensaver_idle_time" => {
-        let mut output =
-          String::from("Idle time in seconds before running screensaver_cmd (0 = disabled)\n");
-        output.push_str(&format!("{}", self.screensaver_idle_time));
-        Ok(Some(output))
-      }
-      _ => Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
-        format!("shopt: Unexpected 'prompt' option '{query}'"),
-      )),
-    }
-  }
-}
+    /// Whether to display line numbers in multiline input
+    line_numbers: bool = true,
 
-impl Display for ShOptPrompt {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let mut output = vec![];
+    /// Command to execute as a screensaver after idle timeout
+    screensaver_cmd: String = String::new(),
 
-    output.push(format!("trunc_prompt_path = {}", self.trunc_prompt_path));
-    output.push(format!("edit_mode = {}", self.edit_mode));
-    output.push(format!("comp_limit = {}", self.comp_limit));
-    output.push(format!("highlight = {}", self.highlight));
-    output.push(format!("auto_indent = {}", self.auto_indent));
-    output.push(format!(
-      "linebreak_on_incomplete = {}",
-      self.linebreak_on_incomplete
-    ));
-    output.push(format!("leader = {}", self.leader));
-    output.push(format!("line_numbers = {}", self.line_numbers));
-    output.push(format!("screensaver_cmd = {}", self.screensaver_cmd));
-    output.push(format!(
-      "screensaver_idle_time = {}",
-      self.screensaver_idle_time
-    ));
+    /// Idle time in seconds before running screensaver_cmd (0 = disabled)
+    screensaver_idle_time: usize = 0,
 
-    let final_output = output.join("\n");
-
-    writeln!(f, "{final_output}")
-  }
-}
-
-impl Default for ShOptPrompt {
-  fn default() -> Self {
-    ShOptPrompt {
-      trunc_prompt_path: 4,
-      edit_mode: ShedEditMode::Vi,
-      comp_limit: 100,
-      highlight: true,
-      auto_indent: true,
-      linebreak_on_incomplete: true,
-      leader: "\\".to_string(),
-      line_numbers: true,
-      screensaver_cmd: String::new(),
-      screensaver_idle_time: 0,
-    }
+    /// Whether tab completion matching is case-insensitive
+    completion_ignore_case: bool = false,
   }
 }
 
@@ -654,12 +365,6 @@ mod tests {
   fn set_and_get_prompt_opts() {
     let mut opts = ShOpts::default();
 
-    opts.set("prompt.edit_mode", "emacs").unwrap();
-    assert!(matches!(opts.prompt.edit_mode, ShedEditMode::Emacs));
-
-    opts.set("prompt.edit_mode", "vi").unwrap();
-    assert!(matches!(opts.prompt.edit_mode, ShedEditMode::Vi));
-
     opts.set("prompt.comp_limit", "50").unwrap();
     assert_eq!(opts.prompt.comp_limit, 50);
 
@@ -704,7 +409,6 @@ mod tests {
     assert!(opts.set("core.dotglob", "notabool").is_err());
     assert!(opts.set("core.max_hist", "notanint").is_err());
     assert!(opts.set("core.max_recurse_depth", "-5").is_err());
-    assert!(opts.set("prompt.edit_mode", "notepad").is_err());
     assert!(opts.set("prompt.comp_limit", "abc").is_err());
   }
 
@@ -718,7 +422,6 @@ mod tests {
     assert!(core_output.contains("bell_enabled"));
 
     let prompt_output = opts.get("prompt").unwrap().unwrap();
-    assert!(prompt_output.contains("edit_mode"));
     assert!(prompt_output.contains("comp_limit"));
     assert!(prompt_output.contains("highlight"));
   }

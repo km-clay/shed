@@ -32,7 +32,7 @@ pub fn shopt(node: Node) -> ShResult<()> {
   }
 
   for (arg, span) in argv {
-    let Some(mut output) = write_shopts(|s| s.query(&arg)).blame(span)? else {
+    let Some(mut output) = write_shopts(|s| s.query(&arg)).promote_err(span)? else {
       continue;
     };
 
@@ -61,7 +61,7 @@ mod tests {
     assert!(out.contains("dotglob"));
     assert!(out.contains("autocd"));
     assert!(out.contains("max_hist"));
-    assert!(out.contains("edit_mode"));
+    assert!(out.contains("comp_limit"));
   }
 
   #[test]
@@ -72,7 +72,7 @@ mod tests {
     assert!(out.contains("dotglob"));
     assert!(out.contains("autocd"));
     // Should not contain prompt opts
-    assert!(!out.contains("edit_mode"));
+    assert!(!out.contains("comp_limit"));
   }
 
   #[test]
@@ -107,11 +107,10 @@ mod tests {
   }
 
   #[test]
-  fn shopt_set_edit_mode() {
+  fn shopt_set_completion_ignore_case() {
     let _g = TestGuard::new();
-    test_input("shopt prompt.edit_mode=emacs").unwrap();
-    let mode = read_shopts(|o| format!("{}", o.prompt.edit_mode));
-    assert_eq!(mode, "emacs");
+    test_input("shopt prompt.completion_ignore_case=true").unwrap();
+    assert!(read_shopts(|o| o.prompt.completion_ignore_case));
   }
 
   // ===================== Error cases =====================

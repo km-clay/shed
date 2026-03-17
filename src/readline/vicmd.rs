@@ -307,6 +307,9 @@ impl Verb {
         | Self::JoinLines
         | Self::InsertChar(_)
         | Self::Insert(_)
+				| Self::Dedent
+				| Self::Indent
+				| Self::Equalize
         | Self::Rot13
         | Self::EndOfFile
         | Self::IncrementNumber(_)

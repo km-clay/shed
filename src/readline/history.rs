@@ -284,7 +284,7 @@ impl History {
         .search_mask
         .clone()
         .into_iter()
-        .map(|ent| ent.command().to_string());
+        .map(|ent| super::complete::Candidate::from(ent.command()));
       self.fuzzy_finder.activate(raw_entries.collect());
       None
     }
