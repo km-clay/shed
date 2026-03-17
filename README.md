@@ -1,6 +1,8 @@
 # shed
 
-A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing and general interactive UX improvements over existing shells. <small>Btw if you don't use `vim` this probably isn't your shell.</small>
+A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing and general interactive UX improvements over existing shells. 
+
+<sub>btw if you don't use `vim` this probably isn't your shell</sub>
 
 <img width="506" height="407" alt="shed" src="https://github.com/user-attachments/assets/3945f663-a361-4418-bf20-0c4eaa2a36d2" />
 
