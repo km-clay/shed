@@ -12,15 +12,23 @@ use super::vicmd::{
   ViCmd, Word,
 };
 use crate::{
-  expand::expand_cmd_sub, libsh::{error::ShResult, guards::var_ctx_guard}, parse::{
-    Redir, RedirType, execute::exec_input, lex::{LexFlags, LexStream, QuoteState, Tk, TkFlags, TkRule}
-  }, prelude::*, procio::{IoFrame, IoMode, IoStack}, readline::{
+  expand::expand_cmd_sub,
+  libsh::{error::ShResult, guards::var_ctx_guard},
+  parse::{
+    Redir, RedirType,
+    execute::exec_input,
+    lex::{LexFlags, LexStream, QuoteState, Tk, TkFlags, TkRule},
+  },
+  prelude::*,
+  procio::{IoFrame, IoMode, IoStack},
+  readline::{
     history::History,
     markers,
     register::{RegisterContent, write_register},
-    term::RawModeGuard,
+    term::{RawModeGuard, get_win_size},
     vicmd::{ReadSrc, WriteDest},
-  }, state::{VarFlags, VarKind, read_shopts, write_meta, write_vars}
+  },
+  state::{VarFlags, VarKind, read_shopts, write_meta, write_vars},
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -1012,11 +1020,30 @@ impl LineBuf {
     if self.end_of_line() == self.cursor.max {
       return None;
     }
-    let target_line = self.cursor_line_number() + n;
+    let target_line = self.cursor_line_number() + n - 1;
     let start = self.start_of_line();
     let (_, end) = self.line_bounds(target_line);
 
     Some((start, end))
+  }
+  pub fn lines_in_range(&mut self, range: Range<usize>) -> Vec<(usize, usize)> {
+    let mut ranges = vec![];
+
+    let mut first_line = self.pos_line_number(range.start);
+    let mut last_line = self.pos_line_number(range.end);
+
+    (first_line, last_line) = ordered(first_line, last_line);
+
+    if first_line == last_line {
+      return vec![self.line_bounds(first_line)];
+    }
+
+    for line_no in first_line..last_line {
+      let (s, e) = self.line_bounds(line_no);
+      ranges.push((s, e));
+    }
+
+    ranges
   }
   pub fn line_bounds(&self, n: usize) -> (usize, usize) {
     if n > self.total_lines() {
@@ -2129,12 +2156,16 @@ impl LineBuf {
     self.buffer.replace_range(start..end, new);
   }
   pub fn calc_indent_level(&mut self) -> usize {
-    let to_cursor = self
-      .slice_to_cursor()
+    self.calc_indent_level_for_pos(self.cursor.get())
+  }
+
+  pub fn calc_indent_level_for_pos(&mut self, pos: usize) -> usize {
+    let slice = self
+      .slice_to(pos)
       .map(|s| s.to_string())
       .unwrap_or(self.buffer.clone());
 
-    self.indent_ctx.calculate(&to_cursor)
+    self.indent_ctx.calculate(&slice)
   }
   pub fn eval_motion(&mut self, verb: Option<&Verb>, motion: MotionCmd) -> MotionKind {
     let buffer = self.buffer.clone();
@@ -2338,7 +2369,7 @@ impl LineBuf {
         let pos = if count == 1 {
           self.end_of_line_exclusive()
         } else if let Some((_, end)) = self.select_lines_down(count) {
-          end
+          end.saturating_sub(1)
         } else {
           self.end_of_line_exclusive()
         };
@@ -2455,14 +2486,6 @@ impl LineBuf {
 
         MotionKind::On(target_pos)
       }
-      MotionCmd(_count, Motion::ScreenLineUp) => todo!(),
-      MotionCmd(_count, Motion::ScreenLineUpCharwise) => todo!(),
-      MotionCmd(_count, Motion::ScreenLineDown) => todo!(),
-      MotionCmd(_count, Motion::ScreenLineDownCharwise) => todo!(),
-      MotionCmd(_count, Motion::BeginningOfScreenLine) => todo!(),
-      MotionCmd(_count, Motion::FirstGraphicalOnScreenLine) => todo!(),
-      MotionCmd(_count, Motion::HalfOfScreen) => todo!(),
-      MotionCmd(_count, Motion::HalfOfScreenLineText) => todo!(),
       MotionCmd(_count, Motion::WholeBuffer) => {
         MotionKind::Exclusive((0, self.grapheme_indices().len()))
       }
@@ -2503,8 +2526,9 @@ impl LineBuf {
         final_end = final_end.min(self.cursor.max);
         MotionKind::Exclusive((start, final_end))
       }
-      MotionCmd(_count, Motion::RepeatMotion) => todo!(),
-      MotionCmd(_count, Motion::RepeatMotionRev) => todo!(),
+      MotionCmd(_count, Motion::RepeatMotion) | MotionCmd(_count, Motion::RepeatMotionRev) => {
+        unreachable!("already handled in readline/mod.rs")
+      }
       MotionCmd(_count, Motion::Null)
       | MotionCmd(_count, Motion::Global(_))
       | MotionCmd(_count, Motion::NotGlobal(_)) => MotionKind::Null,
@@ -3058,28 +3082,34 @@ impl LineBuf {
   }
   #[allow(clippy::unnecessary_to_owned)]
   fn verb_dedent(&mut self, motion: MotionKind) -> ShResult<()> {
-    let Some((start, mut end)) = self.range_from_motion(&motion) else {
+    let Some((start, end)) = self.range_from_motion(&motion) else {
       return Ok(());
     };
+    let end = end.min(self.grapheme_indices().len().saturating_sub(1));
+
+    // Collect tab positions to remove, then remove in reverse so indices stay valid
+    let mut to_remove = Vec::new();
     if self.grapheme_at(start) == Some("\t") {
-      self.remove(start);
+      to_remove.push(start);
     }
-    end = end.min(self.grapheme_indices().len().saturating_sub(1));
-    let mut range_indices = self.grapheme_indices()[start..end].to_vec().into_iter();
-    while let Some(idx) = range_indices.next() {
-      let gr = self.grapheme_at(idx).unwrap();
-      if gr == "\n" {
-        let Some(idx) = range_indices.next() else {
-          if self.grapheme_at(self.grapheme_indices().len().saturating_sub(1)) == Some("\t") {
-            self.remove(self.grapheme_indices().len().saturating_sub(1));
-          }
-          break;
-        };
-        if self.grapheme_at(idx) == Some("\t") {
-          self.remove(idx);
+    let range_indices = self.grapheme_indices()[start..end].to_vec();
+    let mut i = 0;
+    while i < range_indices.len() {
+      let idx = range_indices[i];
+      if self.grapheme_at(idx) == Some("\n") && i + 1 < range_indices.len() {
+        let next_idx = range_indices[i + 1];
+        if self.grapheme_at(next_idx) == Some("\t") {
+          to_remove.push(next_idx);
+          i += 1;
         }
       }
+      i += 1;
     }
+
+    for idx in to_remove.into_iter().rev() {
+      self.remove(idx);
+    }
+
     match motion {
       MotionKind::ExclusiveWithTargetCol((_, _), pos)
       | MotionKind::InclusiveWithTargetCol((_, _), pos) => {
@@ -3089,6 +3119,29 @@ impl LineBuf {
       }
       _ => self.cursor.set(start),
     }
+    Ok(())
+  }
+  fn verb_equalize(&mut self, motion: MotionKind) -> ShResult<()> {
+    let Some((s, e)) = self.range_from_motion(&motion) else {
+      return Ok(());
+    };
+    let lines = self.lines_in_range(s..e);
+    let target_col = self.cursor_col();
+
+    // reverse the list of line spans so that the spans stay valid
+    for (s, _) in lines.into_iter().rev() {
+      let indent_level = self.calc_indent_level_for_pos(s);
+      while self.grapheme_at(s).is_some_and(|c| c == "\t") {
+        self.remove(s)
+      }
+      for _ in 0..indent_level {
+        self.insert_at(s, '\t');
+      }
+    }
+
+    self.cursor.set(s);
+    self.cursor.add(target_col);
+
     Ok(())
   }
   fn verb_insert_mode_line_break(&mut self, anchor: Anchor) -> ShResult<()> {
@@ -3296,7 +3349,7 @@ impl LineBuf {
       Verb::ToLower => self.verb_case_transform(motion, CaseTransform::Lower)?,
       Verb::ToUpper => self.verb_case_transform(motion, CaseTransform::Upper)?,
       Verb::Redo | Verb::Undo => self.verb_undo_redo(verb)?,
-      Verb::RepeatLast => todo!(),
+      Verb::RepeatLast => unreachable!("already handled in readline.rs"),
       Verb::Put(anchor) => self.verb_put(anchor, register)?,
       Verb::SwapVisualAnchor => self.verb_swap_visual_anchor(),
       Verb::JoinLines => self.verb_join_lines()?,
@@ -3304,7 +3357,7 @@ impl LineBuf {
       Verb::Insert(string) => self.verb_insert(string),
       Verb::Indent => self.verb_indent(motion)?,
       Verb::Dedent => self.verb_dedent(motion)?,
-      Verb::Equalize => todo!(),
+      Verb::Equalize => self.verb_equalize(motion)?,
       Verb::InsertModeLineBreak(anchor) => self.verb_insert_mode_line_break(anchor)?,
       Verb::AcceptLineOrNewline => self.verb_accept_line_or_newline()?,
       Verb::IncrementNumber(n) => self.verb_adjust_number(n as i64)?,
@@ -3352,54 +3405,51 @@ impl LineBuf {
           self.cursor.add(grapheme_count);
         }
       },
-      Verb::Write(dest) => {
-				match dest {
-					WriteDest::FileAppend(ref path_buf) |
-					WriteDest::File(ref path_buf) => {
-						let Ok(mut file) = (if matches!(dest, WriteDest::File(_)) {
-							OpenOptions::new()
-								.create(true)
-								.truncate(true)
-								.write(true)
-								.open(path_buf)
-						} else {
-							OpenOptions::new()
-								.create(true)
-								.append(true)
-								.open(path_buf)
-						}) else {
-								write_meta(|m| {
-									m.post_system_message(format!("Failed to open file {}", path_buf.display()))
-								});
-								return Ok(());
-							};
-						if let Err(e) = file.write_all(self.as_str().as_bytes()) {
-							write_meta(|m| {
-								m.post_system_message(format!("Failed to write to file {}: {e}", path_buf.display()))
-							});
-						}
-						return Ok(());
-					}
-					WriteDest::Cmd(cmd) => {
-						let buf = self.as_str().to_string();
-						let io_mode = IoMode::Buffer {
-							tgt_fd: STDIN_FILENO,
-							buf,
-							flags: TkFlags::IS_HEREDOC | TkFlags::LIT_HEREDOC,
-						};
-						let redir = Redir::new(io_mode, RedirType::Input);
-						let mut frame = IoFrame::new();
-						frame.push(redir);
-						let mut stack = IoStack::new();
-						stack.push_frame(frame);
-						exec_input(cmd, Some(stack), false, Some("ex write".into()))?;
-					}
-				}
-			}
+      Verb::Write(dest) => match dest {
+        WriteDest::FileAppend(ref path_buf) | WriteDest::File(ref path_buf) => {
+          let Ok(mut file) = (if matches!(dest, WriteDest::File(_)) {
+            OpenOptions::new()
+              .create(true)
+              .truncate(true)
+              .write(true)
+              .open(path_buf)
+          } else {
+            OpenOptions::new().create(true).append(true).open(path_buf)
+          }) else {
+            write_meta(|m| {
+              m.post_system_message(format!("Failed to open file {}", path_buf.display()))
+            });
+            return Ok(());
+          };
+          if let Err(e) = file.write_all(self.as_str().as_bytes()) {
+            write_meta(|m| {
+              m.post_system_message(format!(
+                "Failed to write to file {}: {e}",
+                path_buf.display()
+              ))
+            });
+          }
+          return Ok(());
+        }
+        WriteDest::Cmd(cmd) => {
+          let buf = self.as_str().to_string();
+          let io_mode = IoMode::Buffer {
+            tgt_fd: STDIN_FILENO,
+            buf,
+            flags: TkFlags::IS_HEREDOC | TkFlags::LIT_HEREDOC,
+          };
+          let redir = Redir::new(io_mode, RedirType::Input);
+          let mut frame = IoFrame::new();
+          frame.push(redir);
+          let mut stack = IoStack::new();
+          stack.push_frame(frame);
+          exec_input(cmd, Some(stack), false, Some("ex write".into()))?;
+        }
+      },
       Verb::Edit(path) => {
-				let input = format!("$EDITOR {}",path.display());
-				exec_input(input, None, true, Some("ex edit".into()))?;
-			}
+        let input = format!("$EDITOR {}", path.display());
+        exec_input(input, None, true, Some("ex edit".into()))?;
+      }
       Verb::Normal(_) | Verb::Substitute(..) | Verb::RepeatSubstitute | Verb::RepeatGlobal => {}
     }
     Ok(())

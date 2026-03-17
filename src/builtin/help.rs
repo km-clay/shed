@@ -121,11 +121,7 @@ pub fn help(node: Node) -> ShResult<()> {
 }
 
 pub fn open_help(content: &str, line: Option<usize>, file_name: Option<String>) -> ShResult<()> {
-  let pager = env::var("SHED_HPAGER")
-		.unwrap_or(
-			env::var("PAGER")
-				.unwrap_or("less -R".into()),
-		);
+  let pager = env::var("SHED_HPAGER").unwrap_or(env::var("PAGER").unwrap_or("less -R".into()));
   let line_arg = line.map(|ln| format!("+{ln}")).unwrap_or_default();
   let prompt_arg = file_name
     .map(|name| format!("-Ps'{name}'"))

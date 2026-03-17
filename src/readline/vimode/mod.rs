@@ -81,9 +81,15 @@ pub trait ViMode {
   fn as_replay(&self) -> Option<CmdReplay>;
   fn cursor_style(&self) -> String;
   fn pending_seq(&self) -> Option<String>;
-  fn pending_cursor(&self) -> Option<usize> { None }
-	fn editor(&mut self) -> Option<&mut LineBuf> { None }
-	fn history(&mut self) -> Option<&mut History> { None }
+  fn pending_cursor(&self) -> Option<usize> {
+    None
+  }
+  fn editor(&mut self) -> Option<&mut LineBuf> {
+    None
+  }
+  fn history(&mut self) -> Option<&mut History> {
+    None
+  }
   fn move_cursor_on_undo(&self) -> bool;
   fn clamp_cursor(&self) -> bool;
   fn hist_scroll_start_pos(&self) -> Option<To>;

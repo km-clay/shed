@@ -450,25 +450,9 @@ impl ViNormal {
                 Motion::WordMotion(To::End, Word::Big, Direction::Backward),
               ));
             }
-            'k' => {
-              chars = chars_clone;
-              break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineUp));
-            }
-            'j' => {
-              chars = chars_clone;
-              break 'motion_parse Some(MotionCmd(count, Motion::ScreenLineDown));
-            }
             '_' => {
               chars = chars_clone;
               break 'motion_parse Some(MotionCmd(count, Motion::EndOfLastWord));
-            }
-            '0' => {
-              chars = chars_clone;
-              break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfScreenLine));
-            }
-            '^' => {
-              chars = chars_clone;
-              break 'motion_parse Some(MotionCmd(count, Motion::FirstGraphicalOnScreenLine));
             }
             _ => return self.quit_parse(),
           }

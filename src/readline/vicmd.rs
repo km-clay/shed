@@ -338,16 +338,8 @@ pub enum Motion {
   ForwardCharForced,
   LineUp,
   LineUpCharwise,
-  ScreenLineUp,
-  ScreenLineUpCharwise,
   LineDown,
   LineDownCharwise,
-  ScreenLineDown,
-  ScreenLineDownCharwise,
-  BeginningOfScreenLine,
-  FirstGraphicalOnScreenLine,
-  HalfOfScreen,
-  HalfOfScreenLineText,
   WholeBuffer,
   StartOfBuffer,
   EndOfBuffer,
@@ -387,12 +379,8 @@ impl Motion {
       &self,
       Self::BeginningOfLine
         | Self::BeginningOfFirstWord
-        | Self::BeginningOfScreenLine
-        | Self::FirstGraphicalOnScreenLine
         | Self::LineDownCharwise
         | Self::LineUpCharwise
-        | Self::ScreenLineUpCharwise
-        | Self::ScreenLineDownCharwise
         | Self::ToColumn
         | Self::TextObj(TextObj::Sentence(_))
         | Self::TextObj(TextObj::Paragraph(_))
@@ -401,20 +389,13 @@ impl Motion {
         | Self::ToBrace(_)
         | Self::ToBracket(_)
         | Self::ToParen(_)
-        | Self::ScreenLineDown
-        | Self::ScreenLineUp
         | Self::Range(_, _)
     )
   }
   pub fn is_linewise(&self) -> bool {
     matches!(
       self,
-      Self::WholeLineInclusive
-        | Self::WholeLineExclusive
-        | Self::LineUp
-        | Self::LineDown
-        | Self::ScreenLineDown
-        | Self::ScreenLineUp
+      Self::WholeLineInclusive | Self::WholeLineExclusive | Self::LineUp | Self::LineDown
     )
   }
 }

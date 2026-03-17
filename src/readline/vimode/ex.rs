@@ -154,13 +154,13 @@ impl ViMode for ViEx {
     None
   }
 
-	fn editor(&mut self) -> Option<&mut LineBuf> {
-		Some(&mut self.pending_cmd.buf)
-	}
+  fn editor(&mut self) -> Option<&mut LineBuf> {
+    Some(&mut self.pending_cmd.buf)
+  }
 
-	fn history(&mut self) -> Option<&mut History> {
-		Some(&mut self.pending_cmd.history)
-	}
+  fn history(&mut self) -> Option<&mut History> {
+    Some(&mut self.pending_cmd.history)
+  }
 
   fn cursor_style(&self) -> String {
     "\x1b[3 q".to_string()
@@ -338,13 +338,13 @@ fn parse_read(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Option<St
 }
 
 fn get_path(path: &str) -> Result<PathBuf, Option<String>> {
-	log::debug!("Expanding path: {}", path);
+  log::debug!("Expanding path: {}", path);
   let expanded = Expander::from_raw(path, TkFlags::empty())
     .map_err(|e| Some(format!("Error expanding path: {}", e)))?
-		.expand()
+    .expand()
     .map_err(|e| Some(format!("Error expanding path: {}", e)))?
-		.join(" ");
-	log::debug!("Expanded path: {}", expanded);
+    .join(" ");
+  log::debug!("Expanded path: {}", expanded);
   Ok(PathBuf::from(&expanded))
 }
 

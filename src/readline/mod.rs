@@ -346,17 +346,17 @@ impl ShedVi {
     self
   }
 
-	/// A mutable reference to the currently focused editor
-	/// This includes the main LineBuf, and sub-editors for modes like Ex mode.
-	pub fn focused_editor(&mut self) -> &mut LineBuf {
-		self.mode.editor().unwrap_or(&mut self.editor)
-	}
+  /// A mutable reference to the currently focused editor
+  /// This includes the main LineBuf, and sub-editors for modes like Ex mode.
+  pub fn focused_editor(&mut self) -> &mut LineBuf {
+    self.mode.editor().unwrap_or(&mut self.editor)
+  }
 
-	/// A mutable reference to the currently focused history, if any.
-	/// This includes the main history struct, and history for sub-editors like Ex mode.
-	pub fn focused_history(&mut self) -> &mut History {
-		self.mode.history().unwrap_or(&mut self.history)
-	}
+  /// A mutable reference to the currently focused history, if any.
+  /// This includes the main history struct, and history for sub-editors like Ex mode.
+  pub fn focused_history(&mut self) -> &mut History {
+    self.mode.history().unwrap_or(&mut self.history)
+  }
 
   /// Feed raw bytes from stdin into the reader's buffer
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
@@ -475,21 +475,21 @@ impl ShedVi {
           SelectorResponse::Accept(cmd) => {
             let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
 
-						{
-							let editor = self.focused_editor();
-							editor.set_buffer(cmd.to_string());
-							editor.move_cursor_to_end();
-						}
+            {
+              let editor = self.focused_editor();
+              editor.set_buffer(cmd.to_string());
+              editor.move_cursor_to_end();
+            }
 
             self
               .history
               .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
-						self.editor.set_hint(None);
-						{
-							let mut writer = std::mem::take(&mut self.writer);
-							self.focused_history().fuzzy_finder.clear(&mut writer)?;
-							self.writer = writer;
-						}
+            self.editor.set_hint(None);
+            {
+              let mut writer = std::mem::take(&mut self.writer);
+              self.focused_history().fuzzy_finder.clear(&mut writer)?;
+              self.writer = writer;
+            }
             self.focused_history().fuzzy_finder.reset();
 
             with_vars([("_HIST_ENTRY".into(), cmd.clone())], || {
@@ -513,11 +513,11 @@ impl ShedVi {
             post_cmds.exec();
 
             self.editor.set_hint(None);
-						{
-							let mut writer = std::mem::take(&mut self.writer);
-							self.focused_history().fuzzy_finder.clear(&mut writer)?;
-							self.writer = writer;
-						}
+            {
+              let mut writer = std::mem::take(&mut self.writer);
+              self.focused_history().fuzzy_finder.clear(&mut writer)?;
+              self.writer = writer;
+            }
             write_vars(|v| {
               v.set_var(
                 "SHED_VI_MODE",
@@ -674,8 +674,9 @@ impl ShedVi {
     }
 
     if let KeyEvent(KeyCode::Tab, mod_keys) = key {
-			if self.mode.report_mode() != ModeReport::Ex
-      && self.editor.attempt_history_expansion(&self.history) {
+      if self.mode.report_mode() != ModeReport::Ex
+        && self.editor.attempt_history_expansion(&self.history)
+      {
         // If history expansion occurred, don't attempt completion yet
         // allow the user to see the expanded command and accept or edit it before completing
         return Ok(None);
@@ -887,14 +888,12 @@ impl ShedVi {
     let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
     let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
     let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
-    log::debug!("is_ex_cmd: {is_ex_cmd}");
     if is_shell_cmd {
       self.old_layout = None;
     }
     if is_ex_cmd {
       self.ex_history.push(cmd.raw_seq.clone());
       self.ex_history.reset();
-      log::debug!("ex_history: {:?}", self.ex_history.entries());
     }
 
     let before = self.editor.buffer.clone();
@@ -1032,11 +1031,11 @@ impl ShedVi {
     let one_line = new_layout.end.row == 0;
 
     self.completer.clear(&mut self.writer)?;
-		{
-			let mut writer = std::mem::take(&mut self.writer);
-			self.focused_history().fuzzy_finder.clear(&mut writer)?;
-			self.writer = writer;
-		}
+    {
+      let mut writer = std::mem::take(&mut self.writer);
+      self.focused_history().fuzzy_finder.clear(&mut writer)?;
+      self.writer = writer;
+    }
 
     if let Some(layout) = self.old_layout.as_ref() {
       self.writer.clear_rows(layout)?;
@@ -1133,11 +1132,11 @@ impl ShedVi {
       .fuzzy_finder
       .set_prompt_line_context(preceding_width, new_layout.cursor.col);
 
-		{
-			let mut writer = std::mem::take(&mut self.writer);
-			self.focused_history().fuzzy_finder.draw(&mut writer)?;
-			self.writer = writer;
-		}
+    {
+      let mut writer = std::mem::take(&mut self.writer);
+      self.focused_history().fuzzy_finder.draw(&mut writer)?;
+      self.writer = writer;
+    }
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;
@@ -1416,11 +1415,7 @@ impl ShedVi {
 
     self.editor.exec_cmd(cmd.clone())?;
 
-    if self.mode.report_mode() == ModeReport::Visual
-      && cmd
-        .verb()
-        .is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank)
-    {
+    if self.mode.report_mode() == ModeReport::Visual && cmd.verb().is_some() {
       self.editor.stop_selecting();
       let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
       self.swap_mode(&mut mode);

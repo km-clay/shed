@@ -3,7 +3,10 @@ use std::{
   sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
 };
 
-use nix::{sys::signal::{SaFlags, SigAction, sigaction}, unistd::getpid};
+use nix::{
+  sys::signal::{SaFlags, SigAction, sigaction},
+  unistd::getpid,
+};
 
 use crate::{
   builtin::trap::TrapTarget,
@@ -98,10 +101,10 @@ pub fn check_signals() -> ShResult<()> {
     GOT_SIGWINCH.store(true, Ordering::SeqCst);
     run_trap(Signal::SIGWINCH)?;
   }
-	if got_signal(Signal::SIGUSR1) {
-		GOT_SIGUSR1.store(true, Ordering::SeqCst);
-		run_trap(Signal::SIGUSR1)?;
-	}
+  if got_signal(Signal::SIGUSR1) {
+    GOT_SIGUSR1.store(true, Ordering::SeqCst);
+    run_trap(Signal::SIGUSR1)?;
+  }
 
   for sig in MISC_SIGNALS {
     if got_signal(sig) {
@@ -333,13 +336,14 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
         let job_complete_msg = job.display(&job_order, JobCmdFlags::PIDS).to_string();
         let statuses = job.get_stats();
 
-				for status in &statuses {
-					if let WtStat::Signaled(_, sig, _) = status
-					&& *sig == Signal::SIGINT {
-						// Necessary to interrupt stuff like shell loops
-						kill(getpid(), Signal::SIGINT).ok();
-					}
-				}
+        for status in &statuses {
+          if let WtStat::Signaled(_, sig, _) = status
+            && *sig == Signal::SIGINT
+          {
+            // Necessary to interrupt stuff like shell loops
+            kill(getpid(), Signal::SIGINT).ok();
+          }
+        }
 
         if let Some(pipe_status) = Job::pipe_status(&statuses) {
           let pipe_status = pipe_status

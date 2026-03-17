@@ -32,13 +32,20 @@ use crate::{
     test::double_bracket_test,
     trap::{TrapTarget, trap},
     varcmds::{export, local, readonly, unset},
-  }, expand::{expand_aliases, expand_case_pattern, glob_to_regex}, jobs::{ChildProc, JobStack, attach_tty, dispatch_job}, libsh::{
+  },
+  expand::{expand_aliases, expand_case_pattern, glob_to_regex},
+  jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
+  libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
     guards::{scope_guard, var_ctx_guard},
     utils::RedirVecUtils,
-  }, prelude::*, procio::{IoMode, IoStack, PipeGenerator}, signal::{check_signals, signals_pending}, state::{
+  },
+  prelude::*,
+  procio::{IoMode, IoStack, PipeGenerator},
+  signal::{check_signals, signals_pending},
+  state::{
     self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_vars,
-  }
+  },
 };
 
 use super::{
@@ -268,10 +275,10 @@ impl Dispatcher {
   }
   pub fn dispatch_node(&mut self, node: Node) -> ShResult<()> {
     while signals_pending() {
-			// If we have received SIGINT,
-			// this will stop the execution here
-			// and propagate back to the functions in main.rs
-			check_signals()?;
+      // If we have received SIGINT,
+      // this will stop the execution here
+      // and propagate back to the functions in main.rs
+      check_signals()?;
     }
 
     match node.class {
