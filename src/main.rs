@@ -160,6 +160,12 @@ fn main() -> ExitCode {
   on_exit_autocmds.exec();
 
   write_jobs(|j| j.hang_up());
+
+	let code = QUIT_CODE.load(Ordering::SeqCst) as u8;
+	if code == 0 && isatty(STDIN_FILENO).unwrap_or_default() {
+		write(borrow_fd(STDERR_FILENO), b"\nexit\n").ok();
+	}
+
   ExitCode::from(QUIT_CODE.load(Ordering::SeqCst) as u8)
 }
 

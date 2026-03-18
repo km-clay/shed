@@ -280,6 +280,7 @@ fn parse_ex_command(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Opt
     _ if "delete".starts_with(&cmd_name) => Ok(Some(Verb::Delete)),
     _ if "yank".starts_with(&cmd_name) => Ok(Some(Verb::Yank)),
     _ if "put".starts_with(&cmd_name) => Ok(Some(Verb::Put(Anchor::After))),
+		_ if "quit".starts_with(&cmd_name) => Ok(Some(Verb::Quit)),
     _ if "read".starts_with(&cmd_name) => parse_read(chars),
     _ if "write".starts_with(&cmd_name) => parse_write(chars),
     _ if "edit".starts_with(&cmd_name) => parse_edit(chars),

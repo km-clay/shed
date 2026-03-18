@@ -19,7 +19,7 @@ use crate::{
   readline::{
     Marker, annotate_input_recursive,
     keys::{KeyCode as C, KeyEvent as K, ModKeys as M},
-    linebuf::{ClampedUsize, LineBuf},
+    linebuf::LineBuf,
     markers::{self, is_marker},
     term::{LineWriter, TermWriter, calc_str_width, get_win_size},
     vimode::{ViInsert, ViMode},
@@ -818,7 +818,6 @@ impl QueryEditor {
     self.available_width = width;
   }
   pub fn update_scroll_offset(&mut self) {
-    self.linebuf.update_graphemes();
     let cursor_pos = self.linebuf.cursor.get();
     if cursor_pos < self.scroll_offset + 1 {
       self.scroll_offset = self.linebuf.cursor.ret_sub(1);
@@ -829,10 +828,8 @@ impl QueryEditor {
         .cursor
         .ret_sub(self.available_width.saturating_sub(1));
     }
-    let max_offset = self
-      .linebuf
-      .grapheme_indices()
-      .len()
+    let max_offset = self.linebuf
+			.count_graphemes()
       .saturating_sub(self.available_width);
     self.scroll_offset = self.scroll_offset.min(max_offset);
   }

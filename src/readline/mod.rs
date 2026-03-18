@@ -9,6 +9,7 @@ use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVis
 
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::expand_prompt;
+use crate::libsh::error::{ShErr, ShErrKind};
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
@@ -882,7 +883,9 @@ impl ShedVi {
         self.needs_redraw = true;
         return Ok(None);
       }
-    }
+    } else if cmd.verb().is_some_and(|v| v.1 == Verb::Quit) {
+			return Ok(Some(ReadlineEvent::Eof));
+		}
 
     let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
     let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));

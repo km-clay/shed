@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use bitflags::bitflags;
 
-use crate::readline::vimode::ex::SubFlags;
+use crate::readline::{linebuf::Grapheme, vimode::ex::SubFlags};
 
 use super::register::{RegisterContent, append_register, read_register, write_register};
 
@@ -161,23 +161,11 @@ impl ViCmd {
     self.motion.as_ref().is_some_and(|m| {
       matches!(
         m.1,
-        Motion::LineUp | Motion::LineDown | Motion::LineUpCharwise | Motion::LineDownCharwise
+        Motion::LineUp | Motion::LineDown
       )
     })
   }
   /// If a ViCmd has a linewise motion, but no verb, we change it to charwise
-  pub fn alter_line_motion_if_no_verb(&mut self) {
-    if self.is_line_motion()
-      && self.verb.is_none()
-      && let Some(motion) = self.motion.as_mut()
-    {
-      match motion.1 {
-        Motion::LineUp => motion.1 = Motion::LineUpCharwise,
-        Motion::LineDown => motion.1 = Motion::LineDownCharwise,
-        _ => unreachable!(),
-      }
-    }
-  }
   pub fn is_mode_transition(&self) -> bool {
     self.verb.as_ref().is_some_and(|v| {
       matches!(
@@ -261,6 +249,7 @@ pub enum Verb {
   Read(ReadSrc),
   Write(WriteDest),
   Edit(PathBuf),
+	Quit,
   Substitute(String, String, SubFlags),
   RepeatSubstitute,
   RepeatGlobal,
@@ -326,23 +315,20 @@ impl Verb {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Motion {
-  WholeLineInclusive, // whole line including the linebreak
-  WholeLineExclusive, // whole line excluding the linebreak
+  WholeLine,
   TextObj(TextObj),
   EndOfLastWord,
   BeginningOfFirstWord,
   BeginningOfLine,
   EndOfLine,
   WordMotion(To, Word, Direction),
-  CharSearch(Direction, Dest, char),
+  CharSearch(Direction, Dest, Grapheme),
   BackwardChar,
   ForwardChar,
   BackwardCharForced, // These two variants can cross line boundaries
   ForwardCharForced,
   LineUp,
-  LineUpCharwise,
   LineDown,
-  LineDownCharwise,
   WholeBuffer,
   StartOfBuffer,
   EndOfBuffer,
@@ -382,8 +368,6 @@ impl Motion {
       &self,
       Self::BeginningOfLine
         | Self::BeginningOfFirstWord
-        | Self::LineDownCharwise
-        | Self::LineUpCharwise
         | Self::ToColumn
         | Self::TextObj(TextObj::Sentence(_))
         | Self::TextObj(TextObj::Paragraph(_))
@@ -398,7 +382,7 @@ impl Motion {
   pub fn is_linewise(&self) -> bool {
     matches!(
       self,
-      Self::WholeLineInclusive | Self::WholeLineExclusive | Self::LineUp | Self::LineDown
+      Self::WholeLine | Self::LineUp | Self::LineDown
     )
   }
 }
