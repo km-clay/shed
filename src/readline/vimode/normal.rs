@@ -332,7 +332,7 @@ impl ViNormal {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(count, Verb::InsertMode)),
-            motion: Some(MotionCmd(1, Motion::BeginningOfFirstWord)),
+            motion: Some(MotionCmd(1, Motion::StartOfFirstWord)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
           });
@@ -583,11 +583,11 @@ impl ViNormal {
         }
         '^' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfFirstWord));
+          break 'motion_parse Some(MotionCmd(count, Motion::StartOfFirstWord));
         }
         '0' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfLine));
+          break 'motion_parse Some(MotionCmd(count, Motion::StartOfLine));
         }
         '$' => {
           chars = chars_clone;

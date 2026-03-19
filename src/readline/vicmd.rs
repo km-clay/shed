@@ -319,8 +319,8 @@ pub enum Motion {
   WholeLine,
   TextObj(TextObj),
   EndOfLastWord,
-  BeginningOfFirstWord,
-  BeginningOfLine,
+  StartOfFirstWord,
+  StartOfLine,
   EndOfLine,
   WordMotion(To, Word, Direction),
   CharSearch(Direction, Dest, Grapheme),
@@ -369,8 +369,8 @@ impl Motion {
   pub fn is_exclusive(&self) -> bool {
     matches!(
       &self,
-      Self::BeginningOfLine
-        | Self::BeginningOfFirstWord
+      Self::StartOfLine
+        | Self::StartOfFirstWord
         | Self::ToColumn
         | Self::TextObj(TextObj::Sentence(_))
         | Self::TextObj(TextObj::Paragraph(_))

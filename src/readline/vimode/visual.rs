@@ -287,7 +287,7 @@ impl ViVisual {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(count, Verb::InsertMode)),
-            motion: Some(MotionCmd(1, Motion::BeginningOfLine)),
+            motion: Some(MotionCmd(1, Motion::StartOfLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -473,7 +473,7 @@ impl ViVisual {
         }
         '0' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::BeginningOfLine));
+          break 'motion_parse Some(MotionCmd(count, Motion::StartOfLine));
         }
         '$' => {
           chars = chars_clone;

@@ -110,7 +110,7 @@ pub trait ViMode {
 pub fn common_cmds(key: E) -> Option<ViCmd> {
   let mut pending_cmd = ViCmd::new();
   match key {
-    E(K::Home, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::BeginningOfLine)),
+    E(K::Home, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::StartOfLine)),
     E(K::End, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::EndOfLine)),
     E(K::Left, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::BackwardChar)),
     E(K::Right, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::ForwardChar)),

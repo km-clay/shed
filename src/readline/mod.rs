@@ -901,7 +901,12 @@ impl ShedVi {
       return Ok(Some(ReadlineEvent::Eof));
     }
 
-    let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
+		// check if it's an edit
+		// we don't count Verb::Change since its possible for it to be called and not actually change anything
+		// e.g. 'cc' on an empty line, 'C' at the end of a line, etc.
+		// this is only used for ringing the bell
+    let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit() && v.1 != Verb::Change);
+
     let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
     let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
     if is_shell_cmd {
@@ -1315,6 +1320,12 @@ impl ShedVi {
   }
 
   pub fn exec_cmd(&mut self, mut cmd: ViCmd, from_replay: bool) -> ShResult<()> {
+    if cmd.verb().is_some() && let Some(range) = self.editor.select_range() {
+      cmd.motion = Some(MotionCmd(1, range))
+    } else {
+      log::warn!("You're in visual mode with no select range??");
+    };
+
     if cmd.is_mode_transition() {
       return self.exec_mode_transition(cmd, from_replay);
     } else if cmd.is_cmd_repeat() {
