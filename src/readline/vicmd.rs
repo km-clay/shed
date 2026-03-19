@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use bitflags::bitflags;
 
-use crate::readline::{linebuf::Grapheme, vimode::ex::SubFlags};
+use crate::readline::{
+  linebuf::{Grapheme, Pos},
+  vimode::ex::SubFlags,
+};
 
 use super::register::{RegisterContent, append_register, read_register, write_register};
 
@@ -335,7 +338,9 @@ pub enum Motion {
   ToBrace(Direction),
   ToBracket(Direction),
   ToParen(Direction),
-  Range(usize, usize),
+  CharRange(Pos, Pos),
+  LineRange(usize, usize),
+  BlockRange(Pos, Pos),
   RepeatMotion,
   RepeatMotionRev,
   Null,
@@ -374,7 +379,7 @@ impl Motion {
         | Self::ToBrace(_)
         | Self::ToBracket(_)
         | Self::ToParen(_)
-        | Self::Range(_, _)
+        | Self::CharRange(_, _)
     )
   }
   pub fn is_linewise(&self) -> bool {

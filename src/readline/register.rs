@@ -45,7 +45,7 @@ pub fn append_register(ch: Option<char>, buf: RegisterContent) {
 pub enum RegisterContent {
   Span(Vec<Line>),
   Line(Vec<Line>),
-	Block(Vec<Line>),
+  Block(Vec<Line>),
   #[default]
   Empty,
 }
@@ -53,11 +53,16 @@ pub enum RegisterContent {
 impl Display for RegisterContent {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-			Self::Block(s) |
-      Self::Line(s) |
-      Self::Span(s) => {
-				write!(f, "{}", s.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n"))
-			}
+      Self::Block(s) | Self::Line(s) | Self::Span(s) => {
+        write!(
+          f,
+          "{}",
+          s.iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+        )
+      }
       Self::Empty => write!(f, ""),
     }
   }
@@ -65,13 +70,11 @@ impl Display for RegisterContent {
 
 impl RegisterContent {
   pub fn clear(&mut self) {
-		*self = Self::Empty
+    *self = Self::Empty
   }
   pub fn len(&self) -> usize {
     match self {
-      Self::Span(s) |
-      Self::Line(s) |
-			Self::Block(s) => s.len(),
+      Self::Span(s) | Self::Line(s) | Self::Block(s) => s.len(),
       Self::Empty => 0,
     }
   }
@@ -79,13 +82,13 @@ impl RegisterContent {
     match self {
       Self::Span(s) => s.is_empty(),
       Self::Line(s) => s.is_empty(),
-			Self::Block(s) => s.is_empty(),
+      Self::Block(s) => s.is_empty(),
       Self::Empty => true,
     }
   }
-	pub fn is_block(&self) -> bool {
-		matches!(self, Self::Block(_))
-	}
+  pub fn is_block(&self) -> bool {
+    matches!(self, Self::Block(_))
+  }
   pub fn is_line(&self) -> bool {
     matches!(self, Self::Line(_))
   }
@@ -250,13 +253,13 @@ impl Register {
   pub fn append(&mut self, mut buf: RegisterContent) {
     match buf {
       RegisterContent::Empty => {}
-      RegisterContent::Span(ref mut s) |
-			RegisterContent::Block(ref mut s) |
-			RegisterContent::Line(ref mut s) => match &mut self.content {
+      RegisterContent::Span(ref mut s)
+      | RegisterContent::Block(ref mut s)
+      | RegisterContent::Line(ref mut s) => match &mut self.content {
         RegisterContent::Empty => self.content = buf,
-        RegisterContent::Span(existing) |
-        RegisterContent::Line(existing) |
-				RegisterContent::Block(existing) => existing.append(s),
+        RegisterContent::Span(existing)
+        | RegisterContent::Line(existing)
+        | RegisterContent::Block(existing) => existing.append(s),
       },
     }
   }

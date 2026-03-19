@@ -311,7 +311,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     let mut exec_if_timeout = None;
 
     let timeout = if readline.pending_keymap.is_empty() {
-      let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone());
+      let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone())
+        .trim()
+        .to_string();
       let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
       if screensaver_idle_time > 0 && !screensaver_cmd.is_empty() {
         exec_if_timeout = Some(screensaver_cmd);

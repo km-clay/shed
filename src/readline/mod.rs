@@ -1,6 +1,6 @@
 use history::History;
 use keys::{KeyCode, KeyEvent, ModKeys};
-use linebuf::{LineBuf, SelectAnchor, SelectMode};
+use linebuf::{LineBuf, SelectMode};
 use std::fmt::Write;
 use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
 use unicode_width::UnicodeWidthStr;
@@ -605,6 +605,14 @@ impl ShedVi {
           }
           CompResponse::Passthrough => { /* fall through to normal handling below */ }
         }
+      } else if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty()) {
+        // Vi mode is waiting for more input (e.g. after 'f', 'd', etc.)
+        // Bypass keymap matching and send directly to the mode handler
+        if let Some(event) = self.handle_key(key)? {
+          return Ok(event);
+        }
+        self.needs_redraw = true;
+        continue;
       } else {
         let keymap_flags = self.curr_keymap_flags();
         self.pending_keymap.push(key.clone());
@@ -634,6 +642,11 @@ impl ShedVi {
           self.needs_redraw = true;
           continue;
         } else {
+          log::debug!(
+            "Ambiguous key sequence: {:?}, matches: {:?}",
+            self.pending_keymap,
+            matches
+          );
           // There is ambiguity. Allow the timeout in the main loop to handle this.
           continue;
         }
@@ -961,8 +974,8 @@ impl ShedVi {
       // Since there is no "future" history, we should just bell and do nothing
       self.writer.send_bell().ok();
     }
-		self.editor.set_cursor_clamp(self.mode.clamp_cursor());
-		self.editor.fix_cursor();
+    self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+    self.editor.fix_cursor();
   }
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
     if self.editor.cursor_at_max() && self.editor.has_hint() {
@@ -1173,7 +1186,7 @@ impl ShedVi {
     post_mode_change.exec();
   }
 
-  fn exec_mode_transition(&mut self, cmd: ViCmd, from_replay: bool) -> ShResult<()> {
+  fn exec_mode_transition(&mut self, mut cmd: ViCmd, from_replay: bool) -> ShResult<()> {
     let mut is_insert_mode = false;
     let count = cmd.verb_count();
 
@@ -1255,10 +1268,21 @@ impl ShedVi {
       self.repeat_action = mode.as_replay();
     }
 
+    if let Some(range) = self.editor.select_range() {
+      cmd.motion = Some(MotionCmd(1, range))
+    } else {
+      log::warn!("You're in visual mode with no select range??");
+    };
+
     // Set cursor clamp BEFORE executing the command so that motions
     // (like EndOfLine for 'A') can reach positions valid in the new mode
+    log::debug!("cmd: {:?}", cmd);
     self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     self.editor.exec_cmd(cmd)?;
+
+    if mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_some() {
+      self.editor.stop_selecting();
+    }
 
     if is_insert_mode {
       self.editor.mark_insert_mode_start_pos();
@@ -1401,7 +1425,7 @@ impl ShedVi {
         // The motion is assigned in the line buffer execution, so we also have to
         // assign it here in order to be able to repeat it
         if let Some(range) = self.editor.select_range() {
-          cmd.motion = Some(MotionCmd(1, Motion::Range(range.0, range.1)))
+          cmd.motion = Some(MotionCmd(1, range))
         } else {
           log::warn!("You're in visual mode with no select range??");
         };
