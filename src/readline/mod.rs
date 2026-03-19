@@ -341,23 +341,25 @@ impl ShedVi {
 
   pub fn with_initial(mut self, initial: &str) -> Self {
     self.editor = LineBuf::new().with_initial(initial, 0);
-    self
-      .history
-      .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+    {
+      let s = self.editor.joined();
+      let c = self.editor.cursor.get();
+      self.history.update_pending_cmd((&s, c));
+    }
     self
   }
 
-	/// A mutable reference to the currently focused editor
-	/// This includes the main LineBuf, and sub-editors for modes like Ex mode.
-	pub fn focused_editor(&mut self) -> &mut LineBuf {
-		self.mode.editor().unwrap_or(&mut self.editor)
-	}
+  /// A mutable reference to the currently focused editor
+  /// This includes the main LineBuf, and sub-editors for modes like Ex mode.
+  pub fn focused_editor(&mut self) -> &mut LineBuf {
+    self.mode.editor().unwrap_or(&mut self.editor)
+  }
 
-	/// A mutable reference to the currently focused history, if any.
-	/// This includes the main history struct, and history for sub-editors like Ex mode.
-	pub fn focused_history(&mut self) -> &mut History {
-		self.mode.history().unwrap_or(&mut self.history)
-	}
+  /// A mutable reference to the currently focused history, if any.
+  /// This includes the main history struct, and history for sub-editors like Ex mode.
+  pub fn focused_history(&mut self) -> &mut History {
+    self.mode.history().unwrap_or(&mut self.history)
+  }
 
   /// Feed raw bytes from stdin into the reader's buffer
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
@@ -436,7 +438,7 @@ impl ShedVi {
     if self.mode.report_mode() == ModeReport::Normal {
       return Ok(true);
     }
-    let input = Arc::new(self.editor.buffer.clone());
+    let input = Arc::new(self.editor.joined());
     self.editor.calc_indent_level();
     let lex_result1 =
       LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
@@ -476,21 +478,21 @@ impl ShedVi {
           SelectorResponse::Accept(cmd) => {
             let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
 
-						{
-							let editor = self.focused_editor();
-							editor.set_buffer(cmd.to_string());
-							editor.move_cursor_to_end();
-						}
+            {
+              let editor = self.focused_editor();
+              editor.set_buffer(cmd.to_string());
+              editor.move_cursor_to_end();
+            }
 
             self
               .history
-              .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
-						self.editor.set_hint(None);
-						{
-							let mut writer = std::mem::take(&mut self.writer);
-							self.focused_history().fuzzy_finder.clear(&mut writer)?;
-							self.writer = writer;
-						}
+              .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
+            self.editor.set_hint(None);
+            {
+              let mut writer = std::mem::take(&mut self.writer);
+              self.focused_history().fuzzy_finder.clear(&mut writer)?;
+              self.writer = writer;
+            }
             self.focused_history().fuzzy_finder.reset();
 
             with_vars([("_HIST_ENTRY".into(), cmd.clone())], || {
@@ -514,11 +516,11 @@ impl ShedVi {
             post_cmds.exec();
 
             self.editor.set_hint(None);
-						{
-							let mut writer = std::mem::take(&mut self.writer);
-							self.focused_history().fuzzy_finder.clear(&mut writer)?;
-							self.writer = writer;
-						}
+            {
+              let mut writer = std::mem::take(&mut self.writer);
+              self.focused_history().fuzzy_finder.clear(&mut writer)?;
+              self.writer = writer;
+            }
             write_vars(|v| {
               v.set_var(
                 "SHED_VI_MODE",
@@ -554,7 +556,7 @@ impl ShedVi {
             }
             self
               .history
-              .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+              .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
             let hint = self.history.get_hint();
             self.editor.set_hint(hint);
             self.completer.clear(&mut self.writer)?;
@@ -669,14 +671,15 @@ impl ShedVi {
       }
       self
         .history
-        .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+        .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
       self.needs_redraw = true;
       return Ok(None);
     }
 
     if let KeyEvent(KeyCode::Tab, mod_keys) = key {
-			if self.mode.report_mode() != ModeReport::Ex
-      && self.editor.attempt_history_expansion(&self.history) {
+      if self.mode.report_mode() != ModeReport::Ex
+        && self.editor.attempt_history_expansion(&self.history)
+      {
         // If history expansion occurred, don't attempt completion yet
         // allow the user to see the expanded command and accept or edit it before completing
         return Ok(None);
@@ -686,7 +689,7 @@ impl ShedVi {
         ModKeys::SHIFT => -1,
         _ => 1,
       };
-      let line = self.focused_editor().as_str().to_string();
+      let line = self.focused_editor().joined();
       let cursor_pos = self.focused_editor().cursor_byte_pos();
 
       match self.completer.complete(line, cursor_pos, direction) {
@@ -719,7 +722,7 @@ impl ShedVi {
           }
           self
             .history
-            .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+            .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
           let hint = self.history.get_hint();
           self.editor.set_hint(hint);
           write_vars(|v| {
@@ -776,7 +779,7 @@ impl ShedVi {
     } else if let KeyEvent(KeyCode::Char('R'), ModKeys::CTRL) = key
       && matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex)
     {
-      let initial = self.focused_editor().as_str().to_string();
+      let initial = self.focused_editor().joined();
       match self.focused_history().start_search(&initial) {
         Some(entry) => {
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
@@ -788,7 +791,7 @@ impl ShedVi {
           self.focused_editor().move_cursor_to_end();
           self
             .history
-            .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+            .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
           self.editor.set_hint(None);
         }
         None => {
@@ -847,8 +850,6 @@ impl ShedVi {
     let Some(mut cmd) = cmd else {
       return Ok(None);
     };
-    cmd.alter_line_motion_if_no_verb();
-
     if self.should_grab_history(&cmd) {
       self.scroll_history(cmd);
       self.needs_redraw = true;
@@ -875,7 +876,7 @@ impl ShedVi {
     }
 
     if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
-      if self.focused_editor().buffer.is_empty() {
+      if self.focused_editor().joined().is_empty() {
         return Ok(Some(ReadlineEvent::Eof));
       } else {
         *self.focused_editor() = LineBuf::new();
@@ -884,23 +885,21 @@ impl ShedVi {
         return Ok(None);
       }
     } else if cmd.verb().is_some_and(|v| v.1 == Verb::Quit) {
-			return Ok(Some(ReadlineEvent::Eof));
-		}
+      return Ok(Some(ReadlineEvent::Eof));
+    }
 
     let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit());
     let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
     let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
-    log::debug!("is_ex_cmd: {is_ex_cmd}");
     if is_shell_cmd {
       self.old_layout = None;
     }
     if is_ex_cmd {
       self.ex_history.push(cmd.raw_seq.clone());
       self.ex_history.reset();
-      log::debug!("ex_history: {:?}", self.ex_history.entries());
     }
 
-    let before = self.editor.buffer.clone();
+    let before = self.editor.joined();
 
     self.exec_cmd(cmd, false)?;
 
@@ -909,12 +908,12 @@ impl ShedVi {
         self.handle_key(key)?;
       }
     }
-    let after = self.editor.as_str();
+    let after = self.editor.joined();
 
     if before != after {
       self
         .history
-        .update_pending_cmd((self.editor.as_str(), self.editor.cursor.get()));
+        .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
     } else if before == after && has_edit_verb {
       self.writer.send_bell().ok();
     }
@@ -929,7 +928,7 @@ impl ShedVi {
   pub fn get_layout(&mut self, line: &str) -> Layout {
     let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
     let (cols, _) = get_win_size(self.tty);
-    Layout::from_parts(cols, self.prompt.get_ps1(), to_cursor, line)
+    Layout::from_parts(cols, self.prompt.get_ps1(), &to_cursor, line)
   }
   pub fn scroll_history(&mut self, cmd: ViCmd) {
     /*
@@ -941,8 +940,8 @@ impl ShedVi {
     let count = &cmd.motion().unwrap().0;
     let motion = &cmd.motion().unwrap().1;
     let count = match motion {
-      Motion::LineUpCharwise => -(*count as isize),
-      Motion::LineDownCharwise => *count as isize,
+      Motion::LineUp => -(*count as isize),
+      Motion::LineDown => *count as isize,
       _ => unreachable!(),
     };
     let entry = self.history.scroll(count);
@@ -985,12 +984,12 @@ impl ShedVi {
     cmd.verb().is_none()
       && (cmd
         .motion()
-        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUpCharwise)))
+        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUp)))
         && self.editor.start_of_line() == 0)
       || (cmd
         .motion()
-        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDownCharwise)))
-        && self.editor.end_of_line() == self.editor.cursor_max())
+        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown)))
+        && self.editor.on_last_line())
   }
 
   pub fn line_text(&mut self) -> String {
@@ -1004,7 +1003,8 @@ impl ShedVi {
     self.highlighter.expand_control_chars();
     self.highlighter.highlight();
     let highlighted = self.highlighter.take();
-    format!("{highlighted}{hint}")
+    let res = format!("{highlighted}{hint}");
+    res
   }
 
   pub fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
@@ -1035,11 +1035,11 @@ impl ShedVi {
     let one_line = new_layout.end.row == 0;
 
     self.completer.clear(&mut self.writer)?;
-		{
-			let mut writer = std::mem::take(&mut self.writer);
-			self.focused_history().fuzzy_finder.clear(&mut writer)?;
-			self.writer = writer;
-		}
+    {
+      let mut writer = std::mem::take(&mut self.writer);
+      self.focused_history().fuzzy_finder.clear(&mut writer)?;
+      self.writer = writer;
+    }
 
     if let Some(layout) = self.old_layout.as_ref() {
       self.writer.clear_rows(layout)?;
@@ -1136,11 +1136,11 @@ impl ShedVi {
       .fuzzy_finder
       .set_prompt_line_context(preceding_width, new_layout.cursor.col);
 
-		{
-			let mut writer = std::mem::take(&mut self.writer);
-			self.focused_history().fuzzy_finder.draw(&mut writer)?;
-			self.writer = writer;
-		}
+    {
+      let mut writer = std::mem::take(&mut self.writer);
+      self.focused_history().fuzzy_finder.draw(&mut writer)?;
+      self.writer = writer;
+    }
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;
@@ -1172,7 +1172,6 @@ impl ShedVi {
   }
 
   fn exec_mode_transition(&mut self, cmd: ViCmd, from_replay: bool) -> ShResult<()> {
-    let mut select_mode = None;
     let mut is_insert_mode = false;
     let count = cmd.verb_count();
 
@@ -1210,9 +1209,7 @@ impl ShedVi {
 
         Verb::VisualModeSelectLast => {
           if self.mode.report_mode() != ModeReport::Visual {
-            self
-              .editor
-              .start_selecting(SelectMode::Char(SelectAnchor::End));
+            self.editor.start_char_select();
           }
           let mut mode: Box<dyn ViMode> = Box::new(ViVisual::new());
           self.swap_mode(&mut mode);
@@ -1220,11 +1217,11 @@ impl ShedVi {
           return self.editor.exec_cmd(cmd);
         }
         Verb::VisualMode => {
-          select_mode = Some(SelectMode::Char(SelectAnchor::End));
+          self.editor.start_char_select();
           Box::new(ViVisual::new())
         }
         Verb::VisualModeLine => {
-          select_mode = Some(SelectMode::Line(SelectAnchor::End));
+          self.editor.start_line_select();
           Box::new(ViVisual::new())
         }
 
@@ -1232,6 +1229,8 @@ impl ShedVi {
       }
     };
 
+    // The mode we just created swaps places with our current mode
+    // After this line, 'mode' contains our previous mode.
     self.swap_mode(&mut mode);
 
     if matches!(
@@ -1259,11 +1258,6 @@ impl ShedVi {
     self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     self.editor.exec_cmd(cmd)?;
 
-    if let Some(sel_mode) = select_mode {
-      self.editor.start_selecting(sel_mode);
-    } else {
-      self.editor.stop_selecting();
-    }
     if is_insert_mode {
       self.editor.mark_insert_mode_start_pos();
     } else {

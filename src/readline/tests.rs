@@ -23,7 +23,7 @@ macro_rules! vi_test {
 
 							vi.feed_bytes($op.as_bytes());
 							vi.process_input().unwrap();
-							assert_eq!(vi.editor.as_str(), $expected_text);
+							assert_eq!(vi.editor.joined(), $expected_text);
 							assert_eq!(vi.editor.cursor.get(), $expected_cursor);
 						}
 				)*
@@ -512,7 +512,7 @@ fn vi_auto_indent() {
   }
 
   assert_eq!(
-    vi.editor.as_str(),
+    vi.editor.joined(),
     "func() {\n\tcase foo in\n\t\tbar)\n\t\t\twhile true; do\n\t\t\t\techo foo \\\n\t\t\t\t\tbar \\\n\t\t\t\t\tbiz \\\n\t\t\t\t\tbazz\n\t\t\t\tbreak\n\t\t\tdone\n\t\t;;\n\tesac\n}"
   );
 }

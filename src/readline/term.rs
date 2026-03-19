@@ -70,9 +70,11 @@ pub fn get_win_size(fd: RawFd) -> (Col, Row) {
 }
 
 fn enumerate_lines(s: &str, left_pad: usize, show_numbers: bool) -> String {
-  let total_lines = s.lines().count();
+  let lines: Vec<&str> = s.split('\n').collect();
+  let total_lines = lines.len();
   let max_num_len = total_lines.to_string().len();
-  s.lines()
+  lines
+    .into_iter()
     .enumerate()
     .fold(String::new(), |mut acc, (i, ln)| {
       if i == 0 {

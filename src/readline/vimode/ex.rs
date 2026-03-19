@@ -46,7 +46,6 @@ impl ExEditor {
       history,
       ..Default::default()
     };
-    new.buf.update_graphemes();
     new
   }
   pub fn clear(&mut self) {
@@ -56,19 +55,19 @@ impl ExEditor {
     cmd.verb().is_none()
       && (cmd
         .motion()
-        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUpCharwise)))
+        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUp)))
         && self.buf.start_of_line() == 0)
       || (cmd
         .motion()
-        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDownCharwise)))
-        && self.buf.end_of_line() == self.buf.cursor_max())
+        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown)))
+        && self.buf.on_last_line())
   }
   pub fn scroll_history(&mut self, cmd: ViCmd) {
     let count = &cmd.motion().unwrap().0;
     let motion = &cmd.motion().unwrap().1;
     let count = match motion {
-      Motion::LineUpCharwise => -(*count as isize),
-      Motion::LineDownCharwise => *count as isize,
+      Motion::LineUp => -(*count as isize),
+      Motion::LineDown => *count as isize,
       _ => unreachable!(),
     };
     let entry = self.history.scroll(count);
@@ -88,7 +87,6 @@ impl ExEditor {
     let Some(mut cmd) = self.mode.handle_key(key) else {
       return Ok(());
     };
-    cmd.alter_line_motion_if_no_verb();
     log::debug!("ExEditor got cmd: {:?}", cmd);
     if self.should_grab_history(&cmd) {
       log::debug!("Grabbing history for cmd: {:?}", cmd);
@@ -118,11 +116,11 @@ impl ViMode for ViEx {
     use crate::readline::keys::{KeyCode as C, KeyEvent as E, ModKeys as M};
     match key {
       E(C::Char('\r'), M::NONE) | E(C::Enter, M::NONE) => {
-        let input = self.pending_cmd.buf.as_str();
-        match parse_ex_cmd(input) {
+        let input = self.pending_cmd.buf.joined();
+        match parse_ex_cmd(&input) {
           Ok(cmd) => Ok(cmd),
           Err(e) => {
-            let msg = e.unwrap_or(format!("Not an editor command: {}", input));
+            let msg = e.unwrap_or(format!("Not an editor command: {}", &input));
             write_meta(|m| m.post_system_message(msg.clone()));
             Err(ShErr::simple(ShErrKind::ParseErr, msg))
           }
@@ -167,7 +165,7 @@ impl ViMode for ViEx {
   }
 
   fn pending_seq(&self) -> Option<String> {
-    Some(self.pending_cmd.buf.as_str().to_string())
+    Some(self.pending_cmd.buf.joined())
   }
 
   fn pending_cursor(&self) -> Option<usize> {
@@ -280,7 +278,7 @@ fn parse_ex_command(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Opt
     _ if "delete".starts_with(&cmd_name) => Ok(Some(Verb::Delete)),
     _ if "yank".starts_with(&cmd_name) => Ok(Some(Verb::Yank)),
     _ if "put".starts_with(&cmd_name) => Ok(Some(Verb::Put(Anchor::After))),
-		_ if "quit".starts_with(&cmd_name) => Ok(Some(Verb::Quit)),
+    _ if "quit".starts_with(&cmd_name) => Ok(Some(Verb::Quit)),
     _ if "read".starts_with(&cmd_name) => parse_read(chars),
     _ if "write".starts_with(&cmd_name) => parse_write(chars),
     _ if "edit".starts_with(&cmd_name) => parse_edit(chars),

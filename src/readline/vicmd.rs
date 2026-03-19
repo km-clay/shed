@@ -158,12 +158,10 @@ impl ViCmd {
     }) && self.motion.is_none()
   }
   pub fn is_line_motion(&self) -> bool {
-    self.motion.as_ref().is_some_and(|m| {
-      matches!(
-        m.1,
-        Motion::LineUp | Motion::LineDown
-      )
-    })
+    self
+      .motion
+      .as_ref()
+      .is_some_and(|m| matches!(m.1, Motion::LineUp | Motion::LineDown))
   }
   /// If a ViCmd has a linewise motion, but no verb, we change it to charwise
   pub fn is_mode_transition(&self) -> bool {
@@ -249,7 +247,7 @@ pub enum Verb {
   Read(ReadSrc),
   Write(WriteDest),
   Edit(PathBuf),
-	Quit,
+  Quit,
   Substitute(String, String, SubFlags),
   RepeatSubstitute,
   RepeatGlobal,
@@ -296,9 +294,9 @@ impl Verb {
         | Self::JoinLines
         | Self::InsertChar(_)
         | Self::Insert(_)
-				| Self::Dedent
-				| Self::Indent
-				| Self::Equalize
+        | Self::Dedent
+        | Self::Indent
+        | Self::Equalize
         | Self::Rot13
         | Self::EndOfFile
         | Self::IncrementNumber(_)
@@ -380,10 +378,7 @@ impl Motion {
     )
   }
   pub fn is_linewise(&self) -> bool {
-    matches!(
-      self,
-      Self::WholeLine | Self::LineUp | Self::LineDown
-    )
+    matches!(self, Self::WholeLine | Self::LineUp | Self::LineDown)
   }
 }
 

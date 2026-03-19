@@ -29,100 +29,144 @@ use crate::{
   },
 };
 
+/// Compat shim: replaces the old ClampedUsize type that was removed in the linebuf refactor.
+/// A simple wrapper around usize with wrapping arithmetic and a max bound.
+#[derive(Clone, Default, Debug)]
+pub struct ClampedUsize {
+  val: usize,
+  max: usize,
+  wrap: bool,
+}
+
+impl ClampedUsize {
+  pub fn new(val: usize, max: usize, wrap: bool) -> Self {
+    Self { val, max, wrap }
+  }
+  pub fn get(&self) -> usize {
+    self.val
+  }
+  pub fn set_max(&mut self, max: usize) {
+    self.max = max;
+    if self.val >= self.max && self.max > 0 {
+      self.val = self.max - 1;
+    }
+  }
+  pub fn wrap_add(&mut self, n: usize) {
+    if self.max == 0 {
+      return;
+    }
+    if self.wrap {
+      self.val = (self.val + n) % self.max;
+    } else {
+      self.val = (self.val + n).min(self.max.saturating_sub(1));
+    }
+  }
+  pub fn wrap_sub(&mut self, n: usize) {
+    if self.max == 0 {
+      return;
+    }
+    if self.wrap {
+      self.val = (self.val + self.max - (n % self.max)) % self.max;
+    } else {
+      self.val = self.val.saturating_sub(n);
+    }
+  }
+}
+
 #[derive(Debug, Clone)]
 pub struct Candidate(pub String);
 
 impl Eq for Candidate {}
 
 impl PartialEq for Candidate {
-	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0
-	}
+  fn eq(&self, other: &Self) -> bool {
+    self.0 == other.0
+  }
 }
 
 impl PartialOrd for Candidate {
-	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-		Some(self.cmp(other))
-	}
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    Some(self.cmp(other))
+  }
 }
 
 impl Ord for Candidate {
-	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.0.cmp(&other.0)
-	}
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    self.0.cmp(&other.0)
+  }
 }
 
 impl From<String> for Candidate {
-	fn from(value: String) -> Self {
-	  Self(value)
-	}
+  fn from(value: String) -> Self {
+    Self(value)
+  }
 }
 
 impl From<&String> for Candidate {
-	fn from(value: &String) -> Self {
-		Self(value.clone())
-	}
+  fn from(value: &String) -> Self {
+    Self(value.clone())
+  }
 }
 
 impl From<&str> for Candidate {
-	fn from(value: &str) -> Self {
-		Self(value.to_string())
-	}
+  fn from(value: &str) -> Self {
+    Self(value.to_string())
+  }
 }
 
 impl Display for Candidate {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", &self.0)
-	}
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", &self.0)
+  }
 }
 
 impl AsRef<str> for Candidate {
-	fn as_ref(&self) -> &str {
-		&self.0
-	}
+  fn as_ref(&self) -> &str {
+    &self.0
+  }
 }
 
 impl std::ops::Deref for Candidate {
-	type Target = str;
-	fn deref(&self) -> &str {
-		&self.0
-	}
+  type Target = str;
+  fn deref(&self) -> &str {
+    &self.0
+  }
 }
 
 impl Candidate {
-	pub fn is_match(&self, other: &str) -> bool {
-		let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
-		if ignore_case {
-			let other_lower = other.to_lowercase();
-			let self_lower = self.0.to_lowercase();
-			self_lower.starts_with(&other_lower)
-		} else {
-			self.0.starts_with(other)
-		}
-	}
-	pub fn as_str(&self) -> &str {
-		&self.0
-	}
-	pub fn as_bytes(&self) -> &[u8] {
-		self.0.as_bytes()
-	}
-	pub fn starts_with(&self, pat: char) -> bool {
-		self.0.starts_with(pat)
-	}
-	pub fn strip_prefix(&self, prefix: &str) -> Option<String> {
-		let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
-		if ignore_case {
-			let old_len = self.0.len();
-			let prefix_lower = prefix.to_lowercase();
-			let self_lower = self.0.to_lowercase();
-			let stripped = self_lower.strip_prefix(&prefix_lower)?;
-			let new_len = stripped.len();
-			let delta = old_len - new_len;
-			Some(self.0[delta..].to_string())
-		} else {
-			self.0.strip_prefix(prefix).map(|s| s.to_string())
-		}
-	}
+  pub fn is_match(&self, other: &str) -> bool {
+    let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
+    if ignore_case {
+      let other_lower = other.to_lowercase();
+      let self_lower = self.0.to_lowercase();
+      self_lower.starts_with(&other_lower)
+    } else {
+      self.0.starts_with(other)
+    }
+  }
+  pub fn as_str(&self) -> &str {
+    &self.0
+  }
+  pub fn as_bytes(&self) -> &[u8] {
+    self.0.as_bytes()
+  }
+  pub fn starts_with(&self, pat: char) -> bool {
+    self.0.starts_with(pat)
+  }
+  pub fn strip_prefix(&self, prefix: &str) -> Option<String> {
+    let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
+    if ignore_case {
+      let old_len = self.0.len();
+      let prefix_lower = prefix.to_lowercase();
+      let self_lower = self.0.to_lowercase();
+      let stripped = self_lower.strip_prefix(&prefix_lower)?;
+      let new_len = stripped.len();
+      let delta = old_len - new_len;
+      Some(self.0[delta..].to_string())
+    } else {
+      self.0.strip_prefix(prefix).map(|s| s.to_string())
+    }
+  }
 }
 
 pub fn complete_signals(start: &str) -> Vec<Candidate> {
@@ -133,7 +177,7 @@ pub fn complete_signals(start: &str) -> Vec<Candidate> {
         .unwrap_or(s.as_ref())
         .to_string()
     })
-		.map(Candidate::from)
+    .map(Candidate::from)
     .filter(|s| s.is_match(start))
     .collect()
 }
@@ -141,8 +185,8 @@ pub fn complete_signals(start: &str) -> Vec<Candidate> {
 pub fn complete_aliases(start: &str) -> Vec<Candidate> {
   read_logic(|l| {
     l.aliases()
-			.keys()
-			.map(Candidate::from)
+      .keys()
+      .map(Candidate::from)
       .filter(|a| a.is_match(start))
       .collect()
   })
@@ -155,7 +199,7 @@ pub fn complete_jobs(start: &str) -> Vec<Candidate> {
         .iter()
         .filter_map(|j| j.as_ref())
         .filter_map(|j| j.name())
-				.map(Candidate::from)
+        .map(Candidate::from)
         .filter(|name| name.is_match(prefix))
         .map(|name| format!("%{name}").into())
         .collect()
@@ -179,7 +223,7 @@ pub fn complete_users(start: &str) -> Vec<Candidate> {
   passwd
     .lines()
     .filter_map(|line| line.split(':').next())
-		.map(Candidate::from)
+    .map(Candidate::from)
     .filter(|username| username.is_match(start))
     .collect()
 }
@@ -199,7 +243,7 @@ pub fn complete_vars(start: &str) -> Vec<Candidate> {
       .keys()
       .filter(|k| k.starts_with(&var_name) && *k != &var_name)
       .map(|k| format!("{prefix}{k}"))
-			.map(Candidate::from)
+      .map(Candidate::from)
       .collect::<Vec<_>>()
   })
 }
@@ -271,7 +315,7 @@ fn complete_commands(start: &str) -> Vec<Candidate> {
   let mut candidates: Vec<Candidate> = read_meta(|m| {
     m.cached_cmds()
       .iter()
-			.map(Candidate::from)
+      .map(Candidate::from)
       .filter(|c| c.is_match(start))
       .collect()
   });
@@ -324,8 +368,6 @@ fn complete_filename(start: &str) -> Vec<Candidate> {
   for entry in entries.flatten() {
     let file_name = entry.file_name();
     let file_str: Candidate = file_name.to_string_lossy().to_string().into();
-
-
 
     // Skip hidden files unless explicitly requested
     if !prefix.starts_with('.') && file_str.0.starts_with('.') {
@@ -528,11 +570,11 @@ impl BashCompSpec {
     );
     exec_input(input, None, false, Some("comp_function".into()))?;
 
-		let comp_reply = read_vars(|v| v.get_arr_elems("COMPREPLY"))
-		.unwrap_or_default()
-		.into_iter()
-		.map(Candidate::from)
-		.collect();
+    let comp_reply = read_vars(|v| v.get_arr_elems("COMPREPLY"))
+      .unwrap_or_default()
+      .into_iter()
+      .map(Candidate::from)
+      .collect();
 
     Ok(comp_reply)
   }
@@ -569,7 +611,12 @@ impl CompSpec for BashCompSpec {
       candidates.extend(complete_signals(&expanded));
     }
     if let Some(words) = &self.wordlist {
-      candidates.extend(words.iter().map(Candidate::from).filter(|w| w.is_match(&expanded)));
+      candidates.extend(
+        words
+          .iter()
+          .map(Candidate::from)
+          .filter(|w| w.is_match(&expanded)),
+      );
     }
     if self.function.is_some() {
       candidates.extend(self.exec_comp_func(ctx)?);
@@ -645,7 +692,7 @@ impl CompResult {
       Self::NoMatch
     } else if candidates.len() == 1 {
       Self::Single {
-        result: candidates.remove(0)
+        result: candidates.remove(0),
       }
     } else {
       Self::Many { candidates }
@@ -828,22 +875,22 @@ impl QueryEditor {
         .cursor
         .ret_sub(self.available_width.saturating_sub(1));
     }
-    let max_offset = self.linebuf
-			.count_graphemes()
+    let max_offset = self
+      .linebuf
+      .count_graphemes()
       .saturating_sub(self.available_width);
     self.scroll_offset = self.scroll_offset.min(max_offset);
   }
   pub fn get_window(&mut self) -> String {
-    self.linebuf.update_graphemes();
-    let buf_len = self.linebuf.grapheme_indices().len();
+    let buf_len = self.linebuf.count_graphemes();
     if buf_len <= self.available_width {
-      return self.linebuf.as_str().to_string();
+      return self.linebuf.joined();
     }
     let start = self
       .scroll_offset
       .min(buf_len.saturating_sub(self.available_width));
     let end = (start + self.available_width).min(buf_len);
-    self.linebuf.slice(start..end).unwrap_or("").to_string()
+    self.linebuf.slice(start..end).unwrap_or_default()
   }
   pub fn handle_key(&mut self, key: K) -> ShResult<()> {
     let Some(cmd) = self.mode.handle_key(key) else {
@@ -1028,7 +1075,7 @@ impl FuzzySelector {
       .into_iter()
       .filter_map(|c| {
         let mut sc = ScoredCandidate::new(c.to_string());
-        let score = sc.fuzzy_score(self.query.linebuf.as_str());
+        let score = sc.fuzzy_score(&self.query.linebuf.joined());
         if score > i32::MIN { Some(sc) } else { None }
       })
       .collect();
@@ -1319,12 +1366,18 @@ impl Completer for FuzzyCompleter {
           basename,
         )
       } else {
-        (self.completer.original_input[..start].to_string(), selected.clone())
+        (
+          self.completer.original_input[..start].to_string(),
+          selected.clone(),
+        )
       }
     } else {
       start += slice.width();
       let completion = selected.strip_prefix(slice).unwrap_or(&selected);
-      (self.completer.original_input[..start].to_string(), completion.to_string())
+      (
+        self.completer.original_input[..start].to_string(),
+        completion.to_string(),
+      )
     };
     let escaped = escape_str(&completion, false);
     let ret = format!(
@@ -1435,7 +1488,10 @@ impl Completer for SimpleCompleter {
   }
 
   fn selected_candidate(&self) -> Option<String> {
-    self.candidates.get(self.selected_idx).map(|c| c.to_string())
+    self
+      .candidates
+      .get(self.selected_idx)
+      .map(|c| c.to_string())
   }
 
   fn token_span(&self) -> (usize, usize) {
@@ -1591,16 +1647,20 @@ impl SimpleCompleter {
         let prefix_end = start + last_sep + 1;
         let trailing_slash = selected.ends_with('/');
         let trimmed = selected.trim_end_matches('/');
-        let mut basename = trimmed.rsplit('/').next().unwrap_or(selected.as_str()).to_string();
+        let mut basename = trimmed
+          .rsplit('/')
+          .next()
+          .unwrap_or(selected.as_str())
+          .to_string();
         if trailing_slash {
           basename.push('/');
         }
-        (
-          self.original_input[..prefix_end].to_string(),
-          basename,
-        )
+        (self.original_input[..prefix_end].to_string(), basename)
       } else {
-        (self.original_input[..start].to_string(), selected.to_string())
+        (
+          self.original_input[..start].to_string(),
+          selected.to_string(),
+        )
       }
     } else {
       start += slice.width();
@@ -1608,12 +1668,7 @@ impl SimpleCompleter {
       (self.original_input[..start].to_string(), completion)
     };
     let escaped = escape_str(&completion, false);
-    format!(
-      "{}{}{}",
-      prefix,
-      escaped,
-      &self.original_input[end..]
-    )
+    format!("{}{}{}", prefix, escaped, &self.original_input[end..])
   }
 
   pub fn build_comp_ctx(&self, tks: &[Tk], line: &str, cursor_pos: usize) -> ShResult<CompContext> {
@@ -2180,7 +2235,7 @@ mod tests {
     vi.feed_bytes(b"echo hello\t");
     let _ = vi.process_input();
 
-    let line = vi.editor.as_str().to_string();
+    let line = vi.editor.joined();
     assert!(
       line.contains("hello\\ world.txt"),
       "expected escaped space in completion: {line:?}"
@@ -2202,7 +2257,7 @@ mod tests {
     vi.feed_bytes(b"echo my\\ \t");
     let _ = vi.process_input();
 
-    let line = vi.editor.as_str().to_string();
+    let line = vi.editor.joined();
     // The user's "my\ " should be preserved, not double-escaped to "my\\\ "
     assert!(
       !line.contains("my\\\\ "),
@@ -2231,7 +2286,7 @@ mod tests {
     vi.feed_bytes(b"echo unique_shed_test\t");
     let _ = vi.process_input();
 
-    let line = vi.editor.as_str().to_string();
+    let line = vi.editor.joined();
     assert!(
       line.contains("unique_shed_test_file.txt"),
       "expected completion in line: {line:?}"
@@ -2251,7 +2306,7 @@ mod tests {
     vi.feed_bytes(b"cd mysub\t");
     let _ = vi.process_input();
 
-    let line = vi.editor.as_str().to_string();
+    let line = vi.editor.joined();
     assert!(
       line.contains("mysubdir/"),
       "expected dir completion with trailing slash: {line:?}"
@@ -2272,7 +2327,7 @@ mod tests {
     vi.feed_bytes(b"cmd --opt=eqf\t");
     let _ = vi.process_input();
 
-    let line = vi.editor.as_str().to_string();
+    let line = vi.editor.joined();
     assert!(
       line.contains("--opt=eqfile.txt"),
       "expected completion after '=': {line:?}"

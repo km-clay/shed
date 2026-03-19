@@ -1,5 +1,7 @@
 use std::{fmt::Display, sync::Mutex};
 
+use crate::readline::linebuf::Line;
+
 pub static REGISTERS: Mutex<Registers> = Mutex::new(Registers::new());
 
 #[cfg(test)]
@@ -41,8 +43,9 @@ pub fn append_register(ch: Option<char>, buf: RegisterContent) {
 
 #[derive(Default, Clone, Debug)]
 pub enum RegisterContent {
-  Span(String),
-  Line(String),
+  Span(Vec<Line>),
+  Line(Vec<Line>),
+	Block(Vec<Line>),
   #[default]
   Empty,
 }
@@ -50,8 +53,11 @@ pub enum RegisterContent {
 impl Display for RegisterContent {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      Self::Span(s) => write!(f, "{}", s),
-      Self::Line(s) => write!(f, "{}", s),
+			Self::Block(s) |
+      Self::Line(s) |
+      Self::Span(s) => {
+				write!(f, "{}", s.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n"))
+			}
       Self::Empty => write!(f, ""),
     }
   }
@@ -59,16 +65,13 @@ impl Display for RegisterContent {
 
 impl RegisterContent {
   pub fn clear(&mut self) {
-    match self {
-      Self::Span(s) => s.clear(),
-      Self::Line(s) => s.clear(),
-      Self::Empty => {}
-    }
+		*self = Self::Empty
   }
   pub fn len(&self) -> usize {
     match self {
-      Self::Span(s) => s.len(),
-      Self::Line(s) => s.len(),
+      Self::Span(s) |
+      Self::Line(s) |
+			Self::Block(s) => s.len(),
       Self::Empty => 0,
     }
   }
@@ -76,24 +79,21 @@ impl RegisterContent {
     match self {
       Self::Span(s) => s.is_empty(),
       Self::Line(s) => s.is_empty(),
+			Self::Block(s) => s.is_empty(),
       Self::Empty => true,
     }
   }
+	pub fn is_block(&self) -> bool {
+		matches!(self, Self::Block(_))
+	}
   pub fn is_line(&self) -> bool {
     matches!(self, Self::Line(_))
   }
   pub fn is_span(&self) -> bool {
     matches!(self, Self::Span(_))
   }
-  pub fn as_str(&self) -> &str {
-    match self {
-      Self::Span(s) => s,
-      Self::Line(s) => s,
-      Self::Empty => "",
-    }
-  }
   pub fn char_count(&self) -> usize {
-    self.as_str().chars().count()
+    self.to_string().chars().count()
   }
 }
 
@@ -238,7 +238,7 @@ pub struct Register {
 impl Register {
   pub const fn new() -> Self {
     Self {
-      content: RegisterContent::Span(String::new()),
+      content: RegisterContent::Empty,
     }
   }
   pub fn content(&self) -> &RegisterContent {
@@ -247,13 +247,16 @@ impl Register {
   pub fn write(&mut self, buf: RegisterContent) {
     self.content = buf
   }
-  pub fn append(&mut self, buf: RegisterContent) {
+  pub fn append(&mut self, mut buf: RegisterContent) {
     match buf {
       RegisterContent::Empty => {}
-      RegisterContent::Span(ref s) | RegisterContent::Line(ref s) => match &mut self.content {
+      RegisterContent::Span(ref mut s) |
+			RegisterContent::Block(ref mut s) |
+			RegisterContent::Line(ref mut s) => match &mut self.content {
         RegisterContent::Empty => self.content = buf,
-        RegisterContent::Span(existing) => existing.push_str(s),
-        RegisterContent::Line(existing) => existing.push_str(s),
+        RegisterContent::Span(existing) |
+        RegisterContent::Line(existing) |
+				RegisterContent::Block(existing) => existing.append(s),
       },
     }
   }

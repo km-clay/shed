@@ -414,7 +414,12 @@ impl History {
   }
 
   pub fn get_hint(&self) -> Option<String> {
-    if self.at_pending() && self.pending.as_ref().is_some_and(|p| !p.buffer.is_empty()) {
+    if self.at_pending()
+      && self
+        .pending
+        .as_ref()
+        .is_some_and(|p| !p.joined().is_empty())
+    {
       let entry = self.hint_entry()?;
       Some(entry.command().to_string())
     } else {

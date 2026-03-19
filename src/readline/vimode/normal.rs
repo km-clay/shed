@@ -3,6 +3,7 @@ use std::str::Chars;
 
 use super::{CmdReplay, CmdState, ModeReport, ViMode, common_cmds};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
+use crate::readline::linebuf::Grapheme;
 use crate::readline::vicmd::{
   Anchor, Bound, CmdFlags, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb,
   VerbCmd, ViCmd, Word,
@@ -197,7 +198,7 @@ impl ViNormal {
           return Some(ViCmd {
             register,
             verb: Some(VerbCmd(count, Verb::Change)),
-            motion: Some(MotionCmd(1, Motion::WholeLineExclusive)),
+            motion: Some(MotionCmd(1, Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: self.flags(),
           });
@@ -411,10 +412,10 @@ impl ViNormal {
         | ('~', Some(VerbCmd(_, Verb::ToggleCaseRange)))
         | ('>', Some(VerbCmd(_, Verb::Indent)))
         | ('<', Some(VerbCmd(_, Verb::Dedent))) => {
-          break 'motion_parse Some(MotionCmd(count, Motion::WholeLineInclusive));
+          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine));
         }
         ('c', Some(VerbCmd(_, Verb::Change))) => {
-          break 'motion_parse Some(MotionCmd(count, Motion::WholeLineExclusive));
+          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine));
         }
         ('W', Some(VerbCmd(_, Verb::Change))) => {
           // Same with 'W'
@@ -535,7 +536,7 @@ impl ViNormal {
 
           break 'motion_parse Some(MotionCmd(
             count,
-            Motion::CharSearch(Direction::Forward, Dest::On, *ch),
+            Motion::CharSearch(Direction::Forward, Dest::On, Grapheme::from(*ch)),
           ));
         }
         'F' => {
@@ -545,7 +546,7 @@ impl ViNormal {
 
           break 'motion_parse Some(MotionCmd(
             count,
-            Motion::CharSearch(Direction::Backward, Dest::On, *ch),
+            Motion::CharSearch(Direction::Backward, Dest::On, Grapheme::from(*ch)),
           ));
         }
         't' => {
@@ -555,7 +556,7 @@ impl ViNormal {
 
           break 'motion_parse Some(MotionCmd(
             count,
-            Motion::CharSearch(Direction::Forward, Dest::Before, *ch),
+            Motion::CharSearch(Direction::Forward, Dest::Before, Grapheme::from(*ch)),
           ));
         }
         'T' => {
@@ -565,7 +566,7 @@ impl ViNormal {
 
           break 'motion_parse Some(MotionCmd(
             count,
-            Motion::CharSearch(Direction::Backward, Dest::Before, *ch),
+            Motion::CharSearch(Direction::Backward, Dest::Before, Grapheme::from(*ch)),
           ));
         }
         ';' => {
