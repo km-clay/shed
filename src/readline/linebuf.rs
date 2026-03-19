@@ -130,6 +130,27 @@ pub fn trim_lines(lines: &mut Vec<Line>) {
   }
 }
 
+pub fn split_lines_at(lines: &mut Vec<Line>, pos: Pos) -> Vec<Line> {
+	let tail = lines[pos.row].split_off(pos.col);
+	let mut rest: Vec<Line> = lines.drain(pos.row + 1..).collect();
+	rest.insert(0, tail);
+	rest
+}
+
+pub fn attach_lines(lines: &mut Vec<Line>, other: &mut Vec<Line>) {
+	if other.len() == 0 { return }
+	if lines.len() == 0 {
+		lines.append(other);
+		return;
+	}
+	let mut head = other.remove(0);
+	let mut tail = lines.pop().unwrap();
+	tail.append(&mut head);
+	lines.push(tail);
+	lines.append(other);
+}
+
+
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Line(Vec<Grapheme>);
 
@@ -547,7 +568,7 @@ fn extract_range_contiguous(buf: &mut Vec<Line>, start: Pos, end: Pos) -> Vec<Li
 #[derive(Debug, Clone)]
 pub struct LineBuf {
   pub lines: Vec<Line>,
-  pub hint: Vec<Line>,
+  pub hint: Option<Vec<Line>>,
   pub cursor: Cursor,
 
   pub select_mode: Option<SelectMode>,
@@ -565,7 +586,7 @@ impl Default for LineBuf {
   fn default() -> Self {
     Self {
       lines: vec![Line::from(vec![])],
-      hint: vec![],
+      hint: None,
       cursor: Cursor {
         pos: Pos { row: 0, col: 0 },
         exclusive: false,
@@ -585,6 +606,9 @@ impl LineBuf {
   pub fn new() -> Self {
     Self::default()
   }
+	pub fn is_empty(&self) -> bool {
+		self.lines.len() == 0 || (self.lines.len() == 1 && self.count_graphemes() == 0)
+	}
   pub fn count_graphemes(&self) -> usize {
     self.lines.iter().map(|line| line.len()).sum()
   }
@@ -1009,11 +1033,21 @@ impl LineBuf {
 	fn char_classes_backward(&self) -> impl Iterator<Item = (Pos,CharClass)> {
 		self.char_classes_backward_from(self.cursor.pos)
 	}
+	fn end_pos(&self) -> Pos {
+		let mut pos = Pos::MAX;
+		pos.clamp_row(&self.lines);
+		pos.clamp_col(&self.lines[pos.row].0, false);
+		pos
+	}
   fn eval_motion(&mut self, cmd: &ViCmd) -> Option<MotionKind> {
     let ViCmd { verb, motion, .. } = cmd;
     let MotionCmd(count, motion) = motion.as_ref()?;
+		let buffer = self.lines.clone();
+		if let Some(mut hint) = self.hint.clone() {
+			attach_lines(&mut self.lines, &mut hint);
+		}
 
-    match motion {
+    let kind = match motion {
       Motion::WholeLine => Some(MotionKind::Line(self.row())),
       Motion::TextObj(text_obj) => todo!(),
       Motion::EndOfLastWord => todo!(),
@@ -1076,7 +1110,8 @@ impl LineBuf {
             self.saved_col = Some(self.cursor.pos.col);
           }
           let row = self.offset_row(off);
-          let col = self.saved_col.unwrap().min(self.lines[row].len());
+					let limit = if self.cursor.exclusive { self.lines[row].len().saturating_sub(1) } else { self.lines[row].len() };
+          let col = self.saved_col.unwrap().min(limit);
           let target = Pos { row, col };
           (target != self.cursor.pos).then_some(MotionKind::Char { target, inclusive: true })
         }
@@ -1106,12 +1141,21 @@ impl LineBuf {
       Motion::Global(val) => todo!(),
       Motion::NotGlobal(val) => todo!(),
       Motion::Null => None,
-    }
+    };
+
+		self.lines = buffer;
+		kind
   }
   fn apply_motion(&mut self, motion: MotionKind) -> ShResult<()> {
+		log::debug!("Applying motion: {:?}, current cursor: {:?}", motion, self.cursor.pos);
     match motion {
       MotionKind::Char { target, inclusive: _ } => {
-        self.set_cursor(target);
+				log::debug!("self.end_pos > target: {}, self.end_pos: {:?}", target > self.end_pos(), self.end_pos());
+        if self.has_hint() && target >= self.end_pos() {
+          self.accept_hint_to(target);
+        } else {
+          self.set_cursor(target);
+        }
       }
       MotionKind::Line(ln) => {
         self.set_row(ln);
@@ -1270,11 +1314,14 @@ impl LineBuf {
       motion,
       ..
     } = cmd;
-    let Some(VerbCmd(count, verb)) = verb else {
-      let Some(motion_kind) = self.eval_motion(cmd) else {
-        return Ok(());
-      };
-      return self.apply_motion(motion_kind);
+    let Some(VerbCmd(_, verb)) = verb else {
+      // For verb-less motions in insert mode, merge hint before evaluating
+      // so motions like `w` can see into the hint text
+      let result = self.eval_motion(cmd);
+      if let Some(motion_kind) = result {
+        self.apply_motion(motion_kind)?;
+      }
+      return Ok(());
     };
     let count = motion.as_ref().map(|m| m.0).unwrap_or(1);
 
@@ -1597,7 +1644,12 @@ impl LineBuf {
 		let before = self.lines.clone();
 		let old_cursor = self.cursor.pos;
 
+		// Execute the command
     let res = self.exec_verb(&cmd);
+
+		if self.is_empty() {
+			self.set_hint(None);
+		}
 
 		let new_cursor = self.cursor.pos;
 
@@ -1648,7 +1700,8 @@ impl LineBuf {
     }
   }
 
-	fn fix_cursor(&mut self) {
+	pub fn fix_cursor(&mut self) {
+		log::debug!("Fixing cursor, exclusive: {}, current pos: {:?}", self.cursor.exclusive, self.cursor.pos);
 		if self.cursor.exclusive {
 			let line = self.cur_line();
 			let col = self.col();
@@ -1688,42 +1741,85 @@ impl LineBuf {
 
   /// Compat shim: set hint text. None clears the hint.
   pub fn set_hint(&mut self, hint: Option<String>) {
-    match hint {
-      Some(s) => self.hint = to_lines(&s),
-      None => self.hint.clear(),
-    }
+		let joined = self.joined();
+		self.hint = hint
+			.and_then(|h| {
+				h.strip_prefix(&joined).map(|s| s.to_string())
+			})
+			.and_then(|h| {
+				(!h.is_empty()).then_some(to_lines(h))
+			});
   }
 
   /// Compat shim: returns true if there is a non-empty hint.
   pub fn has_hint(&self) -> bool {
-    !self.hint.is_empty() && self.hint.iter().any(|l| !l.is_empty())
+    self.hint.as_ref().is_some_and(|h| !h.is_empty() && h.iter().any(|l| !l.is_empty()))
   }
 
   /// Compat shim: get hint text as a string.
   pub fn get_hint_text(&self) -> String {
-    let mut lines = vec![];
-    let mut hint = self.hint.clone();
-    trim_lines(&mut hint);
-    for line in hint {
-      lines.push(line.to_string());
-    }
-    lines.join("\n")
-  }
+		let text = self.get_hint_text_raw();
+    let text = format!("\x1b[90m{text}\x1b[0m");
 
-  /// Compat shim: accept the current hint by appending it to the buffer.
-  pub fn accept_hint(&mut self) {
-    if self.hint.is_empty() {
-      return;
-    }
-    let hint_str = self.get_hint_text();
-    self.push_str(&hint_str);
-    self.hint.clear();
-  }
+		text.replace("\n", "\n\x1b[90m")
+	}
 
-  /// Compat shim: return a constructor that sets initial buffer contents and cursor.
-  pub fn with_initial(mut self, s: &str, cursor_pos: usize) -> Self {
-    self.set_buffer(s.to_string());
-    // In the flat model, cursor_pos was a flat offset. Map to col on row 0.
+	pub fn get_hint_text_raw(&self) -> String {
+		let mut lines = vec![];
+		let mut hint = self.hint.clone().unwrap_or_default();
+		trim_lines(&mut hint);
+		for line in hint {
+			lines.push(line.to_string());
+		}
+		lines.join("\n")
+	}
+
+	/// Accept hint text up to a given target position.
+	/// Temporarily merges the hint into the buffer, moves the cursor to target,
+	/// then splits: everything from cursor onward becomes the new hint.
+	fn accept_hint_to(&mut self, target: Pos) {
+		let Some(mut hint) = self.hint.take() else {
+			self.set_cursor(target);
+			return
+		};
+		attach_lines(&mut self.lines, &mut hint);
+
+		// Split after the target position so the char at target
+		// becomes part of the buffer (w lands ON the next word start)
+		let split_pos = Pos {
+			row: target.row,
+			col: target.col + 1,
+		};
+		// Clamp to buffer bounds
+		let split_pos = Pos {
+			row: split_pos.row.min(self.lines.len().saturating_sub(1)),
+			col: split_pos.col.min(self.lines[split_pos.row.min(self.lines.len().saturating_sub(1))].len()),
+		};
+
+		let new_hint = split_lines_at(&mut self.lines, split_pos);
+		self.hint = (!new_hint.is_empty() && new_hint.iter().any(|l| !l.is_empty())).then_some(new_hint);
+		self.set_cursor(target);
+	}
+
+	/// Compat shim: accept the current hint by appending it to the buffer.
+	pub fn accept_hint(&mut self) {
+		let hint_str = self.get_hint_text_raw();
+		if hint_str.is_empty() {
+			return
+		}
+		// Move cursor to end of buffer, then insert so the hint
+		// joins with the last line's content properly
+		let last_row = self.lines.len().saturating_sub(1);
+		let last_col = self.lines[last_row].len();
+		self.cursor.pos = Pos { row: last_row, col: last_col };
+		self.insert_str(&hint_str);
+		self.hint = None;
+	}
+
+	/// Compat shim: return a constructor that sets initial buffer contents and cursor.
+	pub fn with_initial(mut self, s: &str, cursor_pos: usize) -> Self {
+		self.set_buffer(s.to_string());
+		// In the flat model, cursor_pos was a flat offset. Map to col on row .
     self.cursor.pos = Pos {
       row: 0,
       col: cursor_pos.min(s.len()),

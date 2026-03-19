@@ -120,11 +120,11 @@ pub fn common_cmds(key: E) -> Option<ViCmd> {
     E(K::Char('D'), M::CTRL) => pending_cmd.set_verb(VerbCmd(1, Verb::EndOfFile)),
     E(K::Delete, M::NONE) => {
       pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
-      pending_cmd.set_motion(MotionCmd(1, Motion::ForwardChar));
+      pending_cmd.set_motion(MotionCmd(1, Motion::ForwardCharForced));
     }
     E(K::Backspace, M::NONE) | E(K::Char('H'), M::CTRL) => {
       pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
-      pending_cmd.set_motion(MotionCmd(1, Motion::BackwardChar));
+      pending_cmd.set_motion(MotionCmd(1, Motion::BackwardCharForced));
     }
     _ => return None,
   }

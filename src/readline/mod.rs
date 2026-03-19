@@ -961,6 +961,8 @@ impl ShedVi {
       // Since there is no "future" history, we should just bell and do nothing
       self.writer.send_bell().ok();
     }
+		self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+		self.editor.fix_cursor();
   }
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
     if self.editor.cursor_at_max() && self.editor.has_hint() {

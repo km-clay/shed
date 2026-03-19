@@ -1368,11 +1368,13 @@ pub fn unescape_str(raw: &str) -> String {
         }
       }
       '$' => {
-        result.push(markers::VAR_SUB);
-        if chars.peek() == Some(&'$') {
+        if chars.peek() == Some(&'$')
+				|| chars.peek().is_none_or(|ch| ch.is_whitespace()) {
           chars.next();
           result.push('$');
-        }
+        } else {
+					result.push(markers::VAR_SUB);
+				}
       }
       '`' => {
         result.push(markers::VAR_SUB);
