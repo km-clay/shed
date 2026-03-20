@@ -663,6 +663,36 @@ impl ViMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
+      E(K::Char('G'), M::CTRL) => {
+        self.pending_seq.clear();
+        Some(ViCmd {
+          register: Default::default(),
+          verb: Some(VerbCmd(1, Verb::PrintPosition)),
+          motion: None,
+          raw_seq: "".into(),
+          flags: CmdFlags::empty()
+        })
+      }
+      E(K::Char('D'), M::CTRL) => {
+        self.pending_seq.clear();
+        Some(ViCmd {
+          register: Default::default(),
+          verb: None,
+          motion: Some(MotionCmd(1, Motion::HalfScreenDown)),
+          raw_seq: "".into(),
+          flags: CmdFlags::empty(),
+        })
+      }
+      E(K::Char('U'), M::CTRL) => {
+        self.pending_seq.clear();
+        Some(ViCmd {
+          register: Default::default(),
+          verb: None,
+          motion: Some(MotionCmd(1, Motion::HalfScreenUp)),
+          raw_seq: "".into(),
+          flags: CmdFlags::empty(),
+        })
+      }
       E(K::Char('R'), M::CTRL) => {
         let mut chars = self.pending_seq.chars().peekable();
         let count = self.parse_count(&mut chars).unwrap_or(1);

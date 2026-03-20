@@ -776,6 +776,36 @@ impl ViMode for ViNormal {
           flags: self.flags(),
         })
       }
+      E(K::Char('G'), M::CTRL) => {
+        self.pending_seq.clear();
+        Some(ViCmd {
+          register: Default::default(),
+          verb: Some(VerbCmd(1, Verb::PrintPosition)),
+          motion: None,
+          raw_seq: "".into(),
+          flags: self.flags(),
+        })
+      }
+      E(K::Char('D'), M::CTRL) => {
+        self.pending_seq.clear();
+        Some(ViCmd {
+          register: Default::default(),
+          verb: None,
+          motion: Some(MotionCmd(1, Motion::HalfScreenDown)),
+          raw_seq: "".into(),
+          flags: self.flags(),
+        })
+      }
+      E(K::Char('U'), M::CTRL) => {
+        self.pending_seq.clear();
+        Some(ViCmd {
+          register: Default::default(),
+          verb: None,
+          motion: Some(MotionCmd(1, Motion::HalfScreenUp)),
+          raw_seq: "".into(),
+          flags: self.flags(),
+        })
+      }
 
       E(K::Char(ch), M::NONE) => self.try_parse(ch),
       E(K::Backspace, M::NONE) => Some(ViCmd {

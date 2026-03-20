@@ -1,6 +1,7 @@
 use history::History;
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::{LineBuf, SelectMode};
+use std::collections::VecDeque;
 use std::fmt::Write;
 use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
 use unicode_width::UnicodeWidthStr;
@@ -16,8 +17,7 @@ use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::readline::vimode::{ViEx, ViVerbatim};
 use crate::state::{
-  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta,
-  write_vars,
+  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_meta, read_shopts, with_vars, write_meta, write_vars
 };
 use crate::{
   libsh::error::ShResult,
@@ -272,6 +272,8 @@ pub struct ShedVi {
   pub ex_history: History,
 
   pub needs_redraw: bool,
+	pub ctrl_d_warning_counter: usize,
+	pub status_msgs: VecDeque<(String, Instant)>
 }
 
 impl ShedVi {
@@ -293,6 +295,8 @@ impl ShedVi {
       history: History::new()?,
       ex_history: History::empty(),
       needs_redraw: true,
+			ctrl_d_warning_counter: 0,
+			status_msgs: VecDeque::new()
     };
     write_vars(|v| {
       v.set_var(
@@ -325,6 +329,8 @@ impl ShedVi {
       history: History::empty(),
       ex_history: History::empty(),
       needs_redraw: true,
+			ctrl_d_warning_counter: 0,
+			status_msgs: VecDeque::new()
     };
     write_vars(|v| {
       v.set_var(
@@ -883,17 +889,10 @@ impl ShedVi {
       return Ok(Some(ReadlineEvent::Line(buf)));
     }
 
-    if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile) {
-      if self.focused_editor().joined().is_empty() {
-        return Ok(Some(ReadlineEvent::Eof));
-      } else {
-        *self.focused_editor() = LineBuf::new();
-        self.mode = Box::new(ViInsert::new());
-        self.needs_redraw = true;
-        return Ok(None);
-      }
-    } else if cmd.verb().is_some_and(|v| v.1 == Verb::Quit) {
-      return Ok(Some(ReadlineEvent::Eof));
+    if (cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile)
+		&& self.focused_editor().joined().is_empty())
+		|| cmd.verb().is_some_and(|v| v.1 == Verb::Quit) {
+			return Ok(Some(ReadlineEvent::Eof));
     }
 
 		// check if it's an edit
@@ -901,6 +900,8 @@ impl ShedVi {
 		// e.g. 'cc' on an empty line, 'C' at the end of a line, etc.
 		// this is only used for ringing the bell
     let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit() && v.1 != Verb::Change);
+
+		let is_ctrl_d_motion = cmd.motion().is_some_and(|m| m.1 == Motion::HalfScreenDown);
 
     let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
     let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
@@ -913,6 +914,7 @@ impl ShedVi {
     }
 
     let before = self.editor.joined();
+		let before_cursor = self.editor.cursor;
 
     self.exec_cmd(cmd, false)?;
 
@@ -922,6 +924,7 @@ impl ShedVi {
       }
     }
     let after = self.editor.joined();
+		let after_cursor = self.editor.cursor;
 
     if before != after {
       self
@@ -929,7 +932,18 @@ impl ShedVi {
         .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
     } else if before == after && has_edit_verb {
       self.writer.send_bell().ok();
-    }
+    } else if before_cursor == after_cursor && is_ctrl_d_motion {
+			if self.ctrl_d_warning_counter == 3 || self.editor.is_empty() {
+				// our silly user is spamming ctrl+d for some reason
+				// maybe they want to exit the shell?
+				write_meta(|m| {
+					m.post_status_message("Ctrl+D only quits in insert mode. try ':q' or entering insert mode with 'i'".into())
+				});
+				self.ctrl_d_warning_counter = 0;
+			} else {
+				self.ctrl_d_warning_counter += 1;
+			}
+		}
 
     let hint = self.history.get_hint();
 
@@ -1126,7 +1140,9 @@ impl ShedVi {
     self.writer.flush_write(&buf)?;
 
     // Move to end of layout for overlay draws (completer, history search)
-    let has_overlays = self.completer.is_active() || self.focused_history().fuzzy_finder.is_active();
+    let has_overlays = self.completer.is_active()
+			|| self.focused_history().fuzzy_finder.is_active();
+
     let down = new_layout.end.row.saturating_sub(new_layout.cursor.row);
     if has_overlays && down > 0 {
       self.writer.flush_write(&format!("\x1b[{down}B"))?;
@@ -1141,9 +1157,11 @@ impl ShedVi {
       // Without PSR, use the content width on the cursor's row
       (new_layout.end.col + 1).max(new_layout.cursor.col + 1)
     };
+
+		let mut fuzzy_window_rows = 0;
     self.completer
       .set_prompt_line_context(preceding_width, new_layout.end.col);
-    self.completer.draw(&mut self.writer)?;
+    fuzzy_window_rows += self.completer.draw(&mut self.writer)?;
 
     {
 			self.focused_history()
@@ -1151,9 +1169,36 @@ impl ShedVi {
 				.set_prompt_line_context(preceding_width, new_layout.end.col);
 
       let mut writer = std::mem::take(&mut self.writer);
-      self.focused_history().fuzzy_finder.draw(&mut writer)?;
+      fuzzy_window_rows += self.focused_history().fuzzy_finder.draw(&mut writer)?;
       self.writer = writer;
     }
+
+		while let Some(msg) = write_meta(|m| m.pop_status_message()) {
+			let now = Instant::now();
+			self.status_msgs.push_back((msg,now));
+		}
+
+		while let Some((msg,time)) = self.status_msgs.front() {
+			if time.elapsed().as_secs() < 5 {
+				log::debug!("drawing status message: {msg}");
+				let down = new_layout.end.row - new_layout.cursor.row;
+				log::debug!("status message down: {down}");
+				let fuzzy_rows = fuzzy_window_rows.saturating_sub(1); // the cursor is one row below the top
+				let total = down.saturating_add(fuzzy_rows as u16);
+				let move_down = if total > 0 {
+					format!("\x1b[{total}B")
+				} else {
+					String::new()
+				};
+				let move_up = total + 2;
+				let col = new_layout.cursor.col + 1;
+				self.writer.flush_write(&format!("{move_down}\n\n\x1b7\x1b[2K{msg}\x1b8\x1b[{move_up}A\x1b[{col}G"))?;
+				new_layout.end.row += (2 + msg.chars().filter(|c| *c == '\n').count()) as u16;
+				break
+			} else {
+				self.status_msgs.pop_front();
+			}
+		}
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;

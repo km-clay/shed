@@ -1369,7 +1369,12 @@ pub struct MetaTab {
   runtime_stop: Option<Instant>,
 
   // pending system messages
-  system_msg: Vec<String>,
+	// are drawn above the prompt and survive redraws
+  system_msg: VecDeque<String>,
+
+	// same as system messages,
+	// but they appear under the prompt and are erased on redraw
+	status_msg: VecDeque<String>,
 
   // pushd/popd stack
   dir_stack: VecDeque<PathBuf>,
@@ -1394,7 +1399,8 @@ impl Default for MetaTab {
       shell_time: Instant::now(),
       runtime_start: None,
       runtime_stop: None,
-      system_msg: vec![],
+      system_msg: VecDeque::new(),
+			status_msg: VecDeque::new(),
       dir_stack: VecDeque::new(),
       getopts_offset: 0,
       old_path: None,
@@ -1614,14 +1620,23 @@ impl MetaTab {
     }
   }
   pub fn post_system_message(&mut self, message: String) {
-    self.system_msg.push(message);
+    self.system_msg.push_back(message);
   }
   pub fn pop_system_message(&mut self) -> Option<String> {
-    self.system_msg.pop()
+    self.system_msg.pop_front()
   }
   pub fn system_msg_pending(&self) -> bool {
     !self.system_msg.is_empty()
   }
+	pub fn post_status_message(&mut self, message: String) {
+		self.status_msg.push_back(message);
+	}
+	pub fn pop_status_message(&mut self) -> Option<String> {
+		self.status_msg.pop_front()
+	}
+	pub fn status_msg_pending(&self) -> bool {
+		!self.status_msg.is_empty()
+	}
   pub fn dir_stack_top(&self) -> Option<&PathBuf> {
     self.dir_stack.front()
   }

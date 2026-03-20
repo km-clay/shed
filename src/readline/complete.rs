@@ -734,7 +734,7 @@ pub trait Completer {
     let (s, e) = self.token_span();
     orig.get(s..e).unwrap_or(orig)
   }
-  fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()>;
+  fn draw(&mut self, writer: &mut TermWriter) -> ShResult<usize>;
   fn clear(&mut self, _writer: &mut TermWriter) -> ShResult<()> {
     Ok(())
   }
@@ -1122,9 +1122,9 @@ impl FuzzySelector {
     }
   }
 
-  pub fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()> {
+  pub fn draw(&mut self, writer: &mut TermWriter) -> ShResult<usize> {
     if !self.active {
-      return Ok(());
+      return Ok(0);
     }
     let (cols, _) = get_win_size(*TTY_FILENO);
 
@@ -1272,7 +1272,7 @@ impl FuzzySelector {
     writer.flush_write(&buf)?;
     self.old_layout = Some(new_layout);
 
-    Ok(())
+    Ok(rows as usize)
   }
 
   pub fn clear(&mut self, writer: &mut TermWriter) -> ShResult<()> {
@@ -1421,7 +1421,7 @@ impl Completer for FuzzyCompleter {
   fn clear(&mut self, writer: &mut TermWriter) -> ShResult<()> {
     self.selector.clear(writer)
   }
-  fn draw(&mut self, writer: &mut TermWriter) -> ShResult<()> {
+  fn draw(&mut self, writer: &mut TermWriter) -> ShResult<usize> {
     self.selector.draw(writer)
   }
   fn reset(&mut self) {
@@ -1497,8 +1497,8 @@ impl Completer for SimpleCompleter {
     self.token_span
   }
 
-  fn draw(&mut self, _writer: &mut TermWriter) -> ShResult<()> {
-    Ok(())
+  fn draw(&mut self, _writer: &mut TermWriter) -> ShResult<usize> {
+    Ok(0)
   }
 
   fn original_input(&self) -> &str {

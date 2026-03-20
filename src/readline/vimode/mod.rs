@@ -116,6 +116,7 @@ pub fn common_cmds(key: E) -> Option<ViCmd> {
     E(K::Right, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::ForwardChar)),
     E(K::Up, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::LineUp)),
     E(K::Down, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::LineDown)),
+    E(K::Enter, M::SHIFT) => pending_cmd.set_verb(VerbCmd(1, Verb::InsertChar('\n'))),
     E(K::Enter, M::NONE) => pending_cmd.set_verb(VerbCmd(1, Verb::AcceptLineOrNewline)),
     E(K::Char('D'), M::CTRL) => pending_cmd.set_verb(VerbCmd(1, Verb::EndOfFile)),
     E(K::Delete, M::NONE) => {

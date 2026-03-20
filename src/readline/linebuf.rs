@@ -138,6 +138,13 @@ pub fn split_lines_at(lines: &mut Vec<Line>, pos: Pos) -> Vec<Line> {
   rest
 }
 
+pub fn split_lines(mut lines: Vec<Line>, pos: Pos) -> (Vec<Line>,Vec<Line>) {
+	let tail = lines[pos.row].split_off(pos.col);
+	let mut rest: Vec<Line> = lines.drain(pos.row + 1..).collect();
+	rest.insert(0, tail);
+	(lines, rest)
+}
+
 pub fn attach_lines(lines: &mut Vec<Line>, other: &mut Vec<Line>) {
   if other.is_empty() {
     return;
@@ -1860,6 +1867,16 @@ impl LineBuf {
         let (s, e) = ordered(*s, *e);
         Some(MotionKind::Block { start: s, end: e })
       }
+			dir @ (Motion::HalfScreenUp | Motion::HalfScreenDown) => {
+				let off = match dir {
+					Motion::HalfScreenUp => -(self.get_viewport_height() as isize / 2),
+					Motion::HalfScreenDown => self.get_viewport_height() as isize / 2,
+					_ => unreachable!(),
+				};
+				let row = self.row();
+				let target_row = self.offset_row(off);
+				Some(MotionKind::Line { start: target_row, end: row, inclusive: false })
+			}
       Motion::RepeatMotion |
       Motion::RepeatMotionRev => unreachable!("Repeat motions should have been resolved in readline/mod.rs"),
       Motion::Global(val) |
@@ -1907,7 +1924,6 @@ impl LineBuf {
     Ok(())
   }
   fn extract_range(&mut self, motion: &MotionKind) -> Vec<Line> {
-		log::debug!("Extracting range for motion: {:?}", motion);
     let extracted = match motion {
       MotionKind::Char {
         start,
@@ -2484,9 +2500,31 @@ impl LineBuf {
 				}
       }
 
+			Verb::EndOfFile => {
+				self.lines.clear();
+			}
+
+			Verb::PrintPosition => {
+				let num_lines = self.lines.len();
+				let row = self.row() + 1;
+				let col = self.col() + 1;
+				let total_graphemes = self.count_graphemes();
+				let (left,_) = split_lines(self.lines.clone(), self.cursor.pos);
+				let total_in_left = left.iter().map(|l| l.len()).sum::<usize>();
+				let percentage = if total_graphemes > 0 {
+					(total_in_left as f64 / total_graphemes as f64) * 100.0
+				} else {
+					100.0
+				}.round() as usize;
+
+				let msg = format!("line: {row}/{num_lines}, col: {col} --{percentage}%--");
+				write_meta(|m| {
+					m.post_status_message(msg);
+				})
+			}
+
       Verb::Complete
       | Verb::ExMode
-      | Verb::EndOfFile
       | Verb::InsertMode
       | Verb::NormalMode
       | Verb::VisualMode
@@ -2600,7 +2638,13 @@ impl LineBuf {
   }
 
   pub fn fix_cursor(&mut self) {
+		// we are now going to enforce some invariants and do some bookkeeping
+		if self.lines.is_empty() {
+			// self.lines must always have at least one line
+			self.lines.push(Line::default());
+		}
     if self.cursor.pos.row >= self.lines.len() {
+			// clamp this now so self.cur_line() cannot panic
       self.cursor.pos.row = self.lines.len().saturating_sub(1);
     }
     if self.cursor.exclusive {
@@ -2616,6 +2660,8 @@ impl LineBuf {
         self.cursor.pos.col = line.len();
       }
     }
+
+		// update viewport scroll offset
 		self.update_scroll_offset();
   }
 

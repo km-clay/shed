@@ -243,6 +243,7 @@ pub enum Verb {
   Equalize,
   AcceptLineOrNewline,
   EndOfFile,
+	PrintPosition,
   // Ex-mode verbs
   ExMode,
   ShellCmd(String),
@@ -335,6 +336,8 @@ pub enum Motion {
   EndOfBuffer,
   ToColumn,
   ToDelimMatch,
+	HalfScreenDown,
+	HalfScreenUp,
   ToBrace(Direction),
   ToBracket(Direction),
   ToParen(Direction),

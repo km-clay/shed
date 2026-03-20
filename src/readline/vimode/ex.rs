@@ -120,7 +120,7 @@ impl ViMode for ViEx {
           Ok(cmd) => Ok(cmd),
           Err(e) => {
             let msg = e.unwrap_or(format!("Not an editor command: {}", &input));
-            write_meta(|m| m.post_system_message(msg.clone()));
+            write_meta(|m| m.post_status_message(msg.clone()));
             Err(ShErr::simple(ShErrKind::ParseErr, msg))
           }
         }
