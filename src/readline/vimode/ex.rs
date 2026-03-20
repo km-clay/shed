@@ -42,11 +42,10 @@ struct ExEditor {
 
 impl ExEditor {
   pub fn new(history: History) -> Self {
-    let mut new = Self {
+    Self {
       history,
       ..Default::default()
-    };
-    new
+    }
   }
   pub fn clear(&mut self) {
     *self = Self::default()
@@ -169,7 +168,7 @@ impl ViMode for ViEx {
   }
 
   fn pending_cursor(&self) -> Option<usize> {
-    Some(self.pending_cmd.buf.cursor.get())
+    Some(self.pending_cmd.buf.cursor_to_flat())
   }
 
   fn move_cursor_on_undo(&self) -> bool {
@@ -229,9 +228,6 @@ fn parse_ex_cmd(raw: &str) -> Result<Option<ViCmd>, Option<String>> {
 
 /// Unescape shell command arguments
 fn unescape_shell_cmd(cmd: &str) -> String {
-  // The pest grammar uses double quotes for vicut commands
-  // So shell commands need to escape double quotes
-  // We will be removing a single layer of escaping from double quotes
   let mut result = String::new();
   let mut chars = cmd.chars().peekable();
   while let Some(ch) = chars.next() {

@@ -865,15 +865,15 @@ impl QueryEditor {
     self.available_width = width;
   }
   pub fn update_scroll_offset(&mut self) {
-    let cursor_pos = self.linebuf.cursor.get();
+    let cursor_pos = self.linebuf.cursor_to_flat();
     if cursor_pos < self.scroll_offset + 1 {
-      self.scroll_offset = self.linebuf.cursor.ret_sub(1);
+      self.scroll_offset = self.linebuf.cursor_to_flat().saturating_sub(1)
     }
     if cursor_pos >= self.scroll_offset + self.available_width.saturating_sub(1) {
       self.scroll_offset = self
         .linebuf
-        .cursor
-        .ret_sub(self.available_width.saturating_sub(1));
+        .cursor_to_flat()
+        .saturating_sub(self.available_width.saturating_sub(1));
     }
     let max_offset = self
       .linebuf
@@ -1257,8 +1257,7 @@ impl FuzzySelector {
     let cursor_in_window = self
       .query
       .linebuf
-      .cursor
-      .get()
+      .cursor_to_flat()
       .saturating_sub(self.query.scroll_offset);
     let cursor_col = (cursor_in_window + 4) as u16;
     write!(buf, "\x1b[{}A\r\x1b[{}C", lines_below_prompt, cursor_col).unwrap();

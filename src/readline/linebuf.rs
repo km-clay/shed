@@ -1,7 +1,5 @@
 use std::{
-  fmt::Display,
-  ops::{Index, IndexMut},
-  slice::SliceIndex,
+  collections::HashSet, fmt::Display, ops::{Index, IndexMut}, slice::SliceIndex
 };
 
 use smallvec::SmallVec;
@@ -14,11 +12,11 @@ use super::vicmd::{
 };
 use crate::{
   expand::expand_cmd_sub,
-  libsh::error::ShResult,
+  libsh::{error::ShResult, guards::{RawModeGuard, var_ctx_guard}},
   parse::{
     Redir, RedirType,
     execute::exec_input,
-    lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
+    lex::{LexFlags, LexStream, Tk, TkFlags},
   },
   prelude::*,
   procio::{IoFrame, IoMode, IoStack},
@@ -26,7 +24,7 @@ use crate::{
     markers,
     register::RegisterContent, vicmd::{ReadSrc, VerbCmd, WriteDest},
   },
-  state::{read_vars, write_meta},
+  state::{VarFlags, VarKind, read_vars, write_meta, write_vars},
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
@@ -298,32 +296,6 @@ impl From<&Grapheme> for CharClass {
   }
 }
 
-fn is_whitespace(a: &Grapheme) -> bool {
-  CharClass::from(a) == CharClass::Whitespace
-}
-
-fn is_other_class(a: &Grapheme, b: &Grapheme) -> bool {
-  let a = CharClass::from(a);
-  let b = CharClass::from(b);
-  a != b
-}
-
-fn is_other_class_not_ws(a: &Grapheme, b: &Grapheme) -> bool {
-  if is_whitespace(a) || is_whitespace(b) {
-    false
-  } else {
-    is_other_class(a, b)
-  }
-}
-
-fn is_other_class_or_is_ws(a: &Grapheme, b: &Grapheme) -> bool {
-  if is_whitespace(a) || is_whitespace(b) {
-    true
-  } else {
-    is_other_class(a, b)
-  }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SelectMode {
   Char(Pos),
@@ -343,7 +315,10 @@ impl Pos {
     row: usize::MAX,
     col: usize::MAX,
   };
-  pub const MIN: Self = Pos { row: 0, col: 0 };
+  pub const MIN: Self = Pos {
+		row: usize::MIN, // just in case we discover something smaller than '0'
+		col: usize::MIN,
+	};
 
 	pub fn row_col_add(&self, row: isize, col: isize) -> Self {
 		Self {
@@ -410,21 +385,6 @@ pub enum MotionKind {
 pub struct Cursor {
   pub pos: Pos,
   pub exclusive: bool,
-}
-
-impl Cursor {
-  /// Compat shim: returns the flat column position (col on row 0 in single-line mode)
-  pub fn get(&self) -> usize {
-    self.pos.col
-  }
-  /// Compat shim: sets the flat column position
-  pub fn set(&mut self, col: usize) {
-    self.pos.col = col;
-  }
-  /// Compat shim: returns cursor.col - n without mutating, clamped to 0
-  pub fn ret_sub(&self, n: usize) -> usize {
-    self.pos.col.saturating_sub(n)
-  }
 }
 
 #[derive(Default, Clone, Debug)]
@@ -715,7 +675,66 @@ impl LineBuf {
       col,
     };
   }
-  fn verb_shell_cmd(&self, cmd: &str) -> ShResult<()> {
+  fn verb_shell_cmd(&mut self, cmd: &str) -> ShResult<()> {
+    let mut vars = HashSet::new();
+    vars.insert("_BUFFER".into());
+    vars.insert("_CURSOR".into());
+    vars.insert("_ANCHOR".into());
+    let _guard = var_ctx_guard(vars);
+
+    let mut buf = self.joined();
+    let mut cursor = self.cursor_to_flat();
+    let mut anchor = self.select_mode.map(|r| {
+			match r {
+				SelectMode::Char(pos) |
+				SelectMode::Block(pos) |
+				SelectMode::Line(pos) => {
+					self.pos_to_flat(pos).to_string()
+				}
+			}
+		}).unwrap_or_default();
+
+    write_vars(|v| {
+      v.set_var("_BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
+      v.set_var(
+        "_CURSOR",
+        VarKind::Str(cursor.to_string()),
+        VarFlags::EXPORT,
+      )?;
+      v.set_var(
+        "_ANCHOR",
+        VarKind::Str(anchor.clone()),
+        VarFlags::EXPORT,
+      )
+    })?;
+
+    RawModeGuard::with_cooked_mode(|| exec_input(cmd.to_string(), None, true, Some("<ex-mode-cmd>".into())))?;
+
+    let keys = write_vars(|v| {
+      buf = v.take_var("_BUFFER");
+      cursor = v.take_var("_CURSOR").parse().unwrap_or(cursor);
+      anchor = v.take_var("_ANCHOR");
+      v.take_var("_KEYS")
+    });
+
+    self.set_buffer(buf);
+    self.set_cursor_from_flat(cursor);
+		if let Ok(pos) = anchor.parse()
+    && pos != cursor
+		&& self.select_mode.is_some() {
+			let new_pos = self.pos_from_flat(pos);
+			match self.select_mode.as_mut() {
+				Some(SelectMode::Line(pos)) |
+				Some(SelectMode::Block(pos)) |
+				Some(SelectMode::Char(pos)) => {
+					*pos = new_pos
+				}
+				None => unreachable!()
+			}
+    }
+    if !keys.is_empty() {
+      write_meta(|m| m.set_pending_widget_keys(&keys))
+    }
     Ok(())
   }
   fn insert_at(&mut self, pos: Pos, gr: Grapheme) {
@@ -1064,10 +1083,15 @@ impl LineBuf {
     match obj {
       // text structures
       TextObj::Word(word, bound) => self.text_obj_word(count, word, obj, bound),
-      TextObj::Sentence(direction) => todo!(),
-      TextObj::Paragraph(direction) => todo!(),
-      TextObj::WholeSentence(bound) => todo!(),
-      TextObj::WholeParagraph(bound) => todo!(),
+      TextObj::Sentence(_) |
+      TextObj::Paragraph(_) |
+      TextObj::WholeSentence(_) |
+      TextObj::Tag(_) |
+      TextObj::Custom(_) |
+      TextObj::WholeParagraph(_) => {
+				log::warn!("{:?} text objects are not implemented yet", obj);
+				None
+			}
 
       // quote stuff
       TextObj::DoubleQuote(bound) |
@@ -1081,9 +1105,6 @@ impl LineBuf {
       | TextObj::Bracket(bound)
       | TextObj::Brace(bound)
       | TextObj::Angle(bound) => self.text_obj_delim(count, obj, bound),
-
-      TextObj::Tag(bound) => todo!(),
-      TextObj::Custom(_) => todo!(),
     }
   }
 	fn text_obj_word(
@@ -1736,10 +1757,13 @@ impl LineBuf {
         let (s, e) = ordered(*s, *e);
         Some(MotionKind::Block { start: s, end: e })
       }
-      Motion::RepeatMotion => todo!(),
-      Motion::RepeatMotionRev => todo!(),
-      Motion::Global(val) => todo!(),
-      Motion::NotGlobal(val) => todo!(),
+      Motion::RepeatMotion |
+      Motion::RepeatMotionRev => unreachable!("Repeat motions should have been resolved in readline/mod.rs"),
+      Motion::Global(val) |
+      Motion::NotGlobal(val) => {
+				log::warn!("Global motions are not implemented yet (val: {:?})", val);
+				None
+			}
       Motion::Null => None,
     };
 
@@ -1748,11 +1772,11 @@ impl LineBuf {
   }
 	fn move_to_start(&mut self, motion: MotionKind) {
 		match motion {
-			MotionKind::Char { start, end, inclusive } => {
+			MotionKind::Char { start, end, .. } => {
 				let (s,_) = ordered(start, end);
 				self.set_cursor(s);
 			}
-			MotionKind::Line { start, end, inclusive } => {
+			MotionKind::Line { start, end, .. } => {
 				let (s,_) = ordered(start, end);
 				self.set_cursor(Pos { row: s, col: 0 });
 			}
@@ -2250,7 +2274,7 @@ impl LineBuf {
 					let line_len = self.line(row).len();
 
 					// we are going to calculate the level twice, once at column = 0 and once at column = line.len()
-					// "b-b-b-b-but the performance" i dont care. open a pull request genius
+					// "b-b-b-b-but the performance" i dont care
 					// the number of tabs we use for the line is the lesser of these two calculations
 					// if level_start > level_end, the line has an closer
 					// if level_end > level_start, the line has a opener
@@ -2758,8 +2782,26 @@ impl LineBuf {
     offset + pos.col.min(self.lines[row].len())
   }
 
+	fn pos_from_flat(&self, mut flat: usize) -> Pos {
+		for (i, line) in self.lines.iter().enumerate() {
+			if flat <= line.len() {
+				return Pos { row: i, col: flat };
+			}
+			flat = flat.saturating_sub(line.len() + 1); // +1 for '\n'
+		}
+		// If we exceed the total length, clamp to end
+		let last_row = self.lines.len().saturating_sub(1);
+		let last_col = self.lines[last_row].len();
+		Pos { row: last_row, col: last_col }
+	}
+
 	pub fn cursor_to_flat(&self) -> usize {
 		self.pos_to_flat(self.cursor.pos)
+	}
+
+	pub fn set_cursor_from_flat(&mut self, flat: usize) {
+		self.cursor.pos = self.pos_from_flat(flat);
+		self.fix_cursor();
 	}
 
   /// Compat shim: attempt history expansion. Stub that returns false.

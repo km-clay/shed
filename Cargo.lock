@@ -225,6 +225,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
+name = "fnmatch-regex"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f319c7da34eac5f0b8c7220a4afb2e1ddde0c24ae87c7435a8e36dcd62a43a3"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "regex",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -568,6 +579,7 @@ dependencies = [
  "bitflags",
  "clap",
  "env_logger",
+ "fnmatch-regex",
  "glob",
  "itertools",
  "log",

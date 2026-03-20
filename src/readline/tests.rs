@@ -497,7 +497,7 @@ vi_test! {
   vi_r_on_space        : "hello world"            => "5|r-"         => "hell- world", 4;
   vi_vw_doesnt_crash   : ""        					      => "vw"           => "", 0;
   vi_indent_cursor_pos : "echo foo"               => ">>"           => "\techo foo", 1;
-  vi_join_indent_lines : "echo foo\n\t\techo bar" => "J"        => "echo foo echo bar", 8
+  vi_join_indent_lines : "echo foo\n\t\techo bar" => "J"            => "echo foo echo bar", 8
 }
 
 #[test]

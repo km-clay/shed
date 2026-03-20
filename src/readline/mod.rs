@@ -343,7 +343,7 @@ impl ShedVi {
     self.editor = LineBuf::new().with_initial(initial, 0);
     {
       let s = self.editor.joined();
-      let c = self.editor.cursor.get();
+      let c = self.editor.cursor_to_flat();
       self.history.update_pending_cmd((&s, c));
     }
     self
@@ -486,7 +486,7 @@ impl ShedVi {
 
             self
               .history
-              .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
+              .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
             self.editor.set_hint(None);
             {
               let mut writer = std::mem::take(&mut self.writer);
@@ -548,7 +548,7 @@ impl ShedVi {
             let new_cursor = span_start + candidate.len();
             let line = self.completer.get_completed_line(&candidate);
             self.focused_editor().set_buffer(line);
-            self.focused_editor().cursor.set(new_cursor);
+            self.focused_editor().set_cursor_from_flat(new_cursor);
             // Don't reset yet — clear() needs old_layout to erase the selector.
 
             if !self.history.at_pending() {
@@ -556,7 +556,7 @@ impl ShedVi {
             }
             self
               .history
-              .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
+              .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
             let hint = self.history.get_hint();
             self.editor.set_hint(hint);
             self.completer.clear(&mut self.writer)?;
@@ -684,7 +684,7 @@ impl ShedVi {
       }
       self
         .history
-        .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
+        .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
       self.needs_redraw = true;
       return Ok(None);
     }
@@ -728,14 +728,14 @@ impl ShedVi {
               .unwrap_or_default();
 
           self.focused_editor().set_buffer(line.clone());
-          self.focused_editor().cursor.set(new_cursor);
+          self.focused_editor().set_cursor_from_flat(new_cursor);
 
           if !self.history.at_pending() {
             self.history.reset_to_pending();
           }
           self
             .history
-            .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
+            .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
           let hint = self.history.get_hint();
           self.editor.set_hint(hint);
           write_vars(|v| {
@@ -804,7 +804,7 @@ impl ShedVi {
           self.focused_editor().move_cursor_to_end();
           self
             .history
-            .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
+            .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
           self.editor.set_hint(None);
         }
         None => {
@@ -880,7 +880,7 @@ impl ShedVi {
       }
 
       self.editor.set_hint(None);
-      self.editor.cursor.set(self.editor.cursor_max());
+      self.editor.set_cursor_from_flat(self.editor.cursor_max());
       self.print_line(true)?;
       self.writer.flush_write("\n")?;
       let buf = self.editor.take_buf();
@@ -931,7 +931,7 @@ impl ShedVi {
     if before != after {
       self
         .history
-        .update_pending_cmd((&self.editor.joined(), self.editor.cursor.get()));
+        .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
     } else if before == after && has_edit_verb {
       self.writer.send_bell().ok();
     }

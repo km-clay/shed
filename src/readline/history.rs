@@ -317,7 +317,7 @@ impl History {
 
   pub fn update_pending_cmd(&mut self, buf: (&str, usize)) {
     let cursor_pos = if let Some(pending) = &self.pending {
-      pending.cursor.get()
+      pending.cursor_to_flat()
     } else {
       buf.1
     };
@@ -329,7 +329,7 @@ impl History {
 
     if let Some(pending) = &mut self.pending {
       pending.set_buffer(cmd);
-      pending.cursor.set(cursor_pos);
+      pending.set_cursor_from_flat(cursor_pos);
     } else {
       self.pending = Some(LineBuf::new().with_initial(&cmd, cursor_pos));
     }
