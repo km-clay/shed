@@ -860,7 +860,7 @@ impl ShedVi {
       return Ok(None);
     };
 
-    let Some(mut cmd) = cmd else {
+    let Some(cmd) = cmd else {
       return Ok(None);
     };
     if self.should_grab_history(&cmd) {

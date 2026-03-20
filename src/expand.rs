@@ -2030,44 +2030,18 @@ pub fn expand_case_pattern(raw: &str) -> ShResult<String> {
 }
 
 pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
-  let mut regex = String::new();
-  if anchored {
-    regex.push('^');
-  }
-  let mut chars = glob.chars();
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        // Shell escape: next char is literal
-        if let Some(esc) = chars.next() {
-          // Some characters have special meaning after \ in regex
-          // (e.g. \< is word boundary), so use hex escape for safety
-          regex.push_str(&format!("\\x{:02x}", esc as u32));
-        }
-      }
-      '*' => regex.push_str(".*"),
-      '?' => regex.push('.'),
-      '[' => {
-        // Pass through character class [...] as-is (glob and regex syntax match)
-        regex.push('[');
-        while let Some(bc) = chars.next() {
-          regex.push(bc);
-          if bc == ']' {
-            break;
-          }
-        }
-      }
-      '.' | '+' | '(' | ')' | '|' | '^' | '$' | '{' | '}' => {
-        regex.push('\\');
-        regex.push(ch);
-      }
-      _ => regex.push(ch),
-    }
-  }
-  if anchored {
-    regex.push('$');
-  }
-  Regex::new(&regex).unwrap()
+  // fnmatch_regex always produces ^...$, so get the pattern string and strip if unanchored
+  let pattern = fnmatch_regex::glob_to_regex_pattern(glob)
+    .unwrap_or_else(|_| regex::escape(glob));
+  let pattern = if anchored {
+    pattern
+  } else {
+    pattern
+      .strip_prefix('^').unwrap_or(&pattern)
+      .strip_suffix('$').unwrap_or(&pattern)
+      .to_string()
+  };
+  Regex::new(&pattern).unwrap()
 }
 
 #[derive(Debug)]
