@@ -214,7 +214,7 @@ impl ViVisual {
           let ch = chars_clone.next()?;
           return Some(ViCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::ReplaceCharInplace(ch, 1))),
+            verb: Some(VerbCmd(1, Verb::ReplaceChar(ch))),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),

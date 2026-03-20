@@ -1275,9 +1275,7 @@ impl ShedVi {
 
     if let Some(range) = self.editor.select_range() {
       cmd.motion = Some(MotionCmd(1, range))
-    } else {
-      log::warn!("You're in visual mode with no select range??");
-    };
+    }
 
     // Set cursor clamp BEFORE executing the command so that motions
     // (like EndOfLine for 'A') can reach positions valid in the new mode
@@ -1322,8 +1320,6 @@ impl ShedVi {
   pub fn exec_cmd(&mut self, mut cmd: ViCmd, from_replay: bool) -> ShResult<()> {
     if cmd.verb().is_some() && let Some(range) = self.editor.select_range() {
       cmd.motion = Some(MotionCmd(1, range))
-    } else {
-      log::warn!("You're in visual mode with no select range??");
     };
 
     if cmd.is_mode_transition() {
@@ -1399,7 +1395,7 @@ impl ShedVi {
           };
           let repeat_cmd = ViCmd {
             register: RegisterName::default(),
-            verb: None,
+            verb: cmd.verb,
             motion: Some(motion),
             raw_seq: format!("{count};"),
             flags: CmdFlags::empty(),
@@ -1414,7 +1410,7 @@ impl ShedVi {
           new_motion.0 = *count;
           let repeat_cmd = ViCmd {
             register: RegisterName::default(),
-            verb: None,
+            verb: cmd.verb,
             motion: Some(new_motion),
             raw_seq: format!("{count},"),
             flags: CmdFlags::empty(),

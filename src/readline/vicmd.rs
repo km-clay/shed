@@ -309,7 +309,7 @@ impl Verb {
   pub fn is_char_insert(&self) -> bool {
     matches!(
       self,
-      Self::Change | Self::InsertChar(_) | Self::ReplaceChar(_) | Self::ReplaceCharInplace(_, _)
+      Self::InsertChar(_) | Self::ReplaceChar(_)
     )
   }
 }
