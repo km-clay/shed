@@ -149,16 +149,17 @@ macro_rules! shopt_group {
 #[derive(Clone, Debug)]
 pub struct ShOpts {
   pub core: ShOptCore,
+	pub line: ShOptLine,
   pub prompt: ShOptPrompt,
 }
 
 impl Default for ShOpts {
   fn default() -> Self {
     let core = ShOptCore::default();
-
+		let line = ShOptLine::default();
     let prompt = ShOptPrompt::default();
 
-    Self { core, prompt }
+    Self { core, line,  prompt }
   }
 }
 
@@ -175,6 +176,7 @@ impl ShOpts {
   pub fn display_opts(&mut self) -> ShResult<String> {
     let output = [
       self.query("core")?.unwrap_or_default().to_string(),
+			self.query("line")?.unwrap_or_default().to_string(),
       self.query("prompt")?.unwrap_or_default().to_string(),
     ];
 
@@ -194,6 +196,7 @@ impl ShOpts {
 
     match key {
       "core" => self.core.set(&remainder, val)?,
+			"line" => self.line.set(&remainder, val)?,
       "prompt" => self.prompt.set(&remainder, val)?,
       _ => {
         return Err(ShErr::simple(
@@ -218,6 +221,7 @@ impl ShOpts {
 
     match key {
       "core" => self.core.get(&remainder),
+			"line" => self.line.get(&remainder),
       "prompt" => self.prompt.get(&remainder),
       _ => Err(ShErr::simple(
         ShErrKind::SyntaxErr,
@@ -225,6 +229,16 @@ impl ShOpts {
       )),
     }
   }
+}
+
+shopt_group! {
+  #[derive(Clone, Debug)]
+	pub struct ShOptLine ("line") {
+		/// The maximum height of the line editor viewport window. Can be a positive number or a percentage of terminal height like "50%"
+		viewport_height: String = "50%".to_string(),
+		/// The line offset from the top or bottom of the viewport to trigger scrolling
+		scroll_offset: usize = 2,
+	}
 }
 
 shopt_group! {

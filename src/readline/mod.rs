@@ -642,11 +642,6 @@ impl ShedVi {
           self.needs_redraw = true;
           continue;
         } else {
-          log::debug!(
-            "Ambiguous key sequence: {:?}, matches: {:?}",
-            self.pending_keymap,
-            matches
-          );
           // There is ambiguity. Allow the timeout in the main loop to handle this.
           continue;
         }
@@ -944,7 +939,7 @@ impl ShedVi {
   }
 
   pub fn get_layout(&mut self, line: &str) -> Layout {
-    let to_cursor = self.editor.slice_to_cursor().unwrap_or_default();
+    let to_cursor = self.editor.window_slice_to_cursor().unwrap_or_default();
     let (cols, _) = get_win_size(self.tty);
     Layout::from_parts(cols, self.prompt.get_ps1(), &to_cursor, line)
   }
@@ -1012,24 +1007,9 @@ impl ShedVi {
         && self.editor.on_last_line())
   }
 
-  pub fn line_text(&mut self) -> String {
-    let line = self.editor.to_string();
-    let hint = self.editor.get_hint_text();
-    let do_hl = state::read_shopts(|s| s.prompt.highlight);
-    self.highlighter.only_visual(!do_hl);
-    self
-      .highlighter
-      .load_input(&line, self.editor.cursor_byte_pos());
-    self.highlighter.expand_control_chars();
-    self.highlighter.highlight();
-    let highlighted = self.highlighter.take();
-    let res = format!("{highlighted}{hint}");
-    res
-  }
-
   pub fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
-    let line = self.line_text();
-    let mut new_layout = self.get_layout(&line);
+    let line = self.editor.display_window_joined();
+		let mut new_layout = self.get_layout(&line);
 
     let pending_seq = self.mode.pending_seq();
     let mut prompt_string_right = self.prompt.psr_expanded.clone();
@@ -1070,7 +1050,7 @@ impl ShedVi {
 
     self
       .writer
-      .redraw(self.prompt.get_ps1(), &line, &new_layout)?;
+      .redraw(self.prompt.get_ps1(), &line, &new_layout, self.editor.scroll_offset, self.editor.lines.len())?;
 
     let seq_fits = pending_seq
       .as_ref()
@@ -1129,14 +1109,29 @@ impl ShedVi {
 
     if let ModeReport::Ex = self.mode.report_mode() {
       let pending_seq = self.mode.pending_seq().unwrap_or_default();
-      write!(buf, "\n: {pending_seq}").unwrap();
+      let down = new_layout.end.row - new_layout.cursor.row;
+      let move_down = if down > 0 {
+        format!("\x1b[{down}B")
+      } else {
+        String::new()
+      };
+      write!(buf, "{move_down}\x1b[1G\n: {pending_seq}").unwrap();
       new_layout.end.row += 1;
-      new_layout.cursor.row += 1;
+      new_layout.cursor.row = new_layout.end.row;
+			new_layout.cursor.col = (2 + pending_seq.width()) as u16;
     }
 
     write!(buf, "{}", &self.mode.cursor_style()).unwrap();
 
     self.writer.flush_write(&buf)?;
+
+    // Move to end of layout for overlay draws (completer, history search)
+    let has_overlays = self.completer.is_active() || self.focused_history().fuzzy_finder.is_active();
+    let down = new_layout.end.row.saturating_sub(new_layout.cursor.row);
+    if has_overlays && down > 0 {
+      self.writer.flush_write(&format!("\x1b[{down}B"))?;
+			new_layout.cursor.row = new_layout.end.row;
+    }
 
     // Tell the completer the width of the prompt line above its \n so it can
     // account for wrapping when clearing after a resize.
@@ -1146,17 +1141,15 @@ impl ShedVi {
       // Without PSR, use the content width on the cursor's row
       (new_layout.end.col + 1).max(new_layout.cursor.col + 1)
     };
-    self
-      .completer
-      .set_prompt_line_context(preceding_width, new_layout.cursor.col);
+    self.completer
+      .set_prompt_line_context(preceding_width, new_layout.end.col);
     self.completer.draw(&mut self.writer)?;
 
-    self
-      .focused_history()
-      .fuzzy_finder
-      .set_prompt_line_context(preceding_width, new_layout.cursor.col);
-
     {
+			self.focused_history()
+				.fuzzy_finder
+				.set_prompt_line_context(preceding_width, new_layout.end.col);
+
       let mut writer = std::mem::take(&mut self.writer);
       self.focused_history().fuzzy_finder.draw(&mut writer)?;
       self.writer = writer;
@@ -1279,7 +1272,6 @@ impl ShedVi {
 
     // Set cursor clamp BEFORE executing the command so that motions
     // (like EndOfLine for 'A') can reach positions valid in the new mode
-    log::debug!("cmd: {:?}", cmd);
     self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     self.editor.exec_cmd(cmd)?;
 

@@ -21,13 +21,13 @@ use crate::{
   prelude::*,
   procio::{IoFrame, IoMode, IoStack},
   readline::{
-    markers,
-    register::RegisterContent, vicmd::{ReadSrc, VerbCmd, WriteDest},
+    highlight::Highlighter, markers, register::RegisterContent, term::get_win_size, vicmd::{ReadSrc, VerbCmd, WriteDest}
   },
-  state::{VarFlags, VarKind, read_vars, write_meta, write_vars},
+  state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars},
 };
 
 const PUNCTUATION: [&str; 3] = ["?", "!", "."];
+const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Grapheme(SmallVec<[char; 4]>);
@@ -517,6 +517,8 @@ pub struct LineBuf {
   pub saved_col: Option<usize>,
   pub indent_ctx: IndentCtx,
 
+	pub scroll_offset: usize,
+
   pub undo_stack: Vec<Edit>,
   pub redo_stack: Vec<Edit>,
 }
@@ -535,6 +537,7 @@ impl Default for LineBuf {
       insert_mode_start_pos: None,
       saved_col: None,
       indent_ctx: IndentCtx::new(),
+			scroll_offset: 0,
       undo_stack: vec![],
       redo_stack: vec![],
     }
@@ -545,6 +548,86 @@ impl LineBuf {
   pub fn new() -> Self {
     Self::default()
   }
+	pub fn get_viewport_height(&self) -> usize {
+		let raw = read_shopts(|o| {
+			let height = o.line.viewport_height.as_str();
+			if let Ok(num) = height.parse::<usize>() {
+				num
+			} else if let Some(pre) = height.strip_suffix('%')
+			&& let Ok(num) = pre.parse::<usize>() {
+				if !isatty(STDIN_FILENO).unwrap_or_default() { return DEFAULT_VIEWPORT_HEIGHT };
+				let (_,rows) = get_win_size(STDIN_FILENO);
+				(rows as f64 * (num as f64 / 100.0)).round() as usize
+			} else {
+				log::warn!("Invalid viewport height shopt value: '{}', using 50% of terminal height as default", height);
+				if !isatty(STDIN_FILENO).unwrap_or_default() { return DEFAULT_VIEWPORT_HEIGHT };
+				let (_,rows) = get_win_size(STDIN_FILENO);
+				(rows as f64 * 0.5).round() as usize
+			}
+		});
+		(raw.min(100)).min(self.lines.len())
+	}
+	pub fn update_scroll_offset(&mut self) {
+		let height = self.get_viewport_height();
+		let scrolloff = read_shopts(|o| o.line.scroll_offset);
+		if self.cursor.pos.row < self.scroll_offset + scrolloff {
+			self.scroll_offset = self.cursor.pos.row.saturating_sub(scrolloff);
+		}
+		if self.cursor.pos.row + scrolloff >= self.scroll_offset + height {
+			self.scroll_offset = self.cursor.pos.row + scrolloff + 1 - height;
+		}
+
+		let max_offset = self.lines.len().saturating_sub(height);
+		self.scroll_offset = self.scroll_offset.min(max_offset);
+
+	}
+	pub fn get_window(&self) -> Vec<Line> {
+		let height = self.get_viewport_height();
+		self.lines
+			.iter()
+			.skip(self.scroll_offset)
+			.take(height)
+			.cloned()
+			.collect()
+	}
+	pub fn window_joined(&self) -> String {
+		join_lines(&self.get_window())
+	}
+	pub fn display_window_joined(&self) -> String {
+		let display = self.to_string();
+    let do_hl = state::read_shopts(|s| s.prompt.highlight);
+		let mut highlighter = Highlighter::new();
+    highlighter.only_visual(!do_hl);
+    highlighter.load_input(&display, self.cursor_byte_pos());
+    highlighter.expand_control_chars();
+    highlighter.highlight();
+    let highlighted = highlighter.take();
+		let hint = self.get_hint_text();
+		let lines = to_lines(format!("{highlighted}{hint}"));
+
+		let offset = self.scroll_offset.min(lines.len());
+		let (_,mid) = lines.split_at(offset);
+
+		let height = self.get_viewport_height().min(mid.len());
+		let (mid,_) = mid.split_at(height);
+
+		join_lines(mid)
+	}
+	pub fn window_slice_to_cursor(&self) -> Option<String> {
+		let mut result = String::new();
+		let start_row = self.scroll_offset;
+
+		for i in start_row..self.cursor.pos.row {
+			result.push_str(&self.lines[i].to_string());
+			result.push('\n');
+		}
+		let line = &self.lines[self.cursor.pos.row];
+		let col = self.cursor.pos.col.min(line.len());
+		for g in &line.graphemes()[..col] {
+			result.push_str(&g.to_string());
+		}
+		Some(result)
+	}
   pub fn is_empty(&self) -> bool {
     self.lines.len() == 0 || (self.lines.len() == 1 && self.count_graphemes() == 0)
   }
@@ -864,7 +947,10 @@ impl LineBuf {
       match (to, dir) {
         (To::Start, Direction::Forward) => {
           target = self
-            .word_motion_w(word, target, ignore_trailing_ws)
+						// 'w' is a special snowflake motion so we need these two extra arguments
+						// if we hit the ignore_trailing_ws path in the function,
+						// inclusive is flipped to true.
+            .word_motion_w(word, target, ignore_trailing_ws, &mut inclusive)
             .unwrap_or_else(|| {
               // we set inclusive to true so that we catch the entire word
               // instead of ignoring the last character
@@ -895,7 +981,13 @@ impl LineBuf {
       inclusive,
     })
   }
-  fn word_motion_w(&self, word: &Word, start: Pos, ignore_trailing_ws: bool) -> Option<Pos> {
+  fn word_motion_w(
+		&self,
+		word: &Word,
+		start: Pos,
+		ignore_trailing_ws: bool,
+		inclusive: &mut bool,
+	) -> Option<Pos> {
     use CharClass as C;
 
     // get our iterator of char classes
@@ -924,13 +1016,24 @@ impl LineBuf {
         }
 
         // go forward until we find some char class that isnt this one
-        let first_c = classes.next()?.1;
-
-        match classes.find(|(_, c)| c.is_other_class_or_ws(&first_c))? {
-          (pos, C::Whitespace) if ignore_trailing_ws => return Some(pos),
-          (_, C::Whitespace) => { /* fall through */ }
-          (pos, _) => return Some(pos),
-        }
+				let mut last = classes.next()?;
+        let first_c = last.1;
+				while let Some((p,c)) = classes.next() {
+					match c {
+						C::Whitespace => {
+							if ignore_trailing_ws {
+								*inclusive = true;
+								return Some(last.0)
+							} else {
+								break
+							}
+						}
+						c if !c.is_other_class_or_ws(&first_c) => {
+							last = (p,c);
+						}
+						_ => return Some(p)
+					}
+				}
 
         // we found whitespace previously, look for the next non-whitespace char class
         classes.find(|(_, c)| !c.is_ws()).map(|(p, _)| p)
@@ -1804,6 +1907,7 @@ impl LineBuf {
     Ok(())
   }
   fn extract_range(&mut self, motion: &MotionKind) -> Vec<Line> {
+		log::debug!("Extracting range for motion: {:?}", motion);
     let extracted = match motion {
       MotionKind::Char {
         start,
@@ -2512,6 +2616,7 @@ impl LineBuf {
         self.cursor.pos.col = line.len();
       }
     }
+		self.update_scroll_offset();
   }
 
   pub fn joined(&self) -> String {

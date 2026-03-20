@@ -69,10 +69,10 @@ pub fn get_win_size(fd: RawFd) -> (Col, Row) {
   }
 }
 
-fn enumerate_lines(s: &str, left_pad: usize, show_numbers: bool) -> String {
+fn enumerate_lines(s: &str, left_pad: usize, show_numbers: bool, offset: usize, total_buf_lines: usize) -> String {
   let lines: Vec<&str> = s.split('\n').collect();
-  let total_lines = lines.len();
-  let max_num_len = total_lines.to_string().len();
+  let visible_count = lines.len();
+  let max_num_len = (offset + visible_count).to_string().len();
   lines
     .into_iter()
     .enumerate()
@@ -81,7 +81,7 @@ fn enumerate_lines(s: &str, left_pad: usize, show_numbers: bool) -> String {
         acc.push_str(ln);
         acc.push('\n');
       } else {
-        let num = (i + 1).to_string();
+        let num = (i + offset + 1).to_string();
         let num_pad = max_num_len - num.len();
         // " 2 | " — num + padding + " | "
         let prefix_len = max_num_len + 3; // "N | "
@@ -91,7 +91,7 @@ fn enumerate_lines(s: &str, left_pad: usize, show_numbers: bool) -> String {
         } else {
           " ".repeat(prefix_len + 1).to_string()
         };
-        if i == total_lines - 1 {
+        if i == visible_count - 1 {
           write!(acc, "{prefix}{}{ln}", " ".repeat(trail_pad)).unwrap();
         } else {
           writeln!(acc, "{prefix}{}{ln}", " ".repeat(trail_pad)).unwrap();
@@ -220,7 +220,7 @@ pub trait KeyReader {
 
 pub trait LineWriter {
   fn clear_rows(&mut self, layout: &Layout) -> ShResult<()>;
-  fn redraw(&mut self, prompt: &str, line: &str, new_layout: &Layout) -> ShResult<()>;
+  fn redraw(&mut self, prompt: &str, line: &str, new_layout: &Layout, offset: usize, total_buf_lines: usize) -> ShResult<()>;
   fn flush_write(&mut self, buf: &str) -> ShResult<()>;
   fn send_bell(&mut self) -> ShResult<()>;
 }
@@ -541,7 +541,6 @@ impl Perform for KeyCollector {
     // SS3 sequences
     if byte == b'O' {
       self.ss3_pending = true;
-      return;
     }
   }
 }
@@ -1095,7 +1094,7 @@ impl LineWriter for TermWriter {
     Ok(())
   }
 
-  fn redraw(&mut self, prompt: &str, line: &str, new_layout: &Layout) -> ShResult<()> {
+  fn redraw(&mut self, prompt: &str, line: &str, new_layout: &Layout, offset: usize, total_buf_lines: usize) -> ShResult<()> {
     let err = |_| {
       ShErr::simple(
         ShErrKind::InternalErr,
@@ -1121,7 +1120,7 @@ impl LineWriter for TermWriter {
     if multiline {
       let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
       let show_numbers = read_shopts(|o| o.prompt.line_numbers);
-      let display_line = enumerate_lines(line, prompt_end.col as usize, show_numbers);
+      let display_line = enumerate_lines(line, prompt_end.col as usize, show_numbers, offset, total_buf_lines);
       self.buffer.push_str(&display_line);
     } else {
       self.buffer.push_str(line);
