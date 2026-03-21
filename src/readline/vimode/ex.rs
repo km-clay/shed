@@ -5,10 +5,9 @@ use std::str::Chars;
 use itertools::Itertools;
 
 use crate::bitflags;
-use crate::expand::{Expander, expand_raw};
+use crate::expand::Expander;
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::parse::lex::TkFlags;
-use crate::readline::complete::SimpleCompleter;
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
@@ -17,7 +16,7 @@ use crate::readline::vicmd::{
   WriteDest,
 };
 use crate::readline::vimode::{ModeReport, ViInsert, ViMode};
-use crate::state::{get_home, write_meta};
+use crate::state::write_meta;
 
 bitflags! {
   #[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -83,7 +82,7 @@ impl ExEditor {
     }
   }
   pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<()> {
-    let Some(mut cmd) = self.mode.handle_key(key) else {
+    let Some(cmd) = self.mode.handle_key(key) else {
       return Ok(());
     };
     log::debug!("ExEditor got cmd: {:?}", cmd);
@@ -268,6 +267,7 @@ fn parse_ex_command(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Opt
     }
     _ if "help".starts_with(&cmd_name) => {
       let cmd = "help ".to_string() + chars.collect::<String>().trim();
+			log::debug!("Parsed help command: {}", cmd);
       Ok(Some(Verb::ShellCmd(cmd)))
     }
     "normal!" => parse_normal(chars),

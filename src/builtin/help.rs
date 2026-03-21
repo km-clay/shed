@@ -1,7 +1,6 @@
 use std::{env, io::Write, path::Path};
 
 use ariadne::Span as ASpan;
-use nix::libc::STDIN_FILENO;
 
 use crate::{
   libsh::{
@@ -9,11 +8,10 @@ use crate::{
     guards::RawModeGuard,
   },
   parse::{
-    NdRule, Node, Redir, RedirType,
+    NdRule, Node,
     execute::{exec_input, prepare_argv},
     lex::{QuoteState, Span},
   },
-  procio::{IoFrame, IoMode},
   readline::{complete::ScoredCandidate, markers},
   state,
 };
@@ -100,13 +98,12 @@ pub fn help(node: Node) -> ShResult<()> {
         let expanded = expand_help(&unescaped);
         let tags = read_tags(&expanded);
 
-        for (tag, line) in &tags {}
+        for (_tag, _line) in &tags {}
 
-        if let Some((matched_tag, line)) = get_best_match(&topic, &tags) {
+        if let Some((_matched_tag, line)) = get_best_match(&topic, &tags) {
           open_help(&expanded, Some(line), Some(filename))?;
           state::set_status(0);
           return Ok(());
-        } else {
         }
       }
     }

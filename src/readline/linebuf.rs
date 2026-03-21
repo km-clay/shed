@@ -26,7 +26,6 @@ use crate::{
   state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars},
 };
 
-const PUNCTUATION: [&str; 3] = ["?", "!", "."];
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -551,6 +550,7 @@ impl Default for LineBuf {
   }
 }
 
+#[allow(dead_code,unused_variables)]
 impl LineBuf {
   pub fn new() -> Self {
     Self::default()
@@ -2432,7 +2432,7 @@ impl LineBuf {
           self.insert_str(&contents);
         }
         ReadSrc::Cmd(cmd) => {
-          let output = match expand_cmd_sub(&cmd) {
+          let output = match expand_cmd_sub(cmd) {
             Ok(out) => out,
             Err(e) => {
               e.print_error();
@@ -2582,11 +2582,10 @@ impl LineBuf {
     let new_cursor = self.cursor.pos;
 
     // Stop merging on any non-char-insert command, even if buffer didn't change
-    if !is_char_insert && !is_undo_op {
-      if let Some(edit) = self.undo_stack.last_mut() {
-        edit.merging = false;
-      }
-    }
+    if !is_char_insert && !is_undo_op
+		&& let Some(edit) = self.undo_stack.last_mut() {
+			edit.merging = false;
+		}
 
     if self.lines != before && !is_undo_op {
       self.redo_stack.clear();
@@ -2607,11 +2606,10 @@ impl LineBuf {
       } else {
         self.handle_edit(before, new_cursor, old_cursor);
         // Change starts a new merge chain so subsequent InsertChars merge into it
-        if starts_merge {
-          if let Some(edit) = self.undo_stack.last_mut() {
-            edit.merging = true;
-          }
-        }
+        if starts_merge
+				&& let Some(edit) = self.undo_stack.last_mut() {
+					edit.merging = true;
+				}
       }
     }
 
@@ -3040,7 +3038,7 @@ impl Display for LineBuf {
           }
           cloned[e].push_char(markers::VISUAL_MODE_END);
         }
-        SelectMode::Block(pos) => todo!(),
+        SelectMode::Block(_pos) => todo!(),
       }
       let mut lines = vec![];
       for line in &cloned {

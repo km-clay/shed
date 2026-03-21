@@ -13,7 +13,7 @@ use crate::{
   prelude::*,
   procio::{IoMode, borrow_fd},
   signal::{disable_reaping, enable_reaping},
-  state::{self, ShellParam, Var, VarFlags, VarKind, set_status, write_jobs, write_vars},
+  state::{self, ShellParam, VarFlags, VarKind, set_status, write_jobs, write_vars},
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;

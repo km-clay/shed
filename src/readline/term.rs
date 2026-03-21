@@ -69,7 +69,7 @@ pub fn get_win_size(fd: RawFd) -> (Col, Row) {
   }
 }
 
-fn enumerate_lines(s: &str, left_pad: usize, show_numbers: bool, offset: usize, total_buf_lines: usize) -> String {
+fn enumerate_lines(s: &str, left_pad: usize, show_numbers: bool, offset: usize, _total_buf_lines: usize) -> String {
   let lines: Vec<&str> = s.split('\n').collect();
   let visible_count = lines.len();
   let max_num_len = (offset + visible_count).to_string().len();

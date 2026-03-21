@@ -1,6 +1,6 @@
 use history::History;
 use keys::{KeyCode, KeyEvent, ModKeys};
-use linebuf::{LineBuf, SelectMode};
+use linebuf::LineBuf;
 use std::collections::VecDeque;
 use std::fmt::Write;
 use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
@@ -10,14 +10,13 @@ use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVis
 
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::expand_prompt;
-use crate::libsh::error::{ShErr, ShErrKind};
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::readline::vimode::{ViEx, ViVerbatim};
 use crate::state::{
-  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_meta, read_shopts, with_vars, write_meta, write_vars
+  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta, write_vars
 };
 use crate::{
   libsh::error::ShResult,
@@ -278,45 +277,24 @@ pub struct ShedVi {
 
 impl ShedVi {
   pub fn new(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
-    let mut new = Self {
-      reader: PollReader::new(),
-      writer: TermWriter::new(tty),
-      prompt,
-      tty,
-      completer: Box::new(FuzzyCompleter::default()),
-      highlighter: Highlighter::new(),
-      mode: Box::new(ViInsert::new()),
-      saved_mode: None,
-      pending_keymap: Vec::new(),
-      old_layout: None,
-      repeat_action: None,
-      repeat_motion: None,
-      editor: LineBuf::new(),
-      history: History::new()?,
-      ex_history: History::empty(),
-      needs_redraw: true,
-			ctrl_d_warning_counter: 0,
-			status_msgs: VecDeque::new()
-    };
-    write_vars(|v| {
-      v.set_var(
-        "SHED_VI_MODE",
-        VarKind::Str(new.mode.report_mode().to_string()),
-        VarFlags::NONE,
-      )
-    })?;
-    new.prompt.refresh();
-    new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
-    new.print_line(false)?;
-    Ok(new)
+		Self::new_private(prompt, tty, true)
   }
 
   pub fn new_no_hist(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
+		Self::new_private(prompt, tty, false)
+  }
+
+	fn new_private(prompt: Prompt, tty: RawFd, with_hist: bool) -> ShResult<Self> {
+		let history = if with_hist {
+			History::new()?
+		} else {
+			History::empty()
+		};
     let mut new = Self {
       reader: PollReader::new(),
       writer: TermWriter::new(tty),
-      tty,
       prompt,
+      tty,
       completer: Box::new(FuzzyCompleter::default()),
       highlighter: Highlighter::new(),
       mode: Box::new(ViInsert::new()),
@@ -326,7 +304,7 @@ impl ShedVi {
       repeat_action: None,
       repeat_motion: None,
       editor: LineBuf::new(),
-      history: History::empty(),
+      history,
       ex_history: History::empty(),
       needs_redraw: true,
 			ctrl_d_warning_counter: 0,
@@ -343,7 +321,7 @@ impl ShedVi {
     new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
     new.print_line(false)?;
     Ok(new)
-  }
+	}
 
   pub fn with_initial(mut self, initial: &str) -> Self {
     self.editor = LineBuf::new().with_initial(initial, 0);
@@ -677,181 +655,213 @@ impl ShedVi {
     Ok(ReadlineEvent::Pending)
   }
 
+	fn accept_hint(&mut self) -> ShResult<Option<ReadlineEvent>> {
+		self.editor.accept_hint();
+		if !self.history.at_pending() {
+			self.history.reset_to_pending();
+		}
+		self
+			.history
+			.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+		self.needs_redraw = true;
+
+		Ok(None)
+	}
+
+	fn handle_tab(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
+    let KeyEvent(KeyCode::Tab, mod_keys) = key else {
+			return Ok(None)
+		};
+
+		if self.mode.report_mode() != ModeReport::Ex
+			&& self.editor.attempt_history_expansion(&self.history)
+		{
+			// If history expansion occurred, don't attempt completion yet
+			// allow the user to see the expanded command and accept or edit it before completing
+			return Ok(None);
+		}
+
+		let direction = match mod_keys {
+			ModKeys::SHIFT => -1,
+			_ => 1,
+		};
+		let line = self.focused_editor().joined();
+		let cursor_pos = self.focused_editor().cursor_byte_pos();
+
+		match self.completer.complete(line, cursor_pos, direction) {
+			Err(e) => {
+				e.print_error();
+				// Printing the error invalidates the layout
+				self.old_layout = None;
+			}
+			Ok(Some(line)) => {
+				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
+				let cand = self.completer.selected_candidate().unwrap_or_default();
+				with_vars([("_COMP_CANDIDATE".into(), cand.clone())], || {
+					post_cmds.exec_with(&cand);
+				});
+
+				let span_start = self.completer.token_span().0;
+
+				let new_cursor = span_start
+					+ self
+					.completer
+					.selected_candidate()
+					.map(|c| c.len())
+					.unwrap_or_default();
+
+				self.focused_editor().set_buffer(line.clone());
+				self.focused_editor().set_cursor_from_flat(new_cursor);
+
+				if !self.history.at_pending() {
+					self.history.reset_to_pending();
+				}
+				self
+					.history
+					.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+				let hint = self.history.get_hint();
+				self.editor.set_hint(hint);
+				write_vars(|v| {
+					v.set_var(
+						"SHED_VI_MODE",
+						VarKind::Str(self.mode.report_mode().to_string()),
+						VarFlags::NONE,
+					)
+				})
+				.ok();
+
+				// If we are here, we hit a case where pressing tab returned a single candidate
+				// So we can just go ahead and reset the completer after this
+				self.completer.reset();
+			}
+			Ok(None) => {
+				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
+				let candidates = self.completer.all_candidates();
+				let num_candidates = candidates.len();
+				with_vars(
+					[
+					("_NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
+					("_MATCHES".into(), Into::<Var>::into(candidates)),
+					(
+						"_SEARCH_STR".into(),
+						Into::<Var>::into(self.completer.token()),
+					),
+					],
+					|| {
+						post_cmds.exec();
+					},
+				);
+
+				if self.completer.is_active() {
+					write_vars(|v| {
+						v.set_var(
+							"SHED_VI_MODE",
+							VarKind::Str("COMPLETE".to_string()),
+							VarFlags::NONE,
+						)
+					})
+					.ok();
+					self.prompt.refresh();
+					self.needs_redraw = true;
+					self.editor.set_hint(None);
+				} else {
+					self.writer.send_bell().ok();
+				}
+			}
+		}
+
+		self.needs_redraw = true;
+		Ok(None)
+	}
+
+	fn start_hist_search(&mut self) {
+		let initial = self.focused_editor().joined();
+		match self.focused_history().start_search(&initial) {
+			Some(entry) => {
+				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
+				with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
+					post_cmds.exec_with(&entry);
+				});
+
+				self.focused_editor().set_buffer(entry);
+				self.focused_editor().move_cursor_to_end();
+				self
+					.history
+					.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+				self.editor.set_hint(None);
+			}
+			None => {
+				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
+				let entries = self.focused_history().fuzzy_finder.candidates().to_vec();
+				let matches = self
+					.focused_history()
+					.fuzzy_finder
+					.filtered()
+					.iter()
+					.cloned()
+					.map(|sc| sc.content)
+					.collect::<Vec<_>>();
+
+				let num_entries = entries.len();
+				let num_matches = matches.len();
+				with_vars(
+					[
+					("_ENTRIES".into(), Into::<Var>::into(entries)),
+					("_NUM_ENTRIES".into(), Into::<Var>::into(num_entries)),
+					("_MATCHES".into(), Into::<Var>::into(matches)),
+					("_NUM_MATCHES".into(), Into::<Var>::into(num_matches)),
+					("_SEARCH_STR".into(), Into::<Var>::into(initial)),
+					],
+					|| {
+						post_cmds.exec();
+					},
+				);
+
+				if self.focused_history().fuzzy_finder.is_active() {
+					write_vars(|v| {
+						v.set_var(
+							"SHED_VI_MODE",
+							VarKind::Str("SEARCH".to_string()),
+							VarFlags::NONE,
+						)
+					})
+					.ok();
+					self.prompt.refresh();
+					self.needs_redraw = true;
+					self.editor.set_hint(None);
+				} else {
+					self.writer.send_bell().ok();
+				}
+			}
+		}
+	}
+
+	fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
+		if self.editor.attempt_history_expansion(&self.history) {
+			// If history expansion occurred, don't submit yet
+			// allow the user to see the expanded command and accept or edit it before submitting
+			return Ok(None);
+		}
+
+		self.editor.set_hint(None);
+		self.editor.set_cursor_from_flat(self.editor.cursor_max());
+		self.print_line(true)?;
+		self.writer.flush_write("\n")?;
+		let buf = self.editor.take_buf();
+		self.history.reset();
+		Ok(Some(ReadlineEvent::Line(buf)))
+	}
+
   pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
     if self.should_accept_hint(&key) {
-      self.editor.accept_hint();
-      if !self.history.at_pending() {
-        self.history.reset_to_pending();
-      }
-      self
-        .history
-        .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-      self.needs_redraw = true;
-      return Ok(None);
+			return self.accept_hint();
     }
 
-    if let KeyEvent(KeyCode::Tab, mod_keys) = key {
-      if self.mode.report_mode() != ModeReport::Ex
-        && self.editor.attempt_history_expansion(&self.history)
-      {
-        // If history expansion occurred, don't attempt completion yet
-        // allow the user to see the expanded command and accept or edit it before completing
-        return Ok(None);
-      }
-
-      let direction = match mod_keys {
-        ModKeys::SHIFT => -1,
-        _ => 1,
-      };
-      let line = self.focused_editor().joined();
-      let cursor_pos = self.focused_editor().cursor_byte_pos();
-
-      match self.completer.complete(line, cursor_pos, direction) {
-        Err(e) => {
-          e.print_error();
-          // Printing the error invalidates the layout
-          self.old_layout = None;
-        }
-        Ok(Some(line)) => {
-          let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
-          let cand = self.completer.selected_candidate().unwrap_or_default();
-          with_vars([("_COMP_CANDIDATE".into(), cand.clone())], || {
-            post_cmds.exec_with(&cand);
-          });
-
-          let span_start = self.completer.token_span().0;
-
-          let new_cursor = span_start
-            + self
-              .completer
-              .selected_candidate()
-              .map(|c| c.len())
-              .unwrap_or_default();
-
-          self.focused_editor().set_buffer(line.clone());
-          self.focused_editor().set_cursor_from_flat(new_cursor);
-
-          if !self.history.at_pending() {
-            self.history.reset_to_pending();
-          }
-          self
-            .history
-            .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-          let hint = self.history.get_hint();
-          self.editor.set_hint(hint);
-          write_vars(|v| {
-            v.set_var(
-              "SHED_VI_MODE",
-              VarKind::Str(self.mode.report_mode().to_string()),
-              VarFlags::NONE,
-            )
-          })
-          .ok();
-
-          // If we are here, we hit a case where pressing tab returned a single candidate
-          // So we can just go ahead and reset the completer after this
-          self.completer.reset();
-        }
-        Ok(None) => {
-          let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
-          let candidates = self.completer.all_candidates();
-          let num_candidates = candidates.len();
-          with_vars(
-            [
-              ("_NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
-              ("_MATCHES".into(), Into::<Var>::into(candidates)),
-              (
-                "_SEARCH_STR".into(),
-                Into::<Var>::into(self.completer.token()),
-              ),
-            ],
-            || {
-              post_cmds.exec();
-            },
-          );
-
-          if self.completer.is_active() {
-            write_vars(|v| {
-              v.set_var(
-                "SHED_VI_MODE",
-                VarKind::Str("COMPLETE".to_string()),
-                VarFlags::NONE,
-              )
-            })
-            .ok();
-            self.prompt.refresh();
-            self.needs_redraw = true;
-            self.editor.set_hint(None);
-          } else {
-            self.writer.send_bell().ok();
-          }
-        }
-      }
-
-      self.needs_redraw = true;
-      return Ok(None);
+    if let KeyEvent(KeyCode::Tab, _) = key {
+			return self.handle_tab(key);
     } else if let KeyEvent(KeyCode::Char('R'), ModKeys::CTRL) = key
-      && matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex)
-    {
-      let initial = self.focused_editor().joined();
-      match self.focused_history().start_search(&initial) {
-        Some(entry) => {
-          let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
-          with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
-            post_cmds.exec_with(&entry);
-          });
-
-          self.focused_editor().set_buffer(entry);
-          self.focused_editor().move_cursor_to_end();
-          self
-            .history
-            .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-          self.editor.set_hint(None);
-        }
-        None => {
-          let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
-          let entries = self.focused_history().fuzzy_finder.candidates().to_vec();
-          let matches = self
-            .focused_history()
-            .fuzzy_finder
-            .filtered()
-            .iter()
-            .cloned()
-            .map(|sc| sc.content)
-            .collect::<Vec<_>>();
-
-          let num_entries = entries.len();
-          let num_matches = matches.len();
-          with_vars(
-            [
-              ("_ENTRIES".into(), Into::<Var>::into(entries)),
-              ("_NUM_ENTRIES".into(), Into::<Var>::into(num_entries)),
-              ("_MATCHES".into(), Into::<Var>::into(matches)),
-              ("_NUM_MATCHES".into(), Into::<Var>::into(num_matches)),
-              ("_SEARCH_STR".into(), Into::<Var>::into(initial)),
-            ],
-            || {
-              post_cmds.exec();
-            },
-          );
-
-          if self.focused_history().fuzzy_finder.is_active() {
-            write_vars(|v| {
-              v.set_var(
-                "SHED_VI_MODE",
-                VarKind::Str("SEARCH".to_string()),
-                VarFlags::NONE,
-              )
-            })
-            .ok();
-            self.prompt.refresh();
-            self.needs_redraw = true;
-            self.editor.set_hint(None);
-          } else {
-            self.writer.send_bell().ok();
-          }
-        }
-      }
+		&& matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex) {
+			self.start_hist_search();
     }
 
     let Ok(cmd) = self.mode.handle_key_fallible(key) else {
@@ -871,22 +881,9 @@ impl ShedVi {
     }
 
     if cmd.is_submit_action()
-      && !self.editor.cursor_is_escaped()
-      && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
-    {
-      if self.editor.attempt_history_expansion(&self.history) {
-        // If history expansion occurred, don't submit yet
-        // allow the user to see the expanded command and accept or edit it before submitting
-        return Ok(None);
-      }
-
-      self.editor.set_hint(None);
-      self.editor.set_cursor_from_flat(self.editor.cursor_max());
-      self.print_line(true)?;
-      self.writer.flush_write("\n")?;
-      let buf = self.editor.take_buf();
-      self.history.reset();
-      return Ok(Some(ReadlineEvent::Line(buf)));
+		&& !self.editor.cursor_is_escaped()
+		&& (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete)) {
+			return self.submit();
     }
 
     if (cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile)
@@ -1354,166 +1351,170 @@ impl ShedVi {
     }
   }
 
+	pub fn handle_cmd_repeat(&mut self, cmd: ViCmd) -> ShResult<()> {
+		let Some(replay) = self.repeat_action.clone() else {
+			return Ok(());
+		};
+		let ViCmd { verb, .. } = cmd;
+		let VerbCmd(count, _) = verb.unwrap();
+		match replay {
+			CmdReplay::ModeReplay { cmds, mut repeat } => {
+				if count > 1 {
+					repeat = count as u16;
+				}
+
+				let old_mode = self.mode.report_mode();
+
+				for _ in 0..repeat {
+					let cmds = cmds.clone();
+					for (i, cmd) in cmds.iter().enumerate() {
+						self.exec_cmd(cmd.clone(), true)?;
+						// After the first command, start merging so all subsequent
+						// edits fold into one undo entry (e.g. cw + inserted chars)
+						if i == 0
+							&& let Some(edit) = self.editor.undo_stack.last_mut()
+						{
+							edit.start_merge();
+						}
+					}
+					// Stop merging at the end of the replay
+					if let Some(edit) = self.editor.undo_stack.last_mut() {
+						edit.stop_merge();
+					}
+
+					let old_mode_clone = match old_mode {
+						ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn ViMode>,
+						ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn ViMode>,
+						ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn ViMode>,
+						ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())) as Box<dyn ViMode>,
+						ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn ViMode>,
+						ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn ViMode>,
+						ModeReport::Unknown => unreachable!(),
+					};
+					self.mode = old_mode_clone;
+				}
+			}
+			CmdReplay::Single(mut cmd) => {
+				if count > 1 {
+					// Override the counts with the one passed to the '.' command
+					if cmd.verb.is_some() {
+						if let Some(v_mut) = cmd.verb.as_mut() {
+							v_mut.0 = count
+						}
+						if let Some(m_mut) = cmd.motion.as_mut() {
+							m_mut.0 = 1
+						}
+					} else {
+						return Ok(()); // it has to have a verb to be repeatable,
+													 // something weird happened
+					}
+				}
+				self.editor.exec_cmd(cmd)?;
+			}
+			_ => unreachable!("motions should be handled in the other branch"),
+		}
+		Ok(())
+	}
+
+	pub fn handle_motion_repeat(&mut self, cmd: ViCmd) -> ShResult<()> {
+		match cmd.motion.as_ref().unwrap() {
+			MotionCmd(count, Motion::RepeatMotion) => {
+				let Some(motion) = self.repeat_motion.clone() else {
+					return Ok(());
+				};
+				let repeat_cmd = ViCmd {
+					register: RegisterName::default(),
+					verb: cmd.verb,
+					motion: Some(motion),
+					raw_seq: format!("{count};"),
+					flags: CmdFlags::empty(),
+				};
+				self.editor.exec_cmd(repeat_cmd)
+			}
+			MotionCmd(count, Motion::RepeatMotionRev) => {
+				let Some(motion) = self.repeat_motion.clone() else {
+					return Ok(());
+				};
+				let mut new_motion = motion.invert_char_motion();
+				new_motion.0 = *count;
+				let repeat_cmd = ViCmd {
+					register: RegisterName::default(),
+					verb: cmd.verb,
+					motion: Some(new_motion),
+					raw_seq: format!("{count},"),
+					flags: CmdFlags::empty(),
+				};
+				self.editor.exec_cmd(repeat_cmd)
+			}
+			_ => unreachable!(),
+		}
+	}
   pub fn exec_cmd(&mut self, mut cmd: ViCmd, from_replay: bool) -> ShResult<()> {
     if cmd.verb().is_some() && let Some(range) = self.editor.select_range() {
       cmd.motion = Some(MotionCmd(1, range))
     };
 
     if cmd.is_mode_transition() {
-      return self.exec_mode_transition(cmd, from_replay);
+      self.exec_mode_transition(cmd, from_replay)
     } else if cmd.is_cmd_repeat() {
-      let Some(replay) = self.repeat_action.clone() else {
-        return Ok(());
-      };
-      let ViCmd { verb, .. } = cmd;
-      let VerbCmd(count, _) = verb.unwrap();
-      match replay {
-        CmdReplay::ModeReplay { cmds, mut repeat } => {
-          if count > 1 {
-            repeat = count as u16;
-          }
-
-          let old_mode = self.mode.report_mode();
-
-          for _ in 0..repeat {
-            let cmds = cmds.clone();
-            for (i, cmd) in cmds.iter().enumerate() {
-              self.exec_cmd(cmd.clone(), true)?;
-              // After the first command, start merging so all subsequent
-              // edits fold into one undo entry (e.g. cw + inserted chars)
-              if i == 0
-                && let Some(edit) = self.editor.undo_stack.last_mut()
-              {
-                edit.start_merge();
-              }
-            }
-            // Stop merging at the end of the replay
-            if let Some(edit) = self.editor.undo_stack.last_mut() {
-              edit.stop_merge();
-            }
-
-            let old_mode_clone = match old_mode {
-              ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn ViMode>,
-              ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn ViMode>,
-              ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn ViMode>,
-              ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())) as Box<dyn ViMode>,
-              ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn ViMode>,
-              ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn ViMode>,
-              ModeReport::Unknown => unreachable!(),
-            };
-            self.mode = old_mode_clone;
-          }
-        }
-        CmdReplay::Single(mut cmd) => {
-          if count > 1 {
-            // Override the counts with the one passed to the '.' command
-            if cmd.verb.is_some() {
-              if let Some(v_mut) = cmd.verb.as_mut() {
-                v_mut.0 = count
-              }
-              if let Some(m_mut) = cmd.motion.as_mut() {
-                m_mut.0 = 1
-              }
-            } else {
-              return Ok(()); // it has to have a verb to be repeatable,
-              // something weird happened
-            }
-          }
-          self.editor.exec_cmd(cmd)?;
-        }
-        _ => unreachable!("motions should be handled in the other branch"),
-      }
-      return Ok(());
+			self.handle_cmd_repeat(cmd)
     } else if cmd.is_motion_repeat() {
-      match cmd.motion.as_ref().unwrap() {
-        MotionCmd(count, Motion::RepeatMotion) => {
-          let Some(motion) = self.repeat_motion.clone() else {
-            return Ok(());
-          };
-          let repeat_cmd = ViCmd {
-            register: RegisterName::default(),
-            verb: cmd.verb,
-            motion: Some(motion),
-            raw_seq: format!("{count};"),
-            flags: CmdFlags::empty(),
-          };
-          return self.editor.exec_cmd(repeat_cmd);
-        }
-        MotionCmd(count, Motion::RepeatMotionRev) => {
-          let Some(motion) = self.repeat_motion.clone() else {
-            return Ok(());
-          };
-          let mut new_motion = motion.invert_char_motion();
-          new_motion.0 = *count;
-          let repeat_cmd = ViCmd {
-            register: RegisterName::default(),
-            verb: cmd.verb,
-            motion: Some(new_motion),
-            raw_seq: format!("{count},"),
-            flags: CmdFlags::empty(),
-          };
-          return self.editor.exec_cmd(repeat_cmd);
-        }
-        _ => unreachable!(),
-      }
-    }
+			self.handle_motion_repeat(cmd)
+		} else {
+			if self.mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_none() {
+				self.editor.stop_selecting();
+				let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+				self.swap_mode(&mut mode);
+			}
 
-    if self.mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_none() {
-      self.editor.stop_selecting();
-      let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
-      self.swap_mode(&mut mode);
-    }
+			if cmd.is_repeatable() && !from_replay {
+				if self.mode.report_mode() == ModeReport::Visual {
+					// The motion is assigned in the line buffer execution, so we also have to
+					// assign it here in order to be able to repeat it
+					if let Some(range) = self.editor.select_range() {
+						cmd.motion = Some(MotionCmd(1, range))
+					} else {
+						log::warn!("You're in visual mode with no select range??");
+					};
+				}
+				self.repeat_action = Some(CmdReplay::Single(cmd.clone()));
+			}
 
-    if cmd.is_repeatable() && !from_replay {
-      if self.mode.report_mode() == ModeReport::Visual {
-        // The motion is assigned in the line buffer execution, so we also have to
-        // assign it here in order to be able to repeat it
-        if let Some(range) = self.editor.select_range() {
-          cmd.motion = Some(MotionCmd(1, range))
-        } else {
-          log::warn!("You're in visual mode with no select range??");
-        };
-      }
-      self.repeat_action = Some(CmdReplay::Single(cmd.clone()));
-    }
+			if cmd.is_char_search() {
+				self.repeat_motion = cmd.motion.clone()
+			}
 
-    if cmd.is_char_search() {
-      self.repeat_motion = cmd.motion.clone()
-    }
+			self.editor.exec_cmd(cmd.clone())?;
 
-    self.editor.exec_cmd(cmd.clone())?;
+			if self.mode.report_mode() == ModeReport::Visual
+				&& cmd.verb().is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank) {
+					self.editor.stop_selecting();
+					let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+					self.swap_mode(&mut mode);
+			}
 
-    if self.mode.report_mode() == ModeReport::Visual
-      && cmd
-        .verb()
-        .is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank)
-    {
-      self.editor.stop_selecting();
-      let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
-      self.swap_mode(&mut mode);
-    }
+			if self.mode.report_mode() != ModeReport::Visual && self.editor.select_range().is_some() {
+				self.editor.stop_selecting();
+			}
 
-    if self.mode.report_mode() != ModeReport::Visual && self.editor.select_range().is_some() {
-      self.editor.stop_selecting();
-    }
+			if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
+				let mut mode: Box<dyn ViMode> = if matches!(
+					self.mode.report_mode(),
+					ModeReport::Ex | ModeReport::Verbatim
+				) {
+					if let Some(saved) = self.saved_mode.take() {
+						saved
+					} else {
+						Box::new(ViNormal::new())
+					}
+				} else {
+					Box::new(ViNormal::new())
+				};
+				self.swap_mode(&mut mode);
+			}
 
-    if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
-      let mut mode: Box<dyn ViMode> = if matches!(
-        self.mode.report_mode(),
-        ModeReport::Ex | ModeReport::Verbatim
-      ) {
-        if let Some(saved) = self.saved_mode.take() {
-          saved
-        } else {
-          Box::new(ViNormal::new())
-        }
-      } else {
-        Box::new(ViNormal::new())
-      };
-      self.swap_mode(&mut mode);
-    }
-
-    Ok(())
+			Ok(())
+		}
   }
 }
 
