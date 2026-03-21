@@ -155,137 +155,162 @@
     description = "Additional completion scripts to source when shed starts (e.g. for custom tools or functions)";
   };
 
-  viewportHeight = {
-    type = lib.types.either lib.types.int lib.types.str;
-    default = "50%";
-    description = "Maximum viewport height for the line editor buffer";
-  };
-
-  scrollOffset = {
-    type = lib.types.int;
-    default = "1";
-    description = "The minimum number of lines to keep visible above and below the cursor when scrolling (i.e. the 'scrolloff' option in vim)";
-  };
-
   environmentVars = lib.mkOption {
     type = lib.types.attrsOf lib.types.str;
     default = {};
     description = "Environment variables to set when shed starts";
   };
 
-  settings = {
-    dotGlob = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Whether to include hidden files in glob patterns";
+  shopts = lib.mkOption {
+    type = lib.types.submodule {
+      options = {
+        line = lib.mkOption {
+          type = lib.types.submodule {
+            options = {
+              viewport_height = lib.mkOption {
+                type = lib.types.either lib.types.int lib.types.str;
+                default = "50%";
+                description = "Maximum viewport height for the line editor buffer";
+              };
+              scroll_offset = lib.mkOption {
+                type = lib.types.int;
+                default = 1;
+                description = "The minimum number of lines to keep visible above and below the cursor when scrolling (i.e. the 'scrolloff' option in vim)";
+              };
+            };
+          };
+          default = {};
+          description = "Settings related to the line editor (i.e. the 'shopt line.*' options)";
+        };
+        core = lib.mkOption {
+          type = lib.types.submodule {
+            options = {
+              dotglob = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Whether to include hidden files in glob patterns";
+              };
+              autocd = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Whether to automatically change into directories when they are entered as commands";
+              };
+              hist_ignore_dupes = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Whether to ignore duplicate entries in the command history";
+              };
+              max_hist = lib.mkOption {
+                type = lib.types.int;
+                default = 10000;
+                description = "The maximum number of entries to keep in the command history";
+              };
+              interactive_comments = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to allow comments in interactive mode";
+              };
+              auto_hist = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to automatically add commands to the history as they are executed";
+              };
+              bell_enabled = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to allow shed to ring the terminal bell on certain events (e.g. command completion, errors, etc.)";
+              };
+              max_recurse_depth = lib.mkOption {
+                type = lib.types.int;
+                default = 1000;
+                description = "The maximum depth to allow when recursively executing shell functions";
+              };
+              xpg_echo = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Whether to have the 'echo' builtin expand escape sequences like \\n and \\t (if false, it will print them verbatim)";
+              };
+              noclobber = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Whether to prevent redirection from overwriting existing files by default (i.e. behave as if 'set -o noclobber' is always in effect)";
+              };
+            };
+          };
+          default = {};
+          description = "Core settings (i.e. the 'shopt core.*' options)";
+        };
+        prompt = lib.mkOption {
+          type = lib.types.submodule {
+            options = {
+              leader = lib.mkOption {
+                type = lib.types.str;
+                default = "\\\\";
+                description = "The leader key to use for custom keymaps (e.g. if set to '\\\\', then a keymap with keys='x' would be triggered by '\\x')";
+              };
+              trunc_prompt_path = lib.mkOption {
+                type = lib.types.int;
+                default = 4;
+                description = "The maximum number of path segments to show in the prompt";
+              };
+              comp_limit = lib.mkOption {
+                type = lib.types.int;
+                default = 1000;
+                description = "The maximum number of completion candidates to show before truncating the list";
+              };
+              highlight = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to enable syntax highlighting in the shell";
+              };
+              linebreak_on_incomplete = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to automatically insert a newline when the input is incomplete";
+              };
+              line_numbers = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Whether to show line numbers in the prompt";
+              };
+              screensaver_cmd = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "A shell command to execute after a period of inactivity (i.e. a custom screensaver)";
+              };
+              screensaver_idle_time = lib.mkOption {
+                type = lib.types.int;
+                default = 0;
+                description = "The amount of inactivity time in seconds before the screensaver command is executed";
+              };
+              completion_ignore_case = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Whether to ignore case when completing commands and file names";
+              };
+              auto_indent = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to automatically indent new lines based on the previous line";
+              };
+            };
+          };
+          default = {};
+          description = "Settings related to the prompt (i.e. the 'shopt prompt.*' options)";
+        };
+      };
     };
-    autocd = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Whether to automatically change into directories when they are entered as commands";
-    };
-    historyIgnoresDupes = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Whether to ignore duplicate entries in the command history";
-    };
-    maxHistoryEntries = lib.mkOption {
-      type = lib.types.int;
-      default = 10000;
-      description = "The maximum number of entries to keep in the command history";
-    };
-    interactiveComments = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Whether to allow comments in interactive mode";
-    };
-    autoHistory = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Whether to automatically add commands to the history as they are executed";
-    };
-    bellEnabled = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Whether to allow shed to ring the terminal bell on certain events (e.g. command completion, errors, etc.)";
-    };
-    maxRecurseDepth = lib.mkOption {
-      type = lib.types.int;
-      default = 1000;
-      description = "The maximum depth to allow when recursively executing shell functions";
-    };
-    echoExpandsEscapes = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Whether to have the 'echo' builtin expand escape sequences like \\n and \\t (if false, it will print them verbatim)";
-    };
-    noClobber = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Whether to prevent redirection from overwriting existing files by default (i.e. behave as if 'set -o noclobber' is always in effect)";
-    };
+    default = {};
+  };
 
-    leaderKey = lib.mkOption {
-      type = lib.types.str;
-      default = "\\\\";
-      description = "The leader key to use for custom keymaps (e.g. if set to '\\\\', then a keymap with keys='x' would be triggered by '\\x')";
-    };
-    promptPathSegments = lib.mkOption {
-      type = lib.types.int;
-      default = 4;
-      description = "The maximum number of path segments to show in the prompt";
-    };
-    completionLimit = lib.mkOption {
-      type = lib.types.int;
-      default = 1000;
-      description = "The maximum number of completion candidates to show before truncating the list";
-    };
-    syntaxHighlighting = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Whether to enable syntax highlighting in the shell";
-    };
-    linebreakOnIncomplete = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Whether to automatically insert a newline when the input is incomplete";
-    };
-    lineNumbers = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Whether to show line numbers in the prompt";
-    };
-    screensaverCmd = lib.mkOption {
-      type = lib.types.str;
-      default = "";
-      description = "A shell command to execute after a period of inactivity (i.e. a custom screensaver)";
-    };
-    screensaverIdleTime = lib.mkOption {
-      type = lib.types.int;
-      default = 0;
-      description = "The amount of inactivity time in seconds before the screensaver command is executed";
-    };
-    completionIgnoreCase = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Whether to ignore case when completing commands and file names";
-    };
-    autoIndent = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Whether to automatically indent new lines based on the previous line";
-    };
-
-
-    extraPostConfig = lib.mkOption {
-      type = lib.types.str;
-      default = "";
-      description = "Additional configuration to append to the shed configuration file";
-    };
-    extraPreConfig = lib.mkOption {
-      type = lib.types.str;
-      default = "";
-      description = "Additional configuration to prepend to the shed configuration file";
-    };
+  extraPostConfig = lib.mkOption {
+    type = lib.types.str;
+    default = "";
+    description = "Additional configuration to append to the shed configuration file";
+  };
+  extraPreConfig = lib.mkOption {
+    type = lib.types.str;
+    default = "";
+    description = "Additional configuration to prepend to the shed configuration file";
   };
 }
