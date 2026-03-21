@@ -631,59 +631,31 @@ pub enum AutoCmdKind {
   OnCompletionStart,
   OnCompletionCancel,
   OnCompletionSelect,
+	OnScreensaverExec,
+	OnScreensaverReturn,
   OnExit,
 }
 
-impl Display for AutoCmdKind {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    match self {
-      Self::PreCmd => write!(f, "pre-cmd"),
-      Self::PostCmd => write!(f, "post-cmd"),
-      Self::PreChangeDir => write!(f, "pre-change-dir"),
-      Self::PostChangeDir => write!(f, "post-change-dir"),
-      Self::OnJobFinish => write!(f, "on-job-finish"),
-      Self::PrePrompt => write!(f, "pre-prompt"),
-      Self::PostPrompt => write!(f, "post-prompt"),
-      Self::PreModeChange => write!(f, "pre-mode-change"),
-      Self::PostModeChange => write!(f, "post-mode-change"),
-      Self::OnHistoryOpen => write!(f, "on-history-open"),
-      Self::OnHistoryClose => write!(f, "on-history-close"),
-      Self::OnHistorySelect => write!(f, "on-history-select"),
-      Self::OnCompletionStart => write!(f, "on-completion-start"),
-      Self::OnCompletionCancel => write!(f, "on-completion-cancel"),
-      Self::OnCompletionSelect => write!(f, "on-completion-select"),
-      Self::OnExit => write!(f, "on-exit"),
-    }
-  }
-}
-
-impl FromStr for AutoCmdKind {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
-      "pre-cmd" => Ok(Self::PreCmd),
-      "post-cmd" => Ok(Self::PostCmd),
-      "pre-change-dir" => Ok(Self::PreChangeDir),
-      "post-change-dir" => Ok(Self::PostChangeDir),
-      "on-job-finish" => Ok(Self::OnJobFinish),
-      "pre-prompt" => Ok(Self::PrePrompt),
-      "post-prompt" => Ok(Self::PostPrompt),
-      "pre-mode-change" => Ok(Self::PreModeChange),
-      "post-mode-change" => Ok(Self::PostModeChange),
-      "on-history-open" => Ok(Self::OnHistoryOpen),
-      "on-history-close" => Ok(Self::OnHistoryClose),
-      "on-history-select" => Ok(Self::OnHistorySelect),
-      "on-completion-start" => Ok(Self::OnCompletionStart),
-      "on-completion-cancel" => Ok(Self::OnCompletionCancel),
-      "on-completion-select" => Ok(Self::OnCompletionSelect),
-      "on-exit" => Ok(Self::OnExit),
-      _ => Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        format!("Invalid autocmd kind: {}", s),
-      )),
-    }
-  }
-}
+crate::two_way_display!(AutoCmdKind,
+	PreCmd              <=> "pre-cmd";
+	PostCmd             <=> "post-cmd";
+	PreChangeDir        <=> "pre-change-dir";
+	PostChangeDir       <=> "post-change-dir";
+	OnJobFinish         <=> "on-job-finish";
+	PrePrompt           <=> "pre-prompt";
+	PostPrompt          <=> "post-prompt";
+	PreModeChange       <=> "pre-mode-change";
+	PostModeChange      <=> "post-mode-change";
+	OnHistoryOpen       <=> "on-history-open";
+	OnHistoryClose      <=> "on-history-close";
+	OnHistorySelect     <=> "on-history-select";
+	OnCompletionStart   <=> "on-completion-start";
+	OnCompletionCancel  <=> "on-completion-cancel";
+	OnCompletionSelect  <=> "on-completion-select";
+	OnScreensaverExec   <=> "on-screensaver-exec";
+	OnScreensaverReturn <=> "on-screensaver-return";
+	OnExit              <=> "on-exit";
+);
 
 #[derive(Clone, Debug)]
 pub struct AutoCmd {

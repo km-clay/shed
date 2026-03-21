@@ -388,7 +388,7 @@ mode on startup is Insert.
 
   When the buffer is taller than the terminal, the editor displays a
   scrolling viewport. The viewport follows the cursor and respects the
-  `scrolloff` option (minimum lines visible above/below the cursor).
+  `line.scroll_offset` shopt (minimum lines visible above/below the cursor).
 
   `Ctrl+D`    scroll down half a screen
   `Ctrl+U`    scroll up half a screen

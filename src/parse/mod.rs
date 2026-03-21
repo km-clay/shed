@@ -509,6 +509,12 @@ pub enum LoopKind {
   Until,
 }
 
+crate::two_way_display!(LoopKind,
+	While <=> "while";
+	Until <=> "until";
+);
+
+
 #[derive(Clone, Debug)]
 pub enum TestCase {
   Unary {
@@ -634,29 +640,6 @@ impl TestCaseBuilder {
         operand: self.rhs.take().unwrap(),
         conjunct: self.conjunct.take(),
       }
-    }
-  }
-}
-
-impl FromStr for LoopKind {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
-      "while" => Ok(Self::While),
-      "until" => Ok(Self::Until),
-      _ => Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        format!("Invalid loop kind: {s}"),
-      )),
-    }
-  }
-}
-
-impl Display for LoopKind {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    match self {
-      LoopKind::While => write!(f, "while"),
-      LoopKind::Until => write!(f, "until"),
     }
   }
 }

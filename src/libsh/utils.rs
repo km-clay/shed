@@ -8,6 +8,33 @@ use crate::parse::{Node, Redir, RedirType};
 use crate::prelude::*;
 use crate::state::AutoCmd;
 
+#[macro_export]
+/// Defines a two-way mapping between an enum and its string representation, implementing both Display and FromStr.
+macro_rules! two_way_display {
+	($name:ident, $($member:ident <=> $val:expr;)*) => {
+		impl Display for $name {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				match self {
+					$(Self::$member => write!(f, $val),)*
+				}
+			}
+		}
+
+		impl FromStr for $name {
+			type Err = ShErr;
+			fn from_str(s: &str) -> Result<Self, Self::Err> {
+				match s {
+					$($val => Ok(Self::$member),)*
+						_ => Err(ShErr::simple(
+								ShErrKind::ParseErr,
+								format!("Invalid {} kind: {}",stringify!($name),s),
+						)),
+				}
+			}
+		}
+	};
+}
+
 pub trait VecDequeExt<T> {
   fn to_vec(self) -> Vec<T>;
 }

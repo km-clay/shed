@@ -329,14 +329,21 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       Ok(0) => {
         // We timed out.
         if let Some(cmd) = exec_if_timeout {
-          let prepared = ReadlineEvent::Line(cmd);
+          let prepared = ReadlineEvent::Line(cmd.clone());
           let saved_hist_opt = read_shopts(|o| o.core.auto_hist);
           let _guard = scopeguard::guard(saved_hist_opt, |opt| {
             write_shopts(|o| o.core.auto_hist = opt);
           });
           write_shopts(|o| o.core.auto_hist = false); // don't save screensaver command to history
+					let pre_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnScreensaverExec));
+					pre_cmds.exec_with(&cmd);
 
-          match handle_readline_event(&mut readline, Ok(prepared))? {
+          let res = handle_readline_event(&mut readline, Ok(prepared))?;
+
+					let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnScreensaverReturn));
+					post_cmds.exec_with(&cmd);
+
+					match res {
             true => return Ok(()),
             false => continue,
           }

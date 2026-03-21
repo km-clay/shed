@@ -1,0 +1,44 @@
+*help*
+
+#SHED HELP#
+
+Shed is an experimental UNIX command interpreter (shell) usable as both an interactive login shell and as a shell script command preprocessor. Shed combines the functionality of `bash` with the UX and customizability of `vim`. Shed seeks to improve the interactive shell experience by providing:
+* Programmable, dynamic prompts
+* A hackable line editor similar to `zsh`'s `zle`
+* Custom tab completion
+* An event hook system
+* Fuzzy history search/tab completion
+* And many more features
+
+==============================================================================
+1. Available Topics                            *help-topics*
+
+  `help arith`        Arithmetic expansion: `$(( ))` syntax       |arith|
+  `help autocmd`      Autocmd hooks for shell events               |autocmd|
+  `help ex`           Ex mode (colon) commands                     |ex|
+  `help glob`         Pathname expansion and wildcards             |glob|
+  `help keybinds`     Vi mode keys, motions, text objects          |keybinds|
+  `help param`        Parameter expansion: `${}` operators         |param|
+  `help prompt`       Prompt configuration, PS1, PSR, echo -p      |prompt|
+  `help redirect`     Redirection, pipes, heredocs                 |redirect|
+
+==============================================================================
+2. Navigating Help                             *help-nav*
+
+  `help {topic}`      Open a help page by name. Prefix matches work,
+                      so `help key` opens |keybinds|.
+
+  `help {tag}`        Jump directly to a tagged section. Tags are the
+                      words marked with `*asterisks*` in the help files.
+
+                      Examples:
+                        `help text-objects`     jumps to |text-objects|
+                        `help prompt-escapes`   jumps to |prompt-escapes|
+                        `help heredoc`          jumps to |heredoc|
+
+  Cross-references like |prompt| are clickable tags. Search for them
+  with `help` followed by the reference name.
+
+  Inside the pager, use `/` to search and `q` to quit.
+
+==============================================================================

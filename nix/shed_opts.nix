@@ -155,6 +155,18 @@
     description = "Additional completion scripts to source when shed starts (e.g. for custom tools or functions)";
   };
 
+  viewportHeight = {
+    type = lib.types.either lib.types.int lib.types.str;
+    default = "50%";
+    description = "Maximum viewport height for the line editor buffer";
+  };
+
+  scrollOffset = {
+    type = lib.types.int;
+    default = "1";
+    description = "The minimum number of lines to keep visible above and below the cursor when scrolling (i.e. the 'scrolloff' option in vim)";
+  };
+
   environmentVars = lib.mkOption {
     type = lib.types.attrsOf lib.types.str;
     default = {};

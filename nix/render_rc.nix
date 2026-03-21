@@ -53,6 +53,9 @@ lib.concatLines [
       (lib.concatLines (lib.mapAttrsToList (name: value: "export ${name}=\"${value}\"") cfg.environmentVars))
       (lib.concatLines (lib.mapAttrsToList (name: value: "alias ${name}=\"${value}\"") cfg.aliases))
       (lib.concatLines [
+        "shopt line.viewport_height=${toString cfg.settings.viewportHeight}"
+        "shopt line.scroll_offset=${toString cfg.settings.scrollOffset}"
+
         "shopt core.dotglob=${boolToString cfg.settings.dotGlob}"
         "shopt core.autocd=${boolToString cfg.settings.autocd}"
         "shopt core.hist_ignore_dupes=${boolToString cfg.settings.historyIgnoresDupes}"

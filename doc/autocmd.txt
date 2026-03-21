@@ -145,7 +145,20 @@ behavior without modifying the shell itself.
       Special variables:
         `$_COMP_CANDIDATE`  the selected completion candidate
 
-  2.8 Exit Event                               *autocmd-exit-event*
+  2.8 Screensaver Events                       *autocmd-screensaver-events*
+
+  `on-screensaver-exec`                        *autocmd-on-screensaver-exec*
+
+      Fires when the screensaver activates after the idle timeout.
+      The screensaver command (see `shopt prompt.screensaver_cmd`) is
+      available for pattern matching.
+
+  `on-screensaver-return`                      *autocmd-on-screensaver-return*
+
+      Fires when the shell returns from the screensaver command.
+      The screensaver command is available for pattern matching.
+
+  2.9 Exit Event                               *autocmd-exit-event*
 
   `on-exit`                                    *autocmd-on-exit*
 

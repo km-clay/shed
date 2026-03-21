@@ -925,7 +925,7 @@ impl LineBuf {
       }
       Direction::Backward => {
         let slice = self.line_to_cursor();
-        for (i, gr) in slice.iter().rev().enumerate().skip(1) {
+        for (i, gr) in slice.iter().rev().enumerate() {
           if gr == char {
             match dest {
               Dest::On => return -(i as isize) - 1,
