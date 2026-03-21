@@ -1,0 +1,109 @@
+*ex* *ex-mode* *ex-commands* *colon-commands*
+
+#EX MODE#
+
+Ex mode provides colon commands for operations that go beyond single-key
+normal mode actions. Enter ex mode by pressing `:` in normal mode.
+
+The command line supports full editing via insert mode, and has its own
+command history navigable with `Up` and `Down`.
+
+==============================================================================
+1. Shell Commands                              *ex-shell*
+
+  `:!{cmd}`                                    *ex-bang*
+
+      Execute {cmd} in the shell. The following special variables are
+      set during execution and can be read or modified:
+
+        `$_BUFFER`    the current editor buffer contents
+        `$_CURSOR`    the cursor position (flat byte index)
+        `$_ANCHOR`    the visual selection anchor position
+
+      If the command modifies these variables, the editor state is
+      updated accordingly. This allows ex commands to programmatically
+      edit the buffer.
+
+      If the command sets `$_KEYS`, the value is fed back into the
+      editor as a key sequence.
+
+      Example:
+        `:!echo "$_BUFFER" | tr a-z A-Z > /tmp/out`
+        `:!_BUFFER=$(echo "$_BUFFER" | sort)`
+
+==============================================================================
+2. File Operations                             *ex-file*
+
+  `:r {file}`                                  *ex-read*
+
+      Read the contents of {file} and insert them into the buffer at
+      the cursor position.
+
+  `:r !{cmd}`                                  *ex-read-cmd*
+
+      Execute {cmd} and insert its output into the buffer.
+
+  `:w {file}`                                  *ex-write*
+
+      Write the buffer contents to {file}. Creates the file if it does
+      not exist, or truncates it if it does.
+
+  `:w >> {file}`                               *ex-write-append*
+
+      Append the buffer contents to {file}.
+
+  `:w !{cmd}`                                  *ex-write-cmd*
+
+      Pipe the buffer contents to {cmd} as stdin.
+
+  `:e {file}`                                  *ex-edit*
+
+      Open {file} in the editor defined by `$EDITOR`. Requires the
+      `EDITOR` environment variable to be set.
+
+      Example:
+        `:e ~/.config/shed/shedrc`
+
+==============================================================================
+3. Buffer Operations                           *ex-buffer*
+
+  `:d`                                         *ex-delete*
+
+      Delete the entire buffer.
+
+  `:y`                                         *ex-yank*
+
+      Yank the entire buffer into the default register.
+
+  `:pu`                                        *ex-put*
+
+      Put (paste) from the default register after the cursor.
+
+==============================================================================
+4. Other Commands                              *ex-other*
+
+  `:q`                                         *ex-quit*
+
+      Quit the editor / exit the shell.
+
+  `:help {topic}`                              *ex-help*
+
+      Display help for {topic}. Runs the `help` builtin.
+
+==============================================================================
+5. Path Expansion                              *ex-paths*
+
+  File paths in ex commands are subject to variable expansion. You can
+  use environment variables in paths:
+
+      `:e $HOME/.config/shed/shedrc`
+      `:w ${TMPDIR}/output.txt`
+
+==============================================================================
+6. Ex Command History                          *ex-history*
+
+  Ex mode maintains its own command history, separate from the main
+  shell history. Navigate with `Up` and `Down` while in ex mode.
+
+==============================================================================
+See also: |keybinds| |autocmd| |prompt|

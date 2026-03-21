@@ -1,0 +1,461 @@
+*keybinds* *keys* *vi-mode* *keybindings*
+
+#VI MODE KEYBINDINGS#
+
+The line editor uses a vi-style modal editing system with six modes:
+Normal, Insert, Visual, Replace, Ex (command), and Verbatim. The default
+mode on startup is Insert.
+
+==============================================================================
+1. Normal Mode                                 *normal-mode*
+
+  Normal mode is for navigating and manipulating text. Press `Esc` from
+  any other mode to return here.
+
+  1.1 Movement                                 *normal-movement*
+
+  `h` `l`                                      *key-h* *key-l*
+
+      Move left / right by one character.
+
+  `j` `k`                                      *key-j* *key-k*
+
+      Move down / up by one line.
+
+  `w` `W`                                      *key-w* *key-W*
+
+      Move to the start of the next word. `w` stops at punctuation
+      boundaries, `W` only stops at whitespace.
+
+  `b` `B`                                      *key-b* *key-B*
+
+      Move to the start of the previous word.
+
+  `e` `E`                                      *key-e* *key-E*
+
+      Move to the end of the next word.
+
+  `ge` `gE`                                    *key-ge* *key-gE*
+
+      Move to the end of the previous word.
+
+  `0`                                          *key-0*
+
+      Move to the start of the line.
+
+  `^`                                          *key-caret*
+
+      Move to the first non-whitespace character on the line.
+
+  `$`                                          *key-dollar*
+
+      Move to the end of the line.
+
+  `g_`                                         *key-g_*
+
+      Move to the last non-whitespace character on the line.
+
+  `gg`                                         *key-gg*
+
+      Move to the first line of the buffer.
+
+  `G`                                          *key-G*
+
+      Move to the last line of the buffer.
+
+  `|`                                          *key-bar*
+
+      Move to a specific column. `10|` moves to column 10.
+
+  `%`                                          *key-percent*
+
+      Jump to the matching bracket: `()`, `[]`, `{}`.
+
+  `](` `[(`                                   *key-paren-nav*
+
+      Jump to the next / previous unmatched parenthesis.
+
+  `]}` `[{`                                   *key-brace-nav*
+
+      Jump to the next / previous unmatched brace.
+
+  1.2 Character Search                         *char-search*
+
+  `f{char}`                                    *key-f*
+
+      Move forward to the next occurrence of {char} on the current line.
+
+  `F{char}`                                    *key-F*
+
+      Move backward to the previous occurrence of {char}.
+
+  `t{char}`                                    *key-t*
+
+      Move forward to just before {char}.
+
+  `T{char}`                                    *key-T*
+
+      Move backward to just after {char}.
+
+  `;`                                          *key-semicolon*
+
+      Repeat the last `f`, `F`, `t`, or `T` in the same direction.
+
+  `,`                                          *key-comma*
+
+      Repeat the last `f`, `F`, `t`, or `T` in the reverse direction.
+
+  1.3 Scrolling                                *scrolling*
+
+  `Ctrl+D`                                     *key-ctrl-d*
+
+      In normal mode, scroll down half a screen. See |viewport|.
+			In insert mode, `Ctrl+D` clears the buffer if there is any content, and exits the shell if there is not.
+
+  `Ctrl+U`                                     *key-ctrl-u*
+
+      Scroll up half a screen.
+
+  `Ctrl+G`                                     *key-ctrl-g*
+
+      Print current cursor position (line, column, total lines).
+
+  1.4 Operators                                *operators*
+
+  Operators take a {motion} or |text-object| to define the range they
+  act on. Double an operator to act on the whole line (e.g. `dd`, `>>`,
+  `==`).
+
+  `d{motion}`                                  *key-d*
+
+      Delete the text covered by {motion}.
+
+      `dd`      delete the whole line
+      `D`       delete to end of line (same as `d$`)
+      `x`       delete character under cursor (same as `dl`)
+      `X`       delete character before cursor (same as `dh`)
+
+  `c{motion}`                                  *key-c*
+
+      Delete the text covered by {motion} and enter insert mode.
+
+      `cc`      change the whole line
+      `C`       change to end of line (same as `c$`)
+      `s`       change the character under cursor (same as `cl`)
+      `S`       change the whole line (same as `cc`)
+
+  `y{motion}`                                  *key-y*
+
+      Yank (copy) the text covered by {motion} into a register.
+
+      `yy`      yank the whole line
+      `Y`       yank the whole line
+
+  `>{motion}`                                  *key-indent*
+
+      Indent the lines covered by {motion}.
+
+      `>>`      indent the current line
+
+  `<{motion}`                                  *key-dedent*
+
+      Dedent the lines covered by {motion}.
+
+      `<<`      dedent the current line
+
+  `={motion}`                                  *key-equalize*
+
+      Auto-indent the lines covered by {motion}. Uses the minimum
+      nesting depth of each line's start and end to determine the
+      correct indentation level.
+
+      `==`      equalize the current line
+
+  `g~{motion}`                                 *key-toggle-case*
+
+      Toggle the case of the text covered by {motion}.
+
+  `gu{motion}`                                 *key-gu*
+
+      Convert the text covered by {motion} to lowercase.
+
+  `gU{motion}`                                 *key-gU*
+
+      Convert the text covered by {motion} to uppercase.
+
+  1.5 Single-Key Actions                       *normal-actions*
+
+  `p`                                          *key-p*
+
+      Paste from the register after the cursor.
+
+  `P`                                          *key-P*
+
+      Paste from the register before the cursor.
+
+  `r{char}`                                    *key-r*
+
+      Replace the character under the cursor with {char}. With a count,
+      replaces that many characters.
+
+  `~`                                          *key-tilde*
+
+      Toggle the case of the character under the cursor and advance.
+      Accepts a count.
+
+  `J`                                          *key-J*
+
+      Join the current line with the next line.
+
+  `u`                                          *key-u*
+
+      Undo the last change.
+
+  `Ctrl+R`                                     *key-ctrl-r*
+
+      Redo the last undone change.
+
+  `.`                                          *key-dot*
+
+      Repeat the last editing command.
+
+  `Ctrl+A`                                     *key-ctrl-a*
+
+      Increment the number under the cursor. Recognizes decimal,
+      hexadecimal (`0x`), binary (`0b`), and octal (`0o`) formats.
+      Preserves leading zeros and prefix.
+
+  `Ctrl+X`                                     *key-ctrl-x*
+
+      Decrement the number under the cursor.
+
+  1.6 Entering Other Modes                     *mode-entry*
+
+  `i`       insert before cursor               *key-i*
+  `a`       insert after cursor                 *key-a*
+  `I`       insert at first non-whitespace      *key-I*
+  `A`       insert at end of line               *key-A*
+  `o`       open a new line below               *key-o*
+  `O`       open a new line above               *key-O*
+  `R`       enter replace mode                  *key-R*
+  `v`       enter visual mode (character-wise)  *key-v*
+  `V`       enter visual mode (line-wise)       *key-V-visual*
+  `gv`      reselect last visual region         *key-gv*
+  `:`       enter ex mode                       *key-colon*
+
+  1.7 Registers                                *registers*
+
+  `"{reg}`                                     *key-register*
+
+      Use register {reg} for the next delete, yank, or put. Registers
+      `a`-`z` store text; uppercase `A`-`Z` appends to the corresponding
+      lowercase register.
+
+==============================================================================
+2. Insert Mode                                 *insert-mode*
+
+  Insert mode is for typing text. Characters are inserted at the cursor.
+
+  `Esc`           return to normal mode
+  `Backspace`     delete character before cursor
+  `Ctrl+H`        same as Backspace
+  `Ctrl+W`        delete word before cursor
+  `Delete`        delete character under cursor
+  `Tab`           trigger completion (see |completion|)
+  `Shift+Tab`     trigger completion (reverse direction)
+  `Ctrl+R`        open history search (see |history-search|)
+  `Ctrl+V`        enter verbatim mode (insert literal key sequence)
+  `Enter`         submit line or insert newline if input is incomplete
+
+  Arrow keys, Home, and End work as expected for navigation.
+
+==============================================================================
+3. Visual Mode                                 *visual-mode*
+
+  Visual mode selects a region of text. Enter with `v` (character-wise)
+  or `V` (line-wise) from normal mode.
+
+  All normal-mode motions work to extend the selection. Operators act
+  on the selected region without needing a motion:
+
+  `d` `x`     delete selection
+  `c` `s` `S` change selection (delete and enter insert mode)
+  `y`         yank selection
+  `p` `P`     paste, replacing selection
+  `>` `<`     indent / dedent selection
+  `=`         equalize selection
+  `~`         toggle case of selection
+  `u`         lowercase selection
+  `U`         uppercase selection
+  `r{char}`   replace every character in selection with {char}
+  `J`         join selected lines
+  `o` `O`     swap cursor and selection anchor
+
+  Press `Esc` to return to normal mode without acting.
+
+==============================================================================
+4. Replace Mode                                *replace-mode*
+
+  Replace mode overwrites existing characters as you type. Enter with
+  `R` from normal mode.
+
+  `Esc`           return to normal mode
+  `Backspace`     undo the last replacement
+
+  All other keys replace the character under the cursor and advance.
+
+==============================================================================
+5. Ex Mode                                     *ex-mode-keys*
+
+  Ex mode accepts colon commands. Enter with `:` from normal mode.
+  See |ex| for available commands.
+
+  `Enter`         execute the command
+  `Esc`           cancel and return to normal mode
+  `Ctrl+C`        clear the command line
+  `Up` `Down`     navigate ex command history
+
+==============================================================================
+6. Text Objects                                *text-objects*
+
+  Text objects define a range of text based on structure. They are used
+  with operators: `d`, `c`, `y`, etc. Each has an "inner" (`i`) and
+  "around" (`a`) variant.
+
+  `iw` `aw`                                    *obj-word*
+
+      Word (punctuation-delimited). `aw` includes trailing whitespace.
+
+  `iW` `aW`                                    *obj-WORD*
+
+      WORD (whitespace-delimited). `aW` includes trailing whitespace.
+
+  `i"` `a"`                                    *obj-dquote*
+
+      Double-quoted string.
+
+  `i'` `a'`                                    *obj-squote*
+
+      Single-quoted string.
+
+  `` i` `` `` a` ``                            *obj-backtick*
+
+      Backtick-quoted string.
+
+  `i)` `a)` `ib` `ab`                         *obj-paren*
+
+      Parenthesized block.
+
+  `i]` `a]`                                    *obj-bracket*
+
+      Square-bracketed block.
+
+  `i}` `a}` `iB` `aB`                         *obj-brace*
+
+      Brace-delimited block.
+
+  `i<` `a<`                                    *obj-angle*
+
+      Angle-bracketed block.
+
+  `it` `at`                                    *obj-tag*
+
+      XML/HTML tag block.
+
+  `is` `as`                                    *obj-sentence*
+
+      Sentence.
+
+  `ip` `ap`                                    *obj-paragraph*
+
+      Paragraph (separated by blank lines).
+
+==============================================================================
+7. Counts                                      *counts*
+
+  Most motions, operators, and actions accept a numeric count prefix:
+
+      `3j`        move down 3 lines
+      `2dw`       delete 2 words
+      `5>>`       indent 5 lines
+      `10l`       move 10 characters right
+
+  When both the operator and the motion have counts, they are
+  multiplied: `2d3w` deletes 6 words.
+
+==============================================================================
+8. Viewport                                    *viewport*
+
+  When the buffer is taller than the terminal, the editor displays a
+  scrolling viewport. The viewport follows the cursor and respects the
+  `scrolloff` option (minimum lines visible above/below the cursor).
+
+  `Ctrl+D`    scroll down half a screen
+  `Ctrl+U`    scroll up half a screen
+  `Ctrl+G`    display current position in the buffer
+
+  Line numbers in the left margin reflect actual buffer positions, not
+  viewport-relative indices.
+
+==============================================================================
+9. User-Defined Keymaps                        *keymaps* *keymap*
+
+  Custom key bindings are created with the `keymap` command:
+
+    `keymap [flags] {keys} {action}`
+
+  Flags select the mode(s) the binding applies to:
+
+    `-n`      normal mode
+    `-i`      insert mode
+    `-v`      visual mode
+    `-x`      ex mode
+    `-o`      operator-pending mode
+    `-r`      replace mode
+
+  Keys and actions use angle-bracket notation for special keys:
+
+    `<CR>`    Enter             `<Esc>`     Escape
+    `<Tab>`   Tab               `<BS>`      Backspace
+    `<Del>`   Delete            `<Space>`   Space
+    `<Up>` `<Down>` `<Left>` `<Right>`      Arrow keys
+    `<Home>` `<End>`            Home / End
+    `<F1>` - `<F12>`            Function keys
+    `<CMD>`   Enter ex mode
+    `<Leader>`                  Leader key (set via `shopt prompt.leader`)
+
+  Modifier prefixes:
+
+    `C-`      Control           `A-` `M-`   Alt / Meta
+    `S-`      Shift
+
+  Examples:
+
+    `keymap -n <Leader>w ':w<CR>'`     Leader+w writes to file
+    `keymap -i jk '<Esc>'`             jk exits insert mode
+    `keymap -n <C-n> ':!mycmd<CR>'`    Ctrl+n runs a shell command
+
+  To remove a binding:
+
+    `keymap --remove {keys}`
+
+==============================================================================
+10. Completion                                 *completion*
+
+  `Tab`       start or cycle through completion candidates (forward)
+  `Shift+Tab` cycle backward
+
+  When the completion menu is visible, `Tab` and arrow keys navigate
+  candidates. `Enter` accepts the selected candidate. `Esc` dismisses
+  the menu.
+
+==============================================================================
+11. History Search                             *history-search*
+
+  `Ctrl+R`    open fuzzy history search (from insert or ex mode)
+
+  Type to filter history entries. `Enter` accepts the selected entry.
+  `Esc` dismisses the search.
+
+==============================================================================
+See also: |ex| |autocmd| |prompt|

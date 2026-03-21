@@ -61,23 +61,32 @@ pub fn help(node: Node) -> ShResult<()> {
 
   let hpath = env::var("SHED_HPATH").unwrap_or_default();
 
+	// search for prefixes of help doc filenames
   for path in hpath.split(':') {
-    let path = Path::new(&path).join(&topic);
-    if path.is_file() {
-      let Ok(contents) = std::fs::read_to_string(&path) else {
+    let dir = Path::new(path);
+    let Ok(entries) = dir.read_dir() else { continue };
+    for entry in entries {
+      let Ok(entry) = entry else { continue };
+      let path = entry.path();
+      if !path.is_file() {
         continue;
-      };
-      let filename = path.file_stem().unwrap().to_string_lossy().to_string();
+      }
+      let stem = path.file_stem().unwrap().to_string_lossy();
+      if stem.starts_with(&topic) {
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+          continue;
+        };
 
-      let unescaped = unescape_help(&contents);
-      let expanded = expand_help(&unescaped);
-      open_help(&expanded, None, Some(filename))?;
-      state::set_status(0);
-      return Ok(());
+        let unescaped = unescape_help(&contents);
+        let expanded = expand_help(&unescaped);
+        open_help(&expanded, None, Some(stem.into_owned()))?;
+        state::set_status(0);
+        return Ok(());
+      }
     }
   }
 
-  // didn't find an exact filename match, its probably a tag search
+  // didn't find a filename match, its probably a tag search
   for path in hpath.split(':') {
     let path = Path::new(path);
     if let Ok(entries) = path.read_dir() {

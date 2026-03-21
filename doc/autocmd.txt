@@ -1,0 +1,197 @@
+*autocmd* *autocmds* *hooks*
+
+#AUTOCMDS#
+
+Autocmds (automatic commands) execute shell commands in response to
+specific events. They provide a hook system for customizing shell
+behavior without modifying the shell itself.
+
+==============================================================================
+1. Registration                                *autocmd-register*
+
+  `autocmd [OPTIONS] {kind} {command}`
+
+  Register {command} to run whenever the event {kind} fires.
+
+  Options:
+
+    `-p {pattern}`                             *autocmd-pattern*
+
+        Only run this autocmd when {pattern} (a regex) matches the
+        event's context string. The context varies by event type:
+        for |autocmd-pre-cmd| it is the command being executed, for
+        |autocmd-post-change-dir| it is the target directory, etc.
+
+    `-c`                                       *autocmd-clear*
+
+        Clear all autocmds of the specified {kind}. No command is
+        needed.
+
+  Examples:
+
+      `autocmd post-cmd 'echo "exit: $?"'`
+      `autocmd -p '^git' pre-cmd 'echo running git...'`
+      `autocmd -c pre-cmd`
+
+==============================================================================
+2. Event Kinds                                 *autocmd-kinds*
+
+  2.1 Command Execution                        *autocmd-cmd-events*
+
+  `pre-cmd`                                    *autocmd-pre-cmd*
+
+      Fires before a command is executed. The command string is
+      available for pattern matching.
+
+  `post-cmd`                                   *autocmd-post-cmd*
+
+      Fires after a command finishes. The command string is available
+      for pattern matching.
+
+  2.2 Directory Changes                        *autocmd-dir-events*
+
+  `pre-change-dir`                             *autocmd-pre-change-dir*
+
+      Fires before `cd` changes the working directory. The target
+      directory is available for pattern matching.
+
+      Special variables:
+        `$_NEW_DIR`    the directory being changed to
+        `$_OLD_DIR`    the current directory (before the change)
+
+  `post-change-dir`                            *autocmd-post-change-dir*
+
+      Fires after a successful directory change.
+
+      Special variables:
+        `$_NEW_DIR`    the new working directory
+        `$_OLD_DIR`    the previous directory
+
+  2.3 Job Events                               *autocmd-job-events*
+
+  `on-job-finish`                              *autocmd-on-job-finish*
+
+      Fires when a background job completes. The job's command string
+      is available for pattern matching.
+
+  2.4 Prompt Events                            *autocmd-prompt-events*
+
+  `pre-prompt`                                 *autocmd-pre-prompt*
+
+      Fires before the prompt is rendered. Useful for updating prompt
+      state.
+
+  `post-prompt`                                *autocmd-post-prompt*
+
+      Fires after the prompt is rendered.
+
+  2.5 Mode Change Events                       *autocmd-mode-events*
+
+  `pre-mode-change`                            *autocmd-pre-mode-change*
+
+      Fires before the vi editing mode changes. The `$SHED_VI_MODE`
+      variable still holds the old mode.
+
+  `post-mode-change`                           *autocmd-post-mode-change*
+
+      Fires after the vi editing mode changes. `$SHED_VI_MODE` reflects
+      the new mode.
+
+  2.6 History Events                           *autocmd-hist-events*
+
+  `on-history-open`                            *autocmd-on-history-open*
+
+      Fires when the fuzzy history search window opens.
+
+      Special variables:
+        `$_ENTRIES`      array of all history entries
+        `$_NUM_ENTRIES`  count of all entries
+        `$_MATCHES`      array of currently matching entries
+        `$_NUM_MATCHES`  count of matching entries
+        `$_SEARCH_STR`   the current search string
+
+  `on-history-close`                           *autocmd-on-history-close*
+
+      Fires when the history search is dismissed without selecting.
+
+  `on-history-select`                          *autocmd-on-history-select*
+
+      Fires when a history entry is selected. The entry text is
+      available for pattern matching.
+
+      Special variables:
+        `$_HIST_ENTRY`   the selected history entry
+
+  2.7 Completion Events                        *autocmd-comp-events*
+
+  `on-completion-start`                        *autocmd-on-completion-start*
+
+      Fires when the completion menu becomes visible.
+
+      Special variables:
+        `$_MATCHES`      array of completion candidates
+        `$_NUM_MATCHES`  count of candidates
+        `$_SEARCH_STR`   the token being completed
+
+  `on-completion-cancel`                       *autocmd-on-completion-cancel*
+
+      Fires when the completion menu is dismissed without selecting.
+
+  `on-completion-select`                       *autocmd-on-completion-select*
+
+      Fires when a completion candidate is accepted. The candidate
+      is available for pattern matching.
+
+      Special variables:
+        `$_COMP_CANDIDATE`  the selected completion candidate
+
+  2.8 Exit Event                               *autocmd-exit-event*
+
+  `on-exit`                                    *autocmd-on-exit*
+
+      Fires when the shell is about to exit.
+
+==============================================================================
+3. Behavior                                    *autocmd-behavior*
+
+  - Multiple autocmds can be registered for the same event kind. They
+    execute in registration order.
+
+  - If an autocmd command fails, the error is printed but subsequent
+    autocmds for the same event still run.
+
+  - Autocmds do not affect the shell's exit status (`$?`). The exit
+    status is saved before autocmd execution and restored afterward.
+
+  - Pattern matching uses Rust regex syntax. If an autocmd has no
+    pattern, it always fires for its event kind.
+
+  - Special variables (e.g. `$_NEW_DIR`) are only available within the
+    scope of the autocmd execution. They are not set globally.
+
+==============================================================================
+4. Examples                                    *autocmd-examples*
+
+  Notify on directory change:
+
+      `autocmd post-change-dir 'echo "moved to $_NEW_DIR"'`
+
+  Run a linter only on git commands:
+
+      `autocmd -p '^git commit' post-cmd 'lint-check'`
+
+  Refresh prompt on mode change (for mode indicator):
+
+      `autocmd post-mode-change 'kill -USR1 $$'`
+			(SIGUSR1 can be used to remotely refresh the prompt. See |prompt|)
+
+  Log completed jobs:
+
+      `autocmd on-job-finish 'echo "job done" >> /tmp/jobs.log'`
+
+  Clean up on exit:
+
+      `autocmd on-exit 'rm -f /tmp/my-shell-*.tmp'`
+
+==============================================================================
+See also: |keybinds| |prompt| |ex|

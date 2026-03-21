@@ -1,0 +1,229 @@
+*prompt* *ps1* *psr* *prompt-expansion*
+
+#PROMPT#
+
+The shell displays a configurable prompt before each command. Two prompt
+strings are available: PS1 (the main prompt) and PSR (an optional
+right-aligned prompt).
+
+==============================================================================
+1. Setting the Prompt                          *prompt-set*
+
+  The prompt is controlled by the `PS1` and `PSR` environment variables.
+  Set them in your shell configuration:
+
+      `PS1='\u@\h:\W\$ '`
+      `PSR='$SHED_VI_MODE'`
+
+  Prompts are re-expanded before each display, so command substitutions
+  and functions are evaluated every time.
+
+==============================================================================
+2. Escape Sequences                            *prompt-escapes*
+
+  The following backslash escapes are recognized in PS1 and PSR:
+
+  `\u`                                         *prompt-user*
+
+      The current username (from $USER).
+
+  `\h`                                         *prompt-host*
+
+      The hostname (from $HOST).
+
+  `\w`                                         *prompt-pwd*
+
+      The current working directory, with $HOME replaced by `~`.
+
+      Example:
+        `/home/user/projects`  ->  `~/projects`
+
+  `\W`                                         *prompt-pwd-short*
+
+      Truncated working directory. Shows only the last N path segments,
+      where N is controlled by `shopt prompt.trunc_prompt_path`
+      (default: 4).
+
+      Example (with trunc_prompt_path=2):
+        `/home/user/projects/myapp`  ->  `projects/myapp`
+
+  `\s`                                         *prompt-shell*
+
+      The shell name: `shed`.
+
+  `\$`                                         *prompt-symbol*
+
+      `#` if the effective UID is 0 (root), `$` otherwise.
+
+  `\j`                                         *prompt-jobs*
+
+      The number of background jobs currently managed by the shell.
+
+  `\t`                                         *prompt-runtime-ms*
+
+      The runtime of the last command in milliseconds.
+
+  `\T`                                         *prompt-runtime-fmt*
+
+      The runtime of the last command in human-readable format
+      (e.g. `1m 23s 456ms`).
+
+  `\n`                                         *prompt-newline*
+
+      A literal newline. Use this to create multi-line prompts.
+
+  `\r`                                         *prompt-return*
+
+      A literal carriage return.
+
+  `\\`                                         *prompt-backslash*
+
+      A literal backslash.
+
+  `\e[...`                                     *prompt-ansi*
+
+      An ANSI escape sequence. The sequence starts with `\e[` and ends
+      at the first letter character. Used for colors and formatting.
+
+      Common codes:
+        `\e[0m`       reset all attributes
+        `\e[1m`       bold
+        `\e[3m`       italic
+        `\e[4m`       underline
+        `\e[31m`      red foreground
+        `\e[32m`      green foreground
+        `\e[33m`      yellow foreground
+        `\e[34m`      blue foreground
+        `\e[35m`      magenta foreground
+        `\e[36m`      cyan foreground
+        `\e[1;32m`    bold green
+
+      Example:
+        `PS1='\e[1;32m\u\e[0m@\e[34m\h\e[0m:\w\$ '`
+
+==============================================================================
+3. Functions in Prompts                        *prompt-functions*
+
+  `\@{funcname}`                               *prompt-func*
+  `\@funcname`
+
+      Call a shell function and insert its output. The function must
+      be defined before the prompt is expanded. If the function does
+      not exist, the literal sequence is displayed.
+
+      Example:
+        `git_branch() { git branch --show-current 2>/dev/null; }`
+        `PS1='\u@\h (\@git_branch)\$ '`
+
+      This allows dynamic prompt content that updates on every command.
+
+==============================================================================
+4. Right Prompt (PSR)                          *prompt-right* *psr*
+
+  The PSR variable defines an optional right-aligned prompt displayed
+  on the last line of PS1. It supports the same escape sequences as PS1.
+
+  PSR is only displayed when it fits: if the combined width of the
+  input line and PSR exceeds the terminal width, PSR is hidden.
+
+  PSR is restricted to a single line. If it contains newlines, only the
+  first line is used.
+
+      `PSR='$SHED_VI_MODE'`
+      `PSR='\T'`              # show last command runtime on the right
+
+==============================================================================
+5. Multi-Line Prompts                          *prompt-multiline*
+
+  PS1 may span multiple lines using `\n`. The editor tracks line
+  positions for proper cursor movement and redrawing.
+
+      `PS1='\e[1m\u@\h\e[0m\n\W\$ '`
+
+  This displays the username and hostname on the first line, and the
+  working directory and prompt symbol on the second.
+
+==============================================================================
+6. echo -p                                     *echo-prompt*
+
+  The `echo` builtin accepts a `-p` flag that enables prompt-style
+  expansion on its arguments. All prompt escape sequences listed above
+  are recognized.
+
+      `echo -p '\u'`          # prints the current username
+      `echo -p '\W'`          # prints the truncated working directory
+      `echo -p '\e[31mred\e[0m'`  # prints "red" in red
+
+  The `-p` flag can be combined with `-n` (no trailing newline) and
+  `-e` (interpret escape sequences like `\n` and `\t`). When both `-e`
+  and `-p` are used, prompt expansion runs first, then escape sequence
+  interpretation.
+
+==============================================================================
+7. Prompt Options (shopt)                      *prompt-options*
+
+  The following options under `shopt prompt.*` affect prompt behavior:
+
+  `prompt.trunc_prompt_path`                   *opt-trunc-path*
+
+      Maximum number of path segments shown by `\W`. Default: 4.
+
+  `prompt.highlight`                           *opt-highlight*
+
+      Enable syntax highlighting in the input line. Default: true.
+
+  `prompt.auto_indent`                         *opt-auto-indent*
+
+      Automatically indent new lines to match the current nesting
+      depth. Default: true.
+
+  `prompt.linebreak_on_incomplete`             *opt-linebreak*
+
+      Insert a newline when Enter is pressed on an incomplete command
+      (e.g. unclosed quotes or pipes). Default: true.
+
+  `prompt.line_numbers`                        *opt-line-numbers*
+
+      Display line numbers in the left margin for multi-line buffers.
+      Default: true.
+
+  `prompt.leader`                              *opt-leader*
+
+      The leader key sequence for |keymaps|. Default: `" "` (space).
+
+  `prompt.comp_limit`                          *opt-comp-limit*
+
+      Maximum number of completion candidates to display. Default: 100.
+
+  `prompt.completion_ignore_case`              *opt-comp-case*
+
+      Case-insensitive tab completion. Default: false.
+
+==============================================================================
+8. Special Variables                           *prompt-variables*
+
+  `SHED_VI_MODE`                               *var-vi-mode*
+
+      Set automatically before each prompt to the current vi mode name:
+      `NORMAL`, `INSERT`, `VISUAL`, `COMMAND`, `REPLACE`, `SEARCH`, or
+      `COMPLETE`. Useful in PSR or prompt functions.
+
+      Example:
+        `PSR='$SHED_VI_MODE'`
+
+==============================================================================
+9. Remote Refresh (SIGUSR1)                    *prompt-sigusr1*
+
+  Sending `SIGUSR1` to the shell process causes it to re-expand and
+  redraw the prompt. This is useful for updating the prompt from
+  external processes (e.g. a background script that detects a state
+  change).
+
+      `kill -USR1 $$`
+
+  Combined with prompt functions (see |prompt-func|), this allows the
+  prompt to reflect changes that happen outside the shell's normal
+  command cycle.
+
+==============================================================================
+See also: |keybinds| |autocmd| |ex|

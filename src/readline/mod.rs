@@ -444,6 +444,173 @@ impl ShedVi {
     Ok(is_complete && is_top_level)
   }
 
+	fn handle_hist_search_key(&mut self, key: KeyEvent) -> ShResult<()> {
+		self.print_line(false)?;
+		match self.focused_history().fuzzy_finder.handle_key(key)? {
+			SelectorResponse::Accept(cmd) => {
+				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
+
+				{
+					let editor = self.focused_editor();
+					editor.set_buffer(cmd.to_string());
+					editor.move_cursor_to_end();
+				}
+
+				self
+					.history
+					.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+				self.editor.set_hint(None);
+				{
+					let mut writer = std::mem::take(&mut self.writer);
+					self.focused_history().fuzzy_finder.clear(&mut writer)?;
+					self.writer = writer;
+				}
+				self.focused_history().fuzzy_finder.reset();
+
+				with_vars([("_HIST_ENTRY".into(), cmd.clone())], || {
+					post_cmds.exec_with(&cmd);
+				});
+
+				write_vars(|v| {
+					v.set_var(
+						"SHED_VI_MODE",
+						VarKind::Str(self.mode.report_mode().to_string()),
+						VarFlags::NONE,
+					)
+				})
+				.ok();
+				self.prompt.refresh();
+				self.needs_redraw = true;
+			}
+			SelectorResponse::Dismiss => {
+				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryClose));
+				post_cmds.exec();
+
+				self.editor.set_hint(None);
+				{
+					let mut writer = std::mem::take(&mut self.writer);
+					self.focused_history().fuzzy_finder.clear(&mut writer)?;
+					self.writer = writer;
+				}
+				write_vars(|v| {
+					v.set_var(
+						"SHED_VI_MODE",
+						VarKind::Str(self.mode.report_mode().to_string()),
+						VarFlags::NONE,
+					)
+				})
+				.ok();
+				self.prompt.refresh();
+				self.needs_redraw = true;
+			}
+			SelectorResponse::Consumed => {
+				self.needs_redraw = true;
+			}
+		}
+		Ok(())
+	}
+
+	fn handle_completion_key(&mut self, key: &KeyEvent) -> ShResult<bool> {
+		self.print_line(false)?;
+		match self.completer.handle_key(key.clone())? {
+			CompResponse::Accept(candidate) => {
+				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
+
+				let span_start = self.completer.token_span().0;
+				let new_cursor = span_start + candidate.len();
+				let line = self.completer.get_completed_line(&candidate);
+				self.focused_editor().set_buffer(line);
+				self.focused_editor().set_cursor_from_flat(new_cursor);
+				// Don't reset yet — clear() needs old_layout to erase the selector.
+
+				if !self.history.at_pending() {
+					self.history.reset_to_pending();
+				}
+				self
+					.history
+					.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+				let hint = self.history.get_hint();
+				self.editor.set_hint(hint);
+				self.completer.clear(&mut self.writer)?;
+				self.needs_redraw = true;
+				self.completer.reset();
+
+				write_vars(|v| {
+					v.set_var(
+						"SHED_VI_MODE",
+						VarKind::Str(self.mode.report_mode().to_string()),
+						VarFlags::NONE,
+					)
+				})
+				.ok();
+				self.prompt.refresh();
+
+				with_vars([("_COMP_CANDIDATE".into(), candidate.clone())], || {
+					post_cmds.exec_with(&candidate);
+				});
+
+				Ok(true)
+			}
+			CompResponse::Dismiss => {
+				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionCancel));
+				post_cmds.exec();
+
+				let hint = self.history.get_hint();
+				self.editor.set_hint(hint);
+				self.completer.clear(&mut self.writer)?;
+				write_vars(|v| {
+					v.set_var(
+						"SHED_VI_MODE",
+						VarKind::Str(self.mode.report_mode().to_string()),
+						VarFlags::NONE,
+					)
+				})
+				.ok();
+				self.prompt.refresh();
+				self.completer.reset();
+				Ok(true)
+			}
+			CompResponse::Consumed => {
+				/* just redraw */
+				self.needs_redraw = true;
+				Ok(true)
+			}
+			CompResponse::Passthrough => Ok(false)
+		}
+	}
+
+	fn handle_keymap(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
+		let keymap_flags = self.curr_keymap_flags();
+		self.pending_keymap.push(key.clone());
+
+		let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
+		if matches.is_empty() {
+			// No matches. Drain the buffered keys and execute them.
+			for key in std::mem::take(&mut self.pending_keymap) {
+				if let Some(event) = self.handle_key(key)? {
+					return Ok(Some(event));
+				}
+			}
+			self.needs_redraw = true;
+		} else if matches.len() == 1
+			&& matches[0].compare(&self.pending_keymap) == KeyMapMatch::IsExact
+		{
+			// We have a single exact match. Execute it.
+			let keymap = matches[0].clone();
+			self.pending_keymap.clear();
+			let action = keymap.action_expanded();
+			for key in action {
+				if let Some(event) = self.handle_key(key)? {
+					return Ok(Some(event));
+				}
+			}
+			self.needs_redraw = true;
+		}
+
+		// There is ambiguity. Allow the timeout in the main loop to handle this.
+		Ok(None)
+	}
+
   /// Process any available input and return readline event
   /// This is non-blocking - returns Pending if no complete line yet
   pub fn process_input(&mut self) -> ShResult<ReadlineEvent> {
@@ -457,138 +624,11 @@ impl ShedVi {
     while let Some(key) = self.reader.read_key()? {
       // If completer or history search are active, delegate input to it
       if self.focused_history().fuzzy_finder.is_active() {
-        self.print_line(false)?;
-        match self.focused_history().fuzzy_finder.handle_key(key)? {
-          SelectorResponse::Accept(cmd) => {
-            let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
-
-            {
-              let editor = self.focused_editor();
-              editor.set_buffer(cmd.to_string());
-              editor.move_cursor_to_end();
-            }
-
-            self
-              .history
-              .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-            self.editor.set_hint(None);
-            {
-              let mut writer = std::mem::take(&mut self.writer);
-              self.focused_history().fuzzy_finder.clear(&mut writer)?;
-              self.writer = writer;
-            }
-            self.focused_history().fuzzy_finder.reset();
-
-            with_vars([("_HIST_ENTRY".into(), cmd.clone())], || {
-              post_cmds.exec_with(&cmd);
-            });
-
-            write_vars(|v| {
-              v.set_var(
-                "SHED_VI_MODE",
-                VarKind::Str(self.mode.report_mode().to_string()),
-                VarFlags::NONE,
-              )
-            })
-            .ok();
-            self.prompt.refresh();
-            self.needs_redraw = true;
-            continue;
-          }
-          SelectorResponse::Dismiss => {
-            let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryClose));
-            post_cmds.exec();
-
-            self.editor.set_hint(None);
-            {
-              let mut writer = std::mem::take(&mut self.writer);
-              self.focused_history().fuzzy_finder.clear(&mut writer)?;
-              self.writer = writer;
-            }
-            write_vars(|v| {
-              v.set_var(
-                "SHED_VI_MODE",
-                VarKind::Str(self.mode.report_mode().to_string()),
-                VarFlags::NONE,
-              )
-            })
-            .ok();
-            self.prompt.refresh();
-            self.needs_redraw = true;
-            continue;
-          }
-          SelectorResponse::Consumed => {
-            self.needs_redraw = true;
-            continue;
-          }
-        }
-      } else if self.completer.is_active() {
-        self.print_line(false)?;
-        match self.completer.handle_key(key.clone())? {
-          CompResponse::Accept(candidate) => {
-            let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
-
-            let span_start = self.completer.token_span().0;
-            let new_cursor = span_start + candidate.len();
-            let line = self.completer.get_completed_line(&candidate);
-            self.focused_editor().set_buffer(line);
-            self.focused_editor().set_cursor_from_flat(new_cursor);
-            // Don't reset yet — clear() needs old_layout to erase the selector.
-
-            if !self.history.at_pending() {
-              self.history.reset_to_pending();
-            }
-            self
-              .history
-              .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-            let hint = self.history.get_hint();
-            self.editor.set_hint(hint);
-            self.completer.clear(&mut self.writer)?;
-            self.needs_redraw = true;
-            self.completer.reset();
-
-            write_vars(|v| {
-              v.set_var(
-                "SHED_VI_MODE",
-                VarKind::Str(self.mode.report_mode().to_string()),
-                VarFlags::NONE,
-              )
-            })
-            .ok();
-            self.prompt.refresh();
-
-            with_vars([("_COMP_CANDIDATE".into(), candidate.clone())], || {
-              post_cmds.exec_with(&candidate);
-            });
-
-            continue;
-          }
-          CompResponse::Dismiss => {
-            let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionCancel));
-            post_cmds.exec();
-
-            let hint = self.history.get_hint();
-            self.editor.set_hint(hint);
-            self.completer.clear(&mut self.writer)?;
-            write_vars(|v| {
-              v.set_var(
-                "SHED_VI_MODE",
-                VarKind::Str(self.mode.report_mode().to_string()),
-                VarFlags::NONE,
-              )
-            })
-            .ok();
-            self.prompt.refresh();
-            self.completer.reset();
-            continue;
-          }
-          CompResponse::Consumed => {
-            /* just redraw */
-            self.needs_redraw = true;
-            continue;
-          }
-          CompResponse::Passthrough => { /* fall through to normal handling below */ }
-        }
+				self.handle_hist_search_key(key)?;
+				continue;
+      } else if self.completer.is_active() && self.handle_completion_key(&key)? {
+				// self.handle_completion_key() returns true if we need to continue the loop
+				continue;
       } else if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty()) {
         // Vi mode is waiting for more input (e.g. after 'f', 'd', etc.)
         // Bypass keymap matching and send directly to the mode handler
@@ -597,42 +637,8 @@ impl ShedVi {
         }
         self.needs_redraw = true;
         continue;
-      } else {
-        let keymap_flags = self.curr_keymap_flags();
-        self.pending_keymap.push(key.clone());
-
-        let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
-        if matches.is_empty() {
-          // No matches. Drain the buffered keys and execute them.
-          for key in std::mem::take(&mut self.pending_keymap) {
-            if let Some(event) = self.handle_key(key)? {
-              return Ok(event);
-            }
-          }
-          self.needs_redraw = true;
-          continue;
-        } else if matches.len() == 1
-          && matches[0].compare(&self.pending_keymap) == KeyMapMatch::IsExact
-        {
-          // We have a single exact match. Execute it.
-          let keymap = matches[0].clone();
-          self.pending_keymap.clear();
-          let action = keymap.action_expanded();
-          for key in action {
-            if let Some(event) = self.handle_key(key)? {
-              return Ok(event);
-            }
-          }
-          self.needs_redraw = true;
-          continue;
-        } else {
-          // There is ambiguity. Allow the timeout in the main loop to handle this.
-          continue;
-        }
-      }
-
-      if let Some(event) = self.handle_key(key)? {
-        return Ok(event);
+      } else if let Some(event) = self.handle_keymap(key)? {
+				return Ok(event);
       }
     }
     if !self.completer.is_active() && !self.history.fuzzy_finder.is_active() {
