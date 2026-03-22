@@ -72,6 +72,8 @@ bitflags! {
     const VISUAL_BLOCK = 1<<2;
     const EXIT_CUR_MODE = 1<<3;
     const IS_EX_CMD = 1<<4;
+		const HAS_SHIFT = 1<<5;
+		const HAS_CTRL = 1<<6;
   }
 }
 
@@ -128,6 +130,11 @@ impl ViCmd {
       .as_ref()
       .is_some_and(|v| matches!(v.1, Verb::RepeatLast))
   }
+	pub fn is_virtual_scroll(&self) -> bool {
+		self.verb.as_ref().is_none()
+		&& self.motion.as_ref().is_some_and(|v| matches!(v.1, Motion::LineUp | Motion::LineDown))
+		&& self.flags.intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL)
+	}
   pub fn is_motion_repeat(&self) -> bool {
     self
       .motion

@@ -6,7 +6,7 @@ use crate::libsh::error::ShResult;
 use crate::readline::history::History;
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::LineBuf;
-use crate::readline::vicmd::{Motion, MotionCmd, To, Verb, VerbCmd, ViCmd};
+use crate::readline::vicmd::{CmdFlags, Motion, MotionCmd, To, Verb, VerbCmd, ViCmd};
 
 pub mod ex;
 pub mod insert;
@@ -112,13 +112,27 @@ pub fn common_cmds(key: E) -> Option<ViCmd> {
   match key {
     E(K::Home, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::StartOfLine)),
     E(K::End, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::EndOfLine)),
-    E(K::Left, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::BackwardChar)),
-    E(K::Right, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::ForwardChar)),
-    E(K::Up, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::LineUp)),
-    E(K::Down, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::LineDown)),
     E(K::Enter, M::SHIFT) => pending_cmd.set_verb(VerbCmd(1, Verb::InsertChar('\n'))),
     E(K::Enter, M::NONE) => pending_cmd.set_verb(VerbCmd(1, Verb::AcceptLineOrNewline)),
     E(K::Char('D'), M::CTRL) => pending_cmd.set_verb(VerbCmd(1, Verb::EndOfFile)),
+    E(K::Left, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::BackwardChar)),
+    E(K::Right, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::ForwardChar)),
+    E(K::Up, mods) => {
+			pending_cmd.set_motion(MotionCmd(1, Motion::LineUp));
+			if mods.contains(M::SHIFT) {
+				pending_cmd.flags |= CmdFlags::HAS_SHIFT;
+			} else if mods.contains(M::CTRL) {
+				pending_cmd.flags |= CmdFlags::HAS_CTRL;
+			}
+		}
+    E(K::Down, mods) => {
+			pending_cmd.set_motion(MotionCmd(1, Motion::LineDown));
+			if mods.contains(M::SHIFT) {
+				pending_cmd.flags |= CmdFlags::HAS_SHIFT;
+			} else if mods.contains(M::CTRL) {
+				pending_cmd.flags |= CmdFlags::HAS_CTRL;
+			}
+		}
     E(K::Delete, M::NONE) => {
       pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
       pending_cmd.set_motion(MotionCmd(1, Motion::ForwardCharForced));

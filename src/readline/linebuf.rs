@@ -851,6 +851,37 @@ impl LineBuf {
       }
     }
   }
+	pub fn split_last(&mut self, pat: &str) -> bool {
+		let buf_raw = self.joined();
+		let Some(left) = buf_raw.rsplit_once(pat).map(|(left,_)| left.to_string()) else {
+			return false;
+		};
+
+		self.set_buffer(left);
+		true
+	}
+	pub fn concat_with(&mut self, sep: &str, other: &str) {
+		if self.is_empty() {
+			self.lines = to_lines(other);
+			return
+		}
+		let joined = self.joined();
+		let Some(last) = self.lines.last_mut() else {
+			self.lines = to_lines(other);
+			return
+		};
+		let mut new_lines = to_lines(other);
+		while last.0.last().is_some_and(|l| l.is_ws()) {
+			last.0.pop();
+		}
+		if new_lines.is_empty() { return }
+		if !joined.trim().ends_with(sep.trim()) {
+			last.push_str(sep);
+		}
+		let mut first = new_lines.remove(0);
+		last.append(&mut first);
+		self.lines.extend(new_lines);
+	}
   fn push_str(&mut self, s: &str) {
     let mut lines = to_lines(s);
     attach_lines(&mut self.lines, &mut lines);
@@ -2554,6 +2585,23 @@ impl LineBuf {
 
     Ok(())
   }
+	/// Provides a public interface for editing the buffer in a way that is recognized by the undo system.
+	/// Any change made by the provided function will be tracked in the undo stack.
+	pub fn edit<T,F: FnMut(&mut Self) -> T>(&mut self, mut f: F) -> T {
+    let before = self.lines.clone();
+    let old_cursor = self.cursor.pos;
+
+		let res = f(self);
+
+    if self.is_empty() {
+      self.set_hint(None);
+    }
+
+    let new_cursor = self.cursor.pos;
+		self.handle_edit(before, new_cursor, old_cursor);
+
+		res
+	}
   pub fn exec_cmd(&mut self, cmd: ViCmd) -> ShResult<()> {
     let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
     let starts_merge = cmd.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::Change));
@@ -2688,6 +2736,11 @@ impl LineBuf {
     self.cursor.pos.col = self.cursor.pos.col.min(max_col);
   }
 
+	pub fn clear_buffer(&mut self) {
+		self.lines = vec![Line::default()];
+		self.fix_cursor();
+	}
+
   /// Compat shim: set hint text. None clears the hint.
   pub fn set_hint(&mut self, hint: Option<String>) {
     let joined = self.joined();
@@ -2782,12 +2835,7 @@ impl LineBuf {
 
   /// Compat shim: move cursor to end of buffer.
   pub fn move_cursor_to_end(&mut self) {
-    let last_row = self.lines.len().saturating_sub(1);
-    let last_col = self.lines[last_row].len();
-    self.cursor.pos = Pos {
-      row: last_row,
-      col: last_col,
-    };
+		self.set_cursor(Pos::MAX);
   }
 
   /// Compat shim: returns the maximum cursor position (flat grapheme count).

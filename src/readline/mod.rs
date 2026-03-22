@@ -14,6 +14,7 @@ use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::term::{Pos, TermReader, calc_str_width};
+use crate::readline::vicmd::Direction;
 use crate::readline::vimode::{ViEx, ViVerbatim};
 use crate::state::{
   AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta, write_vars
@@ -880,8 +881,16 @@ impl ShedVi {
     let Some(cmd) = cmd else {
       return Ok(None);
     };
+		if !cmd.is_virtual_scroll() {
+			self.history.stop_virtual_scroll();
+		}
+
     if self.should_grab_history(&cmd) {
-      self.scroll_history(cmd);
+			if cmd.flags.intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL) {
+				self.scroll_history_virtual(cmd);
+			} else {
+				self.scroll_history(cmd);
+			}
       self.needs_redraw = true;
       return Ok(None);
     }
@@ -960,6 +969,68 @@ impl ShedVi {
     let (cols, _) = get_win_size(self.tty);
     Layout::from_parts(cols, self.prompt.get_ps1(), &to_cursor, line)
   }
+	pub fn scroll_history_virtual(&mut self, cmd: ViCmd) {
+		// This function is used for the Shift/Ctrl+Up/Down history concatenation.
+		// Instead of replacing the buffer with a scrolled-to history entry
+		// This function appends it to the end of the current buffer with '&&' or ';'
+		// depending on if the user is holding shift or ctrl.
+
+		let MotionCmd(count, motion) = &cmd.motion.unwrap();
+		let sep = if cmd.flags.contains(CmdFlags::HAS_SHIFT) { " && " } else { "; " };
+		match motion {
+			Motion::LineUp => {
+				self.editor.edit(|e| {
+					match self.history.virtual_scroll_direction() {
+						Some(Direction::Forward) => {
+							for _ in 0..*count {
+								self.history.virt_scroll(-1);
+								if !e.split_last(sep) {
+									e.clear_buffer();
+									self.history.stop_virtual_scroll();
+									break
+								};
+							}
+						}
+						None | Some(Direction::Backward) => {
+							for _ in 0..*count {
+								let Some(entry) = self.history.virt_scroll(-1) else { continue };
+								log::debug!("Got history entry: {:?}", entry);
+								let command = entry.command().to_string();
+								e.concat_with(sep, &command);
+								e.move_cursor_to_end();
+							}
+						}
+					}
+				});
+			}
+			Motion::LineDown => {
+				self.editor.edit(|e| {
+					match self.history.virtual_scroll_direction() {
+						Some(Direction::Backward) => {
+							for _ in 0..*count {
+								self.history.virt_scroll(1);
+								if !e.split_last(sep) {
+									e.clear_buffer();
+									self.history.stop_virtual_scroll();
+									break
+								};
+							}
+						}
+						None | Some(Direction::Forward) => {
+							for _ in 0..*count {
+								let Some(entry) = self.history.virt_scroll(1) else { continue };
+								log::debug!("Got history entry: {:?}", entry);
+								let command = entry.command().to_string();
+								e.concat_with(sep, &command);
+								e.move_cursor_to_end();
+							}
+						}
+					}
+				});
+			}
+			_ => unreachable!(),
+		}
+	}
   pub fn scroll_history(&mut self, cmd: ViCmd) {
     /*
     if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
@@ -1013,6 +1084,7 @@ impl ShedVi {
   }
 
   pub fn should_grab_history(&mut self, cmd: &ViCmd) -> bool {
+		cmd.is_virtual_scroll() ||
     cmd.verb().is_none()
       && (cmd
         .motion()

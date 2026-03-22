@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
-  readline::{complete::FuzzySelector, linebuf::LineBuf},
+  readline::{complete::FuzzySelector, linebuf::LineBuf, vicmd::Direction},
   state::read_meta,
 };
 
@@ -211,8 +211,12 @@ pub struct History {
   search_mask: Vec<HistEntry>,
   pub fuzzy_finder: FuzzySelector,
   no_matches: bool,
+
+	/// The main cursor, used to index the entries list
   pub cursor: usize,
-  //search_direction: Direction,
+	/// A virtual cursor used for shift+up concatenation
+	pub virt_cursor: usize,
+
   ignore_dups: bool,
   max_size: Option<u32>,
   stateless: bool,
@@ -228,7 +232,7 @@ impl History {
       fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
       no_matches: false,
       cursor: 0,
-      //search_direction: Direction::Backward,
+			virt_cursor: 0,
       ignore_dups: false,
       max_size: None,
       stateless: true,
@@ -266,7 +270,7 @@ impl History {
       search_mask,
       no_matches: false,
       cursor,
-      //search_direction: Direction::Backward,
+			virt_cursor: cursor,
       ignore_dups,
       max_size,
       stateless: false,
@@ -293,6 +297,7 @@ impl History {
   pub fn reset(&mut self) {
     self.search_mask = dedupe_entries(&self.entries);
     self.cursor = self.search_mask.len();
+		self.virt_cursor = self.cursor;
   }
 
   pub fn entries(&self) -> &[HistEntry] {
@@ -313,6 +318,7 @@ impl History {
 
   pub fn reset_to_pending(&mut self) {
     self.cursor = self.search_mask.len();
+		self.virt_cursor = self.cursor;
   }
 
   pub fn update_pending_cmd(&mut self, buf: (&str, usize)) {
@@ -401,6 +407,7 @@ impl History {
           }
         }
         self.cursor = self.search_mask.len();
+				self.virt_cursor = self.cursor;
       }
       SearchKind::Fuzzy => todo!(),
     }
@@ -427,14 +434,55 @@ impl History {
     }
   }
 
+	pub fn is_virtual_scrolling(&self) -> bool {
+		self.virt_cursor != self.cursor
+	}
+
+	pub fn virtual_scroll_direction(&self) -> Option<Direction> {
+		match self.virt_cursor.cmp(&self.cursor) {
+			Ordering::Greater => Some(Direction::Forward),
+			Ordering::Equal => None,
+			Ordering::Less => Some(Direction::Backward)
+		}
+	}
+
+	pub fn stop_virtual_scroll(&mut self) {
+		self.virt_cursor = self.cursor;
+	}
+
   pub fn scroll(&mut self, offset: isize) -> Option<&HistEntry> {
     self.cursor = self
       .cursor
       .saturating_add_signed(offset)
       .clamp(0, self.search_mask.len());
+		self.virt_cursor = self.cursor;
 
     self.search_mask.get(self.cursor)
   }
+
+	pub fn virt_scroll(&mut self, offset: isize) -> Option<&HistEntry> {
+		let before = self.virt_cursor;
+		if self.is_virtual_scrolling() {
+						self.virt_cursor = self
+				.virt_cursor
+				.saturating_add_signed(offset)
+				.clamp(0, self.search_mask.len().saturating_sub(1));
+		} else {
+			self.virt_cursor = self
+				.virt_cursor
+				.saturating_add_signed(offset)
+				.clamp(0, self.search_mask.len());
+		}
+
+		if self.virt_cursor == before {
+			// If virt_cursor didn't move, we're at the end of the list and should prevent further scrolling in that direction
+			return None;
+		}
+
+		log::debug!("Cursor: {}, Virt Cursor: {}, Search Mask Len: {}", self.cursor, self.virt_cursor, self.search_mask.len());
+
+		self.search_mask.get(self.virt_cursor)
+	}
 
   pub fn push(&mut self, command: String) {
     let timestamp = SystemTime::now();
