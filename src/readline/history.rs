@@ -474,6 +474,10 @@ impl History {
 				.clamp(0, self.search_mask.len());
 		}
 
+		if self.virt_cursor >= self.search_mask.len() {
+			self.virt_cursor = before;
+		}
+
 		if self.virt_cursor == before {
 			// If virt_cursor didn't move, we're at the end of the list and should prevent further scrolling in that direction
 			return None;

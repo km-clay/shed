@@ -1,5 +1,5 @@
 use std::{
-  collections::HashSet, fmt::Display, ops::{Index, IndexMut}, slice::SliceIndex
+  collections::{HashSet, VecDeque}, fmt::Display, ops::{Index, IndexMut}, slice::SliceIndex
 };
 
 use smallvec::SmallVec;
@@ -189,6 +189,14 @@ impl Line {
   pub fn append(&mut self, other: &mut Line) {
     self.0.append(&mut other.0);
   }
+	pub fn insert_str(&mut self, at: usize, other: &str) {
+		if other.contains('\n') {
+			log::warn!("Inserting string with newlines into a single line. Newlines will be treated as literal characters.");
+		}
+		for g in other.graphemes(true) {
+			self.0.insert(at, Grapheme::from(g));
+		}
+	}
   pub fn insert_char(&mut self, at: usize, c: char) {
     self.0.insert(at, Grapheme::from(c));
   }
@@ -527,6 +535,8 @@ pub struct LineBuf {
 
   pub undo_stack: Vec<Edit>,
   pub redo_stack: Vec<Edit>,
+
+	pub concat_points: VecDeque<Pos>
 }
 
 impl Default for LineBuf {
@@ -546,6 +556,7 @@ impl Default for LineBuf {
 			scroll_offset: 0,
       undo_stack: vec![],
       redo_stack: vec![],
+			concat_points: VecDeque::new(),
     }
   }
 }
@@ -851,36 +862,78 @@ impl LineBuf {
       }
     }
   }
-	pub fn split_last(&mut self, pat: &str) -> bool {
-		let buf_raw = self.joined();
-		let Some(left) = buf_raw.rsplit_once(pat).map(|(left,_)| left.to_string()) else {
-			return false;
-		};
-
-		self.set_buffer(left);
+	pub fn pop_left(&mut self) -> bool {
+		let Some(pos) = self.concat_points.pop_front() else { return false };
+		self.lines = split_lines_at(&mut self.lines, pos);
+		self.fix_cursor();
 		true
 	}
-	pub fn concat_with(&mut self, sep: &str, other: &str) {
+	pub fn pop_right(&mut self) -> bool {
+		let Some(pos) = self.concat_points.pop_back() else { return false };
+		split_lines_at(&mut self.lines, pos);
+		self.fix_cursor();
+		true
+	}
+	pub fn clear_concats(&mut self) {
+		self.concat_points.clear();
+	}
+	/// Concatenate a string onto the left side of the buffer with a separator
+	pub fn concat_left(&mut self, sep: &str, other: &str) {
 		if self.is_empty() {
 			self.lines = to_lines(other);
 			return
 		}
 		let joined = self.joined();
+		let Some(first) = self.lines.first_mut() else {
+			self.lines = to_lines(other);
+			return
+		};
+		let mut new_lines = to_lines(other);
+		if new_lines.is_empty() { return }
+		while first.0.first().is_some_and(|l| l.is_ws()) {
+			first.0.remove(0);
+		}
+		let Some(new_last) = new_lines.last_mut() else { unreachable!() };
+		if !joined.trim_end().ends_with(sep.trim()) {
+			new_last.push_str(sep);
+		}
+		let mut last = new_lines.pop().unwrap();
+		let splice_pos = Pos { row: new_lines.len(), col: last.len() };
+		last.append(first);
+		self.lines[0] = last;
+		if !new_lines.is_empty() {
+			for line in new_lines.into_iter().rev() {
+				self.lines.insert(0, line);
+			}
+		}
+		self.concat_points.push_front(splice_pos);
+	}
+	/// Concatenate a string onto the right side of the buffer with a separator
+	pub fn concat_right(&mut self, sep: &str, other: &str) {
+		if self.is_empty() {
+			self.lines = to_lines(other);
+			return
+		}
+		let joined = self.joined();
+		let last_row = self.lines.len() - 1;
 		let Some(last) = self.lines.last_mut() else {
 			self.lines = to_lines(other);
 			return
 		};
 		let mut new_lines = to_lines(other);
+		if new_lines.is_empty() { return }
 		while last.0.last().is_some_and(|l| l.is_ws()) {
 			last.0.pop();
 		}
-		if new_lines.is_empty() { return }
-		if !joined.trim().ends_with(sep.trim()) {
-			last.push_str(sep);
+		let Some(new_first) = new_lines.first_mut() else { unreachable!() };
+		if !joined.trim_end().ends_with(sep.trim()) {
+			new_first.insert_str(0,sep);
 		}
+		let splice_pos = Pos { row: last_row, col: last.len() };
 		let mut first = new_lines.remove(0);
 		last.append(&mut first);
 		self.lines.extend(new_lines);
+		self.concat_points.push_back(splice_pos);
 	}
   fn push_str(&mut self, s: &str) {
     let mut lines = to_lines(s);
@@ -2730,14 +2783,13 @@ impl LineBuf {
     if self.lines.is_empty() {
       self.lines.push(Line::default());
     }
-    // Clamp cursor to valid position
-    self.cursor.pos.row = self.cursor.pos.row.min(self.lines.len().saturating_sub(1));
-    let max_col = self.lines[self.cursor.pos.row].len();
-    self.cursor.pos.col = self.cursor.pos.col.min(max_col);
+		self.clear_concats();
+		self.fix_cursor();
   }
 
 	pub fn clear_buffer(&mut self) {
 		self.lines = vec![Line::default()];
+		self.clear_concats();
 		self.fix_cursor();
 	}
 

@@ -883,6 +883,7 @@ impl ShedVi {
     };
 		if !cmd.is_virtual_scroll() {
 			self.history.stop_virtual_scroll();
+			self.editor.clear_concats();
 		}
 
     if self.should_grab_history(&cmd) {
@@ -983,12 +984,12 @@ impl ShedVi {
 					match self.history.virtual_scroll_direction() {
 						Some(Direction::Forward) => {
 							for _ in 0..*count {
-								self.history.virt_scroll(-1);
-								if !e.split_last(sep) {
+								if !e.pop_right() {
 									e.clear_buffer();
 									self.history.stop_virtual_scroll();
 									break
 								};
+								self.history.virt_scroll(-1);
 							}
 						}
 						None | Some(Direction::Backward) => {
@@ -996,7 +997,7 @@ impl ShedVi {
 								let Some(entry) = self.history.virt_scroll(-1) else { continue };
 								log::debug!("Got history entry: {:?}", entry);
 								let command = entry.command().to_string();
-								e.concat_with(sep, &command);
+								e.concat_left(sep, &command);
 								e.move_cursor_to_end();
 							}
 						}
@@ -1008,12 +1009,12 @@ impl ShedVi {
 					match self.history.virtual_scroll_direction() {
 						Some(Direction::Backward) => {
 							for _ in 0..*count {
-								self.history.virt_scroll(1);
-								if !e.split_last(sep) {
+								if !e.pop_left() {
 									e.clear_buffer();
 									self.history.stop_virtual_scroll();
 									break
 								};
+								self.history.virt_scroll(1);
 							}
 						}
 						None | Some(Direction::Forward) => {
@@ -1021,7 +1022,7 @@ impl ShedVi {
 								let Some(entry) = self.history.virt_scroll(1) else { continue };
 								log::debug!("Got history entry: {:?}", entry);
 								let command = entry.command().to_string();
-								e.concat_with(sep, &command);
+								e.concat_right(sep, &command);
 								e.move_cursor_to_end();
 							}
 						}
@@ -1172,7 +1173,7 @@ impl ShedVi {
       && psr_fits
     {
       let to_col = self.writer.t_cols - calc_str_width(&psr);
-      let down = new_layout.end.row - new_layout.cursor.row;
+      let down = new_layout.end.row.saturating_sub(new_layout.cursor.row);
       let move_down = if down > 0 {
         format!("\x1b[{down}B")
       } else {
