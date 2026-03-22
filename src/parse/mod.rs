@@ -1877,7 +1877,7 @@ pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<Fil
   let result = match class {
     RedirType::Input => OpenOptions::new().read(true).open(Path::new(&path)),
     RedirType::Output => {
-      if read_shopts(|o| o.core.noclobber) && path.is_file() {
+      if read_shopts(|o| o.set.noclobber) && path.is_file() {
         return Err(ShErr::simple(
           ShErrKind::ExecFail,
           format!(

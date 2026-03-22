@@ -249,20 +249,20 @@ impl Dispatcher {
     }
 		let flags = node.flags;
 
-    match node.class {
-      NdRule::Conjunction { .. } => self.exec_conjunction(node)?,
-      NdRule::Pipeline { .. } => self.exec_pipeline(node)?,
-      NdRule::IfNode { .. } => self.exec_if(node)?,
-      NdRule::LoopNode { .. } => self.exec_loop(node)?,
-      NdRule::ForNode { .. } => self.exec_for(node)?,
-      NdRule::CaseNode { .. } => self.exec_case(node)?,
-      NdRule::BraceGrp { .. } => self.exec_brc_grp(node)?,
-      NdRule::FuncDef { .. } => self.exec_func_def(node)?,
-      NdRule::Negate { .. } => self.exec_negated(node)?,
-      NdRule::Command { .. } => self.dispatch_cmd(node)?,
-      NdRule::Test { .. } => self.exec_test(node)?,
+    let result = match node.class {
+      NdRule::Conjunction { .. } => self.exec_conjunction(node),
+      NdRule::Pipeline { .. } => self.exec_pipeline(node),
+      NdRule::IfNode { .. } => self.exec_if(node),
+      NdRule::LoopNode { .. } => self.exec_loop(node),
+      NdRule::ForNode { .. } => self.exec_for(node),
+      NdRule::CaseNode { .. } => self.exec_case(node),
+      NdRule::BraceGrp { .. } => self.exec_brc_grp(node),
+      NdRule::FuncDef { .. } => self.exec_func_def(node),
+      NdRule::Negate { .. } => self.exec_negated(node),
+      NdRule::Command { .. } => self.dispatch_cmd(node),
+      NdRule::Test { .. } => self.exec_test(node),
       _ => unreachable!(),
-    }
+    };
 
 		if state::get_status() != 0
 		&& !flags.contains(NdFlags::NOT_ERR) {
@@ -271,7 +271,20 @@ impl Dispatcher {
 				exec_input(trap, None, false, Some("trap ERR".to_string()))?;
 				state::set_status(saved_status);
 			}
+			if read_shopts(|o| o.set.errexit) {
+				match result {
+					Ok(_) => {
+						return Err(ShErr::simple(ShErrKind::ErrInterrupt, ""));
+					}
+					Err(mut e) => {
+						e.set_kind(ShErrKind::ErrInterrupt);
+						return Err(e)
+					}
+				}
+			}
 		}
+
+		result?;
 
     Ok(())
   }

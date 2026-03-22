@@ -266,18 +266,31 @@ shopt_group! {
 shopt_group! {
 	#[derive(Clone, Debug)]
 	pub struct ShOptSet ("set") {
+		/// If set, the shell will remember the full path of commands and use that information to speed up command lookup
 		hashall: bool = true,
+		/// Enables vi editing mode. Currently, this is the only editing mode. Changing this does nothing, it's just here because it's in the POSIX specification for the 'set' builtin
 		vi: bool = true,
+		/// If set, all variables that are assigned will be automatically exported to the environment of subsequently executed commands
 		allexport: bool = false,
+		/// If set, the shell will exit immediately if any command exits with a non-zero status, with some exceptions
 		errexit: bool = false,
+		/// If set, '>' and '>>' redirections will fail if the target file already exists
 		noclobber: bool = false,
-		monitor: bool = false,
+		/// If set, jobs run in their own process groups, and report status before the next prompt.
+		monitor: bool = true,
+		/// If set, filename expansion (globbing) is disabled
 		noglob: bool = false,
+		/// If set, the shell will not execute any interpreted commands. Useful for testing scripts.
 		noexec: bool = false,
+		/// If set, function definitions will not be written to command history.
 		nolog: bool = false,
+		/// If set, the shell will print job status info asynchronously when jobs exit or are stopped
 		notify: bool = false,
+		/// If set, attempting to expand an unset variable besides '$*' or '@' is an error
 		nounset: bool = false,
+		/// If set, the shell will write it's input to stderr as it is read.
 		verbose: bool = false,
+		/// If set, the shell will write a trace for each command after it is expanded but before it is executed.
 		xtrace: bool = false,
 	}
 }
@@ -316,9 +329,6 @@ shopt_group! {
 
     /// Whether echo expands escape sequences by default
     xpg_echo: bool = false,
-
-    /// Prevent > from overwriting existing files (use >| to override)
-    noclobber: bool = false,
   }
 }
 
@@ -373,7 +383,6 @@ mod tests {
       bell_enabled,
       max_recurse_depth,
       xpg_echo,
-      noclobber,
     } = ShOptCore::default();
     // If a field is added to the struct, this destructure fails to compile.
     let _ = (
@@ -386,7 +395,6 @@ mod tests {
       bell_enabled,
       max_recurse_depth,
       xpg_echo,
-      noclobber,
     );
   }
 

@@ -284,6 +284,9 @@ impl ShErr {
   pub fn kind(&self) -> &ShErrKind {
     &self.kind
   }
+	pub fn set_kind(&mut self, kind: ShErrKind) {
+		self.kind = kind;
+	}
   pub fn rename(mut self, name: impl Into<String>) -> Self {
     if let Some(span) = self.src_span.as_mut() {
       span.rename(name.into());

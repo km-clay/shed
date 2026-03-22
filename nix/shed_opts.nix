@@ -230,15 +230,83 @@
                 default = false;
                 description = "Whether to have the 'echo' builtin expand escape sequences like \\n and \\t (if false, it will print them verbatim)";
               };
-              noclobber = lib.mkOption {
-                type = lib.types.bool;
-                default = false;
-                description = "Whether to prevent redirection from overwriting existing files by default (i.e. behave as if 'set -o noclobber' is always in effect)";
-              };
             };
           };
           default = {};
           description = "Core settings (i.e. the 'shopt core.*' options)";
+        };
+        set = lib.mkOption {
+          type = lib.types.submodule {
+            options = {
+              hashall = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Remember the full path of commands to speed up command lookup";
+              };
+              vi = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Enable vi editing mode (currently the only editing mode)";
+              };
+              allexport = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Automatically export all variables that are assigned";
+              };
+              errexit = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Exit immediately if any command exits with a non-zero status (equivalent to set -e)";
+              };
+              noclobber = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Prevent '>' redirections from overwriting existing files (equivalent to set -C)";
+              };
+              monitor = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Run jobs in their own process groups and report status before the next prompt (equivalent to set -m)";
+              };
+              noglob = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Disable filename expansion (globbing) (equivalent to set -f)";
+              };
+              noexec = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Read commands but do not execute them; useful for syntax checking (equivalent to set -n)";
+              };
+              nolog = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Do not write function definitions to command history";
+              };
+              notify = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Print job status info asynchronously when jobs exit or are stopped (equivalent to set -b)";
+              };
+              nounset = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Treat expansion of unset variables as an error (equivalent to set -u)";
+              };
+              verbose = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Write shell input to stderr as it is read (equivalent to set -v)";
+              };
+              xtrace = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Write a trace for each command after expansion but before execution (equivalent to set -x)";
+              };
+            };
+          };
+          default = {};
+          description = "POSIX set flags (i.e. the 'shopt set.*' options, equivalent to 'set -o')";
         };
         prompt = lib.mkOption {
           type = lib.types.submodule {
