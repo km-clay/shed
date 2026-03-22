@@ -3,7 +3,7 @@ use regex::Regex;
 use crate::{
   getopt::{Opt, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
-  parse::{NdRule, Node, execute::prepare_argv},
+  parse::{NdRule, Node},
   state::{self, AutoCmd, AutoCmdKind, write_logic},
 };
 
@@ -63,9 +63,8 @@ pub fn autocmd(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, opts) = get_opts_from_tokens(argv, &autocmd_optspec()).promote_err(span.clone())?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &autocmd_optspec()).promote_err(span.clone())?;
   let autocmd_opts = get_autocmd_opts(&opts).promote_err(span.clone())?;
-  let mut argv = prepare_argv(argv)?;
   if !argv.is_empty() {
     argv.remove(0);
   }

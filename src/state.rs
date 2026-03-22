@@ -513,6 +513,15 @@ impl ScopeStack {
     // Fallback to env var
     std::env::var(var_name).unwrap_or_default()
   }
+	pub fn all_vars(&self) -> HashMap<String, Var> {
+		let mut vars = HashMap::new();
+		for scope in self.scopes.iter() {
+			for (k,v) in scope.vars() {
+				vars.insert(k.to_string(), v.clone());
+			}
+		}
+		vars
+	}
   pub fn is_local_var(&self, var_name: &str) -> bool {
     self.scopes.last().is_some_and(|s| {
       s.get_var_flags(var_name)
@@ -959,6 +968,12 @@ impl Var {
   pub fn flags(&self) -> VarFlags {
     self.flags
   }
+	pub fn as_shell_arg(&self) -> String {
+		match &self.kind {
+			VarKind::Arr(_) => format!("( {} )", self),
+			_ => self.to_string()
+		}
+	}
 }
 
 impl Display for Var {
@@ -1120,11 +1135,13 @@ impl VarTab {
     &mut self.sh_argv
   }
   pub fn clear_args(&mut self) {
+		let first = self.sh_argv.pop_front();
     self.sh_argv.clear();
-    // Push the current exe again
-    // This makes sure that $0 is always the current shell, no matter what
-    // It also updates the arg parameters '@' and '#' as well
-    self.bpush_arg(env::current_exe().unwrap().to_str().unwrap().to_string());
+
+		// preserve the first arg, which is conventionally the name of the shell, script, or function
+		if let Some(arg) = first {
+			self.bpush_arg(arg);
+		}
   }
   fn update_arg_params(&mut self) {
     self.set_param(

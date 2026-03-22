@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 
 use crate::{
   expand::expand_cmd_sub,
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptSpec, get_opts_from_tokens_raw},
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{
     NdRule, Node,
@@ -249,7 +249,7 @@ pub fn map(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
-  let (mut argv, opts) = get_opts_from_tokens(argv, &map_opts_spec())?;
+  let (mut argv, opts) = get_opts_from_tokens_raw(argv, &map_opts_spec())?;
   let map_opts = get_map_opts(opts);
   if !argv.is_empty() {
     argv.remove(0); // remove "map" command from argv

@@ -242,8 +242,7 @@ pub fn umask_builtin(node: Node) -> ShResult<()> {
         format!("umask takes at most one argument, got {}", argv.len()),
       ));
     }
-    let arg = argv[0].clone();
-    let raw = arg.as_str();
+    let (ref raw, _) = argv[0];
     if raw.chars().any(|c| c.is_ascii_digit()) {
       let mode_raw = u32::from_str_radix(raw, 8).map_err(|_| {
         ShErr::at(

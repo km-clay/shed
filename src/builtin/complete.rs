@@ -2,9 +2,9 @@ use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptSpec, get_opts_from_tokens, get_opts_from_tokens_raw},
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node, execute::prepare_argv},
+  parse::{NdRule, Node},
   procio::borrow_fd,
   readline::complete::{BashCompSpec, CompContext, CompSpec},
   state::{self, read_meta, write_meta},
@@ -164,9 +164,8 @@ pub fn complete_builtin(node: Node) -> ShResult<()> {
     .collect::<ShResult<Vec<String>>>()?
     .join(" ");
 
-  let (argv, opts) = get_opts_from_tokens(argv, &COMP_OPTS)?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &COMP_OPTS)?;
   let comp_opts = get_comp_opts(opts)?;
-  let mut argv = prepare_argv(argv)?;
   if !argv.is_empty() {
     argv.remove(0);
   }
@@ -244,7 +243,7 @@ pub fn compgen_builtin(node: Node) -> ShResult<()> {
     .collect::<ShResult<Vec<String>>>()?
     .join(" ");
 
-  let (argv, opts) = get_opts_from_tokens(argv, &COMPGEN_OPTS)?;
+  let (argv, opts) = get_opts_from_tokens_raw(argv, &COMPGEN_OPTS)?;
   let prefix = argv.clone().into_iter().nth(1).unwrap_or_default();
   let comp_opts = get_comp_opts(opts)?;
 

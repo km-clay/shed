@@ -6,7 +6,7 @@ use nix::{
 use crate::{
   getopt::{Opt, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node, execute::prepare_argv},
+  parse::{NdRule, Node},
   procio::borrow_fd,
   state,
 };
@@ -36,10 +36,12 @@ pub fn seek(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, opts) = get_opts_from_tokens(argv, &LSEEK_OPTS)?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &LSEEK_OPTS)?;
   let lseek_opts = get_lseek_opts(opts)?;
-  let mut argv = prepare_argv(argv)?.into_iter();
-  argv.next(); // drop 'seek'
+  if !argv.is_empty() {
+    argv.remove(0); // drop 'seek'
+  }
+  let mut argv = argv.into_iter();
 
   let Some(fd) = argv.next() else {
     return Err(ShErr::simple(

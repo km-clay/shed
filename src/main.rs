@@ -304,8 +304,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
     readline.print_line(false)?;
 
-    // Poll for
-    // stdin input
+    // Poll for stdin input
     let mut fds = [PollFd::new(
       unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
       PollFlags::POLLIN,
@@ -337,13 +336,13 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
     match poll(&mut fds, timeout) {
       Ok(0) => {
-        // We timed out.
+        // We timed out. Check if there's a screensaver command
         if let Some(cmd) = exec_if_timeout
 				&& screensaver_deadline.is_some_and(|d| Instant::now() >= d) {
           screensaver_deadline = None;
           let prepared = ReadlineEvent::Line(cmd.clone());
-          let saved_hist_opt = read_shopts(|o| o.core.auto_hist);
-          let _guard = scopeguard::guard(saved_hist_opt, |opt| {
+          let _guard = scopeguard::guard(read_shopts(|o| o.core.auto_hist), |opt| {
+						// restores old auto_hist value
             write_shopts(|o| o.core.auto_hist = opt);
           });
           write_shopts(|o| o.core.auto_hist = false); // don't save screensaver command to history

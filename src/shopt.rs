@@ -2,33 +2,50 @@ use std::{fmt::Display, str::FromStr};
 
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 
-/// Escapes a string for embedding inside single quotes.
-/// Only escapes unescaped `\` and `'` characters.
-pub fn escape_for_single_quote(s: &str) -> String {
+const SPECIAL_CHARS: &str = "#$^*()=|{}[]`<>?~;& '\"";
+
+/// Escapes a string for displaying as a var value
+pub fn as_var_val_display(s: &str) -> String {
   let mut result = String::with_capacity(s.len());
   let mut chars = s.chars().peekable();
+	let mut has_escapes = false;
   while let Some(ch) = chars.next() {
-    if ch == '\\' {
-      match chars.peek() {
-        Some(&'\\') | Some(&'\'') => {
-          // Already escaped — pass through both characters
-          result.push(ch);
-          result.push(chars.next().unwrap());
-        }
-        _ => {
-          // Lone backslash — escape it
-          result.push('\\');
-          result.push('\\');
-        }
-      }
-    } else if ch == '\'' {
-      result.push('\\');
-      result.push('\'');
-    } else {
-      result.push(ch);
-    }
+		match ch {
+			'\\' => {
+				result.push_str("\\\\");
+			}
+			_ if ch.is_ascii_control() => {
+				let escaped = match ch {
+					'\n' => "\\n".into(),
+					'\r' => "\\r".into(),
+					'\t' => "\\t".into(),
+					'\x07' => "\\a".into(),
+					'\x08' => "\\b".into(),
+					'\x0B' => "\\v".into(),
+					'\x0C' => "\\f".into(),
+					_ => format!("\\x{:02x}", ch as u8),
+				};
+				has_escapes = true;
+				result.push_str(&escaped);
+			}
+			'\'' => {
+				has_escapes = true;
+				result.push('\\');
+				result.push('\'');
+			}
+			_ => result.push(ch),
+		}
   }
-  result
+
+	let has_special = result.chars().any(|c| SPECIAL_CHARS.contains(c));
+
+	if has_escapes {
+		format!("$'{result}'")
+	} else if has_special {
+		format!("'{result}'")
+	} else {
+		result
+	}
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -137,8 +154,8 @@ macro_rules! shopt_group {
     impl Display for $name {
       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let output = [
-          $(format!("{}.{}='{}'", $group_name, stringify!($field),
-            $crate::shopt::escape_for_single_quote(&self.$field.to_string())),)*
+          $(format!("{}.{}={}", $group_name, stringify!($field),
+            $crate::shopt::as_var_val_display(&self.$field.to_string())),)*
         ];
         writeln!(f, "{}", output.join("\n"))
       }
@@ -150,6 +167,7 @@ macro_rules! shopt_group {
 pub struct ShOpts {
   pub core: ShOptCore,
 	pub line: ShOptLine,
+	pub set: ShOptSet,
   pub prompt: ShOptPrompt,
 }
 
@@ -157,9 +175,10 @@ impl Default for ShOpts {
   fn default() -> Self {
     let core = ShOptCore::default();
 		let line = ShOptLine::default();
+		let set = ShOptSet::default();
     let prompt = ShOptPrompt::default();
 
-    Self { core, line,  prompt }
+    Self { core, line, set, prompt }
   }
 }
 
@@ -177,6 +196,7 @@ impl ShOpts {
     let output = [
       self.query("core")?.unwrap_or_default().to_string(),
 			self.query("line")?.unwrap_or_default().to_string(),
+			self.query("set")?.unwrap_or_default().to_string(),
       self.query("prompt")?.unwrap_or_default().to_string(),
     ];
 
@@ -197,6 +217,7 @@ impl ShOpts {
     match key {
       "core" => self.core.set(&remainder, val)?,
 			"line" => self.line.set(&remainder, val)?,
+			"set" => self.set.set(&remainder, val)?,
       "prompt" => self.prompt.set(&remainder, val)?,
       _ => {
         return Err(ShErr::simple(
@@ -222,6 +243,7 @@ impl ShOpts {
     match key {
       "core" => self.core.get(&remainder),
 			"line" => self.line.get(&remainder),
+			"set" => self.set.get(&remainder),
       "prompt" => self.prompt.get(&remainder),
       _ => Err(ShErr::simple(
         ShErrKind::SyntaxErr,
@@ -238,6 +260,25 @@ shopt_group! {
 		viewport_height: String = "50%".to_string(),
 		/// The line offset from the top or bottom of the viewport to trigger scrolling
 		scroll_offset: usize = 2,
+	}
+}
+
+shopt_group! {
+	#[derive(Clone, Debug)]
+	pub struct ShOptSet ("set") {
+		hashall: bool = true,
+		vi: bool = true,
+		allexport: bool = false,
+		errexit: bool = false,
+		noclobber: bool = false,
+		monitor: bool = false,
+		noglob: bool = false,
+		noexec: bool = false,
+		nolog: bool = false,
+		notify: bool = false,
+		nounset: bool = false,
+		verbose: bool = false,
+		xtrace: bool = false,
 	}
 }
 

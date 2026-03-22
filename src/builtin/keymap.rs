@@ -2,7 +2,7 @@ use crate::{
   expand::expand_keymap,
   getopt::{Opt, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
-  parse::{NdRule, Node, execute::prepare_argv},
+  parse::{NdRule, Node},
   prelude::*,
   readline::keys::KeyEvent,
   state::{self, write_logic},
@@ -136,7 +136,7 @@ pub fn keymap(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, opts) = get_opts_from_tokens(argv, &KeyMapOpts::keymap_opts())?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &KeyMapOpts::keymap_opts())?;
   let opts = KeyMapOpts::from_opts(&opts).promote_err(span.clone())?;
   if let Some(to_rm) = opts.remove {
     write_logic(|l| l.remove_keymap(&to_rm));
@@ -144,7 +144,6 @@ pub fn keymap(node: Node) -> ShResult<()> {
     return Ok(());
   }
 
-  let mut argv = prepare_argv(argv)?;
   if !argv.is_empty() {
     argv.remove(0);
   }

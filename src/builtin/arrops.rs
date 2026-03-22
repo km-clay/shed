@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::{
   getopt::{Opt, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
-  parse::{NdRule, Node, execute::prepare_argv},
+  parse::{NdRule, Node},
   prelude::*,
   procio::borrow_fd,
   state::{self, VarFlags, VarKind, write_vars},
@@ -57,9 +57,8 @@ fn arr_pop_inner(node: Node, end: End) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
   let arr_op_opts = get_arr_op_opts(opts)?;
-  let mut argv = prepare_argv(argv)?;
   if !argv.is_empty() {
     argv.remove(0);
   }
@@ -101,9 +100,8 @@ fn arr_push_inner(node: Node, end: End) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
   let _arr_op_opts = get_arr_op_opts(opts)?;
-  let mut argv = prepare_argv(argv)?;
   if !argv.is_empty() {
     argv.remove(0);
   }
@@ -166,9 +164,8 @@ pub fn arr_rotate(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &arr_op_optspec())?;
   let arr_op_opts = get_arr_op_opts(opts)?;
-  let mut argv = prepare_argv(argv)?;
   if !argv.is_empty() {
     argv.remove(0);
   }

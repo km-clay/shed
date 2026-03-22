@@ -8,30 +8,7 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias},
-    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
-    autocmd::autocmd,
-    cd::cd,
-    complete::{compgen_builtin, complete_builtin},
-    dirstack::{dirs, popd, pushd},
-    echo::echo,
-    eval, exec,
-    flowctl::flowctl,
-    getopts::getopts,
-    help::help,
-    intro,
-    jobctl::{self, JobBehavior, continue_job, disown, jobs},
-    keymap, map,
-    pwd::pwd,
-    read::{self, read_builtin},
-    resource::{ulimit, umask_builtin},
-    seek::seek,
-    shift::shift,
-    shopt::shopt,
-    source::source,
-    test::double_bracket_test,
-    trap::{TrapTarget, trap},
-    varcmds::{export, local, readonly, unset},
+    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, help::help, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -232,17 +209,7 @@ pub fn exec_input(
   if let Some(mut stack) = io_stack {
     dispatcher.io_stack.extend(stack.drain(..));
   }
-  let result = dispatcher.begin_dispatch();
-
-  if state::get_status() != 0
-    && let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error))
-  {
-    let saved_status = state::get_status();
-    exec_input(trap, None, false, Some(source_name))?;
-    state::set_status(saved_status);
-  }
-
-  result
+  dispatcher.begin_dispatch()
 }
 
 pub struct Dispatcher {
@@ -280,6 +247,7 @@ impl Dispatcher {
       // and propagate back to the functions in main.rs
       check_signals()?;
     }
+		let flags = node.flags;
 
     match node.class {
       NdRule::Conjunction { .. } => self.exec_conjunction(node)?,
@@ -295,6 +263,16 @@ impl Dispatcher {
       NdRule::Test { .. } => self.exec_test(node)?,
       _ => unreachable!(),
     }
+
+		if state::get_status() != 0
+		&& !flags.contains(NdFlags::NOT_ERR) {
+			if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
+				let saved_status = state::get_status();
+				exec_input(trap, None, false, Some("trap ERR".to_string()))?;
+				state::set_status(saved_status);
+			}
+		}
+
     Ok(())
   }
   pub fn dispatch_cmd(&mut self, node: Node) -> ShResult<()> {
@@ -483,6 +461,10 @@ impl Dispatcher {
             state::set_status(*code);
             Ok(())
           }
+					ShErrKind::ErrInterrupt => {
+						// set -e caught an error
+						Err(e.with_context(func_body.body().context.clone()))
+					}
           _ => Err(e),
         }
       } else {
@@ -1027,6 +1009,7 @@ impl Dispatcher {
       "umask" => umask_builtin(cmd),
       "seek" => seek(cmd),
       "help" => help(cmd),
+			"set" => set_builtin(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())

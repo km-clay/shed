@@ -12,7 +12,7 @@ use crate::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt},
     sys::TTY_FILENO,
   },
-  parse::{NdRule, Node, execute::prepare_argv},
+  parse::{NdRule, Node},
   procio::borrow_fd,
   readline::term::{KeyReader, PollReader, RawModeGuard},
   state::{self, VarFlags, VarKind, read_vars, write_vars},
@@ -90,9 +90,8 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
-  let (argv, opts) = get_opts_from_tokens(argv, &READ_OPTS)?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &READ_OPTS)?;
   let read_opts = get_read_flags(opts).blame(blame.clone())?;
-  let mut argv = prepare_argv(argv)?;
   if !argv.is_empty() {
     argv.remove(0);
   }

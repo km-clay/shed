@@ -215,6 +215,8 @@ impl ShErr {
 
     self.labeled(span, first)
   }
+	/// Give a redirguard to this error so that it remains alive
+	/// This allows redirguards to move their guarded context upwards
   pub fn with_redirs(mut self, guard: RedirGuard) -> Self {
     self.io_guards.push(guard);
     self
@@ -459,7 +461,8 @@ pub enum ShErrKind {
   FuncReturn(i32),
   LoopContinue(i32),
   LoopBreak(i32),
-  Interrupt,
+	ErrInterrupt, // used for set -e
+  Interrupt, // used for Ctrl+C on loops
   Null,
 }
 
@@ -497,6 +500,7 @@ impl Display for ShErrKind {
       Self::ReadlineErr => "Readline Error",
       Self::ExCommand => "Ex Command Error",
       Self::Interrupt => "",
+      Self::ErrInterrupt => "",
       Self::Null => "",
     };
     write!(f, "{output}")

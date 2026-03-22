@@ -950,14 +950,16 @@ impl LineBuf {
   ) -> Option<MotionKind> {
     let mut target = self.cursor.pos;
 
-    for _ in 0..count {
+    for i in 0..count {
+			let last = i == count - 1;
+			let iws = ignore_trailing_ws && last; // only ignore on the last iteration
       match (to, dir) {
         (To::Start, Direction::Forward) => {
+					// 'w' is a special snowflake motion so we need these two extra arguments
+					// if we hit the ignore_trailing_ws path in the function,
+					// inclusive is flipped to true.
           target = self
-						// 'w' is a special snowflake motion so we need these two extra arguments
-						// if we hit the ignore_trailing_ws path in the function,
-						// inclusive is flipped to true.
-            .word_motion_w(word, target, ignore_trailing_ws, &mut inclusive)
+            .word_motion_w(word, target, iws, &mut inclusive)
             .unwrap_or_else(|| {
               // we set inclusive to true so that we catch the entire word
               // instead of ignoring the last character
@@ -1632,6 +1634,7 @@ impl LineBuf {
   }
   fn eval_motion_inner(&mut self, cmd: &ViCmd, check_hint: bool) -> Option<MotionKind> {
     let ViCmd { verb, motion, .. } = cmd;
+		log::debug!("verb: {:?}, motion: {:?}, check_hint: {}", verb, motion, check_hint);
     let MotionCmd(count, motion) = motion.as_ref()?;
     let buffer = self.lines.clone();
     if let Some(mut hint) = self.hint.clone() {

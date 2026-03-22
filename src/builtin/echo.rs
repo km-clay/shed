@@ -2,7 +2,7 @@ use crate::{
   expand::expand_prompt,
   getopt::{Opt, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
-  parse::{NdRule, Node, execute::prepare_argv},
+  parse::{NdRule, Node},
   prelude::*,
   procio::borrow_fd,
   state::{self, read_shopts},
@@ -47,9 +47,8 @@ pub fn echo(node: Node) -> ShResult<()> {
     unreachable!()
   };
   assert!(!argv.is_empty());
-  let (argv, opts) = get_opts_from_tokens(argv, &ECHO_OPTS)?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &ECHO_OPTS)?;
   let flags = get_echo_flags(opts).blame(blame)?;
-  let mut argv = prepare_argv(argv)?;
   if !argv.is_empty() {
     argv.remove(0);
   }
