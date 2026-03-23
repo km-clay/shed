@@ -3,17 +3,14 @@ use std::{env, io::Write, path::Path};
 use ariadne::Span as ASpan;
 
 use crate::{
-  libsh::{
+  builtin::join_raw_arg_iter, libsh::{
     error::{ShErr, ShErrKind, ShResult},
     guards::RawModeGuard,
-  },
-  parse::{
+  }, parse::{
     NdRule, Node,
     execute::{exec_input, prepare_argv},
     lex::{QuoteState, Span},
-  },
-  readline::{complete::ScoredCandidate, markers},
-  state,
+  }, readline::{complete::ScoredCandidate, markers}, state
 };
 
 const TAG_SEQ: &str = "\x1b[1;33m"; // bold yellow — searchable tags
@@ -41,22 +38,7 @@ pub fn help(node: Node) -> ShResult<()> {
   let (topic, span) = if argv.peek().is_none() {
     ("help.txt".to_string(), help.1)
   } else {
-    argv.fold((String::new(), Span::default()), |mut acc, arg| {
-      if acc.1 == Span::default() {
-        acc.1 = arg.1.clone();
-      } else {
-        let new_end = arg.1.end();
-        let start = acc.1.start();
-        acc.1.set_range(start..new_end);
-      }
-
-      if acc.0.is_empty() {
-        acc.0 = arg.0;
-      } else {
-        acc.0 = acc.0 + &format!(" {}", arg.0);
-      }
-      acc
-    })
+		join_raw_arg_iter(argv)
   };
 
   let hpath = env::var("SHED_HPATH").unwrap_or_default();

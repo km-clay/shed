@@ -20,7 +20,8 @@ pub mod state;
 #[cfg(test)]
 pub mod testutil;
 
-use std::os::fd::BorrowedFd;
+use std::os::fd::{AsFd, BorrowedFd};
+use std::os::unix::net::UnixListener;
 use std::process::ExitCode;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -43,8 +44,7 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs,
-  write_meta, write_shopts,
+  AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;
@@ -99,6 +99,47 @@ fn setup_panic_handler() {
 
     default_panic_hook(info);
   }));
+}
+
+/// The socket used to expose the system/status message interface
+pub struct MsgSocket {
+	listener: UnixListener,
+	path: PathBuf
+}
+
+impl MsgSocket {
+	pub fn new() -> ShResult<Self> {
+		let pid = Pid::this();
+		let runtime_dir = env::var("XDG_RUNTIME_DIR")
+			.unwrap_or_else(|_| format!("/tmp/shed-{}", nix::unistd::getuid()));
+
+		std::fs::create_dir_all(format!("{runtime_dir}/shed"))?;
+		let sock_path = format!("{runtime_dir}/shed/{pid}.sock");
+		std::fs::remove_file(&sock_path).ok();
+		let listener = UnixListener::bind(&sock_path)?;
+
+		let raw_fd = listener.into_raw_fd();
+		let high_fd = fcntl(raw_fd, FcntlArg::F_DUPFD_CLOEXEC(10))?;
+		close(raw_fd)?;
+
+		let listener = unsafe { UnixListener::from_raw_fd(high_fd) };
+		listener.set_nonblocking(true).ok();
+
+		write_vars(|v| v.set_var("SHED_SOCK", VarKind::Str(sock_path.clone()), VarFlags::EXPORT)).ok();
+		Ok(Self {
+			listener,
+			path: PathBuf::from(sock_path)
+		})
+	}
+	pub fn as_raw_fd(&self) -> RawFd {
+		self.listener.as_raw_fd()
+	}
+}
+
+impl Drop for MsgSocket {
+	fn drop(&mut self) {
+		std::fs::remove_file(&self.path).ok();
+	}
 }
 
 fn main() -> ExitCode {
@@ -231,6 +272,14 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup(args.login_shell);
 
+	let msg_socket = match MsgSocket::new() {
+		Ok(sock) => Some(sock),
+		Err(e) => {
+			e.print_error();
+			None
+		}
+	};
+
   if args.login_shell
     && let Err(e) = source_login()
   {
@@ -305,10 +354,18 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     readline.print_line(false)?;
 
     // Poll for stdin input
-    let mut fds = [PollFd::new(
-      unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
-      PollFlags::POLLIN,
-    )];
+    let mut fds = vec![
+			PollFd::new(
+				unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
+				PollFlags::POLLIN,
+			),
+		];
+		if let Some(fd) = msg_socket.as_ref().map(|sock| sock.as_raw_fd()) {
+			fds.push(PollFd::new(
+				unsafe { BorrowedFd::borrow_raw(fd) },
+				PollFlags::POLLIN,
+			));
+		}
 
     let mut exec_if_timeout = None;
 
@@ -444,6 +501,46 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       }
     }
 
+		// check system message socket
+		if fds
+			.get(1)
+			.and_then(|fd| fd.revents())
+			.is_some_and(|r| r.contains(PollFlags::POLLIN))
+		&& let Some(sock) = msg_socket.as_ref()
+		&& let Ok((conn, _)) = sock.listener.accept() {
+			conn.set_nonblocking(false).ok();
+			let mut bytes = vec![];
+			loop {
+				let mut buffer = [0u8; 1024];
+				match read(conn.as_raw_fd(), &mut buffer) {
+					Ok(0) => break,
+					Ok(n) => {
+						bytes.extend_from_slice(&buffer[..n]);
+					}
+					Err(Errno::EINTR) => continue,
+					Err(e) => {
+						eprintln!("error reading from message socket: {e}");
+						break;
+					}
+				}
+			}
+			let input = String::from_utf8_lossy(&bytes).to_string();
+
+			input
+				.lines()
+				.for_each(|l| {
+					if let Some(msg) = l.strip_prefix("system:") {
+						write_meta(|m| {
+							m.post_system_message(msg.to_string());
+						})
+					} else if let Some(msg) = l.strip_prefix("status:") {
+						write_meta(|m| {
+							m.post_status_message(msg.to_string());
+						})
+					}
+				});
+		}
+
     // Process any available input
     let event = readline.process_input();
     match handle_readline_event(&mut readline, event)? {
@@ -479,6 +576,12 @@ fn handle_readline_event(readline: &mut ShedVi, event: ShResult<ReadlineEvent>) 
             QUIT_CODE.store(*code, Ordering::SeqCst);
             return Ok(true);
           }
+					ShErrKind::ErrInterrupt => {
+						// set -e exit path
+						QUIT_CODE.store(0, Ordering::SeqCst);
+						e.print_error();
+						return Ok(true);
+					}
           _ => e.print_error(),
         }
       }
