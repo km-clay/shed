@@ -364,6 +364,9 @@ shopt_group! {
 
     /// Whether tab completion matching is case-insensitive
     completion_ignore_case: bool = false,
+
+		/// If set, enables history concatenation with Shift+Up/Down
+		hist_cat: bool = true,
   }
 }
 

@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
-  readline::{complete::FuzzySelector, linebuf::LineBuf, vicmd::Direction},
+  readline::{complete::{Candidate, FuzzySelector}, linebuf::LineBuf, vicmd::Direction},
   state::read_meta,
 };
 
@@ -288,7 +288,8 @@ impl History {
         .search_mask
         .clone()
         .into_iter()
-        .map(|ent| super::complete::Candidate::from(ent.command()));
+				.enumerate()
+				.map(|(i,ent)| Candidate::from((i,ent.command().to_string())));
       self.fuzzy_finder.activate(raw_entries.collect());
       None
     }
@@ -459,6 +460,17 @@ impl History {
 
     self.search_mask.get(self.cursor)
   }
+
+	pub fn scroll_to(&mut self, idx: usize) -> Option<&HistEntry> {
+		self.cursor = idx.clamp(0, self.search_mask.len());
+		self.virt_cursor = self.cursor;
+
+		self.search_mask.get(self.cursor)
+	}
+
+	pub fn search_mask_count(&self) -> usize {
+		self.search_mask.len()
+	}
 
 	pub fn virt_scroll(&mut self, offset: isize) -> Option<&HistEntry> {
 		let before = self.virt_cursor;

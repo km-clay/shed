@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use bitflags::bitflags;
 
-use crate::readline::{
+use crate::{readline::{
   linebuf::{Grapheme, Pos},
   vimode::ex::SubFlags,
-};
+}, state::read_shopts};
 
 use super::register::{RegisterContent, append_register, read_register, write_register};
 
@@ -131,7 +131,8 @@ impl ViCmd {
       .is_some_and(|v| matches!(v.1, Verb::RepeatLast))
   }
 	pub fn is_virtual_scroll(&self) -> bool {
-		self.verb.as_ref().is_none()
+		read_shopts(|o| o.prompt.hist_cat)
+		&& self.verb.as_ref().is_none()
 		&& self.motion.as_ref().is_some_and(|v| matches!(v.1, Motion::LineUp | Motion::LineDown))
 		&& self.flags.intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL)
 	}

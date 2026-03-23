@@ -189,12 +189,13 @@ impl Line {
   pub fn append(&mut self, other: &mut Line) {
     self.0.append(&mut other.0);
   }
-	pub fn insert_str(&mut self, at: usize, other: &str) {
+	pub fn insert_str(&mut self, mut at: usize, other: &str) {
 		if other.contains('\n') {
 			log::warn!("Inserting string with newlines into a single line. Newlines will be treated as literal characters.");
 		}
 		for g in other.graphemes(true) {
 			self.0.insert(at, Grapheme::from(g));
+			at += 1;
 		}
 	}
   pub fn insert_char(&mut self, at: usize, c: char) {
@@ -927,6 +928,7 @@ impl LineBuf {
 		}
 		let Some(new_first) = new_lines.first_mut() else { unreachable!() };
 		if !joined.trim_end().ends_with(sep.trim()) {
+			log::debug!("Adding separator '{}' between '{}' and '{}'", sep, joined, other);
 			new_first.insert_str(0,sep);
 		}
 		let splice_pos = Pos { row: last_row, col: last.len() };
@@ -934,6 +936,7 @@ impl LineBuf {
 		last.append(&mut first);
 		self.lines.extend(new_lines);
 		self.concat_points.push_back(splice_pos);
+		log::debug!("final buffer: '{}'", self.joined());
 	}
   fn push_str(&mut self, s: &str) {
     let mut lines = to_lines(s);

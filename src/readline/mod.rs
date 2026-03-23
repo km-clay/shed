@@ -13,6 +13,7 @@ use crate::expand::expand_prompt;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
+use crate::readline::history::HistEntry;
 use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::readline::vicmd::Direction;
 use crate::readline::vimode::{ViEx, ViVerbatim};
@@ -451,16 +452,8 @@ impl ShedVi {
 			SelectorResponse::Accept(cmd) => {
 				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
 
-				{
-					let editor = self.focused_editor();
-					editor.set_buffer(cmd.to_string());
-					editor.move_cursor_to_end();
-				}
-
-				self
-					.history
-					.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-				self.editor.set_hint(None);
+				let entry_idx = cmd.id().unwrap(); // history entries having an id to unwrap is an invariant.
+				self.scroll_history_to(entry_idx);
 				{
 					let mut writer = std::mem::take(&mut self.writer);
 					self.focused_history().fuzzy_finder.clear(&mut writer)?;
@@ -468,7 +461,7 @@ impl ShedVi {
 				}
 				self.focused_history().fuzzy_finder.reset();
 
-				with_vars([("_HIST_ENTRY".into(), cmd.clone())], || {
+				with_vars([("_HIST_ENTRY".into(), cmd.content().to_string())], || {
 					post_cmds.exec_with(&cmd);
 				});
 
@@ -546,7 +539,7 @@ impl ShedVi {
 				.ok();
 				self.prompt.refresh();
 
-				with_vars([("_COMP_CANDIDATE".into(), candidate.clone())], || {
+				with_vars([("_COMP_CANDIDATE".into(), candidate.content().to_string())], || {
 					post_cmds.exec_with(&candidate);
 				});
 
@@ -704,7 +697,7 @@ impl ShedVi {
 			Ok(Some(line)) => {
 				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
 				let cand = self.completer.selected_candidate().unwrap_or_default();
-				with_vars([("_COMP_CANDIDATE".into(), cand.clone())], || {
+				with_vars([("_COMP_CANDIDATE".into(), cand.content().to_string())], || {
 					post_cmds.exec_with(&cand);
 				});
 
@@ -805,8 +798,7 @@ impl ShedVi {
 					.fuzzy_finder
 					.filtered()
 					.iter()
-					.cloned()
-					.map(|sc| sc.content)
+					.map(|sc| sc.candidate.content().to_string())
 					.collect::<Vec<_>>();
 
 				let num_entries = entries.len();
@@ -1032,6 +1024,16 @@ impl ShedVi {
 			_ => unreachable!(),
 		}
 	}
+	pub fn scroll_history_to(&mut self, hist_idx: usize) {
+		let entry = self.history.scroll_to(hist_idx).cloned();
+		if entry.is_some() {
+			write_meta(|m| {
+				let total = self.history.search_mask_count();
+				m.post_status_message(format!("jumped to hist entry: {}/{}", hist_idx + 1, total));
+			})
+		}
+		self.swap_history_editor(entry);
+	}
   pub fn scroll_history(&mut self, cmd: ViCmd) {
     /*
     if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
@@ -1046,26 +1048,30 @@ impl ShedVi {
       Motion::LineDown => *count as isize,
       _ => unreachable!(),
     };
-    let entry = self.history.scroll(count);
-    if let Some(entry) = entry {
-      let editor = std::mem::take(&mut self.editor);
-      self.editor.set_buffer(entry.command().to_string());
-      if self.history.pending.is_none() {
-        self.history.pending = Some(editor);
-      }
-      self.editor.set_hint(None);
-      self.editor.move_cursor_to_end();
-    } else if let Some(pending) = self.history.pending.take() {
-      self.editor = pending;
-    } else {
-      // If we are here it should mean we are on our pending command
-      // And the user tried to scroll history down
-      // Since there is no "future" history, we should just bell and do nothing
-      self.writer.send_bell().ok();
-    }
-    self.editor.set_cursor_clamp(self.mode.clamp_cursor());
-    self.editor.fix_cursor();
+    let entry = self.history.scroll(count).cloned();
+		self.swap_history_editor(entry);
   }
+	pub fn swap_history_editor(&mut self, entry: Option<HistEntry>) {
+		if let Some(entry) = entry {
+			let editor = std::mem::take(&mut self.editor);
+			self.editor.set_buffer(entry.command().to_string());
+			if self.history.pending.is_none() {
+				self.history.pending = Some(editor);
+			}
+			self.editor.set_hint(None);
+			self.editor.move_cursor_to_end();
+		} else if let Some(pending) = self.history.pending.take() {
+			self.editor = pending;
+		} else {
+			// If we are here it should mean we are on our pending command
+			// And the user tried to scroll history down
+			// Since there is no "future" history, we should just bell and do nothing
+			self.writer.send_bell().ok();
+			return;
+		}
+		self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+		self.editor.fix_cursor();
+	}
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
     if self.editor.cursor_at_max() && self.editor.has_hint() {
       match self.mode.report_mode() {

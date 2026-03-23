@@ -990,7 +990,7 @@ impl From<Vec<String>> for Var {
 
 impl From<Vec<Candidate>> for Var {
   fn from(value: Vec<Candidate>) -> Self {
-    let as_strs = value.into_iter().map(|c| c.0).collect::<Vec<_>>();
+    let as_strs = value.into_iter().map(|c| c.content().to_string()).collect::<Vec<_>>();
     Self::new(VarKind::Arr(as_strs.into()), VarFlags::NONE)
   }
 }

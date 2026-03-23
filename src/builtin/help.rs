@@ -151,7 +151,7 @@ pub fn open_help(content: &str, line: Option<usize>, file_name: Option<String>) 
 pub fn get_best_match(topic: &str, tags: &[(String, usize)]) -> Option<(String, usize)> {
   let mut candidates: Vec<_> = tags
     .iter()
-    .map(|(tag, line)| (ScoredCandidate::new(tag.to_string()), *line))
+    .map(|(tag, line)| (ScoredCandidate::new(tag.into()), *line))
     .collect();
 
   for (cand, _) in candidates.iter_mut() {
@@ -163,7 +163,7 @@ pub fn get_best_match(topic: &str, tags: &[(String, usize)]) -> Option<(String, 
 
   candidates
     .first()
-    .map(|(c, line)| (c.content.clone(), *line))
+    .map(|(c, line)| (c.candidate.content().to_string(), *line))
 }
 
 pub fn read_tags(raw: &str) -> Vec<(String, usize)> {

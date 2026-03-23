@@ -73,14 +73,17 @@ impl ClampedUsize {
   }
 }
 
-#[derive(Debug, Clone)]
-pub struct Candidate(pub String);
+#[derive(Default, Debug, Clone)]
+pub struct Candidate {
+	content: String,
+	id: Option<usize> // for stuff like history that cares about the original index
+}
 
 impl Eq for Candidate {}
 
 impl PartialEq for Candidate {
   fn eq(&self, other: &Self) -> bool {
-    self.0 == other.0
+    self.content == other.content
   }
 }
 
@@ -92,44 +95,62 @@ impl PartialOrd for Candidate {
 
 impl Ord for Candidate {
   fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-    self.0.cmp(&other.0)
+    self.content.cmp(&other.content)
   }
 }
 
 impl From<String> for Candidate {
   fn from(value: String) -> Self {
-    Self(value)
+		Self {
+			content: value,
+			id: None
+		}
   }
 }
 
 impl From<&String> for Candidate {
   fn from(value: &String) -> Self {
-    Self(value.clone())
+		Self {
+			content: value.clone(),
+			id: None
+		}
   }
 }
 
 impl From<&str> for Candidate {
   fn from(value: &str) -> Self {
-    Self(value.to_string())
+    Self {
+			content: value.to_string(),
+			id: None
+		}
   }
+}
+
+impl From<(usize, String)> for Candidate {
+	fn from(value: (usize, String)) -> Self {
+		Self {
+			content: value.1,
+			id: Some(value.0)
+		}
+	}
 }
 
 impl Display for Candidate {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", &self.0)
+    write!(f, "{}", &self.content)
   }
 }
 
 impl AsRef<str> for Candidate {
   fn as_ref(&self) -> &str {
-    &self.0
+    &self.content
   }
 }
 
 impl std::ops::Deref for Candidate {
   type Target = str;
   fn deref(&self) -> &str {
-    &self.0
+    &self.content
   }
 }
 
@@ -138,33 +159,39 @@ impl Candidate {
     let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
     if ignore_case {
       let other_lower = other.to_lowercase();
-      let self_lower = self.0.to_lowercase();
+      let self_lower = self.content.to_lowercase();
       self_lower.starts_with(&other_lower)
     } else {
-      self.0.starts_with(other)
+      self.content.starts_with(other)
     }
   }
+	pub fn content(&self) -> &str {
+		&self.content
+	}
+	pub fn id(&self) -> Option<usize> {
+		self.id
+	}
   pub fn as_str(&self) -> &str {
-    &self.0
+    &self.content
   }
   pub fn as_bytes(&self) -> &[u8] {
-    self.0.as_bytes()
+    self.content.as_bytes()
   }
   pub fn starts_with(&self, pat: char) -> bool {
-    self.0.starts_with(pat)
+    self.content.starts_with(pat)
   }
   pub fn strip_prefix(&self, prefix: &str) -> Option<String> {
     let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
     if ignore_case {
-      let old_len = self.0.len();
+      let old_len = self.content.len();
       let prefix_lower = prefix.to_lowercase();
-      let self_lower = self.0.to_lowercase();
+      let self_lower = self.content.to_lowercase();
       let stripped = self_lower.strip_prefix(&prefix_lower)?;
       let new_len = stripped.len();
       let delta = old_len - new_len;
-      Some(self.0[delta..].to_string())
+      Some(self.content[delta..].to_string())
     } else {
-      self.0.strip_prefix(prefix).map(|s| s.to_string())
+      self.content.strip_prefix(prefix).map(|s| s.to_string())
     }
   }
 }
@@ -334,7 +361,7 @@ fn complete_dirs(start: &str) -> Vec<Candidate> {
 
   filenames
     .into_iter()
-    .filter(|f| std::fs::metadata(&f.0).map(|m| m.is_dir()).unwrap_or(false))
+    .filter(|f| std::fs::metadata(&f.content).map(|m| m.is_dir()).unwrap_or(false))
     .collect()
 }
 
@@ -370,7 +397,7 @@ fn complete_filename(start: &str) -> Vec<Candidate> {
     let file_str: Candidate = file_name.to_string_lossy().to_string().into();
 
     // Skip hidden files unless explicitly requested
-    if !prefix.starts_with('.') && file_str.0.starts_with('.') {
+    if !prefix.starts_with('.') && file_str.content.starts_with('.') {
       continue;
     }
 
@@ -624,12 +651,12 @@ impl CompSpec for BashCompSpec {
     candidates = candidates
       .into_iter()
       .map(|c| {
-        let stripped = c.0.strip_prefix(&expanded).unwrap_or_default();
+        let stripped = c.content.strip_prefix(&expanded).unwrap_or_default();
         format!("{prefix}{stripped}").into()
       })
       .collect();
 
-    candidates.sort_by_key(|c| c.0.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
+    candidates.sort_by_key(|c| c.content.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
 
     Ok(candidates)
   }
@@ -702,13 +729,13 @@ impl CompResult {
 
 pub enum CompResponse {
   Passthrough,    // key falls through
-  Accept(String), // user accepted completion
+  Accept(Candidate), // user accepted completion
   Dismiss,        // user canceled completion
   Consumed,       // key was handled, but completion remains active
 }
 
 pub enum SelectorResponse {
-  Accept(String),
+  Accept(Candidate),
   Dismiss,
   Consumed,
 }
@@ -726,7 +753,7 @@ pub trait Completer {
   fn all_candidates(&self) -> Vec<Candidate> {
     vec![]
   }
-  fn selected_candidate(&self) -> Option<String>;
+  fn selected_candidate(&self) -> Option<Candidate>;
   fn token_span(&self) -> (usize, usize);
   fn original_input(&self) -> &str;
   fn token(&self) -> &str {
@@ -745,7 +772,7 @@ pub trait Completer {
 
 #[derive(Default, Debug, Clone)]
 pub struct ScoredCandidate {
-  pub content: String,
+  pub candidate: Candidate,
   pub score: Option<i32>,
 }
 
@@ -756,9 +783,9 @@ impl ScoredCandidate {
   const PENALTY_GAP_START: i32 = 3;
   const PENALTY_GAP_EXTEND: i32 = 1;
 
-  pub fn new(content: String) -> Self {
+  pub fn new(candidate: Candidate) -> Self {
     Self {
-      content,
+      candidate,
       score: None,
     }
   }
@@ -776,10 +803,10 @@ impl ScoredCandidate {
     }
 
     let query_chars: Vec<char> = other.chars().collect();
-    let content_chars: Vec<char> = self.content.chars().collect();
+    let candidate_chars: Vec<char> = self.candidate.chars().collect();
     let mut indices = vec![];
     let mut qi = 0;
-    for (ci, c_ch) in self.content.chars().enumerate() {
+    for (ci, c_ch) in self.candidate.chars().enumerate() {
       if qi < query_chars.len() && c_ch.eq_ignore_ascii_case(&query_chars[qi]) {
         indices.push(ci);
         qi += 1;
@@ -798,7 +825,7 @@ impl ScoredCandidate {
         score += Self::BONUS_FIRST_CHAR;
       }
 
-      if idx == 0 || Self::is_word_bound(content_chars[idx - 1], content_chars[idx]) {
+      if idx == 0 || Self::is_word_bound(candidate_chars[idx - 1], candidate_chars[idx]) {
         score += Self::BONUS_BOUNDARY;
       }
 
@@ -820,7 +847,7 @@ impl ScoredCandidate {
 impl From<String> for ScoredCandidate {
   fn from(content: String) -> Self {
     Self {
-      content,
+      candidate: content.into(),
       score: None,
     }
   }
@@ -829,7 +856,7 @@ impl From<String> for ScoredCandidate {
 impl From<Candidate> for ScoredCandidate {
   fn from(candidate: Candidate) -> Self {
     Self {
-      content: candidate.0,
+      candidate,
       score: None,
     }
   }
@@ -1008,11 +1035,11 @@ impl FuzzySelector {
     self.active
   }
 
-  pub fn selected_candidate(&self) -> Option<String> {
+  pub fn selected_candidate(&self) -> Option<Candidate> {
     self
       .filtered
       .get(self.cursor.get())
-      .map(|c| c.content.clone())
+      .map(|c| c.candidate.clone())
   }
 
   pub fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
@@ -1024,7 +1051,7 @@ impl FuzzySelector {
     self
       .filtered
       .get(idx)
-      .map(|c| c.content.trim_end().lines().count().max(1))
+      .map(|c| c.candidate.content().trim_end().lines().count().max(1))
       .unwrap_or(1)
   }
 
@@ -1074,7 +1101,7 @@ impl FuzzySelector {
       .clone()
       .into_iter()
       .filter_map(|c| {
-        let mut sc = ScoredCandidate::new(c.to_string());
+        let mut sc = ScoredCandidate::new(c);
         let score = sc.fuzzy_score(&self.query.linebuf.joined());
         if score > i32::MIN { Some(sc) } else { None }
       })
@@ -1097,9 +1124,8 @@ impl FuzzySelector {
         if let Some(selected) = self
           .filtered
           .get(self.cursor.get())
-          .map(|c| c.content.clone())
         {
-          Ok(SelectorResponse::Accept(selected))
+          Ok(SelectorResponse::Accept(selected.candidate.clone()))
         } else {
           Ok(SelectorResponse::Dismiss)
         }
@@ -1184,7 +1210,7 @@ impl FuzzySelector {
     rows += 1;
 
     let mut lines_drawn = 0;
-    for (i, candidate) in visible.iter().enumerate() {
+    for (i, s_cand) in visible.iter().enumerate() {
       if lines_drawn >= max_height {
         break;
       }
@@ -1194,7 +1220,7 @@ impl FuzzySelector {
         Self::SELECTOR_GRAY
       };
       let mut drew_number = false;
-      for line in candidate.content.trim_end().lines() {
+      for line in s_cand.candidate.content().trim_end().lines() {
         if lines_drawn >= max_height {
           break;
         }
@@ -1204,7 +1230,7 @@ impl FuzzySelector {
         } else {
           cols.saturating_sub(3)
         };
-        if calc_str_width(&line) > col_lim {
+        if calc_str_width(&line) >= col_lim {
           line.truncate(col_lim.saturating_sub(6) as usize);
           line.push_str("...");
         }
@@ -1362,7 +1388,7 @@ impl Completer for FuzzyCompleter {
         }
         (
           self.completer.original_input[..prefix_end].to_string(),
-          basename,
+          basename.into(),
         )
       } else {
         (
@@ -1372,10 +1398,10 @@ impl Completer for FuzzyCompleter {
       }
     } else {
       start += slice.width();
-      let completion = selected.strip_prefix(slice).unwrap_or(&selected);
+      let completion = selected.strip_prefix(slice).unwrap_or(selected.content().to_string());
       (
         self.completer.original_input[..start].to_string(),
-        completion.to_string(),
+        completion.into(),
       )
     };
     let escaped = escape_str(&completion, false);
@@ -1402,7 +1428,7 @@ impl Completer for FuzzyCompleter {
       return Ok(None);
     } else if candidates.len() == 1 {
       self.selector.filtered = candidates.into_iter().map(ScoredCandidate::from).collect();
-      let selected = self.selector.filtered[0].content.clone();
+      let selected = self.selector.filtered[0].candidate.content().to_string();
       let completed = self.get_completed_line(&selected);
       self.selector.active = false;
       return Ok(Some(completed));
@@ -1434,7 +1460,7 @@ impl Completer for FuzzyCompleter {
   fn is_active(&self) -> bool {
     self.selector.is_active()
   }
-  fn selected_candidate(&self) -> Option<String> {
+  fn selected_candidate(&self) -> Option<Candidate> {
     self.selector.selected_candidate()
   }
   fn original_input(&self) -> &str {
@@ -1486,11 +1512,10 @@ impl Completer for SimpleCompleter {
     self.active
   }
 
-  fn selected_candidate(&self) -> Option<String> {
+  fn selected_candidate(&self) -> Option<Candidate> {
     self
       .candidates
-      .get(self.selected_idx)
-      .map(|c| c.to_string())
+      .get(self.selected_idx).cloned()
   }
 
   fn token_span(&self) -> (usize, usize) {
