@@ -879,7 +879,8 @@ impl ShedVi {
 		}
 
     if self.should_grab_history(&cmd) {
-			if cmd.flags.intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL) {
+			if read_shopts(|o| o.prompt.hist_cat)
+			&& cmd.flags.intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL) {
 				self.scroll_history_virtual(cmd);
 			} else {
 				self.scroll_history(cmd);

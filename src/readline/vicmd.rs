@@ -131,8 +131,7 @@ impl ViCmd {
       .is_some_and(|v| matches!(v.1, Verb::RepeatLast))
   }
 	pub fn is_virtual_scroll(&self) -> bool {
-		read_shopts(|o| o.prompt.hist_cat)
-		&& self.verb.as_ref().is_none()
+		self.verb.as_ref().is_none()
 		&& self.motion.as_ref().is_some_and(|v| matches!(v.1, Motion::LineUp | Motion::LineDown))
 		&& self.flags.intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL)
 	}

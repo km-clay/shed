@@ -69,6 +69,7 @@ pub fn is_in_path(name: &str) -> bool {
   }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum AssignBehavior {
   Export,
   Set,
@@ -248,7 +249,11 @@ impl Dispatcher {
       check_signals()?;
     }
 		let flags = node.flags;
+		let span = node.get_span().clone();
 
+		if self.interactive {
+			log::debug!("status before executing node: {}", state::get_status());
+		}
     let result = match node.class {
       NdRule::Conjunction { .. } => self.exec_conjunction(node),
       NdRule::Pipeline { .. } => self.exec_pipeline(node),
@@ -263,28 +268,29 @@ impl Dispatcher {
       NdRule::Test { .. } => self.exec_test(node),
       _ => unreachable!(),
     };
-
-		if state::get_status() != 0
-		&& !flags.contains(NdFlags::NOT_ERR) {
-			if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
-				let saved_status = state::get_status();
-				exec_input(trap, None, false, Some("trap ERR".to_string()))?;
-				state::set_status(saved_status);
-			}
-			if read_shopts(|o| o.set.errexit) {
-				match result {
-					Ok(_) => {
-						return Err(ShErr::simple(ShErrKind::ErrInterrupt, ""));
-					}
-					Err(mut e) => {
-						e.set_kind(ShErrKind::ErrInterrupt);
-						return Err(e)
-					}
-				}
-			}
+		if self.interactive {
+			log::debug!("status after executing node: {}", state::get_status());
 		}
 
-		result?;
+		if let Err(mut e) = result {
+			if e.is_flow_control() {
+				return Err(e)
+			}
+			if state::get_status() != 0
+			&& !flags.contains(NdFlags::NOT_ERR) {
+				if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
+					let saved_status = state::get_status();
+					exec_input(trap, None, false, Some("trap ERR".to_string()))?;
+					state::set_status(saved_status);
+				}
+				if read_shopts(|o| o.set.errexit) {
+					e.set_kind(ShErrKind::ErrInterrupt);
+					e.persist_redirs();
+					return Err(e)
+				}
+			}
+			return Err(e);
+		}
 
     Ok(())
   }
@@ -498,9 +504,6 @@ impl Dispatcher {
     let NdRule::BraceGrp { body } = brc_grp.class else {
       unreachable!("expected BraceGrp node, got {:?}", brc_grp.class)
     };
-    if self.interactive {
-      log::debug!("Executing brace group, body: {:?}", body);
-    }
     let fork_builtins = brc_grp.flags.contains(NdFlags::FORK_BUILTINS);
 
     self.io_stack.append_to_frame(brc_grp.redirs);
@@ -797,18 +800,17 @@ impl Dispatcher {
     }
   }
   fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
+    let pipeline_span = pipeline.get_span().clone();
+    let pipeline_flags = pipeline.flags;
     let NdRule::Pipeline { cmds } = pipeline.class else {
       unreachable!()
     };
-    if self.interactive {
-      log::debug!("Executing pipeline, cmds: {:#?}", cmds);
-    }
     let is_bg = pipeline.flags.contains(NdFlags::BACKGROUND);
     self.job_stack.new_job();
-    if cmds.len() == 1 {
+    let pipeline_result = if cmds.len() == 1 {
       self.fg_job = !is_bg && self.interactive;
       let cmd = cmds.into_iter().next().unwrap();
-      if is_bg && !matches!(cmd.class, NdRule::Command { .. }) {
+      let result = if is_bg && !matches!(cmd.class, NdRule::Command { .. }) {
         self.run_fork(
           &cmd.get_command().map(|t| t.to_string()).unwrap_or_default(),
           |s| {
@@ -816,10 +818,10 @@ impl Dispatcher {
               e.print_error();
             }
           },
-        )?;
+        )
       } else {
-        self.dispatch_node(cmd)?;
-      }
+        self.dispatch_node(cmd)
+      };
 
       // Give the pipeline terminal control as soon as the first child
       // establishes the PGID, so later children (e.g. nvim) don't get
@@ -832,6 +834,7 @@ impl Dispatcher {
       {
         attach_tty(pgid).ok();
       }
+      result
     } else {
       let (mut in_redirs, mut out_redirs) = self.io_stack.pop_frame().redirs.split_by_channel();
 
@@ -841,6 +844,7 @@ impl Dispatcher {
       let mut tty_attached = false;
 
       let last_cmd = cmds.len() - 1;
+      let mut result = Ok(());
       for (i, mut cmd) in cmds.into_iter().enumerate() {
         let mut frame = pipes.next().ok_or_else(|| {
           ShErr::at(
@@ -862,7 +866,7 @@ impl Dispatcher {
         let _guard = frame.redirect()?;
 
         cmd.flags |= NdFlags::FORK_BUILTINS; // multiple cmds means builtins must fork
-        self.dispatch_node(cmd)?;
+        result = self.dispatch_node(cmd);
 
         // Give the pipeline terminal control as soon as the first child
         // establishes the PGID, so later children (e.g. nvim) don't get
@@ -877,12 +881,36 @@ impl Dispatcher {
           attach_tty(pgid).ok();
           tty_attached = true;
         }
+
+        if result.is_err() {
+          break;
+        }
       }
-    }
+      result
+    };
     let job = self.job_stack.finalize_job().unwrap();
-    dispatch_job(job, is_bg, self.interactive)?;
+    // Always dispatch the job (which reclaims the terminal via take_term)
+    // even if an error occurred, to prevent terminal ownership from being
+    // left with a dead process group.
+    let dispatch_result = dispatch_job(job, is_bg, self.interactive);
+    pipeline_result?;
+    dispatch_result?;
+
+    // Errexit check after the job has been waited on, so the status
+    // reflects the actual exit code of the (possibly forked) command.
+    if state::get_status() != 0
+    && !pipeline_flags.contains(NdFlags::NOT_ERR)
+    && read_shopts(|o| o.set.errexit) {
+      if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
+        let saved_status = state::get_status();
+        exec_input(trap, None, false, Some("trap ERR".to_string()))?;
+        state::set_status(saved_status);
+      }
+      return Err(ShErr::at(ShErrKind::ErrInterrupt, pipeline_span, "Command returned non-zero exit status"));
+    }
     Ok(())
   }
+
   fn exec_builtin(&mut self, cmd: Node) -> ShResult<()> {
     let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
     let cmd_raw = cmd
@@ -946,13 +974,6 @@ impl Dispatcher {
     // Set up redirections here so we can attach the guard to propagated errors.
     self.io_stack.append_to_frame(mem::take(&mut cmd.redirs));
     let frame = self.io_stack.pop_frame();
-    if self.interactive {
-      log::debug!(
-        "popped frame for builtin '{}', frame: {:#?}",
-        cmd_raw,
-        frame
-      );
-    }
     let redir_guard = frame.redirect()?;
 
     // Register ChildProc in current job
@@ -1057,6 +1078,10 @@ impl Dispatcher {
         AssignBehavior::Export
       };
       env_vars_to_unset = self.set_assignments(assignments, assign_behavior)?;
+
+			if let AssignBehavior::Set = assign_behavior {
+				state::set_status(0);
+			}
     }
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
@@ -1205,11 +1230,14 @@ impl Dispatcher {
 
       match kind {
         AssignKind::Eq => {
-          if let Some((name, idx)) = indexed {
-            write_vars(|v| v.set_var_indexed(&name, idx, val.to_string(), flags))?;
-          } else {
-            write_vars(|v| v.set_var(var, val, flags))?;
-          }
+          if let Some((name, idx)) = indexed
+					&& let Err(e) = write_vars(|v| v.set_var_indexed(&name, idx, val.to_string(), flags)) {
+						state::set_status(1);
+						return Err(e)
+					} else if let Err(e) = write_vars(|v| v.set_var(var, val, flags)) {
+						state::set_status(1);
+						return Err(e)
+					}
         }
         AssignKind::PlusEq => todo!(),
         AssignKind::MinusEq => todo!(),

@@ -215,6 +215,14 @@ impl ShErr {
 
     self.labeled(span, first)
   }
+  /// Persist all io guards, closing saved fds without restoring them.
+  /// Use this when an error is being converted to a control flow signal
+  /// (like ErrInterrupt) that will propagate past the redirect scope.
+  pub fn persist_redirs(&mut self) {
+    for guard in self.io_guards.drain(..) {
+      guard.persist();
+    }
+  }
 	/// Give a redirguard to this error so that it remains alive
 	/// This allows redirguards to move their guarded context upwards
   pub fn with_redirs(mut self, guard: RedirGuard) -> Self {
@@ -474,10 +482,10 @@ impl ShErrKind {
     matches!(
       self,
       Self::CleanExit(_)
-        | Self::FuncReturn(_)
-        | Self::LoopContinue(_)
-        | Self::LoopBreak(_)
-        | Self::Interrupt
+			| Self::FuncReturn(_)
+			| Self::LoopContinue(_)
+			| Self::LoopBreak(_)
+			| Self::Interrupt
     )
   }
 }
@@ -503,7 +511,7 @@ impl Display for ShErrKind {
       Self::ReadlineErr => "Readline Error",
       Self::ExCommand => "Ex Command Error",
       Self::Interrupt => "",
-      Self::ErrInterrupt => "",
+      Self::ErrInterrupt => "errexit",
       Self::Null => "",
     };
     write!(f, "{output}")
