@@ -102,10 +102,11 @@ pub fn autocmd(node: Node) -> ShResult<()> {
 
   let autocmd = AutoCmd {
     pattern: autocmd_opts.pattern,
+		kind: autocmd_kind,
     command: autocmd_cmd.0.clone(),
   };
 
-  write_logic(|l| l.insert_autocmd(autocmd_kind, autocmd));
+  write_logic(|l| l.insert_autocmd(autocmd));
 
   state::set_status(0);
   Ok(())

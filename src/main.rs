@@ -101,47 +101,6 @@ fn setup_panic_handler() {
   }));
 }
 
-/// The socket used to expose the system/status message interface
-pub struct MsgSocket {
-	listener: UnixListener,
-	path: PathBuf
-}
-
-impl MsgSocket {
-	pub fn new() -> ShResult<Self> {
-		let pid = Pid::this();
-		let runtime_dir = env::var("XDG_RUNTIME_DIR")
-			.unwrap_or_else(|_| format!("/tmp/shed-{}", nix::unistd::getuid()));
-
-		std::fs::create_dir_all(format!("{runtime_dir}/shed"))?;
-		let sock_path = format!("{runtime_dir}/shed/{pid}.sock");
-		std::fs::remove_file(&sock_path).ok();
-		let listener = UnixListener::bind(&sock_path)?;
-
-		let raw_fd = listener.into_raw_fd();
-		let high_fd = fcntl(raw_fd, FcntlArg::F_DUPFD_CLOEXEC(10))?;
-		close(raw_fd)?;
-
-		let listener = unsafe { UnixListener::from_raw_fd(high_fd) };
-		listener.set_nonblocking(true).ok();
-
-		write_vars(|v| v.set_var("SHED_SOCK", VarKind::Str(sock_path.clone()), VarFlags::EXPORT)).ok();
-		Ok(Self {
-			listener,
-			path: PathBuf::from(sock_path)
-		})
-	}
-	pub fn as_raw_fd(&self) -> RawFd {
-		self.listener.as_raw_fd()
-	}
-}
-
-impl Drop for MsgSocket {
-	fn drop(&mut self) {
-		std::fs::remove_file(&self.path).ok();
-	}
-}
-
 fn main() -> ExitCode {
   yansi::enable();
   env_logger::init();
@@ -272,13 +231,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup(args.login_shell);
 
-	let msg_socket = match MsgSocket::new() {
-		Ok(sock) => Some(sock),
-		Err(e) => {
-			e.print_error();
-			None
-		}
-	};
+	write_meta(|m| m.create_socket())?;
 
   if args.login_shell
     && let Err(e) = source_login()
@@ -360,7 +313,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 				PollFlags::POLLIN,
 			),
 		];
-		if let Some(fd) = msg_socket.as_ref().map(|sock| sock.as_raw_fd()) {
+		if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
 			fds.push(PollFd::new(
 				unsafe { BorrowedFd::borrow_raw(fd) },
 				PollFlags::POLLIN,
@@ -476,10 +429,8 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
 
     // Check if stdin has data
-    if fds[0]
-      .revents()
-      .is_some_and(|r| r.contains(PollFlags::POLLIN))
-    {
+    if fds[0].revents()
+		.is_some_and(|r| r.contains(PollFlags::POLLIN)) {
       let mut buffer = [0u8; 1024];
       match read(*TTY_FILENO, &mut buffer) {
         Ok(0) => {
@@ -501,45 +452,13 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       }
     }
 
-		// check system message socket
-		if fds
-			.get(1)
-			.and_then(|fd| fd.revents())
-			.is_some_and(|r| r.contains(PollFlags::POLLIN))
-		&& let Some(sock) = msg_socket.as_ref()
-		&& let Ok((conn, _)) = sock.listener.accept() {
-			conn.set_nonblocking(false).ok();
-			let mut bytes = vec![];
-			loop {
-				let mut buffer = [0u8; 1024];
-				match read(conn.as_raw_fd(), &mut buffer) {
-					Ok(0) => break,
-					Ok(n) => {
-						bytes.extend_from_slice(&buffer[..n]);
-					}
-					Err(Errno::EINTR) => continue,
-					Err(e) => {
-						eprintln!("error reading from message socket: {e}");
-						break;
-					}
-				}
-			}
-			let input = String::from_utf8_lossy(&bytes).to_string();
-
-			input
-				.lines()
-				.for_each(|l| {
-					if let Some(msg) = l.strip_prefix("system:") {
-						write_meta(|m| {
-							m.post_system_message(msg.to_string());
-						})
-					} else if let Some(msg) = l.strip_prefix("status:") {
-						write_meta(|m| {
-							m.post_status_message(msg.to_string());
-						})
-					}
-				});
+		// check socket fd
+		if fds.get(1)
+		.and_then(|fd| fd.revents())
+		.is_some_and(|r| r.contains(PollFlags::POLLIN)) {
+			write_meta(|m| m.read_socket())?;
 		}
+
 
     // Process any available input
     let event = readline.process_input();

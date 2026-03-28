@@ -3,11 +3,12 @@ use std::{
   collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
   fmt::Display,
   ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign},
-  os::unix::fs::PermissionsExt,
+  os::unix::{fs::PermissionsExt, net::{UnixListener, UnixStream}},
   str::FromStr,
   time::Duration,
 };
 
+use itertools::Itertools;
 use nix::unistd::{User, gethostname, getppid, getuid};
 use regex::Regex;
 
@@ -623,7 +624,7 @@ impl ShFunc {
   }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum AutoCmdKind {
   PreCmd,
   PostCmd,
@@ -669,6 +670,7 @@ crate::two_way_display!(AutoCmdKind,
 #[derive(Clone, Debug)]
 pub struct AutoCmd {
   pub pattern: Option<Regex>,
+	pub kind: AutoCmdKind,
   pub command: String,
 }
 
@@ -694,10 +696,11 @@ impl LogTab {
   pub fn autocmds_mut(&mut self) -> &mut HashMap<AutoCmdKind, Vec<AutoCmd>> {
     &mut self.autocmds
   }
-  pub fn insert_autocmd(&mut self, kind: AutoCmdKind, cmd: AutoCmd) {
-    self.autocmds.entry(kind).or_default().push(cmd);
+  pub fn insert_autocmd(&mut self, cmd: AutoCmd) {
+    self.autocmds.entry(cmd.kind).or_default().push(cmd);
   }
   pub fn get_autocmds(&self, kind: AutoCmdKind) -> Vec<AutoCmd> {
+		write_meta(|m| m.notify_autocmd(kind)).ok();
     self.autocmds.get(&kind).cloned().unwrap_or_default()
   }
   pub fn clear_autocmds(&mut self, kind: AutoCmdKind) {
@@ -1347,6 +1350,180 @@ impl VarTab {
   }
 }
 
+#[derive(Debug)]
+pub enum StatusHeader {
+	ExitCode,
+	CommandName,
+	Runtime,
+	Pid,
+	Pgid
+}
+
+#[derive(Debug)]
+pub enum QueryHeader {
+	Cwd,
+	Var(String),
+	Status(StatusHeader),
+	Jobs
+}
+
+#[derive(Debug)]
+pub enum SocketRequest {
+	/// Posts a system message. System messages appear above the prompt, the same way that job status notifications do.
+	/// Useful for important information.
+	PostSystemMessage(String),
+	/// Posts a status message. Status messages appear under the prompt, and are short lived. Will only survive redraws for a few seconds.
+	/// Useful for quick notifications.
+	PostStatusMessage(String),
+
+	/// Requests information from the shell. The shell will respond with a SocketResponse containing the requested information, or an error if the query was invalid.
+	Query(QueryHeader),
+
+	/// Opens a subscription to the shell's event stream. The shell will send a SocketResponse for each event that occurs, until the socket or connnection is closed.
+	Subscribe,
+
+	/// Requests the shell to redraw the prompt. The shell will respond by redrawing the prompt, and sending a SocketResponse confirming the redraw.
+	RefreshPrompt,
+}
+
+impl FromStr for SocketRequest {
+	type Err = ShErr;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let request_kind = s.chars()
+			.peeking_take_while(|c| c.is_ascii_alphabetic())
+			.collect::<String>()
+			.to_lowercase();
+
+		// take care of no-argument requests
+		match request_kind.trim() {
+			"subscribe" => return Ok(Self::Subscribe),
+			"redraw" => return Ok(Self::RefreshPrompt),
+			_ => {}
+		}
+
+		let rest = s[request_kind.len()..].trim();
+		let mut sep = String::new();
+		let mut rest_chars = rest.chars().peekable();
+
+		// collect the separator
+		while let Some(ch) = rest_chars.peek() {
+			if !ch.is_ascii_alphanumeric() && ch.is_ascii_graphic() {
+				sep.push(*ch);
+				rest_chars.next();
+			} else {
+				break
+			}
+		}
+		let rest = rest_chars.collect::<String>();
+		let mut args = rest.split(&sep);
+
+		match request_kind.trim() {
+			"msg" => {
+				let Some(msg_kind) = args.next() else {
+					return Err(ShErr::simple(ShErrKind::ParseErr, "Missing message kind in 'msg' request"));
+				};
+				match msg_kind.to_lowercase().as_str() {
+					"system" => {
+						let Some(msg) = args.next() else {
+							return Err(ShErr::simple(ShErrKind::ParseErr, "Missing message in system msg request"));
+						};
+						Ok(Self::PostSystemMessage(msg.to_string()))
+					}
+					"status" => {
+						let Some(msg) = args.next() else {
+							return Err(ShErr::simple(ShErrKind::ParseErr, "Missing message in status msg request"));
+						};
+						Ok(Self::PostStatusMessage(msg.to_string()))
+					}
+					_ => Err(ShErr::simple(ShErrKind::ParseErr, format!("Unknown message kind in 'msg' request: {}", msg_kind))),
+				}
+			}
+
+			"query" => {
+				let Some(query_kind) = args.next() else {
+					return Err(ShErr::simple(ShErrKind::ParseErr, "Missing query kind in 'query' request"));
+				};
+				match query_kind.to_lowercase().as_str() {
+					"cwd" => Ok(Self::Query(QueryHeader::Cwd)),
+					"jobs" => Ok(Self::Query(QueryHeader::Jobs)),
+					"status" => {
+						let Some(status_kind) = args.next() else {
+							return Err(ShErr::simple(ShErrKind::ParseErr, "Missing status header in 'query status' request"));
+						};
+						let status_header = match status_kind.to_lowercase().as_str() {
+							"code" => StatusHeader::ExitCode,
+							"command" => StatusHeader::CommandName,
+							"runtime" => StatusHeader::Runtime,
+							"pid" => StatusHeader::Pid,
+							"pgid" => StatusHeader::Pgid,
+							_ => return Err(ShErr::simple(ShErrKind::ParseErr, format!("Unknown status header in 'query status' request: {}", status_kind))),
+						};
+						Ok(Self::Query(QueryHeader::Status(status_header)))
+					}
+					"var" => {
+						let Some(var_name) = args.next() else {
+							return Err(ShErr::simple(ShErrKind::ParseErr, "Missing variable name in 'query var' request"));
+						};
+						Ok(Self::Query(QueryHeader::Var(var_name.to_string())))
+					}
+					_ => Err(ShErr::simple(ShErrKind::ParseErr, format!("Unknown query kind in 'query' request: {}", query_kind))),
+				}
+			}
+			_ => Err(ShErr::simple(ShErrKind::ParseErr, format!("Unknown socket request kind: {}", request_kind))),
+		}
+	}
+}
+
+/// The socket used to expose the system/status message interface
+#[derive(Debug)]
+pub struct ShedSocket {
+	listener: UnixListener,
+	pid: Pid,
+	path: PathBuf,
+}
+
+impl ShedSocket {
+	pub fn new() -> ShResult<Self> {
+		let pid = Pid::this();
+		let runtime_dir = env::var("XDG_RUNTIME_DIR")
+			.unwrap_or_else(|_| format!("/tmp/shed-{}", nix::unistd::getuid()));
+
+		std::fs::create_dir_all(format!("{runtime_dir}/shed"))?;
+		let sock_path = format!("{runtime_dir}/shed/{pid}.sock");
+		std::fs::remove_file(&sock_path).ok();
+		let listener = UnixListener::bind(&sock_path)?;
+
+		let raw_fd = listener.into_raw_fd();
+		let high_fd = fcntl(raw_fd, FcntlArg::F_DUPFD_CLOEXEC(10))?;
+		close(raw_fd)?;
+
+		let listener = unsafe { UnixListener::from_raw_fd(high_fd) };
+		listener.set_nonblocking(true).ok();
+
+		write_vars(|v| v.set_var("SHED_SOCK", VarKind::Str(sock_path.clone()), VarFlags::EXPORT)).ok();
+		Ok(Self {
+			listener,
+			pid,
+			path: PathBuf::from(sock_path)
+		})
+	}
+	pub fn listener(&self) -> &UnixListener {
+		&self.listener
+	}
+	pub fn as_raw_fd(&self) -> RawFd {
+		self.listener.as_raw_fd()
+	}
+}
+
+impl Drop for ShedSocket {
+	fn drop(&mut self) {
+		if Pid::this() == self.pid {
+			std::fs::remove_file(&self.path).ok();
+		}
+	}
+}
+
+
 /// A table of metadata for the shell
 #[derive(Clone, Debug)]
 pub struct MetaTab {
@@ -1356,6 +1533,9 @@ pub struct MetaTab {
   // command running duration
   runtime_start: Option<Instant>,
   runtime_stop: Option<Instant>,
+
+	socket: Option<Arc<ShedSocket>>,
+	subscribers: Vec<Arc<UnixStream>>,
 
   // pending system messages
 	// are drawn above the prompt and survive redraws
@@ -1388,6 +1568,8 @@ impl Default for MetaTab {
       shell_time: Instant::now(),
       runtime_start: None,
       runtime_stop: None,
+			socket: None,
+			subscribers: vec![],
       system_msg: VecDeque::new(),
 			status_msg: VecDeque::new(),
       dir_stack: VecDeque::new(),
@@ -1520,6 +1702,100 @@ impl MetaTab {
     }
     cmds
   }
+	pub fn create_socket(&mut self) -> ShResult<()> {
+		let sock = ShedSocket::new()?;
+		self.socket = Some(sock.into());
+		Ok(())
+	}
+	pub fn get_socket(&self) -> Option<Arc<ShedSocket>> {
+		self.socket.as_ref().cloned()
+	}
+	pub fn read_socket(&mut self) -> ShResult<()> {
+		if let Some(sock) = &self.socket
+		&& let Ok((conn, _)) = sock.listener().accept() {
+			conn.set_nonblocking(false).ok();
+			let mut bytes = vec![];
+			loop {
+				let mut buffer = [0u8; 1024];
+				match read(conn.as_raw_fd(), &mut buffer) {
+					Ok(0) => break,
+					Ok(n) => {
+						if let Some(pos) = buffer[..n].iter().position(|&b| b == b'\n') {
+							bytes.extend_from_slice(&buffer[..pos]);
+							break;
+						}
+						bytes.extend_from_slice(&buffer[..n]);
+					}
+					Err(Errno::EINTR) => continue,
+					Err(e) => {
+						eprintln!("error reading from message socket: {e}");
+						break;
+					}
+				}
+			}
+			let input = String::from_utf8_lossy(&bytes).to_string();
+			let request = match SocketRequest::from_str(&input) {
+				Ok(req) => req,
+				Err(e) => {
+					write(&conn, format!("error parsing request: {e}\n").as_bytes()).ok();
+					return Ok(())
+				}
+			};
+
+			self.handle_socket_request(conn, request)?;
+		}
+
+		Ok(())
+	}
+	pub fn handle_socket_request(&mut self, conn: UnixStream, request: SocketRequest) -> ShResult<()> {
+		match request {
+			SocketRequest::PostSystemMessage(msg) => {
+				log::debug!("Posting system message: {}", msg);
+				self.post_system_message(msg);
+				write(&conn, b"ok\n").ok();
+			},
+			SocketRequest::PostStatusMessage(msg) => {
+				log::debug!("Posting status message: {}", msg);
+				self.post_status_message(msg);
+				write(&conn, b"ok\n").ok();
+			},
+			SocketRequest::Subscribe => {
+				log::debug!("New subscriber to event stream");
+				let conn = Arc::new(conn);
+				self.subscribers.push(conn.clone());
+			},
+			SocketRequest::Query(query_header) => {
+				log::debug!("Received query: {:?}", query_header);
+				match query_header {
+					QueryHeader::Cwd => {
+						let cwd = env::current_dir()?.to_string_lossy().to_string();
+						write(&conn, cwd.as_bytes()).ok();
+						write(&conn, b"\n").ok();
+					}
+					QueryHeader::Var(var) => {
+						let var = read_vars(|v| v.get_var(&var));
+						write(&conn, var.as_bytes()).ok();
+						write(&conn, b"\n").ok();
+					}
+					QueryHeader::Status(status_header) => todo!(),
+					QueryHeader::Jobs => todo!(),
+				}
+			}
+			SocketRequest::RefreshPrompt => {
+				log::debug!("Received prompt refresh request");
+				kill(Pid::this(), Signal::SIGUSR1)?;
+				write(&conn, b"ok\n").ok();
+			}
+		}
+		Ok(())
+	}
+	pub fn notify_autocmd(&self, kind: AutoCmdKind) -> ShResult<()> {
+		for subscriber in &self.subscribers {
+			write(subscriber, format!("autocmd_event>> {kind}\n").as_bytes()).ok();
+		}
+
+		Ok(())
+	}
   pub fn try_rehash_commands(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
     let cwd = env::var("PWD").unwrap_or_default();
@@ -1815,7 +2091,7 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
     ],
     || {
       for cmd in pre_cd {
-        let AutoCmd { command, pattern } = cmd;
+        let AutoCmd { command, kind: _, pattern } = cmd;
         if let Some(pat) = pattern
           && !pat.is_match(dir_raw)
         {
@@ -1843,7 +2119,7 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
     ],
     || {
       for cmd in post_cd {
-        let AutoCmd { command, pattern } = cmd;
+        let AutoCmd { command, kind: _, pattern } = cmd;
         if let Some(pat) = pattern
           && !pat.is_match(dir_raw)
         {

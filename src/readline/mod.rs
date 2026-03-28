@@ -171,6 +171,9 @@ impl Prompt {
   const DEFAULT_PS1: &str =
     "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
   pub fn new() -> Self {
+    let pre_prompt = read_logic(|l| l.get_autocmds(AutoCmdKind::PrePrompt));
+    pre_prompt.exec();
+
     let Ok(ps1_raw) = env::var("PS1") else {
       return Self::default();
     };
@@ -190,6 +193,10 @@ impl Prompt {
 
     // Restore shell state after prompt expansion, since it may have been modified by command substitutions in the prompt
     state::set_status(saved_status);
+
+    let post_prompt = read_logic(|l| l.get_autocmds(AutoCmdKind::PostPrompt));
+    post_prompt.exec();
+
     Self {
       ps1_expanded,
       ps1_raw,
@@ -1142,9 +1149,6 @@ impl ShedVi {
       self.writer.clear_rows(layout)?;
     }
 
-    let pre_prompt = read_logic(|l| l.get_autocmds(AutoCmdKind::PrePrompt));
-    pre_prompt.exec();
-
     self
       .writer
       .redraw(self.prompt.get_ps1(), &line, &new_layout, self.editor.scroll_offset, self.editor.lines.len())?;
@@ -1285,9 +1289,6 @@ impl ShedVi {
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;
-
-    let post_prompt = read_logic(|l| l.get_autocmds(AutoCmdKind::PostPrompt));
-    post_prompt.exec();
 
     Ok(())
   }
