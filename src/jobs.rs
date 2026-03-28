@@ -13,7 +13,7 @@ use crate::{
   prelude::*,
   procio::{IoMode, borrow_fd},
   signal::{disable_reaping, enable_reaping},
-  state::{self, ShellParam, VarFlags, VarKind, set_status, write_jobs, write_vars},
+  state::{self, ShellParam, VarFlags, VarKind, set_status, write_jobs, write_meta, write_vars},
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -826,19 +826,28 @@ pub fn wait_bg(id: JobID) -> ShResult<()> {
       let statuses = job.wait_pgrp()?;
       let mut was_stopped = false;
       let mut code = 0;
-      for status in statuses {
-        code = code_from_status(&status).unwrap_or(0);
+      for status in &statuses {
+        code = code_from_status(status).unwrap_or(0);
         match status {
           WtStat::Stopped(_, _) => {
             was_stopped = true;
           }
           WtStat::Signaled(_, sig, _) => {
-            if sig == Signal::SIGTSTP {
+            if *sig == Signal::SIGTSTP {
               was_stopped = true;
             }
           }
           _ => { /* Do nothing */ }
         }
+      }
+
+      if let Some(pipe_status) = Job::pipe_status(&statuses) {
+        let pipe_status = pipe_status
+          .into_iter()
+          .map(|s| s.to_string())
+          .collect::<VecDeque<String>>();
+
+        write_vars(|v| v.set_var("PIPESTATUS", VarKind::Arr(pipe_status), VarFlags::NONE))?;
       }
 
       if was_stopped {
@@ -896,9 +905,11 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
   }
   // If job wasn't stopped (moved to bg), clear the fg slot
   if !was_stopped {
-    write_jobs(|j| {
-      j.take_fg();
-    });
+    let job = write_jobs(|j| j.take_fg());
+
+    if interactive {
+      write_meta(|m| m.set_last_job(job));
+    }
   }
   if interactive {
     take_term()?;

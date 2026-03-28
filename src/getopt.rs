@@ -130,10 +130,7 @@ pub fn sort_tks(
         for opt_spec in opt_specs {
           if opt_spec.opt == opt {
             if opt_spec.takes_arg {
-              let arg = words_iter
-                .next()
-                .map(|(w, _)| w)
-                .unwrap_or_default();
+              let arg = words_iter.next().map(|(w, _)| w).unwrap_or_default();
 
               let opt = match opt {
                 Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
@@ -487,8 +484,8 @@ mod tests {
 
   // ===================== Variable expansion through opts (TestGuard) =====================
 
-  use crate::testutil::{TestGuard, test_input};
   use crate::state::{self, VarFlags, VarKind, write_vars};
+  use crate::testutil::{TestGuard, test_input};
 
   #[test]
   fn expanded_var_opts_echo() {

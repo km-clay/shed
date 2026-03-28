@@ -223,8 +223,8 @@ impl ShErr {
       guard.persist();
     }
   }
-	/// Give a redirguard to this error so that it remains alive
-	/// This allows redirguards to move their guarded context upwards
+  /// Give a redirguard to this error so that it remains alive
+  /// This allows redirguards to move their guarded context upwards
   pub fn with_redirs(mut self, guard: RedirGuard) -> Self {
     self.io_guards.push(guard);
     self
@@ -292,9 +292,9 @@ impl ShErr {
   pub fn kind(&self) -> &ShErrKind {
     &self.kind
   }
-	pub fn set_kind(&mut self, kind: ShErrKind) {
-		self.kind = kind;
-	}
+  pub fn set_kind(&mut self, kind: ShErrKind) {
+    self.kind = kind;
+  }
   pub fn rename(mut self, name: impl Into<String>) -> Self {
     if let Some(span) = self.src_span.as_mut() {
       span.rename(name.into());
@@ -472,8 +472,8 @@ pub enum ShErrKind {
   FuncReturn(i32),
   LoopContinue(i32),
   LoopBreak(i32),
-	ErrInterrupt, // used for set -e
-  Interrupt, // used for Ctrl+C on loops
+  ErrInterrupt, // used for set -e
+  Interrupt,    // used for Ctrl+C on loops
   Null,
 }
 
@@ -482,10 +482,10 @@ impl ShErrKind {
     matches!(
       self,
       Self::CleanExit(_)
-			| Self::FuncReturn(_)
-			| Self::LoopContinue(_)
-			| Self::LoopBreak(_)
-			| Self::Interrupt
+        | Self::FuncReturn(_)
+        | Self::LoopContinue(_)
+        | Self::LoopBreak(_)
+        | Self::Interrupt
     )
   }
 }

@@ -8,44 +8,44 @@ const SPECIAL_CHARS: &str = "#$^*()=|{}[]`<>?~;& '\"";
 pub fn as_var_val_display(s: &str) -> String {
   let mut result = String::with_capacity(s.len());
   let mut chars = s.chars().peekable();
-	let mut has_escapes = false;
+  let mut has_escapes = false;
   while let Some(ch) = chars.next() {
-		match ch {
-			'\\' => {
-				result.push_str("\\\\");
-			}
-			_ if ch.is_ascii_control() => {
-				let escaped = match ch {
-					'\n' => "\\n".into(),
-					'\r' => "\\r".into(),
-					'\t' => "\\t".into(),
-					'\x07' => "\\a".into(),
-					'\x08' => "\\b".into(),
-					'\x0B' => "\\v".into(),
-					'\x0C' => "\\f".into(),
-					_ => format!("\\x{:02x}", ch as u8),
-				};
-				has_escapes = true;
-				result.push_str(&escaped);
-			}
-			'\'' => {
-				has_escapes = true;
-				result.push('\\');
-				result.push('\'');
-			}
-			_ => result.push(ch),
-		}
+    match ch {
+      '\\' => {
+        result.push_str("\\\\");
+      }
+      _ if ch.is_ascii_control() => {
+        let escaped = match ch {
+          '\n' => "\\n".into(),
+          '\r' => "\\r".into(),
+          '\t' => "\\t".into(),
+          '\x07' => "\\a".into(),
+          '\x08' => "\\b".into(),
+          '\x0B' => "\\v".into(),
+          '\x0C' => "\\f".into(),
+          _ => format!("\\x{:02x}", ch as u8),
+        };
+        has_escapes = true;
+        result.push_str(&escaped);
+      }
+      '\'' => {
+        has_escapes = true;
+        result.push('\\');
+        result.push('\'');
+      }
+      _ => result.push(ch),
+    }
   }
 
-	let has_special = result.chars().any(|c| SPECIAL_CHARS.contains(c));
+  let has_special = result.chars().any(|c| SPECIAL_CHARS.contains(c));
 
-	if has_escapes {
-		format!("$'{result}'")
-	} else if has_special {
-		format!("'{result}'")
-	} else {
-		result
-	}
+  if has_escapes {
+    format!("$'{result}'")
+  } else if has_special {
+    format!("'{result}'")
+  } else {
+    result
+  }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -166,19 +166,24 @@ macro_rules! shopt_group {
 #[derive(Clone, Debug)]
 pub struct ShOpts {
   pub core: ShOptCore,
-	pub line: ShOptLine,
-	pub set: ShOptSet,
+  pub line: ShOptLine,
+  pub set: ShOptSet,
   pub prompt: ShOptPrompt,
 }
 
 impl Default for ShOpts {
   fn default() -> Self {
     let core = ShOptCore::default();
-		let line = ShOptLine::default();
-		let set = ShOptSet::default();
+    let line = ShOptLine::default();
+    let set = ShOptSet::default();
     let prompt = ShOptPrompt::default();
 
-    Self { core, line, set, prompt }
+    Self {
+      core,
+      line,
+      set,
+      prompt,
+    }
   }
 }
 
@@ -195,8 +200,8 @@ impl ShOpts {
   pub fn display_opts(&mut self) -> ShResult<String> {
     let output = [
       self.query("core")?.unwrap_or_default().to_string(),
-			self.query("line")?.unwrap_or_default().to_string(),
-			self.query("set")?.unwrap_or_default().to_string(),
+      self.query("line")?.unwrap_or_default().to_string(),
+      self.query("set")?.unwrap_or_default().to_string(),
       self.query("prompt")?.unwrap_or_default().to_string(),
     ];
 
@@ -216,8 +221,8 @@ impl ShOpts {
 
     match key {
       "core" => self.core.set(&remainder, val)?,
-			"line" => self.line.set(&remainder, val)?,
-			"set" => self.set.set(&remainder, val)?,
+      "line" => self.line.set(&remainder, val)?,
+      "set" => self.set.set(&remainder, val)?,
       "prompt" => self.prompt.set(&remainder, val)?,
       _ => {
         return Err(ShErr::simple(
@@ -242,8 +247,8 @@ impl ShOpts {
 
     match key {
       "core" => self.core.get(&remainder),
-			"line" => self.line.get(&remainder),
-			"set" => self.set.get(&remainder),
+      "line" => self.line.get(&remainder),
+      "set" => self.set.get(&remainder),
       "prompt" => self.prompt.get(&remainder),
       _ => Err(ShErr::simple(
         ShErrKind::SyntaxErr,
@@ -255,44 +260,44 @@ impl ShOpts {
 
 shopt_group! {
   #[derive(Clone, Debug)]
-	pub struct ShOptLine ("line") {
-		/// The maximum height of the line editor viewport window. Can be a positive number or a percentage of terminal height like "50%"
-		viewport_height: String = "50%".to_string(),
-		/// The line offset from the top or bottom of the viewport to trigger scrolling
-		scroll_offset: usize = 2,
-	}
+  pub struct ShOptLine ("line") {
+    /// The maximum height of the line editor viewport window. Can be a positive number or a percentage of terminal height like "50%"
+    viewport_height: String = "50%".to_string(),
+    /// The line offset from the top or bottom of the viewport to trigger scrolling
+    scroll_offset: usize = 2,
+  }
 }
 
 shopt_group! {
-	#[derive(Clone, Debug)]
-	pub struct ShOptSet ("set") {
-		/// If set, the shell will remember the full path of commands and use that information to speed up command lookup
-		hashall: bool = true,
-		/// Enables vi editing mode. Currently, this is the only editing mode. Changing this does nothing, it's just here because it's in the POSIX specification for the 'set' builtin
-		vi: bool = true,
-		/// If set, all variables that are assigned will be automatically exported to the environment of subsequently executed commands
-		allexport: bool = false,
-		/// If set, the shell will exit immediately if any command exits with a non-zero status, with some exceptions
-		errexit: bool = false,
-		/// If set, '>' and '>>' redirections will fail if the target file already exists
-		noclobber: bool = false,
-		/// If set, jobs run in their own process groups, and report status before the next prompt.
-		monitor: bool = true,
-		/// If set, filename expansion (globbing) is disabled
-		noglob: bool = false,
-		/// If set, the shell will not execute any interpreted commands. Useful for testing scripts.
-		noexec: bool = false,
-		/// If set, function definitions will not be written to command history.
-		nolog: bool = false,
-		/// If set, the shell will print job status info asynchronously when jobs exit or are stopped
-		notify: bool = false,
-		/// If set, attempting to expand an unset variable besides '$*' or '@' is an error
-		nounset: bool = false,
-		/// If set, the shell will write it's input to stderr as it is read.
-		verbose: bool = false,
-		/// If set, the shell will write a trace for each command after it is expanded but before it is executed.
-		xtrace: bool = false,
-	}
+  #[derive(Clone, Debug)]
+  pub struct ShOptSet ("set") {
+    /// If set, the shell will remember the full path of commands and use that information to speed up command lookup
+    hashall: bool = true,
+    /// Enables vi editing mode. Currently, this is the only editing mode. Changing this does nothing, it's just here because it's in the POSIX specification for the 'set' builtin
+    vi: bool = true,
+    /// If set, all variables that are assigned will be automatically exported to the environment of subsequently executed commands
+    allexport: bool = false,
+    /// If set, the shell will exit immediately if any command exits with a non-zero status, with some exceptions
+    errexit: bool = false,
+    /// If set, '>' and '>>' redirections will fail if the target file already exists
+    noclobber: bool = false,
+    /// If set, jobs run in their own process groups, and report status before the next prompt.
+    monitor: bool = true,
+    /// If set, filename expansion (globbing) is disabled
+    noglob: bool = false,
+    /// If set, the shell will not execute any interpreted commands. Useful for testing scripts.
+    noexec: bool = false,
+    /// If set, function definitions will not be written to command history.
+    nolog: bool = false,
+    /// If set, the shell will print job status info asynchronously when jobs exit or are stopped
+    notify: bool = false,
+    /// If set, attempting to expand an unset variable besides '$*' or '@' is an error
+    nounset: bool = false,
+    /// If set, the shell will write it's input to stderr as it is read.
+    verbose: bool = false,
+    /// If set, the shell will write a trace for each command after it is expanded but before it is executed.
+    xtrace: bool = false,
+  }
 }
 
 shopt_group! {
@@ -365,8 +370,8 @@ shopt_group! {
     /// Whether tab completion matching is case-insensitive
     completion_ignore_case: bool = false,
 
-		/// If set, enables history concatenation with Shift+Up/Down
-		hist_cat: bool = true,
+    /// If set, enables history concatenation with Shift+Up/Down
+    hist_cat: bool = true,
   }
 }
 

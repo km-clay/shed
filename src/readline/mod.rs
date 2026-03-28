@@ -18,7 +18,8 @@ use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::readline::vicmd::Direction;
 use crate::readline::vimode::{ViEx, ViVerbatim};
 use crate::state::{
-  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta, write_vars
+  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta,
+  write_vars,
 };
 use crate::{
   libsh::error::ShResult,
@@ -280,25 +281,25 @@ pub struct ShedVi {
   pub ex_history: History,
 
   pub needs_redraw: bool,
-	pub ctrl_d_warning_counter: usize,
-	pub status_msgs: VecDeque<(String, Instant)>
+  pub ctrl_d_warning_counter: usize,
+  pub status_msgs: VecDeque<(String, Instant)>,
 }
 
 impl ShedVi {
   pub fn new(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
-		Self::new_private(prompt, tty, true)
+    Self::new_private(prompt, tty, true)
   }
 
   pub fn new_no_hist(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
-		Self::new_private(prompt, tty, false)
+    Self::new_private(prompt, tty, false)
   }
 
-	fn new_private(prompt: Prompt, tty: RawFd, with_hist: bool) -> ShResult<Self> {
-		let history = if with_hist {
-			History::new()?
-		} else {
-			History::empty()
-		};
+  fn new_private(prompt: Prompt, tty: RawFd, with_hist: bool) -> ShResult<Self> {
+    let history = if with_hist {
+      History::new()?
+    } else {
+      History::empty()
+    };
     let mut new = Self {
       reader: PollReader::new(),
       writer: TermWriter::new(tty),
@@ -316,8 +317,8 @@ impl ShedVi {
       history,
       ex_history: History::empty(),
       needs_redraw: true,
-			ctrl_d_warning_counter: 0,
-			status_msgs: VecDeque::new()
+      ctrl_d_warning_counter: 0,
+      status_msgs: VecDeque::new(),
     };
     write_vars(|v| {
       v.set_var(
@@ -330,7 +331,7 @@ impl ShedVi {
     new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
     new.print_line(false)?;
     Ok(new)
-	}
+  }
 
   pub fn with_initial(mut self, initial: &str) -> Self {
     self.editor = LineBuf::new().with_initial(initial, 0);
@@ -453,164 +454,166 @@ impl ShedVi {
     Ok(is_complete && is_top_level)
   }
 
-	fn handle_hist_search_key(&mut self, key: KeyEvent) -> ShResult<()> {
-		self.print_line(false)?;
-		match self.focused_history().fuzzy_finder.handle_key(key)? {
-			SelectorResponse::Accept(cmd) => {
-				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
+  fn handle_hist_search_key(&mut self, key: KeyEvent) -> ShResult<()> {
+    self.print_line(false)?;
+    match self.focused_history().fuzzy_finder.handle_key(key)? {
+      SelectorResponse::Accept(cmd) => {
+        let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
 
-				let entry_idx = cmd.id().unwrap(); // history entries having an id to unwrap is an invariant.
-				self.scroll_history_to(entry_idx);
-				{
-					let mut writer = std::mem::take(&mut self.writer);
-					self.focused_history().fuzzy_finder.clear(&mut writer)?;
-					self.writer = writer;
-				}
-				self.focused_history().fuzzy_finder.reset();
+        let entry_idx = cmd.id().unwrap(); // history entries having an id to unwrap is an invariant.
+        self.scroll_history_to(entry_idx);
+        {
+          let mut writer = std::mem::take(&mut self.writer);
+          self.focused_history().fuzzy_finder.clear(&mut writer)?;
+          self.writer = writer;
+        }
+        self.focused_history().fuzzy_finder.reset();
 
-				with_vars([("_HIST_ENTRY".into(), cmd.content().to_string())], || {
-					post_cmds.exec_with(&cmd);
-				});
+        with_vars([("_HIST_ENTRY".into(), cmd.content().to_string())], || {
+          post_cmds.exec_with(&cmd);
+        });
 
-				write_vars(|v| {
-					v.set_var(
-						"SHED_VI_MODE",
-						VarKind::Str(self.mode.report_mode().to_string()),
-						VarFlags::NONE,
-					)
-				})
-				.ok();
-				self.prompt.refresh();
-				self.needs_redraw = true;
-			}
-			SelectorResponse::Dismiss => {
-				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryClose));
-				post_cmds.exec();
+        write_vars(|v| {
+          v.set_var(
+            "SHED_VI_MODE",
+            VarKind::Str(self.mode.report_mode().to_string()),
+            VarFlags::NONE,
+          )
+        })
+        .ok();
+        self.prompt.refresh();
+        self.needs_redraw = true;
+      }
+      SelectorResponse::Dismiss => {
+        let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryClose));
+        post_cmds.exec();
 
-				self.editor.set_hint(None);
-				{
-					let mut writer = std::mem::take(&mut self.writer);
-					self.focused_history().fuzzy_finder.clear(&mut writer)?;
-					self.writer = writer;
-				}
-				write_vars(|v| {
-					v.set_var(
-						"SHED_VI_MODE",
-						VarKind::Str(self.mode.report_mode().to_string()),
-						VarFlags::NONE,
-					)
-				})
-				.ok();
-				self.prompt.refresh();
-				self.needs_redraw = true;
-			}
-			SelectorResponse::Consumed => {
-				self.needs_redraw = true;
-			}
-		}
-		Ok(())
-	}
+        self.editor.set_hint(None);
+        {
+          let mut writer = std::mem::take(&mut self.writer);
+          self.focused_history().fuzzy_finder.clear(&mut writer)?;
+          self.writer = writer;
+        }
+        write_vars(|v| {
+          v.set_var(
+            "SHED_VI_MODE",
+            VarKind::Str(self.mode.report_mode().to_string()),
+            VarFlags::NONE,
+          )
+        })
+        .ok();
+        self.prompt.refresh();
+        self.needs_redraw = true;
+      }
+      SelectorResponse::Consumed => {
+        self.needs_redraw = true;
+      }
+    }
+    Ok(())
+  }
 
-	fn handle_completion_key(&mut self, key: &KeyEvent) -> ShResult<bool> {
-		self.print_line(false)?;
-		match self.completer.handle_key(key.clone())? {
-			CompResponse::Accept(candidate) => {
-				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
+  fn handle_completion_key(&mut self, key: &KeyEvent) -> ShResult<bool> {
+    self.print_line(false)?;
+    match self.completer.handle_key(key.clone())? {
+      CompResponse::Accept(candidate) => {
+        let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
 
-				let span_start = self.completer.token_span().0;
-				let new_cursor = span_start + candidate.len();
-				let line = self.completer.get_completed_line(&candidate);
-				self.focused_editor().set_buffer(line);
-				self.focused_editor().set_cursor_from_flat(new_cursor);
-				// Don't reset yet — clear() needs old_layout to erase the selector.
+        let span_start = self.completer.token_span().0;
+        let new_cursor = span_start + candidate.len();
+        let line = self.completer.get_completed_line(&candidate);
+        self.focused_editor().set_buffer(line);
+        self.focused_editor().set_cursor_from_flat(new_cursor);
+        // Don't reset yet — clear() needs old_layout to erase the selector.
 
-				if !self.history.at_pending() {
-					self.history.reset_to_pending();
-				}
-				self
-					.history
-					.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-				let hint = self.history.get_hint();
-				self.editor.set_hint(hint);
-				self.completer.clear(&mut self.writer)?;
-				self.needs_redraw = true;
-				self.completer.reset();
+        if !self.history.at_pending() {
+          self.history.reset_to_pending();
+        }
+        self
+          .history
+          .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+        let hint = self.history.get_hint();
+        self.editor.set_hint(hint);
+        self.completer.clear(&mut self.writer)?;
+        self.needs_redraw = true;
+        self.completer.reset();
 
-				write_vars(|v| {
-					v.set_var(
-						"SHED_VI_MODE",
-						VarKind::Str(self.mode.report_mode().to_string()),
-						VarFlags::NONE,
-					)
-				})
-				.ok();
-				self.prompt.refresh();
+        write_vars(|v| {
+          v.set_var(
+            "SHED_VI_MODE",
+            VarKind::Str(self.mode.report_mode().to_string()),
+            VarFlags::NONE,
+          )
+        })
+        .ok();
+        self.prompt.refresh();
 
-				with_vars([("_COMP_CANDIDATE".into(), candidate.content().to_string())], || {
-					post_cmds.exec_with(&candidate);
-				});
+        with_vars(
+          [("_COMP_CANDIDATE".into(), candidate.content().to_string())],
+          || {
+            post_cmds.exec_with(&candidate);
+          },
+        );
 
-				Ok(true)
-			}
-			CompResponse::Dismiss => {
-				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionCancel));
-				post_cmds.exec();
+        Ok(true)
+      }
+      CompResponse::Dismiss => {
+        let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionCancel));
+        post_cmds.exec();
 
-				let hint = self.history.get_hint();
-				self.editor.set_hint(hint);
-				self.completer.clear(&mut self.writer)?;
-				write_vars(|v| {
-					v.set_var(
-						"SHED_VI_MODE",
-						VarKind::Str(self.mode.report_mode().to_string()),
-						VarFlags::NONE,
-					)
-				})
-				.ok();
-				self.prompt.refresh();
-				self.completer.reset();
-				Ok(true)
-			}
-			CompResponse::Consumed => {
-				/* just redraw */
-				self.needs_redraw = true;
-				Ok(true)
-			}
-			CompResponse::Passthrough => Ok(false)
-		}
-	}
+        let hint = self.history.get_hint();
+        self.editor.set_hint(hint);
+        self.completer.clear(&mut self.writer)?;
+        write_vars(|v| {
+          v.set_var(
+            "SHED_VI_MODE",
+            VarKind::Str(self.mode.report_mode().to_string()),
+            VarFlags::NONE,
+          )
+        })
+        .ok();
+        self.prompt.refresh();
+        self.completer.reset();
+        Ok(true)
+      }
+      CompResponse::Consumed => {
+        /* just redraw */
+        self.needs_redraw = true;
+        Ok(true)
+      }
+      CompResponse::Passthrough => Ok(false),
+    }
+  }
 
-	fn handle_keymap(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
-		let keymap_flags = self.curr_keymap_flags();
-		self.pending_keymap.push(key.clone());
+  fn handle_keymap(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
+    let keymap_flags = self.curr_keymap_flags();
+    self.pending_keymap.push(key.clone());
 
-		let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
-		if matches.is_empty() {
-			// No matches. Drain the buffered keys and execute them.
-			for key in std::mem::take(&mut self.pending_keymap) {
-				if let Some(event) = self.handle_key(key)? {
-					return Ok(Some(event));
-				}
-			}
-			self.needs_redraw = true;
-		} else if matches.len() == 1
-			&& matches[0].compare(&self.pending_keymap) == KeyMapMatch::IsExact
-		{
-			// We have a single exact match. Execute it.
-			let keymap = matches[0].clone();
-			self.pending_keymap.clear();
-			let action = keymap.action_expanded();
-			for key in action {
-				if let Some(event) = self.handle_key(key)? {
-					return Ok(Some(event));
-				}
-			}
-			self.needs_redraw = true;
-		}
+    let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
+    if matches.is_empty() {
+      // No matches. Drain the buffered keys and execute them.
+      for key in std::mem::take(&mut self.pending_keymap) {
+        if let Some(event) = self.handle_key(key)? {
+          return Ok(Some(event));
+        }
+      }
+      self.needs_redraw = true;
+    } else if matches.len() == 1 && matches[0].compare(&self.pending_keymap) == KeyMapMatch::IsExact
+    {
+      // We have a single exact match. Execute it.
+      let keymap = matches[0].clone();
+      self.pending_keymap.clear();
+      let action = keymap.action_expanded();
+      for key in action {
+        if let Some(event) = self.handle_key(key)? {
+          return Ok(Some(event));
+        }
+      }
+      self.needs_redraw = true;
+    }
 
-		// There is ambiguity. Allow the timeout in the main loop to handle this.
-		Ok(None)
-	}
+    // There is ambiguity. Allow the timeout in the main loop to handle this.
+    Ok(None)
+  }
 
   /// Process any available input and return readline event
   /// This is non-blocking - returns Pending if no complete line yet
@@ -625,11 +628,11 @@ impl ShedVi {
     while let Some(key) = self.reader.read_key()? {
       // If completer or history search are active, delegate input to it
       if self.focused_history().fuzzy_finder.is_active() {
-				self.handle_hist_search_key(key)?;
-				continue;
+        self.handle_hist_search_key(key)?;
+        continue;
       } else if self.completer.is_active() && self.handle_completion_key(&key)? {
-				// self.handle_completion_key() returns true if we need to continue the loop
-				continue;
+        // self.handle_completion_key() returns true if we need to continue the loop
+        continue;
       } else if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty()) {
         // Vi mode is waiting for more input (e.g. after 'f', 'd', etc.)
         // Bypass keymap matching and send directly to the mode handler
@@ -639,7 +642,7 @@ impl ShedVi {
         self.needs_redraw = true;
         continue;
       } else if let Some(event) = self.handle_keymap(key)? {
-				return Ok(event);
+        return Ok(event);
       }
     }
     if !self.completer.is_active() && !self.history.fuzzy_finder.is_active() {
@@ -662,212 +665,216 @@ impl ShedVi {
     Ok(ReadlineEvent::Pending)
   }
 
-	fn accept_hint(&mut self) -> ShResult<Option<ReadlineEvent>> {
-		self.editor.accept_hint();
-		if !self.history.at_pending() {
-			self.history.reset_to_pending();
-		}
-		self
-			.history
-			.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-		self.needs_redraw = true;
+  fn accept_hint(&mut self) -> ShResult<Option<ReadlineEvent>> {
+    self.editor.accept_hint();
+    if !self.history.at_pending() {
+      self.history.reset_to_pending();
+    }
+    self
+      .history
+      .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+    self.needs_redraw = true;
 
-		Ok(None)
-	}
+    Ok(None)
+  }
 
-	fn handle_tab(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
+  fn handle_tab(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
     let KeyEvent(KeyCode::Tab, mod_keys) = key else {
-			return Ok(None)
-		};
+      return Ok(None);
+    };
 
-		if self.mode.report_mode() != ModeReport::Ex
-			&& self.editor.attempt_history_expansion(&self.history)
-		{
-			// If history expansion occurred, don't attempt completion yet
-			// allow the user to see the expanded command and accept or edit it before completing
-			return Ok(None);
-		}
+    if self.mode.report_mode() != ModeReport::Ex
+      && self.editor.attempt_history_expansion(&self.history)
+    {
+      // If history expansion occurred, don't attempt completion yet
+      // allow the user to see the expanded command and accept or edit it before completing
+      return Ok(None);
+    }
 
-		let direction = match mod_keys {
-			ModKeys::SHIFT => -1,
-			_ => 1,
-		};
-		let line = self.focused_editor().joined();
-		let cursor_pos = self.focused_editor().cursor_byte_pos();
+    let direction = match mod_keys {
+      ModKeys::SHIFT => -1,
+      _ => 1,
+    };
+    let line = self.focused_editor().joined();
+    let cursor_pos = self.focused_editor().cursor_byte_pos();
 
-		match self.completer.complete(line, cursor_pos, direction) {
-			Err(e) => {
-				e.print_error();
-				// Printing the error invalidates the layout
-				self.old_layout = None;
-			}
-			Ok(Some(line)) => {
-				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
-				let cand = self.completer.selected_candidate().unwrap_or_default();
-				with_vars([("_COMP_CANDIDATE".into(), cand.content().to_string())], || {
-					post_cmds.exec_with(&cand);
-				});
+    match self.completer.complete(line, cursor_pos, direction) {
+      Err(e) => {
+        e.print_error();
+        // Printing the error invalidates the layout
+        self.old_layout = None;
+      }
+      Ok(Some(line)) => {
+        let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
+        let cand = self.completer.selected_candidate().unwrap_or_default();
+        with_vars(
+          [("_COMP_CANDIDATE".into(), cand.content().to_string())],
+          || {
+            post_cmds.exec_with(&cand);
+          },
+        );
 
-				let span_start = self.completer.token_span().0;
+        let span_start = self.completer.token_span().0;
 
-				let new_cursor = span_start
-					+ self
-					.completer
-					.selected_candidate()
-					.map(|c| c.len())
-					.unwrap_or_default();
+        let new_cursor = span_start
+          + self
+            .completer
+            .selected_candidate()
+            .map(|c| c.len())
+            .unwrap_or_default();
 
-				self.focused_editor().set_buffer(line.clone());
-				self.focused_editor().set_cursor_from_flat(new_cursor);
+        self.focused_editor().set_buffer(line.clone());
+        self.focused_editor().set_cursor_from_flat(new_cursor);
 
-				if !self.history.at_pending() {
-					self.history.reset_to_pending();
-				}
-				self
-					.history
-					.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-				let hint = self.history.get_hint();
-				self.editor.set_hint(hint);
-				write_vars(|v| {
-					v.set_var(
-						"SHED_VI_MODE",
-						VarKind::Str(self.mode.report_mode().to_string()),
-						VarFlags::NONE,
-					)
-				})
-				.ok();
+        if !self.history.at_pending() {
+          self.history.reset_to_pending();
+        }
+        self
+          .history
+          .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+        let hint = self.history.get_hint();
+        self.editor.set_hint(hint);
+        write_vars(|v| {
+          v.set_var(
+            "SHED_VI_MODE",
+            VarKind::Str(self.mode.report_mode().to_string()),
+            VarFlags::NONE,
+          )
+        })
+        .ok();
 
-				// If we are here, we hit a case where pressing tab returned a single candidate
-				// So we can just go ahead and reset the completer after this
-				self.completer.reset();
-			}
-			Ok(None) => {
-				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
-				let candidates = self.completer.all_candidates();
-				let num_candidates = candidates.len();
-				with_vars(
-					[
-					("_NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
-					("_MATCHES".into(), Into::<Var>::into(candidates)),
-					(
-						"_SEARCH_STR".into(),
-						Into::<Var>::into(self.completer.token()),
-					),
-					],
-					|| {
-						post_cmds.exec();
-					},
-				);
+        // If we are here, we hit a case where pressing tab returned a single candidate
+        // So we can just go ahead and reset the completer after this
+        self.completer.reset();
+      }
+      Ok(None) => {
+        let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
+        let candidates = self.completer.all_candidates();
+        let num_candidates = candidates.len();
+        with_vars(
+          [
+            ("_NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
+            ("_MATCHES".into(), Into::<Var>::into(candidates)),
+            (
+              "_SEARCH_STR".into(),
+              Into::<Var>::into(self.completer.token()),
+            ),
+          ],
+          || {
+            post_cmds.exec();
+          },
+        );
 
-				if self.completer.is_active() {
-					write_vars(|v| {
-						v.set_var(
-							"SHED_VI_MODE",
-							VarKind::Str("COMPLETE".to_string()),
-							VarFlags::NONE,
-						)
-					})
-					.ok();
-					self.prompt.refresh();
-					self.needs_redraw = true;
-					self.editor.set_hint(None);
-				} else {
-					self.writer.send_bell().ok();
-				}
-			}
-		}
+        if self.completer.is_active() {
+          write_vars(|v| {
+            v.set_var(
+              "SHED_VI_MODE",
+              VarKind::Str("COMPLETE".to_string()),
+              VarFlags::NONE,
+            )
+          })
+          .ok();
+          self.prompt.refresh();
+          self.needs_redraw = true;
+          self.editor.set_hint(None);
+        } else {
+          self.writer.send_bell().ok();
+        }
+      }
+    }
 
-		self.needs_redraw = true;
-		Ok(None)
-	}
+    self.needs_redraw = true;
+    Ok(None)
+  }
 
-	fn start_hist_search(&mut self) {
-		let initial = self.focused_editor().joined();
-		match self.focused_history().start_search(&initial) {
-			Some(entry) => {
-				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
-				with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
-					post_cmds.exec_with(&entry);
-				});
+  fn start_hist_search(&mut self) {
+    let initial = self.focused_editor().joined();
+    match self.focused_history().start_search(&initial) {
+      Some(entry) => {
+        let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
+        with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
+          post_cmds.exec_with(&entry);
+        });
 
-				self.focused_editor().set_buffer(entry);
-				self.focused_editor().move_cursor_to_end();
-				self
-					.history
-					.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-				self.editor.set_hint(None);
-			}
-			None => {
-				let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
-				let entries = self.focused_history().fuzzy_finder.candidates().to_vec();
-				let matches = self
-					.focused_history()
-					.fuzzy_finder
-					.filtered()
-					.iter()
-					.map(|sc| sc.candidate.content().to_string())
-					.collect::<Vec<_>>();
+        self.focused_editor().set_buffer(entry);
+        self.focused_editor().move_cursor_to_end();
+        self
+          .history
+          .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+        self.editor.set_hint(None);
+      }
+      None => {
+        let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
+        let entries = self.focused_history().fuzzy_finder.candidates().to_vec();
+        let matches = self
+          .focused_history()
+          .fuzzy_finder
+          .filtered()
+          .iter()
+          .map(|sc| sc.candidate.content().to_string())
+          .collect::<Vec<_>>();
 
-				let num_entries = entries.len();
-				let num_matches = matches.len();
-				with_vars(
-					[
-					("_ENTRIES".into(), Into::<Var>::into(entries)),
-					("_NUM_ENTRIES".into(), Into::<Var>::into(num_entries)),
-					("_MATCHES".into(), Into::<Var>::into(matches)),
-					("_NUM_MATCHES".into(), Into::<Var>::into(num_matches)),
-					("_SEARCH_STR".into(), Into::<Var>::into(initial)),
-					],
-					|| {
-						post_cmds.exec();
-					},
-				);
+        let num_entries = entries.len();
+        let num_matches = matches.len();
+        with_vars(
+          [
+            ("_ENTRIES".into(), Into::<Var>::into(entries)),
+            ("_NUM_ENTRIES".into(), Into::<Var>::into(num_entries)),
+            ("_MATCHES".into(), Into::<Var>::into(matches)),
+            ("_NUM_MATCHES".into(), Into::<Var>::into(num_matches)),
+            ("_SEARCH_STR".into(), Into::<Var>::into(initial)),
+          ],
+          || {
+            post_cmds.exec();
+          },
+        );
 
-				if self.focused_history().fuzzy_finder.is_active() {
-					write_vars(|v| {
-						v.set_var(
-							"SHED_VI_MODE",
-							VarKind::Str("SEARCH".to_string()),
-							VarFlags::NONE,
-						)
-					})
-					.ok();
-					self.prompt.refresh();
-					self.needs_redraw = true;
-					self.editor.set_hint(None);
-				} else {
-					self.writer.send_bell().ok();
-				}
-			}
-		}
-	}
+        if self.focused_history().fuzzy_finder.is_active() {
+          write_vars(|v| {
+            v.set_var(
+              "SHED_VI_MODE",
+              VarKind::Str("SEARCH".to_string()),
+              VarFlags::NONE,
+            )
+          })
+          .ok();
+          self.prompt.refresh();
+          self.needs_redraw = true;
+          self.editor.set_hint(None);
+        } else {
+          self.writer.send_bell().ok();
+        }
+      }
+    }
+  }
 
-	fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
-		if self.editor.attempt_history_expansion(&self.history) {
-			// If history expansion occurred, don't submit yet
-			// allow the user to see the expanded command and accept or edit it before submitting
-			return Ok(None);
-		}
+  fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
+    if self.editor.attempt_history_expansion(&self.history) {
+      // If history expansion occurred, don't submit yet
+      // allow the user to see the expanded command and accept or edit it before submitting
+      return Ok(None);
+    }
 
-		self.editor.set_hint(None);
-		self.editor.set_cursor_from_flat(self.editor.cursor_max());
-		self.print_line(true)?;
-		self.writer.flush_write("\n")?;
-		let buf = self.editor.take_buf();
-		self.history.reset();
-		Ok(Some(ReadlineEvent::Line(buf)))
-	}
+    self.editor.set_hint(None);
+    self.editor.set_cursor_from_flat(self.editor.cursor_max());
+    self.print_line(true)?;
+    self.writer.flush_write("\n")?;
+    let buf = self.editor.take_buf();
+    self.history.reset();
+    Ok(Some(ReadlineEvent::Line(buf)))
+  }
 
   pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
     if self.should_accept_hint(&key) {
-			return self.accept_hint();
+      return self.accept_hint();
     }
 
     if let KeyEvent(KeyCode::Tab, _) = key {
-			return self.handle_tab(key);
+      return self.handle_tab(key);
     } else if let KeyEvent(KeyCode::Char('R'), ModKeys::CTRL) = key
-		&& matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex) {
-			self.start_hist_search();
+      && matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex)
+    {
+      self.start_hist_search();
     }
 
     let Ok(cmd) = self.mode.handle_key_fallible(key) else {
@@ -880,41 +887,48 @@ impl ShedVi {
     let Some(cmd) = cmd else {
       return Ok(None);
     };
-		if !cmd.is_virtual_scroll() {
-			self.history.stop_virtual_scroll();
-			self.editor.clear_concats();
-		}
+    if !cmd.is_virtual_scroll() {
+      self.history.stop_virtual_scroll();
+      self.editor.clear_concats();
+    }
 
     if self.should_grab_history(&cmd) {
-			if read_shopts(|o| o.prompt.hist_cat)
-			&& cmd.flags.intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL) {
-				self.scroll_history_virtual(cmd);
-			} else {
-				self.scroll_history(cmd);
-			}
+      if read_shopts(|o| o.prompt.hist_cat)
+        && cmd
+          .flags
+          .intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL)
+      {
+        self.scroll_history_virtual(cmd);
+      } else {
+        self.scroll_history(cmd);
+      }
       self.needs_redraw = true;
       return Ok(None);
     }
 
     if cmd.is_submit_action()
-		&& !self.editor.cursor_is_escaped()
-		&& (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete)) {
-			return self.submit();
+      && !self.editor.cursor_is_escaped()
+      && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
+    {
+      return self.submit();
     }
 
     if (cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile)
-		&& self.focused_editor().joined().is_empty())
-		|| cmd.verb().is_some_and(|v| v.1 == Verb::Quit) {
-			return Ok(Some(ReadlineEvent::Eof));
+      && self.focused_editor().joined().is_empty())
+      || cmd.verb().is_some_and(|v| v.1 == Verb::Quit)
+    {
+      return Ok(Some(ReadlineEvent::Eof));
     }
 
-		// check if it's an edit
-		// we don't count Verb::Change since its possible for it to be called and not actually change anything
-		// e.g. 'cc' on an empty line, 'C' at the end of a line, etc.
-		// this is only used for ringing the bell
-    let has_edit_verb = cmd.verb().is_some_and(|v| v.1.is_edit() && v.1 != Verb::Change);
+    // check if it's an edit
+    // we don't count Verb::Change since its possible for it to be called and not actually change anything
+    // e.g. 'cc' on an empty line, 'C' at the end of a line, etc.
+    // this is only used for ringing the bell
+    let has_edit_verb = cmd
+      .verb()
+      .is_some_and(|v| v.1.is_edit() && v.1 != Verb::Change);
 
-		let is_ctrl_d_motion = cmd.motion().is_some_and(|m| m.1 == Motion::HalfScreenDown);
+    let is_ctrl_d_motion = cmd.motion().is_some_and(|m| m.1 == Motion::HalfScreenDown);
 
     let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
     let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
@@ -927,7 +941,7 @@ impl ShedVi {
     }
 
     let before = self.editor.joined();
-		let before_cursor = self.editor.cursor;
+    let before_cursor = self.editor.cursor;
 
     self.exec_cmd(cmd, false)?;
 
@@ -937,7 +951,7 @@ impl ShedVi {
       }
     }
     let after = self.editor.joined();
-		let after_cursor = self.editor.cursor;
+    let after_cursor = self.editor.cursor;
 
     if before != after {
       self
@@ -946,17 +960,19 @@ impl ShedVi {
     } else if before == after && has_edit_verb {
       self.writer.send_bell().ok();
     } else if before_cursor == after_cursor && is_ctrl_d_motion {
-			if self.ctrl_d_warning_counter == 3 || self.editor.is_empty() {
-				// our silly user is spamming ctrl+d for some reason
-				// maybe they want to exit the shell?
-				write_meta(|m| {
-					m.post_status_message("Ctrl+D only quits in insert mode. try ':q' or entering insert mode with 'i'".into())
-				});
-				self.ctrl_d_warning_counter = 0;
-			} else {
-				self.ctrl_d_warning_counter += 1;
-			}
-		}
+      if self.ctrl_d_warning_counter == 3 || self.editor.is_empty() {
+        // our silly user is spamming ctrl+d for some reason
+        // maybe they want to exit the shell?
+        write_meta(|m| {
+          m.post_status_message(
+            "Ctrl+D only quits in insert mode. try ':q' or entering insert mode with 'i'".into(),
+          )
+        });
+        self.ctrl_d_warning_counter = 0;
+      } else {
+        self.ctrl_d_warning_counter += 1;
+      }
+    }
 
     let hint = self.history.get_hint();
 
@@ -970,78 +986,86 @@ impl ShedVi {
     let (cols, _) = get_win_size(self.tty);
     Layout::from_parts(cols, self.prompt.get_ps1(), &to_cursor, line)
   }
-	pub fn scroll_history_virtual(&mut self, cmd: ViCmd) {
-		// This function is used for the Shift/Ctrl+Up/Down history concatenation.
-		// Instead of replacing the buffer with a scrolled-to history entry
-		// This function appends it to the end of the current buffer with '&&' or ';'
-		// depending on if the user is holding shift or ctrl.
+  pub fn scroll_history_virtual(&mut self, cmd: ViCmd) {
+    // This function is used for the Shift/Ctrl+Up/Down history concatenation.
+    // Instead of replacing the buffer with a scrolled-to history entry
+    // This function appends it to the end of the current buffer with '&&' or ';'
+    // depending on if the user is holding shift or ctrl.
 
-		let MotionCmd(count, motion) = &cmd.motion.unwrap();
-		let sep = if cmd.flags.contains(CmdFlags::HAS_SHIFT) { " && " } else { "; " };
-		match motion {
-			Motion::LineUp => {
-				self.editor.edit(|e| {
-					match self.history.virtual_scroll_direction() {
-						Some(Direction::Forward) => {
-							for _ in 0..*count {
-								if !e.pop_right() {
-									e.clear_buffer();
-									self.history.stop_virtual_scroll();
-									break
-								};
-								self.history.virt_scroll(-1);
-							}
-						}
-						None | Some(Direction::Backward) => {
-							for _ in 0..*count {
-								let Some(entry) = self.history.virt_scroll(-1) else { continue };
-								log::debug!("Got history entry: {:?}", entry);
-								let command = entry.command().to_string();
-								e.concat_left(sep, &command);
-								e.move_cursor_to_end();
-							}
-						}
-					}
-				});
-			}
-			Motion::LineDown => {
-				self.editor.edit(|e| {
-					match self.history.virtual_scroll_direction() {
-						Some(Direction::Backward) => {
-							for _ in 0..*count {
-								if !e.pop_left() {
-									e.clear_buffer();
-									self.history.stop_virtual_scroll();
-									break
-								};
-								self.history.virt_scroll(1);
-							}
-						}
-						None | Some(Direction::Forward) => {
-							for _ in 0..*count {
-								let Some(entry) = self.history.virt_scroll(1) else { continue };
-								log::debug!("Got history entry: {:?}", entry);
-								let command = entry.command().to_string();
-								e.concat_right(sep, &command);
-								e.move_cursor_to_end();
-							}
-						}
-					}
-				});
-			}
-			_ => unreachable!(),
-		}
-	}
-	pub fn scroll_history_to(&mut self, hist_idx: usize) {
-		let entry = self.history.scroll_to(hist_idx).cloned();
-		if entry.is_some() {
-			write_meta(|m| {
-				let total = self.history.search_mask_count();
-				m.post_status_message(format!("jumped to hist entry: {}/{}", hist_idx + 1, total));
-			})
-		}
-		self.swap_history_editor(entry);
-	}
+    let MotionCmd(count, motion) = &cmd.motion.unwrap();
+    let sep = if cmd.flags.contains(CmdFlags::HAS_SHIFT) {
+      " && "
+    } else {
+      "; "
+    };
+    match motion {
+      Motion::LineUp => {
+        self
+          .editor
+          .edit(|e| match self.history.virtual_scroll_direction() {
+            Some(Direction::Forward) => {
+              for _ in 0..*count {
+                if !e.pop_right() {
+                  e.clear_buffer();
+                  self.history.stop_virtual_scroll();
+                  break;
+                };
+                self.history.virt_scroll(-1);
+              }
+            }
+            None | Some(Direction::Backward) => {
+              for _ in 0..*count {
+                let Some(entry) = self.history.virt_scroll(-1) else {
+                  continue;
+                };
+                log::debug!("Got history entry: {:?}", entry);
+                let command = entry.command().to_string();
+                e.concat_left(sep, &command);
+                e.move_cursor_to_end();
+              }
+            }
+          });
+      }
+      Motion::LineDown => {
+        self
+          .editor
+          .edit(|e| match self.history.virtual_scroll_direction() {
+            Some(Direction::Backward) => {
+              for _ in 0..*count {
+                if !e.pop_left() {
+                  e.clear_buffer();
+                  self.history.stop_virtual_scroll();
+                  break;
+                };
+                self.history.virt_scroll(1);
+              }
+            }
+            None | Some(Direction::Forward) => {
+              for _ in 0..*count {
+                let Some(entry) = self.history.virt_scroll(1) else {
+                  continue;
+                };
+                log::debug!("Got history entry: {:?}", entry);
+                let command = entry.command().to_string();
+                e.concat_right(sep, &command);
+                e.move_cursor_to_end();
+              }
+            }
+          });
+      }
+      _ => unreachable!(),
+    }
+  }
+  pub fn scroll_history_to(&mut self, hist_idx: usize) {
+    let entry = self.history.scroll_to(hist_idx).cloned();
+    if entry.is_some() {
+      write_meta(|m| {
+        let total = self.history.search_mask_count();
+        m.post_status_message(format!("jumped to hist entry: {}/{}", hist_idx + 1, total));
+      })
+    }
+    self.swap_history_editor(entry);
+  }
   pub fn scroll_history(&mut self, cmd: ViCmd) {
     /*
     if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
@@ -1057,29 +1081,29 @@ impl ShedVi {
       _ => unreachable!(),
     };
     let entry = self.history.scroll(count).cloned();
-		self.swap_history_editor(entry);
+    self.swap_history_editor(entry);
   }
-	pub fn swap_history_editor(&mut self, entry: Option<HistEntry>) {
-		if let Some(entry) = entry {
-			let editor = std::mem::take(&mut self.editor);
-			self.editor.set_buffer(entry.command().to_string());
-			if self.history.pending.is_none() {
-				self.history.pending = Some(editor);
-			}
-			self.editor.set_hint(None);
-			self.editor.move_cursor_to_end();
-		} else if let Some(pending) = self.history.pending.take() {
-			self.editor = pending;
-		} else {
-			// If we are here it should mean we are on our pending command
-			// And the user tried to scroll history down
-			// Since there is no "future" history, we should just bell and do nothing
-			self.writer.send_bell().ok();
-			return;
-		}
-		self.editor.set_cursor_clamp(self.mode.clamp_cursor());
-		self.editor.fix_cursor();
-	}
+  pub fn swap_history_editor(&mut self, entry: Option<HistEntry>) {
+    if let Some(entry) = entry {
+      let editor = std::mem::take(&mut self.editor);
+      self.editor.set_buffer(entry.command().to_string());
+      if self.history.pending.is_none() {
+        self.history.pending = Some(editor);
+      }
+      self.editor.set_hint(None);
+      self.editor.move_cursor_to_end();
+    } else if let Some(pending) = self.history.pending.take() {
+      self.editor = pending;
+    } else {
+      // If we are here it should mean we are on our pending command
+      // And the user tried to scroll history down
+      // Since there is no "future" history, we should just bell and do nothing
+      self.writer.send_bell().ok();
+      return;
+    }
+    self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+    self.editor.fix_cursor();
+  }
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
     if self.editor.cursor_at_max() && self.editor.has_hint() {
       match self.mode.report_mode() {
@@ -1099,12 +1123,12 @@ impl ShedVi {
   }
 
   pub fn should_grab_history(&mut self, cmd: &ViCmd) -> bool {
-		cmd.is_virtual_scroll() ||
-    cmd.verb().is_none()
-      && (cmd
-        .motion()
-        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUp)))
-        && self.editor.start_of_line() == 0)
+    cmd.is_virtual_scroll()
+      || cmd.verb().is_none()
+        && (cmd
+          .motion()
+          .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUp)))
+          && self.editor.start_of_line() == 0)
       || (cmd
         .motion()
         .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown)))
@@ -1113,7 +1137,7 @@ impl ShedVi {
 
   pub fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
     let line = self.editor.display_window_joined();
-		let mut new_layout = self.get_layout(&line);
+    let mut new_layout = self.get_layout(&line);
 
     let pending_seq = self.mode.pending_seq();
     let mut prompt_string_right = self.prompt.psr_expanded.clone();
@@ -1149,9 +1173,13 @@ impl ShedVi {
       self.writer.clear_rows(layout)?;
     }
 
-    self
-      .writer
-      .redraw(self.prompt.get_ps1(), &line, &new_layout, self.editor.scroll_offset, self.editor.lines.len())?;
+    self.writer.redraw(
+      self.prompt.get_ps1(),
+      &line,
+      &new_layout,
+      self.editor.scroll_offset,
+      self.editor.lines.len(),
+    )?;
 
     let seq_fits = pending_seq
       .as_ref()
@@ -1219,7 +1247,7 @@ impl ShedVi {
       write!(buf, "{move_down}\x1b[1G\n: {pending_seq}").unwrap();
       new_layout.end.row += 1;
       new_layout.cursor.row = new_layout.end.row;
-			new_layout.cursor.col = (2 + pending_seq.width()) as u16;
+      new_layout.cursor.col = (2 + pending_seq.width()) as u16;
     }
 
     write!(buf, "{}", &self.mode.cursor_style()).unwrap();
@@ -1227,13 +1255,13 @@ impl ShedVi {
     self.writer.flush_write(&buf)?;
 
     // Move to end of layout for overlay draws (completer, history search)
-    let has_overlays = self.completer.is_active()
-			|| self.focused_history().fuzzy_finder.is_active();
+    let has_overlays =
+      self.completer.is_active() || self.focused_history().fuzzy_finder.is_active();
 
     let down = new_layout.end.row.saturating_sub(new_layout.cursor.row);
     if has_overlays && down > 0 {
       self.writer.flush_write(&format!("\x1b[{down}B"))?;
-			new_layout.cursor.row = new_layout.end.row;
+      new_layout.cursor.row = new_layout.end.row;
     }
 
     // Tell the completer the width of the prompt line above its \n so it can
@@ -1245,47 +1273,51 @@ impl ShedVi {
       (new_layout.end.col + 1).max(new_layout.cursor.col + 1)
     };
 
-		let mut fuzzy_window_rows = 0;
-    self.completer
+    let mut fuzzy_window_rows = 0;
+    self
+      .completer
       .set_prompt_line_context(preceding_width, new_layout.end.col);
     fuzzy_window_rows += self.completer.draw(&mut self.writer)?;
 
     {
-			self.focused_history()
-				.fuzzy_finder
-				.set_prompt_line_context(preceding_width, new_layout.end.col);
+      self
+        .focused_history()
+        .fuzzy_finder
+        .set_prompt_line_context(preceding_width, new_layout.end.col);
 
       let mut writer = std::mem::take(&mut self.writer);
       fuzzy_window_rows += self.focused_history().fuzzy_finder.draw(&mut writer)?;
       self.writer = writer;
     }
 
-		while let Some(msg) = write_meta(|m| m.pop_status_message()) {
-			let now = Instant::now();
-			self.status_msgs.push_back((msg,now));
-		}
+    while let Some(msg) = write_meta(|m| m.pop_status_message()) {
+      let now = Instant::now();
+      self.status_msgs.push_back((msg, now));
+    }
 
-		while let Some((msg,time)) = self.status_msgs.front() {
-			if time.elapsed().as_secs() < 5 {
-				log::debug!("drawing status message: {msg}");
-				let down = new_layout.end.row - new_layout.cursor.row;
-				log::debug!("status message down: {down}");
-				let fuzzy_rows = fuzzy_window_rows.saturating_sub(1); // the cursor is one row below the top
-				let total = down.saturating_add(fuzzy_rows as u16);
-				let move_down = if total > 0 {
-					format!("\x1b[{total}B")
-				} else {
-					String::new()
-				};
-				let move_up = total + 2;
-				let col = new_layout.cursor.col + 1;
-				self.writer.flush_write(&format!("{move_down}\n\n\x1b7\x1b[2K{msg}\x1b8\x1b[{move_up}A\x1b[{col}G"))?;
-				new_layout.end.row += (2 + msg.chars().filter(|c| *c == '\n').count()) as u16;
-				break
-			} else {
-				self.status_msgs.pop_front();
-			}
-		}
+    while let Some((msg, time)) = self.status_msgs.front() {
+      if time.elapsed().as_secs() < 5 {
+        log::debug!("drawing status message: {msg}");
+        let down = new_layout.end.row - new_layout.cursor.row;
+        log::debug!("status message down: {down}");
+        let fuzzy_rows = fuzzy_window_rows.saturating_sub(1); // the cursor is one row below the top
+        let total = down.saturating_add(fuzzy_rows as u16);
+        let move_down = if total > 0 {
+          format!("\x1b[{total}B")
+        } else {
+          String::new()
+        };
+        let move_up = total + 2;
+        let col = new_layout.cursor.col + 1;
+        self.writer.flush_write(&format!(
+          "{move_down}\n\n\x1b7\x1b[2K{msg}\x1b8\x1b[{move_up}A\x1b[{col}G"
+        ))?;
+        new_layout.end.row += (2 + msg.chars().filter(|c| *c == '\n').count()) as u16;
+        break;
+      } else {
+        self.status_msgs.pop_front();
+      }
+    }
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;
@@ -1438,170 +1470,175 @@ impl ShedVi {
     }
   }
 
-	pub fn handle_cmd_repeat(&mut self, cmd: ViCmd) -> ShResult<()> {
-		let Some(replay) = self.repeat_action.clone() else {
-			return Ok(());
-		};
-		let ViCmd { verb, .. } = cmd;
-		let VerbCmd(count, _) = verb.unwrap();
-		match replay {
-			CmdReplay::ModeReplay { cmds, mut repeat } => {
-				if count > 1 {
-					repeat = count as u16;
-				}
+  pub fn handle_cmd_repeat(&mut self, cmd: ViCmd) -> ShResult<()> {
+    let Some(replay) = self.repeat_action.clone() else {
+      return Ok(());
+    };
+    let ViCmd { verb, .. } = cmd;
+    let VerbCmd(count, _) = verb.unwrap();
+    match replay {
+      CmdReplay::ModeReplay { cmds, mut repeat } => {
+        if count > 1 {
+          repeat = count as u16;
+        }
 
-				let old_mode = self.mode.report_mode();
+        let old_mode = self.mode.report_mode();
 
-				for _ in 0..repeat {
-					let cmds = cmds.clone();
-					for (i, cmd) in cmds.iter().enumerate() {
-						self.exec_cmd(cmd.clone(), true)?;
-						// After the first command, start merging so all subsequent
-						// edits fold into one undo entry (e.g. cw + inserted chars)
-						if i == 0
-							&& let Some(edit) = self.editor.undo_stack.last_mut()
-						{
-							edit.start_merge();
-						}
-					}
-					// Stop merging at the end of the replay
-					if let Some(edit) = self.editor.undo_stack.last_mut() {
-						edit.stop_merge();
-					}
+        for _ in 0..repeat {
+          let cmds = cmds.clone();
+          for (i, cmd) in cmds.iter().enumerate() {
+            self.exec_cmd(cmd.clone(), true)?;
+            // After the first command, start merging so all subsequent
+            // edits fold into one undo entry (e.g. cw + inserted chars)
+            if i == 0
+              && let Some(edit) = self.editor.undo_stack.last_mut()
+            {
+              edit.start_merge();
+            }
+          }
+          // Stop merging at the end of the replay
+          if let Some(edit) = self.editor.undo_stack.last_mut() {
+            edit.stop_merge();
+          }
 
-					let old_mode_clone = match old_mode {
-						ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn ViMode>,
-						ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn ViMode>,
-						ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn ViMode>,
-						ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())) as Box<dyn ViMode>,
-						ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn ViMode>,
-						ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn ViMode>,
-						ModeReport::Unknown => unreachable!(),
-					};
-					self.mode = old_mode_clone;
-				}
-			}
-			CmdReplay::Single(mut cmd) => {
-				if count > 1 {
-					// Override the counts with the one passed to the '.' command
-					if cmd.verb.is_some() {
-						if let Some(v_mut) = cmd.verb.as_mut() {
-							v_mut.0 = count
-						}
-						if let Some(m_mut) = cmd.motion.as_mut() {
-							m_mut.0 = 1
-						}
-					} else {
-						return Ok(()); // it has to have a verb to be repeatable,
-													 // something weird happened
-					}
-				}
-				self.editor.exec_cmd(cmd)?;
-			}
-			_ => unreachable!("motions should be handled in the other branch"),
-		}
-		Ok(())
-	}
+          let old_mode_clone = match old_mode {
+            ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn ViMode>,
+            ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn ViMode>,
+            ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn ViMode>,
+            ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())) as Box<dyn ViMode>,
+            ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn ViMode>,
+            ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn ViMode>,
+            ModeReport::Unknown => unreachable!(),
+          };
+          self.mode = old_mode_clone;
+        }
+      }
+      CmdReplay::Single(mut cmd) => {
+        if count > 1 {
+          // Override the counts with the one passed to the '.' command
+          if cmd.verb.is_some() {
+            if let Some(v_mut) = cmd.verb.as_mut() {
+              v_mut.0 = count
+            }
+            if let Some(m_mut) = cmd.motion.as_mut() {
+              m_mut.0 = 1
+            }
+          } else {
+            return Ok(()); // it has to have a verb to be repeatable,
+            // something weird happened
+          }
+        }
+        self.editor.exec_cmd(cmd)?;
+      }
+      _ => unreachable!("motions should be handled in the other branch"),
+    }
+    Ok(())
+  }
 
-	pub fn handle_motion_repeat(&mut self, cmd: ViCmd) -> ShResult<()> {
-		match cmd.motion.as_ref().unwrap() {
-			MotionCmd(count, Motion::RepeatMotion) => {
-				let Some(motion) = self.repeat_motion.clone() else {
-					return Ok(());
-				};
-				let repeat_cmd = ViCmd {
-					register: RegisterName::default(),
-					verb: cmd.verb,
-					motion: Some(motion),
-					raw_seq: format!("{count};"),
-					flags: CmdFlags::empty(),
-				};
-				self.editor.exec_cmd(repeat_cmd)
-			}
-			MotionCmd(count, Motion::RepeatMotionRev) => {
-				let Some(motion) = self.repeat_motion.clone() else {
-					return Ok(());
-				};
-				let mut new_motion = motion.invert_char_motion();
-				new_motion.0 = *count;
-				let repeat_cmd = ViCmd {
-					register: RegisterName::default(),
-					verb: cmd.verb,
-					motion: Some(new_motion),
-					raw_seq: format!("{count},"),
-					flags: CmdFlags::empty(),
-				};
-				self.editor.exec_cmd(repeat_cmd)
-			}
-			_ => unreachable!(),
-		}
-	}
+  pub fn handle_motion_repeat(&mut self, cmd: ViCmd) -> ShResult<()> {
+    match cmd.motion.as_ref().unwrap() {
+      MotionCmd(count, Motion::RepeatMotion) => {
+        let Some(motion) = self.repeat_motion.clone() else {
+          return Ok(());
+        };
+        let repeat_cmd = ViCmd {
+          register: RegisterName::default(),
+          verb: cmd.verb,
+          motion: Some(motion),
+          raw_seq: format!("{count};"),
+          flags: CmdFlags::empty(),
+        };
+        self.editor.exec_cmd(repeat_cmd)
+      }
+      MotionCmd(count, Motion::RepeatMotionRev) => {
+        let Some(motion) = self.repeat_motion.clone() else {
+          return Ok(());
+        };
+        let mut new_motion = motion.invert_char_motion();
+        new_motion.0 = *count;
+        let repeat_cmd = ViCmd {
+          register: RegisterName::default(),
+          verb: cmd.verb,
+          motion: Some(new_motion),
+          raw_seq: format!("{count},"),
+          flags: CmdFlags::empty(),
+        };
+        self.editor.exec_cmd(repeat_cmd)
+      }
+      _ => unreachable!(),
+    }
+  }
   pub fn exec_cmd(&mut self, mut cmd: ViCmd, from_replay: bool) -> ShResult<()> {
-    if cmd.verb().is_some() && let Some(range) = self.editor.select_range() {
+    if cmd.verb().is_some()
+      && let Some(range) = self.editor.select_range()
+    {
       cmd.motion = Some(MotionCmd(1, range))
     };
 
     if cmd.is_mode_transition() {
       self.exec_mode_transition(cmd, from_replay)
     } else if cmd.is_cmd_repeat() {
-			self.handle_cmd_repeat(cmd)
+      self.handle_cmd_repeat(cmd)
     } else if cmd.is_motion_repeat() {
-			self.handle_motion_repeat(cmd)
-		} else {
-			if self.mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_none() {
-				self.editor.stop_selecting();
-				let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
-				self.swap_mode(&mut mode);
-			}
+      self.handle_motion_repeat(cmd)
+    } else {
+      if self.mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_none() {
+        self.editor.stop_selecting();
+        let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+        self.swap_mode(&mut mode);
+      }
 
-			if cmd.is_repeatable() && !from_replay {
-				if self.mode.report_mode() == ModeReport::Visual {
-					// The motion is assigned in the line buffer execution, so we also have to
-					// assign it here in order to be able to repeat it
-					if let Some(range) = self.editor.select_range() {
-						cmd.motion = Some(MotionCmd(1, range))
-					} else {
-						log::warn!("You're in visual mode with no select range??");
-					};
-				}
-				self.repeat_action = Some(CmdReplay::Single(cmd.clone()));
-			}
+      if cmd.is_repeatable() && !from_replay {
+        if self.mode.report_mode() == ModeReport::Visual {
+          // The motion is assigned in the line buffer execution, so we also have to
+          // assign it here in order to be able to repeat it
+          if let Some(range) = self.editor.select_range() {
+            cmd.motion = Some(MotionCmd(1, range))
+          } else {
+            log::warn!("You're in visual mode with no select range??");
+          };
+        }
+        self.repeat_action = Some(CmdReplay::Single(cmd.clone()));
+      }
 
-			if cmd.is_char_search() {
-				self.repeat_motion = cmd.motion.clone()
-			}
+      if cmd.is_char_search() {
+        self.repeat_motion = cmd.motion.clone()
+      }
 
-			self.editor.exec_cmd(cmd.clone())?;
+      self.editor.exec_cmd(cmd.clone())?;
 
-			if self.mode.report_mode() == ModeReport::Visual
-				&& cmd.verb().is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank) {
-					self.editor.stop_selecting();
-					let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
-					self.swap_mode(&mut mode);
-			}
+      if self.mode.report_mode() == ModeReport::Visual
+        && cmd
+          .verb()
+          .is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank)
+      {
+        self.editor.stop_selecting();
+        let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+        self.swap_mode(&mut mode);
+      }
 
-			if self.mode.report_mode() != ModeReport::Visual && self.editor.select_range().is_some() {
-				self.editor.stop_selecting();
-			}
+      if self.mode.report_mode() != ModeReport::Visual && self.editor.select_range().is_some() {
+        self.editor.stop_selecting();
+      }
 
-			if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
-				let mut mode: Box<dyn ViMode> = if matches!(
-					self.mode.report_mode(),
-					ModeReport::Ex | ModeReport::Verbatim
-				) {
-					if let Some(saved) = self.saved_mode.take() {
-						saved
-					} else {
-						Box::new(ViNormal::new())
-					}
-				} else {
-					Box::new(ViNormal::new())
-				};
-				self.swap_mode(&mut mode);
-			}
+      if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
+        let mut mode: Box<dyn ViMode> = if matches!(
+          self.mode.report_mode(),
+          ModeReport::Ex | ModeReport::Verbatim
+        ) {
+          if let Some(saved) = self.saved_mode.take() {
+            saved
+          } else {
+            Box::new(ViNormal::new())
+          }
+        } else {
+          Box::new(ViNormal::new())
+        };
+        self.swap_mode(&mut mode);
+      }
 
-			Ok(())
-		}
+      Ok(())
+    }
   }
 }
 

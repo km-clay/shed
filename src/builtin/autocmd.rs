@@ -63,7 +63,8 @@ pub fn autocmd(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
-  let (mut argv, opts) = get_opts_from_tokens(argv, &autocmd_optspec()).promote_err(span.clone())?;
+  let (mut argv, opts) =
+    get_opts_from_tokens(argv, &autocmd_optspec()).promote_err(span.clone())?;
   let autocmd_opts = get_autocmd_opts(&opts).promote_err(span.clone())?;
   if !argv.is_empty() {
     argv.remove(0);
@@ -102,7 +103,7 @@ pub fn autocmd(node: Node) -> ShResult<()> {
 
   let autocmd = AutoCmd {
     pattern: autocmd_opts.pattern,
-		kind: autocmd_kind,
+    kind: autocmd_kind,
     command: autocmd_cmd.0.clone(),
   };
 

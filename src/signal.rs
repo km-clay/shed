@@ -356,7 +356,11 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
 
         let post_job_hooks = read_logic(|l| l.get_autocmds(AutoCmdKind::OnJobFinish));
         for cmd in post_job_hooks {
-          let AutoCmd { pattern, kind: _, command } = cmd;
+          let AutoCmd {
+            pattern,
+            kind: _,
+            command,
+          } = cmd;
           if let Some(pat) = pattern
             && job.get_cmds().iter().all(|p| !pat.is_match(p))
           {

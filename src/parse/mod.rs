@@ -273,8 +273,8 @@ bitflags! {
     const NO_FORK       = 0b000000100;
     const ARR_ASSIGN    = 0b000001000;
     const PIPE_ERR      = 0b000010000; // whether to include stderr in a pipe
-		const NOT_ERR       = 0b000100000; // whether an error triggers ERR traps and set -e
-		const PIPE_CMD      = 0b001000000; // is not the last command in a pipeline
+    const NOT_ERR       = 0b000100000; // whether an error triggers ERR traps and set -e
+    const PIPE_CMD      = 0b001000000; // is not the last command in a pipeline
   }
 }
 
@@ -512,10 +512,9 @@ pub enum LoopKind {
 }
 
 crate::two_way_display!(LoopKind,
-	While <=> "while";
-	Until <=> "until";
+  While <=> "while";
+  Until <=> "until";
 );
-
 
 #[derive(Clone, Debug)]
 pub enum TestCase {
@@ -844,9 +843,9 @@ impl ParseStream {
         TkRule::Or => ConjunctOp::Or,
         _ => ConjunctOp::Null,
       };
-			if conjunct_op != ConjunctOp::Null {
-				block.walk_tree(&mut |nd| nd.flags |= NdFlags::NOT_ERR);
-			}
+      if conjunct_op != ConjunctOp::Null {
+        block.walk_tree(&mut |nd| nd.flags |= NdFlags::NOT_ERR);
+      }
       let conjunction = ConjunctNode {
         cmd: Box::new(block),
         operator: conjunct_op,
@@ -1279,7 +1278,7 @@ impl ParseStream {
         ),
       );
     };
-		cmd.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for negated commands
+    cmd.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for negated commands
 
     node_tks.extend(cmd.tokens.clone());
     self.catch_separator(&mut node_tks);
@@ -1326,7 +1325,7 @@ impl ParseStream {
         );
       };
       node_tks.extend(cond.tokens.clone());
-			cond.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for condition commands
+      cond.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for condition commands
 
       if !self.check_keyword("then") || !self.next_tk_is_some() {
         self.panic_mode(&mut node_tks);
@@ -1523,7 +1522,7 @@ impl ParseStream {
       ));
     };
     node_tks.extend(cond.tokens.clone());
-		cond.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for condition commands
+    cond.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for condition commands
 
     if !self.check_keyword("do") || !self.next_tk_is_some() {
       self.panic_mode(&mut node_tks);
@@ -1589,13 +1588,13 @@ impl ParseStream {
     while let Some(mut cmd) = self.parse_block(false)? {
       let is_punctuated = node_is_punctuated(&cmd.tokens);
       node_tks.append(&mut cmd.tokens.clone());
-			let next_class = self.next_tk_class();
+      let next_class = self.next_tk_class();
       if *next_class == TkRule::ErrPipe {
         cmd.flags |= NdFlags::PIPE_ERR;
       }
-			if matches!(*next_class, TkRule::Pipe | TkRule::ErrPipe) {
-				cmd.walk_tree(&mut |n| n.flags |= NdFlags::PIPE_CMD | NdFlags::NOT_ERR);
-			}
+      if matches!(*next_class, TkRule::Pipe | TkRule::ErrPipe) {
+        cmd.walk_tree(&mut |n| n.flags |= NdFlags::PIPE_CMD | NdFlags::NOT_ERR);
+      }
 
       cmds.push(cmd);
       if *next_class == TkRule::Bg {
@@ -1603,8 +1602,7 @@ impl ParseStream {
         node_tks.push(tk.clone());
         flags |= NdFlags::BACKGROUND;
         break;
-      } else if (!matches!(*next_class, TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated
-      {
+      } else if (!matches!(*next_class, TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated {
         break;
       } else if let Some(pipe) = self.next_tk() {
         node_tks.push(pipe)

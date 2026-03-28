@@ -1123,7 +1123,8 @@ pub fn unescape_str(raw: &str) -> String {
                 }
               }
             }
-            '$' => { // this has a single quote after it
+            '$' => {
+              // this has a single quote after it
               chars.next();
               while let Some(q_ch) = chars.next() {
                 match q_ch {
@@ -1368,15 +1369,18 @@ pub fn unescape_str(raw: &str) -> String {
         }
       }
       '$' => {
-        if chars.peek().is_none_or(|ch| *ch != '$' && !is_var_name_ch(ch)) {
+        if chars
+          .peek()
+          .is_none_or(|ch| *ch != '$' && !is_var_name_ch(ch))
+        {
           chars.next();
           result.push('$');
         } else {
           result.push(markers::VAR_SUB);
-					if chars.peek().is_some_and(|ch| *ch == '$') {
-						chars.next();
-						result.push('$');
-					}
+          if chars.peek().is_some_and(|ch| *ch == '$') {
+            chars.next();
+            result.push('$');
+          }
         }
       }
       '`' => {
@@ -2034,30 +2038,31 @@ pub fn expand_case_pattern(raw: &str) -> ShResult<String> {
 }
 
 pub fn is_var_name_ch(ch: &char) -> bool {
-	matches!(ch,
-		'@' |
-		'*' |
-		'#' |
-		'?' |
-		'!' |
-		'-' |
-		'_' |
-		'A'..='Z' |
-		'a'..='z' |
-		'0'..='9'
-	)
+  matches!(ch,
+    '@' |
+    '*' |
+    '#' |
+    '?' |
+    '!' |
+    '-' |
+    '_' |
+    'A'..='Z' |
+    'a'..='z' |
+    '0'..='9'
+  )
 }
 
 pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
   // fnmatch_regex always produces ^...$, so get the pattern string and strip if unanchored
-  let pattern = fnmatch_regex::glob_to_regex_pattern(glob)
-    .unwrap_or_else(|_| regex::escape(glob));
+  let pattern = fnmatch_regex::glob_to_regex_pattern(glob).unwrap_or_else(|_| regex::escape(glob));
   let pattern = if anchored {
     pattern
   } else {
     pattern
-      .strip_prefix('^').unwrap_or(&pattern)
-      .strip_suffix('$').unwrap_or(&pattern)
+      .strip_prefix('^')
+      .unwrap_or(&pattern)
+      .strip_suffix('$')
+      .unwrap_or(&pattern)
       .to_string()
   };
   Regex::new(&pattern).unwrap()

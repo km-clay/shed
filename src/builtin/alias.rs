@@ -5,7 +5,7 @@ use crate::{
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   procio::borrow_fd,
-  state::{self, read_logic, write_logic},
+  state::{self, read_logic, write_logic, write_meta},
 };
 
 pub fn alias(node: Node) -> ShResult<()> {
@@ -67,6 +67,8 @@ pub fn alias(node: Node) -> ShResult<()> {
       write_logic(|l| l.insert_alias(name, body, span.clone()));
     }
   }
+
+  write_meta(|m| m.rehash_commands());
   state::set_status(0);
   Ok(())
 }

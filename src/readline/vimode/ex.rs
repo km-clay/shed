@@ -267,7 +267,7 @@ fn parse_ex_command(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Opt
     }
     _ if "help".starts_with(&cmd_name) => {
       let cmd = "help ".to_string() + chars.collect::<String>().trim();
-			log::debug!("Parsed help command: {}", cmd);
+      log::debug!("Parsed help command: {}", cmd);
       Ok(Some(Verb::ShellCmd(cmd)))
     }
     "normal!" => parse_normal(chars),

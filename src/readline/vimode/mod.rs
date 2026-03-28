@@ -118,21 +118,21 @@ pub fn common_cmds(key: E) -> Option<ViCmd> {
     E(K::Left, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::BackwardChar)),
     E(K::Right, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::ForwardChar)),
     E(K::Up, mods) => {
-			pending_cmd.set_motion(MotionCmd(1, Motion::LineUp));
-			if mods.contains(M::SHIFT) {
-				pending_cmd.flags |= CmdFlags::HAS_SHIFT;
-			} else if mods.contains(M::CTRL) {
-				pending_cmd.flags |= CmdFlags::HAS_CTRL;
-			}
-		}
+      pending_cmd.set_motion(MotionCmd(1, Motion::LineUp));
+      if mods.contains(M::SHIFT) {
+        pending_cmd.flags |= CmdFlags::HAS_SHIFT;
+      } else if mods.contains(M::CTRL) {
+        pending_cmd.flags |= CmdFlags::HAS_CTRL;
+      }
+    }
     E(K::Down, mods) => {
-			pending_cmd.set_motion(MotionCmd(1, Motion::LineDown));
-			if mods.contains(M::SHIFT) {
-				pending_cmd.flags |= CmdFlags::HAS_SHIFT;
-			} else if mods.contains(M::CTRL) {
-				pending_cmd.flags |= CmdFlags::HAS_CTRL;
-			}
-		}
+      pending_cmd.set_motion(MotionCmd(1, Motion::LineDown));
+      if mods.contains(M::SHIFT) {
+        pending_cmd.flags |= CmdFlags::HAS_SHIFT;
+      } else if mods.contains(M::CTRL) {
+        pending_cmd.flags |= CmdFlags::HAS_CTRL;
+      }
+    }
     E(K::Delete, M::NONE) => {
       pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
       pending_cmd.set_motion(MotionCmd(1, Motion::ForwardCharForced));

@@ -73,7 +73,7 @@ impl AutoCmdVecUtils for Vec<AutoCmd> {
     for cmd in self {
       let AutoCmd {
         pattern: _,
-				kind: _,
+        kind: _,
         command,
       } = cmd;
       if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
@@ -86,10 +86,10 @@ impl AutoCmdVecUtils for Vec<AutoCmd> {
     let saved_status = crate::state::get_status();
     for cmd in self {
       let AutoCmd {
-				pattern,
-				kind: _,
-				command,
-			} = cmd;
+        pattern,
+        kind: _,
+        command,
+      } = cmd;
       if let Some(pat) = pattern
         && !pat.is_match(other_pattern)
       {

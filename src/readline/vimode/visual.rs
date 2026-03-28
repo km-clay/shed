@@ -670,7 +670,7 @@ impl ViMode for ViVisual {
           verb: Some(VerbCmd(1, Verb::PrintPosition)),
           motion: None,
           raw_seq: "".into(),
-          flags: CmdFlags::empty()
+          flags: CmdFlags::empty(),
         })
       }
       E(K::Char('D'), M::CTRL) => {

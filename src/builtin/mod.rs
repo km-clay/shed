@@ -18,25 +18,25 @@ pub mod intro;
 pub mod jobctl;
 pub mod keymap;
 pub mod map;
+pub mod msg;
 pub mod pwd;
 pub mod read;
 pub mod resource;
 pub mod seek;
+pub mod set;
 pub mod shift;
 pub mod shopt;
 pub mod source;
 pub mod test; // [[ ]] thing
 pub mod trap;
 pub mod varcmds;
-pub mod set;
-pub mod msg;
 
 pub const BUILTINS: [&str; 53] = [
   "echo", "cd", "read", "export", "local", "pwd", "source", ".", "shift", "jobs", "fg", "bg",
   "disown", "alias", "unalias", "return", "break", "continue", "exit", "shopt", "builtin",
   "command", "trap", "pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly",
   "unset", "complete", "compgen", "map", "pop", "fpop", "push", "fpush", "rotate", "wait", "type",
-  "getopts", "keymap", "read_key", "autocmd", "ulimit", "umask", "seek", "help", "set", "msg"
+  "getopts", "keymap", "read_key", "autocmd", "ulimit", "umask", "seek", "help", "set", "msg",
 ];
 
 pub fn true_builtin() -> ShResult<()> {
@@ -57,26 +57,26 @@ pub fn noop_builtin() -> ShResult<()> {
 // Join all of the word-split arguments into a single string
 // Preserve the span too
 pub fn join_raw_args(args: Vec<(String, Span)>) -> (String, Span) {
-	join_raw_arg_iter(args.into_iter())
+  join_raw_arg_iter(args.into_iter())
 }
 
 pub fn join_raw_arg_iter(args: impl Iterator<Item = (String, Span)>) -> (String, Span) {
-	args.fold((String::new(), Span::default()), |mut acc, arg| {
-		if acc.1 == Span::default() {
-			acc.1 = arg.1.clone();
-		} else {
-			let new_end = arg.1.end();
-			let start = acc.1.start();
-			acc.1.set_range(start..new_end);
-		}
+  args.fold((String::new(), Span::default()), |mut acc, arg| {
+    if acc.1 == Span::default() {
+      acc.1 = arg.1.clone();
+    } else {
+      let new_end = arg.1.end();
+      let start = acc.1.start();
+      acc.1.set_range(start..new_end);
+    }
 
-		if acc.0.is_empty() {
-			acc.0 = arg.0;
-		} else {
-			acc.0 = acc.0 + &format!(" {}", arg.0);
-		}
-		acc
-	})
+    if acc.0.is_empty() {
+      acc.0 = arg.0;
+    } else {
+      acc.0 = acc.0 + &format!(" {}", arg.0);
+    }
+    acc
+  })
 }
 
 #[cfg(test)]

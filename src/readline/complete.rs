@@ -75,8 +75,8 @@ impl ClampedUsize {
 
 #[derive(Default, Debug, Clone)]
 pub struct Candidate {
-	content: String,
-	id: Option<usize> // for stuff like history that cares about the original index
+  content: String,
+  id: Option<usize>, // for stuff like history that cares about the original index
 }
 
 impl Eq for Candidate {}
@@ -101,38 +101,38 @@ impl Ord for Candidate {
 
 impl From<String> for Candidate {
   fn from(value: String) -> Self {
-		Self {
-			content: value,
-			id: None
-		}
+    Self {
+      content: value,
+      id: None,
+    }
   }
 }
 
 impl From<&String> for Candidate {
   fn from(value: &String) -> Self {
-		Self {
-			content: value.clone(),
-			id: None
-		}
+    Self {
+      content: value.clone(),
+      id: None,
+    }
   }
 }
 
 impl From<&str> for Candidate {
   fn from(value: &str) -> Self {
     Self {
-			content: value.to_string(),
-			id: None
-		}
+      content: value.to_string(),
+      id: None,
+    }
   }
 }
 
 impl From<(usize, String)> for Candidate {
-	fn from(value: (usize, String)) -> Self {
-		Self {
-			content: value.1,
-			id: Some(value.0)
-		}
-	}
+  fn from(value: (usize, String)) -> Self {
+    Self {
+      content: value.1,
+      id: Some(value.0),
+    }
+  }
 }
 
 impl Display for Candidate {
@@ -165,12 +165,12 @@ impl Candidate {
       self.content.starts_with(other)
     }
   }
-	pub fn content(&self) -> &str {
-		&self.content
-	}
-	pub fn id(&self) -> Option<usize> {
-		self.id
-	}
+  pub fn content(&self) -> &str {
+    &self.content
+  }
+  pub fn id(&self) -> Option<usize> {
+    self.id
+  }
   pub fn as_str(&self) -> &str {
     &self.content
   }
@@ -361,7 +361,11 @@ fn complete_dirs(start: &str) -> Vec<Candidate> {
 
   filenames
     .into_iter()
-    .filter(|f| std::fs::metadata(&f.content).map(|m| m.is_dir()).unwrap_or(false))
+    .filter(|f| {
+      std::fs::metadata(&f.content)
+        .map(|m| m.is_dir())
+        .unwrap_or(false)
+    })
     .collect()
 }
 
@@ -728,10 +732,10 @@ impl CompResult {
 }
 
 pub enum CompResponse {
-  Passthrough,    // key falls through
+  Passthrough,       // key falls through
   Accept(Candidate), // user accepted completion
-  Dismiss,        // user canceled completion
-  Consumed,       // key was handled, but completion remains active
+  Dismiss,           // user canceled completion
+  Consumed,          // key was handled, but completion remains active
 }
 
 pub enum SelectorResponse {
@@ -1121,10 +1125,7 @@ impl FuzzySelector {
       }
       K(C::Enter, M::NONE) => {
         self.active = false;
-        if let Some(selected) = self
-          .filtered
-          .get(self.cursor.get())
-        {
+        if let Some(selected) = self.filtered.get(self.cursor.get()) {
           Ok(SelectorResponse::Accept(selected.candidate.clone()))
         } else {
           Ok(SelectorResponse::Dismiss)
@@ -1398,7 +1399,9 @@ impl Completer for FuzzyCompleter {
       }
     } else {
       start += slice.width();
-      let completion = selected.strip_prefix(slice).unwrap_or(selected.content().to_string());
+      let completion = selected
+        .strip_prefix(slice)
+        .unwrap_or(selected.content().to_string());
       (
         self.completer.original_input[..start].to_string(),
         completion.into(),
@@ -1513,9 +1516,7 @@ impl Completer for SimpleCompleter {
   }
 
   fn selected_candidate(&self) -> Option<Candidate> {
-    self
-      .candidates
-      .get(self.selected_idx).cloned()
+    self.candidates.get(self.selected_idx).cloned()
   }
 
   fn token_span(&self) -> (usize, usize) {

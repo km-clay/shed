@@ -44,7 +44,8 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
+  AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, source_env, source_login, source_rc,
+  write_jobs, write_meta, write_shopts,
 };
 use clap::Parser;
 use state::write_vars;
@@ -231,7 +232,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup(args.login_shell);
 
-	write_meta(|m| m.create_socket())?;
+  write_meta(|m| m.create_socket())?;
 
   if args.login_shell
     && let Err(e) = source_login()
@@ -307,18 +308,16 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     readline.print_line(false)?;
 
     // Poll for stdin input
-    let mut fds = vec![
-			PollFd::new(
-				unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
-				PollFlags::POLLIN,
-			),
-		];
-		if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
-			fds.push(PollFd::new(
-				unsafe { BorrowedFd::borrow_raw(fd) },
-				PollFlags::POLLIN,
-			));
-		}
+    let mut fds = vec![PollFd::new(
+      unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
+      PollFlags::POLLIN,
+    )];
+    if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
+      fds.push(PollFd::new(
+        unsafe { BorrowedFd::borrow_raw(fd) },
+        PollFlags::POLLIN,
+      ));
+    }
 
     let mut exec_if_timeout = None;
 
@@ -330,11 +329,12 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       if screensaver_idle_time > 0 && !screensaver_cmd.is_empty() {
         exec_if_timeout = Some(screensaver_cmd);
         if screensaver_deadline.is_none() {
-          screensaver_deadline = Some(Instant::now() + Duration::from_secs(screensaver_idle_time as u64));
+          screensaver_deadline =
+            Some(Instant::now() + Duration::from_secs(screensaver_idle_time as u64));
         }
-				// We unfortunately cant just set the PollTimeout to use 'idle_time * 1000' as the timeout
-				// because u16 overflows after 65 seconds (65535 ms).
-				// So we set a one second timeout and check against the Instant in 'screensaver_deadline'
+        // We unfortunately cant just set the PollTimeout to use 'idle_time * 1000' as the timeout
+        // because u16 overflows after 65 seconds (65535 ms).
+        // So we set a one second timeout and check against the Instant in 'screensaver_deadline'
         PollTimeout::from(1000u16)
       } else {
         screensaver_deadline = None;
@@ -348,23 +348,24 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       Ok(0) => {
         // We timed out. Check if there's a screensaver command
         if let Some(cmd) = exec_if_timeout
-				&& screensaver_deadline.is_some_and(|d| Instant::now() >= d) {
+          && screensaver_deadline.is_some_and(|d| Instant::now() >= d)
+        {
           screensaver_deadline = None;
           let prepared = ReadlineEvent::Line(cmd.clone());
           let _guard = scopeguard::guard(read_shopts(|o| o.core.auto_hist), |opt| {
-						// restores old auto_hist value
+            // restores old auto_hist value
             write_shopts(|o| o.core.auto_hist = opt);
           });
           write_shopts(|o| o.core.auto_hist = false); // don't save screensaver command to history
-					let pre_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnScreensaverExec));
-					pre_cmds.exec_with(&cmd);
+          let pre_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnScreensaverExec));
+          pre_cmds.exec_with(&cmd);
 
           let res = handle_readline_event(&mut readline, Ok(prepared))?;
 
-					let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnScreensaverReturn));
-					post_cmds.exec_with(&cmd);
+          let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnScreensaverReturn));
+          post_cmds.exec_with(&cmd);
 
-					match res {
+          match res {
             true => return Ok(()),
             false => continue,
           }
@@ -429,8 +430,10 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
 
     // Check if stdin has data
-    if fds[0].revents()
-		.is_some_and(|r| r.contains(PollFlags::POLLIN)) {
+    if fds[0]
+      .revents()
+      .is_some_and(|r| r.contains(PollFlags::POLLIN))
+    {
       let mut buffer = [0u8; 1024];
       match read(*TTY_FILENO, &mut buffer) {
         Ok(0) => {
@@ -452,13 +455,14 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       }
     }
 
-		// check socket fd
-		if fds.get(1)
-		.and_then(|fd| fd.revents())
-		.is_some_and(|r| r.contains(PollFlags::POLLIN)) {
-			write_meta(|m| m.read_socket())?;
-		}
-
+    // check socket fd
+    if fds
+      .get(1)
+      .and_then(|fd| fd.revents())
+      .is_some_and(|r| r.contains(PollFlags::POLLIN))
+    {
+      write_meta(|m| m.read_socket())?;
+    }
 
     // Process any available input
     let event = readline.process_input();
@@ -495,12 +499,12 @@ fn handle_readline_event(readline: &mut ShedVi, event: ShResult<ReadlineEvent>) 
             QUIT_CODE.store(*code, Ordering::SeqCst);
             return Ok(true);
           }
-					ShErrKind::ErrInterrupt => {
-						// set -e exit path
-						QUIT_CODE.store(0, Ordering::SeqCst);
-						e.print_error();
-						return Ok(true);
-					}
+          ShErrKind::ErrInterrupt => {
+            // set -e exit path
+            QUIT_CODE.store(0, Ordering::SeqCst);
+            e.print_error();
+            return Ok(true);
+          }
           _ => e.print_error(),
         }
       }

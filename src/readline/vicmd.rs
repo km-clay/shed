@@ -2,10 +2,13 @@ use std::path::PathBuf;
 
 use bitflags::bitflags;
 
-use crate::{readline::{
-  linebuf::{Grapheme, Pos},
-  vimode::ex::SubFlags,
-}, state::read_shopts};
+use crate::{
+  readline::{
+    linebuf::{Grapheme, Pos},
+    vimode::ex::SubFlags,
+  },
+  state::read_shopts,
+};
 
 use super::register::{RegisterContent, append_register, read_register, write_register};
 
@@ -72,8 +75,8 @@ bitflags! {
     const VISUAL_BLOCK = 1<<2;
     const EXIT_CUR_MODE = 1<<3;
     const IS_EX_CMD = 1<<4;
-		const HAS_SHIFT = 1<<5;
-		const HAS_CTRL = 1<<6;
+    const HAS_SHIFT = 1<<5;
+    const HAS_CTRL = 1<<6;
   }
 }
 
@@ -130,11 +133,16 @@ impl ViCmd {
       .as_ref()
       .is_some_and(|v| matches!(v.1, Verb::RepeatLast))
   }
-	pub fn is_virtual_scroll(&self) -> bool {
-		self.verb.as_ref().is_none()
-		&& self.motion.as_ref().is_some_and(|v| matches!(v.1, Motion::LineUp | Motion::LineDown))
-		&& self.flags.intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL)
-	}
+  pub fn is_virtual_scroll(&self) -> bool {
+    self.verb.as_ref().is_none()
+      && self
+        .motion
+        .as_ref()
+        .is_some_and(|v| matches!(v.1, Motion::LineUp | Motion::LineDown))
+      && self
+        .flags
+        .intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL)
+  }
   pub fn is_motion_repeat(&self) -> bool {
     self
       .motion
@@ -250,7 +258,7 @@ pub enum Verb {
   Equalize,
   AcceptLineOrNewline,
   EndOfFile,
-	PrintPosition,
+  PrintPosition,
   // Ex-mode verbs
   ExMode,
   ShellCmd(String),
@@ -315,10 +323,7 @@ impl Verb {
     )
   }
   pub fn is_char_insert(&self) -> bool {
-    matches!(
-      self,
-      Self::InsertChar(_) | Self::ReplaceChar(_)
-    )
+    matches!(self, Self::InsertChar(_) | Self::ReplaceChar(_))
   }
 }
 
@@ -343,8 +348,8 @@ pub enum Motion {
   EndOfBuffer,
   ToColumn,
   ToDelimMatch,
-	HalfScreenDown,
-	HalfScreenUp,
+  HalfScreenDown,
+  HalfScreenUp,
   ToBrace(Direction),
   ToBracket(Direction),
   ToParen(Direction),

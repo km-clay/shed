@@ -3,14 +3,18 @@ use std::{env, io::Write, path::Path};
 use ariadne::Span as ASpan;
 
 use crate::{
-  builtin::join_raw_arg_iter, libsh::{
+  builtin::join_raw_arg_iter,
+  libsh::{
     error::{ShErr, ShErrKind, ShResult},
     guards::RawModeGuard,
-  }, parse::{
+  },
+  parse::{
     NdRule, Node,
     execute::{exec_input, prepare_argv},
     lex::{QuoteState, Span},
-  }, readline::{complete::ScoredCandidate, markers}, state
+  },
+  readline::{complete::ScoredCandidate, markers},
+  state,
 };
 
 const TAG_SEQ: &str = "\x1b[1;33m"; // bold yellow — searchable tags
@@ -38,15 +42,17 @@ pub fn help(node: Node) -> ShResult<()> {
   let (topic, span) = if argv.peek().is_none() {
     ("help.txt".to_string(), help.1)
   } else {
-		join_raw_arg_iter(argv)
+    join_raw_arg_iter(argv)
   };
 
   let hpath = env::var("SHED_HPATH").unwrap_or_default();
 
-	// search for prefixes of help doc filenames
+  // search for prefixes of help doc filenames
   for path in hpath.split(':') {
     let dir = Path::new(path);
-    let Ok(entries) = dir.read_dir() else { continue };
+    let Ok(entries) = dir.read_dir() else {
+      continue;
+    };
     for entry in entries {
       let Ok(entry) = entry else { continue };
       let path = entry.path();

@@ -8,7 +8,32 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, flowctl::flowctl, getopts::getopts, help::help, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
+    alias::{alias, unalias},
+    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
+    autocmd::autocmd,
+    cd::cd,
+    complete::{compgen_builtin, complete_builtin},
+    dirstack::{dirs, popd, pushd},
+    echo::echo,
+    eval, exec,
+    flowctl::flowctl,
+    getopts::getopts,
+    help::help,
+    intro,
+    jobctl::{self, JobBehavior, continue_job, disown, jobs},
+    keymap, map,
+    msg::msg,
+    pwd::pwd,
+    read::{self, read_builtin},
+    resource::{ulimit, umask_builtin},
+    seek::seek,
+    set::set_builtin,
+    shift::shift,
+    shopt::shopt,
+    source::source,
+    test::double_bracket_test,
+    trap::{TrapTarget, trap},
+    varcmds::{export, local, readonly, unset},
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -21,7 +46,8 @@ use crate::{
   procio::{IoMode, IoStack, PipeGenerator},
   signal::{check_signals, signals_pending},
   state::{
-    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_vars,
+    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_meta,
+    write_vars,
   },
 };
 
@@ -248,12 +274,12 @@ impl Dispatcher {
       // and propagate back to the functions in main.rs
       check_signals()?;
     }
-		let flags = node.flags;
-		let span = node.get_span().clone();
+    let flags = node.flags;
+    let span = node.get_span().clone();
 
-		if self.interactive {
-			log::debug!("status before executing node: {}", state::get_status());
-		}
+    if self.interactive {
+      log::debug!("status before executing node: {}", state::get_status());
+    }
     let result = match node.class {
       NdRule::Conjunction { .. } => self.exec_conjunction(node),
       NdRule::Pipeline { .. } => self.exec_pipeline(node),
@@ -268,29 +294,28 @@ impl Dispatcher {
       NdRule::Test { .. } => self.exec_test(node),
       _ => unreachable!(),
     };
-		if self.interactive {
-			log::debug!("status after executing node: {}", state::get_status());
-		}
+    if self.interactive {
+      log::debug!("status after executing node: {}", state::get_status());
+    }
 
-		if let Err(mut e) = result {
-			if e.is_flow_control() {
-				return Err(e)
-			}
-			if state::get_status() != 0
-			&& !flags.contains(NdFlags::NOT_ERR) {
-				if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
-					let saved_status = state::get_status();
-					exec_input(trap, None, false, Some("trap ERR".to_string()))?;
-					state::set_status(saved_status);
-				}
-				if read_shopts(|o| o.set.errexit) {
-					e.set_kind(ShErrKind::ErrInterrupt);
-					e.persist_redirs();
-					return Err(e)
-				}
-			}
-			return Err(e);
-		}
+    if let Err(mut e) = result {
+      if e.is_flow_control() {
+        return Err(e);
+      }
+      if state::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
+        if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
+          let saved_status = state::get_status();
+          exec_input(trap, None, false, Some("trap ERR".to_string()))?;
+          state::set_status(saved_status);
+        }
+        if read_shopts(|o| o.set.errexit) {
+          e.set_kind(ShErrKind::ErrInterrupt);
+          e.persist_redirs();
+          return Err(e);
+        }
+      }
+      return Err(e);
+    }
 
     Ok(())
   }
@@ -403,6 +428,7 @@ impl Dispatcher {
 
     let func = ShFunc::new(func_parser, blame);
     write_logic(|l| l.insert_func(name, func)); // Store the AST
+    write_meta(|m| m.rehash_commands());
     Ok(())
   }
   fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
@@ -480,10 +506,10 @@ impl Dispatcher {
             state::set_status(*code);
             Ok(())
           }
-					ShErrKind::ErrInterrupt => {
-						// set -e caught an error
-						Err(e.with_context(func_body.body().context.clone()))
-					}
+          ShErrKind::ErrInterrupt => {
+            // set -e caught an error
+            Err(e.with_context(func_body.body().context.clone()))
+          }
           _ => Err(e),
         }
       } else {
@@ -899,14 +925,19 @@ impl Dispatcher {
     // Errexit check after the job has been waited on, so the status
     // reflects the actual exit code of the (possibly forked) command.
     if state::get_status() != 0
-    && !pipeline_flags.contains(NdFlags::NOT_ERR)
-    && read_shopts(|o| o.set.errexit) {
+      && !pipeline_flags.contains(NdFlags::NOT_ERR)
+      && read_shopts(|o| o.set.errexit)
+    {
       if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
         let saved_status = state::get_status();
         exec_input(trap, None, false, Some("trap ERR".to_string()))?;
         state::set_status(saved_status);
       }
-      return Err(ShErr::at(ShErrKind::ErrInterrupt, pipeline_span, "Command returned non-zero exit status"));
+      return Err(ShErr::at(
+        ShErrKind::ErrInterrupt,
+        pipeline_span,
+        "Command returned non-zero exit status",
+      ));
     }
     Ok(())
   }
@@ -1043,8 +1074,8 @@ impl Dispatcher {
       "umask" => umask_builtin(cmd),
       "seek" => seek(cmd),
       "help" => help(cmd),
-			"set" => set_builtin(cmd),
-			"msg" => msg(cmd),
+      "set" => set_builtin(cmd),
+      "msg" => msg(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -1080,9 +1111,9 @@ impl Dispatcher {
       };
       env_vars_to_unset = self.set_assignments(assignments, assign_behavior)?;
 
-			if let AssignBehavior::Set = assign_behavior {
-				state::set_status(0);
-			}
+      if let AssignBehavior::Set = assign_behavior {
+        state::set_status(0);
+      }
     }
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
@@ -1232,13 +1263,14 @@ impl Dispatcher {
       match kind {
         AssignKind::Eq => {
           if let Some((name, idx)) = indexed
-					&& let Err(e) = write_vars(|v| v.set_var_indexed(&name, idx, val.to_string(), flags)) {
-						state::set_status(1);
-						return Err(e)
-					} else if let Err(e) = write_vars(|v| v.set_var(var, val, flags)) {
-						state::set_status(1);
-						return Err(e)
-					}
+            && let Err(e) = write_vars(|v| v.set_var_indexed(&name, idx, val.to_string(), flags))
+          {
+            state::set_status(1);
+            return Err(e);
+          } else if let Err(e) = write_vars(|v| v.set_var(var, val, flags)) {
+            state::set_status(1);
+            return Err(e);
+          }
         }
         AssignKind::PlusEq => todo!(),
         AssignKind::MinusEq => todo!(),
