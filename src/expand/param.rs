@@ -23,8 +23,8 @@ pub enum ParamExp {
   AltNotNull(String),                // +
   ErrUnsetOrNull(String),            // :?
   ErrUnset(String),                  // ?
-  Substr(usize),                     // :pos
-  SubstrLen(usize, usize),           // :pos:len
+  SliceOpen(usize),                  // :pos
+  SliceClosed(usize, usize),         // :pos:len
   RemShortestPrefix(String),         // #pattern
   RemLongestPrefix(String),          // ##pattern
   RemShortestSuffix(String),         // %pattern
@@ -131,8 +131,8 @@ impl FromStr for ParamExp {
     // Substring
     if let Some((pos, len)) = parse_pos_len(s) {
       return Ok(match len {
-        Some(l) => SubstrLen(pos, l),
-        None => Substr(pos),
+        Some(l) => SliceClosed(pos, l),
+        None => SliceOpen(pos),
       });
     }
 
@@ -258,7 +258,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           Err(ShErr::simple(ShErrKind::ExecFail, expanded))
         }
       },
-      ParamExp::Substr(pos) => {
+      ParamExp::SliceOpen(pos) => {
         let value = vars.get_var(&var_name);
         if let Some(substr) = value.get(pos..) {
           Ok(substr.to_string())
@@ -266,7 +266,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           Ok(value)
         }
       }
-      ParamExp::SubstrLen(pos, len) => {
+      ParamExp::SliceClosed(pos, len) => {
         let value = vars.get_var(&var_name);
         let end = pos.saturating_add(len);
         if let Some(substr) = value.get(pos..end) {
@@ -551,13 +551,13 @@ mod tests {
   #[test]
   fn param_exp_substr() {
     let exp: ParamExp = ":2".parse().unwrap();
-    assert!(matches!(exp, ParamExp::Substr(2)));
+    assert!(matches!(exp, ParamExp::SliceOpen(2)));
   }
 
   #[test]
   fn param_exp_substr_len() {
     let exp: ParamExp = ":1:3".parse().unwrap();
-    assert!(matches!(exp, ParamExp::SubstrLen(1, 3)));
+    assert!(matches!(exp, ParamExp::SliceClosed(1, 3)));
   }
 
   // ===================== Parameter Expansion (TestGuard) =====================

@@ -24,6 +24,12 @@ pub const KEYWORDS: [&str; 17] = [
 
 pub const OPENERS: [&str; 6] = ["if", "while", "until", "for", "select", "case"];
 
+pub const MIDDLES: [&str; 2] = ["elif", "else"];
+
+pub fn not_marker(tk: &ShResult<Tk>) -> bool {
+	tk.is_err() || !tk.as_ref().is_ok_and(|tk| matches!(tk.class, TkRule::SOI | TkRule::EOI))
+}
+
 /// Used to track whether the lexer is currently inside a quote, and if so, which type
 #[derive(Default, Debug)]
 pub enum QuoteState {
@@ -223,6 +229,10 @@ impl Tk {
       || matches!(self.class, TkRule::BraceGrpStart)
       || matches!(self.class, TkRule::CasePattern)
   }
+	pub fn is_middle(&self) -> bool {
+		MIDDLES.contains(&self.as_str())
+	}
+
   pub fn is_closer(&self) -> bool {
     matches!(self.as_str(), "fi" | "done" | "esac")
       || self.has_double_semi()

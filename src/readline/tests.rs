@@ -527,3 +527,32 @@ fn vi_auto_indent() {
     "func() {\n\tcase foo in\n\t\tbar)\n\t\t\twhile true; do\n\t\t\t\techo foo \\\n\t\t\t\tbar \\\n\t\t\t\tbiz \\\n\t\t\t\tbazz\n\t\t\t\tbreak\n\t\t\tdone\n\t\t;;\n\tesac\n}"
   );
 }
+
+#[test]
+fn vi_auto_indent_siblings() {
+  let (mut vi, _g) = test_vi("");
+
+  // Type each line and press Enter separately so auto-indent triggers
+  let lines = [
+		"if foo; then",
+			"echo foo",
+			"elif bar; then",
+			"echo biz",
+			"else",
+			"echo bar",
+			"fi"
+  ];
+
+  for (i, line) in lines.iter().enumerate() {
+    vi.feed_bytes(line.as_bytes());
+    if i != lines.len() - 1 {
+      vi.feed_bytes(b"\r");
+    }
+    vi.process_input().unwrap();
+  }
+
+  assert_eq!(
+    vi.editor.joined(),
+    "if foo; then\n\techo foo\nelif bar; then\n\techo biz\nelse\n\techo bar\nfi"
+  );
+}

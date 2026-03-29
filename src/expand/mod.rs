@@ -358,9 +358,9 @@ mod tests {
     })
     .unwrap();
 
-    test_input("echo $echo ${var:-${arr[$(($(echo ${i[0]}) + 1))]}}").unwrap();
+    test_input("echo $echo ${var:-${arr[$(($(echo ${i[@]:1:1}) + 1))]}}").unwrap();
 
     let out = guard.read_output();
-    assert_eq!(out, "bar\n");
+    assert_eq!(out, "biz\n");
   }
 }

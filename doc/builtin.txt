@@ -1,0 +1,188 @@
+*builtin* *builtins*
+
+#BUILTINS#
+
+This page documents shed's builtin commands.
+
+==============================================================================
+MAP                                              *map* *maps*
+
+Maps are shell-native tree structures for associating keys with values.
+They support nested paths, dynamic evaluation, arrays, and JSON
+serialization. Maps are particularly useful for building completion
+trees, configuration hierarchies, and structured data.
+
+1. Setting Values ~
+
+  `map {name}.{path}={value}`
+
+  Assign {value} to the node at {path} within map {name}. Intermediate
+  branches are created automatically if they do not exist.
+
+  Examples:
+
+      `map colors.red=#ff0000`
+      `map config.editor.theme=dark`
+      `map git.remote.origin=https://github.com/user/repo`
+
+  If the map {name} does not yet exist, it is created.
+
+  Dynamic Leaves                                 *map-dynamic*
+
+  `-F`
+
+      Mark the value as a dynamic leaf. Instead of storing a static
+      string, the value is treated as a command and evaluated via
+      command substitution each time the leaf is read.
+
+      `map -F git.branches='git branch --format="%(refname:short)"'`
+
+      Each time `map git.branches` is accessed, the command runs and
+      returns fresh output. This is ideal for completion candidates
+      that change over time (branches, tags, containers, etc.).
+
+  JSON Import                                    *map-json*
+
+  `-j`
+
+      Parse the value as JSON. Objects become branches, arrays become
+      array nodes, and strings become static leaves.
+
+      `map -j mymap='{"key": "val", "nested": {"a": 1}}'`
+
+  Local Scope                                    *map-local*
+
+  `-l`
+
+      Create the map in the current scope only. It is removed when the
+      scope exits (e.g. when a function returns).
+
+      `map -l scratch.tmp=working`
+
+2. Reading Values ~
+
+  `map {name}`
+  `map {name}.{path}`
+
+  Print the value at the given path. If the node is a branch, the
+  output is JSON. If it is a static leaf, the raw string is printed.
+  If it is a dynamic leaf, the stored command is evaluated and its
+  output is printed.
+
+  Options:
+
+    `-j`         Force JSON output even for leaf nodes.
+    `--pretty`   Pretty-print JSON output with indentation.
+    `-k`         Print only the keys of the node (children of a branch,
+                 or elements of an array).
+
+  Examples:
+
+      `map config.editor.theme`       # prints: dark
+      `map -j config`                 # prints full JSON tree
+      `map --pretty config`           # prints indented JSON
+      `map -k config.editor`          # prints keys under editor
+
+3. Removing Values ~
+
+  `map -r {name}`
+  `map -r {name}.{path}`
+
+  Remove the node at the given path. If only {name} is given, the
+  entire map is removed. If a path is given, only that subtree is
+  removed; parent branches are preserved.
+
+4. Node Types ~
+                                                 *map-nodes*
+
+  `Branch`         A named collection of child nodes. Accessed by
+                   string keys via dot-path notation.
+
+  `Array`          An ordered list of child nodes. Accessed by numeric
+                   index via dot-path notation.
+
+  `StaticLeaf`     A string value, returned as-is when read.
+
+  `DynamicLeaf`    A command string, evaluated via command substitution
+                   when read. Created with `-F`.
+
+  Leaf nodes are automatically promoted to branches when a sub-path is
+  set beneath them.
+
+5. Paths ~
+                                                 *map-paths*
+
+  Paths use `.` as a separator. Each segment is a key into the current
+  node. For branches, the segment is a string key. For arrays, it is
+  a numeric index.
+
+      `map data.users.0.name=alice`
+      `map data.users.1.name=bob`
+      `map data.users.0.name`          # prints: alice
+
+  Path segments are expanded before lookup, so variables work:
+
+      `map mymap.$key=value`
+
+6. Completion Trees ~
+                                                 *map-completion*
+
+  Maps are well-suited for defining completion hierarchies. Combine
+  static branches for subcommands with dynamic leaves for
+  context-sensitive candidates:
+
+      `map -F git.checkout='git branch --format="%(refname:short)"'`
+      `map -F git.switch='git branch --format="%(refname:short)"'`
+      `map git.remote.add=`
+      `map -F git.remote.remove='git remote'`
+      `map git.commit=`
+      `map git.push=`
+
+      `map -k git`                 # checkout switch merge remote ...
+      `map git.checkout`           # evaluates: git branch ...
+
+  Wildcard Keys                                  *map-wildcard*
+
+  Use `%` as a path segment to create a wildcard key. A wildcard
+  matches any key that does not have an exact static match, allowing
+  trees to describe commands with freeform arguments (filenames,
+  branch names, etc.) that have further structure beneath them.
+
+      `map git.checkout.%.--force=`
+      `map git.checkout.%.--track=`
+
+      `map -k git.checkout.my-branch`   # --force --track
+
+  When `-k` is used on a leaf node (no children), the value is
+  printed instead of keys and the exit status is set to 1. This
+  allows traversal loops to detect the end of a path:
+
+      while keys=$(map -k $path); do
+          # pick next key, continue traversal
+          path="$path.$key"
+      done
+      # loop exited: $keys holds the leaf value
+
+7. JSON Interop ~
+                                                 *map-json-interop*
+
+  Maps can be imported from and exported to JSON:
+
+      `map -j tree='{"bin":{"ls":{},"cat":{}},"etc":{}}'`
+      `map --pretty tree`
+
+  This allows completion trees and configuration maps to be stored in
+  files or generated by external tools.
+
+8. Options Summary ~
+                                                 *map-options*
+
+  `-r`         Remove the specified node or entire map
+  `-k`         Print only the keys of a node
+  `-j`         Parse value as JSON (set) or force JSON output (read)
+  `--pretty`   Pretty-print JSON output
+  `-F`         Store value as a dynamic leaf (command evaluated on read)
+  `-l`         Create map in local scope only
+
+==============================================================================
+See also: |autocmd| |param|

@@ -1,6 +1,8 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
+use scopeguard::defer;
+
 use crate::expand::util::is_var_name_ch;
 use crate::parse::lex::is_hard_sep;
 use crate::prelude::*;
@@ -488,33 +490,31 @@ pub fn unescape_heredoc(raw: &str) -> String {
 pub fn escape_str(raw: &str, use_marker: bool) -> String {
   let mut result = String::new();
   let mut chars = raw.chars();
+	let mut is_first = true;
+	let esc_ch = if use_marker { markers::ESCAPE } else { '\\' };
 
   while let Some(ch) = chars.next() {
     match ch {
       '\'' | '"' | '\\' | '|' | '&' | ';' | '(' | ')' | '<' | '>' | '$' | '*' | '!' | '`' | '{'
       | '?' | '[' | '#' | ' ' | '\t' | '\n' => {
-        if use_marker {
-          result.push(markers::ESCAPE);
-        } else {
-          result.push('\\');
-        }
+				if ch == '$' && is_first {
+					// TODO: Find a less hacky way to prevent completed variables from being escaped
+					result.push('$');
+					is_first = false;
+					continue;
+				}
+				result.push(esc_ch);
         result.push(ch);
-        continue;
       }
       '~' if result.is_empty() => {
-        if use_marker {
-          result.push(markers::ESCAPE);
-        } else {
-          result.push('\\');
-        }
+				result.push(esc_ch);
         result.push(ch);
-        continue;
       }
       _ => {
         result.push(ch);
-        continue;
       }
     }
+		is_first = false;
   }
 
   result

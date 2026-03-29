@@ -855,6 +855,7 @@ impl VarFlags {
 pub enum ArrIndex {
   Literal(usize),
   FromBack(usize),
+	Slice(usize, Option<usize>),
   ArgCount,
   AllJoined,
   AllSplit,

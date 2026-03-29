@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
@@ -10,18 +10,52 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{
     NdRule, Node,
-    lex::{split_tk, split_tk_at},
+    lex::{self, LexFlags, LexStream, split_tk, split_tk_at},
   },
   procio::borrow_fd,
   state::{self, read_vars, write_vars},
 };
+
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
+pub enum BranchKey {
+	Static(String),
+	Wild
+}
+
+impl From<BranchKey> for String {
+	fn from(val: BranchKey) -> Self {
+		match val {
+			BranchKey::Static(s) => s,
+			BranchKey::Wild => "%".to_string(),
+		}
+	}
+}
+
+impl From<String> for BranchKey {
+	fn from(s: String) -> Self {
+		if s == "%" {
+			BranchKey::Wild
+		} else {
+			BranchKey::Static(s)
+		}
+	}
+}
+
+impl Display for BranchKey {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			BranchKey::Static(s) => write!(f, "{}", s),
+			BranchKey::Wild => write!(f, "%"),
+		}
+	}
+}
 
 #[derive(Debug, Clone)]
 pub enum MapNode {
   DynamicLeaf(String), // eval'd on access
   StaticLeaf(String),  // static value
   Array(Vec<MapNode>),
-  Branch(HashMap<String, MapNode>),
+  Branch(HashMap<BranchKey, MapNode>),
 }
 
 impl Default for MapNode {
@@ -36,7 +70,7 @@ impl From<MapNode> for serde_json::Value {
       MapNode::Branch(map) => {
         let val_map = map
           .into_iter()
-          .map(|(k, v)| (k, v.into()))
+          .map(|(k, v)| (k.into(), v.into()))
           .collect::<Map<String, Value>>();
 
         Value::Object(val_map)
@@ -56,8 +90,8 @@ impl From<Value> for MapNode {
       Value::Object(map) => {
         let node_map = map
           .into_iter()
-          .map(|(k, v)| (k, v.into()))
-          .collect::<HashMap<String, MapNode>>();
+          .map(|(k, v)| (k.into(), v.into()))
+          .collect::<HashMap<BranchKey, MapNode>>();
 
         MapNode::Branch(node_map)
       }
@@ -81,7 +115,9 @@ impl MapNode {
           let idx: usize = key.parse().ok()?;
           map_nodes.get(idx)?.get(rest)
         }
-        MapNode::Branch(map) => map.get(key)?.get(rest),
+        MapNode::Branch(map) => {
+					map.get(&BranchKey::Static(key.to_string())).or_else(|| map.get(&BranchKey::Wild))?.get(rest)
+				}
       },
     }
   }
@@ -96,7 +132,8 @@ impl MapNode {
         }
         match self {
           MapNode::Branch(map) => {
-            let child = map.entry(key.to_string()).or_insert_with(Self::default);
+						let bkey = BranchKey::from(key.to_string());
+            let child = map.entry(bkey).or_insert_with(Self::default);
             child.set(rest, value);
           }
           MapNode::Array(map_nodes) => {
@@ -116,7 +153,7 @@ impl MapNode {
     match path {
       [] => None,
       [key] => match self {
-        MapNode::Branch(map) => map.remove(key),
+        MapNode::Branch(map) => map.remove(&BranchKey::Static(key.into())),
         MapNode::Array(nodes) => {
           let idx: usize = key.parse().ok()?;
           if idx >= nodes.len() {
@@ -127,7 +164,15 @@ impl MapNode {
         _ => None,
       },
       [key, rest @ ..] => match self {
-        MapNode::Branch(map) => map.get_mut(key)?.remove(rest),
+        MapNode::Branch(map) => {
+					if let Some(child) = map.get_mut(&BranchKey::Static(key.into())) {
+						child.remove(rest)
+					} else if let Some(child) = map.get_mut(&BranchKey::Wild) {
+						child.remove(rest)
+					} else {
+						None
+					}
+				}
         MapNode::Array(nodes) => {
           let idx: usize = key.parse().ok()?;
           if idx >= nodes.len() {
@@ -249,6 +294,7 @@ pub fn map(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
+  state::set_status(0);
   let (mut argv, opts) = get_opts_from_tokens_raw(argv, &map_opts_spec())?;
   let map_opts = get_map_opts(opts);
   if !argv.is_empty() {
@@ -270,6 +316,7 @@ pub fn map(node: Node) -> ShResult<()> {
 
       let is_json = map_opts.flags.contains(MapFlags::JSON);
       let is_func = map_opts.flags.contains(MapFlags::FUNC);
+			let is_arr = rhs.as_str().starts_with('(') && rhs.as_str().ends_with(')');
       let make_leaf = |s: String| {
         if is_func {
           MapNode::DynamicLeaf(s)
@@ -277,37 +324,44 @@ pub fn map(node: Node) -> ShResult<()> {
           MapNode::StaticLeaf(s)
         }
       };
-      let expanded = rhs.expand()?.get_words().join(" ");
-      let found = write_vars(|v| -> ShResult<bool> {
-        if let Some(map) = v.get_map_mut(name) {
-          if is_json {
-            if let Ok(parsed) = serde_json::from_str::<Value>(expanded.as_str()) {
-              map.set(&path[1..], parsed.into());
-            } else {
-              map.set(&path[1..], make_leaf(expanded.clone()));
-            }
-          } else {
-            map.set(&path[1..], make_leaf(expanded.clone()));
-          }
-          Ok(true)
-        } else {
-          Ok(false)
-        }
-      });
+			let expanded = if is_json {
+				serde_json::from_str::<Value>(rhs.as_str())
+					.map_err(|e| ShErr::simple(
+						ShErrKind::InternalErr,
+						format!("failed to parse JSON: {e}"),
+					))?.into()
+			} else if is_arr {
+				let raw = rhs.as_str();
+				let raw = raw[1..raw.len() - 1].to_string();
+				let tokens = LexStream::new(Arc::new(raw), LexFlags::empty())
+					.filter(lex::not_marker)
+					.try_fold(vec![],
+						|mut acc, tk| -> ShResult<Vec<MapNode>> {
+							for word in tk?.expand()?.get_words() {
+								acc.push(make_leaf(word));
+							}
+							Ok(acc)
+						}
+					)?;
 
-      if !found? {
-        let mut new = MapNode::default();
-        if is_json
-        /*&& let Ok(parsed) = serde_json::from_str::<Value>(rhs.as_str()) */
-        {
-          let parsed = serde_json::from_str::<Value>(expanded.as_str()).unwrap();
-          let node: MapNode = parsed.into();
-          new.set(&path[1..], node);
-        } else {
-          new.set(&path[1..], make_leaf(expanded));
-        }
-        write_vars(|v| v.set_map(name, new, map_opts.flags.contains(MapFlags::LOCAL)));
-      }
+				MapNode::Array(tokens)
+			} else {
+				make_leaf(rhs.expand()?.get_words().join(" "))
+			};
+			let found = write_vars(|v| -> ShResult<bool> {
+				if let Some(map) = v.get_map_mut(name) {
+					map.set(&path[1..], expanded.clone());
+					Ok(true)
+				} else {
+					Ok(false)
+				}
+			});
+
+			if !found? {
+				let mut new = MapNode::default();
+				new.set(&path[1..], expanded);
+				write_vars(|v| v.set_map(name, new, map_opts.flags.contains(MapFlags::LOCAL)));
+			}
     } else {
       let expanded = arg.expand()?.get_words().join(" ");
       let path: Vec<String> = expanded.split('.').map(|s| s.to_string()).collect();
@@ -352,10 +406,16 @@ pub fn map(node: Node) -> ShResult<()> {
         state::set_status(1);
         continue;
       };
-      let output = if keys {
-        node.keys().join(" ")
-      } else {
+      let output = if !keys {
         node.display(json, pretty)?
+      } else {
+				let k = node.keys();
+				if k.is_empty() {
+					state::set_status(1);
+					node.display(json, pretty)?
+				} else {
+					k.join(" ")
+				}
       };
 
       let stdout = borrow_fd(STDOUT_FILENO);
@@ -364,7 +424,6 @@ pub fn map(node: Node) -> ShResult<()> {
     }
   }
 
-  state::set_status(0);
   Ok(())
 }
 

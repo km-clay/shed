@@ -1,6 +1,4 @@
-use std::{env, io::Write, path::Path};
-
-use ariadne::Span as ASpan;
+use std::{env, io::Write, path::{Path, PathBuf}};
 
 use crate::{
   builtin::join_raw_arg_iter,
@@ -11,7 +9,7 @@ use crate::{
   parse::{
     NdRule, Node,
     execute::{exec_input, prepare_argv},
-    lex::{QuoteState, Span},
+    lex::QuoteState,
   },
   readline::{complete::ScoredCandidate, markers},
   state,
@@ -75,43 +73,43 @@ pub fn help(node: Node) -> ShResult<()> {
   }
 
   // didn't find a filename match, its probably a tag search
+	let mut tags = vec![];
   for path in hpath.split(':') {
     let path = Path::new(path);
     if let Ok(entries) = path.read_dir() {
       for entry in entries {
         let Ok(entry) = entry else { continue };
         let path = entry.path();
-        let filename = path.file_stem().unwrap().to_string_lossy().to_string();
-
         if !path.is_file() {
           continue;
         }
 
-        let Ok(contents) = std::fs::read_to_string(&path) else {
-          continue;
-        };
-
-        let unescaped = unescape_help(&contents);
-        let expanded = expand_help(&unescaped);
-        let tags = read_tags(&expanded);
-
-        for (_tag, _line) in &tags {}
-
-        if let Some((_matched_tag, line)) = get_best_match(&topic, &tags) {
-          open_help(&expanded, Some(line), Some(filename))?;
-          state::set_status(0);
-          return Ok(());
-        }
+        let mut new_tags = read_tags(&path)?;
+				score_matches(&topic, &mut new_tags);
+				tags.append(&mut new_tags);
       }
     }
   }
 
-  state::set_status(1);
-  Err(ShErr::at(
-    ShErrKind::NotFound,
-    span,
-    "No relevant help page found for this topic",
-  ))
+	tags.sort_by_key(|t| t.score());
+	log::debug!("tags: {tags:#?}");
+	if let Some(best) = tags.last() {
+		let ScoredTag { tag: _, line, file } = best;
+		let file_name = file.file_stem().map(|s| s.to_string_lossy().to_string());
+		let contents = std::fs::read_to_string(file)?;
+		let expanded = expand_help(&unescape_help(&contents));
+		open_help(&expanded, Some(*line), file_name)?;
+
+		state::set_status(0);
+		Ok(())
+	} else {
+		state::set_status(1);
+		Err(ShErr::at(
+			ShErrKind::NotFound,
+			span,
+			"No relevant help page found for this topic",
+		))
+	}
 }
 
 pub fn open_help(content: &str, line: Option<usize>, file_name: Option<String>) -> ShResult<()> {
@@ -136,25 +134,38 @@ pub fn open_help(content: &str, line: Option<usize>, file_name: Option<String>) 
   })
 }
 
-pub fn get_best_match(topic: &str, tags: &[(String, usize)]) -> Option<(String, usize)> {
-  let mut candidates: Vec<_> = tags
-    .iter()
-    .map(|(tag, line)| (ScoredCandidate::new(tag.into()), *line))
-    .collect();
-
-  for (cand, _) in candidates.iter_mut() {
-    cand.fuzzy_score(topic);
-  }
-
-  candidates.retain(|(c, _)| c.score.unwrap_or(i32::MIN) > i32::MIN);
-  candidates.sort_by_key(|(c, _)| c.score.unwrap_or(i32::MIN));
-
-  candidates
-    .first()
-    .map(|(c, line)| (c.candidate.content().to_string(), *line))
+#[derive(Debug)]
+pub struct ScoredTag {
+	tag: ScoredCandidate,
+	line: usize,
+	file: PathBuf
 }
 
-pub fn read_tags(raw: &str) -> Vec<(String, usize)> {
+impl ScoredTag {
+	pub fn new<P: AsRef<Path>>(tag: ScoredCandidate, line: usize, file: P) -> Self {
+		Self { tag, line, file: file.as_ref().to_path_buf() }
+	}
+	pub fn fuzzy_score(&mut self, topic: &str) {
+		self.tag.fuzzy_score(topic);
+	}
+	pub fn score(&self) -> i32 {
+		self.tag.score.unwrap_or(i32::MIN)
+	}
+}
+
+pub fn score_matches(topic: &str, tags: &mut Vec<ScoredTag>) {
+  for tag in tags.iter_mut() {
+    tag.fuzzy_score(topic);
+  }
+
+  tags.retain(|c| c.score() > i32::MIN);
+}
+
+pub fn read_tags(path: &Path) -> ShResult<Vec<ScoredTag>> {
+	let contents = std::fs::read_to_string(path)?;
+
+	let unescaped = unescape_help(&contents);
+	let raw = expand_help(&unescaped);
   let mut tags = vec![];
 
   for (line_num, line) in raw.lines().enumerate() {
@@ -163,8 +174,12 @@ pub fn read_tags(raw: &str) -> Vec<(String, usize)> {
     while let Some(pos) = rest.find(TAG_SEQ) {
       let after_seq = &rest[pos + TAG_SEQ.len()..];
       if let Some(end) = after_seq.find(RESET_SEQ) {
-        let tag = &after_seq[..end];
-        tags.push((tag.to_string(), line_num + 1));
+				let tag = ScoredTag {
+					tag: ScoredCandidate::new(after_seq[..end].into()).with_len_penalty(true),
+					line: line_num + 1,
+					file: path.to_path_buf()
+				};
+        tags.push(tag);
         rest = &after_seq[end + RESET_SEQ.len()..];
       } else {
         break;
@@ -172,7 +187,7 @@ pub fn read_tags(raw: &str) -> Vec<(String, usize)> {
     }
   }
 
-  tags
+  Ok(tags)
 }
 
 pub fn expand_help(raw: &str) -> String {

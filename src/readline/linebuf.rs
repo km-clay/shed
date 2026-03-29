@@ -458,6 +458,12 @@ impl IndentCtx {
     self.depth += 1;
   }
 
+	pub fn swap_top(&mut self, tk: Tk) {
+		if let Some(top) = self.ctx.last_mut() {
+			*top = tk;
+		}
+	}
+
   pub fn ascend(&mut self) {
     self.depth = self.depth.saturating_sub(1);
     self.ctx.pop();
@@ -474,6 +480,16 @@ impl IndentCtx {
       self.ascend();
     }
   }
+
+	pub fn is_sibling(&self, other: &str) -> bool {
+		let Some(last) = self.ctx.last() else { return false; };
+		let last = last.as_str();
+		if last == "if" || last == "elif" {
+			other == "elif" || other == "else"
+		} else {
+			false
+		}
+	}
 
   pub fn calculate(&mut self, input: &str) -> usize {
     self.depth = 0;
@@ -955,12 +971,6 @@ impl LineBuf {
       unreachable!()
     };
     if !joined.trim_end().ends_with(sep.trim()) {
-      log::debug!(
-        "Adding separator '{}' between '{}' and '{}'",
-        sep,
-        joined,
-        other
-      );
       new_first.insert_str(0, sep);
     }
     let splice_pos = Pos {
@@ -971,7 +981,6 @@ impl LineBuf {
     last.append(&mut first);
     self.lines.extend(new_lines);
     self.concat_points.push_back(splice_pos);
-    log::debug!("final buffer: '{}'", self.joined());
   }
   fn push_str(&mut self, s: &str) {
     let mut lines = to_lines(s);
@@ -1770,12 +1779,6 @@ impl LineBuf {
   }
   fn eval_motion_inner(&mut self, cmd: &ViCmd, check_hint: bool) -> Option<MotionKind> {
     let ViCmd { verb, motion, .. } = cmd;
-    log::debug!(
-      "verb: {:?}, motion: {:?}, check_hint: {}",
-      verb,
-      motion,
-      check_hint
-    );
     let MotionCmd(count, motion) = motion.as_ref()?;
     let buffer = self.lines.clone();
     if let Some(mut hint) = self.hint.clone() {
@@ -2479,7 +2482,19 @@ impl LineBuf {
         Anchor::Before => {
           let row = self.row();
           self.lines.insert(row, Line::default());
-          self.cursor.pos = Pos { row, col: 0 };
+
+					let level = self.calc_indent_level_for_pos(Pos {
+						row,
+						col: 0
+					});
+					let line = self.line_mut(row);
+					let mut col = 0;
+					for tab in std::iter::repeat_n(Grapheme::from('\t'), level) {
+						line.insert(0, tab);
+						col += 1;
+					}
+
+          self.cursor.pos = Pos { row, col };
         }
       },
       Verb::SwapVisualAnchor => {
@@ -2535,9 +2550,16 @@ impl LineBuf {
         if let Some(motion) = self.eval_motion(cmd) {
           self.apply_motion(motion)?;
         }
-        let new_level = self.calc_indent_level();
-        if new_level < level {
-          let delta = level - new_level;
+        let mut new_level = self.calc_indent_level();
+				let line = self.cur_line().to_string();
+				let trimmed = line.trim();
+				let is_sibling = self.indent_ctx.is_sibling(trimmed);
+
+        if new_level < level
+				|| is_sibling {
+					if is_sibling { new_level = new_level.saturating_sub(1) };
+
+          let delta = level.saturating_sub(new_level);
           let line = self.cur_line_mut();
           for _ in 0..delta {
             if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
