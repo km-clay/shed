@@ -361,6 +361,11 @@
                 default = true;
                 description = "Whether to automatically indent new lines based on the previous line";
               };
+              hist_cat = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to enable the history concatenation feature. Ctrl/Shift+Up/Down joins sequential commands in history.";
+              };
             };
           };
           default = {};

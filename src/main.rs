@@ -259,8 +259,6 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
   readline.writer.flush_write("\x1b[?2004h")?; // enable bracketed paste mode
 
-  let mut screensaver_deadline: Option<Instant> = None;
-
   // Main poll loop
   loop {
     write_meta(|m| {
@@ -321,36 +319,31 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
     let mut exec_if_timeout = None;
 
-    let timeout = if readline.pending_keymap.is_empty() {
+    let timeout = if !readline.pending_keymap.is_empty() {
+      PollTimeout::from(1000u16)
+    } else {
       let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone())
         .trim()
         .to_string();
       let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
-      if screensaver_idle_time > 0 && !screensaver_cmd.is_empty() {
-        exec_if_timeout = Some(screensaver_cmd);
-        if screensaver_deadline.is_none() {
-          screensaver_deadline =
-            Some(Instant::now() + Duration::from_secs(screensaver_idle_time as u64));
-        }
-        // We unfortunately cant just set the PollTimeout to use 'idle_time * 1000' as the timeout
-        // because u16 overflows after 65 seconds (65535 ms).
-        // So we set a one second timeout and check against the Instant in 'screensaver_deadline'
-        PollTimeout::from(1000u16)
-      } else {
-        screensaver_deadline = None;
-        PollTimeout::MAX
-      }
-    } else {
-      PollTimeout::from(1000u16)
+      if screensaver_idle_time == 0 || screensaver_cmd.is_empty() {
+        PollTimeout::NONE
+			} else {
+				exec_if_timeout = Some(screensaver_cmd);
+				match PollTimeout::try_from((screensaver_idle_time * 1000) as i32) {
+					Ok(timeout) => {
+						log::debug!("got timeout {timeout:?}");
+						timeout
+					},
+					Err(_) => PollTimeout::NONE
+				}
+			}
     };
 
     match poll(&mut fds, timeout) {
       Ok(0) => {
         // We timed out. Check if there's a screensaver command
-        if let Some(cmd) = exec_if_timeout
-          && screensaver_deadline.is_some_and(|d| Instant::now() >= d)
-        {
-          screensaver_deadline = None;
+        if let Some(cmd) = exec_if_timeout {
           let prepared = ReadlineEvent::Line(cmd.clone());
           let _guard = scopeguard::guard(read_shopts(|o| o.core.auto_hist), |opt| {
             // restores old auto_hist value
@@ -442,7 +435,6 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
         }
         Ok(n) => {
           readline.feed_bytes(&buffer[..n]);
-          screensaver_deadline = None;
         }
         Err(Errno::EINTR) => {
           // Interrupted, continue to handle signals
