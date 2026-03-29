@@ -34,21 +34,14 @@ use crate::{
     test::double_bracket_test,
     trap::{TrapTarget, trap},
     varcmds::{export, local, readonly, unset},
-  },
-  expand::{expand_aliases, expand_case_pattern, glob_to_regex},
-  jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
-  libsh::{
+  }, expand::{expand_aliases, expand_case_pattern, glob_to_regex}, jobs::{ChildProc, JobStack, attach_tty, dispatch_job}, libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
     guards::{scope_guard, var_ctx_guard},
     utils::RedirVecUtils,
-  },
-  prelude::*,
-  procio::{IoMode, IoStack, PipeGenerator},
-  signal::{check_signals, signals_pending},
-  state::{
+  }, prelude::*, procio::{IoMode, IoStack, PipeGenerator, borrow_fd}, shopt::xtrace_print, signal::{check_signals, signals_pending}, state::{
     self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_meta,
     write_vars,
-  },
+  }
 };
 
 use super::{
@@ -275,11 +268,7 @@ impl Dispatcher {
       check_signals()?;
     }
     let flags = node.flags;
-    let span = node.get_span().clone();
 
-    if self.interactive {
-      log::debug!("status before executing node: {}", state::get_status());
-    }
     let result = match node.class {
       NdRule::Conjunction { .. } => self.exec_conjunction(node),
       NdRule::Pipeline { .. } => self.exec_pipeline(node),
@@ -294,9 +283,6 @@ impl Dispatcher {
       NdRule::Test { .. } => self.exec_test(node),
       _ => unreachable!(),
     };
-    if self.interactive {
-      log::debug!("status after executing node: {}", state::get_status());
-    }
 
     if let Err(mut e) = result {
       if e.is_flow_control() {
@@ -367,9 +353,17 @@ impl Dispatcher {
     Ok(())
   }
   pub fn exec_conjunction(&mut self, conjunction: Node) -> ShResult<()> {
+		let span = conjunction.get_span().clone();
     let NdRule::Conjunction { elements } = conjunction.class else {
       unreachable!()
     };
+
+		if read_shopts(|o| o.set.verbose) {
+			let stderr = borrow_fd(STDERR_FILENO);
+			let command = span.as_str().to_string();
+			write(stderr, command.as_bytes()).ok();
+			write(stderr, b"\n").ok();
+		}
 
     let mut elem_iter = elements.into_iter();
     let mut skip = false;
@@ -486,16 +480,17 @@ impl Dispatcher {
     }
 
     let env_vars = self.set_assignments(assignments, AssignBehavior::Export)?;
-    let func_name = argv.remove(0).to_string();
+    let func_name = argv.remove(0);
     let _var_guard = var_ctx_guard(env_vars.into_iter().collect());
 
     self.io_stack.append_to_frame(func.redirs);
 
-    blame.rename(func_name.clone());
+		let name = func_name.as_str().to_string();
+    blame.rename(name.clone());
 
-    let mut argv = prepare_argv(argv).try_blame(blame.clone())?;
-    argv.insert(0, (func_name.clone(), blame.clone()));
-    let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&func_name)) {
+    argv.insert(0, func_name.clone());
+    let argv = prepare_argv(argv).try_blame(blame.clone())?;
+    let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&name)) {
       let _guard = scope_guard(Some(argv));
       func_body.body_mut().propagate_context(func_ctx);
       func_body.body_mut().flags = func.flags;
@@ -1291,12 +1286,16 @@ pub fn prepare_argv(argv: Vec<Tk>) -> ShResult<Vec<(String, Span)>> {
   let mut args = vec![];
 
   for arg in argv {
+		log::debug!("Preparing argv arg: {:?}", arg);
     let span = arg.span.clone();
     let expanded = arg.expand()?;
     for exp in expanded.get_words() {
+			log::debug!("Expanded argv word: {}", exp);
       args.push((exp, span.clone()))
     }
   }
+
+	xtrace_print(&args);
   Ok(args)
 }
 

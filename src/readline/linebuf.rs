@@ -38,6 +38,9 @@ use crate::{
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// A single grapheme. Graphemes can be composed of multiple chars, but are always treated as a single unit for display and editing purposes.
+/// Using a SmallVec<[char; 4]> allows us to organize most multi-byte codepoints while maintaining both ownership and stack allocation.
+/// If we ever run into a Grapheme made of more than 4 chars, just that Grapheme will gracefully spill over onto the heap
 pub struct Grapheme(SmallVec<[char; 4]>);
 
 impl Grapheme {
@@ -52,15 +55,18 @@ impl Grapheme {
   pub fn is_lf(&self) -> bool {
     self.is_char('\n')
   }
-  /// Returns true if the Grapheme consists of exactly one char and that char is `c`
+  /// Returns true if the Grapheme consists of exactly one char and that char is equal to `c`
   pub fn is_char(&self, c: char) -> bool {
     self.0.len() == 1 && self.0[0] == c
   }
   /// Returns the CharClass of the Grapheme, which is determined by the properties of its chars
+	/// Used for things like word motions
   pub fn class(&self) -> CharClass {
     CharClass::from(self)
   }
 
+	/// If the Grapheme consists of exactly one char, returns that char. Otherwise, returns None.
+	/// All callsites that use this method operate on ascii, so never returning anything for multibyte sequences is fine.
   pub fn as_char(&self) -> Option<char> {
     if self.0.len() == 1 {
       Some(self.0[0])
@@ -69,7 +75,7 @@ impl Grapheme {
     }
   }
 
-  /// Returns true if the Grapheme is classified as whitespace (i.e. all chars are whitespace)
+  /// Returns true if the Grapheme is classified as whitespace
   pub fn is_ws(&self) -> bool {
     self.class() == CharClass::Whitespace
   }

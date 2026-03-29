@@ -1,8 +1,27 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use nix::{libc::STDERR_FILENO, unistd::write};
+
+use crate::{libsh::error::{ShErr, ShErrKind, ShResult}, parse::lex::Span, procio::borrow_fd, state::{read_shopts, read_vars}};
 
 const SPECIAL_CHARS: &str = "#$^*()=|{}[]`<>?~;& '\"";
+
+pub fn xtrace_print(argv: &[(String,Span)]) {
+	if read_shopts(|o| o.set.xtrace) {
+		let words = argv
+			.iter()
+			.map(|(s,_)| s.to_string())
+			.collect::<Vec<String>>();
+
+		let stderr = borrow_fd(STDERR_FILENO);
+		let depth = read_vars(|v| v.depth());
+		let prefix = "+".repeat((depth as usize) + 1);
+		let output = format!("{prefix} {}", words.join(" "));
+		log::debug!("xtrace: {output:?}");
+		write(stderr, output.trim().as_bytes()).ok();
+		write(stderr, b"\n").ok();
+	}
+}
 
 /// Escapes a string for displaying as a var value
 pub fn as_var_val_display(s: &str) -> String {

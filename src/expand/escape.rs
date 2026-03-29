@@ -33,365 +33,272 @@ pub fn unescape_str(raw: &str) -> String {
           result.push(next_ch)
         }
       }
-      '(' => {
-        result.push(markers::SUBSH);
-        let mut paren_count = 1;
-        while let Some(subsh_ch) = chars.next() {
-          match subsh_ch {
-            '\\' => {
-              result.push(subsh_ch);
-              if let Some(next_ch) = chars.next() {
-                result.push(next_ch)
-              }
-            }
-            '$' if chars.peek() != Some(&'(') => result.push(markers::VAR_SUB),
-            '(' => {
-              paren_count += 1;
-              result.push(subsh_ch)
-            }
-            ')' => {
-              paren_count -= 1;
-              if paren_count == 0 {
-                result.push(markers::SUBSH);
-                break;
-              } else {
-                result.push(subsh_ch)
-              }
-            }
-            _ => result.push(subsh_ch),
-          }
-        }
-      }
-      '"' => {
-        result.push(markers::DUB_QUOTE);
-        while let Some(q_ch) = chars.next() {
-          match q_ch {
-            '\\' => {
-              if let Some(next_ch) = chars.next() {
-                match next_ch {
-                  '"' | '\\' | '`' | '$' | '!' => {
-                    // discard the backslash
-                  }
-                  _ => {
-                    result.push(q_ch);
-                  }
-                }
-                result.push(next_ch);
-              }
-            }
-            '$' if chars.peek() != Some(&'\'') => {
-              result.push(markers::VAR_SUB);
-              if chars.peek() == Some(&'(') {
-                chars.next();
-                let mut paren_count = 1;
-                result.push(markers::SUBSH);
-                while let Some(subsh_ch) = chars.next() {
-                  match subsh_ch {
-                    '\\' => {
-                      result.push(subsh_ch);
-                      if let Some(next_ch) = chars.next() {
-                        result.push(next_ch)
-                      }
-                    }
-                    '(' => {
-                      result.push(subsh_ch);
-                      paren_count += 1;
-                    }
-                    ')' => {
-                      paren_count -= 1;
-                      if paren_count <= 0 {
-                        result.push(markers::SUBSH);
-                        break;
-                      } else {
-                        result.push(subsh_ch);
-                      }
-                    }
-                    _ => result.push(subsh_ch),
-                  }
-                }
-              }
-            }
-            '$' => { // this has a single quote after it
-              chars.next();
-              while let Some(q_ch) = chars.next() {
-                match q_ch {
-                  '\'' => {
-                    break;
-                  }
-                  '\\' => {
-                    if let Some(esc) = chars.next() {
-                      match esc {
-                        'n' => result.push('\n'),
-                        't' => result.push('\t'),
-                        'r' => result.push('\r'),
-                        '\'' => result.push('\''),
-                        '\\' => result.push('\\'),
-                        'a' => result.push('\x07'),
-                        'b' => result.push('\x08'),
-                        'e' | 'E' => result.push('\x1b'),
-                        'v' => result.push('\x0b'),
-                        'x' => {
-                          let mut hex = String::new();
-                          if let Some(h1) = chars.next() {
-                            hex.push(h1);
-                          } else {
-                            result.push_str("\\x");
-                            continue;
-                          }
-                          if let Some(h2) = chars.next() {
-                            hex.push(h2);
-                          } else {
-                            result.push_str(&format!("\\x{hex}"));
-                            continue;
-                          }
-                          if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                            result.push(byte as char);
-                          } else {
-                            result.push_str(&format!("\\x{hex}"));
-                            continue;
-                          }
-                        }
-                        'o' => {
-                          let mut oct = String::new();
-                          for _ in 0..3 {
-                            if let Some(o) = chars.peek() {
-                              if o.is_digit(8) {
-                                oct.push(*o);
-                                chars.next();
-                              } else {
-                                break;
-                              }
-                            } else {
-                              break;
-                            }
-                          }
-                          if let Ok(byte) = u8::from_str_radix(&oct, 8) {
-                            result.push(byte as char);
-                          } else {
-                            result.push_str(&format!("\\o{oct}"));
-                            continue;
-                          }
-                        }
-                        _ => result.push(esc),
-                      }
-                    }
-                  }
-                  _ => result.push(q_ch),
-                }
-              }
-            }
-            '`' => {
-              result.push(markers::VAR_SUB);
-              result.push(markers::SUBSH);
-              while let Some(bt_ch) = chars.next() {
-                match bt_ch {
-                  '\\' => {
-                    result.push(bt_ch);
-                    if let Some(next_ch) = chars.next() {
-                      result.push(next_ch);
-                    }
-                  }
-                  '`' => {
-                    result.push(markers::SUBSH);
-                    break;
-                  }
-                  _ => result.push(bt_ch),
-                }
-              }
-            }
-            '"' => {
-              result.push(markers::DUB_QUOTE);
-              break;
-            }
-            _ => result.push(q_ch),
-          }
-        }
-      }
-      '\'' => {
-        result.push(markers::SNG_QUOTE);
-        while let Some(q_ch) = chars.next() {
-          match q_ch {
-            '\\' => match chars.peek() {
-              Some(&'\\') | Some(&'\'') => {
-                let ch = chars.next().unwrap();
-                result.push(ch);
-              }
-              _ => result.push(q_ch),
-            },
-            '\'' => {
-              result.push(markers::SNG_QUOTE);
-              break;
-            }
-            _ => result.push(q_ch),
-          }
-        }
-      }
-      '<' if chars.peek() == Some(&'(') => {
-        chars.next();
-        let mut paren_count = 1;
-        result.push(markers::PROC_SUB_OUT);
-        while let Some(subsh_ch) = chars.next() {
-          match subsh_ch {
-            '\\' => {
-              result.push(subsh_ch);
-              if let Some(next_ch) = chars.next() {
-                result.push(next_ch)
-              }
-            }
-            '(' => {
-              result.push(subsh_ch);
-              paren_count += 1;
-            }
-            ')' => {
-              paren_count -= 1;
-              if paren_count <= 0 {
-                result.push(markers::PROC_SUB_OUT);
-                break;
-              } else {
-                result.push(subsh_ch);
-              }
-            }
-            _ => result.push(subsh_ch),
-          }
-        }
-      }
-      '>' if chars.peek() == Some(&'(') => {
-        chars.next();
-        let mut paren_count = 1;
-        result.push(markers::PROC_SUB_IN);
-        while let Some(subsh_ch) = chars.next() {
-          match subsh_ch {
-            '\\' => {
-              result.push(subsh_ch);
-              if let Some(next_ch) = chars.next() {
-                result.push(next_ch)
-              }
-            }
-            '(' => {
-              result.push(subsh_ch);
-              paren_count += 1;
-            }
-            ')' => {
-              paren_count -= 1;
-              if paren_count <= 0 {
-                result.push(markers::PROC_SUB_IN);
-                break;
-              } else {
-                result.push(subsh_ch);
-              }
-            }
-            _ => result.push(subsh_ch),
-          }
-        }
-      }
+      '(' => read_subsh(&mut chars, &mut result),
+      '"' => read_dub_quote(&mut chars, &mut result),
+      '\'' => read_sng_quote(&mut chars, &mut result),
+      '`' => read_backtick(&mut chars, &mut result),
+      '<' if chars.peek() == Some(&'(') => read_proc_sub_in(&mut chars, &mut result),
+      '>' if chars.peek() == Some(&'(') => read_proc_sub_out(&mut chars, &mut result),
       '$' if chars.peek() == Some(&'\'') => {
         chars.next();
+				// read_dollar_quote omits the markers so that it is also compatible with double quoted strings
+				// so we push them explicitly here
         result.push(markers::SNG_QUOTE);
-        while let Some(q_ch) = chars.next() {
-          match q_ch {
-            '\'' => {
-              result.push(markers::SNG_QUOTE);
-              break;
-            }
-            '\\' => {
-              if let Some(esc) = chars.next() {
-                match esc {
-                  'n' => result.push('\n'),
-                  't' => result.push('\t'),
-                  'r' => result.push('\r'),
-                  '\'' => result.push('\''),
-                  '\\' => result.push('\\'),
-                  'a' => result.push('\x07'),
-                  'b' => result.push('\x08'),
-                  'e' | 'E' => result.push('\x1b'),
-                  'v' => result.push('\x0b'),
-                  'x' => {
-                    let mut hex = String::new();
-                    if let Some(h1) = chars.next() {
-                      hex.push(h1);
-                    } else {
-                      result.push_str("\\x");
-                      continue;
-                    }
-                    if let Some(h2) = chars.next() {
-                      hex.push(h2);
-                    } else {
-                      result.push_str(&format!("\\x{hex}"));
-                      continue;
-                    }
-                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                      result.push(byte as char);
-                    } else {
-                      result.push_str(&format!("\\x{hex}"));
-                      continue;
-                    }
-                  }
-                  'o' => {
-                    let mut oct = String::new();
-                    for _ in 0..3 {
-                      if let Some(o) = chars.peek() {
-                        if o.is_digit(8) {
-                          oct.push(*o);
-                          chars.next();
-                        } else {
-                          break;
-                        }
-                      } else {
-                        break;
-                      }
-                    }
-                    if let Ok(byte) = u8::from_str_radix(&oct, 8) {
-                      result.push(byte as char);
-                    } else {
-                      result.push_str(&format!("\\o{oct}"));
-                      continue;
-                    }
-                  }
-                  _ => result.push(esc),
-                }
-              }
-            }
-            _ => result.push(q_ch),
-          }
-        }
+				read_dollar_quote(&mut chars, &mut result);
+				result.push(markers::SNG_QUOTE);
       }
-      '$' => {
-        if chars.peek().is_none_or(|ch| *ch != '$' && *ch != '(' && *ch != '{' && !is_var_name_ch(ch)) {
-          chars.next();
-          result.push('$');
-        } else {
-          result.push(markers::VAR_SUB);
-					if chars.peek().is_some_and(|ch| *ch == '$') {
-						chars.next();
-						result.push('$');
-					}
-        }
-      }
-      '`' => {
-        result.push(markers::VAR_SUB);
-        result.push(markers::SUBSH);
-        while let Some(bt_ch) = chars.next() {
-          match bt_ch {
-            '\\' => {
-              result.push(bt_ch);
-              if let Some(next_ch) = chars.next() {
-                result.push(next_ch);
-              }
-            }
-            '`' => {
-              result.push(markers::SUBSH);
-              break;
-            }
-            _ => result.push(bt_ch),
-          }
-        }
-      }
+      '$' => { read_varsub(&mut chars, &mut result); },
       _ => result.push(ch),
     }
     first_char = false;
   }
 
   result
+}
+
+fn read_varsub(chars: &mut Peekable<Chars>, result: &mut String) -> bool {
+	if chars.peek().is_none_or(|ch| *ch != '$' && *ch != '(' && *ch != '{' && !is_var_name_ch(ch)) {
+		chars.next();
+		result.push('$');
+	} else {
+		result.push(markers::VAR_SUB);
+		if chars.peek().is_some_and(|ch| *ch == '$') {
+			chars.next();
+			result.push('$');
+			return false
+		}
+	}
+	true
+}
+
+fn read_subsh(chars: &mut Peekable<Chars>, result: &mut String) {
+	result.push(markers::SUBSH);
+	let mut paren_count = 1;
+	while let Some(subsh_ch) = chars.next() {
+		match subsh_ch {
+			'\\' => {
+				result.push(subsh_ch);
+				if let Some(next_ch) = chars.next() {
+					result.push(next_ch)
+				}
+			}
+			'$' if chars.peek() == Some(&'\'') => {
+				result.push(subsh_ch);
+			}
+			'$' if chars.peek() != Some(&'(') => { read_varsub(chars, result); },
+			'(' => {
+				paren_count += 1;
+				result.push(subsh_ch)
+			}
+			')' => {
+				paren_count -= 1;
+				if paren_count == 0 {
+					result.push(markers::SUBSH);
+					break;
+				} else {
+					result.push(subsh_ch)
+				}
+			}
+			_ => result.push(subsh_ch),
+		}
+	}
+}
+
+fn read_sng_quote(chars: &mut Peekable<Chars>, result: &mut String) {
+	result.push(markers::SNG_QUOTE);
+	while let Some(q_ch) = chars.next() {
+		match q_ch {
+			'\\' => match chars.peek() {
+				Some(&'\\') | Some(&'\'') => {
+					let ch = chars.next().unwrap();
+					result.push(ch);
+				}
+				_ => result.push(q_ch),
+			},
+			'\'' => {
+				result.push(markers::SNG_QUOTE);
+				break;
+			}
+			_ => result.push(q_ch),
+		}
+	}
+}
+
+fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
+	result.push(markers::DUB_QUOTE);
+	while let Some(q_ch) = chars.next() {
+		match q_ch {
+			'\\' => {
+				if let Some(next_ch) = chars.next() {
+					match next_ch {
+						'"' | '\\' | '`' | '$' | '!' => {
+							// discard the backslash
+						}
+						_ => {
+							result.push(q_ch);
+						}
+					}
+					result.push(next_ch);
+				}
+			}
+			'$' if chars.peek() == Some(&'\'') => {
+				chars.next();
+				read_dollar_quote(chars, result);
+			}
+			'$' => {
+				if read_varsub(chars, result)
+				&& chars.peek() == Some(&'(') {
+					chars.next();
+					read_subsh(chars, result);
+				}
+			}
+			'`' => read_backtick(chars, result),
+			'"' => {
+				result.push(markers::DUB_QUOTE);
+				break;
+			}
+			_ => result.push(q_ch),
+		}
+	}
+}
+
+fn read_dollar_quote(chars: &mut Peekable<Chars>, result: &mut String) {
+	while let Some(q_ch) = chars.next() {
+		match q_ch {
+			'\'' => {
+				break;
+			}
+			'\\' => {
+				let Some(esc) = chars.next() else { continue };
+				match esc {
+					'n' => result.push('\n'),
+					't' => result.push('\t'),
+					'r' => result.push('\r'),
+					'\'' => result.push('\''),
+					'\\' => result.push('\\'),
+					'a' => result.push('\x07'),
+					'b' => result.push('\x08'),
+					'e' | 'E' => result.push('\x1b'),
+					'v' => result.push('\x0b'),
+					'x' => read_hex(chars, result),
+					'o' => read_octal(chars, result),
+					_ => result.push(esc),
+				}
+			}
+			_ => result.push(q_ch),
+		}
+	}
+}
+
+fn read_octal(chars: &mut Peekable<Chars>, result: &mut String) {
+	let mut oct = String::new();
+	for _ in 0..3 {
+		if let Some(o) = chars.peek() {
+			if o.is_digit(8) {
+				oct.push(*o);
+				chars.next();
+			} else {
+				break;
+			}
+		} else {
+			break;
+		}
+	}
+	if let Ok(byte) = u8::from_str_radix(&oct, 8) {
+		result.push(byte as char);
+	} else {
+		result.push_str(&format!("\\o{oct}"));
+	}
+}
+
+fn read_hex(chars: &mut Peekable<Chars>, result: &mut String) {
+	let mut hex = String::new();
+	if let Some(h1) = chars.next() {
+		hex.push(h1);
+	} else {
+		result.push_str("\\x");
+		return;
+	}
+	if let Some(h2) = chars.next() {
+		hex.push(h2);
+	} else {
+		result.push_str(&format!("\\x{hex}"));
+		return;
+	}
+	if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+		result.push(byte as char);
+	} else {
+		result.push_str(&format!("\\x{hex}"));
+	}
+}
+
+fn read_proc_sub_in(chars: &mut Peekable<Chars>, result: &mut String) {
+	read_proc_sub(chars, result, false);
+}
+
+fn read_proc_sub_out(chars: &mut Peekable<Chars>, result: &mut String) {
+	read_proc_sub(chars, result, true);
+}
+
+fn read_proc_sub(chars: &mut Peekable<Chars>, result: &mut String, input: bool) {
+	let marker = if input {
+		markers::PROC_SUB_IN
+	} else {
+		markers::PROC_SUB_OUT
+	};
+	chars.next();
+	let mut paren_count = 1;
+	result.push(marker);
+	while let Some(subsh_ch) = chars.next() {
+		match subsh_ch {
+			'\\' => {
+				result.push(subsh_ch);
+				if let Some(next_ch) = chars.next() {
+					result.push(next_ch)
+				}
+			}
+			'$' if chars.peek() == Some(&'\'') => {
+				result.push(subsh_ch);
+			}
+			'(' => {
+				result.push(subsh_ch);
+				paren_count += 1;
+			}
+			')' => {
+				paren_count -= 1;
+				if paren_count <= 0 {
+					result.push(marker);
+					break;
+				} else {
+					result.push(subsh_ch);
+				}
+			}
+			_ => result.push(subsh_ch),
+		}
+	}
+}
+
+fn read_backtick(chars: &mut Peekable<Chars>, result: &mut String) {
+	result.push(markers::VAR_SUB);
+	result.push(markers::SUBSH);
+	while let Some(bt_ch) = chars.next() {
+		match bt_ch {
+			'\\' => {
+				result.push(bt_ch);
+				if let Some(next_ch) = chars.next() {
+					result.push(next_ch);
+				}
+			}
+			'$' if chars.peek() == Some(&'\'') => {
+				result.push(bt_ch);
+			}
+			'`' => {
+				result.push(markers::SUBSH);
+				break;
+			}
+			_ => result.push(bt_ch),
+		}
+	}
 }
 
 /// Like unescape_str but for heredoc bodies. Only processes:
@@ -425,58 +332,13 @@ pub fn unescape_heredoc(raw: &str) -> String {
       '$' if chars.peek() == Some(&'(') => {
         result.push(markers::VAR_SUB);
         chars.next(); // consume '('
-        result.push(markers::SUBSH);
-        let mut paren_count = 1;
-        while let Some(subsh_ch) = chars.next() {
-          match subsh_ch {
-            '\\' => {
-              result.push(subsh_ch);
-              if let Some(next_ch) = chars.next() {
-                result.push(next_ch);
-              }
-            }
-            '(' => {
-              paren_count += 1;
-              result.push(subsh_ch);
-            }
-            ')' => {
-              paren_count -= 1;
-              if paren_count == 0 {
-                result.push(markers::SUBSH);
-                break;
-              } else {
-                result.push(subsh_ch);
-              }
-            }
-            _ => result.push(subsh_ch),
-          }
-        }
+        read_subsh(&mut chars, &mut result);
       }
       '$' => {
-        result.push(markers::VAR_SUB);
-        if chars.peek() == Some(&'$') {
-          chars.next();
-          result.push('$');
-        }
+        read_varsub(&mut chars, &mut result);
       }
       '`' => {
-        result.push(markers::VAR_SUB);
-        result.push(markers::SUBSH);
-        while let Some(bt_ch) = chars.next() {
-          match bt_ch {
-            '\\' => {
-              result.push(bt_ch);
-              if let Some(next_ch) = chars.next() {
-                result.push(next_ch);
-              }
-            }
-            '`' => {
-              result.push(markers::SUBSH);
-              break;
-            }
-            _ => result.push(bt_ch),
-          }
-        }
+        read_backtick(&mut chars, &mut result);
       }
       _ => result.push(ch),
     }

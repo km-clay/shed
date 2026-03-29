@@ -6,7 +6,7 @@ use fmt::Display;
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult, next_color},
   parse::lex::{Span, Tk},
-  prelude::*,
+  prelude::*, shopt::xtrace_print,
 };
 
 pub type OptSet = Arc<[Opt]>;
@@ -109,6 +109,8 @@ pub fn sort_tks(
       words.push((word, span.clone()));
     }
   }
+
+	xtrace_print(&words);
 
   let mut words_iter = words.into_iter().peekable();
   let mut opts = vec![];

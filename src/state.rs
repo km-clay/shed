@@ -220,6 +220,9 @@ impl ScopeStack {
       self.depth -= 1;
     }
   }
+	pub fn depth(&self) -> u32 {
+		self.depth
+	}
   pub fn cur_scope(&self) -> &VarTab {
     self.scopes.last().unwrap()
   }

@@ -19,6 +19,8 @@ pub mod state;
 
 #[cfg(test)]
 pub mod testutil;
+#[cfg(test)]
+mod tests;
 
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::net::UnixListener;
@@ -244,7 +246,6 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     e.print_error();
   }
 
-  // Create readline instance with initial prompt
   let mut readline = match ShedVi::new(Prompt::new(), *TTY_FILENO) {
     Ok(rl) => rl,
     Err(e) => {
@@ -332,7 +333,6 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 				exec_if_timeout = Some(screensaver_cmd);
 				match PollTimeout::try_from((screensaver_idle_time * 1000) as i32) {
 					Ok(timeout) => {
-						log::debug!("got timeout {timeout:?}");
 						timeout
 					},
 					Err(_) => PollTimeout::NONE
@@ -381,10 +381,6 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
         .revents()
         .is_none_or(|r| !r.contains(PollFlags::POLLIN))
     {
-      log::debug!(
-        "[keymap timeout] resolving pending={:?}",
-        readline.pending_keymap
-      );
       let keymap_flags = readline.curr_keymap_flags();
       let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &readline.pending_keymap));
       // If there's an exact match, fire it; otherwise flush as normal keys
@@ -392,11 +388,6 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
         .iter()
         .find(|km| km.compare(&readline.pending_keymap) == KeyMapMatch::IsExact);
       if let Some(km) = exact {
-        log::debug!(
-          "[keymap timeout] firing exact match: {:?} -> {:?}",
-          km.keys,
-          km.action
-        );
         let action = km.action_expanded();
         readline.pending_keymap.clear();
         for key in action {
@@ -406,10 +397,6 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
           }
         }
       } else {
-        log::debug!(
-          "[keymap timeout] no exact match, flushing {} keys as normal input",
-          readline.pending_keymap.len()
-        );
         let buffered = std::mem::take(&mut readline.pending_keymap);
         for key in buffered {
           let event = readline.handle_key(key).transpose();
