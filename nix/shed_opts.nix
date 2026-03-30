@@ -245,7 +245,7 @@
               };
               vi = lib.mkOption {
                 type = lib.types.bool;
-                default = true;
+                default = false;
                 description = "Enable vi editing mode (currently the only editing mode)";
               };
               allexport = lib.mkOption {

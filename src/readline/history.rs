@@ -14,8 +14,8 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   readline::{
     complete::{Candidate, FuzzySelector},
-    linebuf::LineBuf,
     editcmd::Direction,
+    linebuf::LineBuf,
   },
   state::read_meta,
 };

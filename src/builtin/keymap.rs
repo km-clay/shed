@@ -38,7 +38,7 @@ impl KeyMapOpts {
         Opt::Short('x') => flags |= KeyMapFlags::EX,
         Opt::Short('o') => flags |= KeyMapFlags::OP_PENDING,
         Opt::Short('r') => flags |= KeyMapFlags::REPLACE,
-				Opt::Short('e') => flags |= KeyMapFlags::EMACS,
+        Opt::Short('e') => flags |= KeyMapFlags::EMACS,
         Opt::LongWithArg(name, arg) if name == "remove" => {
           if remove.is_some() {
             return Err(ShErr::simple(
@@ -67,10 +67,10 @@ impl KeyMapOpts {
         opt: Opt::Short('n'), // normal mode
         takes_arg: false,
       },
-			OptSpec {
-				opt: Opt::Short('e'), // emacs mode
-				takes_arg: false,
-			},
+      OptSpec {
+        opt: Opt::Short('e'), // emacs mode
+        takes_arg: false,
+      },
       OptSpec {
         opt: Opt::Short('i'), // insert mode
         takes_arg: false,

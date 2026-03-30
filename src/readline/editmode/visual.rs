@@ -1,13 +1,14 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
-use super::{CmdReplay, CmdState, ModeReport, EditMode, common_cmds};
+use super::{CmdReplay, CmdState, EditMode, ModeReport, common_cmds};
+use crate::readline::editcmd::{
+  Anchor, Bound, CmdFlags, Dest, Direction, EditCmd, Motion, MotionCmd, RegisterName, TextObj, To,
+  Verb, VerbCmd, Word,
+};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::Grapheme;
-use crate::readline::editcmd::{
-  Anchor, Bound, CmdFlags, Dest, Direction, Motion, MotionCmd, RegisterName, TextObj, To, Verb,
-  VerbCmd, EditCmd, Word,
-};
+use crate::{motion, verb};
 
 #[derive(Default, Debug)]
 pub struct ViVisual {
@@ -100,7 +101,7 @@ impl ViVisual {
               'v' => {
                 return Some(EditCmd {
                   register,
-                  verb: Some(VerbCmd(1, Verb::VisualModeSelectLast)),
+                  verb: Some(verb!(Verb::VisualModeSelectLast)),
                   motion: None,
                   raw_seq: self.take_cmd(),
                   flags: CmdFlags::empty(),
@@ -109,7 +110,7 @@ impl ViVisual {
               '?' => {
                 return Some(EditCmd {
                   register,
-                  verb: Some(VerbCmd(1, Verb::Rot13)),
+                  verb: Some(verb!(Verb::Rot13)),
                   motion: None,
                   raw_seq: self.take_cmd(),
                   flags: CmdFlags::empty(),
@@ -124,7 +125,7 @@ impl ViVisual {
         '.' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::RepeatLast)),
+            verb: Some(verb!(count, Verb::RepeatLast)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -133,7 +134,7 @@ impl ViVisual {
         ':' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::ExMode)),
+            verb: Some(verb!(count, Verb::ExMode)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -141,13 +142,13 @@ impl ViVisual {
         }
         'x' => {
           chars = chars_clone;
-          break 'verb_parse Some(VerbCmd(count, Verb::Delete));
+          break 'verb_parse Some(verb!(count, Verb::Delete));
         }
         'X' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::Delete)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            verb: Some(verb!(Verb::Delete)),
+            motion: Some(motion!(Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -155,8 +156,8 @@ impl ViVisual {
         'Y' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::Yank)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            verb: Some(verb!(Verb::Yank)),
+            motion: Some(motion!(Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -164,8 +165,8 @@ impl ViVisual {
         'D' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::Delete)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            verb: Some(verb!(Verb::Delete)),
+            motion: Some(motion!(Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -173,8 +174,8 @@ impl ViVisual {
         'R' | 'C' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::Change)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            verb: Some(verb!(Verb::Change)),
+            motion: Some(motion!(Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -182,8 +183,8 @@ impl ViVisual {
         '>' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::Indent)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            verb: Some(verb!(Verb::Indent)),
+            motion: Some(motion!(Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -191,8 +192,8 @@ impl ViVisual {
         '<' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::Dedent)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            verb: Some(verb!(Verb::Dedent)),
+            motion: Some(motion!(Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -200,21 +201,21 @@ impl ViVisual {
         '=' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::Equalize)),
-            motion: Some(MotionCmd(1, Motion::WholeLine)),
+            verb: Some(verb!(Verb::Equalize)),
+            motion: Some(motion!(Motion::WholeLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
         }
         'p' | 'P' => {
           chars = chars_clone;
-          break 'verb_parse Some(VerbCmd(count, Verb::Put(Anchor::Before)));
+          break 'verb_parse Some(verb!(count, Verb::Put(Anchor::Before)));
         }
         'r' => {
           let ch = chars_clone.next()?;
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::ReplaceChar(ch))),
+            verb: Some(verb!(Verb::ReplaceChar(ch))),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -223,7 +224,7 @@ impl ViVisual {
         '~' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(1, Verb::ToggleCaseRange)),
+            verb: Some(verb!(Verb::ToggleCaseRange)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -232,7 +233,7 @@ impl ViVisual {
         'u' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::ToLower)),
+            verb: Some(verb!(count, Verb::ToLower)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -241,7 +242,7 @@ impl ViVisual {
         's' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::Delete)),
+            verb: Some(verb!(count, Verb::Delete)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -250,7 +251,7 @@ impl ViVisual {
         'S' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::Change)),
+            verb: Some(verb!(count, Verb::Change)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -259,7 +260,7 @@ impl ViVisual {
         'U' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::ToUpper)),
+            verb: Some(verb!(count, Verb::ToUpper)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -268,7 +269,7 @@ impl ViVisual {
         'O' | 'o' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::SwapVisualAnchor)),
+            verb: Some(verb!(count, Verb::SwapVisualAnchor)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -277,8 +278,8 @@ impl ViVisual {
         'A' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::InsertMode)),
-            motion: Some(MotionCmd(1, Motion::ForwardChar)),
+            verb: Some(verb!(count, Verb::InsertMode)),
+            motion: Some(motion!(Motion::ForwardChar)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -286,8 +287,8 @@ impl ViVisual {
         'I' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::InsertMode)),
-            motion: Some(MotionCmd(1, Motion::StartOfLine)),
+            verb: Some(verb!(count, Verb::InsertMode)),
+            motion: Some(motion!(Motion::StartOfLine)),
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
           });
@@ -295,7 +296,7 @@ impl ViVisual {
         'J' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::JoinLines)),
+            verb: Some(verb!(count, Verb::JoinLines)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -304,7 +305,7 @@ impl ViVisual {
         'y' => {
           return Some(EditCmd {
             register,
-            verb: Some(VerbCmd(count, Verb::Yank)),
+            verb: Some(verb!(count, Verb::Yank)),
             motion: None,
             raw_seq: self.take_cmd(),
             flags: CmdFlags::empty(),
@@ -312,11 +313,11 @@ impl ViVisual {
         }
         'd' => {
           chars = chars_clone;
-          break 'verb_parse Some(VerbCmd(count, Verb::Delete));
+          break 'verb_parse Some(verb!(count, Verb::Delete));
         }
         'c' => {
           chars = chars_clone;
-          break 'verb_parse Some(VerbCmd(count, Verb::Change));
+          break 'verb_parse Some(verb!(count, Verb::Change));
         }
         _ => break 'verb_parse None,
       }
@@ -345,10 +346,10 @@ impl ViVisual {
         | ('=', Some(VerbCmd(_, Verb::Equalize)))
         | ('>', Some(VerbCmd(_, Verb::Indent)))
         | ('<', Some(VerbCmd(_, Verb::Dedent))) => {
-          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine));
+          break 'motion_parse Some(motion!(count, Motion::WholeLine));
         }
         ('c', Some(VerbCmd(_, Verb::Change))) => {
-          break 'motion_parse Some(MotionCmd(count, Motion::WholeLine));
+          break 'motion_parse Some(motion!(count, Motion::WholeLine));
         }
         _ => {}
       }
@@ -359,12 +360,12 @@ impl ViVisual {
               'g' => {
                 chars_clone.next();
                 chars = chars_clone;
-                break 'motion_parse Some(MotionCmd(count, Motion::StartOfBuffer));
+                break 'motion_parse Some(motion!(count, Motion::StartOfBuffer));
               }
               'e' => {
                 chars_clone.next();
                 chars = chars_clone;
-                break 'motion_parse Some(MotionCmd(
+                break 'motion_parse Some(motion!(
                   count,
                   Motion::WordMotion(To::End, Word::Normal, Direction::Backward),
                 ));
@@ -372,7 +373,7 @@ impl ViVisual {
               'E' => {
                 chars_clone.next();
                 chars = chars_clone;
-                break 'motion_parse Some(MotionCmd(
+                break 'motion_parse Some(motion!(
                   count,
                   Motion::WordMotion(To::End, Word::Big, Direction::Backward),
                 ));
@@ -390,11 +391,11 @@ impl ViVisual {
           match ch {
             ')' => {
               chars = chars_clone;
-              break 'motion_parse Some(MotionCmd(count, Motion::ToParen(Direction::Forward)));
+              break 'motion_parse Some(motion!(count, Motion::ToParen(Direction::Forward)));
             }
             '}' => {
               chars = chars_clone;
-              break 'motion_parse Some(MotionCmd(count, Motion::ToBrace(Direction::Forward)));
+              break 'motion_parse Some(motion!(count, Motion::ToBrace(Direction::Forward)));
             }
             _ => return self.quit_parse(),
           }
@@ -406,25 +407,25 @@ impl ViVisual {
           match ch {
             '(' => {
               chars = chars_clone;
-              break 'motion_parse Some(MotionCmd(count, Motion::ToParen(Direction::Backward)));
+              break 'motion_parse Some(motion!(count, Motion::ToParen(Direction::Backward)));
             }
             '{' => {
               chars = chars_clone;
-              break 'motion_parse Some(MotionCmd(count, Motion::ToBrace(Direction::Backward)));
+              break 'motion_parse Some(motion!(count, Motion::ToBrace(Direction::Backward)));
             }
             _ => return self.quit_parse(),
           }
         }
         '%' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::ToDelimMatch));
+          break 'motion_parse Some(motion!(count, Motion::ToDelimMatch));
         }
         'f' => {
           let Some(ch) = chars_clone.peek() else {
             break 'motion_parse None;
           };
 
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::CharSearch(Direction::Forward, Dest::On, Grapheme::from(*ch)),
           ));
@@ -434,7 +435,7 @@ impl ViVisual {
             break 'motion_parse None;
           };
 
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::CharSearch(Direction::Backward, Dest::On, Grapheme::from(*ch)),
           ));
@@ -444,7 +445,7 @@ impl ViVisual {
             break 'motion_parse None;
           };
 
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::CharSearch(Direction::Forward, Dest::Before, Grapheme::from(*ch)),
           ));
@@ -454,113 +455,113 @@ impl ViVisual {
             break 'motion_parse None;
           };
 
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::CharSearch(Direction::Backward, Dest::Before, Grapheme::from(*ch)),
           ));
         }
         ';' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::RepeatMotion));
+          break 'motion_parse Some(motion!(count, Motion::RepeatMotion));
         }
         ',' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::RepeatMotionRev));
+          break 'motion_parse Some(motion!(count, Motion::RepeatMotionRev));
         }
         '|' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::ToColumn));
+          break 'motion_parse Some(motion!(count, Motion::ToColumn));
         }
         '0' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::StartOfLine));
+          break 'motion_parse Some(motion!(count, Motion::StartOfLine));
         }
         '$' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::EndOfLine));
+          break 'motion_parse Some(motion!(count, Motion::EndOfLine));
         }
         'k' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::LineUp));
+          break 'motion_parse Some(motion!(count, Motion::LineUp));
         }
         'j' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::LineDown));
+          break 'motion_parse Some(motion!(count, Motion::LineDown));
         }
         'h' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::BackwardChar));
+          break 'motion_parse Some(motion!(count, Motion::BackwardChar));
         }
         'l' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::ForwardChar));
+          break 'motion_parse Some(motion!(count, Motion::ForwardChar));
         }
         'w' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::WordMotion(To::Start, Word::Normal, Direction::Forward),
           ));
         }
         'W' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::WordMotion(To::Start, Word::Big, Direction::Forward),
           ));
         }
         'e' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::WordMotion(To::End, Word::Normal, Direction::Forward),
           ));
         }
         'E' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::WordMotion(To::End, Word::Big, Direction::Forward),
           ));
         }
         'b' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::WordMotion(To::Start, Word::Normal, Direction::Backward),
           ));
         }
         'B' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::WordMotion(To::Start, Word::Big, Direction::Backward),
           ));
         }
         ')' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::TextObj(TextObj::Sentence(Direction::Forward)),
           ));
         }
         '(' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::TextObj(TextObj::Sentence(Direction::Backward)),
           ));
         }
         '}' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::TextObj(TextObj::Paragraph(Direction::Forward)),
           ));
         }
         '{' => {
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(
+          break 'motion_parse Some(motion!(
             count,
             Motion::TextObj(TextObj::Paragraph(Direction::Backward)),
           ));
@@ -589,7 +590,7 @@ impl ViVisual {
             _ => return self.quit_parse(),
           };
           chars = chars_clone;
-          break 'motion_parse Some(MotionCmd(count, Motion::TextObj(obj)));
+          break 'motion_parse Some(motion!(count, Motion::TextObj(obj)));
         }
         _ => return self.quit_parse(),
       }
@@ -624,14 +625,14 @@ impl EditMode for ViVisual {
       E(K::Backspace, M::NONE) => Some(EditCmd {
         register: Default::default(),
         verb: None,
-        motion: Some(MotionCmd(1, Motion::BackwardChar)),
+        motion: Some(motion!(Motion::BackwardChar)),
         raw_seq: "".into(),
         flags: CmdFlags::empty(),
       }),
       E(K::ExMode, _) => {
         return Some(EditCmd {
           register: Default::default(),
-          verb: Some(VerbCmd(1, Verb::ExMode)),
+          verb: Some(verb!(Verb::ExMode)),
           motion: None,
           raw_seq: String::new(),
           flags: Default::default(),
@@ -644,7 +645,7 @@ impl EditMode for ViVisual {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
-          verb: Some(VerbCmd(1, Verb::IncrementNumber(count))),
+          verb: Some(verb!(Verb::IncrementNumber(count))),
           motion: None,
           raw_seq: "".into(),
           flags: CmdFlags::empty(),
@@ -657,7 +658,7 @@ impl EditMode for ViVisual {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
-          verb: Some(VerbCmd(1, Verb::DecrementNumber(count))),
+          verb: Some(verb!(Verb::DecrementNumber(count))),
           motion: None,
           raw_seq: "".into(),
           flags: CmdFlags::empty(),
@@ -667,7 +668,7 @@ impl EditMode for ViVisual {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
-          verb: Some(VerbCmd(1, Verb::PrintPosition)),
+          verb: Some(verb!(Verb::PrintPosition)),
           motion: None,
           raw_seq: "".into(),
           flags: CmdFlags::empty(),
@@ -678,7 +679,7 @@ impl EditMode for ViVisual {
         Some(EditCmd {
           register: Default::default(),
           verb: None,
-          motion: Some(MotionCmd(1, Motion::HalfScreenDown)),
+          motion: Some(motion!(Motion::HalfScreenDown)),
           raw_seq: "".into(),
           flags: CmdFlags::empty(),
         })
@@ -688,7 +689,7 @@ impl EditMode for ViVisual {
         Some(EditCmd {
           register: Default::default(),
           verb: None,
-          motion: Some(MotionCmd(1, Motion::HalfScreenUp)),
+          motion: Some(motion!(Motion::HalfScreenUp)),
           raw_seq: "".into(),
           flags: CmdFlags::empty(),
         })
@@ -698,7 +699,7 @@ impl EditMode for ViVisual {
         let count = self.parse_count(&mut chars).unwrap_or(1);
         Some(EditCmd {
           register: RegisterName::default(),
-          verb: Some(VerbCmd(count, Verb::Redo)),
+          verb: Some(verb!(count, Verb::Redo)),
           motion: None,
           raw_seq: self.take_cmd(),
           flags: CmdFlags::empty(),
@@ -706,8 +707,8 @@ impl EditMode for ViVisual {
       }
       E(K::Esc, M::NONE) => Some(EditCmd {
         register: Default::default(),
-        verb: Some(VerbCmd(1, Verb::NormalMode)),
-        motion: Some(MotionCmd(1, Motion::Null)),
+        verb: Some(verb!(Verb::NormalMode)),
+        motion: Some(motion!(Motion::Null)),
         raw_seq: self.take_cmd(),
         flags: CmdFlags::empty(),
       }),

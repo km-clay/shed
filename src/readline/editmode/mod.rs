@@ -3,18 +3,21 @@ use std::fmt::Display;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::libsh::error::ShResult;
+use crate::readline::editcmd::{
+  CmdFlags, Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word,
+};
 use crate::readline::history::History;
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::LineBuf;
-use crate::readline::editcmd::{CmdFlags, Motion, MotionCmd, To, Verb, VerbCmd, EditCmd};
+use crate::{ctrl, motion, verb};
 
+pub mod emacs;
 pub mod ex;
 pub mod insert;
 pub mod normal;
 pub mod replace;
 pub mod verbatim;
 pub mod visual;
-pub mod emacs;
 
 pub use ex::ViEx;
 pub use insert::ViInsert;
@@ -31,7 +34,7 @@ pub enum ModeReport {
   Visual,
   Replace,
   Verbatim,
-	Emacs,
+  Emacs,
   Unknown,
 }
 
@@ -44,7 +47,7 @@ impl Display for ModeReport {
       ModeReport::Visual => write!(f, "VISUAL"),
       ModeReport::Replace => write!(f, "REPLACE"),
       ModeReport::Verbatim => write!(f, "VERBATIM"),
-			ModeReport::Emacs => write!(f, "EMACS"),
+      ModeReport::Emacs => write!(f, "EMACS"),
       ModeReport::Unknown => write!(f, "UNKNOWN"),
     }
   }
@@ -113,15 +116,24 @@ pub trait EditMode {
 pub fn common_cmds(key: E) -> Option<EditCmd> {
   let mut pending_cmd = EditCmd::new();
   match key {
-    E(K::Home, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::StartOfLine)),
-    E(K::End, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::EndOfLine)),
-    E(K::Enter, M::SHIFT) => pending_cmd.set_verb(VerbCmd(1, Verb::InsertChar('\n'))),
-    E(K::Enter, M::NONE) => pending_cmd.set_verb(VerbCmd(1, Verb::AcceptLineOrNewline)),
-    E(K::Char('D'), M::CTRL) => pending_cmd.set_verb(VerbCmd(1, Verb::EndOfFile)),
-    E(K::Left, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::BackwardChar)),
-    E(K::Right, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::ForwardChar)),
+    E(K::Home, M::NONE) => pending_cmd.set_motion(motion!(Motion::StartOfLine)),
+    E(K::End, M::NONE) => pending_cmd.set_motion(motion!(Motion::EndOfLine)),
+    E(K::Enter, M::SHIFT) => pending_cmd.set_verb(verb!(Verb::InsertChar('\n'))),
+    E(K::Enter, M::NONE) => pending_cmd.set_verb(verb!(Verb::AcceptLineOrNewline)),
+    E(K::Left, M::NONE) => pending_cmd.set_motion(motion!(Motion::BackwardChar)),
+    E(K::Left, M::CTRL) => pending_cmd.set_motion(motion!(Motion::WordMotion(
+      To::Start,
+      Word::Normal,
+      Direction::Backward
+    ))),
+    E(K::Right, M::NONE) => pending_cmd.set_motion(motion!(Motion::ForwardChar)),
+    E(K::Right, M::CTRL) => pending_cmd.set_motion(motion!(Motion::WordMotion(
+      To::Start,
+      Word::Normal,
+      Direction::Forward
+    ))),
     E(K::Up, mods) => {
-      pending_cmd.set_motion(MotionCmd(1, Motion::LineUp));
+      pending_cmd.set_motion(motion!(Motion::LineUp));
       if mods.contains(M::SHIFT) {
         pending_cmd.flags |= CmdFlags::HAS_SHIFT;
       } else if mods.contains(M::CTRL) {
@@ -129,7 +141,7 @@ pub fn common_cmds(key: E) -> Option<EditCmd> {
       }
     }
     E(K::Down, mods) => {
-      pending_cmd.set_motion(MotionCmd(1, Motion::LineDown));
+      pending_cmd.set_motion(motion!(Motion::LineDown));
       if mods.contains(M::SHIFT) {
         pending_cmd.flags |= CmdFlags::HAS_SHIFT;
       } else if mods.contains(M::CTRL) {
@@ -137,13 +149,17 @@ pub fn common_cmds(key: E) -> Option<EditCmd> {
       }
     }
     E(K::Delete, M::NONE) => {
-      pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
-      pending_cmd.set_motion(MotionCmd(1, Motion::ForwardCharForced));
+      pending_cmd.set_verb(verb!(Verb::Delete));
+      pending_cmd.set_motion(motion!(Motion::ForwardCharForced));
     }
-    E(K::Backspace, M::NONE) | E(K::Char('H'), M::CTRL) => {
-      pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
-      pending_cmd.set_motion(MotionCmd(1, Motion::BackwardCharForced));
+    E(K::Backspace, M::NONE) | ctrl!('H') => {
+      pending_cmd.set_verb(verb!(Verb::Delete));
+      pending_cmd.set_motion(motion!(Motion::BackwardCharForced));
     }
+    ctrl!('D') => pending_cmd.set_verb(verb!(Verb::EndOfFile)),
+    ctrl!('P') => pending_cmd.set_verb(verb!(Verb::HistoryUp)),
+    ctrl!('N') => pending_cmd.set_verb(verb!(Verb::HistoryDown)),
+    ctrl!('L') => pending_cmd.set_verb(verb!(Verb::ClearScreen)),
     _ => return None,
   }
   Some(pending_cmd)

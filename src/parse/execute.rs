@@ -34,14 +34,22 @@ use crate::{
     test::double_bracket_test,
     trap::{TrapTarget, trap},
     varcmds::{export, local, readonly, unset},
-  }, expand::{expand_aliases, expand_case_pattern, glob_to_regex}, jobs::{ChildProc, JobStack, attach_tty, dispatch_job}, libsh::{
+  },
+  expand::{expand_aliases, expand_case_pattern, glob_to_regex},
+  jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
+  libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
     guards::{scope_guard, var_ctx_guard},
     utils::RedirVecUtils,
-  }, prelude::*, procio::{IoMode, IoStack, PipeGenerator, borrow_fd}, shopt::xtrace_print, signal::{check_signals, signals_pending}, state::{
+  },
+  prelude::*,
+  procio::{IoMode, IoStack, PipeGenerator, borrow_fd},
+  shopt::xtrace_print,
+  signal::{check_signals, signals_pending},
+  state::{
     self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_meta,
     write_vars,
-  }
+  },
 };
 
 use super::{
@@ -353,17 +361,17 @@ impl Dispatcher {
     Ok(())
   }
   pub fn exec_conjunction(&mut self, conjunction: Node) -> ShResult<()> {
-		let span = conjunction.get_span().clone();
+    let span = conjunction.get_span().clone();
     let NdRule::Conjunction { elements } = conjunction.class else {
       unreachable!()
     };
 
-		if read_shopts(|o| o.set.verbose) {
-			let stderr = borrow_fd(STDERR_FILENO);
-			let command = span.as_str().to_string();
-			write(stderr, command.as_bytes()).ok();
-			write(stderr, b"\n").ok();
-		}
+    if read_shopts(|o| o.set.verbose) {
+      let stderr = borrow_fd(STDERR_FILENO);
+      let command = span.as_str().to_string();
+      write(stderr, command.as_bytes()).ok();
+      write(stderr, b"\n").ok();
+    }
 
     let mut elem_iter = elements.into_iter();
     let mut skip = false;
@@ -485,7 +493,7 @@ impl Dispatcher {
 
     self.io_stack.append_to_frame(func.redirs);
 
-		let name = func_name.as_str().to_string();
+    let name = func_name.as_str().to_string();
     blame.rename(name.clone());
 
     argv.insert(0, func_name.clone());
@@ -1286,16 +1294,14 @@ pub fn prepare_argv(argv: Vec<Tk>) -> ShResult<Vec<(String, Span)>> {
   let mut args = vec![];
 
   for arg in argv {
-		log::debug!("Preparing argv arg: {:?}", arg);
     let span = arg.span.clone();
     let expanded = arg.expand()?;
     for exp in expanded.get_words() {
-			log::debug!("Expanded argv word: {}", exp);
       args.push((exp, span.clone()))
     }
   }
 
-	xtrace_print(&args);
+  xtrace_print(&args);
   Ok(args)
 }
 

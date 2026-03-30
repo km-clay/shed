@@ -1,6 +1,7 @@
-use super::{CmdReplay, ModeReport, EditMode, common_cmds};
+use super::{CmdReplay, EditMode, ModeReport, common_cmds};
+use crate::readline::editcmd::{Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
-use crate::readline::editcmd::{Direction, Motion, MotionCmd, To, Verb, VerbCmd, EditCmd, Word};
+use crate::{motion, verb};
 
 #[derive(Default, Debug)]
 pub struct ViReplace {
@@ -35,51 +36,44 @@ impl EditMode for ViReplace {
   fn handle_key(&mut self, key: E) -> Option<EditCmd> {
     match key {
       E(K::Char(ch), M::NONE) => {
-        self.pending_cmd.set_verb(VerbCmd(1, Verb::ReplaceChar(ch)));
-        self
-          .pending_cmd
-          .set_motion(MotionCmd(1, Motion::ForwardChar));
+        self.pending_cmd.set_verb(verb!(Verb::ReplaceChar(ch)));
+        self.pending_cmd.set_motion(motion!(Motion::ForwardChar));
         self.register_and_return()
       }
       E(K::ExMode, _) => Some(EditCmd {
         register: Default::default(),
-        verb: Some(VerbCmd(1, Verb::ExMode)),
+        verb: Some(verb!(Verb::ExMode)),
         motion: None,
         raw_seq: String::new(),
         flags: Default::default(),
       }),
       E(K::Char('W'), M::CTRL) => {
-        self.pending_cmd.set_verb(VerbCmd(1, Verb::Delete));
-        self.pending_cmd.set_motion(MotionCmd(
-          1,
-          Motion::WordMotion(To::Start, Word::Normal, Direction::Backward),
-        ));
+        self.pending_cmd.set_verb(verb!(Verb::Delete));
+        self.pending_cmd.set_motion(motion!(Motion::WordMotion(
+          To::Start,
+          Word::Normal,
+          Direction::Backward
+        )));
         self.register_and_return()
       }
       E(K::Char('H'), M::CTRL) | E(K::Backspace, M::NONE) => {
-        self
-          .pending_cmd
-          .set_motion(MotionCmd(1, Motion::BackwardChar));
+        self.pending_cmd.set_motion(motion!(Motion::BackwardChar));
         self.register_and_return()
       }
 
       E(K::BackTab, M::NONE) => {
-        self
-          .pending_cmd
-          .set_verb(VerbCmd(1, Verb::CompleteBackward));
+        self.pending_cmd.set_verb(verb!(Verb::CompleteBackward));
         self.register_and_return()
       }
 
       E(K::Char('I'), M::CTRL) | E(K::Tab, M::NONE) => {
-        self.pending_cmd.set_verb(VerbCmd(1, Verb::Complete));
+        self.pending_cmd.set_verb(verb!(Verb::Complete));
         self.register_and_return()
       }
 
       E(K::Esc, M::NONE) => {
-        self.pending_cmd.set_verb(VerbCmd(1, Verb::NormalMode));
-        self
-          .pending_cmd
-          .set_motion(MotionCmd(1, Motion::BackwardChar));
+        self.pending_cmd.set_verb(verb!(Verb::NormalMode));
+        self.pending_cmd.set_motion(motion!(Motion::BackwardChar));
         self.register_and_return()
       }
       _ => common_cmds(key),

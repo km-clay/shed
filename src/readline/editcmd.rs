@@ -4,13 +4,49 @@ use bitflags::bitflags;
 
 use crate::{
   readline::{
-    linebuf::{Grapheme, Pos},
     editmode::ex::SubFlags,
+    linebuf::{Grapheme, Pos},
   },
   state::read_shopts,
 };
 
 use super::register::{RegisterContent, append_register, read_register, write_register};
+
+#[macro_export]
+/// Shorthand for creating VerbCmds, like `verb!(Verb::Delete)` or `verb!(3, Verb::Change)`
+/// If no count is given, the count defaults to 1.
+macro_rules! verb {
+  ($verb:expr) => {
+    VerbCmd(1, $verb)
+  };
+  ($verb:expr,) => {
+    VerbCmd(1, $verb)
+  };
+  ($count:expr, $verb:expr) => {
+    VerbCmd($count, $verb)
+  };
+  ($count:expr, $verb:expr,) => {
+    VerbCmd($count, $verb)
+  };
+}
+
+#[macro_export]
+/// Shorthand for creating MotionCmds, like `motion!(Motion::ForwardChar)` or `motion!(3, Motion::LineDown)`
+/// If no count is given, the count defaults to 1.
+macro_rules! motion {
+  ($motion:expr) => {
+    MotionCmd(1, $motion)
+  };
+  ($motion:expr,) => {
+    MotionCmd(1, $motion)
+  };
+  ($count:expr, $motion:expr) => {
+    MotionCmd($count, $motion)
+  };
+  ($count:expr, $motion:expr,) => {
+    MotionCmd($count, $motion)
+  };
+}
 
 //TODO: write tests that take edit results and cursor positions from actual
 // neovim edits and test them against the behavior of this editor
@@ -101,6 +137,9 @@ impl EditCmd {
   }
   pub fn verb(&self) -> Option<&VerbCmd> {
     self.verb.as_ref()
+  }
+  pub fn verb_mut(&mut self) -> Option<&mut VerbCmd> {
+    self.verb.as_mut()
   }
   pub fn motion(&self) -> Option<&MotionCmd> {
     self.motion.as_ref()
@@ -222,9 +261,21 @@ impl MotionCmd {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Verb {
-	Kill,
-	KillPut,
-	KillCycle,
+  // misc stuff
+  HistoryUp,
+  HistoryDown,
+  ClearScreen,
+
+  // emacs stuff
+  Kill,
+  KillPut,
+  KillCycle,
+  TransposeChar,
+  TransposeWord,
+  Capitalize,
+
+  // vi stuff
+  DeleteOrEof,
   Delete,
   Change,
   Yank,
@@ -262,6 +313,7 @@ pub enum Verb {
   AcceptLineOrNewline,
   EndOfFile,
   PrintPosition,
+
   // Ex-mode verbs
   ExMode,
   ShellCmd(String),

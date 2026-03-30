@@ -1634,6 +1634,7 @@ impl ParseStream {
 
     while let Some(prefix_tk) = tk_iter.next() {
       if let TkRule::CasePattern = prefix_tk.class {
+				self.panic_mode(&mut node_tks);
         return Err(parse_err_full(
           "Found case pattern in command",
           &prefix_tk.span,
@@ -1714,7 +1715,13 @@ impl ParseStream {
         TkRule::Redir => {
           node_tks.push(tk.clone());
           let ctx = self.context.clone();
-          let redir = Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx)?;
+          let redir = match Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx) {
+            Ok(r) => r,
+            Err(e) => {
+              self.panic_mode(&mut node_tks);
+              return Err(e);
+            }
+          };
           redirs.push(redir);
         }
         _ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),

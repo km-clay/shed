@@ -2,8 +2,7 @@
 use std::os::fd::AsRawFd;
 
 use crate::{
-  readline::{Prompt, ShedLine, annotate_input},
-  testutil::TestGuard,
+  readline::{Prompt, ShedLine, annotate_input}, state::write_shopts, testutil::TestGuard
 };
 
 fn assert_annotated(input: &str, expected: &str) {
@@ -21,8 +20,10 @@ macro_rules! vi_test {
 							vi.feed_bytes(b"\x1b"); // Start in normal mode
 							vi.process_input().unwrap();
 
-							vi.feed_bytes($op.as_bytes());
-							vi.process_input().unwrap();
+							for byte in $op.as_bytes() {
+								vi.feed_bytes(&[*byte]);
+								vi.process_input().unwrap();
+							}
 							assert_eq!(vi.editor.joined(), $expected_text);
 							assert_eq!(vi.editor.cursor_to_flat(), $expected_cursor);
 						}
@@ -283,6 +284,7 @@ fn annotate_multiple_redirects() {
 // ===================== Vi Tests =====================
 
 fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
+	write_shopts(|o| o.set.vi = true);
   let g = TestGuard::new();
   let prompt = Prompt::default();
   let vi = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd())
@@ -534,13 +536,13 @@ fn vi_auto_indent_siblings() {
 
   // Type each line and press Enter separately so auto-indent triggers
   let lines = [
-		"if foo; then",
-			"echo foo",
-			"elif bar; then",
-			"echo biz",
-			"else",
-			"echo bar",
-			"fi"
+    "if foo; then",
+    "echo foo",
+    "elif bar; then",
+    "echo biz",
+    "else",
+    "echo bar",
+    "fi",
   ];
 
   for (i, line) in lines.iter().enumerate() {

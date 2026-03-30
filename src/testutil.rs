@@ -38,7 +38,6 @@ pub fn test_input(input: impl Into<String>) -> ShResult<()> {
 }
 
 pub struct TestGuard {
-  _lock: MutexGuard<'static, ()>,
   _redir_guard: RedirGuard,
   old_cwd: PathBuf,
   saved_env: HashMap<String, String>,
@@ -50,8 +49,6 @@ pub struct TestGuard {
 
 impl TestGuard {
   pub fn new() -> Self {
-    let _lock = TEST_MUTEX.lock().unwrap();
-
     let pty = openpty(None, None).unwrap();
     let (pty_master, pty_slave) = (pty.master, pty.slave);
     let mut attrs = tcgetattr(&pty_slave).unwrap();
@@ -88,7 +85,6 @@ impl TestGuard {
     SHED.with(|s| s.save());
     save_registers();
     Self {
-      _lock,
       _redir_guard,
       old_cwd,
       saved_env,

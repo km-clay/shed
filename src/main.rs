@@ -18,9 +18,9 @@ pub mod signal;
 pub mod state;
 
 #[cfg(test)]
-pub mod testutil;
-#[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub mod testutil;
 
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::net::UnixListener;
@@ -268,7 +268,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     });
     error::clear_color();
 
-		readline.fix_editing_mode();
+    readline.fix_editing_mode();
 
     // Handle any pending signals
     while signals_pending() {
@@ -331,15 +331,13 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
       if screensaver_idle_time == 0 || screensaver_cmd.is_empty() {
         PollTimeout::NONE
-			} else {
-				exec_if_timeout = Some(screensaver_cmd);
-				match PollTimeout::try_from((screensaver_idle_time * 1000) as i32) {
-					Ok(timeout) => {
-						timeout
-					},
-					Err(_) => PollTimeout::NONE
-				}
-			}
+      } else {
+        exec_if_timeout = Some(screensaver_cmd);
+        match PollTimeout::try_from((screensaver_idle_time * 1000) as i32) {
+          Ok(timeout) => timeout,
+          Err(_) => PollTimeout::NONE,
+        }
+      }
     };
 
     match poll(&mut fds, timeout) {
@@ -456,7 +454,10 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   Ok(())
 }
 
-fn handle_readline_event(readline: &mut ShedLine, event: ShResult<ReadlineEvent>) -> ShResult<bool> {
+fn handle_readline_event(
+  readline: &mut ShedLine,
+  event: ShResult<ReadlineEvent>,
+) -> ShResult<bool> {
   match event {
     Ok(ReadlineEvent::Line(input)) => {
       let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));

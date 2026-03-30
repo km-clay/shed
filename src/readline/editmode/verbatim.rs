@@ -1,6 +1,7 @@
-use super::{CmdReplay, ModeReport, EditMode, common_cmds};
+use super::{CmdReplay, EditMode, ModeReport, common_cmds};
+use crate::readline::editcmd::{CmdFlags, EditCmd, RegisterName, To, Verb, VerbCmd};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E};
-use crate::readline::editcmd::{CmdFlags, RegisterName, To, Verb, VerbCmd, EditCmd};
+use crate::verb;
 
 #[derive(Default, Clone, Debug)]
 pub struct ViVerbatim {
@@ -27,7 +28,7 @@ impl EditMode for ViVerbatim {
         log::debug!("Received verbatim key sequence: {:?}", seq);
         let cmd = EditCmd {
           register: RegisterName::default(),
-          verb: Some(VerbCmd(1, Verb::Insert(seq.to_string()))),
+          verb: Some(verb!(Verb::Insert(seq.to_string()))),
           motion: None,
           raw_seq: seq.to_string(),
           flags: CmdFlags::EXIT_CUR_MODE,

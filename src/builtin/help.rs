@@ -1,4 +1,8 @@
-use std::{env, io::Write, path::{Path, PathBuf}};
+use std::{
+  env,
+  io::Write,
+  path::{Path, PathBuf},
+};
 
 use crate::{
   builtin::join_raw_arg_iter,
@@ -73,7 +77,7 @@ pub fn help(node: Node) -> ShResult<()> {
   }
 
   // didn't find a filename match, its probably a tag search
-	let mut tags = vec![];
+  let mut tags = vec![];
   for path in hpath.split(':') {
     let path = Path::new(path);
     if let Ok(entries) = path.read_dir() {
@@ -85,31 +89,31 @@ pub fn help(node: Node) -> ShResult<()> {
         }
 
         let mut new_tags = read_tags(&path)?;
-				score_matches(&topic, &mut new_tags);
-				tags.append(&mut new_tags);
+        score_matches(&topic, &mut new_tags);
+        tags.append(&mut new_tags);
       }
     }
   }
 
-	tags.sort_by_key(|t| t.score());
-	log::debug!("tags: {tags:#?}");
-	if let Some(best) = tags.last() {
-		let ScoredTag { tag: _, line, file } = best;
-		let file_name = file.file_stem().map(|s| s.to_string_lossy().to_string());
-		let contents = std::fs::read_to_string(file)?;
-		let expanded = expand_help(&unescape_help(&contents));
-		open_help(&expanded, Some(*line), file_name)?;
+  tags.sort_by_key(|t| t.score());
+  log::debug!("tags: {tags:#?}");
+  if let Some(best) = tags.last() {
+    let ScoredTag { tag: _, line, file } = best;
+    let file_name = file.file_stem().map(|s| s.to_string_lossy().to_string());
+    let contents = std::fs::read_to_string(file)?;
+    let expanded = expand_help(&unescape_help(&contents));
+    open_help(&expanded, Some(*line), file_name)?;
 
-		state::set_status(0);
-		Ok(())
-	} else {
-		state::set_status(1);
-		Err(ShErr::at(
-			ShErrKind::NotFound,
-			span,
-			"No relevant help page found for this topic",
-		))
-	}
+    state::set_status(0);
+    Ok(())
+  } else {
+    state::set_status(1);
+    Err(ShErr::at(
+      ShErrKind::NotFound,
+      span,
+      "No relevant help page found for this topic",
+    ))
+  }
 }
 
 pub fn open_help(content: &str, line: Option<usize>, file_name: Option<String>) -> ShResult<()> {
@@ -136,21 +140,25 @@ pub fn open_help(content: &str, line: Option<usize>, file_name: Option<String>) 
 
 #[derive(Debug)]
 pub struct ScoredTag {
-	tag: ScoredCandidate,
-	line: usize,
-	file: PathBuf
+  tag: ScoredCandidate,
+  line: usize,
+  file: PathBuf,
 }
 
 impl ScoredTag {
-	pub fn new<P: AsRef<Path>>(tag: ScoredCandidate, line: usize, file: P) -> Self {
-		Self { tag, line, file: file.as_ref().to_path_buf() }
-	}
-	pub fn fuzzy_score(&mut self, topic: &str) {
-		self.tag.fuzzy_score(topic);
-	}
-	pub fn score(&self) -> i32 {
-		self.tag.score.unwrap_or(i32::MIN)
-	}
+  pub fn new<P: AsRef<Path>>(tag: ScoredCandidate, line: usize, file: P) -> Self {
+    Self {
+      tag,
+      line,
+      file: file.as_ref().to_path_buf(),
+    }
+  }
+  pub fn fuzzy_score(&mut self, topic: &str) {
+    self.tag.fuzzy_score(topic);
+  }
+  pub fn score(&self) -> i32 {
+    self.tag.score.unwrap_or(i32::MIN)
+  }
 }
 
 pub fn score_matches(topic: &str, tags: &mut Vec<ScoredTag>) {
@@ -162,10 +170,10 @@ pub fn score_matches(topic: &str, tags: &mut Vec<ScoredTag>) {
 }
 
 pub fn read_tags(path: &Path) -> ShResult<Vec<ScoredTag>> {
-	let contents = std::fs::read_to_string(path)?;
+  let contents = std::fs::read_to_string(path)?;
 
-	let unescaped = unescape_help(&contents);
-	let raw = expand_help(&unescaped);
+  let unescaped = unescape_help(&contents);
+  let raw = expand_help(&unescaped);
   let mut tags = vec![];
 
   for (line_num, line) in raw.lines().enumerate() {
@@ -174,11 +182,11 @@ pub fn read_tags(path: &Path) -> ShResult<Vec<ScoredTag>> {
     while let Some(pos) = rest.find(TAG_SEQ) {
       let after_seq = &rest[pos + TAG_SEQ.len()..];
       if let Some(end) = after_seq.find(RESET_SEQ) {
-				let tag = ScoredTag {
-					tag: ScoredCandidate::new(after_seq[..end].into()).with_len_penalty(true),
-					line: line_num + 1,
-					file: path.to_path_buf()
-				};
+        let tag = ScoredTag {
+          tag: ScoredCandidate::new(after_seq[..end].into()).with_len_penalty(true),
+          line: line_num + 1,
+          file: path.to_path_buf(),
+        };
         tags.push(tag);
         rest = &after_seq[end + RESET_SEQ.len()..];
       } else {

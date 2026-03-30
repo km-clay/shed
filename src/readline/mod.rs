@@ -1,3 +1,6 @@
+use crate::motion;
+use editcmd::{CmdFlags, EditCmd, Motion, MotionCmd, RegisterName, Verb, VerbCmd};
+use editmode::{CmdReplay, EditMode, ModeReport, ViInsert, ViNormal, ViReplace, ViVisual};
 use history::History;
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::LineBuf;
@@ -5,19 +8,17 @@ use std::collections::VecDeque;
 use std::fmt::Write;
 use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
 use unicode_width::UnicodeWidthStr;
-use editcmd::{CmdFlags, Motion, MotionCmd, RegisterName, Verb, VerbCmd, EditCmd};
-use editmode::{CmdReplay, ModeReport, ViInsert, EditMode, ViNormal, ViReplace, ViVisual};
 
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::expand_prompt;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
+use crate::readline::editcmd::Direction;
 use crate::readline::editmode::emacs::Emacs;
+use crate::readline::editmode::{ViEx, ViVerbatim};
 use crate::readline::history::HistEntry;
 use crate::readline::term::{Pos, TermReader, calc_str_width};
-use crate::readline::editcmd::Direction;
-use crate::readline::editmode::{ViEx, ViVerbatim};
 use crate::state::{
   AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta,
   write_vars,
@@ -33,6 +34,8 @@ use crate::{
 use crate::{prelude::*, state};
 
 pub mod complete;
+pub mod editcmd;
+pub mod editmode;
 pub mod highlight;
 pub mod history;
 pub mod keys;
@@ -40,8 +43,6 @@ pub mod layout;
 pub mod linebuf;
 pub mod register;
 pub mod term;
-pub mod editcmd;
-pub mod editmode;
 
 #[cfg(test)]
 pub mod tests;
@@ -301,6 +302,11 @@ impl ShedLine {
     } else {
       History::empty()
     };
+    let mode = if read_shopts(|o| o.set.vi) {
+      Box::new(ViInsert::new()) as Box<dyn EditMode>
+    } else {
+      Box::new(Emacs::new()) as Box<dyn EditMode>
+    };
     let mut new = Self {
       reader: PollReader::new(),
       writer: TermWriter::new(tty),
@@ -308,7 +314,7 @@ impl ShedLine {
       tty,
       completer: Box::new(FuzzyCompleter::default()),
       highlighter: Highlighter::new(),
-      mode: Box::new(ViInsert::new()),
+      mode,
       saved_mode: None,
       pending_keymap: Vec::new(),
       old_layout: None,
@@ -392,7 +398,13 @@ impl ShedLine {
     // so print_line can call clear_rows with the full multi-line layout
     self.prompt.refresh();
     self.editor = Default::default();
-    self.swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn EditMode>));
+    let mut mode = if read_shopts(|o| o.set.vi) {
+      Box::new(ViInsert::new()) as Box<dyn EditMode>
+    } else {
+      Box::new(Emacs::new()) as Box<dyn EditMode>
+    };
+
+    self.swap_mode(&mut mode);
     self.needs_redraw = true;
     if full_redraw {
       self.old_layout = None;
@@ -419,7 +431,7 @@ impl ShedLine {
       ModeReport::Visual => flags |= KeyMapFlags::VISUAL,
       ModeReport::Replace => flags |= KeyMapFlags::REPLACE,
       ModeReport::Verbatim => flags |= KeyMapFlags::VERBATIM,
-			ModeReport::Emacs => flags |= KeyMapFlags::EMACS,
+      ModeReport::Emacs => flags |= KeyMapFlags::EMACS,
       ModeReport::Unknown => todo!(),
     }
 
@@ -430,17 +442,14 @@ impl ShedLine {
     flags
   }
 
-	/// This method ensures that the editing mode (Vi or Emacs) matches the 'vi' option, and switches modes if necessary.
-	pub fn fix_editing_mode(&mut self) {
-		if read_shopts(|o| o.set.vi)
-		&& self.mode.report_mode() == ModeReport::Emacs {
-			self.swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn EditMode>));
-		}
-		else if !read_shopts(|o| o.set.vi)
-		&& self.mode.report_mode() != ModeReport::Emacs {
-			self.swap_mode(&mut (Box::new(Emacs::new()) as Box<dyn EditMode>));
-		}
-	}
+  /// This method ensures that the editing mode (Vi or Emacs) matches the 'vi' option, and switches modes if necessary.
+  pub fn fix_editing_mode(&mut self) {
+    if read_shopts(|o| o.set.vi) && self.mode.report_mode() == ModeReport::Emacs {
+      self.swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn EditMode>));
+    } else if !read_shopts(|o| o.set.vi) && self.mode.report_mode() != ModeReport::Emacs {
+      self.swap_mode(&mut (Box::new(Emacs::new()) as Box<dyn EditMode>));
+    }
+  }
 
   fn should_submit(&mut self) -> ShResult<bool> {
     if self.mode.report_mode() == ModeReport::Normal {
@@ -898,9 +907,10 @@ impl ShedLine {
       return Ok(None);
     };
 
-    let Some(cmd) = cmd else {
+    let Some(mut cmd) = cmd else {
       return Ok(None);
     };
+
     if !cmd.is_virtual_scroll() {
       self.history.stop_virtual_scroll();
       self.editor.clear_concats();
@@ -926,6 +936,20 @@ impl ShedLine {
     {
       return self.submit();
     }
+
+    if let Some(VerbCmd(_, v @ Verb::DeleteOrEof)) = cmd.verb_mut() {
+      // user pressed Ctrl+D in emacs mode
+      // we've gotta resolve this into either Delete or EndOfFile here
+      if self.focused_editor().is_empty() {
+        *v = Verb::EndOfFile;
+      } else {
+        *v = Verb::Delete;
+      }
+    } else if let Some(VerbCmd(_, Verb::ClearScreen)) = cmd.verb() {
+			self.writer.clear_screen()?;
+			self.needs_redraw = true;
+			return Ok(None);
+		}
 
     if (cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile)
       && self.focused_editor().joined().is_empty())
@@ -1087,8 +1111,23 @@ impl ShedLine {
       self.history.constrain_entries(constraint);
     }
     */
-    let count = &cmd.motion().unwrap().0;
-    let motion = &cmd.motion().unwrap().1;
+    let count = if cmd.motion().is_some() {
+			&cmd.motion().unwrap().0
+		} else {
+			match cmd.verb() {
+				Some(VerbCmd(c, _)) => c,
+				_ => unreachable!()
+			}
+		};
+    let motion = if cmd.motion().is_some() {
+			cmd.motion().unwrap().1.clone()
+		} else {
+			match cmd.verb() {
+				Some(VerbCmd(_, Verb::HistoryUp)) => Motion::LineUp,
+				Some(VerbCmd(_, Verb::HistoryDown)) => Motion::LineDown,
+				_ => unreachable!(),
+			}
+		};
     let count = match motion {
       Motion::LineUp => -(*count as isize),
       Motion::LineDown => *count as isize,
@@ -1138,6 +1177,9 @@ impl ShedLine {
 
   pub fn should_grab_history(&mut self, cmd: &EditCmd) -> bool {
     cmd.is_virtual_scroll()
+      || cmd
+        .verb()
+        .is_some_and(|v| matches!(v, VerbCmd(_, Verb::HistoryUp | Verb::HistoryDown)))
       || cmd.verb().is_none()
         && (cmd
           .motion()
@@ -1442,7 +1484,7 @@ impl ShedLine {
     }
 
     if let Some(range) = self.editor.select_range() {
-      cmd.motion = Some(MotionCmd(1, range))
+      cmd.motion = Some(motion!(range))
     }
 
     // Set cursor clamp BEFORE executing the command so that motions
@@ -1480,7 +1522,7 @@ impl ShedLine {
       ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())),
       ModeReport::Replace => Box::new(ViReplace::new()),
       ModeReport::Verbatim => Box::new(ViVerbatim::new()),
-			ModeReport::Emacs => Box::new(Emacs::new()),
+      ModeReport::Emacs => Box::new(Emacs::new()),
       ModeReport::Unknown => unreachable!(),
     }
   }
@@ -1523,7 +1565,7 @@ impl ShedLine {
             ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())) as Box<dyn EditMode>,
             ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn EditMode>,
             ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn EditMode>,
-						ModeReport::Emacs => Box::new(Emacs::new()) as Box<dyn EditMode>,
+            ModeReport::Emacs => Box::new(Emacs::new()) as Box<dyn EditMode>,
             ModeReport::Unknown => unreachable!(),
           };
           self.mode = old_mode_clone;
@@ -1588,7 +1630,7 @@ impl ShedLine {
     if cmd.verb().is_some()
       && let Some(range) = self.editor.select_range()
     {
-      cmd.motion = Some(MotionCmd(1, range))
+      cmd.motion = Some(motion!(range))
     };
 
     if cmd.is_mode_transition() {
@@ -1609,7 +1651,7 @@ impl ShedLine {
           // The motion is assigned in the line buffer execution, so we also have to
           // assign it here in order to be able to repeat it
           if let Some(range) = self.editor.select_range() {
-            cmd.motion = Some(MotionCmd(1, range))
+            cmd.motion = Some(motion!(range))
           } else {
             log::warn!("You're in visual mode with no select range??");
           };

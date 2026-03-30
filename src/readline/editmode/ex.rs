@@ -8,15 +8,16 @@ use crate::bitflags;
 use crate::expand::Expander;
 use crate::libsh::error::{ShErr, ShErrKind, ShResult};
 use crate::parse::lex::TkFlags;
+use crate::readline::editcmd::{
+  Anchor, CmdFlags, EditCmd, Motion, MotionCmd, ReadSrc, RegisterName, To, Val, Verb, VerbCmd,
+  WriteDest,
+};
+use crate::readline::editmode::{EditMode, ModeReport, ViInsert};
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
-use crate::readline::editcmd::{
-  Anchor, CmdFlags, Motion, MotionCmd, ReadSrc, RegisterName, To, Val, Verb, VerbCmd, EditCmd,
-  WriteDest,
-};
-use crate::readline::editmode::{ModeReport, ViInsert, EditMode};
 use crate::state::write_meta;
+use crate::{motion, verb};
 
 bitflags! {
   #[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -130,7 +131,7 @@ impl EditMode for ViEx {
       }
       E(C::Esc, M::NONE) => Ok(Some(EditCmd {
         register: RegisterName::default(),
-        verb: Some(VerbCmd(1, Verb::NormalMode)),
+        verb: Some(verb!(Verb::NormalMode)),
         motion: None,
         flags: CmdFlags::empty(),
         raw_seq: "".into(),
@@ -210,9 +211,9 @@ fn parse_ex_cmd(raw: &str) -> Result<Option<EditCmd>, Option<String>> {
       let Some(result) = parse_global(&mut chars)? else {
         return Ok(None);
       };
-      (Some(VerbCmd(1, result.1)), Some(MotionCmd(1, result.0)))
+      (Some(verb!(result.1)), Some(motion!(result.0)))
     } else {
-      (parse_ex_command(&mut chars)?.map(|v| VerbCmd(1, v)), None)
+      (parse_ex_command(&mut chars)?.map(|v| verb!(v)), None)
     }
   };
 

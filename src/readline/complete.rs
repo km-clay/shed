@@ -18,11 +18,11 @@ use crate::{
   },
   readline::{
     Marker, annotate_input_recursive,
+    editmode::{EditMode, ViInsert},
     keys::{KeyCode as C, KeyEvent as K, ModKeys as M},
     linebuf::LineBuf,
     markers::{self, is_marker},
     term::{LineWriter, TermWriter, calc_str_width, get_win_size},
-    editmode::{ViInsert, EditMode},
   },
   state::{
     VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars,
@@ -778,7 +778,7 @@ pub trait Completer {
 pub struct ScoredCandidate {
   pub candidate: Candidate,
   pub score: Option<i32>,
-	pub penalize_len_diff: bool
+  pub penalize_len_diff: bool,
 }
 
 impl ScoredCandidate {
@@ -792,13 +792,13 @@ impl ScoredCandidate {
     Self {
       candidate,
       score: None,
-			penalize_len_diff: false
+      penalize_len_diff: false,
     }
   }
-	pub fn with_len_penalty(mut self, enable: bool) -> Self {
-		self.penalize_len_diff = enable;
-		self
-	}
+  pub fn with_len_penalty(mut self, enable: bool) -> Self {
+    self.penalize_len_diff = enable;
+    self
+  }
   fn is_word_bound(prev: char, curr: char) -> bool {
     match prev {
       '/' | '_' | '-' | '.' | ' ' => true,
@@ -849,11 +849,11 @@ impl ScoredCandidate {
       }
     }
 
-		if self.penalize_len_diff {
-			let len_diff = (candidate_chars.len() as isize - query_chars.len() as isize).unsigned_abs();
-			let len_penalty = (len_diff as i32) * 2;
-			score -= len_penalty;
-		}
+    if self.penalize_len_diff {
+      let len_diff = (candidate_chars.len() as isize - query_chars.len() as isize).unsigned_abs();
+      let len_penalty = (len_diff as i32) * 2;
+      score -= len_penalty;
+    }
 
     self.score = Some(score);
     score
@@ -865,7 +865,7 @@ impl From<String> for ScoredCandidate {
     Self {
       candidate: content.into(),
       score: None,
-			penalize_len_diff: false
+      penalize_len_diff: false,
     }
   }
 }
@@ -875,7 +875,7 @@ impl From<Candidate> for ScoredCandidate {
     Self {
       candidate,
       score: None,
-			penalize_len_diff: false
+      penalize_len_diff: false,
     }
   }
 }
@@ -1422,7 +1422,12 @@ impl Completer for FuzzyCompleter {
       )
     };
     let escaped = escape_str(&completion, false);
-		log::debug!("Prefix: '{}', Completion: '{}', Escaped: '{}'", prefix, completion, escaped);
+    log::debug!(
+      "Prefix: '{}', Completion: '{}', Escaped: '{}'",
+      prefix,
+      completion,
+      escaped
+    );
     let ret = format!(
       "{}{}{}",
       prefix,

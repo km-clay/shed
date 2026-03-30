@@ -10,7 +10,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
 use super::editcmd::{
-  Anchor, Bound, Dest, Direction, Motion, MotionCmd, TextObj, To, Verb, EditCmd, Word,
+  Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
   expand::expand_cmd_sub,
@@ -26,11 +26,11 @@ use crate::{
   prelude::*,
   procio::{IoFrame, IoMode, IoStack},
   readline::{
+    editcmd::{ReadSrc, VerbCmd, WriteDest},
     highlight::Highlighter,
     markers,
     register::RegisterContent,
     term::get_win_size,
-    editcmd::{ReadSrc, VerbCmd, WriteDest},
   },
   state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars},
 };
@@ -60,13 +60,13 @@ impl Grapheme {
     self.0.len() == 1 && self.0[0] == c
   }
   /// Returns the CharClass of the Grapheme, which is determined by the properties of its chars
-	/// Used for things like word motions
+  /// Used for things like word motions
   pub fn class(&self) -> CharClass {
     CharClass::from(self)
   }
 
-	/// If the Grapheme consists of exactly one char, returns that char. Otherwise, returns None.
-	/// All callsites that use this method operate on ascii, so never returning anything for multibyte sequences is fine.
+  /// If the Grapheme consists of exactly one char, returns that char. Otherwise, returns None.
+  /// All callsites that use this method operate on ascii, so never returning anything for multibyte sequences is fine.
   pub fn as_char(&self) -> Option<char> {
     if self.0.len() == 1 {
       Some(self.0[0])
@@ -464,11 +464,11 @@ impl IndentCtx {
     self.depth += 1;
   }
 
-	pub fn swap_top(&mut self, tk: Tk) {
-		if let Some(top) = self.ctx.last_mut() {
-			*top = tk;
-		}
-	}
+  pub fn swap_top(&mut self, tk: Tk) {
+    if let Some(top) = self.ctx.last_mut() {
+      *top = tk;
+    }
+  }
 
   pub fn ascend(&mut self) {
     self.depth = self.depth.saturating_sub(1);
@@ -487,15 +487,17 @@ impl IndentCtx {
     }
   }
 
-	pub fn is_sibling(&self, other: &str) -> bool {
-		let Some(last) = self.ctx.last() else { return false; };
-		let last = last.as_str();
-		if last == "if" || last == "elif" {
-			other == "elif" || other == "else"
-		} else {
-			false
-		}
-	}
+  pub fn is_sibling(&self, other: &str) -> bool {
+    let Some(last) = self.ctx.last() else {
+      return false;
+    };
+    let last = last.as_str();
+    if last == "if" || last == "elif" {
+      other == "elif" || other == "else"
+    } else {
+      false
+    }
+  }
 
   pub fn calculate(&mut self, input: &str) -> usize {
     self.depth = 0;
@@ -552,73 +554,74 @@ fn extract_range_contiguous(buf: &mut Vec<Line>, start: Pos, end: Pos) -> Vec<Li
   extracts
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct KillRing {
-	pub kills: VecDeque<Vec<Line>>,
-	pub merging: bool,
-	pub selected: Option<usize>,
-	pub kill_cycle_span: Option<(Pos,Pos)>,
+  pub kills: VecDeque<Vec<Line>>,
+  pub merging: bool,
+  pub selected: Option<usize>,
+  pub kill_cycle_span: Option<(Pos, Pos)>,
 }
 
 impl KillRing {
-	pub fn new() -> Self {
-		Self {
-			kills: VecDeque::new(),
-			merging: false,
-			selected: None,
-			kill_cycle_span: None,
-		}
-	}
-	pub fn push_back(&mut self, kill: Vec<Line>) {
-		if kill.is_empty() || (kill.len() == 1 && kill[0].is_empty()) {
-			return;
-		}
-		self.kills.push_back(kill);
-		if self.kills.len() > LineBuf::MAX_KILL_RING {
-			self.kills.pop_front();
-		}
-	}
-	pub fn push_front(&mut self, kill: Vec<Line>) {
-		if kill.is_empty() || (kill.len() == 1 && kill[0].is_empty()) {
-			return;
-		}
-		self.kills.push_front(kill);
-		if self.kills.len() > LineBuf::MAX_KILL_RING {
-			self.kills.pop_back();
-		}
-	}
-	pub fn pop_back(&mut self) -> Option<Vec<Line>> {
-		self.kills.pop_back()
-	}
-	pub fn pop_front(&mut self) -> Option<Vec<Line>> {
-		self.kills.pop_front()
-	}
-	pub fn len(&self) -> usize {
-		self.kills.len()
-	}
-	pub fn is_empty(&self) -> bool {
-		self.kills.is_empty()
-	}
-	pub fn next_idx(&mut self) -> usize {
-		let idx = match self.selected {
-			Some(0) | None => self.kills.len(),
-			Some(i) => i,
-		}.saturating_sub(1);
-		self.selected = Some(idx);
-		idx
-	}
-	pub fn reset(&mut self) {
-		self.selected = None;
-		self.kill_cycle_span = None;
-	}
+  pub fn new() -> Self {
+    Self {
+      kills: VecDeque::new(),
+      merging: false,
+      selected: None,
+      kill_cycle_span: None,
+    }
+  }
+  pub fn push_back(&mut self, kill: Vec<Line>) {
+    if kill.is_empty() || (kill.len() == 1 && kill[0].is_empty()) {
+      return;
+    }
+    self.kills.push_back(kill);
+    if self.kills.len() > LineBuf::MAX_KILL_RING {
+      self.kills.pop_front();
+    }
+  }
+  pub fn push_front(&mut self, kill: Vec<Line>) {
+    if kill.is_empty() || (kill.len() == 1 && kill[0].is_empty()) {
+      return;
+    }
+    self.kills.push_front(kill);
+    if self.kills.len() > LineBuf::MAX_KILL_RING {
+      self.kills.pop_back();
+    }
+  }
+  pub fn pop_back(&mut self) -> Option<Vec<Line>> {
+    self.kills.pop_back()
+  }
+  pub fn pop_front(&mut self) -> Option<Vec<Line>> {
+    self.kills.pop_front()
+  }
+  pub fn len(&self) -> usize {
+    self.kills.len()
+  }
+  pub fn is_empty(&self) -> bool {
+    self.kills.is_empty()
+  }
+  pub fn next_idx(&mut self) -> usize {
+    let idx = match self.selected {
+      Some(0) | None => self.kills.len(),
+      Some(i) => i,
+    }
+    .saturating_sub(1);
+    self.selected = Some(idx);
+    idx
+  }
+  pub fn reset(&mut self) {
+    self.selected = None;
+    self.kill_cycle_span = None;
+  }
 }
 
 impl Iterator for KillRing {
-	type Item = Vec<Line>;
-	fn next(&mut self) -> Option<Self::Item> {
-		let next_idx = self.next_idx();
-		self.kills.get(next_idx).cloned()
-	}
+  type Item = Vec<Line>;
+  fn next(&mut self) -> Option<Self::Item> {
+    let next_idx = self.next_idx();
+    self.kills.get(next_idx).cloned()
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -639,8 +642,8 @@ pub struct LineBuf {
   pub undo_stack: Vec<Edit>,
   pub redo_stack: Vec<Edit>,
 
-	pub kill_ring: KillRing,
-	pub kill_cycle_pos: Option<Pos>,
+  pub kill_ring: KillRing,
+  pub kill_cycle_pos: Option<Pos>,
 
   pub concat_points: VecDeque<Pos>,
 }
@@ -651,10 +654,7 @@ impl Default for LineBuf {
       lines: vec![Line::from(vec![])],
       hint: None,
       cursor: Cursor {
-        pos: Pos {
-					row: 0,
-					col: 0,
-				},
+        pos: Pos { row: 0, col: 0 },
         exclusive: false,
       },
       select_mode: None,
@@ -665,8 +665,8 @@ impl Default for LineBuf {
       scroll_offset: 0,
       undo_stack: vec![],
       redo_stack: vec![],
-			kill_ring: KillRing::new(),
-			kill_cycle_pos: None,
+      kill_ring: KillRing::new(),
+      kill_cycle_pos: None,
       concat_points: VecDeque::new(),
     }
   }
@@ -674,7 +674,7 @@ impl Default for LineBuf {
 
 #[allow(dead_code, unused_variables)]
 impl LineBuf {
-	const MAX_KILL_RING: usize = 60;
+  const MAX_KILL_RING: usize = 60;
 
   pub fn new() -> Self {
     Self::default()
@@ -854,6 +854,11 @@ impl LineBuf {
 
     (row, col as usize)
   }
+  fn cursor_on_ws(&self) -> bool {
+    let line = self.cur_line();
+    let col = self.cursor.pos.col;
+    line.graphemes().get(col).is_some_and(|g| g.is_ws())
+  }
   fn set_cursor(&mut self, mut pos: Pos) {
     pos.clamp_row(&self.lines);
     pos.clamp_col(&self.lines[pos.row].0, false);
@@ -896,13 +901,14 @@ impl LineBuf {
   }
   fn verb_shell_cmd(&mut self, cmd: &str) -> ShResult<()> {
     let mut vars = HashSet::new();
-    vars.insert("_BUFFER".into());
-    vars.insert("_CURSOR".into());
-    vars.insert("_ANCHOR".into());
+    vars.insert("BUFFER".into());
+    vars.insert("CURSOR".into());
+    vars.insert("ANCHOR".into());
     let _guard = var_ctx_guard(vars);
 
     let mut buf = self.joined();
-    let mut cursor = self.cursor_to_flat();
+    let cursor_raw = self.cursor_to_flat();
+    let mut cursor = cursor_raw.to_string();
     let mut anchor = self
       .select_mode
       .map(|r| match r {
@@ -927,16 +933,30 @@ impl LineBuf {
     })?;
 
     let keys = write_vars(|v| {
-      buf = v.take_var("_BUFFER");
-      cursor = v.take_var("_CURSOR").parse().unwrap_or(cursor);
-      anchor = v.take_var("_ANCHOR");
-      v.take_var("_KEYS")
+      buf = v.take_var("BUFFER");
+      cursor = v.take_var("CURSOR");
+      anchor = v.take_var("ANCHOR");
+      v.take_var("KEYS")
     });
 
     self.set_buffer(buf);
-    self.set_cursor_from_flat(cursor);
+    if let Some((row, col)) = cursor.split_once(':')
+      && let Ok(row) = row.parse::<usize>()
+      && let Ok(col) = col.parse::<usize>()
+    {
+      self.set_cursor(Pos { row, col });
+    } else if let Ok(num) = cursor.parse::<usize>() {
+      self.set_cursor_from_flat(num);
+    } else {
+      log::warn!(
+        "Invalid cursor position returned from shell command: '{}'",
+        cursor
+      );
+      self.set_cursor_from_flat(cursor_raw);
+    };
+
     if let Ok(pos) = anchor.parse()
-      && pos != cursor
+      && pos != cursor_raw
       && self.select_mode.is_some()
     {
       let new_pos = self.pos_from_flat(pos);
@@ -952,29 +972,35 @@ impl LineBuf {
     }
     Ok(())
   }
-	fn insert_lines_at(&mut self, pos: Pos, mut lines: Vec<Line>) {
-		if lines.is_empty() {
-			return;
-		}
-		let row = pos.row;
-		let col = pos.col;
+  fn insert_lines_at(&mut self, pos: Pos, mut lines: Vec<Line>) {
+    if lines.is_empty() {
+      return;
+    }
+    let row = pos.row;
+    let col = pos.col;
 
-		// Split the current line at the insertion point
-		let mut right = self.lines[row].split_off(col);
+    // Split the current line at the insertion point
+    let mut right = self.lines[row].split_off(col);
 
-		let last = lines.len() - 1;
+    let last = lines.len() - 1;
 
-		// First line appends to current line at the split point
-		self.lines[row].append(&mut lines[0]);
+    // First line appends to current line at the split point
+    self.lines[row].append(&mut lines[0]);
 
-		// Middle + last lines get inserted after
-		for (i, line) in lines[1..].iter().cloned().enumerate() {
-			self.lines.insert(row + 1 + i, line);
-		}
+    // Middle + last lines get inserted after
+    for (i, line) in lines[1..].iter().cloned().enumerate() {
+      self.lines.insert(row + 1 + i, line);
+    }
 
-		// Reattach right half to the last inserted line
-		self.lines[row + last].append(&mut right);
-	}
+    // Reattach right half to the last inserted line
+    self.lines[row + last].append(&mut right);
+  }
+  fn remove_at(&mut self, pos: Pos) -> Option<Grapheme> {
+    let Pos { row, col } = pos;
+    let line = self.lines.get_mut(row)?;
+
+    line.0.get(col).is_some().then(|| line.0.remove(col))
+  }
   fn insert_at(&mut self, pos: Pos, gr: Grapheme) {
     if gr.is_lf() {
       self.set_cursor(pos);
@@ -1221,7 +1247,7 @@ impl LineBuf {
     }
 
     target.clamp_row(&self.lines);
-    target.clamp_col(&self.lines[target.row].0, true);
+    target.clamp_col(&self.lines[target.row].0, self.cursor.exclusive);
 
     Some(MotionKind::Char {
       start: self.cursor.pos,
@@ -1433,7 +1459,7 @@ impl LineBuf {
   fn dispatch_text_obj(&mut self, count: u16, obj: TextObj) -> Option<MotionKind> {
     match obj {
       // text structures
-      TextObj::Word(word, bound) => self.text_obj_word(count, word, obj, bound),
+      TextObj::Word(word, bound) => self.text_obj_word(count, self.cursor.pos, word, bound),
       TextObj::Sentence(_)
       | TextObj::Paragraph(_)
       | TextObj::WholeSentence(_)
@@ -1459,12 +1485,12 @@ impl LineBuf {
   fn text_obj_word(
     &mut self,
     count: u16,
+    from: Pos,
     word: Word,
-    obj: TextObj,
     bound: Bound,
   ) -> Option<MotionKind> {
     use CharClass as C;
-    let mut fwd_classes = self.char_classes_forward();
+    let mut fwd_classes = self.char_classes_forward_from(from);
     let first_class = fwd_classes.next()?;
     match first_class {
       (pos, C::Whitespace) => match bound {
@@ -2203,28 +2229,36 @@ impl LineBuf {
     }
     Ok(())
   }
-	fn extract_span(&mut self, span: (Pos,Pos), inclusive: bool) -> Vec<Line> {
-		let (s, e) = ordered(span.0, span.1);
-		let end = if inclusive {
-			Pos {
-				row: e.row,
-				col: e.col + 1,
-			}
-		} else {
-			e
-		};
-		let mut buf = std::mem::take(&mut self.lines);
-		let extracted = extract_range_contiguous(&mut buf, s, end);
-		self.lines = buf;
-		extracted
-	}
+  fn extract_span(&mut self, span: (Pos, Pos), inclusive: bool) -> Vec<Line> {
+    let (s, e) = ordered(span.0, span.1);
+    let end = if inclusive {
+      Pos {
+        row: e.row,
+        col: e.col + 1,
+      }
+    } else {
+      e
+    };
+    let mut buf = std::mem::take(&mut self.lines);
+    let extracted = extract_range_contiguous(&mut buf, s, end);
+    self.lines = buf;
+    extracted
+  }
+  fn yank_span(&self, span: (Pos, Pos), inclusive: bool) -> Vec<Line> {
+    let mut tmp = Self {
+      lines: self.lines.clone(),
+      cursor: self.cursor,
+      ..Default::default()
+    };
+    tmp.extract_span(span, inclusive)
+  }
   fn extract_range(&mut self, motion: &MotionKind) -> Vec<Line> {
     let extracted = match motion {
       MotionKind::Char {
         start,
         end,
         inclusive,
-      } => self.extract_span((*start,*end), *inclusive),
+      } => self.extract_span((*start, *end), *inclusive),
       MotionKind::Line {
         start,
         end,
@@ -2274,7 +2308,7 @@ impl LineBuf {
 
     self.indent_ctx.calculate(&raw)
   }
-  fn motion_mutation(&mut self, motion: MotionKind, f: impl Fn(&Grapheme) -> Grapheme) {
+  fn motion_mutation(&mut self, motion: MotionKind, mut f: impl FnMut(&Grapheme) -> Grapheme) {
     match motion {
       MotionKind::Char {
         start,
@@ -2370,23 +2404,24 @@ impl LineBuf {
     let count = motion.as_ref().map(|m| m.0).unwrap_or(1);
 
     match verb {
-			Verb::Kill => {
-				let Some(motion) = self.eval_motion(cmd) else {
-					return Ok(());
-				};
-				let mut content = self.delete_range(&motion);
-				if self.kill_ring.merging
-				&& let Some(last) = self.kill_ring.kills.back_mut() {
-					last.append(&mut content);
-				} else {
-					self.kill_ring.push_back(content);
-					if self.kill_ring.len() > Self::MAX_KILL_RING {
-						self.kill_ring.pop_front();
-					}
-				}
+      Verb::Kill => {
+        let Some(motion) = self.eval_motion(cmd) else {
+          return Ok(());
+        };
+        let mut content = self.delete_range(&motion);
+        if self.kill_ring.merging
+          && let Some(last) = self.kill_ring.kills.back_mut()
+        {
+          last.append(&mut content);
+        } else {
+          self.kill_ring.push_back(content);
+          if self.kill_ring.len() > Self::MAX_KILL_RING {
+            self.kill_ring.pop_front();
+          }
+        }
 
-				self.kill_ring.merging = true;
-			}
+        self.kill_ring.merging = true;
+      }
       Verb::Delete | Verb::Change | Verb::Yank => {
         let Some(motion) = self.eval_motion(cmd) else {
           return Ok(());
@@ -2517,6 +2552,36 @@ impl LineBuf {
         });
         self.move_to_start(motion);
       }
+      Verb::Capitalize => {
+        // Emacs Alt+C capitalization
+        let Some(motion) = self.eval_motion(cmd) else {
+          return Ok(());
+        };
+        let mut capitalized = false;
+        self.motion_mutation(motion, |gr| {
+          let Some(ch) = gr.as_char() else {
+            return gr.clone();
+          };
+          if !ch.is_ascii_alphabetic() {
+            return gr.clone();
+          }
+
+          if capitalized {
+            gr.as_char()
+              .map(|c| c.to_ascii_lowercase())
+              .map(Grapheme::from)
+              .unwrap_or_else(|| gr.clone())
+          } else {
+            capitalized = true;
+            gr.as_char()
+              .map(|c| c.to_ascii_uppercase())
+              .map(Grapheme::from)
+              .unwrap_or_else(|| gr.clone())
+          }
+        });
+        self.apply_motion(motion)?;
+        self.cursor.pos = self.cursor.pos.col_add(1);
+      }
       Verb::Undo => {
         if let Some(edit) = self.undo_stack.pop() {
           self.lines = edit.old.clone();
@@ -2531,37 +2596,35 @@ impl LineBuf {
           self.undo_stack.push(edit);
         }
       }
-			Verb::KillCycle => {
-				let Some(content) = self.kill_ring.next() else {
-					return Ok(());
-				};
-				let Some(span) = self.kill_ring.kill_cycle_span else {
-					return Ok(());
-				};
-				let total_len: usize = content.iter()
-					.map(|l| l.len())
-					.sum::<usize>() + content.len().saturating_sub(1); // adds the newlines too
+      Verb::KillCycle => {
+        let Some(content) = self.kill_ring.next() else {
+          return Ok(());
+        };
+        let Some(span) = self.kill_ring.kill_cycle_span else {
+          return Ok(());
+        };
+        let total_len: usize =
+          content.iter().map(|l| l.len()).sum::<usize>() + content.len().saturating_sub(1); // adds the newlines too
 
-				let (s,e) = ordered(span.0, span.1);
-				let old = self.extract_span((s,e), false);
+        let (s, e) = ordered(span.0, span.1);
+        let old = self.extract_span((s, e), false);
 
-				self.set_cursor(s);
-				self.insert_lines_at(s, content);
-				self.cursor.pos = self.offset_cursor_wrapping(0, total_len as isize);
-				self.kill_ring.kill_cycle_span = Some((s,self.cursor.pos));
-			}
-			Verb::KillPut => {
-				let Some(content) = self.kill_ring.next() else {
-					return Ok(());
-				};
-				let paste_pos = self.cursor.pos;
-				let total_len: usize = content.iter()
-					.map(|l| l.len())
-					.sum::<usize>() + content.len().saturating_sub(1); // adds the newlines too
-				self.insert_lines_at(paste_pos, content);
-				self.cursor.pos = self.offset_cursor_wrapping(0, total_len as isize);
-				self.kill_ring.kill_cycle_span = Some((paste_pos,self.cursor.pos));
-			}
+        self.set_cursor(s);
+        self.insert_lines_at(s, content);
+        self.cursor.pos = self.offset_cursor_wrapping(0, total_len as isize);
+        self.kill_ring.kill_cycle_span = Some((s, self.cursor.pos));
+      }
+      Verb::KillPut => {
+        let Some(content) = self.kill_ring.next() else {
+          return Ok(());
+        };
+        let paste_pos = self.cursor.pos;
+        let total_len: usize =
+          content.iter().map(|l| l.len()).sum::<usize>() + content.len().saturating_sub(1); // adds the newlines too
+        self.insert_lines_at(paste_pos, content);
+        self.cursor.pos = self.offset_cursor_wrapping(0, total_len as isize);
+        self.kill_ring.kill_cycle_span = Some((paste_pos, self.cursor.pos));
+      }
       Verb::Put(anchor) => {
         let Some(content) = register.read_from_register() else {
           return Ok(());
@@ -2575,10 +2638,13 @@ impl LineBuf {
               Anchor::After => (self.col() + 1).min(self.cur_line().len()),
               Anchor::Before => self.col(),
             };
-						let pos = Pos { row: self.row(), col };
-						let start_len = self.lines[row].len();
+            let pos = Pos {
+              row: self.row(),
+              col,
+            };
+            let start_len = self.lines[row].len();
 
-						self.insert_lines_at(pos, lines);
+            self.insert_lines_at(pos, lines);
 
             let end_len = self.lines[row].len();
             let mut delta = end_len.saturating_sub(start_len);
@@ -2628,16 +2694,13 @@ impl LineBuf {
           let row = self.row();
           self.lines.insert(row, Line::default());
 
-					let level = self.calc_indent_level_for_pos(Pos {
-						row,
-						col: 0
-					});
-					let line = self.line_mut(row);
-					let mut col = 0;
-					for tab in std::iter::repeat_n(Grapheme::from('\t'), level) {
-						line.insert(0, tab);
-						col += 1;
-					}
+          let level = self.calc_indent_level_for_pos(Pos { row, col: 0 });
+          let line = self.line_mut(row);
+          let mut col = 0;
+          for tab in std::iter::repeat_n(Grapheme::from('\t'), level) {
+            line.insert(0, tab);
+            col += 1;
+          }
 
           self.cursor.pos = Pos { row, col };
         }
@@ -2696,13 +2759,14 @@ impl LineBuf {
           self.apply_motion(motion)?;
         }
         let mut new_level = self.calc_indent_level();
-				let line = self.cur_line().to_string();
-				let trimmed = line.trim();
-				let is_sibling = self.indent_ctx.is_sibling(trimmed);
+        let line = self.cur_line().to_string();
+        let trimmed = line.trim();
+        let is_sibling = self.indent_ctx.is_sibling(trimmed);
 
-        if new_level < level
-				|| is_sibling {
-					if is_sibling { new_level = new_level.saturating_sub(1) };
+        if new_level < level || is_sibling {
+          if is_sibling {
+            new_level = new_level.saturating_sub(1)
+          };
 
           let delta = level.saturating_sub(new_level);
           let line = self.cur_line_mut();
@@ -2890,6 +2954,115 @@ impl LineBuf {
         })
       }
 
+      Verb::TransposeChar => {
+        let Pos { row, col: c_col } = self.cursor.pos;
+        let prev_char = Pos {
+          row,
+          col: c_col.saturating_sub(1),
+        };
+
+        let Some(gr) = self.remove_at(prev_char) else {
+          return Ok(());
+        };
+
+        self.insert_at(self.cursor.pos, gr);
+        self.cursor.pos = self.cursor.pos.col_add(1);
+      }
+      Verb::TransposeWord => {
+        // Find the word at/after cursor
+        let this_word = if self.cursor_on_ws() {
+          let Some(pos) = self.eval_word_motion(
+            1,
+            &To::Start,
+            &Word::Normal,
+            &Direction::Forward,
+            false,
+            false,
+          ) else {
+            return Ok(());
+          };
+          let MotionKind::Char { end, .. } = pos else {
+            unreachable!()
+          };
+          end
+        } else {
+          self.cursor.pos
+        };
+        let Some(MotionKind::Char {
+          start,
+          end,
+          inclusive,
+        }) = self.text_obj_word(1, this_word, Word::Normal, Bound::Inside)
+        else {
+          return Ok(());
+        };
+        let end = if inclusive { end.col_add(1) } else { end };
+        let this_word_span = (start, end);
+
+        let back_count = if self.cursor_on_ws() { 1 } else { 2 };
+
+        // Find the previous word
+        let prev_word = if let Some(pos) = self.eval_word_motion(
+          back_count,
+          &To::Start,
+          &Word::Normal,
+          &Direction::Backward,
+          false,
+          false,
+        ) {
+          let MotionKind::Char { end, .. } = pos else {
+            unreachable!()
+          };
+          end
+        } else {
+          return Ok(());
+        };
+        let Some(MotionKind::Char {
+          start,
+          end,
+          inclusive,
+        }) = self.text_obj_word(1, prev_word, Word::Normal, Bound::Inside)
+        else {
+          return Ok(());
+        };
+        let end = if inclusive { end.col_add(1) } else { end };
+        let prev_word_span = (start, end);
+
+        // Bail if the spans overlap or are the same word
+        if prev_word_span.0 >= this_word_span.0 {
+          return Ok(());
+        }
+
+        // Yank both words non-destructively
+        let this_content = self.yank_span(this_word_span, false);
+        let prev_content = self.yank_span(prev_word_span, false);
+
+        // Compute lengths before we move the content vecs
+        let this_content_len: usize = this_content.iter().map(|l| l.len()).sum::<usize>()
+          + this_content.len().saturating_sub(1);
+        let prev_content_len: usize = prev_content.iter().map(|l| l.len()).sum::<usize>()
+          + prev_content.len().saturating_sub(1);
+
+        // Remove later word first so earlier positions stay valid
+        self.extract_span(this_word_span, false);
+        self.insert_lines_at(this_word_span.0, prev_content);
+
+        // Remove earlier word (its positions are unaffected by later changes)
+        self.extract_span(prev_word_span, false);
+        self.insert_lines_at(prev_word_span.0, this_content);
+
+        // Cursor goes after the later word, which now holds prev_content.
+        // The later word's start shifted by the size difference from
+        // replacing the earlier word with different-length content.
+        let shift = this_content_len as isize - prev_content_len as isize;
+        let new_later_start = Pos {
+          row: this_word_span.0.row,
+          col: (this_word_span.0.col as isize + shift) as usize,
+        };
+        self.set_cursor(new_later_start);
+        self.cursor.pos = self.offset_cursor_wrapping(0, prev_content_len as isize);
+      }
+
       Verb::Complete
       | Verb::ExMode
       | Verb::InsertMode
@@ -2913,7 +3086,11 @@ impl LineBuf {
       | Verb::RepeatGlobal => {
         log::warn!("Verb {:?} is not implemented yet", verb);
       }
-      Verb::RepeatLast => unreachable!("Verb::RepeatLast should be handled in readline/mod.rs"),
+      Verb::RepeatLast
+      | Verb::HistoryDown
+      | Verb::HistoryUp
+      | Verb::DeleteOrEof
+      | Verb::ClearScreen => unreachable!("{verb:?} should be handled in readline/mod.rs"),
     }
 
     Ok(())
@@ -2937,8 +3114,11 @@ impl LineBuf {
   }
   pub fn exec_cmd(&mut self, cmd: EditCmd) -> ShResult<()> {
     let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
-		let is_kill = cmd.verb.as_ref().is_some_and(|v| v.1 == Verb::Kill);
-		let is_killring_op = cmd.verb.as_ref().is_some_and(|v| matches!(v.1, Verb::KillCycle | Verb::KillPut));
+    let is_kill = cmd.verb.as_ref().is_some_and(|v| v.1 == Verb::Kill);
+    let is_killring_op = cmd
+      .verb
+      .as_ref()
+      .is_some_and(|v| matches!(v.1, Verb::KillCycle | Verb::KillPut));
     let starts_merge = cmd
       .verb
       .as_ref()
@@ -3005,13 +3185,13 @@ impl LineBuf {
 
     self.fix_cursor();
 
-		if !is_kill {
-			self.kill_ring.merging = false;
-		}
+    if !is_kill {
+      self.kill_ring.merging = false;
+    }
 
-		if !is_killring_op {
-			self.kill_ring.reset();
-		}
+    if !is_killring_op {
+      self.kill_ring.reset();
+    }
 
     res
   }

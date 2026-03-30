@@ -220,9 +220,9 @@ impl ScopeStack {
       self.depth -= 1;
     }
   }
-	pub fn depth(&self) -> u32 {
-		self.depth
-	}
+  pub fn depth(&self) -> u32 {
+    self.depth
+  }
   pub fn cur_scope(&self) -> &VarTab {
     self.scopes.last().unwrap()
   }
@@ -858,7 +858,7 @@ impl VarFlags {
 pub enum ArrIndex {
   Literal(usize),
   FromBack(usize),
-	Slice(usize, Option<usize>),
+  Slice(usize, Option<usize>),
   ArgCount,
   AllJoined,
   AllSplit,

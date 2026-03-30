@@ -18,36 +18,36 @@ use crate::{
 
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub enum BranchKey {
-	Static(String),
-	Wild
+  Static(String),
+  Wild,
 }
 
 impl From<BranchKey> for String {
-	fn from(val: BranchKey) -> Self {
-		match val {
-			BranchKey::Static(s) => s,
-			BranchKey::Wild => "%".to_string(),
-		}
-	}
+  fn from(val: BranchKey) -> Self {
+    match val {
+      BranchKey::Static(s) => s,
+      BranchKey::Wild => "%".to_string(),
+    }
+  }
 }
 
 impl From<String> for BranchKey {
-	fn from(s: String) -> Self {
-		if s == "%" {
-			BranchKey::Wild
-		} else {
-			BranchKey::Static(s)
-		}
-	}
+  fn from(s: String) -> Self {
+    if s == "%" {
+      BranchKey::Wild
+    } else {
+      BranchKey::Static(s)
+    }
+  }
 }
 
 impl Display for BranchKey {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			BranchKey::Static(s) => write!(f, "{}", s),
-			BranchKey::Wild => write!(f, "%"),
-		}
-	}
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      BranchKey::Static(s) => write!(f, "{}", s),
+      BranchKey::Wild => write!(f, "%"),
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -115,9 +115,10 @@ impl MapNode {
           let idx: usize = key.parse().ok()?;
           map_nodes.get(idx)?.get(rest)
         }
-        MapNode::Branch(map) => {
-					map.get(&BranchKey::Static(key.to_string())).or_else(|| map.get(&BranchKey::Wild))?.get(rest)
-				}
+        MapNode::Branch(map) => map
+          .get(&BranchKey::Static(key.to_string()))
+          .or_else(|| map.get(&BranchKey::Wild))?
+          .get(rest),
       },
     }
   }
@@ -132,7 +133,7 @@ impl MapNode {
         }
         match self {
           MapNode::Branch(map) => {
-						let bkey = BranchKey::from(key.to_string());
+            let bkey = BranchKey::from(key.to_string());
             let child = map.entry(bkey).or_insert_with(Self::default);
             child.set(rest, value);
           }
@@ -165,14 +166,14 @@ impl MapNode {
       },
       [key, rest @ ..] => match self {
         MapNode::Branch(map) => {
-					if let Some(child) = map.get_mut(&BranchKey::Static(key.into())) {
-						child.remove(rest)
-					} else if let Some(child) = map.get_mut(&BranchKey::Wild) {
-						child.remove(rest)
-					} else {
-						None
-					}
-				}
+          if let Some(child) = map.get_mut(&BranchKey::Static(key.into())) {
+            child.remove(rest)
+          } else if let Some(child) = map.get_mut(&BranchKey::Wild) {
+            child.remove(rest)
+          } else {
+            None
+          }
+        }
         MapNode::Array(nodes) => {
           let idx: usize = key.parse().ok()?;
           if idx >= nodes.len() {
@@ -316,7 +317,7 @@ pub fn map(node: Node) -> ShResult<()> {
 
       let is_json = map_opts.flags.contains(MapFlags::JSON);
       let is_func = map_opts.flags.contains(MapFlags::FUNC);
-			let is_arr = rhs.as_str().starts_with('(') && rhs.as_str().ends_with(')');
+      let is_arr = rhs.as_str().starts_with('(') && rhs.as_str().ends_with(')');
       let make_leaf = |s: String| {
         if is_func {
           MapNode::DynamicLeaf(s)
@@ -324,44 +325,40 @@ pub fn map(node: Node) -> ShResult<()> {
           MapNode::StaticLeaf(s)
         }
       };
-			let expanded = if is_json {
-				serde_json::from_str::<Value>(rhs.as_str())
-					.map_err(|e| ShErr::simple(
-						ShErrKind::InternalErr,
-						format!("failed to parse JSON: {e}"),
-					))?.into()
-			} else if is_arr {
-				let raw = rhs.as_str();
-				let raw = raw[1..raw.len() - 1].to_string();
-				let tokens = LexStream::new(Arc::new(raw), LexFlags::empty())
-					.filter(lex::not_marker)
-					.try_fold(vec![],
-						|mut acc, tk| -> ShResult<Vec<MapNode>> {
-							for word in tk?.expand()?.get_words() {
-								acc.push(make_leaf(word));
-							}
-							Ok(acc)
-						}
-					)?;
+      let expanded = if is_json {
+        serde_json::from_str::<Value>(rhs.as_str())
+          .map_err(|e| ShErr::simple(ShErrKind::InternalErr, format!("failed to parse JSON: {e}")))?
+          .into()
+      } else if is_arr {
+        let raw = rhs.as_str();
+        let raw = raw[1..raw.len() - 1].to_string();
+        let tokens = LexStream::new(Arc::new(raw), LexFlags::empty())
+          .filter(lex::not_marker)
+          .try_fold(vec![], |mut acc, tk| -> ShResult<Vec<MapNode>> {
+            for word in tk?.expand()?.get_words() {
+              acc.push(make_leaf(word));
+            }
+            Ok(acc)
+          })?;
 
-				MapNode::Array(tokens)
-			} else {
-				make_leaf(rhs.expand()?.get_words().join(" "))
-			};
-			let found = write_vars(|v| -> ShResult<bool> {
-				if let Some(map) = v.get_map_mut(name) {
-					map.set(&path[1..], expanded.clone());
-					Ok(true)
-				} else {
-					Ok(false)
-				}
-			});
+        MapNode::Array(tokens)
+      } else {
+        make_leaf(rhs.expand()?.get_words().join(" "))
+      };
+      let found = write_vars(|v| -> ShResult<bool> {
+        if let Some(map) = v.get_map_mut(name) {
+          map.set(&path[1..], expanded.clone());
+          Ok(true)
+        } else {
+          Ok(false)
+        }
+      });
 
-			if !found? {
-				let mut new = MapNode::default();
-				new.set(&path[1..], expanded);
-				write_vars(|v| v.set_map(name, new, map_opts.flags.contains(MapFlags::LOCAL)));
-			}
+      if !found? {
+        let mut new = MapNode::default();
+        new.set(&path[1..], expanded);
+        write_vars(|v| v.set_map(name, new, map_opts.flags.contains(MapFlags::LOCAL)));
+      }
     } else {
       let expanded = arg.expand()?.get_words().join(" ");
       let path: Vec<String> = expanded.split('.').map(|s| s.to_string()).collect();
@@ -409,13 +406,13 @@ pub fn map(node: Node) -> ShResult<()> {
       let output = if !keys {
         node.display(json, pretty)?
       } else {
-				let k = node.keys();
-				if k.is_empty() {
-					state::set_status(1);
-					node.display(json, pretty)?
-				} else {
-					k.join(" ")
-				}
+        let k = node.keys();
+        if k.is_empty() {
+          state::set_status(1);
+          node.display(json, pretty)?
+        } else {
+          k.join(" ")
+        }
       };
 
       let stdout = borrow_fd(STDOUT_FILENO);

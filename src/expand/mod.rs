@@ -1,12 +1,12 @@
-mod brace;
+pub mod alias;
 pub mod arithmetic;
+mod brace;
 pub mod escape;
 pub mod param;
 pub mod prompt;
 pub mod subshell;
-pub mod var;
 pub mod util;
-pub mod alias;
+pub mod var;
 
 pub use alias::{expand_aliases, expand_keymap, parse_key_alias};
 pub use arithmetic::expand_arithmetic;

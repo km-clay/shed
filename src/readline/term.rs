@@ -226,6 +226,7 @@ pub trait KeyReader {
 
 pub trait LineWriter {
   fn clear_rows(&mut self, layout: &Layout) -> ShResult<()>;
+	fn clear_screen(&mut self) -> ShResult<()>;
   fn redraw(
     &mut self,
     prompt: &str,
@@ -635,11 +636,30 @@ impl KeyReader for PollReader {
       // If we're in verbatim mode but haven't seen the end marker yet, don't attempt to parse keys
       return Ok(None);
     } else if self.byte_buf.front() == Some(&b'\x1b') {
-      // Escape: if it's the only byte, or the next byte isn't a valid
-      // escape sequence prefix ([ or O), emit a standalone Escape
-      if self.byte_buf.len() == 1 || !matches!(self.byte_buf.get(1), Some(b'[') | Some(b'O')) {
+      if self.byte_buf.len() == 1 {
+        // ESC is the only byte — emit standalone Escape
         self.byte_buf.pop_front();
         return Ok(Some(KeyEvent(KeyCode::Esc, ModKeys::empty())));
+      }
+      match self.byte_buf.get(1) {
+        Some(b'[') | Some(b'O') => {
+          // Valid CSI/SS3 prefix — fall through to the parser below
+        }
+        Some(&b) if b >= 0x20 && b != 0x7f => {
+          // ESC + printable char — interpret as Alt+<char>
+          self.byte_buf.pop_front(); // consume ESC
+          self.byte_buf.pop_front(); // consume the char
+          let ch = b as char;
+          return Ok(Some(KeyEvent(
+            KeyCode::Char(ch.to_ascii_uppercase()),
+            ModKeys::ALT,
+          )));
+        }
+        _ => {
+          // ESC + non-printable/unknown — emit standalone Escape
+          self.byte_buf.pop_front();
+          return Ok(Some(KeyEvent(KeyCode::Esc, ModKeys::empty())));
+        }
       }
     }
     while let Some(byte) = self.byte_buf.pop_front() {
@@ -1106,6 +1126,14 @@ impl LineWriter for TermWriter {
     self.buffer.clear();
     Ok(())
   }
+
+	fn clear_screen(&mut self) -> ShResult<()> {
+		self.buffer.clear();
+		self.buffer.push_str("\x1b[2J\x1b[H"); // Clear entire screen and move cursor to home
+		write_all(self.out, self.buffer.as_str())?;
+		self.buffer.clear();
+		Ok(())
+	}
 
   fn redraw(
     &mut self,

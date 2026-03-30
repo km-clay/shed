@@ -1,6 +1,40 @@
-use super::{CmdReplay, ModeReport, EditMode, common_cmds};
-use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
+use super::{CmdReplay, EditMode, ModeReport, common_cmds};
 use crate::readline::editcmd::{Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word};
+use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
+use crate::{motion, verb};
+
+#[macro_export]
+/// Shorthand for Ctrl + char, e.g. ctrl!('A') expands to Ctrl + A key event.
+macro_rules! ctrl {
+  ($ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::CTRL,
+    )
+  };
+}
+
+#[macro_export]
+/// Shorthand for ALT key combinations, e.g. `alt!('F')` for `ALT+F`
+macro_rules! alt {
+  ($ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::ALT,
+    )
+  };
+}
+
+#[macro_export]
+/// Shorthand for Shift + char, e.g. shift!('A') expands to Shift + A key event.
+macro_rules! shift {
+  ($ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::SHIFT,
+    )
+  };
+}
 
 #[derive(Default, Clone, Debug)]
 pub struct Emacs {
@@ -11,35 +45,35 @@ impl Emacs {
   pub fn new() -> Self {
     Self::default()
   }
-	fn reset_cmd(&mut self) {
-		self.pending_cmd = None;
-	}
-	fn set_verb(&mut self, verb: VerbCmd) {
-		if let Some(cmd) = &mut self.pending_cmd {
-			cmd.verb = Some(verb);
-		} else {
-			self.pending_cmd = Some(EditCmd {
-				register: Default::default(),
-				verb: Some(verb),
-				motion: None,
-				raw_seq: String::new(),
-				flags: Default::default(),
-			});
-		}
-	}
-	fn set_motion(&mut self, motion: MotionCmd) {
-		if let Some(cmd) = &mut self.pending_cmd {
-			cmd.motion = Some(motion);
-		} else {
-			self.pending_cmd = Some(EditCmd {
-				register: Default::default(),
-				verb: None,
-				motion: Some(motion),
-				raw_seq: String::new(),
-				flags: Default::default(),
-			});
-		}
-	}
+  fn reset_cmd(&mut self) {
+    self.pending_cmd = None;
+  }
+  fn set_verb(&mut self, verb: VerbCmd) {
+    if let Some(cmd) = &mut self.pending_cmd {
+      cmd.verb = Some(verb);
+    } else {
+      self.pending_cmd = Some(EditCmd {
+        register: Default::default(),
+        verb: Some(verb),
+        motion: None,
+        raw_seq: String::new(),
+        flags: Default::default(),
+      });
+    }
+  }
+  fn set_motion(&mut self, motion: MotionCmd) {
+    if let Some(cmd) = &mut self.pending_cmd {
+      cmd.motion = Some(motion);
+    } else {
+      self.pending_cmd = Some(EditCmd {
+        register: Default::default(),
+        verb: None,
+        motion: Some(motion),
+        raw_seq: String::new(),
+        flags: Default::default(),
+      });
+    }
+  }
   pub fn take_cmd(&mut self) -> Option<EditCmd> {
     self.pending_cmd.take()
   }
@@ -49,67 +83,160 @@ impl EditMode for Emacs {
   fn handle_key(&mut self, key: E) -> Option<EditCmd> {
     match key {
       E(K::Char(ch), M::NONE) => {
-        self.set_verb(VerbCmd(1, Verb::InsertChar(ch)));
-        self.set_motion(MotionCmd(1, Motion::ForwardChar));
+        self.set_verb(verb!(Verb::InsertChar(ch)));
+        self.set_motion(motion!(Motion::ForwardChar));
         self.take_cmd()
       }
       E(K::ExMode, _) => {
-				self.reset_cmd();
-				self.set_verb(VerbCmd(1, Verb::ExMode));
-				self.take_cmd()
-			},
+        self.reset_cmd();
+        self.set_verb(verb!(Verb::ExMode));
+        self.take_cmd()
+      }
       E(K::Verbatim(seq), _) => {
-				self.reset_cmd();
-        self.set_verb(VerbCmd(1, Verb::Insert(seq.to_string())));
+        self.reset_cmd();
+        self.set_verb(verb!(Verb::Insert(seq.to_string())));
         self.take_cmd()
       }
       E(K::Backspace, M::NONE) => {
-        self.set_verb(VerbCmd(1, Verb::Delete));
-        self.set_motion(MotionCmd(1, Motion::BackwardCharForced));
+        self.set_verb(verb!(Verb::Delete));
+        self.set_motion(motion!(Motion::BackwardCharForced));
         self.take_cmd()
       }
       E(K::BackTab, M::NONE) => {
-        self.set_verb(VerbCmd(1, Verb::CompleteBackward));
+        self.set_verb(verb!(Verb::CompleteBackward));
         self.take_cmd()
       }
       E(K::Tab, M::NONE) | E(K::Char('I'), M::CTRL) => {
-        self.set_verb(VerbCmd(1, Verb::Complete));
+        self.set_verb(verb!(Verb::Complete));
         self.take_cmd()
       }
 
-			// Emacs keybinds
-			E(K::Char('A'), M::CTRL) => {
-				self.set_motion(MotionCmd(1, Motion::StartOfLine));
-				self.take_cmd()
-			}
+      // Emacs keybinds
+      ctrl!('A') => {
+        self.set_motion(motion!(Motion::StartOfLine));
+        self.take_cmd()
+      }
 
-			E(K::Char('E'), M::CTRL) => {
-				self.set_motion(MotionCmd(1, Motion::EndOfLine));
-				self.take_cmd()
-			}
+      ctrl!('E') => {
+        self.set_motion(motion!(Motion::EndOfLine));
+        self.take_cmd()
+      }
 
-			E(k @ (K::Char('F') | K::Char('B')), M::CTRL) => {
-				let motion = if k == K::Char('F') { Motion::ForwardCharForced } else { Motion::BackwardCharForced };
-				self.set_motion(MotionCmd(1, motion));
-				self.take_cmd()
-			}
+      ctrl!('F') | ctrl!('B') => {
+        let motion = if matches!(key, ctrl!('F')) {
+          Motion::ForwardCharForced
+        } else {
+          Motion::BackwardCharForced
+        };
+        self.set_motion(motion!(motion));
+        self.take_cmd()
+      }
 
-			E(k @ (K::Char('F') | K::Char('B')), M::ALT) => {
-				let motion = if k == K::Char('F') {
-					Motion::WordMotion(To::End, Word::Normal, Direction::Forward)
-				} else {
-					Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)
-				};
-				self.set_motion(MotionCmd(1, motion));
-				self.take_cmd()
-			}
+      alt!('F') | alt!('B') => {
+        let motion = if matches!(key, alt!('F')) {
+          Motion::WordMotion(To::End, Word::Normal, Direction::Forward)
+        } else {
+          Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)
+        };
+        self.set_motion(motion!(motion));
+        self.take_cmd()
+      }
 
-      E(K::Char('W'), M::CTRL) => {
-        self.set_verb(VerbCmd(1, Verb::Delete));
-        self.set_motion(MotionCmd(
-          1,
-          Motion::WordMotion(To::Start, Word::Normal, Direction::Backward),
-        ));
+      ctrl!('W') | E(K::Backspace, M::ALT) => {
+        self.set_verb(verb!(Verb::Kill));
+        self.set_motion(motion!(Motion::WordMotion(
+          To::Start,
+          Word::Normal,
+          Direction::Backward
+        )));
+        self.take_cmd()
+      }
+
+      alt!('D') => {
+        self.set_verb(verb!(Verb::Kill));
+        self.set_motion(motion!(Motion::WordMotion(
+          To::End,
+          Word::Normal,
+          Direction::Forward
+        )));
+        self.take_cmd()
+      }
+
+      ctrl!('D') => {
+        self.set_verb(verb!(Verb::DeleteOrEof));
+        self.set_motion(motion!(Motion::ForwardCharForced));
+        self.take_cmd()
+      }
+
+      ctrl!('K') => {
+        self.set_verb(verb!(Verb::Kill));
+        self.set_motion(motion!(Motion::EndOfLine));
+        self.take_cmd()
+      }
+
+      ctrl!('U') => {
+        self.set_verb(verb!(Verb::Kill));
+        self.set_motion(motion!(Motion::StartOfLine));
+        self.take_cmd()
+      }
+
+      ctrl!('Y') => {
+        self.set_verb(verb!(Verb::KillPut));
+        self.take_cmd()
+      }
+
+      alt!('Y') => {
+        self.set_verb(verb!(Verb::KillCycle));
+        self.take_cmd()
+      }
+
+      ctrl!('T') => {
+        self.set_verb(verb!(Verb::TransposeChar));
+        self.take_cmd()
+      }
+
+      alt!('T') => {
+        self.set_verb(verb!(Verb::TransposeWord));
+        self.take_cmd()
+      }
+
+      alt!('U') => {
+        self.set_motion(motion!(Motion::WordMotion(
+          To::End,
+          Word::Normal,
+          Direction::Forward
+        )));
+        self.set_verb(verb!(Verb::ToUpper));
+        self.take_cmd()
+      }
+
+      alt!('L') => {
+        self.set_motion(motion!(Motion::WordMotion(
+          To::End,
+          Word::Normal,
+          Direction::Forward
+        )));
+        self.set_verb(verb!(Verb::ToLower));
+        self.take_cmd()
+      }
+
+      ctrl!('/') => {
+        self.set_verb(verb!(Verb::Undo));
+        self.take_cmd()
+      }
+
+      alt!('/') => {
+        self.set_verb(verb!(Verb::Redo));
+        self.take_cmd()
+      }
+
+      alt!('C') => {
+        self.set_verb(verb!(Verb::Capitalize));
+        self.set_motion(motion!(Motion::WordMotion(
+          To::End,
+          Word::Normal,
+          Direction::Forward
+        )));
         self.take_cmd()
       }
 
@@ -117,12 +244,28 @@ impl EditMode for Emacs {
     }
   }
 
-  fn is_repeatable(&self) -> bool               { true }
-  fn as_replay(&self) -> Option<CmdReplay>      { None }
-	fn cursor_style(&self) -> String              { "\x1b[6 q".to_string() }
-  fn pending_seq(&self) -> Option<String>       { None }
-  fn move_cursor_on_undo(&self) -> bool         { true }
-  fn clamp_cursor(&self) -> bool                { false }
-  fn hist_scroll_start_pos(&self) -> Option<To> { Some(To::End) }
-  fn report_mode(&self) -> ModeReport           { ModeReport::Emacs }
+  fn is_repeatable(&self) -> bool {
+    true
+  }
+  fn as_replay(&self) -> Option<CmdReplay> {
+    None
+  }
+  fn cursor_style(&self) -> String {
+    "\x1b[6 q".to_string()
+  }
+  fn pending_seq(&self) -> Option<String> {
+    None
+  }
+  fn move_cursor_on_undo(&self) -> bool {
+    true
+  }
+  fn clamp_cursor(&self) -> bool {
+    false
+  }
+  fn hist_scroll_start_pos(&self) -> Option<To> {
+    Some(To::End)
+  }
+  fn report_mode(&self) -> ModeReport {
+    ModeReport::Emacs
+  }
 }

@@ -1,8 +1,6 @@
 # shed
 
-A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing and general interactive UX improvements over existing shells. 
-
-<sub>btw if you don't use `vim` this probably isn't your shell</sub>
+A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing and general interactive UX improvements over existing shells.
 
 <img width="506" height="407" alt="shed" src="https://github.com/user-attachments/assets/3945f663-a361-4418-bf20-0c4eaa2a36d2" />
 
@@ -10,11 +8,20 @@ A Linux shell written in Rust. The name is a nod to the original Unix utilities 
 
 ### Line Editor
 
-`shed` includes a built-in `vim` emulator as its line editor, written from scratch. It aims to provide a more precise vim-like editing experience at the shell prompt than conventional `vi` mode implementations.
+`shed` includes a built-in modal line editor, written from scratch. It supports both **vim** and **emacs** editing modes, built on a shared editing engine with grapheme-correct cursor handling, a multiline viewport, and a kill ring.
 
+**Vim mode:**
 - **Normal mode** - motions (`w`, `b`, `e`, `f`, `t`, `%`, `0`, `$`, etc.), verbs (`d`, `c`, `y`, `p`, `r`, `x`, `~`, etc.), text objects (`iw`, `aw`, `i"`, `a{`, `is`, etc.), registers, `.` repeat, `;`/`,` repeat, and counts
 - **Insert mode** - insert, append, replace, with Ctrl+W word deletion and undo/redo
 - **Visual mode** - character-wise and visual line selection with operator support
+- **Command-line mode** - execute common ex-mode commands, or arbitrary shell commands with `:!<cmd>`.
+
+**Emacs mode:**
+- Standard emacs keybindings — Ctrl+A/E, Ctrl+F/B, Alt+F/B, Ctrl+K/U, Ctrl+W, Ctrl+T, Ctrl+Y, Alt+Y, Alt+D/T/U/L/C, undo/redo
+- Kill ring with merge chaining and cycling
+- Powered by the same editing engine as vim mode — not a separate implementation
+
+**Shared features:**
 - **Real-time syntax highlighting** - commands, keywords, strings, variables, redirections, and operators are colored as you type
 - **Tab completion** - context-aware completion for commands, file paths, and variables
 
@@ -69,14 +76,14 @@ keymap -n 'ys' '<CMD>function1<CR><CMD>function2<CR>' # Chain two functions toge
 keymap -nv '<Leader>y' '"+y'                     # Leader+y yanks to clipboard
 ```
 
-Mode flags: `-n` normal, `-i` insert, `-v` visual, `-x` ex, `-o` operator-pending, `-r` replace. Flags can be combined (`-ni` binds in both normal and insert).
+Mode flags: `-n` normal, `-i` insert, `-v` visual, `-x` ex, `-o` operator-pending, `-r` replace, `-e` emacs. Flags can be combined (`-ni` binds in both normal and insert).
 The leader key can be defined using `shopt prompt.leader=<some_key>`.
 
 Keys use vim-style notation: `<C-X>` (Ctrl), `<A-X>` (Alt), `<S-X>` (Shift), `<CR>`, `<Esc>`, `<Tab>`, `<Space>`, `<BS>`, arrow keys, etc. `<CMD>...<CR>` executes a shell command inline.
 
 Use `keymap --remove <keys>` to remove a binding.
 
-Shell commands run via keymaps have read-write access to the line editor state through special variables: `$_BUFFER` (current line contents), `$_CURSOR` (cursor position), `$_ANCHOR` (visual selection anchor), and `$_KEYS` (inject key sequences back into the editor). Modifying these variables from within the command updates the editor when it returns.
+Shell commands run via keymaps have read-write access to the line editor state through special variables: `$BUFFER` (current line contents), `$CURSOR` (cursor position), `$ANCHOR` (visual selection anchor), and `$KEYS` (inject key sequences back into the editor). Modifying these variables from within the command updates the editor when it returns.
 
 ---
 
@@ -212,4 +219,4 @@ pkgs = import nixpkgs {
 
 ## Why shed?
 
-This originally started as an educational hobby project, but over the course of about a year or so it's taken the form of an actual daily-drivable shell. I mainly wanted to create a shell where line editing is more frictionless than standard choices. I use vim a lot so I've built up a lot of muscle memory, and a fair amount of that muscle memory does not apply to vi modes in `bash`/`zsh`. For instance, the standard vi mode in `zsh` does not support selection via text objects. I wanted to create a line editor that actually feels like you're in an editor.
+This originally started as an educational hobby project, but over the course of about two years or so it's taken the form of an actual daily-drivable shell. I mainly wanted to create a shell where line editing is more frictionless than standard choices. Existing shells treat line editing as an afterthought — bash's readline really shows it's age these days, zsh's ZLE is better but still very clunky to work with, and most vi modes lack basic features like visual selection or text objects. `shed`'s line editor is built around a mode-agnostic editing engine that powers both vim and emacs modes with full feature parity, so you get a proper editing experience regardless of which mode you prefer.
