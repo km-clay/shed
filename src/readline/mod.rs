@@ -5,18 +5,19 @@ use std::collections::VecDeque;
 use std::fmt::Write;
 use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
 use unicode_width::UnicodeWidthStr;
-use vicmd::{CmdFlags, Motion, MotionCmd, RegisterName, Verb, VerbCmd, ViCmd};
-use vimode::{CmdReplay, ModeReport, ViInsert, ViMode, ViNormal, ViReplace, ViVisual};
+use editcmd::{CmdFlags, Motion, MotionCmd, RegisterName, Verb, VerbCmd, EditCmd};
+use editmode::{CmdReplay, ModeReport, ViInsert, EditMode, ViNormal, ViReplace, ViVisual};
 
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::expand_prompt;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::lex::{LexStream, QuoteState};
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
+use crate::readline::editmode::emacs::Emacs;
 use crate::readline::history::HistEntry;
 use crate::readline::term::{Pos, TermReader, calc_str_width};
-use crate::readline::vicmd::Direction;
-use crate::readline::vimode::{ViEx, ViVerbatim};
+use crate::readline::editcmd::Direction;
+use crate::readline::editmode::{ViEx, ViVerbatim};
 use crate::state::{
   AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta,
   write_vars,
@@ -39,8 +40,8 @@ pub mod layout;
 pub mod linebuf;
 pub mod register;
 pub mod term;
-pub mod vicmd;
-pub mod vimode;
+pub mod editcmd;
+pub mod editmode;
 
 #[cfg(test)]
 pub mod tests;
@@ -260,7 +261,7 @@ impl Default for Prompt {
   }
 }
 
-pub struct ShedVi {
+pub struct ShedLine {
   pub reader: PollReader,
   pub writer: TermWriter,
   pub tty: RawFd,
@@ -269,8 +270,8 @@ pub struct ShedVi {
   pub highlighter: Highlighter,
   pub completer: Box<dyn Completer>,
 
-  pub mode: Box<dyn ViMode>,
-  pub saved_mode: Option<Box<dyn ViMode>>,
+  pub mode: Box<dyn EditMode>,
+  pub saved_mode: Option<Box<dyn EditMode>>,
   pub pending_keymap: Vec<KeyEvent>,
   pub repeat_action: Option<CmdReplay>,
   pub repeat_motion: Option<MotionCmd>,
@@ -285,7 +286,7 @@ pub struct ShedVi {
   pub status_msgs: VecDeque<(String, Instant)>,
 }
 
-impl ShedVi {
+impl ShedLine {
   pub fn new(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
     Self::new_private(prompt, tty, true)
   }
@@ -391,7 +392,7 @@ impl ShedVi {
     // so print_line can call clear_rows with the full multi-line layout
     self.prompt.refresh();
     self.editor = Default::default();
-    self.swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn ViMode>));
+    self.swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn EditMode>));
     self.needs_redraw = true;
     if full_redraw {
       self.old_layout = None;
@@ -418,6 +419,7 @@ impl ShedVi {
       ModeReport::Visual => flags |= KeyMapFlags::VISUAL,
       ModeReport::Replace => flags |= KeyMapFlags::REPLACE,
       ModeReport::Verbatim => flags |= KeyMapFlags::VERBATIM,
+			ModeReport::Emacs => flags |= KeyMapFlags::EMACS,
       ModeReport::Unknown => todo!(),
     }
 
@@ -427,6 +429,18 @@ impl ShedVi {
 
     flags
   }
+
+	/// This method ensures that the editing mode (Vi or Emacs) matches the 'vi' option, and switches modes if necessary.
+	pub fn fix_editing_mode(&mut self) {
+		if read_shopts(|o| o.set.vi)
+		&& self.mode.report_mode() == ModeReport::Emacs {
+			self.swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn EditMode>));
+		}
+		else if !read_shopts(|o| o.set.vi)
+		&& self.mode.report_mode() != ModeReport::Emacs {
+			self.swap_mode(&mut (Box::new(Emacs::new()) as Box<dyn EditMode>));
+		}
+	}
 
   fn should_submit(&mut self) -> ShResult<bool> {
     if self.mode.report_mode() == ModeReport::Normal {
@@ -879,7 +893,7 @@ impl ShedVi {
 
     let Ok(cmd) = self.mode.handle_key_fallible(key) else {
       // it's an ex mode error
-      self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn ViMode>));
+      self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
 
       return Ok(None);
     };
@@ -986,7 +1000,7 @@ impl ShedVi {
     let (cols, _) = get_win_size(self.tty);
     Layout::from_parts(cols, self.prompt.get_ps1(), &to_cursor, line)
   }
-  pub fn scroll_history_virtual(&mut self, cmd: ViCmd) {
+  pub fn scroll_history_virtual(&mut self, cmd: EditCmd) {
     // This function is used for the Shift/Ctrl+Up/Down history concatenation.
     // Instead of replacing the buffer with a scrolled-to history entry
     // This function appends it to the end of the current buffer with '&&' or ';'
@@ -1066,7 +1080,7 @@ impl ShedVi {
     }
     self.swap_history_editor(entry);
   }
-  pub fn scroll_history(&mut self, cmd: ViCmd) {
+  pub fn scroll_history(&mut self, cmd: EditCmd) {
     /*
     if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
       let constraint = SearchConstraint::new(SearchKind::Prefix, self.editor.to_string());
@@ -1107,7 +1121,7 @@ impl ShedVi {
   pub fn should_accept_hint(&self, event: &KeyEvent) -> bool {
     if self.editor.cursor_at_max() && self.editor.has_hint() {
       match self.mode.report_mode() {
-        ModeReport::Replace | ModeReport::Insert => {
+        ModeReport::Replace | ModeReport::Insert | ModeReport::Emacs => {
           matches!(event, KeyEvent(KeyCode::Right, ModKeys::NONE))
         }
         ModeReport::Visual | ModeReport::Normal => {
@@ -1122,7 +1136,7 @@ impl ShedVi {
     }
   }
 
-  pub fn should_grab_history(&mut self, cmd: &ViCmd) -> bool {
+  pub fn should_grab_history(&mut self, cmd: &EditCmd) -> bool {
     cmd.is_virtual_scroll()
       || cmd.verb().is_none()
         && (cmd
@@ -1325,7 +1339,7 @@ impl ShedVi {
     Ok(())
   }
 
-  pub fn swap_mode(&mut self, mode: &mut Box<dyn ViMode>) {
+  pub fn swap_mode(&mut self, mode: &mut Box<dyn EditMode>) {
     let pre_mode_change = read_logic(|l| l.get_autocmds(AutoCmdKind::PreModeChange));
     pre_mode_change.exec();
 
@@ -1345,11 +1359,11 @@ impl ShedVi {
     post_mode_change.exec();
   }
 
-  fn exec_mode_transition(&mut self, mut cmd: ViCmd, from_replay: bool) -> ShResult<()> {
+  fn exec_mode_transition(&mut self, mut cmd: EditCmd, from_replay: bool) -> ShResult<()> {
     let mut is_insert_mode = false;
     let count = cmd.verb_count();
 
-    let mut mode: Box<dyn ViMode> = if matches!(
+    let mut mode: Box<dyn EditMode> = if matches!(
       self.mode.report_mode(),
       ModeReport::Ex | ModeReport::Verbatim
     ) && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE)
@@ -1385,7 +1399,7 @@ impl ShedVi {
           if self.mode.report_mode() != ModeReport::Visual {
             self.editor.start_char_select();
           }
-          let mut mode: Box<dyn ViMode> = Box::new(ViVisual::new());
+          let mut mode: Box<dyn EditMode> = Box::new(ViVisual::new());
           self.swap_mode(&mut mode);
 
           return self.editor.exec_cmd(cmd);
@@ -1458,7 +1472,7 @@ impl ShedVi {
     Ok(())
   }
 
-  pub fn clone_mode(&self) -> Box<dyn ViMode> {
+  pub fn clone_mode(&self) -> Box<dyn EditMode> {
     match self.mode.report_mode() {
       ModeReport::Normal => Box::new(ViNormal::new()),
       ModeReport::Insert => Box::new(ViInsert::new()),
@@ -1466,15 +1480,16 @@ impl ShedVi {
       ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())),
       ModeReport::Replace => Box::new(ViReplace::new()),
       ModeReport::Verbatim => Box::new(ViVerbatim::new()),
+			ModeReport::Emacs => Box::new(Emacs::new()),
       ModeReport::Unknown => unreachable!(),
     }
   }
 
-  pub fn handle_cmd_repeat(&mut self, cmd: ViCmd) -> ShResult<()> {
+  pub fn handle_cmd_repeat(&mut self, cmd: EditCmd) -> ShResult<()> {
     let Some(replay) = self.repeat_action.clone() else {
       return Ok(());
     };
-    let ViCmd { verb, .. } = cmd;
+    let EditCmd { verb, .. } = cmd;
     let VerbCmd(count, _) = verb.unwrap();
     match replay {
       CmdReplay::ModeReplay { cmds, mut repeat } => {
@@ -1502,12 +1517,13 @@ impl ShedVi {
           }
 
           let old_mode_clone = match old_mode {
-            ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn ViMode>,
-            ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn ViMode>,
-            ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn ViMode>,
-            ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())) as Box<dyn ViMode>,
-            ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn ViMode>,
-            ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn ViMode>,
+            ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn EditMode>,
+            ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn EditMode>,
+            ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn EditMode>,
+            ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone())) as Box<dyn EditMode>,
+            ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn EditMode>,
+            ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn EditMode>,
+						ModeReport::Emacs => Box::new(Emacs::new()) as Box<dyn EditMode>,
             ModeReport::Unknown => unreachable!(),
           };
           self.mode = old_mode_clone;
@@ -1535,13 +1551,13 @@ impl ShedVi {
     Ok(())
   }
 
-  pub fn handle_motion_repeat(&mut self, cmd: ViCmd) -> ShResult<()> {
+  pub fn handle_motion_repeat(&mut self, cmd: EditCmd) -> ShResult<()> {
     match cmd.motion.as_ref().unwrap() {
       MotionCmd(count, Motion::RepeatMotion) => {
         let Some(motion) = self.repeat_motion.clone() else {
           return Ok(());
         };
-        let repeat_cmd = ViCmd {
+        let repeat_cmd = EditCmd {
           register: RegisterName::default(),
           verb: cmd.verb,
           motion: Some(motion),
@@ -1556,7 +1572,7 @@ impl ShedVi {
         };
         let mut new_motion = motion.invert_char_motion();
         new_motion.0 = *count;
-        let repeat_cmd = ViCmd {
+        let repeat_cmd = EditCmd {
           register: RegisterName::default(),
           verb: cmd.verb,
           motion: Some(new_motion),
@@ -1568,7 +1584,7 @@ impl ShedVi {
       _ => unreachable!(),
     }
   }
-  pub fn exec_cmd(&mut self, mut cmd: ViCmd, from_replay: bool) -> ShResult<()> {
+  pub fn exec_cmd(&mut self, mut cmd: EditCmd, from_replay: bool) -> ShResult<()> {
     if cmd.verb().is_some()
       && let Some(range) = self.editor.select_range()
     {
@@ -1584,7 +1600,7 @@ impl ShedVi {
     } else {
       if self.mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_none() {
         self.editor.stop_selecting();
-        let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+        let mut mode: Box<dyn EditMode> = Box::new(ViNormal::new());
         self.swap_mode(&mut mode);
       }
 
@@ -1613,7 +1629,7 @@ impl ShedVi {
           .is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank)
       {
         self.editor.stop_selecting();
-        let mut mode: Box<dyn ViMode> = Box::new(ViNormal::new());
+        let mut mode: Box<dyn EditMode> = Box::new(ViNormal::new());
         self.swap_mode(&mut mode);
       }
 
@@ -1622,7 +1638,7 @@ impl ShedVi {
       }
 
       if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
-        let mut mode: Box<dyn ViMode> = if matches!(
+        let mut mode: Box<dyn EditMode> = if matches!(
           self.mode.report_mode(),
           ModeReport::Ex | ModeReport::Verbatim
         ) {

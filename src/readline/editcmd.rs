@@ -5,7 +5,7 @@ use bitflags::bitflags;
 use crate::{
   readline::{
     linebuf::{Grapheme, Pos},
-    vimode::ex::SubFlags,
+    editmode::ex::SubFlags,
   },
   state::read_shopts,
 };
@@ -81,7 +81,7 @@ bitflags! {
 }
 
 #[derive(Clone, Default, Debug)]
-pub struct ViCmd {
+pub struct EditCmd {
   pub register: RegisterName,
   pub verb: Option<VerbCmd>,
   pub motion: Option<MotionCmd>,
@@ -89,7 +89,7 @@ pub struct ViCmd {
   pub flags: CmdFlags,
 }
 
-impl ViCmd {
+impl EditCmd {
   pub fn new() -> Self {
     Self::default()
   }
@@ -181,7 +181,7 @@ impl ViCmd {
       .as_ref()
       .is_some_and(|m| matches!(m.1, Motion::LineUp | Motion::LineDown))
   }
-  /// If a ViCmd has a linewise motion, but no verb, we change it to charwise
+  /// If a EditCmd has a linewise motion, but no verb, we change it to charwise
   pub fn is_mode_transition(&self) -> bool {
     self.verb.as_ref().is_some_and(|v| {
       matches!(
@@ -222,6 +222,9 @@ impl MotionCmd {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Verb {
+	Kill,
+	KillPut,
+	KillCycle,
   Delete,
   Change,
   Yank,

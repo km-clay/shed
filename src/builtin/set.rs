@@ -32,6 +32,7 @@ bitflags! {
     const VI_MODE = 1 << 11;
     const XTRACE = 1 << 12;
     const HASHALL = 1 << 13;
+    const EMACS_MODE = 1 << 14;
   }
 }
 
@@ -52,6 +53,7 @@ impl SetFlags {
         _ if flag == SetFlags::NO_UNSET => "nounset",
         _ if flag == SetFlags::VERBOSE => "verbose",
         _ if flag == SetFlags::VI_MODE => "vi",
+				_ if flag == SetFlags::EMACS_MODE => "emacs",
         _ if flag == SetFlags::XTRACE => "xtrace",
         _ if flag == SetFlags::HASHALL => "hashall",
         _ => continue,
@@ -90,6 +92,7 @@ impl SetFlags {
       _ if *self == Self::NO_UNSET => Some("nounset"),
       _ if *self == Self::VERBOSE => Some("verbose"),
       _ if *self == Self::VI_MODE => Some("vi"),
+			_ if *self == Self::EMACS_MODE => Some("emacs"),
       _ if *self == Self::XTRACE => Some("xtrace"),
       _ => None,
     }
@@ -127,6 +130,7 @@ impl FromStr for SetFlags {
     match s {
       "ignoreeof" => Ok(Self::IGNORE_EOF),
       "vi" => Ok(Self::VI_MODE),
+			"emacs" => Ok(Self::EMACS_MODE),
       "allexport" => Ok(Self::ALLEXPORT),
       "notify" => Ok(Self::NOTIFY),
       "noclobber" => Ok(Self::NO_CLOBBER),
@@ -354,6 +358,13 @@ pub fn set_builtin(node: Node) -> ShResult<()> {
         }
         for opt in flags.get_shopt_fields() {
           let opt_val = if should_set { "true" } else { "false" };
+					if &opt == "emacs" {
+						let opt_val = if should_set { "false" } else { "true" };
+						write_shopts(|o| o.query(&format!("set.vi={opt_val}")))
+							.promote_err(nd_span.clone())?;
+						continue
+					}
+
           write_shopts(|o| o.query(&format!("set.{opt}={opt_val}")))
             .promote_err(nd_span.clone())?;
         }

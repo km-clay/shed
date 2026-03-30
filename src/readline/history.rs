@@ -15,7 +15,7 @@ use crate::{
   readline::{
     complete::{Candidate, FuzzySelector},
     linebuf::LineBuf,
-    vicmd::Direction,
+    editcmd::Direction,
   },
   state::read_meta,
 };

@@ -11,11 +11,11 @@ use crate::parse::lex::TkFlags;
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
-use crate::readline::vicmd::{
-  Anchor, CmdFlags, Motion, MotionCmd, ReadSrc, RegisterName, To, Val, Verb, VerbCmd, ViCmd,
+use crate::readline::editcmd::{
+  Anchor, CmdFlags, Motion, MotionCmd, ReadSrc, RegisterName, To, Val, Verb, VerbCmd, EditCmd,
   WriteDest,
 };
-use crate::readline::vimode::{ModeReport, ViInsert, ViMode};
+use crate::readline::editmode::{ModeReport, ViInsert, EditMode};
 use crate::state::write_meta;
 
 bitflags! {
@@ -49,7 +49,7 @@ impl ExEditor {
   pub fn clear(&mut self) {
     *self = Self::default()
   }
-  pub fn should_grab_history(&mut self, cmd: &ViCmd) -> bool {
+  pub fn should_grab_history(&mut self, cmd: &EditCmd) -> bool {
     cmd.verb().is_none()
       && (cmd
         .motion()
@@ -60,7 +60,7 @@ impl ExEditor {
         .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown)))
         && self.buf.on_last_line())
   }
-  pub fn scroll_history(&mut self, cmd: ViCmd) {
+  pub fn scroll_history(&mut self, cmd: EditCmd) {
     let count = &cmd.motion().unwrap().0;
     let motion = &cmd.motion().unwrap().1;
     let count = match motion {
@@ -108,9 +108,9 @@ impl ViEx {
   }
 }
 
-impl ViMode for ViEx {
+impl EditMode for ViEx {
   // Ex mode can return errors, so we use this fallible method instead of the normal one
-  fn handle_key_fallible(&mut self, key: KeyEvent) -> ShResult<Option<ViCmd>> {
+  fn handle_key_fallible(&mut self, key: KeyEvent) -> ShResult<Option<EditCmd>> {
     use crate::readline::keys::{KeyCode as C, KeyEvent as E, ModKeys as M};
     match key {
       E(C::Char('\r'), M::NONE) | E(C::Enter, M::NONE) => {
@@ -128,7 +128,7 @@ impl ViMode for ViEx {
         self.pending_cmd.clear();
         Ok(None)
       }
-      E(C::Esc, M::NONE) => Ok(Some(ViCmd {
+      E(C::Esc, M::NONE) => Ok(Some(EditCmd {
         register: RegisterName::default(),
         verb: Some(VerbCmd(1, Verb::NormalMode)),
         motion: None,
@@ -138,7 +138,7 @@ impl ViMode for ViEx {
       _ => self.pending_cmd.handle_key(key).map(|_| None),
     }
   }
-  fn handle_key(&mut self, key: KeyEvent) -> Option<ViCmd> {
+  fn handle_key(&mut self, key: KeyEvent) -> Option<EditCmd> {
     let result = self.handle_key_fallible(key);
     result.ok().flatten()
   }
@@ -187,7 +187,7 @@ impl ViMode for ViEx {
   }
 }
 
-fn parse_ex_cmd(raw: &str) -> Result<Option<ViCmd>, Option<String>> {
+fn parse_ex_cmd(raw: &str) -> Result<Option<EditCmd>, Option<String>> {
   let raw = raw.trim();
   if raw.is_empty() {
     return Ok(None);
@@ -216,7 +216,7 @@ fn parse_ex_cmd(raw: &str) -> Result<Option<ViCmd>, Option<String>> {
     }
   };
 
-  Ok(Some(ViCmd {
+  Ok(Some(EditCmd {
     register: RegisterName::default(),
     verb,
     motion,

@@ -41,7 +41,7 @@ use crate::parse::execute::{exec_dash_c, exec_input};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
-use crate::readline::{Prompt, ReadlineEvent, ShedVi};
+use crate::readline::{Prompt, ReadlineEvent, ShedLine};
 use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
@@ -246,7 +246,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     e.print_error();
   }
 
-  let mut readline = match ShedVi::new(Prompt::new(), *TTY_FILENO) {
+  let mut readline = match ShedLine::new(Prompt::new(), *TTY_FILENO) {
     Ok(rl) => rl,
     Err(e) => {
       eprintln!("Failed to initialize readline: {e}");
@@ -267,6 +267,8 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       m.try_rehash_cwd_listing();
     });
     error::clear_color();
+
+		readline.fix_editing_mode();
 
     // Handle any pending signals
     while signals_pending() {
@@ -454,7 +456,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   Ok(())
 }
 
-fn handle_readline_event(readline: &mut ShedVi, event: ShResult<ReadlineEvent>) -> ShResult<bool> {
+fn handle_readline_event(readline: &mut ShedLine, event: ShResult<ReadlineEvent>) -> ShResult<bool> {
   match event {
     Ok(ReadlineEvent::Line(input)) => {
       let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));

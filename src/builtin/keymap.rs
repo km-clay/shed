@@ -11,13 +11,14 @@ use crate::{
 bitflags! {
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   pub struct KeyMapFlags: u32 {
-    const NORMAL 			= 0b0000001;
-    const INSERT 			= 0b0000010;
-    const VISUAL 			= 0b0000100;
-    const EX 					= 0b0001000;
-    const OP_PENDING 	= 0b0010000;
-    const REPLACE 		= 0b0100000;
-    const VERBATIM 		= 0b1000000;
+    const NORMAL 			= 0b00000001;
+    const INSERT 			= 0b00000010;
+    const VISUAL 			= 0b00000100;
+    const EX 					= 0b00001000;
+    const OP_PENDING 	= 0b00010000;
+    const REPLACE 		= 0b00100000;
+    const VERBATIM 		= 0b01000000;
+    const EMACS   		= 0b10000000;
   }
 }
 
@@ -37,6 +38,7 @@ impl KeyMapOpts {
         Opt::Short('x') => flags |= KeyMapFlags::EX,
         Opt::Short('o') => flags |= KeyMapFlags::OP_PENDING,
         Opt::Short('r') => flags |= KeyMapFlags::REPLACE,
+				Opt::Short('e') => flags |= KeyMapFlags::EMACS,
         Opt::LongWithArg(name, arg) if name == "remove" => {
           if remove.is_some() {
             return Err(ShErr::simple(
@@ -59,12 +61,16 @@ impl KeyMapOpts {
     }
     Ok(Self { remove, flags })
   }
-  pub fn keymap_opts() -> [OptSpec; 7] {
+  pub fn keymap_opts() -> [OptSpec; 8] {
     [
       OptSpec {
         opt: Opt::Short('n'), // normal mode
         takes_arg: false,
       },
+			OptSpec {
+				opt: Opt::Short('e'), // emacs mode
+				takes_arg: false,
+			},
       OptSpec {
         opt: Opt::Short('i'), // insert mode
         takes_arg: false,

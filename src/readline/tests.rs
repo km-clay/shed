@@ -2,7 +2,7 @@
 use std::os::fd::AsRawFd;
 
 use crate::{
-  readline::{Prompt, ShedVi, annotate_input},
+  readline::{Prompt, ShedLine, annotate_input},
   testutil::TestGuard,
 };
 
@@ -282,10 +282,10 @@ fn annotate_multiple_redirects() {
 
 // ===================== Vi Tests =====================
 
-fn test_vi(initial: &str) -> (ShedVi, TestGuard) {
+fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
   let g = TestGuard::new();
   let prompt = Prompt::default();
-  let vi = ShedVi::new_no_hist(prompt, g.pty_slave().as_raw_fd())
+  let vi = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd())
     .unwrap()
     .with_initial(initial);
 

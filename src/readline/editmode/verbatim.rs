@@ -1,10 +1,10 @@
-use super::{CmdReplay, ModeReport, ViMode, common_cmds};
+use super::{CmdReplay, ModeReport, EditMode, common_cmds};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E};
-use crate::readline::vicmd::{CmdFlags, RegisterName, To, Verb, VerbCmd, ViCmd};
+use crate::readline::editcmd::{CmdFlags, RegisterName, To, Verb, VerbCmd, EditCmd};
 
 #[derive(Default, Clone, Debug)]
 pub struct ViVerbatim {
-  sent_cmd: Vec<ViCmd>,
+  sent_cmd: Vec<EditCmd>,
   repeat_count: u16,
 }
 
@@ -20,12 +20,12 @@ impl ViVerbatim {
   }
 }
 
-impl ViMode for ViVerbatim {
-  fn handle_key(&mut self, key: E) -> Option<ViCmd> {
+impl EditMode for ViVerbatim {
+  fn handle_key(&mut self, key: E) -> Option<EditCmd> {
     match key {
       E(K::Verbatim(seq), _mods) => {
         log::debug!("Received verbatim key sequence: {:?}", seq);
-        let cmd = ViCmd {
+        let cmd = EditCmd {
           register: RegisterName::default(),
           verb: Some(VerbCmd(1, Verb::Insert(seq.to_string()))),
           motion: None,

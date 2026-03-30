@@ -6,7 +6,7 @@ use crate::libsh::error::ShResult;
 use crate::readline::history::History;
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::LineBuf;
-use crate::readline::vicmd::{CmdFlags, Motion, MotionCmd, To, Verb, VerbCmd, ViCmd};
+use crate::readline::editcmd::{CmdFlags, Motion, MotionCmd, To, Verb, VerbCmd, EditCmd};
 
 pub mod ex;
 pub mod insert;
@@ -14,6 +14,7 @@ pub mod normal;
 pub mod replace;
 pub mod verbatim;
 pub mod visual;
+pub mod emacs;
 
 pub use ex::ViEx;
 pub use insert::ViInsert;
@@ -30,6 +31,7 @@ pub enum ModeReport {
   Visual,
   Replace,
   Verbatim,
+	Emacs,
   Unknown,
 }
 
@@ -42,6 +44,7 @@ impl Display for ModeReport {
       ModeReport::Visual => write!(f, "VISUAL"),
       ModeReport::Replace => write!(f, "REPLACE"),
       ModeReport::Verbatim => write!(f, "VERBATIM"),
+			ModeReport::Emacs => write!(f, "EMACS"),
       ModeReport::Unknown => write!(f, "UNKNOWN"),
     }
   }
@@ -49,16 +52,16 @@ impl Display for ModeReport {
 
 #[derive(Debug, Clone)]
 pub enum CmdReplay {
-  ModeReplay { cmds: Vec<ViCmd>, repeat: u16 },
-  Single(ViCmd),
+  ModeReplay { cmds: Vec<EditCmd>, repeat: u16 },
+  Single(EditCmd),
   Motion(Motion),
 }
 
 impl CmdReplay {
-  pub fn mode(cmds: Vec<ViCmd>, repeat: u16) -> Self {
+  pub fn mode(cmds: Vec<EditCmd>, repeat: u16) -> Self {
     Self::ModeReplay { cmds, repeat }
   }
-  pub fn single(cmd: ViCmd) -> Self {
+  pub fn single(cmd: EditCmd) -> Self {
     Self::Single(cmd)
   }
   pub fn motion(motion: Motion) -> Self {
@@ -72,11 +75,11 @@ pub enum CmdState {
   Invalid,
 }
 
-pub trait ViMode {
-  fn handle_key_fallible(&mut self, key: E) -> ShResult<Option<ViCmd>> {
+pub trait EditMode {
+  fn handle_key_fallible(&mut self, key: E) -> ShResult<Option<EditCmd>> {
     Ok(self.handle_key(key))
   }
-  fn handle_key(&mut self, key: E) -> Option<ViCmd>;
+  fn handle_key(&mut self, key: E) -> Option<EditCmd>;
   fn is_repeatable(&self) -> bool;
   fn as_replay(&self) -> Option<CmdReplay>;
   fn cursor_style(&self) -> String;
@@ -94,7 +97,7 @@ pub trait ViMode {
   fn clamp_cursor(&self) -> bool;
   fn hist_scroll_start_pos(&self) -> Option<To>;
   fn report_mode(&self) -> ModeReport;
-  fn cmds_from_raw(&mut self, raw: &str) -> Vec<ViCmd> {
+  fn cmds_from_raw(&mut self, raw: &str) -> Vec<EditCmd> {
     let mut cmds = vec![];
     for ch in raw.graphemes(true) {
       let key = E::new(ch, M::NONE);
@@ -107,8 +110,8 @@ pub trait ViMode {
   }
 }
 
-pub fn common_cmds(key: E) -> Option<ViCmd> {
-  let mut pending_cmd = ViCmd::new();
+pub fn common_cmds(key: E) -> Option<EditCmd> {
+  let mut pending_cmd = EditCmd::new();
   match key {
     E(K::Home, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::StartOfLine)),
     E(K::End, M::NONE) => pending_cmd.set_motion(MotionCmd(1, Motion::EndOfLine)),

@@ -22,7 +22,7 @@ use crate::{
     linebuf::LineBuf,
     markers::{self, is_marker},
     term::{LineWriter, TermWriter, calc_str_width, get_win_size},
-    vimode::{ViInsert, ViMode},
+    editmode::{ViInsert, EditMode},
   },
   state::{
     VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars,
@@ -1922,16 +1922,16 @@ impl SimpleCompleter {
 mod tests {
   use super::*;
   use crate::{
-    readline::{Prompt, ShedVi},
+    readline::{Prompt, ShedLine},
     state::{VarFlags, VarKind, write_vars},
     testutil::TestGuard,
   };
   use std::os::fd::AsRawFd;
 
-  fn test_vi(initial: &str) -> (ShedVi, TestGuard) {
+  fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
     let g = TestGuard::new();
     let prompt = Prompt::default();
-    let vi = ShedVi::new_no_hist(prompt, g.pty_slave().as_raw_fd())
+    let vi = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd())
       .unwrap()
       .with_initial(initial);
     (vi, g)

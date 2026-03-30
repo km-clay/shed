@@ -292,7 +292,7 @@ shopt_group! {
   pub struct ShOptSet ("set") {
     /// If set, the shell will remember the full path of commands and use that information to speed up command lookup
     hashall: bool = true,
-    /// Enables vi editing mode. Currently, this is the only editing mode. Changing this does nothing, it's just here because it's in the POSIX specification for the 'set' builtin
+    /// Enables modal line editing mode.
     vi: bool = true,
     /// If set, all variables that are assigned will be automatically exported to the environment of subsequently executed commands
     allexport: bool = false,
