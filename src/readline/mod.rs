@@ -298,9 +298,9 @@ impl ShedLine {
 
   fn new_private(prompt: Prompt, tty: RawFd, with_hist: bool) -> ShResult<Self> {
     let history = if with_hist {
-      History::new()?
+      History::new("shed_history")?
     } else {
-      History::empty()
+      History::empty("shed_history")
     };
     let mode = if read_shopts(|o| o.set.vi) {
       Box::new(ViInsert::new()) as Box<dyn EditMode>
@@ -322,7 +322,7 @@ impl ShedLine {
       repeat_motion: None,
       editor: LineBuf::new(),
       history,
-      ex_history: History::empty(),
+      ex_history: History::empty("shed_history"),
       needs_redraw: true,
       ctrl_d_warning_counter: 0,
       status_msgs: VecDeque::new(),
@@ -974,7 +974,7 @@ impl ShedLine {
       self.old_layout = None;
     }
     if is_ex_cmd {
-      self.ex_history.push(cmd.raw_seq.clone());
+      self.ex_history.push(cmd.raw_seq.clone()).ok();
       self.ex_history.reset();
     }
 
@@ -1105,12 +1105,6 @@ impl ShedLine {
     self.swap_history_editor(entry);
   }
   pub fn scroll_history(&mut self, cmd: EditCmd) {
-    /*
-    if self.history.cursor_entry().is_some_and(|ent| ent.is_new()) {
-      let constraint = SearchConstraint::new(SearchKind::Prefix, self.editor.to_string());
-      self.history.constrain_entries(constraint);
-    }
-    */
     let count = if cmd.motion().is_some() {
 			&cmd.motion().unwrap().0
 		} else {
@@ -1133,6 +1127,12 @@ impl ShedLine {
       Motion::LineDown => *count as isize,
       _ => unreachable!(),
     };
+		if self.history.pending.is_none() {
+			// We are scrolling up from a pending command
+			// Let's refresh the search mask to make sure
+			// our history is up to date
+			self.history.update_search_mask(Some(&self.editor.joined()));
+		}
     let entry = self.history.scroll(count).cloned();
     self.swap_history_editor(entry);
   }

@@ -22,11 +22,9 @@ mod tests;
 #[cfg(test)]
 pub mod testutil;
 
-use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::net::UnixListener;
+use std::os::fd::{BorrowedFd};
 use std::process::ExitCode;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 
 use nix::errno::Errno;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
@@ -46,7 +44,7 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, source_env, source_login, source_rc,
+  AutoCmdKind, read_logic, read_shopts, source_env, source_login, source_rc,
   write_jobs, write_meta, write_shopts,
 };
 use clap::Parser;
@@ -83,11 +81,11 @@ fn setup_panic_handler() {
       }
     });
 
-    let data_dir = env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+		let data_dir = dirs::data_dir().unwrap_or_else(|| {
       let home = env::var("HOME").unwrap();
-      format!("{home}/.local/share")
+      PathBuf::from(format!("{home}/.local/share"))
     });
-    let log_dir = Path::new(&data_dir).join("shed").join("log");
+    let log_dir = data_dir.join("shed").join("log");
     std::fs::create_dir_all(&log_dir).unwrap();
     let log_file_path = log_dir.join("panic.log");
     let mut log_file = parse::get_redir_file(parse::RedirType::Output, log_file_path).unwrap();
@@ -496,10 +494,12 @@ fn handle_readline_event(
 
       post_exec.exec_with(&input);
 
-      if read_shopts(|s| s.core.auto_hist) && !input.is_empty() {
-        readline.history.push(input.clone());
-        readline.history.save()?;
-      }
+      if read_shopts(|s| s.core.auto_hist)
+			&& !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
+			&& !input.is_empty()
+			&& let Err(e) = readline.history.push(input.clone()) {
+				e.print_error();
+			}
 
       readline.fix_column()?;
       readline.writer.flush_write("\n\r")?;

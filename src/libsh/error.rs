@@ -432,6 +432,12 @@ impl Display for ShErr {
   }
 }
 
+impl From<rusqlite::Error> for ShErr {
+	fn from(value: rusqlite::Error) -> Self {
+		ShErr::simple(ShErrKind::HistoryReadErr, value.to_string())
+	}
+}
+
 impl From<std::io::Error> for ShErr {
   fn from(e: std::io::Error) -> Self {
     let msg = std::io::Error::last_os_error();

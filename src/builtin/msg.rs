@@ -4,7 +4,6 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{NdRule, Node},
   prelude::*,
-  procio::borrow_fd,
   state::{self, write_meta},
 };
 
@@ -48,7 +47,7 @@ pub fn msg(node: Node) -> ShResult<()> {
   let (mut argv, opts) = get_opts_from_tokens(argv, &msg_opts())?;
   let flags = get_msg_flags(opts)?;
   argv.remove(0);
-  let (msg, span) = join_raw_args(argv);
+  let (msg, _span) = join_raw_args(argv);
 
   if flags.contains(MsgFlags::SYSTEM) {
     write_meta(|m| {

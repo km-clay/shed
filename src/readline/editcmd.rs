@@ -7,7 +7,6 @@ use crate::{
     editmode::ex::SubFlags,
     linebuf::{Grapheme, Pos},
   },
-  state::read_shopts,
 };
 
 use super::register::{RegisterContent, append_register, read_register, write_register};

@@ -33,11 +33,21 @@ bitflags! {
   }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 struct ExEditor {
   buf: LineBuf,
   mode: ViInsert,
   history: History,
+}
+
+impl Default for ExEditor {
+	fn default() -> Self {
+		Self {
+			buf: LineBuf::default(),
+			mode: ViInsert::default(),
+			history: History::new("ex_history").unwrap_or_else(|_| History::empty("ex_history")),
+		}
+	}
 }
 
 impl ExEditor {

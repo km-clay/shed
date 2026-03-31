@@ -3,7 +3,7 @@ use std::{
   env,
   os::fd::{AsRawFd, BorrowedFd, OwnedFd},
   path::PathBuf,
-  sync::{self, Arc, MutexGuard},
+  sync::Arc,
 };
 
 use nix::{
@@ -21,8 +21,6 @@ use crate::{
   readline::register::{restore_registers, save_registers},
   state::{MetaTab, SHED, read_logic},
 };
-
-static TEST_MUTEX: sync::Mutex<()> = sync::Mutex::new(());
 
 pub fn has_cmds(cmds: &[&str]) -> bool {
   let path_cmds = MetaTab::get_cmds_in_path();

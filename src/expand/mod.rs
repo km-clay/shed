@@ -40,6 +40,10 @@ impl Tk {
       _ => vec![self.to_string()],
     }
   }
+
+	pub fn get_first_word(&self) -> Option<String> {
+		self.get_words().into_iter().next()
+	}
 }
 
 pub struct Expander {

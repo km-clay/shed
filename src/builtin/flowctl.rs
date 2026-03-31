@@ -3,8 +3,12 @@ use crate::{
   parse::{NdRule, Node, execute::prepare_argv},
 };
 
+/// Returns a ShErr that signals a control flow change (break, continue, return, or exit) with an optional status code.
+/// The reason we return an Error on what is technically the "happy path" is because this is how we can unwind the call stack to the appropriate control flow construct (loop, function, or shell exit).
+/// The error bubbles up until it is caught by a context that waits to catch it.
+/// If the error bubbles all the way up to main, the error is printed and the status code is set to 1.
 pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
-  use ShErrKind::*;
+	use ShErrKind as K;
   let NdRule::Command {
     assignments: _,
     argv,
@@ -22,7 +26,7 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
 
     let Ok(status) = arg.parse::<i32>() else {
       return Err(ShErr::at(
-        ShErrKind::SyntaxErr,
+        K::SyntaxErr,
         span,
         format!("{cmd}: Expected a number"),
       ));
@@ -32,10 +36,10 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
   }
 
   let (kind, message) = match kind {
-    LoopContinue(_) => (LoopContinue(code), "'continue' found outside of loop"),
-    LoopBreak(_) => (LoopBreak(code), "'break' found outside of loop"),
-    FuncReturn(_) => (FuncReturn(code), "'return' found outside of function"),
-    CleanExit(_) => (CleanExit(code), ""),
+    K::LoopContinue(_) => (K::LoopContinue(code), "'continue' found outside of loop"),
+    K::LoopBreak(_) => (K::LoopBreak(code), "'break' found outside of loop"),
+    K::FuncReturn(_) => (K::FuncReturn(code), "'return' found outside of function"),
+    K::CleanExit(_) => (K::CleanExit(code), ""),
     _ => unreachable!(),
   };
 

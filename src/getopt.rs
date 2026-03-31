@@ -73,17 +73,18 @@ pub fn get_opts(words: Vec<String>) -> (Vec<String>, Vec<Opt>) {
   (non_opts, opts)
 }
 
+type GetOptResult = ShResult<(Vec<(String, Span)>, Vec<Opt>)>;
 pub fn get_opts_from_tokens_strict(
   tokens: Vec<Tk>,
   opt_specs: &[OptSpec],
-) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
+) -> GetOptResult {
   sort_tks(tokens, opt_specs, true)
 }
 
 pub fn get_opts_from_tokens(
   tokens: Vec<Tk>,
   opt_specs: &[OptSpec],
-) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
+) -> GetOptResult {
   sort_tks(tokens, opt_specs, false)
 }
 
@@ -100,7 +101,7 @@ pub fn sort_tks(
   tokens: Vec<Tk>,
   opt_specs: &[OptSpec],
   strict: bool,
-) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
+) -> GetOptResult {
   // Expand tokens and flatten via get_words, preserving spans
   let mut words: Vec<(String, Span)> = vec![];
   for tk in tokens {

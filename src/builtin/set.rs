@@ -1,18 +1,16 @@
-use std::{fmt::Display, str::FromStr};
+use std::{str::FromStr};
 
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
   libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt},
-    utils::VecDequeExt,
   },
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   procio::borrow_fd,
   shopt::as_var_val_display,
-  state::{self, VarKind, read_shopts, read_vars, write_shopts, write_vars},
-  two_way_display,
+  state::{self, VarKind, read_vars, write_shopts, write_vars},
 };
 
 bitflags! {

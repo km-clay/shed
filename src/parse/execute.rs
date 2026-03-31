@@ -8,32 +8,7 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    alias::{alias, unalias},
-    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
-    autocmd::autocmd,
-    cd::cd,
-    complete::{compgen_builtin, complete_builtin},
-    dirstack::{dirs, popd, pushd},
-    echo::echo,
-    eval, exec,
-    flowctl::flowctl,
-    getopts::getopts,
-    help::help,
-    intro,
-    jobctl::{self, JobBehavior, continue_job, disown, jobs},
-    keymap, map,
-    msg::msg,
-    pwd::pwd,
-    read::{self, read_builtin},
-    resource::{ulimit, umask_builtin},
-    seek::seek,
-    set::set_builtin,
-    shift::shift,
-    shopt::shopt,
-    source::source,
-    test::double_bracket_test,
-    trap::{TrapTarget, trap},
-    varcmds::{export, local, readonly, unset},
+    BUILTINS, alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, fixcmd::fixcmd, flowctl::flowctl, getopts::getopts, help::help, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -326,9 +301,20 @@ impl Dispatcher {
     let Some(cmd) = node.get_command() else {
       return self.exec_cmd(node); // Argv is empty, probably an assignment
     };
-    if is_func(node.get_command().cloned()) {
+		// We need to expand this token
+		// so that a command smuggled inside of a variable is routed correctly,
+		// instead of only hitting the exec_cmd path
+		let cmd_word = cmd.clone()
+			.expand()?
+			.get_words()
+			.into_iter()
+			.next()
+			.unwrap();
+
+    if is_func(&cmd_word) {
       self.exec_func(node)
-    } else if cmd.flags.contains(TkFlags::BUILTIN) {
+    } else if cmd.flags.contains(TkFlags::BUILTIN)
+		|| BUILTINS.contains(&cmd_word.as_str()) {
       self.exec_builtin(node)
     } else if is_subsh(node.get_command().cloned()) {
       self.exec_subsh(node)
@@ -459,7 +445,13 @@ impl Dispatcher {
   }
   fn exec_func(&mut self, func: Node) -> ShResult<()> {
     let mut blame = func.get_span().clone();
-    let func_name = func.get_command().unwrap().to_string();
+    let func_name = func.get_command()
+			.unwrap()
+			.clone()
+			.expand()?
+			.get_first_word()
+			.unwrap_or_default();
+
     let func_ctx = func.get_context(format!(
       "in call to function '{}'",
       func_name.fg(next_color())
@@ -493,7 +485,10 @@ impl Dispatcher {
 
     self.io_stack.append_to_frame(func.redirs);
 
-    let name = func_name.as_str().to_string();
+    let name = func_name.clone()
+			.expand()?
+			.get_first_word()
+			.unwrap_or_default();
     blame.rename(name.clone());
 
     argv.insert(0, func_name.clone());
@@ -1079,6 +1074,7 @@ impl Dispatcher {
       "help" => help(cmd),
       "set" => set_builtin(cmd),
       "msg" => msg(cmd),
+			"fc" => fixcmd(cmd, self.interactive),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -1330,9 +1326,8 @@ pub fn get_pipe_stack(num_cmds: usize) -> Vec<(Option<Redir>, Option<Redir>)> {
   stack
 }
 
-pub fn is_func(tk: Option<Tk>) -> bool {
-  let Some(tk) = tk else { return false };
-  read_logic(|l| l.get_func(&tk.to_string())).is_some()
+pub fn is_func(name: &str) -> bool {
+  read_logic(|l| l.get_func(name)).is_some()
 }
 
 pub fn is_subsh(tk: Option<Tk>) -> bool {

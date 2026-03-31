@@ -1,11 +1,7 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
-use scopeguard::defer;
-
 use crate::expand::util::is_var_name_ch;
-use crate::parse::lex::is_hard_sep;
-use crate::prelude::*;
 use crate::readline::markers;
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.

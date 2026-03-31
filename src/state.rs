@@ -1105,7 +1105,12 @@ impl VarTab {
       .map(|hname| hname.to_string_lossy().to_string())
       .unwrap_or_default();
 
-    let help_paths = format!("/usr/share/shed/doc:{home}/.local/share/shed/doc");
+		let mut data_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from(format!("{home}/.local/share")));
+		data_dir.push("shed");
+		let shed_docs = data_dir.join("doc");
+		let shed_db = data_dir.join("shed_hist.db");
+
+    let help_paths = format!("/usr/share/shed/doc:{}",shed_docs.display());
 
     unsafe {
       env::set_var("IFS", " \t\n");
@@ -1121,7 +1126,8 @@ impl VarTab {
       env::set_var("OLDPWD", pathbuf_to_string(std::env::current_dir()));
       env::set_var("HOME", home.clone());
       env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
-      env::set_var("SHED_HIST", format!("{}/.shedhist", home));
+      env::set_var("SHED_HIST", format!("{}/.shed_history", home));
+      env::set_var("SHED_HISTDB", format!("{}",shed_db.display()));
       env::set_var("SHED_RC", format!("{}/.shedrc", home));
       env::set_var("SHED_HPATH", help_paths);
     }

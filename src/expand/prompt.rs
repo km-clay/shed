@@ -1,7 +1,7 @@
 use crate::expand::subshell::expand_cmd_sub;
 use crate::libsh::error::ShResult;
 use crate::prelude::*;
-use crate::state::{read_jobs, read_logic, read_shopts, write_meta};
+use crate::state::{read_jobs, read_logic, write_meta};
 
 #[derive(Debug)]
 pub enum PromptTk {
