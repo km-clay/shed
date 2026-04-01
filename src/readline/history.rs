@@ -140,21 +140,20 @@ impl History {
 		).unwrap_or(0)
 	}
 
-	pub fn query_range(&self, first: i64, last: i64) -> Vec<(i64, HistEntry)> {
+	/// Runs a query on
+	pub fn query(&self, where_clause: &str, params: &[&dyn rusqlite::ToSql]) -> Vec<(i64, HistEntry)> {
 		let table = &self.table;
-		let sql = format!(r##"
-			SELECT command, timestamp, runtime, id FROM {table}
-			WHERE id BETWEEN ?1 AND ?2
-			ORDER BY id ASC
-		"##);
+		let sql = format!(
+			"SELECT command, timestamp, runtime, id FROM {table} {where_clause}"
+		);
 		let mut stmt = match self.conn.prepare(&sql) {
 			Ok(s) => s,
 			Err(_) => return vec![]
 		};
-		let rows = stmt.query_map(rusqlite::params![first, last], |row| {
+		let rows = stmt.query_map(params, |row| {
 			Ok((
 				row.get(3)?,
-				Self::row_to_entry(row)?
+				Self::row_to_entry(row)?,
 			))
 		});
 
@@ -166,20 +165,21 @@ impl History {
 		}
 	}
 
+	pub fn query_range(&self, first: i64, last: i64) -> Vec<(i64, HistEntry)> {
+		let where_clause = r##"
+			WHERE id BETWEEN ?1 AND ?2
+			ORDER BY id ASC
+		"##.to_string();
+		self.query(&where_clause, rusqlite::params![first, last])
+	}
+
 	pub fn query_by_prefix(&self, prefix: &str) -> Option<(i64, HistEntry)> {
-		let table = &self.table;
-		let sql = format!(r##"
-			SELECT command, timestamp, runtime, id FROM {table}
+		let where_clause = r##"
 			WHERE command LIKE ?1 || '%'
 			ORDER BY id DESC
 			LIMIT 1
-		"##);
-		self.conn.query_row(&sql, rusqlite::params![prefix], |row| {
-			Ok((
-				row.get(3)?,
-				Self::row_to_entry(row)?,
-			))
-		}).ok()
+		"##.to_string();
+		self.query(&where_clause, rusqlite::params![prefix]).into_iter().next()
 	}
 
 	pub fn push_entry(&self, entry: HistEntry) -> ShResult<()> {
@@ -201,7 +201,7 @@ impl History {
 		let timestamp = timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
 		self.conn.execute(
 			&format!("INSERT INTO {table} (timestamp, runtime, command) VALUES (?1, ?2, ?3)"),
-			rusqlite::params![timestamp, runtime.as_secs() as i64, command],
+			rusqlite::params![timestamp, runtime.as_micros() as i64, command],
 		)?;
 		Ok(())
 	}
@@ -210,7 +210,7 @@ impl History {
 		let table = &self.table;
 		self.conn.execute(
 			&format!("UPDATE {table} SET runtime = ?1 WHERE id = (SELECT id FROM {table} ORDER BY id DESC LIMIT 1)"),
-			rusqlite::params![runtime.as_secs() as i64],
+			rusqlite::params![runtime.as_micros() as i64],
 		)?;
 		Ok(())
 	}
@@ -307,7 +307,7 @@ impl History {
 		Ok(HistEntry {
 			command: row.get(0)?,
 			timestamp: UNIX_EPOCH + Duration::from_secs(row.get::<_, i64>(1)? as u64),
-			runtime: Duration::from_secs(row.get::<_, i64>(2)? as u64),
+			runtime: Duration::from_micros(row.get::<_, i64>(2)? as u64),
 		})
 	}
 

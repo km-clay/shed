@@ -8,7 +8,7 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    BUILTINS, alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, fixcmd::fixcmd, flowctl::flowctl, getopts::getopts, help::help, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
+    BUILTINS, alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, fixcmd::fixcmd, flowctl::flowctl, getopts::getopts, help::help, hist::hist_builtin, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -1075,6 +1075,7 @@ impl Dispatcher {
       "set" => set_builtin(cmd),
       "msg" => msg(cmd),
 			"fc" => fixcmd(cmd, self.interactive),
+			"hist" => hist_builtin(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
