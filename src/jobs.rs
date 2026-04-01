@@ -6,10 +6,7 @@ use scopeguard::defer;
 use yansi::Color;
 
 use crate::{
-  libsh::{
-    error::{ShErr, ShErrKind, ShResult},
-    sys::TTY_FILENO,
-  },
+  libsh::{error::ShResult, sys::TTY_FILENO},
   prelude::*,
   procio::{IoMode, borrow_fd},
   sherr,

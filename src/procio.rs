@@ -7,7 +7,7 @@ use std::{
 use crate::{
   expand::Expander,
   libsh::{
-    error::{ShErr, ShErrKind, ShResult},
+    error::{ShErr, ShResult},
     sys::TTY_FILENO,
     utils::RedirVecUtils,
   },

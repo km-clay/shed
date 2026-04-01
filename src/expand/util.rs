@@ -3,6 +3,7 @@ use regex::Regex;
 use crate::expand::escape::unescape_str;
 use crate::expand::var::expand_raw;
 use crate::libsh::error::ShResult;
+use crate::match_loop;
 use crate::readline::markers;
 
 /// Expand a case pattern: performs variable/command expansion while preserving
@@ -16,23 +17,22 @@ pub fn expand_case_pattern(raw: &str) -> ShResult<String> {
   let mut in_quote = false;
   let mut chars = expanded.chars();
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      markers::DUB_QUOTE | markers::SNG_QUOTE => {
-        in_quote = !in_quote;
-      }
-      markers::ESCAPE => {
-        if let Some(next_ch) = chars.next() {
-          result.push(next_ch);
-        }
-      }
-      '*' | '?' | '[' | ']' if in_quote => {
-        result.push('\\');
-        result.push(ch);
-      }
-      _ => result.push(ch),
+  match_loop!(chars.next() => ch, {
+    markers::DUB_QUOTE | markers::SNG_QUOTE => {
+      in_quote = !in_quote;
     }
-  }
+    markers::ESCAPE => {
+      if let Some(next_ch) = chars.next() {
+        result.push(next_ch);
+      }
+    }
+    '*' | '?' | '[' | ']' if in_quote => {
+      result.push('\\');
+      result.push(ch);
+    }
+    _ => result.push(ch),
+  });
+
   Ok(result)
 }
 

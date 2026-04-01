@@ -10,7 +10,7 @@ use crate::{
   expand::expand_keymap,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::{
-    error::{ShErr, ShErrKind, ShResult, ShResultExt},
+    error::{ShResult, ShResultExt},
     sys::TTY_FILENO,
   },
   parse::{NdRule, Node},

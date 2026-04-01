@@ -1,5 +1,6 @@
 use crate::expand::expand_raw;
 use crate::libsh::error::ShResult;
+use crate::match_loop;
 use crate::parse::lex::QuoteState;
 
 /// Check if a string contains valid brace expansion patterns.
@@ -14,39 +15,37 @@ fn has_braces(s: &str) -> bool {
   let mut has_range = false;
   let mut qt_state = QuoteState::default();
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        chars.next();
-      } // skip escaped char
-      '\'' => qt_state.toggle_single(),
-      '"' => qt_state.toggle_double(),
-      '{' if qt_state.outside() => {
-        if depth == 0 {
-          found_open = true;
-          has_comma = false;
-          has_range = false;
-        }
-        depth += 1;
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      chars.next();
+    } // skip escaped char
+    '\'' => qt_state.toggle_single(),
+    '"' => qt_state.toggle_double(),
+    '{' if qt_state.outside() => {
+      if depth == 0 {
+        found_open = true;
+        has_comma = false;
+        has_range = false;
       }
-      '}' if qt_state.outside() && depth > 0 => {
-        depth -= 1;
-        if depth == 0 && found_open && (has_comma || has_range) {
-          return true;
-        }
-      }
-      ',' if qt_state.outside() && depth == 1 => {
-        has_comma = true;
-      }
-      '.' if qt_state.outside() && depth == 1 => {
-        if chars.peek() == Some(&'.') {
-          chars.next();
-          has_range = true;
-        }
-      }
-      _ => {}
+      depth += 1;
     }
-  }
+    '}' if qt_state.outside() && depth > 0 => {
+      depth -= 1;
+      if depth == 0 && found_open && (has_comma || has_range) {
+        return true;
+      }
+    }
+    ',' if qt_state.outside() && depth == 1 => {
+      has_comma = true;
+    }
+    '.' if qt_state.outside() && depth == 1 => {
+      if chars.peek() == Some(&'.') {
+        chars.next();
+        has_range = true;
+      }
+    }
+    _ => {}
+  });
   false
 }
 
@@ -122,64 +121,60 @@ fn get_brace_parts(word: &str) -> Option<(String, String, String)> {
   let mut qt_state = QuoteState::default();
 
   // Find the opening brace
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        prefix.push(ch);
-        if let Some(next) = chars.next() {
-          prefix.push(next);
-        }
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      prefix.push(ch);
+      if let Some(next) = chars.next() {
+        prefix.push(next);
       }
-      '\'' => {
-        qt_state.toggle_single();
-        prefix.push(ch);
-      }
-      '"' => {
-        qt_state.toggle_double();
-        prefix.push(ch);
-      }
-      '{' if qt_state.outside() => {
-        break;
-      }
-      _ => prefix.push(ch),
     }
-  }
+    '\'' => {
+      qt_state.toggle_single();
+      prefix.push(ch);
+    }
+    '"' => {
+      qt_state.toggle_double();
+      prefix.push(ch);
+    }
+    '{' if qt_state.outside() => {
+      break;
+    }
+    _ => prefix.push(ch),
+  });
 
   // Find matching closing brace
   let mut depth = 1;
   let mut inner = String::new();
   qt_state = QuoteState::default();
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        inner.push(ch);
-        if let Some(next) = chars.next() {
-          inner.push(next);
-        }
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      inner.push(ch);
+      if let Some(next) = chars.next() {
+        inner.push(next);
       }
-      '\'' => {
-        qt_state.toggle_single();
-        inner.push(ch);
-      }
-      '"' => {
-        qt_state.toggle_double();
-        inner.push(ch);
-      }
-      '{' if qt_state.outside() => {
-        depth += 1;
-        inner.push(ch);
-      }
-      '}' if qt_state.outside() => {
-        depth -= 1;
-        if depth == 0 {
-          break;
-        }
-        inner.push(ch);
-      }
-      _ => inner.push(ch),
     }
-  }
+    '\'' => {
+      qt_state.toggle_single();
+      inner.push(ch);
+    }
+    '"' => {
+      qt_state.toggle_double();
+      inner.push(ch);
+    }
+    '{' if qt_state.outside() => {
+      depth += 1;
+      inner.push(ch);
+    }
+    '}' if qt_state.outside() => {
+      depth -= 1;
+      if depth == 0 {
+        break;
+      }
+      inner.push(ch);
+    }
+    _ => inner.push(ch),
+  });
 
   if depth != 0 {
     return None; // Unbalanced braces
@@ -201,36 +196,34 @@ fn split_brace_inner(inner: &str) -> Vec<String> {
   let mut depth = 0;
   let mut qt_state = QuoteState::default();
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        current.push(ch);
-        if let Some(next) = chars.next() {
-          current.push(next);
-        }
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      current.push(ch);
+      if let Some(next) = chars.next() {
+        current.push(next);
       }
-      '\'' => {
-        qt_state.toggle_single();
-        current.push(ch);
-      }
-      '"' => {
-        qt_state.toggle_double();
-        current.push(ch);
-      }
-      '{' if qt_state.outside() => {
-        depth += 1;
-        current.push(ch);
-      }
-      '}' if qt_state.outside() => {
-        depth -= 1;
-        current.push(ch);
-      }
-      ',' if qt_state.outside() && depth == 0 => {
-        parts.push(std::mem::take(&mut current));
-      }
-      _ => current.push(ch),
     }
-  }
+    '\'' => {
+      qt_state.toggle_single();
+      current.push(ch);
+    }
+    '"' => {
+      qt_state.toggle_double();
+      current.push(ch);
+    }
+    '{' if qt_state.outside() => {
+      depth += 1;
+      current.push(ch);
+    }
+    '}' if qt_state.outside() => {
+      depth -= 1;
+      current.push(ch);
+    }
+    ',' if qt_state.outside() && depth == 0 => {
+      parts.push(std::mem::take(&mut current));
+    }
+    _ => current.push(ch),
+  });
 
   parts.push(current);
   parts

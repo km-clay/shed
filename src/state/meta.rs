@@ -16,7 +16,7 @@ use crate::{
   builtin::BUILTINS,
   expand::expand_keymap,
   jobs::Job,
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::{ShErr, ShResult},
   prelude::*,
   readline::{
     complete::{BashCompSpec, CompSpec},

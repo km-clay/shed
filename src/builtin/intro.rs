@@ -4,7 +4,7 @@ use ariadne::{Fmt, Span};
 
 use crate::{
   builtin::BUILTINS,
-  libsh::error::{ShErr, ShErrKind, ShResult, next_color},
+  libsh::error::{ShResult, next_color},
   parse::{NdRule, Node, execute::prepare_argv, lex::KEYWORDS},
   prelude::*,
   procio::borrow_fd,

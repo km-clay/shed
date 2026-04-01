@@ -25,6 +25,7 @@ use crate::state::{
 };
 use crate::{
   libsh::error::ShResult,
+  match_loop,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
   readline::{
     complete::{CompResponse, Completer},
@@ -1746,46 +1747,42 @@ pub fn annotate_input_recursive(input: &str) -> String {
   let mut chars = annotated.char_indices().peekable();
   let mut changes = vec![];
 
-  while let Some((pos, ch)) = chars.next() {
-    match ch {
-      markers::CMD_SUB | markers::SUBSH | markers::PROC_SUB => {
-        let mut body = String::new();
-        let span_start = pos + ch.len_utf8();
-        let mut span_end = span_start;
-        let closing_marker = match ch {
-          markers::CMD_SUB => markers::CMD_SUB_END,
-          markers::SUBSH => markers::SUBSH_END,
-          markers::PROC_SUB => markers::PROC_SUB_END,
-          _ => unreachable!(),
-        };
-        while let Some((sub_pos, sub_ch)) = chars.next() {
-          match sub_ch {
-            _ if sub_ch == closing_marker => {
-              span_end = sub_pos;
-              break;
-            }
-            _ => body.push(sub_ch),
-          }
+  match_loop!(chars.next() => (pos, ch) => ch, {
+    markers::CMD_SUB | markers::SUBSH | markers::PROC_SUB => {
+      let mut body = String::new();
+      let span_start = pos + ch.len_utf8();
+      let mut span_end = span_start;
+      let closing_marker = match ch {
+        markers::CMD_SUB => markers::CMD_SUB_END,
+        markers::SUBSH => markers::SUBSH_END,
+        markers::PROC_SUB => markers::PROC_SUB_END,
+        _ => unreachable!(),
+      };
+      match_loop!(chars.next() => (sub_pos, sub_ch) => sub_ch, {
+        _ if sub_ch == closing_marker => {
+          span_end = sub_pos;
+          break;
         }
-        let prefix = match ch {
-          markers::PROC_SUB => match chars.peek().map(|(_, c)| *c) {
-            Some('>') => ">(",
-            Some('<') => "<(",
-            _ => "<(",
-          },
-          markers::CMD_SUB => "$(",
-          markers::SUBSH => "(",
-          _ => unreachable!(),
-        };
+        _ => body.push(sub_ch),
+      });
+      let prefix = match ch {
+        markers::PROC_SUB => match chars.peek().map(|(_, c)| *c) {
+          Some('>') => ">(",
+          Some('<') => "<(",
+          _ => "<(",
+        },
+        markers::CMD_SUB => "$(",
+        markers::SUBSH => "(",
+        _ => unreachable!(),
+      };
 
-        body = body.trim_start_matches(prefix).to_string();
-        let annotated_body = annotate_input_recursive(&body);
-        let final_str = format!("{prefix}{annotated_body})");
-        changes.push((span_start, span_end, final_str));
-      }
-      _ => {}
+      body = body.trim_start_matches(prefix).to_string();
+      let annotated_body = annotate_input_recursive(&body);
+      let final_str = format!("{prefix}{annotated_body})");
+      changes.push((span_start, span_end, final_str));
     }
-  }
+    _ => {}
+  });
 
   for change in changes.into_iter().rev() {
     let (start, end, replacement) = change;
@@ -1840,6 +1837,7 @@ pub fn marker_for(class: &TkRule) -> Option<Marker> {
   }
 }
 
+#[allow(unused_assignments)]
 pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   // Sort by position descending, with priority ordering at same position:
   // - RESET first (inserted first, ends up rightmost)
@@ -1967,229 +1965,217 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
 
   insertions.insert(0, (token.span.range().end, markers::RESET)); // reset at the end of the token
 
-  while let Some((i, ch)) = token_chars.peek() {
-    let index = *i; // we have to dereference this here because rustc is a very pedantic program
-    match ch {
-      '`' if cmd_sub_depth == 0 => {
-        in_backtick = !in_backtick;
-        token_chars.next(); // consume the backtick
-        if !in_backtick {
-          insertions.push((span_start + index + 1, markers::BACKTICK_SUB_END));
-        } else {
-          insertions.push((span_start + index, markers::BACKTICK_SUB));
-        }
-        log::debug!("Backtick at index {index}, in_backtick: {in_backtick}");
+  match_loop!(token_chars.peek() => (i, ch) => ch, {
+  '`' if cmd_sub_depth == 0 => {
+    let i = *i;
+    in_backtick = !in_backtick;
+    token_chars.next(); // consume the backtick
+    if !in_backtick {
+      insertions.push((span_start + i + 1, markers::BACKTICK_SUB_END));
+    } else {
+      insertions.push((span_start + i, markers::BACKTICK_SUB));
+    }
+    log::debug!("Backtick at index {i}, in_backtick: {in_backtick}");
+  }
+  ')' if cmd_sub_depth > 0 || proc_sub_depth > 0 => {
+    let i = *i;
+    token_chars.next(); // consume the paren
+    if cmd_sub_depth > 0 {
+      cmd_sub_depth -= 1;
+      if cmd_sub_depth == 0 {
+        insertions.push((span_start + i + 1, markers::CMD_SUB_END));
       }
-      ')' if cmd_sub_depth > 0 || proc_sub_depth > 0 => {
-        token_chars.next(); // consume the paren
-        if cmd_sub_depth > 0 {
-          cmd_sub_depth -= 1;
-          if cmd_sub_depth == 0 {
-            insertions.push((span_start + index + 1, markers::CMD_SUB_END));
-          }
-        } else if proc_sub_depth > 0 {
-          proc_sub_depth -= 1;
-          if proc_sub_depth == 0 {
-            insertions.push((span_start + index + 1, markers::PROC_SUB_END));
-          }
-        }
-      }
-      '$' if !qt_state.in_single() => {
-        let dollar_pos = index;
-        token_chars.next(); // consume the dollar
-        if let Some((_, dollar_ch)) = token_chars.peek() {
-          match dollar_ch {
-            '(' => {
-              cmd_sub_depth += 1;
-              if cmd_sub_depth == 1 {
-                // only mark top level command subs
-                insertions.push((span_start + dollar_pos, markers::CMD_SUB));
-              }
-              token_chars.next(); // consume the paren
-            }
-            '{' if cmd_sub_depth == 0 => {
-              insertions.push((span_start + dollar_pos, markers::VAR_SUB));
-              token_chars.next(); // consume the brace
-              let mut end_pos; // position after ${
-              while let Some((cur_i, br_ch)) = token_chars.peek() {
-                end_pos = *cur_i;
-                // TODO: implement better parameter expansion awareness here
-                // this is a little too permissive
-                if br_ch.is_ascii_alphanumeric()
-								|| *br_ch == '_'
-								|| *br_ch == '!'
-								|| *br_ch == '#'
-								|| *br_ch == '%'
-								|| *br_ch == ':'
-								|| *br_ch == '-'
-								|| *br_ch == '+'
-								|| *br_ch == '='
-								|| *br_ch == '/' // parameter expansion symbols
-								|| *br_ch == '?'
-								|| *br_ch == '$'
-                // we're in some expansion like $foo$bar or ${foo$bar}
-                {
-                  token_chars.next();
-                } else if *br_ch == '}' {
-                  token_chars.next(); // consume the closing brace
-                  insertions.push((span_start + end_pos + 1, markers::VAR_SUB_END));
-                  break;
-                } else {
-                  // malformed, insert end at current position
-                  insertions.push((span_start + end_pos, markers::VAR_SUB_END));
-                  break;
-                }
-              }
-            }
-            _ if cmd_sub_depth == 0 && (dollar_ch.is_ascii_alphanumeric() || *dollar_ch == '_') => {
-              insertions.push((span_start + dollar_pos, markers::VAR_SUB));
-              let mut end_pos = dollar_pos + 1;
-              // consume the var name
-              while let Some((cur_i, var_ch)) = token_chars.peek() {
-                if var_ch.is_ascii_alphanumeric()
-                  || ShellParam::from_char(var_ch).is_some()
-                  || *var_ch == '_'
-                {
-                  end_pos = *cur_i + 1;
-                  token_chars.next();
-                } else {
-                  break;
-                }
-              }
-              insertions.push((span_start + end_pos, markers::VAR_SUB_END));
-            }
-            _ => { /* Just a plain dollar sign, no marker needed */ }
-          }
-        }
-      }
-      ch if cmd_sub_depth > 0 || proc_sub_depth > 0 || in_backtick => {
-        // We are inside of a command sub or process sub right now
-        // We don't mark any of this text. It will later be recursively annotated
-        // by the syntax highlighter
-        token_chars.next(); // consume the char with no special handling
-      }
-
-      '\\' if !qt_state.in_single() => {
-        token_chars.next(); // consume the backslash
-        if token_chars.peek().is_some() {
-          token_chars.next(); // consume the escaped char
-        }
-      }
-      '\\' if qt_state.in_single() => {
-        token_chars.next();
-        if let Some(&(_, '\'')) = token_chars.peek() {
-          token_chars.next(); // consume the escaped single quote
-        }
-      }
-      '`' if !qt_state.in_single() => {
-        token_chars.next();
-      }
-      '<' | '>' if !qt_state.in_quote() && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
-        token_chars.next();
-        if let Some((_, proc_sub_ch)) = token_chars.peek()
-          && *proc_sub_ch == '('
-        {
-          proc_sub_depth += 1;
-          token_chars.next(); // consume the paren
-          if proc_sub_depth == 1 {
-            insertions.push((span_start + index, markers::PROC_SUB));
-          }
-        }
-      }
-      '"' if !qt_state.in_single() => {
-        if qt_state.in_double() {
-          insertions.push((span_start + *i + 1, markers::STRING_DQ_END));
-        } else {
-          insertions.push((span_start + *i, markers::STRING_DQ));
-        }
-        qt_state.toggle_double();
-        token_chars.next(); // consume the quote
-      }
-      '\'' if !qt_state.in_double() => {
-        if qt_state.in_single() {
-          insertions.push((span_start + *i + 1, markers::STRING_SQ_END));
-        } else {
-          insertions.push((span_start + *i, markers::STRING_SQ));
-        }
-        qt_state.toggle_single();
-        token_chars.next(); // consume the quote
-      }
-      '[' if !qt_state.in_quote() && !token.flags.contains(TkFlags::ASSIGN) => {
-        token_chars.next(); // consume the opening bracket
-        let start_pos = span_start + index;
-        let mut is_glob_pat = false;
-        const VALID_CHARS: &[char] = &['!', '^', '-'];
-
-        while let Some((cur_i, ch)) = token_chars.peek() {
-          if *ch == ']' {
-            is_glob_pat = true;
-            insertions.push((span_start + *cur_i + 1, markers::RESET));
-            insertions.push((span_start + *cur_i, markers::GLOB));
-            token_chars.next(); // consume the closing bracket
-            break;
-          } else if !ch.is_ascii_alphanumeric() && !VALID_CHARS.contains(ch) {
-            token_chars.next();
-            break;
-          } else {
-            token_chars.next();
-          }
-        }
-
-        if is_glob_pat {
-          insertions.push((start_pos + 1, markers::RESET));
-          insertions.push((start_pos, markers::GLOB));
-        }
-      }
-      '*' | '?' if !qt_state.in_quote() => {
-        let glob_ch = *ch;
-        token_chars.next(); // consume the first glob char
-        if !in_context(markers::COMMAND, &insertions) {
-          let offset = if glob_ch == '*' && token_chars.peek().is_some_and(|(_, c)| *c == '*') {
-            // it's one of these probably: ./dir/**/*.txt
-            token_chars.next(); // consume the second *
-            2
-          } else {
-            // just a regular glob char
-            1
-          };
-          insertions.push((span_start + index + offset, markers::RESET));
-          insertions.push((span_start + index, markers::GLOB));
-        }
-      }
-      '!' if !qt_state.in_single() && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
-        let bang_pos = index;
-        token_chars.next(); // consume the '!'
-        if let Some((_, next_ch)) = token_chars.peek() {
-          match next_ch {
-            '!' | '$' => {
-              // !! or !$
-              token_chars.next();
-              insertions.push((span_start + bang_pos, markers::HIST_EXP));
-              insertions.push((span_start + bang_pos + 2, markers::HIST_EXP_END));
-            }
-            c if c.is_ascii_alphanumeric() || *c == '-' => {
-              // !word, !-N, !N
-              let mut end_pos = bang_pos + 1;
-              while let Some((cur_i, wch)) = token_chars.peek() {
-                if wch.is_ascii_alphanumeric() || *wch == '_' || *wch == '-' {
-                  end_pos = *cur_i + 1;
-                  token_chars.next();
-                } else {
-                  break;
-                }
-              }
-              insertions.push((span_start + bang_pos, markers::HIST_EXP));
-              insertions.push((span_start + end_pos, markers::HIST_EXP_END));
-            }
-            _ => { /* lone ! before non-expansion char, ignore */ }
-          }
-        }
-      }
-      _ => {
-        token_chars.next(); // consume the char with no special handling
+    } else if proc_sub_depth > 0 {
+      proc_sub_depth -= 1;
+      if proc_sub_depth == 0 {
+        insertions.push((span_start + i + 1, markers::PROC_SUB_END));
       }
     }
   }
+  '$' if !qt_state.in_single() => {
+    let dollar_pos = *i;
+    token_chars.next(); // consume the dollar
+    if let Some((_, dollar_ch)) = token_chars.peek() {
+      match dollar_ch {
+        '(' => {
+          cmd_sub_depth += 1;
+          if cmd_sub_depth == 1 {
+            // only mark top level command subs
+            insertions.push((span_start + dollar_pos, markers::CMD_SUB));
+          }
+          token_chars.next(); // consume the paren
+        }
+        '{' if cmd_sub_depth == 0 => {
+          insertions.push((span_start + dollar_pos, markers::VAR_SUB));
+          token_chars.next(); // consume the brace
+          let mut end_pos; // position after ${
+          match_loop!(token_chars.peek() => (cur_i, br_ch) => br_ch, {
+            // TODO: implement better parameter expansion awareness here
+            // this is a little too permissive
+            _ if br_ch.is_ascii_alphanumeric() || "_!#%:-+=/?$".contains(*br_ch) => {
+              end_pos = *cur_i + 1;
+              token_chars.next();
+            }
+            '}' => {
+              end_pos = *cur_i;
+              token_chars.next(); // consume the closing brace
+              insertions.push((span_start + end_pos + 1, markers::VAR_SUB_END));
+              break;
+            }
+            _ => {
+              end_pos = *cur_i;
+              // malformed, insert end at current position
+              insertions.push((span_start + end_pos, markers::VAR_SUB_END));
+              break;
+            }
+          });
+        }
+        _ if cmd_sub_depth == 0 && (dollar_ch.is_ascii_alphanumeric() || *dollar_ch == '_') => {
+          insertions.push((span_start + dollar_pos, markers::VAR_SUB));
+          let mut end_pos = dollar_pos + 1;
+          // consume the var name
+          match_loop!(token_chars.peek() => (cur_i, var_ch) => var_ch, {
+            _ if var_ch.is_ascii_alphanumeric() || *var_ch == '_' || ShellParam::from_char(var_ch).is_some() => {
+              end_pos = *cur_i + 1;
+              token_chars.next();
+            }
+            _ => break,
+          });
+          insertions.push((span_start + end_pos, markers::VAR_SUB_END));
+        }
+        _ => { /* Just a plain dollar sign, no marker needed */ }
+        }
+      }
+    }
+    ch if cmd_sub_depth > 0 || proc_sub_depth > 0 || in_backtick => {
+      // We are inside of a command sub or process sub right now
+      // We don't mark any of this text. It will later be recursively annotated
+      // by the syntax highlighter
+      token_chars.next(); // consume the char with no special handling
+    }
+
+    '\\' if !qt_state.in_single() => {
+      token_chars.next(); // consume the backslash
+      if token_chars.peek().is_some() {
+        token_chars.next(); // consume the escaped char
+      }
+    }
+    '\\' if qt_state.in_single() => {
+      token_chars.next();
+      if let Some(&(_, '\'')) = token_chars.peek() {
+        token_chars.next(); // consume the escaped single quote
+      }
+    }
+    '`' if !qt_state.in_single() => {
+      token_chars.next();
+    }
+    '<' | '>' if !qt_state.in_quote() && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
+      let i = *i;
+      token_chars.next();
+      if let Some((_, proc_sub_ch)) = token_chars.peek()
+        && *proc_sub_ch == '('
+      {
+        proc_sub_depth += 1;
+        token_chars.next(); // consume the paren
+        if proc_sub_depth == 1 {
+          insertions.push((span_start + i, markers::PROC_SUB));
+        }
+      }
+    }
+    '"' if !qt_state.in_single() => {
+      if qt_state.in_double() {
+        insertions.push((span_start + *i + 1, markers::STRING_DQ_END));
+      } else {
+        insertions.push((span_start + *i, markers::STRING_DQ));
+      }
+      qt_state.toggle_double();
+      token_chars.next(); // consume the quote
+    }
+    '\'' if !qt_state.in_double() => {
+      if qt_state.in_single() {
+        insertions.push((span_start + *i + 1, markers::STRING_SQ_END));
+      } else {
+        insertions.push((span_start + *i, markers::STRING_SQ));
+      }
+      qt_state.toggle_single();
+      token_chars.next(); // consume the quote
+    }
+    '[' if !qt_state.in_quote() && !token.flags.contains(TkFlags::ASSIGN) => {
+      let i = *i;
+      token_chars.next(); // consume the opening bracket
+      let start_pos = span_start + i;
+      let mut is_glob_pat = false;
+      const VALID_CHARS: &[char] = &['!', '^', '-'];
+
+      match_loop!(token_chars.peek() => (cur_i, ch) => ch, {
+        ']' => {
+          is_glob_pat = true;
+          insertions.push((span_start + *cur_i + 1, markers::RESET));
+          insertions.push((span_start + *cur_i, markers::GLOB));
+          token_chars.next(); // consume the closing bracket
+        }
+        _ if !ch.is_ascii_alphanumeric() && !VALID_CHARS.contains(ch) => {
+          token_chars.next();
+          break;
+        }
+        _ => {
+          token_chars.next();
+        }
+      });
+      if is_glob_pat {
+        insertions.push((start_pos + 1, markers::RESET));
+        insertions.push((start_pos, markers::GLOB));
+      }
+    }
+    '*' | '?' if !qt_state.in_quote() => {
+      let i = *i;
+      let glob_ch = *ch;
+      token_chars.next(); // consume the first glob char
+      if !in_context(markers::COMMAND, &insertions) {
+        let offset = if glob_ch == '*' && token_chars.peek().is_some_and(|(_, c)| *c == '*') {
+          // it's one of these probably: ./dir/**/*.txt
+          token_chars.next(); // consume the second *
+          2
+        } else {
+          // just a regular glob char
+          1
+        };
+        insertions.push((span_start + i + offset, markers::RESET));
+        insertions.push((span_start + i, markers::GLOB));
+      }
+    }
+    '!' if !qt_state.in_single() && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
+      let bang_pos = *i;
+      token_chars.next(); // consume the '!'
+      if let Some((_, next_ch)) = token_chars.peek() {
+        match next_ch {
+          '!' | '$' => {
+            // !! or !$
+            token_chars.next();
+            insertions.push((span_start + bang_pos, markers::HIST_EXP));
+            insertions.push((span_start + bang_pos + 2, markers::HIST_EXP_END));
+          }
+          c if c.is_ascii_alphanumeric() || *c == '-' => {
+            // !word, !-N, !N
+            let mut end_pos = bang_pos + 1;
+            match_loop!(token_chars.peek() => (cur_i, wch) => wch, {
+              _ if wch.is_ascii_alphanumeric() || *wch == '-' || *wch == '_' => {
+                end_pos = *cur_i + 1;
+                token_chars.next();
+              }
+              _ => break,
+            });
+            insertions.push((span_start + bang_pos, markers::HIST_EXP));
+            insertions.push((span_start + end_pos, markers::HIST_EXP_END));
+          }
+          _ => { /* lone ! before non-expansion char, ignore */ }
+        }
+      }
+    }
+    _ => {
+      token_chars.next(); // consume the char with no special handling
+    }
+  });
 
   sort_insertions(&mut insertions);
 

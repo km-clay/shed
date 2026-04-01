@@ -8,7 +8,7 @@ use crate::sherr;
 use crate::{
   expand::expand_cmd_sub,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens_raw},
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
   parse::{
     NdRule, Node,
     lex::{self, LexFlags, LexStream, split_tk, split_tk_at},

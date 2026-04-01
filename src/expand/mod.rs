@@ -18,6 +18,7 @@ pub use util::{expand_case_pattern, glob_to_regex, is_var_name_ch};
 pub use var::{expand_glob, expand_raw, expand_var};
 
 use crate::libsh::error::{ShResult, ShResultExt};
+use crate::match_loop;
 use crate::parse::lex::{Tk, TkFlags, TkRule};
 use crate::prelude::*;
 use crate::readline::markers;
@@ -111,18 +112,16 @@ impl Expander {
           }
         }
         markers::DUB_QUOTE | markers::SNG_QUOTE | markers::SUBSH => {
-          while let Some(q_ch) = chars.next() {
-            match q_ch {
-              markers::ARG_SEP if ch == markers::DUB_QUOTE => {
-                words.push(mem::take(&mut cur_word));
-              }
-              _ if q_ch == ch => {
-                was_quoted = true;
-                continue 'outer; // Isn't rust cool
-              }
-              _ => cur_word.push(q_ch),
+          match_loop!(chars.next() => q_ch, {
+            markers::ARG_SEP if ch == markers::DUB_QUOTE => {
+              words.push(mem::take(&mut cur_word));
             }
-          }
+            _ if q_ch == ch => {
+              was_quoted = true;
+              continue 'outer; // Isn't rust cool
+            }
+            _ => cur_word.push(q_ch),
+          });
         }
         _ if ifs.contains(ch) || ch == markers::ARG_SEP => {
           if cur_word.is_empty() && !was_quoted {
@@ -135,7 +134,6 @@ impl Expander {
         _ => cur_word.push(ch),
       }
     }
-
     if words.is_empty() && (cur_word.is_empty() && !was_quoted) {
       return words;
     } else {

@@ -4,7 +4,6 @@ use std::str::Chars;
 
 use itertools::Itertools;
 
-use crate::bitflags;
 use crate::expand::Expander;
 use crate::libsh::error::ShResult;
 use crate::parse::lex::TkFlags;
@@ -18,6 +17,7 @@ use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
 use crate::sherr;
 use crate::state::write_meta;
+use crate::{bitflags, match_loop};
 use crate::{motion, verb};
 
 bitflags! {
@@ -208,14 +208,13 @@ fn parse_ex_cmd(raw: &str) -> Result<Option<EditCmd>, Option<String>> {
   let (verb, motion) = {
     if chars.peek() == Some(&'g') {
       let mut cmd_name = String::new();
-      while let Some(ch) = chars.peek() {
-        if ch.is_alphanumeric() {
+      match_loop!(chars.peek() => ch, {
+        _ if ch.is_alphanumeric() => {
           cmd_name.push(*ch);
           chars.next();
-        } else {
-          break;
         }
-      }
+        _ => break,
+      });
       if !"global".starts_with(&cmd_name) {
         return Err(None);
       }
@@ -241,35 +240,36 @@ fn parse_ex_cmd(raw: &str) -> Result<Option<EditCmd>, Option<String>> {
 fn unescape_shell_cmd(cmd: &str) -> String {
   let mut result = String::new();
   let mut chars = cmd.chars().peekable();
-  while let Some(ch) = chars.next() {
-    if ch == '\\' {
+
+  match_loop!(chars.next() => ch, {
+    '\\' => {
       if let Some(&'"') = chars.peek() {
         chars.next();
         result.push('"');
       } else {
         result.push(ch);
       }
-    } else {
-      result.push(ch);
     }
-  }
+    _ => result.push(ch),
+  });
+
   result
 }
 
 fn parse_ex_command(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Option<String>> {
   let mut cmd_name = String::new();
 
-  while let Some(ch) = chars.peek() {
-    if cmd_name.is_empty() && ch == &'!' {
+  match_loop!(chars.peek() => ch, {
+    '!' if cmd_name.is_empty() => {
       cmd_name.push(*ch);
       chars.next();
-      break;
-    } else if !ch.is_alphanumeric() {
-      break;
     }
-    cmd_name.push(*ch);
-    chars.next();
-  }
+    _ if ch.is_alphanumeric() => {
+      cmd_name.push(*ch);
+      chars.next();
+    }
+    _ => break,
+  });
 
   match cmd_name.as_str() {
     "!" => {
@@ -429,15 +429,13 @@ fn parse_substitute(chars: &mut Peekable<Chars<'_>>) -> Result<Option<Verb>, Opt
   let old_pat = parse_pattern(chars, delimiter)?;
   let new_pat = parse_pattern(chars, delimiter)?;
   let mut flags = SubFlags::empty();
-  while let Some(ch) = chars.next() {
-    match ch {
-      'g' => flags |= SubFlags::GLOBAL,
-      'i' => flags |= SubFlags::IGNORE_CASE,
-      'I' => flags |= SubFlags::NO_IGNORE_CASE,
-      'n' => flags |= SubFlags::SHOW_COUNT,
-      _ => return Err(None),
-    }
-  }
+  match_loop!(chars.next() => ch, {
+    'g' => flags |= SubFlags::GLOBAL,
+    'i' => flags |= SubFlags::IGNORE_CASE,
+    'I' => flags |= SubFlags::NO_IGNORE_CASE,
+    'n' => flags |= SubFlags::SHOW_COUNT,
+    _ => return Err(None),
+  });
   Ok(Some(Verb::Substitute(old_pat, new_pat, flags)))
 }
 
@@ -447,28 +445,26 @@ fn parse_pattern(
 ) -> Result<String, Option<String>> {
   let mut pat = String::new();
   let mut closed = false;
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        if chars.peek().is_some_and(|c| *c == delimiter) {
-          // We escaped the delimiter, so we consume the escape char and continue
-          pat.push(chars.next().unwrap());
-          continue;
-        } else {
-          // The escape char is probably for the regex in the pattern
-          pat.push(ch);
-          if let Some(esc_ch) = chars.next() {
-            pat.push(esc_ch)
-          }
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      if chars.peek().is_some_and(|c| *c == delimiter) {
+        // We escaped the delimiter, so we consume the escape char and continue
+        pat.push(chars.next().unwrap());
+        continue;
+      } else {
+        // The escape char is probably for the regex in the pattern
+        pat.push(ch);
+        if let Some(esc_ch) = chars.next() {
+          pat.push(esc_ch)
         }
       }
-      _ if ch == delimiter => {
-        closed = true;
-        break;
-      }
-      _ => pat.push(ch),
     }
-  }
+    _ if ch == delimiter => {
+      closed = true;
+      break;
+    }
+    _ => pat.push(ch),
+  });
   if !closed {
     Err(Some("Unclosed pattern in ex command".into()))
   } else {

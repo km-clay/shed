@@ -4,6 +4,7 @@ use tempfile::NamedTempFile;
 
 use crate::{
   libsh::error::{ShResult, ShResultExt},
+  match_loop,
   parse::{
     NdRule, Node,
     execute::exec_input,
@@ -94,21 +95,19 @@ pub fn parse_fc_args(args: Vec<Tk>) -> ShResult<(Vec<(String, Span)>, FixCmdOpts
       let mut old = String::new();
       let mut new = String::new();
       let mut chars = word.chars();
-      while let Some(ch) = chars.next() {
-        match ch {
-          '\\' => {
-            old.push(ch);
-            if let Some(next_ch) = chars.next() {
-              old.push(next_ch);
-            }
+      match_loop!(chars.next() => ch, {
+        '\\' => {
+          old.push(ch);
+          if let Some(next_ch) = chars.next() {
+            old.push(next_ch);
           }
-          '=' => {
-            new = chars.collect();
-            break;
-          }
-          _ => old.push(ch),
         }
-      }
+        '=' => {
+          new = chars.collect();
+          break;
+        }
+        _ => old.push(ch),
+      });
 
       if !new.is_empty() {
         if opts.replace.is_none() {

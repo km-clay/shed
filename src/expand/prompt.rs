@@ -1,5 +1,6 @@
 use crate::expand::subshell::expand_cmd_sub;
 use crate::libsh::error::ShResult;
+use crate::match_loop;
 use crate::prelude::*;
 use crate::state::{read_jobs, read_logic, write_meta};
 
@@ -215,147 +216,140 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
   let mut tk_text = String::new();
   let mut tokens = vec![];
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        // Push any accumulated text as a token
-        if !tk_text.is_empty() {
-          tokens.push(PromptTk::Text(std::mem::take(&mut tk_text)));
-        }
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      // Push any accumulated text as a token
+      if !tk_text.is_empty() {
+        tokens.push(PromptTk::Text(std::mem::take(&mut tk_text)));
+      }
 
-        // Handle the escape sequence
-        if let Some(ch) = chars.next() {
-          match ch {
-            'w' => tokens.push(PromptTk::Pwd),
-            'W' => tokens.push(PromptTk::PwdShort),
-            'h' => tokens.push(PromptTk::Hostname),
-            'H' => tokens.push(PromptTk::HostnameShort),
-            's' => tokens.push(PromptTk::ShellName),
-            'u' => tokens.push(PromptTk::Username),
-            '$' => tokens.push(PromptTk::PromptSymbol),
-            'n' => tokens.push(PromptTk::Text("\n".into())),
-            'r' => tokens.push(PromptTk::Text("\r".into())),
-            't' => tokens.push(PromptTk::RuntimeMillis),
-            'j' => tokens.push(PromptTk::JobCount),
-            'T' => tokens.push(PromptTk::RuntimeFormatted),
-            '\\' => tokens.push(PromptTk::Text("\\".into())),
-            '"' => tokens.push(PromptTk::Text("\"".into())),
-            '\'' => tokens.push(PromptTk::Text("'".into())),
-            '(' => tokens.push(PromptTk::VisGroupOpen),
-            ')' => tokens.push(PromptTk::VisGroupClose),
-            '@' => {
-              let mut func_name = String::new();
-              let is_braced = chars.peek() == Some(&'{');
-              let mut handled = false;
-              while let Some(ch) = chars.peek() {
-                match ch {
-                  '}' if is_braced => {
-                    chars.next();
-                    handled = true;
-                    break;
-                  }
-                  'A'..='Z' | 'a'..='z' | '0'..='9' | '_' => {
-                    func_name.push(*ch);
-                    chars.next();
-                  }
-                  _ => {
-                    handled = true;
-                    if is_braced {
-                      // Invalid character in braced function name
-                      tokens.push(PromptTk::Text(format!("\\@{{{func_name}")));
-                    } else {
-                      // End of unbraced function name
-                      let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
-                      if func_exists {
-                        tokens.push(PromptTk::Function(func_name.clone()));
-                      } else {
-                        tokens.push(PromptTk::Text(format!("\\@{func_name}")));
-                      }
-                    }
-                    break;
-                  }
-                }
+      // Handle the escape sequence
+      if let Some(ch) = chars.next() {
+        match ch {
+          'w' => tokens.push(PromptTk::Pwd),
+          'W' => tokens.push(PromptTk::PwdShort),
+          'h' => tokens.push(PromptTk::Hostname),
+          'H' => tokens.push(PromptTk::HostnameShort),
+          's' => tokens.push(PromptTk::ShellName),
+          'u' => tokens.push(PromptTk::Username),
+          '$' => tokens.push(PromptTk::PromptSymbol),
+          'n' => tokens.push(PromptTk::Text("\n".into())),
+          'r' => tokens.push(PromptTk::Text("\r".into())),
+          't' => tokens.push(PromptTk::RuntimeMillis),
+          'j' => tokens.push(PromptTk::JobCount),
+          'T' => tokens.push(PromptTk::RuntimeFormatted),
+          '\\' => tokens.push(PromptTk::Text("\\".into())),
+          '"' => tokens.push(PromptTk::Text("\"".into())),
+          '\'' => tokens.push(PromptTk::Text("'".into())),
+          '(' => tokens.push(PromptTk::VisGroupOpen),
+          ')' => tokens.push(PromptTk::VisGroupClose),
+          '@' => {
+            let mut func_name = String::new();
+            let is_braced = chars.peek() == Some(&'{');
+            let mut handled = false;
+            match_loop!(chars.next() => ch, {
+              '}' if is_braced => {
+                chars.next();
+                handled = true;
+                break;
               }
-              // Handle end-of-input: function name collected but loop ended without pushing
-              if !handled && !func_name.is_empty() {
-                let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
-                if func_exists {
-                  tokens.push(PromptTk::Function(func_name));
+              'A'..='Z' | 'a'..='z' | '0'..='9' | '_' => {
+                func_name.push(ch);
+                chars.next();
+              }
+              _ => {
+                handled = true;
+                if is_braced {
+                  // Invalid character in braced function name
+                  tokens.push(PromptTk::Text(format!("\\@{{{func_name}")));
                 } else {
-                  tokens.push(PromptTk::Text(format!("\\@{func_name}")));
-                }
-              }
-            }
-            'e' => {
-              if chars.next() == Some('[') {
-                let mut params = String::new();
-
-                // Collect parameters and final character
-                while let Some(ch) = chars.next() {
-                  match ch {
-                    '0'..='9' | ';' | '?' | ':' => params.push(ch), // Valid parameter characters
-                    'A'..='Z' | 'a'..='z' => {
-                      // Final character (letter)
-                      params.push(ch);
-                      break;
-                    }
-                    _ => {
-                      // Invalid character in ANSI sequence
-                      tokens.push(PromptTk::Text(format!("\x1b[{params}")));
-                      break;
-                    }
-                  }
-                }
-
-                tokens.push(PromptTk::AnsiSeq(format!("\x1b[{params}")));
-              } else {
-                // Handle case where 'e' is not followed by '['
-                tokens.push(PromptTk::Text("\\e".into()));
-              }
-            }
-            '0'..='7' => {
-              // Handle octal escape
-              let mut octal_str = String::new();
-              octal_str.push(ch);
-
-              // Collect up to 2 more octal digits
-              for _ in 0..2 {
-                if let Some(&next_ch) = chars.peek() {
-                  if ('0'..='7').contains(&next_ch) {
-                    octal_str.push(chars.next().unwrap());
+                  // End of unbraced function name
+                  let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
+                  if func_exists {
+                    tokens.push(PromptTk::Function(func_name.clone()));
                   } else {
-                    break;
+                    tokens.push(PromptTk::Text(format!("\\@{func_name}")));
                   }
+                }
+                break;
+              }
+            });
+            // Handle end-of-input: function name collected but loop ended without pushing
+            if !handled && !func_name.is_empty() {
+              let func_exists = read_logic(|l| l.get_func(&func_name).is_some());
+              if func_exists {
+                tokens.push(PromptTk::Function(func_name));
+              } else {
+                tokens.push(PromptTk::Text(format!("\\@{func_name}")));
+              }
+            }
+          }
+          'e' => {
+            if chars.next() == Some('[') {
+              let mut params = String::new();
+
+              // Collect parameters and final character
+              match_loop!(chars.next() => ch, {
+                '0'..='9' | ';' | '?' | ':' => params.push(ch), // Valid parameter characters
+                'A'..='Z' | 'a'..='z' => {
+                  // Final character (letter)
+                  params.push(ch);
+                  break;
+                }
+                _ => {
+                  // Invalid character in ANSI sequence
+                  tokens.push(PromptTk::Text(format!("\x1b[{params}")));
+                  break;
+                }
+              });
+
+              tokens.push(PromptTk::AnsiSeq(format!("\x1b[{params}")));
+            } else {
+              // Handle case where 'e' is not followed by '['
+              tokens.push(PromptTk::Text("\\e".into()));
+            }
+          }
+          '0'..='7' => {
+            // Handle octal escape
+            let mut octal_str = String::new();
+            octal_str.push(ch);
+
+            // Collect up to 2 more octal digits
+            for _ in 0..2 {
+              if let Some(&next_ch) = chars.peek() {
+                if ('0'..='7').contains(&next_ch) {
+                  octal_str.push(chars.next().unwrap());
                 } else {
                   break;
                 }
-              }
-
-              // Parse the octal string into an integer
-              if let Ok(octal) = i32::from_str_radix(&octal_str, 8) {
-                tokens.push(PromptTk::AsciiOct(octal));
               } else {
-                // Fallback: treat as raw text
-                tokens.push(PromptTk::Text(format!("\\{octal_str}")));
+                break;
               }
             }
-            _ => {
-              // Unknown escape sequence: treat as raw text
-              tokens.push(PromptTk::Text(format!("\\{ch}")));
+
+            // Parse the octal string into an integer
+            if let Ok(octal) = i32::from_str_radix(&octal_str, 8) {
+              tokens.push(PromptTk::AsciiOct(octal));
+            } else {
+              // Fallback: treat as raw text
+              tokens.push(PromptTk::Text(format!("\\{octal_str}")));
             }
           }
-        } else {
-          // Handle trailing backslash
-          tokens.push(PromptTk::Text("\\".into()));
+          _ => {
+            // Unknown escape sequence: treat as raw text
+            tokens.push(PromptTk::Text(format!("\\{ch}")));
+          }
         }
-      }
-      _ => {
-        // Accumulate non-escape characters
-        tk_text.push(ch);
+      } else {
+        // Handle trailing backslash
+        tokens.push(PromptTk::Text("\\".into()));
       }
     }
-  }
-
+    _ => {
+      // Accumulate non-escape characters
+      tk_text.push(ch);
+    }
+  });
   // Push any remaining text as a token
   if !tk_text.is_empty() {
     tokens.push(PromptTk::Text(tk_text));
@@ -368,100 +362,98 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
   let mut tokens = tokenize_prompt(raw).into_iter();
   let mut result = String::new();
 
-  while let Some(token) = tokens.next() {
-    match token {
-      PromptTk::AsciiOct(_) => todo!(),
-      PromptTk::Text(txt) => result.push_str(&txt),
-      PromptTk::AnsiSeq(params) => result.push_str(&params),
-      PromptTk::RuntimeMillis => {
-        if let Some(runtime) = write_meta(|m| m.get_time()) {
-          let runtime_millis = runtime.as_millis().to_string();
-          result.push_str(&runtime_millis);
-        }
+  match_loop!(tokens.next() => token, {
+    PromptTk::AsciiOct(_) => todo!(),
+    PromptTk::Text(txt) => result.push_str(&txt),
+    PromptTk::AnsiSeq(params) => result.push_str(&params),
+    PromptTk::RuntimeMillis => {
+      if let Some(runtime) = write_meta(|m| m.get_time()) {
+        let runtime_millis = runtime.as_millis().to_string();
+        result.push_str(&runtime_millis);
       }
-      PromptTk::RuntimeFormatted => {
-        if let Some(runtime) = write_meta(|m| m.get_time()) {
-          let runtime_fmt = format_cmd_runtime(runtime);
-          result.push_str(&runtime_fmt);
-        }
-      }
-      PromptTk::Pwd => {
-        let mut pwd = std::env::var("PWD").unwrap();
-        let home = std::env::var("HOME").unwrap();
-        if pwd.starts_with(&home) {
-          pwd = pwd.replacen(&home, "~", 1);
-        }
-        result.push_str(&pwd);
-      }
-      PromptTk::PwdShort => {
-        let mut path = std::env::var("PWD").unwrap();
-        let home = std::env::var("HOME").unwrap();
-        if path.starts_with(&home) {
-          path = path.replacen(&home, "~", 1);
-        }
-        let pathbuf = PathBuf::from(&path);
-        let mut segments = pathbuf.iter().count();
-        let mut path_iter = pathbuf.iter();
-        let max_segments = crate::state::read_shopts(|s| s.prompt.trunc_prompt_path);
-        while segments > max_segments {
-          path_iter.next();
-          segments -= 1;
-        }
-        let path_rebuilt: PathBuf = path_iter.collect();
-        let mut path_rebuilt = path_rebuilt.to_str().unwrap().to_string();
-        if path_rebuilt.starts_with(&home) {
-          path_rebuilt = path_rebuilt.replacen(&home, "~", 1);
-        }
-        result.push_str(&path_rebuilt);
-      }
-      PromptTk::Hostname => {
-        let hostname = std::env::var("HOST").unwrap();
-        result.push_str(&hostname);
-      }
-      PromptTk::HostnameShort => todo!(),
-      PromptTk::ShellName => result.push_str("shed"),
-      PromptTk::Username => {
-        let username = std::env::var("USER").unwrap();
-        result.push_str(&username);
-      }
-      PromptTk::PromptSymbol => {
-        let uid = std::env::var("UID").unwrap();
-        let symbol = if &uid == "0" { '#' } else { '$' };
-        result.push(symbol);
-      }
-      PromptTk::ExitCode => todo!(),
-      PromptTk::SuccessSymbol => todo!(),
-      PromptTk::FailureSymbol => todo!(),
-      PromptTk::JobCount => {
-        let count = read_jobs(|j| {
-          j.jobs()
-            .iter()
-            .filter(|j| {
-              j.as_ref().is_some_and(|j| {
-                j.get_stats()
-                  .iter()
-                  .all(|st| matches!(st, WtStat::StillAlive))
-              })
-            })
-            .count()
-        });
-        result.push_str(&count.to_string());
-      }
-      PromptTk::Function(f) => {
-        let output = expand_cmd_sub(&f)?;
-        result.push_str(&output);
-      }
-      PromptTk::VisGrp => todo!(),
-      PromptTk::UserSeq => todo!(),
-      PromptTk::Weekday => todo!(),
-      PromptTk::Dquote => todo!(),
-      PromptTk::Squote => todo!(),
-      PromptTk::Return => todo!(),
-      PromptTk::Newline => todo!(),
-      PromptTk::VisGroupOpen => todo!(),
-      PromptTk::VisGroupClose => todo!(),
     }
-  }
+    PromptTk::RuntimeFormatted => {
+      if let Some(runtime) = write_meta(|m| m.get_time()) {
+        let runtime_fmt = format_cmd_runtime(runtime);
+        result.push_str(&runtime_fmt);
+      }
+    }
+    PromptTk::Pwd => {
+      let mut pwd = std::env::var("PWD").unwrap();
+      let home = std::env::var("HOME").unwrap();
+      if pwd.starts_with(&home) {
+        pwd = pwd.replacen(&home, "~", 1);
+      }
+      result.push_str(&pwd);
+    }
+    PromptTk::PwdShort => {
+      let mut path = std::env::var("PWD").unwrap();
+      let home = std::env::var("HOME").unwrap();
+      if path.starts_with(&home) {
+        path = path.replacen(&home, "~", 1);
+      }
+      let pathbuf = PathBuf::from(&path);
+      let mut segments = pathbuf.iter().count();
+      let mut path_iter = pathbuf.iter();
+      let max_segments = crate::state::read_shopts(|s| s.prompt.trunc_prompt_path);
+      while segments > max_segments {
+        path_iter.next();
+        segments -= 1;
+      }
+      let path_rebuilt: PathBuf = path_iter.collect();
+      let mut path_rebuilt = path_rebuilt.to_str().unwrap().to_string();
+      if path_rebuilt.starts_with(&home) {
+        path_rebuilt = path_rebuilt.replacen(&home, "~", 1);
+      }
+      result.push_str(&path_rebuilt);
+    }
+    PromptTk::Hostname => {
+      let hostname = std::env::var("HOST").unwrap();
+      result.push_str(&hostname);
+    }
+    PromptTk::HostnameShort => todo!(),
+    PromptTk::ShellName => result.push_str("shed"),
+    PromptTk::Username => {
+      let username = std::env::var("USER").unwrap();
+      result.push_str(&username);
+    }
+    PromptTk::PromptSymbol => {
+      let uid = std::env::var("UID").unwrap();
+      let symbol = if &uid == "0" { '#' } else { '$' };
+      result.push(symbol);
+    }
+    PromptTk::ExitCode => todo!(),
+    PromptTk::SuccessSymbol => todo!(),
+    PromptTk::FailureSymbol => todo!(),
+    PromptTk::JobCount => {
+      let count = read_jobs(|j| {
+        j.jobs()
+          .iter()
+          .filter(|j| {
+            j.as_ref().is_some_and(|j| {
+              j.get_stats()
+                .iter()
+                .all(|st| matches!(st, WtStat::StillAlive))
+            })
+          })
+        .count()
+      });
+      result.push_str(&count.to_string());
+    }
+    PromptTk::Function(f) => {
+      let output = expand_cmd_sub(&f)?;
+      result.push_str(&output);
+    }
+    PromptTk::VisGrp => todo!(),
+    PromptTk::UserSeq => todo!(),
+    PromptTk::Weekday => todo!(),
+    PromptTk::Dquote => todo!(),
+    PromptTk::Squote => todo!(),
+    PromptTk::Return => todo!(),
+    PromptTk::Newline => todo!(),
+    PromptTk::VisGroupOpen => todo!(),
+    PromptTk::VisGroupClose => todo!(),
+  });
 
   Ok(result)
 }

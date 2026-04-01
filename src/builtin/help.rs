@@ -7,6 +7,7 @@ use std::{
 use crate::{
   builtin::join_raw_arg_iter,
   libsh::{error::ShResult, guards::RawModeGuard},
+  match_loop,
   parse::{
     NdRule, Node,
     execute::{exec_input, prepare_argv},
@@ -198,18 +199,16 @@ pub fn expand_help(raw: &str) -> String {
   let mut result = String::new();
   let mut chars = raw.chars();
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      markers::RESET => result.push_str(RESET_SEQ),
-      markers::TAG => result.push_str(TAG_SEQ),
-      markers::REFERENCE => result.push_str(REF_SEQ),
-      markers::HEADER => result.push_str(HEADER_SEQ),
-      markers::CODE => result.push_str(CODE_SEQ),
-      markers::KEYWORD_2 => result.push_str(KEYWORD_2_SEQ),
-      markers::KEYWORD_3 => result.push_str(KEYWORD_3_SEQ),
-      _ => result.push(ch),
-    }
-  }
+  match_loop!(chars.next() => ch, {
+    markers::RESET => result.push_str(RESET_SEQ),
+    markers::TAG => result.push_str(TAG_SEQ),
+    markers::REFERENCE => result.push_str(REF_SEQ),
+    markers::HEADER => result.push_str(HEADER_SEQ),
+    markers::CODE => result.push_str(CODE_SEQ),
+    markers::KEYWORD_2 => result.push_str(KEYWORD_2_SEQ),
+    markers::KEYWORD_3 => result.push_str(KEYWORD_3_SEQ),
+    _ => result.push(ch),
+  });
   result
 }
 
@@ -218,96 +217,88 @@ pub fn unescape_help(raw: &str) -> String {
   let mut chars = raw.chars().peekable();
   let mut qt_state = QuoteState::default();
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        if let Some(next_ch) = chars.next() {
-          result.push(next_ch);
-        }
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      if let Some(next_ch) = chars.next() {
+        result.push(next_ch);
       }
-      '\n' => {
-        result.push(ch);
-        qt_state = QuoteState::default();
-      }
-      '"' => {
-        result.push(ch);
-        qt_state.toggle_double();
-      }
-      '\'' => {
-        result.push(ch);
-        qt_state.toggle_single();
-      }
-      _ if qt_state.in_quote() || chars.peek().is_none_or(|ch| ch.is_whitespace()) => {
-        result.push(ch);
-      }
-      '*' => {
-        result.push(markers::TAG);
-        while let Some(next_ch) = chars.next() {
-          if next_ch == '*' {
-            result.push(markers::RESET);
-            break;
-          } else {
-            result.push(next_ch);
-          }
-        }
-      }
-      '|' => {
-        result.push(markers::REFERENCE);
-        while let Some(next_ch) = chars.next() {
-          if next_ch == '|' {
-            result.push(markers::RESET);
-            break;
-          } else {
-            result.push(next_ch);
-          }
-        }
-      }
-      '#' => {
-        result.push(markers::HEADER);
-        while let Some(next_ch) = chars.next() {
-          if next_ch == '#' {
-            result.push(markers::RESET);
-            break;
-          } else {
-            result.push(next_ch);
-          }
-        }
-      }
-      '`' => {
-        result.push(markers::CODE);
-        while let Some(next_ch) = chars.next() {
-          if next_ch == '`' {
-            result.push(markers::RESET);
-            break;
-          } else {
-            result.push(next_ch);
-          }
-        }
-      }
-      '{' => {
-        result.push(markers::KEYWORD_2);
-        while let Some(next_ch) = chars.next() {
-          if next_ch == '}' {
-            result.push(markers::RESET);
-            break;
-          } else {
-            result.push(next_ch);
-          }
-        }
-      }
-      '[' => {
-        result.push(markers::KEYWORD_3);
-        while let Some(next_ch) = chars.next() {
-          if next_ch == ']' {
-            result.push(markers::RESET);
-            break;
-          } else {
-            result.push(next_ch);
-          }
-        }
-      }
-      _ => result.push(ch),
     }
-  }
+    '\n' => {
+      result.push(ch);
+      qt_state = QuoteState::default();
+    }
+    '"' => {
+      result.push(ch);
+      qt_state.toggle_double();
+    }
+    '\'' => {
+      result.push(ch);
+      qt_state.toggle_single();
+    }
+    _ if qt_state.in_quote() || chars.peek().is_none_or(|ch| ch.is_whitespace()) => {
+      result.push(ch);
+    }
+    '*' => {
+      result.push(markers::TAG);
+      match_loop!(chars.next() => next_ch, {
+        '*' => {
+          result.push(markers::RESET);
+          break;
+        }
+         _ => result.push(next_ch),
+      });
+    }
+    '|' => {
+      result.push(markers::REFERENCE);
+      match_loop!(chars.next() => next_ch, {
+        '*' => {
+          result.push(markers::RESET);
+          break;
+        }
+         _ => result.push(next_ch),
+      });
+    }
+    '#' => {
+      result.push(markers::HEADER);
+      match_loop!(chars.next() => next_ch, {
+        '*' => {
+          result.push(markers::RESET);
+          break;
+        }
+         _ => result.push(next_ch),
+      });
+    }
+    '`' => {
+      result.push(markers::CODE);
+      match_loop!(chars.next() => next_ch, {
+        '*' => {
+          result.push(markers::RESET);
+          break;
+        }
+         _ => result.push(next_ch),
+      });
+    }
+    '{' => {
+      result.push(markers::KEYWORD_2);
+      match_loop!(chars.next() => next_ch, {
+        '*' => {
+          result.push(markers::RESET);
+          break;
+        }
+         _ => result.push(next_ch),
+      });
+    }
+    '[' => {
+      result.push(markers::KEYWORD_3);
+      match_loop!(chars.next() => next_ch, {
+        '*' => {
+          result.push(markers::RESET);
+          break;
+        }
+         _ => result.push(next_ch),
+      });
+    }
+    _ => result.push(ch),
+  });
   result
 }

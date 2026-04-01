@@ -20,13 +20,20 @@ use crate::state::AutoCmd;
 ///
 ///  This pattern is used extensively for parsing strings char by char.
 macro_rules! match_loop {
-    ($iter:expr, $binding:ident, { $($arms:tt)* }) => {
-			while let Some($binding) = $iter.next() {
-				match $binding {
-					$($arms)*
-				}
+	($expr:expr => $binding:ident, { $($arms:tt)* }) => {
+		while let Some($binding) = $expr {
+			match $binding {
+				$($arms)*
 			}
-    };
+		}
+	};
+	($expr:expr => $pat:pat => $binding:expr, { $($arms:tt)* }) => {
+		while let Some($pat) = $expr {
+			match $binding {
+				$($arms)*
+			}
+		}
+	};
 }
 
 #[macro_export]

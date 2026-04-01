@@ -4,7 +4,7 @@ use ariadne::Fmt;
 use fmt::Display;
 
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult, next_color},
+  libsh::error::{ShResult, next_color},
   parse::lex::{Span, Tk},
   prelude::*,
   sherr,

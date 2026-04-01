@@ -4,6 +4,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
   libsh::error::{ShErr, ShResult, ShResultExt},
+  match_loop,
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   procio::borrow_fd,
@@ -330,12 +331,10 @@ pub fn set_builtin(node: Node) -> ShResult<()> {
               Ok(f) => flags |= f,
               Err(e) => return Err(e).promote_err(span),
             }
-            while let Some(ch) = chars.next() {
-              match SetFlags::try_from(ch) {
-                Ok(f) => flags |= f,
-                Err(e) => return Err(e).promote_err(span),
-              }
-            }
+            match_loop!(chars.next() => ch => SetFlags::try_from(ch), {
+              Ok(f) => flags |= f,
+              Err(e) => return Err(e).promote_err(span),
+            });
           }
           None => {
             if should_set && flags.is_empty() {

@@ -10,6 +10,7 @@ use crate::{
     error::{ShErr, ShErrKind, ShResult, last_color, next_color},
     utils::{NodeVecUtils, TkVecUtils},
   },
+  match_loop,
   parse::lex::clean_input,
   prelude::*,
   procio::IoMode,
@@ -354,79 +355,77 @@ impl FromStr for RedirBldr {
     let mut tgt_fd = String::new();
     let mut redir = RedirBldr::new();
 
-    while let Some(ch) = chars.next() {
-      match ch {
-        '>' => {
-          redir = redir.with_class(RedirType::Output);
-          if let Some('>') = chars.peek() {
-            chars.next();
-            redir = redir.with_class(RedirType::Append);
-          } else if let Some('|') = chars.peek() {
-            chars.next();
-            redir = redir.with_class(RedirType::OutputForce);
-          }
+    match_loop!(chars.next() => ch, {
+      '>' => {
+        redir = redir.with_class(RedirType::Output);
+        if let Some('>') = chars.peek() {
+          chars.next();
+          redir = redir.with_class(RedirType::Append);
+        } else if let Some('|') = chars.peek() {
+          chars.next();
+          redir = redir.with_class(RedirType::OutputForce);
         }
-        '<' => {
-          redir = redir.with_class(RedirType::Input);
-          let mut count = 0;
+      }
+      '<' => {
+        redir = redir.with_class(RedirType::Input);
+        let mut count = 0;
 
-          if chars.peek() == Some(&'>') {
-            chars.next(); // consume the '>'
-            redir = redir.with_class(RedirType::ReadWrite);
-          } else {
-            while count < 2 && matches!(chars.peek(), Some('<')) {
-              chars.next();
-              count += 1;
-            }
-          }
-
-          redir = match count {
-            1 => redir.with_class(RedirType::HereDoc),
-            2 => redir.with_class(RedirType::HereString),
-            _ => redir, // Default case remains RedirType::Input
-          };
-        }
-        '&' => {
-          if chars.peek() == Some(&'-') {
+        if chars.peek() == Some(&'>') {
+          chars.next(); // consume the '>'
+          redir = redir.with_class(RedirType::ReadWrite);
+        } else {
+          while count < 2 && matches!(chars.peek(), Some('<')) {
             chars.next();
-            src_fd.push('-');
-          } else {
-            while let Some(next_ch) = chars.next() {
-              if next_ch.is_ascii_digit() {
-                src_fd.push(next_ch)
-              } else {
-                break;
-              }
-            }
-          }
-          if src_fd.is_empty() {
-            return Err(sherr!(
-              ParseErr,
-              "Invalid character '{}' in redirection operator",
-              ch,
-            ));
+            count += 1;
           }
         }
-        _ if ch.is_ascii_digit() && tgt_fd.is_empty() => {
-          tgt_fd.push(ch);
-          while let Some(next_ch) = chars.peek() {
+
+        redir = match count {
+          1 => redir.with_class(RedirType::HereDoc),
+          2 => redir.with_class(RedirType::HereString),
+          _ => redir, // Default case remains RedirType::Input
+        };
+      }
+      '&' => {
+        if chars.peek() == Some(&'-') {
+          chars.next();
+          src_fd.push('-');
+        } else {
+          while let Some(next_ch) = chars.next() {
             if next_ch.is_ascii_digit() {
-              let next_ch = chars.next().unwrap();
-              tgt_fd.push(next_ch);
+              src_fd.push(next_ch)
             } else {
               break;
             }
           }
         }
-        _ => {
+        if src_fd.is_empty() {
           return Err(sherr!(
-            ParseErr,
-            "Invalid character '{}' in redirection operator",
-            ch,
+              ParseErr,
+              "Invalid character '{}' in redirection operator",
+              ch,
           ));
         }
       }
-    }
+      _ if ch.is_ascii_digit() && tgt_fd.is_empty() => {
+        tgt_fd.push(ch);
+        while let Some(next_ch) = chars.peek() {
+          if next_ch.is_ascii_digit() {
+            let next_ch = chars.next().unwrap();
+            tgt_fd.push(next_ch);
+          } else {
+            break;
+          }
+        }
+      }
+      _ => {
+        return Err(sherr!(
+            ParseErr,
+            "Invalid character '{}' in redirection operator",
+            ch,
+        ));
+      }
+    });
 
     let tgt_fd = tgt_fd
       .parse::<i32>()
@@ -1690,41 +1689,38 @@ impl ParseStream {
       }
     }
 
-    while let Some(tk) = tk_iter.next() {
-      if *self.next_tk_class() == TkRule::Bg {
-        break;
-      }
-      match tk.class {
-        TkRule::EOI
+    match_loop!(tk_iter.next() => tk => tk.class, {
+      _ if *self.next_tk_class() == TkRule::Bg => break,
+
+      TkRule::EOI
         | TkRule::Pipe
         | TkRule::ErrPipe
         | TkRule::And
         | TkRule::BraceGrpEnd
         | TkRule::Or
         | TkRule::Bg => break,
-        TkRule::Sep => {
-          node_tks.push(tk.clone());
-          break;
-        }
-        TkRule::Str => {
-          argv.push(tk.clone());
-          node_tks.push(tk.clone());
-        }
-        TkRule::Redir => {
-          node_tks.push(tk.clone());
-          let ctx = self.context.clone();
-          let redir = match Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx) {
-            Ok(r) => r,
-            Err(e) => {
-              self.panic_mode(&mut node_tks);
-              return Err(e);
-            }
-          };
-          redirs.push(redir);
-        }
-        _ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
+      TkRule::Sep => {
+        node_tks.push(tk.clone());
+        break;
       }
-    }
+      TkRule::Str => {
+        argv.push(tk.clone());
+        node_tks.push(tk.clone());
+      }
+      TkRule::Redir => {
+        node_tks.push(tk.clone());
+        let ctx = self.context.clone();
+        let redir = match Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx) {
+          Ok(r) => r,
+          Err(e) => {
+            self.panic_mode(&mut node_tks);
+            return Err(e);
+          }
+        };
+        redirs.push(redir);
+      }
+      _ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
+    });
     self.commit(node_tks.len());
 
     Ok(Some(Node {

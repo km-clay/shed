@@ -11,11 +11,8 @@ use bitflags::bitflags;
 
 use crate::{
   builtin::BUILTINS,
-  libsh::{
-    error::{ShErr, ShErrKind, ShResult},
-    utils::CharDequeUtils,
-  },
-  sherr,
+  libsh::{error::ShResult, utils::CharDequeUtils},
+  match_loop, sherr,
 };
 
 pub const KEYWORDS: [&str; 17] = [
@@ -310,20 +307,18 @@ bitflags! {
 pub fn clean_input(input: &str) -> String {
   let mut chars = input.chars().peekable();
   let mut output = String::new();
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' if chars.peek() == Some(&'\n') => {
+  match_loop!(chars.next() => ch, {
+    '\\' if chars.peek() == Some(&'\n') => {
+      chars.next();
+    }
+    '\r' => {
+      if chars.peek() == Some(&'\n') {
         chars.next();
       }
-      '\r' => {
-        if chars.peek() == Some(&'\n') {
-          chars.next();
-        }
-        output.push('\n');
-      }
-      _ => output.push(ch),
+      output.push('\n');
     }
-  }
+    _ => output.push(ch),
+  });
   output
 }
 
@@ -416,166 +411,164 @@ impl LexStream {
     let mut chars = slice.chars().peekable();
     let mut tk = Tk::default();
 
-    while let Some(ch) = chars.next() {
-      match ch {
-        '>' => {
-          if chars.peek() == Some(&'(') {
-            return None; // It's a process sub
-          }
-          pos += 1;
-          if let Some('|') = chars.peek() {
-            // noclobber force '>|'
-            chars.next();
-            pos += 1;
-            tk = self.get_token(self.cursor..pos, TkRule::Redir);
-            break;
-          }
-
-          if let Some('>') = chars.peek() {
-            chars.next();
-            pos += 1;
-          }
-          let Some('&') = chars.peek() else {
-            tk = self.get_token(self.cursor..pos, TkRule::Redir);
-            break;
-          };
-
+    match_loop!(chars.next() => ch, {
+      '>' => {
+        if chars.peek() == Some(&'(') {
+          return None; // It's a process sub
+        }
+        pos += 1;
+        if let Some('|') = chars.peek() {
+          // noclobber force '>|'
           chars.next();
           pos += 1;
-
-          let mut found_fd = false;
-          if chars.peek().is_some_and(|ch| *ch == '-') {
-            chars.next();
-            found_fd = true;
-            pos += 1;
-          } else {
-            while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
-              chars.next();
-              found_fd = true;
-              pos += 1;
-            }
-          }
-
-          if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-            let span_start = self.cursor;
-            self.cursor = pos;
-            return Some(Err(sherr!(
-              ParseErr @ Span::new(span_start..pos, self.source.clone()),
-              "Invalid redirection",
-            )));
-          } else {
-            tk = self.get_token(self.cursor..pos, TkRule::Redir);
-            break;
-          }
-        }
-        '<' => {
-          if chars.peek() == Some(&'(') {
-            return None; // It's a process sub
-          }
-          pos += 1;
-
-          match chars.peek() {
-            Some('<') => {
-              chars.next();
-              pos += 1;
-
-              match chars.peek() {
-                Some('<') => {
-                  chars.next();
-                  pos += 1;
-                }
-
-                Some(ch) => {
-                  let mut ch = *ch;
-                  while is_field_sep(ch) {
-                    let Some(next_ch) = chars.next() else {
-                      // Incomplete input — fall through to emit << as Redir
-                      break;
-                    };
-                    pos += next_ch.len_utf8();
-                    ch = next_ch;
-                  }
-
-                  if is_field_sep(ch) {
-                    // Ran out of input while skipping whitespace — fall through
-                  } else {
-                    let saved_cursor = self.cursor;
-                    match self.read_heredoc(pos) {
-                      Ok(Some(heredoc_tk)) => {
-                        // cursor is set to after the delimiter word;
-                        // heredoc_skip is set to after the body
-                        pos = self.cursor;
-                        self.cursor = saved_cursor;
-                        tk = heredoc_tk;
-                        break;
-                      }
-                      Ok(None) => {
-                        // Incomplete heredoc — restore cursor and fall through
-                        self.cursor = saved_cursor;
-                      }
-                      Err(e) => return Some(Err(e)),
-                    }
-                  }
-                }
-                _ => {
-                  // No delimiter yet — input is incomplete
-                  // Fall through to emit the << as a Redir token
-                }
-              }
-            }
-            Some('>') => {
-              chars.next();
-              pos += 1;
-              tk = self.get_token(self.cursor..pos, TkRule::Redir);
-              break;
-            }
-            Some('&') => {
-              chars.next();
-              pos += 1;
-
-              let mut found_fd = false;
-              if chars.peek().is_some_and(|ch| *ch == '-') {
-                chars.next();
-                found_fd = true;
-                pos += 1;
-              } else {
-                while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
-                  chars.next();
-                  found_fd = true;
-                  pos += 1;
-                }
-              }
-
-              if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-                let span_start = self.cursor;
-                self.cursor = pos;
-                return Some(Err(sherr!(
-                  ParseErr @ Span::new(span_start..pos, self.source.clone()),
-                  "Invalid redirection",
-                )));
-              } else {
-                tk = self.get_token(self.cursor..pos, TkRule::Redir);
-                break;
-              }
-            }
-            _ => {}
-          }
-
           tk = self.get_token(self.cursor..pos, TkRule::Redir);
           break;
         }
-        '0'..='9' => {
+
+        if let Some('>') = chars.peek() {
+          chars.next();
           pos += 1;
+        }
+        let Some('&') = chars.peek() else {
+          tk = self.get_token(self.cursor..pos, TkRule::Redir);
+          break;
+        };
+
+        chars.next();
+        pos += 1;
+
+        let mut found_fd = false;
+        if chars.peek().is_some_and(|ch| *ch == '-') {
+          chars.next();
+          found_fd = true;
+          pos += 1;
+        } else {
           while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
             chars.next();
+            found_fd = true;
             pos += 1;
           }
         }
-        _ => {
-          return None;
+
+        if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+          let span_start = self.cursor;
+          self.cursor = pos;
+          return Some(Err(sherr!(
+                ParseErr @ Span::new(span_start..pos, self.source.clone()),
+                "Invalid redirection",
+          )));
+        } else {
+          tk = self.get_token(self.cursor..pos, TkRule::Redir);
+          break;
         }
       }
-    }
+      '<' => {
+        if chars.peek() == Some(&'(') {
+          return None; // It's a process sub
+        }
+        pos += 1;
+
+        match chars.peek() {
+          Some('<') => {
+            chars.next();
+            pos += 1;
+
+            match chars.peek() {
+              Some('<') => {
+                chars.next();
+                pos += 1;
+              }
+
+              Some(ch) => {
+                let mut ch = *ch;
+                while is_field_sep(ch) {
+                  let Some(next_ch) = chars.next() else {
+                    // Incomplete input — fall through to emit << as Redir
+                    break;
+                  };
+                  pos += next_ch.len_utf8();
+                  ch = next_ch;
+                }
+
+                if is_field_sep(ch) {
+                  // Ran out of input while skipping whitespace — fall through
+                } else {
+                  let saved_cursor = self.cursor;
+                  match self.read_heredoc(pos) {
+                    Ok(Some(heredoc_tk)) => {
+                      // cursor is set to after the delimiter word;
+                      // heredoc_skip is set to after the body
+                      pos = self.cursor;
+                      self.cursor = saved_cursor;
+                      tk = heredoc_tk;
+                      break;
+                    }
+                    Ok(None) => {
+                      // Incomplete heredoc — restore cursor and fall through
+                      self.cursor = saved_cursor;
+                    }
+                    Err(e) => return Some(Err(e)),
+                  }
+                }
+              }
+              _ => {
+                // No delimiter yet — input is incomplete
+                // Fall through to emit the << as a Redir token
+              }
+            }
+          }
+          Some('>') => {
+            chars.next();
+            pos += 1;
+            tk = self.get_token(self.cursor..pos, TkRule::Redir);
+            break;
+          }
+          Some('&') => {
+            chars.next();
+            pos += 1;
+
+            let mut found_fd = false;
+            if chars.peek().is_some_and(|ch| *ch == '-') {
+              chars.next();
+              found_fd = true;
+              pos += 1;
+            } else {
+              while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+                chars.next();
+                found_fd = true;
+                pos += 1;
+              }
+            }
+
+            if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+              let span_start = self.cursor;
+              self.cursor = pos;
+              return Some(Err(sherr!(
+                    ParseErr @ Span::new(span_start..pos, self.source.clone()),
+                    "Invalid redirection",
+              )));
+            } else {
+              tk = self.get_token(self.cursor..pos, TkRule::Redir);
+              break;
+            }
+          }
+          _ => {}
+        }
+
+        tk = self.get_token(self.cursor..pos, TkRule::Redir);
+        break;
+      }
+      '0'..='9' => {
+        pos += 1;
+        while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+          chars.next();
+          pos += 1;
+        }
+      }
+      _ => {
+        return None;
+      }
+    });
 
     if tk == Tk::default() {
       return None;
@@ -726,317 +719,301 @@ impl LexStream {
       return Ok(casepat_tk);
     }
 
-    while let Some(ch) = chars.next() {
-      match ch {
-        _ if self.flags.contains(LexFlags::RAW) => {
-          if ch.is_whitespace() {
-            break;
-          } else {
-            pos += ch.len_utf8()
+    match_loop!(chars.next() => ch, {
+      _ if self.flags.contains(LexFlags::RAW) => {
+        if ch.is_whitespace() {
+          break;
+        } else {
+          pos += ch.len_utf8()
+        }
+      }
+      '\\' => {
+        pos += 1;
+        if let Some(ch) = chars.next() {
+          pos += ch.len_utf8();
+        }
+      }
+      '\'' => {
+        pos += 1;
+        self.quote_state.toggle_single();
+      }
+      '`' if !self.quote_state.in_single() => {
+        pos += 1;
+        match_loop!(chars.next() => ch, {
+          '\\' => {
+            pos += 1;
+            if let Some(next_ch) = chars.next() {
+              pos += next_ch.len_utf8();
+            }
           }
-        }
-        '\\' => {
-          pos += 1;
-          if let Some(ch) = chars.next() {
-            pos += ch.len_utf8();
-          }
-        }
-        '\'' => {
-          pos += 1;
-          self.quote_state.toggle_single();
-        }
-        '`' if !self.quote_state.in_single() => {
-          pos += 1;
-          while let Some(ch) = chars.next() {
-            match ch {
-              '\\' => {
-                pos += 1;
-                if let Some(next_ch) = chars.next() {
-                  pos += next_ch.len_utf8();
-                }
-              }
-              '$' if chars.peek() == Some(&'(') => {
-                pos += 2;
-                chars.next();
-                let mut paren_count = 1;
-                let paren_pos = pos;
-                while let Some(ch) = chars.next() {
-                  match ch {
-                    '\\' => {
-                      pos += 1;
-                      if let Some(next_ch) = chars.next() {
-                        pos += next_ch.len_utf8();
-                      }
-                    }
-                    '(' => {
-                      pos += 1;
-                      paren_count += 1;
-                    }
-                    ')' => {
-                      pos += 1;
-                      paren_count -= 1;
-                      if paren_count <= 0 {
-                        break;
-                      }
-                    }
-                    _ => pos += ch.len_utf8(),
+          '$' if chars.peek() == Some(&'(') => {
+            pos += 2;
+            chars.next();
+            let mut paren_count = 1;
+            let paren_pos = pos;
+            while let Some(ch) = chars.next() {
+              match ch {
+                '\\' => {
+                  pos += 1;
+                  if let Some(next_ch) = chars.next() {
+                    pos += next_ch.len_utf8();
                   }
                 }
-                if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-                  self.cursor = pos;
-                  return Err(sherr!(
-                      ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-                      "Unclosed subshell",
-                  ));
+                '(' => {
+                  pos += 1;
+                  paren_count += 1;
                 }
+                ')' => {
+                  pos += 1;
+                  paren_count -= 1;
+                  if paren_count <= 0 {
+                    break;
+                  }
+                }
+                _ => pos += ch.len_utf8(),
               }
-              '`' => {
-                pos += 1;
-                break;
-              }
-              _ => pos += ch.len_utf8(),
+            }
+            if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+              self.cursor = pos;
+              return Err(sherr!(
+                  ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+                  "Unclosed subshell",
+              ));
             }
           }
-        }
-        _ if self.quote_state.in_single() => pos += ch.len_utf8(),
-        '$' if chars.peek() == Some(&'(') => {
-          pos += 2;
-          chars.next();
-          let mut paren_count = 1;
-          let paren_pos = pos;
-          while let Some(ch) = chars.next() {
-            match ch {
-              '\\' => {
-                pos += 1;
-                if let Some(next_ch) = chars.next() {
-                  pos += next_ch.len_utf8();
-                }
-              }
-              '(' => {
-                pos += 1;
-                paren_count += 1;
-              }
-              ')' => {
-                pos += 1;
-                paren_count -= 1;
-                if paren_count <= 0 {
-                  break;
-                }
-              }
-              _ => pos += ch.len_utf8(),
-            }
+          '`' => {
+            pos += 1;
+            break;
           }
-          if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-            self.cursor = pos;
-            return Err(sherr!(
-              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-              "Unclosed subshell",
-            ));
-          }
-        }
-        '$' if chars.peek() == Some(&'{') => {
-          pos += 2;
-          chars.next();
-          let mut brace_count = 1;
-          while let Some(brc_ch) = chars.next() {
-            match brc_ch {
-              '\\' => {
-                pos += 1;
-                if let Some(next_ch) = chars.next() {
-                  pos += next_ch.len_utf8()
-                }
-              }
-              '{' => {
-                pos += 1;
-                brace_count += 1;
-              }
-              '}' => {
-                pos += 1;
-                brace_count -= 1;
-                if brace_count == 0 {
-                  break;
-                }
-              }
-              _ => pos += ch.len_utf8(),
-            }
-          }
-        }
-        '"' => {
-          pos += 1;
-          self.quote_state.toggle_double();
-        }
-        _ if self.quote_state.in_double() => pos += ch.len_utf8(),
-        '<' if chars.peek() == Some(&'(') => {
-          pos += 2;
-          chars.next();
-          let mut paren_count = 1;
-          let paren_pos = pos;
-          while let Some(ch) = chars.next() {
-            match ch {
-              '\\' => {
-                pos += 1;
-                if let Some(next_ch) = chars.next() {
-                  pos += next_ch.len_utf8();
-                }
-              }
-              '(' => {
-                pos += 1;
-                paren_count += 1;
-              }
-              ')' => {
-                pos += 1;
-                paren_count -= 1;
-                if paren_count <= 0 {
-                  break;
-                }
-              }
-              _ => pos += ch.len_utf8(),
-            }
-          }
-          if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-            self.cursor = pos;
-            return Err(sherr!(
-              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-              "Unclosed subshell",
-            ));
-          }
-        }
-        '>' if chars.peek() == Some(&'(') => {
-          pos += 2;
-          chars.next();
-          let mut paren_count = 1;
-          let paren_pos = pos;
-          while let Some(ch) = chars.next() {
-            match ch {
-              '\\' => {
-                pos += 1;
-                if let Some(next_ch) = chars.next() {
-                  pos += next_ch.len_utf8();
-                }
-              }
-              '(' => {
-                pos += 1;
-                paren_count += 1;
-              }
-              ')' => {
-                pos += 1;
-                paren_count -= 1;
-                if paren_count <= 0 {
-                  break;
-                }
-              }
-              _ => pos += ch.len_utf8(),
-            }
-          }
-          if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-            self.cursor = pos;
-            return Err(sherr!(
-              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-              "Unclosed subshell",
-            ));
-          }
-        }
-        '(' if can_be_subshell && chars.peek() == Some(&')') => {
-          // standalone "()" — function definition marker
-          pos += 2;
-          chars.next();
-          let mut tk = self.get_token(self.cursor..pos, TkRule::Str);
-          tk.mark(TkFlags::KEYWORD);
-          self.cursor = pos;
-          self.set_next_is_cmd(true);
-          return Ok(tk);
-        }
-        '(' if self.next_is_cmd() && can_be_subshell => {
-          pos += 1;
-          let mut paren_count = 1;
-          let paren_pos = pos;
-          while let Some(ch) = chars.next() {
-            match ch {
-              '\\' => {
-                pos += 1;
-                if let Some(next_ch) = chars.next() {
-                  pos += next_ch.len_utf8();
-                }
-              }
-              '(' => {
-                pos += 1;
-                paren_count += 1;
-              }
-              ')' => {
-                pos += 1;
-                paren_count -= 1;
-                if paren_count <= 0 {
-                  break;
-                }
-              }
-              _ => pos += ch.len_utf8(),
-            }
-          }
-          if paren_count != 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-            self.cursor = pos;
-            return Err(sherr!(
-              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-              "Unclosed subshell",
-            ));
-          }
-          let mut subsh_tk = self.get_token(self.cursor..pos, TkRule::Str);
-          subsh_tk.flags |= TkFlags::IS_CMD;
-          subsh_tk.flags |= TkFlags::IS_SUBSH;
-          self.cursor = pos;
-          self.set_next_is_cmd(true);
-          return Ok(subsh_tk);
-        }
-        '{' if pos == self.cursor && self.next_is_cmd() => {
-          pos += 1;
-          let mut tk = self.get_token(self.cursor..pos, TkRule::BraceGrpStart);
-          tk.flags |= TkFlags::IS_CMD;
-          self.enter_brc_grp();
-          self.set_next_is_cmd(true);
-
-          self.cursor = pos;
-          return Ok(tk);
-        }
-        '}' if pos == self.cursor && self.in_brc_grp() => {
-          pos += 1;
-          let tk = self.get_token(self.cursor..pos, TkRule::BraceGrpEnd);
-          self.leave_brc_grp();
-          self.set_next_is_cmd(true);
-          self.cursor = pos;
-          return Ok(tk);
-        }
-        '=' if chars.peek() == Some(&'(') => {
-          pos += 1; // '='
-          let mut depth = 1;
-          chars.next();
-          pos += 1; // '('
-          // looks like an array
-          while let Some(arr_ch) = chars.next() {
-            match arr_ch {
-              '\\' => {
-                pos += 1;
-                if let Some(next_ch) = chars.next() {
-                  pos += next_ch.len_utf8();
-                }
-              }
-              '(' => {
-                depth += 1;
-                pos += 1;
-              }
-              ')' => {
-                depth -= 1;
-                pos += 1;
-                if depth == 0 {
-                  break;
-                }
-              }
-              _ => pos += arr_ch.len_utf8(),
-            }
-          }
-        }
-        _ if is_hard_sep(ch) => break,
-        _ => pos += ch.len_utf8(),
+          _ => pos += ch.len_utf8(),
+        });
       }
-    }
+      _ if self.quote_state.in_single() => pos += ch.len_utf8(),
+      '$' if chars.peek() == Some(&'(') => {
+        pos += 2;
+        chars.next();
+        let mut paren_count = 1;
+        let paren_pos = pos;
+        match_loop!(chars.next() => ch, {
+          '\\' => {
+            pos += 1;
+            if let Some(next_ch) = chars.next() {
+              pos += next_ch.len_utf8();
+            }
+          }
+          '(' => {
+            pos += 1;
+            paren_count += 1;
+          }
+          ')' => {
+            pos += 1;
+            paren_count -= 1;
+            if paren_count <= 0 {
+              break;
+            }
+          }
+          _ => pos += ch.len_utf8(),
+        });
+        if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+          self.cursor = pos;
+          return Err(sherr!(
+              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+              "Unclosed subshell",
+          ));
+        }
+      }
+      '$' if chars.peek() == Some(&'{') => {
+        pos += 2;
+        chars.next();
+        let mut brace_count = 1;
+        match_loop!(chars.next() => brc_ch, {
+          '\\' => {
+            pos += 1;
+            if let Some(next_ch) = chars.next() {
+              pos += next_ch.len_utf8()
+            }
+          }
+          '{' => {
+            pos += 1;
+            brace_count += 1;
+            }
+          '}' => {
+            pos += 1;
+            brace_count -= 1;
+            if brace_count == 0 {
+              break;
+            }
+          }
+          _ => pos += ch.len_utf8(),
+        });
+      }
+      '"' => {
+        pos += 1;
+        self.quote_state.toggle_double();
+      }
+      _ if self.quote_state.in_double() => pos += ch.len_utf8(),
+      '<' if chars.peek() == Some(&'(') => {
+        pos += 2;
+        chars.next();
+        let mut paren_count = 1;
+        let paren_pos = pos;
+        match_loop!(chars.next() => ch, {
+          '\\' => {
+            pos += 1;
+            if let Some(next_ch) = chars.next() {
+              pos += next_ch.len_utf8();
+            }
+          }
+          '(' => {
+            pos += 1;
+            paren_count += 1;
+          }
+          ')' => {
+            pos += 1;
+            paren_count -= 1;
+            if paren_count <= 0 {
+              break;
+            }
+          }
+          _ => pos += ch.len_utf8(),
+        });
+        if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+          self.cursor = pos;
+          return Err(sherr!(
+              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+              "Unclosed subshell",
+          ));
+        }
+      }
+      '>' if chars.peek() == Some(&'(') => {
+        pos += 2;
+        chars.next();
+        let mut paren_count = 1;
+        let paren_pos = pos;
+        match_loop!(chars.next() => ch, {
+          '\\' => {
+            pos += 1;
+            if let Some(next_ch) = chars.next() {
+              pos += next_ch.len_utf8();
+            }
+          }
+          '(' => {
+            pos += 1;
+            paren_count += 1;
+          }
+          ')' => {
+            pos += 1;
+            paren_count -= 1;
+            if paren_count <= 0 {
+              break;
+            }
+          }
+          _ => pos += ch.len_utf8(),
+        });
+        if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+          self.cursor = pos;
+          return Err(sherr!(
+              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+              "Unclosed subshell",
+          ));
+        }
+      }
+      '(' if can_be_subshell && chars.peek() == Some(&')') => {
+        // standalone "()" — function definition marker
+        pos += 2;
+        chars.next();
+        let mut tk = self.get_token(self.cursor..pos, TkRule::Str);
+        tk.mark(TkFlags::KEYWORD);
+        self.cursor = pos;
+        self.set_next_is_cmd(true);
+        return Ok(tk);
+      }
+      '(' if self.next_is_cmd() && can_be_subshell => {
+        pos += 1;
+        let mut paren_count = 1;
+        let paren_pos = pos;
+        match_loop!(chars.next() => ch, {
+          '\\' => {
+            pos += 1;
+            if let Some(next_ch) = chars.next() {
+              pos += next_ch.len_utf8();
+            }
+          }
+          '(' => {
+            pos += 1;
+            paren_count += 1;
+          }
+          ')' => {
+            pos += 1;
+            paren_count -= 1;
+            if paren_count <= 0 {
+              break;
+            }
+          }
+          _ => pos += ch.len_utf8(),
+        });
+        if paren_count != 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+          self.cursor = pos;
+          return Err(sherr!(
+              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+              "Unclosed subshell",
+          ));
+        }
+        let mut subsh_tk = self.get_token(self.cursor..pos, TkRule::Str);
+        subsh_tk.flags |= TkFlags::IS_CMD;
+        subsh_tk.flags |= TkFlags::IS_SUBSH;
+        self.cursor = pos;
+        self.set_next_is_cmd(true);
+        return Ok(subsh_tk);
+      }
+      '{' if pos == self.cursor && self.next_is_cmd() => {
+        pos += 1;
+        let mut tk = self.get_token(self.cursor..pos, TkRule::BraceGrpStart);
+        tk.flags |= TkFlags::IS_CMD;
+        self.enter_brc_grp();
+        self.set_next_is_cmd(true);
+
+        self.cursor = pos;
+        return Ok(tk);
+      }
+      '}' if pos == self.cursor && self.in_brc_grp() => {
+        pos += 1;
+        let tk = self.get_token(self.cursor..pos, TkRule::BraceGrpEnd);
+        self.leave_brc_grp();
+        self.set_next_is_cmd(true);
+        self.cursor = pos;
+        return Ok(tk);
+      }
+      '=' if chars.peek() == Some(&'(') => {
+        pos += 1; // '='
+        let mut depth = 1;
+        chars.next();
+        pos += 1; // '('
+                  // looks like an array
+        match_loop!(chars.next() => arr_ch, {
+          '\\' => {
+            pos += 1;
+            if let Some(next_ch) = chars.next() {
+              pos += next_ch.len_utf8();
+            }
+          }
+          '(' => {
+            depth += 1;
+            pos += 1;
+          }
+          ')' => {
+            depth -= 1;
+            pos += 1;
+            if depth == 0 {
+              break;
+            }
+          }
+          _ => pos += arr_ch.len_utf8(),
+        });
+      }
+      _ if is_hard_sep(ch) => break,
+      _ => pos += ch.len_utf8(),
+    });
     let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
     if self.quote_state.in_quote() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
       self.cursor = pos;
@@ -1175,17 +1152,16 @@ impl Iterator for LexStream {
           self.cursor = skip;
         }
 
-        while let Some(ch) = get_char(&self.source, self.cursor) {
-          match ch {
-            '\\' if get_char(&self.source, self.cursor + 1) == Some('\n') => {
-              self.cursor = (self.cursor + 2).min(self.source.len());
-            }
-            _ if is_hard_sep(ch) => {
-              self.cursor += 1;
-            }
-            _ => break,
+        match_loop!(get_char(&self.source, self.cursor) => ch, {
+          '\\' if get_char(&self.source, self.cursor + 1) == Some('\n') => {
+            self.cursor = (self.cursor + 2).min(self.source.len());
           }
-        }
+          _ if is_hard_sep(ch) => {
+            self.cursor += 1;
+          }
+          _ => break,
+        });
+
         self.get_token(ch_idx..self.cursor, TkRule::Sep)
       }
       '#'
@@ -1275,15 +1251,13 @@ pub fn get_char(src: &str, idx: usize) -> Option<char> {
 pub fn is_assignment(text: &str) -> bool {
   let mut chars = text.chars();
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        chars.next();
-      }
-      '=' => return true,
-      _ => continue,
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      chars.next();
     }
-  }
+    '=' => return true,
+    _ => continue,
+  });
   false
 }
 

@@ -2,13 +2,13 @@ use std::{fmt::Display, str::FromStr};
 
 use nix::{libc::STDERR_FILENO, unistd::write};
 
-use crate::sherr;
 use crate::{
   libsh::error::{ShErr, ShResult},
   parse::lex::Span,
   procio::borrow_fd,
   state::{read_shopts, read_vars},
 };
+use crate::{match_loop, sherr};
 
 const SPECIAL_CHARS: &str = "#$^*()=|{}[]`<>?~;& '\"";
 
@@ -34,33 +34,31 @@ pub fn as_var_val_display(s: &str) -> String {
   let mut result = String::with_capacity(s.len());
   let mut chars = s.chars().peekable();
   let mut has_escapes = false;
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        result.push_str("\\\\");
-      }
-      _ if ch.is_ascii_control() => {
-        let escaped = match ch {
-          '\n' => "\\n".into(),
-          '\r' => "\\r".into(),
-          '\t' => "\\t".into(),
-          '\x07' => "\\a".into(),
-          '\x08' => "\\b".into(),
-          '\x0B' => "\\v".into(),
-          '\x0C' => "\\f".into(),
-          _ => format!("\\x{:02x}", ch as u8),
-        };
-        has_escapes = true;
-        result.push_str(&escaped);
-      }
-      '\'' => {
-        has_escapes = true;
-        result.push('\\');
-        result.push('\'');
-      }
-      _ => result.push(ch),
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      result.push_str("\\\\");
     }
-  }
+    _ if ch.is_ascii_control() => {
+      let escaped = match ch {
+        '\n' => "\\n".into(),
+        '\r' => "\\r".into(),
+        '\t' => "\\t".into(),
+        '\x07' => "\\a".into(),
+        '\x08' => "\\b".into(),
+        '\x0B' => "\\v".into(),
+        '\x0C' => "\\f".into(),
+        _ => format!("\\x{:02x}", ch as u8),
+      };
+      has_escapes = true;
+      result.push_str(&escaped);
+    }
+    '\'' => {
+      has_escapes = true;
+      result.push('\\');
+      result.push('\'');
+    }
+    _ => result.push(ch),
+  });
 
   let has_special = result.chars().any(|c| SPECIAL_CHARS.contains(c));
 

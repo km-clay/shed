@@ -13,10 +13,7 @@ pub use meta::*;
 pub mod jobs;
 pub use jobs::*;
 
-use crate::{
-  libsh::error::{ShErr, ShErrKind},
-  shopt::ShOpts,
-};
+use crate::{libsh::error::ShErr, shopt::ShOpts};
 
 thread_local! {
   pub static SHED: Shed = Shed::new();

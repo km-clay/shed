@@ -264,7 +264,7 @@ mod tests {
       "on-exit",
     ];
     for kind in kinds {
-      test_input("autocmd {kind} 'true'").unwrap();
+      test_input(format!("autocmd {kind} 'true'")).unwrap();
     }
   }
 

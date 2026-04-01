@@ -12,7 +12,7 @@ use nix::unistd::{User, gethostname, getppid};
 use crate::{
   builtin::map::MapNode,
   libsh::{
-    error::{ShErr, ShErrKind, ShResult},
+    error::{ShErr, ShResult},
     utils::VecDequeExt,
   },
   parse::lex::{LexFlags, LexStream, Tk},

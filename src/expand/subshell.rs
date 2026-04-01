@@ -1,9 +1,10 @@
 use crate::expand::arithmetic::expand_arithmetic;
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::libsh::error::ShResult;
 use crate::parse::execute::exec_input;
 use crate::parse::{Redir, RedirType};
 use crate::prelude::*;
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
+use crate::sherr;
 use crate::state::{self, write_jobs};
 
 pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {

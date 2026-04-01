@@ -143,24 +143,22 @@ impl FromStr for HistEntries {
       let mut feeding_lines = true;
       while feeding_lines {
         feeding_lines = false;
-        while let Some(ch) = chars.next() {
-          match ch {
-            '\\' => {
-              if let Some(esc_ch) = chars.next() {
-                // Unescape: \\ -> \, \n stays as literal n after backslash was written as \\n
-                cur_line.push(esc_ch);
-              } else {
-                // Trailing backslash = line continuation in history file format
-                cur_line.push('\n');
-                feeding_lines = true;
-              }
-            }
-            '\n' => break,
-            _ => {
-              cur_line.push(ch);
+        match_loop!(chars => ch, {
+          '\\' => {
+            if let Some(esc_ch) = chars.next() {
+              // Unescape: \\ -> \, \n stays as literal n after backslash was written as \\n
+              cur_line.push(esc_ch);
+            } else {
+              // Trailing backslash = line continuation in history file format
+              cur_line.push('\n');
+              feeding_lines = true;
             }
           }
-        }
+          '\n' => break,
+          _ => {
+            cur_line.push(ch);
+          }
+        });
         if feeding_lines {
           let Some((_, line)) = lines.next() else {
             return Err(sherr!(HistoryReadErr, "Bad formatting on line {i}",));

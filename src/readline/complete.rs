@@ -12,6 +12,7 @@ use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   expand::escape_str,
   libsh::{error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils},
+  match_loop,
   parse::{
     execute::exec_input,
     lex::{self, LexFlags, Tk, TkRule, ends_with_unescaped},
@@ -298,34 +299,35 @@ pub fn extract_var_name(text: &str) -> Option<(String, usize, usize)> {
   let mut name_start = 0;
   let mut name_end = 0;
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '$' => {
-        if chars.peek() == Some(&'{') {
-          continue;
-        }
+  match_loop!(chars.next() => ch, {
+    '$' => {
+      if chars.peek() == Some(&'{') {
+        continue;
+      }
 
-        reading_name = true;
-        name_start = pos + 1; // Start after the '$'
+      reading_name = true;
+      name_start = pos + 1; // Start after the '$'
+      pos += 1;
       }
-      '{' if !reading_name => {
-        reading_name = true;
-        name_start = pos + 1;
-      }
-      ch if ch.is_alphanumeric() || ch == '_' => {
-        if reading_name {
-          name.push(ch);
-        }
-      }
-      _ => {
-        if reading_name {
-          name_end = pos; // End before the non-alphanumeric character
-          break;
-        }
-      }
+    '{' if !reading_name => {
+      reading_name = true;
+      name_start = pos + 1;
+      pos += 1;
     }
-    pos += 1;
-  }
+    ch if ch.is_alphanumeric() || ch == '_' => {
+      if reading_name {
+        name.push(ch);
+      }
+      pos += 1;
+    }
+    _ => {
+      if reading_name {
+        name_end = pos; // End before the non-alphanumeric character
+        break;
+      }
+      pos += 1;
+    }
+  });
 
   if !reading_name {
     return None;

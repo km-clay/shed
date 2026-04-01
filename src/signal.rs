@@ -11,7 +11,7 @@ use nix::{
 use crate::{
   builtin::trap::TrapTarget,
   jobs::{Job, JobCmdFlags, JobID, take_term},
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
   parse::execute::exec_input,
   prelude::*,
   sherr,

@@ -1,5 +1,5 @@
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
   parse::{NdRule, Node, execute::prepare_argv},
   sherr,
   state::{self, write_vars},

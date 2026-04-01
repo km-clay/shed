@@ -6,7 +6,8 @@ use nix::unistd::{User, getuid};
 
 use crate::{
   exec_input,
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
+  match_loop,
   parse::lex::{LexFlags, LexStream},
   prelude::*,
   sherr,
@@ -40,33 +41,31 @@ pub fn parse_arr_bracket(var_name: &str) -> Option<(String, String)> {
   let mut idx_raw = String::new();
   let mut bracket_depth = 0;
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        chars.next();
-      }
-      '[' => {
-        bracket_depth += 1;
-        if bracket_depth > 1 {
-          idx_raw.push(ch);
-        }
-      }
-      ']' => {
-        if bracket_depth > 0 {
-          bracket_depth -= 1;
-          if bracket_depth == 0 {
-            if idx_raw.is_empty() {
-              return None;
-            }
-            break;
-          }
-        }
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      chars.next();
+    }
+    '[' => {
+      bracket_depth += 1;
+      if bracket_depth > 1 {
         idx_raw.push(ch);
       }
-      _ if bracket_depth > 0 => idx_raw.push(ch),
-      _ => name.push(ch),
     }
-  }
+    ']' => {
+      if bracket_depth > 0 {
+        bracket_depth -= 1;
+        if bracket_depth == 0 {
+          if idx_raw.is_empty() {
+            return None;
+          }
+          break;
+        }
+      }
+      idx_raw.push(ch);
+    }
+    _ if bracket_depth > 0 => idx_raw.push(ch),
+    _ => name.push(ch),
+  });
 
   if name.is_empty() || idx_raw.is_empty() {
     None

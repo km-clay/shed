@@ -107,90 +107,89 @@ pub fn prepare_echo_args(
     let mut chars = arg.chars().peekable();
 
     while let Some(c) = chars.next() {
-      if c == '\\' {
-        if let Some(&next_char) = chars.peek() {
-          match next_char {
-            'n' => {
-              prepared_arg.push('\n');
-              chars.next();
-            }
-            't' => {
-              prepared_arg.push('\t');
-              chars.next();
-            }
-            'r' => {
-              prepared_arg.push('\r');
-              chars.next();
-            }
-            'a' => {
-              prepared_arg.push('\x07');
-              chars.next();
-            }
-            'b' => {
-              prepared_arg.push('\x08');
-              chars.next();
-            }
-            'e' | 'E' => {
-              prepared_arg.push('\x1b');
-              chars.next();
-            }
-            'x' => {
-              chars.next(); // consume 'x'
-              let mut hex_digits = String::new();
-              for _ in 0..2 {
-                if let Some(&hex_char) = chars.peek() {
-                  if hex_char.is_ascii_hexdigit() {
-                    hex_digits.push(hex_char);
-                    chars.next();
-                  } else {
-                    break;
-                  }
-                } else {
-                  break;
-                }
-              }
-              if let Ok(value) = u8::from_str_radix(&hex_digits, 16) {
-                prepared_arg.push(value as char);
-              } else {
-                prepared_arg.push('\\');
-                prepared_arg.push('x');
-                prepared_arg.push_str(&hex_digits);
-              }
-            }
-            '0' => {
-              chars.next(); // consume '0'
-              let mut octal_digits = String::new();
-              for _ in 0..3 {
-                if let Some(&octal_char) = chars.peek() {
-                  if ('0'..='7').contains(&octal_char) {
-                    octal_digits.push(octal_char);
-                    chars.next();
-                  } else {
-                    break;
-                  }
-                } else {
-                  break;
-                }
-              }
-              if let Ok(value) = u8::from_str_radix(&octal_digits, 8) {
-                prepared_arg.push(value as char);
-              } else {
-                prepared_arg.push('\\');
-                prepared_arg.push('0');
-                prepared_arg.push_str(&octal_digits);
-              }
-            }
-            '\\' => {
-              prepared_arg.push('\\');
-              chars.next();
-            }
-            _ => prepared_arg.push(c),
-          }
-        } else {
-          prepared_arg.push(c);
-        }
-      } else {
+      if c != '\\' {
         prepared_arg.push(c);
+      } else {
+        let Some(&next_char) = chars.peek() else {
+          prepared_arg.push(c);
+          continue;
+        };
+        match next_char {
+          'n' => {
+            prepared_arg.push('\n');
+            chars.next();
+          }
+          't' => {
+            prepared_arg.push('\t');
+            chars.next();
+          }
+          'r' => {
+            prepared_arg.push('\r');
+            chars.next();
+          }
+          'a' => {
+            prepared_arg.push('\x07');
+            chars.next();
+          }
+          'b' => {
+            prepared_arg.push('\x08');
+            chars.next();
+          }
+          'e' | 'E' => {
+            prepared_arg.push('\x1b');
+            chars.next();
+          }
+          'x' => {
+            chars.next(); // consume 'x'
+            let mut hex_digits = String::new();
+            for _ in 0..2 {
+              if let Some(&hex_char) = chars.peek() {
+                if hex_char.is_ascii_hexdigit() {
+                  hex_digits.push(hex_char);
+                  chars.next();
+                } else {
+                  break;
+                }
+              } else {
+                break;
+              }
+            }
+            if let Ok(value) = u8::from_str_radix(&hex_digits, 16) {
+              prepared_arg.push(value as char);
+            } else {
+              prepared_arg.push('\\');
+              prepared_arg.push('x');
+              prepared_arg.push_str(&hex_digits);
+            }
+          }
+          '0' => {
+            chars.next(); // consume '0'
+            let mut octal_digits = String::new();
+            for _ in 0..3 {
+              let Some(&octal_char) = chars.peek() else {
+                break;
+              };
+              if ('0'..='7').contains(&octal_char) {
+                octal_digits.push(octal_char);
+                chars.next();
+              } else {
+                break;
+              }
+            }
+            if let Ok(value) = u8::from_str_radix(&octal_digits, 8) {
+              prepared_arg.push(value as char);
+            } else {
+              prepared_arg.push('\\');
+              prepared_arg.push('0');
+              prepared_arg.push_str(&octal_digits);
+            }
+          }
+          '\\' => {
+            prepared_arg.push('\\');
+            chars.next();
+          }
+          _ => prepared_arg.push(c),
+        }
       }
     }
 

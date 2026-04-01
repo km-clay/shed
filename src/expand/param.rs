@@ -6,6 +6,7 @@ use crate::expand::escape::{strip_escape_markers, unescape_str};
 use crate::expand::util::glob_to_regex;
 use crate::expand::var::expand_raw;
 use crate::libsh::error::{ShErr, ShResult};
+use crate::match_loop;
 use crate::sherr;
 use crate::state::{VarFlags, VarKind, read_vars, write_vars};
 
@@ -162,17 +163,14 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
     );
   }
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '!' | '#' | '%' | ':' | '-' | '+' | '^' | ',' | '=' | '/' | '?' => {
-        rest.push(ch);
-        rest.push_str(&chars.collect::<String>());
-        break;
-      }
-      _ => var_name.push(ch),
+  match_loop!(chars.next() => ch, {
+    '!' | '#' | '%' | ':' | '-' | '+' | '^' | ',' | '=' | '/' | '?' => {
+      rest.push(ch);
+      rest.push_str(&chars.collect::<String>());
+      break;
     }
-  }
-
+    _ => var_name.push(ch),
+  });
   if let Ok(expansion) = rest.parse::<ParamExp>() {
     match expansion {
       ParamExp::Len => unreachable!(),

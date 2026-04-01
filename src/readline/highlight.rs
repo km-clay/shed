@@ -5,6 +5,7 @@ use std::{
 
 use crate::{
   libsh::term::{Style, StyleSet},
+  match_loop,
   readline::{
     annotate_input,
     markers::{self, is_marker},
@@ -125,18 +126,16 @@ impl Highlighter {
     let mut expanded = String::new();
     let mut chars = self.input.chars().peekable();
 
-    while let Some(ch) = chars.next() {
-      match ch {
-        '\n' | '\t' | '\r' => expanded.push(ch),
-        c if c as u32 <= 0x1F => {
-          let display = (c as u8 + b'@') as char;
-          expanded.push_str("\x1b[7m^");
-          expanded.push(display);
-          expanded.push_str("\x1b[0m");
-        }
-        _ => expanded.push(ch),
+    match_loop!(chars.next() => ch, {
+      '\n' | '\t' | '\r' => expanded.push(ch),
+      c if c as u32 <= 0x1F => {
+        let display = (c as u8 + b'@') as char;
+        expanded.push_str("\x1b[7m^");
+        expanded.push(display);
+        expanded.push_str("\x1b[0m");
       }
-    }
+      _ => expanded.push(ch),
+    });
 
     self.input = expanded;
   }
@@ -149,22 +148,21 @@ impl Highlighter {
   pub fn highlight(&mut self) {
     let input = self.input.clone();
     let mut input_chars = input.chars().peekable();
-    while let Some(ch) = input_chars.next() {
-      match ch {
-        markers::VISUAL_MODE_START => {
-          self.emit_style(Style::BgWhite | Style::Black);
-          self.in_selection = true;
+    match_loop!(input_chars.next() => ch, {
+      markers::VISUAL_MODE_START => {
+        self.emit_style(Style::BgWhite | Style::Black);
+        self.in_selection = true;
+      }
+      markers::VISUAL_MODE_END => {
+        self.reapply_style();
+        self.in_selection = false;
+      }
+      _ if self.only_hl_visual => {
+        if !is_marker(ch) {
+          self.output.push(ch);
         }
-        markers::VISUAL_MODE_END => {
-          self.reapply_style();
-          self.in_selection = false;
-        }
-        _ if self.only_hl_visual => {
-          if !is_marker(ch) {
-            self.output.push(ch);
-          }
-        }
-        markers::STRING_DQ_END
+      }
+      markers::STRING_DQ_END
         | markers::STRING_SQ_END
         | markers::VAR_SUB_END
         | markers::CMD_SUB_END
@@ -177,266 +175,262 @@ impl Highlighter {
         markers::STRING_DQ | markers::STRING_SQ | markers::KEYWORD => {
           self.push_style(Style::Yellow)
         }
-        markers::BUILTIN => {
-          let mut cmd_name = String::new();
-          let mut chars_clone = input_chars.clone();
-          while let Some(ch) = chars_clone.next() {
-            if ch == markers::RESET {
-              break;
-            }
-            if !is_marker(ch) {
-              cmd_name.push(ch);
-            }
-          }
+      markers::BUILTIN => {
+        let mut cmd_name = String::new();
+        let mut chars_clone = input_chars.clone();
+        match_loop!(chars_clone.next() => ch, {
+          markers::RESET => break,
+          _ if !is_marker(ch) => cmd_name.push(ch),
+          _ => {}
+        });
 
-          match cmd_name.as_str() {
-            "continue" | "return" | "break" => self.push_style(Style::Magenta),
-            _ => self.push_style(Style::Green),
-          }
-        }
-        markers::CASE_PAT => self.push_style(Style::Blue),
-
-        markers::COMMENT => self.push_style(Style::BrightBlack),
-
-        markers::GLOB => self.push_style(Style::Blue),
-
-        markers::REDIRECT | markers::OPERATOR => self.push_style(Style::Magenta | Style::Bold),
-
-        markers::ASSIGNMENT => {
-          let mut var_name = String::new();
-
-          while let Some(ch) = input_chars.peek() {
-            if ch == &'=' {
-              input_chars.next(); // consume the '='
-              break;
-            }
-            match *ch {
-              markers::RESET => break,
-              markers::VISUAL_MODE_START => {
-                self.emit_style(Style::BgWhite | Style::Black);
-                self.in_selection = true;
-                input_chars.next();
-              }
-              markers::VISUAL_MODE_END => {
-                self.reapply_style();
-                self.in_selection = false;
-                input_chars.next();
-              }
-              _ => {
-                var_name.push(*ch);
-                input_chars.next();
-              }
-            }
-          }
-
-          self.output.push_str(&Self::strip_markers(&var_name));
-          self.push_style(Style::Blue);
-          self.output.push('=');
-          self.pop_style();
-        }
-
-        markers::ARG => {
-          let mut arg = String::new();
-          let is_last_arg = !input_chars
-            .clone()
-            .any(|c| c == markers::ARG || c.is_whitespace());
-
-          if !is_last_arg {
-            self.push_style(Style::White);
-          } else {
-            let mut chars_clone = input_chars.clone();
-            while let Some(ch) = chars_clone.next() {
-              if ch == markers::RESET {
-                break;
-              }
-              arg.push(ch);
-            }
-
-            let style = if Self::is_filename(&Self::strip_markers(&arg)) {
-              Style::White | Style::Underline
-            } else {
-              Style::White.into()
-            };
-
-            self.push_style(style);
-            self.last_was_reset = false;
-          }
-        }
-
-        markers::COMMAND => {
-          let mut cmd_name = String::new();
-          let mut chars_clone = input_chars.clone();
-          while let Some(ch) = chars_clone.next() {
-            if ch == markers::RESET {
-              break;
-            }
-            cmd_name.push(ch);
-          }
-          let style = if matches!(
-            Self::strip_markers(&cmd_name).as_str(),
-            "break" | "continue" | "return"
-          ) {
-            Style::Magenta.into()
-          } else if Self::is_valid(&Self::strip_markers(&cmd_name)) {
-            Style::Green.into()
-          } else {
-            Style::Red | Style::Bold
-          };
-          self.push_style(style);
-          self.last_was_reset = false;
-        }
-        markers::CMD_SUB | markers::SUBSH | markers::PROC_SUB | markers::BACKTICK_SUB => {
-          let mut inner = String::new();
-          let mut incomplete = true;
-          let end_marker = match ch {
-            markers::CMD_SUB => markers::CMD_SUB_END,
-            markers::SUBSH => markers::SUBSH_END,
-            markers::PROC_SUB => markers::PROC_SUB_END,
-            markers::BACKTICK_SUB => markers::BACKTICK_SUB_END,
-            _ => unreachable!(),
-          };
-          // Save selection state at entry — the collection loop will update
-          // self.in_selection as it encounters visual markers, but the recursive
-          // highlighter needs the state as of the start of the body.
-          let selection_at_entry = self.in_selection;
-          while let Some(ch) = input_chars.peek() {
-            if *ch == end_marker {
-              incomplete = false;
-              input_chars.next();
-              break;
-            }
-            if *ch == markers::VISUAL_MODE_START {
-              self.in_selection = true;
-            } else if *ch == markers::VISUAL_MODE_END {
-              self.in_selection = false;
-            }
-            inner.push(*ch);
-            input_chars.next();
-          }
-
-          // strip_markers_keep_visual preserves VISUAL_MODE_START/END
-          let inner_clean = Self::strip_markers_keep_visual(&inner);
-          // Use stripped version (no visual markers) for prefix/suffix detection
-          let inner_plain = Self::strip_markers(&inner);
-
-          let prefix = match ch {
-            markers::BACKTICK_SUB => "`",
-            markers::CMD_SUB => "$(",
-            markers::SUBSH => "(",
-            markers::PROC_SUB => {
-              if inner_plain.starts_with("<(") {
-                "<("
-              } else if inner_plain.starts_with(">(") {
-                ">("
-              } else {
-                "<("
-              }
-            }
-            _ => unreachable!(),
-          };
-
-          // Strip prefix/suffix from the visual-marker-aware version
-          let inner_content = if incomplete {
-            Self::strip_prefix_skip_visual(&inner_clean, prefix)
-          } else {
-            let stripped = Self::strip_prefix_skip_visual(&inner_clean, prefix);
-            Self::strip_suffix_skip_visual(&stripped, ")")
-          };
-
-          let mut recursive_highlighter = Self::new();
-          recursive_highlighter.in_selection = selection_at_entry;
-          if recursive_highlighter.in_selection {
-            recursive_highlighter.emit_style(Style::BgWhite | Style::Black);
-          }
-          recursive_highlighter.load_input(&inner_content, self.linebuf_cursor_pos);
-          recursive_highlighter.highlight();
-          // Read back visual state — selection may have started/ended inside
-          self.in_selection = recursive_highlighter.in_selection;
-          self
-            .style_stack
-            .append(&mut recursive_highlighter.style_stack);
-          if selection_at_entry {
-            self.emit_style(Style::BgWhite | Style::Black);
-            self.output.push_str(prefix);
-          } else {
-            self.push_style(Style::Blue);
-            self.output.push_str(prefix);
-            self.pop_style();
-          }
-          self.output.push_str(&recursive_highlighter.take());
-          if !incomplete {
-            self.push_style(Style::Blue);
-            if ch != markers::BACKTICK_SUB {
-              self.output.push(')');
-            }
-            self.pop_style();
-          }
-          self.last_was_reset = false;
-        }
-        markers::HIST_EXP => {
-          let mut hist_exp = String::new();
-          while let Some(ch) = input_chars.peek() {
-            if *ch == markers::HIST_EXP_END {
-              input_chars.next();
-              break;
-            } else if *ch == markers::VISUAL_MODE_START {
-              self.emit_style(Style::BgWhite | Style::Black);
-              self.in_selection = true;
-              input_chars.next();
-              continue;
-            } else if *ch == markers::VISUAL_MODE_END {
-              self.reapply_style();
-              self.in_selection = false;
-              input_chars.next();
-              continue;
-            } else if markers::is_marker(*ch) {
-              input_chars.next();
-              continue;
-            }
-            hist_exp.push(*ch);
-            input_chars.next();
-          }
-          self.push_style(Style::Blue);
-          self.output.push_str(&hist_exp);
-          self.pop_style();
-        }
-        markers::VAR_SUB => {
-          let mut var_sub = String::new();
-          while let Some(ch) = input_chars.peek() {
-            if *ch == markers::VAR_SUB_END {
-              input_chars.next(); // consume the end marker
-              break;
-            } else if *ch == markers::VISUAL_MODE_START {
-              self.emit_style(Style::BgWhite | Style::Black);
-              self.in_selection = true;
-              input_chars.next();
-              continue;
-            } else if *ch == markers::VISUAL_MODE_END {
-              self.reapply_style();
-              self.in_selection = false;
-              input_chars.next();
-              continue;
-            } else if markers::is_marker(*ch) {
-              input_chars.next(); // skip the marker
-              continue;
-            }
-            var_sub.push(*ch);
-            input_chars.next();
-          }
-          let style = Style::Cyan;
-          self.push_style(style);
-          self.output.push_str(&var_sub);
-          self.pop_style();
-        }
-        _ => {
-          if markers::is_marker(ch) {
-          } else {
-            self.output.push(ch);
-            self.last_was_reset = false;
-          }
+        match cmd_name.as_str() {
+          "continue" | "return" | "break" => self.push_style(Style::Magenta),
+          _ => self.push_style(Style::Green),
         }
       }
-    }
+      markers::CASE_PAT => self.push_style(Style::Blue),
+
+      markers::COMMENT => self.push_style(Style::BrightBlack),
+
+      markers::GLOB => self.push_style(Style::Blue),
+
+      markers::REDIRECT | markers::OPERATOR => self.push_style(Style::Magenta | Style::Bold),
+
+      markers::ASSIGNMENT => {
+        let mut var_name = String::new();
+
+        match_loop!(input_chars.peek() => &ch => ch, {
+          _ if ch == '=' => {
+            input_chars.next(); // consume the '='
+            break;
+          }
+          markers::RESET => break,
+          markers::VISUAL_MODE_START => {
+            self.emit_style(Style::BgWhite | Style::Black);
+            self.in_selection = true;
+            input_chars.next();
+          }
+          markers::VISUAL_MODE_END => {
+            self.reapply_style();
+            self.in_selection = false;
+            input_chars.next();
+          }
+          _ => {
+            var_name.push(ch);
+            input_chars.next();
+          }
+        });
+
+        self.output.push_str(&Self::strip_markers(&var_name));
+        self.push_style(Style::Blue);
+        self.output.push('=');
+        self.pop_style();
+      }
+
+      markers::ARG => {
+        let mut arg = String::new();
+        let is_last_arg = !input_chars
+          .clone()
+          .any(|c| c == markers::ARG || c.is_whitespace());
+
+        if !is_last_arg {
+          self.push_style(Style::White);
+        } else {
+          let mut chars_clone = input_chars.clone();
+          match_loop!(chars_clone.next() => ch, {
+            markers::RESET => break,
+            _ => arg.push(ch)
+          });
+
+          let style = if Self::is_filename(&Self::strip_markers(&arg)) {
+            Style::White | Style::Underline
+          } else {
+            Style::White.into()
+          };
+
+          self.push_style(style);
+          self.last_was_reset = false;
+        }
+      }
+
+      markers::COMMAND => {
+        let mut cmd_name = String::new();
+        let mut chars_clone = input_chars.clone();
+        match_loop!(chars_clone.next() => ch, {
+          markers::RESET => break,
+          _ => cmd_name.push(ch)
+        });
+        let style = if matches!(
+          Self::strip_markers(&cmd_name).as_str(),
+          "break" | "continue" | "return"
+        ) {
+          Style::Magenta.into()
+        } else if Self::is_valid(&Self::strip_markers(&cmd_name)) {
+          Style::Green.into()
+        } else {
+          Style::Red | Style::Bold
+        };
+        self.push_style(style);
+        self.last_was_reset = false;
+      }
+      markers::CMD_SUB | markers::SUBSH | markers::PROC_SUB | markers::BACKTICK_SUB => {
+        let mut inner = String::new();
+        let mut incomplete = true;
+        let end_marker = match ch {
+          markers::CMD_SUB => markers::CMD_SUB_END,
+          markers::SUBSH => markers::SUBSH_END,
+          markers::PROC_SUB => markers::PROC_SUB_END,
+          markers::BACKTICK_SUB => markers::BACKTICK_SUB_END,
+          _ => unreachable!(),
+        };
+        // Save selection state at entry — the collection loop will update
+        // self.in_selection as it encounters visual markers, but the recursive
+        // highlighter needs the state as of the start of the body.
+        let selection_at_entry = self.in_selection;
+        match_loop!(input_chars.peek() => &ch => ch, {
+          _ if ch == end_marker => {
+            incomplete = false;
+            input_chars.next();
+            break;
+          }
+          m @ (markers::VISUAL_MODE_START | markers::VISUAL_MODE_END) => {
+            self.in_selection = m == markers::VISUAL_MODE_START;
+            inner.push(m);
+            input_chars.next();
+          }
+          _ => {
+            inner.push(ch);
+            input_chars.next();
+          }
+        });
+
+        // strip_markers_keep_visual preserves VISUAL_MODE_START/END
+        let inner_clean = Self::strip_markers_keep_visual(&inner);
+        // Use stripped version (no visual markers) for prefix/suffix detection
+        let inner_plain = Self::strip_markers(&inner);
+
+        let prefix = match ch {
+          markers::BACKTICK_SUB => "`",
+          markers::CMD_SUB => "$(",
+          markers::SUBSH => "(",
+          markers::PROC_SUB => {
+            if inner_plain.starts_with("<(") {
+              "<("
+            } else if inner_plain.starts_with(">(") {
+              ">("
+            } else {
+              "<("
+            }
+          }
+          _ => unreachable!(),
+        };
+
+        // Strip prefix/suffix from the visual-marker-aware version
+        let inner_content = if incomplete {
+          Self::strip_prefix_skip_visual(&inner_clean, prefix)
+        } else {
+          let stripped = Self::strip_prefix_skip_visual(&inner_clean, prefix);
+          Self::strip_suffix_skip_visual(&stripped, ")")
+        };
+
+        let mut recursive_highlighter = Self::new();
+        recursive_highlighter.in_selection = selection_at_entry;
+        if recursive_highlighter.in_selection {
+          recursive_highlighter.emit_style(Style::BgWhite | Style::Black);
+        }
+        recursive_highlighter.load_input(&inner_content, self.linebuf_cursor_pos);
+        recursive_highlighter.highlight();
+        // Read back visual state — selection may have started/ended inside
+        self.in_selection = recursive_highlighter.in_selection;
+        self
+          .style_stack
+          .append(&mut recursive_highlighter.style_stack);
+        if selection_at_entry {
+          self.emit_style(Style::BgWhite | Style::Black);
+          self.output.push_str(prefix);
+        } else {
+          self.push_style(Style::Blue);
+          self.output.push_str(prefix);
+          self.pop_style();
+        }
+        self.output.push_str(&recursive_highlighter.take());
+        if !incomplete {
+          self.push_style(Style::Blue);
+          if ch != markers::BACKTICK_SUB {
+            self.output.push(')');
+          }
+          self.pop_style();
+        }
+        self.last_was_reset = false;
+      }
+      markers::HIST_EXP => {
+        let mut hist_exp = String::new();
+        match_loop!(input_chars.peek() => &ch => ch, {
+          markers::HIST_EXP_END => {
+            input_chars.next();
+            break;
+          }
+          markers::VISUAL_MODE_START => {
+            self.emit_style(Style::BgWhite | Style::Black);
+            self.in_selection = true;
+            input_chars.next();
+          }
+          markers::VISUAL_MODE_END => {
+            self.reapply_style();
+            self.in_selection = false;
+            input_chars.next();
+          }
+          _ if markers::is_marker(ch) => {
+            input_chars.next();
+          }
+          _ => {
+            hist_exp.push(ch);
+            input_chars.next();
+          }
+        });
+        self.push_style(Style::Blue);
+        self.output.push_str(&hist_exp);
+        self.pop_style();
+      }
+      markers::VAR_SUB => {
+        let mut var_sub = String::new();
+        match_loop!(input_chars.peek() => &ch => ch, {
+          markers::HIST_EXP_END => {
+            input_chars.next();
+            break;
+          }
+          markers::VISUAL_MODE_START => {
+            self.emit_style(Style::BgWhite | Style::Black);
+            self.in_selection = true;
+            input_chars.next();
+          }
+          markers::VISUAL_MODE_END => {
+            self.reapply_style();
+            self.in_selection = false;
+            input_chars.next();
+          }
+          _ if markers::is_marker(ch) => {
+            input_chars.next();
+          }
+          _ => {
+            var_sub.push(ch);
+            input_chars.next();
+          }
+        });
+        let style = Style::Cyan;
+        self.push_style(style);
+        self.output.push_str(&var_sub);
+        self.pop_style();
+      }
+      _ => {
+        if markers::is_marker(ch) {
+        } else {
+          self.output.push(ch);
+          self.last_was_reset = false;
+        }
+      }
+    });
   }
 
   /// Extracts the highlighted output and resets the highlighter state

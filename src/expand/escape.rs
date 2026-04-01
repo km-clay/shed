@@ -2,6 +2,7 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 use crate::expand::util::is_var_name_ch;
+use crate::match_loop;
 use crate::readline::markers;
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
@@ -75,121 +76,113 @@ fn read_varsub(chars: &mut Peekable<Chars>, result: &mut String) -> bool {
 fn read_subsh(chars: &mut Peekable<Chars>, result: &mut String) {
   result.push(markers::SUBSH);
   let mut paren_count = 1;
-  while let Some(subsh_ch) = chars.next() {
-    match subsh_ch {
-      '\\' => {
-        result.push(subsh_ch);
-        if let Some(next_ch) = chars.next() {
-          result.push(next_ch)
-        }
+  match_loop!(chars.next() => subsh_ch, {
+    '\\' => {
+      result.push(subsh_ch);
+      if let Some(next_ch) = chars.next() {
+        result.push(next_ch)
       }
-      '$' if chars.peek() == Some(&'\'') => {
-        result.push(subsh_ch);
-      }
-      '$' if chars.peek() != Some(&'(') => {
-        read_varsub(chars, result);
-      }
-      '(' => {
-        paren_count += 1;
+    }
+    '$' if chars.peek() == Some(&'\'') => {
+      result.push(subsh_ch);
+    }
+    '$' if chars.peek() != Some(&'(') => {
+      read_varsub(chars, result);
+    }
+    '(' => {
+      paren_count += 1;
+      result.push(subsh_ch)
+    }
+    ')' => {
+      paren_count -= 1;
+      if paren_count == 0 {
+        result.push(markers::SUBSH);
+        break;
+      } else {
         result.push(subsh_ch)
       }
-      ')' => {
-        paren_count -= 1;
-        if paren_count == 0 {
-          result.push(markers::SUBSH);
-          break;
-        } else {
-          result.push(subsh_ch)
-        }
-      }
-      _ => result.push(subsh_ch),
     }
-  }
+    _ => result.push(subsh_ch),
+  });
 }
 
 fn read_sng_quote(chars: &mut Peekable<Chars>, result: &mut String) {
   result.push(markers::SNG_QUOTE);
-  while let Some(q_ch) = chars.next() {
-    match q_ch {
-      '\\' => match chars.peek() {
-        Some(&'\\') | Some(&'\'') => {
-          let ch = chars.next().unwrap();
-          result.push(ch);
-        }
-        _ => result.push(q_ch),
-      },
-      '\'' => {
-        result.push(markers::SNG_QUOTE);
-        break;
+  match_loop!(chars.next() => q_ch, {
+    '\\' => match chars.peek() {
+      Some(&'\\') | Some(&'\'') => {
+        let ch = chars.next().unwrap();
+        result.push(ch);
       }
       _ => result.push(q_ch),
+    },
+    '\'' => {
+      result.push(markers::SNG_QUOTE);
+      break;
     }
-  }
+    _ => result.push(q_ch),
+  });
 }
 
 fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
   result.push(markers::DUB_QUOTE);
-  while let Some(q_ch) = chars.next() {
-    match q_ch {
-      '\\' => {
-        if let Some(next_ch) = chars.next() {
-          match next_ch {
-            '"' | '\\' | '`' | '$' | '!' => {
-              // discard the backslash
-            }
-            _ => {
-              result.push(q_ch);
-            }
+  match_loop!(chars.next() => q_ch, {
+    '\\' => {
+      if let Some(next_ch) = chars.next() {
+        match next_ch {
+          '"' | '\\' | '`' | '$' | '!' => {
+            // discard the backslash
           }
-          result.push(next_ch);
+          _ => {
+            result.push(q_ch);
+          }
         }
+        result.push(next_ch);
       }
-      '$' if chars.peek() == Some(&'\'') => {
-        chars.next();
-        read_dollar_quote(chars, result);
-      }
-      '$' => {
-        if read_varsub(chars, result) && chars.peek() == Some(&'(') {
-          chars.next();
-          read_subsh(chars, result);
-        }
-      }
-      '`' => read_backtick(chars, result),
-      '"' => {
-        result.push(markers::DUB_QUOTE);
-        break;
-      }
-      _ => result.push(q_ch),
     }
-  }
+    '$' if chars.peek() == Some(&'\'') => {
+      chars.next();
+      read_dollar_quote(chars, result);
+    }
+    '$' => {
+      if read_varsub(chars, result) && chars.peek() == Some(&'(') {
+        chars.next();
+        read_subsh(chars, result);
+      }
+    }
+    '`' => read_backtick(chars, result),
+    '"' => {
+      result.push(markers::DUB_QUOTE);
+      break;
+    }
+    _ => result.push(q_ch),
+  });
 }
 
 fn read_dollar_quote(chars: &mut Peekable<Chars>, result: &mut String) {
-  while let Some(q_ch) = chars.next() {
-    match q_ch {
-      '\'' => {
-        break;
-      }
-      '\\' => {
-        let Some(esc) = chars.next() else { continue };
-        match esc {
-          'n' => result.push('\n'),
-          't' => result.push('\t'),
-          'r' => result.push('\r'),
-          '\'' => result.push('\''),
-          '\\' => result.push('\\'),
-          'a' => result.push('\x07'),
-          'b' => result.push('\x08'),
-          'e' | 'E' => result.push('\x1b'),
-          'v' => result.push('\x0b'),
-          'x' => read_hex(chars, result),
-          'o' => read_octal(chars, result),
-          _ => result.push(esc),
-        }
-      }
-      _ => result.push(q_ch),
+  match_loop!(chars.next() => q_ch, {
+    '\'' => {
+      break;
     }
-  }
+    '\\' => {
+      let Some(esc) = chars.next() else { continue };
+      match esc {
+        'n' => result.push('\n'),
+        't' => result.push('\t'),
+        'r' => result.push('\r'),
+        '\'' => result.push('\''),
+        '\\' => result.push('\\'),
+        'a' => result.push('\x07'),
+        'b' => result.push('\x08'),
+        'e' | 'E' => result.push('\x1b'),
+        'v' => result.push('\x0b'),
+        'x' => read_hex(chars, result),
+        'o' => read_octal(chars, result),
+        _ => result.push(esc),
+      }
+    }
+    _ => result.push(q_ch),
+  });
 }
 
 fn read_octal(chars: &mut Peekable<Chars>, result: &mut String) {
@@ -251,83 +244,77 @@ fn read_proc_sub(chars: &mut Peekable<Chars>, result: &mut String, input: bool) 
   chars.next();
   let mut paren_count = 1;
   result.push(marker);
-  while let Some(subsh_ch) = chars.next() {
-    match subsh_ch {
-      '\\' => {
-        result.push(subsh_ch);
-        if let Some(next_ch) = chars.next() {
-          result.push(next_ch)
-        }
+  match_loop!(chars.next() => subsh_ch, {
+    '\\' => {
+      result.push(subsh_ch);
+      if let Some(next_ch) = chars.next() {
+        result.push(next_ch)
       }
-      '$' if chars.peek() == Some(&'\'') => {
-        result.push(subsh_ch);
-      }
-      '(' => {
-        result.push(subsh_ch);
-        paren_count += 1;
-      }
-      ')' => {
-        paren_count -= 1;
-        if paren_count <= 0 {
-          result.push(marker);
-          break;
-        } else {
-          result.push(subsh_ch);
-        }
-      }
-      _ => result.push(subsh_ch),
     }
-  }
+    '$' if chars.peek() == Some(&'\'') => {
+      result.push(subsh_ch);
+    }
+    '(' => {
+      result.push(subsh_ch);
+      paren_count += 1;
+    }
+    ')' => {
+      paren_count -= 1;
+      if paren_count <= 0 {
+        result.push(marker);
+        break;
+      } else {
+        result.push(subsh_ch);
+      }
+    }
+    _ => result.push(subsh_ch),
+  });
 }
 
 fn read_backtick(chars: &mut Peekable<Chars>, result: &mut String) {
   result.push(markers::VAR_SUB);
   result.push(markers::SUBSH);
-  while let Some(bt_ch) = chars.next() {
-    match bt_ch {
-      '\\' => {
-        result.push(bt_ch);
-        if let Some(next_ch) = chars.next() {
-          result.push(next_ch);
-        }
+  match_loop!(chars.next() => bt_ch, {
+    '\\' => {
+      result.push(bt_ch);
+      if let Some(next_ch) = chars.next() {
+        result.push(next_ch);
       }
-      // fun fact: this one match arm allows us to parse backtick statements nested in regular command subs inside of other backtick statements.
-      // Not even zsh's parser handles this case
-      '$' if chars.peek() == Some(&'(') => {
-        chars.next();
-        result.push_str("$(");
-        let mut paren_count = 1;
-        while let Some(subsh_ch) = chars.next() {
-          match subsh_ch {
-            '\\' => {
-              result.push(subsh_ch);
-              if let Some(next_ch) = chars.next() {
-                result.push(next_ch)
-              }
-            }
-            '(' => {
-              paren_count += 1;
-              result.push(subsh_ch);
-            }
-            ')' => {
-              paren_count -= 1;
-              result.push(subsh_ch);
-              if paren_count == 0 {
-                break;
-              }
-            }
-            _ => result.push(subsh_ch),
+    }
+    // fun fact: this one match arm allows us to parse backtick statements nested in regular command subs inside of other backtick statements.
+    // Not even zsh's parser handles this case
+    '$' if chars.peek() == Some(&'(') => {
+      chars.next();
+      result.push_str("$(");
+      let mut paren_count = 1;
+      match_loop!(chars.next() => subsh_ch, {
+        '\\' => {
+          result.push(subsh_ch);
+          if let Some(next_ch) = chars.next() {
+            result.push(next_ch)
           }
         }
-      }
-      '`' => {
-        result.push(markers::SUBSH);
-        log::debug!("Finished reading backtick: {result}");
-        break;
-      }
-      _ => result.push(bt_ch),
+        '(' => {
+          paren_count += 1;
+          result.push(subsh_ch);
+        }
+        ')' => {
+          paren_count -= 1;
+          result.push(subsh_ch);
+          if paren_count == 0 {
+            break;
+          }
+        }
+        _ => result.push(subsh_ch),
+      });
     }
-  }
+    '`' => {
+      result.push(markers::SUBSH);
+      log::debug!("Finished reading backtick: {result}");
+      break;
+    }
+    _ => result.push(bt_ch),
+  });
 }
 
 /// Like unescape_str but for heredoc bodies. Only processes:
@@ -339,39 +326,37 @@ pub fn unescape_heredoc(raw: &str) -> String {
   let mut chars = raw.chars().peekable();
   let mut result = String::new();
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        match chars.peek() {
-          Some('$') | Some('`') | Some('\\') | Some('\n') => {
-            let next_ch = chars.next().unwrap();
-            if next_ch == '\n' {
-              // line continuation — discard both backslash and newline
-              continue;
-            }
-            result.push(markers::ESCAPE);
-            result.push(next_ch);
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      match chars.peek() {
+        Some('$') | Some('`') | Some('\\') | Some('\n') => {
+          let next_ch = chars.next().unwrap();
+          if next_ch == '\n' {
+            // line continuation — discard both backslash and newline
+            continue;
           }
-          _ => {
-            // backslash is literal
-            result.push('\\');
-          }
+          result.push(markers::ESCAPE);
+          result.push(next_ch);
+        }
+        _ => {
+          // backslash is literal
+          result.push('\\');
         }
       }
-      '$' if chars.peek() == Some(&'(') => {
-        result.push(markers::VAR_SUB);
-        chars.next(); // consume '('
-        read_subsh(&mut chars, &mut result);
-      }
-      '$' => {
-        read_varsub(&mut chars, &mut result);
-      }
-      '`' => {
-        read_backtick(&mut chars, &mut result);
-      }
-      _ => result.push(ch),
     }
-  }
+    '$' if chars.peek() == Some(&'(') => {
+      result.push(markers::VAR_SUB);
+      chars.next(); // consume '('
+      read_subsh(&mut chars, &mut result);
+    }
+    '$' => {
+      read_varsub(&mut chars, &mut result);
+    }
+    '`' => {
+      read_backtick(&mut chars, &mut result);
+    }
+    _ => result.push(ch),
+  });
 
   result
 }
@@ -415,49 +400,45 @@ pub fn unescape_math(raw: &str) -> String {
   let mut chars = raw.chars().peekable();
   let mut result = String::new();
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\\' => {
-        if let Some(next_ch) = chars.next() {
-          result.push(next_ch)
-        }
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      if let Some(next_ch) = chars.next() {
+        result.push(next_ch)
       }
-      '$' => {
-        result.push(markers::VAR_SUB);
-        if chars.peek() == Some(&'(') {
-          result.push(markers::SUBSH);
-          chars.next();
-          let mut paren_count = 1;
-          while let Some(subsh_ch) = chars.next() {
-            match subsh_ch {
-              '\\' => {
-                result.push(subsh_ch);
-                if let Some(next_ch) = chars.next() {
-                  result.push(next_ch)
-                }
-              }
-              '$' if chars.peek() != Some(&'(') => result.push(markers::VAR_SUB),
-              '(' => {
-                paren_count += 1;
-                result.push(subsh_ch)
-              }
-              ')' => {
-                paren_count -= 1;
-                if paren_count == 0 {
-                  result.push(markers::SUBSH);
-                  break;
-                } else {
-                  result.push(subsh_ch)
-                }
-              }
-              _ => result.push(subsh_ch),
+    }
+    '$' => {
+      result.push(markers::VAR_SUB);
+      if chars.peek() == Some(&'(') {
+        result.push(markers::SUBSH);
+        chars.next();
+        let mut paren_count = 1;
+        match_loop!(chars.next() => subsh_ch, {
+          '\\' => {
+            result.push(subsh_ch);
+            if let Some(next_ch) = chars.next() {
+              result.push(next_ch)
             }
           }
-        }
+          '$' if chars.peek() != Some(&'(') => result.push(markers::VAR_SUB),
+          '(' => {
+            paren_count += 1;
+            result.push(subsh_ch)
+          }
+          ')' => {
+            paren_count -= 1;
+            if paren_count == 0 {
+              result.push(markers::SUBSH);
+              break;
+            } else {
+              result.push(subsh_ch)
+            }
+          }
+          _ => result.push(subsh_ch),
+        });
       }
-      _ => result.push(ch),
     }
-  }
+    _ => result.push(ch),
+  });
   result
 }
 
