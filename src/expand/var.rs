@@ -7,10 +7,11 @@ use crate::expand::PARAMETERS;
 use crate::expand::escape::escape_str;
 use crate::expand::param::perform_param_expansion;
 use crate::expand::subshell::{expand_cmd_sub, expand_proc_sub};
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::libsh::error::ShResult;
 use crate::parse::lex::is_hard_sep;
 use crate::prelude::*;
 use crate::readline::markers;
+use crate::sherr;
 use crate::state::{ArrIndex, read_vars};
 
 pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
@@ -160,9 +161,9 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         if bracket_depth == 0 {
           let expanded_idx = expand_raw(&mut idx_raw.chars().peekable())?;
           idx = Some(expanded_idx.parse::<ArrIndex>().map_err(|_| {
-            ShErr::simple(
-              ShErrKind::ParseErr,
-              format!("Array index must be a number, got '{expanded_idx}'"),
+            sherr!(
+              ParseErr,
+              "Array index must be a number, got '{expanded_idx}'",
             )
           })?);
         }
@@ -175,9 +176,9 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
               chars.next();
               let expanded = expand_raw(&mut split_raw.chars().peekable())?;
               let Ok(split_idx) = expanded.parse::<usize>() else {
-                return Err(ShErr::simple(
-                  ShErrKind::ParseErr,
-                  format!("Split index must be a number, got '{expanded}'"),
+                return Err(sherr!(
+                  ParseErr,
+                  "Split index must be a number, got '{expanded}'",
                 ));
               };
               if split_start.is_none() {
@@ -185,19 +186,16 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
               } else if split_len.is_none() {
                 split_len = Some(split_idx);
               } else {
-                return Err(ShErr::simple(
-                  ShErrKind::ParseErr,
-                  "Too many ':' in split index",
-                ));
+                return Err(sherr!(ParseErr, "Too many ':' in split index",));
               }
               split_raw.clear();
             }
             '}' => {
               let expanded = expand_raw(&mut split_raw.chars().peekable())?;
               let Ok(split_idx) = expanded.parse::<usize>() else {
-                return Err(ShErr::simple(
-                  ShErrKind::ParseErr,
-                  format!("Split index must be a number, got '{expanded}'"),
+                return Err(sherr!(
+                  ParseErr,
+                  "Split index must be a number, got '{expanded}'",
                 ));
               };
 
@@ -206,10 +204,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
               } else if split_len.is_none() {
                 split_len = Some(split_idx);
               } else {
-                return Err(ShErr::simple(
-                  ShErrKind::ParseErr,
-                  "Too many ':' in split index",
-                ));
+                return Err(sherr!(ParseErr, "Too many ':' in split index",));
               }
               break;
             }
@@ -279,14 +274,11 @@ pub fn expand_glob(raw: &str) -> ShResult<String> {
     require_literal_leading_dot: !crate::state::read_shopts(|s| s.core.dotglob),
     ..Default::default()
   };
-  for entry in glob::glob_with(raw, opts)
-    .map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid glob pattern"))?
-  {
-    let entry =
-      entry.map_err(|_| ShErr::simple(ShErrKind::SyntaxErr, "Invalid filename found in glob"))?;
+  for entry in glob::glob_with(raw, opts).map_err(|_| sherr!(SyntaxErr, "Invalid glob pattern"))? {
+    let entry = entry.map_err(|_| sherr!(SyntaxErr, "Invalid filename found in glob"))?;
     let entry_raw = entry
       .to_str()
-      .ok_or_else(|| ShErr::simple(ShErrKind::SyntaxErr, "Non-UTF8 filename found in glob"))?;
+      .ok_or_else(|| sherr!(SyntaxErr, "Non-UTF8 filename found in glob"))?;
     let escaped = escape_str(entry_raw, true);
 
     words.push(escaped)

@@ -2,8 +2,9 @@ use std::{fmt::Display, str::FromStr};
 
 use nix::{libc::STDERR_FILENO, unistd::write};
 
+use crate::sherr;
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::{ShErr, ShResult},
   parse::lex::Span,
   procio::borrow_fd,
   state::{read_shopts, read_vars},
@@ -86,10 +87,7 @@ impl FromStr for ShedBellStyle {
       "audible" => Ok(Self::Audible),
       "visible" => Ok(Self::Visible),
       "disable" => Ok(Self::Disable),
-      _ => Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
-        format!("Invalid bell style '{s}'"),
-      )),
+      _ => Err(sherr!(SyntaxErr, "Invalid bell style '{s}'",)),
     }
   }
 }
@@ -131,24 +129,24 @@ macro_rules! shopt_group {
           $(
             stringify!($field) => {
               let parsed = val.parse::<$ty>().map_err(|_| {
-                ShErr::simple(
-                  ShErrKind::SyntaxErr,
-                  format!("shopt: invalid value '{}' for {}.{}", val, $group_name, opt),
+                sherr!(
+                  SyntaxErr,
+                  "shopt: invalid value '{}' for {}.{}", val, $group_name, opt,
                 )
               })?;
               $(
                 let validate: fn(&$ty) -> Result<(), String> = $validator;
                 validate(&parsed).map_err(|msg| {
-                  ShErr::simple(ShErrKind::SyntaxErr, format!("shopt: {msg}"))
+                  sherr!(SyntaxErr, "shopt: {msg}")
                 })?;
               )?
               self.$field = parsed;
             }
           )*
           _ => {
-            return Err(ShErr::simple(
-              ShErrKind::SyntaxErr,
-              format!("shopt: unexpected '{}' option '{opt}'", $group_name),
+            return Err(sherr!(
+              SyntaxErr,
+              "shopt: unexpected '{}' option '{opt}'", $group_name,
             ));
           }
         }
@@ -167,9 +165,9 @@ macro_rules! shopt_group {
               Ok(Some(output))
             }
           )*
-          _ => Err(ShErr::simple(
-            ShErrKind::SyntaxErr,
-            format!("shopt: unexpected '{}' option '{query}'", $group_name),
+          _ => Err(sherr!(
+            SyntaxErr,
+            "shopt: unexpected '{}' option '{query}'", $group_name,
           )),
         }
       }
@@ -235,10 +233,7 @@ impl ShOpts {
   pub fn set(&mut self, opt: &str, val: &str) -> ShResult<()> {
     let mut query = opt.split('.');
     let Some(key) = query.next() else {
-      return Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
-        "shopt: No option given",
-      ));
+      return Err(sherr!(SyntaxErr, "shopt: No option given",));
     };
 
     let remainder = query.collect::<Vec<_>>().join(".");
@@ -249,8 +244,8 @@ impl ShOpts {
       "set" => self.set.set(&remainder, val)?,
       "prompt" => self.prompt.set(&remainder, val)?,
       _ => {
-        return Err(ShErr::simple(
-          ShErrKind::SyntaxErr,
+        return Err(sherr!(
+          SyntaxErr,
           "shopt: expected 'core' or 'prompt' in shopt key",
         ));
       }
@@ -262,10 +257,7 @@ impl ShOpts {
     // TODO: handle escapes?
     let mut query = query.split('.');
     let Some(key) = query.next() else {
-      return Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
-        "shopt: No option given",
-      ));
+      return Err(sherr!(SyntaxErr, "shopt: No option given",));
     };
     let remainder = query.collect::<Vec<_>>().join(".");
 
@@ -274,8 +266,8 @@ impl ShOpts {
       "line" => self.line.get(&remainder),
       "set" => self.set.get(&remainder),
       "prompt" => self.prompt.get(&remainder),
-      _ => Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
+      _ => Err(sherr!(
+        SyntaxErr,
         "shopt: Expected 'core' or 'prompt' in shopt key",
       )),
     }

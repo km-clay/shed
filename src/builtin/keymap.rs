@@ -1,10 +1,11 @@
 use crate::{
   expand::expand_keymap,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
+  libsh::error::{ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
   readline::keys::KeyEvent,
+  sherr,
   state::{self, write_logic},
 };
 
@@ -41,23 +42,17 @@ impl KeyMapOpts {
         Opt::Short('e') => flags |= KeyMapFlags::EMACS,
         Opt::LongWithArg(name, arg) if name == "remove" => {
           if remove.is_some() {
-            return Err(ShErr::simple(
-              ShErrKind::ExecFail,
-              "Duplicate --remove option for keymap".to_string(),
-            ));
+            return Err(sherr!(ExecFail, "Duplicate --remove option for keymap"));
           }
           remove = Some(arg.clone());
         }
         _ => {
-          return Err(ShErr::simple(
-            ShErrKind::ExecFail,
-            format!("Invalid option for keymap: {:?}", opt),
-          ));
+          return Err(sherr!(ExecFail, "Invalid option for keymap: {:?}", opt,));
         }
       }
     }
     if flags.is_empty() {
-      return Err(ShErr::simple(ShErrKind::ExecFail, "At least one mode option must be specified for keymap".to_string()).with_note("Use -n for normal mode, -i for insert mode, -v for visual mode, -x for ex mode, and -o for operator-pending mode".to_string()));
+      return Err(sherr!(ExecFail, "At least one mode option must be specified for keymap").with_note("Use -e for emacs mode, -n for normal mode, -i for insert mode, -v for visual mode, -x for ex mode, and -o for operator-pending mode".to_string()));
     }
     Ok(Self { remove, flags })
   }
@@ -155,18 +150,16 @@ pub fn keymap(node: Node) -> ShResult<()> {
   }
 
   let Some((keys, _)) = argv.first() else {
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      span,
-      "missing keys argument".to_string(),
+    return Err(sherr!(
+      ExecFail @ span,
+      "missing keys argument",
     ));
   };
 
   let Some((action, _)) = argv.get(1) else {
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      span,
-      "missing action argument".to_string(),
+    return Err(sherr!(
+      ExecFail @ span,
+      "missing action argument",
     ));
   };
 

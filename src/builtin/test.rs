@@ -7,8 +7,9 @@ use nix::{
 use regex::Regex;
 
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::{ShErr, ShResult},
   parse::{ConjunctOp, NdRule, Node, TEST_UNARY_OPS, TestCase},
+  sherr,
 };
 
 #[derive(Debug, Clone)]
@@ -61,7 +62,7 @@ impl FromStr for UnaryOp {
       "-t" => Ok(Self::Terminal),
       "-n" => Ok(Self::NonNull),
       "-z" => Ok(Self::Null),
-      _ => Err(ShErr::simple(ShErrKind::SyntaxErr, "Invalid test operator")),
+      _ => Err(sherr!(SyntaxErr, "Invalid test operator")),
     }
   }
 }
@@ -94,10 +95,7 @@ impl FromStr for TestOp {
       "-ge" => Ok(Self::IntGe),
       "-le" => Ok(Self::IntLe),
       _ if TEST_UNARY_OPS.contains(&s) => Ok(Self::Unary(s.parse::<UnaryOp>()?)),
-      _ => Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
-        format!("Invalid test operator '{}'", s),
-      )),
+      _ => Err(sherr!(SyntaxErr, "Invalid test operator '{s}'")),
     }
   }
 }
@@ -136,9 +134,8 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         let operand = operand.expand()?.get_words().join(" ");
         conjunct_op = conjunct;
         let TestOp::Unary(op) = TestOp::from_str(operator.as_str())? else {
-          return Err(ShErr::at(
-            ShErrKind::SyntaxErr,
-            err_span,
+          return Err(sherr!(
+            SyntaxErr @ err_span,
             "Invalid unary operator",
           ));
         };
@@ -243,9 +240,8 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         let test_op = operator.as_str().parse::<TestOp>()?;
         match test_op {
           TestOp::Unary(_) => {
-            return Err(ShErr::at(
-              ShErrKind::SyntaxErr,
-              err_span,
+            return Err(sherr!(
+              SyntaxErr @ err_span,
               "Expected a binary operator in this test call; found a unary operator",
             ));
           }
@@ -263,10 +259,9 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
           | TestOp::IntGe
           | TestOp::IntLe
           | TestOp::IntEq => {
-            let err = ShErr::at(
-              ShErrKind::SyntaxErr,
-              err_span.clone(),
-              format!("Expected an integer with '{}' operator", operator),
+            let err = sherr!(
+              SyntaxErr @ err_span.clone(),
+              "Expected an integer with '{operator}' operator"
             );
             let Ok(lhs) = lhs.trim().parse::<i32>() else {
               return Err(err);

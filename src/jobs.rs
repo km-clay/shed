@@ -12,6 +12,7 @@ use crate::{
   },
   prelude::*,
   procio::{IoMode, borrow_fd},
+  sherr,
   signal::{disable_reaping, enable_reaping},
   state::{self, VarFlags, VarKind, set_status, write_jobs, write_meta, write_vars},
 };
@@ -507,10 +508,7 @@ pub fn wait_bg(id: JobID) -> ShResult<()> {
     }
     _ => {
       let Some(mut job) = write_jobs(|j| j.remove_job(id.clone())) else {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("wait: No such job with id {:?}", id),
-        ));
+        return Err(sherr!(ExecFail, "wait: No such job with id {:?}", id,));
       };
       let statuses = job.wait_pgrp()?;
       let mut was_stopped = false;

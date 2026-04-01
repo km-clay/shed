@@ -73,9 +73,9 @@ impl HistEntry {
 impl FromStr for HistEntry {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    let err = Err(ShErr::simple(
-      ShErrKind::HistoryReadErr,
-      format!("Bad formatting on history entry '{s}'"),
+    let err = Err(sherr!(
+      HistoryReadErr,
+      "Bad formatting on history entry '{s}'",
     ));
 
     //: 248972349;148;echo foo; echo bar
@@ -137,10 +137,7 @@ impl FromStr for HistEntries {
 
     while let Some((i, line)) = lines.next() {
       if !line.starts_with(": ") {
-        return Err(ShErr::simple(
-          ShErrKind::HistoryReadErr,
-          format!("Bad formatting on line {i}"),
-        ));
+        return Err(sherr!(HistoryReadErr, "Bad formatting on line {i}",));
       }
       let mut chars = line.chars().peekable();
       let mut feeding_lines = true;
@@ -166,10 +163,7 @@ impl FromStr for HistEntries {
         }
         if feeding_lines {
           let Some((_, line)) = lines.next() else {
-            return Err(ShErr::simple(
-              ShErrKind::HistoryReadErr,
-              format!("Bad formatting on line {i}"),
-            ));
+            return Err(sherr!(HistoryReadErr, "Bad formatting on line {i}",));
           };
           chars = line.chars().peekable();
         }
@@ -281,24 +275,23 @@ impl History {
     })
   }
 
-	pub fn start_search(&mut self, initial: &str) -> Option<String> {
-		if self.search_mask.is_empty() {
-			None
-		} else if self.search_mask.len() == 1 {
-			Some(self.search_mask[0].command().to_string())
-		} else {
-			self.fuzzy_finder.set_query(initial.to_string());
-			let raw_entries = self
-				.search_mask
-				.clone()
-				.into_iter()
-				.enumerate()
-				.map(|(i, ent)| Candidate::from((i, ent.command().to_string())));
-			self.fuzzy_finder.activate(raw_entries.collect());
-			None
-		}
-	}
-
+  pub fn start_search(&mut self, initial: &str) -> Option<String> {
+    if self.search_mask.is_empty() {
+      None
+    } else if self.search_mask.len() == 1 {
+      Some(self.search_mask[0].command().to_string())
+    } else {
+      self.fuzzy_finder.set_query(initial.to_string());
+      let raw_entries = self
+        .search_mask
+        .clone()
+        .into_iter()
+        .enumerate()
+        .map(|(i, ent)| Candidate::from((i, ent.command().to_string())));
+      self.fuzzy_finder.activate(raw_entries.collect());
+      None
+    }
+  }
 
   pub fn reset(&mut self) {
     self.search_mask = dedupe_entries(&self.entries);

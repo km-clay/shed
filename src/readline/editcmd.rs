@@ -2,11 +2,9 @@ use std::path::PathBuf;
 
 use bitflags::bitflags;
 
-use crate::{
-  readline::{
-    editmode::ex::SubFlags,
-    linebuf::{Grapheme, Pos},
-  },
+use crate::readline::{
+  editmode::ex::SubFlags,
+  linebuf::{Grapheme, Pos},
 };
 
 use super::register::{RegisterContent, append_register, read_register, write_register};

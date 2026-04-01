@@ -2,8 +2,9 @@ use regex::Regex;
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
+  libsh::error::{ShResult, ShResultExt},
   parse::{NdRule, Node},
+  sherr,
   state::{self, AutoCmd, AutoCmdKind, write_logic},
 };
 
@@ -34,18 +35,14 @@ pub fn get_autocmd_opts(opts: &[Opt]) -> ShResult<AutoCmdOpts> {
   while let Some(arg) = opts.next() {
     match arg {
       Opt::ShortWithArg('p', arg) => {
-        autocmd_opts.pattern = Some(Regex::new(arg).map_err(|e| {
-          ShErr::simple(ShErrKind::ExecFail, format!("invalid regex for -p: {}", e))
-        })?);
+        autocmd_opts.pattern =
+          Some(Regex::new(arg).map_err(|e| sherr!(ExecFail, "invalid regex for -p: {}", e))?);
       }
       Opt::Short('c') => {
         autocmd_opts.clear = true;
       }
       _ => {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("unexpected option: {}", arg),
-        ));
+        return Err(sherr!(ExecFail, "unexpected option: {}", arg,));
       }
     }
   }
@@ -72,18 +69,16 @@ pub fn autocmd(node: Node) -> ShResult<()> {
   let mut args = argv.iter();
 
   let Some(autocmd_kind) = args.next() else {
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      span,
-      "expected an autocmd kind".to_string(),
+    return Err(sherr!(
+      ExecFail @ span,
+      "expected an autocmd kind",
     ));
   };
 
   let Ok(autocmd_kind) = autocmd_kind.0.parse::<AutoCmdKind>() else {
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      autocmd_kind.1.clone(),
-      format!("invalid autocmd kind: {}", autocmd_kind.0),
+    return Err(sherr!(
+      ExecFail @ autocmd_kind.1.clone(),
+      "invalid autocmd kind: {}", autocmd_kind.0,
     ));
   };
 
@@ -94,10 +89,9 @@ pub fn autocmd(node: Node) -> ShResult<()> {
   }
 
   let Some(autocmd_cmd) = args.next() else {
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      span,
-      "expected an autocmd command".to_string(),
+    return Err(sherr!(
+      ExecFail @ span,
+      "expected an autocmd command",
     ));
   };
 
@@ -270,7 +264,7 @@ mod tests {
       "on-exit",
     ];
     for kind in kinds {
-      test_input(format!("autocmd {kind} 'true'")).unwrap();
+      test_input("autocmd {kind} 'true'").unwrap();
     }
   }
 

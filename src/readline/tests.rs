@@ -2,7 +2,9 @@
 use std::os::fd::AsRawFd;
 
 use crate::{
-  readline::{Prompt, ShedLine, annotate_input}, state::write_shopts, testutil::TestGuard
+  readline::{Prompt, ShedLine, annotate_input},
+  state::write_shopts,
+  testutil::TestGuard,
 };
 
 fn assert_annotated(input: &str, expected: &str) {
@@ -284,7 +286,7 @@ fn annotate_multiple_redirects() {
 // ===================== Vi Tests =====================
 
 fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
-	write_shopts(|o| o.set.vi = true);
+  write_shopts(|o| o.set.vi = true);
   let g = TestGuard::new();
   let prompt = Prompt::default();
   let vi = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd())

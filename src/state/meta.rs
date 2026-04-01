@@ -22,6 +22,7 @@ use crate::{
     complete::{BashCompSpec, CompSpec},
     keys::KeyEvent,
   },
+  sherr,
 };
 
 #[derive(Debug)]
@@ -95,43 +96,32 @@ impl FromStr for SocketRequest {
     match request_kind.trim() {
       "msg" => {
         let Some(msg_kind) = args.next() else {
-          return Err(ShErr::simple(
-            ShErrKind::ParseErr,
-            "Missing message kind in 'msg' request",
-          ));
+          return Err(sherr!(ParseErr, "Missing message kind in 'msg' request",));
         };
         match msg_kind.to_lowercase().as_str() {
           "system" => {
             let Some(msg) = args.next() else {
-              return Err(ShErr::simple(
-                ShErrKind::ParseErr,
-                "Missing message in system msg request",
-              ));
+              return Err(sherr!(ParseErr, "Missing message in system msg request",));
             };
             Ok(Self::PostSystemMessage(msg.to_string()))
           }
           "status" => {
             let Some(msg) = args.next() else {
-              return Err(ShErr::simple(
-                ShErrKind::ParseErr,
-                "Missing message in status msg request",
-              ));
+              return Err(sherr!(ParseErr, "Missing message in status msg request",));
             };
             Ok(Self::PostStatusMessage(msg.to_string()))
           }
-          _ => Err(ShErr::simple(
-            ShErrKind::ParseErr,
-            format!("Unknown message kind in 'msg' request: {}", msg_kind),
+          _ => Err(sherr!(
+            ParseErr,
+            "Unknown message kind in 'msg' request: {}",
+            msg_kind,
           )),
         }
       }
 
       "query" => {
         let Some(query_kind) = args.next() else {
-          return Err(ShErr::simple(
-            ShErrKind::ParseErr,
-            "Missing query kind in 'query' request",
-          ));
+          return Err(sherr!(ParseErr, "Missing query kind in 'query' request",));
         };
         match query_kind.to_lowercase().as_str() {
           "cwd" => Ok(Self::Query(QueryHeader::Cwd)),
@@ -146,12 +136,10 @@ impl FromStr for SocketRequest {
                 "pid" => StatusHeader::Pid,
                 "pgid" => StatusHeader::Pgid,
                 _ => {
-                  return Err(ShErr::simple(
-                    ShErrKind::ParseErr,
-                    format!(
-                      "Unknown status header in 'query status' request: {}",
-                      header
-                    ),
+                  return Err(sherr!(
+                    ParseErr,
+                    "Unknown status header in 'query status' request: {}",
+                    header,
                   ));
                 }
               };
@@ -170,22 +158,24 @@ impl FromStr for SocketRequest {
           }
           "var" => {
             let Some(var_name) = args.next() else {
-              return Err(ShErr::simple(
-                ShErrKind::ParseErr,
+              return Err(sherr!(
+                ParseErr,
                 "Missing variable name in 'query var' request",
               ));
             };
             Ok(Self::Query(QueryHeader::Var(var_name.to_string())))
           }
-          _ => Err(ShErr::simple(
-            ShErrKind::ParseErr,
-            format!("Unknown query kind in 'query' request: {}", query_kind),
+          _ => Err(sherr!(
+            ParseErr,
+            "Unknown query kind in 'query' request: {}",
+            query_kind,
           )),
         }
       }
-      _ => Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        format!("Unknown socket request kind: {}", request_kind),
+      _ => Err(sherr!(
+        ParseErr,
+        "Unknown socket request kind: {}",
+        request_kind,
       )),
     }
   }

@@ -226,7 +226,7 @@ pub trait KeyReader {
 
 pub trait LineWriter {
   fn clear_rows(&mut self, layout: &Layout) -> ShResult<()>;
-	fn clear_screen(&mut self) -> ShResult<()>;
+  fn clear_screen(&mut self) -> ShResult<()>;
   fn redraw(
     &mut self,
     prompt: &str,
@@ -1127,13 +1127,13 @@ impl LineWriter for TermWriter {
     Ok(())
   }
 
-	fn clear_screen(&mut self) -> ShResult<()> {
-		self.buffer.clear();
-		self.buffer.push_str("\x1b[2J\x1b[H"); // Clear entire screen and move cursor to home
-		write_all(self.out, self.buffer.as_str())?;
-		self.buffer.clear();
-		Ok(())
-	}
+  fn clear_screen(&mut self) -> ShResult<()> {
+    self.buffer.clear();
+    self.buffer.push_str("\x1b[2J\x1b[H"); // Clear entire screen and move cursor to home
+    write_all(self.out, self.buffer.as_str())?;
+    self.buffer.clear();
+    Ok(())
+  }
 
   fn redraw(
     &mut self,

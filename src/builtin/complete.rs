@@ -3,10 +3,11 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens, get_opts_from_tokens_raw},
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
   parse::{NdRule, Node},
   procio::borrow_fd,
   readline::complete::{BashCompSpec, CompContext, CompSpec},
+  sherr,
   state::{self, read_meta, write_meta},
 };
 
@@ -209,9 +210,8 @@ pub fn complete_builtin(node: Node) -> ShResult<()> {
 
   if argv.is_empty() {
     state::set_status(1);
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      blame,
+    return Err(sherr!(
+      ExecFail @ blame,
       "complete: no command specified",
     ));
   }
@@ -288,10 +288,9 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
         "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
         _ => {
           let span: crate::parse::lex::Span = Default::default();
-          return Err(ShErr::at(
-            ShErrKind::InvalidOpt,
-            span,
-            format!("complete: invalid option: {}", opt_flag),
+          return Err(sherr!(
+            InvalidOpt @ span,
+            "complete: invalid option: {opt_flag}"
           ));
         }
       },

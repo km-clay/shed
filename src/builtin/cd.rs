@@ -5,6 +5,7 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult, next_color},
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
+  sherr,
   state::{self},
 };
 
@@ -31,8 +32,7 @@ pub fn cd(node: Node) -> ShResult<()> {
   };
 
   if !new_dir.exists() {
-    let mut err = ShErr::new(ShErrKind::ExecFail, span.clone())
-      .labeled(cd_span.clone(), "Failed to change directory");
+    let mut err = sherr!(ExecFail @ span.clone(), "Failed to change directory");
     if let Some(span) = arg_span {
       err = err.labeled(
         span,

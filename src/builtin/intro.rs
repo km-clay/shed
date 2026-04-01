@@ -8,6 +8,7 @@ use crate::{
   parse::{NdRule, Node, execute::prepare_argv, lex::KEYWORDS},
   prelude::*,
   procio::borrow_fd,
+  sherr,
   state::{self, ShAlias, ShFunc, read_logic},
 };
 
@@ -86,13 +87,9 @@ pub fn type_builtin(node: Node) -> ShResult<()> {
       }
 
       state::set_status(1);
-      return Err(ShErr::at(
-        ShErrKind::NotFound,
-        span,
-        format!(
-          "'{}' is not a command, function, or alias",
-          arg.fg(next_color())
-        ),
+      return Err(sherr!(
+        NotFound @ span,
+        "'{}' is not a command, function, or alias", arg.fg(next_color())
       ));
     }
   }

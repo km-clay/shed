@@ -8,7 +8,35 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    BUILTINS, alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, fixcmd::fixcmd, flowctl::flowctl, getopts::getopts, help::help, hist::hist_builtin, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
+    BUILTINS,
+    alias::{alias, unalias},
+    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
+    autocmd::autocmd,
+    cd::cd,
+    complete::{compgen_builtin, complete_builtin},
+    dirstack::{dirs, popd, pushd},
+    echo::echo,
+    eval, exec,
+    fixcmd::fixcmd,
+    flowctl::flowctl,
+    getopts::getopts,
+    help::help,
+    hist::hist_builtin,
+    intro,
+    jobctl::{self, JobBehavior, continue_job, disown, jobs},
+    keymap, map,
+    msg::msg,
+    pwd::pwd,
+    read::{self, read_builtin},
+    resource::{ulimit, umask_builtin},
+    seek::seek,
+    set::set_builtin,
+    shift::shift,
+    shopt::shopt,
+    source::source,
+    test::double_bracket_test,
+    trap::{TrapTarget, trap},
+    varcmds::{export, local, readonly, unset},
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -19,10 +47,12 @@ use crate::{
   },
   prelude::*,
   procio::{IoMode, IoStack, PipeGenerator, borrow_fd},
+  sherr,
   shopt::xtrace_print,
   signal::{check_signals, signals_pending},
   state::{
-    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_jobs, write_logic, write_meta, write_vars
+    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_jobs, write_logic,
+    write_meta, write_vars,
   },
 };
 
@@ -300,20 +330,20 @@ impl Dispatcher {
     let Some(cmd) = node.get_command() else {
       return self.exec_cmd(node); // Argv is empty, probably an assignment
     };
-		// We need to expand this token
-		// so that a command smuggled inside of a variable is routed correctly,
-		// instead of only hitting the exec_cmd path
-		let cmd_word = cmd.clone()
-			.expand()?
-			.get_words()
-			.into_iter()
-			.next()
-			.unwrap();
+    // We need to expand this token
+    // so that a command smuggled inside of a variable is routed correctly,
+    // instead of only hitting the exec_cmd path
+    let cmd_word = cmd
+      .clone()
+      .expand()?
+      .get_words()
+      .into_iter()
+      .next()
+      .unwrap();
 
     if is_func(&cmd_word) {
       self.exec_func(node)
-    } else if cmd.flags.contains(TkFlags::BUILTIN)
-		|| BUILTINS.contains(&cmd_word.as_str()) {
+    } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTINS.contains(&cmd_word.as_str()) {
       self.exec_builtin(node)
     } else if is_subsh(node.get_command().cloned()) {
       self.exec_subsh(node)
@@ -398,10 +428,9 @@ impl Dispatcher {
       .unwrap_or(name.span.as_str());
 
     if KEYWORDS.contains(&name) {
-      return Err(ShErr::at(
-        ShErrKind::SyntaxErr,
-        blame,
-        format!("function: Forbidden function name `{name}`"),
+      return Err(sherr!(
+        SyntaxErr @ blame,
+        "function: Forbidden function name `{name}`",
       ));
     }
 
@@ -444,12 +473,13 @@ impl Dispatcher {
   }
   fn exec_func(&mut self, func: Node) -> ShResult<()> {
     let mut blame = func.get_span().clone();
-    let func_name = func.get_command()
-			.unwrap()
-			.clone()
-			.expand()?
-			.get_first_word()
-			.unwrap_or_default();
+    let func_name = func
+      .get_command()
+      .unwrap()
+      .clone()
+      .expand()?
+      .get_first_word()
+      .unwrap_or_default();
 
     let func_ctx = func.get_context(format!(
       "in call to function '{}'",
@@ -471,10 +501,9 @@ impl Dispatcher {
     });
     if depth > max_depth {
       RECURSE_DEPTH.with(|d| d.set(d.get() - 1));
-      return Err(ShErr::at(
-        ShErrKind::InternalErr,
-        blame,
-        format!("maximum recursion depth ({max_depth}) exceeded"),
+      return Err(sherr!(
+        InternalErr @ blame,
+        "maximum recursion depth ({max_depth}) exceeded",
       ));
     }
 
@@ -484,10 +513,11 @@ impl Dispatcher {
 
     self.io_stack.append_to_frame(func.redirs);
 
-    let name = func_name.clone()
-			.expand()?
-			.get_first_word()
-			.unwrap_or_default();
+    let name = func_name
+      .clone()
+      .expand()?
+      .get_first_word()
+      .unwrap_or_default();
     blame.rename(name.clone());
 
     argv.insert(0, func_name.clone());
@@ -513,10 +543,9 @@ impl Dispatcher {
         Ok(())
       }
     } else {
-      Err(ShErr::at(
-        ShErrKind::InternalErr,
-        blame,
-        format!("Failed to find function '{}'", func_name),
+      Err(sherr!(
+        InternalErr @ blame,
+        "Failed to find function '{func_name}'"
       ))
     };
 
@@ -870,10 +899,9 @@ impl Dispatcher {
       let mut result = Ok(());
       for (i, mut cmd) in cmds.into_iter().enumerate() {
         let mut frame = pipes.next().ok_or_else(|| {
-          ShErr::at(
-            ShErrKind::InternalErr,
-            cmd.get_span(),
-            "failed to set up pipeline redirections".to_string(),
+          sherr!(
+            InternalErr @ cmd.get_span(),
+            "failed to set up pipeline redirections",
           )
         })?;
         if i == 0 {
@@ -930,9 +958,8 @@ impl Dispatcher {
         exec_input(trap, None, false, Some("trap ERR".to_string()))?;
         state::set_status(saved_status);
       }
-      return Err(ShErr::at(
-        ShErrKind::ErrInterrupt,
-        pipeline_span,
+      return Err(sherr!(
+        ErrInterrupt @ pipeline_span,
         "Command returned non-zero exit status",
       ));
     }
@@ -1073,8 +1100,8 @@ impl Dispatcher {
       "help" => help(cmd),
       "set" => set_builtin(cmd),
       "msg" => msg(cmd),
-			"fc" => fixcmd(cmd, self.interactive),
-			"hist" => hist_builtin(cmd),
+      "fc" => fixcmd(cmd, self.interactive),
+      "hist" => hist_builtin(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -1172,7 +1199,7 @@ impl Dispatcher {
             .print_error();
         }
         _ => {
-          ShErr::at(ShErrKind::Errno(e), span, format!("{e}"))
+          sherr!(Errno(e) @ span, "{e}")
             .with_context(context)
             .print_error();
         }
@@ -1272,8 +1299,8 @@ impl Dispatcher {
           }
         }
         AssignKind::PlusEq => {
-					let _var = read_vars(|v| v.get_var(var));
-				}
+          let _var = read_vars(|v| v.get_var(var));
+        }
         AssignKind::MinusEq => todo!(),
         AssignKind::MultEq => todo!(),
         AssignKind::DivEq => todo!(),

@@ -11,9 +11,11 @@ pub mod dirstack;
 pub mod echo;
 pub mod eval;
 pub mod exec;
+pub mod fixcmd;
 pub mod flowctl;
 pub mod getopts;
 pub mod help;
+pub mod hist;
 pub mod intro;
 pub mod jobctl;
 pub mod keymap;
@@ -30,8 +32,6 @@ pub mod source;
 pub mod test; // [[ ]] thing
 pub mod trap;
 pub mod varcmds;
-pub mod fixcmd;
-pub mod hist;
 
 pub const BUILTINS: [&str; 55] = [
   "echo", "cd", "read", "export", "local", "pwd", "source", ".", "shift", "jobs", "fg", "bg",
@@ -39,7 +39,7 @@ pub const BUILTINS: [&str; 55] = [
   "command", "trap", "pushd", "popd", "dirs", "exec", "eval", "true", "false", ":", "readonly",
   "unset", "complete", "compgen", "map", "pop", "fpop", "push", "fpush", "rotate", "wait", "type",
   "getopts", "keymap", "read_key", "autocmd", "ulimit", "umask", "seek", "help", "set", "msg",
-	"fc", "hist"
+  "fc", "hist",
 ];
 
 pub fn true_builtin() -> ShResult<()> {

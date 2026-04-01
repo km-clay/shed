@@ -6,7 +6,7 @@ use itertools::Itertools;
 
 use crate::bitflags;
 use crate::expand::Expander;
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::libsh::error::ShResult;
 use crate::parse::lex::TkFlags;
 use crate::readline::editcmd::{
   Anchor, CmdFlags, EditCmd, Motion, MotionCmd, ReadSrc, RegisterName, To, Val, Verb, VerbCmd,
@@ -16,6 +16,7 @@ use crate::readline::editmode::{EditMode, ModeReport, ViInsert};
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
+use crate::sherr;
 use crate::state::write_meta;
 use crate::{motion, verb};
 
@@ -41,13 +42,13 @@ struct ExEditor {
 }
 
 impl Default for ExEditor {
-	fn default() -> Self {
-		Self {
-			buf: LineBuf::default(),
-			mode: ViInsert::default(),
-			history: History::new("ex_history").unwrap_or_else(|_| History::empty("ex_history")),
-		}
-	}
+  fn default() -> Self {
+    Self {
+      buf: LineBuf::default(),
+      mode: ViInsert::default(),
+      history: History::new("ex_history").unwrap_or_else(|_| History::empty("ex_history")),
+    }
+  }
 }
 
 impl ExEditor {
@@ -131,7 +132,7 @@ impl EditMode for ViEx {
           Err(e) => {
             let msg = e.unwrap_or(format!("Not an editor command: {}", &input));
             write_meta(|m| m.post_status_message(msg.clone()));
-            Err(ShErr::simple(ShErrKind::ParseErr, msg))
+            Err(sherr!(ParseErr, "{msg}"))
           }
         }
       }

@@ -9,6 +9,7 @@ use crate::{
   builtin::map::MapNode,
   libsh::error::{ShErr, ShErrKind, ShResult},
   prelude::*,
+  sherr,
 };
 
 #[derive(Clone, Default, Debug)]
@@ -70,10 +71,7 @@ impl ScopeStack {
         return scope.unset_var(var_name);
       }
     }
-    Err(ShErr::simple(
-      ShErrKind::ExecFail,
-      format!("Variable '{}' not found", var_name),
-    ))
+    Err(sherr!(ExecFail, "Variable '{}' not found", var_name,))
   }
   pub fn export_var(&mut self, var_name: &str) {
     for scope in self.scopes.iter_mut().rev() {
@@ -198,18 +196,12 @@ impl ScopeStack {
             return Ok(items.iter().cloned().collect());
           }
           _ => {
-            return Err(ShErr::simple(
-              ShErrKind::ExecFail,
-              format!("Variable '{}' is not an array", var_name),
-            ));
+            return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name,));
           }
         }
       }
     }
-    Err(ShErr::simple(
-      ShErrKind::ExecFail,
-      format!("Variable '{}' not found", var_name),
-    ))
+    Err(sherr!(ExecFail, "Variable '{}' not found", var_name,))
   }
   pub fn get_arr_mut(&mut self, var_name: &str) -> ShResult<&mut VecDeque<String>> {
     for scope in self.scopes.iter_mut().rev() {
@@ -219,18 +211,12 @@ impl ScopeStack {
         match var.kind_mut() {
           VarKind::Arr(items) => return Ok(items),
           _ => {
-            return Err(ShErr::simple(
-              ShErrKind::ExecFail,
-              format!("Variable '{}' is not an array", var_name),
-            ));
+            return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name,));
           }
         }
       }
     }
-    Err(ShErr::simple(
-      ShErrKind::ExecFail,
-      format!("Variable '{}' not found", var_name),
-    ))
+    Err(sherr!(ExecFail, "Variable '{}' not found", var_name,))
   }
   pub fn index_var(&self, var_name: &str, idx: ArrIndex) -> ShResult<String> {
     for scope in self.scopes.iter().rev() {
@@ -245,16 +231,19 @@ impl ScopeStack {
                 if items.len() >= n {
                   items.len() - n
                 } else {
-                  return Err(ShErr::simple(
-                    ShErrKind::ExecFail,
-                    format!("Index {} out of bounds for array '{}'", n, var_name),
+                  return Err(sherr!(
+                    ExecFail,
+                    "Index {} out of bounds for array '{}'",
+                    n,
+                    var_name,
                   ));
                 }
               }
               _ => {
-                return Err(ShErr::simple(
-                  ShErrKind::ExecFail,
-                  format!("Cannot index all elements of array '{}'", var_name),
+                return Err(sherr!(
+                  ExecFail,
+                  "Cannot index all elements of array '{}'",
+                  var_name,
                 ));
               }
             };
@@ -262,17 +251,16 @@ impl ScopeStack {
             if let Some(item) = items.get(idx) {
               return Ok(item.clone());
             } else {
-              return Err(ShErr::simple(
-                ShErrKind::ExecFail,
-                format!("Index {} out of bounds for array '{}'", idx, var_name),
+              return Err(sherr!(
+                ExecFail,
+                "Index {} out of bounds for array '{}'",
+                idx,
+                var_name,
               ));
             }
           }
           _ => {
-            return Err(ShErr::simple(
-              ShErrKind::ExecFail,
-              format!("Variable '{}' is not an array", var_name),
-            ));
+            return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name,));
           }
         }
       }

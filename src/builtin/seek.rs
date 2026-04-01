@@ -5,10 +5,10 @@ use nix::{
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
   parse::{NdRule, Node},
   procio::borrow_fd,
-  state,
+  sherr, state,
 };
 
 pub const LSEEK_OPTS: [OptSpec; 2] = [
@@ -44,27 +44,23 @@ pub fn seek(node: Node) -> ShResult<()> {
   let mut argv = argv.into_iter();
 
   let Some(fd) = argv.next() else {
-    return Err(ShErr::simple(
-      ShErrKind::ExecFail,
-      "lseek: Missing required argument 'fd'",
-    ));
+    return Err(sherr!(ExecFail, "lseek: Missing required argument 'fd'",));
   };
   let Ok(fd) = fd.0.parse::<u32>() else {
     return Err(
-      ShErr::at(ShErrKind::ExecFail, fd.1, "Invalid file descriptor")
-        .with_note("file descriptors are integers"),
+      sherr!(ExecFail @ fd.1, "Invalid file descriptor").with_note("file descriptors are integers"),
     );
   };
 
   let Some(offset) = argv.next() else {
-    return Err(ShErr::simple(
-      ShErrKind::ExecFail,
+    return Err(sherr!(
+      ExecFail,
       "lseek: Missing required argument 'offset'",
     ));
   };
   let Ok(offset) = offset.0.parse::<i64>() else {
     return Err(
-      ShErr::at(ShErrKind::ExecFail, offset.1, "Invalid offset")
+      sherr!(ExecFail @ offset.1, "Invalid offset")
         .with_note("offset can be a positive or negative integer"),
     );
   };
@@ -104,10 +100,7 @@ pub fn get_lseek_opts(opts: Vec<Opt>) -> ShResult<LseekOpts> {
       Opt::Short('c') => lseek_opts.cursor_rel = true,
       Opt::Short('e') => lseek_opts.end_rel = true,
       _ => {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("lseek: Unexpected flag '{opt}'"),
-        ));
+        return Err(sherr!(ExecFail, "lseek: Unexpected flag '{opt}'",));
       }
     }
   }

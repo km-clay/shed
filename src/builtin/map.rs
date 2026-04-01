@@ -4,6 +4,7 @@ use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 use serde_json::{Map, Value};
 
+use crate::sherr;
 use crate::{
   expand::expand_cmd_sub,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens_raw},
@@ -203,18 +204,12 @@ impl MapNode {
       if pretty {
         match serde_json::to_string_pretty(&val) {
           Ok(s) => Ok(s),
-          Err(e) => Err(ShErr::simple(
-            ShErrKind::InternalErr,
-            format!("failed to serialize map: {e}"),
-          )),
+          Err(e) => Err(sherr!(InternalErr, "failed to serialize map: {e}")),
         }
       } else {
         match serde_json::to_string(&val) {
           Ok(s) => Ok(s),
-          Err(e) => Err(ShErr::simple(
-            ShErrKind::InternalErr,
-            format!("failed to serialize map: {e}"),
-          )),
+          Err(e) => Err(sherr!(InternalErr, "failed to serialize map: {e}")),
         }
       }
     } else {
@@ -309,10 +304,7 @@ pub fn map(node: Node) -> ShResult<()> {
         .map(|s| s.expand().map(|exp| exp.get_words().join(" ")))
         .collect::<ShResult<Vec<String>>>()?;
       let Some(name) = path.first() else {
-        return Err(ShErr::simple(
-          ShErrKind::InternalErr,
-          format!("invalid map path: {}", lhs.as_str()),
-        ));
+        return Err(sherr!(InternalErr, "invalid map path: {}", lhs.as_str()));
       };
 
       let is_json = map_opts.flags.contains(MapFlags::JSON);
@@ -327,7 +319,7 @@ pub fn map(node: Node) -> ShResult<()> {
       };
       let expanded = if is_json {
         serde_json::from_str::<Value>(rhs.as_str())
-          .map_err(|e| ShErr::simple(ShErrKind::InternalErr, format!("failed to parse JSON: {e}")))?
+          .map_err(|e| sherr!(InternalErr, "failed to parse JSON: {e}"))?
           .into()
       } else if is_arr {
         let raw = rhs.as_str();
@@ -363,10 +355,7 @@ pub fn map(node: Node) -> ShResult<()> {
       let expanded = arg.expand()?.get_words().join(" ");
       let path: Vec<String> = expanded.split('.').map(|s| s.to_string()).collect();
       let Some(name) = path.first() else {
-        return Err(ShErr::simple(
-          ShErrKind::InternalErr,
-          format!("invalid map path: {}", expanded),
-        ));
+        return Err(sherr!(InternalErr, "invalid map path: {}", expanded));
       };
 
       if map_opts.flags.contains(MapFlags::REMOVE) {
@@ -375,10 +364,7 @@ pub fn map(node: Node) -> ShResult<()> {
             v.remove_map(name);
           } else {
             let Some(map) = v.get_map_mut(name) else {
-              return Err(ShErr::simple(
-                ShErrKind::ExecFail,
-                format!("map not found: {}", name),
-              ));
+              return Err(sherr!(ExecFail, "map not found: {}", name));
             };
             map.remove(&path[1..]);
           }
@@ -393,10 +379,7 @@ pub fn map(node: Node) -> ShResult<()> {
       let keys = map_opts.flags.contains(MapFlags::KEYS);
       let has_map = read_vars(|v| v.get_map(name).is_some());
       if !has_map {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("map not found: {}", name),
-        ));
+        return Err(sherr!(ExecFail, "map not found: {}", name));
       }
       let Some(node) = read_vars(|v| v.get_map(name).and_then(|map| map.get(&path[1..]).cloned()))
       else {

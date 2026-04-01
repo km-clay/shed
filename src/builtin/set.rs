@@ -1,14 +1,13 @@
-use std::{str::FromStr};
+use std::str::FromStr;
 
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-  libsh::{
-    error::{ShErr, ShErrKind, ShResult, ShResultExt},
-  },
+  libsh::error::{ShErr, ShResult, ShResultExt},
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   procio::borrow_fd,
+  sherr,
   shopt::as_var_val_display,
   state::{self, VarKind, read_vars, write_shopts, write_vars},
 };
@@ -114,10 +113,7 @@ impl TryFrom<char> for SetFlags {
       'u' => Ok(Self::NO_UNSET),
       'v' => Ok(Self::VERBOSE),
       'x' => Ok(Self::XTRACE),
-      _ => Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        format!("invalid option: {}", value),
-      )),
+      _ => Err(sherr!(ParseErr, "invalid option: {}", value,)),
     }
   }
 }
@@ -141,10 +137,7 @@ impl FromStr for SetFlags {
       "nolog" => Ok(Self::NO_LOG),
       "verbose" => Ok(Self::VERBOSE),
       "xtrace" => Ok(Self::XTRACE),
-      _ => Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        format!("invalid option: {}", s),
-      )),
+      _ => Err(sherr!(ParseErr, "invalid option: {}", s,)),
     }
   }
 }

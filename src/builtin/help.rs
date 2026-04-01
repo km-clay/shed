@@ -6,17 +6,14 @@ use std::{
 
 use crate::{
   builtin::join_raw_arg_iter,
-  libsh::{
-    error::{ShErr, ShErrKind, ShResult},
-    guards::RawModeGuard,
-  },
+  libsh::{error::ShResult, guards::RawModeGuard},
   parse::{
     NdRule, Node,
     execute::{exec_input, prepare_argv},
     lex::QuoteState,
   },
   readline::{complete::ScoredCandidate, markers},
-  state,
+  sherr, state,
 };
 
 const TAG_SEQ: &str = "\x1b[1;33m"; // bold yellow — searchable tags
@@ -108,9 +105,8 @@ pub fn help(node: Node) -> ShResult<()> {
     Ok(())
   } else {
     state::set_status(1);
-    Err(ShErr::at(
-      ShErrKind::NotFound,
-      span,
+    Err(sherr!(
+      NotFound @ span,
       "No relevant help page found for this topic",
     ))
   }

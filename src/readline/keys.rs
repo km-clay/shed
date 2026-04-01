@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::libsh::error::ShResult;
+use crate::sherr;
 
 // Credit to Rustyline for the design ideas in this module
 // https://github.com/kkawakam/rustyline
@@ -109,9 +110,9 @@ impl KeyEvent {
 
     match event {
       KeyCode::UnknownEscSeq => {
-        return Err(ShErr::simple(
-          ShErrKind::ParseErr,
-          "Cannot convert unknown escape sequence to Vim key sequence".to_string(),
+        return Err(sherr!(
+          ParseErr,
+          "Cannot convert unknown escape sequence to Vim key sequence",
         ));
       }
       KeyCode::ExMode => {

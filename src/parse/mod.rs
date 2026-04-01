@@ -13,6 +13,7 @@ use crate::{
   parse::lex::clean_input,
   prelude::*,
   procio::IoMode,
+  sherr,
   state::read_shopts,
 };
 
@@ -399,9 +400,10 @@ impl FromStr for RedirBldr {
             }
           }
           if src_fd.is_empty() {
-            return Err(ShErr::simple(
-              ShErrKind::ParseErr,
-              format!("Invalid character '{}' in redirection operator", ch),
+            return Err(sherr!(
+              ParseErr,
+              "Invalid character '{}' in redirection operator",
+              ch,
             ));
           }
         }
@@ -417,9 +419,10 @@ impl FromStr for RedirBldr {
           }
         }
         _ => {
-          return Err(ShErr::simple(
-            ShErrKind::ParseErr,
-            format!("Invalid character '{}' in redirection operator", ch),
+          return Err(sherr!(
+            ParseErr,
+            "Invalid character '{}' in redirection operator",
+            ch,
           ));
         }
       }
@@ -773,10 +776,7 @@ impl ParseStream {
         }
         Ok(())
       }
-      _ => Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        "Expected a semicolon or newline here",
-      )),
+      _ => Err(sherr!(ParseErr, "Expected a semicolon or newline here",)),
     }
   }
   fn next_tk_is_some(&self) -> bool {
@@ -1109,9 +1109,8 @@ impl ParseStream {
     match redir_type {
       RedirType::HereString => {
         if next_tk.as_ref().is_none_or(|tk| tk.class == TkRule::EOI) {
-          return Err(ShErr::at(
-            ShErrKind::ParseErr,
-            next_tk.unwrap_or(redir_tk.clone()).span.clone(),
+          return Err(sherr!(
+            ParseErr @ next_tk.unwrap_or(redir_tk.clone()).span.clone(),
             "Expected a string after this redirection",
           ));
         }
@@ -1122,9 +1121,8 @@ impl ParseStream {
       }
       _ => {
         if next_tk.as_ref().is_none_or(|tk| tk.class == TkRule::EOI) {
-          return Err(ShErr::at(
-            ShErrKind::ParseErr,
-            redir_tk.span.clone(),
+          return Err(sherr!(
+            ParseErr @ redir_tk.span.clone(),
             "Expected a filename after this redirection",
           ));
         }
@@ -1634,7 +1632,7 @@ impl ParseStream {
 
     while let Some(prefix_tk) = tk_iter.next() {
       if let TkRule::CasePattern = prefix_tk.class {
-				self.panic_mode(&mut node_tks);
+        self.panic_mode(&mut node_tks);
         return Err(parse_err_full(
           "Found case pattern in command",
           &prefix_tk.span,
@@ -1883,12 +1881,10 @@ pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<Fil
     RedirType::Input => OpenOptions::new().read(true).open(Path::new(&path)),
     RedirType::Output => {
       if read_shopts(|o| o.set.noclobber) && path.is_file() {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!(
-            "shopt core.noclobber is set, refusing to overwrite existing file `{}`",
-            path.display()
-          ),
+        return Err(sherr!(
+          ExecFail,
+          "shopt core.noclobber is set, refusing to overwrite existing file `{}`",
+          path.display()
         ));
       }
       OpenOptions::new()
@@ -1915,15 +1911,7 @@ pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<Fil
 }
 
 fn parse_err_full(reason: &str, blame: &Span, context: LabelCtx) -> ShErr {
-  let color = last_color();
-  ShErr::new(ShErrKind::ParseErr, blame.clone())
-    .with_label(
-      blame.span_source().clone(),
-      Label::new(blame.clone())
-        .with_message(reason)
-        .with_color(color),
-    )
-    .with_context(context)
+  sherr!(ParseErr @ blame.clone(), "{reason}").with_context(context)
 }
 
 fn is_func_name(tk: Option<&Tk>) -> bool {

@@ -1,8 +1,9 @@
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
   parse::{NdRule, Node, execute::prepare_argv, lex::split_tk_at},
   prelude::*,
   procio::borrow_fd,
+  sherr,
   state::{self, VarFlags, VarKind, read_vars, write_vars},
 };
 
@@ -76,19 +77,17 @@ pub fn unset(node: Node) -> ShResult<()> {
   }
 
   if argv.is_empty() {
-    return Err(ShErr::at(
-      ShErrKind::SyntaxErr,
-      blame,
+    return Err(sherr!(
+      SyntaxErr @ blame,
       "unset: Expected at least one argument",
     ));
   }
 
   for (arg, span) in argv {
     if !read_vars(|v| v.var_exists(&arg)) {
-      return Err(ShErr::at(
-        ShErrKind::ExecFail,
-        span,
-        format!("unset: No such variable '{arg}'"),
+      return Err(sherr!(
+        ExecFail @ span,
+        "unset: No such variable '{arg}'",
       ));
     }
     write_vars(|v| v.unset_var(&arg))?;

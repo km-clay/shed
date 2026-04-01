@@ -1,6 +1,7 @@
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{NdRule, Node, execute::prepare_argv},
+  sherr,
 };
 
 /// Returns a ShErr that signals a control flow change (break, continue, return, or exit) with an optional status code.
@@ -8,7 +9,7 @@ use crate::{
 /// The error bubbles up until it is caught by a context that waits to catch it.
 /// If the error bubbles all the way up to main, the error is printed and the status code is set to 1.
 pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
-	use ShErrKind as K;
+  use ShErrKind as K;
   let NdRule::Command {
     assignments: _,
     argv,
@@ -25,10 +26,9 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
     let (arg, span) = argv.into_iter().next().unwrap();
 
     let Ok(status) = arg.parse::<i32>() else {
-      return Err(ShErr::at(
-        K::SyntaxErr,
-        span,
-        format!("{cmd}: Expected a number"),
+      return Err(sherr!(
+        SyntaxErr @ span,
+        "{cmd}: Expected a number",
       ));
     };
 

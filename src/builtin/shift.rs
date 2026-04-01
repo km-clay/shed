@@ -1,6 +1,7 @@
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{NdRule, Node, execute::prepare_argv},
+  sherr,
   state::{self, write_vars},
 };
 
@@ -21,9 +22,8 @@ pub fn shift(node: Node) -> ShResult<()> {
 
   let count = if let Some((arg, span)) = argv.next() {
     let Ok(count) = arg.parse::<usize>() else {
-      return Err(ShErr::at(
-        ShErrKind::ExecFail,
-        span,
+      return Err(sherr!(
+        ExecFail @ span,
         "Expected a number in shift args",
       ));
     };

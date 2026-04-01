@@ -433,9 +433,9 @@ impl Display for ShErr {
 }
 
 impl From<rusqlite::Error> for ShErr {
-	fn from(value: rusqlite::Error) -> Self {
-		ShErr::simple(ShErrKind::HistoryReadErr, value.to_string())
-	}
+  fn from(value: rusqlite::Error) -> Self {
+    ShErr::simple(ShErrKind::HistoryReadErr, value.to_string())
+  }
 }
 
 impl From<std::io::Error> for ShErr {

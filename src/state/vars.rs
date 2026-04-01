@@ -17,10 +17,8 @@ use crate::{
   },
   parse::lex::{LexFlags, LexStream, Tk},
   prelude::*,
-  readline::{
-    complete::Candidate,
-    markers,
-  },
+  readline::{complete::Candidate, markers},
+  sherr,
 };
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
@@ -90,10 +88,7 @@ impl FromStr for ShellParam {
         let idx = n.parse::<usize>().unwrap();
         Ok(Self::Pos(idx))
       }
-      _ => Err(ShErr::simple(
-        ShErrKind::InternalErr,
-        format!("Invalid shell parameter: {}", s),
-      )),
+      _ => Err(sherr!(InternalErr, "Invalid shell parameter: {}", s,)),
     }
   }
 }
@@ -188,10 +183,7 @@ impl FromStr for ArrIndex {
         let idx = s.parse::<usize>().unwrap();
         Ok(Self::Literal(idx))
       }
-      _ => Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        format!("Invalid array index: {}", s),
-      )),
+      _ => Err(sherr!(ParseErr, "Invalid array index: {}", s,)),
     }
   }
 }
@@ -208,10 +200,7 @@ impl VarKind {
   pub fn arr_from_tk(tk: Tk) -> ShResult<Self> {
     let raw = tk.as_str();
     if !raw.starts_with('(') || !raw.ends_with(')') {
-      return Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        format!("Invalid array syntax: {}", raw),
-      ));
+      return Err(sherr!(ParseErr, "Invalid array syntax: {}", raw,));
     }
     let raw = raw[1..raw.len() - 1].to_string();
 
@@ -220,17 +209,17 @@ impl VarKind {
       .try_fold(String::new(), |mut acc, wrds| {
         match wrds {
           Ok(wrds) => {
-						let wrds_joined = wrds.join(" ");
-						acc = [acc,wrds_joined].join(&markers::ARG_SEP.to_string());
-					}
+            let wrds_joined = wrds.join(" ");
+            acc = [acc, wrds_joined].join(&markers::ARG_SEP.to_string());
+          }
           Err(e) => return Err(e),
         }
         Ok(acc)
       })?
-			.split(markers::ARG_SEP)
-			.filter(|s| !s.is_empty())
-			.map(|s| s.to_string())
-			.collect();
+      .split(markers::ARG_SEP)
+      .filter(|s| !s.is_empty())
+      .map(|s| s.to_string())
+      .collect();
 
     Ok(Self::Arr(tokens))
   }
@@ -419,12 +408,13 @@ impl VarTab {
       .map(|hname| hname.to_string_lossy().to_string())
       .unwrap_or_default();
 
-		let mut data_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from(format!("{home}/.local/share")));
-		data_dir.push("shed");
-		let shed_docs = data_dir.join("doc");
-		let shed_db = data_dir.join("shed_hist.db");
+    let mut data_dir =
+      dirs::data_dir().unwrap_or_else(|| PathBuf::from(format!("{home}/.local/share")));
+    data_dir.push("shed");
+    let shed_docs = data_dir.join("doc");
+    let shed_db = data_dir.join("shed_hist.db");
 
-    let help_paths = format!("/usr/share/shed/doc:{}",shed_docs.display());
+    let help_paths = format!("/usr/share/shed/doc:{}", shed_docs.display());
 
     unsafe {
       env::set_var("IFS", " \t\n");
@@ -441,7 +431,7 @@ impl VarTab {
       env::set_var("HOME", home.clone());
       env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
       env::set_var("SHED_HIST", format!("{}/.shed_history", home));
-      env::set_var("SHED_HISTDB", format!("{}",shed_db.display()));
+      env::set_var("SHED_HISTDB", format!("{}", shed_db.display()));
       env::set_var("SHED_RC", format!("{}/.shedrc", home));
       env::set_var("SHED_HPATH", help_paths);
     }
@@ -561,9 +551,10 @@ impl VarTab {
     if let Some(var) = self.vars.get(var_name)
       && var.flags.contains(VarFlags::READONLY)
     {
-      return Err(ShErr::simple(
-        ShErrKind::ExecFail,
-        format!("cannot unset readonly variable '{}'", var_name),
+      return Err(sherr!(
+        ExecFail,
+        "cannot unset readonly variable '{}'",
+        var_name,
       ));
     }
     self.vars.remove(var_name);
@@ -582,16 +573,19 @@ impl VarTab {
               if items.len() >= n {
                 items.len() - n
               } else {
-                return Err(ShErr::simple(
-                  ShErrKind::ExecFail,
-                  format!("Index {} out of bounds for array '{}'", n, var_name),
+                return Err(sherr!(
+                  ExecFail,
+                  "Index {} out of bounds for array '{}'",
+                  n,
+                  var_name,
                 ));
               }
             }
             _ => {
-              return Err(ShErr::simple(
-                ShErrKind::ExecFail,
-                format!("Cannot index all elements of array '{}'", var_name),
+              return Err(sherr!(
+                ExecFail,
+                "Cannot index all elements of array '{}'",
+                var_name,
               ));
             }
           };
@@ -603,10 +597,7 @@ impl VarTab {
           return Ok(());
         }
         _ => {
-          return Err(ShErr::simple(
-            ShErrKind::ExecFail,
-            format!("Variable '{}' is not an array", var_name),
-          ));
+          return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name,));
         }
       }
     }
@@ -615,10 +606,7 @@ impl VarTab {
   pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if let Some(var) = self.vars.get_mut(var_name) {
       if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("Variable '{}' is readonly", var_name),
-        ));
+        return Err(sherr!(ExecFail, "Variable '{}' is readonly", var_name,));
       }
       var.kind = val;
       var.flags |= flags;

@@ -13,10 +13,7 @@ use crate::{
     keymap::{KeyMap, KeyMapFlags, KeyMapMatch},
     trap::TrapTarget,
   },
-  parse::{
-    ConjunctNode, NdRule, Node, ParsedSrc,
-    lex::Span,
-  },
+  parse::{ConjunctNode, NdRule, Node, ParsedSrc, lex::Span},
   readline::keys::KeyEvent,
 };
 

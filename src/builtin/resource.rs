@@ -8,9 +8,10 @@ use nix::{
   unistd::write,
 };
 
+use crate::sherr;
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens_strict},
-  libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
+  libsh::error::{ShResult, ShResultExt, next_color},
   parse::{NdRule, Node},
   procio::borrow_fd,
   state::{self},
@@ -62,49 +63,51 @@ fn get_ulimit_opts(opt: &[Opt]) -> ShResult<UlimitOpts> {
     match o {
       Opt::ShortWithArg('n', arg) => {
         opts.fds = Some(arg.parse().map_err(|_| {
-          ShErr::simple(
-            ShErrKind::ParseErr,
-            format!("invalid argument for -n: {}", arg.fg(next_color())),
+          sherr!(
+            ParseErr,
+            "invalid argument for -n: {}",
+            arg.fg(next_color()),
           )
         })?);
       }
       Opt::ShortWithArg('u', arg) => {
         opts.procs = Some(arg.parse().map_err(|_| {
-          ShErr::simple(
-            ShErrKind::ParseErr,
-            format!("invalid argument for -u: {}", arg.fg(next_color())),
+          sherr!(
+            ParseErr,
+            "invalid argument for -u: {}",
+            arg.fg(next_color()),
           )
         })?);
       }
       Opt::ShortWithArg('s', arg) => {
         opts.stack = Some(arg.parse().map_err(|_| {
-          ShErr::simple(
-            ShErrKind::ParseErr,
-            format!("invalid argument for -s: {}", arg.fg(next_color())),
+          sherr!(
+            ParseErr,
+            "invalid argument for -s: {}",
+            arg.fg(next_color()),
           )
         })?);
       }
       Opt::ShortWithArg('c', arg) => {
         opts.core = Some(arg.parse().map_err(|_| {
-          ShErr::simple(
-            ShErrKind::ParseErr,
-            format!("invalid argument for -c: {}", arg.fg(next_color())),
+          sherr!(
+            ParseErr,
+            "invalid argument for -c: {}",
+            arg.fg(next_color()),
           )
         })?);
       }
       Opt::ShortWithArg('v', arg) => {
         opts.vmem = Some(arg.parse().map_err(|_| {
-          ShErr::simple(
-            ShErrKind::ParseErr,
-            format!("invalid argument for -v: {}", arg.fg(next_color())),
+          sherr!(
+            ParseErr,
+            "invalid argument for -v: {}",
+            arg.fg(next_color()),
           )
         })?);
       }
       o => {
-        return Err(ShErr::simple(
-          ShErrKind::ParseErr,
-          format!("invalid option: {}", o.fg(next_color())),
-        ));
+        return Err(sherr!(ParseErr, "invalid option: {}", o.fg(next_color()),));
       }
     }
   }
@@ -128,81 +131,71 @@ pub fn ulimit(node: Node) -> ShResult<()> {
 
   if let Some(fds) = ulimit_opts.fds {
     let (_, hard) = getrlimit(Resource::RLIMIT_NOFILE).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to get file descriptor limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to get file descriptor limit: {}", e,
       )
     })?;
     setrlimit(Resource::RLIMIT_NOFILE, fds, hard).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to set file descriptor limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to set file descriptor limit: {}", e,
       )
     })?;
   }
   if let Some(procs) = ulimit_opts.procs {
     let (_, hard) = getrlimit(Resource::RLIMIT_NPROC).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to get process limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to get process limit: {}", e,
       )
     })?;
     setrlimit(Resource::RLIMIT_NPROC, procs, hard).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to set process limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to set process limit: {}", e,
       )
     })?;
   }
   if let Some(stack) = ulimit_opts.stack {
     let (_, hard) = getrlimit(Resource::RLIMIT_STACK).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to get stack size limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to get stack size limit: {}", e,
       )
     })?;
     setrlimit(Resource::RLIMIT_STACK, stack, hard).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to set stack size limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to set stack size limit: {}", e,
       )
     })?;
   }
   if let Some(core) = ulimit_opts.core {
     let (_, hard) = getrlimit(Resource::RLIMIT_CORE).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to get core dump size limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to get core dump size limit: {}", e,
       )
     })?;
     setrlimit(Resource::RLIMIT_CORE, core, hard).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to set core dump size limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to set core dump size limit: {}", e,
       )
     })?;
   }
   if let Some(vmem) = ulimit_opts.vmem {
     let (_, hard) = getrlimit(Resource::RLIMIT_AS).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to get virtual memory limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to get virtual memory limit: {}", e,
       )
     })?;
     setrlimit(Resource::RLIMIT_AS, vmem, hard).map_err(|e| {
-      ShErr::at(
-        ShErrKind::ExecFail,
-        span.clone(),
-        format!("failed to set virtual memory limit: {}", e),
+      sherr!(
+        ExecFail @ span.clone(),
+        "failed to set virtual memory limit: {}", e,
       )
     })?;
   }
@@ -236,27 +229,24 @@ pub fn umask_builtin(node: Node) -> ShResult<()> {
 
   if !argv.is_empty() {
     if argv.len() > 1 {
-      return Err(ShErr::at(
-        ShErrKind::ParseErr,
-        span.clone(),
-        format!("umask takes at most one argument, got {}", argv.len()),
+      return Err(sherr!(
+        ParseErr @ span.clone(),
+        "umask takes at most one argument, got {}", argv.len(),
       ));
     }
     let (ref raw, _) = argv[0];
     if raw.chars().any(|c| c.is_ascii_digit()) {
       let mode_raw = u32::from_str_radix(raw, 8).map_err(|_| {
-        ShErr::at(
-          ShErrKind::ParseErr,
-          span.clone(),
-          format!("invalid numeric umask: {}", raw.fg(next_color())),
+        sherr!(
+          ParseErr @ span.clone(),
+          "invalid numeric umask: {}", raw.fg(next_color()),
         )
       })?;
 
       let mode = Mode::from_bits(mode_raw).ok_or_else(|| {
-        ShErr::at(
-          ShErrKind::ParseErr,
-          span.clone(),
-          format!("invalid umask value: {}", raw.fg(next_color())),
+        sherr!(
+          ParseErr @ span.clone(),
+          "invalid umask value: {}", raw.fg(next_color()),
         )
       })?;
 
@@ -296,10 +286,9 @@ pub fn umask_builtin(node: Node) -> ShResult<()> {
                 old_bits = denied | (denied << 3) | (denied << 6);
               }
               _ => {
-                return Err(ShErr::at(
-                  ShErrKind::ParseErr,
-                  span.clone(),
-                  format!("invalid umask 'who' character: {}", ch.fg(next_color())),
+                return Err(sherr!(
+                  ParseErr @ span.clone(),
+                  "invalid umask 'who' character: {}", ch.fg(next_color()),
                 ));
               }
             }
@@ -334,10 +323,9 @@ pub fn umask_builtin(node: Node) -> ShResult<()> {
                 old_bits &= !(mask | (mask << 3) | (mask << 6));
               }
               _ => {
-                return Err(ShErr::at(
-                  ShErrKind::ParseErr,
-                  span.clone(),
-                  format!("invalid umask 'who' character: {}", ch.fg(next_color())),
+                return Err(sherr!(
+                  ParseErr @ span.clone(),
+                  "invalid umask 'who' character: {}", ch.fg(next_color()),
                 ));
               }
             }
@@ -371,10 +359,9 @@ pub fn umask_builtin(node: Node) -> ShResult<()> {
                 old_bits |= (new_bits | (new_bits << 3) | (new_bits << 6)) & 0o777;
               }
               _ => {
-                return Err(ShErr::at(
-                  ShErrKind::ParseErr,
-                  span.clone(),
-                  format!("invalid umask 'who' character: {}", ch.fg(next_color())),
+                return Err(sherr!(
+                  ParseErr @ span.clone(),
+                  "invalid umask 'who' character: {}", ch.fg(next_color()),
                 ));
               }
             }
@@ -382,10 +369,9 @@ pub fn umask_builtin(node: Node) -> ShResult<()> {
 
           umask(Mode::from_bits_truncate(old_bits));
         } else {
-          return Err(ShErr::at(
-            ShErrKind::ParseErr,
-            span.clone(),
-            format!("invalid symbolic umask part: {}", part.fg(next_color())),
+          return Err(sherr!(
+            ParseErr @ span.clone(),
+            "invalid symbolic umask part: {}", part.fg(next_color()),
           ));
         }
       }

@@ -1,10 +1,11 @@
 use crate::{
   expand::expand_prompt,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
+  libsh::error::{ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
   procio::borrow_fd,
+  sherr,
   state::{self, read_shopts},
 };
 
@@ -209,10 +210,7 @@ pub fn get_echo_flags(opts: Vec<Opt>) -> ShResult<EchoFlags> {
       Opt::Short('p') => flags |= EchoFlags::USE_PROMPT,
       Opt::Short('E') => flags |= EchoFlags::NO_ESCAPE,
       _ => {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("echo: Unexpected flag '{opt}'"),
-        ));
+        return Err(sherr!(ExecFail, "echo: Unexpected flag '{opt}'",));
       }
     }
   }

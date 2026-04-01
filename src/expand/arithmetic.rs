@@ -4,7 +4,8 @@ use ariadne::Fmt;
 
 use crate::expand::escape::unescape_math;
 use crate::expand::var::expand_raw;
-use crate::libsh::error::{ShErr, ShErrKind, ShResult, next_color};
+use crate::libsh::error::{ShErr, ShResult, next_color};
+use crate::sherr;
 use crate::state::read_vars;
 
 enum ArithTk {
@@ -114,21 +115,17 @@ impl ArithTk {
         }
         ArithTk::Var(var) => {
           let Some(val) = read_vars(|v| v.try_get_var(&var)) else {
-            return Err(ShErr::simple(
-              ShErrKind::NotFound,
-              format!(
-                "Undefined variable in arithmetic expression: '{}'",
-                var.fg(next_color())
-              ),
+            return Err(sherr!(
+              NotFound,
+              "Undefined variable in arithmetic expression: '{}'",
+              var.fg(next_color()),
             ));
           };
           let Ok(num) = val.parse::<f64>() else {
-            return Err(ShErr::simple(
-              ShErrKind::ParseErr,
-              format!(
-                "Variable '{}' does not contain a number",
-                var.fg(next_color())
-              ),
+            return Err(sherr!(
+              ParseErr,
+              "Variable '{}' does not contain a number",
+              var.fg(next_color()),
             ));
           };
 
@@ -150,14 +147,12 @@ impl ArithTk {
       match token {
         ArithTk::Num(n) => stack.push(n),
         ArithTk::Op(op) => {
-          let rhs = stack.pop().ok_or(ShErr::simple(
-            ShErrKind::ParseErr,
-            "Missing right-hand operand",
-          ))?;
-          let lhs = stack.pop().ok_or(ShErr::simple(
-            ShErrKind::ParseErr,
-            "Missing left-hand operand",
-          ))?;
+          let rhs = stack
+            .pop()
+            .ok_or(sherr!(ParseErr, "Missing right-hand operand",))?;
+          let lhs = stack
+            .pop()
+            .ok_or(sherr!(ParseErr, "Missing left-hand operand",))?;
           let result = match op {
             ArithOp::Add => lhs + rhs,
             ArithOp::Sub => lhs - rhs,
@@ -168,19 +163,13 @@ impl ArithTk {
           stack.push(result);
         }
         _ => {
-          return Err(ShErr::simple(
-            ShErrKind::ParseErr,
-            "Unexpected token during evaluation",
-          ));
+          return Err(sherr!(ParseErr, "Unexpected token during evaluation",));
         }
       }
     }
 
     if stack.len() != 1 {
-      return Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        "Invalid arithmetic expression",
-      ));
+      return Err(sherr!(ParseErr, "Invalid arithmetic expression",));
     }
 
     Ok(stack[0])
@@ -205,10 +194,7 @@ impl FromStr for ArithOp {
       '*' => Ok(Self::Mul),
       '/' => Ok(Self::Div),
       '%' => Ok(Self::Mod),
-      _ => Err(ShErr::simple(
-        ShErrKind::ParseErr,
-        "Invalid arithmetic operator",
-      )),
+      _ => Err(sherr!(ParseErr, "Invalid arithmetic operator",)),
     }
   }
 }

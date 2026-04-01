@@ -13,7 +13,7 @@ use crate::{
   },
   parse::{Redir, RedirType, get_redir_file, lex::TkFlags},
   prelude::*,
-  state,
+  sherr, state,
 };
 
 // Credit to fish-shell for many of the implementation ideas present in this
@@ -181,8 +181,7 @@ impl<R: Read> IoBuf<R> {
 
   /// Get current buffer contents as a string (if valid UTF-8)
   pub fn as_str(&self) -> ShResult<&str> {
-    std::str::from_utf8(&self.buf)
-      .map_err(|_| ShErr::simple(ShErrKind::InternalErr, "Invalid utf-8 in IoBuf"))
+    std::str::from_utf8(&self.buf).map_err(|_| sherr!(InternalErr, "Invalid utf-8 in IoBuf"))
   }
 }
 

@@ -5,7 +5,8 @@ use glob::Pattern;
 use crate::expand::escape::{strip_escape_markers, unescape_str};
 use crate::expand::util::glob_to_regex;
 use crate::expand::var::expand_raw;
-use crate::libsh::error::{ShErr, ShErrKind, ShResult};
+use crate::libsh::error::{ShErr, ShResult};
+use crate::sherr;
 use crate::state::{VarFlags, VarKind, read_vars, write_vars};
 
 #[derive(Debug)]
@@ -43,12 +44,7 @@ impl FromStr for ParamExp {
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     use ParamExp::*;
 
-    let parse_err = || {
-      Err(ShErr::simple(
-        ShErrKind::SyntaxErr,
-        "Invalid parameter expansion",
-      ))
-    };
+    let parse_err = || Err(sherr!(SyntaxErr, "Invalid parameter expansion",));
 
     if s == "^^" {
       return Ok(ToUpperAll);
@@ -247,7 +243,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           Some(val) => Ok(val),
           None => {
             let expanded = expand_raw(&mut err.chars().peekable())?;
-            Err(ShErr::simple(ShErrKind::ExecFail, expanded))
+            Err(sherr!(ExecFail, "{expanded}"))
           }
         }
       }
@@ -255,7 +251,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Some(val) => Ok(val),
         None => {
           let expanded = expand_raw(&mut err.chars().peekable())?;
-          Err(ShErr::simple(ShErrKind::ExecFail, expanded))
+          Err(sherr!(ExecFail, "{expanded}"))
         }
       },
       ParamExp::SliceOpen(pos) => {

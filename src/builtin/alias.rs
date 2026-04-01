@@ -1,10 +1,11 @@
 use ariadne::Fmt;
 
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult, next_color},
+  libsh::error::{ShResult, next_color},
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   procio::borrow_fd,
+  sherr,
   state::{self, read_logic, write_logic, write_meta},
 };
 
@@ -40,9 +41,8 @@ pub fn alias(node: Node) -> ShResult<()> {
     for (arg, span) in argv {
       let Some((name, body)) = arg.split_once('=') else {
         let Some(alias) = read_logic(|l| l.get_alias(&arg)) else {
-          return Err(ShErr::at(
-            ShErrKind::SyntaxErr,
-            span,
+          return Err(sherr!(
+            SyntaxErr @ span,
             "alias: Expected an assignment in alias args",
           ));
         };
@@ -55,13 +55,9 @@ pub fn alias(node: Node) -> ShResult<()> {
         return Ok(());
       };
       if name == "command" || name == "builtin" {
-        return Err(ShErr::at(
-          ShErrKind::ExecFail,
-          span,
-          format!(
-            "alias: Cannot assign alias to reserved name '{}'",
-            name.fg(next_color())
-          ),
+        return Err(sherr!(
+          ExecFail @ span,
+          "alias: Cannot assign alias to reserved name '{}'", name.fg(next_color())
         ));
       }
       write_logic(|l| l.insert_alias(name, body, span.clone()));
@@ -105,10 +101,9 @@ pub fn unalias(node: Node) -> ShResult<()> {
   } else {
     for (arg, span) in argv {
       if read_logic(|l| l.get_alias(&arg)).is_none() {
-        return Err(ShErr::at(
-          ShErrKind::SyntaxErr,
-          span,
-          format!("unalias: alias '{}' not found", arg.fg(next_color())),
+        return Err(sherr!(
+          SyntaxErr @ span,
+          "unalias: alias '{}' not found", arg.fg(next_color()),
         ));
       };
       write_logic(|l| l.remove_alias(&arg))

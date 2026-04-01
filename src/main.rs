@@ -22,7 +22,7 @@ mod tests;
 #[cfg(test)]
 pub mod testutil;
 
-use std::os::fd::{BorrowedFd};
+use std::os::fd::BorrowedFd;
 use std::process::ExitCode;
 use std::sync::atomic::Ordering;
 
@@ -32,7 +32,7 @@ use nix::unistd::read;
 
 use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
-use crate::libsh::error::{self, ShErr, ShErrKind, ShResult};
+use crate::libsh::error::{self, ShErrKind, ShResult};
 use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_input};
@@ -44,8 +44,8 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, read_logic, read_shopts, source_env, source_login, source_rc,
-  write_jobs, write_meta, write_shopts,
+  AutoCmdKind, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs,
+  write_meta, write_shopts,
 };
 use clap::Parser;
 use state::write_vars;
@@ -81,7 +81,7 @@ fn setup_panic_handler() {
       }
     });
 
-		let data_dir = dirs::data_dir().unwrap_or_else(|| {
+    let data_dir = dirs::data_dir().unwrap_or_else(|| {
       let home = env::var("HOME").unwrap();
       PathBuf::from(format!("{home}/.local/share"))
     });
@@ -181,10 +181,7 @@ fn read_commands(args: Vec<String>) -> ShResult<()> {
       Err(Errno::EINTR) => continue,
       Err(e) => {
         QUIT_CODE.store(1, Ordering::SeqCst);
-        return Err(ShErr::simple(
-          ShErrKind::CleanExit(1),
-          format!("error reading from stdin: {e}"),
-        ));
+        return Err(sherr!(CleanExit(1), "error reading from stdin: {e}",));
       }
     }
   }
@@ -203,18 +200,12 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
   if !path.is_file() {
     eprintln!("shed: Failed to open input file: {}", path.display());
     QUIT_CODE.store(1, Ordering::SeqCst);
-    return Err(ShErr::simple(
-      ShErrKind::CleanExit(1),
-      "input file not found",
-    ));
+    return Err(sherr!(CleanExit(1), "input file not found",));
   }
   let Ok(input) = fs::read_to_string(path) else {
     eprintln!("shed: Failed to read input file: {}", path.display());
     QUIT_CODE.store(1, Ordering::SeqCst);
-    return Err(ShErr::simple(
-      ShErrKind::CleanExit(1),
-      "failed to read input file",
-    ));
+    return Err(sherr!(CleanExit(1), "failed to read input file",));
   };
 
   write_vars(|v| {
@@ -249,10 +240,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     Err(e) => {
       eprintln!("Failed to initialize readline: {e}");
       QUIT_CODE.store(1, Ordering::SeqCst);
-      return Err(ShErr::simple(
-        ShErrKind::CleanExit(1),
-        "readline initialization failed",
-      ));
+      return Err(sherr!(CleanExit(1), "readline initialization failed",));
     }
   };
 
@@ -342,7 +330,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       Ok(0) => {
         // We timed out. Check if there's a screensaver command
         if let Some(cmd) = exec_if_timeout
-				&& readline.editor.is_empty() { // don't screensaver if we have a pending command
+          && readline.editor.is_empty()
+        {
+          // don't screensaver if we have a pending command
           let prepared = ReadlineEvent::Line(cmd.clone());
           let _guard = scopeguard::guard(read_shopts(|o| o.core.auto_hist), |opt| {
             // restores old auto_hist value
@@ -496,11 +486,12 @@ fn handle_readline_event(
       post_exec.exec_with(&input);
 
       if read_shopts(|s| s.core.auto_hist)
-			&& !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
-			&& !input.is_empty()
-			&& let Err(e) = readline.history.push(input.clone()) {
-				e.print_error();
-			}
+        && !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
+        && !input.is_empty()
+        && let Err(e) = readline.history.push(input.clone())
+      {
+        e.print_error();
+      }
 
       readline.fix_column()?;
       readline.writer.flush_write("\n\r")?;

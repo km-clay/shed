@@ -4,8 +4,9 @@ use ariadne::Fmt;
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec},
-  libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
+  libsh::error::{ShErr, ShResult, ShResultExt, next_color},
   parse::{NdRule, Node, execute::prepare_argv, lex::Span},
+  sherr,
   state::{self, VarFlags, VarKind, read_meta, read_vars, write_meta, write_vars},
 };
 
@@ -60,13 +61,18 @@ impl FromStr for GetOptsSpec {
           if has_arg {
             chars.next();
           }
-          let takes_arg = if has_arg { OptArg::Single } else { OptArg::None };
+          let takes_arg = if has_arg {
+            OptArg::Single
+          } else {
+            OptArg::None
+          };
           opt_specs.push(OptSpec { opt, takes_arg })
         }
         _ => {
-          return Err(ShErr::simple(
-            ShErrKind::ParseErr,
-            format!("unexpected character '{}'", ch.fg(next_color())),
+          return Err(sherr!(
+            ParseErr,
+            "unexpected character '{}'",
+            ch.fg(next_color()),
           ));
         }
       }
@@ -156,10 +162,9 @@ fn getopts_inner(
         write_vars(|v| v.set_var("OPTARG", VarKind::Str(ch.to_string()), VarFlags::NONE))?;
       } else {
         write_vars(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::NONE))?;
-        ShErr::at(
-          ShErrKind::ExecFail,
-          blame.clone(),
-          format!("illegal option '-{}'", ch.fg(next_color())),
+        sherr!(
+          ExecFail @ blame.clone(),
+          "illegal option '-{}'", ch.fg(next_color()),
         )
         .print_error();
       }
@@ -190,10 +195,9 @@ fn getopts_inner(
           write_vars(|v| v.set_var("OPTARG", VarKind::Str(ch.to_string()), VarFlags::NONE))?;
         } else {
           write_vars(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::NONE))?;
-          ShErr::at(
-            ShErrKind::ExecFail,
-            blame.clone(),
-            format!("option '-{}' requires an argument", ch.fg(next_color())),
+          sherr!(
+            ExecFail @ blame.clone(),
+            "option '-{}' requires an argument", ch.fg(next_color()),
           )
           .print_error();
         }
@@ -227,16 +231,14 @@ pub fn getopts(node: Node) -> ShResult<()> {
   let mut args = argv.into_iter();
 
   let Some(arg_string) = args.next() else {
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      span,
+    return Err(sherr!(
+      ExecFail @ span,
       "getopts: missing option spec",
     ));
   };
   let Some(opt_var) = args.next() else {
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      span,
+    return Err(sherr!(
+      ExecFail @ span,
       "getopts: missing variable name",
     ));
   };

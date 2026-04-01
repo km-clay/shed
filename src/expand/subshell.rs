@@ -115,7 +115,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
           state::set_status(code);
           Ok(io_buf.as_str()?.trim_end().to_string())
         }
-        _ => Err(ShErr::simple(ShErrKind::InternalErr, "Command sub failed")),
+        _ => Err(sherr!(InternalErr, "Command sub failed")),
       }
     }
   }

@@ -41,9 +41,9 @@ impl Tk {
     }
   }
 
-	pub fn get_first_word(&self) -> Option<String> {
-		self.get_words().into_iter().next()
-	}
+  pub fn get_first_word(&self) -> Option<String> {
+    self.get_words().into_iter().next()
+  }
 }
 
 pub struct Expander {

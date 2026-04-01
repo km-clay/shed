@@ -7,6 +7,7 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult, next_color},
   parse::lex::{Span, Tk},
   prelude::*,
+  sherr,
   shopt::xtrace_print,
 };
 
@@ -85,17 +86,11 @@ pub fn get_opts(words: Vec<String>) -> (Vec<String>, Vec<Opt>) {
 }
 
 type GetOptResult = ShResult<(Vec<(String, Span)>, Vec<Opt>)>;
-pub fn get_opts_from_tokens_strict(
-  tokens: Vec<Tk>,
-  opt_specs: &[OptSpec],
-) -> GetOptResult {
+pub fn get_opts_from_tokens_strict(tokens: Vec<Tk>, opt_specs: &[OptSpec]) -> GetOptResult {
   sort_tks(tokens, opt_specs, true)
 }
 
-pub fn get_opts_from_tokens(
-  tokens: Vec<Tk>,
-  opt_specs: &[OptSpec],
-) -> GetOptResult {
+pub fn get_opts_from_tokens(tokens: Vec<Tk>, opt_specs: &[OptSpec]) -> GetOptResult {
   sort_tks(tokens, opt_specs, false)
 }
 
@@ -108,11 +103,7 @@ pub fn get_opts_from_tokens_raw(
   sort_tks_raw(tokens, opt_specs, false)
 }
 
-pub fn sort_tks(
-  tokens: Vec<Tk>,
-  opt_specs: &[OptSpec],
-  strict: bool,
-) -> GetOptResult {
+pub fn sort_tks(tokens: Vec<Tk>, opt_specs: &[OptSpec], strict: bool) -> GetOptResult {
   // Expand tokens and flatten via get_words, preserving spans
   let mut words: Vec<(String, Span)> = vec![];
   for tk in tokens {
@@ -178,9 +169,10 @@ pub fn sort_tks(
         }
         if !pushed {
           if strict {
-            return Err(ShErr::simple(
-              ShErrKind::ParseErr,
-              format!("Unknown option: {}", opt.to_string().fg(next_color())),
+            return Err(sherr!(
+              ParseErr,
+              "Unknown option: {}",
+              opt.to_string().fg(next_color()),
             ));
           } else {
             non_opts.push((word.clone(), span.clone()));
@@ -258,9 +250,10 @@ fn sort_tks_raw(
         }
         if !pushed {
           if strict {
-            return Err(ShErr::simple(
-              ShErrKind::ParseErr,
-              format!("Unknown option: {}", opt.to_string().fg(next_color())),
+            return Err(sherr!(
+              ParseErr,
+              "Unknown option: {}",
+              opt.to_string().fg(next_color()),
             ));
           } else {
             non_opts.push(token.clone());

@@ -1,12 +1,12 @@
 use nix::{errno::Errno, unistd::execvpe};
 
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
   parse::{
     NdRule, Node,
     execute::{ExecArgs, prepare_argv},
   },
-  state,
+  sherr, state,
 };
 
 pub fn exec_builtin(node: Node) -> ShResult<()> {
@@ -38,11 +38,8 @@ pub fn exec_builtin(node: Node) -> ShResult<()> {
   // execvpe only returns on error
   let cmd_str = cmd.to_str().unwrap().to_string();
   match e {
-    Errno::ENOENT => Err(
-      ShErr::new(ShErrKind::NotFound, span.clone())
-        .labeled(span, format!("exec: command not found: {}", cmd_str)),
-    ),
-    _ => Err(ShErr::at(ShErrKind::Errno(e), span, format!("{e}"))),
+    Errno::ENOENT => Err(sherr!(NotFound @ span.clone(), "exec: command not found: {}", cmd_str)),
+    _ => Err(sherr!(Errno(e) @ span, "{e}")),
   }
 }
 

@@ -2,10 +2,11 @@ use std::collections::VecDeque;
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
+  libsh::error::{ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
   procio::borrow_fd,
+  sherr,
   state::{self, VarFlags, VarKind, write_vars},
 };
 
@@ -108,10 +109,9 @@ fn arr_push_inner(node: Node, end: End) -> ShResult<()> {
 
   let mut argv = argv.into_iter();
   let Some((name, _)) = argv.next() else {
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      blame,
-      "push: missing array name".to_string(),
+    return Err(sherr!(
+      ExecFail @ blame,
+      "push: missing array name",
     ));
   };
 
@@ -193,13 +193,10 @@ pub fn get_arr_op_opts(opts: Vec<Opt>) -> ShResult<ArrOpOpts> {
       Opt::ShortWithArg('c', count) => {
         arr_op_opts.count = count
           .parse::<usize>()
-          .map_err(|_| ShErr::simple(ShErrKind::ParseErr, format!("invalid count: {}", count)))?;
+          .map_err(|_| sherr!(ParseErr, "invalid count: {}", count))?;
       }
       Opt::Short('c') => {
-        return Err(ShErr::simple(
-          ShErrKind::ParseErr,
-          "missing count for -c".to_string(),
-        ));
+        return Err(sherr!(ParseErr, "missing count for -c",));
       }
       Opt::Short('r') => {
         arr_op_opts.reverse = true;
@@ -208,16 +205,10 @@ pub fn get_arr_op_opts(opts: Vec<Opt>) -> ShResult<ArrOpOpts> {
         arr_op_opts.var = Some(var);
       }
       Opt::Short('v') => {
-        return Err(ShErr::simple(
-          ShErrKind::ParseErr,
-          "missing variable name for -v".to_string(),
-        ));
+        return Err(sherr!(ParseErr, "missing variable name for -v",));
       }
       _ => {
-        return Err(ShErr::simple(
-          ShErrKind::ParseErr,
-          format!("invalid option: {}", opt),
-        ));
+        return Err(sherr!(ParseErr, "invalid option: '{opt}'"));
       }
     }
   }

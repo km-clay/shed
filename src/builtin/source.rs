@@ -1,7 +1,8 @@
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
+  sherr,
   state::{self, source_file},
 };
 
@@ -22,17 +23,15 @@ pub fn source(node: Node) -> ShResult<()> {
   for (arg, span) in argv {
     let path = PathBuf::from(arg);
     if !path.exists() {
-      return Err(ShErr::at(
-        ShErrKind::ExecFail,
-        span,
-        format!("source: File '{}' not found", path.display()),
+      return Err(sherr!(
+        ExecFail @ span,
+        "source: File '{}' not found", path.display(),
       ));
     }
     if !path.is_file() {
-      return Err(ShErr::at(
-        ShErrKind::ExecFail,
-        span,
-        format!("source: Given path '{}' is not a file", path.display()),
+      return Err(sherr!(
+        ExecFail @ span,
+        "source: Given path '{}' is not a file", path.display(),
       ));
     }
     source_file(path)?;

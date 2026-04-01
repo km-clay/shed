@@ -5,6 +5,7 @@ use nix::{
   unistd::{isatty, read, write},
 };
 
+use crate::sherr;
 use crate::{
   expand::expand_keymap,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
@@ -110,12 +111,8 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
         match read(STDIN_FILENO, &mut buf) {
           Ok(0) => {
             state::set_status(1);
-            let str_result = String::from_utf8(input.clone()).map_err(|e| {
-              ShErr::simple(
-                ShErrKind::ExecFail,
-                format!("read: Input was not valid UTF-8: {e}"),
-              )
-            })?;
+            let str_result = String::from_utf8(input.clone())
+              .map_err(|e| sherr!(ExecFail, "read: Input was not valid UTF-8: {e}"))?;
             return Ok(str_result); // EOF
           }
           Ok(_) => {
@@ -140,21 +137,14 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
             continue;
           }
           Err(e) => {
-            return Err(ShErr::simple(
-              ShErrKind::ExecFail,
-              format!("read: Failed to read from stdin: {e}"),
-            ));
+            return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}"));
           }
         }
       }
 
       state::set_status(0);
-      let str_result = String::from_utf8(input.clone()).map_err(|e| {
-        ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("read: Input was not valid UTF-8: {e}"),
-        )
-      })?;
+      let str_result = String::from_utf8(input.clone())
+        .map_err(|e| sherr!(ExecFail, "read: Input was not valid UTF-8: {e}"))?;
       Ok(str_result)
     })
     .blame(blame)?
@@ -183,19 +173,12 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
           continue;
         }
         Err(e) => {
-          return Err(ShErr::simple(
-            ShErrKind::ExecFail,
-            format!("read: Failed to read from stdin: {e}"),
-          ));
+          return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}"));
         }
       }
     }
-    String::from_utf8(input).map_err(|e| {
-      ShErr::simple(
-        ShErrKind::ExecFail,
-        format!("read: Input was not valid UTF-8: {e}"),
-      )
-    })?
+    String::from_utf8(input)
+      .map_err(|e| sherr!(ExecFail, "read: Input was not valid UTF-8: {e}"))?
   };
 
   if argv.is_empty() {
@@ -256,10 +239,7 @@ pub fn get_read_flags(opts: Vec<Opt>) -> ShResult<ReadOpts> {
         read_opts.delim = delim.chars().map(|c| c as u8).next().unwrap_or(b'\n')
       }
       _ => {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("read: Unexpected flag '{opt}'"),
-        ));
+        return Err(sherr!(ExecFail, "read: Unexpected flag '{opt}'"));
       }
     }
   }
@@ -308,7 +288,7 @@ pub fn read_key(node: Node) -> ShResult<()> {
         state::set_status(130);
         return Ok(());
       }
-      Err(e) => return Err(ShErr::simple(ShErrKind::ExecFail, format!("read_key: {e}"))),
+      Err(e) => return Err(sherr!(ExecFail, "read_key: {e}")),
     }
   };
 
@@ -353,10 +333,7 @@ pub fn get_read_key_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
       Opt::ShortWithArg('w', char_whitelist) => read_key_opts.char_whitelist = Some(char_whitelist),
       Opt::ShortWithArg('b', char_blacklist) => read_key_opts.char_blacklist = Some(char_blacklist),
       _ => {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("read_key: Unexpected flag '{opt}'"),
-        ));
+        return Err(sherr!(ExecFail, "read_key: Unexpected flag '{opt}'"));
       }
     }
   }

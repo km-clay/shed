@@ -9,6 +9,7 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::lex::{LexFlags, LexStream},
   prelude::*,
+  sherr,
   shopt::ShOpts,
 };
 
@@ -87,14 +88,11 @@ pub fn expand_arr_index(idx_raw: &str) -> ShResult<ArrIndex> {
     })?
     .into_iter()
     .next()
-    .ok_or_else(|| ShErr::simple(ShErrKind::ParseErr, "Empty array index"))?;
+    .ok_or_else(|| sherr!(ParseErr, "Empty array index"))?;
 
-  expanded.parse::<ArrIndex>().map_err(|_| {
-    ShErr::simple(
-      ShErrKind::ParseErr,
-      format!("Invalid array index: {}", expanded),
-    )
-  })
+  expanded
+    .parse::<ArrIndex>()
+    .map_err(|_| sherr!(ParseErr, "Invalid array index: {}", expanded,))
 }
 
 pub fn read_meta<T, F: FnOnce(&MetaTab) -> T>(f: F) -> T {
@@ -261,12 +259,9 @@ pub fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<(
   {
     PathBuf::from(&path)
   } else if let Some(home) = get_home() {
-    home.join(format!(".{name}"))
+    home.join(".{name}")
   } else {
-    return Err(ShErr::simple(
-      ShErrKind::InternalErr,
-      "could not determine home path",
-    ));
+    return Err(sherr!(InternalErr, "could not determine home path",));
   };
   if !path.is_file() {
     return Ok(());

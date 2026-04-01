@@ -14,6 +14,7 @@ use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::execute::exec_input,
   prelude::*,
+  sherr,
   state::{
     AutoCmd, AutoCmdKind, VarFlags, VarKind, read_jobs, read_logic, write_jobs, write_meta,
     write_vars,
@@ -79,7 +80,7 @@ pub fn check_signals() -> ShResult<()> {
   if got_signal(Signal::SIGINT) {
     interrupt()?;
     run_trap(Signal::SIGINT)?;
-    return Err(ShErr::simple(ShErrKind::Interrupt, ""));
+    return Err(sherr!(Interrupt, "foo {}", 5));
   }
   if got_signal(Signal::SIGHUP) {
     run_trap(Signal::SIGHUP)?;
@@ -114,7 +115,7 @@ pub fn check_signals() -> ShResult<()> {
 
   if SHOULD_QUIT.load(Ordering::SeqCst) {
     let code = QUIT_CODE.load(Ordering::SeqCst);
-    return Err(ShErr::simple(ShErrKind::CleanExit(code), "exit"));
+    return Err(sherr!(CleanExit(code), "exit"));
   }
   Ok(())
 }

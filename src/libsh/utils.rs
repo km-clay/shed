@@ -37,13 +37,30 @@ macro_rules! match_loop {
 /// sherr!(SyntaxErr, span, "Expected ';' but found '{}'", found);
 /// ```
 macro_rules! sherr {
-    ($kind:ident, $span:expr, $($arg:tt)*) => {
-			$crate::libsh::error::ShErr::at($crate::libsh::error::ShErrKind::$kind, $span, format!($($arg)*))
-    };
-
-    ($kind:ident, $($arg:tt)*) => {
-			$crate::libsh::error::ShErr::simple($crate::libsh::error::ShErrKind::$kind, format!($($arg)*))
-    };
+	($kind:ident($($inner:tt)*)@$span:expr, $($arg:tt)*) => {
+		$crate::libsh::error::ShErr::at(
+			$crate::libsh::error::ShErrKind::$kind($($inner)*),
+			$span, format!($($arg)*)
+		)
+	};
+	($kind:ident($($inner:tt)*), $($arg:tt)*) => {
+		$crate::libsh::error::ShErr::simple(
+			$crate::libsh::error::ShErrKind::$kind($($inner)*),
+			format!($($arg)*)
+		)
+	};
+	($kind:ident@$span:expr, $($arg:tt)*) => {
+		$crate::libsh::error::ShErr::at(
+			$crate::libsh::error::ShErrKind::$kind,
+			$span, format!($($arg)*)
+		)
+	};
+	($kind:ident, $($arg:tt)*) => {
+		$crate::libsh::error::ShErr::simple(
+			$crate::libsh::error::ShErrKind::$kind,
+			format!($($arg)*)
+		)
+	};
 }
 
 #[macro_export]
@@ -63,9 +80,9 @@ macro_rules! two_way_display {
 			fn from_str(s: &str) -> Result<Self, Self::Err> {
 				match s {
 					$($val => Ok(Self::$member),)*
-						_ => Err(ShErr::simple(
-								ShErrKind::ParseErr,
-								format!("Invalid {} kind: {}",stringify!($name),s),
+						_ => Err($crate::sherr!(
+								ParseErr,
+								"Invalid {} kind: {}",stringify!($name),s,
 						)),
 				}
 			}

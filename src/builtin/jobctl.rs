@@ -2,10 +2,11 @@ use ariadne::Fmt;
 
 use crate::{
   jobs::{JobCmdFlags, JobID, wait_bg},
-  libsh::error::{ShErr, ShErrKind, ShResult, next_color},
+  libsh::error::{ShResult, next_color},
   parse::{NdRule, Node, execute::prepare_argv, lex::Span},
   prelude::*,
   procio::borrow_fd,
+  sherr,
   state::{self, read_jobs, write_jobs},
 };
 
@@ -37,17 +38,16 @@ pub fn continue_job(node: Node, behavior: JobBehavior) -> ShResult<()> {
   let mut argv = argv.into_iter();
 
   if read_jobs(|j| j.get_fg().is_some()) {
-    return Err(ShErr::at(
-      ShErrKind::InternalErr,
-      cmd_span,
-      format!("Somehow called '{}' with an existing foreground job", cmd),
+    return Err(sherr!(
+      InternalErr @ cmd_span,
+      "Somehow called '{cmd}' with an existing foreground job"
     ));
   }
 
   let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {
     id
   } else {
-    return Err(ShErr::at(ShErrKind::ExecFail, cmd_span, "No jobs found"));
+    return Err(sherr!(ExecFail @ cmd_span, "No jobs found"));
   };
 
   let tabid = match argv.next() {
@@ -61,10 +61,9 @@ pub fn continue_job(node: Node, behavior: JobBehavior) -> ShResult<()> {
     if query_result.is_some() {
       Ok(j.remove_job(id.clone()).unwrap())
     } else {
-      Err(ShErr::at(
-        ShErrKind::ExecFail,
-        blame.clone(),
-        format!("Job id `{}' not found", tabid),
+      Err(sherr!(
+        ExecFail @ blame.clone(),
+        "Job id `{tabid}' not found"
       ))
     }
   })?;
@@ -94,10 +93,9 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
     if arg.chars().all(|ch| ch.is_ascii_digit()) {
       let num = arg.parse::<usize>().unwrap_or_default();
       if num == 0 {
-        Err(ShErr::at(
-          ShErrKind::SyntaxErr,
-          blame,
-          format!("Invalid job id: {}", arg.fg(next_color())),
+        Err(sherr!(
+          SyntaxErr @ blame,
+          "Invalid job id: {}", arg.fg(next_color()),
         ))
       } else {
         Ok(num.saturating_sub(1))
@@ -109,9 +107,8 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
       });
       match result {
         Some(id) => Ok(id),
-        None => Err(ShErr::at(
-          ShErrKind::InternalErr,
-          blame,
+        None => Err(sherr!(
+          InternalErr @ blame,
           "Found a job but no table id in parse_job_id()",
         )),
       }
@@ -133,17 +130,15 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
 
     match result {
       Some(id) => Ok(id),
-      None => Err(ShErr::at(
-        ShErrKind::InternalErr,
-        blame,
+      None => Err(sherr!(
+        InternalErr @ blame,
         "Found a job but no table id in parse_job_id()",
       )),
     }
   } else {
-    Err(ShErr::at(
-      ShErrKind::SyntaxErr,
-      blame,
-      format!("Invalid arg: {}", arg.fg(next_color())),
+    Err(sherr!(
+      SyntaxErr @ blame,
+      "Invalid arg: {}", arg.fg(next_color()),
     ))
   }
 }
@@ -166,9 +161,8 @@ pub fn jobs(node: Node) -> ShResult<()> {
   for (arg, span) in argv {
     let mut chars = arg.chars().peekable();
     if chars.peek().is_none_or(|ch| *ch != '-') {
-      return Err(ShErr::at(
-        ShErrKind::SyntaxErr,
-        span,
+      return Err(sherr!(
+        SyntaxErr @ span,
         "Invalid flag in jobs call",
       ));
     }
@@ -181,9 +175,8 @@ pub fn jobs(node: Node) -> ShResult<()> {
         'r' => JobCmdFlags::RUNNING,
         's' => JobCmdFlags::STOPPED,
         _ => {
-          return Err(ShErr::at(
-            ShErrKind::SyntaxErr,
-            span,
+          return Err(sherr!(
+            SyntaxErr @ span,
             "Invalid flag in jobs call",
           ));
         }
@@ -213,7 +206,7 @@ pub fn wait(node: Node) -> ShResult<()> {
   }
   if read_jobs(|j| j.curr_job().is_none()) {
     state::set_status(0);
-    return Err(ShErr::at(ShErrKind::ExecFail, blame, "wait: No jobs found"));
+    return Err(sherr!(ExecFail @ blame, "wait: No jobs found"));
   }
   let argv = argv
     .into_iter()
@@ -257,9 +250,8 @@ pub fn disown(node: Node) -> ShResult<()> {
   let curr_job_id = if let Some(id) = read_jobs(|j| j.curr_job()) {
     id
   } else {
-    return Err(ShErr::at(
-      ShErrKind::ExecFail,
-      blame,
+    return Err(sherr!(
+      ExecFail @ blame,
       "disown: No jobs to disown",
     ));
   };

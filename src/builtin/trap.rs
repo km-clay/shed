@@ -7,9 +7,10 @@ use nix::{
 };
 
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::{ShErr, ShResult},
   parse::{NdRule, Node, execute::prepare_argv},
   procio::borrow_fd,
+  sherr,
   state::{self, read_logic, write_logic},
 };
 
@@ -57,10 +58,7 @@ impl FromStr for TrapTarget {
       "IO" => Ok(TrapTarget::Signal(Signal::SIGIO)),
       "PWR" => Ok(TrapTarget::Signal(Signal::SIGPWR)),
       "SYS" => Ok(TrapTarget::Signal(Signal::SIGSYS)),
-      _ => Err(ShErr::simple(
-        ShErrKind::ExecFail,
-        format!("invalid trap target '{}'", s),
-      )),
+      _ => Err(sherr!(ExecFail, "invalid trap target '{s}'")),
     }
   }
 }

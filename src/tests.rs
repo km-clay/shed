@@ -191,7 +191,10 @@ fn dollar_dollar_expands_to_pid() {
   test_input("echo $$").unwrap();
   let out = guard.read_output();
   // Should be a numeric PID
-  assert!(out.trim().parse::<u32>().is_ok(), "expected numeric PID, got: {out}");
+  assert!(
+    out.trim().parse::<u32>().is_ok(),
+    "expected numeric PID, got: {out}"
+  );
 }
 
 #[test]

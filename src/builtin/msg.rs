@@ -1,9 +1,10 @@
 use crate::{
   builtin::join_raw_args,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  libsh::error::ShResult,
   parse::{NdRule, Node},
   prelude::*,
+  sherr,
   state::{self, write_meta},
 };
 
@@ -78,10 +79,7 @@ pub fn get_msg_flags(opts: Vec<Opt>) -> ShResult<MsgFlags> {
       Opt::Long(o) if o.as_str() == "system" => flags |= MsgFlags::SYSTEM,
       Opt::Long(o) if o.as_str() == "status" => flags |= MsgFlags::STATUS,
       _ => {
-        return Err(ShErr::simple(
-          ShErrKind::ExecFail,
-          format!("msg: Unexpected flag '{opt}'"),
-        ));
+        return Err(sherr!(ExecFail, "msg: Unexpected flag '{opt}'",));
       }
     }
   }

@@ -948,10 +948,10 @@ impl ShedLine {
         *v = Verb::Delete;
       }
     } else if let Some(VerbCmd(_, Verb::ClearScreen)) = cmd.verb() {
-			self.writer.clear_screen()?;
-			self.needs_redraw = true;
-			return Ok(None);
-		}
+      self.writer.clear_screen()?;
+      self.needs_redraw = true;
+      return Ok(None);
+    }
 
     if (cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile)
       && self.focused_editor().joined().is_empty())
@@ -1108,33 +1108,33 @@ impl ShedLine {
   }
   pub fn scroll_history(&mut self, cmd: EditCmd) {
     let count = if cmd.motion().is_some() {
-			&cmd.motion().unwrap().0
-		} else {
-			match cmd.verb() {
-				Some(VerbCmd(c, _)) => c,
-				_ => unreachable!()
-			}
-		};
+      &cmd.motion().unwrap().0
+    } else {
+      match cmd.verb() {
+        Some(VerbCmd(c, _)) => c,
+        _ => unreachable!(),
+      }
+    };
     let motion = if cmd.motion().is_some() {
-			cmd.motion().unwrap().1.clone()
-		} else {
-			match cmd.verb() {
-				Some(VerbCmd(_, Verb::HistoryUp)) => Motion::LineUp,
-				Some(VerbCmd(_, Verb::HistoryDown)) => Motion::LineDown,
-				_ => unreachable!(),
-			}
-		};
+      cmd.motion().unwrap().1.clone()
+    } else {
+      match cmd.verb() {
+        Some(VerbCmd(_, Verb::HistoryUp)) => Motion::LineUp,
+        Some(VerbCmd(_, Verb::HistoryDown)) => Motion::LineDown,
+        _ => unreachable!(),
+      }
+    };
     let count = match motion {
       Motion::LineUp => -(*count as isize),
       Motion::LineDown => *count as isize,
       _ => unreachable!(),
     };
-		if self.history.pending.is_none() {
-			// We are scrolling up from a pending command
-			// Let's refresh the search mask to make sure
-			// our history is up to date
-			self.history.update_search_mask(Some(&self.editor.joined()));
-		}
+    if self.history.pending.is_none() {
+      // We are scrolling up from a pending command
+      // Let's refresh the search mask to make sure
+      // our history is up to date
+      self.history.update_search_mask(Some(&self.editor.joined()));
+    }
     let entry = self.history.scroll(count).cloned();
     self.swap_history_editor(entry);
   }
@@ -1841,7 +1841,6 @@ pub fn marker_for(class: &TkRule) -> Option<Marker> {
 }
 
 pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
-
   // Sort by position descending, with priority ordering at same position:
   // - RESET first (inserted first, ends up rightmost)
   // - Regular markers middle
@@ -1946,7 +1945,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   let span_start = token.span.range().start;
 
   let mut qt_state = QuoteState::default();
-	let mut in_backtick = false;
+  let mut in_backtick = false;
   let mut cmd_sub_depth = 0;
   let mut proc_sub_depth = 0;
 
@@ -1971,16 +1970,16 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   while let Some((i, ch)) = token_chars.peek() {
     let index = *i; // we have to dereference this here because rustc is a very pedantic program
     match ch {
-			'`' if cmd_sub_depth == 0 => {
-				in_backtick = !in_backtick;
-				token_chars.next(); // consume the backtick
-				if !in_backtick {
-					insertions.push((span_start + index + 1, markers::BACKTICK_SUB_END));
-				} else {
-					insertions.push((span_start + index, markers::BACKTICK_SUB));
-				}
-				log::debug!("Backtick at index {index}, in_backtick: {in_backtick}");
-			}
+      '`' if cmd_sub_depth == 0 => {
+        in_backtick = !in_backtick;
+        token_chars.next(); // consume the backtick
+        if !in_backtick {
+          insertions.push((span_start + index + 1, markers::BACKTICK_SUB_END));
+        } else {
+          insertions.push((span_start + index, markers::BACKTICK_SUB));
+        }
+        log::debug!("Backtick at index {index}, in_backtick: {in_backtick}");
+      }
       ')' if cmd_sub_depth > 0 || proc_sub_depth > 0 => {
         token_chars.next(); // consume the paren
         if cmd_sub_depth > 0 {
@@ -2082,10 +2081,9 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
           token_chars.next(); // consume the escaped single quote
         }
       }
-			'`' if !qt_state.in_single() => {
-				token_chars.next();
-
-			}
+      '`' if !qt_state.in_single() => {
+        token_chars.next();
+      }
       '<' | '>' if !qt_state.in_quote() && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
         token_chars.next();
         if let Some((_, proc_sub_ch)) = token_chars.peek()
