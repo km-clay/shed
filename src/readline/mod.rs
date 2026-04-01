@@ -86,6 +86,8 @@ pub mod markers {
   pub const GLOB: Marker = '\u{e117}';
   pub const HIST_EXP: Marker = '\u{e11c}';
   pub const HIST_EXP_END: Marker = '\u{e11d}';
+  pub const BACKTICK_SUB: Marker = '\u{e11e}';
+  pub const BACKTICK_SUB_END: Marker = '\u{e11f}';
 
   // other
   pub const VISUAL_MODE_START: Marker = '\u{e118}';
@@ -1839,6 +1841,7 @@ pub fn marker_for(class: &TkRule) -> Option<Marker> {
 }
 
 pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
+
   // Sort by position descending, with priority ordering at same position:
   // - RESET first (inserted first, ends up rightmost)
   // - Regular markers middle
@@ -1943,6 +1946,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   let span_start = token.span.range().start;
 
   let mut qt_state = QuoteState::default();
+	let mut in_backtick = false;
   let mut cmd_sub_depth = 0;
   let mut proc_sub_depth = 0;
 
@@ -1967,6 +1971,16 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   while let Some((i, ch)) = token_chars.peek() {
     let index = *i; // we have to dereference this here because rustc is a very pedantic program
     match ch {
+			'`' if cmd_sub_depth == 0 => {
+				in_backtick = !in_backtick;
+				token_chars.next(); // consume the backtick
+				if !in_backtick {
+					insertions.push((span_start + index + 1, markers::BACKTICK_SUB_END));
+				} else {
+					insertions.push((span_start + index, markers::BACKTICK_SUB));
+				}
+				log::debug!("Backtick at index {index}, in_backtick: {in_backtick}");
+			}
       ')' if cmd_sub_depth > 0 || proc_sub_depth > 0 => {
         token_chars.next(); // consume the paren
         if cmd_sub_depth > 0 {
@@ -2049,7 +2063,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
           }
         }
       }
-      ch if cmd_sub_depth > 0 || proc_sub_depth > 0 => {
+      ch if cmd_sub_depth > 0 || proc_sub_depth > 0 || in_backtick => {
         // We are inside of a command sub or process sub right now
         // We don't mark any of this text. It will later be recursively annotated
         // by the syntax highlighter
@@ -2068,6 +2082,10 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
           token_chars.next(); // consume the escaped single quote
         }
       }
+			'`' if !qt_state.in_single() => {
+				token_chars.next();
+
+			}
       '<' | '>' if !qt_state.in_quote() && cmd_sub_depth == 0 && proc_sub_depth == 0 => {
         token_chars.next();
         if let Some((_, proc_sub_ch)) = token_chars.peek()

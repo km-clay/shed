@@ -22,8 +22,7 @@ use crate::{
   shopt::xtrace_print,
   signal::{check_signals, signals_pending},
   state::{
-    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, write_jobs, write_logic, write_meta,
-    write_vars,
+    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_jobs, write_logic, write_meta, write_vars
   },
 };
 
@@ -1272,7 +1271,9 @@ impl Dispatcher {
             return Err(e);
           }
         }
-        AssignKind::PlusEq => todo!(),
+        AssignKind::PlusEq => {
+					let _var = read_vars(|v| v.get_var(var));
+				}
         AssignKind::MinusEq => todo!(),
         AssignKind::MultEq => todo!(),
         AssignKind::DivEq => todo!(),

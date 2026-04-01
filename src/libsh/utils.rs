@@ -9,6 +9,44 @@ use crate::prelude::*;
 use crate::state::AutoCmd;
 
 #[macro_export]
+/// A macro that abbreviates a loop that looks like this:
+/// ```
+/// while let Some(binding) = iter.next() {
+///  	 match binding {
+///  	   // arms...
+///  	 }
+///  }
+///  ```
+///
+///  This pattern is used extensively for parsing strings char by char.
+macro_rules! match_loop {
+    ($iter:expr, $binding:ident, { $($arms:tt)* }) => {
+			while let Some($binding) = $iter.next() {
+				match $binding {
+					$($arms)*
+				}
+			}
+    };
+}
+
+#[macro_export]
+/// A macro that abbreviates the creation of a ShErr, allowing you to specify the kind and a format string with arguments, and optionally a span for error location.
+/// Examples:
+/// ```
+/// sherr!(ParseErr, "Unexpected token: {}", token);
+/// sherr!(SyntaxErr, span, "Expected ';' but found '{}'", found);
+/// ```
+macro_rules! sherr {
+    ($kind:ident, $span:expr, $($arg:tt)*) => {
+			$crate::libsh::error::ShErr::at($crate::libsh::error::ShErrKind::$kind, $span, format!($($arg)*))
+    };
+
+    ($kind:ident, $($arg:tt)*) => {
+			$crate::libsh::error::ShErr::simple($crate::libsh::error::ShErrKind::$kind, format!($($arg)*))
+    };
+}
+
+#[macro_export]
 /// Defines a two-way mapping between an enum and its string representation, implementing both Display and FromStr.
 macro_rules! two_way_display {
 	($name:ident, $($member:ident <=> $val:expr;)*) => {

@@ -285,13 +285,14 @@ impl Highlighter {
           self.push_style(style);
           self.last_was_reset = false;
         }
-        markers::CMD_SUB | markers::SUBSH | markers::PROC_SUB => {
+        markers::CMD_SUB | markers::SUBSH | markers::PROC_SUB | markers::BACKTICK_SUB => {
           let mut inner = String::new();
           let mut incomplete = true;
           let end_marker = match ch {
             markers::CMD_SUB => markers::CMD_SUB_END,
             markers::SUBSH => markers::SUBSH_END,
             markers::PROC_SUB => markers::PROC_SUB_END,
+						markers::BACKTICK_SUB => markers::BACKTICK_SUB_END,
             _ => unreachable!(),
           };
           // Save selection state at entry — the collection loop will update
@@ -319,6 +320,7 @@ impl Highlighter {
           let inner_plain = Self::strip_markers(&inner);
 
           let prefix = match ch {
+						markers::BACKTICK_SUB => "`",
             markers::CMD_SUB => "$(",
             markers::SUBSH => "(",
             markers::PROC_SUB => {
@@ -364,7 +366,9 @@ impl Highlighter {
           self.output.push_str(&recursive_highlighter.take());
           if !incomplete {
             self.push_style(Style::Blue);
-            self.output.push(')');
+						if ch != markers::BACKTICK_SUB {
+							self.output.push(')');
+						}
             self.pop_style();
           }
           self.last_was_reset = false;

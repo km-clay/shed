@@ -291,11 +291,38 @@ fn read_backtick(chars: &mut Peekable<Chars>, result: &mut String) {
           result.push(next_ch);
         }
       }
-      '$' if chars.peek() == Some(&'\'') => {
-        result.push(bt_ch);
-      }
+			// fun fact: this one match arm allows us to parse backtick statements nested in regular command subs inside of other backtick statements.
+			// Not even zsh's parser handles this case
+			'$' if chars.peek() == Some(&'(') => {
+				chars.next();
+				result.push_str("$(");
+				let mut paren_count = 1;
+				while let Some(subsh_ch) = chars.next() {
+					match subsh_ch {
+						'\\' => {
+							result.push(subsh_ch);
+							if let Some(next_ch) = chars.next() {
+								result.push(next_ch)
+							}
+						}
+						'(' => {
+							paren_count += 1;
+							result.push(subsh_ch);
+						}
+						')' => {
+							paren_count -= 1;
+							result.push(subsh_ch);
+							if paren_count == 0 {
+								break;
+							}
+						}
+						_ => result.push(subsh_ch),
+					}
+				}
+			}
       '`' => {
         result.push(markers::SUBSH);
+				log::debug!("Finished reading backtick: {result}");
         break;
       }
       _ => result.push(bt_ch),

@@ -253,6 +253,7 @@ fn sort_tks_raw(
                 opts.push(opt.clone());
               }
             }
+            pushed = true;
           }
         }
         if !pushed {

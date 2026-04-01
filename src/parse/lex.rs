@@ -55,7 +55,7 @@ impl QuoteState {
   pub fn in_quote(&self) -> bool {
     !self.outside()
   }
-  /// Toggles whether we are in a double quote. If self = QuoteState::Single, this does nothing, since double quotes inside single quotes are just literal characters
+  /// Toggles whether we are in a double quote. If self = QuoteState::Single or QuoteState::Backtick, this does nothing, since double quotes inside those quotes are just literal characters
   pub fn toggle_double(&mut self) {
     match self {
       QuoteState::Outside => *self = QuoteState::Double,
@@ -63,7 +63,7 @@ impl QuoteState {
       _ => {}
     }
   }
-  /// Toggles whether we are in a single quote. If self == QuoteState::Double, this does nothing, since single quotes are not interpreted inside double quotes
+  /// Toggles whether we are in a single quote. If self == QuoteState::Double or QuoteState::Backtick, this does nothing, since single quotes inside those quotes are just literal characters
   pub fn toggle_single(&mut self) {
     match self {
       QuoteState::Outside => *self = QuoteState::Single,
@@ -748,6 +748,60 @@ impl LexStream {
           pos += 1;
           self.quote_state.toggle_single();
         }
+				'`' if !self.quote_state.in_single() => {
+					pos += 1;
+					while let Some(ch) = chars.next() {
+						match ch {
+							'\\' => {
+								pos += 1;
+								if let Some(next_ch) = chars.next() {
+									pos += next_ch.len_utf8();
+								}
+							}
+							'$' if chars.peek() == Some(&'(') => {
+								pos += 2;
+								chars.next();
+								let mut paren_count = 1;
+								let paren_pos = pos;
+								while let Some(ch) = chars.next() {
+									match ch {
+										'\\' => {
+											pos += 1;
+											if let Some(next_ch) = chars.next() {
+												pos += next_ch.len_utf8();
+											}
+										}
+										'(' => {
+											pos += 1;
+											paren_count += 1;
+										}
+										')' => {
+											pos += 1;
+											paren_count -= 1;
+											if paren_count <= 0 {
+												break;
+											}
+										}
+										_ => pos += ch.len_utf8(),
+									}
+								}
+								if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+									self.cursor = pos;
+									return Err(ShErr::at(
+											ShErrKind::ParseErr,
+											Span::new(paren_pos..paren_pos + 1, self.source.clone()),
+											"Unclosed subshell",
+									));
+								}
+							}
+							'`' => {
+								pos += 1;
+								break;
+							}
+							_ => pos += ch.len_utf8(),
+						}
+					}
+				}
         _ if self.quote_state.in_single() => pos += ch.len_utf8(),
         '$' if chars.peek() == Some(&'(') => {
           pos += 2;

@@ -1,9 +1,9 @@
-use std::{cmp::Ordering, fmt::Write, io::Write as IoWrite, sync::atomic::AtomicBool};
+use std::{fmt::Write, io::Write as IoWrite, sync::atomic::AtomicBool};
 
 use tempfile::NamedTempFile;
 
 use crate::{
-  expand::expand_keymap, getopt::{Opt, OptSpec, get_opts_from_tokens}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node, execute::exec_input, lex::{Span, Tk}}, prelude::*, procio::borrow_fd, readline::{history::{HistEntry, History}, keys::KeyEvent}, shopt::xtrace_print, state::{self, write_logic}
+  libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node, execute::exec_input, lex::{Span, Tk}}, prelude::*, procio::borrow_fd, readline::history::{HistEntry, History}, shopt::xtrace_print, state::{self}
 };
 
 /// POSIX specifies that an invocation of `fc` that edits and re-executes a command shall not itself be committed to command history
@@ -224,7 +224,7 @@ fn fc_reexec(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()>
 
 		exec_input(command.clone(), None, interactive, Some("fc re-exec".into()))?;
 		if should_push {
-			hist.push(command);
+			hist.push(command)?;
 		}
 	}
 
