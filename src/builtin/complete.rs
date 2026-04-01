@@ -2,7 +2,7 @@ use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens, get_opts_from_tokens_raw},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens, get_opts_from_tokens_raw},
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{NdRule, Node},
   procio::borrow_fd,
@@ -13,106 +13,106 @@ use crate::{
 pub const COMPGEN_OPTS: [OptSpec; 11] = [
   OptSpec {
     opt: Opt::Short('F'),
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
   OptSpec {
     opt: Opt::Short('W'),
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
   OptSpec {
     opt: Opt::Short('j'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('f'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('d'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('c'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('u'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('v'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('a'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('S'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('o'),
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
 ];
 
 pub const COMP_OPTS: [OptSpec; 14] = [
   OptSpec {
     opt: Opt::Short('F'),
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
   OptSpec {
     opt: Opt::Short('W'),
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
   OptSpec {
     opt: Opt::Short('A'),
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
   OptSpec {
     opt: Opt::Short('j'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('p'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('r'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('f'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('d'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('c'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('u'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('v'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('a'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('S'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('o'),
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
 ];
 

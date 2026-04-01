@@ -908,15 +908,20 @@ impl VarKind {
 
     let tokens: VecDeque<String> = LexStream::new(Arc::new(raw), LexFlags::empty())
       .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
-      .try_fold(vec![], |mut acc, wrds| {
+      .try_fold(String::new(), |mut acc, wrds| {
         match wrds {
-          Ok(wrds) => acc.extend(wrds),
+          Ok(wrds) => {
+						let wrds_joined = wrds.join(" ");
+						acc = [acc,wrds_joined].join(&markers::ARG_SEP.to_string());
+					}
           Err(e) => return Err(e),
         }
         Ok(acc)
       })?
-      .into_iter()
-      .collect();
+			.split(markers::ARG_SEP)
+			.filter(|s| !s.is_empty())
+			.map(|s| s.to_string())
+			.collect();
 
     Ok(Self::Arr(tokens))
   }

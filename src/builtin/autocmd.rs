@@ -1,7 +1,7 @@
 use regex::Regex;
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   state::{self, AutoCmd, AutoCmdKind, write_logic},
@@ -15,11 +15,11 @@ fn autocmd_optspec() -> [OptSpec; 2] {
   [
     OptSpec {
       opt: Opt::Short('p'),
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     },
     OptSpec {
       opt: Opt::Short('c'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
   ]
 }

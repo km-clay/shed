@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
@@ -13,15 +13,15 @@ fn arr_op_optspec() -> Vec<OptSpec> {
   vec![
     OptSpec {
       opt: Opt::Short('c'),
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     },
     OptSpec {
       opt: Opt::Short('r'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
     OptSpec {
       opt: Opt::Short('v'),
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     },
   ]
 }

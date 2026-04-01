@@ -4,7 +4,7 @@ use nix::{
 };
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{NdRule, Node},
   procio::borrow_fd,
@@ -14,11 +14,11 @@ use crate::{
 pub const LSEEK_OPTS: [OptSpec; 2] = [
   OptSpec {
     opt: Opt::Short('c'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('e'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
 ];
 

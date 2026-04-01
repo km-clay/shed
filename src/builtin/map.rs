@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 
 use crate::{
   expand::expand_cmd_sub,
-  getopt::{Opt, OptSpec, get_opts_from_tokens_raw},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens_raw},
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{
     NdRule, Node,
@@ -244,27 +244,27 @@ fn map_opts_spec() -> [OptSpec; 6] {
   [
     OptSpec {
       opt: Opt::Short('r'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
     OptSpec {
       opt: Opt::Short('j'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
     OptSpec {
       opt: Opt::Short('k'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
     OptSpec {
       opt: Opt::Long("pretty".into()),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
     OptSpec {
       opt: Opt::Short('F'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
     OptSpec {
       opt: Opt::Short('l'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
   ]
 }

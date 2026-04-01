@@ -1,6 +1,6 @@
 use crate::{
   builtin::join_raw_args,
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult},
   parse::{NdRule, Node},
   prelude::*,
@@ -18,19 +18,19 @@ fn msg_opts() -> [OptSpec; 4] {
   [
     OptSpec {
       opt: Opt::Long("status".into()),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
     OptSpec {
       opt: Opt::Long("system".into()),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
     OptSpec {
       opt: Opt::Short('s'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
     OptSpec {
       opt: Opt::Short('S'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     },
   ]
 }

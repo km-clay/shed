@@ -1,6 +1,6 @@
 use crate::{
   expand::expand_prompt,
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
@@ -11,19 +11,19 @@ use crate::{
 pub const ECHO_OPTS: [OptSpec; 4] = [
   OptSpec {
     opt: Opt::Short('n'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('E'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('e'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
   OptSpec {
     opt: Opt::Short('p'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   },
 ];
 

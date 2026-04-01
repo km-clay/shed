@@ -3,7 +3,7 @@ use std::str::FromStr;
 use ariadne::Fmt;
 
 use crate::{
-  getopt::{Opt, OptSpec},
+  getopt::{Opt, OptArg, OptSpec},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
   parse::{NdRule, Node, execute::prepare_argv, lex::Span},
   state::{self, VarFlags, VarKind, read_meta, read_vars, write_meta, write_vars},
@@ -26,7 +26,7 @@ impl GetOptsSpec {
       let OptSpec { opt, takes_arg } = spec;
       match opt {
         Opt::Short(opt_ch) if ch == *opt_ch => {
-          if *takes_arg {
+          if *takes_arg != OptArg::None {
             return OptMatch::WantsArg;
           } else {
             return OptMatch::IsMatch;
@@ -56,10 +56,11 @@ impl FromStr for GetOptsSpec {
         ch if ch.is_alphanumeric() => {
           let opt = Opt::Short(*ch);
           chars.next();
-          let takes_arg = chars.peek() == Some(&':');
-          if takes_arg {
+          let has_arg = chars.peek() == Some(&':');
+          if has_arg {
             chars.next();
           }
+          let takes_arg = if has_arg { OptArg::Single } else { OptArg::None };
           opt_specs.push(OptSpec { opt, takes_arg })
         }
         _ => {
@@ -254,6 +255,7 @@ pub fn getopts(node: Node) -> ShResult<()> {
 
 #[cfg(test)]
 mod tests {
+  use crate::getopt::OptArg;
   use crate::state::{self, read_vars};
   use crate::testutil::{TestGuard, test_input};
 
@@ -278,9 +280,9 @@ mod tests {
     use std::str::FromStr;
     let spec = GetOptsSpec::from_str("a:bc:").unwrap();
     assert!(!spec.silent_err);
-    assert!(spec.opt_specs[0].takes_arg); // a:
-    assert!(!spec.opt_specs[1].takes_arg); // b
-    assert!(spec.opt_specs[2].takes_arg); // c:
+    assert_eq!(spec.opt_specs[0].takes_arg, OptArg::Single); // a:
+    assert_eq!(spec.opt_specs[1].takes_arg, OptArg::None); // b
+    assert_eq!(spec.opt_specs[2].takes_arg, OptArg::Single); // c:
   }
 
   #[test]

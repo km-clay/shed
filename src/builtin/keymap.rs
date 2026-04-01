@@ -1,6 +1,6 @@
 use crate::{
   expand::expand_keymap,
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
@@ -65,35 +65,35 @@ impl KeyMapOpts {
     [
       OptSpec {
         opt: Opt::Short('n'), // normal mode
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Short('e'), // emacs mode
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Short('i'), // insert mode
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Short('v'), // visual mode
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Short('x'), // ex mode
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Short('o'), // operator-pending mode
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Long("remove".into()),
-        takes_arg: true,
+        takes_arg: OptArg::Single,
       },
       OptSpec {
         opt: Opt::Short('r'), // replace mode
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
     ]
   }

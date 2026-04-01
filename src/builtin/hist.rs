@@ -6,7 +6,7 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 use regex::Regex;
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node}, procio::borrow_fd, readline::history::{HistEntry, History}, state::{self}
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens}, libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt}, parse::{NdRule, Node}, procio::borrow_fd, readline::history::{HistEntry, History}, state::{self}
 };
 
 #[derive(Debug,Default,Clone)]
@@ -175,51 +175,51 @@ impl HistQuery {
 		[
 			OptSpec {
 				opt: Opt::Long("after".into()),
-				takes_arg: true
+				takes_arg: OptArg::Single
 			},
 			OptSpec {
 				opt: Opt::Long("before".into()),
-				takes_arg: true
+				takes_arg: OptArg::Single
 			},
 			OptSpec {
 				opt: Opt::Long("contains".into()),
-				takes_arg: true
+				takes_arg: OptArg::Single
 			},
 			OptSpec {
 				opt: Opt::Long("starts-with".into()),
-				takes_arg: true
+				takes_arg: OptArg::Single
 			},
 			OptSpec {
 				opt: Opt::Long("matches".into()),
-				takes_arg: true
+				takes_arg: OptArg::Single
 			},
 			OptSpec {
 				opt: Opt::Long("longer-than".into()),
-				takes_arg: true
+				takes_arg: OptArg::Single
 			},
 			OptSpec {
 				opt: Opt::Long("shorter-than".into()),
-				takes_arg: true
+				takes_arg: OptArg::Single
 			},
 			OptSpec {
 				opt: Opt::Long("limit".into()),
-				takes_arg: true
+				takes_arg: OptArg::Single
 			},
 			OptSpec {
 				opt: Opt::Long("count".into()),
-				takes_arg: false
+				takes_arg: OptArg::None
 			},
 			OptSpec {
 				opt: Opt::Long("json".into()),
-				takes_arg: false
+				takes_arg: OptArg::None
 			},
 			OptSpec {
 				opt: Opt::Short('n'),
-				takes_arg: false
+				takes_arg: OptArg::None
 			},
 			OptSpec {
 				opt: Opt::Short('r'),
-				takes_arg: false
+				takes_arg: OptArg::None
 			},
 			]
 	}

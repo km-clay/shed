@@ -16,13 +16,22 @@ pub type OptSet = Arc<[Opt]>;
 pub enum Opt {
   Long(String),
   LongWithArg(String, String),
+  LongWithList(String, Vec<String>),
   Short(char),
   ShortWithArg(char, String),
+  ShortWithList(char, Vec<String>),
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum OptArg {
+  None,
+  Single,
+  List,
 }
 
 pub struct OptSpec {
   pub opt: Opt,
-  pub takes_arg: bool,
+  pub takes_arg: OptArg,
 }
 
 impl Opt {
@@ -49,6 +58,8 @@ impl Display for Opt {
       Self::Short(opt) => write!(f, "-{}", opt),
       Self::LongWithArg(opt, arg) => write!(f, "--{} {}", opt, arg),
       Self::ShortWithArg(opt, arg) => write!(f, "-{} {}", opt, arg),
+      Self::LongWithList(opt, args) => write!(f, "--{} {}", opt, args.join(" ")),
+      Self::ShortWithList(opt, args) => write!(f, "-{} {}", opt, args.join(" ")),
     }
   }
 }
@@ -133,20 +144,36 @@ pub fn sort_tks(
         let mut pushed = false;
         for opt_spec in opt_specs {
           if opt_spec.opt == opt {
-            if opt_spec.takes_arg {
-              let arg = words_iter.next().map(|(w, _)| w).unwrap_or_default();
-
-              let opt = match opt {
-                Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
-                Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
-                _ => unreachable!(),
-              };
-              opts.push(opt);
-              pushed = true;
-            } else {
-              opts.push(opt.clone());
-              pushed = true;
+            match &opt_spec.takes_arg {
+              OptArg::Single => {
+                let arg = words_iter.next().map(|(w, _)| w).unwrap_or_default();
+                let opt = match opt {
+                  Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
+                  Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
+                  _ => unreachable!(),
+                };
+                opts.push(opt);
+              }
+              OptArg::List => {
+                let mut args = vec![];
+                while let Some((w, _)) = words_iter.peek() {
+                  if w.starts_with('-') {
+                    break;
+                  }
+                  args.push(words_iter.next().unwrap().0);
+                }
+                let opt = match opt {
+                  Opt::Long(ref opt) => Opt::LongWithList(opt.to_string(), args),
+                  Opt::Short(opt) => Opt::ShortWithList(opt, args),
+                  _ => unreachable!(),
+                };
+                opts.push(opt);
+              }
+              OptArg::None => {
+                opts.push(opt.clone());
+              }
             }
+            pushed = true;
           }
         }
         if !pushed {
@@ -194,22 +221,37 @@ fn sort_tks_raw(
         let mut pushed = false;
         for opt_spec in opt_specs {
           if opt_spec.opt == opt {
-            if opt_spec.takes_arg {
-              let arg = tokens_iter
-                .next()
-                .map(|t| t.to_string())
-                .unwrap_or_default();
-
-              let opt = match opt {
-                Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
-                Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
-                _ => unreachable!(),
-              };
-              opts.push(opt);
-              pushed = true;
-            } else {
-              opts.push(opt.clone());
-              pushed = true;
+            match &opt_spec.takes_arg {
+              OptArg::Single => {
+                let arg = tokens_iter
+                  .next()
+                  .map(|t| t.to_string())
+                  .unwrap_or_default();
+                let opt = match opt {
+                  Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
+                  Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
+                  _ => unreachable!(),
+                };
+                opts.push(opt);
+              }
+              OptArg::List => {
+                let mut args = vec![];
+                while let Some(t) = tokens_iter.peek() {
+                  if t.to_string().starts_with('-') {
+                    break;
+                  }
+                  args.push(tokens_iter.next().unwrap().to_string());
+                }
+                let opt = match opt {
+                  Opt::Long(ref opt) => Opt::LongWithList(opt.to_string(), args),
+                  Opt::Short(opt) => Opt::ShortWithList(opt, args),
+                  _ => unreachable!(),
+                };
+                opts.push(opt);
+              }
+              OptArg::None => {
+                opts.push(opt.clone());
+              }
             }
           }
         }
@@ -333,11 +375,11 @@ mod tests {
     let opt_spec = vec![
       OptSpec {
         opt: Opt::Short('v'),
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Long("help".into()),
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
     ];
 
@@ -358,7 +400,7 @@ mod tests {
 
     let opt_spec = vec![OptSpec {
       opt: Opt::Short('o'),
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     }];
 
     let (non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
@@ -374,7 +416,7 @@ mod tests {
 
     let opt_spec = vec![OptSpec {
       opt: Opt::Long("output".into()),
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     }];
 
     let (non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
@@ -394,11 +436,11 @@ mod tests {
     let opt_spec = vec![
       OptSpec {
         opt: Opt::Short('v'),
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Short('a'),
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
     ];
 
@@ -417,15 +459,15 @@ mod tests {
     let opt_spec = vec![
       OptSpec {
         opt: Opt::Short('a'),
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Short('b'),
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
       OptSpec {
         opt: Opt::Short('c'),
-        takes_arg: false,
+        takes_arg: OptArg::None,
       },
     ];
 
@@ -443,7 +485,7 @@ mod tests {
 
     let opt_spec = vec![OptSpec {
       opt: Opt::Short('v'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     }];
 
     let (non_opts, opts) = get_opts_from_tokens(tokens, &opt_spec).unwrap();
@@ -465,11 +507,11 @@ mod tests {
     let opt_spec = vec![
       OptSpec {
         opt: Opt::Short('n'),
-        takes_arg: true,
+        takes_arg: OptArg::Single,
       },
       OptSpec {
         opt: Opt::Long("output".into()),
-        takes_arg: true,
+        takes_arg: OptArg::Single,
       },
     ];
 

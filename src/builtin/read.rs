@@ -7,7 +7,7 @@ use nix::{
 
 use crate::{
   expand::expand_keymap,
-  getopt::{Opt, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt},
     sys::TTY_FILENO,
@@ -21,46 +21,46 @@ use crate::{
 pub const READ_OPTS: [OptSpec; 7] = [
   OptSpec {
     opt: Opt::Short('r'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   }, // don't allow backslash escapes
   OptSpec {
     opt: Opt::Short('s'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   }, // don't echo input
   OptSpec {
     opt: Opt::Short('a'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   }, // read into array
   OptSpec {
     opt: Opt::Short('n'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   }, // read only N characters
   OptSpec {
     opt: Opt::Short('t'),
-    takes_arg: false,
+    takes_arg: OptArg::None,
   }, // timeout
   OptSpec {
     opt: Opt::Short('p'),
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   }, // prompt
   OptSpec {
     opt: Opt::Short('d'),
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   }, // read until delimiter
 ];
 
 pub const READ_KEY_OPTS: [OptSpec; 3] = [
   OptSpec {
     opt: Opt::Short('v'), // var name
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
   OptSpec {
     opt: Opt::Short('w'), // char whitelist
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
   OptSpec {
     opt: Opt::Short('b'), // char blacklist
-    takes_arg: true,
+    takes_arg: OptArg::Single,
   },
 ];
 

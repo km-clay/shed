@@ -341,7 +341,8 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     match poll(&mut fds, timeout) {
       Ok(0) => {
         // We timed out. Check if there's a screensaver command
-        if let Some(cmd) = exec_if_timeout {
+        if let Some(cmd) = exec_if_timeout
+				&& readline.editor.is_empty() { // don't screensaver if we have a pending command
           let prepared = ReadlineEvent::Line(cmd.clone());
           let _guard = scopeguard::guard(read_shopts(|o| o.core.auto_hist), |opt| {
             // restores old auto_hist value

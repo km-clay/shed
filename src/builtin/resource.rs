@@ -9,7 +9,7 @@ use nix::{
 };
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens_strict},
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens_strict},
   libsh::error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
   parse::{NdRule, Node},
   procio::borrow_fd,
@@ -20,23 +20,23 @@ fn ulimit_opt_spec() -> [OptSpec; 5] {
   [
     OptSpec {
       opt: Opt::Short('n'), // file descriptors
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     },
     OptSpec {
       opt: Opt::Short('u'), // max user processes
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     },
     OptSpec {
       opt: Opt::Short('s'), // stack size
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     },
     OptSpec {
       opt: Opt::Short('c'), // core dump file size
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     },
     OptSpec {
       opt: Opt::Short('v'), // virtual memory
-      takes_arg: true,
+      takes_arg: OptArg::Single,
     },
   ]
 }
@@ -225,7 +225,7 @@ pub fn umask_builtin(node: Node) -> ShResult<()> {
     argv,
     &[OptSpec {
       opt: Opt::Short('S'),
-      takes_arg: false,
+      takes_arg: OptArg::None,
     }],
   )?;
   let argv = &argv[1..]; // skip command name

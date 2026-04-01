@@ -1,3 +1,4 @@
+use crate::expand::expand_raw;
 use crate::libsh::error::ShResult;
 use crate::parse::lex::QuoteState;
 
@@ -5,6 +6,7 @@ use crate::parse::lex::QuoteState;
 /// Returns true if there's a valid {a,b} or {1..5} pattern at the outermost
 /// level.
 fn has_braces(s: &str) -> bool {
+	let s = expand_raw(&mut s.chars().peekable()).unwrap_or(s.to_string());
   let mut chars = s.chars().peekable();
   let mut depth = 0;
   let mut found_open = false;
