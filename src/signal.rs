@@ -80,7 +80,7 @@ pub fn check_signals() -> ShResult<()> {
   if got_signal(Signal::SIGINT) {
     interrupt()?;
     run_trap(Signal::SIGINT)?;
-    return Err(sherr!(Interrupt, "foo {}", 5));
+    return Err(sherr!(Interrupt, "Interrupted"));
   }
   if got_signal(Signal::SIGHUP) {
     run_trap(Signal::SIGHUP)?;

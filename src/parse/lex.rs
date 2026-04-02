@@ -1,10 +1,5 @@
 use std::{
-  collections::VecDeque,
-  fmt::Display,
-  iter::Peekable,
-  ops::{Bound, Range, RangeBounds},
-  str::Chars,
-  sync::Arc,
+  collections::VecDeque, fmt::Display, iter::Peekable, ops::{Bound, Range, RangeBounds}, rc::Rc, str::Chars,
 };
 
 use bitflags::bitflags;
@@ -73,18 +68,18 @@ impl QuoteState {
 
 #[derive(Clone, PartialEq, Default, Debug, Eq, Hash)]
 pub struct SpanSource {
-  name: Arc<str>,
-  content: Arc<str>,
+  name: Rc<str>,
+  content: Rc<str>,
 }
 
 impl SpanSource {
   pub fn name(&self) -> &str {
     &self.name
   }
-  pub fn content(&self) -> Arc<str> {
+  pub fn content(&self) -> Rc<str> {
     self.content.clone()
   }
-  pub fn rename(&mut self, name: Arc<str>) {
+  pub fn rename(&mut self, name: Rc<str>) {
     self.name = name;
   }
 }
@@ -96,7 +91,7 @@ impl Display for SpanSource {
 }
 
 #[derive(Clone, PartialEq, Default, Debug)]
-/// A slice of some source text. Ultimately wraps an Arc<String>, which means these are cheap to clone.
+/// A slice of some source text. Ultimately wraps an Rc<String>, which means these are cheap to clone.
 /// Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
 pub struct Span {
   range: Range<usize>,
@@ -105,7 +100,7 @@ pub struct Span {
 
 impl Span {
   /// New `Span`. Wraps a range and a string that it refers to.
-  pub fn new(range: Range<usize>, source: Arc<str>) -> Self {
+  pub fn new(range: Range<usize>, source: Rc<str>) -> Self {
     let source = SpanSource {
       name: "<stdin>".into(),
       content: source,
@@ -115,10 +110,10 @@ impl Span {
   pub fn from_span_source(range: Range<usize>, source: SpanSource) -> Self {
     Span { range, source }
   }
-  pub fn rename(&mut self, name: Arc<str>) {
+  pub fn rename(&mut self, name: Rc<str>) {
     self.source.name = name;
   }
-  pub fn with_name(mut self, name: Arc<str>) -> Self {
+  pub fn with_name(mut self, name: Rc<str>) -> Self {
     self.source.name = name;
     self
   }
@@ -132,7 +127,7 @@ impl Span {
   pub fn as_str(&self) -> &str {
     &self.source.content[self.range().start..self.range().end]
   }
-  pub fn get_source(&self) -> Arc<str> {
+  pub fn get_source(&self) -> Rc<str> {
     self.source.content.clone()
   }
   pub fn span_source(&self) -> &SpanSource {
@@ -209,7 +204,7 @@ impl Default for TkRule {
 /// Generally speaking, these are very cheap to clone. The only time cloning a `Tk` is a heavy operation
 /// is if the wrapped `TkRule` is `TkRule::Expanded`, which contains a `Vec<String>` that needs to be cloned.
 /// However, `TkRule::Expanded` is never created through lexing, so it is very rare that a cloned token will have this rule.
-/// Therefore, you can generally consider cloning a token to be effectively as cheap as cloning an Arc<T>.
+/// Therefore, you can generally consider cloning a token to be effectively as cheap as cloning an Rc<T>.
 ///
 /// `TkRule::Expanded` is only created during token expansion, which generally happens much later in an execution cycle.
 pub struct Tk {
@@ -231,7 +226,7 @@ impl Tk {
   pub fn as_str(&self) -> &str {
     self.span.as_str()
   }
-  pub fn source(&self) -> Arc<str> {
+  pub fn source(&self) -> Rc<str> {
     self.span.source.content.clone()
   }
   pub fn mark(&mut self, flag: TkFlags) {
@@ -350,9 +345,9 @@ pub fn clean_input(input: &str) -> String {
 /// Notes:
 /// The first and last lexed token will be an empty token with class TkRule::SOI and TkRule::EOI respectively. These tokens must be handled specially if you are using the lexer for internal stuff like the cases mentioned above.
 pub struct LexStream {
-  source: Arc<str>,
+  source: Rc<str>,
   pub cursor: usize,
-  pub name: Arc<str>,
+  pub name: Rc<str>,
   quote_state: QuoteState,
   brc_grp_depth: usize,
   brc_grp_start: Option<usize>,
@@ -362,7 +357,7 @@ pub struct LexStream {
 }
 
 impl LexStream {
-  pub fn new(source: Arc<str>, flags: LexFlags) -> Self {
+  pub fn new(source: Rc<str>, flags: LexFlags) -> Self {
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
     Self {
       flags,
@@ -398,7 +393,7 @@ impl LexStream {
     };
     self.source.get(start..end)
   }
-  pub fn with_name(mut self, name: Arc<str>) -> Self {
+  pub fn with_name(mut self, name: Rc<str>) -> Self {
     self.name = name;
     self
   }

@@ -30,6 +30,7 @@ pub enum OptArg {
   List,
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct OptSpec {
   pub opt: Opt,
   pub takes_arg: OptArg,

@@ -1,7 +1,7 @@
 use std::{
   cell::Cell,
   collections::{HashSet, VecDeque},
-  os::unix::fs::PermissionsExt,
+  os::unix::fs::PermissionsExt, rc::Rc,
 };
 
 use ariadne::Fmt;
@@ -150,7 +150,7 @@ impl ExecArgs {
 pub fn exec_dash_c(input: String) -> ShResult<()> {
   let log_tab = read_logic(|l| l.clone());
   let expanded = expand_aliases(input, HashSet::new(), &log_tab);
-  let source_name: Arc<str> = "<shed -c>".into();
+  let source_name: Rc<str> = "<shed -c>".into();
   let mut parser = ParsedSrc::new(expanded.into())
     .with_lex_flags(super::lex::LexFlags::empty())
     .with_name(source_name.clone());
@@ -215,7 +215,7 @@ pub fn exec_input(
   input: String,
   io_stack: Option<IoStack>,
   interactive: bool,
-  source_name: Option<Arc<str>>,
+  source_name: Option<Rc<str>>,
 ) -> ShResult<()> {
   let log_tab = read_logic(|l| l.clone());
   let input = expand_aliases(input, HashSet::new(), &log_tab);
@@ -247,14 +247,14 @@ pub fn exec_input(
 pub struct Dispatcher {
   nodes: VecDeque<Node>,
   interactive: bool,
-  source_name: Arc<str>,
+  source_name: Rc<str>,
   pub io_stack: IoStack,
   pub job_stack: JobStack,
   fg_job: bool,
 }
 
 impl Dispatcher {
-  pub fn new(nodes: Vec<Node>, interactive: bool, source_name: Arc<str>) -> Self {
+  pub fn new(nodes: Vec<Node>, interactive: bool, source_name: Rc<str>) -> Self {
     let nodes = VecDeque::from(nodes);
     Self {
       nodes,
@@ -508,7 +508,7 @@ impl Dispatcher {
       .clone()
       .expand()?
       .get_first_word()
-			.map(Into::<Arc<str>>::into)
+			.map(Into::<Rc<str>>::into)
       .unwrap_or_default();
     blame.rename(name.clone());
 

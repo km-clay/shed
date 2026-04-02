@@ -1,8 +1,7 @@
 use std::{
   collections::HashSet,
   fmt::{Debug, Display, Write},
-  path::PathBuf,
-  sync::Arc,
+  path::PathBuf, rc::Rc,
 };
 
 use nix::sys::signal::Signal;
@@ -1800,7 +1799,7 @@ impl SimpleCompleter {
   }
 
   pub fn get_candidates(&mut self, line: String, cursor_pos: usize) -> ShResult<CompResult> {
-    let source: Arc<str> = line.into();
+    let source: Rc<str> = line.into();
     let tokens =
       lex::LexStream::new(source.clone(), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()?;
 

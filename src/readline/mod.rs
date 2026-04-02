@@ -6,6 +6,7 @@ use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::LineBuf;
 use std::collections::VecDeque;
 use std::fmt::Write;
+use std::rc::Rc;
 use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
 use unicode_width::UnicodeWidthStr;
 
@@ -458,12 +459,12 @@ impl ShedLine {
     if self.mode.report_mode() == ModeReport::Normal {
       return Ok(true);
     }
-    let input: Arc<str> = self.editor.joined().into();
+    let input: Rc<str> = self.editor.joined().into();
     self.editor.calc_indent_level();
     let lex_result1 =
-      LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
+      LexStream::new(Rc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
     let lex_result2 =
-      LexStream::new(Arc::clone(&input), LexFlags::empty()).collect::<ShResult<Vec<_>>>();
+      LexStream::new(Rc::clone(&input), LexFlags::empty()).collect::<ShResult<Vec<_>>>();
     let is_top_level = self.editor.indent_ctx.ctx().is_empty();
 
     let is_complete = match (lex_result1.is_err(), lex_result2.is_err()) {
@@ -1725,7 +1726,7 @@ impl ShedLine {
 pub fn annotate_input(input: &str) -> String {
   let mut annotated = input.to_string();
   let input = input.into();
-  let tokens: Vec<Tk> = lex::LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED)
+  let tokens: Vec<Tk> = lex::LexStream::new(Rc::clone(&input), LexFlags::LEX_UNFINISHED)
     .flatten()
     .filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
     .collect();
@@ -1794,7 +1795,7 @@ pub fn annotate_input_recursive(input: &str) -> String {
 
 pub fn get_insertions(input: &str) -> Vec<(usize, Marker)> {
   let input = input.into();
-  let tokens: Vec<Tk> = lex::LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED)
+  let tokens: Vec<Tk> = lex::LexStream::new(Rc::clone(&input), LexFlags::LEX_UNFINISHED)
     .flatten()
     .collect();
 

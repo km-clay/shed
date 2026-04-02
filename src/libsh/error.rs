@@ -4,6 +4,7 @@ use rand::TryRng;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
+use std::rc::Rc;
 use yansi::Paint;
 
 use crate::procio::RedirGuard;
@@ -297,7 +298,7 @@ impl ShErr {
   }
   pub fn rename(mut self, name: impl Into<String>) -> Self {
 		let name: String = name.into();
-		let name: Arc<str> = name.into();
+		let name: Rc<str> = name.into();
 
     if let Some(span) = self.src_span.as_mut() {
       span.rename(name);

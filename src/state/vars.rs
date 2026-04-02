@@ -382,6 +382,7 @@ impl VarTab {
   fn init_sh_vars() -> HashMap<String, Var> {
     let mut vars = HashMap::new();
     vars.insert("COMP_WORDBREAKS".into(), " \t\n\"'@><=;|&(".into());
+		vars.insert("OPTIND".into(), "1".into());
 		let env_vars = Self::init_env();
 		vars.extend(env_vars);
     vars

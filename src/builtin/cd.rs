@@ -61,17 +61,6 @@ pub fn cd(node: Node) -> ShResult<()> {
       format!("cd: Failed to change directory: '{}'", e.fg(Color::Red)),
     ));
   }
-  let new_dir = env::current_dir().map_err(|e| {
-    ShErr::new(ShErrKind::ExecFail, span.clone()).labeled(
-      cd_span.clone(),
-      format!(
-        "cd: Failed to get current directory: '{}'",
-        e.fg(Color::Red)
-      ),
-    )
-  })?;
-  unsafe { env::set_var("PWD", new_dir) };
-
   state::set_status(0);
   Ok(())
 }
@@ -135,17 +124,6 @@ pub mod tests {
   }
 
   // ===================== Environment =====================
-
-  #[test]
-  fn cd_sets_pwd_env() {
-    let _g = TestGuard::new();
-    let temp_dir = TempDir::new().unwrap();
-
-    test_input(format!("cd {}", temp_dir.path().display())).unwrap();
-
-    let pwd = env::var("PWD").unwrap();
-    assert_eq!(pwd, env::current_dir().unwrap().display().to_string());
-  }
 
   #[test]
   fn cd_status_zero_on_success() {

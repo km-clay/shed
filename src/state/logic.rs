@@ -13,7 +13,7 @@ use crate::{
     keymap::{KeyMap, KeyMapFlags, KeyMapMatch},
     trap::TrapTarget,
   },
-  parse::{ConjunctNode, NdRule, Node, ParsedSrc, lex::Span},
+  parse::{Node, lex::Span},
   readline::keys::KeyEvent,
 };
 
@@ -100,6 +100,18 @@ pub struct AutoCmd {
   pub command: String,
 }
 
+impl PartialEq for AutoCmd {
+	fn eq(&self, other: &Self) -> bool {
+		let re_matches = self.pattern.as_ref().is_some_and(|p| {
+			other.pattern.as_ref().is_some_and(|op| {
+				p.as_str() == op.as_str()
+			})
+		}) || (self.pattern.is_none() && other.pattern.is_none());
+
+		self.command == other.command && re_matches
+	}
+}
+
 /// The logic table for the shell
 ///
 /// Contains aliases and functions
@@ -125,7 +137,9 @@ impl LogTab {
     &mut self.autocmds
   }
   pub fn insert_autocmd(&mut self, cmd: AutoCmd) {
-    self.autocmds.entry(cmd.kind).or_default().push(cmd);
+    let entry = self.autocmds.entry(cmd.kind).or_default();
+		if entry.contains(&cmd) { return }
+		entry.push(cmd);
   }
   pub fn get_autocmds(&self, kind: AutoCmdKind) -> Vec<AutoCmd> {
     write_meta(|m| m.notify_autocmd(kind)).ok();
@@ -141,17 +155,14 @@ impl LogTab {
     &mut self.keymaps
   }
   pub fn insert_keymap(&mut self, keymap: KeyMap) {
-    let mut found_dup = false;
     for map in self.keymaps.iter_mut() {
       if map.keys == keymap.keys {
+				// overwrite old keymap with new one
         *map = keymap.clone();
-        found_dup = true;
-        break;
+				return
       }
     }
-    if !found_dup {
-      self.keymaps.push(keymap);
-    }
+		self.keymaps.push(keymap);
   }
   pub fn remove_keymap(&mut self, keys: &str) {
     self.keymaps.retain(|km| km.keys != keys);

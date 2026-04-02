@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Debug, str::FromStr, sync::Arc};
+use std::{collections::VecDeque, fmt::Debug, rc::Rc, str::FromStr};
 
 use ariadne::{Fmt, Label, Span as AriadneSpan};
 use bitflags::bitflags;
@@ -41,21 +41,21 @@ macro_rules! try_match {
 
 /// The parsed AST along with the source input it parsed
 ///
-/// Uses Arc<String> instead of &str because the reference has to stay alive
+/// Uses Rc<String> instead of &str because the reference has to stay alive
 /// while errors are propagated upwards The string also has to stay alive in the
 /// case of pre-parsed shell function nodes, which live in the logic table Using
 /// &str for this use-case dramatically overcomplicates the code
 #[derive(Clone, Debug)]
 pub struct ParsedSrc {
-  pub src: Arc<str>,
-  pub name: Arc<str>,
+  pub src: Rc<str>,
+  pub name: Rc<str>,
   pub ast: Ast,
   pub lex_flags: LexFlags,
   pub context: LabelCtx,
 }
 
 impl ParsedSrc {
-  pub fn new(src: Arc<str>) -> Self {
+  pub fn new(src: Rc<str>) -> Self {
     let src = if src.contains("\\\n") || src.contains('\r') {
       clean_input(&src).as_str().into()
     } else {
@@ -69,7 +69,7 @@ impl ParsedSrc {
       context: VecDeque::new(),
     }
   }
-  pub fn with_name(mut self, name: Arc<str>) -> Self {
+  pub fn with_name(mut self, name: Rc<str>) -> Self {
     self.name = name;
     self
   }
@@ -758,6 +758,9 @@ impl Debug for ParseStream {
 
 impl ParseStream {
   pub fn new(tokens: Vec<Tk>) -> Self {
+		let tokens = tokens.into_iter()
+			.filter(|tk| tk.class != TkRule::Comment)
+			.collect();
     Self {
       tokens,
 			cursor: 0,
@@ -927,7 +930,7 @@ impl ParseStream {
     let name_tk = self.next_tk().unwrap();
     node_tks.push(name_tk.clone());
     let name = name_tk.clone();
-    let name_raw: Arc<str> = if spaced_form {
+    let name_raw: Rc<str> = if spaced_form {
       // Consume the "()" token
       let parens_tk = self.next_tk().unwrap();
       node_tks.push(parens_tk);
