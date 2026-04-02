@@ -47,7 +47,7 @@ pub fn help(node: Node) -> ShResult<()> {
   // Join all of the word-split arguments into a single string
   // Preserve the span too
   let (topic, span) = if argv.peek().is_none() {
-    ("help.txt".to_string(), help.1)
+    ("help".to_string(), help.1)
   } else {
     join_raw_arg_iter(argv)
   };
@@ -259,7 +259,7 @@ pub fn unescape_help(raw: &str) -> String {
     '|' => {
       result.push(markers::REFERENCE);
       match_loop!(chars.next() => next_ch, {
-        '*' => {
+        '|' => {
           result.push(markers::RESET);
           break;
         }
@@ -269,7 +269,7 @@ pub fn unescape_help(raw: &str) -> String {
     '#' => {
       result.push(markers::HEADER);
       match_loop!(chars.next() => next_ch, {
-        '*' => {
+        '#' => {
           result.push(markers::RESET);
           break;
         }
@@ -279,7 +279,7 @@ pub fn unescape_help(raw: &str) -> String {
     '`' => {
       result.push(markers::CODE);
       match_loop!(chars.next() => next_ch, {
-        '*' => {
+        '`' => {
           result.push(markers::RESET);
           break;
         }
@@ -289,7 +289,7 @@ pub fn unescape_help(raw: &str) -> String {
     '{' => {
       result.push(markers::KEYWORD_2);
       match_loop!(chars.next() => next_ch, {
-        '*' => {
+        '}' => {
           result.push(markers::RESET);
           break;
         }
@@ -299,7 +299,7 @@ pub fn unescape_help(raw: &str) -> String {
     '[' => {
       result.push(markers::KEYWORD_3);
       match_loop!(chars.next() => next_ch, {
-        '*' => {
+        ']' => {
           result.push(markers::RESET);
           break;
         }
