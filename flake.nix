@@ -24,6 +24,13 @@
 
       passthru.shellPath = "/bin/shed";
 
+      SHED_DOC_DIR = "${placeholder "out"}/share/shed/doc";
+
+      postInstall = ''
+        mkdir -p $out/share/shed/doc
+        cp doc/*.txt $out/share/shed/doc
+      '';
+
       checkPhase = ''
         cargo test -- --test-threads=1
       '';

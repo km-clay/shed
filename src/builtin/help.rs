@@ -25,6 +25,13 @@ const CODE_SEQ: &str = "\x1b[32m"; // green — inline code
 const KEYWORD_2_SEQ: &str = "\x1b[1;32m"; // bold green — {keyword}
 const KEYWORD_3_SEQ: &str = "\x1b[3;37m"; // italic white — [optional]
 
+/// Directory to search for help docs, set at compile time from the `SHED_DOC_DIR` environment variable
+/// Useful for package build scripts that also install the help pages, to ensure the correct path is embedded in the binary
+const DOC_DIR: &str = match option_env!("SHED_DOC_DIR") {
+	Some(dir) => dir,
+	None => "doc",
+};
+
 pub fn help(node: Node) -> ShResult<()> {
   let NdRule::Command {
     assignments: _,
@@ -46,6 +53,7 @@ pub fn help(node: Node) -> ShResult<()> {
   };
 
   let hpath = env::var("SHED_HPATH").unwrap_or_default();
+	let hpath = [hpath.as_str(), DOC_DIR].join(":");
 
   // search for prefixes of help doc filenames
   for path in hpath.split(':') {
