@@ -296,8 +296,11 @@ impl ShErr {
     self.kind = kind;
   }
   pub fn rename(mut self, name: impl Into<String>) -> Self {
+		let name: String = name.into();
+		let name: Arc<str> = name.into();
+
     if let Some(span) = self.src_span.as_mut() {
-      span.rename(name.into());
+      span.rename(name);
     }
     self
   }
@@ -472,6 +475,7 @@ pub enum ShErrKind {
   NotFound,
   ReadlineErr,
   ExCommand,
+	InvalidAssignment,
 
   // Not really errors, more like internal signals
   CleanExit(i32),
@@ -516,6 +520,7 @@ impl Display for ShErrKind {
       Self::LoopBreak(_) => "Syntax Error",
       Self::ReadlineErr => "Readline Error",
       Self::ExCommand => "Ex Command Error",
+			Self::InvalidAssignment => "Invalid Assignment",
       Self::Interrupt => "",
       Self::ErrInterrupt => "errexit",
       Self::Null => "",

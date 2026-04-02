@@ -1,8 +1,7 @@
 use super::*;
 
 use std::{
-  collections::{HashMap, VecDeque, hash_map::Entry},
-  time::Duration,
+  collections::{HashMap, VecDeque, hash_map::Entry}, sync::atomic::Ordering, time::Duration
 };
 
 use crate::{builtin::map::MapNode, libsh::error::ShResult, prelude::*, sherr};
@@ -178,6 +177,48 @@ impl ScopeStack {
         let random = rand::random_range(0..32768);
         Some(random.to_string())
       }
+			"-" => {
+				let mut set_string = String::new();
+				read_shopts(|o| {
+					if o.set.allexport {
+						set_string.push('a');
+					}
+					if o.set.notify {
+						set_string.push('b');
+					}
+					if o.set.noclobber {
+						set_string.push('C');
+					}
+					if o.set.errexit {
+						set_string.push('e');
+					}
+					if o.set.noglob {
+						set_string.push('f');
+					}
+					if o.set.hashall {
+						set_string.push('h');
+					}
+					if INTERACTIVE.load(Ordering::SeqCst) {
+						set_string.push('i');
+					}
+					if o.set.monitor {
+						set_string.push('m');
+					}
+					if o.set.noexec {
+						set_string.push('n');
+					}
+					if o.set.nounset {
+						set_string.push('u');
+					}
+					if o.set.verbose {
+						set_string.push('v');
+					}
+					if o.set.xtrace {
+						set_string.push('x');
+					}
+				});
+				(!set_string.is_empty()).then_some(set_string)
+			}
       _ => None,
     }
   }
@@ -211,7 +252,7 @@ impl ScopeStack {
         }
       }
     }
-    Err(sherr!(ExecFail, "Variable '{}' not found", var_name,))
+    Err(sherr!(ExecFail, "Variable '{var_name}' not found"))
   }
   pub fn index_var(&self, var_name: &str, idx: ArrIndex) -> ShResult<String> {
     for scope in self.scopes.iter().rev() {
@@ -297,23 +338,19 @@ impl ScopeStack {
     // This version of get_var() is mainly used internally
     // so that we have access to Option methods
     if let Some(magic) = self.get_magic_var(var_name) {
-      return Some(magic);
+      Some(magic)
     } else if let Ok(param) = var_name.parse::<ShellParam>() {
       let val = self.get_param(param);
-      if !val.is_empty() {
-        return Some(val);
-      } else {
-        return None;
-      }
-    }
+			(!val.is_empty()).then_some(val)
+    } else {
+			for scope in self.scopes.iter().rev() {
+				if scope.var_exists(var_name) {
+					return Some(scope.get_var(var_name));
+				}
+			}
 
-    for scope in self.scopes.iter().rev() {
-      if scope.var_exists(var_name) {
-        return Some(scope.get_var(var_name));
-      }
-    }
-
-    None
+			None
+		}
   }
   pub fn take_var(&mut self, var_name: &str) -> String {
     let var = self.get_var(var_name);
@@ -321,20 +358,19 @@ impl ScopeStack {
     var
   }
   pub fn get_var(&self, var_name: &str) -> String {
-    if let Some(magic) = self.get_magic_var(var_name) {
-      return magic;
-    }
-    if let Ok(param) = var_name.parse::<ShellParam>() {
-      return self.get_param(param);
-    }
-    for scope in self.scopes.iter().rev() {
-      if scope.var_exists(var_name) {
-        return scope.get_var(var_name);
-      }
-    }
-    // Fallback to env var
-    std::env::var(var_name).unwrap_or_default()
-  }
+		self.try_get_var(var_name).unwrap_or_default()
+	}
+	pub fn get_var_meta(&self, var_name: &str) -> Var {
+		self.try_get_var_meta(var_name).unwrap_or_default()
+	}
+	pub fn try_get_var_meta(&self, var_name: &str) -> Option<Var> {
+		for scope in self.scopes.iter().rev() {
+			if scope.var_exists(var_name) {
+				return scope.try_get_var_meta(var_name);
+			}
+		}
+		None
+	}
   pub fn all_vars(&self) -> HashMap<String, Var> {
     let mut vars = HashMap::new();
     for scope in self.scopes.iter() {

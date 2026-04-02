@@ -39,7 +39,6 @@ pub enum QueryHeader {
   Cwd,
   Var(String),
   Status(Vec<StatusHeader>),
-  Jobs,
 }
 
 #[derive(Debug)]
@@ -125,7 +124,6 @@ impl FromStr for SocketRequest {
         };
         match query_kind.to_lowercase().as_str() {
           "cwd" => Ok(Self::Query(QueryHeader::Cwd)),
-          "jobs" => Ok(Self::Query(QueryHeader::Jobs)),
           "status" => {
             let mut headers = vec![];
             while let Some(header) = args.next() {
@@ -292,7 +290,7 @@ impl Default for MetaTab {
       old_path: None,
       old_pwd: None,
       path_cache: HashSet::new(),
-      cwd_cache: HashSet::new(),
+			cwd_cache: HashSet::new(),
       comp_specs: HashMap::new(),
       pending_widget_keys: vec![],
     }
@@ -334,8 +332,8 @@ impl MetaTab {
   pub fn reset_getopts_char_offset(&mut self) {
     self.getopts_offset = 0;
   }
-  pub fn cached_cmds(&self) -> &HashSet<String> {
-    &self.path_cache
+  pub fn cached_cmds(&self) -> HashSet<String> {
+		(self.path_cache).union(&self.cwd_cache).cloned().collect()
   }
   pub fn cwd_cache(&self) -> &HashSet<String> {
     &self.cwd_cache
@@ -505,7 +503,6 @@ impl MetaTab {
             write(&conn, output.as_bytes()).ok();
             write(&conn, b"\n").ok();
           }
-          QueryHeader::Jobs => todo!(),
         }
       }
       SocketRequest::RefreshPrompt => {
@@ -523,18 +520,44 @@ impl MetaTab {
 
     Ok(())
   }
-  pub fn rehash_commands(&mut self) {
+	pub fn cache_path_command(&mut self, cmd: String) {
+		self.path_cache.insert(cmd);
+	}
+	pub fn cache_cwd_command(&mut self, cmd: String) {
+		self.cwd_cache.insert(cmd);
+	}
+	pub fn rehash_path(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
-    let cwd = env::var("PWD").unwrap_or_default();
-    log::trace!("Rehashing commands for PATH: '{}' and PWD: '{}'", path, cwd);
-
-    self.path_cache.clear();
     self.old_path = Some(path.clone());
-    self.old_pwd = Some(cwd.clone());
     let cmds_in_path = Self::get_cmds_in_path();
     for cmd in cmds_in_path {
-      self.path_cache.insert(cmd);
+      self.cache_path_command(cmd);
     }
+	}
+	pub fn rehash_logic(&mut self) {
+    write_logic(|l| {
+			if !l.dirty {
+				return
+			}
+      let funcs = l.funcs();
+      let aliases = l.aliases();
+      for func in funcs.keys() {
+        self.cache_path_command(func.clone());
+      }
+      for alias in aliases.keys() {
+        self.cache_path_command(alias.clone());
+      }
+			l.dirty = false;
+    });
+
+    for cmd in BUILTINS {
+      self.cache_path_command(cmd.to_string());
+    }
+	}
+  pub fn rehash_cwd(&mut self) {
+    let cwd = env::var("PWD").unwrap_or_default();
+    self.cwd_cache.clear();
+    self.old_pwd = Some(cwd.clone());
     if let Ok(entries) = Path::new(&cwd).read_dir() {
       for entry in entries.flatten() {
         let Ok(meta) = std::fs::metadata(entry.path()) else {
@@ -546,37 +569,21 @@ impl MetaTab {
           && is_exec
           && let Some(name) = entry.file_name().to_str()
         {
-          self.path_cache.insert(format!("./{}", name));
+          self.cache_cwd_command(format!("./{}", name));
         }
       }
-    }
-
-    read_logic(|l| {
-      let funcs = l.funcs();
-      let aliases = l.aliases();
-      for func in funcs.keys() {
-        self.path_cache.insert(func.clone());
-      }
-      for alias in aliases.keys() {
-        self.path_cache.insert(alias.clone());
-      }
-    });
-
-    for cmd in BUILTINS {
-      self.path_cache.insert(cmd.to_string());
     }
   }
   pub fn try_rehash_commands(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
     let cwd = env::var("PWD").unwrap_or_default();
-    if self.old_path.as_ref().is_some_and(|old| *old == path)
-      && self.old_pwd.as_ref().is_some_and(|old| *old == cwd)
-    {
-      log::trace!("PATH and PWD unchanged, skipping rehash");
-      return;
+    if self.old_path.as_ref().is_some_and(|old| *old != path) {
+			self.rehash_path();
     }
-
-    self.rehash_commands();
+		if self.old_pwd.as_ref().is_some_and(|old| *old != cwd) {
+			self.rehash_cwd();
+		}
+		self.rehash_logic();
   }
   pub fn try_rehash_cwd_listing(&mut self) {
     let cwd = env::var("PWD").unwrap_or_default();

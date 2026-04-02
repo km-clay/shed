@@ -150,8 +150,8 @@ impl ExecArgs {
 pub fn exec_dash_c(input: String) -> ShResult<()> {
   let log_tab = read_logic(|l| l.clone());
   let expanded = expand_aliases(input, HashSet::new(), &log_tab);
-  let source_name = "<shed -c>".to_string();
-  let mut parser = ParsedSrc::new(Arc::new(expanded))
+  let source_name: Arc<str> = "<shed -c>".into();
+  let mut parser = ParsedSrc::new(expanded.into())
     .with_lex_flags(super::lex::LexFlags::empty())
     .with_name(source_name.clone());
   if let Err(errors) = parser.parse_src() {
@@ -215,7 +215,7 @@ pub fn exec_input(
   input: String,
   io_stack: Option<IoStack>,
   interactive: bool,
-  source_name: Option<String>,
+  source_name: Option<Arc<str>>,
 ) -> ShResult<()> {
   let log_tab = read_logic(|l| l.clone());
   let input = expand_aliases(input, HashSet::new(), &log_tab);
@@ -225,7 +225,7 @@ pub fn exec_input(
     super::lex::LexFlags::empty()
   };
   let source_name = source_name.unwrap_or("<stdin>".into());
-  let mut parser = ParsedSrc::new(Arc::new(input))
+  let mut parser = ParsedSrc::new(input.into())
     .with_lex_flags(lex_flags)
     .with_name(source_name.clone());
   if let Err(errors) = parser.parse_src() {
@@ -247,14 +247,14 @@ pub fn exec_input(
 pub struct Dispatcher {
   nodes: VecDeque<Node>,
   interactive: bool,
-  source_name: String,
+  source_name: Arc<str>,
   pub io_stack: IoStack,
   pub job_stack: JobStack,
   fg_job: bool,
 }
 
 impl Dispatcher {
-  pub fn new(nodes: Vec<Node>, interactive: bool, source_name: String) -> Self {
+  pub fn new(nodes: Vec<Node>, interactive: bool, source_name: Arc<str>) -> Self {
     let nodes = VecDeque::from(nodes);
     Self {
       nodes,
@@ -303,7 +303,7 @@ impl Dispatcher {
       if state::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
         if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
           let saved_status = state::get_status();
-          exec_input(trap, None, false, Some("trap ERR".to_string()))?;
+          exec_input(trap, None, false, Some("trap ERR".into()))?;
           state::set_status(saved_status);
         }
         if read_shopts(|o| o.set.errexit) {
@@ -416,11 +416,10 @@ impl Dispatcher {
   pub fn exec_func_def(&mut self, func_def: Node) -> ShResult<()> {
     let blame = func_def.get_span();
     let ctx = func_def.context.clone();
-    let NdRule::FuncDef { name, body } = func_def.class else {
+    let NdRule::FuncDef { name, mut body } = func_def.class else {
       unreachable!()
     };
-    let body_span = body.get_span();
-    let body = body_span.as_str().to_string();
+		body.context.extend(ctx);
     let name = name
       .span
       .as_str()
@@ -434,17 +433,9 @@ impl Dispatcher {
       ));
     }
 
-    let mut func_parser = ParsedSrc::new(Arc::new(body)).with_context(ctx);
-    if let Err(errors) = func_parser.parse_src() {
-      for error in errors {
-        error.print_error();
-      }
-      return Ok(());
-    }
-
-    let func = ShFunc::new(func_parser, blame);
+    let func = ShFunc::new(*body, blame);
     write_logic(|l| l.insert_func(name, func)); // Store the AST
-    write_meta(|m| m.rehash_commands());
+    write_meta(|m| m.cache_path_command(name.to_string()));
     Ok(())
   }
   fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
@@ -517,6 +508,7 @@ impl Dispatcher {
       .clone()
       .expand()?
       .get_first_word()
+			.map(Into::<Arc<str>>::into)
       .unwrap_or_default();
     blame.rename(name.clone());
 
@@ -527,7 +519,7 @@ impl Dispatcher {
       func_body.body_mut().propagate_context(func_ctx);
       func_body.body_mut().flags = func.flags;
 
-      if let Err(e) = self.exec_pipeline(func_body.body().clone()) {
+      if let Err(e) = self.exec_brc_grp(func_body.body().clone()) {
         match e.kind() {
           ShErrKind::FuncReturn(code) => {
             state::set_status(*code);
@@ -955,7 +947,7 @@ impl Dispatcher {
     {
       if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
         let saved_status = state::get_status();
-        exec_input(trap, None, false, Some("trap ERR".to_string()))?;
+        exec_input(trap, None, false, Some("trap ERR".into()))?;
         state::set_status(saved_status);
       }
       return Err(sherr!(
@@ -1126,7 +1118,7 @@ impl Dispatcher {
     let blame = cmd.get_span().clone();
     let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = cmd.class else {
-      unreachable!()
+      unreachable!("found node class '{:?}' in exec_cmd", cmd.class.as_nd_kind())
     };
     let mut env_vars_to_unset = vec![];
     if !assignments.is_empty() {
@@ -1271,6 +1263,7 @@ impl Dispatcher {
 
     for assign in assigns {
       let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
+			let span = assign.get_span();
       let NdRule::Assignment { kind, var, val } = assign.class else {
         unreachable!()
       };
@@ -1299,9 +1292,63 @@ impl Dispatcher {
           }
         }
         AssignKind::PlusEq => {
-          let _var = read_vars(|v| v.get_var(var));
+          let mut var = if let Some((name,idx)) = indexed {
+						read_vars(|v| v.index_var(&name, idx))?.into()
+					} else {
+						read_vars(|v| v.get_var_meta(var))
+					};
+					match var.kind_mut() {
+						VarKind::Str(s) => {
+							let other = val.to_string();
+							*s = [s.to_string(), other].join("")
+						}
+						VarKind::Int(n) => {
+							let Ok(other) = val.to_string().parse::<i32>() else {
+								return Err(sherr!(
+									InvalidAssignment @ span,
+									"cannot add non-integer value to integer variable"
+								));
+							};
+							*n += other;
+						}
+						VarKind::Arr(items) => {
+							match val {
+								VarKind::Str(s) => items.push_back(s),
+								VarKind::Int(n) => items.push_back(n.to_string()),
+								VarKind::Arr(other) => items.extend(other.clone()),
+								VarKind::AssocArr(_) => todo!()
+							}
+						}
+						VarKind::AssocArr(_items) => todo!(),
+					}
         }
-        AssignKind::MinusEq => todo!(),
+        AssignKind::MinusEq => {
+          let mut var = if let Some((name,idx)) = indexed {
+						read_vars(|v| v.index_var(&name, idx))?.into()
+					} else {
+						read_vars(|v| v.get_var_meta(var))
+					};
+					match var.kind_mut() {
+						VarKind::Str(_) => return Err(sherr!(
+							InvalidAssignment @ span,
+							"cannot subtract from string variable"
+						)),
+						VarKind::Arr(_) => return Err(sherr!(
+							InvalidAssignment @ span,
+							"cannot subtract from array variable"
+						)),
+						VarKind::Int(n) => {
+							let Ok(other) = val.to_string().parse::<i32>() else {
+								return Err(sherr!(
+									InvalidAssignment @ span,
+									"cannot add non-integer value to integer variable"
+								));
+							};
+							*n -= other;
+						}
+						VarKind::AssocArr(_items) => todo!(),
+					}
+				}
         AssignKind::MultEq => todo!(),
         AssignKind::DivEq => todo!(),
       }

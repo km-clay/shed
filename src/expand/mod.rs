@@ -34,6 +34,13 @@ impl Tk {
     let class = TkRule::Expanded { exp };
     Ok(Self { class, span, flags })
   }
+	pub fn expand_no_glob(self) -> ShResult<Self> {
+    let flags = self.flags;
+    let span = self.span.clone();
+    let exp = Expander::new(self)?.no_glob().expand().promote_err(span.clone())?;
+    let class = TkRule::Expanded { exp };
+    Ok(Self { class, span, flags })
+	}
   /// Perform word splitting
   pub fn get_words(&self) -> Vec<String> {
     match &self.class {
@@ -49,6 +56,7 @@ impl Tk {
 
 pub struct Expander {
   flags: TkFlags,
+	noglob: bool,
   raw: String,
 }
 
@@ -66,9 +74,13 @@ impl Expander {
     };
     Ok(Self {
       raw: unescaped,
+			noglob: false,
       flags,
     })
   }
+	pub fn no_glob(self) -> Self {
+		Self { noglob: true, ..self }
+	}
   pub fn expand(&mut self) -> ShResult<Vec<String>> {
     let mut chars = self.raw.chars().peekable();
     self.raw = expand_raw(&mut chars)?;
@@ -76,7 +88,7 @@ impl Expander {
     let has_trailing_slash = self.raw.ends_with('/');
     let has_leading_dot_slash = self.raw.starts_with("./");
 
-    if let Ok(glob_exp) = expand_glob(&self.raw)
+    if !self.noglob && let Ok(glob_exp) = expand_glob(&self.raw)
       && !glob_exp.is_empty()
     {
       self.raw = glob_exp;
@@ -161,6 +173,7 @@ mod tests {
 
     let mut exp = Expander {
       raw: "hello world\tfoo".to_string(),
+			noglob: false,
       flags: TkFlags::empty(),
     };
     let words = exp.split_words();
@@ -176,6 +189,7 @@ mod tests {
 
     let mut exp = Expander {
       raw: "a:b:c".to_string(),
+			noglob: false,
       flags: TkFlags::empty(),
     };
     let words = exp.split_words();
@@ -191,6 +205,7 @@ mod tests {
 
     let mut exp = Expander {
       raw: "hello world".to_string(),
+			noglob: false,
       flags: TkFlags::empty(),
     };
     let words = exp.split_words();
@@ -204,6 +219,7 @@ mod tests {
     let raw = format!("{}hello world{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
     let mut exp = Expander {
       raw,
+			noglob: false,
       flags: TkFlags::empty(),
     };
     let words = exp.split_words();
@@ -219,6 +235,7 @@ mod tests {
     let raw = format!("hello{}world", unescape_str("\\ "));
     let mut exp = Expander {
       raw,
+			noglob: false,
       flags: TkFlags::empty(),
     };
     let words = exp.split_words();
@@ -232,6 +249,7 @@ mod tests {
     let raw = format!("hello{}world", unescape_str("\\\t"));
     let mut exp = Expander {
       raw,
+			noglob: false,
       flags: TkFlags::empty(),
     };
     let words = exp.split_words();
@@ -248,6 +266,7 @@ mod tests {
     let raw = format!("a{}b:c", unescape_str("\\:"));
     let mut exp = Expander {
       raw,
+			noglob: false,
       flags: TkFlags::empty(),
     };
     let words = exp.split_words();

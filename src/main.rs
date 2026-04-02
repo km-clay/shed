@@ -44,7 +44,7 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, generate_default_rc, rc_file_path, read_logic, read_shopts, runtime_files, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
+  AutoCmdKind, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;
@@ -127,9 +127,9 @@ fn main() -> ExitCode {
   if let Ok(var) = env::var("SHLVL")
     && let Ok(lvl) = var.parse::<u32>()
   {
-    unsafe { env::set_var("SHLVL", (lvl + 1).to_string()) };
+		write_vars(|v| v.set_var("SHLVL", VarKind::Str((lvl + 1).to_string()), VarFlags::EXPORT)).ok();
   } else {
-    unsafe { env::set_var("SHLVL", "1") };
+		write_vars(|v| v.set_var("SHLVL", VarKind::Str("1".into()), VarFlags::EXPORT)).ok();
   }
 
   if let Err(e) = source_env() {
@@ -215,7 +215,7 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
     write_vars(|v| v.cur_scope_mut().bpush_arg(arg))
   }
 
-  exec_input(input, None, false, Some(path_raw))
+  exec_input(input, None, false, Some(path_raw.into()))
 }
 
 fn first_run_setup() -> ShResult<()> {
@@ -282,6 +282,7 @@ fn first_run_setup() -> ShResult<()> {
 fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup(args.login_shell);
+	crate::state::INTERACTIVE.store(true, Ordering::SeqCst);
 
   write_meta(|m| m.create_socket())?;
 

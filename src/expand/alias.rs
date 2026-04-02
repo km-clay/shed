@@ -1,7 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::parse::lex::{LexFlags, LexStream, TkFlags};
-use crate::prelude::*;
 use crate::readline::keys::{KeyCode, KeyEvent, ModKeys};
 use crate::state::{LogTab, read_shopts};
 
@@ -14,7 +13,7 @@ pub fn expand_aliases(
   log_tab: &LogTab,
 ) -> String {
   let mut result = input.clone();
-  let tokens: Vec<_> = LexStream::new(Arc::new(input), LexFlags::empty()).collect();
+  let tokens: Vec<_> = LexStream::new(input.into(), LexFlags::empty()).collect();
   let mut expanded_this_iter: Vec<String> = vec![];
 
   for token_result in tokens.into_iter().rev() {

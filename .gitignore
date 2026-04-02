@@ -1,5 +1,7 @@
 target
 **/*.rs.bk
+flamegraph.svg
+perf*
 .idea
 *.iml
 /result*

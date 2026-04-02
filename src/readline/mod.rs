@@ -435,7 +435,7 @@ impl ShedLine {
       ModeReport::Replace => flags |= KeyMapFlags::REPLACE,
       ModeReport::Verbatim => flags |= KeyMapFlags::VERBATIM,
       ModeReport::Emacs => flags |= KeyMapFlags::EMACS,
-      ModeReport::Unknown => todo!(),
+      ModeReport::Unknown => panic!("Unknown mode report"),
     }
 
     if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty()) {
@@ -458,7 +458,7 @@ impl ShedLine {
     if self.mode.report_mode() == ModeReport::Normal {
       return Ok(true);
     }
-    let input = Arc::new(self.editor.joined());
+    let input: Arc<str> = self.editor.joined().into();
     self.editor.calc_indent_level();
     let lex_result1 =
       LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
@@ -1724,8 +1724,8 @@ impl ShedLine {
 /// (where COMMAND, RESET, etc. are invisible Unicode markers)
 pub fn annotate_input(input: &str) -> String {
   let mut annotated = input.to_string();
-  let input = Arc::new(input.to_string());
-  let tokens: Vec<Tk> = lex::LexStream::new(input, LexFlags::LEX_UNFINISHED)
+  let input = input.into();
+  let tokens: Vec<Tk> = lex::LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED)
     .flatten()
     .filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
     .collect();
@@ -1793,8 +1793,8 @@ pub fn annotate_input_recursive(input: &str) -> String {
 }
 
 pub fn get_insertions(input: &str) -> Vec<(usize, Marker)> {
-  let input = Arc::new(input.to_string());
-  let tokens: Vec<Tk> = lex::LexStream::new(input, LexFlags::LEX_UNFINISHED)
+  let input = input.into();
+  let tokens: Vec<Tk> = lex::LexStream::new(Arc::clone(&input), LexFlags::LEX_UNFINISHED)
     .flatten()
     .collect();
 

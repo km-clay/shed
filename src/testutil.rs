@@ -3,7 +3,6 @@ use std::{
   env,
   os::fd::{AsRawFd, BorrowedFd, OwnedFd},
   path::PathBuf,
-  sync::Arc,
 };
 
 use nix::{
@@ -16,7 +15,7 @@ use nix::{
 use crate::{
   expand::expand_aliases,
   libsh::error::ShResult,
-  parse::{ParsedSrc, Redir, RedirType, execute::exec_input, lex::LexFlags},
+  parse::{NdKind, ParsedSrc, Redir, RedirType, execute::exec_input, lex::LexFlags},
   procio::{IoFrame, IoMode, RedirGuard},
   readline::register::{restore_registers, save_registers},
   state::{MetaTab, SHED, read_logic},
@@ -156,10 +155,9 @@ pub fn get_ast(input: &str) -> ShResult<Vec<crate::parse::Node>> {
   let log_tab = read_logic(|l| l.clone());
   let input = expand_aliases(input.into(), HashSet::new(), &log_tab);
 
-  let source_name = "test_input".to_string();
-  let mut parser = ParsedSrc::new(Arc::new(input))
+  let mut parser = ParsedSrc::new(input.into())
     .with_lex_flags(LexFlags::empty())
-    .with_name(source_name.clone());
+    .with_name("test_input".into());
 
   parser
     .parse_src()
@@ -227,41 +225,6 @@ impl crate::parse::Node {
       Err(output)
     } else {
       Ok(())
-    }
-  }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum NdKind {
-  IfNode,
-  LoopNode,
-  ForNode,
-  CaseNode,
-  Command,
-  Pipeline,
-  Conjunction,
-  Assignment,
-  BraceGrp,
-  Negate,
-  Test,
-  FuncDef,
-}
-
-impl crate::parse::NdRule {
-  pub fn as_nd_kind(&self) -> NdKind {
-    match self {
-      Self::Negate { .. } => NdKind::Negate,
-      Self::IfNode { .. } => NdKind::IfNode,
-      Self::LoopNode { .. } => NdKind::LoopNode,
-      Self::ForNode { .. } => NdKind::ForNode,
-      Self::CaseNode { .. } => NdKind::CaseNode,
-      Self::Command { .. } => NdKind::Command,
-      Self::Pipeline { .. } => NdKind::Pipeline,
-      Self::Conjunction { .. } => NdKind::Conjunction,
-      Self::Assignment { .. } => NdKind::Assignment,
-      Self::BraceGrp { .. } => NdKind::BraceGrp,
-      Self::Test { .. } => NdKind::Test,
-      Self::FuncDef { .. } => NdKind::FuncDef,
     }
   }
 }

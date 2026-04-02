@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::atomic::AtomicBool};
 
 pub mod scopes;
 pub use scopes::*;
@@ -14,6 +14,8 @@ pub mod jobs;
 pub use jobs::*;
 
 use crate::{libsh::error::ShErr, shopt::ShOpts};
+
+pub static INTERACTIVE: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
   pub static SHED: Shed = Shed::new();

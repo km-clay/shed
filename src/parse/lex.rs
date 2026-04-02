@@ -73,18 +73,18 @@ impl QuoteState {
 
 #[derive(Clone, PartialEq, Default, Debug, Eq, Hash)]
 pub struct SpanSource {
-  name: String,
-  content: Arc<String>,
+  name: Arc<str>,
+  content: Arc<str>,
 }
 
 impl SpanSource {
   pub fn name(&self) -> &str {
     &self.name
   }
-  pub fn content(&self) -> Arc<String> {
+  pub fn content(&self) -> Arc<str> {
     self.content.clone()
   }
-  pub fn rename(&mut self, name: String) {
+  pub fn rename(&mut self, name: Arc<str>) {
     self.name = name;
   }
 }
@@ -95,16 +95,17 @@ impl Display for SpanSource {
   }
 }
 
-/// Span::new(10..20)
 #[derive(Clone, PartialEq, Default, Debug)]
+/// A slice of some source text. Ultimately wraps an Arc<String>, which means these are cheap to clone.
+/// Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
 pub struct Span {
   range: Range<usize>,
   source: SpanSource,
 }
 
 impl Span {
-  /// New `Span`. Wraps a range and a string slice that it refers to.
-  pub fn new(range: Range<usize>, source: Arc<String>) -> Self {
+  /// New `Span`. Wraps a range and a string that it refers to.
+  pub fn new(range: Range<usize>, source: Arc<str>) -> Self {
     let source = SpanSource {
       name: "<stdin>".into(),
       content: source,
@@ -114,24 +115,24 @@ impl Span {
   pub fn from_span_source(range: Range<usize>, source: SpanSource) -> Self {
     Span { range, source }
   }
-  pub fn rename(&mut self, name: String) {
+  pub fn rename(&mut self, name: Arc<str>) {
     self.source.name = name;
   }
-  pub fn with_name(mut self, name: String) -> Self {
+  pub fn with_name(mut self, name: Arc<str>) -> Self {
     self.source.name = name;
     self
   }
   pub fn line_and_col(&self) -> (usize, usize) {
-    let content = self.source.content();
-    let source = ariadne::Source::from(content.as_str());
-    let (_, line, col) = source.get_byte_line(self.range.start).unwrap();
+    let content = &self.source.content[..self.range.start];
+		let line = content.bytes().filter(|&b| b == b'\n').count();
+		let col = content.len() - content.rfind('\n').map(|i| i + 1).unwrap_or(0);
     (line, col)
   }
   /// Slice the source string at the wrapped range
   pub fn as_str(&self) -> &str {
     &self.source.content[self.range().start..self.range().end]
   }
-  pub fn get_source(&self) -> Arc<String> {
+  pub fn get_source(&self) -> Arc<str> {
     self.source.content.clone()
   }
   pub fn span_source(&self) -> &SpanSource {
@@ -163,12 +164,19 @@ impl ariadne::Span for Span {
   }
 }
 
-/// Allows simple access to the underlying range wrapped by the span
 #[derive(Clone, PartialEq, Debug)]
+/// The "class" of a token, i.e. what kind of token it is. This is the result of lexing, and is used during parsing to determine how to interpret the token.
 pub enum TkRule {
-  Null,
-  SOI, // Start-of-Input
+	/// A normal string token. By far the most common type of token. Used for command names, keywords, arguments, basically any "words".
+	/// String tokens are further disambiguated using the TkFlags on the token itself, which can mark a string token as a keyword, a command name, a subshell, etc.
   Str,
+
+	/// The start of a given input.
+  SOI,
+	/// The end of a given input.
+  EOI,
+
+  Null,
   Pipe,
   ErrPipe,
   And,
@@ -180,9 +188,10 @@ pub enum TkRule {
   CasePattern,
   BraceGrpStart,
   BraceGrpEnd,
-  Expanded { exp: Vec<String> },
   Comment,
-  EOI, // End-of-Input
+
+	/// A special token class used for tokens that are the result of expansion, not direct lexing. The contained Vec<String> is the result of splitting the expanded text into words according to shell field splitting rules. This is used to allow expansions to produce multiple tokens, which is necessary for things like `echo *` where the `*` may expand to multiple filenames.
+  Expanded { exp: Vec<String> },
 }
 
 impl Default for TkRule {
@@ -192,6 +201,17 @@ impl Default for TkRule {
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
+/// A single input token. Wraps three things:
+/// * A `TkRule` which identifies what kind of token it is
+/// * A `Span` which represents the slice of the original input the token refers to
+/// * `TkFlags` which is a bitfield containing simple metadata
+///
+/// Generally speaking, these are very cheap to clone. The only time cloning a `Tk` is a heavy operation
+/// is if the wrapped `TkRule` is `TkRule::Expanded`, which contains a `Vec<String>` that needs to be cloned.
+/// However, `TkRule::Expanded` is never created through lexing, so it is very rare that a cloned token will have this rule.
+/// Therefore, you can generally consider cloning a token to be effectively as cheap as cloning an Arc<T>.
+///
+/// `TkRule::Expanded` is only created during token expansion, which generally happens much later in an execution cycle.
 pub struct Tk {
   pub class: TkRule,
   pub span: Span,
@@ -211,7 +231,7 @@ impl Tk {
   pub fn as_str(&self) -> &str {
     self.span.as_str()
   }
-  pub fn source(&self) -> Arc<String> {
+  pub fn source(&self) -> Arc<str> {
     self.span.source.content.clone()
   }
   pub fn mark(&mut self, flag: TkFlags) {
@@ -322,10 +342,17 @@ pub fn clean_input(input: &str) -> String {
   output
 }
 
+/// The main struct for lexical analysis of shell input.
+/// Wraps the source string and a cursor position, as well as some state for handling things like quoting and brace groups.
+///
+/// This struct is useful for more than just the lex-parse-execute pipeline. A single input will be lexed multiple times in many places throughout the codebase. Examples include the syntax highlighter, the line editor auto-indent logic, the bodies of subshells, etc
+///
+/// Notes:
+/// The first and last lexed token will be an empty token with class TkRule::SOI and TkRule::EOI respectively. These tokens must be handled specially if you are using the lexer for internal stuff like the cases mentioned above.
 pub struct LexStream {
-  source: Arc<String>,
+  source: Arc<str>,
   pub cursor: usize,
-  pub name: String,
+  pub name: Arc<str>,
   quote_state: QuoteState,
   brc_grp_depth: usize,
   brc_grp_start: Option<usize>,
@@ -335,7 +362,7 @@ pub struct LexStream {
 }
 
 impl LexStream {
-  pub fn new(source: Arc<String>, flags: LexFlags) -> Self {
+  pub fn new(source: Arc<str>, flags: LexFlags) -> Self {
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
     Self {
       flags,
@@ -371,7 +398,7 @@ impl LexStream {
     };
     self.source.get(start..end)
   }
-  pub fn with_name(mut self, name: String) -> Self {
+  pub fn with_name(mut self, name: Arc<str>) -> Self {
     self.name = name;
     self
   }

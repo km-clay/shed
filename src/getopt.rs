@@ -357,7 +357,7 @@ mod tests {
   }
 
   fn lex(input: &str) -> Vec<Tk> {
-    LexStream::new(Arc::new(input.to_string()), LexFlags::empty())
+    LexStream::new(input.into(), LexFlags::empty())
       .collect::<ShResult<Vec<Tk>>>()
       .unwrap()
   }

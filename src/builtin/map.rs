@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, sync::Arc};
+use std::{collections::HashMap, fmt::Display};
 
 use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
@@ -324,7 +324,7 @@ pub fn map(node: Node) -> ShResult<()> {
       } else if is_arr {
         let raw = rhs.as_str();
         let raw = raw[1..raw.len() - 1].to_string();
-        let tokens = LexStream::new(Arc::new(raw), LexFlags::empty())
+        let tokens = LexStream::new(raw.into(), LexFlags::empty())
           .filter(lex::not_marker)
           .try_fold(vec![], |mut acc, tk| -> ShResult<Vec<MapNode>> {
             for word in tk?.expand()?.get_words() {

@@ -61,10 +61,10 @@ pub fn alias(node: Node) -> ShResult<()> {
         ));
       }
       write_logic(|l| l.insert_alias(name, body, span.clone()));
+			write_meta(|m| m.cache_path_command(name.to_string()));
     }
   }
 
-  write_meta(|m| m.rehash_commands());
   state::set_status(0);
   Ok(())
 }
@@ -106,7 +106,7 @@ pub fn unalias(node: Node) -> ShResult<()> {
           "unalias: alias '{}' not found", arg.fg(next_color()),
         ));
       };
-      write_logic(|l| l.remove_alias(&arg))
+      write_logic(|l| l.remove_alias(&arg));
     }
   }
   state::set_status(0);

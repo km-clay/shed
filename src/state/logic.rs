@@ -39,19 +39,8 @@ pub struct ShFunc {
 }
 
 impl ShFunc {
-  pub fn new(mut src: ParsedSrc, source: Span) -> Self {
-    let body = Self::extract_brc_grp_hack(src.extract_nodes());
+  pub fn new(body: Node, source: Span) -> Self {
     Self { body, source }
-  }
-  fn extract_brc_grp_hack(mut tree: Vec<Node>) -> Node {
-    // FIXME: find a better way to do this
-    let conjunction = tree.pop().unwrap();
-    let NdRule::Conjunction { mut elements } = conjunction.class else {
-      unreachable!()
-    };
-    let conjunct_node = elements.pop().unwrap();
-    let ConjunctNode { cmd, operator: _ } = conjunct_node;
-    *cmd
   }
   pub fn body(&self) -> &Node {
     &self.body
@@ -118,6 +107,8 @@ pub struct AutoCmd {
 pub struct LogTab {
   functions: HashMap<String, ShFunc>,
   aliases: HashMap<String, ShAlias>,
+	pub dirty: bool, // flips on alias/function insertion. used for signaling function/alias caching.
+
   traps: HashMap<TrapTarget, String>,
   keymaps: Vec<KeyMap>,
   autocmds: HashMap<AutoCmdKind, Vec<AutoCmd>>,
@@ -175,7 +166,12 @@ impl LogTab {
   }
   pub fn insert_func(&mut self, name: &str, src: ShFunc) {
     self.functions.insert(name.into(), src);
+		self.dirty = true;
   }
+	pub fn remove_func(&mut self, name: &str) {
+		self.functions.remove(name);
+		self.dirty = true;
+	}
   pub fn insert_trap(&mut self, target: TrapTarget, command: String) {
     self.traps.insert(target, command);
   }
@@ -205,12 +201,14 @@ impl LogTab {
         source,
       },
     );
+		self.dirty = true;
   }
   pub fn get_alias(&self, name: &str) -> Option<ShAlias> {
     self.aliases.get(name).cloned()
   }
   pub fn remove_alias(&mut self, name: &str) {
     self.aliases.remove(name);
+		self.dirty = true;
   }
   pub fn clear_aliases(&mut self) {
     self.aliases.clear()

@@ -503,9 +503,8 @@ impl IndentCtx {
     self.depth = 0;
     self.ctx.clear();
 
-    let input_arc = Arc::new(input.to_string());
     let Ok(tokens) =
-      LexStream::new(input_arc, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()
+      LexStream::new(input.into(), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()
     else {
       log::error!("Lexing failed during depth calculation: {:?}", input);
       return 0;

@@ -10,11 +10,8 @@ pub enum PromptTk {
   Text(String),
   AnsiSeq(String),
   Function(String), // Expands to the output of any defined shell function
-  VisGrp,
-  UserSeq,
   RuntimeMillis,
   RuntimeFormatted,
-  Weekday,
   Dquote,
   Squote,
   Return,
@@ -26,12 +23,7 @@ pub enum PromptTk {
   ShellName,
   Username,
   PromptSymbol,
-  ExitCode,
-  SuccessSymbol,
-  FailureSymbol,
   JobCount,
-  VisGroupOpen,
-  VisGroupClose,
 }
 
 pub fn format_cmd_runtime(dur: std::time::Duration) -> String {
@@ -228,8 +220,8 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
         match ch {
           'w' => tokens.push(PromptTk::Pwd),
           'W' => tokens.push(PromptTk::PwdShort),
-          'h' => tokens.push(PromptTk::Hostname),
-          'H' => tokens.push(PromptTk::HostnameShort),
+          'h' => tokens.push(PromptTk::HostnameShort),
+          'H' => tokens.push(PromptTk::Hostname),
           's' => tokens.push(PromptTk::ShellName),
           'u' => tokens.push(PromptTk::Username),
           '$' => tokens.push(PromptTk::PromptSymbol),
@@ -241,13 +233,11 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
           '\\' => tokens.push(PromptTk::Text("\\".into())),
           '"' => tokens.push(PromptTk::Text("\"".into())),
           '\'' => tokens.push(PromptTk::Text("'".into())),
-          '(' => tokens.push(PromptTk::VisGroupOpen),
-          ')' => tokens.push(PromptTk::VisGroupClose),
           '@' => {
             let mut func_name = String::new();
             let is_braced = chars.peek() == Some(&'{');
             let mut handled = false;
-            match_loop!(chars.next() => ch, {
+            match_loop!(chars.peek() => &ch => ch, {
               '}' if is_braced => {
                 chars.next();
                 handled = true;
@@ -255,7 +245,7 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
               }
               'A'..='Z' | 'a'..='z' | '0'..='9' | '_' => {
                 func_name.push(ch);
-                chars.next();
+								chars.next();
               }
               _ => {
                 handled = true;
@@ -363,7 +353,6 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
   let mut result = String::new();
 
   match_loop!(tokens.next() => token, {
-    PromptTk::AsciiOct(_) => todo!(),
     PromptTk::Text(txt) => result.push_str(&txt),
     PromptTk::AnsiSeq(params) => result.push_str(&params),
     PromptTk::RuntimeMillis => {
@@ -411,7 +400,6 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
       let hostname = std::env::var("HOST").unwrap();
       result.push_str(&hostname);
     }
-    PromptTk::HostnameShort => todo!(),
     PromptTk::ShellName => result.push_str("shed"),
     PromptTk::Username => {
       let username = std::env::var("USER").unwrap();
@@ -422,9 +410,15 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
       let symbol = if &uid == "0" { '#' } else { '$' };
       result.push(symbol);
     }
-    PromptTk::ExitCode => todo!(),
-    PromptTk::SuccessSymbol => todo!(),
-    PromptTk::FailureSymbol => todo!(),
+    PromptTk::HostnameShort => {
+			let hostname = std::env::var("HOST").unwrap();
+			let mut segments = hostname.split('.');
+			if let Some(first) = segments.next() {
+				result.push_str(first);
+			} else {
+				result.push_str(&hostname);
+			}
+		}
     PromptTk::JobCount => {
       let count = read_jobs(|j| {
         j.jobs()
@@ -440,19 +434,19 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
       });
       result.push_str(&count.to_string());
     }
+    PromptTk::AsciiOct(n) => {
+			if let Some(ch) = std::char::from_u32(n as u32) {
+				result.push(ch);
+			}
+		}
     PromptTk::Function(f) => {
       let output = expand_cmd_sub(&f)?;
       result.push_str(&output);
     }
-    PromptTk::VisGrp => todo!(),
-    PromptTk::UserSeq => todo!(),
-    PromptTk::Weekday => todo!(),
-    PromptTk::Dquote => todo!(),
-    PromptTk::Squote => todo!(),
-    PromptTk::Return => todo!(),
-    PromptTk::Newline => todo!(),
-    PromptTk::VisGroupOpen => todo!(),
-    PromptTk::VisGroupClose => todo!(),
+    PromptTk::Newline => result.push('\n'),
+    PromptTk::Dquote => result.push('"'),
+    PromptTk::Squote => result.push('\''),
+    PromptTk::Return => result.push('\r'),
   });
 
   Ok(result)
@@ -474,7 +468,7 @@ mod tests {
 
   #[test]
   fn prompt_hostname() {
-    let tokens = tokenize_prompt("\\h");
+    let tokens = tokenize_prompt("\\H");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Hostname));
   }
@@ -528,7 +522,7 @@ mod tests {
     assert_eq!(tokens.len(), 7);
     assert!(matches!(tokens[0], PromptTk::Username));
     assert!(matches!(tokens[1], PromptTk::Text(ref t) if t == "@"));
-    assert!(matches!(tokens[2], PromptTk::Hostname));
+    assert!(matches!(tokens[2], PromptTk::HostnameShort));
     assert!(matches!(tokens[3], PromptTk::Text(ref t) if t == " "));
     assert!(matches!(tokens[4], PromptTk::Pwd));
     assert!(matches!(tokens[5], PromptTk::PromptSymbol));

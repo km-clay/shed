@@ -47,17 +47,17 @@ macro_rules! try_match {
 /// &str for this use-case dramatically overcomplicates the code
 #[derive(Clone, Debug)]
 pub struct ParsedSrc {
-  pub src: Arc<String>,
-  pub name: String,
+  pub src: Arc<str>,
+  pub name: Arc<str>,
   pub ast: Ast,
   pub lex_flags: LexFlags,
   pub context: LabelCtx,
 }
 
 impl ParsedSrc {
-  pub fn new(src: Arc<String>) -> Self {
+  pub fn new(src: Arc<str>) -> Self {
     let src = if src.contains("\\\n") || src.contains('\r') {
-      Arc::new(clean_input(&src))
+      clean_input(&src).as_str().into()
     } else {
       src
     };
@@ -69,7 +69,7 @@ impl ParsedSrc {
       context: VecDeque::new(),
     }
   }
-  pub fn with_name(mut self, name: String) -> Self {
+  pub fn with_name(mut self, name: Arc<str>) -> Self {
     self.name = name;
     self
   }
@@ -656,6 +656,42 @@ pub enum AssignKind {
   DivEq,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+/// Flat NdRule names used mainly for debugging
+pub enum NdKind {
+  IfNode,
+  LoopNode,
+  ForNode,
+  CaseNode,
+  Command,
+  Pipeline,
+  Conjunction,
+  Assignment,
+  BraceGrp,
+  Negate,
+  Test,
+  FuncDef,
+}
+
+impl crate::parse::NdRule {
+  pub fn as_nd_kind(&self) -> NdKind {
+    match self {
+      Self::Negate { .. } => NdKind::Negate,
+      Self::IfNode { .. } => NdKind::IfNode,
+      Self::LoopNode { .. } => NdKind::LoopNode,
+      Self::ForNode { .. } => NdKind::ForNode,
+      Self::CaseNode { .. } => NdKind::CaseNode,
+      Self::Command { .. } => NdKind::Command,
+      Self::Pipeline { .. } => NdKind::Pipeline,
+      Self::Conjunction { .. } => NdKind::Conjunction,
+      Self::Assignment { .. } => NdKind::Assignment,
+      Self::BraceGrp { .. } => NdKind::BraceGrp,
+      Self::Test { .. } => NdKind::Test,
+      Self::FuncDef { .. } => NdKind::FuncDef,
+    }
+  }
+}
+
 #[derive(Clone, Debug)]
 pub enum NdRule {
   IfNode {
@@ -707,6 +743,7 @@ pub enum NdRule {
 
 pub struct ParseStream {
   pub tokens: Vec<Tk>,
+	pub cursor: usize,
   pub context: LabelCtx,
 }
 
@@ -714,6 +751,7 @@ impl Debug for ParseStream {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_struct("ParseStream")
       .field("tokens", &self.tokens)
+			.field("cursor", &self.cursor)
       .finish()
   }
 }
@@ -722,32 +760,42 @@ impl ParseStream {
   pub fn new(tokens: Vec<Tk>) -> Self {
     Self {
       tokens,
+			cursor: 0,
       context: VecDeque::new(),
     }
   }
   pub fn with_context(tokens: Vec<Tk>, context: LabelCtx) -> Self {
-    Self { tokens, context }
+    Self { tokens, cursor: 0, context }
+  }
+  /// Slice off consumed tokens
+  fn commit(&mut self, num_consumed: usize) {
+    assert!(self.cursor + num_consumed <= self.tokens.len());
+    self.cursor += num_consumed;
   }
   fn next_tk_class(&self) -> &TkRule {
-    if let Some(tk) = self.tokens.first() {
-      &tk.class
-    } else {
-      &TkRule::Null
-    }
+		self.peek_tk()
+			.map(|tk| &tk.class)
+			.unwrap_or(&TkRule::Null)
   }
   fn peek_tk(&self) -> Option<&Tk> {
-    self.tokens.first()
+    self.tokens.get(self.cursor)
   }
   fn next_tk(&mut self) -> Option<Tk> {
-    if !self.tokens.is_empty() {
-      if *self.next_tk_class() == TkRule::EOI {
-        return None;
-      }
-      Some(self.tokens.remove(0))
-    } else {
-      None
-    }
+		let tk = self.tokens.get(self.cursor)
+			.and_then(|tk| (tk.class != TkRule::EOI).then_some(tk))
+			.cloned()?;
+		self.cursor += 1;
+		Some(tk)
   }
+	fn tokens(&self) -> &[Tk] {
+		&self.tokens[self.cursor..]
+	}
+	fn is_empty(&self) -> bool {
+		self.tokens().is_empty()
+	}
+	fn len(&self) -> usize {
+		self.tokens().len()
+	}
   /// Catches a Sep token in cases where separators are optional
   ///
   /// e.g. both `if foo; then bar; fi` and
@@ -779,19 +827,15 @@ impl ParseStream {
     }
   }
   fn next_tk_is_some(&self) -> bool {
-    self
-      .tokens
-      .first()
+    self.peek_tk()
       .is_some_and(|tk| tk.class != TkRule::EOI)
   }
   fn check_case_pattern(&self) -> bool {
-    self
-      .tokens
-      .first()
+    self.peek_tk()
       .is_some_and(|tk| tk.class == TkRule::CasePattern)
   }
   fn check_keyword(&self, kw: &str) -> bool {
-    self.tokens.first().is_some_and(|tk| {
+    self.peek_tk().is_some_and(|tk| {
       if kw == "in" {
         tk.span.as_str() == "in"
       } else {
@@ -801,14 +845,8 @@ impl ParseStream {
   }
   fn check_redir(&self) -> bool {
     self
-      .tokens
-      .first()
+      .peek_tk()
       .is_some_and(|tk| tk.class == TkRule::Redir)
-  }
-  /// Slice off consumed tokens
-  fn commit(&mut self, num_consumed: usize) {
-    assert!(num_consumed <= self.tokens.len());
-    self.tokens = self.tokens[num_consumed..].to_vec();
   }
   /// This tries to match on different stuff that can appear in a command
   /// position Matches shell commands like if-then-fi, pipelines, etc.
@@ -875,11 +913,12 @@ impl ParseStream {
     let body;
 
     // Two forms: "name()" as one token, or "name" followed by "()" as separate tokens
+		// Kind of a hack but I forgot you can have the spaces when I wrote the lexer :D
     let spaced_form = !is_func_name(self.peek_tk())
       && self
         .peek_tk()
         .is_some_and(|tk| tk.flags.contains(TkFlags::IS_CMD))
-      && is_func_parens(self.tokens.get(1));
+      && is_func_parens(self.tokens().get(1));
 
     if !is_func_name(self.peek_tk()) && !spaced_form {
       return Ok(None);
@@ -888,13 +927,13 @@ impl ParseStream {
     let name_tk = self.next_tk().unwrap();
     node_tks.push(name_tk.clone());
     let name = name_tk.clone();
-    let name_raw = if spaced_form {
+    let name_raw: Arc<str> = if spaced_form {
       // Consume the "()" token
       let parens_tk = self.next_tk().unwrap();
       node_tks.push(parens_tk);
-      name.to_string()
+      name.as_str().into()
     } else {
-      name.to_string()
+      name.as_str().into()
     };
     let mut src = name_tk.span.span_source().clone();
     src.rename(name_raw.clone());
@@ -1621,115 +1660,132 @@ impl ParseStream {
     }
   }
   fn parse_cmd(&mut self) -> ShResult<Option<Node>> {
-    let tk_slice = self.tokens.clone();
-    let mut tk_iter = tk_slice.iter();
-    let mut node_tks = vec![];
-    let mut redirs = vec![];
-    let mut argv = vec![];
-    let flags = NdFlags::empty();
-    let mut assignments = vec![];
+		let mut node_tks = vec![];
 
-    while let Some(prefix_tk) = tk_iter.next() {
-      if let TkRule::CasePattern = prefix_tk.class {
-        self.panic_mode(&mut node_tks);
-        return Err(parse_err_full(
-          "Found case pattern in command",
-          &prefix_tk.span,
-          self.context.clone(),
-        ));
-      }
-      let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
-      let is_assignment = prefix_tk.flags.contains(TkFlags::ASSIGN);
-      let is_keyword = prefix_tk.flags.contains(TkFlags::KEYWORD);
+		let result = 'out: {
+			let tk_slice = self.tokens();
+			let mut tk_iter = tk_slice.iter().peekable();
+			let mut redirs = vec![];
+			let mut argv = vec![];
+			let flags = NdFlags::empty();
+			let mut assignments = vec![];
 
-      if is_cmd {
-        node_tks.push(prefix_tk.clone());
-        argv.push(prefix_tk.clone());
-        break;
-      } else if is_assignment {
-        let Some(assign) = self.parse_assignment(prefix_tk) else {
-          break;
-        };
-        node_tks.push(prefix_tk.clone());
-        assignments.push(assign)
-      } else if is_keyword {
-        return Ok(None);
-      } else if prefix_tk.class == TkRule::Sep {
-        // Separator ends the prefix section - add it so commit() consumes it
-        node_tks.push(prefix_tk.clone());
-        break;
-      } else {
-        // Other non-prefix token ends the prefix section
-        break;
-      }
-    }
+			loop {
+				let Some(prefix_tk) = tk_iter.next() else {
+					break;
+				};
+				if let TkRule::CasePattern = prefix_tk.class {
+					break 'out Err(parse_err_full(
+							"Found case pattern in command",
+							&prefix_tk.span,
+							self.context.clone(),
+					));
+				}
+				let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
+				let is_assignment = prefix_tk.flags.contains(TkFlags::ASSIGN);
+				let is_keyword = prefix_tk.flags.contains(TkFlags::KEYWORD);
 
-    if argv.is_empty() {
-      if assignments.is_empty() {
-        return Ok(None);
-      } else {
-        // If we have assignments but no command word,
-        // return the assignment-only command without parsing more tokens
-        self.commit(node_tks.len());
-        let mut context = self.context.clone();
-        let assignments_span = assignments.get_span().unwrap();
-        context.push_back((
-          assignments_span.source().clone(),
-          Label::new(assignments_span)
-            .with_message("in variable assignment defined here".to_string())
-            .with_color(next_color()),
-        ));
-        return Ok(Some(Node {
-          class: NdRule::Command { assignments, argv },
-          tokens: node_tks,
-          flags,
-          redirs,
-          context: self.context.clone(),
-        }));
-      }
-    }
+				if is_cmd {
+					node_tks.push(prefix_tk.clone());
+					argv.push(prefix_tk.clone());
+					break;
+				} else if is_assignment {
+					let Some(assign) = self.parse_assignment(prefix_tk) else {
+						break;
+					};
+					node_tks.push(prefix_tk.clone());
+					assignments.push(assign)
+				} else if is_keyword {
+					return Ok(None);
+				} else if prefix_tk.class == TkRule::Sep {
+					// Separator ends the prefix section - add it so commit() consumes it
+					node_tks.push(prefix_tk.clone());
+					break;
+				} else {
+					// Other non-prefix token ends the prefix section
+					break;
+				}
+			}
+			if argv.is_empty() {
+				if assignments.is_empty() {
+					break 'out Ok(None)
+				} else {
+					// If we have assignments but no command word,
+					// return the assignment-only command without parsing more tokens
+					self.commit(node_tks.len());
+					let mut context = self.context.clone();
+					let assignments_span = assignments.get_span().unwrap();
+					context.push_back((
+							assignments_span.source().clone(),
+							Label::new(assignments_span)
+							.with_message("in variable assignment defined here".to_string())
+							.with_color(next_color()),
+					));
+					break 'out Ok(Some(Node {
+						class: NdRule::Command { assignments, argv },
+						tokens: node_tks.clone(),
+						flags,
+						redirs,
+						context: self.context.clone(),
+					}))
+				}
+			}
+			loop {
+				let Some(tk) = tk_iter.next() else {
+					break;
+				};
+				match tk.class {
+					_ if tk_iter.peek().is_some_and(|tk| tk.class == TkRule::Bg) => break,
 
-    match_loop!(tk_iter.next() => tk => tk.class, {
-      _ if *self.next_tk_class() == TkRule::Bg => break,
+					TkRule::EOI
+						| TkRule::Pipe
+						| TkRule::ErrPipe
+						| TkRule::And
+						| TkRule::BraceGrpEnd
+						| TkRule::Or
+						| TkRule::Bg => break,
+					TkRule::Sep => {
+						node_tks.push(tk.clone());
+						break;
+					}
+					TkRule::Str => {
+						argv.push(tk.clone());
+						node_tks.push(tk.clone());
+					}
+					TkRule::Redir => {
+						node_tks.push(tk.clone());
+						let ctx = self.context.clone();
+						let redir = match Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx) {
+							Ok(r) => r,
+							Err(e) => {
+								self.panic_mode(&mut node_tks);
+								return Err(e);
+							}
+						};
+						redirs.push(redir);
+					}
+					_ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
+				};
+			}
+			self.commit(node_tks.len());
 
-      TkRule::EOI
-        | TkRule::Pipe
-        | TkRule::ErrPipe
-        | TkRule::And
-        | TkRule::BraceGrpEnd
-        | TkRule::Or
-        | TkRule::Bg => break,
-      TkRule::Sep => {
-        node_tks.push(tk.clone());
-        break;
-      }
-      TkRule::Str => {
-        argv.push(tk.clone());
-        node_tks.push(tk.clone());
-      }
-      TkRule::Redir => {
-        node_tks.push(tk.clone());
-        let ctx = self.context.clone();
-        let redir = match Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx) {
-          Ok(r) => r,
-          Err(e) => {
-            self.panic_mode(&mut node_tks);
-            return Err(e);
-          }
-        };
-        redirs.push(redir);
-      }
-      _ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
-    });
-    self.commit(node_tks.len());
+			Ok(Some(Node {
+				class: NdRule::Command { assignments, argv },
+				tokens: node_tks.clone(),
+				flags,
+				redirs,
+				context: self.context.clone(),
+			}))
+		};
 
-    Ok(Some(Node {
-      class: NdRule::Command { assignments, argv },
-      tokens: node_tks,
-      flags,
-      redirs,
-      context: self.context.clone(),
-    }))
+		match result {
+			Ok(node) => Ok(node),
+			Err(e) => {
+				self.panic_mode(&mut node_tks);
+				Err(e)
+			}
+		}
+
   }
   fn parse_assignment(&self, token: &Tk) -> Option<Node> {
     let mut chars = token.span.as_str().chars();
@@ -1843,10 +1899,10 @@ impl Iterator for ParseStream {
   type Item = ShResult<Node>;
   fn next(&mut self) -> Option<Self::Item> {
     // Empty token vector or only SOI/EOI tokens, nothing to do
-    if self.tokens.is_empty() || self.tokens.len() == 1 {
+    if self.is_empty() || self.len() == 1 {
       return None;
     }
-    while let Some(tk) = self.tokens.first() {
+    while let Some(tk) = self.tokens().first() {
       if let TkRule::EOI = tk.class {
         return None;
       }
@@ -2036,7 +2092,8 @@ where
 
 #[cfg(test)]
 pub mod tests {
-  use crate::testutil::{NdKind, get_ast};
+	use super::NdKind;
+  use crate::testutil::get_ast;
 
   #[test]
   fn parse_hello_world() {

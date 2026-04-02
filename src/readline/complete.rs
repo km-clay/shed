@@ -1800,11 +1800,11 @@ impl SimpleCompleter {
   }
 
   pub fn get_candidates(&mut self, line: String, cursor_pos: usize) -> ShResult<CompResult> {
-    let source = Arc::new(line.clone());
+    let source: Arc<str> = line.into();
     let tokens =
-      lex::LexStream::new(source, LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()?;
+      lex::LexStream::new(source.clone(), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()?;
 
-    let ctx = self.build_comp_ctx(&tokens, &line, cursor_pos)?;
+    let ctx = self.build_comp_ctx(&tokens, &source, cursor_pos)?;
 
     // Set token_span from CompContext's current word
     if let Some(cur) = ctx.words.get(ctx.cword) {
@@ -1816,7 +1816,7 @@ impl SimpleCompleter {
     // Use marker-based context detection for sub-token awareness (e.g. VAR_SUB
     // inside a token). Run this before comp specs so variable completions take
     // priority over programmable completion.
-    let (mut marker_ctx, token_start) = self.get_subtoken_completion(&line, cursor_pos);
+    let (mut marker_ctx, token_start) = self.get_subtoken_completion(&source, cursor_pos);
 
     if marker_ctx.last() == Some(&markers::VAR_SUB)
       && let Some(cur) = ctx.words.get(ctx.cword)
@@ -1858,7 +1858,7 @@ impl SimpleCompleter {
     // Get the current token from CompContext
     let Some(mut cur_token) = ctx.words.get(ctx.cword).cloned() else {
       let candidates = complete_filename("./");
-      let end_pos = line.len();
+      let end_pos = source.len();
       self.token_span = (end_pos, end_pos);
       return Ok(CompResult::from_candidates(candidates));
     };

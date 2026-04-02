@@ -131,7 +131,7 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         operand,
         conjunct,
       } => {
-        let operand = operand.expand()?.get_words().join(" ");
+        let operand = operand.expand_no_glob()?.get_words().join(" ");
         conjunct_op = conjunct;
         let TestOp::Unary(op) = TestOp::from_str(operator.as_str())? else {
           return Err(sherr!(
@@ -234,8 +234,8 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
         rhs,
         conjunct,
       } => {
-        let lhs = lhs.expand()?.get_words().join(" ");
-        let rhs = rhs.expand()?.get_words().join(" ");
+        let lhs = lhs.expand_no_glob()?.get_words().join(" ");
+        let rhs = rhs.expand_no_glob()?.get_words().join(" ");
         conjunct_op = conjunct;
         let test_op = operator.as_str().parse::<TestOp>()?;
         match test_op {
@@ -561,6 +561,13 @@ mod tests {
     assert_eq!(state::get_status(), 0);
   }
 
+	#[test]
+	fn no_glob_expansion() {
+		let _g = TestGuard::new();
+		test_input("[[ 'hello*' == hello* ]]").unwrap();
+		assert_eq!(state::get_status(), 0);
+	}
+
   #[test]
   fn test_and_first_false() {
     let _g = TestGuard::new();
@@ -618,4 +625,5 @@ mod tests {
     use std::str::FromStr;
     assert!(TestOp::from_str("~=").is_err());
   }
+
 }

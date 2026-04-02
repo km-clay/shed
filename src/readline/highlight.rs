@@ -467,7 +467,7 @@ impl Highlighter {
       // this is a file that is executable by someone
       meta.permissions().mode() & 0o111 != 0
     } else {
-      read_meta(|m| m.cached_cmds().get(command).is_some())
+      read_meta(|m| m.cached_cmds().contains(command))
     }
   }
 

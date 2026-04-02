@@ -93,7 +93,7 @@ impl FromStr for ShellParam {
   }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Default, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct VarFlags(u8);
 
 impl VarFlags {
@@ -204,7 +204,7 @@ impl VarKind {
     }
     let raw = raw[1..raw.len() - 1].to_string();
 
-    let tokens: VecDeque<String> = LexStream::new(Arc::new(raw), LexFlags::empty())
+    let tokens: VecDeque<String> = LexStream::new(raw.into(), LexFlags::empty())
       .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
       .try_fold(String::new(), |mut acc, wrds| {
         match wrds {
@@ -263,6 +263,15 @@ impl Display for VarKind {
 pub struct Var {
   flags: VarFlags,
   kind: VarKind,
+}
+
+impl Default for Var {
+	fn default() -> Self {
+	  Self {
+			flags: VarFlags::default(),
+			kind: VarKind::Str(String::new()),
+		}
+	}
 }
 
 impl Var {
@@ -354,7 +363,6 @@ impl VarTab {
   pub fn new() -> Self {
     let vars = Self::init_sh_vars();
     let params = Self::init_params();
-    Self::init_env();
     let mut var_tab = Self {
       vars,
       params,
@@ -374,9 +382,17 @@ impl VarTab {
   fn init_sh_vars() -> HashMap<String, Var> {
     let mut vars = HashMap::new();
     vars.insert("COMP_WORDBREAKS".into(), " \t\n\"'@><=;|&(".into());
+		let env_vars = Self::init_env();
+		vars.extend(env_vars);
     vars
   }
-  fn init_env() {
+  fn init_env() -> Vec<(String, Var)> {
+		let mut vars = vec![];
+		let mut set_var = |var: &str, val: &str| {
+			unsafe { env::set_var(var, val) };
+			vars.push((var.to_string(), val.into()))
+		};
+
     let pathbuf_to_string =
       |pb: Result<PathBuf, std::io::Error>| pb.unwrap_or_default().to_string_lossy().to_string();
     // First, inherit any env vars from the parent process
@@ -416,25 +432,25 @@ impl VarTab {
 
     let help_paths = format!("/usr/share/shed/doc:{}", shed_docs.display());
 
-    unsafe {
-      env::set_var("IFS", " \t\n");
-      env::set_var("HOST", hostname.clone());
-      env::set_var("UID", uid.to_string());
-      env::set_var("PPID", getppid().to_string());
-      env::set_var("TMPDIR", "/tmp");
-      env::set_var("TERM", term);
-      env::set_var("LANG", "en_US.UTF-8");
-      env::set_var("USER", username.clone());
-      env::set_var("LOGNAME", username);
-      env::set_var("PWD", pathbuf_to_string(std::env::current_dir()));
-      env::set_var("OLDPWD", pathbuf_to_string(std::env::current_dir()));
-      env::set_var("HOME", home.clone());
-      env::set_var("SHELL", pathbuf_to_string(std::env::current_exe()));
-      env::set_var("SHED_HIST", format!("{}/.shed_history", home));
-      env::set_var("SHED_HISTDB", format!("{}", shed_db.display()));
-      env::set_var("SHED_RC", format!("{}/.shedrc", home));
-      env::set_var("SHED_HPATH", help_paths);
-    }
+		set_var("IFS", " \t\n");
+		set_var("HOST", &hostname.clone());
+		set_var("UID", &uid.to_string());
+		set_var("PPID", &getppid().to_string());
+		set_var("TMPDIR", "/tmp");
+		set_var("TERM", &term);
+		set_var("LANG", "en_US.UTF-8");
+		set_var("USER", &username.clone());
+		set_var("LOGNAME", &username);
+		set_var("PWD", &pathbuf_to_string(std::env::current_dir()));
+		set_var("OLDPWD", &pathbuf_to_string(std::env::current_dir()));
+		set_var("HOME", &home.clone());
+		set_var("SHELL", &pathbuf_to_string(std::env::current_exe()));
+		set_var("SHED_HIST", &format!("{}/.shed_history", home));
+		set_var("SHED_HISTDB", &format!("{}", shed_db.display()));
+		set_var("SHED_RC", &format!("{}/.shedrc", home));
+		set_var("SHED_HPATH", &help_paths);
+
+		vars
   }
   pub fn init_sh_argv(&mut self) {
     for arg in env::args() {
@@ -544,6 +560,12 @@ impl VarTab {
       std::env::var(var).unwrap_or_default()
     }
   }
+	pub fn get_var_meta(&self, var: &str) -> Var {
+		self.try_get_var_meta(var).unwrap_or_default()
+	}
+	pub fn try_get_var_meta(&self, var: &str) -> Option<Var> {
+		self.vars.get(var).cloned()
+	}
   pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
     self.vars.get(var_name).map(|var| var.flags)
   }

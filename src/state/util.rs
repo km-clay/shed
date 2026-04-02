@@ -76,7 +76,7 @@ pub fn parse_arr_bracket(var_name: &str) -> Option<(String, String)> {
 
 /// Expand the raw index expression and parse it into an ArrIndex.
 pub fn expand_arr_index(idx_raw: &str) -> ShResult<ArrIndex> {
-  let expanded = LexStream::new(Arc::new(idx_raw.to_string()), LexFlags::empty())
+  let expanded = LexStream::new(idx_raw.into(), LexFlags::empty())
     .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
     .try_fold(vec![], |mut acc, wrds| {
       match wrds {
@@ -184,7 +184,7 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
           command.clone(),
           None,
           false,
-          Some("autocmd (pre-changedir)".to_string()),
+          Some("autocmd (pre-changedir)".into()),
         ) {
           e.print_error();
         };
@@ -216,7 +216,7 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
           command.clone(),
           None,
           false,
-          Some("autocmd (post-changedir)".to_string()),
+          Some("autocmd (post-changedir)".into()),
         ) {
           e.print_error();
         };
@@ -414,7 +414,7 @@ pub fn source_file(path: PathBuf) -> ShResult<()> {
 
   let mut buf = String::new();
   file.read_to_string(&mut buf)?;
-  exec_input(buf, None, false, Some(source_name))?;
+  exec_input(buf, None, false, Some(source_name.into()))?;
   Ok(())
 }
 
