@@ -1172,10 +1172,10 @@ impl Iterator for LexStream {
         self.cursor += 1;
 
         while let Some(ch) = get_char(&self.source, self.cursor) {
-          self.cursor += ch.len_utf8();
           if ch == '\n' {
             break;
           }
+          self.cursor += ch.len_utf8();
         }
 
         if self.flags.contains(LexFlags::LEX_UNFINISHED) {

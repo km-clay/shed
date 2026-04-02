@@ -19,7 +19,7 @@ use crate::{
   libsh::error::{ShErr, ShResult},
   prelude::*,
   readline::{
-    complete::{BashCompSpec, CompSpec},
+    complete::CompSpec,
     keys::KeyEvent,
   },
   sherr,
@@ -301,10 +301,7 @@ impl Default for MetaTab {
 
 impl MetaTab {
   pub fn new() -> Self {
-    Self {
-      comp_specs: Self::get_builtin_comp_specs(),
-      ..Default::default()
-    }
+    Self::default()
   }
   pub fn shell_time(&self) -> Instant {
     self.shell_time
@@ -336,48 +333,6 @@ impl MetaTab {
   }
   pub fn reset_getopts_char_offset(&mut self) {
     self.getopts_offset = 0;
-  }
-  pub fn get_builtin_comp_specs() -> HashMap<String, Box<dyn CompSpec>> {
-    let mut map = HashMap::new();
-
-    map.insert(
-      "cd".into(),
-      Box::new(BashCompSpec::new().dirs(true)) as Box<dyn CompSpec>,
-    );
-    map.insert(
-      "pushd".into(),
-      Box::new(BashCompSpec::new().dirs(true)) as Box<dyn CompSpec>,
-    );
-    map.insert(
-      "popd".into(),
-      Box::new(BashCompSpec::new().dirs(true)) as Box<dyn CompSpec>,
-    );
-    map.insert(
-      "source".into(),
-      Box::new(BashCompSpec::new().files(true)) as Box<dyn CompSpec>,
-    );
-    map.insert(
-      "bg".into(),
-      Box::new(BashCompSpec::new().jobs(true)) as Box<dyn CompSpec>,
-    );
-    map.insert(
-      "fg".into(),
-      Box::new(BashCompSpec::new().jobs(true)) as Box<dyn CompSpec>,
-    );
-    map.insert(
-      "disown".into(),
-      Box::new(BashCompSpec::new().jobs(true)) as Box<dyn CompSpec>,
-    );
-    map.insert(
-      "alias".into(),
-      Box::new(BashCompSpec::new().aliases(true)) as Box<dyn CompSpec>,
-    );
-    map.insert(
-      "trap".into(),
-      Box::new(BashCompSpec::new().signals(true)) as Box<dyn CompSpec>,
-    );
-
-    map
   }
   pub fn cached_cmds(&self) -> &HashSet<String> {
     &self.path_cache

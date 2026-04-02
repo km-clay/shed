@@ -1354,7 +1354,7 @@ impl ShedLine {
       self.status_msgs.push_back((msg, now));
     }
 
-    while let Some((msg, time)) = self.status_msgs.front() {
+    while !final_draw && let Some((msg, time)) = self.status_msgs.front() {
       if time.elapsed().as_secs() < 5 {
         log::debug!("drawing status message: {msg}");
         let down = new_layout.end.row - new_layout.cursor.row;

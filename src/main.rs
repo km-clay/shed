@@ -44,8 +44,7 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs,
-  write_meta, write_shopts,
+  AutoCmdKind, generate_default_rc, rc_file_path, read_logic, read_shopts, runtime_files, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;
@@ -219,17 +218,85 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
   exec_input(input, None, false, Some(path_raw))
 }
 
+fn first_run_setup() -> ShResult<()> {
+	let tty = borrow_fd(*TTY_FILENO);
+	write(tty, b"\x1b[2J\x1b[H")?; // clear screen and move cursor to top-left to make the message more visible
+	write(tty, b"~/.shedrc was not found. Generate an rc file with sane defaults? [Y/n]\n")?;
+
+	let mut fds = [PollFd::new(tty,PollFlags::POLLIN)];
+
+	let mut answer = String::new();
+
+	loop {
+		match poll(&mut fds, PollTimeout::NONE) {
+			Err(Errno::EINTR) => continue,
+			Err(e) => {
+				eprintln!("poll error during first-run setup: {e}");
+				QUIT_CODE.store(1, Ordering::SeqCst);
+				return Err(sherr!(CleanExit(1), "poll error during first-run setup",));
+			}
+			Ok(_) => {}
+		}
+
+
+    if fds[0]
+      .revents()
+      .is_some_and(|r| r.contains(PollFlags::POLLIN))
+    {
+      let mut buffer = [0u8; 1024];
+      match read(*TTY_FILENO, &mut buffer) {
+        Ok(0) => {
+          // EOF
+          break;
+        }
+        Ok(n) => {
+					answer = String::from_utf8_lossy(&buffer[..n]).to_string();
+        }
+        Err(Errno::EINTR) => {
+          // Interrupted, continue to handle signals
+          continue;
+        }
+        Err(e) => {
+          eprintln!("read error: {e}");
+          break;
+        }
+      }
+		}
+
+		match std::mem::take(&mut answer).to_ascii_lowercase().as_str() {
+			"y" | "\r" | "\n" => break,
+			"n" => return Ok(()),
+			_ => continue
+		}
+	}
+
+	let rc_path = generate_default_rc()?;
+
+	if let Some(rc_path) = rc_path {
+		write_meta(|m| m.post_status_message(format!("Generated default rc file at '{}'", rc_path.display())));
+	}
+
+	Ok(())
+}
+
 fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup(args.login_shell);
 
   write_meta(|m| m.create_socket())?;
 
-  if args.login_shell
-    && let Err(e) = source_login()
-  {
-    e.print_error();
+  if args.login_shell {
+		source_login().ok();
   }
+
+	if rc_file_path().is_none_or(|f| !f.is_file()) {
+		// we didn't find any runtime files at all
+		// let's run a first time setup
+		if let Err(e) = first_run_setup() {
+			e.print_error();
+		}
+	}
+
 
   if let Err(e) = source_rc() {
     e.print_error();
