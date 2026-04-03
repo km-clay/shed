@@ -497,7 +497,7 @@ impl IndentCtx {
     }
   }
 
-  pub fn calculate(&mut self, input: &str) -> usize {
+	pub fn checked_calculate(&mut self, input: &str) -> (usize, bool) {
     self.depth = 0;
     self.ctx.clear();
 
@@ -509,14 +509,18 @@ impl IndentCtx {
 
 		// now we parse the input
 		// src.block_depth will be non-zero if the parse was stopped somewhere.
-		src.parse_src().ok();
+		let res = src.parse_src();
 
 
 		self.depth = src.block_depth;
 		log::debug!("Calculated indent depth: {}", self.depth);
 
 
-    self.depth
+    (self.depth, res.is_err())
+	}
+
+  pub fn calculate(&mut self, input: &str) -> usize {
+		self.checked_calculate(input).0
   }
 }
 
@@ -891,18 +895,23 @@ impl LineBuf {
     Pos { row, col }
   }
   fn break_line(&mut self) {
-    let (row, col) = self.row_col();
-    let level = self.calc_indent_level();
-    let mut rest = self.lines[row].split_off(col);
-    let mut col = 0;
-    for tab in std::iter::repeat_n(Grapheme::from('\t'), level) {
-      rest.insert(0, tab);
-      col += 1;
-    }
+		self.break_line_at(self.cursor.pos);
+  }
+	fn break_line_at(&mut self, pos: Pos) {
+		let Pos { row, col } = pos;
+    let rest = self.lines[row].split_off(col);
 
     self.lines.insert(row + 1, rest);
-    self.cursor.pos = Pos { row: row + 1, col };
-  }
+		let mut new_line_pos = Pos { row: row + 1, col: 0 };
+		let level = self.calc_indent_level_for_pos(new_line_pos);
+		let new_line = self.lines.get_mut(row + 1).unwrap();
+    for tab in std::iter::repeat_n(Grapheme::from('\t'), level) {
+      new_line.insert(0, tab);
+      new_line_pos = new_line_pos.col_add(1);
+    }
+
+    self.cursor.pos = new_line_pos;
+	}
   fn verb_shell_cmd(&mut self, cmd: &str) -> ShResult<()> {
     let mut vars = HashSet::new();
     vars.insert("BUFFER".into());
@@ -1005,15 +1014,33 @@ impl LineBuf {
 
     line.0.get(col).is_some().then(|| line.0.remove(col))
   }
-  fn insert_at(&mut self, pos: Pos, gr: Grapheme) {
+  fn insert_at(&mut self, mut pos: Pos, gr: Grapheme) {
+		let level = self.calc_indent_level_for_pos(pos);
     if gr.is_lf() {
-      self.set_cursor(pos);
-      self.break_line();
+      self.break_line_at(pos);
+			pos = pos.row_add(1);
+			pos.set(pos.row, 0);
     } else {
       let row = pos.row;
       let col = pos.col;
       self.lines[row].insert(col, gr);
+			pos = pos.col_add(1);
     }
+		let new_level = self.calc_indent_level_for_pos(pos);
+		let line = self.cur_line().to_string();
+		let trimmed = line.trim();
+
+		if new_level < level {
+			let delta = level.saturating_sub(new_level);
+			let line = self.cur_line_mut();
+			for _ in 0..delta {
+				if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
+					line.0.remove(0);
+				} else {
+					break;
+				}
+			}
+		}
   }
   fn insert(&mut self, gr: Grapheme) {
     self.insert_at(self.cursor.pos, gr);
@@ -1029,6 +1056,19 @@ impl LineBuf {
       }
     }
   }
+	fn insert_str_at(&mut self, pos: Pos, s: &str) {
+		let mut offset = self.row();
+		for gr in s.graphemes(true) {
+			let gr = Grapheme::from(gr);
+			if gr.is_lf() {
+				self.break_line_at(pos.row_add(offset));
+				offset += 1;
+			} else {
+				self.insert_at(pos.row_add(offset), gr);
+				self.cursor.pos.col += 1;
+			}
+		}
+	}
   pub fn pop_left(&mut self) -> bool {
     let Some(pos) = self.concat_points.pop_front() else {
       return false;
@@ -2304,16 +2344,25 @@ impl LineBuf {
   fn delete_range(&mut self, motion: &MotionKind) -> Vec<Line> {
     self.extract_range(motion)
   }
+	pub fn checked_calc_indent_level_for_pos(&mut self, pos: Pos) -> (usize,bool) {
+    let mut lines = self.lines.clone();
+		log::debug!("Calculating indent level for position {:?} with buffer:\n{:?}", pos, self.joined());
+		log::debug!("lines: {:?}", lines);
+    split_lines_at(&mut lines, pos);
+    let raw = join_lines(&lines);
+		log::debug!("Calculating indent level for raw text:\n{:?}", raw);
+
+    self.indent_ctx.checked_calculate(&raw)
+	}
+	pub fn checked_calc_indent_level(&mut self) -> (usize,bool) {
+		self.checked_calc_indent_level_for_pos(self.cursor.pos)
+	}
   pub fn calc_indent_level(&mut self) -> usize {
 		log::debug!("Calculating indent level for cursor at {:?}", self.cursor.pos);
     self.calc_indent_level_for_pos(self.cursor.pos)
   }
   pub fn calc_indent_level_for_pos(&mut self, pos: Pos) -> usize {
-    let mut lines = self.lines.clone();
-    split_lines_at(&mut lines, pos);
-    let raw = join_lines(&lines);
-
-    self.indent_ctx.calculate(&raw)
+		self.checked_calc_indent_level_for_pos(pos).0
   }
   fn motion_mutation(&mut self, motion: MotionKind, mut f: impl FnMut(&Grapheme) -> Grapheme) {
     match motion {
@@ -2771,30 +2820,9 @@ impl LineBuf {
         self.cursor.exclusive = old_exclusive;
       }
       Verb::InsertChar(ch) => {
-        let level = self.calc_indent_level();
         self.insert(Grapheme::from(*ch));
         if let Some(motion) = self.eval_motion(cmd) {
           self.apply_motion(motion)?;
-        }
-        let mut new_level = self.calc_indent_level();
-        let line = self.cur_line().to_string();
-        let trimmed = line.trim();
-        let is_sibling = self.indent_ctx.is_sibling(trimmed);
-
-        if new_level < level || is_sibling {
-          if is_sibling {
-            new_level = new_level.saturating_sub(1)
-          };
-
-          let delta = level.saturating_sub(new_level);
-          let line = self.cur_line_mut();
-          for _ in 0..delta {
-            if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
-              line.0.remove(0);
-            } else {
-              break;
-            }
-          }
         }
       }
       Verb::Insert(s) => self.insert_str(s),
@@ -3626,8 +3654,8 @@ impl LineBuf {
 			self.replace_range(range, &change);
 			let new_len = self.count_graphemes();
 			let delta = new_len as isize - old_len as isize;
-			let (ns,ne) = self.offset_col_wrapping(self.row(), delta);
-			self.cursor.pos.set(ns,ne);
+			let (nr,nc) = self.offset_col_wrapping(self.row(), delta);
+			self.cursor.pos.set(nr,nc);
 		}
 
 		true

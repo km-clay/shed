@@ -54,7 +54,7 @@ pub struct ParsedSrc {
 	pub parse_flags: ParseFlags,
   pub context: LabelCtx,
 
-	// Not used internally, used mainly for auto-indent in the line editor. Mirrors the field on ParseStream
+	/// Not used internally, used mainly for auto-indent in the line editor. Mirrors the field on ParseStream
 	pub block_depth: usize,
 }
 
@@ -777,7 +777,7 @@ pub struct ParseStream {
   pub context: LabelCtx,
 	pub flags: ParseFlags,
 
-	// Not used internally, used mainly for auto-indent in the line editor
+	/// Not used internally, used mainly for auto-indent in the line editor
 	pub block_depth: usize,
 }
 
@@ -860,6 +860,12 @@ impl ParseStream {
       node_tks.push(self.next_tk().unwrap());
     }
   }
+	fn check_separator(&self) -> bool {
+		matches!(
+			self.next_tk_class(),
+			TkRule::Or | TkRule::Bg | TkRule::And | TkRule::BraceGrpEnd | TkRule::Pipe | TkRule::Sep
+		)
+	}
   fn assert_separator(&mut self, node_tks: &mut Vec<Tk>) -> ShResult<()> {
     let next_class = self.next_tk_class();
     match next_class {
@@ -906,22 +912,35 @@ impl ParseStream {
 			self.block_depth += 1;
 		}
 
+		// You will live to see man made horrors beyond your comprehension
 		let result = || -> ShResult<Option<Node>> {
 			if check_pipelines {
 				try_match!(self.parse_pipeln()?);
+				Ok(None)
 			} else {
 				try_match!(self.parse_func_def()?);
 				try_match!(self.parse_brc_grp(false /* from_func_def */)?);
 				try_match!(self.parse_case()?);
 				try_match!(self.parse_loop()?);
 				try_match!(self.parse_for()?);
-				try_match!(self.parse_if()?);
-				try_match!(self.parse_negate()?);
-				try_match!(self.parse_time()?);
 				try_match!(self.parse_test()?);
-				try_match!(self.parse_cmd()?);
+
+				// these aren't nested contexts
+				// so we decrement the depth and descend into
+				// yet another immediately-invoked closure
+				// please stabilize the try block my rust developers!!
+				self.block_depth -= 1;
+				let r = || -> ShResult<Option<Node>> {
+					try_match!(self.parse_if()?);
+					try_match!(self.parse_negate()?);
+					try_match!(self.parse_time()?);
+					try_match!(self.parse_cmd()?);
+					Ok(None)
+				}()?;
+				self.block_depth += 1;
+
+				Ok(r)
 			}
-			Ok(None)
 		}()?;
 
 		if !check_pipelines {
@@ -1437,8 +1456,12 @@ impl ParseStream {
     node_tks.push(self.next_tk().unwrap());
 
     loop {
+			self.block_depth += 1;
       let prefix_keywrd = if cond_nodes.is_empty() { "if" } else { "elif" };
       let Some(mut cond) = self.parse_cmd_list()? else {
+				if prefix_keywrd == "elif" {
+					self.block_depth -= 1;
+				}
         self.panic_mode(&mut node_tks);
         let span = node_tks.get_span().unwrap();
         let color = next_color();
@@ -1473,6 +1496,7 @@ impl ParseStream {
         node_tks.extend(body_block.tokens.clone());
         body_blocks.push(body_block);
       }
+
       if body_blocks.is_empty() {
         self.panic_mode(&mut node_tks);
         return Err(parse_err_full(
@@ -1491,6 +1515,7 @@ impl ParseStream {
       if !self.check_keyword("elif") || !self.next_tk_is_some() {
         break;
       } else {
+				self.block_depth -= 1;
         node_tks.push(self.next_tk().unwrap());
         self.catch_separator(&mut node_tks);
       }
@@ -1498,11 +1523,24 @@ impl ParseStream {
 
     self.catch_separator(&mut node_tks);
     if self.check_keyword("else") {
+			self.block_depth -= 1;
       node_tks.push(self.next_tk().unwrap());
+			let mut already_added = false;
+
+			if self.check_separator() || self.next_tk_is_some() {
+				already_added = true;
+				self.block_depth += 1;
+			}
+
+			let has_sep = self.check_separator();
+			log::debug!("has_sep = {has_sep}");
+
       self.catch_separator(&mut node_tks);
+
       while let Some(block) = self.parse_cmd_list()? {
         else_block.push(block)
       }
+
       if else_block.is_empty() {
         self.panic_mode(&mut node_tks);
         return Err(parse_err_full(
@@ -1511,6 +1549,10 @@ impl ParseStream {
           self.context.clone(),
         ));
       }
+
+			if !already_added {
+				self.block_depth += 1;
+			}
     }
 
     self.catch_separator(&mut node_tks);
@@ -1523,6 +1565,7 @@ impl ParseStream {
       ));
     }
     node_tks.push(self.next_tk().unwrap());
+		self.block_depth -= 1;
 
     self.parse_redir(&mut redirs, &mut node_tks)?;
 

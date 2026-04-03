@@ -459,8 +459,8 @@ impl ShedLine {
     if self.mode.report_mode() == ModeReport::Normal {
       return Ok(true);
     }
-    let depth = self.editor.calc_indent_level();
-    Ok(depth == 0)
+    let (depth,failed) = self.editor.checked_calc_indent_level();
+    Ok(depth == 0 && !failed)
   }
 
   fn handle_hist_search_key(&mut self, key: KeyEvent) -> ShResult<()> {
@@ -858,12 +858,6 @@ impl ShedLine {
   }
 
   fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
-    if self.editor.attempt_history_expansion(&self.history) {
-      // If history expansion occurred, don't submit yet
-      // allow the user to see the expanded command and accept or edit it before submitting
-      return Ok(None);
-    }
-
     self.editor.set_hint(None);
     self.editor.set_cursor_from_flat(self.editor.cursor_max());
     self.print_line(true)?;
@@ -920,12 +914,17 @@ impl ShedLine {
       return Ok(None);
     }
 
-    if cmd.is_submit_action()
-      && !self.editor.cursor_is_escaped()
-      && (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
-    {
-      return self.submit();
-    }
+    if cmd.is_submit_action() {
+			if self.editor.attempt_history_expansion(&self.history) {
+				// If history expansion occurred, don't submit yet
+				// allow the user to see the expanded command and accept or edit it before submitting
+				return Ok(None);
+			} else if !self.editor.cursor_is_escaped()
+				&& (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
+			{
+				return self.submit();
+			}
+		}
 
     if let Some(VerbCmd(_, v @ Verb::DeleteOrEof)) = cmd.verb_mut() {
       // user pressed Ctrl+D in emacs mode
