@@ -284,7 +284,7 @@ impl Highlighter {
           markers::BACKTICK_SUB => markers::BACKTICK_SUB_END,
           _ => unreachable!(),
         };
-        // Save selection state at entry — the collection loop will update
+        // Save selection state at entry - the collection loop will update
         // self.in_selection as it encounters visual markers, but the recursive
         // highlighter needs the state as of the start of the body.
         let selection_at_entry = self.in_selection;
@@ -341,7 +341,7 @@ impl Highlighter {
         }
         recursive_highlighter.load_input(&inner_content, self.linebuf_cursor_pos);
         recursive_highlighter.highlight();
-        // Read back visual state — selection may have started/ended inside
+        // Read back visual state - selection may have started/ended inside
         self.in_selection = recursive_highlighter.in_selection;
         self
           .style_stack

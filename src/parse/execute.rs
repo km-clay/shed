@@ -880,7 +880,7 @@ impl Dispatcher {
       // Give the pipeline terminal control as soon as the first child
       // establishes the PGID, so later children (e.g. nvim) don't get
       // SIGTTOU when they try to modify terminal attributes.
-      // Only for interactive (top-level) pipelines — command substitution
+      // Only for interactive (top-level) pipelines - command substitution
       // and other non-interactive contexts must not steal the terminal.
       if !is_bg
         && self.interactive
@@ -924,7 +924,7 @@ impl Dispatcher {
         // Give the pipeline terminal control as soon as the first child
         // establishes the PGID, so later children (e.g. nvim) don't get
         // SIGTTOU when they try to modify terminal attributes.
-        // Only for interactive (top-level) pipelines — command substitution
+        // Only for interactive (top-level) pipelines - command substitution
         // and other non-interactive contexts must not steal the terminal.
         if !tty_attached
           && !is_bg
@@ -1053,7 +1053,7 @@ impl Dispatcher {
     )?;
     job.push_child(child);
 
-    // Handle exec specially — persist redirections before dispatch
+    // Handle exec specially - persist redirections before dispatch
     if cmd_raw.as_str() == "exec" {
       redir_guard.persist();
       let result = exec::exec_builtin(cmd);
@@ -1173,7 +1173,7 @@ impl Dispatcher {
     let interactive = self.interactive;
     let child_logic = |pgid: Option<Pid>| -> ! {
       // For non-interactive exec-in-place (e.g. shed -c), skip process group
-      // and terminal setup — just transparently replace the current process.
+      // and terminal setup - just transparently replace the current process.
       if interactive || !no_fork {
         // Put ourselves in the correct process group before exec.
         // For the first child in a pipeline pgid is None, so we

@@ -461,26 +461,26 @@ pub enum Anchor {
 }
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TextObj {
-  /// `iw`, `aw` — inner word, around word
+  /// `iw`, `aw` - inner word, around word
   Word(Word, Bound),
 
-  /// `)`, `(` — forward, backward
+  /// `)`, `(` - forward, backward
   Sentence(Direction),
 
-  /// `}`, `{` — forward, backward
+  /// `}`, `{` - forward, backward
   Paragraph(Direction),
 
   WholeSentence(Bound),
   WholeParagraph(Bound),
 
-  /// `i"`, `a"` — inner/around double quotes
+  /// `i"`, `a"` - inner/around double quotes
   DoubleQuote(Bound),
   /// `i'`, `a'`
   SingleQuote(Bound),
   /// `i\``, `a\``
   BacktickQuote(Bound),
 
-  /// `i)`, `a)` — round parens
+  /// `i)`, `a)` - round parens
   Paren(Bound),
   /// `i]`, `a]`
   Bracket(Bound),
@@ -489,7 +489,7 @@ pub enum TextObj {
   /// `i<`, `a<`
   Angle(Bound),
 
-  /// `it`, `at` — HTML/XML tags
+  /// `it`, `at` - HTML/XML tags
   Tag(Bound),
 
   /// Custom user-defined objects maybe?

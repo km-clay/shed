@@ -89,7 +89,7 @@ pub fn enumerate_lines(
       } else {
         let num = (i + offset + 1).to_string();
         let num_pad = max_num_len - num.len();
-        // " 2 | " — num + padding + " | "
+        // " 2 | " - num + padding + " | "
         let prefix_len = max_num_len + 3; // "N | "
         let trail_pad = left_pad.saturating_sub(prefix_len);
         let prefix = if show_numbers {
@@ -637,16 +637,16 @@ impl KeyReader for PollReader {
       return Ok(None);
     } else if self.byte_buf.front() == Some(&b'\x1b') {
       if self.byte_buf.len() == 1 {
-        // ESC is the only byte — emit standalone Escape
+        // ESC is the only byte - emit standalone Escape
         self.byte_buf.pop_front();
         return Ok(Some(KeyEvent(KeyCode::Esc, ModKeys::empty())));
       }
       match self.byte_buf.get(1) {
         Some(b'[') | Some(b'O') => {
-          // Valid CSI/SS3 prefix — fall through to the parser below
+          // Valid CSI/SS3 prefix - fall through to the parser below
         }
         Some(&b) if b >= 0x20 && b != 0x7f => {
-          // ESC + printable char — interpret as Alt+<char>
+          // ESC + printable char - interpret as Alt+<char>
           self.byte_buf.pop_front(); // consume ESC
           self.byte_buf.pop_front(); // consume the char
           let ch = b as char;
@@ -656,7 +656,7 @@ impl KeyReader for PollReader {
           )));
         }
         _ => {
-          // ESC + non-printable/unknown — emit standalone Escape
+          // ESC + non-printable/unknown - emit standalone Escape
           self.byte_buf.pop_front();
           return Ok(Some(KeyEvent(KeyCode::Esc, ModKeys::empty())));
         }
@@ -837,7 +837,7 @@ impl KeyReader for TermReader {
         return Ok(Some(KeyEvent::new(s, ModKeys::empty())));
       }
 
-      // UTF-8 max 4 bytes — if it’s invalid at this point, bail
+      // UTF-8 max 4 bytes - if it’s invalid at this point, bail
       if collected.len() >= 4 {
         break;
       }

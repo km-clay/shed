@@ -200,7 +200,7 @@ mod tests {
   #[test]
   fn type_function_shadows_builtin() {
     let guard = TestGuard::new();
-    // Define a function named 'echo' — should shadow the builtin
+    // Define a function named 'echo' - should shadow the builtin
     test_input("echo() { true; }").unwrap();
     guard.read_output();
 

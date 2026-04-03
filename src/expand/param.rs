@@ -586,7 +586,7 @@ mod tests {
     let _guard = TestGuard::new();
     write_vars(|v| v.set_var("EMPTY", VarKind::Str("".into()), VarFlags::NONE)).unwrap();
 
-    // ${EMPTY-fallback} — EMPTY is set (even if null), so returns null
+    // ${EMPTY-fallback} - EMPTY is set (even if null), so returns null
     let result = perform_param_expansion("EMPTY-fallback").unwrap();
     assert_eq!(result, "");
   }

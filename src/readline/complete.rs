@@ -1902,7 +1902,7 @@ impl SimpleCompleter {
     };
 
     // Graft unexpanded prefix onto candidates to preserve things like
-    // $SOME_PATH/file.txt Skip for var completions — complete_vars already
+    // $SOME_PATH/file.txt Skip for var completions - complete_vars already
     // returns the full $VAR form
     let is_var_completion = last_marker == Some(markers::VAR_SUB)
       && !candidates.is_empty()

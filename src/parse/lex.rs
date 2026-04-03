@@ -512,7 +512,7 @@ impl LexStream {
                 let mut ch = *ch;
                 while is_field_sep(ch) {
                   let Some(next_ch) = chars.next() else {
-                    // Incomplete input — fall through to emit << as Redir
+                    // Incomplete input - fall through to emit << as Redir
                     break;
                   };
                   pos += next_ch.len_utf8();
@@ -520,7 +520,7 @@ impl LexStream {
                 }
 
                 if is_field_sep(ch) {
-                  // Ran out of input while skipping whitespace — fall through
+                  // Ran out of input while skipping whitespace - fall through
                 } else {
                   let saved_cursor = self.cursor;
                   match self.read_heredoc(pos) {
@@ -533,7 +533,7 @@ impl LexStream {
                       break;
                     }
                     Ok(None) => {
-                      // Incomplete heredoc — restore cursor and fall through
+                      // Incomplete heredoc - restore cursor and fall through
                       self.cursor = saved_cursor;
                     }
                     Err(e) => return Some(Err(e)),
@@ -541,7 +541,7 @@ impl LexStream {
                 }
               }
               _ => {
-                // No delimiter yet — input is incomplete
+                // No delimiter yet - input is incomplete
                 // Fall through to emit the << as a Redir token
               }
             }
@@ -644,7 +644,7 @@ impl LexStream {
       first_char = false;
     }
 
-    // pos is now right after the delimiter word — this is where
+    // pos is now right after the delimiter word - this is where
     // the cursor should return so the rest of the line gets lexed
     let cursor_after_delim = pos;
 
@@ -948,7 +948,7 @@ impl LexStream {
         }
       }
       '(' if can_be_subshell && chars.peek() == Some(&')') => {
-        // standalone "()" — function definition marker
+        // standalone "()" - function definition marker
         pos += 2;
         chars.next();
         let mut tk = self.get_token(self.cursor..pos, TkRule::Str);
@@ -1174,7 +1174,7 @@ impl Iterator for LexStream {
         self.set_next_is_cmd(true);
 
         // If a heredoc was parsed on this line, skip past the body
-        // Only on newline — ';' is a command separator within the same line
+        // Only on newline - ';' is a command separator within the same line
         if (ch == '\n' || ch == '\r')
           && let Some(skip) = self.heredoc_skip.take()
         {
@@ -1458,7 +1458,7 @@ pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
         }
       }
       '$' if qt_state.outside() && chars.peek() == Some(&'\'') => {
-        // $'...' ANSI-C quoting — skip through to closing quote
+        // $'...' ANSI-C quoting - skip through to closing quote
         chars.next(); // consume opening '
         pos += 1;
         while let Some(c) = chars.next() {

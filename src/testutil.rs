@@ -199,7 +199,7 @@ impl crate::parse::Node {
     );
 
     if let Some((nd_kind, expected_rule)) = offender {
-      let expected_rule = expected_rule.map_or("(none — expected array too short)".into(), |e| {
+      let expected_rule = expected_rule.map_or("(none - expected array too short)".into(), |e| {
         format!("{e:?}")
       });
       let full_structure_hint = full_structure

@@ -17,13 +17,13 @@ use crate::{
   sherr, state,
 };
 
-const TAG_SEQ: &str = "\x1b[1;33m"; // bold yellow — searchable tags
-const REF_SEQ: &str = "\x1b[4;36m"; // underline cyan — cross-references
+const TAG_SEQ: &str = "\x1b[1;33m"; // bold yellow - searchable tags
+const REF_SEQ: &str = "\x1b[4;36m"; // underline cyan - cross-references
 const RESET_SEQ: &str = "\x1b[0m";
-const HEADER_SEQ: &str = "\x1b[1;35m"; // bold magenta — section headers
-const CODE_SEQ: &str = "\x1b[32m"; // green — inline code
-const KEYWORD_2_SEQ: &str = "\x1b[1;32m"; // bold green — {keyword}
-const KEYWORD_3_SEQ: &str = "\x1b[3;37m"; // italic white — [optional]
+const HEADER_SEQ: &str = "\x1b[1;35m"; // bold magenta - section headers
+const CODE_SEQ: &str = "\x1b[32m"; // green - inline code
+const KEYWORD_2_SEQ: &str = "\x1b[1;32m"; // bold green - {keyword}
+const KEYWORD_3_SEQ: &str = "\x1b[3;37m"; // italic white - [optional]
 
 /// Directory to search for help docs, set at compile time from the `SHED_DOC_DIR` environment variable
 /// Useful for package build scripts that also install the help pages, to ensure the correct path is embedded in the binary

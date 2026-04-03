@@ -420,7 +420,7 @@ mod tests {
   #[test]
   fn read_custom_delim() {
     let _g = TestGuard::new();
-    // -d sets the delimiter; printf sends "hello,world" — read stops at ','
+    // -d sets the delimiter; printf sends "hello,world" - read stops at ','
     test_input("read -d , myvar < <(echo -n 'hello,world')").unwrap();
     assert_eq!(read_vars(|v| v.get_var("myvar")), "hello");
   }

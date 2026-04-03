@@ -114,7 +114,7 @@ impl ScopeStack {
         return scope.set_var(var_name, val, flags);
       }
     }
-    // Not found in any scope — create in global scope
+    // Not found in any scope - create in global scope
     self.set_var_global(var_name, val, flags)
   }
   pub fn set_var_indexed(
@@ -136,7 +136,7 @@ impl ScopeStack {
         return scope.set_index(var_name, idx, val);
       }
     }
-    // Not found — create in global scope
+    // Not found - create in global scope
     let Some(scope) = self.scopes.first_mut() else {
       return Ok(());
     };

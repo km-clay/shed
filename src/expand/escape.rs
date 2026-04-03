@@ -332,7 +332,7 @@ pub fn unescape_heredoc(raw: &str) -> String {
         Some('$') | Some('`') | Some('\\') | Some('\n') => {
           let next_ch = chars.next().unwrap();
           if next_ch == '\n' {
-            // line continuation — discard both backslash and newline
+            // line continuation - discard both backslash and newline
             continue;
           }
           result.push(markers::ESCAPE);

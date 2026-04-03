@@ -119,7 +119,7 @@ fn getopts_inner(
     return Ok(());
   }
 
-  // Not an option — done
+  // Not an option - done
   let Some(opt_str) = arg.strip_prefix('-') else {
     state::set_status(1);
     return Ok(());

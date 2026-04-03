@@ -398,7 +398,7 @@ impl ShedLine {
 
   /// Reset readline state for a new prompt
   pub fn reset(&mut self, full_redraw: bool) -> ShResult<()> {
-    // Clear old display before resetting state — old_layout must survive
+    // Clear old display before resetting state - old_layout must survive
     // so print_line can call clear_rows with the full multi-line layout
     self.prompt.refresh();
     self.editor = Default::default();
@@ -533,7 +533,7 @@ impl ShedLine {
         let line = self.completer.get_completed_line(&candidate);
         self.focused_editor().set_buffer(line);
         self.focused_editor().set_cursor_from_flat(new_cursor);
-        // Don't reset yet — clear() needs old_layout to erase the selector.
+        // Don't reset yet - clear() needs old_layout to erase the selector.
 
         if !self.history.at_pending() {
           self.history.reset_to_pending();

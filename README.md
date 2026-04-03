@@ -17,9 +17,9 @@ A Linux shell written in Rust. The name is a nod to the original Unix utilities 
 - **Command-line mode** - execute common ex-mode commands, or arbitrary shell commands with `:!<cmd>`.
 
 **Emacs mode:**
-- Standard emacs keybindings — Ctrl+A/E, Ctrl+F/B, Alt+F/B, Ctrl+K/U, Ctrl+W, Ctrl+T, Ctrl+Y, Alt+Y, Alt+D/T/U/L/C, undo/redo
+- Standard emacs keybindings - Ctrl+A/E, Ctrl+F/B, Alt+F/B, Ctrl+K/U, Ctrl+W, Ctrl+T, Ctrl+Y, Alt+Y, Alt+D/T/U/L/C, undo/redo
 - Kill ring with merge chaining and cycling
-- Powered by the same editing engine as vim mode — not a separate implementation
+- Powered by the same editing engine as vim mode - not a separate implementation
 
 **Shared features:**
 - **Real-time syntax highlighting** - commands, keywords, strings, variables, redirections, and operators are colored as you type
@@ -220,4 +220,4 @@ pkgs = import nixpkgs {
 
 ## Why shed?
 
-This originally started as an educational hobby project, but over the course of about two years or so it's taken the form of an actual daily-drivable shell. I mainly wanted to create a shell where line editing is more frictionless than standard choices. Existing shells treat line editing as an afterthought — bash's readline really shows it's age these days, zsh's ZLE is better but still very clunky to work with, and most vi modes lack basic features like visual selection or text objects. `shed`'s line editor is built around a mode-agnostic editing engine that powers both vim and emacs modes with full feature parity, so you get a proper editing experience regardless of which mode you prefer.
+This originally started as an educational hobby project, but over the course of about two years or so it's taken the form of an actual daily-drivable shell. I mainly wanted to create a shell where line editing is more frictionless than standard choices. Existing shells treat line editing as an afterthought. Bash's readline really shows it's age these days, zsh's ZLE is better but still very clunky to work with, and most vi modes lack basic features like visual selection or text objects. `shed`'s line editor is built around a mode-agnostic editing engine that powers both vim and emacs modes with full feature parity, so you get a proper editing experience regardless of which mode you prefer.

@@ -601,7 +601,7 @@ fn hist_no_expansion_test(commands: &[&str], input: &str) {
 	line.process_input().unwrap();
 
 	let before = line.editor.joined();
-	// Manually call attempt_history_expansion — should return false
+	// Manually call attempt_history_expansion - should return false
 	let expanded = line.editor.attempt_history_expansion(&line.history);
 	assert!(!expanded, "expected no expansion but expansion occurred");
 	assert_eq!(line.editor.joined(), before);

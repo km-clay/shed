@@ -436,7 +436,7 @@ mod tests {
     let guard = TestGuard::new();
     write_shopts(|o| o.core.xpg_echo = false);
 
-    // -E without xpg_echo is a no-op — escapes already off
+    // -E without xpg_echo is a no-op - escapes already off
     test_input("echo -E 'hello\\nworld'").unwrap();
     let out = guard.read_output();
     assert_eq!(out, "hello\\nworld\n");

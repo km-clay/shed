@@ -446,7 +446,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       Ok(_) => {}
     }
 
-    // Timeout — resolve pending keymap ambiguity
+    // Timeout - resolve pending keymap ambiguity
     if !readline.pending_keymap.is_empty()
       && fds[0]
         .revents()

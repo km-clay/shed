@@ -18,7 +18,7 @@ use crate::state::write_vars;
 use super::sys::TTY_FILENO;
 
 // ============================================================================
-// ScopeGuard — RAII variable scope management
+// ScopeGuard - RAII variable scope management
 // ============================================================================
 
 pub fn scope_guard(args: Option<Vec<(String, Span)>>) -> impl Drop {
@@ -37,7 +37,7 @@ pub fn shared_scope_guard() -> impl Drop {
 }
 
 // ============================================================================
-// VarCtxGuard — RAII variable context cleanup
+// VarCtxGuard - RAII variable context cleanup
 // ============================================================================
 
 pub fn var_ctx_guard(
@@ -53,7 +53,7 @@ pub fn var_ctx_guard(
 }
 
 // ============================================================================
-// RedirGuard — RAII I/O redirection restoration
+// RedirGuard - RAII I/O redirection restoration
 // ============================================================================
 
 #[derive(Debug)]
@@ -80,7 +80,7 @@ impl Drop for RedirGuard {
 }
 
 // ============================================================================
-// RawModeGuard — RAII terminal raw mode management
+// RawModeGuard - RAII terminal raw mode management
 // ============================================================================
 
 pub fn raw_mode() -> RawModeGuard {
@@ -169,7 +169,7 @@ impl Drop for RawModeGuard {
 }
 
 // ============================================================================
-// TermiosGuard — RAII termios state management
+// TermiosGuard - RAII termios state management
 // ============================================================================
 
 #[derive(Debug)]
