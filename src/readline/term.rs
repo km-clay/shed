@@ -79,13 +79,19 @@ pub fn enumerate_lines(
   let lines: Vec<&str> = s.split('\n').collect();
   let visible_count = lines.len();
   let max_num_len = (offset + visible_count).to_string().len();
+	let mut first = true;
+	log::debug!("left_pad: {left_pad}, offset: {offset}, visible_count: {visible_count}, max_num_len: {max_num_len}");
   lines
     .into_iter()
     .enumerate()
     .fold(String::new(), |mut acc, (i, ln)| {
-      if i == 0 {
+			if first {
+				first = false;
+			} else {
+				acc.push('\n');
+			}
+      if i == 0 && left_pad > 0 {
         acc.push_str(ln);
-        acc.push('\n');
       } else {
         let num = (i + offset + 1).to_string();
         let num_pad = max_num_len - num.len();
@@ -97,11 +103,7 @@ pub fn enumerate_lines(
         } else {
           " ".repeat(prefix_len + 1).to_string()
         };
-        if i == visible_count - 1 {
-          write!(acc, "{prefix}{}{ln}", " ".repeat(trail_pad)).unwrap();
-        } else {
-          writeln!(acc, "{prefix}{}{ln}", " ".repeat(trail_pad)).unwrap();
-        }
+				write!(acc, "{prefix}{}{ln}", " ".repeat(trail_pad)).unwrap();
       }
       acc
     })
@@ -227,6 +229,7 @@ pub trait KeyReader {
 pub trait LineWriter {
   fn clear_rows(&mut self, layout: &Layout) -> ShResult<()>;
   fn clear_screen(&mut self) -> ShResult<()>;
+	fn move_cursor_to_end(&mut self, _layout: &Layout) -> ShResult<()> { Ok(()) }
   fn redraw(
     &mut self,
     prompt: &str,
@@ -1129,6 +1132,26 @@ impl LineWriter for TermWriter {
     Ok(())
   }
 
+	fn move_cursor_to_end(&mut self, layout: &Layout) -> ShResult<()> {
+		self.buffer.clear();
+    let mut end = layout.end.row;
+    if layout.psr_end.is_some() && layout.t_cols > self.t_cols && self.t_cols > 0 {
+      let extra = (layout.t_cols.saturating_sub(1)) / self.t_cols;
+      end += extra;
+    }
+    let cursor_row = layout.cursor.row;
+
+    let cursor_motion = end.saturating_sub(cursor_row);
+    if cursor_motion > 0 {
+      write!(self.buffer, "\x1b[{cursor_motion}B").unwrap();
+    }
+
+		write_all(self.out, self.buffer.as_str())?;
+		self.buffer.clear();
+
+		Ok(())
+	}
+
   fn clear_screen(&mut self) -> ShResult<()> {
     self.buffer.clear();
     self.buffer.push_str("\x1b[2J\x1b[H"); // Clear entire screen and move cursor to home
@@ -1163,9 +1186,9 @@ impl LineWriter for TermWriter {
     }
 
     self.buffer.push_str(prompt);
-    let multiline = line.contains('\n');
+		let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
+    let multiline = line.contains('\n') || prompt_end.col == 0;
     if multiline {
-      let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
       let show_numbers = read_shopts(|o| o.prompt.line_numbers);
       let display_line = enumerate_lines(
         line,
@@ -1179,7 +1202,7 @@ impl LineWriter for TermWriter {
       self.buffer.push_str(line);
     }
 
-    if end.col == 0 && end.row > 0 && !ends_with_newline(&self.buffer) {
+    if end.col == 0 && end.row > prompt_end.row && !ends_with_newline(&self.buffer) {
       // The line has wrapped. We need to use our own line break.
       self.buffer.push('\n');
     }

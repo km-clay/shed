@@ -460,7 +460,6 @@ impl ShedLine {
       return Ok(true);
     }
     let depth = self.editor.calc_indent_level();
-		log::debug!("Indent depth: {}", depth);
     Ok(depth == 0)
   }
 
@@ -868,6 +867,10 @@ impl ShedLine {
     self.editor.set_hint(None);
     self.editor.set_cursor_from_flat(self.editor.cursor_max());
     self.print_line(true)?;
+		if let Some(layout) = &self.old_layout {
+			log::debug!("Moving cursor to end of layout");
+			self.writer.move_cursor_to_end(layout)?;
+		}
     self.writer.flush_write("\n")?;
     let buf = self.editor.take_buf();
     self.history.reset();
@@ -1043,7 +1046,6 @@ impl ShedLine {
                 let Some(entry) = self.history.virt_scroll(-1) else {
                   continue;
                 };
-                log::debug!("Got history entry: {:?}", entry);
                 let command = entry.command().to_string();
                 e.concat_left(sep, &command);
                 e.move_cursor_to_end();
@@ -1070,7 +1072,6 @@ impl ShedLine {
                 let Some(entry) = self.history.virt_scroll(1) else {
                   continue;
                 };
-                log::debug!("Got history entry: {:?}", entry);
                 let command = entry.command().to_string();
                 e.concat_right(sep, &command);
                 e.move_cursor_to_end();
@@ -1340,9 +1341,7 @@ impl ShedLine {
 
     while !final_draw && let Some((msg, time)) = self.status_msgs.front() {
       if time.elapsed().as_secs() < 5 {
-        log::debug!("drawing status message: {msg}");
         let down = new_layout.end.row - new_layout.cursor.row;
-        log::debug!("status message down: {down}");
         let fuzzy_rows = fuzzy_window_rows.saturating_sub(1); // the cursor is one row below the top
         let total = down.saturating_add(fuzzy_rows as u16);
         let move_down = if total > 0 {
@@ -1361,6 +1360,7 @@ impl ShedLine {
         self.status_msgs.pop_front();
       }
     }
+
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;
@@ -1959,7 +1959,6 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
     } else {
       insertions.push((span_start + i, markers::BACKTICK_SUB));
     }
-    log::debug!("Backtick at index {i}, in_backtick: {in_backtick}");
   }
   ')' if cmd_sub_depth > 0 || proc_sub_depth > 0 => {
     let i = *i;
