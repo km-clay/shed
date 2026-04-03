@@ -6,8 +6,6 @@ use std::{
   str::FromStr,
 };
 
-use regex::Regex;
-
 use crate::{
   builtin::{
     keymap::{KeyMap, KeyMapFlags, KeyMapMatch},
@@ -69,6 +67,7 @@ pub enum AutoCmdKind {
   OnCompletionSelect,
   OnScreensaverExec,
   OnScreensaverReturn,
+  OnTimeReport,
   OnExit,
 }
 
@@ -90,26 +89,14 @@ crate::two_way_display!(AutoCmdKind,
   OnCompletionSelect  <=> "on-completion-select";
   OnScreensaverExec   <=> "on-screensaver-exec";
   OnScreensaverReturn <=> "on-screensaver-return";
+  OnTimeReport        <=> "on-time-report";
   OnExit              <=> "on-exit";
 );
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutoCmd {
-  pub pattern: Option<Regex>,
   pub kind: AutoCmdKind,
   pub command: String,
-}
-
-impl PartialEq for AutoCmd {
-	fn eq(&self, other: &Self) -> bool {
-		let re_matches = self.pattern.as_ref().is_some_and(|p| {
-			other.pattern.as_ref().is_some_and(|op| {
-				p.as_str() == op.as_str()
-			})
-		}) || (self.pattern.is_none() && other.pattern.is_none());
-
-		self.command == other.command && re_matches
-	}
 }
 
 /// The logic table for the shell
@@ -119,7 +106,7 @@ impl PartialEq for AutoCmd {
 pub struct LogTab {
   functions: HashMap<String, ShFunc>,
   aliases: HashMap<String, ShAlias>,
-	pub dirty: bool, // flips on alias/function insertion. used for signaling function/alias caching.
+  pub dirty: bool, // flips on alias/function insertion. used for signaling function/alias caching.
 
   traps: HashMap<TrapTarget, String>,
   keymaps: Vec<KeyMap>,
@@ -138,8 +125,10 @@ impl LogTab {
   }
   pub fn insert_autocmd(&mut self, cmd: AutoCmd) {
     let entry = self.autocmds.entry(cmd.kind).or_default();
-		if entry.contains(&cmd) { return }
-		entry.push(cmd);
+    if entry.contains(&cmd) {
+      return;
+    }
+    entry.push(cmd);
   }
   pub fn get_autocmds(&self, kind: AutoCmdKind) -> Vec<AutoCmd> {
     write_meta(|m| m.notify_autocmd(kind)).ok();
@@ -157,12 +146,12 @@ impl LogTab {
   pub fn insert_keymap(&mut self, keymap: KeyMap) {
     for map in self.keymaps.iter_mut() {
       if map.keys == keymap.keys {
-				// overwrite old keymap with new one
+        // overwrite old keymap with new one
         *map = keymap.clone();
-				return
+        return;
       }
     }
-		self.keymaps.push(keymap);
+    self.keymaps.push(keymap);
   }
   pub fn remove_keymap(&mut self, keys: &str) {
     self.keymaps.retain(|km| km.keys != keys);
@@ -177,12 +166,12 @@ impl LogTab {
   }
   pub fn insert_func(&mut self, name: &str, src: ShFunc) {
     self.functions.insert(name.into(), src);
-		self.dirty = true;
+    self.dirty = true;
   }
-	pub fn remove_func(&mut self, name: &str) {
-		self.functions.remove(name);
-		self.dirty = true;
-	}
+  pub fn remove_func(&mut self, name: &str) {
+    self.functions.remove(name);
+    self.dirty = true;
+  }
   pub fn insert_trap(&mut self, target: TrapTarget, command: String) {
     self.traps.insert(target, command);
   }
@@ -212,14 +201,14 @@ impl LogTab {
         source,
       },
     );
-		self.dirty = true;
+    self.dirty = true;
   }
   pub fn get_alias(&self, name: &str) -> Option<ShAlias> {
     self.aliases.get(name).cloned()
   }
   pub fn remove_alias(&mut self, name: &str) {
     self.aliases.remove(name);
-		self.dirty = true;
+    self.dirty = true;
   }
   pub fn clear_aliases(&mut self) {
     self.aliases.clear()

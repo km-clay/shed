@@ -497,7 +497,7 @@ impl ShedLine {
         self.focused_history().fuzzy_finder.reset();
 
         with_vars([("_HIST_ENTRY".into(), cmd.content().to_string())], || {
-          post_cmds.exec_with(&cmd);
+          post_cmds.exec();
         });
 
         write_vars(|v| {
@@ -577,7 +577,7 @@ impl ShedLine {
         with_vars(
           [("_COMP_CANDIDATE".into(), candidate.content().to_string())],
           || {
-            post_cmds.exec_with(&candidate);
+            post_cmds.exec();
           },
         );
 
@@ -737,7 +737,7 @@ impl ShedLine {
         with_vars(
           [("_COMP_CANDIDATE".into(), cand.content().to_string())],
           || {
-            post_cmds.exec_with(&cand);
+            post_cmds.exec();
           },
         );
 
@@ -820,7 +820,7 @@ impl ShedLine {
       Some(entry) => {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
         with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
-          post_cmds.exec_with(&entry);
+          post_cmds.exec();
         });
 
         self.focused_editor().set_buffer(entry);

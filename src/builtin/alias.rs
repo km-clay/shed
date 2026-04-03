@@ -61,7 +61,7 @@ pub fn alias(node: Node) -> ShResult<()> {
         ));
       }
       write_logic(|l| l.insert_alias(name, body, span.clone()));
-			write_meta(|m| m.cache_path_command(name.to_string()));
+      write_meta(|m| m.cache_path_command(name.to_string()));
     }
   }
 

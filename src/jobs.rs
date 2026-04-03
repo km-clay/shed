@@ -6,12 +6,15 @@ use scopeguard::defer;
 use yansi::Color;
 
 use crate::{
-  libsh::{error::ShResult, sys::TTY_FILENO},
+  libsh::{error::ShResult, sys::TTY_FILENO, utils::AutoCmdVecUtils},
   prelude::*,
   procio::{IoMode, borrow_fd},
   sherr,
   signal::{disable_reaping, enable_reaping},
-  state::{self, VarFlags, VarKind, set_status, write_jobs, write_meta, write_vars},
+  state::{
+    self, AutoCmdKind, CmdTimer, VarFlags, VarKind, read_logic, set_status, with_vars, write_jobs,
+    write_meta, write_vars,
+  },
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -83,11 +86,18 @@ pub struct ChildProc {
   pid: Pid,
   command: Option<String>,
   stat: WtStat,
+  timer: CmdTimer,
 }
 
 impl ChildProc {
-  pub fn new(pid: Pid, command: Option<&str>, pgid: Option<Pid>) -> ShResult<Self> {
+  pub fn new(
+    pid: Pid,
+    command: Option<&str>,
+    pgid: Option<Pid>,
+    report_time: bool,
+  ) -> ShResult<Self> {
     let command = command.map(|str| str.to_string());
+    let timer = CmdTimer::new(command.clone().unwrap_or_default(), report_time)?;
     let stat = if kill(pid, None).is_ok() {
       WtStat::StillAlive
     } else {
@@ -98,6 +108,7 @@ impl ChildProc {
       pid,
       command,
       stat,
+      timer,
     };
     if let Some(pgid) = pgid {
       child.set_pgid(pgid).ok();
@@ -336,20 +347,25 @@ impl Job {
     self.set_stats(stat);
     Ok(killpg(self.pgid, sig)?)
   }
-  pub fn wait_pgrp(&mut self) -> ShResult<Vec<WtStat>> {
+  pub fn wait_pgrp(&mut self) -> ShResult<(Vec<WtStat>, Vec<CmdTimer>)> {
     let mut stats = vec![];
+    let mut timers = vec![];
     for child in self.children.iter_mut() {
       if child.pid == Pid::this() {
         // TODO: figure out some way to get the exit code of builtins
         let code = state::get_status();
         stats.push(WtStat::Exited(child.pid, code));
+        child.timer.stop()?;
+        timers.push(child.timer.clone());
         continue;
       }
       loop {
         let result = child.wait(Some(WtFlag::WSTOPPED));
+        child.timer.stop()?;
         match result {
           Ok(stat) => {
             stats.push(stat);
+            timers.push(child.timer.clone());
             break;
           }
           Err(Errno::ECHILD) => break,
@@ -358,7 +374,7 @@ impl Job {
         }
       }
     }
-    Ok(stats)
+    Ok((stats, timers))
   }
   pub fn update_by_id(&mut self, id: JobID, stat: WtStat) -> ShResult<()> {
     match id {
@@ -507,7 +523,14 @@ pub fn wait_bg(id: JobID) -> ShResult<()> {
       let Some(mut job) = write_jobs(|j| j.remove_job(id.clone())) else {
         return Err(sherr!(ExecFail, "wait: No such job with id {:?}", id,));
       };
-      let statuses = job.wait_pgrp()?;
+      let (statuses, timers) = job.wait_pgrp()?;
+
+      for timer in &timers {
+        if timer.should_report() {
+          report_timer(timer)?;
+        }
+      }
+
       let mut was_stopped = false;
       let mut code = 0;
       for status in &statuses {
@@ -543,6 +566,43 @@ pub fn wait_bg(id: JobID) -> ShResult<()> {
   Ok(())
 }
 
+/// Reports timing info for a completed command timer.
+/// Either fires on-time-report autocmds with context variables,
+/// or falls back to formatting with TIMEFORMAT.
+fn report_timer(timer: &CmdTimer) -> ShResult<()> {
+  let autocmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnTimeReport));
+
+  if autocmds.is_empty() {
+    let fmt_str = state::get_time_fmt();
+    let report = timer.format_report(&fmt_str)?;
+    let stderr = borrow_fd(STDERR_FILENO);
+    write(stderr, format!("{report}\n").as_bytes()).ok();
+  } else {
+    let vars = [
+      ("_TIME_REAL_MS".into(), timer.total_wall_ms()?.to_string()),
+      ("_TIME_USER_MS".into(), timer.total_user_ms()?.to_string()),
+      ("_TIME_SYS_MS".into(), timer.total_sys_ms()?.to_string()),
+      (
+        "_TIME_REAL_FMT".into(),
+        timer.total_wall_formatted()?.to_string(),
+      ),
+      (
+        "_TIME_USER_FMT".into(),
+        timer.total_user_formatted()?.to_string(),
+      ),
+      (
+        "_TIME_SYS_FMT".into(),
+        timer.total_sys_formatted()?.to_string(),
+      ),
+      ("_TIME_CPU_PCT".into(), timer.cpu_pct()?.to_string()),
+      ("_TIME_RSS".into(), timer.max_rss()?.to_string()),
+      ("_TIME_CMD".into(), timer.command().to_string()),
+    ];
+    with_vars(vars, || autocmds.exec());
+  }
+  Ok(())
+}
+
 /// Waits on the current foreground job and updates the shell's last status code
 pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
   if job.children().is_empty() {
@@ -557,7 +617,15 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
   defer! {
     enable_reaping();
   }
-  let statuses = write_jobs(|j| j.new_fg(job))?;
+  let (statuses, timers) = write_jobs(|j| j.new_fg(job))?;
+
+  // Report time info after the write_jobs borrow is released
+  for timer in &timers {
+    if timer.should_report() {
+      report_timer(timer)?;
+    }
+  }
+
   for status in &statuses {
     code = code_from_status(status).unwrap_or(0);
     match status {

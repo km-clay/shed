@@ -2,6 +2,8 @@ use crate::expand::subshell::expand_cmd_sub;
 use crate::libsh::error::ShResult;
 use crate::match_loop;
 use crate::prelude::*;
+use crate::state;
+use crate::state::read_vars;
 use crate::state::{read_jobs, read_logic, write_meta};
 
 #[derive(Debug)]
@@ -245,7 +247,7 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
               }
               'A'..='Z' | 'a'..='z' | '0'..='9' | '_' => {
                 func_name.push(ch);
-								chars.next();
+                chars.next();
               }
               _ => {
                 handled = true;
@@ -368,20 +370,20 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
       }
     }
     PromptTk::Pwd => {
-      let mut pwd = std::env::var("PWD").unwrap();
-      let home = std::env::var("HOME").unwrap();
+      let mut pwd = read_vars(|v| v.get_var("PWD"));
+      let home = state::get_home_str().unwrap_or_default();
       if pwd.starts_with(&home) {
         pwd = pwd.replacen(&home, "~", 1);
       }
       result.push_str(&pwd);
     }
     PromptTk::PwdShort => {
-      let mut path = std::env::var("PWD").unwrap();
-      let home = std::env::var("HOME").unwrap();
-      if path.starts_with(&home) {
-        path = path.replacen(&home, "~", 1);
+      let mut pwd = read_vars(|v| v.get_var("PWD"));
+      let home = state::get_home_str().unwrap_or_default();
+      if pwd.starts_with(&home) {
+        pwd = pwd.replacen(&home, "~", 1);
       }
-      let pathbuf = PathBuf::from(&path);
+      let pathbuf = PathBuf::from(&pwd);
       let mut segments = pathbuf.iter().count();
       let mut path_iter = pathbuf.iter();
       let max_segments = crate::state::read_shopts(|s| s.prompt.trunc_prompt_path);
@@ -411,14 +413,14 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
       result.push(symbol);
     }
     PromptTk::HostnameShort => {
-			let hostname = std::env::var("HOST").unwrap();
-			let mut segments = hostname.split('.');
-			if let Some(first) = segments.next() {
-				result.push_str(first);
-			} else {
-				result.push_str(&hostname);
-			}
-		}
+      let hostname = std::env::var("HOST").unwrap();
+      let mut segments = hostname.split('.');
+      if let Some(first) = segments.next() {
+        result.push_str(first);
+      } else {
+        result.push_str(&hostname);
+      }
+    }
     PromptTk::JobCount => {
       let count = read_jobs(|j| {
         j.jobs()
@@ -435,10 +437,10 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
       result.push_str(&count.to_string());
     }
     PromptTk::AsciiOct(n) => {
-			if let Some(ch) = std::char::from_u32(n as u32) {
-				result.push(ch);
-			}
-		}
+      if let Some(ch) = std::char::from_u32(n as u32) {
+        result.push(ch);
+      }
+    }
     PromptTk::Function(f) => {
       let output = expand_cmd_sub(&f)?;
       result.push_str(&output);

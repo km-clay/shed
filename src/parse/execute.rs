@@ -1,7 +1,8 @@
 use std::{
   cell::Cell,
   collections::{HashSet, VecDeque},
-  os::unix::fs::PermissionsExt, rc::Rc,
+  os::unix::fs::PermissionsExt,
+  rc::Rc,
 };
 
 use ariadne::Fmt;
@@ -419,7 +420,7 @@ impl Dispatcher {
     let NdRule::FuncDef { name, mut body } = func_def.class else {
       unreachable!()
     };
-		body.context.extend(ctx);
+    body.context.extend(ctx);
     let name = name
       .span
       .as_str()
@@ -445,10 +446,12 @@ impl Dispatcher {
     };
     let name = self.source_name.clone();
 
+    let report_time = subsh.flags.contains(NdFlags::REPORT_TIME);
+
     self.io_stack.append_to_frame(subsh.redirs);
     let _guard = self.io_stack.pop_frame().redirect()?;
 
-    self.run_fork("anonymous_subshell", |s| {
+    self.run_fork("anonymous_subshell", report_time, |s| {
       if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
         e.print_error();
         return;
@@ -508,7 +511,7 @@ impl Dispatcher {
       .clone()
       .expand()?
       .get_first_word()
-			.map(Into::<Rc<str>>::into)
+      .map(Into::<Rc<str>>::into)
       .unwrap_or_default();
     blame.rename(name.clone());
 
@@ -549,6 +552,7 @@ impl Dispatcher {
       unreachable!("expected BraceGrp node, got {:?}", brc_grp.class)
     };
     let fork_builtins = brc_grp.flags.contains(NdFlags::FORK_BUILTINS);
+    let report_time = brc_grp.flags.contains(NdFlags::REPORT_TIME);
 
     self.io_stack.append_to_frame(brc_grp.redirs);
     let guard = self.io_stack.pop_frame().redirect()?;
@@ -563,7 +567,7 @@ impl Dispatcher {
 
     if fork_builtins {
       log::trace!("Forking brace group");
-      self.run_fork("brace group", |s| {
+      self.run_fork("brace group", report_time, |s| {
         if let Err(e) = brc_grp_logic(s) {
           e.print_error();
         }
@@ -583,6 +587,7 @@ impl Dispatcher {
     };
 
     let fork_builtins = case_stmt.flags.contains(NdFlags::FORK_BUILTINS);
+    let report_time = case_stmt.flags.contains(NdFlags::REPORT_TIME);
 
     self.io_stack.append_to_frame(case_stmt.redirs);
     let guard = self.io_stack.pop_frame().redirect()?;
@@ -623,7 +628,7 @@ impl Dispatcher {
 
     if fork_builtins {
       log::trace!("Forking builtin: case");
-      self.run_fork("case", |s| {
+      self.run_fork("case", report_time, |s| {
         if let Err(e) = case_logic(s) {
           e.print_error();
         }
@@ -647,6 +652,7 @@ impl Dispatcher {
     };
 
     let fork_builtins = loop_stmt.flags.contains(NdFlags::FORK_BUILTINS);
+    let report_time = loop_stmt.flags.contains(NdFlags::REPORT_TIME);
 
     self.io_stack.append_to_frame(loop_stmt.redirs);
     let guard = self.io_stack.pop_frame().redirect()?;
@@ -689,7 +695,7 @@ impl Dispatcher {
 
     if fork_builtins {
       log::trace!("Forking builtin: loop");
-      self.run_fork("loop", |s| {
+      self.run_fork("loop", report_time, |s| {
         if let Err(e) = loop_logic(s) {
           e.print_error();
         }
@@ -707,6 +713,7 @@ impl Dispatcher {
     };
 
     let fork_builtins = for_stmt.flags.contains(NdFlags::FORK_BUILTINS);
+    let report_time = for_stmt.flags.contains(NdFlags::REPORT_TIME);
 
     let to_expanded_strings = |tks: Vec<Tk>| -> ShResult<Vec<String>> {
       Ok(
@@ -769,7 +776,7 @@ impl Dispatcher {
 
     if fork_builtins {
       log::trace!("Forking builtin: for");
-      self.run_fork("for", |s| {
+      self.run_fork("for", report_time, |s| {
         if let Err(e) = for_logic(s) {
           e.print_error();
         }
@@ -790,6 +797,7 @@ impl Dispatcher {
       unreachable!();
     };
     let fork_builtins = if_stmt.flags.contains(NdFlags::FORK_BUILTINS);
+    let report_time = if_stmt.flags.contains(NdFlags::REPORT_TIME);
 
     self.io_stack.append_to_frame(if_stmt.redirs);
     let guard = self.io_stack.pop_frame().redirect()?;
@@ -831,7 +839,7 @@ impl Dispatcher {
 
     if fork_builtins {
       log::trace!("Forking builtin: if");
-      self.run_fork("if", |s| {
+      self.run_fork("if", report_time, |s| {
         if let Err(e) = if_logic(s) {
           e.print_error();
           state::set_status(1);
@@ -850,6 +858,7 @@ impl Dispatcher {
       unreachable!()
     };
     let is_bg = pipeline.flags.contains(NdFlags::BACKGROUND);
+    let report_time = pipeline.flags.contains(NdFlags::REPORT_TIME);
     self.job_stack.new_job();
     let pipeline_result = if cmds.len() == 1 {
       self.fg_job = !is_bg && self.interactive;
@@ -857,6 +866,7 @@ impl Dispatcher {
       let result = if is_bg && !matches!(cmd.class, NdRule::Command { .. }) {
         self.run_fork(
           &cmd.get_command().map(|t| t.to_string()).unwrap_or_default(),
+          report_time,
           |s| {
             if let Err(e) = s.dispatch_node(cmd) {
               e.print_error();
@@ -960,6 +970,7 @@ impl Dispatcher {
 
   fn exec_builtin(&mut self, cmd: Node) -> ShResult<()> {
     let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
+    let report_time = cmd.flags.contains(NdFlags::REPORT_TIME);
     let cmd_raw = cmd
       .get_command()
       .unwrap_or_else(|| panic!("expected command NdRule, got {:?}", &cmd.class))
@@ -971,7 +982,7 @@ impl Dispatcher {
       if cmd_raw.as_str() == "exec" {
         guard.persist();
       }
-      self.run_fork(&cmd_raw, |s| {
+      self.run_fork(&cmd_raw, report_time, |s| {
         if let Err(e) = s.dispatch_builtin(cmd) {
           e.print_error();
         }
@@ -991,12 +1002,14 @@ impl Dispatcher {
   }
   fn dispatch_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
     let cmd_raw = cmd.get_command().unwrap().to_string();
+    let report_time = cmd.flags.contains(NdFlags::REPORT_TIME);
     let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = &mut cmd.class else {
       unreachable!()
     };
     let env_vars = self.set_assignments(mem::take(assignments), AssignBehavior::Export)?;
     let _var_guard = var_ctx_guard(env_vars.into_iter().collect());
+    let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
 
     // Handle builtin/command recursion before redirect/job setup
     if cmd_raw.as_str() == "builtin" {
@@ -1012,7 +1025,7 @@ impl Dispatcher {
         .skip(1)
         .map(|tk| tk.clone())
         .collect::<Vec<Tk>>();
-      if cmd.flags.contains(NdFlags::FORK_BUILTINS) {
+      if fork_builtins {
         cmd.flags |= NdFlags::NO_FORK;
       }
       return self.exec_cmd(cmd);
@@ -1028,10 +1041,16 @@ impl Dispatcher {
     let child_pgid = if let Some(pgid) = job.pgid() {
       pgid
     } else {
-      job.set_pgid(Pid::this());
-      Pid::this()
+      let pid = Pid::this();
+      job.set_pgid(pid);
+      pid
     };
-    let child = ChildProc::new(Pid::this(), Some(&cmd_raw), Some(child_pgid))?;
+    let child = ChildProc::new(
+      Pid::this(),
+      Some(&cmd_raw),
+      fork_builtins.then_some(child_pgid),
+      report_time,
+    )?;
     job.push_child(child);
 
     // Handle exec specially — persist redirections before dispatch
@@ -1116,9 +1135,13 @@ impl Dispatcher {
   }
   fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
     let blame = cmd.get_span().clone();
+    let report_time = cmd.flags.contains(NdFlags::REPORT_TIME);
     let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = cmd.class else {
-      unreachable!("found node class '{:?}' in exec_cmd", cmd.class.as_nd_kind())
+      unreachable!(
+        "found node class '{:?}' in exec_cmd",
+        cmd.class.as_nd_kind()
+      )
     };
     let mut env_vars_to_unset = vec![];
     if !assignments.is_empty() {
@@ -1219,7 +1242,7 @@ impl Dispatcher {
           job.set_pgid(child);
           child
         };
-        let child_proc = ChildProc::new(child, Some(cmd_name), Some(child_pgid))?;
+        let child_proc = ChildProc::new(child, Some(cmd_name), Some(child_pgid), report_time)?;
         job.push_child(child_proc);
       }
     }
@@ -1230,7 +1253,7 @@ impl Dispatcher {
 
     Ok(())
   }
-  fn run_fork(&mut self, name: &str, f: impl FnOnce(&mut Self)) -> ShResult<()> {
+  fn run_fork(&mut self, name: &str, report_time: bool, f: impl FnOnce(&mut Self)) -> ShResult<()> {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     match unsafe { fork()? } {
       ForkResult::Child => {
@@ -1248,7 +1271,7 @@ impl Dispatcher {
           job.set_pgid(child);
           child
         };
-        let child_proc = ChildProc::new(child, Some(name), Some(child_pgid))?;
+        let child_proc = ChildProc::new(child, Some(name), Some(child_pgid), report_time)?;
         job.push_child(child_proc);
         Ok(())
       }
@@ -1263,7 +1286,7 @@ impl Dispatcher {
 
     for assign in assigns {
       let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
-			let span = assign.get_span();
+      let span = assign.get_span();
       let NdRule::Assignment { kind, var, val } = assign.class else {
         unreachable!()
       };
@@ -1292,63 +1315,65 @@ impl Dispatcher {
           }
         }
         AssignKind::PlusEq => {
-          let mut var = if let Some((name,idx)) = indexed {
-						read_vars(|v| v.index_var(&name, idx))?.into()
-					} else {
-						read_vars(|v| v.get_var_meta(var))
-					};
-					match var.kind_mut() {
-						VarKind::Str(s) => {
-							let other = val.to_string();
-							*s = [s.to_string(), other].join("")
-						}
-						VarKind::Int(n) => {
-							let Ok(other) = val.to_string().parse::<i32>() else {
-								return Err(sherr!(
-									InvalidAssignment @ span,
-									"cannot add non-integer value to integer variable"
-								));
-							};
-							*n += other;
-						}
-						VarKind::Arr(items) => {
-							match val {
-								VarKind::Str(s) => items.push_back(s),
-								VarKind::Int(n) => items.push_back(n.to_string()),
-								VarKind::Arr(other) => items.extend(other.clone()),
-								VarKind::AssocArr(_) => todo!()
-							}
-						}
-						VarKind::AssocArr(_items) => todo!(),
-					}
+          let mut var = if let Some((name, idx)) = indexed {
+            read_vars(|v| v.index_var(&name, idx))?.into()
+          } else {
+            read_vars(|v| v.get_var_meta(var))
+          };
+          match var.kind_mut() {
+            VarKind::Str(s) => {
+              let other = val.to_string();
+              *s = [s.to_string(), other].join("")
+            }
+            VarKind::Int(n) => {
+              let Ok(other) = val.to_string().parse::<i32>() else {
+                return Err(sherr!(
+                  InvalidAssignment @ span,
+                  "cannot add non-integer value to integer variable"
+                ));
+              };
+              *n += other;
+            }
+            VarKind::Arr(items) => match val {
+              VarKind::Str(s) => items.push_back(s),
+              VarKind::Int(n) => items.push_back(n.to_string()),
+              VarKind::Arr(other) => items.extend(other.clone()),
+              VarKind::AssocArr(_) => todo!(),
+            },
+            VarKind::AssocArr(_items) => todo!(),
+          }
         }
         AssignKind::MinusEq => {
-          let mut var = if let Some((name,idx)) = indexed {
-						read_vars(|v| v.index_var(&name, idx))?.into()
-					} else {
-						read_vars(|v| v.get_var_meta(var))
-					};
-					match var.kind_mut() {
-						VarKind::Str(_) => return Err(sherr!(
-							InvalidAssignment @ span,
-							"cannot subtract from string variable"
-						)),
-						VarKind::Arr(_) => return Err(sherr!(
-							InvalidAssignment @ span,
-							"cannot subtract from array variable"
-						)),
-						VarKind::Int(n) => {
-							let Ok(other) = val.to_string().parse::<i32>() else {
-								return Err(sherr!(
-									InvalidAssignment @ span,
-									"cannot add non-integer value to integer variable"
-								));
-							};
-							*n -= other;
-						}
-						VarKind::AssocArr(_items) => todo!(),
-					}
-				}
+          let mut var = if let Some((name, idx)) = indexed {
+            read_vars(|v| v.index_var(&name, idx))?.into()
+          } else {
+            read_vars(|v| v.get_var_meta(var))
+          };
+          match var.kind_mut() {
+            VarKind::Str(_) => {
+              return Err(sherr!(
+                InvalidAssignment @ span,
+                "cannot subtract from string variable"
+              ));
+            }
+            VarKind::Arr(_) => {
+              return Err(sherr!(
+                InvalidAssignment @ span,
+                "cannot subtract from array variable"
+              ));
+            }
+            VarKind::Int(n) => {
+              let Ok(other) = val.to_string().parse::<i32>() else {
+                return Err(sherr!(
+                  InvalidAssignment @ span,
+                  "cannot add non-integer value to integer variable"
+                ));
+              };
+              *n -= other;
+            }
+            VarKind::AssocArr(_items) => todo!(),
+          }
+        }
         AssignKind::MultEq => todo!(),
         AssignKind::DivEq => todo!(),
       }

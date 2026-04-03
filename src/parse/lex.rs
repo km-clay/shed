@@ -1,5 +1,10 @@
 use std::{
-  collections::VecDeque, fmt::Display, iter::Peekable, ops::{Bound, Range, RangeBounds}, rc::Rc, str::Chars,
+  collections::VecDeque,
+  fmt::Display,
+  iter::Peekable,
+  ops::{Bound, Range, RangeBounds},
+  rc::Rc,
+  str::Chars,
 };
 
 use bitflags::bitflags;
@@ -10,9 +15,9 @@ use crate::{
   match_loop, sherr,
 };
 
-pub const KEYWORDS: [&str; 17] = [
+pub const KEYWORDS: [&str; 18] = [
   "if", "then", "elif", "else", "fi", "while", "until", "select", "for", "in", "do", "done",
-  "case", "esac", "[[", "]]", "!",
+  "case", "esac", "[[", "]]", "!", "time",
 ];
 
 pub const OPENERS: [&str; 6] = ["if", "while", "until", "for", "select", "case"];
@@ -119,8 +124,8 @@ impl Span {
   }
   pub fn line_and_col(&self) -> (usize, usize) {
     let content = &self.source.content[..self.range.start];
-		let line = content.bytes().filter(|&b| b == b'\n').count();
-		let col = content.len() - content.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line = content.bytes().filter(|&b| b == b'\n').count();
+    let col = content.len() - content.rfind('\n').map(|i| i + 1).unwrap_or(0);
     (line, col)
   }
   /// Slice the source string at the wrapped range
@@ -162,13 +167,13 @@ impl ariadne::Span for Span {
 #[derive(Clone, PartialEq, Debug)]
 /// The "class" of a token, i.e. what kind of token it is. This is the result of lexing, and is used during parsing to determine how to interpret the token.
 pub enum TkRule {
-	/// A normal string token. By far the most common type of token. Used for command names, keywords, arguments, basically any "words".
-	/// String tokens are further disambiguated using the TkFlags on the token itself, which can mark a string token as a keyword, a command name, a subshell, etc.
+  /// A normal string token. By far the most common type of token. Used for command names, keywords, arguments, basically any "words".
+  /// String tokens are further disambiguated using the TkFlags on the token itself, which can mark a string token as a keyword, a command name, a subshell, etc.
   Str,
 
-	/// The start of a given input.
+  /// The start of a given input.
   SOI,
-	/// The end of a given input.
+  /// The end of a given input.
   EOI,
 
   Null,
@@ -185,8 +190,10 @@ pub enum TkRule {
   BraceGrpEnd,
   Comment,
 
-	/// A special token class used for tokens that are the result of expansion, not direct lexing. The contained Vec<String> is the result of splitting the expanded text into words according to shell field splitting rules. This is used to allow expansions to produce multiple tokens, which is necessary for things like `echo *` where the `*` may expand to multiple filenames.
-  Expanded { exp: Vec<String> },
+  /// A special token class used for tokens that are the result of expansion, not direct lexing. The contained Vec<String> is the result of splitting the expanded text into words according to shell field splitting rules. This is used to allow expansions to produce multiple tokens, which is necessary for things like `echo *` where the `*` may expand to multiple filenames.
+  Expanded {
+    exp: Vec<String>,
+  },
 }
 
 impl Default for TkRule {

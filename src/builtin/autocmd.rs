@@ -1,5 +1,3 @@
-use regex::Regex;
-
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::error::{ShResult, ShResultExt},
@@ -9,35 +7,21 @@ use crate::{
 };
 
 pub struct AutoCmdOpts {
-  pattern: Option<Regex>,
   clear: bool,
 }
-fn autocmd_optspec() -> [OptSpec; 2] {
-  [
-    OptSpec {
-      opt: Opt::Short('p'),
-      takes_arg: OptArg::Single,
-    },
-    OptSpec {
-      opt: Opt::Short('c'),
-      takes_arg: OptArg::None,
-    },
-  ]
+fn autocmd_optspec() -> [OptSpec; 1] {
+  [OptSpec {
+    opt: Opt::Short('c'),
+    takes_arg: OptArg::None,
+  }]
 }
 
 pub fn get_autocmd_opts(opts: &[Opt]) -> ShResult<AutoCmdOpts> {
-  let mut autocmd_opts = AutoCmdOpts {
-    pattern: None,
-    clear: false,
-  };
+  let mut autocmd_opts = AutoCmdOpts { clear: false };
 
   let mut opts = opts.iter();
   while let Some(arg) = opts.next() {
     match arg {
-      Opt::ShortWithArg('p', arg) => {
-        autocmd_opts.pattern =
-          Some(Regex::new(arg).map_err(|e| sherr!(ExecFail, "invalid regex for -p: {}", e))?);
-      }
       Opt::Short('c') => {
         autocmd_opts.clear = true;
       }
@@ -96,7 +80,6 @@ pub fn autocmd(node: Node) -> ShResult<()> {
   };
 
   let autocmd = AutoCmd {
-    pattern: autocmd_opts.pattern,
     kind: autocmd_kind,
     command: autocmd_cmd.0.clone(),
   };
@@ -122,7 +105,6 @@ mod tests {
     let cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].command, "echo hello");
-    assert!(cmds[0].pattern.is_none());
   }
 
   #[test]
@@ -158,28 +140,6 @@ mod tests {
       read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd)).len(),
       1
     );
-  }
-
-  // ===================== Pattern =====================
-
-  #[test]
-  fn register_with_pattern() {
-    let _guard = TestGuard::new();
-    test_input("autocmd -p '^git' pre-cmd 'echo git cmd'").unwrap();
-
-    let cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
-    assert_eq!(cmds.len(), 1);
-    assert!(cmds[0].pattern.is_some());
-    let pat = cmds[0].pattern.as_ref().unwrap();
-    assert!(pat.is_match("git status"));
-    assert!(!pat.is_match("echo git"));
-  }
-
-  #[test]
-  fn invalid_regex_pattern() {
-    let _guard = TestGuard::new();
-    let result = test_input("autocmd -p '[invalid' pre-cmd 'echo bad'");
-    assert!(result.is_err());
   }
 
   // ===================== Clear =====================
@@ -280,30 +240,6 @@ mod tests {
     test_input("cd /tmp").unwrap();
     let out = guard.read_output();
     assert!(out.contains("changed"));
-  }
-
-  #[test]
-  fn exec_with_pattern_match() {
-    let guard = TestGuard::new();
-    // Pattern that matches "cd" commands
-    test_input("autocmd -p '/tmp' post-change-dir 'echo matched'").unwrap();
-    guard.read_output();
-
-    test_input("cd /tmp").unwrap();
-    let out = guard.read_output();
-    assert!(out.contains("matched"));
-  }
-
-  #[test]
-  fn exec_with_pattern_no_match() {
-    let guard = TestGuard::new();
-    // Pattern that won't match /tmp
-    test_input("autocmd -p '^/usr' post-change-dir 'echo nope'").unwrap();
-    guard.read_output();
-
-    test_input("cd /tmp").unwrap();
-    let out = guard.read_output();
-    assert!(!out.contains("nope"));
   }
 
   #[test]

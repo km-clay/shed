@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "shed"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "ariadne",
  "bitcode",

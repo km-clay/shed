@@ -44,7 +44,8 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_shopts, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
+  AutoCmdKind, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_shopts,
+  source_env, source_login, source_rc, write_jobs, write_meta, write_shopts,
 };
 use clap::Parser;
 use state::write_vars;
@@ -127,9 +128,16 @@ fn main() -> ExitCode {
   if let Ok(var) = env::var("SHLVL")
     && let Ok(lvl) = var.parse::<u32>()
   {
-		write_vars(|v| v.set_var("SHLVL", VarKind::Str((lvl + 1).to_string()), VarFlags::EXPORT)).ok();
+    write_vars(|v| {
+      v.set_var(
+        "SHLVL",
+        VarKind::Str((lvl + 1).to_string()),
+        VarFlags::EXPORT,
+      )
+    })
+    .ok();
   } else {
-		write_vars(|v| v.set_var("SHLVL", VarKind::Str("1".into()), VarFlags::EXPORT)).ok();
+    write_vars(|v| v.set_var("SHLVL", VarKind::Str("1".into()), VarFlags::EXPORT)).ok();
   }
 
   if let Err(e) = source_env() {
@@ -219,25 +227,27 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
 }
 
 fn first_run_setup() -> ShResult<()> {
-	let tty = borrow_fd(*TTY_FILENO);
-	write(tty, b"\x1b[2J\x1b[H")?; // clear screen and move cursor to top-left to make the message more visible
-	write(tty, b"~/.shedrc was not found. Generate an rc file with sane defaults? [Y/n]\n")?;
+  let tty = borrow_fd(*TTY_FILENO);
+  write(tty, b"\x1b[2J\x1b[H")?; // clear screen and move cursor to top-left to make the message more visible
+  write(
+    tty,
+    b"~/.shedrc was not found. Generate an rc file with sane defaults? [Y/n]\n",
+  )?;
 
-	let mut fds = [PollFd::new(tty,PollFlags::POLLIN)];
+  let mut fds = [PollFd::new(tty, PollFlags::POLLIN)];
 
-	let mut answer = String::new();
+  let mut answer = String::new();
 
-	loop {
-		match poll(&mut fds, PollTimeout::NONE) {
-			Err(Errno::EINTR) => continue,
-			Err(e) => {
-				eprintln!("poll error during first-run setup: {e}");
-				QUIT_CODE.store(1, Ordering::SeqCst);
-				return Err(sherr!(CleanExit(1), "poll error during first-run setup",));
-			}
-			Ok(_) => {}
-		}
-
+  loop {
+    match poll(&mut fds, PollTimeout::NONE) {
+      Err(Errno::EINTR) => continue,
+      Err(e) => {
+        eprintln!("poll error during first-run setup: {e}");
+        QUIT_CODE.store(1, Ordering::SeqCst);
+        return Err(sherr!(CleanExit(1), "poll error during first-run setup",));
+      }
+      Ok(_) => {}
+    }
 
     if fds[0]
       .revents()
@@ -250,7 +260,7 @@ fn first_run_setup() -> ShResult<()> {
           break;
         }
         Ok(n) => {
-					answer = String::from_utf8_lossy(&buffer[..n]).to_string();
+          answer = String::from_utf8_lossy(&buffer[..n]).to_string();
         }
         Err(Errno::EINTR) => {
           // Interrupted, continue to handle signals
@@ -261,43 +271,47 @@ fn first_run_setup() -> ShResult<()> {
           break;
         }
       }
-		}
+    }
 
-		match std::mem::take(&mut answer).to_ascii_lowercase().as_str() {
-			"y" | "\r" | "\n" => break,
-			"n" => return Ok(()),
-			_ => continue
-		}
-	}
+    match std::mem::take(&mut answer).to_ascii_lowercase().as_str() {
+      "y" | "\r" | "\n" => break,
+      "n" => return Ok(()),
+      _ => continue,
+    }
+  }
 
-	let rc_path = generate_default_rc()?;
+  let rc_path = generate_default_rc()?;
 
-	if let Some(rc_path) = rc_path {
-		write_meta(|m| m.post_status_message(format!("Generated default rc file at '{}'", rc_path.display())));
-	}
+  if let Some(rc_path) = rc_path {
+    write_meta(|m| {
+      m.post_status_message(format!(
+        "Generated default rc file at '{}'",
+        rc_path.display()
+      ))
+    });
+  }
 
-	Ok(())
+  Ok(())
 }
 
 fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup(args.login_shell);
-	crate::state::INTERACTIVE.store(true, Ordering::SeqCst);
+  crate::state::INTERACTIVE.store(true, Ordering::SeqCst);
 
   write_meta(|m| m.create_socket())?;
 
   if args.login_shell {
-		source_login().ok();
+    source_login().ok();
   }
 
-	if rc_file_path().is_none_or(|f| !f.is_file()) {
-		// we didn't find any runtime files at all
-		// let's run a first time setup
-		if let Err(e) = first_run_setup() {
-			e.print_error();
-		}
-	}
-
+  if rc_file_path().is_none_or(|f| !f.is_file()) {
+    // we didn't find any runtime files at all
+    // let's run a first time setup
+    if let Err(e) = first_run_setup() {
+      e.print_error();
+    }
+  }
 
   if let Err(e) = source_rc() {
     e.print_error();
@@ -408,12 +422,12 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
           });
           write_shopts(|o| o.core.auto_hist = false); // don't save screensaver command to history
           let pre_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnScreensaverExec));
-          pre_cmds.exec_with(&cmd);
+          pre_cmds.exec();
 
           let res = handle_readline_event(&mut readline, Ok(prepared))?;
 
           let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnScreensaverReturn));
-          post_cmds.exec_with(&cmd);
+          post_cmds.exec();
 
           match res {
             true => return Ok(()),
@@ -520,7 +534,7 @@ fn handle_readline_event(
       let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
       let post_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
 
-      pre_exec.exec_with(&input);
+      pre_exec.exec();
 
       // Time this command and temporarily restore cooked terminal mode while it runs.
       let start = Instant::now();
@@ -551,7 +565,7 @@ fn handle_readline_event(
       log::info!("Command executed in {:.2?}", command_run_time);
       write_meta(|m| m.stop_timer());
 
-      post_exec.exec_with(&input);
+      post_exec.exec();
 
       if read_shopts(|s| s.core.auto_hist)
         && !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)

@@ -89,12 +89,12 @@ Shell commands run via keymaps have read-write access to the line editor state t
 
 ### Autocmds
 
-The `autocmd` builtin registers shell commands to run on specific events:
+The `autocmd` builtin registers shell commands to run on specific events. Many events expose context variables that autocmds can use for conditional logic:
 
 ```sh
-autocmd post-change-dir 'echo "now in $PWD"'
+autocmd post-change-dir 'echo "moved to $_NEW_DIR"'
 autocmd on-exit 'echo goodbye'
-autocmd pre-cmd -p 'sudo' 'echo "running with sudo"'
+autocmd on-time-report 'echo "$_TIME_CMD took $_TIME_REAL_FMT"'
 ```
 
 Available events:
@@ -108,9 +108,10 @@ Available events:
 | `on-history-open`, `on-history-close`, `on-history-select` | History search UI events |
 | `on-completion-start`, `on-completion-cancel`, `on-completion-select` | Tab completion events |
 | `on-job-finish` | Background job completes |
+| `on-time-report` | `time`-prefixed command completes |
 | `on-exit` | Shell is exiting |
 
-Use `-p <pattern>` to filter by regex, and `-c` to clear all autocmds for an event. The pattern matched by `-p` changes by context, and not all autocmds have a pattern to match.
+Use `-c` to clear all autocmds for an event. Context variables (e.g. `$_NEW_DIR`, `$_TIME_REAL_MS`) are scoped to the autocmd execution and documented in `help autocmd`.
 
 ---
 

@@ -1,5 +1,5 @@
 use std::{
-  collections::VecDeque,
+  collections::{HashMap, VecDeque},
   sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
 };
 
@@ -11,12 +11,12 @@ use nix::{
 use crate::{
   builtin::trap::TrapTarget,
   jobs::{Job, JobCmdFlags, JobID, take_term},
-  libsh::error::ShResult,
+  libsh::{error::ShResult, utils::AutoCmdVecUtils},
   parse::execute::exec_input,
   prelude::*,
   sherr,
   state::{
-    AutoCmd, AutoCmdKind, VarFlags, VarKind, read_jobs, read_logic, write_jobs, write_meta,
+    AutoCmdKind, VarFlags, VarKind, read_jobs, read_logic, with_vars, write_jobs, write_meta,
     write_vars,
   },
 };
@@ -355,23 +355,21 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
           write_vars(|v| v.set_var("PIPESTATUS", VarKind::Arr(pipe_status), VarFlags::NONE))?;
         }
 
-        let post_job_hooks = read_logic(|l| l.get_autocmds(AutoCmdKind::OnJobFinish));
-        for cmd in post_job_hooks {
-          let AutoCmd {
-            pattern,
-            kind: _,
-            command,
-          } = cmd;
-          if let Some(pat) = pattern
-            && job.get_cmds().iter().all(|p| !pat.is_match(p))
-          {
-            continue;
-          }
+        let post_job_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnJobFinish));
+        let cmds = job.get_cmds();
+        let cmd_count = cmds.len();
+        // TODO: Add child statuses to exposed variables
+        let mut post_job_vars: HashMap<String, String> = cmds
+          .iter()
+          .enumerate()
+          .map(|(i, cmd)| (format!("_CHILD{i}"), cmd.to_string()))
+          .collect();
 
-          if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
-            e.print_error();
-          }
-        }
+        post_job_vars.insert("_CHILD_COUNT".into(), cmd_count.to_string());
+
+        with_vars(post_job_vars, || {
+          post_job_cmds.exec();
+        });
 
         write_meta(|m| m.post_system_message(job_complete_msg))
       }

@@ -189,10 +189,10 @@ impl JobTab {
   pub fn get_fg_mut(&mut self) -> Option<&mut Job> {
     self.fg.as_mut()
   }
-  pub fn new_fg(&mut self, job: Job) -> ShResult<Vec<WtStat>> {
+  pub fn new_fg(&mut self, job: Job) -> ShResult<(Vec<WtStat>, Vec<CmdTimer>)> {
     self.fg = Some(job);
-    let statuses = self.fg.as_mut().unwrap().wait_pgrp()?;
-    Ok(statuses)
+    let (statuses, timers) = self.fg.as_mut().unwrap().wait_pgrp()?;
+    Ok((statuses, timers))
   }
   pub fn fg_to_bg(&mut self, stat: WtStat) -> ShResult<()> {
     if self.fg.is_none() {

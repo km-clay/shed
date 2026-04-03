@@ -266,12 +266,12 @@ pub struct Var {
 }
 
 impl Default for Var {
-	fn default() -> Self {
-	  Self {
-			flags: VarFlags::default(),
-			kind: VarKind::Str(String::new()),
-		}
-	}
+  fn default() -> Self {
+    Self {
+      flags: VarFlags::default(),
+      kind: VarKind::Str(String::new()),
+    }
+  }
 }
 
 impl Var {
@@ -382,17 +382,17 @@ impl VarTab {
   fn init_sh_vars() -> HashMap<String, Var> {
     let mut vars = HashMap::new();
     vars.insert("COMP_WORDBREAKS".into(), " \t\n\"'@><=;|&(".into());
-		vars.insert("OPTIND".into(), "1".into());
-		let env_vars = Self::init_env();
-		vars.extend(env_vars);
+    vars.insert("OPTIND".into(), "1".into());
+    let env_vars = Self::init_env();
+    vars.extend(env_vars);
     vars
   }
   fn init_env() -> Vec<(String, Var)> {
-		let mut vars = vec![];
-		let mut set_var = |var: &str, val: &str| {
-			unsafe { env::set_var(var, val) };
-			vars.push((var.to_string(), val.into()))
-		};
+    let mut vars = vec![];
+    let mut set_var = |var: &str, val: &str| {
+      unsafe { env::set_var(var, val) };
+      vars.push((var.to_string(), val.into()))
+    };
 
     let pathbuf_to_string =
       |pb: Result<PathBuf, std::io::Error>| pb.unwrap_or_default().to_string_lossy().to_string();
@@ -433,25 +433,25 @@ impl VarTab {
 
     let help_paths = format!("/usr/share/shed/doc:{}", shed_docs.display());
 
-		set_var("IFS", " \t\n");
-		set_var("HOST", &hostname.clone());
-		set_var("UID", &uid.to_string());
-		set_var("PPID", &getppid().to_string());
-		set_var("TMPDIR", "/tmp");
-		set_var("TERM", &term);
-		set_var("LANG", "en_US.UTF-8");
-		set_var("USER", &username.clone());
-		set_var("LOGNAME", &username);
-		set_var("PWD", &pathbuf_to_string(std::env::current_dir()));
-		set_var("OLDPWD", &pathbuf_to_string(std::env::current_dir()));
-		set_var("HOME", &home.clone());
-		set_var("SHELL", &pathbuf_to_string(std::env::current_exe()));
-		set_var("SHED_HIST", &format!("{}/.shed_history", home));
-		set_var("SHED_HISTDB", &format!("{}", shed_db.display()));
-		set_var("SHED_RC", &format!("{}/.shedrc", home));
-		set_var("SHED_HPATH", &help_paths);
+    set_var("IFS", " \t\n");
+    set_var("HOST", &hostname.clone());
+    set_var("UID", &uid.to_string());
+    set_var("PPID", &getppid().to_string());
+    set_var("TMPDIR", "/tmp");
+    set_var("TERM", &term);
+    set_var("LANG", "en_US.UTF-8");
+    set_var("USER", &username.clone());
+    set_var("LOGNAME", &username);
+    set_var("PWD", &pathbuf_to_string(std::env::current_dir()));
+    set_var("OLDPWD", &pathbuf_to_string(std::env::current_dir()));
+    set_var("HOME", &home.clone());
+    set_var("SHELL", &pathbuf_to_string(std::env::current_exe()));
+    set_var("SHED_HIST", &format!("{}/.shed_history", home));
+    set_var("SHED_HISTDB", &format!("{}", shed_db.display()));
+    set_var("SHED_RC", &format!("{}/.shedrc", home));
+    set_var("SHED_HPATH", &help_paths);
 
-		vars
+    vars
   }
   pub fn init_sh_argv(&mut self) {
     for arg in env::args() {
@@ -561,12 +561,12 @@ impl VarTab {
       std::env::var(var).unwrap_or_default()
     }
   }
-	pub fn get_var_meta(&self, var: &str) -> Var {
-		self.try_get_var_meta(var).unwrap_or_default()
-	}
-	pub fn try_get_var_meta(&self, var: &str) -> Option<Var> {
-		self.vars.get(var).cloned()
-	}
+  pub fn get_var_meta(&self, var: &str) -> Var {
+    self.try_get_var_meta(var).unwrap_or_default()
+  }
+  pub fn try_get_var_meta(&self, var: &str) -> Option<Var> {
+    self.vars.get(var).cloned()
+  }
   pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
     self.vars.get(var_name).map(|var| var.flags)
   }

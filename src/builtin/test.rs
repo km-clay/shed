@@ -561,12 +561,12 @@ mod tests {
     assert_eq!(state::get_status(), 0);
   }
 
-	#[test]
-	fn no_glob_expansion() {
-		let _g = TestGuard::new();
-		test_input("[[ 'hello*' == hello* ]]").unwrap();
-		assert_eq!(state::get_status(), 0);
-	}
+  #[test]
+  fn no_glob_expansion() {
+    let _g = TestGuard::new();
+    test_input("[[ 'hello*' == hello* ]]").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
 
   #[test]
   fn test_and_first_false() {
@@ -625,5 +625,4 @@ mod tests {
     use std::str::FromStr;
     assert!(TestOp::from_str("~=").is_err());
   }
-
 }

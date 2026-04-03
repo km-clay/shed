@@ -15,13 +15,6 @@ behavior without modifying the shell itself.
 
   Options:
 
-    `-p {pattern}`                             *autocmd-pattern*
-
-        Only run this autocmd when {pattern} (a regex) matches the
-        event's context string. The context varies by event type:
-        for |autocmd-pre-cmd| it is the command being executed, for
-        |autocmd-post-change-dir| it is the target directory, etc.
-
     `-c`                                       *autocmd-clear*
 
         Clear all autocmds of the specified {kind}. No command is
@@ -30,7 +23,7 @@ behavior without modifying the shell itself.
   Examples:
 
       `autocmd post-cmd 'echo "exit: $?"'`
-      `autocmd -p '^git' pre-cmd 'echo running git...'`
+      `autocmd post-change-dir 'echo "moved to $_NEW_DIR"'`
       `autocmd -c pre-cmd`
 
 ==============================================================================
@@ -40,20 +33,17 @@ behavior without modifying the shell itself.
 
   `pre-cmd`                                    *autocmd-pre-cmd*
 
-      Fires before a command is executed. The command string is
-      available for pattern matching.
+      Fires before a command is executed.
 
   `post-cmd`                                   *autocmd-post-cmd*
 
-      Fires after a command finishes. The command string is available
-      for pattern matching.
+      Fires after a command finishes.
 
   2.2 Directory Changes                        *autocmd-dir-events*
 
   `pre-change-dir`                             *autocmd-pre-change-dir*
 
-      Fires before `cd` changes the working directory. The target
-      directory is available for pattern matching.
+      Fires before `cd` changes the working directory.
 
       Special variables:
         `$_NEW_DIR`    the directory being changed to
@@ -71,8 +61,13 @@ behavior without modifying the shell itself.
 
   `on-job-finish`                              *autocmd-on-job-finish*
 
-      Fires when a background job completes. The job's command string
-      is available for pattern matching.
+      Fires when a background job completes.
+
+      Special variables:
+        `$_CHILD_COUNT`  number of commands in the job
+        `$_CHILD0`       command string of the first pipeline member
+        `$_CHILD1`       command string of the second pipeline member
+        `$_CHILDN`       ...and so on for each member
 
   2.4 Prompt Events                            *autocmd-prompt-events*
 
@@ -116,8 +111,7 @@ behavior without modifying the shell itself.
 
   `on-history-select`                          *autocmd-on-history-select*
 
-      Fires when a history entry is selected. The entry text is
-      available for pattern matching.
+      Fires when a history entry is selected.
 
       Special variables:
         `$_HIST_ENTRY`   the selected history entry
@@ -139,8 +133,7 @@ behavior without modifying the shell itself.
 
   `on-completion-select`                       *autocmd-on-completion-select*
 
-      Fires when a completion candidate is accepted. The candidate
-      is available for pattern matching.
+      Fires when a completion candidate is accepted.
 
       Special variables:
         `$_COMP_CANDIDATE`  the selected completion candidate
@@ -150,13 +143,10 @@ behavior without modifying the shell itself.
   `on-screensaver-exec`                        *autocmd-on-screensaver-exec*
 
       Fires when the screensaver activates after the idle timeout.
-      The screensaver command (see `shopt prompt.screensaver_cmd`) is
-      available for pattern matching.
 
   `on-screensaver-return`                      *autocmd-on-screensaver-return*
 
       Fires when the shell returns from the screensaver command.
-      The screensaver command is available for pattern matching.
 
   2.9 Exit Event                               *autocmd-exit-event*
 
@@ -164,8 +154,42 @@ behavior without modifying the shell itself.
 
       Fires when the shell is about to exit.
 
+  2.10 Time Report Event                       *autocmd-time-report*
+
+  `on-time-report`                             *autocmd-on-time-report*
+
+      Fires when a `time`-prefixed command completes. If no autocmd is
+      registered for this event, the shell falls back to formatting
+      with `$TIMEFMT`.
+
+      Special variables:
+        `$_TIME_REAL_MS`    wall clock time in milliseconds
+        `$_TIME_USER_MS`    user CPU time in milliseconds
+        `$_TIME_SYS_MS`     system CPU time in milliseconds
+        `$_TIME_REAL_FMT`   wall clock time, formatted
+        `$_TIME_USER_FMT`   user CPU time, formatted
+        `$_TIME_SYS_FMT`    system CPU time, formatted
+        `$_TIME_CPU_PCT`    CPU percentage ((user+sys)/real*100)
+        `$_TIME_RSS`        peak resident set size in KB
+        `$_TIME_CMD`        the command that was timed
+
 ==============================================================================
-3. Behavior                                    *autocmd-behavior*
+3. Context Variables                           *autocmd-variables*
+
+  Many autocmd events expose special variables within the scope of the
+  autocmd execution. These variables are only available inside the
+  autocmd command and are not set globally.
+
+  Example:
+
+      `autocmd post-change-dir '`
+      `    if [[ "$_NEW_DIR" == */projects/* ]]; then`
+      `        echo "entering project directory"  `
+      `    fi`
+      `'`
+
+==============================================================================
+4. Behavior                                    *autocmd-behavior*
 
   - Multiple autocmds can be registered for the same event kind. They
     execute in registration order.
@@ -176,22 +200,36 @@ behavior without modifying the shell itself.
   - Autocmds do not affect the shell's exit status (`$?`). The exit
     status is saved before autocmd execution and restored afterward.
 
-  - Pattern matching uses Rust regex syntax. If an autocmd has no
-    pattern, it always fires for its event kind.
-
-  - Special variables (e.g. `$_NEW_DIR`) are only available within the
-    scope of the autocmd execution. They are not set globally.
+  - Special variables are only available within the scope of the
+    autocmd execution. They are not set globally.
 
 ==============================================================================
-4. Examples                                    *autocmd-examples*
+5. Examples                                    *autocmd-examples*
 
   Notify on directory change:
 
       `autocmd post-change-dir 'echo "moved to $_NEW_DIR"'`
 
-  Run a linter only on git commands:
+  Custom time report with color (falls back to plain when piped):
 
-      `autocmd -p '^git commit' post-cmd 'lint-check'`
+      `_time_func() {`
+      `    if [ -t 0 ]; then`
+      `        echo`
+      `        echo -e "\e[36;1m$_TIME_CMD"`
+      `        echo -e "\e[36;1mreal\e[0m\t$_TIME_REAL_FMT"`
+      `        echo -e "\e[36;1muser\e[0m\t$_TIME_USER_FMT"`
+      `        echo -e "\e[36;1msys\e[0m\t$_TIME_SYS_FMT"`
+      `        echo`
+      `    else`
+      `        echo`
+      `        echo "$_TIME_CMD"`
+      `        echo -e "real\t$_TIME_REAL_FMT"`
+      `        echo -e "user\t$_TIME_USER_FMT"`
+      `        echo -e "sys\t$_TIME_SYS_FMT"`
+      `        echo`
+      `    fi`
+      `}`
+      `autocmd on-time-report _time_func`
 
   Refresh prompt on mode change (for mode indicator):
 

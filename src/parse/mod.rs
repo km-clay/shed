@@ -270,13 +270,14 @@ impl Node {
 bitflags! {
 #[derive(Clone,Copy,Debug)]
   pub struct NdFlags: u32 {
-    const BACKGROUND    = 0b000000001;
-    const FORK_BUILTINS = 0b000000010;
-    const NO_FORK       = 0b000000100;
-    const ARR_ASSIGN    = 0b000001000;
-    const PIPE_ERR      = 0b000010000; // whether to include stderr in a pipe
-    const NOT_ERR       = 0b000100000; // whether an error triggers ERR traps and set -e
-    const PIPE_CMD      = 0b001000000; // is not the last command in a pipeline
+    const BACKGROUND    = 1 << 0;
+    const FORK_BUILTINS = 1 << 1;
+    const NO_FORK       = 1 << 2;
+    const ARR_ASSIGN    = 1 << 3;
+    const PIPE_ERR      = 1 << 4; // whether to include stderr in a pipe
+    const NOT_ERR       = 1 << 5; // whether an error triggers ERR traps and set -e
+    const PIPE_CMD      = 1 << 6; // is not the last command in a pipeline
+    const REPORT_TIME   = 1 << 7; // whether this node should be reported by the time keyword
   }
 }
 
@@ -743,7 +744,7 @@ pub enum NdRule {
 
 pub struct ParseStream {
   pub tokens: Vec<Tk>,
-	pub cursor: usize,
+  pub cursor: usize,
   pub context: LabelCtx,
 }
 
@@ -751,24 +752,29 @@ impl Debug for ParseStream {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_struct("ParseStream")
       .field("tokens", &self.tokens)
-			.field("cursor", &self.cursor)
+      .field("cursor", &self.cursor)
       .finish()
   }
 }
 
 impl ParseStream {
   pub fn new(tokens: Vec<Tk>) -> Self {
-		let tokens = tokens.into_iter()
-			.filter(|tk| tk.class != TkRule::Comment)
-			.collect();
+    let tokens = tokens
+      .into_iter()
+      .filter(|tk| tk.class != TkRule::Comment)
+      .collect();
     Self {
       tokens,
-			cursor: 0,
+      cursor: 0,
       context: VecDeque::new(),
     }
   }
   pub fn with_context(tokens: Vec<Tk>, context: LabelCtx) -> Self {
-    Self { tokens, cursor: 0, context }
+    Self {
+      tokens,
+      cursor: 0,
+      context,
+    }
   }
   /// Slice off consumed tokens
   fn commit(&mut self, num_consumed: usize) {
@@ -776,29 +782,29 @@ impl ParseStream {
     self.cursor += num_consumed;
   }
   fn next_tk_class(&self) -> &TkRule {
-		self.peek_tk()
-			.map(|tk| &tk.class)
-			.unwrap_or(&TkRule::Null)
+    self.peek_tk().map(|tk| &tk.class).unwrap_or(&TkRule::Null)
   }
   fn peek_tk(&self) -> Option<&Tk> {
     self.tokens.get(self.cursor)
   }
   fn next_tk(&mut self) -> Option<Tk> {
-		let tk = self.tokens.get(self.cursor)
-			.and_then(|tk| (tk.class != TkRule::EOI).then_some(tk))
-			.cloned()?;
-		self.cursor += 1;
-		Some(tk)
+    let tk = self
+      .tokens
+      .get(self.cursor)
+      .and_then(|tk| (tk.class != TkRule::EOI).then_some(tk))
+      .cloned()?;
+    self.cursor += 1;
+    Some(tk)
   }
-	fn tokens(&self) -> &[Tk] {
-		&self.tokens[self.cursor..]
-	}
-	fn is_empty(&self) -> bool {
-		self.tokens().is_empty()
-	}
-	fn len(&self) -> usize {
-		self.tokens().len()
-	}
+  fn tokens(&self) -> &[Tk] {
+    &self.tokens[self.cursor..]
+  }
+  fn is_empty(&self) -> bool {
+    self.tokens().is_empty()
+  }
+  fn len(&self) -> usize {
+    self.tokens().len()
+  }
   /// Catches a Sep token in cases where separators are optional
   ///
   /// e.g. both `if foo; then bar; fi` and
@@ -830,11 +836,11 @@ impl ParseStream {
     }
   }
   fn next_tk_is_some(&self) -> bool {
-    self.peek_tk()
-      .is_some_and(|tk| tk.class != TkRule::EOI)
+    self.peek_tk().is_some_and(|tk| tk.class != TkRule::EOI)
   }
   fn check_case_pattern(&self) -> bool {
-    self.peek_tk()
+    self
+      .peek_tk()
       .is_some_and(|tk| tk.class == TkRule::CasePattern)
   }
   fn check_keyword(&self, kw: &str) -> bool {
@@ -847,9 +853,7 @@ impl ParseStream {
     })
   }
   fn check_redir(&self) -> bool {
-    self
-      .peek_tk()
-      .is_some_and(|tk| tk.class == TkRule::Redir)
+    self.peek_tk().is_some_and(|tk| tk.class == TkRule::Redir)
   }
   /// This tries to match on different stuff that can appear in a command
   /// position Matches shell commands like if-then-fi, pipelines, etc.
@@ -867,6 +871,7 @@ impl ParseStream {
       try_match!(self.parse_for()?);
       try_match!(self.parse_if()?);
       try_match!(self.parse_negate()?);
+      try_match!(self.parse_time()?);
       try_match!(self.parse_test()?);
       try_match!(self.parse_cmd()?);
     }
@@ -916,7 +921,7 @@ impl ParseStream {
     let body;
 
     // Two forms: "name()" as one token, or "name" followed by "()" as separate tokens
-		// Kind of a hack but I forgot you can have the spaces when I wrote the lexer :D
+    // Kind of a hack but I forgot you can have the spaces when I wrote the lexer :D
     let spaced_form = !is_func_name(self.peek_tk())
       && self
         .peek_tk()
@@ -1296,6 +1301,36 @@ impl ParseStream {
       .with_label(src, label)
       .with_context(self.context.clone())
   }
+  fn parse_time(&mut self) -> ShResult<Option<Node>> {
+    let mut node_tks: Vec<Tk> = vec![];
+
+    if !self.check_keyword("time") || !self.next_tk_is_some() {
+      return Ok(None);
+    }
+    node_tks.push(self.next_tk().unwrap());
+
+    let Some(mut cmd) = self.parse_block(true)? else {
+      self.panic_mode(&mut node_tks);
+      let span = node_tks.get_span().unwrap();
+      let color = next_color();
+      return Err(
+        self.make_err(
+          span.clone(),
+          Label::new(span)
+            .with_message("Expected a command after 'time'")
+            .with_color(color),
+        ),
+      );
+    };
+    // the 'time' keyword does not have it's own NdRule. This is because it does not alter execution in any meaningful way.
+    // All it does here is set the REPORT_TIME flag on the node it wraps. Then we just return the node itself.
+    // Also, this is an unchecked context for the purpose of 'set -e' errors.
+    cmd.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR | NdFlags::REPORT_TIME);
+
+    node_tks.extend(cmd.tokens.clone());
+    self.catch_separator(&mut node_tks);
+    Ok(Some(cmd))
+  }
   fn parse_negate(&mut self) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
 
@@ -1663,132 +1698,132 @@ impl ParseStream {
     }
   }
   fn parse_cmd(&mut self) -> ShResult<Option<Node>> {
-		let mut node_tks = vec![];
+    let mut node_tks = vec![];
 
-		let result = 'out: {
-			let tk_slice = self.tokens();
-			let mut tk_iter = tk_slice.iter().peekable();
-			let mut redirs = vec![];
-			let mut argv = vec![];
-			let flags = NdFlags::empty();
-			let mut assignments = vec![];
+    let result = 'out: {
+      let tk_slice = self.tokens();
+      let mut tk_iter = tk_slice.iter().peekable();
+      let mut redirs = vec![];
+      let mut argv = vec![];
+      let flags = NdFlags::empty();
+      let mut assignments = vec![];
 
-			loop {
-				let Some(prefix_tk) = tk_iter.next() else {
-					break;
-				};
-				if let TkRule::CasePattern = prefix_tk.class {
-					break 'out Err(parse_err_full(
-							"Found case pattern in command",
-							&prefix_tk.span,
-							self.context.clone(),
-					));
-				}
-				let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
-				let is_assignment = prefix_tk.flags.contains(TkFlags::ASSIGN);
-				let is_keyword = prefix_tk.flags.contains(TkFlags::KEYWORD);
+      loop {
+        let Some(prefix_tk) = tk_iter.next() else {
+          break;
+        };
+        if let TkRule::CasePattern = prefix_tk.class {
+          break 'out Err(parse_err_full(
+            "Found case pattern in command",
+            &prefix_tk.span,
+            self.context.clone(),
+          ));
+        }
+        let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
+        let is_assignment = prefix_tk.flags.contains(TkFlags::ASSIGN);
+        let is_keyword = prefix_tk.flags.contains(TkFlags::KEYWORD);
 
-				if is_cmd {
-					node_tks.push(prefix_tk.clone());
-					argv.push(prefix_tk.clone());
-					break;
-				} else if is_assignment {
-					let Some(assign) = self.parse_assignment(prefix_tk) else {
-						break;
-					};
-					node_tks.push(prefix_tk.clone());
-					assignments.push(assign)
-				} else if is_keyword {
-					return Ok(None);
-				} else if prefix_tk.class == TkRule::Sep {
-					// Separator ends the prefix section - add it so commit() consumes it
-					node_tks.push(prefix_tk.clone());
-					break;
-				} else {
-					// Other non-prefix token ends the prefix section
-					break;
-				}
-			}
-			if argv.is_empty() {
-				if assignments.is_empty() {
-					break 'out Ok(None)
-				} else {
-					// If we have assignments but no command word,
-					// return the assignment-only command without parsing more tokens
-					self.commit(node_tks.len());
-					let mut context = self.context.clone();
-					let assignments_span = assignments.get_span().unwrap();
-					context.push_back((
-							assignments_span.source().clone(),
-							Label::new(assignments_span)
-							.with_message("in variable assignment defined here".to_string())
-							.with_color(next_color()),
-					));
-					break 'out Ok(Some(Node {
-						class: NdRule::Command { assignments, argv },
-						tokens: node_tks.clone(),
-						flags,
-						redirs,
-						context: self.context.clone(),
-					}))
-				}
-			}
-			loop {
-				let Some(tk) = tk_iter.next() else {
-					break;
-				};
-				match tk.class {
-					_ if tk_iter.peek().is_some_and(|tk| tk.class == TkRule::Bg) => break,
+        if is_cmd {
+          node_tks.push(prefix_tk.clone());
+          argv.push(prefix_tk.clone());
+          break;
+        } else if is_assignment {
+          let Some(assign) = self.parse_assignment(prefix_tk) else {
+            break;
+          };
+          node_tks.push(prefix_tk.clone());
+          assignments.push(assign)
+        } else if is_keyword {
+          return Ok(None);
+        } else if prefix_tk.class == TkRule::Sep {
+          // Separator ends the prefix section - add it so commit() consumes it
+          node_tks.push(prefix_tk.clone());
+          break;
+        } else {
+          // Other non-prefix token ends the prefix section
+          break;
+        }
+      }
+      if argv.is_empty() {
+        if assignments.is_empty() {
+          break 'out Ok(None);
+        } else {
+          // If we have assignments but no command word,
+          // return the assignment-only command without parsing more tokens
+          self.commit(node_tks.len());
+          let mut context = self.context.clone();
+          let assignments_span = assignments.get_span().unwrap();
+          context.push_back((
+            assignments_span.source().clone(),
+            Label::new(assignments_span)
+              .with_message("in variable assignment defined here".to_string())
+              .with_color(next_color()),
+          ));
+          return Ok(Some(Node {
+            class: NdRule::Command { assignments, argv },
+            tokens: node_tks,
+            flags,
+            redirs,
+            context: self.context.clone(),
+          }));
+        }
+      }
+      loop {
+        let Some(tk) = tk_iter.next() else {
+          break;
+        };
+        match tk.class {
+          _ if tk_iter.peek().is_some_and(|tk| tk.class == TkRule::Bg) => break,
 
-					TkRule::EOI
-						| TkRule::Pipe
-						| TkRule::ErrPipe
-						| TkRule::And
-						| TkRule::BraceGrpEnd
-						| TkRule::Or
-						| TkRule::Bg => break,
-					TkRule::Sep => {
-						node_tks.push(tk.clone());
-						break;
-					}
-					TkRule::Str => {
-						argv.push(tk.clone());
-						node_tks.push(tk.clone());
-					}
-					TkRule::Redir => {
-						node_tks.push(tk.clone());
-						let ctx = self.context.clone();
-						let redir = match Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx) {
-							Ok(r) => r,
-							Err(e) => {
-								self.panic_mode(&mut node_tks);
-								return Err(e);
-							}
-						};
-						redirs.push(redir);
-					}
-					_ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
-				};
-			}
-			self.commit(node_tks.len());
+          TkRule::EOI
+          | TkRule::Pipe
+          | TkRule::ErrPipe
+          | TkRule::And
+          | TkRule::BraceGrpEnd
+          | TkRule::Or
+          | TkRule::Bg => break,
+          TkRule::Sep => {
+            node_tks.push(tk.clone());
+            break;
+          }
+          TkRule::Str => {
+            argv.push(tk.clone());
+            node_tks.push(tk.clone());
+          }
+          TkRule::Redir => {
+            node_tks.push(tk.clone());
+            let ctx = self.context.clone();
+            let redir = match Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx)
+            {
+              Ok(r) => r,
+              Err(e) => {
+                self.panic_mode(&mut node_tks);
+                return Err(e);
+              }
+            };
+            redirs.push(redir);
+          }
+          _ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
+        };
+      }
+      self.commit(node_tks.len());
 
-			Ok(Some(Node {
-				class: NdRule::Command { assignments, argv },
-				tokens: node_tks.clone(),
-				flags,
-				redirs,
-				context: self.context.clone(),
-			}))
-		};
+      return Ok(Some(Node {
+        class: NdRule::Command { assignments, argv },
+        tokens: node_tks,
+        flags,
+        redirs,
+        context: self.context.clone(),
+      }));
+    };
 
-		match result {
-			Ok(node) => Ok(node),
-			Err(e) => {
-				self.panic_mode(&mut node_tks);
-				Err(e)
-			}
-		}
-
+    match result {
+      Ok(node) => Ok(node),
+      Err(e) => {
+        self.panic_mode(&mut node_tks);
+        Err(e)
+      }
+    }
   }
   fn parse_assignment(&self, token: &Tk) -> Option<Node> {
     let mut chars = token.span.as_str().chars();
@@ -2095,7 +2130,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
-	use super::NdKind;
+  use super::NdKind;
   use crate::testutil::get_ast;
 
   #[test]

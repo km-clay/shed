@@ -42,13 +42,11 @@
             "on-completion-start"
             "on-completion-cancel"
             "on-completion-select"
+            "on-screensaver-exec"
+            "on-screensaver-return"
+            "on-time-report"
           ])) (list: list != []);
           description = "The events that trigger this autocmd";
-        };
-        pattern = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = "A regex pattern to use in the hook to determine whether it runs or not. What it's compared to differs by hook, for instance 'pre-change-dir' compares it to the new directory, pre-cmd compares it to the command, etc";
         };
         command = lib.mkOption {
           type = lib.types.addCheck lib.types.str (cmd: cmd != "");

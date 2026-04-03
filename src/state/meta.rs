@@ -2,6 +2,7 @@ use super::*;
 
 use std::{
   collections::{HashMap, HashSet, VecDeque},
+  fmt::Write,
   os::unix::{
     fs::PermissionsExt,
     net::{UnixListener, UnixStream},
@@ -11,17 +12,19 @@ use std::{
 };
 
 use itertools::Itertools;
+use nix::sys::{
+  resource::{Usage, UsageWho, getrusage},
+  time::TimeVal,
+};
 
 use crate::{
   builtin::BUILTINS,
   expand::expand_keymap,
   jobs::Job,
   libsh::error::{ShErr, ShResult},
+  match_loop,
   prelude::*,
-  readline::{
-    complete::CompSpec,
-    keys::KeyEvent,
-  },
+  readline::{complete::CompSpec, keys::KeyEvent},
   sherr,
 };
 
@@ -235,6 +238,311 @@ impl Drop for ShedSocket {
   }
 }
 
+#[derive(Debug, Clone)]
+pub struct CmdTimer {
+  command: String,
+  wall_start: Instant,
+  self_usage_start: Usage,
+  child_usage_start: Usage,
+  wall_end: Option<Duration>,
+  self_usage_end: Option<Usage>,
+  child_usage_end: Option<Usage>,
+  report_time: bool,
+}
+
+impl CmdTimer {
+  pub fn new(command: String, report_time: bool) -> ShResult<Self> {
+    Ok(Self {
+      command,
+      wall_start: Instant::now(),
+      self_usage_start: getrusage(UsageWho::RUSAGE_SELF)?,
+      child_usage_start: getrusage(UsageWho::RUSAGE_CHILDREN)?,
+      wall_end: None,
+      self_usage_end: None,
+      child_usage_end: None,
+      report_time,
+    })
+  }
+
+  pub fn stop(&mut self) -> ShResult<()> {
+    self.wall_end = Some(self.wall_start.elapsed());
+    self.self_usage_end = Some(getrusage(UsageWho::RUSAGE_SELF)?);
+    self.child_usage_end = Some(getrusage(UsageWho::RUSAGE_CHILDREN)?);
+    Ok(())
+  }
+
+  pub fn still_running(&self) -> bool {
+    self.wall_end.is_none() && self.self_usage_end.is_none() && self.child_usage_end.is_none()
+  }
+
+  pub fn should_report(&self) -> bool {
+    self.report_time
+  }
+
+  pub fn cpu_pct(&self) -> ShResult<f64> {
+    if self.still_running() {
+      return Err(sherr!(
+        InternalErr,
+        "attempt to get CPU percentage from a CmdTimer that is still running"
+      ));
+    }
+    let total_user_secs = self.total_user_secs()?;
+    let total_sys_secs = self.total_sys_secs()?;
+    let total_wall_secs = self.wall_end.unwrap().as_secs_f64();
+
+    if total_wall_secs > 0.0 {
+      Ok(((total_user_secs + total_sys_secs) / total_wall_secs) * 100.0)
+    } else {
+      Ok(0.0)
+    }
+  }
+
+  pub fn max_rss(&self) -> ShResult<i64> {
+    if self.still_running() {
+      return Err(sherr!(
+        InternalErr,
+        "attempt to get max RSS from a CmdTimer that is still running"
+      ));
+    }
+    let self_r_maxrss = self.self_usage_end.unwrap().max_rss();
+    let child_r_maxrss = self.child_usage_end.unwrap().max_rss();
+    Ok(self_r_maxrss.max(child_r_maxrss))
+  }
+
+  pub fn command(&self) -> &str {
+    &self.command
+  }
+
+  pub fn total_wall_ms(&self) -> ShResult<i64> {
+    if self.still_running() {
+      return Err(sherr!(
+        InternalErr,
+        "attempt to get wall time from a CmdTimer that is still running"
+      ));
+    }
+    Ok(self.wall_end.unwrap().as_millis() as i64)
+  }
+
+  pub fn total_user_ms(&self) -> ShResult<i64> {
+    if self.still_running() {
+      return Err(sherr!(
+        InternalErr,
+        "attempt to get user time from a CmdTimer that is still running"
+      ));
+    }
+    let self_user_delta =
+      self.self_usage_end.unwrap().user_time() - self.self_usage_start.user_time();
+    let child_user_delta =
+      self.child_usage_end.unwrap().user_time() - self.child_usage_start.user_time();
+    Ok(Self::tv_to_ms(self_user_delta) + Self::tv_to_ms(child_user_delta))
+  }
+
+  pub fn total_sys_ms(&self) -> ShResult<i64> {
+    if self.still_running() {
+      return Err(sherr!(
+        InternalErr,
+        "attempt to get system time from a CmdTimer that is still running"
+      ));
+    }
+    let self_sys_delta =
+      self.self_usage_end.unwrap().system_time() - self.self_usage_start.system_time();
+    let child_sys_delta =
+      self.child_usage_end.unwrap().system_time() - self.child_usage_start.system_time();
+    Ok(Self::tv_to_ms(self_sys_delta) + Self::tv_to_ms(child_sys_delta))
+  }
+
+  pub fn total_user_secs(&self) -> ShResult<f64> {
+    let ms = self.total_user_ms()?;
+    let seconds = ms as f64 / 1000.0;
+
+    Ok(seconds)
+  }
+
+  pub fn total_sys_secs(&self) -> ShResult<f64> {
+    let ms = self.total_sys_ms()?;
+    let seconds = ms as f64 / 1000.0;
+
+    Ok(seconds)
+  }
+
+  fn tv_to_ms(tv: TimeVal) -> i64 {
+    let sec_millis = tv.tv_sec() * 1000;
+    let usec_millis = tv.tv_usec() / 1000;
+    sec_millis + usec_millis
+  }
+
+  fn format_ms(total: i64) -> String {
+    let millis = total % 1000;
+    let total_secs = total / 1000;
+    let secs = total_secs % 60;
+    let total_mins = total_secs / 60;
+    let mins = total_mins % 60;
+    let hours = total_mins / 60;
+
+    let mut result = String::new();
+    if hours > 0 {
+      write!(result, "{hours}h").unwrap();
+    }
+    write!(result, "{mins}m").unwrap();
+    write!(result, "{secs}.{millis:03}").unwrap();
+    result
+  }
+
+  pub fn total_wall_formatted(&self) -> ShResult<String> {
+    if self.still_running() {
+      return Err(sherr!(
+        InternalErr,
+        "attempt to get wall time from a CmdTimer that is still running"
+      ));
+    }
+    let total_ms = self.total_wall_ms()?;
+    Ok(Self::format_ms(total_ms))
+  }
+  pub fn total_user_formatted(&self) -> ShResult<String> {
+    if self.still_running() {
+      return Err(sherr!(
+        InternalErr,
+        "attempt to get user time from a CmdTimer that is still running"
+      ));
+    }
+    let total_ms = self.total_user_ms()?;
+    Ok(Self::format_ms(total_ms))
+  }
+  pub fn total_sys_formatted(&self) -> ShResult<String> {
+    if self.still_running() {
+      return Err(sherr!(
+        InternalErr,
+        "attempt to get system time from a CmdTimer that is still running"
+      ));
+    }
+    let total_ms = self.total_sys_ms()?;
+    Ok(Self::format_ms(total_ms))
+  }
+
+  pub fn format_report(&self, fmt_str: &str) -> ShResult<String> {
+    if self.still_running() {
+      return Err(sherr!(
+        InternalErr,
+        "attempt to format a CmdTimer that is still running"
+      ));
+    }
+
+    let mut output = String::new();
+    let mut chars = fmt_str.chars().peekable();
+
+    match_loop!(chars.next() => ch, {
+      '\\' => {
+        if let Some(esc) = chars.next() {
+          output.push(esc);
+        }
+      }
+      '%' => {
+        let Some(param) = chars.next() else { break; };
+        match param {
+          'm' => {
+            let Some(param2) = chars.next() else { break; };
+            let millis = match param2 {
+              'E' => self.wall_end.unwrap().as_millis() as i64,
+              'U' => (self.total_user_secs()? * 1000.0) as i64,
+              'S' => (self.total_sys_secs()? * 1000.0) as i64,
+              _ => {
+                output.push('%');
+                output.push('m');
+                output.push(param2);
+                continue;
+              }
+            };
+
+            write!(output, "{millis}").unwrap();
+          }
+          'u' => {
+            let Some(param2) = chars.next() else { break; };
+            let micros = match param2 {
+              'E' => self.wall_end.unwrap().as_micros() as i64,
+              'U' => (self.total_user_secs()? * 1_000_000.0).floor() as i64,
+              'S' => (self.total_sys_secs()? * 1_000_000.0).floor() as i64,
+              _ => {
+                output.push('%');
+                output.push('u');
+                output.push(param2);
+                continue;
+              }
+            };
+
+            write!(output, "{micros}").unwrap();
+          }
+          '*' => {
+            let Some(param2) = chars.next() else { break; };
+            let millis = match param2 {
+              'E' => self.wall_end.unwrap().as_millis() as i64,
+              'U' => (self.total_user_secs()? * 1000.0) as i64,
+              'S' => (self.total_sys_secs()? * 1000.0) as i64,
+              _ => {
+                output.push('%');
+                output.push('*');
+                output.push(param2);
+                continue;
+              }
+            };
+            output.push_str(&Self::format_ms(millis));
+          }
+          'E' => {
+            // real seconds
+            let secs = self.wall_end.unwrap().as_secs();
+            write!(output, "{secs}").unwrap();
+          }
+          'U' => {
+            // CPU user mode seconds
+            let total = self.total_user_secs()?;
+
+            write!(output, "{total}").unwrap();
+          }
+          'S' => {
+            // CPU kernel mode seconds
+            let total = self.total_sys_secs()?;
+
+            write!(output, "{total}").unwrap();
+          }
+          'P' => {
+            // CPU percentage ((user + sys) / real * 100)
+            let total_user_secs = self.total_user_secs()?;
+            let total_sys_secs = self.total_sys_secs()?;
+            let total_wall_secs = self.wall_end.unwrap().as_secs_f64();
+
+            if total_wall_secs > 0.0 {
+              let percentage = ((total_user_secs + total_sys_secs) / total_wall_secs) * 100.0;
+
+              write!(output, "{percentage:.2}%").unwrap();
+            } else {
+              write!(output, "0.00%").unwrap();
+            }
+          }
+          'M' => {
+            // max resident set size
+            let self_r_maxrss = self.self_usage_end.unwrap().max_rss();
+            let child_r_maxrss = self.child_usage_end.unwrap().max_rss();
+            let maxrss = self_r_maxrss.max(child_r_maxrss);
+
+            write!(output, "{maxrss}").unwrap();
+          }
+          'J' => {
+            // command name
+            output.push_str(&self.command);
+          }
+          _ => {
+            output.push('%');
+            output.push(param);
+            break
+          }
+        };
+      }
+      _ => output.push(ch),
+    });
+
+    Ok(output)
+  }
+}
+
 /// A table of metadata for the shell
 #[derive(Clone, Debug)]
 pub struct MetaTab {
@@ -290,7 +598,7 @@ impl Default for MetaTab {
       old_path: None,
       old_pwd: None,
       path_cache: HashSet::new(),
-			cwd_cache: HashSet::new(),
+      cwd_cache: HashSet::new(),
       comp_specs: HashMap::new(),
       pending_widget_keys: vec![],
     }
@@ -333,7 +641,7 @@ impl MetaTab {
     self.getopts_offset = 0;
   }
   pub fn cached_cmds(&self) -> HashSet<String> {
-		(self.path_cache).union(&self.cwd_cache).cloned().collect()
+    (self.path_cache).union(&self.cwd_cache).cloned().collect()
   }
   pub fn cwd_cache(&self) -> &HashSet<String> {
     &self.cwd_cache
@@ -520,25 +828,25 @@ impl MetaTab {
 
     Ok(())
   }
-	pub fn cache_path_command(&mut self, cmd: String) {
-		self.path_cache.insert(cmd);
-	}
-	pub fn cache_cwd_command(&mut self, cmd: String) {
-		self.cwd_cache.insert(cmd);
-	}
-	pub fn rehash_path(&mut self) {
+  pub fn cache_path_command(&mut self, cmd: String) {
+    self.path_cache.insert(cmd);
+  }
+  pub fn cache_cwd_command(&mut self, cmd: String) {
+    self.cwd_cache.insert(cmd);
+  }
+  pub fn rehash_path(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
     self.old_path = Some(path.clone());
     let cmds_in_path = Self::get_cmds_in_path();
     for cmd in cmds_in_path {
       self.cache_path_command(cmd);
     }
-	}
-	pub fn rehash_logic(&mut self) {
+  }
+  pub fn rehash_logic(&mut self) {
     write_logic(|l| {
-			if !l.dirty {
-				return
-			}
+      if !l.dirty {
+        return;
+      }
       let funcs = l.funcs();
       let aliases = l.aliases();
       for func in funcs.keys() {
@@ -547,13 +855,13 @@ impl MetaTab {
       for alias in aliases.keys() {
         self.cache_path_command(alias.clone());
       }
-			l.dirty = false;
+      l.dirty = false;
     });
 
     for cmd in BUILTINS {
       self.cache_path_command(cmd.to_string());
     }
-	}
+  }
   pub fn rehash_cwd(&mut self) {
     let cwd = env::var("PWD").unwrap_or_default();
     self.cwd_cache.clear();
@@ -578,12 +886,12 @@ impl MetaTab {
     let path = env::var("PATH").unwrap_or_default();
     let cwd = env::var("PWD").unwrap_or_default();
     if self.old_path.as_ref().is_some_and(|old| *old != path) {
-			self.rehash_path();
+      self.rehash_path();
     }
-		if self.old_pwd.as_ref().is_some_and(|old| *old != cwd) {
-			self.rehash_cwd();
-		}
-		self.rehash_logic();
+    if self.old_pwd.as_ref().is_some_and(|old| *old != cwd) {
+      self.rehash_cwd();
+    }
+    self.rehash_logic();
   }
   pub fn try_rehash_cwd_listing(&mut self) {
     let cwd = env::var("PWD").unwrap_or_default();

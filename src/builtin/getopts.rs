@@ -245,7 +245,7 @@ pub fn getopts(node: Node) -> ShResult<()> {
   };
 
   let opts_spec = GetOptsSpec::from_str(&arg_string.0).promote_err(arg_string.1.clone())?;
-	log::debug!("getopts: parsed option spec: {:?}", opts_spec);
+  log::debug!("getopts: parsed option spec: {:?}", opts_spec);
 
   let explicit_args: Vec<String> = args.map(|s| s.0).collect();
 
@@ -253,7 +253,10 @@ pub fn getopts(node: Node) -> ShResult<()> {
     getopts_inner(&opts_spec, &opt_var.0, &explicit_args, span)
   } else {
     let pos_params: Vec<String> = read_vars(|v| v.sh_argv().iter().skip(1).cloned().collect());
-		log::debug!("getopts: using positional parameters as options: {:?}", pos_params);
+    log::debug!(
+      "getopts: using positional parameters as options: {:?}",
+      pos_params
+    );
     getopts_inner(&opts_spec, &opt_var.0, &pos_params, span)
   }
 }
@@ -377,10 +380,11 @@ mod tests {
     assert_eq!(optind, 3); // Advanced past both -a and val
   }
 
-	#[test]
-	fn optind_reset_after_scope_pop() {
-		let g = TestGuard::new();
-		test_input(r#"
+  #[test]
+  fn optind_reset_after_scope_pop() {
+    let g = TestGuard::new();
+    test_input(
+      r#"
 			func() {
 				while getopts ab opt; do
 					echo "opt: $opt, OPTIND: $OPTIND"
@@ -389,11 +393,13 @@ mod tests {
 
 			func -a -b
 			echo OPTIND: $OPTIND
-		"#).unwrap();
+		"#,
+    )
+    .unwrap();
 
-		let output = g.read_output();
-		assert_eq!(output,"opt: a, OPTIND: 2\nopt: b, OPTIND: 3\nOPTIND: 1\n");
-	}
+    let output = g.read_output();
+    assert_eq!(output, "opt: a, OPTIND: 2\nopt: b, OPTIND: 3\nOPTIND: 1\n");
+  }
 
   // ===================== Multiple calls (loop simulation) =====================
 

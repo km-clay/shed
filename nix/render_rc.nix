@@ -1,11 +1,34 @@
 lib: cfg:
 
 let
+  # This method of escaping is O(n^2)
+  # Shouldn't matter in practice though
+  # We arent going to be handling monster strings here
+  isEscaped = str:
+    let
+      chars = lib.reverseList lib.stringToCharacters str;
+      result = lib.foldl' (acc: ch:
+        if acc.done then acc
+        else if ch == "\\" then { done = acc.done; escaped = !acc.escaped; }
+        else { done = true; escaped = acc.escaped; }
+      ) { done = false; escaped = false; } chars;
+    in result.escaped;
+
+  escape = str:
+    let
+      chars = lib.stringToCharacters str;
+      escaped = lib.foldl' (acc: ch:
+        if ch == "'" && !isEscaped acc
+        then acc + "\\'"
+        else acc + ch
+      ) "" chars;
+    in escaped;
+
   boolToString = b:
   if b then "true" else "false";
 
   mkAutoCmd = cfg:
-    lib.concatLines (map (hook: "autocmd ${hook} ${lib.optionalString (cfg.pattern != null) "-p \"${cfg.pattern}\""} '${cfg.command}'") cfg.hooks);
+    lib.concatLines (map (hook: "autocmd ${hook} '${escape cfg.command}'") cfg.hooks);
 
 
   mkFunctionDef = name: body:
@@ -19,8 +42,8 @@ ${indented}
 
   mkKeymapCmd = cfg: let
     flags = "-${lib.concatStrings cfg.modes}";
-    keys = "'${cfg.keys}'";
-    action = "'${cfg.command}'";
+    keys = "'${escape cfg.keys}'";
+    action = "'${escape cfg.command}'";
   in
     "keymap ${flags} ${keys} ${action}";
 
@@ -36,9 +59,9 @@ ${indented}
       (lib.optionalString cfg.aliases " -a")
       (lib.optionalString cfg.signals " -S")
       (lib.optionalString cfg.noSpace " -n")
-      (lib.optionalString (cfg.function != null) " -F ${cfg.function}")
-      (lib.optionalString (cfg.fallback != "no") " -o ${cfg.fallback}")
-      (lib.optionalString (cfg.wordList != []) " -W '${lib.concatStringsSep " " cfg.wordList}'")
+      (lib.optionalString (cfg.function != null) " -F '${escape cfg.function}'")
+      (lib.optionalString (cfg.fallback != "no") " -o '${escape cfg.fallback}'")
+      (lib.optionalString (cfg.wordList != []) " -W '${escape (lib.concatStringsSep " " cfg.wordList)}'")
 
     ];
   in "complete${flags} ${name}";
