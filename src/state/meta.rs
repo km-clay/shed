@@ -737,22 +737,18 @@ impl MetaTab {
   ) -> ShResult<()> {
     match request {
       SocketRequest::PostSystemMessage(msg) => {
-        log::debug!("Posting system message: {}", msg);
         self.post_system_message(msg);
         write(&conn, b"ok\n").ok();
       }
       SocketRequest::PostStatusMessage(msg) => {
-        log::debug!("Posting status message: {}", msg);
         self.post_status_message(msg);
         write(&conn, b"ok\n").ok();
       }
       SocketRequest::Subscribe => {
-        log::debug!("New subscriber to event stream");
         let conn = Arc::new(conn);
         self.subscribers.push(conn.clone());
       }
       SocketRequest::Query(query_header) => {
-        log::debug!("Received query: {:?}", query_header);
         match query_header {
           QueryHeader::Cwd => {
             let cwd = env::current_dir()?.to_string_lossy().to_string();
@@ -814,7 +810,6 @@ impl MetaTab {
         }
       }
       SocketRequest::RefreshPrompt => {
-        log::debug!("Received prompt refresh request");
         kill(Pid::this(), Signal::SIGUSR1)?;
         write(&conn, b"ok\n").ok();
       }
@@ -899,8 +894,6 @@ impl MetaTab {
       log::trace!("PWD unchanged, skipping rehash of cwd listing");
       return;
     }
-
-    log::debug!("Rehashing cwd listing for PWD: '{}'", cwd);
 
     if let Ok(entries) = Path::new(&cwd).read_dir() {
       for entry in entries.flatten() {

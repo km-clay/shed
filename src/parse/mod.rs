@@ -51,7 +51,11 @@ pub struct ParsedSrc {
   pub name: Rc<str>,
   pub ast: Ast,
   pub lex_flags: LexFlags,
+	pub parse_flags: ParseFlags,
   pub context: LabelCtx,
+
+	// Not used internally, used mainly for auto-indent in the line editor. Mirrors the field on ParseStream
+	pub block_depth: usize,
 }
 
 impl ParsedSrc {
@@ -66,7 +70,9 @@ impl ParsedSrc {
       name: "<stdin>".into(),
       ast: Ast::new(vec![]),
       lex_flags: LexFlags::empty(),
+			parse_flags: ParseFlags::empty(),
       context: VecDeque::new(),
+			block_depth: 0,
     }
   }
   pub fn with_name(mut self, name: Rc<str>) -> Self {
@@ -77,6 +83,10 @@ impl ParsedSrc {
     self.lex_flags = flags;
     self
   }
+	pub fn with_parse_flags(mut self, flags: ParseFlags) -> Self {
+		self.parse_flags = flags;
+		self
+	}
   pub fn with_context(mut self, ctx: LabelCtx) -> Self {
     self.context = ctx;
     self
@@ -93,10 +103,21 @@ impl ParsedSrc {
 
     let mut errors = vec![];
     let mut nodes = vec![];
-    for parse_result in ParseStream::with_context(tokens, self.context.clone()) {
+		let parser = ParseStream::with_context(tokens, self.context.clone()).with_flags(self.parse_flags);
+    for parse_result in parser {
       match parse_result {
-        Ok(node) => nodes.push(node),
-        Err(error) => errors.push(error),
+        Ok(node) => {
+					self.block_depth = 0;
+					nodes.push(node)
+				}
+        Err((depth,error)) => {
+					self.block_depth = depth;
+					if self.parse_flags.contains(ParseFlags::ERR_RETURN) {
+						return Err(vec![error]);
+					} else {
+						errors.push(error);
+					}
+				}
       }
     }
 
@@ -742,10 +763,22 @@ pub enum NdRule {
   },
 }
 
+bitflags! {
+	#[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Hash,PartialOrd,Ord)]
+	pub struct ParseFlags: u32 {
+		const INCOMPLETE = 1 << 0; // Whether to error
+		const ERR_RETURN = 1 << 1; // Return on first error instead of continuing
+	}
+}
+
 pub struct ParseStream {
   pub tokens: Vec<Tk>,
   pub cursor: usize,
   pub context: LabelCtx,
+	pub flags: ParseFlags,
+
+	// Not used internally, used mainly for auto-indent in the line editor
+	pub block_depth: usize,
 }
 
 impl Debug for ParseStream {
@@ -767,6 +800,8 @@ impl ParseStream {
       tokens,
       cursor: 0,
       context: VecDeque::new(),
+			block_depth: 0,
+			flags: ParseFlags::empty(),
     }
   }
   pub fn with_context(tokens: Vec<Tk>, context: LabelCtx) -> Self {
@@ -774,8 +809,14 @@ impl ParseStream {
       tokens,
       cursor: 0,
       context,
+			block_depth: 0,
+			flags: ParseFlags::empty(),
     }
   }
+	pub fn with_flags(mut self, flags: ParseFlags) -> Self {
+		self.flags = flags;
+		self
+	}
   /// Slice off consumed tokens
   fn commit(&mut self, num_consumed: usize) {
     assert!(self.cursor + num_consumed <= self.tokens.len());
@@ -861,21 +902,33 @@ impl ParseStream {
   /// appearing at the bottom The check_pipelines parameter is used to prevent
   /// left-recursion issues in self.parse_pipeln()
   fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
-    if check_pipelines {
-      try_match!(self.parse_pipeln()?);
-    } else {
-      try_match!(self.parse_func_def()?);
-      try_match!(self.parse_brc_grp(false /* from_func_def */)?);
-      try_match!(self.parse_case()?);
-      try_match!(self.parse_loop()?);
-      try_match!(self.parse_for()?);
-      try_match!(self.parse_if()?);
-      try_match!(self.parse_negate()?);
-      try_match!(self.parse_time()?);
-      try_match!(self.parse_test()?);
-      try_match!(self.parse_cmd()?);
-    }
-    Ok(None)
+		if !check_pipelines {
+			self.block_depth += 1;
+		}
+
+		let result = || -> ShResult<Option<Node>> {
+			if check_pipelines {
+				try_match!(self.parse_pipeln()?);
+			} else {
+				try_match!(self.parse_func_def()?);
+				try_match!(self.parse_brc_grp(false /* from_func_def */)?);
+				try_match!(self.parse_case()?);
+				try_match!(self.parse_loop()?);
+				try_match!(self.parse_for()?);
+				try_match!(self.parse_if()?);
+				try_match!(self.parse_negate()?);
+				try_match!(self.parse_time()?);
+				try_match!(self.parse_test()?);
+				try_match!(self.parse_cmd()?);
+			}
+			Ok(None)
+		}()?;
+
+		if !check_pipelines {
+			self.block_depth -= 1;
+		}
+
+		Ok(result)
   }
   fn parse_cmd_list(&mut self) -> ShResult<Option<Node>> {
     let mut elements = vec![];
@@ -1247,6 +1300,7 @@ impl ParseStream {
       let case_pat_tk = self.next_tk().unwrap();
       node_tks.push(case_pat_tk.clone());
       self.catch_separator(&mut node_tks);
+			self.block_depth += 1;
 
       let mut nodes = vec![];
       while let Some(node) = self.parse_cmd_list()? {
@@ -1254,6 +1308,7 @@ impl ParseStream {
         let sep = node.tokens.last().unwrap();
         if sep.has_double_semi() {
           nodes.push(node);
+					self.block_depth -= 1;
           break;
         } else {
           nodes.push(node);
@@ -1267,6 +1322,7 @@ impl ParseStream {
       case_blocks.push(case_node);
 
       self.catch_separator(&mut node_tks);
+
       if self.check_keyword("esac") {
         node_tks.push(self.next_tk().unwrap());
         self.assert_separator(&mut node_tks)?;
@@ -1934,7 +1990,7 @@ impl ParseStream {
 }
 
 impl Iterator for ParseStream {
-  type Item = ShResult<Node>;
+  type Item = Result<Node, (usize, ShErr)>; // (block_depth and error)
   fn next(&mut self) -> Option<Self::Item> {
     // Empty token vector or only SOI/EOI tokens, nothing to do
     if self.is_empty() || self.len() == 1 {
@@ -1954,7 +2010,10 @@ impl Iterator for ParseStream {
     match result {
       Ok(Some(node)) => Some(Ok(node)),
       Ok(None) => None,
-      Err(e) => Some(Err(e)),
+      Err(e) => {
+				let block_depth = std::mem::take(&mut self.block_depth);
+				Some(Err((block_depth,e)))
+			}
     }
   }
 }

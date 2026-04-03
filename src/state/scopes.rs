@@ -179,9 +179,6 @@ impl ScopeStack {
         let random = rand::random_range(0..32768);
         Some(random.to_string())
       }
-      "PWD" => std::env::current_dir()
-        .ok()
-        .and_then(|p| p.into_os_string().into_string().ok()),
       "?" => Some(get_status().to_string()),
       "-" => {
         let mut set_string = String::new();

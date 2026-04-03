@@ -18,7 +18,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
 pub use crate::libsh::guards::{RawModeGuard, raw_mode};
-use crate::state::{read_meta, write_meta};
+use crate::{sherr, state::{read_meta, write_meta}};
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   readline::keys::{KeyCode, ModKeys},
@@ -69,7 +69,7 @@ pub fn get_win_size(fd: RawFd) -> (Col, Row) {
   }
 }
 
-fn enumerate_lines(
+pub fn enumerate_lines(
   s: &str,
   left_pad: usize,
   show_numbers: bool,
@@ -1118,6 +1118,8 @@ impl LineWriter for TermWriter {
       write!(self.buffer, "\x1b[{cursor_motion}B").unwrap()
     }
 
+		log::debug!("rows to clear: {rows_to_clear}, cursor row: {cursor_row}, cursor motion: {cursor_motion}");
+
     for _ in 0..rows_to_clear {
       self.buffer.push_str("\x1b[2K\x1b[A");
     }
@@ -1144,10 +1146,7 @@ impl LineWriter for TermWriter {
     total_buf_lines: usize,
   ) -> ShResult<()> {
     let err = |_| {
-      ShErr::simple(
-        ShErrKind::InternalErr,
-        "Failed to write to LineWriter internal buffer",
-      )
+			sherr!(InternalErr, "Failed to write to LineWriter internal buffer")
     };
     self.buffer.clear();
     self.buffer.push_str("\x1b[J"); // Clear from cursor to end of screen to erase any remnants of the old line after the prompt

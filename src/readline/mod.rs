@@ -459,26 +459,9 @@ impl ShedLine {
     if self.mode.report_mode() == ModeReport::Normal {
       return Ok(true);
     }
-    let input: Rc<str> = self.editor.joined().into();
-    self.editor.calc_indent_level();
-    let lex_result1 =
-      LexStream::new(Rc::clone(&input), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<_>>>();
-    let lex_result2 =
-      LexStream::new(Rc::clone(&input), LexFlags::empty()).collect::<ShResult<Vec<_>>>();
-    let is_top_level = self.editor.indent_ctx.ctx().is_empty();
-
-    let is_complete = match (lex_result1.is_err(), lex_result2.is_err()) {
-      (true, true) => {
-        return Err(lex_result2.unwrap_err());
-      }
-      (true, false) => {
-        return Err(lex_result1.unwrap_err());
-      }
-      (false, true) => false,
-      (false, false) => true,
-    };
-
-    Ok(is_complete && is_top_level)
+    let depth = self.editor.calc_indent_level();
+		log::debug!("Indent depth: {}", depth);
+    Ok(depth == 0)
   }
 
   fn handle_hist_search_key(&mut self, key: KeyEvent) -> ShResult<()> {

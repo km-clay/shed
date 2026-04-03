@@ -13,26 +13,19 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-  expand::expand_cmd_sub,
-  libsh::{
+	expand::expand_cmd_sub, libsh::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},
-  },
-  parse::{
-    Redir, RedirType,
-    execute::exec_input,
-    lex::{LexFlags, LexStream, Tk, TkFlags},
-  },
-  prelude::*,
-  procio::{IoFrame, IoMode, IoStack},
-  readline::{
+  }, parse::{
+    ParseFlags, ParsedSrc, Redir, RedirType, execute::exec_input, lex::{LexFlags, QuoteState, Tk, TkFlags}
+  }, prelude::*, procio::{IoFrame, IoMode, IoStack}, readline::{
     editcmd::{ReadSrc, VerbCmd, WriteDest},
-    highlight::Highlighter,
-    markers,
-    register::RegisterContent,
-    term::get_win_size,
-  },
-  state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars},
+		highlight::Highlighter,
+		history::History,
+		markers,
+		register::RegisterContent,
+		term::get_win_size
+  }, state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars}
 };
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
@@ -359,6 +352,11 @@ impl Pos {
     }
   }
 
+	pub fn set(&mut self, row: usize, col: usize) {
+		self.row = row;
+		self.col = col;
+	}
+
   pub fn col_add(&self, rhs: usize) -> Self {
     self.row_col_add(0, rhs as isize)
   }
@@ -503,16 +501,20 @@ impl IndentCtx {
     self.depth = 0;
     self.ctx.clear();
 
-    let Ok(tokens) =
-      LexStream::new(input.into(), LexFlags::LEX_UNFINISHED).collect::<ShResult<Vec<Tk>>>()
-    else {
-      log::error!("Lexing failed during depth calculation: {:?}", input);
-      return 0;
-    };
+		let mut src = ParsedSrc::new(input.into())
+			.with_lex_flags(LexFlags::LEX_UNFINISHED)
+			.with_parse_flags(ParseFlags::ERR_RETURN);
 
-    for tk in tokens {
-      self.check_tk(tk);
-    }
+		log::debug!("Calculating indent depth for input: '{}'", input);
+
+		// now we parse the input
+		// src.block_depth will be non-zero if the parse was stopped somewhere.
+		src.parse_src().ok();
+
+
+		self.depth = src.block_depth;
+		log::debug!("Calculated indent depth: {}", self.depth);
+
 
     self.depth
   }
@@ -703,7 +705,10 @@ impl LineBuf {
         (rows as f64 * 0.5).round() as usize
       }
     });
-    (raw.min(100)).min(self.lines.len())
+		let mut hint_lines = self.hint.clone().unwrap_or_default();
+		let mut buf_lines = self.lines.clone();
+		attach_lines(&mut buf_lines, &mut hint_lines);
+    (raw.min(100)).min(buf_lines.len())
   }
   pub fn update_scroll_offset(&mut self) {
     let height = self.get_viewport_height();
@@ -1831,11 +1836,13 @@ impl LineBuf {
       return None;
     };
 
-    self.replace_range(s, e, &num_fmt);
+    self.replace_range((s, e), &num_fmt);
     self.cursor.pos.col -= 1;
     Some(())
   }
-  fn replace_range(&mut self, s: Pos, e: Pos, new: &str) -> Vec<Line> {
+  fn replace_range(&mut self, span: (Pos,Pos), new: &str) -> Vec<Line> {
+		let s = span.0;
+		let e = span.1;
     let motion = MotionKind::Char {
       start: s,
       end: e,
@@ -2161,7 +2168,7 @@ impl LineBuf {
         Some(MotionKind::Line {
           start: s,
           end: e,
-          inclusive: false,
+          inclusive: true,
         })
       }
       Motion::BlockRange(s, e) => {
@@ -2298,6 +2305,7 @@ impl LineBuf {
     self.extract_range(motion)
   }
   pub fn calc_indent_level(&mut self) -> usize {
+		log::debug!("Calculating indent level for cursor at {:?}", self.cursor.pos);
     self.calc_indent_level_for_pos(self.cursor.pos)
   }
   pub fn calc_indent_level_for_pos(&mut self, pos: Pos) -> usize {
@@ -2725,9 +2733,20 @@ impl LineBuf {
       }
       Verb::JoinLines => {
         let old_exclusive = self.cursor.exclusive;
+				let mut row = self.row();
+				let mut count = count;
+				if self.select_range().is_some() {
+					let Some(MotionKind::Line { start, end, inclusive }) = self.eval_motion(cmd) else { unreachable!() };
+					let (s,e) = ordered(start, end);
+					count = if inclusive {
+						e - s + 1
+					} else {
+						e - s
+					};
+					row = s;
+				}
         self.cursor.exclusive = false;
         for _ in 0..count {
-          let row = self.row();
           let target_pos = Pos {
             row,
             col: self.offset_col(row, isize::MAX),
@@ -2737,7 +2756,7 @@ impl LineBuf {
           }
 
           let mut next_line = self.lines.remove(row + 1).trim_start();
-          let this_line = self.cur_line_mut();
+          let this_line = self.line_mut(row);
           let this_has_ws = this_line.0.last().is_some_and(|g| g.is_ws());
           let join_with_space = !this_has_ws && !this_line.is_empty() && !next_line.is_empty();
 
@@ -3285,21 +3304,23 @@ impl LineBuf {
 
   /// Compat shim: get hint text as a string.
   pub fn get_hint_text(&self) -> String {
-    let text = self.get_hint_text_raw();
-    let text = format!("\x1b[90m{text}\x1b[0m");
+		if let Some(hint) = &self.hint {
+			let text = self.join_hint();
+			let text = format!("\x1b[90m{text}\x1b[0m");
 
-    text.replace("\n", "\n\x1b[90m")
+			text.replace("\n", "\n\x1b[90m")
+		} else {
+			String::new()
+		}
   }
 
-  pub fn get_hint_text_raw(&self) -> String {
-    let mut lines = vec![];
-    let mut hint = self.hint.clone().unwrap_or_default();
-    trim_lines(&mut hint);
-    for line in hint {
-      lines.push(line.to_string());
-    }
-    lines.join("\n")
-  }
+	pub fn join_hint(&self) -> String {
+		if let Some(hint) = &self.hint {
+			join_lines(hint)
+		} else {
+			String::new()
+		}
+	}
 
   /// Accept hint text up to a given target position.
   /// Temporarily merges the hint into the buffer, moves the cursor to target,
@@ -3338,7 +3359,7 @@ impl LineBuf {
 
   /// Compat shim: accept the current hint by appending it to the buffer.
   pub fn accept_hint(&mut self) {
-    let hint_str = self.get_hint_text_raw();
+    let hint_str = self.join_hint();
     if hint_str.is_empty() {
       return;
     }
@@ -3533,10 +3554,83 @@ impl LineBuf {
     self.fix_cursor();
   }
 
+	pub fn grapheme_positions(&self) -> impl Iterator<Item = (Pos, &Grapheme)> {
+		self.lines.iter().enumerate().flat_map(|(row, line)| {
+			line.graphemes().iter().enumerate().map(move |(col, g)| {
+				(Pos { row, col }, g)
+			})
+		})
+	}
+
   /// Compat shim: attempt history expansion. Stub that returns false.
-  pub fn attempt_history_expansion(&mut self, _history: &super::history::History) -> bool {
-    // TODO: implement history expansion for 2D buffer
-    false
+  pub fn attempt_history_expansion(&mut self, history: &History) -> bool {
+		let mut changes: Vec<((Pos,Pos), String)> = vec![];
+		{
+			// we must descend into this scope because positions borrows 'self' immutably
+			let mut positions = self.grapheme_positions();
+			let mut qt_state = QuoteState::default();
+
+			while let Some((pos, gr)) = positions.next() {
+				let Some(ch) = gr.as_char() else { continue };
+				match ch {
+					'\\' | '$' => {
+						positions.next();
+					}
+					'\'' => qt_state.toggle_single(),
+					'"' => qt_state.toggle_double(),
+					'!' if !qt_state.in_single() => {
+						let start = pos;
+						let Some((pos2,gr2)) = positions.next() else { continue; };
+						let Some(ch) = gr2.as_char() else { continue; };
+						match ch {
+							'!' => {
+								if let Some(prev) = history.last() {
+									let raw = prev.command();
+									changes.push(((start, start.col_add(1)), raw.to_string()));
+								}
+							}
+							'$' => {
+								if let Some(prev) = history.last() {
+									let raw = prev.command();
+									if let Some(last_word) = raw.split_whitespace().last() {
+										changes.push(((start, start.col_add(1)), last_word.to_string()));
+									}
+								}
+							}
+							ch if !ch.is_whitespace() => {
+								let mut end = pos2;
+								let cur_row = end.row;
+								while let Some((pos3,gr3)) = positions.next() {
+									if pos3.row > cur_row { break };             // break on linefeed
+									let Some(ch) = gr3.as_char() else { break }; // break on non-ascii
+									if ch.is_whitespace() { break };             // break on whitespace
+									end = pos3;
+								}
+								let span = self.yank_span((pos2,end), true);
+								let token = join_lines(&span);
+								let cmd = history.resolve_hist_token(&token).unwrap_or(token);
+								changes.push(((start, end), cmd));
+							}
+							_ => {}
+						}
+					}
+					_ => {}
+				}
+			}
+
+			if changes.is_empty() { return false; }
+		} // 'positions' iterator is dropped here
+
+		for (range, change) in changes.into_iter().rev() {
+			let old_len = self.count_graphemes();
+			self.replace_range(range, &change);
+			let new_len = self.count_graphemes();
+			let delta = new_len as isize - old_len as isize;
+			let (ns,ne) = self.offset_col_wrapping(self.row(), delta);
+			self.cursor.pos.set(ns,ne);
+		}
+
+		true
   }
 
   /// Compat shim: check if cursor is on an escaped char.

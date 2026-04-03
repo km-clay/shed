@@ -174,6 +174,10 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
 
   env::set_current_dir(dir)?;
 
+	let new_dir_resolved = env::current_dir()?.display().to_string();
+	write_vars(|v| v.set_var("OLDPWD", VarKind::Str(current_dir.clone()), VarFlags::EXPORT))?;
+	write_vars(|v| v.set_var("PWD", VarKind::Str(new_dir_resolved), VarFlags::EXPORT))?;
+
   with_vars(
     [
       ("_NEW_DIR".into(), dir_raw.as_str()),
