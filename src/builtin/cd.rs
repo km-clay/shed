@@ -1,37 +1,46 @@
 use crate::{
-  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens}, libsh::error::ShResult, match_loop, parse::{NdRule, Node}, prelude::*, procio::borrow_fd, sherr, state::{self, read_vars}
+  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
+  libsh::error::ShResult,
+  match_loop,
+  parse::{NdRule, Node},
+  prelude::*,
+  procio::borrow_fd,
+  sherr,
+  state::{self, read_vars},
 };
 
 fn cd_opt_spec() -> [OptSpec; 2] {
-	[
-		OptSpec {
-			opt: Opt::Short('P'),
-			takes_arg: OptArg::None
-		},
-		OptSpec {
-			opt: Opt::Short('L'),
-			takes_arg: OptArg::None
-		}
-	]
+  [
+    OptSpec {
+      opt: Opt::Short('P'),
+      takes_arg: OptArg::None,
+    },
+    OptSpec {
+      opt: Opt::Short('L'),
+      takes_arg: OptArg::None,
+    },
+  ]
 }
 
 struct CdOpts {
-	resolve_syms: bool
+  resolve_syms: bool,
 }
 
 impl CdOpts {
-	pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
-		let mut new = Self { resolve_syms: false };
-		let mut opts = opts.iter();
+  pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
+    let mut new = Self {
+      resolve_syms: false,
+    };
+    let mut opts = opts.iter();
 
-		match_loop!(opts.next() => opt, {
-			Opt::Short('P') => new.resolve_syms = true,
-			Opt::Short('L') => new.resolve_syms = false,
-			_ => return Err(sherr!(ParseErr, "Invalid option: {opt}"))
-		});
+    match_loop!(opts.next() => opt, {
+      Opt::Short('P') => new.resolve_syms = true,
+      Opt::Short('L') => new.resolve_syms = false,
+      _ => return Err(sherr!(ParseErr, "Invalid option: {opt}"))
+    });
 
-		Ok(new)
-	}
+    Ok(new)
+  }
 }
 
 pub fn cd(node: Node) -> ShResult<()> {
@@ -45,79 +54,86 @@ pub fn cd(node: Node) -> ShResult<()> {
   };
   let cd_span = argv.first().unwrap().span.clone();
 
-  let (mut argv,opts) = get_opts_from_tokens(argv, &cd_opt_spec())?;
-	let cd_opts = CdOpts::from_opts(&opts)?;
+  let (mut argv, opts) = get_opts_from_tokens(argv, &cd_opt_spec())?;
+  let cd_opts = CdOpts::from_opts(&opts)?;
   if !argv.is_empty() {
     argv.remove(0);
   }
 
-	let mut try_cd_path = false;
-	let mut print_dir = false;
+  let mut try_cd_path = false;
+  let mut print_dir = false;
 
   let (mut new_dir, arg_span) = if let Some((arg, span)) = argv.into_iter().next() {
-		match arg.as_str() {
-			"-" => {
-				let old_pwd = read_vars(|v| v.try_get_var("OLDPWD"))
-					.unwrap_or_else(|| state::get_home_str().unwrap_or(String::from("/")));
-				print_dir = true;
-				(PathBuf::from(old_pwd), Some(span))
-			}
-			_ => {
-				try_cd_path = !(arg.starts_with(['/', '.']) || arg.starts_with(".."));
-				(PathBuf::from(arg), Some(span))
-			}
-		}
+    match arg.as_str() {
+      "-" => {
+        let old_pwd = read_vars(|v| v.try_get_var("OLDPWD"))
+          .unwrap_or_else(|| state::get_home_str().unwrap_or(String::from("/")));
+        print_dir = true;
+        (PathBuf::from(old_pwd), Some(span))
+      }
+      _ => {
+        try_cd_path = !(arg.starts_with(['/', '.']) || arg.starts_with(".."));
+        (PathBuf::from(arg), Some(span))
+      }
+    }
   } else {
-    (PathBuf::from(state::get_home_str().unwrap_or(String::from("/"))), None)
+    (
+      PathBuf::from(state::get_home_str().unwrap_or(String::from("/"))),
+      None,
+    )
   };
 
-	if try_cd_path {
-		let path = read_vars(|v| v.get_var("CDPATH"));
-		let paths = path.split(':').map(|p| if p.is_empty() { "." } else { p }).map(PathBuf::from);
-		for path in paths {
-			let joined = path.join(&new_dir);
-			if joined.is_dir() {
-				new_dir = joined;
-				break
-			}
-		}
-	}
+  if try_cd_path {
+    let path = read_vars(|v| v.get_var("CDPATH"));
+    let paths = path
+      .split(':')
+      .map(|p| if p.is_empty() { "." } else { p })
+      .map(PathBuf::from);
+    for path in paths {
+      let joined = path.join(&new_dir);
+      if joined.is_dir() {
+        new_dir = joined;
+        break;
+      }
+    }
+  }
 
-	if cd_opts.resolve_syms {
-		new_dir = std::fs::canonicalize(&new_dir).unwrap_or(new_dir);
-	}
+  if cd_opts.resolve_syms {
+    new_dir = std::fs::canonicalize(&new_dir).unwrap_or(new_dir);
+  }
 
   if !new_dir.exists() {
-		if let Some(arg_span) = arg_span {
-			return Err(sherr!(ExecFail @ arg_span.clone(), "Failed to change directory"));
-		} else {
-			return Err(sherr!(ExecFail @ span.clone(), "Failed to change directory"));
-		}
+    if let Some(arg_span) = arg_span {
+      return Err(sherr!(ExecFail @ arg_span.clone(), "Failed to change directory"));
+    } else {
+      return Err(sherr!(ExecFail @ span.clone(), "Failed to change directory"));
+    }
   }
 
   if !new_dir.is_dir() {
-		if let Some(arg_span) = arg_span {
-			return Err(sherr!(ExecFail @ arg_span.clone(), "Not a directory"));
-		} else {
-			return Err(sherr!(ExecFail @ span.clone(), "Not a directory"));
-		}
+    if let Some(arg_span) = arg_span {
+      return Err(sherr!(ExecFail @ arg_span.clone(), "Not a directory"));
+    } else {
+      return Err(sherr!(ExecFail @ span.clone(), "Not a directory"));
+    }
   }
 
   if let Err(e) = state::change_dir(new_dir) {
     return Err(sherr!(ExecFail @ cd_span.clone(), "Failed to change directory: {e}"));
   }
 
-	if print_dir {
-		let mut dir = env::current_dir()?.display().to_string();
-		if let Some(home) = state::get_home_str()
-		&& let Some(home_dir) = dir.strip_prefix(&home) {
-			dir = format!("~{home_dir}");
-		}
+  if print_dir {
+    let mut dir = env::current_dir()?.display().to_string();
+    if let Some(home) = state::get_home_str()
+      && let Some(home_dir) = dir.strip_prefix(&home)
+    {
+      dir = format!("~{home_dir}");
+    }
 
-		let stdout = borrow_fd(STDOUT_FILENO);
-		write(stdout, dir.as_bytes())?;
-		write(stdout, b"\n")?;
-	}
+    let stdout = borrow_fd(STDOUT_FILENO);
+    write(stdout, dir.as_bytes())?;
+    write(stdout, b"\n")?;
+  }
 
   state::set_status(0);
   Ok(())
@@ -130,7 +146,7 @@ pub mod tests {
 
   use tempfile::TempDir;
 
-  use crate::state::{self, read_vars, write_vars, VarFlags, VarKind};
+  use crate::state::{self, VarFlags, VarKind, read_vars, write_vars};
   use crate::testutil::{TestGuard, test_input};
 
   // ===================== Basic Navigation =====================
@@ -313,7 +329,10 @@ pub mod tests {
     test_input("cd -").unwrap();
 
     let cwd = env::current_dir().unwrap();
-    assert_eq!(cwd.display().to_string(), dir_a.path().display().to_string());
+    assert_eq!(
+      cwd.display().to_string(),
+      dir_a.path().display().to_string()
+    );
   }
 
   #[test]
@@ -328,7 +347,10 @@ pub mod tests {
     test_input("cd -").unwrap();
 
     let cwd = env::current_dir().unwrap();
-    assert_eq!(cwd.display().to_string(), dir_b.path().display().to_string());
+    assert_eq!(
+      cwd.display().to_string(),
+      dir_b.path().display().to_string()
+    );
   }
 
   // ===================== CDPATH =====================
@@ -340,7 +362,14 @@ pub mod tests {
     let target = base.path().join("mydir");
     fs::create_dir(&target).unwrap();
 
-    write_vars(|v| v.set_var("CDPATH", VarKind::Str(base.path().display().to_string()), VarFlags::EXPORT)).unwrap();
+    write_vars(|v| {
+      v.set_var(
+        "CDPATH",
+        VarKind::Str(base.path().display().to_string()),
+        VarFlags::EXPORT,
+      )
+    })
+    .unwrap();
     test_input("cd mydir").unwrap();
 
     let cwd = env::current_dir().unwrap();
@@ -354,11 +383,14 @@ pub mod tests {
     let target = base.path().join("realdir");
     fs::create_dir(&target).unwrap();
 
-    write_vars(|v| v.set_var(
-      "CDPATH",
-      VarKind::Str(format!("/nonexistent_cdpath_xyz:{}", base.path().display())),
-      VarFlags::EXPORT,
-    )).unwrap();
+    write_vars(|v| {
+      v.set_var(
+        "CDPATH",
+        VarKind::Str(format!("/nonexistent_cdpath_xyz:{}", base.path().display())),
+        VarFlags::EXPORT,
+      )
+    })
+    .unwrap();
     test_input("cd realdir").unwrap();
 
     let cwd = env::current_dir().unwrap();
@@ -371,11 +403,21 @@ pub mod tests {
     let target = TempDir::new().unwrap();
     let decoy = TempDir::new().unwrap();
 
-    write_vars(|v| v.set_var("CDPATH", VarKind::Str(decoy.path().display().to_string()), VarFlags::EXPORT)).unwrap();
+    write_vars(|v| {
+      v.set_var(
+        "CDPATH",
+        VarKind::Str(decoy.path().display().to_string()),
+        VarFlags::EXPORT,
+      )
+    })
+    .unwrap();
     test_input(format!("cd {}", target.path().display())).unwrap();
 
     let cwd = env::current_dir().unwrap();
-    assert_eq!(cwd.display().to_string(), target.path().display().to_string());
+    assert_eq!(
+      cwd.display().to_string(),
+      target.path().display().to_string()
+    );
   }
 
   #[test]
@@ -388,7 +430,14 @@ pub mod tests {
     test_input(format!("cd {}", temp_dir.path().display())).unwrap();
 
     let decoy = TempDir::new().unwrap();
-    write_vars(|v| v.set_var("CDPATH", VarKind::Str(decoy.path().display().to_string()), VarFlags::EXPORT)).unwrap();
+    write_vars(|v| {
+      v.set_var(
+        "CDPATH",
+        VarKind::Str(decoy.path().display().to_string()),
+        VarFlags::EXPORT,
+      )
+    })
+    .unwrap();
     test_input("cd ./child").unwrap();
 
     let cwd = env::current_dir().unwrap();
@@ -410,6 +459,9 @@ pub mod tests {
 
     let cwd = env::current_dir().unwrap();
     let canonical_real = fs::canonicalize(&real_dir).unwrap();
-    assert_eq!(cwd.display().to_string(), canonical_real.display().to_string());
+    assert_eq!(
+      cwd.display().to_string(),
+      canonical_real.display().to_string()
+    );
   }
 }

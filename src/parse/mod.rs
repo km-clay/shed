@@ -51,11 +51,11 @@ pub struct ParsedSrc {
   pub name: Rc<str>,
   pub ast: Ast,
   pub lex_flags: LexFlags,
-	pub parse_flags: ParseFlags,
+  pub parse_flags: ParseFlags,
   pub context: LabelCtx,
 
-	/// Not used internally, used mainly for auto-indent in the line editor. Mirrors the field on ParseStream
-	pub block_depth: usize,
+  /// Not used internally, used mainly for auto-indent in the line editor. Mirrors the field on ParseStream
+  pub block_depth: usize,
 }
 
 impl ParsedSrc {
@@ -70,9 +70,9 @@ impl ParsedSrc {
       name: "<stdin>".into(),
       ast: Ast::new(vec![]),
       lex_flags: LexFlags::empty(),
-			parse_flags: ParseFlags::empty(),
+      parse_flags: ParseFlags::empty(),
       context: VecDeque::new(),
-			block_depth: 0,
+      block_depth: 0,
     }
   }
   pub fn with_name(mut self, name: Rc<str>) -> Self {
@@ -83,10 +83,10 @@ impl ParsedSrc {
     self.lex_flags = flags;
     self
   }
-	pub fn with_parse_flags(mut self, flags: ParseFlags) -> Self {
-		self.parse_flags = flags;
-		self
-	}
+  pub fn with_parse_flags(mut self, flags: ParseFlags) -> Self {
+    self.parse_flags = flags;
+    self
+  }
   pub fn with_context(mut self, ctx: LabelCtx) -> Self {
     self.context = ctx;
     self
@@ -103,21 +103,22 @@ impl ParsedSrc {
 
     let mut errors = vec![];
     let mut nodes = vec![];
-		let parser = ParseStream::with_context(tokens, self.context.clone()).with_flags(self.parse_flags);
+    let parser =
+      ParseStream::with_context(tokens, self.context.clone()).with_flags(self.parse_flags);
     for parse_result in parser {
       match parse_result {
         Ok(node) => {
-					self.block_depth = 0;
-					nodes.push(node)
-				}
-        Err((depth,error)) => {
-					self.block_depth = depth;
-					if self.parse_flags.contains(ParseFlags::ERR_RETURN) {
-						return Err(vec![error]);
-					} else {
-						errors.push(error);
-					}
-				}
+          self.block_depth = 0;
+          nodes.push(node)
+        }
+        Err((depth, error)) => {
+          self.block_depth = depth;
+          if self.parse_flags.contains(ParseFlags::ERR_RETURN) {
+            return Err(vec![error]);
+          } else {
+            errors.push(error);
+          }
+        }
       }
     }
 
@@ -764,21 +765,21 @@ pub enum NdRule {
 }
 
 bitflags! {
-	#[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Hash,PartialOrd,Ord)]
-	pub struct ParseFlags: u32 {
-		const INCOMPLETE = 1 << 0; // Whether to error
-		const ERR_RETURN = 1 << 1; // Return on first error instead of continuing
-	}
+  #[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Hash,PartialOrd,Ord)]
+  pub struct ParseFlags: u32 {
+    const INCOMPLETE = 1 << 0; // Whether to error
+    const ERR_RETURN = 1 << 1; // Return on first error instead of continuing
+  }
 }
 
 pub struct ParseStream {
   pub tokens: Vec<Tk>,
   pub cursor: usize,
   pub context: LabelCtx,
-	pub flags: ParseFlags,
+  pub flags: ParseFlags,
 
-	/// Not used internally, used mainly for auto-indent in the line editor
-	pub block_depth: usize,
+  /// Not used internally, used mainly for auto-indent in the line editor
+  pub block_depth: usize,
 }
 
 impl Debug for ParseStream {
@@ -800,8 +801,8 @@ impl ParseStream {
       tokens,
       cursor: 0,
       context: VecDeque::new(),
-			block_depth: 0,
-			flags: ParseFlags::empty(),
+      block_depth: 0,
+      flags: ParseFlags::empty(),
     }
   }
   pub fn with_context(tokens: Vec<Tk>, context: LabelCtx) -> Self {
@@ -809,14 +810,14 @@ impl ParseStream {
       tokens,
       cursor: 0,
       context,
-			block_depth: 0,
-			flags: ParseFlags::empty(),
+      block_depth: 0,
+      flags: ParseFlags::empty(),
     }
   }
-	pub fn with_flags(mut self, flags: ParseFlags) -> Self {
-		self.flags = flags;
-		self
-	}
+  pub fn with_flags(mut self, flags: ParseFlags) -> Self {
+    self.flags = flags;
+    self
+  }
   /// Slice off consumed tokens
   fn commit(&mut self, num_consumed: usize) {
     assert!(self.cursor + num_consumed <= self.tokens.len());
@@ -860,12 +861,12 @@ impl ParseStream {
       node_tks.push(self.next_tk().unwrap());
     }
   }
-	fn check_separator(&self) -> bool {
-		matches!(
-			self.next_tk_class(),
-			TkRule::Or | TkRule::Bg | TkRule::And | TkRule::BraceGrpEnd | TkRule::Pipe | TkRule::Sep
-		)
-	}
+  fn check_separator(&self) -> bool {
+    matches!(
+      self.next_tk_class(),
+      TkRule::Or | TkRule::Bg | TkRule::And | TkRule::BraceGrpEnd | TkRule::Pipe | TkRule::Sep
+    )
+  }
   fn assert_separator(&mut self, node_tks: &mut Vec<Tk>) -> ShResult<()> {
     let next_class = self.next_tk_class();
     match next_class {
@@ -908,46 +909,46 @@ impl ParseStream {
   /// appearing at the bottom The check_pipelines parameter is used to prevent
   /// left-recursion issues in self.parse_pipeln()
   fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
-		if !check_pipelines {
-			self.block_depth += 1;
-		}
+    if !check_pipelines {
+      self.block_depth += 1;
+    }
 
-		// You will live to see man made horrors beyond your comprehension
-		let result = || -> ShResult<Option<Node>> {
-			if check_pipelines {
-				try_match!(self.parse_pipeln()?);
-				Ok(None)
-			} else {
-				try_match!(self.parse_func_def()?);
-				try_match!(self.parse_brc_grp(false /* from_func_def */)?);
-				try_match!(self.parse_case()?);
-				try_match!(self.parse_loop()?);
-				try_match!(self.parse_for()?);
-				try_match!(self.parse_test()?);
+    // You will live to see man made horrors beyond your comprehension
+    let result = || -> ShResult<Option<Node>> {
+      if check_pipelines {
+        try_match!(self.parse_pipeln()?);
+        Ok(None)
+      } else {
+        try_match!(self.parse_func_def()?);
+        try_match!(self.parse_brc_grp(false /* from_func_def */)?);
+        try_match!(self.parse_case()?);
+        try_match!(self.parse_loop()?);
+        try_match!(self.parse_for()?);
+        try_match!(self.parse_test()?);
 
-				// these aren't nested contexts
-				// so we decrement the depth and descend into
-				// yet another immediately-invoked closure
-				// please stabilize the try block my rust developers!!
-				self.block_depth -= 1;
-				let r = || -> ShResult<Option<Node>> {
-					try_match!(self.parse_if()?);
-					try_match!(self.parse_negate()?);
-					try_match!(self.parse_time()?);
-					try_match!(self.parse_cmd()?);
-					Ok(None)
-				}()?;
-				self.block_depth += 1;
+        // these aren't nested contexts
+        // so we decrement the depth and descend into
+        // yet another immediately-invoked closure
+        // please stabilize the try block my rust developers!!
+        self.block_depth -= 1;
+        let r = || -> ShResult<Option<Node>> {
+          try_match!(self.parse_if()?);
+          try_match!(self.parse_negate()?);
+          try_match!(self.parse_time()?);
+          try_match!(self.parse_cmd()?);
+          Ok(None)
+        }()?;
+        self.block_depth += 1;
 
-				Ok(r)
-			}
-		}()?;
+        Ok(r)
+      }
+    }()?;
 
-		if !check_pipelines {
-			self.block_depth -= 1;
-		}
+    if !check_pipelines {
+      self.block_depth -= 1;
+    }
 
-		Ok(result)
+    Ok(result)
   }
   fn parse_cmd_list(&mut self) -> ShResult<Option<Node>> {
     let mut elements = vec![];
@@ -1319,7 +1320,7 @@ impl ParseStream {
       let case_pat_tk = self.next_tk().unwrap();
       node_tks.push(case_pat_tk.clone());
       self.catch_separator(&mut node_tks);
-			self.block_depth += 1;
+      self.block_depth += 1;
 
       let mut nodes = vec![];
       while let Some(node) = self.parse_cmd_list()? {
@@ -1327,7 +1328,7 @@ impl ParseStream {
         let sep = node.tokens.last().unwrap();
         if sep.has_double_semi() {
           nodes.push(node);
-					self.block_depth -= 1;
+          self.block_depth -= 1;
           break;
         } else {
           nodes.push(node);
@@ -1456,12 +1457,12 @@ impl ParseStream {
     node_tks.push(self.next_tk().unwrap());
 
     loop {
-			self.block_depth += 1;
+      self.block_depth += 1;
       let prefix_keywrd = if cond_nodes.is_empty() { "if" } else { "elif" };
       let Some(mut cond) = self.parse_cmd_list()? else {
-				if prefix_keywrd == "elif" {
-					self.block_depth -= 1;
-				}
+        if prefix_keywrd == "elif" {
+          self.block_depth -= 1;
+        }
         self.panic_mode(&mut node_tks);
         let span = node_tks.get_span().unwrap();
         let color = next_color();
@@ -1515,7 +1516,7 @@ impl ParseStream {
       if !self.check_keyword("elif") || !self.next_tk_is_some() {
         break;
       } else {
-				self.block_depth -= 1;
+        self.block_depth -= 1;
         node_tks.push(self.next_tk().unwrap());
         self.catch_separator(&mut node_tks);
       }
@@ -1523,17 +1524,17 @@ impl ParseStream {
 
     self.catch_separator(&mut node_tks);
     if self.check_keyword("else") {
-			self.block_depth -= 1;
+      self.block_depth -= 1;
       node_tks.push(self.next_tk().unwrap());
-			let mut already_added = false;
+      let mut already_added = false;
 
-			if self.check_separator() || self.next_tk_is_some() {
-				already_added = true;
-				self.block_depth += 1;
-			}
+      if self.check_separator() || self.next_tk_is_some() {
+        already_added = true;
+        self.block_depth += 1;
+      }
 
-			let has_sep = self.check_separator();
-			log::debug!("has_sep = {has_sep}");
+      let has_sep = self.check_separator();
+      log::debug!("has_sep = {has_sep}");
 
       self.catch_separator(&mut node_tks);
 
@@ -1550,9 +1551,9 @@ impl ParseStream {
         ));
       }
 
-			if !already_added {
-				self.block_depth += 1;
-			}
+      if !already_added {
+        self.block_depth += 1;
+      }
     }
 
     self.catch_separator(&mut node_tks);
@@ -1565,7 +1566,7 @@ impl ParseStream {
       ));
     }
     node_tks.push(self.next_tk().unwrap());
-		self.block_depth -= 1;
+    self.block_depth -= 1;
 
     self.parse_redir(&mut redirs, &mut node_tks)?;
 
@@ -2054,9 +2055,9 @@ impl Iterator for ParseStream {
       Ok(Some(node)) => Some(Ok(node)),
       Ok(None) => None,
       Err(e) => {
-				let block_depth = std::mem::take(&mut self.block_depth);
-				Some(Err((block_depth,e)))
-			}
+        let block_depth = std::mem::take(&mut self.block_depth);
+        Some(Err((block_depth, e)))
+      }
     }
   }
 }

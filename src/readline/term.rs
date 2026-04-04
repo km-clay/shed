@@ -18,11 +18,14 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Perform};
 
 pub use crate::libsh::guards::{RawModeGuard, raw_mode};
-use crate::{sherr, state::{read_meta, write_meta}};
 use crate::{
   libsh::error::{ShErr, ShErrKind, ShResult},
   readline::keys::{KeyCode, ModKeys},
   state::read_shopts,
+};
+use crate::{
+  sherr,
+  state::{read_meta, write_meta},
 };
 
 use super::keys::KeyEvent;
@@ -79,17 +82,19 @@ pub fn enumerate_lines(
   let lines: Vec<&str> = s.split('\n').collect();
   let visible_count = lines.len();
   let max_num_len = (offset + visible_count).to_string().len();
-	let mut first = true;
-	log::debug!("left_pad: {left_pad}, offset: {offset}, visible_count: {visible_count}, max_num_len: {max_num_len}");
+  let mut first = true;
+  log::debug!(
+    "left_pad: {left_pad}, offset: {offset}, visible_count: {visible_count}, max_num_len: {max_num_len}"
+  );
   lines
     .into_iter()
     .enumerate()
     .fold(String::new(), |mut acc, (i, ln)| {
-			if first {
-				first = false;
-			} else {
-				acc.push('\n');
-			}
+      if first {
+        first = false;
+      } else {
+        acc.push('\n');
+      }
       if i == 0 && left_pad > 0 {
         acc.push_str(ln);
       } else {
@@ -103,7 +108,7 @@ pub fn enumerate_lines(
         } else {
           " ".repeat(prefix_len + 1).to_string()
         };
-				write!(acc, "{prefix}{}{ln}", " ".repeat(trail_pad)).unwrap();
+        write!(acc, "{prefix}{}{ln}", " ".repeat(trail_pad)).unwrap();
       }
       acc
     })
@@ -229,7 +234,9 @@ pub trait KeyReader {
 pub trait LineWriter {
   fn clear_rows(&mut self, layout: &Layout) -> ShResult<()>;
   fn clear_screen(&mut self) -> ShResult<()>;
-	fn move_cursor_to_end(&mut self, _layout: &Layout) -> ShResult<()> { Ok(()) }
+  fn move_cursor_to_end(&mut self, _layout: &Layout) -> ShResult<()> {
+    Ok(())
+  }
   fn redraw(
     &mut self,
     prompt: &str,
@@ -1121,7 +1128,9 @@ impl LineWriter for TermWriter {
       write!(self.buffer, "\x1b[{cursor_motion}B").unwrap()
     }
 
-		log::debug!("rows to clear: {rows_to_clear}, cursor row: {cursor_row}, cursor motion: {cursor_motion}");
+    log::debug!(
+      "rows to clear: {rows_to_clear}, cursor row: {cursor_row}, cursor motion: {cursor_motion}"
+    );
 
     for _ in 0..rows_to_clear {
       self.buffer.push_str("\x1b[2K\x1b[A");
@@ -1132,8 +1141,8 @@ impl LineWriter for TermWriter {
     Ok(())
   }
 
-	fn move_cursor_to_end(&mut self, layout: &Layout) -> ShResult<()> {
-		self.buffer.clear();
+  fn move_cursor_to_end(&mut self, layout: &Layout) -> ShResult<()> {
+    self.buffer.clear();
     let mut end = layout.end.row;
     if layout.psr_end.is_some() && layout.t_cols > self.t_cols && self.t_cols > 0 {
       let extra = (layout.t_cols.saturating_sub(1)) / self.t_cols;
@@ -1146,11 +1155,11 @@ impl LineWriter for TermWriter {
       write!(self.buffer, "\x1b[{cursor_motion}B").unwrap();
     }
 
-		write_all(self.out, self.buffer.as_str())?;
-		self.buffer.clear();
+    write_all(self.out, self.buffer.as_str())?;
+    self.buffer.clear();
 
-		Ok(())
-	}
+    Ok(())
+  }
 
   fn clear_screen(&mut self) -> ShResult<()> {
     self.buffer.clear();
@@ -1168,9 +1177,7 @@ impl LineWriter for TermWriter {
     offset: usize,
     total_buf_lines: usize,
   ) -> ShResult<()> {
-    let err = |_| {
-			sherr!(InternalErr, "Failed to write to LineWriter internal buffer")
-    };
+    let err = |_| sherr!(InternalErr, "Failed to write to LineWriter internal buffer");
     self.buffer.clear();
     self.buffer.push_str("\x1b[J"); // Clear from cursor to end of screen to erase any remnants of the old line after the prompt
 
@@ -1186,7 +1193,7 @@ impl LineWriter for TermWriter {
     }
 
     self.buffer.push_str(prompt);
-		let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
+    let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
     let multiline = line.contains('\n') || prompt_end.col == 0;
     if multiline {
       let show_numbers = read_shopts(|o| o.line.line_numbers);

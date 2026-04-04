@@ -183,7 +183,7 @@ fn fc_edit(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()> {
   let first = opts.first.unwrap_or_default();
   let last = opts.last.unwrap_or(first.clone());
 
-  let entries = get_entry_range(&hist, Some(first), Some(last), opts.reverse);
+  let entries = get_entry_range(&hist, Some(first), Some(last), opts.reverse)?;
   let mut should_push;
 
   NO_HIST_SAVE.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -223,7 +223,7 @@ fn fc_edit(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()> {
 fn fc_reexec(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()> {
   let first = opts.first.unwrap_or_default();
   let last = opts.last.unwrap_or(first.clone());
-  let entries = get_entry_range(&hist, Some(first), Some(last), opts.reverse);
+  let entries = get_entry_range(&hist, Some(first), Some(last), opts.reverse)?;
 
   NO_HIST_SAVE.store(true, std::sync::atomic::Ordering::SeqCst);
   for (_, entry) in entries {
@@ -259,7 +259,7 @@ fn fc_list(hist: History, opts: FixCmdOpts) -> ShResult<()> {
   };
   let last = opts.last.clone().unwrap_or_default();
 
-  let entries = get_entry_range(&hist, Some(first), Some(last), opts.reverse);
+  let entries = get_entry_range(&hist, Some(first), Some(last), opts.reverse)?;
 
   let stdout = borrow_fd(STDOUT_FILENO);
   let mut buf = String::new();
@@ -282,19 +282,24 @@ fn get_entry_range(
   first: Option<RangeArg>,
   last: Option<RangeArg>,
   reverse: bool,
-) -> Vec<(i64, HistEntry)> {
+) -> ShResult<Vec<(i64, HistEntry)>> {
   let last_id = hist.last_id();
 
-  let resolve = |arg: &RangeArg| -> i64 {
+  let resolve = |arg: &RangeArg| -> ShResult<i64> {
     match arg {
-      RangeArg::Number(n) if *n < 0 => last_id + 1 + *n as i64,
-      RangeArg::Number(n) => *n as i64,
-      RangeArg::Prefix(p) => hist.query_by_prefix(p).map(|(id, _)| id).unwrap_or(last_id),
+      RangeArg::Number(n) if *n < 0 => Ok(last_id + 1 + *n as i64),
+      RangeArg::Number(n) => Ok(*n as i64),
+      RangeArg::Prefix(p) => Ok(
+        hist
+          .query_by_prefix(p)?
+          .map(|(id, _)| id)
+          .unwrap_or(last_id),
+      ),
     }
   };
 
-  let first_id = first.as_ref().map(resolve).unwrap_or(last_id);
-  let last_id = last.as_ref().map(resolve).unwrap_or(first_id);
+  let first_id = resolve(&first.unwrap_or(RangeArg::Number(last_id as i32)))?;
+  let last_id = resolve(&last.unwrap_or(RangeArg::Number(first_id as i32)))?;
 
   // Ensure first <= last for the BETWEEN query
   let (lo, hi) = if first_id <= last_id {
@@ -303,9 +308,9 @@ fn get_entry_range(
     (last_id, first_id)
   };
 
-  let mut entries = hist.query_range(lo, hi);
+  let mut entries = hist.query_range(lo, hi)?;
   if reverse || first_id > last_id {
     entries.reverse();
   }
-  entries
+  Ok(entries)
 }

@@ -562,172 +562,122 @@ fn vi_auto_indent_siblings() {
 }
 
 fn hist_expansion_test(commands: &[&str], input: &str, expected: &str) {
-	let g = TestGuard::new();
-	let prompt = Prompt::default();
-	let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
-	for cmd in commands {
-		line.history.push(cmd.to_string()).unwrap();
-	}
-	line.history.update_search_mask(None);
+  let g = TestGuard::new();
+  let prompt = Prompt::default();
+  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+  for cmd in commands {
+    line.history.push(cmd.to_string()).unwrap();
+  }
+  line.history.update_search_mask(None);
 
-	assert_eq!(line.history.masked_entries().len(), commands.len());
+  assert_eq!(line.history.masked_entries().len(), commands.len());
 
-	line.feed_bytes(input.as_bytes());
-	line.process_input().unwrap();
+  line.feed_bytes(input.as_bytes());
+  line.process_input().unwrap();
 
-	// After process_input with \r, if expansion happened the buffer
-	// still holds the expanded text (submit was deferred). If no
-	// expansion happened, take_buf() already consumed it and returned
-	// ReadlineEvent::Line, so we can't read joined(). Use Tab instead
-	// of Enter for expansion-only tests.
-	let joined = line.editor.joined();
-	assert_eq!(joined, expected);
+  // After process_input with \r, if expansion happened the buffer
+  // still holds the expanded text (submit was deferred). If no
+  // expansion happened, take_buf() already consumed it and returned
+  // ReadlineEvent::Line, so we can't read joined(). Use Tab instead
+  // of Enter for expansion-only tests.
+  let joined = line.editor.joined();
+  assert_eq!(joined, expected);
 }
 
 /// Like hist_expansion_test but asserts that no expansion occurs.
 /// Feeds input without \r, triggers expansion via Tab, and checks
 /// the buffer is unchanged.
 fn hist_no_expansion_test(commands: &[&str], input: &str) {
-	let g = TestGuard::new();
-	let prompt = Prompt::default();
-	let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
-	for cmd in commands {
-		line.history.push(cmd.to_string()).unwrap();
-	}
-	line.history.update_search_mask(None);
+  let g = TestGuard::new();
+  let prompt = Prompt::default();
+  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+  for cmd in commands {
+    line.history.push(cmd.to_string()).unwrap();
+  }
+  line.history.update_search_mask(None);
 
-	// Feed input without pressing Enter
-	line.feed_bytes(input.as_bytes());
-	line.process_input().unwrap();
+  // Feed input without pressing Enter
+  line.feed_bytes(input.as_bytes());
+  line.process_input().unwrap();
 
-	let before = line.editor.joined();
-	// Manually call attempt_history_expansion - should return false
-	let expanded = line.editor.attempt_history_expansion(&line.history);
-	assert!(!expanded, "expected no expansion but expansion occurred");
-	assert_eq!(line.editor.joined(), before);
+  let before = line.editor.joined();
+  // Manually call attempt_history_expansion - should return false
+  let expanded = line.editor.attempt_history_expansion(&line.history);
+  assert!(!expanded, "expected no expansion but expansion occurred");
+  assert_eq!(line.editor.joined(), before);
 }
 
 #[test]
 fn history_expansion_prefix() {
-	hist_expansion_test(
-		&["foo", "bar", "biz", "qux"],
-		"!f\r",
-		"foo",
-	);
+  hist_expansion_test(&["foo", "bar", "biz", "qux"], "!f\r", "foo");
 }
 
 #[test]
 fn history_expansion_prefix_latest_match() {
-	hist_expansion_test(
-		&["foo first", "bar", "foo second"],
-		"!f\r",
-		"foo second",
-	);
+  hist_expansion_test(&["foo first", "bar", "foo second"], "!f\r", "foo second");
 }
 
 #[test]
 fn history_expansion_bang_bang() {
-	hist_expansion_test(
-		&["echo hello", "ls"],
-		"!!\r",
-		"ls",
-	);
+  hist_expansion_test(&["echo hello", "ls"], "!!\r", "ls");
 }
 
 #[test]
 fn history_expansion_bang_dollar() {
-	hist_expansion_test(
-		&["echo hello world"],
-		"!$\r",
-		"world",
-	);
+  hist_expansion_test(&["echo hello world"], "!$\r", "world");
 }
 
 #[test]
 fn history_expansion_bang_dollar_single_word() {
-	hist_expansion_test(
-		&["solo"],
-		"!$\r",
-		"solo",
-	);
+  hist_expansion_test(&["solo"], "!$\r", "solo");
 }
 
 #[test]
 fn history_expansion_negative_index() {
-	hist_expansion_test(
-		&["alpha", "beta", "gamma"],
-		"!-2\r",
-		"beta",
-	);
+  hist_expansion_test(&["alpha", "beta", "gamma"], "!-2\r", "beta");
 }
 
 #[test]
 fn history_expansion_positive_index() {
-	hist_expansion_test(
-		&["alpha", "beta", "gamma"],
-		"!1\r",
-		"alpha",
-	);
+  hist_expansion_test(&["alpha", "beta", "gamma"], "!1\r", "alpha");
 }
 
 #[test]
 fn history_expansion_inline() {
-	hist_expansion_test(
-		&["world"],
-		"echo !!\r",
-		"echo world",
-	);
+  hist_expansion_test(&["world"], "echo !!\r", "echo world");
 }
 
 #[test]
 fn history_expansion_multiple() {
-	hist_expansion_test(
-		&["hello", "world"],
-		"echo !! !h\r",
-		"echo world hello",
-	);
+  hist_expansion_test(&["hello", "world"], "echo !! !h\r", "echo world hello");
 }
 
 #[test]
 fn history_expansion_no_match_is_passthrough() {
-	// !z with no match resolves to the token itself (minus the !)
-	hist_expansion_test(
-		&["foo", "bar"],
-		"!z\r",
-		"z",
-	);
+  // !z with no match resolves to the token itself (minus the !)
+  hist_expansion_test(&["foo", "bar"], "!z\r", "z");
 }
 
 #[test]
 fn history_expansion_skips_single_quotes() {
-	hist_no_expansion_test(
-		&["foo"],
-		"'!!'",
-	);
+  hist_no_expansion_test(&["foo"], "'!!'");
 }
 
 #[test]
 fn history_expansion_works_in_double_quotes() {
-	hist_expansion_test(
-		&["foo"],
-		"\"!!\"\r",
-		"\"foo\"",
-	);
+  hist_expansion_test(&["foo"], "\"!!\"\r", "\"foo\"");
 }
 
 #[test]
 fn history_expansion_skips_dollar_bang() {
-	hist_no_expansion_test(
-		&["foo"],
-		"$!1",
-	);
+  hist_no_expansion_test(&["foo"], "$!1");
 }
 
 #[test]
 fn history_expansion_multiline() {
-	hist_expansion_test(
-		&["echo foo", "if true; then\necho foo\nfi", "echo bar"],
-		"!2\r",
-		"if true; then\n\techo foo\nfi",
-	);
+  hist_expansion_test(
+    &["echo foo", "if true; then\necho foo\nfi", "echo bar"],
+    "!2\r",
+    "if true; then\n\techo foo\nfi",
+  );
 }

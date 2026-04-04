@@ -400,10 +400,10 @@ impl Highlighter {
             input_chars.next();
             break;
           }
-					markers::VAR_SUB_END => {
-						input_chars.next();
-						break;
-					}
+          markers::VAR_SUB_END => {
+            input_chars.next();
+            break;
+          }
           markers::VISUAL_MODE_START => {
             self.emit_style(Style::BgWhite | Style::Black);
             self.in_selection = true;

@@ -748,67 +748,65 @@ impl MetaTab {
         let conn = Arc::new(conn);
         self.subscribers.push(conn.clone());
       }
-      SocketRequest::Query(query_header) => {
-        match query_header {
-          QueryHeader::Cwd => {
-            let cwd = env::current_dir()?.to_string_lossy().to_string();
-            write(&conn, cwd.as_bytes()).ok();
-            write(&conn, b"\n").ok();
-          }
-          QueryHeader::Var(var) => {
-            let var = read_vars(|v| v.get_var(&var));
-            write(&conn, var.as_bytes()).ok();
-            write(&conn, b"\n").ok();
-          }
-          QueryHeader::Status(headers) => {
-            let mut responses = vec![];
-            for header in headers {
-              match header {
-                StatusHeader::ExitCode => responses.push(get_status().to_string()),
-                StatusHeader::CommandName => {
-                  if let Some(job) = self.last_job()
-                    && let Some(cmd) = job.name()
-                  {
-                    responses.push(cmd.to_string());
-                  } else {
-                    responses.push("".to_string());
-                  }
-                }
-                StatusHeader::Runtime => {
-                  let Some(dur) = self.get_time() else {
-                    responses.push("".to_string());
-                    continue;
-                  };
-                  responses.push(format!("{}", dur.as_millis()));
-                }
-                StatusHeader::Pid => {
-                  let Some(job) = self.last_job() else {
-                    responses.push("".to_string());
-                    continue;
-                  };
-                  responses.push(
-                    job
-                      .get_pids()
-                      .first()
-                      .map(|p| p.to_string())
-                      .unwrap_or_default(),
-                  );
-                }
-                StatusHeader::Pgid => {
-                  let Some(job) = self.last_job() else {
-                    responses.push("".to_string());
-                    continue;
-                  };
-                  responses.push(job.pgid().to_string());
+      SocketRequest::Query(query_header) => match query_header {
+        QueryHeader::Cwd => {
+          let cwd = env::current_dir()?.to_string_lossy().to_string();
+          write(&conn, cwd.as_bytes()).ok();
+          write(&conn, b"\n").ok();
+        }
+        QueryHeader::Var(var) => {
+          let var = read_vars(|v| v.get_var(&var));
+          write(&conn, var.as_bytes()).ok();
+          write(&conn, b"\n").ok();
+        }
+        QueryHeader::Status(headers) => {
+          let mut responses = vec![];
+          for header in headers {
+            match header {
+              StatusHeader::ExitCode => responses.push(get_status().to_string()),
+              StatusHeader::CommandName => {
+                if let Some(job) = self.last_job()
+                  && let Some(cmd) = job.name()
+                {
+                  responses.push(cmd.to_string());
+                } else {
+                  responses.push("".to_string());
                 }
               }
+              StatusHeader::Runtime => {
+                let Some(dur) = self.get_time() else {
+                  responses.push("".to_string());
+                  continue;
+                };
+                responses.push(format!("{}", dur.as_millis()));
+              }
+              StatusHeader::Pid => {
+                let Some(job) = self.last_job() else {
+                  responses.push("".to_string());
+                  continue;
+                };
+                responses.push(
+                  job
+                    .get_pids()
+                    .first()
+                    .map(|p| p.to_string())
+                    .unwrap_or_default(),
+                );
+              }
+              StatusHeader::Pgid => {
+                let Some(job) = self.last_job() else {
+                  responses.push("".to_string());
+                  continue;
+                };
+                responses.push(job.pgid().to_string());
+              }
             }
-            let output = responses.join(" ");
-            write(&conn, output.as_bytes()).ok();
-            write(&conn, b"\n").ok();
           }
+          let output = responses.join(" ");
+          write(&conn, output.as_bytes()).ok();
+          write(&conn, b"\n").ok();
         }
-      }
+      },
       SocketRequest::RefreshPrompt => {
         kill(Pid::this(), Signal::SIGUSR1)?;
         write(&conn, b"ok\n").ok();
@@ -914,8 +912,9 @@ impl MetaTab {
   pub fn start_timer(&mut self) {
     self.runtime_start = Some(Instant::now());
   }
-  pub fn stop_timer(&mut self) {
+  pub fn stop_timer(&mut self) -> Option<Duration> {
     self.runtime_stop = Some(Instant::now());
+    self.get_time()
   }
   pub fn get_time(&self) -> Option<Duration> {
     if let (Some(start), Some(stop)) = (self.runtime_start, self.runtime_stop) {

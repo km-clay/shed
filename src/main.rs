@@ -563,16 +563,21 @@ fn handle_readline_event(
       }
       let command_run_time = start.elapsed();
       log::info!("Command executed in {:.2?}", command_run_time);
-      write_meta(|m| m.stop_timer());
+      let runtime = write_meta(|m| m.stop_timer());
 
       post_exec.exec();
 
       if read_shopts(|s| s.core.auto_hist)
         && !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
         && !input.is_empty()
-        && let Err(e) = readline.history.push(input.clone())
       {
-        e.print_error();
+        let result = match runtime {
+          Some(dur) => readline.history.push_with_runtime(input.clone(), dur),
+          None => readline.history.push(input.clone()),
+        };
+        if let Err(e) = result {
+          e.print_error();
+        }
       }
 
       readline.fix_column()?;

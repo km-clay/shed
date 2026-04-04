@@ -2,7 +2,10 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use chrono::Utc;
 use chrono_english::{Dialect, Interval, parse_date_string};
-use nix::{libc::STDOUT_FILENO, unistd::write};
+use nix::{
+  libc::{STDERR_FILENO, STDOUT_FILENO},
+  unistd::write,
+};
 use regex::Regex;
 
 use crate::{
@@ -20,15 +23,18 @@ pub struct HistQuery {
   after: Option<String>,
   before: Option<String>,
   contains: Option<String>,
+  lines_gt: Option<usize>,
+  lines_lt: Option<usize>,
   starts_with: Option<String>,
   matches: Option<String>,
-  longer_than: Option<String>,
-  shorter_than: Option<String>,
+  duration_gt: Option<String>,
+  duration_lt: Option<String>,
   limit: Option<usize>,
   no_numbers: bool,
   reverse: bool,
   json: bool,
   count: bool,
+  delete: bool,
 }
 
 impl HistQuery {
@@ -65,7 +71,21 @@ impl HistQuery {
       params.push(Box::new(format!("{prefix}%")));
       idx += 1;
     }
-    if let Some(duration) = &self.longer_than {
+    if let Some(ceiling) = &self.lines_lt {
+      conditions.push(format!(
+        "(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 < ?{idx}"
+      ));
+      params.push(Box::new(*ceiling as i64));
+      idx += 1;
+    }
+    if let Some(floor) = &self.lines_gt {
+      conditions.push(format!(
+        "(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 > ?{idx}"
+      ));
+      params.push(Box::new(*floor as i64));
+      idx += 1;
+    }
+    if let Some(duration) = &self.duration_gt {
       let secs = chrono_english::parse_duration(duration)
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --longer-than: {e}"))?;
       conditions.push(format!("runtime >= ?{idx}"));
@@ -87,7 +107,7 @@ impl HistQuery {
       }
       idx += 1;
     }
-    if let Some(duration) = &self.shorter_than {
+    if let Some(duration) = &self.duration_lt {
       let secs = chrono_english::parse_duration(duration)
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --shorter-than: {e}"))?;
       conditions.push(format!("runtime <= ?{idx}"));
@@ -121,7 +141,11 @@ impl HistQuery {
     let query = format!("{where_clause} ORDER BY id DESC {limit}");
 
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let mut entries = hist.query(&query, &param_refs);
+    let mut entries = if self.delete {
+      hist.delete(&query, &param_refs)?
+    } else {
+      hist.query(&query, &param_refs)?
+    };
 
     // 'self.reverse' actually means "dont reverse the list" internally
     if !self.reverse {
@@ -154,13 +178,26 @@ impl HistQuery {
           "contains" => new.contains = Some(arg.clone()),
           "starts-with" => new.starts_with = Some(arg.clone()),
           "matches" => new.matches = Some(arg.clone()),
-          "longer-than" => new.longer_than = Some(arg.clone()),
-          "shorter-than" => new.shorter_than = Some(arg.clone()),
+          "duration-gt" => new.duration_gt = Some(arg.clone()),
+          "duration-lt" => new.duration_lt = Some(arg.clone()),
           "limit" => new.limit = Some(arg.parse().unwrap_or(usize::MAX)),
+          opt @ ("lines-gt" | "lines-lt") => {
+            let is_gt = opt == "lines-gt";
+            let count = match arg.parse::<usize>() {
+              Ok(c) => c,
+              Err(e) => return Err(sherr!(ParseErr, "Invalid number for {opt}: {e}")),
+            };
+            if is_gt {
+              new.lines_gt = Some(count);
+            } else {
+              new.lines_lt = Some(count);
+            }
+          }
           _ => {}
         },
         Opt::Long(name) => match name.as_str() {
           "count" => new.count = true,
+          "delete" => new.delete = true,
           "json" => new.json = true,
           _ => {}
         },
@@ -175,10 +212,22 @@ impl HistQuery {
     Ok(new)
   }
 
-  pub fn opt_spec() -> [OptSpec; 12] {
+  pub fn opt_spec() -> [OptSpec; 15] {
     [
       OptSpec {
+        opt: Opt::Long("delete".into()),
+        takes_arg: OptArg::None,
+      },
+      OptSpec {
         opt: Opt::Long("after".into()),
+        takes_arg: OptArg::Single,
+      },
+      OptSpec {
+        opt: Opt::Long("lines-gt".into()),
+        takes_arg: OptArg::Single,
+      },
+      OptSpec {
+        opt: Opt::Long("lines-lt".into()),
         takes_arg: OptArg::Single,
       },
       OptSpec {
@@ -198,11 +247,11 @@ impl HistQuery {
         takes_arg: OptArg::Single,
       },
       OptSpec {
-        opt: Opt::Long("longer-than".into()),
+        opt: Opt::Long("duration-gt".into()),
         takes_arg: OptArg::Single,
       },
       OptSpec {
-        opt: Opt::Long("shorter-than".into()),
+        opt: Opt::Long("duration-lt".into()),
         takes_arg: OptArg::Single,
       },
       OptSpec {
@@ -305,6 +354,16 @@ pub fn hist_builtin(node: Node) -> ShResult<()> {
 
   write(stdout, entries_fmt.as_bytes())?;
   write(stdout, b"\n")?;
+
+  if query.delete {
+    let stderr = borrow_fd(STDERR_FILENO);
+    let num_deleted = entries.len();
+    write(
+      stderr,
+      format!("hist: deleted {num_deleted} entries.\n").as_bytes(),
+    )
+    .ok();
+  }
 
   state::set_status(0);
   Ok(())

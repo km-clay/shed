@@ -1366,7 +1366,7 @@ impl Dispatcher {
               let Ok(other) = val.to_string().parse::<i32>() else {
                 return Err(sherr!(
                   InvalidAssignment @ span,
-                  "cannot add non-integer value to integer variable"
+                  "cannot subtract non-integer value to integer variable"
                 ));
               };
               *n -= other;
@@ -1374,8 +1374,68 @@ impl Dispatcher {
             VarKind::AssocArr(_items) => todo!(),
           }
         }
-        AssignKind::MultEq => todo!(),
-        AssignKind::DivEq => todo!(),
+        AssignKind::MultEq => {
+          let mut var = if let Some((name, idx)) = indexed {
+            read_vars(|v| v.index_var(&name, idx))?.into()
+          } else {
+            read_vars(|v| v.get_var_meta(var))
+          };
+          match var.kind_mut() {
+            VarKind::Str(_) => {
+              return Err(sherr!(
+                InvalidAssignment @ span,
+                "cannot multiply string variable"
+              ));
+            }
+            VarKind::Arr(_) => {
+              return Err(sherr!(
+                InvalidAssignment @ span,
+                "cannot multiply array variable"
+              ));
+            }
+            VarKind::Int(n) => {
+              let Ok(other) = val.to_string().parse::<i32>() else {
+                return Err(sherr!(
+                  InvalidAssignment @ span,
+                  "cannot multiply non-integer value to integer variable"
+                ));
+              };
+              *n *= other;
+            }
+            VarKind::AssocArr(_items) => todo!(),
+          }
+        }
+        AssignKind::DivEq => {
+          let mut var = if let Some((name, idx)) = indexed {
+            read_vars(|v| v.index_var(&name, idx))?.into()
+          } else {
+            read_vars(|v| v.get_var_meta(var))
+          };
+          match var.kind_mut() {
+            VarKind::Str(_) => {
+              return Err(sherr!(
+                InvalidAssignment @ span,
+                "cannot divide string variable"
+              ));
+            }
+            VarKind::Arr(_) => {
+              return Err(sherr!(
+                InvalidAssignment @ span,
+                "cannot divide array variable"
+              ));
+            }
+            VarKind::Int(n) => {
+              let Ok(other) = val.to_string().parse::<i32>() else {
+                return Err(sherr!(
+                  InvalidAssignment @ span,
+                  "cannot divide non-integer value to integer variable"
+                ));
+              };
+              *n /= other;
+            }
+            VarKind::AssocArr(_items) => todo!(),
+          }
+        }
       }
 
       if matches!(behavior, AssignBehavior::Export) {

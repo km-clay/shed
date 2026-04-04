@@ -287,8 +287,8 @@ shopt_group! {
     /// The line offset from the top or bottom of the viewport to trigger scrolling
     scroll_offset: usize = 2,
 
-		/// The number of spaces a tab character represents in the line editor
-		tab_width: usize = 4,
+    /// The number of spaces a tab character represents in the line editor
+    tab_width: usize = 4,
 
     /// Whether to enable or disable syntax highlighting on the prompt
     highlight: bool = true,

@@ -13,7 +13,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::expand_prompt;
 use crate::libsh::utils::AutoCmdVecUtils;
-use crate::parse::lex::{LexStream, QuoteState};
+use crate::parse::lex::QuoteState;
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::editcmd::Direction;
 use crate::readline::editmode::emacs::Emacs;
@@ -459,7 +459,7 @@ impl ShedLine {
     if self.mode.report_mode() == ModeReport::Normal {
       return Ok(true);
     }
-    let (depth,failed) = self.editor.checked_calc_indent_level();
+    let (depth, failed) = self.editor.checked_calc_indent_level();
     Ok(depth == 0 && !failed)
   }
 
@@ -861,10 +861,10 @@ impl ShedLine {
     self.editor.set_hint(None);
     self.editor.set_cursor_from_flat(self.editor.cursor_max());
     self.print_line(true)?;
-		if let Some(layout) = &self.old_layout {
-			log::debug!("Moving cursor to end of layout");
-			self.writer.move_cursor_to_end(layout)?;
-		}
+    if let Some(layout) = &self.old_layout {
+      log::debug!("Moving cursor to end of layout");
+      self.writer.move_cursor_to_end(layout)?;
+    }
     self.writer.flush_write("\n")?;
     let buf = self.editor.take_buf();
     self.history.reset();
@@ -915,16 +915,16 @@ impl ShedLine {
     }
 
     if cmd.is_submit_action() {
-			if self.editor.attempt_history_expansion(&self.history) {
-				// If history expansion occurred, don't submit yet
-				// allow the user to see the expanded command and accept or edit it before submitting
-				return Ok(None);
-			} else if !self.editor.cursor_is_escaped()
-				&& (self.should_submit()? || !read_shopts(|o| o.line.linebreak_on_incomplete))
-			{
-				return self.submit();
-			}
-		}
+      if self.editor.attempt_history_expansion(&self.history) {
+        // If history expansion occurred, don't submit yet
+        // allow the user to see the expanded command and accept or edit it before submitting
+        return Ok(None);
+      } else if !self.editor.cursor_is_escaped()
+        && (self.should_submit()? || !read_shopts(|o| o.line.linebreak_on_incomplete))
+      {
+        return self.submit();
+      }
+    }
 
     if let Some(VerbCmd(_, v @ Verb::DeleteOrEof)) = cmd.verb_mut() {
       // user pressed Ctrl+D in emacs mode
@@ -1359,7 +1359,6 @@ impl ShedLine {
         self.status_msgs.pop_front();
       }
     }
-
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;

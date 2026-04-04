@@ -121,9 +121,9 @@ impl History {
     }
   }
 
-  pub fn push(&self, command: String) -> ShResult<()> {
+  pub fn push(&self, command: String) -> ShResult<Option<i64>> {
     if command.is_empty() {
-      return Ok(());
+      return Ok(None);
     }
     if read_shopts(|o| o.core.hist_ignore_dupes) {
       let last: Option<String> = self
@@ -138,7 +138,7 @@ impl History {
         )
         .ok();
       if last.as_deref() == Some(&command) {
-        return Ok(());
+        return Ok(None);
       }
     }
     let table = &self.table;
@@ -150,7 +150,23 @@ impl History {
       &format!("INSERT INTO {table} (timestamp, runtime, command) VALUES (?1, 0, ?2)"),
       rusqlite::params![timestamp, command],
     )?;
-    Ok(())
+    let id = self.conn.last_insert_rowid();
+    Ok(Some(id))
+  }
+
+  pub fn push_with_runtime(&self, command: String, runtime: Duration) -> ShResult<Option<i64>> {
+    let Some(id) = self.push(command)? else {
+      return Ok(None);
+    };
+
+    let table = &self.table;
+    let micros = runtime.as_micros() as i64;
+    self.conn.execute(
+      &format!("UPDATE {table} SET runtime = ?1 WHERE id = ?2"),
+      rusqlite::params![micros, id],
+    )?;
+
+    Ok(Some(id))
   }
 
   pub fn entry_count(&self) -> i64 {
@@ -173,27 +189,42 @@ impl History {
       .unwrap_or(0)
   }
 
-  /// Runs a query on
+  pub fn delete(
+    &self,
+    where_clause: &str,
+    params: &[&dyn rusqlite::ToSql],
+  ) -> ShResult<Vec<(i64, HistEntry)>> {
+    let entries = self.query(where_clause, params)?;
+    let table = &self.table;
+
+    let tx = self.conn.unchecked_transaction()?;
+    tx.execute(&format!(
+				"CREATE TABLE {table}_tmp AS SELECT command, timestamp, runtime FROM {table} WHERE id NOT IN (SELECT id FROM {table}
+		{where_clause}) ORDER BY id"
+		), params)?;
+    tx.execute_batch(&format!(
+      "DROP TABLE {table}; ALTER TABLE {table}_tmp RENAME TO {table};"
+    ))?;
+    tx.commit()?;
+
+    Ok(entries)
+  }
+
+  /// Runs a query on the history table with the given WHERE clause and parameters, returning a vector of (id, HistEntry) tuples.
   pub fn query(
     &self,
     where_clause: &str,
     params: &[&dyn rusqlite::ToSql],
-  ) -> Vec<(i64, HistEntry)> {
+  ) -> ShResult<Vec<(i64, HistEntry)>> {
     let table = &self.table;
     let sql = format!("SELECT command, timestamp, runtime, id FROM {table} {where_clause}");
-    let mut stmt = match self.conn.prepare(&sql) {
-      Ok(s) => s,
-      Err(_) => return vec![],
-    };
-    let rows = stmt.query_map(params, |row| Ok((row.get(3)?, Self::row_to_entry(row)?)));
+    let mut stmt = self.conn.prepare(&sql)?;
+    let rows = stmt.query_map(params, |row| Ok((row.get(3)?, Self::row_to_entry(row)?)))?;
 
-    match rows {
-      Ok(iter) => iter.filter_map(Result::ok).collect(),
-      Err(_) => vec![],
-    }
+    Ok(rows.filter_map(Result::ok).collect())
   }
 
-  pub fn query_range(&self, first: i64, last: i64) -> Vec<(i64, HistEntry)> {
+  pub fn query_range(&self, first: i64, last: i64) -> ShResult<Vec<(i64, HistEntry)>> {
     let where_clause = r##"
 			WHERE id BETWEEN ?1 AND ?2
 			ORDER BY id ASC
@@ -202,17 +233,19 @@ impl History {
     self.query(&where_clause, rusqlite::params![first, last])
   }
 
-  pub fn query_by_prefix(&self, prefix: &str) -> Option<(i64, HistEntry)> {
+  pub fn query_by_prefix(&self, prefix: &str) -> ShResult<Option<(i64, HistEntry)>> {
     let where_clause = r##"
 			WHERE command LIKE ?1 || '%'
 			ORDER BY id DESC
 			LIMIT 1
 		"##
       .to_string();
-    self
-      .query(&where_clause, rusqlite::params![prefix])
-      .into_iter()
-      .next()
+    Ok(
+      self
+        .query(&where_clause, rusqlite::params![prefix])?
+        .into_iter()
+        .next(),
+    )
   }
 
   pub fn push_entry(&self, entry: HistEntry) -> ShResult<()> {
@@ -246,15 +279,6 @@ impl History {
       &format!("INSERT INTO {table} (timestamp, runtime, command) VALUES (?1, ?2, ?3)"),
       rusqlite::params![timestamp, runtime.as_micros() as i64, command],
     )?;
-    Ok(())
-  }
-
-  pub fn update_last_runtime(&self, runtime: Duration) -> ShResult<()> {
-    let table = &self.table;
-    self.conn.execute(
-			&format!("UPDATE {table} SET runtime = ?1 WHERE id = (SELECT id FROM {table} ORDER BY id DESC LIMIT 1)"),
-			rusqlite::params![runtime.as_micros() as i64],
-		)?;
     Ok(())
   }
 

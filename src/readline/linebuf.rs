@@ -13,19 +13,27 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-	expand::expand_cmd_sub, libsh::{
+  expand::expand_cmd_sub,
+  libsh::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},
-  }, parse::{
-    ParseFlags, ParsedSrc, Redir, RedirType, execute::exec_input, lex::{LexFlags, QuoteState, Tk, TkFlags}
-  }, prelude::*, procio::{IoFrame, IoMode, IoStack}, readline::{
+  },
+  parse::{
+    ParseFlags, ParsedSrc, Redir, RedirType,
+    execute::exec_input,
+    lex::{LexFlags, QuoteState, Tk, TkFlags},
+  },
+  prelude::*,
+  procio::{IoFrame, IoMode, IoStack},
+  readline::{
     editcmd::{ReadSrc, VerbCmd, WriteDest},
-		highlight::Highlighter,
-		history::History,
-		markers,
-		register::RegisterContent,
-		term::get_win_size
-  }, state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars}
+    highlight::Highlighter,
+    history::History,
+    markers,
+    register::RegisterContent,
+    term::get_win_size,
+  },
+  state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars},
 };
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
@@ -352,10 +360,10 @@ impl Pos {
     }
   }
 
-	pub fn set(&mut self, row: usize, col: usize) {
-		self.row = row;
-		self.col = col;
-	}
+  pub fn set(&mut self, row: usize, col: usize) {
+    self.row = row;
+    self.col = col;
+  }
 
   pub fn col_add(&self, rhs: usize) -> Self {
     self.row_col_add(0, rhs as isize)
@@ -497,30 +505,28 @@ impl IndentCtx {
     }
   }
 
-	pub fn checked_calculate(&mut self, input: &str) -> (usize, bool) {
+  pub fn checked_calculate(&mut self, input: &str) -> (usize, bool) {
     self.depth = 0;
     self.ctx.clear();
 
-		let mut src = ParsedSrc::new(input.into())
-			.with_lex_flags(LexFlags::LEX_UNFINISHED)
-			.with_parse_flags(ParseFlags::ERR_RETURN);
+    let mut src = ParsedSrc::new(input.into())
+      .with_lex_flags(LexFlags::LEX_UNFINISHED)
+      .with_parse_flags(ParseFlags::ERR_RETURN);
 
-		log::debug!("Calculating indent depth for input: '{}'", input);
+    log::debug!("Calculating indent depth for input: '{}'", input);
 
-		// now we parse the input
-		// src.block_depth will be non-zero if the parse was stopped somewhere.
-		let res = src.parse_src();
+    // now we parse the input
+    // src.block_depth will be non-zero if the parse was stopped somewhere.
+    let res = src.parse_src();
 
-
-		self.depth = src.block_depth;
-		log::debug!("Calculated indent depth: {}", self.depth);
-
+    self.depth = src.block_depth;
+    log::debug!("Calculated indent depth: {}", self.depth);
 
     (self.depth, res.is_err())
-	}
+  }
 
   pub fn calculate(&mut self, input: &str) -> usize {
-		self.checked_calculate(input).0
+    self.checked_calculate(input).0
   }
 }
 
@@ -709,9 +715,9 @@ impl LineBuf {
         (rows as f64 * 0.5).round() as usize
       }
     });
-		let mut hint_lines = self.hint.clone().unwrap_or_default();
-		let mut buf_lines = self.lines.clone();
-		attach_lines(&mut buf_lines, &mut hint_lines);
+    let mut hint_lines = self.hint.clone().unwrap_or_default();
+    let mut buf_lines = self.lines.clone();
+    attach_lines(&mut buf_lines, &mut hint_lines);
     (raw.min(100)).min(buf_lines.len())
   }
   pub fn update_scroll_offset(&mut self) {
@@ -895,23 +901,26 @@ impl LineBuf {
     Pos { row, col }
   }
   fn break_line(&mut self) {
-		self.break_line_at(self.cursor.pos);
+    self.break_line_at(self.cursor.pos);
   }
-	fn break_line_at(&mut self, pos: Pos) {
-		let Pos { row, col } = pos;
+  fn break_line_at(&mut self, pos: Pos) {
+    let Pos { row, col } = pos;
     let rest = self.lines[row].split_off(col);
 
     self.lines.insert(row + 1, rest);
-		let mut new_line_pos = Pos { row: row + 1, col: 0 };
-		let level = self.calc_indent_level_for_pos(new_line_pos);
-		let new_line = self.lines.get_mut(row + 1).unwrap();
+    let mut new_line_pos = Pos {
+      row: row + 1,
+      col: 0,
+    };
+    let level = self.calc_indent_level_for_pos(new_line_pos);
+    let new_line = self.lines.get_mut(row + 1).unwrap();
     for tab in std::iter::repeat_n(Grapheme::from('\t'), level) {
       new_line.insert(0, tab);
       new_line_pos = new_line_pos.col_add(1);
     }
 
     self.cursor.pos = new_line_pos;
-	}
+  }
   fn verb_shell_cmd(&mut self, cmd: &str) -> ShResult<()> {
     let mut vars = HashSet::new();
     vars.insert("BUFFER".into());
@@ -1015,32 +1024,32 @@ impl LineBuf {
     line.0.get(col).is_some().then(|| line.0.remove(col))
   }
   fn insert_at(&mut self, mut pos: Pos, gr: Grapheme) {
-		let level = self.calc_indent_level_for_pos(pos);
+    let level = self.calc_indent_level_for_pos(pos);
     if gr.is_lf() {
       self.break_line_at(pos);
-			pos = pos.row_add(1);
-			pos.set(pos.row, 0);
+      pos = pos.row_add(1);
+      pos.set(pos.row, 0);
     } else {
       let row = pos.row;
       let col = pos.col;
       self.lines[row].insert(col, gr);
-			pos = pos.col_add(1);
+      pos = pos.col_add(1);
     }
-		let new_level = self.calc_indent_level_for_pos(pos);
-		let line = self.cur_line().to_string();
-		let trimmed = line.trim();
+    let new_level = self.calc_indent_level_for_pos(pos);
+    let line = self.cur_line().to_string();
+    let trimmed = line.trim();
 
-		if new_level < level {
-			let delta = level.saturating_sub(new_level);
-			let line = self.cur_line_mut();
-			for _ in 0..delta {
-				if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
-					line.0.remove(0);
-				} else {
-					break;
-				}
-			}
-		}
+    if new_level < level {
+      let delta = level.saturating_sub(new_level);
+      let line = self.cur_line_mut();
+      for _ in 0..delta {
+        if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
+          line.0.remove(0);
+        } else {
+          break;
+        }
+      }
+    }
   }
   fn insert(&mut self, gr: Grapheme) {
     self.insert_at(self.cursor.pos, gr);
@@ -1056,19 +1065,19 @@ impl LineBuf {
       }
     }
   }
-	fn insert_str_at(&mut self, pos: Pos, s: &str) {
-		let mut offset = self.row();
-		for gr in s.graphemes(true) {
-			let gr = Grapheme::from(gr);
-			if gr.is_lf() {
-				self.break_line_at(pos.row_add(offset));
-				offset += 1;
-			} else {
-				self.insert_at(pos.row_add(offset), gr);
-				self.cursor.pos.col += 1;
-			}
-		}
-	}
+  fn insert_str_at(&mut self, pos: Pos, s: &str) {
+    let mut offset = self.row();
+    for gr in s.graphemes(true) {
+      let gr = Grapheme::from(gr);
+      if gr.is_lf() {
+        self.break_line_at(pos.row_add(offset));
+        offset += 1;
+      } else {
+        self.insert_at(pos.row_add(offset), gr);
+        self.cursor.pos.col += 1;
+      }
+    }
+  }
   pub fn pop_left(&mut self) -> bool {
     let Some(pos) = self.concat_points.pop_front() else {
       return false;
@@ -1880,9 +1889,9 @@ impl LineBuf {
     self.cursor.pos.col -= 1;
     Some(())
   }
-  fn replace_range(&mut self, span: (Pos,Pos), new: &str) -> Vec<Line> {
-		let s = span.0;
-		let e = span.1;
+  fn replace_range(&mut self, span: (Pos, Pos), new: &str) -> Vec<Line> {
+    let s = span.0;
+    let e = span.1;
     let motion = MotionKind::Char {
       start: s,
       end: e,
@@ -2344,25 +2353,32 @@ impl LineBuf {
   fn delete_range(&mut self, motion: &MotionKind) -> Vec<Line> {
     self.extract_range(motion)
   }
-	pub fn checked_calc_indent_level_for_pos(&mut self, pos: Pos) -> (usize,bool) {
+  pub fn checked_calc_indent_level_for_pos(&mut self, pos: Pos) -> (usize, bool) {
     let mut lines = self.lines.clone();
-		log::debug!("Calculating indent level for position {:?} with buffer:\n{:?}", pos, self.joined());
-		log::debug!("lines: {:?}", lines);
+    log::debug!(
+      "Calculating indent level for position {:?} with buffer:\n{:?}",
+      pos,
+      self.joined()
+    );
+    log::debug!("lines: {:?}", lines);
     split_lines_at(&mut lines, pos);
     let raw = join_lines(&lines);
-		log::debug!("Calculating indent level for raw text:\n{:?}", raw);
+    log::debug!("Calculating indent level for raw text:\n{:?}", raw);
 
     self.indent_ctx.checked_calculate(&raw)
-	}
-	pub fn checked_calc_indent_level(&mut self) -> (usize,bool) {
-		self.checked_calc_indent_level_for_pos(self.cursor.pos)
-	}
+  }
+  pub fn checked_calc_indent_level(&mut self) -> (usize, bool) {
+    self.checked_calc_indent_level_for_pos(self.cursor.pos)
+  }
   pub fn calc_indent_level(&mut self) -> usize {
-		log::debug!("Calculating indent level for cursor at {:?}", self.cursor.pos);
+    log::debug!(
+      "Calculating indent level for cursor at {:?}",
+      self.cursor.pos
+    );
     self.calc_indent_level_for_pos(self.cursor.pos)
   }
   pub fn calc_indent_level_for_pos(&mut self, pos: Pos) -> usize {
-		self.checked_calc_indent_level_for_pos(pos).0
+    self.checked_calc_indent_level_for_pos(pos).0
   }
   fn motion_mutation(&mut self, motion: MotionKind, mut f: impl FnMut(&Grapheme) -> Grapheme) {
     match motion {
@@ -2782,18 +2798,21 @@ impl LineBuf {
       }
       Verb::JoinLines => {
         let old_exclusive = self.cursor.exclusive;
-				let mut row = self.row();
-				let mut count = count;
-				if self.select_range().is_some() {
-					let Some(MotionKind::Line { start, end, inclusive }) = self.eval_motion(cmd) else { unreachable!() };
-					let (s,e) = ordered(start, end);
-					count = if inclusive {
-						e - s + 1
-					} else {
-						e - s
-					};
-					row = s;
-				}
+        let mut row = self.row();
+        let mut count = count;
+        if self.select_range().is_some() {
+          let Some(MotionKind::Line {
+            start,
+            end,
+            inclusive,
+          }) = self.eval_motion(cmd)
+          else {
+            unreachable!()
+          };
+          let (s, e) = ordered(start, end);
+          count = if inclusive { e - s + 1 } else { e - s };
+          row = s;
+        }
         self.cursor.exclusive = false;
         for _ in 0..count {
           let target_pos = Pos {
@@ -3326,23 +3345,23 @@ impl LineBuf {
   }
 
   pub fn get_hint_text(&self) -> String {
-		if let Some(hint) = &self.hint {
-			let text = self.join_hint();
-			let text = format!("\x1b[90m{text}\x1b[0m");
+    if let Some(hint) = &self.hint {
+      let text = self.join_hint();
+      let text = format!("\x1b[90m{text}\x1b[0m");
 
-			text.replace("\n", "\n\x1b[90m")
-		} else {
-			String::new()
-		}
+      text.replace("\n", "\n\x1b[90m")
+    } else {
+      String::new()
+    }
   }
 
-	pub fn join_hint(&self) -> String {
-		if let Some(hint) = &self.hint {
-			join_lines(hint)
-		} else {
-			String::new()
-		}
-	}
+  pub fn join_hint(&self) -> String {
+    if let Some(hint) = &self.hint {
+      join_lines(hint)
+    } else {
+      String::new()
+    }
+  }
 
   /// Accept hint text up to a given target position.
   /// Temporarily merges the hint into the buffer, moves the cursor to target,
@@ -3563,82 +3582,94 @@ impl LineBuf {
     self.fix_cursor();
   }
 
-	pub fn grapheme_positions(&self) -> impl Iterator<Item = (Pos, &Grapheme)> {
-		self.lines.iter().enumerate().flat_map(|(row, line)| {
-			line.graphemes().iter().enumerate().map(move |(col, g)| {
-				(Pos { row, col }, g)
-			})
-		})
-	}
+  pub fn grapheme_positions(&self) -> impl Iterator<Item = (Pos, &Grapheme)> {
+    self.lines.iter().enumerate().flat_map(|(row, line)| {
+      line
+        .graphemes()
+        .iter()
+        .enumerate()
+        .map(move |(col, g)| (Pos { row, col }, g))
+    })
+  }
 
   pub fn attempt_history_expansion(&mut self, history: &History) -> bool {
-		let mut changes: Vec<((Pos,Pos), String)> = vec![];
-		{
-			// we must descend into this scope because positions borrows 'self' immutably
-			let mut positions = self.grapheme_positions();
-			let mut qt_state = QuoteState::default();
+    let mut changes: Vec<((Pos, Pos), String)> = vec![];
+    {
+      // we must descend into this scope because positions borrows 'self' immutably
+      let mut positions = self.grapheme_positions();
+      let mut qt_state = QuoteState::default();
 
-			while let Some((pos, gr)) = positions.next() {
-				let Some(ch) = gr.as_char() else { continue };
-				match ch {
-					'\\' | '$' => {
-						positions.next();
-					}
-					'\'' => qt_state.toggle_single(),
-					'"' => qt_state.toggle_double(),
-					'!' if !qt_state.in_single() => {
-						let start = pos;
-						let Some((pos2,gr2)) = positions.next() else { continue; };
-						let Some(ch) = gr2.as_char() else { continue; };
-						match ch {
-							'!' => {
-								if let Some(prev) = history.last() {
-									let raw = prev.command();
-									changes.push(((start, start.col_add(1)), raw.to_string()));
-								}
-							}
-							'$' => {
-								if let Some(prev) = history.last() {
-									let raw = prev.command();
-									if let Some(last_word) = raw.split_whitespace().last() {
-										changes.push(((start, start.col_add(1)), last_word.to_string()));
-									}
-								}
-							}
-							ch if !ch.is_whitespace() => {
-								let mut end = pos2;
-								let cur_row = end.row;
-								while let Some((pos3,gr3)) = positions.next() {
-									if pos3.row > cur_row { break };             // break on linefeed
-									let Some(ch) = gr3.as_char() else { break }; // break on non-ascii
-									if ch.is_whitespace() { break };             // break on whitespace
-									end = pos3;
-								}
-								let span = self.yank_span((pos2,end), true);
-								let token = join_lines(&span);
-								let cmd = history.resolve_hist_token(&token).unwrap_or(token);
-								changes.push(((start, end), cmd));
-							}
-							_ => {}
-						}
-					}
-					_ => {}
-				}
-			}
+      while let Some((pos, gr)) = positions.next() {
+        let Some(ch) = gr.as_char() else { continue };
+        match ch {
+          '\\' | '$' => {
+            positions.next();
+          }
+          '\'' => qt_state.toggle_single(),
+          '"' => qt_state.toggle_double(),
+          '!' if !qt_state.in_single() => {
+            let start = pos;
+            let Some((pos2, gr2)) = positions.next() else {
+              continue;
+            };
+            let Some(ch) = gr2.as_char() else {
+              continue;
+            };
+            match ch {
+              '!' => {
+                if let Some(prev) = history.last() {
+                  let raw = prev.command();
+                  changes.push(((start, start.col_add(1)), raw.to_string()));
+                }
+              }
+              '$' => {
+                if let Some(prev) = history.last() {
+                  let raw = prev.command();
+                  if let Some(last_word) = raw.split_whitespace().last() {
+                    changes.push(((start, start.col_add(1)), last_word.to_string()));
+                  }
+                }
+              }
+              ch if !ch.is_whitespace() => {
+                let mut end = pos2;
+                let cur_row = end.row;
+                while let Some((pos3, gr3)) = positions.next() {
+                  if pos3.row > cur_row {
+                    break;
+                  }; // break on linefeed
+                  let Some(ch) = gr3.as_char() else { break }; // break on non-ascii
+                  if ch.is_whitespace() {
+                    break;
+                  }; // break on whitespace
+                  end = pos3;
+                }
+                let span = self.yank_span((pos2, end), true);
+                let token = join_lines(&span);
+                let cmd = history.resolve_hist_token(&token).unwrap_or(token);
+                changes.push(((start, end), cmd));
+              }
+              _ => {}
+            }
+          }
+          _ => {}
+        }
+      }
 
-			if changes.is_empty() { return false; }
-		} // 'positions' iterator is dropped here
+      if changes.is_empty() {
+        return false;
+      }
+    } // 'positions' iterator is dropped here
 
-		for (range, change) in changes.into_iter().rev() {
-			let old_len = self.count_graphemes();
-			self.replace_range(range, &change);
-			let new_len = self.count_graphemes();
-			let delta = new_len as isize - old_len as isize;
-			let (nr,nc) = self.offset_col_wrapping(self.row(), delta);
-			self.cursor.pos.set(nr,nc);
-		}
+    for (range, change) in changes.into_iter().rev() {
+      let old_len = self.count_graphemes();
+      self.replace_range(range, &change);
+      let new_len = self.count_graphemes();
+      let delta = new_len as isize - old_len as isize;
+      let (nr, nc) = self.offset_col_wrapping(self.row(), delta);
+      self.cursor.pos.set(nr, nc);
+    }
 
-		true
+    true
   }
 
   pub fn cursor_is_escaped(&self) -> bool {
