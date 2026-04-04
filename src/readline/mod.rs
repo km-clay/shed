@@ -2108,7 +2108,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
         insertions.push((start_pos, markers::GLOB));
       }
     }
-    '*' | '?' if !qt_state.in_quote() => {
+    '*' | '?' if !qt_state.in_quote() && !token.flags.contains(TkFlags::ASSIGN) => {
       let i = *i;
       let glob_ch = *ch;
       token_chars.next(); // consume the first glob char

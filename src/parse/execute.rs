@@ -1290,7 +1290,7 @@ impl Dispatcher {
       let NdRule::Assignment { kind, var, val } = assign.class else {
         unreachable!()
       };
-      let var = var.span.as_str();
+      let var_name = var.span.as_str();
       let val = if is_arr {
         VarKind::arr_from_tk(val)?
       } else {
@@ -1298,142 +1298,104 @@ impl Dispatcher {
       };
 
       // Parse and expand array index BEFORE entering write_vars borrow
-      let indexed = state::parse_arr_bracket(var)
+      let indexed = state::parse_arr_bracket(var_name)
         .map(|(name, idx_raw)| state::expand_arr_index(&idx_raw).map(|idx| (name, idx)))
         .transpose()?;
 
       match kind {
         AssignKind::Eq => {
-          if let Some((name, idx)) = indexed
-            && let Err(e) = write_vars(|v| v.set_var_indexed(&name, idx, val.to_string(), flags))
-          {
-            state::set_status(1);
-            return Err(e);
-          } else if let Err(e) = write_vars(|v| v.set_var(var, val, flags)) {
-            state::set_status(1);
-            return Err(e);
+          if let Some((name, idx)) = indexed {
+            write_vars(|v| v.set_var_indexed(&name, idx, val.to_string(), flags))?;
+          } else {
+            write_vars(|v| v.set_var(var_name, val.clone(), flags))?;
           }
         }
-        AssignKind::PlusEq => {
-          let mut var = if let Some((name, idx)) = indexed {
-            read_vars(|v| v.index_var(&name, idx))?.into()
+        op @ (AssignKind::PlusEq | AssignKind::MinusEq | AssignKind::MultEq | AssignKind::DivEq) => {
+          let mut var = if let Some((name, idx)) = &indexed {
+            read_vars(|v| v.index_var(name, idx.clone()))?.into()
           } else {
-            read_vars(|v| v.get_var_meta(var))
+            read_vars(|v| v.get_var_meta(var_name))
           };
+
+          let op_name = match op {
+            AssignKind::PlusEq => "add to",
+            AssignKind::MinusEq => "subtract from",
+            AssignKind::MultEq => "multiply",
+            AssignKind::DivEq => "divide",
+            _ => unreachable!(),
+          };
+
+          let parse_rhs = |span: &Span| -> ShResult<i32> {
+            val.to_string().parse::<i32>().map_err(
+              |_| sherr!(InvalidAssignment @ span.clone(), "cannot {op_name} non-integer value"),
+            )
+          };
+
+          let check_div_zero = |other: i32, span: &Span| -> ShResult<()> {
+            if matches!(op, AssignKind::DivEq) && other == 0 {
+              return Err(sherr!(InvalidAssignment @ span.clone(), "division by zero"));
+            }
+            Ok(())
+          };
+
           match var.kind_mut() {
             VarKind::Str(s) => {
-              let other = val.to_string();
-              *s = [s.to_string(), other].join("")
+              if matches!(op, AssignKind::PlusEq) {
+                if let Ok(n) = s.parse::<i32>()
+                  && let Ok(other) = val.to_string().parse::<i32>()
+                {
+                  *s = (n + other).to_string();
+                } else {
+                  let other = val.to_string();
+                  *s = [s.to_string(), other].join("");
+                }
+              } else {
+                let n = s.parse::<i32>().map_err(
+                  |_| sherr!(InvalidAssignment @ span.clone(), "cannot {op_name} string variable"),
+                )?;
+                let other = parse_rhs(&span)?;
+                check_div_zero(other, &span)?;
+                *s = match op {
+                  AssignKind::MinusEq => (n - other).to_string(),
+                  AssignKind::MultEq => (n * other).to_string(),
+                  AssignKind::DivEq => (n / other).to_string(),
+                  _ => unreachable!(),
+                };
+              }
             }
             VarKind::Int(n) => {
-              let Ok(other) = val.to_string().parse::<i32>() else {
+              let other = parse_rhs(&span)?;
+              check_div_zero(other, &span)?;
+              match op {
+                AssignKind::PlusEq => *n += other,
+                AssignKind::MinusEq => *n -= other,
+                AssignKind::MultEq => *n *= other,
+                AssignKind::DivEq => *n /= other,
+                _ => unreachable!(),
+              }
+            }
+            VarKind::Arr(items) => {
+              if matches!(op, AssignKind::PlusEq) {
+                match &val {
+                  VarKind::Str(s) => items.push_back(s.to_string()),
+                  VarKind::Int(n) => items.push_back(n.to_string()),
+                  VarKind::Arr(other) => items.extend(other.clone()),
+                  VarKind::AssocArr(_) => todo!(),
+                }
+              } else {
                 return Err(sherr!(
                   InvalidAssignment @ span,
-                  "cannot add non-integer value to integer variable"
+                  "cannot {op_name} array variable"
                 ));
-              };
-              *n += other;
+              }
             }
-            VarKind::Arr(items) => match val {
-              VarKind::Str(s) => items.push_back(s),
-              VarKind::Int(n) => items.push_back(n.to_string()),
-              VarKind::Arr(other) => items.extend(other.clone()),
-              VarKind::AssocArr(_) => todo!(),
-            },
-            VarKind::AssocArr(_items) => todo!(),
+            VarKind::AssocArr(_) => todo!(),
           }
-        }
-        AssignKind::MinusEq => {
-          let mut var = if let Some((name, idx)) = indexed {
-            read_vars(|v| v.index_var(&name, idx))?.into()
+
+          if let Some((name, idx)) = indexed {
+            write_vars(|v| v.set_var_indexed(&name, idx, var.to_string(), var.flags()))?;
           } else {
-            read_vars(|v| v.get_var_meta(var))
-          };
-          match var.kind_mut() {
-            VarKind::Str(_) => {
-              return Err(sherr!(
-                InvalidAssignment @ span,
-                "cannot subtract from string variable"
-              ));
-            }
-            VarKind::Arr(_) => {
-              return Err(sherr!(
-                InvalidAssignment @ span,
-                "cannot subtract from array variable"
-              ));
-            }
-            VarKind::Int(n) => {
-              let Ok(other) = val.to_string().parse::<i32>() else {
-                return Err(sherr!(
-                  InvalidAssignment @ span,
-                  "cannot subtract non-integer value to integer variable"
-                ));
-              };
-              *n -= other;
-            }
-            VarKind::AssocArr(_items) => todo!(),
-          }
-        }
-        AssignKind::MultEq => {
-          let mut var = if let Some((name, idx)) = indexed {
-            read_vars(|v| v.index_var(&name, idx))?.into()
-          } else {
-            read_vars(|v| v.get_var_meta(var))
-          };
-          match var.kind_mut() {
-            VarKind::Str(_) => {
-              return Err(sherr!(
-                InvalidAssignment @ span,
-                "cannot multiply string variable"
-              ));
-            }
-            VarKind::Arr(_) => {
-              return Err(sherr!(
-                InvalidAssignment @ span,
-                "cannot multiply array variable"
-              ));
-            }
-            VarKind::Int(n) => {
-              let Ok(other) = val.to_string().parse::<i32>() else {
-                return Err(sherr!(
-                  InvalidAssignment @ span,
-                  "cannot multiply non-integer value to integer variable"
-                ));
-              };
-              *n *= other;
-            }
-            VarKind::AssocArr(_items) => todo!(),
-          }
-        }
-        AssignKind::DivEq => {
-          let mut var = if let Some((name, idx)) = indexed {
-            read_vars(|v| v.index_var(&name, idx))?.into()
-          } else {
-            read_vars(|v| v.get_var_meta(var))
-          };
-          match var.kind_mut() {
-            VarKind::Str(_) => {
-              return Err(sherr!(
-                InvalidAssignment @ span,
-                "cannot divide string variable"
-              ));
-            }
-            VarKind::Arr(_) => {
-              return Err(sherr!(
-                InvalidAssignment @ span,
-                "cannot divide array variable"
-              ));
-            }
-            VarKind::Int(n) => {
-              let Ok(other) = val.to_string().parse::<i32>() else {
-                return Err(sherr!(
-                  InvalidAssignment @ span,
-                  "cannot divide non-integer value to integer variable"
-                ));
-              };
-              *n /= other;
-            }
-            VarKind::AssocArr(_items) => todo!(),
+            write_vars(|v| v.set_var(var_name, var.kind().clone(), var.flags()))?;
           }
         }
       }
