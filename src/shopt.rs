@@ -275,10 +275,26 @@ impl ShOpts {
 shopt_group! {
   #[derive(Clone, Debug)]
   pub struct ShOptLine ("line") {
+    /// Whether to automatically insert a newline when the input is incomplete
+    linebreak_on_incomplete: bool = true,
+
     /// The maximum height of the line editor viewport window. Can be a positive number or a percentage of terminal height like "50%"
     viewport_height: String = "50%".to_string(),
+
+    /// Whether to display line numbers in multiline input
+    line_numbers: bool = true,
+
     /// The line offset from the top or bottom of the viewport to trigger scrolling
     scroll_offset: usize = 2,
+
+		/// The number of spaces a tab character represents in the line editor
+		tab_width: usize = 4,
+
+    /// Whether to enable or disable syntax highlighting on the prompt
+    highlight: bool = true,
+
+    /// Whether to automatically indent new lines in multiline commands
+    auto_indent: bool = true,
   }
 }
 
@@ -360,20 +376,8 @@ shopt_group! {
     /// Maximum number of completion candidates displayed upon pressing tab
     comp_limit: usize = 100,
 
-    /// Whether to enable or disable syntax highlighting on the prompt
-    highlight: bool = true,
-
-    /// Whether to automatically indent new lines in multiline commands
-    auto_indent: bool = true,
-
-    /// Whether to automatically insert a newline when the input is incomplete
-    linebreak_on_incomplete: bool = true,
-
     /// The leader key sequence used in keymap bindings
     leader: String = " ".to_string(),
-
-    /// Whether to display line numbers in multiline input
-    line_numbers: bool = true,
 
     /// Command to execute as a screensaver after idle timeout
     screensaver_cmd: String = String::new(),
@@ -508,6 +512,9 @@ mod tests {
 
     let prompt_output = opts.get("prompt").unwrap().unwrap();
     assert!(prompt_output.contains("comp_limit"));
-    assert!(prompt_output.contains("highlight"));
+
+    let line_output = opts.get("line").unwrap().unwrap();
+    assert!(line_output.contains("highlight"));
+    assert!(line_output.contains("tab_width"));
   }
 }

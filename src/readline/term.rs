@@ -1189,7 +1189,7 @@ impl LineWriter for TermWriter {
 		let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
     let multiline = line.contains('\n') || prompt_end.col == 0;
     if multiline {
-      let show_numbers = read_shopts(|o| o.prompt.line_numbers);
+      let show_numbers = read_shopts(|o| o.line.line_numbers);
       let display_line = enumerate_lines(
         line,
         prompt_end.col as usize,

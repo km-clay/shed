@@ -742,7 +742,7 @@ impl LineBuf {
   }
   pub fn display_window_joined(&self) -> String {
     let display = self.to_string();
-    let do_hl = state::read_shopts(|s| s.prompt.highlight);
+    let do_hl = state::read_shopts(|s| s.line.highlight);
     let mut highlighter = Highlighter::new();
     highlighter.only_visual(!do_hl);
     highlighter.load_input(&display, self.cursor_byte_pos());
@@ -3296,9 +3296,6 @@ impl LineBuf {
     lines.join("\n")
   }
 
-  // ───── Compatibility shims for old flat-string interface ─────
-
-  /// Compat shim: replace buffer contents from a string, parsing into lines.
   pub fn set_buffer(&mut self, s: String) {
     self.lines = to_lines(&s);
     if self.lines.is_empty() {
@@ -3314,7 +3311,6 @@ impl LineBuf {
     self.fix_cursor();
   }
 
-  /// Compat shim: set hint text. None clears the hint.
   pub fn set_hint(&mut self, hint: Option<String>) {
     let joined = self.joined();
     self.hint = hint
@@ -3322,7 +3318,6 @@ impl LineBuf {
       .and_then(|h| (!h.is_empty()).then_some(to_lines(h)));
   }
 
-  /// Compat shim: returns true if there is a non-empty hint.
   pub fn has_hint(&self) -> bool {
     self
       .hint
@@ -3330,7 +3325,6 @@ impl LineBuf {
       .is_some_and(|h| !h.is_empty() && h.iter().any(|l| !l.is_empty()))
   }
 
-  /// Compat shim: get hint text as a string.
   pub fn get_hint_text(&self) -> String {
 		if let Some(hint) = &self.hint {
 			let text = self.join_hint();
@@ -3385,7 +3379,6 @@ impl LineBuf {
     self.set_cursor(target);
   }
 
-  /// Compat shim: accept the current hint by appending it to the buffer.
   pub fn accept_hint(&mut self) {
     let hint_str = self.join_hint();
     if hint_str.is_empty() {
@@ -3397,7 +3390,6 @@ impl LineBuf {
     self.hint = None;
   }
 
-  /// Compat shim: return a constructor that sets initial buffer contents and cursor.
   pub fn with_initial(mut self, s: &str, cursor_pos: usize) -> Self {
     self.set_buffer(s.to_string());
     // In the flat model, cursor_pos was a flat offset. Map to col on row .
@@ -3408,12 +3400,10 @@ impl LineBuf {
     self
   }
 
-  /// Compat shim: move cursor to end of buffer.
   pub fn move_cursor_to_end(&mut self) {
     self.set_cursor(Pos::MAX);
   }
 
-  /// Compat shim: returns the maximum cursor position (flat grapheme count).
   pub fn cursor_max(&self) -> usize {
     // In single-line mode this is the length of the first line
     // In multi-line mode this returns total grapheme count (for flat compat)
@@ -3424,7 +3414,6 @@ impl LineBuf {
     }
   }
 
-  /// Compat shim: returns true if cursor is at the max position.
   pub fn cursor_at_max(&self) -> bool {
     let last_row = self.lines.len().saturating_sub(1);
     let max = if self.cursor.exclusive {
@@ -3435,14 +3424,10 @@ impl LineBuf {
     self.cursor.pos.row == last_row && self.cursor.pos.col >= max
   }
 
-  /// Compat shim: set cursor with clamping.
   pub fn set_cursor_clamp(&mut self, exclusive: bool) {
     self.cursor.exclusive = exclusive;
   }
 
-  /// Compat shim: returns the flat column of the start of the current line.
-  /// In the old flat model this returned 0 for single-line; for multi-line it's the
-  /// flat offset of the beginning of the current row.
   pub fn start_of_line(&self) -> usize {
     // Return 0-based flat offset of start of current row
     let mut offset = 0;
@@ -3456,7 +3441,6 @@ impl LineBuf {
     self.cursor.pos.row == self.lines.len().saturating_sub(1)
   }
 
-  /// Compat shim: returns slice of joined buffer from grapheme indices.
   pub fn slice(&self, range: std::ops::Range<usize>) -> Option<String> {
     let joined = self.joined();
     let graphemes: Vec<&str> = joined.graphemes(true).collect();
@@ -3466,7 +3450,6 @@ impl LineBuf {
     Some(graphemes[range].join(""))
   }
 
-  /// Compat shim: returns the string from buffer start to cursor position.
   pub fn slice_to_cursor(&self) -> Option<String> {
     let mut result = String::new();
     for i in 0..self.cursor.pos.row {
@@ -3481,7 +3464,6 @@ impl LineBuf {
     Some(result)
   }
 
-  /// Compat shim: returns cursor byte position in the joined string.
   pub fn cursor_byte_pos(&self) -> usize {
     let mut pos = 0;
     for i in 0..self.cursor.pos.row {
@@ -3516,7 +3498,6 @@ impl LineBuf {
     self.select_mode = Some(SelectMode::Block(self.cursor.pos));
   }
 
-  /// Compat shim: stop visual selection.
   pub fn stop_selecting(&mut self) {
     if self.select_mode.is_some() {
       self.last_selection = self.select_mode.map(|m| {
@@ -3590,7 +3571,6 @@ impl LineBuf {
 		})
 	}
 
-  /// Compat shim: attempt history expansion. Stub that returns false.
   pub fn attempt_history_expansion(&mut self, history: &History) -> bool {
 		let mut changes: Vec<((Pos,Pos), String)> = vec![];
 		{
@@ -3661,7 +3641,6 @@ impl LineBuf {
 		true
   }
 
-  /// Compat shim: check if cursor is on an escaped char.
   pub fn cursor_is_escaped(&self) -> bool {
     if self.cursor.pos.col == 0 {
       return false;
@@ -3676,7 +3655,6 @@ impl LineBuf {
       .is_some_and(|g| g.is_char('\\'))
   }
 
-  /// Compat shim: take buffer contents and reset.
   pub fn take_buf(&mut self) -> String {
     let result = self.joined();
     self.lines = vec![Line::default()];
@@ -3684,12 +3662,10 @@ impl LineBuf {
     result
   }
 
-  /// Compat shim: mark where insert mode started.
   pub fn mark_insert_mode_start_pos(&mut self) {
     self.insert_mode_start_pos = Some(self.cursor.pos);
   }
 
-  /// Compat shim: clear insert mode start position.
   pub fn clear_insert_mode_start_pos(&mut self) {
     self.insert_mode_start_pos = None;
   }

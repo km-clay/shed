@@ -78,6 +78,11 @@ lib.concatLines [
       (lib.concatLines [
         "shopt line.viewport_height=${toString cfg.shopts.line.viewport_height}"
         "shopt line.scroll_offset=${toString cfg.shopts.line.scroll_offset}"
+        "shopt line.tab_width=${toString cfg.shopts.line.tab_width}"
+        "shopt line.highlight=${boolToString cfg.shopts.line.highlight}"
+        "shopt line.linebreak_on_incomplete=${boolToString cfg.shopts.line.linebreak_on_incomplete}"
+        "shopt line.line_numbers=${boolToString cfg.shopts.line.line_numbers}"
+        "shopt line.auto_indent=${boolToString cfg.shopts.line.auto_indent}"
 
         "shopt core.dotglob=${boolToString cfg.shopts.core.dotglob}"
         "shopt core.autocd=${boolToString cfg.shopts.core.autocd}"
@@ -106,13 +111,10 @@ lib.concatLines [
         "shopt prompt.leader='${cfg.shopts.prompt.leader}'"
         "shopt prompt.trunc_prompt_path=${toString cfg.shopts.prompt.trunc_prompt_path}"
         "shopt prompt.comp_limit=${toString cfg.shopts.prompt.comp_limit}"
-        "shopt prompt.highlight=${boolToString cfg.shopts.prompt.highlight}"
-        "shopt prompt.linebreak_on_incomplete=${boolToString cfg.shopts.prompt.linebreak_on_incomplete}"
-        "shopt prompt.line_numbers=${boolToString cfg.shopts.prompt.line_numbers}"
         "shopt prompt.screensaver_idle_time=${toString cfg.shopts.prompt.screensaver_idle_time}"
         "shopt prompt.screensaver_cmd='${cfg.shopts.prompt.screensaver_cmd}'"
         "shopt prompt.completion_ignore_case=${boolToString cfg.shopts.prompt.completion_ignore_case}"
-        "shopt prompt.auto_indent=${boolToString cfg.shopts.prompt.auto_indent}"
+        "shopt prompt.hist_cat=${boolToString cfg.shopts.prompt.hist_cat}"
         functionLines
         completeLines
         keymapLines

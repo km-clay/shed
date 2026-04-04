@@ -162,30 +162,36 @@ right-aligned prompt).
 ==============================================================================
 7. Prompt Options (shopt)                      *prompt-options*
 
+  The following options under `shopt line.*` affect line editor behavior:
+
+  `line.highlight`                             *opt-highlight*
+
+      Enable syntax highlighting in the input line. Default: true.
+
+  `line.auto_indent`                           *opt-auto-indent*
+
+      Automatically indent new lines to match the current nesting
+      depth. Default: true.
+
+  `line.linebreak_on_incomplete`               *opt-linebreak*
+
+      Insert a newline when Enter is pressed on an incomplete command
+      (e.g. unclosed quotes or pipes). Default: true.
+
+  `line.line_numbers`                          *opt-line-numbers*
+
+      Display line numbers in the left margin for multi-line buffers.
+      Default: true.
+
+  `line.tab_width`                             *opt-tab-width*
+
+      Number of spaces per tab in the line editor. Default: 4.
+
   The following options under `shopt prompt.*` affect prompt behavior:
 
   `prompt.trunc_prompt_path`                   *opt-trunc-path*
 
       Maximum number of path segments shown by `\W`. Default: 4.
-
-  `prompt.highlight`                           *opt-highlight*
-
-      Enable syntax highlighting in the input line. Default: true.
-
-  `prompt.auto_indent`                         *opt-auto-indent*
-
-      Automatically indent new lines to match the current nesting
-      depth. Default: true.
-
-  `prompt.linebreak_on_incomplete`             *opt-linebreak*
-
-      Insert a newline when Enter is pressed on an incomplete command
-      (e.g. unclosed quotes or pipes). Default: true.
-
-  `prompt.line_numbers`                        *opt-line-numbers*
-
-      Display line numbers in the left margin for multi-line buffers.
-      Default: true.
 
   `prompt.leader`                              *opt-leader*
 

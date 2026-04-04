@@ -175,6 +175,31 @@
                 default = 1;
                 description = "The minimum number of lines to keep visible above and below the cursor when scrolling (i.e. the 'scrolloff' option in vim)";
               };
+              tab_width = lib.mkOption {
+                type = lib.types.int;
+                default = 4;
+                description = "The number of spaces a tab character represents in the line editor";
+              };
+              highlight = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to enable syntax highlighting in the shell";
+              };
+              linebreak_on_incomplete = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to automatically insert a newline when the input is incomplete";
+              };
+              line_numbers = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to show line numbers in multiline input";
+              };
+              auto_indent = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to automatically indent new lines in multiline commands";
+              };
             };
           };
           default = {};
@@ -324,21 +349,6 @@
                 default = 1000;
                 description = "The maximum number of completion candidates to show before truncating the list";
               };
-              highlight = lib.mkOption {
-                type = lib.types.bool;
-                default = true;
-                description = "Whether to enable syntax highlighting in the shell";
-              };
-              linebreak_on_incomplete = lib.mkOption {
-                type = lib.types.bool;
-                default = true;
-                description = "Whether to automatically insert a newline when the input is incomplete";
-              };
-              line_numbers = lib.mkOption {
-                type = lib.types.bool;
-                default = false;
-                description = "Whether to show line numbers in the prompt";
-              };
               screensaver_cmd = lib.mkOption {
                 type = lib.types.str;
                 default = "";
@@ -353,11 +363,6 @@
                 type = lib.types.bool;
                 default = false;
                 description = "Whether to ignore case when completing commands and file names";
-              };
-              auto_indent = lib.mkOption {
-                type = lib.types.bool;
-                default = true;
-                description = "Whether to automatically indent new lines based on the previous line";
               };
               hist_cat = lib.mkOption {
                 type = lib.types.bool;

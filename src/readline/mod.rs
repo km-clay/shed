@@ -920,7 +920,7 @@ impl ShedLine {
 				// allow the user to see the expanded command and accept or edit it before submitting
 				return Ok(None);
 			} else if !self.editor.cursor_is_escaped()
-				&& (self.should_submit()? || !read_shopts(|o| o.prompt.linebreak_on_incomplete))
+				&& (self.should_submit()? || !read_shopts(|o| o.line.linebreak_on_incomplete))
 			{
 				return self.submit();
 			}

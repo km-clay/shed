@@ -152,7 +152,7 @@ Shell options are managed through `shopt`:
 ```sh
 shopt core.autocd=true          # cd by typing a directory path
 shopt core.dotglob=true         # include hidden files in globs
-shopt prompt.highlight=false    # toggle syntax highlighting
+shopt line.highlight=false      # toggle syntax highlighting
 shopt prompt.edit_mode=vi       # editor mode
 shopt core.max_hist=5000        # history size
 ```
