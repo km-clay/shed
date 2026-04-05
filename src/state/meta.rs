@@ -878,10 +878,10 @@ impl MetaTab {
   pub fn try_rehash_commands(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
     let cwd = env::var("PWD").unwrap_or_default();
-    if self.old_path.as_ref().is_some_and(|old| *old != path) {
+    if self.old_path.as_ref().is_none_or(|old| *old != path) {
       self.rehash_path();
     }
-    if self.old_pwd.as_ref().is_some_and(|old| *old != cwd) {
+    if self.old_pwd.as_ref().is_none_or(|old| *old != cwd) {
       self.rehash_cwd();
     }
     self.rehash_logic();
