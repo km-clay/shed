@@ -681,3 +681,20 @@ fn history_expansion_multiline() {
     "if true; then\n\techo foo\nfi",
   );
 }
+
+#[test]
+fn hist_expansion_parse_recurses() {
+	hist_no_expansion_test(
+		&["cargo run"],
+		"echo \"foo $(echo '!car') bar\"\r",
+	);
+}
+
+#[test]
+fn hist_expansion_ignores_closing_quote() {
+	hist_expansion_test(
+		&["cargo run"],
+		"echo \"foo !car\"\r",
+		"echo \"foo cargo run\"",
+	);
+}

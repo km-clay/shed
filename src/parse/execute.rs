@@ -1310,7 +1310,8 @@ impl Dispatcher {
             write_vars(|v| v.set_var(var_name, val.clone(), flags))?;
           }
         }
-        op @ (AssignKind::PlusEq | AssignKind::MinusEq | AssignKind::MultEq | AssignKind::DivEq) => {
+        op
+        @ (AssignKind::PlusEq | AssignKind::MinusEq | AssignKind::MultEq | AssignKind::DivEq) => {
           let mut var = if let Some((name, idx)) = &indexed {
             read_vars(|v| v.index_var(name, idx.clone()))?.into()
           } else {

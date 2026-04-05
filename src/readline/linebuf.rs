@@ -18,6 +18,7 @@ use crate::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},
   },
+  match_loop,
   parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::exec_input,
@@ -352,6 +353,10 @@ impl Pos {
     row: usize::MIN, // just in case we discover something smaller than '0'
     col: usize::MIN,
   };
+
+  pub fn new(row: usize, col: usize) -> Self {
+    Self { row, col }
+  }
 
   pub fn row_col_add(&self, row: isize, col: isize) -> Self {
     Self {
@@ -845,9 +850,9 @@ impl LineBuf {
     col = col.clamp(0, max);
     col
   }
-  fn offset_col_wrapping(&self, row: usize, offset: isize) -> (usize, usize) {
+  fn offset_col_wrapping_at(&self, row: usize, offset: isize, pos: Pos) -> (usize, usize) {
     let mut row = row;
-    let mut col = self.cursor.pos.col as isize + offset;
+    let mut col = pos.col as isize + offset;
 
     while col < 0 {
       if row == 0 {
@@ -867,6 +872,9 @@ impl LineBuf {
     }
 
     (row, col as usize)
+  }
+  fn offset_col_wrapping(&self, row: usize, offset: isize) -> (usize, usize) {
+    self.offset_col_wrapping_at(row, offset, self.cursor.pos)
   }
   fn cursor_on_ws(&self) -> bool {
     let line = self.cur_line();
@@ -3582,83 +3590,208 @@ impl LineBuf {
     self.fix_cursor();
   }
 
-  pub fn grapheme_positions(&self) -> impl Iterator<Item = (Pos, &Grapheme)> {
-    self.lines.iter().enumerate().flat_map(|(row, line)| {
-      line
-        .graphemes()
-        .iter()
-        .enumerate()
-        .map(move |(col, g)| (Pos { row, col }, g))
-    })
+  pub fn grapheme_positions(&self) -> Vec<(Pos, Grapheme)> {
+    Self::enumerate_graphemes(&self.lines)
+  }
+
+  pub fn enumerate_graphemes(lines: &Vec<Line>) -> Vec<(Pos, Grapheme)> {
+    lines
+      .iter()
+      .enumerate()
+      .flat_map(|(row, line)| {
+        line
+          .graphemes()
+          .iter()
+          .cloned()
+          .enumerate()
+          .map(move |(col, g)| (Pos { row, col }, g))
+      })
+      .collect()
+  }
+
+  /// The inner logic of `attempt_history_expansion()`. This function calls itself recursively when it encounters command substitutions.
+  /// This is necessary because of the following nasty edge case:
+  /// ```bash
+  /// echo "foo $(echo 'bar!') biz"
+  /// ```
+  /// The exclamation point is inside of both double and single quotes here. According to shell language though, it's really just in single quotes because the command substitution is it's own parsing context.
+	/// Pressing enter on this case with a normal flat parse will attempt history expansion. But a parse that recurses into command subs will not.
+  /// The easiest way to handle this is to simply do lightweight recursive descent whenever we see the start of a command sub.
+  pub fn find_history_expansions(
+    &mut self,
+    changes: &mut Vec<((Pos, Pos), String)>,
+    positions: impl Iterator<Item = (Pos, Grapheme)>,
+    history: &History,
+    offset: Pos,
+  ) -> bool {
+    let mut positions = positions.peekable();
+    let mut qt_state = QuoteState::default();
+
+    // Map a sub-buffer position to the original buffer's coordinate space.
+    // On row 0 of the sub-buffer, columns are offset from the anchor point.
+    // On subsequent rows, columns map directly (same line structure).
+    let map_pos = |slf: &Self, sub_pos: Pos, offset: Pos| -> Pos {
+      if sub_pos.row == 0 {
+        let (r, c) = slf.offset_col_wrapping_at(offset.row, sub_pos.col as isize, offset);
+        Pos::new(r, c)
+      } else {
+        Pos::new(offset.row + sub_pos.row, sub_pos.col)
+      }
+    };
+
+    while let Some((pos, gr)) = positions.next() {
+      let Some(ch) = gr.as_char() else { continue };
+      match ch {
+        symbol @ ('$' | '`') if qt_state.in_double() => {
+          let mut lines = vec![];
+          let mut cur_line = vec![];
+          if let Some((_, gr2)) = positions.peek()
+            && let Some('(') = gr2.as_char()
+          {
+            // command substitution. read until we find matching paren.
+            let mut paren_depth = 1;
+            match_loop!(positions.next() => (_,gr) => gr.as_char(), {
+              Some('\\') => {
+                if let Some((_,gr2)) = positions.next() {
+                  cur_line.push(gr2.clone());
+                }
+              }
+              Some('$') => {
+                let Some((pos,gr2)) = positions.peek() else {
+                  cur_line.push(gr.clone());
+                  continue
+                };
+                let Some('(') = gr2.as_char() else {
+                  cur_line.push(gr.clone());
+                  continue
+                };
+
+                positions.next();
+                paren_depth += 1;
+                cur_line.push(Grapheme::from('$'));
+                cur_line.push(Grapheme::from('('));
+              }
+              Some(')') => {
+                paren_depth -= 1;
+                if paren_depth == 0 {
+                  break;
+                }
+                cur_line.push(Grapheme::from(')'));
+              }
+
+              _ if gr.is_lf() => lines.push(Line(std::mem::take(&mut cur_line))),
+              _ => cur_line.push(gr.clone()),
+            });
+
+            lines.push(Line(cur_line));
+            let sub_positions = Self::enumerate_graphemes(&lines).into_iter();
+            // offset past "$(" — 2 chars from the '$' position
+            let sub_offset = map_pos(self, pos.col_add(2), offset);
+
+            // now we recurse.
+            self.find_history_expansions(changes, sub_positions, history, sub_offset);
+          } else if symbol == '`' {
+            // also command substitution.
+            match_loop!(positions.next() => (_,gr) => gr.as_char(), {
+              Some('\\') => {
+                if let Some((_,gr2)) = positions.next() {
+                  cur_line.push(gr2.clone());
+                }
+              }
+              Some('`') => break,
+
+              _ if gr.is_lf() => lines.push(Line(std::mem::take(&mut cur_line))),
+              _ => cur_line.push(gr.clone()),
+            });
+
+            lines.push(Line(cur_line));
+            let sub_positions = Self::enumerate_graphemes(&lines).into_iter();
+            // offset past "`" — 1 char from the backtick position
+            let sub_offset = map_pos(self, pos.col_add(1), offset);
+
+            // now we recurse.
+            self.find_history_expansions(changes, sub_positions, history, sub_offset);
+          } else {
+            positions.next();
+            continue;
+          };
+        }
+        '\\' | '$' => {
+          positions.next();
+        }
+        '\'' => qt_state.toggle_single(),
+        '"' => qt_state.toggle_double(),
+        '!' if !qt_state.in_single() => {
+          let start = pos;
+          let Some((pos2, gr2)) = positions.next() else {
+            continue;
+          };
+          let Some(ch) = gr2.as_char() else {
+            continue;
+          };
+          match ch {
+            '!' => {
+              if let Some(prev) = history.last() {
+                let raw = prev.command();
+                let start = map_pos(self, start, offset);
+                changes.push(((start, start.col_add(1)), raw.to_string()));
+              }
+            }
+            '$' => {
+              if let Some(prev) = history.last() {
+                let raw = prev.command();
+                let start = map_pos(self, start, offset);
+                if let Some(last_word) = raw.split_whitespace().last() {
+                  changes.push(((start, start.col_add(1)), last_word.to_string()));
+                }
+              }
+            }
+            ch if !ch.is_whitespace() => {
+							if ch == '"' && qt_state.in_double() {
+								qt_state.toggle_double();
+								continue;
+							}
+              let mut end = pos2;
+              let cur_row = end.row;
+              while let Some((pos3, gr3)) = positions.next() {
+                if pos3.row > cur_row {
+                  break;
+                }; // break on linefeed
+                let Some(ch) = gr3.as_char() else { break }; // break on non-ascii
+                if ch.is_whitespace() {
+                  break; // break on whitespace
+								} else if ch == '"' && qt_state.in_double() {
+									qt_state.toggle_double();
+									break
+                };
+                end = pos3;
+              }
+              let pos2 = map_pos(self, pos2, offset);
+              let start = map_pos(self, start, offset);
+              let end = map_pos(self, end, offset);
+
+              let span = self.yank_span((pos2, end), true);
+              let token = join_lines(&span);
+              let cmd = history.resolve_hist_token(&token).unwrap_or(token);
+
+              changes.push(((start, end), cmd));
+            }
+            _ => {}
+          }
+        }
+        _ => {}
+      }
+    }
+
+    !changes.is_empty()
   }
 
   pub fn attempt_history_expansion(&mut self, history: &History) -> bool {
     let mut changes: Vec<((Pos, Pos), String)> = vec![];
-    {
-      // we must descend into this scope because positions borrows 'self' immutably
-      let mut positions = self.grapheme_positions();
-      let mut qt_state = QuoteState::default();
-
-      while let Some((pos, gr)) = positions.next() {
-        let Some(ch) = gr.as_char() else { continue };
-        match ch {
-          '\\' | '$' => {
-            positions.next();
-          }
-          '\'' => qt_state.toggle_single(),
-          '"' => qt_state.toggle_double(),
-          '!' if !qt_state.in_single() => {
-            let start = pos;
-            let Some((pos2, gr2)) = positions.next() else {
-              continue;
-            };
-            let Some(ch) = gr2.as_char() else {
-              continue;
-            };
-            match ch {
-              '!' => {
-                if let Some(prev) = history.last() {
-                  let raw = prev.command();
-                  changes.push(((start, start.col_add(1)), raw.to_string()));
-                }
-              }
-              '$' => {
-                if let Some(prev) = history.last() {
-                  let raw = prev.command();
-                  if let Some(last_word) = raw.split_whitespace().last() {
-                    changes.push(((start, start.col_add(1)), last_word.to_string()));
-                  }
-                }
-              }
-              ch if !ch.is_whitespace() => {
-                let mut end = pos2;
-                let cur_row = end.row;
-                while let Some((pos3, gr3)) = positions.next() {
-                  if pos3.row > cur_row {
-                    break;
-                  }; // break on linefeed
-                  let Some(ch) = gr3.as_char() else { break }; // break on non-ascii
-                  if ch.is_whitespace() {
-                    break;
-                  }; // break on whitespace
-                  end = pos3;
-                }
-                let span = self.yank_span((pos2, end), true);
-                let token = join_lines(&span);
-                let cmd = history.resolve_hist_token(&token).unwrap_or(token);
-                changes.push(((start, end), cmd));
-              }
-              _ => {}
-            }
-          }
-          _ => {}
-        }
-      }
-
-      if changes.is_empty() {
-        return false;
-      }
-    } // 'positions' iterator is dropped here
+    let positions = self.grapheme_positions().into_iter();
+    if !self.find_history_expansions(&mut changes, positions, history, Pos::MIN) {
+      return false;
+    };
 
     for (range, change) in changes.into_iter().rev() {
       let old_len = self.count_graphemes();
