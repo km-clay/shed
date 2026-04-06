@@ -159,7 +159,6 @@ pub fn calc_str_width(s: &str) -> u16 {
 
 // Big credit to rustyline for this
 fn width(s: &str, esc_seq: &mut u8) -> u16 {
-  let w_calc = width_calculator();
   if *esc_seq == 1 {
     if s == "[" {
       // CSI
@@ -186,7 +185,7 @@ fn width(s: &str, esc_seq: &mut u8) -> u16 {
   } else if s == "\n" {
     0
   } else {
-    w_calc.width(s) as u16
+    get_width_calculator().width(s) as u16
   }
 }
 
@@ -223,8 +222,14 @@ pub fn append_digit(left: u32, right: u32) -> u32 {
   left.saturating_mul(10).saturating_add(right)
 }
 
-pub trait WidthCalculator {
+pub trait WidthCalculator: Send + Sync {
   fn width(&self, text: &str) -> usize;
+}
+
+static WIDTH_CALC: std::sync::OnceLock<Box<dyn WidthCalculator>> = std::sync::OnceLock::new();
+
+pub fn get_width_calculator() -> &'static dyn WidthCalculator {
+  WIDTH_CALC.get_or_init(width_calculator).as_ref()
 }
 
 pub trait KeyReader {
@@ -283,11 +288,12 @@ pub struct NoZwj;
 
 impl WidthCalculator for NoZwj {
   fn width(&self, text: &str) -> usize {
-    let mut width = 0;
-    for slice in text.split(ZWJ) {
-      width += UnicodeWidth.width(slice);
+    if text.contains(ZWJ) {
+      // ZWJ sequence renders as a single glyph on supported terminals
+      2
+    } else {
+      UnicodeWidth.width(text)
     }
-    width
   }
 }
 
@@ -883,7 +889,12 @@ impl Layout {
       t_cols: 0,
     }
   }
-  pub fn from_parts(term_width: u16, prompt: &str, to_cursor: &str, to_end: &str) -> Self {
+  pub fn from_parts(
+		term_width: u16,
+		prompt: &str,
+		to_cursor: &str,
+		to_end: &str,
+	) -> Self {
     let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 }, 0, false);
     let cursor = Self::calc_pos(term_width, to_cursor, prompt_end, prompt_end.col, true);
     let end = Self::calc_pos(term_width, to_end, prompt_end, prompt_end.col, false);
