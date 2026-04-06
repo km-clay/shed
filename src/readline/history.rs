@@ -9,13 +9,11 @@ use std::{
 use rusqlite::Connection;
 
 use crate::{
-  libsh::error::ShResult,
-  readline::{
+  libsh::error::ShResult, readline::{
     complete::{Candidate, FuzzySelector},
     editcmd::Direction,
     linebuf::LineBuf,
-  },
-  state::read_shopts,
+  }, sherr, state::read_shopts
 };
 
 #[derive(Debug, Clone)]
@@ -198,8 +196,18 @@ impl History {
     let table = &self.table;
 
     let tx = self.conn.unchecked_transaction()?;
+    // rolling backup — overwritten on each delete, restorable via `hist --restore`
+    tx.execute_batch(&format!(
+      "DROP TABLE IF EXISTS {table}_backup; \
+       CREATE TABLE {table}_backup (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT); \
+       INSERT INTO {table}_backup SELECT * FROM {table};"
+    ))?;
+    tx.execute_batch(&format!(
+      "CREATE TABLE {table}_tmp (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT);"
+    ))?;
     tx.execute(&format!(
-				"CREATE TABLE {table}_tmp AS SELECT command, timestamp, runtime FROM {table} WHERE id NOT IN (SELECT id FROM {table}
+				"INSERT INTO {table}_tmp (id, timestamp, runtime, command) \
+				 SELECT ROW_NUMBER() OVER (ORDER BY id), timestamp, runtime, command FROM {table} WHERE id NOT IN (SELECT id FROM {table}
 		{where_clause}) ORDER BY id"
 		), params)?;
     tx.execute_batch(&format!(
@@ -208,6 +216,54 @@ impl History {
     tx.commit()?;
 
     Ok(entries)
+  }
+
+  /// Restores the history table from the rolling backup created by the last delete operation.
+  pub fn restore_backup(&self) -> ShResult<i64> {
+    let table = &self.table;
+    let has_backup: bool = self.conn.query_row(
+      "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name=?1",
+      [&format!("{table}_backup")],
+      |row| row.get(0),
+    )?;
+    if !has_backup {
+      return Err(sherr!(HistoryReadErr, "no backup table found"));
+    }
+    let tx = self.conn.unchecked_transaction()?;
+    // index for fast NOT EXISTS lookup during merge
+    tx.execute_batch(&format!(
+      "CREATE INDEX IF NOT EXISTS {table}_restore_idx ON {table} (command, timestamp);"
+    ))?;
+    // count how many entries from backup are missing in current table
+    let restored: i64 = tx.query_row(&format!(
+      "SELECT COUNT(*) FROM {table}_backup b \
+       WHERE NOT EXISTS ( \
+         SELECT 1 FROM {table} c \
+         WHERE c.command = b.command AND c.timestamp = b.timestamp \
+       )"
+    ), [], |row| row.get(0))?;
+    // merge: insert deleted entries from backup that aren't in the current table
+    tx.execute(&format!(
+      "INSERT INTO {table} (command, timestamp, runtime) \
+       SELECT b.command, b.timestamp, b.runtime \
+       FROM {table}_backup b \
+       WHERE NOT EXISTS ( \
+         SELECT 1 FROM {table} c \
+         WHERE c.command = b.command AND c.timestamp = b.timestamp \
+       )"
+    ), [])?;
+    // rebuild with contiguous IDs in chronological order
+    tx.execute_batch(&format!(
+      "CREATE TABLE {table}_tmp (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT); \
+       INSERT INTO {table}_tmp (id, timestamp, runtime, command) \
+       SELECT ROW_NUMBER() OVER (ORDER BY timestamp), timestamp, runtime, command \
+       FROM {table}; \
+       DROP TABLE {table}; \
+       ALTER TABLE {table}_tmp RENAME TO {table}; \
+       DROP TABLE IF EXISTS {table}_backup;"
+    ))?;
+    tx.commit()?;
+    Ok(restored)
   }
 
   /// Runs a query on the history table with the given WHERE clause and parameters, returning a vector of (id, HistEntry) tuples.

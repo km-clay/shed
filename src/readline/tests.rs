@@ -691,10 +691,268 @@ fn hist_expansion_parse_recurses() {
 }
 
 #[test]
+fn hist_expansion_does_not_recurse_in_single_quotes() {
+	hist_no_expansion_test(
+		&["cargo run"],
+		"echo 'foo $(echo \"!car\") bar'",
+	);
+}
+
+#[test]
 fn hist_expansion_ignores_closing_quote() {
 	hist_expansion_test(
 		&["cargo run"],
 		"echo \"foo !car\"\r",
 		"echo \"foo cargo run\"",
 	);
+}
+
+// ===================== History General Tests =====================
+
+use crate::readline::history::History;
+use std::time::Duration;
+
+#[test]
+fn hist_push_returns_id() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_push_id");
+	let id1 = hist.push("cmd1".into()).unwrap();
+	let id2 = hist.push("cmd2".into()).unwrap();
+	assert!(id1.is_some());
+	assert!(id2.is_some());
+	assert_ne!(id1, id2);
+}
+
+#[test]
+fn hist_push_empty_returns_none() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_push_empty");
+	let id = hist.push("".into()).unwrap();
+	assert!(id.is_none());
+	assert_eq!(hist.entry_count(), 0);
+}
+
+#[test]
+fn hist_entry_count() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_count");
+	assert_eq!(hist.entry_count(), 0);
+	hist.push("cmd1".into()).unwrap();
+	assert_eq!(hist.entry_count(), 1);
+	hist.push("cmd2".into()).unwrap();
+	hist.push("cmd3".into()).unwrap();
+	assert_eq!(hist.entry_count(), 3);
+}
+
+#[test]
+fn hist_last_id() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_last_id");
+	assert_eq!(hist.last_id(), 0);
+	hist.push("cmd1".into()).unwrap();
+	assert_eq!(hist.last_id(), 1);
+	hist.push("cmd2".into()).unwrap();
+	assert_eq!(hist.last_id(), 2);
+}
+
+#[test]
+fn hist_last_returns_most_recent() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_last");
+	assert!(hist.last().is_none());
+	hist.push("first".into()).unwrap();
+	hist.push("second".into()).unwrap();
+	let last = hist.last().unwrap();
+	assert_eq!(last.command, "second");
+}
+
+#[test]
+fn hist_push_with_runtime() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_runtime");
+	let id = hist.push_with_runtime("cmd1".into(), Duration::from_millis(500)).unwrap();
+	assert!(id.is_some());
+	let entries = hist.query("ORDER BY id ASC", &[]).unwrap();
+	assert_eq!(entries.len(), 1);
+	assert_eq!(entries[0].1.runtime, Duration::from_millis(500));
+}
+
+#[test]
+fn hist_query_with_filter() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_query_filter");
+	hist.push("echo foo".into()).unwrap();
+	hist.push("ls -la".into()).unwrap();
+	hist.push("echo bar".into()).unwrap();
+
+	let results = hist.query(
+		"WHERE command LIKE ?1 ORDER BY id ASC",
+		&[&"echo%" as &dyn rusqlite::ToSql],
+	).unwrap();
+	assert_eq!(results.len(), 2);
+	assert_eq!(results[0].1.command, "echo foo");
+	assert_eq!(results[1].1.command, "echo bar");
+}
+
+#[test]
+fn hist_query_range() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_query_range");
+	hist.push("cmd1".into()).unwrap();
+	hist.push("cmd2".into()).unwrap();
+	hist.push("cmd3".into()).unwrap();
+	hist.push("cmd4".into()).unwrap();
+
+	let results = hist.query_range(2, 3).unwrap();
+	assert_eq!(results.len(), 2);
+	assert_eq!(results[0].1.command, "cmd2");
+	assert_eq!(results[1].1.command, "cmd3");
+}
+
+#[test]
+fn hist_ids_are_sequential() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_sequential");
+	hist.push("a".into()).unwrap();
+	hist.push("b".into()).unwrap();
+	hist.push("c".into()).unwrap();
+
+	let entries = hist.query("ORDER BY id ASC", &[]).unwrap();
+	for (i, (id, _)) in entries.iter().enumerate() {
+		assert_eq!(*id, (i + 1) as i64);
+	}
+}
+
+// ===================== History Delete/Restore Tests =====================
+
+#[test]
+fn hist_delete_removes_entries() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_delete");
+	hist.push("echo foo".into()).unwrap();
+	hist.push("echo bar".into()).unwrap();
+	hist.push("echo baz".into()).unwrap();
+	assert_eq!(hist.entry_count(), 3);
+
+	let deleted = hist.delete(
+		"WHERE command = ?1",
+		&[&"echo bar" as &dyn rusqlite::ToSql],
+	).unwrap();
+	assert_eq!(deleted.len(), 1);
+	assert_eq!(deleted[0].1.command, "echo bar");
+	assert_eq!(hist.entry_count(), 2);
+}
+
+#[test]
+fn hist_delete_reids_contiguously() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_reid");
+	hist.push("cmd1".into()).unwrap();
+	hist.push("cmd2".into()).unwrap();
+	hist.push("cmd3".into()).unwrap();
+
+	hist.delete(
+		"WHERE command = ?1",
+		&[&"cmd2" as &dyn rusqlite::ToSql],
+	).unwrap();
+
+	let entries = hist.query("ORDER BY id ASC", &[]).unwrap();
+	assert_eq!(entries.len(), 2);
+	assert_eq!(entries[0].0, 1); // id should be 1
+	assert_eq!(entries[1].0, 2); // id should be 2, not 3
+}
+
+#[test]
+fn hist_delete_creates_backup() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_backup");
+	hist.push("echo foo".into()).unwrap();
+	hist.push("echo bar".into()).unwrap();
+
+	hist.delete(
+		"WHERE command = ?1",
+		&[&"echo bar" as &dyn rusqlite::ToSql],
+	).unwrap();
+
+	// backup should exist — restore should succeed, not error
+	assert!(hist.restore_backup().is_ok());
+}
+
+#[test]
+fn hist_restore_recovers_deleted_entries() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_restore");
+	hist.push("echo foo".into()).unwrap();
+	hist.push("echo bar".into()).unwrap();
+	hist.push("echo baz".into()).unwrap();
+
+	hist.delete(
+		"WHERE command = ?1",
+		&[&"echo bar" as &dyn rusqlite::ToSql],
+	).unwrap();
+
+	assert_eq!(hist.entry_count(), 2);
+
+	let restored = hist.restore_backup().unwrap();
+	assert_eq!(restored, 1);
+	assert_eq!(hist.entry_count(), 3);
+}
+
+#[test]
+fn hist_restore_preserves_new_entries() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_restore_new");
+	hist.push("cmd1".into()).unwrap();
+	hist.push("cmd2".into()).unwrap();
+	hist.push("cmd3".into()).unwrap();
+
+	hist.delete(
+		"WHERE command = ?1",
+		&[&"cmd2" as &dyn rusqlite::ToSql],
+	).unwrap();
+
+	// add a new command after the delete
+	hist.push("cmd4".into()).unwrap();
+
+	let restored = hist.restore_backup().unwrap();
+	assert_eq!(restored, 1); // only cmd2 was missing
+	assert_eq!(hist.entry_count(), 4);
+
+	// all commands should be present, ordered by timestamp
+	let entries = hist.query("ORDER BY id ASC", &[]).unwrap();
+	let cmds: Vec<&str> = entries.iter().map(|(_, e)| e.command.as_str()).collect();
+	assert!(cmds.contains(&"cmd1"));
+	assert!(cmds.contains(&"cmd2"));
+	assert!(cmds.contains(&"cmd3"));
+	assert!(cmds.contains(&"cmd4"));
+}
+
+#[test]
+fn hist_restore_no_backup_errors() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_no_backup");
+	hist.push("echo foo".into()).unwrap();
+
+	assert!(hist.restore_backup().is_err());
+}
+
+#[test]
+fn hist_restore_ids_are_contiguous() {
+	let _g = TestGuard::new();
+	let hist = History::empty("test_restore_ids");
+	hist.push("cmd1".into()).unwrap();
+	hist.push("cmd2".into()).unwrap();
+	hist.push("cmd3".into()).unwrap();
+
+	hist.delete(
+		"WHERE command = ?1",
+		&[&"cmd2" as &dyn rusqlite::ToSql],
+	).unwrap();
+	hist.push("cmd4".into()).unwrap();
+	hist.restore_backup().unwrap();
+
+	let entries = hist.query("ORDER BY id ASC", &[]).unwrap();
+	for (i, (id, _)) in entries.iter().enumerate() {
+		assert_eq!(*id, (i + 1) as i64, "IDs should be contiguous");
+	}
 }

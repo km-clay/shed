@@ -35,6 +35,7 @@ pub struct HistQuery {
   json: bool,
   count: bool,
   delete: bool,
+	restore: bool,
 }
 
 impl HistQuery {
@@ -198,6 +199,7 @@ impl HistQuery {
         Opt::Long(name) => match name.as_str() {
           "count" => new.count = true,
           "delete" => new.delete = true,
+					"restore" => new.restore = true,
           "json" => new.json = true,
           _ => {}
         },
@@ -212,10 +214,14 @@ impl HistQuery {
     Ok(new)
   }
 
-  pub fn opt_spec() -> [OptSpec; 15] {
+  pub fn opt_spec() -> [OptSpec; 16] {
     [
       OptSpec {
         opt: Opt::Long("delete".into()),
+        takes_arg: OptArg::None,
+      },
+      OptSpec {
+        opt: Opt::Long("restore".into()),
         takes_arg: OptArg::None,
       },
       OptSpec {
@@ -345,6 +351,17 @@ pub fn hist_builtin(node: Node) -> ShResult<()> {
     get_opts_from_tokens(argv, &HistQuery::opt_spec()).promote_err(span.clone())?;
   let query = HistQuery::from_opts(&opts).promote_err(span.clone())?;
   let hist = History::new("shed_history").promote_err(span.clone())?;
+
+	if query.restore {
+		let num_restored = hist.restore_backup()?;
+		let stderr = borrow_fd(STDERR_FILENO);
+		write(
+			stderr,
+			format!("hist: restored {num_restored} entries from backup.\n").as_bytes(),
+		).ok();
+		state::set_status(0);
+		return Ok(());
+	}
 
   let entries = query.execute(&hist).promote_err(span.clone())?;
 

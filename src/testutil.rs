@@ -1,12 +1,8 @@
 use std::{
-  collections::{HashMap, HashSet},
-  env,
-  os::fd::{AsRawFd, BorrowedFd, OwnedFd},
-  path::PathBuf,
+  collections::{HashMap, HashSet}, env, os::fd::{AsRawFd, BorrowedFd, OwnedFd}, path::PathBuf, sync::{Arc, Mutex}, thread::JoinHandle
 };
 
 use nix::{
-  fcntl::{FcntlArg, OFlag, fcntl},
   pty::openpty,
   sys::termios::{OutputFlags, SetArg, tcgetattr, tcsetattr},
   unistd::read,
@@ -38,8 +34,12 @@ pub struct TestGuard {
   _redir_guard: RedirGuard,
   old_cwd: PathBuf,
   saved_env: HashMap<String, String>,
-  pty_master: OwnedFd,
+
+  _pty_master: OwnedFd,
   pty_slave: OwnedFd,
+	output: Arc<Mutex<Vec<u8>>>,
+	_read_handle: JoinHandle<()>,
+
 
   cleanups: Vec<Box<dyn FnOnce()>>,
 }
@@ -51,6 +51,22 @@ impl TestGuard {
     let mut attrs = tcgetattr(&pty_slave).unwrap();
     attrs.output_flags &= !OutputFlags::ONLCR;
     tcsetattr(&pty_slave, SetArg::TCSANOW, &attrs).unwrap();
+		let master_raw = pty_master.as_raw_fd();
+
+		// we need this arc mutex and read handle because large test outputs
+		// will cause the test to hang if we try to do everything on one thread.
+		let output = Arc::new(Mutex::new(vec![]));
+		let output_clone = Arc::clone(&output);
+		let _read_handle = std::thread::spawn(move || {
+			let mut buf = [0u8;4096];
+			loop {
+				match read(master_raw, &mut buf) {
+					Ok(0) => break,
+					Ok(n) => output_clone.lock().unwrap().extend_from_slice(&buf[..n]),
+					Err(_) => break
+				}
+			}
+		});
 
     let mut frame = IoFrame::new();
     frame.push(Redir::new(
@@ -85,8 +101,12 @@ impl TestGuard {
       _redir_guard,
       old_cwd,
       saved_env,
-      pty_master,
+      _pty_master: pty_master,
       pty_slave,
+
+			output,
+			_read_handle,
+
       cleanups: vec![],
     }
   }
@@ -99,29 +119,26 @@ impl TestGuard {
     self.cleanups.push(Box::new(f));
   }
 
-  pub fn read_output(&self) -> String {
-    let flags = fcntl(self.pty_master.as_raw_fd(), FcntlArg::F_GETFL).unwrap();
-    let flags = OFlag::from_bits_truncate(flags);
-    fcntl(
-      self.pty_master.as_raw_fd(),
-      FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK),
-    )
-    .unwrap();
-
-    let mut out = vec![];
-    let mut buf = [0; 4096];
-    loop {
-      match read(self.pty_master.as_raw_fd(), &mut buf) {
-        Ok(0) => break,
-        Ok(n) => out.extend_from_slice(&buf[..n]),
-        Err(_) => break,
-      }
-    }
-
-    fcntl(self.pty_master.as_raw_fd(), FcntlArg::F_SETFL(flags)).unwrap();
-
-    String::from_utf8_lossy(&out).to_string()
-  }
+	pub fn read_output(&self) -> String {
+		loop {
+			// wait a little bit for read thread to do its read
+			std::thread::sleep(std::time::Duration::from_millis(5));
+			let buf = self.output.lock().unwrap();
+			// check current length of output buffer
+			let snapshot_len = buf.len();
+			drop(buf);
+			// wait a little bit more
+			std::thread::sleep(std::time::Duration::from_millis(5));
+			let mut buf = self.output.lock().unwrap();
+			if buf.len() == snapshot_len {
+				// no new output came in during the second sleep, assume we're done
+				let result = String::from_utf8_lossy(&buf).to_string();
+				buf.clear();
+				return result;
+			}
+			// more data came in, loop again
+		}
+	}
 }
 
 impl Default for TestGuard {
