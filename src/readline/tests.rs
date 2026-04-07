@@ -874,7 +874,7 @@ fn hist_delete_creates_backup() {
 		&[&"echo bar" as &dyn rusqlite::ToSql],
 	).unwrap();
 
-	// backup should exist — restore should succeed, not error
+	// backup should exist - restore should succeed, not error
 	assert!(hist.restore_backup().is_ok());
 }
 

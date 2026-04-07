@@ -3685,7 +3685,7 @@ impl LineBuf {
 
             lines.push(Line(cur_line));
             let sub_positions = Self::enumerate_graphemes(&lines).into_iter();
-            // offset past "$(" — 2 chars from the '$' position
+            // offset past "$(" - 2 chars from the '$' position
             let sub_offset = map_pos(self, pos.col_add(2), offset);
 
             // now we recurse.
@@ -3706,7 +3706,7 @@ impl LineBuf {
 
             lines.push(Line(cur_line));
             let sub_positions = Self::enumerate_graphemes(&lines).into_iter();
-            // offset past "`" — 1 char from the backtick position
+            // offset past "`" - 1 char from the backtick position
             let sub_offset = map_pos(self, pos.col_add(1), offset);
 
             // now we recurse.

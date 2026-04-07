@@ -196,7 +196,7 @@ impl History {
     let table = &self.table;
 
     let tx = self.conn.unchecked_transaction()?;
-    // rolling backup — overwritten on each delete, restorable via `hist --restore`
+    // rolling backup - overwritten on each delete, restorable via `hist --restore`
     tx.execute_batch(&format!(
       "DROP TABLE IF EXISTS {table}_backup; \
        CREATE TABLE {table}_backup (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT); \

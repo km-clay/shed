@@ -326,10 +326,10 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
   };
 
-  readline.writer.flush_write("\x1b[?2004h")?; // enable bracketed paste mode
 
   // Main poll loop
   loop {
+		readline.writer.flush_write("\x1b[?2004h")?; // enable bracketed paste mode
     write_meta(|m| {
       m.try_rehash_commands();
       m.try_rehash_cwd_listing();
@@ -516,6 +516,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
     // Process any available input
     let event = readline.process_input();
+
+
+    write(borrow_fd(*TTY_FILENO), b"\x1b[?2004l").ok(); // disable bracketed paste
     match handle_readline_event(&mut readline, event)? {
       true => return Ok(()),
       false => { /* continue looping */ }
