@@ -2451,7 +2451,7 @@ impl LineBuf {
         };
         self.set_cursor(Pos { row: *line, col: 0 });
       }
-      MotionKind::Block { start, end } => todo!(),
+      MotionKind::Block { start, end } => unimplemented!(),
     }
   }
   /// Wrapper for apply_motion_inner that calls it with `accept_hint: false`
@@ -2476,7 +2476,7 @@ impl LineBuf {
         };
         self.set_row(*line);
       }
-      MotionKind::Block { start, end } => todo!(),
+      MotionKind::Block { start, end } => unimplemented!(),
     }
     Ok(())
   }
@@ -2648,7 +2648,7 @@ impl LineBuf {
           }
         }
       }
-      MotionKind::Block { start, end } => todo!(),
+      MotionKind::Block { start, end } => unimplemented!(),
     }
   }
   fn inplace_mutation(&mut self, count: u16, f: impl Fn(&Grapheme) -> Grapheme) {
@@ -2970,7 +2970,7 @@ impl LineBuf {
               self.set_row(row + i);
             }
           }
-          RegisterContent::Block(lines) => todo!(),
+          RegisterContent::Block(lines) => unimplemented!(),
           RegisterContent::Empty => {}
         }
       }
@@ -3088,7 +3088,7 @@ impl LineBuf {
             Either::Left(self.line_iter_mut(ordered(start, end)))
           }
           MotionKind::Lines { lines } => Either::Right(self.line_iter_mut_by_indices(&lines)),
-          MotionKind::Block { .. } => todo!(),
+          MotionKind::Block { .. } => unimplemented!(),
         };
         let mut col_offset = 0;
         for line in lines {
@@ -3130,7 +3130,7 @@ impl LineBuf {
             Either::Left(s..=e)
           }
           MotionKind::Lines { lines } => Either::Right(lines.into_iter()),
-          MotionKind::Block { start, end } => todo!(),
+          MotionKind::Block { start, end } => unimplemented!(),
         };
         for row in line_nums {
           let line_len = self.line(row).len();
@@ -4207,7 +4207,7 @@ impl Display for LineBuf {
           }
           cloned[e].push_char(markers::VISUAL_MODE_END);
         }
-        SelectMode::Block(_pos) => todo!(),
+        SelectMode::Block(_pos) => unimplemented!(),
       }
       let mut lines = vec![];
       for line in &cloned {

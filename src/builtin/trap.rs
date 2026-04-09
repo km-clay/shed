@@ -28,6 +28,7 @@ impl FromStr for TrapTarget {
       "EXIT" => Ok(TrapTarget::Exit),
       "ERR" => Ok(TrapTarget::Error),
 
+      "HUP" => Ok(TrapTarget::Signal(Signal::SIGHUP)),
       "INT" => Ok(TrapTarget::Signal(Signal::SIGINT)),
       "QUIT" => Ok(TrapTarget::Signal(Signal::SIGQUIT)),
       "ILL" => Ok(TrapTarget::Signal(Signal::SIGILL)),

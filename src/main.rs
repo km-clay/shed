@@ -179,6 +179,7 @@ fn main() -> ExitCode {
 }
 
 fn read_commands(args: Vec<String>) -> ShResult<()> {
+	write_meta(|m| m.rehash());
   let mut input = vec![];
   let mut read_buf = [0u8; 4096];
   loop {
@@ -202,6 +203,7 @@ fn read_commands(args: Vec<String>) -> ShResult<()> {
 }
 
 fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
+	write_meta(|m| m.rehash());
   let path = path.as_ref();
   let path_raw = path.to_string_lossy().to_string();
   if !path.is_file() {

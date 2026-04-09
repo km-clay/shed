@@ -10,16 +10,19 @@ The following builtins are available:
   `alias`       define or list command aliases              |builtin-alias|
   `arrops`      array manipulation (push, pop, rotate)      |builtin-arrops|
   `autocmd`     register hooks for shell events             |builtin-autocmd|
+  `bg`          resume a stopped job in the background      |builtin-bg|
   `cd`          change the working directory                |builtin-cd|
   `complete`    define custom tab completion rules          |builtin-complete|
   `dirs`        display the directory stack                 |builtin-dirs|
+  `disown`      remove a job from the job table             |builtin-disown|
   `echo`        print arguments to stdout                   |builtin-echo|
   `eval`        evaluate a string as shell input            |builtin-eval|
   `exec`        replace the shell process with a command    |builtin-exec|
   `exit`        exit the shell                              |builtin-exit|
   `export`      mark variables for export to environment    |builtin-export|
   `false`       return exit status 1                        |builtin-false|
-  `fc`          open the current buffer in $EDITOR          |builtin-fc|
+  `fc`          edit and re-exec commands from history      |builtin-fc|
+  `fg`          bring a job to the foreground               |builtin-fg|
   `getopts`     parse option flags in scripts               |builtin-getopts|
   `hash`        manage the command location cache           |builtin-hash|
   `help`        display help pages                          |builtin-help|
@@ -29,19 +32,28 @@ The following builtins are available:
   `kill`        send signals to processes                   |builtin-kill|
   `local`       declare variables local to a function       |builtin-local|
   `map`         structured key-value store                  |builtin-map|
+  `msg`         post a message to the status bar            |builtin-msg|
   `popd`        pop the directory stack                     |builtin-popd|
   `pushd`       push a directory onto the stack             |builtin-pushd|
   `pwd`         print the working directory                 |builtin-pwd|
   `read`        read a line of input into a variable        |builtin-read|
+  `read_key`    read a single keypress                      |builtin-read_key|
   `readonly`    mark variables as read-only                 |builtin-readonly|
-  `seek`        navigate to directories interactively       |builtin-seek|
+  `return`      return from a function                      |builtin-return|
+  `break`       exit a loop                                 |builtin-break|
+  `continue`    skip to the next loop iteration             |builtin-continue|
+  `seek`        seek a file descriptor to a byte offset     |builtin-seek|
   `set`         set shell options and positional parameters |builtin-set|
   `shift`       shift positional parameters                 |builtin-shift|
   `shopt`       get or set shell options                    |builtin-shopt|
   `source`      execute a file in the current shell         |builtin-source|
   `[[`          evaluate conditional expressions            |builtin-test|
+  `times`       print shell and child CPU times             |builtin-times|
   `trap`        set signal handlers                         |builtin-trap|
   `true`        return exit status 0                        |builtin-true|
+  `type`        describe how a name would be interpreted    |builtin-type|
+  `ulimit`      set process resource limits                 |builtin-ulimit|
+  `umask`       set the file creation mask                  |builtin-umask|
   `unalias`     remove aliases                              |builtin-unalias|
   `unset`       remove variables or functions               |builtin-unset|
   `wait`        wait for background jobs to finish          |builtin-wait|
@@ -369,6 +381,9 @@ AUTOCMD                                          *builtin-autocmd* *autocmd*
     `on-completion-start`   when tab completion starts
     `on-completion-cancel`  when tab completion is cancelled
     `on-completion-select`  when a completion candidate is selected
+    `on-screensaver-exec`   when the screensaver command starts
+    `on-screensaver-return` when the screensaver command exits
+    `on-time-report`        when a timed command reports its duration
     `on-exit`               when the shell exits
 
   Examples:
@@ -380,6 +395,22 @@ AUTOCMD                                          *builtin-autocmd* *autocmd*
   For special variables available inside autocmd handlers, see |autocmd|.
 
 ==============================================================================
+BG                                               *builtin-bg* *bg*
+
+  `bg [%jobid]`
+
+  Resume a stopped job in the background. If no {jobid} is given, the
+  current (most recently active) job is used. The job continues running
+  without holding the terminal.
+
+  {jobid} may be `%N` (job number) or `%{cmd}` (prefix match on command).
+
+  Examples:
+
+      `bg`          resume current job in background
+      `bg %2`       resume job 2 in background
+
+==============================================================================
 CD                                               *builtin-cd* *cd*
 
   `cd [-L|-P] [{dir}]`
@@ -388,7 +419,7 @@ CD                                               *builtin-cd* *cd*
   `$HOME`. Updates `$PWD` and `$OLDPWD`.
 
   `-L`    follow symbolic links (default)
-  `-P`    resolve symbolic links to their physical path via `realpath`
+  `-P`    resolve symbolic links to their physical (canonical) path
 
   Special arguments:
 
@@ -478,7 +509,7 @@ COMPGEN                                          *builtin-compgen* *compgen*
   functions.
 
   Accepts the same source flags as `complete` (`-W`, `-F`, `-f`, `-d`,
-  `-c`, `-u`, `-v`, `-a`, `-j`, `-S`).
+  `-c`, `-u`, `-v`, `-a`, `-j`, `-S`, `-o`).
 
   Examples:
 
@@ -487,6 +518,983 @@ COMPGEN                                          *builtin-compgen* *compgen*
       `compgen -f /tmp/`                list files under /tmp/
       `compgen -v HOME`                 list variables starting with HOME
       `compgen -F _my_func`             run function and print results
+      `compgen -o default`              fall back to default completion
 
 ==============================================================================
-See also: |autocmd| |param|
+DISOWN                                           *builtin-disown* *disown*
+
+  `disown [-h] [-a] [%jobid | pid]`
+
+  Remove a job from the shell's job table. A disowned job is no longer
+  tracked and will not produce a "Terminated" notification when it exits.
+
+  `-h`    instead of removing the job, mark it so it does not receive
+          SIGHUP when the shell exits (nohup semantics)
+  `-a`    apply to all current jobs instead of a specific one
+
+  Without an argument, operates on the current (most recently active) job.
+
+  Examples:
+
+      `disown`          disown the current job
+      `disown %2`       disown job 2
+      `disown -h %1`    protect job 1 from SIGHUP on shell exit
+      `disown -a`       disown all jobs
+
+==============================================================================
+DIRS                                             *builtin-dirs* *dirs*
+
+  `dirs [-clpv] [+N | -N]`
+
+  Display the directory stack. The current working directory is always
+  at the top (index 0); entries pushed by `pushd` follow.
+
+  `-c`       clear the directory stack
+  `-l`       show full paths — do not abbreviate `$HOME` as `~`
+  `-p`       print one entry per line
+  `-v`       print one entry per line, preceded by its stack index
+  `+N`       print only the entry at position N from the top (0-based)
+  `-N`       print only the entry at position N from the bottom
+
+  With no arguments, prints all entries on one line separated by spaces,
+  abbreviating `$HOME` as `~`.
+
+  Examples:
+
+      `dirs`              list the full directory stack
+      `dirs -v`           list with numeric indices
+      `dirs +0`           print only the current directory
+      `dirs -c`           clear the stack
+
+==============================================================================
+ECHO                                             *builtin-echo* *echo*
+
+  `echo [-n] [-e] [-E] [-p] [arg ...]`
+
+  Write {arg}s to standard output, separated by spaces, followed by a
+  newline.
+
+  `-n`    suppress the trailing newline
+  `-e`    interpret backslash escape sequences (see below)
+  `-E`    disable escape interpretation (overrides `xpg_echo`)
+  `-p`    expand each argument as a prompt string (see |prompt|)
+
+  Escape sequences (active with `-e` or when `shopt core.xpg_echo=true`):
+
+    `\n`     newline
+    `\t`     horizontal tab
+    `\r`     carriage return
+    `\a`     alert (bell)
+    `\b`     backspace
+    `\e`     escape character (ESC)
+    `\\`     literal backslash
+    `\xNN`   byte with hex value NN (up to 2 digits)
+    `\0NNN`  byte with octal value NNN (up to 3 digits)
+
+  By default escape sequences are NOT interpreted. Set
+  `shopt core.xpg_echo=true` to change this globally; `-E` opts out.
+
+  Examples:
+
+      `echo hello world`
+      `echo -n no newline`
+      `echo -e 'line1\nline2'`
+
+==============================================================================
+EVAL                                             *builtin-eval* *eval*
+
+  `eval [arg ...]`
+
+  Join all {arg}s with spaces and execute the result as shell input in
+  the current environment. Variable assignments, function definitions,
+  and other side effects persist after `eval` returns.
+
+  With no arguments, succeeds silently.
+
+  Examples:
+
+      `eval echo hello`
+      `eval 'x=42; echo $x'`
+      `cmd='echo evaluated'; eval $cmd`
+
+==============================================================================
+EXEC                                             *builtin-exec* *exec*
+
+  `exec [command [arg ...]]`
+
+  Replace the current shell process with {command}. On success `exec`
+  does not return — the shell is replaced entirely.
+
+  With no arguments, succeeds silently (useful for applying redirections
+  to the current shell without replacing it).
+
+  It is an error if {command} cannot be found or executed.
+
+  Examples:
+
+      `exec /bin/sh`
+      `exec myprogram arg1`
+
+==============================================================================
+EXIT                                             *builtin-exit* *exit*
+
+  `exit [n]`
+
+  Exit the shell with status {n}. If {n} is omitted, exits with status
+  0. {n} must be a decimal integer.
+
+  Examples:
+
+      `exit`        exit with current status
+      `exit 0`      exit successfully
+      `exit 1`      exit with failure
+
+==============================================================================
+EXPORT                                           *builtin-export* *export*
+
+  `export [name[=value] ...]`
+
+  Mark variables for automatic export to the environment of subsequently
+  executed commands. With `name=value`, sets and exports in one step.
+  With just {name}, marks an existing variable as exported.
+
+  With no arguments, lists all current environment variables
+  alphabetically as `name="value"` pairs.
+
+  Examples:
+
+      `export`                  list all environment variables
+      `export PATH`             export an existing variable
+      `export EDITOR=nvim`      set and export
+      `export A=1 B=2`          multiple in one call
+
+==============================================================================
+FALSE                                            *builtin-false* *false*
+
+  `false`
+
+  Do nothing and return exit status 1.
+
+==============================================================================
+FG                                               *builtin-fg* *fg*
+
+  `fg [%jobid]`
+
+  Bring a stopped or background job to the foreground. The shell waits
+  for the job to complete (or stop again) before returning the prompt.
+  If no {jobid} is given, the current job is used.
+
+  {jobid} may be `%N` (job number) or `%{cmd}` (prefix match on command).
+
+  Examples:
+
+      `fg`          bring current job to foreground
+      `fg %2`       bring job 2 to foreground
+
+==============================================================================
+FC                                               *builtin-fc* *fc*
+
+  `fc [-e editor] [-nlrs] [first [last]]`
+  `fc -s [old=new] [first]`
+
+  Operate on history entries. {first} and {last} select a range and can
+  be a history number, a negative offset from the most recent entry
+  (e.g. `-2`), or a string prefix matching a command.
+
+  Options ~
+
+    `-e {editor}`   open selected entries in {editor} for editing, then
+                    re-execute. Uses `$FCEDIT` or `$EDITOR` if not given.
+    `-l`            list entries instead of editing. Defaults to the
+                    most recent 16 entries when no range is given.
+    `-n`            suppress line numbers in `-l` output
+    `-r`            reverse the order of selected entries
+    `-s [old=new]`  re-execute without opening an editor. If `old=new`
+                    is given, substitute {old} with {new} first.
+
+  After an edit session, if the command changed it is appended to
+  history; if unchanged it is not. Per POSIX, `fc` itself is not
+  recorded in history when it edits and re-executes a command.
+
+  Examples:
+
+      `fc -l`                   list last 16 commands
+      `fc -l 1 10`              list entries 1–10
+      `fc -s echo`              re-exec last command starting with "echo"
+      `fc -s cat=dog`           re-exec with cat→dog substitution
+      `fc -e vim`               edit last command in vim
+
+==============================================================================
+GETOPTS                                          *builtin-getopts* *getopts*
+
+  `getopts {optstring} {name} [arg ...]`
+
+  Parse short option flags. Intended for use inside a `while` loop.
+  Processes positional parameters by default, or {arg}s if provided.
+
+  {optstring} is a string of recognized option letters. A letter
+  followed by `:` requires an argument. A leading `:` enables silent
+  error handling.
+
+  Each call places the next recognized option in {name}. If the option
+  takes an argument, it is placed in `$OPTARG`. `$OPTIND` tracks the
+  position of the next argument. Returns exit status 1 when no more
+  options remain.
+
+  Examples:
+
+      `while getopts 'ab:c' opt; do`
+      `  case $opt in`
+      `    a) echo "got -a" ;;`
+      `    b) echo "got -b $OPTARG" ;;`
+      `    c) echo "got -c" ;;`
+      `  esac`
+      `done`
+
+==============================================================================
+HASH                                             *builtin-hash* *hash*
+
+  `hash [-r] [--refresh] [name ...]`
+
+  Manage the command path cache. When `hashall` is enabled, the shell
+  caches the full path of commands it has looked up.
+
+  With no arguments, prints all cached commands as `name=path` pairs.
+  With {name} arguments, explicitly adds those commands to the cache
+  (error if not found in `$PATH`).
+
+  `-r`          clear the entire cache
+  `--refresh`   rescan `$PATH` and rebuild the cache
+
+  Examples:
+
+      `hash`             list cached paths
+      `hash git nvim`    cache specific commands
+      `hash -r`          clear the cache
+      `hash --refresh`   rebuild from $PATH
+
+==============================================================================
+HELP                                             *builtin-help* *help*
+
+  `help [{topic}]`
+
+  Display help for {topic}. With no argument, opens the main help index.
+  {topic} may be a builtin name or any named help page.
+
+  Examples:
+
+      `help`            open the help index
+      `help echo`       help for the echo builtin
+      `help param`      parameter expansion reference
+
+==============================================================================
+HIST                                             *builtin-hist* *hist*
+
+  `hist [options] [id ...]`
+
+  Query and manage shell history. History is stored in a SQLite
+  database and supports rich filtering. With no arguments or IDs,
+  prints the full history oldest-first.
+
+  Filter Options ~
+
+    `--after {date}`        entries after {date} (natural language)
+    `--before {date}`       entries before {date}
+    `--contains {str}`      entries whose command contains {str}
+    `--starts-with {str}`   entries whose command starts with {str}
+    `--matches {regex}`     entries matching extended regex {regex}
+    `--duration-gt {dur}`   entries with runtime longer than {dur}
+    `--duration-lt {dur}`   entries with runtime shorter than {dur}
+    `--lines-gt {n}`        entries with more than {n} lines
+    `--lines-lt {n}`        entries with fewer than {n} lines
+    `--limit {n}`           return at most {n} results
+
+  Output Options ~
+
+    `-n`           suppress history IDs
+    `-r`           newest-first order (default is oldest-first)
+    `--count`      print only the count of matching entries
+    `--json`       output as JSON
+
+  Mutation Options ~
+
+    `--delete`     delete matching entries
+    `--restore`    restore previously deleted entries
+    `--ex`         operate on ex-mode history instead of shell command history
+
+  Providing numeric arguments restricts results to those specific IDs:
+
+      `hist 42 43`    print entries with IDs 42 and 43
+
+  Dates accept natural language: "yesterday", "2 hours ago", "last
+  monday", ISO 8601, etc. Durations: "5s", "2 minutes", "1 hour".
+
+  Examples:
+
+      `hist`                           full history
+      `hist --contains git`            entries containing "git"
+      `hist --after "yesterday"`       entries since yesterday
+      `hist --limit 20 -n`             last 20 commands, no IDs
+      `hist --delete --contains foo`   delete entries containing "foo"
+
+==============================================================================
+JOBS                                             *builtin-jobs* *jobs*
+
+  `jobs [-lpnrs]`
+
+  List background and stopped jobs.
+
+  `-l`    long format: include PIDs and process group IDs
+  `-p`    print only the process group ID of each job
+  `-n`    print only jobs whose status has changed since last report
+  `-r`    print only running jobs
+  `-s`    print only stopped jobs
+
+  Examples:
+
+      `jobs`         list all jobs
+      `jobs -l`      list jobs with PIDs
+      `jobs -r`      list only running jobs
+
+==============================================================================
+KEYMAP                                           *builtin-keymap* *keymap*
+
+  `keymap {mode-flags} {keys} {action}`
+  `keymap {mode-flags} --remove {keys}`
+
+  Define or remove a custom key binding. At least one mode flag is
+  required. {keys} and {action} are key sequences.
+
+  Mode Flags ~
+
+    `-e`    emacs mode
+    `-i`    insert mode (vi)
+    `-n`    normal mode (vi)
+    `-o`    operator-pending mode (vi)
+    `-r`    replace mode (vi)
+    `-v`    visual mode (vi)
+    `-x`    ex mode (vi)
+
+  `--remove {keys}`   remove the binding for {keys} in the given modes
+
+  Key sequences use the same notation as the line editor. Special keys
+  can be written as `<cr>`, `<esc>`, `<tab>`, `<space>`, etc.
+
+  Examples:
+
+      `keymap -i 'jk' '<esc>'`        map jk → escape in insert mode
+      `keymap -n 'gs' ':source ~/.shed_profile<cr>'`
+      `keymap -i --remove 'jk'`       remove the jk binding
+
+==============================================================================
+KILL                                             *builtin-kill* *kill*
+
+  `kill [-s signal | -{num} | -signal] {target} ...`
+  `kill -l [signal | number]`
+
+  Send a signal to one or more targets. Default signal is SIGTERM.
+
+  Signal Specification ~
+
+    `-s {name}`    signal by name (e.g. `-s INT`, `-s HUP`)
+    `-{num}`       signal by number (e.g. `-9` for SIGKILL)
+    `-{name}`      shorthand for `-s {name}` (e.g. `-INT`)
+
+  Targets ~
+
+    {pid}     send to that PID
+    -{n}      send to process group {n}
+    0         send to the shell's own process group
+    -1        broadcast to all processes the shell may signal
+    `%N`      send to job number N
+    `%{cmd}`  send to job whose command starts with {cmd}
+
+  Multiple targets may be given. Use `--` to end flag parsing.
+
+  `-l`             list all signal names
+  `-l {name|N}`    print signal name for {name} or number {N}.
+                   Numbers > 128 are decoded as exit status (N − 128).
+  `-v`             verbose: print each signal as it is sent
+
+  Examples:
+
+      `kill 1234`              SIGTERM to PID 1234
+      `kill -9 1234`           SIGKILL to PID 1234
+      `kill -s HUP 1234`       SIGHUP to PID 1234
+      `kill %1`                SIGTERM to job 1
+      `kill -l`                list all signals
+      `kill -l 130`            print: INT
+
+==============================================================================
+LOCAL                                            *builtin-local* *local*
+
+  `local [name[=value] ...]`
+
+  Declare variables scoped to the current function. Local variables
+  shadow any outer variable of the same name and are discarded when the
+  function returns.
+
+  With `name=value`, declares and sets in one step. With just {name},
+  declares with an empty value. Multiple declarations per call are
+  allowed.
+
+  With no arguments, lists all variables in the current scope.
+
+  Examples:
+
+      `local x=10`
+      `local a b c`
+      `local`           list scope variables
+
+==============================================================================
+MSG                                              *builtin-msg* *msg*
+
+  `msg [-s | --status] [-S | --system] {text}`
+
+  Post a text message to the shell's status display area.
+	Useful for surfacing information from things like keymap
+	scripts without cluttering stdout. Has no effect in
+	non-interactive shells.
+
+  `-s` / `--status`   post as a status message (default).
+                      Status messages appear under the prompt
+											and survive prompt redraws for 5 seconds.
+
+  `-S` / `--system`   post as a system-level message. These appear
+	                    above the prompt, in the same way that job
+											notifications do.
+
+  Examples:
+
+      `msg "build complete"`
+      `msg --system "low disk space"`
+
+==============================================================================
+POPD                                             *builtin-popd* *popd*
+
+  `popd [-n] [+N | -N]`
+
+  Remove an entry from the directory stack. By default pops the top
+  entry and changes to the new top.
+
+  `-n`    do not change the current directory (stack only)
+  `+N`    remove the entry at index N from the top (0-based).
+          `+0` is equivalent to plain `popd`.
+  `-N`    remove the entry at index N from the bottom.
+
+  When using `+N` (N > 0) or `-N`, no directory change occurs.
+  The updated stack is printed after each operation.
+  It is an error to pop from an empty stack.
+
+  Examples:
+
+      `popd`          pop top and cd to new top
+      `popd -n`       remove top without cd
+      `popd +1`       remove second stored entry, no cd
+
+==============================================================================
+PUSHD                                            *builtin-pushd* *pushd*
+
+  `pushd [-n] [{dir} | +N | -N]`
+
+  Push {dir} onto the directory stack and change to it. The old working
+  directory becomes the first stack entry.
+
+  `-n`    do not change the current directory (stack only)
+  `+N`    rotate the stack left N positions, then cd to the new top
+  `-N`    rotate the stack right N+1 positions, then cd to the new top
+
+  The updated stack is printed after each operation.
+  It is an error if {dir} does not exist or is not a directory.
+
+  Examples:
+
+      `pushd /tmp`          push /tmp and cd to it
+      `pushd -n ~/src`      push without changing directory
+      `pushd +1`            rotate stack and cd to next entry
+
+==============================================================================
+PWD                                              *builtin-pwd* *pwd*
+
+  `pwd`
+
+  Print the absolute path of the current working directory.
+
+==============================================================================
+READ                                             *builtin-read* *read*
+
+  `read [-r] [-s] [-p {prompt}] [-d {delim}] [name ...]`
+
+  Read one line from standard input. The line is split by `$IFS` and
+  assigned to {name}s in order. If there are more words than names,
+  the last name receives the remainder. With no names, the result is
+  stored in `$REPLY`.
+
+  `-r`           raw mode: backslash is not an escape character
+  `-s`           silent: do not echo typed characters (not yet implemented)
+  `-p {prompt}`  display {prompt} before reading (no newline added)
+  `-d {delim}`   read until {delim} byte instead of newline
+
+  Examples:
+
+      `read name`
+      `read first rest`
+      `read -p "Enter value: " x`
+      `read -s password`
+
+==============================================================================
+READONLY                                         *builtin-readonly* *readonly*
+
+  `readonly [name[=value] ...]`
+
+  Mark variables as read-only. Any attempt to reassign or unset a
+  read-only variable is an error. With `name=value`, sets and protects
+  in one step.
+
+  With no arguments, lists all read-only variables.
+
+  Examples:
+
+      `readonly PI=3.14159`
+      `readonly MYVAR`
+      `readonly`              list read-only variables
+
+==============================================================================
+READ_KEY                                         *builtin-read_key* *read_key*
+
+  `read_key [-v {var}] [-w {whitelist}] [-b {blacklist}]`
+
+  Read a single keypress from the terminal without waiting for Enter.
+  Returns immediately after one key event. If stdin is not a terminal,
+  returns exit status 1 without reading.
+
+  The key is represented in vim-style notation (e.g. `a`, `<esc>`,
+  `<cr>`, `<space>`, `<c-x>`).
+
+  `-v {var}`       store the key sequence in {var} instead of printing
+  `-w {whitelist}` only succeed if the pressed key is in {whitelist}
+  `-b {blacklist}` fail if the pressed key is in {blacklist}
+
+  {whitelist} and {blacklist} use the same key sequence notation as
+  `keymap`.
+
+  Returns exit status 1 if the key does not match the whitelist or
+  matches the blacklist.
+
+  Examples:
+
+      `read_key -v key`                 read a key into $key
+      `read_key -v ch -w 'yn'`          accept only y or n
+      `read_key -w '<esc><cr>'`         accept only Escape or Enter
+
+==============================================================================
+RETURN                                           *builtin-return* *return*
+
+  `return [n]`
+
+  Return from the current function with exit status {n}. If {n} is
+  omitted, returns with status 0. It is an error to call `return`
+  outside of a function.
+
+  Examples:
+
+      `f() { return 0; }`
+      `f() { [[ $x ]] || return 1; echo "ok"; }`
+
+==============================================================================
+BREAK                                            *builtin-break* *break*
+
+  `break [n]`
+
+  Exit the current loop. If {n} is given, the loop exits with status {n};
+  otherwise exits with status 0. It is an error to call `break` outside
+  of a loop.
+
+  Examples:
+
+      `while true; do break; done`
+      `for i in 1 2 3; do break; done`
+
+==============================================================================
+CONTINUE                                         *builtin-continue* *continue*
+
+  `continue [n]`
+
+  Skip the remainder of the current loop iteration and begin the next.
+  If {n} is given, the iteration exits with status {n}; otherwise 0.
+  It is an error to call `continue` outside of a loop.
+
+  Examples:
+
+      `for i in 1 2 3; do [[ $i == 2 ]] && continue; echo $i; done`
+
+==============================================================================
+SEEK                                             *builtin-seek* *seek*
+
+  `seek [-c | -e] {fd} {offset}`
+
+  Call `lseek(2)` on file descriptor {fd}. Prints the resulting byte
+  position to stdout. Particularly useful with '<>' redirections.
+
+  By default the offset is absolute (from start of file).
+
+  `-c`    offset is relative to the current position (SEEK_CUR)
+  `-e`    offset is relative to the end of the file (SEEK_END)
+
+  {offset} may be negative with `-c` or `-e`.
+
+  Examples:
+
+      `seek 3 0`         seek fd 3 to the beginning
+      `seek -c 3 16`     advance fd 3 by 16 bytes
+      `seek -e 3 -1`     seek to 1 byte before the end of fd 3
+
+==============================================================================
+SET                                              *builtin-set* *set*
+
+  `set [-+abCefhmnuvx] [-+o option] [-- arg ...]`
+
+  Set or unset shell options, or replace positional parameters.
+  `-` turns an option on; `+` turns it off.
+
+  Short flags ~
+
+    `-a`  allexport   export all assigned variables automatically
+    `-b`  notify      report job status asynchronously
+    `-C`  noclobber   disallow `>` from overwriting existing files
+    `-e`  errexit     exit on non-zero command status
+    `-f`  noglob      disable filename expansion (globbing)
+    `-h`  hashall     cache command paths on lookup
+    `-m`  monitor     job control (on by default)
+    `-n`  noexec      parse but do not execute
+    `-u`  nounset     treat unset variable expansion as an error
+    `-v`  verbose     print input to stderr as it is read
+    `-x`  xtrace      print expanded commands before execution
+
+  Long options (`-o`/`+o`) ~
+
+    allexport, emacs, errexit, hashall, ignoreeof, monitor, noclobber,
+    noexec, noglob, nolog, notify, nounset, verbose, vi, xtrace
+
+  Positional parameters ~
+
+    `set -- arg ...`   set $1, $2, ... to {arg}s
+    `set --`           clear all positional parameters
+
+  With no arguments, prints all shell variables and their values.
+
+  Examples:
+
+      `set -e`              exit on error
+      `set -x`              enable command tracing
+      `set -o noclobber`    protect files from `>`
+      `set +x`              disable tracing
+      `set -- a b c`        set $1=a $2=b $3=c
+
+==============================================================================
+SHIFT                                            *builtin-shift* *shift*
+
+  `shift [n]`
+
+  Remove the first {n} positional parameters, shifting remaining ones
+  down. {n} defaults to 1. Excess shifts (beyond the count of current
+  parameters) are silent no-ops.
+
+  Examples:
+
+      `shift`       remove $1, shift remaining down
+      `shift 2`     remove $1 and $2
+
+==============================================================================
+SHOPT                                            *builtin-shopt* *shopt*
+
+  `shopt [{category}[.{option}[={value}]]]`
+
+  Get or set shell options organized into categories. Options are
+  accessed via dotted paths like `core.dotglob`.
+
+  Categories ~
+
+    `core`    core shell behavior
+    `line`    line editor appearance and behavior
+    `prompt`  completion and prompt display
+    `set`     POSIX `set` options (mirrors `set -o`)
+
+  With no arguments, lists all options. With a category, lists that
+  category. With a full path, prints the value. With an assignment,
+  sets the value.
+
+  Core options (`core.*`) ~
+
+    `autocd`                navigate to a dir by entering its name
+    `auto_hist`             automatically save commands to history
+    `bell_enabled`          allow the terminal bell
+    `dotglob`               include dotfiles in glob patterns
+    `hist_ignore_dupes`     skip duplicate consecutive history entries
+    `interactive_comments`  allow `#` comments in interactive input
+    `max_hist`              max history entries (-1 for unlimited)
+    `max_recurse_depth`     max recursive function call depth
+    `xpg_echo`              make `echo` expand escapes by default
+
+  Line editor options (`line.*`) ~
+
+    `auto_indent`               auto-indent new lines in multiline input
+    `highlight`                 syntax highlighting on the prompt
+    `line_numbers`              show line numbers in multiline input
+    `linebreak_on_incomplete`   insert newline on incomplete input
+    `scroll_offset`             lines from viewport edge to trigger scroll
+    `tab_width`                 spaces per tab in the editor
+    `viewport_height`           max editor height (number or "50%")
+
+  Prompt options (`prompt.*`) ~
+
+    `comp_limit`              max completion candidates shown
+    `completion_ignore_case`  case-insensitive tab completion
+    `hist_cat`                Shift+Up/Down history concatenation
+    `leader`                  leader key sequence for keymap bindings
+    `screensaver_cmd`         command to run as screensaver
+    `screensaver_idle_time`   idle seconds before screensaver (0=off)
+    `trunc_prompt_path`       max path segments in `\W` prompt escape
+
+  Examples:
+
+      `shopt`                       list all options
+      `shopt core`                  list core options
+      `shopt core.dotglob`          print current value
+      `shopt core.dotglob=true`     enable dotglob
+      `shopt core.max_hist=5000`    set max history
+
+==============================================================================
+SOURCE                                           *builtin-source* *source*
+
+  `source {file} ...`
+  `. {file} ...`
+
+  Execute {file} in the current shell environment. Unlike running a
+  script as a child process, `source` runs in the current scope:
+  variable assignments, function definitions, and directory changes all
+  persist. Multiple files may be given; they are sourced in order.
+
+  It is an error if {file} does not exist or is not a regular file.
+
+  Examples:
+
+      `source ~/.shed_profile`
+      `. ./lib.sh`
+
+==============================================================================
+[[                                               *builtin-test* *[[ [[*
+
+  `[[ {expression} ]]`
+
+  Evaluate a conditional expression. Returns exit status 0 if true,
+  1 if false. Used in `if`, `while`, and `until` conditions.
+
+  Unary file operators ~
+
+    `-e {f}`    exists
+    `-f {f}`    regular file
+    `-d {f}`    directory
+    `-h {f}`    symbolic link (also `-L`)
+    `-r {f}`    readable
+    `-w {f}`    writable
+    `-x {f}`    executable
+    `-s {f}`    non-empty file
+    `-p {f}`    named pipe (FIFO)
+    `-S {f}`    socket
+    `-b {f}`    block special
+    `-c {f}`    character special
+    `-k {f}`    sticky bit set
+    `-u {f}`    setuid bit set
+    `-g {f}`    setgid bit set
+    `-O {f}`    owned by effective UID
+    `-G {f}`    owned by effective GID
+    `-N {f}`    modified since status last read
+    `-t {fd}`   file descriptor open and refers to a terminal
+
+  Unary string operators ~
+
+    `-n {s}`    string is non-empty
+    `-z {s}`    string is empty
+
+  Binary operators ~
+
+    `{a} == {b}`    strings equal
+    `{a} != {b}`    strings not equal
+    `{a} =~ {b}`    {a} matches extended regex {b}
+    `{a} -eq {b}`   integers equal
+    `{a} -ne {b}`   integers not equal
+    `{a} -gt {b}`   integer greater than
+    `{a} -lt {b}`   integer less than
+    `{a} -ge {b}`   integer greater than or equal
+    `{a} -le {b}`   integer less than or equal
+
+  Logical operators ~
+
+    `{e1} && {e2}`   conjunction
+    `{e1} || {e2}`   disjunction
+    `! {e}`          negation
+
+  POSIX character classes are supported in `=~` patterns:
+  `[[:alpha:]]`, `[[:digit:]]`, `[[:space:]]`, etc.
+
+  Examples:
+
+      `[[ -f /etc/passwd ]]`
+      `[[ $x -gt 10 && $x -lt 20 ]]`
+      `[[ $name =~ ^[A-Z] ]]`
+      `[[ -z $reply ]] && echo "empty"`
+
+==============================================================================
+TRAP                                             *builtin-trap* *trap*
+
+  `trap [{action}] {target} ...`
+
+  Register {action} to run when the shell receives {target}. {action}
+  is a shell command string that runs in the current environment.
+  Multiple targets may be given.
+
+  Use `-` as {action} to reset a target to its default disposition.
+  Use `""` to explicitly ignore a signal.
+
+  Targets ~
+
+    `EXIT`    fires when the shell exits normally
+    `ERR`     fires when any command returns non-zero
+    Signal names (without `SIG` prefix): `INT`, `TERM`, `HUP`,
+    `QUIT`, `USR1`, `USR2`, `CHLD`, `PIPE`, `ALRM`, `WINCH`,
+    `TSTP`, `CONT`, and more.
+
+  Examples:
+
+      `trap 'echo bye' EXIT`
+      `trap 'cleanup' INT TERM`
+      `trap - INT`              restore default SIGINT
+      `trap '' HUP`             ignore SIGHUP
+
+==============================================================================
+TIMES                                            *builtin-times* *times*
+
+  `times`
+
+  Print accumulated user and system CPU times for the shell and for all
+  waited-on child processes. Output format:
+
+      {shell_user}m{s}s  {shell_sys}m{s}s
+      {child_user}m{s}s  {child_sys}m{s}s
+
+  First line: shell process time. Second line: total child process time.
+
+==============================================================================
+TRUE                                             *builtin-true* *true*
+
+  `true`
+
+  Do nothing and return exit status 0.
+
+==============================================================================
+UNSET                                            *builtin-unset* *unset*
+
+  `unset {name} ...`
+
+  Remove one or more variables. At least one name must be given.
+  It is an error to unset a variable that does not exist or is
+  marked `readonly`.
+
+  Examples:
+
+      `unset TMPVAR`
+      `unset A B C`
+
+==============================================================================
+TYPE                                             *builtin-type* *type*
+
+  `type {name} ...`
+
+  Describe how the shell would interpret each {name} if used as a
+  command. Reports the first match in lookup order:
+
+    1. function — prints name, source file, and line/column
+    2. alias    — prints the alias definition and source location
+    3. builtin  — prints "{name} is a shell builtin"
+    4. keyword  — prints "{name} is a shell keyword"
+    5. command  — prints the full path found in `$PATH`
+
+  Returns exit status 1 if a name is not found.
+
+  Examples:
+
+      `type echo`       echo is a shell builtin
+      `type ls`         ls is /usr/bin/ls
+      `type if`         if is a shell keyword
+      `type ll`         ll is an alias for 'ls -la' ...
+
+==============================================================================
+ULIMIT                                           *builtin-ulimit* *ulimit*
+
+  `ulimit [-n N] [-u N] [-s N] [-c N] [-v N]`
+
+  Set soft resource limits for the current shell and processes it
+  spawns. Each flag takes a numeric value. The hard limit is left
+  unchanged; it is an error to set a soft limit above the hard limit.
+
+  `-n {N}`   maximum number of open file descriptors
+  `-u {N}`   maximum number of user processes
+  `-s {N}`   maximum stack size in bytes
+  `-c {N}`   maximum core dump file size in bytes (0 = disabled)
+  `-v {N}`   maximum virtual memory (address space) in bytes
+
+  Multiple flags may be combined in one call.
+
+  Examples:
+
+      `ulimit -n 4096`      raise file descriptor limit
+      `ulimit -c 0`         disable core dumps
+
+==============================================================================
+UMASK                                            *builtin-umask* *umask*
+
+  `umask [-S] [{mask}]`
+
+  Get or set the file creation mask. The mask is subtracted from the
+  permissions that programs request when creating new files.
+
+  With no arguments, prints the current mask as a 4-digit octal number.
+
+  `-S`   print the mask in symbolic form (`u=rwx,g=rx,o=rx`)
+
+  {mask} forms ~
+
+    Octal (e.g. `022`)   set the mask directly
+    Symbolic             modify the mask using `chmod`-style notation:
+                         `u`, `g`, `o`, `a` as who;
+                         `r`, `w`, `x` as permissions;
+                         `=`, `+`, `-` as operators.
+                         Multiple clauses separated by `,`.
+
+  Examples:
+
+      `umask`              print current mask (e.g. 0022)
+      `umask -S`           print symbolically (e.g. u=rwx,g=rx,o=rx)
+      `umask 077`          no permissions for group or other
+      `umask u=rwx,g=rx,o=rx`   set symbolically
+      `umask a+r`          allow read for all (clear read mask bit)
+      `umask g-w`          deny write for group (set write mask bit)
+
+==============================================================================
+WAIT                                             *builtin-wait* *wait*
+
+  `wait [{id} ...]`
+
+  Wait for background jobs to finish. Exit status is the exit status of
+  the last waited-on job.
+
+  With no arguments, waits for all background jobs.
+
+  {id} can be a PID, a job table number, or `%N`/`%{cmd}` notation.
+
+  Examples:
+
+      `wait`          wait for all jobs
+      `wait %1`       wait for job 1
+      `wait 4321`     wait for PID 4321
