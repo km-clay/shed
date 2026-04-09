@@ -8,9 +8,7 @@ use crate::{
   procio::borrow_fd,
   state::{read_shopts, read_vars},
 };
-use crate::{match_loop, sherr};
-
-const SPECIAL_CHARS: &str = "#$^*()=|{}[]`<>?~;& '\"";
+use crate::{sherr};
 
 pub fn xtrace_print(argv: &[(String, Span)]) {
   if read_shopts(|o| o.set.xtrace) {
@@ -26,48 +24,6 @@ pub fn xtrace_print(argv: &[(String, Span)]) {
     log::debug!("xtrace: {output:?}");
     write(stderr, output.trim().as_bytes()).ok();
     write(stderr, b"\n").ok();
-  }
-}
-
-/// Escapes a string for displaying as a var value
-pub fn as_var_val_display(s: &str) -> String {
-  let mut result = String::with_capacity(s.len());
-  let mut chars = s.chars().peekable();
-  let mut has_escapes = false;
-  match_loop!(chars.next() => ch, {
-    '\\' => {
-      result.push_str("\\\\");
-    }
-    _ if ch.is_ascii_control() => {
-      let escaped = match ch {
-        '\n' => "\\n".into(),
-        '\r' => "\\r".into(),
-        '\t' => "\\t".into(),
-        '\x07' => "\\a".into(),
-        '\x08' => "\\b".into(),
-        '\x0B' => "\\v".into(),
-        '\x0C' => "\\f".into(),
-        _ => format!("\\x{:02x}", ch as u8),
-      };
-      has_escapes = true;
-      result.push_str(&escaped);
-    }
-    '\'' => {
-      has_escapes = true;
-      result.push('\\');
-      result.push('\'');
-    }
-    _ => result.push(ch),
-  });
-
-  let has_special = result.chars().any(|c| SPECIAL_CHARS.contains(c));
-
-  if has_escapes {
-    format!("$'{result}'")
-  } else if has_special {
-    format!("'{result}'")
-  } else {
-    result
   }
 }
 
@@ -175,7 +131,7 @@ macro_rules! shopt_group {
       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let output = [
           $(format!("{}.{}={}", $group_name, stringify!($field),
-            $crate::shopt::as_var_val_display(&self.$field.to_string())),)*
+            $crate::expand::as_var_val_display(&self.$field.to_string())),)*
         ];
         writeln!(f, "{}", output.join("\n"))
       }

@@ -30,12 +30,14 @@ pub struct HistQuery {
   duration_gt: Option<String>,
   duration_lt: Option<String>,
   limit: Option<usize>,
+	specific_ids: Vec<i64>,
   no_numbers: bool,
   reverse: bool,
   json: bool,
   count: bool,
   delete: bool,
 	restore: bool,
+	ex_hist: bool,
 }
 
 impl HistQuery {
@@ -128,7 +130,17 @@ impl HistQuery {
           params.push(Box::new(dur as i64));
         }
       }
+			idx += 1;
     }
+		if !self.specific_ids.is_empty() {
+			let mut id_strings = vec![];
+			for id in &self.specific_ids {
+				id_strings.push(format!("id = ?{idx}"));
+				params.push(Box::new(*id));
+				idx += 1;
+			}
+			conditions.push(format!("({})", id_strings.join(" OR ")))
+		}
 
     let where_clause = if conditions.is_empty() {
       String::new()
@@ -197,6 +209,7 @@ impl HistQuery {
           _ => {}
         },
         Opt::Long(name) => match name.as_str() {
+					"ex" => new.ex_hist = true,
           "count" => new.count = true,
           "delete" => new.delete = true,
 					"restore" => new.restore = true,
@@ -214,10 +227,14 @@ impl HistQuery {
     Ok(new)
   }
 
-  pub fn opt_spec() -> [OptSpec; 16] {
+  pub fn opt_spec() -> [OptSpec; 17] {
     [
       OptSpec {
         opt: Opt::Long("delete".into()),
+        takes_arg: OptArg::None,
+      },
+      OptSpec {
+        opt: Opt::Long("ex".into()),
         takes_arg: OptArg::None,
       },
       OptSpec {
@@ -347,10 +364,23 @@ pub fn hist_builtin(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
-  let (_argv, opts) =
+  let (mut argv, opts) =
     get_opts_from_tokens(argv, &HistQuery::opt_spec()).promote_err(span.clone())?;
-  let query = HistQuery::from_opts(&opts).promote_err(span.clone())?;
-  let hist = History::new("shed_history").promote_err(span.clone())?;
+	argv.remove(0);
+  let mut query = HistQuery::from_opts(&opts).promote_err(span.clone())?;
+	let table = if query.ex_hist {
+		"ex_history"
+	} else {
+		"shed_history"
+	};
+  let hist = History::new(table).promote_err(span.clone())?;
+
+	for (arg,span) in argv {
+		let Ok(id) = arg.parse::<i64>() else {
+			return Err(sherr!(ParseErr, "Invalid command ID: {arg}").promote(span));
+		};
+		query.specific_ids.push(id);
+	}
 
 	if query.restore {
 		let num_restored = hist.restore_backup()?;

@@ -2,7 +2,7 @@ use std::{fs::metadata, path::PathBuf, str::FromStr};
 
 use nix::{
   sys::stat::{self, SFlag},
-  unistd::AccessFlags,
+  unistd::{AccessFlags, isatty},
 };
 use regex::Regex;
 
@@ -220,8 +220,11 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
             Err(_) => false,
           },
 
-          UnaryOp::Terminal => match operand.as_str().parse::<nix::libc::c_int>() {
-            Ok(fd) => unsafe { nix::libc::isatty(fd) == 1 },
+          UnaryOp::Terminal => match operand.as_str().parse::<i32>() {
+            Ok(fd) => match isatty(fd) {
+							Ok(b) => b,
+							Err(e) => return Err(ShErr::from(e).promote(err_span))
+						}
             Err(_) => false,
           },
           UnaryOp::NonNull => !operand.is_empty(),

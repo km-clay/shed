@@ -545,7 +545,6 @@ fn handle_readline_event(
       if let Err(e) = RawModeGuard::with_cooked_mode(|| {
         exec_input(input.clone(), None, true, Some("<stdin>".into()))
       }) {
-        // CleanExit signals an intentional shell exit; any other error is printed.
         match e.kind() {
           ShErrKind::Interrupt => {
             // We got Ctrl+C during command execution

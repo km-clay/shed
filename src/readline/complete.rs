@@ -26,7 +26,7 @@ use crate::{
     term::{LineWriter, TermWriter, calc_str_width, get_win_size},
   },
   state::{
-    VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars,
+    self, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars
   },
 };
 
@@ -107,6 +107,21 @@ impl From<String> for Candidate {
       id: None,
     }
   }
+}
+
+impl From<&state::meta::Utility> for Candidate {
+	fn from(value: &state::meta::Utility) -> Self {
+		Self {
+			content: value.name().to_string(),
+			id: None,
+		}
+	}
+}
+
+impl From<state::meta::Utility> for Candidate {
+	fn from(value: state::meta::Utility) -> Self {
+		From::from(&value)
+	}
 }
 
 impl From<&String> for Candidate {

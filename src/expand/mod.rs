@@ -10,7 +10,7 @@ pub mod var;
 
 pub use alias::{expand_aliases, expand_keymap, parse_key_alias};
 pub use arithmetic::expand_arithmetic;
-pub use escape::{escape_str, unescape_heredoc, unescape_math, unescape_str};
+pub use escape::{escape_str, as_var_val_display, unescape_heredoc, unescape_math, unescape_str};
 pub use param::{ParamExp, parse_pos_len, perform_param_expansion};
 pub use prompt::{PromptTk, expand_prompt, format_cmd_runtime};
 pub use subshell::{expand_cmd_sub, expand_proc_sub};

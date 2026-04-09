@@ -19,9 +19,7 @@ use vte::{Parser, Perform};
 
 pub use crate::libsh::guards::{RawModeGuard, raw_mode};
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
-  readline::keys::{KeyCode, ModKeys},
-  state::read_shopts,
+  libsh::error::{ShErr, ShErrKind, ShResult}, procio::borrow_fd, readline::keys::{KeyCode, ModKeys}, state::read_shopts
 };
 use crate::{
   sherr,
@@ -117,7 +115,7 @@ pub fn enumerate_lines(
 fn write_all(fd: RawFd, buf: &str) -> nix::Result<()> {
   let mut bytes = buf.as_bytes();
   while !bytes.is_empty() {
-    match nix::unistd::write(unsafe { BorrowedFd::borrow_raw(fd) }, bytes) {
+    match nix::unistd::write(borrow_fd(fd), bytes) {
       Ok(0) => return Err(Errno::EIO),
       Ok(n) => bytes = &bytes[n..],
       Err(Errno::EINTR) => {}
@@ -371,7 +369,6 @@ impl Default for KeyCollector {
 
 impl Perform for KeyCollector {
   fn print(&mut self, c: char) {
-    log::trace!("print: {c:?}");
     // vte routes 0x7f (DEL) to print instead of execute
     if self.ss3_pending {
       self.ss3_pending = false;
@@ -866,7 +863,7 @@ impl KeyReader for TermReader {
 impl AsFd for TermReader {
   fn as_fd(&self) -> BorrowedFd<'_> {
     let fd = self.buffer.get_ref().tty;
-    unsafe { BorrowedFd::borrow_raw(fd) }
+    borrow_fd(fd)
   }
 }
 

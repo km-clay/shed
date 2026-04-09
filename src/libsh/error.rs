@@ -402,6 +402,11 @@ impl ShErr {
     source_map
   }
   pub fn print_error(&self) {
+		if *self.kind() == ShErrKind::Interrupt {
+			// Don't print anything for Interrupt
+			// This only occurs when the user breaks out of something with ctrl + c
+			return
+		}
     let default = || {
       eprintln!("\n{}", self.kind);
       for note in &self.notes {
@@ -461,7 +466,7 @@ impl From<Errno> for ShErr {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ShErrKind {
   IoErr(io::ErrorKind),
   InvalidOpt,

@@ -1,10 +1,5 @@
 use crate::{
-  libsh::error::ShResult,
-  parse::{NdRule, Node, execute::prepare_argv, lex::split_tk_at},
-  prelude::*,
-  procio::borrow_fd,
-  sherr,
-  state::{self, VarFlags, VarKind, read_vars, write_vars},
+  libsh::error::ShResult, parse::{NdRule, Node, execute::prepare_argv, lex::split_tk_at}, prelude::*, procio::borrow_fd, sherr, expand::as_var_val_display, state::{self, VarFlags, VarKind, read_vars, write_vars}
 };
 
 pub fn readonly(node: Node) -> ShResult<()> {
@@ -30,7 +25,7 @@ pub fn readonly(node: Node) -> ShResult<()> {
         .flatten_vars()
         .into_iter()
         .filter(|(_, v)| v.flags().contains(VarFlags::READONLY))
-        .map(|(k, v)| format!("{}={}", k, v))
+        .map(|(k, v)| format!("{}={}", k, as_var_val_display(&v.to_string())))
         .collect::<Vec<String>>();
       vars.sort();
       let mut vars_joined = vars.join("\n");
@@ -116,7 +111,7 @@ pub fn export(node: Node) -> ShResult<()> {
   if argv.is_empty() {
     // Display the environment variables
     let mut env_output = env::vars()
-      .map(|var| format!("{}={}", var.0, var.1)) // Get all of them, zip them into one string
+      .map(|var| format!("{}={}", var.0, as_var_val_display(&var.1.to_string()))) // Get all of them, zip them into one string
       .collect::<Vec<_>>();
     env_output.sort(); // Sort them alphabetically
     let mut env_output = env_output.join("\n"); // Join them with newlines
@@ -166,7 +161,7 @@ pub fn local(node: Node) -> ShResult<()> {
       let mut vars = v
         .flatten_vars()
         .into_iter()
-        .map(|(k, v)| format!("{}={}", k, v))
+        .map(|(k, v)| format!("{}={}", k, as_var_val_display(&v.to_string())))
         .collect::<Vec<String>>();
       vars.sort();
       let mut vars_joined = vars.join("\n");

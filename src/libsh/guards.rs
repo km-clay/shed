@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::os::fd::{BorrowedFd, RawFd};
+use std::os::fd::RawFd;
 
 use nix::sys::termios::{self, LocalFlags, Termios, tcgetattr, tcsetattr};
 use nix::unistd::{isatty, write};
@@ -84,7 +84,7 @@ impl Drop for RedirGuard {
 // ============================================================================
 
 pub fn raw_mode() -> RawModeGuard {
-  let orig = termios::tcgetattr(unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) })
+  let orig = termios::tcgetattr(borrow_fd(*TTY_FILENO))
     .expect("Failed to get terminal attributes");
   let mut raw = orig.clone();
   termios::cfmakeraw(&mut raw);
@@ -93,7 +93,7 @@ pub fn raw_mode() -> RawModeGuard {
   // Keep OPOST enabled so \n is translated to \r\n on output
   raw.output_flags |= termios::OutputFlags::OPOST;
   termios::tcsetattr(
-    unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
+    borrow_fd(*TTY_FILENO),
     termios::SetArg::TCSANOW,
     &raw,
   )
@@ -117,8 +117,7 @@ pub struct RawModeGuard {
 impl RawModeGuard {
   /// Disable raw mode temporarily for a specific operation
   pub fn disable_for<F: FnOnce() -> R, R>(&self, func: F) -> R {
-    unsafe {
-      let fd = BorrowedFd::borrow_raw(self.fd);
+      let fd = borrow_fd(self.fd);
       // Temporarily restore the original termios
       termios::tcsetattr(fd, termios::SetArg::TCSANOW, &self.orig)
         .expect("Failed to temporarily disable raw mode");
@@ -136,7 +135,6 @@ impl RawModeGuard {
       termios::tcsetattr(fd, termios::SetArg::TCSANOW, &raw).expect("Failed to re-enable raw mode");
 
       result
-    }
   }
 
   pub fn with_cooked_mode<F, R>(f: F) -> R
@@ -150,22 +148,19 @@ impl RawModeGuard {
     tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &orig).ok();
     let res = f();
     tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &current).ok();
-    unsafe { write(BorrowedFd::borrow_raw(*TTY_FILENO), b"\x1b[?1l\x1b>").ok() };
+    write(borrow_fd(*TTY_FILENO), b"\x1b[?1l\x1b>").ok();
     res
   }
 }
 
 impl Drop for RawModeGuard {
-  fn drop(&mut self) {
-    unsafe {
-      termios::tcsetattr(
-        BorrowedFd::borrow_raw(self.fd),
-        termios::SetArg::TCSANOW,
-        &self.orig,
-      )
-      .ok();
-    }
-  }
+	fn drop(&mut self) {
+		termios::tcsetattr(
+			borrow_fd(self.fd),
+			termios::SetArg::TCSANOW,
+			&self.orig,
+		).ok();
+	}
 }
 
 // ============================================================================

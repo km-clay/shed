@@ -2,14 +2,13 @@ use std::{env, path::PathBuf};
 
 use ariadne::Fmt;
 use nix::{libc::STDOUT_FILENO, unistd::write};
-use yansi::Color;
 
 use crate::{
-  libsh::error::{ShResult, next_color},
+  libsh::error::{ShResult, ShResultExt, next_color},
   parse::{NdRule, Node, execute::prepare_argv, lex::Span},
   procio::borrow_fd,
   sherr,
-  state::{self, read_meta, write_meta},
+  state::{self, change_dir, read_meta, write_meta},
 };
 
 pub fn truncate_home_path(path: String) -> String {
@@ -42,30 +41,6 @@ fn print_dirs() -> ShResult<()> {
   write(stdout, all_dirs.as_bytes())?;
   write(stdout, b"\n")?;
 
-  Ok(())
-}
-
-fn change_directory(target: &PathBuf, blame: Span) -> ShResult<()> {
-  if !target.is_dir() {
-    return Err(sherr!(
-      ExecFail @ blame,
-      "not a directory: '{}'", target.display().fg(next_color()),
-    ));
-  }
-
-  if let Err(e) = state::change_dir(target) {
-    return Err(sherr!(
-      ExecFail @ blame,
-      "Failed to change directory: '{}'", e.fg(Color::Red),
-    ));
-  }
-  let new_dir = env::current_dir().map_err(|e| {
-    sherr!(
-      ExecFail @ blame,
-      "Failed to get current directory: '{}'", e.fg(Color::Red),
-    )
-  })?;
-  unsafe { env::set_var("PWD", new_dir) };
   Ok(())
 }
 
@@ -178,7 +153,7 @@ pub fn pushd(node: Node) -> ShResult<()> {
     if let Some(dir) = new_cwd
       && !no_cd
     {
-      change_directory(&dir, blame)?;
+			change_dir(&dir).promote_err(blame)?;
       print_dirs()?;
     }
   } else if let Some(dir) = dir {
@@ -192,7 +167,7 @@ pub fn pushd(node: Node) -> ShResult<()> {
       return Ok(());
     }
 
-    change_directory(&dir, blame)?;
+		change_dir(&dir).promote_err(blame)?;
     print_dirs()?;
   }
 
@@ -240,7 +215,7 @@ pub fn popd(node: Node) -> ShResult<()> {
         let dir = write_meta(|m| m.pop_dir());
         if !no_cd {
           if let Some(dir) = dir {
-            change_directory(&dir, blame.clone())?;
+						change_dir(&dir).promote_err(blame)?;
           } else {
             return Err(sherr!(
               ExecFail @ blame,
@@ -288,7 +263,7 @@ pub fn popd(node: Node) -> ShResult<()> {
     }
 
     if let Some(dir) = dir {
-      change_directory(&dir, blame.clone())?;
+			change_dir(&dir).promote_err(blame)?;
       print_dirs()?;
     } else {
       return Err(sherr!(

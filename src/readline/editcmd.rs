@@ -379,6 +379,17 @@ impl Verb {
   }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub enum LineAddr {
+	Number(usize),
+	Current,
+	Last,
+	Offset(isize),
+	Pattern(String),
+	PatternRev(String),
+	Mark(char)
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Motion {
   WholeLine,
@@ -406,14 +417,15 @@ pub enum Motion {
   ToBracket(Direction),
   ToParen(Direction),
   CharRange(Pos, Pos),
-  LineRange(usize, usize),
+  LineRange(LineAddr, LineAddr),
+	Line(LineAddr),
   BlockRange(Pos, Pos),
   RepeatMotion,
   RepeatMotionRev,
   Null,
   // Ex-mode motions
-  Global(Val),
-  NotGlobal(Val),
+  Global(Box<Motion>, String),
+  NotGlobal(Box<Motion>, String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -540,16 +552,4 @@ pub enum WriteDest {
   File(std::path::PathBuf),
   FileAppend(std::path::PathBuf),
   Cmd(String),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Val {
-  Str(String),
-  Regex(String),
-}
-
-impl Val {
-  pub fn new_str(s: String) -> Self {
-    Self::Str(s)
-  }
 }

@@ -7,8 +7,7 @@ use crate::{
   libsh::term::{Style, StyleSet},
   match_loop,
   readline::{
-    annotate_input,
-    markers::{self, is_marker},
+    annotate_input, markers::{self, is_marker}
   },
   state::{read_meta, read_shopts},
 };
@@ -471,7 +470,7 @@ impl Highlighter {
       // this is a file that is executable by someone
       meta.permissions().mode() & 0o111 != 0
     } else {
-      read_meta(|m| m.cached_cmds().contains(command))
+      read_meta(|m| m.cache_contains(command))
     }
   }
 
@@ -506,7 +505,7 @@ impl Highlighter {
     read_meta(|m| {
       let files = m.cwd_cache();
       for file in files {
-        if file.starts_with(arg) {
+        if file.name().starts_with(arg) {
           return true;
         }
       }

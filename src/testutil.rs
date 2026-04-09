@@ -12,18 +12,18 @@ use crate::{
   expand::expand_aliases,
   libsh::error::ShResult,
   parse::{NdKind, ParsedSrc, Redir, RedirType, execute::exec_input, lex::LexFlags},
-  procio::{IoFrame, IoMode, RedirGuard},
+  procio::{IoFrame, IoMode, RedirGuard, borrow_fd},
   readline::register::{restore_registers, save_registers},
   state::{MetaTab, SHED, read_logic},
 };
 
 pub fn has_cmds(cmds: &[&str]) -> bool {
   let path_cmds = MetaTab::get_cmds_in_path();
-  path_cmds.iter().all(|c| cmds.iter().any(|&cmd| c == cmd))
+  path_cmds.iter().all(|c| cmds.iter().any(|&cmd| c.name() == cmd))
 }
 
 pub fn has_cmd(cmd: &str) -> bool {
-  MetaTab::get_cmds_in_path().into_iter().any(|c| c == cmd)
+  MetaTab::get_cmds_in_path().into_iter().any(|c| c.name() == cmd)
 }
 
 pub fn test_input(input: impl Into<String>) -> ShResult<()> {
@@ -112,7 +112,7 @@ impl TestGuard {
   }
 
   pub fn pty_slave(&self) -> BorrowedFd<'_> {
-    unsafe { BorrowedFd::borrow_raw(self.pty_slave.as_raw_fd()) }
+    borrow_fd(self.pty_slave.as_raw_fd())
   }
 
   pub fn add_cleanup(&mut self, f: impl FnOnce() + 'static) {

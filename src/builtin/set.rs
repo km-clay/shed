@@ -9,7 +9,7 @@ use crate::{
   prelude::*,
   procio::borrow_fd,
   sherr,
-  shopt::as_var_val_display,
+  expand::as_var_val_display,
   state::{self, VarKind, read_vars, write_shopts, write_vars},
 };
 

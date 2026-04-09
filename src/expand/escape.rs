@@ -10,6 +10,8 @@ pub(super) fn strip_escape_markers(s: &str) -> String {
   s.replace(markers::ESCAPE, "")
 }
 
+const SPECIAL_CHARS: &str = "#$^*()=|{}[]`<>?~;& '\"";
+
 /// Processes strings into intermediate representations that are more readable
 /// by the program
 ///
@@ -442,6 +444,48 @@ pub fn unescape_math(raw: &str) -> String {
   result
 }
 
+/// Escapes a string for displaying as a var value
+pub fn as_var_val_display(s: &str) -> String {
+  let has_control = s.chars().any(|c| c.is_ascii_control());
+  let has_special = s.chars().any(|c| SPECIAL_CHARS.contains(c));
+
+  if has_control {
+    // $'...' ANSI-C quoting: backslashes and all special chars must be escaped
+    let mut result = String::with_capacity(s.len());
+    for ch in s.chars() {
+      match ch {
+        '\\' => result.push_str("\\\\"),
+        '\'' => result.push_str("\\'"),
+        '\n' => result.push_str("\\n"),
+        '\r' => result.push_str("\\r"),
+        '\t' => result.push_str("\\t"),
+        '\x07' => result.push_str("\\a"),
+        '\x08' => result.push_str("\\b"),
+        '\x0B' => result.push_str("\\v"),
+        '\x0C' => result.push_str("\\f"),
+        c if c.is_ascii_control() => result.push_str(&format!("\\x{:02x}", c as u8)),
+        c => result.push(c),
+      }
+    }
+    format!("$'{result}'")
+  } else if has_special {
+    // Single quotes: only ' needs escaping, and \ only needs escaping when
+    // it precedes ' (to avoid \' being misread as an escaped quote)
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+      match ch {
+        '\\' if chars.peek() == Some(&'\'') => result.push_str("\\\\"),
+        '\'' => result.push_str("\\'"),
+        c => result.push(c),
+      }
+    }
+    format!("'{result}'")
+  } else {
+    s.to_string()
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -523,5 +567,61 @@ mod tests {
     let result = unescape_str("$'\\\\'");
     let expected = format!("{}\\{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
     assert_eq!(result, expected);
+  }
+
+  // ===================== as_var_val_display =====================
+
+  #[test]
+  fn display_simple_value_unquoted() {
+    assert_eq!(as_var_val_display("hello"), "hello");
+  }
+
+  #[test]
+  fn display_value_with_spaces_single_quoted() {
+    assert_eq!(as_var_val_display("hello world"), "'hello world'");
+  }
+
+  #[test]
+  fn display_backslash_no_escaping_in_single_quote_context() {
+    // backslash not before ' — should not be doubled
+    assert_eq!(as_var_val_display("\\@prompt "), "'\\@prompt '");
+  }
+
+  #[test]
+  fn display_backslash_before_quote_escaped() {
+    // backslash before ' must be escaped to avoid \' being read as escaped quote
+    assert_eq!(as_var_val_display("bar\\' biz"), "'bar\\\\\\' biz'");
+  }
+
+  #[test]
+  fn display_single_quote_escaped() {
+    assert_eq!(as_var_val_display("it's"), "'it\\'s'");
+  }
+
+  #[test]
+  fn display_control_char_uses_ansi_c_quoting() {
+    assert_eq!(as_var_val_display("foo\nbar"), "$'foo\\nbar'");
+  }
+
+  #[test]
+  fn display_backslash_escaped_in_ansi_c_context() {
+    assert_eq!(as_var_val_display("foo\\\nbar"), "$'foo\\\\\\nbar'");
+  }
+
+  #[test]
+  fn display_tab_uses_ansi_c_quoting() {
+    assert_eq!(as_var_val_display("foo\tbar"), "$'foo\\tbar'");
+  }
+
+  #[test]
+  fn display_special_chars_single_quoted() {
+    assert_eq!(as_var_val_display("$VAR"), "'$VAR'");
+    assert_eq!(as_var_val_display("foo|bar"), "'foo|bar'");
+    assert_eq!(as_var_val_display("foo&bar"), "'foo&bar'");
+  }
+
+  #[test]
+  fn display_empty_string() {
+    assert_eq!(as_var_val_display(""), "");
   }
 }

@@ -543,6 +543,45 @@ impl CmdTimer {
   }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum UtilKind {
+	Alias,
+	Function,
+	Builtin,
+	Command(PathBuf),
+	File(PathBuf),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Utility {
+	name: String,
+	kind: UtilKind
+}
+
+impl Utility {
+	pub fn alias(name: String) -> Self {
+		Self { name, kind: UtilKind::Alias }
+	}
+	pub fn function(name: String) -> Self {
+		Self { name, kind: UtilKind::Function }
+	}
+	pub fn builtin(name: String) -> Self {
+		Self { name, kind: UtilKind::Builtin }
+	}
+	pub fn command(name: String, path: PathBuf) -> Self {
+		Self { name, kind: UtilKind::Command(path) }
+	}
+	pub fn file(name: String, path: PathBuf) -> Self {
+		Self { name, kind: UtilKind::File(path) }
+	}
+	pub fn name(&self) -> &str {
+		&self.name
+	}
+	pub fn kind(&self) -> &UtilKind {
+		&self.kind
+	}
+}
+
 /// A table of metadata for the shell
 #[derive(Clone, Debug)]
 pub struct MetaTab {
@@ -573,8 +612,8 @@ pub struct MetaTab {
   old_path: Option<String>,
   old_pwd: Option<String>,
   // valid command cache
-  path_cache: HashSet<String>,
-  cwd_cache: HashSet<String>,
+  path_cache: HashSet<Utility>,
+  cwd_cache: HashSet<Utility>,
   // programmable completion specs
   comp_specs: HashMap<String, Box<dyn CompSpec>>,
 
@@ -640,10 +679,14 @@ impl MetaTab {
   pub fn reset_getopts_char_offset(&mut self) {
     self.getopts_offset = 0;
   }
-  pub fn cached_cmds(&self) -> HashSet<String> {
+  pub fn cached_cmds(&self) -> HashSet<Utility> {
     (self.path_cache).union(&self.cwd_cache).cloned().collect()
   }
-  pub fn cwd_cache(&self) -> &HashSet<String> {
+	pub fn clear_cache(&mut self) {
+		self.path_cache.clear();
+		self.cwd_cache.clear();
+	}
+  pub fn cwd_cache(&self) -> &HashSet<Utility> {
     &self.cwd_cache
   }
   pub fn comp_specs(&self) -> &HashMap<String, Box<dyn CompSpec>> {
@@ -661,7 +704,11 @@ impl MetaTab {
   pub fn remove_comp_spec(&mut self, cmd: &str) -> bool {
     self.comp_specs.remove(cmd).is_some()
   }
-  pub fn get_cmds_in_path() -> Vec<String> {
+	pub fn cache_contains(&self, cmd: &str) -> bool {
+		self.path_cache.iter().any(|util| util.name() == cmd)
+		|| self.cwd_cache.iter().any(|util| util.name() == cmd)
+	}
+  pub fn get_cmds_in_path() -> Vec<Utility> {
     let path = env::var("PATH").unwrap_or_default();
     let paths = path.split(":").map(PathBuf::from);
     let mut cmds = vec![];
@@ -677,7 +724,8 @@ impl MetaTab {
             && is_exec
             && let Some(name) = entry.file_name().to_str()
           {
-            cmds.push(name.to_string());
+						let util = Utility::command(name.to_string(), entry.path());
+            cmds.push(util);
           }
         }
       }
@@ -821,10 +869,10 @@ impl MetaTab {
 
     Ok(())
   }
-  pub fn cache_path_command(&mut self, cmd: String) {
+  pub fn cache_path_command(&mut self, cmd: Utility) {
     self.path_cache.insert(cmd);
   }
-  pub fn cache_cwd_command(&mut self, cmd: String) {
+  pub fn cache_cwd_command(&mut self, cmd: Utility) {
     self.cwd_cache.insert(cmd);
   }
   pub fn rehash_path(&mut self) {
@@ -843,16 +891,19 @@ impl MetaTab {
       let funcs = l.funcs();
       let aliases = l.aliases();
       for func in funcs.keys() {
-        self.cache_path_command(func.clone());
+				let util = Utility::function(func.to_string());
+        self.cache_path_command(util);
       }
       for alias in aliases.keys() {
-        self.cache_path_command(alias.clone());
+				let util = Utility::alias(alias.to_string());
+				self.cache_path_command(util);
       }
       l.dirty = false;
     });
 
     for cmd in BUILTINS {
-      self.cache_path_command(cmd.to_string());
+			let util = Utility::builtin(cmd.to_string());
+      self.cache_path_command(util);
     }
   }
   pub fn rehash_cwd(&mut self) {
@@ -870,11 +921,17 @@ impl MetaTab {
           && is_exec
           && let Some(name) = entry.file_name().to_str()
         {
-          self.cache_cwd_command(format!("./{}", name));
+					let util = Utility::file(name.to_string(), entry.path());
+          self.cache_cwd_command(util);
         }
       }
     }
   }
+	pub fn rehash(&mut self) {
+		self.rehash_path();
+		self.rehash_cwd();
+		self.rehash_logic();
+	}
   pub fn try_rehash_commands(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
     let cwd = env::var("PWD").unwrap_or_default();
@@ -893,21 +950,7 @@ impl MetaTab {
       return;
     }
 
-    if let Ok(entries) = Path::new(&cwd).read_dir() {
-      for entry in entries.flatten() {
-        let Ok(meta) = std::fs::metadata(entry.path()) else {
-          continue;
-        };
-        let is_exec = meta.permissions().mode() & 0o111 != 0;
-
-        if meta.is_file()
-          && is_exec
-          && let Some(name) = entry.file_name().to_str()
-        {
-          self.cwd_cache.insert(name.to_string());
-        }
-      }
-    }
+		self.rehash_cwd();
   }
   pub fn start_timer(&mut self) {
     self.runtime_start = Some(Instant::now());
