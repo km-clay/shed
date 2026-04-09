@@ -12,7 +12,7 @@ use crate::{
   },
   prelude::*,
   procio::borrow_fd,
-  readline::history::{HistEntry, History},
+  readline::{history::{HistEntry, History}, linebuf::ordered},
   sherr,
   shopt::xtrace_print,
   state::{self},
@@ -301,12 +301,7 @@ fn get_entry_range(
   let first_id = resolve(&first.unwrap_or(RangeArg::Number(last_id as i32)))?;
   let last_id = resolve(&last.unwrap_or(RangeArg::Number(first_id as i32)))?;
 
-  // Ensure first <= last for the BETWEEN query
-  let (lo, hi) = if first_id <= last_id {
-    (first_id, last_id)
-  } else {
-    (last_id, first_id)
-  };
+  let (lo, hi) = ordered(first_id, last_id);
 
   let mut entries = hist.query_range(lo, hi)?;
   if reverse || first_id > last_id {

@@ -1,11 +1,53 @@
-*builtin* *builtins*
+*builtin* *builtins* *builtin-commands*
 
-#BUILTINS#
+#BUILTIN COMMANDS#
 
-This page documents shed's builtin commands.
+Builtins are commands implemented directly by the shell rather than as
+external executables. They have access to shell state (variables, job table, etc.) that external commands cannot reach.
+
+The following builtins are available:
+
+  `alias`       define or list command aliases              |builtin-alias|
+  `arrops`      array manipulation (push, pop, rotate)      |builtin-arrops|
+  `autocmd`     register hooks for shell events             |builtin-autocmd|
+  `cd`          change the working directory                |builtin-cd|
+  `complete`    define custom tab completion rules          |builtin-complete|
+  `dirs`        display the directory stack                 |builtin-dirs|
+  `echo`        print arguments to stdout                   |builtin-echo|
+  `eval`        evaluate a string as shell input            |builtin-eval|
+  `exec`        replace the shell process with a command    |builtin-exec|
+  `exit`        exit the shell                              |builtin-exit|
+  `export`      mark variables for export to environment    |builtin-export|
+  `false`       return exit status 1                        |builtin-false|
+  `fc`          open the current buffer in $EDITOR          |builtin-fc|
+  `getopts`     parse option flags in scripts               |builtin-getopts|
+  `hash`        manage the command location cache           |builtin-hash|
+  `help`        display help pages                          |builtin-help|
+  `hist`        query and manage shell history              |builtin-hist|
+  `jobs`        list background jobs                        |builtin-jobs|
+  `keymap`      define custom key bindings                  |builtin-keymap|
+  `kill`        send signals to processes                   |builtin-kill|
+  `local`       declare variables local to a function       |builtin-local|
+  `map`         structured key-value store                  |builtin-map|
+  `popd`        pop the directory stack                     |builtin-popd|
+  `pushd`       push a directory onto the stack             |builtin-pushd|
+  `pwd`         print the working directory                 |builtin-pwd|
+  `read`        read a line of input into a variable        |builtin-read|
+  `readonly`    mark variables as read-only                 |builtin-readonly|
+  `seek`        navigate to directories interactively       |builtin-seek|
+  `set`         set shell options and positional parameters |builtin-set|
+  `shift`       shift positional parameters                 |builtin-shift|
+  `shopt`       get or set shell options                    |builtin-shopt|
+  `source`      execute a file in the current shell         |builtin-source|
+  `[[`          evaluate conditional expressions            |builtin-test|
+  `trap`        set signal handlers                         |builtin-trap|
+  `true`        return exit status 0                        |builtin-true|
+  `unalias`     remove aliases                              |builtin-unalias|
+  `unset`       remove variables or functions               |builtin-unset|
+  `wait`        wait for background jobs to finish          |builtin-wait|
 
 ==============================================================================
-MAP                                              *map* *maps*
+MAP                                              *builtin-map* *map* *maps*
 
 Maps are shell-native tree structures for associating keys with values.
 They support nested paths, dynamic evaluation, arrays, and JSON
@@ -183,6 +225,268 @@ trees, configuration hierarchies, and structured data.
   `--pretty`   Pretty-print JSON output
   `-F`         Store value as a dynamic leaf (command evaluated on read)
   `-l`         Create map in local scope only
+
+==============================================================================
+ALIAS                                            *builtin-alias* *alias*
+
+  `alias [name[=value] ...]`
+
+  With no arguments, lists all defined aliases in alphabetical order,
+  in the form `name = "value"`.
+
+  With arguments of the form `name=value`, defines an alias. When
+  {name} is used as a command, it is replaced with {value} before
+  execution. Multiple aliases can be defined in a single call.
+
+	Alias expansion occurs very early in the execution process.
+
+  With an argument that has no `=`, prints the current definition of
+  that alias.
+
+  The names `command` and `builtin` are reserved and cannot be aliased.
+
+  Examples:
+
+      `alias`                           list all aliases
+      `alias ll='ls -la'`               define an alias
+      `alias ll`                        print: ll='ls -la'
+      `alias g='git' gs='git status'`   define multiple
+
+==============================================================================
+UNALIAS                                          *builtin-unalias* *unalias*
+
+  `unalias [name ...]`
+
+  Remove the named aliases. With no arguments, lists all defined
+  aliases (same as `alias` with no arguments).
+
+  It is an error to unalias a name that is not currently defined.
+
+  Examples:
+
+      `unalias ll`               remove the ll alias
+      `unalias g gs`             remove multiple aliases
+
+==============================================================================
+ARROPS                                           *builtin-arrops* *arrops*
+
+  Array operation builtins for manipulating shell arrays. All commands
+  share a common set of options:
+
+    `-c {n}`     perform the operation {n} times (default: 1)
+    `-v {var}`   store the result in {var} instead of printing to stdout
+                 (pop/fpop only)
+    `-r`         reverse direction (rotate only)
+
+  PUSH                                           *builtin-push* *push*
+
+  `push {array} {value} ...`
+
+      Append one or more values to the back of {array}. If {array}
+      does not exist, it is created. Multiple values are appended
+      left to right.
+
+      Examples:
+          `push myarr a b c`     append a, b, c to the back
+
+  FPUSH                                          *builtin-fpush* *fpush*
+
+  `fpush {array} {value} ...`
+
+      Prepend one or more values to the front of {array}. Each value
+      is pushed to the front sequentially, so the last value ends up
+      at index 0.
+
+      Example:
+          `fpush arr a b`    given arr=[c], result is [b, a, c]
+
+  POP                                            *builtin-pop* *pop*
+
+  `pop [-c {n}] [-v {var}] {array}`
+
+      Remove and print the last element of {array}. With `-c`, removes
+      that many elements from the back, printing each on its own line.
+      With `-v`, stores the popped value in {var} instead of printing.
+
+      Sets exit status 1 if the array is empty or does not exist.
+
+      Examples:
+          `pop myarr`            print and remove last element
+          `pop -c 2 myarr`       remove and print last 2 elements
+          `pop -v x myarr`       store last element in $x
+
+  FPOP                                           *builtin-fpop* *fpop*
+
+  `fpop [-c {n}] [-v {var}] {array}`
+
+      Remove and print the first element of {array}. Equivalent to
+      `pop` but operates on the front of the array.
+
+      Examples:
+          `fpop myarr`           print and remove first element
+          `fpop -c 2 myarr`      remove and print first 2 elements
+          `fpop -v x myarr`      store first element in $x
+
+  ROTATE                                         *builtin-rotate* *rotate*
+
+  `rotate [-c {n}] [-r] {array}`
+
+      Rotate {array} left by {n} positions (default: 1). With `-r`,
+      rotate right instead. If {n} exceeds the array length it is
+      clamped, making a full rotation a no-op.
+
+      Examples:
+          `rotate arr`           [a,b,c,d] -> [b,c,d,a]
+          `rotate -c 2 arr`      [a,b,c,d] -> [c,d,a,b]
+          `rotate -r arr`        [a,b,c,d] -> [d,a,b,c]
+
+==============================================================================
+AUTOCMD                                          *builtin-autocmd* *autocmd*
+
+  `autocmd [-c] {event} [{command}]`
+
+  Register {command} to run automatically when {event} fires. Multiple
+  commands can be registered for the same event; they run in
+  registration order. The exit status of autocmd handlers does not
+  affect `$?`.
+
+  `-c`    clear all registered commands for {event} instead of adding one
+
+  Available events:
+
+    `pre-cmd`               before a command is executed
+    `post-cmd`              after a command completes
+    `pre-change-dir`        before `cd` changes the directory
+    `post-change-dir`       after `cd` changes the directory
+    `on-job-finish`         when a background job finishes
+    `pre-prompt`            before the prompt is displayed
+    `post-prompt`           after the prompt is displayed
+    `pre-mode-change`       before the editor mode changes
+    `post-mode-change`      after the editor mode changes
+    `on-history-open`       when history search opens
+    `on-history-close`      when history search closes
+    `on-history-select`     when a history entry is selected
+    `on-completion-start`   when tab completion starts
+    `on-completion-cancel`  when tab completion is cancelled
+    `on-completion-select`  when a completion candidate is selected
+    `on-exit`               when the shell exits
+
+  Examples:
+
+      `autocmd post-cmd 'echo done'`
+      `autocmd post-change-dir 'ls'`
+      `autocmd -c post-cmd`           clear all post-cmd handlers
+
+  For special variables available inside autocmd handlers, see |autocmd|.
+
+==============================================================================
+CD                                               *builtin-cd* *cd*
+
+  `cd [-L|-P] [{dir}]`
+
+  Change the working directory to {dir}. With no argument, changes to
+  `$HOME`. Updates `$PWD` and `$OLDPWD`.
+
+  `-L`    follow symbolic links (default)
+  `-P`    resolve symbolic links to their physical path via `realpath`
+
+  Special arguments:
+
+    `-`    change to `$OLDPWD` (the previous directory) and print the
+           new path. Repeating `cd -` toggles between the two directories.
+
+  `$CDPATH`
+
+      A colon-separated list of directories to search when {dir} is a
+      relative path that does not begin with `./`, or `../`. An
+      empty entry in `$CDPATH` is treated as `.`.
+
+  Fires the `pre-change-dir` and `post-change-dir` autocmd events.
+  See |autocmd| for available hook variables.
+
+  Examples:
+
+      `cd`                  go to $HOME
+      `cd /tmp`             absolute path
+      `cd -`                return to previous directory
+      `cd -P ~/link`        resolve symlink before changing
+
+==============================================================================
+COMPLETE                                         *builtin-complete* *complete*
+
+  `complete [options] {cmd} ...`
+
+  Register a tab completion specification for one or more commands. When
+  the user presses Tab after {cmd}, the shell uses the registered spec to
+  generate candidates. Multiple commands may be given; they all receive
+  the same spec.
+
+  Source Flags (what to complete) ~
+
+    `-W {wordlist}`   complete from a static whitespace-separated word list
+    `-F {func}`       call shell function {func} to generate candidates.
+                      The function should populate `$COMPREPLY` with the
+                      list of matches.
+    `-A {action}`     complete from a built-in action name (see below)
+    `-f`              complete file names
+    `-d`              complete directory names
+    `-c`              complete command names (executables and builtins)
+    `-u`              complete user names
+    `-v`              complete variable names
+    `-a`              complete alias names
+    `-j`              complete job names
+    `-S`              complete signal names
+
+  Behavior Flags ~
+
+    `-o default`      fall back to default (filename) completion if the
+                      spec produces no candidates
+    `-o dirnames`     fall back to directory completion if no candidates
+    `-o space`        append a space after a completed word (default)
+
+  Management Flags ~
+
+    `-p [{cmd} ...]`  print registered specs. With no {cmd}, prints all.
+    `-r [{cmd} ...]`  remove the spec for each {cmd}.
+
+  Examples:
+
+      `complete -W 'start stop restart' myservice`
+      `complete -F _git_complete git`
+      `complete -f -d cp`
+      `complete -p git`           print git's registered spec
+      `complete -r git`           remove git's spec
+
+  When `-F` is used, the following variables are set before the function
+  is called and should be read (not modified) by the function:
+
+    `$COMP_WORDS`     array of words on the current command line
+    `$COMP_CWORD`     index of the word being completed
+    `$COMP_LINE`      the full current command line as a string
+    `$COMP_POINT`     cursor position within `$COMP_LINE`
+
+  The function sets `$COMPREPLY` to an array of completion candidates.
+
+==============================================================================
+COMPGEN                                          *builtin-compgen* *compgen*
+
+  `compgen [options] [{prefix}]`
+
+  Generate completion candidates without registering a spec. Applies the
+  given source flags against {prefix} (if provided) and prints one
+  candidate per line. Useful for testing completion logic or inside `-F`
+  functions.
+
+  Accepts the same source flags as `complete` (`-W`, `-F`, `-f`, `-d`,
+  `-c`, `-u`, `-v`, `-a`, `-j`, `-S`).
+
+  Examples:
+
+      `compgen -W 'foo bar baz'`        print all three words
+      `compgen -W 'foo bar baz' b`      print only: bar baz
+      `compgen -f /tmp/`                list files under /tmp/
+      `compgen -v HOME`                 list variables starting with HOME
+      `compgen -F _my_func`             run function and print results
 
 ==============================================================================
 See also: |autocmd| |param|

@@ -2,9 +2,9 @@
 
 #VI MODE KEYBINDINGS#
 
-The line editor uses a vi-style modal editing system with six modes:
-Normal, Insert, Visual, Replace, Ex (command), and Verbatim. The default
-mode on startup is Insert.
+The line editor uses a vi-style modal editing system with seven modes:
+Normal, Insert, Visual, Replace, Ex (command), Verbatim, and Emacs. The
+default mode on startup is Insert.
 
 ==============================================================================
 1. Normal Mode                                 *normal-mode*
@@ -305,7 +305,51 @@ mode on startup is Insert.
   All other keys replace the character under the cursor and advance.
 
 ==============================================================================
-5. Ex Mode                                     *ex-mode-keys*
+5. Emacs Mode                                  *emacs-mode*
+
+  Emacs mode provides readline-style keybindings as an alternative to
+  vi modal editing. It behaves like a standard single-mode line editor.
+
+  Movement:
+
+  `Ctrl+A`        move to start of line
+  `Ctrl+E`        move to end of line
+  `Ctrl+F`        move forward one character
+  `Ctrl+B`        move backward one character
+  `Alt+F`         move forward one word
+  `Alt+B`         move backward one word
+
+  Editing:
+
+  `Ctrl+D`        delete character under cursor, or EOF if line is empty
+  `Backspace`     delete character before cursor
+  `Ctrl+W`        kill word before cursor (added to kill ring)
+  `Alt+Backspace` same as Ctrl+W
+  `Alt+D`         kill word after cursor (added to kill ring)
+  `Ctrl+K`        kill from cursor to end of line
+  `Ctrl+U`        kill from cursor to start of line
+  `Ctrl+Y`        yank (paste) from kill ring
+  `Alt+Y`         cycle through kill ring entries after Ctrl+Y
+  `Ctrl+T`        transpose characters around cursor
+  `Alt+T`         transpose words around cursor
+  `Alt+U`         uppercase word from cursor to end
+  `Alt+L`         lowercase word from cursor to end
+  `Alt+C`         capitalize word from cursor to end
+
+  Undo / Redo:
+
+  `Ctrl+/`        undo
+  `Alt+/`         redo
+
+  Other:
+
+  `Tab`           trigger completion
+  `Shift+Tab`     trigger completion (reverse)
+  `Ctrl+R`        open history search
+  `:`             enter ex mode
+
+==============================================================================
+6. Ex Mode                                     *ex-mode-keys*
 
   Ex mode accepts colon commands. Enter with `:` from normal mode.
   See |ex| for available commands.
@@ -412,6 +456,7 @@ mode on startup is Insert.
     `-x`      ex mode
     `-o`      operator-pending mode
     `-r`      replace mode
+    `-e`      emacs mode
 
   Keys and actions use angle-bracket notation for special keys:
 

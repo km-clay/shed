@@ -29,7 +29,12 @@ right-aligned prompt).
 
   `\h`                                         *prompt-host*
 
-      The hostname (from $HOST).
+      The short hostname — the first segment of $HOST (e.g. `myhost`
+      from `myhost.example.com`).
+
+  `\H`                                         *prompt-host-full*
+
+      The full hostname (from $HOST).
 
   `\w`                                         *prompt-pwd*
 

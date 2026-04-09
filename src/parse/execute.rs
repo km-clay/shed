@@ -1116,35 +1116,34 @@ impl Dispatcher {
         cmd.class.as_nd_kind()
       )
     };
-    let mut env_vars_to_unset = vec![];
-    if !assignments.is_empty() {
-      let assign_behavior = if argv.is_empty() {
-        AssignBehavior::Set
-      } else {
-        AssignBehavior::Export
-      };
-      env_vars_to_unset = self.set_assignments(assignments, assign_behavior)?;
+		let assign_behavior = if argv.is_empty() {
+			AssignBehavior::Set
+		} else {
+			AssignBehavior::Export
+		};
 
-      if let AssignBehavior::Set = assign_behavior {
-        state::set_status(0);
-      }
-    }
+		if let AssignBehavior::Set = assign_behavior {
+			if !assignments.is_empty() {
+				self.set_assignments(assignments, assign_behavior)?;
+				state::set_status(0);
+			}
+			return Ok(())
+		}
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
-    if argv.is_empty() {
-      return Ok(());
-    }
 
     self.io_stack.append_to_frame(cmd.redirs);
 
     let exec_args = ExecArgs::new(argv).blame(blame)?;
     let _guard = self.io_stack.pop_frame().redirect()?;
-    let job = self.job_stack.curr_job_mut().unwrap();
-    let existing_pgid = job.pgid();
+    let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
 
     let fg_job = self.fg_job;
     let interactive = self.interactive;
     let child_logic = |pgid: Option<Pid>| -> ! {
+			if let AssignBehavior::Export = assign_behavior {
+				self.set_assignments(assignments, assign_behavior).ok();
+			}
       // For non-interactive exec-in-place (e.g. shed -c), skip process group
       // and terminal setup - just transparently replace the current process.
       if interactive || !no_fork {
@@ -1202,6 +1201,7 @@ impl Dispatcher {
     match unsafe { fork()? } {
       ForkResult::Child => child_logic(existing_pgid),
       ForkResult::Parent { child } => {
+				let job = self.job_stack.curr_job_mut().unwrap();
         // Close proc sub pipe fds - the child has inherited them
         // and will access them via /proc/self/fd/N. Keeping them
         // open here would prevent EOF on the pipe.
@@ -1218,10 +1218,6 @@ impl Dispatcher {
         let child_proc = ChildProc::new(child, Some(cmd_name), Some(child_pgid), report_time)?;
         job.push_child(child_proc);
       }
-    }
-
-    for var in env_vars_to_unset {
-      unsafe { std::env::set_var(&var, "") };
     }
 
     Ok(())

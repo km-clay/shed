@@ -4365,6 +4365,7 @@ pub fn toggle_case_char(c: char) -> char {
   }
 }
 
+/// Given two things that implement Ord, make sure that the left is less than the right
 pub fn ordered<T: Ord>(start: T, end: T) -> (T, T) {
   if start > end {
     (end, start)

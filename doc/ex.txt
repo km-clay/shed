@@ -9,7 +9,113 @@ The command line supports full editing via insert mode, and has its own
 command history navigable with `Up` and `Down`.
 
 ==============================================================================
-1. Shell Commands                              *ex-shell*
+1. Line Addresses                              *ex-address* *ex-range*
+
+  Most ex commands accept an optional address or range before the command
+  name to specify which lines to operate on.
+
+  Single address forms:
+
+    `{n}`         line number (1-indexed). `1` is the first line.
+    `.`           the current line
+    `$`           the last line
+    `.+{n}`       current line plus offset (e.g. `.+2`)
+    `.-{n}`       current line minus offset
+    `/{pat}/`     next line matching pattern {pat} (wraps around)
+    `?{pat}?`     previous line matching pattern {pat} (wraps around)
+
+  Range forms (two addresses separated by `,`):
+
+    `{a},{b}`     lines {a} through {b} inclusive
+    `%`           shorthand for `1,$` (all lines)
+
+  Examples:
+
+    `:3d`         delete line 3
+    `:1,5d`       delete lines 1 through 5
+    `:.,$y`       yank from current line to end of buffer
+    `:%s/foo/bar` substitute on all lines
+
+  If no address is given, the command operates on the current line (or
+  all lines, for commands like `:s` with `%`).
+
+==============================================================================
+2. Substitute                                  *ex-substitute* *ex-s*
+
+  `:s/{old}/{new}/[flags]`                     *ex-sub*
+
+      Replace occurrences of {old} (a regular expression) with {new}
+      on the addressed lines. Without a range, operates on the current
+      line.
+
+      Flags:
+
+        `g`   replace all occurrences on each line (default: first only)
+        `i`   case-insensitive match
+        `I`   case-sensitive match (overrides `i`)
+        `n`   show count of matches without substituting
+
+      The delimiter is typically `/` but any non-alphanumeric character
+      may be used (e.g. `:s|foo|bar|`). Delimiters can be escaped with
+      a backslash inside the pattern.
+
+      Examples:
+
+        `:s/foo/bar/`       replace first `foo` with `bar` on current line
+        `:s/foo/bar/g`      replace all `foo` with `bar` on current line
+        `:%s/foo/bar/g`     replace all `foo` with `bar` in entire buffer
+        `:1,5s/^/#/`        prepend `#` to lines 1-5
+
+  `:s`                                         *ex-repeat-sub*
+
+      Repeat the last substitute command. If a range is given (e.g.
+      `:%s`), the repeat is applied to those lines instead of the
+      range from the original command.
+
+==============================================================================
+3. Global                                      *ex-global* *ex-g*
+
+  `:g/{pat}/{cmd}`                             *ex-global-cmd*
+
+      Execute ex command {cmd} on every line matching pattern {pat}.
+      The default range is the entire buffer.
+
+      Examples:
+
+        `:g/foo/d`              delete all lines containing `foo`
+        `:g/^#/s/^#//`         remove leading `#` from all comment lines
+        `:g/error/normal!dd`   delete lines containing "error" via normal!
+
+  `:g!/{pat}/{cmd}`                            *ex-global-not*
+
+      Execute {cmd} on every line that does NOT match {pat}. Equivalent
+      to `:v/{pat}/{cmd}` in traditional vi.
+
+  `:g`                                         *ex-repeat-global*
+
+      Repeat the last global command.
+
+==============================================================================
+4. Normal Mode Commands                        *ex-normal*
+
+  `:normal!{seq}`                              *ex-normal-cmd*
+
+      Execute {seq} as a sequence of normal mode keystrokes. The `!`
+      is required. When used with a line range, the sequence is applied
+      to each line in the range independently, with the cursor starting
+      at column 0 of each line.
+
+      All operations within a ranged `:normal!` are grouped into a
+      single undo operation.
+
+      Examples:
+
+        `:normal!dw`            delete first word on current line
+        `:1,5normal!>>` indent lines 1-5
+        `:g/foo/normal!A;`      append `;` to end of every line containing `foo`
+
+==============================================================================
+5. Shell Commands                              *ex-shell*
 
   `:!{cmd}`                                    *ex-bang*
 
@@ -32,7 +138,7 @@ command history navigable with `Up` and `Down`.
         `:!_BUFFER=$(echo "$_BUFFER" | sort)`
 
 ==============================================================================
-2. File Operations                             *ex-file*
+6. File Operations                             *ex-file*
 
   `:r {file}`                                  *ex-read*
 
@@ -65,22 +171,24 @@ command history navigable with `Up` and `Down`.
         `:e ~/.config/shed/shedrc`
 
 ==============================================================================
-3. Buffer Operations                           *ex-buffer*
+7. Buffer Operations                           *ex-buffer*
 
   `:d`                                         *ex-delete*
 
-      Delete the entire buffer.
+      Delete the addressed lines. Without a range, deletes the current
+      line. `:%d` clears the entire buffer.
 
   `:y`                                         *ex-yank*
 
-      Yank the entire buffer into the default register.
+      Yank the addressed lines into the default register. Without a
+      range, yanks the current line.
 
   `:pu`                                        *ex-put*
 
       Put (paste) from the default register after the cursor.
 
 ==============================================================================
-4. Other Commands                              *ex-other*
+8. Other Commands                              *ex-other*
 
   `:q`                                         *ex-quit*
 
@@ -91,7 +199,7 @@ command history navigable with `Up` and `Down`.
       Display help for {topic}. Runs the `help` builtin.
 
 ==============================================================================
-5. Path Expansion                              *ex-paths*
+9. Path Expansion                              *ex-paths*
 
   File paths in ex commands are subject to variable expansion. You can
   use environment variables in paths:
@@ -100,7 +208,7 @@ command history navigable with `Up` and `Down`.
       `:w ${TMPDIR}/output.txt`
 
 ==============================================================================
-6. Ex Command History                          *ex-history*
+10. Ex Command History                         *ex-history*
 
   Ex mode maintains its own command history, separate from the main
   shell history. Navigate with `Up` and `Down` while in ex mode.

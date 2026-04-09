@@ -71,18 +71,19 @@ impl History {
   pub fn new(table: &str) -> ShResult<Self> {
     let max_hist = read_shopts(|o| o.core.max_hist);
 
-    let db_path = PathBuf::from(env::var("SHED_HISTDB").unwrap_or_else(|_| {
+		let db_path = if let Ok(var) = env::var("SHED_HISTDB") {
+			var
+		} else {
       let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
       dirs::data_dir()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| format!("{home}/.local/share"))
-    }))
-    .join("shed")
-    .join("shed_hist.db");
+        .unwrap_or_else(|| format!("{home}/.local/share/shed/shed_hist.db"))
+		};
 
-    if let Some(parent) = db_path.parent() {
-      std::fs::create_dir_all(parent)?;
-    }
+		let db_path = PathBuf::from(db_path);
+		if let Some(parent) = db_path.parent() {
+			std::fs::create_dir_all(parent)?;
+		}
 
     let conn = Connection::open(&db_path)?;
     Self::init_db(&conn, table)?;
