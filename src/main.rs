@@ -576,10 +576,13 @@ fn handle_readline_event(
       let runtime = write_meta(|m| m.stop_timer());
 
       post_exec.exec();
+			let was_func_def = write_meta(|m| m.take_last_was_func_def());
+			let should_write = !was_func_def || !read_shopts(|o| o.set.nolog);
 
       if read_shopts(|s| s.core.auto_hist)
         && !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
         && !input.is_empty()
+				&& should_write
       {
         let result = match runtime {
           Some(dur) => readline.history.push_with_runtime(input.clone(), dur),

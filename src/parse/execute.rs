@@ -6,6 +6,7 @@ use std::{
 };
 
 use ariadne::Fmt;
+use nix::unistd::{execve, execvp};
 
 use crate::{
   builtin::{
@@ -54,8 +55,7 @@ use crate::{
   shopt::xtrace_print,
   signal::{check_signals, signals_pending},
   state::{
-    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_jobs, write_logic,
-    write_meta, write_vars,
+    self, ShFunc, UtilKind, VarFlags, VarKind, read_logic, read_meta, read_shopts, read_vars, write_jobs, write_logic, write_meta, write_vars
   },
 };
 
@@ -151,6 +151,7 @@ impl ExecArgs {
 /// directly without forking. This avoids process group issues where grandchild
 /// processes (e.g. nvim spawning opencode) lose their controlling terminal.
 pub fn exec_dash_c(input: String) -> ShResult<()> {
+	write_meta(|m| m.rehash());
   let log_tab = read_logic(|l| l.clone());
   let expanded = expand_aliases(input, HashSet::new(), &log_tab);
   let source_name: Rc<str> = "<shed -c>".into();
@@ -321,6 +322,10 @@ impl Dispatcher {
     Ok(())
   }
   pub fn dispatch_cmd(&mut self, node: Node) -> ShResult<()> {
+		if read_shopts(|o| o.set.noexec) {
+			return Ok(());
+		}
+
     let (line, _) = node.get_span().clone().line_and_col();
     write_vars(|v| {
       v.set_var(
@@ -439,6 +444,10 @@ impl Dispatcher {
     let func = ShFunc::new(*body, blame);
     write_logic(|l| l.insert_func(name, func)); // Store the AST
     write_meta(|m| m.cache_path_command(state::meta::Utility::function(name.to_string())));
+		if self.interactive {
+			write_meta(|m| m.set_last_was_func_def(true));
+		}
+
     Ok(())
   }
   fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
@@ -1174,7 +1183,6 @@ impl Dispatcher {
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
     self.io_stack.append_to_frame(cmd.redirs);
-
     let exec_args = ExecArgs::new(argv).blame(blame)?;
     let _guard = self.io_stack.pop_frame().redirect()?;
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
@@ -1215,7 +1223,15 @@ impl Dispatcher {
       let cmd = &exec_args.cmd.0;
       let span = exec_args.cmd.1;
 
-      let Err(e) = execvpe(cmd, &exec_args.argv, &exec_args.envp);
+			let Err(e) = if read_shopts(|o| o.set.hashall)
+			&& let Some(util) = read_meta(|m| m.get_cached_cmd(cmd.to_str().unwrap_or_default())) {
+				let UtilKind::Command(path) = util.kind() else { unreachable!() };
+				let c_path = CString::new(path.as_os_str().to_str().unwrap_or_default().as_bytes()).unwrap_or_default();
+				execve(&c_path, &exec_args.argv, &exec_args.envp)
+			} else {
+				execvpe(cmd, &exec_args.argv, &exec_args.envp)
+			};
+
 
       // execvpe only returns on error
       let cmd_str = cmd.to_str().unwrap().to_string();
@@ -1293,10 +1309,13 @@ impl Dispatcher {
   }
   fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> ShResult<Vec<String>> {
     let mut new_env_vars = vec![];
-    let flags = match behavior {
+    let mut flags = match behavior {
       AssignBehavior::Export => VarFlags::EXPORT,
       AssignBehavior::Set => VarFlags::NONE,
     };
+		if read_shopts(|o| o.set.allexport) {
+			flags = VarFlags::EXPORT;
+		}
 
     for assign in assigns {
       let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);

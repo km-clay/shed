@@ -8,7 +8,7 @@ use crate::expand::var::expand_raw;
 use crate::libsh::error::{ShErr, ShResult};
 use crate::match_loop;
 use crate::sherr;
-use crate::state::{VarFlags, VarKind, read_vars, write_vars};
+use crate::state::{VarFlags, VarKind, read_shopts, read_vars, write_vars};
 
 #[derive(Debug)]
 pub enum ParamExp {
@@ -416,7 +416,11 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
     }
   } else {
-    Ok(vars.get_var(&var_name))
+		let var = vars.try_get_var(&var_name);
+		if var.is_none() && read_shopts(|o| o.set.nounset) {
+			return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
+		}
+    Ok(var.unwrap_or_default())
   }
 }
 

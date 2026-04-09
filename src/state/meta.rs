@@ -634,6 +634,9 @@ pub struct MetaTab {
 
   // pending keys from widget function
   pending_widget_keys: Vec<KeyEvent>,
+
+	// whether or not the last command had a function definition
+	last_was_func_def: bool,
 }
 
 impl Default for MetaTab {
@@ -655,6 +658,7 @@ impl Default for MetaTab {
       cwd_cache: HashSet::new(),
       comp_specs: HashMap::new(),
       pending_widget_keys: vec![],
+			last_was_func_def: false
     }
   }
 }
@@ -723,6 +727,25 @@ impl MetaTab {
     self.path_cache.iter().any(|util| util.name() == cmd)
       || self.cwd_cache.iter().any(|util| util.name() == cmd)
   }
+	pub fn get_cached_cmd(&self, cmd: &str) -> Option<Utility> {
+		// used when the hashall option is set
+		// and we use cached command paths for the execve system call
+		self
+			.path_cache
+			.iter()
+			.chain(self.cwd_cache.iter())
+			.find(|util| util.name() == cmd && matches!(util.kind(), UtilKind::Command(_)))
+			.cloned()
+	}
+	pub fn last_was_func_def(&self) -> bool {
+		self.last_was_func_def
+	}
+	pub fn set_last_was_func_def(&mut self, was_func_def: bool) {
+		self.last_was_func_def = was_func_def;
+	}
+	pub fn take_last_was_func_def(&mut self) -> bool {
+		std::mem::take(&mut self.last_was_func_def)
+	}
   pub fn get_cmds_in_path() -> Vec<Utility> {
     let path = env::var("PATH").unwrap_or_default();
     let paths = path.split(":").map(PathBuf::from);

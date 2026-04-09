@@ -13,7 +13,7 @@ use crate::parse::lex::is_hard_sep;
 use crate::prelude::*;
 use crate::readline::markers;
 use crate::sherr;
-use crate::state::{ArrIndex, read_vars};
+use crate::state::{ArrIndex, read_shopts, read_vars};
 
 pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   let mut result = String::new();
@@ -243,8 +243,11 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
       return Ok(val);
     }
     ch if is_hard_sep(ch) || !(ch.is_alphanumeric() || ch == '_' || ch == '-') => {
-      let val = read_vars(|v| v.get_var(&var_name));
-      return Ok(val);
+      let val = read_vars(|v| v.try_get_var(&var_name));
+			if val.is_none() && read_shopts(|o| o.set.nounset) {
+				return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
+			}
+      return Ok(val.unwrap_or_default());
     }
     _ => {
       chars.next();
@@ -252,8 +255,11 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
     }
   });
   if !var_name.is_empty() {
-    let var_val = read_vars(|v| v.get_var(&var_name));
-    Ok(var_val)
+		let val = read_vars(|v| v.try_get_var(&var_name));
+		if val.is_none() && read_shopts(|o| o.set.nounset) {
+			return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
+		}
+		Ok(val.unwrap_or_default())
   } else {
     Ok(String::new())
   }
@@ -262,12 +268,13 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 pub fn expand_glob(raw: &str) -> ShResult<String> {
   let mut words = vec![];
 
-  if !raw.contains(['*', '?', '[']) {
+  if !raw.contains(['*', '?', '['])
+	|| read_shopts(|o| o.set.noglob) {
     return Ok(raw.to_string());
   }
 
   let opts = glob::MatchOptions {
-    require_literal_leading_dot: !crate::state::read_shopts(|s| s.core.dotglob),
+    require_literal_leading_dot: !read_shopts(|s| s.core.dotglob),
     ..Default::default()
   };
   for entry in glob::glob_with(raw, opts).map_err(|_| sherr!(SyntaxErr, "Invalid glob pattern"))? {
