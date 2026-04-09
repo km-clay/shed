@@ -145,27 +145,27 @@ impl History {
       .duration_since(UNIX_EPOCH)
       .unwrap()
       .as_secs() as i64;
+		let new_id = self.last_id() + 1;
     self.conn.execute(
-      &format!("INSERT INTO {table} (timestamp, runtime, command) VALUES (?1, 0, ?2)"),
-      rusqlite::params![timestamp, command],
+      &format!("INSERT INTO {table} (id, timestamp, runtime, command) VALUES (?1, ?2, 0, ?3)"),
+      rusqlite::params![new_id, timestamp, command],
     )?;
-    let id = self.conn.last_insert_rowid();
-    Ok(Some(id))
+    Ok(Some(new_id))
   }
 
   pub fn push_with_runtime(&self, command: String, runtime: Duration) -> ShResult<Option<i64>> {
-    let Some(id) = self.push(command)? else {
-      return Ok(None);
-    };
+		let Some(next_id) = self.push(command)? else {
+			return Ok(None)
+		};
 
     let table = &self.table;
     let micros = runtime.as_micros() as i64;
     self.conn.execute(
       &format!("UPDATE {table} SET runtime = ?1 WHERE id = ?2"),
-      rusqlite::params![micros, id],
+      rusqlite::params![micros, next_id],
     )?;
 
-    Ok(Some(id))
+    Ok(Some(next_id))
   }
 
   pub fn entry_count(&self) -> i64 {
@@ -332,9 +332,10 @@ impl History {
     }
     let table = &self.table;
     let timestamp = timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+		let new_id = self.last_id() + 1;
     self.conn.execute(
-      &format!("INSERT INTO {table} (timestamp, runtime, command) VALUES (?1, ?2, ?3)"),
-      rusqlite::params![timestamp, runtime.as_micros() as i64, command],
+      &format!("INSERT INTO {table} (id, timestamp, runtime, command) VALUES (?1, ?2, ?3, ?4)"),
+      rusqlite::params![new_id, timestamp, runtime.as_micros() as i64, command],
     )?;
     Ok(())
   }

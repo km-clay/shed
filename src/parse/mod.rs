@@ -1874,6 +1874,7 @@ impl ParseStream {
         };
         match tk.class {
           _ if tk_iter.peek().is_some_and(|tk| tk.class == TkRule::Bg) => break,
+					TkRule:: Comment => break,
 
           TkRule::EOI
           | TkRule::Pipe

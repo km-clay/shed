@@ -320,9 +320,20 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let mut readline = match ShedLine::new(Prompt::new(), *TTY_FILENO) {
     Ok(rl) => rl,
     Err(e) => {
-      eprintln!("Failed to initialize readline: {e}");
-      QUIT_CODE.store(1, Ordering::SeqCst);
-      return Err(sherr!(CleanExit(1), "readline initialization failed",));
+			// try to fall back to no hist
+			match ShedLine::new_no_hist(Prompt::new(), *TTY_FILENO) {
+				Ok(rl) => {
+					eprintln!("Failed to load history: {e}");
+					rl
+				}
+				Err(e) => {
+					// that failed too. we probably arent in a context where readline can work at all.
+					eprintln!("Failed to initialize readline: {e}");
+					QUIT_CODE.store(1, Ordering::SeqCst);
+					return Err(sherr!(CleanExit(1), "readline initialization failed",));
+				}
+			}
+
     }
   };
 
