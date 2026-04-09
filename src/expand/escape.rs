@@ -2,8 +2,9 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 use crate::expand::util::is_var_name_ch;
-use crate::match_loop;
+use crate::{match_loop, state};
 use crate::readline::markers;
+use crate::state::read_vars;
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
 pub(super) fn strip_escape_markers(s: &str) -> String {
@@ -13,7 +14,7 @@ pub(super) fn strip_escape_markers(s: &str) -> String {
 const SPECIAL_CHARS: &str = "#$^*()=|{}[]`<>?~;& '\"";
 
 /// Processes strings into intermediate representations that are more readable
-/// by the program
+/// by the program.
 ///
 /// Clean up a single layer of escape characters, and then replace control
 /// characters like '$' with a non-character unicode representation that is
@@ -21,11 +22,15 @@ const SPECIAL_CHARS: &str = "#$^*()=|{}[]`<>?~;& '\"";
 pub fn unescape_str(raw: &str) -> String {
   let mut chars = raw.chars().peekable();
   let mut result = String::new();
-  let mut first_char = true;
+  let mut last_was_word_break = false;
+	let word_breaks = read_vars(|v| v.try_get_var("COMP_WORDBREAKS")).unwrap_or("\"'><=;|&(: ".into());
+	let ifs = read_vars(|v| v.try_get_var("IFS")).unwrap_or(" \t\n".into());
+	let word_breaks = format!("{word_breaks}{ifs}");
+	let mut first_char = true;
 
   while let Some(ch) = chars.next() {
     match ch {
-      '~' if first_char => result.push(markers::TILDE_SUB),
+      '~' if last_was_word_break || first_char => result.push(markers::TILDE_SUB),
       '\\' => {
         if let Some(next_ch) = chars.next() {
           result.push(markers::ESCAPE);
@@ -51,7 +56,8 @@ pub fn unescape_str(raw: &str) -> String {
       }
       _ => result.push(ch),
     }
-    first_char = false;
+		last_was_word_break = word_breaks.contains(ch);
+		first_char = false;
   }
 
   result
