@@ -2,9 +2,9 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 use crate::expand::util::is_var_name_ch;
-use crate::{match_loop, state};
 use crate::readline::markers;
 use crate::state::read_vars;
+use crate::{match_loop, state};
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
 pub(super) fn strip_escape_markers(s: &str) -> String {
@@ -23,10 +23,11 @@ pub fn unescape_str(raw: &str) -> String {
   let mut chars = raw.chars().peekable();
   let mut result = String::new();
   let mut last_was_word_break = false;
-	let word_breaks = read_vars(|v| v.try_get_var("COMP_WORDBREAKS")).unwrap_or("\"'><=;|&(: ".into());
-	let ifs = read_vars(|v| v.try_get_var("IFS")).unwrap_or(" \t\n".into());
-	let word_breaks = format!("{word_breaks}{ifs}");
-	let mut first_char = true;
+  let word_breaks =
+    read_vars(|v| v.try_get_var("COMP_WORDBREAKS")).unwrap_or("\"'><=;|&(: ".into());
+  let ifs = read_vars(|v| v.try_get_var("IFS")).unwrap_or(" \t\n".into());
+  let word_breaks = format!("{word_breaks}{ifs}");
+  let mut first_char = true;
 
   while let Some(ch) = chars.next() {
     match ch {
@@ -56,8 +57,8 @@ pub fn unescape_str(raw: &str) -> String {
       }
       _ => result.push(ch),
     }
-		last_was_word_break = word_breaks.contains(ch);
-		first_char = false;
+    last_was_word_break = word_breaks.contains(ch);
+    first_char = false;
   }
 
   result

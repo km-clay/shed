@@ -12,7 +12,10 @@ use crate::{
   },
   prelude::*,
   procio::borrow_fd,
-  readline::{history::{HistEntry, History}, linebuf::ordered},
+  readline::{
+    history::{HistEntry, History},
+    linebuf::ordered,
+  },
   sherr,
   shopt::xtrace_print,
   state::{self},

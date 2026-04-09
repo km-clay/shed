@@ -1,5 +1,11 @@
 use crate::{
-  libsh::error::ShResult, parse::{NdRule, Node, execute::prepare_argv, lex::split_tk_at}, prelude::*, procio::borrow_fd, sherr, expand::as_var_val_display, state::{self, VarFlags, VarKind, read_vars, write_vars}
+  expand::as_var_val_display,
+  libsh::error::ShResult,
+  parse::{NdRule, Node, execute::prepare_argv, lex::split_tk_at},
+  prelude::*,
+  procio::borrow_fd,
+  sherr,
+  state::{self, VarFlags, VarKind, read_vars, write_vars},
 };
 
 pub fn readonly(node: Node) -> ShResult<()> {

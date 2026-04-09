@@ -2,13 +2,13 @@ use std::{fmt::Display, str::FromStr};
 
 use nix::{libc::STDERR_FILENO, unistd::write};
 
+use crate::sherr;
 use crate::{
   libsh::error::{ShErr, ShResult},
   parse::lex::Span,
   procio::borrow_fd,
   state::{read_shopts, read_vars},
 };
-use crate::{sherr};
 
 pub fn xtrace_print(argv: &[(String, Span)]) {
   if read_shopts(|o| o.set.xtrace) {

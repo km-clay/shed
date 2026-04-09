@@ -9,11 +9,14 @@ use std::{
 use rusqlite::Connection;
 
 use crate::{
-  libsh::error::ShResult, readline::{
+  libsh::error::ShResult,
+  readline::{
     complete::{Candidate, FuzzySelector},
     editcmd::Direction,
     linebuf::LineBuf,
-  }, sherr, state::read_shopts
+  },
+  sherr,
+  state::read_shopts,
 };
 
 #[derive(Debug, Clone)]
@@ -71,19 +74,19 @@ impl History {
   pub fn new(table: &str) -> ShResult<Self> {
     let max_hist = read_shopts(|o| o.core.max_hist);
 
-		let db_path = if let Ok(var) = env::var("SHED_HISTDB") {
-			var
-		} else {
+    let db_path = if let Ok(var) = env::var("SHED_HISTDB") {
+      var
+    } else {
       let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
       dirs::data_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| format!("{home}/.local/share/shed/shed_hist.db"))
-		};
+    };
 
-		let db_path = PathBuf::from(db_path);
-		if let Some(parent) = db_path.parent() {
-			std::fs::create_dir_all(parent)?;
-		}
+    let db_path = PathBuf::from(db_path);
+    if let Some(parent) = db_path.parent() {
+      std::fs::create_dir_all(parent)?;
+    }
 
     let conn = Connection::open(&db_path)?;
     Self::init_db(&conn, table)?;
@@ -145,7 +148,7 @@ impl History {
       .duration_since(UNIX_EPOCH)
       .unwrap()
       .as_secs() as i64;
-		let new_id = self.last_id() + 1;
+    let new_id = self.last_id() + 1;
     self.conn.execute(
       &format!("INSERT INTO {table} (id, timestamp, runtime, command) VALUES (?1, ?2, 0, ?3)"),
       rusqlite::params![new_id, timestamp, command],
@@ -154,9 +157,9 @@ impl History {
   }
 
   pub fn push_with_runtime(&self, command: String, runtime: Duration) -> ShResult<Option<i64>> {
-		let Some(next_id) = self.push(command)? else {
-			return Ok(None)
-		};
+    let Some(next_id) = self.push(command)? else {
+      return Ok(None);
+    };
 
     let table = &self.table;
     let micros = runtime.as_micros() as i64;
@@ -236,23 +239,30 @@ impl History {
       "CREATE INDEX IF NOT EXISTS {table}_restore_idx ON {table} (command, timestamp);"
     ))?;
     // count how many entries from backup are missing in current table
-    let restored: i64 = tx.query_row(&format!(
-      "SELECT COUNT(*) FROM {table}_backup b \
+    let restored: i64 = tx.query_row(
+      &format!(
+        "SELECT COUNT(*) FROM {table}_backup b \
        WHERE NOT EXISTS ( \
          SELECT 1 FROM {table} c \
          WHERE c.command = b.command AND c.timestamp = b.timestamp \
        )"
-    ), [], |row| row.get(0))?;
+      ),
+      [],
+      |row| row.get(0),
+    )?;
     // merge: insert deleted entries from backup that aren't in the current table
-    tx.execute(&format!(
-      "INSERT INTO {table} (command, timestamp, runtime) \
+    tx.execute(
+      &format!(
+        "INSERT INTO {table} (command, timestamp, runtime) \
        SELECT b.command, b.timestamp, b.runtime \
        FROM {table}_backup b \
        WHERE NOT EXISTS ( \
          SELECT 1 FROM {table} c \
          WHERE c.command = b.command AND c.timestamp = b.timestamp \
        )"
-    ), [])?;
+      ),
+      [],
+    )?;
     // rebuild with contiguous IDs in chronological order
     tx.execute_batch(&format!(
       "CREATE TABLE {table}_tmp (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT); \
@@ -332,7 +342,7 @@ impl History {
     }
     let table = &self.table;
     let timestamp = timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-		let new_id = self.last_id() + 1;
+    let new_id = self.last_id() + 1;
     self.conn.execute(
       &format!("INSERT INTO {table} (id, timestamp, runtime, command) VALUES (?1, ?2, ?3, ?4)"),
       rusqlite::params![new_id, timestamp, runtime.as_micros() as i64, command],

@@ -323,6 +323,7 @@ bitflags! {
     /// The lexer has no more tokens to produce
     const STALE          = 0b0001000000;
     const EXPECTING_IN   = 0b0010000000;
+    const NEXT_IS_REDIR  = 0b0100000000;
   }
 }
 
@@ -429,6 +430,7 @@ impl LexStream {
   pub fn set_next_is_cmd(&mut self, is: bool) {
     if is {
       self.flags |= LexFlags::NEXT_IS_CMD;
+      self.flags &= !LexFlags::NEXT_IS_REDIR;
     } else {
       self.flags &= !LexFlags::NEXT_IS_CMD;
     }
@@ -1053,7 +1055,9 @@ impl LexStream {
     }
 
     let text = new_tk.span.as_str();
-    if self.flags.contains(LexFlags::NEXT_IS_CMD) {
+    let is_cmd =
+      self.flags.contains(LexFlags::NEXT_IS_CMD) && !self.flags.contains(LexFlags::NEXT_IS_REDIR);
+    if is_cmd {
       match text {
         "case" | "select" | "for" => {
           new_tk.mark(TkFlags::KEYWORD);
@@ -1254,18 +1258,20 @@ impl Iterator for LexStream {
       }
       _ => {
         if let Some(tk) = self.read_redir() {
-          self.set_next_is_cmd(false);
+          self.flags |= LexFlags::NEXT_IS_REDIR;
           match tk {
             Ok(tk) => tk,
             Err(e) => return Some(Err(e)),
           }
         } else {
-          match self.read_string() {
+          let res = match self.read_string() {
             Ok(tk) => tk,
             Err(e) => {
               return Some(Err(e));
             }
-          }
+          };
+          self.flags &= !LexFlags::NEXT_IS_REDIR;
+          res
         }
       }
     };

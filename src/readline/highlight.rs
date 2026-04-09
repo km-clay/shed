@@ -7,7 +7,8 @@ use crate::{
   libsh::term::{Style, StyleSet},
   match_loop,
   readline::{
-    annotate_input, markers::{self, is_marker}
+    annotate_input,
+    markers::{self, is_marker},
   },
   state::{read_meta, read_shopts},
 };

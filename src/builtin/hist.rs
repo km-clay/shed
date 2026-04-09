@@ -30,14 +30,14 @@ pub struct HistQuery {
   duration_gt: Option<String>,
   duration_lt: Option<String>,
   limit: Option<usize>,
-	specific_ids: Vec<i64>,
+  specific_ids: Vec<i64>,
   no_numbers: bool,
   reverse: bool,
   json: bool,
   count: bool,
   delete: bool,
-	restore: bool,
-	ex_hist: bool,
+  restore: bool,
+  ex_hist: bool,
 }
 
 impl HistQuery {
@@ -130,17 +130,17 @@ impl HistQuery {
           params.push(Box::new(dur as i64));
         }
       }
-			idx += 1;
+      idx += 1;
     }
-		if !self.specific_ids.is_empty() {
-			let mut id_strings = vec![];
-			for id in &self.specific_ids {
-				id_strings.push(format!("id = ?{idx}"));
-				params.push(Box::new(*id));
-				idx += 1;
-			}
-			conditions.push(format!("({})", id_strings.join(" OR ")))
-		}
+    if !self.specific_ids.is_empty() {
+      let mut id_strings = vec![];
+      for id in &self.specific_ids {
+        id_strings.push(format!("id = ?{idx}"));
+        params.push(Box::new(*id));
+        idx += 1;
+      }
+      conditions.push(format!("({})", id_strings.join(" OR ")))
+    }
 
     let where_clause = if conditions.is_empty() {
       String::new()
@@ -209,10 +209,10 @@ impl HistQuery {
           _ => {}
         },
         Opt::Long(name) => match name.as_str() {
-					"ex" => new.ex_hist = true,
+          "ex" => new.ex_hist = true,
           "count" => new.count = true,
           "delete" => new.delete = true,
-					"restore" => new.restore = true,
+          "restore" => new.restore = true,
           "json" => new.json = true,
           _ => {}
         },
@@ -366,32 +366,33 @@ pub fn hist_builtin(node: Node) -> ShResult<()> {
 
   let (mut argv, opts) =
     get_opts_from_tokens(argv, &HistQuery::opt_spec()).promote_err(span.clone())?;
-	argv.remove(0);
+  argv.remove(0);
   let mut query = HistQuery::from_opts(&opts).promote_err(span.clone())?;
-	let table = if query.ex_hist {
-		"ex_history"
-	} else {
-		"shed_history"
-	};
+  let table = if query.ex_hist {
+    "ex_history"
+  } else {
+    "shed_history"
+  };
   let hist = History::new(table).promote_err(span.clone())?;
 
-	for (arg,span) in argv {
-		let Ok(id) = arg.parse::<i64>() else {
-			return Err(sherr!(ParseErr, "Invalid command ID: {arg}").promote(span));
-		};
-		query.specific_ids.push(id);
-	}
+  for (arg, span) in argv {
+    let Ok(id) = arg.parse::<i64>() else {
+      return Err(sherr!(ParseErr, "Invalid command ID: {arg}").promote(span));
+    };
+    query.specific_ids.push(id);
+  }
 
-	if query.restore {
-		let num_restored = hist.restore_backup()?;
-		let stderr = borrow_fd(STDERR_FILENO);
-		write(
-			stderr,
-			format!("hist: restored {num_restored} entries from backup.\n").as_bytes(),
-		).ok();
-		state::set_status(0);
-		return Ok(());
-	}
+  if query.restore {
+    let num_restored = hist.restore_backup()?;
+    let stderr = borrow_fd(STDERR_FILENO);
+    write(
+      stderr,
+      format!("hist: restored {num_restored} entries from backup.\n").as_bytes(),
+    )
+    .ok();
+    state::set_status(0);
+    return Ok(());
+  }
 
   let entries = query.execute(&hist).promote_err(span.clone())?;
 

@@ -19,7 +19,10 @@ use vte::{Parser, Perform};
 
 pub use crate::libsh::guards::{RawModeGuard, raw_mode};
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult}, procio::borrow_fd, readline::keys::{KeyCode, ModKeys}, state::read_shopts
+  libsh::error::{ShErr, ShErrKind, ShResult},
+  procio::borrow_fd,
+  readline::keys::{KeyCode, ModKeys},
+  state::read_shopts,
 };
 use crate::{
   sherr,
@@ -886,12 +889,7 @@ impl Layout {
       t_cols: 0,
     }
   }
-  pub fn from_parts(
-		term_width: u16,
-		prompt: &str,
-		to_cursor: &str,
-		to_end: &str,
-	) -> Self {
+  pub fn from_parts(term_width: u16, prompt: &str, to_cursor: &str, to_end: &str) -> Self {
     let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 }, 0, false);
     let cursor = Self::calc_pos(term_width, to_cursor, prompt_end, prompt_end.col, true);
     let end = Self::calc_pos(term_width, to_end, prompt_end, prompt_end.col, false);

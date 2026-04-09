@@ -3,13 +3,13 @@ use std::str::FromStr;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
+  expand::as_var_val_display,
   libsh::error::{ShErr, ShResult, ShResultExt},
   match_loop,
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   procio::borrow_fd,
   sherr,
-  expand::as_var_val_display,
   state::{self, VarKind, read_vars, write_shopts, write_vars},
 };
 

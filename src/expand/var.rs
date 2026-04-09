@@ -262,9 +262,9 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 pub fn expand_glob(raw: &str) -> ShResult<String> {
   let mut words = vec![];
 
-	if !raw.contains(['*', '?', '[']) {
-		return Ok(raw.to_string());
-	}
+  if !raw.contains(['*', '?', '[']) {
+    return Ok(raw.to_string());
+  }
 
   let opts = glob::MatchOptions {
     require_literal_leading_dot: !crate::state::read_shopts(|s| s.core.dotglob),

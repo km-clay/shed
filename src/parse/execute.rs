@@ -9,7 +9,37 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    BUILTINS, alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, fixcmd::fixcmd, flowctl::flowctl, getopts::getopts, hash::hash_builtin, help::help, hist::hist_builtin, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs, kill_builtin}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, times::times, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
+    BUILTINS,
+    alias::{alias, unalias},
+    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
+    autocmd::autocmd,
+    cd::cd,
+    complete::{compgen_builtin, complete_builtin},
+    dirstack::{dirs, popd, pushd},
+    echo::echo,
+    eval, exec,
+    fixcmd::fixcmd,
+    flowctl::flowctl,
+    getopts::getopts,
+    hash::hash_builtin,
+    help::help,
+    hist::hist_builtin,
+    intro,
+    jobctl::{self, JobBehavior, continue_job, disown, jobs, kill_builtin},
+    keymap, map,
+    msg::msg,
+    pwd::pwd,
+    read::{self, read_builtin},
+    resource::{ulimit, umask_builtin},
+    seek::seek,
+    set::set_builtin,
+    shift::shift,
+    shopt::shopt,
+    source::source,
+    test::double_bracket_test,
+    times::times,
+    trap::{TrapTarget, trap},
+    varcmds::{export, local, readonly, unset},
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -437,7 +467,7 @@ impl Dispatcher {
       };
     })?;
 
-		Ok(())
+    Ok(())
   }
   fn exec_func(&mut self, func: Node) -> ShResult<()> {
     let mut blame = func.get_span().clone();
@@ -546,7 +576,7 @@ impl Dispatcher {
           e.print_error();
         }
       })?;
-			Ok(())
+      Ok(())
     } else {
       brc_grp_logic(self).map_err(|e| e.with_redirs(guard))
     }
@@ -608,7 +638,7 @@ impl Dispatcher {
           e.print_error();
         }
       })?;
-			Ok(())
+      Ok(())
     } else {
       case_logic(self)
         .try_blame(blame)
@@ -676,7 +706,7 @@ impl Dispatcher {
           e.print_error();
         }
       })?;
-			Ok(())
+      Ok(())
     } else {
       loop_logic(self)
         .try_blame(blame)
@@ -758,7 +788,7 @@ impl Dispatcher {
           e.print_error();
         }
       })?;
-			Ok(())
+      Ok(())
     } else {
       for_logic(self)
         .try_blame(blame)
@@ -823,7 +853,7 @@ impl Dispatcher {
           state::set_status(1);
         }
       })?;
-			Ok(())
+      Ok(())
     } else {
       if_logic(self)
         .try_blame(blame)
@@ -850,8 +880,9 @@ impl Dispatcher {
             if let Err(e) = s.dispatch_node(cmd) {
               e.print_error();
             }
-					})?;
-					Ok(())
+          },
+        )?;
+        Ok(())
       } else {
         self.dispatch_node(cmd)
       };
@@ -966,7 +997,7 @@ impl Dispatcher {
           e.print_error();
         }
       })?;
-			Ok(())
+      Ok(())
     } else {
       let result = self.dispatch_builtin(cmd);
 
@@ -1093,9 +1124,9 @@ impl Dispatcher {
       "msg" => msg(cmd),
       "fc" => fixcmd(cmd, self.interactive),
       "hist" => hist_builtin(cmd),
-			"hash" => hash_builtin(cmd),
-			"times" => times(cmd),
-			"kill" => kill_builtin(cmd),
+      "hash" => hash_builtin(cmd),
+      "times" => times(cmd),
+      "kill" => kill_builtin(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -1126,19 +1157,19 @@ impl Dispatcher {
         cmd.class.as_nd_kind()
       )
     };
-		let assign_behavior = if argv.is_empty() {
-			AssignBehavior::Set
-		} else {
-			AssignBehavior::Export
-		};
+    let assign_behavior = if argv.is_empty() {
+      AssignBehavior::Set
+    } else {
+      AssignBehavior::Export
+    };
 
-		if let AssignBehavior::Set = assign_behavior {
-			if !assignments.is_empty() {
-				self.set_assignments(assignments, assign_behavior)?;
-				state::set_status(0);
-			}
-			return Ok(())
-		}
+    if let AssignBehavior::Set = assign_behavior {
+      if !assignments.is_empty() {
+        self.set_assignments(assignments, assign_behavior)?;
+        state::set_status(0);
+      }
+      return Ok(());
+    }
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
@@ -1151,9 +1182,9 @@ impl Dispatcher {
     let fg_job = self.fg_job;
     let interactive = self.interactive;
     let child_logic = |pgid: Option<Pid>| -> ! {
-			if let AssignBehavior::Export = assign_behavior {
-				self.set_assignments(assignments, assign_behavior).ok();
-			}
+      if let AssignBehavior::Export = assign_behavior {
+        self.set_assignments(assignments, assign_behavior).ok();
+      }
       // For non-interactive exec-in-place (e.g. shed -c), skip process group
       // and terminal setup - just transparently replace the current process.
       if interactive || !no_fork {
@@ -1211,7 +1242,7 @@ impl Dispatcher {
     match unsafe { fork()? } {
       ForkResult::Child => child_logic(existing_pgid),
       ForkResult::Parent { child } => {
-				let job = self.job_stack.curr_job_mut().unwrap();
+        let job = self.job_stack.curr_job_mut().unwrap();
         // Close proc sub pipe fds - the child has inherited them
         // and will access them via /proc/self/fd/N. Keeping them
         // open here would prevent EOF on the pipe.
@@ -1232,7 +1263,12 @@ impl Dispatcher {
 
     Ok(())
   }
-  fn run_fork(&mut self, name: &str, report_time: bool, f: impl FnOnce(&mut Self)) -> ShResult<Pid> {
+  fn run_fork(
+    &mut self,
+    name: &str,
+    report_time: bool,
+    f: impl FnOnce(&mut Self),
+  ) -> ShResult<Pid> {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     match unsafe { fork()? } {
       ForkResult::Child => {

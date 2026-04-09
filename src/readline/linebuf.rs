@@ -15,16 +15,30 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-  expand::expand_cmd_sub, libsh::{
+  expand::expand_cmd_sub,
+  libsh::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},
-  }, match_loop, parse::{
+  },
+  match_loop,
+  parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::exec_input,
     lex::{LexFlags, QuoteState, Tk, TkFlags},
-  }, prelude::*, procio::{IoFrame, IoMode, IoStack, borrow_fd}, readline::{
-    editcmd::{LineAddr, ReadSrc, VerbCmd, WriteDest}, editmode::ex::SubFlags, highlight::Highlighter, history::History, markers, register::RegisterContent, term::get_win_size
-  }, sherr, state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars}
+  },
+  prelude::*,
+  procio::{IoFrame, IoMode, IoStack, borrow_fd},
+  readline::{
+    editcmd::{LineAddr, ReadSrc, VerbCmd, WriteDest},
+    editmode::ex::SubFlags,
+    highlight::Highlighter,
+    history::History,
+    markers,
+    register::RegisterContent,
+    term::get_win_size,
+  },
+  sherr,
+  state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars},
 };
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
@@ -408,10 +422,10 @@ pub enum MotionKind {
     end: usize,
     inclusive: bool,
   },
-	/// A list of lines, not necessarily contiguous. Used for things like the `g` command in visual mode, which selects all lines that match a certain condition.
-	Lines {
-		lines: Vec<usize>
-	},
+  /// A list of lines, not necessarily contiguous. Used for things like the `g` command in visual mode, which selects all lines that match a certain condition.
+  Lines {
+    lines: Vec<usize>,
+  },
   Block {
     start: Pos,
     end: Pos,
@@ -643,8 +657,8 @@ pub struct LineBuf {
   pub select_mode: Option<SelectMode>,
   pub last_selection: Option<(SelectMode, Pos)>,
 
-	pub last_substitute: Option<EditCmd>,
-	pub last_global: Option<EditCmd>,
+  pub last_substitute: Option<EditCmd>,
+  pub last_global: Option<EditCmd>,
 
   pub insert_mode_start_pos: Option<Pos>,
   pub saved_col: Option<usize>,
@@ -654,7 +668,7 @@ pub struct LineBuf {
 
   pub undo_stack: Vec<Edit>,
   pub redo_stack: Vec<Edit>,
-	pub merging_undos: bool,
+  pub merging_undos: bool,
 
   pub kill_ring: KillRing,
   pub kill_cycle_pos: Option<Pos>,
@@ -673,15 +687,15 @@ impl Default for LineBuf {
       },
       select_mode: None,
       last_selection: None,
-			last_substitute: None,
-			last_global: None,
+      last_substitute: None,
+      last_global: None,
       insert_mode_start_pos: None,
       saved_col: None,
       indent_ctx: IndentCtx::new(),
       scroll_offset: 0,
       undo_stack: vec![],
       redo_stack: vec![],
-			merging_undos: false,
+      merging_undos: false,
       kill_ring: KillRing::new(),
       kill_cycle_pos: None,
       concat_points: VecDeque::new(),
@@ -817,16 +831,23 @@ impl LineBuf {
     let (start, end) = ordered(span.0, span.1);
     self.lines.iter_mut().take(end + 1).skip(start)
   }
-	fn line_iter_mut_by_indices(&mut self, indices: &[usize]) -> impl Iterator<Item = &mut Line> + '_ {
-		let indices_set: HashSet<usize> = indices.iter().cloned().collect();
-		self.lines.iter_mut().enumerate().filter_map(move |(i, line)| {
-			if indices_set.contains(&i) {
-				Some(line)
-			} else {
-				None
-			}
-		})
-	}
+  fn line_iter_mut_by_indices(
+    &mut self,
+    indices: &[usize],
+  ) -> impl Iterator<Item = &mut Line> + '_ {
+    let indices_set: HashSet<usize> = indices.iter().cloned().collect();
+    self
+      .lines
+      .iter_mut()
+      .enumerate()
+      .filter_map(move |(i, line)| {
+        if indices_set.contains(&i) {
+          Some(line)
+        } else {
+          None
+        }
+      })
+  }
   fn line_to_cursor(&self) -> &[Grapheme] {
     let line = self.cur_line();
     let col = self.cursor.pos.col.min(line.len());
@@ -969,7 +990,7 @@ impl LineBuf {
       v.set_var("_ANCHOR", VarKind::Str(anchor.clone()), VarFlags::EXPORT)
     })?;
 
-		write(borrow_fd(STDOUT_FILENO), b"\r\n")?;
+    write(borrow_fd(STDOUT_FILENO), b"\r\n")?;
     RawModeGuard::with_cooked_mode(|| {
       exec_input(cmd.to_string(), None, true, Some("<ex-mode-cmd>".into()))
     })?;
@@ -1982,68 +2003,84 @@ impl LineBuf {
       inclusive: true,
     })
   }
-	fn get_row(&self, row: usize) -> Option<&Line> {
-		self.lines.get(row)
-	}
-	/// Given a LineAddr, resolve it to an absolute line number.
-	///
-	/// This is used for commands like `:3` or `:'a` where we need to convert the address into a line number in the buffer.
-	pub fn resolve_line_addr(&self, addr: &LineAddr) -> ShResult<Option<usize>> {
-		match addr {
-			LineAddr::Number(n) => Ok(Some((n.saturating_sub(1)).min(self.lines.len().saturating_sub(1)))),
-			LineAddr::Current => Ok(Some(self.row())),
-			LineAddr::Last => Ok(Some(self.lines.len().saturating_sub(1))),
-			LineAddr::Offset(i) => Ok(Some(self.row().saturating_add_signed(*i))),
-			dir @ (LineAddr::Pattern(re) |
-			LineAddr::PatternRev(re)) => {
-				let reg = Regex::new(re).map_err(|e| sherr!(ParseErr, "Invalid search pattern: {e}"))?;
-				let off = if matches!(dir, LineAddr::Pattern(_)) { 1 } else { -1 };
-				let inc_acc = |acc: usize| (acc as isize + off).rem_euclid(self.lines.len() as isize) as usize;
-				let mut acc = inc_acc(self.row());
+  fn get_row(&self, row: usize) -> Option<&Line> {
+    self.lines.get(row)
+  }
+  /// Given a LineAddr, resolve it to an absolute line number.
+  ///
+  /// This is used for commands like `:3` or `:'a` where we need to convert the address into a line number in the buffer.
+  pub fn resolve_line_addr(&self, addr: &LineAddr) -> ShResult<Option<usize>> {
+    match addr {
+      LineAddr::Number(n) => Ok(Some(
+        (n.saturating_sub(1)).min(self.lines.len().saturating_sub(1)),
+      )),
+      LineAddr::Current => Ok(Some(self.row())),
+      LineAddr::Last => Ok(Some(self.lines.len().saturating_sub(1))),
+      LineAddr::Offset(i) => Ok(Some(self.row().saturating_add_signed(*i))),
+      dir @ (LineAddr::Pattern(re) | LineAddr::PatternRev(re)) => {
+        let reg = Regex::new(re).map_err(|e| sherr!(ParseErr, "Invalid search pattern: {e}"))?;
+        let off = if matches!(dir, LineAddr::Pattern(_)) {
+          1
+        } else {
+          -1
+        };
+        let inc_acc =
+          |acc: usize| (acc as isize + off).rem_euclid(self.lines.len() as isize) as usize;
+        let mut acc = inc_acc(self.row());
 
-				while let Some(row) = self.get_row(acc) {
-					let row_str = row.to_string();
-					if reg.is_match(&row_str) {
-						return Ok(Some(acc));
-					}
+        while let Some(row) = self.get_row(acc) {
+          let row_str = row.to_string();
+          if reg.is_match(&row_str) {
+            return Ok(Some(acc));
+          }
 
-					if acc == self.row() { break }
-					acc = inc_acc(acc);
-				}
+          if acc == self.row() {
+            break;
+          }
+          acc = inc_acc(acc);
+        }
 
-				Ok(None)
-			}
-			LineAddr::Mark(ch) => {
-				match ch {
-					anchor @ ('<' | '>') => {
-						let Some(select_range) = self.select_range() else { return Ok(None) };
-						let (s,e) = match select_range {
-							Motion::CharRange(s, e) => (s.row, e.row),
-							Motion::LineRange(s, e) => {
-								let Some(s) = self.resolve_line_addr(&s)? else { return Ok(None) };
-								let Some(e) = self.resolve_line_addr(&e)? else { return Ok(None) };
-								(s, e)
-							}
-							_ => unreachable!()
-						};
-						match anchor {
-							'<' => Ok(Some(s)),
-							'>' => Ok(Some(e)),
-							_ => unreachable!()
-						}
-					}
-					_ => Ok(None) // TODO: implement marks
-				}
-			}
-		}
-	}
+        Ok(None)
+      }
+      LineAddr::Mark(ch) => {
+        match ch {
+          anchor @ ('<' | '>') => {
+            let Some(select_range) = self.select_range() else {
+              return Ok(None);
+            };
+            let (s, e) = match select_range {
+              Motion::CharRange(s, e) => (s.row, e.row),
+              Motion::LineRange(s, e) => {
+                let Some(s) = self.resolve_line_addr(&s)? else {
+                  return Ok(None);
+                };
+                let Some(e) = self.resolve_line_addr(&e)? else {
+                  return Ok(None);
+                };
+                (s, e)
+              }
+              _ => unreachable!(),
+            };
+            match anchor {
+              '<' => Ok(Some(s)),
+              '>' => Ok(Some(e)),
+              _ => unreachable!(),
+            }
+          }
+          _ => Ok(None), // TODO: implement marks
+        }
+      }
+    }
+  }
   /// Wrapper for eval_motion_inner that calls it with `check_hint: false`
   fn eval_motion(&mut self, cmd: &EditCmd) -> ShResult<Option<MotionKind>> {
     self.eval_motion_inner(cmd, false)
   }
   fn eval_motion_inner(&mut self, cmd: &EditCmd, check_hint: bool) -> ShResult<Option<MotionKind>> {
     let EditCmd { verb, motion, .. } = cmd;
-    let Some(MotionCmd(count, motion)) = motion.as_ref() else { return Ok(None) };
+    let Some(MotionCmd(count, motion)) = motion.as_ref() else {
+      return Ok(None);
+    };
     let buffer = self.lines.clone();
     if let Some(mut hint) = self.hint.clone() {
       attach_lines(&mut self.lines, &mut hint);
@@ -2249,12 +2286,14 @@ impl LineBuf {
                 }
               }
               false
-            }) else { return Ok(None) };
-						return Ok(Some(MotionKind::Char {
-							start: self.cursor.pos,
-							end: target_pos,
-							inclusive: true,
-						}));
+            }) else {
+              return Ok(None);
+            };
+            return Ok(Some(MotionKind::Char {
+              start: self.cursor.pos,
+              end: target_pos,
+              inclusive: true,
+            }));
           }
           Direction::Backward => {
             let mut depth = 0;
@@ -2269,12 +2308,14 @@ impl LineBuf {
                 }
               }
               false
-            }) else { return Ok(None) };
-						return Ok(Some(MotionKind::Char {
-							start: self.cursor.pos,
-							end: target_pos,
-							inclusive: true,
-						}));
+            }) else {
+              return Ok(None);
+            };
+            return Ok(Some(MotionKind::Char {
+              start: self.cursor.pos,
+              end: target_pos,
+              inclusive: true,
+            }));
           }
         }
       }
@@ -2287,17 +2328,23 @@ impl LineBuf {
           inclusive: true,
         })
       }
-			Motion::Line(l) => {
-				let Some(l) = self.resolve_line_addr(l)? else { return Ok(None) };
-				Some(MotionKind::Line {
-					start: l,
-					end: l + 1,
-					inclusive: false,
-				})
-			}
+      Motion::Line(l) => {
+        let Some(l) = self.resolve_line_addr(l)? else {
+          return Ok(None);
+        };
+        Some(MotionKind::Line {
+          start: l,
+          end: l + 1,
+          inclusive: false,
+        })
+      }
       Motion::LineRange(s, e) => {
-				let Some(s) = self.resolve_line_addr(s)? else { return Ok(None) };
-				let Some(e) = self.resolve_line_addr(e)? else { return Ok(None) };
+        let Some(s) = self.resolve_line_addr(s)? else {
+          return Ok(None);
+        };
+        let Some(e) = self.resolve_line_addr(e)? else {
+          return Ok(None);
+        };
         let (s, e) = ordered(s, e);
         Some(MotionKind::Line {
           start: s,
@@ -2327,10 +2374,11 @@ impl LineBuf {
         unreachable!("Repeat motions should have been resolved in readline/mod.rs")
       }
       dir @ (Motion::Global(constraint, pat) | Motion::NotGlobal(constraint, pat)) => {
-				let lines = self.get_matching_lines(constraint, pat, matches!(dir, Motion::Global(_, _)))?;
+        let lines =
+          self.get_matching_lines(constraint, pat, matches!(dir, Motion::Global(_, _)))?;
 
-				self.last_global = Some(cmd.clone());
-				Some(MotionKind::Lines { lines })
+        self.last_global = Some(cmd.clone());
+        Some(MotionKind::Lines { lines })
       }
       Motion::Null => None,
     };
@@ -2338,54 +2386,55 @@ impl LineBuf {
     self.lines = buffer;
     Ok(kind)
   }
-	pub fn get_matching_lines(&self, constraint: &Motion, re: &str, polarity: bool) -> ShResult<Vec<usize>> {
-		let (s,e) = match constraint {
-			Motion::LineRange(s, e) => {
-				let Some(s) = self.resolve_line_addr(s)? else {
-					return Ok(vec![]);
-				};
-				let Some(e) = self.resolve_line_addr(e)? else {
-					return Ok(vec![]);
-				};
-				ordered(s, e)
-			}
-			Motion::Line(addr) => {
-				let Some(line) = self.resolve_line_addr(addr)? else {
-					return Ok(vec![]);
-				};
-				(line, line)
-			}
-			_ => {
-				(0, self.lines.len().saturating_sub(1))
-			}
-		};
+  pub fn get_matching_lines(
+    &self,
+    constraint: &Motion,
+    re: &str,
+    polarity: bool,
+  ) -> ShResult<Vec<usize>> {
+    let (s, e) = match constraint {
+      Motion::LineRange(s, e) => {
+        let Some(s) = self.resolve_line_addr(s)? else {
+          return Ok(vec![]);
+        };
+        let Some(e) = self.resolve_line_addr(e)? else {
+          return Ok(vec![]);
+        };
+        ordered(s, e)
+      }
+      Motion::Line(addr) => {
+        let Some(line) = self.resolve_line_addr(addr)? else {
+          return Ok(vec![]);
+        };
+        (line, line)
+      }
+      _ => (0, self.lines.len().saturating_sub(1)),
+    };
 
-		let re = Regex::new(re)
-			.map_err(|e| sherr!(ParseErr, "Invalid regex in global command: {e}"))?;
-		let mut acc = 0;
-		let mut lines = vec![];
+    let re =
+      Regex::new(re).map_err(|e| sherr!(ParseErr, "Invalid regex in global command: {e}"))?;
+    let mut acc = 0;
+    let mut lines = vec![];
 
-		loop {
-			if !(s..=e).contains(&acc) {
-				acc += 1 % self.lines.len();
-				continue;
-			}
-			let Some(line) = self.get_row(acc) else {
-				break
-			};
-			let line_str = line.to_string();
-			if re.is_match(&line_str) == polarity {
-				lines.push(acc);
-			}
+    loop {
+      if !(s..=e).contains(&acc) {
+        acc += 1 % self.lines.len();
+        continue;
+      }
+      let Some(line) = self.get_row(acc) else { break };
+      let line_str = line.to_string();
+      if re.is_match(&line_str) == polarity {
+        lines.push(acc);
+      }
 
-			if acc == self.lines.len().saturating_sub(1) {
-				break;
-			}
-			acc += 1 % self.lines.len();
-		}
+      if acc == self.lines.len().saturating_sub(1) {
+        break;
+      }
+      acc += 1 % self.lines.len();
+    }
 
-		Ok(lines)
-	}
+    Ok(lines)
+  }
   fn move_to_start(&mut self, motion: MotionKind) {
     match motion {
       MotionKind::Char { start, end, .. } => {
@@ -2396,12 +2445,12 @@ impl LineBuf {
         let (s, _) = ordered(start, end);
         self.set_cursor(Pos { row: s, col: 0 });
       }
-			MotionKind::Lines { lines } => {
-				let Some(line) = lines.first() else {
-					return;
-				};
-				self.set_cursor(Pos { row: *line, col: 0 });
-			}
+      MotionKind::Lines { lines } => {
+        let Some(line) = lines.first() else {
+          return;
+        };
+        self.set_cursor(Pos { row: *line, col: 0 });
+      }
       MotionKind::Block { start, end } => todo!(),
     }
   }
@@ -2421,12 +2470,12 @@ impl LineBuf {
       MotionKind::Line { start, .. } => {
         self.set_row(start);
       }
-			MotionKind::Lines { lines } => {
-				let Some(line) = lines.first() else {
-					return Ok(());
-				};
-				self.set_row(*line);
-			}
+      MotionKind::Lines { lines } => {
+        let Some(line) = lines.first() else {
+          return Ok(());
+        };
+        self.set_row(*line);
+      }
       MotionKind::Block { start, end } => todo!(),
     }
     Ok(())
@@ -2461,14 +2510,14 @@ impl LineBuf {
         end,
         inclusive,
       } => self.extract_span((*start, *end), *inclusive),
-			MotionKind::Lines { lines } => {
-				let mut extracted_lines = vec![];
-				for line_no in lines.iter().rev() {
-					let line = self.lines.remove(*line_no);
-					extracted_lines.push(line);
-				}
-				extracted_lines
-			}
+      MotionKind::Lines { lines } => {
+        let mut extracted_lines = vec![];
+        for line_no in lines.iter().rev() {
+          let line = self.lines.remove(*line_no);
+          extracted_lines.push(line);
+        }
+        extracted_lines
+      }
       MotionKind::Line {
         start,
         end,
@@ -2574,14 +2623,14 @@ impl LineBuf {
           self.lines[e.row][col] = f(&self.lines[e.row][col]);
         }
       }
-			MotionKind::Lines { lines } => {
-				for line_no in lines.iter().rev() {
-					let line = self.line_mut(*line_no);
-					for col in 0..line.len() {
-						line[col] = f(&line[col]);
-					}
-				}
-			}
+      MotionKind::Lines { lines } => {
+        for line_no in lines.iter().rev() {
+          let line = self.line_mut(*line_no);
+          for col in 0..line.len() {
+            line[col] = f(&line[col]);
+          }
+        }
+      }
       MotionKind::Line {
         start,
         end,
@@ -2676,7 +2725,9 @@ impl LineBuf {
         let reg_content = match &motion {
           MotionKind::Char { .. } => RegisterContent::Span(content),
           MotionKind::Line { .. } => RegisterContent::Line(content),
-					MotionKind::Lines { .. } => RegisterContent::Line(vec![content.last().cloned().unwrap_or_default()]),
+          MotionKind::Lines { .. } => {
+            RegisterContent::Line(vec![content.last().cloned().unwrap_or_default()])
+          }
           MotionKind::Block { .. } => RegisterContent::Block(content),
         };
         register.write_to_register(reg_content);
@@ -2710,23 +2761,23 @@ impl LineBuf {
               self.cursor.pos = self.offset_cursor(0, col as isize);
             }
           }
-					MotionKind::Lines { lines } => {
-						let Some(s) = lines.first() else {
-							return Ok(());
-						};
-						self.set_row(*s);
-						if *verb == Verb::Change {
-							// we've gotta indent
-							let level = self.calc_indent_level();
-							let line = self.cur_line_mut();
-							let mut col = 0;
-							for tab in std::iter::repeat_n(Grapheme::from('\t'), level) {
-								line.0.insert(col, tab);
-								col += 1;
-							}
-							self.cursor.pos = self.offset_cursor(0, col as isize);
-						}
-					}
+          MotionKind::Lines { lines } => {
+            let Some(s) = lines.first() else {
+              return Ok(());
+            };
+            self.set_row(*s);
+            if *verb == Verb::Change {
+              // we've gotta indent
+              let level = self.calc_indent_level();
+              let line = self.cur_line_mut();
+              let mut col = 0;
+              for tab in std::iter::repeat_n(Grapheme::from('\t'), level) {
+                line.0.insert(col, tab);
+                col += 1;
+              }
+              self.cursor.pos = self.offset_cursor(0, col as isize);
+            }
+          }
           MotionKind::Block { start, .. } => {
             let (s, _) = ordered(self.cursor.pos, start);
             self.set_cursor(s);
@@ -3029,10 +3080,14 @@ impl LineBuf {
         let Some(motion) = self.eval_motion(cmd)? else {
           return Ok(());
         };
-        let lines: Either<_,_> = match motion {
-          MotionKind::Char { start, end, .. } => Either::Left(self.line_iter_mut(ordered(start.row, end.row))),
-          MotionKind::Line { start, end, .. } => Either::Left(self.line_iter_mut(ordered(start, end))),
-					MotionKind::Lines { lines } => Either::Right(self.line_iter_mut_by_indices(&lines)),
+        let lines: Either<_, _> = match motion {
+          MotionKind::Char { start, end, .. } => {
+            Either::Left(self.line_iter_mut(ordered(start.row, end.row)))
+          }
+          MotionKind::Line { start, end, .. } => {
+            Either::Left(self.line_iter_mut(ordered(start, end)))
+          }
+          MotionKind::Lines { lines } => Either::Right(self.line_iter_mut_by_indices(&lines)),
           MotionKind::Block { .. } => todo!(),
         };
         let mut col_offset = 0;
@@ -3057,24 +3112,24 @@ impl LineBuf {
         let Some(motion) = self.eval_motion(cmd)? else {
           return Ok(());
         };
-        let line_nums: Either<_,_> = match motion {
+        let line_nums: Either<_, _> = match motion {
           MotionKind::Char {
             start,
             end,
             inclusive,
           } => {
-						let (s,e) = ordered(start.row, end.row);
-						Either::Left(s..=e)
-					}
+            let (s, e) = ordered(start.row, end.row);
+            Either::Left(s..=e)
+          }
           MotionKind::Line {
             start,
             end,
             inclusive,
           } => {
-						let (s,e) = ordered(start, end);
-						Either::Left(s..=e)
-					}
-					MotionKind::Lines { lines } => Either::Right(lines.into_iter()),
+            let (s, e) = ordered(start, end);
+            Either::Left(s..=e)
+          }
+          MotionKind::Lines { lines } => Either::Right(lines.into_iter()),
           MotionKind::Block { start, end } => todo!(),
         };
         for row in line_nums {
@@ -3333,84 +3388,91 @@ impl LineBuf {
         self.apply_motion_inner(motion_kind, true)?;
       }
       Verb::Substitute(old, new, flags) => {
-				let line_nums: Vec<usize> = match self.eval_motion(cmd)? {
-					Some(MotionKind::Lines { lines }) => lines,
-					Some(MotionKind::Line { start, end, inclusive }) => {
-						if inclusive {
-							(start..=end).collect()
-						} else {
-							(start..end).collect()
-						}
-					}
-					None => vec![self.row()],
+        let line_nums: Vec<usize> = match self.eval_motion(cmd)? {
+          Some(MotionKind::Lines { lines }) => lines,
+          Some(MotionKind::Line {
+            start,
+            end,
+            inclusive,
+          }) => {
+            if inclusive {
+              (start..=end).collect()
+            } else {
+              (start..end).collect()
+            }
+          }
+          None => vec![self.row()],
 
-					m => return Err(sherr!(
-						InternalErr,
-						"Substitute verb only supports linewise motions, found {m:?}"
-					))
-				};
+          m => {
+            return Err(sherr!(
+              InternalErr,
+              "Substitute verb only supports linewise motions, found {m:?}"
+            ));
+          }
+        };
 
-				let re = match regex::Regex::new(old) {
-					Ok(re) => re,
-					Err(e) => {
-						write_meta(|m| m.post_status_message(format!("{e}")));
-						return Ok(());
-					}
-				};
+        let re = match regex::Regex::new(old) {
+          Ok(re) => re,
+          Err(e) => {
+            write_meta(|m| m.post_status_message(format!("{e}")));
+            return Ok(());
+          }
+        };
 
-				// TODO: implement flag logic
-				let mut changes: Vec<(usize, Vec<Line>)> = vec![];
-				let lines = self.lines
-					.iter()
-					.enumerate()
-					.filter(|(i,_)| line_nums.contains(i));
+        // TODO: implement flag logic
+        let mut changes: Vec<(usize, Vec<Line>)> = vec![];
+        let lines = self
+          .lines
+          .iter()
+          .enumerate()
+          .filter(|(i, _)| line_nums.contains(i));
 
-				for (i,line) in lines {
-					let s = line.to_string();
-					let res = if flags.contains(SubFlags::GLOBAL) {
-						re.replace_all(&s, new)
-					} else {
-						re.replace(&s, new)
-					};
-					let lines = to_lines(res);
-					changes.push((i, lines));
-				}
+        for (i, line) in lines {
+          let s = line.to_string();
+          let res = if flags.contains(SubFlags::GLOBAL) {
+            re.replace_all(&s, new)
+          } else {
+            re.replace(&s, new)
+          };
+          let lines = to_lines(res);
+          changes.push((i, lines));
+        }
 
-				for (i,change) in changes.into_iter().rev() {
-					self.lines.remove(i);
-					for (j,new_line) in change.into_iter().enumerate() {
-						self.lines.insert(i + j, new_line);
-					}
-				}
+        for (i, change) in changes.into_iter().rev() {
+          self.lines.remove(i);
+          for (j, new_line) in change.into_iter().enumerate() {
+            self.lines.insert(i + j, new_line);
+          }
+        }
 
-				self.last_substitute = Some(cmd.clone());
-			}
+        self.last_substitute = Some(cmd.clone());
+      }
       Verb::RepeatSubstitute => {
-				if let Some(sub) = self.last_substitute.clone() {
-					let merged = EditCmd {
-						register: cmd.register,
-						verb: sub.verb,
-						motion: cmd.motion.clone().or(sub.motion),
-						raw_seq: cmd.raw_seq.clone(),
-						flags: cmd.flags,
-					};
-					self.exec_cmd(merged)?;
-				}
-			}
+        if let Some(sub) = self.last_substitute.clone() {
+          let merged = EditCmd {
+            register: cmd.register,
+            verb: sub.verb,
+            motion: cmd.motion.clone().or(sub.motion),
+            raw_seq: cmd.raw_seq.clone(),
+            flags: cmd.flags,
+          };
+          self.exec_cmd(merged)?;
+        }
+      }
       Verb::RepeatGlobal => {
-				if let Some(global) = self.last_global.clone() {
-					let merged = EditCmd {
-						register: cmd.register,
-						verb: global.verb,
-						motion: cmd.motion.clone().or(global.motion),
-						raw_seq: cmd.raw_seq.clone(),
-						flags: cmd.flags,
-					};
-					self.exec_cmd(merged)?;
-				}
+        if let Some(global) = self.last_global.clone() {
+          let merged = EditCmd {
+            register: cmd.register,
+            verb: global.verb,
+            motion: cmd.motion.clone().or(global.motion),
+            raw_seq: cmd.raw_seq.clone(),
+            flags: cmd.flags,
+          };
+          self.exec_cmd(merged)?;
+        }
       }
       Verb::RepeatLast
-			| Verb::Quit
+      | Verb::Quit
       | Verb::Normal(_)
       | Verb::HistoryDown
       | Verb::HistoryUp
@@ -3437,12 +3499,12 @@ impl LineBuf {
 
     res
   }
-	pub fn start_undo_merge(&mut self) {
-		self.merging_undos = true;
-	}
-	pub fn stop_undo_merge(&mut self) {
-		self.merging_undos = false;
-	}
+  pub fn start_undo_merge(&mut self) {
+    self.merging_undos = true;
+  }
+  pub fn stop_undo_merge(&mut self) {
+    self.merging_undos = false;
+  }
   pub fn exec_cmd(&mut self, cmd: EditCmd) -> ShResult<()> {
     let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
     let is_kill = cmd.verb.as_ref().is_some_and(|v| v.1 == Verb::Kill);
@@ -3483,7 +3545,7 @@ impl LineBuf {
 
     // Stop merging on any non-char-insert command, even if buffer didn't change
     if !self.merging_undos
-			&& !is_char_insert
+      && !is_char_insert
       && !is_undo_op
       && let Some(edit) = self.undo_stack.last_mut()
     {
@@ -3509,7 +3571,9 @@ impl LineBuf {
       } else {
         self.handle_edit(before, new_cursor, old_cursor);
         // Change starts a new merge chain so subsequent InsertChars merge into it
-        if (starts_merge || self.merging_undos) && let Some(edit) = self.undo_stack.last_mut() {
+        if (starts_merge || self.merging_undos)
+          && let Some(edit) = self.undo_stack.last_mut()
+        {
           edit.merging = true;
         }
       }
@@ -3814,9 +3878,9 @@ impl LineBuf {
     }
   }
 
-	pub fn is_selecting(&self) -> bool {
-		self.select_mode.is_some()
-	}
+  pub fn is_selecting(&self) -> bool {
+    self.select_mode.is_some()
+  }
 
   /// Helper: convert a Pos to a flat grapheme offset.
   fn pos_to_flat(&self, pos: Pos) -> usize {
@@ -3878,7 +3942,7 @@ impl LineBuf {
   /// echo "foo $(echo 'bar!') biz"
   /// ```
   /// The exclamation point is inside of both double and single quotes here. According to shell language though, it's really just in single quotes because the command substitution is it's own parsing context.
-	/// Pressing enter on this case with a normal flat parse will attempt history expansion. But a parse that recurses into command subs will not.
+  /// Pressing enter on this case with a normal flat parse will attempt history expansion. But a parse that recurses into command subs will not.
   /// The easiest way to handle this is to simply do lightweight recursive descent whenever we see the start of a command sub.
   pub fn find_history_expansions(
     &mut self,
@@ -4010,10 +4074,10 @@ impl LineBuf {
               }
             }
             ch if !ch.is_whitespace() => {
-							if ch == '"' && qt_state.in_double() {
-								qt_state.toggle_double();
-								continue;
-							}
+              if ch == '"' && qt_state.in_double() {
+                qt_state.toggle_double();
+                continue;
+              }
               let mut end = pos2;
               let cur_row = end.row;
               while let Some((pos3, gr3)) = positions.next() {
@@ -4023,9 +4087,9 @@ impl LineBuf {
                 let Some(ch) = gr3.as_char() else { break }; // break on non-ascii
                 if ch.is_whitespace() {
                   break; // break on whitespace
-								} else if ch == '"' && qt_state.in_double() {
-									qt_state.toggle_double();
-									break
+                } else if ch == '"' && qt_state.in_double() {
+                  qt_state.toggle_double();
+                  break;
                 };
                 end = pos3;
               }

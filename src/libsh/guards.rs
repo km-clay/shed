@@ -84,20 +84,15 @@ impl Drop for RedirGuard {
 // ============================================================================
 
 pub fn raw_mode() -> RawModeGuard {
-  let orig = termios::tcgetattr(borrow_fd(*TTY_FILENO))
-    .expect("Failed to get terminal attributes");
+  let orig = termios::tcgetattr(borrow_fd(*TTY_FILENO)).expect("Failed to get terminal attributes");
   let mut raw = orig.clone();
   termios::cfmakeraw(&mut raw);
   // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
   raw.local_flags |= termios::LocalFlags::ISIG;
   // Keep OPOST enabled so \n is translated to \r\n on output
   raw.output_flags |= termios::OutputFlags::OPOST;
-  termios::tcsetattr(
-    borrow_fd(*TTY_FILENO),
-    termios::SetArg::TCSANOW,
-    &raw,
-  )
-  .expect("Failed to set terminal to raw mode");
+  termios::tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &raw)
+    .expect("Failed to set terminal to raw mode");
 
   let (_cols, _rows) = get_win_size(*TTY_FILENO);
 
@@ -117,24 +112,24 @@ pub struct RawModeGuard {
 impl RawModeGuard {
   /// Disable raw mode temporarily for a specific operation
   pub fn disable_for<F: FnOnce() -> R, R>(&self, func: F) -> R {
-      let fd = borrow_fd(self.fd);
-      // Temporarily restore the original termios
-      termios::tcsetattr(fd, termios::SetArg::TCSANOW, &self.orig)
-        .expect("Failed to temporarily disable raw mode");
+    let fd = borrow_fd(self.fd);
+    // Temporarily restore the original termios
+    termios::tcsetattr(fd, termios::SetArg::TCSANOW, &self.orig)
+      .expect("Failed to temporarily disable raw mode");
 
-      // Run the function
-      let result = func();
+    // Run the function
+    let result = func();
 
-      // Re-enable raw mode
-      let mut raw = self.orig.clone();
-      termios::cfmakeraw(&mut raw);
-      // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
-      raw.local_flags |= termios::LocalFlags::ISIG;
-      // Keep OPOST enabled so \n is translated to \r\n on output
-      raw.output_flags |= termios::OutputFlags::OPOST;
-      termios::tcsetattr(fd, termios::SetArg::TCSANOW, &raw).expect("Failed to re-enable raw mode");
+    // Re-enable raw mode
+    let mut raw = self.orig.clone();
+    termios::cfmakeraw(&mut raw);
+    // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
+    raw.local_flags |= termios::LocalFlags::ISIG;
+    // Keep OPOST enabled so \n is translated to \r\n on output
+    raw.output_flags |= termios::OutputFlags::OPOST;
+    termios::tcsetattr(fd, termios::SetArg::TCSANOW, &raw).expect("Failed to re-enable raw mode");
 
-      result
+    result
   }
 
   pub fn with_cooked_mode<F, R>(f: F) -> R
@@ -154,13 +149,9 @@ impl RawModeGuard {
 }
 
 impl Drop for RawModeGuard {
-	fn drop(&mut self) {
-		termios::tcsetattr(
-			borrow_fd(self.fd),
-			termios::SetArg::TCSANOW,
-			&self.orig,
-		).ok();
-	}
+  fn drop(&mut self) {
+    termios::tcsetattr(borrow_fd(self.fd), termios::SetArg::TCSANOW, &self.orig).ok();
+  }
 }
 
 // ============================================================================

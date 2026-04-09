@@ -153,7 +153,7 @@ pub fn pushd(node: Node) -> ShResult<()> {
     if let Some(dir) = new_cwd
       && !no_cd
     {
-			change_dir(&dir).promote_err(blame)?;
+      change_dir(&dir).promote_err(blame)?;
       print_dirs()?;
     }
   } else if let Some(dir) = dir {
@@ -167,7 +167,7 @@ pub fn pushd(node: Node) -> ShResult<()> {
       return Ok(());
     }
 
-		change_dir(&dir).promote_err(blame)?;
+    change_dir(&dir).promote_err(blame)?;
     print_dirs()?;
   }
 
@@ -215,7 +215,7 @@ pub fn popd(node: Node) -> ShResult<()> {
         let dir = write_meta(|m| m.pop_dir());
         if !no_cd {
           if let Some(dir) = dir {
-						change_dir(&dir).promote_err(blame)?;
+            change_dir(&dir).promote_err(blame)?;
           } else {
             return Err(sherr!(
               ExecFail @ blame,
@@ -263,7 +263,7 @@ pub fn popd(node: Node) -> ShResult<()> {
     }
 
     if let Some(dir) = dir {
-			change_dir(&dir).promote_err(blame)?;
+      change_dir(&dir).promote_err(blame)?;
       print_dirs()?;
     } else {
       return Err(sherr!(

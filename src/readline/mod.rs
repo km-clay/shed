@@ -7,11 +7,11 @@ use history::History;
 use itertools::Either;
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::LineBuf;
-use unicode_segmentation::UnicodeSegmentation;
 use std::collections::VecDeque;
 use std::fmt::Write;
 use std::rc::Rc;
 use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
@@ -126,12 +126,12 @@ pub mod markers {
 
   pub const VI_SEQ_EXP: Marker = '\u{e009}';
 
-	// Ex mode highlighting markers
-	pub const EX_LINE_ADDR: Marker = '\u{e00a}';
-	pub const EX_CMD: Marker = '\u{e00b}';
-	pub const EX_DELIM: Marker = '\u{e00c}';
-	pub const EX_PAT: Marker = '\u{e00d}';
-	pub const EX_SHELL_CMD: Marker = '\u{e00e}';
+  // Ex mode highlighting markers
+  pub const EX_LINE_ADDR: Marker = '\u{e00a}';
+  pub const EX_CMD: Marker = '\u{e00b}';
+  pub const EX_DELIM: Marker = '\u{e00c}';
+  pub const EX_PAT: Marker = '\u{e00d}';
+  pub const EX_SHELL_CMD: Marker = '\u{e00e}';
 
   pub const END_MARKERS: [Marker; 7] = [
     VAR_SUB_END,
@@ -906,50 +906,59 @@ impl ShedLine {
       return Ok(None);
     };
 
-		if let Some(VerbCmd(_, Verb::Normal(seq))) = cmd.verb() {
-			let line_nums: Either<_,_> = match cmd.motion() {
-				Some(MotionCmd(_, Motion::LineRange(s, e))) => {
-					let s = self.editor.resolve_line_addr(s)?.unwrap_or(self.editor.row());
-					let e = self.editor.resolve_line_addr(e)?.unwrap_or(self.editor.row());
-					let (s,e) = ordered(s,e);
-					Either::Left(s..=e)
-				}
-				Some(MotionCmd(_, Motion::Line(addr))) => {
-					let addr = self.editor.resolve_line_addr(addr)?.unwrap_or(self.editor.row());
-					Either::Left(addr..=addr)
-				}
-				Some(MotionCmd(_, m @ (Motion::Global(con, re) | Motion::NotGlobal(con, re)))) => {
-					let polarity = matches!(m, Motion::Global(_, _));
-					let lines = self.editor.get_matching_lines(con, re, polarity)?;
-					Either::Right(lines.into_iter())
-				}
-				_ => {
-					let row = self.editor.row();
-					Either::Left(row..=row)
-				}
-			};
+    if let Some(VerbCmd(_, Verb::Normal(seq))) = cmd.verb() {
+      let line_nums: Either<_, _> = match cmd.motion() {
+        Some(MotionCmd(_, Motion::LineRange(s, e))) => {
+          let s = self
+            .editor
+            .resolve_line_addr(s)?
+            .unwrap_or(self.editor.row());
+          let e = self
+            .editor
+            .resolve_line_addr(e)?
+            .unwrap_or(self.editor.row());
+          let (s, e) = ordered(s, e);
+          Either::Left(s..=e)
+        }
+        Some(MotionCmd(_, Motion::Line(addr))) => {
+          let addr = self
+            .editor
+            .resolve_line_addr(addr)?
+            .unwrap_or(self.editor.row());
+          Either::Left(addr..=addr)
+        }
+        Some(MotionCmd(_, m @ (Motion::Global(con, re) | Motion::NotGlobal(con, re)))) => {
+          let polarity = matches!(m, Motion::Global(_, _));
+          let lines = self.editor.get_matching_lines(con, re, polarity)?;
+          Either::Right(lines.into_iter())
+        }
+        _ => {
+          let row = self.editor.row();
+          Either::Left(row..=row)
+        }
+      };
 
-			let keys = expand_keymap(seq);
+      let keys = expand_keymap(seq);
 
-			self.editor.start_undo_merge();
-			for line in line_nums {
-				self.editor.set_cursor(linebuf::Pos { row: line, col: 0 });
-				self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
+      self.editor.start_undo_merge();
+      for line in line_nums {
+        self.editor.set_cursor(linebuf::Pos { row: line, col: 0 });
+        self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
 
-				for key in keys.clone() {
-					if let Err(e) = self.handle_key(key) {
-						self.editor.stop_undo_merge();
-						return Err(e);
-					}
-				}
-			}
-			self.editor.stop_undo_merge();
+        for key in keys.clone() {
+          if let Err(e) = self.handle_key(key) {
+            self.editor.stop_undo_merge();
+            return Err(e);
+          }
+        }
+      }
+      self.editor.stop_undo_merge();
 
-			// just in case
-			self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
+      // just in case
+      self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
 
-			return Ok(None);
-		}
+      return Ok(None);
+    }
 
     if !cmd.is_virtual_scroll() {
       self.focused_history().stop_virtual_scroll();
@@ -1174,7 +1183,7 @@ impl ShedLine {
       // We are scrolling up from a pending command
       // Let's refresh the search mask to make sure
       // our history is up to date
-			let joined = self.editor.joined();
+      let joined = self.editor.joined();
       self.focused_history().update_search_mask(Some(&joined));
     }
     let entry = self.focused_history().scroll(count).cloned();
@@ -1183,7 +1192,9 @@ impl ShedLine {
   pub fn swap_history_editor(&mut self, entry: Option<HistEntry>) {
     if let Some(entry) = entry {
       let editor = std::mem::take(self.focused_editor());
-      self.focused_editor().set_buffer(entry.command().to_string());
+      self
+        .focused_editor()
+        .set_buffer(entry.command().to_string());
       if self.focused_history().pending.is_none() {
         self.focused_history().pending = Some(editor);
       }
@@ -1198,7 +1209,7 @@ impl ShedLine {
       self.writer.send_bell().ok();
       return;
     }
-		let clamp = self.mode.clamp_cursor();
+    let clamp = self.mode.clamp_cursor();
     self.focused_editor().set_cursor_clamp(clamp);
     self.focused_editor().fix_cursor();
   }
@@ -1349,16 +1360,16 @@ impl ShedLine {
       new_layout.end.row += 1;
       new_layout.cursor.row = new_layout.end.row;
       new_layout.cursor.col = {
-				let cursor_offset = self.mode.pending_cursor().unwrap_or(pending_seq.len());
-				let before_cursor = pending_seq
-					.graphemes(true)
-					.take(cursor_offset)
-					.collect::<String>();
+        let cursor_offset = self.mode.pending_cursor().unwrap_or(pending_seq.len());
+        let before_cursor = pending_seq
+          .graphemes(true)
+          .take(cursor_offset)
+          .collect::<String>();
 
-				(2 + before_cursor.width()) as u16
-			};
+        (2 + before_cursor.width()) as u16
+      };
 
-			write!(buf, "\x1b[{}G", new_layout.cursor.col + 1).unwrap();
+      write!(buf, "\x1b[{}G", new_layout.cursor.col + 1).unwrap();
     }
 
     write!(buf, "{}", &self.mode.cursor_style()).unwrap();
@@ -1463,12 +1474,13 @@ impl ShedLine {
       ModeReport::Ex | ModeReport::Verbatim
     ) && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE)
     {
-			if self.mode.report_mode() == ModeReport::Ex
-			&& let Some(mode) = self.saved_mode.as_ref()
-			&& let ModeReport::Visual = mode.report_mode() {
-				self.editor.stop_selecting();
+      if self.mode.report_mode() == ModeReport::Ex
+        && let Some(mode) = self.saved_mode.as_ref()
+        && let ModeReport::Visual = mode.report_mode()
+      {
+        self.editor.stop_selecting();
         Box::new(ViNormal::new())
-			} else if let Some(saved) = self.saved_mode.take() {
+      } else if let Some(saved) = self.saved_mode.take() {
         saved
       } else {
         Box::new(ViNormal::new())
@@ -1484,7 +1496,10 @@ impl ShedLine {
           )
         }
 
-        Verb::ExMode => Box::new(ViEx::new(self.ex_history.clone(), self.editor.is_selecting())),
+        Verb::ExMode => Box::new(ViEx::new(
+          self.ex_history.clone(),
+          self.editor.is_selecting(),
+        )),
 
         Verb::VerbatimMode => {
           self.reader.verbatim_single = true;
@@ -1541,11 +1556,16 @@ impl ShedLine {
       self.repeat_action = mode.as_replay();
     }
 
-		if let Some(range) = self.editor.select_range()
-			&& cmd.verb().is_some_and(|v| !matches!(v.1, Verb::VisualMode | Verb::VisualModeLine | Verb::VisualModeBlock))
-		{
-			cmd.motion = Some(motion!(range))
-		}
+    if let Some(range) = self.editor.select_range()
+      && cmd.verb().is_some_and(|v| {
+        !matches!(
+          v.1,
+          Verb::VisualMode | Verb::VisualModeLine | Verb::VisualModeBlock
+        )
+      })
+    {
+      cmd.motion = Some(motion!(range))
+    }
 
     // Set cursor clamp BEFORE executing the command so that motions
     // (like EndOfLine for 'A') can reach positions valid in the new mode
@@ -1579,7 +1599,10 @@ impl ShedLine {
       ModeReport::Normal => Box::new(ViNormal::new()),
       ModeReport::Insert => Box::new(ViInsert::new()),
       ModeReport::Visual => Box::new(ViVisual::new()),
-      ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone(), self.editor.is_selecting())),
+      ModeReport::Ex => Box::new(ViEx::new(
+        self.ex_history.clone(),
+        self.editor.is_selecting(),
+      )),
       ModeReport::Replace => Box::new(ViReplace::new()),
       ModeReport::Verbatim => Box::new(ViVerbatim::new()),
       ModeReport::Emacs => Box::new(Emacs::new()),
@@ -1622,7 +1645,10 @@ impl ShedLine {
             ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn EditMode>,
             ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn EditMode>,
             ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn EditMode>,
-            ModeReport::Ex => Box::new(ViEx::new(self.ex_history.clone(),self.editor.is_selecting())) as Box<dyn EditMode>,
+            ModeReport::Ex => Box::new(ViEx::new(
+              self.ex_history.clone(),
+              self.editor.is_selecting(),
+            )) as Box<dyn EditMode>,
             ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn EditMode>,
             ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn EditMode>,
             ModeReport::Emacs => Box::new(Emacs::new()) as Box<dyn EditMode>,

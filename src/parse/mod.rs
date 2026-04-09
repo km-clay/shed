@@ -1835,6 +1835,10 @@ impl ParseStream {
           assignments.push(assign)
         } else if is_keyword {
           return Ok(None);
+        } else if prefix_tk.class == TkRule::Redir {
+          let ctx = self.context.clone();
+          let redir = Self::build_redir(prefix_tk, || tk_iter.next().cloned(), &mut node_tks, ctx)?;
+          redirs.push(redir);
         } else if prefix_tk.class == TkRule::Sep {
           // Separator ends the prefix section - add it so commit() consumes it
           node_tks.push(prefix_tk.clone());
@@ -1874,7 +1878,7 @@ impl ParseStream {
         };
         match tk.class {
           _ if tk_iter.peek().is_some_and(|tk| tk.class == TkRule::Bg) => break,
-					TkRule:: Comment => break,
+          TkRule::Comment => break,
 
           TkRule::EOI
           | TkRule::Pipe
@@ -1904,11 +1908,13 @@ impl ParseStream {
             };
             redirs.push(redir);
           }
-          _ => return Err(parse_err_full(
-						&format!("Unexpected token in command: {:?}", tk.class),
-						&tk.span,
-						self.context.clone(),
-					)),
+          _ => {
+            return Err(parse_err_full(
+              &format!("Unexpected token in command: {:?}", tk.class),
+              &tk.span,
+              self.context.clone(),
+            ));
+          }
         };
       }
       self.commit(node_tks.len());

@@ -381,13 +381,13 @@ impl Verb {
 
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub enum LineAddr {
-	Number(usize),
-	Current,
-	Last,
-	Offset(isize),
-	Pattern(String),
-	PatternRev(String),
-	Mark(char)
+  Number(usize),
+  Current,
+  Last,
+  Offset(isize),
+  Pattern(String),
+  PatternRev(String),
+  Mark(char),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -418,7 +418,7 @@ pub enum Motion {
   ToParen(Direction),
   CharRange(Pos, Pos),
   LineRange(LineAddr, LineAddr),
-	Line(LineAddr),
+  Line(LineAddr),
   BlockRange(Pos, Pos),
   RepeatMotion,
   RepeatMotionRev,

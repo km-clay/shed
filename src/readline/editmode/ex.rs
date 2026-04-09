@@ -8,16 +8,17 @@ use crate::expand::Expander;
 use crate::libsh::error::ShResult;
 use crate::parse::lex::TkFlags;
 use crate::readline::editcmd::{
-  Anchor, CmdFlags, EditCmd, LineAddr, Motion, MotionCmd, ReadSrc, RegisterName, To, Verb, VerbCmd, WriteDest
+  Anchor, CmdFlags, EditCmd, LineAddr, Motion, MotionCmd, ReadSrc, RegisterName, To, Verb, VerbCmd,
+  WriteDest,
 };
 use crate::readline::editmode::{EditMode, ModeReport, ViInsert};
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
-use crate::{motion, sherr};
 use crate::state::write_meta;
-use crate::{bitflags, match_loop};
 use crate::verb;
+use crate::{bitflags, match_loop};
+use crate::{motion, sherr};
 
 bitflags! {
   #[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -52,13 +53,13 @@ impl Default for ExEditor {
 
 impl ExEditor {
   pub fn new(history: History, has_select: bool) -> Self {
-		let mut buf = LineBuf::default();
-		if has_select {
-			buf = buf.with_initial("'<,'>", 6);
-		}
+    let mut buf = LineBuf::default();
+    if has_select {
+      buf = buf.with_initial("'<,'>", 6);
+    }
     Self {
       history,
-			buf,
+      buf,
       mode: ViInsert::default(),
     }
   }
@@ -140,12 +141,15 @@ impl EditMode for ViEx {
           }
         };
 
-				if let Some(hist) = self.history()
-				&& let Err(e) = hist.push(input) {
-					write_meta(|m| m.post_status_message(format!("Failed to save ex command to history: {e}")));
-				}
+        if let Some(hist) = self.history()
+          && let Err(e) = hist.push(input)
+        {
+          write_meta(|m| {
+            m.post_status_message(format!("Failed to save ex command to history: {e}"))
+          });
+        }
 
-				res
+        res
       }
       E(C::Char('C'), M::CTRL) => {
         self.pending_cmd.clear();
@@ -194,11 +198,11 @@ impl EditMode for ViEx {
   }
 
   fn move_cursor_on_undo(&self) -> bool {
-		self.pending_cmd.mode.move_cursor_on_undo()
+    self.pending_cmd.mode.move_cursor_on_undo()
   }
 
   fn clamp_cursor(&self) -> bool {
-		self.pending_cmd.mode.clamp_cursor()
+    self.pending_cmd.mode.clamp_cursor()
   }
 
   fn hist_scroll_start_pos(&self) -> Option<To> {
@@ -210,43 +214,46 @@ impl EditMode for ViEx {
   }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct CharTracker<'a> {
-	chars: Peekable<Chars<'a>>,
-	pos: usize
+  chars: Peekable<Chars<'a>>,
+  pos: usize,
 }
 
 impl<'a> CharTracker<'a> {
-	pub fn new(s: &'a str) -> Self {
-		Self { chars: s.chars().peekable(), pos: 0 }
-	}
-	pub fn peek(&mut self) -> Option<&char> {
-		self.chars.peek()
-	}
-	pub fn pos(&self) -> usize {
-		self.pos
-	}
+  pub fn new(s: &'a str) -> Self {
+    Self {
+      chars: s.chars().peekable(),
+      pos: 0,
+    }
+  }
+  pub fn peek(&mut self) -> Option<&char> {
+    self.chars.peek()
+  }
+  pub fn pos(&self) -> usize {
+    self.pos
+  }
 }
 
 impl Iterator for CharTracker<'_> {
-	type Item = char;
+  type Item = char;
 
-	fn next(&mut self) -> Option<Self::Item> {
-		let ch = self.chars.next()?;
-		self.pos += ch.len_utf8();
-		Some(ch)
-	}
+  fn next(&mut self) -> Option<Self::Item> {
+    let ch = self.chars.next()?;
+    self.pos += ch.len_utf8();
+    Some(ch)
+  }
 }
 
 impl<'a> itertools::PeekingNext for CharTracker<'a> {
-	fn peeking_next<F>(&mut self, accept: F) -> Option<Self::Item>
-	where
-		Self: Sized,
-		F: FnOnce(&Self::Item) -> bool
-	{
-		let ch = self.chars.peek().copied()?;
-		accept(&ch).then(|| self.next()).flatten()
-	}
+  fn peeking_next<F>(&mut self, accept: F) -> Option<Self::Item>
+  where
+    Self: Sized,
+    F: FnOnce(&Self::Item) -> bool,
+  {
+    let ch = self.chars.peek().copied()?;
+    accept(&ch).then(|| self.next()).flatten()
+  }
 }
 
 pub fn parse_ex_input(raw: &str) -> Result<Option<EditCmd>, Option<String>> {
@@ -255,32 +262,34 @@ pub fn parse_ex_input(raw: &str) -> Result<Option<EditCmd>, Option<String>> {
     return Ok(None);
   }
   let mut chars = CharTracker::new(raw);
-	let mut motion = parse_ex_address(&mut chars)?.map(|m| motion!(m));
-	log::debug!("Parsed motion: {:?}", motion);
-	let verb = {
-		if chars.peek() == Some(&'g') {
-			let mut cmd_name = String::new();
-			while let Some(ch) = chars.peek() {
-				if ch.is_alphanumeric() {
-					cmd_name.push(*ch);
-					chars.next();
-				} else {
-					break
-				}
-			}
-			if !"global".starts_with(&cmd_name) {
-				return Err(None)
-			}
-			let Some(result) = parse_global(&mut chars,motion.as_ref().map(|mcmd| &mcmd.1))? else { return Ok(None) };
-			motion = Some(motion!(result.0));
-			Some(VerbCmd(1,result.1))
-		} else {
-			parse_ex_command(&mut chars)?.map(|v| verb!(v))
-		}
-	};
-	if motion.is_none() && !matches!(verb, Some(VerbCmd(_,Verb::Write(_)))) {
-		motion = Some(motion!(Motion::Line(LineAddr::Current)))
-	}
+  let mut motion = parse_ex_address(&mut chars)?.map(|m| motion!(m));
+  log::debug!("Parsed motion: {:?}", motion);
+  let verb = {
+    if chars.peek() == Some(&'g') {
+      let mut cmd_name = String::new();
+      while let Some(ch) = chars.peek() {
+        if ch.is_alphanumeric() {
+          cmd_name.push(*ch);
+          chars.next();
+        } else {
+          break;
+        }
+      }
+      if !"global".starts_with(&cmd_name) {
+        return Err(None);
+      }
+      let Some(result) = parse_global(&mut chars, motion.as_ref().map(|mcmd| &mcmd.1))? else {
+        return Ok(None);
+      };
+      motion = Some(motion!(result.0));
+      Some(VerbCmd(1, result.1))
+    } else {
+      parse_ex_command(&mut chars)?.map(|v| verb!(v))
+    }
+  };
+  if motion.is_none() && !matches!(verb, Some(VerbCmd(_, Verb::Write(_)))) {
+    motion = Some(motion!(Motion::Line(LineAddr::Current)))
+  }
 
   Ok(Some(EditCmd {
     register: RegisterName::default(),
@@ -291,81 +300,88 @@ pub fn parse_ex_input(raw: &str) -> Result<Option<EditCmd>, Option<String>> {
   }))
 }
 
-pub fn parse_ex_address(chars: &mut CharTracker<'_>) -> Result<Option<Motion>,Option<String>> {
-	if chars.peek() == Some(&'%') {
-		chars.next();
-		return Ok(Some(Motion::LineRange(LineAddr::Number(1), LineAddr::Last)))
-	}
+pub fn parse_ex_address(chars: &mut CharTracker<'_>) -> Result<Option<Motion>, Option<String>> {
+  if chars.peek() == Some(&'%') {
+    chars.next();
+    return Ok(Some(Motion::LineRange(LineAddr::Number(1), LineAddr::Last)));
+  }
 
-	let mut chars_clone = chars.clone();
-	let Some(start) = parse_one_addr(&mut chars_clone)? else { return Ok(None) };
-	*chars = chars_clone.clone();
+  let mut chars_clone = chars.clone();
+  let Some(start) = parse_one_addr(&mut chars_clone)? else {
+    return Ok(None);
+  };
+  *chars = chars_clone.clone();
 
-	if let Some(&',') = chars.peek()
-	&& let Some(end) = { chars_clone.next(); parse_one_addr(&mut chars_clone)? } {
-		*chars = chars_clone;
-		Ok(Some(Motion::LineRange(start, end)))
-	} else {
-		*chars = chars_clone;
-		Ok(Some(Motion::Line(start)))
-	}
+  if let Some(&',') = chars.peek()
+    && let Some(end) = {
+      chars_clone.next();
+      parse_one_addr(&mut chars_clone)?
+    }
+  {
+    *chars = chars_clone;
+    Ok(Some(Motion::LineRange(start, end)))
+  } else {
+    *chars = chars_clone;
+    Ok(Some(Motion::Line(start)))
+  }
 }
 
-pub fn parse_one_addr(chars: &mut CharTracker<'_>) -> Result<Option<LineAddr>,Option<String>> {
-	let Some(first) = chars.next() else { return Ok(None) };
-	match first {
-		'0'..='9' => {
-			let mut digits = String::new();
-			digits.push(first);
-			digits.extend(chars.peeking_take_while(|c| c.is_ascii_digit()));
+pub fn parse_one_addr(chars: &mut CharTracker<'_>) -> Result<Option<LineAddr>, Option<String>> {
+  let Some(first) = chars.next() else {
+    return Ok(None);
+  };
+  match first {
+    '0'..='9' => {
+      let mut digits = String::new();
+      digits.push(first);
+      digits.extend(chars.peeking_take_while(|c| c.is_ascii_digit()));
 
-			let number = digits.parse::<usize>()
-				.map_err(|_| None)?;
+      let number = digits.parse::<usize>().map_err(|_| None)?;
 
-			Ok(Some(LineAddr::Number(number)))
-		}
-		'\'' => {
-			let Some(ch) = chars.next() else { return Err(Some("Expected mark name after ' in ex address".into())) };
-			if !ch.is_ascii_lowercase() && !"<>[]^.'`".contains(ch) {
-				return Err(Some(format!("Invalid mark name in ex address: {ch}")));
-			}
-			Ok(Some(LineAddr::Mark(ch)))
-		}
-		'+' | '-' => {
-			let mut digits = String::new();
-			digits.push(first);
-			digits.extend(chars.peeking_take_while(|c| c.is_ascii_digit()));
+      Ok(Some(LineAddr::Number(number)))
+    }
+    '\'' => {
+      let Some(ch) = chars.next() else {
+        return Err(Some("Expected mark name after ' in ex address".into()));
+      };
+      if !ch.is_ascii_lowercase() && !"<>[]^.'`".contains(ch) {
+        return Err(Some(format!("Invalid mark name in ex address: {ch}")));
+      }
+      Ok(Some(LineAddr::Mark(ch)))
+    }
+    '+' | '-' => {
+      let mut digits = String::new();
+      digits.push(first);
+      digits.extend(chars.peeking_take_while(|c| c.is_ascii_digit()));
 
-			let number = digits.parse::<isize>()
-				.map_err(|_| None)?;
+      let number = digits.parse::<isize>().map_err(|_| None)?;
 
-			Ok(Some(LineAddr::Offset(number)))
-		}
-		'/' | '?' => {
-			let mut pattern = String::new();
-			while let Some(ch) = chars.next() {
-				match ch {
-					'\\' => {
-						pattern.push('\\');
-						if let Some(esc_ch) = chars.next() {
-							pattern.push(esc_ch)
-						}
-					}
-					_ if ch == first => break,
-					_ => pattern.push(ch)
-				}
-			}
-			match first {
-				'/' => Ok(Some(LineAddr::Pattern(pattern))),
-				'?' => Ok(Some(LineAddr::PatternRev(pattern))),
-				_ => unreachable!()
-			}
-		}
-		'.' => Ok(Some(LineAddr::Current)),
-		'$' => Ok(Some(LineAddr::Last)),
-		_ => Ok(None)
-	}
-
+      Ok(Some(LineAddr::Offset(number)))
+    }
+    '/' | '?' => {
+      let mut pattern = String::new();
+      while let Some(ch) = chars.next() {
+        match ch {
+          '\\' => {
+            pattern.push('\\');
+            if let Some(esc_ch) = chars.next() {
+              pattern.push(esc_ch)
+            }
+          }
+          _ if ch == first => break,
+          _ => pattern.push(ch),
+        }
+      }
+      match first {
+        '/' => Ok(Some(LineAddr::Pattern(pattern))),
+        '?' => Ok(Some(LineAddr::PatternRev(pattern))),
+        _ => unreachable!(),
+      }
+    }
+    '.' => Ok(Some(LineAddr::Current)),
+    '$' => Ok(Some(LineAddr::Last)),
+    _ => Ok(None),
+  }
 }
 
 /// Unescape shell command arguments
@@ -389,14 +405,17 @@ fn unescape_shell_cmd(cmd: &str) -> String {
 }
 
 pub fn parse_ex_command_name(chars: &mut CharTracker<'_>) -> String {
-	log::debug!("Parsing ex command from: {}", chars.clone().collect::<String>());
+  log::debug!(
+    "Parsing ex command from: {}",
+    chars.clone().collect::<String>()
+  );
   let mut cmd_name = String::new();
 
   match_loop!(chars.peek() => ch, {
     '!' if cmd_name.is_empty() || cmd_name == "normal" => {
       cmd_name.push(*ch);
       chars.next();
-			break
+      break
     }
     _ if ch.is_alphanumeric() => {
       cmd_name.push(*ch);
@@ -405,29 +424,34 @@ pub fn parse_ex_command_name(chars: &mut CharTracker<'_>) -> String {
     _ => break,
   });
 
-	cmd_name
+  cmd_name
 }
 
 pub fn ex_command_name_is_valid(name: &str) -> bool {
-	name == "!" ||
-	"help".starts_with(name) ||
-	name.starts_with("normal!") ||
-	"delete".starts_with(name) ||
-	"yank".starts_with(name) ||
-	"put".starts_with(name) ||
-	"quit".starts_with(name) ||
-	"read".starts_with(name) ||
-	"write".starts_with(name) ||
-	"edit".starts_with(name) ||
-	"substitute".starts_with(name) ||
-	"global".starts_with(name)
+  name == "!"
+    || "help".starts_with(name)
+    || name.starts_with("normal!")
+    || "delete".starts_with(name)
+    || "yank".starts_with(name)
+    || "put".starts_with(name)
+    || "quit".starts_with(name)
+    || "read".starts_with(name)
+    || "write".starts_with(name)
+    || "edit".starts_with(name)
+    || "substitute".starts_with(name)
+    || "global".starts_with(name)
 }
 
 pub fn parse_ex_command(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<String>> {
-	log::debug!("Parsing ex command from: {}", chars.clone().collect::<String>());
+  log::debug!(
+    "Parsing ex command from: {}",
+    chars.clone().collect::<String>()
+  );
   let cmd_name = parse_ex_command_name(chars);
 
-	if cmd_name.is_empty() { return Ok(None) }
+  if cmd_name.is_empty() {
+    return Ok(None);
+  }
   match cmd_name.as_str() {
     "!" => {
       let cmd = chars.collect::<String>();
@@ -453,9 +477,9 @@ pub fn parse_ex_command(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Opt
 }
 
 pub fn parse_normal(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<String>> {
-	chars
-		.peeking_take_while(|c| c.is_whitespace())
-		.for_each(drop);
+  chars
+    .peeking_take_while(|c| c.is_whitespace())
+    .for_each(drop);
 
   let seq: String = chars.collect();
   Ok(Some(Verb::Normal(seq)))
@@ -543,27 +567,41 @@ pub fn parse_write(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<S
   Ok(Some(Verb::Write(dest)))
 }
 
-pub fn parse_global(chars: &mut CharTracker<'_>, constraint: Option<&Motion>) -> Result<Option<(Motion,Verb)>,Option<String>> {
-	let is_negated = if chars.peek() == Some(&'!') { chars.next(); true } else { false };
+pub fn parse_global(
+  chars: &mut CharTracker<'_>,
+  constraint: Option<&Motion>,
+) -> Result<Option<(Motion, Verb)>, Option<String>> {
+  let is_negated = if chars.peek() == Some(&'!') {
+    chars.next();
+    true
+  } else {
+    false
+  };
 
-	chars.peeking_take_while(|c| c.is_whitespace()).for_each(drop); // Ignore whitespace
+  chars
+    .peeking_take_while(|c| c.is_whitespace())
+    .for_each(drop); // Ignore whitespace
 
-	let Some(delimiter) = chars.next() else {
-		return Ok(Some((Motion::Null,Verb::RepeatGlobal)))
-	};
-	if delimiter.is_alphanumeric() {
-		return Err(None)
-	}
-	let global_pat = parse_pattern(chars, delimiter)?;
-	let Some(command) = parse_ex_command(chars)? else {
-		return Err(Some("Expected a command after global pattern".into()))
-	};
-	let constraint = Box::new(constraint.cloned().unwrap_or(Motion::LineRange(LineAddr::Number(1),LineAddr::Last)));
-	if is_negated {
-		Ok(Some((Motion::NotGlobal(constraint,global_pat), command)))
-	} else {
-		Ok(Some((Motion::Global(constraint,global_pat), command)))
-	}
+  let Some(delimiter) = chars.next() else {
+    return Ok(Some((Motion::Null, Verb::RepeatGlobal)));
+  };
+  if delimiter.is_alphanumeric() {
+    return Err(None);
+  }
+  let global_pat = parse_pattern(chars, delimiter)?;
+  let Some(command) = parse_ex_command(chars)? else {
+    return Err(Some("Expected a command after global pattern".into()));
+  };
+  let constraint = Box::new(
+    constraint
+      .cloned()
+      .unwrap_or(Motion::LineRange(LineAddr::Number(1), LineAddr::Last)),
+  );
+  if is_negated {
+    Ok(Some((Motion::NotGlobal(constraint, global_pat), command)))
+  } else {
+    Ok(Some((Motion::Global(constraint, global_pat), command)))
+  }
 }
 
 pub fn parse_substitute(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<String>> {

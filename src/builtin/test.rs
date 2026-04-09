@@ -222,9 +222,9 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
 
           UnaryOp::Terminal => match operand.as_str().parse::<i32>() {
             Ok(fd) => match isatty(fd) {
-							Ok(b) => b,
-							Err(e) => return Err(ShErr::from(e).promote(err_span))
-						}
+              Ok(b) => b,
+              Err(e) => return Err(ShErr::from(e).promote(err_span)),
+            },
             Err(_) => false,
           },
           UnaryOp::NonNull => !operand.is_empty(),
