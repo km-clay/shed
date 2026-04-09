@@ -365,7 +365,7 @@ impl CmdTimer {
     Ok(seconds)
   }
 
-  fn tv_to_ms(tv: TimeVal) -> i64 {
+  pub fn tv_to_ms(tv: TimeVal) -> i64 {
     let sec_millis = tv.tv_sec() * 1000;
     let usec_millis = tv.tv_usec() / 1000;
     sec_millis + usec_millis

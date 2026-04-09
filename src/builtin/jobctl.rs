@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use ariadne::Fmt;
 
 use crate::{
@@ -278,4 +280,215 @@ pub fn disown(node: Node) -> ShResult<()> {
 
   state::set_status(0);
   Ok(())
+}
+
+enum KillTarget {
+	Pid(Pid),
+	Pgid(Pid),
+	OurPgrp,
+	Broadcast,
+	Job(JobID),
+}
+
+fn parse_kill_target(arg: &str, blame: Span) -> ShResult<KillTarget> {
+	let Ok(n) = arg.parse::<i32>() else {
+		let Ok(id) = parse_job_id(arg, blame.clone()) else {
+			return Err(sherr!(ParseErr @ blame, "Invalid kill target: {arg}"));
+		};
+		return Ok(KillTarget::Job(JobID::TableID(id)));
+	};
+
+	Ok(match n {
+		-1 => KillTarget::Broadcast,
+		0 => KillTarget::OurPgrp,
+		_ if n < -1 => KillTarget::Pgid(Pid::from_raw(-n)),
+		_ => KillTarget::Pid(Pid::from_raw(n)),
+	})
+}
+
+pub fn kill_builtin(node: Node) -> ShResult<()> {
+	let NdRule::Command {
+		assignments: _,
+		argv,
+	} = node.class else {
+		unreachable!()
+	};
+
+	// TODO: This can probably be refactored to use the getopt framework
+	let mut argv = prepare_argv(argv)?.into_iter().skip(1);
+
+	let mut signal: Option<Signal> = None;
+	let mut print_sig: Option<Signal> = None;
+	let mut targets: Vec<(KillTarget,Span)> = vec![];
+
+	let mut verbose = false;
+	let mut rest_are_targets = false;
+	while let Some((arg, span)) = argv.next() {
+		if arg == "--" {
+			rest_are_targets = true;
+			continue
+		} else if rest_are_targets {
+			let target = parse_kill_target(&arg, span.clone())?;
+			targets.push((target,span));
+			continue
+		}
+
+		if !arg.starts_with("-") {
+			if let Ok(target) = parse_kill_target(&arg, span.clone()) {
+				targets.push((target,span));
+			} else {
+				return Err(sherr!(SyntaxErr @ span, "Invalid flag or kill target: {arg}"));
+			}
+		} else {
+			let stripped = arg.trim_start_matches('-');
+
+			match stripped {
+				"v" | "verbose" => verbose = true,
+				"l" => {
+					let Some((arg,span)) = argv.next() else {
+						let signals: String = crate::signal::ALL_SIGNALS
+							.iter()
+							.map(|sig| {
+								let sig = sig.to_string();
+								sig.strip_prefix("SIG").unwrap_or(&sig).to_string()
+							})
+							.collect::<Vec<_>>()
+							.join(&state::get_separator());
+
+						let stdout = borrow_fd(STDOUT_FILENO);
+						write(stdout, signals.as_bytes())?;
+						write(stdout, b"\n")?;
+
+						state::set_status(0);
+						return Ok(())
+					};
+
+					let parse_result = arg.parse::<Signal>()
+						.or_else(|_| format!("SIG{arg}").parse::<Signal>());
+					if let Ok(parsed_signal) = parse_result {
+						print_sig = Some(parsed_signal);
+						continue
+					}
+
+					let Ok(mut n) = arg.parse::<usize>() else {
+						return Err(sherr!(SyntaxErr @ span, "Invalid signal name or number: {arg}"));
+					};
+
+					if n > 128 {
+						n = n.saturating_sub(128);
+					}
+
+					let Ok(sig) = Signal::try_from(n as i32) else {
+						return Err(sherr!(SyntaxErr @ span, "Invalid signal number: {n}"));
+					};
+
+					print_sig = Some(sig);
+					break
+				}
+				"s" | "signal" => {
+					let Some((arg,span)) = argv.next() else {
+						return Err(sherr!(SyntaxErr @ span, "Expected signal name or number after -s"));
+					};
+
+					let parse_result = arg.parse::<Signal>()
+						.or_else(|_| format!("SIG{arg}").parse::<Signal>());
+
+					match parse_result {
+						Ok(parsed) => {
+							signal = Some(parsed);
+						}
+						Err(_) => {
+							return Err(sherr!(SyntaxErr @ span, "Invalid signal name or number: {arg}"));
+						}
+					}
+				}
+				_ if stripped.parse::<usize>().is_ok() => {
+					let n = stripped.parse::<usize>().unwrap();
+					let Ok(sig) = Signal::try_from(n as i32) else {
+						return Err(sherr!(SyntaxErr @ span, "Invalid signal number: {n}"));
+					};
+					signal = Some(sig);
+				}
+				_ => {
+					let parse_result = stripped.parse::<Signal>()
+						.or_else(|_| format!("SIG{stripped}").parse::<Signal>());
+					if let Ok(parsed_signal) = parse_result {
+						signal = Some(parsed_signal);
+					} else if let Ok(target) = parse_kill_target(&arg, span.clone()) {
+						targets.push((target,span));
+					} else {
+						return Err(sherr!(SyntaxErr @ span, "Invalid flag or kill target: {arg}"));
+					}
+				}
+			}
+		}
+	}
+
+	let stdout = borrow_fd(STDOUT_FILENO);
+
+	if let Some(sig) = print_sig {
+		let sig = sig.to_string();
+		let sig = sig.strip_prefix("SIG").unwrap_or(&sig);
+
+		write(stdout, sig.as_bytes())?;
+		write(stdout, b"\n")?;
+	} else if let Some(sig) = signal.or(Some(Signal::SIGTERM)) && !targets.is_empty() {
+		for (target,blame) in targets {
+			match target {
+				KillTarget::Pid(pid) => {
+					if verbose {
+						write(stdout, format!("kill: killing process {pid} with {sig}\n").as_bytes())?;
+						write(stdout, b"\n")?;
+					}
+					kill(pid, sig)?;
+				}
+				KillTarget::Pgid(pid) => {
+					if verbose {
+						write(stdout, format!("kill: killing process group {pid} with {sig}\n").as_bytes())?;
+						write(stdout, b"\n")?;
+					}
+					killpg(pid, sig)?;
+				}
+				KillTarget::OurPgrp => {
+					let pgrp = getpgrp();
+					if verbose {
+						write(stdout, format!("kill: killing shell's process group ({pgrp}) with {sig}\n").as_bytes())?;
+						write(stdout, b"\n")?;
+					}
+					killpg(pgrp, sig)?;
+				}
+				KillTarget::Broadcast => {
+					if verbose {
+						write(stdout, format!("kill: broadcasting {sig} to all processes\n").as_bytes())?;
+						write(stdout, b"\n")?;
+					}
+					kill(Pid::from_raw(-1), sig)?;
+				}
+				KillTarget::Job(job_id) => {
+					write_jobs(|j| {
+						if let Some(job) = j.query_mut(job_id.clone()) {
+							if verbose {
+								write(stdout, format!("kill: killing job {} with {sig}\n", job.name().unwrap_or(&format!("{job_id:?}"))).as_bytes())?;
+								write(stdout, b"\n")?;
+							}
+							job.killpg(sig)
+						} else {
+							Err(sherr!(
+								ExecFail @ blame.clone(),
+								"Job not found"
+							))
+						}
+					})?;
+				}
+			}
+		}
+	} else {
+		let usage = "usage: kill [-signal_name] pid ...";
+		let stderr = borrow_fd(STDERR_FILENO);
+		write(stderr, usage.as_bytes())?;
+		write(stderr, b"\n")?;
+	}
+
+	state::set_status(0);
+	Ok(())
 }

@@ -1005,7 +1005,7 @@ impl LexStream {
         self.cursor = pos;
         return Ok(tk);
       }
-      '}' if pos == self.cursor && self.in_brc_grp() => {
+      '}' if pos == self.cursor && self.in_brc_grp() && self.next_is_cmd() => {
         pos += 1;
         let tk = self.get_token(self.cursor..pos, TkRule::BraceGrpEnd);
         self.leave_brc_grp();

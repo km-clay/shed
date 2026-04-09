@@ -1904,7 +1904,11 @@ impl ParseStream {
             };
             redirs.push(redir);
           }
-          _ => unimplemented!("Unexpected token rule `{:?}` in parse_cmd()", tk.class),
+          _ => return Err(parse_err_full(
+						&format!("Unexpected token in command: {:?}", tk.class),
+						&tk.span,
+						self.context.clone(),
+					)),
         };
       }
       self.commit(node_tks.len());

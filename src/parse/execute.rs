@@ -9,7 +9,7 @@ use ariadne::Fmt;
 
 use crate::{
   builtin::{
-    BUILTINS, alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, fixcmd::fixcmd, flowctl::flowctl, getopts::getopts, hash::hash_builtin, help::help, hist::hist_builtin, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
+    BUILTINS, alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, fixcmd::fixcmd, flowctl::flowctl, getopts::getopts, hash::hash_builtin, help::help, hist::hist_builtin, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs, kill_builtin}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, test::double_bracket_test, times::times, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
   },
   expand::{expand_aliases, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
@@ -435,7 +435,9 @@ impl Dispatcher {
       if let Err(e) = exec_input(subsh_body, None, s.interactive, Some(name)) {
         e.print_error();
       };
-    })
+    })?;
+
+		Ok(())
   }
   fn exec_func(&mut self, func: Node) -> ShResult<()> {
     let mut blame = func.get_span().clone();
@@ -543,7 +545,8 @@ impl Dispatcher {
         if let Err(e) = brc_grp_logic(s) {
           e.print_error();
         }
-      })
+      })?;
+			Ok(())
     } else {
       brc_grp_logic(self).map_err(|e| e.with_redirs(guard))
     }
@@ -604,7 +607,8 @@ impl Dispatcher {
         if let Err(e) = case_logic(s) {
           e.print_error();
         }
-      })
+      })?;
+			Ok(())
     } else {
       case_logic(self)
         .try_blame(blame)
@@ -671,7 +675,8 @@ impl Dispatcher {
         if let Err(e) = loop_logic(s) {
           e.print_error();
         }
-      })
+      })?;
+			Ok(())
     } else {
       loop_logic(self)
         .try_blame(blame)
@@ -752,7 +757,8 @@ impl Dispatcher {
         if let Err(e) = for_logic(s) {
           e.print_error();
         }
-      })
+      })?;
+			Ok(())
     } else {
       for_logic(self)
         .try_blame(blame)
@@ -816,7 +822,8 @@ impl Dispatcher {
           e.print_error();
           state::set_status(1);
         }
-      })
+      })?;
+			Ok(())
     } else {
       if_logic(self)
         .try_blame(blame)
@@ -843,8 +850,8 @@ impl Dispatcher {
             if let Err(e) = s.dispatch_node(cmd) {
               e.print_error();
             }
-          },
-        )
+					})?;
+					Ok(())
       } else {
         self.dispatch_node(cmd)
       };
@@ -958,7 +965,8 @@ impl Dispatcher {
         if let Err(e) = s.dispatch_builtin(cmd) {
           e.print_error();
         }
-      })
+      })?;
+			Ok(())
     } else {
       let result = self.dispatch_builtin(cmd);
 
@@ -1086,6 +1094,8 @@ impl Dispatcher {
       "fc" => fixcmd(cmd, self.interactive),
       "hist" => hist_builtin(cmd),
 			"hash" => hash_builtin(cmd),
+			"times" => times(cmd),
+			"kill" => kill_builtin(cmd),
       "true" | ":" => {
         state::set_status(0);
         Ok(())
@@ -1222,12 +1232,11 @@ impl Dispatcher {
 
     Ok(())
   }
-  fn run_fork(&mut self, name: &str, report_time: bool, f: impl FnOnce(&mut Self)) -> ShResult<()> {
+  fn run_fork(&mut self, name: &str, report_time: bool, f: impl FnOnce(&mut Self)) -> ShResult<Pid> {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     match unsafe { fork()? } {
       ForkResult::Child => {
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
-        self.interactive = false;
         f(self);
         unsafe { libc::_exit(state::get_status()) }
       }
@@ -1242,7 +1251,7 @@ impl Dispatcher {
         };
         let child_proc = ChildProc::new(child, Some(name), Some(child_pgid), report_time)?;
         job.push_child(child_proc);
-        Ok(())
+        Ok(child_pgid)
       }
     }
   }

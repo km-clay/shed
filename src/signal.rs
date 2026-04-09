@@ -35,11 +35,12 @@ pub static GOT_SIGWINCH: AtomicBool = AtomicBool::new(false);
 /// Useful for dynamic prompt content and asynchronous refreshing
 pub static GOT_SIGUSR1: AtomicBool = AtomicBool::new(false);
 
-const MISC_SIGNALS: [Signal; 21] = [
+const MISC_SIGNALS: [Signal; 22] = [
   Signal::SIGILL,
   Signal::SIGTRAP,
   Signal::SIGABRT,
   Signal::SIGBUS,
+  Signal::SIGQUIT,
   Signal::SIGFPE,
   Signal::SIGSEGV,
   Signal::SIGUSR2,
@@ -57,6 +58,38 @@ const MISC_SIGNALS: [Signal; 21] = [
   Signal::SIGIO,
   Signal::SIGPWR,
   Signal::SIGSYS,
+];
+
+pub const ALL_SIGNALS: [Signal; 29] = [
+	Signal::SIGHUP,
+	Signal::SIGINT,
+	Signal::SIGQUIT,
+	Signal::SIGILL,
+	Signal::SIGTRAP,
+	Signal::SIGABRT,
+	Signal::SIGBUS,
+	Signal::SIGFPE,
+	Signal::SIGKILL,
+	Signal::SIGUSR1,
+	Signal::SIGSEGV,
+	Signal::SIGUSR2,
+	Signal::SIGPIPE,
+	Signal::SIGALRM,
+	Signal::SIGTERM,
+	Signal::SIGCHLD,
+	Signal::SIGCONT,
+	Signal::SIGSTOP,
+	Signal::SIGTSTP,
+	Signal::SIGTTIN,
+	Signal::SIGTTOU,
+	Signal::SIGURG,
+	Signal::SIGXCPU,
+	Signal::SIGXFSZ,
+	Signal::SIGVTALRM,
+	Signal::SIGPROF,
+	Signal::SIGWINCH,
+	Signal::SIGIO,
+	Signal::SIGSYS,
 ];
 
 pub fn signals_pending() -> bool {
@@ -84,10 +117,6 @@ pub fn check_signals() -> ShResult<()> {
   }
   if got_signal(Signal::SIGHUP) {
     run_trap(Signal::SIGHUP)?;
-    hang_up(0);
-  }
-  if got_signal(Signal::SIGQUIT) {
-    run_trap(Signal::SIGQUIT)?;
     hang_up(0);
   }
   if got_signal(Signal::SIGTSTP) {

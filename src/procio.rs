@@ -655,9 +655,8 @@ pub mod tests {
     let path = dir.path().join("dup.txt");
     let _g = TestGuard::new();
 
-    // Redirect stdout to file, then dup stderr to stdout - both should go to file
     test_input(format!(
-      "{{ echo out; echo err >&2 }} > {} 2>&1",
+      "{{ echo out; echo err >&2; }} > {} 2>&1",
       path.display()
     ))
     .unwrap();

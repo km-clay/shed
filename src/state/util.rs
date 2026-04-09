@@ -3,6 +3,7 @@ use super::*;
 use std::{collections::HashMap, sync::atomic::Ordering};
 
 use nix::unistd::{User, getuid};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
   exec_input,
@@ -200,7 +201,7 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
 pub fn get_separator() -> String {
   env::var("IFS")
     .unwrap_or(String::from(" "))
-    .chars()
+    .graphemes(true)
     .next()
     .unwrap()
     .to_string()
