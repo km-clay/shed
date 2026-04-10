@@ -524,6 +524,16 @@ mod tests {
     assert_eq!(lines[0], "gamma");
   }
 
+  #[test]
+  fn compgen_wordlist_double_dash() {
+    let guard = TestGuard::new();
+    test_input("compgen -W 'alpha beta gamma' -- \"g\"").unwrap();
+    let out = guard.read_output();
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0], "gamma");
+  }
+
   // ===================== compgen -v: Variables =====================
 
   #[test]

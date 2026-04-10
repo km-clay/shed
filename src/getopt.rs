@@ -123,8 +123,12 @@ pub fn sort_tks(tokens: Vec<Tk>, opt_specs: &[OptSpec], strict: bool) -> GetOptR
 
   while let Some((word, span)) = words_iter.next() {
     if word == "--" {
-      non_opts.push((word, span));
-      non_opts.extend(words_iter);
+			let rest = words_iter.collect::<Vec<_>>();
+			if rest.is_empty() {
+				non_opts.push((word, span));
+			} else {
+				non_opts.extend(rest);
+			}
       break;
     }
     let parsed_opts = Opt::parse(&word);
@@ -200,9 +204,13 @@ fn sort_tks_raw(
   let mut non_opts = vec![];
 
   while let Some(token) = tokens_iter.next() {
-    if &token.to_string() == "--" {
-      non_opts.push(token);
-      non_opts.extend(tokens_iter);
+    if token.as_str() == "--" {
+			let rest = tokens_iter.collect::<Vec<_>>();
+			if rest.is_empty() {
+				non_opts.push(token);
+			} else {
+				non_opts.extend(rest);
+			}
       break;
     }
     let parsed_opts = Opt::parse(&token.to_string());
