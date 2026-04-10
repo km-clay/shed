@@ -200,7 +200,7 @@ impl FromStr for ArithOp {
 }
 
 pub fn expand_arithmetic(raw: &str) -> ShResult<Option<String>> {
-  let body = raw.strip_prefix('(').unwrap().strip_suffix(')').unwrap(); // Unwraps are safe here, we already checked for the parens
+  let body = raw.strip_prefix('(').unwrap_or(raw).strip_suffix(')').unwrap_or(raw); // Unwraps are safe here, we already checked for the parens
   let unescaped = unescape_math(body);
   let expanded = expand_raw(&mut unescaped.chars().peekable())?;
   let Some(tokens) = ArithTk::tokenize(&expanded)? else {

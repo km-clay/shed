@@ -10,15 +10,10 @@ use std::{
 use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
-  builtin::map::MapNode,
-  libsh::{
+  builtin::map::MapNode, expand::expand_arithmetic, libsh::{
     error::{ShErr, ShResult},
     utils::VecDequeExt,
-  },
-  parse::lex::{LexFlags, LexStream, Tk},
-  prelude::*,
-  readline::{complete::Candidate, markers},
-  sherr,
+  }, parse::lex::{LexFlags, LexStream, Tk}, prelude::*, readline::{complete::Candidate, markers}, sherr
 };
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
@@ -183,7 +178,14 @@ impl FromStr for ArrIndex {
         let idx = s.parse::<usize>().unwrap();
         Ok(Self::Literal(idx))
       }
-      _ => Err(sherr!(ParseErr, "Invalid array index: {}", s,)),
+      _ => {
+				// let's try to handle something like '1+1'
+				if let Ok(Some(res)) = expand_arithmetic(s) {
+					Self::from_str(&res)
+				} else {
+					Err(sherr!(ParseErr, "Invalid array index: {}", s,))
+				}
+			}
     }
   }
 }

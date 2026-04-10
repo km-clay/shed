@@ -779,7 +779,8 @@ HELP                                             *builtin-help* *help*
   `help [{topic}]`
 
   Display help for {topic}. With no argument, opens the main help index.
-  {topic} may be a builtin name or any named help page.
+  {topic} may be a named help page, or anything that matches the tags
+	on individual topics inside the help pages
 
   Examples:
 

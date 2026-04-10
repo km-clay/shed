@@ -504,7 +504,7 @@ impl Highlighter {
     }
 
     read_meta(|m| {
-      let files = m.cwd_cache();
+      let files = m.cached_files();
       for file in files {
         if file.name().starts_with(arg) {
           return true;

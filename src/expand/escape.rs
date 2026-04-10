@@ -4,7 +4,7 @@ use std::str::Chars;
 use crate::expand::util::is_var_name_ch;
 use crate::readline::markers;
 use crate::state::read_vars;
-use crate::{match_loop, state};
+use crate::match_loop;
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
 pub(super) fn strip_escape_markers(s: &str) -> String {

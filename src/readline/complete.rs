@@ -26,7 +26,7 @@ use crate::{
     term::{LineWriter, TermWriter, calc_str_width, get_win_size},
   },
   state::{
-    self, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars,
+    self, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars
   },
 };
 
@@ -107,6 +107,12 @@ impl From<String> for Candidate {
       id: None,
     }
   }
+}
+
+impl From<Rc<Utility>> for Candidate {
+	fn from(value: Rc<Utility>) -> Self {
+	  From::from(&*value)
+	}
 }
 
 impl From<&state::meta::Utility> for Candidate {
@@ -357,8 +363,7 @@ pub fn extract_var_name(text: &str) -> Option<(String, usize, usize)> {
 
 fn complete_commands(start: &str) -> Vec<Candidate> {
   let mut candidates: Vec<Candidate> = read_meta(|m| {
-    m.cached_cmds()
-      .iter()
+    m.cached_utils()
       .map(Candidate::from)
       .filter(|c| c.is_match(start))
       .collect()

@@ -1,5 +1,4 @@
 use crate::motion;
-use crate::readline::editmode::ex::{CharTracker, parse_ex_command_name};
 use crate::readline::linebuf::ordered;
 use editcmd::{CmdFlags, EditCmd, Motion, MotionCmd, RegisterName, Verb, VerbCmd};
 use editmode::{CmdReplay, EditMode, ModeReport, ViInsert, ViNormal, ViReplace, ViVisual};

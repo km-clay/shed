@@ -6,7 +6,7 @@ use std::{
 };
 
 use ariadne::Fmt;
-use nix::unistd::{execve, execvp};
+use nix::unistd::execve;
 
 use crate::{
   builtin::{
@@ -443,9 +443,10 @@ impl Dispatcher {
 
     let func = ShFunc::new(*body, blame);
     write_logic(|l| l.insert_func(name, func)); // Store the AST
-    write_meta(|m| m.cache_path_command(state::meta::Utility::function(name.to_string())));
 		if self.interactive {
-			write_meta(|m| m.set_last_was_func_def(true));
+			write_meta(|m| {
+				m.set_last_was_func_def(true);
+			});
 		}
 
     Ok(())
@@ -1222,13 +1223,13 @@ impl Dispatcher {
 
       let cmd = &exec_args.cmd.0;
       let span = exec_args.cmd.1;
+			let cmd_raw = cmd.to_str().unwrap_or_default();
 
-			let Err(e) = if read_shopts(|o| o.set.hashall)
-			&& let Some(util) = read_meta(|m| m.get_cached_cmd(cmd.to_str().unwrap_or_default())) {
-				let UtilKind::Command(path) = util.kind() else { unreachable!() };
+			let Err(e) = if let Some(path) = state::lookup_cmd(cmd_raw) {
 				let c_path = CString::new(path.as_os_str().to_str().unwrap_or_default().as_bytes()).unwrap_or_default();
 				execve(&c_path, &exec_args.argv, &exec_args.envp)
 			} else {
+				log::warn!("command not found: {}", cmd_raw);
 				execvpe(cmd, &exec_args.argv, &exec_args.envp)
 			};
 

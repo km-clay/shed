@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use nix::libc::STDOUT_FILENO;
 
 use crate::{
@@ -8,7 +10,7 @@ use crate::{
   prelude::*,
   procio::borrow_fd,
   sherr,
-  state::{self, MetaTab, read_meta, write_meta},
+  state::{self, MetaTab, Utility, read_meta, write_meta},
 };
 
 pub fn hash_opt_spec() -> [OptSpec; 2] {
@@ -67,7 +69,7 @@ pub fn hash_builtin(node: Node) -> ShResult<()> {
   argv.remove(0);
   if argv.is_empty() && opts.is_empty() {
     let stdout = borrow_fd(STDOUT_FILENO);
-    let cmds = read_meta(|m| m.cached_cmds().clone());
+    let cmds: Vec<Rc<Utility>> = read_meta(|m| m.cached_utils().collect());
     for cmd in cmds {
       if let state::meta::UtilKind::Command(path) = cmd.kind() {
         let path = as_var_val_display(&path.to_string_lossy());
@@ -93,7 +95,7 @@ pub fn hash_builtin(node: Node) -> ShResult<()> {
   write_meta(|m| {
     for (arg, span) in argv {
       if let Some(cmd) = path_cmds.iter().find(|cmd| cmd.name() == arg) {
-        m.cache_path_command(cmd.clone());
+        m.cache_util(Rc::clone(cmd));
       } else {
         return Err(sherr!(NotFound, "Command not found: {arg}").promote(span));
       }

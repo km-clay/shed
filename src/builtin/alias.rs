@@ -1,12 +1,7 @@
 use ariadne::Fmt;
 
 use crate::{
-  libsh::error::{ShResult, next_color},
-  parse::{NdRule, Node, execute::prepare_argv},
-  prelude::*,
-  procio::borrow_fd,
-  sherr,
-  state::{self, read_logic, write_logic, write_meta},
+  expand::as_var_val_display, libsh::error::{ShResult, next_color}, parse::{NdRule, Node, execute::prepare_argv}, prelude::*, procio::borrow_fd, sherr, state::{self, read_logic, write_logic}
 };
 
 pub fn alias(node: Node) -> ShResult<()> {
@@ -24,11 +19,10 @@ pub fn alias(node: Node) -> ShResult<()> {
   }
 
   if argv.is_empty() {
-    // Display the environment variables
     let mut alias_output = read_logic(|l| {
       l.aliases()
         .iter()
-        .map(|ent| format!("{} = \"{}\"", ent.0, ent.1))
+        .map(|ent| format!("{}={}", ent.0, as_var_val_display(&ent.1.to_string())))
         .collect::<Vec<_>>()
     });
     alias_output.sort(); // Sort them alphabetically
@@ -61,7 +55,6 @@ pub fn alias(node: Node) -> ShResult<()> {
         ));
       }
       write_logic(|l| l.insert_alias(name, body, span.clone()));
-      write_meta(|m| m.cache_path_command(state::meta::Utility::alias(name.to_string())));
     }
   }
 
@@ -85,11 +78,10 @@ pub fn unalias(node: Node) -> ShResult<()> {
   }
 
   if argv.is_empty() {
-    // Display the environment variables
     let mut alias_output = read_logic(|l| {
       l.aliases()
         .iter()
-        .map(|ent| format!("{} = \"{}\"", ent.0, ent.1))
+        .map(|ent| format!("{}={}", ent.0, as_var_val_display(&ent.1.to_string())))
         .collect::<Vec<_>>()
     });
     alias_output.sort(); // Sort them alphabetically
@@ -163,9 +155,9 @@ mod tests {
     let lines: Vec<&str> = out.lines().collect();
 
     assert!(lines.len() >= 3);
-    let a_pos = lines.iter().position(|l| l.contains("a =")).unwrap();
-    let m_pos = lines.iter().position(|l| l.contains("m =")).unwrap();
-    let z_pos = lines.iter().position(|l| l.contains("z =")).unwrap();
+    let a_pos = lines.iter().position(|l| l.contains("a=")).unwrap();
+    let m_pos = lines.iter().position(|l| l.contains("m=")).unwrap();
+    let z_pos = lines.iter().position(|l| l.contains("z=")).unwrap();
     assert!(a_pos < m_pos);
     assert!(m_pos < z_pos);
   }

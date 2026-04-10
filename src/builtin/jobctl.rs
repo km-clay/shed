@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use ariadne::Fmt;
 
 use crate::{

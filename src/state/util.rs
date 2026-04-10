@@ -1,18 +1,12 @@
 use super::*;
 
-use std::{collections::HashMap, sync::atomic::Ordering};
+use std::{collections::HashMap, rc::Rc, sync::atomic::Ordering};
 
 use nix::unistd::{User, getuid};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-  exec_input,
-  libsh::{error::ShResult, utils::AutoCmdVecUtils},
-  match_loop,
-  parse::lex::{LexFlags, LexStream},
-  prelude::*,
-  sherr,
-  shopt::ShOpts,
+  exec_input, libsh::{error::ShResult, utils::AutoCmdVecUtils}, match_loop, parse::lex::{LexFlags, LexStream}, prelude::*, sherr, shopt::ShOpts
 };
 
 /// Read from the job table
@@ -216,6 +210,48 @@ pub fn get_status() -> i32 {
 }
 pub fn set_status(code: i32) {
   super::STATUS_CODE.store(code, Ordering::Relaxed);
+}
+
+pub fn lookup_cmd(cmd: &str) -> Option<PathBuf> {
+	if read_shopts(|o| o.set.hashall) {
+		which_util(cmd)
+			.filter(|u| matches!(u.kind(),UtilKind::Command(_) | UtilKind::File(_)))
+			.map(|u| {
+				let (UtilKind::Command(path) | UtilKind::File(path)) = u.kind() else { unreachable!() };
+				path.clone()
+			})
+	} else {
+		MetaTab::get_exec_files_in_cwd()
+			.into_iter()
+			.chain(MetaTab::get_cmds_in_path())
+			.find(|u| u.name() == cmd)
+			.and_then(|u| {
+				match u.kind() {
+					UtilKind::Command(path) |
+					UtilKind::File(path) => Some(path.clone()),
+					_ => None
+				}
+			})
+	}
+}
+
+pub fn which_util(name: &str) -> Option<Rc<Utility>> {
+	read_meta(|m| m.get_cached_util(name))
+		.or_else(|| {
+			MetaTab::get_cmds_in_path()
+				.into_iter()
+				.chain(MetaTab::get_exec_files_in_cwd())
+				.find(|u| u.name() == name)
+				.inspect(|u| write_meta(|m| m.cache_util(Rc::clone(u)))) // cache it if we find something we havent seen yet
+		})
+}
+
+pub fn try_hash() {
+	if read_shopts(|o| o.set.hashall) {
+		write_meta(|m| m.try_rehash_utils());
+	} else {
+		write_meta(|m| m.clear_cache());
+	}
 }
 
 pub fn runtime_files() -> Vec<PathBuf> {

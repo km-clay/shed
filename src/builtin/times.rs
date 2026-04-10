@@ -6,12 +6,12 @@ use nix::{
 
 use crate::{
   libsh::error::ShResult,
-  parse::{NdRule, Node},
+  parse::Node,
   procio::borrow_fd,
   state::{self, CmdTimer},
 };
 
-pub fn times(node: Node) -> ShResult<()> {
+pub fn times(_node: Node) -> ShResult<()> {
   let self_usage = getrusage(UsageWho::RUSAGE_SELF)?;
   let child_usage = getrusage(UsageWho::RUSAGE_CHILDREN)?;
 
