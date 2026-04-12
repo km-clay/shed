@@ -225,7 +225,7 @@ impl ScopeStack {
       _ => None,
     }
   }
-  pub fn get_arr_elems(&self, var_name: &str) -> ShResult<Vec<String>> {
+  pub fn try_get_arr_elems(&self, var_name: &str) -> ShResult<Vec<String>> {
     for scope in self.scopes.iter().rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
@@ -242,6 +242,9 @@ impl ScopeStack {
     }
     Err(sherr!(ExecFail, "Variable '{}' not found", var_name,))
   }
+	pub fn get_arr_elems(&self, var_name: &str) -> Vec<String> {
+		self.try_get_arr_elems(var_name).unwrap_or_default()
+	}
   pub fn get_arr_mut(&mut self, var_name: &str) -> ShResult<&mut VecDeque<String>> {
     for scope in self.scopes.iter_mut().rev() {
       if scope.var_exists(var_name)

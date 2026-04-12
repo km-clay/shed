@@ -290,7 +290,6 @@ bitflags! {
   #[derive(Debug,Clone,Copy,PartialEq,Default)]
   pub struct TkFlags: u32 {
     const KEYWORD      = 0b0000000000000001;
-    /// This is a      keyword that opens a new block statement, like 'if' and 'while'
     const OPENER       = 0b0000000000000010;
     const IS_CMD       = 0b0000000000000100;
     const IS_SUBSH     = 0b0000000000001000;
@@ -302,6 +301,7 @@ bitflags! {
     const IS_HEREDOC   = 0b0000001000000000;
     const LIT_HEREDOC  = 0b0000010000000000;
     const TAB_HEREDOC  = 0b0000100000000000;
+		const IS_ARITH     = 0b0001000000000000;
   }
 }
 
@@ -333,6 +333,9 @@ pub fn clean_input(input: &str) -> String {
   match_loop!(chars.next() => ch, {
     '\\' if chars.peek() == Some(&'\n') => {
       chars.next();
+			while chars.peek().is_some_and(|c| c.is_whitespace() && *c != '\n') {
+				chars.next();
+			}
     }
     '\r' => {
       if chars.peek() == Some(&'\n') {
@@ -959,30 +962,41 @@ impl LexStream {
         self.set_next_is_cmd(true);
         return Ok(tk);
       }
-      '(' if self.next_is_cmd() && can_be_subshell => {
+      '(' if (self.next_is_cmd() || chars.peek() == Some(&'(')) && can_be_subshell => {
         pos += 1;
         let mut paren_count = 1;
         let paren_pos = pos;
-        match_loop!(chars.next() => ch, {
-          '\\' => {
-            pos += 1;
-            if let Some(next_ch) = chars.next() {
-              pos += next_ch.len_utf8();
-            }
-          }
-          '(' => {
-            pos += 1;
-            paren_count += 1;
-          }
-          ')' => {
-            pos += 1;
-            paren_count -= 1;
-            if paren_count <= 0 {
-              break;
-            }
-          }
-          _ => pos += ch.len_utf8(),
-        });
+				let mut flags = TkFlags::IS_CMD;
+				if chars.peek() == Some(&'(') {
+					// arithmetic
+					paren_count += 1;
+					chars.next();
+					pos += 1;
+					flags |= TkFlags::IS_ARITH;
+				} else {
+					//subshell
+					flags |= TkFlags::IS_SUBSH;
+				}
+				match_loop!(chars.next() => ch, {
+					'\\' => {
+						pos += 1;
+						if let Some(next_ch) = chars.next() {
+							pos += next_ch.len_utf8();
+						}
+					}
+					'(' => {
+						pos += 1;
+						paren_count += 1;
+					}
+					')' => {
+						pos += 1;
+						paren_count -= 1;
+						if paren_count <= 0 {
+							break;
+						}
+					}
+					_ => pos += ch.len_utf8(),
+				});
         if paren_count != 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
           self.cursor = pos;
           return Err(sherr!(
@@ -990,12 +1004,11 @@ impl LexStream {
               "Unclosed subshell",
           ));
         }
-        let mut subsh_tk = self.get_token(self.cursor..pos, TkRule::Str);
-        subsh_tk.flags |= TkFlags::IS_CMD;
-        subsh_tk.flags |= TkFlags::IS_SUBSH;
+        let mut tk = self.get_token(self.cursor..pos, TkRule::Str);
+        tk.flags |= flags;
         self.cursor = pos;
         self.set_next_is_cmd(true);
-        return Ok(subsh_tk);
+        return Ok(tk);
       }
       '{' if pos == self.cursor && self.next_is_cmd() => {
         pos += 1;
@@ -1214,7 +1227,6 @@ impl Iterator for LexStream {
         if self.flags.contains(LexFlags::LEX_UNFINISHED) {
           self.get_token(ch_idx..self.cursor, TkRule::Comment)
         } else {
-          // After consuming the comment, we call next() recursively. This effectively filters out comment tokens.
           return self.next();
         }
       }
@@ -1475,6 +1487,24 @@ pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
             }
           } else if c == '\'' {
             break;
+          }
+        }
+      }
+      '$' if qt_state.outside() && chars.peek() == Some(&'(') => {
+        // $(...) or $((...)) - skip through balanced parens
+        chars.next(); // consume opening '('
+        pos += 1;
+        let mut depth = 1usize;
+        while let Some(c) = chars.next() {
+          pos += c.len_utf8();
+          match c {
+            '(' => depth += 1,
+            ')' => {
+              depth -= 1;
+              if depth == 0 { break; }
+            }
+            '\\' => { if let Some(esc) = chars.next() { pos += esc.len_utf8(); } }
+            _ => {}
           }
         }
       }

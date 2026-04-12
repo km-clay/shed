@@ -92,6 +92,22 @@ fn read_subsh(chars: &mut Peekable<Chars>, result: &mut String) {
         result.push(next_ch)
       }
     }
+		'\'' => {
+			result.push(subsh_ch);
+			match_loop!(chars.next() => q_ch, {
+				'\\' => {
+					result.push(q_ch);
+					if let Some(next_ch) = chars.next() {
+						result.push(next_ch)
+					}
+				}
+				'\'' => {
+					result.push(q_ch);
+					break;
+				}
+				_ => result.push(q_ch),
+			});
+		}
     '$' if chars.peek() == Some(&'\'') => {
       result.push(subsh_ch);
     }

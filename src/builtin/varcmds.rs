@@ -77,13 +77,6 @@ pub fn unset(node: Node) -> ShResult<()> {
     argv.remove(0);
   }
 
-  if argv.is_empty() {
-    return Err(sherr!(
-      SyntaxErr @ blame,
-      "unset: Expected at least one argument",
-    ));
-  }
-
   for (arg, span) in argv {
     if !read_vars(|v| v.var_exists(&arg)) {
       return Err(sherr!(
@@ -289,13 +282,6 @@ mod tests {
   fn unset_nonexistent_fails() {
     let _g = TestGuard::new();
     let result = test_input("unset __no_such_var__");
-    assert!(result.is_err());
-  }
-
-  #[test]
-  fn unset_no_args_fails() {
-    let _g = TestGuard::new();
-    let result = test_input("unset");
     assert!(result.is_err());
   }
 

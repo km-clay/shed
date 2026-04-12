@@ -624,7 +624,6 @@ impl BashCompSpec {
     exec_input(input, None, false, Some("comp_function".into()))?;
 
     let comp_reply = read_vars(|v| v.get_arr_elems("COMPREPLY"))
-      .unwrap_or_default()
       .into_iter()
       .map(Candidate::from)
       .collect();
@@ -683,6 +682,7 @@ impl CompSpec for BashCompSpec {
       .collect();
 
     candidates.sort_by_key(|c| c.content.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
+		candidates.reverse();
 
     Ok(candidates)
   }

@@ -180,7 +180,7 @@ impl FromStr for ArrIndex {
       }
       _ => {
 				// let's try to handle something like '1+1'
-				if let Ok(Some(res)) = expand_arithmetic(s) {
+				if let Ok(res) = expand_arithmetic(s) {
 					Self::from_str(&res)
 				} else {
 					Err(sherr!(ParseErr, "Invalid array index: {}", s,))
@@ -211,8 +211,12 @@ impl VarKind {
       .try_fold(String::new(), |mut acc, wrds| {
         match wrds {
           Ok(wrds) => {
-            let wrds_joined = wrds.join(" ");
-            acc = [acc, wrds_joined].join(&markers::ARG_SEP.to_string());
+						for wrd in wrds {
+							if !acc.is_empty() {
+								acc.push(markers::ARG_SEP);
+							}
+							acc.push_str(&wrd);
+						}
           }
           Err(e) => return Err(e),
         }

@@ -203,6 +203,32 @@ pub fn width_calculator() -> Box<dyn WidthCalculator> {
   }
 }
 
+/// Replace tabs with `tab_stop` number of spaces.
+///
+/// Used for rendering the line editor content in a way that respects the user's `tab_width` shell option.
+/// Has no effect on the text that is submitted to the shell or saved to history, this is strictly for display.
+fn expand_tabs(s: &str, left_margin: u16, tab_stop: u16) -> String {
+	let mut out = String::new();
+	let mut col = left_margin;
+	let mut esc_seq = 0;
+	for c in s.graphemes(true) {
+		if c == "\t" {
+			let spaces = tab_stop - ((col.saturating_sub(left_margin)) % tab_stop);
+			(0..spaces).for_each(|_| {
+				out.push(' ');
+				col += 1;
+			});
+		} else if c == "\n" {
+			out.push('\n');
+			col = left_margin;
+		} else {
+			out.push_str(c);
+			col += width(c, &mut esc_seq);
+		}
+	}
+	out
+}
+
 fn read_digits_until(rdr: &mut TermReader, sep: char) -> ShResult<Option<u32>> {
   let mut num: u32 = 0;
   loop {
@@ -907,7 +933,7 @@ impl Layout {
   }
 
   pub fn calc_pos(term_width: u16, s: &str, orig: Pos, left_margin: u16, raw_calc: bool) -> Pos {
-    const TAB_STOP: u16 = 8;
+		let tab_stop = read_shopts(|o| o.line.tab_width) as u16;
     let mut pos = orig;
     let mut esc_seq = 0;
     for c in s.graphemes(true) {
@@ -916,7 +942,7 @@ impl Layout {
         pos.col = left_margin;
       }
       let c_width = if c == "\t" {
-        TAB_STOP - (pos.col % TAB_STOP)
+				tab_stop - ((pos.col.saturating_sub(left_margin)) % tab_stop)
       } else if raw_calc && Self::is_ctl_char(c) {
         2
       } else {
@@ -1199,12 +1225,14 @@ impl LineWriter for TermWriter {
     }
 
     self.buffer.push_str(prompt);
+    let tab_width = read_shopts(|o| o.line.tab_width);
     let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
-    let multiline = line.contains('\n') || prompt_end.col == 0;
+    let expanded = expand_tabs(line, prompt_end.col, tab_width as u16);
+    let multiline = expanded.contains('\n') || prompt_end.col == 0;
     if multiline {
       let show_numbers = read_shopts(|o| o.line.line_numbers);
       let display_line = enumerate_lines(
-        line,
+        &expanded,
         prompt_end.col as usize,
         show_numbers,
         offset,
@@ -1212,7 +1240,7 @@ impl LineWriter for TermWriter {
       );
       self.buffer.push_str(&display_line);
     } else {
-      self.buffer.push_str(line);
+      self.buffer.push_str(&expanded);
     }
 
     if end.col == 0 && end.row > prompt_end.row && !ends_with_newline(&self.buffer) {

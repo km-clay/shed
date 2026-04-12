@@ -7,7 +7,7 @@ use std::fmt::Display;
 use std::rc::Rc;
 use yansi::Paint;
 
-use crate::procio::RedirGuard;
+use crate::procio::{RedirGuard, borrow_fd};
 use crate::{
   parse::lex::{Span, SpanSource},
   prelude::*,
@@ -401,16 +401,16 @@ impl ShErr {
     }
     source_map
   }
-  pub fn print_error(&self) {
+	fn print_error_internal(&self, fd: RawFd) {
     if *self.kind() == ShErrKind::Interrupt {
       // Don't print anything for Interrupt
       // This only occurs when the user breaks out of something with ctrl + c
       return;
     }
     let default = || {
-      eprintln!("\n{}", self.kind);
+      write(borrow_fd(fd), format!("\n{}\n", self.kind).as_bytes()).ok();
       for note in &self.notes {
-        eprintln!("note: {note}");
+        write(borrow_fd(fd), format!("note: {note}\n").as_bytes()).ok();
       }
     };
     let Some(report) = self.build_report() else {
@@ -424,11 +424,17 @@ impl ShErr {
         .cloned()
         .ok_or_else(|| format!("Failed to fetch source '{}'", src.name()))
     });
-    eprintln!();
+    write(borrow_fd(fd), b"\n").ok();
     if report.eprint(cache).is_err() {
       default();
     }
+	}
+  pub fn print_error(&self) {
+		self.print_error_internal(STDERR_FILENO);
   }
+	pub fn print_error_stdout(&self) {
+		self.print_error_internal(STDOUT_FILENO);
+	}
 }
 
 impl Display for ShErr {

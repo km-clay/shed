@@ -42,7 +42,7 @@ use crate::{
     trap::{TrapTarget, trap},
     varcmds::{export, local, readonly, unset},
   },
-  expand::{expand_aliases, expand_case_pattern, glob_to_regex},
+  expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
   libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
@@ -290,10 +290,12 @@ impl Dispatcher {
       NdRule::Pipeline { .. } => self.exec_pipeline(node),
       NdRule::IfNode { .. } => self.exec_if(node),
       NdRule::LoopNode { .. } => self.exec_loop(node),
-      NdRule::ForNode { .. } => self.exec_for(node),
+      NdRule::ForNode { .. } => self.exec_for_arr(node),
+      NdRule::ForArith { .. } => self.exec_for_arith(node),
       NdRule::CaseNode { .. } => self.exec_case(node),
       NdRule::BraceGrp { .. } => self.exec_brc_grp(node),
       NdRule::FuncDef { .. } => self.exec_func_def(node),
+			NdRule::Arithmetic { .. } => self.exec_arith(node),
       NdRule::Negate { .. } => self.exec_negated(node),
       NdRule::Command { .. } => self.dispatch_cmd(node),
       NdRule::Test { .. } => self.exec_test(node),
@@ -348,13 +350,16 @@ impl Dispatcher {
       .into_iter()
       .next()
       .unwrap();
+		let cmd_tk = node.get_command();
 
     if is_func(&cmd_word) {
       self.exec_func(node)
     } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTINS.contains(&cmd_word.as_str()) {
       self.exec_builtin(node)
-    } else if is_subsh(node.get_command().cloned()) {
+    } else if is_subsh(cmd_tk) {
       self.exec_subsh(node)
+		} else if is_arith(cmd_tk) {
+			self.exec_arith(node)
     } else if read_shopts(|s| s.core.autocd)
       && Path::new(cmd.span.as_str()).is_dir()
       && !is_in_path(cmd.span.as_str())
@@ -449,6 +454,14 @@ impl Dispatcher {
 			});
 		}
 
+		state::set_status(0);
+    Ok(())
+  }
+	fn exec_arith(&mut self, arith: Node) -> ShResult<()> {
+    let NdRule::Arithmetic { body } = arith.class else { unreachable!() };
+    let result = expand_arithmetic_wrapped(body.as_str())?;
+    let val: f64 = result.parse().unwrap_or(0.0);
+    state::set_status(if val != 0.0 { 0 } else { 1 });
     Ok(())
   }
   fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
@@ -723,7 +736,76 @@ impl Dispatcher {
         .map_err(|e| e.with_redirs(guard))
     }
   }
-  fn exec_for(&mut self, for_stmt: Node) -> ShResult<()> {
+	fn exec_for_arith(&mut self, for_stmt: Node) -> ShResult<()> {
+		let blame = for_stmt.get_span().clone();
+		let NdRule::ForArith { init, cond, step, body } = for_stmt.class else {
+			unreachable!();
+		};
+    let fork_builtins = for_stmt.flags.contains(NdFlags::FORK_BUILTINS);
+    let report_time = for_stmt.flags.contains(NdFlags::REPORT_TIME);
+
+    self.io_stack.append_to_frame(for_stmt.redirs);
+    let guard = self.io_stack.pop_frame().redirect()?;
+
+		let for_logic = |s: &mut Self| -> ShResult<()> {
+			if let Some(init_node) = init {
+				s.dispatch_node(*init_node)?;
+			}
+
+			loop {
+				if let Some(cond_node) = cond.clone() {
+					if let Err(e) = s.dispatch_node(*cond_node) {
+						state::set_status(1);
+						return Err(e);
+					}
+					let status = state::get_status();
+					if status != 0 {
+						state::set_status(0);
+						break;
+					}
+				}
+
+				for node in body.clone() {
+					if let Err(e) = s.dispatch_node(node) {
+						match e.kind() {
+							ShErrKind::LoopBreak(code) => {
+								state::set_status(*code);
+								break;
+							}
+							ShErrKind::LoopContinue(code) => {
+								state::set_status(*code);
+								continue;
+							}
+							_ => return Err(e),
+						}
+					}
+				}
+
+				if let Some(step_node) = step.clone()
+				&& let Err(e) = s.dispatch_node(*step_node) {
+					state::set_status(1);
+					return Err(e);
+				}
+			}
+
+			Ok(())
+		};
+
+    if fork_builtins {
+      log::trace!("Forking builtin: for");
+      self.run_fork("for", report_time, |s| {
+        if let Err(e) = for_logic(s) {
+          e.print_error();
+        }
+      })?;
+      Ok(())
+    } else {
+      for_logic(self)
+        .try_blame(blame)
+        .map_err(|e| e.with_redirs(guard))
+    }
+	}
+  fn exec_for_arr(&mut self, for_stmt: Node) -> ShResult<()> {
     let blame = for_stmt.get_span().clone();
     let NdRule::ForNode { vars, arr, body } = for_stmt.class else {
       unreachable!();
@@ -1167,6 +1249,9 @@ impl Dispatcher {
         cmd.class.as_nd_kind()
       )
     };
+		if self.interactive {
+			log::debug!("assignments: {assignments:#?}, argv: {argv:#?}");
+		}
     let assign_behavior = if argv.is_empty() {
       AssignBehavior::Set
     } else {
@@ -1174,26 +1259,39 @@ impl Dispatcher {
     };
 
     if let AssignBehavior::Set = assign_behavior {
+			// if we are here, argv is empty. set assignments and return.
       if !assignments.is_empty() {
         self.set_assignments(assignments, assign_behavior)?;
         state::set_status(0);
       }
       return Ok(());
     }
+		// argv is not empty. let's set this here.
+		let cmd_tk = argv[0].clone();
+		let cmd_name = cmd_tk.as_str();
+
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
     self.io_stack.append_to_frame(cmd.redirs);
-    let exec_args = ExecArgs::new(argv).blame(blame)?;
     let _guard = self.io_stack.pop_frame().redirect()?;
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
 
     let fg_job = self.fg_job;
     let interactive = self.interactive;
     let child_logic = |pgid: Option<Pid>| -> ! {
-      if let AssignBehavior::Export = assign_behavior {
+      if let AssignBehavior::Export = assign_behavior && !assignments.is_empty() {
         self.set_assignments(assignments, assign_behavior).ok();
       }
+			let exec_args = match ExecArgs::new(argv) {
+				Ok(args) => args,
+				Err(e) =>  {
+					sherr!(ExecFail @ blame, "{e}")
+						.with_context(context)
+						.print_error();
+					exit(1);
+				}
+			};
       // For non-interactive exec-in-place (e.g. shed -c), skip process group
       // and terminal setup - just transparently replace the current process.
       if interactive || !no_fork {
@@ -1226,7 +1324,11 @@ impl Dispatcher {
 			let cmd_raw = cmd.to_str().unwrap_or_default();
 
 			let Err(e) = if let Some(path) = state::lookup_cmd(cmd_raw) {
-				let c_path = CString::new(path.as_os_str().to_str().unwrap_or_default().as_bytes()).unwrap_or_default();
+				let path_bytes = path.as_os_str()
+					.to_str()
+					.unwrap_or_default()
+					.as_bytes();
+				let c_path = CString::new(path_bytes).unwrap_or_default();
 				execve(&c_path, &exec_args.argv, &exec_args.envp)
 			} else {
 				log::warn!("command not found: {}", cmd_raw);
@@ -1235,11 +1337,9 @@ impl Dispatcher {
 
 
       // execvpe only returns on error
-      let cmd_str = cmd.to_str().unwrap().to_string();
       match e {
         Errno::ENOENT => {
-          ShErr::new(ShErrKind::NotFound, span.clone())
-            .labeled(span, format!("{cmd_str}: command not found"))
+					sherr!(NotFound @ span, "command not found")
             .with_context(context)
             .print_error();
         }
@@ -1264,8 +1364,6 @@ impl Dispatcher {
         // and will access them via /proc/self/fd/N. Keeping them
         // open here would prevent EOF on the pipe.
         write_jobs(|j| j.drain_registered_fds());
-
-        let cmd_name = exec_args.cmd.0.to_str().unwrap();
 
         let child_pgid = if let Some(pgid) = existing_pgid {
           pgid
@@ -1488,8 +1586,12 @@ pub fn is_func(name: &str) -> bool {
   read_logic(|l| l.get_func(name)).is_some()
 }
 
-pub fn is_subsh(tk: Option<Tk>) -> bool {
+pub fn is_subsh(tk: Option<&Tk>) -> bool {
   tk.is_some_and(|tk| tk.flags.contains(TkFlags::IS_SUBSH))
+}
+
+pub fn is_arith(tk: Option<&Tk>) -> bool {
+	tk.is_some_and(|tk| tk.flags.contains(TkFlags::IS_ARITH))
 }
 
 #[cfg(test)]

@@ -192,6 +192,15 @@ pub fn get_ast(input: &str) -> ShResult<Vec<crate::parse::Node>> {
 }
 
 impl crate::parse::Node {
+	pub fn count_noderules(&mut self, kind: NdKind) -> usize {
+		let mut count = 0;
+		self.walk_tree(&mut |s| {
+			if s.class.as_nd_kind() == kind {
+				count += 1;
+			}
+		});
+		count
+	}
   pub fn assert_structure(
     &mut self,
     expected: &mut impl Iterator<Item = NdKind>,

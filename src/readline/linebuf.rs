@@ -210,7 +210,8 @@ impl Line {
   pub fn append(&mut self, other: &mut Line) {
     self.0.append(&mut other.0);
   }
-  pub fn insert_str(&mut self, mut at: usize, other: &str) {
+  pub fn insert_str(&mut self, at: usize, other: &str) {
+		let mut at = at.min(self.0.len());
     if other.contains('\n') {
       log::warn!(
         "Inserting string with newlines into a single line. Newlines will be treated as literal characters."
@@ -222,9 +223,11 @@ impl Line {
     }
   }
   pub fn insert_char(&mut self, at: usize, c: char) {
+		let at = at.min(self.0.len());
     self.0.insert(at, Grapheme::from(c));
   }
   pub fn insert(&mut self, at: usize, g: Grapheme) {
+		let at = at.min(self.0.len());
     self.0.insert(at, g);
   }
   pub fn width(&self) -> usize {
@@ -3868,7 +3871,7 @@ impl LineBuf {
         Some(Motion::CharRange(s, e))
       }
       SelectMode::Line(pos) => {
-        let (s, e) = ordered(self.row(), pos.row);
+        let (s, e) = ordered(self.row() + 1, pos.row + 1);
         Some(Motion::LineRange(LineAddr::Number(s), LineAddr::Number(e)))
       }
       SelectMode::Block(pos) => {

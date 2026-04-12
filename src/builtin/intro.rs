@@ -87,10 +87,11 @@ pub fn type_builtin(node: Node) -> ShResult<()> {
       }
 
       state::set_status(1);
-      return Err(sherr!(
-        NotFound @ span,
-        "'{}' is not a command, function, or alias", arg.fg(next_color())
-      ));
+			sherr!(
+				NotFound @ span,
+				"'{}' is not a command, function, or alias", arg.fg(next_color())
+			).print_error();
+			return Ok(())
     }
   }
 
@@ -191,7 +192,7 @@ mod tests {
   fn type_not_found() {
     let _g = TestGuard::new();
     let result = test_input("type __hopefully____not_______a____command__");
-    assert!(result.is_err());
+    assert!(result.is_ok());
     assert_eq!(state::get_status(), 1);
   }
 

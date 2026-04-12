@@ -155,12 +155,13 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
   let mut var_name = String::new();
   let mut rest = String::new();
   if raw.starts_with('#') {
-    return Ok(
-      vars
-        .get_var(raw.strip_prefix('#').unwrap())
-        .len()
-        .to_string(),
-    );
+		let var = vars.get_var_meta(raw.strip_prefix('#').unwrap());
+		return Ok(match var.kind() {
+			VarKind::Str(_) |
+			VarKind::Int(_) => var.to_string().len(),
+			VarKind::Arr(items) => items.len(),
+			VarKind::AssocArr(items) => items.len()
+		}.to_string())
   }
 
   match_loop!(chars.next() => ch, {

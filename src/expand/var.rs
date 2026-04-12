@@ -118,14 +118,12 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         match idx {
           ArrIndex::AllSplit => {
             let arg_sep = markers::ARG_SEP.to_string();
-            let elems = read_vars(|v| v.get_arr_elems(&var_name))?;
+            let elems = read_vars(|v| v.get_arr_elems(&var_name));
             let start = split_start.unwrap_or(0);
             let end = start + split_len.unwrap_or(elems.len().saturating_sub(start));
             elems[start..end.min(elems.len())].join(&arg_sep)
           }
-          ArrIndex::ArgCount => read_vars(|v| v.get_arr_elems(&var_name))
-            .map(|elems| elems.len().to_string())
-            .unwrap_or_else(|_| "0".to_string()),
+          ArrIndex::ArgCount => read_vars(|v| v.get_arr_elems(&var_name)).len().to_string(),
           ArrIndex::AllJoined => {
             let ifs = read_vars(|v| v.try_get_var("IFS"))
               .unwrap_or_else(|| " \t\n".to_string())
@@ -134,7 +132,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
               .unwrap_or(' ')
               .to_string();
 
-            let elems = read_vars(|v| v.get_arr_elems(&var_name))?;
+            let elems = read_vars(|v| v.get_arr_elems(&var_name));
             let start = split_start.unwrap_or(0);
             let end = start + split_len.unwrap_or(elems.len().saturating_sub(start));
             elems[start..end.min(elems.len())].join(&ifs)

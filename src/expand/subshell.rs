@@ -1,4 +1,4 @@
-use crate::expand::arithmetic::expand_arithmetic;
+use crate::expand::arithmetic::expand_arithmetic_wrapped;
 use crate::libsh::error::ShResult;
 use crate::parse::execute::exec_input;
 use crate::parse::{Redir, RedirType};
@@ -62,11 +62,8 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 
 /// Get the command output of a given command input as a String
 pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
-  if raw.starts_with('(')
-    && raw.ends_with(')')
-    && let Some(output) = expand_arithmetic(raw)?
-  {
-    return Ok(output); // It's actually an arithmetic sub
+  if raw.starts_with('(') && raw.ends_with(')') {
+    return expand_arithmetic_wrapped(raw);
   }
   let (rpipe, wpipe) = IoMode::get_pipes();
   let cmd_sub_redir = Redir::new(wpipe, RedirType::Output);

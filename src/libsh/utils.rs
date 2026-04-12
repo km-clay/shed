@@ -18,7 +18,40 @@ use crate::state::AutoCmd;
 ///  }
 ///  ```
 ///
-///  This pattern is used extensively for parsing strings char by char.
+///  This macro is used extensively for parsing strings one character at a time.
+///
+///  "The input language to the shell shall first be recognized at the character level"
+///
+///  		-- POSIX 1003.1-2024, 2.10.1 Shell Grammar Lexical Conventions
+///
+///  This macro comes in two forms.
+///  The basic case, `expr => binding`:
+///  ```
+///  let input = String::from("bar")
+///  let mut chars = input.chars();
+///
+///	 // expression => binding
+///  match_loop!(iter.next() => ch, {
+///  	'b' | 'a' | 'r' => {
+///  		// some logic
+///  	}
+///  	_ => panic!()
+///  })
+///  ```
+///
+///  and the pattern matching case, `expr => pat => binding`
+///  ```
+///  let input = String::from("bar")
+///  let mut chars = input.chars().peekable();
+///
+///	 // expression => pattern => binding
+///  match_loop!(iter.peek() => &ch => ch, {
+///  	'b' | 'a' | 'r' => {
+///  		// some logic
+///  	}
+///  	_ => panic!()
+///  })
+///  ```
 macro_rules! match_loop {
 	($expr:expr => $binding:ident, { $($arms:tt)* }) => {
 		while let Some($binding) = $expr {
@@ -38,10 +71,11 @@ macro_rules! match_loop {
 
 #[macro_export]
 /// A macro that abbreviates the creation of a ShErr, allowing you to specify the kind and a format string with arguments, and optionally a span for error location.
+/// Providing a span will automatically make the printed error point at the offending text referred to by the span.
 /// Examples:
 /// ```
 /// sherr!(ParseErr, "Unexpected token: {}", token);
-/// sherr!(SyntaxErr, span, "Expected ';' but found '{}'", found);
+/// sherr!(SyntaxErr @ span, "Expected ';' but found '{}'", found);
 /// ```
 macro_rules! sherr {
 	($kind:ident($($inner:tt)*)@$span:expr, $($arg:tt)*) => {
@@ -72,6 +106,18 @@ macro_rules! sherr {
 
 #[macro_export]
 /// Defines a two-way mapping between an enum and its string representation, implementing both Display and FromStr.
+/// Example:
+///
+/// ```
+/// enum Foobars {
+/// 	Foo,
+/// 	Bar
+/// }
+/// two_way_display! {Foobars,
+/// 	Foo <=> "foo",
+/// 	Bar <=> "bar",
+/// }
+/// ```
 macro_rules! two_way_display {
 	($name:ident, $($member:ident <=> $val:expr;)*) => {
 		impl Display for $name {

@@ -9,7 +9,7 @@ pub mod util;
 pub mod var;
 
 pub use alias::{expand_aliases, expand_keymap, parse_key_alias};
-pub use arithmetic::expand_arithmetic;
+pub use arithmetic::{expand_arithmetic, expand_arithmetic_wrapped};
 pub use escape::{as_var_val_display, escape_str, unescape_heredoc, unescape_math, unescape_str};
 pub use param::{ParamExp, parse_pos_len, perform_param_expansion};
 pub use prompt::{PromptTk, expand_prompt, format_cmd_runtime};
@@ -326,7 +326,7 @@ mod tests {
     })
     .unwrap();
 
-    let elems = read_vars(|v| v.get_arr_elems("arr")).unwrap();
+    let elems = read_vars(|v| v.try_get_arr_elems("arr")).unwrap();
     assert_eq!(elems, vec!["a", "b", "c"]);
   }
 
@@ -342,7 +342,7 @@ mod tests {
     })
     .unwrap();
 
-    let elems = read_vars(|v| v.get_arr_elems("arr")).unwrap();
+    let elems = read_vars(|v| v.try_get_arr_elems("arr")).unwrap();
     assert_eq!(elems.len(), 3);
   }
 

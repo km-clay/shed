@@ -227,7 +227,7 @@ mod tests {
   }
 
   fn get_arr(name: &str) -> Vec<String> {
-    read_vars(|v| v.get_arr_elems(name)).unwrap()
+    read_vars(|v| v.try_get_arr_elems(name)).unwrap()
   }
 
   // ===================== push =====================
