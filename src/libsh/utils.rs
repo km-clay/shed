@@ -20,18 +20,18 @@ use crate::state::AutoCmd;
 ///
 ///  This macro is used extensively for parsing strings one character at a time.
 ///
-///  "The input language to the shell shall first be recognized at the character level"
-///
-///  		-- POSIX 1003.1-2024, 2.10.1 Shell Grammar Lexical Conventions
+///  > "The input language to the shell shall first be recognized at the character level"
+///  >
+///  > -- POSIX 1003.1-2024, 2.10.1 Shell Grammar Lexical Conventions
 ///
 ///  This macro comes in two forms.
 ///  The basic case, `expr => binding`:
 ///  ```
-///  let input = String::from("bar")
+///  let input = String::from("bar");
 ///  let mut chars = input.chars();
 ///
 ///	 // expression => binding
-///  match_loop!(iter.next() => ch, {
+///  match_loop!(chars.next() => ch, {
 ///  	'b' | 'a' | 'r' => {
 ///  		// some logic
 ///  	}
@@ -41,11 +41,11 @@ use crate::state::AutoCmd;
 ///
 ///  and the pattern matching case, `expr => pat => binding`
 ///  ```
-///  let input = String::from("bar")
+///  let input = String::from("bar");
 ///  let mut chars = input.chars().peekable();
 ///
 ///	 // expression => pattern => binding
-///  match_loop!(iter.peek() => &ch => ch, {
+///  match_loop!(chars.peek() => &ch => ch, {
 ///  	'b' | 'a' | 'r' => {
 ///  		// some logic
 ///  	}

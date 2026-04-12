@@ -152,8 +152,8 @@ impl ExecArgs {
 /// processes (e.g. nvim spawning opencode) lose their controlling terminal.
 pub fn exec_dash_c(input: String) -> ShResult<()> {
 	write_meta(|m| m.rehash());
-  let log_tab = read_logic(|l| l.clone());
-  let expanded = expand_aliases(input, HashSet::new(), &log_tab);
+  let aliases = read_logic(|l| l.aliases().clone());
+  let expanded = expand_aliases(input, HashSet::new(), &aliases);
   let source_name: Rc<str> = "<shed -c>".into();
   let mut parser = ParsedSrc::new(expanded.into())
     .with_lex_flags(super::lex::LexFlags::empty())
@@ -221,8 +221,8 @@ pub fn exec_input(
   interactive: bool,
   source_name: Option<Rc<str>>,
 ) -> ShResult<()> {
-  let log_tab = read_logic(|l| l.clone());
-  let input = expand_aliases(input, HashSet::new(), &log_tab);
+  let aliases = read_logic(|l| l.aliases().clone());
+  let input = expand_aliases(input, HashSet::new(), &aliases);
   let lex_flags = if interactive {
     super::lex::LexFlags::INTERACTIVE
   } else {
@@ -1249,9 +1249,6 @@ impl Dispatcher {
         cmd.class.as_nd_kind()
       )
     };
-		if self.interactive {
-			log::debug!("assignments: {assignments:#?}, argv: {argv:#?}");
-		}
     let assign_behavior = if argv.is_empty() {
       AssignBehavior::Set
     } else {
@@ -1266,7 +1263,7 @@ impl Dispatcher {
       }
       return Ok(());
     }
-		// argv is not empty. let's set this here.
+		// argv is not empty. let's set this stuff here.
 		let cmd_tk = argv[0].clone();
 		let cmd_name = cmd_tk.as_str();
 

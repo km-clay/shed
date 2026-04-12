@@ -1,8 +1,8 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::parse::lex::{LexFlags, LexStream, TkFlags};
 use crate::readline::keys::{KeyCode, KeyEvent, ModKeys};
-use crate::state::{LogTab, read_shopts};
+use crate::state::{ShAlias, read_shopts};
 
 /// Expand aliases in the given input string
 ///
@@ -10,7 +10,7 @@ use crate::state::{LogTab, read_shopts};
 pub fn expand_aliases(
   input: String,
   mut already_expanded: HashSet<String>,
-  log_tab: &LogTab,
+  aliases: &HashMap<String, ShAlias>,
 ) -> String {
   let mut result = input.clone();
   let tokens: Vec<_> = LexStream::new(input.into(), LexFlags::empty()).collect();
@@ -32,7 +32,7 @@ pub fn expand_aliases(
       continue;
     }
 
-    if let Some(alias) = log_tab.get_alias(&raw_tk) {
+    if let Some(alias) = aliases.get(&raw_tk) {
       result.replace_range(tk.span.range(), &alias.to_string());
       expanded_this_iter.push(raw_tk);
     }
@@ -42,7 +42,7 @@ pub fn expand_aliases(
     result
   } else {
     already_expanded.extend(expanded_this_iter);
-    expand_aliases(result, already_expanded, log_tab)
+    expand_aliases(result, already_expanded, aliases)
   }
 }
 
@@ -277,8 +277,8 @@ mod tests {
         .insert_alias("ll", "ls -la", dummy_span.clone());
     });
 
-    let log_tab = crate::state::SHED.with(|s| s.logic.borrow().clone());
-    let result = expand_aliases("ll".to_string(), HashSet::new(), &log_tab);
+    let aliases = crate::state::SHED.with(|s| s.logic.borrow().aliases().clone());
+    let result = expand_aliases("ll".to_string(), HashSet::new(), &aliases);
     assert_eq!(result, "ls -la");
   }
 
@@ -292,8 +292,8 @@ mod tests {
         .insert_alias("foo", "foo --verbose", dummy_span.clone());
     });
 
-    let log_tab = crate::state::SHED.with(|s| s.logic.borrow().clone());
-    let result = expand_aliases("foo".to_string(), HashSet::new(), &log_tab);
+    let aliases = crate::state::SHED.with(|s| s.logic.borrow().aliases().clone());
+    let result = expand_aliases("foo".to_string(), HashSet::new(), &aliases);
     // After first expansion: "foo --verbose", then "foo" is in already_expanded
     // so it won't expand again
     assert_eq!(result, "foo --verbose");

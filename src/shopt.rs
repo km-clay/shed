@@ -251,6 +251,9 @@ shopt_group! {
 
     /// Whether to automatically indent new lines in multiline commands
     auto_indent: bool = true,
+
+		/// Whether to suggest commands from history as commands are typed
+		auto_suggest: bool = true,
   }
 }
 

@@ -24,7 +24,7 @@ use crate::{
   parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::exec_input,
-    lex::{LexFlags, QuoteState, Tk, TkFlags},
+    lex::{self, LexFlags, QuoteState, Tk, TkFlags},
   },
   prelude::*,
   procio::{IoFrame, IoMode, IoStack, borrow_fd},
@@ -1086,13 +1086,22 @@ impl LineBuf {
     if new_level < level {
       let delta = level.saturating_sub(new_level);
       let line = self.cur_line_mut();
-      for _ in 0..delta {
-        if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
-          line.0.remove(0);
-        } else {
-          break;
-        }
-      }
+			// check if the line is an exact match of a closer keyword
+			// we don't want to dedent something like 'foo) echo bar ;;'
+			// where the closer is inlined with the content
+			let is_closer = lex::CLOSERS.iter()
+				.chain(lex::MIDDLES.iter())
+				.any(|closer| trimmed == *closer);
+
+			if is_closer {
+				for _ in 0..delta {
+					if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
+						line.0.remove(0);
+					} else {
+						break;
+					}
+				}
+			}
     }
   }
   fn insert(&mut self, gr: Grapheme) {
@@ -3665,6 +3674,10 @@ impl LineBuf {
   }
 
   pub fn set_hint(&mut self, hint: Option<String>) {
+		if !read_shopts(|o| o.line.auto_suggest) {
+			self.hint = None;
+			return;
+		}
     let joined = self.joined();
     self.hint = hint
       .and_then(|h| h.strip_prefix(&joined).map(|s| s.to_string()))

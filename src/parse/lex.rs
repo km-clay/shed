@@ -24,6 +24,8 @@ pub const OPENERS: [&str; 6] = ["if", "while", "until", "for", "select", "case"]
 
 pub const MIDDLES: [&str; 2] = ["elif", "else"];
 
+pub const CLOSERS: [&str; 5] = ["fi", "done", "esac", "}", ";;"];
+
 pub fn not_marker(tk: &ShResult<Tk>) -> bool {
   tk.is_err()
     || !tk

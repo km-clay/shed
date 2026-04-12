@@ -150,18 +150,17 @@ pub fn parse_pos_len(s: &str) -> Option<(usize, Option<usize>)> {
 }
 
 pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
-  let vars = read_vars(|v| v.clone());
   let mut chars = raw.chars();
   let mut var_name = String::new();
   let mut rest = String::new();
   if raw.starts_with('#') {
-		let var = vars.get_var_meta(raw.strip_prefix('#').unwrap());
-		return Ok(match var.kind() {
-			VarKind::Str(_) |
-			VarKind::Int(_) => var.to_string().len(),
-			VarKind::Arr(items) => items.len(),
-			VarKind::AssocArr(items) => items.len()
-		}.to_string())
+    let var = read_vars(|v| v.get_var_meta(raw.strip_prefix('#').unwrap()));
+    return Ok(match var.kind() {
+      VarKind::Str(_) |
+      VarKind::Int(_) => var.to_string().len(),
+      VarKind::Arr(items) => items.len(),
+      VarKind::AssocArr(items) => items.len()
+    }.to_string())
   }
 
   match_loop!(chars.next() => ch, {
@@ -176,11 +175,11 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
     match expansion {
       ParamExp::Len => unreachable!(),
       ParamExp::ToUpperAll => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         Ok(value.to_uppercase())
       }
       ParamExp::ToUpperFirst => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let mut chars = value.chars();
         let first = chars
           .next()
@@ -189,11 +188,11 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Ok(first + chars.as_str())
       }
       ParamExp::ToLowerAll => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         Ok(value.to_lowercase())
       }
       ParamExp::ToLowerFirst => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let mut chars = value.chars();
         let first = chars
           .next()
@@ -202,17 +201,17 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Ok(first + chars.as_str())
       }
       ParamExp::DefaultUnsetOrNull(default) => {
-        match vars.try_get_var(&var_name).filter(|v| !v.is_empty()) {
+        match read_vars(|v| v.try_get_var(&var_name)).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val),
           None => expand_raw(&mut default.chars().peekable()),
         }
       }
-      ParamExp::DefaultUnset(default) => match vars.try_get_var(&var_name) {
+      ParamExp::DefaultUnset(default) => match read_vars(|v| v.try_get_var(&var_name)) {
         Some(val) => Ok(val),
         None => expand_raw(&mut default.chars().peekable()),
       },
       ParamExp::SetDefaultUnsetOrNull(default) => {
-        match vars.try_get_var(&var_name).filter(|v| !v.is_empty()) {
+        match read_vars(|v| v.try_get_var(&var_name)).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val),
           None => {
             let expanded = expand_raw(&mut default.chars().peekable())?;
@@ -221,7 +220,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           }
         }
       }
-      ParamExp::SetDefaultUnset(default) => match vars.try_get_var(&var_name) {
+      ParamExp::SetDefaultUnset(default) => match read_vars(|v| v.try_get_var(&var_name)) {
         Some(val) => Ok(val),
         None => {
           let expanded = expand_raw(&mut default.chars().peekable())?;
@@ -229,16 +228,16 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           Ok(expanded)
         }
       },
-      ParamExp::AltSetNotNull(alt) => match vars.try_get_var(&var_name).filter(|v| !v.is_empty()) {
+      ParamExp::AltSetNotNull(alt) => match read_vars(|v| v.try_get_var(&var_name)).filter(|v| !v.is_empty()) {
         Some(_) => expand_raw(&mut alt.chars().peekable()),
         None => Ok("".into()),
       },
-      ParamExp::AltNotNull(alt) => match vars.try_get_var(&var_name) {
+      ParamExp::AltNotNull(alt) => match read_vars(|v| v.try_get_var(&var_name)) {
         Some(_) => expand_raw(&mut alt.chars().peekable()),
         None => Ok("".into()),
       },
       ParamExp::ErrUnsetOrNull(err) => {
-        match vars.try_get_var(&var_name).filter(|v| !v.is_empty()) {
+        match read_vars(|v| v.try_get_var(&var_name)).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val),
           None => {
             let expanded = expand_raw(&mut err.chars().peekable())?;
@@ -246,7 +245,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           }
         }
       }
-      ParamExp::ErrUnset(err) => match vars.try_get_var(&var_name) {
+      ParamExp::ErrUnset(err) => match read_vars(|v| v.try_get_var(&var_name)) {
         Some(val) => Ok(val),
         None => {
           let expanded = expand_raw(&mut err.chars().peekable())?;
@@ -254,7 +253,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         }
       },
       ParamExp::SliceOpen(pos) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         if let Some(substr) = value.get(pos..) {
           Ok(substr.to_string())
         } else {
@@ -262,7 +261,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         }
       }
       ParamExp::SliceClosed(pos, len) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let end = pos.saturating_add(len);
         if let Some(substr) = value.get(pos..end) {
           Ok(substr.to_string())
@@ -271,7 +270,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         }
       }
       ParamExp::RemShortestPrefix(prefix) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let unescaped = unescape_str(&prefix);
         let expanded =
           strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix));
@@ -285,7 +284,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Ok(value)
       }
       ParamExp::RemLongestPrefix(prefix) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let unescaped = unescape_str(&prefix);
         let expanded =
           strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(prefix));
@@ -299,7 +298,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Ok(value) // no match
       }
       ParamExp::RemShortestSuffix(suffix) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let unescaped = unescape_str(&suffix);
         let expanded =
           strip_escape_markers(&expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix));
@@ -313,7 +312,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Ok(value)
       }
       ParamExp::RemLongestSuffix(suffix) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let unescaped = unescape_str(&suffix);
         let expanded_suffix = strip_escape_markers(
           &expand_raw(&mut unescaped.chars().peekable()).unwrap_or(suffix.clone()),
@@ -328,7 +327,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Ok(value)
       }
       ParamExp::ReplaceFirstMatch(search, replace) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
         let expanded_search =
@@ -347,7 +346,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         }
       }
       ParamExp::ReplaceAllMatches(search, replace) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
         let expanded_search =
@@ -369,7 +368,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Ok(result)
       }
       ParamExp::ReplacePrefix(search, replace) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
         let expanded_search =
@@ -386,7 +385,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Ok(value)
       }
       ParamExp::ReplaceSuffix(search, replace) => {
-        let value = vars.get_var(&var_name);
+        let value = read_vars(|v| v.get_var(&var_name));
         let search = unescape_str(&search);
         let replace = unescape_str(&replace);
         let expanded_search =
@@ -403,24 +402,23 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Ok(value)
       }
       ParamExp::VarNamesWithPrefix(prefix) => {
-        let mut match_vars = vec![];
-        for var in vars.flatten_vars().keys() {
-          if var.starts_with(&prefix) {
-            match_vars.push(var.clone())
-          }
-        }
+        let flat = read_vars(|v| v.flatten_vars());
+        let match_vars: Vec<_> = flat.keys()
+          .filter(|var| var.starts_with(&prefix))
+          .cloned()
+          .collect();
         Ok(match_vars.join(" "))
       }
       ParamExp::ExpandInnerVar(var_name) => {
-        let value = vars.get_var(&var_name);
-        Ok(vars.get_var(&value))
+        let value = read_vars(|v| v.get_var(&var_name));
+        Ok(read_vars(|v| v.get_var(&value)))
       }
     }
   } else {
-		let var = vars.try_get_var(&var_name);
-		if var.is_none() && read_shopts(|o| o.set.nounset) {
-			return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
-		}
+    let var = read_vars(|v| v.try_get_var(&var_name));
+    if var.is_none() && read_shopts(|o| o.set.nounset) {
+      return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
+    }
     Ok(var.unwrap_or_default())
   }
 }

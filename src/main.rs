@@ -539,13 +539,16 @@ fn handle_readline_event(
 ) -> ShResult<bool> {
   match event {
     Ok(ReadlineEvent::Line(input)) => {
+			let exec_start = Instant::now();
       let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
       let post_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
 
+			let pre_start = Instant::now();
       pre_exec.exec();
+			log::info!("Pre-cmd autocmds executed in {:.2?}", pre_start.elapsed());
 
       // Time this command and temporarily restore cooked terminal mode while it runs.
-      let start = Instant::now();
+      let cmd_start = Instant::now();
       write_meta(|m| m.start_timer());
       if let Err(e) = RawModeGuard::with_cooked_mode(|| {
         exec_input(input.clone(), None, true, Some("<stdin>".into()))
@@ -568,11 +571,14 @@ fn handle_readline_event(
           _ => e.print_error(),
         }
       }
-      let command_run_time = start.elapsed();
+      let command_run_time = cmd_start.elapsed();
       log::info!("Command executed in {:.2?}", command_run_time);
       let runtime = write_meta(|m| m.stop_timer());
 
+			let post_start = Instant::now();
       post_exec.exec();
+			log::info!("Post-cmd autocmds executed in {:.2?}", post_start.elapsed());
+
 			let was_func_def = write_meta(|m| m.take_last_was_func_def());
 			let should_write = !was_func_def || !read_shopts(|o| o.set.nolog);
 
@@ -590,13 +596,15 @@ fn handle_readline_event(
         }
       }
 
+			let rl_cleanup_start = Instant::now();
       readline.fix_column()?;
       readline.writer.flush_write("\n\r")?;
 
       // Reset for next command with fresh prompt
       readline.reset(true)?;
+			log::info!("Readline reset and prompt redraw in {:.2?}", rl_cleanup_start.elapsed());
 
-      let real_end = start.elapsed();
+      let real_end = exec_start.elapsed();
       log::info!("Total round trip time: {:.2?}", real_end);
       Ok(false)
     }
