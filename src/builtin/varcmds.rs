@@ -63,7 +63,6 @@ pub fn readonly(node: Node) -> ShResult<()> {
 }
 
 pub fn unset(node: Node) -> ShResult<()> {
-  let blame = node.get_span().clone();
   let NdRule::Command {
     assignments: _,
     argv,

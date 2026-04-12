@@ -45,7 +45,7 @@ use crate::{
   expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
   libsh::{
-    error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
+    error::{ShErrKind, ShResult, ShResultExt, next_color},
     guards::{scope_guard, var_ctx_guard},
     utils::RedirVecUtils,
   },
@@ -55,7 +55,7 @@ use crate::{
   shopt::xtrace_print,
   signal::{check_signals, signals_pending},
   state::{
-    self, ShFunc, UtilKind, VarFlags, VarKind, read_logic, read_meta, read_shopts, read_vars, write_jobs, write_logic, write_meta, write_vars
+    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_jobs, write_logic, write_meta, write_vars
   },
 };
 

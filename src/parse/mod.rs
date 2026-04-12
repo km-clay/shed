@@ -1627,8 +1627,6 @@ impl ParseStream {
         self.block_depth += 1;
       }
 
-      let has_sep = self.check_separator();
-
       self.catch_separator(&mut node_tks);
 
       while let Some(block) = self.parse_cmd_list()? {
@@ -1678,7 +1676,6 @@ impl ParseStream {
     Ok(Some(node))
   }
 	fn parse_for_arith(&mut self, mut node_tks: Vec<Tk>) -> ShResult<Option<Node>> {
-    let mut node_tks: Vec<Tk> = vec![];
 		let mut body: Vec<Node> = vec![];
 		let mut redirs: Vec<Redir> = vec![];
 
@@ -2401,8 +2398,8 @@ where
 			if let Some(node) = step {
 				check_node(&mut *node, filter, operation);
 			}
-			for mut body_node in body {
-				check_node(&mut body_node, filter, operation);
+			for body_node in body {
+				check_node(body_node, filter, operation);
 			}
 		}
     NdRule::CaseNode {

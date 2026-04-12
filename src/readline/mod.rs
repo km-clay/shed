@@ -1021,11 +1021,7 @@ impl ShedLine {
 
     let is_ctrl_d_motion = cmd.motion().is_some_and(|m| m.1 == Motion::HalfScreenDown);
 
-    let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
     let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
-    if is_shell_cmd {
-      self.old_layout = None;
-    }
     if is_ex_cmd {
       self.ex_history.push(cmd.raw_seq.clone()).ok();
       self.ex_history.reset();

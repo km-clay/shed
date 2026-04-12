@@ -335,6 +335,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       }
     }
   };
+	let mut vi_mode = read_shopts(|o| o.set.vi);
 
   // Main poll loop
   loop {
@@ -342,7 +343,13 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 		state::try_hash();
     error::clear_color();
 
-    readline.fix_editing_mode();
+		if read_shopts(|o| o.set.vi) != vi_mode {
+			// the editing mode option changed.
+			// we have to make sure the edit mode reflects the option now
+			readline.fix_editing_mode();
+
+			vi_mode = !vi_mode; // and toggle this
+		}
 
     // Handle any pending signals
     while signals_pending() {

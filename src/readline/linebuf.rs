@@ -984,13 +984,13 @@ impl LineBuf {
       .unwrap_or_default();
 
     write_vars(|v| {
-      v.set_var("_BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
+      v.set_var("BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
       v.set_var(
-        "_CURSOR",
+        "CURSOR",
         VarKind::Str(cursor.to_string()),
         VarFlags::EXPORT,
       )?;
-      v.set_var("_ANCHOR", VarKind::Str(anchor.clone()), VarFlags::EXPORT)
+      v.set_var("ANCHOR", VarKind::Str(anchor.clone()), VarFlags::EXPORT)
     })?;
 
     write(borrow_fd(STDOUT_FILENO), b"\r\n")?;
