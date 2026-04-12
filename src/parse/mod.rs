@@ -1907,24 +1907,25 @@ impl ParseStream {
     while let Some(mut cmd) = self.parse_block(false)? {
       let is_punctuated = node_is_punctuated(&cmd.tokens);
       node_tks.append(&mut cmd.tokens.clone());
-      let next_class = self.next_tk_class();
-      if *next_class == TkRule::ErrPipe {
+      let next_class = self.next_tk_class().clone();
+      if next_class == TkRule::ErrPipe {
         cmd.flags |= NdFlags::PIPE_ERR;
       }
-      if matches!(*next_class, TkRule::Pipe | TkRule::ErrPipe) {
+      if matches!(next_class, TkRule::Pipe | TkRule::ErrPipe) {
         cmd.walk_tree(&mut |n| n.flags |= NdFlags::PIPE_CMD | NdFlags::NOT_ERR);
       }
 
       cmds.push(cmd);
-      if *next_class == TkRule::Bg {
+      if next_class == TkRule::Bg {
         let tk = self.next_tk().unwrap();
         node_tks.push(tk.clone());
         flags |= NdFlags::BACKGROUND;
         break;
-      } else if (!matches!(*next_class, TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated {
+      } else if (!matches!(next_class, TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated {
         break;
       } else if let Some(pipe) = self.next_tk() {
-        node_tks.push(pipe)
+        node_tks.push(pipe);
+				self.catch_separator(&mut node_tks);
       } else {
         break;
       }
@@ -2441,8 +2442,11 @@ where
       name: _,
       ref mut body,
     } => check_node(body, filter, operation),
+    NdRule::Negate {
+			ref mut cmd,
+		} => check_node(cmd, filter, operation),
 
-    NdRule::Negate { ref mut cmd } => check_node(cmd, filter, operation),
+		// base cases with no child nodes
 		NdRule::Arithmetic {..} |
     NdRule::Test {..} |
     NdRule::Assignment {..} => (), // No nodes to check
