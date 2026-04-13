@@ -11,11 +11,11 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   expand::escape_str,
-  libsh::{error::ShResult, guards::var_ctx_guard, sys::TTY_FILENO, utils::TkVecUtils},
+  libsh::{error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, sys::TTY_FILENO, utils::TkVecUtils},
   match_loop,
   parse::{
     execute::exec_input,
-    lex::{self, LexFlags, Tk, TkRule, ends_with_unescaped},
+    lex::{self, LexFlags, Tk, TkRule},
   },
   readline::{
     Marker, annotate_input_recursive,

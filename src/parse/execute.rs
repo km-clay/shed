@@ -41,22 +41,11 @@ use crate::{
     times::times,
     trap::{TrapTarget, trap},
     varcmds::{export, local, readonly, unset},
-  },
-  expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
-  jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
-  libsh::{
-    error::{ShErrKind, ShResult, ShResultExt, next_color},
-    guards::{scope_guard, var_ctx_guard},
-    utils::RedirVecUtils,
-  },
-  prelude::*,
-  procio::{IoMode, IoStack, PipeGenerator, borrow_fd},
-  sherr,
-  shopt::xtrace_print,
-  signal::{check_signals, signals_pending},
-  state::{
+  }, expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex}, jobs::{ChildProc, JobStack, attach_tty, dispatch_job}, libsh::{
+    error::{ShErrKind, ShResult, ShResultExt, next_color}, guards::{scope_guard, var_ctx_guard}, strops::split_case_pat, utils::RedirVecUtils
+  }, prelude::*, procio::{IoMode, IoStack, PipeGenerator, borrow_fd}, sherr, shopt::xtrace_print, signal::{check_signals, signals_pending}, state::{
     self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_jobs, write_logic, write_meta, write_vars
-  },
+  }
 };
 
 use super::{
@@ -384,7 +373,7 @@ impl Dispatcher {
     };
     self.dispatch_node(*cmd)?;
     let status = state::get_status();
-    state::set_status(if status == 0 { 1 } else { 0 });
+    state::set_status_from_bool(status != 0);
 
     Ok(())
   }
@@ -461,7 +450,7 @@ impl Dispatcher {
     let NdRule::Arithmetic { body } = arith.class else { unreachable!() };
     let result = expand_arithmetic_wrapped(body.as_str())?;
     let val: f64 = result.parse().unwrap_or(0.0);
-    state::set_status(if val != 0.0 { 0 } else { 1 });
+    state::set_status_from_bool(val != 0.0);
     Ok(())
   }
   fn exec_subsh(&mut self, subsh: Node) -> ShResult<()> {
@@ -549,21 +538,20 @@ impl Dispatcher {
       func_body.body_mut().propagate_context(func_ctx);
       func_body.body_mut().flags = func.flags;
 
-      if let Err(e) = self.dispatch_node(func_body.body().clone()) {
-        match e.kind() {
+			match self.dispatch_node(func_body.body().clone()) {
+				Ok(()) => Ok(()),
+				Err(e) => match e.kind() {
           ShErrKind::FuncReturn(code) => {
-            state::set_status(*code);
-            Ok(())
-          }
+						state::set_status(*code);
+						Ok(())
+					}
           ShErrKind::ErrInterrupt => {
             // set -e caught an error
             Err(e.with_context(func_body.body().context.clone()))
           }
           _ => Err(e),
         }
-      } else {
-        Ok(())
-      }
+			}
     } else {
       Err(sherr!(
         InternalErr @ blame,
@@ -574,15 +562,35 @@ impl Dispatcher {
     RECURSE_DEPTH.with(|d| d.set(d.get() - 1));
     result
   }
-  fn exec_brc_grp(&mut self, brc_grp: Node) -> ShResult<()> {
-    let NdRule::BraceGrp { body } = brc_grp.class else {
-      unreachable!("expected BraceGrp node, got {:?}", brc_grp.class)
-    };
-    let fork_builtins = brc_grp.flags.contains(NdFlags::FORK_BUILTINS);
-    let report_time = brc_grp.flags.contains(NdFlags::REPORT_TIME);
+	/// Run a compound command.
+	///
+	/// Handles all of the necessary I/O plumbing and fork dispatch.
+	fn run_compound<F>(&mut self, name: &str, redirs: Vec<Redir>, flags: NdFlags, blame: Span, logic: F) -> ShResult<()>
+	where F: FnOnce(&mut Self) -> ShResult<()> {
+		let fork_builtins = flags.contains(NdFlags::FORK_BUILTINS);
+		let report_time = flags.contains(NdFlags::REPORT_TIME);
 
-    self.io_stack.append_to_frame(brc_grp.redirs);
-    let guard = self.io_stack.pop_frame().redirect()?;
+		self.io_stack.append_to_frame(redirs);
+		let guard = self.io_stack.pop_frame().redirect()?;
+
+    if fork_builtins {
+      log::trace!("Forking compound command: {name}");
+      self.run_fork(name, report_time, |s| {
+        if let Err(e) = logic(s) {
+          e.print_error();
+        }
+      })?;
+      Ok(())
+    } else {
+      logic(self)
+        .try_blame(blame)
+        .map_err(|e| e.with_redirs(guard))
+    }
+	}
+  fn exec_brc_grp(&mut self, brc_grp: Node) -> ShResult<()> {
+		let blame = brc_grp.get_span().clone();
+    let NdRule::BraceGrp { body } = brc_grp.class else { unreachable!() };
+
     let brc_grp_logic = |s: &mut Self| -> ShResult<()> {
       for node in body {
         let blame = node.get_span();
@@ -592,33 +600,17 @@ impl Dispatcher {
       Ok(())
     };
 
-    if fork_builtins {
-      log::trace!("Forking brace group");
-      self.run_fork("brace group", report_time, |s| {
-        if let Err(e) = brc_grp_logic(s) {
-          e.print_error();
-        }
-      })?;
-      Ok(())
-    } else {
-      brc_grp_logic(self).map_err(|e| e.with_redirs(guard))
-    }
+		self.run_compound(
+			"brace_group",
+			brc_grp.redirs,
+			brc_grp.flags,
+			blame,
+			brc_grp_logic,
+		)
   }
   fn exec_case(&mut self, case_stmt: Node) -> ShResult<()> {
     let blame = case_stmt.get_span().clone();
-    let NdRule::CaseNode {
-      pattern,
-      case_blocks,
-    } = case_stmt.class
-    else {
-      unreachable!()
-    };
-
-    let fork_builtins = case_stmt.flags.contains(NdFlags::FORK_BUILTINS);
-    let report_time = case_stmt.flags.contains(NdFlags::REPORT_TIME);
-
-    self.io_stack.append_to_frame(case_stmt.redirs);
-    let guard = self.io_stack.pop_frame().redirect()?;
+    let NdRule::CaseNode { pattern, case_blocks } = case_stmt.class else { unreachable!() };
 
     let case_logic = |s: &mut Self| -> ShResult<()> {
       let exp_pattern = pattern.clone().expand()?;
@@ -636,11 +628,11 @@ impl Dispatcher {
           .strip_suffix(')')
           .unwrap_or(pattern.span.as_str())
           .trim();
-        // Split at '|' to allow for multiple patterns like `foo|bar)`
-        let block_patterns = block_pattern_raw.split('|');
+
+        let block_patterns = split_case_pat(block_pattern_raw);
 
         for pattern in block_patterns {
-          let pattern_exp = expand_case_pattern(pattern)?;
+          let pattern_exp = expand_case_pattern(&pattern)?;
           let pattern_regex = glob_to_regex(&pattern_exp, false);
           if pattern_regex.is_match(&pattern_raw) {
             for node in &body {
@@ -654,39 +646,27 @@ impl Dispatcher {
       Ok(())
     };
 
-    if fork_builtins {
-      log::trace!("Forking builtin: case");
-      self.run_fork("case", report_time, |s| {
-        if let Err(e) = case_logic(s) {
-          e.print_error();
-        }
-      })?;
-      Ok(())
-    } else {
-      case_logic(self)
-        .try_blame(blame)
-        .map_err(|e| e.with_redirs(guard))
-    }
+		self.run_compound(
+			"case",
+			case_stmt.redirs,
+			case_stmt.flags,
+			blame,
+			case_logic,
+		)
   }
   fn exec_loop(&mut self, loop_stmt: Node) -> ShResult<()> {
     let blame = loop_stmt.get_span().clone();
     let NdRule::LoopNode { kind, cond_node } = loop_stmt.class else {
       unreachable!();
     };
-    let keep_going = |kind: LoopKind, status: i32| -> bool {
-      match kind {
-        LoopKind::While => status == 0,
-        LoopKind::Until => status != 0,
-      }
-    };
-
-    let fork_builtins = loop_stmt.flags.contains(NdFlags::FORK_BUILTINS);
-    let report_time = loop_stmt.flags.contains(NdFlags::REPORT_TIME);
-
-    self.io_stack.append_to_frame(loop_stmt.redirs);
-    let guard = self.io_stack.pop_frame().redirect()?;
 
     let loop_logic = |s: &mut Self| -> ShResult<()> {
+			let keep_going = |kind: LoopKind, status: i32| -> bool {
+				match kind {
+					LoopKind::While => status == 0,
+					LoopKind::Until => status != 0,
+				}
+			};
       let CondNode { cond, body } = cond_node;
       'outer: loop {
         if let Err(e) = s.dispatch_node(*cond.clone()) {
@@ -699,17 +679,9 @@ impl Dispatcher {
           for node in &body {
             if let Err(e) = s.dispatch_node(node.clone()) {
               match e.kind() {
-                ShErrKind::LoopBreak(code) => {
-                  state::set_status(*code);
-                  break 'outer;
-                }
-                ShErrKind::LoopContinue(code) => {
-                  state::set_status(*code);
-                  continue 'outer;
-                }
-                _ => {
-                  return Err(e);
-                }
+                ShErrKind::LoopBreak(code) => { state::set_status(*code); break 'outer; }
+                ShErrKind::LoopContinue(code) => { state::set_status(*code); continue 'outer; }
+                _ => return Err(e)
               }
             }
           }
@@ -722,37 +694,25 @@ impl Dispatcher {
       Ok(())
     };
 
-    if fork_builtins {
-      log::trace!("Forking builtin: loop");
-      self.run_fork("loop", report_time, |s| {
-        if let Err(e) = loop_logic(s) {
-          e.print_error();
-        }
-      })?;
-      Ok(())
-    } else {
-      loop_logic(self)
-        .try_blame(blame)
-        .map_err(|e| e.with_redirs(guard))
-    }
+		self.run_compound(
+			"loop",
+			loop_stmt.redirs,
+			loop_stmt.flags,
+			blame,
+			loop_logic,
+		)
   }
 	fn exec_for_arith(&mut self, for_stmt: Node) -> ShResult<()> {
 		let blame = for_stmt.get_span().clone();
 		let NdRule::ForArith { init, cond, step, body } = for_stmt.class else {
 			unreachable!();
 		};
-    let fork_builtins = for_stmt.flags.contains(NdFlags::FORK_BUILTINS);
-    let report_time = for_stmt.flags.contains(NdFlags::REPORT_TIME);
-
-    self.io_stack.append_to_frame(for_stmt.redirs);
-    let guard = self.io_stack.pop_frame().redirect()?;
-
 		let for_logic = |s: &mut Self| -> ShResult<()> {
 			if let Some(init_node) = init {
 				s.dispatch_node(*init_node)?;
 			}
 
-			loop {
+			'outer: loop {
 				if let Some(cond_node) = cond.clone() {
 					if let Err(e) = s.dispatch_node(*cond_node) {
 						state::set_status(1);
@@ -768,14 +728,8 @@ impl Dispatcher {
 				for node in body.clone() {
 					if let Err(e) = s.dispatch_node(node) {
 						match e.kind() {
-							ShErrKind::LoopBreak(code) => {
-								state::set_status(*code);
-								break;
-							}
-							ShErrKind::LoopContinue(code) => {
-								state::set_status(*code);
-								continue;
-							}
+							ShErrKind::LoopBreak(code) => { state::set_status(*code); break 'outer; }
+							ShErrKind::LoopContinue(code) => { state::set_status(*code); continue 'outer; }
 							_ => return Err(e),
 						}
 					}
@@ -791,19 +745,13 @@ impl Dispatcher {
 			Ok(())
 		};
 
-    if fork_builtins {
-      log::trace!("Forking builtin: for");
-      self.run_fork("for", report_time, |s| {
-        if let Err(e) = for_logic(s) {
-          e.print_error();
-        }
-      })?;
-      Ok(())
-    } else {
-      for_logic(self)
-        .try_blame(blame)
-        .map_err(|e| e.with_redirs(guard))
-    }
+		self.run_compound(
+			"c_for",
+			for_stmt.redirs,
+			for_stmt.flags,
+			blame,
+			for_logic,
+		)
 	}
   fn exec_for_arr(&mut self, for_stmt: Node) -> ShResult<()> {
     let blame = for_stmt.get_span().clone();
@@ -811,25 +759,19 @@ impl Dispatcher {
       unreachable!();
     };
 
-    let fork_builtins = for_stmt.flags.contains(NdFlags::FORK_BUILTINS);
-    let report_time = for_stmt.flags.contains(NdFlags::REPORT_TIME);
-
-    let to_expanded_strings = |tks: Vec<Tk>| -> ShResult<Vec<String>> {
-      Ok(
-        tks
-          .into_iter()
-          .map(|tk| tk.expand().map(|tk| tk.get_words()))
-          .collect::<ShResult<Vec<Vec<String>>>>()?
-          .into_iter()
-          .flatten()
-          .collect::<Vec<_>>(),
-      )
-    };
-
-    self.io_stack.append_to_frame(for_stmt.redirs);
-    let guard = self.io_stack.pop_frame().redirect()?;
-
     let for_logic = |s: &mut Self| -> ShResult<()> {
+			let to_expanded_strings = |tks: Vec<Tk>| -> ShResult<Vec<String>> {
+				Ok(
+					tks
+					.into_iter()
+					.map(|tk| tk.expand().map(|tk| tk.get_words()))
+					.collect::<ShResult<Vec<Vec<String>>>>()?
+					.into_iter()
+					.flatten()
+					.collect::<Vec<_>>(),
+				)
+			};
+
       // Expand all array variables
       let arr: Vec<String> = to_expanded_strings(arr)?;
       let vars: Vec<String> = to_expanded_strings(vars)?;
@@ -856,14 +798,8 @@ impl Dispatcher {
         for node in body.clone() {
           if let Err(e) = s.dispatch_node(node) {
             match e.kind() {
-              ShErrKind::LoopBreak(code) => {
-                state::set_status(*code);
-                break 'outer;
-              }
-              ShErrKind::LoopContinue(code) => {
-                state::set_status(*code);
-                continue 'outer;
-              }
+              ShErrKind::LoopBreak(code) => { state::set_status(*code); break 'outer; }
+              ShErrKind::LoopContinue(code) => { state::set_status(*code); continue 'outer; }
               _ => return Err(e),
             }
           }
@@ -873,34 +809,17 @@ impl Dispatcher {
       Ok(())
     };
 
-    if fork_builtins {
-      log::trace!("Forking builtin: for");
-      self.run_fork("for", report_time, |s| {
-        if let Err(e) = for_logic(s) {
-          e.print_error();
-        }
-      })?;
-      Ok(())
-    } else {
-      for_logic(self)
-        .try_blame(blame)
-        .map_err(|e| e.with_redirs(guard))
-    }
+		self.run_compound(
+			"for",
+			for_stmt.redirs,
+			for_stmt.flags,
+			blame,
+			for_logic,
+		)
   }
   fn exec_if(&mut self, if_stmt: Node) -> ShResult<()> {
     let blame = if_stmt.get_span().clone();
-    let NdRule::IfNode {
-      cond_nodes,
-      else_block,
-    } = if_stmt.class
-    else {
-      unreachable!();
-    };
-    let fork_builtins = if_stmt.flags.contains(NdFlags::FORK_BUILTINS);
-    let report_time = if_stmt.flags.contains(NdFlags::REPORT_TIME);
-
-    self.io_stack.append_to_frame(if_stmt.redirs);
-    let guard = self.io_stack.pop_frame().redirect()?;
+    let NdRule::IfNode { cond_nodes, else_block } = if_stmt.class else { unreachable!(); };
 
     let if_logic = |s: &mut Self| -> ShResult<()> {
       let mut matched = false;
@@ -937,20 +856,13 @@ impl Dispatcher {
       Ok(())
     };
 
-    if fork_builtins {
-      log::trace!("Forking builtin: if");
-      self.run_fork("if", report_time, |s| {
-        if let Err(e) = if_logic(s) {
-          e.print_error();
-          state::set_status(1);
-        }
-      })?;
-      Ok(())
-    } else {
-      if_logic(self)
-        .try_blame(blame)
-        .map_err(|e| e.with_redirs(guard))
-    }
+		self.run_compound(
+			"if",
+			if_stmt.redirs,
+			if_stmt.flags,
+			blame,
+			if_logic,
+		)
   }
   fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
     let pipeline_span = pipeline.get_span().clone();
@@ -1080,10 +992,6 @@ impl Dispatcher {
 
     if fork_builtins {
       log::trace!("Forking builtin: {}", cmd_raw);
-      let guard = self.io_stack.pop_frame().redirect()?;
-      if cmd_raw.as_str() == "exec" {
-        guard.persist();
-      }
       self.run_fork(&cmd_raw, report_time, |s| {
         if let Err(e) = s.dispatch_builtin(cmd) {
           e.print_error();
@@ -1136,8 +1044,7 @@ impl Dispatcher {
 
     // Set up redirections here so we can attach the guard to propagated errors.
     self.io_stack.append_to_frame(mem::take(&mut cmd.redirs));
-    let frame = self.io_stack.pop_frame();
-    let redir_guard = frame.redirect()?;
+    let guard = self.io_stack.pop_frame().redirect()?;
 
     // Register ChildProc in current job
     let job = self.job_stack.curr_job_mut().unwrap();
@@ -1158,7 +1065,7 @@ impl Dispatcher {
 
     // Handle exec specially - persist redirections before dispatch
     if cmd_raw.as_str() == "exec" {
-      redir_guard.persist();
+      guard.persist();
       let result = exec::exec_builtin(cmd);
       return if let Err(e) = result {
         Err(e.with_context(context))
@@ -1219,12 +1126,13 @@ impl Dispatcher {
       "hash" => hash_builtin(cmd),
       "times" => times(cmd),
       "kill" => kill_builtin(cmd),
-      "true" | ":" => {
-        state::set_status(0);
-        Ok(())
-      }
-      "false" => {
-        state::set_status(1);
+			":" => {
+				state::set_status(0);
+				Ok(())
+			}
+      "true" | "false" => {
+				let cmd = cmd_raw.parse::<bool>().unwrap();
+        state::set_status_from_bool(cmd);
         Ok(())
       }
       _ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw),
@@ -1234,7 +1142,7 @@ impl Dispatcher {
       if !e.is_flow_control() {
         state::set_status(1);
       }
-      Err(e.with_context(context).with_redirs(redir_guard))
+      Err(e.with_context(context).with_redirs(guard))
     } else {
       Ok(())
     }
@@ -1552,31 +1460,6 @@ pub fn prepare_argv(argv: Vec<Tk>) -> ShResult<Vec<(String, Span)>> {
 
   xtrace_print(&args);
   Ok(args)
-}
-
-/// Initialize the pipes for a pipeline
-/// The first command gets `(None, WPipe)`
-/// The last command gets `(RPipe, None)`
-/// Commands inbetween get `(RPipe, WPipe)`
-/// If there is only one command, it gets `(None, None)`
-pub fn get_pipe_stack(num_cmds: usize) -> Vec<(Option<Redir>, Option<Redir>)> {
-  let mut stack = Vec::with_capacity(num_cmds);
-  let mut prev_read: Option<Redir> = None;
-
-  for i in 0..num_cmds {
-    if i == num_cmds - 1 {
-      stack.push((prev_read.take(), None));
-    } else {
-      let (rpipe, wpipe) = IoMode::get_pipes();
-      let r_redir = Redir::new(rpipe, RedirType::Input);
-      let w_redir = Redir::new(wpipe, RedirType::Output);
-
-      // Push (prev_read, Some(w_redir)) and set prev_read to r_redir
-      stack.push((prev_read.take(), Some(w_redir)));
-      prev_read = Some(r_redir);
-    }
-  }
-  stack
 }
 
 pub fn is_func(name: &str) -> bool {

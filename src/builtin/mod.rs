@@ -1,6 +1,6 @@
 use ariadne::Span as ASpan;
 
-use crate::{libsh::error::ShResult, parse::lex::Span, state};
+use crate::parse::lex::Span;
 
 pub mod alias;
 pub mod arrops;
@@ -96,21 +96,6 @@ pub const BUILTINS: [&str; 58] = [
   "unset",
 ];
 
-pub fn true_builtin() -> ShResult<()> {
-  state::set_status(0);
-  Ok(())
-}
-
-pub fn false_builtin() -> ShResult<()> {
-  state::set_status(1);
-  Ok(())
-}
-
-pub fn noop_builtin() -> ShResult<()> {
-  state::set_status(0);
-  Ok(())
-}
-
 // Join all of the word-split arguments into a single string
 // Preserve the span too
 pub fn join_raw_args(args: Vec<(String, Span)>) -> (String, Span) {
@@ -144,7 +129,6 @@ pub mod tests {
   };
 
   // You can never be too sure!!!!!!
-
   #[test]
   fn test_true() {
     let _g = TestGuard::new();

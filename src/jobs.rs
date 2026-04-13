@@ -279,11 +279,10 @@ impl Job {
     self.pgid
   }
   pub fn get_cmds(&self) -> Vec<&str> {
-    let mut cmds = vec![];
-    for child in &self.children {
-      cmds.push(child.cmd().unwrap_or_default())
-    }
-    cmds
+		self.children
+			.iter()
+			.map(|c| c.cmd().unwrap_or_default())
+			.collect()
   }
   pub fn set_stats(&mut self, stat: WtStat) {
     for child in self.children.iter_mut() {
@@ -295,7 +294,7 @@ impl Job {
       .children
       .iter()
       .map(|chld| chld.stat())
-      .collect::<Vec<WtStat>>()
+      .collect()
   }
   pub fn pipe_status(stats: &[WtStat]) -> Option<Vec<i32>> {
     if stats.iter().any(|stat| {
@@ -548,14 +547,7 @@ pub fn wait_bg(id: JobID) -> ShResult<()> {
         }
       }
 
-      if let Some(pipe_status) = Job::pipe_status(&statuses) {
-        let pipe_status = pipe_status
-          .into_iter()
-          .map(|s| s.to_string())
-          .collect::<VecDeque<String>>();
-
-        write_vars(|v| v.set_var("PIPESTATUS", VarKind::Arr(pipe_status), VarFlags::NONE))?;
-      }
+			state::set_pipe_status(&statuses)?;
 
       if was_stopped {
         write_jobs(|j| j.insert_job(job, false))?;
@@ -647,14 +639,8 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
       _ => { /* Do nothing */ }
     }
   }
-  if let Some(pipe_status) = Job::pipe_status(&statuses) {
-    let pipe_status = pipe_status
-      .into_iter()
-      .map(|s| s.to_string())
-      .collect::<VecDeque<String>>();
+	state::set_pipe_status(&statuses)?;
 
-    write_vars(|v| v.set_var("PIPESTATUS", VarKind::Arr(pipe_status), VarFlags::NONE))?;
-  }
   // If job wasn't stopped (moved to bg), clear the fg slot
   if !was_stopped {
     let job = write_jobs(|j| j.take_fg());

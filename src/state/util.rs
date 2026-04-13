@@ -1,12 +1,12 @@
 use super::*;
 
-use std::{collections::HashMap, rc::Rc, sync::atomic::Ordering};
+use std::{collections::{HashMap, VecDeque}, rc::Rc, sync::atomic::Ordering};
 
 use nix::unistd::{User, getuid};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-  exec_input, libsh::{error::ShResult, utils::AutoCmdVecUtils}, match_loop, parse::lex::{LexFlags, LexStream}, prelude::*, sherr, shopt::ShOpts
+  exec_input, jobs::Job, libsh::{error::ShResult, utils::AutoCmdVecUtils}, match_loop, parse::lex::{LexFlags, LexStream}, prelude::*, sherr, shopt::ShOpts
 };
 
 /// Read from the job table
@@ -210,6 +210,20 @@ pub fn get_status() -> i32 {
 }
 pub fn set_status(code: i32) {
   super::STATUS_CODE.store(code, Ordering::Relaxed);
+}
+pub fn set_status_from_bool(code: bool) {
+	super::STATUS_CODE.store(if code { 0 } else { 1 }, Ordering::Relaxed);
+}
+pub fn set_pipe_status(stats: &[WtStat]) -> ShResult<()> {
+	if let Some(pipe_status) = Job::pipe_status(&stats) {
+		let pipe_status = pipe_status
+			.into_iter()
+			.map(|s| s.to_string())
+			.collect::<VecDeque<String>>();
+
+		write_vars(|v| v.set_var("PIPESTATUS", VarKind::Arr(pipe_status), VarFlags::NONE))?;
+	}
+	Ok(())
 }
 
 pub fn lookup_cmd(cmd: &str) -> Option<PathBuf> {

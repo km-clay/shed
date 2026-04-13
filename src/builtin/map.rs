@@ -4,6 +4,7 @@ use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 use serde_json::{Map, Value};
 
+use crate::libsh::strops::{split_tk, split_tk_at};
 use crate::sherr;
 use crate::{
   expand::expand_cmd_sub,
@@ -11,7 +12,7 @@ use crate::{
   libsh::error::ShResult,
   parse::{
     NdRule, Node,
-    lex::{self, LexFlags, LexStream, split_tk, split_tk_at},
+    lex::{self, LexFlags, LexStream},
   },
   procio::borrow_fd,
   state::{self, read_vars, write_vars},

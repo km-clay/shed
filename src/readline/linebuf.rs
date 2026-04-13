@@ -18,13 +18,13 @@ use crate::{
   expand::expand_cmd_sub,
   libsh::{
     error::ShResult,
-    guards::{RawModeGuard, var_ctx_guard},
+    guards::{RawModeGuard, var_ctx_guard}, strops::QuoteState,
   },
   match_loop,
   parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::exec_input,
-    lex::{self, LexFlags, QuoteState, Tk, TkFlags},
+    lex::{self, LexFlags, Tk, TkFlags},
   },
   prelude::*,
   procio::{IoFrame, IoMode, IoStack, borrow_fd},

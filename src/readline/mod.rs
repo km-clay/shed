@@ -1,3 +1,4 @@
+use crate::libsh::strops::QuoteState;
 use crate::motion;
 use crate::readline::linebuf::ordered;
 use editcmd::{CmdFlags, EditCmd, Motion, MotionCmd, RegisterName, Verb, VerbCmd};
@@ -16,7 +17,6 @@ use unicode_width::UnicodeWidthStr;
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::{expand_keymap, expand_prompt};
 use crate::libsh::utils::AutoCmdVecUtils;
-use crate::parse::lex::QuoteState;
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::editcmd::Direction;
 use crate::readline::editmode::emacs::Emacs;

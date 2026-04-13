@@ -6,12 +6,11 @@ use std::{
 
 use crate::{
   builtin::join_raw_arg_iter,
-  libsh::{error::ShResult, guards::RawModeGuard},
+  libsh::{error::ShResult, guards::RawModeGuard, strops::QuoteState},
   match_loop,
   parse::{
     NdRule, Node,
     execute::{exec_input, prepare_argv},
-    lex::QuoteState,
   },
   readline::{complete::ScoredCandidate, markers},
   sherr, state,

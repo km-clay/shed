@@ -7,8 +7,7 @@ use lex::{LexFlags, LexStream, Span, SpanSource, Tk, TkFlags, TkRule};
 
 use crate::{
   libsh::{
-    error::{ShErr, ShErrKind, ShResult, last_color, next_color},
-    utils::{NodeVecUtils, TkVecUtils},
+    error::{ShErr, ShResult, last_color, next_color}, strops::split_tk, utils::NodeVecUtils
   },
   match_loop,
   parse::lex::clean_input,
@@ -2079,7 +2078,7 @@ pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<Fil
 #[allow(clippy::type_complexity)]
 fn split_for_arith_tk(tk: Tk) -> ShResult<(Option<Box<Node>>,Option<Box<Node>>,Option<Box<Node>>)> {
 	let span = tk.span.clone();
-	let mut tks = lex::split_tk(&tk, ";").into_iter();
+	let mut tks = split_tk(&tk, ";").into_iter();
 
 	let Some(init_tk) = tks.next() else {
 		return Err(sherr!(ParseErr @ span, "Missing init statement"));

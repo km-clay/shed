@@ -185,19 +185,20 @@ impl<R: Read> IoBuf<R> {
   }
 }
 
+// this was originally here, but moved to libsh::guards
 pub use crate::libsh::guards::RedirGuard;
 
 /// A struct wrapping three fildescs representing `stdin`, `stdout`, and
 /// `stderr` respectively
 #[derive(Debug, Clone)]
-pub struct IoGroup(pub(crate) RawFd, pub(crate) RawFd, pub(crate) RawFd);
+pub struct IoGroup(pub RawFd, pub RawFd, pub RawFd);
 
 /// A single stack frame used with the IoStack
 /// Each stack frame represents the redirections of a single command
 #[derive(Default, Clone, Debug)]
 pub struct IoFrame {
   pub redirs: Vec<Redir>,
-  pub(crate) saved_io: Option<IoGroup>,
+  pub saved_io: Option<IoGroup>,
 }
 
 impl<'e> IoFrame {
@@ -217,24 +218,6 @@ impl<'e> IoFrame {
     }
   }
 
-  /// Splits the frame into two frames
-  ///
-  /// One frame contains input redirections, the other contains output
-  /// redirections This is used in shell structures to route redirections
-  /// either *to* the condition, or *from* the body The first field of the
-  /// tuple contains input redirections (used for the condition) The second
-  /// field contains output redirections (used for the body)
-  pub fn split_frame(self) -> (Self, Self) {
-    let Self {
-      redirs,
-      saved_io: _,
-    } = self;
-    let (input_redirs, output_redirs) = redirs.split_by_channel();
-    (
-      Self::from_redirs(input_redirs),
-      Self::from_redirs(output_redirs),
-    )
-  }
   pub fn save(&'e mut self) {
     let saved_in = dup_high(STDIN_FILENO).unwrap();
     let saved_out = dup_high(STDOUT_FILENO).unwrap();
@@ -409,17 +392,6 @@ impl IoStack {
   /// Push a new stack frame.
   pub fn push_frame(&mut self, frame: IoFrame) {
     self.push(frame)
-  }
-  /// Flatten the `IoStack`
-  /// All of the current stack frames will be flattened into a single one
-  /// Not sure what use this will serve, but my gut said this was worthy of
-  /// writing
-  pub fn flatten(&mut self) {
-    let mut flat_frame = IoFrame::new();
-    while let Some(mut frame) = self.pop() {
-      flat_frame.append(&mut frame)
-    }
-    self.push(flat_frame);
   }
 }
 

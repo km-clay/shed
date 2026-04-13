@@ -1,5 +1,4 @@
 use std::{
-  collections::VecDeque,
   fmt::Display,
   iter::Peekable,
   ops::{Bound, Range, RangeBounds},
@@ -11,7 +10,7 @@ use bitflags::bitflags;
 
 use crate::{
   builtin::BUILTINS,
-  libsh::error::ShResult,
+  libsh::{error::ShResult, strops::{QuoteState, ends_with_unescaped, scan_braces, scan_parens}},
   match_loop, sherr,
 };
 
@@ -31,46 +30,6 @@ pub fn not_marker(tk: &ShResult<Tk>) -> bool {
     || !tk
       .as_ref()
       .is_ok_and(|tk| matches!(tk.class, TkRule::SOI | TkRule::EOI))
-}
-
-/// Used to track whether the lexer is currently inside a quote, and if so, which type
-#[derive(Default, Debug)]
-pub enum QuoteState {
-  #[default]
-  Outside,
-  Single,
-  Double,
-}
-
-impl QuoteState {
-  pub fn outside(&self) -> bool {
-    matches!(self, QuoteState::Outside)
-  }
-  pub fn in_single(&self) -> bool {
-    matches!(self, QuoteState::Single)
-  }
-  pub fn in_double(&self) -> bool {
-    matches!(self, QuoteState::Double)
-  }
-  pub fn in_quote(&self) -> bool {
-    !self.outside()
-  }
-  /// Toggles whether we are in a double quote. If self = QuoteState::Single or QuoteState::Backtick, this does nothing, since double quotes inside those quotes are just literal characters
-  pub fn toggle_double(&mut self) {
-    match self {
-      QuoteState::Outside => *self = QuoteState::Double,
-      QuoteState::Double => *self = QuoteState::Outside,
-      _ => {}
-    }
-  }
-  /// Toggles whether we are in a single quote. If self == QuoteState::Double or QuoteState::Backtick, this does nothing, since single quotes inside those quotes are just literal characters
-  pub fn toggle_single(&mut self) {
-    match self {
-      QuoteState::Outside => *self = QuoteState::Single,
-      QuoteState::Single => *self = QuoteState::Outside,
-      _ => {}
-    }
-  }
 }
 
 #[derive(Clone, PartialEq, Default, Debug, Eq, Hash)]
@@ -1212,169 +1171,6 @@ pub fn is_cmd_sub(slice: &str) -> bool {
   slice.starts_with("$(") && ends_with_unescaped(slice, ")")
 }
 
-pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
-  slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
-}
-
-fn scan_parens(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
-	scan_delims('(', chars, pos, depth).unwrap()
-}
-
-fn scan_braces(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
-	scan_delims('{', chars, pos, depth).unwrap()
-}
-
-fn scan_brackets(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
-	scan_delims('[', chars, pos, depth).unwrap()
-}
-
-fn scan_angles(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
-	scan_delims('<', chars, pos, depth).unwrap()
-}
-
-fn scan_delims(opener: char, chars: &mut Peekable<Chars>, pos: &mut usize, mut depth: usize) -> ShResult<bool> {
-	let closer = match opener {
-		'(' => ')',
-		'{' => '}',
-		'[' => ']',
-		'<' => '>',
-		_ => return Err(sherr!(
-				ParseErr @ Span::new(*pos..*pos, "".into()),
-				"Invalid opener '{opener}'",
-		)),
-	};
-	let mut qt = QuoteState::default();
-	match_loop!(chars.next() => ch, {
-		'\\' => {
-			*pos += 1;
-			if let Some(next_ch) = chars.next() {
-				*pos += next_ch.len_utf8();
-			}
-		}
-		'\'' => { *pos += 1; qt.toggle_single(); }
-		'"' if !qt.in_single() => { *pos += 1; qt.toggle_double(); }
-		_ if qt.in_quote() => *pos += ch.len_utf8(),
-		_ if ch == opener => { *pos += 1; depth += 1; }
-		_ if ch == closer => {
-			*pos += 1;
-			depth -= 1;
-			if depth == 0 { break; }
-		}
-		_ => *pos += ch.len_utf8(),
-	});
-	Ok(depth == 0)
-}
-
-/// Splits a string by a pattern, but only if the pattern is not escaped by a backslash
-/// and not in quotes.
-pub fn split_all_unescaped(slice: &str, pat: &str) -> Vec<String> {
-  let mut cursor = 0;
-  let mut splits = vec![];
-  while let Some(split) = split_at_unescaped(&slice[cursor..], pat) {
-    cursor += split.0.len() + pat.len();
-    splits.push(split.0);
-  }
-  if let Some(remaining) = slice.get(cursor..) {
-    splits.push(remaining.to_string());
-  }
-  splits
-}
-
-/// Splits a string at the first occurrence of a pattern, but only if the pattern is not escaped by a backslash
-/// and not in quotes. Returns None if the pattern is not found or only found escaped.
-pub fn split_at_unescaped(slice: &str, pat: &str) -> Option<(String, String)> {
-  let mut chars = slice.char_indices().peekable();
-  let mut qt_state = QuoteState::default();
-
-  while let Some((i, ch)) = chars.next() {
-    match ch {
-      '\\' => {
-        chars.next();
-        continue;
-      }
-      '\'' => qt_state.toggle_single(),
-      '"' => qt_state.toggle_double(),
-      _ if qt_state.in_quote() => continue,
-      _ => {}
-    }
-
-    if slice[i..].starts_with(pat) {
-      let before = slice[..i].to_string();
-      let after = slice[i + pat.len()..].to_string();
-      return Some((before, after));
-    }
-  }
-
-  None
-}
-
-pub fn split_tk(tk: &Tk, pat: &str) -> Vec<Tk> {
-  let slice = tk.as_str();
-  let mut cursor = 0;
-  let mut splits = vec![];
-  while let Some(split) = split_at_unescaped(&slice[cursor..], pat) {
-    let before_span = Span::new(
-      tk.span.range().start + cursor..tk.span.range().start + cursor + split.0.len(),
-      tk.source().clone(),
-    );
-    splits.push(Tk::new(tk.class.clone(), before_span));
-    cursor += split.0.len() + pat.len();
-  }
-  if slice.get(cursor..).is_some_and(|s| !s.is_empty()) {
-    let remaining_span = Span::new(
-      tk.span.range().start + cursor..tk.span.range().end,
-      tk.source().clone(),
-    );
-    splits.push(Tk::new(tk.class.clone(), remaining_span));
-  }
-  splits
-}
-
-pub fn split_tk_at(tk: &Tk, pat: &str) -> Option<(Tk, Tk)> {
-  let slice = tk.as_str();
-  let mut chars = slice.char_indices().peekable();
-  let mut qt_state = QuoteState::default();
-
-  while let Some((i, ch)) = chars.next() {
-    match ch {
-      '\\' => {
-        chars.next();
-        continue;
-      }
-      '\'' => qt_state.toggle_single(),
-      '"' => qt_state.toggle_double(),
-      _ if qt_state.in_quote() => continue,
-      _ => {}
-    }
-
-    if slice[i..].starts_with(pat) {
-      let before_span = Span::new(
-        tk.span.range().start..tk.span.range().start + i,
-        tk.source().clone(),
-      );
-      let after_span = Span::new(
-        tk.span.range().start + i + pat.len()..tk.span.range().end,
-        tk.source().clone(),
-      );
-      let before_tk = Tk::new(tk.class.clone(), before_span);
-      let after_tk = Tk::new(tk.class.clone(), after_span);
-      return Some((before_tk, after_tk));
-    }
-  }
-
-  None
-}
-
-pub fn pos_is_escaped(slice: &str, pos: usize) -> bool {
-  let bytes = slice.as_bytes();
-  let mut escaped = false;
-  let mut i = pos;
-  while i > 0 && bytes[i - 1] == b'\\' {
-    escaped = !escaped;
-    i -= 1;
-  }
-  escaped
-}
 
 pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
   let mut pos = 0;
