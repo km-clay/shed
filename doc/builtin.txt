@@ -799,23 +799,33 @@ HIST                                             *builtin-hist* *hist*
 
   Filter Options ~
 
-    `--after {date}`        entries after {date} (natural language)
-    `--before {date}`       entries before {date}
-    `--contains {str}`      entries whose command contains {str}
-    `--starts-with {str}`   entries whose command starts with {str}
-    `--matches {regex}`     entries matching extended regex {regex}
-    `--duration-gt {dur}`   entries with runtime longer than {dur}
-    `--duration-lt {dur}`   entries with runtime shorter than {dur}
-    `--lines-gt {n}`        entries with more than {n} lines
-    `--lines-lt {n}`        entries with fewer than {n} lines
-    `--limit {n}`           return at most {n} results
+    `--after {date}`          entries after {date} (natural language)
+    `--before {date}`         entries before {date}
+    `--contains {str}`        entries whose command contains {str}
+    `--starts-with {str}`     entries whose command starts with {str}
+    `--matches {regex}`       entries matching extended regex {regex}
+    `--duration-gt {dur}`     entries with runtime longer than {dur}
+    `--duration-lt {dur}`     entries with runtime shorter than {dur}
+    `--lines-gt {n}`          entries with more than {n} lines
+    `--lines-lt {n}`          entries with fewer than {n} lines
+    `--with-status {code}`    entries whose command exited with {code}
+    `--with-token {uuid}`     entries with the given unique token
+    `--in-dir {path}`         entries run from {path} (exact match; "." expands)
+    `--limit {n}`             return at most {n} results
+
+  Any filter option can be negated by placing `--not` immediately before it:
+
+      `hist --not --with-status 0`     commands that exited non-zero
+      `hist --not --contains git`      commands not containing "git"
+      `hist --not --in-dir .`          commands run outside current directory
 
   Output Options ~
 
     `-n`           suppress history IDs
     `-r`           newest-first order (default is oldest-first)
     `--count`      print only the count of matching entries
-    `--json`       output as JSON
+    `--json`       output as JSON (includes command, timestamp, runtime,
+                   cwd, status, and token fields)
 
   Mutation Options ~
 
@@ -832,11 +842,13 @@ HIST                                             *builtin-hist* *hist*
 
   Examples:
 
-      `hist`                           full history
-      `hist --contains git`            entries containing "git"
-      `hist --after "yesterday"`       entries since yesterday
-      `hist --limit 20 -n`             last 20 commands, no IDs
-      `hist --delete --contains foo`   delete entries containing "foo"
+      `hist`                                    full history
+      `hist --contains git`                     entries containing "git"
+      `hist --after "yesterday"`                entries since yesterday
+      `hist --limit 20 -n`                      last 20 commands, no IDs
+      `hist --delete --contains foo`            delete entries containing "foo"
+      `hist --not --with-status 0`              failed commands
+      `hist --in-dir . --after "1 hour ago"`    recent commands in current dir
 
 ==============================================================================
 JOBS                                             *builtin-jobs* *jobs*

@@ -18,17 +18,41 @@ use crate::{
   state::{self},
 };
 
+/// Helper macro to reduce repetition when adding conditions to the query. It handles the '--not' logic and parameter binding.
+macro_rules! cond {
+	($not:expr, $conditions:expr, $params:expr, $idx:expr, $query:expr, $param:expr) => {
+		let mut query = $query;
+		if *$not { query = format!("NOT ({query})"); }
+		$conditions.push(query);
+		$params.push(Box::new($param));
+		$idx += 1;
+	};
+}
+
+fn interval_to_micros(interval:Interval) -> i64 {
+	let secs = match interval {
+		Interval::Seconds(n) => n as u64,
+		Interval::Days(n) => (n * 24 * 3600) as u64,
+		Interval::Months(n) => (n * 30 * 24 * 3600) as u64,
+	};
+
+	Duration::from_secs(secs).as_micros() as i64
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct HistQuery {
-  after: Option<String>,
-  before: Option<String>,
-  contains: Option<String>,
-  lines_gt: Option<usize>,
-  lines_lt: Option<usize>,
-  starts_with: Option<String>,
-  matches: Option<String>,
-  duration_gt: Option<String>,
-  duration_lt: Option<String>,
+  after: (Option<String>, bool),
+  before: (Option<String>, bool),
+  contains: (Option<String>, bool),
+  lines_gt: (Option<usize>, bool),
+  lines_lt: (Option<usize>, bool),
+  starts_with: (Option<String>, bool),
+  matches: (Option<String>, bool),
+  duration_gt: (Option<String>, bool),
+  duration_lt: (Option<String>, bool),
+	with_status: (Option<i32>, bool),
+	with_token: (Option<String>, bool),
+	in_dir: (Option<String>, bool),
   limit: Option<usize>,
   specific_ids: Vec<i64>,
   no_numbers: bool,
@@ -50,87 +74,74 @@ impl HistQuery {
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
     let mut idx = 1;
 
-    if let Some(after) = &self.after {
+    if let (Some(after),not) = &self.after {
       let ts = parse_date_string(after, Utc::now(), Dialect::Us)
         .map_err(|e| sherr!(ParseErr, "Failed to parse date for --after: {e}"))?;
-      conditions.push(format!("timestamp >= ?{idx}"));
-      params.push(Box::new(ts.timestamp()));
-      idx += 1;
+			cond!(not, conditions, params, idx,
+				format!("timestamp >= ?{idx}"),
+				ts.timestamp()
+			);
     }
-    if let Some(before) = &self.before {
+    if let (Some(before),not) = &self.before {
       let ts = parse_date_string(before, Utc::now(), Dialect::Us)
         .map_err(|e| sherr!(ParseErr, "Failed to parse date for --before: {e}"))?;
-      conditions.push(format!("timestamp <= ?{idx}"));
-      params.push(Box::new(ts.timestamp()));
-      idx += 1;
+			cond!(not, conditions, params, idx,
+				format!("timestamp <= ?{idx}"),
+				ts.timestamp()
+			);
+		}
+    if let (Some(contains),not) = &self.contains {
+			cond!(not, conditions, params, idx,
+				format!("command LIKE ?{idx}"), format!("%{contains}%")
+			);
     }
-    if let Some(contains) = &self.contains {
-      conditions.push(format!("command LIKE ?{idx}"));
-      params.push(Box::new(format!("%{contains}%")));
-      idx += 1;
+    if let (Some(prefix),not) = &self.starts_with {
+			cond!(not, conditions, params, idx,
+				format!("command LIKE ?{idx}"), format!("{prefix}%")
+			);
     }
-    if let Some(prefix) = &self.starts_with {
-      conditions.push(format!("command LIKE ?{idx}"));
-      params.push(Box::new(format!("{prefix}%")));
-      idx += 1;
+		if let (Some(status),not) = &self.with_status {
+			cond!(not, conditions, params, idx,
+				format!("status = ?{idx}"), *status
+			);
+		}
+		if let (Some(token),not) = &self.with_token {
+			cond!(not, conditions, params, idx,
+				format!("token = ?{idx}"), token.to_string()
+			);
+		}
+		if let (Some(dir),not) = &self.in_dir {
+			cond!(not, conditions, params, idx,
+				format!("cwd LIKE ?{idx}"), dir.to_string()
+			);
+		}
+    if let (Some(ceiling),not) = &self.lines_lt {
+			cond!(not, conditions, params, idx,
+				format!("(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 < ?{idx}"),
+				*ceiling as i64
+			);
     }
-    if let Some(ceiling) = &self.lines_lt {
-      conditions.push(format!(
-        "(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 < ?{idx}"
-      ));
-      params.push(Box::new(*ceiling as i64));
-      idx += 1;
+    if let (Some(floor),not) = &self.lines_gt {
+			cond!(not, conditions, params, idx,
+				format!("(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 > ?{idx}"),
+				*floor as i64
+			);
     }
-    if let Some(floor) = &self.lines_gt {
-      conditions.push(format!(
-        "(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 > ?{idx}"
-      ));
-      params.push(Box::new(*floor as i64));
-      idx += 1;
-    }
-    if let Some(duration) = &self.duration_gt {
+    if let (Some(duration),not) = &self.duration_gt {
       let secs = chrono_english::parse_duration(duration)
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --longer-than: {e}"))?;
-      conditions.push(format!("runtime >= ?{idx}"));
-      match secs {
-        Interval::Seconds(n) => {
-          let dur = Duration::from_secs(n as u64).as_micros();
-          params.push(Box::new(dur as i64));
-        }
-        Interval::Days(n) => {
-          let hours = n * 24;
-          let dur = Duration::from_secs(hours as u64 * 3600).as_micros();
-          params.push(Box::new(dur as i64));
-        }
-        Interval::Months(n) => {
-          let hours = n * 30 * 24;
-          let dur = Duration::from_secs(hours as u64 * 3600).as_micros();
-          params.push(Box::new(dur as i64));
-        }
-      }
-      idx += 1;
+			cond!(not, conditions, params, idx,
+				format!("runtime >= ?{idx}"),
+				interval_to_micros(secs)
+			);
     }
-    if let Some(duration) = &self.duration_lt {
+    if let (Some(duration),not) = &self.duration_lt {
       let secs = chrono_english::parse_duration(duration)
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --shorter-than: {e}"))?;
-      conditions.push(format!("runtime <= ?{idx}"));
-      match secs {
-        Interval::Seconds(n) => {
-          let dur = Duration::from_secs(n as u64).as_micros();
-          params.push(Box::new(dur as i64));
-        }
-        Interval::Days(n) => {
-          let hours = n * 24;
-          let dur = Duration::from_secs(hours as u64 * 3600).as_micros();
-          params.push(Box::new(dur as i64));
-        }
-        Interval::Months(n) => {
-          let hours = n * 30 * 24;
-          let dur = Duration::from_secs(hours as u64 * 3600).as_micros();
-          params.push(Box::new(dur as i64));
-        }
-      }
-      idx += 1;
+			cond!(not, conditions, params, idx,
+				format!("runtime <= ?{idx}"),
+				interval_to_micros(secs)
+			);
     }
     if !self.specific_ids.is_empty() {
       let mut id_strings = vec![];
@@ -165,34 +176,50 @@ impl HistQuery {
       entries.reverse();
     }
 
-    if let Some(pat) = &self.matches {
-      match Regex::new(pat) {
-        Ok(r) => Ok(
-          entries
-            .into_iter()
-            .filter(|e| r.is_match(e.1.command()))
-            .collect(),
-        ),
-        Err(e) => Err(sherr!(ParseErr, "Invalid regex for --matches: {e}")),
-      }
-    } else {
-      Ok(entries)
-    }
+		match &self.matches {
+			(Some(pat),not) => {
+				match Regex::new(pat) {
+					Ok(r) => Ok(
+						entries
+						.into_iter()
+						.filter(|e| r.is_match(e.1.command()) != *not)
+						.collect(),
+					),
+					Err(e) => Err(sherr!(ParseErr, "Invalid regex for --matches: {e}")),
+				}
+			}
+			_ => Ok(entries)
+		}
   }
 
   pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut new = Self::new();
+		let mut negated = false; // '--not' flag flips this for one argument
 
     for opt in opts {
       match opt {
         Opt::LongWithArg(name, arg) => match name.as_str() {
-          "after" => new.after = Some(arg.clone()),
-          "before" => new.before = Some(arg.clone()),
-          "contains" => new.contains = Some(arg.clone()),
-          "starts-with" => new.starts_with = Some(arg.clone()),
-          "matches" => new.matches = Some(arg.clone()),
-          "duration-gt" => new.duration_gt = Some(arg.clone()),
-          "duration-lt" => new.duration_lt = Some(arg.clone()),
+          "after" => new.after = (Some(arg.clone()),negated),
+          "before" => new.before = (Some(arg.clone()),negated),
+          "contains" => new.contains = (Some(arg.clone()),negated),
+          "starts-with" => new.starts_with = (Some(arg.clone()),negated),
+          "matches" => new.matches = (Some(arg.clone()),negated),
+          "duration-gt" => new.duration_gt = (Some(arg.clone()),negated),
+          "duration-lt" => new.duration_lt = (Some(arg.clone()),negated),
+					"with-token" => new.with_token = (Some(arg.clone()),negated),
+					"with-status" => match arg.parse::<i32>() {
+						Ok(s) => new.with_status = (Some(s),negated),
+						Err(e) => return Err(sherr!(ParseErr, "Invalid status code for {opt}: {e}")),
+					},
+					"in-dir" => {
+						// using canonicalize here allows args like "." to work
+						let dir = std::fs::canonicalize(arg)
+							.unwrap_or(arg.into())
+							.display()
+							.to_string();
+
+						new.in_dir = (Some(dir),negated);
+					}
           "limit" => new.limit = Some(arg.parse().unwrap_or(usize::MAX)),
           opt @ ("lines-gt" | "lines-lt") => {
             let is_gt = opt == "lines-gt";
@@ -201,14 +228,18 @@ impl HistQuery {
               Err(e) => return Err(sherr!(ParseErr, "Invalid number for {opt}: {e}")),
             };
             if is_gt {
-              new.lines_gt = Some(count);
+              new.lines_gt = (Some(count),negated);
             } else {
-              new.lines_lt = Some(count);
+              new.lines_lt = (Some(count),negated);
             }
           }
           _ => {}
         },
         Opt::Long(name) => match name.as_str() {
+					"not" => {
+						negated = !negated;
+						continue
+					}
           "ex" => new.ex_hist = true,
           "count" => new.count = true,
           "delete" => new.delete = true,
@@ -222,12 +253,13 @@ impl HistQuery {
           return Err(sherr!(ParseErr, "Unknown option for history: {opt}"));
         }
       }
+			negated = false; // reset polarity after each option
     }
 
     Ok(new)
   }
 
-  pub fn opt_spec() -> [OptSpec; 17] {
+  pub fn opt_spec() -> [OptSpec; 21] {
     [
       OptSpec {
         opt: Opt::Long("delete".into()),
@@ -278,11 +310,27 @@ impl HistQuery {
         takes_arg: OptArg::Single,
       },
       OptSpec {
+        opt: Opt::Long("with-status".into()),
+        takes_arg: OptArg::Single,
+      },
+      OptSpec {
+        opt: Opt::Long("with-token".into()),
+        takes_arg: OptArg::Single,
+      },
+      OptSpec {
+        opt: Opt::Long("in-dir".into()),
+        takes_arg: OptArg::Single,
+      },
+      OptSpec {
         opt: Opt::Long("limit".into()),
         takes_arg: OptArg::Single,
       },
       OptSpec {
         opt: Opt::Long("count".into()),
+        takes_arg: OptArg::None,
+      },
+      OptSpec {
+        opt: Opt::Long("not".into()),
         takes_arg: OptArg::None,
       },
       OptSpec {
@@ -310,6 +358,9 @@ impl HistQuery {
               runtime,
               timestamp,
               command,
+							cwd,
+							status,
+							token
             } = &e.1;
             let mut map = serde_json::Map::new();
             map.insert(
@@ -323,6 +374,10 @@ impl HistQuery {
               ),
             );
             map.insert("command".into(), serde_json::Value::String(command.clone()));
+						map.insert("cwd".into(), serde_json::Value::String(cwd.clone()));
+						map.insert("status".into(), serde_json::Value::Number((*status as i64).into()));
+						map.insert("token".into(), serde_json::Value::String(token.to_string()));
+
             (e.0.to_string(), serde_json::Value::Object(map))
           })
           .collect::<serde_json::Map<String, serde_json::Value>>(),

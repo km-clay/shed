@@ -312,7 +312,7 @@ impl ShedLine {
 
   fn new_private(prompt: Prompt, tty: RawFd, with_hist: bool) -> ShResult<Self> {
     let history = if with_hist {
-      History::new("shed_history")?
+      History::new("shed_history").unwrap()
     } else {
       History::empty("shed_history")
     };

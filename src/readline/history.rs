@@ -7,6 +7,7 @@ use std::{
 };
 
 use rusqlite::Connection;
+use uuid::Uuid;
 
 use crate::{
   libsh::error::ShResult,
@@ -24,6 +25,9 @@ pub struct HistEntry {
   pub runtime: Duration,
   pub timestamp: SystemTime,
   pub command: String,
+	pub cwd: String,
+	pub status: i32,
+	pub token: Uuid
 }
 
 impl HistEntry {
@@ -53,22 +57,63 @@ pub struct History {
 }
 
 impl History {
+	const USER_VERSION: i32 = 2;
   fn init_db(conn: &Connection, table: &str) -> rusqlite::Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL")?;
     conn.execute_batch(&format!(
-      r###"
+      r#"
 			CREATE TABLE IF NOT EXISTS {table} (
 				id	INTEGER PRIMARY KEY,
 				timestamp	INTEGER NOT NULL,
 				runtime	INTEGER NOT NULL DEFAULT 0,
 				command TEXT NOT NULL
 			);
-			CREATE TABLE IF NOT EXISTS schema_meta (
-				version INTEGER NOT NULL
-			);
-			INSERT OR IGNORE INTO schema_meta (rowid, version) VALUES (1, 1);
-		"###
+		"#
     ))?;
+
+		let mut user_version = conn.query_row("PRAGMA user_version", [], |r| r.get::<_,i32>(0))?;
+		while user_version < Self::USER_VERSION {
+			match user_version {
+				0 => {
+					conn.execute_batch(&format!(
+						r#"
+						ALTER TABLE {table} ADD COLUMN cwd TEXT;
+						ALTER TABLE {table} ADD COLUMN status INT DEFAULT 0;
+						"#
+					))?;
+					conn.execute_batch("PRAGMA user_version = 1")?;
+				}
+				1 => {
+					// add the token field here.
+					// 'token' acts as an absolute identifier since
+					// the id field actually shifts after commands are deleted
+					conn.execute_batch(&format!(
+						r#"
+						ALTER TABLE {table} ADD COLUMN token TEXT;
+						"#
+					)).ok();
+
+					let mut stmt = conn.prepare(&format!("SELECT id FROM {table} WHERE token IS NULL"))?;
+					let ids: Vec<i64> = stmt.query_map([], |r| r.get(0))?
+						.filter_map(|r| r.ok())
+						.collect();
+
+					conn.execute_batch("BEGIN")?;
+					for id in ids {
+						conn.execute(
+							&format!("UPDATE {table} SET token = ?1 WHERE id = ?2"),
+							(Uuid::new_v4().to_string(), id),
+						)?;
+					}
+					conn.execute_batch("COMMIT")?;
+
+					conn.execute_batch("PRAGMA user_version = 2")?;
+				}
+				_ => {}
+			}
+			user_version = conn.query_row("PRAGMA user_version", [], |r| r.get::<_,i32>(0))?;
+		}
+
     Ok(())
   }
   pub fn new(table: &str) -> ShResult<Self> {
@@ -123,7 +168,7 @@ impl History {
     }
   }
 
-  pub fn push(&self, command: String) -> ShResult<Option<i64>> {
+  pub fn push(&self, command: String) -> ShResult<Option<Uuid>> {
     if command.is_empty() {
       return Ok(None);
     }
@@ -149,26 +194,28 @@ impl History {
       .unwrap()
       .as_secs() as i64;
     let new_id = self.last_id() + 1;
+		let cwd = env::current_dir()
+			.map(|p| p.to_string_lossy().to_string())
+			.ok();
+		let token = Uuid::new_v4();
+
+
     self.conn.execute(
-      &format!("INSERT INTO {table} (id, timestamp, runtime, command) VALUES (?1, ?2, 0, ?3)"),
-      rusqlite::params![new_id, timestamp, command],
+      &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"),
+      rusqlite::params![new_id, timestamp, command, cwd, token.to_string()],
     )?;
-    Ok(Some(new_id))
+    Ok(Some(token))
   }
 
-  pub fn push_with_runtime(&self, command: String, runtime: Duration) -> ShResult<Option<i64>> {
-    let Some(next_id) = self.push(command)? else {
-      return Ok(None);
-    };
-
+  pub fn set_status(&self, token: Uuid, runtime: Option<Duration>, status: i32) -> ShResult<()> {
     let table = &self.table;
-    let micros = runtime.as_micros() as i64;
+		let micros = runtime.map(|r| r.as_micros() as i64).unwrap_or(0);
     self.conn.execute(
-      &format!("UPDATE {table} SET runtime = ?1 WHERE id = ?2"),
-      rusqlite::params![micros, next_id],
+      &format!("UPDATE {table} SET runtime = ?1, status = ?2 WHERE token = ?3"),
+      rusqlite::params![micros, status, token.to_string()],
     )?;
 
-    Ok(Some(next_id))
+		Ok(())
   }
 
   pub fn entry_count(&self) -> i64 {
@@ -203,15 +250,15 @@ impl History {
     // rolling backup - overwritten on each delete, restorable via `hist --restore`
     tx.execute_batch(&format!(
       "DROP TABLE IF EXISTS {table}_backup; \
-       CREATE TABLE {table}_backup (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT); \
+       CREATE TABLE {table}_backup (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT, cwd TEXT, status INT DEFAULT 0, token TEXT); \
        INSERT INTO {table}_backup SELECT * FROM {table};"
     ))?;
     tx.execute_batch(&format!(
-      "CREATE TABLE {table}_tmp (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT);"
+      "CREATE TABLE {table}_tmp (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT, cwd TEXT, status INT DEFAULT 0, token TEXT);"
     ))?;
     tx.execute(&format!(
-				"INSERT INTO {table}_tmp (id, timestamp, runtime, command) \
-				 SELECT ROW_NUMBER() OVER (ORDER BY id), timestamp, runtime, command FROM {table} WHERE id NOT IN (SELECT id FROM {table}
+				"INSERT INTO {table}_tmp (id, timestamp, runtime, command, cwd, status, token) \
+				 SELECT ROW_NUMBER() OVER (ORDER BY id), timestamp, runtime, command, cwd, status, token FROM {table} WHERE id NOT IN (SELECT id FROM {table}
 		{where_clause}) ORDER BY id"
 		), params)?;
     tx.execute_batch(&format!(
@@ -253,8 +300,8 @@ impl History {
     // merge: insert deleted entries from backup that aren't in the current table
     tx.execute(
       &format!(
-        "INSERT INTO {table} (command, timestamp, runtime) \
-       SELECT b.command, b.timestamp, b.runtime \
+        "INSERT INTO {table} (command, timestamp, runtime, cwd, status, token) \
+       SELECT b.command, b.timestamp, b.runtime, b.cwd, b.status, b.token \
        FROM {table}_backup b \
        WHERE NOT EXISTS ( \
          SELECT 1 FROM {table} c \
@@ -265,9 +312,9 @@ impl History {
     )?;
     // rebuild with contiguous IDs in chronological order
     tx.execute_batch(&format!(
-      "CREATE TABLE {table}_tmp (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT); \
-       INSERT INTO {table}_tmp (id, timestamp, runtime, command) \
-       SELECT ROW_NUMBER() OVER (ORDER BY timestamp), timestamp, runtime, command \
+      "CREATE TABLE {table}_tmp (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT, cwd TEXT, status INT DEFAULT 0, token TEXT); \
+       INSERT INTO {table}_tmp (id, timestamp, runtime, command, cwd, status, token) \
+       SELECT ROW_NUMBER() OVER (ORDER BY timestamp), timestamp, runtime, command, cwd, status, token \
        FROM {table}; \
        DROP TABLE {table}; \
        ALTER TABLE {table}_tmp RENAME TO {table}; \
@@ -284,9 +331,9 @@ impl History {
     params: &[&dyn rusqlite::ToSql],
   ) -> ShResult<Vec<(i64, HistEntry)>> {
     let table = &self.table;
-    let sql = format!("SELECT command, timestamp, runtime, id FROM {table} {where_clause}");
+    let sql = format!("SELECT command, timestamp, runtime, cwd, status, token, id FROM {table} {where_clause}");
     let mut stmt = self.conn.prepare(&sql)?;
-    let rows = stmt.query_map(params, |row| Ok((row.get(3)?, Self::row_to_entry(row)?)))?;
+    let rows = stmt.query_map(params, |row| Ok((row.get(6)?, Self::row_to_entry(row)?)))?;
 
     Ok(rows.filter_map(Result::ok).collect())
   }
@@ -320,6 +367,9 @@ impl History {
       runtime,
       timestamp,
       command,
+			cwd,
+			status,
+			token
     } = entry;
     if command.is_empty() {
       return Ok(());
@@ -344,8 +394,8 @@ impl History {
     let timestamp = timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
     let new_id = self.last_id() + 1;
     self.conn.execute(
-      &format!("INSERT INTO {table} (id, timestamp, runtime, command) VALUES (?1, ?2, ?3, ?4)"),
-      rusqlite::params![new_id, timestamp, runtime.as_micros() as i64, command],
+      &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, status, token) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
+      rusqlite::params![new_id, timestamp, runtime.as_micros() as i64, command, cwd, status, token.to_string()],
     )?;
     Ok(())
   }
@@ -355,7 +405,7 @@ impl History {
     let sql = match prefix {
       Some(_) => format!(
         r##"
-				SELECT command, MAX(timestamp) as ts, runtime FROM {table}
+				SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
 				WHERE command LIKE ?1 || '%'
 				GROUP BY command
 				ORDER BY ts ASC
@@ -363,7 +413,7 @@ impl History {
       ),
       None => format!(
         r##"
-				SELECT command, MAX(timestamp) as ts, runtime FROM {table}
+				SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
 				GROUP BY command
 				ORDER BY ts ASC
 			"##
@@ -463,6 +513,9 @@ impl History {
       command: row.get(0)?,
       timestamp: UNIX_EPOCH + Duration::from_secs(row.get::<_, i64>(1)? as u64),
       runtime: Duration::from_micros(row.get::<_, i64>(2)? as u64),
+			cwd: row.get(3).unwrap_or_else(|_| "".to_string()),
+			status: row.get(4).unwrap_or(0),
+			token: Uuid::parse_str(row.get::<_, String>(5)?.as_str()).unwrap_or_default()
     })
   }
 

@@ -186,20 +186,16 @@ impl JobBldr {
     }
   }
   pub fn with_id(self, id: usize) -> Self {
-    Self {
-      table_id: Some(id),
-      pgid: self.pgid,
-      children: self.children,
-      send_hup: self.send_hup,
-    }
+    Self { table_id: Some(id), ..self }
   }
   pub fn with_pgid(self, pgid: Pid) -> Self {
-    Self {
-      table_id: self.table_id,
-      pgid: Some(pgid),
-      children: self.children,
-      send_hup: self.send_hup,
-    }
+    Self { pgid: Some(pgid), ..self }
+  }
+  pub fn with_children(self, children: Vec<ChildProc>) -> Self {
+    Self { children, ..self }
+  }
+  pub fn push_child(&mut self, child: ChildProc) {
+    self.children.push(child);
   }
   pub fn set_pgid(&mut self, pgid: Pid) {
     self.pgid = Some(pgid);
@@ -210,17 +206,6 @@ impl JobBldr {
   pub fn no_hup(mut self) -> Self {
     self.send_hup = false;
     self
-  }
-  pub fn with_children(self, children: Vec<ChildProc>) -> Self {
-    Self {
-      table_id: self.table_id,
-      pgid: self.pgid,
-      children,
-      send_hup: self.send_hup,
-    }
-  }
-  pub fn push_child(&mut self, child: ChildProc) {
-    self.children.push(child);
   }
   pub fn build(self) -> Job {
     Job {

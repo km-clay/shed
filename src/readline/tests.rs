@@ -720,7 +720,6 @@ fn hist_expansion_ignores_closing_quote() {
 // ===================== History General Tests =====================
 
 use crate::readline::history::History;
-use std::time::Duration;
 
 #[test]
 fn hist_push_returns_id() {
@@ -774,19 +773,6 @@ fn hist_last_returns_most_recent() {
   hist.push("second".into()).unwrap();
   let last = hist.last().unwrap();
   assert_eq!(last.command, "second");
-}
-
-#[test]
-fn hist_push_with_runtime() {
-  let _g = TestGuard::new();
-  let hist = History::empty("test_runtime");
-  let id = hist
-    .push_with_runtime("cmd1".into(), Duration::from_millis(500))
-    .unwrap();
-  assert!(id.is_some());
-  let entries = hist.query("ORDER BY id ASC", &[]).unwrap();
-  assert_eq!(entries.len(), 1);
-  assert_eq!(entries[0].1.runtime, Duration::from_millis(500));
 }
 
 #[test]

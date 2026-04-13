@@ -8,22 +8,117 @@ A Linux shell written in Rust. The name is a nod to the original Unix utilities 
 
 ### Line Editor
 
-`shed` includes a built-in modal line editor, written from scratch. It supports both **vim** and **emacs** editing modes, built on a shared editing engine with grapheme-correct cursor handling, a multiline viewport, and a kill ring.
+`shed` includes a built-in modal line editor, written from scratch. It supports both **vim** and **emacs** editing modes. `shed`'s line editor distinguishes itself by treating multi-line operations as first class. It's effectively a terminal-embedded text editor, rather than a traditional shell line editor.
 
-**Vim mode:**
-- **Normal mode** - motions (`w`, `b`, `e`, `f`, `t`, `%`, `0`, `$`, etc.), verbs (`d`, `c`, `y`, `p`, `r`, `x`, `~`, etc.), text objects (`iw`, `aw`, `i"`, `a{`, `is`, etc.), registers, `.` repeat, `;`/`,` repeat, and counts
-- **Insert mode** - insert, append, replace, with Ctrl+W word deletion and undo/redo
-- **Visual mode** - character-wise and visual line selection with operator support
-- **Command-line mode** - execute common ex-mode commands, or arbitrary shell commands with `:!<cmd>`.
+---
 
-**Emacs mode:**
-- Standard emacs keybindings - Ctrl+A/E, Ctrl+F/B, Alt+F/B, Ctrl+K/U, Ctrl+W, Ctrl+T, Ctrl+Y, Alt+Y, Alt+D/T/U/L/C, undo/redo
-- Kill ring with merge chaining and cycling
-- Powered by the same editing engine as vim mode - not a separate implementation
+### I Can't Believe It's Not `fzf`!
 
-**Shared features:**
-- **Real-time syntax highlighting** - commands, keywords, strings, variables, redirections, and operators are colored as you type
-- **Tab completion** - context-aware completion for commands, file paths, and variables
+`shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
+
+<img width="380" height="270" alt="shed_comp" src="https://github.com/user-attachments/assets/d317387e-4c33-406a-817f-1c183afab749" />
+<img width="380" height="270" alt="shed_search" src="https://github.com/user-attachments/assets/5109eb14-5c33-46bb-ab39-33c60ca039a8" />
+
+---
+
+### Keymaps
+
+The `keymap` builtin lets you bind key sequences to actions in any editor mode:
+
+```sh
+keymap -i 'jk' '<Esc>'                           # exit insert mode with jk
+keymap -n '<C-L>' '<CMD>clear<CR>'               # Ctrl+L runs clear in normal mode
+keymap -e '<C-O>' '<CMD>my_function<CR>'         # Ctrl+O runs a shell function in emacs mode
+keymap -n 'ys' '<CMD>function1<CR><CMD>function2<CR>' # Chain two functions together
+keymap -i '<C-P>' '<CMD>w!wl-copy<CR>'           # Ctrl+P pipes the buffer content to the clipboard
+```
+
+Mode flags: `-n` normal, `-i` insert, `-v` visual, `-x` ex, `-o` operator-pending, `-r` replace, `-e` emacs. Flags can be combined (`-ni` binds in both normal and insert).
+The leader key can be defined using `shopt prompt.leader=<some_key>`.
+
+Keys use vim-style notation: `<C-X>` (Ctrl), `<A-X>` (Alt), `<S-X>` (Shift), `<CR>`, `<Esc>`, `<Tab>`, `<Space>`, `<BS>`, arrow keys, etc. `<CMD>...<CR>` executes a shell command inline.
+
+Use `keymap --remove <keys>` to remove a binding that matches the given key sequence.
+
+Similar to `zsh`'s line editor widgets, shell commands run via keymaps have read-write access to the line editor state through special variables:
+* `$BUFFER` - Current line contents
+* `$CURSOR` - Cursor position, can be written back as either a raw byte index or as 'row:col'
+* `$ANCHOR` - Visual selection anchor
+* `$KEYS` - Keys that the line editor will execute upon returning. This can be used to script arbitrary input.
+
+Modifying these variables from within the command updates the editor when it returns.
+
+---
+
+### Autocmds
+
+The `autocmd` builtin registers shell commands to run on specific events. Many events expose context variables that autocmds can use for conditional logic:
+
+```sh
+autocmd post-change-dir 'echo "moved to $_NEW_DIR"'
+autocmd on-exit 'echo goodbye'
+autocmd on-time-report 'echo "$_TIME_CMD took $_TIME_REAL_FMT"'
+```
+
+Available events:
+
+| Event                                                                 | When it fires                     |
+|-----------------------------------------------------------------------|-----------------------------------|
+| `pre-cmd`, `post-cmd`                                                 | Before/after command execution    |
+| `pre-change-dir`, `post-change-dir`                                   | Before/after cwd changes          |
+| `pre-prompt`, `post-prompt`                                           | Before/after prompt display       |
+| `pre-mode-change`, `post-mode-change`                                 | Before/after editor mode switch   |
+| `on-history-open`, `on-history-close`, `on-history-select`            | History search events             |
+| `on-completion-start`, `on-completion-cancel`, `on-completion-select` | Tab completion events             |
+| `on-job-finish`                                                       | Background job completes          |
+| `on-time-report`                                                      | `time`-prefixed command completes |
+| `on-exit`                                                             | Shell is exiting                  |
+
+Use `-c` to clear all autocmds for an event. Context variables (e.g. `$_NEW_DIR`, `$_TIME_REAL_MS`) are scoped to the autocmd execution and documented in `help autocmd`.
+
+---
+
+### Command History
+
+`shed` uses an `sqlite` database to store your command history. While this is slightly heavier than the usual flat text file approach used by shells like `bash` and `zsh`, it has some advantages:
+* Shared across sessions: All open `shed` instances read from and write to the same history in real time - commands entered in one terminal are immediately available in all the others.
+* Queryable: Power users can query the database directly with any SQLite tool for custom analysis, rather than needing a custom history file parser
+* Richer metadata: Each entry stores timestamp, working directory, runtime duration in milliseconds, and exit code.
+* Safe writes: SQLite's transaction model means a hard kill mid-write won't leave your history file in a broken state.
+* Direct access via `hist`: The `hist` builtin allows you to interact with the database directly, and exposes flags that can be composed to create pseudo-SQL queries, e.g. `hist --starts-with 'echo' --after '10 minutes ago' --delete` will delete all commands starting with echo that were entered within the last 10 minutes.
+
+---
+
+### Shell Language
+
+`shed`'s scripting language follows the specification laid out by [IEEE Std 1003.1-2024 Shell & Utilities](https://pubs.opengroup.org/onlinepubs/9799919799/).
+It is capable of sourcing any POSIX-portable shell script.
+
+---
+
+### Job Control
+
+`shed` implements the usual shell job control utilities.
+
+- Background execution with `&`
+- Suspend foreground jobs with Ctrl+Z
+- `fg`, `bg`, `jobs`, `disown` with flags (`-l`, `-p`, `-r`, `-s`, `-h`, `-a`)
+
+---
+
+### Configuration
+
+Shell options are managed through `shopt`:
+
+```sh
+shopt core.autocd=true          # cd by typing a directory path
+shopt core.dotglob=true         # include hidden files in globs
+shopt line.highlight=false      # toggle syntax highlighting
+shopt prompt.edit_mode=vi       # editor mode
+shopt core.max_hist=5000        # history size
+```
+
+The rc file is loaded from `~/.shedrc` on startup.
 
 ---
 
@@ -51,113 +146,21 @@ export PS1='\u@\h \W \@gitbranch \$ '
 
 If `shed` receives `SIGUSR1` while in interactive mode, it will refresh and redraw the prompt. This can be used to create asynchronous, dynamic prompt content.
 
-Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, similar to how the `-e` flag expands conventional escape sequences.
+Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, similar to how the `-e` flag expands conventional escape sequences. You can use this in your prompt functions to expand prompt stuff internally.
+
+`shed` also provides a `PSR` for expanding content that is justified to the right side of the prompt.
 
 ---
 
-### I Can't Believe It's Not `fzf`!
+### Built-in Documentation
 
-`shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
+`shed` ships with documentation for all of its builtin commands, unique features, and POSIX stuff thats easy to forget like parameter expansion. This documentation is accessible via the `help` command. The help pages are modeled after `vim`'s manual pages, and are accessed in a similar fashion. `help` takes either a topic or a filename as an argument. If a topic is given, it will find it in any of the included help pages and jump straight to that entry.
 
-<img width="380" height="270" alt="shed_comp" src="https://github.com/user-attachments/assets/d317387e-4c33-406a-817f-1c183afab749" />
-<img width="380" height="270" alt="shed_search" src="https://github.com/user-attachments/assets/5109eb14-5c33-46bb-ab39-33c60ca039a8" />
-
----
-
-### Keymaps
-
-The `keymap` builtin lets you bind key sequences to actions in any editor mode:
-
-```sh
-keymap -i 'jk' '<Esc>'                           # exit insert mode with jk
-keymap -n '<C-L>' '<CMD>clear<CR>'               # Ctrl+L runs clear in normal mode
-keymap -i '<C-O>' '<CMD>my_function<CR>'         # Ctrl+O runs a shell function
-keymap -n 'ys' '<CMD>function1<CR><CMD>function2<CR>' # Chain two functions together
-keymap -nv '<Leader>y' '"+y'                     # Leader+y yanks to clipboard
+Examples:
+```bash
+help params.txt # opens params.txt
+help cd         # opens builtins.txt and jumps to the 'cd' entry
 ```
-
-Mode flags: `-n` normal, `-i` insert, `-v` visual, `-x` ex, `-o` operator-pending, `-r` replace, `-e` emacs. Flags can be combined (`-ni` binds in both normal and insert).
-The leader key can be defined using `shopt prompt.leader=<some_key>`.
-
-Keys use vim-style notation: `<C-X>` (Ctrl), `<A-X>` (Alt), `<S-X>` (Shift), `<CR>`, `<Esc>`, `<Tab>`, `<Space>`, `<BS>`, arrow keys, etc. `<CMD>...<CR>` executes a shell command inline.
-
-Use `keymap --remove <keys>` to remove a binding.
-
-Shell commands run via keymaps have read-write access to the line editor state through special variables: `$BUFFER` (current line contents), `$CURSOR` (cursor position), `$ANCHOR` (visual selection anchor), and `$KEYS` (inject key sequences back into the editor). Modifying these variables from within the command updates the editor when it returns.
-
----
-
-### Autocmds
-
-The `autocmd` builtin registers shell commands to run on specific events. Many events expose context variables that autocmds can use for conditional logic:
-
-```sh
-autocmd post-change-dir 'echo "moved to $_NEW_DIR"'
-autocmd on-exit 'echo goodbye'
-autocmd on-time-report 'echo "$_TIME_CMD took $_TIME_REAL_FMT"'
-```
-
-Available events:
-
-| Event | When it fires |
-|-------|---------------|
-| `pre-cmd`, `post-cmd` | Before/after command execution |
-| `pre-change-dir`, `post-change-dir` | Before/after `cd` |
-| `pre-prompt`, `post-prompt` | Before/after prompt display |
-| `pre-mode-change`, `post-mode-change` | Before/after vi mode switch |
-| `on-history-open`, `on-history-close`, `on-history-select` | History search UI events |
-| `on-completion-start`, `on-completion-cancel`, `on-completion-select` | Tab completion events |
-| `on-job-finish` | Background job completes |
-| `on-time-report` | `time`-prefixed command completes |
-| `on-exit` | Shell is exiting |
-
-Use `-c` to clear all autocmds for an event. Context variables (e.g. `$_NEW_DIR`, `$_TIME_REAL_MS`) are scoped to the autocmd execution and documented in `help autocmd`.
-
----
-
-### Shell Language
-
-shed's scripting language contains all of the essentials.
-
-- **Control flow** - `if`/`elif`/`else`, `for`, `while`, `until`, `case` with pattern matching and fallthrough
-- **Functions** - user-defined with local variable scoping, recursion depth limits, and `return`
-- **Pipes and redirections** - `|`, `|&` (pipe stderr), `<`, `>`, `>>`, `<<` (heredoc), `<<<` (herestring), fd duplication (`2>&1`)
-- **Process substitution** - `<(...)` and `>(...)`
-- **Command substitution** - `$(...)` and backticks
-- **Arithmetic expansion** - `$((...))` with `+`, `-`, `*`, `/`, `%`, `**`
-- **Parameter expansion** - `${var}`, `${var:-default}`, `${var:=default}`, `${var:+alt}`, `${var:?err}`, `${#var}`, `${var#pattern}`, `${var%pattern}`, `${var/pat/rep}`
-- **Brace expansion** - `{a,b,c}`, `{1..10}`, `{1..10..2}`
-- **Glob expansion** - `*`, `?`, `[...]` with optional dotglob
-- **Tilde expansion** - `~` and `~user`
-- **Logical operators** - `&&`, `||`, `&` (background)
-- **Test expressions** - `[[ ... ]]` with file tests, string comparison, arithmetic comparison, and regex matching
-- **Subshells** - `(...)` for isolated execution
-- **Variable attributes** - `export`, `local`, `readonly`
-
----
-
-### Job Control
-
-- Background execution with `&`
-- Suspend foreground jobs with Ctrl+Z
-- `fg`, `bg`, `jobs`, `disown` with flags (`-l`, `-p`, `-r`, `-s`, `-h`, `-a`)
-- Process group management and proper signal forwarding
-
----
-
-### Configuration
-
-Shell options are managed through `shopt`:
-
-```sh
-shopt core.autocd=true          # cd by typing a directory path
-shopt core.dotglob=true         # include hidden files in globs
-shopt line.highlight=false      # toggle syntax highlighting
-shopt prompt.edit_mode=vi       # editor mode
-shopt core.max_hist=5000        # history size
-```
-
-The rc file is loaded from `~/.shedrc` on startup.
 
 ---
 
@@ -214,10 +217,19 @@ pkgs = import nixpkgs {
 };
 ```
 
-## Status
+## Known issues
 
-`shed` is experimental software and is currently under active development. It covers most day-to-day interactive shell usage and a good portion of POSIX shell scripting, but it is not yet fully POSIX-compliant. There is no guarantee that your computer will not explode when you run this. Use it at your own risk, the software is provided as-is.
+* The expanded content from the `PSR` variable doesn't work well with multi-line content
+* `select` has not been implemented yet
+
+## Quirks
+
+* Single quotes can be escaped inside of single quoted strings. This is a slight deviation from the POSIX spec, which says that backslashes should always be literal in single quoted strings.
+
+## Notes
+
+`shed` is experimental software and is currently under active development. Using an experimental shell is inherently risky business, there is no guarantee that your computer will not explode when you run this. That being said, I've been daily driving it for 5 months at the time of writing and my computer has not exploded yet. Use it at your own risk, the software is provided as-is.
 
 ## Why shed?
 
-This originally started as an educational hobby project, but over the course of about two years or so it's taken the form of an actual daily-drivable shell. I mainly wanted to create a shell where line editing is more frictionless than standard choices. Existing shells treat line editing as an afterthought. Bash's readline really shows it's age these days, zsh's ZLE is better but still very clunky to work with, and most vi modes lack basic features like visual selection or text objects. `shed`'s line editor is built around a mode-agnostic editing engine that powers both vim and emacs modes with full feature parity, so you get a proper editing experience regardless of which mode you prefer.
+This originally started as an educational hobby project, but over the course of about two years or so it's taken the form of an actual daily-drivable shell (I switched to using it over `zsh` in October 2025). I mainly wanted to create a shell where line editing and general interactive use is more fluid. With the notable exception of `fish`, existing shells are command-interpreters first and interactive programs second, which is fine for scripting, but it's my opinion that interactive user experience should be first class in programs like this.
