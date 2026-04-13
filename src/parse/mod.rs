@@ -39,6 +39,65 @@ macro_rules! try_match {
   };
 }
 
+/// A helper macro for returning parse errors with context
+///
+/// This macro is used to cut down on boilerplate when returning errors in the various parsing functions.
+/// This macro also calls 'self.panic_mode' internally, and requires a mutable borrow of the '$tks' parameter.
+macro_rules! bail {
+	($parser:expr, $tks:expr, $($arg:tt)*) => {
+		$parser.panic_mode(&mut $tks);
+		return Err(parse_err!($parser, $tks, $($arg)*));
+	};
+}
+
+/// A helper macro for constructing parse errors with context
+macro_rules! parse_err {
+	($parser:expr, $tks:expr, $($arg:tt)*) => {
+		parse_err_full(
+			&format!($($arg)*),
+			&crate::libsh::utils::TkVecUtils::get_span(&$tks).unwrap(),
+			$parser.context.clone(),
+		)
+	};
+}
+
+/// A helper macro for constructing AST nodes with varying amounts of information
+///
+/// The first three parameters are always required, but the flags and redirs can be optionally left out if not needed. This is used to cut down on boilerplate when constructing nodes in the various parsing functions
+/// example:
+/// ```
+/// node!(self, node_tks, NdRule::Conjunction { elements }, vec![], NdFlags::empty())
+/// ```
+macro_rules! node {
+	($parser:expr, $tks:expr, $class:expr, $redirs:expr, $flags:expr) => {
+		Node {
+			class: $class,
+			flags: $flags,
+			redirs: $redirs,
+			context: $parser.context.clone(),
+			tokens: $tks,
+		}
+	};
+	($parser:expr, $tks:expr, $class:expr, $redirs:expr) => {
+		Node {
+			class: $class,
+			flags: NdFlags::empty(),
+			redirs: $redirs,
+			context: $parser.context.clone(),
+			tokens: $tks,
+		}
+	};
+	($parser:expr, $tks:expr, $class:expr) => {
+		Node {
+			class: $class,
+			flags: NdFlags::empty(),
+			redirs: vec![],
+			context: $parser.context.clone(),
+			tokens: $tks,
+		}
+	};
+}
+
 /// The parsed AST along with the source input it parsed
 ///
 /// Uses Rc<String> instead of &str because the reference has to stay alive
@@ -991,6 +1050,28 @@ impl ParseStream {
 
     Ok(result)
   }
+	fn parse_compound(&mut self) -> ShResult<Option<Node>> {
+		// parse only a compound command.
+		// used by function definition
+		// because any compound command is a valid
+		// function body.
+		//
+		// also we don't increment block_depth here because it
+		// already happened in parse_block() -> parse_func_def()
+
+		let result = || -> ShResult<Option<Node>> {
+			try_match!(self.parse_brc_grp(true /* from_func_def */)?);
+			try_match!(self.parse_case()?);
+			try_match!(self.parse_loop()?);
+			try_match!(self.parse_for()?);
+			try_match!(self.parse_test()?);
+			try_match!(self.parse_if()?);
+
+			Ok(None)
+		}()?;
+
+    Ok(result)
+	}
   fn parse_cmd_list(&mut self) -> ShResult<Option<Node>> {
     let mut elements = vec![];
     let mut node_tks = vec![];
@@ -1023,13 +1104,7 @@ impl ParseStream {
     if elements.is_empty() {
       Ok(None)
     } else {
-      Ok(Some(Node {
-        class: NdRule::Conjunction { elements },
-        flags: NdFlags::empty(),
-        redirs: vec![],
-        context: self.context.clone(),
-        tokens: node_tks,
-      }))
+      Ok(Some(node!(self, node_tks, NdRule::Conjunction { elements })))
     }
   }
   fn parse_func_def(&mut self) -> ShResult<Option<Node>> {
@@ -1074,28 +1149,17 @@ impl ParseStream {
         .with_color(color),
     ));
 
-    let Some(brc_grp) = self.parse_brc_grp(true /* from_func_def */)? else {
+    let Some(mut compound_cmd) = self.parse_compound()? else {
       self.context.pop_back();
-      return Err(parse_err_full(
-        "Expected a brace group after function name",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected a compound command after function name");
     };
-    body = Box::new(brc_grp);
+		self.parse_redir(&mut compound_cmd.redirs, &mut node_tks)?;
+    body = Box::new(compound_cmd);
     // Replace placeholder with full-span label
     self.context.pop_back();
 
-    let node = Node {
-      class: NdRule::FuncDef { name, body },
-      flags: NdFlags::empty(),
-      redirs: vec![],
-      tokens: node_tks,
-      context: self.context.clone(),
-    };
-
     self.context.pop_back();
-    Ok(Some(node))
+    Ok(Some(node!(self, node_tks, NdRule::FuncDef { name, body })))
   }
   fn panic_mode(&mut self, node_tks: &mut Vec<Tk>) {
     while let Some(tk) = self.next_tk() {
@@ -1121,11 +1185,7 @@ impl ParseStream {
           cases.push(case);
           break;
         } else if cases.is_empty() {
-          return Err(parse_err_full(
-            "Malformed test call",
-            &node_tks.get_span().unwrap(),
-            self.context.clone(),
-          ));
+          return Err(parse_err!(self, node_tks, "Malformed test call"));
         } else {
           break;
         }
@@ -1148,11 +1208,7 @@ impl ParseStream {
       } else if let TkRule::And | TkRule::Or = tk.class {
         if case_builder.can_build() {
           if case_builder.conjunct.is_some() {
-            return Err(parse_err_full(
-              "Invalid placement for logical operator in test",
-              &node_tks.get_span().unwrap(),
-              self.context.clone(),
-            ));
+            return Err(parse_err!(self, node_tks, "Invalid placement for logical operator in test"));
           }
           let op = match tk.class {
             TkRule::And => ConjunctOp::And,
@@ -1164,11 +1220,7 @@ impl ParseStream {
           cases.push(case);
           continue;
         } else {
-          return Err(parse_err_full(
-            "Invalid placement for logical operator in test",
-            &node_tks.get_span().unwrap(),
-            self.context.clone(),
-          ));
+          return Err(parse_err!(self, node_tks, "Invalid placement for logical operator in test"));
         }
       }
       if case_builder.can_build() {
@@ -1177,14 +1229,8 @@ impl ParseStream {
       }
     }
     self.catch_separator(&mut node_tks);
-    let node: Node = Node {
-      class: NdRule::Test { cases },
-      flags: NdFlags::empty(),
-      redirs: vec![],
-      context: self.context.clone(),
-      tokens: node_tks,
-    };
-    Ok(Some(node))
+
+    Ok(Some(node!(self, node_tks, NdRule::Test { cases })))
   }
   fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
@@ -1209,28 +1255,15 @@ impl ParseStream {
       } else if *self.next_tk_class() != TkRule::BraceGrpEnd {
         let next = self.peek_tk().cloned();
         let err = match next {
-          Some(tk) => Err(parse_err_full(
-            &format!("Unexpected token '{}' in brace group body", tk.as_str()),
-            &tk.span,
-            self.context.clone(),
-          )),
-          None => Err(parse_err_full(
-            "Unexpected end of input while parsing brace group body",
-            &node_tks.get_span().unwrap(),
-            self.context.clone(),
-          )),
+          Some(tk) => Err(parse_err!(self, node_tks, "Unexpected token '{}' in brace group body", tk.as_str())),
+          None => Err(parse_err!(self, node_tks, "Unexpected end of input while parsing brace group body")),
         };
         self.panic_mode(&mut node_tks);
         return err;
       }
       self.catch_separator(&mut node_tks);
       if !self.next_tk_is_some() {
-        self.panic_mode(&mut node_tks);
-        return Err(parse_err_full(
-          "Expected a closing brace for this brace group",
-          &node_tks.get_span().unwrap(),
-          self.context.clone(),
-        ));
+				bail!(self, node_tks, "Expected a closing brace for this brace group");
       }
     }
 
@@ -1238,14 +1271,7 @@ impl ParseStream {
       self.parse_redir(&mut redirs, &mut node_tks)?;
     }
 
-    let node = Node {
-      class: NdRule::BraceGrp { body },
-      flags: NdFlags::empty(),
-      redirs,
-      context: self.context.clone(),
-      tokens: node_tks,
-    };
-    Ok(Some(node))
+    Ok(Some(node!(self, node_tks, NdRule::BraceGrp { body }, redirs)))
   }
   fn build_redir<F: FnMut() -> Option<Tk>>(
     redir_tk: &Tk,
@@ -1320,12 +1346,8 @@ impl ParseStream {
     }
     node_tks.push(self.next_tk().unwrap());
 
-    let pat_err = parse_err_full(
-      "Expected a pattern after 'case' keyword",
-      &node_tks.get_span().unwrap(),
-      self.context.clone(),
-    )
-    .with_note("Patterns can be raw text, or anything that gets substituted with raw text");
+    let pat_err = parse_err!(self, node_tks, "Expected a pattern after 'case' keyword")
+			.with_note("Patterns can be raw text, or anything that gets substituted with raw text");
 
     let Some(pat_tk) = self.next_tk() else {
       self.panic_mode(&mut node_tks);
@@ -1341,12 +1363,7 @@ impl ParseStream {
     node_tks.push(pattern.clone());
 
     if !self.check_keyword("in") || !self.next_tk_is_some() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "Expected 'in' after case variable name",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected 'in' after case variable name");
     }
     node_tks.push(self.next_tk().unwrap());
 
@@ -1354,12 +1371,7 @@ impl ParseStream {
 
     loop {
       if !self.check_case_pattern() || !self.next_tk_is_some() {
-        self.panic_mode(&mut node_tks);
-        return Err(parse_err_full(
-          "Expected a case pattern here",
-          &node_tks.get_span().unwrap(),
-          self.context.clone(),
-        ));
+				bail!(self, node_tks, "Expected a case pattern here");
       }
       let case_pat_tk = self.next_tk().unwrap();
       node_tks.push(case_pat_tk.clone());
@@ -1415,32 +1427,11 @@ impl ParseStream {
       }
 
       if !self.next_tk_is_some() {
-        self.panic_mode(&mut node_tks);
-        return Err(parse_err_full(
-          "Expected 'esac' after case block",
-          &node_tks.get_span().unwrap(),
-          self.context.clone(),
-        ));
+				bail!(self, node_tks, "Expected 'esac' to close this case statement");
       }
     }
 
-    let node = Node {
-      class: NdRule::CaseNode {
-        pattern,
-        case_blocks,
-      },
-      flags: NdFlags::empty(),
-      redirs,
-      context: self.context.clone(),
-      tokens: node_tks,
-    };
-    Ok(Some(node))
-  }
-  fn make_err(&self, span: lex::Span, label: Label<lex::Span>) -> ShErr {
-    let src = span.span_source().clone();
-    ShErr::new(ShErrKind::ParseErr, span)
-      .with_label(src, label)
-      .with_context(self.context.clone())
+    Ok(Some(node!(self, node_tks, NdRule::CaseNode { pattern, case_blocks }, redirs)))
   }
   fn parse_time(&mut self) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
@@ -1451,17 +1442,7 @@ impl ParseStream {
     node_tks.push(self.next_tk().unwrap());
 
     let Some(mut cmd) = self.parse_block(true)? else {
-      self.panic_mode(&mut node_tks);
-      let span = node_tks.get_span().unwrap();
-      let color = next_color();
-      return Err(
-        self.make_err(
-          span.clone(),
-          Label::new(span)
-            .with_message("Expected a command after 'time'")
-            .with_color(color),
-        ),
-      );
+			bail!(self, node_tks, "Expected a command after 'time'");
     };
     // the 'time' keyword does not have it's own NdRule. This is because it does not alter execution in any meaningful way.
     // All it does here is set the REPORT_TIME flag on the node it wraps. Then we just return the node itself.
@@ -1485,21 +1466,10 @@ impl ParseStream {
 		self.parse_redir(&mut redirs, &mut node_tks)?;
 
 		if matches!(self.next_tk_class(), TkRule::Str) {
-			return Err(parse_err_full(
-				"Unexpected argument after arithmetic command",
-				&node_tks.get_span().unwrap(),
-				self.context.clone(),
-			))
+			bail!(self, node_tks, "Unexpected argument after arithmetic command");
 		}
 
-		let node = Node {
-			class: NdRule::Arithmetic { body: arith_tk },
-			flags: NdFlags::empty(),
-			redirs,
-			tokens: node_tks,
-			context: self.context.clone(),
-		};
-		Ok(Some(node))
+		Ok(Some(node!(self, node_tks, NdRule::Arithmetic { body: arith_tk }, redirs)))
 	}
   fn parse_negate(&mut self) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
@@ -1510,31 +1480,14 @@ impl ParseStream {
     node_tks.push(self.next_tk().unwrap());
 
     let Some(mut cmd) = self.parse_block(true)? else {
-      self.panic_mode(&mut node_tks);
-      let span = node_tks.get_span().unwrap();
-      let color = next_color();
-      return Err(
-        self.make_err(
-          span.clone(),
-          Label::new(span)
-            .with_message("Expected a command after '!'")
-            .with_color(color),
-        ),
-      );
+			bail!(self, node_tks, "Expected a command after '!'");
     };
     cmd.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for negated commands
 
     node_tks.extend(cmd.tokens.clone());
     self.catch_separator(&mut node_tks);
 
-    let node = Node {
-      class: NdRule::Negate { cmd: Box::new(cmd) },
-      flags: NdFlags::empty(),
-      redirs: vec![],
-      context: self.context.clone(),
-      tokens: node_tks,
-    };
-    Ok(Some(node))
+    Ok(Some(node!(self, node_tks, NdRule::Negate { cmd: Box::new(cmd) })))
   }
   fn parse_if(&mut self) -> ShResult<Option<Node>> {
     // Needs at last one 'if-then',
@@ -1557,31 +1510,13 @@ impl ParseStream {
         if prefix_keywrd == "elif" {
           self.block_depth -= 1;
         }
-        self.panic_mode(&mut node_tks);
-        let span = node_tks.get_span().unwrap();
-        let color = next_color();
-        return Err(
-          self.make_err(
-            span.clone(),
-            Label::new(span)
-              .with_message(format!(
-                "Expected an expression after '{}'",
-                prefix_keywrd.fg(color)
-              ))
-              .with_color(color),
-          ),
-        );
+				bail!(self, node_tks, "Expected a command after '{prefix_keywrd}'");
       };
       node_tks.extend(cond.tokens.clone());
       cond.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for condition commands
 
       if !self.check_keyword("then") || !self.next_tk_is_some() {
-        self.panic_mode(&mut node_tks);
-        return Err(parse_err_full(
-          &format!("Expected 'then' after '{prefix_keywrd}' condition"),
-          &node_tks.get_span().unwrap(),
-          self.context.clone(),
-        ));
+				bail!(self, node_tks, "Expected 'then' after '{prefix_keywrd}' condition");
       }
       node_tks.push(self.next_tk().unwrap());
       self.catch_separator(&mut node_tks);
@@ -1593,12 +1528,7 @@ impl ParseStream {
       }
 
       if body_blocks.is_empty() {
-        self.panic_mode(&mut node_tks);
-        return Err(parse_err_full(
-          "Expected an expression after 'then'",
-          &node_tks.get_span().unwrap(),
-          self.context.clone(),
-        ));
+				bail!(self, node_tks, "Expected a command after 'then'");
       };
       let cond_node = CondNode {
         cond: Box::new(cond),
@@ -1634,12 +1564,7 @@ impl ParseStream {
       }
 
       if else_block.is_empty() {
-        self.panic_mode(&mut node_tks);
-        return Err(parse_err_full(
-          "Expected an expression after 'else'",
-          &node_tks.get_span().unwrap(),
-          self.context.clone(),
-        ));
+				bail!(self, node_tks, "Expected a command after 'else'");
       }
 
       if !already_added {
@@ -1649,12 +1574,7 @@ impl ParseStream {
 
     self.catch_separator(&mut node_tks);
     if !self.check_keyword("fi") || !self.next_tk_is_some() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "Expected 'fi' after if statement",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected 'fi' after if statement");
     }
     node_tks.push(self.next_tk().unwrap());
     self.block_depth -= 1;
@@ -1663,17 +1583,7 @@ impl ParseStream {
 
     self.assert_separator(&mut node_tks)?;
 
-    let node = Node {
-      class: NdRule::IfNode {
-        cond_nodes,
-        else_block,
-      },
-      flags: NdFlags::empty(),
-      redirs,
-      context: self.context.clone(),
-      tokens: node_tks,
-    };
-    Ok(Some(node))
+    Ok(Some(node!(self, node_tks, NdRule::IfNode { cond_nodes, else_block }, redirs)))
   }
 	fn parse_for_arith(&mut self, mut node_tks: Vec<Tk>) -> ShResult<Option<Node>> {
 		let mut body: Vec<Node> = vec![];
@@ -1685,12 +1595,7 @@ impl ParseStream {
 		self.catch_separator(&mut node_tks);
 
     if !self.check_keyword("do") || !self.next_tk_is_some() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "Missing a 'do' for this for loop",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected 'do' after for loop arithmetic expression");
     }
     node_tks.push(self.next_tk().unwrap());
     self.catch_separator(&mut node_tks);
@@ -1701,25 +1606,13 @@ impl ParseStream {
 
     self.catch_separator(&mut node_tks);
     if !self.check_keyword("done") || !self.next_tk_is_some() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "Missing a 'done' after this for loop",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected 'done' after for loop body");
     }
     node_tks.push(self.next_tk().unwrap());
 
     self.parse_redir(&mut redirs, &mut node_tks)?;
 
-    let node = Node {
-      class: NdRule::ForArith { init, cond, step, body },
-      flags: NdFlags::empty(),
-      redirs,
-      context: self.context.clone(),
-      tokens: node_tks,
-    };
-    Ok(Some(node))
+    Ok(Some(node!(self, node_tks, NdRule::ForArith { init, cond, step, body }, redirs)))
 	}
 	fn parse_for_arr(&mut self, mut node_tks: Vec<Tk>) -> ShResult<Option<Node>> {
     let mut vars: Vec<Tk> = vec![];
@@ -1746,28 +1639,13 @@ impl ParseStream {
     }
 
     if vars.is_empty() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "This for loop is missing a variable",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected a variable name for this for loop");
     }
     if arr.is_empty() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "This for loop is missing an array",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected an array for this for loop");
     }
     if !self.check_keyword("do") || !self.next_tk_is_some() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "Missing a 'do' for this for loop",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected 'do' after for loop variable and array");
     }
     node_tks.push(self.next_tk().unwrap());
     self.catch_separator(&mut node_tks);
@@ -1778,25 +1656,13 @@ impl ParseStream {
 
     self.catch_separator(&mut node_tks);
     if !self.check_keyword("done") || !self.next_tk_is_some() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "Missing a 'done' after this for loop",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected 'done' after for loop body");
     }
     node_tks.push(self.next_tk().unwrap());
 
     self.parse_redir(&mut redirs, &mut node_tks)?;
 
-    let node = Node {
-      class: NdRule::ForNode { vars, arr, body },
-      flags: NdFlags::empty(),
-      redirs,
-      context: self.context.clone(),
-      tokens: node_tks,
-    };
-    Ok(Some(node))
+    Ok(Some(node!(self, node_tks, NdRule::ForNode { vars, arr, body }, redirs)))
 	}
   fn parse_for(&mut self) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
@@ -1833,23 +1699,13 @@ impl ParseStream {
     self.catch_separator(&mut node_tks);
 
     let Some(mut cond) = self.parse_cmd_list()? else {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        &format!("Expected an expression after '{loop_kind}'"), // It also implements Display
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected a command after '{loop_kind}'");
     };
     node_tks.extend(cond.tokens.clone());
     cond.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for condition commands
 
     if !self.check_keyword("do") || !self.next_tk_is_some() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "Expected 'do' after loop condition",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected 'do' after '{loop_kind}' condition");
     }
     node_tks.push(self.next_tk().unwrap());
     self.catch_separator(&mut node_tks);
@@ -1860,22 +1716,12 @@ impl ParseStream {
       body.push(block);
     }
     if body.is_empty() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "Expected an expression after 'do'",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected a command after 'do' in this loop");
     };
 
     self.catch_separator(&mut node_tks);
     if !self.check_keyword("done") || !self.next_tk_is_some() {
-      self.panic_mode(&mut node_tks);
-      return Err(parse_err_full(
-        "Expected 'done' after loop body",
-        &node_tks.get_span().unwrap(),
-        self.context.clone(),
-      ));
+			bail!(self, node_tks, "Expected 'done' after loop body");
     }
     node_tks.push(self.next_tk().unwrap());
 
@@ -1887,17 +1733,8 @@ impl ParseStream {
       cond: Box::new(cond),
       body,
     };
-    let loop_node = Node {
-      class: NdRule::LoopNode {
-        kind: loop_kind,
-        cond_node,
-      },
-      flags: NdFlags::empty(),
-      redirs,
-      context: self.context.clone(),
-      tokens: node_tks,
-    };
-    Ok(Some(loop_node))
+
+    Ok(Some(node!(self, node_tks, NdRule::LoopNode { kind: loop_kind, cond_node }, redirs)))
   }
   fn parse_pipeln(&mut self) -> ShResult<Option<Node>> {
     let mut cmds = vec![];
@@ -1933,14 +1770,7 @@ impl ParseStream {
     if cmds.is_empty() {
       Ok(None)
     } else {
-      Ok(Some(Node {
-        // TODO: implement pipe_err support
-        class: NdRule::Pipeline { cmds },
-        flags,
-        redirs: vec![],
-        context: self.context.clone(),
-        tokens: node_tks,
-      }))
+      Ok(Some(node!(self, node_tks, NdRule::Pipeline { cmds }, vec![/*redirs*/], flags)))
     }
   }
   fn parse_cmd(&mut self) -> ShResult<Option<Node>> {
@@ -1959,11 +1789,7 @@ impl ParseStream {
           break;
         };
         if let TkRule::CasePattern = prefix_tk.class {
-          break 'out Err(parse_err_full(
-            "Found case pattern in command",
-            &prefix_tk.span,
-            self.context.clone(),
-          ));
+          break 'out Err(parse_err!(self, node_tks, "Found case pattern in command"));
         }
         let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
         let is_assignment = prefix_tk.flags.contains(TkFlags::ASSIGN);
@@ -2009,13 +1835,7 @@ impl ParseStream {
               .with_message("in variable assignment defined here".to_string())
               .with_color(next_color()),
           ));
-          return Ok(Some(Node {
-            class: NdRule::Command { assignments, argv },
-            tokens: node_tks,
-            flags,
-            redirs,
-            context: self.context.clone(),
-          }));
+          return Ok(Some(node!(self, node_tks, NdRule::Command { assignments, argv }, redirs, flags)));
         }
       }
       loop {
@@ -2054,23 +1874,13 @@ impl ParseStream {
             redirs.push(redir);
           }
           _ => {
-            return Err(parse_err_full(
-              &format!("Unexpected token in command: {:?}", tk.class),
-              &tk.span,
-              self.context.clone(),
-            ));
+            break 'out Err(parse_err!(self, node_tks, "Unexpected token in command: {:?}", tk.class));
           }
         };
       }
       self.commit(node_tks.len());
 
-      return Ok(Some(Node {
-        class: NdRule::Command { assignments, argv },
-        tokens: node_tks,
-        flags,
-        redirs,
-        context: self.context.clone(),
-      }));
+      return Ok(Some(node!(self, node_tks, NdRule::Command { assignments, argv }, redirs, flags)));
     };
 
     match result {
@@ -2183,17 +1993,13 @@ impl ParseStream {
         NdFlags::empty()
       };
 
-      Some(Node {
-        class: NdRule::Assignment {
-          kind: assign_kind,
-          var,
-          val,
-        },
-        tokens: vec![token.clone()],
-        flags,
-        redirs: vec![],
-        context: self.context.clone(),
-      })
+      Some(node!(
+				self,
+				vec![token.clone()],
+				NdRule::Assignment { kind: assign_kind, var, val },
+				vec![/*redirs*/],
+				flags
+			))
     } else {
       None
     }
@@ -2324,133 +2130,6 @@ fn is_func_name(tk: Option<&Tk>) -> bool {
 
 fn is_func_parens(tk: Option<&Tk>) -> bool {
   tk.is_some_and(|tk| tk.flags.contains(TkFlags::KEYWORD) && tk.span.as_str() == "()")
-}
-
-/// Perform an operation on the child nodes of a given node
-///
-/// # Parameters
-/// node: A mutable reference to a node to be operated on
-/// filter: A closure or function which checks an attribute of a child node and
-/// returns a boolean operation: The closure or function to apply to a child
-/// node which matches on the filter
-///
-/// Very useful for testing, i.e. needing to extract specific types of nodes
-/// from the AST to inspect values
-pub fn node_operation<F1, F2>(node: &mut Node, filter: &F1, operation: &mut F2)
-where
-  F1: Fn(&Node) -> bool,
-  F2: FnMut(&mut Node),
-{
-  let check_node = |node: &mut Node, filter: &F1, operation: &mut F2| {
-    if filter(node) {
-      operation(node);
-    } else {
-      node_operation::<F1, F2>(node, filter, operation);
-    }
-  };
-
-  if filter(node) {
-    operation(node);
-  }
-
-  match node.class {
-    NdRule::IfNode {
-      ref mut cond_nodes,
-      ref mut else_block,
-    } => {
-      for node in cond_nodes {
-        let CondNode { cond, body } = node;
-        check_node(cond, filter, operation);
-        for body_node in body {
-          check_node(body_node, filter, operation);
-        }
-      }
-
-      for else_node in else_block {
-        check_node(else_node, filter, operation);
-      }
-    }
-    NdRule::LoopNode {
-      kind: _,
-      ref mut cond_node,
-    } => {
-      let CondNode { cond, body } = cond_node;
-      check_node(cond, filter, operation);
-      for body_node in body {
-        check_node(body_node, filter, operation);
-      }
-    }
-    NdRule::ForNode {
-      vars: _,
-      arr: _,
-      ref mut body,
-    } => {
-      for body_node in body {
-        check_node(body_node, filter, operation);
-      }
-    }
-		NdRule::ForArith { ref mut init, ref mut cond, ref mut step, ref mut body } => {
-			if let Some(node) = init {
-				check_node(&mut *node, filter, operation);
-			}
-			if let Some(node) = cond {
-				check_node(&mut *node, filter, operation);
-			}
-			if let Some(node) = step {
-				check_node(&mut *node, filter, operation);
-			}
-			for body_node in body {
-				check_node(body_node, filter, operation);
-			}
-		}
-    NdRule::CaseNode {
-      pattern: _,
-      ref mut case_blocks,
-    } => {
-      for block in case_blocks {
-        let CaseNode { pattern: _, body } = block;
-        for body_node in body {
-          check_node(body_node, filter, operation);
-        }
-      }
-    }
-    NdRule::Command {
-      ref mut assignments,
-      argv: _,
-    } => {
-      for assign_node in assignments {
-        check_node(assign_node, filter, operation);
-      }
-    }
-    NdRule::Pipeline { ref mut cmds } => {
-      for cmd_node in cmds {
-        check_node(cmd_node, filter, operation);
-      }
-    }
-    NdRule::Conjunction { ref mut elements } => {
-      for node in elements.iter_mut() {
-        let ConjunctNode { cmd, operator: _ } = node;
-        check_node(cmd, filter, operation);
-      }
-    }
-    NdRule::BraceGrp { ref mut body } => {
-      for body_node in body {
-        check_node(body_node, filter, operation);
-      }
-    }
-    NdRule::FuncDef {
-      name: _,
-      ref mut body,
-    } => check_node(body, filter, operation),
-    NdRule::Negate {
-			ref mut cmd,
-		} => check_node(cmd, filter, operation),
-
-		// base cases with no child nodes
-		NdRule::Arithmetic {..} |
-    NdRule::Test {..} |
-    NdRule::Assignment {..} => (), // No nodes to check
-  }
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@ use bitflags::bitflags;
 
 use crate::{
   builtin::BUILTINS,
-  libsh::{error::ShResult, utils::CharDequeUtils},
+  libsh::error::ShResult,
   match_loop, sherr,
 };
 
@@ -259,9 +259,7 @@ impl Tk {
   }
 
   pub fn is_closer(&self) -> bool {
-    matches!(self.as_str(), "fi" | "done" | "esac")
-      || self.has_double_semi()
-      || matches!(self.class, TkRule::BraceGrpEnd)
+		CLOSERS.contains(&self.as_str())
   }
 
   pub fn is_closer_for(&self, other: &Tk) -> bool {
@@ -400,8 +398,8 @@ impl LexStream {
       Bound::Unbounded => 0,
     };
     let end = match range.end_bound() {
-      Bound::Included(&end) => end,
-      Bound::Excluded(&end) => end + 1,
+      Bound::Included(&end) => end + 1,
+      Bound::Excluded(&end) => end,
       Bound::Unbounded => self.source.len(),
     };
     self.source.get(start..end)
@@ -785,31 +783,8 @@ impl LexStream {
           '$' if chars.peek() == Some(&'(') => {
             pos += 2;
             chars.next();
-            let mut paren_count = 1;
             let paren_pos = pos;
-            while let Some(ch) = chars.next() {
-              match ch {
-                '\\' => {
-                  pos += 1;
-                  if let Some(next_ch) = chars.next() {
-                    pos += next_ch.len_utf8();
-                  }
-                }
-                '(' => {
-                  pos += 1;
-                  paren_count += 1;
-                }
-                ')' => {
-                  pos += 1;
-                  paren_count -= 1;
-                  if paren_count <= 0 {
-                    break;
-                  }
-                }
-                _ => pos += ch.len_utf8(),
-              }
-            }
-            if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+            if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
               self.cursor = pos;
               return Err(sherr!(
                   ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
@@ -828,29 +803,8 @@ impl LexStream {
       '$' if chars.peek() == Some(&'(') => {
         pos += 2;
         chars.next();
-        let mut paren_count = 1;
         let paren_pos = pos;
-        match_loop!(chars.next() => ch, {
-          '\\' => {
-            pos += 1;
-            if let Some(next_ch) = chars.next() {
-              pos += next_ch.len_utf8();
-            }
-          }
-          '(' => {
-            pos += 1;
-            paren_count += 1;
-          }
-          ')' => {
-            pos += 1;
-            paren_count -= 1;
-            if paren_count <= 0 {
-              break;
-            }
-          }
-          _ => pos += ch.len_utf8(),
-        });
-        if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+        if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
           self.cursor = pos;
           return Err(sherr!(
               ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
@@ -861,27 +815,13 @@ impl LexStream {
       '$' if chars.peek() == Some(&'{') => {
         pos += 2;
         chars.next();
-        let mut brace_count = 1;
-        match_loop!(chars.next() => brc_ch, {
-          '\\' => {
-            pos += 1;
-            if let Some(next_ch) = chars.next() {
-              pos += next_ch.len_utf8()
-            }
-          }
-          '{' => {
-            pos += 1;
-            brace_count += 1;
-            }
-          '}' => {
-            pos += 1;
-            brace_count -= 1;
-            if brace_count == 0 {
-              break;
-            }
-          }
-          _ => pos += ch.len_utf8(),
-        });
+				if !scan_braces(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+					self.cursor = pos;
+					return Err(sherr!(
+							ParseErr @ Span::new(pos..pos + 1, self.source.clone()),
+							"Unclosed parameter expansion",
+					));
+				}
       }
       '"' => {
         pos += 1;
@@ -891,29 +831,8 @@ impl LexStream {
       '<' if chars.peek() == Some(&'(') => {
         pos += 2;
         chars.next();
-        let mut paren_count = 1;
         let paren_pos = pos;
-        match_loop!(chars.next() => ch, {
-          '\\' => {
-            pos += 1;
-            if let Some(next_ch) = chars.next() {
-              pos += next_ch.len_utf8();
-            }
-          }
-          '(' => {
-            pos += 1;
-            paren_count += 1;
-          }
-          ')' => {
-            pos += 1;
-            paren_count -= 1;
-            if paren_count <= 0 {
-              break;
-            }
-          }
-          _ => pos += ch.len_utf8(),
-        });
-        if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+        if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
           self.cursor = pos;
           return Err(sherr!(
               ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
@@ -924,29 +843,8 @@ impl LexStream {
       '>' if chars.peek() == Some(&'(') => {
         pos += 2;
         chars.next();
-        let mut paren_count = 1;
         let paren_pos = pos;
-        match_loop!(chars.next() => ch, {
-          '\\' => {
-            pos += 1;
-            if let Some(next_ch) = chars.next() {
-              pos += next_ch.len_utf8();
-            }
-          }
-          '(' => {
-            pos += 1;
-            paren_count += 1;
-          }
-          ')' => {
-            pos += 1;
-            paren_count -= 1;
-            if paren_count <= 0 {
-              break;
-            }
-          }
-          _ => pos += ch.len_utf8(),
-        });
-        if !paren_count == 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+        if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
           self.cursor = pos;
           return Err(sherr!(
               ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
@@ -979,27 +877,7 @@ impl LexStream {
 					//subshell
 					flags |= TkFlags::IS_SUBSH;
 				}
-				match_loop!(chars.next() => ch, {
-					'\\' => {
-						pos += 1;
-						if let Some(next_ch) = chars.next() {
-							pos += next_ch.len_utf8();
-						}
-					}
-					'(' => {
-						pos += 1;
-						paren_count += 1;
-					}
-					')' => {
-						pos += 1;
-						paren_count -= 1;
-						if paren_count <= 0 {
-							break;
-						}
-					}
-					_ => pos += ch.len_utf8(),
-				});
-        if paren_count != 0 && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+        if !scan_parens(&mut chars, &mut pos, paren_count) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
           self.cursor = pos;
           return Err(sherr!(
               ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
@@ -1338,6 +1216,55 @@ pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
   slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
 }
 
+fn scan_parens(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
+	scan_delims('(', chars, pos, depth).unwrap()
+}
+
+fn scan_braces(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
+	scan_delims('{', chars, pos, depth).unwrap()
+}
+
+fn scan_brackets(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
+	scan_delims('[', chars, pos, depth).unwrap()
+}
+
+fn scan_angles(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
+	scan_delims('<', chars, pos, depth).unwrap()
+}
+
+fn scan_delims(opener: char, chars: &mut Peekable<Chars>, pos: &mut usize, mut depth: usize) -> ShResult<bool> {
+	let closer = match opener {
+		'(' => ')',
+		'{' => '}',
+		'[' => ']',
+		'<' => '>',
+		_ => return Err(sherr!(
+				ParseErr @ Span::new(*pos..*pos, "".into()),
+				"Invalid opener '{opener}'",
+		)),
+	};
+	let mut qt = QuoteState::default();
+	match_loop!(chars.next() => ch, {
+		'\\' => {
+			*pos += 1;
+			if let Some(next_ch) = chars.next() {
+				*pos += next_ch.len_utf8();
+			}
+		}
+		'\'' => { *pos += 1; qt.toggle_single(); }
+		'"' if !qt.in_single() => { *pos += 1; qt.toggle_double(); }
+		_ if qt.in_quote() => *pos += ch.len_utf8(),
+		_ if ch == opener => { *pos += 1; depth += 1; }
+		_ if ch == closer => {
+			*pos += 1;
+			depth -= 1;
+			if depth == 0 { break; }
+		}
+		_ => *pos += ch.len_utf8(),
+	});
+	Ok(depth == 0)
+}
+
 /// Splits a string by a pattern, but only if the pattern is not escaped by a backslash
 /// and not in quotes.
 pub fn split_all_unescaped(slice: &str, pat: &str) -> Vec<String> {
@@ -1447,22 +1374,6 @@ pub fn pos_is_escaped(slice: &str, pos: usize) -> bool {
     i -= 1;
   }
   escaped
-}
-
-pub fn lookahead(pat: &str, mut chars: Chars) -> Option<usize> {
-  let mut pos = 0;
-  let mut char_deque = VecDeque::new();
-  while let Some(ch) = chars.next() {
-    char_deque.push_back(ch);
-    if char_deque.len() > pat.len() {
-      char_deque.pop_front();
-    }
-    if char_deque.starts_with(pat) {
-      return Some(pos);
-    }
-    pos += 1;
-  }
-  None
 }
 
 pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {

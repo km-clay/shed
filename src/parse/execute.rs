@@ -549,7 +549,7 @@ impl Dispatcher {
       func_body.body_mut().propagate_context(func_ctx);
       func_body.body_mut().flags = func.flags;
 
-      if let Err(e) = self.exec_brc_grp(func_body.body().clone()) {
+      if let Err(e) = self.dispatch_node(func_body.body().clone()) {
         match e.kind() {
           ShErrKind::FuncReturn(code) => {
             state::set_status(*code);
