@@ -524,7 +524,7 @@ impl History {
       .conn
       .query_row(
         &format!(
-          "SELECT command, timestamp, runtime FROM {} ORDER BY id DESC LIMIT 1",
+          "SELECT command, timestamp, runtime, cwd, status, token FROM {} ORDER BY id DESC LIMIT 1",
           self.table
         ),
         [],
