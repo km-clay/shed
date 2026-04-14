@@ -29,6 +29,7 @@ use std::sync::atomic::Ordering;
 
 use nix::errno::Errno;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+use nix::sys::stat::{FchmodatFlags, fchmodat};
 use nix::unistd::read;
 use smallvec::SmallVec;
 
@@ -49,7 +50,7 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, LineHeader, QueryHeader, SocketRequest, StatusHeader, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
+  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;
@@ -408,6 +409,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
   };
   let mut vi_mode = read_shopts(|o| o.set.vi);
+	let mut socket_mode = ShedSocket::mode();
 
 	let mut poll_fds: SmallVec<[PollFd; 2]> = SmallVec::new();
 	let tty_fd = PollFd::new(
@@ -538,6 +540,21 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       true => return Ok(()),
       false => { /* continue looping */ }
     }
+
+		// check the socket mode
+		let curr_socket_mode = ShedSocket::mode();
+
+		if curr_socket_mode != socket_mode {
+			// the mode changed, call chmod
+			let path = ShedSocket::path();
+			fchmodat(
+				None,
+				Path::new(&path),
+				curr_socket_mode,
+				FchmodatFlags::FollowSymlink,
+			).ok();
+			socket_mode = curr_socket_mode;
+		}
   }
 
   Ok(())

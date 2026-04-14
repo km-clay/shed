@@ -234,24 +234,35 @@ pub struct ShedSocket {
 }
 
 impl ShedSocket {
+	pub fn dir() -> String {
+    env::var("XDG_RUNTIME_DIR")
+      .unwrap_or_else(|_| format!("/tmp/shed-{}", nix::unistd::getuid()))
+	}
+	pub fn path() -> String {
+		let pid = Pid::this();
+		let runtime_dir = Self::dir();
+    format!("{runtime_dir}/shed/{pid}.sock")
+	}
+	pub fn mode() -> Mode {
+		read_vars(|v| v.get_var("SHED_SOCK_MODE"))
+			.parse::<u32>()
+			.ok()
+			.and_then(Mode::from_bits)
+			.unwrap_or(Mode::S_IRUSR | Mode::S_IWUSR)
+	}
   pub fn new() -> ShResult<Self> {
-    let pid = Pid::this();
-    let runtime_dir = env::var("XDG_RUNTIME_DIR")
-      .unwrap_or_else(|_| format!("/tmp/shed-{}", nix::unistd::getuid()));
-
+		let runtime_dir = Self::dir();
     std::fs::create_dir_all(format!("{runtime_dir}/shed"))?;
-    let sock_path = format!("{runtime_dir}/shed/{pid}.sock");
+
+		let sock_path = Self::path();
     std::fs::remove_file(&sock_path).ok();
+
     let listener = UnixListener::bind(&sock_path)?;
 
 		// set the permissions for the socket
 		// default is read/write for user, no access for group/other
 		// this can be overridden using the $SHED_SOCK_MODE env var.
-		let mode = read_vars(|v| v.get_var("SHED_SOCK_MODE"))
-			.parse::<u32>()
-			.ok()
-			.and_then(Mode::from_bits)
-			.unwrap_or(Mode::S_IRUSR | Mode::S_IWUSR);
+		let mode = Self::mode();
 
 		fchmodat(
 			None,
@@ -277,7 +288,7 @@ impl ShedSocket {
     .ok();
     Ok(Self {
       listener,
-      pid,
+      pid: Pid::this(),
       path: PathBuf::from(sock_path),
     })
   }

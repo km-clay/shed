@@ -1,0 +1,284 @@
+*socket* *SHED_SOCK* *unix-socket*
+
+#SOCKET#
+
+The shell exposes a Unix domain socket for inter-process communication.
+External programs, background jobs, and shell scripts can use this
+socket to query shell state, post messages, and manipulate the line
+editor asynchronously.
+
+The socket path is stored in `$SHED_SOCK` and is inherited by child
+processes.
+
+==============================================================================
+1. Configuration                               *socket-config*
+
+  `$SHED_SOCK`                                 *socket-path*
+
+      Contains the path to the socket, typically:
+        `$XDG_RUNTIME_DIR/shed/{pid}.sock`
+
+      If `$XDG_RUNTIME_DIR` is unset, falls back to:
+        `/tmp/shed-{uid}/shed/{pid}.sock`
+
+  `$SHED_SOCK_MODE`                            *socket-mode*
+
+      Sets the Unix file permissions on the socket file. Accepts an
+      octal mode value. Default is `0600` (owner read/write only).
+
+      Examples:
+
+          `SHED_SOCK_MODE=0600`   owner only (default)
+          `SHED_SOCK_MODE=0660`   owner and group
+          `SHED_SOCK_MODE=0000`   effectively disables the socket
+
+==============================================================================
+2. Protocol                                    *socket-protocol*
+
+  Messages are sent as a single line of text terminated by `\n`.
+  The general format is:
+
+      `{command}{separator}{arg1}{separator}{arg2}...`
+
+  The separator is any sequence of non-alphanumeric ASCII graphic
+  characters appearing after the command word. The same separator
+  must delimit all subsequent arguments. Some examples:
+
+      `msg/status/hello world`
+      `msg::status::hello world`
+      `msg/\/\/\/status/\/\/\/hello world`
+      `msg<>status<>hello world`
+
+  Requests that take no arguments have no separator:
+
+      `subscribe`
+      `redraw`
+
+  The shell responds with a result followed by `\n`. Mutation
+  requests respond with `ok`. Query requests respond with the
+  requested value.
+
+==============================================================================
+3. Connecting                                  *socket-connect*
+
+  From another terminal or a background process:
+
+      `echo "query::cwd" | socat - UNIX-CONNECT:$SHED_SOCK`
+
+  From within the shell (must be backgrounded so the poll loop
+  can process the request):
+
+      `echo "query::cwd" | socat - UNIX-CONNECT:$SHED_SOCK &`
+
+  Note: the shell cannot query its own socket synchronously because
+  it must return to the poll loop to process incoming requests.
+
+==============================================================================
+4. Messages                                    *socket-msg*
+
+  `msg::{kind}::{text}`                        *socket-msg-system*
+
+      Post a message to the shell.
+
+      `msg::system::{text}`
+
+          Posts a system message. System messages appear above the
+          prompt, similar to job status notifications. They persist
+          across redraws.
+
+      `msg::status::{text}`
+
+          Posts a status message. Status messages appear below the
+          prompt and are short-lived, disappearing after a few
+          seconds or on the next redraw.
+
+  Examples:
+
+      `msg::system::Build complete`
+      `msg::status::3 files changed`
+
+==============================================================================
+5. Queries                                     *socket-query*
+
+  `query::{kind}`                              *socket-query-cwd*
+
+      Request information from the shell.
+
+  `query::cwd`
+
+      Returns the current working directory.
+
+  `query::var::{name}`                         *socket-query-var*
+
+      Returns the value of a shell variable.
+
+          `query::var::PATH`
+          `query::var::SHED_VI_MODE`
+
+  `query::status`                              *socket-query-status*
+
+      Returns information about the last command. By default returns
+      all fields separated by spaces. Specific fields can be
+      requested:
+
+          `query::status`                  all fields
+          `query::status::code`            exit code only
+          `query::status::command`         command name
+          `query::status::runtime`         wall time in milliseconds
+          `query::status::pid`             process ID
+          `query::status::pgid`            process group ID
+
+      Multiple fields can be requested:
+
+          `query::status::code::runtime`
+
+==============================================================================
+6. Line Editor                                 *socket-line*
+
+  The `line` namespace provides read/write access to the line editor
+  state. This enables external programs to inspect and manipulate
+  the command line asynchronously.
+
+  6.1 Reading                                  *socket-line-get*
+
+  `line::get::{field}`
+
+      Returns the current value of a line editor field.
+
+      `line::get::buffer`                      *socket-line-buffer*
+
+          The current buffer contents.
+
+      `line::get::cursor`                      *socket-line-cursor*
+
+          The cursor position as a flat index.
+
+      `line::get::hint`                        *socket-line-hint*
+
+          The current hint/autosuggestion text, if any.
+
+      `line::get::mode`                        *socket-line-mode*
+
+          The current edit mode (e.g. `insert`, `normal`).
+
+      `line::get::anchor`                      *socket-line-anchor*
+
+          The visual selection anchor position, if a selection
+          is active.
+
+  6.2 Writing                                  *socket-line-set*
+
+  `line::set::{field}::{value}`
+
+      Set a line editor field to a new value.
+
+      `line::set::buffer::{text}`
+
+          Replace the buffer contents. The cursor moves to the end.
+
+      `line::set::cursor::{pos}`
+
+          Set the cursor position. Accepts a flat index or `row:col`
+          format. If the position falls within the hint text, the
+          hint is partially accepted up to that point.
+
+              `line::set::cursor::5`
+              `line::set::cursor::0:5`
+
+      `line::set::hint::{text}`
+
+          Set an override hint. Override hints take priority over
+          history-based hints. If the buffer is a prefix of the
+          hint text, the prefix is stripped for display. The
+          override persists until the buffer diverges from it.
+
+      `line::set::mode::{mode}`
+
+          Switch the edit mode.
+
+              `line::set::mode::insert`
+              `line::set::mode::normal`
+              `line::set::mode::emacs`
+
+      `line::set::anchor::{pos}`
+
+          Set the visual selection anchor, if any. Accepts a flat index
+          or `row:col` format. Note that this doesn't make the editor
+					enter visual mode if it's not already in it.
+
+              `line::set::anchor::3`
+              `line::set::anchor::0:3`
+
+==============================================================================
+7. Subscriptions                               *socket-subscribe*
+
+  `subscribe`                                  *socket-subscribe-cmd*
+
+      Opens a persistent connection to the shell's event stream.
+      The shell pushes events to all subscribers as they occur.
+      The connection stays open until the client disconnects or
+      the shell exits.
+
+      Events are delivered as lines in the format:
+
+          `{namespace}>>{event}>>{data}`
+
+      Example event stream:
+
+          `autocmd_event>> pre-cmd`
+          `autocmd_event>> post-cmd`
+          `line>>buffer>> echo foo`
+          `line>>cursor>> 8`
+
+==============================================================================
+8. Other Requests                              *socket-other*
+
+  `redraw`                                     *socket-redraw*
+
+      Triggers a full prompt redraw. Equivalent to sending
+      SIGUSR1 to the shell.
+
+==============================================================================
+9. Async Patterns                              *socket-async*
+
+  The socket enables asynchronous prompt and line editor workflows.
+  Because the shell's main loop multiplexes stdin and the socket
+  via poll(2), socket messages are processed without blocking
+  input.
+
+  9.1 Async Prompt Segments                    *socket-async-prompt*
+
+      Slow operations (e.g. git status on large repos) can be
+      dispatched to background threads or processes, which post
+      results back via the socket when ready:
+
+          `autocmd post-change-dir '{`
+          `  {`
+          `    git_branch=$(git branch --show-current 2>/dev/null)`
+          `    printf "msg::status::%s" "$git_branch" \`
+          `      | socat - UNIX-CONNECT:$SHED_SOCK`
+          `  } &`
+          `}'`
+
+      The prompt renders immediately; the git info appears when
+      the background job finishes.
+
+  9.2 External Autosuggestions                  *socket-async-hint*
+
+      An external process can provide autosuggestions by writing
+      to the hint field:
+
+          `line::set::hint::git commit --amend`
+
+      Override hints persist as long as the buffer remains a
+      prefix of the hint text. They take priority over
+      history-based suggestions.
+
+  9.3 Editor Plugins                           *socket-async-editor*
+
+      Background processes can read and modify the line editor
+      in real time. For example, a linting daemon could watch
+      the buffer and post suggestions:
+
+          `shedsock line::get::buffer`
+          `shedsock msg::status::did you mean: git stash?`
