@@ -682,6 +682,13 @@ impl Hint {
   pub fn raw(&self) -> String {
 		join_lines(self.lines())
   }
+	pub fn take_lines(&mut self) -> Vec<Line> {
+		match self {
+			Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => {
+				std::mem::take(lines)
+			}
+		}
+	}
 }
 
 impl Display for Hint {
@@ -999,7 +1006,7 @@ impl LineBuf {
   }
   pub fn set_cursor(&mut self, mut pos: Pos) {
     pos.clamp_row(&self.lines);
-    pos.clamp_col(&self.lines[pos.row].0, false);
+    pos.clamp_col(&self.lines[pos.row].0, self.cursor.exclusive);
     self.cursor.pos = pos;
   }
   fn set_row(&mut self, row: usize) {
@@ -1061,7 +1068,7 @@ impl LineBuf {
       v.set_var("BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
       v.set_var("CURSOR", VarKind::Str(cursor.to_string()), VarFlags::EXPORT)?;
       if let Some(anchor) = anchor {
-				v.set_var("ANCHOR", VarKind::Str(anchor.to_string()), VarFlags::EXPORT);
+				v.set_var("ANCHOR", VarKind::Str(anchor.to_string()), VarFlags::EXPORT)?;
 			}
 			Ok(())
     })?;
@@ -1115,13 +1122,7 @@ impl LineBuf {
 		&& anchor != cursor_raw
 		&& self.select_mode.is_some()
     {
-      let new_pos = self.pos_from_flat(anchor);
-      match self.select_mode.as_mut() {
-        Some(SelectMode::Line(pos))
-        | Some(SelectMode::Block(pos))
-        | Some(SelectMode::Char(pos)) => *pos = new_pos,
-        None => unreachable!(),
-      }
+			self.set_anchor_from_flat(anchor);
     }
     if !keys.is_empty() {
       write_meta(|m| m.set_pending_widget_keys(&keys))
@@ -1650,7 +1651,7 @@ impl LineBuf {
   fn end_pos(&self) -> Pos {
     let mut pos = Pos::MAX;
     pos.clamp_row(&self.lines);
-    pos.clamp_col(&self.lines[pos.row].0, false);
+    pos.clamp_col(&self.lines[pos.row].0, self.cursor.exclusive);
     pos
   }
   fn dispatch_text_obj(&mut self, count: u16, obj: TextObj) -> Option<MotionKind> {
@@ -2175,6 +2176,94 @@ impl LineBuf {
       }
     }
   }
+	/// Perform an operation that incrementally accepts the hint if the cursor moves into it
+	///
+	/// Works by taking the lines out of self.hint directly and appending them to the buffer, then calling the provided function, and then checking if the cursor moved into the hint.
+	/// If it did, we split the hint lines at the new cursor position and put the remaining lines back into self.hint. If it didn't, we put all the hint lines back into self.hint.
+	pub fn with_hint<F,T>(&mut self, f: F) -> T
+	where F: FnOnce(&mut Self) -> T {
+		let mut hint = self.hint.take();
+
+		let old_end_pos = self.end_pos().col_add(1);
+		if let Some(h) = hint.as_mut() {
+			let mut hint_lines = h.take_lines();
+			attach_lines(&mut self.lines, &mut hint_lines);
+		}
+		let old_cursor_pos = self.cursor.pos;
+
+		let result = f(self);
+
+		let new_cursor_pos = self.cursor.pos;
+
+		if let Some(mut hint) = hint {
+			let split_pos =
+			if new_cursor_pos > old_cursor_pos
+			&& new_cursor_pos >= old_end_pos {
+				// our cursor moved into the hint.
+				new_cursor_pos.col_add(1)
+			} else {
+				old_end_pos
+			};
+
+			let hint_lines = split_lines_at(&mut self.lines, split_pos);
+			if !hint_lines.is_empty() {
+				hint.set_lines(hint_lines);
+				self.hint = Some(hint);
+			}
+		}
+
+		result
+	}
+	fn display_col_to_index(&self, row: usize, target: usize) -> usize {
+		let tab_width = read_shopts(|o| o.line.tab_width);
+		let line = self.line(row);
+		let mut col = 0;
+		for (i, gr) in line.0.iter().enumerate() {
+			if col >= target {
+				return i;
+			}
+			let Some(ch) = gr.as_char() else {
+				col += gr.width();
+				continue
+			};
+
+			match ch {
+				'\t' => {
+					col += tab_width - (col % tab_width);
+				}
+				c => {
+					col += c.width().unwrap_or(0);
+				}
+			}
+		}
+
+		line.0.len()
+	}
+	fn calc_display_col_for(&self, pos: Pos) -> usize {
+		let tab_width = read_shopts(|o| o.line.tab_width);
+		let line = self.line(pos.row);
+		let mut col = 0;
+		for gr in &line.0[..pos.col] {
+			let Some(ch) = gr.as_char() else {
+				col += gr.width();
+				continue
+			};
+
+			match ch {
+				'\t' => {
+					col += tab_width - (col % tab_width);
+				}
+				c => {
+					col += c.width().unwrap_or(0);
+				}
+			}
+		}
+
+		col
+	}
+	fn calc_cursor_display_col(&self) -> usize {
+		self.calc_display_col_for(self.cursor.pos)
+	}
   /// Wrapper for eval_motion_inner that calls it with `check_hint: false`
   fn eval_motion(&mut self, cmd: &EditCmd) -> ShResult<Option<MotionKind>> {
     self.eval_motion_inner(cmd, false)
@@ -2184,311 +2273,313 @@ impl LineBuf {
     let Some(MotionCmd(count, motion)) = motion.as_ref() else {
       return Ok(None);
     };
-    let buffer = self.lines.clone();
-    if let Some(hint) = self.hint.as_ref() {
-			let mut hint_lines = hint.lines().to_vec();
-      attach_lines(&mut self.lines, &mut hint_lines);
-    }
 
-    let kind = match motion {
-      Motion::WholeLine => {
-        let start = self.row();
-        let end = (self.row() + (count.saturating_sub(1))).min(self.lines.len().saturating_sub(1));
-        Some(MotionKind::Line {
-          start,
-          end,
-          inclusive: true,
-        })
-      }
-      Motion::TextObj(text_obj) => self.dispatch_text_obj(*count as u16, text_obj.clone()),
-      Motion::EndOfLastWord => {
-        let row = self.row() + (count.saturating_sub(1));
-        let line = self.line_mut(row);
-        let mut target = Pos { row, col: 0 };
-        for (i, gr) in line.0.iter().enumerate() {
-          if !gr.is_ws() {
-            target.col = i;
-          }
-        }
+		let eval = |this: &mut Self| -> ShResult<Option<MotionKind>> {
+			let kind = match motion {
+				Motion::WholeLine => {
+					let start = this.row();
+					let end = (this.row() + (count.saturating_sub(1))).min(this.lines.len().saturating_sub(1));
+					Some(MotionKind::Line {
+						start,
+						end,
+						inclusive: true,
+					})
+				}
+				Motion::TextObj(text_obj) => this.dispatch_text_obj(*count as u16, text_obj.clone()),
+				Motion::EndOfLastWord => {
+					let row = this.row() + (count.saturating_sub(1));
+					let line = this.line_mut(row);
+					let mut target = Pos { row, col: 0 };
+					for (i, gr) in line.0.iter().enumerate() {
+						if !gr.is_ws() {
+							target.col = i;
+						}
+					}
 
-        (target != self.cursor.pos).then_some(MotionKind::Char {
-          start: self.cursor.pos,
-          end: target,
-          inclusive: true,
-        })
-      }
-      Motion::StartOfFirstWord => {
-        let mut target = Pos {
-          row: self.row(),
-          col: 0,
-        };
-        let line = self.cur_line();
-        for (i, gr) in line.0.iter().enumerate() {
-          target.col = i;
-          if !gr.is_ws() {
-            break;
-          }
-        }
+					(target != this.cursor.pos).then_some(MotionKind::Char {
+						start: this.cursor.pos,
+						end: target,
+						inclusive: true,
+					})
+				}
+				Motion::StartOfFirstWord => {
+					let mut target = Pos {
+						row: this.row(),
+						col: 0,
+					};
+					let line = this.cur_line();
+					for (i, gr) in line.0.iter().enumerate() {
+						target.col = i;
+						if !gr.is_ws() {
+							break;
+						}
+					}
 
-        (target != self.cursor.pos).then_some(MotionKind::Char {
-          start: self.cursor.pos,
-          end: target,
-          inclusive: true,
-        })
-      }
-      dir @ (Motion::StartOfLine | Motion::EndOfLine) => {
-        let (inclusive, off) = match dir {
-          Motion::StartOfLine => (false, isize::MIN),
-          Motion::EndOfLine => (true, isize::MAX),
-          _ => unreachable!(),
-        };
-        let target = self.offset_cursor(0, off);
-        (target != self.cursor.pos).then_some(MotionKind::Char {
-          start: self.cursor.pos,
-          end: target,
-          inclusive,
-        })
-      }
-      Motion::WordMotion(to, word, dir) => {
-        // 'cw' is a weird case
-        // if you are on the word's left boundary, it will not delete whitespace after
-        // the end of the word
-        let ignore_trailing_ws = matches!(verb, Some(VerbCmd(_, Verb::Change)),)
-          && matches!(
-            motion,
-            Motion::WordMotion(To::Start, _, Direction::Forward,)
-          );
-        let inclusive = verb.is_none();
+					(target != this.cursor.pos).then_some(MotionKind::Char {
+						start: this.cursor.pos,
+						end: target,
+						inclusive: true,
+					})
+				}
+				dir @ (Motion::StartOfLine | Motion::EndOfLine) => {
+					let (inclusive, off) = match dir {
+						Motion::StartOfLine => (false, isize::MIN),
+						Motion::EndOfLine => (true, isize::MAX),
+						_ => unreachable!(),
+					};
+					let target = this.offset_cursor(0, off);
+					(target != this.cursor.pos).then_some(MotionKind::Char {
+						start: this.cursor.pos,
+						end: target,
+						inclusive,
+					})
+				}
+				Motion::WordMotion(to, word, dir) => {
+					// 'cw' is a weird case
+					// if you are on the word's left boundary, it will not delete whitespace after
+					// the end of the word
+					let ignore_trailing_ws = matches!(verb, Some(VerbCmd(_, Verb::Change)),)
+						&& matches!(
+							motion,
+							Motion::WordMotion(To::Start, _, Direction::Forward,)
+						);
+					let inclusive = verb.is_none();
 
-        self.eval_word_motion(*count, to, word, dir, ignore_trailing_ws, inclusive)
-      }
-      Motion::CharSearch(dir, dest, char) => {
-        let off = self.search_char(dir, dest, char);
-        let target = self.offset_cursor(0, off);
-        (target != self.cursor.pos).then_some(MotionKind::Char {
-          start: self.cursor.pos,
-          end: target,
-          inclusive: true,
-        })
-      }
-      dir @ (Motion::BackwardChar | Motion::ForwardChar)
-      | dir @ (Motion::BackwardCharForced | Motion::ForwardCharForced) => {
-        let (off, wrap) = match dir {
-          Motion::BackwardChar => (-(*count as isize), false),
-          Motion::ForwardChar => (*count as isize, false),
-          Motion::BackwardCharForced => (-(*count as isize), true),
-          Motion::ForwardCharForced => (*count as isize, true),
-          _ => unreachable!(),
-        };
-        let target = if wrap {
-          self.offset_cursor_wrapping(0, off)
-        } else {
-          self.offset_cursor(0, off)
-        };
+					this.eval_word_motion(*count, to, word, dir, ignore_trailing_ws, inclusive)
+				}
+				Motion::CharSearch(dir, dest, char) => {
+					let off = this.search_char(dir, dest, char);
+					let target = this.offset_cursor(0, off);
+					(target != this.cursor.pos).then_some(MotionKind::Char {
+						start: this.cursor.pos,
+						end: target,
+						inclusive: true,
+					})
+				}
+				dir @ (Motion::BackwardChar | Motion::ForwardChar)
+					| dir @ (Motion::BackwardCharForced | Motion::ForwardCharForced) => {
+						let (off, wrap) = match dir {
+							Motion::BackwardChar => (-(*count as isize), false),
+							Motion::ForwardChar => (*count as isize, false),
+							Motion::BackwardCharForced => (-(*count as isize), true),
+							Motion::ForwardCharForced => (*count as isize, true),
+							_ => unreachable!(),
+						};
+						let target = if wrap {
+							this.offset_cursor_wrapping(0, off)
+						} else {
+							this.offset_cursor(0, off)
+						};
 
-        (target != self.cursor.pos).then_some(MotionKind::Char {
-          start: self.cursor.pos,
-          end: target,
-          inclusive: false,
-        })
-      }
-      dir @ (Motion::LineDown | Motion::LineUp) => {
-        let off = match dir {
-          Motion::LineUp => -(*count as isize),
-          Motion::LineDown => *count as isize,
-          _ => unreachable!(),
-        };
-        if verb.is_some() {
-          let row = self.row();
-          let target_row = self.offset_row(off);
-          let (s, e) = ordered(row, target_row);
-          Some(MotionKind::Line {
-            start: s,
-            end: e,
-            inclusive: true,
-          })
-        } else {
-          if self.saved_col.is_none() {
-            self.saved_col = Some(self.cursor.pos.col);
-          }
-          let row = self.offset_row(off);
-          let limit = if self.cursor.exclusive {
-            self.lines[row].len().saturating_sub(1)
-          } else {
-            self.lines[row].len()
-          };
-          let col = self.saved_col.unwrap().min(limit);
-          let target = Pos { row, col };
-          (target != self.cursor.pos).then_some(MotionKind::Char {
-            start: self.cursor.pos,
-            end: target,
-            inclusive: true,
-          })
-        }
-      }
-      dir @ (Motion::EndOfBuffer | Motion::StartOfBuffer) => {
-        let off = match dir {
-          Motion::StartOfBuffer => isize::MIN,
-          Motion::EndOfBuffer => isize::MAX,
-          _ => unreachable!(),
-        };
-        if verb.is_some() {
-          let row = self.row();
-          let target_row = self.offset_row(off);
-          let (s, e) = ordered(row, target_row);
-          Some(MotionKind::Line {
-            start: s,
-            end: e,
-            inclusive: false,
-          })
-        } else {
-          let target = self.offset_cursor(off, 0);
-          (target != self.cursor.pos).then_some(MotionKind::Char {
-            start: self.cursor.pos,
-            end: target,
-            inclusive: true,
-          })
-        }
-      }
-      Motion::WholeBuffer => Some(MotionKind::Line {
-        start: 0,
-        end: self.lines.len().saturating_sub(1),
-        inclusive: false,
-      }),
-      Motion::ToColumn => {
-        let row = self.row();
-        let end = Pos {
-          row,
-          col: count.saturating_sub(1),
-        };
-        Some(MotionKind::Char {
-          start: self.cursor.pos,
-          end,
-          inclusive: end > self.cursor.pos,
-        })
-      }
+						(target != this.cursor.pos).then_some(MotionKind::Char {
+							start: this.cursor.pos,
+							end: target,
+							inclusive: false,
+						})
+					}
+				dir @ (Motion::LineDown | Motion::LineUp) => {
+					let off = match dir {
+						Motion::LineUp => -(*count as isize),
+						Motion::LineDown => *count as isize,
+						_ => unreachable!(),
+					};
+					if verb.is_some() {
+						let row = this.row();
+						let target_row = this.offset_row(off);
+						let (s, e) = ordered(row, target_row);
+						Some(MotionKind::Line {
+							start: s,
+							end: e,
+							inclusive: true,
+						})
+					} else {
+						if this.saved_col.is_none() {
+							this.saved_col = Some(this.calc_cursor_display_col());
+						}
+						let row = this.offset_row(off);
+						let limit = if this.cursor.exclusive {
+							this.lines[row].len().saturating_sub(1)
+						} else {
+							this.lines[row].len()
+						};
+						let target_col = this.saved_col.unwrap();
+						let col = this.display_col_to_index(row, target_col).min(limit);
+						let target = Pos { row, col };
+						(target != this.cursor.pos).then_some(MotionKind::Char {
+							start: this.cursor.pos,
+							end: target,
+							inclusive: true,
+						})
+					}
+				}
+				dir @ (Motion::EndOfBuffer | Motion::StartOfBuffer) => {
+					let off = match dir {
+						Motion::StartOfBuffer => isize::MIN,
+						Motion::EndOfBuffer => isize::MAX,
+						_ => unreachable!(),
+					};
+					if verb.is_some() {
+						let row = this.row();
+						let target_row = this.offset_row(off);
+						let (s, e) = ordered(row, target_row);
+						Some(MotionKind::Line {
+							start: s,
+							end: e,
+							inclusive: false,
+						})
+					} else {
+						let target = this.offset_cursor(off, 0);
+						(target != this.cursor.pos).then_some(MotionKind::Char {
+							start: this.cursor.pos,
+							end: target,
+							inclusive: true,
+						})
+					}
+				}
+				Motion::WholeBuffer => Some(MotionKind::Line {
+					start: 0,
+					end: this.lines.len().saturating_sub(1),
+					inclusive: false,
+				}),
+				Motion::ToColumn => {
+					let row = this.row();
+					let end = Pos {
+						row,
+						col: count.saturating_sub(1),
+					};
+					Some(MotionKind::Char {
+						start: this.cursor.pos,
+						end,
+						inclusive: end > this.cursor.pos,
+					})
+				}
 
-      Motion::ToDelimMatch => self.find_delim_match(),
-      Motion::ToBracket(direction) | Motion::ToParen(direction) | Motion::ToBrace(direction) => {
-        let (opener, closer) = match motion {
-          Motion::ToBracket(_) => ('[', ']'),
-          Motion::ToParen(_) => ('(', ')'),
-          Motion::ToBrace(_) => ('{', '}'),
-          _ => unreachable!(),
-        };
-        match direction {
-          Direction::Forward => {
-            let mut depth = 0;
-            let Some(target_pos) = self.scan_forward(|g| {
-              if g.as_char() == Some(opener) {
-                depth += 1;
-              }
-              if g.as_char() == Some(closer) {
-                depth -= 1;
-                if depth <= 0 {
-                  return true;
-                }
-              }
-              false
-            }) else {
-              return Ok(None);
-            };
-            return Ok(Some(MotionKind::Char {
-              start: self.cursor.pos,
-              end: target_pos,
-              inclusive: true,
-            }));
-          }
-          Direction::Backward => {
-            let mut depth = 0;
-            let Some(target_pos) = self.scan_backward(|g| {
-              if g.as_char() == Some(closer) {
-                depth += 1;
-              }
-              if g.as_char() == Some(opener) {
-                depth -= 1;
-                if depth <= 0 {
-                  return true;
-                }
-              }
-              false
-            }) else {
-              return Ok(None);
-            };
-            return Ok(Some(MotionKind::Char {
-              start: self.cursor.pos,
-              end: target_pos,
-              inclusive: true,
-            }));
-          }
-        }
-      }
+				Motion::ToDelimMatch => this.find_delim_match(),
+				Motion::ToBracket(direction) | Motion::ToParen(direction) | Motion::ToBrace(direction) => {
+					let (opener, closer) = match motion {
+						Motion::ToBracket(_) => ('[', ']'),
+						Motion::ToParen(_) => ('(', ')'),
+						Motion::ToBrace(_) => ('{', '}'),
+						_ => unreachable!(),
+					};
+					match direction {
+						Direction::Forward => {
+							let mut depth = 0;
+							let Some(target_pos) = this.scan_forward(|g| {
+								if g.as_char() == Some(opener) {
+									depth += 1;
+								}
+								if g.as_char() == Some(closer) {
+									depth -= 1;
+									if depth <= 0 {
+										return true;
+									}
+								}
+								false
+							}) else {
+								return Ok(None);
+							};
+							return Ok(Some(MotionKind::Char {
+								start: this.cursor.pos,
+								end: target_pos,
+								inclusive: true,
+							}));
+						}
+						Direction::Backward => {
+							let mut depth = 0;
+							let Some(target_pos) = this.scan_backward(|g| {
+								if g.as_char() == Some(closer) {
+									depth += 1;
+								}
+								if g.as_char() == Some(opener) {
+									depth -= 1;
+									if depth <= 0 {
+										return true;
+									}
+								}
+								false
+							}) else {
+								return Ok(None);
+							};
+							return Ok(Some(MotionKind::Char {
+								start: this.cursor.pos,
+								end: target_pos,
+								inclusive: true,
+							}));
+						}
+					}
+				}
 
-      Motion::CharRange(s, e) => {
-        let (s, e) = ordered(*s, *e);
-        Some(MotionKind::Char {
-          start: s,
-          end: e,
-          inclusive: true,
-        })
-      }
-      Motion::Line(l) => {
-        let Some(l) = self.resolve_line_addr(l)? else {
-          return Ok(None);
-        };
-        Some(MotionKind::Line {
-          start: l,
-          end: l + 1,
-          inclusive: false,
-        })
-      }
-      Motion::LineRange(s, e) => {
-        let Some(s) = self.resolve_line_addr(s)? else {
-          return Ok(None);
-        };
-        let Some(e) = self.resolve_line_addr(e)? else {
-          return Ok(None);
-        };
-        let (s, e) = ordered(s, e);
-        Some(MotionKind::Line {
-          start: s,
-          end: e,
-          inclusive: true,
-        })
-      }
-      Motion::BlockRange(s, e) => {
-        let (s, e) = ordered(*s, *e);
-        Some(MotionKind::Block { start: s, end: e })
-      }
-      dir @ (Motion::HalfScreenUp | Motion::HalfScreenDown) => {
-        let off = match dir {
-          Motion::HalfScreenUp => -(self.get_viewport_height() as isize / 2),
-          Motion::HalfScreenDown => self.get_viewport_height() as isize / 2,
-          _ => unreachable!(),
-        };
-        let row = self.row();
-        let target_row = self.offset_row(off);
-        Some(MotionKind::Line {
-          start: target_row,
-          end: row,
-          inclusive: false,
-        })
-      }
-      Motion::RepeatMotion | Motion::RepeatMotionRev => {
-        unreachable!("Repeat motions should have been resolved in readline/mod.rs")
-      }
-      dir @ (Motion::Global(constraint, pat) | Motion::NotGlobal(constraint, pat)) => {
-        let lines =
-          self.get_matching_lines(constraint, pat, matches!(dir, Motion::Global(_, _)))?;
+				Motion::CharRange(s, e) => {
+					let (s, e) = ordered(*s, *e);
+					Some(MotionKind::Char {
+						start: s,
+						end: e,
+						inclusive: true,
+					})
+				}
+				Motion::Line(l) => {
+					let Some(l) = this.resolve_line_addr(l)? else {
+						return Ok(None);
+					};
+					Some(MotionKind::Line {
+						start: l,
+						end: l + 1,
+						inclusive: false,
+					})
+				}
+				Motion::LineRange(s, e) => {
+					let Some(s) = this.resolve_line_addr(s)? else {
+						return Ok(None);
+					};
+					let Some(e) = this.resolve_line_addr(e)? else {
+						return Ok(None);
+					};
+					let (s, e) = ordered(s, e);
+					Some(MotionKind::Line {
+						start: s,
+						end: e,
+						inclusive: true,
+					})
+				}
+				Motion::BlockRange(s, e) => {
+					let (s, e) = ordered(*s, *e);
+					Some(MotionKind::Block { start: s, end: e })
+				}
+				dir @ (Motion::HalfScreenUp | Motion::HalfScreenDown) => {
+					let off = match dir {
+						Motion::HalfScreenUp => -(this.get_viewport_height() as isize / 2),
+						Motion::HalfScreenDown => this.get_viewport_height() as isize / 2,
+						_ => unreachable!(),
+					};
+					let row = this.row();
+					let target_row = this.offset_row(off);
+					Some(MotionKind::Line {
+						start: target_row,
+						end: row,
+						inclusive: false,
+					})
+				}
+				Motion::RepeatMotion | Motion::RepeatMotionRev => {
+					unreachable!("Repeat motions should have been resolved in readline/mod.rs")
+				}
+				dir @ (Motion::Global(constraint, pat) | Motion::NotGlobal(constraint, pat)) => {
+					let lines =
+						this.get_matching_lines(constraint, pat, matches!(dir, Motion::Global(_, _)))?;
 
-        self.last_global = Some(cmd.clone());
-        Some(MotionKind::Lines { lines })
-      }
-      Motion::Null => None,
-    };
+					this.last_global = Some(cmd.clone());
+					Some(MotionKind::Lines { lines })
+				}
+				Motion::Null => None,
+			};
+			Ok(kind)
+		};
 
-    self.lines = buffer;
-    Ok(kind)
+		if check_hint {
+			self.with_hint(eval)
+		} else {
+			eval(self)
+		}
   }
   pub fn get_matching_lines(
     &self,
@@ -2563,26 +2654,30 @@ impl LineBuf {
     self.apply_motion_inner(motion, false)
   }
   fn apply_motion_inner(&mut self, motion: MotionKind, accept_hint: bool) -> ShResult<()> {
-    match motion {
-      MotionKind::Char { end, .. } => {
-        if accept_hint && self.has_hint() && end >= self.end_pos() {
-          self.accept_hint_to(end);
-        } else {
-          self.set_cursor(end);
-        }
-      }
-      MotionKind::Line { start, .. } => {
-        self.set_row(start);
-      }
-      MotionKind::Lines { lines } => {
-        let Some(line) = lines.first() else {
-          return Ok(());
-        };
-        self.set_row(*line);
-      }
-      MotionKind::Block { start, end } => unimplemented!(),
-    }
-    Ok(())
+		let apply = |this: &mut Self| -> ShResult<()> {
+			match motion {
+				MotionKind::Char { end, .. } => {
+					this.set_cursor(end);
+				}
+				MotionKind::Line { start, .. } => {
+					this.set_row(start);
+				}
+				MotionKind::Lines { lines } => {
+					let Some(line) = lines.first() else {
+						return Ok(());
+					};
+					this.set_row(*line);
+				}
+				MotionKind::Block { start, end } => unimplemented!(),
+			}
+			Ok(())
+		};
+
+		if accept_hint {
+			self.with_hint(apply)
+		} else {
+			apply(self)
+		}
   }
   fn extract_span(&mut self, span: (Pos, Pos), inclusive: bool) -> Vec<Line> {
     let (s, e) = ordered(span.0, span.1);
@@ -3765,11 +3860,18 @@ impl LineBuf {
     self.fix_cursor();
   }
 
+	pub fn clear_hint(&mut self) {
+		self.hint = None;
+	}
+
   pub fn set_hint(&mut self, hint: Option<Hint>) {
 		let Some(mut hint) = hint else {
-			self.hint = None;
+			if !matches!(&self.hint, Some(Hint::Override(_))) {
+				self.hint = None;
+			}
 			return;
 		};
+
 		if let Some(old_hint) = self.hint.as_ref()
 		&& *old_hint > hint {
 			// order comparisons on hints are priority checks
@@ -3786,10 +3888,7 @@ impl LineBuf {
 		// that works directly on two Vec<Line>'s
     let joined = self.joined();
 		let hint_joined = join_lines(hint.lines());
-		let Some(stripped) = hint_joined.strip_prefix(&joined).map(|s| s.to_string()) else {
-			self.hint = None;
-			return;
-		};
+		let stripped = hint_joined.strip_prefix(&joined).map(|s| s.to_string()).unwrap_or(hint_joined);
 		hint.set_lines(to_lines(&stripped));
 
     self.hint = (!stripped.is_empty()).then_some(hint);
@@ -3923,7 +4022,7 @@ impl LineBuf {
   }
 
   pub fn on_last_line(&self) -> bool {
-    self.cursor.pos.row == self.lines.len().saturating_sub(1)
+    self.cursor.pos.row == self.lines.len().saturating_sub(1) && self.hint.as_ref().is_none_or(|h| h.lines().len() <= 1)
   }
 
   pub fn slice(&self, range: std::ops::Range<usize>) -> Option<String> {
@@ -4061,6 +4160,18 @@ impl LineBuf {
     self.cursor.pos = self.pos_from_flat(flat);
     self.fix_cursor();
   }
+	pub fn set_anchor_from_flat(&mut self, flat: usize) {
+		let new_pos = self.pos_from_flat(flat);
+		self.set_anchor(new_pos);
+	}
+	pub fn set_anchor(&mut self, new_pos: Pos) {
+		match self.select_mode.as_mut() {
+			Some(SelectMode::Line(pos))
+			| Some(SelectMode::Block(pos))
+			| Some(SelectMode::Char(pos)) => *pos = new_pos,
+			None => unreachable!(),
+		}
+	}
 
   pub fn grapheme_positions(&self) -> Vec<(Pos, Grapheme)> {
     Self::enumerate_graphemes(&self.lines)

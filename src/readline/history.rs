@@ -639,12 +639,7 @@ impl History {
   }
 
   pub fn get_hint(&self) -> Option<Hint> {
-    if self.at_pending()
-      && self
-        .pending
-        .as_ref()
-        .is_some_and(|p| !p.joined().is_empty())
-    {
+    if self.at_pending() {
       let entry = self.hint_entry()?;
       Some(Hint::History(to_lines(entry.command())))
     } else {

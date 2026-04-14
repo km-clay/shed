@@ -13,8 +13,8 @@ use crate::{
   sherr,
   signal::{disable_reaping, enable_reaping},
   state::{
-    self, AutoCmdKind, CmdTimer, VarFlags, VarKind, read_logic, set_status, with_vars, write_jobs,
-    write_meta, write_vars,
+    self, AutoCmdKind, CmdTimer, read_logic, set_status, with_vars, write_jobs,
+    write_meta,
   },
 };
 

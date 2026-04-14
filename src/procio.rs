@@ -9,7 +9,6 @@ use crate::{
   libsh::{
     error::{ShErr, ShResult},
     sys::TTY_FILENO,
-    utils::RedirVecUtils,
   },
   parse::{Redir, RedirType, get_redir_file, lex::TkFlags},
   prelude::*,

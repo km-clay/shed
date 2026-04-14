@@ -533,7 +533,7 @@ impl ShedLine {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryClose));
         post_cmds.exec();
 
-        self.editor.set_hint(None);
+        self.editor.clear_hint();
         {
           let mut writer = std::mem::take(&mut self.writer);
           self.focused_history().fuzzy_finder.clear(&mut writer)?;
@@ -577,7 +577,9 @@ impl ShedLine {
           .history
           .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
         let hint = self.focused_history().get_hint();
-        self.editor.set_hint(hint);
+				if !self.editor.is_empty() {
+					self.editor.set_hint(hint);
+				}
         self.completer.clear(&mut self.writer)?;
         self.needs_redraw = true;
         self.completer.reset();
@@ -606,7 +608,9 @@ impl ShedLine {
         post_cmds.exec();
 
         let hint = self.focused_history().get_hint();
-        self.editor.set_hint(hint);
+				if !self.editor.is_empty() {
+					self.editor.set_hint(hint);
+				}
         self.completer.clear(&mut self.writer)?;
         write_vars(|v| {
           v.set_var(
@@ -780,7 +784,9 @@ impl ShedLine {
           .history
           .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
         let hint = self.focused_history().get_hint();
-        self.editor.set_hint(hint);
+				if !self.editor.is_empty() {
+					self.editor.set_hint(hint);
+				}
         write_vars(|v| {
           v.set_var(
             "SHED_VI_MODE",
@@ -823,7 +829,7 @@ impl ShedLine {
           .ok();
           self.prompt.refresh();
           self.needs_redraw = true;
-          self.editor.set_hint(None);
+          self.editor.clear_hint();
         } else {
           self.writer.send_bell().ok();
         }
@@ -848,7 +854,7 @@ impl ShedLine {
         self
           .history
           .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-        self.editor.set_hint(None);
+        self.editor.clear_hint();
       }
       None => {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
@@ -887,7 +893,7 @@ impl ShedLine {
           .ok();
           self.prompt.refresh();
           self.needs_redraw = true;
-          self.editor.set_hint(None);
+          self.editor.clear_hint();
         } else {
           self.writer.send_bell().ok();
         }
@@ -896,7 +902,7 @@ impl ShedLine {
   }
 
   fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
-    self.editor.set_hint(None);
+    self.editor.clear_hint();
     self.editor.set_cursor_from_flat(self.editor.cursor_max());
     self.print_line(true)?;
     if let Some(layout) = &self.old_layout {
@@ -1069,7 +1075,7 @@ impl ShedLine {
     if before != after {
       self
         .history
-        .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+        .constrain_entries(Some(&self.editor.joined()));
     } else if before == after && has_edit_verb {
       self.writer.send_bell().ok();
     } else if before_cursor == after_cursor && is_ctrl_d_motion {
@@ -1089,7 +1095,9 @@ impl ShedLine {
 
     let hint = self.focused_history().get_hint();
 
-    self.editor.set_hint(hint);
+		if !self.editor.is_empty() {
+			self.editor.set_hint(hint);
+		}
     self.needs_redraw = true;
     Ok(None)
   }
@@ -1179,8 +1187,10 @@ impl ShedLine {
   }
   pub fn scroll_history(&mut self, cmd: EditCmd) {
     let count = if cmd.motion().is_some() {
+			log::debug!("Motion for history scroll: {:?}", cmd.motion().unwrap().1);
       &cmd.motion().unwrap().0
     } else {
+			log::debug!("Verb for history scroll: {:?}", cmd.verb().unwrap().1);
       match cmd.verb() {
         Some(VerbCmd(c, _)) => c,
         _ => unreachable!(),
@@ -1200,7 +1210,16 @@ impl ShedLine {
       Motion::LineDown => *count as isize,
       _ => unreachable!(),
     };
+		log::debug!("Scrolling history by {} entries", count);
+		log::debug!("self.history.pending: {}", self.focused_history().pending.is_some());
     if self.focused_history().pending.is_none() {
+			if count >= 0 {
+				// if count >= 0, we are scrolling down
+				// but if we are here, it means we are already at the pending command,
+				// so return and bell
+				self.writer.send_bell().ok();
+				return;
+			}
       // We are scrolling up from a pending command
       // Let's refresh the search mask to make sure
       // our history is up to date
@@ -1219,7 +1238,7 @@ impl ShedLine {
       if self.focused_history().pending.is_none() {
         self.focused_history().pending = Some(editor);
       }
-      self.focused_editor().set_hint(None);
+      self.focused_editor().clear_hint();
       self.focused_editor().move_cursor_to_end();
     } else if let Some(pending) = self.focused_history().pending.take() {
       *self.focused_editor() = pending;

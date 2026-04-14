@@ -226,7 +226,7 @@ pub fn set_status_from_bool(code: bool) {
   super::STATUS_CODE.store(if code { 0 } else { 1 }, Ordering::Relaxed);
 }
 pub fn set_pipe_status(stats: &[WtStat]) -> ShResult<()> {
-  if let Some(pipe_status) = Job::pipe_status(&stats) {
+  if let Some(pipe_status) = Job::pipe_status(stats) {
     let pipe_status = pipe_status
       .into_iter()
       .map(|s| s.to_string())

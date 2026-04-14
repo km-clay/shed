@@ -54,6 +54,18 @@ pub enum SocketRequest {
 
   /// Requests the shell to redraw the prompt. The shell will respond by redrawing the prompt, and sending a SocketResponse confirming the redraw.
   RefreshPrompt,
+
+	LineGet(LineHeader),
+	LineSet(LineHeader,String),
+}
+
+#[derive(Debug)]
+pub enum LineHeader {
+	Buffer,
+	Cursor,
+	Hint,
+	Mode,
+	Anchor
 }
 
 impl FromStr for SocketRequest {
@@ -166,6 +178,44 @@ impl FromStr for SocketRequest {
           )),
         }
       }
+
+			"line" => {
+				let Some(header) = args.next() else {
+					return Err(sherr!(ParseErr, "Missing line header in 'line' request",));
+				};
+				match header {
+					"get" => {
+						let Some(header2) = args.next() else {
+							return Err(sherr!(ParseErr, "Missing line header kind in 'line get' request",));
+						};
+						match header2 {
+							"buffer" => Ok(Self::LineGet(LineHeader::Buffer)),
+							"cursor" => Ok(Self::LineGet(LineHeader::Cursor)),
+							"hint" => Ok(Self::LineGet(LineHeader::Hint)),
+							"mode" => Ok(Self::LineGet(LineHeader::Mode)),
+							"anchor" => Ok(Self::LineGet(LineHeader::Anchor)),
+							_ => Err(sherr!(ParseErr, "Unknown line header kind in 'line get' request: {header2}")),
+						}
+					}
+					"set" => {
+						let Some(header2) = args.next() else {
+							return Err(sherr!(ParseErr, "Missing line header kind in 'line set' request",));
+						};
+						let Some(value) = args.next() else {
+							return Err(sherr!(ParseErr, "Missing value in 'line set' request",));
+						};
+						match header2 {
+							"buffer" => Ok(Self::LineSet(LineHeader::Buffer, value.to_string())),
+							"cursor" => Ok(Self::LineSet(LineHeader::Cursor, value.to_string())),
+							"hint" => Ok(Self::LineSet(LineHeader::Hint, value.to_string())),
+							"mode" => Ok(Self::LineSet(LineHeader::Mode, value.to_string())),
+							"anchor" => Ok(Self::LineSet(LineHeader::Anchor, value.to_string())),
+							_ => Err(sherr!(ParseErr, "Unknown line header kind in 'line set' request: {header2}")),
+						}
+					}
+					_ => Err(sherr!(ParseErr, "Unknown line request kind in 'line' request: {header}")),
+				}
+			}
       _ => Err(sherr!(
         ParseErr,
         "Unknown socket request kind: {}",
@@ -841,134 +891,60 @@ impl MetaTab {
   pub fn get_socket(&self) -> Option<Arc<ShedSocket>> {
     self.socket.as_ref().cloned()
   }
-	pub fn get_socket_pollfd(&self) -> Option<PollFd> {
+	pub fn get_socket_pollfd(&self) -> Option<PollFd<'_>> {
 		self.socket.as_ref().map(|sock| PollFd::new(
 			borrow_fd(sock.as_raw_fd()),
 			nix::poll::PollFlags::POLLIN,
 		))
 	}
-  pub fn read_socket(&mut self) -> ShResult<()> {
-    if let Some(sock) = &self.socket
-      && let Ok((conn, _)) = sock.listener().accept()
-    {
-      conn.set_nonblocking(false).ok();
-      let mut bytes = vec![];
-      loop {
-        let mut buffer = [0u8; 1024];
-        match read(conn.as_raw_fd(), &mut buffer) {
-          Ok(0) => break,
-          Ok(n) => {
-            if let Some(pos) = buffer[..n].iter().position(|&b| b == b'\n') {
-              bytes.extend_from_slice(&buffer[..pos]);
-              break;
-            }
-            bytes.extend_from_slice(&buffer[..n]);
-          }
-          Err(Errno::EINTR) => continue,
-          Err(e) => {
-            eprintln!("error reading from message socket: {e}");
-            break;
-          }
-        }
-      }
-      let input = String::from_utf8_lossy(&bytes).to_string();
-      let request = match SocketRequest::from_str(&input) {
-        Ok(req) => req,
-        Err(e) => {
-          write(&conn, format!("error parsing request: {e}\n").as_bytes()).ok();
-          return Ok(());
-        }
-      };
+	pub fn read_socket(&mut self) -> ShResult<Vec<(UnixStream, SocketRequest)>> {
+		let mut requests = vec![];
+		let Some(listener) = self.get_socket() else {
+			return Ok(requests);
+		};
 
-      self.handle_socket_request(conn, request)?;
-    }
+		while let Ok((conn,_)) = listener.listener().accept()
+		&& let Some(req) = self.read_request(&conn) {
+			requests.push((conn,req));
+		}
 
-    Ok(())
-  }
-  pub fn handle_socket_request(
-    &mut self,
-    conn: UnixStream,
-    request: SocketRequest,
-  ) -> ShResult<()> {
-    match request {
-      SocketRequest::PostSystemMessage(msg) => {
-        self.post_system_message(msg);
-        write(&conn, b"ok\n").ok();
-      }
-      SocketRequest::PostStatusMessage(msg) => {
-        self.post_status_message(msg);
-        write(&conn, b"ok\n").ok();
-      }
-      SocketRequest::Subscribe => {
-        let conn = Arc::new(conn);
-        self.subscribers.push(conn.clone());
-      }
-      SocketRequest::Query(query_header) => match query_header {
-        QueryHeader::Cwd => {
-          let cwd = env::current_dir()?.to_string_lossy().to_string();
-          write(&conn, cwd.as_bytes()).ok();
-          write(&conn, b"\n").ok();
-        }
-        QueryHeader::Var(var) => {
-          let var = read_vars(|v| v.get_var(&var));
-          write(&conn, var.as_bytes()).ok();
-          write(&conn, b"\n").ok();
-        }
-        QueryHeader::Status(headers) => {
-          let mut responses = vec![];
-          for header in headers {
-            match header {
-              StatusHeader::ExitCode => responses.push(get_status().to_string()),
-              StatusHeader::CommandName => {
-                if let Some(job) = self.last_job()
-                  && let Some(cmd) = job.name()
-                {
-                  responses.push(cmd.to_string());
-                } else {
-                  responses.push("".to_string());
-                }
-              }
-              StatusHeader::Runtime => {
-                let Some(dur) = self.get_time() else {
-                  responses.push("".to_string());
-                  continue;
-                };
-                responses.push(format!("{}", dur.as_millis()));
-              }
-              StatusHeader::Pid => {
-                let Some(job) = self.last_job() else {
-                  responses.push("".to_string());
-                  continue;
-                };
-                responses.push(
-                  job
-                    .get_pids()
-                    .first()
-                    .map(|p| p.to_string())
-                    .unwrap_or_default(),
-                );
-              }
-              StatusHeader::Pgid => {
-                let Some(job) = self.last_job() else {
-                  responses.push("".to_string());
-                  continue;
-                };
-                responses.push(job.pgid().to_string());
-              }
-            }
-          }
-          let output = responses.join(" ");
-          write(&conn, output.as_bytes()).ok();
-          write(&conn, b"\n").ok();
-        }
-      },
-      SocketRequest::RefreshPrompt => {
-        kill(Pid::this(), Signal::SIGUSR1)?;
-        write(&conn, b"ok\n").ok();
-      }
-    }
-    Ok(())
-  }
+		Ok(requests)
+	}
+	pub fn read_request(&self, conn: &UnixStream) -> Option<SocketRequest> {
+		conn.set_nonblocking(false).ok();
+		let mut bytes = vec![];
+		loop {
+			let mut buffer = [0u8; 1024];
+			match read(conn.as_raw_fd(), &mut buffer) {
+				Ok(0) => break,
+				Ok(n) => {
+					if let Some(pos) = buffer[..n].iter().position(|&b| b == b'\n') {
+						bytes.extend_from_slice(&buffer[..pos]);
+						break;
+					}
+					bytes.extend_from_slice(&buffer[..n]);
+				}
+				Err(Errno::EINTR) => continue,
+				Err(e) => {
+					write(conn, format!("error>> failed to parse request: {e}\n").as_bytes()).ok();
+					break;
+				}
+			}
+		}
+		let input = String::from_utf8_lossy(&bytes).to_string();
+		let request = match SocketRequest::from_str(&input) {
+			Ok(req) => req,
+			Err(e) => {
+				write(conn, format!("error>> failed to parse request: {e}\n").as_bytes()).ok();
+				return None
+			}
+		};
+
+		Some(request)
+	}
+	pub fn push_subscriber(&mut self, subscriber: UnixStream) {
+		self.subscribers.push(Arc::new(subscriber));
+	}
   pub fn notify_autocmd(&self, kind: AutoCmdKind) -> ShResult<()> {
     for subscriber in &self.subscribers {
       write(subscriber, format!("autocmd_event>> {kind}\n").as_bytes()).ok();

@@ -46,10 +46,10 @@ use crate::{
   expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
   libsh::{
-    error::{ShErrKind, ShResult, ShResultExt, next_color}, guards::{scope_guard, var_ctx_guard}, strops::split_case_pat, sys::TTY_FILENO, utils::RedirVecUtils
+    error::{ShErrKind, ShResult, ShResultExt, next_color}, guards::{scope_guard, var_ctx_guard}, strops::split_case_pat, utils::RedirVecUtils
   },
   prelude::*,
-  procio::{IoMode, IoStack, PipeGenerator, borrow_fd},
+  procio::{IoStack, PipeGenerator, borrow_fd},
   sherr,
   shopt::xtrace_print,
   signal::{check_signals, signals_pending},
@@ -61,7 +61,7 @@ use crate::{
 
 use super::{
   AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node,
-  ParsedSrc, Redir, RedirType,
+  ParsedSrc, Redir,
   lex::{KEYWORDS, Span, Tk, TkFlags},
 };
 

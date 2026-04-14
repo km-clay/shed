@@ -1,11 +1,13 @@
-use std::fmt::Display;
+use std::fmt::{self, Display};
+use std::str::FromStr;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::libsh::error::ShResult;
+use crate::libsh::error::{ShErr, ShResult};
 use crate::readline::editcmd::{
   CmdFlags, Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word,
 };
+use crate::readline::editmode::emacs::Emacs;
 use crate::readline::history::History;
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::LineBuf;
@@ -38,20 +40,52 @@ pub enum ModeReport {
   Unknown,
 }
 
-impl Display for ModeReport {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      ModeReport::Insert => write!(f, "INSERT"),
-      ModeReport::Normal => write!(f, "NORMAL"),
-      ModeReport::Ex => write!(f, "COMMAND"),
-      ModeReport::Visual => write!(f, "VISUAL"),
-      ModeReport::Replace => write!(f, "REPLACE"),
-      ModeReport::Verbatim => write!(f, "VERBATIM"),
-      ModeReport::Emacs => write!(f, "EMACS"),
-      ModeReport::Unknown => write!(f, "UNKNOWN"),
-    }
-  }
+impl ModeReport {
+	pub fn as_edit_mode(&self) -> Box<dyn EditMode> {
+		match self {
+			ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn EditMode>,
+			ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn EditMode>,
+			ModeReport::Ex => Box::new(ViEx::default()) as Box<dyn EditMode>,
+			ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn EditMode>,
+			ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn EditMode>,
+			ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn EditMode>,
+			ModeReport::Emacs => Box::new(Emacs::new()) as Box<dyn EditMode>,
+			ModeReport::Unknown => unimplemented!(),
+		}
+	}
 }
+
+impl Display for ModeReport {
+	fn fmt(&self,f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Insert => write!(f,"INSERT"),
+			Self::Normal => write!(f,"NORMAL"),
+			Self::Ex => write!(f,"COMMAND"),
+			Self::Visual => write!(f,"VISUAL"),
+			Self::Replace => write!(f,"REPLACE"),
+			Self::Verbatim => write!(f,"VERBATIM"),
+			Self::Emacs => write!(f,"EMACS"),
+			Self::Unknown => write!(f,"UNKNOWN"),
+		}
+	}
+}
+impl FromStr for ModeReport {
+	type Err = ShErr;
+	fn from_str(s: &str) -> Result<Self,Self::Err>{
+		match s {
+			"INSERT" => Ok(Self::Insert),
+			"NORMAL" => Ok(Self::Normal),
+			"COMMAND" => Ok(Self::Ex),
+			"VISUAL" => Ok(Self::Visual),
+			"REPLACE" => Ok(Self::Replace),
+			"VERBATIM" => Ok(Self::Verbatim),
+			"EMACS" => Ok(Self::Emacs),
+			_ => Err(crate::sherr!(ParseErr,"Invalid ModeReport kind: {s}")),
+
+		}
+	}
+}
+
 
 #[derive(Debug, Clone)]
 pub enum CmdReplay {

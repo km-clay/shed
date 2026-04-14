@@ -23,6 +23,7 @@ mod tests;
 pub mod testutil;
 
 use std::os::fd::BorrowedFd;
+use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 use std::sync::atomic::Ordering;
 
@@ -40,13 +41,15 @@ use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_input};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
+use crate::readline::editmode::ModeReport;
+use crate::readline::linebuf::{Hint, Pos, to_lines};
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
-use crate::readline::{Prompt, ReadlineEvent, ShedLine};
+use crate::readline::{LineData, Prompt, ReadlineEvent, ShedLine};
 use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
+  AutoCmdKind, LineHeader, QueryHeader, SocketRequest, StatusHeader, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;
@@ -521,7 +524,10 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       .and_then(|fd| fd.revents())
       .is_some_and(|r| r.contains(PollFlags::POLLIN))
     {
-      write_meta(|m| m.read_socket())?;
+      let requests = write_meta(|m| m.read_socket())?;
+			for (conn, req) in requests {
+				handle_socket_request(conn, req, &mut readline).ok();
+			}
     }
 
     // Process any available input
@@ -671,4 +677,158 @@ fn resolve_keymap(readline: &mut ShedLine) -> ShResult<()> {
   }
   readline.print_line(false)?;
   Ok(())
+}
+
+fn handle_socket_request(conn: UnixStream, request: SocketRequest, readline: &mut ShedLine) -> ShResult<()> {
+	match request {
+		SocketRequest::PostSystemMessage(msg) => {
+			write_meta(|m| m.post_system_message(msg));
+			write(&conn, b"ok\n").ok();
+		}
+		SocketRequest::PostStatusMessage(msg) => {
+			write_meta(|m| m.post_status_message(msg));
+			write(&conn, b"ok\n").ok();
+		}
+		SocketRequest::Subscribe => {
+			write_meta(|m| m.push_subscriber(conn));
+		}
+		SocketRequest::RefreshPrompt => {
+			kill(Pid::this(), Signal::SIGUSR1)?;
+			write(&conn, b"ok\n").ok();
+		}
+		SocketRequest::LineGet(line_header) => {
+			let LineData { buffer, cursor, anchor, hint, mode } = readline.get_line_data();
+			match line_header {
+				LineHeader::Buffer => {
+					write(&conn, buffer.as_bytes()).ok();
+					write(&conn, b"\n").ok();
+				}
+				LineHeader::Cursor => {
+					write(&conn, cursor.to_string().as_bytes()).ok();
+					write(&conn, b"\n").ok();
+				}
+				LineHeader::Anchor => {
+					if let Some(anchor) = anchor {
+						write(&conn, anchor.to_string().as_bytes()).ok();
+					}
+					write(&conn, b"\n").ok();
+				}
+				LineHeader::Hint => {
+					if let Some(hint) = hint {
+						write(&conn, hint.as_bytes()).ok();
+					}
+					write(&conn, b"\n").ok();
+				}
+				LineHeader::Mode => {
+					write(&conn, mode.to_string().as_bytes()).ok();
+					write(&conn, b"\n").ok();
+				}
+			}
+		}
+		SocketRequest::LineSet(line_header, value) => {
+			match line_header {
+				LineHeader::Buffer => {
+					readline.editor.edit(|this| {
+						this.set_buffer(value.clone());
+					});
+					readline.history
+						.update_pending_cmd((&readline.editor.joined(), readline.editor.cursor_to_flat()));
+					let hint = readline.history.get_hint();
+					readline.editor.set_hint(hint);
+					readline.editor.move_cursor_to_end();
+					readline.needs_redraw = true;
+				}
+				LineHeader::Cursor => {
+					readline.editor.with_hint(|this| {
+						if let Some((row,col)) = value.split_once(':')
+						&& let Ok(row) = row.parse::<usize>()
+						&& let Ok(col) = col.parse::<usize>() {
+							this.set_cursor(Pos::new(row, col));
+						} else if let Ok(pos) = value.parse::<usize>() {
+							this.set_cursor_from_flat(pos);
+						}
+					})
+				}
+				LineHeader::Hint => {
+					readline.editor.set_hint(Some(Hint::Override(to_lines(value))));
+				}
+				LineHeader::Mode => {
+					let Ok(mode) = value.parse::<ModeReport>() else {
+						// invalid mode report, ignore
+						return Ok(());
+					};
+					let mut mode = mode.as_edit_mode();
+					readline.swap_mode(&mut mode);
+				}
+				LineHeader::Anchor => {
+					if let Some((row,col)) = value.split_once(':')
+					&& let Ok(row) = row.parse::<usize>()
+					&& let Ok(col) = col.parse::<usize>() {
+						readline.editor.set_anchor(Pos::new(row, col));
+					} else if let Ok(pos) = value.parse::<usize>() {
+						readline.editor.set_anchor_from_flat(pos);
+					}
+				}
+			}
+		}
+		SocketRequest::Query(query_header) => match query_header {
+			QueryHeader::Cwd => {
+				let cwd = env::current_dir()?.to_string_lossy().to_string();
+				write(&conn, cwd.as_bytes()).ok();
+				write(&conn, b"\n").ok();
+			}
+			QueryHeader::Var(var) => {
+				let var = read_vars(|v| v.get_var(&var));
+				write(&conn, var.as_bytes()).ok();
+				write(&conn, b"\n").ok();
+			}
+			QueryHeader::Status(headers) => {
+				let mut responses = vec![];
+				for header in headers {
+					match header {
+						StatusHeader::ExitCode => responses.push(state::get_status().to_string()),
+						StatusHeader::CommandName => {
+							if let Some(job) = read_meta(|m| m.last_job().cloned())
+								&& let Some(cmd) = job.name()
+							{
+								responses.push(cmd.to_string());
+							} else {
+								responses.push("".to_string());
+							}
+						}
+						StatusHeader::Runtime => {
+							let Some(dur) = write_meta(|m| m.get_time()) else {
+								responses.push("".to_string());
+								continue;
+							};
+							responses.push(format!("{}", dur.as_millis()));
+						}
+						StatusHeader::Pid => {
+							let Some(job) = write_meta(|m| m.last_job().cloned()) else {
+								responses.push("".to_string());
+								continue;
+							};
+							responses.push(
+								job.get_pids()
+								.first()
+								.map(|p| p.to_string())
+								.unwrap_or_default(),
+							);
+						}
+						StatusHeader::Pgid => {
+							let Some(job) = write_meta(|m| m.last_job().cloned()) else {
+								responses.push("".to_string());
+								continue;
+							};
+							responses.push(job.pgid().to_string());
+						}
+					}
+				}
+				let output = responses.join(" ");
+				write(&conn, output.as_bytes()).ok();
+				write(&conn, b"\n").ok();
+			}
+		},
+	}
+	Ok(())
 }
