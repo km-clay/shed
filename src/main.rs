@@ -563,7 +563,9 @@ fn handle_readline_event(
       post_exec.exec();
 
       let was_func_def = write_meta(|m| m.take_last_was_func_def());
-      let should_write = !was_func_def || !read_shopts(|o| o.set.nolog);
+      let should_write = (!was_func_def || !read_shopts(|o| o.set.nolog))
+				&& !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
+				&& !input.is_empty();
 
       if let Some(token) = token
         && !should_write
@@ -574,8 +576,6 @@ fn handle_readline_event(
       }
 
       if read_shopts(|s| s.core.auto_hist)
-        && !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
-        && !input.is_empty()
         && should_write
         && let Some(token) = token
         && let Err(e) = readline

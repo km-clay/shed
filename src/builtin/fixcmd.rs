@@ -290,7 +290,7 @@ fn get_entry_range(
 
   let resolve = |arg: &RangeArg| -> ShResult<i64> {
     match arg {
-      RangeArg::Number(n) if *n < 0 => Ok(last_id + 1 + *n as i64),
+      RangeArg::Number(n) if *n < 0 => Ok(last_id + 1 + (*n - 1) as i64),
       RangeArg::Number(n) => Ok(*n as i64),
       RangeArg::Prefix(p) => Ok(
         hist

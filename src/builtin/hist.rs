@@ -1,6 +1,5 @@
 use std::{
-  path::PathBuf,
-  time::{Duration, UNIX_EPOCH},
+  cmp::Ordering, path::PathBuf, time::{Duration, UNIX_EPOCH}
 };
 
 use chrono::Utc;
@@ -203,9 +202,20 @@ impl HistQuery {
     }
     if !self.specific_ids.is_empty() {
       let mut id_strings = vec![];
+			let last_id = hist.last_id();
+
       for id in &self.specific_ids {
+				let id = match id.cmp(&0) {
+					Ordering::Greater => *id, // positive number, literal ID
+
+					// user gave a negative number or 0
+					// negative -> go backwards from end
+					// zero -> lands on current command
+					_ => last_id + 1 + (*id - 1),
+				};
+
         id_strings.push(format!("id = ?{idx}"));
-        params.push(Box::new(*id));
+        params.push(Box::new(id));
         idx += 1;
       }
       conditions.push(format!("({})", id_strings.join(" OR ")))
