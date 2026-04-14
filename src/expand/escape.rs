@@ -2,9 +2,9 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 use crate::expand::util::is_var_name_ch;
+use crate::match_loop;
 use crate::readline::markers;
 use crate::state::read_vars;
-use crate::match_loop;
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
 pub(super) fn strip_escape_markers(s: &str) -> String {
@@ -92,22 +92,22 @@ fn read_subsh(chars: &mut Peekable<Chars>, result: &mut String) {
         result.push(next_ch)
       }
     }
-		'\'' => {
-			result.push(subsh_ch);
-			match_loop!(chars.next() => q_ch, {
-				'\\' => {
-					result.push(q_ch);
-					if let Some(next_ch) = chars.next() {
-						result.push(next_ch)
-					}
-				}
-				'\'' => {
-					result.push(q_ch);
-					break;
-				}
-				_ => result.push(q_ch),
-			});
-		}
+    '\'' => {
+      result.push(subsh_ch);
+      match_loop!(chars.next() => q_ch, {
+        '\\' => {
+          result.push(q_ch);
+          if let Some(next_ch) = chars.next() {
+            result.push(next_ch)
+          }
+        }
+        '\'' => {
+          result.push(q_ch);
+          break;
+        }
+        _ => result.push(q_ch),
+      });
+    }
     '$' if chars.peek() == Some(&'\'') => {
       result.push(subsh_ch);
     }

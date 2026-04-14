@@ -110,7 +110,7 @@ bitflags! {
     const IS_EX_CMD = 1<<4;
     const HAS_SHIFT = 1<<5;
     const HAS_CTRL = 1<<6;
-		const IS_SUBMIT = 1<<7;
+    const IS_SUBMIT = 1<<7;
   }
 }
 
@@ -197,7 +197,7 @@ impl EditCmd {
       .verb
       .as_ref()
       .is_some_and(|v| matches!(v.1, Verb::AcceptLineOrNewline))
-		|| self.flags.contains(CmdFlags::IS_SUBMIT)
+      || self.flags.contains(CmdFlags::IS_SUBMIT)
   }
   pub fn is_undo_op(&self) -> bool {
     self

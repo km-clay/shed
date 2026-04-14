@@ -5,39 +5,54 @@ use ariadne::Fmt;
 use crate::expand::escape::unescape_math;
 use crate::expand::var::expand_raw;
 use crate::libsh::error::{ShErr, ShResult, next_color};
-use crate::{match_loop, sherr};
 use crate::state::{VarFlags, VarKind, read_vars, write_vars};
+use crate::{match_loop, sherr};
 
 #[derive(Debug)]
 enum ArithOp {
   // math
-  Add, Sub, Mul, Div, Mod,
+  Add,
+  Sub,
+  Mul,
+  Div,
+  Mod,
   // comparison
-  Lt, Gt, Le, Ge, Eq, Ne,
+  Lt,
+  Gt,
+  Le,
+  Ge,
+  Eq,
+  Ne,
   // logical
-  And, Or,
+  And,
+  Or,
   // assign
-  Assign, PlusAssign, MinusAssign, MulAssign, DivAssign, ModAssign,
+  Assign,
+  PlusAssign,
+  MinusAssign,
+  MulAssign,
+  DivAssign,
+  ModAssign,
 }
 
 impl FromStr for ArithOp {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s {
-      "+"  => Ok(Self::Add),
-      "-"  => Ok(Self::Sub),
-      "*"  => Ok(Self::Mul),
-      "/"  => Ok(Self::Div),
-      "%"  => Ok(Self::Mod),
-      "<"  => Ok(Self::Lt),
-      ">"  => Ok(Self::Gt),
+      "+" => Ok(Self::Add),
+      "-" => Ok(Self::Sub),
+      "*" => Ok(Self::Mul),
+      "/" => Ok(Self::Div),
+      "%" => Ok(Self::Mod),
+      "<" => Ok(Self::Lt),
+      ">" => Ok(Self::Gt),
       "<=" => Ok(Self::Le),
       ">=" => Ok(Self::Ge),
       "==" => Ok(Self::Eq),
       "!=" => Ok(Self::Ne),
       "&&" => Ok(Self::And),
       "||" => Ok(Self::Or),
-      "="  => Ok(Self::Assign),
+      "=" => Ok(Self::Assign),
       "+=" => Ok(Self::PlusAssign),
       "-=" => Ok(Self::MinusAssign),
       "*=" => Ok(Self::MulAssign),
@@ -74,11 +89,13 @@ impl StackVal {
       StackVal::Num(n) => Ok(*n),
       StackVal::Var(name) => {
         let val = read_vars(|v| v.try_get_var(name)).unwrap_or_else(|| "0".into());
-        val.parse::<f64>().map_err(|_| sherr!(
-          ParseErr,
-          "Variable '{}' does not contain a number",
-          name.fg(next_color()),
-        ))
+        val.parse::<f64>().map_err(|_| {
+          sherr!(
+            ParseErr,
+            "Variable '{}' does not contain a number",
+            name.fg(next_color()),
+          )
+        })
       }
     }
   }
@@ -86,11 +103,13 @@ impl StackVal {
 
 fn read_var_as_f64(name: &str) -> ShResult<f64> {
   let val = read_vars(|v| v.try_get_var(name)).unwrap_or_else(|| "0".into());
-  val.parse::<f64>().map_err(|_| sherr!(
-    ParseErr,
-    "Variable '{}' does not contain a number",
-    name.fg(next_color()),
-  ))
+  val.parse::<f64>().map_err(|_| {
+    sherr!(
+      ParseErr,
+      "Variable '{}' does not contain a number",
+      name.fg(next_color()),
+    )
+  })
 }
 
 impl ArithTk {
@@ -310,9 +329,13 @@ impl ArithTk {
       match tk {
         ArithTk::Comma => 0,
         ArithTk::Op(op) => match op {
-          ArithOp::Assign | ArithOp::PlusAssign | ArithOp::MinusAssign |
-          ArithOp::MulAssign | ArithOp::DivAssign | ArithOp::ModAssign => 1,
-          ArithOp::Or  => 2,
+          ArithOp::Assign
+          | ArithOp::PlusAssign
+          | ArithOp::MinusAssign
+          | ArithOp::MulAssign
+          | ArithOp::DivAssign
+          | ArithOp::ModAssign => 1,
+          ArithOp::Or => 2,
           ArithOp::And => 3,
           ArithOp::Eq | ArithOp::Ne => 4,
           ArithOp::Lt | ArithOp::Gt | ArithOp::Le | ArithOp::Ge => 5,
@@ -325,12 +348,18 @@ impl ArithTk {
     }
 
     fn is_right_assoc(tk: &ArithTk) -> bool {
-      matches!(tk,
-        ArithTk::Not | ArithTk::Neg |
-        ArithTk::Op(
-          ArithOp::Assign | ArithOp::PlusAssign | ArithOp::MinusAssign |
-          ArithOp::MulAssign | ArithOp::DivAssign | ArithOp::ModAssign
-        )
+      matches!(
+        tk,
+        ArithTk::Not
+          | ArithTk::Neg
+          | ArithTk::Op(
+            ArithOp::Assign
+              | ArithOp::PlusAssign
+              | ArithOp::MinusAssign
+              | ArithOp::MulAssign
+              | ArithOp::DivAssign
+              | ArithOp::ModAssign
+          )
       )
     }
 
@@ -426,7 +455,8 @@ impl ArithTk {
 
     macro_rules! pop_num {
       () => {
-        stack.pop()
+        stack
+          .pop()
           .ok_or_else(|| sherr!(ParseErr, "Missing operand in arithmetic expression"))?
           .to_num()?
       };
@@ -434,7 +464,10 @@ impl ArithTk {
 
     macro_rules! pop_var {
       () => {
-        match stack.pop().ok_or_else(|| sherr!(ParseErr, "Missing operand in arithmetic expression"))? {
+        match stack
+          .pop()
+          .ok_or_else(|| sherr!(ParseErr, "Missing operand in arithmetic expression"))?
+        {
           StackVal::Var(name) => name,
           StackVal::Num(_) => return Err(sherr!(ParseErr, "Assignment target must be a variable")),
         }
@@ -459,8 +492,12 @@ impl ArithTk {
 
         ArithTk::Comma => {
           // Discard LHS, keep RHS already on stack
-          let rhs = stack.pop().ok_or_else(|| sherr!(ParseErr, "Missing operand after ','"))?;
-          let _lhs = stack.pop().ok_or_else(|| sherr!(ParseErr, "Missing operand before ','"))?;
+          let rhs = stack
+            .pop()
+            .ok_or_else(|| sherr!(ParseErr, "Missing operand after ','"))?;
+          let _lhs = stack
+            .pop()
+            .ok_or_else(|| sherr!(ParseErr, "Missing operand before ','"))?;
           stack.push(rhs);
         }
 
@@ -470,68 +507,145 @@ impl ArithTk {
             ArithOp::Assign => {
               let rhs = pop_num!();
               let lhs = pop_var!();
-              write_vars(|v| v.set_var(&lhs, VarKind::Str(rhs.to_string()), VarFlags::NONE)).unwrap();
+              write_vars(|v| v.set_var(&lhs, VarKind::Str(rhs.to_string()), VarFlags::NONE))
+                .unwrap();
               stack.push(StackVal::Num(rhs));
             }
             ArithOp::PlusAssign => {
               let rhs = pop_num!();
               let lhs = pop_var!();
               let new_val = read_var_as_f64(&lhs)? + rhs;
-              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE)).unwrap();
+              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE))
+                .unwrap();
               stack.push(StackVal::Num(new_val));
             }
             ArithOp::MinusAssign => {
               let rhs = pop_num!();
               let lhs = pop_var!();
               let new_val = read_var_as_f64(&lhs)? - rhs;
-              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE)).unwrap();
+              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE))
+                .unwrap();
               stack.push(StackVal::Num(new_val));
             }
             ArithOp::MulAssign => {
               let rhs = pop_num!();
               let lhs = pop_var!();
               let new_val = read_var_as_f64(&lhs)? * rhs;
-              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE)).unwrap();
+              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE))
+                .unwrap();
               stack.push(StackVal::Num(new_val));
             }
             ArithOp::DivAssign => {
               let rhs = pop_num!();
               let lhs = pop_var!();
               let new_val = read_var_as_f64(&lhs)? / rhs;
-              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE)).unwrap();
+              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE))
+                .unwrap();
               stack.push(StackVal::Num(new_val));
             }
             ArithOp::ModAssign => {
               let rhs = pop_num!();
               let lhs = pop_var!();
               let new_val = read_var_as_f64(&lhs)? % rhs;
-              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE)).unwrap();
+              write_vars(|v| v.set_var(&lhs, VarKind::Str(new_val.to_string()), VarFlags::NONE))
+                .unwrap();
               stack.push(StackVal::Num(new_val));
             }
 
             // Binary math
-            ArithOp::Add => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(lhs + rhs)); }
-            ArithOp::Sub => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(lhs - rhs)); }
-            ArithOp::Mul => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(lhs * rhs)); }
-            ArithOp::Div => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(lhs / rhs)); }
-            ArithOp::Mod => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(lhs % rhs)); }
+            ArithOp::Add => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(lhs + rhs));
+            }
+            ArithOp::Sub => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(lhs - rhs));
+            }
+            ArithOp::Mul => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(lhs * rhs));
+            }
+            ArithOp::Div => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(lhs / rhs));
+            }
+            ArithOp::Mod => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(lhs % rhs));
+            }
 
             // Comparison (result is 1.0 or 0.0)
-            ArithOp::Lt => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(if lhs <  rhs { 1.0 } else { 0.0 })); }
-            ArithOp::Gt => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(if lhs >  rhs { 1.0 } else { 0.0 })); }
-            ArithOp::Le => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(if lhs <= rhs { 1.0 } else { 0.0 })); }
-            ArithOp::Ge => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(if lhs >= rhs { 1.0 } else { 0.0 })); }
-            ArithOp::Eq => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(if (lhs - rhs).abs() < f64::EPSILON { 1.0 } else { 0.0 })); }
-            ArithOp::Ne => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(if (lhs - rhs).abs() >= f64::EPSILON { 1.0 } else { 0.0 })); }
+            ArithOp::Lt => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(if lhs < rhs { 1.0 } else { 0.0 }));
+            }
+            ArithOp::Gt => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(if lhs > rhs { 1.0 } else { 0.0 }));
+            }
+            ArithOp::Le => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(if lhs <= rhs { 1.0 } else { 0.0 }));
+            }
+            ArithOp::Ge => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(if lhs >= rhs { 1.0 } else { 0.0 }));
+            }
+            ArithOp::Eq => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(if (lhs - rhs).abs() < f64::EPSILON {
+                1.0
+              } else {
+                0.0
+              }));
+            }
+            ArithOp::Ne => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(if (lhs - rhs).abs() >= f64::EPSILON {
+                1.0
+              } else {
+                0.0
+              }));
+            }
 
             // Logical (short-circuit semantics not possible in RPN, but side effects already done)
-            ArithOp::And => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(if lhs != 0.0 && rhs != 0.0 { 1.0 } else { 0.0 })); }
-            ArithOp::Or  => { let rhs = pop_num!(); let lhs = pop_num!(); stack.push(StackVal::Num(if lhs != 0.0 || rhs != 0.0 { 1.0 } else { 0.0 })); }
+            ArithOp::And => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(if lhs != 0.0 && rhs != 0.0 {
+                1.0
+              } else {
+                0.0
+              }));
+            }
+            ArithOp::Or => {
+              let rhs = pop_num!();
+              let lhs = pop_num!();
+              stack.push(StackVal::Num(if lhs != 0.0 || rhs != 0.0 {
+                1.0
+              } else {
+                0.0
+              }));
+            }
           }
         }
 
         ArithTk::Inc | ArithTk::Dec | ArithTk::LParen | ArithTk::RParen => {
-          return Err(sherr!(ParseErr, "Unexpected token during arithmetic evaluation: '{token:?}'"));
+          return Err(sherr!(
+            ParseErr,
+            "Unexpected token during arithmetic evaluation: '{token:?}'"
+          ));
         }
       }
     }
@@ -558,19 +672,19 @@ pub fn expand_arithmetic(expr: &str) -> ShResult<String> {
 /// Strip `((...))` or `(...)` wrappers and evaluate. Convenience for call sites
 /// that receive the raw token including its delimiters.
 pub fn expand_arithmetic_wrapped(raw: &str) -> ShResult<String> {
-	let mut expr = raw;
-	if expr.starts_with("((") {
-		expr = &expr[2..];
-	}
-	if expr.ends_with("))") {
-		expr = &expr[..expr.len() - 2];
-	}
-	if expr.starts_with('(') {
-		expr = &expr[1..];
-	}
-	if expr.ends_with(')') {
-		expr = &expr[..expr.len() - 1];
-	}
+  let mut expr = raw;
+  if expr.starts_with("((") {
+    expr = &expr[2..];
+  }
+  if expr.ends_with("))") {
+    expr = &expr[..expr.len() - 2];
+  }
+  if expr.starts_with('(') {
+    expr = &expr[1..];
+  }
+  if expr.ends_with(')') {
+    expr = &expr[..expr.len() - 1];
+  }
   expand_arithmetic(expr)
 }
 
@@ -588,71 +702,113 @@ mod tests {
   // ===================== Basic math =====================
 
   #[test]
-  fn arith_addition() { assert_eq!(arith("(1+2)"), 3.0); }
+  fn arith_addition() {
+    assert_eq!(arith("(1+2)"), 3.0);
+  }
 
   #[test]
-  fn arith_subtraction() { assert_eq!(arith("(10-3)"), 7.0); }
+  fn arith_subtraction() {
+    assert_eq!(arith("(10-3)"), 7.0);
+  }
 
   #[test]
-  fn arith_multiplication() { assert_eq!(arith("(3*4)"), 12.0); }
+  fn arith_multiplication() {
+    assert_eq!(arith("(3*4)"), 12.0);
+  }
 
   #[test]
-  fn arith_division() { assert_eq!(arith("(10/2)"), 5.0); }
+  fn arith_division() {
+    assert_eq!(arith("(10/2)"), 5.0);
+  }
 
   #[test]
-  fn arith_modulo() { assert_eq!(arith("(10%3)"), 1.0); }
+  fn arith_modulo() {
+    assert_eq!(arith("(10%3)"), 1.0);
+  }
 
   #[test]
-  fn arith_precedence() { assert_eq!(arith("(2+3*4)"), 14.0); }
+  fn arith_precedence() {
+    assert_eq!(arith("(2+3*4)"), 14.0);
+  }
 
   #[test]
-  fn arith_parens() { assert_eq!(arith("(2+3)*4"), 20.0); }
+  fn arith_parens() {
+    assert_eq!(arith("(2+3)*4"), 20.0);
+  }
 
   #[test]
-  fn arith_nested_parens() { assert_eq!(arith("(1+2)*(3+4)"), 21.0); }
+  fn arith_nested_parens() {
+    assert_eq!(arith("(1+2)*(3+4)"), 21.0);
+  }
 
   #[test]
-  fn arith_spaces() { assert_eq!(arith("( 1 + 2 )"), 3.0); }
+  fn arith_spaces() {
+    assert_eq!(arith("( 1 + 2 )"), 3.0);
+  }
 
   #[test]
-  fn arith_unary_neg() { assert_eq!(arith("(-5)"), -5.0); }
+  fn arith_unary_neg() {
+    assert_eq!(arith("(-5)"), -5.0);
+  }
 
   #[test]
-  fn arith_unary_neg_in_expr() { assert_eq!(arith("(10 + -3)"), 7.0); }
+  fn arith_unary_neg_in_expr() {
+    assert_eq!(arith("(10 + -3)"), 7.0);
+  }
 
   // ===================== Comparison =====================
 
   #[test]
-  fn arith_lt_true() { assert_eq!(arith("(3 < 5)"), 1.0); }
+  fn arith_lt_true() {
+    assert_eq!(arith("(3 < 5)"), 1.0);
+  }
 
   #[test]
-  fn arith_lt_false() { assert_eq!(arith("(5 < 3)"), 0.0); }
+  fn arith_lt_false() {
+    assert_eq!(arith("(5 < 3)"), 0.0);
+  }
 
   #[test]
-  fn arith_eq_true() { assert_eq!(arith("(4 == 4)"), 1.0); }
+  fn arith_eq_true() {
+    assert_eq!(arith("(4 == 4)"), 1.0);
+  }
 
   #[test]
-  fn arith_ne_true() { assert_eq!(arith("(3 != 4)"), 1.0); }
+  fn arith_ne_true() {
+    assert_eq!(arith("(3 != 4)"), 1.0);
+  }
 
   #[test]
-  fn arith_le_equal() { assert_eq!(arith("(5 <= 5)"), 1.0); }
+  fn arith_le_equal() {
+    assert_eq!(arith("(5 <= 5)"), 1.0);
+  }
 
   // ===================== Logical =====================
 
   #[test]
-  fn arith_logical_and_true() { assert_eq!(arith("(1 && 1)"), 1.0); }
+  fn arith_logical_and_true() {
+    assert_eq!(arith("(1 && 1)"), 1.0);
+  }
 
   #[test]
-  fn arith_logical_and_false() { assert_eq!(arith("(1 && 0)"), 0.0); }
+  fn arith_logical_and_false() {
+    assert_eq!(arith("(1 && 0)"), 0.0);
+  }
 
   #[test]
-  fn arith_logical_or_true() { assert_eq!(arith("(0 || 1)"), 1.0); }
+  fn arith_logical_or_true() {
+    assert_eq!(arith("(0 || 1)"), 1.0);
+  }
 
   #[test]
-  fn arith_not_true() { assert_eq!(arith("(!0)"), 1.0); }
+  fn arith_not_true() {
+    assert_eq!(arith("(!0)"), 1.0);
+  }
 
   #[test]
-  fn arith_not_false() { assert_eq!(arith("(!1)"), 0.0); }
+  fn arith_not_false() {
+    assert_eq!(arith("(!1)"), 0.0);
+  }
 
   // ===================== Assignment =====================
 

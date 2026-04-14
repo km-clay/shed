@@ -18,7 +18,8 @@ use crate::{
   expand::expand_cmd_sub,
   libsh::{
     error::ShResult,
-    guards::{RawModeGuard, var_ctx_guard}, strops::QuoteState,
+    guards::{RawModeGuard, var_ctx_guard},
+    strops::QuoteState,
   },
   match_loop,
   parse::{
@@ -211,7 +212,7 @@ impl Line {
     self.0.append(&mut other.0);
   }
   pub fn insert_str(&mut self, at: usize, other: &str) {
-		let mut at = at.min(self.0.len());
+    let mut at = at.min(self.0.len());
     if other.contains('\n') {
       log::warn!(
         "Inserting string with newlines into a single line. Newlines will be treated as literal characters."
@@ -223,11 +224,11 @@ impl Line {
     }
   }
   pub fn insert_char(&mut self, at: usize, c: char) {
-		let at = at.min(self.0.len());
+    let at = at.min(self.0.len());
     self.0.insert(at, Grapheme::from(c));
   }
   pub fn insert(&mut self, at: usize, g: Grapheme) {
-		let at = at.min(self.0.len());
+    let at = at.min(self.0.len());
     self.0.insert(at, g);
   }
   pub fn width(&self) -> usize {
@@ -985,11 +986,7 @@ impl LineBuf {
 
     write_vars(|v| {
       v.set_var("BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
-      v.set_var(
-        "CURSOR",
-        VarKind::Str(cursor.to_string()),
-        VarFlags::EXPORT,
-      )?;
+      v.set_var("CURSOR", VarKind::Str(cursor.to_string()), VarFlags::EXPORT)?;
       v.set_var("ANCHOR", VarKind::Str(anchor.clone()), VarFlags::EXPORT)
     })?;
 
@@ -1086,22 +1083,23 @@ impl LineBuf {
     if new_level < level {
       let delta = level.saturating_sub(new_level);
       let line = self.cur_line_mut();
-			// check if the line is an exact match of a closer keyword
-			// we don't want to dedent something like 'foo) echo bar ;;'
-			// where the closer is inlined with the content
-			let is_closer = lex::CLOSERS.iter()
-				.chain(lex::MIDDLES.iter())
-				.any(|closer| trimmed == *closer);
+      // check if the line is an exact match of a closer keyword
+      // we don't want to dedent something like 'foo) echo bar ;;'
+      // where the closer is inlined with the content
+      let is_closer = lex::CLOSERS
+        .iter()
+        .chain(lex::MIDDLES.iter())
+        .any(|closer| trimmed == *closer);
 
-			if is_closer {
-				for _ in 0..delta {
-					if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
-						line.0.remove(0);
-					} else {
-						break;
-					}
-				}
-			}
+      if is_closer {
+        for _ in 0..delta {
+          if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
+            line.0.remove(0);
+          } else {
+            break;
+          }
+        }
+      }
     }
   }
   fn insert(&mut self, gr: Grapheme) {
@@ -3674,10 +3672,10 @@ impl LineBuf {
   }
 
   pub fn set_hint(&mut self, hint: Option<String>) {
-		if !read_shopts(|o| o.line.auto_suggest) {
-			self.hint = None;
-			return;
-		}
+    if !read_shopts(|o| o.line.auto_suggest) {
+      self.hint = None;
+      return;
+    }
     let joined = self.joined();
     self.hint = hint
       .and_then(|h| h.strip_prefix(&joined).map(|s| s.to_string()))

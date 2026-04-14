@@ -10,7 +10,10 @@ use bitflags::bitflags;
 
 use crate::{
   builtin::BUILTINS,
-  libsh::{error::ShResult, strops::{QuoteState, ends_with_unescaped, scan_braces, scan_parens}},
+  libsh::{
+    error::ShResult,
+    strops::{QuoteState, ends_with_unescaped, scan_braces, scan_parens},
+  },
   match_loop, sherr,
 };
 
@@ -218,7 +221,7 @@ impl Tk {
   }
 
   pub fn is_closer(&self) -> bool {
-		CLOSERS.contains(&self.as_str())
+    CLOSERS.contains(&self.as_str())
   }
 
   pub fn is_closer_for(&self, other: &Tk) -> bool {
@@ -260,7 +263,7 @@ bitflags! {
     const IS_HEREDOC   = 0b0000001000000000;
     const LIT_HEREDOC  = 0b0000010000000000;
     const TAB_HEREDOC  = 0b0000100000000000;
-		const IS_ARITH     = 0b0001000000000000;
+    const IS_ARITH     = 0b0001000000000000;
   }
 }
 
@@ -292,9 +295,9 @@ pub fn clean_input(input: &str) -> String {
   match_loop!(chars.next() => ch, {
     '\\' if chars.peek() == Some(&'\n') => {
       chars.next();
-			while chars.peek().is_some_and(|c| c.is_whitespace() && *c != '\n') {
-				chars.next();
-			}
+      while chars.peek().is_some_and(|c| c.is_whitespace() && *c != '\n') {
+        chars.next();
+      }
     }
     '\r' => {
       if chars.peek() == Some(&'\n') {
@@ -774,13 +777,13 @@ impl LexStream {
       '$' if chars.peek() == Some(&'{') => {
         pos += 2;
         chars.next();
-				if !scan_braces(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-					self.cursor = pos;
-					return Err(sherr!(
-							ParseErr @ Span::new(pos..pos + 1, self.source.clone()),
-							"Unclosed parameter expansion",
-					));
-				}
+        if !scan_braces(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
+          self.cursor = pos;
+          return Err(sherr!(
+              ParseErr @ Span::new(pos..pos + 1, self.source.clone()),
+              "Unclosed parameter expansion",
+          ));
+        }
       }
       '"' => {
         pos += 1;
@@ -825,17 +828,17 @@ impl LexStream {
         pos += 1;
         let mut paren_count = 1;
         let paren_pos = pos;
-				let mut flags = TkFlags::IS_CMD;
-				if chars.peek() == Some(&'(') {
-					// arithmetic
-					paren_count += 1;
-					chars.next();
-					pos += 1;
-					flags |= TkFlags::IS_ARITH;
-				} else {
-					//subshell
-					flags |= TkFlags::IS_SUBSH;
-				}
+        let mut flags = TkFlags::IS_CMD;
+        if chars.peek() == Some(&'(') {
+          // arithmetic
+          paren_count += 1;
+          chars.next();
+          pos += 1;
+          flags |= TkFlags::IS_ARITH;
+        } else {
+          //subshell
+          flags |= TkFlags::IS_SUBSH;
+        }
         if !scan_parens(&mut chars, &mut pos, paren_count) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
           self.cursor = pos;
           return Err(sherr!(
@@ -1171,7 +1174,6 @@ pub fn is_cmd_sub(slice: &str) -> bool {
   slice.starts_with("$(") && ends_with_unescaped(slice, ")")
 }
 
-
 pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
   let mut pos = 0;
   let mut qt_state = QuoteState::default();
@@ -1210,9 +1212,15 @@ pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
             '(' => depth += 1,
             ')' => {
               depth -= 1;
-              if depth == 0 { break; }
+              if depth == 0 {
+                break;
+              }
             }
-            '\\' => { if let Some(esc) = chars.next() { pos += esc.len_utf8(); } }
+            '\\' => {
+              if let Some(esc) = chars.next() {
+                pos += esc.len_utf8();
+              }
+            }
             _ => {}
           }
         }

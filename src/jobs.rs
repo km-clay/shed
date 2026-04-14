@@ -186,10 +186,16 @@ impl JobBldr {
     }
   }
   pub fn with_id(self, id: usize) -> Self {
-    Self { table_id: Some(id), ..self }
+    Self {
+      table_id: Some(id),
+      ..self
+    }
   }
   pub fn with_pgid(self, pgid: Pid) -> Self {
-    Self { pgid: Some(pgid), ..self }
+    Self {
+      pgid: Some(pgid),
+      ..self
+    }
   }
   pub fn with_children(self, children: Vec<ChildProc>) -> Self {
     Self { children, ..self }
@@ -264,10 +270,11 @@ impl Job {
     self.pgid
   }
   pub fn get_cmds(&self) -> Vec<&str> {
-		self.children
-			.iter()
-			.map(|c| c.cmd().unwrap_or_default())
-			.collect()
+    self
+      .children
+      .iter()
+      .map(|c| c.cmd().unwrap_or_default())
+      .collect()
   }
   pub fn set_stats(&mut self, stat: WtStat) {
     for child in self.children.iter_mut() {
@@ -275,11 +282,7 @@ impl Job {
     }
   }
   pub fn get_stats(&self) -> Vec<WtStat> {
-    self
-      .children
-      .iter()
-      .map(|chld| chld.stat())
-      .collect()
+    self.children.iter().map(|chld| chld.stat()).collect()
   }
   pub fn pipe_status(stats: &[WtStat]) -> Option<Vec<i32>> {
     if stats.iter().any(|stat| {
@@ -532,7 +535,7 @@ pub fn wait_bg(id: JobID) -> ShResult<()> {
         }
       }
 
-			state::set_pipe_status(&statuses)?;
+      state::set_pipe_status(&statuses)?;
 
       if was_stopped {
         write_jobs(|j| j.insert_job(job, false))?;
@@ -624,7 +627,7 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
       _ => { /* Do nothing */ }
     }
   }
-	state::set_pipe_status(&statuses)?;
+  state::set_pipe_status(&statuses)?;
 
   // If job wasn't stopped (moved to bg), clear the fg slot
   if !was_stopped {

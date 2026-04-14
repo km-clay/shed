@@ -807,7 +807,7 @@ impl EditMode for ViNormal {
           flags: self.flags(),
         })
       }
-			E(K::Enter, M::NONE) => {
+      E(K::Enter, M::NONE) => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -816,7 +816,7 @@ impl EditMode for ViNormal {
           raw_seq: "".into(),
           flags: self.flags() | CmdFlags::IS_SUBMIT,
         })
-			}
+      }
       E(K::Char(ch), M::NONE) => self.try_parse(ch),
       E(K::Backspace, M::NONE) => Some(EditCmd {
         register: Default::default(),

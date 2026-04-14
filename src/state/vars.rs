@@ -10,10 +10,16 @@ use std::{
 use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
-  builtin::map::MapNode, expand::expand_arithmetic, libsh::{
+  builtin::map::MapNode,
+  expand::expand_arithmetic,
+  libsh::{
     error::{ShErr, ShResult},
     utils::VecDequeExt,
-  }, parse::lex::{LexFlags, LexStream, Tk}, prelude::*, readline::{complete::Candidate, markers}, sherr
+  },
+  parse::lex::{LexFlags, LexStream, Tk},
+  prelude::*,
+  readline::{complete::Candidate, markers},
+  sherr,
 };
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
@@ -179,13 +185,13 @@ impl FromStr for ArrIndex {
         Ok(Self::Literal(idx))
       }
       _ => {
-				// let's try to handle something like '1+1'
-				if let Ok(res) = expand_arithmetic(s) {
-					Self::from_str(&res)
-				} else {
-					Err(sherr!(ParseErr, "Invalid array index: {}", s,))
-				}
-			}
+        // let's try to handle something like '1+1'
+        if let Ok(res) = expand_arithmetic(s) {
+          Self::from_str(&res)
+        } else {
+          Err(sherr!(ParseErr, "Invalid array index: {}", s,))
+        }
+      }
     }
   }
 }
@@ -211,12 +217,12 @@ impl VarKind {
       .try_fold(String::new(), |mut acc, wrds| {
         match wrds {
           Ok(wrds) => {
-						for wrd in wrds {
-							if !acc.is_empty() {
-								acc.push(markers::ARG_SEP);
-							}
-							acc.push_str(&wrd);
-						}
+            for wrd in wrds {
+              if !acc.is_empty() {
+                acc.push(markers::ARG_SEP);
+              }
+              acc.push_str(&wrd);
+            }
           }
           Err(e) => return Err(e),
         }

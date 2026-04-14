@@ -829,9 +829,10 @@ HIST                                             *builtin-hist* *hist*
 
   Mutation Options ~
 
-    `--delete`     delete matching entries
-    `--restore`    restore previously deleted entries
-    `--ex`         operate on ex-mode history instead of shell command history
+    `--delete`          delete matching entries
+    `--restore`         restore previously deleted entries
+    `--import {source}` import history from another shell (see below)
+    `--ex`              operate on ex-mode history instead of shell command history
 
   Providing numeric arguments restricts results to those specific IDs:
 
@@ -839,6 +840,20 @@ HIST                                             *builtin-hist* *hist*
 
   Dates accept natural language: "yesterday", "2 hours ago", "last
   monday", ISO 8601, etc. Durations: "5s", "2 minutes", "1 hour".
+
+  Importing History ~
+
+  `--import {source}` imports history from another shell's history file.
+  {source} can be a shell name or an explicit file path:
+
+    `bash`    ~/.bash_history   (plain text or with HISTTIMEFORMAT timestamps)
+    `zsh`     ~/.zsh_history    (plain text or extended format)
+    `fish`    ~/.local/share/fish/fish_history
+    any path  treated as a file to auto-detect and import
+
+  The format is detected automatically from the file contents. After import,
+  entries are sorted by timestamp so imported history interleaves correctly
+  with existing entries.
 
   Examples:
 
@@ -849,6 +864,9 @@ HIST                                             *builtin-hist* *hist*
       `hist --delete --contains foo`            delete entries containing "foo"
       `hist --not --with-status 0`              failed commands
       `hist --in-dir . --after "1 hour ago"`    recent commands in current dir
+      `hist --import bash`                      import from ~/.bash_history
+      `hist --import zsh`                       import from ~/.zsh_history
+      `hist --import ~/old_history`             import from explicit path
 
 ==============================================================================
 JOBS                                             *builtin-jobs* *jobs*

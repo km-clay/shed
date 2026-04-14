@@ -208,25 +208,25 @@ pub fn width_calculator() -> Box<dyn WidthCalculator> {
 /// Used for rendering the line editor content in a way that respects the user's `tab_width` shell option.
 /// Has no effect on the text that is submitted to the shell or saved to history, this is strictly for display.
 fn expand_tabs(s: &str, left_margin: u16, tab_stop: u16) -> String {
-	let mut out = String::new();
-	let mut col = left_margin;
-	let mut esc_seq = 0;
-	for c in s.graphemes(true) {
-		if c == "\t" {
-			let spaces = tab_stop - ((col.saturating_sub(left_margin)) % tab_stop);
-			(0..spaces).for_each(|_| {
-				out.push(' ');
-				col += 1;
-			});
-		} else if c == "\n" {
-			out.push('\n');
-			col = left_margin;
-		} else {
-			out.push_str(c);
-			col += width(c, &mut esc_seq);
-		}
-	}
-	out
+  let mut out = String::new();
+  let mut col = left_margin;
+  let mut esc_seq = 0;
+  for c in s.graphemes(true) {
+    if c == "\t" {
+      let spaces = tab_stop - ((col.saturating_sub(left_margin)) % tab_stop);
+      (0..spaces).for_each(|_| {
+        out.push(' ');
+        col += 1;
+      });
+    } else if c == "\n" {
+      out.push('\n');
+      col = left_margin;
+    } else {
+      out.push_str(c);
+      col += width(c, &mut esc_seq);
+    }
+  }
+  out
 }
 
 fn read_digits_until(rdr: &mut TermReader, sep: char) -> ShResult<Option<u32>> {
@@ -933,7 +933,7 @@ impl Layout {
   }
 
   pub fn calc_pos(term_width: u16, s: &str, orig: Pos, left_margin: u16, raw_calc: bool) -> Pos {
-		let tab_stop = read_shopts(|o| o.line.tab_width) as u16;
+    let tab_stop = read_shopts(|o| o.line.tab_width) as u16;
     let mut pos = orig;
     let mut esc_seq = 0;
     for c in s.graphemes(true) {
@@ -942,7 +942,7 @@ impl Layout {
         pos.col = left_margin;
       }
       let c_width = if c == "\t" {
-				tab_stop - ((pos.col.saturating_sub(left_margin)) % tab_stop)
+        tab_stop - ((pos.col.saturating_sub(left_margin)) % tab_stop)
       } else if raw_calc && Self::is_ctl_char(c) {
         2
       } else {

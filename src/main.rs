@@ -335,21 +335,21 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       }
     }
   };
-	let mut vi_mode = read_shopts(|o| o.set.vi);
+  let mut vi_mode = read_shopts(|o| o.set.vi);
 
   // Main poll loop
   loop {
     readline.writer.flush_write("\x1b[?2004h")?; // enable bracketed paste mode
-		state::try_hash();
+    state::try_hash();
     error::clear_color();
 
-		if read_shopts(|o| o.set.vi) != vi_mode {
-			// the editing mode option changed.
-			// we have to make sure the edit mode reflects the option now
-			readline.fix_editing_mode();
+    if read_shopts(|o| o.set.vi) != vi_mode {
+      // the editing mode option changed.
+      // we have to make sure the edit mode reflects the option now
+      readline.fix_editing_mode();
 
-			vi_mode = !vi_mode; // and toggle this
-		}
+      vi_mode = !vi_mode; // and toggle this
+    }
 
     // Handle any pending signals
     while signals_pending() {
@@ -404,7 +404,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     let mut exec_if_timeout = None;
 
     let timeout = if !readline.pending_keymap.is_empty() {
-			// wait for more keymap keys
+      // wait for more keymap keys
       PollTimeout::from(1000u16)
     } else {
       let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone())
@@ -412,7 +412,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
         .to_string();
       let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
       if screensaver_idle_time == 0 || screensaver_cmd.is_empty() {
-				// no screensaver stuff, set no timeout
+        // no screensaver stuff, set no timeout
         PollTimeout::NONE
       } else {
         exec_if_timeout = Some(screensaver_cmd);
@@ -427,7 +427,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       Ok(0) => {
         // We timed out. Check if there's a screensaver command
         if let Some(cmd) = exec_if_timeout
-				&& readline.editor.is_empty() {// don't exec screensaver if we have a pending command
+          && readline.editor.is_empty()
+        {
+          // don't exec screensaver if we have a pending command
           let prepared = ReadlineEvent::Line(cmd.clone());
           let _guard = scopeguard::guard(read_shopts(|o| o.core.auto_hist), |opt| {
             // restores old auto_hist value
@@ -461,9 +463,12 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
     // Timeout - resolve pending keymap ambiguity
     if !readline.pending_keymap.is_empty()
-		&& fds[0].revents().is_none_or(|r| !r.contains(PollFlags::POLLIN)) {
-			resolve_keymap(&mut readline)?;
-			continue;
+      && fds[0]
+        .revents()
+        .is_none_or(|r| !r.contains(PollFlags::POLLIN))
+    {
+      resolve_keymap(&mut readline)?;
+      continue;
     }
 
     // Check if stdin has data
@@ -519,11 +524,9 @@ fn handle_readline_event(
 ) -> ShResult<bool> {
   match event {
     Ok(ReadlineEvent::Line(input)) => {
-			let token = readline.history.push(input.clone())
-				.ok()
-				.flatten();
+      let token = readline.history.push(input.clone()).ok().flatten();
 
-			let exec_start = Instant::now();
+      let exec_start = Instant::now();
       let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
       let post_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
 
@@ -559,31 +562,39 @@ fn handle_readline_event(
 
       post_exec.exec();
 
-			let was_func_def = write_meta(|m| m.take_last_was_func_def());
-			let should_write = !was_func_def || !read_shopts(|o| o.set.nolog);
+      let was_func_def = write_meta(|m| m.take_last_was_func_def());
+      let should_write = !was_func_def || !read_shopts(|o| o.set.nolog);
 
-			if let Some(token) = token
-			&& !should_write {
-				readline.history.delete("WHERE token = ?1", rusqlite::params![token.to_string()])?;
-			}
+      if let Some(token) = token
+        && !should_write
+      {
+        readline
+          .history
+          .delete("WHERE token = ?1", rusqlite::params![token.to_string()])?;
+      }
 
       if read_shopts(|s| s.core.auto_hist)
         && !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
         && !input.is_empty()
-				&& should_write
-				&& let Some(token) = token
-				&& let Err(e) = readline.history.set_status(token, runtime, state::get_status())
-			{
-				e.print_error();
+        && should_write
+        && let Some(token) = token
+        && let Err(e) = readline
+          .history
+          .set_status(token, runtime, state::get_status())
+      {
+        e.print_error();
       }
 
-			let rl_cleanup_start = Instant::now();
+      let rl_cleanup_start = Instant::now();
       readline.fix_column()?;
       readline.writer.flush_write("\n\r")?;
 
       // Reset for next command with fresh prompt
       readline.reset(true)?;
-			log::info!("Readline reset and prompt redraw in {:.2?}", rl_cleanup_start.elapsed());
+      log::info!(
+        "Readline reset and prompt redraw in {:.2?}",
+        rl_cleanup_start.elapsed()
+      );
 
       let real_end = exec_start.elapsed();
       log::info!("Total round trip time: {:.2?}", real_end);
@@ -612,30 +623,30 @@ fn handle_readline_event(
 }
 
 fn resolve_keymap(readline: &mut ShedLine) -> ShResult<()> {
-	let keymap_flags = readline.curr_keymap_flags();
-	let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &readline.pending_keymap));
-	// If there's an exact match, fire it; otherwise flush as normal keys
-	let exact = matches
-		.iter()
-		.find(|km| km.compare(&readline.pending_keymap) == KeyMapMatch::IsExact);
-	if let Some(km) = exact {
-		let action = km.action_expanded();
-		readline.pending_keymap.clear();
-		for key in action {
-			let event = readline.handle_key(key).transpose();
-			if let Some(event) = event {
-				handle_readline_event(readline, event)?;
-			}
-		}
-	} else {
-		let buffered = std::mem::take(&mut readline.pending_keymap);
-		for key in buffered {
-			let event = readline.handle_key(key).transpose();
-			if let Some(event) = event {
-				handle_readline_event(readline, event)?;
-			}
-		}
-	}
-	readline.print_line(false)?;
-	Ok(())
+  let keymap_flags = readline.curr_keymap_flags();
+  let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &readline.pending_keymap));
+  // If there's an exact match, fire it; otherwise flush as normal keys
+  let exact = matches
+    .iter()
+    .find(|km| km.compare(&readline.pending_keymap) == KeyMapMatch::IsExact);
+  if let Some(km) = exact {
+    let action = km.action_expanded();
+    readline.pending_keymap.clear();
+    for key in action {
+      let event = readline.handle_key(key).transpose();
+      if let Some(event) = event {
+        handle_readline_event(readline, event)?;
+      }
+    }
+  } else {
+    let buffered = std::mem::take(&mut readline.pending_keymap);
+    for key in buffered {
+      let event = readline.handle_key(key).transpose();
+      if let Some(event) = event {
+        handle_readline_event(readline, event)?;
+      }
+    }
+  }
+  readline.print_line(false)?;
+  Ok(())
 }

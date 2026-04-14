@@ -7,7 +7,9 @@ use lex::{LexFlags, LexStream, Span, SpanSource, Tk, TkFlags, TkRule};
 
 use crate::{
   libsh::{
-    error::{ShErr, ShResult, last_color, next_color}, strops::split_tk, utils::NodeVecUtils
+    error::{ShErr, ShResult, last_color, next_color},
+    strops::split_tk,
+    utils::NodeVecUtils,
   },
   match_loop,
   parse::lex::clean_input,
@@ -68,33 +70,33 @@ macro_rules! parse_err {
 /// node!(self, node_tks, NdRule::Conjunction { elements }, vec![], NdFlags::empty())
 /// ```
 macro_rules! node {
-	($parser:expr, $tks:expr, $class:expr, $redirs:expr, $flags:expr) => {
-		Node {
-			class: $class,
-			flags: $flags,
-			redirs: $redirs,
-			context: $parser.context.clone(),
-			tokens: $tks,
-		}
-	};
-	($parser:expr, $tks:expr, $class:expr, $redirs:expr) => {
-		Node {
-			class: $class,
-			flags: NdFlags::empty(),
-			redirs: $redirs,
-			context: $parser.context.clone(),
-			tokens: $tks,
-		}
-	};
-	($parser:expr, $tks:expr, $class:expr) => {
-		Node {
-			class: $class,
-			flags: NdFlags::empty(),
-			redirs: vec![],
-			context: $parser.context.clone(),
-			tokens: $tks,
-		}
-	};
+  ($parser:expr, $tks:expr, $class:expr, $redirs:expr, $flags:expr) => {
+    Node {
+      class: $class,
+      flags: $flags,
+      redirs: $redirs,
+      context: $parser.context.clone(),
+      tokens: $tks,
+    }
+  };
+  ($parser:expr, $tks:expr, $class:expr, $redirs:expr) => {
+    Node {
+      class: $class,
+      flags: NdFlags::empty(),
+      redirs: $redirs,
+      context: $parser.context.clone(),
+      tokens: $tks,
+    }
+  };
+  ($parser:expr, $tks:expr, $class:expr) => {
+    Node {
+      class: $class,
+      flags: NdFlags::empty(),
+      redirs: vec![],
+      context: $parser.context.clone(),
+      tokens: $tks,
+    }
+  };
 }
 
 /// The parsed AST along with the source input it parsed
@@ -152,10 +154,12 @@ impl ParsedSrc {
   pub fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
     let mut tokens = vec![];
     for lex_result in LexStream::new(self.src.clone(), self.lex_flags)
-			.with_name(self.name.clone())
-			.filter(|tk| {
-				!tk.as_ref().is_ok_and(|tk| matches!(tk.class, TkRule::Comment))
-			})
+      .with_name(self.name.clone())
+      .filter(|tk| {
+        !tk
+          .as_ref()
+          .is_ok_and(|tk| matches!(tk.class, TkRule::Comment))
+      })
     {
       match lex_result {
         Ok(token) => tokens.push(token),
@@ -281,25 +285,25 @@ impl Node {
           body_node.walk_tree(f);
         }
       }
-			NdRule::ForArith {
-				ref mut init,
-				ref mut cond,
-				ref mut step,
-				ref mut body,
-			} => {
-				if let Some(init) = init {
-					init.walk_tree(f);
-				}
-				if let Some(cond) = cond {
-					cond.walk_tree(f);
-				}
-				if let Some(step) = step {
-					step.walk_tree(f);
-				}
-				for body_node in body {
-					body_node.walk_tree(f);
-				}
-			}
+      NdRule::ForArith {
+        ref mut init,
+        ref mut cond,
+        ref mut step,
+        ref mut body,
+      } => {
+        if let Some(init) = init {
+          init.walk_tree(f);
+        }
+        if let Some(cond) = cond {
+          cond.walk_tree(f);
+        }
+        if let Some(step) = step {
+          step.walk_tree(f);
+        }
+        for body_node in body {
+          body_node.walk_tree(f);
+        }
+      }
       NdRule::CaseNode {
         pattern: _,
         ref mut case_blocks,
@@ -344,9 +348,7 @@ impl Node {
       NdRule::Negate { ref mut cmd } => {
         cmd.walk_tree(f);
       }
-			NdRule::Arithmetic {..} |
-      NdRule::Test {..} |
-      NdRule::Assignment {..} => (), // No nodes to check
+      NdRule::Arithmetic { .. } | NdRule::Test { .. } | NdRule::Assignment { .. } => (), // No nodes to check
     }
   }
   pub fn propagate_context(&mut self, ctx: (SpanSource, Label<Span>)) {
@@ -763,8 +765,8 @@ pub enum NdKind {
   IfNode,
   LoopNode,
   ForNode,
-	ForArith,
-	Arithmetic,
+  ForArith,
+  Arithmetic,
   CaseNode,
   Command,
   Pipeline,
@@ -783,8 +785,8 @@ impl crate::parse::NdRule {
       Self::IfNode { .. } => NdKind::IfNode,
       Self::LoopNode { .. } => NdKind::LoopNode,
       Self::ForNode { .. } => NdKind::ForNode,
-			Self::ForArith { .. } => NdKind::ForArith,
-			Self::Arithmetic { .. } => NdKind::Arithmetic,
+      Self::ForArith { .. } => NdKind::ForArith,
+      Self::Arithmetic { .. } => NdKind::Arithmetic,
       Self::CaseNode { .. } => NdKind::CaseNode,
       Self::Command { .. } => NdKind::Command,
       Self::Pipeline { .. } => NdKind::Pipeline,
@@ -812,15 +814,15 @@ pub enum NdRule {
     arr: Vec<Tk>,
     body: Vec<Node>,
   },
-	ForArith {
-		init: Option<Box<Node>>,
-		cond: Option<Box<Node>>,
-		step: Option<Box<Node>>,
-		body: Vec<Node>
-	},
-	Arithmetic {
-		body: Tk
-	},
+  ForArith {
+    init: Option<Box<Node>>,
+    cond: Option<Box<Node>>,
+    step: Option<Box<Node>>,
+    body: Vec<Node>,
+  },
+  Arithmetic {
+    body: Tk,
+  },
   Negate {
     cmd: Box<Node>,
   },
@@ -979,16 +981,18 @@ impl ParseStream {
     }
   }
   fn next_tk_is_some(&self) -> bool {
-    self.peek_tk().is_some_and(|tk| !matches!(tk.class,TkRule::Comment | TkRule::EOI))
+    self
+      .peek_tk()
+      .is_some_and(|tk| !matches!(tk.class, TkRule::Comment | TkRule::EOI))
   }
   fn check_case_pattern(&self) -> bool {
     self
       .peek_tk()
       .is_some_and(|tk| tk.class == TkRule::CasePattern)
   }
-	fn check_flags(&self, flags: TkFlags) -> bool {
-		self.peek_tk().is_some_and(|tk| tk.flags.contains(flags))
-	}
+  fn check_flags(&self, flags: TkFlags) -> bool {
+    self.peek_tk().is_some_and(|tk| tk.flags.contains(flags))
+  }
   fn check_keyword(&self, kw: &str) -> bool {
     self.peek_tk().is_some_and(|tk| {
       if kw == "in" {
@@ -1033,7 +1037,7 @@ impl ParseStream {
           try_match!(self.parse_if()?);
           try_match!(self.parse_negate()?);
           try_match!(self.parse_time()?);
-					try_match!(self.parse_arith()?);
+          try_match!(self.parse_arith()?);
           try_match!(self.parse_cmd()?);
           Ok(None)
         }()?;
@@ -1049,35 +1053,35 @@ impl ParseStream {
 
     Ok(result)
   }
-	fn parse_compound(&mut self) -> ShResult<Option<Node>> {
-		// parse only a compound command.
-		// used by function definition
-		// because any compound command is a valid
-		// function body.
-		//
-		// also we don't increment block_depth here because it
-		// already happened in parse_block() -> parse_func_def()
+  fn parse_compound(&mut self) -> ShResult<Option<Node>> {
+    // parse only a compound command.
+    // used by function definition
+    // because any compound command is a valid
+    // function body.
+    //
+    // also we don't increment block_depth here because it
+    // already happened in parse_block() -> parse_func_def()
 
-		let result = || -> ShResult<Option<Node>> {
-			try_match!(self.parse_brc_grp(true /* from_func_def */)?);
-			try_match!(self.parse_case()?);
-			try_match!(self.parse_loop()?);
-			try_match!(self.parse_for()?);
-			try_match!(self.parse_test()?);
-			try_match!(self.parse_if()?);
+    let result = || -> ShResult<Option<Node>> {
+      try_match!(self.parse_brc_grp(true /* from_func_def */)?);
+      try_match!(self.parse_case()?);
+      try_match!(self.parse_loop()?);
+      try_match!(self.parse_for()?);
+      try_match!(self.parse_test()?);
+      try_match!(self.parse_if()?);
 
-			Ok(None)
-		}()?;
+      Ok(None)
+    }()?;
 
     Ok(result)
-	}
+  }
   fn parse_cmd_list(&mut self) -> ShResult<Option<Node>> {
     let mut elements = vec![];
     let mut node_tks = vec![];
 
     while let Some(mut block) = self.parse_block(true)? {
       node_tks.append(&mut block.tokens.clone());
-			self.catch_separator(&mut node_tks);
+      self.catch_separator(&mut node_tks);
       let conjunct_op = match self.next_tk_class() {
         TkRule::And => ConjunctOp::And,
         TkRule::Or => ConjunctOp::Or,
@@ -1103,7 +1107,11 @@ impl ParseStream {
     if elements.is_empty() {
       Ok(None)
     } else {
-      Ok(Some(node!(self, node_tks, NdRule::Conjunction { elements })))
+      Ok(Some(node!(
+        self,
+        node_tks,
+        NdRule::Conjunction { elements }
+      )))
     }
   }
   fn parse_func_def(&mut self) -> ShResult<Option<Node>> {
@@ -1133,7 +1141,7 @@ impl ParseStream {
     } else {
       name.as_str().into()
     };
-		self.catch_separator(&mut node_tks);
+    self.catch_separator(&mut node_tks);
     let mut src = name_tk.span.span_source().clone();
     src.rename(name_raw.clone());
     let color = next_color();
@@ -1150,9 +1158,13 @@ impl ParseStream {
 
     let Some(mut compound_cmd) = self.parse_compound()? else {
       self.context.pop_back();
-			bail!(self, node_tks, "Expected a compound command after function name");
+      bail!(
+        self,
+        node_tks,
+        "Expected a compound command after function name"
+      );
     };
-		self.parse_redir(&mut compound_cmd.redirs, &mut node_tks)?;
+    self.parse_redir(&mut compound_cmd.redirs, &mut node_tks)?;
     body = Box::new(compound_cmd);
     // Replace placeholder with full-span label
     self.context.pop_back();
@@ -1207,7 +1219,11 @@ impl ParseStream {
       } else if let TkRule::And | TkRule::Or = tk.class {
         if case_builder.can_build() {
           if case_builder.conjunct.is_some() {
-            return Err(parse_err!(self, node_tks, "Invalid placement for logical operator in test"));
+            return Err(parse_err!(
+              self,
+              node_tks,
+              "Invalid placement for logical operator in test"
+            ));
           }
           let op = match tk.class {
             TkRule::And => ConjunctOp::And,
@@ -1219,7 +1235,11 @@ impl ParseStream {
           cases.push(case);
           continue;
         } else {
-          return Err(parse_err!(self, node_tks, "Invalid placement for logical operator in test"));
+          return Err(parse_err!(
+            self,
+            node_tks,
+            "Invalid placement for logical operator in test"
+          ));
         }
       }
       if case_builder.can_build() {
@@ -1254,15 +1274,28 @@ impl ParseStream {
       } else if *self.next_tk_class() != TkRule::BraceGrpEnd {
         let next = self.peek_tk().cloned();
         let err = match next {
-          Some(tk) => Err(parse_err!(self, node_tks, "Unexpected token '{}' in brace group body", tk.as_str())),
-          None => Err(parse_err!(self, node_tks, "Unexpected end of input while parsing brace group body")),
+          Some(tk) => Err(parse_err!(
+            self,
+            node_tks,
+            "Unexpected token '{}' in brace group body",
+            tk.as_str()
+          )),
+          None => Err(parse_err!(
+            self,
+            node_tks,
+            "Unexpected end of input while parsing brace group body"
+          )),
         };
         self.panic_mode(&mut node_tks);
         return err;
       }
       self.catch_separator(&mut node_tks);
       if !self.next_tk_is_some() {
-				bail!(self, node_tks, "Expected a closing brace for this brace group");
+        bail!(
+          self,
+          node_tks,
+          "Expected a closing brace for this brace group"
+        );
       }
     }
 
@@ -1270,7 +1303,12 @@ impl ParseStream {
       self.parse_redir(&mut redirs, &mut node_tks)?;
     }
 
-    Ok(Some(node!(self, node_tks, NdRule::BraceGrp { body }, redirs)))
+    Ok(Some(node!(
+      self,
+      node_tks,
+      NdRule::BraceGrp { body },
+      redirs
+    )))
   }
   fn build_redir<F: FnMut() -> Option<Tk>>(
     redir_tk: &Tk,
@@ -1346,7 +1384,7 @@ impl ParseStream {
     node_tks.push(self.next_tk().unwrap());
 
     let pat_err = parse_err!(self, node_tks, "Expected a pattern after 'case' keyword")
-			.with_note("Patterns can be raw text, or anything that gets substituted with raw text");
+      .with_note("Patterns can be raw text, or anything that gets substituted with raw text");
 
     let Some(pat_tk) = self.next_tk() else {
       self.panic_mode(&mut node_tks);
@@ -1362,7 +1400,7 @@ impl ParseStream {
     node_tks.push(pattern.clone());
 
     if !self.check_keyword("in") || !self.next_tk_is_some() {
-			bail!(self, node_tks, "Expected 'in' after case variable name");
+      bail!(self, node_tks, "Expected 'in' after case variable name");
     }
     node_tks.push(self.next_tk().unwrap());
 
@@ -1370,7 +1408,7 @@ impl ParseStream {
 
     loop {
       if !self.check_case_pattern() || !self.next_tk_is_some() {
-				bail!(self, node_tks, "Expected a case pattern here");
+        bail!(self, node_tks, "Expected a case pattern here");
       }
       let case_pat_tk = self.next_tk().unwrap();
       node_tks.push(case_pat_tk.clone());
@@ -1378,20 +1416,23 @@ impl ParseStream {
 
       let mut nodes = vec![];
       let mut found_end = false;
-			while self.check_separator() {
-				let sep = self.peek_tk().unwrap();
-				if sep.has_double_semi() {
-					node_tks.push(self.next_tk().unwrap());
-					found_end = true;
-					self.block_depth -= 1;
-					break;
-				} else {
-					node_tks.push(self.next_tk().unwrap());
-				}
-			}
+      while self.check_separator() {
+        let sep = self.peek_tk().unwrap();
+        if sep.has_double_semi() {
+          node_tks.push(self.next_tk().unwrap());
+          found_end = true;
+          self.block_depth -= 1;
+          break;
+        } else {
+          node_tks.push(self.next_tk().unwrap());
+        }
+      }
       while !found_end && let Some(node) = self.parse_cmd_list()? {
         node_tks.extend(node.tokens.clone());
-        let trailing_dbl_semi = node.tokens.iter().rev()
+        let trailing_dbl_semi = node
+          .tokens
+          .iter()
+          .rev()
           .take_while(|tk| matches!(tk.class, TkRule::Sep))
           .any(|tk| tk.has_double_semi());
         if trailing_dbl_semi {
@@ -1426,11 +1467,23 @@ impl ParseStream {
       }
 
       if !self.next_tk_is_some() {
-				bail!(self, node_tks, "Expected 'esac' to close this case statement");
+        bail!(
+          self,
+          node_tks,
+          "Expected 'esac' to close this case statement"
+        );
       }
     }
 
-    Ok(Some(node!(self, node_tks, NdRule::CaseNode { pattern, case_blocks }, redirs)))
+    Ok(Some(node!(
+      self,
+      node_tks,
+      NdRule::CaseNode {
+        pattern,
+        case_blocks
+      },
+      redirs
+    )))
   }
   fn parse_time(&mut self) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
@@ -1441,7 +1494,7 @@ impl ParseStream {
     node_tks.push(self.next_tk().unwrap());
 
     let Some(mut cmd) = self.parse_block(true)? else {
-			bail!(self, node_tks, "Expected a command after 'time'");
+      bail!(self, node_tks, "Expected a command after 'time'");
     };
     // the 'time' keyword does not have it's own NdRule. This is because it does not alter execution in any meaningful way.
     // All it does here is set the REPORT_TIME flag on the node it wraps. Then we just return the node itself.
@@ -1452,24 +1505,33 @@ impl ParseStream {
     self.catch_separator(&mut node_tks);
     Ok(Some(cmd))
   }
-	fn parse_arith(&mut self) -> ShResult<Option<Node>> {
-		let mut node_tks: Vec<Tk> = vec![];
-		let mut redirs: Vec<Redir> = vec![];
+  fn parse_arith(&mut self) -> ShResult<Option<Node>> {
+    let mut node_tks: Vec<Tk> = vec![];
+    let mut redirs: Vec<Redir> = vec![];
 
-		if !self.check_flags(TkFlags::IS_ARITH) || !self.next_tk_is_some() {
-			return Ok(None);
-		}
-		let arith_tk = self.next_tk().unwrap();
-		node_tks.push(arith_tk.clone());
+    if !self.check_flags(TkFlags::IS_ARITH) || !self.next_tk_is_some() {
+      return Ok(None);
+    }
+    let arith_tk = self.next_tk().unwrap();
+    node_tks.push(arith_tk.clone());
 
-		self.parse_redir(&mut redirs, &mut node_tks)?;
+    self.parse_redir(&mut redirs, &mut node_tks)?;
 
-		if matches!(self.next_tk_class(), TkRule::Str) {
-			bail!(self, node_tks, "Unexpected argument after arithmetic command");
-		}
+    if matches!(self.next_tk_class(), TkRule::Str) {
+      bail!(
+        self,
+        node_tks,
+        "Unexpected argument after arithmetic command"
+      );
+    }
 
-		Ok(Some(node!(self, node_tks, NdRule::Arithmetic { body: arith_tk }, redirs)))
-	}
+    Ok(Some(node!(
+      self,
+      node_tks,
+      NdRule::Arithmetic { body: arith_tk },
+      redirs
+    )))
+  }
   fn parse_negate(&mut self) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
 
@@ -1479,14 +1541,18 @@ impl ParseStream {
     node_tks.push(self.next_tk().unwrap());
 
     let Some(mut cmd) = self.parse_block(true)? else {
-			bail!(self, node_tks, "Expected a command after '!'");
+      bail!(self, node_tks, "Expected a command after '!'");
     };
     cmd.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for negated commands
 
     node_tks.extend(cmd.tokens.clone());
     self.catch_separator(&mut node_tks);
 
-    Ok(Some(node!(self, node_tks, NdRule::Negate { cmd: Box::new(cmd) })))
+    Ok(Some(node!(
+      self,
+      node_tks,
+      NdRule::Negate { cmd: Box::new(cmd) }
+    )))
   }
   fn parse_if(&mut self) -> ShResult<Option<Node>> {
     // Needs at last one 'if-then',
@@ -1509,13 +1575,17 @@ impl ParseStream {
         if prefix_keywrd == "elif" {
           self.block_depth -= 1;
         }
-				bail!(self, node_tks, "Expected a command after '{prefix_keywrd}'");
+        bail!(self, node_tks, "Expected a command after '{prefix_keywrd}'");
       };
       node_tks.extend(cond.tokens.clone());
       cond.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for condition commands
 
       if !self.check_keyword("then") || !self.next_tk_is_some() {
-				bail!(self, node_tks, "Expected 'then' after '{prefix_keywrd}' condition");
+        bail!(
+          self,
+          node_tks,
+          "Expected 'then' after '{prefix_keywrd}' condition"
+        );
       }
       node_tks.push(self.next_tk().unwrap());
       self.catch_separator(&mut node_tks);
@@ -1527,7 +1597,7 @@ impl ParseStream {
       }
 
       if body_blocks.is_empty() {
-				bail!(self, node_tks, "Expected a command after 'then'");
+        bail!(self, node_tks, "Expected a command after 'then'");
       };
       let cond_node = CondNode {
         cond: Box::new(cond),
@@ -1563,7 +1633,7 @@ impl ParseStream {
       }
 
       if else_block.is_empty() {
-				bail!(self, node_tks, "Expected a command after 'else'");
+        bail!(self, node_tks, "Expected a command after 'else'");
       }
 
       if !already_added {
@@ -1573,7 +1643,7 @@ impl ParseStream {
 
     self.catch_separator(&mut node_tks);
     if !self.check_keyword("fi") || !self.next_tk_is_some() {
-			bail!(self, node_tks, "Expected 'fi' after if statement");
+      bail!(self, node_tks, "Expected 'fi' after if statement");
     }
     node_tks.push(self.next_tk().unwrap());
     self.block_depth -= 1;
@@ -1582,19 +1652,31 @@ impl ParseStream {
 
     self.assert_separator(&mut node_tks)?;
 
-    Ok(Some(node!(self, node_tks, NdRule::IfNode { cond_nodes, else_block }, redirs)))
+    Ok(Some(node!(
+      self,
+      node_tks,
+      NdRule::IfNode {
+        cond_nodes,
+        else_block
+      },
+      redirs
+    )))
   }
-	fn parse_for_arith(&mut self, mut node_tks: Vec<Tk>) -> ShResult<Option<Node>> {
-		let mut body: Vec<Node> = vec![];
-		let mut redirs: Vec<Redir> = vec![];
+  fn parse_for_arith(&mut self, mut node_tks: Vec<Tk>) -> ShResult<Option<Node>> {
+    let mut body: Vec<Node> = vec![];
+    let mut redirs: Vec<Redir> = vec![];
 
-		let arith_tk = self.next_tk().unwrap(); // we checked already
-		node_tks.push(arith_tk.clone());
-		let (init,cond,step) = split_for_arith_tk(arith_tk)?;
-		self.catch_separator(&mut node_tks);
+    let arith_tk = self.next_tk().unwrap(); // we checked already
+    node_tks.push(arith_tk.clone());
+    let (init, cond, step) = split_for_arith_tk(arith_tk)?;
+    self.catch_separator(&mut node_tks);
 
     if !self.check_keyword("do") || !self.next_tk_is_some() {
-			bail!(self, node_tks, "Expected 'do' after for loop arithmetic expression");
+      bail!(
+        self,
+        node_tks,
+        "Expected 'do' after for loop arithmetic expression"
+      );
     }
     node_tks.push(self.next_tk().unwrap());
     self.catch_separator(&mut node_tks);
@@ -1605,15 +1687,25 @@ impl ParseStream {
 
     self.catch_separator(&mut node_tks);
     if !self.check_keyword("done") || !self.next_tk_is_some() {
-			bail!(self, node_tks, "Expected 'done' after for loop body");
+      bail!(self, node_tks, "Expected 'done' after for loop body");
     }
     node_tks.push(self.next_tk().unwrap());
 
     self.parse_redir(&mut redirs, &mut node_tks)?;
 
-    Ok(Some(node!(self, node_tks, NdRule::ForArith { init, cond, step, body }, redirs)))
-	}
-	fn parse_for_arr(&mut self, mut node_tks: Vec<Tk>) -> ShResult<Option<Node>> {
+    Ok(Some(node!(
+      self,
+      node_tks,
+      NdRule::ForArith {
+        init,
+        cond,
+        step,
+        body
+      },
+      redirs
+    )))
+  }
+  fn parse_for_arr(&mut self, mut node_tks: Vec<Tk>) -> ShResult<Option<Node>> {
     let mut vars: Vec<Tk> = vec![];
     let mut arr: Vec<Tk> = vec![];
     let mut body: Vec<Node> = vec![];
@@ -1638,13 +1730,17 @@ impl ParseStream {
     }
 
     if vars.is_empty() {
-			bail!(self, node_tks, "Expected a variable name for this for loop");
+      bail!(self, node_tks, "Expected a variable name for this for loop");
     }
     if arr.is_empty() {
-			bail!(self, node_tks, "Expected an array for this for loop");
+      bail!(self, node_tks, "Expected an array for this for loop");
     }
     if !self.check_keyword("do") || !self.next_tk_is_some() {
-			bail!(self, node_tks, "Expected 'do' after for loop variable and array");
+      bail!(
+        self,
+        node_tks,
+        "Expected 'do' after for loop variable and array"
+      );
     }
     node_tks.push(self.next_tk().unwrap());
     self.catch_separator(&mut node_tks);
@@ -1655,14 +1751,19 @@ impl ParseStream {
 
     self.catch_separator(&mut node_tks);
     if !self.check_keyword("done") || !self.next_tk_is_some() {
-			bail!(self, node_tks, "Expected 'done' after for loop body");
+      bail!(self, node_tks, "Expected 'done' after for loop body");
     }
     node_tks.push(self.next_tk().unwrap());
 
     self.parse_redir(&mut redirs, &mut node_tks)?;
 
-    Ok(Some(node!(self, node_tks, NdRule::ForNode { vars, arr, body }, redirs)))
-	}
+    Ok(Some(node!(
+      self,
+      node_tks,
+      NdRule::ForNode { vars, arr, body },
+      redirs
+    )))
+  }
   fn parse_for(&mut self) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
 
@@ -1671,11 +1772,11 @@ impl ParseStream {
     }
     node_tks.push(self.next_tk().unwrap());
 
-		if self.check_flags(TkFlags::IS_ARITH) {
-			self.parse_for_arith(node_tks)
-		} else {
-			self.parse_for_arr(node_tks)
-		}
+    if self.check_flags(TkFlags::IS_ARITH) {
+      self.parse_for_arith(node_tks)
+    } else {
+      self.parse_for_arr(node_tks)
+    }
   }
   fn parse_loop(&mut self) -> ShResult<Option<Node>> {
     // Requires a single CondNode and a LoopKind
@@ -1698,13 +1799,17 @@ impl ParseStream {
     self.catch_separator(&mut node_tks);
 
     let Some(mut cond) = self.parse_cmd_list()? else {
-			bail!(self, node_tks, "Expected a command after '{loop_kind}'");
+      bail!(self, node_tks, "Expected a command after '{loop_kind}'");
     };
     node_tks.extend(cond.tokens.clone());
     cond.walk_tree(&mut |n| n.flags |= NdFlags::NOT_ERR); // disable set -e for condition commands
 
     if !self.check_keyword("do") || !self.next_tk_is_some() {
-			bail!(self, node_tks, "Expected 'do' after '{loop_kind}' condition");
+      bail!(
+        self,
+        node_tks,
+        "Expected 'do' after '{loop_kind}' condition"
+      );
     }
     node_tks.push(self.next_tk().unwrap());
     self.catch_separator(&mut node_tks);
@@ -1715,12 +1820,12 @@ impl ParseStream {
       body.push(block);
     }
     if body.is_empty() {
-			bail!(self, node_tks, "Expected a command after 'do' in this loop");
+      bail!(self, node_tks, "Expected a command after 'do' in this loop");
     };
 
     self.catch_separator(&mut node_tks);
     if !self.check_keyword("done") || !self.next_tk_is_some() {
-			bail!(self, node_tks, "Expected 'done' after loop body");
+      bail!(self, node_tks, "Expected 'done' after loop body");
     }
     node_tks.push(self.next_tk().unwrap());
 
@@ -1733,7 +1838,15 @@ impl ParseStream {
       body,
     };
 
-    Ok(Some(node!(self, node_tks, NdRule::LoopNode { kind: loop_kind, cond_node }, redirs)))
+    Ok(Some(node!(
+      self,
+      node_tks,
+      NdRule::LoopNode {
+        kind: loop_kind,
+        cond_node
+      },
+      redirs
+    )))
   }
   fn parse_pipeln(&mut self) -> ShResult<Option<Node>> {
     let mut cmds = vec![];
@@ -1761,7 +1874,7 @@ impl ParseStream {
         break;
       } else if let Some(pipe) = self.next_tk() {
         node_tks.push(pipe);
-				self.catch_separator(&mut node_tks);
+        self.catch_separator(&mut node_tks);
       } else {
         break;
       }
@@ -1769,7 +1882,13 @@ impl ParseStream {
     if cmds.is_empty() {
       Ok(None)
     } else {
-      Ok(Some(node!(self, node_tks, NdRule::Pipeline { cmds }, vec![/*redirs*/], flags)))
+      Ok(Some(node!(
+        self,
+        node_tks,
+        NdRule::Pipeline { cmds },
+        vec![/*redirs*/],
+        flags
+      )))
     }
   }
   fn parse_cmd(&mut self) -> ShResult<Option<Node>> {
@@ -1834,7 +1953,13 @@ impl ParseStream {
               .with_message("in variable assignment defined here".to_string())
               .with_color(next_color()),
           ));
-          return Ok(Some(node!(self, node_tks, NdRule::Command { assignments, argv }, redirs, flags)));
+          return Ok(Some(node!(
+            self,
+            node_tks,
+            NdRule::Command { assignments, argv },
+            redirs,
+            flags
+          )));
         }
       }
       loop {
@@ -1873,13 +1998,24 @@ impl ParseStream {
             redirs.push(redir);
           }
           _ => {
-            break 'out Err(parse_err!(self, node_tks, "Unexpected token in command: {:?}", tk.class));
+            break 'out Err(parse_err!(
+              self,
+              node_tks,
+              "Unexpected token in command: {:?}",
+              tk.class
+            ));
           }
         };
       }
       self.commit(node_tks.len());
 
-      return Ok(Some(node!(self, node_tks, NdRule::Command { assignments, argv }, redirs, flags)));
+      return Ok(Some(node!(
+        self,
+        node_tks,
+        NdRule::Command { assignments, argv },
+        redirs,
+        flags
+      )));
     };
 
     match result {
@@ -1993,12 +2129,16 @@ impl ParseStream {
       };
 
       Some(node!(
-				self,
-				vec![token.clone()],
-				NdRule::Assignment { kind: assign_kind, var, val },
-				vec![/*redirs*/],
-				flags
-			))
+        self,
+        vec![token.clone()],
+        NdRule::Assignment {
+          kind: assign_kind,
+          var,
+          val
+        },
+        vec![/*redirs*/],
+        flags
+      ))
     } else {
       None
     }
@@ -2076,44 +2216,52 @@ pub fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<Fil
 }
 
 #[allow(clippy::type_complexity)]
-fn split_for_arith_tk(tk: Tk) -> ShResult<(Option<Box<Node>>,Option<Box<Node>>,Option<Box<Node>>)> {
-	let span = tk.span.clone();
-	let mut tks = split_tk(&tk, ";").into_iter();
+fn split_for_arith_tk(
+  tk: Tk,
+) -> ShResult<(Option<Box<Node>>, Option<Box<Node>>, Option<Box<Node>>)> {
+  let span = tk.span.clone();
+  let mut tks = split_tk(&tk, ";").into_iter();
 
-	let Some(init_tk) = tks.next() else {
-		return Err(sherr!(ParseErr @ span, "Missing init statement"));
-	};
-	let init = Some(Box::new(Node {
-		class: NdRule::Arithmetic { body: init_tk.clone() },
-		flags: NdFlags::empty(),
-		redirs: vec![],
-		tokens: vec![init_tk],
-		context: Default::default(),
-	}));
+  let Some(init_tk) = tks.next() else {
+    return Err(sherr!(ParseErr @ span, "Missing init statement"));
+  };
+  let init = Some(Box::new(Node {
+    class: NdRule::Arithmetic {
+      body: init_tk.clone(),
+    },
+    flags: NdFlags::empty(),
+    redirs: vec![],
+    tokens: vec![init_tk],
+    context: Default::default(),
+  }));
 
-	let Some(cond_tk) = tks.next() else {
-		return Err(sherr!(ParseErr @ span, "Missing condition statement"));
-	};
-	let cond = Some(Box::new(Node {
-		class: NdRule::Arithmetic { body: cond_tk.clone() },
-		flags: NdFlags::empty(),
-		redirs: vec![],
-		tokens: vec![cond_tk],
-		context: Default::default(),
-	}));
+  let Some(cond_tk) = tks.next() else {
+    return Err(sherr!(ParseErr @ span, "Missing condition statement"));
+  };
+  let cond = Some(Box::new(Node {
+    class: NdRule::Arithmetic {
+      body: cond_tk.clone(),
+    },
+    flags: NdFlags::empty(),
+    redirs: vec![],
+    tokens: vec![cond_tk],
+    context: Default::default(),
+  }));
 
-	let Some(step_tk) = tks.next() else {
-		return Err(sherr!(ParseErr @ span, "Missing step statement"));
-	};
-	let step = Some(Box::new(Node {
-		class: NdRule::Arithmetic { body: step_tk.clone() },
-		flags: NdFlags::empty(),
-		redirs: vec![],
-		tokens: vec![step_tk],
-		context: Default::default(),
-	}));
+  let Some(step_tk) = tks.next() else {
+    return Err(sherr!(ParseErr @ span, "Missing step statement"));
+  };
+  let step = Some(Box::new(Node {
+    class: NdRule::Arithmetic {
+      body: step_tk.clone(),
+    },
+    flags: NdFlags::empty(),
+    redirs: vec![],
+    tokens: vec![step_tk],
+    context: Default::default(),
+  }));
 
-	Ok((init,cond,step))
+  Ok((init, cond, step))
 }
 
 fn parse_err_full(reason: &str, blame: &Span, context: LabelCtx) -> ShErr {
@@ -2135,7 +2283,7 @@ fn is_func_parens(tk: Option<&Tk>) -> bool {
 pub mod tests {
   use pretty_assertions::assert_eq;
 
-use super::NdKind;
+  use super::NdKind;
   use crate::testutil::get_ast;
 
   #[test]
@@ -2761,8 +2909,8 @@ use super::NdKind;
 
   #[test]
   fn parse_cursed_input() {
-		// valid shell syntax btw
-		// your editor might not enjoy this
+    // valid shell syntax btw
+    // your editor might not enjoy this
     let input = "if if while if if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; then if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; elif while while :; do :; done; do until :; do :; done; done; then while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; elif until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; then until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; else case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; fi; do while case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; then until while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do until while :; do :; done; do until :; do :; done; done; done; elif until until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; done; then case foo in; foo) case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac;; bar) if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi;; biz) if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi;; esac; elif case foo in; foo) while while :; do :; done; do until :; do :; done; done;; bar) while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done;; biz) until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done;; esac; then if until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; then case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; elif case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; then if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; elif if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; else while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; fi; else if until while :; do :; done; do until :; do :; done; done; then until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; elif case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; then case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; elif if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; then if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; else while while :; do :; done; do until :; do :; done; done; fi; fi; then while while while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; do while until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; done; done; elif until until case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; do if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; done; do until if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; do while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; done; then case foo in; foo) case foo in; foo) while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done;; bar) until while :; do :; done; do until :; do :; done; done;; biz) until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done;; esac;; bar) case foo in; foo) case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac;; bar) case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac;; biz) if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi;; esac;; biz) if if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; then while while :; do :; done; do until :; do :; done; done; elif while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; then until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; elif until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; then case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; else case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; fi;; esac; elif if if if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; elif while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; then while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; elif until while :; do :; done; do until :; do :; done; done; then until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; else case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; fi; then while case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; do if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; done; elif while if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; do while while :; do :; done; do until :; do :; done; done; done; then until while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; done; elif until until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; done; then case foo in; foo) case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac;; bar) if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi;; biz) if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi;; esac; else case foo in; foo) while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done;; bar) while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done;; biz) until while :; do :; done; do until :; do :; done; done;; esac; fi; then if if until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; then case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; elif case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; then if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; elif if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; then while while :; do :; done; do until :; do :; done; done; else while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; fi; then if until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; then until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; elif case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac; then case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; elif if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; else while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; fi; elif while while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; do until while :; do :; done; do until :; do :; done; done; done; then while until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; do case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; done; elif until case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; do if until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; else while :; do :; done; fi; done; then until if until :; do :; done; then until :; do :; done; elif case foo in; foo) :;; bar) :;; biz) :;; esac; then case foo in; foo) :;; bar) :;; biz) :;; esac; elif if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; else while :; do :; done; fi; do while while :; do :; done; do until :; do :; done; done; done; else case foo in; foo) while until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done;; bar) until case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done;; biz) until if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done;; esac; fi; else while case foo in; foo) case foo in; foo) while :; do :; done;; bar) until :; do :; done;; biz) until :; do :; done;; esac;; bar) case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) case foo in; foo) :;; bar) :;; biz) :;; esac;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac;; biz) if if :; then :; elif :; then :; elif :; then :; else :; fi; then while :; do :; done; elif while :; do :; done; then until :; do :; done; elif until :; do :; done; then case foo in; foo) :;; bar) :;; biz) :;; esac; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi;; esac; do if if if :; then :; elif :; then :; elif :; then :; else :; fi; then if :; then :; elif :; then :; elif :; then :; else :; fi; elif while :; do :; done; then while :; do :; done; elif until :; do :; done; then until :; do :; done; else case foo in; foo) :;; bar) :;; biz) :;; esac; fi; then while case foo in; foo) :;; bar) :;; biz) :;; esac; do if :; then :; elif :; then :; elif :; then :; else :; fi; done; elif while if :; then :; elif :; then :; elif :; then :; else :; fi; do while :; do :; done; done; then until while :; do :; done; do until :; do :; done; done; elif until until :; do :; done; do case foo in; foo) :;; bar) :;; biz) :;; esac; done; then case foo in; foo) case foo in; foo) :;; bar) :;; biz) :;; esac;; bar) if :; then :; elif :; then :; elif :; then :; else :; fi;; biz) if :; then :; elif :; then :; elif :; then :; else :; fi;; esac; else case foo in; foo) while :; do :; done;; bar) while :; do :; done;; biz) until :; do :; done;; esac; fi; done; fi";
     assert!(get_ast(input).is_ok()); // lets spare our sanity and just say that "ok" means "it parsed correctly"
   }

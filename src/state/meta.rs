@@ -1,10 +1,15 @@
 use super::*;
 
 use std::{
-  collections::{HashMap, HashSet, VecDeque}, fmt::Write, os::unix::{
+  collections::{HashMap, HashSet, VecDeque},
+  fmt::Write,
+  os::unix::{
     fs::PermissionsExt,
     net::{UnixListener, UnixStream},
-  }, rc::Rc, str::FromStr, time::Duration
+  },
+  rc::Rc,
+  str::FromStr,
+  time::Duration,
 };
 
 use itertools::Itertools;
@@ -591,15 +596,12 @@ impl Utility {
   pub fn kind(&self) -> &UtilKind {
     &self.kind
   }
-	pub fn path(&self) -> Option<&Path> {
-		match &self.kind {
-			UtilKind::Alias |
-			UtilKind::Function |
-			UtilKind::Builtin => None,
-			UtilKind::Command(path_buf) |
-			UtilKind::File(path_buf) => Some(path_buf)
-		}
-	}
+  pub fn path(&self) -> Option<&Path> {
+    match &self.kind {
+      UtilKind::Alias | UtilKind::Function | UtilKind::Builtin => None,
+      UtilKind::Command(path_buf) | UtilKind::File(path_buf) => Some(path_buf),
+    }
+  }
 }
 
 /// A table of metadata for the shell
@@ -632,15 +634,15 @@ pub struct MetaTab {
   old_path: Option<String>,
   old_pwd: Option<String>,
   // utility cache - commands, functions, aliases, etc
-	util_cache: HashSet<Rc<Utility>>,
+  util_cache: HashSet<Rc<Utility>>,
   // programmable completion specs
   comp_specs: HashMap<String, Box<dyn CompSpec>>,
 
   // pending keys from widget function
   pending_widget_keys: Vec<KeyEvent>,
 
-	// whether or not the last command had a function definition
-	last_was_func_def: bool,
+  // whether or not the last command had a function definition
+  last_was_func_def: bool,
 }
 
 impl Default for MetaTab {
@@ -658,10 +660,10 @@ impl Default for MetaTab {
       getopts_offset: 0,
       old_path: None,
       old_pwd: None,
-			util_cache: HashSet::new(),
+      util_cache: HashSet::new(),
       comp_specs: HashMap::new(),
       pending_widget_keys: vec![],
-			last_was_func_def: false
+      last_was_func_def: false,
     }
   }
 }
@@ -702,33 +704,43 @@ impl MetaTab {
     self.getopts_offset = 0;
   }
   pub fn cached_utils(&self) -> impl Iterator<Item = Rc<Utility>> {
-		self.util_cache.iter().cloned()
+    self.util_cache.iter().cloned()
   }
-	pub fn cached_cmds(&self) -> impl Iterator<Item = Rc<Utility>> {
-		self.util_cache.iter()
-			.filter(|util| matches!(util.kind(), UtilKind::Command(_)))
-			.cloned()
-	}
-	pub fn cached_files(&self) -> impl Iterator<Item = Rc<Utility>> {
-		self.util_cache.iter()
-			.filter(|util| matches!(util.kind(), UtilKind::File(_)))
-			.cloned()
-	}
-	pub fn cached_aliases(&self) -> impl Iterator<Item = Rc<Utility>> {
-		self.util_cache.iter()
-			.filter(|util| matches!(util.kind(), UtilKind::Alias))
-			.cloned()
-	}
-	pub fn cached_functions(&self) -> impl Iterator<Item = Rc<Utility>> {
-		self.util_cache.iter()
-			.filter(|util| matches!(util.kind(), UtilKind::Function))
-			.cloned()
-	}
-	pub fn cached_builtins(&self) -> impl Iterator<Item = Rc<Utility>> {
-		self.util_cache.iter()
-			.filter(|util| matches!(util.kind(), UtilKind::Builtin))
-			.cloned()
-	}
+  pub fn cached_cmds(&self) -> impl Iterator<Item = Rc<Utility>> {
+    self
+      .util_cache
+      .iter()
+      .filter(|util| matches!(util.kind(), UtilKind::Command(_)))
+      .cloned()
+  }
+  pub fn cached_files(&self) -> impl Iterator<Item = Rc<Utility>> {
+    self
+      .util_cache
+      .iter()
+      .filter(|util| matches!(util.kind(), UtilKind::File(_)))
+      .cloned()
+  }
+  pub fn cached_aliases(&self) -> impl Iterator<Item = Rc<Utility>> {
+    self
+      .util_cache
+      .iter()
+      .filter(|util| matches!(util.kind(), UtilKind::Alias))
+      .cloned()
+  }
+  pub fn cached_functions(&self) -> impl Iterator<Item = Rc<Utility>> {
+    self
+      .util_cache
+      .iter()
+      .filter(|util| matches!(util.kind(), UtilKind::Function))
+      .cloned()
+  }
+  pub fn cached_builtins(&self) -> impl Iterator<Item = Rc<Utility>> {
+    self
+      .util_cache
+      .iter()
+      .filter(|util| matches!(util.kind(), UtilKind::Builtin))
+      .cloned()
+  }
   pub fn comp_specs(&self) -> &HashMap<String, Box<dyn CompSpec>> {
     &self.comp_specs
   }
@@ -747,31 +759,27 @@ impl MetaTab {
   pub fn cache_contains(&self, cmd: &str) -> bool {
     self.util_cache.iter().any(|util| util.name() == cmd)
   }
-	pub fn get_cached_cmd(&self, cmd: &str) -> Option<Rc<Utility>> {
-		// used when the hashall option is set
-		// and we use cached command paths for the execve system call
-		self
-			.util_cache
-			.iter()
-			.find(|util| util.name() == cmd && matches!(util.kind(), UtilKind::Command(_)))
-			.cloned()
-	}
-	pub fn get_cached_util(&self, util: &str) -> Option<Rc<Utility>> {
-		self
-			.util_cache
-			.iter()
-			.find(|u| u.name() == util)
-			.cloned()
-	}
-	pub fn last_was_func_def(&self) -> bool {
-		self.last_was_func_def
-	}
-	pub fn set_last_was_func_def(&mut self, was_func_def: bool) {
-		self.last_was_func_def = was_func_def;
-	}
-	pub fn take_last_was_func_def(&mut self) -> bool {
-		std::mem::take(&mut self.last_was_func_def)
-	}
+  pub fn get_cached_cmd(&self, cmd: &str) -> Option<Rc<Utility>> {
+    // used when the hashall option is set
+    // and we use cached command paths for the execve system call
+    self
+      .util_cache
+      .iter()
+      .find(|util| util.name() == cmd && matches!(util.kind(), UtilKind::Command(_)))
+      .cloned()
+  }
+  pub fn get_cached_util(&self, util: &str) -> Option<Rc<Utility>> {
+    self.util_cache.iter().find(|u| u.name() == util).cloned()
+  }
+  pub fn last_was_func_def(&self) -> bool {
+    self.last_was_func_def
+  }
+  pub fn set_last_was_func_def(&mut self, was_func_def: bool) {
+    self.last_was_func_def = was_func_def;
+  }
+  pub fn take_last_was_func_def(&mut self) -> bool {
+    std::mem::take(&mut self.last_was_func_def)
+  }
   pub fn get_cmds_in_path() -> Vec<Rc<Utility>> {
     let path = env::var("PATH").unwrap_or_default();
     let paths = path.split(":").map(PathBuf::from);
@@ -796,27 +804,27 @@ impl MetaTab {
     }
     cmds
   }
-	pub fn get_exec_files_in_cwd() -> Vec<Rc<Utility>> {
+  pub fn get_exec_files_in_cwd() -> Vec<Rc<Utility>> {
     let cwd = env::var("PWD").unwrap_or_default();
-		let mut files = vec![];
-		if let Ok(entries) = Path::new(&cwd).read_dir() {
-			for entry in entries.flatten() {
-				let Ok(meta) = std::fs::metadata(entry.path()) else {
-					continue;
-				};
-				let is_exec = meta.permissions().mode() & 0o111 != 0;
+    let mut files = vec![];
+    if let Ok(entries) = Path::new(&cwd).read_dir() {
+      for entry in entries.flatten() {
+        let Ok(meta) = std::fs::metadata(entry.path()) else {
+          continue;
+        };
+        let is_exec = meta.permissions().mode() & 0o111 != 0;
 
-				if meta.is_file()
-					&& is_exec
-						&& let Some(name) = entry.file_name().to_str()
-				{
-					let util = Utility::file(name.to_string(), entry.path());
-					files.push(util.into());
-				}
-			}
-		}
-		files
-	}
+        if meta.is_file()
+          && is_exec
+          && let Some(name) = entry.file_name().to_str()
+        {
+          let util = Utility::file(name.to_string(), entry.path());
+          files.push(util.into());
+        }
+      }
+    }
+    files
+  }
   pub fn create_socket(&mut self) -> ShResult<()> {
     let sock = ShedSocket::new()?;
     self.socket = Some(sock.into());
@@ -954,30 +962,40 @@ impl MetaTab {
 
     Ok(())
   }
-	pub fn cache_util(&mut self, util: Rc<Utility>) {
+  pub fn cache_util(&mut self, util: Rc<Utility>) {
     self.util_cache.insert(util);
   }
-	pub fn clear_cached_files(&mut self) {
-		self.util_cache.retain(|util| !matches!(util.kind(), UtilKind::File(_)));
-	}
-	pub fn clear_cached_cmds(&mut self) {
-		self.util_cache.retain(|util| !matches!(util.kind(), UtilKind::Command(_)));
-	}
-	pub fn clear_cached_aliases(&mut self) {
-		self.util_cache.retain(|util| !matches!(util.kind(), UtilKind::Alias));
-	}
-	pub fn clear_cached_functions(&mut self) {
-		self.util_cache.retain(|util| !matches!(util.kind(), UtilKind::Function));
-	}
-	pub fn clear_cached_builtins(&mut self) {
-		self.util_cache.retain(|util| !matches!(util.kind(), UtilKind::Builtin));
-	}
-	pub fn clear_cache(&mut self) {
-		self.util_cache.clear();
-	}
+  pub fn clear_cached_files(&mut self) {
+    self
+      .util_cache
+      .retain(|util| !matches!(util.kind(), UtilKind::File(_)));
+  }
+  pub fn clear_cached_cmds(&mut self) {
+    self
+      .util_cache
+      .retain(|util| !matches!(util.kind(), UtilKind::Command(_)));
+  }
+  pub fn clear_cached_aliases(&mut self) {
+    self
+      .util_cache
+      .retain(|util| !matches!(util.kind(), UtilKind::Alias));
+  }
+  pub fn clear_cached_functions(&mut self) {
+    self
+      .util_cache
+      .retain(|util| !matches!(util.kind(), UtilKind::Function));
+  }
+  pub fn clear_cached_builtins(&mut self) {
+    self
+      .util_cache
+      .retain(|util| !matches!(util.kind(), UtilKind::Builtin));
+  }
+  pub fn clear_cache(&mut self) {
+    self.util_cache.clear();
+  }
   pub fn rehash_path(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
-		self.clear_cached_cmds();
+    self.clear_cached_cmds();
     self.old_path = Some(path.clone());
     let cmds_in_path = Self::get_cmds_in_path();
     for cmd in cmds_in_path {
@@ -988,19 +1006,19 @@ impl MetaTab {
     let cwd = env::var("PWD").unwrap_or_default();
     self.clear_cached_files();
     self.old_pwd = Some(cwd.clone());
-		let exec_files_in_cwd = Self::get_exec_files_in_cwd();
-		for file in exec_files_in_cwd {
-			self.cache_util(file);
-		}
+    let exec_files_in_cwd = Self::get_exec_files_in_cwd();
+    for file in exec_files_in_cwd {
+      self.cache_util(file);
+    }
   }
   pub fn rehash_internals(&mut self) {
     write_logic(|l| {
       if !l.dirty {
         return;
       }
-			self.clear_cached_aliases();
-			self.clear_cached_functions();
-			self.clear_cached_builtins();
+      self.clear_cached_aliases();
+      self.clear_cached_functions();
+      self.clear_cached_builtins();
       let funcs = l.funcs();
       let aliases = l.aliases();
       for func in funcs.keys() {
@@ -1022,7 +1040,7 @@ impl MetaTab {
   pub fn rehash(&mut self) {
     self.rehash_path();
     self.rehash_cwd();
-		self.rehash_internals();
+    self.rehash_internals();
   }
   pub fn try_rehash_utils(&mut self) {
     let path = env::var("PATH").unwrap_or_default();
@@ -1033,7 +1051,7 @@ impl MetaTab {
     if self.old_pwd.as_ref().is_none_or(|old| *old != cwd) {
       self.rehash_cwd();
     }
-		self.rehash_internals();
+    self.rehash_internals();
   }
   pub fn start_timer(&mut self) {
     self.runtime_start = Some(Instant::now());

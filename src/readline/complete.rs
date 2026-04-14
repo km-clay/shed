@@ -11,7 +11,10 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   expand::escape_str,
-  libsh::{error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, sys::TTY_FILENO, utils::TkVecUtils},
+  libsh::{
+    error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, sys::TTY_FILENO,
+    utils::TkVecUtils,
+  },
   match_loop,
   parse::{
     execute::exec_input,
@@ -26,7 +29,8 @@ use crate::{
     term::{LineWriter, TermWriter, calc_str_width, get_win_size},
   },
   state::{
-    self, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, write_vars
+    self, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars,
+    write_vars,
   },
 };
 
@@ -110,9 +114,9 @@ impl From<String> for Candidate {
 }
 
 impl From<Rc<Utility>> for Candidate {
-	fn from(value: Rc<Utility>) -> Self {
-	  From::from(&*value)
-	}
+  fn from(value: Rc<Utility>) -> Self {
+    From::from(&*value)
+  }
 }
 
 impl From<&state::meta::Utility> for Candidate {
@@ -682,7 +686,7 @@ impl CompSpec for BashCompSpec {
       .collect();
 
     candidates.sort_by_key(|c| c.content.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
-		candidates.reverse();
+    candidates.reverse();
 
     Ok(candidates)
   }

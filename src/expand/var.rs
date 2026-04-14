@@ -242,9 +242,9 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
     }
     ch if is_hard_sep(ch) || !(ch.is_alphanumeric() || ch == '_' || ch == '-') => {
       let val = read_vars(|v| v.try_get_var(&var_name));
-			if val.is_none() && read_shopts(|o| o.set.nounset) {
-				return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
-			}
+      if val.is_none() && read_shopts(|o| o.set.nounset) {
+        return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
+      }
       return Ok(val.unwrap_or_default());
     }
     _ => {
@@ -253,11 +253,11 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
     }
   });
   if !var_name.is_empty() {
-		let val = read_vars(|v| v.try_get_var(&var_name));
-		if val.is_none() && read_shopts(|o| o.set.nounset) {
-			return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
-		}
-		Ok(val.unwrap_or_default())
+    let val = read_vars(|v| v.try_get_var(&var_name));
+    if val.is_none() && read_shopts(|o| o.set.nounset) {
+      return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
+    }
+    Ok(val.unwrap_or_default())
   } else {
     Ok(String::new())
   }
@@ -266,8 +266,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 pub fn expand_glob(raw: &str) -> ShResult<String> {
   let mut words = vec![];
 
-  if !raw.contains(['*', '?', '['])
-	|| read_shopts(|o| o.set.noglob) {
+  if !raw.contains(['*', '?', '[']) || read_shopts(|o| o.set.noglob) {
     return Ok(raw.to_string());
   }
 

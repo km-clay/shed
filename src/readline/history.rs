@@ -25,9 +25,22 @@ pub struct HistEntry {
   pub runtime: Duration,
   pub timestamp: SystemTime,
   pub command: String,
-	pub cwd: String,
-	pub status: i32,
-	pub token: Uuid
+  pub cwd: String,
+  pub status: i32,
+  pub token: Uuid,
+}
+
+impl Default for HistEntry {
+  fn default() -> Self {
+    Self {
+      runtime: Duration::default(),
+      timestamp: SystemTime::now(),
+      command: String::new(),
+      cwd: String::new(),
+      status: 0,
+      token: Uuid::new_v4(),
+    }
+  }
 }
 
 impl HistEntry {
@@ -57,7 +70,7 @@ pub struct History {
 }
 
 impl History {
-	const USER_VERSION: i32 = 2;
+  const USER_VERSION: i32 = 2;
   fn init_db(conn: &Connection, table: &str) -> rusqlite::Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL")?;
     conn.execute_batch(&format!(
@@ -71,48 +84,55 @@ impl History {
 		"#
     ))?;
 
-		let mut user_version = conn.query_row("PRAGMA user_version", [], |r| r.get::<_,i32>(0))?;
-		while user_version < Self::USER_VERSION {
-			match user_version {
-				0 => {
-					conn.execute_batch(&format!(
-						r#"
+    let mut user_version = conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))?;
+    while user_version < Self::USER_VERSION {
+      match user_version {
+        0 => {
+          conn.execute_batch(&format!(
+            r#"
 						ALTER TABLE {table} ADD COLUMN cwd TEXT;
 						ALTER TABLE {table} ADD COLUMN status INT DEFAULT 0;
 						"#
-					))?;
-					conn.execute_batch("PRAGMA user_version = 1")?;
-				}
-				1 => {
-					// add the token field here.
-					// 'token' acts as an absolute identifier since
-					// the id field actually shifts after commands are deleted
-					conn.execute_batch(&format!(
-						r#"
+          ))?;
+          conn.execute_batch("PRAGMA user_version = 1")?;
+        }
+        1 => {
+          // add the token field here.
+          // 'token' acts as an absolute identifier since
+          // the id field actually shifts after commands are deleted
+          conn
+            .execute_batch(&format!(
+              r#"
 						ALTER TABLE {table} ADD COLUMN token TEXT;
 						"#
-					)).ok();
+            ))
+            .ok();
 
-					let mut stmt = conn.prepare(&format!("SELECT id FROM {table} WHERE token IS NULL"))?;
-					let ids: Vec<i64> = stmt.query_map([], |r| r.get(0))?
-						.filter_map(|r| r.ok())
-						.collect();
+          let mut stmt = conn.prepare(&format!("SELECT id FROM {table} WHERE token IS NULL"))?;
+          let ids: Vec<i64> = stmt
+            .query_map([], |r| r.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
 
-					conn.execute_batch("BEGIN")?;
-					for id in ids {
-						conn.execute(
-							&format!("UPDATE {table} SET token = ?1 WHERE id = ?2"),
-							(Uuid::new_v4().to_string(), id),
-						)?;
-					}
-					conn.execute_batch("COMMIT")?;
+          conn.execute_batch("BEGIN")?;
+          for id in ids {
+            let res = conn.execute(
+              &format!("UPDATE {table} SET token = ?1 WHERE id = ?2"),
+              (Uuid::new_v4().to_string(), id),
+            );
+            if let Err(e) = res {
+              conn.execute_batch("ROLLBACK").ok();
+              return Err(e);
+            }
+          }
+          conn.execute_batch("COMMIT")?;
 
-					conn.execute_batch("PRAGMA user_version = 2")?;
-				}
-				_ => {}
-			}
-			user_version = conn.query_row("PRAGMA user_version", [], |r| r.get::<_,i32>(0))?;
-		}
+          conn.execute_batch("PRAGMA user_version = 2")?;
+        }
+        _ => {}
+      }
+      user_version = conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))?;
+    }
 
     Ok(())
   }
@@ -194,11 +214,10 @@ impl History {
       .unwrap()
       .as_secs() as i64;
     let new_id = self.last_id() + 1;
-		let cwd = env::current_dir()
-			.map(|p| p.to_string_lossy().to_string())
-			.ok();
-		let token = Uuid::new_v4();
-
+    let cwd = env::current_dir()
+      .map(|p| p.to_string_lossy().to_string())
+      .ok();
+    let token = Uuid::new_v4();
 
     self.conn.execute(
       &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"),
@@ -209,13 +228,13 @@ impl History {
 
   pub fn set_status(&self, token: Uuid, runtime: Option<Duration>, status: i32) -> ShResult<()> {
     let table = &self.table;
-		let micros = runtime.map(|r| r.as_micros() as i64).unwrap_or(0);
+    let micros = runtime.map(|r| r.as_micros() as i64).unwrap_or(0);
     self.conn.execute(
       &format!("UPDATE {table} SET runtime = ?1, status = ?2 WHERE token = ?3"),
       rusqlite::params![micros, status, token.to_string()],
     )?;
 
-		Ok(())
+    Ok(())
   }
 
   pub fn entry_count(&self) -> i64 {
@@ -324,6 +343,45 @@ impl History {
     Ok(restored)
   }
 
+  pub fn sort_by_timestamp(&self) -> ShResult<()> {
+    let table = &self.table;
+    let tx = self.conn.unchecked_transaction()?;
+    tx.execute_batch(&format!(
+      r#"
+			CREATE TABLE {table}_tmp (
+				id INTEGER PRIMARY KEY,
+				timestamp INT,
+				runtime INT,
+				command TEXT,
+				cwd TEXT,
+				status INT DEFAULT 0,
+				token TEXT
+			);
+			INSERT INTO {table}_tmp (id, timestamp, runtime, command, cwd, status, token)
+			SELECT ROW_NUMBER() OVER (ORDER BY timestamp), timestamp, runtime, command, cwd, status, token
+			FROM {table};
+			DROP TABLE {table};
+			ALTER TABLE {table}_tmp RENAME TO {table};
+			"#
+    ))?;
+    tx.commit()?;
+    Ok(())
+  }
+
+  pub fn transaction<T, F: FnOnce() -> ShResult<T>>(&self, f: F) -> ShResult<T> {
+    self.conn.execute_batch("BEGIN")?;
+    match f() {
+      Ok(val) => {
+        self.conn.execute_batch("COMMIT")?;
+        Ok(val)
+      }
+      Err(e) => {
+        self.conn.execute_batch("ROLLBACK").ok();
+        Err(e)
+      }
+    }
+  }
+
   /// Runs a query on the history table with the given WHERE clause and parameters, returning a vector of (id, HistEntry) tuples.
   pub fn query(
     &self,
@@ -331,7 +389,9 @@ impl History {
     params: &[&dyn rusqlite::ToSql],
   ) -> ShResult<Vec<(i64, HistEntry)>> {
     let table = &self.table;
-    let sql = format!("SELECT command, timestamp, runtime, cwd, status, token, id FROM {table} {where_clause}");
+    let sql = format!(
+      "SELECT command, timestamp, runtime, cwd, status, token, id FROM {table} {where_clause}"
+    );
     let mut stmt = self.conn.prepare(&sql)?;
     let rows = stmt.query_map(params, |row| Ok((row.get(6)?, Self::row_to_entry(row)?)))?;
 
@@ -367,9 +427,9 @@ impl History {
       runtime,
       timestamp,
       command,
-			cwd,
-			status,
-			token
+      cwd,
+      status,
+      token,
     } = entry;
     if command.is_empty() {
       return Ok(());
@@ -513,9 +573,9 @@ impl History {
       command: row.get(0)?,
       timestamp: UNIX_EPOCH + Duration::from_secs(row.get::<_, i64>(1)? as u64),
       runtime: Duration::from_micros(row.get::<_, i64>(2)? as u64),
-			cwd: row.get(3).unwrap_or_else(|_| "".to_string()),
-			status: row.get(4).unwrap_or(0),
-			token: Uuid::parse_str(row.get::<_, String>(5)?.as_str()).unwrap_or_default()
+      cwd: row.get(3).unwrap_or_else(|_| "".to_string()),
+      status: row.get(4).unwrap_or(0),
+      token: Uuid::parse_str(row.get::<_, String>(5)?.as_str()).unwrap_or_default(),
     })
   }
 

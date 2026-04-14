@@ -87,11 +87,12 @@ pub fn type_builtin(node: Node) -> ShResult<()> {
       }
 
       state::set_status(1);
-			sherr!(
-				NotFound @ span,
-				"'{}' is not a command, function, or alias", arg.fg(next_color())
-			).print_error();
-			return Ok(())
+      sherr!(
+        NotFound @ span,
+        "'{}' is not a command, function, or alias", arg.fg(next_color())
+      )
+      .print_error();
+      return Ok(());
     }
   }
 

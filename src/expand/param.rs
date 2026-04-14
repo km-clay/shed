@@ -155,12 +155,14 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
   let mut rest = String::new();
   if raw.starts_with('#') {
     let var = read_vars(|v| v.get_var_meta(raw.strip_prefix('#').unwrap()));
-    return Ok(match var.kind() {
-      VarKind::Str(_) |
-      VarKind::Int(_) => var.to_string().len(),
-      VarKind::Arr(items) => items.len(),
-      VarKind::AssocArr(items) => items.len()
-    }.to_string())
+    return Ok(
+      match var.kind() {
+        VarKind::Str(_) | VarKind::Int(_) => var.to_string().len(),
+        VarKind::Arr(items) => items.len(),
+        VarKind::AssocArr(items) => items.len(),
+      }
+      .to_string(),
+    );
   }
 
   match_loop!(chars.next() => ch, {
@@ -228,10 +230,12 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           Ok(expanded)
         }
       },
-      ParamExp::AltSetNotNull(alt) => match read_vars(|v| v.try_get_var(&var_name)).filter(|v| !v.is_empty()) {
-        Some(_) => expand_raw(&mut alt.chars().peekable()),
-        None => Ok("".into()),
-      },
+      ParamExp::AltSetNotNull(alt) => {
+        match read_vars(|v| v.try_get_var(&var_name)).filter(|v| !v.is_empty()) {
+          Some(_) => expand_raw(&mut alt.chars().peekable()),
+          None => Ok("".into()),
+        }
+      }
       ParamExp::AltNotNull(alt) => match read_vars(|v| v.try_get_var(&var_name)) {
         Some(_) => expand_raw(&mut alt.chars().peekable()),
         None => Ok("".into()),
@@ -403,7 +407,8 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       }
       ParamExp::VarNamesWithPrefix(prefix) => {
         let flat = read_vars(|v| v.flatten_vars());
-        let match_vars: Vec<_> = flat.keys()
+        let match_vars: Vec<_> = flat
+          .keys()
           .filter(|var| var.starts_with(&prefix))
           .cloned()
           .collect();

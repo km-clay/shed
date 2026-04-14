@@ -401,7 +401,7 @@ impl ShErr {
     }
     source_map
   }
-	fn print_error_internal(&self, fd: RawFd) {
+  fn print_error_internal(&self, fd: RawFd) {
     if *self.kind() == ShErrKind::Interrupt {
       // Don't print anything for Interrupt
       // This only occurs when the user breaks out of something with ctrl + c
@@ -428,13 +428,13 @@ impl ShErr {
     if report.eprint(cache).is_err() {
       default();
     }
-	}
-  pub fn print_error(&self) {
-		self.print_error_internal(STDERR_FILENO);
   }
-	pub fn print_error_stdout(&self) {
-		self.print_error_internal(STDOUT_FILENO);
-	}
+  pub fn print_error(&self) {
+    self.print_error_internal(STDERR_FILENO);
+  }
+  pub fn print_error_stdout(&self) {
+    self.print_error_internal(STDOUT_FILENO);
+  }
 }
 
 impl Display for ShErr {

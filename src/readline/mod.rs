@@ -469,10 +469,14 @@ impl ShedLine {
     if self.mode.report_mode() == ModeReport::Normal {
       return Ok(true);
     }
-		if self.editor.cursor_is_escaped()
-		&& matches!(self.mode.report_mode(), ModeReport::Emacs | ModeReport::Insert) {
-			return Ok(false);
-		}
+    if self.editor.cursor_is_escaped()
+      && matches!(
+        self.mode.report_mode(),
+        ModeReport::Emacs | ModeReport::Insert
+      )
+    {
+      return Ok(false);
+    }
     let (depth, failed) = self.editor.checked_calc_indent_level();
     Ok(depth == 0 && !failed)
   }
@@ -987,9 +991,7 @@ impl ShedLine {
         // If history expansion occurred, don't submit yet
         // allow the user to see the expanded command and accept or edit it before submitting
         return Ok(None);
-      } else if self.should_submit()?
-				|| !read_shopts(|o| o.line.linebreak_on_incomplete)
-      {
+      } else if self.should_submit()? || !read_shopts(|o| o.line.linebreak_on_incomplete) {
         return self.submit();
       }
     }
@@ -1244,7 +1246,7 @@ impl ShedLine {
         .motion()
         .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown)))
         && self.editor.on_last_line())
-				&& !cmd.flags.contains(CmdFlags::IS_SUBMIT)
+        && !cmd.flags.contains(CmdFlags::IS_SUBMIT)
   }
 
   pub fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
