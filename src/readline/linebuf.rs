@@ -1,8 +1,5 @@
 use std::{
-  collections::{HashSet, VecDeque},
-  fmt::Display,
-  ops::{Index, IndexMut},
-  slice::SliceIndex,
+  cmp::Ordering, collections::{HashSet, VecDeque}, fmt::Display, ops::{Index, IndexMut}, slice::SliceIndex
 };
 
 use itertools::Either;
@@ -181,7 +178,7 @@ pub fn attach_lines(lines: &mut Vec<Line>, other: &mut Vec<Line>) {
   lines.append(other);
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub struct Line(Vec<Grapheme>);
 
 impl Line {
@@ -652,10 +649,93 @@ impl Iterator for KillRing {
   }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Hint {
+	Override(Vec<Line>),
+	History(Vec<Line>),
+	Completion(Vec<Line>),
+}
+
+impl Hint {
+	pub fn new_override(s: String) -> Self {
+		Self::Override(to_lines(s))
+	}
+	pub fn new_history(s: String) -> Self {
+		Self::History(to_lines(s))
+	}
+	pub fn new_completion(s: String) -> Self {
+		Self::Completion(to_lines(s))
+	}
+
+	pub fn set_lines(&mut self, new_lines: Vec<Line>) {
+		match self {
+			Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => {
+				*lines = new_lines;
+			}
+		}
+	}
+	pub fn lines(&self) -> &[Line] {
+		match self {
+			Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => lines,
+		}
+	}
+  pub fn raw(&self) -> String {
+		join_lines(self.lines())
+  }
+}
+
+impl Display for Hint {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let text = self.raw();
+		let text = format!("\x1b[90m{text}\x1b[0m").replace("\n", "\n\x1b[90m");
+
+		write!(f, "{text}")
+	}
+}
+
+impl PartialOrd for Hint {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for Hint {
+	/// Defines priority for hint types.
+	///
+	/// If a new hint would overwrite an old hint, the 'lesser' hint loses
+	///
+	/// 'greater' hints and 'equal' hints both overwrite.
+	fn cmp(&self, other: &Self) -> Ordering {
+		match self {
+			Self::Override(_) => {
+				if matches!(other, Self::Override(_)) {
+					Ordering::Equal
+				} else {
+					Ordering::Greater
+				}
+			}
+			Self::History(_) => {
+				match other {
+					Self::Override(_) => Ordering::Less,
+					Self::History(_) => Ordering::Equal,
+					Self::Completion(_) => Ordering::Greater,
+				}
+			}
+			Self::Completion(_) => {
+				if matches!(other, Self::Completion(_)) {
+					Ordering::Equal
+				} else {
+					Ordering::Less
+				}
+			}
+		}
+	}
+}
+
 #[derive(Debug, Clone)]
 pub struct LineBuf {
   pub lines: Vec<Line>,
-  pub hint: Option<Vec<Line>>,
+  pub hint: Option<Hint>,
   pub cursor: Cursor,
 
   pub select_mode: Option<SelectMode>,
@@ -739,7 +819,7 @@ impl LineBuf {
         (rows as f64 * 0.5).round() as usize
       }
     });
-    let mut hint_lines = self.hint.clone().unwrap_or_default();
+    let mut hint_lines = self.hint_lines();
     let mut buf_lines = self.lines.clone();
     attach_lines(&mut buf_lines, &mut hint_lines);
     (raw.min(100)).min(buf_lines.len())
@@ -975,19 +1055,15 @@ impl LineBuf {
     let mut buf = self.joined();
     let cursor_raw = self.cursor_to_flat();
     let mut cursor = cursor_raw.to_string();
-    let mut anchor = self
-      .select_mode
-      .map(|r| match r {
-        SelectMode::Char(pos) | SelectMode::Block(pos) | SelectMode::Line(pos) => {
-          self.pos_to_flat(pos).to_string()
-        }
-      })
-      .unwrap_or_default();
+    let mut anchor = self.anchor_to_flat();
 
-    write_vars(|v| {
+    write_vars(|v| -> ShResult<()> {
       v.set_var("BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
       v.set_var("CURSOR", VarKind::Str(cursor.to_string()), VarFlags::EXPORT)?;
-      v.set_var("ANCHOR", VarKind::Str(anchor.clone()), VarFlags::EXPORT)
+      if let Some(anchor) = anchor {
+				v.set_var("ANCHOR", VarKind::Str(anchor.to_string()), VarFlags::EXPORT);
+			}
+			Ok(())
     })?;
 
     write(borrow_fd(STDOUT_FILENO), b"\r\n")?;
@@ -995,14 +1071,31 @@ impl LineBuf {
       exec_input(cmd.to_string(), None, true, Some("<ex-mode-cmd>".into()))
     })?;
 
+		let mut new_anchor = None;
+
     let keys = write_vars(|v| {
       buf = v.take_var("BUFFER");
       cursor = v.take_var("CURSOR");
-      anchor = v.take_var("ANCHOR");
+			if anchor.is_some() {
+				new_anchor = Some(v.take_var("ANCHOR"));
+			}
       v.take_var("KEYS")
     });
 
     self.set_buffer(buf);
+
+		if let Some(new_anchor) = new_anchor
+		{
+			if let Some((row, col)) = new_anchor.split_once(':')
+			&& let Ok(row) = row.parse::<usize>()
+			&& let Ok(col) = col.parse::<usize>()
+			{
+				anchor = Some(self.pos_to_flat(Pos { row, col }));
+			} else if let Ok(num) = new_anchor.parse::<usize>() {
+				anchor = Some(self.pos_to_flat(self.pos_from_flat(num))); // round trip validates position
+			}
+		}
+
     if let Some((row, col)) = cursor.split_once(':')
       && let Ok(row) = row.parse::<usize>()
       && let Ok(col) = col.parse::<usize>()
@@ -1018,11 +1111,11 @@ impl LineBuf {
       self.set_cursor_from_flat(cursor_raw);
     };
 
-    if let Ok(pos) = anchor.parse()
-      && pos != cursor_raw
-      && self.select_mode.is_some()
+		if let Some(anchor) = anchor
+		&& anchor != cursor_raw
+		&& self.select_mode.is_some()
     {
-      let new_pos = self.pos_from_flat(pos);
+      let new_pos = self.pos_from_flat(anchor);
       match self.select_mode.as_mut() {
         Some(SelectMode::Line(pos))
         | Some(SelectMode::Block(pos))
@@ -2092,8 +2185,9 @@ impl LineBuf {
       return Ok(None);
     };
     let buffer = self.lines.clone();
-    if let Some(mut hint) = self.hint.clone() {
-      attach_lines(&mut self.lines, &mut hint);
+    if let Some(hint) = self.hint.as_ref() {
+			let mut hint_lines = hint.lines().to_vec();
+      attach_lines(&mut self.lines, &mut hint_lines);
     }
 
     let kind = match motion {
@@ -3671,42 +3765,66 @@ impl LineBuf {
     self.fix_cursor();
   }
 
-  pub fn set_hint(&mut self, hint: Option<String>) {
+  pub fn set_hint(&mut self, hint: Option<Hint>) {
+		let Some(mut hint) = hint else {
+			self.hint = None;
+			return;
+		};
+		if let Some(old_hint) = self.hint.as_ref()
+		&& *old_hint > hint {
+			// order comparisons on hints are priority checks
+			// if older hint has higher priority, keep it instead of replacing with lower-priority new hint
+			return;
+		}
+
     if !read_shopts(|o| o.line.auto_suggest) {
       self.hint = None;
       return;
     }
+
+		// TODO: write an actual "strip_prefix" function
+		// that works directly on two Vec<Line>'s
     let joined = self.joined();
-    self.hint = hint
-      .and_then(|h| h.strip_prefix(&joined).map(|s| s.to_string()))
-      .and_then(|h| (!h.is_empty()).then_some(to_lines(h)));
+		let hint_joined = join_lines(hint.lines());
+		let Some(stripped) = hint_joined.strip_prefix(&joined).map(|s| s.to_string()) else {
+			self.hint = None;
+			return;
+		};
+		hint.set_lines(to_lines(&stripped));
+
+    self.hint = (!stripped.is_empty()).then_some(hint);
   }
 
   pub fn has_hint(&self) -> bool {
     self
       .hint
       .as_ref()
-      .is_some_and(|h| !h.is_empty() && h.iter().any(|l| !l.is_empty()))
+      .is_some_and(|h| !h.lines().is_empty() && h.lines().iter().any(|l| !l.is_empty()))
   }
+
+	pub fn hint_lines(&self) -> Vec<Line> {
+		self.hint.as_ref().map(|h| h.lines().to_vec()).unwrap_or_default()
+	}
 
   pub fn get_hint_text(&self) -> String {
-    if let Some(hint) = &self.hint {
-      let text = self.join_hint();
-      let text = format!("\x1b[90m{text}\x1b[0m");
-
-      text.replace("\n", "\n\x1b[90m")
-    } else {
-      String::new()
-    }
+		self.try_get_hint_text().unwrap_or_default()
   }
+
+	pub fn try_get_hint_text(&self) -> Option<String> {
+		self.hint
+			.as_ref()
+			.map(|h| h.to_string())
+	}
 
   pub fn join_hint(&self) -> String {
-    if let Some(hint) = &self.hint {
-      join_lines(hint)
-    } else {
-      String::new()
-    }
+		self.try_join_hint().unwrap_or_default()
   }
+
+	pub fn try_join_hint(&self) -> Option<String> {
+		self.hint
+			.as_ref()
+			.map(|h| h.raw())
+	}
 
   /// Accept hint text up to a given target position.
   /// Temporarily merges the hint into the buffer, moves the cursor to target,
@@ -3716,7 +3834,8 @@ impl LineBuf {
       self.set_cursor(target);
       return;
     };
-    attach_lines(&mut self.lines, &mut hint);
+		let mut hint_lines = hint.lines().to_vec();
+    attach_lines(&mut self.lines, &mut hint_lines);
     let split_col = if self.cursor.exclusive {
       target.col + 1
     } else {
@@ -3738,8 +3857,10 @@ impl LineBuf {
     };
 
     let new_hint = split_lines_at(&mut self.lines, split_pos);
-    self.hint =
-      (!new_hint.is_empty() && new_hint.iter().any(|l| !l.is_empty())).then_some(new_hint);
+		let should_retake = !new_hint.is_empty() && new_hint.iter().all(|l| l.is_empty());
+		hint.set_lines(new_hint);
+
+    self.hint = should_retake.then_some(hint);
     self.set_cursor(target);
   }
 
@@ -3925,6 +4046,16 @@ impl LineBuf {
   pub fn cursor_to_flat(&self) -> usize {
     self.pos_to_flat(self.cursor.pos)
   }
+
+	pub fn anchor_to_flat(&self) -> Option<usize> {
+		self
+			.select_mode
+			.map(|r| match r {
+				SelectMode::Char(pos) | SelectMode::Block(pos) | SelectMode::Line(pos) => {
+					self.pos_to_flat(pos)
+				}
+			})
+	}
 
   pub fn set_cursor_from_flat(&mut self, flat: usize) {
     self.cursor.pos = self.pos_from_flat(flat);

@@ -7,6 +7,7 @@ use std::{
 
 use ariadne::Fmt;
 use nix::unistd::execve;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
   builtin::{
@@ -45,10 +46,7 @@ use crate::{
   expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
   libsh::{
-    error::{ShErrKind, ShResult, ShResultExt, next_color},
-    guards::{scope_guard, var_ctx_guard},
-    strops::split_case_pat,
-    utils::RedirVecUtils,
+    error::{ShErrKind, ShResult, ShResultExt, next_color}, guards::{scope_guard, var_ctx_guard}, strops::split_case_pat, sys::TTY_FILENO, utils::RedirVecUtils
   },
   prelude::*,
   procio::{IoMode, IoStack, PipeGenerator, borrow_fd},
@@ -354,12 +352,12 @@ impl Dispatcher {
       .unwrap();
     let cmd_tk = node.get_command();
 
-    if is_func(&cmd_word) {
+		if is_subsh(cmd_tk) {
+			self.exec_subsh(node)
+    } else if is_func(&cmd_word) {
       self.exec_func(node)
     } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTINS.contains(&cmd_word.as_str()) {
       self.exec_builtin(node)
-    } else if is_subsh(cmd_tk) {
-      self.exec_subsh(node)
     } else if is_arith(cmd_tk) {
       self.exec_arith(node)
     } else if read_shopts(|s| s.core.autocd)
@@ -473,26 +471,32 @@ impl Dispatcher {
     let NdRule::Command { assignments, argv } = subsh.class else {
       unreachable!()
     };
-    let name = self.source_name.clone();
+    let src_name = self.source_name.clone();
 
     let report_time = subsh.flags.contains(NdFlags::REPORT_TIME);
 
     self.io_stack.append_to_frame(subsh.redirs);
     let _guard = self.io_stack.pop_frame().redirect()?;
 
-    self.run_fork("anonymous_subshell", report_time, |s| {
+		let subsh_raw = argv[0].span.as_str();
+		let subsh_body = subsh_raw[1..subsh_raw.len() - 1].to_string(); // Remove surrounding parentheses
+
+		let subsh_display = subsh_body.graphemes(true)
+			.take(70) // maximum display length
+			.collect::<String>();
+		let name = format!("( {subsh_display} )");
+
+    self.run_fork(&name, report_time, |s| {
       if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
         e.print_error();
         return;
       };
 
-      let subsh_raw = argv[0].span.as_str();
-      let subsh_body = subsh_raw[1..subsh_raw.len() - 1].to_string(); // Remove surrounding parentheses
 
-      if let Err(e) = exec_input(subsh_body, None, s.interactive, Some(name)) {
+      if let Err(e) = exec_input(subsh_body, None, false, Some(src_name)) {
         e.print_error();
       };
-    })?;
+    }).unwrap();
 
     Ok(())
   }
@@ -1323,6 +1327,7 @@ impl Dispatcher {
     match unsafe { fork()? } {
       ForkResult::Child => {
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
+				crate::signal::reset_signals(self.fg_job);
         f(self);
         unsafe { libc::_exit(state::get_status()) }
       }

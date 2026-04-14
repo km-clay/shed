@@ -85,11 +85,7 @@ impl HistQuery {
     if let (Some(after), not) = &self.after {
       let ts = parse_date_string(after, Utc::now(), Dialect::Us)
         .map_err(|e| sherr!(ParseErr, "Failed to parse date for --after: {e}"))?;
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("timestamp >= ?{idx}"),
         ts.timestamp()
       );
@@ -97,81 +93,49 @@ impl HistQuery {
     if let (Some(before), not) = &self.before {
       let ts = parse_date_string(before, Utc::now(), Dialect::Us)
         .map_err(|e| sherr!(ParseErr, "Failed to parse date for --before: {e}"))?;
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("timestamp <= ?{idx}"),
         ts.timestamp()
       );
     }
     if let (Some(contains), not) = &self.contains {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("command LIKE ?{idx}"),
         format!("%{contains}%")
       );
     }
     if let (Some(prefix), not) = &self.starts_with {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("command LIKE ?{idx}"),
         format!("{prefix}%")
       );
     }
     if let (Some(status), not) = &self.with_status {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("status = ?{idx}"),
         *status
       );
     }
     if let (Some(token), not) = &self.with_token {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("token = ?{idx}"),
         token.to_string()
       );
     }
     if let (Some(dir), not) = &self.in_dir {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("cwd LIKE ?{idx}"),
         dir.to_string()
       );
     }
     if let (Some(ceiling), not) = &self.lines_lt {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 < ?{idx}"),
         *ceiling as i64
       );
     }
     if let (Some(floor), not) = &self.lines_gt {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 > ?{idx}"),
         *floor as i64
       );
@@ -179,11 +143,7 @@ impl HistQuery {
     if let (Some(duration), not) = &self.duration_gt {
       let secs = chrono_english::parse_duration(duration)
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --longer-than: {e}"))?;
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("runtime >= ?{idx}"),
         interval_to_micros(secs)
       );
@@ -191,11 +151,7 @@ impl HistQuery {
     if let (Some(duration), not) = &self.duration_lt {
       let secs = chrono_english::parse_duration(duration)
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --shorter-than: {e}"))?;
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
+      cond!(not, conditions, params, idx,
         format!("runtime <= ?{idx}"),
         interval_to_micros(secs)
       );
@@ -239,8 +195,10 @@ impl HistQuery {
       hist.query(&query, &param_refs)?
     };
 
-    // 'self.reverse' actually means "dont reverse the list" internally
+    // 'self.reverse' means 'print the entries in descending order'
     if !self.reverse {
+			// the entries start in descending order. we reverse it
+			// so that the more recent ones are at the bottom by default
       entries.reverse();
     }
 

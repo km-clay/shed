@@ -1,5 +1,25 @@
 use std::{fmt::Display, ops::BitOr};
 
+use nix::{libc::STDOUT_FILENO, unistd::write};
+
+use crate::{libsh::error::ShResult, procio::borrow_fd, sherr};
+
+/// Enables or disables bracketed paste mode in the terminal.
+pub fn set_bracketed_paste(on: bool) -> ShResult<()> {
+	let stdout = borrow_fd(STDOUT_FILENO);
+
+	let control = if on {
+		b"\x1b[?2004h"
+	} else {
+		b"\x1b[?2004l"
+	};
+
+	write(stdout, control)
+		.map_err(|e| sherr!(InternalErr, "Failed to enable bracketed paste: {e}"))?;
+
+	Ok(())
+}
+
 pub trait Styled: Sized + Display {
   fn styled<S: Into<StyleSet>>(self, style: S) -> String {
     let styles: StyleSet = style.into();

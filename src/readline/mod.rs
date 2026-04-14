@@ -176,6 +176,14 @@ pub enum ReadlineEvent {
   Pending,
 }
 
+pub struct LineData {
+	pub buffer: String,
+	pub cursor: usize,
+	pub anchor: Option<usize>,
+	pub hint: Option<String>,
+	pub mode: String
+}
+
 pub struct Prompt {
   ps1_expanded: String,
   ps1_raw: String,
@@ -363,6 +371,16 @@ impl ShedLine {
     }
     self
   }
+
+	pub fn get_line_data(&self) -> LineData {
+		LineData {
+			buffer: self.editor.joined().replace('\n', "\\n"),
+			cursor: self.editor.cursor_to_flat(),
+			anchor: self.editor.anchor_to_flat(),
+			hint: self.editor.try_join_hint().map(|s| s.replace('\n', "\\n")),
+			mode: self.mode.report_mode().to_string(),
+		}
+	}
 
   /// A mutable reference to the currently focused editor
   /// This includes the main LineBuf, and sub-editors for modes like Ex mode.
@@ -688,6 +706,8 @@ impl ShedLine {
       self.print_line(false)?;
       self.needs_redraw = false;
     }
+		let line_data = self.get_line_data();
+		write_meta(|m| m.notify_line_edit(line_data)).ok();
 
     Ok(ReadlineEvent::Pending)
   }
@@ -1519,7 +1539,7 @@ impl ShedLine {
           let mut mode: Box<dyn EditMode> = Box::new(ViVisual::new());
           self.swap_mode(&mut mode);
 
-          return self.editor.exec_cmd(cmd);
+          return self.fire_editor_command(cmd);
         }
         Verb::VisualMode => {
           self.editor.start_char_select();
@@ -1572,7 +1592,7 @@ impl ShedLine {
     // Set cursor clamp BEFORE executing the command so that motions
     // (like EndOfLine for 'A') can reach positions valid in the new mode
     self.editor.set_cursor_clamp(self.mode.clamp_cursor());
-    self.editor.exec_cmd(cmd)?;
+    self.fire_editor_command(cmd)?;
 
     if mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_some() {
       self.editor.stop_selecting();
@@ -1674,7 +1694,7 @@ impl ShedLine {
             // something weird happened
           }
         }
-        self.editor.exec_cmd(cmd)?;
+        self.fire_editor_command(cmd)?;
       }
       _ => unreachable!("motions should be handled in the other branch"),
     }
@@ -1694,7 +1714,7 @@ impl ShedLine {
           raw_seq: format!("{count};"),
           flags: CmdFlags::empty(),
         };
-        self.editor.exec_cmd(repeat_cmd)
+        self.fire_editor_command(repeat_cmd)
       }
       MotionCmd(count, Motion::RepeatMotionRev) => {
         let Some(motion) = self.repeat_motion.clone() else {
@@ -1709,7 +1729,7 @@ impl ShedLine {
           raw_seq: format!("{count},"),
           flags: CmdFlags::empty(),
         };
-        self.editor.exec_cmd(repeat_cmd)
+        self.fire_editor_command(repeat_cmd)
       }
       _ => unreachable!(),
     }
@@ -1751,7 +1771,7 @@ impl ShedLine {
         self.repeat_motion = cmd.motion.clone()
       }
 
-      self.editor.exec_cmd(cmd.clone())?;
+      self.fire_editor_command(cmd.clone())?;
 
       if self.mode.report_mode() == ModeReport::Visual
         && cmd
@@ -1786,6 +1806,11 @@ impl ShedLine {
       Ok(())
     }
   }
+
+	pub fn fire_editor_command(&mut self, cmd: EditCmd) -> ShResult<()> {
+		// just a direct wrapper for now, but might want to add some extra logic here later
+		self.editor.exec_cmd(cmd)
+	}
 }
 
 /// Annotates shell input with invisible Unicode markers for syntax highlighting

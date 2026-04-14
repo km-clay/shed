@@ -13,20 +13,12 @@ use std::{
 };
 
 use itertools::Itertools;
-use nix::sys::{
-  resource::{Usage, UsageWho, getrusage},
-  time::TimeVal,
-};
+use nix::{poll::PollFd, sys::{
+  resource::{Usage, UsageWho, getrusage}, stat::{FchmodatFlags, fchmodat}, time::TimeVal
+}};
 
 use crate::{
-  builtin::BUILTINS,
-  expand::expand_keymap,
-  jobs::Job,
-  libsh::error::{ShErr, ShResult},
-  match_loop,
-  prelude::*,
-  readline::{complete::CompSpec, keys::KeyEvent},
-  sherr,
+  builtin::BUILTINS, expand::expand_keymap, jobs::Job, libsh::error::{ShErr, ShResult}, match_loop, prelude::*, procio::borrow_fd, readline::{LineData, complete::CompSpec, keys::KeyEvent}, sherr
 };
 
 #[derive(Debug)]
@@ -201,6 +193,22 @@ impl ShedSocket {
     let sock_path = format!("{runtime_dir}/shed/{pid}.sock");
     std::fs::remove_file(&sock_path).ok();
     let listener = UnixListener::bind(&sock_path)?;
+
+		// set the permissions for the socket
+		// default is read/write for user, no access for group/other
+		// this can be overridden using the $SHED_SOCK_MODE env var.
+		let mode = read_vars(|v| v.get_var("SHED_SOCK_MODE"))
+			.parse::<u32>()
+			.ok()
+			.and_then(Mode::from_bits)
+			.unwrap_or(Mode::S_IRUSR | Mode::S_IWUSR);
+
+		fchmodat(
+			None,
+			Path::new(&sock_path),
+			mode,
+			FchmodatFlags::FollowSymlink,
+		)?;
 
     let raw_fd = listener.into_raw_fd();
     let high_fd = fcntl(raw_fd, FcntlArg::F_DUPFD_CLOEXEC(10))?;
@@ -833,6 +841,12 @@ impl MetaTab {
   pub fn get_socket(&self) -> Option<Arc<ShedSocket>> {
     self.socket.as_ref().cloned()
   }
+	pub fn get_socket_pollfd(&self) -> Option<PollFd> {
+		self.socket.as_ref().map(|sock| PollFd::new(
+			borrow_fd(sock.as_raw_fd()),
+			nix::poll::PollFlags::POLLIN,
+		))
+	}
   pub fn read_socket(&mut self) -> ShResult<()> {
     if let Some(sock) = &self.socket
       && let Ok((conn, _)) = sock.listener().accept()
@@ -962,6 +976,26 @@ impl MetaTab {
 
     Ok(())
   }
+	pub fn notify_line_edit(&self, data: LineData) -> ShResult<()> {
+		let LineData { buffer, cursor, anchor, hint, mode } = data;
+
+		for subscriber in &self.subscribers {
+			let mut buf = String::new();
+			buf.push_str(&format!("line>>buffer>> {buffer}\n"));
+			buf.push_str(&format!("line>>cursor>> {cursor}\n"));
+			if let Some(anchor) = anchor {
+				buf.push_str(&format!("line>>anchor>> {anchor}\n"));
+			}
+			if let Some(hint) = &hint {
+				buf.push_str(&format!("line>>hint>> {hint}\n"));
+			}
+			buf.push_str(&format!("line>>mode>> {mode}\n"));
+
+			write(subscriber, buf.as_bytes()).ok();
+		}
+
+		Ok(())
+	}
   pub fn cache_util(&mut self, util: Rc<Utility>) {
     self.util_cache.insert(util);
   }

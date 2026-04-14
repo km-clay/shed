@@ -29,11 +29,13 @@ use std::sync::atomic::Ordering;
 use nix::errno::Errno;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::unistd::read;
+use smallvec::SmallVec;
 
 use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{self, ShErrKind, ShResult};
 use crate::libsh::sys::TTY_FILENO;
+use crate::libsh::term::set_bracketed_paste;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_input};
 use crate::prelude::*;
@@ -44,8 +46,7 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_shopts,
-  source_env, source_login, source_rc, write_jobs, write_meta, write_shopts,
+  AutoCmdKind, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;
@@ -153,7 +154,7 @@ fn main() -> ExitCode {
     run_script(path, args.script_args)
   } else {
     let res = shed_interactive(args);
-    write(borrow_fd(*TTY_FILENO), b"\x1b[?2004l").ok(); // disable bracketed paste mode on exit
+		set_bracketed_paste(false).ok();
     res
   } {
     e.print_error();
@@ -294,6 +295,74 @@ fn first_run_setup() -> ShResult<()> {
   Ok(())
 }
 
+fn handle_signals_interactive(readline: &mut ShedLine) -> ShResult<bool> {
+	// Handle any pending signals
+	while signals_pending() {
+		if let Err(e) = check_signals() {
+			match e.kind() {
+				ShErrKind::Interrupt => {
+					// We got Ctrl+C - clear current input and redraw
+					readline.reset_active_widget(false)?;
+				}
+				ShErrKind::CleanExit(code) => {
+					QUIT_CODE.store(*code, Ordering::SeqCst);
+					return Ok(false);
+				}
+				_ => e.print_error(),
+			}
+		}
+	}
+
+	if GOT_SIGWINCH.swap(false, Ordering::SeqCst) {
+		log::info!("Window size change detected, updating readline dimensions");
+		// Restore cursor to saved row before clearing, since the terminal
+		// may have moved it during resize/rewrap
+		readline.writer.update_t_cols();
+		readline.mark_dirty();
+	}
+
+	if JOB_DONE.swap(false, Ordering::SeqCst) {
+		// update the prompt so any job count escape sequences update dynamically
+		readline.prompt_mut().refresh();
+	}
+
+	if GOT_SIGUSR1.swap(false, Ordering::SeqCst) {
+		log::info!("SIGUSR1 received: refreshing readline state");
+		readline.mark_dirty();
+		readline.prompt_mut().refresh();
+	}
+
+	readline.print_line(false)?;
+
+	Ok(true)
+}
+
+fn get_poll_timeout(readline: &mut ShedLine) -> (PollTimeout,Option<String>) {
+	let mut exec_if_timeout = None;
+
+	let timeout = if !readline.pending_keymap.is_empty() {
+		// wait for more keymap keys
+		PollTimeout::from(1000u16)
+	} else {
+		let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone())
+			.trim()
+			.to_string();
+		let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
+		if screensaver_idle_time == 0 || screensaver_cmd.is_empty() {
+			// no screensaver stuff, set no timeout
+			PollTimeout::NONE
+		} else {
+			exec_if_timeout = Some(screensaver_cmd);
+			match PollTimeout::try_from((screensaver_idle_time * 1000) as i32) {
+				Ok(timeout) => timeout,
+				Err(_) => PollTimeout::NONE,
+			}
+		}
+	};
+
+	(timeout, exec_if_timeout)
+}
+
 fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
   sig_setup(args.login_shell);
@@ -337,11 +406,27 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   };
   let mut vi_mode = read_shopts(|o| o.set.vi);
 
+	let mut poll_fds: SmallVec<[PollFd; 2]> = SmallVec::new();
+	let tty_fd = PollFd::new(
+		unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
+		PollFlags::POLLIN,
+	);
+
+
   // Main poll loop
   loop {
-    readline.writer.flush_write("\x1b[?2004h")?; // enable bracketed paste mode
+		set_bracketed_paste(true).ok();
     state::try_hash();
     error::clear_color();
+
+		poll_fds.clear();
+		poll_fds.push(tty_fd);
+		if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
+			poll_fds.push(PollFd::new(
+					unsafe { BorrowedFd::borrow_raw(fd) },
+					PollFlags::POLLIN,
+			));
+		}
 
     if read_shopts(|o| o.set.vi) != vi_mode {
       // the editing mode option changed.
@@ -351,79 +436,13 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       vi_mode = !vi_mode; // and toggle this
     }
 
-    // Handle any pending signals
-    while signals_pending() {
-      if let Err(e) = check_signals() {
-        match e.kind() {
-          ShErrKind::Interrupt => {
-            // We got Ctrl+C - clear current input and redraw
-            readline.reset_active_widget(false)?;
-          }
-          ShErrKind::CleanExit(code) => {
-            QUIT_CODE.store(*code, Ordering::SeqCst);
-            return Ok(());
-          }
-          _ => e.print_error(),
-        }
-      }
-    }
+		if !handle_signals_interactive(&mut readline)? {
+			return Ok(())
+		}
 
-    if GOT_SIGWINCH.swap(false, Ordering::SeqCst) {
-      log::info!("Window size change detected, updating readline dimensions");
-      // Restore cursor to saved row before clearing, since the terminal
-      // may have moved it during resize/rewrap
-      readline.writer.update_t_cols();
-      readline.mark_dirty();
-    }
+		let (timeout, exec_if_timeout) = get_poll_timeout(&mut readline);
 
-    if JOB_DONE.swap(false, Ordering::SeqCst) {
-      // update the prompt so any job count escape sequences update dynamically
-      readline.prompt_mut().refresh();
-    }
-
-    if GOT_SIGUSR1.swap(false, Ordering::SeqCst) {
-      log::info!("SIGUSR1 received: refreshing readline state");
-      readline.mark_dirty();
-      readline.prompt_mut().refresh();
-    }
-
-    readline.print_line(false)?;
-
-    // Poll for stdin input
-    let mut fds = vec![PollFd::new(
-      unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
-      PollFlags::POLLIN,
-    )];
-    if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
-      fds.push(PollFd::new(
-        unsafe { BorrowedFd::borrow_raw(fd) },
-        PollFlags::POLLIN,
-      ));
-    }
-
-    let mut exec_if_timeout = None;
-
-    let timeout = if !readline.pending_keymap.is_empty() {
-      // wait for more keymap keys
-      PollTimeout::from(1000u16)
-    } else {
-      let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone())
-        .trim()
-        .to_string();
-      let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
-      if screensaver_idle_time == 0 || screensaver_cmd.is_empty() {
-        // no screensaver stuff, set no timeout
-        PollTimeout::NONE
-      } else {
-        exec_if_timeout = Some(screensaver_cmd);
-        match PollTimeout::try_from((screensaver_idle_time * 1000) as i32) {
-          Ok(timeout) => timeout,
-          Err(_) => PollTimeout::NONE,
-        }
-      }
-    };
-
-    match poll(&mut fds, timeout) {
+    match poll(&mut poll_fds, timeout) {
       Ok(0) => {
         // We timed out. Check if there's a screensaver command
         if let Some(cmd) = exec_if_timeout
@@ -461,9 +480,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       Ok(_) => {}
     }
 
-    // Timeout - resolve pending keymap ambiguity
+    // resolve pending keymap ambiguity
     if !readline.pending_keymap.is_empty()
-      && fds[0]
+      && poll_fds[0]
         .revents()
         .is_none_or(|r| !r.contains(PollFlags::POLLIN))
     {
@@ -472,7 +491,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
 
     // Check if stdin has data
-    if fds[0]
+    if poll_fds[0]
       .revents()
       .is_some_and(|r| r.contains(PollFlags::POLLIN))
     {
@@ -497,7 +516,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
 
     // check socket fd
-    if fds
+    if poll_fds
       .get(1)
       .and_then(|fd| fd.revents())
       .is_some_and(|r| r.contains(PollFlags::POLLIN))
@@ -508,7 +527,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     // Process any available input
     let event = readline.process_input();
 
-    write(borrow_fd(*TTY_FILENO), b"\x1b[?2004l").ok(); // disable bracketed paste
+		set_bracketed_paste(false).ok();
     match handle_readline_event(&mut readline, event)? {
       true => return Ok(()),
       false => { /* continue looping */ }
@@ -524,7 +543,9 @@ fn handle_readline_event(
 ) -> ShResult<bool> {
   match event {
     Ok(ReadlineEvent::Line(input)) => {
-      let token = readline.history.push(input.clone()).ok().flatten();
+      let token = read_shopts(|s| s.core.auto_hist).then_some(
+				readline.history.push(input.clone()).ok().flatten()
+			).flatten();
 
       let exec_start = Instant::now();
       let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
@@ -563,7 +584,8 @@ fn handle_readline_event(
       post_exec.exec();
 
       let was_func_def = write_meta(|m| m.take_last_was_func_def());
-      let should_write = (!was_func_def || !read_shopts(|o| o.set.nolog))
+      let should_write = read_shopts(|o| o.core.auto_hist)
+				&& (!was_func_def || !read_shopts(|o| o.set.nolog))
 				&& !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
 				&& !input.is_empty();
 

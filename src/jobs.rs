@@ -1,6 +1,7 @@
-use std::collections::VecDeque;
+use std::fmt::Write;
 
 use ariadne::Fmt;
+use itertools::izip;
 use nix::unistd::getpid;
 use scopeguard::defer;
 use yansi::Color;
@@ -406,11 +407,7 @@ impl Job {
     let pids = flags.contains(JobCmdFlags::PIDS);
 
     let current = job_order.last();
-    let prev = if job_order.len() > 2 {
-      job_order.get(job_order.len() - 2)
-    } else {
-      None
-    };
+    let prev = (job_order.len() > 2).then(|| job_order.get(job_order.len() - 2)).flatten();
 
     let id = self.table_id.unwrap();
     let symbol = if current == self.table_id.as_ref() {
@@ -420,54 +417,51 @@ impl Job {
     } else {
       " "
     };
-    let padding_count = symbol.len() + id.to_string().len() + 3;
-    let padding = " ".repeat(padding_count);
 
-    let mut output = String::new();
+		let job_pids = self.get_pids();
+		let job_stats = self.get_stats();
+		let job_cmds = self.get_cmds();
+		let zipped = izip!(
+			0..,
+			job_pids.iter(),
+			job_stats.iter(),
+			job_cmds.iter(),
+		);
+
     let id_box = format!("[{}]{}", id + 1, symbol);
-    output.push_str(&format!("{id_box}\t"));
-    for (i, cmd) in self.get_cmds().iter().enumerate() {
-      let pid = if pids || init {
-        let mut pid = self.get_pids().get(i).unwrap().to_string();
-        pid.push(' ');
-        pid
-      } else {
-        "".to_string()
-      };
-      let job_stat = *self.get_stats().get(i).unwrap();
-      let fmt_stat = DisplayWaitStatus(job_stat).to_string();
+    let id_width = id_box.len();
+    let last_cmd = self.get_cmds().len() - 1;
 
-      let mut stat_line = fmt_stat.clone();
-      stat_line = format!("{}{} ", pid, stat_line);
-      stat_line = format!("{} {}", stat_line, cmd);
-      stat_line = match job_stat {
-        WtStat::Stopped(..) | WtStat::Signaled(..) => stat_line.fg(Color::Magenta).to_string(),
-        WtStat::Exited(_, code) => match code {
-          0 => stat_line.fg(Color::Green).to_string(),
-          _ => stat_line.fg(Color::Red).to_string(),
-        },
-        _ => stat_line.fg(Color::Cyan).to_string(),
-      };
-      if i != 0 {
-        let padding = " ".repeat(id_box.len() - 1);
-        stat_line = format!("{padding}{}", stat_line);
-      }
-      if i != self.get_cmds().len() - 1 {
-        stat_line.push_str(" |");
-      }
+    let mut output = format!("{id_box}\t");
 
-      let stat_final = if long {
-        format!(
-          "{}{} {}",
-          if i != 0 { &padding } else { "" },
-          self.get_pids().get(i).unwrap(),
-          stat_line
-        )
+    for (i, pid, job_stat, cmd) in zipped {
+      let fmt_stat = DisplayWaitStatus(*job_stat).to_string();
+      let pipe = if i != last_cmd { " |" } else { "" };
+
+      let stat_line = if pids || init {
+        format!("{pid} {fmt_stat}  {cmd}{pipe}")
       } else {
-        format!("{}{}", if i != 0 { &padding } else { "" }, stat_line)
+        format!("{fmt_stat}  {cmd}{pipe}")
       };
-      output.push_str(&stat_final);
-      output.push('\n');
+
+      let stat_line = match job_stat {
+        WtStat::Stopped(..) | WtStat::Signaled(..) => stat_line.fg(Color::Magenta),
+        WtStat::Exited(_, 0) => stat_line.fg(Color::Green),
+        WtStat::Exited(..) => stat_line.fg(Color::Red),
+        _ => stat_line.fg(Color::Cyan),
+      }.to_string();
+
+      if i == 0 {
+        if long {
+          writeln!(output, "{pid} {stat_line}").ok();
+        } else {
+          writeln!(output, "{stat_line}").ok();
+        }
+      } else if long {
+        writeln!(output, "{:>id_width$}\t{pid} {stat_line}", "").ok();
+      } else {
+        writeln!(output, "{:>id_width$}\t{stat_line}", "").ok();
+      }
     }
     output
   }

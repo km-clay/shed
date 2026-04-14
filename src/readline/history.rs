@@ -14,7 +14,7 @@ use crate::{
   readline::{
     complete::{Candidate, FuzzySelector},
     editcmd::Direction,
-    linebuf::LineBuf,
+    linebuf::{Hint, LineBuf, to_lines},
   },
   sherr,
   state::read_shopts,
@@ -638,7 +638,7 @@ impl History {
     self.search_mask.last()
   }
 
-  pub fn get_hint(&self) -> Option<String> {
+  pub fn get_hint(&self) -> Option<Hint> {
     if self.at_pending()
       && self
         .pending
@@ -646,7 +646,7 @@ impl History {
         .is_some_and(|p| !p.joined().is_empty())
     {
       let entry = self.hint_entry()?;
-      Some(entry.command().to_string())
+      Some(Hint::History(to_lines(entry.command())))
     } else {
       None
     }
