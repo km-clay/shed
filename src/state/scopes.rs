@@ -18,7 +18,7 @@ pub struct ScopeStack {
   depth: u32,
 
   // Global parameters such as $!, $$, etc
-  global_params: HashMap<String, String>,
+  global_params: HashMap<ShellParam, String>,
 }
 
 impl ScopeStack {
@@ -30,7 +30,7 @@ impl ScopeStack {
       .unwrap_or_else(|| "shed".to_string());
     new
       .global_params
-      .insert(ShellParam::ShellName.to_string(), shell_name);
+      .insert(ShellParam::ShellName, shell_name);
     new
   }
   pub fn descend(&mut self, argv: Option<Vec<String>>) {
@@ -84,7 +84,7 @@ impl ScopeStack {
       }
     }
     if let Ok(param) = var_name.parse::<ShellParam>() {
-      return self.global_params.contains_key(&param.to_string());
+      return self.global_params.contains_key(&param);
     }
     false
   }
@@ -402,7 +402,7 @@ impl ScopeStack {
   }
   pub fn get_param(&self, param: ShellParam) -> String {
     if param.is_global()
-      && let Some(val) = self.global_params.get(&param.to_string())
+      && let Some(val) = self.global_params.get(&param)
     {
       return val.clone();
     }
@@ -426,13 +426,12 @@ impl ScopeStack {
     "".into()
   }
   /// Set a shell parameter
-  /// Therefore, these are global state and we use the global scope
   pub fn set_param(&mut self, param: ShellParam, val: &str) {
     match param {
       ShellParam::ShPid | ShellParam::Status | ShellParam::LastJob | ShellParam::ShellName => {
         self
           .global_params
-          .insert(param.to_string(), val.to_string());
+          .insert(param, val.to_string());
       }
       ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount => {
         if let Some(scope) = self.scopes.first_mut() {

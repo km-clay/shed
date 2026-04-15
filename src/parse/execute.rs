@@ -1049,7 +1049,7 @@ impl Dispatcher {
     }
   }
   fn dispatch_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
-    let mut cmd_raw = cmd.get_command().unwrap().to_string();
+    let cmd_raw = cmd.get_command().unwrap().to_string();
     let report_time = cmd.flags.contains(NdFlags::REPORT_TIME);
     let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = &mut cmd.class else {

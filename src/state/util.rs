@@ -423,7 +423,7 @@ pub fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<(
   {
     PathBuf::from(&path)
   } else if let Some(home) = get_home() {
-    home.join(".{name}")
+    home.join(format!(".{name}"))
   } else {
     return Err(sherr!(InternalErr, "could not determine home path",));
   };

@@ -134,54 +134,63 @@ pub fn sort_tks(tokens: Vec<Tk>, opt_specs: &[OptSpec], strict: bool) -> GetOptR
     let parsed_opts = Opt::parse(&word);
 
     if parsed_opts.is_empty() {
-      non_opts.push((word, span))
-    } else {
-      for opt in parsed_opts {
-        let mut pushed = false;
-        for opt_spec in opt_specs {
-          if opt_spec.opt == opt {
-            match &opt_spec.takes_arg {
-              OptArg::Single => {
-                let arg = words_iter.next().map(|(w, _)| w).unwrap_or_default();
-                let opt = match opt {
-                  Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
-                  Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
-                  _ => unreachable!(),
-                };
-                opts.push(opt);
-              }
-              OptArg::List => {
-                let mut args = vec![];
-                while let Some((w, _)) = words_iter.peek() {
-                  if w.starts_with('-') {
-                    break;
-                  }
-                  args.push(words_iter.next().unwrap().0);
-                }
-                let opt = match opt {
-                  Opt::Long(ref opt) => Opt::LongWithList(opt.to_string(), args),
-                  Opt::Short(opt) => Opt::ShortWithList(opt, args),
-                  _ => unreachable!(),
-                };
-                opts.push(opt);
-              }
-              OptArg::None => {
-                opts.push(opt.clone());
-              }
+      non_opts.push((word, span));
+      continue;
+    }
+
+    let all_recognized = parsed_opts
+      .iter()
+      .all(|o| opt_specs.iter().any(|s| s.opt == *o));
+
+    if !all_recognized {
+      if strict {
+        let unknown = parsed_opts
+          .iter()
+          .find(|o| !opt_specs.iter().any(|s| s.opt == **o))
+          .unwrap();
+        return Err(sherr!(
+          ParseErr,
+          "Unknown option: {}",
+          unknown.to_string().fg(next_color()),
+        ));
+      }
+      non_opts.push((word, span));
+      continue;
+    }
+
+    for opt in parsed_opts {
+      for opt_spec in opt_specs {
+        if opt_spec.opt == opt {
+          match &opt_spec.takes_arg {
+            OptArg::Single => {
+              let arg = words_iter.next().map(|(w, _)| w).unwrap_or_default();
+              let opt = match opt {
+                Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
+                Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
+                _ => unreachable!(),
+              };
+              opts.push(opt);
             }
-            pushed = true;
+            OptArg::List => {
+              let mut args = vec![];
+              while let Some((w, _)) = words_iter.peek() {
+                if w.starts_with('-') {
+                  break;
+                }
+                args.push(words_iter.next().unwrap().0);
+              }
+              let opt = match opt {
+                Opt::Long(ref opt) => Opt::LongWithList(opt.to_string(), args),
+                Opt::Short(opt) => Opt::ShortWithList(opt, args),
+                _ => unreachable!(),
+              };
+              opts.push(opt);
+            }
+            OptArg::None => {
+              opts.push(opt.clone());
+            }
           }
-        }
-        if !pushed {
-          if strict {
-            return Err(sherr!(
-              ParseErr,
-              "Unknown option: {}",
-              opt.to_string().fg(next_color()),
-            ));
-          } else {
-            non_opts.push((word.clone(), span.clone()));
-          }
+          break;
         }
       }
     }
@@ -216,57 +225,66 @@ fn sort_tks_raw(
     let parsed_opts = Opt::parse(&token.to_string());
 
     if parsed_opts.is_empty() {
-      non_opts.push(token)
-    } else {
-      for opt in parsed_opts {
-        let mut pushed = false;
-        for opt_spec in opt_specs {
-          if opt_spec.opt == opt {
-            match &opt_spec.takes_arg {
-              OptArg::Single => {
-                let arg = tokens_iter
-                  .next()
-                  .map(|t| t.to_string())
-                  .unwrap_or_default();
-                let opt = match opt {
-                  Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
-                  Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
-                  _ => unreachable!(),
-                };
-                opts.push(opt);
-              }
-              OptArg::List => {
-                let mut args = vec![];
-                while let Some(t) = tokens_iter.peek() {
-                  if t.to_string().starts_with('-') {
-                    break;
-                  }
-                  args.push(tokens_iter.next().unwrap().to_string());
-                }
-                let opt = match opt {
-                  Opt::Long(ref opt) => Opt::LongWithList(opt.to_string(), args),
-                  Opt::Short(opt) => Opt::ShortWithList(opt, args),
-                  _ => unreachable!(),
-                };
-                opts.push(opt);
-              }
-              OptArg::None => {
-                opts.push(opt.clone());
-              }
+      non_opts.push(token);
+      continue;
+    }
+
+    let all_recognized = parsed_opts
+      .iter()
+      .all(|o| opt_specs.iter().any(|s| s.opt == *o));
+
+    if !all_recognized {
+      if strict {
+        let unknown = parsed_opts
+          .iter()
+          .find(|o| !opt_specs.iter().any(|s| s.opt == **o))
+          .unwrap();
+        return Err(sherr!(
+          ParseErr,
+          "Unknown option: {}",
+          unknown.to_string().fg(next_color()),
+        ));
+      }
+      non_opts.push(token);
+      continue;
+    }
+
+    for opt in parsed_opts {
+      for opt_spec in opt_specs {
+        if opt_spec.opt == opt {
+          match &opt_spec.takes_arg {
+            OptArg::Single => {
+              let arg = tokens_iter
+                .next()
+                .map(|t| t.to_string())
+                .unwrap_or_default();
+              let opt = match opt {
+                Opt::Long(ref opt) => Opt::LongWithArg(opt.to_string(), arg),
+                Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
+                _ => unreachable!(),
+              };
+              opts.push(opt);
             }
-            pushed = true;
+            OptArg::List => {
+              let mut args = vec![];
+              while let Some(t) = tokens_iter.peek() {
+                if t.to_string().starts_with('-') {
+                  break;
+                }
+                args.push(tokens_iter.next().unwrap().to_string());
+              }
+              let opt = match opt {
+                Opt::Long(ref opt) => Opt::LongWithList(opt.to_string(), args),
+                Opt::Short(opt) => Opt::ShortWithList(opt, args),
+                _ => unreachable!(),
+              };
+              opts.push(opt);
+            }
+            OptArg::None => {
+              opts.push(opt.clone());
+            }
           }
-        }
-        if !pushed {
-          if strict {
-            return Err(sherr!(
-              ParseErr,
-              "Unknown option: {}",
-              opt.to_string().fg(next_color()),
-            ));
-          } else {
-            non_opts.push(token.clone());
-          }
+          break;
         }
       }
     }

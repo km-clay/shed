@@ -462,4 +462,56 @@ mod tests {
     // xpg_echo expands \n, -n suppresses trailing newline
     assert_eq!(out, "hello\nworld");
   }
+
+  #[test]
+  fn echo_unknown_packed_short_is_literal() {
+    let guard = TestGuard::new();
+    test_input("echo -shed").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "-shed\n");
+  }
+
+  #[test]
+  fn echo_unknown_packed_short_with_other_args() {
+    let guard = TestGuard::new();
+    test_input("echo x -shed y").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "x -shed y\n");
+  }
+
+  #[test]
+  fn echo_dollar_zero_expansion() {
+    // $0 expands to a value starting with '-' in login shells; make sure
+    // that doesn't get re-parsed as options and duplicated.
+    let guard = TestGuard::new();
+    test_input("X=-shed; echo $X").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "-shed\n");
+  }
+
+  #[test]
+  fn echo_partial_match_pack_is_literal() {
+    // `-nq` contains recognized 'n' but unknown 'q' → whole word is literal.
+    let guard = TestGuard::new();
+    test_input("echo -nq hello").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "-nq hello\n");
+  }
+
+  #[test]
+  fn echo_unknown_long_opt_is_literal() {
+    let guard = TestGuard::new();
+    test_input("echo --bogus hi").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "--bogus hi\n");
+  }
+
+  #[test]
+  fn echo_fully_recognized_pack_still_works() {
+    // -ne: both recognized, so 'n' suppresses newline and 'e' enables escapes.
+    let guard = TestGuard::new();
+    test_input("echo -ne 'a\\tb'").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "a\tb");
+  }
 }
