@@ -7,7 +7,7 @@ version = "0.10.7"
 edition = "2024"
 
 [profile.release]
-strip = true
+debug = true
 
 [dependencies]
 ariadne = "0.6.0"

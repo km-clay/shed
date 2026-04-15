@@ -714,7 +714,9 @@ impl ShedLine {
   }
 
   fn accept_hint(&mut self) -> ShResult<Option<ReadlineEvent>> {
-    self.editor.accept_hint();
+		self.editor.edit(|e| {
+			e.accept_hint();
+		});
     if !self.focused_history().at_pending() {
       self.focused_history().reset_to_pending();
     }

@@ -210,7 +210,8 @@ pub fn strip_prefix_lines(mut lines: Vec<Line>, other: &[Line]) -> Option<Vec<Li
 		.take_while(|(l,r)| *l == *r)
 		.count();
 
-	lines = lines.split_off(common_lines);
+	// drain equal lines
+	lines.drain(..common_lines);
 
 	if lines.is_empty() {
 		return None
@@ -221,7 +222,9 @@ pub fn strip_prefix_lines(mut lines: Vec<Line>, other: &[Line]) -> Option<Vec<Li
 			.zip(other_line.0.iter())
 			.take_while(|(l,r)| l == r)
 			.count();
-		lines[0] = Line(lines[0].0[common_chars..].to_vec());
+
+		// drain common characters
+		lines[0].0.drain(..common_chars);
 	}
 
 	if lines.iter().all(|l| l.is_empty()) {
@@ -2237,15 +2240,23 @@ impl LineBuf {
   }
 	/// Perform an operation that incrementally accepts the hint if the cursor moves into it
 	///
-	/// Works by taking the lines out of self.hint directly and appending them to the buffer, then calling the provided function, and then checking if the cursor moved into the hint.
-	/// If it did, we split the hint lines at the new cursor position and put the remaining lines back into self.hint. If it didn't, we put all the hint lines back into self.hint.
+	/// Process:
+	/// * take the lines out of self.hint directly
+	/// * mark end of buffer position, append hint lines to self.lines
+	/// * call the function
+	/// * split the buffer at `old_end_pos.max(new_cursor_pos)`
+	///
+	/// Notes:
+	/// * The size of the hint can never grow as a result of this function. It will only ever stay the same size or shrink.
 	pub fn with_hint<F,T>(&mut self, f: F) -> T
 	where F: FnOnce(&mut Self) -> T {
 		let mut hint = self.hint.take();
-		let old_end_pos = self.end_pos().col_add(1);
+		let mut old_end_pos = self.end_pos();
 
-		log::debug!("hint lines: {:?}", hint.as_ref().map(|h| h.lines()));
-		log::debug!("buffer lines: {:?}", self.lines);
+		if self.cursor.exclusive {
+			old_end_pos = old_end_pos.col_add(1);
+		}
+
 		if let Some(h) = hint.as_mut()
 		&& let Some(mut hint_lines) = strip_prefix_lines(h.take_lines(), &self.lines) {
 			attach_lines(&mut self.lines, &mut hint_lines);
