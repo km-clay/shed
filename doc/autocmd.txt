@@ -46,16 +46,16 @@ behavior without modifying the shell itself.
       Fires before `cd` changes the working directory.
 
       Special variables:
-        `$_NEW_DIR`    the directory being changed to
-        `$_OLD_DIR`    the current directory (before the change)
+        `$NEW_DIR`    the directory being changed to
+        `$OLD_DIR`    the current directory (before the change)
 
   `post-change-dir`                            *autocmd-post-change-dir*
 
       Fires after a successful directory change.
 
       Special variables:
-        `$_NEW_DIR`    the new working directory
-        `$_OLD_DIR`    the previous directory
+        `$NEW_DIR`    the new working directory
+        `$OLD_DIR`    the previous directory
 
   2.3 Job Events                               *autocmd-job-events*
 
@@ -64,10 +64,10 @@ behavior without modifying the shell itself.
       Fires when a background job completes.
 
       Special variables:
-        `$_CHILD_COUNT`  number of commands in the job
-        `$_CHILD0`       command string of the first pipeline member
-        `$_CHILD1`       command string of the second pipeline member
-        `$_CHILDN`       ...and so on for each member
+        `$CHILD_COUNT`  number of commands in the job
+        `$CHILD0`       command string of the first pipeline member
+        `$CHILD1`       command string of the second pipeline member
+        `$CHILDN`       ...and so on for each member
 
   2.4 Prompt Events                            *autocmd-prompt-events*
 
@@ -99,11 +99,11 @@ behavior without modifying the shell itself.
       Fires when the fuzzy history search window opens.
 
       Special variables:
-        `$_ENTRIES`      array of all history entries
-        `$_NUM_ENTRIES`  count of all entries
-        `$_MATCHES`      array of currently matching entries
-        `$_NUM_MATCHES`  count of matching entries
-        `$_SEARCH_STR`   the current search string
+        `$ENTRIES`      array of all history entries
+        `$NUM_ENTRIES`  count of all entries
+        `$MATCHES`      array of currently matching entries
+        `$NUM_MATCHES`  count of matching entries
+        `$SEARCH_STR`   the current search string
 
   `on-history-close`                           *autocmd-on-history-close*
 
@@ -114,7 +114,7 @@ behavior without modifying the shell itself.
       Fires when a history entry is selected.
 
       Special variables:
-        `$_HIST_ENTRY`   the selected history entry
+        `$HIST_ENTRY`   the selected history entry
 
   2.7 Completion Events                        *autocmd-comp-events*
 
@@ -123,9 +123,9 @@ behavior without modifying the shell itself.
       Fires when the completion menu becomes visible.
 
       Special variables:
-        `$_MATCHES`      array of completion candidates
-        `$_NUM_MATCHES`  count of candidates
-        `$_SEARCH_STR`   the token being completed
+        `$MATCHES`      array of completion candidates
+        `$NUM_MATCHES`  count of candidates
+        `$SEARCH_STR`   the token being completed
 
   `on-completion-cancel`                       *autocmd-on-completion-cancel*
 
@@ -163,15 +163,15 @@ behavior without modifying the shell itself.
       with `$TIMEFMT`.
 
       Special variables:
-        `$_TIME_REAL_MS`    wall clock time in milliseconds
-        `$_TIME_USER_MS`    user CPU time in milliseconds
-        `$_TIME_SYS_MS`     system CPU time in milliseconds
-        `$_TIME_REAL_FMT`   wall clock time, formatted
-        `$_TIME_USER_FMT`   user CPU time, formatted
-        `$_TIME_SYS_FMT`    system CPU time, formatted
-        `$_TIME_CPU_PCT`    CPU percentage ((user+sys)/real*100)
-        `$_TIME_RSS`        peak resident set size in KB
-        `$_TIME_CMD`        the command that was timed
+        `$TIME_REAL_MS`    wall clock time in milliseconds
+        `$TIME_USER_MS`    user CPU time in milliseconds
+        `$TIME_SYS_MS`     system CPU time in milliseconds
+        `$TIME_REAL_FMT`   wall clock time, formatted
+        `$TIME_USER_FMT`   user CPU time, formatted
+        `$TIME_SYS_FMT`    system CPU time, formatted
+        `$TIME_CPU_PCT`    CPU percentage ((user+sys)/real*100)
+        `$TIME_RSS`        peak resident set size in KB
+        `$TIME_CMD`        the command that was timed
 
 ==============================================================================
 3. Context Variables                           *autocmd-variables*
@@ -183,7 +183,7 @@ behavior without modifying the shell itself.
   Example:
 
       `autocmd post-change-dir '`
-      `    if [[ "$_NEW_DIR" == */projects/* ]]; then`
+      `    if [[ "$NEW_DIR" == */projects/* ]]; then`
       `        echo "entering project directory"  `
       `    fi`
       `'`
@@ -215,17 +215,17 @@ behavior without modifying the shell itself.
       `_time_func() {`
       `    if [ -t 0 ]; then`
       `        echo`
-      `        echo -e "\e[36;1m$_TIME_CMD"`
-      `        echo -e "\e[36;1mreal\e[0m\t$_TIME_REAL_FMT"`
-      `        echo -e "\e[36;1muser\e[0m\t$_TIME_USER_FMT"`
-      `        echo -e "\e[36;1msys\e[0m\t$_TIME_SYS_FMT"`
+      `        echo -e "\e[36;1m$TIME_CMD"`
+      `        echo -e "\e[36;1mreal\e[0m\t$TIME_REAL_FMT"`
+      `        echo -e "\e[36;1muser\e[0m\t$TIME_USER_FMT"`
+      `        echo -e "\e[36;1msys\e[0m\t$TIME_SYS_FMT"`
       `        echo`
       `    else`
       `        echo`
-      `        echo "$_TIME_CMD"`
-      `        echo -e "real\t$_TIME_REAL_FMT"`
-      `        echo -e "user\t$_TIME_USER_FMT"`
-      `        echo -e "sys\t$_TIME_SYS_FMT"`
+      `        echo "$TIME_CMD"`
+      `        echo -e "real\t$TIME_REAL_FMT"`
+      `        echo -e "user\t$TIME_USER_FMT"`
+      `        echo -e "sys\t$TIME_SYS_FMT"`
       `        echo`
       `    fi`
       `}`

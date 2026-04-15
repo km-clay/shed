@@ -577,9 +577,7 @@ impl ShedLine {
           .history
           .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
         let hint = self.focused_history().get_hint();
-				if !self.editor.is_empty() {
-					self.editor.set_hint(hint);
-				}
+				self.editor.set_hint(hint);
         self.completer.clear(&mut self.writer)?;
         self.needs_redraw = true;
         self.completer.reset();
@@ -608,9 +606,7 @@ impl ShedLine {
         post_cmds.exec();
 
         let hint = self.focused_history().get_hint();
-				if !self.editor.is_empty() {
-					self.editor.set_hint(hint);
-				}
+				self.editor.set_hint(hint);
         self.completer.clear(&mut self.writer)?;
         write_vars(|v| {
           v.set_var(
@@ -637,7 +633,9 @@ impl ShedLine {
     let keymap_flags = self.curr_keymap_flags();
     self.pending_keymap.push(key.clone());
 
-    let matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
+    let mut matches = read_logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
+		let is_exact = matches.len() == 1 && matches[0].compare(&self.pending_keymap) == KeyMapMatch::IsExact;
+
     if matches.is_empty() {
       // No matches. Drain the buffered keys and execute them.
       for key in std::mem::take(&mut self.pending_keymap) {
@@ -646,10 +644,9 @@ impl ShedLine {
         }
       }
       self.needs_redraw = true;
-    } else if matches.len() == 1 && matches[0].compare(&self.pending_keymap) == KeyMapMatch::IsExact
-    {
+    } else if is_exact {
       // We have a single exact match. Execute it.
-      let keymap = matches[0].clone();
+      let keymap = matches.remove(0);
       self.pending_keymap.clear();
       let action = keymap.action_expanded();
       for key in action {
@@ -784,9 +781,7 @@ impl ShedLine {
           .history
           .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
         let hint = self.focused_history().get_hint();
-				if !self.editor.is_empty() {
-					self.editor.set_hint(hint);
-				}
+				self.editor.set_hint(hint);
         write_vars(|v| {
           v.set_var(
             "SHED_VI_MODE",
@@ -806,10 +801,10 @@ impl ShedLine {
         let num_candidates = candidates.len();
         with_vars(
           [
-            ("_NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
-            ("_MATCHES".into(), Into::<Var>::into(candidates)),
+            ("NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
+            ("MATCHES".into(), Into::<Var>::into(candidates)),
             (
-              "_SEARCH_STR".into(),
+              "SEARCH_STR".into(),
               Into::<Var>::into(self.completer.token()),
             ),
           ],
@@ -871,11 +866,11 @@ impl ShedLine {
         let num_matches = matches.len();
         with_vars(
           [
-            ("_ENTRIES".into(), Into::<Var>::into(entries)),
-            ("_NUM_ENTRIES".into(), Into::<Var>::into(num_entries)),
-            ("_MATCHES".into(), Into::<Var>::into(matches)),
-            ("_NUM_MATCHES".into(), Into::<Var>::into(num_matches)),
-            ("_SEARCH_STR".into(), Into::<Var>::into(initial)),
+            ("ENTRIES".into(), Into::<Var>::into(entries)),
+            ("NUM_ENTRIES".into(), Into::<Var>::into(num_entries)),
+            ("MATCHES".into(), Into::<Var>::into(matches)),
+            ("NUM_MATCHES".into(), Into::<Var>::into(num_matches)),
+            ("SEARCH_STR".into(), Into::<Var>::into(initial)),
           ],
           || {
             post_cmds.exec();
@@ -1095,9 +1090,7 @@ impl ShedLine {
 
     let hint = self.focused_history().get_hint();
 
-		if !self.editor.is_empty() {
-			self.editor.set_hint(hint);
-		}
+		self.editor.set_hint(hint);
     self.needs_redraw = true;
     Ok(None)
   }
@@ -1210,8 +1203,6 @@ impl ShedLine {
       Motion::LineDown => *count as isize,
       _ => unreachable!(),
     };
-		log::debug!("Scrolling history by {} entries", count);
-		log::debug!("self.history.pending: {}", self.focused_history().pending.is_some());
     if self.focused_history().pending.is_none() {
 			if count >= 0 {
 				// if count >= 0, we are scrolling down
@@ -1305,8 +1296,7 @@ impl ShedLine {
     }
     let mut buf = String::new();
 
-    let row0_used = self
-      .prompt
+    let row0_used = self.prompt
       .get_ps1()
       .lines()
       .next()

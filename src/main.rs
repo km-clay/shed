@@ -568,7 +568,7 @@ fn handle_readline_event(
     Ok(ReadlineEvent::Line(input)) => {
       let token = read_shopts(|s| s.core.auto_hist).then(||
 				readline.history.push(input.clone()).ok().flatten()
-			).flatten();
+			).flatten(); // token is used as a stable identifier for the command in the history
 
       let exec_start = Instant::now();
       let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));

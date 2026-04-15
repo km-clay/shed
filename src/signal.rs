@@ -391,10 +391,10 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
         let mut post_job_vars: HashMap<String, String> = cmds
           .iter()
           .enumerate()
-          .map(|(i, cmd)| (format!("_CHILD{i}"), cmd.to_string()))
+          .map(|(i, cmd)| (format!("CHILD{i}"), cmd.to_string()))
           .collect();
 
-        post_job_vars.insert("_CHILD_COUNT".into(), cmd_count.to_string());
+        post_job_vars.insert("CHILD_COUNT".into(), cmd_count.to_string());
 
         with_vars(post_job_vars, || {
           post_job_cmds.exec();

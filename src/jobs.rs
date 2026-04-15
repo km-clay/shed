@@ -553,24 +553,24 @@ fn report_timer(timer: &CmdTimer) -> ShResult<()> {
     write(stderr, format!("{report}\n").as_bytes()).ok();
   } else {
     let vars = [
-      ("_TIME_REAL_MS".into(), timer.total_wall_ms()?.to_string()),
-      ("_TIME_USER_MS".into(), timer.total_user_ms()?.to_string()),
-      ("_TIME_SYS_MS".into(), timer.total_sys_ms()?.to_string()),
+      ("TIME_REAL_MS".into(), timer.total_wall_ms()?.to_string()),
+      ("TIME_USER_MS".into(), timer.total_user_ms()?.to_string()),
+      ("TIME_SYS_MS".into(), timer.total_sys_ms()?.to_string()),
       (
-        "_TIME_REAL_FMT".into(),
+        "TIME_REAL_FMT".into(),
         timer.total_wall_formatted()?.to_string(),
       ),
       (
-        "_TIME_USER_FMT".into(),
+        "TIME_USER_FMT".into(),
         timer.total_user_formatted()?.to_string(),
       ),
       (
-        "_TIME_SYS_FMT".into(),
+        "TIME_SYS_FMT".into(),
         timer.total_sys_formatted()?.to_string(),
       ),
-      ("_TIME_CPU_PCT".into(), timer.cpu_pct()?.to_string()),
-      ("_TIME_RSS".into(), timer.max_rss()?.to_string()),
-      ("_TIME_CMD".into(), timer.command().to_string()),
+      ("TIME_CPU_PCT".into(), timer.cpu_pct()?.to_string()),
+      ("TIME_RSS".into(), timer.max_rss()?.to_string()),
+      ("TIME_CMD".into(), timer.command().to_string()),
     ];
     with_vars(vars, || autocmds.exec());
   }

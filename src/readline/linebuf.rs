@@ -3931,6 +3931,11 @@ impl LineBuf {
 	}
 
   pub fn set_hint(&mut self, hint: Option<Hint>) {
+		if self.is_empty() {
+			self.hint = None;
+			return
+		}
+
 		let Some(hint) = hint else {
 			if !matches!(&self.hint, Some(Hint::Override(_))) {
 				self.hint = None;
