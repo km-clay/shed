@@ -253,7 +253,7 @@ pub struct ReadKeyOpts {
   char_blacklist: Option<String>,
 }
 
-pub fn read_key(node: Node) -> ShResult<()> {
+pub fn readkey(node: Node) -> ShResult<()> {
   let blame = node.get_span().clone();
   let NdRule::Command { argv, .. } = node.class else {
     unreachable!()
@@ -265,7 +265,7 @@ pub fn read_key(node: Node) -> ShResult<()> {
   }
 
   let (_, opts) = get_opts_from_tokens(argv, &READ_KEY_OPTS).blame(blame.clone())?;
-  let read_key_opts = get_read_key_opts(opts).blame(blame.clone())?;
+  let readkey_opts = get_readkey_opts(opts).blame(blame.clone())?;
 
   let key = {
     let _raw = crate::readline::term::raw_mode();
@@ -278,7 +278,7 @@ pub fn read_key(node: Node) -> ShResult<()> {
       Ok(n) => {
         let mut reader = PollReader::new();
         reader.feed_bytes(&buf[..n]);
-        let Some(key) = reader.read_key()? else {
+        let Some(key) = reader.readkey()? else {
           state::set_status(1);
           return Ok(());
         };
@@ -288,13 +288,13 @@ pub fn read_key(node: Node) -> ShResult<()> {
         state::set_status(130);
         return Ok(());
       }
-      Err(e) => return Err(sherr!(ExecFail, "read_key: {e}")),
+      Err(e) => return Err(sherr!(ExecFail, "readkey: {e}")),
     }
   };
 
   let vim_seq = key.as_vim_seq()?;
 
-  if let Some(wl) = read_key_opts.char_whitelist {
+  if let Some(wl) = readkey_opts.char_whitelist {
     let allowed = expand_keymap(&wl);
     if !allowed.contains(&key) {
       state::set_status(1);
@@ -302,7 +302,7 @@ pub fn read_key(node: Node) -> ShResult<()> {
     }
   }
 
-  if let Some(bl) = read_key_opts.char_blacklist {
+  if let Some(bl) = readkey_opts.char_blacklist {
     let disallowed = expand_keymap(&bl);
     if disallowed.contains(&key) {
       state::set_status(1);
@@ -310,7 +310,7 @@ pub fn read_key(node: Node) -> ShResult<()> {
     }
   }
 
-  if let Some(var) = read_key_opts.var_name {
+  if let Some(var) = readkey_opts.var_name {
     write_vars(|v| v.set_var(&var, VarKind::Str(vim_seq), VarFlags::NONE))?;
   } else {
     write(borrow_fd(STDOUT_FILENO), vim_seq.as_bytes())?;
@@ -320,8 +320,8 @@ pub fn read_key(node: Node) -> ShResult<()> {
   Ok(())
 }
 
-pub fn get_read_key_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
-  let mut read_key_opts = ReadKeyOpts {
+pub fn get_readkey_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
+  let mut readkey_opts = ReadKeyOpts {
     var_name: None,
     char_whitelist: None,
     char_blacklist: None,
@@ -329,16 +329,16 @@ pub fn get_read_key_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
 
   for opt in opts {
     match opt {
-      Opt::ShortWithArg('v', var_name) => read_key_opts.var_name = Some(var_name),
-      Opt::ShortWithArg('w', char_whitelist) => read_key_opts.char_whitelist = Some(char_whitelist),
-      Opt::ShortWithArg('b', char_blacklist) => read_key_opts.char_blacklist = Some(char_blacklist),
+      Opt::ShortWithArg('v', var_name) => readkey_opts.var_name = Some(var_name),
+      Opt::ShortWithArg('w', char_whitelist) => readkey_opts.char_whitelist = Some(char_whitelist),
+      Opt::ShortWithArg('b', char_blacklist) => readkey_opts.char_blacklist = Some(char_blacklist),
       _ => {
-        return Err(sherr!(ExecFail, "read_key: Unexpected flag '{opt}'"));
+        return Err(sherr!(ExecFail, "readkey: Unexpected flag '{opt}'"));
       }
     }
   }
 
-  Ok(read_key_opts)
+  Ok(readkey_opts)
 }
 
 #[cfg(test)]

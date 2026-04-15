@@ -260,7 +260,7 @@ pub fn get_width_calculator() -> &'static dyn WidthCalculator {
 }
 
 pub trait KeyReader {
-  fn read_key(&mut self) -> Result<Option<KeyEvent>, ShErr>;
+  fn readkey(&mut self) -> Result<Option<KeyEvent>, ShErr>;
 }
 
 pub trait LineWriter {
@@ -663,7 +663,7 @@ impl Default for PollReader {
 }
 
 impl KeyReader for PollReader {
-  fn read_key(&mut self) -> Result<Option<KeyEvent>, ShErr> {
+  fn readkey(&mut self) -> Result<Option<KeyEvent>, ShErr> {
     if self.verbatim_single {
       if let Some(key) = self.read_one_verbatim() {
         self.verbatim_single = false;
@@ -860,7 +860,7 @@ impl TermReader {
 }
 
 impl KeyReader for TermReader {
-  fn read_key(&mut self) -> Result<Option<KeyEvent>, ShErr> {
+  fn readkey(&mut self) -> Result<Option<KeyEvent>, ShErr> {
     use core::str;
 
     let mut collected = Vec::with_capacity(4);

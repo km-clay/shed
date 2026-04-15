@@ -566,7 +566,7 @@ fn handle_readline_event(
 ) -> ShResult<bool> {
   match event {
     Ok(ReadlineEvent::Line(input)) => {
-      let token = read_shopts(|s| s.core.auto_hist).then_some(
+      let token = read_shopts(|s| s.core.auto_hist).then(||
 				readline.history.push(input.clone()).ok().flatten()
 			).flatten();
 

@@ -1049,7 +1049,7 @@ impl Dispatcher {
     }
   }
   fn dispatch_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
-    let cmd_raw = cmd.get_command().unwrap().to_string();
+    let mut cmd_raw = cmd.get_command().unwrap().to_string();
     let report_time = cmd.flags.contains(NdFlags::REPORT_TIME);
     let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = &mut cmd.class else {
@@ -1078,6 +1078,13 @@ impl Dispatcher {
       }
       return self.exec_cmd(cmd);
     }
+
+		if argv.len() == 2
+		&& argv[1].as_str() == "--help" {
+			// we have been asked for help
+			// is this a hack? only the nose knows.
+			return exec_input(format!("help builtin-{cmd_raw}"), None, false, Some("<builtin-help>".into()))
+		}
 
     // Set up redirections here so we can attach the guard to propagated errors.
     self.io_stack.append_to_frame(mem::take(&mut cmd.redirs));
@@ -1150,7 +1157,7 @@ impl Dispatcher {
       "type" => intro::type_builtin(cmd),
       "getopts" => getopts(cmd),
       "keymap" => keymap::keymap(cmd),
-      "read_key" => read::read_key(cmd),
+      "readkey" => read::readkey(cmd),
       "autocmd" => autocmd(cmd),
       "ulimit" => ulimit(cmd),
       "umask" => umask_builtin(cmd),

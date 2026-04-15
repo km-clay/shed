@@ -37,7 +37,7 @@ The following builtins are available:
   `pushd`       push a directory onto the stack             |builtin-pushd|
   `pwd`         print the working directory                 |builtin-pwd|
   `read`        read a line of input into a variable        |builtin-read|
-  `read_key`    read a single keypress                      |builtin-read_key|
+  `readkey`     read a single keypress                      |builtin-readkey|
   `readonly`    mark variables as read-only                 |builtin-readonly|
   `return`      return from a function                      |builtin-return|
   `break`       exit a loop                                 |builtin-break|
@@ -1091,9 +1091,9 @@ READONLY                                         *builtin-readonly* *readonly*
       `readonly`              list read-only variables
 
 ==============================================================================
-READ_KEY                                         *builtin-read_key* *read_key*
+READKEY                                         *builtin-readkey* *readkey*
 
-  `read_key [-v {var}] [-w {whitelist}] [-b {blacklist}]`
+  `readkey [-v {var}] [-w {whitelist}] [-b {blacklist}]`
 
   Read a single keypress from the terminal without waiting for Enter.
   Returns immediately after one key event. If stdin is not a terminal,
@@ -1114,9 +1114,9 @@ READ_KEY                                         *builtin-read_key* *read_key*
 
   Examples:
 
-      `read_key -v key`                 read a key into $key
-      `read_key -v ch -w 'yn'`          accept only y or n
-      `read_key -w '<esc><cr>'`         accept only Escape or Enter
+      `readkey -v key`                 read a key into $key
+      `readkey -v ch -w 'yn'`          accept only y or n
+      `readkey -w '<esc><cr>'`         accept only Escape or Enter
 
 ==============================================================================
 RETURN                                           *builtin-return* *return*

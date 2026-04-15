@@ -674,7 +674,7 @@ impl ShedLine {
     }
 
     // Process all available keys
-    while let Some(key) = self.reader.read_key()? {
+    while let Some(key) = self.reader.readkey()? {
       // If completer or history search are active, delegate input to it
       if self.focused_history().fuzzy_finder.is_active() {
         self.handle_hist_search_key(key)?;
