@@ -178,6 +178,59 @@ pub fn attach_lines(lines: &mut Vec<Line>, other: &mut Vec<Line>) {
   lines.append(other);
 }
 
+pub fn is_prefix_lines(this: &[Line], other: &[Line]) -> bool {
+	if this.is_empty() {
+		return false;
+	}
+
+	let all_but_last = this[..this.len().saturating_sub(1)].iter()
+		.zip(other.iter())
+		.all(|(l,r)| *l == *r);
+
+	if !all_but_last {
+		return false;
+	}
+
+	let last = this.len().saturating_sub(1);
+	let Some(other_line) = other.get(last).map(|l| &l.0) else {
+		return false;
+	};
+	let this_line = &this[last].0;
+
+	this_line.len() <= other_line.len() && this_line.iter().zip(other_line.iter()).all(|(l,r)| l == r)
+}
+
+pub fn strip_prefix_lines(mut lines: Vec<Line>, other: &[Line]) -> Option<Vec<Line>> {
+	if lines.is_empty() {
+		return None
+	}
+
+	let common_lines = lines.iter()
+		.zip(other.iter())
+		.take_while(|(l,r)| *l == *r)
+		.count();
+
+	lines = lines.split_off(common_lines);
+
+	if lines.is_empty() {
+		return None
+	}
+
+	if let Some(other_line) = other.get(common_lines) {
+		let common_chars = lines[0].0.iter()
+			.zip(other_line.0.iter())
+			.take_while(|(l,r)| l == r)
+			.count();
+		lines[0] = Line(lines[0].0[common_chars..].to_vec());
+	}
+
+	if lines.iter().all(|l| l.is_empty()) {
+		None
+	} else {
+		Some(lines)
+	}
+}
+
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub struct Line(Vec<Grapheme>);
 
@@ -689,14 +742,20 @@ impl Hint {
 			}
 		}
 	}
-}
+	pub fn display(&self, prefix: Option<&str>) -> String {
+		let mut text = self.raw();
+		if let Some(prefix) = prefix
+		&& let Some(rest) = text.strip_prefix(prefix) {
+			text = rest.to_string();
+		}
 
-impl Display for Hint {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let text = self.raw();
-		let text = format!("\x1b[90m{text}\x1b[0m").replace("\n", "\n\x1b[90m");
-
-		write!(f, "{text}")
+		format!("\x1b[90m{text}\x1b[0m").replace("\n", "\n\x1b[90m")
+	}
+	pub fn len(&self) -> usize {
+		self.lines().len()
+	}
+	pub fn is_empty(&self) -> bool {
+		self.lines().is_empty() || (self.lines().len() == 1 && self.lines()[0].is_empty())
 	}
 }
 
@@ -2183,10 +2242,12 @@ impl LineBuf {
 	pub fn with_hint<F,T>(&mut self, f: F) -> T
 	where F: FnOnce(&mut Self) -> T {
 		let mut hint = self.hint.take();
-
 		let old_end_pos = self.end_pos().col_add(1);
-		if let Some(h) = hint.as_mut() {
-			let mut hint_lines = h.take_lines();
+
+		log::debug!("hint lines: {:?}", hint.as_ref().map(|h| h.lines()));
+		log::debug!("buffer lines: {:?}", self.lines);
+		if let Some(h) = hint.as_mut()
+		&& let Some(mut hint_lines) = strip_prefix_lines(h.take_lines(), &self.lines) {
 			attach_lines(&mut self.lines, &mut hint_lines);
 		}
 		let old_cursor_pos = self.cursor.pos;
@@ -3788,6 +3849,11 @@ impl LineBuf {
       self.kill_ring.reset();
     }
 
+		if let Some(Hint::Override(hint_lines)) = self.hint.as_ref()
+		&& !is_prefix_lines(&self.lines, hint_lines) {
+			self.clear_hint();
+		}
+
     res
   }
 
@@ -3865,7 +3931,7 @@ impl LineBuf {
 	}
 
   pub fn set_hint(&mut self, hint: Option<Hint>) {
-		let Some(mut hint) = hint else {
+		let Some(hint) = hint else {
 			if !matches!(&self.hint, Some(Hint::Override(_))) {
 				self.hint = None;
 			}
@@ -3884,14 +3950,7 @@ impl LineBuf {
       return;
     }
 
-		// TODO: write an actual "strip_prefix" function
-		// that works directly on two Vec<Line>'s
-    let joined = self.joined();
-		let hint_joined = join_lines(hint.lines());
-		let stripped = hint_joined.strip_prefix(&joined).map(|s| s.to_string()).unwrap_or(hint_joined);
-		hint.set_lines(to_lines(&stripped));
-
-    self.hint = (!stripped.is_empty()).then_some(hint);
+    self.hint = (!hint.is_empty()).then_some(hint);
   }
 
   pub fn has_hint(&self) -> bool {
@@ -3912,7 +3971,7 @@ impl LineBuf {
 	pub fn try_get_hint_text(&self) -> Option<String> {
 		self.hint
 			.as_ref()
-			.map(|h| h.to_string())
+			.map(|h| h.display(Some(&self.joined())))
 	}
 
   pub fn join_hint(&self) -> String {
@@ -3925,53 +3984,13 @@ impl LineBuf {
 			.map(|h| h.raw())
 	}
 
-  /// Accept hint text up to a given target position.
-  /// Temporarily merges the hint into the buffer, moves the cursor to target,
-  /// then splits: everything from cursor onward becomes the new hint.
-  fn accept_hint_to(&mut self, target: Pos) {
-    let Some(mut hint) = self.hint.take() else {
-      self.set_cursor(target);
-      return;
-    };
-		let mut hint_lines = hint.lines().to_vec();
-    attach_lines(&mut self.lines, &mut hint_lines);
-    let split_col = if self.cursor.exclusive {
-      target.col + 1
-    } else {
-      target.col
-    };
-
-    // Split after the target position so the char at target
-    // becomes part of the buffer (w lands ON the next word start)
-    let split_pos = Pos {
-      row: target.row,
-      col: target.col + 1,
-    };
-    // Clamp to buffer bounds
-    let split_pos = Pos {
-      row: split_pos.row.min(self.lines.len().saturating_sub(1)),
-      col: split_pos
-        .col
-        .min(self.lines[split_pos.row.min(self.lines.len().saturating_sub(1))].len()),
-    };
-
-    let new_hint = split_lines_at(&mut self.lines, split_pos);
-		let should_retake = !new_hint.is_empty() && new_hint.iter().all(|l| l.is_empty());
-		hint.set_lines(new_hint);
-
-    self.hint = should_retake.then_some(hint);
-    self.set_cursor(target);
-  }
-
   pub fn accept_hint(&mut self) {
-    let hint_str = self.join_hint();
-    if hint_str.is_empty() {
-      return;
-    }
-    self.push_str(&hint_str);
+		let Some(mut hint) = self.hint.take() else { return };
+		let Some(mut hint_lines) = strip_prefix_lines(hint.take_lines(), &self.lines) else { return };
+		attach_lines(&mut self.lines, &mut hint_lines);
+
     self.set_cursor(Pos::MAX);
     self.fix_cursor();
-    self.hint = None;
   }
 
   pub fn with_initial(mut self, s: &str, cursor_pos: usize) -> Self {

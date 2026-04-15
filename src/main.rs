@@ -535,7 +535,6 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     // Process any available input
     let event = readline.process_input();
 
-		set_bracketed_paste(false).ok();
     match handle_readline_event(&mut readline, event)? {
       true => return Ok(()),
       false => { /* continue looping */ }
@@ -560,6 +559,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   Ok(())
 }
 
+/// Handle a ReadlineEvent. Returns a boolean, `true` means "exit the shell", `false` means "keep looping"
 fn handle_readline_event(
   readline: &mut ShedLine,
   event: ShResult<ReadlineEvent>,
@@ -577,6 +577,7 @@ fn handle_readline_event(
       pre_exec.exec();
 
       // Time this command and temporarily restore cooked terminal mode while it runs.
+			set_bracketed_paste(false).ok();
       let cmd_start = Instant::now();
       write_meta(|m| m.start_timer());
       if let Err(e) = RawModeGuard::with_cooked_mode(|| {
