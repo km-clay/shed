@@ -46,7 +46,7 @@ use crate::{
   expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
   libsh::{
-    error::{ShErrKind, ShResult, ShResultExt, next_color}, guards::{scope_guard, var_ctx_guard}, strops::split_case_pat, utils::RedirVecUtils
+    error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color}, guards::{scope_guard, var_ctx_guard}, strops::split_case_pat, utils::RedirVecUtils
   },
   prelude::*,
   procio::{IoStack, PipeGenerator, borrow_fd},
@@ -306,18 +306,6 @@ impl Dispatcher {
       if e.is_flow_control() {
         return Err(e);
       }
-      if state::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
-        if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
-          let saved_status = state::get_status();
-          exec_input(trap, None, false, Some("trap ERR".into()))?;
-          state::set_status(saved_status);
-        }
-        if read_shopts(|o| o.set.errexit) {
-          e.set_kind(ShErrKind::ErrInterrupt);
-          e.persist_redirs();
-          return Err(e);
-        }
-      }
       return Err(e);
     }
 
@@ -493,7 +481,7 @@ impl Dispatcher {
       };
 
 
-      if let Err(e) = exec_input(subsh_body, None, false, Some(src_name)) {
+      if let Err(e) = exec_input(subsh_body, None, s.interactive, Some(src_name)) {
         e.print_error();
       };
     }).unwrap();
@@ -901,123 +889,82 @@ impl Dispatcher {
 
     self.run_compound("if", if_stmt.redirs, if_stmt.flags, blame, if_logic)
   }
-  fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
-    let pipeline_span = pipeline.get_span().clone();
-    let pipeline_flags = pipeline.flags;
-    let NdRule::Pipeline { cmds } = pipeline.class else {
-      unreachable!()
-    };
-    let is_bg = pipeline.flags.contains(NdFlags::BACKGROUND);
-    let report_time = pipeline.flags.contains(NdFlags::REPORT_TIME);
-    self.job_stack.new_job();
-    let pipeline_result = if cmds.len() == 1 {
-      self.fg_job = !is_bg && self.interactive;
-      let cmd = cmds.into_iter().next().unwrap();
-      let result = if is_bg && !matches!(cmd.class, NdRule::Command { .. }) {
-        self.run_fork(
-          &cmd.get_command().map(|t| t.to_string()).unwrap_or_default(),
-          report_time,
-          |s| {
-            if let Err(e) = s.dispatch_node(cmd) {
-              e.print_error();
-            }
-          },
-        )?;
-        Ok(())
-      } else {
-        self.dispatch_node(cmd)
-      };
+	fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
+		let pipeline_span = pipeline.get_span().clone();
+		let pipeline_flags = pipeline.flags;
+		let NdRule::Pipeline { cmds } = pipeline.class else {
+			unreachable!()
+		};
 
-      // Give the pipeline terminal control as soon as the first child
-      // establishes the PGID, so later children (e.g. nvim) don't get
-      // SIGTTOU when they try to modify terminal attributes.
-      // Only for interactive (top-level) pipelines - command substitution
-      // and other non-interactive contexts must not steal the terminal.
-      if !is_bg
-        && self.interactive
-        && let Some(pgid) = self.job_stack.curr_job_mut().unwrap().pgid()
-      {
-        attach_tty(pgid).ok();
-      }
-      result
-    } else {
-      let (mut in_redirs, mut out_redirs) = self.io_stack.pop_frame().redirs.split_by_channel();
+		let is_bg = pipeline_flags.contains(NdFlags::BACKGROUND);
+		let report_time = pipeline_flags.contains(NdFlags::REPORT_TIME);
+		let num_cmds = cmds.len();
+		let last = num_cmds.saturating_sub(1);
+		let mut tty_attached = false;
 
-      let mut pipes = PipeGenerator::new(cmds.len()).as_io_frames();
+		// closure that tells us if a pipeline segment should fork
+		let should_fork_segment = |cmd: &Node| -> bool {
+			is_bg && num_cmds == 1 && runs_inline(cmd)
+		};
+		// closure that gets the pgid we need if the child wants the tty
+		let tty_controller = |s: &mut Self| -> Option<Pid> {
+			(!is_bg && s.interactive).then(|| {
+				s.job_stack.curr_job_mut().unwrap().pgid()
+			}).flatten()
+		};
 
-      self.fg_job = !is_bg && self.interactive;
-      let mut tty_attached = false;
+		self.job_stack.new_job();
+		self.fg_job = !is_bg && self.interactive;
 
-      let last_cmd = cmds.len() - 1;
-      let mut result = Ok(());
-      for (i, mut cmd) in cmds.into_iter().enumerate() {
-        let mut frame = pipes.next().ok_or_else(|| {
-          sherr!(
-            InternalErr @ cmd.get_span(),
-            "failed to set up pipeline redirections",
-          )
-        })?;
-        if i == 0 {
-          for redir in std::mem::take(&mut in_redirs) {
-            frame.push(redir);
-          }
-        } else if i == last_cmd {
-          for redir in std::mem::take(&mut out_redirs) {
-            frame.push(redir);
-          }
-        }
+		let (mut in_rdrs, mut out_rdrs) = self.io_stack
+			.pop_frame()
+			.redirs
+			.split_by_channel();
+		let mut pipes = PipeGenerator::new(num_cmds).as_io_frames();
+		let mut result = Ok(());
 
-        let _guard = frame.redirect()?;
+		for (i, mut cmd) in cmds.into_iter().enumerate() {
+			if num_cmds > 1 {
+				// builtins must fork in multi-command pipelines
+				cmd.flags |= NdFlags::FORK_BUILTINS;
+			}
 
-        cmd.flags |= NdFlags::FORK_BUILTINS; // multiple cmds means builtins must fork
-        result = self.dispatch_node(cmd);
+			let mut frame = pipes.next().unwrap();
+			if i == 0 { frame.extend(std::mem::take(&mut in_rdrs)) };
+			if i == last { frame.extend(std::mem::take(&mut out_rdrs)) };
+			let _guard = frame.redirect()?;
 
-        // Give the pipeline terminal control as soon as the first child
-        // establishes the PGID, so later children (e.g. nvim) don't get
-        // SIGTTOU when they try to modify terminal attributes.
-        // Only for interactive (top-level) pipelines - command substitution
-        // and other non-interactive contexts must not steal the terminal.
-        if !tty_attached
-          && !is_bg
-          && self.interactive
-          && let Some(pgid) = self.job_stack.curr_job_mut().unwrap().pgid()
-        {
-          attach_tty(pgid).ok();
-          tty_attached = true;
-        }
+			result = if should_fork_segment(&cmd) {
+				let name = cmd
+					.get_command()
+					.map(|t| t.to_string())
+					.unwrap_or_default();
 
-        if result.is_err() {
-          break;
-        }
-      }
-      result
-    };
-    let job = self.job_stack.finalize_job().unwrap();
-    // Always dispatch the job (which reclaims the terminal via take_term)
-    // even if an error occurred, to prevent terminal ownership from being
-    // left with a dead process group.
-    let dispatch_result = dispatch_job(job, is_bg, self.interactive);
-    pipeline_result?;
-    dispatch_result?;
+				self.run_fork(&name, report_time, |s| {
+					if let Err(e) = s.dispatch_node(cmd) {
+						e.print_error();
+					}
+				})
+			} else {
+				self.dispatch_node(cmd)
+			};
 
-    // Errexit check after the job has been waited on, so the status
-    // reflects the actual exit code of the (possibly forked) command.
-    if state::get_status() != 0
-      && !pipeline_flags.contains(NdFlags::NOT_ERR)
-      && read_shopts(|o| o.set.errexit)
-    {
-      if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
-        let saved_status = state::get_status();
-        exec_input(trap, None, false, Some("trap ERR".into()))?;
-        state::set_status(saved_status);
-      }
-      return Err(sherr!(
-        ErrInterrupt @ pipeline_span,
-        "Command returned non-zero exit status",
-      ));
-    }
-    Ok(())
-  }
+			if !tty_attached && let Some(pgid) = tty_controller(self) {
+				attach_tty(pgid).ok();
+				tty_attached = true;
+			}
+
+			if result.is_err() { break; }
+		}
+
+		let job = self.job_stack.finalize_job().unwrap();
+		let dispatch_result = dispatch_job(job, is_bg, self.interactive);
+		result?;
+		dispatch_result?;
+
+		check_err(pipeline_flags, None, Some(pipeline_span))?;
+		Ok(())
+	}
 
   fn exec_builtin(&mut self, cmd: Node) -> ShResult<()> {
     let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
@@ -1329,12 +1276,13 @@ impl Dispatcher {
     name: &str,
     report_time: bool,
     f: impl FnOnce(&mut Self),
-  ) -> ShResult<Pid> {
+  ) -> ShResult<()> {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     match unsafe { fork()? } {
       ForkResult::Child => {
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
 				crate::signal::reset_signals(self.fg_job);
+        self.interactive = false;
         f(self);
         unsafe { libc::_exit(state::get_status()) }
       }
@@ -1349,7 +1297,7 @@ impl Dispatcher {
         };
         let child_proc = ChildProc::new(child, Some(name), Some(child_pgid), report_time)?;
         job.push_child(child_proc);
-        Ok(child_pgid)
+        Ok(())
       }
     }
   }
@@ -1516,6 +1464,46 @@ pub fn is_arith(tk: Option<&Tk>) -> bool {
   tk.is_some_and(|tk| tk.flags.contains(TkFlags::IS_ARITH))
 }
 
+/// Checks if a command will fork on its own or not
+pub fn runs_inline(cmd: &Node) -> bool {
+	let NdRule::Command { .. } = cmd.class else {
+		return false
+	};
+	let cmd_word = cmd
+		.get_command()
+		.and_then(|c| c.clone().expand().ok())
+		.and_then(|t| t.get_first_word())
+		.unwrap_or_default();
+	!is_func(&cmd_word) && !BUILTINS.contains(&cmd_word.as_str())
+}
+
+pub fn check_err(flags: NdFlags, err: Option<ShErr>, span: Option<Span>) -> ShResult<()> {
+	if state::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
+		if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
+			let saved_status = state::get_status();
+			exec_input(trap, None, false, Some("trap ERR".into()))?;
+			state::set_status(saved_status);
+		}
+		if read_shopts(|o| o.set.errexit) {
+			if let Some(mut e) = err {
+				e.set_kind(ShErrKind::ErrInterrupt);
+				e.persist_redirs();
+				return Err(e);
+			} else if let Some(span) = span {
+				return Err(sherr!(
+						ErrInterrupt @ span,
+						"Command returned non-zero exit status",
+				));
+			} else {
+				return Err(sherr!(
+						ErrInterrupt,
+						"Command returned non-zero exit status",
+				));
+			}
+		}
+	}
+	Ok(())
+}
 #[cfg(test)]
 mod tests {
   use crate::state;

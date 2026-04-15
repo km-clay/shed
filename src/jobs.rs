@@ -430,7 +430,7 @@ impl Job {
 
     let id_box = format!("[{}]{}", id + 1, symbol);
     let id_width = id_box.len();
-    let last_cmd = self.get_cmds().len() - 1;
+    let last_cmd = self.get_cmds().len().saturating_sub(1);
 
     let mut output = format!("{id_box}\t");
 

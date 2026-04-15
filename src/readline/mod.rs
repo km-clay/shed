@@ -734,7 +734,7 @@ impl ShedLine {
     };
 
     if self.mode.report_mode() != ModeReport::Ex
-      && self.editor.attempt_history_expansion(&self.history)
+      && self.editor.edit(|e| e.attempt_history_expansion(&self.history))
     {
       // If history expansion occurred, don't attempt completion yet
       // allow the user to see the expanded command and accept or edit it before completing
@@ -1569,6 +1569,15 @@ impl ShedLine {
     // After this line, 'mode' contains our previous mode.
     self.swap_mode(&mut mode);
 
+		// check if we left insert/replace mode
+		if matches!(
+			mode.report_mode(), // 'mode' now contains the mode we just left
+			ModeReport::Insert | ModeReport::Replace
+		) {
+			self.editor.stop_undo_merge();
+		}
+
+		// check if we entered ex/verbatim mode
     if matches!(
       self.mode.report_mode(),
       ModeReport::Ex | ModeReport::Verbatim

@@ -451,25 +451,23 @@ impl PipeGenerator {
 impl Iterator for PipeGenerator {
   type Item = (Option<Redir>, Option<Redir>);
   fn next(&mut self) -> Option<Self::Item> {
-    if self.cursor == self.num_cmds {
+    if self.cursor >= self.num_cmds {
       return None;
     }
-    if self.cursor + 1 == self.num_cmds {
-      if self.num_cmds == 1 {
-        return None;
-      } else {
-        self.cursor += 1;
-        return Some((self.last_rpipe.take(), None));
-      }
-    }
-    let (r, w) = IoMode::get_pipes();
-    let mut rpipe = Some(Redir::new(r, RedirType::Input));
-    std::mem::swap(&mut self.last_rpipe, &mut rpipe);
 
-    let wpipe = Redir::new(w, RedirType::Output);
+		let needs_write = self.cursor + 1 < self.num_cmds; // this is not the last command
 
-    self.cursor += 1;
-    Some((rpipe, Some(wpipe)))
+		let rpipe = self.last_rpipe.take(); // None if this is the first command
+		let wpipe = needs_write.then(|| {
+			let (r,w) = IoMode::get_pipes();
+			let read = Redir::new(r, RedirType::Input);
+			let write = Redir::new(w, RedirType::Output);
+			self.last_rpipe = Some(read);
+			write
+		});
+
+		self.cursor += 1;
+		Some((rpipe,wpipe))
   }
 }
 

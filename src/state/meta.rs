@@ -12,13 +12,13 @@ use std::{
   time::Duration,
 };
 
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use nix::{poll::PollFd, sys::{
   resource::{Usage, UsageWho, getrusage}, stat::{FchmodatFlags, fchmodat}, time::TimeVal
 }};
 
 use crate::{
-  builtin::BUILTINS, expand::expand_keymap, jobs::Job, libsh::error::{ShErr, ShResult}, match_loop, prelude::*, procio::borrow_fd, readline::{LineData, complete::CompSpec, keys::KeyEvent}, sherr
+  builtin::BUILTINS, expand::expand_keymap, jobs::{DisplayWaitStatus, Job}, libsh::error::{ShErr, ShResult}, match_loop, prelude::*, procio::borrow_fd, readline::{LineData, complete::CompSpec, keys::KeyEvent}, sherr
 };
 
 #[derive(Debug)]
@@ -963,10 +963,38 @@ impl MetaTab {
 
     Ok(())
   }
+	fn broadcast<F: FnMut(&Arc<UnixStream>)>(&self, mut f: F) {
+		for subscriber in &self.subscribers {
+			f(subscriber);
+		}
+	}
+	pub fn notify_job_complete(&self, job: &Job) -> ShResult<()> {
+		let id = job.tabid()
+			.map(|i| (i + 1).to_string())
+			.unwrap_or_default();
+		let pids = job.get_pids();
+		let stats = job.get_stats();
+		let cmds = job.get_cmds();
+
+		self.broadcast(|sub| {
+			let mut buf = format!("job>>begin>> {id} {}\n", pids.len());
+			for (pid, stat, cmd) in izip!(&pids, &stats, &cmds) {
+				let stat_str = match stat {
+					WtStat::Exited(_, 0) => "done".to_string(),
+					WtStat::Exited(_, n) => format!("failed:{n}"),
+					WtStat::Signaled(_, sig, _) => format!("signaled:{sig:?}"),
+					other => format!("{other:?}")
+				};
+				buf.push_str(&format!("job>>child>> {pid} {stat_str} {cmd}\n"));
+			}
+			write(sub, buf.as_bytes()).ok();
+		});
+		Ok(())
+	}
 	pub fn notify_line_edit(&self, data: LineData) -> ShResult<()> {
 		let LineData { buffer, cursor, anchor, hint, mode } = data;
 
-		for subscriber in &self.subscribers {
+		self.broadcast(|sub| {
 			let mut buf = String::new();
 			buf.push_str(&format!("line>>buffer>> {buffer}\n"));
 			buf.push_str(&format!("line>>cursor>> {cursor}\n"));
@@ -978,8 +1006,8 @@ impl MetaTab {
 			}
 			buf.push_str(&format!("line>>mode>> {mode}\n"));
 
-			write(subscriber, buf.as_bytes()).ok();
-		}
+			write(sub, buf.as_bytes()).ok();
+		});
 
 		Ok(())
 	}

@@ -332,7 +332,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   /*
    * Here we are going to get metadata on the exited process by querying the
    * job table with the pid. Then if the discovered job is the fg task,
-   * return terminal control to rsh If it is not the fg task, print the
+   * return terminal control to shed If it is not the fg task, print the
    * display info for the job in the job table We can reasonably assume that
    * if it is not a foreground job, then it exists in the job table
    * If this assumption is incorrect, the code has gone wrong somewhere.
@@ -400,7 +400,8 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
           post_job_cmds.exec();
         });
 
-        write_meta(|m| m.post_system_message(job_complete_msg))
+        write_meta(|m| m.post_system_message(job_complete_msg));
+				write_meta(|m| m.notify_job_complete(&job)).ok();
       }
     }
   }

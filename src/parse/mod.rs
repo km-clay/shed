@@ -1316,7 +1316,7 @@ impl ParseStream {
     node_tks: &mut Vec<Tk>,
     context: LabelCtx,
   ) -> ShResult<Redir> {
-    let redir_bldr = RedirBldr::try_from(redir_tk.clone()).unwrap();
+    let redir_bldr = RedirBldr::try_from(redir_tk.clone())?;
     let next_tk = if redir_bldr.io_mode.is_none() {
       next()
     } else {
