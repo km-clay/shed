@@ -46,7 +46,10 @@ use crate::{
   expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
   libsh::{
-    error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color}, guards::{scope_guard, var_ctx_guard}, strops::split_case_pat, utils::RedirVecUtils
+    error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
+    guards::{scope_guard, var_ctx_guard},
+    strops::split_case_pat,
+    utils::RedirVecUtils,
   },
   prelude::*,
   procio::{IoStack, PipeGenerator, borrow_fd},
@@ -283,8 +286,6 @@ impl Dispatcher {
       // and propagate back to the functions in main.rs
       check_signals()?;
     }
-    let flags = node.flags;
-
     let result = match node.class {
       NdRule::Conjunction { .. } => self.exec_conjunction(node),
       NdRule::Pipeline { .. } => self.exec_pipeline(node),
@@ -302,7 +303,7 @@ impl Dispatcher {
       _ => unreachable!(),
     };
 
-    if let Err(mut e) = result {
+    if let Err(e) = result {
       if e.is_flow_control() {
         return Err(e);
       }
@@ -340,8 +341,8 @@ impl Dispatcher {
       .unwrap();
     let cmd_tk = node.get_command();
 
-		if is_subsh(cmd_tk) {
-			self.exec_subsh(node)
+    if is_subsh(cmd_tk) {
+      self.exec_subsh(node)
     } else if is_func(&cmd_word) {
       self.exec_func(node)
     } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTINS.contains(&cmd_word.as_str()) {
@@ -466,25 +467,27 @@ impl Dispatcher {
     self.io_stack.append_to_frame(subsh.redirs);
     let _guard = self.io_stack.pop_frame().redirect()?;
 
-		let subsh_raw = argv[0].span.as_str();
-		let subsh_body = subsh_raw[1..subsh_raw.len() - 1].to_string(); // Remove surrounding parentheses
+    let subsh_raw = argv[0].span.as_str();
+    let subsh_body = subsh_raw[1..subsh_raw.len() - 1].to_string(); // Remove surrounding parentheses
 
-		let subsh_display = subsh_body.graphemes(true)
-			.take(70) // maximum display length
-			.collect::<String>();
-		let name = format!("( {subsh_display} )");
+    let subsh_display = subsh_body
+      .graphemes(true)
+      .take(70) // maximum display length
+      .collect::<String>();
+    let name = format!("( {subsh_display} )");
 
-    self.run_fork(&name, report_time, |s| {
-      if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
-        e.print_error();
-        return;
-      };
+    self
+      .run_fork(&name, report_time, |s| {
+        if let Err(e) = s.set_assignments(assignments, AssignBehavior::Export) {
+          e.print_error();
+          return;
+        };
 
-
-      if let Err(e) = exec_input(subsh_body, None, s.interactive, Some(src_name)) {
-        e.print_error();
-      };
-    }).unwrap();
+        if let Err(e) = exec_input(subsh_body, None, s.interactive, Some(src_name)) {
+          e.print_error();
+        };
+      })
+      .unwrap();
 
     Ok(())
   }
@@ -889,82 +892,80 @@ impl Dispatcher {
 
     self.run_compound("if", if_stmt.redirs, if_stmt.flags, blame, if_logic)
   }
-	fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
-		let pipeline_span = pipeline.get_span().clone();
-		let pipeline_flags = pipeline.flags;
-		let NdRule::Pipeline { cmds } = pipeline.class else {
-			unreachable!()
-		};
+  fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
+    let pipeline_span = pipeline.get_span().clone();
+    let pipeline_flags = pipeline.flags;
+    let NdRule::Pipeline { cmds } = pipeline.class else {
+      unreachable!()
+    };
 
-		let is_bg = pipeline_flags.contains(NdFlags::BACKGROUND);
-		let report_time = pipeline_flags.contains(NdFlags::REPORT_TIME);
-		let num_cmds = cmds.len();
-		let last = num_cmds.saturating_sub(1);
-		let mut tty_attached = false;
+    let is_bg = pipeline_flags.contains(NdFlags::BACKGROUND);
+    let report_time = pipeline_flags.contains(NdFlags::REPORT_TIME);
+    let num_cmds = cmds.len();
+    let last = num_cmds.saturating_sub(1);
+    let mut tty_attached = false;
 
-		// closure that tells us if a pipeline segment should fork
-		let should_fork_segment = |cmd: &Node| -> bool {
-			is_bg && num_cmds == 1 && runs_inline(cmd)
-		};
-		// closure that gets the pgid we need if the child wants the tty
-		let tty_controller = |s: &mut Self| -> Option<Pid> {
-			(!is_bg && s.interactive).then(|| {
-				s.job_stack.curr_job_mut().unwrap().pgid()
-			}).flatten()
-		};
+    // closure that tells us if a pipeline segment should fork
+    let should_fork_segment = |cmd: &Node| -> bool { is_bg && num_cmds == 1 && runs_inline(cmd) };
+    // closure that gets the pgid we need if the child wants the tty
+    let tty_controller = |s: &mut Self| -> Option<Pid> {
+      (!is_bg && s.interactive)
+        .then(|| s.job_stack.curr_job_mut().unwrap().pgid())
+        .flatten()
+    };
 
-		self.job_stack.new_job();
-		self.fg_job = !is_bg && self.interactive;
+    self.job_stack.new_job();
+    self.fg_job = !is_bg && self.interactive;
 
-		let (mut in_rdrs, mut out_rdrs) = self.io_stack
-			.pop_frame()
-			.redirs
-			.split_by_channel();
-		let mut pipes = PipeGenerator::new(num_cmds).as_io_frames();
-		let mut result = Ok(());
+    let (mut in_rdrs, mut out_rdrs) = self.io_stack.pop_frame().redirs.split_by_channel();
+    let mut pipes = PipeGenerator::new(num_cmds).as_io_frames();
+    let mut result = Ok(());
 
-		for (i, mut cmd) in cmds.into_iter().enumerate() {
-			if num_cmds > 1 {
-				// builtins must fork in multi-command pipelines
-				cmd.flags |= NdFlags::FORK_BUILTINS;
-			}
+    for (i, mut cmd) in cmds.into_iter().enumerate() {
+      if num_cmds > 1 {
+        // builtins must fork in multi-command pipelines
+        cmd.flags |= NdFlags::FORK_BUILTINS;
+      }
 
-			let mut frame = pipes.next().unwrap();
-			if i == 0 { frame.extend(std::mem::take(&mut in_rdrs)) };
-			if i == last { frame.extend(std::mem::take(&mut out_rdrs)) };
-			let _guard = frame.redirect()?;
+      let mut frame = pipes.next().unwrap();
+      if i == 0 {
+        frame.extend(std::mem::take(&mut in_rdrs))
+      };
+      if i == last {
+        frame.extend(std::mem::take(&mut out_rdrs))
+      };
+      let _guard = frame.redirect()?;
 
-			result = if should_fork_segment(&cmd) {
-				let name = cmd
-					.get_command()
-					.map(|t| t.to_string())
-					.unwrap_or_default();
+      result = if should_fork_segment(&cmd) {
+        let name = cmd.get_command().map(|t| t.to_string()).unwrap_or_default();
 
-				self.run_fork(&name, report_time, |s| {
-					if let Err(e) = s.dispatch_node(cmd) {
-						e.print_error();
-					}
-				})
-			} else {
-				self.dispatch_node(cmd)
-			};
+        self.run_fork(&name, report_time, |s| {
+          if let Err(e) = s.dispatch_node(cmd) {
+            e.print_error();
+          }
+        })
+      } else {
+        self.dispatch_node(cmd)
+      };
 
-			if !tty_attached && let Some(pgid) = tty_controller(self) {
-				attach_tty(pgid).ok();
-				tty_attached = true;
-			}
+      if !tty_attached && let Some(pgid) = tty_controller(self) {
+        attach_tty(pgid).ok();
+        tty_attached = true;
+      }
 
-			if result.is_err() { break; }
-		}
+      if result.is_err() {
+        break;
+      }
+    }
 
-		let job = self.job_stack.finalize_job().unwrap();
-		let dispatch_result = dispatch_job(job, is_bg, self.interactive);
-		result?;
-		dispatch_result?;
+    let job = self.job_stack.finalize_job().unwrap();
+    let dispatch_result = dispatch_job(job, is_bg, self.interactive);
+    result?;
+    dispatch_result?;
 
-		check_err(pipeline_flags, None, Some(pipeline_span))?;
-		Ok(())
-	}
+    check_err(pipeline_flags, None, Some(pipeline_span))?;
+    Ok(())
+  }
 
   fn exec_builtin(&mut self, cmd: Node) -> ShResult<()> {
     let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
@@ -1026,12 +1027,16 @@ impl Dispatcher {
       return self.exec_cmd(cmd);
     }
 
-		if argv.len() == 2
-		&& argv[1].as_str() == "--help" {
-			// we have been asked for help
-			// is this a hack? only the nose knows.
-			return exec_input(format!("help builtin-{cmd_raw}"), None, false, Some("<builtin-help>".into()))
-		}
+    if argv.len() == 2 && argv[1].as_str() == "--help" {
+      // we have been asked for help
+      // is this a hack? only the nose knows.
+      return exec_input(
+        format!("help builtin-{cmd_raw}"),
+        None,
+        false,
+        Some("<builtin-help>".into()),
+      );
+    }
 
     // Set up redirections here so we can attach the guard to propagated errors.
     self.io_stack.append_to_frame(mem::take(&mut cmd.redirs));
@@ -1271,17 +1276,12 @@ impl Dispatcher {
 
     Ok(())
   }
-  fn run_fork(
-    &mut self,
-    name: &str,
-    report_time: bool,
-    f: impl FnOnce(&mut Self),
-  ) -> ShResult<()> {
+  fn run_fork(&mut self, name: &str, report_time: bool, f: impl FnOnce(&mut Self)) -> ShResult<()> {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     match unsafe { fork()? } {
       ForkResult::Child => {
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
-				crate::signal::reset_signals(self.fg_job);
+        crate::signal::reset_signals(self.fg_job);
         self.interactive = false;
         f(self);
         unsafe { libc::_exit(state::get_status()) }
@@ -1466,43 +1466,43 @@ pub fn is_arith(tk: Option<&Tk>) -> bool {
 
 /// Checks if a command will fork on its own or not
 pub fn runs_inline(cmd: &Node) -> bool {
-	let NdRule::Command { .. } = cmd.class else {
-		return false
-	};
-	let cmd_word = cmd
-		.get_command()
-		.and_then(|c| c.clone().expand().ok())
-		.and_then(|t| t.get_first_word())
-		.unwrap_or_default();
-	!is_func(&cmd_word) && !BUILTINS.contains(&cmd_word.as_str())
+  let NdRule::Command { .. } = cmd.class else {
+    return false;
+  };
+  let cmd_word = cmd
+    .get_command()
+    .and_then(|c| c.clone().expand().ok())
+    .and_then(|t| t.get_first_word())
+    .unwrap_or_default();
+  !is_func(&cmd_word) && !BUILTINS.contains(&cmd_word.as_str())
 }
 
 pub fn check_err(flags: NdFlags, err: Option<ShErr>, span: Option<Span>) -> ShResult<()> {
-	if state::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
-		if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
-			let saved_status = state::get_status();
-			exec_input(trap, None, false, Some("trap ERR".into()))?;
-			state::set_status(saved_status);
-		}
-		if read_shopts(|o| o.set.errexit) {
-			if let Some(mut e) = err {
-				e.set_kind(ShErrKind::ErrInterrupt);
-				e.persist_redirs();
-				return Err(e);
-			} else if let Some(span) = span {
-				return Err(sherr!(
-						ErrInterrupt @ span,
-						"Command returned non-zero exit status",
-				));
-			} else {
-				return Err(sherr!(
-						ErrInterrupt,
-						"Command returned non-zero exit status",
-				));
-			}
-		}
-	}
-	Ok(())
+  if state::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
+    if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
+      let saved_status = state::get_status();
+      exec_input(trap, None, false, Some("trap ERR".into()))?;
+      state::set_status(saved_status);
+    }
+    if read_shopts(|o| o.set.errexit) {
+      if let Some(mut e) = err {
+        e.set_kind(ShErrKind::ErrInterrupt);
+        e.persist_redirs();
+        return Err(e);
+      } else if let Some(span) = span {
+        return Err(sherr!(
+            ErrInterrupt @ span,
+            "Command returned non-zero exit status",
+        ));
+      } else {
+        return Err(sherr!(
+          ErrInterrupt,
+          "Command returned non-zero exit status",
+        ));
+      }
+    }
+  }
+  Ok(())
 }
 #[cfg(test)]
 mod tests {

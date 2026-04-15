@@ -104,8 +104,7 @@ pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
   }
 
   let key = match key_name.first()?.to_uppercase().as_str() {
-    "CR" => KeyCode::Char('\r'),
-    "ENTER" | "RETURN" => KeyCode::Enter,
+    "CR" | "ENTER" | "RETURN" => KeyCode::Enter,
     "ESC" | "ESCAPE" => KeyCode::Esc,
     "TAB" => KeyCode::Tab,
     "BS" | "BACKSPACE" => KeyCode::Backspace,
@@ -139,7 +138,7 @@ mod tests {
   #[test]
   fn key_alias_cr() {
     let key = parse_key_alias("CR").unwrap();
-    assert_eq!(key, KeyEvent(KeyCode::Char('\r'), ModKeys::NONE));
+    assert_eq!(key, KeyEvent(KeyCode::Enter, ModKeys::NONE));
   }
 
   #[test]
@@ -261,7 +260,7 @@ mod tests {
     let keys = expand_keymap("a<CR>b");
     assert_eq!(keys.len(), 3);
     assert_eq!(keys[0], KeyEvent(KeyCode::Char('a'), ModKeys::NONE));
-    assert_eq!(keys[1], KeyEvent(KeyCode::Char('\r'), ModKeys::NONE));
+    assert_eq!(keys[1], KeyEvent(KeyCode::Enter, ModKeys::NONE));
     assert_eq!(keys[2], KeyEvent(KeyCode::Char('b'), ModKeys::NONE));
   }
 

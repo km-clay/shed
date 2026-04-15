@@ -73,7 +73,7 @@ impl History {
   const USER_VERSION: i32 = 2;
   fn init_db(conn: &Connection, table: &str) -> rusqlite::Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL")?;
-		conn.execute_batch("PRAGMA case_sensitive_like = 1")?;
+    conn.execute_batch("PRAGMA case_sensitive_like = 1")?;
     conn.execute_batch(&format!(
       r#"
 			CREATE TABLE IF NOT EXISTS {table} (

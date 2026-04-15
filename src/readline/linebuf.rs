@@ -1,5 +1,9 @@
 use std::{
-  cmp::Ordering, collections::{HashSet, VecDeque}, fmt::Display, ops::{Index, IndexMut}, slice::SliceIndex
+  cmp::Ordering,
+  collections::{HashSet, VecDeque},
+  fmt::Display,
+  ops::{Index, IndexMut},
+  slice::SliceIndex,
 };
 
 use itertools::Either;
@@ -179,59 +183,64 @@ pub fn attach_lines(lines: &mut Vec<Line>, other: &mut Vec<Line>) {
 }
 
 pub fn is_prefix_lines(this: &[Line], other: &[Line]) -> bool {
-	if this.is_empty() {
-		return false;
-	}
+  if this.is_empty() {
+    return false;
+  }
 
-	let all_but_last = this[..this.len().saturating_sub(1)].iter()
-		.zip(other.iter())
-		.all(|(l,r)| *l == *r);
+  let all_but_last = this[..this.len().saturating_sub(1)]
+    .iter()
+    .zip(other.iter())
+    .all(|(l, r)| *l == *r);
 
-	if !all_but_last {
-		return false;
-	}
+  if !all_but_last {
+    return false;
+  }
 
-	let last = this.len().saturating_sub(1);
-	let Some(other_line) = other.get(last).map(|l| &l.0) else {
-		return false;
-	};
-	let this_line = &this[last].0;
+  let last = this.len().saturating_sub(1);
+  let Some(other_line) = other.get(last).map(|l| &l.0) else {
+    return false;
+  };
+  let this_line = &this[last].0;
 
-	this_line.len() <= other_line.len() && this_line.iter().zip(other_line.iter()).all(|(l,r)| l == r)
+  this_line.len() <= other_line.len()
+    && this_line.iter().zip(other_line.iter()).all(|(l, r)| l == r)
 }
 
 pub fn strip_prefix_lines(mut lines: Vec<Line>, other: &[Line]) -> Option<Vec<Line>> {
-	if lines.is_empty() {
-		return None
-	}
+  if lines.is_empty() {
+    return None;
+  }
 
-	let common_lines = lines.iter()
-		.zip(other.iter())
-		.take_while(|(l,r)| *l == *r)
-		.count();
+  let common_lines = lines
+    .iter()
+    .zip(other.iter())
+    .take_while(|(l, r)| *l == *r)
+    .count();
 
-	// drain equal lines
-	lines.drain(..common_lines);
+  // drain equal lines
+  lines.drain(..common_lines);
 
-	if lines.is_empty() {
-		return None
-	}
+  if lines.is_empty() {
+    return None;
+  }
 
-	if let Some(other_line) = other.get(common_lines) {
-		let common_chars = lines[0].0.iter()
-			.zip(other_line.0.iter())
-			.take_while(|(l,r)| l == r)
-			.count();
+  if let Some(other_line) = other.get(common_lines) {
+    let common_chars = lines[0]
+      .0
+      .iter()
+      .zip(other_line.0.iter())
+      .take_while(|(l, r)| l == r)
+      .count();
 
-		// drain common characters
-		lines[0].0.drain(..common_chars);
-	}
+    // drain common characters
+    lines[0].0.drain(..common_chars);
+  }
 
-	if lines.iter().all(|l| l.is_empty()) {
-		None
-	} else {
-		Some(lines)
-	}
+  if lines.iter().all(|l| l.is_empty()) {
+    None
+  } else {
+    Some(lines)
+  }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd)]
@@ -707,98 +716,97 @@ impl Iterator for KillRing {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Hint {
-	Override(Vec<Line>),
-	History(Vec<Line>),
-	Completion(Vec<Line>),
+  Override(Vec<Line>),
+  History(Vec<Line>),
+  Completion(Vec<Line>),
 }
 
 impl Hint {
-	pub fn new_override(s: String) -> Self {
-		Self::Override(to_lines(s))
-	}
-	pub fn new_history(s: String) -> Self {
-		Self::History(to_lines(s))
-	}
-	pub fn new_completion(s: String) -> Self {
-		Self::Completion(to_lines(s))
-	}
-
-	pub fn set_lines(&mut self, new_lines: Vec<Line>) {
-		match self {
-			Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => {
-				*lines = new_lines;
-			}
-		}
-	}
-	pub fn lines(&self) -> &[Line] {
-		match self {
-			Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => lines,
-		}
-	}
-  pub fn raw(&self) -> String {
-		join_lines(self.lines())
+  pub fn new_override(s: String) -> Self {
+    Self::Override(to_lines(s))
   }
-	pub fn take_lines(&mut self) -> Vec<Line> {
-		match self {
-			Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => {
-				std::mem::take(lines)
-			}
-		}
-	}
-	pub fn display(&self, prefix: Option<&str>) -> String {
-		let mut text = self.raw();
-		if let Some(prefix) = prefix
-		&& let Some(rest) = text.strip_prefix(prefix) {
-			text = rest.to_string();
-		}
+  pub fn new_history(s: String) -> Self {
+    Self::History(to_lines(s))
+  }
+  pub fn new_completion(s: String) -> Self {
+    Self::Completion(to_lines(s))
+  }
 
-		format!("\x1b[90m{text}\x1b[0m").replace("\n", "\n\x1b[90m")
-	}
-	pub fn len(&self) -> usize {
-		self.lines().len()
-	}
-	pub fn is_empty(&self) -> bool {
-		self.lines().is_empty() || (self.lines().len() == 1 && self.lines()[0].is_empty())
-	}
+  pub fn set_lines(&mut self, new_lines: Vec<Line>) {
+    match self {
+      Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => {
+        *lines = new_lines;
+      }
+    }
+  }
+  pub fn lines(&self) -> &[Line] {
+    match self {
+      Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => lines,
+    }
+  }
+  pub fn raw(&self) -> String {
+    join_lines(self.lines())
+  }
+  pub fn take_lines(&mut self) -> Vec<Line> {
+    match self {
+      Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => {
+        std::mem::take(lines)
+      }
+    }
+  }
+  pub fn display(&self, prefix: Option<&str>) -> String {
+    let mut text = self.raw();
+    if let Some(prefix) = prefix
+      && let Some(rest) = text.strip_prefix(prefix)
+    {
+      text = rest.to_string();
+    }
+
+    format!("\x1b[90m{text}\x1b[0m").replace("\n", "\n\x1b[90m")
+  }
+  pub fn len(&self) -> usize {
+    self.lines().len()
+  }
+  pub fn is_empty(&self) -> bool {
+    self.lines().is_empty() || (self.lines().len() == 1 && self.lines()[0].is_empty())
+  }
 }
 
 impl PartialOrd for Hint {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    Some(self.cmp(other))
+  }
 }
 
 impl Ord for Hint {
-	/// Defines priority for hint types.
-	///
-	/// If a new hint would overwrite an old hint, the 'lesser' hint loses
-	///
-	/// 'greater' hints and 'equal' hints both overwrite.
-	fn cmp(&self, other: &Self) -> Ordering {
-		match self {
-			Self::Override(_) => {
-				if matches!(other, Self::Override(_)) {
-					Ordering::Equal
-				} else {
-					Ordering::Greater
-				}
-			}
-			Self::History(_) => {
-				match other {
-					Self::Override(_) => Ordering::Less,
-					Self::History(_) => Ordering::Equal,
-					Self::Completion(_) => Ordering::Greater,
-				}
-			}
-			Self::Completion(_) => {
-				if matches!(other, Self::Completion(_)) {
-					Ordering::Equal
-				} else {
-					Ordering::Less
-				}
-			}
-		}
-	}
+  /// Defines priority for hint types.
+  ///
+  /// If a new hint would overwrite an old hint, the 'lesser' hint loses
+  ///
+  /// 'greater' hints and 'equal' hints both overwrite.
+  fn cmp(&self, other: &Self) -> Ordering {
+    match self {
+      Self::Override(_) => {
+        if matches!(other, Self::Override(_)) {
+          Ordering::Equal
+        } else {
+          Ordering::Greater
+        }
+      }
+      Self::History(_) => match other {
+        Self::Override(_) => Ordering::Less,
+        Self::History(_) => Ordering::Equal,
+        Self::Completion(_) => Ordering::Greater,
+      },
+      Self::Completion(_) => {
+        if matches!(other, Self::Completion(_)) {
+          Ordering::Equal
+        } else {
+          Ordering::Less
+        }
+      }
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -1130,9 +1138,9 @@ impl LineBuf {
       v.set_var("BUFFER", VarKind::Str(buf.clone()), VarFlags::EXPORT)?;
       v.set_var("CURSOR", VarKind::Str(cursor.to_string()), VarFlags::EXPORT)?;
       if let Some(anchor) = anchor {
-				v.set_var("ANCHOR", VarKind::Str(anchor.to_string()), VarFlags::EXPORT)?;
-			}
-			Ok(())
+        v.set_var("ANCHOR", VarKind::Str(anchor.to_string()), VarFlags::EXPORT)?;
+      }
+      Ok(())
     })?;
 
     write(borrow_fd(STDOUT_FILENO), b"\r\n")?;
@@ -1140,30 +1148,29 @@ impl LineBuf {
       exec_input(cmd.to_string(), None, true, Some("<ex-mode-cmd>".into()))
     })?;
 
-		let mut new_anchor = None;
+    let mut new_anchor = None;
 
     let keys = write_vars(|v| {
       buf = v.take_var("BUFFER");
       cursor = v.take_var("CURSOR");
-			if anchor.is_some() {
-				new_anchor = Some(v.take_var("ANCHOR"));
-			}
+      if anchor.is_some() {
+        new_anchor = Some(v.take_var("ANCHOR"));
+      }
       v.take_var("KEYS")
     });
 
     self.set_buffer(buf);
 
-		if let Some(new_anchor) = new_anchor
-		{
-			if let Some((row, col)) = new_anchor.split_once(':')
-			&& let Ok(row) = row.parse::<usize>()
-			&& let Ok(col) = col.parse::<usize>()
-			{
-				anchor = Some(self.pos_to_flat(Pos { row, col }));
-			} else if let Ok(num) = new_anchor.parse::<usize>() {
-				anchor = Some(self.pos_to_flat(self.pos_from_flat(num))); // round trip validates position
-			}
-		}
+    if let Some(new_anchor) = new_anchor {
+      if let Some((row, col)) = new_anchor.split_once(':')
+        && let Ok(row) = row.parse::<usize>()
+        && let Ok(col) = col.parse::<usize>()
+      {
+        anchor = Some(self.pos_to_flat(Pos { row, col }));
+      } else if let Ok(num) = new_anchor.parse::<usize>() {
+        anchor = Some(self.pos_to_flat(self.pos_from_flat(num))); // round trip validates position
+      }
+    }
 
     if let Some((row, col)) = cursor.split_once(':')
       && let Ok(row) = row.parse::<usize>()
@@ -1180,11 +1187,11 @@ impl LineBuf {
       self.set_cursor_from_flat(cursor_raw);
     };
 
-		if let Some(anchor) = anchor
-		&& anchor != cursor_raw
-		&& self.select_mode.is_some()
+    if let Some(anchor) = anchor
+      && anchor != cursor_raw
+      && self.select_mode.is_some()
     {
-			self.set_anchor_from_flat(anchor);
+      self.set_anchor_from_flat(anchor);
     }
     if !keys.is_empty() {
       write_meta(|m| m.set_pending_widget_keys(&keys))
@@ -2238,104 +2245,105 @@ impl LineBuf {
       }
     }
   }
-	/// Perform an operation that incrementally accepts the hint if the cursor moves into it
-	///
-	/// Process:
-	/// * take the lines out of self.hint directly
-	/// * mark end of buffer position, append hint lines to self.lines
-	/// * call the function
-	/// * split the buffer at `old_end_pos.max(new_cursor_pos)`
-	///
-	/// Notes:
-	/// * The size of the hint can never grow as a result of this function. It will only ever stay the same size or shrink.
-	pub fn with_hint<F,T>(&mut self, f: F) -> T
-	where F: FnOnce(&mut Self) -> T {
-		let mut hint = self.hint.take();
-		let mut old_end_pos = self.end_pos();
+  /// Perform an operation that incrementally accepts the hint if the cursor moves into it
+  ///
+  /// Process:
+  /// * take the lines out of self.hint directly
+  /// * mark end of buffer position, append hint lines to self.lines
+  /// * call the function
+  /// * split the buffer at `old_end_pos.max(new_cursor_pos)`
+  ///
+  /// Notes:
+  /// * The size of the hint can never grow as a result of this function. It will only ever stay the same size or shrink.
+  pub fn with_hint<F, T>(&mut self, f: F) -> T
+  where
+    F: FnOnce(&mut Self) -> T,
+  {
+    let mut hint = self.hint.take();
+    let mut old_end_pos = self.end_pos();
 
-		if self.cursor.exclusive {
-			old_end_pos = old_end_pos.col_add(1);
-		}
+    if self.cursor.exclusive {
+      old_end_pos = old_end_pos.col_add(1);
+    }
 
-		if let Some(h) = hint.as_mut()
-		&& let Some(mut hint_lines) = strip_prefix_lines(h.take_lines(), &self.lines) {
-			attach_lines(&mut self.lines, &mut hint_lines);
-		}
-		let old_cursor_pos = self.cursor.pos;
+    if let Some(h) = hint.as_mut()
+      && let Some(mut hint_lines) = strip_prefix_lines(h.take_lines(), &self.lines)
+    {
+      attach_lines(&mut self.lines, &mut hint_lines);
+    }
+    let old_cursor_pos = self.cursor.pos;
 
-		let result = f(self);
+    let result = f(self);
 
-		let new_cursor_pos = self.cursor.pos;
+    let new_cursor_pos = self.cursor.pos;
 
-		if let Some(mut hint) = hint {
-			let split_pos =
-			if new_cursor_pos > old_cursor_pos
-			&& new_cursor_pos >= old_end_pos {
-				// our cursor moved into the hint.
-				new_cursor_pos.col_add(1)
-			} else {
-				old_end_pos
-			};
+    if let Some(mut hint) = hint {
+      let split_pos = if new_cursor_pos > old_cursor_pos && new_cursor_pos >= old_end_pos {
+        // our cursor moved into the hint.
+        new_cursor_pos.col_add(1)
+      } else {
+        old_end_pos
+      };
 
-			let hint_lines = split_lines_at(&mut self.lines, split_pos);
-			if !hint_lines.is_empty() {
-				hint.set_lines(hint_lines);
-				self.hint = Some(hint);
-			}
-		}
+      let hint_lines = split_lines_at(&mut self.lines, split_pos);
+      if !hint_lines.is_empty() {
+        hint.set_lines(hint_lines);
+        self.hint = Some(hint);
+      }
+    }
 
-		result
-	}
-	fn display_col_to_index(&self, row: usize, target: usize) -> usize {
-		let tab_width = read_shopts(|o| o.line.tab_width);
-		let line = self.line(row);
-		let mut col = 0;
-		for (i, gr) in line.0.iter().enumerate() {
-			if col >= target {
-				return i;
-			}
-			let Some(ch) = gr.as_char() else {
-				col += gr.width();
-				continue
-			};
+    result
+  }
+  fn display_col_to_index(&self, row: usize, target: usize) -> usize {
+    let tab_width = read_shopts(|o| o.line.tab_width);
+    let line = self.line(row);
+    let mut col = 0;
+    for (i, gr) in line.0.iter().enumerate() {
+      if col >= target {
+        return i;
+      }
+      let Some(ch) = gr.as_char() else {
+        col += gr.width();
+        continue;
+      };
 
-			match ch {
-				'\t' => {
-					col += tab_width - (col % tab_width);
-				}
-				c => {
-					col += c.width().unwrap_or(0);
-				}
-			}
-		}
+      match ch {
+        '\t' => {
+          col += tab_width - (col % tab_width);
+        }
+        c => {
+          col += c.width().unwrap_or(0);
+        }
+      }
+    }
 
-		line.0.len()
-	}
-	fn calc_display_col_for(&self, pos: Pos) -> usize {
-		let tab_width = read_shopts(|o| o.line.tab_width);
-		let line = self.line(pos.row);
-		let mut col = 0;
-		for gr in &line.0[..pos.col] {
-			let Some(ch) = gr.as_char() else {
-				col += gr.width();
-				continue
-			};
+    line.0.len()
+  }
+  fn calc_display_col_for(&self, pos: Pos) -> usize {
+    let tab_width = read_shopts(|o| o.line.tab_width);
+    let line = self.line(pos.row);
+    let mut col = 0;
+    for gr in &line.0[..pos.col] {
+      let Some(ch) = gr.as_char() else {
+        col += gr.width();
+        continue;
+      };
 
-			match ch {
-				'\t' => {
-					col += tab_width - (col % tab_width);
-				}
-				c => {
-					col += c.width().unwrap_or(0);
-				}
-			}
-		}
+      match ch {
+        '\t' => {
+          col += tab_width - (col % tab_width);
+        }
+        c => {
+          col += c.width().unwrap_or(0);
+        }
+      }
+    }
 
-		col
-	}
-	fn calc_cursor_display_col(&self) -> usize {
-		self.calc_display_col_for(self.cursor.pos)
-	}
+    col
+  }
+  fn calc_cursor_display_col(&self) -> usize {
+    self.calc_display_col_for(self.cursor.pos)
+  }
   /// Wrapper for eval_motion_inner that calls it with `check_hint: false`
   fn eval_motion(&mut self, cmd: &EditCmd) -> ShResult<Option<MotionKind>> {
     self.eval_motion_inner(cmd, false)
@@ -2346,312 +2354,313 @@ impl LineBuf {
       return Ok(None);
     };
 
-		let eval = |this: &mut Self| -> ShResult<Option<MotionKind>> {
-			let kind = match motion {
-				Motion::WholeLine => {
-					let start = this.row();
-					let end = (this.row() + (count.saturating_sub(1))).min(this.lines.len().saturating_sub(1));
-					Some(MotionKind::Line {
-						start,
-						end,
-						inclusive: true,
-					})
-				}
-				Motion::TextObj(text_obj) => this.dispatch_text_obj(*count as u16, text_obj.clone()),
-				Motion::EndOfLastWord => {
-					let row = this.row() + (count.saturating_sub(1));
-					let line = this.line_mut(row);
-					let mut target = Pos { row, col: 0 };
-					for (i, gr) in line.0.iter().enumerate() {
-						if !gr.is_ws() {
-							target.col = i;
-						}
-					}
+    let eval = |this: &mut Self| -> ShResult<Option<MotionKind>> {
+      let kind = match motion {
+        Motion::WholeLine => {
+          let start = this.row();
+          let end =
+            (this.row() + (count.saturating_sub(1))).min(this.lines.len().saturating_sub(1));
+          Some(MotionKind::Line {
+            start,
+            end,
+            inclusive: true,
+          })
+        }
+        Motion::TextObj(text_obj) => this.dispatch_text_obj(*count as u16, text_obj.clone()),
+        Motion::EndOfLastWord => {
+          let row = this.row() + (count.saturating_sub(1));
+          let line = this.line_mut(row);
+          let mut target = Pos { row, col: 0 };
+          for (i, gr) in line.0.iter().enumerate() {
+            if !gr.is_ws() {
+              target.col = i;
+            }
+          }
 
-					(target != this.cursor.pos).then_some(MotionKind::Char {
-						start: this.cursor.pos,
-						end: target,
-						inclusive: true,
-					})
-				}
-				Motion::StartOfFirstWord => {
-					let mut target = Pos {
-						row: this.row(),
-						col: 0,
-					};
-					let line = this.cur_line();
-					for (i, gr) in line.0.iter().enumerate() {
-						target.col = i;
-						if !gr.is_ws() {
-							break;
-						}
-					}
+          (target != this.cursor.pos).then_some(MotionKind::Char {
+            start: this.cursor.pos,
+            end: target,
+            inclusive: true,
+          })
+        }
+        Motion::StartOfFirstWord => {
+          let mut target = Pos {
+            row: this.row(),
+            col: 0,
+          };
+          let line = this.cur_line();
+          for (i, gr) in line.0.iter().enumerate() {
+            target.col = i;
+            if !gr.is_ws() {
+              break;
+            }
+          }
 
-					(target != this.cursor.pos).then_some(MotionKind::Char {
-						start: this.cursor.pos,
-						end: target,
-						inclusive: true,
-					})
-				}
-				dir @ (Motion::StartOfLine | Motion::EndOfLine) => {
-					let (inclusive, off) = match dir {
-						Motion::StartOfLine => (false, isize::MIN),
-						Motion::EndOfLine => (true, isize::MAX),
-						_ => unreachable!(),
-					};
-					let target = this.offset_cursor(0, off);
-					(target != this.cursor.pos).then_some(MotionKind::Char {
-						start: this.cursor.pos,
-						end: target,
-						inclusive,
-					})
-				}
-				Motion::WordMotion(to, word, dir) => {
-					// 'cw' is a weird case
-					// if you are on the word's left boundary, it will not delete whitespace after
-					// the end of the word
-					let ignore_trailing_ws = matches!(verb, Some(VerbCmd(_, Verb::Change)),)
-						&& matches!(
-							motion,
-							Motion::WordMotion(To::Start, _, Direction::Forward,)
-						);
-					let inclusive = verb.is_none();
+          (target != this.cursor.pos).then_some(MotionKind::Char {
+            start: this.cursor.pos,
+            end: target,
+            inclusive: true,
+          })
+        }
+        dir @ (Motion::StartOfLine | Motion::EndOfLine) => {
+          let (inclusive, off) = match dir {
+            Motion::StartOfLine => (false, isize::MIN),
+            Motion::EndOfLine => (true, isize::MAX),
+            _ => unreachable!(),
+          };
+          let target = this.offset_cursor(0, off);
+          (target != this.cursor.pos).then_some(MotionKind::Char {
+            start: this.cursor.pos,
+            end: target,
+            inclusive,
+          })
+        }
+        Motion::WordMotion(to, word, dir) => {
+          // 'cw' is a weird case
+          // if you are on the word's left boundary, it will not delete whitespace after
+          // the end of the word
+          let ignore_trailing_ws = matches!(verb, Some(VerbCmd(_, Verb::Change)),)
+            && matches!(
+              motion,
+              Motion::WordMotion(To::Start, _, Direction::Forward,)
+            );
+          let inclusive = verb.is_none();
 
-					this.eval_word_motion(*count, to, word, dir, ignore_trailing_ws, inclusive)
-				}
-				Motion::CharSearch(dir, dest, char) => {
-					let off = this.search_char(dir, dest, char);
-					let target = this.offset_cursor(0, off);
-					(target != this.cursor.pos).then_some(MotionKind::Char {
-						start: this.cursor.pos,
-						end: target,
-						inclusive: true,
-					})
-				}
-				dir @ (Motion::BackwardChar | Motion::ForwardChar)
-					| dir @ (Motion::BackwardCharForced | Motion::ForwardCharForced) => {
-						let (off, wrap) = match dir {
-							Motion::BackwardChar => (-(*count as isize), false),
-							Motion::ForwardChar => (*count as isize, false),
-							Motion::BackwardCharForced => (-(*count as isize), true),
-							Motion::ForwardCharForced => (*count as isize, true),
-							_ => unreachable!(),
-						};
-						let target = if wrap {
-							this.offset_cursor_wrapping(0, off)
-						} else {
-							this.offset_cursor(0, off)
-						};
+          this.eval_word_motion(*count, to, word, dir, ignore_trailing_ws, inclusive)
+        }
+        Motion::CharSearch(dir, dest, char) => {
+          let off = this.search_char(dir, dest, char);
+          let target = this.offset_cursor(0, off);
+          (target != this.cursor.pos).then_some(MotionKind::Char {
+            start: this.cursor.pos,
+            end: target,
+            inclusive: true,
+          })
+        }
+        dir @ (Motion::BackwardChar | Motion::ForwardChar)
+        | dir @ (Motion::BackwardCharForced | Motion::ForwardCharForced) => {
+          let (off, wrap) = match dir {
+            Motion::BackwardChar => (-(*count as isize), false),
+            Motion::ForwardChar => (*count as isize, false),
+            Motion::BackwardCharForced => (-(*count as isize), true),
+            Motion::ForwardCharForced => (*count as isize, true),
+            _ => unreachable!(),
+          };
+          let target = if wrap {
+            this.offset_cursor_wrapping(0, off)
+          } else {
+            this.offset_cursor(0, off)
+          };
 
-						(target != this.cursor.pos).then_some(MotionKind::Char {
-							start: this.cursor.pos,
-							end: target,
-							inclusive: false,
-						})
-					}
-				dir @ (Motion::LineDown | Motion::LineUp) => {
-					let off = match dir {
-						Motion::LineUp => -(*count as isize),
-						Motion::LineDown => *count as isize,
-						_ => unreachable!(),
-					};
-					if verb.is_some() {
-						let row = this.row();
-						let target_row = this.offset_row(off);
-						let (s, e) = ordered(row, target_row);
-						Some(MotionKind::Line {
-							start: s,
-							end: e,
-							inclusive: true,
-						})
-					} else {
-						if this.saved_col.is_none() {
-							this.saved_col = Some(this.calc_cursor_display_col());
-						}
-						let row = this.offset_row(off);
-						let limit = if this.cursor.exclusive {
-							this.lines[row].len().saturating_sub(1)
-						} else {
-							this.lines[row].len()
-						};
-						let target_col = this.saved_col.unwrap();
-						let col = this.display_col_to_index(row, target_col).min(limit);
-						let target = Pos { row, col };
-						(target != this.cursor.pos).then_some(MotionKind::Char {
-							start: this.cursor.pos,
-							end: target,
-							inclusive: true,
-						})
-					}
-				}
-				dir @ (Motion::EndOfBuffer | Motion::StartOfBuffer) => {
-					let off = match dir {
-						Motion::StartOfBuffer => isize::MIN,
-						Motion::EndOfBuffer => isize::MAX,
-						_ => unreachable!(),
-					};
-					if verb.is_some() {
-						let row = this.row();
-						let target_row = this.offset_row(off);
-						let (s, e) = ordered(row, target_row);
-						Some(MotionKind::Line {
-							start: s,
-							end: e,
-							inclusive: false,
-						})
-					} else {
-						let target = this.offset_cursor(off, 0);
-						(target != this.cursor.pos).then_some(MotionKind::Char {
-							start: this.cursor.pos,
-							end: target,
-							inclusive: true,
-						})
-					}
-				}
-				Motion::WholeBuffer => Some(MotionKind::Line {
-					start: 0,
-					end: this.lines.len().saturating_sub(1),
-					inclusive: false,
-				}),
-				Motion::ToColumn => {
-					let row = this.row();
-					let end = Pos {
-						row,
-						col: count.saturating_sub(1),
-					};
-					Some(MotionKind::Char {
-						start: this.cursor.pos,
-						end,
-						inclusive: end > this.cursor.pos,
-					})
-				}
+          (target != this.cursor.pos).then_some(MotionKind::Char {
+            start: this.cursor.pos,
+            end: target,
+            inclusive: false,
+          })
+        }
+        dir @ (Motion::LineDown | Motion::LineUp) => {
+          let off = match dir {
+            Motion::LineUp => -(*count as isize),
+            Motion::LineDown => *count as isize,
+            _ => unreachable!(),
+          };
+          if verb.is_some() {
+            let row = this.row();
+            let target_row = this.offset_row(off);
+            let (s, e) = ordered(row, target_row);
+            Some(MotionKind::Line {
+              start: s,
+              end: e,
+              inclusive: true,
+            })
+          } else {
+            if this.saved_col.is_none() {
+              this.saved_col = Some(this.calc_cursor_display_col());
+            }
+            let row = this.offset_row(off);
+            let limit = if this.cursor.exclusive {
+              this.lines[row].len().saturating_sub(1)
+            } else {
+              this.lines[row].len()
+            };
+            let target_col = this.saved_col.unwrap();
+            let col = this.display_col_to_index(row, target_col).min(limit);
+            let target = Pos { row, col };
+            (target != this.cursor.pos).then_some(MotionKind::Char {
+              start: this.cursor.pos,
+              end: target,
+              inclusive: true,
+            })
+          }
+        }
+        dir @ (Motion::EndOfBuffer | Motion::StartOfBuffer) => {
+          let off = match dir {
+            Motion::StartOfBuffer => isize::MIN,
+            Motion::EndOfBuffer => isize::MAX,
+            _ => unreachable!(),
+          };
+          if verb.is_some() {
+            let row = this.row();
+            let target_row = this.offset_row(off);
+            let (s, e) = ordered(row, target_row);
+            Some(MotionKind::Line {
+              start: s,
+              end: e,
+              inclusive: false,
+            })
+          } else {
+            let target = this.offset_cursor(off, 0);
+            (target != this.cursor.pos).then_some(MotionKind::Char {
+              start: this.cursor.pos,
+              end: target,
+              inclusive: true,
+            })
+          }
+        }
+        Motion::WholeBuffer => Some(MotionKind::Line {
+          start: 0,
+          end: this.lines.len().saturating_sub(1),
+          inclusive: false,
+        }),
+        Motion::ToColumn => {
+          let row = this.row();
+          let end = Pos {
+            row,
+            col: count.saturating_sub(1),
+          };
+          Some(MotionKind::Char {
+            start: this.cursor.pos,
+            end,
+            inclusive: end > this.cursor.pos,
+          })
+        }
 
-				Motion::ToDelimMatch => this.find_delim_match(),
-				Motion::ToBracket(direction) | Motion::ToParen(direction) | Motion::ToBrace(direction) => {
-					let (opener, closer) = match motion {
-						Motion::ToBracket(_) => ('[', ']'),
-						Motion::ToParen(_) => ('(', ')'),
-						Motion::ToBrace(_) => ('{', '}'),
-						_ => unreachable!(),
-					};
-					match direction {
-						Direction::Forward => {
-							let mut depth = 0;
-							let Some(target_pos) = this.scan_forward(|g| {
-								if g.as_char() == Some(opener) {
-									depth += 1;
-								}
-								if g.as_char() == Some(closer) {
-									depth -= 1;
-									if depth <= 0 {
-										return true;
-									}
-								}
-								false
-							}) else {
-								return Ok(None);
-							};
-							return Ok(Some(MotionKind::Char {
-								start: this.cursor.pos,
-								end: target_pos,
-								inclusive: true,
-							}));
-						}
-						Direction::Backward => {
-							let mut depth = 0;
-							let Some(target_pos) = this.scan_backward(|g| {
-								if g.as_char() == Some(closer) {
-									depth += 1;
-								}
-								if g.as_char() == Some(opener) {
-									depth -= 1;
-									if depth <= 0 {
-										return true;
-									}
-								}
-								false
-							}) else {
-								return Ok(None);
-							};
-							return Ok(Some(MotionKind::Char {
-								start: this.cursor.pos,
-								end: target_pos,
-								inclusive: true,
-							}));
-						}
-					}
-				}
+        Motion::ToDelimMatch => this.find_delim_match(),
+        Motion::ToBracket(direction) | Motion::ToParen(direction) | Motion::ToBrace(direction) => {
+          let (opener, closer) = match motion {
+            Motion::ToBracket(_) => ('[', ']'),
+            Motion::ToParen(_) => ('(', ')'),
+            Motion::ToBrace(_) => ('{', '}'),
+            _ => unreachable!(),
+          };
+          match direction {
+            Direction::Forward => {
+              let mut depth = 0;
+              let Some(target_pos) = this.scan_forward(|g| {
+                if g.as_char() == Some(opener) {
+                  depth += 1;
+                }
+                if g.as_char() == Some(closer) {
+                  depth -= 1;
+                  if depth <= 0 {
+                    return true;
+                  }
+                }
+                false
+              }) else {
+                return Ok(None);
+              };
+              return Ok(Some(MotionKind::Char {
+                start: this.cursor.pos,
+                end: target_pos,
+                inclusive: true,
+              }));
+            }
+            Direction::Backward => {
+              let mut depth = 0;
+              let Some(target_pos) = this.scan_backward(|g| {
+                if g.as_char() == Some(closer) {
+                  depth += 1;
+                }
+                if g.as_char() == Some(opener) {
+                  depth -= 1;
+                  if depth <= 0 {
+                    return true;
+                  }
+                }
+                false
+              }) else {
+                return Ok(None);
+              };
+              return Ok(Some(MotionKind::Char {
+                start: this.cursor.pos,
+                end: target_pos,
+                inclusive: true,
+              }));
+            }
+          }
+        }
 
-				Motion::CharRange(s, e) => {
-					let (s, e) = ordered(*s, *e);
-					Some(MotionKind::Char {
-						start: s,
-						end: e,
-						inclusive: true,
-					})
-				}
-				Motion::Line(l) => {
-					let Some(l) = this.resolve_line_addr(l)? else {
-						return Ok(None);
-					};
-					Some(MotionKind::Line {
-						start: l,
-						end: l + 1,
-						inclusive: false,
-					})
-				}
-				Motion::LineRange(s, e) => {
-					let Some(s) = this.resolve_line_addr(s)? else {
-						return Ok(None);
-					};
-					let Some(e) = this.resolve_line_addr(e)? else {
-						return Ok(None);
-					};
-					let (s, e) = ordered(s, e);
-					Some(MotionKind::Line {
-						start: s,
-						end: e,
-						inclusive: true,
-					})
-				}
-				Motion::BlockRange(s, e) => {
-					let (s, e) = ordered(*s, *e);
-					Some(MotionKind::Block { start: s, end: e })
-				}
-				dir @ (Motion::HalfScreenUp | Motion::HalfScreenDown) => {
-					let off = match dir {
-						Motion::HalfScreenUp => -(this.get_viewport_height() as isize / 2),
-						Motion::HalfScreenDown => this.get_viewport_height() as isize / 2,
-						_ => unreachable!(),
-					};
-					let row = this.row();
-					let target_row = this.offset_row(off);
-					Some(MotionKind::Line {
-						start: target_row,
-						end: row,
-						inclusive: false,
-					})
-				}
-				Motion::RepeatMotion | Motion::RepeatMotionRev => {
-					unreachable!("Repeat motions should have been resolved in readline/mod.rs")
-				}
-				dir @ (Motion::Global(constraint, pat) | Motion::NotGlobal(constraint, pat)) => {
-					let lines =
-						this.get_matching_lines(constraint, pat, matches!(dir, Motion::Global(_, _)))?;
+        Motion::CharRange(s, e) => {
+          let (s, e) = ordered(*s, *e);
+          Some(MotionKind::Char {
+            start: s,
+            end: e,
+            inclusive: true,
+          })
+        }
+        Motion::Line(l) => {
+          let Some(l) = this.resolve_line_addr(l)? else {
+            return Ok(None);
+          };
+          Some(MotionKind::Line {
+            start: l,
+            end: l + 1,
+            inclusive: false,
+          })
+        }
+        Motion::LineRange(s, e) => {
+          let Some(s) = this.resolve_line_addr(s)? else {
+            return Ok(None);
+          };
+          let Some(e) = this.resolve_line_addr(e)? else {
+            return Ok(None);
+          };
+          let (s, e) = ordered(s, e);
+          Some(MotionKind::Line {
+            start: s,
+            end: e,
+            inclusive: true,
+          })
+        }
+        Motion::BlockRange(s, e) => {
+          let (s, e) = ordered(*s, *e);
+          Some(MotionKind::Block { start: s, end: e })
+        }
+        dir @ (Motion::HalfScreenUp | Motion::HalfScreenDown) => {
+          let off = match dir {
+            Motion::HalfScreenUp => -(this.get_viewport_height() as isize / 2),
+            Motion::HalfScreenDown => this.get_viewport_height() as isize / 2,
+            _ => unreachable!(),
+          };
+          let row = this.row();
+          let target_row = this.offset_row(off);
+          Some(MotionKind::Line {
+            start: target_row,
+            end: row,
+            inclusive: false,
+          })
+        }
+        Motion::RepeatMotion | Motion::RepeatMotionRev => {
+          unreachable!("Repeat motions should have been resolved in readline/mod.rs")
+        }
+        dir @ (Motion::Global(constraint, pat) | Motion::NotGlobal(constraint, pat)) => {
+          let lines =
+            this.get_matching_lines(constraint, pat, matches!(dir, Motion::Global(_, _)))?;
 
-					this.last_global = Some(cmd.clone());
-					Some(MotionKind::Lines { lines })
-				}
-				Motion::Null => None,
-			};
-			Ok(kind)
-		};
+          this.last_global = Some(cmd.clone());
+          Some(MotionKind::Lines { lines })
+        }
+        Motion::Null => None,
+      };
+      Ok(kind)
+    };
 
-		if check_hint {
-			self.with_hint(eval)
-		} else {
-			eval(self)
-		}
+    if check_hint {
+      self.with_hint(eval)
+    } else {
+      eval(self)
+    }
   }
   pub fn get_matching_lines(
     &self,
@@ -2726,30 +2735,30 @@ impl LineBuf {
     self.apply_motion_inner(motion, false)
   }
   fn apply_motion_inner(&mut self, motion: MotionKind, accept_hint: bool) -> ShResult<()> {
-		let apply = |this: &mut Self| -> ShResult<()> {
-			match motion {
-				MotionKind::Char { end, .. } => {
-					this.set_cursor(end);
-				}
-				MotionKind::Line { start, .. } => {
-					this.set_row(start);
-				}
-				MotionKind::Lines { lines } => {
-					let Some(line) = lines.first() else {
-						return Ok(());
-					};
-					this.set_row(*line);
-				}
-				MotionKind::Block { start, end } => unimplemented!(),
-			}
-			Ok(())
-		};
+    let apply = |this: &mut Self| -> ShResult<()> {
+      match motion {
+        MotionKind::Char { end, .. } => {
+          this.set_cursor(end);
+        }
+        MotionKind::Line { start, .. } => {
+          this.set_row(start);
+        }
+        MotionKind::Lines { lines } => {
+          let Some(line) = lines.first() else {
+            return Ok(());
+          };
+          this.set_row(*line);
+        }
+        MotionKind::Block { start, end } => unimplemented!(),
+      }
+      Ok(())
+    };
 
-		if accept_hint {
-			self.with_hint(apply)
-		} else {
-			apply(self)
-		}
+    if accept_hint {
+      self.with_hint(apply)
+    } else {
+      apply(self)
+    }
   }
   fn extract_span(&mut self, span: (Pos, Pos), inclusive: bool) -> Vec<Line> {
     let (s, e) = ordered(span.0, span.1);
@@ -3860,10 +3869,11 @@ impl LineBuf {
       self.kill_ring.reset();
     }
 
-		if let Some(Hint::Override(hint_lines)) = self.hint.as_ref()
-		&& !is_prefix_lines(&self.lines, hint_lines) {
-			self.clear_hint();
-		}
+    if let Some(Hint::Override(hint_lines)) = self.hint.as_ref()
+      && !is_prefix_lines(&self.lines, hint_lines)
+    {
+      self.clear_hint();
+    }
 
     res
   }
@@ -3937,29 +3947,30 @@ impl LineBuf {
     self.fix_cursor();
   }
 
-	pub fn clear_hint(&mut self) {
-		self.hint = None;
-	}
+  pub fn clear_hint(&mut self) {
+    self.hint = None;
+  }
 
   pub fn set_hint(&mut self, hint: Option<Hint>) {
-		if self.is_empty() {
-			self.hint = None;
-			return
-		}
+    if self.is_empty() {
+      self.hint = None;
+      return;
+    }
 
-		let Some(hint) = hint else {
-			if !matches!(&self.hint, Some(Hint::Override(_))) {
-				self.hint = None;
-			}
-			return;
-		};
+    let Some(hint) = hint else {
+      if !matches!(&self.hint, Some(Hint::Override(_))) {
+        self.hint = None;
+      }
+      return;
+    };
 
-		if let Some(old_hint) = self.hint.as_ref()
-		&& *old_hint > hint {
-			// order comparisons on hints are priority checks
-			// if older hint has higher priority, keep it instead of replacing with lower-priority new hint
-			return;
-		}
+    if let Some(old_hint) = self.hint.as_ref()
+      && *old_hint > hint
+    {
+      // order comparisons on hints are priority checks
+      // if older hint has higher priority, keep it instead of replacing with lower-priority new hint
+      return;
+    }
 
     if !read_shopts(|o| o.line.auto_suggest) {
       self.hint = None;
@@ -3976,34 +3987,38 @@ impl LineBuf {
       .is_some_and(|h| !h.lines().is_empty() && h.lines().iter().any(|l| !l.is_empty()))
   }
 
-	pub fn hint_lines(&self) -> Vec<Line> {
-		self.hint.as_ref().map(|h| h.lines().to_vec()).unwrap_or_default()
-	}
+  pub fn hint_lines(&self) -> Vec<Line> {
+    self
+      .hint
+      .as_ref()
+      .map(|h| h.lines().to_vec())
+      .unwrap_or_default()
+  }
 
   pub fn get_hint_text(&self) -> String {
-		self.try_get_hint_text().unwrap_or_default()
+    self.try_get_hint_text().unwrap_or_default()
   }
 
-	pub fn try_get_hint_text(&self) -> Option<String> {
-		self.hint
-			.as_ref()
-			.map(|h| h.display(Some(&self.joined())))
-	}
+  pub fn try_get_hint_text(&self) -> Option<String> {
+    self.hint.as_ref().map(|h| h.display(Some(&self.joined())))
+  }
 
   pub fn join_hint(&self) -> String {
-		self.try_join_hint().unwrap_or_default()
+    self.try_join_hint().unwrap_or_default()
   }
 
-	pub fn try_join_hint(&self) -> Option<String> {
-		self.hint
-			.as_ref()
-			.map(|h| h.raw())
-	}
+  pub fn try_join_hint(&self) -> Option<String> {
+    self.hint.as_ref().map(|h| h.raw())
+  }
 
   pub fn accept_hint(&mut self) {
-		let Some(mut hint) = self.hint.take() else { return };
-		let Some(mut hint_lines) = strip_prefix_lines(hint.take_lines(), &self.lines) else { return };
-		attach_lines(&mut self.lines, &mut hint_lines);
+    let Some(mut hint) = self.hint.take() else {
+      return;
+    };
+    let Some(mut hint_lines) = strip_prefix_lines(hint.take_lines(), &self.lines) else {
+      return;
+    };
+    attach_lines(&mut self.lines, &mut hint_lines);
 
     self.set_cursor(Pos::MAX);
     self.fix_cursor();
@@ -4057,7 +4072,8 @@ impl LineBuf {
   }
 
   pub fn on_last_line(&self) -> bool {
-    self.cursor.pos.row == self.lines.len().saturating_sub(1) && self.hint.as_ref().is_none_or(|h| h.lines().len() <= 1)
+    self.cursor.pos.row == self.lines.len().saturating_sub(1)
+      && self.hint.as_ref().is_none_or(|h| h.lines().len() <= 1)
   }
 
   pub fn slice(&self, range: std::ops::Range<usize>) -> Option<String> {
@@ -4181,32 +4197,30 @@ impl LineBuf {
     self.pos_to_flat(self.cursor.pos)
   }
 
-	pub fn anchor_to_flat(&self) -> Option<usize> {
-		self
-			.select_mode
-			.map(|r| match r {
-				SelectMode::Char(pos) | SelectMode::Block(pos) | SelectMode::Line(pos) => {
-					self.pos_to_flat(pos)
-				}
-			})
-	}
+  pub fn anchor_to_flat(&self) -> Option<usize> {
+    self.select_mode.map(|r| match r {
+      SelectMode::Char(pos) | SelectMode::Block(pos) | SelectMode::Line(pos) => {
+        self.pos_to_flat(pos)
+      }
+    })
+  }
 
   pub fn set_cursor_from_flat(&mut self, flat: usize) {
     self.cursor.pos = self.pos_from_flat(flat);
     self.fix_cursor();
   }
-	pub fn set_anchor_from_flat(&mut self, flat: usize) {
-		let new_pos = self.pos_from_flat(flat);
-		self.set_anchor(new_pos);
-	}
-	pub fn set_anchor(&mut self, new_pos: Pos) {
-		match self.select_mode.as_mut() {
-			Some(SelectMode::Line(pos))
-			| Some(SelectMode::Block(pos))
-			| Some(SelectMode::Char(pos)) => *pos = new_pos,
-			None => unreachable!(),
-		}
-	}
+  pub fn set_anchor_from_flat(&mut self, flat: usize) {
+    let new_pos = self.pos_from_flat(flat);
+    self.set_anchor(new_pos);
+  }
+  pub fn set_anchor(&mut self, new_pos: Pos) {
+    match self.select_mode.as_mut() {
+      Some(SelectMode::Line(pos)) | Some(SelectMode::Block(pos)) | Some(SelectMode::Char(pos)) => {
+        *pos = new_pos
+      }
+      None => unreachable!(),
+    }
+  }
 
   pub fn grapheme_positions(&self) -> Vec<(Pos, Grapheme)> {
     Self::enumerate_graphemes(&self.lines)

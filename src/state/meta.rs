@@ -13,12 +13,25 @@ use std::{
 };
 
 use itertools::{Itertools, izip};
-use nix::{poll::PollFd, sys::{
-  resource::{Usage, UsageWho, getrusage}, stat::{FchmodatFlags, fchmodat}, time::TimeVal
-}};
+use nix::{
+  poll::PollFd,
+  sys::{
+    resource::{Usage, UsageWho, getrusage},
+    stat::{FchmodatFlags, fchmodat},
+    time::TimeVal,
+  },
+};
 
 use crate::{
-  builtin::BUILTINS, expand::expand_keymap, jobs::{DisplayWaitStatus, Job}, libsh::error::{ShErr, ShResult}, match_loop, prelude::*, procio::borrow_fd, readline::{LineData, complete::CompSpec, keys::KeyEvent}, sherr
+  builtin::BUILTINS,
+  expand::expand_keymap,
+  jobs::{DisplayWaitStatus, Job},
+  libsh::error::{ShErr, ShResult},
+  match_loop,
+  prelude::*,
+  procio::borrow_fd,
+  readline::{LineData, complete::CompSpec, keys::KeyEvent},
+  sherr,
 };
 
 #[derive(Debug)]
@@ -55,17 +68,18 @@ pub enum SocketRequest {
   /// Requests the shell to redraw the prompt. The shell will respond by redrawing the prompt, and sending a SocketResponse confirming the redraw.
   RefreshPrompt,
 
-	LineGet(LineHeader),
-	LineSet(LineHeader,String),
+  LineGet(LineHeader),
+  LineSet(LineHeader, String),
+  LineSendKeys(Vec<KeyEvent>),
 }
 
 #[derive(Debug)]
 pub enum LineHeader {
-	Buffer,
-	Cursor,
-	Hint,
-	Mode,
-	Anchor
+  Buffer,
+  Cursor,
+  Hint,
+  Mode,
+  Anchor,
 }
 
 impl FromStr for SocketRequest {
@@ -179,43 +193,65 @@ impl FromStr for SocketRequest {
         }
       }
 
-			"line" => {
-				let Some(header) = args.next() else {
-					return Err(sherr!(ParseErr, "Missing line header in 'line' request",));
-				};
-				match header {
-					"get" => {
-						let Some(header2) = args.next() else {
-							return Err(sherr!(ParseErr, "Missing line header kind in 'line get' request",));
-						};
-						match header2 {
-							"buffer" => Ok(Self::LineGet(LineHeader::Buffer)),
-							"cursor" => Ok(Self::LineGet(LineHeader::Cursor)),
-							"hint" => Ok(Self::LineGet(LineHeader::Hint)),
-							"mode" => Ok(Self::LineGet(LineHeader::Mode)),
-							"anchor" => Ok(Self::LineGet(LineHeader::Anchor)),
-							_ => Err(sherr!(ParseErr, "Unknown line header kind in 'line get' request: {header2}")),
-						}
-					}
-					"set" => {
-						let Some(header2) = args.next() else {
-							return Err(sherr!(ParseErr, "Missing line header kind in 'line set' request",));
-						};
-						let Some(value) = args.next() else {
-							return Err(sherr!(ParseErr, "Missing value in 'line set' request",));
-						};
-						match header2 {
-							"buffer" => Ok(Self::LineSet(LineHeader::Buffer, value.to_string())),
-							"cursor" => Ok(Self::LineSet(LineHeader::Cursor, value.to_string())),
-							"hint" => Ok(Self::LineSet(LineHeader::Hint, value.to_string())),
-							"mode" => Ok(Self::LineSet(LineHeader::Mode, value.to_string())),
-							"anchor" => Ok(Self::LineSet(LineHeader::Anchor, value.to_string())),
-							_ => Err(sherr!(ParseErr, "Unknown line header kind in 'line set' request: {header2}")),
-						}
-					}
-					_ => Err(sherr!(ParseErr, "Unknown line request kind in 'line' request: {header}")),
-				}
-			}
+      "line" => {
+        let Some(header) = args.next() else {
+          return Err(sherr!(ParseErr, "Missing line header in 'line' request",));
+        };
+        match header {
+          "get" => {
+            let Some(header2) = args.next() else {
+              return Err(sherr!(
+                ParseErr,
+                "Missing line header kind in 'line get' request",
+              ));
+            };
+            match header2 {
+              "buffer" => Ok(Self::LineGet(LineHeader::Buffer)),
+              "cursor" => Ok(Self::LineGet(LineHeader::Cursor)),
+              "hint" => Ok(Self::LineGet(LineHeader::Hint)),
+              "mode" => Ok(Self::LineGet(LineHeader::Mode)),
+              "anchor" => Ok(Self::LineGet(LineHeader::Anchor)),
+              _ => Err(sherr!(
+                ParseErr,
+                "Unknown line header kind in 'line get' request: {header2}"
+              )),
+            }
+          }
+          "set" => {
+            let Some(header2) = args.next() else {
+              return Err(sherr!(
+                ParseErr,
+                "Missing line header kind in 'line set' request",
+              ));
+            };
+            let Some(value) = args.next() else {
+              return Err(sherr!(ParseErr, "Missing value in 'line set' request",));
+            };
+            match header2 {
+              "buffer" => Ok(Self::LineSet(LineHeader::Buffer, value.to_string())),
+              "cursor" => Ok(Self::LineSet(LineHeader::Cursor, value.to_string())),
+              "hint" => Ok(Self::LineSet(LineHeader::Hint, value.to_string())),
+              "mode" => Ok(Self::LineSet(LineHeader::Mode, value.to_string())),
+              "anchor" => Ok(Self::LineSet(LineHeader::Anchor, value.to_string())),
+              _ => Err(sherr!(
+                ParseErr,
+                "Unknown line header kind in 'line set' request: {header2}"
+              )),
+            }
+          }
+          "keys" => {
+            let Some(value) = args.next() else {
+              return Err(sherr!(ParseErr, "Missing value in 'line keys' request",));
+            };
+            let events = expand_keymap(value);
+            Ok(Self::LineSendKeys(events))
+          }
+          _ => Err(sherr!(
+            ParseErr,
+            "Unknown line request kind in 'line' request: {header}"
+          )),
+        }
+      }
       _ => Err(sherr!(
         ParseErr,
         "Unknown socket request kind: {}",
@@ -234,42 +270,41 @@ pub struct ShedSocket {
 }
 
 impl ShedSocket {
-	pub fn dir() -> String {
-    env::var("XDG_RUNTIME_DIR")
-      .unwrap_or_else(|_| format!("/tmp/shed-{}", nix::unistd::getuid()))
-	}
-	pub fn path() -> String {
-		let pid = Pid::this();
-		let runtime_dir = Self::dir();
+  pub fn dir() -> String {
+    env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| format!("/tmp/shed-{}", nix::unistd::getuid()))
+  }
+  pub fn path() -> String {
+    let pid = Pid::this();
+    let runtime_dir = Self::dir();
     format!("{runtime_dir}/shed/{pid}.sock")
-	}
-	pub fn mode() -> Mode {
-		read_vars(|v| v.get_var("SHED_SOCK_MODE"))
-			.parse::<u32>()
-			.ok()
-			.and_then(Mode::from_bits)
-			.unwrap_or(Mode::S_IRUSR | Mode::S_IWUSR)
-	}
+  }
+  pub fn mode() -> Mode {
+    read_vars(|v| v.get_var("SHED_SOCK_MODE"))
+      .parse::<u32>()
+      .ok()
+      .and_then(Mode::from_bits)
+      .unwrap_or(Mode::S_IRUSR | Mode::S_IWUSR)
+  }
   pub fn new() -> ShResult<Self> {
-		let runtime_dir = Self::dir();
+    let runtime_dir = Self::dir();
     std::fs::create_dir_all(format!("{runtime_dir}/shed"))?;
 
-		let sock_path = Self::path();
+    let sock_path = Self::path();
     std::fs::remove_file(&sock_path).ok();
 
     let listener = UnixListener::bind(&sock_path)?;
 
-		// set the permissions for the socket
-		// default is read/write for user, no access for group/other
-		// this can be overridden using the $SHED_SOCK_MODE env var.
-		let mode = Self::mode();
+    // set the permissions for the socket
+    // default is read/write for user, no access for group/other
+    // this can be overridden using the $SHED_SOCK_MODE env var.
+    let mode = Self::mode();
 
-		fchmodat(
-			None,
-			Path::new(&sock_path),
-			mode,
-			FchmodatFlags::FollowSymlink,
-		)?;
+    fchmodat(
+      None,
+      Path::new(&sock_path),
+      mode,
+      FchmodatFlags::FollowSymlink,
+    )?;
 
     let raw_fd = listener.into_raw_fd();
     let high_fd = fcntl(raw_fd, FcntlArg::F_DUPFD_CLOEXEC(10))?;
@@ -902,115 +937,151 @@ impl MetaTab {
   pub fn get_socket(&self) -> Option<Arc<ShedSocket>> {
     self.socket.as_ref().cloned()
   }
-	pub fn get_socket_pollfd(&self) -> Option<PollFd<'_>> {
-		self.socket.as_ref().map(|sock| PollFd::new(
-			borrow_fd(sock.as_raw_fd()),
-			nix::poll::PollFlags::POLLIN,
-		))
-	}
-	pub fn read_socket(&mut self) -> ShResult<Vec<(UnixStream, SocketRequest)>> {
-		let mut requests = vec![];
-		let Some(listener) = self.get_socket() else {
-			return Ok(requests);
-		};
+  pub fn get_socket_pollfd(&self) -> Option<PollFd<'_>> {
+    self
+      .socket
+      .as_ref()
+      .map(|sock| PollFd::new(borrow_fd(sock.as_raw_fd()), nix::poll::PollFlags::POLLIN))
+  }
+  pub fn read_socket(&mut self) -> ShResult<Vec<(UnixStream, SocketRequest)>> {
+    let mut requests = vec![];
+    let Some(listener) = self.get_socket() else {
+      return Ok(requests);
+    };
 
-		while let Ok((conn,_)) = listener.listener().accept()
-		&& let Some(req) = self.read_request(&conn) {
-			requests.push((conn,req));
-		}
+    while let Ok((conn, _)) = listener.listener().accept()
+      && let Some(req) = self.read_request(&conn)
+    {
+      requests.push((conn, req));
+    }
 
-		Ok(requests)
-	}
-	pub fn read_request(&self, conn: &UnixStream) -> Option<SocketRequest> {
-		conn.set_nonblocking(false).ok();
-		let mut bytes = vec![];
-		loop {
-			let mut buffer = [0u8; 1024];
-			match read(conn.as_raw_fd(), &mut buffer) {
-				Ok(0) => break,
-				Ok(n) => {
-					if let Some(pos) = buffer[..n].iter().position(|&b| b == b'\n') {
-						bytes.extend_from_slice(&buffer[..pos]);
-						break;
-					}
-					bytes.extend_from_slice(&buffer[..n]);
-				}
-				Err(Errno::EINTR) => continue,
-				Err(e) => {
-					write(conn, format!("error>> failed to parse request: {e}\n").as_bytes()).ok();
-					break;
-				}
-			}
-		}
-		let input = String::from_utf8_lossy(&bytes).to_string();
-		let request = match SocketRequest::from_str(&input) {
-			Ok(req) => req,
-			Err(e) => {
-				write(conn, format!("error>> failed to parse request: {e}\n").as_bytes()).ok();
-				return None
-			}
-		};
+    Ok(requests)
+  }
+  pub fn read_request(&self, conn: &UnixStream) -> Option<SocketRequest> {
+    conn.set_nonblocking(false).ok();
+    let mut bytes = vec![];
+    loop {
+      let mut buffer = [0u8; 1024];
+      match read(conn.as_raw_fd(), &mut buffer) {
+        Ok(0) => break,
+        Ok(n) => {
+          if let Some(pos) = buffer[..n].iter().position(|&b| b == b'\n') {
+            bytes.extend_from_slice(&buffer[..pos]);
+            break;
+          }
+          bytes.extend_from_slice(&buffer[..n]);
+        }
+        Err(Errno::EINTR) => continue,
+        Err(e) => {
+          write(
+            conn,
+            format!("error>> failed to parse request: {e}\n").as_bytes(),
+          )
+          .ok();
+          break;
+        }
+      }
+    }
+    let input = String::from_utf8_lossy(&bytes).to_string();
+    let request = match SocketRequest::from_str(&input) {
+      Ok(req) => req,
+      Err(e) => {
+        write(
+          conn,
+          format!("error>> failed to parse request: {e}\n").as_bytes(),
+        )
+        .ok();
+        return None;
+      }
+    };
 
-		Some(request)
-	}
-	pub fn push_subscriber(&mut self, subscriber: UnixStream) {
-		self.subscribers.push(Arc::new(subscriber));
-	}
+    Some(request)
+  }
+  pub fn push_subscriber(&mut self, subscriber: UnixStream) {
+    self.subscribers.push(Arc::new(subscriber));
+  }
   pub fn notify_autocmd(&self, kind: AutoCmdKind) -> ShResult<()> {
     for subscriber in &self.subscribers {
-      write(subscriber, format!("autocmd_event>> {kind}\n").as_bytes()).ok();
+      write(subscriber, format!("autocmd_event>>{kind}\n").as_bytes()).ok();
     }
 
     Ok(())
   }
-	fn broadcast<F: FnMut(&Arc<UnixStream>)>(&self, mut f: F) {
-		for subscriber in &self.subscribers {
-			f(subscriber);
-		}
-	}
-	pub fn notify_job_complete(&self, job: &Job) -> ShResult<()> {
-		let id = job.tabid()
-			.map(|i| (i + 1).to_string())
-			.unwrap_or_default();
-		let pids = job.get_pids();
-		let stats = job.get_stats();
-		let cmds = job.get_cmds();
+  pub fn num_subscribers(&self) -> usize {
+    self.subscribers.len()
+  }
+  fn broadcast<F: FnMut(&Arc<UnixStream>) -> std::io::Result<()>>(&mut self, mut f: F) {
+    let mut dead = vec![];
+    for (i, subscriber) in self.subscribers.iter().enumerate() {
+      if f(subscriber).is_err() {
+        dead.push(i);
+      }
+    }
 
-		self.broadcast(|sub| {
-			let mut buf = format!("job>>begin>> {id} {}\n", pids.len());
-			for (pid, stat, cmd) in izip!(&pids, &stats, &cmds) {
-				let stat_str = match stat {
-					WtStat::Exited(_, 0) => "done".to_string(),
-					WtStat::Exited(_, n) => format!("failed:{n}"),
-					WtStat::Signaled(_, sig, _) => format!("signaled:{sig:?}"),
-					other => format!("{other:?}")
-				};
-				buf.push_str(&format!("job>>child>> {pid} {stat_str} {cmd}\n"));
-			}
-			write(sub, buf.as_bytes()).ok();
-		});
-		Ok(())
-	}
-	pub fn notify_line_edit(&self, data: LineData) -> ShResult<()> {
-		let LineData { buffer, cursor, anchor, hint, mode } = data;
+    for i in dead.into_iter().rev() {
+      self.subscribers.remove(i);
+    }
+  }
+  pub fn notify_job_complete(&mut self, job: &Job) -> ShResult<()> {
+    let id = job.tabid().map(|i| (i + 1).to_string()).unwrap_or_default();
+    let pids = job.get_pids();
+    let stats = job.get_stats();
+    let cmds = job.get_cmds();
 
-		self.broadcast(|sub| {
-			let mut buf = String::new();
-			buf.push_str(&format!("line>>buffer>> {buffer}\n"));
-			buf.push_str(&format!("line>>cursor>> {cursor}\n"));
-			if let Some(anchor) = anchor {
-				buf.push_str(&format!("line>>anchor>> {anchor}\n"));
-			}
-			if let Some(hint) = &hint {
-				buf.push_str(&format!("line>>hint>> {hint}\n"));
-			}
-			buf.push_str(&format!("line>>mode>> {mode}\n"));
+    self.broadcast(|sub| {
+      let mut buf = format!("job>>begin>>{id} {}\n", pids.len());
+      for (pid, stat, cmd) in izip!(&pids, &stats, &cmds) {
+        let stat_str = match stat {
+          WtStat::Exited(_, 0) => "done".to_string(),
+          WtStat::Exited(_, n) => format!("failed:{n}"),
+          WtStat::Signaled(_, sig, _) => format!("signaled:{sig:?}"),
+          other => format!("{other:?}"),
+        };
+        buf.push_str(&format!("job>>child>>{pid} {stat_str} {cmd}\n"));
+      }
+      write(sub, buf.as_bytes())?;
+      Ok(())
+    });
+    Ok(())
+  }
+  pub fn notify_line_edit(&mut self, data: LineData) -> ShResult<()> {
+    let LineData {
+      buffer,
+      cursor,
+      anchor,
+      hint,
+      mode,
+    } = data;
 
-			write(sub, buf.as_bytes()).ok();
-		});
+    self.broadcast(|sub| {
+      let mut buf = String::new();
+      buf.push_str(&format!("line>>buffer>>{buffer}\n"));
+      buf.push_str(&format!("line>>cursor>>{cursor}\n"));
+      if let Some(anchor) = anchor {
+        buf.push_str(&format!("line>>anchor>>{anchor}\n"));
+      }
+      if let Some(hint) = &hint {
+        buf.push_str(&format!("line>>hint>>{hint}\n"));
+      }
+      buf.push_str(&format!("line>>mode>>{mode}\n"));
 
-		Ok(())
-	}
+      write(sub, buf.as_bytes())?;
+      Ok(())
+    });
+
+    Ok(())
+  }
+  pub fn notify_key_event(&mut self, event: KeyEvent) -> ShResult<()> {
+    let seq = event.as_vim_seq()?;
+
+    self.broadcast(|sub| {
+      let buf = format!("line>>key_event>>{seq}\n");
+      write(sub, buf.as_bytes())?;
+      Ok(())
+    });
+
+    Ok(())
+  }
   pub fn cache_util(&mut self, util: Rc<Utility>) {
     self.util_cache.insert(util);
   }

@@ -28,9 +28,7 @@ impl ScopeStack {
     let shell_name = std::env::args()
       .next()
       .unwrap_or_else(|| "shed".to_string());
-    new
-      .global_params
-      .insert(ShellParam::ShellName, shell_name);
+    new.global_params.insert(ShellParam::ShellName, shell_name);
     new
   }
   pub fn descend(&mut self, argv: Option<Vec<String>>) {
@@ -429,9 +427,7 @@ impl ScopeStack {
   pub fn set_param(&mut self, param: ShellParam, val: &str) {
     match param {
       ShellParam::ShPid | ShellParam::Status | ShellParam::LastJob | ShellParam::ShellName => {
-        self
-          .global_params
-          .insert(param, val.to_string());
+        self.global_params.insert(param, val.to_string());
       }
       ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount => {
         if let Some(scope) = self.scopes.first_mut() {

@@ -455,19 +455,19 @@ impl Iterator for PipeGenerator {
       return None;
     }
 
-		let needs_write = self.cursor + 1 < self.num_cmds; // this is not the last command
+    let needs_write = self.cursor + 1 < self.num_cmds; // this is not the last command
 
-		let rpipe = self.last_rpipe.take(); // None if this is the first command
-		let wpipe = needs_write.then(|| {
-			let (r,w) = IoMode::get_pipes();
-			let read = Redir::new(r, RedirType::Input);
-			let write = Redir::new(w, RedirType::Output);
-			self.last_rpipe = Some(read);
-			write
-		});
+    let rpipe = self.last_rpipe.take(); // None if this is the first command
+    let wpipe = needs_write.then(|| {
+      let (r, w) = IoMode::get_pipes();
+      let read = Redir::new(r, RedirType::Input);
+      let write = Redir::new(w, RedirType::Output);
+      self.last_rpipe = Some(read);
+      write
+    });
 
-		self.cursor += 1;
-		Some((rpipe,wpipe))
+    self.cursor += 1;
+    Some((rpipe, wpipe))
   }
 }
 

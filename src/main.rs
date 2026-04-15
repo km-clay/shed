@@ -42,15 +42,17 @@ use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_input};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
-use crate::readline::editmode::ModeReport;
-use crate::readline::linebuf::{Hint, Pos, to_lines};
+use crate::readline::editmode::{EditMode, ModeReport, ViNormal};
+use crate::readline::linebuf::{self, Hint, Pos, to_lines};
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{LineData, Prompt, ReadlineEvent, ShedLine};
 use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, write_jobs, write_meta, write_shopts
+  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, VarFlags, VarKind,
+  generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env,
+  source_login, source_rc, write_jobs, write_meta, write_shopts,
 };
 use clap::Parser;
 use state::write_vars;
@@ -158,7 +160,7 @@ fn main() -> ExitCode {
     run_script(path, args.script_args)
   } else {
     let res = shed_interactive(args);
-		set_bracketed_paste(false).ok();
+    set_bracketed_paste(false).ok();
     res
   } {
     e.print_error();
@@ -300,71 +302,71 @@ fn first_run_setup() -> ShResult<()> {
 }
 
 fn handle_signals_interactive(readline: &mut ShedLine) -> ShResult<bool> {
-	// Handle any pending signals
-	while signals_pending() {
-		if let Err(e) = check_signals() {
-			match e.kind() {
-				ShErrKind::Interrupt => {
-					// We got Ctrl+C - clear current input and redraw
-					readline.reset_active_widget(false)?;
-				}
-				ShErrKind::CleanExit(code) => {
-					QUIT_CODE.store(*code, Ordering::SeqCst);
-					return Ok(false);
-				}
-				_ => e.print_error(),
-			}
-		}
-	}
+  // Handle any pending signals
+  while signals_pending() {
+    if let Err(e) = check_signals() {
+      match e.kind() {
+        ShErrKind::Interrupt => {
+          // We got Ctrl+C - clear current input and redraw
+          readline.reset_active_widget(false)?;
+        }
+        ShErrKind::CleanExit(code) => {
+          QUIT_CODE.store(*code, Ordering::SeqCst);
+          return Ok(false);
+        }
+        _ => e.print_error(),
+      }
+    }
+  }
 
-	if GOT_SIGWINCH.swap(false, Ordering::SeqCst) {
-		log::info!("Window size change detected, updating readline dimensions");
-		// Restore cursor to saved row before clearing, since the terminal
-		// may have moved it during resize/rewrap
-		readline.writer.update_t_cols();
-		readline.mark_dirty();
-	}
+  if GOT_SIGWINCH.swap(false, Ordering::SeqCst) {
+    log::info!("Window size change detected, updating readline dimensions");
+    // Restore cursor to saved row before clearing, since the terminal
+    // may have moved it during resize/rewrap
+    readline.writer.update_t_cols();
+    readline.mark_dirty();
+  }
 
-	if JOB_DONE.swap(false, Ordering::SeqCst) {
-		// update the prompt so any job count escape sequences update dynamically
-		readline.prompt_mut().refresh();
-	}
+  if JOB_DONE.swap(false, Ordering::SeqCst) {
+    // update the prompt so any job count escape sequences update dynamically
+    readline.prompt_mut().refresh();
+  }
 
-	if GOT_SIGUSR1.swap(false, Ordering::SeqCst) {
-		log::info!("SIGUSR1 received: refreshing readline state");
-		readline.mark_dirty();
-		readline.prompt_mut().refresh();
-	}
+  if GOT_SIGUSR1.swap(false, Ordering::SeqCst) {
+    log::info!("SIGUSR1 received: refreshing readline state");
+    readline.mark_dirty();
+    readline.prompt_mut().refresh();
+  }
 
-	readline.print_line(false)?;
+  readline.print_line(false)?;
 
-	Ok(true)
+  Ok(true)
 }
 
-fn get_poll_timeout(readline: &mut ShedLine) -> (PollTimeout,Option<String>) {
-	let mut exec_if_timeout = None;
+fn get_poll_timeout(readline: &mut ShedLine) -> (PollTimeout, Option<String>) {
+  let mut exec_if_timeout = None;
 
-	let timeout = if !readline.pending_keymap.is_empty() {
-		// wait for more keymap keys
-		PollTimeout::from(1000u16)
-	} else {
-		let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone())
-			.trim()
-			.to_string();
-		let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
-		if screensaver_idle_time == 0 || screensaver_cmd.is_empty() {
-			// no screensaver stuff, set no timeout
-			PollTimeout::NONE
-		} else {
-			exec_if_timeout = Some(screensaver_cmd);
-			match PollTimeout::try_from((screensaver_idle_time * 1000) as i32) {
-				Ok(timeout) => timeout,
-				Err(_) => PollTimeout::NONE,
-			}
-		}
-	};
+  let timeout = if !readline.pending_keymap.is_empty() {
+    // wait for more keymap keys
+    PollTimeout::from(1000u16)
+  } else {
+    let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone())
+      .trim()
+      .to_string();
+    let screensaver_idle_time = read_shopts(|o| o.prompt.screensaver_idle_time);
+    if screensaver_idle_time == 0 || screensaver_cmd.is_empty() {
+      // no screensaver stuff, set no timeout
+      PollTimeout::NONE
+    } else {
+      exec_if_timeout = Some(screensaver_cmd);
+      match PollTimeout::try_from((screensaver_idle_time * 1000) as i32) {
+        Ok(timeout) => timeout,
+        Err(_) => PollTimeout::NONE,
+      }
+    }
+  };
 
-	(timeout, exec_if_timeout)
+  (timeout, exec_if_timeout)
 }
 
 fn shed_interactive(args: ShedArgs) -> ShResult<()> {
@@ -409,29 +411,28 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
   };
   let mut vi_mode = read_shopts(|o| o.set.vi);
-	let mut socket_mode = ShedSocket::mode();
+  let mut socket_mode = ShedSocket::mode();
 
-	let mut poll_fds: SmallVec<[PollFd; 2]> = SmallVec::new();
-	let tty_fd = PollFd::new(
-		unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
-		PollFlags::POLLIN,
-	);
-
+  let mut poll_fds: SmallVec<[PollFd; 2]> = SmallVec::new();
+  let tty_fd = PollFd::new(
+    unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
+    PollFlags::POLLIN,
+  );
 
   // Main poll loop
   loop {
-		set_bracketed_paste(true).ok();
+    set_bracketed_paste(true).ok();
     state::try_hash();
     error::clear_color();
 
-		poll_fds.clear();
-		poll_fds.push(tty_fd);
-		if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
-			poll_fds.push(PollFd::new(
-					unsafe { BorrowedFd::borrow_raw(fd) },
-					PollFlags::POLLIN,
-			));
-		}
+    poll_fds.clear();
+    poll_fds.push(tty_fd);
+    if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
+      poll_fds.push(PollFd::new(
+        unsafe { BorrowedFd::borrow_raw(fd) },
+        PollFlags::POLLIN,
+      ));
+    }
 
     if read_shopts(|o| o.set.vi) != vi_mode {
       // the editing mode option changed.
@@ -439,13 +440,19 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       readline.fix_editing_mode();
 
       vi_mode = !vi_mode; // and toggle this
+    } else if read_meta(|m| m.num_subscribers()) == 0
+      && readline.mode.report_mode() == ModeReport::Remote
+    {
+      // we are in remote mode with no consumers for our broadcasted input.
+      // That effectively soft locks the shell, so let's fix that
+      readline.fix_editing_mode();
     }
 
-		if !handle_signals_interactive(&mut readline)? {
-			return Ok(())
-		}
+    if !handle_signals_interactive(&mut readline)? {
+      return Ok(());
+    }
 
-		let (timeout, exec_if_timeout) = get_poll_timeout(&mut readline);
+    let (timeout, exec_if_timeout) = get_poll_timeout(&mut readline);
 
     match poll(&mut poll_fds, timeout) {
       Ok(0) => {
@@ -527,9 +534,14 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       .is_some_and(|r| r.contains(PollFlags::POLLIN))
     {
       let requests = write_meta(|m| m.read_socket())?;
-			for (conn, req) in requests {
-				handle_socket_request(conn, req, &mut readline).ok();
-			}
+      for (conn, req) in requests {
+        let res = handle_socket_request(conn, req, &mut readline).transpose();
+        if let Some(event) = res
+          && handle_readline_event(&mut readline, event)?
+        {
+          return Ok(());
+        }
+      }
     }
 
     // Process any available input
@@ -540,20 +552,21 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       false => { /* continue looping */ }
     }
 
-		// check the socket mode
-		let curr_socket_mode = ShedSocket::mode();
+    // check the socket mode
+    let curr_socket_mode = ShedSocket::mode();
 
-		if curr_socket_mode != socket_mode {
-			// the mode changed, call chmod
-			let path = ShedSocket::path();
-			fchmodat(
-				None,
-				Path::new(&path),
-				curr_socket_mode,
-				FchmodatFlags::FollowSymlink,
-			).ok();
-			socket_mode = curr_socket_mode;
-		}
+    if curr_socket_mode != socket_mode {
+      // the mode changed, call chmod
+      let path = ShedSocket::path();
+      fchmodat(
+        None,
+        Path::new(&path),
+        curr_socket_mode,
+        FchmodatFlags::FollowSymlink,
+      )
+      .ok();
+      socket_mode = curr_socket_mode;
+    }
   }
 
   Ok(())
@@ -566,9 +579,9 @@ fn handle_readline_event(
 ) -> ShResult<bool> {
   match event {
     Ok(ReadlineEvent::Line(input)) => {
-      let token = read_shopts(|s| s.core.auto_hist).then(||
-				readline.history.push(input.clone()).ok().flatten()
-			).flatten(); // token is used as a stable identifier for the command in the history
+      let token = read_shopts(|s| s.core.auto_hist)
+        .then(|| readline.history.push(input.clone()).ok().flatten())
+        .flatten(); // token is used as a stable identifier for the command in the history
 
       let exec_start = Instant::now();
       let pre_exec = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
@@ -577,7 +590,7 @@ fn handle_readline_event(
       pre_exec.exec();
 
       // Time this command and temporarily restore cooked terminal mode while it runs.
-			set_bracketed_paste(false).ok();
+      set_bracketed_paste(false).ok();
       let cmd_start = Instant::now();
       write_meta(|m| m.start_timer());
       if let Err(e) = RawModeGuard::with_cooked_mode(|| {
@@ -609,9 +622,9 @@ fn handle_readline_event(
 
       let was_func_def = write_meta(|m| m.take_last_was_func_def());
       let should_write = read_shopts(|o| o.core.auto_hist)
-				&& (!was_func_def || !read_shopts(|o| o.set.nolog))
-				&& !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
-				&& !input.is_empty();
+        && (!was_func_def || !read_shopts(|o| o.set.nolog))
+        && !builtin::fixcmd::NO_HIST_SAVE.swap(false, Ordering::SeqCst)
+        && !input.is_empty();
 
       if let Some(token) = token
         && !should_write
@@ -697,156 +710,177 @@ fn resolve_keymap(readline: &mut ShedLine) -> ShResult<()> {
   Ok(())
 }
 
-fn handle_socket_request(conn: UnixStream, request: SocketRequest, readline: &mut ShedLine) -> ShResult<()> {
-	match request {
-		SocketRequest::PostSystemMessage(msg) => {
-			write_meta(|m| m.post_system_message(msg));
-			write(&conn, b"ok\n").ok();
-		}
-		SocketRequest::PostStatusMessage(msg) => {
-			write_meta(|m| m.post_status_message(msg));
-			write(&conn, b"ok\n").ok();
-		}
-		SocketRequest::Subscribe => {
-			write_meta(|m| m.push_subscriber(conn));
-		}
-		SocketRequest::RefreshPrompt => {
-			kill(Pid::this(), Signal::SIGUSR1)?;
-			write(&conn, b"ok\n").ok();
-		}
-		SocketRequest::LineGet(line_header) => {
-			let LineData { buffer, cursor, anchor, hint, mode } = readline.get_line_data();
-			match line_header {
-				LineHeader::Buffer => {
-					write(&conn, buffer.as_bytes()).ok();
-					write(&conn, b"\n").ok();
-				}
-				LineHeader::Cursor => {
-					write(&conn, cursor.to_string().as_bytes()).ok();
-					write(&conn, b"\n").ok();
-				}
-				LineHeader::Anchor => {
-					if let Some(anchor) = anchor {
-						write(&conn, anchor.to_string().as_bytes()).ok();
-					}
-					write(&conn, b"\n").ok();
-				}
-				LineHeader::Hint => {
-					if let Some(hint) = hint {
-						write(&conn, hint.as_bytes()).ok();
-					}
-					write(&conn, b"\n").ok();
-				}
-				LineHeader::Mode => {
-					write(&conn, mode.to_string().as_bytes()).ok();
-					write(&conn, b"\n").ok();
-				}
-			}
-		}
-		SocketRequest::LineSet(line_header, value) => {
-			match line_header {
-				LineHeader::Buffer => {
-					readline.editor.edit(|this| {
-						this.set_buffer(value.clone());
-					});
-					readline.history
-						.update_pending_cmd((&readline.editor.joined(), readline.editor.cursor_to_flat()));
-					let hint = readline.history.get_hint();
-					readline.editor.set_hint(hint);
-					readline.editor.move_cursor_to_end();
-					readline.needs_redraw = true;
-				}
-				LineHeader::Cursor => {
-					readline.editor.with_hint(|this| {
-						if let Some((row,col)) = value.split_once(':')
-						&& let Ok(row) = row.parse::<usize>()
-						&& let Ok(col) = col.parse::<usize>() {
-							this.set_cursor(Pos::new(row, col));
-						} else if let Ok(pos) = value.parse::<usize>() {
-							this.set_cursor_from_flat(pos);
-						}
-					})
-				}
-				LineHeader::Hint => {
-					readline.editor.set_hint(Some(Hint::Override(to_lines(value))));
-				}
-				LineHeader::Mode => {
-					let Ok(mode) = value.parse::<ModeReport>() else {
-						// invalid mode report, ignore
-						return Ok(());
-					};
-					let mut mode = mode.as_edit_mode();
-					readline.swap_mode(&mut mode);
-				}
-				LineHeader::Anchor => {
-					if let Some((row,col)) = value.split_once(':')
-					&& let Ok(row) = row.parse::<usize>()
-					&& let Ok(col) = col.parse::<usize>() {
-						readline.editor.set_anchor(Pos::new(row, col));
-					} else if let Ok(pos) = value.parse::<usize>() {
-						readline.editor.set_anchor_from_flat(pos);
-					}
-				}
-			}
-		}
-		SocketRequest::Query(query_header) => match query_header {
-			QueryHeader::Cwd => {
-				let cwd = env::current_dir()?.to_string_lossy().to_string();
-				write(&conn, cwd.as_bytes()).ok();
-				write(&conn, b"\n").ok();
-			}
-			QueryHeader::Var(var) => {
-				let var = read_vars(|v| v.get_var(&var));
-				write(&conn, var.as_bytes()).ok();
-				write(&conn, b"\n").ok();
-			}
-			QueryHeader::Status(headers) => {
-				let mut responses = vec![];
-				for header in headers {
-					match header {
-						StatusHeader::ExitCode => responses.push(state::get_status().to_string()),
-						StatusHeader::CommandName => {
-							if let Some(job) = read_meta(|m| m.last_job().cloned())
-								&& let Some(cmd) = job.name()
-							{
-								responses.push(cmd.to_string());
-							} else {
-								responses.push("".to_string());
-							}
-						}
-						StatusHeader::Runtime => {
-							let Some(dur) = write_meta(|m| m.get_time()) else {
-								responses.push("".to_string());
-								continue;
-							};
-							responses.push(format!("{}", dur.as_millis()));
-						}
-						StatusHeader::Pid => {
-							let Some(job) = write_meta(|m| m.last_job().cloned()) else {
-								responses.push("".to_string());
-								continue;
-							};
-							responses.push(
-								job.get_pids()
-								.first()
-								.map(|p| p.to_string())
-								.unwrap_or_default(),
-							);
-						}
-						StatusHeader::Pgid => {
-							let Some(job) = write_meta(|m| m.last_job().cloned()) else {
-								responses.push("".to_string());
-								continue;
-							};
-							responses.push(job.pgid().to_string());
-						}
-					}
-				}
-				let output = responses.join(" ");
-				write(&conn, output.as_bytes()).ok();
-				write(&conn, b"\n").ok();
-			}
-		},
-	}
-	Ok(())
+fn handle_socket_request(
+  conn: UnixStream,
+  request: SocketRequest,
+  readline: &mut ShedLine,
+) -> ShResult<Option<ReadlineEvent>> {
+  match request {
+    SocketRequest::PostSystemMessage(msg) => {
+      write_meta(|m| m.post_system_message(msg));
+      write(&conn, b"ok\n").ok();
+    }
+    SocketRequest::PostStatusMessage(msg) => {
+      write_meta(|m| m.post_status_message(msg));
+      write(&conn, b"ok\n").ok();
+    }
+    SocketRequest::Subscribe => {
+      write_meta(|m| m.push_subscriber(conn));
+    }
+    SocketRequest::RefreshPrompt => {
+      kill(Pid::this(), Signal::SIGUSR1)?;
+      write(&conn, b"ok\n").ok();
+    }
+    SocketRequest::LineGet(line_header) => {
+      let LineData {
+        buffer,
+        cursor,
+        anchor,
+        hint,
+        mode,
+      } = readline.get_line_data();
+      match line_header {
+        LineHeader::Buffer => {
+          write(&conn, buffer.as_bytes()).ok();
+          write(&conn, b"\n").ok();
+        }
+        LineHeader::Cursor => {
+          write(&conn, cursor.to_string().as_bytes()).ok();
+          write(&conn, b"\n").ok();
+        }
+        LineHeader::Anchor => {
+          if let Some(anchor) = anchor {
+            write(&conn, anchor.to_string().as_bytes()).ok();
+          }
+          write(&conn, b"\n").ok();
+        }
+        LineHeader::Hint => {
+          if let Some(hint) = hint {
+            write(&conn, hint.as_bytes()).ok();
+          }
+          write(&conn, b"\n").ok();
+        }
+        LineHeader::Mode => {
+          write(&conn, mode.to_string().as_bytes()).ok();
+          write(&conn, b"\n").ok();
+        }
+      }
+    }
+    SocketRequest::LineSet(line_header, value) => {
+      match line_header {
+        LineHeader::Buffer => {
+          readline.editor.edit(|this| {
+            this.set_buffer(value.clone());
+          });
+          readline
+            .history
+            .update_pending_cmd((&readline.editor.joined(), readline.editor.cursor_to_flat()));
+          let hint = readline.history.get_hint();
+          readline.editor.set_hint(hint);
+          readline.editor.move_cursor_to_end();
+          readline.needs_redraw = true;
+        }
+        LineHeader::Cursor => readline.editor.with_hint(|this| {
+          if let Some((row, col)) = value.split_once(':')
+            && let Ok(row) = row.parse::<usize>()
+            && let Ok(col) = col.parse::<usize>()
+          {
+            this.set_cursor(Pos::new(row, col));
+          } else if let Ok(pos) = value.parse::<usize>() {
+            this.set_cursor_from_flat(pos);
+          }
+        }),
+        LineHeader::Hint => {
+          readline
+            .editor
+            .set_hint(Some(Hint::Override(to_lines(value))));
+        }
+        LineHeader::Mode => {
+          let Ok(mode) = value.parse::<ModeReport>() else {
+            // invalid mode report, ignore
+            return Ok(None);
+          };
+          let mut mode = mode.as_edit_mode();
+          readline.swap_mode(&mut mode);
+        }
+        LineHeader::Anchor => {
+          if let Some((row, col)) = value.split_once(':')
+            && let Ok(row) = row.parse::<usize>()
+            && let Ok(col) = col.parse::<usize>()
+          {
+            readline.editor.set_anchor(Pos::new(row, col));
+          } else if let Ok(pos) = value.parse::<usize>() {
+            readline.editor.set_anchor_from_flat(pos);
+          }
+        }
+      }
+    }
+    SocketRequest::LineSendKeys(events) => {
+      for key in events {
+        if let Some(event) = readline.dispatch_key(key)? {
+          return Ok(Some(event));
+        }
+      }
+    }
+    SocketRequest::Query(query_header) => match query_header {
+      QueryHeader::Cwd => {
+        let cwd = env::current_dir()?.to_string_lossy().to_string();
+        write(&conn, cwd.as_bytes()).ok();
+        write(&conn, b"\n").ok();
+      }
+      QueryHeader::Var(var) => {
+        let var = read_vars(|v| v.get_var(&var));
+        write(&conn, var.as_bytes()).ok();
+        write(&conn, b"\n").ok();
+      }
+      QueryHeader::Status(headers) => {
+        let mut responses = vec![];
+        for header in headers {
+          match header {
+            StatusHeader::ExitCode => responses.push(state::get_status().to_string()),
+            StatusHeader::CommandName => {
+              if let Some(job) = read_meta(|m| m.last_job().cloned())
+                && let Some(cmd) = job.name()
+              {
+                responses.push(cmd.to_string());
+              } else {
+                responses.push("".to_string());
+              }
+            }
+            StatusHeader::Runtime => {
+              let Some(dur) = write_meta(|m| m.get_time()) else {
+                responses.push("".to_string());
+                continue;
+              };
+              responses.push(format!("{}", dur.as_millis()));
+            }
+            StatusHeader::Pid => {
+              let Some(job) = write_meta(|m| m.last_job().cloned()) else {
+                responses.push("".to_string());
+                continue;
+              };
+              responses.push(
+                job
+                  .get_pids()
+                  .first()
+                  .map(|p| p.to_string())
+                  .unwrap_or_default(),
+              );
+            }
+            StatusHeader::Pgid => {
+              let Some(job) = write_meta(|m| m.last_job().cloned()) else {
+                responses.push("".to_string());
+                continue;
+              };
+              responses.push(job.pgid().to_string());
+            }
+          }
+        }
+        let output = responses.join(" ");
+        write(&conn, output.as_bytes()).ok();
+        write(&conn, b"\n").ok();
+      }
+    },
+  }
+  Ok(None)
 }

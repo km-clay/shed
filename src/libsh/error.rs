@@ -455,8 +455,8 @@ impl From<rusqlite::Error> for ShErr {
 
 impl From<std::io::Error> for ShErr {
   fn from(e: std::io::Error) -> Self {
-		let bt = std::backtrace::Backtrace::force_capture();
-		log::error!("I/O Error: {e}\nBacktrace:\n{bt}");
+    let bt = std::backtrace::Backtrace::force_capture();
+    log::error!("I/O Error: {e}\nBacktrace:\n{bt}");
     let msg = std::io::Error::last_os_error();
     ShErr::simple(ShErrKind::IoErr(e.kind()), msg.to_string())
   }

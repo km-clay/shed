@@ -12,10 +12,7 @@ use crate::{
   procio::{IoMode, borrow_fd},
   sherr,
   signal::{disable_reaping, enable_reaping},
-  state::{
-    self, AutoCmdKind, CmdTimer, read_logic, set_status, with_vars, write_jobs,
-    write_meta,
-  },
+  state::{self, AutoCmdKind, CmdTimer, read_logic, set_status, with_vars, write_jobs, write_meta},
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -407,7 +404,9 @@ impl Job {
     let pids = flags.contains(JobCmdFlags::PIDS);
 
     let current = job_order.last();
-    let prev = (job_order.len() > 2).then(|| job_order.get(job_order.len() - 2)).flatten();
+    let prev = (job_order.len() > 2)
+      .then(|| job_order.get(job_order.len() - 2))
+      .flatten();
 
     let id = self.table_id.unwrap();
     let symbol = if current == self.table_id.as_ref() {
@@ -418,15 +417,10 @@ impl Job {
       " "
     };
 
-		let job_pids = self.get_pids();
-		let job_stats = self.get_stats();
-		let job_cmds = self.get_cmds();
-		let zipped = izip!(
-			0..,
-			job_pids.iter(),
-			job_stats.iter(),
-			job_cmds.iter(),
-		);
+    let job_pids = self.get_pids();
+    let job_stats = self.get_stats();
+    let job_cmds = self.get_cmds();
+    let zipped = izip!(0.., job_pids.iter(), job_stats.iter(), job_cmds.iter(),);
 
     let id_box = format!("[{}]{}", id + 1, symbol);
     let id_width = id_box.len();
@@ -449,7 +443,8 @@ impl Job {
         WtStat::Exited(_, 0) => stat_line.fg(Color::Green),
         WtStat::Exited(..) => stat_line.fg(Color::Red),
         _ => stat_line.fg(Color::Cyan),
-      }.to_string();
+      }
+      .to_string();
 
       if i == 0 {
         if long {

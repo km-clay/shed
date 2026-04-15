@@ -401,7 +401,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
         });
 
         write_meta(|m| m.post_system_message(job_complete_msg));
-				write_meta(|m| m.notify_job_complete(&job)).ok();
+        write_meta(|m| m.notify_job_complete(&job)).ok();
       }
     }
   }

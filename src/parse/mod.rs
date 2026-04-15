@@ -1907,7 +1907,11 @@ impl ParseStream {
           break;
         };
         if let TkRule::CasePattern = prefix_tk.class {
-          break 'out Err(parse_err!(self, node_tks, "Found case pattern in command"));
+          break 'out Err(parse_err!(
+            self,
+            vec![prefix_tk.clone()],
+            "Found case pattern in command"
+          ));
         }
         let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
         let is_assignment = prefix_tk.flags.contains(TkFlags::ASSIGN);

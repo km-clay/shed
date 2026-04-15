@@ -12,14 +12,15 @@ use crate::{
 bitflags! {
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   pub struct KeyMapFlags: u32 {
-    const NORMAL 			= 0b00000001;
-    const INSERT 			= 0b00000010;
-    const VISUAL 			= 0b00000100;
-    const EX 					= 0b00001000;
-    const OP_PENDING 	= 0b00010000;
-    const REPLACE 		= 0b00100000;
-    const VERBATIM 		= 0b01000000;
-    const EMACS   		= 0b10000000;
+    const NORMAL 			= 1<<0;
+    const INSERT 			= 1<<1;
+    const VISUAL 			= 1<<2;
+    const EX 					= 1<<3;
+    const OP_PENDING 	= 1<<4;
+    const REPLACE 		= 1<<5;
+    const VERBATIM 		= 1<<6;
+    const EMACS   		= 1<<7;
+    const REMOTE   		= 1<<8;
   }
 }
 
