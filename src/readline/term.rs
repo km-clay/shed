@@ -31,6 +31,13 @@ use crate::{
 
 use super::keys::KeyEvent;
 
+pub const OSC_PROMPT_START: &str = "\x1b]133;A\x07";
+pub const OSC_PROMPT_END: &str = "\x1b]133;B\x07";
+pub const OSC_EXEC_START: &str = "\x1b]133;C\x07";
+pub fn osc_exec_end(code: i32) -> String {
+	format!("\x1b]133;D;{code}\x07")
+}
+
 pub type Row = u16;
 pub type Col = u16;
 
@@ -1224,7 +1231,10 @@ impl LineWriter for TermWriter {
       self.buffer.push_str(&system_msg);
     }
 
+		self.buffer.push_str(OSC_PROMPT_START);
     self.buffer.push_str(prompt);
+		self.buffer.push_str(OSC_PROMPT_END);
+
     let tab_width = read_shopts(|o| o.line.tab_width);
     let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
     let expanded = expand_tabs(line, prompt_end.col, tab_width as u16);

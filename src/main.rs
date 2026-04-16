@@ -44,7 +44,7 @@ use crate::prelude::*;
 use crate::procio::borrow_fd;
 use crate::readline::editmode::ModeReport;
 use crate::readline::linebuf::{Hint, Pos, to_lines};
-use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
+use crate::readline::term::{LineWriter, OSC_EXEC_START, RawModeGuard, osc_exec_end, raw_mode};
 use crate::readline::{LineData, Prompt, ReadlineEvent, ShedLine};
 use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
@@ -591,11 +591,17 @@ fn handle_readline_event(
 
       // Time this command and temporarily restore cooked terminal mode while it runs.
       set_bracketed_paste(false).ok();
+
       let cmd_start = Instant::now();
       write_meta(|m| m.start_timer());
-      if let Err(e) = RawModeGuard::with_cooked_mode(|| {
+
+			readline.writer.flush_write(OSC_EXEC_START).ok();
+			let res = RawModeGuard::with_cooked_mode(|| {
         exec_input(input.clone(), None, true, Some("<stdin>".into()))
-      }) {
+      });
+			readline.writer.flush_write(&osc_exec_end(state::get_status())).ok();
+
+      if let Err(e) = res {
         match e.kind() {
           ShErrKind::Interrupt => {
             // We got Ctrl+C during command execution

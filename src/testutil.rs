@@ -63,6 +63,8 @@ impl TestGuard {
 
     // we need this arc mutex and read handle because large test outputs
     // will cause the test to hang if we try to do everything on one thread.
+		// if we attempt to do this synchronously, we have to do both the reading and the writing.
+		// we can't read if we're blocked on writing to a full pty buffer.
     let output = Arc::new(Mutex::new(vec![]));
     let output_clone = Arc::clone(&output);
     let _read_handle = std::thread::spawn(move || {
