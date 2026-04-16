@@ -1231,8 +1231,15 @@ impl LineWriter for TermWriter {
       self.buffer.push_str(&system_msg);
     }
 
+
 		self.buffer.push_str(OSC_PROMPT_START);
+		if let Ok(prefix) = env::var("SHELL_PROMPT_PREFIX") {
+			self.buffer.push_str(&prefix);
+		}
     self.buffer.push_str(prompt);
+		if let Ok(suffix) = env::var("SHELL_PROMPT_SUFFIX") {
+			self.buffer.push_str(&suffix);
+		}
 		self.buffer.push_str(OSC_PROMPT_END);
 
     let tab_width = read_shopts(|o| o.line.tab_width);

@@ -392,6 +392,10 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     e.print_error();
   }
 
+	if let Ok(welcome) = env::var("SHELL_WELCOME") {
+		eprintln!("{welcome}");
+	}
+
   let mut readline = match ShedLine::new(Prompt::new(), *TTY_FILENO) {
     Ok(rl) => rl,
     Err(e) => {
