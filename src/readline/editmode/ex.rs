@@ -11,7 +11,8 @@ use crate::readline::editcmd::{
   Anchor, CmdFlags, EditCmd, LineAddr, Motion, MotionCmd, ReadSrc, RegisterName, To, Verb, VerbCmd,
   WriteDest,
 };
-use crate::readline::editmode::{EditMode, ModeReport, ViInsert};
+use crate::readline::editmode::emacs::Emacs;
+use crate::readline::editmode::{EditMode, ModeReport};
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
@@ -37,7 +38,7 @@ bitflags! {
 #[derive(Clone, Debug)]
 struct ExEditor {
   buf: LineBuf,
-  mode: ViInsert,
+  mode: Emacs,
   history: History,
 }
 
@@ -45,7 +46,7 @@ impl Default for ExEditor {
   fn default() -> Self {
     Self {
       buf: LineBuf::default(),
-      mode: ViInsert::default(),
+      mode: Emacs::default(),
       history: History::new("ex_history").unwrap_or_else(|_| History::empty("ex_history")),
     }
   }
@@ -60,7 +61,7 @@ impl ExEditor {
     Self {
       history,
       buf,
-      mode: ViInsert::default(),
+      mode: Emacs::default(),
     }
   }
   pub fn clear(&mut self) {

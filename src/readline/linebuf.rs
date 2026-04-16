@@ -6,7 +6,6 @@ use std::{
   slice::SliceIndex,
 };
 
-use ariadne::Span;
 use itertools::Either;
 use regex::Regex;
 use smallvec::SmallVec;
@@ -17,7 +16,7 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-  expand::{self, alias::AliasExpander, expand_cmd_sub},
+  expand::expand_cmd_sub,
   libsh::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},

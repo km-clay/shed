@@ -7,7 +7,6 @@ use std::{
 };
 
 use bitflags::bitflags;
-use itertools::Itertools;
 
 use crate::{
   builtin::BUILTINS,

@@ -25,7 +25,7 @@ use nix::{
 use crate::{
   builtin::BUILTINS,
   expand::expand_keymap,
-  jobs::{DisplayWaitStatus, Job},
+  jobs::Job,
   libsh::error::{ShErr, ShResult},
   match_loop,
   prelude::*,

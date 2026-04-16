@@ -42,8 +42,8 @@ use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_input};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
-use crate::readline::editmode::{EditMode, ModeReport, ViNormal};
-use crate::readline::linebuf::{self, Hint, Pos, to_lines};
+use crate::readline::editmode::ModeReport;
+use crate::readline::linebuf::{Hint, Pos, to_lines};
 use crate::readline::term::{LineWriter, RawModeGuard, raw_mode};
 use crate::readline::{LineData, Prompt, ReadlineEvent, ShedLine};
 use crate::signal::{

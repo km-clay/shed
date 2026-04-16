@@ -1848,42 +1848,6 @@ impl ShedLine {
   }
 }
 
-pub struct Annotator {
-	tokens: Vec<Tk>,
-	result: String,
-	heredoc_queue: VecDeque<(String,bool)> // (delimiter,is_literal)
-}
-
-impl Annotator {
-	pub fn annotate(input: &str) -> String {
-		let tokens = LexStream::new(input.into(), LexFlags::LEX_UNFINISHED)
-			.flatten()
-			.filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
-			.collect();
-		Self {
-			tokens,
-			result: input.to_string(),
-			heredoc_queue: VecDeque::new(),
-		}.begin()
-	}
-
-	fn begin(mut self) -> String {
-		self.annotate_one();
-
-		self.result
-	}
-
-	fn annotate_one(&mut self) {
-		for tk in self.tokens.iter().rev() {
-			let insertions = annotate_token(tk.clone());
-			for (pos, marker) in insertions {
-				let pos = pos.max(0).min(self.result.len());
-				self.result.insert(pos, marker);
-			}
-		}
-	}
-}
-
 /// Annotates shell input with invisible Unicode markers for syntax highlighting
 ///
 /// Takes raw shell input and inserts non-character markers (U+FDD0-U+FDEF
@@ -2018,7 +1982,6 @@ pub fn marker_for(class: &TkRule) -> Option<Marker> {
   }
 }
 
-#[allow(unused_assignments)]
 pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   // Sort by position descending, with priority ordering at same position:
   // - RESET first (inserted first, ends up rightmost)

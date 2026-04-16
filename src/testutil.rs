@@ -1,5 +1,5 @@
 use std::{
-  collections::{HashMap, HashSet},
+  collections::HashMap,
   env,
   os::fd::{AsRawFd, BorrowedFd, OwnedFd},
   path::PathBuf,
@@ -19,7 +19,7 @@ use crate::{
   parse::{NdKind, ParsedSrc, Redir, RedirType, execute::exec_input, lex::LexFlags},
   procio::{IoFrame, IoMode, RedirGuard, borrow_fd},
   readline::register::{restore_registers, save_registers},
-  state::{MetaTab, SHED, read_logic},
+  state::{MetaTab, SHED},
 };
 
 pub fn has_cmds(cmds: &[&str]) -> bool {

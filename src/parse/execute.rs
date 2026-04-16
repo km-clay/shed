@@ -1,6 +1,6 @@
 use std::{
   cell::Cell,
-  collections::{HashSet, VecDeque},
+  collections::VecDeque,
   os::unix::fs::PermissionsExt,
   rc::Rc,
 };
