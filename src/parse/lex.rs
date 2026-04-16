@@ -209,6 +209,11 @@ impl Tk {
       flags: TkFlags::empty(),
     }
   }
+	pub fn replaced(&self, other: &str) -> String {
+		let mut content = self.span.source.content().to_string();
+		content.replace_range(self.span.range(), other);
+		content
+	}
   pub fn as_str(&self) -> &str {
     self.span.as_str()
   }

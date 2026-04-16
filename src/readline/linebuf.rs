@@ -6,6 +6,7 @@ use std::{
   slice::SliceIndex,
 };
 
+use ariadne::Span;
 use itertools::Either;
 use regex::Regex;
 use smallvec::SmallVec;
@@ -26,7 +27,7 @@ use crate::{
   parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::exec_input,
-    lex::{self, LexFlags, Tk, TkFlags},
+    lex::{self, LexFlags, LexStream, Tk, TkFlags, TkRule},
   },
   prelude::*,
   procio::{IoFrame, IoMode, IoStack, borrow_fd},
@@ -40,7 +41,7 @@ use crate::{
     term::get_win_size,
   },
   sherr,
-  state::{self, VarFlags, VarKind, read_shopts, read_vars, write_meta, write_vars},
+  state::{self, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_meta, write_vars},
 };
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
@@ -1341,15 +1342,21 @@ impl LineBuf {
     }
   }
   fn insert_str_at(&mut self, pos: Pos, s: &str) {
-    let mut offset = self.row();
+    let mut row_offset = self.row();
+		let mut col_offset = pos.col;
     for gr in s.graphemes(true) {
       let gr = Grapheme::from(gr);
       if gr.is_lf() {
-        self.break_line_at(pos.row_add(offset));
-        offset += 1;
+        self.break_line_at(pos.row_add(row_offset));
+        row_offset += 1;
+				col_offset = 0;
       } else {
-        self.insert_at(pos.row_add(offset), gr);
-        self.cursor.pos.col += 1;
+        self.insert_at(pos.row_add(row_offset).col_add(col_offset), gr);
+				if self.cursor.pos.row == pos.row + row_offset
+				&& self.cursor.pos.col >= col_offset {
+						self.cursor.pos.col += 1;
+				}
+				col_offset += 1;
       }
     }
   }
@@ -3865,6 +3872,13 @@ impl LineBuf {
     let before = self.lines.clone();
     let old_cursor = self.cursor.pos;
 
+		if is_separator && read_shopts(|o| o.prompt.expand_aliases) {
+			self.attempt_alias_expansion();
+			if cmd.is_hard_separator() {
+				self.alias_ctx.push(self.cursor.pos);
+			}
+		}
+
     // Execute the command
     let res = self.exec_verb(&cmd);
 
@@ -3884,13 +3898,6 @@ impl LineBuf {
     }
 
 		self.alias_ctx.clamp_start(self.end_pos());
-
-		if is_separator && read_shopts(|o| o.prompt.expand_aliases) {
-			self.attempt_alias_expansion();
-			if cmd.is_hard_separator() {
-				self.alias_ctx.push(self.cursor.pos);
-			}
-		}
 
     if self.lines != before && !is_undo_op {
       self.redo_stack.clear();
@@ -4312,39 +4319,53 @@ impl LineBuf {
 		std::mem::take(&mut self.alias_ctx);
 	}
 
+	fn word_before_cursor(&mut self) -> Option<(Pos,Pos)> {
+		let word_start = self.word_motion_b(&Word::Big, self.cursor.pos)?;
+		Some(ordered(word_start, self.cursor.pos))
+	}
+
+	fn get(&mut self, pos: Pos) -> Option<Grapheme> {
+		self.lines
+			.get(pos.row)
+			.and_then(|line| line.graphemes().get(pos.col))
+			.cloned()
+	}
+
+	fn grapheme_before_cursor(&mut self) -> Option<Grapheme> {
+		self.get(self.cursor.pos.col_add_signed(-1))
+	}
+
 	pub fn attempt_alias_expansion(&mut self) -> bool {
-		let split_point = self.alias_ctx.current_pos();
-		let lines = split_lines_at(&mut self.lines, split_point);
-		let joined = join_lines(&lines);
-		let joined_len = joined.graphemes(true).count();
-
-		let (expanded,first_pos) = AliasExpander::new(
-			joined.clone(),
-			self.alias_ctx.current_set(),
-		).expand();
-
-		let len_delta = expanded.graphemes(true).count() as isize - joined_len as isize;
-
-		let grapheme_pos = first_pos // start position of expanded token
-			.and_then(|byte_pos| Some(joined.get(..byte_pos)?.graphemes(true).count()))
-			.unwrap_or(0);
-
-		attach_lines(&mut self.lines, &mut to_lines(&expanded));
-
-		// new_start = split_point + grapheme_pos
-		let (ns,ne) = self.offset_col_wrapping_at(split_point.row, grapheme_pos as isize, split_point);
-		let new_start = Pos::new(ns,ne);
-
-		if self.cursor.pos >= split_point {
-			self.cursor.pos = self.offset_cursor_wrapping(0, len_delta);
+		if self.grapheme_before_cursor().is_none_or(|gr| gr.is_ws()) {
+			return false
 		}
 
-		let res = joined != expanded;
-		if res {
-			self.alias_ctx.start_pos = new_start; // update
-			self.alias_ctx.stack.last_mut().unwrap().0 = new_start;
+		let line_len = self.line(self.row()).len();
+		let (to_cursor,mut after_cursor) = split_lines(self.lines.clone(), self.cursor.pos);
+		let raw = join_lines(&to_cursor);
+		let mut tokens = LexStream::new(raw.clone().into(), LexFlags::empty())
+			.filter_map(Result::ok)
+			.filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
+			.collect::<Vec<_>>();
+
+		let Some(last) = tokens.pop() else { return false; };
+		if !last.flags.contains(TkFlags::IS_CMD) { return false; }
+		let word = last.as_str();
+
+
+		if let Some(alias) = read_logic(|l| l.aliases().get(word).cloned()) {
+			let alias = alias.to_string();
+			let delta = alias.graphemes(true).count() as isize - word.graphemes(true).count() as isize;
+			let expanded = last.replaced(&alias);
+
+			self.lines = to_lines(expanded);
+			attach_lines(&mut self.lines, &mut after_cursor);
+			self.cursor.pos = self.cursor.pos.col_add_signed(delta);
+
+			true
+		} else {
+			false
 		}
-		res
 	}
 
   /// The inner logic of `attempt_history_expansion()`. This function calls itself recursively when it encounters command substitutions.
