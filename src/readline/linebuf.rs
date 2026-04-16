@@ -589,7 +589,6 @@ impl IndentCtx {
     self.ctx.clear();
 
     let mut src = ParsedSrc::new(input.into())
-      .with_lex_flags(LexFlags::LEX_UNFINISHED)
       .with_parse_flags(ParseFlags::ERR_RETURN);
 
     log::debug!("Calculating indent depth for input: '{}'", input);

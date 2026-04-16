@@ -189,7 +189,8 @@ impl Default for TkRule {
 ///
 /// Generally speaking, these are very cheap to clone. The only time cloning a `Tk` is a heavy operation
 /// is if the wrapped `TkRule` is `TkRule::Expanded`, which contains a `Vec<String>` that needs to be cloned.
-/// However, `TkRule::Expanded` is never created through lexing, so it is very rare that a cloned token will have this rule.
+/// However, `TkRule::Expanded` is never created through lexing. You can assume that if you are cloning a `Tk`,
+/// it will not have this `TkRule`.
 /// Therefore, you can generally consider cloning a token to be effectively as cheap as cloning an Rc<T>.
 ///
 /// `TkRule::Expanded` is only created during token expansion, which generally happens much later in an execution cycle.
@@ -199,8 +200,6 @@ pub struct Tk {
   pub flags: TkFlags,
 }
 
-// There's one impl here and then another in expand.rs which has the expansion
-// logic
 impl Tk {
   pub fn new(class: TkRule, span: Span) -> Self {
     Self {
@@ -291,8 +290,6 @@ bitflags! {
     const LEX_UNFINISHED = 0b0000000010;
     /// The next string-type token is a command name
     const NEXT_IS_CMD    = 0b0000000100;
-    /// We are in a quotation, so quoting rules apply
-    const IN_QUOTE       = 0b0000001000;
     /// Only lex strings; used in expansions
     const RAW            = 0b0000010000;
     /// The lexer has not produced any tokens yet
@@ -592,7 +589,6 @@ impl LexStream {
   }
   pub fn read_heredoc(&mut self, mut pos: usize) -> ShResult<Option<Tk>> {
     let slice = self.slice(pos..).unwrap_or_default().to_string();
-		println!("foooo");
 		let span_start = pos;
     let mut chars = slice.chars();
     let mut delim = String::new();
