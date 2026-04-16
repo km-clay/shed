@@ -120,17 +120,16 @@ pub struct ExecArgs {
 }
 
 impl ExecArgs {
-  pub fn new(argv: Vec<Tk>) -> ShResult<Self> {
-    assert!(!argv.is_empty());
+  pub fn new(argv: Vec<Tk>) -> ShResult<Option<Self>> {
     let argv = prepare_argv(argv)?;
-    Self::from_expanded(argv)
+
+		Ok((!argv.is_empty()).then(|| Self::from_expanded(argv)))
   }
-  pub fn from_expanded(argv: Vec<(String, Span)>) -> ShResult<Self> {
-    assert!(!argv.is_empty());
+  pub fn from_expanded(argv: Vec<(String, Span)>) -> Self {
     let cmd = Self::get_cmd(&argv);
     let argv = Self::get_argv(argv);
     let envp = Self::get_envp();
-    Ok(Self { cmd, argv, envp })
+    Self { cmd, argv, envp }
   }
   pub fn get_cmd(argv: &[(String, Span)]) -> (CString, Span) {
     let cmd = argv[0].0.as_str();
@@ -332,13 +331,20 @@ impl Dispatcher {
     // We need to expand this token
     // so that a command smuggled inside of a variable is routed correctly,
     // instead of only hitting the exec_cmd path
-    let cmd_word = cmd
+    let Some(cmd_word) = cmd
       .clone()
       .expand()?
       .get_words()
       .into_iter()
-      .next()
-      .unwrap();
+      .next() else {
+				if let NdRule::Command { ref assignments, argv: _ } = node.class
+				&& !assignments.is_empty() {
+					return self.exec_cmd(node);
+				} else {
+					return Ok(());
+				}
+			};
+
     let cmd_tk = node.get_command();
 
     if is_subsh(cmd_tk) {
@@ -1186,7 +1192,10 @@ impl Dispatcher {
         self.set_assignments(assignments, assign_behavior).ok();
       }
       let exec_args = match ExecArgs::new(argv) {
-        Ok(args) => args,
+        Ok(Some(args)) => args,
+				Ok(None) => {
+					exit(0);
+				}
         Err(e) => {
           sherr!(ExecFail @ blame, "{e}")
             .with_context(context)

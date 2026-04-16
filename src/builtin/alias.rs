@@ -47,12 +47,11 @@ pub fn alias(node: Node) -> ShResult<()> {
           ));
         };
 
-        let alias_output = format!("{arg}='{alias}'");
+        let alias_output = format!("{arg}='{alias}'\n");
 
         let stdout = borrow_fd(STDOUT_FILENO);
-        write(stdout, alias_output.as_bytes())?; // Write it
-        state::set_status(0);
-        return Ok(());
+        write(stdout, alias_output.as_bytes())?;
+				continue
       };
       if name == "command" || name == "builtin" {
         return Err(sherr!(

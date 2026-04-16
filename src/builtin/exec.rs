@@ -28,7 +28,7 @@ pub fn exec_builtin(node: Node) -> ShResult<()> {
     return Ok(());
   }
 
-  let args = ExecArgs::from_expanded(expanded_argv)?;
+  let args = ExecArgs::from_expanded(expanded_argv);
 
   let cmd = &args.cmd.0;
   let span = args.cmd.1;

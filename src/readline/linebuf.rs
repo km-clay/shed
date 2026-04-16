@@ -592,14 +592,12 @@ impl IndentCtx {
 			.with_lex_flags(LexFlags::LEX_UNFINISHED)
       .with_parse_flags(ParseFlags::ERR_RETURN);
 
-    log::debug!("Calculating indent depth for input: '{}'", input);
 
     // now we parse the input
     // src.block_depth will be non-zero if the parse was stopped somewhere.
     let res = src.parse_src();
 
     self.depth = src.block_depth;
-    log::debug!("Calculated indent depth: {}", self.depth);
 
     (self.depth, res.is_err())
   }
@@ -2902,15 +2900,8 @@ impl LineBuf {
   }
   pub fn checked_calc_indent_level_for_pos(&mut self, pos: Pos) -> (usize, bool) {
     let mut lines = self.lines.clone();
-    log::debug!(
-      "Calculating indent level for position {:?} with buffer:\n{:?}",
-      pos,
-      self.joined()
-    );
-    log::debug!("lines: {:?}", lines);
     split_lines_at(&mut lines, pos);
     let raw = join_lines(&lines);
-    log::debug!("Calculating indent level for raw text:\n{:?}", raw);
 
     self.indent_ctx.checked_calculate(&raw)
   }
@@ -2918,10 +2909,6 @@ impl LineBuf {
     self.checked_calc_indent_level_for_pos(self.cursor.pos)
   }
   pub fn calc_indent_level(&mut self) -> usize {
-    log::debug!(
-      "Calculating indent level for cursor at {:?}",
-      self.cursor.pos
-    );
     self.calc_indent_level_for_pos(self.cursor.pos)
   }
   pub fn calc_indent_level_for_pos(&mut self, pos: Pos) -> usize {
@@ -4335,6 +4322,7 @@ impl LineBuf {
 			joined.clone(),
 			self.alias_ctx.current_set(),
 		).expand();
+
 		let len_delta = expanded.graphemes(true).count() as isize - joined_len as isize;
 
 		let grapheme_pos = first_pos // start position of expanded token
