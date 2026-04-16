@@ -339,6 +339,11 @@
                 default = "\\\\";
                 description = "The leader key to use for custom keymaps (e.g. if set to '\\\\', then a keymap with keys='x' would be triggered by '\\x')";
               };
+              expand_aliases = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to expand aliases in the prompt (i.e. whether to apply alias substitution to the command line before executing it)";
+              };
               trunc_prompt_path = lib.mkOption {
                 type = lib.types.int;
                 default = 4;

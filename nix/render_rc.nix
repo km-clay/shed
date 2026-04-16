@@ -115,6 +115,7 @@ lib.concatLines [
         "shopt prompt.screensaver_cmd='${cfg.shopts.prompt.screensaver_cmd}'"
         "shopt prompt.completion_ignore_case=${boolToString cfg.shopts.prompt.completion_ignore_case}"
         "shopt prompt.hist_cat=${boolToString cfg.shopts.prompt.hist_cat}"
+        "shopt prompt.expand_aliases=${boolToString cfg.shopts.prompt.expand_aliases}"
         functionLines
         completeLines
         keymapLines
