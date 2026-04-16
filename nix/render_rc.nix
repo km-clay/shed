@@ -116,6 +116,19 @@ lib.concatLines [
         "shopt prompt.completion_ignore_case=${boolToString cfg.shopts.prompt.completion_ignore_case}"
         "shopt prompt.hist_cat=${boolToString cfg.shopts.prompt.hist_cat}"
         "shopt prompt.expand_aliases=${boolToString cfg.shopts.prompt.expand_aliases}"
+
+        ''shopt highlight.string="${cfg.shopts.highlight.string}"''
+        ''shopt highlight.keyword="${cfg.shopts.highlight.keyword}"''
+        ''shopt highlight.valid_command="${cfg.shopts.highlight.valid_command}"''
+        ''shopt highlight.invalid_command="${cfg.shopts.highlight.invalid_command}"''
+        ''shopt highlight.control_flow_keyword="${cfg.shopts.highlight.control_flow_keyword}"''
+        ''shopt highlight.argument="${cfg.shopts.highlight.argument}"''
+        ''shopt highlight.argument_file="${cfg.shopts.highlight.argument_file}"''
+        ''shopt highlight.variable="${cfg.shopts.highlight.variable}"''
+        ''shopt highlight.operator="${cfg.shopts.highlight.operator}"''
+        ''shopt highlight.comment="${cfg.shopts.highlight.comment}"''
+        ''shopt highlight.glob="${cfg.shopts.highlight.glob}"''
+        ''shopt highlight.selection="${cfg.shopts.highlight.selection}"''
         functionLines
         completeLines
         keymapLines

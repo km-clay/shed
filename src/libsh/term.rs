@@ -1,8 +1,9 @@
-use std::{fmt::Display, ops::BitOr};
+use std::{fmt::Display, ops::BitOr, str::FromStr};
 
 use nix::{libc::STDOUT_FILENO, unistd::write};
+use yansi::{Paint, Painted};
 
-use crate::{libsh::error::ShResult, procio::borrow_fd, sherr};
+use crate::{libsh::error::ShResult, match_loop, procio::borrow_fd, sherr};
 
 /// Enables or disables bracketed paste mode in the terminal.
 pub fn set_bracketed_paste(on: bool) -> ShResult<()> {
@@ -16,182 +17,79 @@ pub fn set_bracketed_paste(on: bool) -> ShResult<()> {
   Ok(())
 }
 
-pub trait Styled: Sized + Display {
-  fn styled<S: Into<StyleSet>>(self, style: S) -> String {
-    let styles: StyleSet = style.into();
-    let reset = Style::Reset;
-    format!("{styles}{self}{reset}")
-  }
+/// Build an ansi color escape sequence from a plain english description
+pub fn color_from_description(desc: &str) -> ShResult<String> {
+	let mut style: Painted<&str> = "".primary().on_primary().linger();
+	let mut words = desc.split_whitespace();
+
+	match_loop!(words.next() => word, {
+		"green" => style = style.green(),
+		"red" => style = style.red(),
+		"yellow" => style = style.yellow(),
+		"blue" => style = style.blue(),
+		"magenta" => style = style.magenta(),
+		"cyan" => style = style.cyan(),
+		"white" => style = style.white(),
+		"black" => style = style.black(),
+		"bold" => style = style.bold(),
+		"dim" => style = style.dim(),
+		"italic" => style = style.italic(),
+		"underline" => style = style.underline(),
+		"strikethrough" => style = style.strike(),
+		"hidden" => style = style.attr(yansi::Attribute::Conceal),
+		"blink" => style = style.attr(yansi::Attribute::Blink),
+		"inverted" => style = style.attr(yansi::Attribute::Invert),
+		"reset" => style = style.resetting(),
+
+		"bright" => style = style.bright(),
+		"on" => {
+			let Some(mut word) = words.next() else {
+				return Err(sherr!(ParseErr, "Expected background color after 'on' in color description"));
+			};
+			if word == "bright" {
+				style = style.on_bright();
+				let Some(w) = words.next() else {
+					return Err(sherr!(ParseErr, "Expected background color after 'on bright' in color description"));
+				};
+				word = w;
+			}
+			match word {
+				"green" => style = style.on_green(),
+				"red" => style = style.on_red(),
+				"yellow" => style = style.on_yellow(),
+				"blue" => style = style.on_blue(),
+				"magenta" => style = style.on_magenta(),
+				"cyan" => style = style.on_cyan(),
+				"white" => style = style.on_white(),
+				"black" => style = style.on_black(),
+				hex if word.starts_with('#') => {
+					let (r,g,b) = hex_to_rgb(hex)?;
+					style = style.on_rgb(r,g,b);
+				}
+				_ => return Err(sherr!(ParseErr, "Unknown background color '{}' in color description", word)),
+			}
+		}
+
+		hex if word.starts_with('#') => {
+			let (r,g,b) = hex_to_rgb(hex)?;
+			style = style.rgb(r,g,b);
+		}
+
+		_ => return Err(sherr!(ParseErr, "Unknown style '{}' in color description", word)),
+	});
+
+	Ok(style.to_string())
 }
 
-impl<T: Display> Styled for T {}
+pub fn hex_to_rgb(hex: &str) -> ShResult<(u8,u8,u8)> {
+	let hex = &hex[1..];
+	if hex.len() != 6
+		||!hex.chars().all(|ch| ('a'..='f').contains(&ch) || ('0'..='9').contains(&ch)) {
+			return Err(sherr!(ParseErr, "Invalid hex color '{}' in color description", hex));
+	}
+	let r = u8::from_str_radix(&hex[..2], 16).unwrap();
+	let g = u8::from_str_radix(&hex[2..4], 16).unwrap();
+	let b = u8::from_str_radix(&hex[4..6], 16).unwrap();
 
-/// Enum representing a single ANSI style
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Style {
-  // Undoes all styles
-  Reset,
-  ResetFg,
-  ResetBg,
-  // Foreground Colors
-  Black,
-  Red,
-  Green,
-  Yellow,
-  Blue,
-  Magenta,
-  Cyan,
-  White,
-  BrightBlack,
-  BrightRed,
-  BrightGreen,
-  BrightYellow,
-  BrightBlue,
-  BrightMagenta,
-  BrightCyan,
-  BrightWhite,
-  RGB(u8, u8, u8), // Custom foreground color
-
-  // Background Colors
-  BgBlack,
-  BgRed,
-  BgGreen,
-  BgYellow,
-  BgBlue,
-  BgMagenta,
-  BgCyan,
-  BgWhite,
-  BgBrightBlack,
-  BgBrightRed,
-  BgBrightGreen,
-  BgBrightYellow,
-  BgBrightBlue,
-  BgBrightMagenta,
-  BgBrightCyan,
-  BgBrightWhite,
-  BgRGB(u8, u8, u8), // Custom background color
-
-  // Text Attributes
-  Bold,
-  Dim,
-  Italic,
-  Underline,
-  Strikethrough,
-  Reversed,
-}
-
-impl Display for Style {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Style::Reset => write!(f, "\x1b[0m"),
-      Style::ResetFg => write!(f, "\x1b[39m"),
-      Style::ResetBg => write!(f, "\x1b[49m"),
-
-      // Foreground colors
-      Style::Black => write!(f, "\x1b[30m"),
-      Style::Red => write!(f, "\x1b[31m"),
-      Style::Green => write!(f, "\x1b[32m"),
-      Style::Yellow => write!(f, "\x1b[33m"),
-      Style::Blue => write!(f, "\x1b[34m"),
-      Style::Magenta => write!(f, "\x1b[35m"),
-      Style::Cyan => write!(f, "\x1b[36m"),
-      Style::White => write!(f, "\x1b[37m"),
-      Style::BrightBlack => write!(f, "\x1b[90m"),
-      Style::BrightRed => write!(f, "\x1b[91m"),
-      Style::BrightGreen => write!(f, "\x1b[92m"),
-      Style::BrightYellow => write!(f, "\x1b[93m"),
-      Style::BrightBlue => write!(f, "\x1b[94m"),
-      Style::BrightMagenta => write!(f, "\x1b[95m"),
-      Style::BrightCyan => write!(f, "\x1b[96m"),
-      Style::BrightWhite => write!(f, "\x1b[97m"),
-      Style::RGB(r, g, b) => write!(f, "\x1b[38;2;{r};{g};{b}m"),
-
-      // Background colors
-      Style::BgBlack => write!(f, "\x1b[40m"),
-      Style::BgRed => write!(f, "\x1b[41m"),
-      Style::BgGreen => write!(f, "\x1b[42m"),
-      Style::BgYellow => write!(f, "\x1b[43m"),
-      Style::BgBlue => write!(f, "\x1b[44m"),
-      Style::BgMagenta => write!(f, "\x1b[45m"),
-      Style::BgCyan => write!(f, "\x1b[46m"),
-      Style::BgWhite => write!(f, "\x1b[47m"),
-      Style::BgBrightBlack => write!(f, "\x1b[100m"),
-      Style::BgBrightRed => write!(f, "\x1b[101m"),
-      Style::BgBrightGreen => write!(f, "\x1b[102m"),
-      Style::BgBrightYellow => write!(f, "\x1b[103m"),
-      Style::BgBrightBlue => write!(f, "\x1b[104m"),
-      Style::BgBrightMagenta => write!(f, "\x1b[105m"),
-      Style::BgBrightCyan => write!(f, "\x1b[106m"),
-      Style::BgBrightWhite => write!(f, "\x1b[107m"),
-      Style::BgRGB(r, g, b) => write!(f, "\x1b[48;2;{r};{g};{b}m"),
-
-      // Text attributes
-      Style::Bold => write!(f, "\x1b[1m"),
-      Style::Dim => write!(f, "\x1b[2m"), // New
-      Style::Italic => write!(f, "\x1b[3m"),
-      Style::Underline => write!(f, "\x1b[4m"),
-      Style::Strikethrough => write!(f, "\x1b[9m"), // New
-      Style::Reversed => write!(f, "\x1b[7m"),
-    }
-  }
-}
-
-/// Struct representing a **set** of styles
-#[derive(Debug, Default, Clone)]
-pub struct StyleSet {
-  styles: Vec<Style>,
-}
-
-impl StyleSet {
-  pub fn new() -> Self {
-    Self { styles: vec![] }
-  }
-
-  pub fn styles(&self) -> &[Style] {
-    &self.styles
-  }
-
-  pub fn styles_mut(&mut self) -> &mut Vec<Style> {
-    &mut self.styles
-  }
-
-  pub fn add_style(mut self, style: Style) -> Self {
-    if !self.styles.contains(&style) {
-      self.styles.push(style);
-    }
-    self
-  }
-}
-
-impl Display for StyleSet {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    for style in &self.styles {
-      style.fmt(f)?
-    }
-    Ok(())
-  }
-}
-
-/// Allow OR (`|`) operator to combine multiple `Style` values into a `StyleSet`
-impl BitOr for Style {
-  type Output = StyleSet;
-
-  fn bitor(self, rhs: Self) -> Self::Output {
-    StyleSet::new().add_style(self).add_style(rhs)
-  }
-}
-
-/// Allow OR (`|`) operator to combine `StyleSet` with `Style`
-impl BitOr<Style> for StyleSet {
-  type Output = StyleSet;
-
-  fn bitor(self, rhs: Style) -> Self::Output {
-    self.add_style(rhs)
-  }
-}
-
-impl From<Style> for StyleSet {
-  fn from(style: Style) -> Self {
-    StyleSet::new().add_style(style)
-  }
+	Ok((r,g,b))
 }

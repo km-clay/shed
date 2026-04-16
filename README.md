@@ -89,6 +89,31 @@ Use `-c` to clear all autocmds for an event. Context variables (e.g. `$_NEW_DIR`
 
 ---
 
+### Alias Expansion
+
+`shed` supports fish-style alias expansion on the prompt. When enabled (`shopt prompt.expand_aliases=true`, the default), aliases expand visually as you type — press space or enter after an alias and the real command appears in the buffer before execution. This lets you see and edit the expanded form before running it.
+
+Expansion only applies to words in command position (not arguments).
+
+---
+
+### Syntax Highlighting
+
+`shed`'s syntax highlighter is fully configurable through `shopt highlight.*`:
+
+```sh
+shopt highlight.valid_command="bold green"
+shopt highlight.string="yellow"
+shopt highlight.variable="#89b4fa"
+shopt highlight.comment="italic bright black"
+shopt highlight.operator="bold magenta"
+shopt highlight.selection="black on white"
+```
+
+Style descriptions support named colors, `bright` variants, modifiers (`bold`, `italic`, `underline`, `dim`, `strikethrough`), hex colors (`#rrggbb`), and backgrounds with `on`. Raw ANSI escapes are also accepted.
+
+---
+
 ### IPC Socket
 
 `shed` exposes a Unix socket that other processes can use to interact with it. The path to this socket is held per-instance in the `$SHED_SOCK` environment variable. Subscribing to the socket gives you a stream of event data, and there are several requests that can be written to the socket to control `shed` in various ways.
@@ -121,11 +146,12 @@ It is capable of sourcing any POSIX-portable shell script.
 Shell options are managed through `shopt`:
 
 ```sh
-shopt core.autocd=true          # cd by typing a directory path
-shopt core.dotglob=true         # include hidden files in globs
-shopt line.highlight=false      # toggle syntax highlighting
-shopt prompt.edit_mode=vi       # editor mode
-shopt core.max_hist=5000        # history size
+shopt core.autocd=true                        # cd by typing a directory path
+shopt core.dotglob=true                       # include hidden files in globs
+shopt line.highlight=false                    # toggle syntax highlighting
+shopt set.vi=true                             # editor mode
+shopt core.max_hist=5000                      # history size
+shopt highlight.valid_command="bold green"    # customize highlight colors
 ```
 
 The rc file is loaded from `~/.shedrc` on startup.
@@ -145,6 +171,7 @@ The prompt string supports escape sequences for dynamic content:
 | `\t`, `\T` | Last command runtime (milliseconds / human-readable) |
 | `\s` | Shell name |
 | `\e[...` | ANSI escape sequences for colors and styling |
+| `\c{desc}` | Named color styling (e.g. `\c{bold green}`, `\c{#ff5733}`, `\c{reset}`) |
 | `\@name` | Execute a shell function and embed its output |
 
 The `\@` escape is particularly useful. It lets you embed the output of any shell function directly in your prompt. Define a function that prints something, then reference it in your prompt string:
@@ -156,7 +183,11 @@ export PS1='\u@\h \W \@gitbranch \$ '
 
 If `shed` receives `SIGUSR1` while in interactive mode, it will refresh and redraw the prompt. This can be used to create asynchronous, dynamic prompt content.
 
-Additionally, `echo` now has a `-p` flag that expands prompt escape sequences, similar to how the `-e` flag expands conventional escape sequences. You can use this in your prompt functions to expand prompt stuff internally.
+Additionally, `echo` has a `-p` flag that expands prompt escape sequences. This provides an interface for accessing the information provided by these escape sequences from any context. For instance, using \c{...} instead of raw ANSI codes:
+
+```sh
+echo -p '\c{bold green on black}Build succeeded\c{reset} in \T'
+```
 
 `shed` also provides a `PSR` for expanding content that is justified to the right side of the prompt.
 

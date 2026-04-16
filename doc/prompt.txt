@@ -85,10 +85,50 @@ right-aligned prompt).
 
       A literal backslash.
 
+  `\c{description}`                             *prompt-color*
+
+      A named color/style escape. The description is a space-separated
+      list of modifiers and a color name. This is the recommended way
+      to add color to prompts and `echo -p` output.
+
+      Colors:
+        `black` `red` `green` `yellow` `blue` `magenta` `cyan` `white`
+
+      Modifiers:
+        `bold` `dim` `italic` `underline` `strikethrough`
+
+      Prefixes:
+        `bright` before a color for the bright variant
+        `on` before a color for the background
+        `on bright` for a bright background
+
+      Hex colors:
+        `#rrggbb` for true-color (foreground)
+        `on #rrggbb` for true-color background
+
+      Special:
+        `reset` to clear all styling
+
+      Examples:
+        `\c{bold green}`
+        `\c{italic bright cyan}`
+        `\c{bold red on white}`
+        `\c{#ff5733}`
+        `\c{bold #89b4fa on #1e1e2e}`
+        `\c{reset}`
+
+      In prompts:
+        `PS1='\c{bold green}\u\c{reset}@\c{blue}\h\c{reset}:\w\$ '`
+
+      In scripts:
+        `echo -p '\c{red}error:\c{reset} something went wrong'`
+
   `\e[...`                                     *prompt-ansi*
 
-      An ANSI escape sequence. The sequence starts with `\e[` and ends
-      at the first letter character. Used for colors and formatting.
+      A raw ANSI escape sequence. The sequence starts with `\e[` and
+      ends at the first letter character. The `\c{...}` escape above
+      is preferred for readability, but raw ANSI codes are supported
+      for advanced use cases.
 
       Common codes:
         `\e[0m`       reset all attributes
@@ -209,6 +249,71 @@ right-aligned prompt).
   `prompt.completion_ignore_case`              *opt-comp-case*
 
       Case-insensitive tab completion. Default: false.
+
+  `prompt.expand_aliases`                      *opt-expand-aliases*
+
+      Expand aliases visually on the prompt (fish-style abbreviations).
+      When enabled, aliases expand when you press space, enter, or
+      semicolon after a command-position word. Default: true.
+
+  The following options under `shopt highlight.*` control syntax
+  highlighting colors. Values are style descriptions using the same
+  format as the `\c{...}` prompt escape (see |prompt-color|):
+
+  `highlight.string`                           *opt-hl-string*
+
+      Color for string literals. Default: `yellow`.
+
+  `highlight.keyword`                          *opt-hl-keyword*
+
+      Color for shell keywords (`if`, `while`, `for`, etc.).
+      Default: `yellow`.
+
+  `highlight.valid_command`                    *opt-hl-valid-cmd*
+
+      Color for commands found in PATH, functions, or aliases.
+      Default: `green`.
+
+  `highlight.invalid_command`                  *opt-hl-invalid-cmd*
+
+      Color for commands that cannot be found. Default: `bold red`.
+
+  `highlight.control_flow_keyword`             *opt-hl-control*
+
+      Color for `break`, `continue`, `return`. Default: `magenta`.
+
+  `highlight.argument`                         *opt-hl-argument*
+
+      Color for command arguments. Default: `white`.
+
+  `highlight.argument_file`                    *opt-hl-argument-file*
+
+      Color for arguments matching existing filenames.
+      Default: `underline white`.
+
+  `highlight.variable`                         *opt-hl-variable*
+
+      Color for variable references (`$VAR`, `${VAR}`).
+      Default: `cyan`.
+
+  `highlight.operator`                         *opt-hl-operator*
+
+      Color for pipes, redirections, `&&`, `||`.
+      Default: `bold magenta`.
+
+  `highlight.comment`                          *opt-hl-comment*
+
+      Color for comments. Default: `italic bright black`.
+
+  `highlight.glob`                             *opt-hl-glob*
+
+      Color for glob characters (`*`, `?`, `[...]`).
+      Default: `bright cyan`.
+
+  `highlight.selection`                        *opt-hl-selection*
+
+      Color for the visual mode selection.
+      Default: `black on white`.
 
 ==============================================================================
 8. Special Variables                           *prompt-variables*

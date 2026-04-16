@@ -4,14 +4,142 @@ use std::{
 };
 
 use crate::{
-  libsh::term::{Style, StyleSet},
+  libsh::{error::ShResult, term::{color_from_description}},
   match_loop,
   readline::{
     annotate_input,
     markers::{self, is_marker},
   },
-  state::{read_meta, read_shopts},
+  state::{read_meta, read_shopts, write_meta},
 };
+
+fn resolve_style(raw: &str) -> ShResult<String> {
+	if raw.starts_with("\\e") {
+		Ok(raw.replace("\\e", "\x1b"))
+	} else {
+		color_from_description(raw)
+	}
+}
+
+pub fn string_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.string.clone()))
+}
+
+pub fn keyword_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.keyword.clone()))
+}
+
+pub fn valid_command_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.valid_command.clone()))
+}
+
+pub fn invalid_command_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.invalid_command.clone()))
+}
+
+pub fn control_flow_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.control_flow_keyword.clone()))
+}
+
+pub fn argument_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.argument.clone()))
+}
+
+pub fn argument_file_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.argument_file.clone()))
+}
+
+pub fn variable_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.variable.clone()))
+}
+
+pub fn operator_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.operator.clone()))
+}
+
+pub fn comment_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.comment.clone()))
+}
+
+pub fn glob_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.glob.clone()))
+}
+
+pub fn selection_style() -> ShResult<String> {
+	resolve_style(&read_shopts(|o| o.highlight.selection.clone()))
+}
+
+pub struct HighlightTheme {
+	pub string: String,
+	pub keyword: String,
+	pub valid_command: String,
+	pub invalid_command: String,
+	pub control_flow: String,
+	pub argument: String,
+	pub argument_file: String,
+	pub variable: String,
+	pub operator: String,
+	pub comment: String,
+	pub glob: String,
+	pub selection: String,
+}
+
+impl Default for HighlightTheme {
+	fn default() -> Self {
+		Self {
+			string: resolve_style("yellow").unwrap(),
+			keyword: resolve_style("yellow").unwrap(),
+			valid_command: resolve_style("green").unwrap(),
+			invalid_command: resolve_style("bold red").unwrap(),
+			control_flow: resolve_style("magenta").unwrap(),
+			argument: resolve_style("white").unwrap(),
+			argument_file: resolve_style("underline white").unwrap(),
+			variable: resolve_style("cyan").unwrap(),
+			operator: resolve_style("bold").unwrap(),
+			comment: resolve_style("italic bright black").unwrap(),
+			glob: resolve_style("bright cyan").unwrap(),
+			selection: resolve_style("black on white").unwrap(),
+		}
+	}
+}
+
+impl HighlightTheme {
+	pub fn resolve() -> Self {
+		let fallback = Self::default();
+		let mut errors = vec![];
+
+		let try_or = |f: fn() -> ShResult<String>, default: &str, errors: &mut Vec<String>| -> String {
+			match f() {
+				Ok(s) => s,
+				Err(e) => {
+					errors.push(e.to_string());
+					default.to_string()
+				}
+			}
+		};
+
+		let theme = Self {
+			string: try_or(string_style, &fallback.string, &mut errors),
+			keyword: try_or(keyword_style, &fallback.keyword, &mut errors),
+			valid_command: try_or(valid_command_style, &fallback.valid_command, &mut errors),
+			invalid_command: try_or(invalid_command_style, &fallback.invalid_command, &mut errors),
+			control_flow: try_or(control_flow_style, &fallback.control_flow, &mut errors),
+			argument: try_or(argument_style, &fallback.argument, &mut errors),
+			argument_file: try_or(argument_file_style, &fallback.argument_file, &mut errors),
+			variable: try_or(variable_style, &fallback.variable, &mut errors),
+			operator: try_or(operator_style, &fallback.operator, &mut errors),
+			comment: try_or(comment_style, &fallback.comment, &mut errors),
+			glob: try_or(glob_style, &fallback.glob, &mut errors),
+			selection: try_or(selection_style, &fallback.selection, &mut errors),
+		};
+
+		for err in errors {
+			write_meta(|m| m.post_status_message(err));
+		}
+
+		theme
+	}
+}
 
 /// Syntax highlighter for shell input using Unicode marker-based annotation
 ///
@@ -24,7 +152,7 @@ pub struct Highlighter {
   input: String,
   output: String,
   linebuf_cursor_pos: usize,
-  style_stack: Vec<StyleSet>,
+  style_stack: Vec<String>,
   last_was_reset: bool,
   in_selection: bool,
   only_hl_visual: bool,
@@ -146,11 +274,12 @@ impl Highlighter {
   /// applying appropriate styles. Nested constructs (command substitutions,
   /// subshells, strings) are handled recursively with proper style restoration.
   pub fn highlight(&mut self) {
+    let theme = HighlightTheme::resolve();
     let input = self.input.clone();
     let mut input_chars = input.chars().peekable();
     match_loop!(input_chars.next() => ch, {
       markers::VISUAL_MODE_START => {
-        self.emit_style(Style::BgWhite | Style::Black);
+        self.emit_style(&theme.selection);
         self.in_selection = true;
       }
       markers::VISUAL_MODE_END => {
@@ -172,8 +301,11 @@ impl Highlighter {
 
         markers::CMD_SEP | markers::RESET => self.clear_styles(),
 
-        markers::STRING_DQ | markers::STRING_SQ | markers::KEYWORD => {
-          self.push_style(Style::Yellow)
+        markers::STRING_DQ | markers::STRING_SQ => {
+          self.push_style(&theme.string);
+        }
+        markers::KEYWORD => {
+          self.push_style(&theme.keyword);
         }
       markers::BUILTIN => {
         let mut cmd_name = String::new();
@@ -185,17 +317,17 @@ impl Highlighter {
         });
 
         match cmd_name.as_str() {
-          "continue" | "return" | "break" => self.push_style(Style::Magenta),
-          _ => self.push_style(Style::Green),
+          "continue" | "return" | "break" => self.push_style(&theme.control_flow),
+          _ => self.push_style(&theme.valid_command),
         }
       }
-      markers::CASE_PAT => self.push_style(Style::Blue),
+      markers::CASE_PAT => self.push_style(&theme.glob),
 
-      markers::COMMENT => self.push_style(Style::BrightBlack),
+      markers::COMMENT => self.push_style(&theme.comment),
 
-      markers::GLOB => self.push_style(Style::Blue),
+      markers::GLOB => self.push_style(&theme.glob),
 
-      markers::REDIRECT | markers::OPERATOR => self.push_style(Style::Magenta | Style::Bold),
+      markers::REDIRECT | markers::OPERATOR => self.push_style(&theme.operator),
 
       markers::ASSIGNMENT => {
         let mut var_name = String::new();
@@ -207,7 +339,7 @@ impl Highlighter {
           }
           markers::RESET => break,
           markers::VISUAL_MODE_START => {
-            self.emit_style(Style::BgWhite | Style::Black);
+            self.emit_style(&theme.selection);
             self.in_selection = true;
             input_chars.next();
           }
@@ -223,7 +355,7 @@ impl Highlighter {
         });
 
         self.output.push_str(&Self::strip_markers(&var_name));
-        self.push_style(Style::Blue);
+        self.push_style(&theme.variable);
         self.output.push('=');
         self.pop_style();
       }
@@ -235,7 +367,7 @@ impl Highlighter {
           .any(|c| c == markers::ARG || c.is_whitespace());
 
         if !is_last_arg {
-          self.push_style(Style::White);
+          self.push_style(&theme.argument);
         } else {
           let mut chars_clone = input_chars.clone();
           match_loop!(chars_clone.next() => ch, {
@@ -244,9 +376,9 @@ impl Highlighter {
           });
 
           let style = if Self::is_filename(&Self::strip_markers(&arg)) {
-            Style::White | Style::Underline
+            &theme.argument_file
           } else {
-            Style::White.into()
+            &theme.argument
           };
 
           self.push_style(style);
@@ -265,11 +397,11 @@ impl Highlighter {
           Self::strip_markers(&cmd_name).as_str(),
           "break" | "continue" | "return"
         ) {
-          Style::Magenta.into()
+          &theme.control_flow
         } else if Self::is_valid(&Self::strip_markers(&cmd_name)) {
-          Style::Green.into()
+          &theme.valid_command
         } else {
-          Style::Red | Style::Bold
+          &theme.invalid_command
         };
         self.push_style(style);
         self.last_was_reset = false;
@@ -284,9 +416,6 @@ impl Highlighter {
           markers::BACKTICK_SUB => markers::BACKTICK_SUB_END,
           _ => unreachable!(),
         };
-        // Save selection state at entry - the collection loop will update
-        // self.in_selection as it encounters visual markers, but the recursive
-        // highlighter needs the state as of the start of the body.
         let selection_at_entry = self.in_selection;
         match_loop!(input_chars.peek() => &ch => ch, {
           _ if ch == end_marker => {
@@ -305,9 +434,7 @@ impl Highlighter {
           }
         });
 
-        // strip_markers_keep_visual preserves VISUAL_MODE_START/END
         let inner_clean = Self::strip_markers_keep_visual(&inner);
-        // Use stripped version (no visual markers) for prefix/suffix detection
         let inner_plain = Self::strip_markers(&inner);
 
         let prefix = match ch {
@@ -326,7 +453,6 @@ impl Highlighter {
           _ => unreachable!(),
         };
 
-        // Strip prefix/suffix from the visual-marker-aware version
         let inner_content = if incomplete {
           Self::strip_prefix_skip_visual(&inner_clean, prefix)
         } else {
@@ -337,26 +463,25 @@ impl Highlighter {
         let mut recursive_highlighter = Self::new();
         recursive_highlighter.in_selection = selection_at_entry;
         if recursive_highlighter.in_selection {
-          recursive_highlighter.emit_style(Style::BgWhite | Style::Black);
+          recursive_highlighter.emit_style(&theme.selection);
         }
         recursive_highlighter.load_input(&inner_content, self.linebuf_cursor_pos);
         recursive_highlighter.highlight();
-        // Read back visual state - selection may have started/ended inside
         self.in_selection = recursive_highlighter.in_selection;
         self
           .style_stack
           .append(&mut recursive_highlighter.style_stack);
         if selection_at_entry {
-          self.emit_style(Style::BgWhite | Style::Black);
+          self.emit_style(&theme.selection);
           self.output.push_str(prefix);
         } else {
-          self.push_style(Style::Blue);
+          self.push_style(&theme.operator);
           self.output.push_str(prefix);
           self.pop_style();
         }
         self.output.push_str(&recursive_highlighter.take());
         if !incomplete {
-          self.push_style(Style::Blue);
+          self.push_style(&theme.operator);
           if ch != markers::BACKTICK_SUB {
             self.output.push(')');
           }
@@ -372,7 +497,7 @@ impl Highlighter {
             break;
           }
           markers::VISUAL_MODE_START => {
-            self.emit_style(Style::BgWhite | Style::Black);
+            self.emit_style(&theme.selection);
             self.in_selection = true;
             input_chars.next();
           }
@@ -389,7 +514,7 @@ impl Highlighter {
             input_chars.next();
           }
         });
-        self.push_style(Style::Blue);
+        self.push_style(&theme.variable);
         self.output.push_str(&hist_exp);
         self.pop_style();
       }
@@ -405,7 +530,7 @@ impl Highlighter {
             break;
           }
           markers::VISUAL_MODE_START => {
-            self.emit_style(Style::BgWhite | Style::Black);
+            self.emit_style(&theme.selection);
             self.in_selection = true;
             input_chars.next();
           }
@@ -422,8 +547,7 @@ impl Highlighter {
             input_chars.next();
           }
         });
-        let style = Style::Cyan;
-        self.push_style(style);
+        self.push_style(&theme.variable);
         self.output.push_str(&var_sub);
         self.pop_style();
       }
@@ -520,58 +644,34 @@ impl Highlighter {
   /// preventing redundant `\x1b[0m` sequences in the output.
   fn emit_reset(&mut self) {
     if !self.last_was_reset {
-      self.output.push_str(&Style::Reset.to_string());
+      self.output.push_str("\x1b[0m");
       self.last_was_reset = true;
     }
   }
 
-  /// Emits a style ANSI code to the output
-  ///
-  /// Unconditionally appends the ANSI escape sequence for the given style
-  /// and marks that we're no longer in a reset state.
-  fn emit_style(&mut self, style: StyleSet) {
-    let mut style = style;
-    if !style.styles().contains(&Style::BgWhite) {
-      style = style.add_style(Style::BgBlack);
-    }
-    self.output.push_str(&style.to_string());
+  fn emit_style(&mut self, style: &str) {
+    self.output.push_str(style);
     self.last_was_reset = false;
   }
 
-  /// Pushes a new style onto the stack and emits its ANSI code
-  ///
-  /// Used when entering a new syntax context (string, variable, command, etc.).
-  /// The style stack allows proper restoration when exiting nested constructs.
-  pub fn push_style(&mut self, style: impl Into<StyleSet>) {
-    let set: StyleSet = style.into();
-    self.style_stack.push(set.clone());
+  pub fn push_style(&mut self, style: &str) {
+    self.style_stack.push(style.to_string());
     if !self.in_selection {
-      self.emit_style(set.clone());
+      self.emit_style(style);
     }
   }
 
-  /// Pops a style from the stack and restores the previous style
-  ///
-  /// Used when exiting a syntax context. If there's a parent style on the
-  /// stack, it's re-emitted to restore the previous color. Otherwise, emits a
-  /// reset. This ensures colors are properly restored in nested constructs
-  /// like `"string with $VAR"` where the string color resumes after the
-  /// variable.
   pub fn pop_style(&mut self) {
     self.style_stack.pop();
     if !self.in_selection {
       if let Some(style) = self.style_stack.last().cloned() {
-        self.emit_style(style);
+        self.emit_style(&style);
       } else {
         self.emit_reset();
       }
     }
   }
 
-  /// Clears all styles from the stack and emits a reset
-  ///
-  /// Used at command separators and explicit reset markers to return to
-  /// the default terminal color between independent commands.
   pub fn clear_styles(&mut self) {
     self.style_stack.clear();
     if !self.in_selection {
@@ -581,7 +681,7 @@ impl Highlighter {
 
   pub fn reapply_style(&mut self) {
     if let Some(style) = self.style_stack.last().cloned() {
-      self.emit_style(style);
+      self.emit_style(&style);
     } else {
       self.emit_reset();
     }

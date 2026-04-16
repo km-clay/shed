@@ -379,6 +379,74 @@
           default = {};
           description = "Settings related to the prompt (i.e. the 'shopt prompt.*' options)";
         };
+        highlight = lib.mkOption {
+          type = lib.types.submodule {
+            options = {
+              string = lib.mkOption {
+                type = lib.types.str;
+                default = "yellow";
+                description = "Style for string literals (single and double quoted)";
+              };
+              keyword = lib.mkOption {
+                type = lib.types.str;
+                default = "yellow";
+                description = "Style for shell keywords like 'if', 'while', 'for'";
+              };
+              valid_command = lib.mkOption {
+                type = lib.types.str;
+                default = "green";
+                description = "Style for commands that exist in PATH, as functions, or as aliases";
+              };
+              invalid_command = lib.mkOption {
+                type = lib.types.str;
+                default = "bold red";
+                description = "Style for commands that cannot be found";
+              };
+              control_flow_keyword = lib.mkOption {
+                type = lib.types.str;
+                default = "magenta";
+                description = "Style for control flow keywords like 'break', 'continue', 'return'";
+              };
+              argument = lib.mkOption {
+                type = lib.types.str;
+                default = "white";
+                description = "Style for command arguments";
+              };
+              argument_file = lib.mkOption {
+                type = lib.types.str;
+                default = "underline white";
+                description = "Style for arguments that refer to existing files";
+              };
+              variable = lib.mkOption {
+                type = lib.types.str;
+                default = "cyan";
+                description = "Style for variable references like $VAR and ${VAR}";
+              };
+              operator = lib.mkOption {
+                type = lib.types.str;
+                default = "bold";
+                description = "Style for operators like pipes, redirections, && and ||";
+              };
+              comment = lib.mkOption {
+                type = lib.types.str;
+                default = "italic bright black";
+                description = "Style for comments";
+              };
+              glob = lib.mkOption {
+                type = lib.types.str;
+                default = "bright cyan";
+                description = "Style for glob characters like *, ?, and [...]";
+              };
+              selection = lib.mkOption {
+                type = lib.types.str;
+                default = "black on white";
+                description = "Style for the visual mode selection";
+              };
+            };
+          };
+          default = {};
+          description = "Syntax highlighting color configuration. Values are style descriptions like 'bold green', 'italic bright cyan', '#ff5733', or 'bold red on white'.";
+        };
       };
     };
     default = {};
