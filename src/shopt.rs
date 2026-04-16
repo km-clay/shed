@@ -349,6 +349,9 @@ shopt_group! {
 
     /// If set, enables history concatenation with Shift+Up/Down
     hist_cat: bool = true,
+
+		/// If set, expands aliases on the prompt instead of after submitting
+		expand_aliases: bool = true,
   }
 }
 

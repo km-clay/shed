@@ -7,6 +7,7 @@ use std::{
 };
 
 use bitflags::bitflags;
+use itertools::Itertools;
 
 use crate::{
   builtin::BUILTINS,
@@ -659,16 +660,12 @@ impl LexStream {
         }
       }
       if !found_newline {
-        if self.flags.contains(LexFlags::LEX_UNFINISHED) {
-          return Ok(None);
-        } else {
-					return Err(lex_err!(
-						self,
-						pos,
-						span_start..pos,
-						"Heredoc delimiter not found",
-					))
-        }
+				return Err(lex_err!(
+					self,
+					pos,
+					span_start..pos,
+					"Heredoc delimiter not found",
+				))
       }
       scan
     };
@@ -679,8 +676,12 @@ impl LexStream {
     // Read lines until we find one that matches the delimiter exactly
     let mut line = String::new();
     let mut line_start = pos;
+		let mut leading_tabs = true;
     while let Some(ch) = chars.next() {
       pos += ch.len_utf8();
+			if leading_tabs && ch == '\t' {
+				continue;
+			}
       if ch == '\n' {
         let trimmed = line.trim_end_matches('\r');
         if trimmed == delim {
@@ -691,6 +692,7 @@ impl LexStream {
           return Ok(Some(tk));
         }
         line.clear();
+				leading_tabs = true;
         line_start = pos;
       } else {
         line.push(ch);
@@ -706,16 +708,12 @@ impl LexStream {
       return Ok(Some(tk));
     }
 
-    if !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-      Err(lex_err!(
-        self,
-        pos,
-        span_start..pos,
-        "Heredoc delimiter '{delim}' not found",
-      ))
-    } else {
-      Ok(None)
-    }
+		Err(lex_err!(
+			self,
+			pos,
+			span_start..pos,
+			"Heredoc delimiter '{delim}' not found",
+		))
   }
   pub fn read_string(&mut self) -> ShResult<Tk> {
     assert!(self.cursor <= self.source.len());

@@ -16,7 +16,7 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-  expand::expand_cmd_sub,
+  expand::{self, alias::AliasExpander, expand_cmd_sub},
   libsh::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},
@@ -589,6 +589,7 @@ impl IndentCtx {
     self.ctx.clear();
 
     let mut src = ParsedSrc::new(input.into())
+			.with_lex_flags(LexFlags::LEX_UNFINISHED)
       .with_parse_flags(ParseFlags::ERR_RETURN);
 
     log::debug!("Calculating indent depth for input: '{}'", input);
@@ -606,6 +607,67 @@ impl IndentCtx {
   pub fn calculate(&mut self, input: &str) -> usize {
     self.checked_calculate(input).0
   }
+}
+
+#[derive(Debug,Clone)]
+pub struct AliasCtx {
+	stack: Vec<(Pos, HashSet<String>)>,
+	start_pos: Pos,
+}
+
+impl Default for AliasCtx {
+	fn default() -> Self {
+		Self {
+			stack: vec![(Pos::MIN, HashSet::default())],
+			start_pos: Pos::MIN
+		}
+	}
+}
+
+impl AliasCtx {
+	pub fn new() -> Self { Self::default() }
+	pub fn pop(&mut self) -> (Pos, HashSet<String>) {
+		// the stack should *always* have at least one context element
+		if self.stack.len() == 1 {
+			let last = self.stack.last_mut().unwrap();
+			std::mem::take(last)
+		} else {
+			self.stack.pop().unwrap()
+		}
+	}
+	pub fn push(&mut self, pos: Pos) {
+		self.stack.push((pos, HashSet::new()));
+	}
+	pub fn current_set(&mut self) -> &mut HashSet<String> {
+		&mut self.stack.last_mut().unwrap().1
+	}
+	pub fn current_pos(&self) -> Pos {
+		self.stack.last().unwrap().0
+	}
+	pub fn start_pos(&self) -> Pos {
+		self.start_pos
+	}
+	pub fn set_start_pos(&mut self, pos: Pos) {
+		self.start_pos = pos;
+	}
+	pub fn clamp_start(&mut self, end: Pos) {
+		if self.start_pos >= end {
+			self.start_pos = end;
+			while self.current_pos() > end {
+				let old_len = self.stack.len();
+				self.pop();
+				let new_len = self.stack.len();
+				if new_len == old_len {
+					break; // should never happen, but you never know
+				}
+			}
+			if self.current_pos() >= end {
+				let last = self.stack.last_mut().unwrap();
+				last.1.clear();
+				last.0 = end;
+			}
+		}
+	}
 }
 
 fn extract_range_contiguous(buf: &mut Vec<Line>, start: Pos, end: Pos) -> Vec<Line> {
@@ -823,6 +885,7 @@ pub struct LineBuf {
   pub insert_mode_start_pos: Option<Pos>,
   pub saved_col: Option<usize>,
   pub indent_ctx: IndentCtx,
+	pub alias_ctx: AliasCtx,
 
   pub scroll_offset: usize,
 
@@ -852,6 +915,7 @@ impl Default for LineBuf {
       insert_mode_start_pos: None,
       saved_col: None,
       indent_ctx: IndentCtx::new(),
+			alias_ctx: AliasCtx::new(),
       scroll_offset: 0,
       undo_stack: vec![],
       redo_stack: vec![],
@@ -3805,6 +3869,7 @@ impl LineBuf {
       cmd.motion().map(|m| &m.1),
       Some(Motion::LineUp | Motion::LineDown)
     );
+		let is_separator = cmd.is_separator_insert();
 
     if !is_vertical {
       self.saved_col = None;
@@ -3830,6 +3895,15 @@ impl LineBuf {
     {
       edit.merging = false;
     }
+
+		self.alias_ctx.clamp_start(self.end_pos());
+
+		if is_separator && read_shopts(|o| o.prompt.expand_aliases) {
+			self.attempt_alias_expansion();
+			if cmd.is_hard_separator() {
+				self.alias_ctx.push(self.cursor.pos);
+			}
+		}
 
     if self.lines != before && !is_undo_op {
       self.redo_stack.clear();
@@ -4239,6 +4313,51 @@ impl LineBuf {
       })
       .collect()
   }
+
+	pub fn attempt_inline_expansion(&mut self, history: &History) -> bool {
+		let hist_res = self.attempt_history_expansion(history);
+		let alias_res = self.attempt_alias_expansion();
+
+		hist_res || alias_res
+	}
+
+	pub fn clear_alias_ctx(&mut self) {
+		std::mem::take(&mut self.alias_ctx);
+	}
+
+	pub fn attempt_alias_expansion(&mut self) -> bool {
+		let split_point = self.alias_ctx.current_pos();
+		let lines = split_lines_at(&mut self.lines, split_point);
+		let joined = join_lines(&lines);
+		let joined_len = joined.graphemes(true).count();
+
+		let (expanded,first_pos) = AliasExpander::new(
+			joined.clone(),
+			self.alias_ctx.current_set(),
+		).expand();
+		let len_delta = expanded.graphemes(true).count() as isize - joined_len as isize;
+
+		let grapheme_pos = first_pos // start position of expanded token
+			.and_then(|byte_pos| Some(joined.get(..byte_pos)?.graphemes(true).count()))
+			.unwrap_or(0);
+
+		attach_lines(&mut self.lines, &mut to_lines(&expanded));
+
+		// new_start = split_point + grapheme_pos
+		let (ns,ne) = self.offset_col_wrapping_at(split_point.row, grapheme_pos as isize, split_point);
+		let new_start = Pos::new(ns,ne);
+
+		if self.cursor.pos >= split_point {
+			self.cursor.pos = self.offset_cursor_wrapping(0, len_delta);
+		}
+
+		let res = joined != expanded;
+		if res {
+			self.alias_ctx.start_pos = new_start; // update
+			self.alias_ctx.stack.last_mut().unwrap().0 = new_start;
+		}
+		res
+	}
 
   /// The inner logic of `attempt_history_expansion()`. This function calls itself recursively when it encounters command substitutions.
   /// This is necessary because of the following nasty edge case:

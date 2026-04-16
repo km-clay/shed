@@ -1,5 +1,6 @@
 use crate::libsh::strops::QuoteState;
 use crate::motion;
+use crate::parse::lex::LexStream;
 use crate::readline::editmode::remote::RemoteMode;
 use crate::readline::linebuf::ordered;
 use editcmd::{CmdFlags, EditCmd, Motion, MotionCmd, RegisterName, Verb, VerbCmd};
@@ -578,7 +579,7 @@ impl ShedLine {
         self
           .history
           .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-        let hint = self.focused_history().get_hint();
+        let hint = self.history.get_hint();
         self.editor.set_hint(hint);
         self.completer.clear(&mut self.writer)?;
         self.needs_redraw = true;
@@ -607,7 +608,7 @@ impl ShedLine {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionCancel));
         post_cmds.exec();
 
-        let hint = self.focused_history().get_hint();
+        let hint = self.history.get_hint();
         self.editor.set_hint(hint);
         self.completer.clear(&mut self.writer)?;
         write_vars(|v| {
@@ -742,10 +743,11 @@ impl ShedLine {
     if self.mode.report_mode() != ModeReport::Ex
       && self
         .editor
-        .edit(|e| e.attempt_history_expansion(&self.history))
+        .edit(|e| e.attempt_inline_expansion(&self.history))
     {
       // If history expansion occurred, don't attempt completion yet
-      // allow the user to see the expanded command and accept or edit it before completing
+			let hint = self.history.get_hint();
+			self.editor.set_hint(hint);
       return Ok(None);
     }
 
@@ -790,7 +792,7 @@ impl ShedLine {
         self
           .history
           .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-        let hint = self.focused_history().get_hint();
+        let hint = self.history.get_hint();
         self.editor.set_hint(hint);
         write_vars(|v| {
           v.set_var(
@@ -908,10 +910,10 @@ impl ShedLine {
 
   fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
     self.editor.clear_hint();
+		self.editor.clear_alias_ctx();
     self.editor.set_cursor_from_flat(self.editor.cursor_max());
     self.print_line(true)?;
     if let Some(layout) = &self.old_layout {
-      log::debug!("Moving cursor to end of layout");
       self.writer.move_cursor_to_end(layout)?;
     }
     self.writer.flush_write("\n")?;
@@ -1018,9 +1020,13 @@ impl ShedLine {
     }
 
     if cmd.is_submit_action() {
-      if self.editor.attempt_history_expansion(&self.history) {
+      if self.editor.attempt_inline_expansion(&self.history) {
         // If history expansion occurred, don't submit yet
-        // allow the user to see the expanded command and accept or edit it before submitting
+        self.history
+          .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+				let hint = self.history.get_hint();
+				self.editor.set_hint(hint);
+
         return Ok(None);
       } else if self.should_submit()? || !read_shopts(|o| o.line.linebreak_on_incomplete) {
         return self.submit();
@@ -1096,7 +1102,7 @@ impl ShedLine {
       }
     }
 
-    let hint = self.focused_history().get_hint();
+    let hint = self.history.get_hint();
 
     self.editor.set_hint(hint);
     self.needs_redraw = true;
@@ -1842,6 +1848,42 @@ impl ShedLine {
   }
 }
 
+pub struct Annotator {
+	tokens: Vec<Tk>,
+	result: String,
+	heredoc_queue: VecDeque<(String,bool)> // (delimiter,is_literal)
+}
+
+impl Annotator {
+	pub fn annotate(input: &str) -> String {
+		let tokens = LexStream::new(input.into(), LexFlags::LEX_UNFINISHED)
+			.flatten()
+			.filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
+			.collect();
+		Self {
+			tokens,
+			result: input.to_string(),
+			heredoc_queue: VecDeque::new(),
+		}.begin()
+	}
+
+	fn begin(mut self) -> String {
+		self.annotate_one();
+
+		self.result
+	}
+
+	fn annotate_one(&mut self) {
+		for tk in self.tokens.iter().rev() {
+			let insertions = annotate_token(tk.clone());
+			for (pos, marker) in insertions {
+				let pos = pos.max(0).min(self.result.len());
+				self.result.insert(pos, marker);
+			}
+		}
+	}
+}
+
 /// Annotates shell input with invisible Unicode markers for syntax highlighting
 ///
 /// Takes raw shell input and inserts non-character markers (U+FDD0-U+FDEF
@@ -1864,7 +1906,7 @@ impl ShedLine {
 pub fn annotate_input(input: &str) -> String {
   let mut annotated = input.to_string();
   let input = input.into();
-  let tokens: Vec<Tk> = lex::LexStream::new(Rc::clone(&input), LexFlags::LEX_UNFINISHED)
+  let tokens: Vec<Tk> = LexStream::new(Rc::clone(&input), LexFlags::LEX_UNFINISHED)
     .flatten()
     .filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
     .collect();

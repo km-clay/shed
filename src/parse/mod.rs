@@ -153,6 +153,7 @@ impl ParsedSrc {
   }
   pub fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
     let mut tokens = vec![];
+    let mut errors = vec![];
     for lex_result in LexStream::new(self.src.clone(), self.lex_flags)
       .with_name(self.name.clone())
       .filter(|tk| {
@@ -163,11 +164,16 @@ impl ParsedSrc {
     {
       match lex_result {
         Ok(token) => tokens.push(token),
-        Err(error) => return Err(vec![error]),
+        Err(error) => {
+					if self.lex_flags.contains(LexFlags::LEX_UNFINISHED) {
+						errors.push(error)
+					} else {
+						return Err(vec![error])
+					}
+				}
       }
     }
 
-    let mut errors = vec![];
     let mut nodes = vec![];
     let parser =
       ParseStream::with_context(tokens, self.context.clone()).with_flags(self.parse_flags);

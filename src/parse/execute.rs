@@ -155,8 +155,7 @@ impl ExecArgs {
 /// processes (e.g. nvim spawning opencode) lose their controlling terminal.
 pub fn exec_dash_c(input: String) -> ShResult<()> {
   write_meta(|m| m.rehash());
-  let aliases = read_logic(|l| l.aliases().clone());
-  let expanded = expand_aliases(input, HashSet::new(), &aliases);
+  let expanded = expand_aliases(input);
   let source_name: Rc<str> = "<shed -c>".into();
   let mut parser = ParsedSrc::new(expanded.into())
     .with_lex_flags(super::lex::LexFlags::empty())
@@ -219,13 +218,14 @@ pub fn exec_dash_c(input: String) -> ShResult<()> {
 }
 
 pub fn exec_input(
-  input: String,
+  mut input: String,
   io_stack: Option<IoStack>,
   interactive: bool,
   source_name: Option<Rc<str>>,
 ) -> ShResult<()> {
-  let aliases = read_logic(|l| l.aliases().clone());
-  let input = expand_aliases(input, HashSet::new(), &aliases);
+	if !interactive || !read_shopts(|o| o.prompt.expand_aliases) {
+		input = expand_aliases(input);
+	}
   let lex_flags = if interactive {
     super::lex::LexFlags::INTERACTIVE
   } else {

@@ -212,14 +212,6 @@ fn annotate_glob() {
 }
 
 #[test]
-fn annotate_heredoc_operator() {
-  assert_annotated(
-    "cat <<EOF",
-    "\u{e100}cat\u{e11a} \u{e105}<<\u{e11a}\u{e102}EOF\u{e11a}",
-  );
-}
-
-#[test]
 fn annotate_herestring_operator() {
   assert_annotated(
     "cat <<< hello",

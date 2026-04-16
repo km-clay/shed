@@ -177,8 +177,7 @@ impl Drop for TestGuard {
 }
 
 pub fn get_ast(input: &str) -> ShResult<Vec<crate::parse::Node>> {
-  let aliases = read_logic(|l| l.aliases().clone());
-  let input = expand_aliases(input.into(), HashSet::new(), &aliases);
+  let input = expand_aliases(input.into());
 
   let mut parser = ParsedSrc::new(input.into())
     .with_lex_flags(LexFlags::empty())
