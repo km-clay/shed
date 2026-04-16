@@ -35,6 +35,21 @@ pub fn not_marker(tk: &ShResult<Tk>) -> bool {
       .is_ok_and(|tk| matches!(tk.class, TkRule::SOI | TkRule::EOI))
 }
 
+/// Constructs a parse error and commits cursor position for the lexer
+///
+/// All error returns from `LexStream` ***MUST*** advance the cursor past
+/// the offending input, otherwise the caller will backtrack and read the bad input again.
+/// This causes an infinite loop. This macro enforces that invariant structurally,
+/// if you can't pass a new cursor position, you can't build an error.
+///
+/// In cases where the error occurs at the very end of input, `LexFlags::STALE` is used instead.
+macro_rules! lex_err {
+	($lexer:expr, $pos:expr, $range: expr, $($arg:tt)*) => {{
+		$lexer.cursor = $pos;
+		sherr!(ParseErr @ Span::new($range, $lexer.source.clone()), $($arg)*)
+	}}
+}
+
 #[derive(Clone, PartialEq, Default, Debug, Eq, Hash)]
 pub struct SpanSource {
   name: Rc<str>,
@@ -448,10 +463,11 @@ impl LexStream {
 
         if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
           let span_start = self.cursor;
-          self.cursor = pos;
-          return Some(Err(sherr!(
-                ParseErr @ Span::new(span_start..pos, self.source.clone()),
-                "Invalid redirection",
+          return Some(Err(lex_err!(
+            self,
+            pos,
+            span_start..pos,
+            "Invalid redirection",
           )));
         } else {
           tk = self.get_token(self.cursor..pos, TkRule::Redir);
@@ -538,10 +554,11 @@ impl LexStream {
 
             if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
               let span_start = self.cursor;
-              self.cursor = pos;
-              return Some(Err(sherr!(
-                    ParseErr @ Span::new(span_start..pos, self.source.clone()),
-                    "Invalid redirection",
+              return Some(Err(lex_err!(
+                self,
+                pos,
+                span_start..pos,
+                "Invalid redirection",
               )));
             } else {
               tk = self.get_token(self.cursor..pos, TkRule::Redir);
@@ -575,6 +592,8 @@ impl LexStream {
   }
   pub fn read_heredoc(&mut self, mut pos: usize) -> ShResult<Option<Tk>> {
     let slice = self.slice(pos..).unwrap_or_default().to_string();
+		println!("foooo");
+		let span_start = pos;
     let mut chars = slice.chars();
     let mut delim = String::new();
     let mut flags = TkFlags::empty();
@@ -647,10 +666,12 @@ impl LexStream {
         if self.flags.contains(LexFlags::LEX_UNFINISHED) {
           return Ok(None);
         } else {
-          return Err(sherr!(
-            ParseErr @ Span::new(pos..pos, self.source.clone()),
-            "Heredoc delimiter not found",
-          ));
+					return Err(lex_err!(
+						self,
+						pos,
+						span_start..pos,
+						"Heredoc delimiter not found",
+					))
         }
       }
       scan
@@ -690,9 +711,11 @@ impl LexStream {
     }
 
     if !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-      Err(sherr!(
-        ParseErr @ Span::new(start..pos, self.source.clone()),
-        "Heredoc delimiter '{delim}' not found"
+      Err(lex_err!(
+        self,
+        pos,
+        span_start..pos,
+        "Heredoc delimiter '{delim}' not found",
       ))
     } else {
       Ok(None)
@@ -747,10 +770,11 @@ impl LexStream {
             chars.next();
             let paren_pos = pos;
             if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-              self.cursor = pos;
-              return Err(sherr!(
-                  ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-                  "Unclosed subshell",
+              return Err(lex_err!(
+                self,
+                pos,
+                paren_pos..paren_pos + 1,
+                "Unclosed subshell",
               ));
             }
           }
@@ -767,10 +791,11 @@ impl LexStream {
         chars.next();
         let paren_pos = pos;
         if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-          self.cursor = pos;
-          return Err(sherr!(
-              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-              "Unclosed subshell",
+          return Err(lex_err!(
+            self,
+            pos,
+            paren_pos..paren_pos + 1,
+            "Unclosed subshell",
           ));
         }
       }
@@ -778,10 +803,11 @@ impl LexStream {
         pos += 2;
         chars.next();
         if !scan_braces(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-          self.cursor = pos;
-          return Err(sherr!(
-              ParseErr @ Span::new(pos..pos + 1, self.source.clone()),
-              "Unclosed parameter expansion",
+          return Err(lex_err!(
+            self,
+            pos,
+            pos..pos + 1,
+            "Unclosed parameter expansion",
           ));
         }
       }
@@ -795,10 +821,11 @@ impl LexStream {
         chars.next();
         let paren_pos = pos;
         if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-          self.cursor = pos;
-          return Err(sherr!(
-              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-              "Unclosed subshell",
+          return Err(lex_err!(
+            self,
+            pos,
+            paren_pos..paren_pos + 1,
+            "Unclosed subshell",
           ));
         }
       }
@@ -807,10 +834,11 @@ impl LexStream {
         chars.next();
         let paren_pos = pos;
         if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-          self.cursor = pos;
-          return Err(sherr!(
-              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-              "Unclosed subshell",
+          return Err(lex_err!(
+            self,
+            pos,
+            paren_pos..paren_pos + 1,
+            "Unclosed subshell",
           ));
         }
       }
@@ -840,10 +868,11 @@ impl LexStream {
           flags |= TkFlags::IS_SUBSH;
         }
         if !scan_parens(&mut chars, &mut pos, paren_count) && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-          self.cursor = pos;
-          return Err(sherr!(
-              ParseErr @ Span::new(paren_pos..paren_pos + 1, self.source.clone()),
-              "Unclosed subshell",
+          return Err(lex_err!(
+            self,
+            pos,
+            paren_pos..paren_pos + 1,
+            "Unclosed subshell",
           ));
         }
         let mut tk = self.get_token(self.cursor..pos, TkRule::Str);
@@ -1016,6 +1045,7 @@ impl Iterator for LexStream {
     if self.cursor == self.source.len() {
       if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
         let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
+				self.flags |= LexFlags::STALE;
         return Err(sherr!(
           ParseErr @ Span::new(start..self.cursor, self.source.clone()),
           "Unclosed brace group",

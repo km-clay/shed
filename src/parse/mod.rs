@@ -1365,7 +1365,13 @@ impl ParseStream {
       let tk = self.next_tk().unwrap();
       node_tks.push(tk.clone());
       let ctx = self.context.clone();
-      let redir = Self::build_redir(&tk, || self.next_tk(), node_tks, ctx)?;
+      let redir = match Self::build_redir(&tk, || self.next_tk(), node_tks, ctx) {
+				Ok(r) => r,
+				Err(e) => {
+					self.panic_mode(node_tks);
+					return Err(e);
+				}
+			};
       redirs.push(redir);
     }
     Ok(())

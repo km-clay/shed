@@ -199,6 +199,20 @@ processes.
               `line::set::mode::insert`
               `line::set::mode::normal`
               `line::set::mode::emacs`
+              `line::set::mode::remote`
+
+          `remote` mode causes the shell to stop handling keys itself.
+          Every key event is broadcast over the socket as a
+          `line>>key_event>>` event (see *socket-event-key*), and the
+          shell does nothing else with it. A subscriber is expected to
+          be listening and to drive the editor via `line::set::*` in
+          response.
+
+          If `remote` mode is set with zero subscribers connected, or
+          if the last subscriber disconnects while `remote` mode is
+          active, the shell automatically falls back to the user's
+          default mode (`vi` if `set.vi` is enabled, else `emacs`) so
+          the prompt never becomes unusable.
 
       `line::set::anchor::{pos}`
 
@@ -208,6 +222,24 @@ processes.
 
               `line::set::anchor::3`
               `line::set::anchor::0:3`
+
+  6.3 Sending keys                             *socket-line-keys*
+
+  `line::keys::{value}`
+
+      Feed one or more synthetic key events into the line editor.
+      `{value}` is a keymap-notation string, the same syntax used by
+      the `keymap` builtin: regular characters verbatim, and special
+      keys or modifiers in angle brackets. The events pass through the
+      full editor dispatch chain (completion, history search, mode
+      handler, keymap matching), exactly as if the user had typed
+      them — so `<Enter>` triggers submission, `<Tab>` triggers
+      completion, and so on.
+
+          `line::keys::hello world`
+          `line::keys::foobar<Enter>`
+          `line::keys::<C-r>`
+          `line::keys::<Esc>dw`
 
 ==============================================================================
 7. Subscriptions                               *socket-subscribe*
@@ -229,6 +261,45 @@ processes.
           `autocmd_event>> post-cmd`
           `line>>buffer>> echo foo`
           `line>>cursor>> 8`
+
+  7.1 Key events                               *socket-event-key*
+
+  `line>>key_event>> {key}`
+
+      Broadcast only while the editor is in `remote` mode
+      (see *socket-line-mode*). `{key}` is a single key event in
+      keymap notation, e.g. `a`, `<Enter>`, `<C-x>`, `<S-Tab>`.
+
+      Subscribers typically read keys, apply whatever editing logic
+      they want, and push state back via `line::set::buffer::...`,
+      `line::set::cursor::...`, etc.
+
+  7.2 Job events                               *socket-event-job*
+
+  `job>>begin>> {id} {n}`
+  `job>>child>> {pid} {status} {cmd}`
+
+      Broadcast when a job completes. `begin` announces the job id
+      and how many `child` events follow. Each `child` event reports
+      one pipeline stage.
+
+      `{status}` is one of:
+
+          `done`               exit code 0
+          `failed:{n}`         exit code n (non-zero)
+          `signaled:{SIGNAL}`  killed by signal (e.g. `signaled:SIGTERM`)
+
+      Example for a single-stage job:
+
+          `job>>begin>> 1 1`
+          `job>>child>> 12345 done sleep 2`
+
+      Example for a pipeline:
+
+          `job>>begin>> 2 3`
+          `job>>child>> 12346 done cat /etc/hosts`
+          `job>>child>> 12347 failed:1 grep missing`
+          `job>>child>> 12348 done wc -l`
 
 ==============================================================================
 8. Other Requests                              *socket-other*
@@ -282,3 +353,35 @@ processes.
 
           `shedsock line::get::buffer`
           `shedsock msg::status::did you mean: git stash?`
+
+  9.4 Full Editor Replacement                  *socket-async-remote*
+
+      A subscriber can take over all keyboard input by putting the
+      editor into `remote` mode. The shell stops processing keys
+      locally, broadcasts each key as a `line>>key_event>>` event,
+      and waits for the subscriber to mutate editor state via
+      `line::set::*`.
+
+      Minimal echo-through implementation in shell:
+
+          `{ shedsock subscribe; } | {`
+          `  shedsock line::set::mode::remote`
+          `  while read line; do`
+          `    case $line in`
+          `      line>>key_event*)`
+          `        key=${line#*>>key_event>> }`
+          `        buf=$(shedsock line::get::buffer)`
+          `        shedsock "line::set::buffer::$buf$key"`
+          `        ;;`
+          `    esac`
+          `  done`
+          `}`
+
+      More sophisticated wrappers can interpret keymap notation,
+      implement modal editing, drive completion, or proxy the
+      stream to an external editor written in any language. The
+      socket does not care what's on the other end — it just
+      forwards keys out and accepts state back.
+
+      See *socket-line-mode* for the auto-fallback behavior that
+      protects users from being locked out if the subscriber dies.

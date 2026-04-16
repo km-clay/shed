@@ -12,7 +12,7 @@ A Linux shell written in Rust. The name is a nod to the original Unix utilities 
 
 ---
 
-### I Can't Believe It's Not `fzf`!
+### Fuzzy Tab Completion/History Search
 
 `shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
 
@@ -86,6 +86,16 @@ Use `-c` to clear all autocmds for an event. Context variables (e.g. `$_NEW_DIR`
 * Richer metadata: Each entry stores timestamp, working directory, runtime duration in milliseconds, and exit code.
 * Safe writes: SQLite's transaction model means a hard kill mid-write won't leave your history file in a broken state.
 * Direct access via `hist`: The `hist` builtin allows you to interact with the database directly, and exposes flags that can be composed to create pseudo-SQL queries, e.g. `hist --starts-with 'echo' --after '10 minutes ago' --delete` will delete all commands starting with echo that were entered within the last 10 minutes.
+
+---
+
+### IPC Socket
+
+`shed` exposes a Unix socket that other processes can use to interact with it. The path to this socket is held per-instance in the `$SHED_SOCK` environment variable. Subscribing to the socket gives you a stream of event data, and there are several requests that can be written to the socket to control `shed` in various ways.
+
+Among other things, it's possible to read from and write to the line editor directly via the socket. This enables total extensibility of the editor by anything that can interact with a Unix socket. The `remote` editing mode causes input keys to be broadcast over the socket, to be consumed by subscribers that can use those inputs to control the editor remotely.
+
+More info can be found in [./doc/socket.txt](./doc/socket.txt).
 
 ---
 
