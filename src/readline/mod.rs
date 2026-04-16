@@ -1020,7 +1020,13 @@ impl ShedLine {
     }
 
     if cmd.is_submit_action() {
-      if self.editor.attempt_inline_expansion(&self.history) {
+			if self.editor.attempt_alias_expansion() {
+        self.history
+          .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+				let hint = self.history.get_hint();
+				self.editor.set_hint(hint);
+			}
+      if self.editor.attempt_history_expansion(&self.history) {
         // If history expansion occurred, don't submit yet
         self.history
           .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
@@ -1982,6 +1988,7 @@ pub fn marker_for(class: &TkRule) -> Option<Marker> {
   }
 }
 
+#[allow(unused_assignments)]
 pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   // Sort by position descending, with priority ordering at same position:
   // - RESET first (inserted first, ends up rightmost)

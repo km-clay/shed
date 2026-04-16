@@ -2,8 +2,9 @@
 use std::os::fd::AsRawFd;
 
 use crate::{
+  parse::lex::Span,
   readline::{Prompt, ShedLine, annotate_input},
-  state::write_shopts,
+  state::{write_logic, write_shopts},
   testutil::TestGuard,
 };
 
@@ -941,4 +942,142 @@ fn hist_restore_ids_are_contiguous() {
   for (i, (id, _)) in entries.iter().enumerate() {
     assert_eq!(*id, (i + 1) as i64, "IDs should be contiguous");
   }
+}
+
+// ===================== Alias Expansion Tests =====================
+
+fn setup_aliases(aliases: &[(&str, &str)]) {
+  let span = Span::default();
+  write_logic(|l| {
+    for (name, body) in aliases {
+      l.insert_alias(name, body, span.clone());
+    }
+  });
+}
+
+fn alias_expansion_test(aliases: &[(&str, &str)], input: &str, expected: &str) {
+  let g = TestGuard::new();
+  write_shopts(|o| o.prompt.expand_aliases = true);
+  setup_aliases(aliases);
+
+  let prompt = Prompt::default();
+  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+
+  line.feed_bytes(input.as_bytes());
+  line.process_input().unwrap();
+
+  let joined = line.editor.joined();
+  assert_eq!(joined, expected, "\nInput: {input:?}");
+}
+
+fn alias_no_expansion_test(aliases: &[(&str, &str)], input: &str) {
+  let g = TestGuard::new();
+  write_shopts(|o| o.prompt.expand_aliases = true);
+  setup_aliases(aliases);
+
+  let prompt = Prompt::default();
+  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+
+  line.feed_bytes(input.as_bytes());
+  line.process_input().unwrap();
+
+  let before = line.editor.joined();
+  let expanded = line.editor.attempt_alias_expansion();
+  assert!(!expanded, "expected no alias expansion but expansion occurred");
+  assert_eq!(line.editor.joined(), before);
+}
+
+#[test]
+fn alias_simple_expansion() {
+  alias_expansion_test(
+    &[("ll", "ls -la")],
+    "ll ",
+    "ls -la ",
+  );
+}
+
+#[test]
+fn alias_expansion_with_args() {
+  alias_expansion_test(
+    &[("gc", "git commit")],
+    "gc -m 'hello'",
+    "git commit -m 'hello'",
+  );
+}
+
+#[test]
+fn alias_self_referencing_no_infinite_loop() {
+  alias_expansion_test(
+    &[("diff", "diff --color=auto")],
+    "diff ",
+    "diff --color=auto ",
+  );
+}
+
+#[test]
+fn alias_no_expand_in_arg_position() {
+  alias_no_expansion_test(
+    &[("foo", "bar")],
+    "echo foo ",
+  );
+}
+
+#[test]
+fn alias_expand_after_semicolon() {
+  alias_expansion_test(
+    &[("gc", "git commit")],
+    "echo hi; gc ",
+    "echo hi; git commit ",
+  );
+}
+
+#[test]
+fn alias_single_char_name() {
+  alias_expansion_test(
+    &[("g", "git")],
+    "g ",
+    "git ",
+  );
+}
+
+#[test]
+fn alias_single_char_body() {
+  alias_expansion_test(
+    &[("a", "b")],
+    "a ",
+    "b ",
+  );
+}
+
+#[test]
+fn alias_no_expand_when_disabled() {
+  let g = TestGuard::new();
+  write_shopts(|o| o.prompt.expand_aliases = false);
+  setup_aliases(&[("gc", "git commit")]);
+
+  let prompt = Prompt::default();
+  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+
+  line.feed_bytes(b"gc ");
+  line.process_input().unwrap();
+
+  let joined = line.editor.joined();
+  assert_ne!(joined, "git commit");
+}
+
+#[test]
+fn alias_no_expand_in_quotes() {
+  alias_no_expansion_test(
+    &[("gc", "git commit")],
+    "echo 'gc' ",
+  );
+}
+
+#[test]
+fn alias_multiple_on_same_line() {
+  alias_expansion_test(
+    &[("gc", "git commit"), ("gp", "git push")],
+    "gc; gp ",
+    "git commit; git push ",
+  );
 }
