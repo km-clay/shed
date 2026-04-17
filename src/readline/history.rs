@@ -65,6 +65,8 @@ pub struct History {
   conn: Arc<Connection>,
   table: String,
   search_mask: Vec<HistEntry>,
+  hint_cache: Vec<HistEntry>,
+  mask_stale: bool,
   no_matches: bool,
   max_size: Option<u32>,
 }
@@ -163,12 +165,15 @@ impl History {
       table: table.to_string(),
       pending: None,
       search_mask: vec![],
+      hint_cache: vec![],
+      mask_stale: true,
       fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
       no_matches: false,
       cursor: 0,
       virt_cursor: 0,
       max_size,
     };
+    hist.refresh_hint_cache();
     hist.reset();
     Ok(hist)
   }
@@ -181,6 +186,8 @@ impl History {
       table: table.to_string(),
       pending: None,
       search_mask: vec![],
+      hint_cache: vec![],
+      mask_stale: true,
       fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
       no_matches: false,
       cursor: 0,
@@ -505,6 +512,20 @@ impl History {
     self.virt_cursor = self.cursor;
   }
 
+  pub fn mark_mask_stale(&mut self) {
+    self.mask_stale = true;
+  }
+
+  /// Refresh the search mask from the database if stale. Call before
+  /// any operation that reads the mask (history scrolling).
+  pub fn ensure_mask_fresh(&mut self) {
+    if self.mask_stale {
+      let prefix = self.pending.as_ref().map(|p| p.joined());
+      self.constrain_entries(prefix.as_deref());
+      self.mask_stale = false;
+    }
+  }
+
   pub fn constrain_entries(&mut self, prefix: Option<&str>) {
     self.update_search_mask(prefix);
     self.no_matches = self.search_mask.is_empty();
@@ -603,12 +624,11 @@ impl History {
     let cmd = buf.0.to_string();
 
     if let Some(pending) = &mut self.pending {
-      pending.set_buffer(cmd.clone());
+      pending.set_buffer(cmd);
       pending.set_cursor_from_flat(cursor_pos);
     } else {
       self.pending = Some(LineBuf::new().with_initial(&cmd, cursor_pos));
     }
-    self.constrain_entries(Some(&cmd));
   }
 
   pub fn max_hist_size(&mut self, size: Option<u32>) {
@@ -639,13 +659,23 @@ impl History {
     self.search_mask.last()
   }
 
+  /// Get a hint by scanning the in-memory cache. No database access.
   pub fn get_hint(&self) -> Option<Hint> {
-    if self.at_pending() {
-      let entry = self.hint_entry()?;
-      Some(Hint::History(to_lines(entry.command())))
-    } else {
-      None
+    if !self.at_pending() {
+      return None;
     }
+    let prefix = self.pending.as_ref()?.joined();
+    if prefix.is_empty() {
+      return None;
+    }
+    self.hint_cache.iter().rev()
+      .find(|e| e.command().starts_with(&prefix) && e.command() != &prefix)
+      .map(|e| Hint::History(to_lines(e.command())))
+  }
+
+  /// Reload the hint cache from the database. Call after command execution.
+  pub fn refresh_hint_cache(&mut self) {
+    self.hint_cache = self.query_masked(None);
   }
 
   pub fn is_virtual_scrolling(&self) -> bool {
@@ -665,6 +695,7 @@ impl History {
   }
 
   pub fn scroll(&mut self, offset: isize) -> Option<&HistEntry> {
+    self.ensure_mask_fresh();
     self.cursor = self
       .cursor
       .saturating_add_signed(offset)
@@ -675,6 +706,7 @@ impl History {
   }
 
   pub fn scroll_to(&mut self, idx: usize) -> Option<&HistEntry> {
+    self.ensure_mask_fresh();
     self.cursor = idx.clamp(0, self.search_mask.len());
     self.virt_cursor = self.cursor;
 
@@ -719,6 +751,7 @@ impl History {
   }
 
   pub fn start_search(&mut self, initial: &str) -> Option<String> {
+    self.ensure_mask_fresh();
     if self.search_mask.is_empty() {
       None
     } else if self.search_mask.len() == 1 {

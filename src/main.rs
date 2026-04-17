@@ -654,6 +654,8 @@ fn handle_readline_event(
         e.print_error();
       }
 
+      readline.history.refresh_hint_cache();
+
       let rl_cleanup_start = Instant::now();
       readline.fix_column()?;
       readline.writer.flush_write("\n\r")?;

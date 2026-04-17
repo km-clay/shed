@@ -1073,7 +1073,7 @@ impl ShedLine {
     let after_cursor = self.editor.cursor;
 
     if before != after {
-      self.history.constrain_entries(Some(&self.editor.joined()));
+      self.history.mark_mask_stale();
     } else if before == after && has_edit_verb {
       self.writer.send_bell().ok();
     } else if before_cursor == after_cursor && is_ctrl_d_motion {
