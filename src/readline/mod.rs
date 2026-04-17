@@ -576,11 +576,7 @@ impl ShedLine {
         if !self.focused_history().at_pending() {
           self.focused_history().reset_to_pending();
         }
-        self
-          .history
-          .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-        let hint = self.history.get_hint();
-        self.editor.set_hint(hint);
+				self.update_editor_hint();
         self.completer.clear(&mut self.writer)?;
         self.needs_redraw = true;
         self.completer.reset();
@@ -608,8 +604,7 @@ impl ShedLine {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionCancel));
         post_cmds.exec();
 
-        let hint = self.history.get_hint();
-        self.editor.set_hint(hint);
+				self.update_editor_hint();
         self.completer.clear(&mut self.writer)?;
         write_vars(|v| {
           v.set_var(
@@ -746,8 +741,7 @@ impl ShedLine {
         .edit(|e| e.attempt_inline_expansion(&self.history))
     {
       // If history expansion occurred, don't attempt completion yet
-			let hint = self.history.get_hint();
-			self.editor.set_hint(hint);
+			self.update_editor_hint();
       return Ok(None);
     }
 
@@ -789,11 +783,7 @@ impl ShedLine {
         if !self.focused_history().at_pending() {
           self.focused_history().reset_to_pending();
         }
-        self
-          .history
-          .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-        let hint = self.history.get_hint();
-        self.editor.set_hint(hint);
+				self.update_editor_hint();
         write_vars(|v| {
           v.set_var(
             "SHED_VI_MODE",
@@ -1020,17 +1010,11 @@ impl ShedLine {
 
     if cmd.is_submit_action() {
 			if self.editor.attempt_alias_expansion() {
-        self.history
-          .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-				let hint = self.history.get_hint();
-				self.editor.set_hint(hint);
+				self.update_editor_hint();
 			}
       if self.editor.attempt_history_expansion(&self.history) {
         // If history expansion occurred, don't submit yet
-        self.history
-          .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-				let hint = self.history.get_hint();
-				self.editor.set_hint(hint);
+				self.update_editor_hint();
 
         return Ok(None);
       } else if self.should_submit()? || !read_shopts(|o| o.line.linebreak_on_incomplete) {
@@ -1107,9 +1091,7 @@ impl ShedLine {
       }
     }
 
-    let hint = self.history.get_hint();
-
-    self.editor.set_hint(hint);
+		self.update_editor_hint();
     self.needs_redraw = true;
     Ok(None)
   }
@@ -1813,6 +1795,8 @@ impl ShedLine {
 
       self.fire_editor_command(cmd.clone())?;
 
+			self.update_editor_hint();
+
       if self.mode.report_mode() == ModeReport::Visual
         && cmd
           .verb()
@@ -1846,6 +1830,12 @@ impl ShedLine {
       Ok(())
     }
   }
+
+	pub fn update_editor_hint(&mut self) {
+		self.history.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+		let hint = self.history.get_hint();
+		self.editor.set_hint(hint);
+	}
 
   pub fn fire_editor_command(&mut self, cmd: EditCmd) -> ShResult<()> {
     // just a direct wrapper for now, but might want to add some extra logic here later

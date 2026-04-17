@@ -16,7 +16,7 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-  expand::expand_cmd_sub,
+  expand::{alias::AliasExpander, expand_cmd_sub},
   libsh::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},
@@ -2282,9 +2282,18 @@ impl LineBuf {
     let new_cursor_pos = self.cursor.pos;
 
     if let Some(mut hint) = hint {
-      let split_pos = if new_cursor_pos > old_cursor_pos && new_cursor_pos >= old_end_pos {
+			let is_past_end = if self.cursor.exclusive {
+				new_cursor_pos >= old_end_pos
+			} else {
+				new_cursor_pos > old_end_pos
+			};
+      let split_pos = if new_cursor_pos > old_cursor_pos && is_past_end {
         // our cursor moved into the hint.
-        new_cursor_pos.col_add(1)
+				let old_len = self.count_graphemes();
+				self.attempt_alias_expansion();
+				let new_len = self.count_graphemes();
+				let delta = new_len as isize - old_len as isize;
+        new_cursor_pos.col_add_signed(delta + 1)
       } else {
         old_end_pos
       };
@@ -3808,7 +3817,9 @@ impl LineBuf {
     let before = self.lines.clone();
     let old_cursor = self.cursor.pos;
 
-		if is_separator && read_shopts(|o| o.prompt.expand_aliases) {
+		if is_separator
+		&& !self.grapheme_before_cursor().is_none_or(|gr| gr.is_ws())
+		&& read_shopts(|o| o.prompt.expand_aliases) {
 			self.attempt_alias_expansion();
 		}
 
@@ -4017,6 +4028,7 @@ impl LineBuf {
       return;
     };
     attach_lines(&mut self.lines, &mut hint_lines);
+		self.attempt_alias_expansion_all();
 
     self.set_cursor(Pos::MAX);
     self.fix_cursor();
@@ -4261,19 +4273,33 @@ impl LineBuf {
 	fn grapheme_before_cursor(&mut self) -> Option<Grapheme> {
 		self.get(self.cursor.pos.col_add_signed(-1))
 	}
+	fn grapheme_after_cursor(&mut self) -> Option<Grapheme> {
+		self.get(self.cursor.pos)
+	}
+
+	pub fn attempt_alias_expansion_all(&mut self) -> bool {
+		let raw = self.joined();
+		let mut seen = HashSet::new();
+		let (result, first_pos) = AliasExpander::new(raw.clone(), &mut seen).expand();
+		if first_pos.is_some() {
+			self.lines = to_lines(result);
+			true
+		} else {
+			false
+		}
+	}
 
 	pub fn attempt_alias_expansion(&mut self) -> bool {
-		if self.grapheme_before_cursor().is_none_or(|gr| gr.is_ws()) {
-			return false
-		}
 
-		let line_len = self.line(self.row()).len();
 		let (to_cursor,mut after_cursor) = split_lines(self.lines.clone(), self.cursor.pos);
 		let raw = join_lines(&to_cursor);
 		let mut tokens = LexStream::new(raw.clone().into(), LexFlags::empty())
 			.filter_map(Result::ok)
 			.filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
 			.collect::<Vec<_>>();
+		while tokens.last().is_some_and(|tk| !tk.flags.contains(TkFlags::IS_CMD)) {
+			tokens.pop();
+		}
 
 		let Some(last) = tokens.pop() else { return false; };
 		if !last.flags.contains(TkFlags::IS_CMD) { return false; }
