@@ -74,8 +74,6 @@ pub struct History {
 impl History {
   const USER_VERSION: i32 = 2;
   fn init_db(conn: &Connection, table: &str) -> rusqlite::Result<()> {
-    conn.execute_batch("PRAGMA journal_mode=WAL")?;
-    conn.execute_batch("PRAGMA case_sensitive_like = 1")?;
     conn.execute_batch(&format!(
       r#"
 			CREATE TABLE IF NOT EXISTS {table} (
@@ -139,29 +137,14 @@ impl History {
 
     Ok(())
   }
-  pub fn new(table: &str) -> ShResult<Self> {
+  pub fn new(conn: Arc<Connection>, table: &str) -> ShResult<Self> {
     let max_hist = read_shopts(|o| o.core.max_hist);
 
-    let db_path = if let Ok(var) = env::var("SHED_HISTDB") {
-      var
-    } else {
-      let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
-      dirs::data_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| format!("{home}/.local/share/shed/shed_hist.db"))
-    };
-
-    let db_path = PathBuf::from(db_path);
-    if let Some(parent) = db_path.parent() {
-      std::fs::create_dir_all(parent)?;
-    }
-
-    let conn = Connection::open(&db_path)?;
     Self::init_db(&conn, table)?;
 
     let max_size = (max_hist >= 0).then_some(max_hist as u32);
     let mut hist = Self {
-      conn: conn.into(),
+      conn,
       table: table.to_string(),
       pending: None,
       search_mask: vec![],

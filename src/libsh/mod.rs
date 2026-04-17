@@ -4,4 +4,5 @@ pub mod histimport;
 pub mod strops;
 pub mod sys;
 pub mod term;
+pub mod ui;
 pub mod utils;

@@ -152,10 +152,13 @@ fn main() -> ExitCode {
   }
 
   if let Err(e) = if let Some(cmd) = args.command {
+    state::init_db_conn(false).ok();
     exec_dash_c(cmd)
   } else if args.stdin || !isatty(STDIN_FILENO).unwrap_or(false) {
+    state::init_db_conn(false).ok();
     read_commands(args.script_args)
   } else if !args.script_args.is_empty() {
+    state::init_db_conn(false).ok();
     let path = args.script_args.remove(0);
     run_script(path, args.script_args)
   } else {
@@ -374,7 +377,15 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   sig_setup(args.login_shell);
   crate::state::INTERACTIVE.store(true, Ordering::SeqCst);
 
-  write_meta(|m| m.create_socket())?;
+  state::init_db_conn(true)?;
+  write_meta(|m| {
+		m.ensure_meta_table()?;
+		m.create_socket()
+	})?;
+
+	if let Some(msg) = read_meta(|m| m.welcome_message()) {
+		println!("{msg}");
+	}
 
   if args.login_shell {
     source_login().ok();

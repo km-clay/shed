@@ -557,7 +557,10 @@ pub fn hist_builtin(node: Node) -> ShResult<()> {
   } else {
     "shed_history"
   };
-  let hist = History::new(table).promote_err(span.clone())?;
+  let conn = state::get_db_conn()
+    .ok_or_else(|| sherr!(InternalErr, "database not available"))
+    .promote_err(span.clone())?;
+  let hist = History::new(conn, table).promote_err(span.clone())?;
 
   for (arg, span) in argv {
     let Ok(id) = arg.parse::<i64>() else {

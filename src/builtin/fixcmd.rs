@@ -160,7 +160,10 @@ pub fn fixcmd(node: Node, interactive: bool) -> ShResult<()> {
 
   let (_argv, opts) = parse_fc_args(argv).promote_err(span.clone())?;
 
-  let hist = History::new("shed_history").promote_err(span.clone())?;
+  let conn = state::get_db_conn()
+    .ok_or_else(|| sherr!(InternalErr, "database not available"))
+    .promote_err(span.clone())?;
+  let hist = History::new(conn, "shed_history").promote_err(span.clone())?;
   if opts.list {
     fc_list(hist, opts).promote_err(span)?;
   } else if opts.no_editor {

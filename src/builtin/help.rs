@@ -13,7 +13,7 @@ use crate::{
     execute::{exec_input, prepare_argv},
   },
   readline::{complete::ScoredCandidate, markers},
-  sherr, state,
+  sherr, state::{self, write_meta},
 };
 
 const TAG_SEQ: &str = "\x1b[1;33m"; // bold yellow - searchable tags
@@ -39,6 +39,10 @@ pub fn help(node: Node) -> ShResult<()> {
   else {
     unreachable!()
   };
+
+	let _guard = scopeguard::guard((), |_| {
+		write_meta(|m| m.disable_welcome_message()).unwrap();
+	});
 
   let mut argv = prepare_argv(argv)?.into_iter().peekable();
   let help = argv.next().unwrap(); // drop 'help'

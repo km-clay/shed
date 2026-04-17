@@ -1,12 +1,13 @@
 *help*
 
-#SHED HELP#
+#SHED MANUAL#
 
 Shed is an experimental UNIX command interpreter (shell) usable as both an interactive login shell and as a shell script command preprocessor. Shed combines the functionality of `bash` with the UX and customizability of `vim`. Shed seeks to improve the interactive shell experience by providing:
-* Programmable, dynamic prompts
 * A hackable line editor similar to `zsh`'s `zle`
+* Programmable, dynamic prompts
 * Custom tab completion
 * An event hook system
+* An IPC socket for async workflows
 * Fuzzy history search/tab completion
 * And many more features
 

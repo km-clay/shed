@@ -1,9 +1,10 @@
 use std::{
   cell::RefCell,
-  sync::atomic::{AtomicBool, AtomicI32},
+  sync::{Arc, OnceLock, atomic::{AtomicBool, AtomicI32}},
 };
 
 pub mod scopes;
+use rusqlite::Connection;
 pub use scopes::*;
 pub mod logic;
 pub use logic::*;
@@ -25,13 +26,14 @@ thread_local! {
   pub static SHED: Shed = Shed::new();
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Shed {
   pub jobs: RefCell<JobTab>,
   pub var_scopes: RefCell<ScopeStack>,
   pub meta: RefCell<MetaTab>,
   pub logic: RefCell<LogTab>,
   pub shopts: RefCell<ShOpts>,
+  pub db_conn: OnceLock<Option<Arc<Connection>>>,
 
   #[cfg(test)]
   saved: RefCell<Option<Box<Self>>>,
@@ -45,10 +47,20 @@ impl Shed {
       meta: RefCell::new(MetaTab::new()),
       logic: RefCell::new(LogTab::new()),
       shopts: RefCell::new(ShOpts::default()),
+      db_conn: OnceLock::new(),
 
       #[cfg(test)]
       saved: RefCell::new(None),
     }
+  }
+
+  #[cfg(test)]
+  fn clone_db_conn(&self) -> OnceLock<Option<Arc<Connection>>> {
+    let lock = OnceLock::new();
+    if let Some(val) = self.db_conn.get() {
+      let _ = lock.set(val.clone());
+    }
+    lock
   }
 }
 
@@ -67,6 +79,7 @@ impl Shed {
       meta: RefCell::new(self.meta.borrow().clone()),
       logic: RefCell::new(self.logic.borrow().clone()),
       shopts: RefCell::new(self.shopts.borrow().clone()),
+      db_conn: self.clone_db_conn(),
       saved: RefCell::new(None),
     };
     *self.saved.borrow_mut() = Some(Box::new(saved));

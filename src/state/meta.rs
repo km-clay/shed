@@ -21,6 +21,7 @@ use nix::{
     time::TimeVal,
   },
 };
+use rusqlite::Connection;
 
 use crate::{
   builtin::BUILTINS,
@@ -779,6 +780,94 @@ impl MetaTab {
   pub fn shell_time(&self) -> Instant {
     self.shell_time
   }
+	pub fn ensure_meta_table(&self) -> ShResult<()> {
+		query_db(|conn| {
+			conn.execute(
+				"CREATE TABLE IF NOT EXISTS meta (
+					key TEXT PRIMARY KEY,
+					value TEXT NOT NULL
+				)",
+				[],
+			)?;
+			Ok(())
+		})?;
+		Ok(())
+	}
+	pub fn disable_welcome_message(&self) -> ShResult<()> {
+		query_db(|conn| {
+			conn.execute(
+				"INSERT INTO meta (key, value) VALUES ('show_welcome', '0')
+				ON CONFLICT(key) DO UPDATE SET value='0' WHERE key='welcome_message'",
+				[],
+			)?;
+			Ok(())
+		})?;
+		Ok(())
+	}
+	pub fn welcome_message(&self) -> Option<String> {
+		let res = query_db(|conn| {
+			let result = conn.query_row(
+				"SELECT value FROM meta WHERE key='show_welcome'",
+				[],
+				|row| row.get::<_, String>(0),
+			);
+			match result {
+				Ok(val) => Ok(Some(val)),
+				Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+				Err(e) => Err(e.into()),
+			}
+		}).ok().flatten().flatten();
+
+		if res.is_some_and(|r| r == "0") {
+			return None;
+		}
+
+		let content_lines = [
+			"",
+			"\x1b[1mWelcome to shed!\x1b[0m",
+			"",
+			"Type \x1b[33mhelp\x1b[0m to get started.",
+			"",
+		];
+
+		let mut longest = -1;
+		content_lines.iter().for_each(|l| {
+			if longest < (l.len() as i32) {
+				longest = l.len() as i32;
+			}
+		});
+		let longest = longest as usize;
+
+
+		let version = env!("CARGO_PKG_VERSION");
+
+		use crate::libsh::ui;
+		let mut buf = String::new();
+
+		// ╭─ shed v0.xx.x ───────────╮
+		let title = format!(
+			"{}{} \x1b[1;35mshed\x1b[0m \x1b[90mv{}\x1b[0m ",
+			ui::TOP_LEFT, ui::HOR_LINE, version
+		);
+		ui::pad_line(&mut buf, &title, ui::HOR_LINE, ui::TOP_RIGHT, longest);
+		buf.push('\n');
+
+		for line in &content_lines {
+			let row = format!("{} {}", ui::VERT_LINE, line);
+			ui::pad_line(&mut buf, &row, " ", ui::VERT_LINE, longest);
+			buf.push('\n');
+		}
+
+		// ╰──────────────────────────╯
+		write!(
+			buf, "{}{}{}",
+			ui::BOT_LEFT,
+			ui::HOR_LINE.repeat(longest.saturating_sub(2)),
+			ui::BOT_RIGHT
+		).unwrap();
+
+		Some(buf)
+	}
   pub fn set_pending_widget_keys(&mut self, keys: &str) {
     let exp = expand_keymap(keys);
     self.pending_widget_keys = exp;

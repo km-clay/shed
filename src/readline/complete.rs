@@ -13,7 +13,7 @@ use crate::{
   expand::escape_str,
   libsh::{
     error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, sys::TTY_FILENO,
-    utils::TkVecUtils,
+    ui, utils::TkVecUtils,
   },
   match_loop,
   parse::{
@@ -994,17 +994,9 @@ pub struct FuzzyCompleter {
 }
 
 impl FuzzySelector {
-  const BOT_LEFT: &str = "\x1b[90m╰\x1b[0m";
-  const BOT_RIGHT: &str = "\x1b[90m╯\x1b[0m";
-  const TOP_LEFT: &str = "\x1b[90m╭\x1b[0m";
-  const TOP_RIGHT: &str = "\x1b[90m╮\x1b[0m";
-  const HOR_LINE: &str = "\x1b[90m─\x1b[0m";
-  const VERT_LINE: &str = "\x1b[90m│\x1b[0m";
   const SELECTOR_GRAY: &str = "\x1b[90m▌\x1b[0m";
   const SELECTOR_HL: &str = "\x1b[38;2;200;0;120m▌\x1b[1;39;48;5;237m";
   const PROMPT_ARROW: &str = "\x1b[1;36m>\x1b[0m";
-  const TREE_LEFT: &str = "\x1b[90m├\x1b[0m";
-  const TREE_RIGHT: &str = "\x1b[90m┤\x1b[0m";
 
   pub fn new(title: impl Into<String>) -> Self {
     Self {
@@ -1203,15 +1195,8 @@ impl FuzzySelector {
     let (cols, _) = get_win_size(*TTY_FILENO);
     let cols = cols as usize;
 
-    // Helper: pad 'content' with 'fill' to 'cols' width, bookended by 'right_border'
-    let pad_line = |buf: &mut String, content: &str, fill: &str, right_border: &str| {
-      let used = calc_str_width(content) as usize;
-      let padding = cols.saturating_sub(used + 1);
-      buf.push_str(content);
-      for _ in 0..padding {
-        buf.push_str(fill);
-      }
-      buf.push_str(right_border);
+    let pad = |buf: &mut String, content: &str, fill: &str, right_border: &str| {
+      ui::pad_line(buf, content, fill, right_border, cols);
     };
 
     let mut buf = String::new();
@@ -1231,24 +1216,24 @@ impl FuzzySelector {
     let mut rows: u16 = 0;
 
     // ╭─ Title ──────────────────╮
-    let title_content = format!("\n{}{} \x1b[1m{}\x1b[0m ", Self::TOP_LEFT, Self::HOR_LINE, title);
-    pad_line(&mut buf, &title_content, Self::HOR_LINE, Self::TOP_RIGHT);
+    let title_content = format!("\n{}{} \x1b[1m{}\x1b[0m ", ui::TOP_LEFT, ui::HOR_LINE, title);
+    pad(&mut buf, &title_content, ui::HOR_LINE, ui::TOP_RIGHT);
     rows += 1;
 
     // │ > query                  │
-    let prompt_content = format!("{} {} {}", Self::VERT_LINE, Self::PROMPT_ARROW, query);
-    pad_line(&mut buf, &prompt_content, " ", Self::VERT_LINE);
+    let prompt_content = format!("{} {} {}", ui::VERT_LINE, Self::PROMPT_ARROW, query);
+    pad(&mut buf, &prompt_content, " ", ui::VERT_LINE);
     rows += 1;
 
     // ├──filtered/total──────────┤
     let sep_content = format!(
       "{}{}\x1b[33m{}\x1b[0m/\x1b[33m{}\x1b[0m",
-      Self::TREE_LEFT,
-      Self::HOR_LINE.repeat(2),
+      ui::TREE_LEFT,
+      ui::HOR_LINE.repeat(2),
       num_filtered,
       num_candidates
     );
-    pad_line(&mut buf, &sep_content, Self::HOR_LINE, Self::TREE_RIGHT);
+    pad(&mut buf, &sep_content, ui::HOR_LINE, ui::TREE_RIGHT);
     rows += 1;
 
     // Candidate lines
@@ -1279,18 +1264,18 @@ impl FuzzySelector {
           let num = i + offset + 1;
           format!(
             "{} {}\x1b[33m{num:<min_pad$}\x1b[39m{line}\x1b[0m",
-            Self::VERT_LINE, selector
+            ui::VERT_LINE, selector
           )
         } else if number_candidates {
           format!(
             "{} {}{:>min_pad$}{line}\x1b[0m",
-            Self::VERT_LINE, selector, ""
+            ui::VERT_LINE, selector, ""
           )
         } else {
-          format!("{} {}{line}\x1b[0m", Self::VERT_LINE, selector)
+          format!("{} {}{line}\x1b[0m", ui::VERT_LINE, selector)
         };
 
-        pad_line(&mut buf, &left, " ", Self::VERT_LINE);
+        pad(&mut buf, &left, " ", ui::VERT_LINE);
         rows += 1;
         drew_number = true;
         lines_drawn += 1;
@@ -1298,7 +1283,7 @@ impl FuzzySelector {
     }
 
     // ╰──────────────────────────╯
-    write!(buf, "{}{}{}", Self::BOT_LEFT, Self::HOR_LINE.repeat(cols.saturating_sub(2)), Self::BOT_RIGHT).unwrap();
+    write!(buf, "{}{}{}", ui::BOT_LEFT, ui::HOR_LINE.repeat(cols.saturating_sub(2)), ui::BOT_RIGHT).unwrap();
     rows += 1;
 
     // Move cursor back up to the query input line

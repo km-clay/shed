@@ -7,6 +7,7 @@ use std::{
 };
 
 use nix::unistd::{User, getuid};
+use rusqlite::Connection;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
@@ -19,6 +20,26 @@ use crate::{
   sherr,
   shopt::ShOpts,
 };
+
+/// Query the SQLite database.
+///
+/// Takes a function that returns ShResult<T>, and returns ShResult<Option<T>>.
+/// The option is necessary because `Shed.db_conn` can be None. This happens
+/// in non-interactive cases, or cases where the database cannot be opened.
+///
+/// The returns look basically like this:
+/// * Ok(None) means "there's no database connection"
+/// * Err(e) is your function's ShErr
+/// * Ok(Some(T)) means the connection exists and your function succeeded.
+pub fn query_db<T, F: FnOnce(Arc<Connection>) -> ShResult<T>>(f: F) -> ShResult<Option<T>> {
+  SHED.with(|shed| {
+    let Some(Some(conn)) = shed.db_conn.get() else {
+      return Ok(None);
+    };
+
+    f(Arc::clone(conn)).map(Some)
+  })
+}
 
 /// Read from the job table
 pub fn read_jobs<T, F: FnOnce(&JobTab) -> T>(f: F) -> T {
@@ -481,6 +502,47 @@ pub fn get_home_str_unchecked() -> String {
       caller.line()
     )
   }
+}
+
+/// Get a clone of the shared database connection, if available.
+pub fn get_db_conn() -> Option<Arc<Connection>> {
+  SHED.with(|shed| shed.db_conn.get().cloned().flatten())
+}
+
+/// Initialize the shared database connection on the `Shed` struct.
+///
+/// Call with `true` for interactive sessions (opens the DB),
+/// or `false` for non-interactive contexts (sets to `None`).
+pub fn init_db_conn(interactive: bool) -> ShResult<()> {
+  SHED.with(|shed| {
+    if interactive {
+      let conn = open_db_conn()?;
+      conn.execute_batch("PRAGMA journal_mode=WAL")?;
+      conn.execute_batch("PRAGMA case_sensitive_like = 1")?;
+      let _ = shed.db_conn.set(Some(conn.into()));
+    } else {
+      let _ = shed.db_conn.set(None);
+    }
+    Ok(())
+  })
+}
+
+fn open_db_conn() -> ShResult<Connection> {
+  let db_path = if let Ok(var) = env::var("SHED_HISTDB") {
+    var
+  } else {
+    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    dirs::data_dir()
+      .map(|p| p.to_string_lossy().to_string())
+      .unwrap_or_else(|| format!("{home}/.local/share/shed/shed_hist.db"))
+  };
+
+  let db_path = PathBuf::from(db_path);
+  if let Some(parent) = db_path.parent() {
+    std::fs::create_dir_all(parent)?;
+  }
+
+  Ok(Connection::open(&db_path)?)
 }
 
 pub fn get_home() -> Option<PathBuf> {

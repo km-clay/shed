@@ -26,8 +26,8 @@ use crate::readline::editmode::{ViEx, ViVerbatim};
 use crate::readline::history::HistEntry;
 use crate::readline::term::{Pos, TermReader, calc_str_width};
 use crate::state::{
-  AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars, write_meta,
-  write_vars,
+  self, AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars,
+  write_meta, write_vars,
 };
 use crate::{
   libsh::error::ShResult,
@@ -38,7 +38,7 @@ use crate::{
     highlight::Highlighter,
   },
 };
-use crate::{prelude::*, state};
+use crate::prelude::*;
 
 pub mod complete;
 pub mod editcmd;
@@ -317,9 +317,18 @@ impl ShedLine {
 
   fn new_private(prompt: Prompt, tty: RawFd, with_hist: bool) -> ShResult<Self> {
     let history = if with_hist {
-      History::new("shed_history").unwrap()
+      if let Some(conn) = state::get_db_conn() {
+        History::new(conn, "shed_history")?
+      } else {
+        History::empty("shed_history")
+      }
     } else {
       History::empty("shed_history")
+    };
+    let ex_history = if let Some(conn) = state::get_db_conn() {
+      History::new(conn, "ex_history")?
+    } else {
+      History::empty("ex_history")
     };
     let mode = if read_shopts(|o| o.set.vi) {
       Box::new(ViInsert::new()) as Box<dyn EditMode>
@@ -341,7 +350,7 @@ impl ShedLine {
       repeat_motion: None,
       editor: LineBuf::new(),
       history,
-      ex_history: History::new("ex_history")?,
+      ex_history,
       needs_redraw: true,
       ctrl_d_warning_counter: 0,
       status_msgs: VecDeque::new(),

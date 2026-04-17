@@ -16,7 +16,7 @@ use crate::readline::editmode::{EditMode, ModeReport};
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
-use crate::state::write_meta;
+use crate::state::{self, write_meta};
 use crate::verb;
 use crate::{bitflags, match_loop};
 use crate::{motion, sherr};
@@ -47,7 +47,9 @@ impl Default for ExEditor {
     Self {
       buf: LineBuf::default(),
       mode: Emacs::default(),
-      history: History::new("ex_history").unwrap_or_else(|_| History::empty("ex_history")),
+      history: state::get_db_conn()
+        .and_then(|conn| History::new(conn, "ex_history").ok())
+        .unwrap_or_else(|| History::empty("ex_history")),
     }
   }
 }
