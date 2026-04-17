@@ -1124,18 +1124,25 @@ impl FuzzySelector {
       return;
     }
 
-    // Scroll down: ensure all candidates from scroll_offset through cursor
-    // fit within max_height rendered lines
+    // Scroll down: work backwards from cursor to find the
+    // earliest offset that fits within max_height lines.
+    let mut lines = 0;
+    let mut new_offset = cursor;
     loop {
-      let mut lines = 0;
-      let last = cursor.min(self.filtered.len().saturating_sub(1));
-      for idx in self.scroll_offset..=last {
-        lines += self.candidate_height(idx);
-      }
-      if lines <= self.max_height || self.scroll_offset >= cursor {
+      let h = self.candidate_height(new_offset);
+      if lines + h > self.max_height && new_offset < cursor {
+        new_offset += 1;
         break;
       }
-      self.scroll_offset += 1;
+      lines += h;
+      if new_offset == 0 {
+        break;
+      }
+      new_offset -= 1;
+    }
+
+    if new_offset > self.scroll_offset {
+      self.scroll_offset = new_offset;
     }
   }
 
@@ -1194,144 +1201,115 @@ impl FuzzySelector {
       return Ok(0);
     }
     let (cols, _) = get_win_size(*TTY_FILENO);
+    let cols = cols as usize;
+
+    // Helper: pad 'content' with 'fill' to 'cols' width, bookended by 'right_border'
+    let pad_line = |buf: &mut String, content: &str, fill: &str, right_border: &str| {
+      let used = calc_str_width(content) as usize;
+      let padding = cols.saturating_sub(used + 1);
+      buf.push_str(content);
+      for _ in 0..padding {
+        buf.push_str(fill);
+      }
+      buf.push_str(right_border);
+    };
 
     let mut buf = String::new();
     let cursor_pos = self.cursor.get();
     let offset = self.scroll_offset;
-    self
-      .query
-      .set_available_width(cols.saturating_sub(6) as usize);
+    let number_candidates = self.number_candidates;
+    let max_height = self.max_height;
+    let num_filtered = self.filtered.len();
+    let num_candidates = self.candidates.len();
+    let min_pad = num_candidates.to_string().len().saturating_add(1).max(6);
+
+    self.query.set_available_width(cols.saturating_sub(6));
     self.query.update_scroll_offset();
     let query = self.query.get_window();
-    let num_filtered = format!("\x1b[33m{}\x1b[0m", self.filtered.len());
-    let num_candidates = format!("\x1b[33m{}\x1b[0m", self.candidates.len());
     let title = self.title.clone();
-    let title_width = title.len() as u16;
-    let number_candidates = self.number_candidates;
-    let min_pad = self
-      .candidates
-      .len()
-      .to_string()
-      .len()
-      .saturating_add(1)
-      .max(6);
-    let max_height = self.max_height;
     let visible = self.get_window();
     let mut rows: u16 = 0;
-    let top_bar = format!(
-      "\n{}{} \x1b[1m{}\x1b[0m {}{}",
-      Self::TOP_LEFT,
-      Self::HOR_LINE,
-      title,
-      Self::HOR_LINE.repeat(cols.saturating_sub(title_width + 5) as usize),
-      Self::TOP_RIGHT
-    );
-    buf.push_str(&top_bar);
-    rows += 1;
-    for _ in 0..rows {}
 
-    let prompt = format!("{} {} {}", Self::VERT_LINE, Self::PROMPT_ARROW, &query);
-    let cols_used = calc_str_width(&prompt);
-    let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
-    let prompt_line_final = format!("{}{}{}", prompt, right_pad, Self::VERT_LINE);
-    buf.push_str(&prompt_line_final);
+    // ╭─ Title ──────────────────╮
+    let title_content = format!("\n{}{} \x1b[1m{}\x1b[0m ", Self::TOP_LEFT, Self::HOR_LINE, title);
+    pad_line(&mut buf, &title_content, Self::HOR_LINE, Self::TOP_RIGHT);
     rows += 1;
 
-    let sep_line_left = format!(
-      "{}{}{}/{}",
+    // │ > query                  │
+    let prompt_content = format!("{} {} {}", Self::VERT_LINE, Self::PROMPT_ARROW, query);
+    pad_line(&mut buf, &prompt_content, " ", Self::VERT_LINE);
+    rows += 1;
+
+    // ├──filtered/total──────────┤
+    let sep_content = format!(
+      "{}{}\x1b[33m{}\x1b[0m/\x1b[33m{}\x1b[0m",
       Self::TREE_LEFT,
       Self::HOR_LINE.repeat(2),
-      &num_filtered,
-      &num_candidates
+      num_filtered,
+      num_candidates
     );
-    let cols_used = calc_str_width(&sep_line_left);
-    let right_pad = Self::HOR_LINE.repeat(cols.saturating_sub(cols_used + 1) as usize);
-    let sep_line_final = format!("{}{}{}", sep_line_left, right_pad, Self::TREE_RIGHT);
-    buf.push_str(&sep_line_final);
+    pad_line(&mut buf, &sep_content, Self::HOR_LINE, Self::TREE_RIGHT);
     rows += 1;
 
+    // Candidate lines
     let mut lines_drawn = 0;
+    let col_lim = if number_candidates {
+      cols.saturating_sub(3 + min_pad)
+    } else {
+      cols.saturating_sub(3)
+    };
+
     for (i, s_cand) in visible.iter().enumerate() {
-      if lines_drawn >= max_height {
-        break;
-      }
-      let selector = if i + offset == cursor_pos {
-        Self::SELECTOR_HL
-      } else {
-        Self::SELECTOR_GRAY
-      };
+      if lines_drawn >= max_height { break; }
+
+      let selected = i + offset == cursor_pos;
+      let selector = if selected { Self::SELECTOR_HL } else { Self::SELECTOR_GRAY };
       let mut drew_number = false;
+
       for line in s_cand.candidate.content().trim_end().lines() {
-        if lines_drawn >= max_height {
-          break;
-        }
+        if lines_drawn >= max_height { break; }
+
         let mut line = line.trim_end().replace('\t', "    ");
-        let col_lim = if number_candidates {
-          cols.saturating_sub(3 + min_pad as u16)
-        } else {
-          cols.saturating_sub(3)
-        };
-        if calc_str_width(&line) >= col_lim {
-          line.truncate(col_lim.saturating_sub(6) as usize);
+        if calc_str_width(&line) >= col_lim as u16 {
+          line.truncate(col_lim.saturating_sub(6));
           line.push_str("...");
         }
-        let left = if number_candidates {
-          if !drew_number {
-            let this_num = i + offset + 1;
-            let right_pad = " ".repeat(min_pad.saturating_sub(this_num.to_string().len()));
-            format!(
-              "{} {}\x1b[33m{}\x1b[39m{right_pad}{}\x1b[0m",
-              Self::VERT_LINE,
-              &selector,
-              i + offset + 1,
-              &line
-            )
-          } else {
-            let right_pad = " ".repeat(min_pad);
-            format!(
-              "{} {}{}{}\x1b[0m",
-              Self::VERT_LINE,
-              &selector,
-              right_pad,
-              &line
-            )
-          }
+
+        let left = if number_candidates && !drew_number {
+          let num = i + offset + 1;
+          format!(
+            "{} {}\x1b[33m{num:<min_pad$}\x1b[39m{line}\x1b[0m",
+            Self::VERT_LINE, selector
+          )
+        } else if number_candidates {
+          format!(
+            "{} {}{:>min_pad$}{line}\x1b[0m",
+            Self::VERT_LINE, selector, ""
+          )
         } else {
-          format!("{} {}{}\x1b[0m", Self::VERT_LINE, &selector, &line)
+          format!("{} {}{line}\x1b[0m", Self::VERT_LINE, selector)
         };
-        let cols_used = calc_str_width(&left);
-        let right_pad = " ".repeat(cols.saturating_sub(cols_used + 1) as usize);
-        let hl_cand_line = format!("{}{}{}", left, right_pad, Self::VERT_LINE);
-        buf.push_str(&hl_cand_line);
+
+        pad_line(&mut buf, &left, " ", Self::VERT_LINE);
         rows += 1;
         drew_number = true;
         lines_drawn += 1;
       }
     }
 
-    let bot_bar = format!(
-      "{}{}{}",
-      Self::BOT_LEFT,
-      Self::HOR_LINE
-        .to_string()
-        .repeat(cols.saturating_sub(2) as usize),
-      Self::BOT_RIGHT
-    );
-    buf.push_str(&bot_bar);
+    // ╰──────────────────────────╯
+    write!(buf, "{}{}{}", Self::BOT_LEFT, Self::HOR_LINE.repeat(cols.saturating_sub(2)), Self::BOT_RIGHT).unwrap();
     rows += 1;
 
+    // Move cursor back up to the query input line
     let lines_below_prompt = rows.saturating_sub(2);
-    let cursor_in_window = self
-      .query
-      .linebuf
-      .cursor_to_flat()
-      .saturating_sub(self.query.scroll_offset);
+    let cursor_in_window = self.query.linebuf.cursor_to_flat().saturating_sub(self.query.scroll_offset);
     let cursor_col = (cursor_in_window + 4) as u16;
-    write!(buf, "\x1b[{}A\r\x1b[{}C", lines_below_prompt, cursor_col).unwrap();
+    write!(buf, "\x1b[{lines_below_prompt}A\r\x1b[{cursor_col}C").unwrap();
 
     let new_layout = FuzzyLayout {
       rows,
-      cols,
+      cols: cols as u16,
       cursor_col,
       preceding_line_width: self.prompt_line_width,
       preceding_cursor_col: self.prompt_cursor_col,

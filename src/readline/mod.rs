@@ -537,6 +537,7 @@ impl ShedLine {
           self.focused_history().fuzzy_finder.clear(&mut writer)?;
           self.writer = writer;
         }
+        self.focused_history().fuzzy_finder.reset();
         write_vars(|v| {
           v.set_var(
             "SHED_VI_MODE",

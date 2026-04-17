@@ -13,14 +13,14 @@ Shed is an experimental UNIX command interpreter (shell) usable as both an inter
 ==============================================================================
 1. Available Topics                            *help-topics*
 
-  `help arith`        Arithmetic expansion: `$(( ))` syntax       |arith|
   `help autocmd`      Autocmd hooks for shell events               |autocmd|
   `help builtin`      Builtin command reference                    |builtin|
   `help ex`           Ex mode (colon) commands                     |ex|
-  `help glob`         Pathname expansion and wildcards             |glob|
   `help keybinds`     Vi mode keys, motions, text objects          |keybinds|
-  `help param`        Parameter expansion: `${}` operators         |param|
   `help prompt`       Prompt configuration, PS1, PSR, echo -p      |prompt|
+  `help arith`        Arithmetic expansion: `$(( ))` syntax          |arith|
+  `help glob`         Pathname expansion and wildcards             |glob|
+  `help param`        Parameter expansion: `${}` operators           |param|
   `help redirect`     Redirection, pipes, heredocs                 |redirect|
 
 ==============================================================================
@@ -30,16 +30,17 @@ Shed is an experimental UNIX command interpreter (shell) usable as both an inter
                       so `help key` opens |keybinds|.
 
   `help {tag}`        Jump directly to a tagged section. Tags are the
-                      words marked with `*asterisks*` in the help files.
+                      words in the top right of each section.
 
                       Examples:
-                        `help text-objects`     jumps to |text-objects|
+                        `help help-nav`         jumps to this section
                         `help prompt-escapes`   jumps to |prompt-escapes|
                         `help heredoc`          jumps to |heredoc|
 
-  Cross-references like |prompt| are clickable tags. Search for them
+  Cross-references like |prompt| are searchable tags. Search for them
   with `help` followed by the reference name.
 
-  Inside the pager, use `/` to search and `q` to quit.
+  By default, help pages are displayed using `less`, but you can choose
+	a pager to use by exporting the `$SHED_HPAGER` environment variable.
 
 ==============================================================================

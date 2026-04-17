@@ -1247,10 +1247,11 @@ SHOPT                                            *builtin-shopt* *shopt*
 
   Categories ~
 
-    `core`    core shell behavior
-    `line`    line editor appearance and behavior
-    `prompt`  completion and prompt display
-    `set`     POSIX `set` options (mirrors `set -o`)
+    `core`        core shell behavior
+    `line`        line editor appearance and behavior
+    `prompt`      completion and prompt display
+    `set`         POSIX `set` options (mirrors `set -o`)
+    `highlight`   syntax highlighting colors
 
   With no arguments, lists all options. With a category, lists that
   category. With a full path, prints the value. With an assignment,
@@ -1271,6 +1272,7 @@ SHOPT                                            *builtin-shopt* *shopt*
   Line editor options (`line.*`) ~
 
     `auto_indent`               auto-indent new lines in multiline input
+    `auto_suggest`              show history-based autosuggestions
     `highlight`                 syntax highlighting on the prompt
     `line_numbers`              show line numbers in multiline input
     `linebreak_on_incomplete`   insert newline on incomplete input
@@ -1282,19 +1284,40 @@ SHOPT                                            *builtin-shopt* *shopt*
 
     `comp_limit`              max completion candidates shown
     `completion_ignore_case`  case-insensitive tab completion
+    `expand_aliases`          fish-style alias expansion on the prompt
     `hist_cat`                Shift+Up/Down history concatenation
     `leader`                  leader key sequence for keymap bindings
     `screensaver_cmd`         command to run as screensaver
     `screensaver_idle_time`   idle seconds before screensaver (0=off)
     `trunc_prompt_path`       max path segments in `\W` prompt escape
 
+  Highlight options (`highlight.*`) ~
+
+    Values are style descriptions: color names (`green`, `bright cyan`),
+    modifiers (`bold`, `italic`, `underline`), hex colors (`#rrggbb`),
+    backgrounds (`on red`, `on #1e1e2e`). See |prompt-color|.
+
+    `string`                  string literals (default: `yellow`)
+    `keyword`                 shell keywords (default: `yellow`)
+    `valid_command`           valid commands (default: `green`)
+    `invalid_command`         unknown commands (default: `bold red`)
+    `control_flow_keyword`    break/continue/return (default: `magenta`)
+    `argument`                command arguments (default: `white`)
+    `argument_file`           filename arguments (default: `underline white`)
+    `variable`                $VAR references (default: `cyan`)
+    `operator`                pipes, redirects, && || (default: `bold`)
+    `comment`                 comments (default: `italic bright black`)
+    `glob`                    glob characters (default: `bright cyan`)
+    `selection`               visual mode selection (default: `black on white`)
+
   Examples:
 
-      `shopt`                       list all options
-      `shopt core`                  list core options
-      `shopt core.dotglob`          print current value
-      `shopt core.dotglob=true`     enable dotglob
-      `shopt core.max_hist=5000`    set max history
+      `shopt`                                    list all options
+      `shopt core`                               list core options
+      `shopt core.dotglob`                       print current value
+      `shopt core.dotglob=true`                  enable dotglob
+      `shopt core.max_hist=5000`                 set max history
+      `shopt highlight.valid_command="bold green"`  customize colors
 
 ==============================================================================
 SOURCE                                           *builtin-source* *source*
