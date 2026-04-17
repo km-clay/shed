@@ -488,7 +488,7 @@ pub enum MotionKind {
     end: usize,
     inclusive: bool,
   },
-  /// A list of lines, not necessarily contiguous. Used for things like the `g` command in visual mode, which selects all lines that match a certain condition.
+  /// A list of lines, not necessarily contiguous. Used for things like line addresses in ex mode commands
   Lines {
     lines: Vec<usize>,
   },
@@ -605,67 +605,6 @@ impl IndentCtx {
   pub fn calculate(&mut self, input: &str) -> usize {
     self.checked_calculate(input).0
   }
-}
-
-#[derive(Debug,Clone)]
-pub struct AliasCtx {
-	stack: Vec<(Pos, HashSet<String>)>,
-	start_pos: Pos,
-}
-
-impl Default for AliasCtx {
-	fn default() -> Self {
-		Self {
-			stack: vec![(Pos::MIN, HashSet::default())],
-			start_pos: Pos::MIN
-		}
-	}
-}
-
-impl AliasCtx {
-	pub fn new() -> Self { Self::default() }
-	pub fn pop(&mut self) -> (Pos, HashSet<String>) {
-		// the stack should *always* have at least one context element
-		if self.stack.len() == 1 {
-			let last = self.stack.last_mut().unwrap();
-			std::mem::take(last)
-		} else {
-			self.stack.pop().unwrap()
-		}
-	}
-	pub fn push(&mut self, pos: Pos) {
-		self.stack.push((pos, HashSet::new()));
-	}
-	pub fn current_set(&mut self) -> &mut HashSet<String> {
-		&mut self.stack.last_mut().unwrap().1
-	}
-	pub fn current_pos(&self) -> Pos {
-		self.stack.last().unwrap().0
-	}
-	pub fn start_pos(&self) -> Pos {
-		self.start_pos
-	}
-	pub fn set_start_pos(&mut self, pos: Pos) {
-		self.start_pos = pos;
-	}
-	pub fn clamp_start(&mut self, end: Pos) {
-		if self.start_pos >= end {
-			self.start_pos = end;
-			while self.current_pos() > end {
-				let old_len = self.stack.len();
-				self.pop();
-				let new_len = self.stack.len();
-				if new_len == old_len {
-					break; // should never happen, but you never know
-				}
-			}
-			if self.current_pos() >= end {
-				let last = self.stack.last_mut().unwrap();
-				last.1.clear();
-				last.0 = end;
-			}
-		}
-	}
 }
 
 fn extract_range_contiguous(buf: &mut Vec<Line>, start: Pos, end: Pos) -> Vec<Line> {
@@ -883,7 +822,6 @@ pub struct LineBuf {
   pub insert_mode_start_pos: Option<Pos>,
   pub saved_col: Option<usize>,
   pub indent_ctx: IndentCtx,
-	pub alias_ctx: AliasCtx,
 
   pub scroll_offset: usize,
 
@@ -913,7 +851,6 @@ impl Default for LineBuf {
       insert_mode_start_pos: None,
       saved_col: None,
       indent_ctx: IndentCtx::new(),
-			alias_ctx: AliasCtx::new(),
       scroll_offset: 0,
       undo_stack: vec![],
       redo_stack: vec![],
@@ -990,7 +927,7 @@ impl LineBuf {
   }
   pub fn display_window_joined(&self) -> String {
     let display = self.to_string();
-    let do_hl = state::read_shopts(|s| s.line.highlight);
+    let do_hl = state::read_shopts(|s| s.highlight.enable);
     let mut highlighter = Highlighter::new();
     highlighter.only_visual(!do_hl);
     highlighter.load_input(&display, self.cursor_byte_pos());
@@ -3873,9 +3810,6 @@ impl LineBuf {
 
 		if is_separator && read_shopts(|o| o.prompt.expand_aliases) {
 			self.attempt_alias_expansion();
-			if cmd.is_hard_separator() {
-				self.alias_ctx.push(self.cursor.pos);
-			}
 		}
 
     // Execute the command
@@ -3895,8 +3829,6 @@ impl LineBuf {
     {
       edit.merging = false;
     }
-
-		self.alias_ctx.clamp_start(self.end_pos());
 
     if self.lines != before && !is_undo_op {
       self.redo_stack.clear();
@@ -4312,10 +4244,6 @@ impl LineBuf {
 		let alias_res = self.attempt_alias_expansion();
 
 		hist_res || alias_res
-	}
-
-	pub fn clear_alias_ctx(&mut self) {
-		std::mem::take(&mut self.alias_ctx);
 	}
 
 	fn word_before_cursor(&mut self) -> Option<(Pos,Pos)> {

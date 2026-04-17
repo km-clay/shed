@@ -252,9 +252,6 @@ shopt_group! {
     /// The number of spaces a tab character represents in the line editor
     tab_width: usize = 4,
 
-    /// Whether to enable or disable syntax highlighting on the prompt
-    highlight: bool = true,
-
     /// Whether to automatically indent new lines in multiline commands
     auto_indent: bool = true,
 
@@ -364,6 +361,8 @@ shopt_group! {
 shopt_group! {
   #[derive(Clone, Debug)]
   pub struct ShOptHighlight ("highlight") {
+		/// Whether to enable syntax highlighting in the line editor
+		enable: bool = true,
 		/// The color used for highlighting strings
 		string: String = "yellow".into(),
 		/// The color used for highlighting keywords like 'if' and 'for'
@@ -512,7 +511,6 @@ mod tests {
     assert!(prompt_output.contains("comp_limit"));
 
     let line_output = opts.get("line").unwrap().unwrap();
-    assert!(line_output.contains("highlight"));
     assert!(line_output.contains("tab_width"));
   }
 }

@@ -79,7 +79,6 @@ lib.concatLines [
         "shopt line.viewport_height=${toString cfg.shopts.line.viewport_height}"
         "shopt line.scroll_offset=${toString cfg.shopts.line.scroll_offset}"
         "shopt line.tab_width=${toString cfg.shopts.line.tab_width}"
-        "shopt line.highlight=${boolToString cfg.shopts.line.highlight}"
         "shopt line.linebreak_on_incomplete=${boolToString cfg.shopts.line.linebreak_on_incomplete}"
         "shopt line.line_numbers=${boolToString cfg.shopts.line.line_numbers}"
         "shopt line.auto_indent=${boolToString cfg.shopts.line.auto_indent}"
@@ -117,6 +116,7 @@ lib.concatLines [
         "shopt prompt.hist_cat=${boolToString cfg.shopts.prompt.hist_cat}"
         "shopt prompt.expand_aliases=${boolToString cfg.shopts.prompt.expand_aliases}"
 
+        ''shopt highlight.enable="${boolToString cfg.shopts.highlight.enable}"''
         ''shopt highlight.string="${cfg.shopts.highlight.string}"''
         ''shopt highlight.keyword="${cfg.shopts.highlight.keyword}"''
         ''shopt highlight.valid_command="${cfg.shopts.highlight.valid_command}"''

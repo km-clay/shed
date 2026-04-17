@@ -910,7 +910,6 @@ impl ShedLine {
 
   fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
     self.editor.clear_hint();
-		self.editor.clear_alias_ctx();
     self.editor.set_cursor_from_flat(self.editor.cursor_max());
     self.print_line(true)?;
     if let Some(layout) = &self.old_layout {

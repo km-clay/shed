@@ -180,11 +180,6 @@
                 default = 4;
                 description = "The number of spaces a tab character represents in the line editor";
               };
-              highlight = lib.mkOption {
-                type = lib.types.bool;
-                default = true;
-                description = "Whether to enable syntax highlighting in the shell";
-              };
               linebreak_on_incomplete = lib.mkOption {
                 type = lib.types.bool;
                 default = true;
@@ -382,6 +377,11 @@
         highlight = lib.mkOption {
           type = lib.types.submodule {
             options = {
+              enable = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to enable syntax highlighting in the shell";
+              };
               string = lib.mkOption {
                 type = lib.types.str;
                 default = "yellow";
