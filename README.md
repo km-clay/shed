@@ -17,8 +17,7 @@ A Linux shell written in Rust. The name is a nod to the original Unix utilities 
 
 `shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
 
-<img width="380" height="270" alt="shed_comp" src="https://github.com/user-attachments/assets/d317387e-4c33-406a-817f-1c183afab749" />
-<img width="380" height="270" alt="shed_search" src="https://github.com/user-attachments/assets/5109eb14-5c33-46bb-ab39-33c60ca039a8" />
+<img width="931" height="537" alt="file" src="https://github.com/user-attachments/assets/f078857a-e781-46f1-8bf3-06317f1d6ccb" />
 
 ---
 
