@@ -803,6 +803,7 @@ HIST                                             *builtin-hist* *hist*
     `--before {date}`         entries before {date}
     `--contains {str}`        entries whose command contains {str}
     `--starts-with {str}`     entries whose command starts with {str}
+    `--ends-with {str}`       entries whose command ends with {str}
     `--matches {regex}`       entries matching extended regex {regex}
     `--duration-gt {dur}`     entries with runtime longer than {dur}
     `--duration-lt {dur}`     entries with runtime shorter than {dur}
