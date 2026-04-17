@@ -2,7 +2,8 @@
 
 A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing and general interactive UX improvements over existing shells.
 
-<img width="506" height="407" alt="shed" src="https://github.com/user-attachments/assets/3945f663-a361-4418-bf20-0c4eaa2a36d2" />
+<img width="1238" height="672" alt="file" src="https://github.com/user-attachments/assets/b4216ce5-ebc4-4c75-9f4b-4f658a377cca" />
+
 
 ## Features
 
