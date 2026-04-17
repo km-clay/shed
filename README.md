@@ -207,6 +207,14 @@ help cd         # opens builtins.txt and jumps to the 'cd' entry
 
 ## Building
 
+### Arch Linux (AUR)
+
+```sh
+yay -S shed-sh
+```
+
+Or your favorite AUR helper (`paru -S shed-sh`, etc).
+
 ### Cargo
 
 Requires Rust (edition 2024).

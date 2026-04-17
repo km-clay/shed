@@ -420,7 +420,7 @@
               variable = lib.mkOption {
                 type = lib.types.str;
                 default = "cyan";
-                description = "Style for variable references like $VAR and ${VAR}";
+                description = ''Style for variable references like $VAR and ''${VAR}'';
               };
               operator = lib.mkOption {
                 type = lib.types.str;
