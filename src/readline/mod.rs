@@ -256,11 +256,6 @@ impl Prompt {
     self.psr_expanded.as_deref()
   }
 
-  /// Mark the prompt as needing re-expansion on next access.
-  pub fn invalidate(&mut self) {
-    self.dirty = true;
-  }
-
   fn refresh_now(&mut self) {
     let saved_status = state::get_status();
     *self = Self::new();
@@ -269,7 +264,7 @@ impl Prompt {
   }
 
   pub fn refresh(&mut self) {
-    self.invalidate();
+    self.dirty = true;
   }
 }
 
@@ -1838,8 +1833,15 @@ impl ShedLine {
 	}
 
   pub fn fire_editor_command(&mut self, cmd: EditCmd) -> ShResult<()> {
-    // just a direct wrapper for now, but might want to add some extra logic here later
-    self.editor.exec_cmd(cmd)
+		let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
+    let res = self.editor.exec_cmd(cmd);
+
+		if is_shell_cmd {
+			self.needs_redraw = true;
+			self.prompt.refresh();
+		}
+
+		res
   }
 }
 

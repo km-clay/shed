@@ -40,7 +40,8 @@ use crate::{
     term::get_win_size,
   },
   sherr,
-  state::{self, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_meta, write_vars},
+  libsh::utils::AutoCmdVecUtils,
+  state::{self, AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_meta, write_vars},
 };
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
@@ -1141,10 +1142,14 @@ impl LineBuf {
       Ok(())
     })?;
 
-    write(borrow_fd(STDOUT_FILENO), b"\r\n")?;
+    let pre_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
+    let post_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
+
+    pre_cmd.exec();
     RawModeGuard::with_cooked_mode(|| {
       exec_input(cmd.to_string(), None, true, Some("<ex-mode-cmd>".into()))
     })?;
+    post_cmd.exec();
 
     let mut new_anchor = None;
 
@@ -3456,14 +3461,18 @@ impl LineBuf {
           self.insert_str(&contents);
         }
         ReadSrc::Cmd(cmd) => {
+          let pre_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
+          let post_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
+          pre_cmd.exec();
           let output = match expand_cmd_sub(cmd) {
             Ok(out) => out,
             Err(e) => {
+              post_cmd.exec();
               e.print_error();
               return Ok(());
             }
           };
-
+          post_cmd.exec();
           self.insert_str(&output);
         }
       },
@@ -3508,7 +3517,11 @@ impl LineBuf {
           let mut stack = IoStack::new();
           stack.push_frame(frame);
 
+          let pre_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
+          let post_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
+          pre_cmd.exec();
           exec_input(cmd.to_string(), Some(stack), false, Some("ex write".into()))?;
+          post_cmd.exec();
         }
       },
       Verb::Edit(path) => {
