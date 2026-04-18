@@ -6,6 +6,7 @@ use std::{
   slice::SliceIndex,
 };
 
+use ariadne::Span;
 use itertools::Either;
 use regex::Regex;
 use smallvec::SmallVec;
@@ -4316,11 +4317,13 @@ impl LineBuf {
 
 		let Some(last) = tokens.pop() else { return false; };
 		if !last.flags.contains(TkFlags::IS_CMD) { return false; }
+		let tk_start = last.span.start();
 		let word = last.as_str();
 
 
-		if let Some(alias) = read_logic(|l| l.aliases().get(word).cloned()) {
-			let alias = alias.to_string();
+		if let Some(alias) = read_logic(|l| l.aliases().get(word).cloned())
+		&& let alias = alias.to_string()
+		&& !raw[tk_start..].starts_with(&alias) {
 			let delta = alias.graphemes(true).count() as isize - word.graphemes(true).count() as isize;
 			let expanded = last.replaced(&alias);
 

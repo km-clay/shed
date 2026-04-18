@@ -211,7 +211,8 @@ command history navigable with `Up` and `Down`.
 10. Ex Command History                         *ex-history*
 
   Ex mode maintains its own command history, separate from the main
-  shell history. Navigate with `Up` and `Down` while in ex mode.
+  shell history. Navigate with `Up` and `Down` while in ex mode, or
+	open history search with `Ctrl+R`.
 
 ==============================================================================
 See also: |keybinds| |autocmd| |prompt|

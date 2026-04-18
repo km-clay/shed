@@ -47,7 +47,8 @@ pub enum StatusHeader {
 #[derive(Debug)]
 pub enum QueryHeader {
   Cwd,
-  Var(String),
+  GetVar(String),
+	SetVar(String,String,VarFlags),
   Status(Vec<StatusHeader>),
 }
 
@@ -178,13 +179,58 @@ impl FromStr for SocketRequest {
             Ok(Self::Query(QueryHeader::Status(headers)))
           }
           "var" => {
-            let Some(var_name) = args.next() else {
+            let Some(kind) = args.next() else {
               return Err(sherr!(
                 ParseErr,
-                "Missing variable name in 'query var' request",
+								"Expected 'get' or 'set' in 'var' query",
               ));
             };
-            Ok(Self::Query(QueryHeader::Var(var_name.to_string())))
+						match kind {
+							"get" => {
+								let Some(var_name) = args.next() else {
+									return Err(sherr!(
+										ParseErr,
+										"Missing variable name in 'query var get' request",
+									));
+								};
+								Ok(Self::Query(QueryHeader::GetVar(var_name.to_string())))
+							}
+							"set" => {
+								let Some(var_name) = args.next() else {
+									return Err(sherr!(
+										ParseErr,
+										"Missing variable name in 'query var set' request",
+									));
+								};
+								let Some(value) = args.next() else {
+									return Err(sherr!(
+										ParseErr,
+										"Missing variable value in 'query var set' request",
+									));
+								};
+								let mut flags = VarFlags::NONE;
+								while let Some(flag) = args.next() {
+									match flag.to_lowercase().as_str() {
+										"export" => flags |= VarFlags::EXPORT,
+										"local" => flags |= VarFlags::LOCAL,
+										"readonly" => flags |= VarFlags::READONLY,
+										_ => {
+											return Err(sherr!(
+												ParseErr,
+												"Unknown variable flag in 'query var set' request: {}",
+												flag,
+											));
+										}
+									}
+								}
+								Ok(Self::Query(QueryHeader::SetVar(var_name.to_string(), value.to_string(), flags)))
+							}
+							_ => Err(sherr!(
+								ParseErr,
+								"Unknown query kind in 'query var' request: {}",
+								kind,
+							)),
+						}
           }
           _ => Err(sherr!(
             ParseErr,

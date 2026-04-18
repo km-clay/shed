@@ -108,12 +108,27 @@ processes.
 
       Returns the current working directory.
 
-  `query::var::{name}`                         *socket-query-var*
+  `query::var::get::{name}`                     *socket-query-var-get*
 
       Returns the value of a shell variable.
 
-          `query::var::PATH`
-          `query::var::SHED_VI_MODE`
+          `query::var::get::PATH`
+          `query::var::get::SHED_VI_MODE`
+
+  `query::var::set::{name}::{value}[::flags]`  *socket-query-var-set*
+
+      Sets a shell variable to the given value. Optional flags
+      can be appended:
+
+          `export`     mark the variable for export
+          `local`      mark as local scope
+          `readonly`   mark as read-only
+
+      Responds with `ok` on success.
+
+          `query::var::set::MY_VAR::hello`
+          `query::var::set::MY_VAR::hello::export`
+          `query::var::set::MY_VAR::hello::export::readonly`
 
   `query::status`                              *socket-query-status*
 

@@ -250,6 +250,10 @@ impl Highlighter {
     chars[..ti].iter().collect()
   }
 
+	/// Expands control characters in the input to visible representations
+	///
+	/// Operates on chars in the range 0x00..0x1F, replacing them with caret notation (e.g., `^A` for 0x01)
+	/// Newline (`'\n'`), tab (`'\t'`), and carriage return (`'\r'`) are preserved as-is. This allows control characters to be visible in the highlighted output.
   pub fn expand_control_chars(&mut self) {
     let mut expanded = String::new();
     let mut chars = self.input.chars().peekable();
