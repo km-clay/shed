@@ -12,12 +12,11 @@ use crate::readline::editcmd::{
   Anchor, CmdFlags, EditCmd, LineAddr, Motion, MotionCmd, ReadSrc, RegisterName, To, Verb, VerbCmd,
   WriteDest,
 };
-use crate::readline::editmode::emacs::Emacs;
 use crate::readline::editmode::{EditMode, ModeReport};
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
-use crate::state::{self, write_meta};
+use crate::state::write_meta;
 use crate::verb;
 use crate::{bitflags, match_loop};
 use crate::{motion, sherr};

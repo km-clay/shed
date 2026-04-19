@@ -31,7 +31,7 @@ use crate::{
     lex::{self, LexFlags, LexStream, Tk, TkFlags, TkRule},
   },
   prelude::*,
-  procio::{IoFrame, IoMode, IoStack, borrow_fd},
+  procio::{IoFrame, IoMode, IoStack},
   readline::{
     editcmd::{LineAddr, ReadSrc, VerbCmd, WriteDest},
     editmode::ex::SubFlags,

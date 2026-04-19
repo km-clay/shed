@@ -3,33 +3,30 @@ mod pager;
 
 use std::{
   env,
-  io::Write,
-  ops::Range,
   path::{Path, PathBuf},
-  rc::Rc,
 };
 
 use crate::{
   builtin::{
     help::{
       markup::StyledHelp,
-      pager::{HelpPager, PagerCmd, PagerEvent},
+      pager::{HelpPager, PagerEvent},
     },
     join_raw_arg_iter,
   },
   libsh::{
     error::ShResult,
-    guards::{RawModeGuard, TuiGuard},
+    guards::TuiGuard,
     sys::TTY_FILENO,
   },
   parse::{
     NdRule, Node,
-    execute::{exec_input, prepare_argv},
+    execute::prepare_argv,
   },
   procio::borrow_fd,
   readline::complete::ScoredCandidate,
   sherr,
-  state::{self, write_meta},
+  state::write_meta,
 };
 
 use markup::TAG_SEQ;

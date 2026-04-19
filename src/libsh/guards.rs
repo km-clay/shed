@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::os::fd::RawFd;
 
-use nix::sys::termios::{self, LocalFlags, Termios, tcgetattr, tcsetattr};
+use nix::sys::termios::{self, Termios, tcgetattr, tcsetattr};
 use nix::unistd::{isatty, write};
 use scopeguard::guard;
 

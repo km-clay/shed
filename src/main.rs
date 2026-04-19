@@ -22,7 +22,6 @@ mod tests;
 #[cfg(test)]
 pub mod testutil;
 
-use std::os::fd::BorrowedFd;
 use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 use std::sync::atomic::Ordering;
@@ -35,7 +34,7 @@ use smallvec::SmallVec;
 
 use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
-use crate::libsh::error::{self, ShErr, ShErrKind, ShResult};
+use crate::libsh::error::{self, ShErrKind, ShResult};
 use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::term::set_bracketed_paste;
 use crate::libsh::utils::AutoCmdVecUtils;

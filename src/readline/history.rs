@@ -1,7 +1,6 @@
 use std::{
   cmp::Ordering,
   env,
-  path::PathBuf,
   sync::Arc,
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -655,7 +654,7 @@ impl History {
       .hint_cache
       .iter()
       .rev()
-      .find(|e| e.command().starts_with(&prefix) && e.command() != &prefix)
+      .find(|e| e.command().starts_with(&prefix) && e.command() != prefix)
       .map(|e| Hint::History(to_lines(e.command())))
   }
 

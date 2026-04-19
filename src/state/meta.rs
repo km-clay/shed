@@ -21,8 +21,6 @@ use nix::{
     time::TimeVal,
   },
 };
-use rusqlite::Connection;
-
 use crate::{
   builtin::BUILTINS,
   expand::expand_keymap,

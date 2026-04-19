@@ -1,5 +1,3 @@
-use std::{fmt::Display, ops::BitOr, str::FromStr};
-
 use nix::{libc::STDOUT_FILENO, unistd::write};
 use yansi::{Paint, Painted};
 
@@ -86,7 +84,7 @@ pub fn hex_to_rgb(hex: &str) -> ShResult<(u8, u8, u8)> {
   if hex.len() != 6
     || !hex
       .chars()
-      .all(|ch| ('a'..='f').contains(&ch) || ('0'..='9').contains(&ch))
+      .all(|ch: char| ('a'..='f').contains(&ch) || ch.is_ascii_digit())
   {
     return Err(sherr!(
       ParseErr,

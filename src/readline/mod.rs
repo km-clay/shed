@@ -1,4 +1,3 @@
-use crate::libsh::error::ShErr;
 use crate::libsh::strops::QuoteState;
 use crate::motion;
 use crate::parse::lex::LexStream;

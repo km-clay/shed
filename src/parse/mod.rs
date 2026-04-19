@@ -2331,10 +2331,6 @@ fn parse_err_full(reason: &str, blame: &Span, context: LabelCtx) -> ShErr {
   sherr!(ParseErr @ blame.clone(), "{reason}").with_context(context)
 }
 
-fn is_func_name(tk: Option<&Tk>) -> bool {
-  tk.is_some_and(|tk| tk.flags.contains(TkFlags::FUNCNAME))
-}
-
 #[cfg(test)]
 pub mod tests {
   use pretty_assertions::assert_eq;

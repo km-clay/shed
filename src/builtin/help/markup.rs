@@ -4,7 +4,6 @@ use crate::{libsh::strops::QuoteState, match_loop, readline::markers};
 
 pub const TAG_SEQ: &str = "\x1b[1;33m"; // bold yellow - searchable tags
 pub const REF_SEQ: &str = "\x1b[4;36m"; // underline cyan - cross-references
-pub const SELECTED_REF_SEQ: &str = "\x1b[7;4;36m"; // inverse underline cyan - selected cross-reference
 pub const SEARCH_RES_SEQ: &str = "\x1b[1;7;m"; // bold inverse - search result highlight
 pub const RESET_SEQ: &str = "\x1b[0m";
 pub const HEADER_SEQ: &str = "\x1b[1;35m"; // bold magenta - section headers
@@ -28,17 +27,8 @@ impl MarkedSpan {
     }
   }
 
-  pub fn prefix_seq<'a>(&self, source: &'a str) -> &'a str {
-    &source[self.prefix_seq.clone()]
-  }
   pub fn content<'a>(&self, source: &'a str) -> &'a str {
     &source[self.content.clone()]
-  }
-  pub fn postfix_seq<'a>(&self, source: &'a str) -> &'a str {
-    &source[self.postfix_seq.clone()]
-  }
-  pub fn full<'a>(&self, source: &'a str) -> &'a str {
-    &source[self.prefix_seq.start..self.postfix_seq.end]
   }
   pub fn line_no(&self, source: &str) -> usize {
     source[..self.prefix_seq.start]
