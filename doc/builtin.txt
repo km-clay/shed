@@ -1166,12 +1166,18 @@ SET                                              *builtin-set* *set*
     allexport, emacs, errexit, hashall, ignoreeof, monitor, noclobber,
     noexec, noglob, nolog, notify, nounset, verbose, vi, xtrace
 
+  Reset ~
+
+    `set -`            reset all set options to their default values
+
   Positional parameters ~
 
     `set -- arg ...`   set $1, $2, ... to {arg}s
     `set --`           clear all positional parameters
 
   With no arguments, prints all shell variables and their values.
+  With `-o` or `+o` and no option name, prints all options in a
+  format that can be re-sourced to restore the current state.
 
   Examples:
 
@@ -1179,7 +1185,9 @@ SET                                              *builtin-set* *set*
       `set -x`              enable command tracing
       `set -o noclobber`    protect files from `>`
       `set +x`              disable tracing
+      `set -`               reset all options to defaults
       `set -- a b c`        set $1=a $2=b $3=c
+      `set -o`              print all options as set/unset commands
 
 ==============================================================================
 SHIFT                                            *builtin-shift* *shift*
@@ -1248,6 +1256,26 @@ SHOPT                                            *builtin-shopt* *shopt*
     `screensaver_cmd`         command to run as screensaver
     `screensaver_idle_time`   idle seconds before screensaver (0=off)
     `trunc_prompt_path`       max path segments in `\W` prompt escape
+
+  Set options (`set.*`) ~
+
+    These mirror the POSIX `set -o` options. They can also be set
+    using the traditional `set -o {option}` / `set +o {option}` syntax.
+    See `builtin-set` for more details.
+
+    `allexport`               auto-export all variable assignments (`set -a`)
+    `errexit`                 exit on non-zero command status (`set -e`)
+    `hashall`                 cache command locations in a hash table
+    `monitor`                 enable job control and background processes (`set -m`)
+    `noclobber`               prevent `>` from overwriting files (`set -C`)
+    `noexec`                  parse but don't execute commands (`set -n`)
+    `noglob`                  disable globbing/filename expansion (`set -f`)
+    `nolog`                   don't save function definitions to history
+    `notify`                  print job status immediately on completion (`set -b`)
+    `nounset`                 error on expansion of unset variables (`set -u`)
+    `verbose`                 print shell input to stderr as read (`set -v`)
+    `vi`                      vi keybindings (false = emacs mode)
+    `xtrace`                  print commands after expansion (`set -x`)
 
   Highlight options (`highlight.*`) ~
 

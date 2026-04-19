@@ -202,7 +202,15 @@ pub fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResu
         pager = pager.saturating_sub(1);
       }
       PagerEvent::Continue => continue,
-      PagerEvent::Exit => break,
+      PagerEvent::Exit => {
+				if pager > 0 {
+					page_stack.truncate(pager); // go back to previous page
+					pager -= 1;
+				} else {
+					break; // exit pager
+				}
+			}
+
     }
   }
 

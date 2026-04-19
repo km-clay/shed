@@ -4,7 +4,8 @@
 
 The line editor uses a vi-style modal editing system with seven modes:
 Normal, Insert, Visual, Replace, Ex (command), Verbatim, and Emacs. The
-default mode on startup is Insert.
+default mode on startup is dependent on the value of the shell option `set.vi`,
+see |builtin-shopt| for more info.
 
 ==============================================================================
 1. Normal Mode                                 *normal-mode*

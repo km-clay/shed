@@ -75,6 +75,9 @@ struct ShedArgs {
 
   #[arg(long, short)]
   login_shell: bool,
+
+	#[arg(long, short)]
+	welcome: bool
 }
 
 /// We need to make sure that even if we panic, our child processes get sighup
@@ -329,8 +332,8 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     m.create_socket()
   })?;
 
-  if let Some(msg) = read_meta(|m| m.welcome_message()) {
-    println!("{msg}");
+  if let Some(msg) = read_meta(|m| m.welcome_message(args.welcome)) {
+    println!("\n{msg}");
   }
 
   if args.login_shell {

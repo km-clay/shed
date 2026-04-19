@@ -849,7 +849,7 @@ impl MetaTab {
     })?;
     Ok(())
   }
-  pub fn welcome_message(&self) -> Option<String> {
+  pub fn welcome_message(&self, force: bool) -> Option<String> {
     let res = query_db(|conn| {
       let result = conn.query_row(
         "SELECT value FROM meta WHERE key='show_welcome'",
@@ -866,7 +866,7 @@ impl MetaTab {
     .flatten()
     .flatten();
 
-    if res.is_some_and(|r| r == "0") {
+    if res.is_some_and(|r| r == "0") && !force {
       return None;
     }
 
