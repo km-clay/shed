@@ -109,9 +109,9 @@ impl EditMode for ViEx {
       }
       E(C::Esc, M::NONE) => Ok(Some(EditCmd {
         register: RegisterName::default(),
-        verb: Some(verb!(Verb::NormalMode)),
+        verb: None,
         motion: None,
-        flags: CmdFlags::empty(),
+        flags: CmdFlags::EXIT_CUR_MODE,
         raw_seq: "".into(),
       })),
       _ => self.pending_cmd.editor.handle_key(key).map(|_| None),

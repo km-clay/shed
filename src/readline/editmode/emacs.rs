@@ -142,6 +142,11 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
+			alt!(';') => {
+				self.set_verb(verb!(Verb::ExMode));
+				self.take_cmd()
+			}
+
       ctrl!('W') | E(K::Backspace, M::ALT) => {
         self.set_verb(verb!(Verb::Kill));
         self.set_motion(motion!(Motion::WordMotion(

@@ -346,7 +346,7 @@ default mode on startup is Insert.
   `Tab`           trigger completion
   `Shift+Tab`     trigger completion (reverse)
   `Ctrl+R`        open history search
-  `:`             enter ex mode
+  `Alt+;`             enter ex mode
 
 ==============================================================================
 6. Ex Mode                                     *ex-mode-keys*
