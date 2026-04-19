@@ -2,10 +2,13 @@ use std::path::PathBuf;
 
 use bitflags::bitflags;
 
-use crate::{readline::{
-  editmode::ex::SubFlags,
-  linebuf::{Grapheme, Pos},
-}, state::read_vars};
+use crate::{
+  readline::{
+    editmode::ex::SubFlags,
+    linebuf::{Grapheme, Pos},
+  },
+  state::read_vars,
+};
 
 use super::register::{RegisterContent, append_register, read_register, write_register};
 
@@ -192,33 +195,29 @@ impl EditCmd {
       .as_ref()
       .is_some_and(|m| matches!(m.1, Motion::CharSearch(..)))
   }
-	pub fn is_separator_insert(&self) -> bool {
-		self.verb
-			.as_ref()
-			.is_some_and(|v| {
-				let mut ifs = read_vars(|v| v.try_get_var("IFS")).unwrap_or(" \t\n".into());
-				ifs.push(';');
-				match &v.1 {
-					Verb::AcceptLineOrNewline => true,
-					Verb::InsertChar(ch) => ifs.contains(*ch),
-					Verb::Insert(s) => s.len() == 1 && ifs.contains(s.chars().next().unwrap()),
-					_ => false
-				}
-			})
-	}
-	pub fn is_hard_separator(&self) -> bool {
-		self.verb
-			.as_ref()
-			.is_some_and(|v| {
-				let seps = ";\n";
-				match &v.1 {
-					Verb::AcceptLineOrNewline => true,
-					Verb::InsertChar(ch) => seps.contains(*ch),
-					Verb::Insert(s) => s.len() == 1 && seps.contains(s.chars().next().unwrap()),
-					_ => false
-				}
-			})
-	}
+  pub fn is_separator_insert(&self) -> bool {
+    self.verb.as_ref().is_some_and(|v| {
+      let mut ifs = read_vars(|v| v.try_get_var("IFS")).unwrap_or(" \t\n".into());
+      ifs.push(';');
+      match &v.1 {
+        Verb::AcceptLineOrNewline => true,
+        Verb::InsertChar(ch) => ifs.contains(*ch),
+        Verb::Insert(s) => s.len() == 1 && ifs.contains(s.chars().next().unwrap()),
+        _ => false,
+      }
+    })
+  }
+  pub fn is_hard_separator(&self) -> bool {
+    self.verb.as_ref().is_some_and(|v| {
+      let seps = ";\n";
+      match &v.1 {
+        Verb::AcceptLineOrNewline => true,
+        Verb::InsertChar(ch) => seps.contains(*ch),
+        Verb::Insert(s) => s.len() == 1 && seps.contains(s.chars().next().unwrap()),
+        _ => false,
+      }
+    })
+  }
   pub fn is_submit_action(&self) -> bool {
     self
       .verb

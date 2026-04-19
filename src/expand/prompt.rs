@@ -12,7 +12,7 @@ pub enum PromptTk {
   AsciiOct(i32),
   Text(String),
   AnsiSeq(String),
-	Color(String), // plain english color descriptions
+  Color(String),    // plain english color descriptions
   Function(String), // Expands to the output of any defined shell function
   RuntimeMillis,
   RuntimeFormatted,
@@ -237,19 +237,19 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
           '\\' => tokens.push(PromptTk::Text("\\".into())),
           '"' => tokens.push(PromptTk::Text("\"".into())),
           '\'' => tokens.push(PromptTk::Text("'".into())),
-					'c' => {
-						let Some('{') = chars.peek() else {
-							tk_text.push_str("\\c");
-							break;
-						};
-						chars.next(); // consume the '{'
-						let mut desc = String::new();
-						match_loop!(chars.next() => ch, {
-							'}' => break,
-							_ => desc.push(ch)
-						});
-						tokens.push(PromptTk::Color(desc));
-					}
+          'c' => {
+            let Some('{') = chars.peek() else {
+              tk_text.push_str("\\c");
+              break;
+            };
+            chars.next(); // consume the '{'
+            let mut desc = String::new();
+            match_loop!(chars.next() => ch, {
+              '}' => break,
+              _ => desc.push(ch)
+            });
+            tokens.push(PromptTk::Color(desc));
+          }
           '@' => {
             let mut func_name = String::new();
             let is_braced = chars.peek() == Some(&'{');
@@ -372,12 +372,12 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
   match_loop!(tokens.next() => token, {
     PromptTk::Text(txt) => result.push_str(&txt),
     PromptTk::AnsiSeq(params) => result.push_str(&params),
-		PromptTk::Color(c) => {
-			match color_from_description(&c) {
-				Ok(esc_seq) => result.push_str(&esc_seq),
-				Err(e) => write_meta(|m| m.post_status_message(e.to_string()))
-			}
-		}
+    PromptTk::Color(c) => {
+      match color_from_description(&c) {
+        Ok(esc_seq) => result.push_str(&esc_seq),
+        Err(e) => write_meta(|m| m.post_status_message(e.to_string()))
+      }
+    }
     PromptTk::RuntimeMillis => {
       if let Some(runtime) = write_meta(|m| m.get_time()) {
         let runtime_millis = runtime.as_millis().to_string();

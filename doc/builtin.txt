@@ -244,7 +244,8 @@ ALIAS                                            *builtin-alias* *alias*
   `alias [name[=value] ...]`
 
   With no arguments, lists all defined aliases in alphabetical order,
-  in the form `name = "value"`.
+  in the form `name="value"`. Alias definitions printed this way are
+	valid shell input that can be reused to recreate the alias.
 
   With arguments of the form `name=value`, defines an alias. When
   {name} is used as a command, it is replaced with {value} before
@@ -399,16 +400,7 @@ BG                                               *builtin-bg* *bg*
 
   `bg [%jobid]`
 
-  Resume a stopped job in the background. If no {jobid} is given, the
-  current (most recently active) job is used. The job continues running
-  without holding the terminal.
-
-  {jobid} may be `%N` (job number) or `%{cmd}` (prefix match on command).
-
-  Examples:
-
-      `bg`          resume current job in background
-      `bg %2`       resume job 2 in background
+  Resume a stopped job in the background. See |jobs-bg| for details.
 
 ==============================================================================
 CD                                               *builtin-cd* *cd*
@@ -525,21 +517,7 @@ DISOWN                                           *builtin-disown* *disown*
 
   `disown [-h] [-a] [%jobid | pid]`
 
-  Remove a job from the shell's job table. A disowned job is no longer
-  tracked and will not produce a "Terminated" notification when it exits.
-
-  `-h`    instead of removing the job, mark it so it does not receive
-          SIGHUP when the shell exits (nohup semantics)
-  `-a`    apply to all current jobs instead of a specific one
-
-  Without an argument, operates on the current (most recently active) job.
-
-  Examples:
-
-      `disown`          disown the current job
-      `disown %2`       disown job 2
-      `disown -h %1`    protect job 1 from SIGHUP on shell exit
-      `disown -a`       disown all jobs
+  Remove a job from the shell's job table. See |jobs-disown| for details.
 
 ==============================================================================
 DIRS                                             *builtin-dirs* *dirs*
@@ -550,7 +528,7 @@ DIRS                                             *builtin-dirs* *dirs*
   at the top (index 0); entries pushed by `pushd` follow.
 
   `-c`       clear the directory stack
-  `-l`       show full paths — do not abbreviate `$HOME` as `~`
+  `-l`       show full paths. Do not abbreviate `$HOME` as `~`
   `-p`       print one entry per line
   `-v`       print one entry per line, preceded by its stack index
   `+N`       print only the entry at position N from the top (0-based)
@@ -623,7 +601,7 @@ EXEC                                             *builtin-exec* *exec*
   `exec [command [arg ...]]`
 
   Replace the current shell process with {command}. On success `exec`
-  does not return — the shell is replaced entirely.
+  does not return. The shell is replaced entirely.
 
   With no arguments, succeeds silently (useful for applying redirections
   to the current shell without replacing it).
@@ -680,16 +658,8 @@ FG                                               *builtin-fg* *fg*
 
   `fg [%jobid]`
 
-  Bring a stopped or background job to the foreground. The shell waits
-  for the job to complete (or stop again) before returning the prompt.
-  If no {jobid} is given, the current job is used.
-
-  {jobid} may be `%N` (job number) or `%{cmd}` (prefix match on command).
-
-  Examples:
-
-      `fg`          bring current job to foreground
-      `fg %2`       bring job 2 to foreground
+  Bring a stopped or background job to the foreground. See |jobs-fg|
+  for details.
 
 ==============================================================================
 FC                                               *builtin-fc* *fc*
@@ -874,19 +844,7 @@ JOBS                                             *builtin-jobs* *jobs*
 
   `jobs [-lpnrs]`
 
-  List background and stopped jobs.
-
-  `-l`    long format: include PIDs and process group IDs
-  `-p`    print only the process group ID of each job
-  `-n`    print only jobs whose status has changed since last report
-  `-r`    print only running jobs
-  `-s`    print only stopped jobs
-
-  Examples:
-
-      `jobs`         list all jobs
-      `jobs -l`      list jobs with PIDs
-      `jobs -r`      list only running jobs
+  List background and stopped jobs. See |jobs-list| for details.
 
 ==============================================================================
 KEYMAP                                           *builtin-keymap* *keymap*
@@ -1469,11 +1427,11 @@ TYPE                                             *builtin-type* *type*
   Describe how the shell would interpret each {name} if used as a
   command. Reports the first match in lookup order:
 
-    1. function — prints name, source file, and line/column
-    2. alias    — prints the alias definition and source location
-    3. builtin  — prints "{name} is a shell builtin"
-    4. keyword  — prints "{name} is a shell keyword"
-    5. command  — prints the full path found in `$PATH`
+    1. function - prints name, source file, and line/column
+    2. alias    - prints the alias definition and source location
+    3. builtin  - prints "{name} is a shell builtin"
+    4. keyword  - prints "{name} is a shell keyword"
+    5. command  - prints the full path found in `$PATH`
 
   Returns exit status 1 if a name is not found.
 
@@ -1541,15 +1499,4 @@ WAIT                                             *builtin-wait* *wait*
 
   `wait [{id} ...]`
 
-  Wait for background jobs to finish. Exit status is the exit status of
-  the last waited-on job.
-
-  With no arguments, waits for all background jobs.
-
-  {id} can be a PID, a job table number, or `%N`/`%{cmd}` notation.
-
-  Examples:
-
-      `wait`          wait for all jobs
-      `wait %1`       wait for job 1
-      `wait 4321`     wait for PID 4321
+  Wait for background jobs to finish. See |jobs-wait| for details.

@@ -51,7 +51,7 @@ pub fn alias(node: Node) -> ShResult<()> {
 
         let stdout = borrow_fd(STDOUT_FILENO);
         write(stdout, alias_output.as_bytes())?;
-				continue
+        continue;
       };
       if name == "command" || name == "builtin" {
         return Err(sherr!(

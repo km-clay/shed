@@ -326,13 +326,13 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
   state::init_db_conn(true)?;
   write_meta(|m| {
-		m.ensure_meta_table()?;
-		m.create_socket()
-	})?;
+    m.ensure_meta_table()?;
+    m.create_socket()
+  })?;
 
-	if let Some(msg) = read_meta(|m| m.welcome_message()) {
-		println!("{msg}");
-	}
+  if let Some(msg) = read_meta(|m| m.welcome_message()) {
+    println!("{msg}");
+  }
 
   if args.login_shell {
     source_login().ok();
@@ -350,9 +350,9 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     e.print_error();
   }
 
-	if let Ok(welcome) = env::var("SHELL_WELCOME") {
-		eprintln!("{welcome}");
-	}
+  if let Ok(welcome) = env::var("SHELL_WELCOME") {
+    eprintln!("{welcome}");
+  }
 
   let mut readline = match ShedLine::new(Prompt::new(), *TTY_FILENO) {
     Ok(rl) => rl,
@@ -376,10 +376,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let mut socket_mode = ShedSocket::mode();
 
   let mut poll_fds: SmallVec<[PollFd; 2]> = SmallVec::new();
-  let tty_fd = PollFd::new(
-    borrow_fd(*TTY_FILENO),
-    PollFlags::POLLIN,
-  );
+  let tty_fd = PollFd::new(borrow_fd(*TTY_FILENO), PollFlags::POLLIN);
 
   // Main poll loop
   loop {
@@ -390,10 +387,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     poll_fds.clear();
     poll_fds.push(tty_fd);
     if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
-      poll_fds.push(PollFd::new(
-        borrow_fd(fd),
-        PollFlags::POLLIN,
-      ));
+      poll_fds.push(PollFd::new(borrow_fd(fd), PollFlags::POLLIN));
     }
 
     if read_shopts(|o| o.set.vi) != vi_mode {
@@ -469,17 +463,17 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       .revents()
       .is_some_and(|r| r.contains(PollFlags::POLLIN))
     {
-			match readline.read() {
-				Ok(_) => { /* data read, will be processed below */ }
-				Err(e) => match e.kind() {
-					ShErrKind::LoopBreak(_) => break,
-					ShErrKind::LoopContinue(_) => continue,
-					_ => {
-						e.print_error();
-						break
-					}
-				}
-			}
+      match readline.read() {
+        Ok(_) => { /* data read, will be processed below */ }
+        Err(e) => match e.kind() {
+          ShErrKind::LoopBreak(_) => break,
+          ShErrKind::LoopContinue(_) => continue,
+          _ => {
+            e.print_error();
+            break;
+          }
+        },
+      }
     }
 
     // check socket fd
@@ -550,11 +544,14 @@ fn handle_readline_event(
       let cmd_start = Instant::now();
       write_meta(|m| m.start_timer());
 
-			readline.writer.flush_write(OSC_EXEC_START).ok();
-			let res = RawModeGuard::with_cooked_mode(|| {
+      readline.writer.flush_write(OSC_EXEC_START).ok();
+      let res = RawModeGuard::with_cooked_mode(|| {
         exec_input(input.clone(), None, true, Some("<stdin>".into()))
       });
-			readline.writer.flush_write(&osc_exec_end(state::get_status())).ok();
+      readline
+        .writer
+        .flush_write(&osc_exec_end(state::get_status()))
+        .ok();
 
       if let Err(e) = res {
         match e.kind() {
@@ -796,10 +793,10 @@ fn handle_socket_request(
         write(&conn, var.as_bytes()).ok();
         write(&conn, b"\n").ok();
       }
-			QueryHeader::SetVar(var, val, flags) => {
-				write_vars(|v| v.set_var(&var, VarKind::Str(val), flags)).ok();
-				write(&conn, b"ok\n").ok();
-			}
+      QueryHeader::SetVar(var, val, flags) => {
+        write_vars(|v| v.set_var(&var, VarKind::Str(val), flags)).ok();
+        write(&conn, b"ok\n").ok();
+      }
       QueryHeader::Status(headers) => {
         let mut responses = vec![];
         for header in headers {

@@ -12,8 +12,8 @@ use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   expand::escape_str,
   libsh::{
-    error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, sys::TTY_FILENO,
-    ui, utils::TkVecUtils,
+    error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, sys::TTY_FILENO, ui,
+    utils::TkVecUtils,
   },
   match_loop,
   parse::{
@@ -1216,7 +1216,12 @@ impl FuzzySelector {
     let mut rows: u16 = 0;
 
     // ╭─ Title ──────────────────╮
-    let title_content = format!("\n{}{} \x1b[1m{}\x1b[0m ", ui::TOP_LEFT, ui::HOR_LINE, title);
+    let title_content = format!(
+      "\n{}{} \x1b[1m{}\x1b[0m ",
+      ui::TOP_LEFT,
+      ui::HOR_LINE,
+      title
+    );
     pad(&mut buf, &title_content, ui::HOR_LINE, ui::TOP_RIGHT);
     rows += 1;
 
@@ -1245,14 +1250,22 @@ impl FuzzySelector {
     };
 
     for (i, s_cand) in visible.iter().enumerate() {
-      if lines_drawn >= max_height { break; }
+      if lines_drawn >= max_height {
+        break;
+      }
 
       let selected = i + offset == cursor_pos;
-      let selector = if selected { Self::SELECTOR_HL } else { Self::SELECTOR_GRAY };
+      let selector = if selected {
+        Self::SELECTOR_HL
+      } else {
+        Self::SELECTOR_GRAY
+      };
       let mut drew_number = false;
 
       for line in s_cand.candidate.content().trim_end().lines() {
-        if lines_drawn >= max_height { break; }
+        if lines_drawn >= max_height {
+          break;
+        }
 
         let mut line = line.trim_end().replace('\t', "    ");
         if calc_str_width(&line) >= col_lim as u16 {
@@ -1264,12 +1277,15 @@ impl FuzzySelector {
           let num = i + offset + 1;
           format!(
             "{} {}\x1b[33m{num:<min_pad$}\x1b[39m{line}\x1b[0m",
-            ui::VERT_LINE, selector
+            ui::VERT_LINE,
+            selector
           )
         } else if number_candidates {
           format!(
             "{} {}{:>min_pad$}{line}\x1b[0m",
-            ui::VERT_LINE, selector, ""
+            ui::VERT_LINE,
+            selector,
+            ""
           )
         } else {
           format!("{} {}{line}\x1b[0m", ui::VERT_LINE, selector)
@@ -1283,12 +1299,23 @@ impl FuzzySelector {
     }
 
     // ╰──────────────────────────╯
-    write!(buf, "{}{}{}", ui::BOT_LEFT, ui::HOR_LINE.repeat(cols.saturating_sub(2)), ui::BOT_RIGHT).unwrap();
+    write!(
+      buf,
+      "{}{}{}",
+      ui::BOT_LEFT,
+      ui::HOR_LINE.repeat(cols.saturating_sub(2)),
+      ui::BOT_RIGHT
+    )
+    .unwrap();
     rows += 1;
 
     // Move cursor back up to the query input line
     let lines_below_prompt = rows.saturating_sub(2);
-    let cursor_in_window = self.query.linebuf.cursor_to_flat().saturating_sub(self.query.scroll_offset);
+    let cursor_in_window = self
+      .query
+      .linebuf
+      .cursor_to_flat()
+      .saturating_sub(self.query.scroll_offset);
     let cursor_col = (cursor_in_window + 4) as u16;
     write!(buf, "\x1b[{lines_below_prompt}A\r\x1b[{cursor_col}C").unwrap();
 

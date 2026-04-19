@@ -1,0 +1,182 @@
+*variables* *vars* *assignment*
+
+#VARIABLES#
+
+Variables store values that can be referenced later using parameter
+expansion (see |param|). Shed supports string variables, integer
+variables, and arrays.
+
+==============================================================================
+1. Assignment                                    *var-assign*
+
+  `name=value`                                   *var-basic*
+
+      Assign {value} to {name}. No spaces are allowed around the `=`.
+      If {value} contains spaces or special characters, quote it:
+
+          `greeting="hello world"`
+          `path=/usr/bin`
+          `empty=`
+
+      Assignments can precede a command, in which case the variable
+      is set only for the duration of that command:
+
+          `LC_ALL=C sort file.txt`
+
+  Multiple assignments can appear on one line:
+
+      `a=1 b=2 c=3`
+
+==============================================================================
+2. Mutation Operators                            *var-mutation*
+
+  Shed supports arithmetic mutation operators that modify an existing
+  variable in place. These operators perform integer arithmetic:
+
+  `name+=value`                                  *var-plus-eq*
+
+      Add {value} to {name}.
+
+          `count=5`
+          `count+=3`       # count is now 8
+
+  `name-=value`                                  *var-minus-eq*
+
+      Subtract {value} from {name}.
+
+          `count=10`
+          `count-=4`       # count is now 6
+
+  `name*=value`                                  *var-mult-eq*
+
+      Multiply {name} by {value}.
+
+          `count=3`
+          `count*=5`       # count is now 15
+
+  `name/=value`                                  *var-div-eq*
+
+      Divide {name} by {value} (integer division).
+
+          `count=10`
+          `count/=3`       # count is now 3
+
+  Note: When used with `+=` on a string variable, the value is
+  appended as a string rather than performing arithmetic:
+
+      `greeting="hello"`
+      `greeting+=" world"`   # greeting is now "hello world"
+
+==============================================================================
+3. Arrays                                        *var-arrays*
+
+  3.1 Indexed Arrays                             *var-indexed-array*
+
+  `name=(item1 item2 item3)`                     *var-array-assign*
+
+      Assign an indexed array. Elements are separated by whitespace.
+
+          `fruits=(apple banana cherry)`
+
+      Access individual elements with subscript notation:
+
+          `echo ${fruits[0]}`      # prints "apple"
+          `echo ${fruits[2]}`      # prints "cherry"
+
+      Access all elements:
+
+          `echo ${fruits[@]}`      # all elements as separate words
+          `echo ${fruits[*]}`      # all elements as a single word
+
+      Get the number of elements:
+
+          `echo ${#fruits[@]}`     # prints 3
+
+==============================================================================
+4. Variable Attributes                           *var-attributes*
+
+  `export name=value`                            *var-export*
+
+      Mark a variable for export to child processes. Exported
+      variables are inherited by commands and subshells.
+
+          `export PATH="/usr/local/bin:$PATH"`
+          `export EDITOR=vim`
+
+      Export an existing variable without changing its value:
+
+          `export name`
+
+  `local name=value`                             *var-local*
+
+      Declare a variable as local to the current function scope.
+      Local variables are not visible outside the function in which
+      they are declared.
+
+          `myfunc() {`
+          `  local tmp="working"`
+          `  echo $tmp`
+          `}`
+
+  `readonly name=value`                          *var-readonly*
+
+      Mark a variable as read-only. Any subsequent attempt to assign
+      to it will produce an error.
+
+          `readonly PI=3`
+          `PI=4`                   # error: PI is read-only
+
+==============================================================================
+5. Special Parameters                            *var-special*
+
+  These parameters are set by the shell and cannot be assigned to
+  directly:
+
+  `$?`                                           *var-status*
+
+      Exit status of the most recently executed command.
+
+  `$$`                                           *var-pid*
+
+      Process ID of the current shell.
+
+  `$!`                                           *var-lastjob*
+
+      Process ID of the most recent background job.
+
+  `$0`                                           *var-shellname*
+
+      The name of the shell or script.
+
+  `$1` `$2` ... `$9`                             *var-positional*
+
+      Positional parameters passed to the shell, function, or script.
+
+  `$@`                                           *var-all-args*
+
+      All positional parameters as separate words. When double-quoted,
+      each parameter becomes a separate word: `"$@"` is equivalent to
+      `"$1" "$2" ...`
+
+  `$*`                                           *var-all-args-str*
+
+      All positional parameters as a single word. When double-quoted,
+      parameters are joined by the first character of `$IFS`.
+
+  `$#`                                           *var-argcount*
+
+      The number of positional parameters.
+
+==============================================================================
+6. Unsetting Variables                           *var-unset*
+
+  `unset name`
+
+      Remove a variable. After unsetting, `$name` expands to nothing.
+
+      To unset a single array element:
+
+          `unset 'arr[2]'`
+
+==============================================================================
+See also: |param| |arith|

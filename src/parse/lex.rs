@@ -17,9 +17,9 @@ use crate::{
   match_loop, sherr,
 };
 
-pub const KEYWORDS: [&str; 18] = [
+pub const KEYWORDS: [&str; 19] = [
   "if", "then", "elif", "else", "fi", "while", "until", "select", "for", "in", "do", "done",
-  "case", "esac", "[[", "]]", "!", "time",
+  "case", "esac", "[[", "]]", "!", "time", "function",
 ];
 
 pub const OPENERS: [&str; 6] = ["if", "while", "until", "for", "select", "case"];
@@ -208,11 +208,11 @@ impl Tk {
       flags: TkFlags::empty(),
     }
   }
-	pub fn replaced(&self, other: &str) -> String {
-		let mut content = self.span.source.content().to_string();
-		content.replace_range(self.span.range(), other);
-		content
-	}
+  pub fn replaced(&self, other: &str) -> String {
+    let mut content = self.span.source.content().to_string();
+    content.replace_range(self.span.range(), other);
+    content
+  }
   pub fn as_str(&self) -> &str {
     self.span.as_str()
   }
@@ -283,6 +283,7 @@ bitflags! {
     const LIT_HEREDOC  = 0b0000010000000000;
     const TAB_HEREDOC  = 0b0000100000000000;
     const IS_ARITH     = 0b0001000000000000;
+    const FUNCNAME		 = 0b0010000000000000;
   }
 }
 
@@ -303,6 +304,7 @@ bitflags! {
     const STALE          = 0b0001000000;
     const EXPECTING_IN   = 0b0010000000;
     const NEXT_IS_REDIR  = 0b0100000000;
+    const NEXT_IS_FUNC   = 0b1000000000;
   }
 }
 
@@ -413,6 +415,7 @@ impl LexStream {
     if is {
       self.flags |= LexFlags::NEXT_IS_CMD;
       self.flags &= !LexFlags::NEXT_IS_REDIR;
+      self.flags &= !LexFlags::NEXT_IS_FUNC;
     } else {
       self.flags &= !LexFlags::NEXT_IS_CMD;
     }
@@ -594,7 +597,7 @@ impl LexStream {
   }
   pub fn read_heredoc(&mut self, mut pos: usize) -> ShResult<Option<Tk>> {
     let slice = self.slice(pos..).unwrap_or_default().to_string();
-		let span_start = pos;
+    let span_start = pos;
     let mut chars = slice.chars();
     let mut delim = String::new();
     let mut flags = TkFlags::empty();
@@ -664,12 +667,12 @@ impl LexStream {
         }
       }
       if !found_newline {
-				return Err(lex_err!(
-					self,
-					pos,
-					span_start..pos,
-					"Heredoc delimiter not found",
-				))
+        return Err(lex_err!(
+          self,
+          pos,
+          span_start..pos,
+          "Heredoc delimiter not found",
+        ));
       }
       scan
     };
@@ -680,12 +683,12 @@ impl LexStream {
     // Read lines until we find one that matches the delimiter exactly
     let mut line = String::new();
     let mut line_start = pos;
-		let mut leading_tabs = true;
+    let mut leading_tabs = true;
     while let Some(ch) = chars.next() {
       pos += ch.len_utf8();
-			if leading_tabs && ch == '\t' {
-				continue;
-			}
+      if leading_tabs && ch == '\t' {
+        continue;
+      }
       if ch == '\n' {
         let trimmed = line.trim_end_matches('\r');
         if trimmed == delim {
@@ -696,7 +699,7 @@ impl LexStream {
           return Ok(Some(tk));
         }
         line.clear();
-				leading_tabs = true;
+        leading_tabs = true;
         line_start = pos;
       } else {
         line.push(ch);
@@ -712,12 +715,12 @@ impl LexStream {
       return Ok(Some(tk));
     }
 
-		Err(lex_err!(
-			self,
-			pos,
-			span_start..pos,
-			"Heredoc delimiter '{delim}' not found",
-		))
+    Err(lex_err!(
+      self,
+      pos,
+      span_start..pos,
+      "Heredoc delimiter '{delim}' not found",
+    ))
   }
   pub fn read_string(&mut self) -> ShResult<Tk> {
     assert!(self.cursor <= self.source.len());
@@ -840,15 +843,11 @@ impl LexStream {
           ));
         }
       }
-      '(' if can_be_subshell && chars.peek() == Some(&')') => {
+      '(' if self.next_is_cmd() && chars.peek() == Some(&')') && pos != self.cursor => {
         // standalone "()" - function definition marker
-        pos += 2;
-        chars.next();
-        let mut tk = self.get_token(self.cursor..pos, TkRule::Str);
-        tk.mark(TkFlags::KEYWORD);
-        self.cursor = pos;
-        self.set_next_is_cmd(true);
-        return Ok(tk);
+        // this will be handled below by self.func_paren_lookahead()
+        log::debug!("LEX: breaking out of word loop for standalone () at pos {pos}, cursor {}", self.cursor);
+        break;
       }
       '(' if (self.next_is_cmd() || chars.peek() == Some(&'(')) && can_be_subshell => {
         pos += 1;
@@ -941,6 +940,20 @@ impl LexStream {
       self.flags.contains(LexFlags::NEXT_IS_CMD) && !self.flags.contains(LexFlags::NEXT_IS_REDIR);
     if is_cmd {
       match text {
+        "function" => {
+          log::debug!("LEX: found 'function' keyword, setting NEXT_IS_FUNC");
+          new_tk.mark(TkFlags::KEYWORD);
+          self.flags |= LexFlags::NEXT_IS_FUNC;
+        }
+        _ if self.func_paren_lookahead(&mut pos) => {
+          log::debug!(
+            "LEX: func_paren_lookahead matched for token '{}', cursor now {}",
+            text,
+            self.cursor
+          );
+          new_tk.mark(TkFlags::FUNCNAME);
+          self.set_next_is_cmd(true);
+        }
         "case" | "select" | "for" => {
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::EXPECTING_IN;
@@ -967,6 +980,14 @@ impl LexStream {
           }
           self.set_next_is_cmd(false);
         }
+        _ if self.flags.contains(LexFlags::NEXT_IS_FUNC) => {
+          log::debug!(
+            "LEX: NEXT_IS_FUNC matched for token '{}', marking as FUNCNAME",
+            text
+          );
+          new_tk.mark(TkFlags::FUNCNAME);
+          self.set_next_is_cmd(true);
+        }
         _ => {
           new_tk.flags |= TkFlags::IS_CMD;
           if BUILTINS.contains(&text) {
@@ -984,6 +1005,37 @@ impl LexStream {
     self.cursor = pos;
     Ok(new_tk)
   }
+  pub fn func_paren_lookahead(&mut self, pos: &mut usize) -> bool {
+    log::debug!(
+      "LEX: func_paren_lookahead called, cursor={}, source_len={}",
+      self.cursor,
+      self.source.len()
+    );
+    let slice = self.slice(*pos..).unwrap_or_default().to_string();
+    log::debug!("LEX: func_paren_lookahead slice='{}'", slice.escape_debug());
+    let mut chars = slice.chars().peekable();
+    match_loop!(chars.next() => ch, {
+      ' ' | '\t' => {
+        *pos += 1;
+      }
+      '(' => {
+        *pos += 1;
+
+        if chars.next() == Some(')') {
+          *pos += 1;
+          log::debug!("LEX: func_paren_lookahead MATCH, advancing cursor {} -> {}", self.cursor, pos);
+          self.cursor = *pos;
+          return true;
+        }
+      }
+      _ => {
+        log::debug!("LEX: func_paren_lookahead no match, hit '{}'", ch.escape_debug());
+        return false;
+      }
+    });
+    log::debug!("LEX: func_paren_lookahead fell through (empty)");
+    false
+  }
   pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk {
     let mut span = Span::new(range, self.source.clone());
     span.rename(self.name.clone());
@@ -994,6 +1046,12 @@ impl LexStream {
 impl Iterator for LexStream {
   type Item = ShResult<Tk>;
   fn next(&mut self) -> Option<Self::Item> {
+    log::debug!(
+      "LEX: next() called, cursor={}, source_len={}, flags={:?}",
+      self.cursor,
+      self.source.len(),
+      self.flags
+    );
     assert!(self.cursor <= self.source.len());
     // We are at the end of the input
     if self.cursor == self.source.len() {
@@ -1043,7 +1101,7 @@ impl Iterator for LexStream {
     if self.cursor == self.source.len() {
       if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
         let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
-				self.flags |= LexFlags::STALE;
+        self.flags |= LexFlags::STALE;
         return Err(sherr!(
           ParseErr @ Span::new(start..self.cursor, self.source.clone()),
           "Unclosed brace group",
@@ -1195,7 +1253,6 @@ pub fn is_field_sep(ch: char) -> bool {
 
 pub fn is_keyword(slice: &str) -> bool {
   KEYWORDS.contains(&slice)
-    || (ends_with_unescaped(slice, "()") && !ends_with_unescaped(slice, "=()"))
 }
 
 pub fn is_cmd_sub(slice: &str) -> bool {

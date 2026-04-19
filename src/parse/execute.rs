@@ -1,9 +1,4 @@
-use std::{
-  cell::Cell,
-  collections::VecDeque,
-  os::unix::fs::PermissionsExt,
-  rc::Rc,
-};
+use std::{cell::Cell, collections::VecDeque, os::unix::fs::PermissionsExt, rc::Rc};
 
 use ariadne::Fmt;
 use nix::unistd::execve;
@@ -123,7 +118,7 @@ impl ExecArgs {
   pub fn new(argv: Vec<Tk>) -> ShResult<Option<Self>> {
     let argv = prepare_argv(argv)?;
 
-		Ok((!argv.is_empty()).then(|| Self::from_expanded(argv)))
+    Ok((!argv.is_empty()).then(|| Self::from_expanded(argv)))
   }
   pub fn from_expanded(argv: Vec<(String, Span)>) -> Self {
     let cmd = Self::get_cmd(&argv);
@@ -222,9 +217,9 @@ pub fn exec_input(
   interactive: bool,
   source_name: Option<Rc<str>>,
 ) -> ShResult<()> {
-	if !interactive || !read_shopts(|o| o.prompt.expand_aliases) {
-		input = expand_aliases(input);
-	}
+  if !interactive || !read_shopts(|o| o.prompt.expand_aliases) {
+    input = expand_aliases(input);
+  }
   let lex_flags = if interactive {
     super::lex::LexFlags::INTERACTIVE
   } else {
@@ -331,19 +326,18 @@ impl Dispatcher {
     // We need to expand this token
     // so that a command smuggled inside of a variable is routed correctly,
     // instead of only hitting the exec_cmd path
-    let Some(cmd_word) = cmd
-      .clone()
-      .expand()?
-      .get_words()
-      .into_iter()
-      .next() else {
-				if let NdRule::Command { ref assignments, argv: _ } = node.class
-				&& !assignments.is_empty() {
-					return self.exec_cmd(node);
-				} else {
-					return Ok(());
-				}
-			};
+    let Some(cmd_word) = cmd.clone().expand()?.get_words().into_iter().next() else {
+      if let NdRule::Command {
+        ref assignments,
+        argv: _,
+      } = node.class
+        && !assignments.is_empty()
+      {
+        return self.exec_cmd(node);
+      } else {
+        return Ok(());
+      }
+    };
 
     let cmd_tk = node.get_command();
 
@@ -1193,9 +1187,9 @@ impl Dispatcher {
       }
       let exec_args = match ExecArgs::new(argv) {
         Ok(Some(args)) => args,
-				Ok(None) => {
-					exit(0);
-				}
+        Ok(None) => {
+          exit(0);
+        }
         Err(e) => {
           sherr!(ExecFail @ blame, "{e}")
             .with_context(context)

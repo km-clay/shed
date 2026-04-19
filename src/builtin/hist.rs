@@ -56,7 +56,7 @@ pub struct HistQuery {
   lines_gt: (Option<usize>, bool),
   lines_lt: (Option<usize>, bool),
   starts_with: (Option<String>, bool),
-	ends_with: (Option<String>, bool),
+  ends_with: (Option<String>, bool),
   matches: (Option<String>, bool),
   duration_gt: (Option<String>, bool),
   duration_lt: (Option<String>, bool),
@@ -109,16 +109,16 @@ impl HistQuery {
         ts.timestamp()
       );
     }
-		if let (Some(prefix), not) = &self.ends_with {
-			cond!(
-				not,
-				conditions,
-				params,
-				idx,
-				format!("RTRIM(command) LIKE ?{idx}"),
-				format!("%{prefix}")
-			);
-		}
+    if let (Some(prefix), not) = &self.ends_with {
+      cond!(
+        not,
+        conditions,
+        params,
+        idx,
+        format!("RTRIM(command) LIKE ?{idx}"),
+        format!("%{prefix}")
+      );
+    }
     if let (Some(contains), not) = &self.contains {
       cond!(
         not,
@@ -284,7 +284,7 @@ impl HistQuery {
           "before" => new.before = (Some(arg.clone()), negated),
           "contains" => new.contains = (Some(arg.clone()), negated),
           "starts-with" => new.starts_with = (Some(arg.clone()), negated),
-					"ends-with" => new.ends_with = (Some(arg.clone()), negated),
+          "ends-with" => new.ends_with = (Some(arg.clone()), negated),
           "matches" => new.matches = (Some(arg.clone()), negated),
           "duration-gt" => new.duration_gt = (Some(arg.clone()), negated),
           "duration-lt" => new.duration_lt = (Some(arg.clone()), negated),
@@ -407,10 +407,10 @@ impl HistQuery {
         opt: Opt::Long("before".into()),
         takes_arg: OptArg::Single,
       },
-			OptSpec {
-				opt: Opt::Long("ends-with".into()),
-				takes_arg: OptArg::Single,
-			},
+      OptSpec {
+        opt: Opt::Long("ends-with".into()),
+        takes_arg: OptArg::Single,
+      },
       OptSpec {
         opt: Opt::Long("contains".into()),
         takes_arg: OptArg::Single,

@@ -283,6 +283,11 @@ pkgs = import nixpkgs {
 
 * Single quotes can be escaped inside of single quoted strings. This is a slight deviation from the POSIX spec, which says that backslashes should always be literal in single quoted strings.
 
+## AI Usage
+
+AI has been used to assist with development in some areas of this codebase.
+Full disclosure can be found here: [AI_POLICY.md](./AI_POLICY.md).
+
 ## Notes
 
 `shed` is experimental software and is currently under active development. Using an experimental shell is inherently risky business, there is no guarantee that your computer will not explode when you run this. That being said, I've been daily driving it for 5 months at the time of writing and my computer has not exploded yet. Use it at your own risk, the software is provided as-is.

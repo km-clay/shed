@@ -111,7 +111,9 @@ pub struct RawModeGuard {
 
 impl RawModeGuard {
   pub fn with_cooked_mode<F, R>(f: F) -> R
-  where F: FnOnce() -> R {
+  where
+    F: FnOnce() -> R,
+  {
     let current = tcgetattr(borrow_fd(*TTY_FILENO)).expect("Failed to get terminal attributes");
     let orig = ORIG_TERMIOS
       .with(|cell| cell.borrow().clone())
@@ -131,35 +133,35 @@ impl Drop for RawModeGuard {
 }
 
 pub struct TuiGuard {
-	_raw_mode_guard: RawModeGuard
+  _raw_mode_guard: RawModeGuard,
 }
 
 impl TuiGuard {
-	pub fn new() -> Self {
-		let new = Self {
-			_raw_mode_guard: raw_mode(),
-		};
+  pub fn new() -> Self {
+    let new = Self {
+      _raw_mode_guard: raw_mode(),
+    };
 
-		if isatty(*TTY_FILENO).unwrap_or(false) {
-			write(borrow_fd(*TTY_FILENO), b"\x1b[?1049h").ok(); // enter alt buffer
-			write(borrow_fd(*TTY_FILENO), b"\x1b[?25l").ok(); // hide cursor
-		}
+    if isatty(*TTY_FILENO).unwrap_or(false) {
+      write(borrow_fd(*TTY_FILENO), b"\x1b[?1049h").ok(); // enter alt buffer
+      write(borrow_fd(*TTY_FILENO), b"\x1b[?25l").ok(); // hide cursor
+    }
 
-		new
-	}
+    new
+  }
 }
 
 impl Default for TuiGuard {
-	fn default() -> Self {
-		Self::new()
-	}
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl Drop for TuiGuard {
-	fn drop(&mut self) {
-		if isatty(*TTY_FILENO).unwrap_or(false) {
-			write(borrow_fd(*TTY_FILENO), b"\x1b[?25h").ok(); // show cursor
-			write(borrow_fd(*TTY_FILENO), b"\x1b[?1049l").ok(); // exit alt buffer
-		}
-	}
+  fn drop(&mut self) {
+    if isatty(*TTY_FILENO).unwrap_or(false) {
+      write(borrow_fd(*TTY_FILENO), b"\x1b[?25h").ok(); // show cursor
+      write(borrow_fd(*TTY_FILENO), b"\x1b[?1049l").ok(); // exit alt buffer
+    }
+  }
 }

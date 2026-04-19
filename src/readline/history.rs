@@ -651,7 +651,10 @@ impl History {
     if prefix.is_empty() {
       return None;
     }
-    self.hint_cache.iter().rev()
+    self
+      .hint_cache
+      .iter()
+      .rev()
       .find(|e| e.command().starts_with(&prefix) && e.command() != &prefix)
       .map(|e| Hint::History(to_lines(e.command())))
   }

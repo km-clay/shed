@@ -287,9 +287,12 @@ impl Default for Var {
 }
 
 impl Var {
-	pub fn env_var(val: &str) -> Self {
-		Self { flags: VarFlags::EXPORT, kind: VarKind::Str(val.to_string()) }
-	}
+  pub fn env_var(val: &str) -> Self {
+    Self {
+      flags: VarFlags::EXPORT,
+      kind: VarKind::Str(val.to_string()),
+    }
+  }
   pub fn new(kind: VarKind, flags: VarFlags) -> Self {
     Self { flags, kind }
   }
@@ -404,16 +407,15 @@ impl VarTab {
   }
   fn init_env() -> Vec<(String, Var)> {
     let mut vars = vec![];
-		for (key, val) in env::vars() {
-			if !vars.iter().any(|(k, _)| k == &key) {
-				vars.push((key, Var::env_var(&val)));
-			}
-		}
+    for (key, val) in env::vars() {
+      if !vars.iter().any(|(k, _)| k == &key) {
+        vars.push((key, Var::env_var(&val)));
+      }
+    }
     let mut set_var = |var: &str, val: &str| {
       unsafe { env::set_var(var, val) };
       vars.push((var.to_string(), Var::env_var(val)))
     };
-
 
     let pathbuf_to_string =
       |pb: Result<PathBuf, std::io::Error>| pb.unwrap_or_default().to_string_lossy().to_string();

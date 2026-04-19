@@ -1,6 +1,9 @@
 use std::{
   cell::RefCell,
-  sync::{Arc, OnceLock, atomic::{AtomicBool, AtomicI32}},
+  sync::{
+    Arc, OnceLock,
+    atomic::{AtomicBool, AtomicI32},
+  },
 };
 
 pub mod scopes;

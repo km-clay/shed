@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{iter::Peekable, ops::Range, str::Chars};
 
 use crate::{libsh::strops::QuoteState, match_loop, readline::markers};
 
@@ -14,106 +14,101 @@ pub const KEYWORD_2_SEQ: &str = "\x1b[3;37m"; // italic white - [optional]
 
 #[derive(Debug)]
 pub struct MarkedSpan {
-	prefix_seq: Range<usize>,
-	content: Range<usize>,
-	postfix_seq: Range<usize>
+  prefix_seq: Range<usize>,
+  content: Range<usize>,
+  postfix_seq: Range<usize>,
 }
 
 impl MarkedSpan {
-	pub fn new(
-		prefix_seq: Range<usize>,
-		content: Range<usize>,
-		postfix_seq: Range<usize>,
-	) -> Self {
-		Self {
-			prefix_seq,
-			content,
-			postfix_seq
-		}
-	}
+  pub fn new(prefix_seq: Range<usize>, content: Range<usize>, postfix_seq: Range<usize>) -> Self {
+    Self {
+      prefix_seq,
+      content,
+      postfix_seq,
+    }
+  }
 
-	pub fn prefix_seq<'a>(&self, source: &'a str) -> &'a str {
-		&source[self.prefix_seq.clone()]
-	}
-	pub fn content<'a>(&self, source: &'a str) -> &'a str {
-		&source[self.content.clone()]
-	}
-	pub fn postfix_seq<'a>(&self, source: &'a str) -> &'a str {
-		&source[self.postfix_seq.clone()]
-	}
-	pub fn full<'a>(&self, source: &'a str) -> &'a str {
-		&source[self.prefix_seq.start..self.postfix_seq.end]
-	}
-	pub fn line_no(&self, source: &str) -> usize {
-		source[..self.prefix_seq.start]
-			.chars()
-			.filter(|c| *c == '\n')
-			.count()
-	}
+  pub fn prefix_seq<'a>(&self, source: &'a str) -> &'a str {
+    &source[self.prefix_seq.clone()]
+  }
+  pub fn content<'a>(&self, source: &'a str) -> &'a str {
+    &source[self.content.clone()]
+  }
+  pub fn postfix_seq<'a>(&self, source: &'a str) -> &'a str {
+    &source[self.postfix_seq.clone()]
+  }
+  pub fn full<'a>(&self, source: &'a str) -> &'a str {
+    &source[self.prefix_seq.start..self.postfix_seq.end]
+  }
+  pub fn line_no(&self, source: &str) -> usize {
+    source[..self.prefix_seq.start]
+      .chars()
+      .filter(|c| *c == '\n')
+      .count()
+  }
 
-	pub fn line_start(&self, source: &str) -> usize {
-		source[..self.prefix_seq.start]
-			.rfind('\n')
-			.map(|pos| pos + 1)
-			.unwrap_or(0)
-	}
+  pub fn line_start(&self, source: &str) -> usize {
+    source[..self.prefix_seq.start]
+      .rfind('\n')
+      .map(|pos| pos + 1)
+      .unwrap_or(0)
+  }
 
-	pub fn rel_to_line(&self, source: &str) -> (Range<usize>, Range<usize>, Range<usize>) {
-		let offset = self.line_start(source);
-		(
-			self.prefix_seq.clone().start - offset..self.prefix_seq.clone().end - offset,
-			self.content.clone().start - offset..self.content.clone().end - offset,
-			self.postfix_seq.clone().start - offset..self.postfix_seq.clone().end - offset,
-		)
-	}
+  pub fn rel_to_line(&self, source: &str) -> (Range<usize>, Range<usize>, Range<usize>) {
+    let offset = self.line_start(source);
+    (
+      self.prefix_seq.clone().start - offset..self.prefix_seq.clone().end - offset,
+      self.content.clone().start - offset..self.content.clone().end - offset,
+      self.postfix_seq.clone().start - offset..self.postfix_seq.clone().end - offset,
+    )
+  }
 }
-
 
 #[derive(Debug)]
 pub struct StyledHelp {
-	content: String,
+  content: String,
 }
 
 impl StyledHelp {
-	pub fn new(content: &str) -> Self {
-		Self {
-			content: style_help_content(content),
-		}
-	}
-	pub fn content(&self) -> &str {
-		&self.content
-	}
+  pub fn new(content: &str) -> Self {
+    Self {
+      content: style_help_content(content),
+    }
+  }
+  pub fn content(&self) -> &str {
+    &self.content
+  }
 
-	pub fn find_markers(&self, marker: &str) -> Vec<MarkedSpan> {
-		let mut markers = vec![];
-		let mut cursor = 0;
+  pub fn find_markers(&self, marker: &str) -> Vec<MarkedSpan> {
+    let mut markers = vec![];
+    let mut cursor = 0;
 
-		while let Some(pos) = self.content[cursor..].find(marker) {
-			let abs_pos = cursor + pos;
-			let prefix_end = abs_pos + marker.len();
+    while let Some(pos) = self.content[cursor..].find(marker) {
+      let abs_pos = cursor + pos;
+      let prefix_end = abs_pos + marker.len();
 
-			let Some(end) = self.content[prefix_end..].find(RESET_SEQ) else {
-				break
-			};
+      let Some(end) = self.content[prefix_end..].find(RESET_SEQ) else {
+        break;
+      };
 
-			let postfix_start = prefix_end + end;
-			let postfix_end = postfix_start + RESET_SEQ.len();
+      let postfix_start = prefix_end + end;
+      let postfix_end = postfix_start + RESET_SEQ.len();
 
-			markers.push(MarkedSpan::new(
-					abs_pos..prefix_end,
-					prefix_end..postfix_start,
-					postfix_start..postfix_end,
-			));
+      markers.push(MarkedSpan::new(
+        abs_pos..prefix_end,
+        prefix_end..postfix_start,
+        postfix_start..postfix_end,
+      ));
 
-			cursor = postfix_end;
-		}
+      cursor = postfix_end;
+    }
 
-		markers
-	}
+    markers
+  }
 }
 
 pub fn style_help_content(raw: &str) -> String {
-	expand_help(&unescape_help(raw))
+  expand_help(&unescape_help(raw))
 }
 
 fn expand_help(raw: &str) -> String {
@@ -138,6 +133,24 @@ fn unescape_help(raw: &str) -> String {
   let mut chars = raw.chars().peekable();
   let mut qt_state = QuoteState::default();
 
+  let find_closer = |closer: char, res: &mut String, chars: &mut Peekable<Chars>| {
+    match_loop!(chars.next() => next_ch, {
+      _ if next_ch == closer => {
+        res.push(markers::RESET);
+        break;
+      }
+      '\\' => {
+        match chars.peek() {
+          Some(ch) if *ch == closer || *ch == '\\' => {
+            res.push(chars.next().unwrap());
+          }
+          _ => res.push(next_ch),
+        }
+      }
+      _ => res.push(next_ch),
+    });
+  };
+
   match_loop!(chars.next() => ch, {
     '\\' => {
       if let Some(next_ch) = chars.next() {
@@ -161,63 +174,27 @@ fn unescape_help(raw: &str) -> String {
     }
     '*' => {
       result.push(markers::TAG);
-      match_loop!(chars.next() => next_ch, {
-        '*' => {
-          result.push(markers::RESET);
-          break;
-        }
-         _ => result.push(next_ch),
-      });
+      find_closer('*', &mut result, &mut chars);
     }
     '|' => {
       result.push(markers::REFERENCE);
-      match_loop!(chars.next() => next_ch, {
-        '|' => {
-          result.push(markers::RESET);
-          break;
-        }
-         _ => result.push(next_ch),
-      });
+      find_closer('|', &mut result, &mut chars);
     }
     '#' => {
       result.push(markers::HEADER);
-      match_loop!(chars.next() => next_ch, {
-        '#' => {
-          result.push(markers::RESET);
-          break;
-        }
-         _ => result.push(next_ch),
-      });
+      find_closer('#', &mut result, &mut chars);
     }
     '`' => {
       result.push(markers::CODE);
-      match_loop!(chars.next() => next_ch, {
-        '`' => {
-          result.push(markers::RESET);
-          break;
-        }
-         _ => result.push(next_ch),
-      });
+      find_closer('`', &mut result, &mut chars);
     }
     '{' => {
       result.push(markers::KEYWORD_2);
-      match_loop!(chars.next() => next_ch, {
-        '}' => {
-          result.push(markers::RESET);
-          break;
-        }
-         _ => result.push(next_ch),
-      });
+      find_closer('}', &mut result, &mut chars);
     }
     '[' => {
       result.push(markers::KEYWORD_2);
-      match_loop!(chars.next() => next_ch, {
-        ']' => {
-          result.push(markers::RESET);
-          break;
-        }
-         _ => result.push(next_ch),
-      });
+      find_closer(']', &mut result, &mut chars);
     }
     _ => result.push(ch),
   });

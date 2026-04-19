@@ -1,0 +1,855 @@
+*scripting* *shell-scripting*
+
+#SHELL SCRIPTING#
+
+This page covers the shell scripting language used by shed. The syntax
+is POSIX `sh` compatible, so scripts written for other POSIX shells
+should generally work without modification.
+
+A shell script is a text file containing commands, one per line or
+separated by `;`. Scripts can be run with `shed scriptfile` or made
+executable with a shebang line:
+
+    `#!/usr/bin/env shed`
+
+==============================================================================
+1. Quoting                                       *script-quoting*
+
+  Quoting controls how the shell interprets special characters.
+  Without quoting, characters like spaces, `$`, `*`, and `|` have
+  special meaning.
+
+  1.1 Backslash                      *script-backslash* *script-escape*
+
+      A backslash ('`\\`') escapes the next character, removing any special
+      meaning it would otherwise have:
+
+          `echo hello\ world`       # prints "hello world" (one argument)
+          `echo \$HOME`             # prints "$HOME" literally
+          `echo file\*`             # prints "file*" literally
+
+      A backslash at the end of a line acts as a line continuation,
+      joining the next line to the current one:
+
+          `echo hello \\`
+          `world`                   # prints "hello world"
+
+  1.2 Single Quotes                              *script-single-quote*
+
+      Single quotes preserve everything literally. No expansion,
+      no escaping, and no special characters are recognized inside
+      single quotes:
+
+          `echo 'hello $USER'`      # prints "hello $USER"
+          `echo '$((1+2))'`         # prints "$((1+2))"
+
+      Notably, in `shed` single quotes can be escaped inside of single quotes.
+      This is an intentional deviation from the POSIX specification. It is the
+      only case where backslashes are recognized inside single quotes.
+
+          `echo 'it\'s'`          # prints "it's" (end, escape, restart)
+
+  1.3 Double Quotes                              *script-double-quote*
+
+      Double quotes allow variable expansion, command substitution,
+      and arithmetic expansion, but suppress word splitting and glob
+      expansion:
+
+          `echo "hello $USER"`      # expands \$USER
+          `echo "$(date)"`          # runs command substitution
+          `echo "$((2+2))"`         # arithmetic expansion
+          `echo "*.txt"`            # prints "*.txt" literally (no glob)
+
+      Inside double quotes, these characters are still special:
+
+          `$`     parameter/command/arithmetic expansion
+          `\``     command substitution (legacy syntax)
+          `\\`     escapes `$`, `\``, `"`, `\\`, and newline only
+          `"`     ends the quoted string
+
+      Everything else is literal:
+
+          `echo "hello\tworld"`     # prints "hello\tworld" (not a tab)
+
+  1.4 ANSI-C Quoting                             *script-dollar-quote*
+
+      `$'...'` interprets backslash escape sequences the way C does.
+      This is the way to include tabs, newlines, and other control
+      characters in a string:
+
+          `echo $'hello\tworld'`    # prints "hello	world" (actual tab)
+          `echo $'line1\nline2'`    # prints two lines
+          `echo $'\e[31mred\e[0m'`  # prints "red" in red
+
+      Recognized escapes:
+
+          `\n`    newline             `\t`    tab
+          `\r`    carriage return     `\\`    literal backslash
+          `\a`    bell                `\b`    backspace
+          `\e`    escape (0x1b)       `\f`    form feed
+          `\v`    vertical tab        `\'`    single quote
+          `\xNN`  hex byte            `\nnn`  octal byte
+
+  1.5 When to Quote                              *script-when-to-quote*
+
+      As a rule of thumb: always double-quote variable expansions
+      unless you specifically want word splitting or globbing.
+
+          `# Wrong - breaks if $file contains spaces`
+          `cp $file /tmp/`
+
+          `# Right`
+          `cp "$file" /tmp/`
+
+      Use single quotes for strings that should not be expanded at
+      all, and `$'...'` when you need escape sequences.
+
+==============================================================================
+2. Command Lists                                 *script-lists*
+
+  Commands can be chained together with operators that control
+  execution flow based on success or failure.
+
+  2.1 Sequential Execution                       *script-semicolon*
+
+      `;` separates commands that run one after another, regardless
+      of whether the previous command succeeded or failed:
+
+          `mkdir build; cd build; cmake ..`
+
+      A newline has the same effect as `;`:
+
+          `mkdir build`
+          `cd build`
+          `cmake ..`
+
+  2.2 Conditional AND                            *script-and*
+
+      `&&` runs the next command only if the previous one succeeded
+      (exit status 0):
+
+          `make && make install`
+          `cd /tmp && rm -rf build/`
+
+      This is useful for guarding destructive operations behind
+      a prerequisite.
+
+  2.3 Conditional OR                             *script-or*
+
+      `||` runs the next command only if the previous one failed
+      (non-zero exit status):
+
+          `cd /project || exit 1`
+          `grep -q pattern file || echo "not found"`
+
+      A common idiom combines `&&` and `||` as a simple conditional:
+
+          `test -f config.yml && echo "found" || echo "missing"`
+
+  2.4 Background                                 *script-background*
+
+      `&` runs the preceding command in the background. The shell
+      does not wait for it to finish before continuing. See |jobs|
+      for details on managing background jobs.
+
+          `long_build &`
+          `echo "build started in background"`
+
+  2.5 Negation                                   *script-negation*
+
+      `!` negates the exit status of a command. A successful command
+      becomes a failure, and vice versa:
+
+          `! grep -q error log.txt && echo "no errors"`
+
+  2.6 Precedence
+
+      `&&` and `||` have equal precedence and associate left to right.
+      Use grouping (see |script-grouping|) to override:
+
+          `# Without grouping: (a && b) || c`
+          `a && b || c`
+
+          `# With grouping: a && (b || c)`
+          `a && { b || c; }`
+
+==============================================================================
+3. Pipelines                                     *script-pipelines*
+
+  A pipeline connects the standard output of one command to the
+  standard input of the next using `|`:
+
+      `cat file.txt | grep error | wc -l`
+
+  Each command in a pipeline runs in its own subshell. All stages
+  start concurrently. The shell does not wait for one stage to
+  finish before starting the next.
+
+  3.1 Exit Status                                *script-pipe-status*
+
+      The exit status of a pipeline is the exit status of the last
+      command:
+
+          `false | true`       # exit status 0 (from true)
+          `true | false`       # exit status 1 (from false)
+
+      The `$PIPESTATUS` array holds the exit status of each stage
+      in the most recently executed pipeline:
+
+          `true | false | true`
+          `echo ${PIPESTATUS[0]}`   # 0 (from true)
+          `echo ${PIPESTATUS[1]}`   # 1 (from false)
+          `echo ${PIPESTATUS[2]}`   # 0 (from true)
+
+  3.2 Stderr Piping                              *script-pipe-stderr*
+
+      `|&` pipes both stdout and stderr to the next command. This is
+      shorthand for `2>&1 |`:
+
+          `make |& grep error`
+          `curl -v http://example.com |& less`
+
+  3.3 Common Patterns                            *script-pipe-patterns*
+
+      Filtering output:
+
+          `ls -la | grep "\.txt$"`
+          `ps aux | grep nginx | grep -v grep`
+
+      Counting:
+
+          `find . -name "*.rs" | wc -l`
+
+      Sorting and deduplication:
+
+          `cut -d: -f1 /etc/passwd | sort -u`
+
+      Processing with `while read`:
+
+          `find . -name "*.log" | while read -r file; do`
+          `  echo "Found: $file"`
+          `done`
+
+      Note: because each stage of a pipeline runs in a subshell,
+      variables set inside a `while read` loop on the right side
+      of a pipe are not visible after the pipeline finishes.
+
+==============================================================================
+4. Exit Status                                   *script-exit-status*
+
+  Every command produces an integer exit status when it finishes.
+  By convention:
+
+      `0`       success
+      `1-125`   failure (meaning varies by command)
+      `126`     command found but not executable
+      `127`     command not found
+      `128+N`   terminated by signal N (e.g. 130 = SIGINT, 137 = SIGKILL)
+
+  4.1 Checking Exit Status                       *script-check-status*
+
+      `$?` holds the exit status of the most recently executed
+      command:
+
+          `grep -q pattern file`
+          `echo $?`                # 0 if found, 1 if not
+
+      In practice, you rarely need `$?` directly. Use `&&`, `||`,
+      or `if` instead:
+
+          `grep -q pattern file && echo "found"`
+          `if grep -q pattern file; then echo "found"; fi`
+
+  4.2 Returning from Functions                   *script-return*
+
+      `return [N]` exits a function with status {N} (default 0):
+
+          `is_root() {`
+          `  test "$(id -u)" -eq 0`
+          `}`
+
+      The exit status of a function is the exit status of the last
+      command executed within it, unless an explicit `return` is used.
+
+  4.3 Exiting a Script                           *script-exit*
+
+      `exit [N]` terminates the script with status {N} (default is
+      the status of the last command):
+
+          `if ! cd /project; then`
+          `  echo "failed to enter /project" >&2`
+          `  exit 1`
+          `fi`
+
+==============================================================================
+5. Subshells and Grouping                        *script-grouping*
+
+  Commands can be grouped together so they share redirections,
+  run as a unit in a pipeline, or have their execution conditioned
+  as a block.
+
+  5.1 Subshells                                  *script-subshell*
+
+      `( commands )`
+
+      Parentheses run {commands} in a subshell — a separate copy of
+      the shell environment. Changes to variables, the working
+      directory, or other state inside the subshell do not affect
+      the parent:
+
+          `x=before`
+          `(x=after; echo "inside: $x")`   # prints "inside: after"
+          `echo "outside: $x"`              # prints "outside: before"
+
+      A common use is isolating side effects:
+
+          `(cd /tmp && tar xf archive.tar)`
+          `# still in the original directory here`
+
+      Subshells can be used in pipelines and command lists:
+
+          `(echo header; cat data.csv) | less`
+          `(make clean && make) || echo "build failed"`
+
+  5.2 Brace Groups                               *script-braces*
+
+      `{ commands; }`
+
+      Braces group {commands} without creating a subshell. They run
+      in the current shell environment, so variable changes persist:
+
+          `x=before`
+          `{ x=after; echo "inside: $x"; }`   # prints "inside: after"
+          `echo "outside: $x"`                 # prints "outside: after"
+
+      Note the required syntax: the opening `{` must be followed by
+      a space, and the closing `}` must be preceded by `;` or a
+      newline.
+
+      Brace groups are useful for shared redirections:
+
+          `{`
+          `  echo "stdout line"`
+          `  echo "stderr line" >&2`
+          `} > out.log 2> err.log`
+
+      And for grouping in command lists (see |script-lists|):
+
+          `test -f config || { echo "missing config" >&2; exit 1; }`
+
+  5.3 Command Substitution                       *script-command-sub*
+
+      `$(command)` or `\`command\``
+
+      Runs {command} in a subshell and substitutes its stdout into
+      the surrounding command. The modern `$(...)` syntax is preferred
+      because it nests cleanly:
+
+          `echo "Today is $(date +%A)"`
+          `files=$(find . -name "*.txt" | wc -l)`
+          `echo "Kernel: $(uname -r) on $(uname -m)"`
+
+      Trailing newlines are stripped from the output. To preserve
+      them, add a sentinel character and strip it:
+
+          `output="$(printf "hello\n\n"; echo x)"`
+          `output="${output%x}"`
+
+  5.4 Process Substitution                       *script-process-sub*
+
+      `<(command)` and `>(command)`
+
+      Process substitution provides a filename that, when read or
+      written, connects to the stdin or stdout of {command}. This
+      is useful for commands that expect filenames rather than stdin:
+
+          `diff <(sort file1) <(sort file2)`
+          `comm -13 <(sort list1) <(sort list2)`
+
+      `<(cmd)` provides a readable path connected to {cmd}'s stdout.
+      `>(cmd)` provides a writable path connected to {cmd}'s stdin.
+
+==============================================================================
+6. Conditionals                                  *script-conditionals*
+
+  6.1 if / elif / else                           *script-if*
+
+      `if {condition}; then`
+      `  {commands}`
+      `elif {condition}; then`
+      `  {commands}`
+      `else`
+      `  {commands}`
+      `fi`
+
+      The {condition} is any command. If it exits with status 0
+      (success), the corresponding {commands} block runs:
+
+          `if test -f config.yml; then`
+          `  echo "config found"`
+          `elif test -f config.json; then`
+          `  echo "falling back to JSON config"`
+          `else`
+          `  echo "no config found" >&2`
+          `  exit 1`
+          `fi`
+
+      `elif` and `else` are optional. Multiple `elif` branches are
+      allowed.
+
+  6.2 test and [                                 *script-test*
+
+      `test` and `[` are the same command. `[` requires a closing `]`
+      as its last argument. They evaluate a conditional expression
+      and exit 0 (true) or 1 (false).
+
+      File tests:
+
+          `-e {file}`     file exists
+          `-f {file}`     file exists and is a regular file
+          `-d {file}`     file exists and is a directory
+          `-r {file}`     file is readable
+          `-w {file}`     file is writable
+          `-x {file}`     file is executable
+          `-s {file}`     file exists and is non-empty
+          `-L {file}`     file is a symbolic link
+
+      String tests:
+
+          `-n {str}`      string is non-empty
+          `-z {str}`      string is empty
+          `{a} = {b}`     strings are equal
+          `{a} != {b}`    strings are not equal
+
+      Integer comparisons:
+
+          `{a} -eq {b}`   equal
+          `{a} -ne {b}`   not equal
+          `{a} -lt {b}`   less than
+          `{a} -le {b}`   less than or equal
+          `{a} -gt {b}`   greater than
+          `{a} -ge {b}`   greater than or equal
+
+      Logical operators:
+
+          `! {expr}`              negation
+          `{expr} -a {expr}`     AND
+          `{expr} -o {expr}`     OR
+
+      Examples:
+
+          `if [ -f "$file" ]; then echo "exists"; fi`
+          `if [ "$count" -gt 10 ]; then echo "many"; fi`
+          `[ -z "$var" ] && var="default"`
+
+  6.3 [[ (extended test)                         *script-double-bracket*
+
+      `[[` is an enhanced version of `[` with several advantages:
+
+      * No word splitting or glob expansion on variables, so
+        quoting is less critical (though still good practice)
+      * `&&` and `||` for logical operators (instead of `-a` / `-o`)
+      * `=~` for regex matching
+      * Pattern matching with `==`
+
+          `if [[ -n $var && $var != "skip" ]]; then`
+          `  echo "processing $var"`
+          `fi`
+
+      Regex matching with `=~`:
+
+          `if [[ $input =~ ^[0-9]+$ ]]; then`
+          `  echo "it's a number"`
+          `fi`
+
+      When `=~` matches, the captured groups are available in the
+      `$BASH_REMATCH` array (shed uses the same convention as bash).
+
+  6.4 case                                       *script-case*
+
+      `case {word} in`
+      `  {pattern}) {commands} ;;`
+      `  {pattern} | {pattern}) {commands} ;;`
+      `  *) {commands} ;;`
+      `esac`
+
+      Match {word} against patterns. The first matching branch runs,
+      then execution continues after `esac`. Patterns use the same
+      syntax as filename globs (see |glob|):
+
+          `case "$1" in`
+          `  start)`
+          `    start_service`
+          `    ;;`
+          `  stop)`
+          `    stop_service`
+          `    ;;`
+          `  restart)`
+          `    stop_service`
+          `    start_service`
+          `    ;;`
+          `  *)`
+          `    echo "usage: $0 {start|stop|restart}" >&2`
+          `    exit 1`
+          `    ;;`
+          `esac`
+
+      Multiple patterns can match the same branch using `|`:
+
+          `case "$ans" in`
+          `  y | yes | Y | YES) echo "confirmed" ;;`
+          `  *) echo "cancelled" ;;`
+          `esac`
+
+==============================================================================
+7. Loops                                         *script-loops*
+
+  7.1 `For` loops                                *script-for-in*
+
+      `for {var} in {words}; do`
+      `  {commands}`
+      `done`
+
+      Iterate over a list of words, assigning each to {var}:
+
+          `for f in *.txt; do`
+          `  echo "processing $f"`
+          `done`
+
+          `for host in web1 web2 db1; do`
+          `  ssh "$host" uptime`
+          `done`
+
+      The word list is subject to the usual expansions (globs,
+      variables, command substitution):
+
+          `for pkg in $(cat packages.txt); do`
+          `  apt install -y "$pkg"`
+          `done`
+
+      If `in {words}` is omitted, the loop iterates over the
+      positional parameters (`"$@"`):
+
+          `for arg; do`
+          `  echo "got: $arg"`
+          `done`
+
+  7.2 `C-style For` loops                       *script-for-c*
+
+      `for (( {init}; {test}; {step} )); do`
+      `  {commands}`
+      `done`
+
+      Arithmetic for loop, similar to C:
+
+          `for (( i=0; i<10; i++ )); do`
+          `  echo "$i"`
+          `done`
+
+          `for (( i=0, j=10; i<j; i++, j-- )); do`
+          `  echo "$i $j"`
+          `done`
+
+  7.3 `While` loops                            *script-while*
+
+      `while {condition}; do`
+      `  {commands}`
+      `done`
+
+      Run {commands} repeatedly as long as {condition} succeeds:
+
+          `count=0`
+          `while [ "$count" -lt 5 ]; do`
+          `  echo "$count"`
+          `  count=$((count + 1))`
+          `done`
+
+      Reading lines from a file:
+
+          `while read -r line; do`
+          `  echo ">> $line"`
+          `done < input.txt`
+
+      Infinite loop:
+
+          `while true; do`
+          `  check_status || break`
+          `  sleep 5`
+          `done`
+
+  7.4 `Until` loops                            *script-until*
+
+      `until {condition}; do`
+      `  {commands}`
+      `done`
+
+      The opposite of `while` — runs {commands} until {condition}
+      succeeds:
+
+          `until ping -c1 -W1 server >/dev/null 2>&1; do`
+          `  echo "waiting for server..."`
+          `  sleep 1`
+          `done`
+          `echo "server is up"`
+
+  7.5 The `break` and `continue` keywords     *script-break* *script-continue*
+
+      `break [N]` exits the innermost loop and sets `$?` to {N} (default 0):
+
+          `while true; do`
+          `  read -r input`
+          `  if [ "$input" = "quit" ]; then`
+          `    break`
+          `  fi`
+          `  echo "you said: $input"`
+          `done`
+
+      `continue [N]` restarts the loop and sets `$?` to {N} (default 0):
+
+          `for f in *; do`
+          `  if [ -d "$f" ]; then`
+          `    continue`
+          `  fi`
+          `  wc -l "$f"`
+          `done`
+
+==============================================================================
+8. Functions                                     *script-functions*
+
+  Functions let you group commands under a name and call them like
+  any other command.
+
+  8.1 Definition                                 *script-func-def*
+
+      There are two syntax forms:
+
+          `name() {`
+          `  commands`
+          `}`
+
+          `function name {`
+          `  commands`
+          `}`
+
+      Both forms are equivalent. The body can be any compound command,
+      but braces are by far the most common.
+
+  8.2 Arguments                                  *script-func-args*
+
+      Functions receive arguments through positional parameters,
+      just like scripts. Inside the function, `$1`, `$2`, etc.
+      refer to the function's arguments, not the script's:
+
+          `greet() {`
+          `  echo "hello, $1"`
+          `}`
+          `greet world`              # prints "hello, world"
+
+      `$@` and `$#` also reflect the function's arguments:
+
+          `show_args() {`
+          `  echo "got $# args: $@"`
+          `}`
+          `show_args a b c`          # prints "got 3 args: a b c"
+
+  8.3 Return Values                              *script-func-return*
+
+      `return [N]` exits the function with status {N} (default 0).
+      If no `return` is used, the function's exit status is that of
+      the last command executed:
+
+          `is_empty() {`
+          `  [ -z "$1" ]`
+          `}`
+
+          `if is_empty "$var"; then`
+          `  echo "var is empty"`
+          `fi`
+
+      Functions cannot return strings directly. The common patterns
+      for producing output are:
+
+      Printing to stdout (caller captures with command substitution):
+
+          `get_date() {`
+          `  date +%Y-%m-%d`
+          `}`
+          `today=$(get_date)`
+
+      Setting a variable by name:
+
+          `get_date() {`
+          `  eval "$1=$(date +%Y-%m-%d)"`
+          `}`
+          `get_date today`
+          `echo "$today"`
+
+  8.4 Local Variables                            *script-func-local*
+
+      By default, variables in functions are global. Use `local` to
+      restrict a variable to the function's scope:
+
+          `count_files() {`
+          `  local n`
+          `  n=$(ls -1 | wc -l)`
+          `  echo "$n"`
+          `}`
+          `count_files`
+          `echo "$n"`                # empty — n was local
+
+      Without `local`, `n` would remain set after the function
+      returns. See |var-local| for more details.
+
+  8.5 Recursion                                  *script-func-recurse*
+
+      Functions can call themselves. Make sure there is a base case
+      to avoid infinite recursion:
+
+          `factorial() {`
+          `  if [ "$1" -le 1 ]; then`
+          `    echo 1`
+          `    return`
+          `  fi`
+          `  local prev=$(factorial $(($1 - 1)))`
+          `  echo $(($1 * prev))`
+          `}`
+          `factorial 5`              # prints 120
+
+==============================================================================
+9. Traps                                         *script-traps*
+
+  `trap` registers a command to run when the shell receives a signal
+  or reaches a specific event.
+
+  9.1 Syntax                                     *script-trap-syntax*
+
+      `trap {command} {signal} ...`
+
+          Register {command} to run when {signal} is received.
+          Multiple signals can be listed:
+
+          `trap 'echo interrupted' INT`
+          `trap 'cleanup' INT TERM HUP`
+
+      `trap '' {signal}`
+
+          Ignore {signal} entirely:
+
+          `trap '' INT`             # Ctrl-C does nothing
+
+      `trap - {signal}`
+
+          Reset {signal} to its default behavior:
+
+          `trap - INT`             # restore default Ctrl-C
+
+      `trap`
+
+          With no arguments, list all currently registered traps.
+
+  9.2 Pseudo-Signals                             *script-trap-pseudo*
+
+      In addition to real signals, `trap` recognizes:
+
+      `EXIT`                                     *script-trap-exit*
+
+          Runs when the shell exits, regardless of the reason.
+          This is the most common trap, used for cleanup:
+
+          `tmpdir=$(mktemp -d)`
+          `trap 'rm -rf "$tmpdir"' EXIT`
+
+      `ERR`                                      *script-trap-err*
+
+          Runs whenever a command exits with a non-zero status:
+
+          `trap 'echo "command failed: $?" >&2' ERR`
+
+  9.3 Common Signals                             *script-trap-signals*
+
+      `INT`       interrupt (Ctrl-C)
+      `TERM`      termination request
+      `HUP`       terminal closed / hangup
+      `QUIT`      quit (Ctrl-\)
+      `USR1`      user-defined signal 1
+      `USR2`      user-defined signal 2
+      `WINCH`     terminal window resize
+
+  9.4 Cleanup Pattern                            *script-trap-cleanup*
+
+      The standard pattern for temporary file cleanup:
+
+          `cleanup() {`
+          `  rm -f "$tmpfile"`
+          `  rm -rf "$tmpdir"`
+          `}`
+          `trap cleanup EXIT`
+
+          `tmpfile=$(mktemp)`
+          `tmpdir=$(mktemp -d)`
+          `# ... script body ...`
+          `# cleanup runs automatically on exit`
+
+      This ensures cleanup happens whether the script finishes
+      normally, is interrupted, or encounters an error.
+
+==============================================================================
+10. File Descriptor Manipulation with exec       *script-exec-redirect*
+
+  `exec` with no command argument applies redirections to the
+  current shell session. This lets you permanently redirect
+  file descriptors for the rest of the script.
+
+  10.1 Redirecting stdout/stderr                 *script-exec-redir-std*
+
+      Redirect all subsequent output to a file:
+
+          `exec > output.log 2>&1`
+          `echo "this goes to output.log"`
+          `ls -la`                   # also goes to output.log
+
+      Redirect stderr to a log while keeping stdout on the terminal:
+
+          `exec 2> error.log`
+          `echo "visible on terminal"`
+          `ls /nonexistent`          # error goes to error.log
+
+      Redirect all output to the terminal:
+
+          `exec > /dev/tty 2>&1`
+
+  10.2 Opening custom file descriptors           *script-exec-custom-fd*
+
+      Open a file on a numbered descriptor for later use:
+
+          `exec 3> output.txt`       # open fd 3 for writing
+          `echo "hello" >&3`         # write to fd 3
+          `echo "world" >&3`
+          `exec 3>&-`                # close fd 3
+
+      Open a file for reading:
+
+          `exec 4< input.txt`        # open fd 4 for reading
+          `read -r line <&4`         # read a line from fd 4
+          `exec 4<&-`                # close fd 4
+
+  10.3 Saving and restoring descriptors          *script-exec-save-fd*
+
+      Save a descriptor before redirecting, then restore it later:
+
+          `exec 3>&1`                # save stdout to fd 3
+          `exec > /tmp/log.txt`      # redirect stdout to file
+          `echo "this goes to the file"`
+          `exec 1>&3 3>&-`           # restore stdout, close fd 3
+          `echo "this goes to the terminal"`
+
+  10.4 Read/write descriptors                    *script-exec-readwrite*
+
+      Open a file for both reading and writing:
+
+          `exec 3<> file.txt`
+
+      See |redirect| for full details on redirection syntax.
+			See |builtin-seek| for arbitrary cursor movement in read-write FDs.
+
+==============================================================================

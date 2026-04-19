@@ -20,6 +20,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::{expand_keymap, expand_prompt};
 use crate::libsh::utils::AutoCmdVecUtils;
+use crate::prelude::*;
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::editcmd::Direction;
 use crate::readline::editmode::emacs::Emacs;
@@ -39,7 +40,6 @@ use crate::{
     highlight::Highlighter,
   },
 };
-use crate::prelude::*;
 
 pub mod complete;
 pub mod editcmd;
@@ -171,26 +171,26 @@ type Marker = char;
 ///
 /// Used for simpler text inputs like Ex mode and the help builtin's search bar
 /// Do note that passing a table name to this struct will create a database table if it doesn't already exist.
-#[derive(Default,Debug,Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct SimpleEditor {
-	pub buf: LineBuf,
-	pub mode: Emacs,
-	pub history: Option<History>
+  pub buf: LineBuf,
+  pub mode: Emacs,
+  pub history: Option<History>,
 }
 
 impl SimpleEditor {
-	pub fn new(history_table: Option<&str>) -> Self {
-		let history = history_table.map(|name| {
-			state::get_db_conn()
-				.and_then(|conn| History::new(conn, name).ok())
-				.unwrap_or(History::empty(name))
-		});
-		Self {
-			history,
-			buf: LineBuf::default(),
-			mode: Emacs::default(),
-		}
-	}
+  pub fn new(history_table: Option<&str>) -> Self {
+    let history = history_table.map(|name| {
+      state::get_db_conn()
+        .and_then(|conn| History::new(conn, name).ok())
+        .unwrap_or(History::empty(name))
+    });
+    Self {
+      history,
+      buf: LineBuf::default(),
+      mode: Emacs::default(),
+    }
+  }
   pub fn should_grab_history(&mut self, cmd: &EditCmd) -> bool {
     cmd.verb().is_none()
       && (cmd
@@ -203,7 +203,9 @@ impl SimpleEditor {
         && self.buf.on_last_line())
   }
   pub fn scroll_history(&mut self, cmd: EditCmd) {
-		let Some(history) = self.history.as_mut() else { return };
+    let Some(history) = self.history.as_mut() else {
+      return;
+    };
     let count = &cmd.motion().unwrap().0;
     let motion = &cmd.motion().unwrap().1;
     let count = match motion {
@@ -437,9 +439,9 @@ impl ShedLine {
     new.print_line(false)?;
     Ok(new)
   }
-	pub fn read(&mut self) -> ShResult<()> {
-		self.reader.read(self.tty)
-	}
+  pub fn read(&mut self) -> ShResult<()> {
+    self.reader.read(self.tty)
+  }
 
   pub fn with_initial(mut self, initial: &str) -> Self {
     self.editor = LineBuf::new().with_initial(initial, 0);
@@ -654,7 +656,7 @@ impl ShedLine {
         if !self.focused_history().at_pending() {
           self.focused_history().reset_to_pending();
         }
-				self.update_editor_hint();
+        self.update_editor_hint();
         self.completer.clear(&mut self.writer)?;
         self.needs_redraw = true;
         self.completer.reset();
@@ -682,7 +684,7 @@ impl ShedLine {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionCancel));
         post_cmds.exec();
 
-				self.update_editor_hint();
+        self.update_editor_hint();
         self.completer.clear(&mut self.writer)?;
         write_vars(|v| {
           v.set_var(
@@ -819,7 +821,7 @@ impl ShedLine {
         .edit(|e| e.attempt_inline_expansion(&self.history))
     {
       // If history expansion occurred, don't attempt completion yet
-			self.update_editor_hint();
+      self.update_editor_hint();
       return Ok(None);
     }
 
@@ -861,7 +863,7 @@ impl ShedLine {
         if !self.focused_history().at_pending() {
           self.focused_history().reset_to_pending();
         }
-				self.update_editor_hint();
+        self.update_editor_hint();
         write_vars(|v| {
           v.set_var(
             "SHED_VI_MODE",
@@ -1087,12 +1089,12 @@ impl ShedLine {
     }
 
     if cmd.is_submit_action() {
-			if self.editor.attempt_alias_expansion() {
-				self.update_editor_hint();
-			}
+      if self.editor.attempt_alias_expansion() {
+        self.update_editor_hint();
+      }
       if self.editor.attempt_history_expansion(&self.history) {
         // If history expansion occurred, don't submit yet
-				self.update_editor_hint();
+        self.update_editor_hint();
 
         return Ok(None);
       } else if self.should_submit()? || !read_shopts(|o| o.line.linebreak_on_incomplete) {
@@ -1169,7 +1171,7 @@ impl ShedLine {
       }
     }
 
-		self.update_editor_hint();
+    self.update_editor_hint();
     self.needs_redraw = true;
     Ok(None)
   }
@@ -1607,9 +1609,7 @@ impl ShedLine {
           )
         }
 
-        Verb::ExMode => Box::new(ViEx::new(
-          self.editor.is_selecting(),
-        )),
+        Verb::ExMode => Box::new(ViEx::new(self.editor.is_selecting())),
 
         Verb::VerbatimMode => {
           self.reader.verbatim_single = true;
@@ -1718,9 +1718,7 @@ impl ShedLine {
       ModeReport::Normal => Box::new(ViNormal::new()),
       ModeReport::Insert => Box::new(ViInsert::new()),
       ModeReport::Visual => Box::new(ViVisual::new()),
-      ModeReport::Ex => Box::new(ViEx::new(
-        self.editor.is_selecting(),
-      )),
+      ModeReport::Ex => Box::new(ViEx::new(self.editor.is_selecting())),
       ModeReport::Replace => Box::new(ViReplace::new()),
       ModeReport::Verbatim => Box::new(ViVerbatim::new()),
       ModeReport::Emacs => Box::new(Emacs::new()),
@@ -1768,9 +1766,7 @@ impl ShedLine {
             ModeReport::Verbatim => Box::new(ViVerbatim::new()),
             ModeReport::Emacs => Box::new(Emacs::new()),
             ModeReport::Remote => Box::new(RemoteMode),
-            ModeReport::Ex => Box::new(ViEx::new(
-              self.editor.is_selecting(),
-            )),
+            ModeReport::Ex => Box::new(ViEx::new(self.editor.is_selecting())),
             ModeReport::Unknown => unreachable!(),
           };
           self.mode = old_mode_clone;
@@ -1870,7 +1866,7 @@ impl ShedLine {
 
       self.fire_editor_command(cmd.clone())?;
 
-			self.update_editor_hint();
+      self.update_editor_hint();
 
       if self.mode.report_mode() == ModeReport::Visual
         && cmd
@@ -1906,22 +1902,24 @@ impl ShedLine {
     }
   }
 
-	pub fn update_editor_hint(&mut self) {
-		self.history.update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
-		let hint = self.history.get_hint();
-		self.editor.set_hint(hint);
-	}
+  pub fn update_editor_hint(&mut self) {
+    self
+      .history
+      .update_pending_cmd((&self.editor.joined(), self.editor.cursor_to_flat()));
+    let hint = self.history.get_hint();
+    self.editor.set_hint(hint);
+  }
 
   pub fn fire_editor_command(&mut self, cmd: EditCmd) -> ShResult<()> {
-		let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
+    let is_shell_cmd = cmd.verb().is_some_and(|v| matches!(v.1, Verb::ShellCmd(_)));
     let res = self.editor.exec_cmd(cmd);
 
-		if is_shell_cmd {
-			self.needs_redraw = true;
-			self.prompt.refresh();
-		}
+    if is_shell_cmd {
+      self.needs_redraw = true;
+      self.prompt.refresh();
+    }
 
-		res
+    res
   }
 }
 
@@ -2177,7 +2175,7 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
     insertions.insert(0, (span_start, markers::ARG));
   }
 
-  if token.flags.contains(TkFlags::KEYWORD) {
+  if token.flags.contains(TkFlags::KEYWORD) || token.flags.contains(TkFlags::FUNCNAME) {
     insertions.insert(0, (span_start, markers::KEYWORD));
   }
 

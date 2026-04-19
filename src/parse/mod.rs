@@ -165,12 +165,12 @@ impl ParsedSrc {
       match lex_result {
         Ok(token) => tokens.push(token),
         Err(error) => {
-					if self.lex_flags.contains(LexFlags::LEX_UNFINISHED) {
-						errors.push(error)
-					} else {
-						return Err(vec![error])
-					}
-				}
+          if self.lex_flags.contains(LexFlags::LEX_UNFINISHED) {
+            errors.push(error)
+          } else {
+            return Err(vec![error]);
+          }
+        }
       }
     }
 
@@ -1043,6 +1043,7 @@ impl ParseStream {
           try_match!(self.parse_if()?);
           try_match!(self.parse_negate()?);
           try_match!(self.parse_time()?);
+          try_match!(self.parse_func_keyword()?);
           try_match!(self.parse_arith()?);
           try_match!(self.parse_cmd()?);
           Ok(None)
@@ -1060,6 +1061,15 @@ impl ParseStream {
     Ok(result)
   }
   fn parse_compound(&mut self) -> ShResult<Option<Node>> {
+    log::debug!(
+      "PARSE: parse_compound called, peek={:?}",
+      self.peek_tk().map(|t| format!(
+        "{} class={:?} flags={:?}",
+        t.span.as_str(),
+        t.class,
+        t.flags
+      ))
+    );
     // parse only a compound command.
     // used by function definition
     // because any compound command is a valid
@@ -1124,29 +1134,47 @@ impl ParseStream {
     let mut node_tks: Vec<Tk> = vec![];
     let body;
 
-    // Two forms: "name()" as one token, or "name" followed by "()" as separate tokens
-    // Kind of a hack but I forgot you can have the spaces when I wrote the lexer :D
-    let spaced_form = !is_func_name(self.peek_tk())
-      && self
-        .peek_tk()
-        .is_some_and(|tk| tk.flags.contains(TkFlags::IS_CMD))
-      && is_func_parens(self.tokens().get(1));
+    let has_func_kw = self.check_keyword("function");
+    log::debug!(
+      "PARSE: parse_func_def called, has_func_kw={}, peek={:?}",
+      has_func_kw,
+      self.peek_tk().map(|t| t.span.as_str().to_string())
+    );
 
-    if !is_func_name(self.peek_tk()) && !spaced_form {
-      return Ok(None);
+    if has_func_kw {
+      log::debug!("PARSE: consuming 'function' keyword");
+      node_tks.push(self.next_tk().unwrap());
+    }
+
+    if !self.check_flags(TkFlags::FUNCNAME) {
+      log::debug!(
+        "PARSE: no FUNCNAME flag on next token, peek={:?}",
+        self
+          .peek_tk()
+          .map(|t| format!("{} flags={:?}", t.span.as_str(), t.flags))
+      );
+      if has_func_kw {
+        bail!(
+          self,
+          node_tks,
+          "Expected function name after 'function' keyword"
+        );
+      } else {
+        return Ok(None);
+      }
     }
 
     let name_tk = self.next_tk().unwrap();
+    log::debug!(
+      "PARSE: func name token='{}', flags={:?}",
+      name_tk.span.as_str(),
+      name_tk.flags
+    );
     node_tks.push(name_tk.clone());
     let name = name_tk.clone();
-    let name_raw: Rc<str> = if spaced_form {
-      // Consume the "()" token
-      let parens_tk = self.next_tk().unwrap();
-      node_tks.push(parens_tk);
-      name.as_str().into()
-    } else {
-      name.as_str().into()
-    };
+    let name_raw: Rc<str> = name.as_str().into();
+    log::debug!("PARSE: name_raw='{}'", name_raw);
+
     self.catch_separator(&mut node_tks);
     let mut src = name_tk.span.span_source().clone();
     src.rename(name_raw.clone());
@@ -1175,7 +1203,6 @@ impl ParseStream {
     // Replace placeholder with full-span label
     self.context.pop_back();
 
-    self.context.pop_back();
     Ok(Some(node!(self, node_tks, NdRule::FuncDef { name, body })))
   }
   fn panic_mode(&mut self, node_tks: &mut Vec<Tk>) {
@@ -1372,12 +1399,12 @@ impl ParseStream {
       node_tks.push(tk.clone());
       let ctx = self.context.clone();
       let redir = match Self::build_redir(&tk, || self.next_tk(), node_tks, ctx) {
-				Ok(r) => r,
-				Err(e) => {
-					self.panic_mode(node_tks);
-					return Err(e);
-				}
-			};
+        Ok(r) => r,
+        Err(e) => {
+          self.panic_mode(node_tks);
+          return Err(e);
+        }
+      };
       redirs.push(redir);
     }
     Ok(())
@@ -1516,6 +1543,26 @@ impl ParseStream {
     node_tks.extend(cmd.tokens.clone());
     self.catch_separator(&mut node_tks);
     Ok(Some(cmd))
+  }
+  fn parse_func_keyword(&mut self) -> ShResult<Option<Node>> {
+    log::debug!(
+      "PARSE: parse_func_keyword called, peek={:?}",
+      self.peek_tk().map(|t| t.span.as_str().to_string())
+    );
+    if !self.check_keyword("function") || !self.next_tk_is_some() {
+      return Ok(None);
+    }
+
+    log::debug!("PARSE: parse_func_keyword matched, delegating to parse_func_def");
+    let Some(func_def) = self.parse_func_def()? else {
+      bail!(
+        self,
+        vec![],
+        "Malformed function definition after 'function' keyword"
+      );
+    };
+
+    Ok(Some(func_def))
   }
   fn parse_arith(&mut self) -> ShResult<Option<Node>> {
     let mut node_tks: Vec<Tk> = vec![];
@@ -2285,14 +2332,7 @@ fn parse_err_full(reason: &str, blame: &Span, context: LabelCtx) -> ShErr {
 }
 
 fn is_func_name(tk: Option<&Tk>) -> bool {
-  tk.is_some_and(|tk| {
-    tk.flags.contains(TkFlags::KEYWORD)
-      && (tk.span.as_str().ends_with("()") && !tk.span.as_str().ends_with("\\()"))
-  })
-}
-
-fn is_func_parens(tk: Option<&Tk>) -> bool {
-  tk.is_some_and(|tk| tk.flags.contains(TkFlags::KEYWORD) && tk.span.as_str() == "()")
+  tk.is_some_and(|tk| tk.flags.contains(TkFlags::FUNCNAME))
 }
 
 #[cfg(test)]

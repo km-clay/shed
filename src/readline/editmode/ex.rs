@@ -38,13 +38,13 @@ bitflags! {
 
 #[derive(Clone, Debug)]
 struct ExEditor {
-	editor: SimpleEditor,
+  editor: SimpleEditor,
 }
 
 impl Default for ExEditor {
   fn default() -> Self {
     Self {
-			editor: SimpleEditor::new(Some("ex_history"))
+      editor: SimpleEditor::new(Some("ex_history")),
     }
   }
 }
@@ -55,9 +55,7 @@ impl ExEditor {
     if has_select {
       editor.buf = editor.buf.with_initial("'<,'>", 6);
     }
-    Self {
-			editor
-    }
+    Self { editor }
   }
   pub fn clear(&mut self) {
     *self = Self::default()

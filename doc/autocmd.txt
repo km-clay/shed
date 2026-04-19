@@ -43,7 +43,7 @@ behavior without modifying the shell itself.
 
   `pre-change-dir`                             *autocmd-pre-change-dir*
 
-      Fires before `cd` changes the working directory.
+      Fires before |cd| changes the working directory.
 
       Special variables:
         `$NEW_DIR`    the directory being changed to
@@ -73,12 +73,12 @@ behavior without modifying the shell itself.
 
   `pre-prompt`                                 *autocmd-pre-prompt*
 
-      Fires before the prompt is rendered. Useful for updating prompt
+      Fires before the |prompt| is rendered. Useful for updating prompt
       state.
 
   `post-prompt`                                *autocmd-post-prompt*
 
-      Fires after the prompt is rendered.
+      Fires after the |prompt| is rendered.
 
   2.5 Mode Change Events                       *autocmd-mode-events*
 

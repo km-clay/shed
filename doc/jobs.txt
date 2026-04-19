@@ -1,0 +1,163 @@
+*jobs* *job-control*
+
+#JOB CONTROL#
+
+Shed provides POSIX job control for managing background and suspended
+processes. Jobs are tracked by the shell and can be moved between
+the foreground and background.
+
+==============================================================================
+1. Overview                                      *jobs-overview*
+
+  When a command is run normally, the shell waits for it to finish
+  before accepting new input. Job control allows you to run commands
+  in the background, suspend foreground commands, and switch between
+  them.
+
+  Key signals:
+
+      {Ctrl-Z}    Suspend the foreground job (sends SIGTSTP)
+      {Ctrl-C}    Interrupt the foreground job (sends SIGINT)
+
+==============================================================================
+2. Background Jobs                               *jobs-background*
+
+  `command &`                                    *jobs-ampersand*
+
+      Appending `&` to a command runs it in the background. The shell
+      prints the job number, PID, and command name, then immediately returns to the
+      prompt:
+
+          `sleep 60 &`
+          `[1]	12345 running	sleep`
+
+  Pipelines can be backgrounded too:
+
+      `find / -name "*.log" | wc -l &`
+			`[1]	12345 running find |
+						54321 running wc`
+
+==============================================================================
+3. Job Identifiers                               *jobs-id*
+
+  Jobs can be referred to by number or by command prefix:
+
+      `%N`                job number N (e.g. `%1`, `%2`)
+      `%{prefix}`         the job whose command starts with {prefix}
+
+  The current job (most recently active) is used when no identifier
+  is given.
+
+==============================================================================
+4. Builtins                                      *jobs-builtins*
+
+  4.1 jobs                                       *jobs-list* *builtin-jobs*
+
+  `jobs [-lpnrs]`
+
+      List background and stopped jobs.
+
+      `-l`    long format: include PIDs and process group IDs
+      `-p`    print only the process group ID of each job
+      `-n`    print only jobs whose status has changed since last report
+      `-r`    print only running jobs
+      `-s`    print only stopped jobs
+
+      Examples:
+
+          `jobs`         list all jobs
+          `jobs -l`      list jobs with PIDs
+          `jobs -r`      list only running jobs
+
+  4.2 fg                                         *jobs-fg* *builtin-fg*
+
+  `fg [%jobid]`
+
+      Bring a stopped or background job to the foreground. The shell
+      waits for the job to complete (or stop again) before returning
+      the prompt. If no {jobid} is given, the current job is used.
+
+      Examples:
+
+          `fg`          bring current job to foreground
+          `fg %2`       bring job 2 to foreground
+
+  4.3 bg                                         *jobs-bg* *builtin-bg*
+
+  `bg [%jobid]`
+
+      Resume a stopped job in the background. If no {jobid} is given,
+      the current (most recently active) job is used. The job continues
+      running without holding the terminal.
+
+      Examples:
+
+          `bg`          resume current job in background
+          `bg %2`       resume job 2 in background
+
+  4.4 wait                                       *jobs-wait* *builtin-wait*
+
+  `wait [{id} ...]`
+
+      Wait for background jobs to finish. Exit status is the exit
+      status of the last waited-on job.
+
+      With no arguments, waits for all background jobs.
+
+      {id} can be a PID, a job table number, or `%N`/`%{cmd}` notation.
+
+      Examples:
+
+          `wait`          wait for all jobs
+          `wait %1`       wait for job 1
+          `wait 4321`     wait for PID 4321
+
+  4.5 disown                                     *jobs-disown* *builtin-disown*
+
+  `disown [-h] [-a] [%jobid | pid]`
+
+      Remove a job from the shell's job table. A disowned job is no
+      longer tracked and will not produce a "Terminated" notification
+      when it exits.
+
+      `-h`    instead of removing the job, mark it so it does not
+              receive SIGHUP when the shell exits (nohup semantics)
+      `-a`    apply to all current jobs instead of a specific one
+
+      Without an argument, operates on the current job.
+
+      Examples:
+
+          `disown`          disown the current job
+          `disown %2`       disown job 2
+          `disown -h %1`    protect job 1 from SIGHUP on shell exit
+          `disown -a`       disown all jobs
+
+==============================================================================
+5. Socket Events                                 *jobs-events*
+
+  Job completions are broadcast over the shell's Unix socket
+  (see |socket|) to any connected subscribers:
+
+      `job>>begin>> {id} {n}`
+      `job>>child>> {pid} {status} {cmd}`
+
+  `begin` announces the job id and how many `child` events follow.
+  Each `child` event reports one pipeline stage.
+
+  `{status}` is one of:
+
+      `done`               exit code 0
+      `failed:{n}`         exit code n (non-zero)
+      `signaled:{SIGNAL}`  killed by signal (e.g. `signaled:SIGTERM`)
+
+  Example for a pipeline:
+
+      `job>>begin>> 2 3`
+      `job>>child>> 12346 done cat`
+      `job>>child>> 12347 failed:1 grep`
+      `job>>child>> 12348 signaled:SIGINT awk`
+      `job>>child>> 12349 done wc`
+
+==============================================================================
+See also: |socket| |builtin|

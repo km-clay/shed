@@ -248,7 +248,7 @@ processes.
       keys or modifiers in angle brackets. The events pass through the
       full editor dispatch chain (completion, history search, mode
       handler, keymap matching), exactly as if the user had typed
-      them — so `<Enter>` triggers submission, `<Tab>` triggers
+      them, so `<Enter>` triggers submission, `<Tab>` triggers
       completion, and so on.
 
           `line::keys::hello world`
@@ -395,7 +395,7 @@ processes.
       More sophisticated wrappers can interpret keymap notation,
       implement modal editing, drive completion, or proxy the
       stream to an external editor written in any language. The
-      socket does not care what's on the other end — it just
+      socket does not care what's on the other end, it just
       forwards keys out and accepts state back.
 
       See *socket-line-mode* for the auto-fallback behavior that

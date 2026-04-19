@@ -240,7 +240,7 @@ fn annotate_var_in_double_quotes() {
 fn annotate_func_def() {
   assert_annotated(
     "foo() { echo hello; }",
-    "\u{e103}foo()\u{e11a} \u{e104}{\u{e11a} \u{e101}echo\u{e11a} \u{e102}hello\u{e11a}\u{e108}; \u{e11a}\u{e104}}\u{e11a}",
+    "\u{e102}\u{e103}foo\u{e11a}() \u{e104}{\u{e11a} \u{e101}echo\u{e11a} \u{e102}hello\u{e11a}\u{e108}; \u{e11a}\u{e104}}\u{e11a}",
   );
 }
 
@@ -983,17 +983,16 @@ fn alias_no_expansion_test(aliases: &[(&str, &str)], input: &str) {
 
   let before = line.editor.joined();
   let expanded = line.editor.attempt_alias_expansion();
-  assert!(!expanded, "expected no alias expansion but expansion occurred");
+  assert!(
+    !expanded,
+    "expected no alias expansion but expansion occurred"
+  );
   assert_eq!(line.editor.joined(), before);
 }
 
 #[test]
 fn alias_simple_expansion() {
-  alias_expansion_test(
-    &[("ll", "ls -la")],
-    "ll ",
-    "ls -la ",
-  );
+  alias_expansion_test(&[("ll", "ls -la")], "ll ", "ls -la ");
 }
 
 #[test]
@@ -1016,10 +1015,7 @@ fn alias_self_referencing_no_infinite_loop() {
 
 #[test]
 fn alias_no_expand_in_arg_position() {
-  alias_no_expansion_test(
-    &[("foo", "bar")],
-    "echo foo ",
-  );
+  alias_no_expansion_test(&[("foo", "bar")], "echo foo ");
 }
 
 #[test]
@@ -1033,20 +1029,12 @@ fn alias_expand_after_semicolon() {
 
 #[test]
 fn alias_single_char_name() {
-  alias_expansion_test(
-    &[("g", "git")],
-    "g ",
-    "git ",
-  );
+  alias_expansion_test(&[("g", "git")], "g ", "git ");
 }
 
 #[test]
 fn alias_single_char_body() {
-  alias_expansion_test(
-    &[("a", "b")],
-    "a ",
-    "b ",
-  );
+  alias_expansion_test(&[("a", "b")], "a ", "b ");
 }
 
 #[test]
@@ -1067,10 +1055,7 @@ fn alias_no_expand_when_disabled() {
 
 #[test]
 fn alias_no_expand_in_quotes() {
-  alias_no_expansion_test(
-    &[("gc", "git commit")],
-    "echo 'gc' ",
-  );
+  alias_no_expansion_test(&[("gc", "git commit")], "echo 'gc' ");
 }
 
 #[test]

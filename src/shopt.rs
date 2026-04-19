@@ -145,7 +145,7 @@ pub struct ShOpts {
   pub line: ShOptLine,
   pub set: ShOptSet,
   pub prompt: ShOptPrompt,
-	pub highlight: ShOptHighlight,
+  pub highlight: ShOptHighlight,
 }
 
 impl Default for ShOpts {
@@ -154,14 +154,14 @@ impl Default for ShOpts {
     let line = ShOptLine::default();
     let set = ShOptSet::default();
     let prompt = ShOptPrompt::default();
-		let highlight = ShOptHighlight::default();
+    let highlight = ShOptHighlight::default();
 
     Self {
       core,
       line,
       set,
       prompt,
-			highlight,
+      highlight,
     }
   }
 }
@@ -182,7 +182,7 @@ impl ShOpts {
       self.query("line")?.unwrap_or_default().to_string(),
       self.query("set")?.unwrap_or_default().to_string(),
       self.query("prompt")?.unwrap_or_default().to_string(),
-			self.query("highlight")?.unwrap_or_default().to_string(),
+      self.query("highlight")?.unwrap_or_default().to_string(),
     ];
 
     Ok(output.join("\n"))
@@ -201,12 +201,9 @@ impl ShOpts {
       "line" => self.line.set(&remainder, val)?,
       "set" => self.set.set(&remainder, val)?,
       "prompt" => self.prompt.set(&remainder, val)?,
-			"highlight" => self.highlight.set(&remainder, val)?,
+      "highlight" => self.highlight.set(&remainder, val)?,
       _ => {
-        return Err(sherr!(
-          SyntaxErr,
-					"shopt: Unknown shopt set '{}'", key,
-        ));
+        return Err(sherr!(SyntaxErr, "shopt: Unknown shopt set '{}'", key,));
       }
     }
     Ok(())
@@ -225,11 +222,8 @@ impl ShOpts {
       "line" => self.line.get(&remainder),
       "set" => self.set.get(&remainder),
       "prompt" => self.prompt.get(&remainder),
-			"highlight" => self.highlight.get(&remainder),
-      _ => Err(sherr!(
-        SyntaxErr,
-        "shopt: Unknown shopt set '{}'", key,
-      )),
+      "highlight" => self.highlight.get(&remainder),
+      _ => Err(sherr!(SyntaxErr, "shopt: Unknown shopt set '{}'", key,)),
     }
   }
 }
@@ -353,40 +347,40 @@ shopt_group! {
     /// If set, enables history concatenation with Shift+Up/Down
     hist_cat: bool = true,
 
-		/// If set, expands aliases on the prompt instead of after submitting
-		expand_aliases: bool = true,
+    /// If set, expands aliases on the prompt instead of after submitting
+    expand_aliases: bool = true,
   }
 }
 
 shopt_group! {
   #[derive(Clone, Debug)]
   pub struct ShOptHighlight ("highlight") {
-		/// Whether to enable syntax highlighting in the line editor
-		enable: bool = true,
-		/// The color used for highlighting strings
-		string: String = "yellow".into(),
-		/// The color used for highlighting keywords like 'if' and 'for'
-		keyword: String = "yellow".into(),
-		/// The color used for highlighting valid commands
-		valid_command: String = "green".into(),
-		/// The color used for highlighting invalid commands
-		invalid_command: String = "bold red".into(),
-		/// The color used for highlighting control flow keywords like 'break' and 'return'
-		control_flow_keyword: String = "magenta".into(),
-		/// The color used for highlighting command arguments
-		argument: String = "white".into(),
-		/// The color used for highlighting arguments that refer to existing files
-		argument_file: String = "underline white".into(),
-		/// The color used for highlighting variables
-		variable: String = "cyan".into(),
-		/// The color used for highlighting operators like pipes and redirects
-		operator: String = "bold".into(),
-		/// The color used for highlighting comments
-		comment: String = "italic bright black".into(),
-		/// The color used for highlighting glob characters
-		glob: String = "bright cyan".into(),
-		/// The color used for highlighting the current selection
-		selection: String = "black on white".into(),
+    /// Whether to enable syntax highlighting in the line editor
+    enable: bool = true,
+    /// The color used for highlighting strings
+    string: String = "yellow".into(),
+    /// The color used for highlighting keywords like 'if' and 'for'
+    keyword: String = "yellow".into(),
+    /// The color used for highlighting valid commands
+    valid_command: String = "green".into(),
+    /// The color used for highlighting invalid commands
+    invalid_command: String = "bold red".into(),
+    /// The color used for highlighting control flow keywords like 'break' and 'return'
+    control_flow_keyword: String = "magenta".into(),
+    /// The color used for highlighting command arguments
+    argument: String = "white".into(),
+    /// The color used for highlighting arguments that refer to existing files
+    argument_file: String = "underline white".into(),
+    /// The color used for highlighting variables
+    variable: String = "cyan".into(),
+    /// The color used for highlighting operators like pipes and redirects
+    operator: String = "bold".into(),
+    /// The color used for highlighting comments
+    comment: String = "italic bright black".into(),
+    /// The color used for highlighting glob characters
+    glob: String = "bright cyan".into(),
+    /// The color used for highlighting the current selection
+    selection: String = "black on white".into(),
   }
 }
 

@@ -21,8 +21,11 @@ Press {Tab} to follow cross-reference links in the help pages.
   `help autocmd`      Autocmd hooks for shell events               |autocmd|
   `help builtin`      Builtin command reference                    |builtin|
   `help ex`           Ex mode (colon) commands                     |ex|
+  `help jobs`         Job control and background processes         |jobs|
   `help keybinds`     Vi mode keys, motions, text objects          |keybinds|
   `help prompt`       Prompt configuration, PS1, PSR, echo -p      |prompt|
+  `help scripting`    Shell scripting language reference             |scripting|
+  `help variables`    Variables, assignment, arrays, attributes    |variables|
   `help arith`        Arithmetic expansion: `$(( ))` syntax          |arith|
   `help glob`         Pathname expansion and wildcards             |glob|
   `help param`        Parameter expansion: `${}` operators           |param|

@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-  libsh::{error::ShResult, term::{color_from_description}},
+  libsh::{error::ShResult, term::color_from_description},
   match_loop,
   readline::{
     annotate_input,
@@ -14,131 +14,135 @@ use crate::{
 };
 
 fn resolve_style(raw: &str) -> ShResult<String> {
-	if raw.starts_with("\\e") {
-		Ok(raw.replace("\\e", "\x1b"))
-	} else {
-		color_from_description(raw)
-	}
+  if raw.starts_with("\\e") {
+    Ok(raw.replace("\\e", "\x1b"))
+  } else {
+    color_from_description(raw)
+  }
 }
 
 pub fn string_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.string.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.string.clone()))
 }
 
 pub fn keyword_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.keyword.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.keyword.clone()))
 }
 
 pub fn valid_command_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.valid_command.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.valid_command.clone()))
 }
 
 pub fn invalid_command_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.invalid_command.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.invalid_command.clone()))
 }
 
 pub fn control_flow_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.control_flow_keyword.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.control_flow_keyword.clone()))
 }
 
 pub fn argument_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.argument.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.argument.clone()))
 }
 
 pub fn argument_file_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.argument_file.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.argument_file.clone()))
 }
 
 pub fn variable_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.variable.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.variable.clone()))
 }
 
 pub fn operator_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.operator.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.operator.clone()))
 }
 
 pub fn comment_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.comment.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.comment.clone()))
 }
 
 pub fn glob_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.glob.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.glob.clone()))
 }
 
 pub fn selection_style() -> ShResult<String> {
-	resolve_style(&read_shopts(|o| o.highlight.selection.clone()))
+  resolve_style(&read_shopts(|o| o.highlight.selection.clone()))
 }
 
 pub struct HighlightTheme {
-	pub string: String,
-	pub keyword: String,
-	pub valid_command: String,
-	pub invalid_command: String,
-	pub control_flow: String,
-	pub argument: String,
-	pub argument_file: String,
-	pub variable: String,
-	pub operator: String,
-	pub comment: String,
-	pub glob: String,
-	pub selection: String,
+  pub string: String,
+  pub keyword: String,
+  pub valid_command: String,
+  pub invalid_command: String,
+  pub control_flow: String,
+  pub argument: String,
+  pub argument_file: String,
+  pub variable: String,
+  pub operator: String,
+  pub comment: String,
+  pub glob: String,
+  pub selection: String,
 }
 
 impl Default for HighlightTheme {
-	fn default() -> Self {
-		Self {
-			string: resolve_style("yellow").unwrap(),
-			keyword: resolve_style("yellow").unwrap(),
-			valid_command: resolve_style("green").unwrap(),
-			invalid_command: resolve_style("bold red").unwrap(),
-			control_flow: resolve_style("magenta").unwrap(),
-			argument: resolve_style("white").unwrap(),
-			argument_file: resolve_style("underline white").unwrap(),
-			variable: resolve_style("cyan").unwrap(),
-			operator: resolve_style("bold").unwrap(),
-			comment: resolve_style("italic bright black").unwrap(),
-			glob: resolve_style("bright cyan").unwrap(),
-			selection: resolve_style("black on white").unwrap(),
-		}
-	}
+  fn default() -> Self {
+    Self {
+      string: resolve_style("yellow").unwrap(),
+      keyword: resolve_style("yellow").unwrap(),
+      valid_command: resolve_style("green").unwrap(),
+      invalid_command: resolve_style("bold red").unwrap(),
+      control_flow: resolve_style("magenta").unwrap(),
+      argument: resolve_style("white").unwrap(),
+      argument_file: resolve_style("underline white").unwrap(),
+      variable: resolve_style("cyan").unwrap(),
+      operator: resolve_style("bold").unwrap(),
+      comment: resolve_style("italic bright black").unwrap(),
+      glob: resolve_style("bright cyan").unwrap(),
+      selection: resolve_style("black on white").unwrap(),
+    }
+  }
 }
 
 impl HighlightTheme {
-	pub fn resolve() -> Self {
-		let fallback = Self::default();
-		let mut errors = vec![];
+  pub fn resolve() -> Self {
+    let fallback = Self::default();
+    let mut errors = vec![];
 
-		let try_or = |f: fn() -> ShResult<String>, default: &str, errors: &mut Vec<String>| -> String {
-			match f() {
-				Ok(s) => s,
-				Err(e) => {
-					errors.push(e.to_string());
-					default.to_string()
-				}
-			}
-		};
+    let try_or = |f: fn() -> ShResult<String>, default: &str, errors: &mut Vec<String>| -> String {
+      match f() {
+        Ok(s) => s,
+        Err(e) => {
+          errors.push(e.to_string());
+          default.to_string()
+        }
+      }
+    };
 
-		let theme = Self {
-			string: try_or(string_style, &fallback.string, &mut errors),
-			keyword: try_or(keyword_style, &fallback.keyword, &mut errors),
-			valid_command: try_or(valid_command_style, &fallback.valid_command, &mut errors),
-			invalid_command: try_or(invalid_command_style, &fallback.invalid_command, &mut errors),
-			control_flow: try_or(control_flow_style, &fallback.control_flow, &mut errors),
-			argument: try_or(argument_style, &fallback.argument, &mut errors),
-			argument_file: try_or(argument_file_style, &fallback.argument_file, &mut errors),
-			variable: try_or(variable_style, &fallback.variable, &mut errors),
-			operator: try_or(operator_style, &fallback.operator, &mut errors),
-			comment: try_or(comment_style, &fallback.comment, &mut errors),
-			glob: try_or(glob_style, &fallback.glob, &mut errors),
-			selection: try_or(selection_style, &fallback.selection, &mut errors),
-		};
+    let theme = Self {
+      string: try_or(string_style, &fallback.string, &mut errors),
+      keyword: try_or(keyword_style, &fallback.keyword, &mut errors),
+      valid_command: try_or(valid_command_style, &fallback.valid_command, &mut errors),
+      invalid_command: try_or(
+        invalid_command_style,
+        &fallback.invalid_command,
+        &mut errors,
+      ),
+      control_flow: try_or(control_flow_style, &fallback.control_flow, &mut errors),
+      argument: try_or(argument_style, &fallback.argument, &mut errors),
+      argument_file: try_or(argument_file_style, &fallback.argument_file, &mut errors),
+      variable: try_or(variable_style, &fallback.variable, &mut errors),
+      operator: try_or(operator_style, &fallback.operator, &mut errors),
+      comment: try_or(comment_style, &fallback.comment, &mut errors),
+      glob: try_or(glob_style, &fallback.glob, &mut errors),
+      selection: try_or(selection_style, &fallback.selection, &mut errors),
+    };
 
-		for err in errors {
-			write_meta(|m| m.post_status_message(err));
-		}
+    for err in errors {
+      write_meta(|m| m.post_status_message(err));
+    }
 
-		theme
-	}
+    theme
+  }
 }
 
 /// Syntax highlighter for shell input using Unicode marker-based annotation
@@ -250,10 +254,10 @@ impl Highlighter {
     chars[..ti].iter().collect()
   }
 
-	/// Expands control characters in the input to visible representations
-	///
-	/// Operates on chars in the range 0x00..0x1F, replacing them with caret notation (e.g., `^A` for 0x01)
-	/// Newline (`'\n'`), tab (`'\t'`), and carriage return (`'\r'`) are preserved as-is. This allows control characters to be visible in the highlighted output.
+  /// Expands control characters in the input to visible representations
+  ///
+  /// Operates on chars in the range 0x00..0x1F, replacing them with caret notation (e.g., `^A` for 0x01)
+  /// Newline (`'\n'`), tab (`'\t'`), and carriage return (`'\r'`) are preserved as-is. This allows control characters to be visible in the highlighted output.
   pub fn expand_control_chars(&mut self) {
     let mut expanded = String::new();
     let mut chars = self.input.chars().peekable();

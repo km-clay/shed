@@ -35,7 +35,7 @@ pub const OSC_PROMPT_START: &str = "\x1b]133;A\x07";
 pub const OSC_PROMPT_END: &str = "\x1b]133;B\x07";
 pub const OSC_EXEC_START: &str = "\x1b]133;C\x07";
 pub fn osc_exec_end(code: i32) -> String {
-	format!("\x1b]133;D;{code}\x07")
+  format!("\x1b]133;D;{code}\x07")
 }
 
 pub type Row = u16;
@@ -285,8 +285,8 @@ pub trait LineWriter {
     total_buf_lines: usize,
   ) -> ShResult<()>;
   fn flush_write(&mut self, buf: &str) -> ShResult<()>;
-	fn buffer(&mut self, buf: &str) -> ShResult<()>;
-	fn flush(&mut self) -> ShResult<()>;
+  fn buffer(&mut self, buf: &str) -> ShResult<()>;
+  fn flush(&mut self) -> ShResult<()>;
   fn send_bell(&mut self) -> ShResult<()>;
 }
 
@@ -664,26 +664,24 @@ impl PollReader {
     self.byte_buf.extend(bytes);
   }
 
-	pub fn read(&mut self, fd: RawFd) -> ShResult<()> {
-		let mut buffer = [0u8; 1024];
-		match read(fd, &mut buffer) {
-			Ok(0) => {
-				// EOF
-				Err(ShErr::loop_break(0))
-			}
-			Ok(n) => {
-				self.feed_bytes(&buffer[..n]);
-				Ok(())
-			}
-			Err(Errno::EINTR) => {
-				// Interrupted, continue to handle signals
-				Err(ShErr::loop_continue(0))
-			}
-			Err(e) => {
-				Err(e.into())
-			}
-		}
-	}
+  pub fn read(&mut self, fd: RawFd) -> ShResult<()> {
+    let mut buffer = [0u8; 1024];
+    match read(fd, &mut buffer) {
+      Ok(0) => {
+        // EOF
+        Err(ShErr::loop_break(0))
+      }
+      Ok(n) => {
+        self.feed_bytes(&buffer[..n]);
+        Ok(())
+      }
+      Err(Errno::EINTR) => {
+        // Interrupted, continue to handle signals
+        Err(ShErr::loop_continue(0))
+      }
+      Err(e) => Err(e.into()),
+    }
+  }
 }
 
 impl Default for PollReader {
@@ -1004,7 +1002,7 @@ pub struct TermWriter {
   last_bell: Option<Instant>,
   out: RawFd,
   pub t_cols: Col, // terminal width
-	pub t_rows: Row, // terminal height
+  pub t_rows: Row, // terminal height
   buffer: String,
 }
 
@@ -1015,7 +1013,7 @@ impl TermWriter {
       last_bell: None,
       out,
       t_cols,
-			t_rows,
+      t_rows,
       buffer: String::new(),
     }
   }
@@ -1073,11 +1071,11 @@ impl TermWriter {
     Ok(())
   }
 
-	pub fn update_t_dims(&mut self) {
+  pub fn update_t_dims(&mut self) {
     let (t_cols, t_rows) = get_win_size(self.out);
     self.t_cols = t_cols;
-		self.t_rows = t_rows;
-	}
+    self.t_rows = t_rows;
+  }
 
   /// Called before the prompt is drawn. If we are not on column 1, push a vid-inverted '%' and then a '\n\r'.
   ///
@@ -1257,16 +1255,15 @@ impl LineWriter for TermWriter {
       self.buffer.push_str(&system_msg);
     }
 
-
-		self.buffer.push_str(OSC_PROMPT_START);
-		if let Ok(prefix) = env::var("SHELL_PROMPT_PREFIX") {
-			self.buffer.push_str(&prefix);
-		}
+    self.buffer.push_str(OSC_PROMPT_START);
+    if let Ok(prefix) = env::var("SHELL_PROMPT_PREFIX") {
+      self.buffer.push_str(&prefix);
+    }
     self.buffer.push_str(prompt);
-		if let Ok(suffix) = env::var("SHELL_PROMPT_SUFFIX") {
-			self.buffer.push_str(&suffix);
-		}
-		self.buffer.push_str(OSC_PROMPT_END);
+    if let Ok(suffix) = env::var("SHELL_PROMPT_SUFFIX") {
+      self.buffer.push_str(&suffix);
+    }
+    self.buffer.push_str(OSC_PROMPT_END);
 
     let tab_width = read_shopts(|o| o.line.tab_width);
     let prompt_end = Layout::calc_pos(self.t_cols, prompt, Pos { col: 0, row: 0 }, 0, false);
@@ -1303,16 +1300,16 @@ impl LineWriter for TermWriter {
     Ok(())
   }
 
-	fn flush(&mut self) -> ShResult<()> {
-		let buf = std::mem::take(&mut self.buffer);
-		write_all(self.out, &buf)?;
-		Ok(())
-	}
+  fn flush(&mut self) -> ShResult<()> {
+    let buf = std::mem::take(&mut self.buffer);
+    write_all(self.out, &buf)?;
+    Ok(())
+  }
 
-	fn buffer(&mut self, buf: &str) -> ShResult<()> {
-		self.buffer.push_str(buf);
-		Ok(())
-	}
+  fn buffer(&mut self, buf: &str) -> ShResult<()> {
+    self.buffer.push_str(buf);
+    Ok(())
+  }
 
   fn send_bell(&mut self) -> ShResult<()> {
     if read_shopts(|o| o.core.bell_enabled) {

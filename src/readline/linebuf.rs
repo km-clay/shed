@@ -18,6 +18,7 @@ use super::editcmd::{
 };
 use crate::{
   expand::{alias::AliasExpander, expand_cmd_sub},
+  libsh::utils::AutoCmdVecUtils,
   libsh::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},
@@ -41,8 +42,10 @@ use crate::{
     term::get_win_size,
   },
   sherr,
-  libsh::utils::AutoCmdVecUtils,
-  state::{self, AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_meta, write_vars},
+  state::{
+    self, AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_meta,
+    write_vars,
+  },
 };
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
@@ -591,9 +594,8 @@ impl IndentCtx {
     self.ctx.clear();
 
     let mut src = ParsedSrc::new(input.into())
-			.with_lex_flags(LexFlags::LEX_UNFINISHED)
+      .with_lex_flags(LexFlags::LEX_UNFINISHED)
       .with_parse_flags(ParseFlags::ERR_RETURN);
-
 
     // now we parse the input
     // src.block_depth will be non-zero if the parse was stopped somewhere.
@@ -1285,20 +1287,19 @@ impl LineBuf {
   }
   fn insert_str_at(&mut self, pos: Pos, s: &str) {
     let mut row_offset = self.row();
-		let mut col_offset = pos.col;
+    let mut col_offset = pos.col;
     for gr in s.graphemes(true) {
       let gr = Grapheme::from(gr);
       if gr.is_lf() {
         self.break_line_at(pos.row_add(row_offset));
         row_offset += 1;
-				col_offset = 0;
+        col_offset = 0;
       } else {
         self.insert_at(pos.row_add(row_offset).col_add(col_offset), gr);
-				if self.cursor.pos.row == pos.row + row_offset
-				&& self.cursor.pos.col >= col_offset {
-						self.cursor.pos.col += 1;
-				}
-				col_offset += 1;
+        if self.cursor.pos.row == pos.row + row_offset && self.cursor.pos.col >= col_offset {
+          self.cursor.pos.col += 1;
+        }
+        col_offset += 1;
       }
     }
   }
@@ -2288,17 +2289,17 @@ impl LineBuf {
     let new_cursor_pos = self.cursor.pos;
 
     if let Some(mut hint) = hint {
-			let is_past_end = if self.cursor.exclusive {
-				new_cursor_pos >= old_end_pos
-			} else {
-				new_cursor_pos > old_end_pos
-			};
+      let is_past_end = if self.cursor.exclusive {
+        new_cursor_pos >= old_end_pos
+      } else {
+        new_cursor_pos > old_end_pos
+      };
       let split_pos = if new_cursor_pos > old_cursor_pos && is_past_end {
         // our cursor moved into the hint.
-				let old_len = self.count_graphemes();
-				self.attempt_alias_expansion();
-				let new_len = self.count_graphemes();
-				let delta = new_len as isize - old_len as isize;
+        let old_len = self.count_graphemes();
+        self.attempt_alias_expansion();
+        let new_len = self.count_graphemes();
+        let delta = new_len as isize - old_len as isize;
         new_cursor_pos.col_add_signed(delta + 1)
       } else {
         old_end_pos
@@ -3822,7 +3823,7 @@ impl LineBuf {
       cmd.motion().map(|m| &m.1),
       Some(Motion::LineUp | Motion::LineDown)
     );
-		let is_separator = cmd.is_separator_insert();
+    let is_separator = cmd.is_separator_insert();
 
     if !is_vertical {
       self.saved_col = None;
@@ -3831,11 +3832,12 @@ impl LineBuf {
     let before = self.lines.clone();
     let old_cursor = self.cursor.pos;
 
-		if is_separator
-		&& !self.grapheme_before_cursor().is_none_or(|gr| gr.is_ws())
-		&& read_shopts(|o| o.prompt.expand_aliases) {
-			self.attempt_alias_expansion();
-		}
+    if is_separator
+      && !self.grapheme_before_cursor().is_none_or(|gr| gr.is_ws())
+      && read_shopts(|o| o.prompt.expand_aliases)
+    {
+      self.attempt_alias_expansion();
+    }
 
     // Execute the command
     let res = self.exec_verb(&cmd);
@@ -4042,7 +4044,7 @@ impl LineBuf {
       return;
     };
     attach_lines(&mut self.lines, &mut hint_lines);
-		self.attempt_alias_expansion_all();
+    self.attempt_alias_expansion_all();
 
     self.set_cursor(Pos::MAX);
     self.fix_cursor();
@@ -4265,77 +4267,84 @@ impl LineBuf {
       .collect()
   }
 
-	pub fn attempt_inline_expansion(&mut self, history: &History) -> bool {
-		let hist_res = self.attempt_history_expansion(history);
-		let alias_res = self.attempt_alias_expansion();
+  pub fn attempt_inline_expansion(&mut self, history: &History) -> bool {
+    let hist_res = self.attempt_history_expansion(history);
+    let alias_res = self.attempt_alias_expansion();
 
-		hist_res || alias_res
-	}
+    hist_res || alias_res
+  }
 
-	fn word_before_cursor(&mut self) -> Option<(Pos,Pos)> {
-		let word_start = self.word_motion_b(&Word::Big, self.cursor.pos)?;
-		Some(ordered(word_start, self.cursor.pos))
-	}
+  fn word_before_cursor(&mut self) -> Option<(Pos, Pos)> {
+    let word_start = self.word_motion_b(&Word::Big, self.cursor.pos)?;
+    Some(ordered(word_start, self.cursor.pos))
+  }
 
-	fn get(&mut self, pos: Pos) -> Option<Grapheme> {
-		self.lines
-			.get(pos.row)
-			.and_then(|line| line.graphemes().get(pos.col))
-			.cloned()
-	}
+  fn get(&mut self, pos: Pos) -> Option<Grapheme> {
+    self
+      .lines
+      .get(pos.row)
+      .and_then(|line| line.graphemes().get(pos.col))
+      .cloned()
+  }
 
-	fn grapheme_before_cursor(&mut self) -> Option<Grapheme> {
-		self.get(self.cursor.pos.col_add_signed(-1))
-	}
-	fn grapheme_after_cursor(&mut self) -> Option<Grapheme> {
-		self.get(self.cursor.pos)
-	}
+  fn grapheme_before_cursor(&mut self) -> Option<Grapheme> {
+    self.get(self.cursor.pos.col_add_signed(-1))
+  }
+  fn grapheme_after_cursor(&mut self) -> Option<Grapheme> {
+    self.get(self.cursor.pos)
+  }
 
-	pub fn attempt_alias_expansion_all(&mut self) -> bool {
-		let raw = self.joined();
-		let mut seen = HashSet::new();
-		let (result, first_pos) = AliasExpander::new(raw.clone(), &mut seen).expand();
-		if first_pos.is_some() {
-			self.lines = to_lines(result);
-			true
-		} else {
-			false
-		}
-	}
+  pub fn attempt_alias_expansion_all(&mut self) -> bool {
+    let raw = self.joined();
+    let mut seen = HashSet::new();
+    let (result, first_pos) = AliasExpander::new(raw.clone(), &mut seen).expand();
+    if first_pos.is_some() {
+      self.lines = to_lines(result);
+      true
+    } else {
+      false
+    }
+  }
 
-	pub fn attempt_alias_expansion(&mut self) -> bool {
+  pub fn attempt_alias_expansion(&mut self) -> bool {
+    let (to_cursor, mut after_cursor) = split_lines(self.lines.clone(), self.cursor.pos);
+    let raw = join_lines(&to_cursor);
+    let mut tokens = LexStream::new(raw.clone().into(), LexFlags::empty())
+      .filter_map(Result::ok)
+      .filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
+      .collect::<Vec<_>>();
+    while tokens
+      .last()
+      .is_some_and(|tk| !tk.flags.contains(TkFlags::IS_CMD))
+    {
+      tokens.pop();
+    }
 
-		let (to_cursor,mut after_cursor) = split_lines(self.lines.clone(), self.cursor.pos);
-		let raw = join_lines(&to_cursor);
-		let mut tokens = LexStream::new(raw.clone().into(), LexFlags::empty())
-			.filter_map(Result::ok)
-			.filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
-			.collect::<Vec<_>>();
-		while tokens.last().is_some_and(|tk| !tk.flags.contains(TkFlags::IS_CMD)) {
-			tokens.pop();
-		}
+    let Some(last) = tokens.pop() else {
+      return false;
+    };
+    if !last.flags.contains(TkFlags::IS_CMD) {
+      return false;
+    }
+    let tk_start = last.span.start();
+    let word = last.as_str();
 
-		let Some(last) = tokens.pop() else { return false; };
-		if !last.flags.contains(TkFlags::IS_CMD) { return false; }
-		let tk_start = last.span.start();
-		let word = last.as_str();
+    if let Some(alias) = read_logic(|l| l.aliases().get(word).cloned())
+      && let alias = alias.to_string()
+      && !raw[tk_start..].starts_with(&alias)
+    {
+      let delta = alias.graphemes(true).count() as isize - word.graphemes(true).count() as isize;
+      let expanded = last.replaced(&alias);
 
+      self.lines = to_lines(expanded);
+      attach_lines(&mut self.lines, &mut after_cursor);
+      self.cursor.pos = self.cursor.pos.col_add_signed(delta);
 
-		if let Some(alias) = read_logic(|l| l.aliases().get(word).cloned())
-		&& let alias = alias.to_string()
-		&& !raw[tk_start..].starts_with(&alias) {
-			let delta = alias.graphemes(true).count() as isize - word.graphemes(true).count() as isize;
-			let expanded = last.replaced(&alias);
-
-			self.lines = to_lines(expanded);
-			attach_lines(&mut self.lines, &mut after_cursor);
-			self.cursor.pos = self.cursor.pos.col_add_signed(delta);
-
-			true
-		} else {
-			false
-		}
-	}
+      true
+    } else {
+      false
+    }
+  }
 
   /// The inner logic of `attempt_history_expansion()`. This function calls itself recursively when it encounters command substitutions.
   /// This is necessary because of the following nasty edge case:

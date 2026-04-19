@@ -1,4 +1,4 @@
-use std::{fs::metadata, path::PathBuf, str::FromStr};
+use std::{cell::RefCell, collections::VecDeque, fs::metadata, path::PathBuf, str::FromStr};
 
 use nix::{
   sys::stat::{self, SFlag},
@@ -10,7 +10,12 @@ use crate::{
   libsh::error::{ShErr, ShResult},
   parse::{ConjunctOp, NdRule, Node, TEST_UNARY_OPS, TestCase},
   sherr,
+  state::{VarFlags, VarKind, write_vars},
 };
+
+thread_local! {
+  pub static LAST_RE: RefCell<Option<(String, Regex)>> = const { RefCell::new(None) };
+}
 
 #[derive(Debug, Clone)]
 pub enum UnaryOp {
@@ -282,12 +287,36 @@ pub fn double_bracket_test(node: Node) -> ShResult<bool> {
               _ => unreachable!(),
             }
           }
-          TestOp::RegexMatch => {
-            // FIXME: Imagine doing all of this in every single iteration of a loop
-            let cleaned = replace_posix_classes(&rhs);
-            let regex = Regex::new(&cleaned).unwrap();
-            regex.is_match(&lhs)
-          }
+          TestOp::RegexMatch => LAST_RE.with(|cell| {
+            let mut cache = cell.borrow_mut();
+            if cache.as_ref().is_none_or(|(pat, _)| pat != &rhs) {
+              let cleaned = replace_posix_classes(&rhs);
+              let Ok(compiled) = Regex::new(&cleaned) else {
+                return Err(sherr!(
+                  SyntaxErr @ err_span.clone(),
+                  "Invalid regex pattern: {rhs}"
+                ));
+              };
+              *cache = Some((rhs.clone(), compiled));
+            }
+
+            let (_, regex) = cache.as_ref().unwrap();
+
+            if let Some(caps) = regex.captures(&lhs) {
+              let groups: VecDeque<String> = caps
+                .iter()
+                .map(|m| m.map(|mat| mat.as_str().to_string()).unwrap_or_default())
+                .collect();
+
+              write_vars(|v| v.set_var("SHED_REMATCH", VarKind::Arr(groups), VarFlags::LOCAL))?;
+
+              Ok(true)
+            } else {
+              write_vars(|v| v.unset_var("SHED_REMATCH")).ok();
+
+              Ok(false)
+            }
+          })?,
         }
       }
     };
