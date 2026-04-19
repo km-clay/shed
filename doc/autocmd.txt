@@ -23,7 +23,7 @@ behavior without modifying the shell itself.
   Examples:
 
       `autocmd post-cmd 'echo "exit: $?"'`
-      `autocmd post-change-dir 'echo "moved to $_NEW_DIR"'`
+      `autocmd post-change-dir 'echo "moved to $NEW_DIR"'`
       `autocmd -c pre-cmd`
 
 ==============================================================================
@@ -136,7 +136,7 @@ behavior without modifying the shell itself.
       Fires when a completion candidate is accepted.
 
       Special variables:
-        `$_COMP_CANDIDATE`  the selected completion candidate
+        `$COMP_CANDIDATE`  the selected completion candidate
 
   2.8 Screensaver Events                       *autocmd-screensaver-events*
 
@@ -208,7 +208,7 @@ behavior without modifying the shell itself.
 
   Notify on directory change:
 
-      `autocmd post-change-dir 'echo "moved to $_NEW_DIR"'`
+      `autocmd post-change-dir 'echo "moved to $NEW_DIR"'`
 
   Custom time report with color (falls back to plain when piped):
 

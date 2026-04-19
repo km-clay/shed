@@ -213,8 +213,8 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
 
   with_vars(
     [
-      ("_NEW_DIR".into(), dir_raw.as_str()),
-      ("_OLD_DIR".into(), current_dir.as_str()),
+      ("NEW_DIR".into(), dir_raw.as_str()),
+      ("OLD_DIR".into(), current_dir.as_str()),
     ],
     || {
       post_cd.exec();

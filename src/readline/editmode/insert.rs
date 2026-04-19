@@ -97,7 +97,8 @@ impl EditMode for ViInsert {
       }
 
       E(K::Char('I'), M::CTRL) | E(K::Tab, M::NONE) => {
-        self.pending_cmd.set_verb(verb!(Verb::Complete));
+        self.pending_cmd.set_verb(verb!(Verb::InsertChar('\t')));
+        self.pending_cmd.set_motion(motion!(Motion::ForwardChar));
         self.register_and_return()
       }
 

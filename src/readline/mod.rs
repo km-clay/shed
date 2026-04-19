@@ -163,6 +163,7 @@ pub mod markers {
   pub const KEYWORD_1: Marker = '\u{e185}';
   /// square brackets
   pub const KEYWORD_2: Marker = '\u{e186}';
+  pub const CODE_BLOCK: Marker = '\u{e187}';
 }
 type Marker = char;
 
@@ -564,6 +565,10 @@ impl ShedLine {
     }
   }
 
+  fn should_complete(&mut self) -> bool {
+    !self.editor.cursor_in_leading_ws()
+  }
+
   fn should_submit(&mut self) -> ShResult<bool> {
     if self.mode.report_mode() == ModeReport::Normal {
       return Ok(true);
@@ -595,7 +600,7 @@ impl ShedLine {
         }
         self.focused_history().fuzzy_finder.reset();
 
-        with_vars([("_HIST_ENTRY".into(), cmd.content().to_string())], || {
+        with_vars([("HIST_ENTRY".into(), cmd.content().to_string())], || {
           post_cmds.exec();
         });
 
@@ -671,7 +676,7 @@ impl ShedLine {
         self.prompt.refresh();
 
         with_vars(
-          [("_COMP_CANDIDATE".into(), candidate.content().to_string())],
+          [("COMP_CANDIDATE".into(), candidate.content().to_string())],
           || {
             post_cmds.exec();
           },
@@ -841,7 +846,7 @@ impl ShedLine {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
         let cand = self.completer.selected_candidate().unwrap_or_default();
         with_vars(
-          [("_COMP_CANDIDATE".into(), cand.content().to_string())],
+          [("COMP_CANDIDATE".into(), cand.content().to_string())],
           || {
             post_cmds.exec();
           },
@@ -921,7 +926,7 @@ impl ShedLine {
     match self.focused_history().start_search(&initial) {
       Some(entry) => {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
-        with_vars([("_HIST_ENTRY".into(), entry.clone())], || {
+        with_vars([("HIST_ENTRY".into(), entry.clone())], || {
           post_cmds.exec();
         });
 
@@ -995,7 +1000,9 @@ impl ShedLine {
       return self.accept_hint();
     }
 
-    if let KeyEvent(KeyCode::Tab, _) = key {
+    if let KeyEvent(KeyCode::Tab, _) = key
+      && self.should_complete()
+    {
       return self.handle_tab(key);
     } else if let KeyEvent(KeyCode::Char('R'), ModKeys::CTRL) = key
       && matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex)

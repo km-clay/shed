@@ -186,6 +186,33 @@ fn unescape_help(raw: &str) -> String {
       result.push(markers::KEYWORD_2);
       find_closer(']', &mut result, &mut chars);
     }
+    '~' => {
+      let mut tilde_count = 1;
+      while tilde_count != 3 && chars.peek() == Some(&'~') {
+        chars.next();
+        tilde_count += 1;
+      }
+      if tilde_count != 3 {
+        result.push_str(&"~".repeat(tilde_count));
+      } else {
+        match_loop!(chars.next() => ch, {
+          '~' => {
+            tilde_count = 1;
+            while tilde_count != 3 && chars.peek() == Some(&'~') {
+              chars.next();
+              tilde_count += 1;
+            }
+            if tilde_count != 3 {
+              result.push_str(&"~".repeat(3 + tilde_count));
+            } else {
+              result.push(markers::RESET);
+              break
+            }
+          }
+          _ => result.push(ch),
+        })
+      }
+    }
     _ => result.push(ch),
   });
   result

@@ -5,6 +5,7 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 use serde_json::{Map, Value};
 
 use crate::libsh::strops::{split_tk, split_tk_at};
+use crate::procio::capture_command;
 use crate::sherr;
 use crate::{
   expand::expand_cmd_sub,

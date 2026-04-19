@@ -122,20 +122,45 @@ command history navigable with `Up` and `Down`.
       Execute {cmd} in the shell. The following special variables are
       set during execution and can be read or modified:
 
-        `$_BUFFER`    the current editor buffer contents
-        `$_CURSOR`    the cursor position (flat byte index)
-        `$_ANCHOR`    the visual selection anchor position
+        `$BUFFER`    the current editor buffer contents
+        `$CURSOR`    the cursor position (flat byte index)
+        `$ANCHOR`    the visual selection anchor position
 
       If the command modifies these variables, the editor state is
       updated accordingly. This allows ex commands to programmatically
       edit the buffer.
 
-      If the command sets `$_KEYS`, the value is fed back into the
+      If the command sets `$KEYS`, the value is fed back into the
       editor as a key sequence.
 
       Example:
-        `:!echo "$_BUFFER" | tr a-z A-Z > /tmp/out`
-        `:!_BUFFER=$(echo "$_BUFFER" | sort)`
+        `:!echo "$BUFFER" | tr a-z A-Z > /tmp/out`
+        `:!BUFFER=$(echo "$BUFFER" | sort)`
+
+  `:{range}!{cmd}`                              *ex-bang-filter*
+
+      Filter lines through {cmd}. The addressed lines are piped to
+      {cmd} as stdin, and replaced with its stdout. This is the same
+      as `vim`'s filter command.
+
+      With a single line address:
+
+        `:5!tr a-z A-Z`          uppercase line 5
+        `:.!date`                replace current line with date output
+
+      With a range:
+
+        `:1,5!sort`              sort lines 1 through 5
+        `:%!sort -u`             sort and deduplicate the entire buffer
+        `:'<,'>!column -t`       align the visual selection into columns
+
+      If the command produces no output, the addressed lines are
+      deleted.
+
+      This is particularly powerful with shell functions:
+
+        `:%!indent_code`         pipe entire buffer through a function
+        `:3,10!awk '{print NR, $0}'`  number lines 3-10
 
 ==============================================================================
 6. File Operations                             *ex-file*

@@ -12,15 +12,6 @@ use std::{
   time::Duration,
 };
 
-use itertools::{Itertools, izip};
-use nix::{
-  poll::PollFd,
-  sys::{
-    resource::{Usage, UsageWho, getrusage},
-    stat::{FchmodatFlags, fchmodat},
-    time::TimeVal,
-  },
-};
 use crate::{
   builtin::BUILTINS,
   expand::expand_keymap,
@@ -31,6 +22,15 @@ use crate::{
   procio::borrow_fd,
   readline::{LineData, complete::CompSpec, keys::KeyEvent},
   sherr,
+};
+use itertools::{Itertools, izip};
+use nix::{
+  poll::PollFd,
+  sys::{
+    resource::{Usage, UsageWho, getrusage},
+    stat::{FchmodatFlags, fchmodat},
+    time::TimeVal,
+  },
 };
 
 #[derive(Debug)]

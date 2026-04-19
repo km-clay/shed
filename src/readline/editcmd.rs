@@ -136,6 +136,18 @@ impl EditCmd {
   pub fn set_verb(&mut self, verb: VerbCmd) {
     self.verb = Some(verb)
   }
+	pub fn new_with_verb(&self, verb: Option<VerbCmd>) -> Self {
+		Self {
+			verb,
+			..self.clone()
+		}
+	}
+	pub fn new_with_motion(&self, motion: Option<MotionCmd>) -> Self {
+		Self {
+			motion,
+			..self.clone()
+		}
+	}
   pub fn verb(&self) -> Option<&VerbCmd> {
     self.verb.as_ref()
   }

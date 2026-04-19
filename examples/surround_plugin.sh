@@ -92,7 +92,7 @@ _surround_1() {
 	_read_obj
 	_get_surround_target
 
-	# the $_KEYS variable can be used to send a sequence of keys
+	# the $KEYS variable can be used to send a sequence of keys
 	# back to the editor. here, we prefix the text object with 'v'
 	# to make the line editor enter visual mode and select the text object.
 	_KEYS="v$_obj"
@@ -101,27 +101,27 @@ _surround_1() {
 _surround_2() {
 	# this is called after _surround_1. the editor received our visual
 	# selection command, so now we can operate on the range it has selected.
-	# $_ANCHOR and $_CURSOR can be used to find both sides of the selection
+	# $ANCHOR and $CURSOR can be used to find both sides of the selection
 	local start
 	local end
-	if [ "$_ANCHOR" -lt "$_CURSOR" ]; then
-	  start=$_ANCHOR
-	  end=$_CURSOR
+	if [ "$ANCHOR" -lt "$CURSOR" ]; then
+	  start=$ANCHOR
+	  end=$CURSOR
 	else
-	  start=$_CURSOR
-	  end=$_ANCHOR
+	  start=$CURSOR
+	  end=$ANCHOR
 	fi
 	end=$((end + 1))
 
 	delta=$((end - start))
 
 	# use parameter expansion to slice up the buffer into 3 parts
-	left="${_BUFFER:0:$start}"
-	mid="${_BUFFER:$start:$delta}"
-	right="${_BUFFER:$end}"
+	left="${BUFFER:0:$start}"
+	mid="${BUFFER:$start:$delta}"
+	right="${BUFFER:$end}"
 
 	# slide our delimiters inbetween those parts
-	_BUFFER="$left$_sl$mid$_sr$right"
+	BUFFER="$left$_sl$mid$_sr$right"
 	_CURSOR=$start
 
 }
@@ -132,8 +132,8 @@ _surround_del() {
 	_get_surround_target
 
 	# slice the buffer in half at the cursor
-	local left_buf="${_BUFFER:0:$_CURSOR}"
-	local right_buf="${_BUFFER:$left}"
+	local left_buf="${BUFFER:0:$CURSOR}"
+	local right_buf="${BUFFER:$left}"
 	local left=""
 	local right=""
 
@@ -155,8 +155,8 @@ _surround_del() {
 	# this is the start of the middle part of the buffer
 	mid_start=$((left + 1))
 	right=""
-	left_buf="${_BUFFER:0:$left}"
-	right_buf="${_BUFFER:$mid_start}" # from mid_start to end of buffer
+	left_buf="${BUFFER:0:$left}"
+	right_buf="${BUFFER:$mid_start}" # from mid_start to end of buffer
 	_scan_right $_sr "$right_buf" # scan right
 
 	[ "$?" -ne 0 ] && return 1
@@ -166,12 +166,12 @@ _surround_del() {
 	right_start=$((mid_end + 1)) # and get the start of the last part
 
 	# and now we just slice it like we did in _surround_2
-	new_left_buf="${_BUFFER:0:$left}"
-	new_mid_buf="${_BUFFER:$mid_start:$right}"
-	new_right_buf="${_BUFFER:$right_start}"
+	new_left_buf="${BUFFER:0:$left}"
+	new_mid_buf="${BUFFER:$mid_start:$right}"
+	new_right_buf="${BUFFER:$right_start}"
 
 	# put them back together. the end result is a buffer without those pesky delimiters
-	_BUFFER="$new_left_buf$new_mid_buf$new_right_buf"
+	BUFFER="$new_left_buf$new_mid_buf$new_right_buf"
 
 }
 

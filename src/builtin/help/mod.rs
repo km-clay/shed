@@ -14,15 +14,8 @@ use crate::{
     },
     join_raw_arg_iter,
   },
-  libsh::{
-    error::ShResult,
-    guards::TuiGuard,
-    sys::TTY_FILENO,
-  },
-  parse::{
-    NdRule, Node,
-    execute::prepare_argv,
-  },
+  libsh::{error::ShResult, guards::TuiGuard, sys::TTY_FILENO},
+  parse::{NdRule, Node, execute::prepare_argv},
   procio::borrow_fd,
   readline::complete::ScoredCandidate,
   sherr,

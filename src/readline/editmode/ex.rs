@@ -236,7 +236,7 @@ pub fn parse_ex_input(raw: &str) -> Result<Option<EditCmd>, Option<String>> {
       parse_ex_command(&mut chars)?.map(|v| verb!(v))
     }
   };
-  if motion.is_none() && !matches!(verb, Some(VerbCmd(_, Verb::Write(_)))) {
+  if motion.is_none() && !matches!(verb, Some(VerbCmd(_, Verb::Write(_) | Verb::ShellCmd(_)))) {
     motion = Some(motion!(Motion::Line(LineAddr::Current)))
   }
 

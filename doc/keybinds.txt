@@ -1,6 +1,6 @@
 *keybinds* *keys* *vi-mode* *keybindings*
 
-#VI MODE KEYBINDINGS#
+#LINE EDITOR KEYBINDINGS#
 
 The line editor uses a vi-style modal editing system with seven modes:
 Normal, Insert, Visual, Replace, Ex (command), Verbatim, and Emacs. The

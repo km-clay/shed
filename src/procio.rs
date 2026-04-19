@@ -10,7 +10,7 @@ use crate::{
     error::{ShErr, ShResult},
     sys::TTY_FILENO,
   },
-  parse::{Redir, RedirType, get_redir_file, lex::TkFlags},
+  parse::{Redir, RedirType, execute::exec_input, get_redir_file, lex::TkFlags},
   prelude::*,
   sherr, state,
 };
@@ -473,6 +473,82 @@ impl Iterator for PipeGenerator {
 
     self.cursor += 1;
     Some((rpipe, wpipe))
+  }
+}
+
+pub fn capture_command(cmd: &str, stdin: Option<&str>) -> ShResult<String> {
+  let (rpipe, wpipe) = IoMode::get_pipes();
+  let child_stdout = Redir::new(wpipe, RedirType::Output);
+  let mut child_io_frame = IoFrame::from_redir(child_stdout);
+  let mut stdout_io_buf = IoBuf::new(rpipe);
+
+  let (mut stdin_pipe, stdin_write_fd) = if stdin.is_some() {
+    let (r, w) = IoMode::get_pipes();
+    let write_fd = w.src_fd();
+    let child_stdin = Redir::new(r, RedirType::Input);
+    child_io_frame.push(child_stdin);
+    (Some(w), Some(write_fd))
+  } else {
+    (None, None)
+  };
+
+  let mut io_stack = IoStack::new();
+  io_stack.push_frame(child_io_frame);
+
+  match unsafe { fork()? } {
+    ForkResult::Child => {
+      if let Some(fd) = stdin_write_fd {
+        close(fd).ok(); // close child's copy of stdin write end
+      }
+      if let Err(e) = exec_input(
+        cmd.to_string(),
+        Some(io_stack),
+        false,
+        Some("command_sub".into()),
+      ) {
+        e.print_error();
+        unsafe { libc::_exit(1) };
+      }
+      let status = state::get_status();
+      unsafe { libc::_exit(status) };
+    }
+    ForkResult::Parent { child } => {
+      std::mem::drop(io_stack); // closes parent's copy of child fds
+
+      if let Some(pipe) = stdin_pipe.take() {
+        write(borrow_fd(pipe.src_fd()), stdin.unwrap().as_bytes())?;
+        std::mem::drop(pipe);
+      }
+
+      loop {
+        match stdout_io_buf.fill_buffer() {
+          Ok(()) => break,
+          Err(e) => {
+            if e.kind() == io::ErrorKind::Interrupted {
+              continue;
+            } else {
+              return Err(e.into());
+            }
+          }
+        }
+      }
+
+      let status = loop {
+        match waitpid(child, Some(WtFlag::WSTOPPED)) {
+          Ok(status) => break status,
+          Err(Errno::EINTR) => continue,
+          Err(e) => return Err(e.into()),
+        }
+      };
+
+      match status {
+        WtStat::Exited(_, code) => {
+          state::set_status(code);
+          Ok(stdout_io_buf.as_str()?.trim_end().to_string())
+        }
+        _ => Err(sherr!(InternalErr, "Command sub failed")),
+      }
+    }
   }
 }
 

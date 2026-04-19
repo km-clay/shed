@@ -156,6 +156,7 @@ pub fn common_cmds(key: E) -> Option<EditCmd> {
   match key {
     E(K::Home, M::NONE) => pending_cmd.set_motion(motion!(Motion::StartOfLine)),
     E(K::End, M::NONE) => pending_cmd.set_motion(motion!(Motion::EndOfLine)),
+    E(K::Tab, M::NONE) => pending_cmd.set_verb(verb!(Verb::InsertChar('\t'))),
     E(K::Enter, M::SHIFT) => pending_cmd.set_verb(verb!(Verb::InsertChar('\n'))),
     E(K::Enter, M::NONE) => pending_cmd.set_verb(verb!(Verb::AcceptLineOrNewline)),
     E(K::Left, M::NONE) => pending_cmd.set_motion(motion!(Motion::BackwardChar)),

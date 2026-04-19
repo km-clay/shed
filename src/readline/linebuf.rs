@@ -17,12 +17,13 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-  expand::{alias::AliasExpander, expand_cmd_sub},
-  libsh::utils::AutoCmdVecUtils,
+  expand::{self, alias::AliasExpander, expand_cmd_sub},
+	verb, motion,
   libsh::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},
     strops::QuoteState,
+    utils::AutoCmdVecUtils,
   },
   match_loop,
   parse::{
@@ -31,7 +32,7 @@ use crate::{
     lex::{self, LexFlags, LexStream, Tk, TkFlags, TkRule},
   },
   prelude::*,
-  procio::{IoFrame, IoMode, IoStack},
+  procio::{self, IoFrame, IoMode, IoStack, capture_command},
   readline::{
     editcmd::{LineAddr, ReadSrc, VerbCmd, WriteDest},
     editmode::ex::SubFlags,
@@ -1124,7 +1125,7 @@ impl LineBuf {
 
     self.cursor.pos = new_line_pos;
   }
-  fn verb_shell_cmd(&mut self, cmd: &str) -> ShResult<()> {
+  fn verb_shell_cmd(&mut self, cmd: &str, stdin: Option<&str>) -> ShResult<String> {
     let mut vars = HashSet::new();
     vars.insert("BUFFER".into());
     vars.insert("CURSOR".into());
@@ -1149,10 +1150,10 @@ impl LineBuf {
     let post_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
 
     pre_cmd.exec();
-    RawModeGuard::with_cooked_mode(|| {
-      exec_input(cmd.to_string(), None, true, Some("<ex-mode-cmd>".into()))
-    })?;
+    let res = procio::capture_command(cmd, stdin);
     post_cmd.exec();
+
+    let output = res?;
 
     let mut new_anchor = None;
 
@@ -1202,7 +1203,7 @@ impl LineBuf {
     if !keys.is_empty() {
       write_meta(|m| m.set_pending_widget_keys(&keys))
     }
-    Ok(())
+    Ok(output)
   }
   fn insert_lines_at(&mut self, pos: Pos, mut lines: Vec<Line>) {
     if lines.is_empty() {
@@ -2160,6 +2161,7 @@ impl LineBuf {
     let first = self.scan_forward(is_delim)?;
 
     let delim_match = if is_closer(self.gr_at(first)?) {
+      let mut depth = 0;
       let opener = match self.gr_at(first)?.as_char()? {
         ')' => '(',
         ']' => '[',
@@ -2167,8 +2169,16 @@ impl LineBuf {
         '>' => '<',
         _ => unreachable!(),
       };
-      self.scan_backward_from(first, |g| g.as_char() == Some(opener))?
+      self.scan_backward_from(first, |g| {
+        if g.as_char() == self.gr_at(first).and_then(|c| c.as_char()) {
+          depth += 1;
+        } else if g.as_char() == Some(opener) {
+          depth -= 1;
+        }
+        depth == 0
+      })?
     } else if is_opener(self.gr_at(first)?) {
+      let mut depth = 0;
       let closer = match self.gr_at(first)?.as_char()? {
         '(' => ')',
         '[' => ']',
@@ -2176,7 +2186,14 @@ impl LineBuf {
         '<' => '>',
         _ => unreachable!(),
       };
-      self.scan_forward_from(first, |g| g.as_char() == Some(closer))?
+      self.scan_forward_from(first, |g| {
+        if g.as_char() == self.gr_at(first).and_then(|c| c.as_char()) {
+          depth += 1;
+        } else if g.as_char() == Some(closer) {
+          depth -= 1;
+        }
+        depth == 0
+      })?
     } else {
       unreachable!()
     };
@@ -3221,6 +3238,16 @@ impl LineBuf {
         let Some(content) = register.read_from_register() else {
           return Ok(());
         };
+				if let Some(motion) = self.select_range() {
+					// we have a selected range to replace.
+					// no need to overcomplicate it, the Verb::Delete handler
+					// knows exactly how to do this.
+					let rec_cmd = cmd
+						.new_with_verb(Some(verb!(Verb::Delete)))
+						.new_with_motion(Some(motion!(motion)));
+
+					self.exec_verb(&rec_cmd)?;
+				}
         match content {
           RegisterContent::Span(lines) => {
             let move_cursor = lines.len() == 1 && lines[0].len() > 1;
@@ -3447,7 +3474,26 @@ impl LineBuf {
         // so we break to a new line
         self.break_line();
       }
-      Verb::ShellCmd(cmd) => self.verb_shell_cmd(cmd)?,
+      Verb::ShellCmd(sh_cmd) => {
+        let Some(MotionKind::Line {
+          start,
+          end,
+          inclusive,
+        }) = self.eval_motion(cmd)?
+        else {
+          self.verb_shell_cmd(sh_cmd, None)?;
+          return Ok(());
+        };
+        let (s, e) = ordered(start, end);
+        let lines = self.lines.drain(s..=e).collect::<Vec<_>>();
+        if self.lines.is_empty() {
+          self.lines.push(Line::default());
+        }
+        let input = format!("{}\n", join_lines(&lines));
+        let output = self.verb_shell_cmd(sh_cmd, Some(&input))?;
+        let new_lines = to_lines(output);
+        self.lines.splice(s..s, new_lines);
+      }
       Verb::Read(src) => match src {
         ReadSrc::File(path_buf) => {
           if !path_buf.is_file() {
@@ -3466,7 +3512,7 @@ impl LineBuf {
           let pre_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
           let post_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
           pre_cmd.exec();
-          let output = match expand_cmd_sub(cmd) {
+          let output = match capture_command(cmd, None) {
             Ok(out) => out,
             Err(e) => {
               post_cmd.exec();
@@ -4171,6 +4217,36 @@ impl LineBuf {
     self.select_mode = None;
   }
 
+	pub fn select_motion(&self) -> Option<MotionKind> {
+		let range = self.select_range()?;
+		match range {
+			Motion::CharRange(s, e) => {
+				let (s, e) = ordered(s, e);
+				Some(MotionKind::Char {
+					start: s,
+					end: e,
+					inclusive: true,
+				})
+			}
+			Motion::LineRange(s, e) => {
+				let Some(s) = self.resolve_line_addr(&s).ok()? else {
+					return None;
+				};
+				let Some(e) = self.resolve_line_addr(&e).ok()? else {
+					return None;
+				};
+				let (s, e) = ordered(s, e);
+				Some(MotionKind::Line {
+					start: s,
+					end: e,
+					inclusive: true,
+				})
+			}
+			Motion::BlockRange(s, e) => todo!(),
+			_ => unreachable!()
+		}
+	}
+
   pub fn select_range(&self) -> Option<Motion> {
     let mode = self.select_mode.as_ref()?;
     match mode {
@@ -4540,6 +4616,15 @@ impl LineBuf {
     }
 
     true
+  }
+
+  pub fn cursor_in_leading_ws(&self) -> bool {
+    let line = self.line(self.row());
+    let col = self.col();
+    line
+      .0
+      .get(..col)
+      .is_none_or(|grs| grs.iter().all(|g| g.is_ws()))
   }
 
   pub fn cursor_is_escaped(&self) -> bool {
