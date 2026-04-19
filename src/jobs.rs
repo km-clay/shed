@@ -216,6 +216,7 @@ impl JobBldr {
       table_id: self.table_id,
       pgid: self.pgid.unwrap_or(Pid::from_raw(0)),
       children: self.children,
+      notify: false,
       send_hup: self.send_hup,
     }
   }
@@ -245,6 +246,7 @@ pub struct Job {
   table_id: Option<usize>,
   pgid: Pid,
   children: Vec<ChildProc>,
+  notify: bool,
   send_hup: bool,
 }
 
@@ -257,6 +259,12 @@ impl Job {
   }
   pub fn send_hup(&self) -> bool {
     self.send_hup
+  }
+  pub fn set_notify(&mut self, notify: bool) {
+    self.notify = notify;
+  }
+  pub fn notify(&self) -> bool {
+    self.notify
   }
   pub fn running(&self) -> bool {
     !self.children.iter().all(|chld| chld.exited())
@@ -633,9 +641,12 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
   Ok(())
 }
 
-pub fn dispatch_job(job: Job, is_bg: bool, interactive: bool) -> ShResult<()> {
+pub fn dispatch_job(mut job: Job, is_bg: bool, interactive: bool) -> ShResult<()> {
+  if interactive {
+    job.set_notify(true);
+  }
   if is_bg {
-    write_jobs(|j| j.insert_job(job, false))?;
+    write_jobs(|j| j.insert_job(job, !interactive))?;
   } else {
     wait_fg(job, interactive)?;
   }

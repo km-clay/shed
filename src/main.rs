@@ -76,8 +76,8 @@ struct ShedArgs {
   #[arg(long, short)]
   login_shell: bool,
 
-	#[arg(long, short)]
-	welcome: bool
+  #[arg(long, short)]
+  welcome: bool,
 }
 
 /// We need to make sure that even if we panic, our child processes get sighup

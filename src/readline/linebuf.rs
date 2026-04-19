@@ -18,14 +18,13 @@ use super::editcmd::{
 };
 use crate::{
   expand::{self, alias::AliasExpander, expand_cmd_sub},
-	verb, motion,
   libsh::{
     error::ShResult,
     guards::{RawModeGuard, var_ctx_guard},
     strops::QuoteState,
     utils::AutoCmdVecUtils,
   },
-  match_loop,
+  match_loop, motion,
   parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::exec_input,
@@ -47,6 +46,7 @@ use crate::{
     self, AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_meta,
     write_vars,
   },
+  verb,
 };
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
@@ -3238,16 +3238,16 @@ impl LineBuf {
         let Some(content) = register.read_from_register() else {
           return Ok(());
         };
-				if let Some(motion) = self.select_range() {
-					// we have a selected range to replace.
-					// no need to overcomplicate it, the Verb::Delete handler
-					// knows exactly how to do this.
-					let rec_cmd = cmd
-						.new_with_verb(Some(verb!(Verb::Delete)))
-						.new_with_motion(Some(motion!(motion)));
+        if let Some(motion) = self.select_range() {
+          // we have a selected range to replace.
+          // no need to overcomplicate it, the Verb::Delete handler
+          // knows exactly how to do this.
+          let rec_cmd = cmd
+            .new_with_verb(Some(verb!(Verb::Delete)))
+            .new_with_motion(Some(motion!(motion)));
 
-					self.exec_verb(&rec_cmd)?;
-				}
+          self.exec_verb(&rec_cmd)?;
+        }
         match content {
           RegisterContent::Span(lines) => {
             let move_cursor = lines.len() == 1 && lines[0].len() > 1;
@@ -4217,35 +4217,35 @@ impl LineBuf {
     self.select_mode = None;
   }
 
-	pub fn select_motion(&self) -> Option<MotionKind> {
-		let range = self.select_range()?;
-		match range {
-			Motion::CharRange(s, e) => {
-				let (s, e) = ordered(s, e);
-				Some(MotionKind::Char {
-					start: s,
-					end: e,
-					inclusive: true,
-				})
-			}
-			Motion::LineRange(s, e) => {
-				let Some(s) = self.resolve_line_addr(&s).ok()? else {
-					return None;
-				};
-				let Some(e) = self.resolve_line_addr(&e).ok()? else {
-					return None;
-				};
-				let (s, e) = ordered(s, e);
-				Some(MotionKind::Line {
-					start: s,
-					end: e,
-					inclusive: true,
-				})
-			}
-			Motion::BlockRange(s, e) => todo!(),
-			_ => unreachable!()
-		}
-	}
+  pub fn select_motion(&self) -> Option<MotionKind> {
+    let range = self.select_range()?;
+    match range {
+      Motion::CharRange(s, e) => {
+        let (s, e) = ordered(s, e);
+        Some(MotionKind::Char {
+          start: s,
+          end: e,
+          inclusive: true,
+        })
+      }
+      Motion::LineRange(s, e) => {
+        let Some(s) = self.resolve_line_addr(&s).ok()? else {
+          return None;
+        };
+        let Some(e) = self.resolve_line_addr(&e).ok()? else {
+          return None;
+        };
+        let (s, e) = ordered(s, e);
+        Some(MotionKind::Line {
+          start: s,
+          end: e,
+          inclusive: true,
+        })
+      }
+      Motion::BlockRange(s, e) => todo!(),
+      _ => unreachable!(),
+    }
+  }
 
   pub fn select_range(&self) -> Option<Motion> {
     let mode = self.select_mode.as_ref()?;

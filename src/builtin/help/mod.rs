@@ -203,14 +203,13 @@ pub fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResu
       }
       PagerEvent::Continue => continue,
       PagerEvent::Exit => {
-				if pager > 0 {
-					page_stack.truncate(pager); // go back to previous page
-					pager -= 1;
-				} else {
-					break; // exit pager
-				}
-			}
-
+        if pager > 0 {
+          page_stack.truncate(pager); // go back to previous page
+          pager -= 1;
+        } else {
+          break; // exit pager
+        }
+      }
     }
   }
 

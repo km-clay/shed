@@ -16,7 +16,7 @@ use crate::{
   prelude::*,
   sherr,
   state::{
-    AutoCmdKind, VarFlags, VarKind, read_jobs, read_logic, with_vars, write_jobs, write_meta,
+    AutoCmdKind, Var, VarFlags, VarKind, read_jobs, read_logic, with_vars, write_jobs, write_meta,
     write_vars,
   },
 };
@@ -363,7 +363,6 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
       let job_order = read_jobs(|j| j.order().to_vec());
       let result = read_jobs(|j| j.query(JobID::Pgid(pgid)).cloned());
       if let Some(job) = result {
-        let job_complete_msg = job.display(&job_order, JobCmdFlags::PIDS).to_string();
         let statuses = job.get_stats();
 
         for status in &statuses {
@@ -385,22 +384,49 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
         }
 
         let post_job_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnJobFinish));
-        let cmds = job.get_cmds();
+        let cmds: VecDeque<String> = job.get_cmds().into_iter().map(|s| s.to_string()).collect();
+        let id = job.tabid().unwrap_or_default().to_string();
+        let status = statuses
+          .last()
+          .map(|s| match s {
+            WtStat::Exited(_, code) => *code,
+            WtStat::Signaled(_, sig, _) => 128 + *sig as i32,
+            _ => 1,
+          })
+          .unwrap_or_default()
+          .to_string();
+
         let cmd_count = cmds.len();
         // TODO: Add child statuses to exposed variables
-        let mut post_job_vars: HashMap<String, String> = cmds
-          .iter()
-          .enumerate()
-          .map(|(i, cmd)| (format!("CHILD{i}"), cmd.to_string()))
-          .collect();
-
-        post_job_vars.insert("CHILD_COUNT".into(), cmd_count.to_string());
+        let post_job_vars: HashMap<String, Var> = [
+          (
+            "CHILDREN".to_string(),
+            Var::new(VarKind::Arr(cmds), VarFlags::NONE),
+          ),
+          (
+            "CHILD_COUNT".to_string(),
+            Var::new(VarKind::Str(cmd_count.to_string()), VarFlags::NONE),
+          ),
+          (
+            "JOB_ID".to_string(),
+            Var::new(VarKind::Str(id), VarFlags::NONE),
+          ),
+          (
+            "JOB_STATUS".to_string(),
+            Var::new(VarKind::Str(status), VarFlags::NONE),
+          ),
+        ]
+        .into();
 
         with_vars(post_job_vars, || {
           post_job_cmds.exec();
         });
 
-        write_meta(|m| m.post_system_message(job_complete_msg));
+        if job.notify() {
+          let job_complete_msg = job.display(&job_order, JobCmdFlags::PIDS).to_string();
+          write_meta(|m| m.post_system_message(job_complete_msg));
+        }
+
         write_meta(|m| m.notify_job_complete(&job)).ok();
       }
     }

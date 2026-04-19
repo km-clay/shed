@@ -9,6 +9,7 @@ I have personally used AI to assist with development in a few areas:
 * mechanical "janitor work": Stuff like fixing simple bugs, changing symbol names, extracting logic into helper functions, etc.
 * UI geometry calculation: Stuff like the fuzzy finder window and prompt layout calculations were written with assistance from AI.
 * Summarizing references: I've referenced the codebases for `fish`, `zsh`, and `bash` when making executive design decisions for `shed`. When making these references, I have made use of AI for reading through the existing implementations and summarizing their design strategies.
+* Creation of unit tests.
 * Writing documentation comments for functions/structs.
 * Some parts of the README have been generated.
 

@@ -64,10 +64,10 @@ behavior without modifying the shell itself.
       Fires when a background job completes.
 
       Special variables:
-        `$CHILD_COUNT`  number of commands in the job
-        `$CHILD0`       command string of the first pipeline member
-        `$CHILD1`       command string of the second pipeline member
-        `$CHILDN`       ...and so on for each member
+        `$CHILD_COUNT`    number of commands in the job
+        `$CHILDREN`       array of the command strings in the job
+        `$JOB_STATUS`     exit code of the job (0 if success, otherwise nonzero)
+        `$JOB_ID`         the job table ID (positive integer)
 
   2.4 Prompt Events                            *autocmd-prompt-events*
 
