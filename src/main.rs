@@ -35,7 +35,7 @@ use smallvec::SmallVec;
 
 use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
-use crate::libsh::error::{self, ShErrKind, ShResult};
+use crate::libsh::error::{self, ShErr, ShErrKind, ShResult};
 use crate::libsh::sys::TTY_FILENO;
 use crate::libsh::term::set_bracketed_paste;
 use crate::libsh::utils::AutoCmdVecUtils;
@@ -273,7 +273,7 @@ fn handle_signals_interactive(readline: &mut ShedLine) -> ShResult<bool> {
     log::info!("Window size change detected, updating readline dimensions");
     // Restore cursor to saved row before clearing, since the terminal
     // may have moved it during resize/rewrap
-    readline.writer.update_t_cols();
+    readline.writer.update_t_dims();
     readline.mark_dirty();
   }
 
@@ -377,7 +377,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
 
   let mut poll_fds: SmallVec<[PollFd; 2]> = SmallVec::new();
   let tty_fd = PollFd::new(
-    unsafe { BorrowedFd::borrow_raw(*TTY_FILENO) },
+    borrow_fd(*TTY_FILENO),
     PollFlags::POLLIN,
   );
 
@@ -391,7 +391,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     poll_fds.push(tty_fd);
     if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
       poll_fds.push(PollFd::new(
-        unsafe { BorrowedFd::borrow_raw(fd) },
+        borrow_fd(fd),
         PollFlags::POLLIN,
       ));
     }
@@ -469,24 +469,17 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       .revents()
       .is_some_and(|r| r.contains(PollFlags::POLLIN))
     {
-      let mut buffer = [0u8; 1024];
-      match read(*TTY_FILENO, &mut buffer) {
-        Ok(0) => {
-          // EOF
-          break;
-        }
-        Ok(n) => {
-          readline.feed_bytes(&buffer[..n]);
-        }
-        Err(Errno::EINTR) => {
-          // Interrupted, continue to handle signals
-          continue;
-        }
-        Err(e) => {
-          eprintln!("read error: {e}");
-          break;
-        }
-      }
+			match readline.read() {
+				Ok(_) => { /* data read, will be processed below */ }
+				Err(e) => match e.kind() {
+					ShErrKind::LoopBreak(_) => break,
+					ShErrKind::LoopContinue(_) => continue,
+					_ => {
+						e.print_error();
+						break
+					}
+				}
+			}
     }
 
     // check socket fd
@@ -506,7 +499,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       }
     }
 
-    // Process any available input
+    // Process the input that we read above
     let event = readline.process_input();
 
     match handle_readline_event(&mut readline, event)? {

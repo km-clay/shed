@@ -2,15 +2,19 @@
 
 #SHED MANUAL#
 
-Shed is an experimental UNIX command interpreter (shell) usable as both an interactive login shell and as a shell script command preprocessor. Shed combines the functionality of `bash` with the UX and customizability of `vim`. Shed seeks to improve the interactive shell experience by providing:
+Shed is an experimental UNIX command interpreter (shell) usable as both an
+interactive login shell and as a shell script command preprocessor.
+Shed combines the functionality of `bash` with the UX and customizability of `vim`.
+Features include:
 * A hackable line editor similar to `zsh`'s `zle`
 * Programmable, dynamic prompts
 * Custom tab completion
 * An event hook system
 * An IPC socket for async workflows
 * Fuzzy history search/tab completion
-* And many more features
+* Extensive, navigable documentation via `help`
 
+Press {Tab} to follow cross-reference links in the help pages.
 ==============================================================================
 1. Available Topics                            *help-topics*
 
@@ -38,10 +42,34 @@ Shed is an experimental UNIX command interpreter (shell) usable as both an inter
                         `help prompt-escapes`   jumps to |prompt-escapes|
                         `help heredoc`          jumps to |heredoc|
 
-  Cross-references like |prompt| are searchable tags. Search for them
-  with `help` followed by the reference name.
+  Help pages are displayed in an interactive pager.      *help-pager*
 
-  By default, help pages are displayed using `less`, but you can choose
-	a pager to use by exporting the `$SHED_HPAGER` environment variable.
+  2.1 Scrolling                                  *help-scroll*
+
+      `j` / {Down}        Scroll down one line
+      `k` / {Up}          Scroll up one line
+      `d`                 Scroll down 15 lines
+      `u`                 Scroll up 15 lines
+      `g`                 Jump to top of page
+      `G`                 Jump to bottom of page
+      `q` / {Esc}         Quit the pager
+
+  2.2 Search                                     *help-search*
+
+      `/`{pattern}        Search forward
+      `?`{pattern}        Search backward
+      `n`                 Jump to next match
+      `N`                 Jump to previous match
+
+      Search results are highlighted. Pressing {Esc} clears the
+      search.
+
+  2.3 Cross-Reference Navigation                 *help-hints*
+
+      {Tab}               Enter hint mode
+
+      In hint mode, each visible cross-reference is labelled with
+      a single character. Press that character to follow the link
+      and open the referenced help page. Press {Esc} to cancel.
 
 ==============================================================================

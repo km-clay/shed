@@ -7,6 +7,7 @@ use itertools::Itertools;
 use crate::expand::Expander;
 use crate::libsh::error::ShResult;
 use crate::parse::lex::TkFlags;
+use crate::readline::SimpleEditor;
 use crate::readline::editcmd::{
   Anchor, CmdFlags, EditCmd, LineAddr, Motion, MotionCmd, ReadSrc, RegisterName, To, Verb, VerbCmd,
   WriteDest,
@@ -37,81 +38,29 @@ bitflags! {
 
 #[derive(Clone, Debug)]
 struct ExEditor {
-  buf: LineBuf,
-  mode: Emacs,
-  history: History,
+	editor: SimpleEditor,
 }
 
 impl Default for ExEditor {
   fn default() -> Self {
     Self {
-      buf: LineBuf::default(),
-      mode: Emacs::default(),
-      history: state::get_db_conn()
-        .and_then(|conn| History::new(conn, "ex_history").ok())
-        .unwrap_or_else(|| History::empty("ex_history")),
+			editor: SimpleEditor::new(Some("ex_history"))
     }
   }
 }
 
 impl ExEditor {
-  pub fn new(history: History, has_select: bool) -> Self {
-    let mut buf = LineBuf::default();
+  pub fn new(has_select: bool) -> Self {
+    let mut editor = SimpleEditor::new(Some("ex_history"));
     if has_select {
-      buf = buf.with_initial("'<,'>", 6);
+      editor.buf = editor.buf.with_initial("'<,'>", 6);
     }
     Self {
-      history,
-      buf,
-      mode: Emacs::default(),
+			editor
     }
   }
   pub fn clear(&mut self) {
     *self = Self::default()
-  }
-  pub fn should_grab_history(&mut self, cmd: &EditCmd) -> bool {
-    cmd.verb().is_none()
-      && (cmd
-        .motion()
-        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUp)))
-        && self.buf.start_of_line() == 0)
-      || (cmd
-        .motion()
-        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown)))
-        && self.buf.on_last_line())
-  }
-  pub fn scroll_history(&mut self, cmd: EditCmd) {
-    let count = &cmd.motion().unwrap().0;
-    let motion = &cmd.motion().unwrap().1;
-    let count = match motion {
-      Motion::LineUp => -(*count as isize),
-      Motion::LineDown => *count as isize,
-      _ => unreachable!(),
-    };
-    let entry = self.history.scroll(count);
-    if let Some(entry) = entry {
-      let buf = std::mem::take(&mut self.buf);
-      self.buf.set_buffer(entry.command().to_string());
-      if self.history.pending.is_none() {
-        self.history.pending = Some(buf);
-      }
-      self.buf.set_hint(None);
-      self.buf.move_cursor_to_end();
-    } else if let Some(pending) = self.history.pending.take() {
-      self.buf = pending;
-    }
-  }
-  pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<()> {
-    let Some(cmd) = self.mode.handle_key(key) else {
-      return Ok(());
-    };
-    log::debug!("ExEditor got cmd: {:?}", cmd);
-    if self.should_grab_history(&cmd) {
-      log::debug!("Grabbing history for cmd: {:?}", cmd);
-      self.scroll_history(cmd);
-      return Ok(());
-    }
-    self.buf.exec_cmd(cmd)
   }
 }
 
@@ -121,9 +70,9 @@ pub struct ViEx {
 }
 
 impl ViEx {
-  pub fn new(history: History, has_select: bool) -> Self {
+  pub fn new(has_select: bool) -> Self {
     Self {
-      pending_cmd: ExEditor::new(history, has_select),
+      pending_cmd: ExEditor::new(has_select),
     }
   }
 }
@@ -134,7 +83,7 @@ impl EditMode for ViEx {
     use crate::readline::keys::{KeyCode as C, KeyEvent as E, ModKeys as M};
     match key {
       E(C::Char('\r'), M::NONE) | E(C::Enter, M::NONE) => {
-        let input = self.pending_cmd.buf.joined();
+        let input = self.pending_cmd.editor.buf.joined();
         let res = match parse_ex_input(&input) {
           Ok(cmd) => Ok(cmd),
           Err(e) => {
@@ -165,7 +114,7 @@ impl EditMode for ViEx {
         flags: CmdFlags::empty(),
         raw_seq: "".into(),
       })),
-      _ => self.pending_cmd.handle_key(key).map(|_| None),
+      _ => self.pending_cmd.editor.handle_key(key).map(|_| None),
     }
   }
   fn handle_key(&mut self, key: KeyEvent) -> Option<EditCmd> {
@@ -181,11 +130,11 @@ impl EditMode for ViEx {
   }
 
   fn editor(&mut self) -> Option<&mut LineBuf> {
-    Some(&mut self.pending_cmd.buf)
+    Some(&mut self.pending_cmd.editor.buf)
   }
 
   fn history(&mut self) -> Option<&mut History> {
-    Some(&mut self.pending_cmd.history)
+    self.pending_cmd.editor.history.as_mut()
   }
 
   fn cursor_style(&self) -> String {
@@ -193,19 +142,19 @@ impl EditMode for ViEx {
   }
 
   fn pending_seq(&self) -> Option<String> {
-    Some(self.pending_cmd.buf.joined())
+    Some(self.pending_cmd.editor.buf.joined())
   }
 
   fn pending_cursor(&self) -> Option<usize> {
-    Some(self.pending_cmd.buf.cursor_to_flat())
+    Some(self.pending_cmd.editor.buf.cursor_to_flat())
   }
 
   fn move_cursor_on_undo(&self) -> bool {
-    self.pending_cmd.mode.move_cursor_on_undo()
+    self.pending_cmd.editor.mode.move_cursor_on_undo()
   }
 
   fn clamp_cursor(&self) -> bool {
-    self.pending_cmd.mode.clamp_cursor()
+    self.pending_cmd.editor.mode.clamp_cursor()
   }
 
   fn hist_scroll_start_pos(&self) -> Option<To> {

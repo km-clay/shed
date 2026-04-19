@@ -110,32 +110,8 @@ pub struct RawModeGuard {
 }
 
 impl RawModeGuard {
-  /// Disable raw mode temporarily for a specific operation
-  pub fn disable_for<F: FnOnce() -> R, R>(&self, func: F) -> R {
-    let fd = borrow_fd(self.fd);
-    // Temporarily restore the original termios
-    termios::tcsetattr(fd, termios::SetArg::TCSANOW, &self.orig)
-      .expect("Failed to temporarily disable raw mode");
-
-    // Run the function
-    let result = func();
-
-    // Re-enable raw mode
-    let mut raw = self.orig.clone();
-    termios::cfmakeraw(&mut raw);
-    // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
-    raw.local_flags |= termios::LocalFlags::ISIG;
-    // Keep OPOST enabled so \n is translated to \r\n on output
-    raw.output_flags |= termios::OutputFlags::OPOST;
-    termios::tcsetattr(fd, termios::SetArg::TCSANOW, &raw).expect("Failed to re-enable raw mode");
-
-    result
-  }
-
   pub fn with_cooked_mode<F, R>(f: F) -> R
-  where
-    F: FnOnce() -> R,
-  {
+  where F: FnOnce() -> R {
     let current = tcgetattr(borrow_fd(*TTY_FILENO)).expect("Failed to get terminal attributes");
     let orig = ORIG_TERMIOS
       .with(|cell| cell.borrow().clone())
@@ -154,49 +130,36 @@ impl Drop for RawModeGuard {
   }
 }
 
-// ============================================================================
-// TermiosGuard - RAII termios state management
-// ============================================================================
-
-#[derive(Debug)]
-pub struct TermiosGuard {
-  saved_termios: Option<Termios>,
+pub struct TuiGuard {
+	_raw_mode_guard: RawModeGuard
 }
 
-impl TermiosGuard {
-  pub fn new(new_termios: Termios) -> Self {
-    let mut new = Self {
-      saved_termios: None,
-    };
+impl TuiGuard {
+	pub fn new() -> Self {
+		let new = Self {
+			_raw_mode_guard: raw_mode(),
+		};
 
-    if isatty(*TTY_FILENO).unwrap() {
-      let current_termios = termios::tcgetattr(std::io::stdin()).unwrap();
-      new.saved_termios = Some(current_termios);
+		if isatty(*TTY_FILENO).unwrap_or(false) {
+			write(borrow_fd(*TTY_FILENO), b"\x1b[?1049h").ok(); // enter alt buffer
+			write(borrow_fd(*TTY_FILENO), b"\x1b[?25l").ok(); // hide cursor
+		}
 
-      termios::tcsetattr(
-        std::io::stdin(),
-        nix::sys::termios::SetArg::TCSANOW,
-        &new_termios,
-      )
-      .unwrap();
-    }
-
-    new
-  }
+		new
+	}
 }
 
-impl Default for TermiosGuard {
-  fn default() -> Self {
-    let mut termios_val = termios::tcgetattr(std::io::stdin()).unwrap();
-    termios_val.local_flags &= !LocalFlags::ECHOCTL;
-    Self::new(termios_val)
-  }
+impl Default for TuiGuard {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
-impl Drop for TermiosGuard {
-  fn drop(&mut self) {
-    if let Some(saved) = &self.saved_termios {
-      termios::tcsetattr(std::io::stdin(), nix::sys::termios::SetArg::TCSANOW, saved).unwrap();
-    }
-  }
+impl Drop for TuiGuard {
+	fn drop(&mut self) {
+		if isatty(*TTY_FILENO).unwrap_or(false) {
+			write(borrow_fd(*TTY_FILENO), b"\x1b[?25h").ok(); // show cursor
+			write(borrow_fd(*TTY_FILENO), b"\x1b[?1049l").ok(); // exit alt buffer
+		}
+	}
 }

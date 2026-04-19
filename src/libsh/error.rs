@@ -199,6 +199,15 @@ impl ShErr {
       io_guards: vec![],
     }
   }
+	pub fn loop_break(code: i32) -> Self {
+    Self::simple(ShErrKind::LoopContinue(code), "'continue' found outside of loop")
+	}
+	pub fn loop_continue(code: i32) -> Self {
+		Self::simple(ShErrKind::LoopBreak(code), "'break' found outside of loop")
+	}
+	pub fn func_return(code: i32) -> Self {
+		Self::simple(ShErrKind::FuncReturn(code), "'return' found outside of function")
+	}
   pub fn is_flow_control(&self) -> bool {
     self.kind.is_flow_control()
   }

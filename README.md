@@ -1,9 +1,14 @@
 # shed
 
-A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. It's a shell with a heavy emphasis on smooth line editing and general interactive UX improvements over existing shells.
+A Linux shell written in Rust. The name is a nod to the original Unix utilities `sh` and `ed`. `shed` places heavy emphasis on smooth line editing and general interactive UX improvements over existing options.
+
+`shed` is generally POSIX compatible, so the only stuff to learn is the stuff that sets it apart.
 
 <img width="931" height="537" alt="file" src="https://github.com/user-attachments/assets/33c587f0-99b2-4c5d-a80d-b7b130a7b8b1" />
 
+## Why shed?
+
+I started working on `shed` because I have yet to find an unopinionated shell with genuinely smooth out-of-the-box line editing features. Bash and zsh are both POSIX compliant in their syntax, but bash's readline and zsh's zle are both really clunky to work with (in my opinion). Fish has pretty decent line editing, but wants me to learn their scripting language instead of the one that everyone else uses. There just wasn't a perfect solution. I didn't feel like I (or anyone else) should have to choose between a shell that respects my muscle memory and a shell that has good interactive UX.
 
 ## Features
 
@@ -18,6 +23,20 @@ A Linux shell written in Rust. The name is a nod to the original Unix utilities 
 `shed` comes with fuzzy completion and history searching out of the box. It has it's own internal fuzzyfinder implementation, so `fzf` is not a dependency.
 
 <img width="931" height="537" alt="file" src="https://github.com/user-attachments/assets/f078857a-e781-46f1-8bf3-06317f1d6ccb" />
+
+---
+
+### Interactive Documentation
+
+`shed` ships with documentation for all of its builtin commands, unique features, and POSIX stuff thats easy to forget like parameter expansion. This documentation is accessible via the `help` builtin.
+
+The help topics are opened in an interactive pager, and contain links to other topics that can be followed, similar to a wiki. Pressing Tab labels onscreen links and pressing the key next to them jumps to that topic.
+
+Examples:
+```bash
+help params.txt # opens params.txt
+help cd         # opens builtins.txt and jumps to the 'cd' entry
+```
 
 ---
 
@@ -55,9 +74,9 @@ Modifying these variables from within the command updates the editor when it ret
 The `autocmd` builtin registers shell commands to run on specific events. Many events expose context variables that autocmds can use for conditional logic:
 
 ```sh
-autocmd post-change-dir 'echo "moved to $_NEW_DIR"'
+autocmd post-change-dir 'echo "moved to $NEW_DIR"'
 autocmd on-exit 'echo goodbye'
-autocmd on-time-report 'echo "$_TIME_CMD took $_TIME_REAL_FMT"'
+autocmd on-time-report 'echo "$TIME_CMD took $TIME_REAL_FMT"'
 ```
 
 Available events:
@@ -74,7 +93,7 @@ Available events:
 | `on-time-report`                                                      | `time`-prefixed command completes |
 | `on-exit`                                                             | Shell is exiting                  |
 
-Use `-c` to clear all autocmds for an event. Context variables (e.g. `$_NEW_DIR`, `$_TIME_REAL_MS`) are scoped to the autocmd execution and documented in `help autocmd`.
+Use `-c` to clear all autocmds for an event. Context variables (e.g. `$NEW_DIR`, `$TIME_REAL_MS`) are scoped to the autocmd execution and documented in `help autocmd`.
 
 ---
 
@@ -91,7 +110,7 @@ Use `-c` to clear all autocmds for an event. Context variables (e.g. `$_NEW_DIR`
 
 ### Alias Expansion
 
-`shed` supports fish-style alias expansion on the prompt. When enabled (`shopt prompt.expand_aliases=true`, the default), aliases expand visually as you type — press space or enter after an alias and the real command appears in the buffer before execution. This lets you see and edit the expanded form before running it.
+`shed` supports fish-style alias expansion on the prompt. When enabled (`shopt prompt.expand_aliases=true`, the default), aliases expand visually as you type. Press space or enter after an alias and the real command appears in the buffer before execution. This lets you see and edit the expanded form before running it.
 
 Expansion only applies to words in command position (not arguments).
 
@@ -127,7 +146,7 @@ More info can be found in [./doc/socket.txt](./doc/socket.txt).
 ### Shell Language
 
 `shed`'s scripting language follows the specification laid out by [IEEE Std 1003.1-2024 Shell & Utilities](https://pubs.opengroup.org/onlinepubs/9799919799/).
-It is capable of sourcing any POSIX-portable shell script.
+It is capable of sourcing any POSIX-portable shell script, or I'll eat my hat.
 
 ---
 
@@ -193,17 +212,6 @@ echo -p '\c{bold green on black}Build succeeded\c{reset} in \T'
 
 ---
 
-### Built-in Documentation
-
-`shed` ships with documentation for all of its builtin commands, unique features, and POSIX stuff thats easy to forget like parameter expansion. This documentation is accessible via the `help` command. The help pages are modeled after `vim`'s manual pages, and are accessed in a similar fashion. `help` takes either a topic or a filename as an argument. If a topic is given, it will find it in any of the included help pages and jump straight to that entry.
-
-Examples:
-```bash
-help params.txt # opens params.txt
-help cd         # opens builtins.txt and jumps to the 'cd' entry
-```
-
----
 
 ## Building
 
@@ -278,7 +286,3 @@ pkgs = import nixpkgs {
 ## Notes
 
 `shed` is experimental software and is currently under active development. Using an experimental shell is inherently risky business, there is no guarantee that your computer will not explode when you run this. That being said, I've been daily driving it for 5 months at the time of writing and my computer has not exploded yet. Use it at your own risk, the software is provided as-is.
-
-## Why shed?
-
-This originally started as an educational hobby project, but over the course of about two years or so it's taken the form of an actual daily-drivable shell (I switched to using it over `zsh` in October 2025). I mainly wanted to create a shell where line editing and general interactive use is more fluid. With the notable exception of `fish`, existing shells are command-interpreters first and interactive programs second, which is fine for scripting, but it's my opinion that interactive user experience should be first class in programs like this.

@@ -413,6 +413,11 @@ impl From<Vec<IoFrame>> for IoStack {
   }
 }
 
+/// Borrow a raw file descriptor, for use with std/nix file descriptor operations that expect OwnedFd/BorrowedFd.
+///
+/// Safety note: only use this with FDs that can be assumed to be open, like 0, 1, 2, and /dev/tty. Do not use this with FDs that might be closed or reused by the OS, as it can lead to undefined behavior if the FD is used after being closed or repurposed.
+///
+/// FDs that have a lifetime should always be wrapped in an OwnedFd or similar.
 pub fn borrow_fd<'f>(fd: i32) -> BorrowedFd<'f> {
   unsafe { BorrowedFd::borrow_raw(fd) }
 }

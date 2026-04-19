@@ -1,3 +1,4 @@
+use crate::libsh::error::ShErr;
 use crate::libsh::strops::QuoteState;
 use crate::motion;
 use crate::parse::lex::LexStream;
@@ -160,13 +161,82 @@ pub mod markers {
   pub const HEADER: Marker = '\u{e182}';
   pub const CODE: Marker = '\u{e183}';
   /// angle brackets
-  pub const KEYWORD_1: Marker = '\u{e184}';
-  /// curly brackets
-  pub const KEYWORD_2: Marker = '\u{e185}';
+  pub const KEYWORD_1: Marker = '\u{e185}';
   /// square brackets
-  pub const KEYWORD_3: Marker = '\u{e186}';
+  pub const KEYWORD_2: Marker = '\u{e186}';
 }
 type Marker = char;
+
+/// A simple line editor with optional history
+///
+/// Used for simpler text inputs like Ex mode and the help builtin's search bar
+/// Do note that passing a table name to this struct will create a database table if it doesn't already exist.
+#[derive(Default,Debug,Clone)]
+pub struct SimpleEditor {
+	pub buf: LineBuf,
+	pub mode: Emacs,
+	pub history: Option<History>
+}
+
+impl SimpleEditor {
+	pub fn new(history_table: Option<&str>) -> Self {
+		let history = history_table.map(|name| {
+			state::get_db_conn()
+				.and_then(|conn| History::new(conn, name).ok())
+				.unwrap_or(History::empty(name))
+		});
+		Self {
+			history,
+			buf: LineBuf::default(),
+			mode: Emacs::default(),
+		}
+	}
+  pub fn should_grab_history(&mut self, cmd: &EditCmd) -> bool {
+    cmd.verb().is_none()
+      && (cmd
+        .motion()
+        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineUp)))
+        && self.buf.start_of_line() == 0)
+      || (cmd
+        .motion()
+        .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown)))
+        && self.buf.on_last_line())
+  }
+  pub fn scroll_history(&mut self, cmd: EditCmd) {
+		let Some(history) = self.history.as_mut() else { return };
+    let count = &cmd.motion().unwrap().0;
+    let motion = &cmd.motion().unwrap().1;
+    let count = match motion {
+      Motion::LineUp => -(*count as isize),
+      Motion::LineDown => *count as isize,
+      _ => unreachable!(),
+    };
+    let entry = history.scroll(count);
+    if let Some(entry) = entry {
+      let buf = std::mem::take(&mut self.buf);
+      self.buf.set_buffer(entry.command().to_string());
+      if history.pending.is_none() {
+        history.pending = Some(buf);
+      }
+      self.buf.set_hint(None);
+      self.buf.move_cursor_to_end();
+    } else if let Some(pending) = history.pending.take() {
+      self.buf = pending;
+    }
+  }
+  pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<()> {
+    let Some(cmd) = self.mode.handle_key(key) else {
+      return Ok(());
+    };
+    log::debug!("ExEditor got cmd: {:?}", cmd);
+    if self.should_grab_history(&cmd) {
+      log::debug!("Grabbing history for cmd: {:?}", cmd);
+      self.scroll_history(cmd);
+      return Ok(());
+    }
+    self.buf.exec_cmd(cmd)
+  }
+}
 
 /// Non-blocking readline result
 pub enum ReadlineEvent {
@@ -367,6 +437,9 @@ impl ShedLine {
     new.print_line(false)?;
     Ok(new)
   }
+	pub fn read(&mut self) -> ShResult<()> {
+		self.reader.read(self.tty)
+	}
 
   pub fn with_initial(mut self, initial: &str) -> Self {
     self.editor = LineBuf::new().with_initial(initial, 0);
@@ -1535,7 +1608,6 @@ impl ShedLine {
         }
 
         Verb::ExMode => Box::new(ViEx::new(
-          self.ex_history.clone(),
           self.editor.is_selecting(),
         )),
 
@@ -1647,7 +1719,6 @@ impl ShedLine {
       ModeReport::Insert => Box::new(ViInsert::new()),
       ModeReport::Visual => Box::new(ViVisual::new()),
       ModeReport::Ex => Box::new(ViEx::new(
-        self.ex_history.clone(),
         self.editor.is_selecting(),
       )),
       ModeReport::Replace => Box::new(ViReplace::new()),
@@ -1698,7 +1769,6 @@ impl ShedLine {
             ModeReport::Emacs => Box::new(Emacs::new()),
             ModeReport::Remote => Box::new(RemoteMode),
             ModeReport::Ex => Box::new(ViEx::new(
-              self.ex_history.clone(),
               self.editor.is_selecting(),
             )),
             ModeReport::Unknown => unreachable!(),

@@ -11,7 +11,7 @@ use nix::{
   errno::Errno,
   libc::{self},
   poll::{self, PollFlags, PollTimeout},
-  unistd::isatty,
+  unistd::{isatty, read},
 };
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -285,6 +285,8 @@ pub trait LineWriter {
     total_buf_lines: usize,
   ) -> ShResult<()>;
   fn flush_write(&mut self, buf: &str) -> ShResult<()>;
+	fn buffer(&mut self, buf: &str) -> ShResult<()>;
+	fn flush(&mut self) -> ShResult<()>;
   fn send_bell(&mut self) -> ShResult<()>;
 }
 
@@ -661,6 +663,27 @@ impl PollReader {
   pub fn feed_bytes(&mut self, bytes: &[u8]) {
     self.byte_buf.extend(bytes);
   }
+
+	pub fn read(&mut self, fd: RawFd) -> ShResult<()> {
+		let mut buffer = [0u8; 1024];
+		match read(fd, &mut buffer) {
+			Ok(0) => {
+				// EOF
+				Err(ShErr::loop_break(0))
+			}
+			Ok(n) => {
+				self.feed_bytes(&buffer[..n]);
+				Ok(())
+			}
+			Err(Errno::EINTR) => {
+				// Interrupted, continue to handle signals
+				Err(ShErr::loop_continue(0))
+			}
+			Err(e) => {
+				Err(e.into())
+			}
+		}
+	}
 }
 
 impl Default for PollReader {
@@ -981,16 +1004,18 @@ pub struct TermWriter {
   last_bell: Option<Instant>,
   out: RawFd,
   pub t_cols: Col, // terminal width
+	pub t_rows: Row, // terminal height
   buffer: String,
 }
 
 impl TermWriter {
   pub fn new(out: RawFd) -> Self {
-    let (t_cols, _) = get_win_size(out);
+    let (t_cols, t_rows) = get_win_size(out);
     Self {
       last_bell: None,
       out,
       t_cols,
+			t_rows,
       buffer: String::new(),
     }
   }
@@ -1048,10 +1073,11 @@ impl TermWriter {
     Ok(())
   }
 
-  pub fn update_t_cols(&mut self) {
-    let (t_cols, _) = get_win_size(self.out);
+	pub fn update_t_dims(&mut self) {
+    let (t_cols, t_rows) = get_win_size(self.out);
     self.t_cols = t_cols;
-  }
+		self.t_rows = t_rows;
+	}
 
   /// Called before the prompt is drawn. If we are not on column 1, push a vid-inverted '%' and then a '\n\r'.
   ///
@@ -1276,6 +1302,17 @@ impl LineWriter for TermWriter {
     write_all(self.out, buf)?;
     Ok(())
   }
+
+	fn flush(&mut self) -> ShResult<()> {
+		let buf = std::mem::take(&mut self.buffer);
+		write_all(self.out, &buf)?;
+		Ok(())
+	}
+
+	fn buffer(&mut self, buf: &str) -> ShResult<()> {
+		self.buffer.push_str(buf);
+		Ok(())
+	}
 
   fn send_bell(&mut self) -> ShResult<()> {
     if read_shopts(|o| o.core.bell_enabled) {
