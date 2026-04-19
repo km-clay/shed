@@ -23,6 +23,8 @@ use crate::{
 
 pub enum PagerEvent {
   Continue,
+  Back,
+  Forward,
   OpenRef(String), // Open a new pager from this cross-reference
   Exit,
 }
@@ -310,6 +312,8 @@ impl HelpPager {
 
       K::Down | K::Char('j') => PagerCmd::Scroll(1),
       K::Up | K::Char('k') => PagerCmd::Scroll(-1),
+      K::Left | K::Char('h') => return Ok(PagerEvent::Back),
+      K::Right | K::Char('l') => return Ok(PagerEvent::Forward),
 
       _ => return Ok(PagerEvent::Continue),
     };

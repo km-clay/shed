@@ -147,9 +147,12 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
 }
 
 pub fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResult<()> {
-  let Some(mut pager) = HelpPager::new(content.to_string(), line, filename) else {
+  let Some(pager) = HelpPager::new(content.to_string(), line, filename) else {
     return Ok(()); // means stdout is not a terminal, so return
   };
+
+  let mut page_stack = vec![pager];
+  let mut pager = 0usize; // index
 
   // now we use the same input pattern as in main.rs
   let tty_fd = PollFd::new(borrow_fd(*TTY_FILENO), PollFlags::POLLIN);
@@ -157,33 +160,57 @@ pub fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResu
   // restores terminal state on drop
 
   loop {
-    pager.display()?;
-    match poll(&mut [tty_fd], PollTimeout::NONE) {
-      Ok(0) => {
-        // timeout? eof?
+    let res = {
+      let Some(pager) = page_stack.get_mut(pager) else {
         break;
+      };
+      pager.display()?;
+      match poll(&mut [tty_fd], PollTimeout::NONE) {
+        Ok(0) => {
+          // timeout? eof?
+          break;
+        }
+        Ok(_) => { /* fall through */ }
+        Err(Errno::EINTR) => continue, // just retry
+        Err(e) => {
+          return Err(sherr!(
+            InternalErr,
+            "Error polling for help pager input: {e}"
+          ));
+        }
       }
-      Ok(_) => { /* fall through */ }
-      Err(Errno::EINTR) => continue, // just retry
-      Err(e) => {
-        return Err(sherr!(
-          InternalErr,
-          "Error polling for help pager input: {e}"
-        ));
-      }
-    }
 
+      pager.handle_input()?
+    };
     // if we are here, we have input to read
 
-    match pager.handle_input()? {
+    match res {
       PagerEvent::OpenRef(crossref) => match get_help_content(&crossref) {
-        // recursively open pagers to navigate to other pages
-        Some((line, content, filename)) => open_help(&content, line, filename),
-        None => Err(sherr!(
-          NotFound,
-          "No relevant help page found for topic '{crossref}'",
-        )),
-      }?,
+        // open new pager, push to stack
+        Some((line, content, filename)) => {
+          let new_pager = HelpPager::new(content, line, filename).ok_or_else(|| {
+            sherr!(
+              NotFound,
+              "No relevant help page found for topic '{crossref}'",
+            )
+          })?;
+          page_stack.truncate(pager + 1); // drop any "forward" history if we navigate to a new page
+          page_stack.push(new_pager);
+          pager = page_stack.len() - 1;
+        }
+        None => {
+          return Err(sherr!(
+            NotFound,
+            "No relevant help page found for topic '{crossref}'",
+          ));
+        }
+      },
+      PagerEvent::Forward => {
+        pager = (pager + 1).min(page_stack.len() - 1);
+      }
+      PagerEvent::Back => {
+        pager = pager.saturating_sub(1);
+      }
       PagerEvent::Continue => continue,
       PagerEvent::Exit => break,
     }

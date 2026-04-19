@@ -51,6 +51,8 @@ Press {Tab} to follow cross-reference links in the help pages.
 
       `j` / {Down}        Scroll down one line
       `k` / {Up}          Scroll up one line
+      `h` / {Left}        Navigate to previous open page
+      `l` / {Right}       Navigate to next open page
       `d`                 Scroll down 15 lines
       `u`                 Scroll up 15 lines
       `g`                 Jump to top of page
@@ -74,5 +76,9 @@ Press {Tab} to follow cross-reference links in the help pages.
       In hint mode, each visible cross-reference is labelled with
       a single character. Press that character to follow the link
       and open the referenced help page. Press {Esc} to cancel.
+
+      After following a cross-reference, you can navigate between
+      open pages using the {Left} and {Right} arrow keys, or `h` and `l`.
+
 
 ==============================================================================
