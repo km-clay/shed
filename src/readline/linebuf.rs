@@ -24,7 +24,7 @@ use crate::{
     utils::AutoCmdVecUtils,
   }, match_loop, motion, parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
-    execute::exec_input,
+    execute::{exec_int, exec_nonint},
     lex::{self, LexFlags, LexStream, Tk, TkFlags, TkRule},
   }, prelude::*, procio::{self, IoFrame, IoMode, IoStack, capture_command}, readline::{
     editcmd::{LineAddr, ReadSrc, StashArgs, StashListArg, VerbCmd, WriteDest},
@@ -1155,7 +1155,7 @@ impl LineBuf {
       Some(procio::capture_command(cmd, Some(stdin))?)
     } else {
       let _guard = with_term(|t| t.cooked_mode_guard());
-      exec_input(cmd.to_string(), None, true, Some("<ex-mode-cmd>".into()))?;
+      exec_int(cmd.to_string(), Some("<ex-mode-cmd>".into()))?;
       None
     };
     post_cmd.exec();
@@ -3568,7 +3568,7 @@ impl LineBuf {
           let pre_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PreCmd));
           let post_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
           pre_cmd.exec();
-          exec_input(cmd.to_string(), Some(stack), false, Some("ex write".into()))?;
+          exec_nonint(cmd.to_string(), Some(stack), Some("ex write".into()))?;
           post_cmd.exec();
         }
       },
@@ -3577,7 +3577,7 @@ impl LineBuf {
           write_meta(|m| m.post_system_message("$EDITOR is unset. Aborting edit.".into()));
         } else {
           let input = format!("$EDITOR {}", path.display());
-          exec_input(input, None, true, Some("ex edit".into()))?;
+          exec_int(input, Some("ex edit".into()))?;
         }
       }
 

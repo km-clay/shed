@@ -36,7 +36,7 @@ use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{self, ShErrKind, ShResult};
 use crate::libsh::utils::AutoCmdVecUtils;
-use crate::parse::execute::{exec_dash_c, exec_input};
+use crate::parse::execute::{exec_dash_c, exec_int, exec_nonint};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
 use crate::readline::editmode::ModeReport;
@@ -161,7 +161,7 @@ fn main() -> ExitCode {
   };
 
   if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Exit))
-    && let Err(e) = exec_input(trap, None, false, Some("trap".into()))
+    && let Err(e) = exec_nonint(trap, None, Some("trap".into()))
   {
     e.print_error();
   }
@@ -199,7 +199,7 @@ fn read_commands(args: Vec<String>) -> ShResult<()> {
     write_vars(|v| v.cur_scope_mut().bpush_arg(arg))
   }
 
-  exec_input(commands, None, false, None)
+  exec_nonint(commands, None, None)
 }
 
 fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
@@ -224,7 +224,7 @@ fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
     write_vars(|v| v.cur_scope_mut().bpush_arg(arg))
   }
 
-  exec_input(input, None, false, Some(path_raw.into()))
+  exec_nonint(input, None, Some(path_raw.into()))
 }
 
 fn first_run_setup() -> ShResult<()> {
@@ -549,7 +549,7 @@ fn handle_readline_event(
       let res = {
         // _guard restores terminal state on drop
         let _guard = with_term(|t| t.prepare_for_exec())?;
-        exec_input(input.clone(), None, false, Some("<stdin>".into()))
+        exec_int(input.clone(), Some("<stdin>".into()))
       };
 
       let osc_end = osc_exec_end(state::get_status());

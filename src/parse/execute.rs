@@ -117,6 +117,8 @@ impl ExecArgs {
 /// directly without forking. This avoids process group issues where grandchild
 /// processes (e.g. nvim spawning opencode) lose their controlling terminal.
 pub fn exec_dash_c(input: String) -> ShResult<()> {
+  let _guard = with_term(|t| t.interactive_guard(false));
+
   write_meta(|m| m.rehash());
   let expanded = expand_aliases(input);
   let source_name: Rc<str> = "<shed -c>".into();
@@ -173,19 +175,46 @@ pub fn exec_dash_c(input: String) -> ShResult<()> {
     }
   }
 
-  let mut dispatcher = Dispatcher::new(nodes, false, source_name);
+  let mut dispatcher = Dispatcher::new(nodes, source_name);
   // exec_cmd expects a job on the stack (normally set up by exec_pipeline).
   // For the NO_FORK exec-in-place path, create one so it doesn't panic.
   dispatcher.job_stack.new_job();
   dispatcher.begin_dispatch()
 }
 
+/// Execute interactively.
+///
+/// Used in the main loop and other places that are guaranteed to be interacting with a tty somehow.
+/// This controls whether or not the shell passes terminal control to child processes.
+pub fn exec_int(
+  input: String,
+  source_name: Option<Rc<str>>,
+) -> ShResult<()> {
+  let _guard = with_term(|t| t.interactive_guard(true));
+  exec_input(input, None, source_name)
+}
+
+/// Execute non-interactively
+pub fn exec_nonint(
+  input: String,
+  io_stack: Option<IoStack>,
+  source_name: Option<Rc<str>>,
+) -> ShResult<()> {
+  let _guard = with_term(|t| t.interactive_guard(false));
+  exec_input(input, io_stack, source_name)
+}
+
+/// Execute arbitrary shell input
+///
+/// This should only be called directly if you wish to inherit
+/// the caller's interactive status.
 pub fn exec_input(
   mut input: String,
   io_stack: Option<IoStack>,
-  interactive: bool,
   source_name: Option<Rc<str>>,
 ) -> ShResult<()> {
+  let interactive = with_term(|t| t.interactive());
+
   if !interactive || !read_shopts(|o| o.prompt.expand_aliases) {
     input = expand_aliases(input);
   }
@@ -207,7 +236,7 @@ pub fn exec_input(
 
   let nodes = parser.extract_nodes();
 
-  let mut dispatcher = Dispatcher::new(nodes, interactive, source_name.clone());
+  let mut dispatcher = Dispatcher::new(nodes, source_name.clone());
   if let Some(mut stack) = io_stack {
     dispatcher.io_stack.extend(stack.drain(..));
   }
@@ -216,7 +245,6 @@ pub fn exec_input(
 
 pub struct Dispatcher {
   nodes: VecDeque<Node>,
-  interactive: bool,
   source_name: Rc<str>,
   pub io_stack: IoStack,
   pub job_stack: JobStack,
@@ -224,11 +252,10 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
-  pub fn new(nodes: Vec<Node>, interactive: bool, source_name: Rc<str>) -> Self {
+  pub fn new(nodes: Vec<Node>, source_name: Rc<str>) -> Self {
     let nodes = VecDeque::from(nodes);
     Self {
       nodes,
-      interactive,
       source_name,
       io_stack: IoStack::new(),
       job_stack: JobStack::new(),
@@ -329,7 +356,6 @@ impl Dispatcher {
       exec_input(
         format!("cd {dir}"),
         Some(stack),
-        self.interactive,
         Some(self.source_name.clone()),
       )
     } else {
@@ -406,7 +432,7 @@ impl Dispatcher {
 
     let func = ShFunc::new(*body, blame);
     write_logic(|l| l.insert_func(name, func)); // Store the AST
-    if self.interactive {
+    if with_term(|t| t.interactive()) {
       write_meta(|m| {
         m.set_last_was_func_def(true);
       });
@@ -452,7 +478,7 @@ impl Dispatcher {
           return;
         };
 
-        if let Err(e) = exec_input(subsh_body, None, s.interactive, Some(src_name)) {
+        if let Err(e) = exec_input(subsh_body, None, Some(src_name)) {
           e.print_error();
         };
       })
@@ -878,13 +904,17 @@ impl Dispatcher {
     let should_fork_segment = |cmd: &Node| -> bool { is_bg && num_cmds == 1 && runs_inline(cmd) };
     // closure that gets the pgid we need if the child wants the tty
     let tty_controller = |s: &mut Self| -> Option<Pid> {
-      (!is_bg && s.interactive)
+      if with_term(|t| t.interactive()) {
+        log::debug!("Checking if we need to attach to tty for pipeline segment");
+        log::debug!("is_bg: {is_bg}, interactive: {}", with_term(|t| t.interactive()));
+      }
+      (!is_bg && with_term(|t| t.interactive()))
         .then(|| s.job_stack.curr_job_mut().unwrap().pgid())
         .flatten()
     };
 
     self.job_stack.new_job();
-    self.fg_job = !is_bg && self.interactive;
+    self.fg_job = !is_bg && with_term(|t| t.interactive());
 
     let (mut in_rdrs, mut out_rdrs) = self.io_stack.pop_frame().redirs.split_by_channel();
     let mut pipes = PipeGenerator::new(num_cmds).as_io_frames();
@@ -918,6 +948,7 @@ impl Dispatcher {
       };
 
       if !tty_attached && let Some(pgid) = tty_controller(self) {
+        log::debug!("Attaching to tty with pgid {pgid}");
         with_term(|t| t.attach(pgid)).ok();
         tty_attached = true;
       }
@@ -928,7 +959,7 @@ impl Dispatcher {
     }
 
     let job = self.job_stack.finalize_job().unwrap();
-    let dispatch_result = dispatch_job(job, is_bg, self.interactive);
+    let dispatch_result = dispatch_job(job, is_bg, with_term(|t| t.interactive()));
     result?;
     dispatch_result?;
 
@@ -999,10 +1030,9 @@ impl Dispatcher {
     if argv.len() == 2 && argv[1].as_str() == "--help" {
       // we have been asked for help
       // is this a hack? only the nose knows.
-      return exec_input(
+      return exec_nonint(
         format!("help builtin-{cmd_raw}"),
         None,
-        false,
         Some("<builtin-help>".into()),
       );
     }
@@ -1086,7 +1116,7 @@ impl Dispatcher {
       "help" => help(cmd),
       "set" => set_builtin(cmd),
       "msg" => msg(cmd),
-      "fc" => fixcmd(cmd, self.interactive),
+      "fc" => fixcmd(cmd),
       "hist" => hist_builtin(cmd),
       "hash" => hash_builtin(cmd),
       "times" => times(cmd),
@@ -1148,8 +1178,8 @@ impl Dispatcher {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
 
     let fg_job = self.fg_job;
-    let interactive = self.interactive;
-    let child_logic = |pgid: Option<Pid>| -> ! {
+    let interactive = with_term(|t| t.interactive());
+    let child_logic = |_pgid: Option<Pid>| -> ! {
       if let AssignBehavior::Export = assign_behavior
         && !assignments.is_empty()
       {
@@ -1167,25 +1197,6 @@ impl Dispatcher {
           exit(1);
         }
       };
-      // For non-interactive exec-in-place (e.g. shed -c), skip process group
-      // and terminal setup - just transparently replace the current process.
-      if interactive || !no_fork {
-        // Put ourselves in the correct process group before exec.
-        // For the first child in a pipeline pgid is None, so we
-        // become our own group leader (setpgid(0,0)).  For later
-        // children we join the leader's group.
-        let our_pgid = pgid.unwrap_or(Pid::from_raw(0));
-        let _ = setpgid(Pid::from_raw(0), our_pgid);
-
-        if fg_job {
-          let tty_pgid = if our_pgid == Pid::from_raw(0) {
-            nix::unistd::getpid()
-          } else {
-            our_pgid
-          };
-          with_term(|t| t.attach(tty_pgid)).ok();
-        }
-      }
 
       if interactive || !no_fork {
         crate::signal::reset_signals(fg_job);
@@ -1252,7 +1263,7 @@ impl Dispatcher {
       ForkResult::Child => {
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
         crate::signal::reset_signals(self.fg_job);
-        self.interactive = false;
+        let _guard = with_term(|t| t.interactive_guard(false));
         f(self);
         unsafe { libc::_exit(state::get_status()) }
       }
@@ -1451,7 +1462,7 @@ pub fn check_err(flags: NdFlags, err: Option<ShErr>, span: Option<Span>) -> ShRe
   if state::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
     if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Error)) {
       let saved_status = state::get_status();
-      exec_input(trap, None, false, Some("trap ERR".into()))?;
+      exec_nonint(trap, None, Some("trap ERR".into()))?;
       state::set_status(saved_status);
     }
     if read_shopts(|o| o.set.errexit) {

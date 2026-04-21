@@ -17,7 +17,7 @@ use crate::{
   },
   match_loop,
   parse::{
-    execute::exec_input,
+    execute::exec_nonint,
     lex::{self, LexFlags, Tk, TkRule},
   },
   readline::{
@@ -624,7 +624,7 @@ impl BashCompSpec {
       "{} {cmd_name} {cword_str} {pword_str}",
       self.function.as_ref().unwrap()
     );
-    exec_input(input, None, false, Some("comp_function".into()))?;
+    exec_nonint(input, None, Some("comp_function".into()))?;
 
     let comp_reply = read_vars(|v| v.get_arr_elems("COMPREPLY"))
       .into_iter()

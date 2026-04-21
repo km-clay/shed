@@ -7,7 +7,7 @@ use std::{
 use crate::{
   expand::Expander,
   libsh::error::{ShErr, ShResult},
-  parse::{Redir, RedirType, execute::exec_input, get_redir_file, lex::TkFlags},
+  parse::{Redir, RedirType, execute::{exec_nonint}, get_redir_file, lex::TkFlags},
   prelude::*,
   sherr, state::{self, with_term},
 };
@@ -497,10 +497,9 @@ pub fn capture_command(cmd: &str, stdin: Option<&str>) -> ShResult<String> {
       if let Some(fd) = stdin_write_fd {
         close(fd).ok(); // close child's copy of stdin write end
       }
-      if let Err(e) = exec_input(
+      if let Err(e) = exec_nonint(
         cmd.to_string(),
         Some(io_stack),
-        false,
         Some("command_sub".into()),
       ) {
         e.print_error();

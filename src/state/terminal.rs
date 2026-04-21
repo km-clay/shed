@@ -500,20 +500,20 @@ impl Drop for FlushGuard {
 ///
 /// This is returned from any Terminal method that modifies the terminal state.
 /// This allows us to scope terminal state changes, and ensures that the terminal state is always restored even if the code panics or returns early.
+#[derive(Debug)]
 pub struct TermGuard {
-  raw_mode: bool,
-  bracketed_paste: bool,
-  kitty_proto: bool,
-  alt_buffer: bool,
-  cursor_style: CursorStyle,
-  cursor_visible: bool,
+  raw_mode: Option<bool>,
+  bracketed_paste: Option<bool>,
+  kitty_proto: Option<bool>,
+  alt_buffer: Option<bool>,
+  cursor_style: Option<CursorStyle>,
+  cursor_visible: Option<bool>,
+  interactive: Option<bool>,
 }
 
 impl Drop for TermGuard {
   fn drop(&mut self) {
-    with_term(|t| {
-      t.load_state(&*self).ok()
-    });
+    with_term(|t| t.load_state(self).ok());
   }
 }
 
@@ -530,6 +530,7 @@ pub struct Terminal {
   alt_buffer: bool,
   cursor_style: CursorStyle,
   cursor_visible: bool,
+  interactive: bool,
   orig_termios: Option<Termios>,
 
   t_cols: usize,
@@ -579,6 +580,7 @@ impl Terminal {
       kitty_kbd_proto: false,
       alt_buffer: false,
       cursor_style: CursorStyle::Default,
+      interactive: false,
       cursor_visible: true,
       raw_mode: false,
       orig_termios: None,
@@ -611,25 +613,69 @@ impl Terminal {
     self.tty.is_some_and(|tty| isatty(tty).unwrap_or(false))
   }
 
+  pub fn interactive(&self) -> bool {
+    self.interactive
+  }
+
+  pub fn interactive_guard(&mut self, on: bool) -> TermGuard {
+    let old = self.interactive;
+    self.interactive = on;
+    TermGuard {
+      interactive: Some(old),
+      raw_mode: None,
+      bracketed_paste: None,
+      kitty_proto: None,
+      alt_buffer: None,
+      cursor_style: None,
+      cursor_visible: None,
+    }
+  }
+
   fn save_state(&self) -> TermGuard {
     TermGuard {
-      raw_mode: self.raw_mode,
-      bracketed_paste: self.bracketed_paste,
-      kitty_proto: self.kitty_kbd_proto,
-      alt_buffer: self.alt_buffer,
-      cursor_style: self.cursor_style,
-      cursor_visible: self.cursor_visible,
+      raw_mode: Some(self.raw_mode),
+      bracketed_paste: Some(self.bracketed_paste),
+      kitty_proto: Some(self.kitty_kbd_proto),
+      alt_buffer: Some(self.alt_buffer),
+      cursor_style: Some(self.cursor_style),
+      cursor_visible: Some(self.cursor_visible),
+      interactive: None,
     }
   }
 
   fn load_state(&mut self, guard: &TermGuard) -> ShResult<()> {
-    self.toggle_raw_mode(guard.raw_mode)?; // restore raw mode first so escape sequences work
-    self.toggle_bracketed_paste(guard.bracketed_paste)?;
-    self.toggle_kitty_proto(guard.kitty_proto)?;
-    self.toggle_alt_buffer(guard.alt_buffer)?;
-    self.toggle_cursor_visibility(guard.cursor_visible)?;
-    self.set_cursor_style(guard.cursor_style)?;
-    self.flush()?; // flush restore sequences immediately
+    let mut wrote_seq = false;
+    if let Some(raw_mode) = guard.raw_mode {
+      self.toggle_raw_mode(raw_mode)?; // restore raw mode first so escape sequences work
+      wrote_seq = true;
+    }
+    if let Some(bracketed_paste) = guard.bracketed_paste {
+      self.toggle_bracketed_paste(bracketed_paste)?;
+      wrote_seq = true;
+    }
+    if let Some(kitty_proto) = guard.kitty_proto {
+      self.toggle_kitty_proto(kitty_proto)?;
+      wrote_seq = true;
+    }
+    if let Some(alt_buffer) = guard.alt_buffer {
+      self.toggle_alt_buffer(alt_buffer)?;
+      wrote_seq = true;
+    }
+    if let Some(cursor_visible) = guard.cursor_visible {
+      self.toggle_cursor_visibility(cursor_visible)?;
+      wrote_seq = true;
+    }
+    if let Some(cursor_style) = guard.cursor_style {
+      self.set_cursor_style(cursor_style)?;
+      wrote_seq = true;
+    }
+    if let Some(interactive) = guard.interactive {
+      self.interactive = interactive;
+    }
+
+    if wrote_seq {
+      self.flush()?; // flush restore sequences immediately
+    }
     Ok(())
   }
 
@@ -774,12 +820,17 @@ impl Terminal {
   }
 
   pub fn attach(&mut self, pgid: Pid) -> ShResult<()> {
+    log::debug!("Attaching to pgid {pgid}");
+    log::debug!("self.tty = {:?}", self.tty);
     let Some(tty) = self.tty else { return Ok(()); };
     // If we aren't attached to a terminal, the pgid already controls it, or the
     // process group does not exist Then return ok
     let term_controller = self.controller().unwrap_or(Pid::this());
     let isatty = self.isatty();
     if !isatty || pgid == term_controller || killpg(pgid, None).is_err() {
+      log::debug!(
+        "Not attaching to pgid {pgid}: isatty={isatty}, term_controller={term_controller}"
+      );
       return Ok(());
     }
 
@@ -797,6 +848,7 @@ impl Terminal {
     pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&new_mask), Some(&mut mask_bkup))?;
 
     let result = tcsetpgrp(borrow_fd(tty), pgid);
+    log::debug!("tcsetpgrp result: {result:?}");
 
     pthread_sigmask(
       SigmaskHow::SIG_SETMASK,
@@ -804,13 +856,12 @@ impl Terminal {
       Some(&mut new_mask),
     )?;
 
-    match result {
-      Ok(_) => Ok(()),
-      Err(_e) => {
-        tcsetpgrp(borrow_fd(tty), getpgrp())?;
-        Ok(())
-      }
+    if let Err(e) = result {
+      log::error!("Failed to set terminal process group: {e}");
+      tcsetpgrp(borrow_fd(tty), getpgrp())?;
     }
+
+    Ok(())
   }
 
   pub fn fd_is_tty(&self, other: RawFd) -> bool {

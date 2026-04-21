@@ -2,7 +2,7 @@ use crate::{
   libsh::error::ShResult,
   parse::{
     NdRule, Node,
-    execute::{exec_input, prepare_argv},
+    execute::{exec_nonint, prepare_argv},
   },
   state,
 };
@@ -32,7 +32,7 @@ pub fn eval(node: Node) -> ShResult<()> {
     .collect::<Vec<_>>()
     .join(" ");
 
-  exec_input(joined_argv, None, false, Some("eval".into()))
+  exec_nonint(joined_argv, None, Some("eval".into()))
 }
 
 #[cfg(test)]

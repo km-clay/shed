@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use ariadne::Span as AriadneSpan;
 
-use crate::parse::execute::exec_input;
+use crate::parse::execute::exec_nonint;
 use crate::parse::lex::{Span, Tk, TkRule};
 use crate::parse::{Node, Redir, RedirType};
 use crate::prelude::*;
@@ -179,7 +179,7 @@ impl AutoCmdVecUtils for Vec<AutoCmd> {
     let saved_status = crate::state::get_status();
     for cmd in self {
       let AutoCmd { kind: _, command } = cmd;
-      if let Err(e) = exec_input(command.clone(), None, false, Some("autocmd".into())) {
+      if let Err(e) = exec_nonint(command.clone(), None, Some("autocmd".into())) {
         e.print_error();
       }
     }

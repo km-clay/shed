@@ -16,7 +16,7 @@ use nix::{
 use crate::{
   expand::expand_aliases,
   libsh::error::ShResult,
-  parse::{NdKind, ParsedSrc, Redir, RedirType, execute::exec_input, lex::LexFlags},
+  parse::{NdKind, ParsedSrc, Redir, RedirType, execute::exec_nonint, lex::LexFlags},
   procio::{IoFrame, IoMode, RedirGuard, borrow_fd},
   readline::register::{restore_registers, save_registers},
   state::{self, MetaTab, with_term},
@@ -36,7 +36,7 @@ pub fn has_cmd(cmd: &str) -> bool {
 }
 
 pub fn test_input(input: impl Into<String>) -> ShResult<()> {
-  exec_input(input.into(), None, false, None)
+  exec_nonint(input.into(), None, None)
 }
 
 pub struct TestGuard {

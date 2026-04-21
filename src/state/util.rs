@@ -11,11 +11,10 @@ use rusqlite::Connection;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-  exec_input,
   jobs::Job,
   libsh::{error::ShResult, utils::AutoCmdVecUtils},
   match_loop,
-  parse::lex::{LexFlags, LexStream},
+  parse::{execute::exec_nonint, lex::{LexFlags, LexStream}},
   prelude::*,
   sherr,
   shopt::ShOpts,
@@ -151,8 +150,14 @@ pub fn write_shopts<T, F: FnOnce(&mut ShOpts) -> T>(f: F) -> T {
   SHED.with(|shed| f(&mut shed.shopts.borrow_mut()))
 }
 
+#[track_caller]
 pub fn with_term<T, F: FnOnce(&mut Terminal) -> T>(f: F) -> T {
-  SHED.with(|shed| f(&mut shed.terminal.borrow_mut()))
+  let caller = std::panic::Location::caller();
+  SHED.with(|shed| {
+    let mut term = shed.terminal.try_borrow_mut()
+      .unwrap_or_else(|_| panic!("with_term: RefCell already borrowed (called from {caller})"));
+    f(&mut term)
+  })
 }
 
 #[cfg(test)]
@@ -509,7 +514,7 @@ pub fn source_file(path: PathBuf) -> ShResult<()> {
 
   let mut buf = String::new();
   file.read_to_string(&mut buf)?;
-  exec_input(buf, None, false, Some(source_name.into()))?;
+  exec_nonint(buf, None, Some(source_name.into()))?;
   Ok(())
 }
 

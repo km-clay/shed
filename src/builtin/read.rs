@@ -102,7 +102,9 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
   let input = if isatty(STDIN_FILENO)? {
     // Restore default terminal settings
     let _guard = with_term(|t| t.cooked_mode_guard());
-    (|| {
+
+    // using a named block here     vvvv
+    let result: ShResult<String> = 'read: {
       let mut input: Vec<u8> = vec![];
       let mut escaped = false;
       loop {
@@ -112,7 +114,7 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
             state::set_status(1);
             let str_result = String::from_utf8(input.clone())
               .map_err(|e| sherr!(ExecFail, "read: Input was not valid UTF-8: {e}"))?;
-            return Ok(str_result); // EOF
+            break 'read Ok(str_result); // EOF
           }
           Ok(_) => {
             if buf[0] == read_opts.delim {
@@ -131,12 +133,12 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
           Err(Errno::EINTR) => {
             if crate::signal::sigint_pending() {
               state::set_status(130);
-              return Ok(String::new());
+              break 'read Ok(String::new());
             }
             continue;
           }
           Err(e) => {
-            return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}"));
+            break 'read Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}"));
           }
         }
       }
@@ -145,7 +147,9 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
       let str_result = String::from_utf8(input.clone())
         .map_err(|e| sherr!(ExecFail, "read: Input was not valid UTF-8: {e}"))?;
       Ok(str_result)
-    })().blame(blame)?
+    };
+
+    result.blame(blame)?
   } else {
     let mut input: Vec<u8> = vec![];
     loop {

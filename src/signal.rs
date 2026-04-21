@@ -12,7 +12,7 @@ use crate::{
   builtin::trap::TrapTarget,
   jobs::{Job, JobCmdFlags, JobID, take_term},
   libsh::{error::ShResult, utils::AutoCmdVecUtils},
-  parse::execute::exec_input,
+  parse::execute::exec_nonint,
   prelude::*,
   sherr,
   state::{
@@ -105,7 +105,7 @@ pub fn check_signals() -> ShResult<()> {
   let got_signal = |sig: Signal| -> bool { pending & (1 << sig as u64) != 0 };
   let run_trap = |sig: Signal| -> ShResult<()> {
     if let Some(command) = read_logic(|l| l.get_trap(TrapTarget::Signal(sig))) {
-      exec_input(command, None, false, Some("trap".into()))?;
+      exec_nonint(command, None, Some("trap".into()))?;
     }
     Ok(())
   };

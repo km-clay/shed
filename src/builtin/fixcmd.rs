@@ -148,7 +148,7 @@ pub fn parse_fc_args(args: Vec<Tk>) -> ShResult<(Vec<(String, Span)>, FixCmdOpts
   Ok((non_opts, opts))
 }
 
-pub fn fixcmd(node: Node, interactive: bool) -> ShResult<()> {
+pub fn fixcmd(node: Node) -> ShResult<()> {
   let span = node.get_span();
   let NdRule::Command {
     assignments: _,
@@ -167,16 +167,16 @@ pub fn fixcmd(node: Node, interactive: bool) -> ShResult<()> {
   if opts.list {
     fc_list(hist, opts).promote_err(span)?;
   } else if opts.no_editor {
-    fc_reexec(hist, opts, interactive).promote_err(span)?;
+    fc_reexec(hist, opts).promote_err(span)?;
   } else {
-    fc_edit(hist, opts, interactive).promote_err(span)?;
+    fc_edit(hist, opts).promote_err(span)?;
   }
 
   state::set_status(0);
   Ok(())
 }
 
-fn fc_edit(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()> {
+fn fc_edit(hist: History, opts: FixCmdOpts) -> ShResult<()> {
   let editor = if let Some(editor) = opts.editor {
     editor
   } else if let Ok(editor) = env::var("FCEDIT") {
@@ -203,7 +203,7 @@ fn fc_edit(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()> {
 
     let editor_cmd = format!("{editor} {}", tmp.path().display());
 
-    exec_input(editor_cmd, None, interactive, Some("fc edit".into()))?;
+    exec_input(editor_cmd, None, Some("fc edit".into()))?;
 
     tmp.rewind()?;
     tmp.read_to_string(&mut new_cmd)?;
@@ -214,7 +214,6 @@ fn fc_edit(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()> {
     exec_input(
       new_cmd.clone(),
       None,
-      interactive,
       Some("fc re-exec".into()),
     )?;
 
@@ -226,7 +225,7 @@ fn fc_edit(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()> {
   Ok(())
 }
 
-fn fc_reexec(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()> {
+fn fc_reexec(hist: History, opts: FixCmdOpts) -> ShResult<()> {
   let first = opts.first.unwrap_or_default();
   let last = opts.last.unwrap_or(first.clone());
   let entries = get_entry_range(&hist, Some(first), Some(last), opts.reverse)?;
@@ -246,7 +245,6 @@ fn fc_reexec(hist: History, opts: FixCmdOpts, interactive: bool) -> ShResult<()>
     exec_input(
       command.clone(),
       None,
-      interactive,
       Some("fc re-exec".into()),
     )?;
     if should_push {

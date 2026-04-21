@@ -1,6 +1,6 @@
 use crate::expand::arithmetic::expand_arithmetic_wrapped;
 use crate::libsh::error::ShResult;
-use crate::parse::execute::exec_input;
+use crate::parse::execute::exec_nonint;
 use crate::parse::{Redir, RedirType};
 use crate::prelude::*;
 use crate::procio::{IoBuf, IoFrame, IoMode, IoStack};
@@ -41,10 +41,9 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       let mut io_stack = IoStack::new();
       io_stack.push_frame(io_frame);
 
-      if let Err(e) = exec_input(
+      if let Err(e) = exec_nonint(
         raw.to_string(),
         Some(io_stack),
-        false,
         Some("process_sub".into()),
       ) {
         e.print_error();
@@ -74,10 +73,9 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<String> {
   match unsafe { fork()? } {
     ForkResult::Child => {
       io_stack.push_frame(cmd_sub_io_frame);
-      if let Err(e) = exec_input(
+      if let Err(e) = exec_nonint(
         raw.to_string(),
         Some(io_stack),
-        false,
         Some("command_sub".into()),
       ) {
         e.print_error();
