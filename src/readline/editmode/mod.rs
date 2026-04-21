@@ -191,15 +191,15 @@ pub fn common_cmds(key: E) -> Option<EditCmd> {
       pending_cmd.set_verb(verb!(Verb::Delete));
       pending_cmd.set_motion(motion!(Motion::ForwardCharForced));
     }
-    E(K::Backspace, M::NONE) | ctrl!('H') => {
+    E(K::Backspace, M::NONE) | ctrl!('h') => {
       pending_cmd.set_verb(verb!(Verb::Delete));
       pending_cmd.set_motion(motion!(Motion::BackwardCharForced));
     }
-    ctrl!('D') => pending_cmd.set_verb(verb!(Verb::EndOfFile)),
-    ctrl!('C') => pending_cmd.set_verb(verb!(Verb::Interrupt)),
-    ctrl!('P') => pending_cmd.set_verb(verb!(Verb::HistoryUp)),
-    ctrl!('N') => pending_cmd.set_verb(verb!(Verb::HistoryDown)),
-    ctrl!('L') => pending_cmd.set_verb(verb!(Verb::ClearScreen)),
+    ctrl!('d') => pending_cmd.set_verb(verb!(Verb::EndOfFile)),
+    ctrl!('c') => pending_cmd.set_verb(verb!(Verb::Interrupt)),
+    ctrl!('p') => pending_cmd.set_verb(verb!(Verb::HistoryUp)),
+    ctrl!('n') => pending_cmd.set_verb(verb!(Verb::HistoryDown)),
+    ctrl!('l') => pending_cmd.set_verb(verb!(Verb::ClearScreen)),
     _ => return None,
   }
   Some(pending_cmd)

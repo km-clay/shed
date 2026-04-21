@@ -144,7 +144,8 @@ pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
     }
   }
 
-  let key = match key_name.first()?.to_uppercase().as_str() {
+  let raw_key = key_name.first()?;
+  let key = match raw_key.to_uppercase().as_str() {
     "CR" | "ENTER" | "RETURN" => KeyCode::Enter,
     "ESC" | "ESCAPE" => KeyCode::Esc,
     "TAB" => KeyCode::Tab,
@@ -161,7 +162,7 @@ pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
     "CMD" => KeyCode::ExMode,
     "PGUP" | "PAGEUP" => KeyCode::PageUp,
     "PGDN" | "PAGEDOWN" => KeyCode::PageDown,
-    k if k.len() == 1 => KeyCode::Char(k.chars().next().unwrap()),
+    k if k.len() == 1 => KeyCode::Char(raw_key.chars().next().unwrap()),
     _ => return None,
   };
 
@@ -236,7 +237,7 @@ use crate::testutil::TestGuard;
   #[test]
   fn key_alias_ctrl_modifier() {
     let key = parse_key_alias("C-a").unwrap();
-    assert_eq!(key, KeyEvent(KeyCode::Char('A'), ModKeys::CTRL));
+    assert_eq!(key, KeyEvent(KeyCode::Char('a'), ModKeys::CTRL));
   }
 
   #[test]
@@ -245,7 +246,7 @@ use crate::testutil::TestGuard;
     assert_eq!(
       key,
       KeyEvent(
-        KeyCode::Char('B'),
+        KeyCode::Char('b'),
         ModKeys::CTRL | ModKeys::SHIFT | ModKeys::ALT
       )
     );
@@ -254,7 +255,7 @@ use crate::testutil::TestGuard;
   #[test]
   fn key_alias_alt_modifier() {
     let key = parse_key_alias("M-x").unwrap();
-    assert_eq!(key, KeyEvent(KeyCode::Char('X'), ModKeys::ALT));
+    assert_eq!(key, KeyEvent(KeyCode::Char('x'), ModKeys::ALT));
   }
 
   #[test]
@@ -288,7 +289,7 @@ use crate::testutil::TestGuard;
   #[test]
   fn keymap_ctrl_key() {
     let keys = expand_keymap("<C-a>");
-    assert_eq!(keys, vec![KeyEvent(KeyCode::Char('A'), ModKeys::CTRL)]);
+    assert_eq!(keys, vec![KeyEvent(KeyCode::Char('a'), ModKeys::CTRL)]);
   }
 
   #[test]

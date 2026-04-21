@@ -1156,7 +1156,7 @@ impl FuzzySelector {
 
   pub fn handle_key(&mut self, key: K) -> ShResult<SelectorResponse> {
     match key {
-      K(C::Char('D'), M::CTRL) | K(C::Esc, M::NONE) => {
+      K(C::Char('d'), M::CTRL) | K(C::Esc, M::NONE) => {
         self.active = false;
         self.filtered.clear();
         Ok(SelectorResponse::Dismiss)

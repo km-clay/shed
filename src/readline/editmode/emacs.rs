@@ -4,7 +4,7 @@ use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::{motion, verb};
 
 #[macro_export]
-/// Shorthand for Ctrl + char, e.g. ctrl!('A') expands to Ctrl + A key event.
+/// Shorthand for Ctrl + char, e.g. ctrl!('a') expands to Ctrl + A key event.
 macro_rules! ctrl {
   ($ch:literal) => {
     $crate::readline::keys::KeyEvent(
@@ -15,7 +15,7 @@ macro_rules! ctrl {
 }
 
 #[macro_export]
-/// Shorthand for ALT key combinations, e.g. `alt!('F')` for `ALT+F`
+/// Shorthand for ALT key combinations, e.g. `alt!('f')` for `ALT+F`
 macro_rules! alt {
   ($ch:literal) => {
     $crate::readline::keys::KeyEvent(
@@ -106,24 +106,24 @@ impl EditMode for Emacs {
         self.set_verb(verb!(Verb::CompleteBackward));
         self.take_cmd()
       }
-      E(K::Tab, M::NONE) | E(K::Char('I'), M::CTRL) => {
+      E(K::Tab, M::NONE) | E(K::Char('i'), M::CTRL) => {
         self.set_verb(verb!(Verb::Complete));
         self.take_cmd()
       }
 
       // Emacs keybinds
-      ctrl!('A') => {
+      ctrl!('a') => {
         self.set_motion(motion!(Motion::StartOfLine));
         self.take_cmd()
       }
 
-      ctrl!('E') => {
+      ctrl!('e') => {
         self.set_motion(motion!(Motion::EndOfLine));
         self.take_cmd()
       }
 
-      ctrl!('F') | ctrl!('B') => {
-        let motion = if matches!(key, ctrl!('F')) {
+      ctrl!('f') | ctrl!('b') => {
+        let motion = if matches!(key, ctrl!('f')) {
           Motion::ForwardCharForced
         } else {
           Motion::BackwardCharForced
@@ -132,8 +132,8 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      alt!('F') | alt!('B') => {
-        let motion = if matches!(key, alt!('F')) {
+      alt!('f') | alt!('b') => {
+        let motion = if matches!(key, alt!('f')) {
           Motion::WordMotion(To::End, Word::Normal, Direction::Forward)
         } else {
           Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)
@@ -147,7 +147,7 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      ctrl!('W') | E(K::Backspace, M::ALT) => {
+      ctrl!('w') | E(K::Backspace, M::ALT) => {
         self.set_verb(verb!(Verb::Kill));
         self.set_motion(motion!(Motion::WordMotion(
           To::Start,
@@ -157,7 +157,7 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      alt!('D') => {
+      alt!('d') => {
         self.set_verb(verb!(Verb::Kill));
         self.set_motion(motion!(Motion::WordMotion(
           To::End,
@@ -167,45 +167,45 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      ctrl!('D') => {
+      ctrl!('d') => {
         self.set_verb(verb!(Verb::DeleteOrEof));
         self.set_motion(motion!(Motion::ForwardCharForced));
         self.take_cmd()
       }
 
-      ctrl!('K') => {
+      ctrl!('k') => {
         self.set_verb(verb!(Verb::Kill));
         self.set_motion(motion!(Motion::EndOfLine));
         self.take_cmd()
       }
 
-      ctrl!('U') => {
+      ctrl!('u') => {
         self.set_verb(verb!(Verb::Kill));
         self.set_motion(motion!(Motion::StartOfLine));
         self.take_cmd()
       }
 
-      ctrl!('Y') => {
+      ctrl!('y') => {
         self.set_verb(verb!(Verb::KillPut));
         self.take_cmd()
       }
 
-      alt!('Y') => {
+      alt!('y') => {
         self.set_verb(verb!(Verb::KillCycle));
         self.take_cmd()
       }
 
-      ctrl!('T') => {
+      ctrl!('t') => {
         self.set_verb(verb!(Verb::TransposeChar));
         self.take_cmd()
       }
 
-      alt!('T') => {
+      alt!('t') => {
         self.set_verb(verb!(Verb::TransposeWord));
         self.take_cmd()
       }
 
-      alt!('U') => {
+      alt!('u') => {
         self.set_motion(motion!(Motion::WordMotion(
           To::End,
           Word::Normal,
@@ -215,7 +215,7 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      alt!('L') => {
+      alt!('l') => {
         self.set_motion(motion!(Motion::WordMotion(
           To::End,
           Word::Normal,
@@ -235,7 +235,7 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      alt!('C') => {
+      alt!('c') => {
         self.set_verb(verb!(Verb::Capitalize));
         self.set_motion(motion!(Motion::WordMotion(
           To::End,

@@ -8,7 +8,7 @@ use crate::readline::editcmd::{
 };
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::Grapheme;
-use crate::{motion, verb};
+use crate::{ctrl, motion, verb};
 
 #[derive(Default, Debug)]
 pub struct ViVisual {
@@ -638,7 +638,7 @@ impl EditMode for ViVisual {
           flags: Default::default(),
         });
       }
-      E(K::Char('A'), M::CTRL) => {
+      ctrl!('a') => {
         let count = self
           .parse_count(&mut self.pending_seq.chars().peekable())
           .unwrap_or(1) as u16;
@@ -651,7 +651,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      E(K::Char('X'), M::CTRL) => {
+      ctrl!('x') => {
         let count = self
           .parse_count(&mut self.pending_seq.chars().peekable())
           .unwrap_or(1) as u16;
@@ -664,7 +664,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      E(K::Char('G'), M::CTRL) => {
+      ctrl!('g') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -674,7 +674,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      E(K::Char('D'), M::CTRL) => {
+      ctrl!('d') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -684,7 +684,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      E(K::Char('U'), M::CTRL) => {
+      ctrl!('u') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -694,7 +694,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      E(K::Char('R'), M::CTRL) => {
+      ctrl!('r') => {
         let mut chars = self.pending_seq.chars().peekable();
         let count = self.parse_count(&mut chars).unwrap_or(1);
         Some(EditCmd {

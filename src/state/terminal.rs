@@ -148,7 +148,7 @@ impl Perform for EventParser {
       0x7f => TermEvent::Key(KeyEvent(KeyCode::Backspace, ModKeys::empty())),
       0x01..=0x1a => {
         // Ctrl+A through Ctrl+Z (excluding special cases above)
-        let c = (b'A' + byte - 1) as char;
+        let c = (b'a' + byte - 1) as char;
         TermEvent::Key(KeyEvent(KeyCode::Char(c), ModKeys::CTRL))
       }
       _ => return,
@@ -278,12 +278,7 @@ impl Perform for EventParser {
           27 => KeyCode::Esc,
           127 => KeyCode::Backspace,
           _ => {
-            if let Some(mut ch) = char::from_u32(codepoint as u32) {
-              if mods.contains(ModKeys::CTRL) && ch.is_ascii_lowercase() {
-                // result of using uppercase chars everywhere for Ctrl+char matches
-                // TODO: do something about that footgun that isn't this nonsense
-                ch = ch.to_ascii_uppercase();
-              }
+            if let Some(ch) = char::from_u32(codepoint as u32) {
               KeyCode::Char(ch)
             } else {
               return;

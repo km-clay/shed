@@ -975,7 +975,7 @@ impl ShedLine {
       && self.should_complete()
     {
       return self.handle_tab(key);
-    } else if let KeyEvent(KeyCode::Char('R'), ModKeys::CTRL) = key
+    } else if let KeyEvent(KeyCode::Char('r'), ModKeys::CTRL) = key
       && matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex)
     {
       self.start_hist_search();

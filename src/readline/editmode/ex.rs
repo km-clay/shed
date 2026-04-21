@@ -99,7 +99,7 @@ impl EditMode for ViEx {
 
         res
       }
-      E(C::Char('C'), M::CTRL) => {
+      E(C::Char('c'), M::CTRL) => {
         self.pending_cmd.clear();
         Ok(None)
       }

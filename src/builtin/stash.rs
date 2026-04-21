@@ -75,6 +75,21 @@ impl StashOpts {
           cursor_pos: cursor,
         });
       }
+      Opt::LongWithList(opt, mut args) => {
+        let "save" = opt.as_str() else {
+          return Err(sherr!(ParseErr, "unexpected option {opt} in stash"))
+        };
+
+        // length of 'args' is enforced by the opt spec
+        let cursor = args.pop().unwrap();
+        let buffer = args.pop().unwrap();
+        let name = args.pop().unwrap();
+        new.to_save.push(StashedCmd {
+          name: Some(name),
+          buffer,
+          cursor_pos: cursor,
+        });
+      }
       Opt::ShortWithArg('d', arg) => {
         new.to_delete.push(arg);
       }
@@ -190,6 +205,9 @@ impl Stash {
   pub fn stash_cmd(&self, cmd: StashedCmd) -> ShResult<()> {
     if cmd.name.as_ref().is_some_and(|n| n.parse::<usize>().is_ok()) {
       return Err(sherr!(ParseErr, "stash name cannot be a number"));
+    }
+    if let Some(ref name) = cmd.name {
+      self.conn.execute("DELETE FROM stash WHERE name = ?1", [name])?;
     }
     self.conn.execute(
       "INSERT INTO stash (name, buffer, cursor, timestamp) VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
