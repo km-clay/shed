@@ -303,6 +303,7 @@ pub fn stash(node: Node) -> ShResult<()> {
   };
 
   let (_, opts) = get_opts_from_tokens(argv, &stash_opts()).promote_err(span.clone())?;
+  let is_empty = opts.is_empty();
   let stash_opts = StashOpts::from_opts(opts).promote_err(span.clone())?;
   let stash = Stash::new().promote_err(span.clone())?;
 
@@ -314,7 +315,7 @@ pub fn stash(node: Node) -> ShResult<()> {
     stash.delete_cmd(&cmd).promote_err(span.clone())?;
   }
 
-  if stash_opts.list {
+  if stash_opts.list || is_empty {
     let output = stash.list(stash_opts.only_named, stash_opts.only_stack);
     write(borrow_fd(STDOUT_FILENO), output.as_bytes())?;
     write(borrow_fd(STDOUT_FILENO), b"\n")?;
