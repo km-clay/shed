@@ -496,7 +496,6 @@ impl ShedLine {
     } else {
       Box::new(Emacs::new()) as Box<dyn EditMode>
     };
-
     self.swap_mode(&mut mode);
     self.needs_redraw = true;
     if full_redraw {

@@ -455,7 +455,7 @@ pub fn parse_stash(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<S
 
   if arg.is_empty() {
     return Ok(Some(Verb::Stash(StashArgs::Push(None))))
-  } else if !arg_names.contains(&arg.as_str()) {
+  } else if !arg_names.iter().any(|name| name.starts_with(arg.as_str())) {
     return Ok(Some(Verb::Stash(StashArgs::Push(Some(arg)))));
   }
 

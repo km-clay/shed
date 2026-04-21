@@ -604,18 +604,13 @@ fn handle_readline_event(
         e.print_error();
       }
 
-      readline.history.refresh_hint_cache();
+      readline.history.refresh_hist_entries();
 
-      let rl_cleanup_start = Instant::now();
       with_term(|t| t.fix_cursor_column())?;
       write_term!("\n\r")?;
 
       // Reset for next command with fresh prompt
       readline.reset(true)?;
-      log::info!(
-        "Readline reset and prompt redraw in {:.2?}",
-        rl_cleanup_start.elapsed()
-      );
 
       let real_end = exec_start.elapsed();
       log::info!("Total round trip time: {:.2?}", real_end);

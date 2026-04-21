@@ -3,7 +3,7 @@ use std::{collections::VecDeque, fmt::{Debug, Display}, io::Write, os::fd::RawFd
 use nix::{errno::Errno, fcntl::{FcntlArg, OFlag, fcntl, open}, poll::{PollFd, PollFlags, PollTimeout, poll}, sys::{signal::{SigSet, SigmaskHow, Signal, kill, killpg, pthread_sigmask}, stat::Mode, termios::{self, Termios, tcgetattr, tcsetattr}}, unistd::{Pid, close, getpgrp, isatty, read, tcsetpgrp, write}};
 use vte::Perform;
 
-use crate::{libsh::error::{ShErr, ShErrKind, ShResult}, procio::borrow_fd, readline::{keys::{KeyCode, KeyEvent, ModKeys}, linebuf::Pos, term::get_win_size}, sherr, state::{read_shopts, with_term}};
+use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}}, procio::borrow_fd, readline::{keys::{KeyCode, KeyEvent, ModKeys}, linebuf::Pos, term::get_win_size}, sherr, state::{read_shopts, with_term}};
 
 /// Write to the internal Terminal buffer
 ///
@@ -820,17 +820,12 @@ impl Terminal {
   }
 
   pub fn attach(&mut self, pgid: Pid) -> ShResult<()> {
-    log::debug!("Attaching to pgid {pgid}");
-    log::debug!("self.tty = {:?}", self.tty);
     let Some(tty) = self.tty else { return Ok(()); };
     // If we aren't attached to a terminal, the pgid already controls it, or the
     // process group does not exist Then return ok
     let term_controller = self.controller().unwrap_or(Pid::this());
     let isatty = self.isatty();
     if !isatty || pgid == term_controller || killpg(pgid, None).is_err() {
-      log::debug!(
-        "Not attaching to pgid {pgid}: isatty={isatty}, term_controller={term_controller}"
-      );
       return Ok(());
     }
 
@@ -848,7 +843,6 @@ impl Terminal {
     pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&new_mask), Some(&mut mask_bkup))?;
 
     let result = tcsetpgrp(borrow_fd(tty), pgid);
-    log::debug!("tcsetpgrp result: {result:?}");
 
     pthread_sigmask(
       SigmaskHow::SIG_SETMASK,
@@ -895,9 +889,12 @@ impl Terminal {
 
   pub fn prepare_for_pager(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
+    self.toggle_raw_mode(true)?;
+    self.toggle_bracketed_paste(false)?;
     self.toggle_alt_buffer(true)?;
     self.set_cursor_style(CursorStyle::Default)?;
     self.toggle_cursor_visibility(false)?;
+    self.flush()?;
     Ok(guard)
   }
 
@@ -906,8 +903,8 @@ impl Terminal {
     self.toggle_bracketed_paste(false)?;
     self.toggle_alt_buffer(false)?;
     self.set_cursor_style(CursorStyle::Default)?;
-    self.flush()?; // flush escape sequences before switching to cooked mode
     self.toggle_raw_mode(false)?;
+    self.flush()?; // flush escape sequences before switching to cooked mode
     Ok(guard)
   }
 
@@ -969,7 +966,7 @@ impl Terminal {
 
   pub fn set_cursor_style(&mut self, style: CursorStyle) -> ShResult<()> {
     let style_raw = style.to_string();
-    self.write_direct(&style_raw)?;
+    self.write_all(style_raw.as_bytes())?;
     self.cursor_style = style;
     Ok(())
   }
@@ -1056,7 +1053,10 @@ impl std::io::Write for Terminal {
       match write(borrow_fd(tty), buf) {
         Ok(n) => buf = &buf[n..],
         Err(Errno::EINTR) => continue,
-        Err(_) => return Err(std::io::Error::last_os_error())
+        Err(_) => {
+          self.input_buf.clear();
+          return Err(std::io::Error::last_os_error());
+        }
       }
     }
     self.input_buf.clear();

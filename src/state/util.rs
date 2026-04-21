@@ -567,7 +567,7 @@ pub fn init_db_conn() {
   })
 }
 
-fn open_db_conn() -> ShResult<Connection> {
+pub fn open_db_conn() -> ShResult<Connection> {
   let db_path = if let Ok(var) = env::var("SHED_HISTDB") {
     var
   } else {

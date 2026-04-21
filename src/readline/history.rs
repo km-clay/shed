@@ -1,8 +1,5 @@
 use std::{
-  cmp::Ordering,
-  env,
-  sync::Arc,
-  time::{Duration, SystemTime, UNIX_EPOCH},
+  cmp::Ordering, collections::HashMap, env, sync::{Arc, LazyLock, RwLock, atomic::AtomicU64}, time::{Duration, SystemTime, UNIX_EPOCH}
 };
 
 use rusqlite::Connection;
@@ -16,7 +13,7 @@ use crate::{
     linebuf::{Hint, LineBuf, to_lines},
   },
   sherr,
-  state::read_shopts,
+  state::{self, read_shopts},
 };
 
 #[derive(Debug, Clone)]
@@ -28,6 +25,13 @@ pub struct HistEntry {
   pub status: i32,
   pub token: Uuid,
 }
+
+type HistTables = HashMap<String, Vec<HistEntry>>;
+
+static HIST_GENERATION: AtomicU64 = AtomicU64::new(0);
+static HIST_ENTRIES: LazyLock<Arc<RwLock<HistTables>>> = LazyLock::new(|| {
+  Arc::new(RwLock::new(HashMap::new()))
+});
 
 impl Default for HistEntry {
   fn default() -> Self {
@@ -54,6 +58,40 @@ impl HistEntry {
   }
 }
 
+fn query_masked(prefix: Option<&str>, conn: &Connection, table: &str) -> Vec<HistEntry> {
+  let sql = match prefix {
+    Some(_) => format!(
+      r##"
+      SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
+      WHERE command LIKE ?1 || '%'
+      GROUP BY command
+      ORDER BY ts ASC
+      "##
+    ),
+    None => format!(
+      r##"
+      SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
+      GROUP BY command
+      ORDER BY ts ASC
+      "##
+    ),
+  };
+  let mut stmt = match conn.prepare(&sql) {
+    Ok(s) => s,
+    Err(_) => return vec![],
+  };
+  let rows = match prefix {
+    Some(p) => stmt.query_map(rusqlite::params![p], History::row_to_entry),
+    None => stmt.query_map([], History::row_to_entry),
+  };
+
+  match rows {
+    Ok(iter) => iter.filter_map(Result::ok).collect(),
+    Err(_) => vec![],
+  }
+}
+
+
 #[derive(Debug, Clone)]
 pub struct History {
   pub pending: Option<LineBuf>,
@@ -64,7 +102,6 @@ pub struct History {
   conn: Arc<Connection>,
   table: String,
   search_mask: Vec<HistEntry>,
-  hint_cache: Vec<HistEntry>,
   mask_stale: bool,
   no_matches: bool,
   max_size: Option<u32>,
@@ -72,6 +109,49 @@ pub struct History {
 
 impl History {
   const USER_VERSION: i32 = 2;
+  pub fn new(conn: Arc<Connection>, table: &str) -> ShResult<Self> {
+    let max_hist = read_shopts(|o| o.core.max_hist);
+
+    Self::init_db(&conn, table)?;
+
+    let max_size = (max_hist >= 0).then_some(max_hist as u32);
+    let mut hist = Self {
+      conn,
+      table: table.to_string(),
+      pending: None,
+      search_mask: vec![],
+      mask_stale: true,
+      fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
+      no_matches: false,
+      cursor: 0,
+      virt_cursor: 0,
+      max_size,
+    };
+    let entries = query_masked(None, &hist.conn, &hist.table);
+    if let Ok(mut cache) = HIST_ENTRIES.write() {
+      cache.insert(hist.table.clone(), entries);
+    }
+    hist.reset();
+    Ok(hist)
+  }
+
+  pub fn empty(table: &str) -> Self {
+    let conn = Connection::open_in_memory().expect("Failed to open in-memory database");
+    Self::init_db(&conn, table).expect("Failed to initialize in-memory database");
+    Self {
+      conn: conn.into(),
+      table: table.to_string(),
+      pending: None,
+      search_mask: vec![],
+      mask_stale: true,
+      fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
+      no_matches: false,
+      cursor: 0,
+      virt_cursor: 0,
+      max_size: None,
+    }
+  }
+
   fn init_db(conn: &Connection, table: &str) -> rusqlite::Result<()> {
     conn.execute_batch(&format!(
       r#"
@@ -136,48 +216,6 @@ impl History {
 
     Ok(())
   }
-  pub fn new(conn: Arc<Connection>, table: &str) -> ShResult<Self> {
-    let max_hist = read_shopts(|o| o.core.max_hist);
-
-    Self::init_db(&conn, table)?;
-
-    let max_size = (max_hist >= 0).then_some(max_hist as u32);
-    let mut hist = Self {
-      conn,
-      table: table.to_string(),
-      pending: None,
-      search_mask: vec![],
-      hint_cache: vec![],
-      mask_stale: true,
-      fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
-      no_matches: false,
-      cursor: 0,
-      virt_cursor: 0,
-      max_size,
-    };
-    hist.refresh_hint_cache();
-    hist.reset();
-    Ok(hist)
-  }
-
-  pub fn empty(table: &str) -> Self {
-    let conn = Connection::open_in_memory().expect("Failed to open in-memory database");
-    Self::init_db(&conn, table).expect("Failed to initialize in-memory database");
-    Self {
-      conn: conn.into(),
-      table: table.to_string(),
-      pending: None,
-      search_mask: vec![],
-      hint_cache: vec![],
-      mask_stale: true,
-      fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
-      no_matches: false,
-      cursor: 0,
-      virt_cursor: 0,
-      max_size: None,
-    }
-  }
-
   pub fn push(&self, command: String) -> ShResult<Option<Uuid>> {
     if command.is_empty() {
       return Ok(None);
@@ -217,12 +255,17 @@ impl History {
   }
 
   pub fn set_status(&self, token: Uuid, runtime: Option<Duration>, status: i32) -> ShResult<()> {
-    let table = &self.table;
-    let micros = runtime.map(|r| r.as_micros() as i64).unwrap_or(0);
-    self.conn.execute(
-      &format!("UPDATE {table} SET runtime = ?1, status = ?2 WHERE token = ?3"),
-      rusqlite::params![micros, status, token.to_string()],
-    )?;
+    let table = self.table.clone();
+
+    std::thread::spawn(move || {
+      let Some(conn) = state::open_db_conn().ok() else { return };
+      conn.execute_batch("PRAGMA journal_mode=WAL").ok();
+      let micros = runtime.map(|r| r.as_micros() as i64).unwrap_or(0);
+      conn.execute(
+        &format!("UPDATE {table} SET runtime = ?1, status = ?2 WHERE token = ?3"),
+        rusqlite::params![micros, status, token.to_string()],
+      ).ok();
+    });
 
     Ok(())
   }
@@ -450,46 +493,28 @@ impl History {
     Ok(())
   }
 
-  pub fn query_masked(&self, prefix: Option<&str>) -> Vec<HistEntry> {
-    let table = &self.table;
-    let sql = match prefix {
-      Some(_) => format!(
-        r##"
-				SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
-				WHERE command LIKE ?1 || '%'
-				GROUP BY command
-				ORDER BY ts ASC
-			"##
-      ),
-      None => format!(
-        r##"
-				SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
-				GROUP BY command
-				ORDER BY ts ASC
-			"##
-      ),
-    };
-    let mut stmt = match self.conn.prepare(&sql) {
-      Ok(s) => s,
-      Err(_) => return vec![],
-    };
-    let rows = match prefix {
-      Some(p) => stmt.query_map(rusqlite::params![p], Self::row_to_entry),
-      None => stmt.query_map([], Self::row_to_entry),
-    };
-
-    match rows {
-      Ok(iter) => iter.filter_map(Result::ok).collect(),
-      Err(_) => vec![],
-    }
-  }
-
   pub fn update_search_mask(&mut self, prefix: Option<&str>) {
-    self.search_mask = self.query_masked(prefix);
+    let Some(entries) = HIST_ENTRIES.read().ok() else {
+      self.search_mask = vec![];
+      return;
+    };
+    let Some(entry_table) = entries.get(&self.table) else {
+      self.search_mask = vec![];
+      return;
+    };
+    let Some(prefix) = prefix else {
+      self.search_mask = entry_table.clone();
+      return;
+    };
+
+    self.search_mask = entry_table.iter()
+      .filter(|e| e.command().starts_with(prefix))
+      .cloned()
+      .collect();
   }
 
   pub fn reset(&mut self) {
-    self.update_search_mask(None);
+    self.mask_stale = true;
     self.cursor = self.search_mask.len();
     self.virt_cursor = self.cursor;
   }
@@ -572,7 +597,7 @@ impl History {
     }
   }
 
-  fn row_to_entry(row: &rusqlite::Row) -> Result<HistEntry, rusqlite::Error> {
+  pub fn row_to_entry(row: &rusqlite::Row) -> Result<HistEntry, rusqlite::Error> {
     Ok(HistEntry {
       command: row.get(0)?,
       timestamp: UNIX_EPOCH + Duration::from_secs(row.get::<_, i64>(1)? as u64),
@@ -650,17 +675,36 @@ impl History {
     if prefix.is_empty() {
       return None;
     }
-    self
-      .hint_cache
-      .iter()
+    let entries = HIST_ENTRIES.read().ok()?;
+    let table = entries.get(&self.table)?;
+    table.iter()
       .rev()
       .find(|e| e.command().starts_with(&prefix) && e.command() != prefix)
       .map(|e| Hint::History(to_lines(e.command())))
   }
 
-  /// Reload the hint cache from the database. Call after command execution.
-  pub fn refresh_hint_cache(&mut self) {
-    self.hint_cache = self.query_masked(None);
+  pub fn refresh_hist_entries_sync(&mut self) {
+    let entries = query_masked(None, &self.conn, &self.table);
+    if let Ok(mut cache) = HIST_ENTRIES.write() {
+      cache.insert(self.table.clone(), entries);
+    }
+  }
+
+  pub fn refresh_hist_entries(&mut self) {
+    let generation = HIST_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let table = self.table.clone();
+
+    std::thread::spawn(move || {
+      let Some(conn) = state::open_db_conn().ok() else { return };
+      conn.execute_batch("PRAGMA journal_mode=WAL").ok();
+      let entries = query_masked(None, &conn, &table);
+      if HIST_GENERATION.load(std::sync::atomic::Ordering::SeqCst) == generation
+      && let Ok(mut cache) = HIST_ENTRIES.write() {
+        let entry_table = cache.entry(table.clone()).or_insert_with(Vec::new);
+        // only hold the lock for as long as it takes to swap in the new cache
+        *entry_table = entries;
+      }
+    });
   }
 
   pub fn is_virtual_scrolling(&self) -> bool {

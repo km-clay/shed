@@ -580,6 +580,7 @@ fn hist_expansion_test(commands: &[&str], input: &str, expected: &str) {
   for cmd in commands {
     line.history.push(cmd.to_string()).unwrap();
   }
+  line.history.refresh_hist_entries_sync();
   line.history.update_search_mask(None);
 
   assert_eq!(line.history.masked_entries().len(), commands.len());
