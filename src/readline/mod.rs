@@ -992,6 +992,11 @@ impl ShedLine {
       return Ok(None);
     };
 
+    if let Some(VerbCmd(_, Verb::Interrupt)) = cmd.verb() {
+      self.reset_active_widget(false)?;
+      return Ok(None);
+    }
+
     if let Some(VerbCmd(_, Verb::Normal(seq))) = cmd.verb() {
       let line_nums: Either<_, _> = match cmd.motion() {
         Some(MotionCmd(_, Motion::LineRange(s, e))) => {

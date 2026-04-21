@@ -1435,6 +1435,15 @@ impl LineBuf {
 
     loop {
       let line = &self.lines[row];
+      if col >= line.len() {
+        if row < self.lines.len() - 1 {
+          row += 1;
+          col = 0;
+          continue;
+        } else {
+          return None;
+        }
+      }
       if !line.is_empty() && f(&line[col]) {
         return Some(Pos { row, col });
       }
@@ -1449,7 +1458,7 @@ impl LineBuf {
     }
   }
   fn scan_backward<F: FnMut(&Grapheme) -> bool>(&self, f: F) -> Option<Pos> {
-    self.scan_backward_from(self.cursor.pos, f)
+    self.scan_backward_from(self.cursor.pos.col_add_signed(-1), f)
   }
   fn scan_backward_from<F: FnMut(&Grapheme) -> bool>(&self, mut pos: Pos, mut f: F) -> Option<Pos> {
     pos.clamp_row(&self.lines);
@@ -1943,7 +1952,8 @@ impl LineBuf {
       .or_else(|| self.scan_forward(|g| g.as_char() == Some(q_ch)))?;
 
     let mut scan_start_pos = start_pos;
-    scan_start_pos.col += 1;
+    let line_len = self.lines[scan_start_pos.row].len();
+    scan_start_pos.col = (scan_start_pos.col + 1).min(line_len.saturating_sub(1));
 
     let mut end_pos = self.scan_forward_from(scan_start_pos, |g| g.as_char() == Some(q_ch))?;
 
@@ -3724,7 +3734,9 @@ impl LineBuf {
             self.insert_lines_at(self.cursor.pos, lines);
             self.cursor.pos = self.cursor.pos + cursor_offset;
             self.fix_cursor();
-            self.equalize_rows(line_range.collect());
+            if read_shopts(|o| o.line.auto_indent) {
+              self.equalize_rows(line_range.collect());
+            }
           }
           StashArgs::Swap(arg) => todo!(),
           StashArgs::List(arg) => {
@@ -3988,6 +4000,7 @@ impl LineBuf {
         }
       }
       Verb::RepeatLast
+      | Verb::Interrupt
       | Verb::Quit
       | Verb::Normal(_)
       | Verb::HistoryDown

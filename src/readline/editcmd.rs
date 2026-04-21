@@ -366,6 +366,7 @@ pub enum Verb {
   Equalize,
   AcceptLineOrNewline,
   EndOfFile,
+  Interrupt,
   PrintPosition,
 
   // Ex-mode verbs

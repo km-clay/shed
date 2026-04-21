@@ -54,7 +54,7 @@ static TTY_FILENO: LazyLock<Option<RawFd>> = LazyLock::new(|| {
 pub enum TermEvent {
   Key(KeyEvent),
   CursorPos(usize,usize),
-
+  Capabilities(usize),
 }
 
 #[derive(Debug,Default,Clone)]
@@ -251,13 +251,28 @@ impl Perform for EventParser {
         };
         TermEvent::Key(KeyEvent(key, mods))
       }
-      ([], 'u') => {
-        let codepoint = params.first().copied().unwrap_or(0);
+      ([], 'u') => { // kitty keyboard protocol: CSI code;mod;text u
+        let codepoint = params.first()
+          .copied()
+          .unwrap_or(0);
         let mods = params
           .get(1)
           .map(ModKeys::from)
           .unwrap_or(ModKeys::empty());
-        let key = match codepoint {
+        let text = params.get(2)
+          .copied()
+          .unwrap_or(codepoint);
+
+        let (ch, mods) = if text != codepoint && mods.contains(ModKeys::SHIFT) {
+          // Kitty reported something like 'Shift+7' and text is '&'
+          // So we remove the SHIFT modifier and use the actual text
+
+          (text, mods & !ModKeys::SHIFT)
+        } else {
+          (codepoint, mods)
+        };
+
+        let key = match ch {
           9 => KeyCode::Tab,
           13 => KeyCode::Enter,
           27 => KeyCode::Esc,
@@ -276,6 +291,11 @@ impl Perform for EventParser {
           }
         };
         TermEvent::Key(KeyEvent(key, mods))
+      }
+      ([b'?'], 'u') => {
+        // capabilities response
+        let cap_num = params.first().copied().unwrap_or(0) as usize;
+        TermEvent::Capabilities(cap_num)
       }
       // SGR mouse: CSI < button;x;y M/m (ignore mouse events for now)
       ([b'<'], 'M') | ([b'<'], 'm') => {
@@ -542,8 +562,9 @@ pub struct Terminal {
 impl Terminal {
   pub const BRACKET_PASTE_ON: &str = "\x1b[?2004h";
   pub const BRACKET_PASTE_OFF: &str = "\x1b[?2004l";
-  pub const KITTY_PROTO_ON: &str = "\x1b[>1u";
+  pub const KITTY_PROTO_ON: &str = "\x1b[>17u";
   pub const KITTY_PROTO_OFF: &str = "\x1b[<u";
+  pub const CAP_QUERY: &str = "\x1b[?u";
   pub const ALT_BUFFER_ENTER: &str = "\x1b[?1049h";
   pub const ALT_BUFFER_EXIT: &str = "\x1b[?1049l";
   pub const CURSOR_HIDE: &str = "\x1b[?25l";
@@ -690,6 +711,27 @@ impl Terminal {
     let Some(tty) = self.tty else { return Ok(0) };
     let poll_fd = PollFd::new(borrow_fd(tty), PollFlags::POLLIN);
     Ok(poll(&mut [poll_fd], timeout)?)
+  }
+
+  pub fn check_term_capabilities(&mut self) -> ShResult<Option<TermEvent>> {
+    let Some(tty) = self.tty else { return Ok(None) };
+
+    self.write_direct(Self::CAP_QUERY)?;
+
+    if self.poll(PollTimeout::from(50u8))? == 0 {
+      // timeout - assume we didn't get a response
+      return Ok(None);
+    }
+
+    self.reader.read(tty)?;
+
+    while let Some(event) = self.reader.read_event()? {
+      if let TermEvent::Capabilities(_) = event {
+        return Ok(Some(event));
+      }
+    }
+
+    Ok(None)
   }
 
   pub fn get_cursor_pos(&mut self) -> ShResult<Option<(usize,usize)>> {
@@ -904,6 +946,7 @@ impl Terminal {
     self.toggle_alt_buffer(false)?;
     self.set_cursor_style(CursorStyle::Default)?;
     self.toggle_raw_mode(false)?;
+    self.toggle_kitty_proto(false)?;
     self.flush()?; // flush escape sequences before switching to cooked mode
     Ok(guard)
   }

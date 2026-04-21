@@ -47,7 +47,7 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, with_term, write_jobs, write_meta, write_shopts
+  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, TermEvent, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, terminal, with_term, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;
@@ -316,6 +316,12 @@ fn get_poll_timeout(readline: &mut ShedLine) -> (PollTimeout, Option<String>) {
 
 fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let _raw_mode = with_term(|t| t.raw_mode_guard())?;
+  let cap = with_term(|t| t.check_term_capabilities())?;
+
+  if let Some(TermEvent::Capabilities(_)) = cap {
+    with_term(|t| t.toggle_kitty_proto(true))?;
+  }
+
   sig_setup(args.login_shell);
   crate::state::INTERACTIVE.store(true, Ordering::SeqCst);
 
@@ -345,6 +351,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   }
 
   if let Ok(welcome) = env::var("SHELL_WELCOME") {
+    // support for systemd's run0 message
     eprintln!("{welcome}");
   }
 
