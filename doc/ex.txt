@@ -240,4 +240,56 @@ command history navigable with `Up` and `Down`.
 	open history search with `Ctrl+R`.
 
 ==============================================================================
+11. Stash                                       *ex-stash*
+
+  The stash lets you save and recall command snippets directly
+  from the line editor. Unnamed stashes act as a temporary stack;
+  named stashes are persistent snippets.
+
+  `:stash`                                      *ex-stash-push*
+
+      Push the current buffer and cursor position onto the unnamed
+      stack, then clear the buffer.
+
+  `:stash {name}`
+
+      Save the current buffer and cursor position as a named stash.
+      If {name} already exists, it is overwritten.
+
+  `:stash pop [N]`                              *ex-stash-pop*
+
+      Pop the most recent unnamed stash (or index {N}) and replace
+      the buffer with it. The cursor is restored to the saved
+      position.
+
+  `:stash apply {name}`                         *ex-stash-apply*
+
+      Apply a named stash to the buffer. The stash remains saved
+      for future use.
+
+  `:stash insert {name}`                        *ex-stash-insert*
+
+      Insert a named stash at the current cursor position. The
+      saved cursor offset is applied relative to the insertion
+      point.
+
+  `:stash drop [N | {name}]`                    *ex-stash-drop*
+
+      Remove a stash entry by index or name.
+
+  `:stash list [stack | named]`                 *ex-stash-list*
+
+      List stashed entries. Optionally filter to only stack or
+      only named entries.
+
+  Named stashes can be predefined in your `shedrc` using the
+  |builtin-stash| command:
+
+      `stash --save commit 'git commit -m ""' 16`
+
+  Then recalled instantly from the editor:
+
+      `:stash apply commit`
+
+==============================================================================
 See also: |keybinds| |autocmd| |prompt|

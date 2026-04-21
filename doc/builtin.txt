@@ -44,6 +44,7 @@ The following builtins are available:
   `continue`    skip to the next loop iteration             |builtin-continue|
   `seek`        seek a file descriptor to a byte offset     |builtin-seek|
   `set`         set shell options and positional parameters |builtin-set|
+  `stash`       save and recall command snippets            |builtin-stash|
   `shift`       shift positional parameters                 |builtin-shift|
   `shopt`       get or set shell options                    |builtin-shopt|
   `source`      execute a file in the current shell         |builtin-source|
@@ -1188,6 +1189,44 @@ SET                                              *builtin-set* *set*
       `set -`               reset all options to defaults
       `set -- a b c`        set $1=a $2=b $3=c
       `set -o`              print all options as set/unset commands
+
+==============================================================================
+STASH                                            *builtin-stash* *stash*
+
+  Save and recall command snippets. Stash operates in two modes:
+
+  *Unnamed (stack)* — temporary storage with push/pop semantics.
+  Push a command to save it, pop to restore and remove it.
+
+  *Named* — persistent snippets recalled by name. Saving with an
+  existing name overwrites the previous entry.
+
+  `stash`                                        *stash-list*
+
+      With no arguments, list all stashed entries (both stack and
+      named).
+
+  `stash --save {name} {buffer} [{cursor}]`     *stash-save*
+
+      Save {buffer} as a named stash. {cursor} is an optional
+      cursor position as a flat index or `row:col` format.
+
+          `stash --save commit 'git commit -m ""' 16`
+          `stash --save forloop 'for i in ; do\n\ndone' 9`
+
+      If {name} already exists, it is overwritten.
+
+  `stash --delete {name}`                        *stash-delete*
+
+      Remove a named stash or stack entry by name or index.
+
+  `stash --list [--named | --stack]`             *stash-list-filter*
+
+      List stashes, optionally filtering to only named or only
+      stack entries.
+
+  See |ex-stash| for the ex mode interface, which can save directly
+  from the current editor state.
 
 ==============================================================================
 SHIFT                                            *builtin-shift* *shift*

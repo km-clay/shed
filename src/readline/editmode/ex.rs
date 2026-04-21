@@ -477,8 +477,8 @@ pub fn parse_stash(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<S
     _ if "swap".starts_with(arg.as_str()) => Ok(Some(Verb::Stash(StashArgs::Swap(name)))),
     _ if "list".starts_with(arg.as_str()) => {
       let target = name.map(|n| match n.as_str() {
-        _ if "stack".starts_with(arg.as_str()) => Ok(Some(StashListArg::Stack)),
-        _ if "named".starts_with(arg.as_str()) => Ok(Some(StashListArg::Named)),
+        _ if "stack".starts_with(n.trim()) => Ok(Some(StashListArg::Stack)),
+        _ if "named".starts_with(n.trim()) => Ok(Some(StashListArg::Named)),
         _ => Err(Some(format!("Invalid stash list target: {}", n))),
       }).transpose()?.flatten();
 

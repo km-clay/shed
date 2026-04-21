@@ -3733,8 +3733,22 @@ impl LineBuf {
               Some(StashListArg::Named) => stash.list(/*named_only:*/true, /*stack_only:*/false),
               None => stash.list(/*named_only:*/false, /*stack_only:*/false),
             };
-            for line in output.lines() {
-              write_meta(|m| m.post_system_message(line.to_string()));
+            if output.trim().is_empty() {
+              match arg {
+                Some(StashListArg::Named) => {
+                  write_meta(|m| m.post_status_message("stash: No named stash entries".into()));
+                }
+                Some(StashListArg::Stack) => {
+                  write_meta(|m| m.post_status_message("stash: Stack is empty".into()));
+                }
+                None => {
+                  write_meta(|m| m.post_status_message("stash: No stash entries".into()));
+                }
+              }
+            } else {
+              for line in output.lines() {
+                write_meta(|m| m.post_system_message(line.to_string()));
+              }
             }
           }
         }
