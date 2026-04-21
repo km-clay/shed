@@ -19,7 +19,7 @@ use crate::{
   parse::{NdKind, ParsedSrc, Redir, RedirType, execute::exec_input, lex::LexFlags},
   procio::{IoFrame, IoMode, RedirGuard, borrow_fd},
   readline::register::{restore_registers, save_registers},
-  state::{MetaTab, SHED},
+  state::{self, MetaTab, with_term},
 };
 
 pub fn has_cmds(cmds: &[&str]) -> bool {
@@ -60,6 +60,7 @@ impl TestGuard {
     attrs.output_flags &= !OutputFlags::ONLCR;
     tcsetattr(&pty_slave, SetArg::TCSANOW, &attrs).unwrap();
     let master_raw = pty_master.as_raw_fd();
+    with_term(|t| t.set_fd_for_testing(Some(pty_slave.as_raw_fd())));
 
     // we need this arc mutex and read handle because large test outputs
     // will cause the test to hang if we try to do everything on one thread.
@@ -105,7 +106,7 @@ impl TestGuard {
 
     let old_cwd = env::current_dir().unwrap();
     let saved_env = env::vars().collect();
-    SHED.with(|s| s.save());
+    state::util::save_state();
     save_registers();
     Self {
       _redir_guard,
@@ -173,7 +174,7 @@ impl Drop for TestGuard {
     for cleanup in self.cleanups.drain(..).rev() {
       cleanup();
     }
-    SHED.with(|s| s.restore());
+    state::util::restore_state();
     restore_registers();
   }
 }

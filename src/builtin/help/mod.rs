@@ -14,12 +14,12 @@ use crate::{
     },
     join_raw_arg_iter,
   },
-  libsh::{error::ShResult, guards::TuiGuard, sys::TTY_FILENO},
+  libsh::error::ShResult,
   parse::{NdRule, Node, execute::prepare_argv},
   procio::borrow_fd,
   readline::complete::ScoredCandidate,
   sherr,
-  state::write_meta,
+  state::{with_term, write_meta},
 };
 
 use markup::TAG_SEQ;
@@ -145,9 +145,13 @@ pub fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResu
   let mut pager = 0usize; // index
 
   // now we use the same input pattern as in main.rs
-  let tty_fd = PollFd::new(borrow_fd(*TTY_FILENO), PollFlags::POLLIN);
-  let _tui_guard = TuiGuard::new(); // enters the alt buffer, hides the cursor
+  let Some(tty) = with_term(|t| unsafe { t.tty() }) else {
+    return Ok(()); // no tty, just return
+  };
+  let tty_fd = PollFd::new(borrow_fd(tty), PollFlags::POLLIN);
+
   // restores terminal state on drop
+  let _tui_guard = with_term(|t| t.prepare_for_pager());
 
   loop {
     let res = {

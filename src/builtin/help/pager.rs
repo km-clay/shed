@@ -1,4 +1,4 @@
-use std::os::fd::RawFd;
+use std::io::Write;
 
 use nix::{
   libc::STDOUT_FILENO,
@@ -11,14 +11,13 @@ use crate::{
     StyledHelp,
     markup::{MarkedSpan, REF_SEQ, RESET_SEQ, SEARCH_RES_SEQ, TAG_SEQ},
   },
-  libsh::{error::ShResult, sys::TTY_FILENO},
+  libsh::error::ShResult,
   procio::borrow_fd,
   readline::{
     SimpleEditor,
     editcmd::Direction,
     keys::KeyEvent,
-    term::{KeyReader, LineWriter, PollReader, TermWriter},
-  },
+  }, state::with_term, write_term,
 };
 
 pub enum PagerEvent {
@@ -57,10 +56,6 @@ impl SearchQuery {
 }
 
 pub struct HelpPager {
-  reader: PollReader,
-  writer: TermWriter,
-  tty: RawFd,
-
   search: SearchQuery,
   ref_keys: Vec<(usize, char)>,
   cross_refs: Vec<MarkedSpan>, // spans
@@ -85,9 +80,6 @@ impl HelpPager {
     let cross_refs = content.find_markers(REF_SEQ);
 
     Some(Self {
-      reader: PollReader::new(),
-      writer: TermWriter::new(*TTY_FILENO),
-      tty: *TTY_FILENO,
       jump_dist: 15,
       ref_keys: vec![],
       search: SearchQuery::default(),
@@ -103,7 +95,8 @@ impl HelpPager {
 
   pub fn cross_refs_in_viewport(&self) -> Vec<usize> {
     let top = self.scroll_offset;
-    let bottom = top + self.writer.t_rows as usize;
+    let t_rows = with_term(|t| t.t_rows());
+    let bottom = top + t_rows as usize;
 
     let first = self
       .cross_refs
@@ -124,10 +117,8 @@ impl HelpPager {
   pub fn display(&mut self) -> ShResult<()> {
     // need to take this out of the struct for a sec
     // so that we can buffer the lines without allocating
-    let mut writer = std::mem::take(&mut self.writer);
-
-    writer.buffer("\x1b[H")?;
-    let height = writer.t_rows;
+    write_term!("\x1b[H")?;
+    let height = with_term(|t| t.t_rows());
     let mut content = self.content().to_string();
 
     for (s, e) in self.search.results.iter().rev() {
@@ -162,22 +153,20 @@ impl HelpPager {
           );
         }
 
-        writer.buffer(&line).ok();
-        writer.buffer("\x1b[K\n").ok(); // clear rest of line, insert linefeed
+        write_term!("{line}\x1b[K\n").ok();
       } else {
-        writer.buffer(line).ok();
-        writer.buffer("\x1b[K\n").ok();
+        write_term!("{line}\x1b[K\n").ok();
       }
     }
 
     for _ in content_lines.len()..height as usize {
-      writer.buffer("\x1b[1;34m~\x1b[0m\x1b[K\n").ok(); // draw tildes on empty lines
+      write_term!("\x1b[1;34m~\x1b[0m\x1b[K\n").ok(); // draw tildes on empty lines
     }
 
-    writer.buffer("\r").ok();
+    write_term!("\r").ok();
 
     if let Some(name) = &self.filename {
-      writer.buffer(&format!("\x1b[1;7;4m {name} \x1b[0m ",)).ok();
+      write_term!("\x1b[1;7;4m {name} \x1b[0m ",).ok();
     }
 
     if self.search.active {
@@ -186,22 +175,19 @@ impl HelpPager {
         Direction::Forward => '/',
         Direction::Backward => '?',
       };
-      writer
-        .buffer(&format!("\x1b[1;7;4m {prefix}{query} \x1b[0m",))
-        .ok();
+      write_term!("\x1b[1;7;4m {prefix}{query} \x1b[0m",).ok();
     }
 
-    writer.flush()?;
-
-    self.writer = writer;
+    with_term(|t| t.flush())?;
     Ok(())
   }
 
   pub fn handle_input(&mut self) -> ShResult<PagerEvent> {
-    self.reader.read(self.tty)?; // process stdin
+    with_term(|t| t.read())?;
+    let keys = with_term(|t| t.drain_keys())?;
 
     let mut res = PagerEvent::Continue;
-    while let Some(key) = self.reader.readkey()? {
+    for key in keys {
       res = self.handle_key(key)?;
     }
 
@@ -324,11 +310,12 @@ impl HelpPager {
   }
 
   pub fn max_scroll(&self) -> usize {
+    let t_rows = with_term(|t| t.t_rows());
     self
       .content()
       .lines()
       .count()
-      .saturating_sub(self.writer.t_rows as usize)
+      .saturating_sub(t_rows)
   }
 
   pub fn search(&mut self, jump: bool) {
@@ -430,7 +417,7 @@ impl HelpPager {
         self.scroll_offset = 0;
       }
       PagerCmd::BottomOfPage => {
-        let rows = self.writer.t_rows;
+        let rows = with_term(|t| t.t_rows());
         let n_lines = self.content().lines().count();
         self.scroll_offset = n_lines.saturating_sub(rows as usize);
       }

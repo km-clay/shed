@@ -96,10 +96,8 @@ impl JobTab {
     let last_pid = job.children().last().map(|c| c.pid());
     self.order.push(tab_pos);
     if !silent {
-      write(
-        borrow_fd(1),
-        job.display(&self.order, JobCmdFlags::INIT).as_bytes(),
-      )?;
+      let msg = job.display(&self.order, JobCmdFlags::INIT);
+      write_meta(|m| m.post_system_message(msg));
     }
     if tab_pos == self.jobs.len() {
       self.jobs.push(Some(job))

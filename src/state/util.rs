@@ -21,45 +21,10 @@ use crate::{
   shopt::ShOpts,
 };
 
-/// Query the SQLite database.
-///
-/// Takes a function that returns ShResult<T>, and returns ShResult<Option<T>>.
-/// The option is necessary because `Shed.db_conn` can be None. This happens
-/// in non-interactive cases, or cases where the database cannot be opened.
-///
-/// The returns look basically like this:
-/// * Ok(None) means "there's no database connection"
-/// * Err(e) is your function's ShErr
-/// * Ok(Some(T)) means the connection exists and your function succeeded.
-pub fn query_db<T, F: FnOnce(Arc<Connection>) -> ShResult<T>>(f: F) -> ShResult<Option<T>> {
-  SHED.with(|shed| {
-    let Some(Some(conn)) = shed.db_conn.get() else {
-      return Ok(None);
-    };
-
-    f(Arc::clone(conn)).map(Some)
-  })
+thread_local! {
+  static SHED: Shed = Shed::new();
 }
 
-/// Read from the job table
-pub fn read_jobs<T, F: FnOnce(&JobTab) -> T>(f: F) -> T {
-  SHED.with(|shed| f(&shed.jobs.borrow()))
-}
-
-/// Write to the job table
-pub fn write_jobs<T, F: FnOnce(&mut JobTab) -> T>(f: F) -> T {
-  SHED.with(|shed| f(&mut shed.jobs.borrow_mut()))
-}
-
-/// Read from the var scope stack
-pub fn read_vars<T, F: FnOnce(&ScopeStack) -> T>(f: F) -> T {
-  SHED.with(|shed| f(&shed.var_scopes.borrow()))
-}
-
-/// Write to the variable table
-pub fn write_vars<T, F: FnOnce(&mut ScopeStack) -> T>(f: F) -> T {
-  SHED.with(|shed| f(&mut shed.var_scopes.borrow_mut()))
-}
 
 /// Parse `arr[idx]` into (name, raw_index_expr). Pure parsing, no expansion.
 pub fn parse_arr_bracket(var_name: &str) -> Option<(String, String)> {
@@ -121,6 +86,44 @@ pub fn expand_arr_index(idx_raw: &str) -> ShResult<ArrIndex> {
     .map_err(|_| sherr!(ParseErr, "Invalid array index: {}", expanded,))
 }
 
+/*
+ * the functions below are some of the most important in the entire codebase
+ * it's very important to understand these if you want to get anything done around here.
+ *
+ * Each one accesses a different part of the shared state (the "Shed" struct),
+ * and they take a closure that operates on that part of the state.
+ *
+ * The main footgun associated with using these is re-entrancy.
+ * For instance, If you call write_vars() in a place that can be accessed
+ * by write_vars(), (e.g. in the Var table), the shell will crash with a borrow error.
+ * Let's not do that!
+ *
+ * With these, we can access shell state anywhere without threading a state object through every function.
+ * However, we must be mindful of what the callstack looks like when we call them, to avoid re-entrancy issues.
+ */
+
+
+/// Read from the job table
+pub fn read_jobs<T, F: FnOnce(&JobTab) -> T>(f: F) -> T {
+  SHED.with(|shed| f(&shed.jobs.borrow()))
+}
+
+/// Write to the job table
+pub fn write_jobs<T, F: FnOnce(&mut JobTab) -> T>(f: F) -> T {
+  SHED.with(|shed| f(&mut shed.jobs.borrow_mut()))
+}
+
+/// Read from the var scope stack
+pub fn read_vars<T, F: FnOnce(&ScopeStack) -> T>(f: F) -> T {
+  SHED.with(|shed| f(&shed.var_scopes.borrow()))
+}
+
+/// Write to the variable table
+pub fn write_vars<T, F: FnOnce(&mut ScopeStack) -> T>(f: F) -> T {
+  SHED.with(|shed| f(&mut shed.var_scopes.borrow_mut()))
+}
+
+
 pub fn read_meta<T, F: FnOnce(&MetaTab) -> T>(f: F) -> T {
   SHED.with(|shed| f(&shed.meta.borrow()))
 }
@@ -146,6 +149,40 @@ pub fn read_shopts<T, F: FnOnce(&ShOpts) -> T>(f: F) -> T {
 
 pub fn write_shopts<T, F: FnOnce(&mut ShOpts) -> T>(f: F) -> T {
   SHED.with(|shed| f(&mut shed.shopts.borrow_mut()))
+}
+
+pub fn with_term<T, F: FnOnce(&mut Terminal) -> T>(f: F) -> T {
+  SHED.with(|shed| f(&mut shed.terminal.borrow_mut()))
+}
+
+#[cfg(test)]
+pub fn save_state() {
+  SHED.with(|shed| shed.save())
+}
+
+#[cfg(test)]
+pub fn restore_state() {
+  SHED.with(|shed| shed.restore())
+}
+
+/// Query the SQLite database.
+///
+/// Takes a function that returns ShResult<T>, and returns ShResult<Option<T>>.
+/// The option is necessary because `Shed.db_conn` can be None. This happens
+/// in non-interactive cases, or cases where the database cannot be opened.
+///
+/// The returns look basically like this:
+/// * Ok(None) means "there's no database connection"
+/// * Err(e) is your function's ShErr
+/// * Ok(Some(T)) means the connection exists and your function succeeded.
+pub fn query_db<T, F: FnOnce(Arc<Connection>) -> ShResult<T>>(f: F) -> ShResult<Option<T>> {
+  SHED.with(|shed| {
+    let Some(Some(conn)) = shed.db_conn.get() else {
+      return Ok(None);
+    };
+
+    f(Arc::clone(conn)).map(Some)
+  })
 }
 
 pub fn descend_scope(argv: Option<Vec<String>>) {
@@ -510,20 +547,18 @@ pub fn get_db_conn() -> Option<Arc<Connection>> {
 }
 
 /// Initialize the shared database connection on the `Shed` struct.
-///
-/// Call with `true` for interactive sessions (opens the DB),
-/// or `false` for non-interactive contexts (sets to `None`).
-pub fn init_db_conn(interactive: bool) -> ShResult<()> {
+pub fn init_db_conn() {
   SHED.with(|shed| {
-    if interactive {
-      let conn = open_db_conn()?;
-      conn.execute_batch("PRAGMA journal_mode=WAL")?;
-      conn.execute_batch("PRAGMA case_sensitive_like = 1")?;
-      let _ = shed.db_conn.set(Some(conn.into()));
-    } else {
-      let _ = shed.db_conn.set(None);
+    match open_db_conn().ok() {
+      Some(conn) => {
+        let Ok(_) = conn.execute_batch("PRAGMA journal_mode=WAL") else { return };
+        let Ok(_) = conn.execute_batch("PRAGMA case_sensitive_like = 1") else { return };
+        let _ = shed.db_conn.set(Some(conn.into()));
+      }
+      None => {
+        let _ = shed.db_conn.set(None);
+      }
     }
-    Ok(())
   })
 }
 

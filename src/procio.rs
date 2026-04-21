@@ -6,13 +6,10 @@ use std::{
 
 use crate::{
   expand::Expander,
-  libsh::{
-    error::{ShErr, ShResult},
-    sys::TTY_FILENO,
-  },
+  libsh::error::{ShErr, ShResult},
   parse::{Redir, RedirType, execute::exec_input, get_redir_file, lex::TkFlags},
   prelude::*,
-  sherr, state,
+  sherr, state::{self, with_term},
 };
 
 // Credit to fish-shell for many of the implementation ideas present in this
@@ -237,7 +234,7 @@ impl<'e> IoFrame {
       let io_mode = &mut redir.io_mode;
       match io_mode {
         IoMode::Close { tgt_fd } => {
-          if *tgt_fd == *TTY_FILENO {
+          if with_term(|t| t.fd_is_tty(*tgt_fd)) {
             // Don't let user close the shell's tty fd.
             continue;
           }

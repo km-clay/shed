@@ -259,12 +259,41 @@ impl ScopeStack {
     Err(sherr!(ExecFail, "Variable '{var_name}' not found"))
   }
   pub fn index_var(&self, var_name: &str, idx: ArrIndex) -> ShResult<String> {
+    self.index_var_sliced(var_name, idx, None, None)
+  }
+
+  pub fn index_var_sliced(&self, var_name: &str, idx: ArrIndex, slice_start: Option<usize>, slice_len: Option<usize>) -> ShResult<String> {
     for scope in self.scopes.iter().rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
       {
         match var.kind() {
           VarKind::Arr(items) => {
+            match idx {
+              ArrIndex::AllSplit => {
+                let arg_sep = crate::readline::markers::ARG_SEP.to_string();
+                let start = slice_start.unwrap_or(0);
+                let end = start + slice_len.unwrap_or(items.len().saturating_sub(start));
+                let sliced = &items.iter().skip(start).take(end - start).cloned().collect::<Vec<_>>();
+                return Ok(sliced.join(&arg_sep));
+              }
+              ArrIndex::AllJoined => {
+                let ifs = self.try_get_var("IFS")
+                  .unwrap_or_else(|| " \t\n".to_string())
+                  .chars()
+                  .next()
+                  .unwrap_or(' ')
+                  .to_string();
+                let start = slice_start.unwrap_or(0);
+                let end = start + slice_len.unwrap_or(items.len().saturating_sub(start));
+                let sliced = &items.iter().skip(start).take(end - start).cloned().collect::<Vec<_>>();
+                return Ok(sliced.join(&ifs));
+              }
+              ArrIndex::ArgCount => {
+                return Ok(items.len().to_string());
+              }
+              _ => {}
+            }
             let idx = match idx {
               ArrIndex::Literal(n) => n,
               ArrIndex::FromBack(n) => {
@@ -339,8 +368,6 @@ impl ScopeStack {
     }
   }
   pub fn try_get_var(&self, var_name: &str) -> Option<String> {
-    // This version of get_var() is mainly used internally
-    // so that we have access to Option methods
     if let Some(magic) = self.get_magic_var(var_name) {
       Some(magic)
     } else if let Ok(param) = var_name.parse::<ShellParam>() {
@@ -354,6 +381,14 @@ impl ScopeStack {
       }
 
       None
+    }
+  }
+  /// Resolve a pre-parsed VarName, handling array indexes and slicing if present.
+  pub fn resolve_var(&self, var: &VarName) -> Option<String> {
+    if let Some(idx) = var.index() {
+      self.index_var_sliced(var.name(), idx.clone(), var.slice_start(), var.slice_len()).ok()
+    } else {
+      self.try_get_var(var.name())
     }
   }
   pub fn take_var(&mut self, var_name: &str) -> String {

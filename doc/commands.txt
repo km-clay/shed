@@ -1,0 +1,1659 @@
+*commands* *common-commands*
+
+#COMMON COMMANDS#
+
+Quick reference for frequently used commands. Each entry shows the
+most common usage patterns — not exhaustive, but enough to handle
+common cases without reaching for a man page.
+
+Categories:
+
+   1. |commands-archives|      tar, gzip, zip, 7z, xz, bzip2, zstd
+   2. |commands-networking|    ssh, scp, rsync, curl, wget, ss, ip, dig, ping
+   3. |commands-text|          grep, sed, awk, cut, sort, uniq, tr, wc, head/tail, column
+   4. |commands-data|          jq, base64, xxd, od, hexdump, bc, envsubst
+   5. |commands-files|         find, du, df, ln, stat, file, chmod, chown, xattr, lsblk, mount
+   6. |commands-processes|     ps, top, kill, lsof, strace, nice, nohup, timeout, watch
+   7. |commands-system|        systemctl, journalctl, uname, dmesg, sysctl, lscpu
+   8. |commands-git|           branch, stash, rebase, cherry-pick, reflog, reset, bisect, worktree
+   9. |commands-multimedia|    ffmpeg, imagemagick, mpv, yt-dlp
+  10. |commands-crypto|        ssh-keygen, gpg, openssl, sha256sum, age
+
+==============================================================================
+1. Archives                                      *commands-archives*
+
+  1.1 tar                                        *tar*
+
+      Create an archive:
+
+          `tar -cf archive.tar dir/`          uncompressed
+          `tar -czf archive.tar.gz dir/`      gzip
+          `tar -cjf archive.tar.bz2 dir/`    bzip2
+          `tar -cJf archive.tar.xz dir/`     xz
+
+      Extract an archive:
+
+          `tar -xf archive.tar`               auto-detects compression
+          `tar -xf archive.tar.gz`            same — -z/-j/-J are optional
+          `tar -xf archive.tar -C /tmp/`     extract to a specific directory
+
+      List contents:
+
+          `tar -tf archive.tar`               list files without extracting
+
+      Extract specific files:
+
+          `tar -xf archive.tar path/to/file`
+
+      Flags:
+
+          `-c`    create        `-v`    verbose
+          `-x`    extract       `-f`    filename (always last before the name)
+          `-t`    list          `-C`    change directory before operating
+          `-z`    gzip          `-j`    bzip2          `-J`    xz
+
+  1.2 gzip / gunzip                              *gzip* *gunzip*
+
+      Compress a file (replaces original):
+
+          `gzip file.txt`                     produces file.txt.gz
+
+      Decompress:
+
+          `gunzip file.txt.gz`                restores file.txt
+          `gzip -d file.txt.gz`               same thing
+
+      Keep the original:
+
+          `gzip -k file.txt`                  keeps file.txt alongside .gz
+
+      Compress to stdout (for piping):
+
+          `gzip -c file.txt > file.txt.gz`
+          `cat file.txt | gzip > file.txt.gz`
+
+  1.3 zip / unzip                                *zip* *unzip*
+
+      Create a zip archive:
+
+          `zip archive.zip file1 file2`
+          `zip -r archive.zip dir/`           recursive (directories)
+
+      Extract:
+
+          `unzip archive.zip`
+          `unzip archive.zip -d /tmp/`        extract to a directory
+
+      List contents:
+
+          `unzip -l archive.zip`
+
+      Extract specific files:
+
+          `unzip archive.zip "path/to/file"`
+
+      Add to existing archive:
+
+          `zip archive.zip newfile`
+
+  1.4 7z                                         *7z* *7zip*
+
+      Create an archive:
+
+          `7z a archive.7z dir/`              add (create)
+          `7z a archive.7z -p`                with password
+
+      Extract:
+
+          `7z x archive.7z`                   preserves directory structure
+          `7z e archive.7z`                   extract flat (no dirs)
+
+      List contents:
+
+          `7z l archive.7z`
+
+      Flags:
+
+          `a`     add/create    `x`     extract with paths
+          `e`     extract flat  `l`     list
+          `t`     test          `d`     delete from archive
+
+  1.5 xz                                         *xz* *unxz*
+
+      Compress (replaces original):
+
+          `xz file.txt`                       produces file.txt.xz
+
+      Decompress:
+
+          `xz -d file.txt.xz`
+          `unxz file.txt.xz`                  same thing
+
+      Keep original:
+
+          `xz -k file.txt`
+
+      Compression level (0-9, default 6):
+
+          `xz -9 file.txt`                    maximum compression
+
+  1.6 bzip2 / bunzip2                            *bzip2* *bunzip2*
+
+      Compress:
+
+          `bzip2 file.txt`                    produces file.txt.bz2
+
+      Decompress:
+
+          `bunzip2 file.txt.bz2`
+          `bzip2 -d file.txt.bz2`
+
+      Keep original:
+
+          `bzip2 -k file.txt`
+
+  1.7 zstd                                       *zstd* *unzstd*
+
+      Compress:
+
+          `zstd file.txt`                     produces file.txt.zst
+          `zstd -19 file.txt`                 max compression (1-19)
+
+      Decompress:
+
+          `zstd -d file.txt.zst`
+          `unzstd file.txt.zst`
+
+      Keep original (default — use --rm to remove):
+
+          `zstd --rm file.txt`                compress and remove original
+
+      Pipe-friendly:
+
+          `cat data | zstd > data.zst`
+          `zstd -d < data.zst > data`
+
+==============================================================================
+2. Networking                                    *commands-networking*
+
+  2.1 ssh                                        *ssh*
+
+      Connect to a remote host:
+
+          `ssh user@host`
+          `ssh -p 2222 user@host`             custom port
+
+      Run a command remotely:
+
+          `ssh user@host 'ls -la /tmp'`
+
+      Port forwarding (local → remote):
+
+          `ssh -L 8080:localhost:80 user@host`
+          # access remote port 80 at localhost:8080
+
+      Port forwarding (remote → local):
+
+          `ssh -R 9090:localhost:3000 user@host`
+          # remote port 9090 forwards to your local 3000
+
+      SOCKS proxy:
+
+          `ssh -D 1080 user@host`
+          # use as SOCKS5 proxy on localhost:1080
+
+      Jump through a bastion host:
+
+          `ssh -J bastion user@internal-host`
+
+      Agent forwarding:
+
+          `ssh -A user@host`
+
+  2.2 scp                                        *scp*
+
+      Copy file to remote:
+
+          `scp file.txt user@host:/tmp/`
+          `scp -r dir/ user@host:/tmp/`       recursive
+
+      Copy from remote:
+
+          `scp user@host:/tmp/file.txt .`
+          `scp -r user@host:/tmp/dir/ .`
+
+      Custom port:
+
+          `scp -P 2222 file.txt user@host:/tmp/`
+
+  2.3 rsync                                      *rsync*
+
+      Sync local directories:
+
+          `rsync -av src/ dest/`              archive mode, verbose
+          `rsync -av --delete src/ dest/`     mirror (delete extras in dest)
+
+      Sync to/from remote:
+
+          `rsync -av dir/ user@host:/path/`
+          `rsync -av user@host:/path/ dir/`
+
+      Dry run (show what would change):
+
+          `rsync -avn src/ dest/`
+
+      Exclude patterns:
+
+          `rsync -av --exclude='*.log' src/ dest/`
+          `rsync -av --exclude-from=.rsyncignore src/ dest/`
+
+      Resume partial transfers:
+
+          `rsync -avP src/ dest/`             -P = --partial --progress
+
+      Flags:
+
+          `-a`    archive (recursive, preserves perms/times/symlinks)
+          `-v`    verbose       `-n`    dry run
+          `-z`    compress      `-P`    partial + progress
+          `--delete`  remove files in dest not in src
+
+  2.4 curl                                       *curl*
+
+      GET request:
+
+          `curl https://example.com`
+          `curl -o file.html https://example.com`    save to file
+          `curl -O https://example.com/file.tar.gz`  save with remote name
+
+      POST request:
+
+          `curl -X POST -d 'key=value' https://api.example.com`
+          `curl -X POST -H 'Content-Type: application/json' \`
+          `  -d '{"key": "value"}' https://api.example.com`
+
+      Headers:
+
+          `curl -H 'Authorization: Bearer TOKEN' https://api.example.com`
+          `curl -I https://example.com`       headers only (HEAD request)
+
+      Follow redirects:
+
+          `curl -L https://example.com`
+
+      Silent + just the body:
+
+          `curl -s https://api.example.com | jq .`
+
+      Upload a file:
+
+          `curl -F 'file=@local.txt' https://upload.example.com`
+
+      Flags:
+
+          `-s`    silent        `-S`    show errors (with -s)
+          `-L`    follow redirects      `-o`    output file
+          `-I`    headers only  `-X`    HTTP method
+          `-H`    add header    `-d`    POST data
+          `-F`    multipart form data   `-k`    ignore SSL errors
+
+  2.5 wget                                       *wget*
+
+      Download a file:
+
+          `wget https://example.com/file.tar.gz`
+          `wget -O output.html https://example.com`  custom filename
+          `wget -q https://example.com/file`          quiet
+
+      Resume interrupted download:
+
+          `wget -c https://example.com/large-file.iso`
+
+      Mirror a website:
+
+          `wget -m -p -k https://example.com`
+
+  2.6 ss                                         *ss*
+
+      List listening ports:
+
+          `ss -tlnp`                          TCP, listening, numeric, process
+
+      All TCP connections:
+
+          `ss -tnp`
+
+      Filter by port:
+
+          `ss -tlnp sport = :8080`
+          `ss -tnp dst :443`
+
+      Flags:
+
+          `-t`    TCP           `-u`    UDP
+          `-l`    listening     `-n`    numeric (no DNS)
+          `-p`    show process  `-a`    all states
+
+  2.7 ip                                         *ip-cmd*
+
+      Show addresses:
+
+          `ip addr`                            or `ip a`
+
+      Show routing table:
+
+          `ip route`                           or `ip r`
+
+      Show link status:
+
+          `ip link`                            or `ip l`
+
+      Add/remove an address:
+
+          `ip addr add 192.168.1.10/24 dev eth0`
+          `ip addr del 192.168.1.10/24 dev eth0`
+
+      Bring interface up/down:
+
+          `ip link set eth0 up`
+          `ip link set eth0 down`
+
+  2.8 dig                                        *dig*
+
+      DNS lookup:
+
+          `dig example.com`
+          `dig example.com A`                 query A records
+          `dig example.com MX`                mail servers
+          `dig example.com +short`            just the answer
+
+      Reverse lookup:
+
+          `dig -x 8.8.8.8`
+
+      Use a specific nameserver:
+
+          `dig @1.1.1.1 example.com`
+
+      Trace resolution path:
+
+          `dig +trace example.com`
+
+  2.9 ping                                       *ping*
+
+      Basic connectivity check:
+
+          `ping example.com`
+          `ping -c 4 example.com`             send 4 packets and stop
+          `ping -W 2 example.com`             2 second timeout
+
+==============================================================================
+3. Text Processing                               *commands-text*
+
+  3.1 grep                                       *grep-cmd*
+
+      Search for a pattern:
+
+          `grep 'pattern' file`
+          `grep -r 'pattern' dir/`            recursive
+          `grep -i 'pattern' file`            case insensitive
+
+      Show context:
+
+          `grep -B 3 -A 3 'error' log`       3 lines before/after
+          `grep -C 3 'error' log`             same thing
+
+      Invert match:
+
+          `grep -v 'debug' log`               lines NOT matching
+
+      Count matches:
+
+          `grep -c 'pattern' file`
+
+      Only filenames:
+
+          `grep -rl 'TODO' src/`              files containing match
+          `grep -rL 'TODO' src/`              files NOT containing match
+
+      Fixed string (not regex):
+
+          `grep -F 'literal.string' file`
+
+      Extended regex:
+
+          `grep -E '(foo|bar)+' file`
+
+      Flags:
+
+          `-r`    recursive     `-i`    case insensitive
+          `-v`    invert match  `-c`    count
+          `-l`    files with match      `-L`    files without match
+          `-n`    line numbers  `-o`    only matching part
+          `-w`    whole word    `-F`    fixed string (no regex)
+          `-E`    extended regex        `-P`    Perl regex (PCRE)
+
+  3.2 sed                                        *sed*
+
+      Replace first match per line:
+
+          `sed 's/old/new/' file`
+
+      Replace all matches:
+
+          `sed 's/old/new/g' file`
+
+      In-place edit:
+
+          `sed -i 's/old/new/g' file`
+          `sed -i.bak 's/old/new/g' file`    with backup
+
+      Delete lines:
+
+          `sed '/pattern/d' file`             delete matching lines
+          `sed '5d' file`                     delete line 5
+          `sed '2,5d' file`                   delete lines 2-5
+
+      Print specific lines:
+
+          `sed -n '5p' file`                  print line 5
+          `sed -n '10,20p' file`              print lines 10-20
+          `sed -n '/start/,/end/p' file`      between patterns
+
+      Insert/append:
+
+          `sed '3i\new line' file`            insert before line 3
+          `sed '3a\new line' file`            append after line 3
+
+      Multiple operations:
+
+          `sed -e 's/foo/bar/' -e 's/baz/qux/' file`
+          `sed 's/foo/bar/; s/baz/qux/' file`
+
+  3.3 awk                                        *awk*
+
+      Print specific columns:
+
+          `awk '{print $1}' file`             first column
+          `awk '{print $1, $3}' file`         first and third
+          `awk '{print $NF}' file`            last column
+
+      Custom field separator:
+
+          `awk -F: '{print $1}' /etc/passwd`
+          `awk -F'\t' '{print $2}' file`
+
+      Filter lines:
+
+          `awk '/pattern/ {print}' file`
+          `awk '$3 > 100 {print $1, $3}' file`
+
+      Built-in variables:
+
+          `NR`    current line number
+          `NF`    number of fields in current line
+          `FS`    field separator (input)
+          `OFS`   output field separator
+
+      Sum a column:
+
+          `awk '{sum += $1} END {print sum}' file`
+
+      Print with formatting:
+
+          `awk '{printf "%-20s %s\n", $1, $2}' file`
+
+      Line numbers:
+
+          `awk '{print NR, $0}' file`
+
+  3.4 cut                                        *cut*
+
+      Extract columns by delimiter:
+
+          `cut -d: -f1 /etc/passwd`           field 1 (username)
+          `cut -d, -f1,3 file.csv`            fields 1 and 3
+          `cut -d' ' -f2- file`               field 2 onwards
+
+      Extract by character position:
+
+          `cut -c1-10 file`                   first 10 characters
+          `cut -c5- file`                     from character 5 onwards
+
+  3.5 sort                                       *sort-cmd*
+
+      Sort lines:
+
+          `sort file`
+          `sort -r file`                      reverse
+          `sort -n file`                      numeric
+          `sort -k2 file`                     by second field
+          `sort -t: -k3 -n /etc/passwd`       by field 3, numeric, colon-delimited
+
+      Unique sort:
+
+          `sort -u file`                      sort and deduplicate
+
+      Human-readable numbers:
+
+          `sort -h`                            handles K, M, G suffixes
+
+  3.6 uniq                                       *uniq*
+
+      Remove consecutive duplicates (input must be sorted):
+
+          `sort file | uniq`
+          `sort file | uniq -c`               with counts
+          `sort file | uniq -d`               only duplicates
+          `sort file | uniq -u`               only unique lines
+
+  3.7 tr                                         *tr*
+
+      Translate characters:
+
+          `echo hello | tr a-z A-Z`           uppercase
+          `echo hello | tr ' ' '\n'`          spaces to newlines
+
+      Delete characters:
+
+          `tr -d '\r' < file`                 remove carriage returns
+          `tr -d '[:space:]' < file`          remove all whitespace
+
+      Squeeze repeated characters:
+
+          `tr -s ' '`                          collapse multiple spaces
+
+  3.8 wc                                         *wc*
+
+      Count lines, words, characters:
+
+          `wc file`                            all three
+          `wc -l file`                        lines only
+          `wc -w file`                        words only
+          `wc -c file`                        bytes
+          `wc -m file`                        characters (multibyte aware)
+
+  3.9 head / tail                                *head* *tail*
+
+      First/last N lines:
+
+          `head -n 20 file`
+          `tail -n 20 file`
+          `head -c 100 file`                  first 100 bytes
+
+      All but last N lines:
+
+          `head -n -5 file`
+
+      Follow a file (live):
+
+          `tail -f /var/log/syslog`
+          `tail -f -n 50 log`                 last 50, then follow
+
+  3.10 column                                    *column*
+
+      Align into columns:
+
+          `column -t file`                    auto-detect columns
+          `column -t -s',' file.csv`          CSV with comma separator
+
+==============================================================================
+4. Data and Formats                              *commands-data*
+
+  4.1 jq                                         *jq*
+
+      Pretty-print JSON:
+
+          `cat data.json | jq .`
+          `curl -s https://api.example.com | jq .`
+
+      Extract a field:
+
+          `jq '.name' data.json`
+          `jq '.users[0].email' data.json`
+
+      Extract raw string (no quotes):
+
+          `jq -r '.name' data.json`
+
+      Filter array elements:
+
+          `jq '.[] | select(.age > 30)' data.json`
+          `jq '.users[] | select(.active == true)' data.json`
+
+      Map over an array:
+
+          `jq '[.[] | .name]' data.json`
+          `jq '.users | map(.email)' data.json`
+
+      Multiple fields:
+
+          `jq '{name: .name, id: .id}' data.json`
+          `jq '.users[] | {name, email}' data.json`
+
+      Length:
+
+          `jq '.users | length' data.json`
+
+      Keys:
+
+          `jq 'keys' data.json`
+
+      Construct JSON:
+
+          `jq -n '{name: "foo", value: 42}'`
+          `jq -n --arg name "$NAME" '{name: $name}'`
+
+      Slurp multiple objects into array:
+
+          `cat *.json | jq -s .`
+
+  4.2 base64                                     *base64*
+
+      Encode:
+
+          `echo -n 'hello' | base64`
+          `base64 file.bin > file.b64`
+
+      Decode:
+
+          `echo 'aGVsbG8=' | base64 -d`
+          `base64 -d file.b64 > file.bin`
+
+  4.3 xxd                                        *xxd*
+
+      Hex dump:
+
+          `xxd file`
+          `xxd -l 64 file`                    first 64 bytes
+          `xxd -s 0x100 file`                 start at offset 0x100
+
+      Plain hex (no formatting):
+
+          `xxd -p file`
+
+      Reverse (hex back to binary):
+
+          `xxd -r -p hexfile > binary`
+
+      Binary dump:
+
+          `xxd -b file`
+
+  4.4 od                                         *od*
+
+      Octal dump:
+
+          `od file`
+          `od -A x -t x1z file`              hex with ASCII sidebar
+
+      Common format flags:
+
+          `-A x`      hex addresses
+          `-t x1`     hex bytes
+          `-t c`      characters
+          `-t d2`     2-byte decimal integers
+
+  4.5 hexdump                                    *hexdump*
+
+      Canonical hex + ASCII:
+
+          `hexdump -C file`
+          `hexdump -C -n 256 file`            first 256 bytes
+
+  4.6 bc                                         *bc*
+
+      Calculator:
+
+          `echo '2^10' | bc`                  1024
+          `echo 'scale=4; 22/7' | bc`         3.1428
+          `echo 'ibase=16; FF' | bc`          255 (hex to decimal)
+          `echo 'obase=2; 42' | bc`           101010 (decimal to binary)
+
+  4.7 envsubst                                   *envsubst*
+
+      Substitute environment variables in a template:
+
+          `envsubst < template.conf > output.conf`
+          `envsubst '$USER $HOME' < template`  only these vars
+
+==============================================================================
+5. Files and Disk                                *commands-files*
+
+  5.1 find                                       *find-cmd*
+
+      Find by name:
+
+          `find . -name '*.txt'`
+          `find . -iname '*.jpg'`             case insensitive
+          `find /etc -name '*.conf'`
+
+      Find by type:
+
+          `find . -type f`                    files only
+          `find . -type d`                    directories only
+          `find . -type l`                    symlinks
+
+      Find by modification time:
+
+          `find . -mtime -7`                  modified in last 7 days
+          `find . -mtime +30`                 modified more than 30 days ago
+          `find . -newer reference.txt`       newer than reference file
+
+      Find by size:
+
+          `find . -size +100M`                larger than 100MB
+          `find . -size -1k`                  smaller than 1KB
+
+      Execute on results:
+
+          `find . -name '*.log' -delete`
+          `find . -name '*.sh' -exec chmod +x {} \;`
+          `find . -name '*.c' -exec grep -l 'main' {} +`
+
+      Combine conditions:
+
+          `find . -name '*.tmp' -o -name '*.bak'`        OR
+          `find . -type f -name '*.py' -size +10k`       AND
+          `find . ! -name '*.keep'`                      NOT
+
+  5.2 du                                         *du*
+
+      Disk usage of a directory:
+
+          `du -sh dir/`                       human-readable summary
+          `du -sh *`                          each item in current dir
+          `du -sh * | sort -h`               sorted by size
+
+      Depth limit:
+
+          `du -h --max-depth=1 /`
+
+  5.3 df                                         *df*
+
+      Filesystem space:
+
+          `df -h`                             human-readable
+          `df -h /`                           specific mount
+          `df -i`                             inode usage
+
+  5.4 ln                                         *ln*
+
+      Create a symlink:
+
+          `ln -s /path/to/target linkname`
+
+      Create a hard link:
+
+          `ln /path/to/target linkname`
+
+      Force (overwrite existing):
+
+          `ln -sf /new/target linkname`
+
+  5.5 stat                                       *stat-cmd*
+
+      File metadata:
+
+          `stat file`
+          `stat -c '%s' file`                 size in bytes
+          `stat -c '%Y' file`                 modification time (epoch)
+          `stat -c '%a %U:%G %n' file`        permissions, owner, name
+
+  5.6 file                                       *file-cmd*
+
+      Identify file type:
+
+          `file image.png`                    "PNG image data, 800x600..."
+          `file mystery`                      identifies by content, not name
+          `file -i document`                  MIME type
+
+  5.7 chmod                                      *chmod*
+
+      Set permissions (octal):
+
+          `chmod 755 script.sh`               rwxr-xr-x
+          `chmod 644 file.txt`                rw-r--r--
+          `chmod 600 secret.key`              rw-------
+
+      Set permissions (symbolic):
+
+          `chmod +x script.sh`                add execute
+          `chmod u+w file`                    owner write
+          `chmod go-rwx private/`             remove group/other access
+
+      Recursive:
+
+          `chmod -R 755 dir/`
+
+      Common patterns:
+
+          `755`   executables, directories
+          `644`   regular files
+          `600`   private files (keys, tokens)
+          `700`   private directories
+
+  5.8 chown                                      *chown*
+
+      Change owner:
+
+          `chown user file`
+          `chown user:group file`
+          `chown -R user:group dir/`          recursive
+
+  5.9 xattr                                      *xattr* *getfattr* *setfattr*
+
+      List extended attributes:
+
+          `getfattr -d file`
+
+      Set an attribute:
+
+          `setfattr -n user.comment -v "important" file`
+
+      Remove an attribute:
+
+          `setfattr -x user.comment file`
+
+  5.10 lsblk                                     *lsblk*
+
+      List block devices:
+
+          `lsblk`
+          `lsblk -f`                          show filesystem types
+          `lsblk -o NAME,SIZE,TYPE,MOUNTPOINT`
+
+  5.11 mount / umount                            *mount* *umount*
+
+      Mount a filesystem:
+
+          `mount /dev/sda1 /mnt`
+          `mount -t ext4 /dev/sda1 /mnt`
+          `mount -o loop image.iso /mnt`      mount an ISO
+
+      Unmount:
+
+          `umount /mnt`
+          `umount -l /mnt`                    lazy unmount (busy fs)
+
+      List current mounts:
+
+          `mount | column -t`
+          `findmnt`                            tree view
+
+==============================================================================
+6. Process Management                            *commands-processes*
+
+  6.1 ps                                         *ps*
+
+      Show your processes:
+
+          `ps`                                current terminal only
+          `ps aux`                            all processes, all users
+          `ps -ef`                            full format (POSIX style)
+
+      Filter by name:
+
+          `ps aux | grep nginx`
+          `ps -C nginx`                       by command name directly
+
+      Show process tree:
+
+          `ps auxf`                           forest (tree) view
+          `ps --forest -e`
+
+      Custom output:
+
+          `ps -eo pid,ppid,%cpu,%mem,cmd --sort=-%mem`
+          `ps -eo pid,user,start,cmd`
+
+  6.2 top / htop                                 *top* *htop*
+
+      Interactive process viewer:
+
+          `top`
+          `htop`                              nicer interface (if installed)
+
+      Useful top keybinds:
+
+          `P`     sort by CPU
+          `M`     sort by memory
+          `k`     kill a process
+          `f`     choose display fields
+          `q`     quit
+
+      Batch mode (for scripting):
+
+          `top -bn1 | head -20`
+
+  6.3 kill / killall                             *kill* *killall*
+
+      Send signal to a process:
+
+          `kill 1234`                         SIGTERM (graceful)
+          `kill -9 1234`                      SIGKILL (force)
+          `kill -STOP 1234`                   pause
+          `kill -CONT 1234`                   resume
+
+      Kill by name:
+
+          `killall nginx`
+          `killall -9 nginx`
+
+      Common signals:
+
+          `TERM` (15)   graceful shutdown (default)
+          `KILL` (9)    force kill (cannot be caught)
+          `HUP`  (1)    reload config (convention)
+          `STOP` (19)   pause process
+          `CONT` (18)   resume paused process
+          `INT`  (2)    interrupt (like Ctrl-C)
+
+  6.4 lsof                                       *lsof*
+
+      Files opened by a process:
+
+          `lsof -p 1234`
+
+      Who's using a port:
+
+          `lsof -i :8080`
+          `lsof -i TCP:443`
+
+      Who's using a file:
+
+          `lsof /var/log/syslog`
+
+      Network connections by a process:
+
+          `lsof -i -p 1234`
+
+      All network connections:
+
+          `lsof -i`
+
+  6.5 strace                                     *strace*
+
+      Trace system calls:
+
+          `strace command`
+          `strace -p 1234`                    attach to running process
+          `strace -f command`                 follow forks
+
+      Filter by syscall type:
+
+          `strace -e trace=open,read,write command`
+          `strace -e trace=network command`
+          `strace -e trace=file command`
+
+      Summary (count + timing):
+
+          `strace -c command`
+
+      Output to file:
+
+          `strace -o trace.log command`
+
+  6.6 nice / renice                              *nice* *renice*
+
+      Run with lower priority:
+
+          `nice -n 10 make -j8`              lower priority (higher nice)
+          `nice -n -5 important-task`         higher priority (needs root)
+
+      Change priority of running process:
+
+          `renice 10 -p 1234`
+          `renice -5 -p 1234`                 needs root
+
+      Nice values: -20 (highest priority) to 19 (lowest)
+
+  6.7 nohup                                     *nohup*
+
+      Run immune to hangups:
+
+          `nohup long-task &`                 survives logout
+          `nohup command > output.log 2>&1 &`
+
+  6.8 timeout                                    *timeout*
+
+      Kill a command after a duration:
+
+          `timeout 30s command`
+          `timeout 5m long-task`
+          `timeout --signal=KILL 10s command`  force kill after 10s
+
+  6.9 watch                                      *watch*
+
+      Repeat a command periodically:
+
+          `watch -n 2 'df -h'`                every 2 seconds
+          `watch -d 'ls -la'`                 highlight differences
+          `watch -n 1 'ss -tlnp'`             monitor ports
+
+==============================================================================
+7. System                                        *commands-system*
+
+  7.1 systemctl                                  *systemctl*
+
+      Service management:
+
+          `systemctl start nginx`
+          `systemctl stop nginx`
+          `systemctl restart nginx`
+          `systemctl reload nginx`            reload config without restart
+
+      Status:
+
+          `systemctl status nginx`
+          `systemctl is-active nginx`
+          `systemctl is-enabled nginx`
+
+      Enable/disable at boot:
+
+          `systemctl enable nginx`
+          `systemctl disable nginx`
+          `systemctl enable --now nginx`      enable and start immediately
+
+      List services:
+
+          `systemctl list-units --type=service`
+          `systemctl list-units --failed`
+
+      User services:
+
+          `systemctl --user start myservice`
+          `systemctl --user enable myservice`
+
+  7.2 journalctl                                 *journalctl*
+
+      View logs:
+
+          `journalctl`                        all logs
+          `journalctl -u nginx`               specific unit
+          `journalctl -f`                     follow (like tail -f)
+          `journalctl -u nginx -f`            follow specific unit
+
+      Filter by time:
+
+          `journalctl --since '1 hour ago'`
+          `journalctl --since '2024-01-01' --until '2024-01-02'`
+          `journalctl --since today`
+
+      Filter by priority:
+
+          `journalctl -p err`                 errors and above
+          `journalctl -p warning`
+
+      Boot logs:
+
+          `journalctl -b`                     current boot
+          `journalctl -b -1`                  previous boot
+          `journalctl --list-boots`
+
+      Disk usage:
+
+          `journalctl --disk-usage`
+          `journalctl --vacuum-size=500M`     shrink to 500MB
+
+  7.3 uname                                      *uname*
+
+      System information:
+
+          `uname -a`                          everything
+          `uname -r`                          kernel version
+          `uname -m`                          architecture (x86_64, aarch64)
+          `uname -n`                          hostname
+
+  7.4 hostnamectl                                *hostnamectl*
+
+      Show/set hostname:
+
+          `hostnamectl`
+          `hostnamectl set-hostname mybox`
+
+  7.5 timedatectl                                *timedatectl*
+
+      Show time info:
+
+          `timedatectl`
+
+      Set timezone:
+
+          `timedatectl set-timezone America/New_York`
+          `timedatectl list-timezones | grep America`
+
+  7.6 loginctl                                   *loginctl*
+
+      Active sessions:
+
+          `loginctl list-sessions`
+          `loginctl show-session 1`
+          `loginctl terminate-session 3`
+
+  7.7 dmesg                                      *dmesg*
+
+      Kernel messages:
+
+          `dmesg`
+          `dmesg -T`                          human-readable timestamps
+          `dmesg -w`                          follow (live)
+          `dmesg | grep -i usb`               filter
+
+  7.8 sysctl                                     *sysctl*
+
+      View/set kernel parameters:
+
+          `sysctl -a`                         all parameters
+          `sysctl net.ipv4.ip_forward`        specific value
+          `sysctl -w net.ipv4.ip_forward=1`   set value (until reboot)
+
+  7.9 lscpu / lsmem                              *lscpu* *lsmem*
+
+      Hardware info:
+
+          `lscpu`                             CPU details
+          `lsmem`                             memory layout
+          `free -h`                           memory usage
+
+  7.10 uptime                                    *uptime*
+
+          `uptime`                            load averages, uptime duration
+
+==============================================================================
+8. Git                                           *commands-git*
+
+  The basics (add, commit, push, pull) are assumed. This section
+  covers the operations you reach for less often.
+
+  8.1 Branching                                  *git-branch*
+
+      Create and switch:
+
+          `git switch -c new-branch`
+          `git checkout -b new-branch`        older syntax
+
+      Delete a branch:
+
+          `git branch -d merged-branch`       safe (must be merged)
+          `git branch -D unmerged-branch`     force delete
+
+      Delete remote branch:
+
+          `git push origin --delete old-branch`
+
+      List branches:
+
+          `git branch -a`                     local + remote
+          `git branch --merged`               branches merged into current
+          `git branch --no-merged`            unmerged branches
+
+  8.2 Stash                                      *git-stash*
+
+      Save working changes:
+
+          `git stash`
+          `git stash -m "work in progress"`
+          `git stash --include-untracked`     also stash new files
+
+      Restore:
+
+          `git stash pop`                     apply and remove
+          `git stash apply`                   apply but keep in stash
+
+      List stashes:
+
+          `git stash list`
+
+      Apply specific stash:
+
+          `git stash pop stash@{2}`
+
+      Show stash contents:
+
+          `git stash show -p`                 diff of last stash
+          `git stash show -p stash@{1}`
+
+      Drop a stash:
+
+          `git stash drop stash@{0}`
+          `git stash clear`                   remove all stashes
+
+  8.3 Rebase                                     *git-rebase*
+
+      Rebase current branch onto main:
+
+          `git rebase main`
+
+      Interactive rebase (edit last N commits):
+
+          `git rebase -i HEAD~3`
+
+      Interactive rebase operations:
+
+          `pick`      keep the commit as-is
+          `reword`    change the commit message
+          `edit`      pause to amend the commit
+          `squash`    merge into previous commit (combine messages)
+          `fixup`     merge into previous commit (discard message)
+          `drop`      remove the commit
+
+      Abort a rebase in progress:
+
+          `git rebase --abort`
+
+      Continue after resolving conflicts:
+
+          `git rebase --continue`
+
+  8.4 Cherry-pick                                *git-cherry-pick*
+
+      Apply a commit from another branch:
+
+          `git cherry-pick abc1234`
+          `git cherry-pick abc1234 def5678`   multiple commits
+
+      Without committing (stage only):
+
+          `git cherry-pick --no-commit abc1234`
+
+  8.5 Reflog                                     *git-reflog*
+
+      View recent HEAD movements:
+
+          `git reflog`
+          `git reflog show main`              specific branch
+
+      Recover lost commits:
+
+          `git checkout HEAD@{3}`             go back 3 moves
+          `git branch recovered HEAD@{5}`     create branch at old state
+
+  8.6 Reset                                      *git-reset*
+
+      Unstage files:
+
+          `git reset HEAD file`               unstage specific file
+          `git reset`                         unstage everything
+
+      Move HEAD back:
+
+          `git reset --soft HEAD~1`           undo commit, keep staged
+          `git reset --mixed HEAD~1`          undo commit, keep working (default)
+          `git reset --hard HEAD~1`           undo commit, discard changes
+
+  8.7 Bisect                                     *git-bisect*
+
+      Binary search for a bad commit:
+
+          `git bisect start`
+          `git bisect bad`                    current commit is bad
+          `git bisect good v1.0`              this tag was good
+
+      Then at each step:
+
+          `git bisect good`                   this commit is fine
+          `git bisect bad`                    this commit has the bug
+
+      Finish:
+
+          `git bisect reset`
+
+      Automated bisect:
+
+          `git bisect run ./test-script.sh`
+
+  8.8 Worktree                                   *git-worktree*
+
+      Work on multiple branches simultaneously:
+
+          `git worktree add ../feature feature-branch`
+          `git worktree add ../hotfix -b hotfix-branch`
+
+      List worktrees:
+
+          `git worktree list`
+
+      Remove a worktree:
+
+          `git worktree remove ../feature`
+
+  8.9 Log                                        *git-log*
+
+      Compact log:
+
+          `git log --oneline`
+          `git log --oneline -20`             last 20
+
+      Graph:
+
+          `git log --oneline --graph --all`
+
+      Search commits:
+
+          `git log --grep='fix bug'`          by message
+          `git log -S 'function_name'`        by content change
+          `git log -- path/to/file`           by file
+
+      Custom format:
+
+          `git log --format='%h %an %s'`     hash, author, subject
+
+  8.10 Diff                                      *git-diff*
+
+      Working directory vs staged:
+
+          `git diff`
+
+      Staged vs last commit:
+
+          `git diff --staged`
+
+      Between commits/branches:
+
+          `git diff main..feature`
+          `git diff HEAD~3..HEAD`
+
+      Stat only (summary):
+
+          `git diff --stat`
+
+      Specific file:
+
+          `git diff -- path/to/file`
+
+  8.11 Clean                                     *git-clean*
+
+      Remove untracked files:
+
+          `git clean -n`                      dry run (show what would delete)
+          `git clean -f`                      force delete
+          `git clean -fd`                     include directories
+          `git clean -fdx`                    also remove ignored files
+
+==============================================================================
+9. Multimedia                                    *commands-multimedia*
+
+  9.1 ffmpeg                                     *ffmpeg*
+
+      Convert format:
+
+          `ffmpeg -i input.mkv output.mp4`
+          `ffmpeg -i input.wav output.mp3`
+
+      Extract audio from video:
+
+          `ffmpeg -i video.mp4 -vn audio.mp3`
+          `ffmpeg -i video.mp4 -vn -acodec copy audio.aac`  no re-encode
+
+      Remove audio from video:
+
+          `ffmpeg -i input.mp4 -an output.mp4`
+
+      Trim/cut:
+
+          `ffmpeg -i input.mp4 -ss 00:01:30 -t 00:00:45 clip.mp4`
+          # start at 1:30, duration 45 seconds
+
+          `ffmpeg -i input.mp4 -ss 00:01:30 -to 00:02:15 clip.mp4`
+          # start at 1:30, end at 2:15
+
+      Change resolution:
+
+          `ffmpeg -i input.mp4 -vf scale=1280:720 output.mp4`
+          `ffmpeg -i input.mp4 -vf scale=-1:720 output.mp4`   auto width
+
+      Change framerate:
+
+          `ffmpeg -i input.mp4 -r 30 output.mp4`
+
+      GIF from video:
+
+          `ffmpeg -i input.mp4 -vf "fps=10,scale=320:-1" output.gif`
+
+      Concatenate files:
+
+          `ffmpeg -f concat -i filelist.txt -c copy output.mp4`
+          # filelist.txt contains: file 'clip1.mp4'\nfile 'clip2.mp4'
+
+      Screen recording (Linux):
+
+          `ffmpeg -f x11grab -s 1920x1080 -i :0.0 output.mp4`
+
+      Stream info:
+
+          `ffmpeg -i file.mp4`                just prints info (no output file)
+
+      Common flags:
+
+          `-i`        input file
+          `-vn`       no video          `-an`       no audio
+          `-c copy`   copy without re-encoding
+          `-vf`       video filter      `-af`       audio filter
+          `-ss`       start time        `-t`        duration
+          `-to`       end time          `-r`        framerate
+          `-crf`      quality (0-51, lower = better, 23 default)
+          `-preset`   encoding speed (ultrafast → veryslow)
+
+  9.2 imagemagick (convert/magick)               *imagemagick* *convert* *magick*
+
+      Resize:
+
+          `convert input.png -resize 800x600 output.png`
+          `convert input.png -resize 50% output.png`
+
+      Convert format:
+
+          `convert input.png output.jpg`
+          `convert input.svg output.png`
+
+      Quality (JPEG):
+
+          `convert input.png -quality 85 output.jpg`
+
+      Crop:
+
+          `convert input.png -crop 200x200+50+50 output.png`
+          # 200x200 area starting at x=50 y=50
+
+      Rotate:
+
+          `convert input.png -rotate 90 output.png`
+
+      Batch convert:
+
+          `for f in *.png; do convert "$f" "${f%.png}.jpg"; done`
+
+      Create thumbnail:
+
+          `convert input.png -thumbnail 150x150^ -gravity center \`
+          `  -extent 150x150 thumb.png`
+
+      Strip metadata:
+
+          `convert input.jpg -strip output.jpg`
+
+      Info:
+
+          `identify image.png`                dimensions, format, depth
+          `identify -verbose image.png`       all metadata
+
+      Note: newer versions use `magick` instead of `convert`:
+
+          `magick input.png -resize 50% output.png`
+
+  9.3 mpv                                        *mpv*
+
+      Play media:
+
+          `mpv file.mp4`
+          `mpv https://url/to/stream`
+
+      Useful flags:
+
+          `--no-video`              audio only
+          `--start=01:30`           seek to timestamp
+          `--speed=1.5`             playback speed
+          `--loop`                  loop playback
+          `--vo=null`               no video output (audio only)
+
+  9.4 yt-dlp                                     *yt-dlp*
+
+      Download video:
+
+          `yt-dlp URL`
+          `yt-dlp -f best URL`
+
+      Audio only:
+
+          `yt-dlp -x URL`
+          `yt-dlp -x --audio-format mp3 URL`
+
+      List available formats:
+
+          `yt-dlp -F URL`
+
+      Specific format:
+
+          `yt-dlp -f 137+140 URL`             video + audio by format ID
+
+      Download playlist:
+
+          `yt-dlp --playlist-items 1-10 URL`
+
+      Subtitles:
+
+          `yt-dlp --write-sub --sub-lang en URL`
+
+==============================================================================
+10. Crypto and Security                          *commands-crypto*
+
+  10.1 ssh-keygen                                *ssh-keygen*
+
+      Generate a key pair:
+
+          `ssh-keygen -t ed25519 -C "user@host"`
+          `ssh-keygen -t rsa -b 4096`
+
+      Specify output path:
+
+          `ssh-keygen -t ed25519 -f ~/.ssh/mykey`
+
+      Change passphrase:
+
+          `ssh-keygen -p -f ~/.ssh/id_ed25519`
+
+      Show public key fingerprint:
+
+          `ssh-keygen -lf ~/.ssh/id_ed25519.pub`
+
+      Copy public key to server:
+
+          `ssh-copy-id user@host`
+          `ssh-copy-id -i ~/.ssh/mykey.pub user@host`
+
+  10.2 gpg                                       *gpg*
+
+      Generate a key:
+
+          `gpg --full-generate-key`
+
+      List keys:
+
+          `gpg --list-keys`
+          `gpg --list-secret-keys`
+
+      Encrypt a file (symmetric, password):
+
+          `gpg -c file.txt`                   produces file.txt.gpg
+
+      Encrypt for a recipient (asymmetric):
+
+          `gpg -e -r recipient@email file.txt`
+
+      Decrypt:
+
+          `gpg -d file.txt.gpg > file.txt`
+          `gpg file.txt.gpg`                  auto-outputs to file.txt
+
+      Sign a file:
+
+          `gpg --sign file.txt`               binary signature
+          `gpg --clearsign file.txt`          readable signed text
+          `gpg --detach-sign file.txt`        separate .sig file
+
+      Verify:
+
+          `gpg --verify file.txt.sig file.txt`
+
+      Export/import keys:
+
+          `gpg --export -a "Name" > public.asc`
+          `gpg --export-secret-keys -a "Name" > private.asc`
+          `gpg --import public.asc`
+
+  10.3 openssl                                   *openssl*
+
+      Generate a self-signed certificate:
+
+          `openssl req -x509 -newkey rsa:4096 -keyout key.pem \`
+          `  -out cert.pem -days 365 -nodes`
+
+      View certificate info:
+
+          `openssl x509 -in cert.pem -text -noout`
+
+      Check remote server's certificate:
+
+          `openssl s_client -connect example.com:443 < /dev/null`
+
+      Generate random bytes:
+
+          `openssl rand -hex 32`              64 hex characters
+          `openssl rand -base64 32`           base64 encoded
+
+      Hash a file:
+
+          `openssl dgst -sha256 file`
+
+      Encrypt/decrypt a file:
+
+          `openssl enc -aes-256-cbc -salt -in file -out file.enc`
+          `openssl enc -d -aes-256-cbc -in file.enc -out file`
+
+      Generate an RSA key:
+
+          `openssl genrsa -out private.pem 4096`
+          `openssl rsa -in private.pem -pubout -out public.pem`
+
+  10.4 sha256sum / md5sum                        *sha256sum* *md5sum*
+
+      Generate checksum:
+
+          `sha256sum file`
+          `md5sum file`
+          `sha256sum *.iso > checksums.txt`
+
+      Verify checksum:
+
+          `sha256sum -c checksums.txt`
+
+  10.5 age                                       *age*
+
+      Modern file encryption (simpler than gpg):
+
+      Encrypt:
+
+          `age -r AGE_PUBLIC_KEY -o file.age file`
+          `age -p -o file.age file`           passphrase (no key)
+
+      Decrypt:
+
+          `age -d -i key.txt -o file file.age`
+          `age -d -o file file.age`           passphrase prompt
+
+      Generate a key:
+
+          `age-keygen -o key.txt`
+
+==============================================================================

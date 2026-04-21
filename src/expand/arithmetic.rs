@@ -673,17 +673,12 @@ pub fn expand_arithmetic(expr: &str) -> ShResult<String> {
 /// that receive the raw token including its delimiters.
 pub fn expand_arithmetic_wrapped(raw: &str) -> ShResult<String> {
   let mut expr = raw;
-  if expr.starts_with("((") {
-    expr = &expr[2..];
-  }
-  if expr.ends_with("))") {
-    expr = &expr[..expr.len() - 2];
-  }
-  if expr.starts_with('(') {
-    expr = &expr[1..];
-  }
-  if expr.ends_with(')') {
-    expr = &expr[..expr.len() - 1];
+  if expr.starts_with("((")
+  && expr.ends_with("))") {
+    expr = &expr[2..expr.len() - 2];
+  } else if expr.starts_with('(')
+  && expr.ends_with(')') {
+    expr = &expr[1..expr.len() - 1];
   }
   expand_arithmetic(expr)
 }

@@ -11,7 +11,7 @@ use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
   builtin::map::MapNode,
-  expand::expand_arithmetic,
+  expand::{expand_arithmetic, expand_raw},
   libsh::{
     error::{ShErr, ShResult},
     utils::VecDequeExt,
@@ -172,7 +172,8 @@ pub enum ArrIndex {
 impl FromStr for ArrIndex {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
+    let s = expand_raw(&mut s.chars().peekable())?;
+    match s.as_str() {
       "@" => Ok(Self::AllSplit),
       "*" => Ok(Self::AllJoined),
       "#" => Ok(Self::ArgCount),
@@ -186,7 +187,7 @@ impl FromStr for ArrIndex {
       }
       _ => {
         // let's try to handle something like '1+1'
-        if let Ok(res) = expand_arithmetic(s) {
+        if let Ok(res) = expand_arithmetic(&s) {
           Self::from_str(&res)
         } else {
           Err(sherr!(ParseErr, "Invalid array index: {}", s,))
@@ -194,6 +195,103 @@ impl FromStr for ArrIndex {
       }
     }
   }
+}
+
+/// Find the first `:` that isn't nested inside `${}`, `$()`, or `(())`
+fn top_level_colon(s: &str) -> Option<usize> {
+  let mut brace_depth = 0;
+  let mut paren_depth = 0;
+  for (i, ch) in s.char_indices() {
+    match ch {
+      '{' => brace_depth += 1,
+      '}' => brace_depth -= 1,
+      '(' => paren_depth += 1,
+      ')' => paren_depth -= 1,
+      ':' if brace_depth == 0 && paren_depth == 0 => return Some(i),
+      _ => {}
+    }
+  }
+  None
+}
+
+/// A parsed variable name, optionally with an array index and slice.
+/// Index expansion happens at construction time, so it's safe
+/// to use inside `read_vars`/`write_vars` closures without
+/// causing re-entrant borrows.
+#[derive(Clone, Debug)]
+pub struct VarName {
+  name: String,
+  index: Option<ArrIndex>,
+  slice_start: Option<usize>,
+  slice_len: Option<usize>,
+}
+
+impl VarName {
+  pub fn parse(raw: &str) -> ShResult<Self> {
+    let Some(bracket_start) = raw.find('[') else {
+      return Ok(Self { name: raw.to_string(), index: None, slice_start: None, slice_len: None });
+    };
+
+    // Find the matching ']' by tracking depth, since the index
+    // content may contain nested brackets (e.g. ${arr[${i[0]}]})
+    let mut depth = 0;
+    let mut bracket_end = None;
+    for (i, ch) in raw[bracket_start..].char_indices() {
+      match ch {
+        '[' => depth += 1,
+        ']' => {
+          depth -= 1;
+          if depth == 0 {
+            bracket_end = Some(bracket_start + i);
+            break;
+          }
+        }
+        _ => {}
+      }
+    }
+
+    let Some(bracket_end) = bracket_end else {
+      return Ok(Self { name: raw.to_string(), index: None, slice_start: None, slice_len: None });
+    };
+
+    let name = raw[..bracket_start].to_string();
+    let idx_str = &raw[bracket_start + 1..bracket_end];
+    let index = idx_str.parse::<ArrIndex>()?;
+
+    // Array slicing only applies to [@] and [*] indexes
+    let (slice_start, slice_len) = if matches!(index, ArrIndex::AllSplit | ArrIndex::AllJoined) {
+      let after_bracket = &raw[bracket_end + 1..];
+      if let Some(rest) = after_bracket.strip_prefix(':') {
+        // Split on ':' at the top level only (not inside ${} or $())
+        if let Some(split_pos) = top_level_colon(rest) {
+          let s = &rest[..split_pos];
+          let l = &rest[split_pos + 1..];
+          let s_exp = expand_raw(&mut s.chars().peekable()).unwrap_or_else(|_| s.to_string());
+          let l_exp = expand_raw(&mut l.chars().peekable()).unwrap_or_else(|_| l.to_string());
+          (s_exp.parse::<usize>().ok(), l_exp.parse::<usize>().ok())
+        } else {
+          let expanded = expand_raw(&mut rest.chars().peekable()).unwrap_or_else(|_| rest.to_string());
+          (expanded.parse::<usize>().ok(), None)
+        }
+      } else {
+        (None, None)
+      }
+    } else {
+      (None, None)
+    };
+
+    Ok(Self { name, index: Some(index), slice_start, slice_len })
+  }
+
+  /// Create a VarName from a plain name with no index (no expansion needed)
+  pub fn plain(name: impl Into<String>) -> Self {
+    Self { name: name.into(), index: None, slice_start: None, slice_len: None }
+  }
+
+  pub fn name(&self) -> &str { &self.name }
+  pub fn index(&self) -> Option<&ArrIndex> { self.index.as_ref() }
+  pub fn slice_start(&self) -> Option<usize> { self.slice_start }
+  pub fn slice_len(&self) -> Option<usize> { self.slice_len }
 }
 
 #[derive(Clone, Debug)]

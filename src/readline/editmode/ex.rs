@@ -9,8 +9,7 @@ use crate::libsh::error::ShResult;
 use crate::parse::lex::TkFlags;
 use crate::readline::SimpleEditor;
 use crate::readline::editcmd::{
-  Anchor, CmdFlags, EditCmd, LineAddr, Motion, MotionCmd, ReadSrc, RegisterName, To, Verb, VerbCmd,
-  WriteDest,
+  Anchor, CmdFlags, EditCmd, LineAddr, Motion, MotionCmd, ReadSrc, RegisterName, StashArgs, StashListArg, To, Verb, VerbCmd, WriteDest
 };
 use crate::readline::editmode::{EditMode, ModeReport};
 use crate::readline::history::History;
@@ -389,6 +388,7 @@ pub fn ex_command_name_is_valid(name: &str) -> bool {
     || "edit".starts_with(name)
     || "substitute".starts_with(name)
     || "global".starts_with(name)
+    || "stash".starts_with(name)
 }
 
 pub fn parse_ex_command(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<String>> {
@@ -421,6 +421,7 @@ pub fn parse_ex_command(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Opt
     _ if "write".starts_with(&cmd_name) => parse_write(chars),
     _ if "edit".starts_with(&cmd_name) => parse_edit(chars),
     _ if "substitute".starts_with(&cmd_name) => parse_substitute(chars),
+    _ if "stash".starts_with(&cmd_name) => parse_stash(chars),
     _ => Err(None),
   }
 }
@@ -432,6 +433,59 @@ pub fn parse_normal(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<
 
   let seq: String = chars.collect();
   Ok(Some(Verb::Normal(seq)))
+}
+
+pub fn parse_stash(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<String>> {
+  chars
+    .peeking_take_while(|c| c.is_whitespace())
+    .for_each(drop);
+  let arg_names = [
+    "pop",
+    "drop",
+    "apply",
+    "insert",
+    "swap",
+    "list",
+  ];
+
+  let mut arg = String::new();
+  while chars.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
+    arg.push(chars.next().unwrap());
+  }
+
+  if arg.is_empty() {
+    return Ok(Some(Verb::Stash(StashArgs::Push(None))))
+  } else if !arg_names.contains(&arg.as_str()) {
+    return Ok(Some(Verb::Stash(StashArgs::Push(Some(arg)))));
+  }
+
+  chars
+    .peeking_take_while(|c| c.is_whitespace())
+    .for_each(drop);
+  let mut name = String::new();
+
+  while chars.peek().is_some_and(|c| !c.is_whitespace()) {
+    name.push(chars.next().unwrap());
+  }
+
+  let name = (!name.is_empty()).then_some(name);
+  match arg.as_str() {
+    _ if "pop".starts_with(arg.as_str()) => Ok(Some(Verb::Stash(StashArgs::Pop(name)))),
+    _ if "drop".starts_with(arg.as_str()) => Ok(Some(Verb::Stash(StashArgs::Drop(name)))),
+    _ if "apply".starts_with(arg.as_str()) => Ok(Some(Verb::Stash(StashArgs::Apply(name)))),
+    _ if "insert".starts_with(arg.as_str()) => Ok(Some(Verb::Stash(StashArgs::Insert(name)))),
+    _ if "swap".starts_with(arg.as_str()) => Ok(Some(Verb::Stash(StashArgs::Swap(name)))),
+    _ if "list".starts_with(arg.as_str()) => {
+      let target = name.map(|n| match n.as_str() {
+        _ if "stack".starts_with(arg.as_str()) => Ok(Some(StashListArg::Stack)),
+        _ if "named".starts_with(arg.as_str()) => Ok(Some(StashListArg::Named)),
+        _ => Err(Some(format!("Invalid stash list target: {}", n))),
+      }).transpose()?.flatten();
+
+      Ok(Some(Verb::Stash(StashArgs::List(target))))
+    }
+    _ => Err(Some(format!("Unknown stash command: {}", arg))),
+  }
 }
 
 pub fn parse_edit(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<String>> {

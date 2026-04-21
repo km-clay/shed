@@ -254,3 +254,27 @@ bitflags::bitflags! {
     const CTRL_ALT_SHIFT = Self::CTRL.bits() | Self::ALT.bits() | Self::SHIFT.bits();
   }
 }
+
+impl From<u16> for ModKeys {
+  fn from(param: u16) -> Self {
+    // CSI modifiers: param = 1 + (shift) + (alt*2) + (ctrl*4) + (meta*8)
+    let bits = param.saturating_sub(1);
+    let mut mods = ModKeys::empty();
+    if bits & 1 != 0 {
+      mods |= ModKeys::SHIFT;
+    }
+    if bits & 2 != 0 {
+      mods |= ModKeys::ALT;
+    }
+    if bits & 4 != 0 {
+      mods |= ModKeys::CTRL;
+    }
+    mods
+  }
+}
+
+impl From<&u16> for ModKeys {
+  fn from(value: &u16) -> Self {
+    ModKeys::from(*value)
+  }
+}

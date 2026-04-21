@@ -27,6 +27,7 @@ Press {Tab} to follow cross-reference links in the help pages.
   `help scripting`    Shell scripting language reference           |scripting|
   `help variables`    Variables, assignment, arrays, attributes    |variables|
   `help arith`        Arithmetic expansion: `$(( ))` syntax          |arith|
+  `help commands`     Common command cheat sheet                   |commands|
   `help glob`         Pathname expansion and wildcards             |glob|
   `help param`        Parameter expansion: `${}` operators           |param|
   `help redirect`     Redirection, pipes, heredocs                 |redirect|
@@ -53,21 +54,20 @@ Press {Tab} to follow cross-reference links in the help pages.
       `k` / {Up}          Scroll up one line
       `h` / {Left}        Navigate to previous open page
       `l` / {Right}       Navigate to next open page
-      `d`                 Scroll down 15 lines
-      `u`                 Scroll up 15 lines
-      `g`                 Jump to top of page
-      `G`                 Jump to bottom of page
+      `d`               Scroll down 15 lines
+      `u`               Scroll up 15 lines
+      `g`               Jump to top of page
+      `G`               Jump to bottom of page
       `q` / {Esc}         Quit the pager
 
   2.2 Search                                     *help-search*
 
       `/`{pattern}        Search forward
       `?`{pattern}        Search backward
-      `n`                 Jump to next match
-      `N`                 Jump to previous match
+      `n`               Jump to next match
+      `N`               Jump to previous match
 
-      Search results are highlighted. Pressing {Esc} clears the
-      search.
+      Search results are highlighted as you type.
 
   2.3 Cross-Reference Navigation                 *help-hints*
 

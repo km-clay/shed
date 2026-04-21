@@ -7,12 +7,12 @@ use scopeguard::defer;
 use yansi::Color;
 
 use crate::{
-  libsh::{error::ShResult, sys::TTY_FILENO, utils::AutoCmdVecUtils},
+  libsh::{error::ShResult, utils::AutoCmdVecUtils},
   prelude::*,
   procio::{IoMode, borrow_fd},
   sherr,
   signal::{disable_reaping, enable_reaping},
-  state::{self, AutoCmdKind, CmdTimer, read_logic, set_status, with_vars, write_jobs, write_meta},
+  state::{self, AutoCmdKind, CmdTimer, read_logic, set_status, with_term, with_vars, write_jobs, write_meta},
 };
 
 pub const SIG_EXIT_OFFSET: i32 = 128;
@@ -470,15 +470,11 @@ impl Job {
   }
 }
 
-pub fn term_ctlr() -> Pid {
-  tcgetpgrp(borrow_fd(*TTY_FILENO)).unwrap_or(getpgrp())
-}
-
 /// Calls attach_tty() on the shell's process group to retake control of the
 /// terminal
 pub fn take_term() -> ShResult<()> {
   // take the terminal back
-  attach_tty(getpgrp())?;
+  with_term(|t| t.attach(getpgrp()))?;
 
   // send SIGWINCH to tell readline to update its window size in case it changed while we were in the background
   killpg(getpgrp(), Signal::SIGWINCH)?;
@@ -588,7 +584,7 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
   let mut code = 0;
   let mut was_stopped = false;
   if interactive {
-    attach_tty(job.pgid())?;
+    with_term(|t| t.attach(job.pgid()))?;
   }
   disable_reaping();
   defer! {
@@ -651,41 +647,4 @@ pub fn dispatch_job(mut job: Job, is_bg: bool, interactive: bool) -> ShResult<()
     wait_fg(job, interactive)?;
   }
   Ok(())
-}
-
-pub fn attach_tty(pgid: Pid) -> ShResult<()> {
-  // If we aren't attached to a terminal, the pgid already controls it, or the
-  // process group does not exist Then return ok
-  if !isatty(*TTY_FILENO).unwrap_or(false) || pgid == term_ctlr() || killpg(pgid, None).is_err() {
-    return Ok(());
-  }
-
-  if pgid == getpgrp() && term_ctlr() != getpgrp() {
-    kill(term_ctlr(), Signal::SIGTTOU).ok();
-  }
-
-  let mut new_mask = SigSet::empty();
-  let mut mask_bkup = SigSet::empty();
-
-  new_mask.add(Signal::SIGTSTP);
-  new_mask.add(Signal::SIGTTIN);
-  new_mask.add(Signal::SIGTTOU);
-
-  pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&new_mask), Some(&mut mask_bkup))?;
-
-  let result = tcsetpgrp(borrow_fd(*TTY_FILENO), pgid);
-
-  pthread_sigmask(
-    SigmaskHow::SIG_SETMASK,
-    Some(&mask_bkup),
-    Some(&mut new_mask),
-  )?;
-
-  match result {
-    Ok(_) => Ok(()),
-    Err(_e) => {
-      tcsetpgrp(borrow_fd(*TTY_FILENO), getpgrp())?;
-      Ok(())
-    }
-  }
 }

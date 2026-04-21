@@ -34,14 +34,15 @@ pub mod test; // [[ ]] thing
 pub mod times;
 pub mod trap;
 pub mod varcmds;
+pub mod stash;
 
-pub const BUILTINS: [&str; 58] = [
+pub const BUILTINS: [&str; 59] = [
   ".", ":", "alias", "autocmd", "bg", "break", "builtin", "cd", "compgen", "complete", "continue",
   "dirs", "eval", "exec", "exit", "export", "false", "fg", "fpop", "fpush", "hash", "help", "hist",
   "jobs", "keymap", "kill", "local", "map", "msg", "pop", "popd", "push", "pushd", "pwd", "read",
   "readkey", "readonly", "return", "rotate", "seek", "set", "shift", "shopt", "source", "times",
   "trap", "true", "type", "ulimit", "umask", "unalias", "wait", "command", "disown", "echo", "fc",
-  "getopts", "unset",
+  "getopts", "unset", "stash"
 ];
 
 // Join all of the word-split arguments into a single string

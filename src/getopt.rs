@@ -27,6 +27,7 @@ pub enum Opt {
 pub enum OptArg {
   None,
   Single,
+  Exact(usize),
   List,
 }
 
@@ -171,6 +172,30 @@ pub fn sort_tks(tokens: Vec<Tk>, opt_specs: &[OptSpec], strict: bool) -> GetOptR
               };
               opts.push(opt);
             }
+            OptArg::Exact(n) => {
+              let mut args = vec![];
+              while let Some((w, _)) = words_iter.peek() {
+                if w.starts_with('-') || args.len() >= *n {
+                  break;
+                }
+                args.push(words_iter.next().unwrap().0);
+              }
+              if args.len() != *n {
+                return Err(sherr!(
+                  ParseErr,
+                  "Option {} expects exactly {} arguments, but got {}",
+                  opt.to_string().fg(next_color()),
+                  n,
+                  args.len()
+                ));
+              }
+              let opt = match opt {
+                Opt::Long(ref opt) => Opt::LongWithList(opt.to_string(), args),
+                Opt::Short(opt) => Opt::ShortWithList(opt, args),
+                _ => unreachable!(),
+              };
+              opts.push(opt);
+            }
             OptArg::List => {
               let mut args = vec![];
               while let Some((w, _)) = words_iter.peek() {
@@ -265,10 +290,34 @@ fn sort_tks_raw(
               };
               opts.push(opt);
             }
+            OptArg::Exact(n) => {
+              let mut args = vec![];
+              while let Some(tk) = tokens_iter.peek() {
+                if tk.as_str().starts_with('-') || args.len() >= *n {
+                  break;
+                }
+                args.push(tokens_iter.next().unwrap().to_string());
+              }
+              if args.len() != *n {
+                return Err(sherr!(
+                  ParseErr,
+                  "Option {} expects exactly {} arguments, but got {}",
+                  opt.to_string().fg(next_color()),
+                  n,
+                  args.len()
+                ));
+              }
+              let opt = match opt {
+                Opt::Long(ref opt) => Opt::LongWithList(opt.to_string(), args),
+                Opt::Short(opt) => Opt::ShortWithList(opt, args),
+                _ => unreachable!(),
+              };
+              opts.push(opt);
+            }
             OptArg::List => {
               let mut args = vec![];
               while let Some(t) = tokens_iter.peek() {
-                if t.to_string().starts_with('-') {
+                if t.as_str().starts_with('-') {
                   break;
                 }
                 args.push(tokens_iter.next().unwrap().to_string());

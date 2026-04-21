@@ -13,7 +13,7 @@ use crate::parse::lex::is_hard_sep;
 use crate::prelude::*;
 use crate::readline::markers;
 use crate::sherr;
-use crate::state::{ArrIndex, read_shopts, read_vars};
+use crate::state::{read_shopts, read_vars};
 
 pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   let mut result = String::new();
@@ -80,14 +80,6 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   let mut var_name = String::new();
   let mut brace_depth: i32 = 0;
   let mut inner_brace_depth: i32 = 0;
-  let mut bracket_depth: i32 = 0;
-  let mut idx_brace_depth: i32 = 0;
-  let mut idx_raw = String::new();
-  let mut idx = None;
-  let mut split_start = None;
-  let mut split_len = None;
-  let mut split_raw = String::new();
-  let mut in_operator = false;
   match_loop!(chars.peek() => &ch => ch, {
     markers::SUBSH if var_name.is_empty() => {
       chars.next(); // now safe to consume
@@ -112,109 +104,10 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
       chars.next(); // consume the brace
       brace_depth += 1;
     }
-    '}' if brace_depth > 0 && bracket_depth == 0 && inner_brace_depth == 0 => {
+    '}' if brace_depth > 0 && inner_brace_depth == 0 => {
       chars.next(); // consume the brace
-      let val = if let Some(idx) = idx {
-        match idx {
-          ArrIndex::AllSplit => {
-            let arg_sep = markers::ARG_SEP.to_string();
-            let elems = read_vars(|v| v.get_arr_elems(&var_name));
-            let start = split_start.unwrap_or(0);
-            let end = start + split_len.unwrap_or(elems.len().saturating_sub(start));
-            elems[start..end.min(elems.len())].join(&arg_sep)
-          }
-          ArrIndex::ArgCount => read_vars(|v| v.get_arr_elems(&var_name)).len().to_string(),
-          ArrIndex::AllJoined => {
-            let ifs = read_vars(|v| v.try_get_var("IFS"))
-              .unwrap_or_else(|| " \t\n".to_string())
-              .chars()
-              .next()
-              .unwrap_or(' ')
-              .to_string();
-
-            let elems = read_vars(|v| v.get_arr_elems(&var_name));
-            let start = split_start.unwrap_or(0);
-            let end = start + split_len.unwrap_or(elems.len().saturating_sub(start));
-            elems[start..end.min(elems.len())].join(&ifs)
-          }
-          _ => read_vars(|v| v.index_var(&var_name, idx))?,
-        }
-      } else {
-        perform_param_expansion(&var_name)?
-      };
+      let val = perform_param_expansion(&var_name)?;
       return Ok(val);
-    }
-    '[' if brace_depth > 0 && bracket_depth == 0 && inner_brace_depth == 0 && !in_operator => {
-      chars.next(); // consume the bracket
-      bracket_depth += 1;
-    }
-    ']' if bracket_depth > 0 && idx_brace_depth == 0 => {
-      bracket_depth -= 1;
-      chars.next(); // consume the bracket
-      if bracket_depth == 0 {
-        let expanded_idx = expand_raw(&mut idx_raw.chars().peekable())?;
-        idx = Some(expanded_idx.parse::<ArrIndex>().map_err(|_| {
-          sherr!(
-            ParseErr,
-            "Array index must be a number, got '{expanded_idx}'",
-          )
-        })?);
-      }
-    }
-    ':' if matches!(idx, Some(ArrIndex::AllSplit | ArrIndex::AllJoined)) => {
-      chars.next();
-      match_loop!(chars.peek() => ch, {
-        ':' => {
-          chars.next();
-          let expanded = expand_raw(&mut split_raw.chars().peekable())?;
-          let Ok(split_idx) = expanded.parse::<usize>() else {
-            return Err(sherr!(
-                ParseErr,
-                "Split index must be a number, got '{expanded}'",
-            ));
-          };
-          if split_start.is_none() {
-            split_start = Some(split_idx);
-          } else if split_len.is_none() {
-            split_len = Some(split_idx);
-          } else {
-            return Err(sherr!(ParseErr, "Too many ':' in split index",));
-          }
-          split_raw.clear();
-        }
-        '}' => {
-          let expanded = expand_raw(&mut split_raw.chars().peekable())?;
-          let Ok(split_idx) = expanded.parse::<usize>() else {
-            return Err(sherr!(
-                ParseErr,
-                "Split index must be a number, got '{expanded}'",
-            ));
-          };
-
-          if split_start.is_none() {
-            split_start = Some(split_idx);
-          } else if split_len.is_none() {
-            split_len = Some(split_idx);
-          } else {
-            return Err(sherr!(ParseErr, "Too many ':' in split index",));
-          }
-          break;
-        }
-        _ => {
-          split_raw.push(*ch);
-          chars.next();
-        }
-      });
-    }
-    ch if bracket_depth > 0 => {
-      chars.next(); // safe to consume
-      if ch == '{' {
-        idx_brace_depth += 1;
-      }
-      if ch == '}' {
-        idx_brace_depth -= 1;
-      }
-      idx_raw.push(ch);
     }
     ch if brace_depth > 0 => {
       chars.next(); // safe to consume
@@ -223,9 +116,6 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
       }
       if ch == '}' {
         inner_brace_depth -= 1;
-      }
-      if !in_operator && matches!(ch, '#' | '%' | ':' | '/' | '-' | '+' | '=' | '?' | '!') {
-        in_operator = true;
       }
       var_name.push(ch);
     }

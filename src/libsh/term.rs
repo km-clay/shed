@@ -1,19 +1,6 @@
-use nix::{libc::STDOUT_FILENO, unistd::write};
 use yansi::{Paint, Painted};
 
-use crate::{libsh::error::ShResult, match_loop, procio::borrow_fd, sherr};
-
-/// Enables or disables bracketed paste mode in the terminal.
-pub fn set_bracketed_paste(on: bool) -> ShResult<()> {
-  let stdout = borrow_fd(STDOUT_FILENO);
-
-  let control = if on { b"\x1b[?2004h" } else { b"\x1b[?2004l" };
-
-  write(stdout, control)
-    .map_err(|e| sherr!(InternalErr, "Failed to enable bracketed paste: {e}"))?;
-
-  Ok(())
-}
+use crate::{libsh::error::ShResult, match_loop, sherr};
 
 /// Build an ansi color escape sequence from a plain english description
 pub fn color_from_description(desc: &str) -> ShResult<String> {

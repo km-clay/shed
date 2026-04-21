@@ -1061,15 +1061,6 @@ impl ParseStream {
     Ok(result)
   }
   fn parse_compound(&mut self) -> ShResult<Option<Node>> {
-    log::debug!(
-      "PARSE: parse_compound called, peek={:?}",
-      self.peek_tk().map(|t| format!(
-        "{} class={:?} flags={:?}",
-        t.span.as_str(),
-        t.class,
-        t.flags
-      ))
-    );
     // parse only a compound command.
     // used by function definition
     // because any compound command is a valid
@@ -1135,24 +1126,12 @@ impl ParseStream {
     let body;
 
     let has_func_kw = self.check_keyword("function");
-    log::debug!(
-      "PARSE: parse_func_def called, has_func_kw={}, peek={:?}",
-      has_func_kw,
-      self.peek_tk().map(|t| t.span.as_str().to_string())
-    );
 
     if has_func_kw {
-      log::debug!("PARSE: consuming 'function' keyword");
       node_tks.push(self.next_tk().unwrap());
     }
 
     if !self.check_flags(TkFlags::FUNCNAME) {
-      log::debug!(
-        "PARSE: no FUNCNAME flag on next token, peek={:?}",
-        self
-          .peek_tk()
-          .map(|t| format!("{} flags={:?}", t.span.as_str(), t.flags))
-      );
       if has_func_kw {
         bail!(
           self,
@@ -1165,15 +1144,9 @@ impl ParseStream {
     }
 
     let name_tk = self.next_tk().unwrap();
-    log::debug!(
-      "PARSE: func name token='{}', flags={:?}",
-      name_tk.span.as_str(),
-      name_tk.flags
-    );
     node_tks.push(name_tk.clone());
     let name = name_tk.clone();
     let name_raw: Rc<str> = name.as_str().into();
-    log::debug!("PARSE: name_raw='{}'", name_raw);
 
     self.catch_separator(&mut node_tks);
     let mut src = name_tk.span.span_source().clone();
@@ -1545,15 +1518,10 @@ impl ParseStream {
     Ok(Some(cmd))
   }
   fn parse_func_keyword(&mut self) -> ShResult<Option<Node>> {
-    log::debug!(
-      "PARSE: parse_func_keyword called, peek={:?}",
-      self.peek_tk().map(|t| t.span.as_str().to_string())
-    );
     if !self.check_keyword("function") || !self.next_tk_is_some() {
       return Ok(None);
     }
 
-    log::debug!("PARSE: parse_func_keyword matched, delegating to parse_func_def");
     let Some(func_def) = self.parse_func_def()? else {
       bail!(
         self,
@@ -2047,6 +2015,7 @@ impl ParseStream {
             argv.push(tk.clone());
             node_tks.push(tk.clone());
           }
+					TkRule::HereDoc {..} |
           TkRule::Redir => {
             node_tks.push(tk.clone());
             let ctx = self.context.clone();

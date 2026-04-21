@@ -1,6 +1,6 @@
 use std::{
   collections::HashSet,
-  fmt::{Debug, Display, Write},
+  fmt::{Debug, Display},
   path::PathBuf,
   rc::Rc,
 };
@@ -12,7 +12,7 @@ use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   expand::escape_str,
   libsh::{
-    error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, sys::TTY_FILENO, ui,
+    error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, ui,
     utils::TkVecUtils,
   },
   match_loop,
@@ -26,12 +26,11 @@ use crate::{
     keys::{KeyCode as C, KeyEvent as K, ModKeys as M},
     linebuf::LineBuf,
     markers::{self, is_marker},
-    term::{LineWriter, TermWriter, calc_str_width, get_win_size},
+    term::calc_str_width,
   },
   state::{
-    self, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars,
-    write_vars,
-  },
+    self, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, with_term, write_vars
+  }, write_term,
 };
 
 /// Compat shim: replaces the old ClampedUsize type that was removed in the linebuf refactor.
@@ -791,11 +790,11 @@ pub trait Completer {
     let (s, e) = self.token_span();
     orig.get(s..e).unwrap_or(orig)
   }
-  fn draw(&mut self, writer: &mut TermWriter) -> ShResult<usize>;
-  fn clear(&mut self, _writer: &mut TermWriter) -> ShResult<()> {
+  fn draw(&mut self) -> ShResult<usize>;
+  fn clear(&mut self) -> ShResult<()> {
     Ok(())
   }
-  fn set_prompt_line_context(&mut self, _line_width: u16, _cursor_col: u16) {}
+  fn set_prompt_line_context(&mut self, _line_width: usize, _cursor_col: usize) {}
   fn handle_key(&mut self, key: K) -> ShResult<CompResponse>;
   fn get_completed_line(&self, candidate: &str) -> String;
 }
@@ -908,14 +907,14 @@ impl From<Candidate> for ScoredCandidate {
 
 #[derive(Debug, Clone)]
 pub struct FuzzyLayout {
-  rows: u16,
-  cols: u16,
-  cursor_col: u16,
+  rows: usize,
+  cols: usize,
+  cursor_col: usize,
   /// Width of the prompt line above the `\n` that starts the fuzzy window.
   /// If PSR was drawn, this is `t_cols`; otherwise the content width.
-  preceding_line_width: u16,
+  preceding_line_width: usize,
   /// Cursor column on the prompt line before the fuzzy window was drawn.
-  preceding_cursor_col: u16,
+  preceding_cursor_col: usize,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -982,8 +981,8 @@ pub struct FuzzySelector {
   max_height: usize,
   scroll_offset: usize,
   active: bool,
-  prompt_line_width: u16,
-  prompt_cursor_col: u16,
+  prompt_line_width: usize,
+  prompt_cursor_col: usize,
   title: String,
 }
 
@@ -1078,7 +1077,7 @@ impl FuzzySelector {
       .map(|c| c.candidate.clone())
   }
 
-  pub fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
+  pub fn set_prompt_line_context(&mut self, line_width: usize, cursor_col: usize) {
     self.prompt_line_width = line_width;
     self.prompt_cursor_col = cursor_col;
   }
@@ -1188,18 +1187,16 @@ impl FuzzySelector {
     }
   }
 
-  pub fn draw(&mut self, writer: &mut TermWriter) -> ShResult<usize> {
+  pub fn draw(&mut self) -> ShResult<usize> {
     if !self.active {
       return Ok(0);
     }
-    let (cols, _) = get_win_size(*TTY_FILENO);
-    let cols = cols as usize;
+    let cols = with_term(|t| t.t_cols());
 
-    let pad = |buf: &mut String, content: &str, fill: &str, right_border: &str| {
-      ui::pad_line(buf, content, fill, right_border, cols);
+    let pad = |content: &str, fill: &str, right_border: &str| {
+      ui::pad_line(content, fill, right_border, cols);
     };
 
-    let mut buf = String::new();
     let cursor_pos = self.cursor.get();
     let offset = self.scroll_offset;
     let number_candidates = self.number_candidates;
@@ -1213,7 +1210,7 @@ impl FuzzySelector {
     let query = self.query.get_window();
     let title = self.title.clone();
     let visible = self.get_window();
-    let mut rows: u16 = 0;
+    let mut rows: usize = 0;
 
     // ╭─ Title ──────────────────╮
     let title_content = format!(
@@ -1222,12 +1219,12 @@ impl FuzzySelector {
       ui::HOR_LINE,
       title
     );
-    pad(&mut buf, &title_content, ui::HOR_LINE, ui::TOP_RIGHT);
+    pad(&title_content, ui::HOR_LINE, ui::TOP_RIGHT);
     rows += 1;
 
     // │ > query                  │
     let prompt_content = format!("{} {} {}", ui::VERT_LINE, Self::PROMPT_ARROW, query);
-    pad(&mut buf, &prompt_content, " ", ui::VERT_LINE);
+    pad(&prompt_content, " ", ui::VERT_LINE);
     rows += 1;
 
     // ├──filtered/total──────────┤
@@ -1238,7 +1235,7 @@ impl FuzzySelector {
       num_filtered,
       num_candidates
     );
-    pad(&mut buf, &sep_content, ui::HOR_LINE, ui::TREE_RIGHT);
+    pad(&sep_content, ui::HOR_LINE, ui::TREE_RIGHT);
     rows += 1;
 
     // Candidate lines
@@ -1268,7 +1265,7 @@ impl FuzzySelector {
         }
 
         let mut line = line.trim_end().replace('\t', "    ");
-        if calc_str_width(&line) >= col_lim as u16 {
+        if calc_str_width(&line) >= col_lim {
           line.truncate(col_lim.saturating_sub(6));
           line.push_str("...");
         }
@@ -1291,7 +1288,7 @@ impl FuzzySelector {
           format!("{} {}{line}\x1b[0m", ui::VERT_LINE, selector)
         };
 
-        pad(&mut buf, &left, " ", ui::VERT_LINE);
+        pad(&left, " ", ui::VERT_LINE);
         rows += 1;
         drew_number = true;
         lines_drawn += 1;
@@ -1299,8 +1296,7 @@ impl FuzzySelector {
     }
 
     // ╰──────────────────────────╯
-    write!(
-      buf,
+    write_term!(
       "{}{}{}",
       ui::BOT_LEFT,
       ui::HOR_LINE.repeat(cols.saturating_sub(2)),
@@ -1316,59 +1312,56 @@ impl FuzzySelector {
       .linebuf
       .cursor_to_flat()
       .saturating_sub(self.query.scroll_offset);
-    let cursor_col = (cursor_in_window + 4) as u16;
-    write!(buf, "\x1b[{lines_below_prompt}A\r\x1b[{cursor_col}C").unwrap();
+    let cursor_col = cursor_in_window + 4;
+    write_term!("\x1b[{lines_below_prompt}A\r\x1b[{cursor_col}C").unwrap();
 
     let new_layout = FuzzyLayout {
       rows,
-      cols: cols as u16,
+      cols,
       cursor_col,
       preceding_line_width: self.prompt_line_width,
       preceding_cursor_col: self.prompt_cursor_col,
     };
-    writer.flush_write(&buf)?;
     self.old_layout = Some(new_layout);
 
-    Ok(rows as usize)
+    Ok(rows)
   }
 
-  pub fn clear(&mut self, writer: &mut TermWriter) -> ShResult<()> {
+  pub fn clear(&mut self) -> ShResult<()> {
     if let Some(layout) = self.old_layout.take() {
-      let (new_cols, _) = get_win_size(*TTY_FILENO);
-      let total_cells = layout.rows as u32 * layout.cols as u32;
+      let new_cols = with_term(|t| t.t_cols());
+      let total_cells = layout.rows * layout.cols;
       let physical_rows = if new_cols > 0 {
-        total_cells.div_ceil(new_cols as u32) as u16
+        total_cells.div_ceil(new_cols)
       } else {
         layout.rows
       };
-      let cursor_offset = layout.cols as u32 + layout.cursor_col as u32;
+      let cursor_offset = layout.cols + layout.cursor_col;
       let cursor_phys_row = if new_cols > 0 {
-        (cursor_offset / new_cols as u32) as u16
+        cursor_offset / new_cols
       } else {
         1
       };
       let lines_below = physical_rows.saturating_sub(cursor_phys_row + 1);
 
       let gap_extra = if new_cols > 0 && layout.preceding_line_width > new_cols {
-        let wrap_rows = (layout.preceding_line_width as u32).div_ceil(new_cols as u32) as u16;
+        let wrap_rows = (layout.preceding_line_width).div_ceil(new_cols);
         let cursor_wrap_row = layout.preceding_cursor_col / new_cols;
         wrap_rows.saturating_sub(cursor_wrap_row + 1)
       } else {
         0
       };
 
-      let mut buf = String::new();
       if lines_below > 0 {
-        write!(buf, "\x1b[{}B", lines_below).unwrap();
+        write_term!("\x1b[{lines_below}B").unwrap();
       }
       for _ in 0..physical_rows {
-        buf.push_str("\x1b[2K\x1b[A");
+        write_term!("\x1b[2K\x1b[A").unwrap();
       }
-      buf.push_str("\x1b[2K");
+      write_term!("\x1b[2K").unwrap();
       for _ in 0..gap_extra {
-        buf.push_str("\x1b[A\x1b[2K");
+        write_term!("\x1b[2K\x1b[A").unwrap();
       }
-      writer.flush_write(&buf)?;
     }
     Ok(())
   }
@@ -1387,7 +1380,7 @@ impl Completer for FuzzyCompleter {
   fn all_candidates(&self) -> Vec<Candidate> {
     self.selector.candidates.clone()
   }
-  fn set_prompt_line_context(&mut self, line_width: u16, cursor_col: u16) {
+  fn set_prompt_line_context(&mut self, line_width: usize, cursor_col: usize) {
     self
       .selector
       .set_prompt_line_context(line_width, cursor_col);
@@ -1483,11 +1476,11 @@ impl Completer for FuzzyCompleter {
       SelectorResponse::Consumed => Ok(CompResponse::Consumed),
     }
   }
-  fn clear(&mut self, writer: &mut TermWriter) -> ShResult<()> {
-    self.selector.clear(writer)
+  fn clear(&mut self) -> ShResult<()> {
+    self.selector.clear()
   }
-  fn draw(&mut self, writer: &mut TermWriter) -> ShResult<usize> {
-    self.selector.draw(writer)
+  fn draw(&mut self) -> ShResult<usize> {
+    self.selector.draw()
   }
   fn reset(&mut self) {
     self.completer.reset();
@@ -1559,7 +1552,7 @@ impl Completer for SimpleCompleter {
     self.token_span
   }
 
-  fn draw(&mut self, _writer: &mut TermWriter) -> ShResult<usize> {
+  fn draw(&mut self) -> ShResult<usize> {
     Ok(0)
   }
 
@@ -1947,12 +1940,10 @@ mod tests {
     state::{VarFlags, VarKind, write_vars},
     testutil::TestGuard,
   };
-  use std::os::fd::AsRawFd;
-
   fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
     let g = TestGuard::new();
     let prompt = Prompt::default();
-    let vi = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd())
+    let vi = ShedLine::new_no_hist(prompt)
       .unwrap()
       .with_initial(initial);
     (vi, g)
@@ -2293,8 +2284,9 @@ mod tests {
     let (mut vi, _g) = test_vi("");
     std::env::set_current_dir(&tmp).unwrap();
 
-    vi.feed_bytes(b"echo hello\t");
-    let _ = vi.process_input();
+    crate::state::with_term(|t| t.feed_bytes(b"echo hello\t"));
+    let keys = crate::state::with_term(|t| t.drain_keys()).unwrap();
+    let _ = vi.process_input(keys);
 
     let line = vi.editor.joined();
     assert!(
@@ -2315,8 +2307,9 @@ mod tests {
     std::env::set_current_dir(&tmp).unwrap();
 
     // User types "echo my\ " with the space already escaped
-    vi.feed_bytes(b"echo my\\ \t");
-    let _ = vi.process_input();
+    crate::state::with_term(|t| t.feed_bytes(b"echo my\\ \t"));
+    let keys = crate::state::with_term(|t| t.drain_keys()).unwrap();
+    let _ = vi.process_input(keys);
 
     let line = vi.editor.joined();
     // The user's "my\ " should be preserved, not double-escaped to "my\\\ "
@@ -2344,8 +2337,9 @@ mod tests {
     std::env::set_current_dir(&tmp).unwrap();
 
     // Type "echo unique_shed_test" then press Tab
-    vi.feed_bytes(b"echo unique_shed_test\t");
-    let _ = vi.process_input();
+    crate::state::with_term(|t| t.feed_bytes(b"echo unique_shed_test\t"));
+    let keys = crate::state::with_term(|t| t.drain_keys()).unwrap();
+    let _ = vi.process_input(keys);
 
     let line = vi.editor.joined();
     assert!(
@@ -2364,8 +2358,9 @@ mod tests {
     let (mut vi, _g) = test_vi("");
     std::env::set_current_dir(&tmp).unwrap();
 
-    vi.feed_bytes(b"cd mysub\t");
-    let _ = vi.process_input();
+    crate::state::with_term(|t| t.feed_bytes(b"cd mysub\t"));
+    let keys = crate::state::with_term(|t| t.drain_keys()).unwrap();
+    let _ = vi.process_input(keys);
 
     let line = vi.editor.joined();
     assert!(
@@ -2385,8 +2380,9 @@ mod tests {
     let (mut vi, _g) = test_vi("");
     std::env::set_current_dir(&tmp).unwrap();
 
-    vi.feed_bytes(b"cmd --opt=eqf\t");
-    let _ = vi.process_input();
+    crate::state::with_term(|t| t.feed_bytes(b"cmd --opt=eqf\t"));
+    let keys = crate::state::with_term(|t| t.drain_keys()).unwrap();
+    let _ = vi.process_input(keys);
 
     let line = vi.editor.joined();
     assert!(

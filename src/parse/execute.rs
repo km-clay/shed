@@ -6,40 +6,10 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
   builtin::{
-    BUILTINS,
-    alias::{alias, unalias},
-    arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate},
-    autocmd::autocmd,
-    cd::cd,
-    complete::{compgen_builtin, complete_builtin},
-    dirstack::{dirs, popd, pushd},
-    echo::echo,
-    eval, exec,
-    fixcmd::fixcmd,
-    flowctl::flowctl,
-    getopts::getopts,
-    hash::hash_builtin,
-    help::help,
-    hist::hist_builtin,
-    intro,
-    jobctl::{self, JobBehavior, continue_job, disown, jobs, kill_builtin},
-    keymap, map,
-    msg::msg,
-    pwd::pwd,
-    read::{self, read_builtin},
-    resource::{ulimit, umask_builtin},
-    seek::seek,
-    set::set_builtin,
-    shift::shift,
-    shopt::shopt,
-    source::source,
-    test::double_bracket_test,
-    times::times,
-    trap::{TrapTarget, trap},
-    varcmds::{export, local, readonly, unset},
+    BUILTINS, alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, fixcmd::fixcmd, flowctl::flowctl, getopts::getopts, hash::hash_builtin, help::help, hist::hist_builtin, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs, kill_builtin}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, stash::stash, test::double_bracket_test, times::times, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
   },
   expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
-  jobs::{ChildProc, JobStack, attach_tty, dispatch_job},
+  jobs::{ChildProc, JobStack, dispatch_job},
   libsh::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
     guards::{scope_guard, var_ctx_guard},
@@ -52,8 +22,7 @@ use crate::{
   shopt::xtrace_print,
   signal::{check_signals, signals_pending},
   state::{
-    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_jobs, write_logic,
-    write_meta, write_vars,
+    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, read_vars, with_term, write_jobs, write_logic, write_meta, write_vars
   },
 };
 
@@ -949,7 +918,7 @@ impl Dispatcher {
       };
 
       if !tty_attached && let Some(pgid) = tty_controller(self) {
-        attach_tty(pgid).ok();
+        with_term(|t| t.attach(pgid)).ok();
         tty_attached = true;
       }
 
@@ -1122,6 +1091,7 @@ impl Dispatcher {
       "hash" => hash_builtin(cmd),
       "times" => times(cmd),
       "kill" => kill_builtin(cmd),
+      "stash" => stash(cmd),
       ":" => {
         state::set_status(0);
         Ok(())
@@ -1213,10 +1183,7 @@ impl Dispatcher {
           } else {
             our_pgid
           };
-          let _ = tcsetpgrp(
-            unsafe { BorrowedFd::borrow_raw(*crate::libsh::sys::TTY_FILENO) },
-            tty_pgid,
-          );
+          with_term(|t| t.attach(tty_pgid)).ok();
         }
       }
 

@@ -1,18 +1,19 @@
 use crate::libsh::strops::QuoteState;
-use crate::motion;
+use crate::{motion, write_term};
 use crate::parse::lex::LexStream;
 use crate::readline::editmode::remote::RemoteMode;
-use crate::readline::linebuf::ordered;
+use crate::readline::linebuf::{Pos, ordered};
+use ariadne::Span;
 use editcmd::{CmdFlags, EditCmd, Motion, MotionCmd, RegisterName, Verb, VerbCmd};
 use editmode::{CmdReplay, EditMode, ModeReport, ViInsert, ViNormal, ViReplace, ViVisual};
 use history::History;
 use itertools::Either;
 use keys::{KeyCode, KeyEvent, ModKeys};
 use linebuf::LineBuf;
+use nix::poll::PollTimeout;
 use std::collections::VecDeque;
-use std::fmt::Write;
 use std::rc::Rc;
-use term::{KeyReader, Layout, LineWriter, PollReader, TermWriter, get_win_size};
+use term::Layout;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -25,10 +26,9 @@ use crate::readline::editcmd::Direction;
 use crate::readline::editmode::emacs::Emacs;
 use crate::readline::editmode::{ViEx, ViVerbatim};
 use crate::readline::history::HistEntry;
-use crate::readline::term::{Pos, TermReader, calc_str_width};
+use crate::readline::term::{calc_str_width, clear_rows, move_cursor_to_end, redraw};
 use crate::state::{
-  self, AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_vars,
-  write_meta, write_vars,
+  self, AutoCmdKind, ShellParam, Terminal, Var, VarFlags, VarKind, read_logic, read_shopts, with_term, with_vars, write_meta, write_vars
 };
 use crate::{
   libsh::error::ShResult,
@@ -115,6 +115,13 @@ pub mod markers {
   pub const PROC_SUB_IN: Marker = '\u{e005}';
   /// Output process sub marker
   pub const PROC_SUB_OUT: Marker = '\u{e006}';
+  pub const HEREDOC_START: Marker = '\u{e00a}';
+	pub const HEREDOC_END: Marker = '\u{e00b}';
+	pub const HEREDOC_BODY: Marker = '\u{e00c}';
+  pub const PARAM_OP: Marker = '\u{e00d}';     // parameter expansion operator (##, %, :-, etc.)
+  pub const PARAM_OP_END: Marker = '\u{e00e}';
+  pub const PARAM_BODY: Marker = '\u{e00f}';    // pattern/value after operator
+  pub const PARAM_BODY_END: Marker = '\u{e010}';
   /// Marker for null expansion
   /// This is used for when "$@" or "$*" are used in quotes and there are no
   /// arguments Without this marker, it would be handled like an empty string,
@@ -127,20 +134,16 @@ pub mod markers {
 
   pub const VI_SEQ_EXP: Marker = '\u{e009}';
 
-  // Ex mode highlighting markers
-  pub const EX_LINE_ADDR: Marker = '\u{e00a}';
-  pub const EX_CMD: Marker = '\u{e00b}';
-  pub const EX_DELIM: Marker = '\u{e00c}';
-  pub const EX_PAT: Marker = '\u{e00d}';
-  pub const EX_SHELL_CMD: Marker = '\u{e00e}';
 
-  pub const END_MARKERS: [Marker; 7] = [
+  pub const END_MARKERS: [Marker; 9] = [
     VAR_SUB_END,
     CMD_SUB_END,
     PROC_SUB_END,
     STRING_DQ_END,
     STRING_SQ_END,
     SUBSH_END,
+    PARAM_OP_END,
+    PARAM_BODY_END,
     RESET,
   ];
   pub const TOKEN_LEVEL: [Marker; 10] = [
@@ -230,9 +233,7 @@ impl SimpleEditor {
     let Some(cmd) = self.mode.handle_key(key) else {
       return Ok(());
     };
-    log::debug!("ExEditor got cmd: {:?}", cmd);
     if self.should_grab_history(&cmd) {
-      log::debug!("Grabbing history for cmd: {:?}", cmd);
       self.scroll_history(cmd);
       return Ok(());
     }
@@ -354,10 +355,6 @@ impl Default for Prompt {
 }
 
 pub struct ShedLine {
-  pub reader: PollReader,
-  pub writer: TermWriter,
-  pub tty: RawFd,
-
   pub prompt: Prompt,
   pub highlighter: Highlighter,
   pub completer: Box<dyn Completer>,
@@ -379,15 +376,15 @@ pub struct ShedLine {
 }
 
 impl ShedLine {
-  pub fn new(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
-    Self::new_private(prompt, tty, true)
+  pub fn new(prompt: Prompt) -> ShResult<Self> {
+    Self::new_private(prompt, true)
   }
 
-  pub fn new_no_hist(prompt: Prompt, tty: RawFd) -> ShResult<Self> {
-    Self::new_private(prompt, tty, false)
+  pub fn new_no_hist(prompt: Prompt) -> ShResult<Self> {
+    Self::new_private(prompt, false)
   }
 
-  fn new_private(prompt: Prompt, tty: RawFd, with_hist: bool) -> ShResult<Self> {
+  fn new_private(prompt: Prompt, with_hist: bool) -> ShResult<Self> {
     let history = if with_hist {
       if let Some(conn) = state::get_db_conn() {
         History::new(conn, "shed_history")?
@@ -408,10 +405,7 @@ impl ShedLine {
       Box::new(Emacs::new()) as Box<dyn EditMode>
     };
     let mut new = Self {
-      reader: PollReader::new(),
-      writer: TermWriter::new(tty),
       prompt,
-      tty,
       completer: Box::new(FuzzyCompleter::default()),
       highlighter: Highlighter::new(),
       mode,
@@ -435,12 +429,9 @@ impl ShedLine {
       )
     })?;
     new.prompt.refresh();
-    new.writer.flush_write("\n")?; // ensure we start on a new line, in case the previous command didn't end with a newline
+    write_term!("\n").ok();
     new.print_line(false)?;
     Ok(new)
-  }
-  pub fn read(&mut self) -> ShResult<()> {
-    self.reader.read(self.tty)
   }
 
   pub fn with_initial(mut self, initial: &str) -> Self {
@@ -475,20 +466,9 @@ impl ShedLine {
     self.mode.history().unwrap_or(&mut self.history)
   }
 
-  /// Feed raw bytes from stdin into the reader's buffer
-  pub fn feed_bytes(&mut self, bytes: &[u8]) {
-    self.reader.feed_bytes(bytes);
-  }
-
   /// Mark that the display needs to be redrawn (e.g., after SIGWINCH)
   pub fn mark_dirty(&mut self) {
     self.needs_redraw = true;
-  }
-
-  pub fn fix_column(&mut self) -> ShResult<()> {
-    self
-      .writer
-      .fix_cursor_column(&mut TermReader::new(self.tty))
   }
 
   pub fn reset_active_widget(&mut self, full_redraw: bool) -> ShResult<()> {
@@ -593,11 +573,7 @@ impl ShedLine {
 
         let entry_idx = cmd.id().unwrap(); // history entries having an id to unwrap is an invariant.
         self.scroll_history_to(entry_idx);
-        {
-          let mut writer = std::mem::take(&mut self.writer);
-          self.focused_history().fuzzy_finder.clear(&mut writer)?;
-          self.writer = writer;
-        }
+        self.focused_history().fuzzy_finder.clear()?;
         self.focused_history().fuzzy_finder.reset();
 
         with_vars([("HIST_ENTRY".into(), cmd.content().to_string())], || {
@@ -620,11 +596,7 @@ impl ShedLine {
         post_cmds.exec();
 
         self.editor.clear_hint();
-        {
-          let mut writer = std::mem::take(&mut self.writer);
-          self.focused_history().fuzzy_finder.clear(&mut writer)?;
-          self.writer = writer;
-        }
+        self.focused_history().fuzzy_finder.clear()?;
         self.focused_history().fuzzy_finder.reset();
         write_vars(|v| {
           v.set_var(
@@ -661,7 +633,7 @@ impl ShedLine {
           self.focused_history().reset_to_pending();
         }
         self.update_editor_hint();
-        self.completer.clear(&mut self.writer)?;
+        self.completer.clear()?;
         self.needs_redraw = true;
         self.completer.reset();
 
@@ -689,7 +661,7 @@ impl ShedLine {
         post_cmds.exec();
 
         self.update_editor_hint();
-        self.completer.clear(&mut self.writer)?;
+        self.completer.clear()?;
         write_vars(|v| {
           v.set_var(
             "SHED_VI_MODE",
@@ -746,7 +718,7 @@ impl ShedLine {
 
   /// Process any available input and return readline event
   /// This is non-blocking - returns Pending if no complete line yet
-  pub fn process_input(&mut self) -> ShResult<ReadlineEvent> {
+  pub fn process_input(&mut self, keys: Vec<KeyEvent>) -> ShResult<ReadlineEvent> {
     // Redraw if needed
     if self.needs_redraw {
       self.print_line(false)?;
@@ -754,7 +726,7 @@ impl ShedLine {
     }
 
     // Process all available keys
-    while let Some(key) = self.reader.readkey()? {
+    for key in keys {
       if let Some(ev) = self.dispatch_key(key)? {
         return Ok(ev);
       }
@@ -912,7 +884,7 @@ impl ShedLine {
           self.needs_redraw = true;
           self.editor.clear_hint();
         } else {
-          self.writer.send_bell().ok();
+          with_term(|t| t.send_bell()).ok();
         }
       }
     }
@@ -976,7 +948,7 @@ impl ShedLine {
           self.needs_redraw = true;
           self.editor.clear_hint();
         } else {
-          self.writer.send_bell().ok();
+          with_term(|t| t.send_bell()).ok();
         }
       }
     }
@@ -987,9 +959,9 @@ impl ShedLine {
     self.editor.set_cursor_from_flat(self.editor.cursor_max());
     self.print_line(true)?;
     if let Some(layout) = &self.old_layout {
-      self.writer.move_cursor_to_end(layout)?;
+      move_cursor_to_end(layout)?;
     }
-    self.writer.flush_write("\n")?;
+    write_term!("\n").ok();
     let buf = self.editor.take_buf();
     self.focused_history().reset();
     Ok(Some(ReadlineEvent::Line(buf)))
@@ -1117,7 +1089,7 @@ impl ShedLine {
         *v = Verb::Delete;
       }
     } else if let Some(VerbCmd(_, Verb::ClearScreen)) = cmd.verb() {
-      self.writer.clear_screen()?;
+      with_term(|t| t.write_direct(Terminal::CLEAR_SCREEN)).ok();
       self.needs_redraw = true;
       return Ok(None);
     }
@@ -1161,7 +1133,7 @@ impl ShedLine {
     if before != after {
       self.history.mark_mask_stale();
     } else if before == after && has_edit_verb {
-      self.writer.send_bell().ok();
+      with_term(|t| t.send_bell()).ok();
     } else if before_cursor == after_cursor && is_ctrl_d_motion {
       if self.ctrl_d_warning_counter == 3 || self.editor.is_empty() {
         // our silly user is spamming ctrl+d for some reason
@@ -1184,7 +1156,7 @@ impl ShedLine {
 
   pub fn get_layout(&mut self, line: &str) -> Layout {
     let to_cursor = self.editor.window_slice_to_cursor().unwrap_or_default();
-    let (cols, _) = get_win_size(self.tty);
+    let cols = with_term(|t| t.t_cols());
     Layout::from_parts(cols, self.prompt.get_ps1(), &to_cursor, line)
   }
   pub fn scroll_history_virtual(&mut self, cmd: EditCmd) {
@@ -1267,10 +1239,8 @@ impl ShedLine {
   }
   pub fn scroll_history(&mut self, cmd: EditCmd) {
     let count = if cmd.motion().is_some() {
-      log::debug!("Motion for history scroll: {:?}", cmd.motion().unwrap().1);
       &cmd.motion().unwrap().0
     } else {
-      log::debug!("Verb for history scroll: {:?}", cmd.verb().unwrap().1);
       match cmd.verb() {
         Some(VerbCmd(c, _)) => c,
         _ => unreachable!(),
@@ -1295,7 +1265,7 @@ impl ShedLine {
         // if count >= 0, we are scrolling down
         // but if we are here, it means we are already at the pending command,
         // so return and bell
-        self.writer.send_bell().ok();
+        with_term(|t| t.send_bell()).ok();
         return;
       }
       // We are scrolling up from a pending command
@@ -1324,7 +1294,7 @@ impl ShedLine {
       // If we are here it should mean we are on our pending command
       // And the user tried to scroll history down
       // Since there is no "future" history, we should just bell and do nothing
-      self.writer.send_bell().ok();
+      with_term(|t| t.send_bell()).ok();
       return;
     }
     let clamp = self.mode.clamp_cursor();
@@ -1381,30 +1351,26 @@ impl ShedLine {
       prompt_string_right =
         prompt_string_right.map(|psr| psr.lines().next().unwrap_or_default().to_string());
     }
-    let mut buf = String::new();
 
+    let t_cols = with_term(|t| t.t_cols());
     let row0_used = self
       .prompt
       .get_ps1()
       .lines()
       .next()
-      .map(|l| Layout::calc_pos(self.writer.t_cols, l, Pos { col: 0, row: 0 }, 0, false))
+      .map(|l| Layout::calc_pos(t_cols, l, Pos { col: 0, row: 0 }, 0, false))
       .map(|p| p.col)
-      .unwrap_or_default() as usize;
+      .unwrap_or_default();
     let one_line = new_layout.end.row == 0;
 
-    self.completer.clear(&mut self.writer)?;
-    {
-      let mut writer = std::mem::take(&mut self.writer);
-      self.focused_history().fuzzy_finder.clear(&mut writer)?;
-      self.writer = writer;
-    }
+    self.completer.clear()?;
+    self.focused_history().fuzzy_finder.clear()?;
 
     if let Some(layout) = self.old_layout.as_ref() {
-      self.writer.clear_rows(layout)?;
+      clear_rows(layout)?;
     }
 
-    self.writer.redraw(
+    redraw(
       self.prompt.get_ps1(),
       &line,
       &new_layout,
@@ -1414,9 +1380,9 @@ impl ShedLine {
 
     let seq_fits = pending_seq
       .as_ref()
-      .is_some_and(|seq| row0_used + 1 < (self.writer.t_cols as usize).saturating_sub(seq.width()));
+      .is_some_and(|seq| row0_used + 1 < t_cols.saturating_sub(seq.width()));
     let psr_fits = prompt_string_right.as_ref().is_some_and(|psr| {
-      new_layout.end.col as usize + 1 < (self.writer.t_cols as usize).saturating_sub(psr.width())
+      new_layout.end.col + 1 < t_cols.saturating_sub(psr.width())
     });
 
     if !final_draw
@@ -1426,7 +1392,7 @@ impl ShedLine {
       && seq_fits
       && self.mode.report_mode() != ModeReport::Ex
     {
-      let to_col = self.writer.t_cols - calc_str_width(&seq);
+      let to_col = t_cols - calc_str_width(&seq);
       let up = new_layout.cursor.row; // rows to move up from cursor to top line of prompt
 
       let move_up = if up > 0 {
@@ -1437,12 +1403,12 @@ impl ShedLine {
 
       // Save cursor, move up to top row, move right to column, write sequence,
       // restore cursor
-      write!(buf, "\x1b7{move_up}\x1b[{to_col}G{seq}\x1b8").unwrap();
+      write_term!("\x1b7{move_up}\x1b[{to_col}G{seq}\x1b8").unwrap();
     } else if !final_draw
       && let Some(psr) = prompt_string_right
       && psr_fits
     {
-      let to_col = self.writer.t_cols - calc_str_width(&psr);
+      let to_col = t_cols - calc_str_width(&psr);
       let down = new_layout.end.row.saturating_sub(new_layout.cursor.row);
       let move_down = if down > 0 {
         format!("\x1b[{down}B")
@@ -1450,7 +1416,7 @@ impl ShedLine {
         String::new()
       };
 
-      write!(buf, "\x1b7{move_down}\x1b[{to_col}G{psr}\x1b8").unwrap();
+      write_term!("\x1b7{move_down}\x1b[{to_col}G{psr}\x1b8").unwrap();
 
       // Record where the PSR ends so clear_rows can account for wrapping
       // if the terminal shrinks.
@@ -1459,7 +1425,7 @@ impl ShedLine {
         col: to_col,
       };
       new_layout.psr_end = Some(Layout::calc_pos(
-        self.writer.t_cols,
+        t_cols,
         &psr,
         psr_start,
         0,
@@ -1475,7 +1441,7 @@ impl ShedLine {
       } else {
         String::new()
       };
-      write!(buf, "{move_down}\x1b[1G\n: {pending_seq}").unwrap();
+      write_term!("{move_down}\x1b[1G\n: {pending_seq}").unwrap();
       new_layout.end.row += 1;
       new_layout.cursor.row = new_layout.end.row;
       new_layout.cursor.col = {
@@ -1485,15 +1451,13 @@ impl ShedLine {
           .take(cursor_offset)
           .collect::<String>();
 
-        (2 + before_cursor.width()) as u16
+        2 + before_cursor.width()
       };
 
-      write!(buf, "\x1b[{}G", new_layout.cursor.col + 1).unwrap();
+      write_term!("\x1b[{}G", new_layout.cursor.col + 1).unwrap();
     }
 
-    write!(buf, "{}", &self.mode.cursor_style()).unwrap();
-
-    self.writer.flush_write(&buf)?;
+    write_term!("{}", &self.mode.cursor_style()).unwrap();
 
     // Move to end of layout for overlay draws (completer, history search)
     let has_overlays =
@@ -1501,14 +1465,14 @@ impl ShedLine {
 
     let down = new_layout.end.row.saturating_sub(new_layout.cursor.row);
     if has_overlays && down > 0 {
-      self.writer.flush_write(&format!("\x1b[{down}B"))?;
+      write_term!("\x1b[{down}B")?;
       new_layout.cursor.row = new_layout.end.row;
     }
 
     // Tell the completer the width of the prompt line above its \n so it can
     // account for wrapping when clearing after a resize.
     let preceding_width = if new_layout.psr_end.is_some() {
-      self.writer.t_cols
+      t_cols
     } else {
       // Without PSR, use the content width on the cursor's row
       (new_layout.end.col + 1).max(new_layout.cursor.col + 1)
@@ -1518,29 +1482,33 @@ impl ShedLine {
     self
       .completer
       .set_prompt_line_context(preceding_width, new_layout.end.col);
-    fuzzy_window_rows += self.completer.draw(&mut self.writer)?;
+    fuzzy_window_rows += self.completer.draw()?;
 
-    {
-      self
-        .focused_history()
-        .fuzzy_finder
-        .set_prompt_line_context(preceding_width, new_layout.end.col);
-
-      let mut writer = std::mem::take(&mut self.writer);
-      fuzzy_window_rows += self.focused_history().fuzzy_finder.draw(&mut writer)?;
-      self.writer = writer;
-    }
+    self
+      .focused_history()
+      .fuzzy_finder
+      .set_prompt_line_context(preceding_width, new_layout.end.col);
+    fuzzy_window_rows += self.focused_history().fuzzy_finder.draw()?;
 
     while let Some(msg) = write_meta(|m| m.pop_status_message()) {
       let now = Instant::now();
       self.status_msgs.push_back((msg, now));
     }
 
+    while self.status_msgs.len() > 1 {
+      self.status_msgs.pop_front();
+    }
+
     while !final_draw && let Some((msg, time)) = self.status_msgs.front() {
       if time.elapsed().as_secs() < 5 {
+        let diff = 5000.0 - time.elapsed().as_millis() as f64;
+        let timeout = PollTimeout::try_from(diff.max(0.0) as i32)
+          .unwrap_or(PollTimeout::NONE);
+        write_meta(|m| m.set_poll_timeout(Some(timeout)));
+
         let down = new_layout.end.row - new_layout.cursor.row;
         let fuzzy_rows = fuzzy_window_rows.saturating_sub(1); // the cursor is one row below the top
-        let total = down.saturating_add(fuzzy_rows as u16);
+        let total = down.saturating_add(fuzzy_rows);
         let move_down = if total > 0 {
           format!("\x1b[{total}B")
         } else {
@@ -1548,10 +1516,10 @@ impl ShedLine {
         };
         let move_up = total + 2;
         let col = new_layout.cursor.col + 1;
-        self.writer.flush_write(&format!(
+        write_term!(
           "{move_down}\n\n\x1b7\x1b[2K{msg}\x1b8\x1b[{move_up}A\x1b[{col}G"
-        ))?;
-        new_layout.end.row += (2 + msg.chars().filter(|c| *c == '\n').count()) as u16;
+        )?;
+        new_layout.end.row += 2 + msg.chars().filter(|c| *c == '\n').count();
         break;
       } else {
         self.status_msgs.pop_front();
@@ -1618,7 +1586,7 @@ impl ShedLine {
         Verb::ExMode => Box::new(ViEx::new(self.editor.is_selecting())),
 
         Verb::VerbatimMode => {
-          self.reader.verbatim_single = true;
+          with_term(|t| t.verbatim_single(true));
           Box::new(ViVerbatim::new().with_count(count as u16))
         }
 
@@ -1951,15 +1919,43 @@ impl ShedLine {
 pub fn annotate_input(input: &str) -> String {
   let mut annotated = input.to_string();
   let input = input.into();
-  let tokens: Vec<Tk> = LexStream::new(Rc::clone(&input), LexFlags::LEX_UNFINISHED)
+  let mut tokens: Vec<Tk> = LexStream::new(Rc::clone(&input), LexFlags::LEX_UNFINISHED)
     .flatten()
     .filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
-    .collect();
+		.fold(vec![], |mut acc,tk| {
+			let TkRule::HereDoc { start_delim, end_delim } = tk.class else {
+				acc.push(tk);
+				return acc;
+			};
+			// we have a heredoc token. these are weird because their spans are non-contiguous.
+			// so we have to split them up.
+			// the sort below will handle ordering these correctly relative to other tokens.
+
+			let mut start_tk = Tk::new(TkRule::HereDocStart, start_delim);
+			let mut body = Tk::new(TkRule::HereDocBody, tk.span);
+			start_tk.flags = tk.flags;
+			body.flags = tk.flags;
+
+
+			acc.push(start_tk);
+			acc.push(body);
+
+      if let Some(end_delim) = end_delim {
+        let mut end_tk = Tk::new(TkRule::HereDocEnd, end_delim);
+        end_tk.flags = tk.flags;
+        acc.push(end_tk);
+      }
+
+			acc
+		});
+
+	tokens.sort_by_key(|tk| tk.span.start());
 
   for tk in tokens.into_iter().rev() {
     let insertions = annotate_token(tk);
     for (pos, marker) in insertions {
       let pos = pos.max(0).min(annotated.len());
+			if !annotated.is_char_boundary(pos) { continue; }
       annotated.insert(pos, marker);
     }
   }
@@ -2054,7 +2050,11 @@ pub fn marker_for(class: &TkRule) -> Option<Marker> {
     TkRule::Sep => Some(markers::CMD_SEP),
     TkRule::Redir => Some(markers::REDIRECT),
     TkRule::Comment => Some(markers::COMMENT),
+		TkRule::HereDocStart => Some(markers::HEREDOC_START),
+		TkRule::HereDocEnd => Some(markers::HEREDOC_END),
     TkRule::Expanded { exp: _ }
+		| TkRule::HereDoc {..}
+		| TkRule::HereDocBody
     | TkRule::EOI
     | TkRule::SOI
     | TkRule::Null
@@ -2137,12 +2137,6 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
 
   let mut insertions: Vec<(usize, Marker)> = vec![];
 
-  // Heredoc tokens have spans covering the body content far from the <<
-  // operator, which breaks position tracking after marker insertions
-  if token.flags.contains(TkFlags::IS_HEREDOC) {
-    return insertions;
-  }
-
   if token.class != TkRule::Str
     && let Some(marker) = marker_for(&token.class)
   {
@@ -2162,6 +2156,14 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
     insertions.push((token.span.range().start, markers::OPERATOR));
     return insertions;
   }
+
+  if token.flags.contains(TkFlags::IS_HEREDOC) {
+		insertions.push((token.span.range().start, markers::HEREDOC_BODY));
+		if token.flags.contains(TkFlags::LIT_HEREDOC) {
+			return insertions; // no need to scan for sub-tokens in a literal heredoc
+		}
+  }
+
 
   let token_raw = token.span.as_str();
   let mut token_chars = token_raw.char_indices().peekable();
@@ -2233,25 +2235,108 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
         '{' if cmd_sub_depth == 0 => {
           insertions.push((span_start + dollar_pos, markers::VAR_SUB));
           token_chars.next(); // consume the brace
-          let mut end_pos; // position after ${
-          match_loop!(token_chars.peek() => (cur_i, br_ch) => br_ch, {
-            // TODO: implement better parameter expansion awareness here
-            // this is a little too permissive
-            _ if br_ch.is_ascii_alphanumeric() || "_!#%:-+=/?$".contains(*br_ch) => {
-              end_pos = *cur_i + 1;
-              token_chars.next();
+
+          // State machine for parameter expansion:
+          // 1. Variable name (alphanumeric, _, or special params)
+          // 2. Optional [index] with depth tracking
+          // 3. Optional operator (#, ##, %, %%, :-, :=, //, etc.)
+          // 4. Optional pattern/value after operator
+          // Nested ${} and $() get markers for recursive annotation.
+          let mut inner_brace_depth = 0;
+          let mut inner_paren_depth = 0;
+          let mut bracket_depth: i32 = 0;
+          let mut in_var_name = true;
+          let mut in_operator = false;
+          let mut in_body = false;
+          let mut prev_was_dollar = false;
+
+          match_loop!(token_chars.next() => (cur_i, br_ch) => br_ch, {
+            // Nested ${ inside the expansion
+            '$' => {
+              prev_was_dollar = true;
             }
-            '}' => {
-              end_pos = *cur_i;
-              token_chars.next(); // consume the closing brace
-              insertions.push((span_start + end_pos + 1, markers::VAR_SUB_END));
+            '{' if prev_was_dollar => {
+              prev_was_dollar = false;
+              inner_brace_depth += 1;
+              if inner_brace_depth == 1 && bracket_depth == 0 {
+                insertions.push((span_start + cur_i - 1, markers::VAR_SUB));
+              }
+            }
+            '(' if prev_was_dollar => {
+              prev_was_dollar = false;
+              inner_paren_depth += 1;
+              if inner_paren_depth == 1 {
+                insertions.push((span_start + cur_i - 1, markers::CMD_SUB));
+              }
+            }
+            _ if prev_was_dollar => {
+              prev_was_dollar = false;
+            }
+
+            ')' if inner_paren_depth > 0 => {
+              inner_paren_depth -= 1;
+              if inner_paren_depth == 0 {
+                insertions.push((span_start + cur_i + 1, markers::CMD_SUB_END));
+              }
+            }
+
+            '}' if inner_brace_depth > 0 => {
+              inner_brace_depth -= 1;
+              if inner_brace_depth == 0 {
+                insertions.push((span_start + cur_i + 1, markers::VAR_SUB_END));
+              }
+            }
+
+            // Closing brace of the outer expansion
+            '}' if inner_brace_depth == 0 && bracket_depth == 0 => {
+              if in_body {
+                insertions.push((span_start + cur_i, markers::PARAM_BODY_END));
+              } else if in_operator {
+                insertions.push((span_start + cur_i, markers::PARAM_OP_END));
+              }
+              insertions.push((span_start + cur_i + 1, markers::VAR_SUB_END));
               break;
             }
+
+            // Array index brackets
+            '[' if inner_brace_depth == 0 && in_var_name => {
+              bracket_depth += 1;
+            }
+            ']' if bracket_depth > 0 => {
+              bracket_depth -= 1;
+            }
+
+            // Characters inside nested constructs. just consume
+            _ if bracket_depth > 0 || inner_brace_depth > 0 || inner_paren_depth > 0 => {}
+
+            // Operator characters (transition from var name to operator)
+            _ if in_var_name && !in_operator
+              && matches!(br_ch, '#' | '%' | ':' | '/' | '-' | '+' | '=' | '?' | '!' | '^' | ',') =>
+            {
+              in_var_name = false;
+              in_operator = true;
+              insertions.push((span_start + cur_i, markers::PARAM_OP));
+            }
+
+            // Second char of a double operator, or transition to body
+            _ if in_operator => {
+              in_operator = false;
+              in_body = true;
+              let is_double = matches!(br_ch, '#' | '%' | '/' | '-' | '=' | '+' | '?');
+              let body_start = if is_double { cur_i + 1 } else { cur_i };
+              insertions.push((span_start + body_start, markers::PARAM_OP_END));
+              insertions.push((span_start + body_start, markers::PARAM_BODY));
+            }
+
+            // Variable name characters
+            _ if in_var_name && (br_ch.is_ascii_alphanumeric() || br_ch == '_') => {}
+
+            // Body characters (pattern/value after operator)
+            _ if in_body => {}
+
+            // Anything else
             _ => {
-              end_pos = *cur_i;
-              // malformed, insert end at current position
-              insertions.push((span_start + end_pos, markers::VAR_SUB_END));
-              break;
+              in_var_name = false;
             }
           });
         }

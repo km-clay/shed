@@ -1,6 +1,6 @@
 use std::{
   os::unix::fs::PermissionsExt,
-  path::{Path, PathBuf},
+  path::Path,
 };
 
 use crate::{
@@ -300,21 +300,23 @@ impl Highlighter {
         }
       }
       markers::STRING_DQ_END
-        | markers::STRING_SQ_END
-        | markers::VAR_SUB_END
-        | markers::CMD_SUB_END
-        | markers::PROC_SUB_END
-        | markers::SUBSH_END
-        | markers::HIST_EXP_END => self.pop_style(),
+			| markers::STRING_SQ_END
+			| markers::VAR_SUB_END
+			| markers::CMD_SUB_END
+			| markers::PROC_SUB_END
+			| markers::SUBSH_END
+			| markers::HIST_EXP_END
+			| markers::PARAM_OP_END
+			| markers::PARAM_BODY_END => self.pop_style(),
 
-        markers::CMD_SEP | markers::RESET => self.clear_styles(),
+			markers::CMD_SEP | markers::RESET => self.clear_styles(),
 
-        markers::STRING_DQ | markers::STRING_SQ => {
-          self.push_style(&theme.string);
-        }
-        markers::KEYWORD => {
-          self.push_style(&theme.keyword);
-        }
+			markers::STRING_DQ | markers::STRING_SQ => {
+				self.push_style(&theme.string);
+			}
+			markers::KEYWORD => {
+				self.push_style(&theme.keyword);
+			}
       markers::BUILTIN => {
         let mut cmd_name = String::new();
         let mut chars_clone = input_chars.clone();
@@ -330,6 +332,13 @@ impl Highlighter {
         }
       }
       markers::CASE_PAT => self.push_style(&theme.glob),
+
+			markers::PARAM_OP => self.push_style(&theme.operator),
+			markers::PARAM_BODY => self.push_style(&theme.string),
+
+			markers::HEREDOC_START => self.push_style(&theme.operator),
+			markers::HEREDOC_BODY => self.push_style(&theme.string),
+			markers::HEREDOC_END => self.push_style(&theme.operator),
 
       markers::COMMENT => self.push_style(&theme.comment),
 
@@ -470,11 +479,14 @@ impl Highlighter {
 
         let mut recursive_highlighter = Self::new();
         recursive_highlighter.in_selection = selection_at_entry;
+
         if recursive_highlighter.in_selection {
           recursive_highlighter.emit_style(&theme.selection);
         }
+
         recursive_highlighter.load_input(&inner_content, self.linebuf_cursor_pos);
         recursive_highlighter.highlight();
+
         self.in_selection = recursive_highlighter.in_selection;
         self
           .style_stack
@@ -608,42 +620,7 @@ impl Highlighter {
   }
 
   fn is_filename(arg: &str) -> bool {
-    let path = Path::new(arg);
-
-    if path.is_absolute() && path.exists() {
-      return true;
-    }
-
-    if path.is_absolute()
-      && let Some(parent_dir) = path.parent()
-      && let Ok(entries) = parent_dir.read_dir()
-    {
-      let files = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-      let Some(arg_filename) = PathBuf::from(arg)
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-      else {
-        return false;
-      };
-      for file in files {
-        if file.starts_with(&arg_filename) {
-          return true;
-        }
-      }
-    }
-
-    read_meta(|m| {
-      let files = m.cached_files();
-      for file in files {
-        if file.name().starts_with(arg) {
-          return true;
-        }
-      }
-      false
-    })
+    read_meta(|m| m.cached_files().any(|f| f.name().starts_with(arg)))
   }
 
   /// Emits a reset ANSI code to the output, with deduplication

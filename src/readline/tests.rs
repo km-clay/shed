@@ -1,10 +1,9 @@
 #![allow(non_snake_case)]
-use std::os::fd::AsRawFd;
 
 use crate::{
   parse::lex::Span,
   readline::{Prompt, ShedLine, annotate_input},
-  state::{write_logic, write_shopts},
+  state::{with_term, write_logic, write_shopts},
   testutil::TestGuard,
 };
 
@@ -20,12 +19,14 @@ macro_rules! vi_test {
 						#[test]
 						fn $name() {
 							let (mut vi, _g) = test_vi($input);
-							vi.feed_bytes(b"\x1b"); // Start in normal mode
-							vi.process_input().unwrap();
+							with_term(|t| t.feed_bytes(b"\x1b")); // Start in normal mode
+							let keys = with_term(|t| t.drain_keys()).unwrap();
+							vi.process_input(keys).unwrap();
 
 							for byte in $op.as_bytes() {
-								vi.feed_bytes(&[*byte]);
-								vi.process_input().unwrap();
+								with_term(|t| t.feed_bytes(&[*byte]));
+								let keys = with_term(|t| t.drain_keys()).unwrap();
+								vi.process_input(keys).unwrap();
 							}
 							assert_eq!(vi.editor.joined(), $expected_text);
 							assert_eq!(vi.editor.cursor_to_flat(), $expected_cursor);
@@ -282,7 +283,7 @@ fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
   write_shopts(|o| o.set.vi = true);
   let g = TestGuard::new();
   let prompt = Prompt::default();
-  let vi = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd())
+  let vi = ShedLine::new_no_hist(prompt)
     .unwrap()
     .with_initial(initial);
 
@@ -528,11 +529,12 @@ fn vi_auto_indent() {
   ];
 
   for (i, line) in lines.iter().enumerate() {
-    vi.feed_bytes(line.as_bytes());
+    with_term(|t| t.feed_bytes(line.as_bytes()));
     if i != lines.len() - 1 {
-      vi.feed_bytes(b"\r");
+      with_term(|t| t.feed_bytes(b"\r"));
     }
-    vi.process_input().unwrap();
+    let keys = with_term(|t| t.drain_keys()).unwrap();
+    vi.process_input(keys).unwrap();
   }
 
   assert_eq!(
@@ -557,11 +559,12 @@ fn vi_auto_indent_siblings() {
   ];
 
   for (i, line) in lines.iter().enumerate() {
-    vi.feed_bytes(line.as_bytes());
+    with_term(|t| t.feed_bytes(line.as_bytes()));
     if i != lines.len() - 1 {
-      vi.feed_bytes(b"\r");
+      with_term(|t| t.feed_bytes(b"\r"));
     }
-    vi.process_input().unwrap();
+    let keys = with_term(|t| t.drain_keys()).unwrap();
+    vi.process_input(keys).unwrap();
   }
 
   assert_eq!(
@@ -571,9 +574,9 @@ fn vi_auto_indent_siblings() {
 }
 
 fn hist_expansion_test(commands: &[&str], input: &str, expected: &str) {
-  let g = TestGuard::new();
+  let _g = TestGuard::new();
   let prompt = Prompt::default();
-  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+  let mut line = ShedLine::new_no_hist(prompt).unwrap();
   for cmd in commands {
     line.history.push(cmd.to_string()).unwrap();
   }
@@ -581,8 +584,9 @@ fn hist_expansion_test(commands: &[&str], input: &str, expected: &str) {
 
   assert_eq!(line.history.masked_entries().len(), commands.len());
 
-  line.feed_bytes(input.as_bytes());
-  line.process_input().unwrap();
+  with_term(|t| t.feed_bytes(input.as_bytes()));
+  let keys = with_term(|t| t.drain_keys()).unwrap();
+  line.process_input(keys).unwrap();
 
   // After process_input with \r, if expansion happened the buffer
   // still holds the expanded text (submit was deferred). If no
@@ -597,17 +601,18 @@ fn hist_expansion_test(commands: &[&str], input: &str, expected: &str) {
 /// Feeds input without \r, triggers expansion via Tab, and checks
 /// the buffer is unchanged.
 fn hist_no_expansion_test(commands: &[&str], input: &str) {
-  let g = TestGuard::new();
+  let _g = TestGuard::new();
   let prompt = Prompt::default();
-  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+  let mut line = ShedLine::new_no_hist(prompt).unwrap();
   for cmd in commands {
     line.history.push(cmd.to_string()).unwrap();
   }
   line.history.update_search_mask(None);
 
   // Feed input without pressing Enter
-  line.feed_bytes(input.as_bytes());
-  line.process_input().unwrap();
+  with_term(|t| t.feed_bytes(input.as_bytes()));
+  let keys = with_term(|t| t.drain_keys()).unwrap();
+  line.process_input(keys).unwrap();
 
   let before = line.editor.joined();
   // Manually call attempt_history_expansion - should return false
@@ -956,30 +961,32 @@ fn setup_aliases(aliases: &[(&str, &str)]) {
 }
 
 fn alias_expansion_test(aliases: &[(&str, &str)], input: &str, expected: &str) {
-  let g = TestGuard::new();
+  let _g = TestGuard::new();
   write_shopts(|o| o.prompt.expand_aliases = true);
   setup_aliases(aliases);
 
   let prompt = Prompt::default();
-  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+  let mut line = ShedLine::new_no_hist(prompt).unwrap();
 
-  line.feed_bytes(input.as_bytes());
-  line.process_input().unwrap();
+  with_term(|t| t.feed_bytes(input.as_bytes()));
+  let keys = with_term(|t| t.drain_keys()).unwrap();
+  line.process_input(keys).unwrap();
 
   let joined = line.editor.joined();
   assert_eq!(joined, expected, "\nInput: {input:?}");
 }
 
 fn alias_no_expansion_test(aliases: &[(&str, &str)], input: &str) {
-  let g = TestGuard::new();
+  let _g = TestGuard::new();
   write_shopts(|o| o.prompt.expand_aliases = true);
   setup_aliases(aliases);
 
   let prompt = Prompt::default();
-  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+  let mut line = ShedLine::new_no_hist(prompt).unwrap();
 
-  line.feed_bytes(input.as_bytes());
-  line.process_input().unwrap();
+  with_term(|t| t.feed_bytes(input.as_bytes()));
+  let keys = with_term(|t| t.drain_keys()).unwrap();
+  line.process_input(keys).unwrap();
 
   let before = line.editor.joined();
   let expanded = line.editor.attempt_alias_expansion();
@@ -1039,15 +1046,16 @@ fn alias_single_char_body() {
 
 #[test]
 fn alias_no_expand_when_disabled() {
-  let g = TestGuard::new();
+  let _g = TestGuard::new();
   write_shopts(|o| o.prompt.expand_aliases = false);
   setup_aliases(&[("gc", "git commit")]);
 
   let prompt = Prompt::default();
-  let mut line = ShedLine::new_no_hist(prompt, g.pty_slave().as_raw_fd()).unwrap();
+  let mut line = ShedLine::new_no_hist(prompt).unwrap();
 
-  line.feed_bytes(b"gc ");
-  line.process_input().unwrap();
+  with_term(|t| t.feed_bytes(b"gc "));
+  let keys = with_term(|t| t.drain_keys()).unwrap();
+  line.process_input(keys).unwrap();
 
   let joined = line.editor.joined();
   assert_ne!(joined, "git commit");

@@ -8,6 +8,7 @@ use std::rc::Rc;
 use yansi::Paint;
 
 use crate::procio::{RedirGuard, borrow_fd};
+use crate::sherr;
 use crate::{
   parse::lex::{Span, SpanSource},
   prelude::*,
@@ -459,6 +460,12 @@ impl Display for ShErr {
     } else {
       write!(f, "{} - {}", self.kind, self.notes.first().unwrap())
     }
+  }
+}
+
+impl From<std::fmt::Error> for ShErr {
+  fn from(value: std::fmt::Error) -> Self {
+    sherr!(InternalErr, "{value}")
   }
 }
 

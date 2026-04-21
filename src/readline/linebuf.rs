@@ -17,36 +17,26 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-  expand::{self, alias::AliasExpander, expand_cmd_sub},
-  libsh::{
+  builtin::stash::{Stash, StashedCmd}, expand::alias::AliasExpander, libsh::{
     error::ShResult,
-    guards::{RawModeGuard, var_ctx_guard},
+    guards::var_ctx_guard,
     strops::QuoteState,
     utils::AutoCmdVecUtils,
-  },
-  match_loop, motion,
-  parse::{
+  }, match_loop, motion, parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::exec_input,
     lex::{self, LexFlags, LexStream, Tk, TkFlags, TkRule},
-  },
-  prelude::*,
-  procio::{self, IoFrame, IoMode, IoStack, capture_command},
-  readline::{
-    editcmd::{LineAddr, ReadSrc, VerbCmd, WriteDest},
+  }, prelude::*, procio::{self, IoFrame, IoMode, IoStack, capture_command}, readline::{
+    editcmd::{LineAddr, ReadSrc, StashArgs, StashListArg, VerbCmd, WriteDest},
     editmode::ex::SubFlags,
     highlight::Highlighter,
     history::History,
     markers,
     register::RegisterContent,
     term::get_win_size,
-  },
-  sherr,
-  state::{
-    self, AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, read_vars, write_meta,
-    write_vars,
-  },
-  verb,
+  }, sherr, state::{
+    self, AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, read_vars, with_term, write_meta, write_vars
+  }, verb
 };
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
@@ -475,6 +465,17 @@ impl Pos {
       max = max.saturating_sub(1);
     }
     self.col = self.col.clamp(0, max);
+  }
+}
+
+impl std::ops::Add for Pos {
+  type Output = Self;
+
+  fn add(self, rhs: Self) -> Self::Output {
+    Self {
+      row: self.row.saturating_add(rhs.row),
+      col: self.col.saturating_add(rhs.col),
+    }
   }
 }
 
@@ -1125,7 +1126,7 @@ impl LineBuf {
 
     self.cursor.pos = new_line_pos;
   }
-  fn verb_shell_cmd(&mut self, cmd: &str, stdin: Option<&str>) -> ShResult<String> {
+  fn verb_shell_cmd(&mut self, cmd: &str, stdin: Option<&str>) -> ShResult<Option<String>> {
     let mut vars = HashSet::new();
     vars.insert("BUFFER".into());
     vars.insert("CURSOR".into());
@@ -1150,10 +1151,16 @@ impl LineBuf {
     let post_cmd = read_logic(|l| l.get_autocmds(AutoCmdKind::PostCmd));
 
     pre_cmd.exec();
-    let res = procio::capture_command(cmd, stdin);
+    let res = if let Some(stdin) = stdin {
+      Some(procio::capture_command(cmd, Some(stdin))?)
+    } else {
+      let _guard = with_term(|t| t.cooked_mode_guard());
+      exec_input(cmd.to_string(), None, true, Some("<ex-mode-cmd>".into()))?;
+      None
+    };
     post_cmd.exec();
 
-    let output = res?;
+    let output = res;
 
     let mut new_anchor = None;
 
@@ -1169,30 +1176,26 @@ impl LineBuf {
     self.set_buffer(buf);
 
     if let Some(new_anchor) = new_anchor {
-      if let Some((row, col)) = new_anchor.split_once(':')
-        && let Ok(row) = row.parse::<usize>()
-        && let Ok(col) = col.parse::<usize>()
-      {
-        anchor = Some(self.pos_to_flat(Pos { row, col }));
-      } else if let Ok(num) = new_anchor.parse::<usize>() {
-        anchor = Some(self.pos_to_flat(self.pos_from_flat(num))); // round trip validates position
+      if let Ok(pos) = self.parse_pos(&new_anchor) {
+        anchor = Some(self.pos_to_flat(pos));
+      } else {
+        log::warn!(
+          "Invalid anchor position returned from shell command: '{}'",
+          new_anchor
+        );
+        anchor = None;
       }
     }
 
-    if let Some((row, col)) = cursor.split_once(':')
-      && let Ok(row) = row.parse::<usize>()
-      && let Ok(col) = col.parse::<usize>()
-    {
-      self.set_cursor(Pos { row, col });
-    } else if let Ok(num) = cursor.parse::<usize>() {
-      self.set_cursor_from_flat(num);
+    if let Ok(pos) = self.parse_pos(&cursor) {
+      self.set_cursor(pos);
     } else {
       log::warn!(
         "Invalid cursor position returned from shell command: '{}'",
         cursor
       );
       self.set_cursor_from_flat(cursor_raw);
-    };
+    }
 
     if let Some(anchor) = anchor
       && anchor != cursor_raw
@@ -1204,6 +1207,21 @@ impl LineBuf {
       write_meta(|m| m.set_pending_widget_keys(&keys))
     }
     Ok(output)
+  }
+  fn parse_pos(&self, pos: &str) -> ShResult<Pos> {
+    if let Some((row, col)) = pos.split_once(':')
+      && let Ok(row) = row.parse::<usize>()
+      && let Ok(col) = col.parse::<usize>()
+    {
+      Ok(Pos { row, col })
+    } else if let Ok(num) = pos.parse::<usize>() {
+      Ok(self.pos_from_flat(num))
+    } else {
+      Err(sherr!(
+        ParseErr,
+        "Invalid position format: '{pos}'. Expected 'row:col' or grapheme index.",
+      ))
+    }
   }
   fn insert_lines_at(&mut self, pos: Pos, mut lines: Vec<Line>) {
     if lines.is_empty() {
@@ -3448,26 +3466,8 @@ impl LineBuf {
           MotionKind::Lines { lines } => Either::Right(lines.into_iter()),
           MotionKind::Block { start, end } => unimplemented!(),
         };
-        for row in line_nums {
-          let line_len = self.line(row).len();
-
-          // we are going to calculate the level twice, once at column = 0 and once at column = line.len()
-          // "b-b-b-b-but the performance" i dont care
-          // the number of tabs we use for the line is the lesser of these two calculations
-          // if level_start > level_end, the line has an closer
-          // if level_end > level_start, the line has a opener
-          let level_start = self.calc_indent_level_for_pos(Pos { row, col: 0 });
-          let level_end = self.calc_indent_level_for_pos(Pos { row, col: line_len });
-          let num_tabs = level_start.min(level_end);
-
-          let line = self.line_mut(row);
-          while line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
-            line.0.remove(0);
-          }
-          for tab in std::iter::repeat_n(Grapheme::from('\t'), num_tabs) {
-            line.insert(0, tab);
-          }
-        }
+        let line_nums: Vec<usize> = line_nums.collect();
+        self.equalize_rows(line_nums);
       }
       Verb::AcceptLineOrNewline => {
         // If we are here, we did not accept the line
@@ -3491,7 +3491,7 @@ impl LineBuf {
         }
         let input = format!("{}\n", join_lines(&lines));
         let output = self.verb_shell_cmd(sh_cmd, Some(&input))?;
-        let new_lines = to_lines(output);
+        let new_lines = to_lines(output.unwrap_or_default());
         self.lines.splice(s..s, new_lines);
       }
       Verb::Read(src) => match src {
@@ -3578,6 +3578,165 @@ impl LineBuf {
         } else {
           let input = format!("$EDITOR {}", path.display());
           exec_input(input, None, true, Some("ex edit".into()))?;
+        }
+      }
+
+      Verb::Stash(args) => {
+        let Ok(stash) = Stash::new() else {
+          write_meta(|m| m.post_status_message("Failed to open stash - database unreachable".into()));
+          return Ok(());
+        };
+        match args {
+          StashArgs::Push(arg) => {
+            if self.is_empty() {
+              write_meta(|m| m.post_status_message("Buffer is empty, nothing to stash".into()));
+              return Ok(());
+            }
+            let stash_len = stash.stack_len();
+            let name = arg.clone()
+              .filter(|a| !a.trim().is_empty());
+            let buffer = self.joined();
+            let (s,e) = (self.row(),self.col());
+
+            stash.push(name, &buffer, (s,e))?;
+            self.clear_buffer();
+            self.clear_hint();
+            self.set_cursor(Pos::new(0,0));
+          }
+          StashArgs::Pop(arg) => {
+            let stack_len = stash.stack_len();
+            let idx = arg.as_ref()
+              .map(|a| a.parse::<usize>())
+              .transpose()
+              .ok()
+              .flatten()
+              .unwrap_or(stack_len.saturating_sub(1));
+
+            let StashedCmd { name, buffer, cursor_pos } = match stash.pop(idx) {
+              Ok(ent) => match ent {
+                Some(ent) => ent,
+                None => {
+                  write_meta(|m| {
+                    if stack_len == 0 {
+                      m.post_status_message("stash: Stash is empty".into());
+                    } else {
+                      m.post_status_message(format!("stash: No stash entry at index '{idx}'"));
+                    }
+                  });
+                  return Ok(())
+                }
+              }
+              Err(e) => {
+                write_meta(|m| m.post_status_message(format!("stash: Failed to pop stash entry: {e}")));
+                return Ok(());
+              }
+            };
+            let cursor_pos = match self.parse_pos(&cursor_pos) {
+              Ok(pos) => pos,
+              Err(e) => {
+                write_meta(|m| m.post_status_message(format!("stash: Failed to parse cursor position from stash: {e}")));
+                Pos { row: 0, col: 0 }
+              }
+            };
+
+            self.set_buffer(buffer);
+            self.set_cursor(cursor_pos);
+
+          }
+          StashArgs::Drop(arg) => {
+            let idx = arg.as_ref()
+              .map(|a| a.parse::<usize>())
+              .transpose()
+              .ok()
+              .flatten()
+              .unwrap_or(0);
+            let stack_len = stash.stack_len();
+
+            match stash.pop(idx).ok().flatten() {
+              Some(_) => {
+                write_meta(|m| m.post_status_message(format!("stash: Dropped stash entry '{idx}'")));
+              }
+              None => {
+                if stack_len == 0 {
+                  write_meta(|m| m.post_status_message("stash: Stash is empty, nothing to drop".into()));
+                } else {
+                  write_meta(|m| m.post_status_message(format!("stash: No stack entry at index '{idx}'")));
+                }
+              }
+            }
+          }
+          StashArgs::Apply(arg) => {
+            let stack_len = stash.stack_len();
+            let name = arg.clone().unwrap_or(stack_len.saturating_sub(1).to_string());
+
+            let Some(StashedCmd { name, buffer, cursor_pos }) = stash.get(&name)? else {
+              if let Ok(idx) = name.parse::<usize>() {
+                if stack_len == 0 {
+                  write_meta(|m| m.post_status_message("stash: Stash is empty".into()));
+                } else {
+                  write_meta(|m| m.post_status_message(format!("stash: No stash entry at index '{idx}'")));
+                }
+              } else {
+                write_meta(|m| m.post_status_message(format!("stash: No stash entry named '{name}'")));
+              }
+              return Ok(());
+            };
+
+            let cursor_pos = match self.parse_pos(&cursor_pos) {
+              Ok(pos) => pos,
+              Err(e) => {
+                write_meta(|m| m.post_status_message(format!("stash: Failed to parse cursor position from stash: {e}")));
+                Pos { row: 0, col: 0 }
+              }
+            };
+
+            self.set_buffer(buffer);
+            self.set_cursor(cursor_pos);
+          }
+          StashArgs::Insert(arg) => {
+            let stack_len = stash.stack_len();
+            let name = arg.clone().unwrap_or(stack_len.saturating_sub(1).to_string());
+
+            let Some(StashedCmd { name, buffer, cursor_pos }) = stash.get(&name)? else {
+              if let Ok(idx) = name.parse::<usize>() {
+                if stack_len == 0 {
+                  write_meta(|m| m.post_status_message("stash: Stash is empty".into()));
+                } else {
+                  write_meta(|m| m.post_status_message(format!("stash: No stash entry at index '{idx}'")));
+                }
+              } else {
+                write_meta(|m| m.post_status_message(format!("stash: No stash entry named '{name}'")));
+              }
+              return Ok(());
+            };
+
+            let cursor_offset = match self.parse_pos(&cursor_pos) {
+              Ok(pos) => pos,
+              Err(e) => {
+                write_meta(|m| m.post_system_message(format!("stash: Failed to parse cursor position from stash: {e}")));
+                Pos { row: 0, col: 0 }
+              }
+            };
+            let lines = to_lines(&buffer);
+            let num_lines = lines.len();
+            let line_range = self.row()..self.row() + num_lines;
+
+            self.insert_lines_at(self.cursor.pos, lines);
+            self.cursor.pos = self.cursor.pos + cursor_offset;
+            self.fix_cursor();
+            self.equalize_rows(line_range.collect());
+          }
+          StashArgs::Swap(arg) => todo!(),
+          StashArgs::List(arg) => {
+            let output = match arg {
+              Some(StashListArg::Stack) => stash.list(/*named_only:*/false, /*stack_only:*/true),
+              Some(StashListArg::Named) => stash.list(/*named_only:*/true, /*stack_only:*/false),
+              None => stash.list(/*named_only:*/false, /*stack_only:*/false),
+            };
+            for line in output.lines() {
+              write_meta(|m| m.post_system_message(line.to_string()));
+            }
+          }
         }
       }
 
@@ -3824,6 +3983,28 @@ impl LineBuf {
     }
 
     Ok(())
+  }
+  pub fn equalize_rows(&mut self, line_nums: Vec<usize>) {
+    for row in line_nums {
+      let line_len = self.line(row).len();
+
+      // we are going to calculate the level twice, once at column = 0 and once at column = line.len()
+      // "b-b-b-b-but muh performance" i dont care
+      // the number of tabs we use for the line is the lesser of these two calculations
+      // if level_start > level_end, the line has an closer
+      // if level_end > level_start, the line has a opener
+      let level_start = self.calc_indent_level_for_pos(Pos { row, col: 0 });
+      let level_end = self.calc_indent_level_for_pos(Pos { row, col: line_len });
+      let num_tabs = level_start.min(level_end);
+
+      let line = self.line_mut(row);
+      while line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
+        line.0.remove(0);
+      }
+      for tab in std::iter::repeat_n(Grapheme::from('\t'), num_tabs) {
+        line.insert(0, tab);
+      }
+    }
   }
   /// Provides a public interface for editing the buffer in a way that is recognized by the undo system.
   /// Any change made by the provided function will be tracked in the undo stack.
@@ -4229,12 +4410,8 @@ impl LineBuf {
         })
       }
       Motion::LineRange(s, e) => {
-        let Some(s) = self.resolve_line_addr(&s).ok()? else {
-          return None;
-        };
-        let Some(e) = self.resolve_line_addr(&e).ok()? else {
-          return None;
-        };
+        let s = self.resolve_line_addr(&s).ok()??;
+        let e = self.resolve_line_addr(&e).ok()??;
         let (s, e) = ordered(s, e);
         Some(MotionKind::Line {
           start: s,

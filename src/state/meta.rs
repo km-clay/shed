@@ -9,7 +9,7 @@ use std::{
   },
   rc::Rc,
   str::FromStr,
-  time::Duration,
+  time::{Duration, SystemTime},
 };
 
 use crate::{
@@ -25,7 +25,7 @@ use crate::{
 };
 use itertools::{Itertools, izip};
 use nix::{
-  poll::PollFd,
+  poll::{PollFd, PollTimeout},
   sys::{
     resource::{Usage, UsageWho, getrusage},
     stat::{FchmodatFlags, fchmodat},
@@ -770,11 +770,13 @@ pub struct MetaTab {
 
   // pending system messages
   // are drawn above the prompt and survive redraws
-  system_msg: VecDeque<String>,
+  system_msg: VecDeque<(SystemTime,String)>,
+  system_msg_hist: VecDeque<(SystemTime,String)>,
 
   // same as system messages,
   // but they appear under the prompt and are erased on redraw
-  status_msg: VecDeque<String>,
+  status_msg: VecDeque<(SystemTime,String)>,
+  status_msg_hist: VecDeque<(SystemTime,String)>,
 
   // pushd/popd stack
   dir_stack: VecDeque<PathBuf>,
@@ -793,6 +795,8 @@ pub struct MetaTab {
 
   // whether or not the last command had a function definition
   last_was_func_def: bool,
+
+  main_loop_timeout: Option<PollTimeout>,
 }
 
 impl Default for MetaTab {
@@ -805,7 +809,9 @@ impl Default for MetaTab {
       subscribers: vec![],
       last_job: None,
       system_msg: VecDeque::new(),
+      system_msg_hist: VecDeque::new(),
       status_msg: VecDeque::new(),
+      status_msg_hist: VecDeque::new(),
       dir_stack: VecDeque::new(),
       getopts_offset: 0,
       old_path: None,
@@ -814,6 +820,7 @@ impl Default for MetaTab {
       comp_specs: HashMap::new(),
       pending_widget_keys: vec![],
       last_was_func_def: false,
+      main_loop_timeout: None,
     }
   }
 }
@@ -822,6 +829,19 @@ impl MetaTab {
   pub fn new() -> Self {
     Self::default()
   }
+
+  /// Set a poll timeout for the main loop to use
+  ///
+  /// This is used mainly for managing status message lifetimes.
+  /// If a status message is showing below the prompt, the timeout
+  /// will trigger a redraw and clear it.
+  pub fn set_poll_timeout(&mut self, timeout: Option<PollTimeout>) {
+    self.main_loop_timeout = timeout;
+  }
+  pub fn take_poll_timeout(&mut self) -> Option<PollTimeout> {
+    self.main_loop_timeout.take()
+  }
+
   pub fn shell_time(&self) -> Instant {
     self.shell_time
   }
@@ -898,12 +918,12 @@ impl MetaTab {
       ui::HOR_LINE,
       version
     );
-    ui::pad_line(&mut buf, &title, ui::HOR_LINE, ui::TOP_RIGHT, longest);
+    ui::pad_line_into(&mut buf, &title, ui::HOR_LINE, ui::TOP_RIGHT, longest);
     buf.push('\n');
 
     for line in &content_lines {
       let row = format!("{} {}", ui::VERT_LINE, line);
-      ui::pad_line(&mut buf, &row, " ", ui::VERT_LINE, longest);
+      ui::pad_line_into(&mut buf, &row, " ", ui::VERT_LINE, longest);
       buf.push('\n');
     }
 
@@ -1328,22 +1348,34 @@ impl MetaTab {
     }
   }
   pub fn post_system_message(&mut self, message: String) {
-    self.system_msg.push_back(message);
+    let now = SystemTime::now();
+    self.system_msg.push_back((now,message));
   }
   pub fn pop_system_message(&mut self) -> Option<String> {
-    self.system_msg.pop_front()
+    let (time,msg) = self.system_msg.pop_front()?;
+    self.system_msg_hist.push_back((time,msg.clone()));
+    Some(msg)
   }
   pub fn system_msg_pending(&self) -> bool {
     !self.system_msg.is_empty()
   }
   pub fn post_status_message(&mut self, message: String) {
-    self.status_msg.push_back(message);
+    let now = SystemTime::now();
+    self.status_msg.push_back((now,message));
   }
   pub fn pop_status_message(&mut self) -> Option<String> {
-    self.status_msg.pop_front()
+    let (time,msg) = self.status_msg.pop_front()?;
+    self.status_msg_hist.push_back((time,msg.clone()));
+    Some(msg)
   }
   pub fn status_msg_pending(&self) -> bool {
     !self.status_msg.is_empty()
+  }
+  pub fn status_msg_history(&self) -> &VecDeque<(SystemTime,String)> {
+    &self.status_msg_hist
+  }
+  pub fn system_msg_history(&self) -> &VecDeque<(SystemTime,String)> {
+    &self.system_msg_hist
   }
   pub fn dir_stack_top(&self) -> Option<&PathBuf> {
     self.dir_stack.front()

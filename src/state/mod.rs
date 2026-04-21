@@ -19,24 +19,24 @@ pub mod meta;
 pub use meta::*;
 pub mod jobs;
 pub use jobs::*;
+pub mod terminal;
+pub use terminal::*;
 
-use crate::{libsh::error::ShErr, shopt::ShOpts};
+use crate::{libsh::{error::ShErr, }, shopt::ShOpts};
 
 pub static INTERACTIVE: AtomicBool = AtomicBool::new(false);
 pub static STATUS_CODE: AtomicI32 = AtomicI32::new(0);
 
-thread_local! {
-  pub static SHED: Shed = Shed::new();
-}
-
 #[derive(Debug)]
 pub struct Shed {
+  // constructed in state/util.rs
   pub jobs: RefCell<JobTab>,
   pub var_scopes: RefCell<ScopeStack>,
   pub meta: RefCell<MetaTab>,
   pub logic: RefCell<LogTab>,
   pub shopts: RefCell<ShOpts>,
   pub db_conn: OnceLock<Option<Arc<Connection>>>,
+  pub terminal: RefCell<Terminal>,
 
   #[cfg(test)]
   saved: RefCell<Option<Box<Self>>>,
@@ -51,6 +51,7 @@ impl Shed {
       logic: RefCell::new(LogTab::new()),
       shopts: RefCell::new(ShOpts::default()),
       db_conn: OnceLock::new(),
+      terminal: RefCell::new(Terminal::new()),
 
       #[cfg(test)]
       saved: RefCell::new(None),
@@ -83,6 +84,7 @@ impl Shed {
       logic: RefCell::new(self.logic.borrow().clone()),
       shopts: RefCell::new(self.shopts.borrow().clone()),
       db_conn: self.clone_db_conn(),
+      terminal: RefCell::new(self.terminal.borrow().clone()),
       saved: RefCell::new(None),
     };
     *self.saved.borrow_mut() = Some(Box::new(saved));

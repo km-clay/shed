@@ -1,11 +1,7 @@
+use chrono::{DateTime, Local};
+
 use crate::{
-  builtin::join_raw_args,
-  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::ShResult,
-  parse::{NdRule, Node},
-  prelude::*,
-  sherr,
-  state::{self, write_meta},
+  builtin::join_raw_args, getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens}, libsh::error::ShResult, parse::{NdRule, Node}, prelude::*, procio::borrow_fd, sherr, state::{self, read_meta, write_meta}
 };
 
 bitflags! {
@@ -48,6 +44,29 @@ pub fn msg(node: Node) -> ShResult<()> {
   let (mut argv, opts) = get_opts_from_tokens(argv, &msg_opts())?;
   let flags = get_msg_flags(opts)?;
   argv.remove(0);
+
+  if argv.is_empty() {
+    read_meta(|m| -> ShResult<()> {
+      let history = if flags.contains(MsgFlags::SYSTEM) {
+        m.system_msg_history()
+      } else {
+        m.status_msg_history()
+      };
+      let stdout = borrow_fd(STDOUT_FILENO);
+
+      for (time,msg) in history {
+        let time: DateTime<Local> = (*time).into();
+        let formatted = time.format("[%H:%M:%S]").to_string();
+        let msg = msg.trim().replace('\n', "\n\t\t");
+
+        write(stdout, format!("{formatted}\t{msg}\n").as_bytes())?;
+      }
+
+      Ok(())
+    })?;
+    // argv is empty, maybe they want us to list past messages?
+  }
+
   let (msg, _span) = join_raw_args(argv);
 
   if flags.contains(MsgFlags::SYSTEM) {

@@ -172,7 +172,8 @@ pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
 mod tests {
   use super::*;
   use crate::parse::lex::Span;
-  use crate::testutil::TestGuard;
+  use crate::state::write_logic;
+use crate::testutil::TestGuard;
 
   // ===================== parse_key_alias =====================
 
@@ -311,11 +312,7 @@ mod tests {
   fn alias_simple() {
     let _guard = TestGuard::new();
     let dummy_span = Span::default();
-    crate::state::SHED.with(|s| {
-      s.logic
-        .borrow_mut()
-        .insert_alias("ll", "ls -la", dummy_span.clone());
-    });
+    write_logic(|l| l.insert_alias("ll", "ls -la", dummy_span.clone()));
 
     let result = expand_aliases("ll".to_string());
     assert_eq!(result, "ls -la");
@@ -325,11 +322,7 @@ mod tests {
   fn alias_circular_prevention() {
     let _guard = TestGuard::new();
     let dummy_span = Span::default();
-    crate::state::SHED.with(|s| {
-      s.logic
-        .borrow_mut()
-        .insert_alias("foo", "foo --verbose", dummy_span.clone());
-    });
+    write_logic(|l| l.insert_alias("foo", "foo --verbose", dummy_span.clone()));
 
     let result = expand_aliases("foo".to_string());
     // After first expansion: "foo --verbose", then "foo" is in already_expanded

@@ -296,6 +296,23 @@ impl MotionCmd {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub enum StashListArg {
+  Stack,
+  Named
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum StashArgs {
+  Push(Option<String>),
+  Pop(Option<String>),
+  Drop(Option<String>),
+  Apply(Option<String>),
+  Insert(Option<String>),
+  Swap(Option<String>),
+  List(Option<StashListArg>)
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Verb {
   // misc stuff
@@ -358,6 +375,7 @@ pub enum Verb {
   Read(ReadSrc),
   Write(WriteDest),
   Edit(PathBuf),
+  Stash(StashArgs),
   Quit,
   Substitute(String, String, SubFlags),
   RepeatSubstitute,

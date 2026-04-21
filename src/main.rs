@@ -35,23 +35,19 @@ use smallvec::SmallVec;
 use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
 use crate::libsh::error::{self, ShErrKind, ShResult};
-use crate::libsh::sys::TTY_FILENO;
-use crate::libsh::term::set_bracketed_paste;
 use crate::libsh::utils::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_input};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
 use crate::readline::editmode::ModeReport;
 use crate::readline::linebuf::{Hint, Pos, to_lines};
-use crate::readline::term::{LineWriter, OSC_EXEC_START, RawModeGuard, osc_exec_end, raw_mode};
+use crate::readline::term::{OSC_EXEC_START, osc_exec_end};
 use crate::readline::{LineData, Prompt, ReadlineEvent, ShedLine};
 use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, VarFlags, VarKind,
-  generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env,
-  source_login, source_rc, write_jobs, write_meta, write_shopts,
+  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, with_term, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;
@@ -84,11 +80,7 @@ struct ShedArgs {
 fn setup_panic_handler() {
   let default_panic_hook = std::panic::take_hook();
   std::panic::set_hook(Box::new(move |info| {
-    let _ = state::SHED.try_with(|shed| {
-      if let Ok(mut jobs) = shed.jobs.try_borrow_mut() {
-        jobs.hang_up();
-      }
-    });
+    write_jobs(|j| j.hang_up());
 
     let data_dir = dirs::data_dir().unwrap_or_else(|| {
       let home = env::var("HOME").unwrap();
@@ -153,20 +145,17 @@ fn main() -> ExitCode {
     e.print_error();
   }
 
+  state::init_db_conn();
+
   if let Err(e) = if let Some(cmd) = args.command {
-    state::init_db_conn(false).ok();
     exec_dash_c(cmd)
   } else if args.stdin || !isatty(STDIN_FILENO).unwrap_or(false) {
-    state::init_db_conn(false).ok();
     read_commands(args.script_args)
   } else if !args.script_args.is_empty() {
-    state::init_db_conn(false).ok();
     let path = args.script_args.remove(0);
     run_script(path, args.script_args)
   } else {
-    let res = shed_interactive(args);
-    set_bracketed_paste(false).ok();
-    res
+    shed_interactive(args)
   } {
     e.print_error();
   };
@@ -275,7 +264,7 @@ fn handle_signals_interactive(readline: &mut ShedLine) -> ShResult<bool> {
     log::info!("Window size change detected, updating readline dimensions");
     // Restore cursor to saved row before clearing, since the terminal
     // may have moved it during resize/rewrap
-    readline.writer.update_t_dims();
+    with_term(|t| t.update_t_dims());
     readline.mark_dirty();
   }
 
@@ -301,6 +290,12 @@ fn get_poll_timeout(readline: &mut ShedLine) -> (PollTimeout, Option<String>) {
   let timeout = if !readline.pending_keymap.is_empty() {
     // wait for more keymap keys
     PollTimeout::from(1000u16)
+  } else if let Some(timeout) = write_meta(|m| m.take_poll_timeout()) {
+    // something gave us an explicit poll timeout to use.
+    // usually this means there is a status message showing.
+    // after the timeout, it will trigger a redraw that clears
+    // the status message.
+    timeout
   } else {
     let screensaver_cmd = read_shopts(|o| o.prompt.screensaver_cmd.clone())
       .trim()
@@ -311,10 +306,8 @@ fn get_poll_timeout(readline: &mut ShedLine) -> (PollTimeout, Option<String>) {
       PollTimeout::NONE
     } else {
       exec_if_timeout = Some(screensaver_cmd);
-      match PollTimeout::try_from((screensaver_idle_time * 1000) as i32) {
-        Ok(timeout) => timeout,
-        Err(_) => PollTimeout::NONE,
-      }
+      PollTimeout::try_from((screensaver_idle_time * 1000) as i32)
+        .unwrap_or(PollTimeout::NONE)
     }
   };
 
@@ -322,11 +315,10 @@ fn get_poll_timeout(readline: &mut ShedLine) -> (PollTimeout, Option<String>) {
 }
 
 fn shed_interactive(args: ShedArgs) -> ShResult<()> {
-  let _raw_mode = raw_mode(); // sets raw mode, restores termios on drop
+  let _raw_mode = with_term(|t| t.raw_mode_guard())?;
   sig_setup(args.login_shell);
   crate::state::INTERACTIVE.store(true, Ordering::SeqCst);
 
-  state::init_db_conn(true)?;
   write_meta(|m| {
     m.ensure_meta_table()?;
     m.create_socket()
@@ -356,11 +348,11 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     eprintln!("{welcome}");
   }
 
-  let mut readline = match ShedLine::new(Prompt::new(), *TTY_FILENO) {
+  let mut readline = match ShedLine::new(Prompt::new()) {
     Ok(rl) => rl,
     Err(e) => {
       // try to fall back to no hist
-      match ShedLine::new_no_hist(Prompt::new(), *TTY_FILENO) {
+      match ShedLine::new_no_hist(Prompt::new()) {
         Ok(rl) => {
           eprintln!("Failed to load history: {e}");
           rl
@@ -378,18 +370,25 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
   let mut socket_mode = ShedSocket::mode();
 
   let mut poll_fds: SmallVec<[PollFd; 2]> = SmallVec::new();
-  let tty_fd = PollFd::new(borrow_fd(*TTY_FILENO), PollFlags::POLLIN);
+  let Some(tty_fd) = with_term(|t| unsafe { t.tty() }) else {
+    eprintln!("Failed to access terminal file descriptor");
+    QUIT_CODE.store(1, Ordering::SeqCst);
+    return Err(sherr!(CleanExit(1), "terminal access failed",));
+  };
+  let tty_poll = PollFd::new(borrow_fd(tty_fd), PollFlags::POLLIN);
+  let socket_fd = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd()));
+  let socket_poll = socket_fd.map(|fd| PollFd::new(borrow_fd(fd), PollFlags::POLLIN));
 
   // Main poll loop
   loop {
-    set_bracketed_paste(true).ok();
     state::try_hash();
     error::clear_color();
+    let _flush_guard = state::FlushGuard; // flushes terminal on drop
 
     poll_fds.clear();
-    poll_fds.push(tty_fd);
-    if let Some(fd) = write_meta(|m| m.get_socket().map(|s| s.as_raw_fd())) {
-      poll_fds.push(PollFd::new(borrow_fd(fd), PollFlags::POLLIN));
+    poll_fds.push(tty_poll);
+    if let Some(fd) = socket_poll {
+      poll_fds.push(fd);
     }
 
     if read_shopts(|o| o.set.vi) != vi_mode {
@@ -411,6 +410,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
 
     let (timeout, exec_if_timeout) = get_poll_timeout(&mut readline);
+    with_term(|t| t.flush())?;
 
     match poll(&mut poll_fds, timeout) {
       Ok(0) => {
@@ -465,7 +465,7 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
       .revents()
       .is_some_and(|r| r.contains(PollFlags::POLLIN))
     {
-      match readline.read() {
+      match with_term(|t| t.read()) {
         Ok(_) => { /* data read, will be processed below */ }
         Err(e) => match e.kind() {
           ShErrKind::LoopBreak(_) => break,
@@ -496,7 +496,8 @@ fn shed_interactive(args: ShedArgs) -> ShResult<()> {
     }
 
     // Process the input that we read above
-    let event = readline.process_input();
+    let keys = with_term(|t| t.drain_keys())?;
+    let event = readline.process_input(keys);
 
     match handle_readline_event(&mut readline, event)? {
       true => return Ok(()),
@@ -540,20 +541,19 @@ fn handle_readline_event(
 
       pre_exec.exec();
 
-      // Time this command and temporarily restore cooked terminal mode while it runs.
-      set_bracketed_paste(false).ok();
-
       let cmd_start = Instant::now();
       write_meta(|m| m.start_timer());
 
-      readline.writer.flush_write(OSC_EXEC_START).ok();
-      let res = RawModeGuard::with_cooked_mode(|| {
-        exec_input(input.clone(), None, true, Some("<stdin>".into()))
-      });
-      readline
-        .writer
-        .flush_write(&osc_exec_end(state::get_status()))
-        .ok();
+      write_term!("{OSC_EXEC_START}").ok();
+
+      let res = {
+        // _guard restores terminal state on drop
+        let _guard = with_term(|t| t.prepare_for_exec())?;
+        exec_input(input.clone(), None, false, Some("<stdin>".into()))
+      };
+
+      let osc_end = osc_exec_end(state::get_status());
+      write_term!("{osc_end}").ok();
 
       if let Err(e) = res {
         match e.kind() {
@@ -607,8 +607,8 @@ fn handle_readline_event(
       readline.history.refresh_hint_cache();
 
       let rl_cleanup_start = Instant::now();
-      readline.fix_column()?;
-      readline.writer.flush_write("\n\r")?;
+      with_term(|t| t.fix_cursor_column())?;
+      write_term!("\n\r")?;
 
       // Reset for next command with fresh prompt
       readline.reset(true)?;

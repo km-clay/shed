@@ -1,21 +1,10 @@
-use std::cell::RefCell;
 use std::collections::HashSet;
-use std::os::fd::RawFd;
 
-use nix::sys::termios::{self, Termios, tcgetattr, tcsetattr};
-use nix::unistd::{isatty, write};
 use scopeguard::guard;
 
-thread_local! {
-  static ORIG_TERMIOS: RefCell<Option<Termios>> = const { RefCell::new(None) };
-}
-
 use crate::parse::lex::Span;
-use crate::procio::{IoFrame, borrow_fd};
-use crate::readline::term::get_win_size;
+use crate::procio::IoFrame;
 use crate::state::write_vars;
-
-use super::sys::TTY_FILENO;
 
 // ============================================================================
 // ScopeGuard - RAII variable scope management
@@ -76,92 +65,5 @@ impl RedirGuard {
 impl Drop for RedirGuard {
   fn drop(&mut self) {
     self.0.restore().ok();
-  }
-}
-
-// ============================================================================
-// RawModeGuard - RAII terminal raw mode management
-// ============================================================================
-
-pub fn raw_mode() -> RawModeGuard {
-  let orig = termios::tcgetattr(borrow_fd(*TTY_FILENO)).expect("Failed to get terminal attributes");
-  let mut raw = orig.clone();
-  termios::cfmakeraw(&mut raw);
-  // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
-  raw.local_flags |= termios::LocalFlags::ISIG;
-  // Keep OPOST enabled so \n is translated to \r\n on output
-  raw.output_flags |= termios::OutputFlags::OPOST;
-  termios::tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &raw)
-    .expect("Failed to set terminal to raw mode");
-
-  let (_cols, _rows) = get_win_size(*TTY_FILENO);
-
-  ORIG_TERMIOS.with(|cell| *cell.borrow_mut() = Some(orig.clone()));
-
-  RawModeGuard {
-    orig,
-    fd: *TTY_FILENO,
-  }
-}
-
-pub struct RawModeGuard {
-  orig: termios::Termios,
-  fd: RawFd,
-}
-
-impl RawModeGuard {
-  pub fn with_cooked_mode<F, R>(f: F) -> R
-  where
-    F: FnOnce() -> R,
-  {
-    let current = tcgetattr(borrow_fd(*TTY_FILENO)).expect("Failed to get terminal attributes");
-    let orig = ORIG_TERMIOS
-      .with(|cell| cell.borrow().clone())
-      .expect("with_cooked_mode called before raw_mode()");
-    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &orig).ok();
-    let res = f();
-    tcsetattr(borrow_fd(*TTY_FILENO), termios::SetArg::TCSANOW, &current).ok();
-    write(borrow_fd(*TTY_FILENO), b"\x1b[?1l\x1b>").ok();
-    res
-  }
-}
-
-impl Drop for RawModeGuard {
-  fn drop(&mut self) {
-    termios::tcsetattr(borrow_fd(self.fd), termios::SetArg::TCSANOW, &self.orig).ok();
-  }
-}
-
-pub struct TuiGuard {
-  _raw_mode_guard: RawModeGuard,
-}
-
-impl TuiGuard {
-  pub fn new() -> Self {
-    let new = Self {
-      _raw_mode_guard: raw_mode(),
-    };
-
-    if isatty(*TTY_FILENO).unwrap_or(false) {
-      write(borrow_fd(*TTY_FILENO), b"\x1b[?1049h").ok(); // enter alt buffer
-      write(borrow_fd(*TTY_FILENO), b"\x1b[?25l").ok(); // hide cursor
-    }
-
-    new
-  }
-}
-
-impl Default for TuiGuard {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
-impl Drop for TuiGuard {
-  fn drop(&mut self) {
-    if isatty(*TTY_FILENO).unwrap_or(false) {
-      write(borrow_fd(*TTY_FILENO), b"\x1b[?25h").ok(); // show cursor
-      write(borrow_fd(*TTY_FILENO), b"\x1b[?1049l").ok(); // exit alt buffer
-    }
   }
 }

@@ -46,7 +46,7 @@ pub fn not_marker(tk: &ShResult<Tk>) -> bool {
 macro_rules! lex_err {
 	($lexer:expr, $pos:expr, $range: expr, $($arg:tt)*) => {{
 		$lexer.cursor = $pos;
-		sherr!(ParseErr @ Span::new($range, $lexer.source.clone()), $($arg)*)
+		sherr!(ParseErr @ $lexer.get_span($range), $($arg)*)
 	}}
 }
 
@@ -168,8 +168,18 @@ pub enum TkRule {
   BraceGrpStart,
   BraceGrpEnd,
   Comment,
+	HereDoc {
+		start_delim: Span,
+		end_delim: Option<Span> // is None if not found when lexing unfinished input
+	},
 
-  /// A special token class used for tokens that are the result of expansion, not direct lexing. The contained Vec<String> is the result of splitting the expanded text into words according to shell field splitting rules. This is used to allow expansions to produce multiple tokens, which is necessary for things like `echo *` where the `*` may expand to multiple filenames.
+	// these three are only used in input annotation/syntax highlighting
+	HereDocStart,
+	HereDocBody,
+	HereDocEnd,
+
+	/// These are only used as an intermediate state for tokens that are in the process of being expanded.
+	/// You can be confident that any token you are working on does not have this rule.
   Expanded {
     exp: Vec<String>,
   },
@@ -692,7 +702,13 @@ impl LexStream {
       if ch == '\n' {
         let trimmed = line.trim_end_matches('\r');
         if trimmed == delim {
-          let mut tk = self.get_token(start..line_start, TkRule::Redir);
+					let start_delim = self.get_span(span_start..cursor_after_delim);
+					let end_delim = self.get_span(line_start..pos);
+          let rule = TkRule::HereDoc {
+            start_delim,
+            end_delim: Some(end_delim),
+          };
+          let mut tk = self.get_token(start..line_start, rule);
           tk.flags |= TkFlags::IS_HEREDOC | flags;
           self.heredoc_skip = Some(pos);
           self.cursor = cursor_after_delim;
@@ -708,19 +724,39 @@ impl LexStream {
     // Check the last line (no trailing newline)
     let trimmed = line.trim_end_matches('\r');
     if trimmed == delim {
-      let mut tk = self.get_token(start..line_start, TkRule::Redir);
+			let start_delim = self.get_span(span_start..cursor_after_delim);
+			let end_delim = self.get_span(line_start..pos);
+      let rule = TkRule::HereDoc {
+        start_delim,
+        end_delim: Some(end_delim),
+      };
+      let mut tk = self.get_token(start..line_start, rule);
       tk.flags |= TkFlags::IS_HEREDOC | flags;
       self.heredoc_skip = Some(pos);
       self.cursor = cursor_after_delim;
       return Ok(Some(tk));
     }
 
-    Err(lex_err!(
-      self,
-      pos,
-      span_start..pos,
-      "Heredoc delimiter '{delim}' not found",
-    ))
+    if self.flags.contains(LexFlags::LEX_UNFINISHED) {
+      let start_delim = self.get_span(span_start..cursor_after_delim);
+      let rule = TkRule::HereDoc {
+        start_delim,
+        end_delim: None,
+      };
+      let mut tk = self.get_token(start..pos, rule);
+      tk.flags |= TkFlags::IS_HEREDOC | flags;
+      self.heredoc_skip = Some(pos);
+      self.cursor = cursor_after_delim;
+      Ok(Some(tk))
+    } else {
+      Err(lex_err!(
+          self,
+          pos,
+          span_start..pos,
+          "Heredoc delimiter '{delim}' not found",
+      ))
+    }
+
   }
   pub fn read_string(&mut self) -> ShResult<Tk> {
     assert!(self.cursor <= self.source.len());
@@ -846,7 +882,6 @@ impl LexStream {
       '(' if self.next_is_cmd() && chars.peek() == Some(&')') && pos != self.cursor => {
         // standalone "()" - function definition marker
         // this will be handled below by self.func_paren_lookahead()
-        log::debug!("LEX: breaking out of word loop for standalone () at pos {pos}, cursor {}", self.cursor);
         break;
       }
       '(' if (self.next_is_cmd() || chars.peek() == Some(&'(')) && can_be_subshell => {
@@ -941,16 +976,10 @@ impl LexStream {
     if is_cmd {
       match text {
         "function" => {
-          log::debug!("LEX: found 'function' keyword, setting NEXT_IS_FUNC");
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::NEXT_IS_FUNC;
         }
         _ if self.func_paren_lookahead(&mut pos) => {
-          log::debug!(
-            "LEX: func_paren_lookahead matched for token '{}', cursor now {}",
-            text,
-            self.cursor
-          );
           new_tk.mark(TkFlags::FUNCNAME);
           self.set_next_is_cmd(true);
         }
@@ -981,10 +1010,6 @@ impl LexStream {
           self.set_next_is_cmd(false);
         }
         _ if self.flags.contains(LexFlags::NEXT_IS_FUNC) => {
-          log::debug!(
-            "LEX: NEXT_IS_FUNC matched for token '{}', marking as FUNCNAME",
-            text
-          );
           new_tk.mark(TkFlags::FUNCNAME);
           self.set_next_is_cmd(true);
         }
@@ -1006,13 +1031,7 @@ impl LexStream {
     Ok(new_tk)
   }
   pub fn func_paren_lookahead(&mut self, pos: &mut usize) -> bool {
-    log::debug!(
-      "LEX: func_paren_lookahead called, cursor={}, source_len={}",
-      self.cursor,
-      self.source.len()
-    );
     let slice = self.slice(*pos..).unwrap_or_default().to_string();
-    log::debug!("LEX: func_paren_lookahead slice='{}'", slice.escape_debug());
     let mut chars = slice.chars().peekable();
     match_loop!(chars.next() => ch, {
       ' ' | '\t' => {
@@ -1023,21 +1042,21 @@ impl LexStream {
 
         if chars.next() == Some(')') {
           *pos += 1;
-          log::debug!("LEX: func_paren_lookahead MATCH, advancing cursor {} -> {}", self.cursor, pos);
           self.cursor = *pos;
           return true;
         }
       }
       _ => {
-        log::debug!("LEX: func_paren_lookahead no match, hit '{}'", ch.escape_debug());
         return false;
       }
     });
-    log::debug!("LEX: func_paren_lookahead fell through (empty)");
     false
   }
+	pub fn get_span(&self, range: Range<usize>) -> Span {
+		Span::new(range, self.source.clone())
+	}
   pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk {
-    let mut span = Span::new(range, self.source.clone());
+    let mut span = self.get_span(range);
     span.rename(self.name.clone());
     Tk::new(class, span)
   }
@@ -1046,12 +1065,6 @@ impl LexStream {
 impl Iterator for LexStream {
   type Item = ShResult<Tk>;
   fn next(&mut self) -> Option<Self::Item> {
-    log::debug!(
-      "LEX: next() called, cursor={}, source_len={}, flags={:?}",
-      self.cursor,
-      self.source.len(),
-      self.flags
-    );
     assert!(self.cursor <= self.source.len());
     // We are at the end of the input
     if self.cursor == self.source.len() {
@@ -1064,7 +1077,7 @@ impl Iterator for LexStream {
           let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
           self.flags |= LexFlags::STALE;
           return Err(sherr!(
-            ParseErr @ Span::new(start..self.cursor, self.source.clone()),
+            ParseErr @ self.get_span(start..self.cursor),
             "Unclosed brace group",
           ))
           .into();
@@ -1103,7 +1116,7 @@ impl Iterator for LexStream {
         let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
         self.flags |= LexFlags::STALE;
         return Err(sherr!(
-          ParseErr @ Span::new(start..self.cursor, self.source.clone()),
+          ParseErr @ self.get_span(start..self.cursor),
           "Unclosed brace group",
         ))
         .into();
@@ -1116,6 +1129,7 @@ impl Iterator for LexStream {
         let ch = get_char(&self.source, self.cursor).unwrap();
         let ch_idx = self.cursor;
         self.cursor += 1;
+        let mut heredoc_skipped = false;
         self.set_next_is_cmd(true);
 
         // If a heredoc was parsed on this line, skip past the body
@@ -1123,6 +1137,7 @@ impl Iterator for LexStream {
         if (ch == '\n' || ch == '\r')
           && let Some(skip) = self.heredoc_skip.take()
         {
+          heredoc_skipped = true;
           self.cursor = skip;
         }
 
@@ -1132,11 +1147,21 @@ impl Iterator for LexStream {
           }
           _ if is_hard_sep(ch) => {
             self.cursor += 1;
+            // If we just consumed a newline and there's a pending heredoc, skip past the body
+            if (ch == '\n' || ch == '\r')
+              && let Some(skip) = self.heredoc_skip.take()
+            {
+              heredoc_skipped = true;
+              self.cursor = skip;
+            }
           }
           _ => break,
         });
 
-        self.get_token(ch_idx..self.cursor, TkRule::Sep)
+        // If a heredoc skip occurred, cap the separator span to just the
+        // triggering character so it doesn't cover the heredoc body
+        let sep_end = if heredoc_skipped { ch_idx + 1 } else { self.cursor };
+        self.get_token(ch_idx..sep_end, TkRule::Sep)
       }
       '#'
         if !self.flags.contains(LexFlags::INTERACTIVE)

@@ -5,17 +5,15 @@ use nix::{
   unistd::{isatty, read, write},
 };
 
-use crate::sherr;
+use crate::{sherr, state::with_term};
 use crate::{
   expand::expand_keymap,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
   libsh::{
     error::{ShResult, ShResultExt},
-    sys::TTY_FILENO,
   },
   parse::{NdRule, Node},
   procio::borrow_fd,
-  readline::term::{KeyReader, PollReader, RawModeGuard},
   state::{self, VarFlags, VarKind, read_vars, write_vars},
 };
 
@@ -103,7 +101,8 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
 
   let input = if isatty(STDIN_FILENO)? {
     // Restore default terminal settings
-    RawModeGuard::with_cooked_mode(|| {
+    let _guard = with_term(|t| t.cooked_mode_guard());
+    (|| {
       let mut input: Vec<u8> = vec![];
       let mut escaped = false;
       loop {
@@ -146,8 +145,7 @@ pub fn read_builtin(node: Node) -> ShResult<()> {
       let str_result = String::from_utf8(input.clone())
         .map_err(|e| sherr!(ExecFail, "read: Input was not valid UTF-8: {e}"))?;
       Ok(str_result)
-    })
-    .blame(blame)?
+    })().blame(blame)?
   } else {
     let mut input: Vec<u8> = vec![];
     loop {
@@ -259,7 +257,7 @@ pub fn readkey(node: Node) -> ShResult<()> {
     unreachable!()
   };
 
-  if !isatty(*TTY_FILENO)? {
+  if !with_term(|t| t.isatty()) {
     state::set_status(1);
     return Ok(());
   }
@@ -268,28 +266,16 @@ pub fn readkey(node: Node) -> ShResult<()> {
   let readkey_opts = get_readkey_opts(opts).blame(blame.clone())?;
 
   let key = {
-    let _raw = crate::readline::term::raw_mode();
-    let mut buf = [0u8; 16];
-    match read(*TTY_FILENO, &mut buf) {
-      Ok(0) => {
-        state::set_status(1);
-        return Ok(());
-      }
-      Ok(n) => {
-        let mut reader = PollReader::new();
-        reader.feed_bytes(&buf[..n]);
-        let Some(key) = reader.readkey()? else {
-          state::set_status(1);
-          return Ok(());
-        };
-        key
-      }
-      Err(Errno::EINTR) => {
-        state::set_status(130);
-        return Ok(());
-      }
-      Err(e) => return Err(sherr!(ExecFail, "readkey: {e}")),
+    let _raw = with_term(|t| t.raw_mode_guard());
+    with_term(|t| t.read())?;
+
+    let mut keys = with_term(|t| t.drain_keys())?;
+    if keys.is_empty() {
+      state::set_status(1);
+      return Ok(());
     }
+
+    keys.remove(0)
   };
 
   let vim_seq = key.as_vim_seq()?;
