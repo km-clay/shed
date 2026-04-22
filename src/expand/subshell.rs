@@ -1,5 +1,5 @@
 use crate::expand::arithmetic::expand_arithmetic_wrapped;
-use crate::libsh::error::ShResult;
+use crate::util::error::ShResult;
 use crate::parse::execute::exec_nonint;
 use crate::parse::{Redir, RedirType};
 use crate::prelude::*;

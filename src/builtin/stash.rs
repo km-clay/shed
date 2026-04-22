@@ -3,7 +3,7 @@ use std::sync::Arc;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 use rusqlite::Connection;
 
-use crate::{getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens}, libsh::error::{ShResult, ShResultExt}, match_loop, parse::{NdRule, Node}, procio::borrow_fd, sherr, state};
+use crate::{getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens}, util::error::{ShResult, ShResultExt}, match_loop, parse::{NdRule, Node}, procio::borrow_fd, sherr, state};
 
 pub fn stash_opts() -> [OptSpec;8] {
   [

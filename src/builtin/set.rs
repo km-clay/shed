@@ -4,7 +4,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
   expand::as_var_val_display,
-  libsh::error::{ShErr, ShResult, ShResultExt},
+  util::error::{ShErr, ShResult, ShResultExt},
   match_loop,
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,

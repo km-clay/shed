@@ -6,7 +6,7 @@ use std::{
 use regex::Regex;
 
 use crate::{
-  libsh::{error::ShResult, strops::ends_with_unescaped},
+  util::{error::ShResult, strops::ends_with_unescaped},
   match_loop,
   readline::history::HistEntry,
   sherr,

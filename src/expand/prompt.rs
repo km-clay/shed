@@ -1,6 +1,6 @@
 use crate::expand::subshell::expand_cmd_sub;
-use crate::libsh::error::ShResult;
-use crate::libsh::term::color_from_description;
+use crate::util::error::ShResult;
+use crate::util::ui::color_from_description;
 use crate::match_loop;
 use crate::prelude::*;
 use crate::state;

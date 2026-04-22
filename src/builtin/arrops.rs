@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::{ShResult, ShResultExt},
+  util::error::{ShResult, ShResultExt},
   parse::{NdRule, Node},
   prelude::*,
   procio::borrow_fd,

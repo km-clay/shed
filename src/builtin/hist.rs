@@ -14,8 +14,7 @@ use regex::Regex;
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::{
-    self,
+  util::{
     error::{ShResult, ShResultExt},
   },
   parse::{NdRule, Node},
@@ -582,7 +581,7 @@ pub fn hist_builtin(node: Node) -> ShResult<()> {
   }
 
   if let Some(ref path) = query.import {
-    let entries: Vec<(i64, HistEntry)> = libsh::histimport::import_history(path.into())
+    let entries: Vec<(i64, HistEntry)> = crate::readline::histimport::import_history(path.into())
       .promote_err(span.clone())?
       .into_iter()
       .enumerate()

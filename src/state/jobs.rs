@@ -4,7 +4,7 @@ use scopeguard::defer;
 
 use crate::{
   jobs::{Job, JobCmdFlags, JobID, RegisteredFd, take_term, wait_fg},
-  libsh::error::ShResult,
+  util::error::ShResult,
   prelude::*,
   procio::{IoMode, borrow_fd},
   signal::{disable_reaping, enable_reaping},

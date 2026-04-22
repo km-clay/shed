@@ -5,11 +5,11 @@ use nix::{
   unistd::{isatty, read, write},
 };
 
-use crate::{sherr, state::with_term};
+use crate::{util::error::ShErrKind, sherr, state::with_term};
 use crate::{
   expand::expand_keymap,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::{
+  util::{
     error::{ShResult, ShResultExt},
   },
   parse::{NdRule, Node},
@@ -271,7 +271,19 @@ pub fn readkey(node: Node) -> ShResult<()> {
 
   let key = {
     let _raw = with_term(|t| t.raw_mode_guard());
-    with_term(|t| t.read())?;
+    if let Err(e) = with_term(|t| t.read()) {
+      match e.kind() {
+        ShErrKind::LoopBreak(_) => {
+          state::set_status(1);
+          return Ok(());
+        }
+        ShErrKind::LoopContinue(_) => {
+          state::set_status(0);
+          return Ok(());
+        }
+        _ => return Err(e).blame(blame)
+      }
+    };
 
     let mut keys = with_term(|t| t.drain_keys())?;
     if keys.is_empty() {

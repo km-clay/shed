@@ -16,7 +16,7 @@ use crate::{
   builtin::BUILTINS,
   expand::expand_keymap,
   jobs::Job,
-  libsh::error::{ShErr, ShResult},
+  util::error::{ShErr, ShResult},
   match_loop,
   prelude::*,
   procio::borrow_fd,
@@ -908,7 +908,7 @@ impl MetaTab {
 
     let version = env!("CARGO_PKG_VERSION");
 
-    use crate::libsh::ui;
+    use crate::util::ui;
     let mut buf = String::new();
 
     // ╭─ shed v0.xx.x ───────────╮

@@ -5,7 +5,7 @@ use nix::libc::STDOUT_FILENO;
 use crate::{
   expand::as_var_val_display,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::ShResult,
+  util::error::ShResult,
   parse::{NdRule, Node},
   prelude::*,
   procio::borrow_fd,

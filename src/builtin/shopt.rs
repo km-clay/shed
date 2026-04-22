@@ -1,5 +1,5 @@
 use crate::{
-  libsh::error::{ShResult, ShResultExt},
+  util::error::{ShResult, ShResultExt},
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   procio::borrow_fd,

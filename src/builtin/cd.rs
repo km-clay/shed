@@ -1,6 +1,6 @@
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  libsh::error::ShResult,
+  util::error::ShResult,
   match_loop,
   parse::{NdRule, Node},
   prelude::*,

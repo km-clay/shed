@@ -14,7 +14,7 @@ use crate::{
     },
     join_raw_arg_iter,
   },
-  libsh::error::ShResult,
+  util::error::ShResult,
   parse::{NdRule, Node, execute::prepare_argv},
   procio::borrow_fd,
   readline::complete::ScoredCandidate,

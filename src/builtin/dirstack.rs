@@ -4,7 +4,7 @@ use ariadne::Fmt;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 
 use crate::{
-  libsh::error::{ShResult, ShResultExt, next_color},
+  util::error::{ShResult, ShResultExt, next_color},
   parse::{NdRule, Node, execute::prepare_argv, lex::Span},
   procio::borrow_fd,
   sherr,

@@ -2,7 +2,7 @@ use regex::Regex;
 
 use crate::expand::escape::unescape_str;
 use crate::expand::var::expand_raw;
-use crate::libsh::error::ShResult;
+use crate::util::error::ShResult;
 use crate::match_loop;
 use crate::readline::markers;
 

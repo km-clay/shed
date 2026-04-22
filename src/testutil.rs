@@ -15,7 +15,7 @@ use nix::{
 
 use crate::{
   expand::expand_aliases,
-  libsh::error::ShResult,
+  util::error::ShResult,
   parse::{NdKind, ParsedSrc, Redir, RedirType, execute::exec_nonint, lex::LexFlags},
   procio::{IoFrame, IoMode, RedirGuard, borrow_fd},
   readline::register::{restore_registers, save_registers},

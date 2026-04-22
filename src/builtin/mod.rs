@@ -1,6 +1,6 @@
 use ariadne::Span as ASpan;
 
-use crate::parse::lex::Span;
+use crate::{getopt::{Opt, OptSpec}, parse::lex::Span, util::error::ShResult};
 
 pub mod alias;
 pub mod arrops;
@@ -44,6 +44,17 @@ pub const BUILTINS: [&str; 59] = [
   "trap", "true", "type", "ulimit", "umask", "unalias", "wait", "command", "disown", "echo", "fc",
   "getopts", "unset", "stash"
 ];
+
+trait Builtin {
+  fn opts(&self) -> &[OptSpec] { &[] }
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()>;
+}
+
+struct BuiltinArgs {
+  argv: Vec<(String,Span)>,
+  opts: Vec<Opt>,
+  span: Span
+}
 
 // Join all of the word-split arguments into a single string
 // Preserve the span too

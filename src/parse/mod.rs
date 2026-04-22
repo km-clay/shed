@@ -6,10 +6,10 @@ use fmt::Display;
 use lex::{LexFlags, LexStream, Span, SpanSource, Tk, TkFlags, TkRule};
 
 use crate::{
-  libsh::{
+  util::{
     error::{ShErr, ShResult, last_color, next_color},
     strops::split_tk,
-    utils::NodeVecUtils,
+    NodeVecUtils,
   },
   match_loop,
   parse::lex::clean_input,
@@ -56,7 +56,7 @@ macro_rules! parse_err {
 	($parser:expr, $tks:expr, $($arg:tt)*) => {
 		parse_err_full(
 			&format!($($arg)*),
-			&crate::libsh::utils::TkVecUtils::get_span(&$tks).unwrap(),
+			&crate::util::TkVecUtils::get_span(&$tks).unwrap(),
 			$parser.context.clone(),
 		)
 	};

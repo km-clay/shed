@@ -12,7 +12,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
-  libsh::error::ShResult,
+  util::error::ShResult,
   readline::linebuf::Pos,
   state::{read_shopts, with_term}, write_term,
 };

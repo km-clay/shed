@@ -11,7 +11,7 @@ use crate::{
     StyledHelp,
     markup::{MarkedSpan, REF_SEQ, RESET_SEQ, SEARCH_RES_SEQ, TAG_SEQ},
   },
-  libsh::error::ShResult,
+  util::error::ShResult,
   procio::borrow_fd,
   readline::{
     SimpleEditor,

@@ -5,7 +5,7 @@ use nix::{
 };
 
 use crate::{
-  libsh::error::ShResult,
+  util::error::ShResult,
   parse::Node,
   procio::borrow_fd,
   state::{self, CmdTimer},

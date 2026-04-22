@@ -1,4 +1,4 @@
-use crate::libsh::strops::QuoteState;
+use crate::util::strops::QuoteState;
 use crate::{motion, write_term};
 use crate::parse::lex::LexStream;
 use crate::readline::editmode::remote::RemoteMode;
@@ -19,7 +19,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::{expand_keymap, expand_prompt};
-use crate::libsh::utils::AutoCmdVecUtils;
+use crate::util::AutoCmdVecUtils;
 use crate::prelude::*;
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::editcmd::Direction;
@@ -31,7 +31,7 @@ use crate::state::{
   self, AutoCmdKind, ShellParam, Terminal, Var, VarFlags, VarKind, read_logic, read_shopts, with_term, with_vars, write_meta, write_vars
 };
 use crate::{
-  libsh::error::ShResult,
+  util::error::ShResult,
   match_loop,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
   readline::{
@@ -44,6 +44,7 @@ pub mod complete;
 pub mod editcmd;
 pub mod editmode;
 pub mod highlight;
+pub mod histimport;
 pub mod history;
 pub mod keys;
 pub mod layout;

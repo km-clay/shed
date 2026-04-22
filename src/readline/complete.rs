@@ -11,9 +11,9 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   expand::escape_str,
-  libsh::{
+  util::{
     error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, ui,
-    utils::TkVecUtils,
+    TkVecUtils,
   },
   match_loop,
   parse::{

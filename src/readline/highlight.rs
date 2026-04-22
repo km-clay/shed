@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-  libsh::{error::ShResult, term::color_from_description},
+  util::{error::ShResult, ui::color_from_description},
   match_loop,
   readline::{
     annotate_input,

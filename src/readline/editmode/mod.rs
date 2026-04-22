@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::libsh::error::{ShErr, ShResult};
+use crate::util::error::{ShErr, ShResult};
 use crate::readline::editcmd::{
   CmdFlags, Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word,
 };

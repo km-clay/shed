@@ -4,12 +4,12 @@ use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 use serde_json::{Map, Value};
 
-use crate::libsh::strops::{split_tk, split_tk_at};
+use crate::util::strops::{split_tk, split_tk_at};
 use crate::sherr;
 use crate::{
   expand::expand_cmd_sub,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens_raw},
-  libsh::error::ShResult,
+  util::error::ShResult,
   parse::{
     NdRule, Node,
     lex::{self, LexFlags, LexStream},

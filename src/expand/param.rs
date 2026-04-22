@@ -5,7 +5,7 @@ use glob::Pattern;
 use crate::expand::escape::{strip_escape_markers, unescape_str};
 use crate::expand::util::glob_to_regex;
 use crate::expand::var::expand_raw;
-use crate::libsh::error::{ShErr, ShResult};
+use crate::util::error::{ShErr, ShResult};
 use crate::match_loop;
 use crate::sherr;
 use crate::state::{VarFlags, VarKind, VarName, read_shopts, read_vars, write_vars};

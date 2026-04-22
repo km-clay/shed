@@ -4,7 +4,7 @@ use ariadne::Fmt;
 
 use crate::expand::escape::unescape_math;
 use crate::expand::var::expand_raw;
-use crate::libsh::error::{ShErr, ShResult, next_color};
+use crate::util::error::{ShErr, ShResult, next_color};
 use crate::state::{VarFlags, VarKind, read_vars, write_vars};
 use crate::{match_loop, sherr};
 

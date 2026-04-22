@@ -7,7 +7,7 @@ use crate::expand::PARAMETERS;
 use crate::expand::escape::escape_str;
 use crate::expand::param::perform_param_expansion;
 use crate::expand::subshell::{expand_cmd_sub, expand_proc_sub};
-use crate::libsh::error::ShResult;
+use crate::util::error::ShResult;
 use crate::match_loop;
 use crate::parse::lex::is_hard_sep;
 use crate::prelude::*;

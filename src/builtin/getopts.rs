@@ -4,7 +4,7 @@ use ariadne::Fmt;
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec},
-  libsh::error::{ShErr, ShResult, ShResultExt, next_color},
+  util::error::{ShErr, ShResult, ShResultExt, next_color},
   parse::{NdRule, Node, execute::prepare_argv, lex::Span},
   sherr,
   state::{self, VarFlags, VarKind, read_meta, read_vars, write_meta, write_vars},

@@ -8,7 +8,7 @@ pub mod builtin;
 pub mod expand;
 pub mod getopt;
 pub mod jobs;
-pub mod libsh;
+pub mod util;
 pub mod parse;
 pub mod prelude;
 pub mod procio;
@@ -34,8 +34,8 @@ use smallvec::SmallVec;
 
 use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
-use crate::libsh::error::{self, ShErrKind, ShResult};
-use crate::libsh::utils::AutoCmdVecUtils;
+use crate::util::error::{self, ShErrKind, ShResult};
+use crate::util::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_int, exec_nonint};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
@@ -47,7 +47,7 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, TermEvent, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, terminal, with_term, write_jobs, write_meta, write_shopts
+  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, TermEvent, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, with_term, write_jobs, write_meta, write_shopts
 };
 use clap::Parser;
 use state::write_vars;

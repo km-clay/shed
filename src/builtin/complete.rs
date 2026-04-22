@@ -3,7 +3,7 @@ use nix::{libc::STDOUT_FILENO, unistd::write};
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens, get_opts_from_tokens_raw},
-  libsh::error::ShResult,
+  util::error::ShResult,
   parse::{NdRule, Node},
   procio::borrow_fd,
   readline::complete::{BashCompSpec, CompContext, CompSpec},

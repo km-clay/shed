@@ -1,7 +1,7 @@
 use std::{iter::Peekable, str::Chars};
 
 use crate::{
-  libsh::error::ShResult,
+  util::error::ShResult,
   match_loop,
   parse::lex::{Span, Tk},
   sherr,

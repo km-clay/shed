@@ -1,5 +1,5 @@
 use crate::{
-  libsh::error::{ShErr, ShErrKind, ShResult},
+  util::error::{ShErr, ShErrKind, ShResult},
   parse::{NdRule, Node, execute::prepare_argv},
   sherr,
 };
@@ -48,7 +48,7 @@ pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
 
 #[cfg(test)]
 mod tests {
-  use crate::libsh::error::ShErrKind;
+  use crate::util::error::ShErrKind;
   use crate::state;
   use crate::testutil::{TestGuard, test_input};
 

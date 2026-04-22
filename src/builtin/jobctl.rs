@@ -2,7 +2,7 @@ use ariadne::Fmt;
 
 use crate::{
   jobs::{JobCmdFlags, JobID, wait_bg},
-  libsh::error::{ShResult, next_color},
+  util::error::{ShResult, next_color},
   parse::{NdRule, Node, execute::prepare_argv, lex::Span},
   prelude::*,
   procio::borrow_fd,

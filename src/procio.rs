@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
   expand::Expander,
-  libsh::error::{ShErr, ShResult},
+  util::error::{ShErr, ShResult},
   parse::{Redir, RedirType, execute::{exec_nonint}, get_redir_file, lex::TkFlags},
   prelude::*,
   sherr, state::{self, with_term},
@@ -181,8 +181,8 @@ impl<R: Read> IoBuf<R> {
   }
 }
 
-// this was originally here, but moved to libsh::guards
-pub use crate::libsh::guards::RedirGuard;
+// this was originally here, but moved to util::guards
+pub use crate::util::guards::RedirGuard;
 
 /// A struct wrapping three fildescs representing `stdin`, `stdout`, and
 /// `stderr` respectively

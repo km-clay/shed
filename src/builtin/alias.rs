@@ -2,7 +2,7 @@ use ariadne::Fmt;
 
 use crate::{
   expand::as_var_val_display,
-  libsh::error::{ShResult, next_color},
+  util::error::{ShResult, next_color},
   parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   procio::borrow_fd,

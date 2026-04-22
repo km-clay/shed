@@ -1,7 +1,7 @@
 use nix::{errno::Errno, unistd::execvpe};
 
 use crate::{
-  libsh::error::ShResult,
+  util::error::ShResult,
   parse::{
     NdRule, Node,
     execute::{ExecArgs, prepare_argv},

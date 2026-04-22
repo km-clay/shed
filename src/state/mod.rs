@@ -22,7 +22,7 @@ pub use jobs::*;
 pub mod terminal;
 pub use terminal::*;
 
-use crate::{libsh::{error::ShErr, }, shopt::ShOpts};
+use crate::{util::{error::ShErr, }, shopt::ShOpts};
 
 pub static INTERACTIVE: AtomicBool = AtomicBool::new(false);
 pub static STATUS_CODE: AtomicI32 = AtomicI32::new(0);

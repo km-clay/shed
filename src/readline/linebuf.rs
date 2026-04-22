@@ -17,11 +17,11 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-  builtin::stash::{Stash, StashedCmd}, expand::alias::AliasExpander, libsh::{
+  builtin::stash::{Stash, StashedCmd}, expand::alias::AliasExpander, util::{
     error::ShResult,
     guards::var_ctx_guard,
     strops::QuoteState,
-    utils::AutoCmdVecUtils,
+    AutoCmdVecUtils,
   }, match_loop, motion, parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::{exec_int, exec_nonint},
@@ -3624,7 +3624,10 @@ impl LineBuf {
 
             let StashedCmd { name, buffer, cursor_pos } = match stash.pop(idx) {
               Ok(ent) => match ent {
-                Some(ent) => ent,
+                Some(ent) => {
+                  write_meta(|m| m.post_status_message("stash: Popped stack entry".to_string()));
+                  ent
+                }
                 None => {
                   write_meta(|m| {
                     if stack_len == 0 {
@@ -3691,6 +3694,11 @@ impl LineBuf {
               }
               return Ok(());
             };
+
+            if let Some(name) = name {
+              write_meta(|m| m.post_status_message(format!("stash: Applied stash entry '{}'", name)));
+            }
+
 
             let cursor_pos = match self.parse_pos(&cursor_pos) {
               Ok(pos) => pos,

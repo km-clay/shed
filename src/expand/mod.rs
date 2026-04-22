@@ -17,7 +17,7 @@ pub use subshell::{expand_cmd_sub, expand_proc_sub};
 pub use util::{expand_case_pattern, glob_to_regex, is_var_name_ch};
 pub use var::{expand_glob, expand_raw, expand_var};
 
-use crate::libsh::error::{ShResult, ShResultExt};
+use crate::util::error::{ShResult, ShResultExt};
 use crate::match_loop;
 use crate::parse::lex::{Tk, TkFlags, TkRule};
 use crate::prelude::*;

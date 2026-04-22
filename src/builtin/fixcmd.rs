@@ -3,7 +3,7 @@ use std::{fmt::Write, io::Write as IoWrite, sync::atomic::AtomicBool};
 use tempfile::NamedTempFile;
 
 use crate::{
-  libsh::error::{ShResult, ShResultExt},
+  util::error::{ShResult, ShResultExt},
   match_loop,
   parse::{
     NdRule, Node,

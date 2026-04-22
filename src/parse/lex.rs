@@ -10,7 +10,7 @@ use bitflags::bitflags;
 
 use crate::{
   builtin::BUILTINS,
-  libsh::{
+  util::{
     error::ShResult,
     strops::{QuoteState, ends_with_unescaped, scan_braces, scan_parens},
   },

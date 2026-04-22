@@ -7,7 +7,7 @@ use nix::{
 use regex::Regex;
 
 use crate::{
-  libsh::error::{ShErr, ShResult},
+  util::error::{ShErr, ShResult},
   parse::{ConjunctOp, NdRule, Node, TEST_UNARY_OPS, TestCase},
   sherr,
   state::{VarFlags, VarKind, write_vars},

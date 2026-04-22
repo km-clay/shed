@@ -7,7 +7,7 @@ use scopeguard::defer;
 use yansi::Color;
 
 use crate::{
-  libsh::{error::ShResult, utils::AutoCmdVecUtils},
+  util::{error::ShResult, AutoCmdVecUtils},
   prelude::*,
   procio::{IoMode, borrow_fd},
   sherr,

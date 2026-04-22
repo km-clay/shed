@@ -12,45 +12,6 @@ use crate::{
 
 use super::register::{RegisterContent, append_register, read_register, write_register};
 
-#[macro_export]
-/// Shorthand for creating VerbCmds, like `verb!(Verb::Delete)` or `verb!(3, Verb::Change)`
-/// If no count is given, the count defaults to 1.
-macro_rules! verb {
-  ($verb:expr) => {
-    VerbCmd(1, $verb)
-  };
-  ($verb:expr,) => {
-    VerbCmd(1, $verb)
-  };
-  ($count:expr, $verb:expr) => {
-    VerbCmd($count, $verb)
-  };
-  ($count:expr, $verb:expr,) => {
-    VerbCmd($count, $verb)
-  };
-}
-
-#[macro_export]
-/// Shorthand for creating MotionCmds, like `motion!(Motion::ForwardChar)` or `motion!(3, Motion::LineDown)`
-/// If no count is given, the count defaults to 1.
-macro_rules! motion {
-  ($motion:expr) => {
-    MotionCmd(1, $motion)
-  };
-  ($motion:expr,) => {
-    MotionCmd(1, $motion)
-  };
-  ($count:expr, $motion:expr) => {
-    MotionCmd($count, $motion)
-  };
-  ($count:expr, $motion:expr,) => {
-    MotionCmd($count, $motion)
-  };
-}
-
-//TODO: write tests that take edit results and cursor positions from actual
-// neovim edits and test them against the behavior of this editor
-
 #[derive(Clone, Copy, Debug)]
 pub struct RegisterName {
   name: Option<char>,

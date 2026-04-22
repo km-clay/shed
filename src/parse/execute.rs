@@ -10,11 +10,11 @@ use crate::{
   },
   expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
   jobs::{ChildProc, JobStack, dispatch_job},
-  libsh::{
+  util::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
     guards::{scope_guard, var_ctx_guard},
     strops::split_case_pat,
-    utils::RedirVecUtils,
+    RedirVecUtils,
   },
   prelude::*,
   procio::{IoStack, PipeGenerator, borrow_fd},

@@ -12,7 +12,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
   jobs::Job,
-  libsh::{error::ShResult, utils::AutoCmdVecUtils},
+  util::{error::ShResult, AutoCmdVecUtils},
   match_loop,
   parse::{execute::exec_nonint, lex::{LexFlags, LexStream}},
   prelude::*,

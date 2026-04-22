@@ -7,7 +7,7 @@ use nix::{
 };
 
 use crate::{
-  libsh::error::{ShErr, ShResult},
+  util::error::{ShErr, ShResult},
   parse::{NdRule, Node, execute::prepare_argv},
   procio::borrow_fd,
   sherr,

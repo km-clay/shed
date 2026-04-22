@@ -5,7 +5,7 @@ use std::str::Chars;
 use itertools::Itertools;
 
 use crate::expand::Expander;
-use crate::libsh::error::ShResult;
+use crate::util::error::ShResult;
 use crate::parse::lex::TkFlags;
 use crate::readline::SimpleEditor;
 use crate::readline::editcmd::{

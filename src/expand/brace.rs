@@ -1,6 +1,6 @@
 use crate::expand::expand_raw;
-use crate::libsh::error::ShResult;
-use crate::libsh::strops::QuoteState;
+use crate::util::error::ShResult;
+use crate::util::strops::QuoteState;
 use crate::match_loop;
 
 /// Check if a string contains valid brace expansion patterns.

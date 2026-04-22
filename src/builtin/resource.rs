@@ -11,7 +11,7 @@ use nix::{
 use crate::sherr;
 use crate::{
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens_strict},
-  libsh::error::{ShResult, ShResultExt, next_color},
+  util::error::{ShResult, ShResultExt, next_color},
   parse::{NdRule, Node},
   procio::borrow_fd,
   state::{self},

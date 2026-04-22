@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local};
 
 use crate::{
-  builtin::join_raw_args, getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens}, libsh::error::ShResult, parse::{NdRule, Node}, prelude::*, procio::borrow_fd, sherr, state::{self, read_meta, write_meta}
+  builtin::join_raw_args, getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens}, util::error::ShResult, parse::{NdRule, Node}, prelude::*, procio::borrow_fd, sherr, state::{self, read_meta, write_meta}
 };
 
 bitflags! {

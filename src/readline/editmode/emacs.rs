@@ -1,40 +1,8 @@
 use super::{CmdReplay, EditMode, ModeReport, common_cmds};
 use crate::readline::editcmd::{Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
-use crate::{motion, verb};
+use crate::{alt, ctrl, motion, verb};
 
-#[macro_export]
-/// Shorthand for Ctrl + char, e.g. ctrl!('a') expands to Ctrl + A key event.
-macro_rules! ctrl {
-  ($ch:literal) => {
-    $crate::readline::keys::KeyEvent(
-      $crate::readline::keys::KeyCode::Char($ch),
-      $crate::readline::keys::ModKeys::CTRL,
-    )
-  };
-}
-
-#[macro_export]
-/// Shorthand for ALT key combinations, e.g. `alt!('f')` for `ALT+F`
-macro_rules! alt {
-  ($ch:literal) => {
-    $crate::readline::keys::KeyEvent(
-      $crate::readline::keys::KeyCode::Char($ch),
-      $crate::readline::keys::ModKeys::ALT,
-    )
-  };
-}
-
-#[macro_export]
-/// Shorthand for Shift + char, e.g. shift!('A') expands to Shift + A key event.
-macro_rules! shift {
-  ($ch:literal) => {
-    $crate::readline::keys::KeyEvent(
-      $crate::readline::keys::KeyCode::Char($ch),
-      $crate::readline::keys::ModKeys::SHIFT,
-    )
-  };
-}
 
 #[derive(Default, Clone, Debug)]
 pub struct Emacs {

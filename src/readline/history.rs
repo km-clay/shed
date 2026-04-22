@@ -6,7 +6,7 @@ use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::{
-  libsh::error::ShResult,
+  util::error::ShResult,
   readline::{
     complete::{Candidate, FuzzySelector},
     editcmd::Direction,

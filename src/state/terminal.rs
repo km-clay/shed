@@ -3,40 +3,7 @@ use std::{collections::VecDeque, fmt::{Debug, Display}, io::Write, os::fd::RawFd
 use nix::{errno::Errno, fcntl::{FcntlArg, OFlag, fcntl, open}, poll::{PollFd, PollFlags, PollTimeout, poll}, sys::{signal::{SigSet, SigmaskHow, Signal, kill, killpg, pthread_sigmask}, stat::Mode, termios::{self, Termios, tcgetattr, tcsetattr}}, unistd::{Pid, close, getpgrp, isatty, read, tcsetpgrp, write}};
 use vte::Perform;
 
-use crate::{libsh::{error::{ShErr, ShErrKind, ShResult}}, procio::borrow_fd, readline::{keys::{KeyCode, KeyEvent, ModKeys}, linebuf::Pos, term::get_win_size}, sherr, state::{read_shopts, with_term}};
-
-/// Write to the internal Terminal buffer
-///
-/// The given input will be buffered, meaning it won't be sent to the terminal until Terminal::flush() is called
-/// Note that this calls with_term() internally.
-/// DO NOT call this from within any of the state module accessors (e.g. read_logic, write_meta, etc) as that will cause a deadlock.
-#[macro_export]
-macro_rules! write_term {
-  ($($arg:tt)*) => {{
-    use std::io::Write;
-    $crate::state::with_term(|t| write!(t, $($arg)*))
-  }};
-}
-
-/// Write to the internal Terminal buffer, and then flush it
-///
-/// This sends the given format args directly to the terminal.
-/// Note that this calls with_term() internally.
-/// DO NOT call this from within any of the state module accessors (e.g. read_logic, write_meta, etc) as that will cause a deadlock.
-#[macro_export]
-macro_rules! flush_term {
-  () => {
-    use std::fmt::Write as FmtWrite;
-    $crate::state::with_term(|t| t.flush())
-  };
-  ($($arg:tt)*) => {{
-    use std::fmt::Write as FmtWrite;
-    $crate::state::with_term(|t| {
-      write!(t, $($arg)*)
-        t.flush()?;
-    })
-  }};
-}
+use crate::{util::{error::{ShErr, ShErrKind, ShResult}}, procio::borrow_fd, readline::{keys::{KeyCode, KeyEvent, ModKeys}, linebuf::Pos, term::get_win_size}, sherr, state::{read_shopts, with_term}};
 
 /// Minimum fd number for shell-internal file descriptors.
 pub const MIN_INTERNAL_FD: RawFd = 10;
