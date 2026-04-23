@@ -12,14 +12,14 @@ use nix::unistd::{User, gethostname, getppid};
 use crate::{
   builtin::map::MapNode,
   expand::{expand_arithmetic, expand_raw},
-  util::{
-    error::{ShErr, ShResult},
-    VecDequeExt,
-  },
   parse::lex::{LexFlags, LexStream, Tk},
   prelude::*,
   readline::{complete::Candidate, markers},
   sherr,
+  util::{
+    VecDequeExt,
+    error::{ShErr, ShResult},
+  },
 };
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
@@ -229,7 +229,12 @@ pub struct VarName {
 impl VarName {
   pub fn parse(raw: &str) -> ShResult<Self> {
     let Some(bracket_start) = raw.find('[') else {
-      return Ok(Self { name: raw.to_string(), index: None, slice_start: None, slice_len: None });
+      return Ok(Self {
+        name: raw.to_string(),
+        index: None,
+        slice_start: None,
+        slice_len: None,
+      });
     };
 
     // Find the matching ']' by tracking depth, since the index
@@ -251,7 +256,12 @@ impl VarName {
     }
 
     let Some(bracket_end) = bracket_end else {
-      return Ok(Self { name: raw.to_string(), index: None, slice_start: None, slice_len: None });
+      return Ok(Self {
+        name: raw.to_string(),
+        index: None,
+        slice_start: None,
+        slice_len: None,
+      });
     };
 
     let name = raw[..bracket_start].to_string();
@@ -270,7 +280,8 @@ impl VarName {
           let l_exp = expand_raw(&mut l.chars().peekable()).unwrap_or_else(|_| l.to_string());
           (s_exp.parse::<usize>().ok(), l_exp.parse::<usize>().ok())
         } else {
-          let expanded = expand_raw(&mut rest.chars().peekable()).unwrap_or_else(|_| rest.to_string());
+          let expanded =
+            expand_raw(&mut rest.chars().peekable()).unwrap_or_else(|_| rest.to_string());
           (expanded.parse::<usize>().ok(), None)
         }
       } else {
@@ -280,18 +291,36 @@ impl VarName {
       (None, None)
     };
 
-    Ok(Self { name, index: Some(index), slice_start, slice_len })
+    Ok(Self {
+      name,
+      index: Some(index),
+      slice_start,
+      slice_len,
+    })
   }
 
   /// Create a VarName from a plain name with no index (no expansion needed)
   pub fn plain(name: impl Into<String>) -> Self {
-    Self { name: name.into(), index: None, slice_start: None, slice_len: None }
+    Self {
+      name: name.into(),
+      index: None,
+      slice_start: None,
+      slice_len: None,
+    }
   }
 
-  pub fn name(&self) -> &str { &self.name }
-  pub fn index(&self) -> Option<&ArrIndex> { self.index.as_ref() }
-  pub fn slice_start(&self) -> Option<usize> { self.slice_start }
-  pub fn slice_len(&self) -> Option<usize> { self.slice_len }
+  pub fn name(&self) -> &str {
+    &self.name
+  }
+  pub fn index(&self) -> Option<&ArrIndex> {
+    self.index.as_ref()
+  }
+  pub fn slice_start(&self) -> Option<usize> {
+    self.slice_start
+  }
+  pub fn slice_len(&self) -> Option<usize> {
+    self.slice_len
+  }
 }
 
 #[derive(Clone, Debug)]
@@ -302,9 +331,19 @@ pub enum VarKind {
   AssocArr(Vec<(String, String)>),
 }
 
+impl Default for VarKind {
+  fn default() -> Self {
+    Self::Str(String::new())
+  }
+}
+
 impl VarKind {
   pub fn arr_from_tk(tk: Tk) -> ShResult<Self> {
     let raw = tk.as_str();
+    Self::arr_from_raw(raw)
+  }
+
+  pub fn arr_from_raw(raw: &str) -> ShResult<Self> {
     if !raw.starts_with('(') || !raw.ends_with(')') {
       return Err(sherr!(ParseErr, "Invalid array syntax: {}", raw,));
     }
@@ -332,6 +371,19 @@ impl VarKind {
       .collect();
 
     Ok(Self::Arr(tokens))
+  }
+
+  pub fn parse(raw: &str) -> Self {
+    Self::arr_from_raw(raw).unwrap_or_else(|_| Self::Str(raw.to_string()))
+  }
+
+  pub fn parse_tk(tk: Tk) -> Self {
+    let raw = tk.as_str();
+    Self::parse(raw)
+  }
+
+  pub fn empty() -> Self {
+    Self::Str(String::new())
   }
 
   pub fn arr_from_vec(vec: Vec<String>) -> Self {

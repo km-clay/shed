@@ -1,107 +1,73 @@
 use chrono::{DateTime, Local};
 
 use crate::{
-  builtin::join_raw_args, getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens}, util::error::ShResult, parse::{NdRule, Node}, prelude::*, procio::borrow_fd, sherr, state::{self, read_meta, write_meta}
+  builtin::join_raw_args,
+  getopt::{Opt, OptSpec},
+  sherr,
+  state::{read_meta, write_meta},
+  util::{error::ShResult, with_status, write_ln_out},
 };
 
-bitflags! {
-  pub struct MsgFlags: u32 {
-    const SYSTEM = 1 << 0;
-    const STATUS = 1 << 1;
+pub(super) struct Msg;
+impl super::Builtin for Msg {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::flag('s'),
+      OptSpec::flag('S'),
+      OptSpec::flag("status"),
+      OptSpec::flag("system"),
+    ]
   }
-}
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let mut system = false;
+    let mut status = false;
 
-fn msg_opts() -> [OptSpec; 4] {
-  [
-    OptSpec {
-      opt: Opt::Long("status".into()),
-      takes_arg: OptArg::None,
-    },
-    OptSpec {
-      opt: Opt::Long("system".into()),
-      takes_arg: OptArg::None,
-    },
-    OptSpec {
-      opt: Opt::Short('s'),
-      takes_arg: OptArg::None,
-    },
-    OptSpec {
-      opt: Opt::Short('S'),
-      takes_arg: OptArg::None,
-    },
-  ]
-}
-
-pub fn msg(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let (mut argv, opts) = get_opts_from_tokens(argv, &msg_opts())?;
-  let flags = get_msg_flags(opts)?;
-  argv.remove(0);
-
-  if argv.is_empty() {
-    read_meta(|m| -> ShResult<()> {
-      let history = if flags.contains(MsgFlags::SYSTEM) {
-        m.system_msg_history()
-      } else {
-        m.status_msg_history()
-      };
-      let stdout = borrow_fd(STDOUT_FILENO);
-
-      for (time,msg) in history {
-        let time: DateTime<Local> = (*time).into();
-        let formatted = time.format("[%H:%M:%S]").to_string();
-        let msg = msg.trim().replace('\n', "\n\t\t");
-
-        write(stdout, format!("{formatted}\t{msg}\n").as_bytes())?;
-      }
-
-      Ok(())
-    })?;
-    // argv is empty, maybe they want us to list past messages?
-  }
-
-  let (msg, _span) = join_raw_args(argv);
-
-  if flags.contains(MsgFlags::SYSTEM) {
-    write_meta(|m| {
-      m.post_system_message(msg);
-    })
-  } else if flags.contains(MsgFlags::STATUS) {
-    write_meta(|m| {
-      m.post_status_message(msg);
-    })
-  } else {
-    // just default to status messages i guess?
-    write_meta(|m| {
-      m.post_status_message(msg);
-    })
-  }
-
-  state::set_status(0);
-  Ok(())
-}
-
-pub fn get_msg_flags(opts: Vec<Opt>) -> ShResult<MsgFlags> {
-  let mut flags = MsgFlags::empty();
-
-  for opt in opts {
-    match opt {
-      Opt::Short('S') => flags |= MsgFlags::SYSTEM,
-      Opt::Short('s') => flags |= MsgFlags::STATUS,
-      Opt::Long(o) if o.as_str() == "system" => flags |= MsgFlags::SYSTEM,
-      Opt::Long(o) if o.as_str() == "status" => flags |= MsgFlags::STATUS,
-      _ => {
-        return Err(sherr!(ExecFail, "msg: Unexpected flag '{opt}'",));
+    for opt in args.opts {
+      match opt {
+        Opt::Short('S') => system = true,
+        Opt::Short('s') => status = true,
+        Opt::Long(o) if o.as_str() == "system" => system = true,
+        Opt::Long(o) if o.as_str() == "status" => status = true,
+        _ => {
+          return Err(sherr!(ExecFail, "msg: Unexpected flag '{opt}'",));
+        }
       }
     }
-  }
 
-  Ok(flags)
+    if args.argv.is_empty() {
+      // argv is empty, maybe they want us to list past messages?
+      read_meta(|m| -> ShResult<()> {
+        let history = if system {
+          m.system_msg_history()
+        } else {
+          m.status_msg_history()
+        };
+        for (time, msg) in history {
+          let time: DateTime<Local> = (*time).into();
+          let formatted = time.format("[%H:%M:%S]").to_string();
+          let msg = msg.trim().replace('\n', "\n\t\t"); // aligns multiline messages
+
+          write_ln_out(format!("{formatted}\t{msg}"))?;
+        }
+
+        Ok(())
+      })?;
+    }
+
+    let (msg, _span) = join_raw_args(args.argv);
+
+    if system {
+      write_meta(|m| {
+        m.post_system_message(msg.clone());
+      })
+    }
+    // defaults to status messages if no flag is provided, but if both are provided we post to both
+    if status || !system {
+      write_meta(|m| {
+        m.post_status_message(msg);
+      })
+    }
+
+    with_status(0)
+  }
 }

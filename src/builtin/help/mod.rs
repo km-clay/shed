@@ -7,19 +7,16 @@ use std::{
 };
 
 use crate::{
-  builtin::{
-    help::{
-      markup::StyledHelp,
-      pager::{HelpPager, PagerEvent},
-    },
-    join_raw_arg_iter,
+  builtin::help::{
+    markup::StyledHelp,
+    pager::{HelpPager, PagerEvent},
   },
-  util::error::ShResult,
-  parse::{NdRule, Node, execute::prepare_argv},
+  parse::lex::Span,
   procio::borrow_fd,
   readline::complete::ScoredCandidate,
   sherr,
   state::{with_term, write_meta},
+  util::error::ShResult,
 };
 
 use markup::TAG_SEQ;
@@ -35,36 +32,29 @@ const DOC_DIR: &str = match option_env!("SHED_DOC_DIR") {
   None => "doc",
 };
 
-pub fn help(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Help;
+impl super::Builtin for Help {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let _guard = scopeguard::guard((), |_| {
+      write_meta(|m| m.disable_welcome_message()).unwrap();
+    });
+    let mut argv = args.argv.into_iter().peekable();
 
-  let _guard = scopeguard::guard((), |_| {
-    write_meta(|m| m.disable_welcome_message()).unwrap();
-  });
+    // Join all of the word-split arguments into a single string
+    // Preserve the span too
+    let (topic, span) = if argv.peek().is_none() {
+      ("help".to_string(), Span::default())
+    } else {
+      super::join_raw_arg_iter(argv)
+    };
 
-  let mut argv = prepare_argv(argv)?.into_iter().peekable();
-  let help = argv.next().unwrap(); // drop 'help'
-
-  // Join all of the word-split arguments into a single string
-  // Preserve the span too
-  let (topic, span) = if argv.peek().is_none() {
-    ("help".to_string(), help.1)
-  } else {
-    join_raw_arg_iter(argv)
-  };
-
-  match get_help_content(&topic) {
-    Some((line, content, filename)) => open_help(&content, line, filename),
-    None => Err(sherr!(
-      NotFound @ span,
-      "No relevant help page found for this topic",
-    )),
+    match get_help_content(&topic) {
+      Some((line, content, filename)) => open_help(&content, line, filename),
+      None => Err(sherr!(
+        NotFound @ span,
+        "No relevant help page found for this topic",
+      )),
+    }
   }
 }
 

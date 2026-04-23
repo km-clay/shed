@@ -1,38 +1,25 @@
 use crate::{
-  util::error::ShResult,
-  parse::{
-    NdRule, Node,
-    execute::{exec_nonint, prepare_argv},
-  },
+  parse::execute::exec_nonint,
   state,
+  util::{error::ShResult, with_status},
 };
 
-pub fn eval(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Eval;
+impl super::Builtin for Eval {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      return with_status(0);
+    }
+    let sep = state::get_separator();
+    let command = args
+      .argv
+      .into_iter()
+      .map(|(s, _)| s)
+      .collect::<Vec<_>>()
+      .join(&sep);
 
-  let mut expanded_argv = prepare_argv(argv)?;
-  if !expanded_argv.is_empty() {
-    expanded_argv.remove(0);
+    exec_nonint(command, None, Some("eval".into()))
   }
-
-  if expanded_argv.is_empty() {
-    state::set_status(0);
-    return Ok(());
-  }
-
-  let joined_argv = expanded_argv
-    .into_iter()
-    .map(|(s, _)| s)
-    .collect::<Vec<_>>()
-    .join(" ");
-
-  exec_nonint(joined_argv, None, Some("eval".into()))
 }
 
 #[cfg(test)]

@@ -50,7 +50,7 @@ impl<'a> AliasExpander<'a> {
       // Check if the input from this token already starts with the expansion
       let rest = &self.input[tk.span.range().start..];
       if rest.starts_with(&expansion) {
-        // Already expanded — skip, but still mark it
+        // Already expanded - skip, but still mark it
         self.expanded.insert(word.to_string());
         continue;
       }
@@ -174,7 +174,7 @@ mod tests {
   use super::*;
   use crate::parse::lex::Span;
   use crate::state::write_logic;
-use crate::testutil::TestGuard;
+  use crate::testutil::TestGuard;
 
   // ===================== parse_key_alias =====================
 

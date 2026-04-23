@@ -13,15 +13,15 @@ use std::{
 };
 
 use crate::{
-  builtin::BUILTINS,
+  builtin::BUILTIN_NAMES,
   expand::expand_keymap,
   jobs::Job,
-  util::error::{ShErr, ShResult},
   match_loop,
   prelude::*,
   procio::borrow_fd,
   readline::{LineData, complete::CompSpec, keys::KeyEvent},
   sherr,
+  util::error::{ShErr, ShResult},
 };
 use itertools::{Itertools, izip};
 use nix::{
@@ -393,8 +393,8 @@ impl Drop for ShedSocket {
 pub struct CmdTimer {
   command: String,
   wall_start: Instant,
-  self_usage_start: Usage,
-  child_usage_start: Usage,
+  self_usage_start: Option<Usage>,
+  child_usage_start: Option<Usage>,
   wall_end: Option<Duration>,
   self_usage_end: Option<Usage>,
   child_usage_end: Option<Usage>,
@@ -403,11 +403,19 @@ pub struct CmdTimer {
 
 impl CmdTimer {
   pub fn new(command: String, report_time: bool) -> ShResult<Self> {
+    let (self_usage_start, child_usage_start) = if report_time {
+      (
+        Some(getrusage(UsageWho::RUSAGE_SELF)?),
+        Some(getrusage(UsageWho::RUSAGE_CHILDREN)?),
+      )
+    } else {
+      (None, None)
+    };
     Ok(Self {
       command,
       wall_start: Instant::now(),
-      self_usage_start: getrusage(UsageWho::RUSAGE_SELF)?,
-      child_usage_start: getrusage(UsageWho::RUSAGE_CHILDREN)?,
+      self_usage_start,
+      child_usage_start,
       wall_end: None,
       self_usage_end: None,
       child_usage_end: None,
@@ -417,8 +425,10 @@ impl CmdTimer {
 
   pub fn stop(&mut self) -> ShResult<()> {
     self.wall_end = Some(self.wall_start.elapsed());
-    self.self_usage_end = Some(getrusage(UsageWho::RUSAGE_SELF)?);
-    self.child_usage_end = Some(getrusage(UsageWho::RUSAGE_CHILDREN)?);
+    if self.report_time {
+      self.self_usage_end = Some(getrusage(UsageWho::RUSAGE_SELF)?);
+      self.child_usage_end = Some(getrusage(UsageWho::RUSAGE_CHILDREN)?);
+    }
     Ok(())
   }
 
@@ -482,9 +492,9 @@ impl CmdTimer {
       ));
     }
     let self_user_delta =
-      self.self_usage_end.unwrap().user_time() - self.self_usage_start.user_time();
+      self.self_usage_end.unwrap().user_time() - self.self_usage_start.unwrap().user_time();
     let child_user_delta =
-      self.child_usage_end.unwrap().user_time() - self.child_usage_start.user_time();
+      self.child_usage_end.unwrap().user_time() - self.child_usage_start.unwrap().user_time();
     Ok(Self::tv_to_ms(self_user_delta) + Self::tv_to_ms(child_user_delta))
   }
 
@@ -496,9 +506,9 @@ impl CmdTimer {
       ));
     }
     let self_sys_delta =
-      self.self_usage_end.unwrap().system_time() - self.self_usage_start.system_time();
+      self.self_usage_end.unwrap().system_time() - self.self_usage_start.unwrap().system_time();
     let child_sys_delta =
-      self.child_usage_end.unwrap().system_time() - self.child_usage_start.system_time();
+      self.child_usage_end.unwrap().system_time() - self.child_usage_start.unwrap().system_time();
     Ok(Self::tv_to_ms(self_sys_delta) + Self::tv_to_ms(child_sys_delta))
   }
 
@@ -754,6 +764,26 @@ impl Utility {
   }
 }
 
+/// Automatically manages loop depth in the meta table.
+///
+/// When dropped, decrements the loop depth in the meta table.
+pub struct LoopGuard;
+impl Drop for LoopGuard {
+  fn drop(&mut self) {
+    write_meta(|m| m.leave_loop())
+  }
+}
+
+/// Automatically manages function depth in the meta table.
+///
+/// When dropped, decrements the function depth in the meta table.
+pub struct FuncGuard;
+impl Drop for FuncGuard {
+  fn drop(&mut self) {
+    write_meta(|m| m.leave_func())
+  }
+}
+
 /// A table of metadata for the shell
 #[derive(Clone, Debug)]
 pub struct MetaTab {
@@ -770,13 +800,13 @@ pub struct MetaTab {
 
   // pending system messages
   // are drawn above the prompt and survive redraws
-  system_msg: VecDeque<(SystemTime,String)>,
-  system_msg_hist: VecDeque<(SystemTime,String)>,
+  system_msg: VecDeque<(SystemTime, String)>,
+  system_msg_hist: VecDeque<(SystemTime, String)>,
 
   // same as system messages,
   // but they appear under the prompt and are erased on redraw
-  status_msg: VecDeque<(SystemTime,String)>,
-  status_msg_hist: VecDeque<(SystemTime,String)>,
+  status_msg: VecDeque<(SystemTime, String)>,
+  status_msg_hist: VecDeque<(SystemTime, String)>,
 
   // pushd/popd stack
   dir_stack: VecDeque<PathBuf>,
@@ -792,6 +822,9 @@ pub struct MetaTab {
 
   // pending keys from widget function
   pending_widget_keys: Vec<KeyEvent>,
+
+  func_depth: usize,
+  loop_depth: usize,
 
   // whether or not the last command had a function definition
   last_was_func_def: bool,
@@ -816,6 +849,8 @@ impl Default for MetaTab {
       getopts_offset: 0,
       old_path: None,
       old_pwd: None,
+      loop_depth: 0,
+      func_depth: 0,
       util_cache: HashSet::new(),
       comp_specs: HashMap::new(),
       pending_widget_keys: vec![],
@@ -868,6 +903,35 @@ impl MetaTab {
       Ok(())
     })?;
     Ok(())
+  }
+  pub fn enter_loop(&mut self) -> LoopGuard {
+    self.loop_depth += 1;
+
+    LoopGuard
+  }
+  pub fn leave_loop(&mut self) {
+    if self.loop_depth > 0 {
+      self.loop_depth -= 1;
+    }
+  }
+  pub fn enter_func(&mut self) -> FuncGuard {
+    self.func_depth += 1;
+
+    FuncGuard
+  }
+  pub fn leave_func(&mut self) {
+    if self.func_depth > 0 {
+      self.func_depth -= 1;
+    }
+  }
+  pub fn in_loop(&self) -> bool {
+    self.loop_depth > 0
+  }
+  pub fn in_func(&self) -> bool {
+    self.func_depth > 0
+  }
+  pub fn func_depth(&self) -> usize {
+    self.func_depth
   }
   pub fn welcome_message(&self, force: bool) -> Option<String> {
     let res = query_db(|conn| {
@@ -1033,7 +1097,12 @@ impl MetaTab {
       .cloned()
   }
   pub fn get_cached_util(&self, util: &str) -> Option<Rc<Utility>> {
-    self.util_cache.iter().find(|u| u.name() == util).cloned()
+    self
+      .util_cache
+      .iter()
+      .filter(|u| u.name() == util)
+      .min_by_key(|u| u.kind().clone())
+      .cloned()
   }
   pub fn last_was_func_def(&self) -> bool {
     self.last_was_func_def
@@ -1047,6 +1116,7 @@ impl MetaTab {
   pub fn get_cmds_in_path() -> Vec<Rc<Utility>> {
     let path = env::var("PATH").unwrap_or_default();
     let paths = path.split(":").map(PathBuf::from);
+    let mut seen = HashSet::new();
     let mut cmds = vec![];
     for path in paths {
       if let Ok(entries) = path.read_dir() {
@@ -1059,6 +1129,7 @@ impl MetaTab {
           if meta.is_file()
             && is_exec
             && let Some(name) = entry.file_name().to_str()
+            && seen.insert(name.to_string())
           {
             let util = Utility::command(name.to_string(), entry.path());
             cmds.push(util.into());
@@ -1312,7 +1383,7 @@ impl MetaTab {
       l.dirty = false;
     });
 
-    for cmd in BUILTINS {
+    for cmd in BUILTIN_NAMES {
       let util = Utility::builtin(cmd.to_string());
       self.cache_util(util.into());
     }
@@ -1349,11 +1420,11 @@ impl MetaTab {
   }
   pub fn post_system_message(&mut self, message: String) {
     let now = SystemTime::now();
-    self.system_msg.push_back((now,message));
+    self.system_msg.push_back((now, message));
   }
   pub fn pop_system_message(&mut self) -> Option<String> {
-    let (time,msg) = self.system_msg.pop_front()?;
-    self.system_msg_hist.push_back((time,msg.clone()));
+    let (time, msg) = self.system_msg.pop_front()?;
+    self.system_msg_hist.push_back((time, msg.clone()));
     Some(msg)
   }
   pub fn system_msg_pending(&self) -> bool {
@@ -1361,20 +1432,20 @@ impl MetaTab {
   }
   pub fn post_status_message(&mut self, message: String) {
     let now = SystemTime::now();
-    self.status_msg.push_back((now,message));
+    self.status_msg.push_back((now, message));
   }
   pub fn pop_status_message(&mut self) -> Option<String> {
-    let (time,msg) = self.status_msg.pop_front()?;
-    self.status_msg_hist.push_back((time,msg.clone()));
+    let (time, msg) = self.status_msg.pop_front()?;
+    self.status_msg_hist.push_back((time, msg.clone()));
     Some(msg)
   }
   pub fn status_msg_pending(&self) -> bool {
     !self.status_msg.is_empty()
   }
-  pub fn status_msg_history(&self) -> &VecDeque<(SystemTime,String)> {
+  pub fn status_msg_history(&self) -> &VecDeque<(SystemTime, String)> {
     &self.status_msg_hist
   }
-  pub fn system_msg_history(&self) -> &VecDeque<(SystemTime,String)> {
+  pub fn system_msg_history(&self) -> &VecDeque<(SystemTime, String)> {
     &self.system_msg_hist
   }
   pub fn dir_stack_top(&self) -> Option<&PathBuf> {

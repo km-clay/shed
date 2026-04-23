@@ -1,17 +1,35 @@
-use std::sync::Arc;
-
 use ariadne::Fmt;
 use fmt::Display;
 
 use crate::{
-  util::error::{ShResult, next_color},
   parse::lex::{Span, Tk},
   prelude::*,
   sherr,
   shopt::xtrace_print,
+  util::error::{ShResult, next_color},
 };
 
-pub type OptSet = Arc<[Opt]>;
+pub trait AsOpt {
+  fn as_opt(&self) -> Opt;
+}
+
+impl AsOpt for char {
+  fn as_opt(&self) -> Opt {
+    Opt::Short(*self)
+  }
+}
+
+impl AsOpt for String {
+  fn as_opt(&self) -> Opt {
+    Opt::Long(self.clone())
+  }
+}
+
+impl AsOpt for &str {
+  fn as_opt(&self) -> Opt {
+    Opt::Long(self.to_string())
+  }
+}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Opt {
@@ -21,20 +39,6 @@ pub enum Opt {
   Short(char),
   ShortWithArg(char, String),
   ShortWithList(char, Vec<String>),
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum OptArg {
-  None,
-  Single,
-  Exact(usize),
-  List,
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct OptSpec {
-  pub opt: Opt,
-  pub takes_arg: OptArg,
 }
 
 impl Opt {
@@ -63,6 +67,47 @@ impl Display for Opt {
       Self::ShortWithArg(opt, arg) => write!(f, "-{} {}", opt, arg),
       Self::LongWithList(opt, args) => write!(f, "--{} {}", opt, args.join(" ")),
       Self::ShortWithList(opt, args) => write!(f, "-{} {}", opt, args.join(" ")),
+    }
+  }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum OptArg {
+  None,
+  Single,
+  Exact(usize),
+  List,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct OptSpec {
+  pub opt: Opt,
+  pub takes_arg: OptArg,
+}
+
+impl OptSpec {
+  pub fn flag(opt: impl AsOpt) -> Self {
+    Self {
+      opt: opt.as_opt(),
+      takes_arg: OptArg::None,
+    }
+  }
+  pub fn single_arg(opt: impl AsOpt) -> Self {
+    Self {
+      opt: opt.as_opt(),
+      takes_arg: OptArg::Single,
+    }
+  }
+  pub fn exact_args(opt: impl AsOpt, n: usize) -> Self {
+    Self {
+      opt: opt.as_opt(),
+      takes_arg: OptArg::Exact(n),
+    }
+  }
+  pub fn arg_list(opt: impl AsOpt) -> Self {
+    Self {
+      opt: opt.as_opt(),
+      takes_arg: OptArg::List,
     }
   }
 }

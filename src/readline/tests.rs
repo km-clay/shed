@@ -283,9 +283,7 @@ fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
   write_shopts(|o| o.set.vi = true);
   let g = TestGuard::new();
   let prompt = Prompt::default();
-  let vi = ShedLine::new_no_hist(prompt)
-    .unwrap()
-    .with_initial(initial);
+  let vi = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
 
   (vi, g)
 }

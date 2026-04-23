@@ -1,30 +1,8 @@
-use std::{cell::Cell, collections::VecDeque, os::unix::fs::PermissionsExt, rc::Rc};
+use std::{collections::VecDeque, os::unix::fs::PermissionsExt, rc::Rc};
 
 use ariadne::Fmt;
 use nix::unistd::execve;
 use unicode_segmentation::UnicodeSegmentation;
-
-use crate::{
-  builtin::{
-    BUILTINS, alias::{alias, unalias}, arrops::{arr_fpop, arr_fpush, arr_pop, arr_push, arr_rotate}, autocmd::autocmd, cd::cd, complete::{compgen_builtin, complete_builtin}, dirstack::{dirs, popd, pushd}, echo::echo, eval, exec, fixcmd::fixcmd, flowctl::flowctl, getopts::getopts, hash::hash_builtin, help::help, hist::hist_builtin, intro, jobctl::{self, JobBehavior, continue_job, disown, jobs, kill_builtin}, keymap, map, msg::msg, pwd::pwd, read::{self, read_builtin}, resource::{ulimit, umask_builtin}, seek::seek, set::set_builtin, shift::shift, shopt::shopt, source::source, stash::stash, test::double_bracket_test, times::times, trap::{TrapTarget, trap}, varcmds::{export, local, readonly, unset}
-  },
-  expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
-  jobs::{ChildProc, JobStack, dispatch_job},
-  util::{
-    error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
-    guards::{scope_guard, var_ctx_guard},
-    strops::split_case_pat,
-    RedirVecUtils,
-  },
-  prelude::*,
-  procio::{IoStack, PipeGenerator, borrow_fd},
-  sherr,
-  shopt::xtrace_print,
-  signal::{check_signals, signals_pending},
-  state::{
-    self, ShFunc, VarFlags, VarKind, read_logic, read_shopts, read_vars, with_term, write_jobs, write_logic, write_meta, write_vars
-  },
-};
 
 use super::{
   AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node,
@@ -32,9 +10,27 @@ use super::{
   lex::{KEYWORDS, Span, Tk, TkFlags},
 };
 
-thread_local! {
-  static RECURSE_DEPTH: Cell<usize> = const { Cell::new(0) };
-}
+use crate::{
+  builtin::{BUILTIN_NAMES, exec, lookup_builtin, test::double_bracket_test, trap::TrapTarget},
+  expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
+  jobs::{ChildProc, JobStack, dispatch_job},
+  prelude::*,
+  procio::{IoStack, PipeGenerator, borrow_fd},
+  sherr,
+  shopt::xtrace_print,
+  signal::{check_signals, signals_pending},
+  state::{
+    self, ShFunc, VarFlags, VarKind, read_logic, read_meta, read_shopts, read_vars, with_term,
+    write_jobs, write_logic, write_meta, write_vars,
+  },
+  util::{
+    RedirVecUtils,
+    error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
+    guards::{scope_guard, var_ctx_guard},
+    strops::split_case_pat,
+    with_status,
+  },
+};
 
 pub fn is_in_path(name: &str) -> bool {
   if name.starts_with("./") || name.starts_with("../") || name.starts_with('/') {
@@ -135,7 +131,7 @@ pub fn exec_dash_c(input: String) -> ShResult<()> {
   let mut nodes = parser.extract_nodes();
 
   // Single simple command: exec directly without forking.
-  // The parser wraps single commands as Conjunction → Pipeline → Command.
+  // The parser wraps single commands as Conjunction -> Pipeline -> Command.
   // Unwrap all layers to check, then set NO_FORK on the inner Command.
   if nodes.len() == 1 {
     let is_single_cmd = match &nodes[0].class {
@@ -186,10 +182,7 @@ pub fn exec_dash_c(input: String) -> ShResult<()> {
 ///
 /// Used in the main loop and other places that are guaranteed to be interacting with a tty somehow.
 /// This controls whether or not the shell passes terminal control to child processes.
-pub fn exec_int(
-  input: String,
-  source_name: Option<Rc<str>>,
-) -> ShResult<()> {
+pub fn exec_int(input: String, source_name: Option<Rc<str>>) -> ShResult<()> {
   let _guard = with_term(|t| t.interactive_guard(true));
   exec_input(input, None, source_name)
 }
@@ -341,7 +334,7 @@ impl Dispatcher {
       self.exec_subsh(node)
     } else if is_func(&cmd_word) {
       self.exec_func(node)
-    } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTINS.contains(&cmd_word.as_str()) {
+    } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTIN_NAMES.contains(&cmd_word.as_str()) {
       self.exec_builtin(node)
     } else if is_arith(cmd_tk) {
       self.exec_arith(node)
@@ -509,13 +502,8 @@ impl Dispatcher {
     };
 
     let max_depth = read_shopts(|s| s.core.max_recurse_depth);
-    let depth = RECURSE_DEPTH.with(|d| {
-      let cur = d.get();
-      d.set(cur + 1);
-      cur + 1
-    });
+    let depth = read_meta(|m| m.func_depth());
     if depth > max_depth {
-      RECURSE_DEPTH.with(|d| d.set(d.get() - 1));
       return Err(sherr!(
         InternalErr @ blame,
         "maximum recursion depth ({max_depth}) exceeded",
@@ -538,8 +526,10 @@ impl Dispatcher {
 
     argv.insert(0, func_name.clone());
     let argv = prepare_argv(argv).try_blame(blame.clone())?;
-    let result = if let Some(ref mut func_body) = read_logic(|l| l.get_func(&name)) {
+    if let Some(ref mut func_body) = read_logic(|l| l.get_func(&name)) {
       let _guard = scope_guard(Some(argv));
+      let _func_guard = write_meta(|m| m.enter_func());
+
       func_body.body_mut().propagate_context(func_ctx);
       func_body.body_mut().flags = func.flags;
 
@@ -562,10 +552,7 @@ impl Dispatcher {
         InternalErr @ blame,
         "Failed to find function '{func_name}'"
       ))
-    };
-
-    RECURSE_DEPTH.with(|d| d.set(d.get() - 1));
-    result
+    }
   }
   /// Run a compound command.
   ///
@@ -716,6 +703,7 @@ impl Dispatcher {
       Ok(())
     };
 
+    let _loop_guard = write_meta(|m| m.enter_loop());
     self.run_compound("loop", loop_stmt.redirs, loop_stmt.flags, blame, loop_logic)
   }
   fn exec_for_arith(&mut self, for_stmt: Node) -> ShResult<()> {
@@ -774,6 +762,7 @@ impl Dispatcher {
       Ok(())
     };
 
+    let _loop_guard = write_meta(|m| m.enter_loop());
     self.run_compound("c_for", for_stmt.redirs, for_stmt.flags, blame, for_logic)
   }
   fn exec_for_arr(&mut self, for_stmt: Node) -> ShResult<()> {
@@ -838,6 +827,7 @@ impl Dispatcher {
       Ok(())
     };
 
+    let _loop_guard = write_meta(|m| m.enter_loop());
     self.run_compound("for", for_stmt.redirs, for_stmt.flags, blame, for_logic)
   }
   fn exec_if(&mut self, if_stmt: Node) -> ShResult<()> {
@@ -906,7 +896,10 @@ impl Dispatcher {
     let tty_controller = |s: &mut Self| -> Option<Pid> {
       if with_term(|t| t.interactive()) {
         log::debug!("Checking if we need to attach to tty for pipeline segment");
-        log::debug!("is_bg: {is_bg}, interactive: {}", with_term(|t| t.interactive()));
+        log::debug!(
+          "is_bg: {is_bg}, interactive: {}",
+          with_term(|t| t.interactive())
+        );
       }
       (!is_bg && with_term(|t| t.interactive()))
         .then(|| s.job_stack.curr_job_mut().unwrap().pgid())
@@ -1061,86 +1054,38 @@ impl Dispatcher {
     // Handle exec specially - persist redirections before dispatch
     if cmd_raw.as_str() == "exec" {
       guard.persist();
-      let result = exec::exec_builtin(cmd);
-      return if let Err(e) = result {
-        Err(e.with_context(context))
-      } else {
-        Ok(())
-      };
     }
 
-    let result = match cmd_raw.as_str() {
-      "echo" => echo(cmd),
-      "cd" => cd(cmd),
-      "export" => export(cmd),
-      "local" => local(cmd),
-      "pwd" => pwd(cmd),
-      "source" | "." => source(cmd),
-      "shift" => shift(cmd),
-      "fg" => continue_job(cmd, JobBehavior::Foregound),
-      "bg" => continue_job(cmd, JobBehavior::Background),
-      "disown" => disown(cmd),
-      "jobs" => jobs(cmd),
-      "alias" => alias(cmd),
-      "unalias" => unalias(cmd),
-      "return" => flowctl(cmd, ShErrKind::FuncReturn(0)),
-      "break" => flowctl(cmd, ShErrKind::LoopBreak(0)),
-      "continue" => flowctl(cmd, ShErrKind::LoopContinue(0)),
-      "exit" => flowctl(cmd, ShErrKind::CleanExit(0)),
-      "shopt" => shopt(cmd),
-      "read" => read_builtin(cmd),
-      "trap" => trap(cmd),
-      "pushd" => pushd(cmd),
-      "popd" => popd(cmd),
-      "dirs" => dirs(cmd),
-      "eval" => eval::eval(cmd),
-      "readonly" => readonly(cmd),
-      "unset" => unset(cmd),
-      "complete" => complete_builtin(cmd),
-      "compgen" => compgen_builtin(cmd),
-      "map" => map::map(cmd),
-      "pop" => arr_pop(cmd),
-      "fpop" => arr_fpop(cmd),
-      "push" => arr_push(cmd),
-      "fpush" => arr_fpush(cmd),
-      "rotate" => arr_rotate(cmd),
-      "wait" => jobctl::wait(cmd),
-      "type" => intro::type_builtin(cmd),
-      "getopts" => getopts(cmd),
-      "keymap" => keymap::keymap(cmd),
-      "readkey" => read::readkey(cmd),
-      "autocmd" => autocmd(cmd),
-      "ulimit" => ulimit(cmd),
-      "umask" => umask_builtin(cmd),
-      "seek" => seek(cmd),
-      "help" => help(cmd),
-      "set" => set_builtin(cmd),
-      "msg" => msg(cmd),
-      "fc" => fixcmd(cmd),
-      "hist" => hist_builtin(cmd),
-      "hash" => hash_builtin(cmd),
-      "times" => times(cmd),
-      "kill" => kill_builtin(cmd),
-      "stash" => stash(cmd),
-      ":" => {
-        state::set_status(0);
-        Ok(())
-      }
-      "true" | "false" => {
-        let cmd = cmd_raw.parse::<bool>().unwrap();
-        state::set_status_from_bool(cmd);
-        Ok(())
-      }
-      _ => unimplemented!("Have not yet added support for builtin '{}'", cmd_raw),
+    let Some(builtin) = lookup_builtin(&cmd_raw) else {
+      sherr!(NotFound @ cmd.get_span(), "builtin not found: {cmd_raw}")
+        .with_context(context)
+        .print_error();
+      return with_status(127); // 127 = command not found
     };
 
-    if let Err(e) = result {
-      if !e.is_flow_control() {
-        state::set_status(1);
+    let result = builtin.run_builtin(cmd);
+
+    // Now we inspect the error that we got, if any
+    match result {
+      Ok(()) => Ok(()),
+      Err(e) => {
+        // if we aren't in the context these are looking for
+        // then they will bubble all the way up to main
+        // which cancels execution. Let's catch that here
+        let should_propagate = match e.kind() {
+          ShErrKind::CleanExit(_) => true, // this one always goes
+          ShErrKind::LoopBreak(_) | ShErrKind::LoopContinue(_) => read_meta(|m| m.in_loop()),
+          ShErrKind::FuncReturn(_) => read_meta(|m| m.in_func()),
+          _ => false,
+        };
+
+        if should_propagate {
+          Err(e.with_context(context))
+        } else {
+          e.with_context(context).print_error();
+          with_status(1)
+        }
       }
-      Err(e.with_context(context).with_redirs(guard))
-    } else {
-      Ok(())
     }
   }
   fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
@@ -1162,10 +1107,13 @@ impl Dispatcher {
     if let AssignBehavior::Set = assign_behavior {
       // if we are here, argv is empty. set assignments and return.
       if !assignments.is_empty() {
-        self.set_assignments(assignments, assign_behavior)?;
-        state::set_status(0);
+        if let Err(e) = self.set_assignments(assignments, assign_behavior) {
+          e.print_error();
+          return with_status(1);
+        } else {
+          return with_status(0);
+        };
       }
-      return Ok(());
     }
     // argv is not empty. let's set this stuff here.
     let cmd_tk = argv[0].clone();
@@ -1455,7 +1403,7 @@ pub fn runs_inline(cmd: &Node) -> bool {
     .and_then(|c| c.clone().expand().ok())
     .and_then(|t| t.get_first_word())
     .unwrap_or_default();
-  !is_func(&cmd_word) && !BUILTINS.contains(&cmd_word.as_str())
+  !is_func(&cmd_word) && !BUILTIN_NAMES.contains(&cmd_word.as_str())
 }
 
 pub fn check_err(flags: NdFlags, err: Option<ShErr>, span: Option<Span>) -> ShResult<()> {
@@ -1643,7 +1591,7 @@ mod tests {
   #[test]
   fn negate_pipeline_last_cmd() {
     let _g = TestGuard::new();
-    // pipeline status = last cmd (false) = 1, negated → 0
+    // pipeline status = last cmd (false) = 1, negated -> 0
     test_input("! true | false").unwrap();
     assert_eq!(state::get_status(), 0);
   }
@@ -1651,7 +1599,7 @@ mod tests {
   #[test]
   fn negate_pipeline_last_cmd_true() {
     let _g = TestGuard::new();
-    // pipeline status = last cmd (true) = 0, negated → 1
+    // pipeline status = last cmd (true) = 0, negated -> 1
     test_input("! false | true").unwrap();
     assert_eq!(state::get_status(), 1);
   }

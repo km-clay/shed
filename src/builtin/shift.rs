@@ -1,42 +1,32 @@
 use crate::{
-  util::error::ShResult,
-  parse::{NdRule, Node, execute::prepare_argv},
   sherr,
-  state::{self, write_vars},
+  state::write_vars,
+  util::{error::ShResult, with_status},
 };
 
-pub fn shift(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Shift;
+impl super::Builtin for Shift {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let mut argv = args.argv.into_iter();
 
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
+    let count = argv
+      .next()
+      .map(|(st, sp)| {
+        st.parse::<usize>().map_err(|_| {
+          sherr!(
+            ExecFail @ sp,
+            "Expected a number in shift args",
+          )
+        })
+      })
+      .unwrap_or(Ok(1))?;
+
+    for _ in 0..count {
+      write_vars(|v| v.cur_scope_mut().fpop_arg());
+    }
+
+    with_status(0)
   }
-  let mut argv = argv.into_iter();
-
-  let count = if let Some((arg, span)) = argv.next() {
-    let Ok(count) = arg.parse::<usize>() else {
-      return Err(sherr!(
-        ExecFail @ span,
-        "Expected a number in shift args",
-      ));
-    };
-    count
-  } else {
-    1
-  };
-  for _ in 0..count {
-    write_vars(|v| v.cur_scope_mut().fpop_arg());
-  }
-
-  state::set_status(0);
-  Ok(())
 }
 
 #[cfg(test)]
@@ -76,8 +66,8 @@ mod tests {
   #[test]
   fn shift_non_numeric_fails() {
     let _g = TestGuard::new();
-    let result = test_input("shift abc");
-    assert!(result.is_err());
+    test_input("shift abc").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]

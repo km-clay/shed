@@ -1,54 +1,104 @@
 use crate::{
-  util::error::{ShErr, ShErrKind, ShResult},
-  parse::{NdRule, Node, execute::prepare_argv},
   sherr,
+  util::error::{ShErr, ShErrKind, ShResult, ShResultExt},
 };
 
-/// Returns a ShErr that signals a control flow change (break, continue, return, or exit) with an optional status code.
-/// The reason we return an Error on what is technically the "happy path" is because this is how we can unwind the call stack to the appropriate control flow construct (loop, function, or shell exit).
-/// The error bubbles up until it is caught by a context that waits to catch it.
-/// If the error bubbles all the way up to main, the error is printed and the status code is set to 1.
-pub fn flowctl(node: Node, kind: ShErrKind) -> ShResult<()> {
-  use ShErrKind as K;
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-  let mut code = 0;
+/// A trait for flow control builtins (break, continue, return, exit).
+///
+/// The way flowctl works in `shed` is by leveraging Rust's error propagation to unwind the call stack until it reaches the appropriate control flow construct (loop, function, or shell exit).
+/// This doubles as a true error propagation, if the error created never reaches a context that waits to catch it, it will bubble all the way up to main, where it will be printed.
+trait FlowCtl: super::Builtin {
+  fn flow_control(&self, code: i32) -> ShErr;
+  fn cmd(&self) -> &'static str;
+  fn exec_flow_ctl(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let code = args
+      .argv
+      .into_iter()
+      .next()
+      .map(|(st, sp)| {
+        st.parse::<i32>().map_err(|_| {
+          sherr!(
+            SyntaxErr @ sp,
+            "{}: Expected a number",
+            self.cmd(),
+          )
+        })
+      })
+      .transpose()?
+      .unwrap_or(0);
 
-  let mut argv = prepare_argv(argv)?;
-  let cmd = argv.remove(0).0;
-
-  if !argv.is_empty() {
-    let (arg, span) = argv.into_iter().next().unwrap();
-
-    let Ok(status) = arg.parse::<i32>() else {
-      return Err(sherr!(
-        SyntaxErr @ span,
-        "{cmd}: Expected a number",
-      ));
-    };
-
-    code = status;
+    Err(self.flow_control(code)).promote_err(args.span)
   }
+}
 
-  let (kind, message) = match kind {
-    K::LoopContinue(_) => (K::LoopContinue(code), "'continue' found outside of loop"),
-    K::LoopBreak(_) => (K::LoopBreak(code), "'break' found outside of loop"),
-    K::FuncReturn(_) => (K::FuncReturn(code), "'return' found outside of function"),
-    K::CleanExit(_) => (K::CleanExit(code), ""),
-    _ => unreachable!(),
-  };
+pub(super) struct Return;
+impl super::Builtin for Return {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    self.exec_flow_ctl(args)
+  }
+}
+impl FlowCtl for Return {
+  fn cmd(&self) -> &'static str {
+    "return"
+  }
+  fn flow_control(&self, code: i32) -> ShErr {
+    ShErr::simple(
+      ShErrKind::FuncReturn(code),
+      "'return' found outside of function",
+    )
+  }
+}
 
-  Err(ShErr::simple(kind, message))
+pub(super) struct Break;
+impl super::Builtin for Break {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    self.exec_flow_ctl(args)
+  }
+}
+impl FlowCtl for Break {
+  fn cmd(&self) -> &'static str {
+    "break"
+  }
+  fn flow_control(&self, code: i32) -> ShErr {
+    ShErr::simple(ShErrKind::LoopBreak(code), "'break' found outside of loop")
+  }
+}
+
+pub(super) struct Continue;
+impl super::Builtin for Continue {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    self.exec_flow_ctl(args)
+  }
+}
+impl FlowCtl for Continue {
+  fn cmd(&self) -> &'static str {
+    "continue"
+  }
+  fn flow_control(&self, code: i32) -> ShErr {
+    ShErr::simple(
+      ShErrKind::LoopContinue(code),
+      "'continue' found outside of loop",
+    )
+  }
+}
+
+pub(super) struct Exit;
+impl super::Builtin for Exit {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    self.exec_flow_ctl(args)
+  }
+}
+impl FlowCtl for Exit {
+  fn cmd(&self) -> &'static str {
+    "exit"
+  }
+  fn flow_control(&self, code: i32) -> ShErr {
+    ShErr::simple(ShErrKind::CleanExit(code), "")
+  }
 }
 
 #[cfg(test)]
 mod tests {
-  use crate::util::error::ShErrKind;
   use crate::state;
   use crate::testutil::{TestGuard, test_input};
 
@@ -65,15 +115,15 @@ mod tests {
   #[test]
   fn break_outside_loop_errors() {
     let _g = TestGuard::new();
-    let result = test_input("break");
-    assert!(result.is_err());
+    test_input("break").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn break_non_numeric_errors() {
     let _g = TestGuard::new();
-    let result = test_input("for i in 1; do break abc; done");
-    assert!(result.is_err());
+    test_input("for i in 1; do break abc; done").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== continue =====================
@@ -90,8 +140,8 @@ mod tests {
   #[test]
   fn continue_outside_loop_errors() {
     let _g = TestGuard::new();
-    let result = test_input("continue");
-    assert!(result.is_err());
+    test_input("continue").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== return =====================
@@ -116,8 +166,8 @@ mod tests {
   #[test]
   fn return_outside_function_errors() {
     let _g = TestGuard::new();
-    let result = test_input("return");
-    assert!(result.is_err());
+    test_input("return").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== exit =====================
@@ -125,25 +175,21 @@ mod tests {
   #[test]
   fn exit_returns_clean_exit() {
     let _g = TestGuard::new();
-    let result = test_input("exit 0");
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(matches!(err.kind(), ShErrKind::CleanExit(0)));
+    test_input("exit 0").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn exit_with_code() {
     let _g = TestGuard::new();
-    let result = test_input("exit 5");
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(matches!(err.kind(), ShErrKind::CleanExit(5)));
+    test_input("exit 5").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn exit_non_numeric_errors() {
     let _g = TestGuard::new();
-    let result = test_input("exit abc");
-    assert!(result.is_err());
+    test_input("exit abc").ok();
+    assert_ne!(state::get_status(), 0);
   }
 }

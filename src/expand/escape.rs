@@ -210,7 +210,7 @@ fn read_dollar_quote(chars: &mut Peekable<Chars>, result: &mut String) {
   });
 }
 
-fn read_octal(chars: &mut Peekable<Chars>, result: &mut String) {
+pub fn read_octal(chars: &mut Peekable<Chars>, result: &mut String) {
   let mut oct = String::new();
   for _ in 0..3 {
     if let Some(o) = chars.peek() {
@@ -231,7 +231,7 @@ fn read_octal(chars: &mut Peekable<Chars>, result: &mut String) {
   }
 }
 
-fn read_hex(chars: &mut Peekable<Chars>, result: &mut String) {
+pub fn read_hex(chars: &mut Peekable<Chars>, result: &mut String) {
   let mut hex = String::new();
   if let Some(h1) = chars.next() {
     hex.push(h1);
@@ -606,7 +606,7 @@ mod tests {
 
   #[test]
   fn display_backslash_no_escaping_in_single_quote_context() {
-    // backslash not before ' — should not be doubled
+    // backslash not before ' - should not be doubled
     assert_eq!(as_var_val_display("\\@prompt "), "'\\@prompt '");
   }
 

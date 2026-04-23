@@ -1,46 +1,12 @@
 use std::sync::Arc;
 
-use nix::{libc::STDOUT_FILENO, unistd::write};
 use rusqlite::Connection;
 
-use crate::{getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens}, util::error::{ShResult, ShResultExt}, match_loop, parse::{NdRule, Node}, procio::borrow_fd, sherr, state};
-
-pub fn stash_opts() -> [OptSpec;8] {
-  [
-    OptSpec {
-      opt: Opt::Short('s'),
-      takes_arg: OptArg::Exact(3)
-    },
-    OptSpec {
-      opt: Opt::Long("save".into()),
-      takes_arg: OptArg::Exact(3)
-    },
-    OptSpec {
-      opt: Opt::Short('d'),
-      takes_arg: OptArg::Single
-    },
-    OptSpec {
-      opt: Opt::Long("delete".into()),
-      takes_arg: OptArg::Single
-    },
-    OptSpec {
-      opt: Opt::Short('l'),
-      takes_arg: OptArg::None
-    },
-    OptSpec {
-      opt: Opt::Long("list".into()),
-      takes_arg: OptArg::None
-    },
-    OptSpec {
-      opt: Opt::Long("stack".into()),
-      takes_arg: OptArg::None
-    },
-    OptSpec {
-      opt: Opt::Long("named".into()),
-      takes_arg: OptArg::None
-    },
-  ]
-}
+use crate::{
+  getopt::{Opt, OptSpec},
+  match_loop, outln, sherr, state,
+  util::error::{ShResult, ShResultExt},
+};
 
 #[derive(Debug)]
 pub struct StashedCmd {
@@ -49,7 +15,7 @@ pub struct StashedCmd {
   pub cursor_pos: String, // absolute grapheme pos or row:col
 }
 
-#[derive(Debug,Default)]
+#[derive(Debug, Default)]
 pub struct StashOpts {
   to_save: Vec<StashedCmd>,
   to_delete: Vec<String>,
@@ -115,18 +81,18 @@ impl StashOpts {
 }
 
 pub struct Stash {
-  conn: Arc<Connection>
+  conn: Arc<Connection>,
 }
 
 impl Stash {
   pub fn new() -> ShResult<Self> {
-    let conn = state::get_db_conn()
-      .ok_or_else(|| sherr!(InternalErr, "database not available"))?;
+    let conn = state::get_db_conn().ok_or_else(|| sherr!(InternalErr, "database not available"))?;
     Self::init_stash_table(&conn)?;
     Ok(Self { conn })
   }
   pub fn init_stash_table(conn: &Arc<Connection>) -> ShResult<()> {
-    conn.execute_batch(r#"
+    conn.execute_batch(
+      r#"
 			CREATE TABLE IF NOT EXISTS stash (
 				id	INTEGER PRIMARY KEY,
         name TEXT,
@@ -134,16 +100,18 @@ impl Stash {
         cursor TEXT,
         timestamp INTEGER
 			);
-		"#)?;
+		"#,
+    )?;
     Ok(())
   }
 
   pub fn stack_len(&self) -> usize {
-    self.conn.query_row(
-      "SELECT COUNT(*) FROM stash WHERE name IS NULL",
-      [],
-      |row| row.get(0)
-    ).unwrap_or(0i64) as usize
+    self
+      .conn
+      .query_row("SELECT COUNT(*) FROM stash WHERE name IS NULL", [], |row| {
+        row.get(0)
+      })
+      .unwrap_or(0i64) as usize
   }
 
   pub fn list(&self, mut named_only: bool, mut stack_only: bool) -> String {
@@ -151,20 +119,24 @@ impl Stash {
       named_only = false;
       stack_only = false;
     }
-    let stack: Vec<String> = self.conn
+    let stack: Vec<String> = self
+      .conn
       .prepare("SELECT buffer FROM stash WHERE name IS NULL ORDER BY timestamp ASC")
       .and_then(|mut stmt| {
-        stmt.query_map([], |row| row.get::<_, String>(0))?
+        stmt
+          .query_map([], |row| row.get::<_, String>(0))?
           .collect::<Result<Vec<_>, _>>()
       })
-    .unwrap_or_else(|_| vec![]);
-    let named: Vec<(String, String)> = self.conn
+      .unwrap_or_else(|_| vec![]);
+    let named: Vec<(String, String)> = self
+      .conn
       .prepare("SELECT name, buffer FROM stash WHERE name IS NOT NULL ORDER BY timestamp ASC")
       .and_then(|mut stmt| {
-        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        stmt
+          .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
           .collect::<Result<Vec<_>, _>>()
       })
-    .unwrap_or_else(|_| vec![]);
+      .unwrap_or_else(|_| vec![]);
 
     let mut output = String::new();
     if !stack.is_empty() && !named_only {
@@ -174,12 +146,13 @@ impl Stash {
         output.push('\n');
       }
       output.push_str(
-        &stack.iter()
-          .map(|s| s.replace('\n',"\n\t"))
+        &stack
+          .iter()
+          .map(|s| s.replace('\n', "\n\t"))
           .enumerate()
-          .map(|(i,s)| format!("[{i}]\t{s}"))
+          .map(|(i, s)| format!("[{i}]\t{s}"))
           .collect::<Vec<_>>()
-          .join("\n")
+          .join("\n"),
       );
     }
 
@@ -193,21 +166,28 @@ impl Stash {
         output.push('\n');
       }
       output.push_str(
-        &named.iter()
-        .map(|(n,b)| format!("{n}\t{}",b.replace('\n',"\n\t")))
-        .collect::<Vec<_>>()
-        .join("\n")
+        &named
+          .iter()
+          .map(|(n, b)| format!("{n}\t{}", b.replace('\n', "\n\t")))
+          .collect::<Vec<_>>()
+          .join("\n"),
       );
     }
 
     output
   }
   pub fn stash_cmd(&self, cmd: StashedCmd) -> ShResult<()> {
-    if cmd.name.as_ref().is_some_and(|n| n.parse::<usize>().is_ok()) {
+    if cmd
+      .name
+      .as_ref()
+      .is_some_and(|n| n.parse::<usize>().is_ok())
+    {
       return Err(sherr!(ParseErr, "stash name cannot be a number"));
     }
     if let Some(ref name) = cmd.name {
-      self.conn.execute("DELETE FROM stash WHERE name = ?1", [name])?;
+      self
+        .conn
+        .execute("DELETE FROM stash WHERE name = ?1", [name])?;
     }
     self.conn.execute(
       "INSERT INTO stash (name, buffer, cursor, timestamp) VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
@@ -222,10 +202,9 @@ impl Stash {
         [n as i64]
       )?;
     } else {
-      self.conn.execute(
-        "DELETE FROM stash WHERE name = ?1",
-        [cmd]
-      )?;
+      self
+        .conn
+        .execute("DELETE FROM stash WHERE name = ?1", [cmd])?;
     }
     Ok(())
   }
@@ -235,13 +214,19 @@ impl Stash {
       SELECT id, buffer, cursor FROM stash WHERE name IS NULL ORDER BY timestamp ASC LIMIT 1 OFFSET ?1
     ")?;
 
-    let Some((id, cmd)) = stmt.query_row([n as i64], |row| {
-      Ok((row.get::<_, i64>(0)?, StashedCmd {
-        name: None,
-        buffer: row.get(1)?,
-        cursor_pos: row.get(2)?,
-      }))
-    }).ok() else {
+    let Some((id, cmd)) = stmt
+      .query_row([n as i64], |row| {
+        Ok((
+          row.get::<_, i64>(0)?,
+          StashedCmd {
+            name: None,
+            buffer: row.get(1)?,
+            cursor_pos: row.get(2)?,
+          },
+        ))
+      })
+      .ok()
+    else {
       return Ok(None);
     };
 
@@ -249,35 +234,44 @@ impl Stash {
     Ok(Some(cmd))
   }
 
-  pub fn push(&self, name: Option<String>, buffer: &str, cursor: (usize,usize)) -> ShResult<()> {
-    let (row,col) = cursor;
+  pub fn push(&self, name: Option<String>, buffer: &str, cursor: (usize, usize)) -> ShResult<()> {
+    let (row, col) = cursor;
     if name.as_ref().is_some_and(|n| n.parse::<usize>().is_ok()) {
       return Err(sherr!(ParseErr, "stashed command name cannot be a number"));
     }
     let cursor = format!("{row}:{col}");
     if let Some(ref name) = name {
-      self.conn.execute("DELETE FROM stash WHERE name = ?1", [name])?;
+      self
+        .conn
+        .execute("DELETE FROM stash WHERE name = ?1", [name])?;
     }
-    let mut stmt = self.conn.prepare("
+    let mut stmt = self.conn.prepare(
+      "
       INSERT INTO stash (name, buffer, cursor, timestamp) VALUES (?1, ?2, ?3, strftime('%s', 'now'))
-    ")?;
+    ",
+    )?;
 
     stmt.execute((&name, buffer, &cursor))?;
     Ok(())
   }
 
   pub fn get_index(&self, n: usize) -> ShResult<Option<StashedCmd>> {
-    let mut stmt = self.conn.prepare("
+    let mut stmt = self.conn.prepare(
+      "
       SELECT buffer, cursor FROM stash WHERE name IS NULL ORDER BY timestamp ASC LIMIT 1 OFFSET ?1
-    ")?;
+    ",
+    )?;
 
-    let Some(cmd) = stmt.query_row([n as i64], |row| {
-      Ok(StashedCmd {
-        name: None,
-        buffer: row.get(0)?,
-        cursor_pos: row.get(1)?,
+    let Some(cmd) = stmt
+      .query_row([n as i64], |row| {
+        Ok(StashedCmd {
+          name: None,
+          buffer: row.get(0)?,
+          cursor_pos: row.get(1)?,
+        })
       })
-    }).ok() else {
+      .ok()
+    else {
       return Ok(None);
     };
 
@@ -285,17 +279,22 @@ impl Stash {
   }
 
   pub fn get_named(&self, name: &str) -> ShResult<Option<StashedCmd>> {
-    let mut stmt = self.conn.prepare("
+    let mut stmt = self.conn.prepare(
+      "
       SELECT buffer, cursor FROM stash WHERE name LIKE ?1 ORDER BY timestamp ASC LIMIT 1
-    ")?;
+    ",
+    )?;
 
-    let Some(cmd) = stmt.query_row([name], |row| {
-      Ok(StashedCmd {
-        name: Some(name.to_string()),
-        buffer: row.get(0)?,
-        cursor_pos: row.get(1)?,
+    let Some(cmd) = stmt
+      .query_row([name], |row| {
+        Ok(StashedCmd {
+          name: Some(name.to_string()),
+          buffer: row.get(0)?,
+          cursor_pos: row.get(1)?,
+        })
       })
-    }).ok() else {
+      .ok()
+    else {
       return Ok(None);
     };
 
@@ -311,33 +310,39 @@ impl Stash {
   }
 }
 
-pub fn stash(node: Node) -> ShResult<()> {
-  let span = node.get_span().clone();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class else {
-    unreachable!()
-  };
-
-  let (_, opts) = get_opts_from_tokens(argv, &stash_opts()).promote_err(span.clone())?;
-  let is_empty = opts.is_empty();
-  let stash_opts = StashOpts::from_opts(opts).promote_err(span.clone())?;
-  let stash = Stash::new().promote_err(span.clone())?;
-
-  for cmd in stash_opts.to_save {
-    stash.stash_cmd(cmd).promote_err(span.clone())?;
+pub(super) struct StashBuiltin;
+impl super::Builtin for StashBuiltin {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::exact_args('s', 3),
+      OptSpec::exact_args("save", 3),
+      OptSpec::single_arg('d'),
+      OptSpec::single_arg("delete"),
+      OptSpec::flag('l'),
+      OptSpec::flag("list"),
+      OptSpec::flag("stack"),
+      OptSpec::flag("named"),
+    ]
   }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let span = args.span();
+    let is_empty = args.opts.is_empty();
+    let stash_opts = StashOpts::from_opts(args.opts).promote_err(span.clone())?;
+    let stash = Stash::new().promote_err(span.clone())?;
 
-  for cmd in stash_opts.to_delete {
-    stash.delete_cmd(&cmd).promote_err(span.clone())?;
+    for cmd in stash_opts.to_save {
+      stash.stash_cmd(cmd).promote_err(span.clone())?;
+    }
+
+    for cmd in stash_opts.to_delete {
+      stash.delete_cmd(&cmd).promote_err(span.clone())?;
+    }
+
+    if stash_opts.list || is_empty {
+      let output = stash.list(stash_opts.only_named, stash_opts.only_stack);
+      outln!("{output}")?;
+    }
+
+    Ok(())
   }
-
-  if stash_opts.list || is_empty {
-    let output = stash.list(stash_opts.only_named, stash_opts.only_stack);
-    write(borrow_fd(STDOUT_FILENO), output.as_bytes())?;
-    write(borrow_fd(STDOUT_FILENO), b"\n")?;
-  }
-
-  Ok(())
 }

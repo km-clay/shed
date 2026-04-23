@@ -259,7 +259,7 @@ impl MotionCmd {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum StashListArg {
   Stack,
-  Named
+  Named,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -270,7 +270,7 @@ pub enum StashArgs {
   Apply(Option<String>),
   Insert(Option<String>),
   Swap(Option<String>),
-  List(Option<StashListArg>)
+  List(Option<StashListArg>),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

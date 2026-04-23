@@ -1,8 +1,8 @@
-use crate::util::strops::QuoteState;
-use crate::{motion, write_term};
 use crate::parse::lex::LexStream;
 use crate::readline::editmode::remote::RemoteMode;
 use crate::readline::linebuf::{Pos, ordered};
+use crate::util::strops::QuoteState;
+use crate::{motion, write_term};
 use ariadne::Span;
 use editcmd::{CmdFlags, EditCmd, Motion, MotionCmd, RegisterName, Verb, VerbCmd};
 use editmode::{CmdReplay, EditMode, ModeReport, ViInsert, ViNormal, ViReplace, ViVisual};
@@ -19,7 +19,6 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::{expand_keymap, expand_prompt};
-use crate::util::AutoCmdVecUtils;
 use crate::prelude::*;
 use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
 use crate::readline::editcmd::Direction;
@@ -28,16 +27,18 @@ use crate::readline::editmode::{ViEx, ViVerbatim};
 use crate::readline::history::HistEntry;
 use crate::readline::term::{calc_str_width, clear_rows, move_cursor_to_end, redraw};
 use crate::state::{
-  self, AutoCmdKind, ShellParam, Terminal, Var, VarFlags, VarKind, read_logic, read_shopts, with_term, with_vars, write_meta, write_vars
+  self, AutoCmdKind, ShellParam, Terminal, Var, VarFlags, VarKind, read_logic, read_shopts,
+  with_term, with_vars, write_meta, write_vars,
 };
+use crate::util::AutoCmdVecUtils;
 use crate::{
-  util::error::ShResult,
   match_loop,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
   readline::{
     complete::{CompResponse, Completer},
     highlight::Highlighter,
   },
+  util::error::ShResult,
 };
 
 pub mod complete;
@@ -117,11 +118,11 @@ pub mod markers {
   /// Output process sub marker
   pub const PROC_SUB_OUT: Marker = '\u{e006}';
   pub const HEREDOC_START: Marker = '\u{e00a}';
-	pub const HEREDOC_END: Marker = '\u{e00b}';
-	pub const HEREDOC_BODY: Marker = '\u{e00c}';
-  pub const PARAM_OP: Marker = '\u{e00d}';     // parameter expansion operator (##, %, :-, etc.)
+  pub const HEREDOC_END: Marker = '\u{e00b}';
+  pub const HEREDOC_BODY: Marker = '\u{e00c}';
+  pub const PARAM_OP: Marker = '\u{e00d}'; // parameter expansion operator (##, %, :-, etc.)
   pub const PARAM_OP_END: Marker = '\u{e00e}';
-  pub const PARAM_BODY: Marker = '\u{e00f}';    // pattern/value after operator
+  pub const PARAM_BODY: Marker = '\u{e00f}'; // pattern/value after operator
   pub const PARAM_BODY_END: Marker = '\u{e010}';
   /// Marker for null expansion
   /// This is used for when "$@" or "$*" are used in quotes and there are no
@@ -134,7 +135,6 @@ pub mod markers {
   pub const ARG_SEP: Marker = '\u{e008}';
 
   pub const VI_SEQ_EXP: Marker = '\u{e009}';
-
 
   pub const END_MARKERS: [Marker; 9] = [
     VAR_SUB_END,
@@ -1386,9 +1386,9 @@ impl ShedLine {
     let seq_fits = pending_seq
       .as_ref()
       .is_some_and(|seq| row0_used + 1 < t_cols.saturating_sub(seq.width()));
-    let psr_fits = prompt_string_right.as_ref().is_some_and(|psr| {
-      new_layout.end.col + 1 < t_cols.saturating_sub(psr.width())
-    });
+    let psr_fits = prompt_string_right
+      .as_ref()
+      .is_some_and(|psr| new_layout.end.col + 1 < t_cols.saturating_sub(psr.width()));
 
     if !final_draw
       && let Some(seq) = pending_seq
@@ -1429,13 +1429,7 @@ impl ShedLine {
         row: new_layout.end.row,
         col: to_col,
       };
-      new_layout.psr_end = Some(Layout::calc_pos(
-        t_cols,
-        &psr,
-        psr_start,
-        0,
-        false,
-      ));
+      new_layout.psr_end = Some(Layout::calc_pos(t_cols, &psr, psr_start, 0, false));
     }
 
     if let ModeReport::Ex = self.mode.report_mode() {
@@ -1507,8 +1501,7 @@ impl ShedLine {
     while !final_draw && let Some((msg, time)) = self.status_msgs.front() {
       if time.elapsed().as_secs() < 5 {
         let diff = 5000.0 - time.elapsed().as_millis() as f64;
-        let timeout = PollTimeout::try_from(diff.max(0.0) as i32)
-          .unwrap_or(PollTimeout::NONE);
+        let timeout = PollTimeout::try_from(diff.max(0.0) as i32).unwrap_or(PollTimeout::NONE);
         write_meta(|m| m.set_poll_timeout(Some(timeout)));
 
         let down = new_layout.end.row - new_layout.cursor.row;
@@ -1521,9 +1514,7 @@ impl ShedLine {
         };
         let move_up = total + 2;
         let col = new_layout.cursor.col + 1;
-        write_term!(
-          "{move_down}\n\n\x1b7\x1b[2K{msg}\x1b8\x1b[{move_up}A\x1b[{col}G"
-        )?;
+        write_term!("{move_down}\n\n\x1b7\x1b[2K{msg}\x1b8\x1b[{move_up}A\x1b[{col}G")?;
         new_layout.end.row += 2 + msg.chars().filter(|c| *c == '\n').count();
         break;
       } else {
@@ -1927,23 +1918,26 @@ pub fn annotate_input(input: &str) -> String {
   let mut tokens: Vec<Tk> = LexStream::new(Rc::clone(&input), LexFlags::LEX_UNFINISHED)
     .flatten()
     .filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
-		.fold(vec![], |mut acc,tk| {
-			let TkRule::HereDoc { start_delim, end_delim } = tk.class else {
-				acc.push(tk);
-				return acc;
-			};
-			// we have a heredoc token. these are weird because their spans are non-contiguous.
-			// so we have to split them up.
-			// the sort below will handle ordering these correctly relative to other tokens.
+    .fold(vec![], |mut acc, tk| {
+      let TkRule::HereDoc {
+        start_delim,
+        end_delim,
+      } = tk.class
+      else {
+        acc.push(tk);
+        return acc;
+      };
+      // we have a heredoc token. these are weird because their spans are non-contiguous.
+      // so we have to split them up.
+      // the sort below will handle ordering these correctly relative to other tokens.
 
-			let mut start_tk = Tk::new(TkRule::HereDocStart, start_delim);
-			let mut body = Tk::new(TkRule::HereDocBody, tk.span);
-			start_tk.flags = tk.flags;
-			body.flags = tk.flags;
+      let mut start_tk = Tk::new(TkRule::HereDocStart, start_delim);
+      let mut body = Tk::new(TkRule::HereDocBody, tk.span);
+      start_tk.flags = tk.flags;
+      body.flags = tk.flags;
 
-
-			acc.push(start_tk);
-			acc.push(body);
+      acc.push(start_tk);
+      acc.push(body);
 
       if let Some(end_delim) = end_delim {
         let mut end_tk = Tk::new(TkRule::HereDocEnd, end_delim);
@@ -1951,16 +1945,18 @@ pub fn annotate_input(input: &str) -> String {
         acc.push(end_tk);
       }
 
-			acc
-		});
+      acc
+    });
 
-	tokens.sort_by_key(|tk| tk.span.start());
+  tokens.sort_by_key(|tk| tk.span.start());
 
   for tk in tokens.into_iter().rev() {
     let insertions = annotate_token(tk);
     for (pos, marker) in insertions {
       let pos = pos.max(0).min(annotated.len());
-			if !annotated.is_char_boundary(pos) { continue; }
+      if !annotated.is_char_boundary(pos) {
+        continue;
+      }
       annotated.insert(pos, marker);
     }
   }
@@ -2055,11 +2051,11 @@ pub fn marker_for(class: &TkRule) -> Option<Marker> {
     TkRule::Sep => Some(markers::CMD_SEP),
     TkRule::Redir => Some(markers::REDIRECT),
     TkRule::Comment => Some(markers::COMMENT),
-		TkRule::HereDocStart => Some(markers::HEREDOC_START),
-		TkRule::HereDocEnd => Some(markers::HEREDOC_END),
+    TkRule::HereDocStart => Some(markers::HEREDOC_START),
+    TkRule::HereDocEnd => Some(markers::HEREDOC_END),
     TkRule::Expanded { exp: _ }
-		| TkRule::HereDoc {..}
-		| TkRule::HereDocBody
+    | TkRule::HereDoc { .. }
+    | TkRule::HereDocBody
     | TkRule::EOI
     | TkRule::SOI
     | TkRule::Null
@@ -2163,12 +2159,11 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   }
 
   if token.flags.contains(TkFlags::IS_HEREDOC) {
-		insertions.push((token.span.range().start, markers::HEREDOC_BODY));
-		if token.flags.contains(TkFlags::LIT_HEREDOC) {
-			return insertions; // no need to scan for sub-tokens in a literal heredoc
-		}
+    insertions.push((token.span.range().start, markers::HEREDOC_BODY));
+    if token.flags.contains(TkFlags::LIT_HEREDOC) {
+      return insertions; // no need to scan for sub-tokens in a literal heredoc
+    }
   }
-
 
   let token_raw = token.span.as_str();
   let mut token_chars = token_raw.char_indices().peekable();

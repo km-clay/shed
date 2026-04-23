@@ -1,8 +1,8 @@
 pub mod error;
 pub mod guards;
+pub mod macros;
 pub mod strops;
 pub mod ui;
-pub mod macros;
 
 use std::collections::VecDeque;
 
@@ -11,9 +11,10 @@ use ariadne::Span as AriadneSpan;
 use crate::parse::execute::exec_nonint;
 use crate::parse::lex::{Span, Tk, TkRule};
 use crate::parse::{Node, Redir, RedirType};
-use crate::prelude::*;
+use crate::procio::borrow_fd;
 use crate::state::AutoCmd;
-
+use crate::util::error::ShResult;
+use crate::{prelude::*, state};
 
 pub trait VecDequeExt<T> {
   fn to_vec(self) -> Vec<T>;
@@ -176,4 +177,44 @@ impl NodeVecUtils<Node> for Vec<Node> {
     }
     None
   }
+}
+
+pub struct FdWriter(pub RawFd);
+
+impl std::io::Write for FdWriter {
+  fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    nix::unistd::write(borrow_fd(self.0), buf)
+      .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
+  }
+  fn flush(&mut self) -> io::Result<()> {
+    Ok(())
+  }
+}
+
+pub fn write_ln_out(data: impl AsRef<[u8]>) -> ShResult<usize> {
+  Ok(write_out(data)? + write_out(b"\n")?)
+}
+
+pub fn write_ln_err(data: impl AsRef<[u8]>) -> ShResult<usize> {
+  Ok(write_err(data)? + write_err(b"\n")?)
+}
+
+pub fn write_out(data: impl AsRef<[u8]>) -> ShResult<usize> {
+  write_fd(STDOUT_FILENO, data)
+}
+
+pub fn write_err(data: impl AsRef<[u8]>) -> ShResult<usize> {
+  write_fd(STDERR_FILENO, data)
+}
+
+pub fn write_fd(fd: RawFd, data: impl AsRef<[u8]>) -> ShResult<usize> {
+  Ok(write(borrow_fd(fd), data.as_ref())?)
+}
+
+/// Sets status code and always returns Ok(())
+///
+/// It's easy to forget to set the status code, this helps with that
+pub fn with_status(code: i32) -> ShResult<()> {
+  state::set_status(code);
+  Ok(())
 }

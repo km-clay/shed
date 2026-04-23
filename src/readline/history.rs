@@ -1,12 +1,15 @@
 use std::{
-  cmp::Ordering, collections::HashMap, env, sync::{Arc, LazyLock, RwLock, atomic::AtomicU64}, time::{Duration, SystemTime, UNIX_EPOCH}
+  cmp::Ordering,
+  collections::HashMap,
+  env,
+  sync::{Arc, LazyLock, RwLock, atomic::AtomicU64},
+  time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::{
-  util::error::ShResult,
   readline::{
     complete::{Candidate, FuzzySelector},
     editcmd::Direction,
@@ -14,6 +17,7 @@ use crate::{
   },
   sherr,
   state::{self, read_shopts},
+  util::error::ShResult,
 };
 
 #[derive(Debug, Clone)]
@@ -29,9 +33,8 @@ pub struct HistEntry {
 type HistTables = HashMap<String, Vec<HistEntry>>;
 
 static HIST_GENERATION: AtomicU64 = AtomicU64::new(0);
-static HIST_ENTRIES: LazyLock<Arc<RwLock<HistTables>>> = LazyLock::new(|| {
-  Arc::new(RwLock::new(HashMap::new()))
-});
+static HIST_ENTRIES: LazyLock<Arc<RwLock<HistTables>>> =
+  LazyLock::new(|| Arc::new(RwLock::new(HashMap::new())));
 
 impl Default for HistEntry {
   fn default() -> Self {
@@ -90,7 +93,6 @@ fn query_masked(prefix: Option<&str>, conn: &Connection, table: &str) -> Vec<His
     Err(_) => vec![],
   }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct History {
@@ -258,13 +260,17 @@ impl History {
     let table = self.table.clone();
 
     std::thread::spawn(move || {
-      let Some(conn) = state::open_db_conn().ok() else { return };
+      let Some(conn) = state::open_db_conn().ok() else {
+        return;
+      };
       conn.execute_batch("PRAGMA journal_mode=WAL").ok();
       let micros = runtime.map(|r| r.as_micros() as i64).unwrap_or(0);
-      conn.execute(
-        &format!("UPDATE {table} SET runtime = ?1, status = ?2 WHERE token = ?3"),
-        rusqlite::params![micros, status, token.to_string()],
-      ).ok();
+      conn
+        .execute(
+          &format!("UPDATE {table} SET runtime = ?1, status = ?2 WHERE token = ?3"),
+          rusqlite::params![micros, status, token.to_string()],
+        )
+        .ok();
     });
 
     Ok(())
@@ -507,7 +513,8 @@ impl History {
       return;
     };
 
-    self.search_mask = entry_table.iter()
+    self.search_mask = entry_table
+      .iter()
       .filter(|e| e.command().starts_with(prefix))
       .cloned()
       .collect();
@@ -677,7 +684,8 @@ impl History {
     }
     let entries = HIST_ENTRIES.read().ok()?;
     let table = entries.get(&self.table)?;
-    table.iter()
+    table
+      .iter()
       .rev()
       .find(|e| e.command().starts_with(&prefix) && e.command() != prefix)
       .map(|e| Hint::History(to_lines(e.command())))
@@ -695,11 +703,14 @@ impl History {
     let table = self.table.clone();
 
     std::thread::spawn(move || {
-      let Some(conn) = state::open_db_conn().ok() else { return };
+      let Some(conn) = state::open_db_conn().ok() else {
+        return;
+      };
       conn.execute_batch("PRAGMA journal_mode=WAL").ok();
       let entries = query_masked(None, &conn, &table);
       if HIST_GENERATION.load(std::sync::atomic::Ordering::SeqCst) == generation
-      && let Ok(mut cache) = HIST_ENTRIES.write() {
+        && let Ok(mut cache) = HIST_ENTRIES.write()
+      {
         let entry_table = cache.entry(table.clone()).or_insert_with(Vec::new);
         // only hold the lock for as long as it takes to swap in the new cache
         *entry_table = entries;

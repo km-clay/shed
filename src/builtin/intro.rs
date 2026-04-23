@@ -1,103 +1,65 @@
-use std::os::unix::fs::PermissionsExt;
-
 use ariadne::{Fmt, Span};
 
 use crate::{
-  builtin::BUILTINS,
-  util::error::{ShResult, next_color},
-  parse::{NdRule, Node, execute::prepare_argv, lex::KEYWORDS},
-  prelude::*,
-  procio::borrow_fd,
+  out, outln,
+  parse::lex::KEYWORDS,
   sherr,
-  state::{self, ShAlias, ShFunc, read_logic},
+  state::{self, read_logic},
+  util::{
+    error::{ShResult, next_color},
+    with_status,
+  },
 };
 
-pub fn type_builtin(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
-  }
-
-  /*
-   * we have to check in the same order that the dispatcher checks this
-   * 1. function
-   * 2. builtin
-   * 3. command
-   */
-
-  'outer: for (arg, span) in argv {
-    let stdout = borrow_fd(STDOUT_FILENO);
-    if let Some(func) = read_logic(|v| v.get_func(&arg)) {
-      let ShFunc { body: _, source } = func;
-      let (line, col) = source.line_and_col();
-      let name = source.source().name();
-      let msg = format!(
-        "{arg} is a function defined at {name}:{}:{}\n",
-        line + 1,
-        col + 1
-      );
-      write(stdout, msg.as_bytes())?;
-    } else if let Some(alias) = read_logic(|v| v.get_alias(&arg)) {
-      let ShAlias { body, source } = alias;
-      let (line, col) = source.line_and_col();
-      let name = source.source().name();
-      let msg = format!(
-        "{arg} is an alias for '{body}' defined at {name}:{}:{}\n",
-        line + 1,
-        col + 1
-      );
-      write(stdout, msg.as_bytes())?;
-    } else if BUILTINS.contains(&arg.as_str()) {
-      let msg = format!("{arg} is a shell builtin\n");
-      write(stdout, msg.as_bytes())?;
-    } else if KEYWORDS.contains(&arg.as_str()) {
-      let msg = format!("{arg} is a shell keyword\n");
-      write(stdout, msg.as_bytes())?;
-    } else {
-      let path = env::var("PATH").unwrap_or_default();
-      let paths = path.split(':').map(Path::new).collect::<Vec<_>>();
-
-      for path in paths {
-        if let Ok(entries) = path.read_dir() {
-          for entry in entries.flatten() {
-            let Ok(meta) = std::fs::metadata(entry.path()) else {
-              continue;
-            };
-            let is_exec = meta.permissions().mode() & 0o111 != 0;
-
-            if meta.is_file()
-              && is_exec
-              && let Some(name) = entry.file_name().to_str()
-              && name == arg
-            {
-              let msg = format!("{arg} is {}\n", entry.path().display());
-              write(stdout, msg.as_bytes())?;
-              continue 'outer;
-            }
+pub(super) struct Type;
+impl super::Builtin for Type {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let mut status = 0;
+    for (arg, span) in args.argv {
+      if let Some(util) = state::which_util(&arg) {
+        match util.kind() {
+          state::UtilKind::Alias => {
+            let alias = read_logic(|v| v.get_alias(&arg)).unwrap();
+            let (line, col) = alias.source.line_and_col();
+            let name = alias.source.source().name();
+            out!(
+              "{arg} is an alias for '{alias_body}' defined at {name}:{ln}:{co}",
+              ln = line + 1,
+              co = col + 1,
+              alias_body = alias.body,
+            )?
           }
-        }
+          state::UtilKind::Function => {
+            let func = read_logic(|v| v.get_func(&arg)).unwrap();
+            let (line, col) = func.source.line_and_col();
+            let name = func.source.source().name();
+            out!(
+              "{arg} is a function defined at {name}:{ln}:{co}",
+              ln = line + 1,
+              co = col + 1,
+              name = name,
+            )?
+          }
+          state::UtilKind::Builtin => outln!("{arg} is a shell builtin")?,
+          state::UtilKind::Command(path_buf) | state::UtilKind::File(path_buf) => {
+            outln!("{arg} is {}", path_buf.display())?
+          }
+        };
+      } else if KEYWORDS.contains(&arg.as_str()) {
+        outln!("{arg} is a shell keyword")?;
+      } else {
+        sherr!(
+          NotFound @ span,
+          "'{}' is not a command, function, or alias", arg.fg(next_color())
+        )
+        .print_error();
+
+        status = 1;
       }
-
-      state::set_status(1);
-      sherr!(
-        NotFound @ span,
-        "'{}' is not a command, function, or alias", arg.fg(next_color())
-      )
-      .print_error();
-      return Ok(());
     }
-  }
 
-  state::set_status(0);
-  Ok(())
+    with_status(status)
+  }
 }
 
 #[cfg(test)]
@@ -113,7 +75,10 @@ mod tests {
     test_input("type echo").unwrap();
     let out = guard.read_output();
     assert!(out.contains("echo"));
-    assert!(out.contains("shell builtin"));
+    assert!(
+      out.contains("shell builtin"),
+      "Expected 'shell builtin' in output, got: {out}"
+    );
   }
 
   #[test]

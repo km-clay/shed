@@ -8,7 +8,6 @@ pub mod builtin;
 pub mod expand;
 pub mod getopt;
 pub mod jobs;
-pub mod util;
 pub mod parse;
 pub mod prelude;
 pub mod procio;
@@ -16,6 +15,7 @@ pub mod readline;
 pub mod shopt;
 pub mod signal;
 pub mod state;
+pub mod util;
 
 #[cfg(test)]
 mod tests;
@@ -34,8 +34,6 @@ use smallvec::SmallVec;
 
 use crate::builtin::keymap::KeyMapMatch;
 use crate::builtin::trap::TrapTarget;
-use crate::util::error::{self, ShErrKind, ShResult};
-use crate::util::AutoCmdVecUtils;
 use crate::parse::execute::{exec_dash_c, exec_int, exec_nonint};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
@@ -47,8 +45,12 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, TermEvent, VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts, read_vars, source_env, source_login, source_rc, with_term, write_jobs, write_meta, write_shopts
+  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, TermEvent,
+  VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts,
+  read_vars, source_env, source_login, source_rc, with_term, write_jobs, write_meta, write_shopts,
 };
+use crate::util::AutoCmdVecUtils;
+use crate::util::error::{self, ShErrKind, ShResult};
 use clap::Parser;
 use state::write_vars;
 
@@ -306,8 +308,7 @@ fn get_poll_timeout(readline: &mut ShedLine) -> (PollTimeout, Option<String>) {
       PollTimeout::NONE
     } else {
       exec_if_timeout = Some(screensaver_cmd);
-      PollTimeout::try_from((screensaver_idle_time * 1000) as i32)
-        .unwrap_or(PollTimeout::NONE)
+      PollTimeout::try_from((screensaver_idle_time * 1000) as i32).unwrap_or(PollTimeout::NONE)
     }
   };
 

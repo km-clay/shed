@@ -1,192 +1,154 @@
 use crate::{
   expand::as_var_val_display,
-  util::{error::ShResult, strops::split_tk_at},
-  parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
-  procio::borrow_fd,
   sherr,
-  state::{self, VarFlags, VarKind, read_vars, write_vars},
+  state::{ScopeStack, VarFlags, VarKind, read_vars, write_vars},
+  util::{
+    error::{ShResult, ShResultExt},
+    strops::split_at_unescaped,
+    with_status, write_ln_out,
+  },
 };
 
-pub fn readonly(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  // Remove "readonly" from argv
-  let argv = if !argv.is_empty() {
-    &argv[1..]
-  } else {
-    &argv[..]
-  };
-
-  if argv.is_empty() {
-    // Display the local variables
-    let vars_output = read_vars(|v| {
-      let mut vars = v
-        .flatten_vars()
-        .into_iter()
-        .filter(|(_, v)| v.flags().contains(VarFlags::READONLY))
-        .map(|(k, v)| format!("{}={}", k, as_var_val_display(&v.to_string())))
-        .collect::<Vec<String>>();
-      vars.sort();
-      let mut vars_joined = vars.join("\n");
-      vars_joined.push('\n');
-      vars_joined
-    });
-
-    let stdout = borrow_fd(STDOUT_FILENO);
-    write(stdout, vars_output.as_bytes())?; // Write it
-  } else {
-    for tk in argv {
-      if let Some((var_tk, val_tk)) = split_tk_at(tk, "=") {
-        let var = var_tk.expand()?.get_words().join(" ");
-        let val = if val_tk.as_str().starts_with('(') && val_tk.as_str().ends_with(')') {
-          VarKind::arr_from_tk(val_tk.clone())?
-        } else {
-          VarKind::Str(val_tk.expand()?.get_words().join(" "))
-        };
-        write_vars(|v| v.set_var(&var, val, VarFlags::READONLY))?;
-      } else {
-        let arg = tk.clone().expand()?.get_words().join(" ");
-        write_vars(|v| v.set_var(&arg, VarKind::Str(String::new()), VarFlags::READONLY))?;
-      }
-    }
-  }
-
-  state::set_status(0);
-  Ok(())
+/// Display key/value pairs as '{key}={value}\n'
+///
+/// The 'value' is escaped in such a way that the whole line can be reused as a shell assignment
+pub fn display_as_vars(vars: impl Iterator<Item = (impl ToString, impl ToString)>) -> String {
+  let mut vars = vars
+    .map(|(k, v)| display_as_var(k, v))
+    .collect::<Vec<String>>();
+  vars.sort();
+  vars.join("\n")
 }
 
-pub fn unset(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
-  }
-
-  for (arg, span) in argv {
-    if !read_vars(|v| v.var_exists(&arg)) {
-      return Err(sherr!(
-        ExecFail @ span,
-        "unset: No such variable '{arg}'",
-      ));
-    }
-    write_vars(|v| v.unset_var(&arg))?;
-  }
-
-  state::set_status(0);
-  Ok(())
+pub fn display_as_var(name: impl ToString, value: impl ToString) -> String {
+  format!(
+    "{}={}",
+    name.to_string(),
+    as_var_val_display(&value.to_string())
+  )
 }
 
-pub fn export(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  // Remove "export" from argv
-  let argv = if !argv.is_empty() {
-    &argv[1..]
-  } else {
-    &argv[..]
-  };
-
-  if argv.is_empty() {
-    // Display the environment variables
-    let mut env_output = env::vars()
-      .map(|var| format!("{}={}", var.0, as_var_val_display(&var.1.to_string()))) // Get all of them, zip them into one string
-      .collect::<Vec<_>>();
-    env_output.sort(); // Sort them alphabetically
-    let mut env_output = env_output.join("\n"); // Join them with newlines
-    env_output.push('\n'); // Push a final newline
-
-    let stdout = borrow_fd(STDOUT_FILENO);
-    write(stdout, env_output.as_bytes())?; // Write it
-  } else {
-    for tk in argv {
-      if let Some((var_tk, val_tk)) = split_tk_at(tk, "=") {
-        let var = var_tk.expand()?.get_words().join(" ");
-        let val = if val_tk.as_str().starts_with('(') && val_tk.as_str().ends_with(')') {
-          VarKind::arr_from_tk(val_tk.clone())?
-        } else {
-          VarKind::Str(val_tk.expand()?.get_words().join(" "))
-        };
-        write_vars(|v| v.set_var(&var, val, VarFlags::EXPORT))?;
-      } else {
-        let arg = tk.clone().expand()?.get_words().join(" ");
-        write_vars(|v| v.export_var(&arg)); // Export an existing variable, if any
-      }
-    }
-  }
-  state::set_status(0);
-  Ok(())
+fn display_env_vars() -> String {
+  display_as_vars(env::vars())
 }
 
-pub fn local(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>) -> String {
+  let vars = vars.flatten_vars().into_iter();
 
-  // Remove "local" from argv
-  let argv = if !argv.is_empty() {
-    &argv[1..]
+  if let Some(flags) = filter {
+    display_as_vars(vars.filter(|(_, v)| v.flags().contains(flags)))
   } else {
-    &argv[..]
+    display_as_vars(vars)
+  }
+}
+
+fn display_readonly(vars: &ScopeStack) -> String {
+  display_vars_internal(vars, Some(VarFlags::READONLY))
+}
+
+fn display_local(vars: &ScopeStack) -> String {
+  display_vars_internal(vars, None)
+}
+
+pub fn split_assignment(arg: String) -> (String, Option<VarKind>) {
+  let Some((e, l)) = split_at_unescaped(&arg, "=") else {
+    return (arg, None);
   };
+  let var = arg[..e].trim().to_string();
+  let val = arg[e + l..].to_string();
+  (var, Some(VarKind::parse(&val)))
+}
 
-  if argv.is_empty() {
-    // Display the local variables
-    let vars_output = read_vars(|v| {
-      let mut vars = v
-        .flatten_vars()
-        .into_iter()
-        .map(|(k, v)| format!("{}={}", k, as_var_val_display(&v.to_string())))
-        .collect::<Vec<String>>();
-      vars.sort();
-      let mut vars_joined = vars.join("\n");
-      vars_joined.push('\n');
-      vars_joined
-    });
+pub fn split_assignment_raw(arg: String) -> (String, Option<String>) {
+  let Some((e, l)) = split_at_unescaped(&arg, "=") else {
+    return (arg, None);
+  };
+  let var = arg[..e].trim().to_string();
+  let val = arg[e + l..].to_string();
+  (var, Some(val))
+}
 
-    let stdout = borrow_fd(STDOUT_FILENO);
-    write(stdout, vars_output.as_bytes())?; // Write it
-  } else {
-    for tk in argv {
-      if let Some((var_tk, val_tk)) = split_tk_at(tk, "=") {
-        let var = var_tk.expand()?.get_words().join(" ");
-        let val = if val_tk.as_str().starts_with('(') && val_tk.as_str().ends_with(')') {
-          VarKind::arr_from_tk(val_tk.clone())?
-        } else {
-          VarKind::Str(val_tk.expand()?.get_words().join(" "))
-        };
-        write_vars(|v| v.set_var(&var, val, VarFlags::LOCAL))?;
+pub(super) struct Readonly;
+impl super::Builtin for Readonly {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      // Display the local variables
+      write_ln_out(read_vars(display_readonly))?;
+
+      return with_status(0);
+    }
+
+    for (arg, span) in args.argv {
+      let (var, val) = split_assignment(arg);
+      write_vars(|v| {
+        v.set_var(&var, val.unwrap_or_default(), VarFlags::READONLY)
+          .promote_err(span)
+      })?;
+    }
+
+    with_status(0)
+  }
+}
+
+pub(super) struct Unset;
+impl super::Builtin for Unset {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    for (arg, span) in args.argv {
+      if !read_vars(|v| v.var_exists(&arg)) {
+        return Err(sherr!(
+            ExecFail @ span,
+            "unset: No such variable '{arg}'",
+        ));
+      }
+      write_vars(|v| v.unset_var(&arg))?;
+    }
+
+    with_status(0)
+  }
+}
+
+pub(super) struct Export;
+impl super::Builtin for Export {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      // Display the environment variables
+      write_ln_out(display_env_vars())?;
+      return with_status(0);
+    }
+
+    for (arg, span) in args.argv {
+      let (var, val) = split_assignment(arg);
+      if let Some(val) = val {
+        write_vars(|v| v.set_var(&var, val, VarFlags::EXPORT)).promote_err(span)?;
       } else {
-        let arg = tk.clone().expand()?.get_words().join(" ");
-        write_vars(|v| v.set_var(&arg, VarKind::Str(String::new()), VarFlags::LOCAL))?;
+        // Export an existing variable, if any
+        write_vars(|v| v.export_var(&var));
       }
     }
+
+    with_status(0)
   }
-  state::set_status(0);
-  Ok(())
+}
+
+pub(super) struct Local;
+impl super::Builtin for Local {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      write_ln_out(read_vars(display_local))?;
+      return with_status(0);
+    }
+
+    for (arg, span) in args.argv {
+      let (var, val) = split_assignment(arg);
+      write_vars(|v| {
+        v.set_var(&var, val.unwrap_or_default(), VarFlags::LOCAL)
+          .promote_err(span)
+      })?;
+    }
+
+    with_status(0)
+  }
 }
 
 #[cfg(test)]
@@ -217,8 +179,8 @@ mod tests {
   fn readonly_prevents_reassignment() {
     let _g = TestGuard::new();
     test_input("readonly myvar=hello").unwrap();
-    let result = test_input("myvar=world");
-    assert!(result.is_err());
+    test_input("myvar=world").ok();
+    assert_ne!(state::get_status(), 0);
     assert_eq!(read_vars(|v| v.get_var("myvar")), "hello");
   }
 
@@ -280,16 +242,16 @@ mod tests {
   #[test]
   fn unset_nonexistent_fails() {
     let _g = TestGuard::new();
-    let result = test_input("unset __no_such_var__");
-    assert!(result.is_err());
+    test_input("unset __no_such_var__").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn unset_readonly_fails() {
     let _g = TestGuard::new();
     test_input("readonly myvar=protected").unwrap();
-    let result = test_input("unset myvar");
-    assert!(result.is_err());
+    test_input("unset myvar").ok();
+    assert_ne!(state::get_status(), 0);
     assert_eq!(read_vars(|v| v.get_var("myvar")), "protected");
   }
 

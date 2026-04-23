@@ -510,9 +510,9 @@ FC                                               *builtin-fc* *fc*
   Examples:
 
       `fc -l`                   list last 16 commands
-      `fc -l 1 10`              list entries 1–10
+      `fc -l 1 10`              list entries 1-10
       `fc -s echo`              re-exec last command starting with "echo"
-      `fc -s cat=dog`           re-exec with cat→dog substitution
+      `fc -s cat=dog`           re-exec with cat -> dog substitution
       `fc -e vim`               edit last command in vim
 
 ==============================================================================
@@ -693,7 +693,7 @@ KEYMAP                                           *builtin-keymap* *keymap*
 
   Examples:
 
-      `keymap -i 'jk' '<esc>'`        map jk → escape in insert mode
+      `keymap -i 'jk' '<esc>'`        map jk -> escape in insert mode
       `keymap -n 'gs' ':source ~/.shed_profile<cr>'`
       `keymap -i --remove 'jk'`       remove the jk binding
 
@@ -1195,10 +1195,10 @@ STASH                                            *builtin-stash* *stash*
 
   Save and recall command snippets. Stash operates in two modes:
 
-  *Unnamed (stack)* — temporary storage with push/pop semantics.
+  *Unnamed (stack)* - temporary storage with push/pop semantics.
   Push a command to save it, pop to restore and remove it.
 
-  *Named* — persistent snippets recalled by name. Saving with an
+  *Named* - persistent snippets recalled by name. Saving with an
   existing name overwrites the previous entry.
 
   `stash`                                        *stash-list*

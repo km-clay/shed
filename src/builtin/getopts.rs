@@ -4,10 +4,13 @@ use ariadne::Fmt;
 
 use crate::{
   getopt::{Opt, OptArg, OptSpec},
-  util::error::{ShErr, ShResult, ShResultExt, next_color},
-  parse::{NdRule, Node, execute::prepare_argv, lex::Span},
+  parse::lex::Span,
   sherr,
   state::{self, VarFlags, VarKind, read_meta, read_vars, write_meta, write_vars},
+  util::{
+    error::{ShErr, ShResult, ShResultExt, next_color},
+    with_status,
+  },
 };
 
 enum OptMatch {
@@ -86,6 +89,37 @@ impl FromStr for GetOptsSpec {
   }
 }
 
+pub(super) struct GetOpts;
+impl super::Builtin for GetOpts {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let span = args.span();
+    let mut argv = args.argv.into_iter();
+
+    let Some(arg_string) = argv.next() else {
+      return Err(sherr!(
+          ExecFail @ span,
+          "getopts: missing option spec",
+      ));
+    };
+    let Some(opt_var) = argv.next() else {
+      return Err(sherr!(
+          ExecFail @ span,
+          "getopts: missing variable name",
+      ));
+    };
+
+    let opts_spec = GetOptsSpec::from_str(&arg_string.0).promote_err(arg_string.1.clone())?;
+
+    let explicit_args: Vec<String> = argv.map(|s| s.0).collect();
+    if !explicit_args.is_empty() {
+      getopts_inner(&opts_spec, &opt_var.0, &explicit_args, span)
+    } else {
+      let pos_params: Vec<String> = read_vars(|v| v.sh_argv().iter().skip(1).cloned().collect());
+      getopts_inner(&opts_spec, &opt_var.0, &pos_params, span)
+    }
+  }
+}
+
 fn advance_optind(opt_index: usize, amount: usize) -> ShResult<()> {
   write_vars(|v| {
     v.set_var(
@@ -115,20 +149,17 @@ fn getopts_inner(
   if arg.as_str() == "--" {
     advance_optind(opt_index, 1)?;
     write_meta(|m| m.reset_getopts_char_offset());
-    state::set_status(1);
-    return Ok(());
+    return with_status(1);
   }
 
   // Not an option - done
   let Some(opt_str) = arg.strip_prefix('-') else {
-    state::set_status(1);
-    return Ok(());
+    return with_status(1);
   };
 
   // Bare "-" is not an option
   if opt_str.is_empty() {
-    state::set_status(1);
-    return Ok(());
+    return with_status(1);
   }
 
   let char_idx = read_meta(|m| m.getopts_char_offset());
@@ -137,8 +168,7 @@ fn getopts_inner(
     // advance to next arg and signal done for this call
     write_meta(|m| m.reset_getopts_char_offset());
     advance_optind(opt_index, 1)?;
-    state::set_status(1);
-    return Ok(());
+    return with_status(1);
   };
 
   let last_char_in_arg = char_idx >= opt_str.len() - 1;
@@ -203,57 +233,14 @@ fn getopts_inner(
           .print_error();
         }
         advance_optind(opt_index, 1)?;
-        state::set_status(0);
-        return Ok(());
+        return with_status(0);
       }
 
       write_vars(|v| v.set_var(opt_var, VarKind::Str(ch.to_string()), VarFlags::NONE))?;
-      state::set_status(0);
     }
   }
 
-  Ok(())
-}
-
-pub fn getopts(node: Node) -> ShResult<()> {
-  let span = node.get_span().clone();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
-  }
-  let mut args = argv.into_iter();
-
-  let Some(arg_string) = args.next() else {
-    return Err(sherr!(
-      ExecFail @ span,
-      "getopts: missing option spec",
-    ));
-  };
-  let Some(opt_var) = args.next() else {
-    return Err(sherr!(
-      ExecFail @ span,
-      "getopts: missing variable name",
-    ));
-  };
-
-  let opts_spec = GetOptsSpec::from_str(&arg_string.0).promote_err(arg_string.1.clone())?;
-
-  let explicit_args: Vec<String> = args.map(|s| s.0).collect();
-
-  if !explicit_args.is_empty() {
-    getopts_inner(&opts_spec, &opt_var.0, &explicit_args, span)
-  } else {
-    let pos_params: Vec<String> = read_vars(|v| v.sh_argv().iter().skip(1).cloned().collect());
-    getopts_inner(&opts_spec, &opt_var.0, &pos_params, span)
-  }
+  with_status(0)
 }
 
 #[cfg(test)]
@@ -480,14 +467,14 @@ mod tests {
   #[test]
   fn getopts_missing_spec() {
     let _g = TestGuard::new();
-    let result = test_input("getopts");
-    assert!(result.is_err());
+    test_input("getopts").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn getopts_missing_varname() {
     let _g = TestGuard::new();
-    let result = test_input("getopts ab");
-    assert!(result.is_err());
+    test_input("getopts ab").ok();
+    assert_ne!(state::get_status(), 0);
   }
 }

@@ -1,142 +1,98 @@
 use crate::{
-  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  util::error::ShResult,
-  match_loop,
-  parse::{NdRule, Node},
+  getopt::{Opt, OptSpec},
   prelude::*,
-  procio::borrow_fd,
   sherr,
   state::{self, read_vars},
+  util::{error::ShResult, with_status, write_ln_out},
 };
 
-fn cd_opt_spec() -> [OptSpec; 2] {
-  [
-    OptSpec {
-      opt: Opt::Short('P'),
-      takes_arg: OptArg::None,
-    },
-    OptSpec {
-      opt: Opt::Short('L'),
-      takes_arg: OptArg::None,
-    },
-  ]
-}
+pub(super) struct Cd;
+impl super::Builtin for Cd {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::flag('P'), OptSpec::flag('L')]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let mut resolve_syms = false;
+    let mut try_cd_path = false;
+    let mut print_dir = false;
 
-struct CdOpts {
-  resolve_syms: bool,
-}
+    for opt in &args.opts {
+      match opt {
+        Opt::Short('P') => resolve_syms = true,
+        Opt::Short('L') => resolve_syms = false,
+        _ => return Err(sherr!(ParseErr @ args.span, "Invalid option: {opt}")),
+      }
+    }
 
-impl CdOpts {
-  pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
-    let mut new = Self {
-      resolve_syms: false,
+    let (mut new_dir, arg_span) = if let Some((arg, span)) = args.argv.into_iter().next() {
+      match arg.as_str() {
+        "-" => {
+          let old_pwd = get_old_pwd();
+          print_dir = true;
+          (old_pwd, Some(span))
+        }
+        _ => {
+          try_cd_path = !arg.starts_with(['/', '.']);
+          (PathBuf::from(arg), Some(span))
+        }
+      }
+    } else {
+      (
+        PathBuf::from(state::get_home_str().unwrap_or(String::from("/"))),
+        None,
+      )
     };
-    let mut opts = opts.iter();
 
-    match_loop!(opts.next() => opt, {
-      Opt::Short('P') => new.resolve_syms = true,
-      Opt::Short('L') => new.resolve_syms = false,
-      _ => return Err(sherr!(ParseErr, "Invalid option: {opt}"))
-    });
+    let span = arg_span.unwrap_or(args.span);
 
-    Ok(new)
-  }
-}
-
-pub fn cd(node: Node) -> ShResult<()> {
-  let span = node.get_span();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-  let cd_span = argv.first().unwrap().span.clone();
-
-  let (mut argv, opts) = get_opts_from_tokens(argv, &cd_opt_spec())?;
-  let cd_opts = CdOpts::from_opts(&opts)?;
-  if !argv.is_empty() {
-    argv.remove(0);
-  }
-
-  let mut try_cd_path = false;
-  let mut print_dir = false;
-
-  let (mut new_dir, arg_span) = if let Some((arg, span)) = argv.into_iter().next() {
-    match arg.as_str() {
-      "-" => {
-        let old_pwd = read_vars(|v| v.try_get_var("OLDPWD"))
-          .unwrap_or_else(|| state::get_home_str().unwrap_or(String::from("/")));
-        print_dir = true;
-        (PathBuf::from(old_pwd), Some(span))
-      }
-      _ => {
-        try_cd_path = !(arg.starts_with(['/', '.']) || arg.starts_with(".."));
-        (PathBuf::from(arg), Some(span))
-      }
+    if try_cd_path && let Some(found) = search_cd_path(&new_dir) {
+      new_dir = found;
     }
-  } else {
-    (
-      PathBuf::from(state::get_home_str().unwrap_or(String::from("/"))),
-      None,
-    )
-  };
 
-  if try_cd_path {
-    let path = read_vars(|v| v.get_var("CDPATH"));
-    let paths = path
-      .split(':')
-      .map(|p| if p.is_empty() { "." } else { p })
-      .map(PathBuf::from);
-    for path in paths {
-      let joined = path.join(&new_dir);
-      if joined.is_dir() {
-        new_dir = joined;
-        break;
-      }
+    if resolve_syms && let Ok(canon) = std::fs::canonicalize(&new_dir) {
+      new_dir = canon;
     }
-  }
 
-  if cd_opts.resolve_syms {
-    new_dir = std::fs::canonicalize(&new_dir).unwrap_or(new_dir);
-  }
-
-  if !new_dir.exists() {
-    if let Some(arg_span) = arg_span {
-      return Err(sherr!(ExecFail @ arg_span.clone(), "Failed to change directory"));
-    } else {
-      return Err(sherr!(ExecFail @ span.clone(), "Failed to change directory"));
+    if !new_dir.exists() {
+      return Err(sherr!(ExecFail @ span.clone(), "Directory not found"));
     }
-  }
-
-  if !new_dir.is_dir() {
-    if let Some(arg_span) = arg_span {
-      return Err(sherr!(ExecFail @ arg_span.clone(), "Not a directory"));
-    } else {
+    if !new_dir.is_dir() {
       return Err(sherr!(ExecFail @ span.clone(), "Not a directory"));
     }
-  }
-
-  if let Err(e) = state::change_dir(new_dir) {
-    return Err(sherr!(ExecFail @ cd_span.clone(), "Failed to change directory: {e}"));
-  }
-
-  if print_dir {
-    let mut dir = env::current_dir()?.display().to_string();
-    if let Some(home) = state::get_home_str()
-      && let Some(home_dir) = dir.strip_prefix(&home)
-    {
-      dir = format!("~{home_dir}");
+    if let Err(e) = state::change_dir(new_dir) {
+      return Err(sherr!(ExecFail @ span.clone(), "Failed to change directory: {e}"));
     }
 
-    let stdout = borrow_fd(STDOUT_FILENO);
-    write(stdout, dir.as_bytes())?;
-    write(stdout, b"\n")?;
-  }
+    if print_dir {
+      let mut dir = env::current_dir()?.display().to_string();
+      if let Some(home) = state::get_home_str()
+        && let Some(home_dir) = dir.strip_prefix(&home)
+      {
+        dir = format!("~{home_dir}");
+      }
 
-  state::set_status(0);
-  Ok(())
+      write_ln_out(dir)?;
+    }
+
+    with_status(0)
+  }
+}
+
+fn search_cd_path(new_dir: impl AsRef<Path>) -> Option<PathBuf> {
+  let path = read_vars(|v| v.get_var("CDPATH"));
+  let mut paths = path
+    .split(':')
+    .filter(|p| !p.trim().is_empty())
+    .map(PathBuf::from);
+
+  paths.find_map(|p| p.join(&new_dir).is_dir().then(|| p.join(&new_dir)))
+}
+
+fn get_old_pwd() -> PathBuf {
+  read_vars(|v| v.try_get_var("OLDPWD"))
+    .or_else(|| state::get_home_str().or_else(|| Some(String::from("/"))))
+    .map(PathBuf::from)
+    .unwrap()
 }
 
 #[cfg(test)]
@@ -214,8 +170,8 @@ pub mod tests {
   #[test]
   fn cd_nonexistent_dir_fails() {
     let _g = TestGuard::new();
-    let result = test_input("cd /nonexistent_path_that_does_not_exist_xyz");
-    assert!(result.is_err());
+    test_input("cd /nonexistent_path_that_does_not_exist_xyz").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
@@ -225,8 +181,8 @@ pub mod tests {
     let file_path = temp_dir.path().join("afile.txt");
     fs::write(&file_path, "hello").unwrap();
 
-    let result = test_input(format!("cd {}", file_path.display()));
-    assert!(result.is_err());
+    test_input(format!("cd {}", file_path.display())).ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== Multiple cd =====================

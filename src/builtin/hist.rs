@@ -6,22 +6,19 @@ use std::{
 
 use chrono::Utc;
 use chrono_english::{Dialect, Interval, parse_date_string};
-use nix::{
-  libc::{STDERR_FILENO, STDOUT_FILENO},
-  unistd::write,
-};
 use regex::Regex;
 
 use crate::{
-  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
+  getopt::{Opt, OptSpec},
+  readline::{
+    histimport,
+    history::{HistEntry, History},
+  },
+  sherr, state,
   util::{
     error::{ShResult, ShResultExt},
+    with_status, write_ln_err, write_ln_out,
   },
-  parse::{NdRule, Node},
-  procio::borrow_fd,
-  readline::history::{HistEntry, History},
-  sherr,
-  state::{self},
 };
 
 /// Helper macro to reduce repetition when adding conditions to the query. It handles the '--not' logic and parameter binding.
@@ -376,103 +373,6 @@ impl HistQuery {
     Ok(new)
   }
 
-  pub fn opt_spec() -> [OptSpec; 23] {
-    [
-      OptSpec {
-        opt: Opt::Long("delete".into()),
-        takes_arg: OptArg::None,
-      },
-      OptSpec {
-        opt: Opt::Long("ex".into()),
-        takes_arg: OptArg::None,
-      },
-      OptSpec {
-        opt: Opt::Long("restore".into()),
-        takes_arg: OptArg::None,
-      },
-      OptSpec {
-        opt: Opt::Long("after".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("lines-gt".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("lines-lt".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("before".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("ends-with".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("contains".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("starts-with".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("matches".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("duration-gt".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("duration-lt".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("with-status".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("with-token".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("in-dir".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("limit".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Long("count".into()),
-        takes_arg: OptArg::None,
-      },
-      OptSpec {
-        opt: Opt::Long("not".into()),
-        takes_arg: OptArg::None,
-      },
-      OptSpec {
-        opt: Opt::Long("json".into()),
-        takes_arg: OptArg::None,
-      },
-      OptSpec {
-        opt: Opt::Long("import".into()),
-        takes_arg: OptArg::Single,
-      },
-      OptSpec {
-        opt: Opt::Short('n'),
-        takes_arg: OptArg::None,
-      },
-      OptSpec {
-        opt: Opt::Short('r'),
-        takes_arg: OptArg::None,
-      },
-    ]
-  }
-
   pub fn format_entries(&self, entries: &[(i64, HistEntry)]) -> String {
     if self.json {
       let json: serde_json::Value = serde_json::Value::Object(
@@ -537,100 +437,99 @@ impl HistQuery {
   }
 }
 
-pub fn hist_builtin(node: Node) -> ShResult<()> {
-  let span = node.get_span();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let (mut argv, opts) =
-    get_opts_from_tokens(argv, &HistQuery::opt_spec()).promote_err(span.clone())?;
-  argv.remove(0);
-  let mut query = HistQuery::from_opts(&opts).promote_err(span.clone())?;
-  let table = if query.ex_hist {
-    "ex_history"
-  } else {
-    "shed_history"
-  };
-  let conn = state::get_db_conn()
-    .ok_or_else(|| sherr!(InternalErr, "database not available"))
-    .promote_err(span.clone())?;
-  let hist = History::new(conn, table).promote_err(span.clone())?;
-
-  for (arg, span) in argv {
-    let Ok(id) = arg.parse::<i64>() else {
-      return Err(sherr!(ParseErr, "Invalid command ID: {arg}").promote(span));
+pub(super) struct Hist;
+impl super::Builtin for Hist {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::flag("delete"),
+      OptSpec::flag("ex"),
+      OptSpec::flag("restore"),
+      OptSpec::flag("count"),
+      OptSpec::flag("not"),
+      OptSpec::flag("json"),
+      OptSpec::flag('n'),
+      OptSpec::flag('r'),
+      OptSpec::single_arg("after"),
+      OptSpec::single_arg("lines-gt"),
+      OptSpec::single_arg("lines-lt"),
+      OptSpec::single_arg("before"),
+      OptSpec::single_arg("ends-with"),
+      OptSpec::single_arg("contains"),
+      OptSpec::single_arg("starts-with"),
+      OptSpec::single_arg("matches"),
+      OptSpec::single_arg("duration-gt"),
+      OptSpec::single_arg("duration-lt"),
+      OptSpec::single_arg("with-status"),
+      OptSpec::single_arg("with-token"),
+      OptSpec::single_arg("in-dir"),
+      OptSpec::single_arg("limit"),
+      OptSpec::single_arg("import"),
+    ]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let span = args.span();
+    let mut query = HistQuery::from_opts(&args.opts).promote_err(span.clone())?;
+    let table = if query.ex_hist {
+      "ex_history"
+    } else {
+      "shed_history"
     };
-    query.specific_ids.push(id);
-  }
+    let conn = state::get_db_conn()
+      .ok_or_else(|| sherr!(InternalErr, "database not available"))
+      .promote_err(span.clone())?;
+    let hist = History::new(conn, table).promote_err(span.clone())?;
 
-  if query.restore {
-    let num_restored = hist.restore_backup()?;
-    let stderr = borrow_fd(STDERR_FILENO);
-    write(
-      stderr,
-      format!("hist: restored {num_restored} entries from backup.\n").as_bytes(),
-    )
-    .ok();
-    state::set_status(0);
-    return Ok(());
-  }
+    for (arg, span) in args.argv {
+      let Ok(id) = arg.parse::<i64>() else {
+        return Err(sherr!(ParseErr, "Invalid command ID: {arg}").promote(span));
+      };
+      query.specific_ids.push(id);
+    }
 
-  if let Some(ref path) = query.import {
-    let entries: Vec<(i64, HistEntry)> = crate::readline::histimport::import_history(path.into())
-      .promote_err(span.clone())?
-      .into_iter()
-      .enumerate()
-      .map(|(i, e)| (i as i64, e))
-      .collect();
+    if query.restore {
+      let num_restored = hist.restore_backup()?;
+      write_ln_err(format!(
+        "hist: restored {num_restored} entries from backup."
+      ))?;
 
+      return with_status(0);
+    }
+
+    if let Some(ref path) = query.import {
+      let entries: Vec<(i64, HistEntry)> = histimport::import_history(path.into())
+        .promote_err(span.clone())?
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| (i as i64, e))
+        .collect();
+
+      let entries_fmt = query.format_entries(&entries);
+      let count = entries.len();
+
+      hist.transaction(|| {
+        for (_, entry) in entries {
+          hist.push_entry(entry).promote_err(span.clone())?;
+        }
+        Ok(())
+      })?;
+
+      write_ln_out(entries_fmt)?;
+      write_ln_err(format!("hist: imported {count} entries."))?;
+
+      hist.sort_by_timestamp()?;
+      return with_status(0);
+    }
+
+    let entries = query.execute(&hist).promote_err(span.clone())?;
     let entries_fmt = query.format_entries(&entries);
-    let stdout = borrow_fd(STDOUT_FILENO);
-    let stderr = borrow_fd(STDERR_FILENO);
-    let count = entries.len();
 
-    hist.transaction(|| {
-      for (_, entry) in entries {
-        hist.push_entry(entry).promote_err(span.clone())?;
-      }
-      Ok(())
-    })?;
+    write_ln_out(entries_fmt)?;
 
-    write(stdout, entries_fmt.as_bytes())?;
-    write(stdout, b"\n")?;
-    write(
-      stderr,
-      format!("hist: imported {count} entries.\n").as_bytes(),
-    )?;
+    if query.delete {
+      let num_deleted = entries.len();
+      write_ln_err(format!("hist: deleted {num_deleted} entries."))?;
+    }
 
-    hist.sort_by_timestamp()?;
-    state::set_status(0);
-    return Ok(());
+    with_status(0)
   }
-
-  let entries = query.execute(&hist).promote_err(span.clone())?;
-
-  let entries_fmt = query.format_entries(&entries);
-
-  let stdout = borrow_fd(STDOUT_FILENO);
-
-  write(stdout, entries_fmt.as_bytes())?;
-  write(stdout, b"\n")?;
-
-  if query.delete {
-    let stderr = borrow_fd(STDERR_FILENO);
-    let num_deleted = entries.len();
-    write(
-      stderr,
-      format!("hist: deleted {num_deleted} entries.\n").as_bytes(),
-    )
-    .ok();
-  }
-
-  state::set_status(0);
-  Ok(())
 }

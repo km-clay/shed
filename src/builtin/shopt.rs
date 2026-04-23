@@ -1,49 +1,33 @@
 use crate::{
-  util::error::{ShResult, ShResultExt},
-  parse::{NdRule, Node, execute::prepare_argv},
-  prelude::*,
-  procio::borrow_fd,
-  state::{self, write_shopts},
+  outln,
+  state::write_shopts,
+  util::{
+    error::{ShResult, ShResultExt},
+    with_status,
+  },
 };
 
-pub fn shopt(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Shopt;
+impl super::Builtin for Shopt {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      let output = write_shopts(|s| s.display_opts())?;
 
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
+      outln!("{output}")?;
+
+      return with_status(0);
+    }
+
+    for (arg, span) in args.argv {
+      let Some(output) = write_shopts(|s| s.query(&arg)).promote_err(span)? else {
+        continue;
+      };
+
+      outln!("{output}")?;
+    }
+
+    with_status(0)
   }
-
-  if argv.is_empty() {
-    let mut output = write_shopts(|s| s.display_opts())?;
-
-    let output_channel = borrow_fd(STDOUT_FILENO);
-    output.push('\n');
-
-    write(output_channel, output.as_bytes())?;
-    state::set_status(0);
-    return Ok(());
-  }
-
-  for (arg, span) in argv {
-    let Some(mut output) = write_shopts(|s| s.query(&arg)).promote_err(span)? else {
-      continue;
-    };
-
-    let output_channel = borrow_fd(STDOUT_FILENO);
-    output.push('\n');
-
-    write(output_channel, output.as_bytes())?;
-  }
-
-  state::set_status(0);
-  Ok(())
 }
 
 #[cfg(test)]
@@ -118,22 +102,22 @@ mod tests {
   #[test]
   fn shopt_invalid_category() {
     let _g = TestGuard::new();
-    let result = test_input("shopt bogus.dotglob");
-    assert!(result.is_err());
+    test_input("shopt bogus.dotglob").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn shopt_invalid_option() {
     let _g = TestGuard::new();
-    let result = test_input("shopt core.nonexistent");
-    assert!(result.is_err());
+    test_input("shopt core.nonexistent").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn shopt_invalid_value() {
     let _g = TestGuard::new();
-    let result = test_input("shopt core.dotglob=notabool");
-    assert!(result.is_err());
+    test_input("shopt core.dotglob=notabool").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== Status =====================

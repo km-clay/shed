@@ -3,14 +3,14 @@ use std::str::FromStr;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
+  bitflags,
   expand::as_var_val_display,
-  util::error::{ShErr, ShResult, ShResultExt},
-  match_loop,
-  parse::{NdRule, Node, execute::prepare_argv},
-  prelude::*,
-  procio::borrow_fd,
-  sherr,
-  state::{self, VarKind, read_vars, write_shopts, write_vars},
+  match_loop, outln, sherr,
+  state::{VarKind, read_vars, write_shopts, write_vars},
+  util::{
+    error::{ShErr, ShResult, ShResultExt},
+    with_status,
+  },
 };
 
 bitflags! {
@@ -251,132 +251,114 @@ pub fn build_set_call(readable: bool) -> String {
   }
 }
 
-pub fn set_builtin(node: Node) -> ShResult<()> {
-  let nd_span = node.get_span().clone();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Set;
+impl super::Builtin for Set {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let span = args.span();
 
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
-  }
-
-  if argv.is_empty() {
-    // print values of all variables
-    let out = borrow_fd(STDOUT_FILENO);
-    let all_vars = read_vars(|v| v.all_vars());
-    for (k, v) in all_vars {
-      match v.kind() {
-        VarKind::Arr(items) => {
-          let items = items
-            .clone()
-            .into_iter()
-            .map(|v| as_var_val_display(&v.to_string()))
-            .collect::<Vec<_>>()
-            .join(" ");
-          write(out, format!("{k}=( {items} )\n").as_bytes())?;
-        }
-        _ => {
-          let v = as_var_val_display(&v.to_string());
-          write(out, format!("{k}={v}\n").as_bytes())?;
+    if args.argv.is_empty() {
+      // print values of all variables
+      let all_vars = read_vars(|v| v.all_vars());
+      for (k, v) in all_vars {
+        match v.kind() {
+          VarKind::Arr(items) => {
+            let items = items
+              .clone()
+              .into_iter()
+              .map(|v| as_var_val_display(&v.to_string()))
+              .collect::<Vec<_>>()
+              .join(" ");
+            outln!("{k}=( {items} )")?;
+          }
+          _ => {
+            let v = as_var_val_display(&v.to_string());
+            outln!("{k}={v}")?;
+          }
         }
       }
     }
-  }
 
-  let mut args = argv.into_iter().peekable();
-  let mut clear_if_empty = false;
+    let mut argv = args.argv.into_iter().peekable();
+    let mut clear_if_empty = false;
+    let mut pos_args = vec![];
 
-  let mut pos_args = vec![];
+    'outer: while let Some((arg, arg_span)) = argv.next() {
+      let mut flags = SetFlags::empty();
+      let mut chars = arg.chars().peekable();
 
-  'outer: while let Some((arg, span)) = args.next() {
-    let mut flags = SetFlags::empty();
-    let mut chars = arg.chars().peekable();
-
-    match chars.peek() {
-      Some(polarity @ ('+' | '-')) => {
-        let mut chars = arg[1..].chars().peekable();
-        let should_set = *polarity == '-';
-        match chars.next() {
-          Some('-') => {
-            clear_if_empty = true;
-            break 'outer;
-          }
-          Some('o') => {
-            let mut found = false;
-            while let Some((arg, _)) = args.peek() {
-              found = true;
-              if arg.starts_with('-') || arg.starts_with('+') {
-                break;
+      match chars.peek() {
+        Some(polarity @ ('+' | '-')) => {
+          let mut chars = arg[1..].chars().peekable();
+          let should_set = *polarity == '-';
+          match chars.next() {
+            Some('-') => {
+              clear_if_empty = true;
+              break 'outer;
+            }
+            Some('o') => {
+              let mut found = false;
+              while let Some((arg, _)) = argv.peek() {
+                found = true;
+                if arg.starts_with('-') || arg.starts_with('+') {
+                  break;
+                }
+                let (arg, arg_span) = argv.next().unwrap();
+                match SetFlags::from_str(&arg) {
+                  Ok(f) => flags |= f,
+                  Err(e) => return Err(e).promote_err(arg_span),
+                }
               }
-              let (arg, span) = args.next().unwrap();
-              match SetFlags::from_str(&arg) {
+              if !found {
+                let output = build_set_call(should_set);
+                outln!("{output}")?;
+              }
+            }
+            Some(c) => {
+              match SetFlags::try_from(c) {
                 Ok(f) => flags |= f,
-                Err(e) => return Err(e).promote_err(span),
+                Err(e) => return Err(e).promote_err(arg_span),
+              }
+              match_loop!(chars.next() => ch => SetFlags::try_from(ch), {
+                Ok(f) => flags |= f,
+                Err(e) => return Err(e).promote_err(arg_span),
+              });
+            }
+            None => {
+              if should_set && flags.is_empty() {
+                write_shopts(|o| o.set = Default::default());
+                continue;
               }
             }
-            if !found {
-              let output = build_set_call(should_set);
-              let out = borrow_fd(STDOUT_FILENO);
-              write(out, format!("{output}\n").as_bytes())?;
-            }
           }
-          Some(c) => {
-            match SetFlags::try_from(c) {
-              Ok(f) => flags |= f,
-              Err(e) => return Err(e).promote_err(span),
-            }
-            match_loop!(chars.next() => ch => SetFlags::try_from(ch), {
-              Ok(f) => flags |= f,
-              Err(e) => return Err(e).promote_err(span),
-            });
-          }
-          None => {
-            if should_set && flags.is_empty() {
-              // the arg is a single literal '-'
-              // the behavior for this is actually unspecified by POSIX
-              // so let's just make it reset all of the set opts to their defaults
-              write_shopts(|o| o.set = Default::default());
+          for opt in flags.get_shopt_fields() {
+            let opt_val = if should_set { "true" } else { "false" };
+            if &opt == "emacs" {
+              let opt_val = if should_set { "false" } else { "true" };
+              write_shopts(|o| o.query(&format!("set.vi={opt_val}"))).promote_err(span.clone())?;
               continue;
             }
+            write_shopts(|o| o.query(&format!("set.{opt}={opt_val}"))).promote_err(span.clone())?;
           }
         }
-        for opt in flags.get_shopt_fields() {
-          let opt_val = if should_set { "true" } else { "false" };
-          if &opt == "emacs" {
-            let opt_val = if should_set { "false" } else { "true" };
-            write_shopts(|o| o.query(&format!("set.vi={opt_val}"))).promote_err(nd_span.clone())?;
-            continue;
-          }
-
-          write_shopts(|o| o.query(&format!("set.{opt}={opt_val}")))
-            .promote_err(nd_span.clone())?;
-        }
+        Some(_) => pos_args.push(arg),
+        None => {}
       }
-      Some(_) => pos_args.push(arg),
-      None => {}
     }
-  }
 
-  while let Some((arg, _)) = args.next() {
-    pos_args.push(arg);
-  }
+    while let Some((arg, _)) = argv.next() {
+      pos_args.push(arg);
+    }
 
-  if !pos_args.is_empty() || clear_if_empty {
-    write_vars(|v| {
-      let cur_scope = v.cur_scope_mut();
-      cur_scope.clear_args();
-      for arg in pos_args {
-        cur_scope.bpush_arg(arg);
-      }
-    })
-  }
+    if !pos_args.is_empty() || clear_if_empty {
+      write_vars(|v| {
+        let cur_scope = v.cur_scope_mut();
+        cur_scope.clear_args();
+        for arg in pos_args {
+          cur_scope.bpush_arg(arg);
+        }
+      })
+    }
 
-  state::set_status(0);
-  Ok(())
+    with_status(0)
+  }
 }

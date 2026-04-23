@@ -1,16 +1,13 @@
-use std::{
-  os::unix::fs::PermissionsExt,
-  path::Path,
-};
+use std::{os::unix::fs::PermissionsExt, path::Path};
 
 use crate::{
-  util::{error::ShResult, ui::color_from_description},
   match_loop,
   readline::{
     annotate_input,
     markers::{self, is_marker},
   },
   state::{read_meta, read_shopts, write_meta},
+  util::{error::ShResult, ui::color_from_description},
 };
 
 fn resolve_style(raw: &str) -> ShResult<String> {
@@ -300,23 +297,23 @@ impl Highlighter {
         }
       }
       markers::STRING_DQ_END
-			| markers::STRING_SQ_END
-			| markers::VAR_SUB_END
-			| markers::CMD_SUB_END
-			| markers::PROC_SUB_END
-			| markers::SUBSH_END
-			| markers::HIST_EXP_END
-			| markers::PARAM_OP_END
-			| markers::PARAM_BODY_END => self.pop_style(),
+      | markers::STRING_SQ_END
+      | markers::VAR_SUB_END
+      | markers::CMD_SUB_END
+      | markers::PROC_SUB_END
+      | markers::SUBSH_END
+      | markers::HIST_EXP_END
+      | markers::PARAM_OP_END
+      | markers::PARAM_BODY_END => self.pop_style(),
 
-			markers::CMD_SEP | markers::RESET => self.clear_styles(),
+      markers::CMD_SEP | markers::RESET => self.clear_styles(),
 
-			markers::STRING_DQ | markers::STRING_SQ => {
-				self.push_style(&theme.string);
-			}
-			markers::KEYWORD => {
-				self.push_style(&theme.keyword);
-			}
+      markers::STRING_DQ | markers::STRING_SQ => {
+        self.push_style(&theme.string);
+      }
+      markers::KEYWORD => {
+        self.push_style(&theme.keyword);
+      }
       markers::BUILTIN => {
         let mut cmd_name = String::new();
         let mut chars_clone = input_chars.clone();
@@ -333,12 +330,12 @@ impl Highlighter {
       }
       markers::CASE_PAT => self.push_style(&theme.glob),
 
-			markers::PARAM_OP => self.push_style(&theme.operator),
-			markers::PARAM_BODY => self.push_style(&theme.string),
+      markers::PARAM_OP => self.push_style(&theme.operator),
+      markers::PARAM_BODY => self.push_style(&theme.string),
 
-			markers::HEREDOC_START => self.push_style(&theme.operator),
-			markers::HEREDOC_BODY => self.push_style(&theme.string),
-			markers::HEREDOC_END => self.push_style(&theme.operator),
+      markers::HEREDOC_START => self.push_style(&theme.operator),
+      markers::HEREDOC_BODY => self.push_style(&theme.string),
+      markers::HEREDOC_END => self.push_style(&theme.operator),
 
       markers::COMMENT => self.push_style(&theme.comment),
 

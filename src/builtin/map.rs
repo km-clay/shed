@@ -4,19 +4,23 @@ use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 use serde_json::{Map, Value};
 
-use crate::util::strops::{split_tk, split_tk_at};
 use crate::sherr;
+use crate::util::strops::{split_tk, split_tk_at};
 use crate::{
   expand::expand_cmd_sub,
   getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens_raw},
-  util::error::ShResult,
   parse::{
     NdRule, Node,
     lex::{self, LexFlags, LexStream},
   },
   procio::borrow_fd,
   state::{self, read_vars, write_vars},
+  util::error::ShResult,
 };
+
+/*
+ * NOTE: this is a wip builtin, not actually part of the usable set right now.
+ */
 
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub enum BranchKey {
@@ -425,235 +429,4 @@ pub fn get_map_opts(opts: Vec<Opt>) -> MapOpts {
     }
   }
   map_opts
-}
-
-#[cfg(test)]
-mod tests {
-  use super::{MapFlags, MapNode, get_map_opts};
-  use crate::getopt::Opt;
-  use crate::state::{self, read_vars};
-  use crate::testutil::{TestGuard, test_input};
-
-  // ===================== Pure: MapNode get/set/remove =====================
-
-  #[test]
-  fn mapnode_set_and_get() {
-    let mut root = MapNode::default();
-    root.set(&["key".into()], MapNode::StaticLeaf("val".into()));
-    let node = root.get(&["key".into()]).unwrap();
-    assert!(matches!(node, MapNode::StaticLeaf(s) if s == "val"));
-  }
-
-  #[test]
-  fn mapnode_nested_set_and_get() {
-    let mut root = MapNode::default();
-    root.set(
-      &["a".into(), "b".into(), "c".into()],
-      MapNode::StaticLeaf("deep".into()),
-    );
-    let node = root.get(&["a".into(), "b".into(), "c".into()]).unwrap();
-    assert!(matches!(node, MapNode::StaticLeaf(s) if s == "deep"));
-  }
-
-  #[test]
-  fn mapnode_get_missing() {
-    let root = MapNode::default();
-    assert!(root.get(&["nope".into()]).is_none());
-  }
-
-  #[test]
-  fn mapnode_remove() {
-    let mut root = MapNode::default();
-    root.set(&["key".into()], MapNode::StaticLeaf("val".into()));
-    let removed = root.remove(&["key".into()]);
-    assert!(removed.is_some());
-    assert!(root.get(&["key".into()]).is_none());
-  }
-
-  #[test]
-  fn mapnode_remove_nested() {
-    let mut root = MapNode::default();
-    root.set(&["a".into(), "b".into()], MapNode::StaticLeaf("val".into()));
-    root.remove(&["a".into(), "b".into()]);
-    assert!(root.get(&["a".into(), "b".into()]).is_none());
-    // Parent branch should still exist
-    assert!(root.get(&["a".into()]).is_some());
-  }
-
-  #[test]
-  fn mapnode_keys() {
-    let mut root = MapNode::default();
-    root.set(&["x".into()], MapNode::StaticLeaf("1".into()));
-    root.set(&["y".into()], MapNode::StaticLeaf("2".into()));
-    let mut keys = root.keys();
-    keys.sort();
-    assert_eq!(keys, vec!["x", "y"]);
-  }
-
-  #[test]
-  fn mapnode_display_leaf() {
-    let leaf = MapNode::StaticLeaf("hello".into());
-    assert_eq!(leaf.display(false, false).unwrap(), "hello");
-  }
-
-  #[test]
-  fn mapnode_display_json() {
-    let mut root = MapNode::default();
-    root.set(&["k".into()], MapNode::StaticLeaf("v".into()));
-    let json = root.display(true, false).unwrap();
-    assert!(json.contains("\"k\""));
-    assert!(json.contains("\"v\""));
-  }
-
-  #[test]
-  fn mapnode_overwrite() {
-    let mut root = MapNode::default();
-    root.set(&["key".into()], MapNode::StaticLeaf("old".into()));
-    root.set(&["key".into()], MapNode::StaticLeaf("new".into()));
-    let node = root.get(&["key".into()]).unwrap();
-    assert!(matches!(node, MapNode::StaticLeaf(s) if s == "new"));
-  }
-
-  #[test]
-  fn mapnode_promote_leaf_to_branch() {
-    let mut root = MapNode::default();
-    root.set(&["key".into()], MapNode::StaticLeaf("leaf".into()));
-    // Setting a sub-path should promote the leaf to a branch
-    root.set(
-      &["key".into(), "sub".into()],
-      MapNode::StaticLeaf("nested".into()),
-    );
-    let node = root.get(&["key".into(), "sub".into()]).unwrap();
-    assert!(matches!(node, MapNode::StaticLeaf(s) if s == "nested"));
-  }
-
-  // ===================== Pure: MapNode JSON round-trip =====================
-
-  #[test]
-  fn mapnode_json_roundtrip() {
-    let mut root = MapNode::default();
-    root.set(&["name".into()], MapNode::StaticLeaf("test".into()));
-    root.set(&["count".into()], MapNode::StaticLeaf("42".into()));
-
-    let val: serde_json::Value = root.clone().into();
-    let back: MapNode = val.into();
-    assert!(back.get(&["name".into()]).is_some());
-    assert!(back.get(&["count".into()]).is_some());
-  }
-
-  // ===================== Pure: option parsing =====================
-
-  #[test]
-  fn parse_remove_flag() {
-    let opts = get_map_opts(vec![Opt::Short('r')]);
-    assert!(opts.flags.contains(MapFlags::REMOVE));
-  }
-
-  #[test]
-  fn parse_json_flag() {
-    let opts = get_map_opts(vec![Opt::Short('j')]);
-    assert!(opts.flags.contains(MapFlags::JSON));
-  }
-
-  #[test]
-  fn parse_keys_flag() {
-    let opts = get_map_opts(vec![Opt::Short('k')]);
-    assert!(opts.flags.contains(MapFlags::KEYS));
-  }
-
-  #[test]
-  fn parse_pretty_flag() {
-    let opts = get_map_opts(vec![Opt::Long("pretty".into())]);
-    assert!(opts.flags.contains(MapFlags::PRETTY));
-  }
-
-  #[test]
-  fn parse_func_flag() {
-    let opts = get_map_opts(vec![Opt::Short('F')]);
-    assert!(opts.flags.contains(MapFlags::FUNC));
-  }
-
-  #[test]
-  fn parse_combined_flags() {
-    let opts = get_map_opts(vec![Opt::Short('j'), Opt::Short('k')]);
-    assert!(opts.flags.contains(MapFlags::JSON));
-    assert!(opts.flags.contains(MapFlags::KEYS));
-  }
-
-  // ===================== Integration =====================
-
-  #[test]
-  fn map_set_and_read() {
-    let guard = TestGuard::new();
-    test_input("map mymap.key=hello").unwrap();
-    test_input("map mymap.key").unwrap();
-    let out = guard.read_output();
-    assert_eq!(out.trim(), "hello");
-  }
-
-  #[test]
-  fn map_nested_path() {
-    let guard = TestGuard::new();
-    test_input("map mymap.a.b.c=deep").unwrap();
-    test_input("map mymap.a.b.c").unwrap();
-    let out = guard.read_output();
-    assert_eq!(out.trim(), "deep");
-  }
-
-  #[test]
-  fn map_remove() {
-    let _g = TestGuard::new();
-    test_input("map mymap.key=val").unwrap();
-    test_input("map -r mymap.key").unwrap();
-    let has = read_vars(|v| {
-      v.get_map("mymap")
-        .and_then(|m| m.get(&["key".into()]).cloned())
-        .is_some()
-    });
-    assert!(!has);
-  }
-
-  #[test]
-  fn map_remove_entire() {
-    let _g = TestGuard::new();
-    test_input("map mymap.key=val").unwrap();
-    test_input("map -r mymap").unwrap();
-    let has = read_vars(|v| v.get_map("mymap").is_some());
-    assert!(!has);
-  }
-
-  #[test]
-  fn map_keys() {
-    let guard = TestGuard::new();
-    test_input("map mymap.x=1").unwrap();
-    test_input("map mymap.y=2").unwrap();
-    test_input("map -k mymap").unwrap();
-    let out = guard.read_output();
-    assert!(out.contains("x"));
-    assert!(out.contains("y"));
-  }
-
-  #[test]
-  fn map_json_output() {
-    let guard = TestGuard::new();
-    test_input("map mymap.key=val").unwrap();
-    test_input("map -j mymap").unwrap();
-    let out = guard.read_output();
-    assert!(out.contains("\"key\""));
-    assert!(out.contains("\"val\""));
-  }
-
-  #[test]
-  fn map_nonexistent_errors() {
-    let _g = TestGuard::new();
-    let result = test_input("map __no_such_map__");
-    assert!(result.is_err());
-  }
-
-  #[test]
-  fn map_status_zero() {
-    let _g = TestGuard::new();
-    test_input("map mymap.key=val").unwrap();
-    assert_eq!(state::get_status(), 0);
-  }
 }

@@ -1,20 +1,14 @@
-use std::{
-  env,
-  fmt::Write as FmtWrite,
-  fmt::Debug,
-  os::fd::RawFd,
-};
+use std::{env, fmt::Debug, fmt::Write as FmtWrite, os::fd::RawFd};
 
-use nix::
-  libc::{self}
-;
+use nix::libc::{self};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
-  util::error::ShResult,
   readline::linebuf::Pos,
-  state::{read_shopts, with_term}, write_term,
+  state::{read_shopts, with_term},
+  util::error::ShResult,
+  write_term,
 };
 use crate::{
   sherr,
@@ -295,7 +289,13 @@ impl Layout {
     !gr.is_empty() && gr.as_bytes()[0] <= 0x1F && gr != "\n" && gr != "\t" && gr != "\r"
   }
 
-  pub fn calc_pos(term_width: usize, s: &str, orig: Pos, left_margin: usize, raw_calc: bool) -> Pos {
+  pub fn calc_pos(
+    term_width: usize,
+    s: &str,
+    orig: Pos,
+    left_margin: usize,
+    raw_calc: bool,
+  ) -> Pos {
     let tab_stop = read_shopts(|o| o.line.tab_width);
     let mut pos = orig;
     let mut esc_seq = 0;
@@ -391,7 +391,6 @@ pub fn redraw(
 
   Ok(())
 }
-
 
 pub fn move_cursor_to_end(layout: &Layout) -> ShResult<()> {
   let t_cols = with_term(|t| t.t_cols());

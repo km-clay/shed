@@ -1,6 +1,6 @@
-use std::fmt::Write;
+use crate::{match_loop, sherr, util::error::ShResult};
 use crate::{readline::term::calc_str_width, write_term};
-use crate::{util::error::ShResult, match_loop, sherr};
+use std::fmt::Write;
 use yansi::{Paint, Painted};
 
 pub const BOT_LEFT: &str = "\x1b[90m╰\x1b[0m";

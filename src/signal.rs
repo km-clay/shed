@@ -11,7 +11,6 @@ use nix::{
 use crate::{
   builtin::trap::TrapTarget,
   jobs::{Job, JobCmdFlags, JobID, take_term},
-  util::{error::ShResult, AutoCmdVecUtils},
   parse::execute::exec_nonint,
   prelude::*,
   sherr,
@@ -19,6 +18,7 @@ use crate::{
     AutoCmdKind, Var, VarFlags, VarKind, read_jobs, read_logic, with_vars, write_jobs, write_meta,
     write_vars,
   },
+  util::{AutoCmdVecUtils, error::ShResult},
 };
 
 static SIGNALS: AtomicU64 = AtomicU64::new(0);
@@ -91,6 +91,27 @@ pub const ALL_SIGNALS: [Signal; 29] = [
   Signal::SIGIO,
   Signal::SIGSYS,
 ];
+
+pub fn parse_signal(s: &str) -> ShResult<Signal> {
+  // Try as signal name (e.g. "TERM", "SIGTERM", "term")
+  let upper = s.to_uppercase();
+  if let Ok(sig) = upper.parse::<Signal>() {
+    return Ok(sig);
+  }
+  if let Ok(sig) = format!("SIG{upper}").parse::<Signal>() {
+    return Ok(sig);
+  }
+  // Try as number (e.g. "9", "137")
+  if let Ok(mut n) = s.parse::<usize>() {
+    if n > 128 {
+      n -= 128;
+    }
+    if let Ok(sig) = Signal::try_from(n as i32) {
+      return Ok(sig);
+    }
+  }
+  Err(sherr!(SyntaxErr, "Invalid signal name or number: {s}"))
+}
 
 pub fn signals_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) != 0 || SHOULD_QUIT.load(Ordering::SeqCst)

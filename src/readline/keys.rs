@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::util::error::ShResult;
 use crate::sherr;
+use crate::util::error::ShResult;
 
 // Credit to Rustyline for the design ideas in this module
 // https://github.com/kkawakam/rustyline

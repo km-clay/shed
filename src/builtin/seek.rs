@@ -1,115 +1,75 @@
-use nix::{
-  libc::STDOUT_FILENO,
-  unistd::{Whence, lseek, write},
-};
+use nix::unistd::{Whence, lseek};
 
 use crate::{
-  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  util::error::ShResult,
-  parse::{NdRule, Node},
-  procio::borrow_fd,
-  sherr, state,
+  getopt::{Opt, OptSpec},
+  outln, sherr,
+  util::{error::ShResult, with_status},
 };
 
-pub const LSEEK_OPTS: [OptSpec; 2] = [
-  OptSpec {
-    opt: Opt::Short('c'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('e'),
-    takes_arg: OptArg::None,
-  },
-];
-
-pub struct LseekOpts {
-  cursor_rel: bool,
-  end_rel: bool,
-}
-
-pub fn seek(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let (mut argv, opts) = get_opts_from_tokens(argv, &LSEEK_OPTS)?;
-  let lseek_opts = get_lseek_opts(opts)?;
-  if !argv.is_empty() {
-    argv.remove(0); // drop 'seek'
+pub(super) struct Seek;
+impl super::Builtin for Seek {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::flag('c'), OptSpec::flag('e')]
   }
-  let mut argv = argv.into_iter();
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let span = args.span();
+    let mut cursor_rel = false;
+    let mut end_rel = false;
+    let mut argv = args.argv.into_iter();
 
-  let Some(fd) = argv.next() else {
-    return Err(sherr!(ExecFail, "lseek: Missing required argument 'fd'",));
-  };
-  let Ok(fd) = fd.0.parse::<u32>() else {
-    return Err(
-      sherr!(ExecFail @ fd.1, "Invalid file descriptor").with_note("file descriptors are integers"),
-    );
-  };
-
-  let Some(offset) = argv.next() else {
-    return Err(sherr!(
-      ExecFail,
-      "lseek: Missing required argument 'offset'",
-    ));
-  };
-  let Ok(offset) = offset.0.parse::<i64>() else {
-    return Err(
-      sherr!(ExecFail @ offset.1, "Invalid offset")
-        .with_note("offset can be a positive or negative integer"),
-    );
-  };
-
-  let whence = if lseek_opts.cursor_rel {
-    Whence::SeekCur
-  } else if lseek_opts.end_rel {
-    Whence::SeekEnd
-  } else {
-    Whence::SeekSet
-  };
-
-  match lseek(fd as i32, offset, whence) {
-    Ok(new_offset) => {
-      let stdout = borrow_fd(STDOUT_FILENO);
-      let buf = new_offset.to_string() + "\n";
-      write(stdout, buf.as_bytes())?;
-    }
-    Err(e) => {
-      state::set_status(1);
-      return Err(e.into());
-    }
-  }
-
-  state::set_status(0);
-  Ok(())
-}
-
-pub fn get_lseek_opts(opts: Vec<Opt>) -> ShResult<LseekOpts> {
-  let mut lseek_opts = LseekOpts {
-    cursor_rel: false,
-    end_rel: false,
-  };
-
-  for opt in opts {
-    match opt {
-      Opt::Short('c') => lseek_opts.cursor_rel = true,
-      Opt::Short('e') => lseek_opts.end_rel = true,
-      _ => {
-        return Err(sherr!(ExecFail, "lseek: Unexpected flag '{opt}'",));
+    for opt in args.opts {
+      match opt {
+        Opt::Short('c') => cursor_rel = true,
+        Opt::Short('e') => end_rel = true,
+        _ => {
+          return Err(sherr!(ExecFail, "lseek: Unexpected flag '{opt}'",));
+        }
       }
     }
-  }
 
-  Ok(lseek_opts)
+    let Some((fd, fd_span)) = argv.next() else {
+      return Err(sherr!(ExecFail @ span, "lseek: Missing required argument 'fd'",));
+    };
+    let Ok(fd) = fd.parse::<u32>() else {
+      return Err(
+        sherr!(ExecFail @ fd_span, "Invalid file descriptor")
+          .with_note("file descriptors are integers"),
+      );
+    };
+
+    let Some((offset, offset_span)) = argv.next() else {
+      return Err(sherr!(
+        ExecFail,
+        "lseek: Missing required argument 'offset'",
+      ));
+    };
+    let Ok(offset) = offset.parse::<i64>() else {
+      return Err(
+        sherr!(ExecFail @ offset_span, "Invalid offset")
+          .with_note("offset can be a positive or negative integer"),
+      );
+    };
+
+    let whence = if cursor_rel {
+      Whence::SeekCur
+    } else if end_rel {
+      Whence::SeekEnd
+    } else {
+      Whence::SeekSet
+    };
+
+    let new_off =
+      lseek(fd as i32, offset, whence).map_err(|e| sherr!(ExecFail @ span, "lseek failed: {e}"))?;
+
+    outln!("{new_off}")?;
+
+    with_status(0)
+  }
 }
 
 #[cfg(test)]
 mod tests {
+  use crate::state;
   use crate::testutil::{TestGuard, test_input};
   use pretty_assertions::assert_eq;
 
@@ -241,18 +201,18 @@ mod tests {
   fn seek_bad_fd() {
     let _g = TestGuard::new();
 
-    let result = test_input("seek 99 0");
-    assert!(result.is_err());
+    test_input("seek 99 0").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn seek_missing_args() {
     let _g = TestGuard::new();
 
-    let result = test_input("seek");
-    assert!(result.is_err());
+    test_input("seek").ok();
+    assert_ne!(state::get_status(), 0);
 
-    let result = test_input("seek 9");
-    assert!(result.is_err());
+    test_input("seek 9").ok();
+    assert_ne!(state::get_status(), 0);
   }
 }

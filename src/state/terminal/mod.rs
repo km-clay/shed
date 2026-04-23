@@ -1,9 +1,39 @@
-use std::{collections::VecDeque, fmt::{Debug, Display}, io::Write, os::fd::RawFd, sync::LazyLock, time::Instant};
+use std::{
+  collections::VecDeque,
+  fmt::{Debug, Display},
+  io::Write,
+  os::fd::RawFd,
+  sync::LazyLock,
+  time::Instant,
+};
 
-use nix::{errno::Errno, fcntl::{FcntlArg, OFlag, fcntl, open}, poll::{PollFd, PollFlags, PollTimeout, poll}, sys::{signal::{SigSet, SigmaskHow, Signal, kill, killpg, pthread_sigmask}, stat::Mode, termios::{self, Termios, tcgetattr, tcsetattr}}, unistd::{Pid, close, getpgrp, isatty, read, tcsetpgrp, write}};
+mod guard;
+use guard::{Snapshot, TermGuard};
+
+use nix::{
+  errno::Errno,
+  fcntl::{FcntlArg, OFlag, fcntl, open},
+  poll::{PollFd, PollFlags, PollTimeout, poll},
+  sys::{
+    signal::{SigSet, SigmaskHow, Signal, kill, killpg, pthread_sigmask},
+    stat::Mode,
+    termios::{self, Termios, tcgetattr, tcsetattr},
+  },
+  unistd::{Pid, close, getpgrp, isatty, read, tcsetpgrp, write},
+};
 use vte::Perform;
 
-use crate::{util::{error::{ShErr, ShErrKind, ShResult}}, procio::borrow_fd, readline::{keys::{KeyCode, KeyEvent, ModKeys}, linebuf::Pos, term::get_win_size}, sherr, state::{read_shopts, with_term}};
+use crate::{
+  procio::borrow_fd,
+  readline::{
+    keys::{KeyCode, KeyEvent, ModKeys},
+    linebuf::Pos,
+    term::get_win_size,
+  },
+  sherr,
+  state::{read_shopts, with_term},
+  util::error::{ShErr, ShErrKind, ShResult},
+};
 
 /// Minimum fd number for shell-internal file descriptors.
 pub const MIN_INTERNAL_FD: RawFd = 10;
@@ -17,17 +47,17 @@ static TTY_FILENO: LazyLock<Option<RawFd>> = LazyLock::new(|| {
   Some(high)
 });
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub enum TermEvent {
   Key(KeyEvent),
-  CursorPos(usize,usize),
+  CursorPos(usize, usize),
   Capabilities(usize),
 }
 
-#[derive(Debug,Default,Clone)]
+#[derive(Debug, Default, Clone)]
 struct EventParser {
   events: VecDeque<TermEvent>,
-  ss3_pending: bool
+  ss3_pending: bool,
 }
 
 impl EventParser {
@@ -98,7 +128,10 @@ impl Perform for EventParser {
     }
 
     if c == '\x7f' {
-      self.push(TermEvent::Key(KeyEvent(KeyCode::Backspace, ModKeys::empty())));
+      self.push(TermEvent::Key(KeyEvent(
+        KeyCode::Backspace,
+        ModKeys::empty(),
+      )));
     } else {
       self.push(TermEvent::Key(KeyEvent(KeyCode::Char(c), ModKeys::empty())));
     }
@@ -110,7 +143,7 @@ impl Perform for EventParser {
       0x00 => TermEvent::Key(KeyEvent(KeyCode::Char(' '), ModKeys::CTRL)), // Ctrl+Space / Ctrl+@
       0x09 => TermEvent::Key(KeyEvent(KeyCode::Tab, ModKeys::empty())),    // Tab (Ctrl+I)
       0x0a => TermEvent::Key(KeyEvent(KeyCode::Char('j'), ModKeys::CTRL)), // Ctrl+J (linefeed)
-      0x0d => TermEvent::Key(KeyEvent(KeyCode::Enter, ModKeys::empty())),  // Carriage return (Ctrl+M)
+      0x0d => TermEvent::Key(KeyEvent(KeyCode::Enter, ModKeys::empty())), // Carriage return (Ctrl+M)
       0x1b => TermEvent::Key(KeyEvent(KeyCode::Esc, ModKeys::empty())),
       0x7f => TermEvent::Key(KeyEvent(KeyCode::Backspace, ModKeys::empty())),
       0x01..=0x1a => {
@@ -146,46 +179,28 @@ impl Perform for EventParser {
         TermEvent::CursorPos(col, row)
       }
       ([], 'A') => {
-        let mods = params
-          .get(1)
-          .map(ModKeys::from)
-          .unwrap_or(ModKeys::empty());
+        let mods = params.get(1).map(ModKeys::from).unwrap_or(ModKeys::empty());
         TermEvent::Key(KeyEvent(KeyCode::Up, mods))
       }
       ([], 'B') => {
-        let mods = params
-          .get(1)
-          .map(ModKeys::from)
-          .unwrap_or(ModKeys::empty());
+        let mods = params.get(1).map(ModKeys::from).unwrap_or(ModKeys::empty());
         TermEvent::Key(KeyEvent(KeyCode::Down, mods))
       }
       ([], 'C') => {
-        let mods = params
-          .get(1)
-          .map(ModKeys::from)
-          .unwrap_or(ModKeys::empty());
+        let mods = params.get(1).map(ModKeys::from).unwrap_or(ModKeys::empty());
         TermEvent::Key(KeyEvent(KeyCode::Right, mods))
       }
       ([], 'D') => {
-        let mods = params
-          .get(1)
-          .map(ModKeys::from)
-          .unwrap_or(ModKeys::empty());
+        let mods = params.get(1).map(ModKeys::from).unwrap_or(ModKeys::empty());
         TermEvent::Key(KeyEvent(KeyCode::Left, mods))
       }
       // Home/End: CSI H/F or CSI 1;mod H/F
       ([], 'H') => {
-        let mods = params
-          .get(1)
-          .map(ModKeys::from)
-          .unwrap_or(ModKeys::empty());
+        let mods = params.get(1).map(ModKeys::from).unwrap_or(ModKeys::empty());
         TermEvent::Key(KeyEvent(KeyCode::Home, mods))
       }
       ([], 'F') => {
-        let mods = params
-          .get(1)
-          .map(ModKeys::from)
-          .unwrap_or(ModKeys::empty());
+        let mods = params.get(1).map(ModKeys::from).unwrap_or(ModKeys::empty());
         TermEvent::Key(KeyEvent(KeyCode::End, mods))
       }
       // Shift+Tab: CSI Z
@@ -193,10 +208,7 @@ impl Perform for EventParser {
       // Special keys with tilde: CSI num ~ or CSI num;mod ~
       ([], '~') => {
         let key_num = params.first().copied().unwrap_or(0);
-        let mods = params
-          .get(1)
-          .map(ModKeys::from)
-          .unwrap_or(ModKeys::empty());
+        let mods = params.get(1).map(ModKeys::from).unwrap_or(ModKeys::empty());
         let key = match key_num {
           1 | 7 => KeyCode::Home,
           2 => KeyCode::Insert,
@@ -218,17 +230,11 @@ impl Perform for EventParser {
         };
         TermEvent::Key(KeyEvent(key, mods))
       }
-      ([], 'u') => { // kitty keyboard protocol: CSI code;mod;text u
-        let codepoint = params.first()
-          .copied()
-          .unwrap_or(0);
-        let mods = params
-          .get(1)
-          .map(ModKeys::from)
-          .unwrap_or(ModKeys::empty());
-        let text = params.get(2)
-          .copied()
-          .unwrap_or(codepoint);
+      ([], 'u') => {
+        // kitty keyboard protocol: CSI code;mod;text u
+        let codepoint = params.first().copied().unwrap_or(0);
+        let mods = params.get(1).map(ModKeys::from).unwrap_or(ModKeys::empty());
+        let text = params.get(2).copied().unwrap_or(codepoint);
 
         let (ch, mods) = if text != codepoint && mods.contains(ModKeys::SHIFT) {
           // Kitty reported something like 'Shift+7' and text is '&'
@@ -399,7 +405,10 @@ impl PollReader {
       if self.byte_buf.len() == 1 {
         // ESC is the only byte - emit standalone Escape
         self.byte_buf.pop_front();
-        return Ok(Some(TermEvent::Key(KeyEvent(KeyCode::Esc, ModKeys::empty()))));
+        return Ok(Some(TermEvent::Key(KeyEvent(
+          KeyCode::Esc,
+          ModKeys::empty(),
+        ))));
       }
       match self.byte_buf.get(1) {
         Some(b'[') | Some(b'O') => {
@@ -418,7 +427,10 @@ impl PollReader {
         _ => {
           // ESC + non-printable/unknown - emit standalone Escape
           self.byte_buf.pop_front();
-          return Ok(Some(TermEvent::Key(KeyEvent(KeyCode::Esc, ModKeys::empty()))));
+          return Ok(Some(TermEvent::Key(KeyEvent(
+            KeyCode::Esc,
+            ModKeys::empty(),
+          ))));
         }
       }
     }
@@ -447,7 +459,7 @@ impl Default for PollReader {
   }
 }
 
-#[derive(Clone,Copy,Debug,Default,PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum CursorStyle {
   #[default]
   Default,
@@ -478,29 +490,8 @@ impl Drop for FlushGuard {
   }
 }
 
-/// A guard that saves the terminal state on creation and restores it on drop.
-///
-/// This is returned from any Terminal method that modifies the terminal state.
-/// This allows us to scope terminal state changes, and ensures that the terminal state is always restored even if the code panics or returns early.
-#[derive(Debug)]
-pub struct TermGuard {
-  raw_mode: Option<bool>,
-  bracketed_paste: Option<bool>,
-  kitty_proto: Option<bool>,
-  alt_buffer: Option<bool>,
-  cursor_style: Option<CursorStyle>,
-  cursor_visible: Option<bool>,
-  interactive: Option<bool>,
-}
-
-impl Drop for TermGuard {
-  fn drop(&mut self) {
-    with_term(|t| t.load_state(self).ok());
-  }
-}
-
 /// An abstraction over the terminal that manages terminal attributes, and I/O.
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct Terminal {
   tty: Option<RawFd>,
   reader: PollReader,
@@ -513,12 +504,13 @@ pub struct Terminal {
   cursor_style: CursorStyle,
   cursor_visible: bool,
   interactive: bool,
-  orig_termios: Option<Termios>,
+
+  termios_stack: Vec<Termios>,
 
   t_cols: usize,
   t_rows: usize,
 
-  last_bell: Option<Instant>
+  last_bell: Option<Instant>,
 }
 
 impl Terminal {
@@ -544,7 +536,9 @@ impl Terminal {
       on_ctl
     } else if !on && *switch {
       off_ctl
-    } else { return Ok(()); };
+    } else {
+      return Ok(());
+    };
 
     buf.push_str(control);
 
@@ -554,7 +548,7 @@ impl Terminal {
 
   pub fn new() -> Self {
     let tty = TTY_FILENO.and_then(|fd| isatty(fd).unwrap_or(false).then_some(fd));
-    let (cols,rows) = tty.map(get_win_size).unwrap_or((80,24));
+    let (cols, rows) = tty.map(get_win_size).unwrap_or((80, 24));
     Self {
       tty,
       reader: PollReader::new(),
@@ -566,7 +560,7 @@ impl Terminal {
       interactive: false,
       cursor_visible: true,
       raw_mode: false,
-      orig_termios: None,
+      termios_stack: vec![],
       t_cols: cols as usize,
       t_rows: rows as usize,
       last_bell: None,
@@ -603,56 +597,72 @@ impl Terminal {
   pub fn interactive_guard(&mut self, on: bool) -> TermGuard {
     let old = self.interactive;
     self.interactive = on;
-    TermGuard {
-      interactive: Some(old),
-      raw_mode: None,
-      bracketed_paste: None,
-      kitty_proto: None,
-      alt_buffer: None,
-      cursor_style: None,
-      cursor_visible: None,
-    }
+
+    let guard = TermGuard::new().with_interactive(old);
+    guard.activate()
   }
 
-  fn save_state(&self) -> TermGuard {
-    TermGuard {
-      raw_mode: Some(self.raw_mode),
-      bracketed_paste: Some(self.bracketed_paste),
-      kitty_proto: Some(self.kitty_kbd_proto),
-      alt_buffer: Some(self.alt_buffer),
-      cursor_style: Some(self.cursor_style),
-      cursor_visible: Some(self.cursor_visible),
-      interactive: None,
-    }
+  fn save_state(&self) -> Snapshot {
+    let guard = TermGuard::new()
+      .with_raw_mode(self.raw_mode)
+      .with_bracketed_paste(self.bracketed_paste)
+      .with_kitty_proto(self.kitty_kbd_proto)
+      .with_alt_buffer(self.alt_buffer)
+      .with_cursor_style(self.cursor_style)
+      .with_cursor_visible(self.cursor_visible)
+      .with_termios_depth(self.termios_stack.len());
+
+    Snapshot::new(guard)
   }
 
-  fn load_state(&mut self, guard: &TermGuard) -> ShResult<()> {
+  pub fn raw_mode(&self) -> bool {
+    self.raw_mode
+  }
+  pub fn bracketed_paste(&self) -> bool {
+    self.bracketed_paste
+  }
+  pub fn kitty_kbd_proto(&self) -> bool {
+    self.kitty_kbd_proto
+  }
+  pub fn alt_buffer(&self) -> bool {
+    self.alt_buffer
+  }
+  pub fn cursor_style(&self) -> CursorStyle {
+    self.cursor_style
+  }
+  pub fn cursor_visible(&self) -> bool {
+    self.cursor_visible
+  }
+
+  pub fn load_state(&mut self, guard: &TermGuard) -> ShResult<()> {
+    if let Some(depth) = guard.termios_depth() {
+      while self.termios_stack.len() > depth {
+        self.pop_termios()?;
+      }
+    }
+
     let mut wrote_seq = false;
-    if let Some(raw_mode) = guard.raw_mode {
-      self.toggle_raw_mode(raw_mode)?; // restore raw mode first so escape sequences work
-      wrote_seq = true;
-    }
-    if let Some(bracketed_paste) = guard.bracketed_paste {
+    if let Some(bracketed_paste) = guard.bracketed_paste() {
       self.toggle_bracketed_paste(bracketed_paste)?;
       wrote_seq = true;
     }
-    if let Some(kitty_proto) = guard.kitty_proto {
+    if let Some(kitty_proto) = guard.kitty_proto() {
       self.toggle_kitty_proto(kitty_proto)?;
       wrote_seq = true;
     }
-    if let Some(alt_buffer) = guard.alt_buffer {
+    if let Some(alt_buffer) = guard.alt_buffer() {
       self.toggle_alt_buffer(alt_buffer)?;
       wrote_seq = true;
     }
-    if let Some(cursor_visible) = guard.cursor_visible {
+    if let Some(cursor_visible) = guard.cursor_visible() {
       self.toggle_cursor_visibility(cursor_visible)?;
       wrote_seq = true;
     }
-    if let Some(cursor_style) = guard.cursor_style {
+    if let Some(cursor_style) = guard.cursor_style() {
       self.set_cursor_style(cursor_style)?;
       wrote_seq = true;
     }
-    if let Some(interactive) = guard.interactive {
+    if let Some(interactive) = guard.interactive() {
       self.interactive = interactive;
     }
 
@@ -664,7 +674,7 @@ impl Terminal {
 
   pub fn update_t_dims(&mut self) {
     let Some(tty) = self.tty else { return };
-    let (cols,rows) = get_win_size(tty);
+    let (cols, rows) = get_win_size(tty);
     self.t_cols = cols as usize;
     self.t_rows = rows as usize;
   }
@@ -696,7 +706,7 @@ impl Terminal {
     Ok(None)
   }
 
-  pub fn get_cursor_pos(&mut self) -> ShResult<Option<(usize,usize)>> {
+  pub fn get_cursor_pos(&mut self) -> ShResult<Option<(usize, usize)>> {
     let Some(tty) = self.tty else { return Ok(None) };
 
     // ask the terminal where our cursor is
@@ -710,7 +720,9 @@ impl Terminal {
     self.reader.read(tty)?;
 
     while let Some(event) = self.reader.read_event()? {
-      let TermEvent::CursorPos(row, col) = event else { continue };
+      let TermEvent::CursorPos(row, col) = event else {
+        continue;
+      };
       return Ok(Some((col, row)));
     }
     Ok(None)
@@ -824,7 +836,9 @@ impl Terminal {
   }
 
   pub fn attach(&mut self, pgid: Pid) -> ShResult<()> {
-    let Some(tty) = self.tty else { return Ok(()); };
+    let Some(tty) = self.tty else {
+      return Ok(());
+    };
     // If we aren't attached to a terminal, the pgid already controls it, or the
     // process group does not exist Then return ok
     let term_controller = self.controller().unwrap_or(Pid::this());
@@ -887,77 +901,88 @@ impl Terminal {
   pub fn cooked_mode_guard(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
     self.toggle_bracketed_paste(false)?;
-    self.toggle_raw_mode(false)?;
-    Ok(guard)
+    self.edit_termios(enable_cooked_mode)?;
+    Ok(guard.activate())
+  }
+
+  pub fn cooked_no_echo_guard(&mut self) -> ShResult<TermGuard> {
+    let guard = self.save_state();
+    self.toggle_bracketed_paste(false)?;
+    self.edit_termios(|t| {
+      enable_cooked_mode(t);
+      t.local_flags.remove(termios::LocalFlags::ECHO);
+    })?;
+    Ok(guard.activate())
   }
 
   pub fn prepare_for_pager(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
-    self.toggle_raw_mode(true)?;
+    self.edit_termios(enable_raw_mode)?;
     self.toggle_bracketed_paste(false)?;
     self.toggle_alt_buffer(true)?;
     self.set_cursor_style(CursorStyle::Default)?;
     self.toggle_cursor_visibility(false)?;
     self.flush()?;
-    Ok(guard)
+    Ok(guard.activate())
   }
 
   pub fn prepare_for_exec(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
     self.toggle_bracketed_paste(false)?;
     self.toggle_alt_buffer(false)?;
+    self.edit_termios(enable_cooked_mode)?;
     self.set_cursor_style(CursorStyle::Default)?;
-    self.toggle_raw_mode(false)?;
     self.toggle_kitty_proto(false)?;
     self.flush()?; // flush escape sequences before switching to cooked mode
-    Ok(guard)
+    Ok(guard.activate())
   }
 
   pub fn raw_mode_guard(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
-    self.toggle_raw_mode(true)?;
-    Ok(guard)
+    self.edit_termios(enable_raw_mode)?;
+    Ok(guard.activate())
   }
 
-  pub fn toggle_raw_mode(&mut self, on: bool) -> ShResult<()> {
+  fn push_termios(&mut self) -> ShResult<()> {
     let Some(tty) = self.tty else { return Ok(()) };
-    if on && !self.raw_mode {
-      let orig = tcgetattr(borrow_fd(tty))
-        .map_err(|e| sherr!(InternalErr, "Failed to get terminal attributes: {e}"))?;
+    let current = tcgetattr(borrow_fd(tty))
+      .map_err(|e| sherr!(InternalErr, "Failed to get terminal attributes: {e}"))?;
 
-      let mut raw = orig.clone();
+    self.termios_stack.push(current);
+    Ok(())
+  }
 
-      termios::cfmakeraw(&mut raw);
-      // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
-      raw.local_flags |= termios::LocalFlags::ISIG;
-      // Keep OPOST enabled so \n is translated to \r\n on output
-      raw.output_flags |= termios::OutputFlags::OPOST;
-
-      tcsetattr(borrow_fd(tty), termios::SetArg::TCSANOW, &raw)
-        .map_err(|e| sherr!(InternalErr, "Failed to enable raw mode: {e}"))?;
-
-      self.orig_termios = Some(orig);
-      self.raw_mode = true;
-
-    } else if !on && self.raw_mode {
-      if let Some(ref orig) = self.orig_termios {
-        tcsetattr(borrow_fd(tty), termios::SetArg::TCSANOW, orig)
-          .map_err(|e| sherr!(InternalErr, "Failed to disable raw mode: {e}"))?;
-      }
-      self.raw_mode = false;
+  fn pop_termios(&mut self) -> ShResult<()> {
+    let Some(tty) = self.tty else { return Ok(()) };
+    if let Some(termios) = self.termios_stack.pop() {
+      tcsetattr(borrow_fd(tty), termios::SetArg::TCSANOW, &termios)
+        .map_err(|e| sherr!(InternalErr, "Failed to restore terminal attributes: {e}"))?;
     }
     Ok(())
   }
 
-  pub fn orig_termios(&self) -> Option<&Termios> {
-    self.orig_termios.as_ref()
+  pub fn edit_termios<F: FnOnce(&mut Termios)>(&mut self, f: F) -> ShResult<()> {
+    let Some(tty) = self.tty else { return Ok(()) };
+    self.push_termios()?;
+
+    let mut raw = tcgetattr(borrow_fd(tty))
+      .map_err(|e| sherr!(InternalErr, "Failed to get terminal attributes: {e}"))?;
+
+    f(&mut raw);
+
+    tcsetattr(borrow_fd(tty), termios::SetArg::TCSANOW, &raw)
+      .map_err(|e| sherr!(InternalErr, "Failed to set terminal attributes: {e}"))?;
+
+    Ok(())
   }
 
   pub fn is_raw(&self) -> bool {
     self.raw_mode
   }
   pub fn write_direct(&mut self, buf: &str) -> ShResult<()> {
-    let Some(tty) = self.tty else { return Ok(()); };
+    let Some(tty) = self.tty else {
+      return Ok(());
+    };
     let mut buf = buf.as_bytes();
     while !buf.is_empty() {
       match write(borrow_fd(tty), buf) {
@@ -1023,19 +1048,23 @@ impl Terminal {
 }
 
 impl Default for Terminal {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl Drop for Terminal {
   fn drop(&mut self) {
     self.toggle_bracketed_paste(false).ok();
     self.toggle_kitty_proto(false).ok();
-    self.toggle_raw_mode(false).ok();
+    self.toggle_cursor_visibility(true).ok();
     self.toggle_alt_buffer(false).ok();
     if self.cursor_style != CursorStyle::Default {
       self.set_cursor_style(CursorStyle::Default).ok();
+    }
+    self.flush().ok();
+    while !self.termios_stack.is_empty() {
+      self.pop_termios().ok();
     }
   }
 }
@@ -1051,7 +1080,7 @@ impl std::io::Write for Terminal {
   fn flush(&mut self) -> std::io::Result<()> {
     let Some(tty) = self.tty else {
       self.input_buf.clear();
-      return Ok(())
+      return Ok(());
     };
     let mut buf = self.input_buf.as_bytes();
     while !buf.is_empty() {
@@ -1067,4 +1096,27 @@ impl std::io::Write for Terminal {
     self.input_buf.clear();
     Ok(())
   }
+}
+
+fn enable_raw_mode(term: &mut Termios) {
+  termios::cfmakeraw(term);
+  // Keep ISIG enabled so Ctrl+C/Ctrl+Z still generate signals
+  term.local_flags |= termios::LocalFlags::ISIG;
+  // Keep OPOST enabled so \n is translated to \r\n on output
+  term.output_flags |= termios::OutputFlags::OPOST;
+}
+
+fn enable_cooked_mode(term: &mut Termios) {
+  term.local_flags |= termios::LocalFlags::ICANON
+    | termios::LocalFlags::ECHO
+    | termios::LocalFlags::ECHOE
+    | termios::LocalFlags::ECHOK
+    | termios::LocalFlags::ECHONL
+    | termios::LocalFlags::ISIG
+    | termios::LocalFlags::IEXTEN;
+  term.input_flags |= termios::InputFlags::ICRNL | termios::InputFlags::IXON;
+  term.output_flags |= termios::OutputFlags::OPOST;
+  // Restore VMIN/VTIME to canonical mode defaults
+  term.control_chars[termios::SpecialCharacterIndices::VMIN as usize] = 1;
+  term.control_chars[termios::SpecialCharacterIndices::VTIME as usize] = 0;
 }

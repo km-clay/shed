@@ -1,10 +1,11 @@
 use std::{iter::Peekable, str::Chars};
 
 use crate::{
-  util::error::ShResult,
+  expand::escape::{read_hex, read_octal},
   match_loop,
   parse::lex::{Span, Tk},
   sherr,
+  util::error::ShResult,
 };
 
 /// Used to track whether the lexer is currently inside a quote, and if so, which type
@@ -245,4 +246,73 @@ pub fn scan_delims(
     _ => *pos += ch.len_utf8(),
   });
   Ok(depth == 0)
+}
+
+/// Expand standard ANSI-C escapes
+pub fn expand_ansi_c(s: &str) -> String {
+  let mut result = String::new();
+  let mut chars = s.chars().peekable();
+
+  while let Some(ch) = chars.next() {
+    if ch != '\\' {
+      result.push(ch);
+      continue;
+    }
+    let Some(&next) = chars.peek() else {
+      result.push(ch);
+      break;
+    };
+
+    match next {
+      'n' => {
+        result.push('\n');
+        chars.next();
+      }
+      't' => {
+        result.push('\t');
+        chars.next();
+      }
+      'r' => {
+        result.push('\r');
+        chars.next();
+      }
+      'a' => {
+        result.push('\x07');
+        chars.next();
+      }
+      'b' => {
+        result.push('\x08');
+        chars.next();
+      }
+      'e' => {
+        result.push('\x1B');
+        chars.next();
+      }
+      'E' => {
+        result.push('\x1B');
+        chars.next();
+      }
+      'v' => {
+        result.push('\x0B');
+        chars.next();
+      }
+      'x' => {
+        chars.next();
+        read_hex(&mut chars, &mut result);
+      }
+      '0' => {
+        chars.next();
+        read_octal(&mut chars, &mut result);
+      }
+      '\\' => {
+        result.push('\\');
+        chars.next();
+      }
+      _ => {
+        result.push(ch);
+      }
+    }
+  }
+
+  result
 }

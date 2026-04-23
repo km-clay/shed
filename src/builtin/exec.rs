@@ -1,45 +1,34 @@
 use nix::{errno::Errno, unistd::execvpe};
 
 use crate::{
-  util::error::ShResult,
   parse::{
     NdRule, Node,
     execute::{ExecArgs, prepare_argv},
   },
   sherr, state,
+  util::{error::ShResult, with_status},
 };
 
-pub fn exec_builtin(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Exec;
+impl super::Builtin for Exec {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      return with_status(0);
+    }
 
-  let mut expanded_argv = prepare_argv(argv)?;
-  if !expanded_argv.is_empty() {
-    expanded_argv.remove(0);
-  }
+    let args = ExecArgs::from_expanded(args.argv);
 
-  if expanded_argv.is_empty() {
-    state::set_status(0);
-    return Ok(());
-  }
+    let cmd = &args.cmd.0;
+    let span = args.cmd.1;
 
-  let args = ExecArgs::from_expanded(expanded_argv);
+    let Err(e) = execvpe(cmd, &args.argv, &args.envp);
 
-  let cmd = &args.cmd.0;
-  let span = args.cmd.1;
-
-  let Err(e) = execvpe(cmd, &args.argv, &args.envp);
-
-  // execvpe only returns on error
-  let cmd_str = cmd.to_str().unwrap().to_string();
-  match e {
-    Errno::ENOENT => Err(sherr!(NotFound @ span.clone(), "exec: command not found: {}", cmd_str)),
-    _ => Err(sherr!(Errno(e) @ span, "{e}")),
+    // execvpe only returns on error
+    let cmd_str = cmd.to_str().unwrap().to_string();
+    match e {
+      Errno::ENOENT => Err(sherr!(NotFound @ span.clone(), "exec: command not found: {}", cmd_str)),
+      _ => Err(sherr!(Errno(e) @ span, "{e}")),
+    }
   }
 }
 
@@ -59,9 +48,9 @@ mod tests {
   #[test]
   fn exec_nonexistent_command_fails() {
     let _g = TestGuard::new();
-    let result = test_input(
+    test_input(
       "exec _____________no_such_______command_xyz_____________hopefully______this_doesnt______exist_____somewhere_in___your______PATH__________________",
-    );
-    assert!(result.is_err());
+    ).ok();
+    assert_ne!(state::get_status(), 0);
   }
 }

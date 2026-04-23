@@ -5,17 +5,18 @@ use std::str::Chars;
 use itertools::Itertools;
 
 use crate::expand::Expander;
-use crate::util::error::ShResult;
 use crate::parse::lex::TkFlags;
 use crate::readline::SimpleEditor;
 use crate::readline::editcmd::{
-  Anchor, CmdFlags, EditCmd, LineAddr, Motion, MotionCmd, ReadSrc, RegisterName, StashArgs, StashListArg, To, Verb, VerbCmd, WriteDest
+  Anchor, CmdFlags, EditCmd, LineAddr, Motion, MotionCmd, ReadSrc, RegisterName, StashArgs,
+  StashListArg, To, Verb, VerbCmd, WriteDest,
 };
 use crate::readline::editmode::{EditMode, ModeReport};
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
 use crate::state::write_meta;
+use crate::util::error::ShResult;
 use crate::verb;
 use crate::{bitflags, match_loop};
 use crate::{motion, sherr};
@@ -439,14 +440,7 @@ pub fn parse_stash(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<S
   chars
     .peeking_take_while(|c| c.is_whitespace())
     .for_each(drop);
-  let arg_names = [
-    "pop",
-    "drop",
-    "apply",
-    "insert",
-    "swap",
-    "list",
-  ];
+  let arg_names = ["pop", "drop", "apply", "insert", "swap", "list"];
 
   let mut arg = String::new();
   while chars.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
@@ -454,7 +448,7 @@ pub fn parse_stash(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<S
   }
 
   if arg.is_empty() {
-    return Ok(Some(Verb::Stash(StashArgs::Push(None))))
+    return Ok(Some(Verb::Stash(StashArgs::Push(None))));
   } else if !arg_names.iter().any(|name| name.starts_with(arg.as_str())) {
     return Ok(Some(Verb::Stash(StashArgs::Push(Some(arg)))));
   }
@@ -476,11 +470,14 @@ pub fn parse_stash(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<S
     _ if "insert".starts_with(arg.as_str()) => Ok(Some(Verb::Stash(StashArgs::Insert(name)))),
     _ if "swap".starts_with(arg.as_str()) => Ok(Some(Verb::Stash(StashArgs::Swap(name)))),
     _ if "list".starts_with(arg.as_str()) => {
-      let target = name.map(|n| match n.as_str() {
-        _ if "stack".starts_with(n.trim()) => Ok(Some(StashListArg::Stack)),
-        _ if "named".starts_with(n.trim()) => Ok(Some(StashListArg::Named)),
-        _ => Err(Some(format!("Invalid stash list target: {}", n))),
-      }).transpose()?.flatten();
+      let target = name
+        .map(|n| match n.as_str() {
+          _ if "stack".starts_with(n.trim()) => Ok(Some(StashListArg::Stack)),
+          _ if "named".starts_with(n.trim()) => Ok(Some(StashListArg::Named)),
+          _ => Err(Some(format!("Invalid stash list target: {}", n))),
+        })
+        .transpose()?
+        .flatten();
 
       Ok(Some(Verb::Stash(StashArgs::List(target))))
     }

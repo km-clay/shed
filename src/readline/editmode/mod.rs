@@ -3,7 +3,6 @@ use std::str::FromStr;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::util::error::{ShErr, ShResult};
 use crate::readline::editcmd::{
   CmdFlags, Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word,
 };
@@ -12,6 +11,7 @@ use crate::readline::editmode::remote::RemoteMode;
 use crate::readline::history::History;
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::LineBuf;
+use crate::util::error::{ShErr, ShResult};
 use crate::{ctrl, motion, verb};
 
 pub mod emacs;

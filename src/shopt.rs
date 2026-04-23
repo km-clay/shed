@@ -4,10 +4,10 @@ use nix::{libc::STDERR_FILENO, unistd::write};
 
 use crate::sherr;
 use crate::{
-  util::error::{ShErr, ShResult},
   parse::lex::Span,
   procio::borrow_fd,
   state::{read_shopts, read_vars},
+  util::error::{ShErr, ShResult},
 };
 
 pub fn xtrace_print(argv: &[(String, Span)]) {

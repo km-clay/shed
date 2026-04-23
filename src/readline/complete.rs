@@ -11,10 +11,6 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   expand::escape_str,
-  util::{
-    error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, ui,
-    TkVecUtils,
-  },
   match_loop,
   parse::{
     execute::exec_nonint,
@@ -29,8 +25,11 @@ use crate::{
     term::calc_str_width,
   },
   state::{
-    self, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, with_term, write_vars
-  }, write_term,
+    self, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars,
+    with_term, write_vars,
+  },
+  util::{TkVecUtils, error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, ui},
+  write_term,
 };
 
 /// Compat shim: replaces the old ClampedUsize type that was removed in the linebuf refactor.
@@ -1943,9 +1942,7 @@ mod tests {
   fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
     let g = TestGuard::new();
     let prompt = Prompt::default();
-    let vi = ShedLine::new_no_hist(prompt)
-      .unwrap()
-      .with_initial(initial);
+    let vi = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
     (vi, g)
   }
 

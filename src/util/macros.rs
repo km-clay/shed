@@ -234,3 +234,42 @@ macro_rules! two_way_display {
 		}
 	};
 }
+
+/*
+ * Below are our primitives for writing to the shell's output channels.
+ * It is basically a re-implementation of println! and eprintln! and the others,
+ * but generally more reliable in an environment that experiences constant output redirection and swapping of the underlying file descriptors.
+ * These can be considered more reliable because they just push bytes directly to the kernel and let the os figure it out
+ */
+
+#[macro_export]
+macro_rules! outln {
+  ($($arg:tt)*) => {{
+    use std::io::Write;
+    writeln!($crate::util::FdWriter(nix::libc::STDOUT_FILENO), $($arg)*)
+  }};
+}
+
+#[macro_export]
+macro_rules! errln {
+  ($($arg:tt)*) => {{
+    use std::io::Write;
+    writeln!($crate::util::FdWriter(nix::libc::STDERR_FILENO), $($arg)*)
+  }};
+}
+
+#[macro_export]
+macro_rules! out {
+  ($($arg:tt)*) => {{
+    use std::io::Write;
+    write!($crate::util::FdWriter(nix::libc::STDOUT_FILENO), $($arg)*)
+  }};
+}
+
+#[macro_export]
+macro_rules! err {
+  ($($arg:tt)*) => {{
+    use std::io::Write;
+    write!($crate::util::FdWriter(nix::libc::STDERR_FILENO), $($arg)*)
+  }};
+}

@@ -3,11 +3,12 @@ use super::*;
 use scopeguard::defer;
 
 use crate::{
-  jobs::{Job, JobCmdFlags, JobID, RegisteredFd, take_term, wait_fg},
-  util::error::ShResult,
+  jobs::{Job, JobCmdFlags, JobID, RegisteredFd, code_from_status, take_term, wait_fg},
   prelude::*,
   procio::{IoMode, borrow_fd},
   signal::{disable_reaping, enable_reaping},
+  state,
+  util::error::ShResult,
 };
 
 #[derive(Clone, Default, Debug)]
@@ -216,10 +217,13 @@ impl JobTab {
     defer! {
       enable_reaping();
     }
+    let mut code = 0;
     for job in self.jobs.iter_mut() {
       let Some(job) = job else { continue };
-      job.wait_pgrp()?;
+      let (statuses, _) = job.wait_pgrp()?;
+      code = statuses.last().and_then(code_from_status).unwrap_or(0);
     }
+    state::set_status(code);
     Ok(())
   }
   pub fn remove_job(&mut self, id: JobID) -> Option<Job> {

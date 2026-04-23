@@ -9,12 +9,14 @@ use std::{
 use bitflags::bitflags;
 
 use crate::{
-  builtin::BUILTINS,
+  builtin::BUILTIN_NAMES,
+  match_loop,
+  readline::linebuf::Pos,
+  sherr,
   util::{
     error::ShResult,
     strops::{QuoteState, ends_with_unescaped, scan_braces, scan_parens},
   },
-  match_loop, sherr,
 };
 
 pub const KEYWORDS: [&str; 19] = [
@@ -76,9 +78,11 @@ impl Display for SpanSource {
 
 #[derive(Clone, PartialEq, Default, Debug)]
 /// A slice of some source text. Ultimately wraps an Rc<String>, which means these are cheap to clone.
-/// Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
+///
+/// Load-bearing struct. Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
 pub struct Span {
   range: Range<usize>,
+  pos: Pos,
   source: SpanSource,
 }
 
@@ -89,10 +93,22 @@ impl Span {
       name: "<stdin>".into(),
       content: source,
     };
-    Span { range, source }
+    Span {
+      range,
+      pos: Pos::MIN,
+      source,
+    }
   }
   pub fn from_span_source(range: Range<usize>, source: SpanSource) -> Self {
-    Span { range, source }
+    Span {
+      range,
+      pos: Pos::MIN,
+      source,
+    }
+  }
+  pub fn at(mut self, pos: Pos) -> Self {
+    self.pos = pos;
+    self
   }
   pub fn rename(&mut self, name: Rc<str>) {
     self.source.name = name;
@@ -102,10 +118,7 @@ impl Span {
     self
   }
   pub fn line_and_col(&self) -> (usize, usize) {
-    let content = &self.source.content[..self.range.start];
-    let line = content.bytes().filter(|&b| b == b'\n').count();
-    let col = content.len() - content.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    (line, col)
+    (self.pos.row, self.pos.col)
   }
   /// Slice the source string at the wrapped range
   pub fn as_str(&self) -> &str {
@@ -168,18 +181,18 @@ pub enum TkRule {
   BraceGrpStart,
   BraceGrpEnd,
   Comment,
-	HereDoc {
-		start_delim: Span,
-		end_delim: Option<Span> // is None if not found when lexing unfinished input
-	},
+  HereDoc {
+    start_delim: Span,
+    end_delim: Option<Span>, // is None if not found when lexing unfinished input
+  },
 
-	// these three are only used in input annotation/syntax highlighting
-	HereDocStart,
-	HereDocBody,
-	HereDocEnd,
+  // these three are only used in input annotation/syntax highlighting
+  HereDocStart,
+  HereDocBody,
+  HereDocEnd,
 
-	/// These are only used as an intermediate state for tokens that are in the process of being expanded.
-	/// You can be confident that any token you are working on does not have this rule.
+  /// These are only used as an intermediate state for tokens that are in the process of being expanded.
+  /// You can be confident that any token you are working on does not have this rule.
   Expanded {
     exp: Vec<String>,
   },
@@ -349,6 +362,8 @@ pub fn clean_input(input: &str) -> String {
 pub struct LexStream {
   source: Rc<str>,
   pub cursor: usize,
+  pos_offset: usize,
+  pos: Pos,
   pub name: Rc<str>,
   quote_state: QuoteState,
   brc_grp_depth: usize,
@@ -366,6 +381,8 @@ impl LexStream {
       source,
       name: "<stdin>".into(),
       cursor: 0,
+      pos_offset: 0,
+      pos: Pos::new(0, 0),
       quote_state: QuoteState::default(),
       brc_grp_depth: 0,
       brc_grp_start: None,
@@ -404,6 +421,32 @@ impl LexStream {
   }
   pub fn in_brc_grp(&self) -> bool {
     self.brc_grp_depth > 0
+  }
+  pub fn update_pos(&mut self) {
+    if self.cursor < self.pos_offset {
+      // cursor moved backwards? recompute I guess?
+      // I think this only happens in heredocs but idk
+      self.pos = Pos::new(0, 0);
+      self.pos_offset = 0;
+    }
+    let slice = &self.source[self.pos_offset..self.cursor];
+    for ch in slice.chars() {
+      if ch == '\n' {
+        self.pos.row += 1;
+        self.pos.col = 0;
+      } else {
+        self.pos.col += 1;
+      }
+    }
+    self.pos_offset = self.cursor;
+  }
+  pub fn update_cursor(&mut self, new_cursor: usize) {
+    assert!(new_cursor <= self.source.len());
+    self.cursor = new_cursor;
+    self.update_pos();
+  }
+  pub fn inc_cursor(&mut self, amt: usize) {
+    self.update_cursor(self.cursor + amt);
   }
   pub fn enter_brc_grp(&mut self) {
     if self.brc_grp_depth == 0 {
@@ -526,13 +569,13 @@ impl LexStream {
                       // cursor is set to after the delimiter word;
                       // heredoc_skip is set to after the body
                       pos = self.cursor;
-                      self.cursor = saved_cursor;
+                      self.update_cursor(saved_cursor);
                       tk = heredoc_tk;
                       break;
                     }
                     Ok(None) => {
                       // Incomplete heredoc - restore cursor and fall through
-                      self.cursor = saved_cursor;
+                      self.update_cursor(saved_cursor);
                     }
                     Err(e) => return Some(Err(e)),
                   }
@@ -602,7 +645,7 @@ impl LexStream {
       return None;
     }
 
-    self.cursor = pos;
+    self.update_cursor(pos);
     Some(Ok(tk))
   }
   pub fn read_heredoc(&mut self, mut pos: usize) -> ShResult<Option<Tk>> {
@@ -702,8 +745,8 @@ impl LexStream {
       if ch == '\n' {
         let trimmed = line.trim_end_matches('\r');
         if trimmed == delim {
-					let start_delim = self.get_span(span_start..cursor_after_delim);
-					let end_delim = self.get_span(line_start..pos);
+          let start_delim = self.get_span(span_start..cursor_after_delim);
+          let end_delim = self.get_span(line_start..pos);
           let rule = TkRule::HereDoc {
             start_delim,
             end_delim: Some(end_delim),
@@ -711,7 +754,7 @@ impl LexStream {
           let mut tk = self.get_token(start..line_start, rule);
           tk.flags |= TkFlags::IS_HEREDOC | flags;
           self.heredoc_skip = Some(pos);
-          self.cursor = cursor_after_delim;
+          self.update_cursor(cursor_after_delim);
           return Ok(Some(tk));
         }
         line.clear();
@@ -724,8 +767,8 @@ impl LexStream {
     // Check the last line (no trailing newline)
     let trimmed = line.trim_end_matches('\r');
     if trimmed == delim {
-			let start_delim = self.get_span(span_start..cursor_after_delim);
-			let end_delim = self.get_span(line_start..pos);
+      let start_delim = self.get_span(span_start..cursor_after_delim);
+      let end_delim = self.get_span(line_start..pos);
       let rule = TkRule::HereDoc {
         start_delim,
         end_delim: Some(end_delim),
@@ -733,7 +776,7 @@ impl LexStream {
       let mut tk = self.get_token(start..line_start, rule);
       tk.flags |= TkFlags::IS_HEREDOC | flags;
       self.heredoc_skip = Some(pos);
-      self.cursor = cursor_after_delim;
+      self.update_cursor(cursor_after_delim);
       return Ok(Some(tk));
     }
 
@@ -746,17 +789,16 @@ impl LexStream {
       let mut tk = self.get_token(start..pos, rule);
       tk.flags |= TkFlags::IS_HEREDOC | flags;
       self.heredoc_skip = Some(pos);
-      self.cursor = cursor_after_delim;
+      self.update_cursor(cursor_after_delim);
       Ok(Some(tk))
     } else {
       Err(lex_err!(
-          self,
-          pos,
-          span_start..pos,
-          "Heredoc delimiter '{delim}' not found",
+        self,
+        pos,
+        span_start..pos,
+        "Heredoc delimiter '{delim}' not found",
       ))
     }
-
   }
   pub fn read_string(&mut self) -> ShResult<Tk> {
     assert!(self.cursor <= self.source.len());
@@ -770,7 +812,7 @@ impl LexStream {
     {
       pos += count;
       let casepat_tk = self.get_token(self.cursor..pos, TkRule::CasePattern);
-      self.cursor = pos;
+      self.update_cursor(pos);
       self.set_next_is_cmd(true);
       return Ok(casepat_tk);
     }
@@ -909,7 +951,7 @@ impl LexStream {
         }
         let mut tk = self.get_token(self.cursor..pos, TkRule::Str);
         tk.flags |= flags;
-        self.cursor = pos;
+        self.update_cursor(pos);
         self.set_next_is_cmd(true);
         return Ok(tk);
       }
@@ -920,7 +962,7 @@ impl LexStream {
         self.enter_brc_grp();
         self.set_next_is_cmd(true);
 
-        self.cursor = pos;
+        self.update_cursor(pos);
         return Ok(tk);
       }
       '}' if pos == self.cursor && self.in_brc_grp() && self.next_is_cmd() => {
@@ -928,7 +970,7 @@ impl LexStream {
         let tk = self.get_token(self.cursor..pos, TkRule::BraceGrpEnd);
         self.leave_brc_grp();
         self.set_next_is_cmd(true);
-        self.cursor = pos;
+        self.update_cursor(pos);
         return Ok(tk);
       }
       '=' if chars.peek() == Some(&'(') => {
@@ -963,7 +1005,7 @@ impl LexStream {
     });
     let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
     if self.quote_state.in_quote() && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-      self.cursor = pos;
+      self.update_cursor(pos);
       return Err(sherr!(
         ParseErr @ new_tk.span,
         "Unterminated quote",
@@ -983,10 +1025,15 @@ impl LexStream {
           new_tk.mark(TkFlags::FUNCNAME);
           self.set_next_is_cmd(true);
         }
-        "case" | "select" | "for" => {
+        "case" => {
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::EXPECTING_IN;
           self.case_depth += 1;
+          self.set_next_is_cmd(false);
+        }
+        "select" | "for" => {
+          new_tk.mark(TkFlags::KEYWORD);
+          self.flags |= LexFlags::EXPECTING_IN;
           self.set_next_is_cmd(false);
         }
         "in" if self.flags.contains(LexFlags::EXPECTING_IN) => {
@@ -1015,7 +1062,7 @@ impl LexStream {
         }
         _ => {
           new_tk.flags |= TkFlags::IS_CMD;
-          if BUILTINS.contains(&text) {
+          if BUILTIN_NAMES.contains(&text) {
             new_tk.mark(TkFlags::BUILTIN);
           }
           self.set_next_is_cmd(false);
@@ -1027,10 +1074,11 @@ impl LexStream {
     } else if is_cmd_sub(text) {
       new_tk.mark(TkFlags::IS_CMDSUB)
     }
-    self.cursor = pos;
+    self.update_cursor(pos);
     Ok(new_tk)
   }
   pub fn func_paren_lookahead(&mut self, pos: &mut usize) -> bool {
+    let saved_pos = *pos;
     let slice = self.slice(*pos..).unwrap_or_default().to_string();
     let mut chars = slice.chars().peekable();
     match_loop!(chars.next() => ch, {
@@ -1042,20 +1090,26 @@ impl LexStream {
 
         if chars.next() == Some(')') {
           *pos += 1;
-          self.cursor = *pos;
+          self.update_cursor(*pos);
           return true;
         }
+        // Not "()" - restore pos
+        *pos = saved_pos;
+        return false;
       }
       _ => {
+        *pos = saved_pos;
         return false;
       }
     });
+    *pos = saved_pos;
     false
   }
-	pub fn get_span(&self, range: Range<usize>) -> Span {
-		Span::new(range, self.source.clone())
-	}
-  pub fn get_token(&self, range: Range<usize>, class: TkRule) -> Tk {
+  pub fn get_span(&mut self, range: Range<usize>) -> Span {
+    self.update_pos();
+    Span::new(range, self.source.clone()).at(self.pos)
+  }
+  pub fn get_token(&mut self, range: Range<usize>, class: TkRule) -> Tk {
     let mut span = self.get_span(range);
     span.rename(self.name.clone());
     Tk::new(class, span)
@@ -1103,9 +1157,9 @@ impl Iterator for LexStream {
     loop {
       let pos = self.cursor;
       if self.slice(pos..pos + 2) == Some("\\\n") {
-        self.cursor += 2;
+        self.inc_cursor(2);
       } else if pos < self.source.len() && is_field_sep(get_char(&self.source, pos).unwrap()) {
-        self.cursor += 1;
+        self.inc_cursor(1);
       } else {
         break;
       }
@@ -1128,7 +1182,7 @@ impl Iterator for LexStream {
       '\r' | '\n' | ';' => {
         let ch = get_char(&self.source, self.cursor).unwrap();
         let ch_idx = self.cursor;
-        self.cursor += 1;
+        self.inc_cursor(1);
         let mut heredoc_skipped = false;
         self.set_next_is_cmd(true);
 
@@ -1138,21 +1192,21 @@ impl Iterator for LexStream {
           && let Some(skip) = self.heredoc_skip.take()
         {
           heredoc_skipped = true;
-          self.cursor = skip;
+          self.update_cursor(skip);
         }
 
         match_loop!(get_char(&self.source, self.cursor) => ch, {
           '\\' if get_char(&self.source, self.cursor + 1) == Some('\n') => {
-            self.cursor = (self.cursor + 2).min(self.source.len());
+            self.update_cursor((self.cursor + 2).min(self.source.len()));
           }
           _ if is_hard_sep(ch) => {
-            self.cursor += 1;
+            self.inc_cursor(1);
             // If we just consumed a newline and there's a pending heredoc, skip past the body
             if (ch == '\n' || ch == '\r')
               && let Some(skip) = self.heredoc_skip.take()
             {
               heredoc_skipped = true;
-              self.cursor = skip;
+              self.update_cursor(skip);
             }
           }
           _ => break,
@@ -1160,7 +1214,11 @@ impl Iterator for LexStream {
 
         // If a heredoc skip occurred, cap the separator span to just the
         // triggering character so it doesn't cover the heredoc body
-        let sep_end = if heredoc_skipped { ch_idx + 1 } else { self.cursor };
+        let sep_end = if heredoc_skipped {
+          ch_idx + 1
+        } else {
+          self.cursor
+        };
         self.get_token(ch_idx..sep_end, TkRule::Sep)
       }
       '#'
@@ -1168,13 +1226,13 @@ impl Iterator for LexStream {
           || crate::state::read_shopts(|s| s.core.interactive_comments) =>
       {
         let ch_idx = self.cursor;
-        self.cursor += 1;
+        self.inc_cursor(1);
 
         while let Some(ch) = get_char(&self.source, self.cursor) {
           if ch == '\n' {
             break;
           }
-          self.cursor += ch.len_utf8();
+          self.inc_cursor(ch.len_utf8());
         }
 
         if self.flags.contains(LexFlags::LEX_UNFINISHED) {
@@ -1184,7 +1242,7 @@ impl Iterator for LexStream {
         }
       }
       '!' if self.next_is_cmd() => {
-        self.cursor += 1;
+        self.inc_cursor(1);
         let tk_type = TkRule::Bang;
 
         let mut tk = self.get_token((self.cursor - 1)..self.cursor, tk_type);
@@ -1193,14 +1251,14 @@ impl Iterator for LexStream {
       }
       '|' => {
         let ch_idx = self.cursor;
-        self.cursor += 1;
+        self.inc_cursor(1);
         self.set_next_is_cmd(true);
 
         let tk_type = if let Some('|') = get_char(&self.source, self.cursor) {
-          self.cursor += 1;
+          self.inc_cursor(1);
           TkRule::Or
         } else if let Some('&') = get_char(&self.source, self.cursor) {
-          self.cursor += 1;
+          self.inc_cursor(1);
           TkRule::ErrPipe
         } else {
           TkRule::Pipe
@@ -1210,11 +1268,11 @@ impl Iterator for LexStream {
       }
       '&' => {
         let ch_idx = self.cursor;
-        self.cursor += 1;
+        self.inc_cursor(1);
         self.set_next_is_cmd(true);
 
         let tk_type = if let Some('&') = get_char(&self.source, self.cursor) {
-          self.cursor += 1;
+          self.inc_cursor(1);
           TkRule::And
         } else {
           TkRule::Bg

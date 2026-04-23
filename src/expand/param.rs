@@ -5,10 +5,10 @@ use glob::Pattern;
 use crate::expand::escape::{strip_escape_markers, unescape_str};
 use crate::expand::util::glob_to_regex;
 use crate::expand::var::expand_raw;
-use crate::util::error::{ShErr, ShResult};
 use crate::match_loop;
 use crate::sherr;
 use crate::state::{VarFlags, VarKind, VarName, read_shopts, read_vars, write_vars};
+use crate::util::error::{ShErr, ShResult};
 
 #[derive(Debug)]
 pub enum ParamExp {
@@ -240,12 +240,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           .unwrap_or_default();
         Ok(first + chars.as_str())
       }
-      ParamExp::DefaultUnsetOrNull(default) => {
-        match read_vars(try_get).filter(|v| !v.is_empty()) {
-          Some(val) => Ok(val),
-          None => expand_raw(&mut default.chars().peekable()),
-        }
-      }
+      ParamExp::DefaultUnsetOrNull(default) => match read_vars(try_get).filter(|v| !v.is_empty()) {
+        Some(val) => Ok(val),
+        None => expand_raw(&mut default.chars().peekable()),
+      },
       ParamExp::DefaultUnset(default) => match read_vars(try_get) {
         Some(val) => Ok(val),
         None => expand_raw(&mut default.chars().peekable()),
@@ -255,7 +253,13 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           Some(val) => Ok(val),
           None => {
             let expanded = expand_raw(&mut default.chars().peekable())?;
-            write_vars(|v| v.set_var(parsed.name(), VarKind::Str(expanded.clone()), VarFlags::NONE))?;
+            write_vars(|v| {
+              v.set_var(
+                parsed.name(),
+                VarKind::Str(expanded.clone()),
+                VarFlags::NONE,
+              )
+            })?;
             Ok(expanded)
           }
         }
@@ -264,29 +268,31 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         Some(val) => Ok(val),
         None => {
           let expanded = expand_raw(&mut default.chars().peekable())?;
-          write_vars(|v| v.set_var(parsed.name(), VarKind::Str(expanded.clone()), VarFlags::NONE))?;
+          write_vars(|v| {
+            v.set_var(
+              parsed.name(),
+              VarKind::Str(expanded.clone()),
+              VarFlags::NONE,
+            )
+          })?;
           Ok(expanded)
         }
       },
-      ParamExp::AltSetNotNull(alt) => {
-        match read_vars(try_get).filter(|v| !v.is_empty()) {
-          Some(_) => expand_raw(&mut alt.chars().peekable()),
-          None => Ok("".into()),
-        }
-      }
+      ParamExp::AltSetNotNull(alt) => match read_vars(try_get).filter(|v| !v.is_empty()) {
+        Some(_) => expand_raw(&mut alt.chars().peekable()),
+        None => Ok("".into()),
+      },
       ParamExp::AltNotNull(alt) => match read_vars(try_get) {
         Some(_) => expand_raw(&mut alt.chars().peekable()),
         None => Ok("".into()),
       },
-      ParamExp::ErrUnsetOrNull(err) => {
-        match read_vars(try_get).filter(|v| !v.is_empty()) {
-          Some(val) => Ok(val),
-          None => {
-            let expanded = expand_raw(&mut err.chars().peekable())?;
-            Err(sherr!(ExecFail, "{expanded}"))
-          }
+      ParamExp::ErrUnsetOrNull(err) => match read_vars(try_get).filter(|v| !v.is_empty()) {
+        Some(val) => Ok(val),
+        None => {
+          let expanded = expand_raw(&mut err.chars().peekable())?;
+          Err(sherr!(ExecFail, "{expanded}"))
         }
-      }
+      },
       ParamExp::ErrUnset(err) => match read_vars(try_get) {
         Some(val) => Ok(val),
         None => {

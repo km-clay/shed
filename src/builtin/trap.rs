@@ -1,17 +1,15 @@
 use std::{fmt::Display, str::FromStr};
 
-use nix::{
-  libc::{STDERR_FILENO, STDOUT_FILENO},
-  sys::signal::Signal,
-  unistd::write,
-};
+use nix::sys::signal::Signal;
 
 use crate::{
-  util::error::{ShErr, ShResult},
-  parse::{NdRule, Node, execute::prepare_argv},
-  procio::borrow_fd,
-  sherr,
-  state::{self, read_logic, write_logic},
+  errln, outln,
+  signal::parse_signal,
+  state::{read_logic, write_logic},
+  util::{
+    error::{ShErr, ShResult, ShResultExt},
+    with_status,
+  },
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -27,39 +25,7 @@ impl FromStr for TrapTarget {
     match s {
       "EXIT" => Ok(TrapTarget::Exit),
       "ERR" => Ok(TrapTarget::Error),
-
-      "HUP" => Ok(TrapTarget::Signal(Signal::SIGHUP)),
-      "INT" => Ok(TrapTarget::Signal(Signal::SIGINT)),
-      "QUIT" => Ok(TrapTarget::Signal(Signal::SIGQUIT)),
-      "ILL" => Ok(TrapTarget::Signal(Signal::SIGILL)),
-      "TRAP" => Ok(TrapTarget::Signal(Signal::SIGTRAP)),
-      "ABRT" => Ok(TrapTarget::Signal(Signal::SIGABRT)),
-      "BUS" => Ok(TrapTarget::Signal(Signal::SIGBUS)),
-      "FPE" => Ok(TrapTarget::Signal(Signal::SIGFPE)),
-      "KILL" => Ok(TrapTarget::Signal(Signal::SIGKILL)),
-      "USR1" => Ok(TrapTarget::Signal(Signal::SIGUSR1)),
-      "SEGV" => Ok(TrapTarget::Signal(Signal::SIGSEGV)),
-      "USR2" => Ok(TrapTarget::Signal(Signal::SIGUSR2)),
-      "PIPE" => Ok(TrapTarget::Signal(Signal::SIGPIPE)),
-      "ALRM" => Ok(TrapTarget::Signal(Signal::SIGALRM)),
-      "TERM" => Ok(TrapTarget::Signal(Signal::SIGTERM)),
-      "STKFLT" => Ok(TrapTarget::Signal(Signal::SIGSTKFLT)),
-      "CHLD" => Ok(TrapTarget::Signal(Signal::SIGCHLD)),
-      "CONT" => Ok(TrapTarget::Signal(Signal::SIGCONT)),
-      "STOP" => Ok(TrapTarget::Signal(Signal::SIGSTOP)),
-      "TSTP" => Ok(TrapTarget::Signal(Signal::SIGTSTP)),
-      "TTIN" => Ok(TrapTarget::Signal(Signal::SIGTTIN)),
-      "TTOU" => Ok(TrapTarget::Signal(Signal::SIGTTOU)),
-      "URG" => Ok(TrapTarget::Signal(Signal::SIGURG)),
-      "XCPU" => Ok(TrapTarget::Signal(Signal::SIGXCPU)),
-      "XFSZ" => Ok(TrapTarget::Signal(Signal::SIGXFSZ)),
-      "VTALRM" => Ok(TrapTarget::Signal(Signal::SIGVTALRM)),
-      "PROF" => Ok(TrapTarget::Signal(Signal::SIGPROF)),
-      "WINCH" => Ok(TrapTarget::Signal(Signal::SIGWINCH)),
-      "IO" => Ok(TrapTarget::Signal(Signal::SIGIO)),
-      "PWR" => Ok(TrapTarget::Signal(Signal::SIGPWR)),
-      "SYS" => Ok(TrapTarget::Signal(Signal::SIGSYS)),
-      _ => Err(sherr!(ExecFail, "invalid trap target '{s}'")),
+      _ => Ok(TrapTarget::Signal(parse_signal(s)?)),
     }
   }
 }
@@ -69,102 +35,51 @@ impl Display for TrapTarget {
     match self {
       TrapTarget::Exit => write!(f, "EXIT"),
       TrapTarget::Error => write!(f, "ERR"),
-      TrapTarget::Signal(s) => match s {
-        Signal::SIGHUP => write!(f, "HUP"),
-        Signal::SIGINT => write!(f, "INT"),
-        Signal::SIGQUIT => write!(f, "QUIT"),
-        Signal::SIGILL => write!(f, "ILL"),
-        Signal::SIGTRAP => write!(f, "TRAP"),
-        Signal::SIGABRT => write!(f, "ABRT"),
-        Signal::SIGBUS => write!(f, "BUS"),
-        Signal::SIGFPE => write!(f, "FPE"),
-        Signal::SIGKILL => write!(f, "KILL"),
-        Signal::SIGUSR1 => write!(f, "USR1"),
-        Signal::SIGSEGV => write!(f, "SEGV"),
-        Signal::SIGUSR2 => write!(f, "USR2"),
-        Signal::SIGPIPE => write!(f, "PIPE"),
-        Signal::SIGALRM => write!(f, "ALRM"),
-        Signal::SIGTERM => write!(f, "TERM"),
-        Signal::SIGSTKFLT => write!(f, "STKFLT"),
-        Signal::SIGCHLD => write!(f, "CHLD"),
-        Signal::SIGCONT => write!(f, "CONT"),
-        Signal::SIGSTOP => write!(f, "STOP"),
-        Signal::SIGTSTP => write!(f, "TSTP"),
-        Signal::SIGTTIN => write!(f, "TTIN"),
-        Signal::SIGTTOU => write!(f, "TTOU"),
-        Signal::SIGURG => write!(f, "URG"),
-        Signal::SIGXCPU => write!(f, "XCPU"),
-        Signal::SIGXFSZ => write!(f, "XFSZ"),
-        Signal::SIGVTALRM => write!(f, "VTALRM"),
-        Signal::SIGPROF => write!(f, "PROF"),
-        Signal::SIGWINCH => write!(f, "WINCH"),
-        Signal::SIGIO => write!(f, "IO"),
-        Signal::SIGPWR => write!(f, "PWR"),
-        Signal::SIGSYS => write!(f, "SYS"),
-
-        _ => {
-          log::warn!("TrapTarget::fmt() : unrecognized signal {}", s);
-          Err(std::fmt::Error)
-        }
-      },
+      TrapTarget::Signal(s) => {
+        let name = s.to_string();
+        write!(f, "{}", name.strip_prefix("SIG").unwrap_or(&name))
+      }
     }
   }
 }
 
-pub fn trap(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
-  }
-
-  if argv.is_empty() {
-    let stdout = borrow_fd(STDOUT_FILENO);
-
-    return read_logic(|l| -> ShResult<()> {
-      for l in l.traps() {
-        let target = l.0;
-        let command = l.1;
-        write(stdout, format!("trap -- '{command}' {target}\n").as_bytes())?;
-      }
-      Ok(())
-    });
-  }
-
-  if argv.len() == 1 {
-    let stderr = borrow_fd(STDERR_FILENO);
-    write(stderr, b"usage: trap <COMMAND> [SIGNAL...]\n")?;
-    state::set_status(1);
-    return Ok(());
-  }
-
-  let mut args = argv.into_iter();
-
-  let command = args.next().unwrap().0;
-  let mut targets = vec![];
-
-  while let Some((arg, _)) = args.next() {
-    let target = arg.parse::<TrapTarget>()?;
-    targets.push(target);
-  }
-
-  for target in targets {
-    if &command == "-" {
-      write_logic(|l| l.remove_trap(target))
-    } else {
-      write_logic(|l| l.insert_trap(target, command.clone()))
+pub(super) struct Trap;
+impl super::Builtin for Trap {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      read_logic(|l| -> ShResult<()> {
+        for l in l.traps() {
+          let target = l.0;
+          let command = l.1;
+          outln!("trap -- '{command}' {target}")?;
+        }
+        Ok(())
+      })?;
+      return with_status(0);
+    } else if args.argv.len() == 1 {
+      errln!("usage: trap <COMMAND> [SIGNAL...]")?;
+      return with_status(1);
     }
-  }
 
-  state::set_status(0);
-  Ok(())
+    let mut argv = args.argv.into_iter();
+    let command = argv.next().unwrap().0;
+    let mut targets = vec![];
+
+    for (arg, span) in argv {
+      let target = arg.parse::<TrapTarget>().promote_err(span)?;
+      targets.push(target);
+    }
+
+    for target in targets {
+      if &command == "-" {
+        write_logic(|l| l.remove_trap(target))
+      } else {
+        write_logic(|l| l.insert_trap(target, command.clone()))
+      }
+    }
+
+    with_status(0)
+  }
 }
 
 #[cfg(test)]
@@ -298,8 +213,8 @@ mod tests {
   #[test]
   fn trap_invalid_signal() {
     let _g = TestGuard::new();
-    let result = test_input("trap 'echo hi' BOGUS");
-    assert!(result.is_err());
+    test_input("trap 'echo hi' BOGUS").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== Status =====================

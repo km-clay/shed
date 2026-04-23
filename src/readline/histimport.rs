@@ -6,10 +6,10 @@ use std::{
 use regex::Regex;
 
 use crate::{
-  util::{error::ShResult, strops::ends_with_unescaped},
   match_loop,
   readline::history::HistEntry,
   sherr,
+  util::{error::ShResult, strops::ends_with_unescaped},
 };
 
 pub fn import_history(path: PathBuf) -> ShResult<Vec<HistEntry>> {

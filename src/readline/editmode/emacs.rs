@@ -3,7 +3,6 @@ use crate::readline::editcmd::{Direction, EditCmd, Motion, MotionCmd, To, Verb, 
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::{alt, ctrl, motion, verb};
 
-
 #[derive(Default, Clone, Debug)]
 pub struct Emacs {
   pending_cmd: Option<EditCmd>,

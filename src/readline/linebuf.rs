@@ -17,16 +17,17 @@ use super::editcmd::{
   Anchor, Bound, Dest, Direction, EditCmd, Motion, MotionCmd, TextObj, To, Verb, Word,
 };
 use crate::{
-  builtin::stash::{Stash, StashedCmd}, expand::alias::AliasExpander, util::{
-    error::ShResult,
-    guards::var_ctx_guard,
-    strops::QuoteState,
-    AutoCmdVecUtils,
-  }, match_loop, motion, parse::{
+  builtin::stash::{Stash, StashedCmd},
+  expand::alias::AliasExpander,
+  match_loop, motion,
+  parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::{exec_int, exec_nonint},
     lex::{self, LexFlags, LexStream, Tk, TkFlags, TkRule},
-  }, prelude::*, procio::{self, IoFrame, IoMode, IoStack, capture_command}, readline::{
+  },
+  prelude::*,
+  procio::{self, IoFrame, IoMode, IoStack, capture_command},
+  readline::{
     editcmd::{LineAddr, ReadSrc, StashArgs, StashListArg, VerbCmd, WriteDest},
     editmode::ex::SubFlags,
     highlight::Highlighter,
@@ -34,9 +35,14 @@ use crate::{
     markers,
     register::RegisterContent,
     term::get_win_size,
-  }, sherr, state::{
-    self, AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, read_vars, with_term, write_meta, write_vars
-  }, verb
+  },
+  sherr,
+  state::{
+    self, AutoCmdKind, VarFlags, VarKind, read_logic, read_shopts, read_vars, with_term,
+    write_meta, write_vars,
+  },
+  util::{AutoCmdVecUtils, error::ShResult, guards::var_ctx_guard, strops::QuoteState},
+  verb,
 };
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
@@ -3593,7 +3599,9 @@ impl LineBuf {
 
       Verb::Stash(args) => {
         let Ok(stash) = Stash::new() else {
-          write_meta(|m| m.post_status_message("Failed to open stash - database unreachable".into()));
+          write_meta(|m| {
+            m.post_status_message("Failed to open stash - database unreachable".into())
+          });
           return Ok(());
         };
         match args {
@@ -3603,26 +3611,30 @@ impl LineBuf {
               return Ok(());
             }
             let stash_len = stash.stack_len();
-            let name = arg.clone()
-              .filter(|a| !a.trim().is_empty());
+            let name = arg.clone().filter(|a| !a.trim().is_empty());
             let buffer = self.joined();
-            let (s,e) = (self.row(),self.col());
+            let (s, e) = (self.row(), self.col());
 
-            stash.push(name, &buffer, (s,e))?;
+            stash.push(name, &buffer, (s, e))?;
             self.clear_buffer();
             self.clear_hint();
-            self.set_cursor(Pos::new(0,0));
+            self.set_cursor(Pos::new(0, 0));
           }
           StashArgs::Pop(arg) => {
             let stack_len = stash.stack_len();
-            let idx = arg.as_ref()
+            let idx = arg
+              .as_ref()
               .map(|a| a.parse::<usize>())
               .transpose()
               .ok()
               .flatten()
               .unwrap_or(stack_len.saturating_sub(1));
 
-            let StashedCmd { name, buffer, cursor_pos } = match stash.pop(idx) {
+            let StashedCmd {
+              name,
+              buffer,
+              cursor_pos,
+            } = match stash.pop(idx) {
               Ok(ent) => match ent {
                 Some(ent) => {
                   write_meta(|m| m.post_status_message("stash: Popped stack entry".to_string()));
@@ -3636,28 +3648,34 @@ impl LineBuf {
                       m.post_status_message(format!("stash: No stash entry at index '{idx}'"));
                     }
                   });
-                  return Ok(())
+                  return Ok(());
                 }
-              }
+              },
               Err(e) => {
-                write_meta(|m| m.post_status_message(format!("stash: Failed to pop stash entry: {e}")));
+                write_meta(|m| {
+                  m.post_status_message(format!("stash: Failed to pop stash entry: {e}"))
+                });
                 return Ok(());
               }
             };
             let cursor_pos = match self.parse_pos(&cursor_pos) {
               Ok(pos) => pos,
               Err(e) => {
-                write_meta(|m| m.post_status_message(format!("stash: Failed to parse cursor position from stash: {e}")));
+                write_meta(|m| {
+                  m.post_status_message(format!(
+                    "stash: Failed to parse cursor position from stash: {e}"
+                  ))
+                });
                 Pos { row: 0, col: 0 }
               }
             };
 
             self.set_buffer(buffer);
             self.set_cursor(cursor_pos);
-
           }
           StashArgs::Drop(arg) => {
-            let idx = arg.as_ref()
+            let idx = arg
+              .as_ref()
               .map(|a| a.parse::<usize>())
               .transpose()
               .ok()
@@ -3667,43 +3685,65 @@ impl LineBuf {
 
             match stash.pop(idx).ok().flatten() {
               Some(_) => {
-                write_meta(|m| m.post_status_message(format!("stash: Dropped stash entry '{idx}'")));
+                write_meta(|m| {
+                  m.post_status_message(format!("stash: Dropped stash entry '{idx}'"))
+                });
               }
               None => {
                 if stack_len == 0 {
-                  write_meta(|m| m.post_status_message("stash: Stash is empty, nothing to drop".into()));
+                  write_meta(|m| {
+                    m.post_status_message("stash: Stash is empty, nothing to drop".into())
+                  });
                 } else {
-                  write_meta(|m| m.post_status_message(format!("stash: No stack entry at index '{idx}'")));
+                  write_meta(|m| {
+                    m.post_status_message(format!("stash: No stack entry at index '{idx}'"))
+                  });
                 }
               }
             }
           }
           StashArgs::Apply(arg) => {
             let stack_len = stash.stack_len();
-            let name = arg.clone().unwrap_or(stack_len.saturating_sub(1).to_string());
+            let name = arg
+              .clone()
+              .unwrap_or(stack_len.saturating_sub(1).to_string());
 
-            let Some(StashedCmd { name, buffer, cursor_pos }) = stash.get(&name)? else {
+            let Some(StashedCmd {
+              name,
+              buffer,
+              cursor_pos,
+            }) = stash.get(&name)?
+            else {
               if let Ok(idx) = name.parse::<usize>() {
                 if stack_len == 0 {
                   write_meta(|m| m.post_status_message("stash: Stash is empty".into()));
                 } else {
-                  write_meta(|m| m.post_status_message(format!("stash: No stash entry at index '{idx}'")));
+                  write_meta(|m| {
+                    m.post_status_message(format!("stash: No stash entry at index '{idx}'"))
+                  });
                 }
               } else {
-                write_meta(|m| m.post_status_message(format!("stash: No stash entry named '{name}'")));
+                write_meta(|m| {
+                  m.post_status_message(format!("stash: No stash entry named '{name}'"))
+                });
               }
               return Ok(());
             };
 
             if let Some(name) = name {
-              write_meta(|m| m.post_status_message(format!("stash: Applied stash entry '{}'", name)));
+              write_meta(|m| {
+                m.post_status_message(format!("stash: Applied stash entry '{}'", name))
+              });
             }
-
 
             let cursor_pos = match self.parse_pos(&cursor_pos) {
               Ok(pos) => pos,
               Err(e) => {
-                write_meta(|m| m.post_status_message(format!("stash: Failed to parse cursor position from stash: {e}")));
+                write_meta(|m| {
+                  m.post_status_message(format!(
+                    "stash: Failed to parse cursor position from stash: {e}"
+                  ))
+                });
                 Pos { row: 0, col: 0 }
               }
             };
@@ -3713,17 +3753,28 @@ impl LineBuf {
           }
           StashArgs::Insert(arg) => {
             let stack_len = stash.stack_len();
-            let name = arg.clone().unwrap_or(stack_len.saturating_sub(1).to_string());
+            let name = arg
+              .clone()
+              .unwrap_or(stack_len.saturating_sub(1).to_string());
 
-            let Some(StashedCmd { name, buffer, cursor_pos }) = stash.get(&name)? else {
+            let Some(StashedCmd {
+              name,
+              buffer,
+              cursor_pos,
+            }) = stash.get(&name)?
+            else {
               if let Ok(idx) = name.parse::<usize>() {
                 if stack_len == 0 {
                   write_meta(|m| m.post_status_message("stash: Stash is empty".into()));
                 } else {
-                  write_meta(|m| m.post_status_message(format!("stash: No stash entry at index '{idx}'")));
+                  write_meta(|m| {
+                    m.post_status_message(format!("stash: No stash entry at index '{idx}'"))
+                  });
                 }
               } else {
-                write_meta(|m| m.post_status_message(format!("stash: No stash entry named '{name}'")));
+                write_meta(|m| {
+                  m.post_status_message(format!("stash: No stash entry named '{name}'"))
+                });
               }
               return Ok(());
             };
@@ -3731,7 +3782,11 @@ impl LineBuf {
             let cursor_offset = match self.parse_pos(&cursor_pos) {
               Ok(pos) => pos,
               Err(e) => {
-                write_meta(|m| m.post_system_message(format!("stash: Failed to parse cursor position from stash: {e}")));
+                write_meta(|m| {
+                  m.post_system_message(format!(
+                    "stash: Failed to parse cursor position from stash: {e}"
+                  ))
+                });
                 Pos { row: 0, col: 0 }
               }
             };
@@ -3749,9 +3804,13 @@ impl LineBuf {
           StashArgs::Swap(arg) => todo!(),
           StashArgs::List(arg) => {
             let output = match arg {
-              Some(StashListArg::Stack) => stash.list(/*named_only:*/false, /*stack_only:*/true),
-              Some(StashListArg::Named) => stash.list(/*named_only:*/true, /*stack_only:*/false),
-              None => stash.list(/*named_only:*/false, /*stack_only:*/false),
+              Some(StashListArg::Stack) => {
+                stash.list(/*named_only:*/ false, /*stack_only:*/ true)
+              }
+              Some(StashListArg::Named) => {
+                stash.list(/*named_only:*/ true, /*stack_only:*/ false)
+              }
+              None => stash.list(/*named_only:*/ false, /*stack_only:*/ false),
             };
             if output.trim().is_empty() {
               match arg {

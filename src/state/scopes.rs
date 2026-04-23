@@ -6,7 +6,7 @@ use std::{
   time::Duration,
 };
 
-use crate::{builtin::map::MapNode, util::error::ShResult, prelude::*, sherr};
+use crate::{builtin::map::MapNode, prelude::*, sherr, util::error::ShResult};
 
 #[derive(Clone, Default, Debug)]
 pub struct ScopeStack {
@@ -262,7 +262,13 @@ impl ScopeStack {
     self.index_var_sliced(var_name, idx, None, None)
   }
 
-  pub fn index_var_sliced(&self, var_name: &str, idx: ArrIndex, slice_start: Option<usize>, slice_len: Option<usize>) -> ShResult<String> {
+  pub fn index_var_sliced(
+    &self,
+    var_name: &str,
+    idx: ArrIndex,
+    slice_start: Option<usize>,
+    slice_len: Option<usize>,
+  ) -> ShResult<String> {
     for scope in self.scopes.iter().rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
@@ -274,11 +280,17 @@ impl ScopeStack {
                 let arg_sep = crate::readline::markers::ARG_SEP.to_string();
                 let start = slice_start.unwrap_or(0);
                 let end = start + slice_len.unwrap_or(items.len().saturating_sub(start));
-                let sliced = &items.iter().skip(start).take(end - start).cloned().collect::<Vec<_>>();
+                let sliced = &items
+                  .iter()
+                  .skip(start)
+                  .take(end - start)
+                  .cloned()
+                  .collect::<Vec<_>>();
                 return Ok(sliced.join(&arg_sep));
               }
               ArrIndex::AllJoined => {
-                let ifs = self.try_get_var("IFS")
+                let ifs = self
+                  .try_get_var("IFS")
                   .unwrap_or_else(|| " \t\n".to_string())
                   .chars()
                   .next()
@@ -286,7 +298,12 @@ impl ScopeStack {
                   .to_string();
                 let start = slice_start.unwrap_or(0);
                 let end = start + slice_len.unwrap_or(items.len().saturating_sub(start));
-                let sliced = &items.iter().skip(start).take(end - start).cloned().collect::<Vec<_>>();
+                let sliced = &items
+                  .iter()
+                  .skip(start)
+                  .take(end - start)
+                  .cloned()
+                  .collect::<Vec<_>>();
                 return Ok(sliced.join(&ifs));
               }
               ArrIndex::ArgCount => {
@@ -386,7 +403,9 @@ impl ScopeStack {
   /// Resolve a pre-parsed VarName, handling array indexes and slicing if present.
   pub fn resolve_var(&self, var: &VarName) -> Option<String> {
     if let Some(idx) = var.index() {
-      self.index_var_sliced(var.name(), idx.clone(), var.slice_start(), var.slice_len()).ok()
+      self
+        .index_var_sliced(var.name(), idx.clone(), var.slice_start(), var.slice_len())
+        .ok()
     } else {
       self.try_get_var(var.name())
     }

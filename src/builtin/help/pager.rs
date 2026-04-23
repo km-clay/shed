@@ -11,13 +11,11 @@ use crate::{
     StyledHelp,
     markup::{MarkedSpan, REF_SEQ, RESET_SEQ, SEARCH_RES_SEQ, TAG_SEQ},
   },
-  util::error::ShResult,
   procio::borrow_fd,
-  readline::{
-    SimpleEditor,
-    editcmd::Direction,
-    keys::KeyEvent,
-  }, state::with_term, write_term,
+  readline::{SimpleEditor, editcmd::Direction, keys::KeyEvent},
+  state::with_term,
+  util::error::ShResult,
+  write_term,
 };
 
 pub enum PagerEvent {
@@ -311,11 +309,7 @@ impl HelpPager {
 
   pub fn max_scroll(&self) -> usize {
     let t_rows = with_term(|t| t.t_rows());
-    self
-      .content()
-      .lines()
-      .count()
-      .saturating_sub(t_rows)
+    self.content().lines().count().saturating_sub(t_rows)
   }
 
   pub fn search(&mut self, jump: bool) {

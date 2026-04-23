@@ -15,11 +15,11 @@ use nix::{
 
 use crate::{
   expand::expand_aliases,
-  util::error::ShResult,
   parse::{NdKind, ParsedSrc, Redir, RedirType, execute::exec_nonint, lex::LexFlags},
   procio::{IoFrame, IoMode, RedirGuard, borrow_fd},
   readline::register::{restore_registers, save_registers},
   state::{self, MetaTab, with_term},
+  util::error::ShResult,
 };
 
 pub fn has_cmds(cmds: &[&str]) -> bool {
@@ -107,6 +107,7 @@ impl TestGuard {
     let old_cwd = env::current_dir().unwrap();
     let saved_env = env::vars().collect();
     state::util::save_state();
+    state::try_hash();
     save_registers();
     Self {
       _redir_guard,

@@ -6,10 +6,11 @@ use std::{
 
 use crate::{
   expand::Expander,
-  util::error::{ShErr, ShResult},
-  parse::{Redir, RedirType, execute::{exec_nonint}, get_redir_file, lex::TkFlags},
+  parse::{Redir, RedirType, execute::exec_nonint, get_redir_file, lex::TkFlags},
   prelude::*,
-  sherr, state::{self, with_term},
+  sherr,
+  state::{self, with_term},
+  util::error::{ShErr, ShResult},
 };
 
 // Credit to fish-shell for many of the implementation ideas present in this
@@ -497,11 +498,7 @@ pub fn capture_command(cmd: &str, stdin: Option<&str>) -> ShResult<String> {
       if let Some(fd) = stdin_write_fd {
         close(fd).ok(); // close child's copy of stdin write end
       }
-      if let Err(e) = exec_nonint(
-        cmd.to_string(),
-        Some(io_stack),
-        Some("command_sub".into()),
-      ) {
+      if let Err(e) = exec_nonint(cmd.to_string(), Some(io_stack), Some("command_sub".into())) {
         e.print_error();
         unsafe { libc::_exit(1) };
       }

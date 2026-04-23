@@ -12,18 +12,20 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
   jobs::Job,
-  util::{error::ShResult, AutoCmdVecUtils},
   match_loop,
-  parse::{execute::exec_nonint, lex::{LexFlags, LexStream}},
+  parse::{
+    execute::exec_nonint,
+    lex::{LexFlags, LexStream},
+  },
   prelude::*,
   sherr,
   shopt::ShOpts,
+  util::{AutoCmdVecUtils, error::ShResult},
 };
 
 thread_local! {
   static SHED: Shed = Shed::new();
 }
-
 
 /// Parse `arr[idx]` into (name, raw_index_expr). Pure parsing, no expansion.
 pub fn parse_arr_bracket(var_name: &str) -> Option<(String, String)> {
@@ -101,7 +103,6 @@ pub fn expand_arr_index(idx_raw: &str) -> ShResult<ArrIndex> {
  * However, we must be mindful of what the callstack looks like when we call them, to avoid re-entrancy issues.
  */
 
-
 /// Read from the job table
 pub fn read_jobs<T, F: FnOnce(&JobTab) -> T>(f: F) -> T {
   SHED.with(|shed| f(&shed.jobs.borrow()))
@@ -121,7 +122,6 @@ pub fn read_vars<T, F: FnOnce(&ScopeStack) -> T>(f: F) -> T {
 pub fn write_vars<T, F: FnOnce(&mut ScopeStack) -> T>(f: F) -> T {
   SHED.with(|shed| f(&mut shed.var_scopes.borrow_mut()))
 }
-
 
 pub fn read_meta<T, F: FnOnce(&MetaTab) -> T>(f: F) -> T {
   SHED.with(|shed| f(&shed.meta.borrow()))
@@ -154,7 +154,9 @@ pub fn write_shopts<T, F: FnOnce(&mut ShOpts) -> T>(f: F) -> T {
 pub fn with_term<T, F: FnOnce(&mut Terminal) -> T>(f: F) -> T {
   let caller = std::panic::Location::caller();
   SHED.with(|shed| {
-    let mut term = shed.terminal.try_borrow_mut()
+    let mut term = shed
+      .terminal
+      .try_borrow_mut()
       .unwrap_or_else(|_| panic!("with_term: RefCell already borrowed (called from {caller})"));
     f(&mut term)
   })
@@ -266,6 +268,9 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
   Ok(())
 }
 
+/// Get the first char of IFS
+///
+/// Used mainly for joining strings
 pub fn get_separator() -> String {
   env::var("IFS")
     .unwrap_or(String::from(" "))
@@ -273,6 +278,13 @@ pub fn get_separator() -> String {
     .next()
     .unwrap()
     .to_string()
+}
+
+/// Get the entire IFS variable
+///
+/// Used mainly for splitting strings
+pub fn get_separators() -> String {
+  env::var("IFS").unwrap_or(String::from(" \t\n"))
 }
 
 pub fn get_time_fmt() -> String {
@@ -323,12 +335,23 @@ pub fn lookup_cmd(cmd: &str) -> Option<PathBuf> {
 }
 
 pub fn which_util(name: &str) -> Option<Rc<Utility>> {
-  read_meta(|m| m.get_cached_util(name)).or_else(|| {
+  // Check in shell resolution order: alias > function > builtin > cached command > PATH
+  if read_logic(|l| l.get_alias(name).is_some()) {
+    return Some(Rc::new(Utility::alias(name.to_string())));
+  }
+  if read_logic(|l| l.get_func(name).is_some()) {
+    return Some(Rc::new(Utility::function(name.to_string())));
+  }
+  if crate::builtin::lookup_builtin(name).is_some() {
+    return Some(Rc::new(Utility::builtin(name.to_string())));
+  }
+  // For external commands, check cache first, then scan PATH
+  read_meta(|m| m.get_cached_cmd(name)).or_else(|| {
     MetaTab::get_cmds_in_path()
       .into_iter()
       .chain(MetaTab::get_exec_files_in_cwd())
       .find(|u| u.name() == name)
-      .inspect(|u| write_meta(|m| m.cache_util(Rc::clone(u)))) // cache it if we find something we havent seen yet
+      .inspect(|u| write_meta(|m| m.cache_util(Rc::clone(u))))
   })
 }
 
@@ -553,16 +576,18 @@ pub fn get_db_conn() -> Option<Arc<Connection>> {
 
 /// Initialize the shared database connection on the `Shed` struct.
 pub fn init_db_conn() {
-  SHED.with(|shed| {
-    match open_db_conn().ok() {
-      Some(conn) => {
-        let Ok(_) = conn.execute_batch("PRAGMA journal_mode=WAL") else { return };
-        let Ok(_) = conn.execute_batch("PRAGMA case_sensitive_like = 1") else { return };
-        let _ = shed.db_conn.set(Some(conn.into()));
-      }
-      None => {
-        let _ = shed.db_conn.set(None);
-      }
+  SHED.with(|shed| match open_db_conn().ok() {
+    Some(conn) => {
+      let Ok(_) = conn.execute_batch("PRAGMA journal_mode=WAL") else {
+        return;
+      };
+      let Ok(_) = conn.execute_batch("PRAGMA case_sensitive_like = 1") else {
+        return;
+      };
+      let _ = shed.db_conn.set(Some(conn.into()));
+    }
+    None => {
+      let _ = shed.db_conn.set(None);
     }
   })
 }

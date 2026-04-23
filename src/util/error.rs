@@ -88,6 +88,7 @@ pub fn clear_color() {
 pub trait ShResultExt {
   fn blame(self, span: Span) -> Self;
   fn try_blame(self, span: Span) -> Self;
+  /// If the value is Err(), attach a span to it
   fn promote_err(self, span: Span) -> Self;
   fn is_flow_control(&self) -> bool;
 }

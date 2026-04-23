@@ -1,21 +1,13 @@
 use crate::{
-  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  util::error::{ShResult, ShResultExt},
-  parse::{NdRule, Node},
+  getopt::{Opt, OptSpec},
   sherr,
-  state::{self, AutoCmd, AutoCmdKind, write_logic},
+  state::{AutoCmd, AutoCmdKind, write_logic},
+  util::{error::ShResult, with_status},
 };
 
 pub struct AutoCmdOpts {
   clear: bool,
 }
-fn autocmd_optspec() -> [OptSpec; 1] {
-  [OptSpec {
-    opt: Opt::Short('c'),
-    takes_arg: OptArg::None,
-  }]
-}
-
 pub fn get_autocmd_opts(opts: &[Opt]) -> ShResult<AutoCmdOpts> {
   let mut autocmd_opts = AutoCmdOpts { clear: false };
 
@@ -34,60 +26,57 @@ pub fn get_autocmd_opts(opts: &[Opt]) -> ShResult<AutoCmdOpts> {
   Ok(autocmd_opts)
 }
 
-pub fn autocmd(node: Node) -> ShResult<()> {
-  let span = node.get_span();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let (mut argv, opts) =
-    get_opts_from_tokens(argv, &autocmd_optspec()).promote_err(span.clone())?;
-  let autocmd_opts = get_autocmd_opts(&opts).promote_err(span.clone())?;
-  if !argv.is_empty() {
-    argv.remove(0);
+pub(super) struct AutoCmdBuiltin;
+impl super::Builtin for AutoCmdBuiltin {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::flag('c')]
   }
-  let mut args = argv.iter();
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let span = args.span();
+    let mut clear = false;
+    let mut argv = args.argv.iter();
+    for opt in args.opts {
+      match opt {
+        Opt::Short('c') => clear = true,
+        _ => return Err(sherr!(ExecFail, "unexpected option: {}", opt,)),
+      }
+    }
 
-  let Some(autocmd_kind) = args.next() else {
-    return Err(sherr!(
-      ExecFail @ span,
-      "expected an autocmd kind",
-    ));
-  };
+    let Some(autocmd_kind) = argv.next() else {
+      return Err(sherr!(
+          ExecFail @ span,
+          "expected an autocmd kind",
+      ));
+    };
 
-  let Ok(autocmd_kind) = autocmd_kind.0.parse::<AutoCmdKind>() else {
-    return Err(sherr!(
-      ExecFail @ autocmd_kind.1.clone(),
-      "invalid autocmd kind: {}", autocmd_kind.0,
-    ));
-  };
+    let Ok(autocmd_kind) = autocmd_kind.0.parse::<AutoCmdKind>() else {
+      return Err(sherr!(
+          ExecFail @ autocmd_kind.1.clone(),
+          "invalid autocmd kind: {}", autocmd_kind.0,
+      ));
+    };
 
-  if autocmd_opts.clear {
-    write_logic(|l| l.clear_autocmds(autocmd_kind));
-    state::set_status(0);
-    return Ok(());
+    if clear {
+      write_logic(|l| l.clear_autocmds(autocmd_kind));
+      return with_status(0);
+    }
+
+    let Some(autocmd_cmd) = argv.next() else {
+      return Err(sherr!(
+          ExecFail @ span,
+          "expected an autocmd command",
+      ));
+    };
+
+    let autocmd = AutoCmd {
+      kind: autocmd_kind,
+      command: autocmd_cmd.0.clone(),
+    };
+
+    write_logic(|l| l.insert_autocmd(autocmd));
+
+    with_status(0)
   }
-
-  let Some(autocmd_cmd) = args.next() else {
-    return Err(sherr!(
-      ExecFail @ span,
-      "expected an autocmd command",
-    ));
-  };
-
-  let autocmd = AutoCmd {
-    kind: autocmd_kind,
-    command: autocmd_cmd.0.clone(),
-  };
-
-  write_logic(|l| l.insert_autocmd(autocmd));
-
-  state::set_status(0);
-  Ok(())
 }
 
 #[cfg(test)]
@@ -182,22 +171,22 @@ mod tests {
   #[test]
   fn missing_kind() {
     let _guard = TestGuard::new();
-    let result = test_input("autocmd");
-    assert!(result.is_err());
+    test_input("autocmd").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn invalid_kind() {
     let _guard = TestGuard::new();
-    let result = test_input("autocmd not-a-real-kind 'echo hi'");
-    assert!(result.is_err());
+    test_input("autocmd not-a-real-kind 'echo hi'").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn missing_command() {
     let _guard = TestGuard::new();
-    let result = test_input("autocmd pre-cmd");
-    assert!(result.is_err());
+    test_input("autocmd pre-cmd").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== All valid kind strings =====================

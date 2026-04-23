@@ -2,120 +2,15 @@ use bitflags::bitflags;
 use nix::{libc::STDOUT_FILENO, unistd::write};
 
 use crate::{
-  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens, get_opts_from_tokens_raw},
-  util::error::ShResult,
+  getopt::{Opt, OptSpec},
+  outln,
   parse::{NdRule, Node},
   procio::borrow_fd,
   readline::complete::{BashCompSpec, CompContext, CompSpec},
   sherr,
-  state::{self, read_meta, write_meta},
+  state::{read_meta, write_meta},
+  util::{error::ShResult, with_status, write_out},
 };
-
-pub const COMPGEN_OPTS: [OptSpec; 11] = [
-  OptSpec {
-    opt: Opt::Short('F'),
-    takes_arg: OptArg::Single,
-  },
-  OptSpec {
-    opt: Opt::Short('W'),
-    takes_arg: OptArg::Single,
-  },
-  OptSpec {
-    opt: Opt::Short('j'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('f'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('d'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('c'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('u'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('v'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('a'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('S'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('o'),
-    takes_arg: OptArg::Single,
-  },
-];
-
-pub const COMP_OPTS: [OptSpec; 14] = [
-  OptSpec {
-    opt: Opt::Short('F'),
-    takes_arg: OptArg::Single,
-  },
-  OptSpec {
-    opt: Opt::Short('W'),
-    takes_arg: OptArg::Single,
-  },
-  OptSpec {
-    opt: Opt::Short('A'),
-    takes_arg: OptArg::Single,
-  },
-  OptSpec {
-    opt: Opt::Short('j'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('p'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('r'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('f'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('d'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('c'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('u'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('v'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('a'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('S'),
-    takes_arg: OptArg::None,
-  },
-  OptSpec {
-    opt: Opt::Short('o'),
-    takes_arg: OptArg::Single,
-  },
-];
 
 bitflags! {
   #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -148,124 +43,162 @@ pub struct CompOpts {
   pub opt_flags: CompOptFlags,
 }
 
-pub fn complete_builtin(node: Node) -> ShResult<()> {
-  let blame = node.get_span().clone();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-  assert!(!argv.is_empty());
-  let src = argv
-    .clone()
-    .into_iter()
-    .map(|tk| tk.expand().map(|tk| tk.get_words().join(" ")))
-    .collect::<ShResult<Vec<String>>>()?
-    .join(" ");
-
-  let (mut argv, opts) = get_opts_from_tokens(argv, &COMP_OPTS)?;
-  let comp_opts = get_comp_opts(opts)?;
-  if !argv.is_empty() {
-    argv.remove(0);
+pub(super) struct Complete;
+impl super::Builtin for Complete {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::flag('j'),
+      OptSpec::flag('p'),
+      OptSpec::flag('r'),
+      OptSpec::flag('f'),
+      OptSpec::flag('d'),
+      OptSpec::flag('c'),
+      OptSpec::flag('u'),
+      OptSpec::flag('v'),
+      OptSpec::flag('a'),
+      OptSpec::flag('S'),
+      OptSpec::single_arg('o'),
+      OptSpec::single_arg('F'),
+      OptSpec::single_arg('W'),
+      OptSpec::single_arg('A'),
+    ]
   }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let blame = args.span();
+    let src = build_source(&args.opts, &args.argv);
+    let comp_opts = get_comp_opts(args.opts)?;
 
-  if comp_opts.flags.contains(CompFlags::PRINT) {
-    if argv.is_empty() {
-      read_meta(|m| -> ShResult<()> {
-        let specs = m.comp_specs().values();
-        for spec in specs {
-          let stdout = borrow_fd(STDOUT_FILENO);
-          write(stdout, spec.source().as_bytes())?;
-        }
-        Ok(())
-      })?;
-    } else {
-      read_meta(|m| -> ShResult<()> {
-        for (cmd, _) in &argv {
-          if let Some(spec) = m.comp_specs().get(cmd) {
-            let stdout = borrow_fd(STDOUT_FILENO);
-            write(stdout, spec.source().as_bytes())?;
+    if comp_opts.flags.contains(CompFlags::PRINT) {
+      if args.argv.is_empty() {
+        read_meta(|m| -> ShResult<()> {
+          let specs = m.comp_specs().values();
+          for spec in specs {
+            write_out(spec.source())?;
           }
-        }
-        Ok(())
-      })?;
+          Ok(())
+        })?;
+      } else {
+        read_meta(|m| -> ShResult<()> {
+          for (cmd, _) in &args.argv {
+            if let Some(spec) = m.comp_specs().get(cmd) {
+              let stdout = borrow_fd(STDOUT_FILENO);
+              write(stdout, spec.source().as_bytes())?;
+            }
+          }
+          Ok(())
+        })?;
+      }
+
+      return with_status(0);
     }
 
-    state::set_status(0);
-    return Ok(());
+    if comp_opts.flags.contains(CompFlags::REMOVE) {
+      write_meta(|m| {
+        for (cmd, _) in &args.argv {
+          m.remove_comp_spec(cmd);
+        }
+      });
+
+      return with_status(0);
+    }
+
+    if args.argv.is_empty() {
+      return Err(sherr!(
+        ExecFail @ blame,
+        "complete: no command specified",
+      ));
+    }
+
+    let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
+
+    for (cmd, _) in args.argv {
+      write_meta(|m| m.set_comp_spec(cmd, Box::new(comp_spec.clone())));
+    }
+
+    with_status(0)
   }
-
-  if comp_opts.flags.contains(CompFlags::REMOVE) {
-    write_meta(|m| {
-      for (cmd, _) in &argv {
-        m.remove_comp_spec(cmd);
-      }
-    });
-
-    state::set_status(0);
-    return Ok(());
-  }
-
-  if argv.is_empty() {
-    state::set_status(1);
-    return Err(sherr!(
-      ExecFail @ blame,
-      "complete: no command specified",
-    ));
-  }
-
-  let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
-
-  for (cmd, _) in argv {
-    write_meta(|m| m.set_comp_spec(cmd, Box::new(comp_spec.clone())));
-  }
-
-  state::set_status(0);
-  Ok(())
 }
 
-pub fn compgen_builtin(node: Node) -> ShResult<()> {
-  let _blame = node.get_span().clone();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-  assert!(!argv.is_empty());
-  let src = argv
-    .clone()
-    .into_iter()
-    .map(|tk| tk.expand().map(|tk| tk.get_words().join(" ")))
-    .collect::<ShResult<Vec<String>>>()?
-    .join(" ");
-
-  let (argv, opts) = get_opts_from_tokens_raw(argv, &COMPGEN_OPTS)?;
-  let prefix = argv.clone().into_iter().nth(1).unwrap_or_default();
-  let comp_opts = get_comp_opts(opts)?;
-
-  let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
-
-  let dummy_ctx = CompContext {
-    words: vec![prefix.clone()],
-    cword: 0,
-    line: prefix.to_string(),
-    cursor_pos: prefix.as_str().len(),
-  };
-
-  let results = comp_spec.complete(&dummy_ctx)?;
-
-  let stdout = borrow_fd(STDOUT_FILENO);
-  for result in &results {
-    write(stdout, result.as_bytes())?;
-    write(stdout, b"\n")?;
+pub(super) struct CompGen;
+impl super::Builtin for CompGen {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::flag('j'),
+      OptSpec::flag('f'),
+      OptSpec::flag('d'),
+      OptSpec::flag('c'),
+      OptSpec::flag('u'),
+      OptSpec::flag('v'),
+      OptSpec::flag('a'),
+      OptSpec::flag('S'),
+      OptSpec::single_arg('o'),
+      OptSpec::single_arg('F'),
+      OptSpec::single_arg('W'),
+    ]
   }
+  fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
+    unreachable!("CompGen uses run_builtin directly")
+  }
+  fn run_builtin(&self, node: Node) -> ShResult<()> {
+    use crate::getopt::get_opts_from_tokens_raw;
 
-  state::set_status(0);
-  Ok(())
+    let NdRule::Command {
+      assignments: _,
+      argv,
+    } = node.class
+    else {
+      unreachable!()
+    };
+    let src = argv
+      .iter()
+      .map(|tk| tk.clone().expand().map(|tk| tk.get_words().join(" ")))
+      .collect::<ShResult<Vec<String>>>()?
+      .join(" ");
+
+    let (argv, opts) = get_opts_from_tokens_raw(argv, &self.opts())?;
+
+    let prefix = argv.into_iter().nth(1).unwrap_or_default();
+    let comp_opts = get_comp_opts(opts)?;
+    let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
+
+    let dummy_ctx = CompContext {
+      words: vec![prefix.clone()],
+      cword: 0,
+      line: prefix.to_string(),
+      cursor_pos: prefix.as_str().len(),
+    };
+
+    let results = comp_spec.complete(&dummy_ctx)?;
+
+    for result in &results {
+      outln!("{result}")?;
+    }
+
+    with_status(0)
+  }
+}
+
+fn build_source(opts: &[Opt], argv: &[(String, crate::parse::lex::Span)]) -> String {
+  let mut parts: Vec<String> = vec!["complete".into()];
+  for opt in opts {
+    match opt {
+      Opt::Short(c) => parts.push(format!("-{c}")),
+      Opt::Long(s) => parts.push(format!("--{s}")),
+      Opt::ShortWithArg(c, a) => {
+        parts.push(format!("-{c}"));
+        parts.push(a.clone());
+      }
+      Opt::LongWithArg(s, a) => {
+        parts.push(format!("--{s}"));
+        parts.push(a.clone());
+      }
+      _ => {}
+    }
+  }
+  for (s, _) in argv {
+    parts.push(s.clone());
+  }
+  parts.join(" ")
 }
 
 pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
@@ -286,6 +219,7 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
         "default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
         "dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
         "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
+        "nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
         _ => {
           let span: crate::parse::lex::Span = Default::default();
           return Err(sherr!(
@@ -390,8 +324,8 @@ mod tests {
   #[test]
   fn complete_no_command_fails() {
     let _g = TestGuard::new();
-    let result = test_input("complete -W 'foo'");
-    assert!(result.is_err());
+    test_input("complete -W 'foo'").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== complete -r: Removal =====================
@@ -471,8 +405,8 @@ mod tests {
   #[test]
   fn complete_option_invalid() {
     let _g = TestGuard::new();
-    let result = test_input("complete -o bogus -W 'foo' mycmd");
-    assert!(result.is_err());
+    test_input("complete -o bogus -W 'foo' mycmd").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== compgen -W: Word list =====================

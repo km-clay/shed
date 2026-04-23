@@ -3,7 +3,7 @@
 #COMMON COMMANDS#
 
 Quick reference for frequently used commands. Each entry shows the
-most common usage patterns — not exhaustive, but enough to handle
+most common usage patterns - not exhaustive, but enough to handle
 common cases without reaching for a man page.
 
 Categories:
@@ -34,7 +34,7 @@ Categories:
       Extract an archive:
 
           `tar -xf archive.tar`               auto-detects compression
-          `tar -xf archive.tar.gz`            same — -z/-j/-J are optional
+          `tar -xf archive.tar.gz`            same - -z/-j/-J are optional
           `tar -xf archive.tar -C /tmp/`     extract to a specific directory
 
       List contents:
@@ -164,7 +164,7 @@ Categories:
           `zstd -d file.txt.zst`
           `unzstd file.txt.zst`
 
-      Keep original (default — use --rm to remove):
+      Keep original (default - use --rm to remove):
 
           `zstd --rm file.txt`                compress and remove original
 
@@ -187,12 +187,12 @@ Categories:
 
           `ssh user@host 'ls -la /tmp'`
 
-      Port forwarding (local → remote):
+      Port forwarding (local -> remote):
 
           `ssh -L 8080:localhost:80 user@host`
           # access remote port 80 at localhost:8080
 
-      Port forwarding (remote → local):
+      Port forwarding (remote -> local):
 
           `ssh -R 9090:localhost:3000 user@host`
           # remote port 9090 forwards to your local 3000
@@ -1433,7 +1433,7 @@ Categories:
           `-ss`       start time        `-t`        duration
           `-to`       end time          `-r`        framerate
           `-crf`      quality (0-51, lower = better, 23 default)
-          `-preset`   encoding speed (ultrafast → veryslow)
+          `-preset`   encoding speed (ultrafast -> veryslow)
 
   9.2 imagemagick (convert/magick)               *imagemagick* *convert* *magick*
 

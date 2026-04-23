@@ -3,7 +3,6 @@ use std::{fmt::Write, io::Write as IoWrite, sync::atomic::AtomicBool};
 use tempfile::NamedTempFile;
 
 use crate::{
-  util::error::{ShResult, ShResultExt},
   match_loop,
   parse::{
     NdRule, Node,
@@ -19,6 +18,7 @@ use crate::{
   sherr,
   shopt::xtrace_print,
   state::{self},
+  util::error::{ShResult, ShResultExt},
 };
 
 /// POSIX specifies that an invocation of `fc` that edits and re-executes a command shall not itself be committed to command history
@@ -148,32 +148,38 @@ pub fn parse_fc_args(args: Vec<Tk>) -> ShResult<(Vec<(String, Span)>, FixCmdOpts
   Ok((non_opts, opts))
 }
 
-pub fn fixcmd(node: Node) -> ShResult<()> {
-  let span = node.get_span();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let (_argv, opts) = parse_fc_args(argv).promote_err(span.clone())?;
-
-  let conn = state::get_db_conn()
-    .ok_or_else(|| sherr!(InternalErr, "database not available"))
-    .promote_err(span.clone())?;
-  let hist = History::new(conn, "shed_history").promote_err(span.clone())?;
-  if opts.list {
-    fc_list(hist, opts).promote_err(span)?;
-  } else if opts.no_editor {
-    fc_reexec(hist, opts).promote_err(span)?;
-  } else {
-    fc_edit(hist, opts).promote_err(span)?;
+pub(super) struct FixCmd;
+impl super::Builtin for FixCmd {
+  fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
+    unreachable!("fixcmd is a special snowflake command that needs really special handling");
   }
+  fn run_builtin(&self, node: Node) -> ShResult<()> {
+    let span = node.get_span();
+    let NdRule::Command {
+      assignments: _,
+      argv,
+    } = node.class
+    else {
+      unreachable!()
+    };
 
-  state::set_status(0);
-  Ok(())
+    let (_argv, opts) = parse_fc_args(argv).promote_err(span.clone())?;
+
+    let conn = state::get_db_conn()
+      .ok_or_else(|| sherr!(InternalErr, "database not available"))
+      .promote_err(span.clone())?;
+    let hist = History::new(conn, "shed_history").promote_err(span.clone())?;
+    if opts.list {
+      fc_list(hist, opts).promote_err(span)?;
+    } else if opts.no_editor {
+      fc_reexec(hist, opts).promote_err(span)?;
+    } else {
+      fc_edit(hist, opts).promote_err(span)?;
+    }
+
+    state::set_status(0);
+    Ok(())
+  }
 }
 
 fn fc_edit(hist: History, opts: FixCmdOpts) -> ShResult<()> {
@@ -211,11 +217,7 @@ fn fc_edit(hist: History, opts: FixCmdOpts) -> ShResult<()> {
 
     should_push = new_cmd != old_cmd;
 
-    exec_input(
-      new_cmd.clone(),
-      None,
-      Some("fc re-exec".into()),
-    )?;
+    exec_input(new_cmd.clone(), None, Some("fc re-exec".into()))?;
 
     if should_push {
       hist.push(new_cmd)?;
@@ -242,11 +244,7 @@ fn fc_reexec(hist: History, opts: FixCmdOpts) -> ShResult<()> {
       }
     }
 
-    exec_input(
-      command.clone(),
-      None,
-      Some("fc re-exec".into()),
-    )?;
+    exec_input(command.clone(), None, Some("fc re-exec".into()))?;
     if should_push {
       hist.push(command)?;
     }

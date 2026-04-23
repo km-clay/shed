@@ -1,102 +1,61 @@
 use ariadne::Fmt;
 
 use crate::{
-  expand::as_var_val_display,
-  util::error::{ShResult, next_color},
-  parse::{NdRule, Node, execute::prepare_argv},
-  prelude::*,
-  procio::borrow_fd,
-  sherr,
-  state::{self, read_logic, write_logic},
+  builtin::varcmds::{display_as_var, display_as_vars, split_assignment_raw},
+  outln, sherr,
+  state::{read_logic, write_logic},
+  util::{
+    error::{ShResult, next_color},
+    with_status,
+  },
 };
 
-pub fn alias(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Alias;
+impl super::Builtin for Alias {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      let output = read_logic(|l| display_as_vars(l.aliases().iter()));
+      outln!("{output}")?;
 
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
-  }
+      return with_status(0);
+    }
 
-  if argv.is_empty() {
-    let mut alias_output = read_logic(|l| {
-      l.aliases()
-        .iter()
-        .map(|ent| format!("{}={}", ent.0, as_var_val_display(&ent.1.to_string())))
-        .collect::<Vec<_>>()
-    });
-    alias_output.sort(); // Sort them alphabetically
-    let mut alias_output = alias_output.join("\n"); // Join them with newlines
-    alias_output.push('\n'); // Push a final newline
-
-    let stdout = borrow_fd(STDOUT_FILENO);
-    write(stdout, alias_output.as_bytes())?; // Write it
-  } else {
-    for (arg, span) in argv {
-      let Some((name, body)) = arg.split_once('=') else {
-        let Some(alias) = read_logic(|l| l.get_alias(&arg)) else {
-          return Err(sherr!(
-            SyntaxErr @ span,
-            "alias: Expected an assignment in alias args",
-          ));
-        };
-
-        let alias_output = format!("{arg}='{alias}'\n");
-
-        let stdout = borrow_fd(STDOUT_FILENO);
-        write(stdout, alias_output.as_bytes())?;
-        continue;
-      };
+    for (arg, span) in args.argv {
+      let (name, value) = split_assignment_raw(arg);
       if name == "command" || name == "builtin" {
         return Err(sherr!(
           ExecFail @ span,
-          "alias: Cannot assign alias to reserved name '{}'", name.fg(next_color())
+          "Cannot assign alias to reserved name '{}'", name.fg(next_color())
         ));
       }
-      write_logic(|l| l.insert_alias(name, body, span.clone()));
-    }
-  }
 
-  state::set_status(0);
-  Ok(())
+      if let Some(value) = value {
+        write_logic(|l| l.insert_alias(&name, &value, span.clone()));
+      } else if let Some(alias) = read_logic(|l| l.get_alias(&name)) {
+        outln!("{}", display_as_var(name, alias.body))?;
+      } else {
+        return Err(sherr!(
+          SyntaxErr @ span,
+          "Unknown alias '{name}'",
+        ));
+      }
+    }
+
+    with_status(0)
+  }
 }
 
-/// Remove one or more aliases by name
-pub fn unalias(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Unalias;
+impl super::Builtin for Unalias {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      let output = read_logic(|l| display_as_vars(l.aliases().iter()));
+      outln!("{output}")?;
 
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
-  }
+      return with_status(0);
+    }
 
-  if argv.is_empty() {
-    let mut alias_output = read_logic(|l| {
-      l.aliases()
-        .iter()
-        .map(|ent| format!("{}={}", ent.0, as_var_val_display(&ent.1.to_string())))
-        .collect::<Vec<_>>()
-    });
-    alias_output.sort(); // Sort them alphabetically
-    let mut alias_output = alias_output.join("\n"); // Join them with newlines
-    alias_output.push('\n'); // Push a final newline
-
-    let stdout = borrow_fd(STDOUT_FILENO);
-    write(stdout, alias_output.as_bytes())?; // Write it
-  } else {
-    for (arg, span) in argv {
+    for (arg, span) in args.argv {
       if read_logic(|l| l.get_alias(&arg)).is_none() {
         return Err(sherr!(
           SyntaxErr @ span,
@@ -105,9 +64,9 @@ pub fn unalias(node: Node) -> ShResult<()> {
       };
       write_logic(|l| l.remove_alias(&arg));
     }
+
+    with_status(0)
   }
-  state::set_status(0);
-  Ok(())
 }
 
 #[cfg(test)]
@@ -170,22 +129,22 @@ mod tests {
   #[test]
   fn alias_reserved_name_command() {
     let _guard = TestGuard::new();
-    let result = test_input("alias command='something'");
-    assert!(result.is_err());
+    test_input("alias command='something'").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn alias_reserved_name_builtin() {
     let _guard = TestGuard::new();
-    let result = test_input("alias builtin='something'");
-    assert!(result.is_err());
+    test_input("alias builtin='something'").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn alias_missing_equals() {
     let _guard = TestGuard::new();
-    let result = test_input("alias noequals");
-    assert!(result.is_err());
+    test_input("alias noequals").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
@@ -223,8 +182,8 @@ mod tests {
   #[test]
   fn unalias_nonexistent() {
     let _guard = TestGuard::new();
-    let result = test_input("unalias nosuchalias");
-    assert!(result.is_err());
+    test_input("unalias nosuchalias").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]

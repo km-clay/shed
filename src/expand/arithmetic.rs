@@ -4,8 +4,8 @@ use ariadne::Fmt;
 
 use crate::expand::escape::unescape_math;
 use crate::expand::var::expand_raw;
-use crate::util::error::{ShErr, ShResult, next_color};
 use crate::state::{VarFlags, VarKind, read_vars, write_vars};
+use crate::util::error::{ShErr, ShResult, next_color};
 use crate::{match_loop, sherr};
 
 #[derive(Debug)]
@@ -77,7 +77,7 @@ enum ArithTk {
   Var(String),
 }
 
-// Stack value used during eval_rpn — keeps Var names alive for assignment targets
+// Stack value used during eval_rpn - keeps Var names alive for assignment targets
 enum StackVal {
   Num(f64),
   Var(String),
@@ -155,7 +155,7 @@ impl ArithTk {
           last_was_operand = false;
         } else {
           tokens.push(Self::Neg);
-          // last_was_operand stays false — Neg is unary prefix
+          // last_was_operand stays false - Neg is unary prefix
         }
       }
 
@@ -387,12 +387,12 @@ impl ArithTk {
           write_vars(|v| v.set_var(var, VarKind::Str((val + delta).to_string()), VarFlags::NONE)).unwrap();
           output.push(ArithTk::Num(val)); // push old value (postfix)
         } else {
-          output.push(token); // keep as Var — may be assignment target
+          output.push(token); // keep as Var - may be assignment target
         }
       }
 
       op @ (ArithTk::Inc | ArithTk::Dec) => {
-        // Prefix inc/dec — must be followed by a Var
+        // Prefix inc/dec - must be followed by a Var
         let Some(ArithTk::Var(_)) = tokens.peek() else {
           return Err(sherr!(
             ParseErr,
@@ -409,12 +409,12 @@ impl ArithTk {
       }
 
       ArithTk::Not | ArithTk::Neg => {
-        // Unary right-associative — push to ops stack
+        // Unary right-associative - push to ops stack
         ops.push(token);
       }
 
       ArithTk::Comma => {
-        // Lowest-precedence binary op — push to ops stack so both operands
+        // Lowest-precedence binary op - push to ops stack so both operands
         // are fully evaluated before Comma is applied
         while let Some(top) = ops.last() {
           if matches!(top, ArithTk::LParen) { break; }
@@ -503,7 +503,7 @@ impl ArithTk {
 
         ArithTk::Op(op) => {
           match op {
-            // Assignment ops — LHS must be a Var
+            // Assignment ops - LHS must be a Var
             ArithOp::Assign => {
               let rhs = pop_num!();
               let lhs = pop_var!();
@@ -673,13 +673,19 @@ pub fn expand_arithmetic(expr: &str) -> ShResult<String> {
 /// that receive the raw token including its delimiters.
 pub fn expand_arithmetic_wrapped(raw: &str) -> ShResult<String> {
   let mut expr = raw;
-  if expr.starts_with("((")
-  && expr.ends_with("))") {
-    expr = &expr[2..expr.len() - 2];
-  } else if expr.starts_with('(')
-  && expr.ends_with(')') {
-    expr = &expr[1..expr.len() - 1];
+
+  if expr.starts_with("((") {
+    expr = &expr[2..];
+  } else if expr.starts_with('(') {
+    expr = &expr[1..];
   }
+
+  if expr.ends_with("))") {
+    expr = &expr[..expr.len() - 2];
+  } else if expr.ends_with(')') {
+    expr = &expr[..expr.len() - 1];
+  }
+
   expand_arithmetic(expr)
 }
 
@@ -690,7 +696,7 @@ mod tests {
   use crate::testutil::TestGuard;
 
   fn arith(s: &str) -> f64 {
-    // Tests pass raw expressions — no outer ((...)) wrapper stripping
+    // Tests pass raw expressions - no outer ((...)) wrapper stripping
     expand_arithmetic(s).unwrap().parse::<f64>().unwrap()
   }
 

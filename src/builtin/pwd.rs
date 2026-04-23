@@ -1,28 +1,17 @@
 use crate::{
-  util::error::ShResult,
-  parse::{NdRule, Node},
   prelude::*,
-  procio::borrow_fd,
-  state,
+  util::{error::ShResult, with_status, write_ln_out},
 };
 
-pub fn pwd(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv: _,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Pwd;
+impl super::Builtin for Pwd {
+  fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
+    let curr_dir = env::current_dir().unwrap().display().to_string();
 
-  let stdout = borrow_fd(STDOUT_FILENO);
+    write_ln_out(curr_dir)?;
 
-  let mut curr_dir = env::current_dir().unwrap().to_str().unwrap().to_string();
-  curr_dir.push('\n');
-  write(stdout, curr_dir.as_bytes())?;
-
-  state::set_status(0);
-  Ok(())
+    with_status(0)
+  }
 }
 
 #[cfg(test)]

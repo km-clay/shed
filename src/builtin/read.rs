@@ -1,346 +1,264 @@
+use std::{collections::VecDeque, time::Duration};
+
 use bitflags::bitflags;
 use nix::{
   errno::Errno,
-  libc::{STDIN_FILENO, STDOUT_FILENO},
-  unistd::{isatty, read, write},
+  libc::STDIN_FILENO,
+  poll::{PollFd, PollFlags, PollTimeout, poll},
+  unistd::read,
 };
 
-use crate::{util::error::ShErrKind, sherr, state::with_term};
 use crate::{
   expand::expand_keymap,
-  getopt::{Opt, OptArg, OptSpec, get_opts_from_tokens},
-  util::{
-    error::{ShResult, ShResultExt},
-  },
-  parse::{NdRule, Node},
+  getopt::{Opt, OptSpec},
+  parse::lex::Span,
   procio::borrow_fd,
-  state::{self, VarFlags, VarKind, read_vars, write_vars},
+  sherr, signal,
+  state::{self, VarFlags, VarKind, with_term, write_vars},
+  util::{
+    error::{ShErrKind, ShResult, ShResultExt},
+    with_status, write_out,
+  },
 };
-
-pub const READ_OPTS: [OptSpec; 7] = [
-  OptSpec {
-    opt: Opt::Short('r'),
-    takes_arg: OptArg::None,
-  }, // don't allow backslash escapes
-  OptSpec {
-    opt: Opt::Short('s'),
-    takes_arg: OptArg::None,
-  }, // don't echo input
-  OptSpec {
-    opt: Opt::Short('a'),
-    takes_arg: OptArg::None,
-  }, // read into array
-  OptSpec {
-    opt: Opt::Short('n'),
-    takes_arg: OptArg::None,
-  }, // read only N characters
-  OptSpec {
-    opt: Opt::Short('t'),
-    takes_arg: OptArg::None,
-  }, // timeout
-  OptSpec {
-    opt: Opt::Short('p'),
-    takes_arg: OptArg::Single,
-  }, // prompt
-  OptSpec {
-    opt: Opt::Short('d'),
-    takes_arg: OptArg::Single,
-  }, // read until delimiter
-];
-
-pub const READ_KEY_OPTS: [OptSpec; 3] = [
-  OptSpec {
-    opt: Opt::Short('v'), // var name
-    takes_arg: OptArg::Single,
-  },
-  OptSpec {
-    opt: Opt::Short('w'), // char whitelist
-    takes_arg: OptArg::Single,
-  },
-  OptSpec {
-    opt: Opt::Short('b'), // char blacklist
-    takes_arg: OptArg::Single,
-  },
-];
 
 bitflags! {
   pub struct ReadFlags: u32 {
     const NO_ESCAPES = 	0b000001;
     const NO_ECHO = 		0b000010; // TODO: unused
-    const ARRAY = 			0b000100; // TODO: unused
-    const N_CHARS = 		0b001000; // TODO: unused
-    const TIMEOUT = 		0b010000; // TODO: unused
+    const ARRAY = 			0b000100;
+    const N_CHARS = 		0b001000;
+    const TIMEOUT = 		0b010000;
   }
 }
-
-pub struct ReadOpts {
-  prompt: Option<String>,
-  delim: u8, // byte representation of the delimiter character
-  flags: ReadFlags,
-}
-
-pub fn read_builtin(node: Node) -> ShResult<()> {
-  let blame = node.get_span().clone();
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
-
-  let (mut argv, opts) = get_opts_from_tokens(argv, &READ_OPTS)?;
-  let read_opts = get_read_flags(opts).blame(blame.clone())?;
-  if !argv.is_empty() {
-    argv.remove(0);
+pub(super) struct Read;
+impl super::Builtin for Read {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::flag('r'),
+      OptSpec::flag('s'),
+      OptSpec::single_arg('a'),
+      OptSpec::single_arg('n'),
+      OptSpec::single_arg('t'),
+      OptSpec::single_arg('p'),
+      OptSpec::single_arg('d'),
+    ]
   }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let mut flags = ReadFlags::empty();
+    let mut prompt = None;
+    let mut timeout = None;
+    let mut max_bytes = None;
+    let mut array_name = None;
+    let mut delim = b'\n';
 
-  if let Some(prompt) = read_opts.prompt {
-    write(borrow_fd(STDOUT_FILENO), prompt.as_bytes())?;
-  }
-
-  let input = if isatty(STDIN_FILENO)? {
-    // Restore default terminal settings
-    let _guard = with_term(|t| t.cooked_mode_guard());
-
-    // using a named block here     vvvv
-    let result: ShResult<String> = 'read: {
-      let mut input: Vec<u8> = vec![];
-      let mut escaped = false;
-      loop {
-        let mut buf = [0u8; 1];
-        match read(STDIN_FILENO, &mut buf) {
-          Ok(0) => {
-            state::set_status(1);
-            let str_result = String::from_utf8(input.clone())
-              .map_err(|e| sherr!(ExecFail, "read: Input was not valid UTF-8: {e}"))?;
-            break 'read Ok(str_result); // EOF
-          }
-          Ok(_) => {
-            if buf[0] == read_opts.delim {
-              if read_opts.flags.contains(ReadFlags::NO_ESCAPES) && escaped {
-                input.push(buf[0]);
-              } else {
-                // Delimiter reached, stop reading
-                break;
-              }
-            } else if read_opts.flags.contains(ReadFlags::NO_ESCAPES) && buf[0] == b'\\' {
-              escaped = true;
-            } else {
-              input.push(buf[0]);
-            }
-          }
-          Err(Errno::EINTR) => {
-            if crate::signal::sigint_pending() {
-              state::set_status(130);
-              break 'read Ok(String::new());
-            }
-            continue;
-          }
-          Err(e) => {
-            break 'read Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}"));
-          }
+    for opt in &args.opts {
+      match opt {
+        Opt::Short('r') => flags |= ReadFlags::NO_ESCAPES,
+        Opt::Short('s') => flags |= ReadFlags::NO_ECHO,
+        Opt::ShortWithArg('a', a) => array_name = Some(a.clone()),
+        Opt::ShortWithArg('p', p) => prompt = Some(p),
+        Opt::ShortWithArg('d', d) => delim = d.chars().map(|c| c as u8).next().unwrap_or(b'\n'),
+        Opt::ShortWithArg('n', n) => {
+          let bytes = n
+            .parse::<usize>()
+            .map_err(|_| sherr!(ExecFail, "read: Invalid byte count '{n}'"))?;
+          max_bytes = Some(bytes);
         }
+        Opt::ShortWithArg('t', t) => {
+          let seconds = t
+            .parse::<f64>()
+            .map_err(|_| sherr!(ExecFail, "read: Invalid timeout value '{t}'"))?;
+          timeout = Some(Duration::from_secs_f64(seconds).as_millis() as i32);
+        }
+        _ => return Err(sherr!(ExecFail, "read: Unexpected flag '{opt}'")).promote_err(args.span),
       }
+    }
 
-      state::set_status(0);
-      let str_result = String::from_utf8(input.clone())
-        .map_err(|e| sherr!(ExecFail, "read: Input was not valid UTF-8: {e}"))?;
-      Ok(str_result)
+    if let Some(p) = prompt {
+      write_out(p)?;
+    }
+
+    let _guard = if flags.contains(ReadFlags::NO_ECHO) {
+      with_term(|t| t.cooked_no_echo_guard())?
+    } else {
+      with_term(|t| t.cooked_mode_guard())?
     };
+    let input = read_bytes(
+      delim,
+      !flags.contains(ReadFlags::NO_ESCAPES),
+      timeout,
+      max_bytes,
+    )
+    .promote_err(args.span())?;
 
-    result.blame(blame)?
-  } else {
-    let mut input: Vec<u8> = vec![];
-    loop {
-      let mut buf = [0u8; 1];
-      match read(STDIN_FILENO, &mut buf) {
-        Ok(0) => {
-          state::set_status(1);
-          break; // EOF
-        }
-        Ok(_) => {
-          if buf[0] == read_opts.delim {
-            state::set_status(0);
-            break; // Delimiter reached, stop reading
-          }
-          input.push(buf[0]);
-        }
-        Err(Errno::EINTR) => {
-          let pending = crate::signal::sigint_pending();
-          if pending {
-            state::set_status(130);
+    if let Some(arr) = array_name {
+      field_split_arr(&input, &arr).promote_err(args.span())
+    } else {
+      field_split_vars(&input, &args.argv).promote_err(args.span())
+    }
+  }
+}
+
+fn read_bytes(
+  delim: u8,
+  escape_aware: bool,
+  timeout: Option<i32>,
+  max_bytes: Option<usize>,
+) -> ShResult<String> {
+  let mut buf = vec![];
+  let mut escaped = false;
+  let poll_fd = PollFd::new(borrow_fd(STDIN_FILENO), PollFlags::POLLIN);
+  let timeout = timeout
+    .map(PollTimeout::try_from)
+    .and_then(Result::ok)
+    .unwrap_or(PollTimeout::NONE);
+
+  loop {
+    if poll(&mut [poll_fd], timeout)? == 0 {
+      state::set_status(1);
+      return String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}")); // timeout
+    }
+
+    let mut in_buf = [0u8; 1];
+    match read(STDIN_FILENO, &mut in_buf) {
+      Ok(0) => {
+        state::set_status(1);
+        let ret =
+          String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}"))?;
+        return Ok(ret); // EOF
+      }
+      Ok(_) => {
+        if in_buf[0] == delim && !(escape_aware && escaped) {
+          break;
+        } else if escape_aware && in_buf[0] == b'\\' {
+          escaped = true;
+        } else {
+          escaped = false;
+          buf.push(in_buf[0]);
+
+          if let Some(max) = max_bytes
+            && buf.len() >= max
+          {
             break;
           }
-          continue;
-        }
-        Err(e) => {
-          return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}"));
         }
       }
-    }
-    String::from_utf8(input)
-      .map_err(|e| sherr!(ExecFail, "read: Input was not valid UTF-8: {e}"))?
-  };
-
-  if argv.is_empty() {
-    write_vars(|v| v.set_var("REPLY", VarKind::Str(input.clone()), VarFlags::NONE))?;
-  } else {
-    // get our field separator
-    let mut field_sep = read_vars(|v| v.get_var("IFS"));
-    if field_sep.is_empty() {
-      field_sep = " ".to_string()
-    }
-    let mut remaining = input;
-
-    for (i, arg) in argv.iter().enumerate() {
-      if i == argv.len() - 1 {
-        // Last arg, stuff the rest of the input into it
-        let trimmed = remaining.trim_start_matches(|c: char| field_sep.contains(c));
-        write_vars(|v| v.set_var(&arg.0, VarKind::Str(trimmed.to_string()), VarFlags::NONE))?;
-        break;
-      }
-
-      // trim leading IFS characters
-      let trimmed = remaining.trim_start_matches(|c: char| field_sep.contains(c));
-
-      if let Some(idx) = trimmed.find(|c: char| field_sep.contains(c)) {
-        // We found a field separator, split at the char index
-        let (field, rest) = trimmed.split_at(idx);
-        write_vars(|v| v.set_var(&arg.0, VarKind::Str(field.to_string()), VarFlags::NONE))?;
-
-        // note that this doesn't account for consecutive IFS characters, which is what
-        // that trim above is for
-        remaining = rest.to_string();
-      } else {
-        write_vars(|v| v.set_var(&arg.0, VarKind::Str(trimmed.to_string()), VarFlags::NONE))?;
-        remaining.clear();
-      }
-    }
-  }
-
-  Ok(())
-}
-
-pub fn get_read_flags(opts: Vec<Opt>) -> ShResult<ReadOpts> {
-  let mut read_opts = ReadOpts {
-    prompt: None,
-    delim: b'\n',
-    flags: ReadFlags::empty(),
-  };
-
-  for opt in opts {
-    match opt {
-      Opt::Short('r') => read_opts.flags |= ReadFlags::NO_ESCAPES,
-      Opt::Short('s') => read_opts.flags |= ReadFlags::NO_ECHO,
-      Opt::Short('a') => read_opts.flags |= ReadFlags::ARRAY,
-      Opt::Short('n') => read_opts.flags |= ReadFlags::N_CHARS,
-      Opt::Short('t') => read_opts.flags |= ReadFlags::TIMEOUT,
-      Opt::ShortWithArg('p', prompt) => read_opts.prompt = Some(prompt),
-      Opt::ShortWithArg('d', delim) => {
-        read_opts.delim = delim.chars().map(|c| c as u8).next().unwrap_or(b'\n')
-      }
-      _ => {
-        return Err(sherr!(ExecFail, "read: Unexpected flag '{opt}'"));
-      }
-    }
-  }
-
-  Ok(read_opts)
-}
-
-pub struct ReadKeyOpts {
-  var_name: Option<String>,
-  char_whitelist: Option<String>,
-  char_blacklist: Option<String>,
-}
-
-pub fn readkey(node: Node) -> ShResult<()> {
-  let blame = node.get_span().clone();
-  let NdRule::Command { argv, .. } = node.class else {
-    unreachable!()
-  };
-
-  if !with_term(|t| t.isatty()) {
-    state::set_status(1);
-    return Ok(());
-  }
-
-  let (_, opts) = get_opts_from_tokens(argv, &READ_KEY_OPTS).blame(blame.clone())?;
-  let readkey_opts = get_readkey_opts(opts).blame(blame.clone())?;
-
-  let key = {
-    let _raw = with_term(|t| t.raw_mode_guard());
-    if let Err(e) = with_term(|t| t.read()) {
-      match e.kind() {
-        ShErrKind::LoopBreak(_) => {
-          state::set_status(1);
-          return Ok(());
+      Err(Errno::EINTR) => {
+        if signal::sigint_pending() {
+          state::set_status(130);
+          return Ok(String::new());
         }
-        ShErrKind::LoopContinue(_) => {
-          state::set_status(0);
-          return Ok(());
-        }
-        _ => return Err(e).blame(blame)
+        continue;
       }
-    };
-
-    let mut keys = with_term(|t| t.drain_keys())?;
-    if keys.is_empty() {
-      state::set_status(1);
-      return Ok(());
+      Err(e) => return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}")),
     }
-
-    keys.remove(0)
-  };
-
-  let vim_seq = key.as_vim_seq()?;
-
-  if let Some(wl) = readkey_opts.char_whitelist {
-    let allowed = expand_keymap(&wl);
-    if !allowed.contains(&key) {
-      state::set_status(1);
-      return Ok(());
-    }
-  }
-
-  if let Some(bl) = readkey_opts.char_blacklist {
-    let disallowed = expand_keymap(&bl);
-    if disallowed.contains(&key) {
-      state::set_status(1);
-      return Ok(());
-    }
-  }
-
-  if let Some(var) = readkey_opts.var_name {
-    write_vars(|v| v.set_var(&var, VarKind::Str(vim_seq), VarFlags::NONE))?;
-  } else {
-    write(borrow_fd(STDOUT_FILENO), vim_seq.as_bytes())?;
   }
 
   state::set_status(0);
+  String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}"))
+}
+
+fn field_split_vars(input: &str, vars: &[(String, Span)]) -> ShResult<()> {
+  if vars.is_empty() {
+    write_vars(|v| v.set_var("REPLY", VarKind::Str(input.to_string()), VarFlags::NONE))?;
+    return Ok(());
+  }
+
+  let sep = state::get_separators();
+
+  let fields: Vec<&str> = input.splitn(vars.len(), |c| sep.contains(c)).collect();
+  for (name, field) in vars.iter().zip(fields) {
+    let field = field.trim_start_matches(|c: char| sep.contains(c));
+    write_vars(|v| v.set_var(&name.0, VarKind::Str(field.to_string()), VarFlags::NONE))?;
+  }
+
   Ok(())
 }
 
-pub fn get_readkey_opts(opts: Vec<Opt>) -> ShResult<ReadKeyOpts> {
-  let mut readkey_opts = ReadKeyOpts {
-    var_name: None,
-    char_whitelist: None,
-    char_blacklist: None,
-  };
-
-  for opt in opts {
-    match opt {
-      Opt::ShortWithArg('v', var_name) => readkey_opts.var_name = Some(var_name),
-      Opt::ShortWithArg('w', char_whitelist) => readkey_opts.char_whitelist = Some(char_whitelist),
-      Opt::ShortWithArg('b', char_blacklist) => readkey_opts.char_blacklist = Some(char_blacklist),
-      _ => {
-        return Err(sherr!(ExecFail, "readkey: Unexpected flag '{opt}'"));
-      }
-    }
+fn field_split_arr(input: &str, arr_name: &str) -> ShResult<()> {
+  if arr_name.is_empty() {
+    return Err(sherr!(ExecFail, "read: Array name cannot be empty"));
   }
 
-  Ok(readkey_opts)
+  let sep = state::get_separators();
+  let fields: VecDeque<String> = input
+    .split(|c| sep.contains(c))
+    .map(|s| s.to_string())
+    .collect();
+
+  write_vars(|v| v.set_var(arr_name, VarKind::Arr(fields), VarFlags::NONE))
+}
+
+pub(super) struct ReadKey;
+impl super::Builtin for ReadKey {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::single_arg('v'), // var name
+      OptSpec::single_arg('w'), // char whitelist
+      OptSpec::single_arg('b'), // char blacklist
+    ]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if !with_term(|t| t.isatty()) {
+      return with_status(1);
+    }
+    let mut whitelist = None;
+    let mut blacklist = None;
+    let mut var_name = None;
+
+    for opt in &args.opts {
+      match opt {
+        Opt::ShortWithArg('v', name) => var_name = Some(name),
+        Opt::ShortWithArg('w', wl) => whitelist = Some(wl),
+        Opt::ShortWithArg('b', bl) => blacklist = Some(bl),
+        _ => {
+          return Err(sherr!(ExecFail, "readkey: Unexpected flag '{opt}'"))
+            .promote_err(args.span());
+        }
+      }
+    }
+
+    let key = {
+      let _raw = with_term(|t| t.raw_mode_guard());
+      if let Err(e) = with_term(|t| t.read()) {
+        match e.kind() {
+          ShErrKind::LoopBreak(_) => return with_status(1),
+          ShErrKind::LoopContinue(_) => return with_status(0),
+          _ => return Err(e).promote_err(args.span()),
+        }
+      }
+
+      let mut keys = with_term(|t| t.drain_keys())?;
+      if keys.is_empty() {
+        return with_status(1);
+      }
+
+      keys.remove(0)
+    };
+
+    let vim_seq = key.as_vim_seq()?;
+
+    if let Some(wl) = whitelist {
+      let allowed = expand_keymap(wl);
+      if !allowed.contains(&key) {
+        return with_status(1);
+      }
+    }
+    if let Some(bl) = blacklist {
+      let disallowed = expand_keymap(bl);
+      if disallowed.contains(&key) {
+        return with_status(1);
+      }
+    }
+
+    if let Some(var) = var_name {
+      write_vars(|v| v.set_var(var, VarKind::Str(vim_seq), VarFlags::NONE))?;
+    } else {
+      write_out(vim_seq)?;
+    }
+
+    with_status(0)
+  }
 }
 
 #[cfg(test)]
@@ -442,31 +360,5 @@ mod tests {
     // Empty input / EOF should set status 1
     test_input("read < <(echo -n '')").unwrap();
     assert_eq!(state::get_status(), 1);
-  }
-
-  // ===================== Flag parsing (pure) =====================
-
-  #[test]
-  fn flags_raw_mode() {
-    use super::get_read_flags;
-    use crate::getopt::Opt;
-    let flags = get_read_flags(vec![Opt::Short('r')]).unwrap();
-    assert!(flags.flags.contains(super::ReadFlags::NO_ESCAPES));
-  }
-
-  #[test]
-  fn flags_prompt() {
-    use super::get_read_flags;
-    use crate::getopt::Opt;
-    let flags = get_read_flags(vec![Opt::ShortWithArg('p', "Enter: ".into())]).unwrap();
-    assert_eq!(flags.prompt, Some("Enter: ".into()));
-  }
-
-  #[test]
-  fn flags_delimiter() {
-    use super::get_read_flags;
-    use crate::getopt::Opt;
-    let flags = get_read_flags(vec![Opt::ShortWithArg('d', ",".into())]).unwrap();
-    assert_eq!(flags.delim, b',');
   }
 }

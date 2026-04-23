@@ -292,7 +292,7 @@ executable with a shebang line:
 
       `( commands )`
 
-      Parentheses run {commands} in a subshell — a separate copy of
+      Parentheses run {commands} in a subshell - a separate copy of
       the shell environment. Changes to variables, the working
       directory, or other state inside the subshell do not affect
       the parent:
@@ -583,7 +583,7 @@ executable with a shebang line:
       `  {commands}`
       `done`
 
-      The opposite of `while` — runs {commands} until {condition}
+      The opposite of `while` - runs {commands} until {condition}
       succeeds:
 
           `until ping -c1 -W1 server >/dev/null 2>&1; do`
@@ -695,7 +695,7 @@ executable with a shebang line:
           `  echo "$n"`
           `}`
           `count_files`
-          `echo "$n"`                # empty — n was local
+          `echo "$n"`                # empty - n was local
 
       Without `local`, `n` would remain set after the function
       returns. See |var-local| for more details.

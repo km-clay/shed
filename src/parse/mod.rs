@@ -6,17 +6,17 @@ use fmt::Display;
 use lex::{LexFlags, LexStream, Span, SpanSource, Tk, TkFlags, TkRule};
 
 use crate::{
-  util::{
-    error::{ShErr, ShResult, last_color, next_color},
-    strops::split_tk,
-    NodeVecUtils,
-  },
   match_loop,
   parse::lex::clean_input,
   prelude::*,
   procio::IoMode,
   sherr,
   state::read_shopts,
+  util::{
+    NodeVecUtils,
+    error::{ShErr, ShResult, last_color, next_color},
+    strops::split_tk,
+  },
 };
 
 pub mod execute;
@@ -1219,7 +1219,7 @@ impl ParseStream {
         case_builder = case_builder.with_rhs(tk.clone());
         continue;
       } else if case_builder.lhs.is_some() && case_builder.operator.is_none() {
-        // we got lhs, then rhs → treat it as operator maybe?
+        // we got lhs, then rhs -> treat it as operator maybe?
         case_builder = case_builder.with_operator(tk.clone());
         continue;
       } else if let TkRule::And | TkRule::Or = tk.class {
@@ -2015,8 +2015,7 @@ impl ParseStream {
             argv.push(tk.clone());
             node_tks.push(tk.clone());
           }
-					TkRule::HereDoc {..} |
-          TkRule::Redir => {
+          TkRule::HereDoc { .. } | TkRule::Redir => {
             node_tks.push(tk.clone());
             let ctx = self.context.clone();
             let redir = match Self::build_redir(tk, || tk_iter.next().cloned(), &mut node_tks, ctx)

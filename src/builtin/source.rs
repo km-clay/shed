@@ -1,44 +1,33 @@
 use crate::{
-  util::error::ShResult,
-  parse::{NdRule, Node, execute::prepare_argv},
   prelude::*,
   sherr,
-  state::{self, source_file},
+  state::source_file,
+  util::{error::ShResult, with_status},
 };
 
-pub fn source(node: Node) -> ShResult<()> {
-  let NdRule::Command {
-    assignments: _,
-    argv,
-  } = node.class
-  else {
-    unreachable!()
-  };
+pub(super) struct Source;
+impl super::Builtin for Source {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    for (arg, span) in args.argv {
+      let path = PathBuf::from(arg);
 
-  let mut argv = prepare_argv(argv)?;
-  if !argv.is_empty() {
-    argv.remove(0);
-  }
+      if !path.exists() {
+        return Err(sherr!(
+          ExecFail @ span,
+          "source: File '{}' not found", path.display(),
+        ));
+      } else if !path.is_file() {
+        return Err(sherr!(
+          ExecFail @ span,
+          "source: Given path '{}' is not a file", path.display(),
+        ));
+      }
 
-  for (arg, span) in argv {
-    let path = PathBuf::from(arg);
-    if !path.exists() {
-      return Err(sherr!(
-        ExecFail @ span,
-        "source: File '{}' not found", path.display(),
-      ));
+      source_file(path)?;
     }
-    if !path.is_file() {
-      return Err(sherr!(
-        ExecFail @ span,
-        "source: Given path '{}' is not a file", path.display(),
-      ));
-    }
-    source_file(path)?;
-  }
 
-  state::set_status(0);
-  Ok(())
+    with_status(0)
+  }
 }
 
 #[cfg(test)]
@@ -143,16 +132,16 @@ pub mod tests {
   #[test]
   fn source_nonexistent_file() {
     let _g = TestGuard::new();
-    let result = test_input("source /tmp/__no_such_file_xyz__");
-    assert!(result.is_err());
+    test_input("source /tmp/__no_such_file_xyz__").ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   #[test]
   fn source_directory_fails() {
     let _g = TestGuard::new();
     let dir = TempDir::new().unwrap();
-    let result = test_input(format!("source {}", dir.path().display()));
-    assert!(result.is_err());
+    test_input(format!("source {}", dir.path().display())).ok();
+    assert_ne!(state::get_status(), 0);
   }
 
   // ===================== Status =====================

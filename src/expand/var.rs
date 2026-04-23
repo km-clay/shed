@@ -7,13 +7,13 @@ use crate::expand::PARAMETERS;
 use crate::expand::escape::escape_str;
 use crate::expand::param::perform_param_expansion;
 use crate::expand::subshell::{expand_cmd_sub, expand_proc_sub};
-use crate::util::error::ShResult;
 use crate::match_loop;
 use crate::parse::lex::is_hard_sep;
 use crate::prelude::*;
 use crate::readline::markers;
 use crate::sherr;
 use crate::state::{read_shopts, read_vars};
+use crate::util::error::ShResult;
 
 pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   let mut result = String::new();
