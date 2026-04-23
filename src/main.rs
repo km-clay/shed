@@ -55,8 +55,13 @@ use clap::Parser;
 use state::write_vars;
 
 #[derive(Parser, Debug)]
+#[command(
+  author = "Kyler Clay",
+  about  = "An experimental POSIX shell",
+  long_about = "shed is an experimental POSIX shell focused on interative user experience, extensibility, and powerful line editing."
+)]
 struct ShedArgs {
-  #[arg(short)]
+  #[arg(short, conflicts_with_all = ["interactive", "stdin"])]
   command: Option<String>,
 
   #[arg(trailing_var_arg = true)]
@@ -79,11 +84,18 @@ struct ShedArgs {
 }
 
 /// We need to make sure that even if we panic, our child processes get sighup
+///
+/// This basically just wraps the default panic handler with our job control stuff
 fn setup_panic_handler() {
+  // take the default hook
   let default_panic_hook = std::panic::take_hook();
+
+  // set our hook
   std::panic::set_hook(Box::new(move |info| {
+    // hang up jobs
     write_jobs(|j| j.hang_up());
 
+    // log panic
     let data_dir = dirs::data_dir().unwrap_or_else(|| {
       let home = env::var("HOME").unwrap();
       PathBuf::from(format!("{home}/.local/share"))
@@ -101,6 +113,7 @@ fn setup_panic_handler() {
       .write_all(format!("\nBacktrace:\n{:?}", backtrace).as_bytes())
       .unwrap();
 
+    // call the default panic hook
     default_panic_hook(info);
   }));
 }

@@ -1931,7 +1931,7 @@ pub fn annotate_input(input: &str) -> String {
       // so we have to split them up.
       // the sort below will handle ordering these correctly relative to other tokens.
 
-      let mut start_tk = Tk::new(TkRule::HereDocStart, start_delim);
+      let mut start_tk = Tk::new(TkRule::HereDocStart, *start_delim);
       let mut body = Tk::new(TkRule::HereDocBody, tk.span);
       start_tk.flags = tk.flags;
       body.flags = tk.flags;
@@ -1940,7 +1940,7 @@ pub fn annotate_input(input: &str) -> String {
       acc.push(body);
 
       if let Some(end_delim) = end_delim {
-        let mut end_tk = Tk::new(TkRule::HereDocEnd, end_delim);
+        let mut end_tk = Tk::new(TkRule::HereDocEnd, *end_delim);
         end_tk.flags = tk.flags;
         acc.push(end_tk);
       }

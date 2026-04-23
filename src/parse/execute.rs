@@ -11,25 +11,16 @@ use super::{
 };
 
 use crate::{
-  builtin::{BUILTIN_NAMES, exec, lookup_builtin, test::double_bracket_test, trap::TrapTarget},
-  expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex},
-  jobs::{ChildProc, JobStack, dispatch_job},
-  prelude::*,
-  procio::{IoStack, PipeGenerator, borrow_fd},
-  sherr,
-  shopt::xtrace_print,
-  signal::{check_signals, signals_pending},
-  state::{
+  builtin::{BUILTIN_NAMES, lookup_builtin, test::double_bracket_test, trap::TrapTarget}, errln, expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern, glob_to_regex}, jobs::{ChildProc, JobStack, dispatch_job}, prelude::*, procio::{IoStack, PipeGenerator}, sherr, shopt::xtrace_print, signal::{check_signals, signals_pending}, state::{
     self, ShFunc, VarFlags, VarKind, read_logic, read_meta, read_shopts, read_vars, with_term,
     write_jobs, write_logic, write_meta, write_vars,
-  },
-  util::{
+  }, util::{
     RedirVecUtils,
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
     guards::{scope_guard, var_ctx_guard},
     strops::split_case_pat,
     with_status,
-  },
+  }
 };
 
 pub fn is_in_path(name: &str) -> bool {
@@ -372,10 +363,8 @@ impl Dispatcher {
     };
 
     if read_shopts(|o| o.set.verbose) {
-      let stderr = borrow_fd(STDERR_FILENO);
       let command = span.as_str().to_string();
-      write(stderr, command.as_bytes()).ok();
-      write(stderr, b"\n").ok();
+      errln!("{command}").ok();
     }
 
     let mut elem_iter = elements.into_iter();
@@ -968,123 +957,29 @@ impl Dispatcher {
       .unwrap_or_else(|| panic!("expected command NdRule, got {:?}", &cmd.class))
       .to_string();
 
+    let Some(builtin) = lookup_builtin(&cmd_raw) else {
+      sherr!(NotFound @ cmd.get_span(), "builtin not found: {cmd_raw}")
+        .print_error();
+      return with_status(127);
+    };
+
     if fork_builtins {
       log::trace!("Forking builtin: {}", cmd_raw);
       self.run_fork(&cmd_raw, report_time, |s| {
-        if let Err(e) = s.dispatch_builtin(cmd) {
+        if let Err(e) = builtin.setup_builtin(cmd, s) {
           e.print_error();
         }
       })?;
       Ok(())
     } else {
-      let result = self.dispatch_builtin(cmd);
-
-      if let Err(e) = result {
+      if let Err(e) = builtin.setup_builtin(cmd, self) {
         let code = state::get_status();
         if code == 0 {
           state::set_status(1);
         }
-        return Err(e);
-      }
-      Ok(())
-    }
-  }
-  fn dispatch_builtin(&mut self, mut cmd: Node) -> ShResult<()> {
-    let cmd_raw = cmd.get_command().unwrap().to_string();
-    let report_time = cmd.flags.contains(NdFlags::REPORT_TIME);
-    let context = cmd.context.clone();
-    let NdRule::Command { assignments, argv } = &mut cmd.class else {
-      unreachable!()
-    };
-    let env_vars = self.set_assignments(mem::take(assignments), AssignBehavior::Export)?;
-    let _var_guard = var_ctx_guard(env_vars.into_iter().collect());
-    let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
-
-    // Handle builtin/command recursion before redirect/job setup
-    if cmd_raw.as_str() == "builtin" {
-      *argv = argv
-        .iter_mut()
-        .skip(1)
-        .map(|tk| tk.clone())
-        .collect::<Vec<Tk>>();
-      return self.exec_builtin(cmd);
-    } else if cmd_raw.as_str() == "command" {
-      *argv = argv
-        .iter_mut()
-        .skip(1)
-        .map(|tk| tk.clone())
-        .collect::<Vec<Tk>>();
-      if fork_builtins {
-        cmd.flags |= NdFlags::NO_FORK;
-      }
-      return self.exec_cmd(cmd);
-    }
-
-    if argv.len() == 2 && argv[1].as_str() == "--help" {
-      // we have been asked for help
-      // is this a hack? only the nose knows.
-      return exec_nonint(
-        format!("help builtin-{cmd_raw}"),
-        None,
-        Some("<builtin-help>".into()),
-      );
-    }
-
-    // Set up redirections here so we can attach the guard to propagated errors.
-    self.io_stack.append_to_frame(mem::take(&mut cmd.redirs));
-    let guard = self.io_stack.pop_frame().redirect()?;
-
-    // Register ChildProc in current job
-    let job = self.job_stack.curr_job_mut().unwrap();
-    let child_pgid = if let Some(pgid) = job.pgid() {
-      pgid
-    } else {
-      let pid = Pid::this();
-      job.set_pgid(pid);
-      pid
-    };
-    let child = ChildProc::new(
-      Pid::this(),
-      Some(&cmd_raw),
-      fork_builtins.then_some(child_pgid),
-      report_time,
-    )?;
-    job.push_child(child);
-
-    // Handle exec specially - persist redirections before dispatch
-    if cmd_raw.as_str() == "exec" {
-      guard.persist();
-    }
-
-    let Some(builtin) = lookup_builtin(&cmd_raw) else {
-      sherr!(NotFound @ cmd.get_span(), "builtin not found: {cmd_raw}")
-        .with_context(context)
-        .print_error();
-      return with_status(127); // 127 = command not found
-    };
-
-    let result = builtin.run_builtin(cmd);
-
-    // Now we inspect the error that we got, if any
-    match result {
-      Ok(()) => Ok(()),
-      Err(e) => {
-        // if we aren't in the context these are looking for
-        // then they will bubble all the way up to main
-        // which cancels execution. Let's catch that here
-        let should_propagate = match e.kind() {
-          ShErrKind::CleanExit(_) => true, // this one always goes
-          ShErrKind::LoopBreak(_) | ShErrKind::LoopContinue(_) => read_meta(|m| m.in_loop()),
-          ShErrKind::FuncReturn(_) => read_meta(|m| m.in_func()),
-          _ => false,
-        };
-
-        if should_propagate {
-          Err(e.with_context(context))
-        } else {
-          e.with_context(context).print_error();
-          with_status(1)
-        }
+        Err(e)
+      } else {
+        Ok(())
       }
     }
   }
@@ -1230,7 +1125,7 @@ impl Dispatcher {
       }
     }
   }
-  fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> ShResult<Vec<String>> {
+  pub fn set_assignments(&self, assigns: Vec<Node>, behavior: AssignBehavior) -> ShResult<Vec<String>> {
     let mut new_env_vars = vec![];
     let mut flags = match behavior {
       AssignBehavior::Export => VarFlags::EXPORT,

@@ -3,22 +3,14 @@ use std::{fmt::Write, io::Write as IoWrite, sync::atomic::AtomicBool};
 use tempfile::NamedTempFile;
 
 use crate::{
-  match_loop,
-  parse::{
+  match_loop, out, parse::{
     NdRule, Node,
-    execute::exec_input,
+    execute::{Dispatcher, exec_input},
     lex::{Span, Tk},
-  },
-  prelude::*,
-  procio::borrow_fd,
-  readline::{
+  }, prelude::*, readline::{
     history::{HistEntry, History},
     linebuf::ordered,
-  },
-  sherr,
-  shopt::xtrace_print,
-  state::{self},
-  util::error::{ShResult, ShResultExt},
+  }, sherr, shopt::xtrace_print, state::{self}, util::error::{ShResult, ShResultExt}
 };
 
 /// POSIX specifies that an invocation of `fc` that edits and re-executes a command shall not itself be committed to command history
@@ -153,7 +145,11 @@ impl super::Builtin for FixCmd {
   fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
     unreachable!("fixcmd is a special snowflake command that needs really special handling");
   }
-  fn run_builtin(&self, node: Node) -> ShResult<()> {
+  fn run_builtin(
+    &self,
+    node: Node,
+    _dispatcher: &mut Dispatcher
+  ) -> ShResult<()> {
     let span = node.get_span();
     let NdRule::Command {
       assignments: _,
@@ -263,7 +259,6 @@ fn fc_list(hist: History, opts: FixCmdOpts) -> ShResult<()> {
 
   let entries = get_entry_range(&hist, Some(first), Some(last), opts.reverse)?;
 
-  let stdout = borrow_fd(STDOUT_FILENO);
   let mut buf = String::new();
   for (id, entry) in entries {
     let cmd = entry.command;
@@ -274,7 +269,7 @@ fn fc_list(hist: History, opts: FixCmdOpts) -> ShResult<()> {
     buf.push('\n');
   }
 
-  write(stdout, buf.as_bytes())?;
+  out!("{}", buf)?;
 
   Ok(())
 }

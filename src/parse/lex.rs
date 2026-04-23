@@ -182,8 +182,8 @@ pub enum TkRule {
   BraceGrpEnd,
   Comment,
   HereDoc {
-    start_delim: Span,
-    end_delim: Option<Span>, // is None if not found when lexing unfinished input
+    start_delim: Box<Span>,
+    end_delim: Option<Box<Span>>, // is None if not found when lexing unfinished input
   },
 
   // these three are only used in input annotation/syntax highlighting
@@ -745,8 +745,8 @@ impl LexStream {
       if ch == '\n' {
         let trimmed = line.trim_end_matches('\r');
         if trimmed == delim {
-          let start_delim = self.get_span(span_start..cursor_after_delim);
-          let end_delim = self.get_span(line_start..pos);
+          let start_delim = Box::new(self.get_span(span_start..cursor_after_delim));
+          let end_delim = Box::new(self.get_span(line_start..pos));
           let rule = TkRule::HereDoc {
             start_delim,
             end_delim: Some(end_delim),
@@ -767,8 +767,8 @@ impl LexStream {
     // Check the last line (no trailing newline)
     let trimmed = line.trim_end_matches('\r');
     if trimmed == delim {
-      let start_delim = self.get_span(span_start..cursor_after_delim);
-      let end_delim = self.get_span(line_start..pos);
+      let start_delim = Box::new(self.get_span(span_start..cursor_after_delim));
+      let end_delim = Box::new(self.get_span(line_start..pos));
       let rule = TkRule::HereDoc {
         start_delim,
         end_delim: Some(end_delim),
@@ -781,7 +781,7 @@ impl LexStream {
     }
 
     if self.flags.contains(LexFlags::LEX_UNFINISHED) {
-      let start_delim = self.get_span(span_start..cursor_after_delim);
+      let start_delim = Box::new(self.get_span(span_start..cursor_after_delim));
       let rule = TkRule::HereDoc {
         start_delim,
         end_delim: None,

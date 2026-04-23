@@ -1,15 +1,7 @@
 use bitflags::bitflags;
-use nix::{libc::STDOUT_FILENO, unistd::write};
 
 use crate::{
-  getopt::{Opt, OptSpec},
-  outln,
-  parse::{NdRule, Node},
-  procio::borrow_fd,
-  readline::complete::{BashCompSpec, CompContext, CompSpec},
-  sherr,
-  state::{read_meta, write_meta},
-  util::{error::ShResult, with_status, write_out},
+  getopt::{Opt, OptSpec}, out, outln, parse::{NdRule, Node, execute::Dispatcher}, readline::complete::{BashCompSpec, CompContext, CompSpec}, sherr, state::{read_meta, write_meta}, util::{error::ShResult, with_status, write_out}
 };
 
 bitflags! {
@@ -81,8 +73,7 @@ impl super::Builtin for Complete {
         read_meta(|m| -> ShResult<()> {
           for (cmd, _) in &args.argv {
             if let Some(spec) = m.comp_specs().get(cmd) {
-              let stdout = borrow_fd(STDOUT_FILENO);
-              write(stdout, spec.source().as_bytes())?;
+              out!("{}",spec.source())?;
             }
           }
           Ok(())
@@ -139,7 +130,11 @@ impl super::Builtin for CompGen {
   fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
     unreachable!("CompGen uses run_builtin directly")
   }
-  fn run_builtin(&self, node: Node) -> ShResult<()> {
+  fn run_builtin(
+    &self,
+    node: Node,
+    _dispatcher: &mut Dispatcher
+  ) -> ShResult<()> {
     use crate::getopt::get_opts_from_tokens_raw;
 
     let NdRule::Command {

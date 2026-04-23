@@ -1,11 +1,8 @@
 use nix::{errno::Errno, unistd::execvpe};
 
 use crate::{
-  parse::{
-    NdRule, Node,
-    execute::{ExecArgs, prepare_argv},
-  },
-  sherr, state,
+  parse::execute::ExecArgs,
+  sherr,
   util::{error::ShResult, with_status},
 };
 

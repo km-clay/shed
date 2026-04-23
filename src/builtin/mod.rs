@@ -1,13 +1,10 @@
 use ariadne::Span as ASpan;
+use nix::unistd::Pid;
 
 use crate::{
-  getopt::{Opt, OptSpec, get_opts_from_tokens, get_opts_from_tokens_strict},
-  parse::{
-    NdRule, Node,
-    execute::prepare_argv,
-    lex::{Span, Tk},
-  },
-  util::{error::ShResult, with_status},
+  getopt::{Opt, OptSpec, get_opts_from_tokens, get_opts_from_tokens_strict}, jobs::ChildProc, parse::{
+    NdFlags, NdRule, Node, execute::{AssignBehavior, Dispatcher, exec_nonint, prepare_argv}, lex::{Span, Tk}
+  }, sherr, state::read_meta, util::{error::{ShErrKind, ShResult}, guards::var_ctx_guard, with_status}
 };
 
 pub mod alias;
@@ -16,8 +13,8 @@ pub mod autocmd;
 pub mod cd;
 pub mod complete;
 pub mod dirstack;
-pub mod echo;
 pub mod eval;
+pub mod echo;
 pub mod exec;
 pub mod fixcmd;
 pub mod flowctl;
@@ -100,7 +97,9 @@ register_builtins! {
   "autocmd"  => autocmd::AutoCmdBuiltin,
   "bg"       => jobctl::Bg,
   "break"    => flowctl::Break,
+  "builtin"  => BuiltinBuiltin,
   "cd"       => cd::Cd,
+  "command"  => CommandBuiltin,
   "compgen"  => complete::CompGen,
   "complete" => complete::Complete,
   "continue" => flowctl::Continue,
@@ -188,8 +187,89 @@ pub trait Builtin: Sync {
     };
     Ok((argv, opts))
   }
+  /// The main entry point for running a builtin. This is responsible for setting up the environment, handling redirections, and catching control flow errors.
+  fn setup_builtin(
+    &self,
+    mut node: Node,
+    dispatcher: &mut Dispatcher
+  ) -> ShResult<()> {
+    let cmd_raw = node.get_command().unwrap().to_string();
+    let report_time = node.flags.contains(NdFlags::REPORT_TIME);
+    let context = node.context.clone();
+    let NdRule::Command { assignments, argv } = &mut node.class else {
+      unreachable!()
+    };
+    let env_vars = dispatcher.set_assignments(std::mem::take(assignments), AssignBehavior::Export)?;
+    let _var_guard = var_ctx_guard(env_vars.into_iter().collect());
+    let fork_builtins = node.flags.contains(NdFlags::FORK_BUILTINS);
+
+    if argv.len() == 2 && argv[1].as_str() == "--help" {
+      // we have been asked for help
+      // is this a hack? only the nose knows.
+      return exec_nonint(
+        format!("help builtin-{cmd_raw}"),
+        None,
+        Some("<builtin-help>".into()),
+      );
+    }
+
+    // Set up redirections here so we can attach the guard to propagated errors.
+    dispatcher.io_stack.append_to_frame(std::mem::take(&mut node.redirs));
+    let guard = dispatcher.io_stack.pop_frame().redirect()?;
+
+    // Register ChildProc in current job
+    let job = dispatcher.job_stack.curr_job_mut().unwrap();
+    let child_pgid = if let Some(pgid) = job.pgid() {
+      pgid
+    } else {
+      let pid = Pid::this();
+      job.set_pgid(pid);
+      pid
+    };
+    let child = ChildProc::new(
+      Pid::this(),
+      Some(&cmd_raw),
+      fork_builtins.then_some(child_pgid),
+      report_time,
+    )?;
+    job.push_child(child);
+
+    // Handle exec specially - persist redirections before dispatch
+    if cmd_raw.as_str() == "exec" {
+      guard.persist();
+    }
+
+    let result = self.run_builtin(node, dispatcher);
+
+    // Now we inspect the error that we got, if any
+    match result {
+      Ok(()) => Ok(()),
+      Err(e) => {
+        // if we aren't in the context these are looking for
+        // then they will bubble all the way up to main
+        // which cancels execution. Let's catch that here
+        let should_propagate = match e.kind() {
+          ShErrKind::CleanExit(_) => true, // this one always goes
+          ShErrKind::LoopBreak(_) | ShErrKind::LoopContinue(_) => read_meta(|m| m.in_loop()),
+          ShErrKind::FuncReturn(_) => read_meta(|m| m.in_func()),
+          _ => false,
+        };
+
+        if should_propagate {
+          Err(e.with_context(context))
+        } else {
+          e.with_context(context).print_error();
+          with_status(1)
+        }
+      }
+    }
+  }
   /// Parse arguments and options, pack BuiltinArgs, run self.execute()
-  fn run_builtin(&self, node: Node) -> ShResult<()> {
+  fn run_builtin(
+    &self,
+    node: Node,
+    _dispatcher: &mut Dispatcher
+  ) -> ShResult<()> {
     let span = node.get_span().clone();
     let NdRule::Command {
       assignments: _,
@@ -267,6 +347,69 @@ struct False;
 impl Builtin for False {
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     with_status(1)
+  }
+}
+
+struct BuiltinBuiltin;
+impl Builtin for BuiltinBuiltin { // lol
+  fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
+    unreachable!("this one operates on the node directly")
+  }
+  fn setup_builtin(
+    &self,
+    mut node: Node,
+    dispatcher: &mut Dispatcher
+  ) -> ShResult<()> {
+    let span = node.get_span();
+    let NdRule::Command {
+      assignments: _,
+      ref mut argv,
+    } = node.class else {
+      unreachable!()
+    };
+    *argv = argv
+      .iter_mut()
+      .skip(1)
+      .map(|tk| tk.clone())
+      .collect::<Vec<Tk>>();
+
+    let cmd = argv.first().map(|tk| tk.as_str()).unwrap_or("");
+    let Some(builtin) = lookup_builtin(cmd) else {
+      sherr!(NotFound @ span, "builtin not found: {cmd}")
+        .print_error();
+      return with_status(127);
+    };
+
+    builtin.setup_builtin(node, dispatcher)
+  }
+}
+
+pub struct CommandBuiltin;
+impl Builtin for CommandBuiltin {
+  fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
+    unreachable!("this one operates on the node directly")
+  }
+  fn run_builtin(
+    &self,
+    mut node: Node,
+    dispatcher: &mut Dispatcher
+  ) -> ShResult<()> {
+    let NdRule::Command {
+      assignments: _,
+      ref mut argv,
+    } = node.class else {
+      unreachable!()
+    };
+    *argv = argv
+      .iter_mut()
+      .skip(1)
+      .map(|tk| tk.clone())
+      .collect::<Vec<Tk>>();
+
+    node.flags |= NdFlags::NO_FORK;
+
+    // this one has to offload to the dispatcher
+    dispatcher.dispatch_node(node)
   }
 }
 
