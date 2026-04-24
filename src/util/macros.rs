@@ -304,7 +304,7 @@ macro_rules! sherr {
 macro_rules! two_way_display {
 	($name:ident, $($member:ident <=> $val:expr;)*) => {
 		impl Display for $name {
-			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+			fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 				match self {
 					$(Self::$member => write!(f, $val),)*
 				}

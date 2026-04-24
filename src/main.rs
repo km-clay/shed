@@ -38,7 +38,7 @@ use crate::parse::execute::{exec_dash_c, exec_int, exec_nonint};
 use crate::prelude::*;
 use crate::procio::borrow_fd;
 use crate::readline::editmode::ModeReport;
-use crate::readline::linebuf::{Hint, Pos, to_lines};
+use crate::readline::linebuf::{Hint, Lines, Pos};
 use crate::readline::term::{OSC_EXEC_START, osc_exec_end};
 use crate::readline::{LineData, Prompt, ReadlineEvent, ShedLine};
 use crate::signal::{
@@ -771,7 +771,7 @@ fn handle_socket_request(
         LineHeader::Hint => {
           readline
             .editor
-            .set_hint(Some(Hint::Override(to_lines(value))));
+            .set_hint(Some(Hint::Override(Lines::to_lines(value))));
         }
         LineHeader::Mode => {
           let Ok(mode) = value.parse::<ModeReport>() else {

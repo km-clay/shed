@@ -2,7 +2,7 @@ use std::{
   cmp::Ordering,
   collections::{HashSet, VecDeque},
   fmt::Display,
-  ops::{Index, IndexMut},
+  ops::{Deref, DerefMut, Index, IndexMut},
   slice::SliceIndex,
 };
 
@@ -47,10 +47,10 @@ use crate::{
 
 const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// A single grapheme. Graphemes can be composed of multiple chars, but are always treated as a single unit for display and editing purposes.
 /// Using a SmallVec<[char; 4]> allows us to organize most multi-byte codepoints while maintaining both ownership and stack allocation.
 /// If we ever run into a Grapheme made of more than 4 chars, just that Grapheme will gracefully spill over onto the heap
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Grapheme(SmallVec<[char; 4]>);
 
 impl Grapheme {
@@ -134,115 +134,6 @@ impl Display for Grapheme {
 pub fn to_graphemes(s: impl ToString) -> Vec<Grapheme> {
   let s = s.to_string();
   s.graphemes(true).map(Grapheme::from).collect()
-}
-
-pub fn to_lines(s: impl ToString) -> Vec<Line> {
-  let s = s.to_string();
-  s.split("\n").map(to_graphemes).map(Line::from).collect()
-}
-
-pub fn join_lines(lines: &[Line]) -> String {
-  lines
-    .iter()
-    .map(|line| line.to_string())
-    .collect::<Vec<String>>()
-    .join("\n")
-}
-
-pub fn trim_lines(lines: &mut Vec<Line>) {
-  while lines.last().is_some_and(|line| line.is_empty()) {
-    lines.pop();
-  }
-}
-
-pub fn split_lines_at(lines: &mut Vec<Line>, pos: Pos) -> Vec<Line> {
-  let tail = lines[pos.row].split_off(pos.col);
-  let mut rest: Vec<Line> = lines.drain(pos.row + 1..).collect();
-  rest.insert(0, tail);
-  rest
-}
-
-pub fn split_lines(mut lines: Vec<Line>, pos: Pos) -> (Vec<Line>, Vec<Line>) {
-  let tail = lines[pos.row].split_off(pos.col);
-  let mut rest: Vec<Line> = lines.drain(pos.row + 1..).collect();
-  rest.insert(0, tail);
-  (lines, rest)
-}
-
-pub fn attach_lines(lines: &mut Vec<Line>, other: &mut Vec<Line>) {
-  if other.is_empty() {
-    return;
-  }
-  if lines.is_empty() {
-    lines.append(other);
-    return;
-  }
-  let mut head = other.remove(0);
-  let mut tail = lines.pop().unwrap();
-  tail.append(&mut head);
-  lines.push(tail);
-  lines.append(other);
-}
-
-pub fn is_prefix_lines(this: &[Line], other: &[Line]) -> bool {
-  if this.is_empty() {
-    return false;
-  }
-
-  let all_but_last = this[..this.len().saturating_sub(1)]
-    .iter()
-    .zip(other.iter())
-    .all(|(l, r)| *l == *r);
-
-  if !all_but_last {
-    return false;
-  }
-
-  let last = this.len().saturating_sub(1);
-  let Some(other_line) = other.get(last).map(|l| &l.0) else {
-    return false;
-  };
-  let this_line = &this[last].0;
-
-  this_line.len() <= other_line.len()
-    && this_line.iter().zip(other_line.iter()).all(|(l, r)| l == r)
-}
-
-pub fn strip_prefix_lines(mut lines: Vec<Line>, other: &[Line]) -> Option<Vec<Line>> {
-  if lines.is_empty() {
-    return None;
-  }
-
-  let common_lines = lines
-    .iter()
-    .zip(other.iter())
-    .take_while(|(l, r)| *l == *r)
-    .count();
-
-  // drain equal lines
-  lines.drain(..common_lines);
-
-  if lines.is_empty() {
-    return None;
-  }
-
-  if let Some(other_line) = other.get(common_lines) {
-    let common_chars = lines[0]
-      .0
-      .iter()
-      .zip(other_line.0.iter())
-      .take_while(|(l, r)| l == r)
-      .count();
-
-    // drain common characters
-    lines[0].0.drain(..common_chars);
-  }
-
-  if lines.iter().all(|l| l.is_empty()) {
-    None
-  } else {
-    Some(lines)
-  }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd)]
@@ -334,6 +225,178 @@ impl Display for Line {
     Ok(())
   }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lines(Vec<Line>);
+impl Lines {
+  pub fn to_lines(s: impl ToString) -> Lines {
+    let s = s.to_string();
+    let mut new: Lines = s.split("\n")
+      .map(to_graphemes)
+      .map(Line::from)
+      .collect();
+    new.push_empty();
+    new
+  }
+
+  /// Ensure that the underlying Vec<Line> is not empty
+  pub fn push_empty(&mut self) {
+    if self.is_empty() {
+      self.push(Line::default());
+    }
+  }
+
+  pub fn join(&self) -> String {
+    self.0
+      .iter()
+      .map(|line| line.to_string())
+      .collect::<Vec<String>>()
+      .join("\n")
+  }
+
+  pub fn trim_lines(&mut self) {
+    while self.last().is_some_and(|line| line.is_empty()) {
+      self.0.pop();
+    }
+    self.push_empty();
+  }
+
+  pub fn split_lines_at(&mut self, pos: Pos) -> Lines {
+    let tail = self[pos.row].split_off(pos.col);
+    let mut rest: Lines = self.drain(pos.row + 1..).collect();
+    rest.insert(0, tail);
+    self.push_empty();
+    rest
+  }
+
+  pub fn split_lines(mut self, pos: Pos) -> (Lines, Lines) {
+    let tail = self[pos.row].split_off(pos.col);
+    let mut rest: Lines = self.drain(pos.row + 1..).collect();
+    self.push_empty();
+    rest.insert(0, tail);
+    (self, rest)
+  }
+
+  pub fn attach_lines(&mut self, other: &mut Lines) {
+    if other.is_empty() {
+      return;
+    }
+    if self.is_empty() {
+      self.append(other);
+      self.push_empty();
+      return;
+    }
+    let mut head = other.remove(0);
+    let mut tail = self.pop().unwrap();
+    tail.append(&mut head);
+    self.push(tail);
+    self.append(other);
+    self.push_empty();
+  }
+
+  pub fn is_prefix_lines(&self, other: &Lines) -> bool {
+    if self.is_empty() {
+      return false;
+    }
+
+    let all_but_last = self.0[..self.len().saturating_sub(1)]
+      .iter()
+      .zip(other.iter())
+      .all(|(l, r)| *l == *r);
+
+    if !all_but_last {
+      return false;
+    }
+
+    let last = self.len().saturating_sub(1);
+    let Some(other_line) = other.get(last).map(|l| &l.0) else {
+      return false;
+    };
+    let this_line = &self[last].0;
+
+    this_line.len() <= other_line.len()
+      && this_line.iter().zip(other_line.iter()).all(|(l, r)| l == r)
+  }
+
+  pub fn strip_prefix_lines(mut self, other: &Lines) -> Option<Lines> {
+    if self.is_empty() {
+      return None;
+    }
+
+    let common_lines = self.0
+      .iter()
+      .zip(other.iter())
+      .take_while(|(l, r)| *l == *r)
+      .count();
+
+    // drain equal lines
+    self.drain(..common_lines);
+
+    if self.is_empty() {
+      self.push_empty();
+      return None;
+    }
+
+    if let Some(other_line) = other.get(common_lines) {
+      let common_chars = self[0]
+        .0
+        .iter()
+        .zip(other_line.0.iter())
+        .take_while(|(l, r)| l == r)
+        .count();
+
+      // drain common characters
+      self[0].0.drain(..common_chars);
+    }
+
+    if self.iter().all(|l| l.is_empty()) {
+      None
+    } else {
+      Some(self)
+    }
+  }
+}
+
+impl Default for Lines {
+  fn default() -> Self {
+    Self(vec![Line::default()])
+  }
+}
+
+impl std::iter::FromIterator<Line> for Lines {
+  fn from_iter<T: IntoIterator<Item = Line>>(iter: T) -> Self {
+    Self(iter.into_iter().collect())
+  }
+}
+
+impl Deref for Lines {
+  type Target = Vec<Line>;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl DerefMut for Lines {
+  fn deref_mut(&mut self) -> &mut Vec<Line> {
+    &mut self.0
+  }
+}
+
+impl Index<usize> for Lines {
+  type Output = Line;
+  fn index(&self, index: usize) -> &Self::Output {
+    let index = index.min(self.0.len().saturating_sub(1));
+    &self.0[index]
+  }
+}
+
+impl IndexMut<usize> for Lines {
+  fn index_mut(&mut self, index: usize) -> &mut Line {
+    let index = index.min(self.0.len().saturating_sub(1));
+    &mut self.0[index]
+  }
+}
+
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum Delim {
@@ -521,8 +584,8 @@ pub struct Cursor {
 pub struct Edit {
   pub old_cursor: Pos,
   pub new_cursor: Pos,
-  pub old: Vec<Line>,
-  pub new: Vec<Line>,
+  pub old: Lines,
+  pub new: Lines,
   pub merging: bool,
 }
 
@@ -619,7 +682,7 @@ impl IndentCtx {
   }
 }
 
-fn extract_range_contiguous(buf: &mut Vec<Line>, start: Pos, end: Pos) -> Vec<Line> {
+fn extract_range_contiguous(buf: &mut Lines, start: Pos, end: Pos) -> Lines {
   let start_col = start.col.min(buf[start.row].len());
   let end_col = end.col.min(buf[end.row].len());
 
@@ -627,7 +690,7 @@ fn extract_range_contiguous(buf: &mut Vec<Line>, start: Pos, end: Pos) -> Vec<Li
     // single line case
     let line = &mut buf[start.row];
     let removed: Vec<Grapheme> = line.0.drain(start_col..end_col).collect();
-    return vec![Line(removed)];
+    return Lines(vec![Line(removed)]);
   }
 
   // multi line case
@@ -635,7 +698,7 @@ fn extract_range_contiguous(buf: &mut Vec<Line>, start: Pos, end: Pos) -> Vec<Li
   let first_tail: Line = buf[start.row].split_off(start_col);
 
   // all inbetween lines. extracts nothing if only two rows
-  let middle: Vec<Line> = buf.drain(start.row + 1..end.row).collect();
+  let middle: Lines = buf.drain(start.row + 1..end.row).collect();
 
   // head of last line
   let last_col = end_col.min(buf[start.row + 1].len());
@@ -649,14 +712,14 @@ fn extract_range_contiguous(buf: &mut Vec<Line>, start: Pos, end: Pos) -> Vec<Li
 
   // construct vector of extracted content
   let mut extracts = vec![first_tail];
-  extracts.extend(middle);
+  extracts.extend(middle.0);
   extracts.push(last_head);
-  extracts
+  Lines(extracts)
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct KillRing {
-  pub kills: VecDeque<Vec<Line>>,
+  pub kills: VecDeque<Lines>,
   pub merging: bool,
   pub selected: Option<usize>,
   pub kill_cycle_span: Option<(Pos, Pos)>,
@@ -671,7 +734,7 @@ impl KillRing {
       kill_cycle_span: None,
     }
   }
-  pub fn push_back(&mut self, kill: Vec<Line>) {
+  pub fn push_back(&mut self, kill: Lines) {
     if kill.is_empty() || (kill.len() == 1 && kill[0].is_empty()) {
       return;
     }
@@ -680,7 +743,7 @@ impl KillRing {
       self.kills.pop_front();
     }
   }
-  pub fn push_front(&mut self, kill: Vec<Line>) {
+  pub fn push_front(&mut self, kill: Lines) {
     if kill.is_empty() || (kill.len() == 1 && kill[0].is_empty()) {
       return;
     }
@@ -689,10 +752,10 @@ impl KillRing {
       self.kills.pop_back();
     }
   }
-  pub fn pop_back(&mut self) -> Option<Vec<Line>> {
+  pub fn pop_back(&mut self) -> Option<Lines> {
     self.kills.pop_back()
   }
-  pub fn pop_front(&mut self) -> Option<Vec<Line>> {
+  pub fn pop_front(&mut self) -> Option<Lines> {
     self.kills.pop_front()
   }
   pub fn len(&self) -> usize {
@@ -717,7 +780,7 @@ impl KillRing {
 }
 
 impl Iterator for KillRing {
-  type Item = Vec<Line>;
+  type Item = Lines;
   fn next(&mut self) -> Option<Self::Item> {
     let next_idx = self.next_idx();
     self.kills.get(next_idx).cloned()
@@ -726,38 +789,38 @@ impl Iterator for KillRing {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Hint {
-  Override(Vec<Line>),
-  History(Vec<Line>),
-  Completion(Vec<Line>),
+  Override(Lines),
+  History(Lines),
+  Completion(Lines),
 }
 
 impl Hint {
   pub fn new_override(s: String) -> Self {
-    Self::Override(to_lines(s))
+    Self::Override(Lines::to_lines(s))
   }
   pub fn new_history(s: String) -> Self {
-    Self::History(to_lines(s))
+    Self::History(Lines::to_lines(s))
   }
   pub fn new_completion(s: String) -> Self {
-    Self::Completion(to_lines(s))
+    Self::Completion(Lines::to_lines(s))
   }
 
-  pub fn set_lines(&mut self, new_lines: Vec<Line>) {
+  pub fn set_lines(&mut self, new_lines: Lines) {
     match self {
       Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => {
         *lines = new_lines;
       }
     }
   }
-  pub fn lines(&self) -> &[Line] {
+  pub fn lines(&self) -> &Lines {
     match self {
       Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => lines,
     }
   }
   pub fn raw(&self) -> String {
-    join_lines(self.lines())
+    self.lines().join()
   }
-  pub fn take_lines(&mut self) -> Vec<Line> {
+  pub fn take_lines(&mut self) -> Lines {
     match self {
       Self::Override(lines) | Self::History(lines) | Self::Completion(lines) => {
         std::mem::take(lines)
@@ -821,7 +884,7 @@ impl Ord for Hint {
 
 #[derive(Debug, Clone)]
 pub struct LineBuf {
-  pub lines: Vec<Line>,
+  pub lines: Lines,
   pub hint: Option<Hint>,
   pub cursor: Cursor,
 
@@ -850,7 +913,7 @@ pub struct LineBuf {
 impl Default for LineBuf {
   fn default() -> Self {
     Self {
-      lines: vec![Line::from(vec![])],
+      lines: Lines::default(),
       hint: None,
       cursor: Cursor {
         pos: Pos { row: 0, col: 0 },
@@ -908,7 +971,7 @@ impl LineBuf {
     });
     let mut hint_lines = self.hint_lines();
     let mut buf_lines = self.lines.clone();
-    attach_lines(&mut buf_lines, &mut hint_lines);
+    buf_lines.attach_lines(&mut hint_lines);
     (raw.min(100)).min(buf_lines.len())
   }
   pub fn update_scroll_offset(&mut self) {
@@ -924,7 +987,7 @@ impl LineBuf {
     let max_offset = self.lines.len().saturating_sub(height);
     self.scroll_offset = self.scroll_offset.min(max_offset);
   }
-  pub fn get_window(&self) -> Vec<Line> {
+  pub fn get_window(&self) -> Lines {
     let height = self.get_viewport_height();
     self
       .lines
@@ -935,7 +998,7 @@ impl LineBuf {
       .collect()
   }
   pub fn window_joined(&self) -> String {
-    join_lines(&self.get_window())
+    self.get_window().join()
   }
   pub fn display_window_joined(&self) -> String {
     let display = self.to_string();
@@ -947,7 +1010,7 @@ impl LineBuf {
     highlighter.highlight();
     let highlighted = highlighter.take();
     let hint = self.get_hint_text();
-    let lines = to_lines(format!("{highlighted}{hint}"));
+    let lines = Lines::to_lines(format!("{highlighted}{hint}"));
 
     let offset = self.scroll_offset.min(lines.len());
     let (_, mid) = lines.split_at(offset);
@@ -955,7 +1018,7 @@ impl LineBuf {
     let height = self.get_viewport_height().min(mid.len());
     let (mid, _) = mid.split_at(height);
 
-    join_lines(mid)
+    Lines(mid.to_vec()).join()
   }
   pub fn window_slice_to_cursor(&self) -> Option<String> {
     let mut result = String::new();
@@ -1229,7 +1292,7 @@ impl LineBuf {
       ))
     }
   }
-  fn insert_lines_at(&mut self, pos: Pos, mut lines: Vec<Line>) {
+  fn insert_lines_at(&mut self, pos: Pos, mut lines: Lines) {
     if lines.is_empty() {
       return;
     }
@@ -1245,7 +1308,7 @@ impl LineBuf {
     self.lines[row].append(&mut lines[0]);
 
     // Middle + last lines get inserted after
-    for (i, line) in lines[1..].iter().cloned().enumerate() {
+    for (i, line) in lines.0[1..].iter().cloned().enumerate() {
       self.lines.insert(row + 1 + i, line);
     }
 
@@ -1332,7 +1395,7 @@ impl LineBuf {
     let Some(pos) = self.concat_points.pop_front() else {
       return false;
     };
-    self.lines = split_lines_at(&mut self.lines, pos);
+    self.lines = self.lines.split_lines_at(pos);
     self.fix_cursor();
     true
   }
@@ -1340,7 +1403,7 @@ impl LineBuf {
     let Some(pos) = self.concat_points.pop_back() else {
       return false;
     };
-    split_lines_at(&mut self.lines, pos);
+    self.lines.split_lines_at(pos);
     self.fix_cursor();
     true
   }
@@ -1350,15 +1413,15 @@ impl LineBuf {
   /// Concatenate a string onto the left side of the buffer with a separator
   pub fn concat_left(&mut self, sep: &str, other: &str) {
     if self.is_empty() {
-      self.lines = to_lines(other);
+      self.lines = Lines::to_lines(other);
       return;
     }
     let joined = self.joined();
     let Some(first) = self.lines.first_mut() else {
-      self.lines = to_lines(other);
+      self.lines = Lines::to_lines(other);
       return;
     };
-    let mut new_lines = to_lines(other);
+    let mut new_lines = Lines::to_lines(other);
     if new_lines.is_empty() {
       return;
     }
@@ -1379,7 +1442,7 @@ impl LineBuf {
     last.append(first);
     self.lines[0] = last;
     if !new_lines.is_empty() {
-      for line in new_lines.into_iter().rev() {
+      for line in new_lines.0.into_iter().rev() {
         self.lines.insert(0, line);
       }
     }
@@ -1388,16 +1451,16 @@ impl LineBuf {
   /// Concatenate a string onto the right side of the buffer with a separator
   pub fn concat_right(&mut self, sep: &str, other: &str) {
     if self.is_empty() {
-      self.lines = to_lines(other);
+      self.lines = Lines::to_lines(other);
       return;
     }
     let joined = self.joined();
     let last_row = self.lines.len() - 1;
     let Some(last) = self.lines.last_mut() else {
-      self.lines = to_lines(other);
+      self.lines = Lines::to_lines(other);
       return;
     };
-    let mut new_lines = to_lines(other);
+    let mut new_lines = Lines::to_lines(other);
     if new_lines.is_empty() {
       return;
     }
@@ -1416,12 +1479,12 @@ impl LineBuf {
     };
     let mut first = new_lines.remove(0);
     last.append(&mut first);
-    self.lines.extend(new_lines);
+    self.lines.extend(new_lines.0);
     self.concat_points.push_back(splice_pos);
   }
   fn push_str(&mut self, s: &str) {
-    let mut lines = to_lines(s);
-    attach_lines(&mut self.lines, &mut lines);
+    let mut lines = Lines::to_lines(s);
+    self.lines.attach_lines(&mut lines);
   }
   fn push(&mut self, gr: Grapheme) {
     let last = self.lines.last_mut();
@@ -2149,7 +2212,7 @@ impl LineBuf {
     self.cursor.pos.col -= 1;
     Some(())
   }
-  fn replace_range(&mut self, span: (Pos, Pos), new: &str) -> Vec<Line> {
+  fn replace_range(&mut self, span: (Pos, Pos), new: &str) -> Lines {
     let s = span.0;
     let e = span.1;
     let motion = MotionKind::Char {
@@ -2176,7 +2239,7 @@ impl LineBuf {
         result.push_str(&g.to_string());
       }
       // Middle lines
-      for line in &self.lines[s.row + 1..e.row] {
+      for line in &self.lines.0[s.row + 1..e.row] {
         result.push('\n');
         result.push_str(&line.to_string());
       }
@@ -2329,9 +2392,9 @@ impl LineBuf {
     }
 
     if let Some(h) = hint.as_mut()
-      && let Some(mut hint_lines) = strip_prefix_lines(h.take_lines(), &self.lines)
+      && let Some(mut hint_lines) = h.take_lines().strip_prefix_lines(&self.lines)
     {
-      attach_lines(&mut self.lines, &mut hint_lines);
+      self.lines.attach_lines(&mut hint_lines);
     }
     let old_cursor_pos = self.cursor.pos;
 
@@ -2356,7 +2419,7 @@ impl LineBuf {
         old_end_pos
       };
 
-      let hint_lines = split_lines_at(&mut self.lines, split_pos);
+      let hint_lines = self.lines.split_lines_at(split_pos);
       if !hint_lines.is_empty() {
         hint.set_lines(hint_lines);
         self.hint = Some(hint);
@@ -2831,7 +2894,7 @@ impl LineBuf {
       apply(self)
     }
   }
-  fn extract_span(&mut self, span: (Pos, Pos), inclusive: bool) -> Vec<Line> {
+  fn extract_span(&mut self, span: (Pos, Pos), inclusive: bool) -> Lines {
     let (s, e) = ordered(span.0, span.1);
     let end = if inclusive {
       Pos {
@@ -2846,7 +2909,7 @@ impl LineBuf {
     self.lines = buf;
     extracted
   }
-  fn yank_span(&self, span: (Pos, Pos), inclusive: bool) -> Vec<Line> {
+  fn yank_span(&self, span: (Pos, Pos), inclusive: bool) -> Lines {
     let mut tmp = Self {
       lines: self.lines.clone(),
       cursor: self.cursor,
@@ -2854,7 +2917,7 @@ impl LineBuf {
     };
     tmp.extract_span(span, inclusive)
   }
-  fn extract_range(&mut self, motion: &MotionKind) -> Vec<Line> {
+  fn extract_range(&mut self, motion: &MotionKind) -> Lines {
     let extracted = match motion {
       MotionKind::Char {
         start,
@@ -2867,7 +2930,7 @@ impl LineBuf {
           let line = self.lines.remove(*line_no);
           extracted_lines.push(line);
         }
-        extracted_lines
+        Lines(extracted_lines)
       }
       MotionKind::Line {
         start,
@@ -2897,7 +2960,7 @@ impl LineBuf {
     }
     extracted
   }
-  fn yank_range(&self, motion: &MotionKind) -> Vec<Line> {
+  fn yank_range(&self, motion: &MotionKind) -> Lines {
     let mut tmp = Self {
       lines: self.lines.clone(),
       cursor: self.cursor,
@@ -2905,13 +2968,13 @@ impl LineBuf {
     };
     tmp.extract_range(motion)
   }
-  fn delete_range(&mut self, motion: &MotionKind) -> Vec<Line> {
+  fn delete_range(&mut self, motion: &MotionKind) -> Lines {
     self.extract_range(motion)
   }
   pub fn checked_calc_indent_level_for_pos(&mut self, pos: Pos) -> (usize, bool) {
     let mut lines = self.lines.clone();
-    split_lines_at(&mut lines, pos);
-    let raw = join_lines(&lines);
+    lines.split_lines_at(pos);
+    let raw = lines.join();
 
     self.indent_ctx.checked_calculate(&raw)
   }
@@ -3063,12 +3126,12 @@ impl LineBuf {
           self.delete_range(&motion)
         };
         let reg_content = match &motion {
-          MotionKind::Char { .. } => RegisterContent::Span(content),
-          MotionKind::Line { .. } => RegisterContent::Line(content),
+          MotionKind::Char { .. } => RegisterContent::Span(content.0),
+          MotionKind::Line { .. } => RegisterContent::Line(content.0),
           MotionKind::Lines { .. } => {
             RegisterContent::Line(vec![content.last().cloned().unwrap_or_default()])
           }
-          MotionKind::Block { .. } => RegisterContent::Block(content),
+          MotionKind::Block { .. } => RegisterContent::Block(content.0),
         };
         register.write_to_register(reg_content);
 
@@ -3297,7 +3360,7 @@ impl LineBuf {
             };
             let start_len = self.lines[row].len();
 
-            self.insert_lines_at(pos, lines);
+            self.insert_lines_at(pos, Lines(lines));
 
             let end_len = self.lines[row].len();
             let mut delta = end_len.saturating_sub(start_len);
@@ -3505,10 +3568,10 @@ impl LineBuf {
         if self.lines.is_empty() {
           self.lines.push(Line::default());
         }
-        let input = format!("{}\n", join_lines(&lines));
+        let input = format!("{}\n", Lines(lines).join());
         let output = self.verb_shell_cmd(sh_cmd, Some(&input))?;
-        let new_lines = to_lines(output.unwrap_or_default());
-        self.lines.splice(s..s, new_lines);
+        let new_lines = Lines::to_lines(output.unwrap_or_default());
+        self.lines.0.splice(s..s, new_lines.0);
       }
       Verb::Read(src) => match src {
         ReadSrc::File(path_buf) => {
@@ -3790,7 +3853,7 @@ impl LineBuf {
                 Pos { row: 0, col: 0 }
               }
             };
-            let lines = to_lines(&buffer);
+            let lines = Lines::to_lines(&buffer);
             let num_lines = lines.len();
             let line_range = self.row()..self.row() + num_lines;
 
@@ -3842,7 +3905,7 @@ impl LineBuf {
         let row = self.row() + 1;
         let col = self.col() + 1;
         let total_graphemes = self.count_graphemes();
-        let (left, _) = split_lines(self.lines.clone(), self.cursor.pos);
+        let (left, _) = self.lines.clone().split_lines(self.cursor.pos);
         let total_in_left = left.iter().map(|l| l.len()).sum::<usize>();
         let percentage = if total_graphemes > 0 {
           (total_in_left as f64 / total_graphemes as f64) * 100.0
@@ -4015,7 +4078,7 @@ impl LineBuf {
         };
 
         // TODO: implement flag logic
-        let mut changes: Vec<(usize, Vec<Line>)> = vec![];
+        let mut changes: Vec<(usize, Lines)> = vec![];
         let lines = self
           .lines
           .iter()
@@ -4029,13 +4092,13 @@ impl LineBuf {
           } else {
             re.replace(&s, new)
           };
-          let lines = to_lines(res);
+          let lines = Lines::to_lines(res);
           changes.push((i, lines));
         }
 
         for (i, change) in changes.into_iter().rev() {
           self.lines.remove(i);
-          for (j, new_line) in change.into_iter().enumerate() {
+          for (j, new_line) in change.0.into_iter().enumerate() {
             self.lines.insert(i + j, new_line);
           }
         }
@@ -4216,7 +4279,7 @@ impl LineBuf {
     }
 
     if let Some(Hint::Override(hint_lines)) = self.hint.as_ref()
-      && !is_prefix_lines(&self.lines, hint_lines)
+      && !self.lines.is_prefix_lines(hint_lines)
     {
       self.clear_hint();
     }
@@ -4224,7 +4287,7 @@ impl LineBuf {
     res
   }
 
-  pub fn handle_edit(&mut self, old: Vec<Line>, new_cursor: Pos, old_cursor: Pos) {
+  pub fn handle_edit(&mut self, old: Lines, new_cursor: Pos, old_cursor: Pos) {
     let edit_is_merging = self.undo_stack.last().is_some_and(|edit| edit.merging);
     if edit_is_merging {
       // Update the `new` snapshot on the existing edit
@@ -4272,14 +4335,14 @@ impl LineBuf {
 
   pub fn joined(&self) -> String {
     let mut lines = vec![];
-    for line in &self.lines {
+    for line in &self.lines.0 {
       lines.push(line.to_string());
     }
     lines.join("\n")
   }
 
   pub fn set_buffer(&mut self, s: String) {
-    self.lines = to_lines(&s);
+    self.lines = Lines::to_lines(&s);
     if self.lines.is_empty() {
       self.lines.push(Line::default());
     }
@@ -4288,7 +4351,7 @@ impl LineBuf {
   }
 
   pub fn clear_buffer(&mut self) {
-    self.lines = vec![Line::default()];
+    self.lines = Lines::default();
     self.clear_concats();
     self.fix_cursor();
   }
@@ -4333,12 +4396,12 @@ impl LineBuf {
       .is_some_and(|h| !h.lines().is_empty() && h.lines().iter().any(|l| !l.is_empty()))
   }
 
-  pub fn hint_lines(&self) -> Vec<Line> {
-    self
+  pub fn hint_lines(&self) -> Lines {
+    Lines(self
       .hint
       .as_ref()
       .map(|h| h.lines().to_vec())
-      .unwrap_or_default()
+      .unwrap_or_default())
   }
 
   pub fn get_hint_text(&self) -> String {
@@ -4361,10 +4424,10 @@ impl LineBuf {
     let Some(mut hint) = self.hint.take() else {
       return;
     };
-    let Some(mut hint_lines) = strip_prefix_lines(hint.take_lines(), &self.lines) else {
+    let Some(mut hint_lines) = hint.take_lines().strip_prefix_lines(&self.lines) else {
       return;
     };
-    attach_lines(&mut self.lines, &mut hint_lines);
+    self.lines.attach_lines(&mut hint_lines);
     self.attempt_alias_expansion_all();
 
     self.set_cursor(Pos::MAX);
@@ -4599,7 +4662,7 @@ impl LineBuf {
     Self::enumerate_graphemes(&self.lines)
   }
 
-  pub fn enumerate_graphemes(lines: &[Line]) -> Vec<(Pos, Grapheme)> {
+  pub fn enumerate_graphemes(lines: &Lines) -> Vec<(Pos, Grapheme)> {
     lines
       .iter()
       .enumerate()
@@ -4646,7 +4709,7 @@ impl LineBuf {
     let mut seen = HashSet::new();
     let (result, first_pos) = AliasExpander::new(raw.clone(), &mut seen).expand();
     if first_pos.is_some() {
-      self.lines = to_lines(result);
+      self.lines = Lines::to_lines(result);
       true
     } else {
       false
@@ -4654,8 +4717,8 @@ impl LineBuf {
   }
 
   pub fn attempt_alias_expansion(&mut self) -> bool {
-    let (to_cursor, mut after_cursor) = split_lines(self.lines.clone(), self.cursor.pos);
-    let raw = join_lines(&to_cursor);
+    let (to_cursor, mut after_cursor) = self.lines.clone().split_lines(self.cursor.pos);
+    let raw = to_cursor.join();
     let mut tokens = LexStream::new(raw.clone().into(), LexFlags::empty())
       .filter_map(Result::ok)
       .filter(|tk| !matches!(tk.class, TkRule::SOI | TkRule::EOI | TkRule::Null))
@@ -4683,8 +4746,8 @@ impl LineBuf {
       let delta = alias.graphemes(true).count() as isize - word.graphemes(true).count() as isize;
       let expanded = last.replaced(&alias);
 
-      self.lines = to_lines(expanded);
-      attach_lines(&mut self.lines, &mut after_cursor);
+      self.lines = Lines::to_lines(expanded);
+      self.lines.attach_lines(&mut after_cursor);
       self.cursor.pos = self.cursor.pos.col_add_signed(delta);
 
       true
@@ -4768,7 +4831,7 @@ impl LineBuf {
             });
 
             lines.push(Line(cur_line));
-            let sub_positions = Self::enumerate_graphemes(&lines).into_iter();
+            let sub_positions = Self::enumerate_graphemes(&Lines(lines)).into_iter();
             // offset past "$(" - 2 chars from the '$' position
             let sub_offset = map_pos(self, pos.col_add(2), offset);
 
@@ -4789,7 +4852,7 @@ impl LineBuf {
             });
 
             lines.push(Line(cur_line));
-            let sub_positions = Self::enumerate_graphemes(&lines).into_iter();
+            let sub_positions = Self::enumerate_graphemes(&Lines(lines)).into_iter();
             // offset past "`" - 1 char from the backtick position
             let sub_offset = map_pos(self, pos.col_add(1), offset);
 
@@ -4855,7 +4918,7 @@ impl LineBuf {
               let end = map_pos(self, end, offset);
 
               let span = self.yank_span((pos2, end), true);
-              let token = join_lines(&span);
+              let token = span.join();
               let cmd = history.resolve_hist_token(&token).unwrap_or(token);
 
               changes.push(((start, end), cmd));
@@ -4914,7 +4977,7 @@ impl LineBuf {
 
   pub fn take_buf(&mut self) -> String {
     let result = self.joined();
-    self.lines = vec![Line::default()];
+    self.lines = Lines::default();
     self.cursor.pos = Pos { row: 0, col: 0 };
     result
   }
@@ -4976,7 +5039,7 @@ impl Display for LineBuf {
         SelectMode::Block(_pos) => unimplemented!(),
       }
       let mut lines = vec![];
-      for line in &cloned {
+      for line in &cloned.0 {
         lines.push(line.to_string());
       }
       let joined = lines.join("\n");
@@ -4988,7 +5051,7 @@ impl Display for LineBuf {
 }
 
 struct CharClassIter<'a> {
-  lines: &'a [Line],
+  lines: &'a Lines,
   row: usize,
   col: usize,
   exhausted: bool,
@@ -4996,7 +5059,7 @@ struct CharClassIter<'a> {
 }
 
 impl<'a> CharClassIter<'a> {
-  pub fn new(lines: &'a [Line], start_pos: Pos) -> Self {
+  pub fn new(lines: &'a Lines, start_pos: Pos) -> Self {
     Self {
       lines,
       row: start_pos.row,
@@ -5071,7 +5134,7 @@ impl<'a> Iterator for CharClassIter<'a> {
 }
 
 struct CharClassIterRev<'a> {
-  lines: &'a [Line],
+  lines: &'a Lines,
   row: usize,
   col: usize,
   exhausted: bool,
@@ -5079,7 +5142,7 @@ struct CharClassIterRev<'a> {
 }
 
 impl<'a> CharClassIterRev<'a> {
-  pub fn new(lines: &'a [Line], start_pos: Pos) -> Self {
+  pub fn new(lines: &'a Lines, start_pos: Pos) -> Self {
     let row = start_pos.row.min(lines.len().saturating_sub(1));
     let col = if lines.is_empty() || lines[row].is_empty() {
       0

@@ -13,6 +13,36 @@ use nix::{
   unistd::read,
 };
 
+#[macro_export]
+macro_rules! assert_status_eq {
+  ($expected_status:expr) => {
+    {
+      assert_eq!(state::get_status(), $expected_status);
+    }
+
+  };
+  ($expected_status:expr, $($args:tt)+) => {
+    {
+      assert_eq!(state::get_status(), $expected_status, $($args)+);
+    }
+  }
+}
+
+#[macro_export]
+macro_rules! assert_status_ne {
+  ($expected_status:expr) => {
+    {
+      assert_ne!(state::get_status(), $expected_status);
+    }
+
+  };
+  ($expected_status:expr, $($args:tt)+) => {
+    {
+      assert_ne!(state::get_status(), $expected_status, $($args)+);
+    }
+  }
+}
+
 use crate::{
   expand::expand_aliases,
   parse::{NdKind, ParsedSrc, Redir, RedirType, execute::exec_nonint, lex::LexFlags},

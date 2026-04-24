@@ -20,7 +20,7 @@ use crate::{
   readline::{
     Marker, annotate_input_recursive,
     editmode::{EditMode, ViInsert},
-    keys::{KeyCode as C, KeyEvent as K, ModKeys as M},
+    keys::{KeyCode as C, KeyEvent as K},
     linebuf::LineBuf,
     markers::{self, is_marker},
     term::calc_str_width,
