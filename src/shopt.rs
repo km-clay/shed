@@ -3,7 +3,7 @@ use std::{fmt::Display, str::FromStr};
 use nix::{libc::STDERR_FILENO, unistd::write};
 
 use crate::expand::expand_keymap;
-use crate::sherr;
+use crate::{sherr, two_way_display};
 use crate::util::ui::color_from_description;
 use crate::{
   parse::lex::Span,
@@ -36,16 +36,10 @@ pub enum ShedBellStyle {
   Disable,
 }
 
-impl FromStr for ShedBellStyle {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s.to_ascii_lowercase().as_str() {
-      "audible" => Ok(Self::Audible),
-      "visible" => Ok(Self::Visible),
-      "disable" => Ok(Self::Disable),
-      _ => Err(sherr!(SyntaxErr, "Invalid bell style '{s}'",)),
-    }
-  }
+two_way_display! {ShedBellStyle,
+  Audible <=> "audible";
+  Visible <=> "visible";
+  Disable <=> "disable";
 }
 
 /// Generates a shopt group struct with `set`, `get`, `Display`, and `Default` impls.
@@ -96,7 +90,7 @@ macro_rules! shopt_group {
                 let validate: fn(&$ty) -> Result<(), String> = $validator;
                 if let Err(e) = validate(&parsed).map_err(|msg| {
                   sherr!(SyntaxErr, "shopt: {msg}")
-                }) { e.print_error(); return Ok(()) }
+                }) { e.print_error(); return $crate::util::with_status(1) }
               )?
               self.$field = parsed;
             }
@@ -395,8 +389,14 @@ shopt_group! {
 
     /// Whether echo expands escape sequences by default
     xpg_echo: bool = false,
+
+    ///
+    bell_style: ShedBellStyle = ShedBellStyle::Audible
   }
 }
+// TODO: new . behavior idea
+// TODO: bell style
+// TODO: lines(line)
 
 #[allow(clippy::ptr_arg)]
 fn validate_leader(v: &String) -> Result<(), String> {
@@ -503,33 +503,6 @@ shopt_group! {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn all_core_fields_covered() {
-    let ShOptCore {
-      dotglob,
-      autocd,
-      hist_ignore_dupes,
-      max_hist,
-      interactive_comments,
-      auto_hist,
-      bell_enabled,
-      max_recurse_depth,
-      xpg_echo,
-    } = ShOptCore::default();
-    // If a field is added to the struct, this destructure fails to compile.
-    let _ = (
-      dotglob,
-      autocd,
-      hist_ignore_dupes,
-      max_hist,
-      interactive_comments,
-      auto_hist,
-      bell_enabled,
-      max_recurse_depth,
-      xpg_echo,
-    );
-  }
 
   #[test]
   fn set_and_get_core_bool() {

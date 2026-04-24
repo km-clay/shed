@@ -144,6 +144,12 @@ impl TermGuard {
   }
 }
 
+impl Default for TermGuard {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 impl Drop for TermGuard {
   fn drop(&mut self) {
     // if we are not active, that means we are still inside of with_term()

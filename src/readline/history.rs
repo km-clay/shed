@@ -13,7 +13,7 @@ use crate::{
   readline::{
     complete::{Candidate, FuzzySelector},
     editcmd::Direction,
-    linebuf::{Hint, LineBuf, to_lines},
+    linebuf::{Hint, LineBuf, Lines},
   },
   sherr,
   state::{self, read_shopts},
@@ -630,12 +630,12 @@ impl History {
   }
 
   pub fn update_pending_cmd(&mut self, buf: (&str, usize)) {
-    let cursor_pos = if let Some(pending) = &self.pending {
-      pending.cursor_to_flat()
-    } else {
-      buf.1
-    };
+    if !self.at_pending() {
+      // Don't overwrite the saved pending command while browsing history
+      return;
+    }
     let cmd = buf.0.to_string();
+    let cursor_pos = buf.1;
 
     if let Some(pending) = &mut self.pending {
       pending.set_buffer(cmd);
@@ -688,7 +688,7 @@ impl History {
       .iter()
       .rev()
       .find(|e| e.command().starts_with(&prefix) && e.command() != prefix)
-      .map(|e| Hint::History(to_lines(e.command())))
+      .map(|e| Hint::History(Lines::to_lines(e.command())))
   }
 
   pub fn refresh_hist_entries_sync(&mut self) {

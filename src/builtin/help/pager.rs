@@ -13,7 +13,7 @@ use crate::{
   },
   procio::borrow_fd,
   readline::{SimpleEditor, editcmd::Direction, keys::KeyEvent, term::calc_str_width},
-  state::{Cols, Rows, with_term},
+  state::with_term,
   util::error::ShResult,
   write_term,
 };
