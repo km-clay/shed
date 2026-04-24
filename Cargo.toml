@@ -2,7 +2,7 @@
 name = "shed"
 description = "A linux shell written in rust"
 publish = false
-version = "0.13.1"
+version = "0.13.2"
 
 edition = "2024"
 

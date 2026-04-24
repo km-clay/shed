@@ -77,7 +77,7 @@ executable with a shebang line:
       This is the way to include tabs, newlines, and other control
       characters in a string:
 
-          `echo $'hello\tworld'`    # prints "hello	world" (actual tab)
+          `echo $'hello\tworld'`    # prints "hello world" (actual tab)
           `echo $'line1\nline2'`    # prints two lines
           `echo $'\e[31mred\e[0m'`  # prints "red" in red
 
@@ -850,6 +850,6 @@ executable with a shebang line:
           `exec 3<> file.txt`
 
       See |redirect| for full details on redirection syntax.
-			See |builtin-seek| for arbitrary cursor movement in read-write FDs.
+      See |builtin-seek| for arbitrary cursor movement in read-write FDs.
 
 ==============================================================================

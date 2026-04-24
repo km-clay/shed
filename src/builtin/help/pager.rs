@@ -65,6 +65,7 @@ pub struct HelpPager {
   ref_keys: Vec<(usize, char)>,
   cross_refs: Vec<MarkedSpan>, // spans
   click_refs: Vec<ClickableRef>,
+  hovered: Option<usize>, // index into cross_refs
 
   jump_dist: usize,
 
@@ -90,6 +91,7 @@ impl HelpPager {
       ref_keys: vec![],
       click_refs: vec![],
       search: SearchQuery::default(),
+      hovered: None,
       scroll_offset,
       filename,
       content,
@@ -141,7 +143,7 @@ impl HelpPager {
       let line_text = &content_str[line_start..];
 
       let col_start = calc_str_width(&line_text[..prefix_range.start]);
-      let col_end = calc_str_width(&line_text[..postfix_range.end]);
+      let col_end = calc_str_width(&line_text[..postfix_range.end]) + 1; //inclusive
 
       self.click_refs.push(ClickableRef {
         row: screen_row,
@@ -152,6 +154,13 @@ impl HelpPager {
     }
 
     let mut content = self.content().to_string();
+
+    if let Some(idx) = self.hovered
+    && let Some(c_ref) = self.cross_refs.get(idx) {
+      const HOVER_SEQ: &str = "\x1b[7;36m"; // inverse cyan (same length as REF_SEQ to maintain spans)
+      let prefix = c_ref.prefix_range();
+      content.replace_range(prefix, HOVER_SEQ);
+    }
 
     for (s, e) in self.search.results.iter().rev() {
       content.insert_str(*e, RESET_SEQ);
@@ -165,30 +174,31 @@ impl HelpPager {
       .collect();
 
     for (i, line) in content_lines.iter().enumerate() {
-      if !self.ref_keys.is_empty() {
-        let mut line = line.to_string();
-        let indexes = self.cross_refs.iter().enumerate().filter(|(ci, c_ref)| {
-          self.ref_keys.iter().any(|(j, _)| *j == *ci)
-            && c_ref.line_no(self.content()) == self.scroll_offset + i
-        });
-
-        for index in indexes.rev() {
-          let (_, _, postfix) = self.cross_refs[index.0].rel_to_line(self.content());
-          let Some((_, ch)) = self.ref_keys.iter().find(|(j, _)| *j == index.0) else {
-            continue;
-          };
-
-          line = format!(
-            "{}{TAG_SEQ}[{ch}]{RESET_SEQ}{}",
-            &line[..postfix.end],
-            &line[postfix.end..],
-          );
-        }
-
+      if self.ref_keys.is_empty() {
         write_term!("{line}\x1b[K\n").ok();
-      } else {
-        write_term!("{line}\x1b[K\n").ok();
+        continue
       }
+
+      let mut line = line.to_string();
+      let indexes = self.cross_refs.iter().enumerate().filter(|(ci, c_ref)| {
+        self.ref_keys.iter().any(|(j, _)| *j == *ci)
+          && c_ref.line_no(self.content()) == self.scroll_offset + i
+      });
+
+      for index in indexes.rev() {
+        let (_, _, postfix) = self.cross_refs[index.0].rel_to_line(self.content());
+        let Some((_, ch)) = self.ref_keys.iter().find(|(j, _)| *j == index.0) else {
+          continue;
+        };
+
+        line = format!(
+          "{}{TAG_SEQ}[{ch}]{RESET_SEQ}{}",
+          &line[..postfix.end],
+          &line[postfix.end..],
+        );
+      }
+
+      write_term!("{line}\x1b[K\n").ok();
     }
 
     for _ in content_lines.len()..height as usize {
@@ -333,6 +343,9 @@ impl HelpPager {
       K::Back | K::Left | K::Char('h') => return Ok(PagerEvent::Back),
       K::Forward | K::Right | K::Char('l') => return Ok(PagerEvent::Forward),
 
+      K::MousePos(row, col) => {
+        return self.handle_hover(*row, *col);
+      }
       K::LeftClick(row, col) => {
         return self.handle_click(*row, *col);
       }
@@ -435,6 +448,23 @@ impl HelpPager {
         break; // no more hint chars available
       }
     }
+  }
+
+  fn click_ref_from_pos(&self, row: usize, col: usize) -> Option<&ClickableRef> {
+    self.click_refs.iter().find(|cr| {
+      cr.row == row && col >= cr.col_start && col < cr.col_end
+    })
+  }
+
+  fn handle_hover(&mut self, row: usize, col: usize) -> ShResult<PagerEvent> {
+    let new_hover = self.click_ref_from_pos(row, col).map(|cr| cr.ref_idx);
+
+    if new_hover != self.hovered {
+      self.hovered = new_hover;
+      self.display()?;
+    }
+
+    Ok(PagerEvent::Continue)
   }
 
   fn handle_click(&mut self, row: usize, col: usize) -> ShResult<PagerEvent> {

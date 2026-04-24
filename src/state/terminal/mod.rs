@@ -289,6 +289,7 @@ impl Perform for EventParser {
               0 => TermEvent::Key(KeyEvent(KeyCode::LeftClick(row,col), ModKeys::empty())),
               1 => TermEvent::Key(KeyEvent(KeyCode::MiddleClick(row,col), ModKeys::empty())),
               2 => TermEvent::Key(KeyEvent(KeyCode::RightClick(row,col), ModKeys::empty())),
+              35 => TermEvent::Key(KeyEvent(KeyCode::MousePos(row, col), ModKeys::empty())),
               _ => {
                 // Other mouse events we don't care about
                 return;
@@ -554,8 +555,8 @@ impl Terminal {
   pub const CURSOR_SHOW: &str = "\x1b[?25h";
   pub const CURSOR_QUERY: &str = "\x1b[6n";
   pub const CLEAR_SCREEN: &str = "\x1b[2J\x1b[H";
-  pub const MOUSE_ON: &str = "\x1b[?1000h\x1b[?1006h";
-  pub const MOUSE_OFF: &str = "\x1b[?1000l\x1b[?1006l";
+  pub const MOUSE_ON: &str = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
+  pub const MOUSE_OFF: &str = "\x1b[?1003l\x1b[?1000l\x1b[?1006l";
   fn toggle_attr(
     buf: &mut String,
     switch: &mut bool,

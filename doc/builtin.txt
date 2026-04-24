@@ -724,7 +724,7 @@ KILL                                             *builtin-kill* *kill*
 
   `-l`             list all signal names
   `-l {name|N}`    print signal name for {name} or number {N}.
-                   Numbers > 128 are decoded as exit status (N − 128).
+                   Numbers > 128 are decoded as exit status (N - 128).
   `-v`             verbose: print each signal as it is sent
 
   Examples:

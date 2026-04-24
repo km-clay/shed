@@ -111,7 +111,7 @@ see |builtin-shopt| for more info.
   `Ctrl+D`                                     *key-ctrl-d*
 
       In normal mode, scroll down half a screen. See |viewport|.
-			In insert mode, `Ctrl+D` clears the buffer if there is any content, and exits the shell if there is not.
+      In insert mode, `Ctrl+D` clears the buffer if there is any content, and exits the shell if there is not.
 
   `Ctrl+U`                                     *key-ctrl-u*
 

@@ -233,7 +233,7 @@ processes.
 
           Set the visual selection anchor, if any. Accepts a flat index
           or `row:col` format. Note that this doesn't make the editor
-					enter visual mode if it's not already in it.
+          enter visual mode if it's not already in it.
 
               `line::set::anchor::3`
               `line::set::anchor::0:3`

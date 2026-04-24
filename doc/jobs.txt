@@ -29,13 +29,13 @@ the foreground and background.
       prompt:
 
           `sleep 60 &`
-          `[1]	12345 running	sleep`
+          `[1]  12345 running sleep`
 
   Pipelines can be backgrounded too:
 
       `find / -name "*.log" | wc -l &`
-			`[1]	12345 running find |
-						54321 running wc`
+      `[1]  12345 running find |
+            54321 running wc`
 
 ==============================================================================
 3. Job Identifiers                               *jobs-id*

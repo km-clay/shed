@@ -3,7 +3,7 @@ mod pager;
 
 use std::{
   env,
-  path::{Path, PathBuf},
+  path::Path,
 };
 
 use crate::{
@@ -25,12 +25,54 @@ use nix::{
   poll::{PollFd, PollFlags, PollTimeout, poll},
 };
 
-/// Directory to search for help docs, set at compile time from the `SHED_DOC_DIR` environment variable
-/// Useful for package build scripts that also install the help pages, to ensure the correct path is embedded in the binary
-const DOC_DIR: &str = match option_env!("SHED_DOC_DIR") {
-  Some(dir) => dir,
-  None => "doc",
-};
+/// Validates the included help pages
+///
+/// If the help pages contain tabs or non-ascii characters,
+/// that is a compile error. The goal is to keep formatting
+/// consistent, and make sure that output looks good even in the tty
+const fn validate_help_page(s: &str) {
+  let bytes = s.as_bytes();
+  let mut i = 0;
+  while i < bytes.len() {
+    if bytes[i] == b'\t' {
+      panic!("help file contains tabs")
+    }
+    if bytes[i] > 127 {
+      panic!("help file contains non-ascii characters")
+    }
+    i += 1;
+  }
+}
+
+macro_rules! help_pages {
+  ($($name:literal),* $(,)?) => {
+    const HELP_PAGES: &[(&str, &str)] = &[
+      $({
+        const S: &str = include_str!(concat!("../../../doc/", $name, ".txt"));
+        validate_help_page(S);
+        ($name, S)
+      },)*
+    ];
+  };
+}
+
+help_pages! {
+  "arith",
+  "autocmd",
+  "builtin",
+  "commands",
+  "ex",
+  "glob",
+  "help",
+  "jobs",
+  "keybinds",
+  "param",
+  "prompt",
+  "redirect",
+  "scripting",
+  "socket",
+  "variables",
+}
 
 pub(super) struct Help;
 impl super::Builtin for Help {
@@ -71,7 +113,6 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
   }
 
   let hpath = env::var("SHED_HPATH").unwrap_or_default();
-  let hpath = [hpath.as_str(), DOC_DIR].join(":");
 
   // search for prefixes of help doc filenames
   for path in hpath.split(':') {
@@ -96,6 +137,13 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
     }
   }
 
+  // ok, not a filename. let's check our builtin help pages
+  for (page,content) in HELP_PAGES {
+    if page.starts_with(topic) {
+      return Some((0, content.to_string(), Some(page.to_string())));
+    }
+  }
+
   // didn't find a filename match, its probably a tag search
   let mut tags = vec![];
   for path in hpath.split(':') {
@@ -108,21 +156,31 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
           continue;
         }
 
-        let mut new_tags = read_tags(&path).ok()?;
+        let mut new_tags = read_tags_from_file(&path).ok()?;
         score_matches(topic, &mut new_tags);
         tags.append(&mut new_tags);
       }
     }
   }
 
+  for (page,content) in HELP_PAGES {
+    let mut new_tags = read_tags(content, page).ok()?;
+    score_matches(topic, &mut new_tags);
+    tags.append(&mut new_tags);
+  }
+
   tags.sort_by_key(|t| t.score());
   log::debug!("tags: {tags:#?}");
   tags.last().and_then(|best| {
     let ScoredTag { tag: _, line, file } = best;
-    let file_name = file.file_stem().map(|s| s.to_string_lossy().to_string());
+
+    if let Some((_, content)) = HELP_PAGES.iter().find(|(name, _)| name == file) {
+      return Some((line.saturating_sub(2), content.to_string(), Some(file.to_string())));
+    }
+
     std::fs::read_to_string(file)
       .ok()
-      .map(|content| (line.saturating_sub(2), content, file_name))
+      .map(|content| (line.saturating_sub(2), content, Some(file.to_string())))
   })
 }
 
@@ -214,15 +272,15 @@ pub fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResu
 pub struct ScoredTag {
   tag: ScoredCandidate,
   line: usize,
-  file: PathBuf,
+  file: String,
 }
 
 impl ScoredTag {
-  pub fn new<P: AsRef<Path>>(tag: ScoredCandidate, line: usize, file: P) -> Self {
+  pub fn new(tag: ScoredCandidate, line: usize, file: &str) -> Self {
     Self {
       tag,
       line,
-      file: file.as_ref().to_path_buf(),
+      file: file.to_string(),
     }
   }
   pub fn fuzzy_score(&mut self, topic: &str) {
@@ -241,9 +299,13 @@ pub fn score_matches(topic: &str, tags: &mut Vec<ScoredTag>) {
   tags.retain(|c| c.score() > i32::MIN);
 }
 
-pub fn read_tags(path: &Path) -> ShResult<Vec<ScoredTag>> {
+pub fn read_tags_from_file(path: &Path) -> ShResult<Vec<ScoredTag>> {
   let contents = std::fs::read_to_string(path)?;
-  let styled = StyledHelp::new(&contents);
+  read_tags(&contents, path.file_stem().unwrap().to_string_lossy().as_ref())
+}
+
+pub fn read_tags(content: &str, name: &str) -> ShResult<Vec<ScoredTag>> {
+  let styled = StyledHelp::new(content);
 
   let tags = styled
     .find_markers(TAG_SEQ)
@@ -252,7 +314,7 @@ pub fn read_tags(path: &Path) -> ShResult<Vec<ScoredTag>> {
       ScoredTag::new(
         ScoredCandidate::new(span.content(styled.content()).into()).with_len_penalty(true),
         span.line_no(styled.content()),
-        path,
+        name
       )
     })
     .collect();

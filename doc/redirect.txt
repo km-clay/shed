@@ -130,9 +130,9 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
 
       Example:
         `if true; then`
-        `	cat <<- EOF`
-        `	indented content`
-        `	EOF`
+        ` cat <<- EOF`
+        ` indented content`
+        ` EOF`
         `fi`
 
 ==============================================================================

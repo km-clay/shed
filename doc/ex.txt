@@ -237,7 +237,7 @@ command history navigable with `Up` and `Down`.
 
   Ex mode maintains its own command history, separate from the main
   shell history. Navigate with `Up` and `Down` while in ex mode, or
-	open history search with `Ctrl+R`.
+  open history search with `Ctrl+R`.
 
 ==============================================================================
 11. Stash                                       *ex-stash*

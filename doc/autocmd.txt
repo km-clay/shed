@@ -234,7 +234,7 @@ behavior without modifying the shell itself.
   Refresh prompt on mode change (for mode indicator):
 
       `autocmd post-mode-change 'kill -USR1 $$'`
-			(SIGUSR1 can be used to remotely refresh the prompt. See |prompt|)
+      (SIGUSR1 can be used to remotely refresh the prompt. See |prompt|)
 
   Log completed jobs:
 

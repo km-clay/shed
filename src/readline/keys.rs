@@ -202,6 +202,10 @@ impl KeyEvent {
         seq.push_str("Forward");
         needs_angle_bracket = true;
       }
+      KeyCode::MousePos(x,y) => {
+        seq.push_str(&format!("MousePos({x},{y})"));
+        needs_angle_bracket = true;
+      }
     }
 
     if needs_angle_bracket {
@@ -241,6 +245,7 @@ pub enum KeyCode {
   // mouse events
   ScrollUp,
   ScrollDown,
+  MousePos(usize,usize),
   LeftClick(usize,usize),
   RightClick(usize,usize),
   MiddleClick(usize,usize),

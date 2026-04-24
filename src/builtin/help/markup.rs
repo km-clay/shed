@@ -27,6 +27,9 @@ impl MarkedSpan {
     }
   }
 
+  pub fn prefix_range(&self) -> Range<usize> {
+    self.prefix_seq.clone()
+  }
   pub fn content<'a>(&self, source: &'a str) -> &'a str {
     &source[self.content.clone()]
   }

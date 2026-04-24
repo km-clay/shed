@@ -990,6 +990,7 @@ pub struct FuzzySelector {
   prompt_line_width: usize,
   prompt_cursor_col: usize,
   row_map: Vec<Option<usize>>,
+  hovered: Option<usize>, // index of the currently hovered candidate, if any
   title: String,
   _mouse_guard: Option<TermGuard>,
 }
@@ -1003,6 +1004,7 @@ pub struct FuzzyCompleter {
 impl FuzzySelector {
   const SELECTOR_GRAY: &str = "\x1b[90m▌\x1b[0m";
   const SELECTOR_HL: &str = "\x1b[38;2;200;0;120m▌\x1b[1;39;48;5;237m";
+  const SELECTOR_HOVER: &str = "\x1b[90m▌\x1b[1;39;48;5;237m";
   const PROMPT_ARROW: &str = "\x1b[1;36m>\x1b[0m";
 
   pub fn new(title: impl Into<String>) -> Self {
@@ -1018,6 +1020,7 @@ impl FuzzySelector {
       prompt_line_width: 0,
       row_map: vec![],
       prompt_cursor_col: 0,
+      hovered: None,
       title: title.into(),
       _mouse_guard: with_term(|t| t.mouse_support_guard(true)).ok()
     }
@@ -1149,7 +1152,7 @@ impl FuzzySelector {
   pub fn handle_click(&mut self, row: usize, _col: usize) -> ShResult<SelectorResponse> {
     let top_left = self.old_layout.as_ref().map(|l| l.top_left).unwrap_or(0);
     let relative_row = row.saturating_sub(top_left);
-    if let Some(&Some(idx)) = self.row_map.get(relative_row) {
+    if let Some(idx) = self.row_map.get(relative_row).copied().flatten() {
       if self.cursor.val == idx {
         Ok(SelectorResponse::Accept(self.filtered[idx].candidate.clone()))
       } else {
@@ -1161,8 +1164,21 @@ impl FuzzySelector {
     }
   }
 
+  pub fn handle_hover(&mut self, row: usize) -> ShResult<SelectorResponse> {
+    let top_left = self.old_layout.as_ref().map(|l| l.top_left).unwrap_or(0);
+    let relative_row = row.saturating_sub(top_left);
+    let idx = self.row_map.get(relative_row).copied().flatten();
+
+    if self.hovered != idx {
+      self.hovered = idx;
+    }
+
+    Ok(SelectorResponse::Consumed)
+  }
+
   pub fn handle_key(&mut self, key: K) -> ShResult<SelectorResponse> {
     match key {
+      K(C::MousePos(row,_), _) => self.handle_hover(row),
       K(C::LeftClick(row,col), _) => self.handle_click(row, col),
       key!(Ctrl + 'd') | key!(Esc) => {
         self.filtered.clear();
@@ -1225,6 +1241,7 @@ impl FuzzySelector {
     let num_filtered = self.filtered.len();
     let num_candidates = self.candidates.len();
     let min_pad = num_candidates.to_string().len().saturating_add(1).max(6);
+    let hovered = self.hovered;
 
     self.query.set_available_width(cols.saturating_sub(6));
     self.query.update_scroll_offset();
@@ -1274,8 +1291,11 @@ impl FuzzySelector {
       }
 
       let selected = i + offset == cursor_pos;
+      let hovered = hovered == Some(i + offset);
       let selector = if selected {
         Self::SELECTOR_HL
+      } else if hovered {
+        Self::SELECTOR_HOVER
       } else {
         Self::SELECTOR_GRAY
       };
