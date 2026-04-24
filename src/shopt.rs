@@ -2,7 +2,9 @@ use std::{fmt::Display, str::FromStr};
 
 use nix::{libc::STDERR_FILENO, unistd::write};
 
+use crate::expand::expand_keymap;
 use crate::sherr;
+use crate::util::ui::color_from_description;
 use crate::{
   parse::lex::Span,
   procio::borrow_fd,
@@ -51,6 +53,8 @@ impl FromStr for ShedBellStyle {
 /// Doc comments on each field become the description shown by `shopt get`.
 /// Every field type must implement `FromStr + Display`.
 ///
+/// Additionally creates a line generator for the default `.shedrc` file.
+///
 /// Optional per-field validation: `#[validate(|val| expr)]` runs after parsing
 /// and must return `Result<(), String>` where the error string is the message.
 macro_rules! shopt_group {
@@ -90,9 +94,9 @@ macro_rules! shopt_group {
               })?;
               $(
                 let validate: fn(&$ty) -> Result<(), String> = $validator;
-                validate(&parsed).map_err(|msg| {
+                if let Err(e) = validate(&parsed).map_err(|msg| {
                   sherr!(SyntaxErr, "shopt: {msg}")
-                })?;
+                }) { e.print_error(); return Ok(()) }
               )?
               self.$field = parsed;
             }
@@ -124,6 +128,27 @@ macro_rules! shopt_group {
             "shopt: unexpected '{}' option '{query}'", $group_name,
           )),
         }
+      }
+
+      pub fn generate_rc_lines() -> Vec<String> {
+        let defaults = Self::default();
+        let mut lines = vec![];
+        $(
+          let desc = concat!($($desc,)*);
+          let val = $crate::expand::as_var_val_display(&defaults.$field.to_string());
+          let entry = format!(
+            "shopt {}.{}={}",
+            $group_name,
+            stringify!($field),
+            val,
+          );
+          if !desc.is_empty() {
+            lines.push(format!("{:<50} # {}", entry, desc.trim()));
+          } else {
+            lines.push(entry);
+          }
+        )*
+        lines
       }
     }
 
@@ -167,6 +192,32 @@ impl Default for ShOpts {
 }
 
 impl ShOpts {
+  pub fn generate_default_rc() -> Vec<String> {
+    let mut lines = vec![];
+    lines.push("# -- Shell Options --".into());
+    lines.push(String::new());
+
+    lines.push("# - Core -".into());
+    lines.extend(ShOptCore::generate_rc_lines());
+    lines.push(String::new());
+
+    lines.push("# - Line Editor -".into());
+    lines.extend(ShOptLine::generate_rc_lines());
+    lines.push(String::new());
+
+    lines.push("# - Prompt -".into());
+    lines.extend(ShOptPrompt::generate_rc_lines());
+    lines.push(String::new());
+
+    lines.push("# - POSIX Set Options -".into());
+    lines.extend(ShOptSet::generate_rc_lines());
+    lines.push(String::new());
+
+    lines.push("# - Syntax Highlighting -".into());
+    lines.extend(ShOptHighlight::generate_rc_lines());
+    lines
+  }
+
   pub fn query(&mut self, query: &str) -> ShResult<Option<String>> {
     if let Some((opt, new_val)) = query.split_once('=') {
       self.set(opt, new_val)?;
@@ -228,6 +279,22 @@ impl ShOpts {
   }
 }
 
+#[allow(clippy::ptr_arg)]
+fn validate_viewport_height(v: &String) -> Result<(), String> {
+  if v.ends_with('%') {
+    let num_part = &v[..v.len() - 1];
+    match num_part.parse::<usize>() {
+      Ok(num) if num > 0 && num <= 100 => Ok(()),
+      _ => Err("viewport_height percentage must be a number between 1% and 100%".into()),
+    }
+  } else {
+    match v.parse::<usize>() {
+      Ok(num) if num > 0 => Ok(()),
+      _ => Err("viewport_height must be a positive integer or a percentage".into()),
+    }
+  }
+}
+
 shopt_group! {
   #[derive(Clone, Debug)]
   pub struct ShOptLine ("line") {
@@ -235,6 +302,7 @@ shopt_group! {
     linebreak_on_incomplete: bool = true,
 
     /// The maximum height of the line editor viewport window. Can be a positive number or a percentage of terminal height like "50%"
+    #[validate(validate_viewport_height)]
     viewport_height: String = "50%".to_string(),
 
     /// Whether to display line numbers in multiline input
@@ -251,6 +319,9 @@ shopt_group! {
 
     /// Whether to suggest commands from history as commands are typed
     auto_suggest: bool = true,
+
+    /// A command to use when text is yanked into the '+' register
+    clipboard_cmd: String = "".to_string(),
   }
 }
 
@@ -286,6 +357,14 @@ shopt_group! {
   }
 }
 
+fn validate_max_hist(v: &isize) -> Result<(), String> {
+  if *v < -1 {
+    Err("expected a non-negative integer or -1 for max_hist value".into())
+  } else {
+    Ok(())
+  }
+}
+
 shopt_group! {
   #[derive(Clone, Debug)]
   pub struct ShOptCore ("core") {
@@ -299,11 +378,7 @@ shopt_group! {
     hist_ignore_dupes: bool = true,
 
     /// Maximum number of entries in the command history file (-1 for unlimited)
-    #[validate(|v: &isize| if *v < -1 {
-      Err("expected a non-negative integer or -1 for max_hist value".into())
-    } else {
-      Ok(())
-    })]
+    #[validate(validate_max_hist)]
     max_hist: isize = 10_000,
 
     /// Whether or not to allow comments in interactive mode
@@ -323,6 +398,14 @@ shopt_group! {
   }
 }
 
+#[allow(clippy::ptr_arg)]
+fn validate_leader(v: &String) -> Result<(), String> {
+  if expand_keymap(v).is_empty() {
+    Err(format!("invalid leader key sequence '{v}'"))
+  } else {
+    Ok(())
+  }
+}
 shopt_group! {
   #[derive(Clone, Debug)]
   pub struct ShOptPrompt ("prompt") {
@@ -333,7 +416,8 @@ shopt_group! {
     comp_limit: usize = 100,
 
     /// The leader key sequence used in keymap bindings
-    leader: String = " ".to_string(),
+    #[validate(validate_leader)]
+    leader: String = "<Space>".to_string(),
 
     /// Command to execute as a screensaver after idle timeout
     screensaver_cmd: String = String::new(),
@@ -352,34 +436,66 @@ shopt_group! {
   }
 }
 
+fn validate_color(v: &String) -> Result<(), String> {
+  if color_from_description(v).is_err() {
+    Err(format!("invalid color description '{v}'"))
+  } else {
+    Ok(())
+  }
+}
+
 shopt_group! {
   #[derive(Clone, Debug)]
   pub struct ShOptHighlight ("highlight") {
     /// Whether to enable syntax highlighting in the line editor
     enable: bool = true,
+
     /// The color used for highlighting strings
+    #[validate(validate_color)]
     string: String = "yellow".into(),
+
     /// The color used for highlighting keywords like 'if' and 'for'
+    #[validate(validate_color)]
     keyword: String = "yellow".into(),
+
     /// The color used for highlighting valid commands
+    #[validate(validate_color)]
     valid_command: String = "green".into(),
+
     /// The color used for highlighting invalid commands
+    #[validate(validate_color)]
     invalid_command: String = "bold red".into(),
+
     /// The color used for highlighting control flow keywords like 'break' and 'return'
+    #[validate(validate_color)]
     control_flow_keyword: String = "magenta".into(),
+
     /// The color used for highlighting command arguments
+    #[validate(validate_color)]
     argument: String = "white".into(),
+
     /// The color used for highlighting arguments that refer to existing files
+    #[validate(validate_color)]
     argument_file: String = "underline white".into(),
+
     /// The color used for highlighting variables
+    #[validate(validate_color)]
     variable: String = "cyan".into(),
+
     /// The color used for highlighting operators like pipes and redirects
+    #[validate(validate_color)]
     operator: String = "bold".into(),
+
     /// The color used for highlighting comments
+    #[validate(validate_color)]
     comment: String = "italic bright black".into(),
+
     /// The color used for highlighting glob characters
+    #[validate(validate_color)]
     glob: String = "bright cyan".into(),
+
     /// The color used for highlighting the current selection
+    #[validate(validate_color)]
     selection: String = "black on white".into(),
   }
 }

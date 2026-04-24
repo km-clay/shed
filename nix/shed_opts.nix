@@ -331,7 +331,7 @@
             options = {
               leader = lib.mkOption {
                 type = lib.types.str;
-                default = "\\\\";
+                default = "<Space>";
                 description = "The leader key to use for custom keymaps (e.g. if set to '\\\\', then a keymap with keys='x' would be triggered by '\\x')";
               };
               expand_aliases = lib.mkOption {
