@@ -14,7 +14,7 @@
   {
     packages.default = pkgs.rustPlatform.buildRustPackage {
       pname = "shed";
-      version = "0.12.8";
+      version = "0.13.0";
 
       src = self;
 

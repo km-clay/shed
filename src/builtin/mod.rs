@@ -409,7 +409,7 @@ impl Builtin for CommandBuiltin {
     node.flags |= NdFlags::NO_FORK;
 
     // this one has to offload to the dispatcher
-    dispatcher.dispatch_node(node)
+    dispatcher.exec_cmd(node)
   }
 }
 

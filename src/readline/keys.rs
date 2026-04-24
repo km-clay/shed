@@ -174,6 +174,34 @@ impl KeyEvent {
       }
       KeyCode::Grapheme(gr) => seq.push_str(gr),
       KeyCode::Verbatim(s) => seq.push_str(s),
+      clk @ (KeyCode::MiddleClick(x,y) |
+      KeyCode::RightClick(x,y) |
+      KeyCode::LeftClick(x,y)) => {
+        let name = match clk {
+          KeyCode::MiddleClick(_,_) => "MiddleClick",
+          KeyCode::RightClick(_,_) => "RightClick",
+          KeyCode::LeftClick(_,_) => "LeftClick",
+          _ => unreachable!(),
+        };
+        seq.push_str(&format!("{name}({x},{y})"));
+        needs_angle_bracket = true;
+      }
+      KeyCode::ScrollUp => {
+        seq.push_str("ScrollUp");
+        needs_angle_bracket = true;
+      }
+      KeyCode::ScrollDown => {
+        seq.push_str("ScrollDown");
+        needs_angle_bracket = true;
+      }
+      KeyCode::Back => {
+        seq.push_str("Back");
+        needs_angle_bracket = true;
+      }
+      KeyCode::Forward => {
+        seq.push_str("Forward");
+        needs_angle_bracket = true;
+      }
     }
 
     if needs_angle_bracket {
@@ -209,6 +237,15 @@ pub enum KeyCode {
   Right,
   Tab,
   Up,
+
+  // mouse events
+  ScrollUp,
+  ScrollDown,
+  LeftClick(usize,usize),
+  RightClick(usize,usize),
+  MiddleClick(usize,usize),
+  Back,
+  Forward,
 
   // weird stuff
   ExMode, // keycode emitted by the <cmd> byte alias in vim keymaps

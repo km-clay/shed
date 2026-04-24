@@ -11,6 +11,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
   expand::escape_str,
+  key,
   match_loop,
   parse::{
     execute::exec_nonint,
@@ -25,8 +26,7 @@ use crate::{
     term::calc_str_width,
   },
   state::{
-    self, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars,
-    with_term, write_vars,
+    self, Cols, Rows, TermGuard, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, with_term, write_vars
   },
   util::{TkVecUtils, error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, ui},
   write_term,
@@ -73,6 +73,13 @@ impl ClampedUsize {
     } else {
       self.val = self.val.saturating_sub(n);
     }
+  }
+
+  pub fn sub(&mut self, n: usize) {
+    self.val = self.val.saturating_sub(n);
+  }
+  pub fn add(&mut self, n: usize) {
+    self.val = self.val.saturating_add(n).min(self.max.saturating_sub(1));
   }
 }
 
@@ -906,6 +913,7 @@ impl From<Candidate> for ScoredCandidate {
 
 #[derive(Debug, Clone)]
 pub struct FuzzyLayout {
+  top_left: usize,
   rows: usize,
   cols: usize,
   cursor_col: usize,
@@ -969,7 +977,7 @@ impl QueryEditor {
   }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct FuzzySelector {
   query: QueryEditor,
   filtered: Vec<ScoredCandidate>,
@@ -979,13 +987,14 @@ pub struct FuzzySelector {
   old_layout: Option<FuzzyLayout>,
   max_height: usize,
   scroll_offset: usize,
-  active: bool,
   prompt_line_width: usize,
   prompt_cursor_col: usize,
+  row_map: Vec<Option<usize>>,
   title: String,
+  _mouse_guard: Option<TermGuard>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FuzzyCompleter {
   completer: SimpleCompleter,
   pub selector: FuzzySelector,
@@ -1006,10 +1015,11 @@ impl FuzzySelector {
       number_candidates: false,
       old_layout: None,
       scroll_offset: 0,
-      active: false,
       prompt_line_width: 0,
+      row_map: vec![],
       prompt_cursor_col: 0,
       title: title.into(),
+      _mouse_guard: with_term(|t| t.mouse_support_guard(true)).ok()
     }
   }
 
@@ -1037,7 +1047,6 @@ impl FuzzySelector {
   }
 
   pub fn activate(&mut self, candidates: Vec<Candidate>) {
-    self.active = true;
     self.candidates = candidates;
     self.score_candidates();
   }
@@ -1048,25 +1057,9 @@ impl FuzzySelector {
     self.score_candidates();
   }
 
-  pub fn reset(&mut self) {
+  pub fn reset_query(&mut self) {
     self.query.clear();
-    self.filtered.clear();
-    self.candidates.clear();
-    self.cursor = ClampedUsize::new(0, 0, true);
-    self.old_layout = None;
-    self.scroll_offset = 0;
-    self.active = false;
-  }
-
-  pub fn reset_stay_active(&mut self) {
-    if self.active {
-      self.query.clear();
-      self.score_candidates();
-    }
-  }
-
-  pub fn is_active(&self) -> bool {
-    self.active
+    self.score_candidates();
   }
 
   pub fn selected_candidate(&self) -> Option<Candidate> {
@@ -1153,29 +1146,57 @@ impl FuzzySelector {
     self.filtered = scored;
   }
 
+  pub fn handle_click(&mut self, row: usize, _col: usize) -> ShResult<SelectorResponse> {
+    let top_left = self.old_layout.as_ref().map(|l| l.top_left).unwrap_or(0);
+    let relative_row = row.saturating_sub(top_left);
+    if let Some(&Some(idx)) = self.row_map.get(relative_row) {
+      if self.cursor.val == idx {
+        Ok(SelectorResponse::Accept(self.filtered[idx].candidate.clone()))
+      } else {
+        self.cursor = ClampedUsize::new(idx, self.filtered.len(), true);
+        Ok(SelectorResponse::Consumed)
+      }
+    } else {
+      Ok(SelectorResponse::Consumed)
+    }
+  }
+
   pub fn handle_key(&mut self, key: K) -> ShResult<SelectorResponse> {
     match key {
-      K(C::Char('d'), M::CTRL) | K(C::Esc, M::NONE) => {
-        self.active = false;
+      K(C::LeftClick(row,col), _) => self.handle_click(row, col),
+      key!(Ctrl + 'd') | key!(Esc) => {
         self.filtered.clear();
         Ok(SelectorResponse::Dismiss)
       }
-      K(C::Enter, M::NONE) => {
-        self.active = false;
+      key!(Enter) => {
         if let Some(selected) = self.filtered.get(self.cursor.get()) {
           Ok(SelectorResponse::Accept(selected.candidate.clone()))
         } else {
           Ok(SelectorResponse::Dismiss)
         }
       }
-      K(C::Tab, M::SHIFT) | K(C::Up, M::NONE) => {
-        self.cursor.wrap_sub(1);
+      key @(key!(ScrollUp) | key!(Shift + Tab) | key!(Up)) => {
+        match key {
+          key!(ScrollUp) => self.cursor.sub(1), // no wrap
+          key!(Up) |
+          key!(Shift + Tab) => self.cursor.wrap_sub(1), // wrap
+          _ => unreachable!()
+        }
+        Ok(SelectorResponse::Consumed)
+      }
+      key @(key!(ScrollDown) | key!(Tab) | key!(Down)) => {
+        match key {
+          key!(ScrollDown) => self.cursor.add(1), // no wrap
+          key!(Down) |
+          key!(Tab) => self.cursor.wrap_add(1), // wrap
+          _ => unreachable!()
+        }
         self.update_scroll_offset();
         Ok(SelectorResponse::Consumed)
       }
-      K(C::Tab, M::NONE) | K(C::Down, M::NONE) => {
-        self.cursor.wrap_add(1);
-        self.update_scroll_offset();
+      key!(Ctrl + 'c') => {
+        self.query.clear();
+        self.score_candidates();
         Ok(SelectorResponse::Consumed)
       }
       _ => {
@@ -1187,15 +1208,16 @@ impl FuzzySelector {
   }
 
   pub fn draw(&mut self) -> ShResult<usize> {
-    if !self.active {
-      return Ok(0);
-    }
-    let cols = with_term(|t| t.t_cols());
+    self.row_map.clear();
+    let (cols,top_left) = with_term(|t| {
+      (t.t_cols(), t.get_cursor_pos().ok().flatten().unwrap_or((Rows(0),Cols(0))).0.0 + 1)
+    });
 
     let pad = |content: &str, fill: &str, right_border: &str| {
       ui::pad_line(content, fill, right_border, cols);
     };
 
+    let mut row_map = vec![];
     let cursor_pos = self.cursor.get();
     let offset = self.scroll_offset;
     let number_candidates = self.number_candidates;
@@ -1220,6 +1242,7 @@ impl FuzzySelector {
     );
     pad(&title_content, ui::HOR_LINE, ui::TOP_RIGHT);
     rows += 1;
+    row_map.push(None);
 
     // │ > query                  │
     let prompt_content = format!("{} {} {}", ui::VERT_LINE, Self::PROMPT_ARROW, query);
@@ -1289,6 +1312,7 @@ impl FuzzySelector {
 
         pad(&left, " ", ui::VERT_LINE);
         rows += 1;
+        row_map.push(Some(i + offset));
         drew_number = true;
         lines_drawn += 1;
       }
@@ -1303,6 +1327,7 @@ impl FuzzySelector {
     )
     .unwrap();
     rows += 1;
+    row_map.push(None);
 
     // Move cursor back up to the query input line
     let lines_below_prompt = rows.saturating_sub(2);
@@ -1315,6 +1340,7 @@ impl FuzzySelector {
     write_term!("\x1b[{lines_below_prompt}A\r\x1b[{cursor_col}C").unwrap();
 
     let new_layout = FuzzyLayout {
+      top_left,
       rows,
       cols,
       cursor_col,
@@ -1322,6 +1348,7 @@ impl FuzzySelector {
       preceding_cursor_col: self.prompt_cursor_col,
     };
     self.old_layout = Some(new_layout);
+    self.row_map = row_map;
 
     Ok(rows)
   }
@@ -1385,7 +1412,7 @@ impl Completer for FuzzyCompleter {
       .set_prompt_line_context(line_width, cursor_col);
   }
   fn reset_stay_active(&mut self) {
-    self.selector.reset_stay_active();
+    self.selector.reset_query();
   }
   fn get_completed_line(&self, _candidate: &str) -> String {
     log::debug!("Getting completed line for candidate: {}", _candidate);
@@ -1455,13 +1482,11 @@ impl Completer for FuzzyCompleter {
     let candidates: Vec<_> = self.completer.candidates.clone();
     if candidates.is_empty() {
       self.completer.reset();
-      self.selector.active = false;
       return Ok(None);
     } else if candidates.len() == 1 {
       self.selector.filtered = candidates.into_iter().map(ScoredCandidate::from).collect();
       let selected = self.selector.filtered[0].candidate.content().to_string();
       let completed = self.get_completed_line(&selected);
-      self.selector.active = false;
       return Ok(Some(completed));
     }
     self.selector.activate(candidates);
@@ -1483,13 +1508,13 @@ impl Completer for FuzzyCompleter {
   }
   fn reset(&mut self) {
     self.completer.reset();
-    self.selector.reset();
+    self.selector.reset_query();
   }
   fn token_span(&self) -> (usize, usize) {
     self.completer.token_span()
   }
   fn is_active(&self) -> bool {
-    self.selector.is_active()
+    !self.selector.candidates.is_empty()
   }
   fn selected_candidate(&self) -> Option<Candidate> {
     self.selector.selected_candidate()

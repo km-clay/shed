@@ -8,7 +8,7 @@ use crate::readline::editcmd::{
 };
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::Grapheme;
-use crate::{ctrl, motion, verb};
+use crate::{key, motion, verb};
 
 #[derive(Default, Debug)]
 pub struct ViVisual {
@@ -622,7 +622,7 @@ impl EditMode for ViVisual {
   fn handle_key(&mut self, key: E) -> Option<EditCmd> {
     let mut cmd: Option<EditCmd> = match key {
       E(K::Char(ch), M::NONE) => self.try_parse(ch),
-      E(K::Backspace, M::NONE) => Some(EditCmd {
+      key!(Backspace) => Some(EditCmd {
         register: Default::default(),
         verb: None,
         motion: Some(motion!(Motion::BackwardChar)),
@@ -638,7 +638,7 @@ impl EditMode for ViVisual {
           flags: Default::default(),
         });
       }
-      ctrl!('a') => {
+      key!(Ctrl + 'a') => {
         let count = self
           .parse_count(&mut self.pending_seq.chars().peekable())
           .unwrap_or(1) as u16;
@@ -651,7 +651,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      ctrl!('x') => {
+      key!(Ctrl + 'x') => {
         let count = self
           .parse_count(&mut self.pending_seq.chars().peekable())
           .unwrap_or(1) as u16;
@@ -664,7 +664,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      ctrl!('g') => {
+      key!(Ctrl + 'g') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -674,7 +674,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      ctrl!('d') => {
+      key!(Ctrl + 'd') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -684,7 +684,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      ctrl!('u') => {
+      key!(Ctrl + 'u') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -694,7 +694,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      ctrl!('r') => {
+      key!(Ctrl + 'r') => {
         let mut chars = self.pending_seq.chars().peekable();
         let count = self.parse_count(&mut chars).unwrap_or(1);
         Some(EditCmd {
@@ -705,7 +705,7 @@ impl EditMode for ViVisual {
           flags: CmdFlags::empty(),
         })
       }
-      E(K::Esc, M::NONE) => Some(EditCmd {
+      key!(Esc) => Some(EditCmd {
         register: Default::default(),
         verb: Some(verb!(Verb::NormalMode)),
         motion: Some(motion!(Motion::Null)),

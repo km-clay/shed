@@ -1,7 +1,7 @@
 use super::{CmdReplay, EditMode, ModeReport, common_cmds};
 use crate::readline::editcmd::{Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
-use crate::{ctrl, motion, verb};
+use crate::{key, motion, verb};
 
 #[derive(Default, Debug)]
 pub struct ViReplace {
@@ -47,7 +47,7 @@ impl EditMode for ViReplace {
         raw_seq: String::new(),
         flags: Default::default(),
       }),
-      ctrl!('w') => {
+      key!(Ctrl + 'w') => {
         self.pending_cmd.set_verb(verb!(Verb::Delete));
         self.pending_cmd.set_motion(motion!(Motion::WordMotion(
           To::Start,
@@ -56,22 +56,22 @@ impl EditMode for ViReplace {
         )));
         self.register_and_return()
       }
-      ctrl!('h') | E(K::Backspace, M::NONE) => {
+      key!(Ctrl + 'h') | key!(Backspace) => {
         self.pending_cmd.set_motion(motion!(Motion::BackwardChar));
         self.register_and_return()
       }
 
-      E(K::BackTab, M::NONE) => {
+      key!(BackTab) => {
         self.pending_cmd.set_verb(verb!(Verb::CompleteBackward));
         self.register_and_return()
       }
 
-      ctrl!('i') | E(K::Tab, M::NONE) => {
+      key!(Ctrl + 'i') | key!(Tab) => {
         self.pending_cmd.set_verb(verb!(Verb::Complete));
         self.register_and_return()
       }
 
-      E(K::Esc, M::NONE) => {
+      key!(Esc) => {
         self.pending_cmd.set_verb(verb!(Verb::NormalMode));
         self.pending_cmd.set_motion(motion!(Motion::BackwardChar));
         self.register_and_return()

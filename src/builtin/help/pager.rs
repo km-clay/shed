@@ -12,8 +12,8 @@ use crate::{
     markup::{MarkedSpan, REF_SEQ, RESET_SEQ, SEARCH_RES_SEQ, TAG_SEQ},
   },
   procio::borrow_fd,
-  readline::{SimpleEditor, editcmd::Direction, keys::KeyEvent},
-  state::with_term,
+  readline::{SimpleEditor, editcmd::Direction, keys::KeyEvent, term::calc_str_width},
+  state::{Cols, Rows, with_term},
   util::error::ShResult,
   write_term,
 };
@@ -53,10 +53,18 @@ impl SearchQuery {
   }
 }
 
+struct ClickableRef {
+  row: usize,
+  col_start: usize,
+  col_end: usize,
+  ref_idx: usize,
+}
+
 pub struct HelpPager {
   search: SearchQuery,
   ref_keys: Vec<(usize, char)>,
   cross_refs: Vec<MarkedSpan>, // spans
+  click_refs: Vec<ClickableRef>,
 
   jump_dist: usize,
 
@@ -80,6 +88,7 @@ impl HelpPager {
     Some(Self {
       jump_dist: 15,
       ref_keys: vec![],
+      click_refs: vec![],
       search: SearchQuery::default(),
       scroll_offset,
       filename,
@@ -113,10 +122,35 @@ impl HelpPager {
   }
 
   pub fn display(&mut self) -> ShResult<()> {
-    // need to take this out of the struct for a sec
-    // so that we can buffer the lines without allocating
     write_term!("\x1b[H")?;
     let height = with_term(|t| t.t_rows());
+
+    // Build click map for cross-references in viewport
+    self.click_refs.clear();
+    let scroll = self.scroll_offset;
+    let content_str = self.content.content();
+    for (idx, c_ref) in self.cross_refs.iter().enumerate() {
+      let line_no = c_ref.line_no(content_str);
+      if line_no < scroll || line_no >= scroll + height as usize {
+        continue;
+      }
+      let screen_row = line_no - scroll; // 1-based terminal rows
+      let line_start = c_ref.line_start(content_str);
+
+      let (prefix_range, _, postfix_range) = c_ref.rel_to_line(content_str);
+      let line_text = &content_str[line_start..];
+
+      let col_start = calc_str_width(&line_text[..prefix_range.start]);
+      let col_end = calc_str_width(&line_text[..postfix_range.end]);
+
+      self.click_refs.push(ClickableRef {
+        row: screen_row,
+        col_start,
+        col_end,
+        ref_idx: idx,
+      });
+    }
+
     let mut content = self.content().to_string();
 
     for (s, e) in self.search.results.iter().rev() {
@@ -294,10 +328,14 @@ impl HelpPager {
       K::Char('d') => PagerCmd::Scroll(self.jump_dist as isize),
       K::Char('u') => PagerCmd::Scroll(-(self.jump_dist as isize)),
 
-      K::Down | K::Char('j') => PagerCmd::Scroll(1),
-      K::Up | K::Char('k') => PagerCmd::Scroll(-1),
-      K::Left | K::Char('h') => return Ok(PagerEvent::Back),
-      K::Right | K::Char('l') => return Ok(PagerEvent::Forward),
+      K::ScrollDown | K::Down | K::Char('j') => PagerCmd::Scroll(1),
+      K::ScrollUp | K::Up | K::Char('k') => PagerCmd::Scroll(-1),
+      K::Back | K::Left | K::Char('h') => return Ok(PagerEvent::Back),
+      K::Forward | K::Right | K::Char('l') => return Ok(PagerEvent::Forward),
+
+      K::LeftClick(row, col) => {
+        return self.handle_click(*row, *col);
+      }
 
       _ => return Ok(PagerEvent::Continue),
     };
@@ -397,6 +435,16 @@ impl HelpPager {
         break; // no more hint chars available
       }
     }
+  }
+
+  fn handle_click(&mut self, row: usize, col: usize) -> ShResult<PagerEvent> {
+    if let Some(cr) = self.click_refs.iter().find(|cr| {
+      cr.row == row && col >= cr.col_start && col < cr.col_end
+    }) {
+      let target = self.cross_refs[cr.ref_idx].content(self.content()).to_string();
+      return Ok(PagerEvent::OpenRef(target));
+    }
+    Ok(PagerEvent::Continue)
   }
 
   pub fn exec_cmd(&mut self, cmd: PagerCmd) -> ShResult<()> {

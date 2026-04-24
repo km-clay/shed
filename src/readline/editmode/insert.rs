@@ -1,7 +1,7 @@
 use super::{CmdReplay, EditMode, ModeReport, common_cmds};
 use crate::readline::editcmd::{Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
-use crate::{ctrl, motion, verb};
+use crate::{key, motion, verb};
 
 #[derive(Default, Clone, Debug)]
 pub struct ViInsert {
@@ -70,7 +70,7 @@ impl EditMode for ViInsert {
           .set_verb(verb!(Verb::Insert(seq.to_string())));
         self.register_and_return()
       }
-      ctrl!('w') => {
+      key!(Ctrl + 'w') => {
         self.pending_cmd.set_verb(verb!(Verb::Delete));
         self.pending_cmd.set_motion(motion!(Motion::WordMotion(
           To::Start,
@@ -79,11 +79,11 @@ impl EditMode for ViInsert {
         )));
         self.register_and_return()
       }
-      ctrl!('v') => {
+      key!(Ctrl + 'v') => {
         self.pending_cmd.set_verb(verb!(Verb::VerbatimMode));
         self.register_and_return()
       }
-      ctrl!('h') | E(K::Backspace, _) => {
+      key!(Ctrl + 'h') | E(K::Backspace, _) => {
         self.pending_cmd.set_verb(verb!(Verb::Delete));
         self
           .pending_cmd
@@ -96,7 +96,7 @@ impl EditMode for ViInsert {
         self.register_and_return()
       }
 
-      ctrl!('i') | E(K::Tab, M::NONE) => {
+      key!(Ctrl + 'i') | E(K::Tab, M::NONE) => {
         self.pending_cmd.set_verb(verb!(Verb::InsertChar('\t')));
         self.pending_cmd.set_motion(motion!(Motion::ForwardChar));
         self.register_and_return()

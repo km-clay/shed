@@ -20,7 +20,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::builtin::keymap::{KeyMapFlags, KeyMapMatch};
 use crate::expand::{expand_keymap, expand_prompt};
 use crate::prelude::*;
-use crate::readline::complete::{FuzzyCompleter, SelectorResponse};
+use crate::readline::complete::{FuzzyCompleter, FuzzySelector, SelectorResponse};
 use crate::readline::editcmd::Direction;
 use crate::readline::editmode::emacs::Emacs;
 use crate::readline::editmode::{ViEx, ViVerbatim};
@@ -32,6 +32,7 @@ use crate::state::{
 };
 use crate::util::AutoCmdVecUtils;
 use crate::{
+  key,
   match_loop,
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
   readline::{
@@ -175,7 +176,7 @@ type Marker = char;
 ///
 /// Used for simpler text inputs like Ex mode and the help builtin's search bar
 /// Do note that passing a table name to this struct will create a database table if it doesn't already exist.
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub struct SimpleEditor {
   pub buf: LineBuf,
   pub mode: Emacs,
@@ -358,7 +359,7 @@ impl Default for Prompt {
 pub struct ShedLine {
   pub prompt: Prompt,
   pub highlighter: Highlighter,
-  pub completer: Box<dyn Completer>,
+  pub completer: Option<FuzzyCompleter>,
 
   pub mode: Box<dyn EditMode>,
   pub saved_mode: Option<Box<dyn EditMode>>,
@@ -407,7 +408,7 @@ impl ShedLine {
     };
     let mut new = Self {
       prompt,
-      completer: Box::new(FuzzyCompleter::default()),
+      completer: None,
       highlighter: Highlighter::new(),
       mode,
       saved_mode: None,
@@ -467,18 +468,22 @@ impl ShedLine {
     self.mode.history().unwrap_or(&mut self.history)
   }
 
+  pub fn history_fzf(&mut self) -> Option<&mut FuzzySelector> {
+    self.focused_history().fuzzy_finder.as_mut()
+  }
+
   /// Mark that the display needs to be redrawn (e.g., after SIGWINCH)
   pub fn mark_dirty(&mut self) {
     self.needs_redraw = true;
   }
 
   pub fn reset_active_widget(&mut self, full_redraw: bool) -> ShResult<()> {
-    if self.completer.is_active() {
-      self.completer.reset_stay_active();
+    if let Some(comp) = self.completer.as_mut() {
+      comp.reset_stay_active();
       self.needs_redraw = true;
       Ok(())
-    } else if self.focused_history().fuzzy_finder.is_active() {
-      self.focused_history().fuzzy_finder.reset_stay_active();
+    } else if let Some(finder) = self.history_fzf() {
+      finder.reset_query();
       self.needs_redraw = true;
       Ok(())
     } else {
@@ -567,14 +572,17 @@ impl ShedLine {
 
   fn handle_hist_search_key(&mut self, key: KeyEvent) -> ShResult<()> {
     self.print_line(false)?;
-    match self.focused_history().fuzzy_finder.handle_key(key)? {
+    let finder = self.history_fzf().unwrap();
+    match finder.handle_key(key)? {
       SelectorResponse::Accept(cmd) => {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistorySelect));
 
         let entry_idx = cmd.id().unwrap(); // history entries having an id to unwrap is an invariant.
         self.scroll_history_to(entry_idx);
-        self.focused_history().fuzzy_finder.clear()?;
-        self.focused_history().fuzzy_finder.reset();
+        if let Some(finder) = self.history_fzf() {
+          finder.clear()?;
+        }
+        self.focused_history().stop_search();
 
         with_vars([("HIST_ENTRY".into(), cmd.content().to_string())], || {
           post_cmds.exec();
@@ -596,8 +604,10 @@ impl ShedLine {
         post_cmds.exec();
 
         self.editor.clear_hint();
-        self.focused_history().fuzzy_finder.clear()?;
-        self.focused_history().fuzzy_finder.reset();
+        if let Some(finder) = self.history_fzf() {
+          finder.clear()?;
+        }
+        self.focused_history().stop_search();
         write_vars(|v| {
           v.set_var(
             "SHED_VI_MODE",
@@ -618,24 +628,28 @@ impl ShedLine {
 
   fn handle_completion_key(&mut self, key: &KeyEvent) -> ShResult<bool> {
     self.print_line(false)?;
-    match self.completer.handle_key(key.clone())? {
+    let comp = self.completer.as_mut().unwrap();
+    match comp.handle_key(key.clone())? {
       CompResponse::Accept(candidate) => {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
 
-        let span_start = self.completer.token_span().0;
+        let comp = self.completer.as_ref().unwrap();
+        let span_start = comp.token_span().0;
         let new_cursor = span_start + candidate.len();
-        let line = self.completer.get_completed_line(&candidate);
+        let line = comp.get_completed_line(&candidate);
         self.focused_editor().set_buffer(line);
         self.focused_editor().set_cursor_from_flat(new_cursor);
-        // Don't reset yet - clear() needs old_layout to erase the selector.
 
         if !self.focused_history().at_pending() {
           self.focused_history().reset_to_pending();
         }
         self.update_editor_hint();
-        self.completer.clear()?;
+        // clear() needs old_layout to erase the selector, so clear before dropping
+        if let Some(comp) = self.completer.as_mut() {
+          comp.clear()?;
+        }
+        self.completer = None;
         self.needs_redraw = true;
-        self.completer.reset();
 
         write_vars(|v| {
           v.set_var(
@@ -661,7 +675,10 @@ impl ShedLine {
         post_cmds.exec();
 
         self.update_editor_hint();
-        self.completer.clear()?;
+        if let Some(comp) = self.completer.as_mut() {
+          comp.clear()?;
+        }
+        self.completer = None;
         write_vars(|v| {
           v.set_var(
             "SHED_VI_MODE",
@@ -671,7 +688,6 @@ impl ShedLine {
         })
         .ok();
         self.prompt.refresh();
-        self.completer.reset();
         Ok(true)
       }
       CompResponse::Consumed => {
@@ -731,7 +747,7 @@ impl ShedLine {
         return Ok(ev);
       }
     }
-    if !self.completer.is_active() && !self.focused_history().fuzzy_finder.is_active() {
+    if self.completer.is_none() && self.history_fzf().is_none() {
       write_vars(|v| {
         v.set_var(
           "SHED_VI_MODE",
@@ -754,10 +770,10 @@ impl ShedLine {
   }
 
   pub fn dispatch_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
-    if self.focused_history().fuzzy_finder.is_active() {
+    if self.history_fzf().is_some() {
       self.handle_hist_search_key(key)?;
       Ok(None)
-    } else if self.completer.is_active() && self.handle_completion_key(&key)? {
+    } else if self.completer.is_some() && self.handle_completion_key(&key)? {
       // self.handle_completion_key() returns true if we need to continue the loop
       Ok(None)
     } else if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty()) {
@@ -808,7 +824,8 @@ impl ShedLine {
     let line = self.focused_editor().joined();
     let cursor_pos = self.focused_editor().cursor_byte_pos();
 
-    match self.completer.complete(line, cursor_pos, direction) {
+    let mut comp = self.completer.take().unwrap_or_default();
+    match comp.complete(line, cursor_pos, direction) {
       Err(e) => {
         e.print_error();
         // Printing the error invalidates the layout
@@ -816,7 +833,7 @@ impl ShedLine {
       }
       Ok(Some(line)) => {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionSelect));
-        let cand = self.completer.selected_candidate().unwrap_or_default();
+        let cand = comp.selected_candidate().unwrap_or_default();
         with_vars(
           [("COMP_CANDIDATE".into(), cand.content().to_string())],
           || {
@@ -824,11 +841,10 @@ impl ShedLine {
           },
         );
 
-        let span_start = self.completer.token_span().0;
+        let span_start = comp.token_span().0;
 
         let new_cursor = span_start
-          + self
-            .completer
+          + comp
             .selected_candidate()
             .map(|c| c.len())
             .unwrap_or_default();
@@ -849,13 +865,11 @@ impl ShedLine {
         })
         .ok();
 
-        // If we are here, we hit a case where pressing tab returned a single candidate
-        // So we can just go ahead and reset the completer after this
-        self.completer.reset();
+        // Single candidate, don't store the completer
       }
       Ok(None) => {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
-        let candidates = self.completer.all_candidates();
+        let candidates = comp.all_candidates();
         let num_candidates = candidates.len();
         with_vars(
           [
@@ -863,7 +877,7 @@ impl ShedLine {
             ("MATCHES".into(), Into::<Var>::into(candidates)),
             (
               "SEARCH_STR".into(),
-              Into::<Var>::into(self.completer.token()),
+              Into::<Var>::into(comp.token()),
             ),
           ],
           || {
@@ -871,7 +885,8 @@ impl ShedLine {
           },
         );
 
-        if self.completer.is_active() {
+        if comp.is_active() {
+          self.completer = Some(comp);
           write_vars(|v| {
             v.set_var(
               "SHED_VI_MODE",
@@ -911,10 +926,9 @@ impl ShedLine {
       }
       None => {
         let post_cmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnHistoryOpen));
-        let entries = self.focused_history().fuzzy_finder.candidates().to_vec();
-        let matches = self
-          .focused_history()
-          .fuzzy_finder
+        let finder = self.history_fzf().unwrap();
+        let entries = finder.candidates().to_vec();
+        let matches = finder
           .filtered()
           .iter()
           .map(|sc| sc.candidate.content().to_string())
@@ -935,7 +949,7 @@ impl ShedLine {
           },
         );
 
-        if self.focused_history().fuzzy_finder.is_active() {
+        if self.history_fzf().is_some() {
           write_vars(|v| {
             v.set_var(
               "SHED_VI_MODE",
@@ -976,7 +990,7 @@ impl ShedLine {
       && self.should_complete()
     {
       return self.handle_tab(key);
-    } else if let KeyEvent(KeyCode::Char('r'), ModKeys::CTRL) = key
+    } else if let key!(Ctrl + 'r') = key
       && matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex)
     {
       self.start_hist_search();
@@ -1368,8 +1382,8 @@ impl ShedLine {
       .unwrap_or_default();
     let one_line = new_layout.end.row == 0;
 
-    self.completer.clear()?;
-    self.focused_history().fuzzy_finder.clear()?;
+    if let Some(comp) = self.completer.as_mut() { comp.clear()?; }
+    if let Some(finder) = self.history_fzf() { finder.clear()?; }
 
     if let Some(layout) = self.old_layout.as_ref() {
       clear_rows(layout)?;
@@ -1460,7 +1474,7 @@ impl ShedLine {
 
     // Move to end of layout for overlay draws (completer, history search)
     let has_overlays =
-      self.completer.is_active() || self.focused_history().fuzzy_finder.is_active();
+      self.completer.is_some() || self.history_fzf().is_some();
 
     let down = new_layout.end.row.saturating_sub(new_layout.cursor.row);
     if has_overlays && down > 0 {
@@ -1477,17 +1491,16 @@ impl ShedLine {
       (new_layout.end.col + 1).max(new_layout.cursor.col + 1)
     };
 
-    let mut fuzzy_window_rows = 0;
-    self
-      .completer
-      .set_prompt_line_context(preceding_width, new_layout.end.col);
-    fuzzy_window_rows += self.completer.draw()?;
+    let mut fuzzy_window_rows = 0usize;
+    if let Some(comp) = self.completer.as_mut() {
+      comp.set_prompt_line_context(preceding_width, new_layout.end.col);
+      fuzzy_window_rows += comp.draw()?;
+    }
 
-    self
-      .focused_history()
-      .fuzzy_finder
-      .set_prompt_line_context(preceding_width, new_layout.end.col);
-    fuzzy_window_rows += self.focused_history().fuzzy_finder.draw()?;
+    if let Some(finder) = self.history_fzf() {
+      finder.set_prompt_line_context(preceding_width, new_layout.end.col);
+      fuzzy_window_rows += finder.draw()?;
+    }
 
     while let Some(msg) = write_meta(|m| m.pop_status_message()) {
       let now = Instant::now();

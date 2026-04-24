@@ -52,15 +52,22 @@ Press {Tab} to follow cross-reference links in the help pages.
 
       `j` / {Down}        Scroll down one line
       `k` / {Up}          Scroll up one line
-      `h` / {Left}        Navigate to previous open page
-      `l` / {Right}       Navigate to next open page
       `d`               Scroll down 15 lines
       `u`               Scroll up 15 lines
       `g`               Jump to top of page
       `G`               Jump to bottom of page
       `q` / {Esc}         Quit the pager
 
-  2.2 Search                                     *help-search*
+      Mouse scrolling is also supported.
+
+  2.2 Page Navigation                            *help-nav*
+
+      `h` / {Left}        Navigate to previous open page
+      `l` / {Right}       Navigate to next open page
+
+      Mouse back/forward buttons also work for page navigation.
+
+  2.3 Search                                     *help-search*
 
       `/`{pattern}        Search forward
       `?`{pattern}        Search backward
@@ -69,7 +76,7 @@ Press {Tab} to follow cross-reference links in the help pages.
 
       Search results are highlighted as you type.
 
-  2.3 Cross-Reference Navigation                 *help-hints*
+  2.4 Cross-Reference Navigation                 *help-hints*
 
       {Tab}               Enter hint mode
 
@@ -77,8 +84,7 @@ Press {Tab} to follow cross-reference links in the help pages.
       a single character. Press that character to follow the link
       and open the referenced help page. Press {Esc} to cancel.
 
-      After following a cross-reference, you can navigate between
-      open pages using the {Left} and {Right} arrow keys, or `h` and `l`.
+      Cross-references can also be clicked directly with the mouse.
 
 
 ==============================================================================

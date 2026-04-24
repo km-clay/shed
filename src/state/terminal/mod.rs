@@ -8,7 +8,8 @@ use std::{
 };
 
 mod guard;
-use guard::{Snapshot, TermGuard};
+use guard::Snapshot;
+pub use guard::TermGuard;
 
 use nix::{
   errno::Errno,
@@ -47,10 +48,15 @@ static TTY_FILENO: LazyLock<Option<RawFd>> = LazyLock::new(|| {
   Some(high)
 });
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rows(pub usize);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cols(pub usize);
+
 #[derive(Debug, Clone)]
 pub enum TermEvent {
   Key(KeyEvent),
-  CursorPos(usize, usize),
+  CursorPos(Rows, Cols),
   Capabilities(usize),
 }
 
@@ -176,7 +182,7 @@ impl Perform for EventParser {
       ([], 'R') => {
         let row = params.first().copied().unwrap_or(0) as usize;
         let col = params.get(1).copied().unwrap_or(0) as usize;
-        TermEvent::CursorPos(col, row)
+        TermEvent::CursorPos(Rows(row), Cols(col))
       }
       ([], 'A') => {
         let mods = params.get(1).map(ModKeys::from).unwrap_or(ModKeys::empty());
@@ -266,8 +272,30 @@ impl Perform for EventParser {
         TermEvent::Capabilities(cap_num)
       }
       // SGR mouse: CSI < button;x;y M/m (ignore mouse events for now)
-      ([b'<'], 'M') | ([b'<'], 'm') => {
-        return;
+      ([b'<'], dir @ ('M' | 'm')) => {
+        if dir == 'm' { return } // release event
+
+        let button = params.first().copied().unwrap_or(0);
+        match button {
+          64 => TermEvent::Key(KeyEvent(KeyCode::ScrollUp, ModKeys::empty())),
+          65 => TermEvent::Key(KeyEvent(KeyCode::ScrollDown, ModKeys::empty())),
+          128 => TermEvent::Key(KeyEvent(KeyCode::Back, ModKeys::empty())),
+          129 => TermEvent::Key(KeyEvent(KeyCode::Forward, ModKeys::empty())),
+          _ => {
+            let col = params.get(1).copied().unwrap_or(0) as usize;
+            let row = params.get(2).copied().unwrap_or(0) as usize;
+
+            match button {
+              0 => TermEvent::Key(KeyEvent(KeyCode::LeftClick(row,col), ModKeys::empty())),
+              1 => TermEvent::Key(KeyEvent(KeyCode::MiddleClick(row,col), ModKeys::empty())),
+              2 => TermEvent::Key(KeyEvent(KeyCode::RightClick(row,col), ModKeys::empty())),
+              _ => {
+                // Other mouse events we don't care about
+                return;
+              }
+            }
+          }
+        }
       }
       _ => return,
     };
@@ -503,6 +531,7 @@ pub struct Terminal {
   alt_buffer: bool,
   cursor_style: CursorStyle,
   cursor_visible: bool,
+  mouse_enabled: bool,
   interactive: bool,
 
   termios_stack: Vec<Termios>,
@@ -525,6 +554,8 @@ impl Terminal {
   pub const CURSOR_SHOW: &str = "\x1b[?25h";
   pub const CURSOR_QUERY: &str = "\x1b[6n";
   pub const CLEAR_SCREEN: &str = "\x1b[2J\x1b[H";
+  pub const MOUSE_ON: &str = "\x1b[?1000h\x1b[?1006h";
+  pub const MOUSE_OFF: &str = "\x1b[?1000l\x1b[?1006l";
   fn toggle_attr(
     buf: &mut String,
     switch: &mut bool,
@@ -559,6 +590,7 @@ impl Terminal {
       cursor_style: CursorStyle::Default,
       interactive: false,
       cursor_visible: true,
+      mouse_enabled: false,
       raw_mode: false,
       termios_stack: vec![],
       t_cols: cols as usize,
@@ -600,6 +632,12 @@ impl Terminal {
 
     let guard = TermGuard::new().with_interactive(old);
     guard.activate()
+  }
+
+  pub fn mouse_support_guard(&mut self, on: bool) -> ShResult<TermGuard> {
+    let guard = TermGuard::new().with_mouse_support(self.mouse_enabled);
+    self.toggle_mouse_support(on)?;
+    Ok(guard.activate())
   }
 
   fn save_state(&self) -> Snapshot {
@@ -662,6 +700,10 @@ impl Terminal {
       self.set_cursor_style(cursor_style)?;
       wrote_seq = true;
     }
+    if let Some(mouse_mode) = guard.mouse_support() {
+      self.toggle_mouse_support(mouse_mode)?;
+      wrote_seq = true;
+    }
     if let Some(interactive) = guard.interactive() {
       self.interactive = interactive;
     }
@@ -706,7 +748,7 @@ impl Terminal {
     Ok(None)
   }
 
-  pub fn get_cursor_pos(&mut self) -> ShResult<Option<(usize, usize)>> {
+  pub fn get_cursor_pos(&mut self) -> ShResult<Option<(Rows, Cols)>> {
     let Some(tty) = self.tty else { return Ok(None) };
 
     // ask the terminal where our cursor is
@@ -723,7 +765,7 @@ impl Terminal {
       let TermEvent::CursorPos(row, col) = event else {
         continue;
       };
-      return Ok(Some((col, row)));
+      return Ok(Some((row, col)));
     }
     Ok(None)
   }
@@ -736,7 +778,7 @@ impl Terminal {
       return Ok(());
     };
 
-    if c != 1 {
+    if c.0 != 1 {
       self.input_buf.push_str("\x1b[7m%\x1b[0m\n\r");
     }
     Ok(())
@@ -920,6 +962,7 @@ impl Terminal {
     self.edit_termios(enable_raw_mode)?;
     self.toggle_bracketed_paste(false)?;
     self.toggle_alt_buffer(true)?;
+    self.toggle_mouse_support(true)?;
     self.set_cursor_style(CursorStyle::Default)?;
     self.toggle_cursor_visibility(false)?;
     self.flush()?;
@@ -1027,6 +1070,16 @@ impl Terminal {
       &mut self.bracketed_paste,
       Self::BRACKET_PASTE_ON,
       Self::BRACKET_PASTE_OFF,
+      on,
+    )
+  }
+
+  pub fn toggle_mouse_support(&mut self, on: bool) -> ShResult<()> {
+    Self::toggle_attr(
+      &mut self.input_buf,
+      &mut self.mouse_enabled,
+      Self::MOUSE_ON,
+      Self::MOUSE_OFF,
       on,
     )
   }

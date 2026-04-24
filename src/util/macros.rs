@@ -67,35 +67,126 @@ macro_rules! motion {
   };
 }
 
+/// A macro for creating KeyEvent instances from a syntax like `key!(Ctrl + Shift + Enter)` or `key!(Alt + 'f')` or just `key!(Enter)`.
 #[macro_export]
-/// Shorthand for Ctrl + char, e.g. ctrl!('a') expands to Ctrl + A key event.
-macro_rules! ctrl {
-  ($ch:literal) => {
+macro_rules! key {
+  (Shift + Ctrl + Alt + $key:ident) => { key!(Ctrl + Shift + Alt + $key) };
+  (Shift + Alt + Ctrl + $key:ident) => { key!(Ctrl + Shift + Alt + $key) };
+  (Alt + Ctrl + Shift + $key:ident) => { key!(Ctrl + Shift + Alt + $key) };
+  (Alt + Shift + Ctrl + $key:ident) => { key!(Ctrl + Shift + Alt + $key) };
+  (Ctrl + Alt + Shift + $key:ident) => { key!(Ctrl + Shift + Alt + $key) };
+  (Ctrl + Shift + Alt + $key:ident) => {
     $crate::readline::keys::KeyEvent(
-      $crate::readline::keys::KeyCode::Char($ch),
-      $crate::readline::keys::ModKeys::CTRL,
+      $crate::readline::keys::KeyCode::$key,
+      $crate::readline::keys::ModKeys::CTRL_SHIFT_ALT
     )
   };
-}
 
-#[macro_export]
-/// Shorthand for ALT key combinations, e.g. `alt!('f')` for `ALT+F`
-macro_rules! alt {
-  ($ch:literal) => {
+  (Shift + Ctrl + $key:ident) => { key!(Ctrl + Shift + $key) };
+  (Ctrl + Shift + $key:ident) => {
     $crate::readline::keys::KeyEvent(
-      $crate::readline::keys::KeyCode::Char($ch),
-      $crate::readline::keys::ModKeys::ALT,
+      $crate::readline::keys::KeyCode::$key,
+      $crate::readline::keys::ModKeys::CTRL_SHIFT
     )
   };
-}
+  (Alt + Ctrl + $key:ident) => { key!(Ctrl + Alt + $key) };
+  (Ctrl + Alt + $key:ident) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::$key,
+      $crate::readline::keys::ModKeys::CTRL_ALT
+    )
+  };
+  (Alt + Shift + $key:ident) => { key!(Shift + Alt + $key) };
+  (Shift + Alt + $key:ident) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::$key,
+      $crate::readline::keys::ModKeys::SHIFT_ALT
+    )
+  };
 
-#[macro_export]
-/// Shorthand for Shift + char, e.g. shift!('A') expands to Shift + A key event.
-macro_rules! shift {
+  (Ctrl + $key:ident) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::$key,
+      $crate::readline::keys::ModKeys::CTRL
+    )
+  };
+  (Shift + $key:ident) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::$key,
+      $crate::readline::keys::ModKeys::SHIFT
+    )
+  };
+  (Alt + $key:ident) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::$key,
+      $crate::readline::keys::ModKeys::ALT
+    )
+  };
+
+  ($key:ident) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::$key,
+      $crate::readline::keys::ModKeys::NONE
+    )
+  };
+
+  (Shift + Ctrl + Alt + $ch:literal) => { key!(Ctrl + Shift + Alt + $ch) };
+  (Shift + Alt + Ctrl + $ch:literal) => { key!(Ctrl + Shift + Alt + $ch) };
+  (Alt + Ctrl + Shift + $ch:literal) => { key!(Ctrl + Shift + Alt + $ch) };
+  (Alt + Shift + Ctrl + $ch:literal) => { key!(Ctrl + Shift + Alt + $ch) };
+  (Ctrl + Alt + Shift + $ch:literal) => { key!(Ctrl + Shift + Alt + $ch) };
+  (Ctrl + Shift + Alt + $ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::CTRL_SHIFT_ALT
+    )
+  };
+
+  (Shift + Ctrl + $ch:literal) => { key!(Ctrl + Shift + $ch) };
+  (Ctrl + Shift + $ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::CTRL_SHIFT
+    )
+  };
+  (Alt + Ctrl + $ch:literal) => { key!(Ctrl + Alt + $ch) };
+  (Ctrl + Alt + $ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::CTRL_ALT
+    )
+  };
+  (Alt + Shift + $ch:literal) => { key!(Shift + Alt + $ch) };
+  (Shift + Alt + $ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::SHIFT_ALT
+    )
+  };
+
+  (Ctrl + $ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::CTRL
+    )
+  };
+  (Shift + $ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::SHIFT
+    )
+  };
+  (Alt + $ch:literal) => {
+    $crate::readline::keys::KeyEvent(
+      $crate::readline::keys::KeyCode::Char($ch),
+      $crate::readline::keys::ModKeys::ALT
+    )
+  };
+
   ($ch:literal) => {
     $crate::readline::keys::KeyEvent(
       $crate::readline::keys::KeyCode::Char($ch),
-      $crate::readline::keys::ModKeys::SHIFT,
+      $crate::readline::keys::ModKeys::NONE
     )
   };
 }

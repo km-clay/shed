@@ -983,7 +983,7 @@ impl Dispatcher {
       }
     }
   }
-  fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
+  pub fn exec_cmd(&mut self, cmd: Node) -> ShResult<()> {
     let blame = cmd.get_span().clone();
     let report_time = cmd.flags.contains(NdFlags::REPORT_TIME);
     let context = cmd.context.clone();

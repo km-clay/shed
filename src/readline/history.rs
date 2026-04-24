@@ -94,10 +94,10 @@ fn query_masked(prefix: Option<&str>, conn: &Connection, table: &str) -> Vec<His
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct History {
   pub pending: Option<LineBuf>,
-  pub fuzzy_finder: FuzzySelector,
+  pub fuzzy_finder: Option<FuzzySelector>,
   pub cursor: usize,
   pub virt_cursor: usize,
 
@@ -123,7 +123,7 @@ impl History {
       pending: None,
       search_mask: vec![],
       mask_stale: true,
-      fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
+      fuzzy_finder: None,
       no_matches: false,
       cursor: 0,
       virt_cursor: 0,
@@ -146,7 +146,7 @@ impl History {
       pending: None,
       search_mask: vec![],
       mask_stale: true,
-      fuzzy_finder: FuzzySelector::new("History").number_candidates(true),
+      fuzzy_finder: None,
       no_matches: false,
       cursor: 0,
       virt_cursor: 0,
@@ -797,16 +797,22 @@ impl History {
     } else if self.search_mask.len() == 1 {
       Some(self.search_mask[0].command().to_string())
     } else {
+      let mut finder = FuzzySelector::new("History").number_candidates(true);
       self.update_search_mask(Some(initial));
-      self.fuzzy_finder.set_query(initial.to_string());
+      finder.set_query(initial.to_string());
       let raw_entries = self
         .search_mask
         .clone()
         .into_iter()
         .enumerate()
         .map(|(i, ent)| Candidate::from((i, ent.command().to_string())));
-      self.fuzzy_finder.activate(raw_entries.collect());
+      finder.activate(raw_entries.collect());
+      self.fuzzy_finder = Some(finder);
       None
     }
+  }
+
+  pub fn stop_search(&mut self) {
+    self.fuzzy_finder = None;
   }
 }

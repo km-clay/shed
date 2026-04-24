@@ -495,6 +495,9 @@ see |builtin-shopt| for more info.
   candidates. `Enter` accepts the selected candidate. `Esc` dismisses
   the menu.
 
+  Mouse support: scroll wheel navigates candidates without wrapping.
+  Click a candidate to highlight it; click again to accept.
+
 ==============================================================================
 11. History Search                             *history-search*
 
@@ -502,6 +505,8 @@ see |builtin-shopt| for more info.
 
   Type to filter history entries. `Enter` accepts the selected entry.
   `Esc` dismisses the search.
+
+  Mouse scroll and click work the same as in the completion menu.
 
 ==============================================================================
 See also: |ex| |autocmd| |prompt|

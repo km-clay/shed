@@ -1,7 +1,7 @@
 use super::{CmdReplay, EditMode, ModeReport, common_cmds};
 use crate::readline::editcmd::{Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
-use crate::{alt, ctrl, motion, verb};
+use crate::{key, motion, verb};
 
 #[derive(Default, Clone, Debug)]
 pub struct Emacs {
@@ -64,33 +64,33 @@ impl EditMode for Emacs {
         self.set_verb(verb!(Verb::Insert(seq.to_string())));
         self.take_cmd()
       }
-      E(K::Backspace, M::NONE) => {
+      key!(Backspace) => {
         self.set_verb(verb!(Verb::Delete));
         self.set_motion(motion!(Motion::BackwardCharForced));
         self.take_cmd()
       }
-      E(K::BackTab, M::NONE) => {
+      key!(BackTab) => {
         self.set_verb(verb!(Verb::CompleteBackward));
         self.take_cmd()
       }
-      E(K::Tab, M::NONE) | E(K::Char('i'), M::CTRL) => {
+      key!(Tab) | key!(Ctrl + 'i') => {
         self.set_verb(verb!(Verb::Complete));
         self.take_cmd()
       }
 
       // Emacs keybinds
-      ctrl!('a') => {
+      key!(Ctrl + 'a') => {
         self.set_motion(motion!(Motion::StartOfLine));
         self.take_cmd()
       }
 
-      ctrl!('e') => {
+      key!(Ctrl + 'e') => {
         self.set_motion(motion!(Motion::EndOfLine));
         self.take_cmd()
       }
 
-      ctrl!('f') | ctrl!('b') => {
-        let motion = if matches!(key, ctrl!('f')) {
+      key!(Ctrl + 'f') | key!(Ctrl + 'b') => {
+        let motion = if matches!(key, key!(Ctrl + 'f')) {
           Motion::ForwardCharForced
         } else {
           Motion::BackwardCharForced
@@ -99,8 +99,8 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      alt!('f') | alt!('b') => {
-        let motion = if matches!(key, alt!('f')) {
+      key!(Alt + 'f') | key!(Alt + 'b') => {
+        let motion = if matches!(key, key!(Alt + 'f')) {
           Motion::WordMotion(To::End, Word::Normal, Direction::Forward)
         } else {
           Motion::WordMotion(To::Start, Word::Normal, Direction::Backward)
@@ -109,12 +109,12 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      alt!(';') => {
+      key!(Alt + ';') => {
         self.set_verb(verb!(Verb::ExMode));
         self.take_cmd()
       }
 
-      ctrl!('w') | E(K::Backspace, M::ALT) => {
+      key!(Ctrl + 'w') | key!(Alt + Backspace) => {
         self.set_verb(verb!(Verb::Kill));
         self.set_motion(motion!(Motion::WordMotion(
           To::Start,
@@ -124,7 +124,7 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      alt!('d') => {
+      key!(Alt + 'd') => {
         self.set_verb(verb!(Verb::Kill));
         self.set_motion(motion!(Motion::WordMotion(
           To::End,
@@ -134,45 +134,45 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      ctrl!('d') => {
+      key!(Ctrl + 'd') => {
         self.set_verb(verb!(Verb::DeleteOrEof));
         self.set_motion(motion!(Motion::ForwardCharForced));
         self.take_cmd()
       }
 
-      ctrl!('k') => {
+      key!(Ctrl + 'k') => {
         self.set_verb(verb!(Verb::Kill));
         self.set_motion(motion!(Motion::EndOfLine));
         self.take_cmd()
       }
 
-      ctrl!('u') => {
+      key!(Ctrl + 'u') => {
         self.set_verb(verb!(Verb::Kill));
         self.set_motion(motion!(Motion::StartOfLine));
         self.take_cmd()
       }
 
-      ctrl!('y') => {
+      key!(Ctrl + 'y') => {
         self.set_verb(verb!(Verb::KillPut));
         self.take_cmd()
       }
 
-      alt!('y') => {
+      key!(Alt + 'y') => {
         self.set_verb(verb!(Verb::KillCycle));
         self.take_cmd()
       }
 
-      ctrl!('t') => {
+      key!(Ctrl + 't') => {
         self.set_verb(verb!(Verb::TransposeChar));
         self.take_cmd()
       }
 
-      alt!('t') => {
+      key!(Alt + 't') => {
         self.set_verb(verb!(Verb::TransposeWord));
         self.take_cmd()
       }
 
-      alt!('u') => {
+      key!(Alt + 'u') => {
         self.set_motion(motion!(Motion::WordMotion(
           To::End,
           Word::Normal,
@@ -182,7 +182,7 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      alt!('l') => {
+      key!(Alt + 'l') => {
         self.set_motion(motion!(Motion::WordMotion(
           To::End,
           Word::Normal,
@@ -192,17 +192,17 @@ impl EditMode for Emacs {
         self.take_cmd()
       }
 
-      ctrl!('/') => {
+      key!(Ctrl + '/') => {
         self.set_verb(verb!(Verb::Undo));
         self.take_cmd()
       }
 
-      alt!('/') => {
+      key!(Alt + '/') => {
         self.set_verb(verb!(Verb::Redo));
         self.take_cmd()
       }
 
-      alt!('c') => {
+      key!(Alt + 'c') => {
         self.set_verb(verb!(Verb::Capitalize));
         self.set_motion(motion!(Motion::WordMotion(
           To::End,

@@ -19,7 +19,7 @@ use crate::state::write_meta;
 use crate::util::error::ShResult;
 use crate::verb;
 use crate::{bitflags, match_loop};
-use crate::{motion, sherr};
+use crate::{key, motion, sherr};
 
 bitflags! {
   #[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -35,7 +35,7 @@ bitflags! {
   }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct ExEditor {
   editor: SimpleEditor,
 }
@@ -61,7 +61,7 @@ impl ExEditor {
   }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Debug)]
 pub struct ViEx {
   pending_cmd: ExEditor,
 }
@@ -77,9 +77,8 @@ impl ViEx {
 impl EditMode for ViEx {
   // Ex mode can return errors, so we use this fallible method instead of the normal one
   fn handle_key_fallible(&mut self, key: KeyEvent) -> ShResult<Option<EditCmd>> {
-    use crate::readline::keys::{KeyCode as C, KeyEvent as E, ModKeys as M};
     match key {
-      E(C::Char('\r'), M::NONE) | E(C::Enter, M::NONE) => {
+      key!('\r') | key!(Enter) => {
         let input = self.pending_cmd.editor.buf.joined();
         let res = match parse_ex_input(&input) {
           Ok(cmd) => Ok(cmd),
@@ -100,11 +99,11 @@ impl EditMode for ViEx {
 
         res
       }
-      E(C::Char('c'), M::CTRL) => {
+      key!(Ctrl + 'c') => {
         self.pending_cmd.clear();
         Ok(None)
       }
-      E(C::Esc, M::NONE) => Ok(Some(EditCmd {
+      key!(Esc) => Ok(Some(EditCmd {
         register: RegisterName::default(),
         verb: None,
         motion: None,

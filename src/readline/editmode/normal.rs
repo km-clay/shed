@@ -8,7 +8,7 @@ use crate::readline::editcmd::{
 };
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::Grapheme;
-use crate::{ctrl, motion, verb};
+use crate::{key, motion, verb};
 
 #[derive(Default, Debug)]
 pub struct ViNormal {
@@ -735,7 +735,7 @@ impl ViNormal {
 impl EditMode for ViNormal {
   fn handle_key(&mut self, key: E) -> Option<EditCmd> {
     let mut cmd: Option<EditCmd> = match key {
-      E(K::Char('V'), M::NONE) => Some(EditCmd {
+      key!('V') => Some(EditCmd {
         register: Default::default(),
         verb: Some(verb!(Verb::VisualModeLine)),
         motion: None,
@@ -751,7 +751,7 @@ impl EditMode for ViNormal {
           flags: self.flags(),
         });
       }
-      ctrl!('a') => {
+      key!(Ctrl + 'a') => {
         let count = self
           .parse_count(&mut self.pending_seq.chars().peekable())
           .unwrap_or(1) as u16;
@@ -764,7 +764,7 @@ impl EditMode for ViNormal {
           flags: self.flags(),
         })
       }
-      ctrl!('x') => {
+      key!(Ctrl + 'x') => {
         let count = self
           .parse_count(&mut self.pending_seq.chars().peekable())
           .unwrap_or(1) as u16;
@@ -777,7 +777,7 @@ impl EditMode for ViNormal {
           flags: self.flags(),
         })
       }
-      ctrl!('g') => {
+      key!(Ctrl + 'g') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -787,7 +787,7 @@ impl EditMode for ViNormal {
           flags: self.flags(),
         })
       }
-      ctrl!('d') => {
+      key!(Ctrl + 'd') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -797,7 +797,7 @@ impl EditMode for ViNormal {
           flags: self.flags(),
         })
       }
-      ctrl!('u') => {
+      key!(Ctrl + 'u') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -807,7 +807,7 @@ impl EditMode for ViNormal {
           flags: self.flags(),
         })
       }
-      E(K::Enter, M::NONE) => {
+      key!(Enter) => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: Default::default(),
@@ -818,14 +818,14 @@ impl EditMode for ViNormal {
         })
       }
       E(K::Char(ch), M::NONE) => self.try_parse(ch),
-      E(K::Backspace, M::NONE) => Some(EditCmd {
+      key!(Backspace) => Some(EditCmd {
         register: Default::default(),
         verb: None,
         motion: Some(motion!(Motion::BackwardChar)),
         raw_seq: "".into(),
         flags: self.flags(),
       }),
-      ctrl!('r') => {
+      key!(Ctrl + 'r') => {
         let mut chars = self.pending_seq.chars().peekable();
         let count = self.parse_count(&mut chars).unwrap_or(1);
         Some(EditCmd {
@@ -836,7 +836,7 @@ impl EditMode for ViNormal {
           flags: self.flags(),
         })
       }
-      E(K::Esc, M::NONE) => {
+      key!(Esc) => {
         self.clear_cmd();
         None
       }

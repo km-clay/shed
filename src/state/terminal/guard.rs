@@ -19,6 +19,7 @@ pub struct TermGuard {
   alt_buffer: Option<bool>,
   cursor_style: Option<CursorStyle>,
   cursor_visible: Option<bool>,
+  mouse_support: Option<bool>,
   interactive: Option<bool>,
   termios_depth: Option<usize>,
 
@@ -35,6 +36,7 @@ impl TermGuard {
       alt_buffer: None,
       cursor_style: None,
       cursor_visible: None,
+      mouse_support: None,
       interactive: None,
       termios_depth: None,
       active: false,
@@ -82,6 +84,13 @@ impl TermGuard {
     self.cursor_visible = Some(cursor_visible);
     self
   }
+  pub fn with_mouse_support(mut self, mouse_support: bool) -> Self {
+    if self.active {
+      return self;
+    }
+    self.mouse_support = Some(mouse_support);
+    self
+  }
   pub fn with_interactive(mut self, interactive: bool) -> Self {
     if self.active {
       return self;
@@ -113,6 +122,9 @@ impl TermGuard {
   }
   pub fn cursor_visible(&self) -> Option<bool> {
     self.cursor_visible
+  }
+  pub fn mouse_support(&self) -> Option<bool> {
+    self.mouse_support
   }
   pub fn interactive(&self) -> Option<bool> {
     self.interactive
