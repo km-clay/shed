@@ -4,7 +4,7 @@ use bitflags::bitflags;
 
 use crate::{
   readline::{
-    editmode::ex::SubFlags,
+    editmode::SubFlags,
     linebuf::{Grapheme, Pos, SelectShape},
   },
   state::read_vars,
@@ -75,7 +75,7 @@ bitflags! {
     const HAS_SHIFT = 1<<5;
     const HAS_CTRL = 1<<6;
     const IS_SUBMIT = 1<<7;
-    const REPLAY_CONTINUATION = 1<<8;
+    const IS_CANCEL = 1<<8;
   }
 }
 
@@ -253,6 +253,8 @@ impl EditCmd {
           | Verb::VerbatimMode
           | Verb::ExMode
           | Verb::InsertMode
+          | Verb::SearchMode
+          | Verb::RevSearchMode
           | Verb::InsertModeLineBreak(_)
           | Verb::NormalMode
           | Verb::VisualModeSelectLast
@@ -340,6 +342,8 @@ pub enum Verb {
   InsertMode,
   InsertModeLineBreak(Anchor),
   NormalMode,
+  SearchMode,
+  RevSearchMode,
   VisualMode,
   VisualModeLine,
   VisualModeBlock, // dont even know if im going to implement this
@@ -468,6 +472,9 @@ pub enum Motion {
   CharRange(Pos, Pos),
   LineRange(LineAddr, LineAddr),
   Line(LineAddr),
+  Search(String, Direction),
+  RepeatSearch,
+  RepeatSearchRev,
   BlockRange(Pos, Pos),
   Selection(SelectShape), // used in dot-repeats of visual mode
   RepeatMotion,

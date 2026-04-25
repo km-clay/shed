@@ -1,5 +1,5 @@
 use crate::parse::lex::LexStream;
-use crate::readline::editmode::remote::RemoteMode;
+use crate::readline::editmode::{RemoteMode, ViSearch, ViSearchRev};
 use crate::readline::linebuf::{Pos, ordered};
 use crate::util::strops::QuoteState;
 use crate::{motion, verb, write_term};
@@ -22,8 +22,7 @@ use crate::expand::{expand_keymap, expand_prompt};
 use crate::prelude::*;
 use crate::readline::complete::{FuzzyCompleter, FuzzySelector, SelectorResponse};
 use crate::readline::editcmd::Direction;
-use crate::readline::editmode::emacs::Emacs;
-use crate::readline::editmode::{ViEx, ViVerbatim};
+use crate::readline::editmode::{Emacs, ViEx, ViVerbatim};
 use crate::readline::history::HistEntry;
 use crate::readline::term::{calc_str_width, clear_rows, move_cursor_to_end, redraw};
 use crate::state::{
@@ -103,6 +102,9 @@ pub mod markers {
   pub const VISUAL_MODE_START: Marker = '\u{e118}';
   pub const VISUAL_MODE_END: Marker = '\u{e119}';
 
+  pub const MATCH_START: Marker = '\u{e120}';
+  pub const MATCH_END: Marker = '\u{e121}';
+
   pub const RESET: Marker = '\u{e11a}';
 
   pub const NULL: Marker = '\u{e11b}';
@@ -118,6 +120,7 @@ pub mod markers {
   pub const PROC_SUB_IN: Marker = '\u{e005}';
   /// Output process sub marker
   pub const PROC_SUB_OUT: Marker = '\u{e006}';
+
   pub const HEREDOC_START: Marker = '\u{e00a}';
   pub const HEREDOC_END: Marker = '\u{e00b}';
   pub const HEREDOC_BODY: Marker = '\u{e00c}';
@@ -125,11 +128,13 @@ pub mod markers {
   pub const PARAM_OP_END: Marker = '\u{e00e}';
   pub const PARAM_BODY: Marker = '\u{e00f}'; // pattern/value after operator
   pub const PARAM_BODY_END: Marker = '\u{e010}';
+
   /// Marker for null expansion
   /// This is used for when "$@" or "$*" are used in quotes and there are no
   /// arguments Without this marker, it would be handled like an empty string,
   /// which breaks some commands
   pub const NULL_EXPAND: Marker = '\u{e007}';
+
   /// Explicit marker for argument separation
   /// This is used to join the arguments given by "$@", and preserves exact
   /// formatting of the original arguments, including quoting
@@ -169,6 +174,13 @@ pub mod markers {
   /// square brackets
   pub const KEYWORD_2: Marker = '\u{e186}';
   pub const CODE_BLOCK: Marker = '\u{e187}';
+
+  pub fn is_visual_marker(c: Marker) -> bool {
+    c == VISUAL_MODE_START ||
+    c == VISUAL_MODE_END ||
+    c == MATCH_START ||
+    c == MATCH_END
+  }
 }
 type Marker = char;
 
@@ -556,7 +568,8 @@ impl ShedLine {
       ModeReport::Verbatim => flags |= KeyMapFlags::VERBATIM,
       ModeReport::Emacs => flags |= KeyMapFlags::EMACS,
       ModeReport::Remote => flags |= KeyMapFlags::REMOTE,
-      ModeReport::Unknown => panic!("Unknown mode report"),
+      ModeReport::Search | ModeReport::RevSearch => {}
+      ModeReport::Unknown => unreachable!("Unknown mode report"),
     }
 
     if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty()) {
@@ -801,10 +814,13 @@ impl ShedLine {
     } else if self.completer.is_some() && self.handle_completion_key(&key)? {
       // self.handle_completion_key() returns true if we need to continue the loop
       Ok(None)
-    } else if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty()) {
+    } else if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty())
+      || self.mode.is_input_mode()
+    {
       // Vi mode is waiting for more input (e.g. after 'f', 'd', etc.)
       // Bypass keymap matching and send directly to the mode handler
       let ev = self.handle_key(key)?;
+      self.update_editor_search();
 
       Ok(ev)
     } else {
@@ -1170,8 +1186,18 @@ impl ShedLine {
     Ok(None)
   }
 
+  pub fn update_editor_search(&mut self) {
+    if matches!(self.mode.report_mode(), ModeReport::RevSearch | ModeReport::Search) {
+      self.editor.update_pending_search(self.mode.pending_seq());
+      self.needs_redraw = true;
+    }
+  }
+
   pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
-    let Some(linecmd) = self.resolve_key(&key)? else { return Ok(None) };
+    let Some(linecmd) = self.resolve_key(&key)? else {
+      self.update_editor_search();
+      return Ok(None)
+    };
     if !matches!(&linecmd, LineCmd::ScrollHistVirtual(_)) {
       self.focused_history().stop_virtual_scroll();
       self.editor.clear_concats();
@@ -1469,7 +1495,7 @@ impl ShedLine {
       && !seq.is_empty()
       && !(prompt_string_right.is_some() && one_line)
       && seq_fits
-      && self.mode.report_mode() != ModeReport::Ex
+      && !self.mode.is_input_mode()
     {
       let to_col = t_cols - calc_str_width(&seq);
       let up = new_layout.cursor.row; // rows to move up from cursor to top line of prompt
@@ -1506,15 +1532,21 @@ impl ShedLine {
       new_layout.psr_end = Some(Layout::calc_pos(t_cols, &psr, psr_start, 0, false));
     }
 
-    if let ModeReport::Ex = self.mode.report_mode() {
+    if let ModeReport::Ex | ModeReport::RevSearch | ModeReport::Search = self.mode.report_mode() {
       let pending_seq = self.mode.pending_seq().unwrap_or_default();
+      let prefix_seq = match self.mode.report_mode() {
+        ModeReport::Ex => ": ",
+        ModeReport::RevSearch => "?",
+        ModeReport::Search => "/",
+        _ => unreachable!()
+      };
       let down = new_layout.end.row - new_layout.cursor.row;
       let move_down = if down > 0 {
         format!("\x1b[{down}B")
       } else {
         String::new()
       };
-      write_term!("{move_down}\x1b[1G\n: {pending_seq}").unwrap();
+      write_term!("{move_down}\x1b[1G\n{prefix_seq}{pending_seq}").unwrap();
       new_layout.end.row += 1;
       new_layout.cursor.row = new_layout.end.row;
       new_layout.cursor.col = {
@@ -1524,7 +1556,7 @@ impl ShedLine {
           .take(cursor_offset)
           .collect::<String>();
 
-        2 + before_cursor.width()
+        1 + before_cursor.width()
       };
 
       write_term!("\x1b[{}G", new_layout.cursor.col + 1).unwrap();
@@ -1625,6 +1657,10 @@ impl ShedLine {
     let mut is_insert_mode = false;
     let count = cmd.verb_count();
 
+    if cmd.flags.contains(CmdFlags::IS_CANCEL) {
+      self.editor.clear_pending_search();
+    }
+
     let mut mode: Box<dyn EditMode> = if matches!(
       self.mode.report_mode(),
       ModeReport::Ex | ModeReport::Verbatim
@@ -1679,6 +1715,13 @@ impl ShedLine {
         Verb::VisualModeLine => {
           self.editor.start_line_select();
           Box::new(ViVisual::new())
+        }
+
+        Verb::SearchMode => {
+          Box::new(ViSearch::new())
+        }
+        Verb::RevSearchMode => {
+          Box::new(ViSearchRev::new())
         }
 
         _ => unreachable!(),
@@ -1766,6 +1809,8 @@ impl ShedLine {
       ModeReport::Verbatim => Box::new(ViVerbatim::new()),
       ModeReport::Emacs => Box::new(Emacs::new()),
       ModeReport::Remote => Box::new(RemoteMode),
+      ModeReport::Search => Box::new(ViSearch::new()),
+      ModeReport::RevSearch => Box::new(ViSearchRev::new()),
       ModeReport::Unknown => unreachable!(),
     }
   }
@@ -1810,6 +1855,8 @@ impl ShedLine {
             ModeReport::Emacs => Box::new(Emacs::new()),
             ModeReport::Remote => Box::new(RemoteMode),
             ModeReport::Ex => Box::new(ViEx::new(self.editor.is_selecting())),
+            ModeReport::Search => Box::new(ViSearch::new()),
+            ModeReport::RevSearch => Box::new(ViSearchRev::new()),
             ModeReport::Unknown => unreachable!(),
           };
           self.mode = old_mode_clone;
@@ -2138,6 +2185,30 @@ pub fn marker_for(class: &TkRule) -> Option<Marker> {
 
 #[allow(unused_assignments)]
 pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
+  let priority = |m: Marker| -> u8 {
+    match m {
+      markers::MATCH_START
+        | markers::MATCH_END
+        | markers::VISUAL_MODE_END
+        | markers::VISUAL_MODE_START
+        | markers::RESET => 0,
+
+        markers::VAR_SUB
+          | markers::VAR_SUB_END
+          | markers::CMD_SUB
+          | markers::CMD_SUB_END
+          | markers::PROC_SUB
+          | markers::PROC_SUB_END
+          | markers::STRING_DQ
+          | markers::STRING_DQ_END
+          | markers::STRING_SQ
+          | markers::STRING_SQ_END
+          | markers::SUBSH_END => 2,
+
+        markers::ARG => 3,
+        _ => 1,
+    }
+  };
   // Sort by position descending, with priority ordering at same position:
   // - RESET first (inserted first, ends up rightmost)
   // - Regular markers middle
@@ -2146,24 +2217,6 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
   let sort_insertions = |insertions: &mut Vec<(usize, Marker)>| {
     insertions.sort_by(|a, b| match b.0.cmp(&a.0) {
       std::cmp::Ordering::Equal => {
-        let priority = |m: Marker| -> u8 {
-          match m {
-            markers::VISUAL_MODE_END | markers::VISUAL_MODE_START | markers::RESET => 0,
-            markers::VAR_SUB
-            | markers::VAR_SUB_END
-            | markers::CMD_SUB
-            | markers::CMD_SUB_END
-            | markers::PROC_SUB
-            | markers::PROC_SUB_END
-            | markers::STRING_DQ
-            | markers::STRING_DQ_END
-            | markers::STRING_SQ
-            | markers::STRING_SQ_END
-            | markers::SUBSH_END => 2,
-            markers::ARG => 3,
-            _ => 1,
-          }
-        };
         priority(a.1).cmp(&priority(b.1))
       }
       other => other,
@@ -2175,25 +2228,6 @@ pub fn annotate_token(token: Tk) -> Vec<(usize, Marker)> {
     stack.sort_by(|a, b| {
       match b.0.cmp(&a.0) {
         std::cmp::Ordering::Equal => {
-          let priority = |m: Marker| -> u8 {
-            match m {
-              markers::VISUAL_MODE_END | markers::VISUAL_MODE_START | markers::RESET => 0,
-              markers::VAR_SUB
-              | markers::VAR_SUB_END
-              | markers::CMD_SUB
-              | markers::CMD_SUB_END
-              | markers::PROC_SUB
-              | markers::PROC_SUB_END
-              | markers::STRING_DQ
-              | markers::STRING_DQ_END
-              | markers::STRING_SQ
-              | markers::STRING_SQ_END
-              | markers::SUBSH_END => 2,
-
-              markers::ARG => 3, // Lowest priority - processed first, overridden by sub-tokens
-              _ => 1,
-            }
-          };
           priority(a.1).cmp(&priority(b.1))
         }
         other => other,

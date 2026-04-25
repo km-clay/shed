@@ -191,7 +191,7 @@ impl Stash {
     }
     self.conn.execute(
       "INSERT INTO stash (name, buffer, cursor, timestamp) VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
-      (&cmd.name, &cmd.buffer, &cmd.cursor_pos)
+      (&cmd.name, &cmd.buffer, cmd.cursor_pos.trim())
     )?;
     Ok(())
   }
@@ -251,7 +251,7 @@ impl Stash {
     ",
     )?;
 
-    stmt.execute((&name, buffer, &cursor))?;
+    stmt.execute((&name, buffer, cursor.trim()))?;
     Ok(())
   }
 

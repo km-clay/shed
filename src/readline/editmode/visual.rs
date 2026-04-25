@@ -8,6 +8,7 @@ use crate::readline::editcmd::{
 };
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::Grapheme;
+use crate::state::CursorStyle;
 use crate::{key, motion, verb};
 
 #[derive(Default, Debug)]
@@ -184,7 +185,6 @@ impl ViVisual {
           });
         }
         'R' | 'C' => {
-          self.pending_flags |= CmdFlags::REPLAY_CONTINUATION;
           return Some(EditCmd {
             register,
             verb: Some(verb!(Verb::Change)),
@@ -330,7 +330,6 @@ impl ViVisual {
         }
         'c' => {
           chars = chars_clone;
-          self.pending_flags |= CmdFlags::REPLAY_CONTINUATION;
           break 'verb_parse Some(verb!(count, Verb::Change));
         }
         _ => break 'verb_parse None,
@@ -760,7 +759,7 @@ impl EditMode for ViVisual {
   }
 
   fn cursor_style(&self) -> String {
-    "\x1b[2 q".to_string()
+    CursorStyle::Block(false).to_string()
   }
 
   fn pending_seq(&self) -> Option<String> {

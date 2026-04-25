@@ -1,6 +1,7 @@
 use super::{CmdReplay, EditMode, ModeReport, common_cmds};
 use crate::readline::editcmd::{CmdFlags, EditCmd, RegisterName, To, Verb, VerbCmd};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E};
+use crate::state::CursorStyle;
 use crate::verb;
 
 #[derive(Default, Clone, Debug)]
@@ -49,7 +50,7 @@ impl EditMode for ViVerbatim {
   }
 
   fn cursor_style(&self) -> String {
-    "\x1b[6 q".to_string()
+    CursorStyle::Underline(true).to_string()
   }
   fn pending_seq(&self) -> Option<String> {
     None

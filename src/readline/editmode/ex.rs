@@ -15,7 +15,7 @@ use crate::readline::editmode::{EditMode, ModeReport};
 use crate::readline::history::History;
 use crate::readline::keys::KeyEvent;
 use crate::readline::linebuf::LineBuf;
-use crate::state::write_meta;
+use crate::state::{CursorStyle, write_meta};
 use crate::util::error::ShResult;
 use crate::verb;
 use crate::{bitflags, match_loop};
@@ -144,7 +144,11 @@ impl EditMode for ViEx {
   }
 
   fn cursor_style(&self) -> String {
-    "\x1b[3 q".to_string()
+    CursorStyle::Underline(false).to_string()
+  }
+
+  fn is_input_mode(&self) -> bool {
+    true
   }
 
   fn pending_seq(&self) -> Option<String> {
@@ -187,9 +191,6 @@ impl<'a> CharTracker<'a> {
   }
   pub fn peek(&mut self) -> Option<&char> {
     self.chars.peek()
-  }
-  pub fn pos(&self) -> usize {
-    self.pos
   }
 }
 
@@ -383,22 +384,6 @@ pub fn parse_ex_command_name(chars: &mut CharTracker<'_>) -> String {
   });
 
   cmd_name
-}
-
-pub fn ex_command_name_is_valid(name: &str) -> bool {
-  name == "!"
-    || "help".starts_with(name)
-    || name.starts_with("normal!")
-    || "delete".starts_with(name)
-    || "yank".starts_with(name)
-    || "put".starts_with(name)
-    || "quit".starts_with(name)
-    || "read".starts_with(name)
-    || "write".starts_with(name)
-    || "edit".starts_with(name)
-    || "substitute".starts_with(name)
-    || "global".starts_with(name)
-    || "stash".starts_with(name)
 }
 
 pub fn parse_ex_command(chars: &mut CharTracker<'_>) -> Result<Option<Verb>, Option<String>> {

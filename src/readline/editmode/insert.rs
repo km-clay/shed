@@ -1,6 +1,7 @@
 use super::{CmdReplay, EditMode, ModeReport, common_cmds};
 use crate::readline::editcmd::{Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word};
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
+use crate::state::CursorStyle;
 use crate::{key, motion, verb};
 
 #[derive(Default, Clone, Debug)]
@@ -120,7 +121,7 @@ impl EditMode for ViInsert {
   }
 
   fn cursor_style(&self) -> String {
-    "\x1b[6 q".to_string()
+    CursorStyle::Beam(false).to_string()
   }
   fn pending_seq(&self) -> Option<String> {
     None

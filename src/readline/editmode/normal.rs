@@ -8,6 +8,7 @@ use crate::readline::editcmd::{
 };
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::Grapheme;
+use crate::state::CursorStyle;
 use crate::{key, motion, verb};
 
 #[derive(Default, Debug)]
@@ -390,6 +391,21 @@ impl ViNormal {
           chars = chars_clone;
           break 'verb_parse Some(verb!(count, Verb::Equalize));
         }
+        dir @ ('/' | '?') => {
+          // search mode, return an entire command here
+          let verb = Some(verb!(match dir {
+            '/' => Verb::SearchMode,
+            '?' => Verb::RevSearchMode,
+            _ => unreachable!()
+          }));
+          return Some(EditCmd {
+            register,
+            verb,
+            motion: None,
+            raw_seq: format!("{}{dir}",self.take_cmd()),
+            flags: CmdFlags::empty(),
+          });
+        }
         _ => break 'verb_parse None,
       }
     };
@@ -616,6 +632,14 @@ impl ViNormal {
             count,
             Motion::WordMotion(To::Start, Word::Normal, Direction::Forward),
           ));
+        }
+        'n' => {
+          chars = chars_clone;
+          break 'motion_parse Some(motion!(count, Motion::RepeatSearch));
+        }
+        'N' => {
+          chars = chars_clone;
+          break 'motion_parse Some(motion!(count, Motion::RepeatSearchRev));
         }
         'W' => {
           chars = chars_clone;
@@ -865,7 +889,7 @@ impl EditMode for ViNormal {
   }
 
   fn cursor_style(&self) -> String {
-    "\x1b[2 q".to_string()
+    CursorStyle::Block(false).to_string()
   }
 
   fn pending_seq(&self) -> Option<String> {

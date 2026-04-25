@@ -4,7 +4,7 @@ use crate::{
   match_loop,
   readline::{
     annotate_input,
-    markers::{self, is_marker},
+    markers::{self, is_marker, is_visual_marker},
   },
   state::{read_meta, read_shopts, write_meta},
   util::{error::ShResult, ui::color_from_description},
@@ -156,6 +156,7 @@ pub struct Highlighter {
   style_stack: Vec<String>,
   last_was_reset: bool,
   in_selection: bool,
+  in_match: bool,
   only_hl_visual: bool,
 }
 
@@ -169,6 +170,7 @@ impl Highlighter {
       style_stack: Vec::new(),
       last_was_reset: true, // start as true so we don't emit a leading reset
       in_selection: false,
+      in_match: false,
       only_hl_visual: false,
     }
   }
@@ -199,9 +201,7 @@ impl Highlighter {
   pub fn strip_markers_keep_visual(str: &str) -> String {
     let mut out = String::new();
     for ch in str.chars() {
-      if ch == markers::VISUAL_MODE_START || ch == markers::VISUAL_MODE_END {
-        out.push(ch); // preserve visual markers
-      } else if !is_marker(ch) {
+      if is_visual_marker(ch) || !is_marker(ch) {
         out.push(ch);
       }
     }
@@ -217,7 +217,7 @@ impl Highlighter {
     // Walk through text, matching prefix chars while skipping visual markers
     while prefix_chars.peek().is_some() {
       match chars.next() {
-        Some(c) if c == markers::VISUAL_MODE_START || c == markers::VISUAL_MODE_END => continue,
+        Some(c) if is_visual_marker(c) => continue,
         Some(c) if Some(&c) == prefix_chars.peek() => {
           prefix_chars.next();
         }
@@ -240,7 +240,7 @@ impl Highlighter {
         return text.to_string();
       }
       ti -= 1;
-      if chars[ti] == markers::VISUAL_MODE_START || chars[ti] == markers::VISUAL_MODE_END {
+      if is_visual_marker(chars[ti]) {
         continue; // skip visual markers
       }
       si -= 1;
@@ -290,6 +290,15 @@ impl Highlighter {
       markers::VISUAL_MODE_END => {
         self.reapply_style();
         self.in_selection = false;
+      }
+      markers::MATCH_START => {
+        self.emit_style("\x1b[7m");
+        self.in_match = true;
+      }
+      markers::MATCH_END => {
+        self.emit_style("\x1b[27m");
+        self.reapply_style();
+        self.in_match = false;
       }
       _ if self.only_hl_visual => {
         if !is_marker(ch) {
@@ -360,6 +369,17 @@ impl Highlighter {
           markers::VISUAL_MODE_END => {
             self.reapply_style();
             self.in_selection = false;
+            input_chars.next();
+          }
+          markers::MATCH_START => {
+            self.emit_style("\x1b[7m");
+            self.in_match = true;
+            input_chars.next();
+          }
+          markers::MATCH_END => {
+            self.emit_style("\x1b[27m");
+            self.reapply_style();
+            self.in_match = false;
             input_chars.next();
           }
           _ => {
@@ -439,6 +459,11 @@ impl Highlighter {
           }
           m @ (markers::VISUAL_MODE_START | markers::VISUAL_MODE_END) => {
             self.in_selection = m == markers::VISUAL_MODE_START;
+            inner.push(m);
+            input_chars.next();
+          }
+          m @ (markers::MATCH_START | markers::MATCH_END) => {
+            self.in_match = m == markers::MATCH_START;
             inner.push(m);
             input_chars.next();
           }
@@ -523,6 +548,17 @@ impl Highlighter {
             self.in_selection = false;
             input_chars.next();
           }
+          markers::MATCH_START => {
+            self.emit_style("\x1b[7m");
+            self.in_match = true;
+            input_chars.next();
+          }
+          markers::MATCH_END => {
+            self.emit_style("\x1b[27m");
+            self.reapply_style();
+            self.in_match = false;
+            input_chars.next();
+          }
           _ if markers::is_marker(ch) => {
             input_chars.next();
           }
@@ -554,6 +590,17 @@ impl Highlighter {
           markers::VISUAL_MODE_END => {
             self.reapply_style();
             self.in_selection = false;
+            input_chars.next();
+          }
+          markers::MATCH_START => {
+            self.emit_style("\x1b[7m");
+            self.in_match = true;
+            input_chars.next();
+          }
+          markers::MATCH_END => {
+            self.emit_style("\x1b[27m");
+            self.reapply_style();
+            self.in_match = false;
             input_chars.next();
           }
           _ if markers::is_marker(ch) => {

@@ -1,6 +1,6 @@
 use crate::{
   readline::{editcmd::To, editmode::EditMode},
-  state::write_meta,
+  state::{CursorStyle, write_meta},
 };
 
 pub struct RemoteMode;
@@ -23,7 +23,7 @@ impl EditMode for RemoteMode {
   }
 
   fn cursor_style(&self) -> String {
-    "\x1b[6 q".to_string()
+    CursorStyle::Beam(false).to_string()
   }
 
   fn pending_seq(&self) -> Option<String> {

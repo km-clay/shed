@@ -25,7 +25,7 @@ use crate::{
   procio::{self, IoFrame, IoMode, IoStack, capture_command},
   readline::{
     editcmd::{LineAddr, ReadSrc, StashArgs, StashListArg, VerbCmd, WriteDest},
-    editmode::ex::SubFlags,
+    editmode::SubFlags,
     highlight::Highlighter,
     history::History,
     markers,
@@ -56,6 +56,9 @@ impl Grapheme {
   /// Returns the display width of the Grapheme, treating unprintable chars as width 0
   pub fn width(&self) -> usize {
     self.0.iter().map(|c| c.width().unwrap_or(0)).sum()
+  }
+  pub fn len_utf8(&self) -> usize {
+    self.0.iter().map(|c| c.len_utf8()).sum()
   }
   /// Returns true if the Grapheme is wrapping a linefeed ('\n')
   pub fn is_lf(&self) -> bool {
@@ -960,6 +963,7 @@ impl Ord for Hint {
 #[derive(Debug, Clone)]
 pub struct LineBuf {
   pub lines: Lines,
+  pub byte_positions: Option<Vec<(usize,Pos)>>,
   pub hint: Option<Hint>,
   pub cursor: Cursor,
 
@@ -968,6 +972,8 @@ pub struct LineBuf {
 
   pub last_substitute: Option<EditCmd>,
   pub last_global: Option<EditCmd>,
+  pub last_search: Option<Motion>,
+  pub pending_search: Option<String>,
 
   pub insert_mode_start_pos: Option<Pos>,
   pub saved_col: Option<usize>,
@@ -990,6 +996,7 @@ impl Default for LineBuf {
     Self {
       lines: Lines::default(),
       hint: None,
+      byte_positions: None,
       cursor: Cursor {
         pos: Pos { row: 0, col: 0 },
         exclusive: false,
@@ -998,6 +1005,8 @@ impl Default for LineBuf {
       last_selection: None,
       last_substitute: None,
       last_global: None,
+      last_search: None,
+      pending_search: None,
       insert_mode_start_pos: None,
       saved_col: None,
       indent_ctx: IndentCtx::new(),
@@ -1061,6 +1070,13 @@ impl LineBuf {
 
     let max_offset = self.lines.len().saturating_sub(height);
     self.scroll_offset = self.scroll_offset.min(max_offset);
+  }
+  pub fn clear_pending_search(&mut self) {
+    self.pending_search = None;
+  }
+  pub fn update_pending_search(&mut self, new: Option<String>) {
+    let Some(new) = new else { return };
+    self.pending_search = (!new.is_empty()).then_some(new);
   }
   pub fn get_window(&self) -> Lines {
     let height = self.get_viewport_height();
@@ -2528,6 +2544,78 @@ impl LineBuf {
 
     line.0.len()
   }
+  /// map every valid Pos in the buffer to a corresponding byte position in the string
+  fn byte_positions(&self) -> Vec<(usize,Pos)> {
+    let mut positions = vec![];
+    let mut acc = 0;
+
+    for (row, line) in self.lines.iter().enumerate() {
+      for (col, gr) in line.0.iter().enumerate() {
+        positions.push((acc, Pos { row, col }));
+        acc += gr.len_utf8();
+      }
+      positions.push((acc, Pos { row, col: line.0.len() }));
+      acc += 1; // for the newline
+    }
+
+    positions
+  }
+
+  pub fn byte_to_pos(&mut self, byte_offset: usize) -> Option<Pos> {
+    if let Some(positions) = &self.byte_positions {
+      positions
+        .iter()
+        .find_map(|(b,p)| (*b >= byte_offset).then_some(*p))
+    } else {
+      self.byte_positions = Some(self.byte_positions());
+      self.byte_to_pos(byte_offset)
+    }
+  }
+
+  pub fn pos_to_byte(&mut self, pos: Pos) -> Option<usize> {
+    if let Some(positions) = &self.byte_positions {
+      positions
+        .iter()
+        .find_map(|(b,p)| (*p >= pos).then_some(*b))
+    } else {
+      self.byte_positions = Some(self.byte_positions());
+      self.pos_to_byte(pos)
+    }
+  }
+  pub fn search(&mut self, motion: &Motion, save: bool) -> Option<MotionKind> {
+    let Motion::Search(pat, dir) = motion else { return None };
+    let re = Regex::new(pat)
+      .unwrap_or_else(|_| Regex::new(&regex::escape(pat)).unwrap());
+    let buf = self.joined();
+    let cursor_byte = self.pos_to_byte(self.cursor.pos)?;
+
+    let target_byte = match dir {
+      Direction::Forward => {
+        re.find_at(&buf, cursor_byte + 1)
+          .or_else(|| re.find(&buf))
+          .map(|m| m.start())
+      }
+      Direction::Backward => {
+        let matches: Vec<_> = re.find_iter(&buf).collect();
+        matches.iter().rev()
+          .find(|m| m.start() < cursor_byte)
+          .or_else(|| matches.last())
+          .map(|m| m.start())
+      }
+    };
+
+    target_byte.and_then(|b| self.byte_to_pos(b)).map(|target| {
+      if save {
+        self.last_search = Some(motion.clone());
+      }
+      MotionKind::Char {
+        start: self.cursor.pos,
+        end: target,
+        inclusive: false,
+      }
+    })
+  }
+
   fn calc_display_col_for(&self, pos: Pos) -> usize {
     let tab_width = read_shopts(|o| o.line.tab_width);
     let line = self.line(pos.row);
@@ -2751,6 +2839,34 @@ impl LineBuf {
           })
         }
 
+        Motion::Search(..) => this.search(&motion, true),
+
+        Motion::RepeatSearch => {
+          if let Some(search) = this.last_search.clone() {
+            this.search(&search, false)
+          } else {
+            None
+          }
+        }
+
+        Motion::RepeatSearchRev => {
+          if let Some(search) = &this.last_search {
+            let rev_search = match search {
+              Motion::Search(pat, dir) => {
+                let rev_dir = match dir {
+                  Direction::Forward => Direction::Backward,
+                  Direction::Backward => Direction::Forward,
+                };
+                Motion::Search(pat.clone(), rev_dir)
+              }
+              _ => unreachable!(),
+            };
+            this.search(&rev_search, false)
+          } else {
+            None
+          }
+        }
+
         Motion::ToDelimMatch => this.find_delim_match(),
         Motion::ToBracket(direction) | Motion::ToParen(direction) | Motion::ToBrace(direction) => {
           let (opener, closer) = match motion {
@@ -2857,15 +2973,16 @@ impl LineBuf {
             inclusive: false,
           })
         }
-        Motion::RepeatMotion | Motion::RepeatMotionRev => {
-          unreachable!("Repeat motions should have been resolved in readline/mod.rs")
-        }
         dir @ (Motion::Global(constraint, pat) | Motion::NotGlobal(constraint, pat)) => {
           let lines =
             this.get_matching_lines(constraint, pat, matches!(dir, Motion::Global(_, _)))?;
 
           this.last_global = Some(cmd.clone());
           Some(MotionKind::Lines { lines })
+        }
+
+        Motion::RepeatMotion | Motion::RepeatMotionRev => {
+          unreachable!("Repeat motions should have been resolved in readline/mod.rs")
         }
         Motion::Null => None,
         Motion::Selection(mode) => { unreachable!() }
@@ -3804,6 +3921,9 @@ impl LineBuf {
                 return Ok(());
               }
             };
+
+            self.set_buffer(buffer);
+
             let cursor_pos = match self.parse_pos(&cursor_pos) {
               Ok(pos) => pos,
               Err(e) => {
@@ -3816,7 +3936,6 @@ impl LineBuf {
               }
             };
 
-            self.set_buffer(buffer);
             self.set_cursor(cursor_pos);
           }
           StashArgs::Drop(arg) => {
@@ -3882,6 +4001,8 @@ impl LineBuf {
               });
             }
 
+            self.set_buffer(buffer);
+
             let cursor_pos = match self.parse_pos(&cursor_pos) {
               Ok(pos) => pos,
               Err(e) => {
@@ -3894,7 +4015,6 @@ impl LineBuf {
               }
             };
 
-            self.set_buffer(buffer);
             self.set_cursor(cursor_pos);
           }
           StashArgs::Insert(arg) => {
@@ -3925,6 +4045,12 @@ impl LineBuf {
               return Ok(());
             };
 
+            let lines = Lines::to_lines(&buffer);
+            let num_lines = lines.len();
+            let line_range = self.row()..self.row() + num_lines;
+
+            self.insert_lines_at(self.cursor.pos, lines);
+
             let cursor_offset = match self.parse_pos(&cursor_pos) {
               Ok(pos) => pos,
               Err(e) => {
@@ -3936,11 +4062,6 @@ impl LineBuf {
                 Pos { row: 0, col: 0 }
               }
             };
-            let lines = Lines::to_lines(&buffer);
-            let num_lines = lines.len();
-            let line_range = self.row()..self.row() + num_lines;
-
-            self.insert_lines_at(self.cursor.pos, lines);
             self.cursor.pos = self.cursor.pos + cursor_offset;
             self.fix_cursor();
             if read_shopts(|o| o.line.auto_indent) {
@@ -4115,6 +4236,8 @@ impl LineBuf {
       Verb::Complete
       | Verb::ExMode
       | Verb::InsertMode
+      | Verb::SearchMode
+      | Verb::RevSearchMode
       | Verb::NormalMode
       | Verb::VisualMode
       | Verb::VerbatimMode
@@ -4379,6 +4502,8 @@ impl LineBuf {
     {
       self.clear_hint();
     }
+
+    self.byte_positions = None;
 
     res
   }
@@ -5109,9 +5234,43 @@ impl LineBuf {
 
 impl Display for LineBuf {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    if let Some(select) = self.select_mode.as_ref() {
-      let mut cloned = self.lines.clone();
+    let mut cloned = self.lines.clone();
 
+    // Layer 1: search match highlighting
+    if let Some(pat) = self.pending_search.as_ref()
+      && !pat.is_empty()
+      && let Ok(re) = Regex::new(pat)
+    {
+      let buf = self.joined();
+      // Collect (start_pos, end_pos) pairs first, then insert in reverse
+      // so earlier insertions don't shift later byte offsets
+      // Build a one-shot byte-to-pos index since we can't mutate the cache
+      // through &self.
+      let positions = self.byte_positions();
+      let lookup = |b: usize| -> Option<Pos> {
+        positions
+          .iter()
+          .find_map(|(off, p)| (*off >= b).then_some(*p))
+      };
+      let mut spans: Vec<(Pos, Pos)> = re
+        .find_iter(&buf)
+        .filter_map(|m| Some((lookup(m.start())?, lookup(m.end())?)))
+        .collect();
+      // Sort by start descending so later positions are inserted first
+      spans.sort_by(|a, b| b.0.cmp(&a.0));
+      for (s, e) in spans {
+        // Insert end marker first (still on its row), then start marker
+        if e.col >= cloned[e.row].len() {
+          cloned[e.row].push_char(markers::MATCH_END);
+        } else {
+          cloned[e.row].insert(e.col, markers::MATCH_END.into());
+        }
+        cloned[s.row].insert(s.col, markers::MATCH_START.into());
+      }
+    }
+
+    // Layer 2: visual mode selection highlighting
+    if let Some(select) = self.select_mode.as_ref() {
       match select {
         SelectMode::Char(pos) => {
           let (s, e) = ordered(self.cursor.pos, *pos);
@@ -5154,15 +5313,10 @@ impl Display for LineBuf {
         }
         SelectMode::Block(_pos) => unimplemented!(),
       }
-      let mut lines = vec![];
-      for line in &cloned.0 {
-        lines.push(line.to_string());
-      }
-      let joined = lines.join("\n");
-      write!(f, "{joined}")
-    } else {
-      write!(f, "{}", self.joined())
     }
+
+    let lines: Vec<String> = cloned.0.iter().map(|line| line.to_string()).collect();
+    write!(f, "{}", lines.join("\n"))
   }
 }
 

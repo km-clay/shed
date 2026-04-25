@@ -6,29 +6,31 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::readline::editcmd::{
   CmdFlags, Direction, EditCmd, Motion, MotionCmd, To, Verb, VerbCmd, Word,
 };
-use crate::readline::editmode::emacs::Emacs;
-use crate::readline::editmode::remote::RemoteMode;
 use crate::readline::history::History;
 use crate::readline::keys::{KeyCode as K, KeyEvent as E, ModKeys as M};
 use crate::readline::linebuf::LineBuf;
 use crate::util::error::{ShErr, ShResult};
 use crate::{key, motion, verb};
 
-pub mod emacs;
-pub mod ex;
-pub mod insert;
-pub mod normal;
-pub mod remote;
-pub mod replace;
-pub mod verbatim;
-pub mod visual;
+mod emacs;
+mod ex;
+mod insert;
+mod normal;
+mod remote;
+mod replace;
+mod verbatim;
+mod visual;
+mod search;
 
-pub use ex::ViEx;
+pub use ex::{SubFlags, ViEx};
 pub use insert::ViInsert;
 pub use normal::ViNormal;
 pub use replace::ViReplace;
 pub use verbatim::ViVerbatim;
 pub use visual::ViVisual;
+pub use emacs::Emacs;
+pub use remote::RemoteMode;
+pub use search::{ViSearch, ViSearchRev};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModeReport {
@@ -40,6 +42,8 @@ pub enum ModeReport {
   Verbatim,
   Emacs,
   Remote,
+  Search,
+  RevSearch,
   Unknown,
 }
 
@@ -54,6 +58,8 @@ impl ModeReport {
       ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn EditMode>,
       ModeReport::Emacs => Box::new(Emacs::new()) as Box<dyn EditMode>,
       ModeReport::Remote => Box::new(RemoteMode) as Box<dyn EditMode>,
+      ModeReport::Search => Box::new(ViSearch::new()) as Box<dyn EditMode>,
+      ModeReport::RevSearch => Box::new(ViSearchRev::new()) as Box<dyn EditMode>,
       ModeReport::Unknown => unimplemented!(),
     }
   }
@@ -70,6 +76,7 @@ impl Display for ModeReport {
       Self::Verbatim => write!(f, "VERBATIM"),
       Self::Emacs => write!(f, "EMACS"),
       Self::Remote => write!(f, "REMOTE"),
+      Self::Search | Self::RevSearch => write!(f, "SEARCH"),
       Self::Unknown => write!(f, "UNKNOWN"),
     }
   }
@@ -134,6 +141,7 @@ pub trait EditMode {
   fn history(&mut self) -> Option<&mut History> {
     None
   }
+  fn is_input_mode(&self) -> bool { false }
   fn move_cursor_on_undo(&self) -> bool;
   fn clamp_cursor(&self) -> bool;
   fn hist_scroll_start_pos(&self) -> Option<To>;
