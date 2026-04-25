@@ -59,6 +59,9 @@ impl ExEditor {
   pub fn clear(&mut self) {
     *self = Self::default()
   }
+  pub fn is_empty(&self) -> bool {
+    self.editor.buf.is_empty()
+  }
 }
 
 #[derive(Default, Debug)]
@@ -103,6 +106,13 @@ impl EditMode for ViEx {
         self.pending_cmd.clear();
         Ok(None)
       }
+      key!(Backspace) if self.pending_cmd.is_empty() => Ok(Some(EditCmd {
+        register: RegisterName::default(),
+        verb: None,
+        motion: None,
+        flags: CmdFlags::EXIT_CUR_MODE,
+        raw_seq: "".into(),
+      })),
       key!(Esc) => Ok(Some(EditCmd {
         register: RegisterName::default(),
         verb: None,

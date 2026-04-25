@@ -13,11 +13,18 @@ use crate::{key, motion, verb};
 #[derive(Default, Debug)]
 pub struct ViVisual {
   pending_seq: String,
+  cmds: Vec<EditCmd>,
+  pending_flags: CmdFlags,
+  repeat_count: u16,
 }
 
 impl ViVisual {
   pub fn new() -> Self {
     Self::default()
+  }
+  pub fn with_count(mut self, repeat_count: u16) -> Self {
+    self.repeat_count = repeat_count;
+    self
   }
   pub fn clear_cmd(&mut self) {
     self.pending_seq = String::new();
@@ -25,8 +32,13 @@ impl ViVisual {
   pub fn take_cmd(&mut self) -> String {
     std::mem::take(&mut self.pending_seq)
   }
+  pub fn take_flags(&mut self) -> CmdFlags {
+    std::mem::take(&mut self.pending_flags)
+  }
+  pub fn register_cmd(&mut self, cmd: &EditCmd) {
+    self.cmds.push(cmd.clone());
+  }
 
-  #[allow(clippy::unnecessary_unwrap)]
   fn validate_combination(&self, verb: Option<&Verb>, motion: Option<&Motion>) -> CmdState {
     if verb.is_none() {
       match motion {
@@ -34,8 +46,8 @@ impl ViVisual {
         None => return CmdState::Pending,
       }
     }
-    if motion.is_none() && verb.is_some() {
-      match verb.unwrap() {
+    if motion.is_none() && let Some(verb) = verb {
+      match verb {
         Verb::Put(_) => CmdState::Complete,
         _ => CmdState::Pending,
       }
@@ -172,12 +184,13 @@ impl ViVisual {
           });
         }
         'R' | 'C' => {
+          self.pending_flags |= CmdFlags::REPLAY_CONTINUATION;
           return Some(EditCmd {
             register,
             verb: Some(verb!(Verb::Change)),
             motion: Some(motion!(Motion::WholeLine)),
             raw_seq: self.take_cmd(),
-            flags: CmdFlags::empty(),
+            flags: self.take_flags()
           });
         }
         '>' => {
@@ -317,6 +330,7 @@ impl ViVisual {
         }
         'c' => {
           chars = chars_clone;
+          self.pending_flags |= CmdFlags::REPLAY_CONTINUATION;
           break 'verb_parse Some(verb!(count, Verb::Change));
         }
         _ => break 'verb_parse None,
@@ -329,7 +343,7 @@ impl ViVisual {
         verb: Some(verb),
         motion: None,
         raw_seq: self.take_cmd(),
-        flags: CmdFlags::empty(),
+        flags: self.take_flags()
       });
     }
 
@@ -607,7 +621,7 @@ impl ViVisual {
         verb,
         motion,
         raw_seq: std::mem::take(&mut self.pending_seq),
-        flags: CmdFlags::empty(),
+        flags: self.take_flags()
       }),
       CmdState::Pending => None,
       CmdState::Invalid => {
@@ -725,6 +739,11 @@ impl EditMode for ViVisual {
     if let Some(cmd) = cmd.as_mut() {
       cmd.normalize_counts();
     };
+    if let Some(cmd) = cmd.as_ref()
+      && !matches!(cmd.verb.as_ref().map(|v| &v.1), Some(Verb::NormalMode | Verb::ExMode | Verb::Undo | Verb::Redo))
+    {
+      self.register_cmd(cmd);
+    }
     cmd
   }
 
@@ -733,7 +752,11 @@ impl EditMode for ViVisual {
   }
 
   fn as_replay(&self) -> Option<CmdReplay> {
-    None
+    if self.cmds.is_empty() {
+      None
+    } else {
+      Some(CmdReplay::mode(self.cmds.clone(), self.repeat_count))
+    }
   }
 
   fn cursor_style(&self) -> String {

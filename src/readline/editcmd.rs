@@ -5,7 +5,7 @@ use bitflags::bitflags;
 use crate::{
   readline::{
     editmode::ex::SubFlags,
-    linebuf::{Grapheme, Pos},
+    linebuf::{Grapheme, Pos, SelectShape},
   },
   state::read_vars,
 };
@@ -75,6 +75,7 @@ bitflags! {
     const HAS_SHIFT = 1<<5;
     const HAS_CTRL = 1<<6;
     const IS_SUBMIT = 1<<7;
+    const REPLAY_CONTINUATION = 1<<8;
   }
 }
 
@@ -109,6 +110,28 @@ impl EditCmd {
       ..self.clone()
     }
   }
+  pub fn history_scroll_offset(&self) -> Option<isize> {
+    if matches!(self.verb().map(|v| &v.1), Some(Verb::HistoryUp | Verb::HistoryDown)) {
+      let count = self.verb().map(|v| v.0).unwrap_or(1);
+      let offset = match self.verb().map(|v| &v.1) {
+        Some(Verb::HistoryUp) => -(count as isize),
+        Some(Verb::HistoryDown) => count as isize,
+        _ => 0,
+      };
+      Some(offset)
+
+    } else if matches!(self.motion().map(|m| &m.1), Some(Motion::LineUp | Motion::LineDown)) {
+      let count = self.motion().map(|m| m.0).unwrap_or(1);
+      let offset = match self.motion().map(|m| &m.1) {
+        Some(Motion::LineUp) => -(count as isize),
+        Some(Motion::LineDown) => count as isize,
+        _ => 0,
+      };
+      Some(offset)
+    } else {
+      None
+    }
+  }
   pub fn verb(&self) -> Option<&VerbCmd> {
     self.verb.as_ref()
   }
@@ -139,6 +162,9 @@ impl EditCmd {
   }
   pub fn is_repeatable(&self) -> bool {
     self.verb.as_ref().is_some_and(|v| v.1.is_repeatable())
+  }
+  pub fn is_edit(&self) -> bool {
+    self.verb.as_ref().is_some_and(|v| v.1.is_edit())
   }
   pub fn is_cmd_repeat(&self) -> bool {
     self
@@ -358,6 +384,9 @@ impl Verb {
         | Self::ToggleCaseInplace(_)
         | Self::Put(_)
         | Self::ReplaceMode
+        | Self::InsertMode
+        | Self::VisualMode
+        | Self::VisualModeLine
         | Self::InsertModeLineBreak(_)
         | Self::JoinLines
         | Self::InsertChar(_)
@@ -440,6 +469,7 @@ pub enum Motion {
   LineRange(LineAddr, LineAddr),
   Line(LineAddr),
   BlockRange(Pos, Pos),
+  Selection(SelectShape), // used in dot-repeats of visual mode
   RepeatMotion,
   RepeatMotionRev,
   Null,

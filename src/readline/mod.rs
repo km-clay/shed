@@ -2,7 +2,7 @@ use crate::parse::lex::LexStream;
 use crate::readline::editmode::remote::RemoteMode;
 use crate::readline::linebuf::{Pos, ordered};
 use crate::util::strops::QuoteState;
-use crate::{motion, write_term};
+use crate::{motion, verb, write_term};
 use ariadne::Span;
 use editcmd::{CmdFlags, EditCmd, Motion, MotionCmd, RegisterName, Verb, VerbCmd};
 use editmode::{CmdReplay, EditMode, ModeReport, ViInsert, ViNormal, ViReplace, ViVisual};
@@ -207,16 +207,9 @@ impl SimpleEditor {
         .is_some_and(|m| matches!(m, MotionCmd(_, Motion::LineDown)))
         && self.buf.on_last_line())
   }
-  pub fn scroll_history(&mut self, cmd: EditCmd) {
+  pub fn scroll_history(&mut self, count: isize) {
     let Some(history) = self.history.as_mut() else {
       return;
-    };
-    let count = &cmd.motion().unwrap().0;
-    let motion = &cmd.motion().unwrap().1;
-    let count = match motion {
-      Motion::LineUp => -(*count as isize),
-      Motion::LineDown => *count as isize,
-      _ => unreachable!(),
     };
     let entry = history.scroll(count);
     if let Some(entry) = entry {
@@ -236,7 +229,12 @@ impl SimpleEditor {
       return Ok(());
     };
     if self.should_grab_history(&cmd) {
-      self.scroll_history(cmd);
+      let count = match cmd.motion().unwrap() {
+        MotionCmd(_, Motion::LineUp) => -1,
+        MotionCmd(_, Motion::LineDown) => 1,
+        _ => unreachable!(),
+      };
+      self.scroll_history(count);
       return Ok(());
     }
     self.buf.exec_cmd(cmd)
@@ -353,6 +351,33 @@ impl Default for Prompt {
       psr_raw: None,
       dirty: false,
     }
+  }
+}
+
+pub enum LineCmd {
+  Execute(EditCmd),
+  SubmitLine(EditCmd),
+  AppendHint,
+  ScrollHist(isize),
+  ScrollHistVirtual(EditCmd),
+  EndOfFile,
+  Quit,
+  ClearScreen,
+  ResetWidget,
+  NormalSeq(Vec<usize>,String),
+  TriggerCompletion,
+  TriggerHistSearch,
+}
+
+impl LineCmd {
+  pub fn switch_to_normal() -> Self {
+    Self::Execute(EditCmd {
+      register: Default::default(),
+      verb: Some(verb!(Verb::NormalMode)),
+      motion: None,
+      raw_seq: String::new(),
+      flags: CmdFlags::empty(),
+    })
   }
 }
 
@@ -968,6 +993,39 @@ impl ShedLine {
     }
   }
 
+  fn extract_line_nums(&self, cmd: &EditCmd) -> ShResult<Vec<usize>> {
+    Ok(match cmd.motion() {
+      Some(MotionCmd(_, Motion::LineRange(s, e))) => {
+        let s = self
+          .editor
+          .resolve_line_addr(s)?
+          .unwrap_or(self.editor.row());
+        let e = self
+          .editor
+          .resolve_line_addr(e)?
+          .unwrap_or(self.editor.row());
+        let (s, e) = ordered(s, e);
+        Either::Left(s..=e)
+      }
+      Some(MotionCmd(_, Motion::Line(addr))) => {
+        let addr = self
+          .editor
+          .resolve_line_addr(addr)?
+          .unwrap_or(self.editor.row());
+        Either::Left(addr..=addr)
+      }
+      Some(MotionCmd(_, m @ (Motion::Global(con, re) | Motion::NotGlobal(con, re)))) => {
+        let polarity = matches!(m, Motion::Global(_, _));
+        let lines = self.editor.get_matching_lines(con, re, polarity)?;
+        Either::Right(lines.into_iter())
+      }
+      _ => {
+        let row = self.editor.row();
+        Either::Left(row..=row)
+      }
+    }.collect())
+  }
+
   fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
     self.editor.clear_hint();
     self.editor.set_cursor_from_flat(self.editor.cursor_max());
@@ -981,145 +1039,84 @@ impl ShedLine {
     Ok(Some(ReadlineEvent::Line(buf)))
   }
 
-  pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
-    if self.should_accept_hint(&key) {
-      return self.accept_hint();
-    }
-
-    if let KeyEvent(KeyCode::Tab, _) = key
+  pub fn resolve_key(&mut self, key: &KeyEvent) -> ShResult<Option<LineCmd>> {
+    if self.should_accept_hint(key) {
+      return Ok(Some(LineCmd::AppendHint));
+    } else if let KeyEvent(KeyCode::Tab, _) = key
       && self.should_complete()
     {
-      return self.handle_tab(key);
+      return Ok(Some(LineCmd::TriggerCompletion));
     } else if let key!(Ctrl + 'r') = key
       && matches!(self.mode.report_mode(), ModeReport::Insert | ModeReport::Ex)
     {
-      self.start_hist_search();
+      return Ok(Some(LineCmd::TriggerHistSearch));
     }
 
-    let Ok(cmd) = self.mode.handle_key_fallible(key) else {
+    let Ok(cmd) = self.mode.handle_key_fallible(key.clone()) else {
       // it's an ex mode error
-      self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
-
-      return Ok(None);
+      return Ok(Some(LineCmd::switch_to_normal()))
     };
 
-    let Some(mut cmd) = cmd else {
-      return Ok(None);
+    let Some(cmd) = cmd else {
+      return Ok(None)
     };
 
+    self.resolve_cmd(cmd)
+  }
+
+  pub fn resolve_cmd(&mut self, mut cmd: EditCmd) -> ShResult<Option<LineCmd>> {
     if let Some(VerbCmd(_, Verb::Interrupt)) = cmd.verb() {
-      self.reset_active_widget(false)?;
-      return Ok(None);
+      return Ok(Some(LineCmd::ResetWidget));
     }
 
     if let Some(VerbCmd(_, Verb::Normal(seq))) = cmd.verb() {
-      let line_nums: Either<_, _> = match cmd.motion() {
-        Some(MotionCmd(_, Motion::LineRange(s, e))) => {
-          let s = self
-            .editor
-            .resolve_line_addr(s)?
-            .unwrap_or(self.editor.row());
-          let e = self
-            .editor
-            .resolve_line_addr(e)?
-            .unwrap_or(self.editor.row());
-          let (s, e) = ordered(s, e);
-          Either::Left(s..=e)
-        }
-        Some(MotionCmd(_, Motion::Line(addr))) => {
-          let addr = self
-            .editor
-            .resolve_line_addr(addr)?
-            .unwrap_or(self.editor.row());
-          Either::Left(addr..=addr)
-        }
-        Some(MotionCmd(_, m @ (Motion::Global(con, re) | Motion::NotGlobal(con, re)))) => {
-          let polarity = matches!(m, Motion::Global(_, _));
-          let lines = self.editor.get_matching_lines(con, re, polarity)?;
-          Either::Right(lines.into_iter())
-        }
-        _ => {
-          let row = self.editor.row();
-          Either::Left(row..=row)
-        }
-      };
-
-      let keys = expand_keymap(seq);
-
-      self.editor.start_undo_merge();
-      for line in line_nums {
-        self.editor.set_cursor(linebuf::Pos { row: line, col: 0 });
-        self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
-
-        for key in keys.clone() {
-          if let Err(e) = self.handle_key(key) {
-            self.editor.stop_undo_merge();
-            return Err(e);
-          }
-        }
-      }
-      self.editor.stop_undo_merge();
-
-      // just in case
-      self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
-
-      return Ok(None);
-    }
-
-    if !cmd.is_virtual_scroll() {
-      self.focused_history().stop_virtual_scroll();
-      self.editor.clear_concats();
+      let line_nums = self.extract_line_nums(&cmd)?;
+      return Ok(Some(LineCmd::NormalSeq(line_nums, seq.clone())))
     }
 
     if self.should_grab_history(&cmd) {
+      let offset = cmd.history_scroll_offset().unwrap();
+
       if read_shopts(|o| o.prompt.hist_cat)
         && cmd
           .flags
           .intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL)
       {
-        self.scroll_history_virtual(cmd);
+        return Ok(Some(LineCmd::ScrollHistVirtual(cmd)));
       } else {
-        self.scroll_history(cmd);
+        return Ok(Some(LineCmd::ScrollHist(offset)));
       }
-      self.needs_redraw = true;
-      return Ok(None);
     }
 
     if cmd.is_submit_action() {
-      if self.editor.attempt_alias_expansion() {
-        self.update_editor_hint();
-      }
-      if self.editor.attempt_history_expansion(&self.history) {
-        // If history expansion occurred, don't submit yet
-        self.update_editor_hint();
-
-        return Ok(None);
-      } else if self.should_submit()? || !read_shopts(|o| o.line.linebreak_on_incomplete) {
-        return self.submit();
-      }
+      return Ok(Some(LineCmd::SubmitLine(cmd)));
     }
 
-    if let Some(VerbCmd(_, v @ Verb::DeleteOrEof)) = cmd.verb_mut() {
+    if let Some(VerbCmd(_, Verb::DeleteOrEof)) = cmd.verb_mut() {
       // user pressed Ctrl+D in emacs mode
       // we've gotta resolve this into either Delete or EndOfFile here
       if self.focused_editor().is_empty() {
-        *v = Verb::EndOfFile;
+        cmd.verb_mut().unwrap().1 = Verb::EndOfFile;
       } else {
-        *v = Verb::Delete;
+        cmd.verb_mut().unwrap().1 = Verb::Delete;
       }
+      return Ok(Some(LineCmd::Execute(cmd)));
     } else if let Some(VerbCmd(_, Verb::ClearScreen)) = cmd.verb() {
-      with_term(|t| t.write_direct(Terminal::CLEAR_SCREEN)).ok();
-      self.needs_redraw = true;
-      return Ok(None);
+      return Ok(Some(LineCmd::ClearScreen));
     }
 
-    if (cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile)
-      && self.focused_editor().joined().is_empty())
-      || cmd.verb().is_some_and(|v| v.1 == Verb::Quit)
+    if cmd.verb().is_some_and(|v| v.1 == Verb::EndOfFile)
+      && self.focused_editor().joined().is_empty()
     {
-      return Ok(Some(ReadlineEvent::Eof));
+      return Ok(Some(LineCmd::EndOfFile));
+    } else if cmd.verb().is_some_and(|v| v.1 == Verb::Quit) {
+      return Ok(Some(LineCmd::Quit));
     }
 
+    Ok(Some(LineCmd::Execute(cmd)))
+  }
+
+  pub fn run_cmd(&mut self, cmd: EditCmd) -> ShResult<Option<ReadlineEvent>> {
     // check if it's an edit
     // we don't count Verb::Change since its possible for it to be called and not actually change anything
     // e.g. 'cc' on an empty line, 'C' at the end of a line, etc.
@@ -1171,6 +1168,91 @@ impl ShedLine {
     self.update_editor_hint();
     self.needs_redraw = true;
     Ok(None)
+  }
+
+  pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {
+    let Some(linecmd) = self.resolve_key(&key)? else { return Ok(None) };
+    if !matches!(&linecmd, LineCmd::ScrollHistVirtual(_)) {
+      self.focused_history().stop_virtual_scroll();
+      self.editor.clear_concats();
+    }
+
+    match linecmd {
+      LineCmd::Execute(cmd) => self.run_cmd(cmd),
+      LineCmd::ScrollHist(off) => {
+        self.scroll_history(off);
+        self.needs_redraw = true;
+        Ok(None)
+      }
+      LineCmd::ScrollHistVirtual(cmd) => {
+        self.scroll_history_virtual(cmd);
+        self.needs_redraw = true;
+        Ok(None)
+      }
+      LineCmd::EndOfFile => {
+        if self.focused_editor().joined().is_empty() {
+          Ok(Some(ReadlineEvent::Eof))
+        } else {
+          self.reset_active_widget(false)?;
+          Ok(None)
+        }
+      }
+      LineCmd::Quit => Ok(Some(ReadlineEvent::Eof)),
+      LineCmd::ClearScreen => {
+        with_term(|t| t.write_direct(Terminal::CLEAR_SCREEN)).ok();
+        self.needs_redraw = true;
+        Ok(None)
+      }
+      LineCmd::ResetWidget => {
+        self.reset_active_widget(false)?;
+        Ok(None)
+      }
+      LineCmd::NormalSeq(line_nums,seq) => {
+        let keys = expand_keymap(&seq);
+
+        self.editor.start_undo_merge();
+        for line in line_nums {
+          self.editor.set_cursor(linebuf::Pos { row: line, col: 0 });
+          self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
+
+          for key in keys.clone() {
+            if let Err(e) = self.handle_key(key) {
+              self.editor.stop_undo_merge();
+              return Err(e);
+            }
+          }
+        }
+        self.editor.stop_undo_merge();
+
+        // just in case
+        self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
+
+        Ok(None)
+      }
+      LineCmd::TriggerCompletion => self.handle_tab(key),
+      LineCmd::TriggerHistSearch => {
+        self.start_hist_search();
+        Ok(None)
+      }
+      LineCmd::SubmitLine(cmd) => {
+        if self.editor.attempt_alias_expansion() {
+          self.update_editor_hint();
+        }
+        if self.editor.attempt_history_expansion(&self.history) {
+          // If history expansion occurred, don't submit yet
+          self.update_editor_hint();
+
+          Ok(None)
+        } else if self.should_submit()? || !read_shopts(|o| o.line.linebreak_on_incomplete) {
+          self.submit()
+        } else {
+          self.run_cmd(cmd)
+        }
+      }
+      LineCmd::AppendHint => self.accept_hint(),
+    }
+
+
   }
 
   pub fn get_layout(&mut self, line: &str) -> Layout {
@@ -1256,29 +1338,7 @@ impl ShedLine {
     }
     self.swap_history_editor(entry);
   }
-  pub fn scroll_history(&mut self, cmd: EditCmd) {
-    let count = if cmd.motion().is_some() {
-      &cmd.motion().unwrap().0
-    } else {
-      match cmd.verb() {
-        Some(VerbCmd(c, _)) => c,
-        _ => unreachable!(),
-      }
-    };
-    let motion = if cmd.motion().is_some() {
-      cmd.motion().unwrap().1.clone()
-    } else {
-      match cmd.verb() {
-        Some(VerbCmd(_, Verb::HistoryUp)) => Motion::LineUp,
-        Some(VerbCmd(_, Verb::HistoryDown)) => Motion::LineDown,
-        _ => unreachable!(),
-      }
-    };
-    let count = match motion {
-      Motion::LineUp => -(*count as isize),
-      Motion::LineDown => *count as isize,
-      _ => unreachable!(),
-    };
+  pub fn scroll_history(&mut self, count: isize) {
     if self.focused_history().pending.is_none() {
       if count >= 0 {
         // if count >= 0, we are scrolling down
@@ -1831,16 +1891,15 @@ impl ShedLine {
       }
 
       if cmd.is_repeatable() && !from_replay {
+        let mut replay_cmd = cmd.clone();
         if self.mode.report_mode() == ModeReport::Visual {
-          // The motion is assigned in the line buffer execution, so we also have to
-          // assign it here in order to be able to repeat it
-          if let Some(range) = self.editor.select_range() {
-            cmd.motion = Some(motion!(range))
+          if let Some(shape_motion) = self.editor.select_mode() {
+            replay_cmd.motion = Some(motion!(shape_motion));
           } else {
             log::warn!("You're in visual mode with no select range??");
           };
         }
-        self.repeat_action = Some(CmdReplay::Single(cmd.clone()));
+        self.repeat_action = Some(CmdReplay::Single(replay_cmd));
       }
 
       if cmd.is_char_search() {

@@ -1,9 +1,5 @@
 use std::{
-  cmp::Ordering,
-  collections::{HashSet, VecDeque},
-  fmt::Display,
-  ops::{Deref, DerefMut, Index, IndexMut},
-  slice::SliceIndex,
+  cmp::Ordering, collections::{HashSet, VecDeque}, fmt::Display, ops::{Deref, DerefMut, Index, IndexMut}, slice::SliceIndex
 };
 
 use ariadne::Span;
@@ -472,10 +468,59 @@ pub enum SelectMode {
   Block(Pos),
 }
 
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+impl SelectMode {
+  pub fn shape(&self, other: Pos) -> SelectShape {
+    match self {
+      SelectMode::Char(pos) => {
+        let (s,e) = ordered(*pos, other);
+        // offset points from lower end (s) to upper end (e) — always non-negative
+        SelectShape::Char(e.difference(&s))
+      }
+      SelectMode::Line(pos) => {
+        let (s,e) = ordered(*pos, other);
+        SelectShape::Line(e.difference(&s))
+      }
+      SelectMode::Block(pos) => {
+        let (s,e) = ordered(*pos, other);
+        SelectShape::Block(e.difference(&s))
+      }
+    }
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SelectShape {
+  Char(SignedPos),
+  Line(SignedPos),
+  Block(SignedPos),
+}
+
+impl SelectShape {
+  pub fn pos(&self) -> SignedPos {
+    match self {
+      SelectShape::Char(pos) | SelectShape::Line(pos) | SelectShape::Block(pos) => *pos,
+    }
+  }
+
+  pub fn into_select_mode(self, resolved: Pos) -> SelectMode {
+    match self {
+      SelectShape::Char(_) => SelectMode::Char(resolved),
+      SelectShape::Line(_) => SelectMode::Line(resolved),
+      SelectShape::Block(_) => SelectMode::Block(resolved),
+    }
+  }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Pos {
   pub row: usize,
   pub col: usize,
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct SignedPos {
+  pub row: isize,
+  pub col: isize,
 }
 
 impl Pos {
@@ -491,6 +536,20 @@ impl Pos {
 
   pub fn new(row: usize, col: usize) -> Self {
     Self { row, col }
+  }
+
+  pub fn difference(&self, other: &Pos) -> SignedPos {
+    SignedPos {
+      row: self.row as isize - other.row as isize,
+      col: self.col as isize - other.col as isize,
+    }
+  }
+
+  pub fn add_signed(&self, other: SignedPos) -> Self {
+    Self {
+      row: self.row.saturating_add_signed(other.row),
+      col: self.col.saturating_add_signed(other.col),
+    }
   }
 
   pub fn row_col_add(&self, row: isize, col: isize) -> Self {
@@ -534,6 +593,22 @@ impl Pos {
       max = max.saturating_sub(1);
     }
     self.col = self.col.clamp(0, max);
+  }
+}
+
+impl PartialOrd for Pos {
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl Ord for Pos {
+  fn cmp(&self, other: &Self) -> Ordering {
+    match self.row.cmp(&other.row) {
+      Ordering::Greater => Ordering::Greater,
+      Ordering::Less => Ordering::Less,
+      Ordering::Equal => self.col.cmp(&other.col),
+    }
   }
 }
 
@@ -2487,9 +2562,16 @@ impl LineBuf {
     let Some(MotionCmd(count, motion)) = motion.as_ref() else {
       return Ok(None);
     };
+    let mut motion = motion.clone();
+
+
+    if let Motion::Selection(mode) = motion
+    && let Some(new) = self.evaluate_select_shape(&mode) {
+      motion = new;
+    }
 
     let eval = |this: &mut Self| -> ShResult<Option<MotionKind>> {
-      let kind = match motion {
+      let kind = match &motion {
         Motion::WholeLine => {
           let start = this.row();
           let end =
@@ -2786,6 +2868,7 @@ impl LineBuf {
           Some(MotionKind::Lines { lines })
         }
         Motion::Null => None,
+        Motion::Selection(mode) => { unreachable!() }
       };
       Ok(kind)
     };
@@ -4182,9 +4265,18 @@ impl LineBuf {
   }
   pub fn start_undo_merge(&mut self) {
     self.merging_undos = true;
+    if let Some(edit) = self.undo_stack.last_mut() {
+      edit.merging = true;
+    }
   }
   pub fn stop_undo_merge(&mut self) {
     self.merging_undos = false;
+    if let Some(edit) = self.undo_stack.last_mut() {
+      edit.merging = false;
+    }
+  }
+  pub fn is_merging(&self) -> bool {
+    self.merging_undos || self.undo_stack.last().is_some_and(|edit| edit.merging)
   }
   pub fn exec_cmd(&mut self, cmd: EditCmd) -> ShResult<()> {
     let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
@@ -4266,6 +4358,10 @@ impl LineBuf {
           edit.merging = true;
         }
       }
+
+      if self.undo_stack.last().is_some_and(|e| e.is_empty()) {
+        self.undo_stack.pop();
+      }
     }
 
     self.fix_cursor();
@@ -4288,7 +4384,8 @@ impl LineBuf {
   }
 
   pub fn handle_edit(&mut self, old: Lines, new_cursor: Pos, old_cursor: Pos) {
-    let edit_is_merging = self.undo_stack.last().is_some_and(|edit| edit.merging);
+    let last_edit = self.undo_stack.last();
+    let edit_is_merging = last_edit.is_some_and(|edit| edit.merging);
     if edit_is_merging {
       // Update the `new` snapshot on the existing edit
       if let Some(edit) = self.undo_stack.last_mut() {
@@ -4581,8 +4678,13 @@ impl LineBuf {
     }
   }
 
+  /// Absolute values of currently selected range
   pub fn select_range(&self) -> Option<Motion> {
     let mode = self.select_mode.as_ref()?;
+    self.evaluate_selection(mode)
+  }
+
+  pub fn evaluate_selection(&self, mode: &SelectMode) -> Option<Motion> {
     match mode {
       SelectMode::Char(pos) => {
         let (s, e) = ordered(self.cursor.pos, *pos);
@@ -4597,6 +4699,18 @@ impl LineBuf {
         Some(Motion::BlockRange(s, e))
       }
     }
+  }
+
+  pub fn evaluate_select_shape(&self, shape: &SelectShape) -> Option<Motion> {
+    let offset = shape.pos();
+    let anchor = self.cursor.pos.add_signed(offset);
+    assert!(anchor > self.cursor.pos);
+    let mode = shape.into_select_mode(anchor);
+    self.evaluate_selection(&mode)
+  }
+
+  pub fn select_mode(&self) -> Option<Motion> {
+    self.select_mode.as_ref().map(|m| Motion::Selection(m.shape(self.cursor.pos)))
   }
 
   pub fn is_selecting(&self) -> bool {
@@ -4907,6 +5021,8 @@ impl LineBuf {
                 let Some(ch) = gr3.as_char() else { break }; // break on non-ascii
                 if ch.is_whitespace() {
                   break; // break on whitespace
+                } else if matches!(ch, ';' | '&' | '|' | '(' | ')' | '<' | '>') {
+                  break; // break on shell metacharacters
                 } else if ch == '"' && qt_state.in_double() {
                   qt_state.toggle_double();
                   break;
