@@ -329,12 +329,7 @@ fn get_poll_timeout(readline: &mut ShedLine) -> (PollTimeout, Option<String>) {
 }
 
 fn shed_interactive(args: ShedArgs) -> ShResult<()> {
-  let _raw_mode = with_term(|t| t.raw_mode_guard())?;
-  let cap = with_term(|t| t.check_term_capabilities())?;
-
-  if let Some(TermEvent::Capabilities(_)) = cap {
-    with_term(|t| t.toggle_kitty_proto(true))?;
-  }
+  let _raw_mode = with_term(|t| t.setup_terminal())?;
 
   sig_setup(args.login_shell);
   crate::state::INTERACTIVE.store(true, Ordering::SeqCst);

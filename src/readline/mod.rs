@@ -2,7 +2,7 @@ use crate::parse::lex::LexStream;
 use crate::readline::editmode::{RemoteMode, ViSearch, ViSearchRev};
 use crate::readline::linebuf::{Pos, ordered};
 use crate::util::strops::QuoteState;
-use crate::{motion, verb, write_term};
+use crate::{flush_term, motion, verb, write_term};
 use ariadne::Span;
 use editcmd::{CmdFlags, EditCmd, Motion, MotionCmd, RegisterName, Verb, VerbCmd};
 use editmode::{CmdReplay, EditMode, ModeReport, ViInsert, ViNormal, ViReplace, ViVisual};
@@ -26,8 +26,7 @@ use crate::readline::editmode::{Emacs, ViEx, ViVerbatim};
 use crate::readline::history::HistEntry;
 use crate::readline::term::{calc_str_width, clear_rows, move_cursor_to_end, redraw};
 use crate::state::{
-  self, AutoCmdKind, ShellParam, Terminal, Var, VarFlags, VarKind, read_logic, read_shopts,
-  with_term, with_vars, write_meta, write_vars,
+  self, AutoCmdKind, Rows, ShellParam, Terminal, Var, VarFlags, VarKind, read_logic, read_shopts, with_term, with_vars, write_meta, write_vars
 };
 use crate::util::AutoCmdVecUtils;
 use crate::{
@@ -1225,7 +1224,25 @@ impl ShedLine {
       }
       LineCmd::Quit => Ok(Some(ReadlineEvent::Eof)),
       LineCmd::ClearScreen => {
-        with_term(|t| t.write_direct(Terminal::CLEAR_SCREEN)).ok();
+        let cursor_row = with_term(|t| t.get_cursor_pos())
+          .ok()
+          .flatten()
+          .map(|(r, _)| r.0)
+          .unwrap_or(1);
+
+        let prompt_cursor_offset = self.old_layout
+          .as_ref()
+          .map(|l| l.cursor.row)
+          .unwrap_or(0);
+
+        let prompt_top = cursor_row.saturating_sub(prompt_cursor_offset);
+        let scroll_amount = prompt_top.saturating_sub(1);
+
+        if scroll_amount > 0 {
+          with_term(|t| t.scroll_up(scroll_amount)).ok();
+          // Move cursor up to track the prompt's new position
+          flush_term!("\x1b[{scroll_amount}A")?;
+        }
         self.needs_redraw = true;
         Ok(None)
       }
@@ -1627,9 +1644,18 @@ impl ShedLine {
       }
     }
 
+
+    let (term_rows,Ok(Some((Rows(c_row),_)))) = with_term(|t| (t.t_rows(),t.get_cursor_pos())) else {
+      self.old_layout = Some(new_layout);
+      self.needs_redraw = false;
+      return Ok(())
+    };
+    let rows_below_cursor = new_layout.end.row.saturating_sub(new_layout.cursor.row);
+    let prompt_bottom = c_row + rows_below_cursor;
+    let empty_rows = term_rows.saturating_sub(prompt_bottom);
+
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;
-
     Ok(())
   }
 

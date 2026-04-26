@@ -106,6 +106,8 @@ Use `-c` to clear all autocmds for an event. Context variables (e.g. `$NEW_DIR`,
 * Safe writes: SQLite's transaction model means a hard kill mid-write won't leave your history file in a broken state.
 * Direct access via `hist`: The `hist` builtin allows you to interact with the database directly, and exposes flags that can be composed to create pseudo-SQL queries, e.g. `hist --starts-with 'echo' --after '10 minutes ago' --delete` will delete all commands starting with echo that were entered within the last 10 minutes.
 
+Additionally, `shed` implements a unique feature for interacting with your history. Consecutive commands can be concatenated with `;` or `&&` as separators if you scroll with `Ctrl` or `Shift` respectively. Useful if you need to re-run a batch of commands.
+
 ---
 
 ### Alias Expansion

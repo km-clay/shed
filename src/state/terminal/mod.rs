@@ -1,16 +1,13 @@
 use std::{
-  collections::VecDeque,
-  fmt::{Debug, Display},
-  io::Write,
-  os::fd::RawFd,
-  sync::LazyLock,
-  time::Instant,
+  collections::VecDeque, env, fmt::{Debug, Display}, io::Write, os::fd::RawFd, sync::LazyLock, time::Instant
 };
 
 mod guard;
+use bitflags::bitflags;
 use guard::Snapshot;
 pub use guard::TermGuard;
 
+use itertools::Itertools;
 use nix::{
   errno::Errno,
   fcntl::{FcntlArg, OFlag, fcntl, open},
@@ -57,13 +54,17 @@ pub struct Cols(pub usize);
 pub enum TermEvent {
   Key(KeyEvent),
   CursorPos(Rows, Cols),
-  Capabilities(usize),
+  KittyKbdFlags(usize),
+  Capabilities { name: String, value: Option<String> },
 }
 
 #[derive(Debug, Default, Clone)]
 struct EventParser {
   events: VecDeque<TermEvent>,
   ss3_pending: bool,
+  dcs_buf: Option<String>,
+  dcs_is_xtgettcap: bool,
+  dcs_supported: bool
 }
 
 impl EventParser {
@@ -71,6 +72,9 @@ impl EventParser {
     Self {
       events: VecDeque::new(),
       ss3_pending: false,
+      dcs_buf: None,
+      dcs_is_xtgettcap: false,
+      dcs_supported: false,
     }
   }
 
@@ -81,9 +85,76 @@ impl EventParser {
   pub fn pop(&mut self) -> Option<TermEvent> {
     self.events.pop_front()
   }
+
+  pub fn parse_term_cap(&mut self) {
+    let Some(buf) = self.dcs_buf.take() else { return };
+    let supported = self.dcs_supported;
+    self.dcs_is_xtgettcap = false;
+    self.dcs_supported = false;
+
+    // Only emit when the terminal reported the cap as supported.
+    if !supported { return }
+
+    let (name_hex, value_hex) = match buf.split_once('=') {
+      Some((n,v)) => (n, Some(v)),
+      None => (buf.as_str(), None)
+    };
+    let Some(name) = Self::decode_hex(name_hex) else { return };
+    let value = value_hex.and_then(Self::decode_hex);
+
+    self.push(TermEvent::Capabilities { name, value });
+  }
+
+  pub fn decode_hex(hex: &str) -> Option<String> {
+    if !hex.len().is_multiple_of(2) {
+      return None; // Invalid hex string
+    }
+
+    let bytes: Option<Vec<u8>> = hex.chars()
+      .chunks(2)
+      .into_iter()
+      .map(|chunk| {
+        let s: String = chunk.collect();
+        u8::from_str_radix(&s, 16).ok()
+      })
+      .collect();
+    bytes.map(|b| String::from_utf8_lossy(&b).into_owned())
+  }
 }
 
 impl Perform for EventParser {
+  #[allow(clippy::single_match)]
+  fn hook(&mut self, params: &vte::Params, intermediates: &[u8], _ignore: bool, action: char) {
+    let params: Vec<u16> = params
+      .iter()
+      .map(|p| p.first().copied().unwrap_or(0))
+      .collect();
+
+    match (intermediates, action) {
+      ([b'+'], 'r') => {
+        let first = params.first().copied().unwrap_or(0);
+        self.dcs_supported = first == 1;
+        self.dcs_is_xtgettcap = true;
+
+        self.dcs_buf = Some(String::new());
+      }
+
+      _ => ()
+    }
+  }
+
+  fn put(&mut self, _byte: u8) {
+    if let Some(buf) = self.dcs_buf.as_mut() {
+      buf.push(_byte as char);
+    }
+  }
+
+  fn unhook(&mut self) {
+    if self.dcs_is_xtgettcap {
+      self.parse_term_cap();
+    }
+  }
+
   fn print(&mut self, c: char) {
     // vte routes 0x7f (DEL) to print instead of execute
     if self.ss3_pending {
@@ -269,7 +340,7 @@ impl Perform for EventParser {
       ([b'?'], 'u') => {
         // capabilities response
         let cap_num = params.first().copied().unwrap_or(0) as usize;
-        TermEvent::Capabilities(cap_num)
+        TermEvent::KittyKbdFlags(cap_num)
       }
       // SGR mouse: CSI < button;x;y M/m (ignore mouse events for now)
       ([b'<'], dir @ ('M' | 'm')) => {
@@ -440,8 +511,8 @@ impl PollReader {
         ))));
       }
       match self.byte_buf.get(1) {
-        Some(b'[') | Some(b'O') => {
-          // Valid CSI/SS3 prefix - fall through to the parser below
+        Some(b'[') | Some(b'O') | Some(b'P') | Some(b']') | Some(b'_') => {
+          // Valid CSI/SS3/DCS/OSC/APC prefix - fall through to the parser below
         }
         Some(&b) if b >= 0x20 && b != 0x7f => {
           // ESC + printable char - interpret as Alt+<char>
@@ -519,6 +590,22 @@ impl Drop for FlushGuard {
   }
 }
 
+bitflags! {
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  pub struct TermCap: u32 {
+    const TRUECOLOR = 1<<0;
+    const KITTY_KBD_PROTO = 1<<1;
+    const SGR_MOUSE = 1<<2;
+    const SCROLL_UPDOWN = 1<<3;
+    const ALT_SCREEN = 1<<4;
+    const BRACKET_PASTE = 1<<5;
+    const FOCUS_REPORT = 1<<6;
+    const SYNC_OUTPUT = 1<<7;
+    const STRIKETHROUGH = 1<<8;
+    const UNDERLINE_STYLES = 1<<9;
+  }
+}
+
 /// An abstraction over the terminal that manages terminal attributes, and I/O.
 #[derive(Clone, Debug)]
 pub struct Terminal {
@@ -536,6 +623,7 @@ pub struct Terminal {
   interactive: bool,
 
   termios_stack: Vec<Termios>,
+  term_caps: TermCap,
 
   t_cols: usize,
   t_rows: usize,
@@ -594,6 +682,7 @@ impl Terminal {
       mouse_enabled: false,
       raw_mode: false,
       termios_stack: vec![],
+      term_caps: TermCap::empty(),
       t_cols: cols as usize,
       t_rows: rows as usize,
       last_bell: None,
@@ -641,6 +730,66 @@ impl Terminal {
     Ok(guard.activate())
   }
 
+  pub fn setup_terminal(&mut self) -> ShResult<TermGuard> {
+    let guard = self.save_state();
+    self.edit_termios(enable_raw_mode)?;
+    if self.check_kitty_kbd_flags()?.is_some() {
+      self.toggle_kitty_proto(true)?;
+    }
+    self.query_caps()?;
+
+    log::debug!("Terminal capabilities: {:?}", self.term_caps);
+    Ok(guard.activate())
+  }
+
+  pub fn query_caps(&mut self) -> ShResult<()> {
+    let Some(tty) = self.tty else { return Ok(()) };
+    let mut caps = TermCap::empty();
+
+    let queries = [
+      ("Su", TermCap::SYNC_OUTPUT),
+      ("RGB", TermCap::TRUECOLOR),
+    ];
+
+    let mut query_str = String::new();
+    for (name, _) in &queries {
+      // convert name into hex, send to terminal
+      let hex: String = name.bytes().map(|b| format!("{b:02x}")).collect();
+      query_str.push_str(&format!("\x1bP+q{hex}\x1b\\"));
+    }
+
+    self.write_direct(&query_str)?;
+
+    let start = Instant::now();
+    loop {
+      let deadline = 50u128.saturating_sub(start.elapsed().as_millis());
+      if deadline == 0 {
+        break
+      }
+
+      let timeout = PollTimeout::try_from(deadline as i32).unwrap();
+      if self.poll(timeout)? > 0 {
+        self.reader.read(tty)?;
+        while let Some(event) = self.reader.read_event()? {
+          if let TermEvent::Capabilities { name, value: _ } = event {
+            for (cap, flag) in &queries {
+              if name == *cap {
+                caps.insert(*flag);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if env::var("COLORTERM").is_ok_and(|v| v == "truecolor" || v == "24bit") {
+      caps.insert(TermCap::TRUECOLOR);
+    }
+
+    self.term_caps = caps;
+    Ok(())
+  }
+
   fn save_state(&self) -> Snapshot {
     let guard = TermGuard::new()
       .with_raw_mode(self.raw_mode)
@@ -671,6 +820,14 @@ impl Terminal {
   }
   pub fn cursor_visible(&self) -> bool {
     self.cursor_visible
+  }
+
+  pub fn scroll_up(&mut self, lines: usize) -> ShResult<()> {
+    if lines == 0 {
+      return Ok(());
+    }
+    self.write_direct(&format!("\x1b[{lines}S"))?;
+    Ok(())
   }
 
   pub fn load_state(&mut self, guard: &TermGuard) -> ShResult<()> {
@@ -728,7 +885,7 @@ impl Terminal {
     Ok(poll(&mut [poll_fd], timeout)?)
   }
 
-  pub fn check_term_capabilities(&mut self) -> ShResult<Option<TermEvent>> {
+  pub fn check_kitty_kbd_flags(&mut self) -> ShResult<Option<TermEvent>> {
     let Some(tty) = self.tty else { return Ok(None) };
 
     self.write_direct(Self::CAP_QUERY)?;
@@ -741,7 +898,7 @@ impl Terminal {
     self.reader.read(tty)?;
 
     while let Some(event) = self.reader.read_event()? {
-      if let TermEvent::Capabilities(_) = event {
+      if let TermEvent::KittyKbdFlags(_) = event {
         return Ok(Some(event));
       }
     }

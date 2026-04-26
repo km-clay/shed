@@ -19,14 +19,15 @@ macro_rules! write_term {
 #[macro_export]
 macro_rules! flush_term {
   () => {
-    use std::fmt::Write as FmtWrite;
+    use std::io::Write;
     $crate::state::with_term(|t| t.flush())
   };
   ($($arg:tt)*) => {{
-    use std::fmt::Write as FmtWrite;
-    $crate::state::with_term(|t| {
-      write!(t, $($arg)*)
-        t.flush()?;
+    use std::io::Write;
+    $crate::state::with_term(|t| -> $crate::util::error::ShResult<()> {
+      write!(t, $($arg)*)?;
+      t.flush()?;
+      Ok(())
     })
   }};
 }
