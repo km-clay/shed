@@ -45,7 +45,7 @@ use crate::signal::{
   GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
 };
 use crate::state::{
-  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader, TermEvent,
+  AutoCmdKind, LineHeader, QueryHeader, ShedSocket, SocketRequest, StatusHeader,
   VarFlags, VarKind, generate_default_rc, rc_file_path, read_logic, read_meta, read_shopts,
   read_vars, source_env, source_login, source_rc, with_term, write_jobs, write_meta, write_shopts,
 };

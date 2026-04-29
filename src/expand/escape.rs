@@ -2,9 +2,11 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 use crate::expand::util::is_var_name_ch;
-use crate::match_loop;
+use crate::util::error::ShResult;
+use crate::{match_loop, sherr};
 use crate::readline::markers;
 use crate::state::read_vars;
+use crate::util::strops::QuoteState;
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
 pub(super) fn strip_escape_markers(s: &str) -> String {
@@ -421,16 +423,21 @@ pub fn escape_str(raw: &str, use_marker: bool) -> String {
   result
 }
 
-pub fn unescape_math(raw: &str) -> String {
+pub fn unescape_math(raw: &str) -> ShResult<String> {
   let mut chars = raw.chars().peekable();
   let mut result = String::new();
+  let mut qt_state = QuoteState::default();
 
   match_loop!(chars.next() => ch, {
     '\\' => {
-      if let Some(next_ch) = chars.next() {
+      if (!qt_state.in_single() || chars.peek().is_some_and(|&c| c == '\''))
+      && let Some(next_ch) = chars.next() {
         result.push(next_ch)
       }
     }
+    '"' => qt_state.toggle_double(),
+    '\'' => qt_state.toggle_single(),
+    _ if qt_state.in_single() => result.push(ch),
     '$' => {
       result.push(markers::VAR_SUB);
       if chars.peek() == Some(&'(') {
@@ -462,9 +469,18 @@ pub fn unescape_math(raw: &str) -> String {
         });
       }
     }
+    _ if qt_state.in_double() => { result.push(ch); }
     _ => result.push(ch),
   });
-  result
+
+  if !qt_state.outside() {
+    return Err(sherr!(
+      ParseErr,
+      "Unmatched quote in arithmetic expression",
+    ));
+  }
+
+  Ok(result)
 }
 
 /// Escapes a string for displaying as a var value

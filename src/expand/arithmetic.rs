@@ -661,7 +661,7 @@ impl ArithTk {
 /// Evaluate an arithmetic expression string, returning the result.
 /// The caller is responsible for stripping any `((...))` or `(...)` wrappers.
 pub fn expand_arithmetic(expr: &str) -> ShResult<String> {
-  let unescaped = unescape_math(expr);
+  let unescaped = unescape_math(expr)?;
   let expanded = expand_raw(&mut unescaped.chars().peekable())?;
   let tokens = ArithTk::tokenize(&expanded)?;
   let rpn = ArithTk::to_rpn(tokens)?;

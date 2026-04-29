@@ -629,6 +629,11 @@ pub struct Terminal {
   t_rows: usize,
 
   last_bell: Option<Instant>,
+
+  /// When set, terminal-capability and cursor-position probes short-circuit
+  /// instead of sending escape sequences and waiting for replies. Used by
+  /// tests where the PTY peer doesn't synthesize responses.
+  test_mode: bool,
 }
 
 impl Terminal {
@@ -686,6 +691,7 @@ impl Terminal {
       t_cols: cols as usize,
       t_rows: rows as usize,
       last_bell: None,
+      test_mode: false,
     }
   }
 
@@ -743,6 +749,7 @@ impl Terminal {
   }
 
   pub fn query_caps(&mut self) -> ShResult<()> {
+    if self.test_mode { return Ok(()); }
     let Some(tty) = self.tty else { return Ok(()) };
     let mut caps = TermCap::empty();
 
@@ -797,6 +804,7 @@ impl Terminal {
       .with_kitty_proto(self.kitty_kbd_proto)
       .with_alt_buffer(self.alt_buffer)
       .with_cursor_style(self.cursor_style)
+      .with_mouse_support(self.mouse_enabled)
       .with_cursor_visible(self.cursor_visible)
       .with_termios_depth(self.termios_stack.len());
 
@@ -886,6 +894,7 @@ impl Terminal {
   }
 
   pub fn check_kitty_kbd_flags(&mut self) -> ShResult<Option<TermEvent>> {
+    if self.test_mode { return Ok(None); }
     let Some(tty) = self.tty else { return Ok(None) };
 
     self.write_direct(Self::CAP_QUERY)?;
@@ -907,6 +916,7 @@ impl Terminal {
   }
 
   pub fn get_cursor_pos(&mut self) -> ShResult<Option<(Rows, Cols)>> {
+    if self.test_mode { return Ok(None); }
     let Some(tty) = self.tty else { return Ok(None) };
 
     // ask the terminal where our cursor is
@@ -1255,6 +1265,7 @@ impl Terminal {
   #[cfg(test)]
   pub fn set_fd_for_testing(&mut self, fd: Option<RawFd>) {
     self.tty = fd;
+    self.test_mode = fd.is_some();
   }
 }
 

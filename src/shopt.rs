@@ -4,7 +4,7 @@ use nix::{libc::STDERR_FILENO, unistd::write};
 
 use crate::expand::expand_keymap;
 use crate::{sherr, two_way_display};
-use crate::util::ui::color_from_description;
+use crate::util::ui::ansi_from_description;
 use crate::{
   parse::lex::Span,
   procio::borrow_fd,
@@ -437,7 +437,7 @@ shopt_group! {
 }
 
 fn validate_color(v: &String) -> Result<(), String> {
-  if color_from_description(v).is_err() {
+  if ansi_from_description(v).is_err() {
     Err(format!("invalid color description '{v}'"))
   } else {
     Ok(())

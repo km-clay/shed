@@ -1,5 +1,5 @@
 use std::{
-  cmp::Ordering, collections::{HashSet, VecDeque}, fmt::Display, ops::{Deref, DerefMut, Index, IndexMut}, slice::SliceIndex
+  cmp::Ordering, collections::{HashSet, VecDeque}, fmt::Display, ops::{Deref, DerefMut, Index, IndexMut, Range}, slice::SliceIndex
 };
 
 use ariadne::Span;
@@ -26,7 +26,7 @@ use crate::{
   readline::{
     editcmd::{LineAddr, ReadSrc, StashArgs, StashListArg, VerbCmd, WriteDest},
     editmode::SubFlags,
-    highlight::Highlighter,
+    highlight::{self},
     history::History,
     markers,
     register::RegisterContent,
@@ -476,7 +476,7 @@ impl SelectMode {
     match self {
       SelectMode::Char(pos) => {
         let (s,e) = ordered(*pos, other);
-        // offset points from lower end (s) to upper end (e) — always non-negative
+        // offset points from lower end (s) to upper end (e) - always non-negative
         SelectShape::Char(e.difference(&s))
       }
       SelectMode::Line(pos) => {
@@ -1091,15 +1091,23 @@ impl LineBuf {
   pub fn window_joined(&self) -> String {
     self.get_window().join()
   }
-  pub fn display_window_joined(&self) -> String {
-    let display = self.to_string();
+  pub fn display_window_joined(&mut self) -> String {
+    let joined = self.joined();
     let do_hl = state::read_shopts(|s| s.highlight.enable);
-    let mut highlighter = Highlighter::new();
-    highlighter.only_visual(!do_hl);
-    highlighter.load_input(&display, self.cursor_byte_pos());
-    highlighter.expand_control_chars();
-    highlighter.highlight();
-    let highlighted = highlighter.take();
+    let palette = if do_hl {
+      highlight::Palette::new()
+    } else {
+      highlight::Palette::neutral()
+    };
+    let mut select_spans = self.search_match_spans();
+    select_spans.extend(self.select_range_byte_pos());
+
+    let highlighted = highlight::highlight(
+      &joined,
+      &palette,
+      self.cursor_to_flat(),
+      select_spans,
+    );
     let hint = self.get_hint_text();
     let lines = Lines::to_lines(format!("{highlighted}{hint}"));
 
@@ -4809,6 +4817,30 @@ impl LineBuf {
     self.evaluate_selection(mode)
   }
 
+  pub fn select_range_byte_pos(&mut self) -> Option<Range<usize>> {
+    match self.select_range()? {
+      Motion::CharRange(s, e) => {
+        let s = self.pos_to_byte(s)?;
+        let e = self.pos_to_byte(e)?;
+        let (s,e) = ordered(s, e);
+        Some(s..e)
+      }
+      Motion::LineRange(s, e) => {
+        let s = self.resolve_line_addr(&s).ok()??;
+        let e = self.resolve_line_addr(&e).ok()??;
+        let s = self.pos_to_byte(Pos { row: s, col: 0 })?;
+        let e = self.pos_to_byte(Pos {
+          row: e,
+          col: self.lines[e].len(),
+        })?;
+        let (s, e) = ordered(s, e);
+        Some(s..e)
+      }
+      Motion::BlockRange(s, e) => todo!(),
+      _ => unreachable!(),
+    }
+  }
+
   pub fn evaluate_selection(&self, mode: &SelectMode) -> Option<Motion> {
     match mode {
       SelectMode::Char(pos) => {
@@ -5229,6 +5261,26 @@ impl LineBuf {
 
   pub fn clear_insert_mode_start_pos(&mut self) {
     self.insert_mode_start_pos = None;
+  }
+
+  pub fn search_match_spans(&self) -> Vec<Range<usize>> {
+    if let Some(pat) = self.pending_search.as_ref()
+      && !pat.is_empty()
+      && let Ok(re) = Regex::new(pat)
+    {
+      let buf = self.joined();
+      let positions = self.byte_positions();
+      let lookup = |b: usize| -> Option<usize> {
+        positions
+          .iter()
+          .find_map(|(off, p)| (*off >= b).then_some(*off))
+      };
+      re.find_iter(&buf)
+        .filter_map(|m| Some(lookup(m.start())?..lookup(m.end())?))
+        .collect()
+    } else {
+      vec![]
+    }
   }
 }
 

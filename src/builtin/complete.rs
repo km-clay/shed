@@ -157,7 +157,7 @@ impl super::Builtin for CompGen {
     let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
 
     let dummy_ctx = CompContext {
-      words: vec![prefix.clone()],
+      words: vec![prefix.to_string()],
       cword: 0,
       line: prefix.to_string(),
       cursor_pos: prefix.as_str().len(),

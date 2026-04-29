@@ -15,6 +15,7 @@ use crate::procio::borrow_fd;
 use crate::state::AutoCmd;
 use crate::util::error::ShResult;
 use crate::{prelude::*, state};
+pub use strops::*;
 
 pub trait VecDequeExt<T> {
   fn to_vec(self) -> Vec<T>;

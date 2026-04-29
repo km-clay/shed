@@ -5,7 +5,7 @@ use crate::state;
 use crate::state::read_vars;
 use crate::state::{read_jobs, read_logic, write_meta};
 use crate::util::error::ShResult;
-use crate::util::ui::color_from_description;
+use crate::util::ui::ansi_from_description;
 
 #[derive(Debug)]
 pub enum PromptTk {
@@ -373,8 +373,8 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
     PromptTk::Text(txt) => result.push_str(&txt),
     PromptTk::AnsiSeq(params) => result.push_str(&params),
     PromptTk::Color(c) => {
-      match color_from_description(&c) {
-        Ok(esc_seq) => result.push_str(&esc_seq),
+      match ansi_from_description(&c) {
+        Ok(esc_seq) => result.push_str(&esc_seq.to_string()),
         Err(e) => write_meta(|m| m.post_status_message(e.to_string()))
       }
     }

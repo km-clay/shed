@@ -138,6 +138,40 @@ impl Span {
   pub fn set_range(&mut self, range: Range<usize>) {
     self.range = range;
   }
+
+  pub fn shift(&mut self, amt: isize) {
+    let max = self.source.content.len();
+
+    let start_signed = self.range.start as isize + amt;
+    debug_assert!(start_signed >= 0, "Span::shift underflow");
+    let start = start_signed as usize;
+
+    let end_signed = self.range.end as isize + amt;
+    debug_assert!(end_signed >= 0, "Span::shift underflow");
+    debug_assert!(end_signed as usize <= max, "Span::shift overflow");
+    let end = end_signed as usize;
+
+    self.range = start..end;
+  }
+
+  pub fn shift_clamped(&mut self, amt: isize) {
+    let diff = self.range.end - self.range.start;
+    let max = self.source.content.len() as isize;
+    let start = (self.range.start as isize + amt).clamp(0, max) as usize;
+    let end = (self.range.end as isize + amt).clamp(0, max) as usize;
+
+    if end == (max as usize) && end - start < diff {
+      // If we hit the end of the source, adjust the start to maintain the same length if possible
+      let new_start = end.saturating_sub(diff);
+      self.range = new_start..end;
+    } else if start == 0 && end - start < diff {
+      // If we hit the start of the source, adjust the end to maintain the same length if possible
+      let new_end = (start + diff).min(max as usize);
+      self.range = start..new_end;
+    } else {
+      self.range = start..end;
+    }
+  }
 }
 
 impl ariadne::Span for Span {
@@ -266,6 +300,10 @@ impl Tk {
     CLOSERS.contains(&self.as_str())
   }
 
+  pub fn filter_meta(&self) -> bool {
+    !matches!(self.class, TkRule::SOI | TkRule::EOI | TkRule::Null)
+  }
+
   pub fn is_closer_for(&self, other: &Tk) -> bool {
     if (matches!(other.class, TkRule::BraceGrpStart) && matches!(self.class, TkRule::BraceGrpEnd))
       || (matches!(other.class, TkRule::CasePattern) && self.has_double_semi())
@@ -278,6 +316,14 @@ impl Tk {
       "case" => matches!(self.as_str(), "esac"),
       _ => false,
     }
+  }
+
+  /// used when lexing recursively, to replace the token's span with the original source
+  pub fn rebase_into(mut self, outer_span: &Span, offset: usize) -> Self {
+    let start = self.span.range.start + offset;
+    let end = self.span.range.end + offset;
+    self.span = Span::new(start..end, outer_span.get_source());
+    self
   }
 }
 

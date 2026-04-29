@@ -268,6 +268,11 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
   Ok(())
 }
 
+pub fn get_comp_wordbreaks() -> String {
+  env::var("COMP_WORDBREAKS")
+    .unwrap_or_else(|_| String::from("\"'><;|=&(:"))
+}
+
 /// Get the first char of IFS
 ///
 /// Used mainly for joining strings

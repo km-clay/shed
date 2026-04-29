@@ -35,7 +35,6 @@ use crate::{
   parse::lex::{self, LexFlags, Tk, TkFlags, TkRule},
   readline::{
     complete::{CompResponse, Completer},
-    highlight::Highlighter,
   },
   util::error::ShResult,
 };
@@ -51,6 +50,7 @@ pub mod layout;
 pub mod linebuf;
 pub mod register;
 pub mod term;
+pub mod context;
 
 #[cfg(test)]
 pub mod tests;
@@ -180,6 +180,13 @@ pub mod markers {
     c == MATCH_START ||
     c == MATCH_END
   }
+
+  pub fn strip_markers(str: &str) -> String {
+    let mut out = str.to_string();
+    out.retain(|c| !is_marker(c));
+    out
+  }
+
 }
 type Marker = char;
 
@@ -394,7 +401,6 @@ impl LineCmd {
 
 pub struct ShedLine {
   pub prompt: Prompt,
-  pub highlighter: Highlighter,
   pub completer: Option<FuzzyCompleter>,
 
   pub mode: Box<dyn EditMode>,
@@ -445,7 +451,6 @@ impl ShedLine {
     let mut new = Self {
       prompt,
       completer: None,
-      highlighter: Highlighter::new(),
       mode,
       saved_mode: None,
       pending_keymap: Vec::new(),
@@ -1573,7 +1578,7 @@ impl ShedLine {
           .take(cursor_offset)
           .collect::<String>();
 
-        1 + before_cursor.width()
+        prefix_seq.width() + before_cursor.width()
       };
 
       write_term!("\x1b[{}G", new_layout.cursor.col + 1).unwrap();
@@ -1682,10 +1687,6 @@ impl ShedLine {
   fn exec_mode_transition(&mut self, mut cmd: EditCmd, from_replay: bool) -> ShResult<()> {
     let mut is_insert_mode = false;
     let count = cmd.verb_count();
-
-    if cmd.flags.contains(CmdFlags::IS_CANCEL) {
-      self.editor.clear_pending_search();
-    }
 
     let mut mode: Box<dyn EditMode> = if matches!(
       self.mode.report_mode(),
@@ -1949,6 +1950,10 @@ impl ShedLine {
     {
       cmd.motion = Some(motion!(range))
     };
+
+    if cmd.flags.contains(CmdFlags::IS_CANCEL) {
+      self.editor.clear_pending_search();
+    }
 
     if cmd.is_mode_transition() {
       self.exec_mode_transition(cmd, from_replay)

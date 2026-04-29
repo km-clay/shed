@@ -108,6 +108,16 @@ pub fn split_tk_at(tk: &Tk, pat: &str) -> Option<(Tk, Tk)> {
   })
 }
 
+pub fn split_span_at(span: &Span, pat: &str) -> Option<(Span, Span)> {
+  let slice = span.as_str();
+  let base = span.range().start;
+  split_at_unescaped(slice, pat).map(|(start, len)| {
+    let left = Span::new(base..base + start, span.get_source());
+    let right = Span::new(base + start + len..base + slice.len(), span.get_source());
+    (left, right)
+  })
+}
+
 pub fn split_all_with<T, F, B>(slice: &str, segment_fn: F, mut build: B) -> Vec<T>
 where
   F: Fn(&str) -> Option<(usize, usize)>,
@@ -246,6 +256,43 @@ pub fn scan_delims(
     _ => *pos += ch.len_utf8(),
   });
   Ok(depth == 0)
+}
+
+pub fn format_size(bytes: u64) -> String {
+  const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+  let mut size = bytes as f64;
+  let mut unit = 0;
+  while size >= 1024.0 && unit < UNITS.len() - 1 {
+    size /= 1024.0;
+    unit += 1;
+  }
+  if unit == 0 {
+    format!("{} {}", size as u64, UNITS[unit])
+  } else {
+    format!("{:.1} {}", size, UNITS[unit])
+  }
+}
+
+pub fn format_mode(mode: u32) -> String {
+  let mut out = String::new();
+  let mut check_bit = |bit: u32, ch: char| {
+    if mode & bit != 0 {
+      out.push(ch);
+    } else {
+      out.push('-');
+    }
+  };
+  check_bit(0o400, 'r');
+  check_bit(0o200, 'w');
+  check_bit(0o100, 'x');
+  check_bit(0o040, 'r');
+  check_bit(0o020, 'w');
+  check_bit(0o010, 'x');
+  check_bit(0o004, 'r');
+  check_bit(0o002, 'w');
+  check_bit(0o001, 'x');
+
+  out
 }
 
 /// Expand standard ANSI-C escapes

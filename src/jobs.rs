@@ -285,6 +285,9 @@ impl Job {
       .map(|c| c.cmd().unwrap_or_default())
       .collect()
   }
+  pub fn get_cmd_line(&self) -> String {
+    self.get_cmds().join(" | ")
+  }
   pub fn set_stats(&mut self, stat: WtStat) {
     for child in self.children.iter_mut() {
       child.set_stat(stat);
