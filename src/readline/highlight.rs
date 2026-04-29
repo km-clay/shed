@@ -226,8 +226,8 @@ fn emit_with_selection(
   style: PaletteEntry,
   selections: &[Range<usize>],
 ) {
-  // Filter to only selections that overlap this emit range — most ranges
-  // won't overlap any, so the common path stays a single write.
+  // find every selection that starts before our end, and ends after our start
+  // if both of these are true, there is overlap
   let mut overlapping: Vec<Range<usize>> = selections
     .iter()
     .filter(|s| s.start < range.end && s.end > range.start)
@@ -244,11 +244,10 @@ fn emit_with_selection(
   overlapping.sort_by_key(|s| s.start);
   let mut merged: Vec<Range<usize>> = Vec::with_capacity(overlapping.len());
   for sel in overlapping {
-    if let Some(last) = merged.last_mut() {
-      if sel.start <= last.end {
-        last.end = last.end.max(sel.end);
-        continue;
-      }
+    if let Some(last) = merged.last_mut()
+    && sel.start <= last.end {
+      last.end = last.end.max(sel.end);
+      continue;
     }
     merged.push(sel);
   }
@@ -260,14 +259,18 @@ fn emit_with_selection(
   for sel in &merged {
     let sel_start = sel.start.max(range.start);
     let sel_end = sel.end.min(range.end);
+
     if pos < sel_start {
       write!(out, "{}", src[pos..sel_start].paint(style.style())).unwrap();
     }
+
     if sel_start < sel_end {
       write!(out, "{}", src[sel_start..sel_end].paint(sel_style.style())).unwrap();
     }
+
     pos = sel_end;
   }
+
   if pos < range.end {
     write!(out, "{}", src[pos..range.end].paint(style.style())).unwrap();
   }
@@ -333,11 +336,7 @@ mod tests {
     }
   }
 
-  /// True if `out` contains an SGR sequence whose final color/attr code is
-  /// `code` — i.e., the sequence ends with `<code>m`, regardless of any
-  /// preceding parameters. yansi may emit `\x1b[33m` *or* `\x1b[49;33m`
-  /// (background-default prefix) depending on version/config; we just want
-  /// to confirm the foreground code is in the output somewhere.
+  /// check to see if there is a color code
   fn contains_sgr_param(out: &str, code: &str) -> bool {
     out.contains(&format!("[{code}m")) || out.contains(&format!(";{code}m"))
   }

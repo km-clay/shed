@@ -15,7 +15,7 @@ use crate::sherr;
 use crate::state::{read_shopts, read_vars};
 use crate::util::error::ShResult;
 
-pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
+pub fn expand_raw_inner(chars: &mut Peekable<Chars<'_>>, expand_cmd_subs: bool) -> ShResult<String> {
   let mut result = String::new();
 
   match_loop!(chars.next() => ch, {
@@ -48,7 +48,7 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
 
       result.push_str(&home);
     }
-    markers::PROC_SUB_OUT => {
+    markers::PROC_SUB_OUT if expand_cmd_subs => {
       let mut inner = String::new();
       match_loop!(chars.next() => ch, {
         markers::PROC_SUB_OUT => break,
@@ -57,7 +57,7 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
       let fd_path = expand_proc_sub(&inner, false)?;
       result.push_str(&fd_path);
     }
-    markers::PROC_SUB_IN => {
+    markers::PROC_SUB_IN if expand_cmd_subs => {
       let mut inner = String::new();
       match_loop!(chars.next() => ch, {
         markers::PROC_SUB_IN => break,
@@ -67,7 +67,7 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
       result.push_str(&fd_path);
     }
     markers::VAR_SUB => {
-      let expanded = expand_var(chars)?;
+      let expanded = expand_var(chars, expand_cmd_subs)?;
       result.push_str(&expanded);
     }
     _ => result.push(ch),
@@ -76,7 +76,11 @@ pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
   Ok(result)
 }
 
-pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
+pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
+  expand_raw_inner(chars, true)
+}
+
+pub fn expand_var(chars: &mut Peekable<Chars<'_>>, expand_cmd_subs: bool) -> ShResult<String> {
   let mut var_name = String::new();
   let mut brace_depth: i32 = 0;
   let mut inner_brace_depth: i32 = 0;
@@ -97,8 +101,12 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
         // and we got passed some unfinished input. Just treat it as literal text
         return Ok(format!("$({subsh_body}"));
       }
-      let expanded = expand_cmd_sub(&subsh_body)?;
-      return Ok(expanded);
+      if expand_cmd_subs {
+        let expanded = expand_cmd_sub(&subsh_body)?;
+        return Ok(expanded);
+      } else {
+        return Ok(subsh_body);
+      }
     }
     '{' if var_name.is_empty() && brace_depth == 0 => {
       chars.next(); // consume the brace

@@ -1,4 +1,5 @@
 use std::iter::Peekable;
+use std::ops::Range;
 use std::str::Chars;
 
 use crate::expand::util::is_var_name_ch;
@@ -388,24 +389,27 @@ pub fn unescape_heredoc(raw: &str) -> String {
   result
 }
 
+pub fn escape_str(raw: &str, use_marker: bool) -> String {
+  escape_str_bounded(raw, use_marker, None)
+}
+
 /// Opposite of unescape_str - escapes a string to be executed as literal text
 /// Used for completion results, and glob filename matches.
-pub fn escape_str(raw: &str, use_marker: bool) -> String {
+pub fn escape_str_bounded(raw: &str, use_marker: bool, bound: Option<Range<usize>>) -> String {
   let mut result = String::new();
-  let mut chars = raw.chars();
+  let mut chars = raw.char_indices();
   let mut is_first = true;
   let esc_ch = if use_marker { markers::ESCAPE } else { '\\' };
 
-  while let Some(ch) = chars.next() {
+  while let Some((i,ch)) = chars.next() {
+    if let Some(bound) = &bound && !bound.contains(&i) {
+      result.push(ch);
+      continue
+    }
+
     match ch {
       '\'' | '"' | '\\' | '|' | '&' | ';' | '(' | ')' | '<' | '>' | '$' | '*' | '!' | '`' | '{'
       | '?' | '[' | '#' | ' ' | '\t' | '\n' => {
-        if ch == '$' && is_first {
-          // TODO: Find a less hacky way to prevent completed variables from being escaped
-          result.push('$');
-          is_first = false;
-          continue;
-        }
         result.push(esc_ch);
         result.push(ch);
       }

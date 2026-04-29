@@ -2,7 +2,7 @@ use std::{iter::Peekable, os::unix::fs::PermissionsExt, path::Path, str::CharInd
 
 use bitflags::bitflags;
 
-use crate::{expand::{expand_raw, unescape_str}, match_loop, parse::lex::{LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, readline::{linebuf::Delim, markers::strip_markers}, state::{self, ShellParam, read_meta, read_shopts}, util::strops::QuoteState};
+use crate::{expand::{unescape_str, var::expand_raw_inner}, match_loop, parse::lex::{LexFlags, LexStream, Span, Tk, TkFlags, TkRule}, readline::{linebuf::Delim, markers::strip_markers}, state::{self, ShellParam, read_meta, read_shopts}, util::strops::QuoteState};
 
 
 pub fn get_context_tokens(input: &str) -> Vec<CtxTk> {
@@ -46,6 +46,7 @@ fn is_valid(command: &str) -> bool {
 }
 
 bitflags! {
+  /// bitfield representing what syntax structures are valid in the current context
   pub struct ScanCtx: u16 {
     const VAR_SUB           = 1 << 0;  // $foo, ${foo}
     const CMD_SUB           = 1 << 1;  // $(...)
@@ -62,6 +63,7 @@ bitflags! {
 }
 
 impl ScanCtx {
+  // useful constants
   pub const TOP_LEVEL: Self = Self::ESCAPE_QUOTE_ONLY.complement(); // everything but ESCAPE_QUOTE_ONLY
 
   pub const DOUBLE_QUOTE: Self = Self::VAR_SUB
@@ -295,26 +297,21 @@ impl CtxTk {
     )
   }
 
-  pub fn split_str_at(&self, at: usize) -> Option<(&str,&str)> {
+  pub fn relative_cursor_pos(&self, at: usize) -> Option<usize> {
     if !self.range_inclusive().contains(&at) {
       return None;
     }
-    let delta = at - self.span.range().start;
-    let raw = self.span().as_str();
+    Some(at - self.span.range().start)
+  }
 
-    raw.split_at_checked(delta)
+  pub fn split_str_at(&self, at: usize) -> Option<(&str,&str)> {
+    let cursor_pos = self.relative_cursor_pos(at)?;
+
+    self.span().as_str().split_at_checked(cursor_pos)
   }
 
   pub fn is_argument(&self) -> bool {
     matches!(self.class(), CtxTkRule::Argument | CtxTkRule::ArgumentFile)
-  }
-
-  pub fn is_floor(&self) -> bool {
-    // If we hit one of these, we always treat it as a leaf
-    matches!(
-      self.class(),
-      CtxTkRule::Argument | CtxTkRule::ArgumentFile | CtxTkRule::VarSub
-    )
   }
 
   pub fn prefix_from(&self, at: usize) -> Option<&str> {
@@ -324,10 +321,6 @@ impl CtxTk {
   pub fn get_leaf(&self, cursor_pos: usize) -> Option<&CtxTk> {
     if !self.range_inclusive().contains(&cursor_pos) {
       return None;
-    }
-
-    if self.is_floor() {
-      return Some(self);
     }
 
     for token in &self.sub_tokens {
@@ -416,7 +409,7 @@ fn check_path_exists(path: &str) -> bool {
   if Path::new(path).exists() { return true; }
 
   let unescaped = unescape_str(path);
-  let Ok(expanded) = expand_raw(&mut unescaped.chars().peekable()) else {
+  let Ok(expanded) = expand_raw_inner(&mut unescaped.chars().peekable(), false) else {
     return false;
   };
   let stripped = strip_markers(&expanded);
@@ -721,7 +714,7 @@ fn scan_subspans(
         if next_is(chars, '(') {
           if consume(chars, consumed).is_none() { continue };
 
-          if next_is(chars, '(') && scan_ctx.contains(S::ARITHMETIC) {
+          if next_is(chars, '(') && scan_ctx.contains(S::VAR_SUB) {
             let sub_tk = get_subtoken(
               chars, span,
               TerminatorCtx::ArithSub,
@@ -1098,10 +1091,16 @@ fn scan_subspans(
           let sub_end = sub_start + 1 + var_size; // include the '$' in the span
 
           let span = Span::new(sub_start..sub_end, span.get_source());
+          let sub_span = Span::new(sub_start + 1..sub_end, span.get_source());
+          let sub_token = CtxTk {
+            span: sub_span,
+            class: CtxTkRule::ParamName,
+            sub_tokens: vec![],
+          };
           sub_tokens.push(CtxTk {
             span,
             class: CtxTkRule::VarSub,
-            sub_tokens: vec![],
+            sub_tokens: vec![sub_token],
            })
         }
       }

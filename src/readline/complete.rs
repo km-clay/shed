@@ -1,5 +1,5 @@
 use std::{
-  collections::HashSet, fmt::{Debug, Display}, fs::DirEntry, os::unix::fs::PermissionsExt, path::PathBuf, rc::Rc
+  collections::HashSet, fmt::{Debug, Display}, fs::DirEntry, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, rc::Rc
 };
 
 use nix::sys::signal::Signal;
@@ -7,9 +7,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
-  expand::{escape_str, expand_raw, unescape_str},
+  expand::{escape::escape_str_bounded, unescape_str, var::expand_raw_inner},
   key,
-  match_loop,
   parse::{
     execute::exec_nonint,
     lex::Span,
@@ -82,7 +81,7 @@ enum CompStrat {
   Command { prefix: String },
   Argument { prefix: String },
   Dirs { prefix: String },
-  Files { prefix: String, parent: Option<String> },
+  Files { path: String },
   /// Semantic dead end, nothing can meaningfully go here. Suggest a `;` so
   /// the user can move on (e.g. inside or right after a closed subshell).
   Separator,
@@ -90,33 +89,13 @@ enum CompStrat {
   Null,
 }
 
-/// Compute the replacement span for a VarSub-shaped sub-token. For
-/// `${name...}`-style param expansion, narrow to just `${name` so trailing
-/// operators/args (`:-default`, `/pat/rep`, the closing `}`, etc.) are
-/// preserved when the candidate (which includes the `${` prefix) replaces.
-/// For a bare `$name` VarSub with no ParamName child, the wrapper IS the name
-/// region, so we return its full span.
-fn narrow_var_span(sub: &CtxTk) -> Span {
-  sub
-    .sub_tokens()
-    .iter()
-    .find(|c| matches!(c.class(), CtxTkRule::ParamName))
-    .map(|name| Span::new(sub.range().start..name.range().end, sub.span().get_source()))
-    .unwrap_or_else(|| sub.span().clone())
-}
-
 impl CompStrat {
-  pub fn escapes_candidates(&self) -> bool {
-    matches!(self,
-      Self::Files { .. } | Self::Dirs { .. } | Self::Argument { .. }
-    )
-  }
-
-  pub fn resolve(tks: &[CtxTk], cursor_pos: usize) -> (Self,Span) {
+  pub fn resolve(tks: &[CtxTk], cursor_pos: usize) -> (Self,Span,usize) {
     // Cursor inside a token's span, complete what's currently being typed.
     if let Some(leaf) = tks.iter().find_map(|t| t.get_leaf(cursor_pos)) {
-      log::debug!("Cursor in leaf {:?} with class {:?} and sub_tokens: {:?}", leaf.span().as_str(), leaf.class(), leaf.sub_tokens().iter().map(|s| s.span().as_str()).collect::<Vec<_>>());
-      return Self::from_leaf(leaf, cursor_pos);
+      let res = Self::from_leaf(leaf, cursor_pos);
+      log::debug!("Cursor inside token {:?}, completing with strategy {:?}", leaf.span().as_str(), res.0);
+      return res
     }
 
     let Some(prev) = tks.iter().rfind(|t| t.range().end <= cursor_pos) else {
@@ -124,6 +103,7 @@ impl CompStrat {
       return (
         Self::Command { prefix: String::new() },
         Span::new(cursor_pos..cursor_pos, "".into()),
+        0
       );
     };
     log::debug!(
@@ -134,6 +114,7 @@ impl CompStrat {
     (
       Self::from_predecessor(prev),
       Span::new(cursor_pos..cursor_pos, prev.span().get_source()),
+      0
     )
   }
 
@@ -147,62 +128,16 @@ impl CompStrat {
   /// graft after the last `/`. Otherwise we treat the leaf as path-shaped
   /// and target the whole leaf so `get_completed_line`'s last-`/` graft
   /// preserves the parent text.
-  fn from_leaf(leaf: &CtxTk, cursor_pos: usize) -> (Self, Span) {
-    if leaf.is_argument() {
-      // Cursor on a structurally-meaningful sub-token wins over path slicing.
-      if let Some(sub) = leaf
-        .sub_tokens()
-        .iter()
-        .find(|s| s.range_inclusive().contains(&cursor_pos))
-      {
-        match sub.class() {
-          CtxTkRule::VarSub | CtxTkRule::ParamName => {
-            let prefix = sub.prefix_from(cursor_pos).unwrap_or_default().to_string();
-            return (Self::Var { prefix }, narrow_var_span(sub));
-          }
-          CtxTkRule::Tilde => {
-            let prefix = sub.prefix_from(cursor_pos).unwrap_or_default().to_string();
-            return (Self::Tilde { prefix }, sub.span().clone());
-          }
-          CtxTkRule::CmdSub
-          | CtxTkRule::BacktickSub
-          | CtxTkRule::ProcSubIn
-          | CtxTkRule::ProcSubOut
-          | CtxTkRule::DoubleString
-          | CtxTkRule::SingleString
-          | CtxTkRule::DollarString => {
-            if let Some(inner) = sub.get_leaf(cursor_pos) {
-              return Self::from_leaf(inner, cursor_pos);
-            }
-            // Fall through to path-slicing if recursion produced nothing.
-          }
-          // Glob, Escape, etc., fall through to path-slicing default.
-          _ => {}
-        }
-      }
-
-      // Path-shaped argument: slice on the most recent unescaped `/` before
-      // the cursor. `can_split_at` rejects positions inside protective
-      // sub-tokens (Escape, VarSub, etc.), so escaped slashes and slashes
-      // inside `$(...)` etc. are skipped automatically.
-      let leaf_text = leaf.span().as_str();
-      let leaf_start = leaf.range().start;
-      let cursor_local = cursor_pos - leaf_start;
-
-      let parent_end = leaf_text[..cursor_local]
-        .char_indices()
-        .rev()
-        .find(|(byte, ch)| *ch == '/' && leaf.can_split_at(leaf_start + byte))
-        .map(|(byte, _)| byte + 1)
-        .unwrap_or(0);
-
-      let prefix = leaf_text[parent_end..cursor_local].to_string();
-      let parent = (parent_end > 0).then(|| leaf_text[..parent_end].to_string());
-
-      return (Self::Files { prefix, parent }, leaf.span().clone());
-    }
+  fn from_leaf(leaf: &CtxTk, cursor_pos: usize) -> (Self, Span, usize) {
+    log::debug!(
+      "Cursor inside {:?} with class {:?}",
+      leaf.span().as_str(),
+      leaf.class(),
+    );
 
     let prefix = leaf.prefix_from(cursor_pos).unwrap_or_default().to_string();
+    let whole = leaf.span().as_str();
+    let cursor_pos = leaf.relative_cursor_pos(cursor_pos);
     let strat = match leaf.class() {
       CtxTkRule::ValidCommand
       | CtxTkRule::InvalidCommand
@@ -216,7 +151,7 @@ impl CompStrat {
       | CtxTkRule::SingleString
       | CtxTkRule::DollarString            => Self::Argument { prefix },
       CtxTkRule::Glob
-      | CtxTkRule::Redirect                => Self::Files    { prefix, parent: None },
+      | CtxTkRule::Redirect                => Self::Files    { path: whole.to_string() },
       CtxTkRule::Tilde                     => Self::Tilde    { prefix },
       CtxTkRule::VarSub
       | CtxTkRule::ParamName
@@ -226,10 +161,8 @@ impl CompStrat {
       | CtxTkRule::BraceGroup
       | CtxTkRule::Arithmetic              => Self::Separator,
 
-      // Argument is unreachable here (the is_argument branch handles it),
-      // but listed for exhaustiveness.
       CtxTkRule::Argument
-      | CtxTkRule::ArgumentFile            => Self::Files { prefix, parent: None },
+      | CtxTkRule::ArgumentFile            => Self::Files { path: whole.to_string() },
 
       // Everything else inside a leaf means "no useful completion here".
       CtxTkRule::Comment
@@ -254,11 +187,7 @@ impl CompStrat {
     };
     // VarSub/ParamName get a narrowed span (`${name`) so trailing param
     // expansion bits (`:-default`, `}`, etc.) are preserved on replace.
-    let span = match leaf.class() {
-      CtxTkRule::VarSub | CtxTkRule::ParamName => narrow_var_span(leaf),
-      _ => leaf.span().clone(),
-    };
-    (strat, span)
+    (strat, leaf.span().clone(), cursor_pos.unwrap_or(whole.len()))
   }
 
   /// Cursor is *past* `prev` (in whitespace or at end of input). The prefix
@@ -293,7 +222,7 @@ impl CompStrat {
       CtxTkRule::Keyword                   => Self::Command  { prefix },
 
       // After a redirect we expect a file path.
-      CtxTkRule::Redirect                  => Self::Files    { prefix, parent: None },
+      CtxTkRule::Redirect                  => Self::Files    { path: String::new() },
 
       // After a closed structural construct, semantically nothing follows
       // until a separator, suggest one.
@@ -349,6 +278,18 @@ impl PartialOrd for Candidate {
 impl Ord for Candidate {
   fn cmp(&self, other: &Self) -> std::cmp::Ordering {
     self.content.cmp(&other.content)
+  }
+}
+
+impl From<PathBuf> for Candidate {
+  fn from(value: PathBuf) -> Self {
+    let path_raw = value.to_string_lossy().to_string();
+    let desc = file_desc(&value);
+    Self {
+      content: path_raw,
+      desc: Some(desc),
+      id: None,
+    }
   }
 }
 
@@ -460,6 +401,10 @@ impl Candidate {
     self.desc = Some(desc);
     self
   }
+  pub fn is_dir(&self) -> bool {
+    // dumb hack but it saves a stat() call at least :D
+    self.desc.as_ref().map(|d| d.contains("dir")).unwrap_or(false)
+  }
   pub fn starts_with(&self, pat: char) -> bool {
     self.content.starts_with(pat)
   }
@@ -541,22 +486,17 @@ pub fn complete_users(start: &str) -> Vec<Candidate> {
 }
 
 pub fn complete_vars(start: &str) -> Vec<Candidate> {
-  let Some((var_name, name_start, _end)) = extract_var_name(start) else {
-    return vec![];
-  };
-  if !read_vars(|v| v.get_var(&var_name)).is_empty() {
+  if !read_vars(|v| v.get_var(start)).is_empty() {
     return vec![];
   }
   // if we are here, we have a variable substitution that isn't complete
   // so let's try to complete it
-  let prefix = &start[..name_start]; // e.g. "$" or "${"
   read_vars(|v| {
     v.flatten_vars()
       .keys()
-      .filter(|k| k.starts_with(&var_name) && *k != &var_name)
-      .map(|k| format!("{prefix}{k}"))
+      .filter(|k| k.starts_with(start) && *k != start)
       .map(|s| {
-        if let Some(val) = read_vars(|v| v.try_get_var(&s)) {
+        if let Some(val) = read_vars(|v| v.try_get_var(s)) {
           Candidate::from(s).with_desc(val)
         } else {
           Candidate::from(s)
@@ -587,58 +527,7 @@ pub fn complete_vars_raw(raw: &str) -> Vec<Candidate> {
   })
 }
 
-pub fn extract_var_name(text: &str) -> Option<(String, usize, usize)> {
-  let mut chars = text.chars().peekable();
-  let mut name = String::new();
-  let mut reading_name = false;
-  let mut pos = 0;
-  let mut name_start = 0;
-  let mut name_end = 0;
-
-  match_loop!(chars.next() => ch, {
-    '$' => {
-      if chars.peek() == Some(&'{') {
-        // Skip past the `$`, the `{` arm below will set up reading_name.
-        pos += 1;
-        continue;
-      }
-
-      reading_name = true;
-      name_start = pos + 1; // Start after the '$'
-      pos += 1;
-      }
-    '{' if !reading_name => {
-      reading_name = true;
-      name_start = pos + 1;
-      pos += 1;
-    }
-    ch if ch.is_alphanumeric() || ch == '_' => {
-      if reading_name {
-        name.push(ch);
-      }
-      pos += 1;
-    }
-    _ => {
-      if reading_name {
-        name_end = pos; // End before the non-alphanumeric character
-        break;
-      }
-      pos += 1;
-    }
-  });
-
-  if !reading_name {
-    return None;
-  }
-
-  if name_end == 0 {
-    name_end = pos;
-  }
-
-  Some((name, name_start, name_end))
-}
-
-fn complete_commands(start: &str) -> Vec<Candidate> {
+fn complete_commands(start: &str, cursor_pos: usize) -> Vec<Candidate> {
   let mut candidates: Vec<Candidate> = read_meta(|m| {
     m.cached_utils()
       .map(Candidate::from)
@@ -647,7 +536,7 @@ fn complete_commands(start: &str) -> Vec<Candidate> {
   });
 
   if read_shopts(|o| o.core.autocd) {
-    let dirs = complete_dirs(start);
+    let dirs = complete_dirs(start, cursor_pos);
     candidates.extend(dirs);
   }
 
@@ -655,8 +544,8 @@ fn complete_commands(start: &str) -> Vec<Candidate> {
   candidates
 }
 
-fn complete_dirs(start: &str) -> Vec<Candidate> {
-  let filenames = complete_filename(start);
+fn complete_dirs(start: &str, cursor_pos: usize) -> Vec<Candidate> {
+  let filenames = complete_path(start, cursor_pos);
 
   filenames
     .into_iter()
@@ -670,85 +559,46 @@ fn complete_dirs(start: &str) -> Vec<Candidate> {
 
 fn unescape_for_completion(raw: &str) -> String {
   let unescaped = unescape_str(raw);
-  expand_raw(&mut unescaped.chars().peekable())
+  expand_raw_inner(&mut unescaped.chars().peekable(), true)
     .map(|s| strip_markers(&s))
     .unwrap_or_else(|_| raw.to_string())
 }
 
-fn complete_files_in(prefix: &str, parent: Option<&str>) -> Vec<Candidate> {
-  let prefix = unescape_for_completion(prefix);
-  match parent {
-    Some(parent) => {
-      let expanded_parent = unescape_for_completion(parent);
-      complete_filename(&format!("{expanded_parent}{prefix}"))
-    }
-    None => complete_filename(&prefix),
-  }
+fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
+  let (prefix, postfix) = path.split_at_checked(cursor_pos).unwrap_or((path, ""));
+  let unescaped_pre = unescape_for_completion(prefix);
+  let unescaped_post = unescape_for_completion(postfix);
+
+  let pat = format!("{}*{}", glob::Pattern::escape(&unescaped_pre), glob::Pattern::escape(&unescaped_post));
+  let candidates: Vec<Candidate> = glob::glob(&pat)
+    .map(|it| it.filter_map(Result::ok).map(|c| c.into()).collect())
+    .unwrap_or_default();
+
+  candidates.into_iter()
+    .map(|mut c| {
+      let is_dir = c.desc.as_ref().is_some_and(|d| d.contains("dir"));
+      let inner = unescaped_pre.len()..(c.content.len() - unescaped_post.len());
+      let escaped = escape_str_bounded(&c.content, false, Some(inner));
+      log::debug!("Escaping candidate {:?} to {:?} with prefix {:?} and postfix {:?} (unescaped pre/post: {:?}/{:?})", c.content, escaped, prefix, postfix, unescaped_pre, unescaped_post);
+
+      let after_prefix = escaped.strip_prefix(&unescaped_pre)
+        .unwrap_or(&escaped);
+      let stripped = after_prefix.strip_suffix(&unescaped_post)
+        .unwrap_or(after_prefix);
+
+      c.content = format!("{prefix}{stripped}{postfix}");
+      if is_dir {
+        c.content.push('/');
+      }
+      c
+    }).collect()
 }
 
-fn complete_filename(start: &str) -> Vec<Candidate> {
-  let mut candidates = vec![];
-  let has_dotslash = start.starts_with("./");
-
-  // Split path into directory and filename parts
-  // Use "." if start is empty (e.g., after "foo=")
-  let path = PathBuf::from(if start.is_empty() { "." } else { start });
-  let (dir, prefix) = if start.ends_with('/') || start.is_empty() {
-    // Completing inside a directory: "src/" -> dir="src/", prefix=""
-    (path, "")
-  } else if let Some(parent) = path.parent()
-    && !parent.as_os_str().is_empty()
-  {
-    // Has directory component: "src/ma" -> dir="src", prefix="ma"
-    (
-      parent.to_path_buf(),
-      path.file_name().unwrap().to_str().unwrap_or(""),
-    )
-  } else {
-    // No directory: "fil" -> dir=".", prefix="fil"
-    (PathBuf::from("."), start)
-  };
-
-  let Ok(entries) = std::fs::read_dir(&dir) else {
-    return candidates;
-  };
-
-  for entry in entries.flatten() {
-    let file_name = entry.file_name();
-    let file_str: Candidate = file_name.to_string_lossy().to_string().into();
-
-    // Skip hidden files unless explicitly requested
-    if !prefix.starts_with('.') && file_str.content.starts_with('.') {
-      continue;
-    }
-
-    if file_str.is_match(prefix) {
-      // Reconstruct full path
-      let mut full_path = dir.join(&file_name);
-
-      // Add trailing slash for directories
-      if entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
-        full_path.push(""); // adds trailing /
-      }
-
-      let mut path_raw = full_path.to_string_lossy().to_string();
-      if path_raw.starts_with("./") && !has_dotslash {
-        path_raw = path_raw.trim_start_matches("./").to_string();
-      }
-      let cand = Candidate::from(path_raw.clone()).with_desc(file_description(&entry));
-
-      candidates.push(cand);
-    }
-  }
-
-  candidates.sort();
-  candidates
-}
-
-fn file_description(file: &DirEntry) -> String {
-  let Ok(meta) = file.metadata() else { return String::new(); };
+fn file_desc<P: AsRef<Path>>(path: P) -> String {
+  let path = path.as_ref();
+  let Ok(meta) = path.metadata() else { return String::new(); };
   let kind = if meta.is_dir() { "dir" }
-    else if file.file_type().is_ok_and(|f| f.is_symlink()) { "link" }
+    else if path.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) { "link" }
     else if meta.permissions().mode() & 0o111 != 0 { "exec" }
     else if meta.is_file() { "file" }
     else { "?" };
@@ -952,16 +802,16 @@ impl CompSpec for BashCompSpec {
     let prefix = &ctx.words[ctx.cword];
 
     let unescaped = unescape_str(prefix.as_str());
-    let expanded = expand_raw(&mut unescaped.chars().peekable())?;
+    let expanded = expand_raw_inner(&mut unescaped.chars().peekable(), false)?;
     let stripped  = strip_markers(&expanded);
     if self.files {
-      candidates.extend(complete_filename(&stripped));
+      candidates.extend(complete_path(&stripped, ctx.cursor_pos));
     }
     if self.dirs {
-      candidates.extend(complete_dirs(&stripped));
+      candidates.extend(complete_dirs(&stripped, ctx.cursor_pos));
     }
     if self.commands {
-      candidates.extend(complete_commands(&stripped));
+      candidates.extend(complete_commands(&stripped, ctx.cursor_pos));
     }
     if self.vars {
       candidates.extend(complete_vars_raw(&stripped));
@@ -1767,57 +1617,14 @@ impl Completer for FuzzyCompleter {
     log::debug!("Getting completed line for candidate: {}", _candidate);
 
     let selected = self.selector.selected_candidate().unwrap_or_default();
-    let (mut start, end) = self.completer.token_span;
-    let slice = self
-      .completer
-      .original_input
-      .get(start..end)
-      .unwrap_or_default();
-    let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
-    let (prefix, completion) = if ignore_case {
-      if let Some(graft) = self.completer.graft_pos {
-        let trailing_slash = selected.ends_with('/');
-        let trimmed = selected.trim_end_matches('/');
-        let mut basename = trimmed.rsplit('/').next().unwrap_or(&selected).to_string();
-        if trailing_slash {
-          basename.push('/');
-        }
-        (
-          self.completer.original_input[..graft].to_string(),
-          basename.into(),
-        )
-      } else {
-        (
-          self.completer.original_input[..start].to_string(),
-          selected.clone(),
-        )
-      }
-    } else {
-      start += slice.width();
-      let completion = selected
-        .strip_prefix(slice)
-        .unwrap_or(selected.content().to_string());
-      (
-        self.completer.original_input[..start].to_string(),
-        completion.into(),
-      )
-    };
-    let final_completion = if self.completer.escape_candidates {
-      escape_str(&completion, false)
-    } else {
-      completion.to_string()
-    };
-    log::debug!(
-      "Prefix: '{}', Completion: '{}', Final: '{}'",
-      prefix,
-      completion,
-      final_completion
-    );
+    let (start, end) = self.completer.token_span;
+    // Wholesale replace `token_span` with the candidate. See
+    // `SimpleCompleter::get_completed_line` for the rationale.
     let ret = format!(
       "{}{}{}",
-      prefix,
-      final_completion,
-      &self.completer.original_input[end..]
+      &self.completer.original_input[..start],
+      selected.as_str(),
+      &self.completer.original_input[end..],
     );
     log::debug!("Completed line: {}", ret);
     ret
@@ -1884,8 +1691,6 @@ pub struct SimpleCompleter {
   pub active: bool,
   pub dirs_only: bool,
   pub add_space: bool,
-  pub escape_candidates: bool,
-  pub graft_pos: Option<usize>,
 }
 
 impl Completer for SimpleCompleter {
@@ -2069,41 +1874,14 @@ impl SimpleCompleter {
     if self.candidates.is_empty() {
       return self.original_input.clone();
     }
-
     let selected = &self.candidates[self.selected_idx];
-    let (mut start, end) = self.token_span;
-    let slice = self.original_input.get(start..end).unwrap_or("");
-    let ignore_case = read_shopts(|o| o.prompt.completion_ignore_case);
-    let (prefix, completion) = if ignore_case {
-      if let Some(graft) = self.graft_pos {
-        let trailing_slash = selected.ends_with('/');
-        let trimmed = selected.trim_end_matches('/');
-        let mut basename = trimmed
-          .rsplit('/')
-          .next()
-          .unwrap_or(selected.as_str())
-          .to_string();
-        if trailing_slash {
-          basename.push('/');
-        }
-        (self.original_input[..graft].to_string(), basename)
-      } else {
-        (
-          self.original_input[..start].to_string(),
-          selected.to_string(),
-        )
-      }
-    } else {
-      start += slice.width();
-      let completion = selected.strip_prefix(slice).unwrap_or(selected.to_string());
-      (self.original_input[..start].to_string(), completion)
-    };
-    let final_completion = if self.escape_candidates {
-      escape_str(&completion, false)
-    } else {
-      completion
-    };
-    format!("{}{}{}", prefix, final_completion, &self.original_input[end..])
+    let (start, end) = self.token_span;
+    format!(
+      "{}{}{}",
+      &self.original_input[..start],
+      selected.as_str(),
+      &self.original_input[end..],
+    )
   }
 
   pub fn build_comp_ctx(&self, tks: &[CtxTk], line: &str, cursor_pos: usize) -> ShResult<CompContext> {
@@ -2184,20 +1962,15 @@ impl SimpleCompleter {
 
   pub fn get_candidates(&mut self, line: String, cursor_pos: usize) -> ShResult<CompResult> {
     let tks = get_context_tokens(&line);
-    let (strat, replace_span) = CompStrat::resolve(&tks, cursor_pos);
+    let (strat, replace_span, cursor_pos) = CompStrat::resolve(&tks, cursor_pos);
 
     self.token_span = (replace_span.range().start, replace_span.range().end);
-    self.escape_candidates = strat.escapes_candidates();
-    self.graft_pos = match &strat {
-      CompStrat::Files { parent: Some(p), .. } => Some(self.token_span.0 + p.len()),
-      _ => None,
-    };
     match strat {
       CompStrat::Var { prefix } => Ok(CompResult::from_candidates(complete_vars(&prefix))),
       CompStrat::Tilde { prefix } => Ok(CompResult::from_candidates(complete_users(&prefix))),
-      CompStrat::Command { prefix } => Ok(CompResult::from_candidates(complete_commands(&prefix))),
-      CompStrat::Dirs { prefix } => Ok(CompResult::from_candidates(complete_dirs(&prefix))),
-      CompStrat::Files { prefix, parent } => Ok(CompResult::from_candidates(complete_files_in(&prefix, parent.as_deref()))),
+      CompStrat::Command { prefix } => Ok(CompResult::from_candidates(complete_commands(&prefix, cursor_pos))),
+      CompStrat::Dirs { prefix } => Ok(CompResult::from_candidates(complete_dirs(&prefix, cursor_pos))),
+      CompStrat::Files { path } => Ok(CompResult::from_candidates(complete_path(&path, cursor_pos))),
       CompStrat::Separator => Ok(CompResult::Single { result: Candidate::from(";"), }),
       CompStrat::Null => Ok(CompResult::NoMatch),
       CompStrat::Argument { prefix } => {
@@ -2216,16 +1989,16 @@ impl SimpleCompleter {
             Ok(result)
           }
           CompSpecResult::NoSpec => {
-            Ok(CompResult::from_candidates(complete_filename(&expanded)))
+            Ok(CompResult::from_candidates(complete_path(&expanded, cursor_pos)))
           }
           CompSpecResult::NoMatch { flags } => {
             if flags.contains(CompOptFlags::SPACE) {
               self.add_space = true;
             }
             if flags.contains(CompOptFlags::DIRNAMES) {
-              Ok(CompResult::from_candidates(complete_dirs(&expanded)))
+              Ok(CompResult::from_candidates(complete_dirs(&expanded, cursor_pos)))
             } else if flags.contains(CompOptFlags::DEFAULT) {
-              Ok(CompResult::from_candidates(complete_filename(&expanded)))
+              Ok(CompResult::from_candidates(complete_path(&expanded, cursor_pos)))
             } else {
               Ok(CompResult::NoMatch)
             }
@@ -2249,37 +2022,6 @@ mod tests {
     let prompt = Prompt::default();
     let vi = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
     (vi, g)
-  }
-
-  // ===================== extract_var_name =====================
-
-  #[test]
-  fn extract_var_simple() {
-    let (name, start, end) = extract_var_name("$HOME").unwrap();
-    assert_eq!(name, "HOME");
-    assert_eq!(start, 1);
-    assert_eq!(end, 5);
-  }
-
-  #[test]
-  fn extract_var_braced() {
-    let (name, start, end) = extract_var_name("${PATH}").unwrap();
-    assert_eq!(name, "PATH");
-    // `${` covers bytes 0..2; the name starts at byte 2 and ends at byte 6.
-    assert_eq!(start, 2);
-    assert_eq!(end, 6);
-  }
-
-  #[test]
-  fn extract_var_partial() {
-    let (name, start, _end) = extract_var_name("$HO").unwrap();
-    assert_eq!(name, "HO");
-    assert_eq!(start, 1);
-  }
-
-  #[test]
-  fn extract_var_none() {
-    assert!(extract_var_name("hello").is_none());
   }
 
   // ===================== ScoredCandidate::fuzzy_score =====================
@@ -2437,8 +2179,6 @@ mod tests {
       dirs_only: false,
       add_space: false,
       cursor_pos: 0,
-      escape_candidates: true,
-      graft_pos: None,
     };
     comp.cycle_completion(1);
     assert_eq!(comp.selected_idx, 0);
@@ -2456,8 +2196,6 @@ mod tests {
       dirs_only: false,
       add_space: false,
       cursor_pos: 0,
-      escape_candidates: true,
-      graft_pos: None,
     };
     comp.cycle_completion(-1);
     assert_eq!(comp.selected_idx, 2);
@@ -2511,31 +2249,33 @@ mod tests {
     );
   }
 
+  // `get_completed_line` now wholesale-replaces `token_span` with the
+  // candidate. Escaping happens upstream in `complete_path` (the candidate
+  // arrives splice-ready), so these tests verify the splice mechanics with
+  // already-escaped candidates.
+
   #[test]
   fn completed_line_only_escapes_new_text() {
     let _g = TestGuard::new();
-    // Simulate: user typed "echo hel", completion candidate is "hello world"
+    // Candidate arrives pre-escaped from upstream: user-typed "hel" stays
+    // verbatim, the matched suffix "lo world" was escaped to "lo\ world".
     let comp = SimpleCompleter {
-      candidates: vec!["hello world".into()],
+      candidates: vec!["hello\\ world".into()],
       selected_idx: 0,
       original_input: "echo hel".into(),
-      token_span: (5, 8), // "hel" spans bytes 5..8
+      token_span: (5, 8),
       active: true,
       dirs_only: false,
       add_space: false,
       cursor_pos: 0,
-      escape_candidates: true,
-      graft_pos: None,
     };
     let result = comp.get_completed_line();
-    // "hel" is the user's text (not escaped), "lo world" is new (escaped)
     assert_eq!(result, "echo hello\\ world");
   }
 
   #[test]
   fn completed_line_no_new_text() {
     let _g = TestGuard::new();
-    // User typed the full token, nothing new to escape
     let comp = SimpleCompleter {
       candidates: vec!["hello".into()],
       selected_idx: 0,
@@ -2545,8 +2285,6 @@ mod tests {
       dirs_only: false,
       add_space: false,
       cursor_pos: 0,
-      escape_candidates: true,
-      graft_pos: None,
     };
     let result = comp.get_completed_line();
     assert_eq!(result, "echo hello");
@@ -2555,10 +2293,9 @@ mod tests {
   #[test]
   fn completed_line_appends_suffix_with_escape() {
     let _g = TestGuard::new();
-    // User typed "echo hel", candidate is "hello world" (from filesystem)
-    // strip_prefix("hel") => "lo world", which gets escaped
+    // Wholesale replacement of `token_span` with the (pre-escaped) candidate.
     let comp = SimpleCompleter {
-      candidates: vec!["hello world".into()],
+      candidates: vec!["hello\\ world".into()],
       selected_idx: 0,
       original_input: "echo hel".into(),
       token_span: (5, 8),
@@ -2566,8 +2303,6 @@ mod tests {
       dirs_only: false,
       add_space: false,
       cursor_pos: 0,
-      escape_candidates: true,
-      graft_pos: None,
     };
     let result = comp.get_completed_line();
     assert_eq!(result, "echo hello\\ world");
@@ -2576,10 +2311,10 @@ mod tests {
   #[test]
   fn completed_line_suffix_only_escapes_new_part() {
     let _g = TestGuard::new();
-    // User typed "echo hello", candidate is "hello world&done"
-    // strip_prefix("hello") => " world&done", only that gets escaped
+    // Candidate arrives with the user's "hello" preserved verbatim and the
+    // appended " world&done" already escaped to "\ world\&done".
     let comp = SimpleCompleter {
-      candidates: vec!["hello world&done".into()],
+      candidates: vec!["hello\\ world\\&done".into()],
       selected_idx: 0,
       original_input: "echo hello".into(),
       token_span: (5, 10),
@@ -2587,11 +2322,8 @@ mod tests {
       dirs_only: false,
       add_space: false,
       cursor_pos: 0,
-      escape_candidates: true,
-      graft_pos: None,
     };
     let result = comp.get_completed_line();
-    // "hello" is preserved as-is, " world&done" gets escaped
     assert_eq!(result, "echo hello\\ world\\&done");
   }
 
@@ -2651,7 +2383,7 @@ mod tests {
   /// Returns (strategy, replacement-span as a (start, end) tuple).
   fn dispatch(input: &str, cursor: usize) -> (CompStrat, (usize, usize)) {
     let tks = get_context_tokens(input);
-    let (strat, span) = CompStrat::resolve(&tks, cursor);
+    let (strat, span, _cursor_pos) = CompStrat::resolve(&tks, cursor);
     (strat, (span.range().start, span.range().end))
   }
 
@@ -2662,77 +2394,66 @@ mod tests {
       | CompStrat::Tilde { prefix }
       | CompStrat::Command { prefix }
       | CompStrat::Argument { prefix }
-      | CompStrat::Dirs { prefix }
-      | CompStrat::Files { prefix, .. } => prefix,
+      | CompStrat::Dirs { prefix } => prefix,
+      CompStrat::Files { path } => path,
       CompStrat::Separator | CompStrat::Null => "",
     }
   }
 
   #[test]
   fn dispatch_bare_var_sub() {
-    // `$FL` cursor at end → Var{prefix:"$FL"}, span covers `$FL`.
     let input = "echo $FL";
     let (strat, span) = dispatch(input, input.len());
     assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
-    assert_eq!(prefix_of(&strat), "$FL");
-    assert_eq!(&input[span.0..span.1], "$FL");
+    assert_eq!(prefix_of(&strat), "FL");
+    assert_eq!(&input[span.0..span.1], "FL");
   }
 
   #[test]
   fn dispatch_braced_var_sub_unclosed() {
-    // `${FL` cursor at end → Var, span narrowed to `${FL`.
-    // The closing `}` doesn't exist yet; replacement targets exactly what
-    // the user has typed.
     let input = "echo ${FL";
     let (strat, span) = dispatch(input, input.len());
     assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
-    assert_eq!(prefix_of(&strat), "${FL");
-    assert_eq!(&input[span.0..span.1], "${FL");
+    assert_eq!(prefix_of(&strat), "FL");
+    assert_eq!(&input[span.0..span.1], "FL");
   }
 
   #[test]
   fn dispatch_braced_var_sub_closed() {
-    // `${FL}` cursor at end → Var, span narrowed to `${FL`. The `}` lives
-    // outside the span so it's preserved when the candidate replaces.
     let input = "echo ${FL}";
-    let (strat, span) = dispatch(input, input.len());
+    let cursor = input.find("FL").unwrap() + 2; // end of FL, just before `}`
+    let (strat, span) = dispatch(input, cursor);
     assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
-    assert_eq!(prefix_of(&strat), "${FL}");
-    assert_eq!(&input[span.0..span.1], "${FL");
+    assert_eq!(prefix_of(&strat), "FL");
+    assert_eq!(&input[span.0..span.1], "FL");
   }
 
   #[test]
   fn dispatch_braced_var_with_substitution_op() {
-    // `${FL/bar` parses as a (greedy) substitution param expansion.
-    // Cursor on FL → Var, span narrowed to `${FL` so the `/bar` is preserved.
     let input = "echo ${FL/bar";
     let cursor = input.find("FL").unwrap() + 2; // end of FL
     let (strat, span) = dispatch(input, cursor);
     assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
-    assert_eq!(&input[span.0..span.1], "${FL");
+    assert_eq!(&input[span.0..span.1], "FL");
   }
 
   #[test]
   fn dispatch_var_sub_inside_path() {
-    // `/foo/$FL/bar` cursor on FL → Var, span covers exactly `$FL`.
-    // Sibling path bytes (`/foo/` and `/bar`) stay outside the span.
     let input = "echo /foo/$FL/bar";
     let cursor = input.find("$FL").unwrap() + 3; // end of $FL
     let (strat, span) = dispatch(input, cursor);
     assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
-    assert_eq!(prefix_of(&strat), "$FL");
-    assert_eq!(&input[span.0..span.1], "$FL");
+    assert_eq!(prefix_of(&strat), "FL");
+    assert_eq!(&input[span.0..span.1], "FL");
   }
 
   #[test]
   fn dispatch_var_sub_inside_double_quoted_string() {
-    // `"foo $FL` (unclosed double-quoted string) cursor at end.
-    // Recursion descends into DoubleString → VarSub. Span covers `$FL`.
     let input = "echo \"foo $FL";
     let (strat, span) = dispatch(input, input.len());
     assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
-    assert_eq!(prefix_of(&strat), "$FL");
-    assert_eq!(&input[span.0..span.1], "$FL");
+    assert_eq!(prefix_of(&strat), "FL");
+    assert_eq!(&input[span.0..span.1], "FL");
   }
 
   #[test]
@@ -2741,56 +2462,11 @@ mod tests {
     let cursor = input.find("FL").unwrap() + 2; // end of FL
     let (strat, span) = dispatch(input, cursor);
     assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
-    assert_eq!(&input[span.0..span.1], "${FL");
-  }
-
-  #[test]
-  fn dispatch_path_with_var_prefix() {
-    // `$HOME/proj` cursor at end → Files with parent="$HOME/", prefix="proj".
-    // The cursor is past the var sub, so we fall through to path slicing.
-    let input = "echo $HOME/proj";
-    let (strat, _) = dispatch(input, input.len());
-    match strat {
-      CompStrat::Files { prefix, parent } => {
-        assert_eq!(prefix, "proj");
-        assert_eq!(parent.as_deref(), Some("$HOME/"));
-      }
-      other => panic!("expected Files, got {other:?}"),
-    }
-  }
-
-  #[test]
-  fn dispatch_simple_path_no_parent() {
-    // `foo` cursor at end → Files{prefix:"foo", parent:None}, span = leaf.
-    let input = "echo foo";
-    let (strat, span) = dispatch(input, input.len());
-    match strat {
-      CompStrat::Files { prefix, parent } => {
-        assert_eq!(prefix, "foo");
-        assert_eq!(parent, None);
-      }
-      other => panic!("expected Files, got {other:?}"),
-    }
-    assert_eq!(&input[span.0..span.1], "foo");
-  }
-
-  #[test]
-  fn dispatch_path_with_literal_parent() {
-    // `bar/foo` cursor at end → Files{prefix:"foo", parent:Some("bar/")}.
-    let input = "echo bar/foo";
-    let (strat, _) = dispatch(input, input.len());
-    match strat {
-      CompStrat::Files { prefix, parent } => {
-        assert_eq!(prefix, "foo");
-        assert_eq!(parent.as_deref(), Some("bar/"));
-      }
-      other => panic!("expected Files, got {other:?}"),
-    }
+    assert_eq!(&input[span.0..span.1], "FL");
   }
 
   #[test]
   fn dispatch_empty_input_is_command() {
-    // Empty input → Command{prefix:""}.
     let (strat, _) = dispatch("", 0);
     assert!(matches!(strat, CompStrat::Command { .. }), "got {strat:?}");
     assert_eq!(prefix_of(&strat), "");
@@ -2798,7 +2474,6 @@ mod tests {
 
   #[test]
   fn dispatch_after_separator_is_command() {
-    // `ls foo | ` cursor at end → Command{prefix:""} (new pipeline segment).
     let input = "ls foo | ";
     let (strat, _) = dispatch(input, input.len());
     assert!(matches!(strat, CompStrat::Command { .. }), "got {strat:?}");
@@ -2807,9 +2482,6 @@ mod tests {
 
   #[test]
   fn dispatch_in_gap_after_command_uses_zero_width_span() {
-    // `echo ` cursor at end (after trailing space) → Argument synthesized
-    // from the predecessor. Replace span must be zero-width at cursor so
-    // candidates are INSERTED, not replacing "echo".
     let input = "echo ";
     let (strat, span) = dispatch(input, input.len());
     assert!(matches!(strat, CompStrat::Argument { .. }), "got {strat:?}");
@@ -2819,7 +2491,6 @@ mod tests {
 
   #[test]
   fn dispatch_partial_command_name() {
-    // `ls<cursor>` (cursor inside the command word) → Command{prefix:"ls"}.
     let input = "ls";
     let (strat, span) = dispatch(input, input.len());
     assert!(matches!(strat, CompStrat::Command { .. }), "got {strat:?}");
@@ -2829,14 +2500,11 @@ mod tests {
 
   #[test]
   fn dispatch_preserves_braces_under_string_recursion() {
-    // Combined: param-expansion-style var sub inside a string. After our
-    // get_leaf VarSub-stop-point fix, this dispatches correctly via the
-    // non-Argument branch with narrow_var_span finding the ParamName.
     let input = "echo \"foo ${FL}/bar\"";
     let cursor = input.find("FL").unwrap() + 2;
     let (strat, span) = dispatch(input, cursor);
     assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
-    assert_eq!(&input[span.0..span.1], "${FL");
+    assert_eq!(&input[span.0..span.1], "FL");
   }
 
   // ===================== Integration tests (pty) =====================

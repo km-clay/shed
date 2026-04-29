@@ -46,6 +46,7 @@ impl super::Builtin for Cd {
     let span = arg_span.unwrap_or(args.span);
 
     if try_cd_path && let Some(found) = search_cd_path(&new_dir) {
+      print_dir = true;
       new_dir = found;
     }
 
