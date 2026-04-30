@@ -133,6 +133,19 @@ impl IoMode {
       },
     )
   }
+  pub fn get_pipes_no_cloexec() -> (Self, Self) {
+    let (rpipe, wpipe) = nix::unistd::pipe().unwrap();
+    (
+      Self::Pipe {
+        tgt_fd: STDIN_FILENO,
+        pipe: rpipe.into(),
+      },
+      Self::Pipe {
+        tgt_fd: STDOUT_FILENO,
+        pipe: wpipe.into(),
+      },
+    )
+  }
 }
 
 impl Read for IoMode {

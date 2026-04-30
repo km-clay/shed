@@ -10,7 +10,7 @@ use crate::util::error::ShResult;
 pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
   // FIXME: Still a lot of issues here
   // Seems like debugging will be a massive effort
-  let (rpipe, wpipe) = IoMode::get_pipes();
+  let (rpipe, wpipe) = IoMode::get_pipes_no_cloexec();
   let rpipe_raw = rpipe.src_fd();
   let wpipe_raw = wpipe.src_fd();
 
@@ -31,9 +31,6 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 
   match unsafe { fork()? } {
     ForkResult::Child => {
-      // Close the parent's pipe end so the grandchild doesn't inherit it.
-      // Without this, >(cmd) hangs because the command holds its own
-      // pipe's write end open and never sees EOF.
       drop(register_fd);
 
       let redir = Redir::new(proc_fd, redir_type);
