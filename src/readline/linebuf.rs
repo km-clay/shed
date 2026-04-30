@@ -2,7 +2,7 @@ use std::{
   cmp::Ordering, collections::{HashSet, VecDeque}, fmt::Display, ops::{Deref, DerefMut, Index, IndexMut, Range}, slice::SliceIndex
 };
 
-use ariadne::Span;
+use ariadne::Span as AriadneSpan;
 use itertools::Either;
 use regex::Regex;
 use smallvec::SmallVec;
@@ -24,13 +24,7 @@ use crate::{
   prelude::*,
   procio::{self, IoFrame, IoMode, IoStack, capture_command},
   readline::{
-    editcmd::{LineAddr, ReadSrc, StashArgs, StashListArg, VerbCmd, WriteDest},
-    editmode::SubFlags,
-    highlight::{self},
-    history::History,
-    markers,
-    register::RegisterContent,
-    term::get_win_size,
+    context::{CtxTkRule, get_context_tokens}, editcmd::{LineAddr, ReadSrc, StashArgs, StashListArg, VerbCmd, WriteDest}, editmode::SubFlags, highlight::{self}, history::History, markers, register::RegisterContent, term::get_win_size
   },
   sherr,
   state::{
@@ -3340,13 +3334,16 @@ impl LineBuf {
         } else if *verb == Verb::Change && matches!(motion, MotionKind::Line { .. }) {
           let n_lines = self.lines.len();
           let content = self.delete_range(&motion);
+          self.fix_cursor();
           let row = self.row();
           if n_lines > 1 {
             self.lines.insert(row, Line::default());
           }
           content
         } else {
-          self.delete_range(&motion)
+          let lines = self.delete_range(&motion);
+          self.fix_cursor();
+          lines
         };
         let reg_content = match &motion {
           MotionKind::Char { .. } => RegisterContent::Span(content.0),
@@ -4384,7 +4381,7 @@ impl LineBuf {
       let num_tabs = level_start.min(level_end);
 
       let line = self.line_mut(row);
-      while line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
+      while line.0.first().is_some_and(|c| c.is_ws()) {
         line.0.remove(0);
       }
       for tab in std::iter::repeat_n(Grapheme::from('\t'), num_tabs) {
@@ -5222,11 +5219,41 @@ impl LineBuf {
   }
 
   pub fn attempt_history_expansion(&mut self, history: &History) -> bool {
-    let mut changes: Vec<((Pos, Pos), String)> = vec![];
-    let positions = self.grapheme_positions().into_iter();
-    if !self.find_history_expansions(&mut changes, positions, history, Pos::MIN) {
-      return false;
-    };
+    let buf = self.joined();
+    let tks = get_context_tokens(&buf);
+    let mut hist_expansions = vec![];
+    for tk in &tks {
+      hist_expansions.extend(tk.find_nodes(|n| *n.class() == CtxTkRule::HistExp));
+    }
+    hist_expansions.sort_by_key(|n| n.span().start());
+
+    let mut any_changes = false;
+    let mut changes: Vec<((Pos,Pos), String)> = vec![];
+    for exp in hist_expansions {
+      let span = exp.span().clone();
+      let Some(start) = self.byte_to_pos(span.range().start) else {
+        continue
+      };
+      let Some(mut end) = self.byte_to_pos(span.range().end) else {
+        continue
+      };
+      end = end.col_sub(1); // exclusive range
+      let change = match history.resolve_hist_token(exp.span().as_str()) {
+        Some(s) => {
+          any_changes = true;
+          s.to_string()
+        }
+        None => {
+          any_changes = true;
+          let raw = exp.span().as_str();
+          raw.strip_prefix('!')
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| raw.to_string())
+        }
+      };
+
+      changes.push(((start,end), change));
+    }
 
     for (range, change) in changes.into_iter().rev() {
       let old_len = self.count_graphemes();
@@ -5237,7 +5264,7 @@ impl LineBuf {
       self.cursor.pos.set(nr, nc);
     }
 
-    true
+    any_changes
   }
 
   pub fn cursor_in_leading_ws(&self) -> bool {

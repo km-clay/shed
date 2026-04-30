@@ -26,7 +26,7 @@ use crate::readline::editmode::{Emacs, ViEx, ViVerbatim};
 use crate::readline::history::HistEntry;
 use crate::readline::term::{calc_str_width, clear_rows, move_cursor_to_end, redraw};
 use crate::state::{
-  self, AutoCmdKind, Rows, ShellParam, Terminal, Var, VarFlags, VarKind, read_logic, read_shopts, with_term, with_vars, write_meta, write_vars
+  self, AutoCmdKind, ShellParam, Var, VarFlags, VarKind, read_logic, read_shopts, with_term, with_vars, write_meta, write_vars
 };
 use crate::util::AutoCmdVecUtils;
 use crate::{
@@ -1648,16 +1648,6 @@ impl ShedLine {
         self.status_msgs.pop_front();
       }
     }
-
-
-    let (term_rows,Ok(Some((Rows(c_row),_)))) = with_term(|t| (t.t_rows(),t.get_cursor_pos())) else {
-      self.old_layout = Some(new_layout);
-      self.needs_redraw = false;
-      return Ok(())
-    };
-    let rows_below_cursor = new_layout.end.row.saturating_sub(new_layout.cursor.row);
-    let prompt_bottom = c_row + rows_below_cursor;
-    let empty_rows = term_rows.saturating_sub(prompt_bottom);
 
     self.old_layout = Some(new_layout);
     self.needs_redraw = false;

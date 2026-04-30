@@ -44,11 +44,11 @@ const fn validate_help_page(s: &str) {
   }
 }
 
-macro_rules! help_pages {
+macro_rules! include_help_pages {
   ($($name:literal),* $(,)?) => {
     const HELP_PAGES: &[(&str, &str)] = &[
       $({
-        const S: &str = include_str!(concat!("../../../doc/", $name, ".txt"));
+        const S: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", $name));
         validate_help_page(S);
         ($name, S)
       },)*
@@ -56,22 +56,22 @@ macro_rules! help_pages {
   };
 }
 
-help_pages! {
-  "arith",
-  "autocmd",
-  "builtin",
-  "commands",
-  "ex",
-  "glob",
-  "help",
-  "jobs",
-  "keybinds",
-  "param",
-  "prompt",
-  "redirect",
-  "scripting",
-  "socket",
-  "variables",
+include_help_pages! {
+  "doc/arith.txt",
+  "doc/autocmd.txt",
+  "doc/builtin.txt",
+  "doc/commands.txt",
+  "doc/ex.txt",
+  "doc/glob.txt",
+  "doc/help.txt",
+  "doc/jobs.txt",
+  "doc/keybinds.txt",
+  "doc/param.txt",
+  "doc/prompt.txt",
+  "doc/redirect.txt",
+  "doc/scripting.txt",
+  "doc/socket.txt",
+  "doc/variables.txt",
 }
 
 pub(super) struct Help;

@@ -1071,10 +1071,8 @@ impl Dispatcher {
       if !assignments.is_empty() {
         if let Err(e) = self.set_assignments(assignments, assign_behavior) {
           e.print_error();
-          return with_status(1);
-        } else {
-          return with_status(0);
         };
+        return Ok(())
       }
     }
     // argv is not empty. let's set this stuff here.
@@ -1208,12 +1206,14 @@ impl Dispatcher {
       let NdRule::Assignment { kind, var, val } = assign.class else {
         unreachable!()
       };
+      let old_status = state::get_status();
       let var_name = var.span.as_str();
       let val = if is_arr {
         VarKind::arr_from_tk(val)?
       } else {
         VarKind::Str(val.expand()?.get_words().join(" "))
       };
+      let param_expansion_failed = state::get_status() != 0;
 
       // Parse and expand array index BEFORE entering write_vars borrow
       let indexed = state::parse_arr_bracket(var_name)
@@ -1317,6 +1317,12 @@ impl Dispatcher {
             write_vars(|v| v.set_var(var_name, var.kind().clone(), var.flags()))?;
           }
         }
+      }
+
+      if param_expansion_failed {
+        state::set_status(1);
+      } else {
+        state::set_status(old_status);
       }
 
       if matches!(behavior, AssignBehavior::Export) {

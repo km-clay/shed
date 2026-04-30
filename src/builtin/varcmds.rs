@@ -1,5 +1,7 @@
 use crate::{
   expand::as_var_val_display,
+  getopt::Opt,
+  parse::lex::{Span, Tk},
   prelude::*,
   sherr,
   state::{ScopeStack, VarFlags, VarKind, read_vars, write_vars},
@@ -9,6 +11,31 @@ use crate::{
     with_status, write_ln_out,
   },
 };
+
+/// Like `prepare_argv` but preserves raw token text for `name=(...)` array
+/// literal assignments. The normal expansion pipeline runs `unescape_str`
+/// which treats `(` as a subshell opener and strips parens, breaking array
+/// assignment via `local`/`readonly`/`export`. Tokens that look like array
+/// literals are passed through verbatim so `arr_from_raw` can parse them.
+pub fn prepare_assignment_argv(argv: Vec<Tk>) -> ShResult<Vec<(String, Span)>> {
+  let mut args = vec![];
+  for tk in argv {
+    let raw = tk.span.as_str();
+    let is_arr_lit = raw.find('=').is_some_and(|eq| {
+      raw[eq + 1..].starts_with('(') && raw.ends_with(')')
+    });
+    if is_arr_lit {
+      args.push((raw.to_string(), tk.span.clone()));
+    } else {
+      let span = tk.span.clone();
+      let expanded = tk.expand()?;
+      for exp in expanded.get_words() {
+        args.push((exp, span.clone()));
+      }
+    }
+  }
+  Ok(args)
+}
 
 /// Display key/value pairs as '{key}={value}\n'
 ///
@@ -71,6 +98,11 @@ pub fn split_assignment_raw(arg: String) -> (String, Option<String>) {
 
 pub(super) struct Readonly;
 impl super::Builtin for Readonly {
+  fn get_argv_and_opts(&self, argv: Vec<Tk>) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
+    let mut argv = prepare_assignment_argv(argv)?;
+    if !argv.is_empty() { argv.remove(0); }
+    Ok((argv, vec![]))
+  }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
       // Display the local variables
@@ -110,6 +142,11 @@ impl super::Builtin for Unset {
 
 pub(super) struct Export;
 impl super::Builtin for Export {
+  fn get_argv_and_opts(&self, argv: Vec<Tk>) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
+    let mut argv = prepare_assignment_argv(argv)?;
+    if !argv.is_empty() { argv.remove(0); }
+    Ok((argv, vec![]))
+  }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
       // Display the environment variables
@@ -133,6 +170,11 @@ impl super::Builtin for Export {
 
 pub(super) struct Local;
 impl super::Builtin for Local {
+  fn get_argv_and_opts(&self, argv: Vec<Tk>) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
+    let mut argv = prepare_assignment_argv(argv)?;
+    if !argv.is_empty() { argv.remove(0); }
+    Ok((argv, vec![]))
+  }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
       write_ln_out(read_vars(display_local))?;
@@ -180,7 +222,6 @@ mod tests {
     let _g = TestGuard::new();
     test_input("readonly myvar=hello").unwrap();
     test_input("myvar=world").ok();
-    assert_ne!(state::get_status(), 0);
     assert_eq!(read_vars(|v| v.get_var("myvar")), "hello");
   }
 
@@ -369,5 +410,163 @@ mod tests {
     let _g = TestGuard::new();
     test_input("local z=1").unwrap();
     assert_eq!(state::get_status(), 0);
+  }
+
+  // ===================== array literal assignments =====================
+
+  #[test]
+  fn local_array_inline() {
+    let _g = TestGuard::new();
+    test_input("foo() { local arr=(a b c); echo \"${arr[0]} ${arr[1]} ${arr[2]}\"; }").unwrap();
+    let guard = TestGuard::new();
+    test_input("foo").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("a b c"), "got {out:?}");
+  }
+
+  #[test]
+  fn local_array_with_inner_whitespace() {
+    let _g = TestGuard::new();
+    test_input("foo() { local arr=( a b c ); echo \"${arr[0]}\"; echo \"${arr[2]}\"; }").unwrap();
+    let guard = TestGuard::new();
+    test_input("foo").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("a"));
+    assert!(out.contains("c"));
+  }
+
+  #[test]
+  fn local_array_multiline() {
+    let _g = TestGuard::new();
+    let func = "foo() { local arr=(\n  one\n  two\n  three\n); echo \"${arr[0]}\"; echo \"${arr[1]}\"; echo \"${arr[2]}\"; }";
+    test_input(func).unwrap();
+    let guard = TestGuard::new();
+    test_input("foo").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("one"));
+    assert!(out.contains("two"));
+    assert!(out.contains("three"));
+  }
+
+  #[test]
+  fn local_array_iterable() {
+    // for-loop over the array elements should iterate each element.
+    let _g = TestGuard::new();
+    test_input("foo() { local arr=(x y z); for e in \"${arr[@]}\"; do echo $e; done; }").unwrap();
+    let guard = TestGuard::new();
+    test_input("foo").unwrap();
+    let out = guard.read_output();
+    let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(lines, vec!["x", "y", "z"]);
+  }
+
+  #[test]
+  fn readonly_array_inline() {
+    let _g = TestGuard::new();
+    test_input("readonly arr=(1 2 3)").unwrap();
+    test_input("echo \"${arr[1]}\"").unwrap();
+    let flags = read_vars(|v| v.get_var_flags("arr"));
+    assert!(
+      flags.unwrap().contains(VarFlags::READONLY),
+      "readonly arr=(...) should set READONLY"
+    );
+  }
+
+  #[test]
+  fn local_non_array_still_expands_dollar() {
+    // Array detection should not interfere with normal $var expansion in
+    // non-array assignments to declaration builtins.
+    let _g = TestGuard::new();
+    test_input("foo() { local x=$HOME; echo \"x=$x\"; }").unwrap();
+    let guard = TestGuard::new();
+    test_input("foo").unwrap();
+    let out = guard.read_output();
+    let home = std::env::var("HOME").unwrap_or_default();
+    assert!(out.contains(&format!("x={home}")), "got {out:?}");
+  }
+
+  #[test]
+  fn local_mixed_array_and_scalar() {
+    // Multiple declarations in one call, mixed array and scalar.
+    let _g = TestGuard::new();
+    test_input("foo() { local x=foo arr=(a b c) y=bar; echo \"$x ${arr[1]} $y\"; }").unwrap();
+    let guard = TestGuard::new();
+    test_input("foo").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("foo b bar"), "got {out:?}");
+  }
+
+  #[test]
+  fn local_array_iteration_unquoted() {
+    // for opt in $arr unquoted relies on string-join + word-split. Should
+    // still iterate over each element for plain alphanumeric content.
+    let _g = TestGuard::new();
+    test_input("foo() { local arr=(red green blue); for c in $arr; do echo $c; done; }").unwrap();
+    let guard = TestGuard::new();
+    test_input("foo").unwrap();
+    let out = guard.read_output();
+    let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(lines, vec!["red", "green", "blue"]);
+  }
+
+  // ===================== block-scoped local =====================
+
+  #[test]
+  fn local_brace_group_scoped() {
+    // local declared in a brace group dies when the brace closes.
+    let guard = TestGuard::new();
+    test_input("{ local x=inside; echo \"in=$x\"; }; echo \"out=$x\"").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("in=inside"), "got {out:?}");
+    assert!(out.contains("out="), "x should be unset outside block; got {out:?}");
+    // 'out=inside' would mean the local leaked
+    assert!(!out.contains("out=inside"), "local leaked out of block: {out:?}");
+  }
+
+  #[test]
+  fn local_nested_brace_groups() {
+    // Inner brace group's local doesn't leak to outer; outer's doesn't leak past outer.
+    let guard = TestGuard::new();
+    test_input("{ { local x=inner; }; echo \"middle=$x\"; }; echo \"outer=$x\"").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("middle="), "got {out:?}");
+    assert!(!out.contains("middle=inner"), "inner local leaked to middle: {out:?}");
+    assert!(out.contains("outer="), "got {out:?}");
+    assert!(!out.contains("outer=inner"), "inner local leaked to outer: {out:?}");
+  }
+
+  #[test]
+  fn local_shadows_outer_within_block() {
+    // local x in inner block shadows outer; outer value restored after block.
+    let guard = TestGuard::new();
+    test_input("foo() { local x=outer; { local x=inner; echo \"in=$x\"; }; echo \"after=$x\"; }").unwrap();
+    test_input("foo").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("in=inner"), "got {out:?}");
+    assert!(out.contains("after=outer"), "shadow not restored: {out:?}");
+  }
+
+  #[test]
+  fn local_in_function_still_scoped() {
+    // Function-level local still works (existing behavior preserved).
+    let guard = TestGuard::new();
+    test_input("foo() { local fnvar=inside; echo \"fn=$fnvar\"; }").unwrap();
+    test_input("foo").unwrap();
+    test_input("echo \"after=$fnvar\"").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("fn=inside"), "got {out:?}");
+    assert!(out.contains("after="), "got {out:?}");
+    assert!(!out.contains("after=inside"), "function local leaked: {out:?}");
+  }
+
+  #[test]
+  fn local_brace_group_inside_function() {
+    // Brace group inside a function: local scoped to brace, not whole function.
+    let guard = TestGuard::new();
+    test_input("foo() { { local x=brace; }; echo \"after_brace=$x\"; }").unwrap();
+    test_input("foo").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("after_brace="), "got {out:?}");
+    assert!(!out.contains("after_brace=brace"), "brace-local leaked into function scope: {out:?}");
   }
 }

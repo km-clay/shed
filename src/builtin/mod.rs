@@ -42,6 +42,40 @@ pub mod trap;
 pub mod varcmds;
 pub mod defer;
 
+macro_rules! register_completions {
+  ($($name:literal => $path:literal),* $(,)?) => {
+    static COMPLETIONS: &[(&str,&str)] = &[
+      $(($name, include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", $path)))),*
+    ];
+
+    pub fn source_builtin_completions() {
+      for (name, src) in COMPLETIONS {
+        if let Err(e) = $crate::parse::execute::exec_nonint(src.to_string(), None, Some(format!("{name} comp").into())) {
+          e.print_error();
+        }
+      }
+    }
+
+    #[cfg(test)]
+    mod comp_test {
+      #[test]
+      fn builtin_completions_pass() {
+        let failures: Vec<&str> = super::COMPLETIONS.iter()
+          .filter(|(name,src)| {
+            $crate::parse::execute::exec_nonint(
+              src.to_string(),
+              None,
+              Some(format!("{name} comp").into())
+            ).is_err()
+          })
+          .map(|(name,_)| *name)
+          .collect();
+        assert!(failures.is_empty(), "Completions failed to source: {failures:?}");
+      }
+    }
+  };
+}
+
 macro_rules! register_builtins {
   ($($name:literal => $ty:expr),* $(,)?) => {
     static BUILTIN_TABLE: &[(&str, &dyn Builtin)] = &[
@@ -101,6 +135,7 @@ register_builtins! {
   "builtin"  => BuiltinBuiltin,
   "cd"       => cd::Cd,
   "command"  => CommandBuiltin,
+  "compadd"  => complete::Compadd,
   "compgen"  => complete::CompGen,
   "complete" => complete::Complete,
   "continue" => flowctl::Continue,
@@ -151,6 +186,11 @@ register_builtins! {
   "unalias"  => alias::Unalias,
   "unset"    => varcmds::Unset,
   "wait"     => jobctl::Wait,
+}
+
+register_completions! {
+  "cd"    => "include/completions/cd_comp.shed",
+  "shopt" => "include/completions/shopt_comp.shed",
 }
 
 /// Lookup a name in the builtin table via binary search

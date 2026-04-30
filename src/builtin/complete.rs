@@ -1,7 +1,9 @@
 use bitflags::bitflags;
 
+use itertools::{Itertools, EitherOrBoth};
+
 use crate::{
-  getopt::{Opt, OptSpec}, out, outln, parse::{NdRule, Node, execute::Dispatcher}, readline::complete::{BashCompSpec, CompContext, CompSpec}, sherr, state::{read_meta, write_meta}, util::{error::ShResult, with_status, write_out}
+  getopt::{Opt, OptSpec}, out, outln, parse::{NdRule, Node, execute::Dispatcher}, readline::complete::{BashCompSpec, Candidate, CompContext, CompSpec}, sherr, state::{read_meta, read_vars, write_meta}, util::{error::ShResult, with_status, write_out}
 };
 
 bitflags! {
@@ -168,6 +170,90 @@ impl super::Builtin for CompGen {
     for result in &results {
       outln!("{result}")?;
     }
+
+    with_status(0)
+  }
+}
+
+pub(super) struct Compadd;
+impl super::Builtin for Compadd {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::single_arg('P'),
+      OptSpec::single_arg('S'),
+      OptSpec::single_arg('d'),
+      OptSpec::single_arg('a'),
+    ]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let mut prefix = None;
+    let mut suffix = None;
+    let mut desc_arr = None;
+    let mut cand_arr = None;
+    for opt in args.opts {
+      match opt {
+        Opt::ShortWithArg('d', arg) => desc_arr = Some(arg),
+        Opt::ShortWithArg('P', arg) => prefix = Some(arg),
+        Opt::ShortWithArg('S', arg) => suffix = Some(arg),
+        Opt::ShortWithArg('a', arg) => cand_arr = Some(arg),
+        _ => {}
+      }
+    }
+    log::debug!("Compadd options - prefix: {:?}, suffix: {:?}, desc_arr: {:?}, cand_arr: {:?}", prefix, suffix, desc_arr, cand_arr);
+
+    let make_candidate = |mut a| {
+      if let Some(p) = &prefix {
+        a = format!("{p}{a}");
+      }
+      if let Some(s) = &suffix {
+        a = format!("{a}{s}");
+      }
+      Candidate::from(a)
+    };
+
+    let mut candidates: Vec<Candidate> = args.argv
+      .into_iter()
+      .map(|(s, _)| s)
+      .map(make_candidate)
+      .collect();
+
+    if let Some(cand_arr) = cand_arr {
+      log::debug!("arr exists: {:?}", read_vars(|v| v.get_var_meta(&cand_arr)));
+      let elems: Vec<Candidate> = read_vars(|v| v.get_arr_elems(&cand_arr))
+        .into_iter()
+        .map(make_candidate)
+        .collect();
+
+      candidates.extend(elems);
+    }
+    log::debug!("Candidates: {:?}", candidates);
+
+    let descriptions = if let Some(desc_arr) = desc_arr {
+      log::debug!("desc_arr exists: {:?}", read_vars(|v| v.get_var_meta(&desc_arr)));
+      read_vars(|v| v.get_arr_elems(&desc_arr))
+    } else {
+      vec![]
+    }.into_iter();
+    log::debug!("Descriptions: {:?}", descriptions);
+
+    let described: Vec<Candidate> = candidates
+      .into_iter()
+      .zip_longest(descriptions)
+      .filter_map(|pair| {
+        match pair {
+          EitherOrBoth::Both(cand, desc) => Some(cand.with_desc(desc)),
+          EitherOrBoth::Left(cand) => Some(cand),
+          EitherOrBoth::Right(_) => None
+        }
+      })
+      .collect();
+
+    write_meta(|m| {
+      for candidate in described {
+        log::debug!("Adding completion candidate: {:?}", candidate);
+        m.comp_add(candidate);
+      }
+    });
 
     with_status(0)
   }
@@ -562,6 +648,138 @@ mod tests {
   fn compgen_status_zero() {
     let _g = TestGuard::new();
     test_input("compgen -W 'hello'").unwrap();
+    assert_eq!(state::get_status(), 0);
+  }
+
+  // ===================== compadd =====================
+
+  #[test]
+  fn compadd_basic_words() {
+    let _g = TestGuard::new();
+    test_input("compadd a b c").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    let contents: Vec<&str> = cands.iter().map(|c| c.content()).collect();
+    assert_eq!(contents, vec!["a", "b", "c"]);
+    for c in &cands {
+      assert_eq!(c.desc(), None);
+    }
+  }
+
+  #[test]
+  fn compadd_accumulates_across_calls() {
+    let _g = TestGuard::new();
+    test_input("compadd a b").unwrap();
+    test_input("compadd c d").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    let contents: Vec<&str> = cands.iter().map(|c| c.content()).collect();
+    assert_eq!(contents, vec!["a", "b", "c", "d"]);
+  }
+
+  #[test]
+  fn compadd_take_drains() {
+    // After draining, a fresh take should return empty.
+    let _g = TestGuard::new();
+    test_input("compadd x y").unwrap();
+    let _ = state::write_meta(|m| m.take_comp_candidates());
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    assert!(cands.is_empty(), "candidates should reset after take");
+  }
+
+  #[test]
+  fn compadd_prefix() {
+    let _g = TestGuard::new();
+    test_input("compadd -P 'pre_' a b").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    let contents: Vec<&str> = cands.iter().map(|c| c.content()).collect();
+    assert_eq!(contents, vec!["pre_a", "pre_b"]);
+  }
+
+  #[test]
+  fn compadd_suffix() {
+    let _g = TestGuard::new();
+    test_input("compadd -S '_suf' a b").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    let contents: Vec<&str> = cands.iter().map(|c| c.content()).collect();
+    assert_eq!(contents, vec!["a_suf", "b_suf"]);
+  }
+
+  #[test]
+  fn compadd_prefix_and_suffix() {
+    let _g = TestGuard::new();
+    test_input("compadd -P 'p.' -S '=' x y").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    let contents: Vec<&str> = cands.iter().map(|c| c.content()).collect();
+    assert_eq!(contents, vec!["p.x=", "p.y="]);
+  }
+
+  #[test]
+  fn compadd_array_source() {
+    let _g = TestGuard::new();
+    test_input("words=(alpha beta gamma)").unwrap();
+    test_input("compadd -a words").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    let contents: Vec<&str> = cands.iter().map(|c| c.content()).collect();
+    assert_eq!(contents, vec!["alpha", "beta", "gamma"]);
+  }
+
+  #[test]
+  fn compadd_parallel_descriptions() {
+    let _g = TestGuard::new();
+    test_input("words=(a b c)").unwrap();
+    test_input("descs=(\"first\" \"second\" \"third\")").unwrap();
+    test_input("compadd -d descs -a words").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    assert_eq!(cands.len(), 3);
+    assert_eq!(cands[0].content(), "a");
+    assert_eq!(cands[0].desc(), Some("first"));
+    assert_eq!(cands[1].content(), "b");
+    assert_eq!(cands[1].desc(), Some("second"));
+    assert_eq!(cands[2].content(), "c");
+    assert_eq!(cands[2].desc(), Some("third"));
+  }
+
+  #[test]
+  fn compadd_extra_descriptions_dropped() {
+    // More descriptions than candidates -> extras are silently dropped.
+    let _g = TestGuard::new();
+    test_input("words=(a b)").unwrap();
+    test_input("descs=(\"first\" \"second\" \"third\")").unwrap();
+    test_input("compadd -d descs -a words").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    assert_eq!(cands.len(), 2);
+    assert_eq!(cands[0].desc(), Some("first"));
+    assert_eq!(cands[1].desc(), Some("second"));
+  }
+
+  #[test]
+  fn compadd_fewer_descriptions_leaves_remainder_undescribed() {
+    // Fewer descriptions than candidates -> remainder has no description.
+    let _g = TestGuard::new();
+    test_input("words=(a b c d)").unwrap();
+    test_input("descs=(\"only\")").unwrap();
+    test_input("compadd -d descs -a words").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    assert_eq!(cands.len(), 4);
+    assert_eq!(cands[0].desc(), Some("only"));
+    assert_eq!(cands[1].desc(), None);
+    assert_eq!(cands[2].desc(), None);
+    assert_eq!(cands[3].desc(), None);
+  }
+
+  #[test]
+  fn compadd_prefix_suffix_with_array_source() {
+    let _g = TestGuard::new();
+    test_input("words=(x y)").unwrap();
+    test_input("compadd -P 'opt.' -S '=' -a words").unwrap();
+    let cands = state::write_meta(|m| m.take_comp_candidates());
+    let contents: Vec<&str> = cands.iter().map(|c| c.content()).collect();
+    assert_eq!(contents, vec!["opt.x=", "opt.y="]);
+  }
+
+  #[test]
+  fn compadd_status_zero() {
+    let _g = TestGuard::new();
+    test_input("compadd a b c").unwrap();
     assert_eq!(state::get_status(), 0);
   }
 }

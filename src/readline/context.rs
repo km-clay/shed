@@ -1,4 +1,4 @@
-use std::{iter::Peekable, os::unix::fs::PermissionsExt, path::Path, str::CharIndices};
+use std::{collections::VecDeque, iter::Peekable, os::unix::fs::PermissionsExt, path::Path, str::CharIndices};
 
 use bitflags::bitflags;
 
@@ -351,6 +351,22 @@ impl CtxTk {
     }
 
     Some(self) // cursor is in our span, so..
+  }
+
+  pub fn find_nodes<F: Fn(&CtxTk) -> bool>(&self, pred: F) -> Vec<&CtxTk> {
+    let mut found = vec![];
+    let mut work: VecDeque<&CtxTk> = self.sub_tokens().iter().collect();
+
+    while let Some(child) = work.pop_front() {
+      for sub_token in child.sub_tokens.iter() {
+        work.push_back(sub_token);
+      }
+      if pred(child) {
+        found.push(child);
+      }
+    }
+
+    found
   }
 
   /// Create a CtxTk from a Tk
@@ -740,6 +756,7 @@ fn scan_subspans(
             }
             let delta = *consumed - orig_consumed;
             let span = Span::new(span_start..(span_start + 1 + delta), span.get_source());
+            log::debug!("Found history expansion token: '{}'", span.as_str());
             sub_tokens.push(CtxTk {
               span,
               class: CtxTkRule::HistExp,
@@ -1206,7 +1223,7 @@ fn scan_subspans(
         let num_span = Span::new(num_start..(num_start + num_consumed), span.get_source());
         sub_tokens.push(CtxTk {
           span: num_span,
-          class: CtxTkRule::Argument,
+          class: CtxTkRule::ArithNumber,
           sub_tokens: vec![],
         })
       }
@@ -1434,5 +1451,70 @@ mod tests {
     let tk = parse_first(src);
     let outer = find(&tk, CtxTkRule::VarSub).expect("outer VarSub");
     assert_eq!(span_str(outer, src), "${foo:-${bar}}");
+  }
+
+  // ===================== Subshell sub-token classification =====================
+
+  /// Helper: count CtxTk descendants of `tk` matching `class`.
+  fn count(tk: &CtxTk, class: CtxTkRule) -> usize {
+    let mut n = if tk.class == class { 1 } else { 0 };
+    for s in &tk.sub_tokens {
+      n += count(s, class);
+    }
+    n
+  }
+
+  #[test]
+  fn subshell_classified_correctly() {
+    // `(echo foo)` at command position should produce a Subshell token.
+    let src = "(echo foo)";
+    let tk = parse_first(src);
+    let s = find(&tk, CtxTkRule::Subshell).expect("Subshell");
+    assert_eq!(span_str(s, src), "(echo foo)");
+  }
+
+  #[test]
+  fn subshell_body_has_command_classification() {
+    // Body should be lexed via from_cmd_sub. `echo` is classified as
+    // ValidCommand if the builtin cache is populated, else InvalidCommand —
+    // either way it must hit a command-shaped class, not raw Argument.
+    // (parse_first doesn't init the cache, so we accept either form.)
+    let src = "(echo foo)";
+    let tk = parse_first(src);
+    let s = find(&tk, CtxTkRule::Subshell).expect("Subshell");
+    let cmds = count(s, CtxTkRule::ValidCommand) + count(s, CtxTkRule::InvalidCommand);
+    assert!(
+      cmds >= 1,
+      "subshell body should classify echo as a command, tree = {s:#?}"
+    );
+  }
+
+  #[test]
+  fn arithmetic_dollar_form_atoms() {
+    // $((x + 5)) should produce an Arithmetic node with ArithVar/ArithOp/ArithNumber.
+    let src = "$((x + 5))";
+    let tk = parse_first(src);
+    let a = find(&tk, CtxTkRule::Arithmetic).expect("Arithmetic");
+    assert_eq!(span_str(a, src), "$((x + 5))");
+    assert!(find(a, CtxTkRule::ArithVar).is_some(), "expected ArithVar");
+    assert!(find(a, CtxTkRule::ArithOp).is_some(), "expected ArithOp");
+    assert!(find(a, CtxTkRule::ArithNumber).is_some(), "expected ArithNumber");
+  }
+
+  #[test]
+  fn arithmetic_var_span_is_complete() {
+    // Off-by-one regression test: ArithVar span must cover all chars of the var name.
+    let src = "$((foo))";
+    let tk = parse_first(src);
+    let v = find(&tk, CtxTkRule::ArithVar).expect("ArithVar");
+    assert_eq!(span_str(v, src), "foo");
+  }
+
+  #[test]
+  fn arithmetic_number_span_is_complete() {
+    let src = "$((42))";
+    let tk = parse_first(src);
+    let n = find(&tk, CtxTkRule::ArithNumber).expect("ArithNumber");
+    assert_eq!(span_str(n, src), "42");
   }
 }

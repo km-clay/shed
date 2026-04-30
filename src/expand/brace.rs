@@ -14,6 +14,7 @@ fn has_braces(s: &str) -> bool {
   let mut has_comma = false;
   let mut has_range = false;
   let mut qt_state = QuoteState::default();
+  let mut last_was_dollar = false;
 
   match_loop!(chars.next() => ch, {
     '\\' => {
@@ -21,7 +22,10 @@ fn has_braces(s: &str) -> bool {
     } // skip escaped char
     '\'' => qt_state.toggle_single(),
     '"' => qt_state.toggle_double(),
-    '{' if qt_state.outside() => {
+    '$' if qt_state.outside() => {
+      last_was_dollar = true;
+    }
+    '{' if qt_state.outside() && !last_was_dollar => {
       if depth == 0 {
         found_open = true;
         has_comma = false;

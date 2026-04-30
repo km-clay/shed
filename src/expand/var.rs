@@ -275,4 +275,82 @@ mod tests {
     let result = expand_raw(&mut raw.chars().peekable()).unwrap();
     assert_eq!(result, home);
   }
+
+  // ===================== escape_glob =====================
+
+  #[test]
+  fn escape_glob_passthrough_when_no_escapes() {
+    // No `\` chars → output equals input.
+    assert_eq!(escape_glob("foo*bar", false), "foo*bar");
+    assert_eq!(escape_glob("plain", false), "plain");
+  }
+
+  #[test]
+  fn escape_glob_wraps_escaped_star() {
+    // `\*` → `[*]` (glob-literal star)
+    assert_eq!(escape_glob("foo\\*", false), "foo[*]");
+  }
+
+  #[test]
+  fn escape_glob_wraps_escaped_question_mark() {
+    assert_eq!(escape_glob("foo\\?", false), "foo[?]");
+  }
+
+  #[test]
+  fn escape_glob_wraps_escaped_bracket() {
+    assert_eq!(escape_glob("foo\\[bar", false), "foo[[]bar");
+  }
+
+  #[test]
+  fn escape_glob_strips_non_meta_escapes() {
+    // `\ ` (escaped space) becomes literal space — not a glob meta, so
+    // bracket-wrap is unnecessary.
+    assert_eq!(escape_glob("my\\ file", false), "my file");
+  }
+
+  #[test]
+  fn escape_glob_drops_trailing_escape() {
+    // Lone trailing `\` with nothing to escape — silently dropped.
+    assert_eq!(escape_glob("foo\\", false), "foo");
+  }
+
+  #[test]
+  fn escape_glob_with_marker_form() {
+    // use_markers=true reads the ESCAPE marker char, not literal `\`.
+    use crate::readline::markers;
+    let input = format!("foo{}*", markers::ESCAPE);
+    assert_eq!(escape_glob(&input, true), "foo[*]");
+  }
+
+  // ===================== expand_glob with escapes =====================
+
+  #[test]
+  fn expand_glob_matches_escaped_space() {
+    // The original bug: `my\ *` should match a file named `my file.txt`.
+    let _g = TestGuard::new();
+    let tmp = std::env::temp_dir().join("shed_test_glob_escape");
+    std::fs::create_dir_all(&tmp).ok();
+    let target = tmp.join("my file.txt");
+    std::fs::write(&target, "").unwrap();
+
+    let saved_dir = std::env::current_dir().ok();
+    std::env::set_current_dir(&tmp).unwrap();
+
+    // After unescape_str, `my\ *` becomes `my{ESCAPE} *`.
+    let unescaped = unescape_str("my\\ *");
+    let result = expand_glob(&unescaped);
+
+    if let Some(prev) = saved_dir {
+      let _ = std::env::set_current_dir(prev);
+    }
+    std::fs::remove_dir_all(&tmp).ok();
+
+    let result = result.expect("expand_glob should succeed");
+    // Glob expansion should match `my file.txt`. Result is escape-marker-
+    // wrapped post-glob; check via strip_markers.
+    use crate::readline::markers::strip_markers;
+    let stripped = strip_markers(&result);
+    assert!(stripped.contains("my file.txt"),
+      "expected match for 'my\\ *'; got {stripped:?}");
+  }
 }

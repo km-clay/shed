@@ -1287,7 +1287,9 @@ impl Iterator for LexStream {
           return self.next();
         }
       }
-      '!' if self.next_is_cmd() => {
+      '!' if self.next_is_cmd()
+        && get_char(&self.source, self.cursor + 1)
+          .is_none_or(|c| c.is_whitespace() || matches!(c, ';' | '|' | '&')) => {
         self.inc_cursor(1);
         let tk_type = TkRule::Bang;
 
@@ -1451,4 +1453,101 @@ pub fn case_pat_lookahead(mut chars: Peekable<Chars>) -> Option<usize> {
     }
   }
   None
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::rc::Rc;
+
+  fn lex_classes(src: &str) -> Vec<TkRule> {
+    let rc: Rc<str> = src.into();
+    LexStream::new(rc, LexFlags::LEX_UNFINISHED)
+      .filter_map(Result::ok)
+      .filter(|t| !matches!(t.class, TkRule::SOI | TkRule::EOI))
+      .map(|t| t.class)
+      .collect()
+  }
+
+  fn lex_first_nontrivial_text(src: &str) -> String {
+    let rc: Rc<str> = src.into();
+    LexStream::new(rc, LexFlags::LEX_UNFINISHED)
+      .filter_map(Result::ok)
+      .find(|t| !matches!(t.class, TkRule::SOI | TkRule::EOI | TkRule::Sep))
+      .map(|t| t.span.as_str().to_string())
+      .unwrap_or_default()
+  }
+
+  // ===================== `!` lexer disambiguation =====================
+  //
+  // `! cmd` (with space)  -> TkRule::Bang (negation operator)
+  // `!cmd`  (no space)    -> TkRule::Str (so CtxTk's inner scan can find
+  //                          it as HistExp)
+
+  #[test]
+  fn bang_with_space_is_negation() {
+    let classes = lex_classes("! true");
+    assert!(
+      classes.contains(&TkRule::Bang),
+      "expected Bang token in '! true'; got {classes:?}"
+    );
+  }
+
+  #[test]
+  fn bang_with_semicolon_is_negation() {
+    let classes = lex_classes("!;");
+    assert!(
+      classes.contains(&TkRule::Bang),
+      "expected Bang token before ';'; got {classes:?}"
+    );
+  }
+
+  #[test]
+  fn bang_with_pipe_is_negation() {
+    let classes = lex_classes("!|");
+    assert!(
+      classes.contains(&TkRule::Bang),
+      "expected Bang token before '|'; got {classes:?}"
+    );
+  }
+
+  #[test]
+  fn bang_followed_by_alpha_is_word() {
+    // `!cmd` should be lexed as one Str token, not Bang followed by `cmd`.
+    let classes = lex_classes("!cmd");
+    assert!(
+      !classes.contains(&TkRule::Bang),
+      "'!cmd' should NOT produce a Bang token; got {classes:?}"
+    );
+    let text = lex_first_nontrivial_text("!cmd");
+    assert_eq!(text, "!cmd",
+      "the whole `!cmd` should be one token; got {text:?}");
+  }
+
+  #[test]
+  fn bang_followed_by_digit_is_word() {
+    let classes = lex_classes("!42");
+    assert!(
+      !classes.contains(&TkRule::Bang),
+      "'!42' should NOT produce a Bang; got {classes:?}"
+    );
+  }
+
+  #[test]
+  fn bang_followed_by_bang_is_word() {
+    // `!!` is the hist-exp "last command" — not two Bang operators.
+    let classes = lex_classes("!!");
+    let bang_count = classes.iter().filter(|c| matches!(c, TkRule::Bang)).count();
+    assert!(bang_count <= 1,
+      "'!!' should not produce two Bang tokens; got {classes:?}");
+  }
+
+  #[test]
+  fn bang_followed_by_dollar_is_word() {
+    let classes = lex_classes("!$");
+    assert!(
+      !classes.contains(&TkRule::Bang),
+      "'!$' should NOT produce a Bang; got {classes:?}"
+    );
+  }
 }
