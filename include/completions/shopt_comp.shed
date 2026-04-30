@@ -1,0 +1,149 @@
+_shopt_comp() {
+		local cword=${COMP_WORDS[$COMP_CWORD]}
+		local group option
+		local groups=( 
+			highlight 	
+			core 
+			line 
+			set 
+			prompt 
+		)
+		local groups_desc=(
+			"Syntax highlighting options"
+			"Core config options"
+			"Line editor options"
+			"POSIX set options"
+			"Prompt config otions"
+		)
+		local highlight=(
+			enable 
+			string 
+			keyword 
+			valid_command 
+			invalid_command 
+			control_flow_keyword 
+			argument 
+			argument_file 
+			comment 
+			glob 
+			selection 
+		)
+		local highlight_desc=(
+			"Enables/disables syntax highlighting. Current value: '$(shopt highlight.enable)'"
+			"The style of strings. Current value: '$(shopt highlight.string)'"
+			"The style of shell keywords. Current value: '$(shopt highlight.keyword)'"
+			"The style of valid commands. Current value: '$(shopt highlight.valid_command)'"
+			"The style of invalid commands. Current value: '$(shopt highlight.invalid_command)'"
+			"The style of 'break', 'return', and 'continue'. Current value: '$(shopt highlight.control_flow_keyword)'"
+			"The style of command arguments. Current value: '$(shopt highlight.argument)'"
+			"The style of valid path names. Current value: '$(shopt highlight.argument_file)'"
+			"The style of comments. Current value: '$(shopt highlight.comment)'"
+			"The style of glob characters. Current value: '$(shopt highlight.glob)'"
+			"The style of visual selections. Current value: '$(shopt highlight.selection)'"
+		)
+		local core=( 
+			dotglob 
+			nullglob 
+			autocd 
+			hist_ignore_dupes 
+			max_hist 
+			interactive_comments 
+			auto_hist 
+			bell_enabled 
+			max_recurse_depth 
+			xpg_echo 
+			bell_style 
+		)
+		local core_desc=(
+			"If enabled, glob patterns match on hidden files. Current value: '$(shopt core.dotglob)'"
+			"If enabled, expand to nothing when no files are found. Current value: '$(shopt core.nullglob)'"
+			"If enabled, executing a directory name moves to it. Current value: '$(shopt core.autocd)'"
+			"If enabled, history ignores consecutive duplicate commands. Current value: '$(shopt core.hist_ignore_dupes)'"
+			"Max number of history entries. -1 means no limit. Current value: '$(shopt core.max_hist)'"
+			"If enabled, allows for writing comments on the interactive prompt. Current value: '$(shopt core.interactive_comments)'"
+			"If enabled, saves executed commands to your history. Current value: '$(shopt core.auto_hist)'"
+			"If enabled, allows the shell to ring the terminal's bell. Current value: '$(shopt core.bell_enabled)'"
+			"Maximum depth of nested function calls. Current value: '$(shopt core.max_recurse_depth)'"
+			"Whether or not 'echo' expands escape sequences by default. Current value: '$(shopt core.xpg_echo)'"
+			"Whether shed sends an audible bell, a visual one, or 'both'. Current value: '$(shopt core.bell_style)'"
+		)
+		local prompt=(
+			trunc_prompt_path 
+			comp_limit 
+			leader 
+			screensaver_cmd 
+			screensaver_idle_time 
+			completion_ignore_case 
+			hist_cat 
+			expand_aliases 
+		)
+		local prompt_desc=(
+			"Maximum number of path segments in the prompt's expanded CWD. Current value: '$(shopt prompt.trunc_prompt_path)'"
+			"Maximum number of completion candidates per tab press. Current value: '$(shopt prompt.comp_limit)'"
+			"The key sequence that the <leader> key alias refers to. Current value: '$(shopt prompt.leader)'"
+			"A command to execute after a certain period of inactivity. Current value: '$(shopt prompt.screensaver_cmd)'"
+			"Amount of time in seconds before screensaver_cmd is executed. Current value: '$(shopt prompt.screensaver_idle_time)'"
+			"If enabled, tab completion ignores case when matching. Current value: '$(shopt prompt.completion_ignore_case)'"
+			"Enables joining history entries together using Ctrl/Shift+Up/Down. Current value: '$(shopt prompt.hist_cat)'"
+			"If enabled, aliases are expanded on the prompt instead of during execution. Current value: '$(shopt prompt.expand_aliases)'"
+		)
+		local line=(
+			linebreak_on_incomplete
+			viewport_height
+			line_numbers
+			scroll_offset
+			tab_width
+			auto_indent
+			auto_suggest
+			clipboard_cmd
+		)
+		local line_desc=(
+			"Whether enter breaks a new line on incomplete input, or submits the command as is. Current value: '$(shopt line.linebreak_on_incomplete)'"
+			"Maximum number of visible lines in the line editor. Takes an absolute value or percentage of terminal height. Current value: '$(shopt line.viewport_height)'"
+			"How many lines away from the top or bottom the cursor must be before the viewport scrolls. Current value: '$(shopt line.scroll_offset)'"
+			"Visual width of tab characters in the line editor. Current value: '$(shopt line.tab_width)'"
+			"If enabled, indentation level is tracked and maintained automatically. Current value: '$(shopt line.auto_indent)'"
+			"If enabled, the line editor will suggest similar commands from your history as you type. Current value: '$(shopt line.auto_suggest)'"
+			"The command to use with the '+' register to write to the system clipboard. Current value: '$(shopt line.clipboard_cmd)'"
+		)
+		local set=(
+			hashall
+			vi
+			allexport
+			errexit
+			noclobber
+			monitor
+			noglob
+			noexec
+			nolog
+			notify
+			nounset
+			verbose
+			xtrace
+		)
+		local set_desc=(
+			"If enabled, the shell remembers the full path of commands to speed up lookup. Current value: '$(shopt set.hashall)'"
+			"Enables modal (vi-style) line editing. Current value: '$(shopt set.vi)'"
+			"If enabled, all assigned variables are automatically exported to the environment. Current value: '$(shopt set.allexport)'"
+			"If enabled, the shell exits immediately when any command returns non-zero. Current value: '$(shopt set.errexit)'"
+			"If enabled, '>' and '>>' redirections fail if the target file already exists. Current value: '$(shopt set.noclobber)'"
+			"If enabled, jobs run in their own process groups and report status before the next prompt. Current value: '$(shopt set.monitor)'"
+			"If enabled, filename expansion (globbing) is disabled. Current value: '$(shopt set.noglob)'"
+			"If enabled, commands are not executed (useful for syntax checking). Current value: '$(shopt set.noexec)'"
+			"If enabled, function definitions are not written to command history. Current value: '$(shopt set.nolog)'"
+			"If enabled, asynchronous job status info is printed when jobs exit or stop. Current value: '$(shopt set.notify)'"
+			"If enabled, expanding an unset variable (other than \$* or \$@) is an error. Current value: '$(shopt set.nounset)'"
+			"If enabled, the shell writes its input to stderr as it is read. Current value: '$(shopt set.verbose)'"
+			"If enabled, the shell prints a trace of each command before executing it. Current value: '$(shopt set.xtrace)'"
+		)
+		if group=${cword%.*} && option=${cword#*.}; then
+				for opt_grp in $groups; do
+						if [[ "$opt_grp" == "$group" ]]; then
+								compadd -P "${opt_grp}." -S '=' -d ${opt_grp}_desc -a ${opt_grp}
+						fi
+				done
+		else
+				compadd -S '.' -d groups_desc -a groups
+		fi
+}
+complete -F _shopt_comp shopt

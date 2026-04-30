@@ -724,6 +724,16 @@ fn hist_expansion_breaks_on_metacharacters() {
   hist_expansion_test(&["cargo run"], "!car | grep foo\r", "cargo run | grep foo");
 }
 
+#[test]
+fn hist_expansion_skips_param_indirection() {
+  // ${!var} is parameter indirection, not history expansion. The leading
+  // '!' inside the braces names the variable to dereference, and must not
+  // be consumed by the bang-history scanner.
+  hist_no_expansion_test(&["cargo run"], "echo ${!var}");
+  hist_no_expansion_test(&["cargo run"], "echo ${!car}");
+  hist_no_expansion_test(&["cargo run"], "echo \"${!var}\"");
+}
+
 // ===================== History General Tests =====================
 
 use crate::readline::history::History;

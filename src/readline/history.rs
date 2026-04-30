@@ -553,6 +553,18 @@ impl History {
 
   pub fn resolve_hist_token(&self, token: &str) -> Option<String> {
     let token = token.strip_prefix('!').unwrap_or(token).to_string();
+
+    // !! → last command verbatim
+    if token == "!" {
+      return self.last().map(|e| e.command().to_string());
+    }
+    // !$ → last word of last command
+    if token == "$" {
+      return self
+        .last()
+        .and_then(|e| e.command().split_whitespace().last().map(String::from));
+    }
+
     if let Ok(num) = token.parse::<i32>()
       && num != 0
     {

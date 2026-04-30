@@ -16,7 +16,7 @@ use crate::{
     Marker, annotate_input_recursive, context::{CtxTk, CtxTkRule, get_context_tokens}, editmode::{EditMode, ViInsert}, keys::{KeyCode as C, KeyEvent as K}, linebuf::LineBuf, markers::{self, is_marker, strip_markers}, term::calc_str_width
   },
   state::{
-    self, Cols, Rows, TermGuard, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, with_term, write_vars
+    self, Cols, Rows, TermGuard, Utility, VarFlags, VarKind, read_jobs, read_logic, read_meta, read_shopts, read_vars, with_term, write_meta, write_vars
   },
   util::{self, error::ShResult, guards::var_ctx_guard, strops::ends_with_unescaped, ui},
   write_term,
@@ -397,6 +397,9 @@ impl Candidate {
   }
   pub fn content(&self) -> &str {
     &self.content
+  }
+  pub fn desc(&self) -> Option<&str> {
+    self.desc.as_deref()
   }
   pub fn id(&self) -> Option<usize> {
     self.id
@@ -808,12 +811,25 @@ impl BashCompSpec {
     );
     exec_nonint(input, None, Some("comp_function".into()))?;
 
-    let comp_reply = read_vars(|v| v.get_arr_elems("COMPREPLY"))
+    let comp_reply: Vec<Candidate> = read_vars(|v| v.get_arr_elems("COMPREPLY"))
       .into_iter()
       .map(Candidate::from)
       .collect();
 
-    Ok(comp_reply)
+    let comp_add: Vec<Candidate> = write_meta(|m| m.take_comp_candidates())
+      .into_iter()
+      .filter(|c| {
+        log::debug!("Filtering comp_add candidate {:?} against cword_str {:?}", c.content, cword_str);
+        c.is_match(&cword_str)
+      })
+      .collect();
+
+    let candidates: Vec<Candidate> = comp_reply
+      .into_iter()
+      .chain(comp_add)
+      .collect();
+
+    Ok(candidates)
   }
 }
 
@@ -862,9 +878,10 @@ impl CompSpec for BashCompSpec {
     }
     candidates = candidates
       .into_iter()
-      .map(|c| {
-        let stripped = c.content.strip_prefix(&stripped).unwrap_or_default();
-        format!("{prefix}{stripped}").into()
+      .map(|mut c| {
+        let tail = c.content.strip_prefix(&stripped).unwrap_or_default().to_string();
+        c.content = format!("{prefix}{tail}");
+        c
       })
       .collect();
 
@@ -2588,5 +2605,118 @@ mod tests {
     );
 
     std::fs::remove_dir_all(&tmp).ok();
+  }
+
+  // ===================== get_branch / Null walk-up =====================
+
+  #[test]
+  fn dispatch_walks_up_from_escape_leaf() {
+    // Cursor inside an Escape token (`\ `) should not produce Null —
+    // the dispatcher should walk up to the parent Argument.
+    let input = "echo my\\ ";
+    let (strat, _span) = dispatch(input, input.len());
+    assert!(
+      !matches!(strat, CompStrat::Null),
+      "Escape leaf should walk up to parent, got Null"
+    );
+  }
+
+  #[test]
+  fn dispatch_branch_chain_deep_nesting() {
+    // Cursor inside the deeply nested `~/file` path through subshell→arg→
+    // varsub→paramindex→cmdsub→arg→varsub→paramindex→cmdsub→argfile.
+    // Just verify the branch chain resolves without panic and reaches a
+    // non-Null strat.
+    let input = "(echo foo ${bar[$(echo ${foo[$(cat ~/fil)]}) + 1]})";
+    let cursor = input.find("~/fil").unwrap() + 3;
+    let (strat, _span) = dispatch(input, cursor);
+    assert!(
+      !matches!(strat, CompStrat::Null),
+      "deeply nested cursor should resolve, got {strat:?}"
+    );
+  }
+
+  #[test]
+  fn dispatch_argument_carries_full_path() {
+    // CompStrat::Argument carries `path` (full token), not `prefix`. With
+    // cursor in the middle, the strat must contain everything (so postfix
+    // is preserved when completing).
+    let input = "cd /tmp/foo/bar/baz";
+    let cursor = input.find("foo").unwrap() + 2; // after 'fo', mid-token
+    let (strat, _span) = dispatch(input, cursor);
+    let p = prefix_of(&strat);
+    assert!(p.contains("/bar/baz"),
+      "Argument strat should contain full token incl. postfix; got {p:?}");
+  }
+
+  // ===================== comp function arg quoting =====================
+  //
+  // exec_comp_func builds the function-call input as
+  //   `{fn_name} {as_var_val_display(cmd)} {as_var_val_display(cword)} {as_var_val_display(pword)}`
+  // The comp function's $1/$2/$3 must receive the original strings even when
+  // they contain spaces, quotes, $, ;, etc. These tests exercise the same
+  // formatting path that exec_comp_func uses.
+
+  use crate::expand::escape::as_var_val_display;
+  use crate::state::read_vars;
+  use crate::testutil::test_input;
+
+  fn run_comp_func_with_args(cmd: &str, cword: &str, pword: &str) -> (String, String, String) {
+    test_input(
+      "_capture() { CAP1=\"$1\"; CAP2=\"$2\"; CAP3=\"$3\"; }"
+    ).unwrap();
+    let input = format!(
+      "_capture {} {} {}",
+      as_var_val_display(cmd),
+      as_var_val_display(cword),
+      as_var_val_display(pword),
+    );
+    test_input(input).unwrap();
+    (
+      read_vars(|v| v.get_var("CAP1")),
+      read_vars(|v| v.get_var("CAP2")),
+      read_vars(|v| v.get_var("CAP3")),
+    )
+  }
+
+  #[test]
+  fn comp_args_plain_strings() {
+    let _g = TestGuard::new();
+    let (a, b, c) = run_comp_func_with_args("git", "checkout", "master");
+    assert_eq!(a, "git");
+    assert_eq!(b, "checkout");
+    assert_eq!(c, "master");
+  }
+
+  #[test]
+  fn comp_args_with_spaces() {
+    let _g = TestGuard::new();
+    let (a, b, c) = run_comp_func_with_args("my cmd", "foo bar", "baz qux");
+    assert_eq!(a, "my cmd");
+    assert_eq!(b, "foo bar");
+    assert_eq!(c, "baz qux");
+  }
+
+  #[test]
+  fn comp_args_with_dollar_sign() {
+    let _g = TestGuard::new();
+    let (a, b, _) = run_comp_func_with_args("$VAR", "$cmd", "");
+    assert_eq!(a, "$VAR");
+    assert_eq!(b, "$cmd");
+  }
+
+  #[test]
+  fn comp_args_with_semicolon_and_pipe() {
+    let _g = TestGuard::new();
+    let (a, b, _) = run_comp_func_with_args("a;b", "x|y", "");
+    assert_eq!(a, "a;b");
+    assert_eq!(b, "x|y");
+  }
+
+  #[test]
+  fn comp_args_with_single_quote() {
+    let _g = TestGuard::new();
+    let (a, _b, _c) = run_comp_func_with_args("it's", "", "");
+    assert_eq!(a, "it's");
   }
 }

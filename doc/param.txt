@@ -194,4 +194,45 @@ of the name, or when using any of the operators below.
         `echo ${str:0:5}`      # prints "hello"
 
 ==============================================================================
+11. Exit Status                                  *param-status*
+
+  Some parameter expansions set the shell exit status (`$?`) as a
+  side-channel signal of whether the expansion modified the value:
+
+      `0`   the expansion changed the value (something matched/fired)
+      `1`   the expansion was a no-op (nothing matched, slice out of
+            range, etc.)
+
+  This is an extension over POSIX. The expansion's *value* is unaffected;
+  this is purely an extra signal for control flow.
+
+  Operators that set the status ~
+
+    Substring removal       `#`, `##`, `%`, `%%`
+    Search and replace      `/`, `//`, `/#`, `/%`
+    Case modification       `^`, `^^`, `,`, `,,`
+    Substrings              `:offset`, `:offset:length` (1 if out of range)
+
+  Operators that do not set the status (always `$? = 0`): default-value
+  forms (`:-`, `-`, `:=`, `=`, `:+`, `+`), error-on-unset (`:?`, `?`),
+  length (`${#var}`), and the basic forms (`$var`, `${var}`).
+
+  The canonical use case is loop-until-no-op:
+
+      `path=foo/bar/baz/`
+      `while path=${path%/*}; do`
+      `  echo "$path"`
+      `done`
+      # prints: foo/bar/baz, foo/bar, foo, then loop ends
+
+  Or as a guard:
+
+      `if foo=${foo#prefix-}; then`
+      `  echo "had a prefix"`
+      `fi`
+
+  When checking after an assignment with multiple expansions, status
+  reflects only the last expansion in the assignment.
+
+==============================================================================
 See also: |redirect| |glob| |arith|

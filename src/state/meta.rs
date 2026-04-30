@@ -19,7 +19,7 @@ use crate::{
   match_loop,
   prelude::*,
   procio::borrow_fd,
-  readline::{LineData, complete::CompSpec, keys::KeyEvent},
+  readline::{LineData, complete::{Candidate, CompSpec}, keys::KeyEvent},
   sherr,
   util::error::{ShErr, ShResult},
 };
@@ -784,7 +784,7 @@ impl Drop for FuncGuard {
   }
 }
 
-/// A table of metadata for the shell
+/// Miscellaneous global data storage
 #[derive(Clone, Debug)]
 pub struct MetaTab {
   // Time when the shell was started, used for calculating shell uptime
@@ -826,6 +826,9 @@ pub struct MetaTab {
   func_depth: usize,
   loop_depth: usize,
 
+  // completion candidates given by compadd
+  comp_add_candidates: Vec<Candidate>,
+
   // whether or not the last command had a function definition
   last_was_func_def: bool,
 
@@ -851,6 +854,7 @@ impl Default for MetaTab {
       old_pwd: None,
       loop_depth: 0,
       func_depth: 0,
+      comp_add_candidates: vec![],
       util_cache: HashSet::new(),
       comp_specs: HashMap::new(),
       pending_widget_keys: vec![],
@@ -1417,6 +1421,12 @@ impl MetaTab {
     } else {
       None
     }
+  }
+  pub fn comp_add(&mut self, candidate: Candidate) {
+    self.comp_add_candidates.push(candidate);
+  }
+  pub fn take_comp_candidates(&mut self) -> Vec<Candidate> {
+    std::mem::take(&mut self.comp_add_candidates)
   }
   pub fn post_system_message(&mut self, message: String) {
     let now = SystemTime::now();

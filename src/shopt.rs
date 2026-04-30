@@ -359,6 +359,14 @@ fn validate_max_hist(v: &isize) -> Result<(), String> {
   }
 }
 
+#[allow(clippy::ptr_arg)]
+fn validate_bell_style(v: &String) -> Result<(), String> {
+  match v.as_str() {
+    "audible" | "visible" | "both" => Ok(()),
+    _ => Err("bell_style must be 'audible', 'visible', or 'both'".into()),
+  }
+}
+
 shopt_group! {
   #[derive(Clone, Debug)]
   pub struct ShOptCore ("core") {
@@ -393,8 +401,9 @@ shopt_group! {
     /// Whether echo expands escape sequences by default
     xpg_echo: bool = false,
 
-    ///
-    bell_style: ShedBellStyle = ShedBellStyle::Audible
+    /// Whether to use a visible or audible bell
+    #[validate(validate_bell_style)]
+    bell_style: String = "audible".to_string(),
   }
 }
 // TODO: new . behavior idea

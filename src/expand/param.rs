@@ -5,7 +5,7 @@ use glob::Pattern;
 use crate::expand::escape::{strip_escape_markers, unescape_str};
 use crate::expand::util::glob_to_regex;
 use crate::expand::var::expand_raw;
-use crate::match_loop;
+use crate::{match_loop, state};
 use crate::sherr;
 use crate::state::{VarFlags, VarKind, VarName, read_shopts, read_vars, write_vars};
 use crate::util::error::{ShErr, ShResult};
@@ -210,13 +210,25 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
   let parsed = VarName::parse(&var_name)?;
   let get = |v: &crate::state::scopes::ScopeStack| v.resolve_var(&parsed).unwrap_or_default();
   let try_get = |v: &crate::state::scopes::ScopeStack| v.resolve_var(&parsed);
+  let compare = |old: &str, new: &str| {
+    // for some of these that do mutation on the var, we set the status based on whether it changed
+    // this allows scripts to do stuff like "while foo=${foo#bar}" or just generally check
+    // whether a parameter expansion did anything without needing verbose checks like [[ "$foo" != "${foo#bar}" ]]
+    if old != new {
+      state::set_status(0);
+    } else {
+      state::set_status(1);
+    }
+  };
 
   if let Ok(expansion) = rest.parse::<ParamExp>() {
     match expansion {
       ParamExp::Len => unreachable!(),
       ParamExp::ToUpperAll => {
         let value = read_vars(get);
-        Ok(value.to_uppercase())
+        let new = value.to_uppercase();
+        compare(&value, &new);
+        Ok(new)
       }
       ParamExp::ToUpperFirst => {
         let value = read_vars(get);
@@ -225,11 +237,16 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           .next()
           .map(|c| c.to_uppercase().to_string())
           .unwrap_or_default();
-        Ok(first + chars.as_str())
+
+        let new = first + chars.as_str();
+        compare(&value, &new);
+        Ok(new)
       }
       ParamExp::ToLowerAll => {
         let value = read_vars(get);
-        Ok(value.to_lowercase())
+        let new = value.to_lowercase();
+        compare(&value, &new);
+        Ok(new)
       }
       ParamExp::ToLowerFirst => {
         let value = read_vars(get);
@@ -238,7 +255,9 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           .next()
           .map(|c| c.to_lowercase().to_string())
           .unwrap_or_default();
-        Ok(first + chars.as_str())
+        let new = first + chars.as_str();
+        compare(&value,&new);
+        Ok(new)
       }
       ParamExp::DefaultUnsetOrNull(default) => match read_vars(try_get).filter(|v| !v.is_empty()) {
         Some(val) => Ok(val),
@@ -303,8 +322,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
       ParamExp::SliceOpen(pos) => {
         let value = read_vars(get);
         if let Some(substr) = value.get(pos..) {
+          state::set_status(0);
           Ok(substr.to_string())
         } else {
+          state::set_status(1);
           Ok(value)
         }
       }
@@ -312,8 +333,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         let value = read_vars(get);
         let end = pos.saturating_add(len);
         if let Some(substr) = value.get(pos..end) {
+          state::set_status(0);
           Ok(substr.to_string())
         } else {
+          state::set_status(1);
           Ok(value)
         }
       }
@@ -326,9 +349,11 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         for i in 0..=value.len() {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
+            state::set_status(0);
             return Ok(value[i..].to_string());
           }
         }
+        state::set_status(1);
         Ok(value)
       }
       ParamExp::RemLongestPrefix(prefix) => {
@@ -340,9 +365,11 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
+            state::set_status(0);
             return Ok(value[i..].to_string());
           }
         }
+        state::set_status(1);
         Ok(value) // no match
       }
       ParamExp::RemShortestSuffix(suffix) => {
@@ -354,9 +381,11 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
+            state::set_status(0);
             return Ok(value[..i].to_string());
           }
         }
+        state::set_status(1);
         Ok(value)
       }
       ParamExp::RemLongestSuffix(suffix) => {
@@ -369,9 +398,11 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         for i in 0..=value.len() {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
+            state::set_status(0);
             return Ok(value[..i].to_string());
           }
         }
+        state::set_status(1);
         Ok(value)
       }
       ParamExp::ReplaceFirstMatch(search, replace) => {
@@ -388,8 +419,10 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
           let before = &value[..mat.start()];
           let after = &value[mat.end()..];
           let result = format!("{}{}{}", before, expanded_replace, after);
+          state::set_status(0);
           Ok(result)
         } else {
+          state::set_status(1);
           Ok(value)
         }
       }
@@ -413,6 +446,7 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
 
         // Append the rest of the string
         result.push_str(&value[last_match_end..]);
+        compare(&value, &result);
         Ok(result)
       }
       ParamExp::ReplacePrefix(search, replace) => {
@@ -427,9 +461,11 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
+            state::set_status(0);
             return Ok(format!("{}{}", expanded_replace, &value[i..]));
           }
         }
+        state::set_status(1);
         Ok(value)
       }
       ParamExp::ReplaceSuffix(search, replace) => {
@@ -444,9 +480,11 @@ pub fn perform_param_expansion(raw: &str) -> ShResult<String> {
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
+            state::set_status(0);
             return Ok(format!("{}{}", &value[..i], expanded_replace));
           }
         }
+        state::set_status(1);
         Ok(value)
       }
       ParamExp::VarNamesWithPrefix(prefix) => {
@@ -808,5 +846,168 @@ mod tests {
 
     let out = guard.read_output();
     assert_eq!(out, "hello world\n");
+  }
+
+  // ===================== Exit status side-channel =====================
+  //
+  // shed extends POSIX: param expansions that "fire" (modify the value) set
+  // $? = 0; no-ops set $? = 1. Lets you write `while foo=${foo#bar}; ...`.
+
+  fn set_var(name: &str, val: &str) {
+    write_vars(|v| v.set_var(name, VarKind::Str(val.into()), VarFlags::NONE)).unwrap();
+  }
+
+  /// Run the assignment with status zeroed first, then read the resulting
+  /// status. `set_assignments` preserves prior status on a fire and sets 1
+  /// on a no-op, so we have to set a known baseline.
+  fn assignment_status(assignment: &str) -> i32 {
+    test_input("true").unwrap();
+    test_input(assignment).unwrap();
+    crate::state::get_status()
+  }
+
+  // ----- prefix removal -----
+  #[test]
+  fn status_prefix_short_match_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "abc.txt");
+    assert_eq!(assignment_status("foo=${v#a}"), 0);
+  }
+
+  #[test]
+  fn status_prefix_short_no_match_one() {
+    let _g = TestGuard::new();
+    set_var("v", "abc.txt");
+    assert_eq!(assignment_status("foo=${v#xyz}"), 1);
+  }
+
+  #[test]
+  fn status_prefix_long_match_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "/home/user/file.txt");
+    assert_eq!(assignment_status("foo=${v##*/}"), 0);
+  }
+
+  #[test]
+  fn status_prefix_long_no_match_one() {
+    let _g = TestGuard::new();
+    set_var("v", "abc");
+    assert_eq!(assignment_status("foo=${v##xyz*}"), 1);
+  }
+
+  // ----- suffix removal -----
+  #[test]
+  fn status_suffix_short_match_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "file.tar.gz");
+    assert_eq!(assignment_status("foo=${v%.gz}"), 0);
+  }
+
+  #[test]
+  fn status_suffix_short_no_match_one() {
+    let _g = TestGuard::new();
+    set_var("v", "file.tar.gz");
+    assert_eq!(assignment_status("foo=${v%.zip}"), 1);
+  }
+
+  #[test]
+  fn status_suffix_long_match_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "file.tar.gz");
+    assert_eq!(assignment_status("foo=${v%%.*}"), 0);
+  }
+
+  // ----- replacement -----
+  #[test]
+  fn status_replace_first_match_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "foo bar foo");
+    assert_eq!(assignment_status("x=${v/foo/baz}"), 0);
+  }
+
+  #[test]
+  fn status_replace_first_no_match_one() {
+    let _g = TestGuard::new();
+    set_var("v", "foo bar foo");
+    assert_eq!(assignment_status("x=${v/zzz/baz}"), 1);
+  }
+
+  #[test]
+  fn status_replace_all_match_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "foo bar foo");
+    assert_eq!(assignment_status("x=${v//foo/baz}"), 0);
+  }
+
+  #[test]
+  fn status_replace_all_no_match_one() {
+    let _g = TestGuard::new();
+    set_var("v", "foo bar");
+    assert_eq!(assignment_status("x=${v//zzz/baz}"), 1);
+  }
+
+  // ----- case modification -----
+  #[test]
+  fn status_upper_all_changes_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "hello");
+    assert_eq!(assignment_status("x=${v^^}"), 0);
+  }
+
+  #[test]
+  fn status_upper_all_no_change_one() {
+    let _g = TestGuard::new();
+    set_var("v", "HELLO");
+    assert_eq!(assignment_status("x=${v^^}"), 1);
+  }
+
+  #[test]
+  fn status_lower_all_changes_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "HELLO");
+    assert_eq!(assignment_status("x=${v,,}"), 0);
+  }
+
+  #[test]
+  fn status_lower_all_no_change_one() {
+    let _g = TestGuard::new();
+    set_var("v", "hello");
+    assert_eq!(assignment_status("x=${v,,}"), 1);
+  }
+
+  // ----- substring slicing -----
+  #[test]
+  fn status_slice_in_range_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "hello world");
+    assert_eq!(assignment_status("x=${v:0:5}"), 0);
+  }
+
+  #[test]
+  fn status_slice_open_in_range_zero() {
+    let _g = TestGuard::new();
+    set_var("v", "hello");
+    assert_eq!(assignment_status("x=${v:1}"), 0);
+  }
+
+  #[test]
+  fn status_slice_out_of_range_one() {
+    let _g = TestGuard::new();
+    set_var("v", "hi");
+    assert_eq!(assignment_status("x=${v:99}"), 1);
+  }
+
+  // ----- the canonical use case -----
+  #[test]
+  fn status_loop_pattern_terminates() {
+    // while loop using param-expansion status as condition. Each iteration
+    // strips one `/segment` from the end of $path. Loop exits when nothing
+    // is left to strip (no-op fires status=1).
+    let guard = TestGuard::new();
+    test_input("path=foo/bar/baz").unwrap();
+    test_input("while path=${path%/*}; do echo \"$path\"; done").unwrap();
+    let out = guard.read_output();
+    let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(lines, vec!["foo/bar", "foo"]);
   }
 }
