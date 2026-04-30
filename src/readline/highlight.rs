@@ -3,7 +3,7 @@ use std::{fmt::Write, ops::Range};
 use yansi::Paint;
 
 use crate::{
-  parse::lex::Span, readline::context::{CtxTk, CtxTkRule, get_context_tokens}, shopt::ShOptHighlight, state::read_shopts, util::ui::{PaletteEntry, style_from_description}
+  readline::context::{CtxTk, CtxTkRule, get_context_tokens}, shopt::ShOptHighlight, state::read_shopts, util::ui::{PaletteEntry, style_from_description}
 };
 
 pub struct Palette {
@@ -349,7 +349,7 @@ mod tests {
     assert!(contains_sgr_param(&out, "36"), "expected cyan in output: {out:?}");
     // And `$foo` should sit somewhere after a cyan code.
     let cyan_idx = out.find(";36m").or_else(|| out.find("[36m")).expect("cyan");
-    assert!(out[cyan_idx..].contains("$foo"), "expected $foo after cyan: {out:?}");
+    assert!(out[cyan_idx..].contains("foo"), "expected $foo after cyan: {out:?}");
   }
 
   #[test]

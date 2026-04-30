@@ -57,7 +57,38 @@ impl ScopeStack {
     self.scopes.last_mut().unwrap()
   }
   pub fn sh_argv(&self) -> &VecDeque<String> {
+    for scope in self.scopes.iter().rev() {
+      let argv = scope.sh_argv();
+      if !argv.is_empty() {
+        return argv;
+      }
+    }
+
     self.cur_scope().sh_argv()
+  }
+  pub fn sh_argv_mut(&mut self) -> &mut VecDeque<String> {
+    let len = self.scopes.len();
+    let idx = self.scopes
+      .iter()
+      .rposition(|s| !s.sh_argv().is_empty())
+      .unwrap_or(len - 1);
+    self.scopes[idx].sh_argv_mut()
+  }
+  pub fn sh_argv_scope_mut(&mut self) -> &mut VarTab {
+    let idx = self
+      .scopes
+      .iter()
+      .rposition(|s| !s.sh_argv().is_empty())
+      .unwrap_or(0);
+    self.scopes.get_mut(idx).unwrap()
+  }
+  pub fn sh_argv_scope(&self) -> &VarTab {
+    let idx = self
+      .scopes
+      .iter()
+      .rposition(|s| !s.sh_argv().is_empty())
+      .unwrap_or(0);
+    self.scopes.get(idx).unwrap()
   }
   pub fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
     for scope in self.scopes.iter_mut().rev() {
@@ -463,10 +494,9 @@ impl ScopeStack {
       param,
       ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount
     ) {
-      if let Some(scope) = self.scopes.last() {
-        return scope.get_param(param);
-      }
-      return "".into();
+
+      let scope = self.sh_argv_scope();
+      return scope.get_param(param);
     }
     for scope in self.scopes.iter().rev() {
       let val = scope.get_param(param);
@@ -484,9 +514,8 @@ impl ScopeStack {
         self.global_params.insert(param, val.to_string());
       }
       ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount => {
-        if let Some(scope) = self.scopes.first_mut() {
-          scope.set_param(param, val);
-        }
+        let scope = self.sh_argv_scope_mut();
+        scope.set_param(param, val);
       }
     }
   }

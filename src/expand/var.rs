@@ -161,18 +161,39 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>, expand_cmd_subs: bool) -> ShR
   }
 }
 
+pub fn escape_glob(raw: &str, use_markers: bool) -> String {
+  let esc_ch = if use_markers {
+    markers::ESCAPE
+  } else {
+    '\\'
+  };
+  let mut out = String::new();
+  let mut chars = raw.chars();
+  match_loop!(chars.next() => ch, {
+    _ if ch == esc_ch => {
+      if let Some(nch) = chars.next() {
+        out.push_str(&glob::Pattern::escape(&nch.to_string()));
+      }
+    }
+    _ => out.push(ch),
+  });
+
+  out
+}
+
 pub fn expand_glob(raw: &str) -> ShResult<String> {
   let mut words = vec![];
 
   if !raw.contains(['*', '?', '[']) || read_shopts(|o| o.set.noglob) {
     return Ok(raw.to_string());
   }
+  let escaped = escape_glob(raw, true);
 
   let opts = glob::MatchOptions {
     require_literal_leading_dot: !read_shopts(|s| s.core.dotglob),
     ..Default::default()
   };
-  for entry in glob::glob_with(raw, opts).map_err(|_| sherr!(SyntaxErr, "Invalid glob pattern"))? {
+  for entry in glob::glob_with(&escaped, opts).map_err(|_| sherr!(SyntaxErr, "Invalid glob pattern"))? {
     let entry = entry.map_err(|_| sherr!(SyntaxErr, "Invalid filename found in glob"))?;
     let entry_raw = entry
       .to_str()

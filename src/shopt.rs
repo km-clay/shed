@@ -365,6 +365,9 @@ shopt_group! {
     /// Include hidden files in glob patterns
     dotglob: bool = false,
 
+    /// Globs with no matches expand to nothing instead of the original string
+    nullglob: bool = false,
+
     /// Allow navigation to directories by passing the directory as a command directly
     autocd: bool = false,
 

@@ -1,15 +1,20 @@
 use crate::{
-  outln,
-  state::write_shopts,
-  util::{
+  getopt::{Opt, OptSpec}, outln, state::write_shopts, util::{
     error::{ShResult, ShResultExt},
     with_status,
-  },
+  }
 };
 
 pub(super) struct Shopt;
 impl super::Builtin for Shopt {
+  fn opts(&self) -> Vec<crate::getopt::OptSpec> {
+    vec![
+      OptSpec::flag('h'),
+    ]
+  }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let print_help = args.opts.contains(&Opt::Short('h'));
+
     if args.argv.is_empty() {
       let output = write_shopts(|s| s.display_opts())?;
 
@@ -23,7 +28,13 @@ impl super::Builtin for Shopt {
         continue;
       };
 
-      outln!("{output}")?;
+      // kind of a hack but idc
+      if print_help || output.lines().count() > 2 {
+        outln!("{output}")?;
+      } else {
+        let second_line = output.lines().nth(1).unwrap_or("");
+        outln!("{second_line}")?;
+      }
     }
 
     with_status(0)

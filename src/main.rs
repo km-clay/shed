@@ -181,6 +181,14 @@ fn main() -> ExitCode {
     e.print_error();
   }
 
+  let mut deferred = write_vars(|v| v.cur_scope_mut().take_deferred_cmds());
+
+  while let Some(cmd) = deferred.pop() {
+    if let Err(e) = exec_nonint(cmd, None, Some("defer".into())) {
+      e.print_error();
+    }
+  }
+
   let on_exit_autocmds = read_logic(|l| l.get_autocmds(AutoCmdKind::OnExit));
   on_exit_autocmds.exec();
 

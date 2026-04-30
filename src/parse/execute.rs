@@ -2,6 +2,7 @@ use std::{collections::VecDeque, os::unix::fs::PermissionsExt, rc::Rc};
 
 use ariadne::Fmt;
 use nix::unistd::execve;
+use scopeguard::defer;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
@@ -17,7 +18,7 @@ use crate::{
   }, util::{
     RedirVecUtils,
     error::{ShErr, ShErrKind, ShResult, ShResultExt, next_color},
-    guards::{scope_guard, var_ctx_guard},
+    guards::{scope_guard, shared_scope_guard, var_ctx_guard},
     strops::split_case_pat,
     with_status,
   }
@@ -531,6 +532,16 @@ impl Dispatcher {
     argv.insert(0, func_name.clone());
     let argv = prepare_argv(argv).try_blame(blame.clone())?;
     if let Some(ref mut func_body) = read_logic(|l| l.get_func(&name)) {
+      defer! {
+        if let Some(trap) = read_logic(|l| l.get_trap(TrapTarget::Return)) {
+          let saved_status = state::get_status();
+          if let Err(e) = exec_nonint(trap, None, Some("trap RETURN".into())) {
+            e.print_error();
+          }
+          state::set_status(saved_status);
+        }
+      }
+
       let _guard = scope_guard(Some(argv));
       let _func_guard = write_meta(|m| m.enter_func());
 
@@ -599,6 +610,7 @@ impl Dispatcher {
     };
 
     let brc_grp_logic = |s: &mut Self| -> ShResult<()> {
+      let _guard = shared_scope_guard();
       for node in body {
         let blame = node.get_span();
         s.dispatch_node(node).try_blame(blame)?;
@@ -648,6 +660,7 @@ impl Dispatcher {
           let pattern_exp = expand_case_pattern(&pattern)?;
           let pattern_regex = glob_to_regex(&pattern_exp, false);
           if pattern_regex.is_match(&pattern_raw) {
+            let _guard = shared_scope_guard();
             for node in &body {
               s.dispatch_node(node.clone())?;
             }
@@ -659,7 +672,13 @@ impl Dispatcher {
       Ok(())
     };
 
-    self.run_compound("case", case_stmt.redirs, case_stmt.flags, blame, case_logic)
+    self.run_compound(
+      "case",
+      case_stmt.redirs,
+      case_stmt.flags,
+      blame,
+      case_logic,
+    )
   }
   fn exec_loop(&mut self, loop_stmt: Node) -> ShResult<()> {
     let blame = loop_stmt.get_span().clone();
@@ -683,6 +702,7 @@ impl Dispatcher {
 
         let status = state::get_status();
         if keep_going(kind, status) {
+          let _guard = shared_scope_guard();
           for node in &body {
             if let Err(e) = s.dispatch_node(node.clone()) {
               match e.kind() {
@@ -708,7 +728,13 @@ impl Dispatcher {
     };
 
     let _loop_guard = write_meta(|m| m.enter_loop());
-    self.run_compound("loop", loop_stmt.redirs, loop_stmt.flags, blame, loop_logic)
+    self.run_compound(
+      "loop",
+      loop_stmt.redirs,
+      loop_stmt.flags,
+      blame,
+      loop_logic,
+    )
   }
   fn exec_for_arith(&mut self, for_stmt: Node) -> ShResult<()> {
     let blame = for_stmt.get_span().clone();
@@ -738,6 +764,7 @@ impl Dispatcher {
             break;
           }
         }
+        let _guard = shared_scope_guard();
 
         for node in body.clone() {
           if let Err(e) = s.dispatch_node(node) {
@@ -767,7 +794,13 @@ impl Dispatcher {
     };
 
     let _loop_guard = write_meta(|m| m.enter_loop());
-    self.run_compound("c_for", for_stmt.redirs, for_stmt.flags, blame, for_logic)
+    self.run_compound(
+      "c_for",
+      for_stmt.redirs,
+      for_stmt.flags,
+      blame,
+      for_logic,
+    )
   }
   fn exec_for_arr(&mut self, for_stmt: Node) -> ShResult<()> {
     let blame = for_stmt.get_span().clone();
@@ -811,6 +844,8 @@ impl Dispatcher {
           for_guard.insert(var.to_string());
         }
 
+        let _guard = shared_scope_guard();
+
         for node in body.clone() {
           if let Err(e) = s.dispatch_node(node) {
             match e.kind() {
@@ -832,7 +867,13 @@ impl Dispatcher {
     };
 
     let _loop_guard = write_meta(|m| m.enter_loop());
-    self.run_compound("for", for_stmt.redirs, for_stmt.flags, blame, for_logic)
+    self.run_compound(
+      "for",
+      for_stmt.redirs,
+      for_stmt.flags,
+      blame,
+      for_logic,
+    )
   }
   fn exec_if(&mut self, if_stmt: Node) -> ShResult<()> {
     let blame = if_stmt.get_span().clone();
@@ -848,15 +889,19 @@ impl Dispatcher {
       let mut matched = false;
       for node in cond_nodes {
         let CondNode { cond, body } = node;
+        {
+          let _guard = shared_scope_guard();
 
-        if let Err(e) = s.dispatch_node(*cond) {
-          state::set_status(1);
-          return Err(e);
+          if let Err(e) = s.dispatch_node(*cond) {
+            state::set_status(1);
+            return Err(e);
+          }
         }
 
         match state::get_status() {
           0 => {
             matched = true;
+            let _guard = shared_scope_guard();
             for body_node in body {
               s.dispatch_node(body_node)?;
             }
@@ -868,6 +913,7 @@ impl Dispatcher {
 
       if !matched {
         if !else_block.is_empty() {
+          let _guard = shared_scope_guard();
           for node in else_block {
             s.dispatch_node(node)?;
           }
@@ -879,7 +925,13 @@ impl Dispatcher {
       Ok(())
     };
 
-    self.run_compound("if", if_stmt.redirs, if_stmt.flags, blame, if_logic)
+    self.run_compound(
+      "if",
+      if_stmt.redirs,
+      if_stmt.flags,
+      blame,
+      if_logic,
+    )
   }
   fn exec_pipeline(&mut self, pipeline: Node) -> ShResult<()> {
     let pipeline_span = pipeline.get_span().clone();

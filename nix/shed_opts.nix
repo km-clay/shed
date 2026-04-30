@@ -208,6 +208,11 @@
                 default = false;
                 description = "Whether to include hidden files in glob patterns";
               };
+              nullglob = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Whether to expand glob patterns that don't match any files to an empty list instead of leaving them unexpanded";
+              };
               autocd = lib.mkOption {
                 type = lib.types.bool;
                 default = false;

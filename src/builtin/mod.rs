@@ -40,6 +40,7 @@ pub mod test; // [[ ]] thing
 pub mod times;
 pub mod trap;
 pub mod varcmds;
+pub mod defer;
 
 macro_rules! register_builtins {
   ($($name:literal => $ty:expr),* $(,)?) => {
@@ -103,6 +104,7 @@ register_builtins! {
   "compgen"  => complete::CompGen,
   "complete" => complete::Complete,
   "continue" => flowctl::Continue,
+  "defer"    => defer::Defer,
   "dirs"     => dirstack::Dirs,
   "disown"   => jobctl::Disown,
   "echo"     => echo::Echo,

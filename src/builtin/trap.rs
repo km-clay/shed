@@ -3,19 +3,17 @@ use std::{fmt::Display, str::FromStr};
 use nix::sys::signal::Signal;
 
 use crate::{
-  errln, outln,
-  signal::parse_signal,
-  state::{read_logic, write_logic},
-  util::{
+  errln, expand::as_var_val_display, outln, signal::parse_signal, state::{read_logic, write_logic}, util::{
     error::{ShErr, ShResult, ShResultExt},
     with_status,
-  },
+  }
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub enum TrapTarget {
   Exit,
   Error,
+  Return,
   Signal(Signal),
 }
 
@@ -24,6 +22,7 @@ impl FromStr for TrapTarget {
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s {
       "EXIT" => Ok(TrapTarget::Exit),
+      "RETURN" => Ok(TrapTarget::Return),
       "ERR" => Ok(TrapTarget::Error),
       _ => Ok(TrapTarget::Signal(parse_signal(s)?)),
     }
@@ -34,6 +33,7 @@ impl Display for TrapTarget {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       TrapTarget::Exit => write!(f, "EXIT"),
+      TrapTarget::Return => write!(f, "RETURN"),
       TrapTarget::Error => write!(f, "ERR"),
       TrapTarget::Signal(s) => {
         let name = s.to_string();
@@ -50,8 +50,8 @@ impl super::Builtin for Trap {
       read_logic(|l| -> ShResult<()> {
         for l in l.traps() {
           let target = l.0;
-          let command = l.1;
-          outln!("trap -- '{command}' {target}")?;
+          let command = as_var_val_display(l.1);
+          outln!("trap -- {command} {target}")?;
         }
         Ok(())
       })?;

@@ -19,7 +19,7 @@ use crate::{
   parse::{
     ParseFlags, ParsedSrc, Redir, RedirType,
     execute::{exec_int, exec_nonint},
-    lex::{self, LexFlags, LexStream, Tk, TkFlags, TkRule},
+    lex::{self, CLOSERS, LexFlags, LexStream, Tk, TkFlags, TkRule},
   },
   prelude::*,
   procio::{self, IoFrame, IoMode, IoStack, capture_command},
@@ -1285,7 +1285,8 @@ impl LineBuf {
       row: row + 1,
       col: 0,
     };
-    let level = self.calc_indent_level_for_pos(new_line_pos);
+    let fixed_line_pos = self.fix_calc_pos(new_line_pos);
+    let level = self.calc_indent_level_for_pos(fixed_line_pos);
     let new_line = self.lines.get_mut(row + 1).unwrap();
     for tab in std::iter::repeat_n(Grapheme::from('\t'), level) {
       new_line.insert(0, tab);
@@ -1420,12 +1421,26 @@ impl LineBuf {
 
     line.0.get(col).is_some().then(|| line.0.remove(col))
   }
+  fn fix_calc_pos(&mut self, pos: Pos) -> Pos {
+    let row = pos.row;
+    let Some(line) = self.lines.get(row).map(|l| l.to_string()) else {
+      return pos
+    };
+    if let Some(closer) = CLOSERS.iter().find(|c| line.trim().starts_with(*c)) {
+      log::debug!("Line starts with closer '{}', adjusting calculated position by {}", closer, closer.len());
+      pos.col_add(closer.len())
+    } else {
+      pos
+    }
+  }
   fn insert_at(&mut self, mut pos: Pos, gr: Grapheme) {
     let level = self.calc_indent_level_for_pos(pos);
     if gr.is_lf() {
       self.break_line_at(pos);
       pos = pos.row_add(1);
       pos.set(pos.row, 0);
+      log::debug!("Inserted LF, breaking line at {pos:?}, calculated indent level {level}");
+      pos = self.fix_calc_pos(pos)
     } else {
       let row = pos.row;
       let col = pos.col;
@@ -2818,7 +2833,7 @@ impl LineBuf {
             Some(MotionKind::Line {
               start: s,
               end: e,
-              inclusive: false,
+              inclusive: true,
             })
           } else {
             let target = this.offset_cursor(off, 0);
@@ -3759,7 +3774,7 @@ impl LineBuf {
       Verb::AcceptLineOrNewline => {
         // If we are here, we did not accept the line
         // so we break to a new line
-        self.break_line();
+        self.insert(Grapheme::from('\n'));
       }
       Verb::ShellCmd(sh_cmd) => {
         let Some(MotionKind::Line {

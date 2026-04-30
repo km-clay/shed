@@ -1,13 +1,12 @@
 use std::{
-  collections::HashSet, fmt::{Debug, Display}, fs::DirEntry, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, rc::Rc
+  collections::HashSet, fmt::{Debug, Display}, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, rc::Rc
 };
 
 use nix::sys::signal::Signal;
-use unicode_width::UnicodeWidthStr;
 
 use crate::{
   builtin::complete::{CompFlags, CompOptFlags, CompOpts},
-  expand::{escape::escape_str_bounded, unescape_str, var::expand_raw_inner},
+  expand::{escape::{as_var_val_display, escape_str_bounded}, unescape_str, var::{escape_glob, expand_raw_inner}},
   key,
   parse::{
     execute::exec_nonint,
@@ -74,13 +73,12 @@ impl ClampedUsize {
   }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum CompStrat {
   Var { prefix: String },
   Tilde { prefix: String },
   Command { prefix: String },
-  Argument { prefix: String },
-  Dirs { prefix: String },
+  Argument { path: String },
   Files { path: String },
   /// Semantic dead end, nothing can meaningfully go here. Suggest a `;` so
   /// the user can move on (e.g. inside or right after a closed subshell).
@@ -92,10 +90,21 @@ enum CompStrat {
 impl CompStrat {
   pub fn resolve(tks: &[CtxTk], cursor_pos: usize) -> (Self,Span,usize) {
     // Cursor inside a token's span, complete what's currently being typed.
-    if let Some(leaf) = tks.iter().find_map(|t| t.get_leaf(cursor_pos)) {
-      let res = Self::from_leaf(leaf, cursor_pos);
-      log::debug!("Cursor inside token {:?}, completing with strategy {:?}", leaf.span().as_str(), res.0);
-      return res
+    let branch = tks.iter().find_map(|t| {
+      let branch = t.get_branch(cursor_pos);
+
+      (!branch.is_empty()).then_some(branch)
+    });
+    log::debug!("Got branch {:?} for cursor position {}", branch.as_ref().map(|b| b.iter().map(|t| t.class()).collect::<Vec<_>>()), cursor_pos);
+
+    if let Some(mut branch) = branch {
+      while let Some(node) = branch.pop() {
+        let res = Self::from_leaf(node, cursor_pos);
+        if res.0 == CompStrat::Null && !branch.is_empty() {
+          continue
+        }
+        return res
+      }
     }
 
     let Some(prev) = tks.iter().rfind(|t| t.range().end <= cursor_pos) else {
@@ -142,6 +151,7 @@ impl CompStrat {
       CtxTkRule::ValidCommand
       | CtxTkRule::InvalidCommand
       | CtxTkRule::Keyword                 => Self::Command  { prefix },
+
       CtxTkRule::AssignmentRight
       | CtxTkRule::CmdSub
       | CtxTkRule::BacktickSub
@@ -149,23 +159,23 @@ impl CompStrat {
       | CtxTkRule::ProcSubOut
       | CtxTkRule::DoubleString
       | CtxTkRule::SingleString
-      | CtxTkRule::DollarString            => Self::Argument { prefix },
+      | CtxTkRule::Argument
+      | CtxTkRule::ArgumentFile
+      | CtxTkRule::DollarString            => Self::Argument { path: whole.to_string() },
       CtxTkRule::Glob
       | CtxTkRule::Redirect                => Self::Files    { path: whole.to_string() },
       CtxTkRule::Tilde                     => Self::Tilde    { prefix },
-      CtxTkRule::VarSub
-      | CtxTkRule::ParamName
+
+      CtxTkRule::ParamName
       | CtxTkRule::ArithVar                => Self::Var      { prefix },
 
-      CtxTkRule::Subshell
-      | CtxTkRule::BraceGroup
-      | CtxTkRule::Arithmetic              => Self::Separator,
-
-      CtxTkRule::Argument
-      | CtxTkRule::ArgumentFile            => Self::Files { path: whole.to_string() },
 
       // Everything else inside a leaf means "no useful completion here".
       CtxTkRule::Comment
+      | CtxTkRule::Subshell
+      | CtxTkRule::Arithmetic
+      | CtxTkRule::BraceGroup
+      | CtxTkRule::VarSub
       | CtxTkRule::CasePattern
       | CtxTkRule::HistExp
       | CtxTkRule::Escape
@@ -211,7 +221,7 @@ impl CompStrat {
       | CtxTkRule::DoubleString
       | CtxTkRule::SingleString
       | CtxTkRule::DollarString
-      | CtxTkRule::AssignmentRight         => Self::Argument { prefix },
+      | CtxTkRule::AssignmentRight         => Self::Argument { path: String::new() },
 
       // After a separator or operator, we're at the start of a new segment.
       CtxTkRule::Separator
@@ -566,10 +576,18 @@ fn unescape_for_completion(raw: &str) -> String {
 
 fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
   let (prefix, postfix) = path.split_at_checked(cursor_pos).unwrap_or((path, ""));
+  let prefix = if ends_with_unescaped(prefix, "\\") {
+    &prefix[..prefix.len() - 1]
+  } else {
+    prefix
+  };
+
   let unescaped_pre = unescape_for_completion(prefix);
   let unescaped_post = unescape_for_completion(postfix);
+  let escaped_pre = escape_glob(&unescaped_pre, false);
+  let escaped_post = escape_glob(&unescaped_post, false);
 
-  let pat = format!("{}*{}", glob::Pattern::escape(&unescaped_pre), glob::Pattern::escape(&unescaped_post));
+  let pat = format!("{}*{}", &escaped_pre, &escaped_post);
   let candidates: Vec<Candidate> = glob::glob(&pat)
     .map(|it| it.filter_map(Result::ok).map(|c| c.into()).collect())
     .unwrap_or_default();
@@ -782,8 +800,11 @@ impl BashCompSpec {
     };
 
     let input = format!(
-      "{} {cmd_name} {cword_str} {pword_str}",
-      self.function.as_ref().unwrap()
+      "{} {} {} {}",
+      self.function.as_ref().unwrap(),
+      as_var_val_display(&cmd_name),
+      as_var_val_display(&cword_str),
+      as_var_val_display(&pword_str),
     );
     exec_nonint(input, None, Some("comp_function".into()))?;
 
@@ -886,6 +907,7 @@ impl Clone for Box<dyn CompSpec> {
   }
 }
 
+#[derive(Debug, Clone)]
 pub struct CompContext {
   pub words: Vec<String>,
   pub cword: usize,
@@ -1939,6 +1961,7 @@ impl SimpleCompleter {
   }
 
   pub fn try_comp_spec(&self, ctx: &CompContext) -> ShResult<CompSpecResult> {
+    log::debug!("Trying to find comp spec for context: {:?}", ctx);
     let Some(cmd) = ctx.cmd() else {
       return Ok(CompSpecResult::NoSpec);
     };
@@ -1962,25 +1985,18 @@ impl SimpleCompleter {
 
   pub fn get_candidates(&mut self, line: String, cursor_pos: usize) -> ShResult<CompResult> {
     let tks = get_context_tokens(&line);
-    let (strat, replace_span, cursor_pos) = CompStrat::resolve(&tks, cursor_pos);
+    let (strat, replace_span, leaf_cursor_pos) = CompStrat::resolve(&tks, cursor_pos);
 
     self.token_span = (replace_span.range().start, replace_span.range().end);
     match strat {
       CompStrat::Var { prefix } => Ok(CompResult::from_candidates(complete_vars(&prefix))),
       CompStrat::Tilde { prefix } => Ok(CompResult::from_candidates(complete_users(&prefix))),
-      CompStrat::Command { prefix } => Ok(CompResult::from_candidates(complete_commands(&prefix, cursor_pos))),
-      CompStrat::Dirs { prefix } => Ok(CompResult::from_candidates(complete_dirs(&prefix, cursor_pos))),
-      CompStrat::Files { path } => Ok(CompResult::from_candidates(complete_path(&path, cursor_pos))),
+      CompStrat::Command { prefix } => Ok(CompResult::from_candidates(complete_commands(&prefix, leaf_cursor_pos))),
+      CompStrat::Files { path } => Ok(CompResult::from_candidates(complete_path(&path, leaf_cursor_pos))),
       CompStrat::Separator => Ok(CompResult::Single { result: Candidate::from(";"), }),
       CompStrat::Null => Ok(CompResult::NoMatch),
-      CompStrat::Argument { prefix } => {
+      CompStrat::Argument { path } => {
         let ctx = self.build_comp_ctx(&tks, &line, cursor_pos)?;
-        // Expanded form: backslashes/quotes/var-subs in the user's literal
-        // input resolved for filesystem matching. The original `prefix` is
-        // still used for `complete -F` (bash compat: user functions get
-        // COMP_WORDS as the user typed them) but file-completion fallbacks
-        // need the expanded form to match real filenames.
-        let expanded = unescape_for_completion(&prefix);
         match self.try_comp_spec(&ctx)? {
           CompSpecResult::Match { result, flags } => {
             if flags.contains(CompOptFlags::SPACE) {
@@ -1989,16 +2005,16 @@ impl SimpleCompleter {
             Ok(result)
           }
           CompSpecResult::NoSpec => {
-            Ok(CompResult::from_candidates(complete_path(&expanded, cursor_pos)))
+            Ok(CompResult::from_candidates(complete_path(&path, leaf_cursor_pos)))
           }
           CompSpecResult::NoMatch { flags } => {
             if flags.contains(CompOptFlags::SPACE) {
               self.add_space = true;
             }
             if flags.contains(CompOptFlags::DIRNAMES) {
-              Ok(CompResult::from_candidates(complete_dirs(&expanded, cursor_pos)))
+              Ok(CompResult::from_candidates(complete_dirs(&path, leaf_cursor_pos)))
             } else if flags.contains(CompOptFlags::DEFAULT) {
-              Ok(CompResult::from_candidates(complete_path(&expanded, cursor_pos)))
+              Ok(CompResult::from_candidates(complete_path(&path, leaf_cursor_pos)))
             } else {
               Ok(CompResult::NoMatch)
             }
@@ -2392,9 +2408,8 @@ mod tests {
     match strat {
       CompStrat::Var { prefix }
       | CompStrat::Tilde { prefix }
-      | CompStrat::Command { prefix }
-      | CompStrat::Argument { prefix }
-      | CompStrat::Dirs { prefix } => prefix,
+      | CompStrat::Command { prefix } => prefix,
+      | CompStrat::Argument { path } |
       CompStrat::Files { path } => path,
       CompStrat::Separator | CompStrat::Null => "",
     }

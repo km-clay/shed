@@ -225,6 +225,7 @@ impl CtxTk {
       CtxTkRule::ProcSubIn |
       CtxTkRule::ProcSubOut |
       CtxTkRule::CmdSub => 2,
+      CtxTkRule::Subshell |
       CtxTkRule::BacktickSub => 1,
       _ => unreachable!(),
     };
@@ -318,6 +319,26 @@ impl CtxTk {
     self.split_str_at(at).map(|(prefix,_)| prefix)
   }
 
+  /// Get the entire vertical slice that the cursor intersects with
+  ///
+  /// Sorted by depth, deepest are at the end. Calling .pop() on the result will give you the most specific token under the cursor, and the rest of the vector will be its parents up to the root.
+  pub fn get_branch(&self, cursor_pos: usize) -> Vec<&CtxTk> {
+    self.get_branch_inner(cursor_pos, vec![])
+  }
+  pub fn get_branch_inner<'a>(&'a self, cursor_pos: usize, mut nodes: Vec<&'a CtxTk>) -> Vec<&'a CtxTk> {
+    if !self.range_inclusive().contains(&cursor_pos) {
+      return nodes;
+    }
+    nodes.push(self);
+
+    for token in &self.sub_tokens {
+      if token.range_inclusive().contains(&cursor_pos) {
+        return token.get_branch_inner(cursor_pos, nodes);
+      }
+    }
+
+    nodes
+  }
   pub fn get_leaf(&self, cursor_pos: usize) -> Option<&CtxTk> {
     if !self.range_inclusive().contains(&cursor_pos) {
       return None;
@@ -334,7 +355,7 @@ impl CtxTk {
 
   /// Create a CtxTk from a Tk
   ///
-  /// returns a Vec<CtxTk> because heredocs are a very unfortunate posix feature.
+  /// returns a Vec<CtxTk> because this is used to recursively classify child tokens as well
   pub fn from_tk(value: Tk) -> Vec<CtxTk> {
     let Tk { ref class, ref span, flags } = value;
     if let Some(class) = Self::rule_for(class) {
@@ -346,10 +367,52 @@ impl CtxTk {
     };
 
     let mut chars = span.as_str().char_indices().peekable();
+
+    let new_class = if flags.contains(TkFlags::IS_ARITH) {
+      CtxTkRule::Arithmetic
+    } else if flags.contains(TkFlags::IS_SUBSH | TkFlags::IS_CMD) {
+      chars.next(); // consume '('
+      return vec![CtxTk::from_cmd_sub( // lets just build this here. simple enough
+        &mut chars,
+        CtxTkRule::Subshell,
+        &mut 0,
+        0,
+        lex_subshell,
+        span,
+      )];
+    } else if flags.intersects(TkFlags::BUILTIN | TkFlags::IS_CMD) {
+      if is_valid(value.as_str()) {
+        CtxTkRule::ValidCommand
+      } else {
+        CtxTkRule::InvalidCommand
+      }
+    } else if flags.intersects(TkFlags::KEYWORD | TkFlags::FUNCNAME) {
+      CtxTkRule::Keyword
+    } else if check_path_exists(value.as_str()) {
+      CtxTkRule::ArgumentFile
+    } else {
+      // regular argument. lets subdivide it further on COMP_WORDBREAKS members
+      let (_,sub_tokens) = scan_subspans(
+        &mut chars, span, flags,
+        ScanCtx::TOP_LEVEL,
+        TerminatorCtx::Eof,
+      );
+      let tk = Self {
+        span: span.clone(),
+        class: CtxTkRule::Argument,
+        sub_tokens
+      };
+      return subdivide_argument(tk);
+    };
+    let scan_ctx = if flags.contains(TkFlags::IS_ARITH) {
+      ScanCtx::ARITH
+    } else {
+      ScanCtx::TOP_LEVEL
+    };
+
     let (_,sub_tokens) = scan_subspans(
-      &mut chars,
-      span,
-      ScanCtx::TOP_LEVEL,
+      &mut chars, span, flags,
+      scan_ctx,
       TerminatorCtx::Eof,
     );
 
@@ -373,26 +436,6 @@ impl CtxTk {
         ]
       };
     }
-
-    let new_class = if flags.intersects(TkFlags::BUILTIN | TkFlags::IS_CMD) {
-      if is_valid(value.as_str()) {
-        CtxTkRule::ValidCommand
-      } else {
-        CtxTkRule::InvalidCommand
-      }
-    } else if flags.intersects(TkFlags::KEYWORD | TkFlags::FUNCNAME) {
-      CtxTkRule::Keyword
-    } else if check_path_exists(value.as_str()) {
-      CtxTkRule::ArgumentFile
-    } else {
-      // regular argument. lets subdivide it further on COMP_WORDBREAKS members
-      let tk = Self {
-        span: span.clone(),
-        class: CtxTkRule::Argument,
-        sub_tokens
-      };
-      return subdivide_argument(tk);
-    };
 
     vec![Self {
       span: span.clone(),
@@ -479,6 +522,7 @@ fn parse_op_body(
   chars: &mut Peekable<CharIndices>,
   consumed: &mut usize,
   span: &Span,
+  flags: TkFlags,
   op_start: usize,
   op_size: usize,
   var_sub_tokens: &mut Vec<CtxTk>,
@@ -491,7 +535,7 @@ fn parse_op_body(
   });
 
   let (inner_consumed, inner) = scan_subspans(
-    chars, span,
+    chars, span, flags,
     ScanCtx::TOP_LEVEL,
     TerminatorCtx::ParamExpansion,
   );
@@ -514,10 +558,11 @@ fn parse_op_body(
   arg_end
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // teehee
 fn get_subtoken(
   chars: &mut Peekable<CharIndices>,
   span: &Span,
+  flags: TkFlags,
   term_ctx: TerminatorCtx,
   scan_ctx: ScanCtx,
   opener_len: usize,
@@ -525,7 +570,7 @@ fn get_subtoken(
   consumed: &mut usize,
   rule: CtxTkRule
 ) -> CtxTk {
-  let (inner_consumed, inner) = scan_subspans(chars, span, scan_ctx, term_ctx);
+  let (inner_consumed, inner) = scan_subspans(chars, span, flags, scan_ctx, term_ctx);
   *consumed += inner_consumed;
 
   let token_end = token_start + opener_len + inner_consumed; // include the opening
@@ -540,6 +585,7 @@ fn get_subtoken(
 fn scan_subspans(
   chars: &mut Peekable<CharIndices>,
   span: &Span,
+  flags: TkFlags,
   scan_ctx: ScanCtx,
   term_ctx: TerminatorCtx
 ) -> (usize, Vec<CtxTk>) {
@@ -583,9 +629,31 @@ fn scan_subspans(
           }
         }
       }
+      '(' if next_is(chars, '(') && scan_ctx.contains(S::ARITH) && flags.contains(TkFlags::IS_CMD) => {
+        consume(chars, consumed); // consume the second '('
+        let sub_tk = get_subtoken(
+          chars, span, flags,
+          TerminatorCtx::Arith,
+          ScanCtx::ARITH,
+          2, i + span.range().start, consumed,
+          CtxTkRule::Arithmetic,
+        );
+        sub_tokens.push(sub_tk);
+      }
+      '(' if flags.contains(TkFlags::IS_CMD) => {
+        let sub_tk = CtxTk::from_cmd_sub(
+          chars,
+          CtxTkRule::Subshell,
+          consumed,
+          i,
+          lex_subshell,
+          span,
+        );
+        sub_tokens.push(sub_tk);
+      }
       '"' if scan_ctx.contains(S::QUOTE) => {
         let sub_tk = get_subtoken(
-          chars, span,
+          chars, span, flags,
           TerminatorCtx::DoubleQuote,
           ScanCtx::DOUBLE_QUOTE,
           1, i + span.range().start, consumed,
@@ -595,7 +663,7 @@ fn scan_subspans(
       }
       '\'' if scan_ctx.contains(S::QUOTE) => {
         let sub_tk = get_subtoken(
-          chars, span,
+          chars, span, flags,
           TerminatorCtx::SingleQuote,
           ScanCtx::SINGLE_QUOTE,
           1, i + span.range().start, consumed,
@@ -715,11 +783,12 @@ fn scan_subspans(
           if consume(chars, consumed).is_none() { continue };
 
           if next_is(chars, '(') && scan_ctx.contains(S::VAR_SUB) {
+            consume(chars, consumed); // consume the inner arithmetic opener '('
             let sub_tk = get_subtoken(
-              chars, span,
+              chars, span, flags,
               TerminatorCtx::ArithSub,
               ScanCtx::ARITH,
-              2, i + span.range().start, consumed,
+              3, i + span.range().start, consumed,
               CtxTkRule::Arithmetic,
             );
             sub_tokens.push(sub_tk);
@@ -739,8 +808,7 @@ fn scan_subspans(
           consume(chars, consumed); // consume the opening quote
 
           let (inner_consumed, inner) = scan_subspans(
-            chars,
-            span,
+            chars, span, flags,
             ScanCtx::DOLLAR_QUOTE,
             TerminatorCtx::SingleQuote,
           );
@@ -807,7 +875,7 @@ fn scan_subspans(
             consume(chars, consumed); // consume '['
             pos += 1;
             let (inner_consumed, inner) = scan_subspans(
-              chars, span,
+              chars, span, flags,
               ScanCtx::ARITH,
               TerminatorCtx::VarIndex,
             );
@@ -849,6 +917,7 @@ fn scan_subspans(
                     chars,
                     consumed,
                     span,
+                    flags,
                     pos - 2,
                     2,
                     &mut var_sub_tokens,
@@ -929,6 +998,7 @@ fn scan_subspans(
                 chars,
                 consumed,
                 span,
+                flags,
                 pos - 1,
                 1,
                 &mut var_sub_tokens,
@@ -950,6 +1020,7 @@ fn scan_subspans(
                 chars,
                 consumed,
                 span,
+                flags,
                 pos - op_size,
                 op_size,
                 &mut var_sub_tokens,
@@ -973,6 +1044,7 @@ fn scan_subspans(
                 chars,
                 consumed,
                 span,
+                flags,
                 pos - op_size,
                 op_size,
                 &mut var_sub_tokens,
@@ -1106,7 +1178,7 @@ fn scan_subspans(
       }
       'a'..='z' | 'A'..='Z' | '_' if in_arith => {
         let var_start = i + span.range().start;
-        let mut var_consumed = 0;
+        let mut var_consumed = ch.len_utf8();
         while let Some(&(_,ch)) = chars.peek() {
           if !(ch.is_ascii_alphanumeric() || ch == '_') {
             break
@@ -1123,7 +1195,7 @@ fn scan_subspans(
       }
       '0'..='9' if in_arith => {
         let num_start = i + span.range().start;
-        let mut num_consumed = 0;
+        let mut num_consumed = ch.len_utf8();
         while let Some(&(_,ch)) = chars.peek() {
           if !ch.is_ascii_digit() {
             break
@@ -1138,7 +1210,7 @@ fn scan_subspans(
           sub_tokens: vec![],
         })
       }
-      '+' | '/' | '%' | '-' | '*' | '=' if in_arith => {
+      '+' | '/' | '%' | '-' | '*' | '=' | '&' | '^' | '|' | '~' | '!' | '<' | '>' | '?' | ':' | ',' if in_arith => {
         let op_start = i + span.range().start;
         let op_end = op_start + 1;
         let op_span = Span::new(op_start..op_end, span.get_source());

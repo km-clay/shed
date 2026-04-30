@@ -84,6 +84,7 @@ lib.concatLines [
         "shopt line.auto_indent=${boolToString cfg.shopts.line.auto_indent}"
 
         "shopt core.dotglob=${boolToString cfg.shopts.core.dotglob}"
+        "shopt core.nullglob=${boolToString cfg.shopts.core.nullglob}"
         "shopt core.autocd=${boolToString cfg.shopts.core.autocd}"
         "shopt core.hist_ignore_dupes=${boolToString cfg.shopts.core.hist_ignore_dupes}"
         "shopt core.max_hist=${toString cfg.shopts.core.max_hist}"

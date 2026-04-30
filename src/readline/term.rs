@@ -70,9 +70,6 @@ pub fn enumerate_lines(
   let max_num_len = (offset + visible_count).to_string().len();
   let mut first = true;
   let mut last_style = String::new();
-  log::debug!(
-    "left_pad: {left_pad}, offset: {offset}, visible_count: {visible_count}, max_num_len: {max_num_len}"
-  );
   lines
     .into_iter()
     .enumerate()

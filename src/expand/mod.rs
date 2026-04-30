@@ -21,7 +21,9 @@ use crate::match_loop;
 use crate::parse::lex::{Tk, TkFlags, TkRule};
 use crate::prelude::*;
 use crate::readline::markers;
+use crate::state::read_shopts;
 use crate::util::error::{ShResult, ShResultExt};
+use crate::util::has_any_unescaped;
 
 pub(crate) const PARAMETERS: [char; 7] = ['@', '*', '#', '$', '?', '!', '0'];
 
@@ -96,9 +98,12 @@ impl Expander {
 
     if !self.noglob
       && let Ok(glob_exp) = expand_glob(&self.raw)
-      && !glob_exp.is_empty()
     {
-      self.raw = glob_exp;
+      if !glob_exp.is_empty() {
+        self.raw = glob_exp;
+      } else if read_shopts(|o| o.core.nullglob) && has_any_unescaped(&self.raw, &["*", "?", "["]) {
+        self.raw = markers::NULL_EXPAND.to_string();
+      }
     }
 
     if has_trailing_slash && !self.raw.ends_with('/') {

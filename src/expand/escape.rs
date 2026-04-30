@@ -393,12 +393,15 @@ pub fn escape_str(raw: &str, use_marker: bool) -> String {
   escape_str_bounded(raw, use_marker, None)
 }
 
-/// Opposite of unescape_str - escapes a string to be executed as literal text
+/// Opposite of unescape_str, escapes a string to be executed as literal text
 /// Used for completion results, and glob filename matches.
+///
+/// if use_marker is true, it will check for `markers::ESCAPE` instead of a literal backslash.
+/// if a bound (something like 0..5) is provided, the escaping logic will be limited to those bytes
+/// this is mainly used for escaping the region of text that is changed during completion
 pub fn escape_str_bounded(raw: &str, use_marker: bool, bound: Option<Range<usize>>) -> String {
   let mut result = String::new();
   let mut chars = raw.char_indices();
-  let mut is_first = true;
   let esc_ch = if use_marker { markers::ESCAPE } else { '\\' };
 
   while let Some((i,ch)) = chars.next() {
@@ -421,7 +424,6 @@ pub fn escape_str_bounded(raw: &str, use_marker: bool, bound: Option<Range<usize
         result.push(ch);
       }
     }
-    is_first = false;
   }
 
   result

@@ -22,7 +22,7 @@ impl super::Builtin for Shift {
       .unwrap_or(Ok(1))?;
 
     for _ in 0..count {
-      write_vars(|v| v.cur_scope_mut().fpop_arg());
+      write_vars(|v| v.sh_argv_scope_mut().fpop_arg());
     }
 
     with_status(0)

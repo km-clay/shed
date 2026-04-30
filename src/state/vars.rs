@@ -11,7 +11,7 @@ use nix::unistd::{User, gethostname, getppid};
 
 use crate::{
   builtin::map::MapNode,
-  expand::{expand_arithmetic, expand_raw},
+  expand::{as_var_val_display, expand_arithmetic, expand_raw},
   parse::lex::{LexFlags, LexStream, Tk},
   prelude::*,
   readline::{complete::Candidate, markers},
@@ -516,6 +516,7 @@ pub struct VarTab {
   params: HashMap<ShellParam, String>,
   sh_argv: VecDeque<String>, /* Using a VecDeque makes the implementation of `shift` straightforward */
 
+  deferred_cmds: Vec<String>,
   maps: HashMap<String, MapNode>,
 }
 
@@ -525,6 +526,7 @@ impl VarTab {
       vars: HashMap::new(),
       params: HashMap::new(),
       sh_argv: VecDeque::new(),
+      deferred_cmds: Vec::new(),
       maps: HashMap::new(),
     }
   }
@@ -535,6 +537,7 @@ impl VarTab {
       vars,
       params,
       sh_argv: VecDeque::new(),
+      deferred_cmds: Vec::new(),
       maps: HashMap::new(),
     };
     var_tab.init_sh_argv();
@@ -640,6 +643,19 @@ impl VarTab {
         unsafe { env::set_var(var_name, "") };
       }
     }
+  }
+  pub fn defer_cmd(&mut self, cmd: String) {
+    self.deferred_cmds.push(cmd);
+  }
+  pub fn take_deferred_cmds(&mut self) -> Vec<String> {
+    std::mem::take(&mut self.deferred_cmds)
+  }
+  pub fn display_deferred_cmds(&self) -> String {
+    self.deferred_cmds
+      .iter()
+      .map(|s| as_var_val_display(s))
+      .collect::<Vec<_>>()
+      .join("\n")
   }
   pub fn sh_argv(&self) -> &VecDeque<String> {
     &self.sh_argv

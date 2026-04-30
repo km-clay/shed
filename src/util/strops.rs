@@ -202,6 +202,14 @@ pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
   slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
 }
 
+pub fn has_unescaped(slice: &str, pat: &str) -> bool {
+  split_at_unescaped(slice, pat).is_some()
+}
+
+pub fn has_any_unescaped(slice: &str, pats: &[&str]) -> bool {
+  pats.iter().any(|&pat| has_unescaped(slice, pat))
+}
+
 pub fn scan_parens(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
   scan_delims('(', chars, pos, depth).unwrap()
 }
