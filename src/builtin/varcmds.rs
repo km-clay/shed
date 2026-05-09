@@ -117,11 +117,10 @@ impl super::Builtin for Declare {
       OptSpec::flag('r'),
       OptSpec::flag('x'),
       OptSpec::flag('a'),
+      OptSpec::flag('A'),
       OptSpec::flag('p'),
       OptSpec::flag('f'),
       OptSpec::flag('F'),
-      // -l, -u, -A intentionally omitted — case transforms aren't
-      // implemented and associative arrays don't exist yet.
     ]
   }
   fn get_argv_and_opts(&self, argv: Vec<Tk>) -> ShResult<(super::ArgVector, Vec<Opt>)> {
@@ -143,6 +142,7 @@ impl super::Builtin for Declare {
         Opt::Short('x') => flags |= VarFlags::EXPORT,
         Opt::Short('i') => kind = DeclareKind::Int,
         Opt::Short('a') => kind = DeclareKind::Arr,
+        Opt::Short('A') => kind = DeclareKind::Assoc,
         Opt::Short('p') => introspect = Some(IntrospectMode::Vars),
         Opt::Short('f') => introspect = Some(IntrospectMode::FunctionsFull),
         Opt::Short('F') => introspect = Some(IntrospectMode::FunctionNames),
@@ -181,12 +181,10 @@ impl super::Builtin for Declare {
           VarKind::arr_from_raw(v).promote_err(span.clone())?
         }
         (DeclareKind::Arr, None) => VarKind::Arr(VecDeque::new()),
-        (DeclareKind::Assoc, _) => {
-          return Err(sherr!(
-            ExecFail @ span,
-            "declare -A is not yet implemented",
-          ));
+        (DeclareKind::Assoc, Some(v)) => {
+          VarKind::assoc_arr_from_raw(v).promote_err(span.clone())?
         }
+        (DeclareKind::Assoc, None) => VarKind::AssocArr(Vec::new()),
       };
       write_vars(|v| v.set_var(&name, val, flags)).promote_err(span)?;
     }
@@ -875,5 +873,101 @@ mod tests {
     // "echo hi". For now, verify the lookup at least found the
     // function and emitted *something* identifying it.
     assert!(out.contains("foo"), "got {out:?}");
+  }
+
+  #[test]
+  fn indexed_array_index_resolves_variable() {
+    // Regression: `arr[foo]` with foo holding a number should arith-eval
+    // to that index. Previously this produced `Key("foo")` and errored.
+    let guard = TestGuard::new();
+    test_input("declare -a arr=(a b c)").unwrap();
+    test_input("foo=1").unwrap();
+    test_input("echo ${arr[foo]}").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("b"), "got {out:?}");
+  }
+
+  #[test]
+  fn assoc_array_numeric_key_works() {
+    // `aa[5]` on an associative array should look up the literal key "5",
+    // not be parsed as a numeric index.
+    let guard = TestGuard::new();
+    test_input("declare -A aa=([5]=five [foo]=bar)").unwrap();
+    test_input("echo ${aa[5]}").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("five"), "got {out:?}");
+  }
+
+  #[test]
+  fn declare_assoc_empty() {
+    let _g = TestGuard::new();
+    test_input("declare -A mymap").unwrap();
+    assert_eq!(read_vars(|v| v.get_var("mymap")), "");
+  }
+
+  #[test]
+  fn declare_assoc_with_values() {
+    let _g = TestGuard::new();
+    test_input("declare -A mymap=([foo]=bar [biz]=baz)").unwrap();
+    let val = read_vars(|v| v.index_var("mymap", crate::state::ArrIndex::Key("foo".to_string())));
+    assert_eq!(val.unwrap(), "bar");
+    let val2 = read_vars(|v| v.index_var("mymap", crate::state::ArrIndex::Key("biz".to_string())));
+    assert_eq!(val2.unwrap(), "baz");
+  }
+
+  #[test]
+  fn assoc_array_set_key() {
+    let guard = TestGuard::new();
+    test_input("declare -A aa").unwrap();
+    test_input("aa[key1]=value1").unwrap();
+    test_input("aa[key2]=value2").unwrap();
+    test_input("echo ${aa[key1]} ${aa[key2]}").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("value1 value2"), "got {out:?}");
+  }
+
+  #[test]
+  fn assoc_array_get_all_values() {
+    let guard = TestGuard::new();
+    test_input("declare -A aa=([a]=1 [b]=2 [c]=3)").unwrap();
+    test_input("echo ${aa[@]}").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("1") && out.contains("2") && out.contains("3"), "got {out:?}");
+  }
+
+  #[test]
+  fn assoc_array_get_keys() {
+    let guard = TestGuard::new();
+    test_input("declare -A aa=([foo]=bar [biz]=baz)").unwrap();
+    test_input("echo ${!aa[@]}").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("foo") && out.contains("biz"), "got {out:?}");
+  }
+
+  #[test]
+  fn assoc_array_count() {
+    let _g = TestGuard::new();
+    test_input("declare -A aa=([a]=1 [b]=2 [c]=3)").unwrap();
+    test_input("declare -i count=${#aa[@]}").unwrap();
+    assert_eq!(read_vars(|v| v.get_var("count")), "3");
+  }
+
+  #[test]
+  fn assoc_array_value_length() {
+    let guard = TestGuard::new();
+    test_input("declare -A aa=([key]=hello)").unwrap();
+    test_input("echo ${#aa[key]}").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("5"), "got {out:?}");
+  }
+
+  #[test]
+  fn assoc_array_update_existing_key() {
+    let guard = TestGuard::new();
+    test_input("declare -A aa=([k]=old)").unwrap();
+    test_input("aa[k]=new").unwrap();
+    test_input("echo ${aa[k]}").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("new"), "got {out:?}");
   }
 }

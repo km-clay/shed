@@ -1301,7 +1301,12 @@ impl Dispatcher {
                   VarKind::Str(s) => items.push_back(s.to_string()),
                   VarKind::Int(n) => items.push_back(n.to_string()),
                   VarKind::Arr(other) => items.extend(other.clone()),
-                  VarKind::AssocArr(_) => todo!(),
+                  VarKind::AssocArr(_) => {
+                    return Err(sherr!(
+                      InvalidAssignment @ span,
+                      "cannot append associative array to indexed array"
+                    ));
+                  }
                 }
               } else {
                 return Err(sherr!(
@@ -1310,7 +1315,12 @@ impl Dispatcher {
                 ));
               }
             }
-            VarKind::AssocArr(_) => todo!(),
+            VarKind::AssocArr(_) => {
+              return Err(sherr!(
+                InvalidAssignment @ span,
+                "cannot {op_name} associative array variable"
+              ));
+            }
           }
 
           if let Some((name, idx)) = indexed {

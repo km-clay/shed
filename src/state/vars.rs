@@ -384,6 +384,52 @@ impl VarKind {
   pub fn arr_from_vec(vec: Vec<String>) -> Self {
     Self::Arr(VecDeque::from(vec))
   }
+
+  pub fn assoc_arr_from_raw(raw: &str) -> ShResult<Self> {
+    if !raw.starts_with('(') || !raw.ends_with(')') {
+      return Err(sherr!(ParseErr, "Invalid associative array syntax: {}", raw,));
+    }
+    let raw = raw[1..raw.len() - 1].to_string();
+
+    let tokens: Vec<String> = LexStream::new(raw.into(), LexFlags::empty())
+      .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
+      .try_fold(String::new(), |mut acc, wrds| {
+        match wrds {
+          Ok(wrds) => {
+            for wrd in wrds {
+              if !acc.is_empty() {
+                acc.push(markers::ARG_SEP);
+              }
+              acc.push_str(&wrd);
+            }
+          }
+          Err(e) => return Err(e),
+        }
+        Ok(acc)
+      })?
+      .split(markers::ARG_SEP)
+      .filter(|s| !s.is_empty())
+      .map(|s| s.to_string())
+      .collect();
+
+    let mut pairs = Vec::new();
+    for token in tokens {
+      if token.starts_with('[') && token.contains("]=") {
+        let key_end = token.find("]=").unwrap();
+        let key = token[1..key_end].to_string();
+        let val = token[key_end + 2..].to_string();
+        pairs.push((key, val));
+      } else {
+        return Err(sherr!(
+          ParseErr,
+          "Invalid associative array element: expected [key]=value, got {}",
+          token,
+        ));
+      }
+    }
+
+    Ok(Self::AssocArr(pairs))
+  }
 }
 
 impl Display for VarKind {
@@ -773,6 +819,7 @@ impl VarTab {
     if self.var_exists(var_name)
       && let Some(var) = self.vars_mut().get_mut(var_name)
     {
+      let idx = idx.resolve_for(var.kind())?;
       match var.kind_mut() {
         VarKind::Arr(items) => {
           let idx = match idx {
@@ -802,6 +849,25 @@ impl VarTab {
             items.resize(idx + 1, String::new());
           }
           items[idx] = val;
+          return Ok(());
+        }
+        VarKind::AssocArr(items) => {
+          // resolve_for guarantees `idx` is `Key(_)` here (or one of the
+          // wildcards below, which don't make sense for assignment).
+          let ArrIndex::Key(key) = idx else {
+            return Err(sherr!(
+              ExecFail,
+              "Cannot assign to all elements of associative array '{}'",
+              var_name,
+            ));
+          };
+          for (k, v) in items.iter_mut() {
+            if k == &key {
+              *v = val;
+              return Ok(());
+            }
+          }
+          items.push((key, val));
           return Ok(());
         }
         _ => {

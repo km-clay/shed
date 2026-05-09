@@ -305,6 +305,7 @@ impl ScopeStack {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
       {
+        let idx = idx.clone().resolve_for(var.kind())?;
         match var.kind() {
           VarKind::Arr(items) => {
             match idx {
@@ -377,6 +378,38 @@ impl ScopeStack {
               ));
             }
           }
+          VarKind::AssocArr(items) => {
+            match idx {
+              ArrIndex::AllSplit => {
+                let arg_sep = crate::readline::markers::ARG_SEP.to_string();
+                let values: Vec<String> = items.iter().map(|(_, v)| v.clone()).collect();
+                return Ok(values.join(&arg_sep));
+              }
+              ArrIndex::AllJoined => {
+                let ifs = self
+                  .try_get_var("IFS")
+                  .unwrap_or_else(|| " \t\n".to_string())
+                  .chars()
+                  .next()
+                  .unwrap_or(' ')
+                  .to_string();
+                let values: Vec<String> = items.iter().map(|(_, v)| v.clone()).collect();
+                return Ok(values.join(&ifs));
+              }
+              ArrIndex::ArgCount => {
+                return Ok(items.len().to_string());
+              }
+              ArrIndex::Key(key) => {
+                for (k, v) in items {
+                  if k == &key {
+                    return Ok(v.clone());
+                  }
+                }
+                return Ok(String::new());
+              }
+              _ => unreachable!("resolve_for guarantees Key/AllSplit/AllJoined/ArgCount on AssocArr"),
+            }
+          }
           _ => {
             return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name,));
           }
@@ -385,6 +418,52 @@ impl ScopeStack {
     }
     Ok("".into())
   }
+
+  pub fn get_array_keys(&self, var_name: &str, joined: bool) -> ShResult<String> {
+    for scope in self.scopes.iter().rev() {
+      if scope.var_exists(var_name)
+        && let Some(var) = scope.vars().get(var_name)
+      {
+        match var.kind() {
+          VarKind::Arr(items) => {
+            let indices: Vec<String> = (0..items.len()).map(|i| i.to_string()).collect();
+            let sep = if joined {
+              self
+                .try_get_var("IFS")
+                .unwrap_or_else(|| " \t\n".to_string())
+                .chars()
+                .next()
+                .unwrap_or(' ')
+                .to_string()
+            } else {
+              crate::readline::markers::ARG_SEP.to_string()
+            };
+            return Ok(indices.join(&sep));
+          }
+          VarKind::AssocArr(items) => {
+            let keys: Vec<String> = items.iter().map(|(k, _)| k.clone()).collect();
+            let sep = if joined {
+              self
+                .try_get_var("IFS")
+                .unwrap_or_else(|| " \t\n".to_string())
+                .chars()
+                .next()
+                .unwrap_or(' ')
+                .to_string()
+            } else {
+              crate::readline::markers::ARG_SEP.to_string()
+            };
+            return Ok(keys.join(&sep));
+          }
+          _ => {
+            return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name,));
+          }
+        }
+      }
+    }
+    Ok("".into())
+  }
+
   pub fn remove_map(&mut self, map_name: &str) -> Option<MapNode> {
     for scope in self.scopes.iter_mut().rev() {
       if scope.get_map(map_name).is_some() {
