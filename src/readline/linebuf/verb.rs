@@ -125,12 +125,17 @@ impl super::LineBuf {
     let content = if *verb == Verb::Yank {
       self.yank_range(&motion)
     } else if *verb == Verb::Change && matches!(motion, MotionKind::Line { .. }) {
+      let MotionKind::Line { start, end, .. } = &motion else {
+        unreachable!()
+      };
+      let (insert_target, _) = ordered(*start, *end);
       let n_lines = self.lines.len();
       let content = self.delete_range(&motion);
       self.fix_cursor();
-      let row = self.row();
       if n_lines > 1 {
-        self.lines.insert(row, Line::default());
+        // clamp insert target at new length
+        let insert_at = insert_target.min(self.lines.len());
+        self.lines.insert(insert_at, Line::default());
       }
       content
     } else {

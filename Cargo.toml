@@ -6,7 +6,7 @@ resolver = "2"
 name = "shed"
 description = "A linux shell written in rust"
 publish = false
-version = "0.19.2"
+version = "0.19.3"
 
 edition = "2024"
 
