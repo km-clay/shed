@@ -50,7 +50,7 @@ macro_rules! include_help_pages {
   ($($name:literal),* $(,)?) => {
     const HELP_PAGES: &[(&str, &str)] = &[
       $({
-        const S: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/include/", $name));
+        const S: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/include/help/", $name));
         validate_help_page(S);
         ($name, S)
       },)*
@@ -59,21 +59,21 @@ macro_rules! include_help_pages {
 }
 
 include_help_pages! {
-  "help/arith.txt",
-  "help/autocmd.txt",
-  "help/builtin.txt",
-  "help/commands.txt",
-  "help/ex.txt",
-  "help/glob.txt",
-  "help/help.txt",
-  "help/jobs.txt",
-  "help/keybinds.txt",
-  "help/param.txt",
-  "help/prompt.txt",
-  "help/redirect.txt",
-  "help/scripting.txt",
-  "help/socket.txt",
-  "help/variables.txt",
+  "arith.txt",
+  "autocmd.txt",
+  "builtin.txt",
+  "commands.txt",
+  "ex.txt",
+  "glob.txt",
+  "help.txt",
+  "jobs.txt",
+  "keybinds.txt",
+  "param.txt",
+  "prompt.txt",
+  "redirect.txt",
+  "scripting.txt",
+  "socket.txt",
+  "variables.txt",
 }
 
 pub(super) struct Help;
