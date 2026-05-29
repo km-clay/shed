@@ -1,16 +1,55 @@
-use std::env;
+use std::{
+  env,
+  path::{Component, Path, PathBuf},
+};
 
-use super::{ShResult, outln, with_status};
+use super::{
+  ShResult,
+  getopt::{Opt, OptSpec},
+  outln, sherr, try_var, with_status,
+};
 
 pub(super) struct Pwd;
 impl super::Builtin for Pwd {
-  fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
-    let curr_dir = env::current_dir().unwrap().display().to_string();
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::flag('P'), OptSpec::flag('L')]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let mut use_pwd = true; // whether to use $PWD first (-L)
 
-    outln!("{curr_dir}");
-
+    for opt in &args.opts {
+      match opt {
+        Opt::Short('P') => use_pwd = false,
+        Opt::Short('L') => use_pwd = true,
+        _ => return Err(sherr!(ParseErr @ args.span, "Invalid option: {opt}")),
+      }
+    }
+    if use_pwd {
+      // -L
+      let pwd = try_var!("PWD").map(PathBuf::from).unwrap_or("".into());
+      if is_clean_absolute_path(&pwd) {
+        let pwd = pwd.display();
+        outln!("{pwd}");
+      } else {
+        use_pwd = false; // behaves like -P in this case
+      }
+    }
+    if !use_pwd {
+      // -P
+      let cwd = env::current_dir()?;
+      let cwd = cwd.display();
+      outln!("{cwd}");
+    }
     with_status(0)
   }
+}
+
+/// whether path is (absolute and not contain ., ..)
+fn is_clean_absolute_path(path: &Path) -> bool {
+  path.is_absolute()
+    && !path
+      .components()
+      .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
 }
 
 #[cfg(test)]
