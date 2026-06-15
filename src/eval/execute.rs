@@ -1769,6 +1769,7 @@ pub(crate) fn is_builtin(cmd: &Node) -> bool {
         && cmd_word.as_str() != "command"
         && cmd_word.as_str() != "exec"
         && cmd_word.as_str() != "eval"
+        && cmd_word.as_str() != "read"
         && cmd_word.flags.contains(TkFlags::BUILTIN)
     })
     .unwrap_or(true) // empty argv: assignment-only command

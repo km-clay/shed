@@ -52,7 +52,7 @@ impl super::Builtin for Read {
       OptSpec::single_arg('d'),
     ]
   }
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut flags = ReadFlags::empty();
     let mut prompt = None;
     let mut timeout = None;
@@ -99,16 +99,13 @@ impl super::Builtin for Read {
     } else {
       Shed::term_mut(Terminal::cooked_mode_guard)?
     };
-    let input = if let Some(stdin) = args.take_stdin() {
-      stdin
-    } else {
-      do_read(
-        delim,
-        !flags.contains(ReadFlags::NO_ESCAPE),
-        timeout,
-        max_bytes,
-      )?
-    };
+
+    let input = do_read(
+      delim,
+      !flags.contains(ReadFlags::NO_ESCAPE),
+      timeout,
+      max_bytes,
+    )?;
 
     if let Some(arr) = array_name {
       if flags.contains(ReadFlags::QUOTED) {
