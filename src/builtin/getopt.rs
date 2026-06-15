@@ -1,3 +1,7 @@
+//! `shed`'s internal opt parsing functions
+//!
+//! not be be confused with the `getopts` builtin
+
 use std::fmt;
 
 use fmt::Display;

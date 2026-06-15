@@ -1,9 +1,9 @@
 use ariadne::Span as ASpan;
-use nix::unistd::Pid;
+use nix::unistd::{Pid, isatty};
 use scopeguard::defer;
 use std::{cell::RefCell, fmt::Write};
 
-use crate::state::meta::UtilKind;
+use crate::{procio::stdin_fileno, state::meta::UtilKind};
 
 use super::{
   errln,
@@ -388,6 +388,7 @@ pub(super) trait Builtin: Sync {
       span,
       cmd_span,
       stdin,
+      drained_fd0: false,
     };
 
     self.execute(builtin_args)
@@ -405,6 +406,7 @@ pub struct BuiltinArgs {
   span: Span,     // the entire call
   cmd_span: Span, // just the command
   stdin: Option<String>,
+  drained_fd0: bool,
 }
 
 impl BuiltinArgs {
@@ -415,11 +417,25 @@ impl BuiltinArgs {
   pub fn cmd_span(&self) -> Span {
     self.cmd_span.clone()
   }
-  pub fn take_stdin(&mut self) -> Option<String> {
+  pub fn take_sink(&mut self) -> Option<String> {
     self.stdin.take()
   }
+  pub fn take_stdin(&mut self) -> Option<String> {
+    if let Some(s) = self.stdin.take() {
+      return Some(s);
+    }
+    if self.drained_fd0 {
+      return None;
+    }
+    if isatty(stdin_fileno()).unwrap_or(true) {
+      return None;
+    }
+
+    self.drained_fd0 = true;
+    procio::read_input().ok()
+  }
   pub fn has_stdin(&self) -> bool {
-    self.stdin.as_ref().is_some_and(|stdin| !stdin.is_empty())
+    self.stdin.is_some() || !isatty(stdin_fileno()).unwrap_or(true)
   }
 }
 
