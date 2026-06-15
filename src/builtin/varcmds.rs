@@ -298,12 +298,22 @@ impl super::Builtin for Unset {
     true
   }
 
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::flag('f')]
+  }
+
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let is_func = args.opts.iter().any(|o| matches!(o, Opt::Short('f')));
+
     for (arg, _) in args.argv {
-      if !Shed::vars(|v| v.var_exists(&arg)) {
-        continue;
+      if is_func {
+        Shed::logic_mut(|l| l.remove_func(&arg));
+      } else {
+        if !Shed::vars(|v| v.var_exists(&arg)) {
+          continue;
+        }
+        Shed::vars_mut(|v| v.unset_var(&arg))?;
       }
-      Shed::vars_mut(|v| v.unset_var(&arg))?;
     }
 
     with_status(0)
