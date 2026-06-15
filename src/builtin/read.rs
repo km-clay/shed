@@ -381,12 +381,12 @@ fn field_split_vars_quoted(input: &str, vars: &[(String, Span)]) -> ShResult<()>
   }
 
   for (i, (name, _)) in vars.iter().enumerate() {
-    let value = if i + 1 == vars.len() {
-      fields[i..].join(" ")
-    } else if i < fields.len() {
-      fields[i].clone()
-    } else {
+    let value = if i >= fields.len() {
       String::new()
+    } else if i + 1 == vars.len() {
+      fields[i..].join(" ")
+    } else {
+      fields[i].clone()
     };
 
     Shed::vars_mut(|v| v.set_var(name, VarKind::string(value), VarFlags::empty()))?;
