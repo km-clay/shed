@@ -1803,8 +1803,8 @@ mod tests {
       "tilde-expanded path should be absolute, got {word:?}"
     );
     assert!(
-      !word.chars().any(|c| ('\u{e000}'..='\u{e0ff}').contains(&c)),
-      "expanded path should not contain PUA marker chars, got {word:?}"
+      !word.chars().any(|c| ('\u{fdd0}'..='\u{fdef}').contains(&c)),
+      "expanded path should not contain marker chars, got {word:?}"
     );
   }
 
