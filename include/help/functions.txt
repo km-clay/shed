@@ -22,8 +22,35 @@ For the language reference on writing your own functions, see
 The following functions are bundled:
 
   `logout`      exit a login shell                          |function-logout|
+  `qcount`      count records or fields in a quoted stream  |function-qcount|
+  `qmap`        transform each record via a lambda          |function-qmap|
+  `qpad`        normalize records to uniform field count    |function-qpad|
+  `qselect`     project or reorder fields in records        |function-qselect|
+  `qwhere`      filter records by a predicate               |function-qwhere|
   `split`       split a string by a pattern                 |function-split|
   `version`     print the shed version                      |function-version|
+
+Quoted Stream Adapters ~                                  *quoted-streams*
+
+  The `q`-prefixed functions (`qmap`, `qwhere`, `qselect`, `qpad`,
+  `qcount`) operate on streams of shell-quoted records. A "quoted
+  stream" is a byte stream where:
+
+    - records are separated by newlines
+    - fields within a record are separated by whitespace
+    - field contents are encoded with |quote|(builtin-quote) (single
+      quotes for whitespace, ANSI-C for control characters, bare
+      for plain identifiers)
+    - empty fields are encoded as `''`
+
+  Producers (|split|(function-split), |quote|(builtin-quote)) emit
+  streams in this format. Consumers (these `q`-adapters,
+  |unquote|(builtin-unquote), `read -q`) decode them. The format is
+  byte-compatible with line-oriented Unix tools like `sort`, `head`,
+  `tail`, `uniq`, and `wc`, which means quoted streams pipe through
+  the standard toolchain without adapters.
+
+  See |builtin-quote| and |builtin-unquote| for encoding details.
 
 ==============================================================================
 LOGOUT                                           *function-logout* *logout*
@@ -42,17 +69,177 @@ LOGOUT                                           *function-logout* *logout*
       `logout`           exit if this is a login shell
 
 ==============================================================================
+QCOUNT                                           *function-qcount* *qcount*
+
+  `qcount [-f]`
+
+  Count records in a quoted stream, or fields per record.
+
+  `-f`    print the number of fields in each record, one count per
+          line. Useful for sanity-checking that a stream has the
+          shape you expect.
+
+  Without `-f`, prints a single number: the total record count
+  consumed from stdin.
+
+  Examples:
+
+      `producer | qcount`                count records
+      `producer | qcount -f`             field count per record
+      `producer | qcount -f | sort -u`   inspect record shapes
+                                         (one unique line means a
+                                         uniform stream)
+
+  See also: |quoted-streams|, |function-qpad|
+
+==============================================================================
+QMAP                                             *function-qmap* *qmap*
+
+  `qmap {body}`
+
+  Transform each record in a quoted stream by running {body} as a
+  shell lambda. Fields of the current record are bound as `$1`, `$2`,
+  ..., `$@`. Whatever {body} writes to stdout becomes downstream
+  content; re-encode with |quote|(builtin-quote) to emit a properly-
+  encoded record.
+
+  {body} is interpreted as a shell script string. Each invocation
+  runs in its own function scope so `return` returns from the lambda
+  rather than from `qmap`, and `local` declarations inside the body
+  do not leak between records.
+
+  Examples:
+
+      `producer | qmap 'quote "$1" "extra"'`
+                          append a literal field to every record
+
+      `producer | qmap 'quote "${1^^}"'`
+                          uppercase the first field
+
+      `producer | qmap 'quote "$2" "$1"'`
+                          swap fields 1 and 2 (assumes 2-field input)
+
+      `producer | qmap 'quote "$(realpath "$1")"'`
+                          resolve path in field 1 to its absolute form
+
+  See also: |quoted-streams|, |function-qwhere|
+
+==============================================================================
+QPAD                                             *function-qpad* *qpad*
+
+  `qpad`
+
+  Normalize a quoted stream so every record has the same number of
+  fields. Reads the entire stream, finds the longest record, then
+  emits all records padded to that length with empty fields (`''`).
+
+  Useful upstream of |qselect|(function-qselect) to make
+  field projection safe: with a padded stream, indices that would
+  otherwise overflow short records yield empty strings rather than
+  errors.
+
+  Note: this operator must buffer the entire stream in memory to find
+  the longest record. Not suitable for unbounded producers.
+
+  Examples:
+
+      `producer | qpad`                  normalize record shape
+      `producer | qpad | qselect 1 3`    safe projection even when
+                                         some records had <3 fields
+      `producer | qpad | qcount -f \\`
+        `| sort -u`                      should print exactly one
+                                         number after padding
+
+  See also: |quoted-streams|, |function-qselect|, |function-qcount|
+
+==============================================================================
+QSELECT                                          *function-qselect* *qselect*
+
+  `qselect {idx} [{idx} ...]`
+
+  Project and/or reorder fields in each record. Fields are 1-indexed.
+  Indices may be repeated; the resulting record has fields in exactly
+  the order specified.
+
+  Errors with exit status 1 if any requested index is `0`, or if any
+  index exceeds the field count of a record being processed. To make
+  projection safe for variable-shape streams, pipe through
+  |qpad|(function-qpad) first.
+
+  Examples:
+
+      `producer | qselect 1`             keep only field 1
+      `producer | qselect 2 1`           swap fields 1 and 2
+      `producer | qselect 1 1 1`         emit field 1 three times
+      `producer | qselect 3 1`           keep fields 3 and 1 in that
+                                         order, drop field 2
+      `producer | qpad | qselect 3 1`    safe projection on padded
+                                         stream
+
+  See also: |quoted-streams|, |function-qpad|
+
+==============================================================================
+QWHERE                                           *function-qwhere* *qwhere*
+
+  `qwhere {predicate}`
+
+  Filter records in a quoted stream. {predicate} is a shell lambda
+  evaluated per record with fields bound as `$1`, `$2`, etc. Records
+  where the predicate exits 0 are passed through unchanged; records
+  where it exits non-zero are dropped. The original quoted record
+  is emitted byte-for-byte on a match.
+
+  The predicate runs in its own function scope.
+
+  Inspired by `where` in `nushell`, but evaluates an arbitrary shell
+  expression rather than a typed comparison.
+
+  Examples:
+
+      `producer | qwhere '[ "$1" = "active" ]'`
+                          keep records where field 1 equals "active"
+
+      `producer | qwhere '[ -f "$1" ]'`
+                          keep records whose first field names an
+                          existing file
+
+      `producer | qwhere '[[ "$1" == git* ]]'`
+                          glob match on field 1
+
+      `producer | qwhere '[ "${#1}" -gt 10 ]'`
+                          keep records where field 1 is longer than
+                          10 characters
+
+  See also: |quoted-streams|, |function-qmap|
+
+==============================================================================
 SPLIT                                            *function-split* *split*
 
   `split {pattern} {string}`
+  `cmd | split {pattern}`
+  `cmd | split -0`
 
-  Split {string} on every occurrence of {pattern} and emit each part
-  through |quote|. The output is suitable for decoding with |unquote -a|(builtin-unquote),
-  which will protect fields from shell word splitting and expansion
-  by reading the fields directly into an array.
+  Split input on every occurrence of {pattern} and emit each part
+  through |quote|(builtin-quote). The output is a quoted record
+  stream suitable for decoding/formatting via |unquote|(builtin-unquote),
+  or for consumption by the `q`-prefixed adapter functions (see |quoted-streams|).
 
   Trailing delimiters are stripped before splitting, so an empty
   final field is never produced. An empty {string} produces no output.
+
+  `-0`    use the NUL byte as the delimiter. Equivalent to passing
+          `$'\0'` as the pattern. Designed to pair with `find -print0`
+          and other NUL-emitting tools.
+
+  Input modes ~
+
+    With both {pattern} and {string} as arguments, splits {string}
+    once and exits.
+
+    With only {pattern} (or `-0`) and data piped on stdin, reads each
+    input line and splits each independently. Each input line becomes
+    one or more output records depending on how many parts the
+    pattern produces.
 
   Examples:
 
@@ -66,7 +253,17 @@ SPLIT                                            *function-split* *split*
       `split "->" "x->y->z" | unquote -a chain`
                                 multi-character delimiter, into an array
 
-  See also: |quote|(builtin-quote), |unquote|(builtin-unquote)
+      `find . -print0 | split -0 | unquote -0 | xargs -0 ...`
+                                bridge `find -print0` into shed's
+                                quoted-stream protocol and back to
+                                a NUL-aware external consumer
+
+      `cat config.txt | split = | qwhere '[ "$1" = "some_key" ]'`
+                                stream mode: each line of the file
+                                is split on `=`, then filtered
+
+  See also: |quote|(builtin-quote), |unquote|(builtin-unquote),
+  |quoted-streams|
 
 ==============================================================================
 VERSION                                          *function-version* *version*

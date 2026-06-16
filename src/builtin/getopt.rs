@@ -128,6 +128,16 @@ pub(crate) fn get_opts_from_tokens_raw(
   sort_tks_raw(tokens, opt_specs, false)
 }
 
+/// Like `get_opts_from_tokens_raw`, but pre-expands tokens without word
+/// splitting. Use for builtins (declare/local/export/readonly) that need
+/// to preserve whitespace in assignment RHS values.
+pub(crate) fn get_opts_from_tokens_raw_no_split(
+  tokens: &[Tk],
+  opt_specs: &[OptSpec],
+) -> ShResult<(Vec<Tk>, Vec<Opt>)> {
+  sort_tks_raw_no_split(tokens, opt_specs, false)
+}
+
 pub(crate) fn sort_tks(tokens: &[Tk], opt_specs: &[OptSpec], strict: bool) -> GetOptResult {
   // Expand tokens and flatten via get_words, preserving spans
   let mut words: Vec<(String, Span)> = vec![];
@@ -233,9 +243,32 @@ fn sort_tks_raw(
   opt_specs: &[OptSpec],
   strict: bool,
 ) -> ShResult<(Vec<Tk>, Vec<Opt>)> {
+  sort_tks_raw_inner(tokens, opt_specs, strict, true)
+}
+
+fn sort_tks_raw_no_split(
+  tokens: &[Tk],
+  opt_specs: &[OptSpec],
+  strict: bool,
+) -> ShResult<(Vec<Tk>, Vec<Opt>)> {
+  sort_tks_raw_inner(tokens, opt_specs, strict, false)
+}
+
+fn sort_tks_raw_inner(
+  tokens: &[Tk],
+  opt_specs: &[OptSpec],
+  strict: bool,
+  split_words: bool,
+) -> ShResult<(Vec<Tk>, Vec<Opt>)> {
   let mut tokens_iter = tokens
     .iter()
-    .map(Tk::expand)
+    .map(|tk| {
+      if split_words {
+        tk.expand()
+      } else {
+        tk.expand_unsplit()
+      }
+    })
     .collect::<ShResult<Vec<_>>>()?
     .into_iter()
     .peekable();

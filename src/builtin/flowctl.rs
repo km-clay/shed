@@ -337,6 +337,30 @@ mod tests {
     assert_ne!(state::Shed::get_status(), 0);
   }
 
+  #[test]
+  fn return_in_piped_function() {
+    let _g = TestGuard::new();
+    // Regression: `return` inside a function on the LHS of a pipeline used
+    // to surface as 'return found outside of function' because exec_func's
+    // FuncReturn catch ran in the parent while the function body ran in a
+    // fork via FORK_BUILTINS. Now exec_func forks itself when the flag is
+    // set so the catch is in the same process as the body.
+    test_input("piped_ret() { return 42; }").unwrap();
+    test_input("piped_ret | cat").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn early_return_in_piped_function_works() {
+    let guard = TestGuard::new();
+    // Sanity: function with conditional return on LHS of pipeline,
+    // verify the output (not just exit status) is right.
+    test_input("early_ret() { echo before; return; echo after; }").unwrap();
+    test_input("early_ret | cat").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out.trim(), "before");
+  }
+
   // ===================== exit =====================
 
   #[test]
