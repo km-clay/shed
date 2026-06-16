@@ -87,7 +87,9 @@ impl super::Builtin for Unquote {
           for fields in fields {
             out!("{delim}{fields}");
           }
-          outln!();
+          if delim == "\n" {
+            outln!();
+          }
         }
       }
       Some(UnquoteTarget::Array(name)) => {
