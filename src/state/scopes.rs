@@ -8,6 +8,7 @@ use super::{
 };
 use crate::{
   HashMap,
+  expand::markers,
   state::vars::{VarStr, VarStrSliceExt},
 };
 
@@ -295,15 +296,15 @@ impl ScopeStack {
               ArrIndex::AllSplit => {
                 let arg_sep = crate::expand::markers::ARG_SEP.to_string();
                 let start = slice_start.unwrap_or(0);
-                let end = start + slice_len.unwrap_or(items.len().saturating_sub(start));
-                let sliced = items
-                  .iter()
-                  .skip(start)
-                  .take(end - start)
-                  .cloned()
-                  .collect::<Vec<_>>()
-                  .join_with(&arg_sep);
-                return Ok(sliced);
+                let take = slice_len.unwrap_or(items.len().saturating_sub(start));
+                let selected: Vec<_> = items.iter().skip(start).take(take).cloned().collect();
+
+                if selected.is_empty() {
+                  let mut buf = [0u8; 4];
+                  return Ok(VarStr::from(markers::NULL_EXPAND.encode_utf8(&mut buf)));
+                }
+
+                return Ok(selected.join_with(&arg_sep));
               }
               ArrIndex::AllJoined => {
                 let ifs = self
@@ -363,6 +364,10 @@ impl ScopeStack {
           }
           VarKind::AssocArr(items) => match idx {
             ArrIndex::AllSplit => {
+              if items.is_empty() {
+                let mut buf = [0u8; 4];
+                return Ok(VarStr::from(markers::NULL_EXPAND.encode_utf8(&mut buf)));
+              }
               let arg_sep = crate::expand::markers::ARG_SEP.to_string();
               let values: Vec<&VarStr> = items.iter().map(|(_, v)| v).collect();
               return Ok(values.join_with(&arg_sep));
