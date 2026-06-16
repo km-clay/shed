@@ -5,7 +5,7 @@ use crate::state::logic::{AutoloadKind, ShFunc};
 use super::{
   Span, Tk,
   expand::expand_arithmetic,
-  getopt::{Opt, OptSpec, get_opts_from_tokens_raw},
+  getopt::{Opt, OptSpec, get_opts_from_tokens_raw_no_split},
   outln, sherr,
   state::{
     Shed,
@@ -24,17 +24,34 @@ pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(String, Span)>> {
   let mut out = vec![];
   for tk in argv {
     let raw = tk.span.as_str();
-    let is_arr_lit = raw
-      .find('=')
-      .is_some_and(|eq| raw[eq + 1..].starts_with('(') && raw.ends_with(')'));
+    let eq_pos = split_at_unescaped(raw, "=").map(|(pos, _)| pos);
+
+    let is_arr_lit = eq_pos.is_some_and(|eq| raw[eq + 1..].starts_with('(') && raw.ends_with(')'));
     if is_arr_lit {
       out.push((raw.to_string(), tk.span.clone()));
-    } else {
-      let span = tk.span.clone();
-      let expanded = tk.expand()?;
-      for exp in expanded.get_words() {
-        out.push((exp, span.clone()));
+      continue;
+    }
+
+    let span = tk.span.clone();
+
+    if let Some(eq) = eq_pos {
+      let name = &raw[..eq];
+      let is_valid_name = !name.is_empty()
+        && name
+          .chars()
+          .next()
+          .is_some_and(|c| c.is_alphabetic() || c == '_')
+        && name.chars().all(|c| c.is_alphanumeric() || c == '_');
+      if is_valid_name {
+        let expanded = tk.expand_no_split()?;
+        out.push((expanded, span));
+        continue;
       }
+    }
+
+    let expanded = tk.expand()?;
+    for exp in expanded.get_words() {
+      out.push((exp, span.clone()));
     }
   }
   Ok(out)
@@ -135,7 +152,7 @@ impl super::Builtin for Declare {
     argv: &[Tk],
     _no_split: bool,
   ) -> ShResult<(super::ArgVector, Vec<Opt>)> {
-    let (raw_argv, opts) = get_opts_from_tokens_raw(argv, &self.opts())?;
+    let (raw_argv, opts) = get_opts_from_tokens_raw_no_split(argv, &self.opts())?;
     let mut argv = prepare_assignment_argv(&raw_argv)?;
     if !argv.is_empty() {
       argv.remove(0);
@@ -375,7 +392,7 @@ impl super::Builtin for Local {
     argv: &[Tk],
     _no_split: bool,
   ) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
-    let (raw_argv, opts) = get_opts_from_tokens_raw(argv, &self.opts())?;
+    let (raw_argv, opts) = get_opts_from_tokens_raw_no_split(argv, &self.opts())?;
     let mut argv = prepare_assignment_argv(&raw_argv)?;
     if !argv.is_empty() {
       argv.remove(0);
@@ -604,6 +621,88 @@ mod tests {
     test_input("local x=10 y=20").unwrap();
     assert_eq!(var!("x"), "10");
     assert_eq!(var!("y"), "20");
+  }
+
+  #[test]
+  fn local_cmd_sub_preserves_whitespace() {
+    let _g = TestGuard::new();
+    // Regression: assignment RHS was going through word-splitting expand
+    // which collapsed runs of whitespace into single spaces. Now uses
+    // expand_no_split via the get_opts_from_tokens_raw_no_split path.
+    test_input(r#"local ws=$(echo "FOO    BAR")"#).unwrap();
+    assert_eq!(var!("ws"), "FOO    BAR");
+  }
+
+  #[test]
+  fn local_cmd_sub_preserves_newlines() {
+    let _g = TestGuard::new();
+    test_input(r#"local ml=$(printf 'a\nb\nc')"#).unwrap();
+    assert_eq!(var!("ml"), "a\nb\nc");
+  }
+
+  #[test]
+  fn local_bare_names_still_split() {
+    let _g = TestGuard::new();
+    // Make sure the no-split path didn't break bare-name declarations:
+    // `local a b c` should still declare three separate variables.
+    test_input("local la=1 lb=2 lc=3").unwrap();
+    assert_eq!(var!("la"), "1");
+    assert_eq!(var!("lb"), "2");
+    assert_eq!(var!("lc"), "3");
+  }
+
+  #[test]
+  fn declare_cmd_sub_preserves_whitespace() {
+    let _g = TestGuard::new();
+    test_input(r#"declare dws=$(echo "X    Y    Z")"#).unwrap();
+    assert_eq!(var!("dws"), "X    Y    Z");
+  }
+
+  #[test]
+  fn export_cmd_sub_preserves_whitespace() {
+    let _g = TestGuard::new();
+    test_input(r#"export EXP_WS=$(echo "P    Q")"#).unwrap();
+    assert_eq!(var!("EXP_WS"), "P    Q");
+  }
+
+  #[test]
+  fn readonly_cmd_sub_preserves_whitespace() {
+    let _g = TestGuard::new();
+    test_input(r#"readonly RO_WS=$(echo "M    N")"#).unwrap();
+    assert_eq!(var!("RO_WS"), "M    N");
+  }
+
+  // ===================== Str += concat regression =====================
+  // Was doing arithmetic when both sides parsed as i32, giving
+  // sum-of-digits for `buf=""; buf+="2"; buf+="0"; buf+="1"; buf+="6"`.
+
+  #[test]
+  fn string_plus_eq_concatenates_numeric_strings() {
+    let _g = TestGuard::new();
+    test_input("sx=2").unwrap();
+    test_input("sx+=3").unwrap();
+    assert_eq!(var!("sx"), "23");
+  }
+
+  #[test]
+  fn string_plus_eq_builds_numeric_string_char_by_char() {
+    let _g = TestGuard::new();
+    test_input(r#"sb="""#).unwrap();
+    test_input(r#"sb+="2""#).unwrap();
+    test_input(r#"sb+="0""#).unwrap();
+    test_input(r#"sb+="1""#).unwrap();
+    test_input(r#"sb+="6""#).unwrap();
+    assert_eq!(var!("sb"), "2016");
+  }
+
+  #[test]
+  fn int_plus_eq_still_does_arithmetic() {
+    let _g = TestGuard::new();
+    // declare -i means arithmetic += is correct, the previous fix
+    // should not have broken this path.
+    test_input("declare -i iy=2").unwrap();
+    test_input("iy+=3").unwrap();
+    assert_eq!(var!("iy"), "5");
   }
 
   #[test]

@@ -1519,7 +1519,7 @@ impl Dispatcher {
       let val = if is_arr {
         VarKind::arr_from_tk(val)?
       } else {
-        VarKind::string(val.expand_to_words()?.join(" "))
+        VarKind::string(val.expand_no_split()?)
       };
       let param_expansion_failed = state::Shed::get_status() != 0;
 
@@ -1618,14 +1618,8 @@ impl Dispatcher {
           match var.kind_mut() {
             VarKind::Str(s) => {
               if matches!(op, AssignKind::PlusEq) {
-                if let Ok(n) = s.parse::<i32>()
-                  && let Ok(other) = val.to_string().parse::<i32>()
-                {
-                  *s = (n + other).to_string().into();
-                } else {
-                  let other = val.to_string();
-                  *s = [s.as_str(), &other].join("").into();
-                }
+                let other = val.to_string();
+                *s = [s.as_str(), &other].join("").into();
               } else {
                 let n = s.parse::<i32>().map_err(
                   |_| sherr!(InvalidAssignment @ span.clone(), "cannot {op_name} string variable"),
@@ -1962,6 +1956,34 @@ mod tests {
     let _g = TestGuard::new();
     test_input("for x in a b c; do true; done").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn for_loop_empty_array_at_zero_iterations() {
+    // Regression: ${arr[@]} on an empty array used to emit one empty
+    // word instead of zero words, causing `for i in "${arr[@]}"` to
+    // loop once with $i="" instead of looping zero times. Symmetric
+    // with "$@" when there are no positional args.
+    //
+    // Note: bash distinguishes arr=() (zero words) from arr=("")
+    // (one empty word). Shed currently collapses both at the downstream
+    // expansion layer; only the zero-elements case is fixed. The
+    // one-empty-element case is a separate, deeper bug that needs
+    // word-splitting changes — not covered here.
+    let guard = TestGuard::new();
+    test_input("arr=()").unwrap();
+    test_input(r#"for i in "${arr[@]}"; do echo loop; done"#).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "");
+  }
+
+  #[test]
+  fn for_loop_empty_assoc_array_zero_iterations() {
+    let guard = TestGuard::new();
+    test_input("declare -A am").unwrap();
+    test_input(r#"for i in "${am[@]}"; do echo loop; done"#).unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "");
   }
 
   // ===================== case status =====================
@@ -2496,14 +2518,43 @@ mod tests {
     assert_eq!(var!("x"), "world");
   }
 
+  #[test]
+  fn assign_eq_cmd_sub_preserves_whitespace() {
+    // Regression: assignment RHS was going through expand_to_words+join,
+    // collapsing runs of whitespace into single spaces. POSIX says
+    // assignment context does not apply word splitting.
+    let _g = TestGuard::new();
+    test_input(r#"ws=$(echo "FOO    BAR")"#).unwrap();
+    assert_eq!(var!("ws"), "FOO    BAR");
+  }
+
+  #[test]
+  fn assign_eq_cmd_sub_preserves_newlines() {
+    let _g = TestGuard::new();
+    test_input(r#"ml=$(printf 'a\nb\nc')"#).unwrap();
+    assert_eq!(var!("ml"), "a\nb\nc");
+  }
+
   // ─── PlusEq on strings ──────────────────────────────────────────────
 
   #[test]
-  fn assign_plus_eq_numeric_strings_adds() {
-    // Two parseable-as-int strings: `+=` does arithmetic addition.
+  fn assign_plus_eq_string_var_concatenates() {
+    // Even when both sides parse as int, `+=` on a plain string var
+    // concatenates (per POSIX/bash). Arithmetic only happens for
+    // `declare -i` typed vars. Regression: was doing arithmetic when
+    // both sides looked numeric, producing sum-of-digits bugs when
+    // building strings character-by-character.
     let _g = TestGuard::new();
     test_input("x=5; x+=3").unwrap();
-    assert_eq!(var!("x"), "8");
+    assert_eq!(var!("x"), "53");
+  }
+
+  #[test]
+  fn assign_plus_eq_int_var_does_arithmetic() {
+    // declare -i opts into arithmetic +=.
+    let _g = TestGuard::new();
+    test_input("declare -i y=5; y+=3").unwrap();
+    assert_eq!(var!("y"), "8");
   }
 
   #[test]
@@ -2511,6 +2562,20 @@ mod tests {
     let _g = TestGuard::new();
     test_input("x=hello; x+=world").unwrap();
     assert_eq!(var!("x"), "helloworld");
+  }
+
+  #[test]
+  fn assign_plus_eq_sum_of_digits_regression() {
+    // Specific case from the CSV parser bug: building up a string
+    // one numeric char at a time. With the broken arithmetic-sniff
+    // path, this produced "9" (2+0+1+6) instead of "2016".
+    let _g = TestGuard::new();
+    test_input(r#"buf="""#).unwrap();
+    test_input(r#"buf+="2""#).unwrap();
+    test_input(r#"buf+="0""#).unwrap();
+    test_input(r#"buf+="1""#).unwrap();
+    test_input(r#"buf+="6""#).unwrap();
+    assert_eq!(var!("buf"), "2016");
   }
 
   #[test]
