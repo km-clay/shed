@@ -386,24 +386,15 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       },
       ParamExp::SliceOpen(pos) => {
         let value = Shed::vars(get);
-        if let Some(substr) = value.get(pos..) {
-          Shed::set_status(0);
-          Ok(substr.into())
-        } else {
-          Shed::set_status(1);
-          Ok(value)
-        }
+        let substr: String = value.chars().skip(pos).collect();
+        Shed::set_status(0);
+        Ok(substr.into())
       }
       ParamExp::SliceClosed(pos, len) => {
         let value = Shed::vars(get);
-        let end = pos.saturating_add(len);
-        if let Some(substr) = value.get(pos..end) {
-          Shed::set_status(0);
-          Ok(substr.into())
-        } else {
-          Shed::set_status(1);
-          Ok(value)
-        }
+        let substr: String = value.chars().skip(pos).take(len).collect();
+        Shed::set_status(0);
+        Ok(substr.into())
       }
       ParamExp::RemShortestPrefix(prefix) => {
         let value = Shed::vars(get);
@@ -411,7 +402,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           .no_glob()
           .expand_for_glob()?;
         let pattern = compile_glob(&expanded).unwrap();
-        for i in 0..=value.len() {
+        for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
             Shed::set_status(0);
@@ -427,7 +418,10 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           .no_glob()
           .expand_for_glob()?;
         let pattern = compile_glob(&expanded).unwrap();
-        for i in (0..=value.len()).rev() {
+        for i in (0..=value.len())
+          .rev()
+          .filter(|&i| value.is_char_boundary(i))
+        {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
             Shed::set_status(0);
@@ -443,7 +437,10 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           .no_glob()
           .expand_for_glob()?;
         let pattern = compile_glob(&expanded).unwrap();
-        for i in (0..=value.len()).rev() {
+        for i in (0..=value.len())
+          .rev()
+          .filter(|&i| value.is_char_boundary(i))
+        {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
             Shed::set_status(0);
@@ -459,7 +456,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           .no_glob()
           .expand_for_glob()?;
         let pattern = compile_glob(&expanded_suffix).unwrap();
-        for i in 0..=value.len() {
+        for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
             Shed::set_status(0);
@@ -1401,5 +1398,77 @@ mod tests {
     set("x", "ALREADY_UPPER");
     test_param_expansion("x^^").unwrap();
     assert_eq!(Shed::get_status(), 1);
+  }
+
+  // ===================== UTF-8 boundary regression =====================
+  // Pattern removal must iterate over char boundaries, not byte indices,
+  // or it panics on strings containing multi-byte characters.
+
+  #[test]
+  fn rem_shortest_prefix_handles_multibyte() {
+    let _g = TestGuard::new();
+    set("x", "discount — does it apply?");
+    let result = test_param_expansion("x#discount — ").unwrap();
+    assert_eq!(result.as_str(), "does it apply?");
+  }
+
+  #[test]
+  fn rem_longest_prefix_handles_multibyte() {
+    let _g = TestGuard::new();
+    set("x", "café au lait");
+    let result = test_param_expansion("x##*é ").unwrap();
+    assert_eq!(result.as_str(), "au lait");
+  }
+
+  #[test]
+  fn rem_shortest_suffix_handles_multibyte() {
+    let _g = TestGuard::new();
+    set("x", "café au lait");
+    let result = test_param_expansion("x% au lait").unwrap();
+    assert_eq!(result.as_str(), "café");
+  }
+
+  #[test]
+  fn rem_longest_suffix_handles_multibyte() {
+    let _g = TestGuard::new();
+    set("x", "Müller, Hans");
+    let result = test_param_expansion("x%%, *").unwrap();
+    assert_eq!(result.as_str(), "Müller");
+  }
+
+  // Substring slicing must be char-based, not byte-based. With byte-based
+  // slicing, indices that landed inside a multi-byte character returned
+  // None from str::get and the fallback handed back the entire string,
+  // catastrophically polluting any caller iterating char-by-char.
+
+  #[test]
+  fn slice_open_handles_multibyte_char() {
+    let _g = TestGuard::new();
+    set("x", "Müller");
+    // Skip the first char, take the rest.
+    let result = test_param_expansion("x:1").unwrap();
+    assert_eq!(result.as_str(), "üller");
+  }
+
+  #[test]
+  fn slice_closed_picks_one_char_at_each_position() {
+    let _g = TestGuard::new();
+    set("x", "Müller");
+    // Walking char-by-char through a string with multi-byte chars
+    // must always return exactly one char, never the whole string.
+    for (i, expected) in ["M", "ü", "l", "l", "e", "r"].iter().enumerate() {
+      let result = test_param_expansion(&format!("x:{i}:1")).unwrap();
+      assert_eq!(result.as_str(), *expected, "at index {i}");
+    }
+  }
+
+  #[test]
+  fn slice_closed_inside_japanese() {
+    let _g = TestGuard::new();
+    set("x", "田中さん");
+    // Each char is 3 bytes in UTF-8.
+    assert_eq!(test_param_expansion("x:0:1").unwrap().as_str(), "田");
+    assert_eq!(test_param_expansion("x:1:1").unwrap().as_str(), "中");
+    assert_eq!(test_param_expansion("x:2:2").unwrap().as_str(), "さん");
   }
 }
