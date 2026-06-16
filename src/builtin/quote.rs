@@ -4,7 +4,7 @@ use crate::{
   ShResult, Shed,
   builtin::getopt::OptSpec,
   eval::lex::{LexFlags, LexStream},
-  expand, out, outln,
+  expand, out, outln, procio,
   state::vars::{VarFlags, VarKind},
   util::with_status,
 };
@@ -51,7 +51,11 @@ impl super::Builtin for Unquote {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     log::debug!("entered unquote execute()");
     let input = if args.argv.is_empty() || args.has_stdin() {
-      args.take_stdin().unwrap()
+      if args.has_stdin() {
+        args.take_stdin().unwrap()
+      } else {
+        procio::read_input()?
+      }
     } else {
       super::join_raw_args(args.argv).0
     };
