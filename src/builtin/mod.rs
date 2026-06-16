@@ -1,9 +1,9 @@
 use ariadne::Span as ASpan;
-use nix::unistd::{Pid, isatty};
+use nix::unistd::Pid;
 use scopeguard::defer;
 use std::{cell::RefCell, fmt::Write};
 
-use crate::{procio::stdin_fileno, state::meta::UtilKind};
+use crate::state::meta::UtilKind;
 
 use super::{
   errln,

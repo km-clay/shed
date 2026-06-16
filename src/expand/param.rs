@@ -1141,10 +1141,13 @@ mod tests {
   }
 
   #[test]
-  fn status_slice_out_of_range_one() {
+  fn status_slice_out_of_range_zero() {
     let _g = TestGuard::new();
     set_var("v", "hi");
-    assert_eq!(assignment_status("x=${v:99}"), 1);
+    // Slice past the end yields an empty value, but the operation itself
+    // didn't fail — matches bash semantics. Previously this returned the
+    // whole string via a buggy fallback AND set status=1.
+    assert_eq!(assignment_status("x=${v:99}"), 0);
   }
 
   // ----- the canonical use case -----
@@ -1287,8 +1290,9 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "hi");
     let result = test_param_expansion("x:99").unwrap();
-    // The fallback path returns the original value untouched.
-    assert_eq!(result, "hi");
+    // Skipping past the end yields an empty string, matching bash
+    // behavior. Previously a buggy fallback returned the whole value.
+    assert_eq!(result, "");
   }
 
   #[test]
