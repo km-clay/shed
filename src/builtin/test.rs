@@ -370,9 +370,15 @@ impl super::Builtin for Test {
     let span = args.span();
     let result = ArgvParser::new(&args.argv)
       .parse_or(true)
-      .map_err(|e| e.try_blame(span))?;
+      .map_err(|e| e.try_blame(span));
 
-    with_status(i32::from(!result))
+    match result {
+      Err(e) => {
+        Shed::set_status(2);
+        Err(e)
+      }
+      Ok(res) => with_status(i32::from(!res)),
+    }
   }
 }
 
