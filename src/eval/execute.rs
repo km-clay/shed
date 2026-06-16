@@ -566,6 +566,20 @@ impl Dispatcher {
     Ok(())
   }
   fn exec_func(&mut self, func: &Node) -> ShResult<()> {
+    if func.flags.contains(NdFlags::FORK_BUILTINS) {
+      let name = func
+        .get_command()
+        .map(ToString::to_string)
+        .unwrap_or_default();
+      let mut func_call = func.clone();
+      func_call.flags.remove(NdFlags::FORK_BUILTINS);
+      return self.run_fork(&name, |s| {
+        if let Err(e) = s.exec_func(&func_call) {
+          e.print_error();
+        }
+      });
+    }
+
     // need to do this in a new scope so we can borrow func safely
     let (func_name, mut blame) = {
       // borrow func.class to avoid partial move
