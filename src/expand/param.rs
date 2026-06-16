@@ -1299,7 +1299,6 @@ mod tests {
   fn param_substr_len_beyond_end() {
     let _g = TestGuard::new();
     set("x", "ab");
-    // start=0, end=0+99=99 — out of bounds → fallback returns full value.
     let result = test_param_expansion("x:0:99").unwrap();
     assert_eq!(result, "ab");
   }
