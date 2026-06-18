@@ -25,7 +25,9 @@ The following functions are bundled:
   `qcount`      count records or fields in a quoted stream  |function-qcount|
   `qmap`        transform each record via a lambda          |function-qmap|
   `qpad`        normalize records to uniform field count    |function-qpad|
+  `qpipe`       pipe each record through an external command|function-qpipe|
   `qselect`     project or reorder fields in records        |function-qselect|
+  `qtable`      render a quoted stream as a table           |function-qtable|
   `qwhere`      filter records by a predicate               |function-qwhere|
   `split`       split a string by a pattern                 |function-split|
   `version`     print the shed version                      |function-version|
@@ -33,8 +35,8 @@ The following functions are bundled:
 Quoted Stream Adapters ~                                  *quoted-streams*
 
   The `q`-prefixed functions (`qmap`, `qwhere`, `qselect`, `qpad`,
-  `qcount`) operate on streams of shell-quoted records. A "quoted
-  stream" is a byte stream where:
+  `qcount`, `qpipe`, `qtable`) operate on streams of shell-quoted
+  records. A "quoted stream" is a byte stream where:
 
     - records are separated by newlines
     - fields within a record are separated by whitespace
@@ -51,6 +53,26 @@ Quoted Stream Adapters ~                                  *quoted-streams*
   the standard toolchain without adapters.
 
   See |builtin-quote| and |builtin-unquote| for encoding details.
+
+Named streams ~                                          *named-streams*
+
+  Several adapters accept `-n` to treat the first record of the stream
+  as a header naming each field. With `-n`:
+
+    - |qcount|(function-qcount) skips the header before counting
+    - |qmap|(function-qmap) binds each field by its header name as a
+      local in the lambda, and re-emits the header unchanged
+    - |qwhere|(function-qwhere) binds each field by its header name in
+      the predicate, and passes the header through unfiltered
+    - |qselect|(function-qselect) lets you project fields by name as
+      well as by index, and rewrites the header to match
+    - |qpad|(function-qpad) keeps the header as the first record and
+      pads it alongside the body to the common field count
+    - |qtable|(function-qtable) uses the header as the table's column
+      titles
+
+  A named stream is an ordinary quoted stream; the header is just its
+  first record. Tools that are unaware of `-n` pass it through as data.
 
 ==============================================================================
 LOGOUT                                           *function-logout* *logout*
@@ -71,13 +93,16 @@ LOGOUT                                           *function-logout* *logout*
 ==============================================================================
 QCOUNT                                           *function-qcount* *qcount*
 
-  `qcount [-f]`
+  `qcount [-f] [-n]`
 
   Count records in a quoted stream, or fields per record.
 
   `-f`    print the number of fields in each record, one count per
           line. Useful for sanity-checking that a stream has the
           shape you expect.
+
+  `-n`    treat the first record as a header and skip it, so it is
+          not counted. See |named-streams|.
 
   Without `-f`, prints a single number: the total record count
   consumed from stdin.
@@ -86,16 +111,17 @@ QCOUNT                                           *function-qcount* *qcount*
 
       `producer | qcount`                count records
       `producer | qcount -f`             field count per record
+      `producer | qcount -n`             count records, ignoring header
       `producer | qcount -f | sort -u`   inspect record shapes
                                          (one unique line means a
                                          uniform stream)
 
-  See also: |quoted-streams|, |function-qpad|
+  See also: |quoted-streams|, |named-streams|, |function-qpad|
 
 ==============================================================================
 QMAP                                             *function-qmap* *qmap*
 
-  `qmap {body}`
+  `qmap [-n] {body}`
 
   Transform each record in a quoted stream by running {body} as a
   shell lambda. Fields of the current record are bound as `$1`, `$2`,
@@ -108,6 +134,11 @@ QMAP                                             *function-qmap* *qmap*
   rather than from `qmap`, and `local` declarations inside the body
   do not leak between records.
 
+  `-n`    treat the first record as a header. Each field is bound as
+          a local named after its column in addition to the positional
+          `$1`, `$2`, ..., and the header is re-emitted unchanged ahead
+          of the transformed records. See |named-streams|.
+
   Examples:
 
       `producer | qmap 'quote "$1" "extra"'`
@@ -119,15 +150,18 @@ QMAP                                             *function-qmap* *qmap*
       `producer | qmap 'quote "$2" "$1"'`
                           swap fields 1 and 2 (assumes 2-field input)
 
+      `producer | qmap -n 'quote "$name" "$size"'`
+                          reference fields by their header names
+
       `producer | qmap 'quote "$(realpath "$1")"'`
                           resolve path in field 1 to its absolute form
 
-  See also: |quoted-streams|, |function-qwhere|
+  See also: |quoted-streams|, |named-streams|, |function-qwhere|
 
 ==============================================================================
 QPAD                                             *function-qpad* *qpad*
 
-  `qpad`
+  `qpad [-n]`
 
   Normalize a quoted stream so every record has the same number of
   fields. Reads the entire stream, finds the longest record, then
@@ -138,6 +172,11 @@ QPAD                                             *function-qpad* *qpad*
   otherwise overflow short records yield empty strings rather than
   errors.
 
+  `-n`    treat the first record as a header. It is included when
+          finding the longest record and padded along with the body,
+          so the header always has a slot per column. See
+          |named-streams|.
+
   Note: this operator must buffer the entire stream in memory to find
   the longest record. Not suitable for unbounded producers.
 
@@ -146,16 +185,49 @@ QPAD                                             *function-qpad* *qpad*
       `producer | qpad`                  normalize record shape
       `producer | qpad | qselect 1 3`    safe projection even when
                                          some records had <3 fields
+      `producer | qpad -n | qtable -n`   pad a named stream, then
+                                         render it as a table
       `producer | qpad | qcount -f \\`
         `| sort -u`                      should print exactly one
                                          number after padding
 
-  See also: |quoted-streams|, |function-qselect|, |function-qcount|
+  See also: |quoted-streams|, |named-streams|, |function-qselect|,
+  |function-qcount|
+
+==============================================================================
+QPIPE                                            *function-qpipe* *qpipe*
+
+  `qpipe [-n] {command} [{arg} ...]`
+
+  Pipe each record through an external {command}, one record at a
+  time. The fields of the record are written to the command's stdin,
+  one field per line, and the command's output lines are collected
+  and re-encoded as a single quoted record via |quote|(builtin-quote).
+
+  This bridges quoted streams to line-oriented tools that operate
+  within a record rather than across the whole stream. Because each
+  record spawns the command afresh, qpipe is best for light filters,
+  not high-volume streams.
+
+  `-n`    treat the first record as a header and re-emit it ahead of
+          the transformed records. See |named-streams|.
+
+  Examples:
+
+      `producer | qpipe sort`            sort the fields within each
+                                         record
+
+      `producer | qpipe grep -v '^$'`    drop empty fields from each
+                                         record
+
+      `producer | qpipe tr a-z A-Z`      uppercase every field
+
+  See also: |quoted-streams|, |named-streams|, |function-qmap|
 
 ==============================================================================
 QSELECT                                          *function-qselect* *qselect*
 
-  `qselect {idx} [{idx} ...]`
+  `qselect [-n] {idx|name} [{idx|name} ...]`
 
   Project and/or reorder fields in each record. Fields are 1-indexed.
   Indices may be repeated; the resulting record has fields in exactly
@@ -166,6 +238,11 @@ QSELECT                                          *function-qselect* *qselect*
   projection safe for variable-shape streams, pipe through
   |qpad|(function-qpad) first.
 
+  `-n`    treat the first record as a header. Arguments may then be
+          column names as well as numeric indices, and the header is
+          rewritten to the selected columns. A name that matches no
+          column errors with exit status 1. See |named-streams|.
+
   Examples:
 
       `producer | qselect 1`             keep only field 1
@@ -173,15 +250,44 @@ QSELECT                                          *function-qselect* *qselect*
       `producer | qselect 1 1 1`         emit field 1 three times
       `producer | qselect 3 1`           keep fields 3 and 1 in that
                                          order, drop field 2
+      `producer | qselect -n name size`  project by column name
       `producer | qpad | qselect 3 1`    safe projection on padded
                                          stream
 
-  See also: |quoted-streams|, |function-qpad|
+  See also: |quoted-streams|, |named-streams|, |function-qpad|
+
+==============================================================================
+QTABLE                                           *function-qtable* *qtable*
+
+  `qtable [-n]`
+
+  Render a quoted stream as a box-drawn table, one row per record and
+  one column per field. Column widths are sized to the widest cell
+  using |width|(builtin-width), so the layout stays aligned even with
+  wide characters and combining marks.
+
+  The whole stream is buffered before drawing, since column widths
+  cannot be known until every record has been read. Not suitable for
+  unbounded producers.
+
+  `-n`    treat the first record as a header and render it as the
+          table's column titles, separated from the body by a rule.
+          When the table is taller than the terminal the header is
+          repeated at the bottom. See |named-streams|.
+
+  Examples:
+
+      `producer | qtable`                render records as a table
+
+      `producer | qtable -n`             use the first record as
+                                         column headings
+
+  See also: |quoted-streams|, |named-streams|, |builtin-width|
 
 ==============================================================================
 QWHERE                                           *function-qwhere* *qwhere*
 
-  `qwhere {predicate}`
+  `qwhere [-n] {predicate}`
 
   Filter records in a quoted stream. {predicate} is a shell lambda
   evaluated per record with fields bound as `$1`, `$2`, etc. Records
@@ -190,6 +296,11 @@ QWHERE                                           *function-qwhere* *qwhere*
   is emitted byte-for-byte on a match.
 
   The predicate runs in its own function scope.
+
+  `-n`    treat the first record as a header. Each field is also bound
+          as a local named after its column, so the predicate can refer
+          to fields by name, and the header is passed through
+          unfiltered. See |named-streams|.
 
   Inspired by `where` in `nushell`, but evaluates an arbitrary shell
   expression rather than a typed comparison.
@@ -206,11 +317,14 @@ QWHERE                                           *function-qwhere* *qwhere*
       `producer | qwhere '[[ "$1" == git* ]]'`
                           glob match on field 1
 
+      `producer | qwhere -n '[ "$size" -gt 10 ]'`
+                          filter by a named column
+
       `producer | qwhere '[ "${#1}" -gt 10 ]'`
                           keep records where field 1 is longer than
                           10 characters
 
-  See also: |quoted-streams|, |function-qmap|
+  See also: |quoted-streams|, |named-streams|, |function-qmap|
 
 ==============================================================================
 SPLIT                                            *function-split* *split*
