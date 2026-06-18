@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, os::fd::BorrowedFd, time::Duration};
+use std::{os::fd::BorrowedFd, time::Duration};
 
 use bitflags::bitflags;
 use nix::{
@@ -343,6 +343,92 @@ fn unescape(line: &[u8]) -> Vec<u8> {
   out
 }
 
+/// POSIX field splitting. IFS-whitespace runs collapse into a single
+/// delimiter and are stripped from both ends; non-whitespace IFS characters
+/// are hard delimiters that can yield empty fields. When `max` is set,
+/// splitting stops after `max - 1` fields and the untouched remainder (with
+/// trailing IFS-whitespace trimmed) becomes the final field, mirroring
+/// `read var1 var2 ...` where the last variable absorbs the rest of the line.
+fn ifs_split(input: &str, ifs: &str, max: Option<usize>) -> Vec<String> {
+  let is_ws = |c: char| c.is_whitespace() && ifs.contains(c);
+  let is_hard = |c: char| !c.is_whitespace() && ifs.contains(c);
+
+  let mut fields: Vec<String> = Vec::new();
+  let mut cur = String::new();
+  let mut chars = input.char_indices().peekable();
+
+  while chars.peek().is_some_and(|&(_, c)| is_ws(c)) {
+    chars.next();
+  }
+
+  while let Some(&(i, c)) = chars.peek() {
+    if max.is_some_and(|max| fields.len() == max - 1) {
+      let rest = input[i..].trim_end_matches(|c: char| is_ws(c));
+      fields.push(rest.to_string());
+      return fields;
+    }
+
+    chars.next();
+
+    if is_ws(c) {
+      while chars.peek().is_some_and(|&(_, c)| is_ws(c)) {
+        chars.next();
+      }
+      // a hard delimiter abutting a whitespace run folds into one separator
+      if chars.peek().is_some_and(|&(_, c)| is_hard(c)) {
+        chars.next();
+      }
+      // trailing whitespace must not produce an empty field
+      if chars.peek().is_some() {
+        fields.push(std::mem::take(&mut cur));
+      }
+    } else if is_hard(c) {
+      fields.push(std::mem::take(&mut cur));
+      while chars.peek().is_some_and(|&(_, c)| is_ws(c)) {
+        chars.next();
+      }
+    } else {
+      cur.push(c);
+    }
+  }
+
+  if !cur.is_empty() {
+    fields.push(cur);
+  }
+
+  fields
+}
+
+/// Merge zero-width fields into the following one. A field that renders to no
+/// glyphs (a lone SGR color escape, say) can't stand alone, so it attaches to
+/// the next field. Genuine empty fields (zero bytes, from adjacent
+/// non-whitespace IFS delimiters) are kept, since those carry meaning. This
+/// deliberately diverges from bash, which would leave the escape orphaned;
+/// the divergence makes splitting colored, column-aligned command output
+/// (`eza`, `ls`, `ps`) survive positional indexing.
+fn glue_zero_width(fields: Vec<String>) -> Vec<String> {
+  let mut out: Vec<String> = Vec::with_capacity(fields.len());
+  let mut pending = String::new();
+
+  for field in fields {
+    if !field.is_empty() && state::terminal::calc_str_width(&field) == 0 {
+      pending.push_str(&field);
+    } else if pending.is_empty() {
+      out.push(field);
+    } else {
+      pending.push_str(&field);
+      out.push(std::mem::take(&mut pending));
+    }
+  }
+
+  // a dangling zero-width run (e.g. a trailing reset) has nothing to attach to
+  if !pending.is_empty() {
+    out.push(pending);
+  }
+
+  out
+}
+
 fn field_split_vars(input: &str, vars: &[(String, Span)]) -> ShResult<()> {
   if vars.is_empty() {
     Shed::vars_mut(|v| v.set_var("REPLY", VarKind::string(input), VarFlags::empty()))?;
@@ -350,11 +436,11 @@ fn field_split_vars(input: &str, vars: &[(String, Span)]) -> ShResult<()> {
   }
 
   let sep = state::util::get_separators();
+  let fields = ifs_split(input, &sep, Some(vars.len()));
 
-  let fields: Vec<&str> = input.splitn(vars.len(), |c| sep.contains(c)).collect();
-  for (name, field) in vars.iter().zip(fields) {
-    let field = field.trim_start_matches(|c: char| sep.contains(c));
-    Shed::vars_mut(|v| v.set_var(&name.0, VarKind::string(field), VarFlags::empty()))?;
+  for (i, (name, _)) in vars.iter().enumerate() {
+    let value = fields.get(i).map(String::as_str).unwrap_or("");
+    Shed::vars_mut(|v| v.set_var(name, VarKind::string(value), VarFlags::empty()))?;
   }
 
   Ok(())
@@ -366,13 +452,13 @@ fn field_split_arr(input: &str, arr_name: &str) -> ShResult<()> {
   }
 
   let sep = state::util::get_separators();
-  let fields: VecDeque<&str> = input.split(|c| sep.contains(c)).collect();
+  let fields = glue_zero_width(ifs_split(input, &sep, None));
 
   Shed::vars_mut(|v| v.set_var(arr_name, VarKind::arr(fields), VarFlags::empty()))
 }
 
 fn field_split_vars_quoted(input: &str, vars: &[(String, Span)]) -> ShResult<()> {
-  let fields = quote::unquote_raw(input)?;
+  let fields = glue_zero_width(quote::unquote_raw(input)?);
 
   if vars.is_empty() {
     let joined = fields.join(" ");
@@ -400,7 +486,7 @@ fn field_split_arr_quoted(input: &str, arr_name: &str) -> ShResult<()> {
     return Err(sherr!(ExecFail, "read: Array name cannot be empty"));
   }
 
-  let fields = quote::unquote_raw(input)?;
+  let fields = glue_zero_width(quote::unquote_raw(input)?);
 
   Shed::vars_mut(|v| v.set_var(arr_name, VarKind::arr(fields), VarFlags::empty()))
 }
@@ -480,9 +566,14 @@ impl super::Builtin for ReadKey {
 #[cfg(test)]
 mod tests {
   use crate::state::terminal::Terminal;
+  use crate::state::vars::VarStr;
   use crate::state::{self, Shed, vars::VarFlags, vars::VarKind};
   use crate::tests::testutil::{TestGuard, test_input};
   use crate::var;
+
+  fn arr(name: &str) -> Vec<VarStr> {
+    Shed::vars(|v| v.try_get_arr_elems(name)).unwrap()
+  }
 
   // ===================== Basic read into REPLY =====================
 
@@ -528,6 +619,73 @@ mod tests {
     // b and c get empty strings since there are no more fields
     assert_eq!(var!("b"), "");
     assert_eq!(var!("c"), "");
+  }
+
+  #[test]
+  fn read_collapses_whitespace_runs() {
+    // Regression: column-aligned output (ls/eza/ps) pads with runs of spaces.
+    // Default-IFS splitting must collapse them rather than emit empty fields.
+    let _g = TestGuard::new();
+    test_input("read -a f < <(echo 'a    b   c')").unwrap();
+    assert_eq!(arr("f"), vec!["a", "b", "c"]);
+  }
+
+  #[test]
+  fn read_arr_trims_leading_and_trailing_whitespace() {
+    let _g = TestGuard::new();
+    test_input("read -a f < <(printf '   a b   \\n')").unwrap();
+    assert_eq!(arr("f"), vec!["a", "b"]);
+  }
+
+  #[test]
+  fn read_vars_preserve_remainder_spacing() {
+    // The last variable absorbs the rest of the line with its internal
+    // whitespace intact, only trailing IFS-whitespace stripped.
+    let _g = TestGuard::new();
+    test_input("read a b < <(echo 'one   two   three')").unwrap();
+    assert_eq!(var!("a"), "one");
+    assert_eq!(var!("b"), "two   three");
+  }
+
+  #[test]
+  fn read_arr_hard_ifs_keeps_empty_fields() {
+    // Non-whitespace IFS delimiters are hard: adjacent ones yield empties.
+    // The zero-width gluing pass must not swallow these (zero bytes != zero
+    // display width).
+    let _g = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
+    test_input("read -a f < <(echo 'a::b')").unwrap();
+    assert_eq!(arr("f"), vec!["a", "", "b"]);
+  }
+
+  #[test]
+  fn read_arr_glues_orphan_escape_into_next_field() {
+    // A bare color escape between whitespace renders to nothing, so it merges
+    // into the following field rather than becoming its own. This is what lets
+    // colored, column-aligned output (eza/ls) survive positional splitting.
+    let _g = TestGuard::new();
+    test_input(r#"read -a f < <(printf '\x1b[34m foo bar\n')"#).unwrap();
+    assert_eq!(arr("f"), vec!["\u{1b}[34mfoo", "bar"]);
+  }
+
+  #[test]
+  fn read_arr_trailing_orphan_escape_is_kept() {
+    // A dangling escape with nothing after it has no field to glue onto, so it
+    // survives as its own element rather than being dropped.
+    let _g = TestGuard::new();
+    test_input(r#"read -a f < <(printf 'foo \x1b[0m\n')"#).unwrap();
+    assert_eq!(arr("f"), vec!["foo", "\u{1b}[0m"]);
+  }
+
+  #[test]
+  fn read_q_preserves_quoted_whitespace_and_glues_escape() {
+    // The quoted path honors single-quoting (so a name with runs of spaces is
+    // kept verbatim, unlike whitespace-splitting), and still glues an orphan
+    // color escape into the next field. This is what lets `read -q -a` parse
+    // colored, quoted, column-aligned output (eza) losslessly.
+    let _g = TestGuard::new();
+    test_input(r#"read -q -a f < <(printf "\x1b[34m foo 'a   b   c'\n")"#).unwrap();
+    assert_eq!(arr("f"), vec!["\u{1b}[34mfoo", "a   b   c"]);
   }
 
   // ===================== Custom IFS =====================
