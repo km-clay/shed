@@ -67,6 +67,7 @@ The following builtins are available:
   `unquote`     decode shell-quoted input into fields       |builtin-unquote|
   `unset`       remove variables or functions               |builtin-unset|
   `wait`        wait for background jobs to finish          |builtin-wait|
+  `width`       print the display width of a string          |builtin-width|
 
 ==============================================================================
 ALIAS                                            *builtin-alias* *alias*
@@ -2217,3 +2218,30 @@ WAIT                                             *builtin-wait* *wait*
   `wait [{id} ...]`
 
   Wait for background jobs to finish. See |jobs-wait| for details.
+
+==============================================================================
+WIDTH                                            *builtin-width* *width*
+
+  `width [{string} ...]`
+  `cmd | width`
+
+  Print the display width of a string in terminal columns. This counts
+  rendered cells, not bytes or code points: wide characters (CJK, many
+  emoji) count as two columns and zero-width characters (combining
+  marks) count as none.
+
+  With arguments, the joined arguments are measured. With no arguments,
+  the string is read from stdin. The result is printed as a single
+  number followed by a newline.
+
+  Useful for laying out aligned output by hand. |qtable|(function-qtable)
+  uses it internally to size its columns.
+
+  Examples:
+
+      `width hello`              outputs:  `5`
+      `width 日本語`             outputs:  `6`  (three wide characters)
+      `printf 'café' | width`    outputs:  `4`  (combining mark is
+                                                 zero-width)
+
+  See also: |function-qtable|
