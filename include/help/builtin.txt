@@ -38,6 +38,7 @@ The following builtins are available:
   `local`       declare variables local to a function       |builtin-local|
   `msg`         post a message to the status bar            |builtin-msg|
   `popd`        pop the directory stack                     |builtin-popd|
+  `printf`      formatted output                            |builtin-printf|
   `pushd`       push a directory onto the stack             |builtin-pushd|
   `pwd`         print the working directory                 |builtin-pwd|
   `quote`       shell-quote arguments for round-tripping    |builtin-quote|
@@ -1188,6 +1189,124 @@ POPD                                             *builtin-popd* *popd*
       `popd`          pop top and cd to new top
       `popd -n`       remove top without cd
       `popd +1`       remove second stored entry, no cd
+
+==============================================================================
+PRINTF                                           *builtin-printf* *printf*
+
+  `printf {format} [{argument} ...]`
+
+  Format and print {argument}s according to the {format} string. Backslash
+  escape sequences in {format} are interpreted; conversion specifiers
+  beginning with `%` are replaced with formatted arguments.
+
+  If there are more {argument}s than conversion specifiers in {format}, the
+  format string is restarted from the beginning and applied repeatedly until
+  all arguments are consumed. If there are fewer, missing numeric arguments
+  default to 0 and missing string arguments default to the empty string.
+
+  Conversion specifiers ~
+
+  The general form of a conversion specifier is:
+
+      `%[flags][width][.precision]conversion`
+
+  Conversion characters:
+
+    `%d`, `%i`    signed decimal integer
+    `%u`          unsigned decimal integer
+    `%o`          unsigned octal
+    `%x`, `%X`    unsigned hexadecimal (lowercase / uppercase)
+    `%f`          fixed-point decimal float (default precision 6)
+    `%e`, `%E`    scientific notation (lowercase / uppercase exponent)
+    `%g`, `%G`    shortest of `%f` or `%e`, with insignificant trailing
+                  zeros removed
+    `%c`          first character of the argument
+    `%s`          string
+    `%b`          string with backslash escapes interpreted (ANSI-C)
+    `%q`          shell-quoted output suitable for re-input
+    `%(FORMAT)T`  date/time formatted via `strftime` codes. Argument is
+                  seconds since the Unix epoch; `-1` means current time,
+                  `-2` means shell start time
+    `%%`          literal `%`
+
+  Flags ~
+
+    `-`           left-justify within field width (default is right-justify)
+    `+`           always show sign on signed numeric output (`+42`, `-42`)
+    `' '` (space) leave a space before positive numbers (` 42`)
+    `#`           alternate form:
+                    `%#o` prepends a `0` so the value reads as octal
+                    `%#x` / `%#X` prepend `0x` / `0X` for non-zero values
+                    `%#f`, `%#g` force a decimal point even with no
+                    fractional digits
+    `0`           zero-pad on the left instead of space-padding. Ignored
+                  if `-` is also set, or for non-numeric conversions.
+
+  Width and precision ~
+
+    {width} is the minimum field width. Values shorter than {width} are
+    padded; longer values are not truncated. A `*` in place of a number
+    reads the width from the next argument.
+
+    {precision} (preceded by `.`) means different things depending on the
+    conversion:
+
+      Integer:        minimum number of digits, zero-padded
+      Float (`f e`):  digits after the decimal point (default 6)
+      Float (`g`):    significant digits (default 6, minimum 1)
+      String:         maximum characters to print
+
+    A bare `.` is equivalent to `.0`. A `*` reads the precision from the
+    next argument. A negative precision is treated as if absent.
+
+  Format-string escapes ~
+
+  These backslash escapes are interpreted in the {format} string itself
+  (separate from `%b` which interprets escapes in its argument):
+
+    `\n` newline           `\t` tab                  `\r` carriage return
+    `\\` backslash         `\a` alert (bell)         `\b` backspace
+    `\f` form feed         `\v` vertical tab         `\e` escape (ESC)
+    `\xNN`  byte with hex value NN (1-2 digits)
+    `\NNN`  byte with octal value NNN (1-3 digits)
+
+  Examples ~
+
+      `printf 'hello %s\n' world`
+                                outputs: `hello world`
+
+      `printf '%s: %d\n' alice 1 bob 2 carol 3`
+                                format restarts twice, outputs three lines
+
+      `printf '[%5d] [%-5d] [%05d]\n' 42 42 42`
+                                outputs: `[   42] [42   ] [00042]`
+
+      `printf '%.3f\n' 3.14159`
+                                outputs: `3.142`
+
+      `printf '%.3s\n' hello`
+                                outputs: `hel`
+
+      `printf '%+d\n' 42`
+                                outputs: `+42`
+
+      `printf '%#x\n' 255`
+                                outputs: `0xff`
+
+      `printf '%q\n' 'hello world'`
+                                outputs: `'hello world'` (round-trippable
+                                through the shell parser)
+
+      `printf '%(%Y-%m-%d)T\n' -1`
+                                outputs the current date
+
+      `printf '%(%H:%M:%S)T\n' -2`
+                                outputs the shell start time
+
+      `printf '%*d\n' 8 42`
+                                width read from argument (width 8)
+
+  See also: |builtin-echo|, |builtin-quote|
 
 ==============================================================================
 PUSHD                                            *builtin-pushd* *pushd*

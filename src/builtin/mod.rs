@@ -39,6 +39,10 @@ pub(crate) fn has_out_sink() -> bool {
   OUT_SINK.with(|s| s.borrow().last().is_some())
 }
 
+pub(crate) fn has_in_sink() -> bool {
+  IN_SINK.with(|s| s.borrow().last().is_some())
+}
+
 pub(crate) fn take_stdin() -> Option<String> {
   IN_SINK.with(|s| s.borrow_mut().last_mut().and_then(|opt| opt.take()))
 }
@@ -111,6 +115,7 @@ mod jobctl;
 mod keymap;
 mod msg;
 mod pwd;
+mod printf;
 mod quote;
 mod read;
 mod resource;
@@ -189,6 +194,7 @@ register_builtins! {
   "msg"      => msg::Msg,
   "pop"      => arrops::Pop,
   "popd"     => dirstack::PopDir,
+  "printf"   => printf::Printf,
   "push"     => arrops::Push,
   "pushd"    => dirstack::PushDir,
   "pwd"      => pwd::Pwd,

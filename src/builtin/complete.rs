@@ -168,9 +168,7 @@ impl super::Builtin for Compadd {
       OptSpec::flag("quoted"),
     ]
   }
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    if let Some(stdin) = args.take_stdin() {}
-
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut prefix = None;
     let mut suffix = None;
     let mut desc_arr = None;
