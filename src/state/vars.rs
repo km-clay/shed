@@ -1085,12 +1085,19 @@ impl VarTab {
     }
   }
   fn update_arg_params(&mut self) {
-    self.set_param(
-      ShellParam::AllArgs,
-      &self.sh_argv.clone().into_iter().collect::<Vec<_>>()[1..]
-        .join_with(&markers::ARG_SEP.to_string()),
-    );
-    self.set_param(ShellParam::ArgCount, &(self.sh_argv.len() - 1).to_string());
+    // sh_argv[0] is $0 (script/function name); [1..] are positionals.
+    // When the deque is entirely empty, treat as zero positionals.
+    let positional_count = self.sh_argv.len().saturating_sub(1);
+    let positional_join = self
+      .sh_argv
+      .iter()
+      .skip(1)
+      .cloned()
+      .collect::<Vec<_>>()
+      .join_with(&markers::ARG_SEP.to_string());
+
+    self.set_param(ShellParam::AllArgs, &positional_join);
+    self.set_param(ShellParam::ArgCount, &positional_count.to_string());
   }
   /// Push an arg to the back of the arg deque
   pub fn bpush_arg(&mut self, arg: VarStr) {

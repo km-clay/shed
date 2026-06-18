@@ -77,4 +77,27 @@ mod tests {
     test_input("f a b").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
   }
+
+  #[test]
+  fn shift_to_empty_does_not_panic() {
+    // Regression: update_arg_params used to slice [1..] and subtract 1
+    // unconditionally, panicking when sh_argv hit length 0. Common path
+    // to trigger: getopts in a function with only flag args, followed
+    // by `shift $((OPTIND - 1))` consuming the last positional.
+    let guard = TestGuard::new();
+    test_input(
+      r#"
+        f() {
+          while getopts ":n" opt; do :; done
+          shift $((OPTIND - 1))
+          echo "count: $#"
+          echo "all: [$*]"
+        }
+        f -n
+      "#,
+    )
+    .unwrap();
+    let out = guard.read_output();
+    assert_eq!(out, "count: 0\nall: []\n");
+  }
 }
