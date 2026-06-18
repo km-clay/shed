@@ -35,6 +35,7 @@ enum Conversion {
   ShortestFloat(Case),
   Char,
   Str,
+  RepeatStr,
   AnsiC,
   ShellQuote,
   StrfTime(VarStr),
@@ -134,6 +135,7 @@ impl FmtSpec {
       }
       Conversion::Char => self.apply_char(args, flags, width)?,
       Conversion::Str => self.apply_str(args, flags, width, prec)?,
+      Conversion::RepeatStr => self.apply_repeat_str(args, width)?,
       Conversion::AnsiC => self.apply_ansi_c(args, flags, width, prec)?,
       Conversion::ShellQuote => self.apply_shell_quote(args, flags, width)?,
       Conversion::StrfTime(format) => self.apply_strftime(args, flags, width, format.as_str())?,
@@ -399,6 +401,17 @@ impl FmtSpec {
     Ok(pad_to_width(&s, "", flags, width, false))
   }
 
+  fn apply_repeat_str<I: Iterator<Item = String>>(
+    &self,
+    args: &mut Peekable<I>,
+    width: Option<usize>,
+  ) -> ShResult<String> {
+    // The width slot is the repeat count (`%*r` / `%5r`), not a field width, so
+    // there is no padding. A bare `%r` with no count degrades to a single copy.
+    let s = args.next().unwrap_or_default();
+    Ok(s.repeat(width.unwrap_or(1)))
+  }
+
   fn apply_ansi_c<I: Iterator<Item = String>>(
     &self,
     args: &mut Peekable<I>,
@@ -534,6 +547,7 @@ impl FmtSpec {
       'G' => Ok(Conversion::ShortestFloat(Case::Upper)),
       'c' => Ok(Conversion::Char),
       's' => Ok(Conversion::Str),
+      'r' => Ok(Conversion::RepeatStr),
       'b' => Ok(Conversion::AnsiC),
       'q' => Ok(Conversion::ShellQuote),
       '(' => {
@@ -721,6 +735,58 @@ mod tests {
     let guard = TestGuard::new();
     test_input(r#"printf '%s' hello"#).unwrap();
     assert_eq!(guard.read_output(), "hello");
+  }
+
+  #[test]
+  fn printf_repeat_literal_count() {
+    let guard = TestGuard::new();
+    test_input(r#"printf '%5r' x"#).unwrap();
+    assert_eq!(guard.read_output(), "xxxxx");
+  }
+
+  #[test]
+  fn printf_repeat_dynamic_count() {
+    let guard = TestGuard::new();
+    test_input(r#"printf '%*r' 3 ab"#).unwrap();
+    assert_eq!(guard.read_output(), "ababab");
+  }
+
+  #[test]
+  fn printf_repeat_multibyte() {
+    let guard = TestGuard::new();
+    test_input(r#"printf '%4r' '─'"#).unwrap();
+    assert_eq!(guard.read_output(), "────");
+  }
+
+  #[test]
+  fn printf_repeat_zero_count_is_empty() {
+    // Count 0 must come via the dynamic form; a literal leading `0` is the
+    // zero-pad flag, not a count.
+    let guard = TestGuard::new();
+    test_input(r#"printf '%*r' 0 x"#).unwrap();
+    assert_eq!(guard.read_output(), "");
+  }
+
+  #[test]
+  fn printf_repeat_bare_is_single_copy() {
+    let guard = TestGuard::new();
+    test_input(r#"printf '%r' hi"#).unwrap();
+    assert_eq!(guard.read_output(), "hi");
+  }
+
+  #[test]
+  fn printf_repeat_recycles_format() {
+    let guard = TestGuard::new();
+    test_input(r#"printf '%*r' 3 a 2 b"#).unwrap();
+    assert_eq!(guard.read_output(), "aaabb");
+  }
+
+  #[test]
+  fn printf_repeat_in_separator_pattern() {
+    // The qtable use case: build a separator inline, no fork.
+    let guard = TestGuard::new();
+    test_input(r#"printf '╭%*r╮' 3 '─'"#).unwrap();
+    assert_eq!(guard.read_output(), "╭───╮");
   }
 
   #[test]

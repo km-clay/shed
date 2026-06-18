@@ -1226,10 +1226,14 @@ PRINTF                                           *builtin-printf* *printf*
     `%s`          string
     `%b`          string with backslash escapes interpreted (ANSI-C)
     `%q`          shell-quoted output suitable for re-input
+    `%r`          repeat the argument string (shed extension). The field
+                  width is the repeat count, not a pad width; see below
     `%(FORMAT)T`  date/time formatted via `strftime` codes. Argument is
                   seconds since the Unix epoch; `-1` means current time,
                   `-2` means shell start time
     `%%`          literal `%`
+
+  `%r` is a `shed` extension; `bash` and `POSIX` do not provide it.
 
   Flags ~
 
@@ -1261,6 +1265,13 @@ PRINTF                                           *builtin-printf* *printf*
     A bare `.` is equivalent to `.0`. A `*` reads the precision from the
     next argument. A negative precision is treated as if absent.
 
+    For `%r` the width slot is reinterpreted as a repeat count rather than
+    a field width: the argument string is emitted that many times with no
+    padding. `%5r` repeats five times, `%*r` takes the count from the next
+    argument, and a bare `%r` (no count) emits a single copy. A count of
+    `0` produces no output (only reachable via `%*r`, since a literal
+    leading `0` is the zero-pad flag).
+
   Format-string escapes ~
 
   These backslash escapes are interpreted in the {format} string itself
@@ -1288,6 +1299,13 @@ PRINTF                                           *builtin-printf* *printf*
 
       `printf '%.3s\n' hello`
                                 outputs: `hel`
+
+      `printf '%5r\n' =`
+                                outputs: `=====`
+
+      `printf '╭%*r╮\n' 4 '─'`
+                                outputs: `╭────╮` (count from the argument;
+                                handy for drawing rules and separators)
 
       `printf '%+d\n' 42`
                                 outputs: `+42`
