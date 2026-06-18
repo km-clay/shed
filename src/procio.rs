@@ -16,7 +16,7 @@ use nix::{
     stat::Mode,
     wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid},
   },
-  unistd::{ForkResult, fork, read, write},
+  unistd::{ForkResult, fork, isatty, read, write},
 };
 
 use crate::{Shed, signal, state::terminal::Terminal, util};
@@ -808,7 +808,9 @@ pub(super) fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShRes
 }
 
 pub(super) fn read_input() -> ShResult<String> {
-  let _guard = Shed::term_mut(Terminal::prepare_for_exec);
+  let _guard = isatty(stdin_fileno())
+    .unwrap_or(false)
+    .then(|| Shed::term_mut(Terminal::prepare_for_exec));
 
   let mut input = vec![];
   let mut read_buf = [0u8; 4096];
