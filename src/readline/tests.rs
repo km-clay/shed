@@ -22,8 +22,8 @@ macro_rules! vi_test {
             let keys = Shed::term_mut(|t| t.drain_keys());
             vi.process_input(keys).unwrap();
           }
-          assert_eq!(vi.editor.to_string(), $expected_text);
-          assert_eq!(vi.editor.cursor_to_flat(), $expected_cursor);
+          assert_eq!(vi.core.editor.to_string(), $expected_text);
+          assert_eq!(vi.core.editor.cursor_to_flat(), $expected_cursor);
         }
       )*
     }
@@ -349,7 +349,7 @@ fn vi_auto_indent() {
   }
 
   assert_eq!(
-    vi.editor.to_string(),
+    vi.core.editor.to_string(),
     "func() {\n\tcase foo in\n\t\tbar)\n\t\t\twhile true; do\n\t\t\t\techo foo \\\n\t\t\t\tbar \\\n\t\t\t\tbiz \\\n\t\t\t\tbazz\n\t\t\t\tbreak\n\t\t\tdone\n\t\t;;\n\tesac\n}"
   );
 }
@@ -379,7 +379,7 @@ fn vi_auto_indent_siblings() {
   }
 
   assert_eq!(
-    vi.editor.to_string(),
+    vi.core.editor.to_string(),
     "if foo; then\n\techo foo\nelif bar; then\n\techo biz\nelse\n\techo bar\nfi"
   );
 }
@@ -399,7 +399,7 @@ fn vi_auto_indent_funcdef() {
   vi.process_input(vec![key!(Enter)]).unwrap();
   vi.process_input(vec![key!(Esc)]).unwrap();
   vi.process_input(vec![key!('O')]).unwrap();
-  assert_eq!(vi.editor.to_string(), "func_def() {\n\t\n}");
+  assert_eq!(vi.core.editor.to_string(), "func_def() {\n\t\n}");
 }
 
 #[test]
@@ -414,7 +414,7 @@ fn vi_auto_indent_empty_body() {
   vi.process_input(vec![key!('f')]).unwrap();
   vi.process_input(vec![key!('i')]).unwrap();
 
-  assert_eq!(vi.editor.to_string(), "if true; then\nfi");
+  assert_eq!(vi.core.editor.to_string(), "if true; then\nfi");
 }
 
 #[test]
@@ -425,7 +425,7 @@ fn vi_func_def_is_finished() {
   Shed::term_mut(|t| t.feed_bytes(bytes));
   let keys = Shed::term_mut(Terminal::drain_keys);
   vi.process_input(keys).unwrap();
-  assert_eq!(vi.editor.to_string(), "");
+  assert_eq!(vi.core.editor.to_string(), "");
 }
 
 #[test]
@@ -436,7 +436,7 @@ fn case_stmt_is_finished() {
   Shed::term_mut(|t| t.feed_bytes(bytes));
   let keys = Shed::term_mut(Terminal::drain_keys);
   vi.process_input(keys).unwrap();
-  assert_eq!(vi.editor.to_string(), "");
+  assert_eq!(vi.core.editor.to_string(), "");
 }
 
 macro_rules! hist_expansion_test {
@@ -463,7 +463,7 @@ macro_rules! hist_expansion_test {
           let keys = Shed::term_mut(|t| t.drain_keys());
           line.process_input(keys).unwrap();
 
-          let joined = line.editor.to_string();
+          let joined = line.core.editor.to_string();
           assert_eq!(joined, $expected);
         }
       )*
@@ -483,11 +483,11 @@ macro_rules! hist_expansion_test {
           let keys = Shed::term_mut(|t| t.drain_keys());
           line.process_input(keys).unwrap();
 
-          let before = line.editor.to_string();
+          let before = line.core.editor.to_string();
           // Manually call attempt_history_expansion - should return false
-          let expanded = line.editor.attempt_history_expansion(&line.history);
+          let expanded = line.core.editor.attempt_history_expansion(&line.history);
           assert!(!expanded, "expected no expansion but expansion occurred");
-          assert_eq!(line.editor.to_string(), before);
+          assert_eq!(line.core.editor.to_string(), before);
         }
       )*
     }
@@ -791,7 +791,7 @@ macro_rules! alias_expansion_test {
           let keys = Shed::term_mut(|t| t.drain_keys());
           line.process_input(keys).unwrap();
 
-          let joined = line.editor.to_string();
+          let joined = line.core.editor.to_string();
           assert_eq!(joined, $result, "\nInput: {:?}", $input);
         }
       )*
@@ -812,13 +812,13 @@ macro_rules! alias_expansion_test {
             let keys = Shed::term_mut(|t| t.drain_keys());
             line.process_input(keys).unwrap();
 
-            let before = line.editor.to_string();
-            let expanded = line.editor.attempt_alias_expansion();
+            let before = line.core.editor.to_string();
+            let expanded = line.core.editor.attempt_alias_expansion();
             assert!(
               !expanded,
               "expected no alias expansion but expansion occurred"
             );
-            assert_eq!(line.editor.to_string(), before);
+            assert_eq!(line.core.editor.to_string(), before);
           }
       )*
     }
@@ -862,7 +862,7 @@ fn alias_no_expand_when_disabled() {
   let keys = Shed::term_mut(Terminal::drain_keys);
   line.process_input(keys).unwrap();
 
-  let joined = line.editor.to_string();
+  let joined = line.core.editor.to_string();
   assert_ne!(joined, "git commit");
 }
 
@@ -903,13 +903,13 @@ macro_rules! hint_test {
           let keys = expand_keymap($input);
           line.process_input(keys).unwrap();
 
-          assert_eq!(line.editor.to_string(), $expected_buf, "buffer mismatch");
+          assert_eq!(line.core.editor.to_string(), $expected_buf, "buffer mismatch");
           assert_eq!(
-            line.editor.try_join_hint().unwrap_or_default(),
+            line.core.editor.try_join_hint().unwrap_or_default(),
             $expected_hint,
             "hint mismatch"
           );
-          assert_eq!(line.editor.cursor_to_flat(), $expected_cursor, "cursor mismatch");
+          assert_eq!(line.core.editor.cursor_to_flat(), $expected_cursor, "cursor mismatch");
         }
       )*
     }
@@ -1042,8 +1042,8 @@ fn test_emacs(initial: &str) -> (ShedLine, TestGuard) {
   let mut em = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
   // Place cursor at end-of-buffer — matches what a real interactive
   // emacs session looks like just after the user has finished typing.
-  let end = em.editor.to_string().chars().count();
-  em.editor.edit(|e| e.set_cursor_from_flat(end));
+  let end = em.core.editor.to_string().chars().count();
+  em.core.editor.edit(|e| e.set_cursor_from_flat(end));
   (em, g)
 }
 
@@ -1057,9 +1057,9 @@ macro_rules! emacs_test {
           let (mut em, _g) = test_emacs($input);
           let keys = expand_keymap($op);
           em.process_input(keys).unwrap();
-          assert_eq!(em.editor.to_string(), $expected_text,
+          assert_eq!(em.core.editor.to_string(), $expected_text,
             "buffer mismatch for {}", stringify!($name));
-          assert_eq!(em.editor.cursor_to_flat(), $expected_cursor,
+          assert_eq!(em.core.editor.cursor_to_flat(), $expected_cursor,
             "cursor mismatch for {}", stringify!($name));
         }
       )*
@@ -1176,8 +1176,8 @@ mod handle_completion_key {
     // FuzzyCompleter::default() the token_span is (0, 0) and
     // original_input is empty, so the completed line is just the
     // candidate.
-    assert_eq!(line.editor.to_string(), "hello");
-    assert_eq!(line.editor.cursor_to_flat(), "hello".len());
+    assert_eq!(line.core.editor.to_string(), "hello");
+    assert_eq!(line.core.editor.cursor_to_flat(), "hello".len());
   }
 
   #[test]
@@ -1186,7 +1186,7 @@ mod handle_completion_key {
     let (mut line, _g) = fresh_line("");
     install_completer(&mut line, &["alpha", "beta", "gamma"]);
     line.handle_completion_key(&key!(Enter)).unwrap();
-    assert_eq!(line.editor.to_string(), "gamma");
+    assert_eq!(line.core.editor.to_string(), "gamma");
     assert!(line.completer.is_none());
   }
 
@@ -1200,7 +1200,7 @@ mod handle_completion_key {
     assert!(ret);
     assert!(line.completer.is_none());
     // The editor buffer should NOT be modified on dismiss.
-    assert_eq!(line.editor.to_string(), "partial");
+    assert_eq!(line.core.editor.to_string(), "partial");
   }
 
   #[test]
@@ -1210,7 +1210,7 @@ mod handle_completion_key {
     let ret = line.handle_completion_key(&key!(Ctrl + 'd')).unwrap();
     assert!(ret);
     assert!(line.completer.is_none());
-    assert_eq!(line.editor.to_string(), "partial");
+    assert_eq!(line.core.editor.to_string(), "partial");
   }
 
   // ─── Tab/Down/Up → Consumed ───────────────────────────────────────
@@ -1252,7 +1252,7 @@ mod handle_completion_key {
     install_completer(&mut line, &["alpha", "beta", "gamma"]);
     line.handle_completion_key(&key!(Tab)).unwrap();
     line.handle_completion_key(&key!(Enter)).unwrap();
-    assert_eq!(line.editor.to_string(), "beta");
+    assert_eq!(line.core.editor.to_string(), "beta");
   }
 
   // ─── Enter on empty filtered → Dismiss path ───────────────────────
@@ -1292,9 +1292,9 @@ macro_rules! visual_test {
           vi.process_input(prelude).unwrap();
           let keys = expand_keymap($op);
           vi.process_input(keys).unwrap();
-          assert_eq!(vi.editor.to_string(), $expected_text,
+          assert_eq!(vi.core.editor.to_string(), $expected_text,
             "buffer mismatch for {}", stringify!($name));
-          assert_eq!(vi.editor.cursor_to_flat(), $expected_cursor,
+          assert_eq!(vi.core.editor.cursor_to_flat(), $expected_cursor,
             "cursor mismatch for {}", stringify!($name));
         }
       )*
@@ -1563,8 +1563,8 @@ mod handle_key_dispatch {
     let g = TestGuard::new();
     let prompt = Prompt::default();
     let mut line = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
-    let end = line.editor.to_string().chars().count();
-    line.editor.edit(|e| e.set_cursor_from_flat(end));
+    let end = line.core.editor.to_string().chars().count();
+    line.core.editor.edit(|e| e.set_cursor_from_flat(end));
     (line, g)
   }
 
@@ -1580,11 +1580,11 @@ mod handle_key_dispatch {
   #[test]
   fn ctrl_d_on_non_empty_buffer_deletes_char_returns_none() {
     let (mut line, _g) = fresh_emacs("hello");
-    line.editor.edit(|e| e.set_cursor_from_flat(0));
+    line.core.editor.edit(|e| e.set_cursor_from_flat(0));
     let res = line.handle_key(&key!(Ctrl + 'd')).unwrap();
     assert!(res.is_none(), "expected None, got {res:?}");
     // The Ctrl+D-as-Delete should remove the char under the cursor.
-    assert_eq!(line.editor.to_string(), "ello");
+    assert_eq!(line.core.editor.to_string(), "ello");
   }
 
   // ─── ClearScreen ──────────────────────────────────────────────────
@@ -1644,7 +1644,7 @@ mod handle_key_dispatch {
     let key = KeyEvent(KeyCode::Char('x'), ModKeys::NONE);
     let res = line.handle_key(&key).unwrap();
     assert!(res.is_none());
-    assert_eq!(line.editor.to_string(), "x");
+    assert_eq!(line.core.editor.to_string(), "x");
   }
 
   // ─── Unbound key returns None (no LineCmd) ─────────────────────
@@ -1859,11 +1859,11 @@ mod readline_mod_coverage {
   #[test]
   fn reset_active_widget_with_no_widget_falls_through_to_reset() {
     let (mut line, _g) = fresh_emacs_line();
-    line.editor.set_buffer("some content");
-    assert_eq!(line.editor.to_string(), "some content");
+    line.core.editor.set_buffer("some content");
+    assert_eq!(line.core.editor.to_string(), "some content");
     line.reset_active_widget(false).unwrap();
     // reset() wipes the editor.
-    assert_eq!(line.editor.to_string(), "");
+    assert_eq!(line.core.editor.to_string(), "");
   }
 
   // ─── ShedLine::handle_keymap is_exact arm ──────────────────────
@@ -1871,8 +1871,8 @@ mod readline_mod_coverage {
   #[test]
   fn handle_keymap_executes_action_on_exact_match() {
     let (mut line, _g) = fresh_emacs_line();
-    line.editor.set_buffer("hello");
-    line.editor.set_cursor_from_flat(0);
+    line.core.editor.set_buffer("hello");
+    line.core.editor.set_cursor_from_flat(0);
     // Map <C-a> → <C-e> in emacs mode. This overrides the built-in
     // StartOfLine binding for Ctrl+A so that pressing it goes to EOL.
     Shed::logic_mut(|l| {
@@ -1884,7 +1884,7 @@ mod readline_mod_coverage {
     });
     line.handle_keymap(&key!(Ctrl + 'a')).unwrap();
     // Action expanded to Ctrl+E → EndOfLine → cursor at "hello".len().
-    assert_eq!(line.editor.cursor_to_flat(), 5);
+    assert_eq!(line.core.editor.cursor_to_flat(), 5);
     assert!(
       line.pending_keymap.is_empty(),
       "exact match should clear pending_keymap"
@@ -1904,10 +1904,10 @@ mod readline_mod_coverage {
     line.history.push("echo foobar").unwrap();
     line.history.refresh_hist_entries();
     line.history.constrain_entries(None);
-    line.editor.set_buffer("echo");
-    line.editor.move_cursor_to_end();
+    line.core.editor.set_buffer("echo");
+    line.core.editor.move_cursor_to_end();
     line.start_hist_search();
-    assert_eq!(line.editor.to_string(), "echo foobar");
+    assert_eq!(line.core.editor.to_string(), "echo foobar");
     assert!(
       line.history.fuzzy_finder.is_none(),
       "finder should not have opened"
@@ -1923,8 +1923,8 @@ mod readline_mod_coverage {
     line.history.push("ls -la").unwrap();
     line.history.refresh_hist_entries();
     line.history.constrain_entries(None);
-    line.editor.set_buffer("git");
-    line.editor.move_cursor_to_end();
+    line.core.editor.set_buffer("git");
+    line.core.editor.move_cursor_to_end();
     line.start_hist_search();
     assert!(
       line.history.fuzzy_finder.is_some(),
@@ -1954,8 +1954,8 @@ mod readline_mod_coverage {
   #[test]
   fn run_cmd_ctrl_d_motion_increments_counter_then_resets() {
     let (mut line, _g) = fresh_emacs_line();
-    line.editor.set_buffer("single line");
-    line.editor.move_cursor_to_end();
+    line.core.editor.set_buffer("single line");
+    line.core.editor.move_cursor_to_end();
     // 3 non-moving Ctrl+D-as-motion calls increment the counter.
     line.run_cmd(ctrl_d_motion_cmd()).unwrap();
     assert_eq!(line.ctrl_d_warning_counter, 1);
@@ -1995,8 +1995,8 @@ mod readline_mod_coverage {
     // to mask.len() so virt_scroll(-1) actually moves backward from the
     // "pending" sentinel position.
     line.history.constrain_entries(None);
-    line.editor.set_buffer(initial);
-    line.editor.move_cursor_to_end();
+    line.core.editor.set_buffer(initial);
+    line.core.editor.move_cursor_to_end();
     (line, g)
   }
 
@@ -2006,14 +2006,14 @@ mod readline_mod_coverage {
     // " && " (HAS_SHIFT) onto the current buffer.
     let (mut line, _g) = line_with_virt_history("current", &["prev_cmd"]);
     line.scroll_history_virtual(virtual_scroll_cmd(Motion::LineUp, true));
-    assert_eq!(line.editor.to_string(), "prev_cmd && current");
+    assert_eq!(line.core.editor.to_string(), "prev_cmd && current");
   }
 
   #[test]
   fn scroll_history_virtual_lineup_ctrl_prepends_with_semicolon() {
     let (mut line, _g) = line_with_virt_history("current", &["prev_cmd"]);
     line.scroll_history_virtual(virtual_scroll_cmd(Motion::LineUp, false));
-    assert_eq!(line.editor.to_string(), "prev_cmd; current");
+    assert_eq!(line.core.editor.to_string(), "prev_cmd; current");
   }
 
   #[test]
@@ -2022,10 +2022,10 @@ mod readline_mod_coverage {
     // Down then pops_left and reverses one step.
     let (mut line, _g) = line_with_virt_history("current", &["prev_cmd"]);
     line.scroll_history_virtual(virtual_scroll_cmd(Motion::LineUp, true));
-    assert_eq!(line.editor.to_string(), "prev_cmd && current");
+    assert_eq!(line.core.editor.to_string(), "prev_cmd && current");
     line.scroll_history_virtual(virtual_scroll_cmd(Motion::LineDown, true));
     // pop_left strips the prepended chunk
-    assert_eq!(line.editor.to_string(), "current");
+    assert_eq!(line.core.editor.to_string(), "current");
   }
 
   #[test]
@@ -2043,7 +2043,7 @@ mod readline_mod_coverage {
     // tie-break for equal `MAX(timestamp)` rows is unspecified — assert
     // structurally without pinning which entry won the tie.
     line.scroll_history_virtual(virtual_scroll_cmd(Motion::LineDown, true));
-    let joined = line.editor.to_string();
+    let joined = line.core.editor.to_string();
     assert!(
       joined == "current && alpha" || joined == "current && beta",
       "expected concat_right with one of the entries, got {joined:?}"
@@ -2067,6 +2067,6 @@ mod readline_mod_coverage {
     let (mut vi, _g) = test_vi("one two three four five");
     let keys = expand_keymap("<Esc>0dw3.");
     vi.process_input(keys).unwrap();
-    assert_eq!(vi.editor.to_string(), "three four five");
+    assert_eq!(vi.core.editor.to_string(), "three four five");
   }
 }

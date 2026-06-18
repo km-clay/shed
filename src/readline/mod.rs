@@ -6,6 +6,7 @@ use unicode_width::UnicodeWidthStr;
 
 mod complete;
 mod context;
+mod core;
 mod editcmd;
 mod editmode;
 mod highlight;
@@ -15,6 +16,8 @@ mod layout;
 mod linebuf;
 mod register;
 pub(super) mod stash;
+
+use self::core::EditorCore;
 
 use complete::{
   CompResponse, Completer, FuzzyCompleter, FuzzySelector, GridCompleter, SelectorResponse,
@@ -467,13 +470,9 @@ pub(super) struct ShedLine {
   statline: Option<StatusLine>,
   completer: Option<Box<dyn Completer>>,
 
-  mode: Box<dyn EditMode>,
-  saved_mode: Option<Box<dyn EditMode>>,
+  core: EditorCore,
   pending_keymap: Vec<KeyEvent>,
-  repeat_action: Option<CmdReplay>,
-  repeat_motion: Option<Cmd<Motion>>,
   repeat_macro: Option<RegisterName>,
-  editor: LineBuf,
   macro_record: MacroRecord,
 
   old_layout: Option<Layout>,
@@ -524,16 +523,12 @@ impl ShedLine {
       prompt,
       statline,
       completer: None,
-      mode,
-      saved_mode: None,
+      core: EditorCore::new(mode),
       pending_keymap: Vec::new(),
       old_layout: None,
       blank_rows_above: 0,
       overlay_displacement: 0,
-      repeat_action: None,
-      repeat_motion: None,
       repeat_macro: None,
-      editor: LineBuf::new(),
       macro_record: MacroRecord::Idle,
       history,
       ex_history,
@@ -545,7 +540,7 @@ impl ShedLine {
     Shed::vars_mut(|v| {
       v.set_var(
         "SHED_EDIT_MODE",
-        VarKind::string(new.mode.report_mode().to_string()),
+        VarKind::string(new.core.mode.report_mode().to_string()),
         VarFlags::empty(),
       )
     })?;
@@ -557,24 +552,24 @@ impl ShedLine {
 
   pub fn get_line_data(&self) -> LineData {
     LineData {
-      buffer: self.editor.to_string().replace('\n', "\\n"),
-      cursor: self.editor.cursor_to_flat(),
-      anchor: self.editor.anchor_to_flat(),
-      hint: self.editor.try_join_hint().map(|s| s.replace('\n', "\\n")),
-      mode: self.mode.report_mode().to_string(),
+      buffer: self.core.editor.to_string().replace('\n', "\\n"),
+      cursor: self.core.editor.cursor_to_flat(),
+      anchor: self.core.editor.anchor_to_flat(),
+      hint: self
+        .core
+        .editor
+        .try_join_hint()
+        .map(|s| s.replace('\n', "\\n")),
+      mode: self.core.mode.report_mode().to_string(),
     }
   }
 
   /// A mutable reference to the currently focused editor
   /// This includes the main `LineBuf`, and sub-editors for modes like Ex mode.
-  fn focused_editor(&mut self) -> &mut LineBuf {
-    self.mode.editor().unwrap_or(&mut self.editor)
-  }
-
   /// A mutable reference to the currently focused history, if any.
   /// This includes the main history struct, and history for sub-editors like Ex mode.
   fn focused_history(&mut self) -> &mut History {
-    self.mode.history().unwrap_or(&mut self.history)
+    self.core.mode.history().unwrap_or(&mut self.history)
   }
 
   fn history_fzf(&mut self) -> Option<&mut FuzzySelector> {
@@ -621,7 +616,7 @@ impl ShedLine {
     // Clear old display before resetting state - old_layout must survive
     // so print_line can call clear_rows with the full multi-line layout
     self.refresh_ui();
-    self.editor = LineBuf::default();
+    self.core.editor = LineBuf::default();
     Shed::vars_mut(|v| {
       v.set_var("EDITOR_LINES", VarKind::Int(1), VarFlags::READONLY)?;
       v.set_var("EDITOR_LINE", VarKind::Int(1), VarFlags::READONLY)?;
@@ -637,7 +632,7 @@ impl ShedLine {
     } else {
       Box::new(Emacs::new()) as Box<dyn EditMode>
     };
-    self.swap_mode(&mut mode);
+    self.core.swap_mode(&mut mode);
     self.needs_redraw = true;
     if full_redraw {
       self.old_layout = None;
@@ -678,7 +673,7 @@ impl ShedLine {
 
   pub fn curr_keymap_flags(&self) -> KeyMapFlags {
     let mut flags = KeyMapFlags::empty();
-    match self.mode.report_mode() {
+    match self.core.mode.report_mode() {
       ModeReport::Insert => flags |= KeyMapFlags::INSERT,
       ModeReport::Normal => flags |= KeyMapFlags::NORMAL,
       ModeReport::Ex => flags |= KeyMapFlags::EX,
@@ -690,7 +685,12 @@ impl ShedLine {
       ModeReport::Search | ModeReport::RevSearch => {}
     }
 
-    if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty()) {
+    if self
+      .core
+      .mode
+      .pending_seq()
+      .is_some_and(|seq| !seq.is_empty())
+    {
       flags |= KeyMapFlags::OP_PENDING;
     }
 
@@ -699,30 +699,34 @@ impl ShedLine {
 
   /// This method ensures that the editing mode (Vi or Emacs) matches the 'vi' option, and switches modes if necessary.
   pub fn fix_editing_mode(&mut self) {
-    if shopt!(set.vi) && self.mode.report_mode() == ModeReport::Emacs {
-      self.swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn EditMode>));
-    } else if !shopt!(set.vi) && self.mode.report_mode() != ModeReport::Emacs {
-      self.swap_mode(&mut (Box::new(Emacs::new()) as Box<dyn EditMode>));
+    if shopt!(set.vi) && self.core.mode.report_mode() == ModeReport::Emacs {
+      self
+        .core
+        .swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn EditMode>));
+    } else if !shopt!(set.vi) && self.core.mode.report_mode() != ModeReport::Emacs {
+      self
+        .core
+        .swap_mode(&mut (Box::new(Emacs::new()) as Box<dyn EditMode>));
     }
   }
 
   fn should_complete(&mut self) -> bool {
-    !self.focused_editor().cursor_in_leading_ws()
+    !self.core.focused_editor().cursor_in_leading_ws()
   }
 
   fn should_submit(&mut self) -> bool {
-    if self.mode.report_mode() == ModeReport::Normal {
+    if self.core.mode.report_mode() == ModeReport::Normal {
       return true;
     }
-    if self.editor.cursor_is_escaped()
+    if self.core.editor.cursor_is_escaped()
       && matches!(
-        self.mode.report_mode(),
+        self.core.mode.report_mode(),
         ModeReport::Emacs | ModeReport::Insert
       )
     {
       return false;
     }
-    let (depth, failed) = self.editor.cursor_indent_level();
+    let (depth, failed) = self.core.editor.cursor_indent_level();
     depth == 0 && !failed
   }
 
@@ -744,7 +748,7 @@ impl ShedLine {
         Shed::vars_mut(|v| {
           v.set_var(
             "SHED_EDIT_MODE",
-            VarKind::string(self.mode.report_mode().to_string()),
+            VarKind::string(self.core.mode.report_mode().to_string()),
             VarFlags::empty(),
           )
         })
@@ -755,7 +759,7 @@ impl ShedLine {
       SelectorResponse::Dismiss => {
         autocmd!(OnHistoryClose);
 
-        self.editor.clear_hint();
+        self.core.editor.clear_hint();
         if let Some(finder) = self.history_fzf() {
           finder.clear();
         }
@@ -763,7 +767,7 @@ impl ShedLine {
         Shed::vars_mut(|v| {
           v.set_var(
             "SHED_EDIT_MODE",
-            VarKind::string(self.mode.report_mode().to_string()),
+            VarKind::string(self.core.mode.report_mode().to_string()),
             VarFlags::empty(),
           )
         })
@@ -790,7 +794,7 @@ impl ShedLine {
       Shed::vars_mut(|v| {
         v.set_var(
           "SHED_EDIT_MODE",
-          VarKind::string(this.mode.report_mode().to_string()),
+          VarKind::string(this.core.mode.report_mode().to_string()),
           VarFlags::empty(),
         )
       })
@@ -807,8 +811,8 @@ impl ShedLine {
         let span_start = comp.token_span().0;
         let new_cursor = span_start + candidate.len();
         let line = comp.get_completed_line(&candidate);
-        self.focused_editor().set_buffer(&line);
-        self.focused_editor().set_cursor_from_flat(new_cursor);
+        self.core.focused_editor().set_buffer(&line);
+        self.core.focused_editor().set_cursor_from_flat(new_cursor);
 
         if !self.focused_history().at_pending() {
           self.focused_history().reset_to_pending();
@@ -824,7 +828,7 @@ impl ShedLine {
         Shed::vars_mut(|v| {
           v.set_var(
             "SHED_EDIT_MODE",
-            VarKind::string(self.mode.report_mode().to_string()),
+            VarKind::string(self.core.mode.report_mode().to_string()),
             VarFlags::empty(),
           )
         })
@@ -845,8 +849,8 @@ impl ShedLine {
         let span_start = comp.token_span().0;
         let new_cursor = span_start + candidate.len();
         let line = comp.get_completed_line(&candidate);
-        self.focused_editor().set_buffer(&line);
-        self.focused_editor().set_cursor_from_flat(new_cursor);
+        self.core.focused_editor().set_buffer(&line);
+        self.core.focused_editor().set_cursor_from_flat(new_cursor);
         self.update_editor_hint();
         self.needs_redraw = true;
         Ok(true)
@@ -928,7 +932,7 @@ impl ShedLine {
       Shed::vars_mut(|v| {
         v.set_var(
           "SHED_EDIT_MODE",
-          VarKind::string(self.mode.report_mode().to_string()),
+          VarKind::string(self.core.mode.report_mode().to_string()),
           VarFlags::empty(),
         )
       })
@@ -949,12 +953,12 @@ impl ShedLine {
   }
 
   fn try_comp_hint(&mut self) {
-    if !self.editor.cursor_at_max() {
+    if !self.core.editor.cursor_at_max() {
       return;
     }
 
-    let buf = self.editor.to_string();
-    let cursor_pos = self.editor.cursor_to_flat();
+    let buf = self.core.editor.to_string();
+    let cursor_pos = self.core.editor.cursor_to_flat();
     if !buf.is_empty() {
       self.worker.dispatch_worker(buf, cursor_pos);
     }
@@ -971,14 +975,21 @@ impl ShedLine {
     } else if self.completer.is_some() && self.handle_completion_key(&key)? {
       // self.handle_completion_key() returns true if we need to continue the loop
       Ok(None)
-    } else if self.mode.pending_seq().is_some_and(|seq| !seq.is_empty())
-      || self.mode.is_input_mode()
+    } else if self
+      .core
+      .mode
+      .pending_seq()
+      .is_some_and(|seq| !seq.is_empty())
+      || self.core.mode.is_input_mode()
     {
       // Vi mode is waiting for more input (e.g. after 'f', 'd', etc.)
       // Bypass keymap matching and send directly to the mode handler
       let ev = self.handle_key(&key)?;
-      self.update_editor_search();
-      self.editor.set_cursor_clamp(self.mode.clamp_cursor());
+      self.core.update_editor_search();
+      self
+        .core
+        .editor
+        .set_cursor_clamp(self.core.mode.clamp_cursor());
 
       Ok(ev)
     } else {
@@ -1006,15 +1017,16 @@ impl ShedLine {
   }
 
   fn accept_hint(&mut self) -> Option<ReadlineEvent> {
-    self.editor.edit(|e| {
+    self.core.editor.edit(|e| {
       e.accept_hint();
     });
     if !self.focused_history().at_pending() {
       self.focused_history().reset_to_pending();
     }
-    self
-      .history
-      .update_pending_cmd((&self.editor.to_string(), self.editor.cursor_to_flat()));
+    self.history.update_pending_cmd((
+      &self.core.editor.to_string(),
+      self.core.editor.cursor_to_flat(),
+    ));
     self.needs_redraw = true;
 
     None
@@ -1025,8 +1037,9 @@ impl ShedLine {
       return None;
     };
 
-    if self.mode.report_mode() != ModeReport::Ex
+    if self.core.mode.report_mode() != ModeReport::Ex
       && self
+        .core
         .editor
         .edit(|e| e.attempt_inline_expansion(&self.history))
     {
@@ -1039,8 +1052,8 @@ impl ShedLine {
       ModKeys::SHIFT => -1,
       _ => 1,
     };
-    let line = self.focused_editor().to_string();
-    let cursor_pos = self.focused_editor().cursor_byte_pos();
+    let line = self.core.focused_editor().to_string();
+    let cursor_pos = self.core.focused_editor().cursor_byte_pos();
 
     let mut comp = self
       .completer
@@ -1049,7 +1062,7 @@ impl ShedLine {
         CompleteStyle::Grid => Box::new(GridCompleter::new()),
         CompleteStyle::Fuzzy => Box::new(FuzzyCompleter::default()),
       });
-    let source = if self.mode.report_mode() == ModeReport::Ex {
+    let source = if self.core.mode.report_mode() == ModeReport::Ex {
       complete::CompSource::ExMode
     } else {
       complete::CompSource::Shell
@@ -1076,8 +1089,8 @@ impl ShedLine {
             .map(|c| c.len())
             .unwrap_or_default();
 
-        self.focused_editor().set_buffer(&line);
-        self.focused_editor().set_cursor_from_flat(new_cursor);
+        self.core.focused_editor().set_buffer(&line);
+        self.core.focused_editor().set_cursor_from_flat(new_cursor);
 
         if !self.focused_history().at_pending() {
           self.focused_history().reset_to_pending();
@@ -1086,7 +1099,7 @@ impl ShedLine {
         Shed::vars_mut(|v| {
           v.set_var(
             "SHED_EDIT_MODE",
-            VarKind::string(self.mode.report_mode().to_string()),
+            VarKind::string(self.core.mode.report_mode().to_string()),
             VarFlags::empty(),
           )
         })
@@ -1118,7 +1131,7 @@ impl ShedLine {
           .ok();
           self.refresh_ui();
           self.needs_redraw = true;
-          self.editor.clear_hint();
+          self.core.editor.clear_hint();
         } else {
           Shed::term_mut(Terminal::send_bell).ok();
         }
@@ -1130,18 +1143,19 @@ impl ShedLine {
   }
 
   fn start_hist_search(&mut self) {
-    let initial = self.focused_editor().to_string();
+    let initial = self.core.focused_editor().to_string();
     if let Some(entry) = self.focused_history().start_search(&initial) {
       with_vars([("HIST_ENTRY".into(), entry.clone())], || {
         autocmd!(OnHistorySelect);
       });
 
-      self.focused_editor().set_buffer(&entry);
-      self.focused_editor().move_cursor_to_end();
-      self
-        .history
-        .update_pending_cmd((&self.editor.to_string(), self.editor.cursor_to_flat()));
-      self.editor.clear_hint();
+      self.core.focused_editor().set_buffer(&entry);
+      self.core.focused_editor().move_cursor_to_end();
+      self.history.update_pending_cmd((
+        &self.core.editor.to_string(),
+        self.core.editor.cursor_to_flat(),
+      ));
+      self.core.editor.clear_hint();
     } else {
       let finder = self.history_fzf().unwrap();
       let entries = finder.candidates().to_vec();
@@ -1175,7 +1189,7 @@ impl ShedLine {
         .ok();
         self.refresh_ui();
         self.needs_redraw = true;
-        self.editor.clear_hint();
+        self.core.editor.clear_hint();
       } else {
         Shed::term_mut(Terminal::send_bell).ok();
       }
@@ -1183,25 +1197,28 @@ impl ShedLine {
   }
 
   pub(crate) fn in_insert_mode(&self) -> bool {
-    matches!(self.mode.report_mode(), ModeReport::Insert)
+    matches!(self.core.mode.report_mode(), ModeReport::Insert)
   }
 
   fn extract_line_nums(&self, cmd: &EditCmd) -> ShResult<Vec<usize>> {
     if let Some(Cmd(_, Verb::ExCmd(node))) = cmd.verb() {
-      return self.editor.lines_for_ex_node(node);
+      return self.core.editor.lines_for_ex_node(node);
     }
-    Ok(vec![self.editor.row()])
+    Ok(vec![self.core.editor.row()])
   }
 
   fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
-    self.editor.clear_hint();
-    self.editor.set_cursor_from_flat(self.editor.cursor_max());
+    self.core.editor.clear_hint();
+    self
+      .core
+      .editor
+      .set_cursor_from_flat(self.core.editor.cursor_max());
     self.print_line(true)?;
     if let Some(layout) = &self.old_layout {
       move_cursor_to_end(layout);
     }
     if shopt!(line.trim_on_submit) {
-      self.editor.trim();
+      self.core.editor.trim();
     }
 
     queue_term!(TermCtl::PrintChar('\r')).ok();
@@ -1212,7 +1229,7 @@ impl ShedLine {
     // overlay displacement is moot once the prompt is gone.
     self.blank_rows_above = 0;
     self.overlay_displacement = 0;
-    let buf = self.editor.take_buf();
+    let buf = self.core.editor.take_buf();
     self.focused_history().reset();
     Ok(Some(ReadlineEvent::Line(buf)))
   }
@@ -1226,14 +1243,14 @@ impl ShedLine {
       return Ok(Some(LineCmd::TriggerCompletion));
     } else if let key!(Ctrl + 'r') = key
       && matches!(
-        self.mode.report_mode(),
+        self.core.mode.report_mode(),
         ModeReport::Emacs | ModeReport::Insert | ModeReport::Ex
       )
     {
       return Ok(Some(LineCmd::TriggerHistSearch));
     }
 
-    let Ok(cmd) = self.mode.handle_key_fallible(key.clone()) else {
+    let Ok(cmd) = self.core.mode.handle_key_fallible(key.clone()) else {
       // it's an ex mode error
       return Ok(Some(LineCmd::switch_to_normal()));
     };
@@ -1273,7 +1290,7 @@ impl ShedLine {
     if let Some(Cmd(_, Verb::DeleteOrEof)) = cmd.verb_mut() {
       // user pressed Ctrl+D in emacs mode
       // we've gotta resolve this into either Delete or EndOfFile here
-      if self.focused_editor().is_empty() {
+      if self.core.focused_editor().is_empty() {
         return Ok(Some(LineCmd::EndOfFile));
       }
       cmd.verb_mut().unwrap().1 = Verb::Delete;
@@ -1282,15 +1299,15 @@ impl ShedLine {
       return Ok(Some(LineCmd::ClearScreen));
     }
 
-    if cmd.verb_is(&Verb::EndOfFile) && self.focused_editor().is_empty() {
+    if cmd.verb_is(&Verb::EndOfFile) && self.core.focused_editor().is_empty() {
       return Ok(Some(LineCmd::EndOfFile));
     } else if cmd.is_quit() {
-      if self.editor.open_file().is_some() {
+      if self.core.editor.open_file().is_some() {
         return Ok(Some(LineCmd::ResetWidget));
       }
       return Ok(Some(LineCmd::Quit));
     } else if cmd.is_write_quit() {
-      if self.editor.open_file().is_some() {
+      if self.core.editor.open_file().is_some() {
         return Ok(Some(LineCmd::WriteQuit));
       }
       return Ok(Some(LineCmd::Quit));
@@ -1351,32 +1368,32 @@ impl ShedLine {
         },
       };
 
-      self.editor.start_undo_merge();
+      self.core.editor.start_undo_merge();
       if let Ok(Some(event)) = self.replay_keys(events, false) {
-        self.editor.stop_undo_merge();
+        self.core.editor.stop_undo_merge();
         return Ok(Some(event));
       }
-      self.editor.stop_undo_merge();
+      self.core.editor.stop_undo_merge();
       return Ok(None);
     }
 
-    let before = self.editor.to_string();
-    let before_cursor = self.editor.cursor();
+    let before = self.core.editor.to_string();
+    let before_cursor = self.core.editor.cursor();
 
-    self.exec_cmd(cmd, false)?;
+    self.core.exec_cmd(cmd, false)?;
 
     if let Some(keys) = Shed::meta_mut(MetaTab::take_pending_widget_keys) {
       self.replay_keys(keys, false)?;
     }
-    let after = self.editor.to_string();
-    let after_cursor = self.editor.cursor();
+    let after = self.core.editor.to_string();
+    let after_cursor = self.core.editor.cursor();
 
     if before != after {
       self.history.mark_mask_stale();
     } else if before == after && has_edit_verb {
       Shed::term_mut(Terminal::send_bell).ok();
     } else if before_cursor == after_cursor && is_ctrl_d_motion {
-      if self.ctrl_d_warning_counter == 3 || self.editor.is_empty() {
+      if self.ctrl_d_warning_counter == 3 || self.core.editor.is_empty() {
         // our silly user is spamming ctrl+d for some reason
         // maybe they want to exit the shell?
         status_msg!("Ctrl+D only quits in insert mode. try ':q' or entering insert mode with 'i'");
@@ -1391,25 +1408,15 @@ impl ShedLine {
     Ok(None)
   }
 
-  fn update_editor_search(&mut self) {
-    if matches!(
-      self.mode.report_mode(),
-      ModeReport::RevSearch | ModeReport::Search
-    ) {
-      self.editor.update_pending_search(self.mode.pending_seq());
-      self.needs_redraw = true;
-    }
-  }
-
   pub fn handle_key(&mut self, key: &KeyEvent) -> ShResult<Option<ReadlineEvent>> {
     let Some(linecmd) = self.resolve_key(key)? else {
-      self.update_editor_search();
+      self.core.update_editor_search();
       self.needs_redraw = true;
       return Ok(None);
     };
     if !matches!(&linecmd, LineCmd::ScrollHistVirtual(_)) {
       self.focused_history().stop_virtual_scroll();
-      self.editor.clear_concats();
+      self.core.editor.clear_concats();
     }
 
     match linecmd {
@@ -1425,7 +1432,7 @@ impl ShedLine {
         Ok(None)
       }
       LineCmd::EndOfFile => {
-        if self.focused_editor().to_string().is_empty() {
+        if self.core.focused_editor().to_string().is_empty() {
           Ok(Some(ReadlineEvent::Eof))
         } else {
           self.reset_active_widget(false)?;
@@ -1466,20 +1473,27 @@ impl ShedLine {
       LineCmd::NormalSeq(line_nums, seq) => {
         let keys = expand_keymap(&seq);
 
-        self.editor.start_undo_merge();
+        self.core.editor.start_undo_merge();
         for line in line_nums {
-          self.editor.set_cursor(linebuf::Pos { row: line, col: 0 });
-          self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
+          self
+            .core
+            .editor
+            .set_cursor(linebuf::Pos { row: line, col: 0 });
+          self
+            .core
+            .swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
 
           if let Err(e) = self.replay_keys(keys.clone(), false) {
-            self.editor.stop_undo_merge();
+            self.core.editor.stop_undo_merge();
             return Err(e);
           }
         }
-        self.editor.stop_undo_merge();
+        self.core.editor.stop_undo_merge();
 
         // just in case
-        self.swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
+        self
+          .core
+          .swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
 
         Ok(None)
       }
@@ -1489,10 +1503,10 @@ impl ShedLine {
         Ok(None)
       }
       LineCmd::SubmitLine(cmd) => {
-        if self.editor.attempt_alias_expansion() {
+        if self.core.editor.attempt_alias_expansion() {
           self.update_editor_hint();
         }
-        if self.editor.attempt_history_expansion(&self.history) {
+        if self.core.editor.attempt_history_expansion(&self.history) {
           // If history expansion occurred, don't submit yet
           self.update_editor_hint();
 
@@ -1508,12 +1522,12 @@ impl ShedLine {
   }
 
   fn get_layout(&mut self, line: &str) -> Layout {
-    let to_cursor = self.editor.window_slice_to_cursor();
+    let to_cursor = self.core.editor.window_slice_to_cursor();
     let cols = Shed::term(Terminal::t_cols);
     let prompt = layout::pad_prompt_for_gutter(
       self.prompt.get_ps1(),
       line,
-      self.editor.scroll_offset(),
+      self.core.editor.scroll_offset(),
       cols,
     );
     Layout::from_parts(cols, &prompt, &to_cursor, line)
@@ -1533,6 +1547,7 @@ impl ShedLine {
     match motion {
       Motion::LineUp => {
         self
+          .core
           .editor
           .edit(|e| match self.history.virtual_scroll_direction() {
             Some(Direction::Forward) => {
@@ -1559,6 +1574,7 @@ impl ShedLine {
       }
       Motion::LineDown => {
         self
+          .core
           .editor
           .edit(|e| match self.history.virtual_scroll_direction() {
             Some(Direction::Backward) => {
@@ -1609,7 +1625,7 @@ impl ShedLine {
       // We are scrolling up from a pending command
       // Let's refresh the search mask to make sure
       // our history is up to date
-      let joined = self.editor.to_string();
+      let joined = self.core.editor.to_string();
       self.focused_history().update_search_mask(Some(&joined));
     }
     let entry = self.focused_history().scroll(count).cloned();
@@ -1617,15 +1633,15 @@ impl ShedLine {
   }
   fn swap_history_editor(&mut self, entry: Option<HistEntry>) {
     if let Some(entry) = entry {
-      let editor = std::mem::take(self.focused_editor());
-      self.focused_editor().set_buffer(entry.command());
+      let editor = std::mem::take(self.core.focused_editor());
+      self.core.focused_editor().set_buffer(entry.command());
       if self.focused_history().pending.is_none() {
         self.focused_history().pending = Some(editor);
       }
-      self.focused_editor().clear_hint();
-      self.focused_editor().move_cursor_to_end();
+      self.core.focused_editor().clear_hint();
+      self.core.focused_editor().move_cursor_to_end();
     } else if let Some(pending) = self.focused_history().pending.take() {
-      *self.focused_editor() = pending;
+      *self.core.focused_editor() = pending;
     } else {
       // If we are here it should mean we are on our pending command
       // And the user tried to scroll history down
@@ -1633,19 +1649,19 @@ impl ShedLine {
       Shed::term_mut(Terminal::send_bell).ok();
       return;
     }
-    let clamp = self.mode.clamp_cursor();
-    self.focused_editor().set_cursor_clamp(clamp);
-    self.focused_editor().fix_cursor();
+    let clamp = self.core.mode.clamp_cursor();
+    self.core.focused_editor().set_cursor_clamp(clamp);
+    self.core.focused_editor().fix_cursor();
   }
   fn should_accept_hint(&self, event: &KeyEvent) -> bool {
-    if self.editor.cursor_at_max() && self.editor.has_hint() {
-      match self.mode.report_mode() {
+    if self.core.editor.cursor_at_max() && self.core.editor.has_hint() {
+      match self.core.mode.report_mode() {
         ModeReport::Replace | ModeReport::Insert | ModeReport::Emacs => {
           matches!(event, KeyEvent(KeyCode::Right, ModKeys::NONE))
         }
         ModeReport::Visual | ModeReport::Normal => {
           matches!(event, KeyEvent(KeyCode::Right, ModKeys::NONE))
-            || (self.mode.pending_seq().unwrap(/* always Some on normal mode */).is_empty()
+            || (self.core.mode.pending_seq().unwrap(/* always Some on normal mode */).is_empty()
               && matches!(event, KeyEvent(KeyCode::Char('l'), ModKeys::NONE)))
         }
         _ => false,
@@ -1664,11 +1680,11 @@ impl ShedLine {
         && (cmd
           .motion()
           .is_some_and(|m| matches!(m, Cmd(_, Motion::LineUp)))
-          && self.editor.start_of_line() == 0)
+          && self.core.editor.start_of_line() == 0)
       || (cmd
         .motion()
         .is_some_and(|m| matches!(m, Cmd(_, Motion::LineDown)))
-        && self.editor.on_last_line())
+        && self.core.editor.on_last_line())
         && !cmd.flags.contains(CmdFlags::IS_SUBMIT)
   }
 
@@ -1708,18 +1724,18 @@ impl ShedLine {
     // messages; reserve two when the full statline is on as well.
     let reserved = Terminal::reserved_rows() as usize;
     let viewport_cap = t_rows.saturating_sub(prompt_lines + reserved).max(1);
-    self.editor.set_viewport_cap(Some(viewport_cap));
+    self.core.editor.set_viewport_cap(Some(viewport_cap));
 
-    let line = self.editor.display_window_joined();
+    let line = self.core.editor.display_window_joined();
     let mut new_layout = self.get_layout(&line);
 
     let pending_seq = self
       .macro_record
       .status()
-      .or_else(|| self.mode.pending_seq());
+      .or_else(|| self.core.mode.pending_seq());
     let mut prompt_string_right = self.prompt.psr_expanded.clone();
     let has_sub_editor = matches!(
-      self.mode.report_mode(),
+      self.core.mode.report_mode(),
       ModeReport::Ex | ModeReport::RevSearch | ModeReport::Search
     );
 
@@ -1814,8 +1830,8 @@ impl ShedLine {
       self.prompt.get_ps1(),
       &line,
       &new_layout,
-      self.editor.scroll_offset(),
-      self.editor.lines().len(),
+      self.core.editor.scroll_offset(),
+      self.core.editor.lines().len(),
     );
 
     let seq_fits = pending_seq
@@ -1830,7 +1846,7 @@ impl ShedLine {
       && !seq.is_empty()
       && !(prompt_string_right.is_some() && one_line)
       && seq_fits
-      && !self.mode.is_input_mode()
+      && !self.core.mode.is_input_mode()
     {
       // write our pending sequence
       let to_col = (t_cols - calc_str_width(&seq)) as u16;
@@ -1872,7 +1888,7 @@ impl ShedLine {
       new_layout.psr_end = Some(Layout::calc_pos(t_cols, &psr, psr_start, 0, false));
     }
 
-    queue_term!(TermCtl::Cursor(SetStyle(self.mode.cursor_style()),)).ok();
+    queue_term!(TermCtl::Cursor(SetStyle(self.core.mode.cursor_style()),)).ok();
 
     // Move to end of layout for overlay draws (completer, history search)
     let has_overlays = self.completer.is_some() || self.history_fzf().is_some();
@@ -1884,19 +1900,21 @@ impl ShedLine {
     }
 
     // write sub-prompts for stuff like ex mode
-    if let ModeReport::Ex | ModeReport::RevSearch | ModeReport::Search = self.mode.report_mode() {
-      let mut pending_seq = self.mode.pending_seq().unwrap_or_default();
-      let prefix_seq = match self.mode.report_mode() {
+    if let ModeReport::Ex | ModeReport::RevSearch | ModeReport::Search =
+      self.core.mode.report_mode()
+    {
+      let mut pending_seq = self.core.mode.pending_seq().unwrap_or_default();
+      let prefix_seq = match self.core.mode.report_mode() {
         ModeReport::Ex => ": ",
         ModeReport::RevSearch => "?",
         ModeReport::Search => "/",
         _ => unreachable!(),
       };
       let down = new_layout.end.row - new_layout.cursor.row;
-      if let ModeReport::Ex = self.mode.report_mode()
+      if let ModeReport::Ex = self.core.mode.report_mode()
         && shopt!(highlight.enable)
       {
-        let cursor_pos = self.focused_editor().cursor_to_flat();
+        let cursor_pos = self.core.focused_editor().cursor_to_flat();
         let mut highlighted = String::new();
         highlight::highlight_ex(
           &mut highlighted,
@@ -1919,7 +1937,7 @@ impl ShedLine {
       new_layout.end.row += 1;
       new_layout.cursor.row = new_layout.end.row;
       new_layout.cursor.col = {
-        let cursor_offset = self.mode.pending_cursor().unwrap_or(pending_seq.len());
+        let cursor_offset = self.core.mode.pending_cursor().unwrap_or(pending_seq.len());
         let before_cursor = pending_seq
           .graphemes(true)
           .take(cursor_offset)
@@ -2064,369 +2082,24 @@ impl ShedLine {
   }
 
   pub fn try_swap_mode_from_str(&mut self, name: &str) -> bool {
-    let Ok(mode) = name.parse::<ModeReport>() else {
-      // invalid mode report, ignore
-      return false;
-    };
-    let mut mode = mode.as_edit_mode();
-    self.swap_mode(&mut mode);
-    true
-  }
-
-  fn swap_mode(&mut self, mode: &mut Box<dyn EditMode>) {
-    autocmd!(PreModeChange);
-    defer!(autocmd!(PostModeChange));
-
-    std::mem::swap(&mut self.mode, mode);
-    self.editor.set_cursor_clamp(self.mode.clamp_cursor());
-    Shed::vars_mut(|v| {
-      v.set_var(
-        "SHED_EDIT_MODE",
-        VarKind::string(self.mode.report_mode().to_string()),
-        VarFlags::empty(),
-      )
-    })
-    .ok();
-    self.refresh_ui();
-  }
-
-  #[expect(clippy::too_many_lines)]
-  fn exec_mode_transition(&mut self, mut cmd: EditCmd, from_replay: bool) -> ShResult<()> {
-    let mut is_insert_mode = false;
-    let count = cmd.verb_count();
-
-    let mut mode: Box<dyn EditMode> = if matches!(
-      self.mode.report_mode(),
-      ModeReport::Ex | ModeReport::Verbatim
-    ) && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE)
-    {
-      if self.mode.report_mode() == ModeReport::Ex
-        && let Some(mode) = self.saved_mode.as_ref()
-        && let ModeReport::Visual = mode.report_mode()
-      {
-        self.editor.stop_selecting();
-        Box::new(ViNormal::new())
-      } else if let Some(saved) = self.saved_mode.take() {
-        saved
-      } else {
-        Box::new(ViNormal::new())
-      }
-    } else {
-      match cmd.verb().unwrap().1 {
-        Verb::Change | Verb::InsertModeLineBreak(_) | Verb::InsertMode => {
-          is_insert_mode = true;
-          Box::new(
-            ViInsert::new()
-              .with_count(count as u16)
-              .record_cmd(cmd.clone()),
-          )
-        }
-
-        Verb::ExMode => Box::new(ViEx::new(self.editor.is_selecting())),
-
-        Verb::VerbatimMode => {
-          Shed::term_mut(|t| t.verbatim_single(true));
-          Box::new(ViVerbatim::new().with_count(count as u16))
-        }
-
-        Verb::NormalMode => Box::new(ViNormal::new()),
-
-        Verb::ReplaceMode => Box::new(ViReplace::new()),
-
-        Verb::VisualModeSelectLast => {
-          if self.mode.report_mode() != ModeReport::Visual {
-            self.editor.start_char_select();
-          }
-          let mut mode: Box<dyn EditMode> = Box::new(ViVisual::new());
-          self.swap_mode(&mut mode);
-
-          return self.fire_editor_command(&cmd);
-        }
-        Verb::VisualMode => {
-          self.editor.start_char_select();
-          Box::new(ViVisual::new())
-        }
-        Verb::VisualModeLine => {
-          self.editor.start_line_select();
-          Box::new(ViVisual::new())
-        }
-
-        Verb::SearchMode => Box::new(ViSearch::new(count)),
-        Verb::RevSearchMode => Box::new(ViSearchRev::new(count)),
-
-        _ => unreachable!(),
-      }
-    };
-
-    // The mode we just created swaps places with our current mode
-    // After this line, 'mode' contains our previous mode.
-    self.swap_mode(&mut mode);
-
-    // check if we left insert/replace mode
-    if matches!(
-      mode.report_mode(), // 'mode' now contains the mode we just left
-      ModeReport::Insert | ModeReport::Replace
-    ) {
-      self.editor.stop_undo_merge();
-    }
-
-    // check if we entered ex/verbatim mode
-    if matches!(
-      self.mode.report_mode(),
-      ModeReport::Ex | ModeReport::Verbatim
-    ) {
-      self.saved_mode = Some(mode);
-      Shed::vars_mut(|v| {
-        v.set_var(
-          "SHED_EDIT_MODE",
-          VarKind::string(self.mode.report_mode().to_string()),
-          VarFlags::empty(),
-        )
-      })?;
-      self.refresh_ui();
-      return Ok(());
-    }
-
-    if mode.is_repeatable() && !from_replay {
-      self.repeat_action = mode.as_replay();
-    }
-
-    if let Some(range) = self.editor.select_range()
-      && cmd
-        .verb()
-        .is_some_and(|v| !matches!(v.1, Verb::VisualMode | Verb::VisualModeLine))
-    {
-      cmd.motion = Some(motion!(range));
-    }
-
-    // Set cursor clamp BEFORE executing the command so that motions
-    // (like EndOfLine for 'A') can reach positions valid in the new mode
-    self.editor.set_cursor_clamp(self.mode.clamp_cursor());
-    self.fire_editor_command(&cmd)?;
-
-    if mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_some() {
-      self.editor.stop_selecting();
-    }
-
-    if is_insert_mode {
-      self.editor.mark_insert_mode_start_pos();
-    } else {
-      self.editor.clear_insert_mode_start_pos();
-    }
-
-    Shed::vars_mut(|v| {
-      v.set_var(
-        "SHED_EDIT_MODE",
-        VarKind::string(self.mode.report_mode().to_string()),
-        VarFlags::empty(),
-      )
-    })?;
-    self.refresh_ui();
-
-    Ok(())
-  }
-
-  fn handle_cmd_repeat(&mut self, cmd: EditCmd) -> ShResult<()> {
-    let Some(replay) = self.repeat_action.clone() else {
-      return Ok(());
-    };
-    let EditCmd { verb, .. } = cmd;
-    let Cmd(count, _) = verb.unwrap();
-    match replay {
-      CmdReplay::ModeReplay { cmds, mut repeat } => {
-        if count > 1 {
-          repeat = count as u16;
-        }
-
-        let old_mode = self.mode.report_mode();
-
-        for _ in 0..repeat {
-          let cmds = cmds.clone();
-          for (i, cmd) in cmds.iter().enumerate() {
-            self.exec_cmd(cmd.clone(), true)?;
-            // After the first command, start merging so all subsequent
-            // edits fold into one undo entry (e.g. cw + inserted chars)
-            if i == 0 {
-              self.editor.start_undo_merge();
-            }
-          }
-          // Stop merging at the end of the replay
-          self.editor.stop_undo_merge();
-
-          let old_mode_clone: Box<dyn EditMode> = match old_mode {
-            ModeReport::Normal => Box::new(ViNormal::new()),
-            ModeReport::Insert => Box::new(ViInsert::new()),
-            ModeReport::Visual => Box::new(ViVisual::new()),
-            ModeReport::Replace => Box::new(ViReplace::new()),
-            ModeReport::Verbatim => Box::new(ViVerbatim::new()),
-            ModeReport::Emacs => Box::new(Emacs::new()),
-            ModeReport::Remote => Box::new(RemoteMode),
-            ModeReport::Ex => Box::new(ViEx::new(self.editor.is_selecting())),
-            ModeReport::Search => Box::new(ViSearch::new(1)),
-            ModeReport::RevSearch => Box::new(ViSearchRev::new(1)),
-          };
-          self.mode = old_mode_clone;
-        }
-      }
-      CmdReplay::Single(mut cmd) => {
-        if count > 1 {
-          // Override the counts with the one passed to the '.' command
-          if cmd.verb.is_some() {
-            if let Some(v_mut) = cmd.verb.as_mut() {
-              v_mut.0 = count;
-            }
-            if let Some(m_mut) = cmd.motion.as_mut() {
-              m_mut.0 = 1;
-            }
-          } else {
-            return Ok(()); // it has to have a verb to be repeatable,
-            // something weird happened
-          }
-        }
-        self.fire_editor_command(&cmd)?;
-      }
-    }
-    Ok(())
-  }
-
-  fn handle_motion_repeat(&mut self, cmd: EditCmd) -> ShResult<()> {
-    match cmd.motion.as_ref().unwrap() {
-      Cmd(count, Motion::RepeatMotion) => {
-        let Some(motion) = self.repeat_motion.clone() else {
-          return Ok(());
-        };
-        let repeat_cmd = EditCmd {
-          register: RegisterName::default(),
-          verb: cmd.verb,
-          motion: Some(motion),
-          raw_seq: format!("{count};"),
-          flags: CmdFlags::empty(),
-        };
-        self.fire_editor_command(&repeat_cmd)
-      }
-      Cmd(count, Motion::RepeatMotionRev) => {
-        let Some(motion) = self.repeat_motion.clone() else {
-          return Ok(());
-        };
-        let mut new_motion = invert_char_motion(motion);
-        new_motion.0 = *count;
-        let repeat_cmd = EditCmd {
-          register: RegisterName::default(),
-          verb: cmd.verb,
-          motion: Some(new_motion),
-          raw_seq: format!("{count},"),
-          flags: CmdFlags::empty(),
-        };
-        self.fire_editor_command(&repeat_cmd)
-      }
-      _ => unreachable!(),
-    }
-  }
-  fn exec_cmd(&mut self, mut cmd: EditCmd, from_replay: bool) -> ShResult<()> {
-    if cmd.verb().is_some()
-      && let Some(range) = self.editor.select_range()
-    {
-      cmd.motion = Some(motion!(range));
-    }
-
-    if cmd.flags.contains(CmdFlags::IS_CANCEL) {
-      self.editor.clear_pending_search();
-    }
-
-    if cmd.is_mode_transition() {
-      self.exec_mode_transition(cmd, from_replay)
-    } else if cmd.is_cmd_repeat() {
-      self.handle_cmd_repeat(cmd)
-    } else if cmd.is_motion_repeat() {
-      self.handle_motion_repeat(cmd)
-    } else {
-      if self.mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_none() {
-        self.editor.stop_selecting();
-        let mut mode: Box<dyn EditMode> = Box::new(ViNormal::new());
-        self.swap_mode(&mut mode);
-      }
-
-      if cmd.is_repeatable() && !from_replay {
-        let mut replay_cmd = cmd.clone();
-        if self.mode.report_mode() == ModeReport::Visual {
-          if let Some(shape_motion) = self.editor.select_mode() {
-            replay_cmd.motion = Some(motion!(shape_motion));
-          } else {
-            log::warn!("You're in visual mode with no select range??");
-          }
-        }
-        self.repeat_action = Some(CmdReplay::Single(Box::new(replay_cmd)));
-      }
-
-      if cmd.is_char_search() {
-        self.repeat_motion.clone_from(&cmd.motion);
-      }
-
-      self.fire_editor_command(&cmd)?;
-
-      self.update_editor_hint();
-
-      if self.mode.report_mode() == ModeReport::Visual
-        && cmd
-          .verb()
-          .is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank)
-      {
-        self.editor.stop_selecting();
-        let mut mode: Box<dyn EditMode> = Box::new(ViNormal::new());
-        self.swap_mode(&mut mode);
-      }
-
-      if self.mode.report_mode() != ModeReport::Visual && self.editor.select_range().is_some() {
-        self.editor.stop_selecting();
-      }
-
-      if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
-        let mut mode: Box<dyn EditMode> = if matches!(
-          self.mode.report_mode(),
-          ModeReport::Ex | ModeReport::Verbatim
-        ) {
-          if let Some(saved) = self.saved_mode.take() {
-            saved
-          } else {
-            Box::new(ViNormal::new())
-          }
-        } else {
-          Box::new(ViNormal::new())
-        };
-        self.swap_mode(&mut mode);
-      }
-
-      Ok(())
-    }
+    self.core.try_swap_mode_from_str(name)
   }
 
   fn update_editor_hint(&mut self) {
-    self
-      .history
-      .update_pending_cmd((&self.editor.to_string(), self.editor.cursor_to_flat()));
+    self.history.update_pending_cmd((
+      &self.core.editor.to_string(),
+      self.core.editor.cursor_to_flat(),
+    ));
     let hint = self.history.get_hint();
-    self.editor.set_hint(hint);
-  }
-
-  fn fire_editor_command(&mut self, cmd: &EditCmd) -> ShResult<()> {
-    let is_shell_cmd = cmd.is_shell_cmd();
-    let res = self.editor.exec_cmd(cmd);
-    self.needs_redraw = true;
-    self.refresh_statline();
-
-    if is_shell_cmd {
-      self.refresh_prompt();
-    }
-
-    res
+    self.core.editor.set_hint(hint);
   }
 
   pub(super) fn editor(&self) -> &LineBuf {
-    &self.editor
+    &self.core.editor
   }
 
   pub(super) fn editor_mut(&mut self) -> &mut LineBuf {
-    &mut self.editor
+    &mut self.core.editor
   }
 
   pub(super) fn pending_keymap(&self) -> &[KeyEvent] {
@@ -2447,10 +2120,10 @@ impl ShedLine {
 
   #[cfg(test)]
   pub fn with_initial(mut self, initial: &str) -> Self {
-    self.editor = LineBuf::new().with_initial(initial, 0);
+    self.core.editor = LineBuf::new().with_initial(initial, 0);
     {
-      let s = self.editor.to_string();
-      let c = self.editor.cursor_to_flat();
+      let s = self.core.editor.to_string();
+      let c = self.core.editor.cursor_to_flat();
       self.focused_history().update_pending_cmd((&s, c));
     }
     self

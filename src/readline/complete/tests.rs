@@ -696,7 +696,7 @@ fn tab_escapes_special_in_filename() {
   let keys = Shed::term_mut(Terminal::drain_keys);
   let _ = vi.process_input(keys);
 
-  let line = vi.editor.to_string();
+  let line = vi.core.editor.to_string();
   assert!(
     line.contains("hello\\ world.txt"),
     "expected escaped space in completion: {line:?}"
@@ -719,7 +719,7 @@ fn tab_does_not_escape_user_text() {
   let keys = Shed::term_mut(Terminal::drain_keys);
   let _ = vi.process_input(keys);
 
-  let line = vi.editor.to_string();
+  let line = vi.core.editor.to_string();
   // The user's "my\ " should be preserved, not double-escaped to "my\\\ "
   assert!(
     !line.contains("my\\\\ "),
@@ -882,7 +882,7 @@ fn tab_completes_filename() {
   let keys = Shed::term_mut(Terminal::drain_keys);
   let _ = vi.process_input(keys);
 
-  let line = vi.editor.to_string();
+  let line = vi.core.editor.to_string();
   assert!(
     line.contains("unique_shed_test_file.txt"),
     "expected completion in line: {line:?}"
@@ -903,7 +903,7 @@ fn tab_completes_directory_with_slash() {
   let keys = Shed::term_mut(Terminal::drain_keys);
   let _ = vi.process_input(keys);
 
-  let line = vi.editor.to_string();
+  let line = vi.core.editor.to_string();
   assert!(
     line.contains("mysubdir/"),
     "expected dir completion with trailing slash: {line:?}"
@@ -925,7 +925,7 @@ fn tab_after_equals() {
   let keys = Shed::term_mut(Terminal::drain_keys);
   let _ = vi.process_input(keys);
 
-  let line = vi.editor.to_string();
+  let line = vi.core.editor.to_string();
   assert!(
     line.contains("--opt=eqfile.txt"),
     "expected completion after '=': {line:?}"
