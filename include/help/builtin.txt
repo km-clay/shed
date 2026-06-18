@@ -56,6 +56,7 @@ The following builtins are available:
   `shopt`       get or set shell options                    |builtin-shopt|
   `source`      execute a file in the current shell         |builtin-source|
   `[[`          evaluate conditional expressions            |builtin-test|
+  `thru`        pass stdin to stdout, optionally tee/limit  |builtin-thru|
   `times`       print shell and child CPU times             |builtin-times|
   `trap`        set signal handlers                         |builtin-trap|
   `true`        return exit status 0                        |builtin-true|
@@ -1991,6 +1992,88 @@ SOURCE                                           *builtin-source* *source*
       `[[ -z $reply ]] && echo "empty"`
       `[[ -i $port ]] || raise "port must be an integer"`
       `[[ -F $ratio && -F $threshold ]] || raise "expected numeric inputs"`
+
+==============================================================================
+THRU                                             *builtin-thru* *thru*
+
+  `thru [-c] [-t {dest}] [-a] [-L {bytes}]`
+
+  Pass standard input to standard output unchanged. Equivalent to a fork-free
+  `cat` with no arguments. Intended for two main use cases:
+
+    - Capturing stdin into a variable without spawning an external process:
+      `var=$(thru)` instead of `var=$(cat)`.
+    - Acting as a no-op stage in a pipeline that can optionally tee, count,
+      or limit the byte stream without disturbing the data flow.
+
+  With no flags, `thru` is the identity function for byte streams: every
+  byte read from stdin is written to stdout unchanged.
+
+  Options ~
+
+    `-t {dest}`, `--tee {dest}`
+                  Write a copy of the stream to {dest} in addition to
+                  stdout. {dest} can be a regular file path or any
+                  filesystem path that the operating system maps to an
+                  open file descriptor (`/dev/stderr`, `/dev/stdout`,
+                  `/dev/fd/N`). By default the destination file is
+                  truncated if it exists.
+
+    `-a`, `--append`
+                  Append to the tee destination instead of truncating it.
+                  Only meaningful when `-t` is also given.
+
+    `-c`, `--count`
+                  After draining stdin, write the total number of bytes
+                  that passed through to standard error. Does not affect
+                  the pass-through output.
+
+    `-L {bytes}`, `--limit {bytes}`
+                  Pass through at most {bytes} bytes from stdin. Excess
+                  input is discarded. The byte count snaps down to the
+                  nearest UTF-8 character boundary so multi-byte characters
+                  are never split.
+
+  Behavior notes ~
+
+    Errors writing to the tee destination are reported on stderr but do
+    not interrupt the pass-through; the primary stream-to-stdout flow
+    continues even if the side-channel write fails. Pipelines composed
+    with `thru -t` therefore stay live even when the tee target becomes
+    unavailable mid-stream (full disk, removed mount, etc.).
+
+    When `-t` and `-c` are both given, the count reflects the bytes that
+    were actually emitted (after `-L` truncation, if any). All side
+    effects observe the same final byte count.
+
+  Examples ~
+
+      `var=$(thru)`
+                                slurp stdin into `$var` without forking
+                                an external `cat`
+
+      `producer | thru -t /dev/stderr | consumer`
+                                live-debug a pipeline: stream continues
+                                to `consumer` while a copy is mirrored
+                                to the terminal via stderr
+
+      `producer | thru -t /tmp/snapshot.sqr | consumer`
+                                capture a single run's data to a file for
+                                later inspection
+
+      `producer | thru -t log.txt -a | consumer`
+                                append-mode tee, useful for accumulating
+                                output across multiple runs
+
+      `huge_producer | thru -L 4096 | inspect`
+                                cap the stream at 4 KB, useful for
+                                sampling unbounded producers
+
+      `producer | thru -c | consumer`
+                                report total bytes through this stage on
+                                stderr at end of run
+
+  See also: |builtin-quote|, |quoted-streams|
 
 ==============================================================================
 TRAP                                             *builtin-trap* *trap*

@@ -213,6 +213,7 @@ register_builtins! {
   "source"   => source::Source,
   "stash"    => stash::StashBuiltin,
   "test"     => test::Test,
+  "thru"     => Thru,
   "times"    => times::Times,
   "trap"     => trap::Trap,
   "true"     => True,
@@ -223,6 +224,7 @@ register_builtins! {
   "unquote"  => quote::Unquote,
   "unset"    => varcmds::Unset,
   "wait"     => jobctl::Wait,
+  "width"    => width::Width,
 }
 
 /// Lookup a name in the builtin table via binary search
@@ -478,6 +480,105 @@ struct False;
 impl Builtin for False {
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     with_status(1)
+  }
+}
+
+struct Thru;
+impl Builtin for Thru {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::flag('c'),
+      OptSpec::flag("count"),
+      OptSpec::flag('a'),
+      OptSpec::flag("append"),
+      OptSpec::single_arg('t'),
+      OptSpec::single_arg("tee"),
+      OptSpec::single_arg('L'),
+      OptSpec::single_arg("limit"),
+    ]
+  }
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
+    let mut input = if args.argv.is_empty() || args.has_stdin() {
+      if let Some(stdin) = args.take_stdin() {
+        stdin
+      } else {
+        procio::read_input()?
+      }
+    } else {
+      return with_status(0);
+    };
+
+    let mut count = false;
+    let mut append = false;
+    let mut tee = None;
+    let mut limit = None;
+
+    for opt in &args.opts {
+      match opt {
+        Opt::LongWithArg(flag, arg) => match flag.as_str() {
+          "tee" => tee = Some(arg.clone()),
+          "append" => append = true,
+          "count" => count = true,
+          "limit" => limit = Some(arg.clone()),
+          _ => {}
+        },
+        Opt::ShortWithArg('t', dest) => tee = Some(dest.clone()),
+        Opt::ShortWithArg('L', dest) => limit = Some(dest.clone()),
+        Opt::Short('c') => count = true,
+        Opt::Short('a') => append = true,
+        _ => {}
+      }
+    }
+
+    if append && tee.is_none() {
+      errln!("thru: warning: -a/--append ignored without -t/--tee");
+    }
+
+    if let Some(limit) = limit {
+      match limit.parse::<usize>() {
+        Ok(mut n) => {
+          n = n.min(input.len());
+          while n > 0 && !input.is_char_boundary(n) {
+            n -= 1;
+          }
+          input.truncate(n);
+        }
+        Err(e) => {
+          errln!("thru: invalid limit {limit}: {e}");
+        }
+      }
+    }
+
+    if count {
+      let n = input.len();
+      errln!("thru: {n} bytes");
+    }
+
+    if let Some(dest) = tee {
+      let file = if append {
+        std::fs::OpenOptions::new()
+          .create(true)
+          .append(true)
+          .open(&dest)
+      } else {
+        std::fs::File::create(&dest)
+      };
+      match file {
+        Ok(mut f) => {
+          use std::io::Write;
+          if let Err(e) = f.write_all(input.as_bytes()) {
+            errln!("thru: failed to write to {dest}: {e}");
+          }
+        }
+        Err(e) => {
+          errln!("thru: failed to open {dest} for writing: {e}");
+        }
+      }
+    }
+
+    out!("{input}");
+
+    with_status(0)
   }
 }
 
