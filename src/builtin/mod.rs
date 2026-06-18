@@ -114,8 +114,8 @@ mod intro;
 mod jobctl;
 mod keymap;
 mod msg;
-mod pwd;
 mod printf;
+mod pwd;
 mod quote;
 mod read;
 mod resource;
@@ -129,6 +129,7 @@ mod test; // [[ ]] thing
 mod times;
 mod trap;
 mod varcmds;
+mod width;
 
 use getopt::{Opt, OptSpec, get_opts_from_tokens, get_opts_from_tokens_strict};
 pub(crate) use help::HELP_PAGE_INSTALL_DIR;
