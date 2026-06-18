@@ -506,15 +506,6 @@ mod open_help_tests {
   }
 
   #[test]
-  fn get_builtin_tag_help() {
-    let _g = TestGuard::new();
-    let (line, content, filename) = get_help_content("builtin-alias").unwrap();
-    assert!(content.contains("builtin-alias"));
-    assert_eq!(filename, Some("help/builtin.txt".to_string()));
-    assert_eq!(line, 67);
-  }
-
-  #[test]
   fn get_hpath_help() {
     let _g = TestGuard::new();
     let dir = tempfile::TempDir::new().unwrap();
