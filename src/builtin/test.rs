@@ -143,7 +143,15 @@ fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
     UnaryOp::SetUID => stat::stat(operand).is_ok_and(|s| s.st_mode & nix::libc::S_ISUID != 0),
     UnaryOp::SetGID => stat::stat(operand).is_ok_and(|s| s.st_mode & nix::libc::S_ISGID != 0),
     UnaryOp::Terminal => match operand.parse::<i32>() {
-      Ok(fd) => isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false),
+      Ok(fd) => match fd {
+        1 => {
+          !super::has_out_sink() && isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false)
+        }
+        0 => {
+          !super::has_in_sink() && isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false)
+        }
+        _ => isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false),
+      },
       Err(_) => false,
     },
     UnaryOp::NonNull => !operand.is_empty(),
