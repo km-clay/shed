@@ -119,10 +119,9 @@ impl super::Builtin for GetOpts {
 
 fn advance_optind(opt_index: usize, amount: usize) -> ShResult<()> {
   Shed::vars_mut(|v| {
-    v.set_var(
+    v.update_var(
       "OPTIND",
       VarKind::Str((opt_index + amount).to_string().into()),
-      VarFlags::LOCAL,
     )
   })
 }
@@ -381,7 +380,14 @@ mod tests {
   }
 
   #[test]
-  fn optind_reset_after_scope_pop() {
+  fn optind_scoped_to_function_call() {
+    // Each function call starts with a fresh OPTIND=1, set via
+    // VarFlags::LOCAL inside exec_func. Modifications inside the
+    // function's while-getopts loop are visible throughout the
+    // function body (survive the loop scope), but vanish when the
+    // function returns, restoring the caller's OPTIND. This is more
+    // user-friendly than bash's "global by default; remember to
+    // local OPTIND yourself" convention.
     let g = TestGuard::new();
     test_input(
       r#"
@@ -399,6 +405,59 @@ mod tests {
 
     let output = g.read_output();
     assert_eq!(output, "opt: a, OPTIND: 2\nopt: b, OPTIND: 3\nOPTIND: 1\n");
+  }
+
+  #[test]
+  fn optind_fresh_for_each_function_call() {
+    // Pipeline-style use case: multiple functions each parse their
+    // own args via getopts. Each function should see OPTIND=1 at
+    // entry, regardless of what previous getopts calls left behind.
+    let g = TestGuard::new();
+    test_input(
+      r#"
+			outer() {
+				while getopts ab opt; do :; done
+				echo "outer after: $OPTIND"
+				inner -x
+				echo "outer after inner: $OPTIND"
+			}
+			inner() {
+				echo "inner entry: $OPTIND"
+				while getopts x opt; do :; done
+				echo "inner after: $OPTIND"
+			}
+			outer -a -b
+		"#,
+    )
+    .unwrap();
+
+    let output = g.read_output();
+    assert_eq!(
+      output,
+      "outer after: 3\ninner entry: 1\ninner after: 2\nouter after inner: 3\n"
+    );
+  }
+
+  #[test]
+  fn optind_survives_loop_scope_within_function() {
+    // The specific regression case from the bug report: OPTIND must be
+    // correct AFTER the while-getopts loop exits but BEFORE the function
+    // returns. The old VarFlags::LOCAL behavior made it revert to 1 the
+    // moment the loop body's scope frame was popped.
+    let g = TestGuard::new();
+    test_input(
+      r#"
+			func() {
+				while getopts abcd opt; do :; done
+				echo "after loop: $OPTIND"
+			}
+			func -a -b -c -d
+		"#,
+    )
+    .unwrap();
+
+    let output = g.read_output();
+    assert_eq!(output.trim(), "after loop: 5");
   }
 
   // ===================== Multiple calls (loop simulation) =====================

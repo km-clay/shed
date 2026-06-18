@@ -668,6 +668,10 @@ impl Dispatcher {
     let _guard = scope_guard(Some(argv));
     let _func_guard = Shed::meta_mut(MetaTab::enter_func);
 
+    // getopts OPTIND variable
+    // scoped per-script and per-function call
+    Shed::vars_mut(|v| v.set_var("OPTIND", VarKind::Int(1), VarFlags::LOCAL)).ok();
+
     for ctx in caller_contexts.into_iter().rev() {
       func_body.propagate_context(&ctx);
     }
