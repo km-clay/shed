@@ -3,10 +3,9 @@ use itertools::Itertools;
 use crate::{
   ShResult, Shed,
   builtin::getopt::OptSpec,
-  eval::lex::{LexFlags, LexStream},
-  expand, out, outln, procio,
+  expand, match_loop, out, outln, procio,
   state::vars::{VarFlags, VarKind},
-  util::with_status,
+  util::{expand_ansi_c, with_status},
 };
 
 use super::getopt::Opt;
@@ -107,13 +106,56 @@ impl super::Builtin for Unquote {
 }
 
 pub(crate) fn unquote_raw(s: &str) -> ShResult<Vec<String>> {
-  let tokens = LexStream::new(s.into(), LexFlags::empty());
   let mut fields = vec![];
+  let mut field = String::new();
+  let mut chars = s.chars().peekable();
+  let mut started = false;
 
-  for tk in tokens {
-    let tk = tk?;
+  match_loop!(chars.next() => ch, {
+    '\\' => {
+      started = true;
+      if let Some(next) = chars.next() {
+        field.push(next);
+      }
+    }
+    '\'' => {
+      started = true;
+      match_loop!(chars.next() => ch, {
+        '\'' => break,
+        _ => field.push(ch),
+      })
+    }
+    '$' if chars.peek() == Some(&'\'') => {
+      started = true;
+      chars.next();
+      let mut raw = String::new();
+      match_loop!(chars.next() => ch, {
+        '\'' => break,
+        '\\' => {
+          raw.push('\\');
+          if let Some(next) = chars.next() {
+            raw.push(next);
+          }
+        }
+        _ => raw.push(ch),
+      });
 
-    fields.extend(tk.expand_to_words()?);
+      field.push_str(&expand_ansi_c(&raw));
+    }
+    _ if ch.is_whitespace() => {
+      if started {
+        fields.push(std::mem::take(&mut field));
+        started = false;
+      }
+    }
+    _ => {
+      started = true;
+      field.push(ch);
+    }
+  });
+
+  if started {
+    fields.push(field);
   }
 
   Ok(fields)
