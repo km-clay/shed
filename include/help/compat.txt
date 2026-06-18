@@ -1,0 +1,85 @@
+*compat* *compatibility* *extensions* *deviations* *posix-compat* *bash-compat*
+
+#COMPATIBILITY#
+
+Shed aims to run `POSIX` `sh` scripts and most `bash` idioms unchanged, but it
+deliberately adds features neither provides, and in a few places it
+intentionally behaves differently. This page is the catalog of both.
+
+It is an index, not a manual: each entry links to the page where the
+feature is documented in full. If something here surprises you, follow
+the link for the details and rationale.
+
+Two kinds of difference are tracked:
+
+  |shed-extensions|   features `shed` provides that `bash`/`POSIX` do not
+  |shed-deviations|   places `shed` intentionally behaves differently
+
+Any incompatibilities not listed here are bugs, not deviations. If you have
+found any deviations that are not listed here, please open an issue at
+`https://github.com/km-clay/shed`
+
+==============================================================================
+EXTENSIONS                                                  *shed-extensions*
+
+  Features unique to `shed`. Using these makes a script `shed`-specific.
+
+  Structured data (SQR) ~                                  *shed-ext-data*
+
+    `quote`       encode arguments as a shell-quoted record   |builtin-quote|
+    `unquote`     decode a shell-quoted record into fields    |builtin-unquote|
+    `read -q`     read a shell-quoted record into fields      |builtin-read|
+
+  Utilities ~                                              *shed-ext-util*
+
+    `printf %r`   repeat the argument string N times          |builtin-printf|
+    `thru`        fork-free `cat`/`tee` replacement           |builtin-thru|
+    `width`       display width of a string in columns        |builtin-width|
+    `flog`        write a formatted log message               |builtin-flog|
+    `seek`        seek a file descriptor to an offset (lseek) |builtin-seek|
+
+  Scripting & syntax ~                                     *shed-ext-script*
+
+    `arrops`      array push/pop/rotate operations            |builtin-arrops|
+    `raise`       raise a user-facing error                   |builtin-raise|
+    `try`/`catch` guarded block, forces errexit + pipefail    |script-try|
+    `defer`       run a command when the scope exits          |script-defer|
+    `test -i/-F`  integer & float type checks for `[`         |test-numeric|
+    `~uid`        tilde expansion by numeric UID              |tilde-uid|
+    `${...}`      expansion sets `$?` to changed/no-op        |param-status|
+
+  Interactive & shell ~                                    *shed-ext-interactive*
+
+    `autocmd`     run hooks on shell events                   |builtin-autocmd|
+    `compadd`     register tab-completion candidates          |builtin-compadd|
+    `keymap`      define custom key bindings                  |builtin-keymap|
+    `hist`        query and manage shell history              |builtin-hist|
+    `stash`       save and recall command snippets            |builtin-stash|
+    `msg`         post a message to the status bar            |builtin-msg|
+    `readkey`     read a single keypress                      |builtin-readkey|
+    `genrc`       regenerate the rc file from live state      |builtin-genrc|
+
+==============================================================================
+DEVIATIONS                                                  *shed-deviations*
+
+  Places where `shed` intentionally diverges from `bash`/`POSIX`. Each is a
+  considered choice, not an accident.
+
+  `read -a`       A field that renders to no glyphs (a lone color
+                  escape, a combining mark) is glued onto the next
+                  field rather than standing alone. `bash` keeps it
+                  as its own element. This lets colored, column-
+                  aligned command output (`eza`, `ls`, `ps`) split
+                  cleanly. Genuine empty fields (zero bytes) are
+                  preserved.                                   |builtin-read|
+
+  `local`         Binds to whatever scope frame is current (brace
+                  group, loop, `if` body), not only functions as
+                  in `bash`.                                    |builtin-local|
+
+  arrays          A bare `$arr` expands to every element of the array,
+                  and `${#arr}` is the element count. In `bash`, `$arr`
+                  is just `${arr[0]}` and `${#arr}` is the length of
+                  that first element.                          |variables|
+
+==============================================================================

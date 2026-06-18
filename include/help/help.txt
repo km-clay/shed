@@ -33,6 +33,7 @@ Cross-reference links can also be `clicked` directly with the mouse.
   `help variables`    Variables, assignment, arrays, attributes    |variables|
   `help arith`        Arithmetic expansion: `$(( ))` syntax          |arith|
   `help commands`     Common command cheat sheet                   |commands|
+  `help compat`       Extensions and POSIX/bash deviations         |compat|
   `help glob`         Pathname expansion and wildcards             |glob|
   `help param`        Parameter expansion: `${}` operators           |param|
   `help redirect`     Redirection, pipes, heredocs                 |redirect|
