@@ -43,12 +43,6 @@ executable with a shebang line:
           `echo 'hello $USER'`      # prints "hello $USER"
           `echo '$((1+2))'`         # prints "$((1+2))"
 
-      Notably, in `shed` single quotes can be escaped inside of single quotes.
-      This is an intentional deviation from the POSIX specification. It is the
-      only case where backslashes are recognized inside single quotes.
-
-          `echo 'it\'s'`          # prints "it's" (end, escape, restart)
-
   1.3 Double Quotes                              *script-double-quote*
 
       Double quotes allow variable expansion, command substitution,
