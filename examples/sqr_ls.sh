@@ -22,5 +22,7 @@ qls() {
 		fi
 	done
 
+	# __emit_sqr is a helper included in include/functions
+	# it pipes to qtable if stdout is a tty, and passes through otherwise
 	echo "$buf" | qname mode size user date name | __emit_sqr -n
 }
