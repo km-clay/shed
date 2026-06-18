@@ -67,7 +67,7 @@ The following builtins are available:
   `unquote`     decode shell-quoted input into fields       |builtin-unquote|
   `unset`       remove variables or functions               |builtin-unset|
   `wait`        wait for background jobs to finish          |builtin-wait|
-  `width`       print the display width of a string          |builtin-width|
+  `width`       print the display width of a string         |builtin-width|
 
 ==============================================================================
 ALIAS                                            *builtin-alias* *alias*

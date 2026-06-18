@@ -21,16 +21,17 @@ For the language reference on writing your own functions, see
 
 The following functions are bundled:
 
-  `logout`      exit a login shell                          |function-logout|
-  `qcount`      count records or fields in a quoted stream  |function-qcount|
-  `qmap`        transform each record via a lambda          |function-qmap|
-  `qpad`        normalize records to uniform field count    |function-qpad|
-  `qpipe`       pipe each record through an external command|function-qpipe|
-  `qselect`     project or reorder fields in records        |function-qselect|
-  `qtable`      render a quoted stream as a table           |function-qtable|
-  `qwhere`      filter records by a predicate               |function-qwhere|
-  `split`       split a string by a pattern                 |function-split|
-  `version`     print the shed version                      |function-version|
+  `logout`      exit a login shell                           |function-logout|
+  `qcount`      count records or fields in a quoted stream   |function-qcount|
+  `qmap`        transform each record via a lambda           |function-qmap|
+  `qname`       prepend a header record to a stream          |function-qname|
+  `qpad`        normalize records to uniform field count     |function-qpad|
+  `qpipe`       pipe each record through an external command |function-qpipe|
+  `qselect`     project or reorder fields in records         |function-qselect|
+  `qtable`      render a quoted stream as a table            |function-qtable|
+  `qwhere`      filter records by a predicate                |function-qwhere|
+  `split`       split a string by a pattern                  |function-split|
+  `version`     print the shed version                       |function-version|
 
 Quoted Stream Adapters ~                                  *quoted-streams*
 
@@ -56,8 +57,9 @@ Quoted Stream Adapters ~                                  *quoted-streams*
 
 Named streams ~                                          *named-streams*
 
-  Several adapters accept `-n` to treat the first record of the stream
-  as a header naming each field. With `-n`:
+  |qname|(function-qname) builds a named stream by prepending a header
+  record to its input. From there, several adapters accept `-n` to
+  treat that first record as a header naming each field. With `-n`:
 
     - |qcount|(function-qcount) skips the header before counting
     - |qmap|(function-qmap) binds each field by its header name as a
@@ -157,6 +159,36 @@ QMAP                                             *function-qmap* *qmap*
                           resolve path in field 1 to its absolute form
 
   See also: |quoted-streams|, |named-streams|, |function-qwhere|
+
+==============================================================================
+QNAME                                            *function-qname* *qname*
+
+  `qname {name} [{name} ...]`
+
+  Prepend a header record to a quoted stream. Each {name} becomes one
+  field of a header record emitted ahead of the input, turning a plain
+  stream into a named stream (see |named-streams|). The names are
+  encoded with |quote|(builtin-quote) like any other record, and the
+  original input follows unchanged.
+
+  This is the producer side of the `-n` convention: downstream
+  adapters invoked with `-n` will treat the record `qname` emits as
+  the header.
+
+  The whole stream is buffered so the header can be emitted first.
+
+  Examples:
+
+      `producer | qname name size user`
+                          label a three-field stream
+
+      `producer | qname name size user | qtable -n`
+                          name the columns, then render with headings
+
+      `producer | qname name size | qwhere -n '[ "$size" -gt 0 ]'`
+                          name the columns, then filter by name
+
+  See also: |quoted-streams|, |named-streams|, |function-qtable|
 
 ==============================================================================
 QPAD                                             *function-qpad* *qpad*
