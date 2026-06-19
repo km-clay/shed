@@ -26,19 +26,23 @@ mod search;
 mod verbatim;
 mod visual;
 
-pub(super) use emacs::Emacs;
-pub(super) use ex::{
-  AddressRange, COMMANDS, ExCommand, ExLexer, ExLineAddr, ExNdRule, ExNode, ExTk, ExTkRule,
-  SubFlags, ViEx,
+pub(crate) use self::{
+  emacs::Emacs,
+  ex::ViEx,
+  insert::ViInsert,
+  normal::ViNormal,
+  parse::{ParseResult, ViParser},
+  remote::RemoteMode,
+  replace::ViReplace,
+  search::{ViSearch, ViSearchRev},
+  verbatim::ViVerbatim,
+  visual::ViVisual,
 };
-pub(super) use insert::ViInsert;
-pub(super) use normal::ViNormal;
-pub(super) use parse::{ParseResult, ViParser};
-pub(super) use remote::RemoteMode;
-pub(super) use replace::ViReplace;
-pub(super) use search::{ViSearch, ViSearchRev};
-pub(super) use verbatim::ViVerbatim;
-pub(super) use visual::ViVisual;
+
+pub(crate) use ex::{
+  AddressRange, COMMANDS, ExCommand, ExLexer, ExLineAddr, ExNdRule, ExNode, ExTk, ExTkRule,
+  SubFlags,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ModeReport {
@@ -55,7 +59,7 @@ pub(crate) enum ModeReport {
 }
 
 impl ModeReport {
-  pub(super) fn as_edit_mode(self) -> Box<dyn EditMode> {
+  pub(crate) fn as_edit_mode(self) -> Box<dyn EditMode> {
     match self {
       ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn EditMode>,
       ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn EditMode>,
@@ -106,7 +110,7 @@ impl FromStr for ModeReport {
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum CmdReplay {
+pub(crate) enum CmdReplay {
   ModeReplay { cmds: Vec<EditCmd>, repeat: u16 },
   Single(Box<EditCmd>),
 }
@@ -117,13 +121,13 @@ impl CmdReplay {
   }
 }
 
-pub(super) enum CmdState {
+pub(crate) enum CmdState {
   Pending,
   Complete,
   Invalid,
 }
 
-pub(super) trait EditMode {
+pub(crate) trait EditMode {
   fn handle_key_fallible(&mut self, key: E) -> ShResult<Option<EditCmd>> {
     Ok(self.handle_key(key))
   }

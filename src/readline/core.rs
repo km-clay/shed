@@ -5,11 +5,13 @@ use super::editmode::{
   CmdReplay, EditMode, Emacs, ModeReport, RemoteMode, ViEx, ViInsert, ViNormal, ViReplace,
   ViSearch, ViSearchRev, ViVerbatim, ViVisual,
 };
-use super::linebuf::LineBuf;
+use super::linebuf::{LineBuf, Pos};
 use super::register::RegisterName;
 
+use crate::keys::{KeyCode, ModKeys};
 use crate::{
   autocmd,
+  expand::expand_keymap,
   keys::KeyEvent,
   motion,
   state::{
@@ -19,7 +21,7 @@ use crate::{
   util::ShResult,
 };
 
-pub(super) struct EditorCore {
+pub(crate) struct EditorCore {
   pub editor: LineBuf,
   pub mode: Box<dyn EditMode>,
   pub saved_mode: Option<Box<dyn EditMode>>,
@@ -32,6 +34,9 @@ pub(super) struct EditorCore {
   /// Set when an executed command shelled out, so the wrapper can refresh the
   /// prompt. Drained by the wrapper.
   pub shell_cmd_ran: bool,
+  /// Set when the editing mode changed, so the wrapper can refresh a
+  /// mode-aware prompt. Drained by the wrapper.
+  pub mode_changed: bool,
 }
 
 impl EditorCore {
@@ -44,6 +49,7 @@ impl EditorCore {
       repeat_motion: None,
       needs_redraw: false,
       shell_cmd_ran: false,
+      mode_changed: false,
     }
   }
 
@@ -53,6 +59,15 @@ impl EditorCore {
     let mut core = Self::new(Box::new(ViNormal::new()));
     core.editor = LineBuf::new().with_initial(input, 0);
     core
+  }
+
+  pub fn empty() -> Self {
+    Self::new(Box::new(ViNormal::new()))
+  }
+
+  pub fn set_buffer(&mut self, input: &str) {
+    self.editor.set_buffer(input);
+    self.editor.set_cursor_from_flat(0);
   }
 
   /// Feed one key: resolve it through the current mode into a command and
@@ -70,6 +85,18 @@ impl EditorCore {
       self.feed_key(key)?;
     }
     Ok(())
+  }
+
+  /// The full buffer contents as a string.
+  pub fn text(&self) -> String {
+    self.editor.to_string()
+  }
+
+  /// The text currently selected, if any. Used by headless drivers to capture
+  /// the span a motion traversed.
+  pub fn selection(&mut self) -> Option<String> {
+    let range = self.editor.select_range_byte_pos()?;
+    self.editor.to_string().get(range).map(str::to_string)
   }
 
   /// The editor sub-buffer that currently has focus. Ex mode supplies its own
@@ -114,6 +141,7 @@ impl EditorCore {
     defer!(autocmd!(PostModeChange));
 
     std::mem::swap(&mut self.mode, mode);
+    self.mode_changed = true;
     self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     Shed::vars_mut(|v| {
       v.set_var(
@@ -123,6 +151,48 @@ impl EditorCore {
       )
     })
     .ok();
+  }
+
+  /// The line numbers an ex command's address resolves to, defaulting to the
+  /// current line. Mirrors `ShedLine::extract_line_nums`.
+  fn normal_seq_lines(&self, cmd: &EditCmd) -> ShResult<Vec<usize>> {
+    if let Some(Cmd(_, Verb::ExCmd(node))) = cmd.verb() {
+      self.editor.lines_for_ex_node(node)
+    } else {
+      Ok(vec![self.editor.row()])
+    }
+  }
+
+  /// Run a `:normal` key sequence on each addressed line, in normal mode,
+  /// folded into one undo step.
+  fn run_normal_seq(&mut self, lines: &[usize], seq: &str) -> ShResult<()> {
+    let keys = expand_keymap(seq);
+    self.editor.start_undo_merge();
+    for &line in lines {
+      self.editor.set_cursor(Pos { row: line, col: 0 });
+      self.reset_mode(false)?;
+      if let Err(e) = self.feed_keys(keys.clone()) {
+        self.editor.stop_undo_merge();
+        return Err(e);
+      }
+    }
+    self.editor.stop_undo_merge();
+    Ok(())
+  }
+
+  pub fn reset_mode(&mut self, submit_pending: bool) -> ShResult<()> {
+    if submit_pending {
+      match self.mode.report_mode() {
+        ModeReport::Ex | ModeReport::Search | ModeReport::RevSearch => {
+          self.feed_key(KeyEvent(KeyCode::Enter, ModKeys::NONE))?;
+        }
+        _ => {}
+      }
+    }
+
+    let mut mode: Box<dyn EditMode> = Box::new(ViNormal::new());
+    self.swap_mode(&mut mode);
+    Ok(())
   }
 
   #[expect(clippy::too_many_lines)]
@@ -347,6 +417,20 @@ impl EditorCore {
   }
 
   pub fn exec_cmd(&mut self, mut cmd: EditCmd, from_replay: bool) -> ShResult<()> {
+    // `:normal` runs a key sequence on each addressed line. It needs the mode
+    // machine, so it's handled here rather than in LineBuf's ex dispatch (the
+    // interactive layer intercepts it earlier; this catches the headless path).
+    if let Some(seq) = cmd.try_get_normal_seq() {
+      let seq = seq.to_string();
+      let lines = self.normal_seq_lines(&cmd)?;
+      return self.run_normal_seq(&lines, &seq);
+    }
+    // `:q`/`:wq` are interactive-submit concepts; there is nothing to quit when
+    // driving the editor headlessly.
+    if cmd.is_quit() || cmd.is_write_quit() {
+      return Ok(());
+    }
+
     if cmd.verb().is_some()
       && let Some(range) = self.editor.select_range()
     {

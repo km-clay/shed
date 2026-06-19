@@ -30,7 +30,7 @@ bitflags! {
 }
 
 #[derive(Clone, Default, Debug)]
-pub(super) struct EditCmd {
+pub(crate) struct EditCmd {
   pub register: RegisterName,
   pub verb: Option<Cmd<Verb>>,
   pub motion: Option<Cmd<Motion>>,

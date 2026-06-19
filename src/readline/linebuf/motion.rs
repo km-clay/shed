@@ -904,14 +904,78 @@ impl super::LineBuf {
       }
     }
   }
+  fn text_obj_paragraph(&mut self, from: Pos, bound: Bound) -> Option<MotionKind> {
+    let is_blank = |i: usize| self.lines.get(i).is_some_and(|l| l.is_empty());
+    let this_line = from.row;
+    let kind = is_blank(this_line);
+    let around = matches!(bound, Bound::Around);
+
+    let mut lo = this_line;
+    let mut hi = this_line;
+
+    while lo > 0 && is_blank(lo - 1) == kind {
+      lo -= 1;
+    }
+    while hi + 1 < self.lines.len() && is_blank(hi + 1) == kind {
+      hi += 1;
+    }
+
+    if around {
+      if hi + 1 < self.lines.len() {
+        let opp = is_blank(hi + 1);
+        while hi + 1 < self.lines.len() && is_blank(hi + 1) == opp {
+          hi += 1;
+        }
+      } else if lo > 0 {
+        let opp = is_blank(lo - 1);
+        while lo > 0 && is_blank(lo - 1) == opp {
+          lo -= 1;
+        }
+      }
+    }
+
+    Some(MotionKind::Line {
+      start: lo,
+      end: hi,
+      inclusive: true,
+    })
+  }
+
+  fn paragraph_motion(&self, dir: Direction) -> Option<MotionKind> {
+    let is_blank = |i: usize| self.lines.get(i).is_some_and(|l| l.is_empty());
+    let cur = self.row();
+    let last = self.lines.len().saturating_sub(1);
+
+    let target = match dir {
+      // first blank line below the cursor, else the end of the buffer
+      Direction::Forward => match ((cur + 1)..self.lines.len()).find(|&i| is_blank(i)) {
+        Some(row) => Pos { row, col: 0 },
+        None => Pos {
+          row: last,
+          col: self.lines.get(last).map_or(0, |l| l.len()),
+        },
+      },
+      // last blank line above the cursor, else the top of the buffer
+      Direction::Backward => Pos {
+        row: (0..cur).rev().find(|&i| is_blank(i)).unwrap_or(0),
+        col: 0,
+      },
+    };
+
+    (target != self.cursor.pos).then_some(MotionKind::Char {
+      start: self.cursor.pos,
+      end: target,
+      inclusive: false,
+    })
+  }
+
   fn dispatch_text_obj(&mut self, obj: TextObj) -> Option<MotionKind> {
     match obj {
       // text structures
       TextObj::Word(word, bound) => self.text_obj_word(self.cursor.pos, word, bound),
-      TextObj::Sentence(_)
-      | TextObj::Paragraph(_)
-      | TextObj::WholeSentence(_)
-      | TextObj::WholeParagraph(_) => {
+      TextObj::WholeParagraph(bound) => self.text_obj_paragraph(self.cursor.pos, bound),
+      TextObj::Paragraph(dir) => self.paragraph_motion(dir),
+      TextObj::Sentence(_) | TextObj::WholeSentence(_) => {
         log::warn!("{obj:?} text objects are not implemented yet");
         None
       }
@@ -1087,37 +1151,59 @@ impl super::LineBuf {
       _ => unreachable!(),
     };
 
-    let start_pos = self
-      .scan_backward(|g| g.as_char() == Some(q_ch))
-      .or_else(|| self.scan_forward(|g| g.as_char() == Some(q_ch)))?;
-
-    let mut scan_start_pos = start_pos;
-    let line_len = self.lines[scan_start_pos.row].len();
-    scan_start_pos.col = (scan_start_pos.col + 1).min(line_len.saturating_sub(1));
-
-    let mut end_pos = self.scan_forward_from(scan_start_pos, |g| g.as_char() == Some(q_ch))?;
+    // Quote text objects operate within a single line. Pair the quotes on the
+    // cursor's line left to right and pick the first pair whose closing quote
+    // is at or after the cursor. This resolves correctly whether the cursor
+    // sits before, inside, or on either quote of the pair, unlike a directional
+    // scan that mistakes the closing quote for an opener when the cursor is
+    // past it.
+    let row = self.cursor.pos.row;
+    let cur_col = self.cursor.pos.col;
+    let (open, close) = self.lines[row]
+      .0
+      .iter()
+      .enumerate()
+      .filter_map(|(c, g)| (g.as_char() == Some(q_ch)).then_some(c))
+      .collect::<Vec<_>>()
+      .chunks_exact(2)
+      .map(|pair| (pair[0], pair[1]))
+      .find(|&(_, close)| close >= cur_col)?;
 
     match bound {
       Bound::Around => {
-        // Around for quoted structures is weird. We have to include any trailing whitespace in the range.
-        end_pos.col += 1;
-        let mut classes = self.char_classes_forward_from(end_pos);
-        end_pos = classes
-          .find(|(_, c)| !c.is_ws())
-          .map_or(self.end_pos(), |(p, _)| p);
-
-        (start_pos <= end_pos).then_some(MotionKind::Char {
-          start: start_pos,
-          end: end_pos,
-          inclusive: false,
-        })
+        // Around a quoted structure extends through any trailing whitespace
+        // after the closing quote. When some follows, the object ends
+        // exclusively at the first non-whitespace char. When none does (the
+        // quote ends the line), it ends inclusively on the last char so the
+        // closing quote itself is still captured.
+        let start = Pos { row, col: open };
+        let after_close = Pos {
+          row,
+          col: close + 1,
+        };
+        let mut classes = self.char_classes_forward_from(after_close);
+        match classes.find(|(_, c)| !c.is_ws()) {
+          Some((p, _)) => Some(MotionKind::Char {
+            start,
+            end: p,
+            inclusive: false,
+          }),
+          None => Some(MotionKind::Char {
+            start,
+            end: Pos {
+              row,
+              col: self.lines[row].len().saturating_sub(1),
+            },
+            inclusive: true,
+          }),
+        }
       }
       Bound::Inside => {
-        let mut start_pos = start_pos;
-        start_pos.col += 1;
-        (start_pos <= end_pos).then_some(MotionKind::Char {
-          start: start_pos,
-          end: end_pos,
+        let start = Pos { row, col: open + 1 };
+        let end = Pos { row, col: close };
+        (start <= end).then_some(MotionKind::Char {
+          start,
+          end,
           inclusive: false,
         })
       }

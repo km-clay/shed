@@ -564,7 +564,7 @@ impl super::LineBuf {
     self.get(self.cursor.pos.col_add_signed(-1))
   }
 
-  pub(super) fn pos_to_flat(&self, pos: Pos) -> usize {
+  pub(crate) fn pos_to_flat(&self, pos: Pos) -> usize {
     let mut offset = 0;
     let row = pos.row.min(self.lines.len().saturating_sub(1));
     for i in 0..row {
@@ -1203,12 +1203,6 @@ impl super::LineBuf {
   pub(super) fn gr_at(&self, pos: Pos) -> Option<&Grapheme> {
     self.lines.get(pos.row)?.0.get(pos.col)
   }
-  pub(super) fn end_pos(&self) -> Pos {
-    let mut pos = Pos::MAX;
-    pos.clamp_row(&self.lines);
-    pos.clamp_col(&self.lines[pos.row].0, self.cursor.exclusive);
-    pos
-  }
   pub(super) fn char_classes_backward_from(
     &self,
     pos: Pos,
@@ -1304,13 +1298,19 @@ impl super::LineBuf {
   pub(super) fn col(&self) -> usize {
     self.cursor.pos.col
   }
-  pub(super) fn offset_col(&self, row: usize, offset: isize) -> usize {
+  pub(crate) fn offset_col(&self, row: usize, offset: isize) -> usize {
     let mut col = self.cursor.pos.col.saturating_add_signed(offset);
     let max = if self.cursor.exclusive {
       self.lines[row].len().saturating_sub(1)
     } else {
       self.lines[row].len()
     };
+    col = col.clamp(0, max);
+    col
+  }
+  pub(crate) fn offset_col_absolute(&self, row: usize, offset: isize) -> usize {
+    let mut col = self.cursor.pos.col.saturating_add_signed(offset);
+    let max = self.lines[row].len();
     col = col.clamp(0, max);
     col
   }

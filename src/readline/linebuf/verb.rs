@@ -18,6 +18,20 @@ impl super::LineBuf {
     let EditCmd { verb, motion, .. } = cmd;
 
     let Some(Cmd(_, verb)) = verb else {
+      // In visual mode a bare text object reshapes the whole selection to span
+      // the object, rather than just moving the cursor to its far end the way
+      // an ordinary motion would. Both the evaluation and the reshape happen
+      // with the hint merged in, so a `vi"`/`va"` whose closing quote lives in
+      // the hint resolves against real positions instead of an out-of-bounds
+      // end that would get clamped after the hint is dropped.
+      if self.is_selecting() && matches!(cmd.motion.as_ref(), Some(Cmd(_, Motion::TextObj(_)))) {
+        return self.with_hint(|this| {
+          if let Some(motion_kind) = this.eval_motion(cmd)? {
+            this.select_text_object(&motion_kind);
+          }
+          Ok(())
+        });
+      }
       // For verb-less motions in insert mode, merge hint before evaluating
       // so motions like `w` can see into the hint text
       let result = self.eval_motion_with_hint(cmd)?;
@@ -503,6 +517,41 @@ impl super::LineBuf {
       }
     }
   }
+  /// Reshape the active selection to span a text object, anchoring at its
+  /// start and putting the cursor at its end. Used when a text object is given
+  /// in visual mode, where it selects the object rather than moving the cursor.
+  fn select_text_object(&mut self, motion: &MotionKind) {
+    match motion {
+      MotionKind::Char {
+        start,
+        end,
+        inclusive,
+      } => {
+        self.set_select_anchor(*start);
+        self.set_cursor(*end);
+        // A charwise visual selection always includes the grapheme under the
+        // cursor, so for an exclusive object end (e.g. `i(`, `i"`), step the
+        // cursor back one grapheme onto the last included character.
+        if !*inclusive {
+          let back = self.offset_cursor_wrapping(0, -1);
+          self.set_cursor(back);
+        }
+      }
+      MotionKind::Line { start, end, .. } => {
+        let end_col = self.lines.get(*end).map_or(0, Line::len).saturating_sub(1);
+        self.set_select_anchor(Pos {
+          row: *start,
+          col: 0,
+        });
+        self.set_cursor(Pos {
+          row: *end,
+          col: end_col,
+        });
+      }
+      MotionKind::Block { .. } => {}
+    }
+  }
+
   fn swap_visual_anchor(&mut self) {
     let cur_pos = self.cursor.pos;
     let new_anchor;

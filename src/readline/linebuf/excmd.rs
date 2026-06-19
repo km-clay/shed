@@ -65,7 +65,7 @@ impl super::LineBuf {
       ExNdRule::Delete /*--------------------*/ => self.ex_delete(cmd, address),
       ExNdRule::Yank /*======================*/ => self.ex_yank(cmd, address),
       ExNdRule::Put(anchor) /*---------------*/ => self.ex_put(cmd, *anchor, address),
-      ExNdRule::Edit(paths) /*---------------*/ => Self::ex_edit(paths),
+      ExNdRule::Edit(paths) /*===============*/ => Self::ex_edit(paths),
       ExNdRule::Write(write_dest) /*---------*/ => self.ex_write(write_dest),
       ExNdRule::RepeatSubstitute /*==========*/ => self.repeat_substitute(cmd),
       ExNdRule::RepeatGlobal /*--------------*/ => self.repeat_global(cmd),
@@ -78,9 +78,12 @@ impl super::LineBuf {
         Ok(())
       }
 
-      ExNdRule::Normal {..} /*---------------*/ |
-      ExNdRule::WriteQuit /*-----------------*/ |
-      ExNdRule::Quit /*======================*/ => unreachable!(/* handled in readline/mod.rs */),
+      // Intercepted by the editor driver (ShedLine interactively, EditorCore
+      // headlessly) before reaching here. Erroring rather than panicking keeps
+      // a stray one from taking down the whole shell.
+      ExNdRule::Normal { .. } | ExNdRule::WriteQuit | ExNdRule::Quit => {
+        Err(crate::sherr!(ExecFail, "ex command is handled by the editor driver, not the buffer"))
+      }
     }
   }
 

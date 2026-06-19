@@ -253,6 +253,19 @@ impl ViVisual {
         raw_seq: String::new(),
         flags: CmdFlags::empty(),
       }),
+      // In visual mode i/a introduce a text object that reshapes the selection,
+      // rather than entering insert/append the way common_verb would treat them.
+      'i' | 'a' => match ViParser::parse_text_obj(ch, chars, count) {
+        C::Partial(motion) => C::complete(EditCmd {
+          register,
+          verb: None,
+          motion: Some(motion),
+          raw_seq: String::new(),
+          flags: CmdFlags::empty(),
+        }),
+        C::Complete(res) => C::Complete(res),
+        C::NoMatch => C::no_match(),
+      },
       _ => C::no_match(),
     }
   }

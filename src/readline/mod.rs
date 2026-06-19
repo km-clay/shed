@@ -1,5 +1,4 @@
 use nix::poll::PollTimeout;
-use scopeguard::defer;
 use std::{collections::VecDeque, io::Write, sync::mpsc, time::Instant};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -17,17 +16,15 @@ mod linebuf;
 mod register;
 pub(super) mod stash;
 
-use self::core::EditorCore;
+pub(crate) use self::core::EditorCore;
 
 use complete::{
   CompResponse, Completer, FuzzyCompleter, FuzzySelector, GridCompleter, SelectorResponse,
   SimpleCompleter,
 };
-use editcmd::{Cmd, CmdFlags, EditCmd, Motion, Verb, invert_char_motion};
-use editmode::{
-  CmdReplay, EditMode, Emacs, RemoteMode, ViEx, ViInsert, ViNormal, ViReplace, ViSearch,
-  ViSearchRev, ViVerbatim, ViVisual,
-};
+use editcmd::{Cmd, CmdFlags, EditCmd, Motion, Verb};
+use editmode::{EditMode, Emacs, ViInsert, ViNormal};
+
 use layout::{Layout, move_cursor_to_end, redraw};
 use linebuf::LineBuf;
 use register::{RegisterContent, RegisterName};
@@ -1401,6 +1398,16 @@ impl ShedLine {
       } else {
         self.ctrl_d_warning_counter += 1;
       }
+    }
+
+    // Drain the UI signals the core raised during execution. These used to be
+    // refreshed inline by fire_editor_command/swap_mode before the core split.
+    let shell_cmd_ran = std::mem::take(&mut self.core.shell_cmd_ran);
+    let mode_changed = std::mem::take(&mut self.core.mode_changed);
+    self.core.needs_redraw = false;
+    self.refresh_statline();
+    if shell_cmd_ran || mode_changed {
+      self.refresh_prompt();
     }
 
     self.update_editor_hint();

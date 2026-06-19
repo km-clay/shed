@@ -65,6 +65,14 @@ impl super::LineBuf {
     self.select_mode = Some(SelectMode::Line(self.cursor.pos));
   }
 
+  pub fn set_select_anchor(&mut self, pos: Pos) {
+    if let Some(mode) = self.select_mode.as_mut() {
+      match mode {
+        SelectMode::Char(a) | SelectMode::Line(a) | SelectMode::Block(a) => *a = pos,
+      }
+    }
+  }
+
   pub fn stop_selecting(&mut self) {
     if self.select_mode.is_some() {
       self.last_selection = self.select_mode.map(|m| {
@@ -85,10 +93,15 @@ impl super::LineBuf {
   pub fn select_range_byte_pos(&mut self) -> Option<Range<usize>> {
     match self.select_range()? {
       Motion::CharRange(s, e) => {
-        let s = self.pos_to_byte(s)?;
-        let e = self.pos_to_byte(e)?;
         let (s, e) = ordered(s, e);
-        Some(s..e)
+        let start = self.pos_to_byte(s)?;
+        let mut end = self.pos_to_byte(e)?;
+        // Charwise selections are inclusive of the grapheme under the cursor,
+        // matching how the operator path treats a CharRange motion.
+        if let Some(gr) = self.lines.get(e.row).and_then(|line| line.0.get(e.col)) {
+          end += gr.len_utf8();
+        }
+        Some(start..end)
       }
       Motion::LineRange(s, e) => {
         let s = self.resolve_line_addr(&s).ok()??;

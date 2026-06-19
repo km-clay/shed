@@ -1424,6 +1424,39 @@ visual_test! {
 
   // ─── invalid sequence — pending seq cleared, next op runs ───────
   parse_verb_invalid_then_d            : "hello"       => "vgX d"             => "ello", 0;
+
+  // ─── text objects in visual mode ─────────────────────────────────
+  v_iw_selects_inner_word              : "hello world" => "viwd"              => " world", 0;
+  v_aw_selects_word_and_trailing_ws    : "hello world" => "vawd"              => "world", 0;
+  v_i_paren_selects_inside             : "x(foo)y"     => "f(vi(d"            => "x()y", 2;
+  v_a_paren_selects_around             : "x(foo)y"     => "f(va(d"            => "xy", 1;
+  v_i_quote_selects_inside             : "say \"hi\""  => "f\"vi\"d"          => "say \"\"", 5;
+  v_a_quote_selects_around_at_eol      : "say \"hi\""  => "f\"va\"d"          => "say ", 3;
+  // Cursor on the closing quote (e.g. after typing then Esc) must still
+  // resolve the surrounding pair, not mistake the closer for an opener.
+  v_a_quote_cursor_on_closing_quote    : "say \"hi\""  => "$va\"d"            => "say ", 3;
+  v_i_quote_cursor_on_closing_quote    : "say \"hi\""  => "$vi\"d"            => "say \"\"", 5;
+}
+
+// A hint after a buffer ending in a quote must not bleed into the text object:
+// `va"` evaluates with the hint merged (so a closing quote in the hint still
+// resolves), but when the closer is the last real char the selection must stop
+// at it rather than dropping it once the hint is restored.
+#[test]
+fn va_quote_with_hint_at_eol_includes_closing_quote() {
+  use crate::expand::expand_keymap;
+  use crate::readline::linebuf::{Hint, Lines};
+
+  let (mut vi, _g) = test_vi("say \"hi\"");
+  vi.process_input(expand_keymap("<Esc>")).unwrap();
+  vi.core.editor.set_cursor_from_flat(7); // on the closing quote
+  vi.core
+    .editor
+    .set_hint(Some(Hint::Override(Lines::to_lines("say \"hi\"more"))));
+
+  vi.process_input(expand_keymap("va\"")).unwrap();
+
+  assert_eq!(vi.core.selection().as_deref(), Some("\"hi\""));
 }
 
 // ===================== handle_hist_search_key =====================

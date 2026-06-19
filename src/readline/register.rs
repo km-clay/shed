@@ -35,11 +35,11 @@ pub fn restore_registers() {
   });
 }
 
-pub(super) fn read_register(ch: Option<char>) -> Option<RegisterContent> {
+pub(crate) fn read_register(ch: Option<char>) -> Option<RegisterContent> {
   REGISTERS.with(|regs| regs.borrow().get_reg(ch).map(|r| r.content().clone()))
 }
 
-pub(super) fn write_register(ch: Option<char>, buf: RegisterContent) {
+pub(crate) fn write_register(ch: Option<char>, buf: RegisterContent) {
   REGISTERS.with(|regs| {
     if let Some(r) = regs.borrow_mut().get_reg_mut(ch) {
       r.write(buf);
@@ -47,7 +47,7 @@ pub(super) fn write_register(ch: Option<char>, buf: RegisterContent) {
   });
 }
 
-pub(super) fn append_register(ch: Option<char>, buf: RegisterContent) {
+pub(crate) fn append_register(ch: Option<char>, buf: RegisterContent) {
   REGISTERS.with(|regs| {
     if let Some(r) = regs.borrow_mut().get_reg_mut(ch) {
       r.append(buf);
@@ -56,7 +56,7 @@ pub(super) fn append_register(ch: Option<char>, buf: RegisterContent) {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct RegisterName {
+pub(crate) struct RegisterName {
   name: Option<char>,
   append: bool,
 }
@@ -116,7 +116,7 @@ impl From<char> for RegisterName {
 }
 
 #[derive(Default, Clone, Debug)]
-pub(super) enum RegisterContent {
+pub(crate) enum RegisterContent {
   Span(Vec<Line>),
   Line(Vec<Line>),
   Block(Vec<Line>),

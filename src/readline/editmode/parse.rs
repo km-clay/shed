@@ -316,33 +316,42 @@ impl ViParser {
         }
       }
 
-      ch if ch == 'i' || ch == 'a' => {
-        let bound = match ch {
-          'i' => Bound::Inside,
-          'a' => Bound::Around,
-          _ => unreachable!(),
-        };
-        let Some(next_ch) = chars.next() else {
-          return C::pending();
-        };
-        let obj = match next_ch {
-          'w' => TextObj::Word(Word::Normal, bound),
-          'W' => TextObj::Word(Word::Big, bound),
-          's' => TextObj::WholeSentence(bound),
-          'p' => TextObj::WholeParagraph(bound),
-          '"' => TextObj::DoubleQuote(bound),
-          '\'' => TextObj::SingleQuote(bound),
-          '`' => TextObj::BacktickQuote(bound),
-          '(' | ')' | 'b' => TextObj::Paren(bound),
-          '{' | '}' | 'B' => TextObj::Brace(bound),
-          '[' | ']' => TextObj::Bracket(bound),
-          '<' | '>' => TextObj::Angle(bound),
-          _ => return C::invalid(),
-        };
-        C::partial(motion!(count, Motion::TextObj(obj)))
-      }
+      ch if ch == 'i' || ch == 'a' => Self::parse_text_obj(ch, chars, count),
       _ => C::no_match(),
     }
+  }
+  /// Parse a text object given its leading bound char (`i` for inside, `a` for
+  /// around) and the object char that follows. Shared by the operator-pending
+  /// motion parser and visual mode, where `i`/`a` introduce a text object.
+  pub(super) fn parse_text_obj(
+    bound_ch: char,
+    chars: &mut Peekable<Chars<'_>>,
+    count: usize,
+  ) -> CallbackResult<Cmd<Motion>> {
+    use CallbackResult as C;
+    let bound = match bound_ch {
+      'i' => Bound::Inside,
+      'a' => Bound::Around,
+      _ => return C::no_match(),
+    };
+    let Some(next_ch) = chars.next() else {
+      return C::pending();
+    };
+    let obj = match next_ch {
+      'w' => TextObj::Word(Word::Normal, bound),
+      'W' => TextObj::Word(Word::Big, bound),
+      's' => TextObj::WholeSentence(bound),
+      'p' => TextObj::WholeParagraph(bound),
+      '"' => TextObj::DoubleQuote(bound),
+      '\'' => TextObj::SingleQuote(bound),
+      '`' => TextObj::BacktickQuote(bound),
+      '(' | ')' | 'b' => TextObj::Paren(bound),
+      '{' | '}' | 'B' => TextObj::Brace(bound),
+      '[' | ']' => TextObj::Bracket(bound),
+      '<' | '>' => TextObj::Angle(bound),
+      _ => return C::invalid(),
+    };
+    C::partial(motion!(count, Motion::TextObj(obj)))
   }
   #[expect(clippy::too_many_lines)]
   fn common_verb(chars: &mut Peekable<Chars<'_>>, count: usize) -> CallbackResult<Cmd<Verb>> {
