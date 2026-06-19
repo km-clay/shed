@@ -37,6 +37,7 @@ EXTENSIONS                                                  *shed-extensions*
     `width`       display width of a string in columns        |builtin-width|
     `flog`        write a formatted log message               |builtin-flog|
     `seek`        seek a file descriptor to an offset (lseek) |builtin-seek|
+    `vice`        slice & edit text with vim motions          |builtin-vice|
 
   Scripting & syntax ~                                     *shed-ext-script*
 

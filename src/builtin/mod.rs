@@ -129,6 +129,7 @@ mod test; // [[ ]] thing
 mod times;
 mod trap;
 mod varcmds;
+mod vice;
 mod width;
 
 use getopt::{Opt, OptSpec, get_opts_from_tokens, get_opts_from_tokens_strict};
@@ -223,6 +224,7 @@ register_builtins! {
   "unalias"  => alias::Unalias,
   "unquote"  => quote::Unquote,
   "unset"    => varcmds::Unset,
+  "vice"     => vice::Vice,
   "wait"     => jobctl::Wait,
   "width"    => width::Width,
 }

@@ -66,6 +66,7 @@ The following builtins are available:
   `unalias`     remove aliases                              |builtin-unalias|
   `unquote`     decode shell-quoted input into fields       |builtin-unquote|
   `unset`       remove variables or functions               |builtin-unset|
+  `vice`        slice and edit text with vim motions        |builtin-vice|
   `wait`        wait for background jobs to finish          |builtin-wait|
   `width`       print the display width of a string         |builtin-width|
 
@@ -2263,3 +2264,79 @@ WIDTH                                            *builtin-width* *width*
                                                  zero-width)
 
   See also: |function-qtable|
+
+==============================================================================
+VICE                                             *builtin-vice* *vice*
+
+  `vice [options] {program} [{file} ...]`
+  `cmd | vice [options] {program}`
+
+  Slice and edit text with `vim` motions. `vice` is a programmatic interface
+  for `shed`'s text editing engine. Runs the given commands over its input
+  as a sequence of motion commands, capturing spans of text as fields or
+  transforming the buffer in place. It is the structural counterpart
+  to `cut`/`sed`: you navigate by motions and text objects instead
+  of byte offsets or line-oriented regex.
+
+  Input is read from stdin, or from {file} arguments (each handled as
+  its own buffer). The editor starts in normal mode and, by default,
+  returns to normal mode after every command.
+
+  Program ~
+
+    The program is a sequence of commands applied in order. Order and
+    repetition are significant. Commands are not limited to motions;
+    the buffer can be freely edited in-place.
+
+    `-c`, `--cut {keys}`    run {keys} and capture the span of text the
+                            cursor traverses as a field. If {keys} leave a
+                            visual selection (e.g. `viw`), that selection
+                            is captured instead. Each -c emits a field.
+    `-m`, `--move {keys}`   run {keys} for navigation only; capture
+                            nothing.
+    `-s`, `--sep {keys}`    a separator motion run automatically after
+                            each `-c`, advancing to the next field. Saves
+                            repeating `-m` between captures.
+    `-r`, `--repeat {N:R}`  repeat the previous {N} commands {R} times.
+    `--keep-mode`           do not reset to normal mode between commands
+                            (lets an insert started in one command carry
+                            into the next).
+
+    {keys} use keymap notation: `<CR>`, `<Esc>`, `<C-a>`, `<tab>`, etc.,
+    the same as |keymap|(builtin-keymap).
+
+  Output ~
+
+    `-q`, `--quoted`   encode the captured fields as a shell-quoted
+                       (SQR) record, so the output pipes into the
+                       |quoted-streams| adapters (`qmap`, `qtable`, ...).
+    `-d {delim}`       field delimiter for un-quoted output (default a
+                       single space).
+
+    With no `-c` in the program, the whole (possibly edited) buffer is
+    emitted instead of fields.
+
+  In-place editing ~
+
+    `-i`, `--in-place`    write the transformed buffer back to each
+                          {file} rather than printing it.
+    `--backup`            copy the original to `{file}.bak` first.
+    `--backup-ext {ext}`  use {ext} instead of `bak`.
+
+    `-i` requires {file} arguments; it has no effect on stdin.
+
+  Examples:
+
+      `echo foo bar | vice -m 'w' -c 'e'`
+                          Skips past `foo` with `-m 'w'`, then slices `bar`
+                          into a field using `-c 'e'`. Output is 'bar'
+
+      `vice -i --backup -c '/TODO<CR>dd' notes.txt`
+                          delete the first `TODO` line, in place
+
+      `vice -i -m ':g/^$/d<CR>' file.txt`
+                          delete all blank lines via `:g`, in place
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |quoted-streams|, |builtin-quote|, |keymap|(builtin-keymap)
