@@ -2305,6 +2305,23 @@ VICE                                             *builtin-vice* *vice*
     {keys} use keymap notation: `<CR>`, `<Esc>`, `<C-a>`, `<tab>`, etc.,
     the same as |keymap|(builtin-keymap).
 
+  Linewise ~
+
+    `-l`, `--lines`    run the program against each input line separately
+                       rather than the whole input as one buffer, emitting
+                       one record per line.
+
+    The editor is reused across lines, so a linewise run stays a single
+    process. This is the efficient way to transform or extract from every
+    line, and the entry point for feeding columnar tool output (`ls`, `ps`,
+    `eza`) into the |quoted-streams| adapters one row at a time.
+
+    If a search motion (`f`, `t`, `/`, `?`, `n`, `N`) finds no target the
+    program is aborted for that input, mirroring `vim`'s cancellation of a
+    macro on a failed search. Under `-l` the offending line is skipped and
+    no record is emitted for it; the run still succeeds. On a whole-buffer
+    run `vice` emits nothing and exits with status 1.
+
   Output ~
 
     `-q`, `--quoted`   encode the captured fields as a shell-quoted
@@ -2330,6 +2347,11 @@ VICE                                             *builtin-vice* *vice*
       `echo foo bar | vice -m 'w' -c 'e'`
                           Skips past `foo` with `-m 'w'`, then slices `bar`
                           into a field using `-c 'e'`. Output is 'bar'
+
+      `ls -l | vice -l -q --sep 'w' -c 'viW' -r 1:2 -c 'WEE' -c '$'`
+                          slice each line into SQR fields (the WORD columns,
+                          a multi-word date span, then the name), ready for
+                          the |quoted-streams| adapters
 
       `vice -i --backup -c '/TODO<CR>dd' notes.txt`
                           delete the first `TODO` line, in place

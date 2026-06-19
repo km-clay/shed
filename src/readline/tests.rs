@@ -278,6 +278,10 @@ vi_test! {
   count_n_bkwd             : "foo=(bar biz bam)"            => "/b\r2Nx"             => "foo=(bar iz bam)", 9;
   macro_record             : "foo bar biz"                  => "qacwbam\x1bwqQQ"     => "bam bam bam", 10;
   macro_double             : "foo BAR biz BAM"              => "qag~wwqqbguwwq@a@b"  => "FOO bar BIZ bam", 14;
+  // The macro deletes each `X`. The second `@a` runs out of `X`s, so its `fX`
+  // fails and aborts the replay before the `x` can delete an innocent char.
+  macro_aborts_on_failed_search
+                           : "aXbXc"                        => "qafXxq@a@a"          => "abc", 2;
   normal_V_line_visual_d   : "abc\ndef\nghi"                => "jVd"                 => "abc\nghi", 4;
   normal_ctrl_a_increments : "42"                           => "\x01"                => "43", 1;
   normal_ctrl_x_decrements : "42"                           => "\x18"                => "41", 1;

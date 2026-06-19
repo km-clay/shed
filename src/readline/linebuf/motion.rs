@@ -159,7 +159,11 @@ impl super::LineBuf {
             .map(regex::Match::start)
         }
       };
-      offset = target_byte?;
+      let Some(b) = target_byte else {
+        self.search_failed = true;
+        return None;
+      };
+      offset = b;
     }
 
     target_byte.and_then(|b| self.byte_to_pos(b)).map(|target| {
@@ -269,11 +273,17 @@ impl super::LineBuf {
           let off = this.search_char(*dir, *dest, char, *count);
           let target = this.offset_cursor(0, off);
           let inclusive = matches!(dir, Direction::Forward);
-          (target != this.cursor.pos).then_some(MotionKind::Char {
-            start: this.cursor.pos,
-            end: target,
-            inclusive,
-          })
+          if target == this.cursor.pos {
+            // No movement means the target char wasn't found.
+            this.search_failed = true;
+            None
+          } else {
+            Some(MotionKind::Char {
+              start: this.cursor.pos,
+              end: target,
+              inclusive,
+            })
+          }
         }
         dir @ (Motion::BackwardChar
         | Motion::ForwardChar

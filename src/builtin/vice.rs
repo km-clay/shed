@@ -141,6 +141,11 @@ impl Vice {
           let start = core.editor.cursor_to_flat();
 
           core.feed_keys(keys)?;
+          // A failed search aborts the whole program; leave the flag set so
+          // the caller can skip the line or fail the buffer.
+          if core.editor.search_failed() {
+            return Ok(());
+          }
 
           let field = if let Some(sel) = core.selection() {
             log::debug!("Vice: selection found: {:?}", sel);
@@ -163,15 +168,24 @@ impl Vice {
 
           if let Some(sep) = prog.sep.clone() {
             core.feed_keys(sep)?;
+            if core.editor.search_failed() {
+              return Ok(());
+            }
           }
         }
         ViceCmd::Move(keys) => {
           core.feed_keys(keys)?;
+          if core.editor.search_failed() {
+            return Ok(());
+          }
         }
         ViceCmd::Repeat(num_cmds, num_repeats) => {
           for _ in 0..num_repeats {
             let repeat_cmds = spent_cmds.split_off(spent_cmds.len().saturating_sub(num_cmds));
             Self::exec_cmds(core, prog, repeat_cmds, fields, spent_cmds)?;
+            if core.editor.search_failed() {
+              return Ok(());
+            }
           }
         }
       }
@@ -199,9 +213,9 @@ impl Vice {
     })
   }
 
-  fn run_inplace(file: &str, input: &str, prog: &ViceProg, span: &Span) -> ShResult<()> {
+  fn run_inplace(file: &str, input: &str, prog: &ViceProg, span: &Span) -> ShResult<bool> {
     let mut collected = String::new();
-    Self::run(input, prog, span, |record| {
+    let ok = Self::run(input, prog, span, |record| {
       collected.push_str(record);
       // Linewise emits one record per line; whole-buffer mode is written
       // back verbatim, so only the linewise records get terminators.
@@ -210,10 +224,15 @@ impl Vice {
       }
       Ok(())
     })?;
-    Self::write_inplace(file, &collected, prog.backup_ext.as_ref(), span)
+    if !ok {
+      // A whole-buffer search failed; leave the file untouched.
+      return Ok(false);
+    }
+    Self::write_inplace(file, &collected, prog.backup_ext.as_ref(), span)?;
+    Ok(true)
   }
 
-  fn run_stream(input: &str, prog: &ViceProg, span: &Span) -> ShResult<()> {
+  fn run_stream(input: &str, prog: &ViceProg, span: &Span) -> ShResult<bool> {
     Self::run(input, prog, span, |record| {
       outln!("{record}");
       Ok(())
@@ -222,26 +241,35 @@ impl Vice {
 
   /// Drive `input` through the program, handing each output record to `sink`.
   /// Linewise mode reuses one editor across lines; otherwise the whole input is
-  /// a single buffer.
+  /// a single buffer. Returns `false` when a whole-buffer run is aborted by a
+  /// failed search (the caller turns that into a non-zero exit); in linewise
+  /// mode an aborted line is simply skipped and the run still succeeds.
   fn run(
     input: &str,
     prog: &ViceProg,
     span: &Span,
     mut sink: impl FnMut(&str) -> ShResult<()>,
-  ) -> ShResult<()> {
+  ) -> ShResult<bool> {
     if prog.lines {
       let mut core = EditorCore::empty();
       for line in input.lines() {
         core.set_buffer(line);
         let record = Self::render(&mut core, prog, span)?;
+        if core.editor.search_failed() {
+          continue;
+        }
         sink(&record)?;
       }
+      Ok(true)
     } else {
       let mut core = EditorCore::headless(input);
       let record = Self::render(&mut core, prog, span)?;
+      if core.editor.search_failed() {
+        return Ok(false);
+      }
       sink(&record)?;
+      Ok(true)
     }
-    Ok(())
   }
 
   /// Atomically write `output` back to `file`, preserving permissions and
@@ -310,23 +338,25 @@ impl super::Builtin for Vice {
     let prog = Self::parse_cmds(&args.opts).promote_err(span.clone())?;
 
     if let Some(input) = input {
-      Self::run_stream(&input, &prog, &span)?;
-      return with_status(0);
+      let ok = Self::run_stream(&input, &prog, &span)?;
+      return with_status(i32::from(!ok));
     }
 
+    let mut ok = true;
     for (file, span) in args.argv {
       let Ok(content) = std::fs::read_to_string(&file) else {
         return Err(sherr!(ExecFail @ span, "Failed to read file: '{file}'"));
       };
 
-      if prog.inplace {
-        Self::run_inplace(&file, &content, &prog, &span)?;
+      let file_ok = if prog.inplace {
+        Self::run_inplace(&file, &content, &prog, &span)?
       } else {
-        Self::run_stream(&content, &prog, &span)?;
-      }
+        Self::run_stream(&content, &prog, &span)?
+      };
+      ok = ok && file_ok;
     }
 
-    with_status(0)
+    with_status(i32::from(!ok))
   }
 }
 
@@ -457,5 +487,37 @@ mod tests {
     test_input("vice -i --backup -m 'x' f.txt").unwrap();
     assert_file!("f.txt", "rig\n");
     assert_file!("f.txt.bak", "orig\n");
+  }
+
+  // ===================== Search-failure abort =====================
+
+  #[test]
+  fn vice_lines_skips_failed_search() {
+    let g = TestGuard::new();
+    // `fX` fails on the middle line, which is dropped from the output.
+    test_input("printf 'aXb\\ncYd\\neXf\\n' | vice -l -m 'fX' -c '$'").unwrap();
+    assert_output!(g, "Xb\nXf\n");
+  }
+
+  #[test]
+  fn vice_whole_buffer_search_fail_emits_nothing_and_exits_1() {
+    use crate::assert_status_eq;
+    use crate::state;
+
+    let g = TestGuard::new();
+    test_input("printf 'no target' | vice -m 'fZ' -c '$'").unwrap();
+    assert_output!(g, "");
+    assert_status_eq!(1);
+  }
+
+  #[test]
+  fn vice_whole_buffer_search_success_exits_0() {
+    use crate::assert_status_eq;
+    use crate::state;
+
+    let g = TestGuard::new();
+    test_input("printf 'find Z here' | vice -m 'fZ' -c '$'").unwrap();
+    assert_output!(g, "Z here\n");
+    assert_status_eq!(0);
   }
 }

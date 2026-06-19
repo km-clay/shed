@@ -91,6 +91,10 @@ pub struct LineBuf {
   last_search: Option<Motion>,
   pending_search: Option<String>,
 
+  /// Set when the last command's `f`/`t`/search-style motion found no target.
+  /// Drained by macro playback and the `vice` driver to abort a run.
+  search_failed: bool,
+
   insert_mode_start_pos: Option<Pos>,
   saved_col: Option<usize>,
   viewport_cap: Option<usize>,
@@ -136,6 +140,7 @@ impl Default for LineBuf {
       last_global: None,
       last_search: None,
       pending_search: None,
+      search_failed: false,
       insert_mode_start_pos: None,
       saved_col: None,
       viewport_cap: None,
@@ -166,6 +171,11 @@ impl LineBuf {
   }
   pub fn scroll_offset(&self) -> usize {
     self.scroll_offset
+  }
+  /// Whether the most recently executed command was a search-style motion
+  /// (`f`/`t`/`;`/`,`/`n`/`N`) that found no target.
+  pub fn search_failed(&self) -> bool {
+    self.search_failed
   }
   pub(super) fn exec_cmd(&mut self, cmd: &EditCmd) -> ShResult<()> {
     let is_char_insert = cmd.verb.as_ref().is_some_and(|v| v.1.is_char_insert());
@@ -201,6 +211,9 @@ impl LineBuf {
 
     let before = self.lines.clone();
     let old_cursor = self.cursor.pos;
+
+    // Reset per command; the search motion arms raise it again if they fail.
+    self.search_failed = false;
 
     if is_separator
       && !self.grapheme_before_cursor().is_none_or(|gr| gr.is_ws())

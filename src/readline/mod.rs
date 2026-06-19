@@ -1009,6 +1009,11 @@ impl ShedLine {
       if let Some(ev) = ev {
         return Ok(Some(ev));
       }
+      // Abort the replay if a search-style motion found no target, matching
+      // vim's behavior of cancelling macro playback on a failed `f`/`/`.
+      if self.core.editor.search_failed() {
+        break;
+      }
     }
     Ok(None)
   }
