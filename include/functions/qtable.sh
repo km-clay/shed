@@ -5,10 +5,13 @@ qtable() {
 	local -a headers
 	local i=0
 	local has_names=0
+	local justify="${SQR_TABLE_JUSTIFY:-right}"
+	local left
 
-	while getopts ":n" opt; do
+	while getopts ":nl" opt; do
 		case "$opt" in
 			n) has_names=1 ;;
+			l) justify="left" ;;
 		esac
 	done
 	shift $((OPTIND - 1))
@@ -19,6 +22,11 @@ qtable() {
 		IFS= read -q -a headers
 	fi
 
+	if [[ "$justify" == left ]]; then
+		left=1
+	else
+		left=0
+	fi
 
 	draw_separator() {
 		local left="$1"
@@ -30,9 +38,7 @@ qtable() {
 		for ((i=0; i<${#widths[@]}; i++)); do
 			cell=$(( "${widths[i]}" + 2 ))
 
-			for ((j=0; j<cell; j++)); do
-				echo -n '─'
-			done
+			printf '%*r' "$cell" '─'
 
 			if (( i < ${#widths[@]} - 1 )); then
 				echo -n "$middle"
@@ -45,23 +51,24 @@ qtable() {
 	draw_row() {
 		local row=("$@")
 
-		echo -n '│ '
+		printf '│ '
 
 		for ((col=0; col<${#row[@]}; col++)); do
 			field="${row[col]}"
 			this_width=$(width "$field")
 			target_width=${widths[col]}
-
 			diff=$(( target_width - this_width ))
 
-			for ((pad=0; pad<diff; pad++)); do
-				echo -n ' '
-			done
+			((left)) && printf "%s" "$field"
 
-			echo -n "$field │ "
+			printf "%*s" "$diff" ""
+
+			((left)) || printf "%s" "$field"
+
+			printf " │ "
 		done
 
-		echo
+		printf "\n"
 	}
 
 	record_widths() {
