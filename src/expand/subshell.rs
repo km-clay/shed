@@ -2,7 +2,7 @@ use std::os::fd::AsRawFd;
 
 use crate::{
   builtin::SinkScope,
-  eval::{ParsedSrc, parse::node::node_has_only_builtins},
+  eval::{ParsedSrc, parse::node::nodes_have_only_builtins},
   state::vars::VarStr,
   util::isolation_guard,
 };
@@ -81,9 +81,9 @@ pub fn is_internal(raw: &str) -> bool {
     return false;
   }
 
-  let ast = parser.extract_nodes();
+  let mut ast = parser.extract_nodes();
 
-  node_has_only_builtins(ast)
+  nodes_have_only_builtins(ast.iter_mut())
 }
 
 pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {

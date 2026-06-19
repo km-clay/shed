@@ -1092,6 +1092,8 @@ impl Dispatcher {
       unreachable!()
     };
 
+    let mut cmds = cmds.to_vec();
+
     let has_redirs = !pipeline.redirs.is_empty();
     let is_bg = pipeline_flags.contains(NdFlags::BACKGROUND);
     let interactive = Shed::term(Terminal::interactive);
@@ -1105,11 +1107,6 @@ impl Dispatcher {
     if cmds.len() == 1 && !is_bg && runs_inline(&cmds[0]) {
       // it's a single command. skip the I/O setup
       return self.exec_one(&cmds[0], should_fork_segment, pipeline_flags);
-    }
-
-    if internal_pipeline(cmds, is_bg, has_redirs) {
-      // All-builtin pipeline: dispatch in-process, no fork.
-      return self.exec_internal_pipeline(cmds, pipeline_span, pipeline_flags, pipeline_context);
     }
 
     let _cooked_guard = (!is_bg && interactive).then(|| Shed::term_mut(Terminal::prepare_for_exec));
@@ -1131,19 +1128,27 @@ impl Dispatcher {
 
     let mut spans = vec![];
 
-    // True if the last stage will run inline rather than fork; its exit
-    // status lands in `Shed::get_status()` instead of `wait_fg`'s status
-    // vec, so we need to merge it back in after dispatch_job.
-    let last_is_lastpipe = num_cmds > 1 && !will_fork(&cmds[last]);
+    // trailing builtins that we don't need to fork
+    let tail_start = match cmds
+      .iter_mut()
+      .rev()
+      .position(|n| !node_has_only_builtins(n))
+    {
+      Some(pos) => cmds.len() - pos,
+      None => 0,
+    };
 
-    let pipes = PipeGenerator::new(num_cmds);
-    let cmds_and_pipes = cmds.iter().enumerate().zip(pipes);
+    let pipes = PipeGenerator::new((tail_start + 1).min(num_cmds));
+    let cmds_and_pipes = cmds.iter_mut().enumerate().zip(pipes);
+
+    // Per-stage statuses of the in-process tail, captured for the PIPESTATUS
+    // splice and pipefail blame after the forked prefix is waited on.
+    let mut tail_statuses: Vec<(i32, Span)> = vec![];
 
     for ((i, cmd), (r, w)) in cmds_and_pipes {
-      let mut cmd = cmd.clone(); // TODO: handle this in a way that doesnt clone it
       let has_redirs = has_redirs || (r.is_some() || w.is_some());
 
-      if num_cmds > 1 && i != last {
+      if num_cmds > 1 && i != tail_start {
         // builtins must fork in the middle of multi-command pipelines
         cmd.flags |= NdFlags::FORK_BUILTINS;
       }
@@ -1157,6 +1162,20 @@ impl Dispatcher {
       if let Some(mut r) = r {
         r.apply()?;
       }
+
+      if i == tail_start {
+        // the rest of these are non-forking builtins
+        std::mem::take(&mut out_rdrs).apply_persistent().ok();
+        result = match self.exec_internal_pipeline(&cmds[i..]) {
+          Ok(statuses) => {
+            tail_statuses = statuses;
+            Ok(())
+          }
+          Err(e) => Err(e),
+        };
+        break;
+      }
+
       if let Some(mut w) = w {
         w.apply()?;
       }
@@ -1192,22 +1211,49 @@ impl Dispatcher {
       }
     }
 
-    // Capture the lastpipe stage's status before dispatch_job, since
-    // wait_fg will overwrite Shed::status with the last forked child's
-    // exit code (which isn't the real last stage).
-    let lastpipe_status = last_is_lastpipe.then(Shed::get_status);
-
     let job = self.job_stack.finalize_job().unwrap();
     let dispatch_result = dispatch_job(job, is_bg, Shed::term(Terminal::interactive));
 
-    if let Some(lp) = lastpipe_status {
-      let waited = Shed::get_status();
-      let merged = if shopt!(set.pipefail) && lp == 0 {
-        waited
-      } else {
-        lp
+    // The in-process tail ran inline, so its statuses never reached the wait.
+    // Splice them onto the forked prefix's (which the wait left in PIPESTATUS)
+    // and recompute $? across the whole pipeline.
+    if !tail_statuses.is_empty() {
+      // The forked prefix's per-stage codes: the wait only fills PIPESTATUS for
+      // a multi-stage job (`Job::pipe_status` bails at len <= 1), so a lone
+      // prefix stage's code is just `$?`.
+      let mut codes: Vec<i32> = match tail_start {
+        0 => vec![],
+        1 => vec![Shed::get_status()],
+        _ => Shed::vars(|v| v.try_get_arr_elems("PIPESTATUS"))
+          .map(|elems| {
+            elems
+              .iter()
+              .filter_map(|s| s.to_string().parse().ok())
+              .collect()
+          })
+          .unwrap_or_default(),
       };
-      Shed::set_status(merged);
+      codes.extend(tail_statuses.iter().map(|(code, _)| *code));
+
+      let status = if shopt!(set.pipefail) {
+        codes.iter().rev().find(|c| **c != 0).copied()
+      } else {
+        codes.last().copied()
+      }
+      .unwrap_or(0);
+
+      Shed::vars_mut(|v| {
+        v.set_var(
+          "PIPESTATUS",
+          VarKind::arr(codes.iter().map(i32::to_string)),
+          VarFlags::empty(),
+        )
+      })
+      .ok();
+      Shed::set_status(status);
+
+      // keep `spans` aligned with PIPESTATUS so pipefail blame indexes correctly
+      spans.extend(tail_statuses.iter().map(|(_, span)| span.clone()));
     }
 
     result?;
@@ -1223,27 +1269,22 @@ impl Dispatcher {
     Ok(())
   }
 
-  fn exec_internal_pipeline(
-    &mut self,
-    cmds: &[Node],
-    span: Span,
-    flags: NdFlags,
-    ctx: LabelCtx,
-  ) -> ShResult<()> {
+  /// Run a contiguous run of in-process builtins, wiring them together with
+  /// string sinks instead of pipes. Returns each stage's exit status and span
+  /// so the caller can fold them into PIPESTATUS and the pipefail blame; the
+  /// first hard error short-circuits the run.
+  fn exec_internal_pipeline(&mut self, cmds: &[Node]) -> ShResult<Vec<(i32, Span)>> {
     let mut prev = None;
     let num_cmds = cmds.len();
     let last = num_cmds.saturating_sub(1);
-    let mut statuses = vec![];
-    let mut last_nonzero = None;
-    let mut result = Ok(());
+    let mut statuses = Vec::with_capacity(num_cmds);
 
     for (i, cmd) in cmds.iter().enumerate() {
       let is_last = i == last;
       let out_scope = (!is_last).then(SinkScope::new);
       let _in_scope = prev.take().map(StdinScope::push);
-      let span = cmd.span.clone();
 
-      result = match &cmd.class {
+      let result = match &cmd.class {
         NdRule::Subshell { body } => {
           let _ceiling = isolation_guard(None);
 
@@ -1262,36 +1303,16 @@ impl Dispatcher {
         _ => self.dispatch_node(cmd),
       };
 
-      let status = Shed::get_status();
-      statuses.push(status.to_string());
-      if status != 0 {
-        last_nonzero = Some((status, span));
-      }
+      statuses.push((Shed::get_status(), cmd.span.clone()));
 
       if let Some(scope) = out_scope {
         prev = Some(scope.take());
       }
 
-      if result.is_err() {
-        break;
-      }
+      result?;
     }
 
-    Shed::vars_mut(|v| v.set_var("PIPESTATUS", VarKind::arr(statuses), VarFlags::empty())).ok();
-
-    let blame_span = if shopt!(set.pipefail)
-      && let Some((code, pipefail)) = last_nonzero
-    {
-      Shed::set_status(code);
-      Some(pipefail)
-    } else {
-      Some(span)
-    };
-
-    result?;
-
-    check_err(flags, None, blame_span, ctx)?;
-    Ok(())
+    Ok(statuses)
   }
 
   fn exec_builtin(&mut self, cmd: &Node) -> ShResult<()> {
@@ -1767,10 +1788,6 @@ pub fn is_func(name: &str) -> bool {
 
 pub fn is_arith(tk: Option<&Tk>) -> bool {
   tk.is_some_and(|tk| tk.flags.contains(TkFlags::IS_ARITH))
-}
-
-fn internal_pipeline(cmds: &[Node], is_bg: bool, has_redirs: bool) -> bool {
-  !is_bg && !has_redirs && node_has_only_builtins(cmds.to_vec())
 }
 
 pub(crate) fn is_builtin(cmd: &Node) -> bool {

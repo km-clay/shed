@@ -400,102 +400,107 @@ pub(crate) enum NdRule {
   },
 }
 
-pub(crate) fn node_has_only_builtins(nodes: Vec<Node>) -> bool {
-  for mut node in nodes {
-    let mut res = None;
-    node.walk_tree(&mut |node| {
-      if let Some(false) = res {
-        return;
-      }
+pub(crate) fn node_has_only_builtins(node: &mut Node) -> bool {
+  let mut res = None;
+  node.walk_tree(&mut |node| {
+    if let Some(false) = res {
+      return;
+    }
 
-      if !node.redirs.is_empty() {
-        res = Some(false);
-        return;
-      }
+    if !node.redirs.is_empty() {
+      res = Some(false);
+      return;
+    }
 
-      if node
-        .flags
-        .contains(NdFlags::BACKGROUND | NdFlags::FORK_BUILTINS)
-      {
-        res = Some(false);
-        return;
-      }
+    if node
+      .flags
+      .contains(NdFlags::BACKGROUND | NdFlags::FORK_BUILTINS)
+    {
+      res = Some(false);
+      return;
+    }
 
-      match &node.class {
-        NdRule::Command { .. } => {
-          if !is_func_node(node) {
-            res = Some(is_builtin(node));
-            return;
-          }
-          let name = node.get_command().map(|tk| tk.to_string()).unwrap();
+    match &node.class {
+      NdRule::Command { .. } => {
+        if !is_func_node(node) {
+          res = Some(is_builtin(node));
+          return;
+        }
+        let name = node.get_command().map(|tk| tk.to_string()).unwrap();
 
-          // Caller is about to execute this anyway (cmd sub, pipeline, etc),
-          // so source the autoload now while we have the chance.
-          let autoload_src = Shed::logic_mut(|l| {
-            if let Some(ShFunc::Autoload(_)) = l.get_func_ref(&name) {
-              let func = l.remove_func(&name)?;
-              if let ShFunc::Autoload(src) = func {
-                return Some(src);
-              }
+        // Caller is about to execute this anyway (cmd sub, pipeline, etc),
+        // so source the autoload now while we have the chance.
+        let autoload_src = Shed::logic_mut(|l| {
+          if let Some(ShFunc::Autoload(_)) = l.get_func_ref(&name) {
+            let func = l.remove_func(&name)?;
+            if let ShFunc::Autoload(src) = func {
+              return Some(src);
             }
-            None
-          });
-
-          if let Some(src) = autoload_src
-            && src.source(AutoloadKind::Function).is_err()
-          {
-            res = Some(false);
-            return;
           }
+          None
+        });
 
-          let short_circuit = Shed::logic(|l| {
-            let Some(func) = l.get_func_ref(&name) else {
-              return Some(false);
-            };
+        if let Some(src) = autoload_src
+          && src.source(AutoloadKind::Function).is_err()
+        {
+          res = Some(false);
+          return;
+        }
 
-            match func {
-              ShFunc::Defined { is_internal, .. } => match is_internal {
-                Some(IsInternal::Yes) => Some(true),
-                Some(IsInternal::No) => Some(false),
-                Some(IsInternal::Checking) => Some(true),
-                None => None,
-              },
-              ShFunc::Autoload(_) => Some(false),
-            }
-          });
-
-          if let Some(verdict) = short_circuit {
-            res = Some(verdict);
-            return;
-          }
-
-          // Cache miss: function exists, is Defined, is_internal is None.
-          // Mark Checking and clone the body in a single borrow.
-          let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&name) {
-            Some(ShFunc::Defined {
-              logic, is_internal, ..
-            }) => {
-              *is_internal = Some(IsInternal::Checking);
-              Some(logic.clone())
-            }
-            _ => None,
-          }) else {
-            return;
+        let short_circuit = Shed::logic(|l| {
+          let Some(func) = l.get_func_ref(&name) else {
+            return Some(false);
           };
 
-          let is = node_has_only_builtins(vec![*logic]);
-          let verdict = if is { IsInternal::Yes } else { IsInternal::No };
-          Shed::logic_mut(|l| {
-            if let Some(func) = l.get_func_mut(&name) {
-              func.set_is_internal(verdict).ok();
-            }
-          });
-          res = Some(is);
+          match func {
+            ShFunc::Defined { is_internal, .. } => match is_internal {
+              Some(IsInternal::Yes) => Some(true),
+              Some(IsInternal::No) => Some(false),
+              Some(IsInternal::Checking) => Some(true),
+              None => None,
+            },
+            ShFunc::Autoload(_) => Some(false),
+          }
+        });
+
+        if let Some(verdict) = short_circuit {
+          res = Some(verdict);
+          return;
         }
-        _ => res = Some(true),
+
+        // Cache miss: function exists, is Defined, is_internal is None.
+        // Mark Checking and clone the body in a single borrow.
+        let Some(mut logic) = Shed::logic_mut(|l| match l.get_func_mut(&name) {
+          Some(ShFunc::Defined {
+            logic, is_internal, ..
+          }) => {
+            *is_internal = Some(IsInternal::Checking);
+            Some(logic.clone())
+          }
+          _ => None,
+        }) else {
+          return;
+        };
+
+        let is = node_has_only_builtins(&mut logic);
+        let verdict = if is { IsInternal::Yes } else { IsInternal::No };
+        Shed::logic_mut(|l| {
+          if let Some(func) = l.get_func_mut(&name) {
+            func.set_is_internal(verdict).ok();
+          }
+        });
+        res = Some(is);
       }
-    });
-    if let Some(false) = res {
+      _ => res = Some(true),
+    }
+  });
+
+  res.unwrap_or(false)
+}
+
+pub(crate) fn nodes_have_only_builtins<'a>(nodes: impl Iterator<Item = &'a mut Node>) -> bool {
+  for node in nodes {
+    if !node_has_only_builtins(node) {
       return false;
     }
   }
