@@ -53,7 +53,7 @@ qtable() {
 
 		printf '│ '
 
-		for ((col=0; col<${#row[@]}; col++)); do
+		for ((col=0; col<${#widths[@]}; col++)); do
 			field="${row[col]}"
 			this_width=$(width "$field")
 			target_width=${widths[col]}
