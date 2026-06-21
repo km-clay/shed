@@ -12,6 +12,9 @@ use super::getopt::Opt;
 
 pub(super) struct Quote;
 impl super::Builtin for Quote {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::single_arg('v'), OptSpec::single_arg("var")]
+  }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     if let Some(stdin) = args.take_stdin() {
       let quoted = expand::shell_quote(&stdin);
@@ -19,13 +22,58 @@ impl super::Builtin for Quote {
       return with_status(0);
     }
 
-    let parts: Vec<String> = args
+    let mut parts: Vec<String> = args
       .argv
       .iter()
       .map(|(s, _)| expand::shell_quote(s))
       .collect();
+
+    for opt in &args.opts {
+      match opt {
+        Opt::ShortWithArg('v', var) => {
+          if let Some(quoted) = quote_var(var) {
+            parts.push(quoted);
+          }
+        }
+        Opt::LongWithArg(flag, var) if flag == "var" => {
+          if let Some(quoted) = quote_var(var) {
+            parts.push(quoted);
+          }
+        }
+        _ => {}
+      }
+    }
+
     outln!("{}", parts.join(" "));
     with_status(0)
+  }
+}
+
+fn quote_var(name: &str) -> Option<String> {
+  let var = Shed::vars(|v| v.try_get_var_meta(name))?;
+  match var.kind() {
+    VarKind::Str(var_str) => Some(expand::shell_quote(var_str.as_str())),
+    VarKind::Int(int) => {
+      let mut buf = itoa::Buffer::new();
+      let int_str = buf.format(*int);
+      Some(expand::shell_quote(int_str))
+    }
+    VarKind::Arr(var_strs) => Some(
+      var_strs
+        .iter()
+        .map(|v| expand::shell_quote(v.as_str()))
+        .join(" "),
+    ),
+    VarKind::AssocArr(items) => Some(
+      items
+        .iter()
+        .map(|(k, v)| [expand::shell_quote(k), expand::shell_quote(v)].join(" "))
+        .join("\n"),
+    ),
+    VarKind::Magic(magic_var) => {
+      let resolved = magic_var()?;
+      Some(expand::shell_quote(resolved.as_str()))
+    }
   }
 }
 
