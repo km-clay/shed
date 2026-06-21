@@ -29,7 +29,7 @@ use layout::{Layout, move_cursor_to_end, redraw};
 use linebuf::LineBuf;
 use register::{RegisterContent, RegisterName};
 
-use crate::interactive::{LoopAction, run_prompt_command};
+use crate::interactive::{LoopAction, Redraw, run_prompt_command};
 use crate::state::logic::AutoCmdKind;
 use crate::state::terminal::{Scroll, TermCtl};
 use crate::state::vars::Var;
@@ -1116,7 +1116,7 @@ impl ShedLine {
 
         for cmd in cmds {
           if let LoopAction::Break =
-            run_prompt_command(cmd.command().to_string(), false, None).ok()?
+            run_prompt_command(cmd.command().to_string(), Some(Redraw::Partial), None).ok()?
           {
             res = LoopAction::Break;
             break;

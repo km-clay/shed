@@ -659,14 +659,18 @@ impl Terminal {
   /// Called before the prompt is drawn. If we are not on column 1, push a vid-inverted '%' and then a '\n\r'.
   ///
   /// Aping zsh with this but it's a nice feature.
-  pub fn fix_cursor_column(&mut self) -> ShResult<()> {
-    let Some((_, c)) = self.get_cursor_pos()? else {
-      return Ok(());
-    };
-
-    if c.0 != 1 {
-      write!(self, "\x1b[7m%\x1b[0m\n\r")?;
+  pub fn fix_cursor_column(&mut self, full: bool) -> ShResult<()> {
+    if full {
+      let Some((_, c)) = self.get_cursor_pos()? else {
+        return Ok(());
+      };
+      if c.0 != 1 {
+        write!(self, "\x1b[7m%\x1b[0m\n\r")?;
+      }
+    } else {
+      write!(self, "\r")?;
     }
+
     self.flush()?;
     Ok(())
   }

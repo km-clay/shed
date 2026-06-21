@@ -22,6 +22,7 @@ use crate::{
   exec_term,
   signal::FOCUS_GAINED,
   state::{logic::AutoCmdKind, terminal::CursorCtl, util::with_vars},
+  write_term,
 };
 
 use super::{
@@ -361,7 +362,7 @@ fn shed_loop_iter(
 
               for cmd in cmds {
                 if let LoopAction::Break =
-                  run_prompt_command(cmd.command().to_string(), false, None)?
+                  run_prompt_command(cmd.command().to_string(), None, None)?
                 {
                   return Ok(LoopAction::Break);
                 }
@@ -505,9 +506,11 @@ fn handle_readline_event(
       let cmd_start = Instant::now();
       Shed::meta_mut(MetaTab::start_timer);
 
-      if let LoopAction::Break =
-        run_prompt_command(input.clone(), true, Some(get_repl_entry_name()))?
-      {
+      if let LoopAction::Break = run_prompt_command(
+        input.clone(),
+        Some(Redraw::Full),
+        Some(get_repl_entry_name()),
+      )? {
         return Ok(LoopAction::Break);
       }
 
@@ -582,20 +585,28 @@ fn handle_readline_event(
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Redraw {
+  /// Redraw the prompt with a newline
+  Full,
+  /// Redraw with no newline
+  Partial,
+}
+
 pub(crate) fn run_prompt_command(
   input: String,
-  clear_prompt: bool,
+  clear_prompt: Option<Redraw>,
   source: Option<Rc<str>>,
 ) -> ShResult<LoopAction> {
   exec_term!(TermCtl::Osc(ExecStart)).ok();
 
-  let position = (!clear_prompt)
+  let position = (clear_prompt.is_none())
     .then(|| Shed::term_mut(Terminal::get_cursor_pos))
     .transpose()?
     .flatten();
 
   let res = {
-    let _scroll_guard = Shed::term_mut(|t| t.yield_terminal(clear_prompt));
+    let _scroll_guard = Shed::term_mut(|t| t.yield_terminal(clear_prompt.is_some()));
     exec_int(input, source)
   };
 
@@ -609,8 +620,8 @@ pub(crate) fn run_prompt_command(
 
   exec_term!(TermCtl::Osc(ExecEnd(Shed::get_status()))).ok();
 
-  if clear_prompt {
-    Shed::term_mut(Terminal::fix_cursor_column)?;
+  if let Some(clear) = clear_prompt {
+    Shed::term_mut(|t| t.fix_cursor_column(clear == Redraw::Full))?;
   }
 
   if let Err(e) = res {
