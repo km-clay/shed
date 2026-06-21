@@ -3,7 +3,7 @@ use itertools::Itertools;
 use crate::{
   ShResult, Shed,
   builtin::getopt::OptSpec,
-  expand, match_loop, out, outln, procio,
+  expand, match_loop, out, outln,
   state::vars::{VarFlags, VarKind},
   util::{expand_ansi_c, with_status},
 };
@@ -16,7 +16,7 @@ impl super::Builtin for Quote {
     vec![OptSpec::single_arg('v'), OptSpec::single_arg("var")]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    if let Some(stdin) = args.take_stdin() {
+    if let Some(stdin) = self.get_input_with(&mut args, |_| false) {
       let quoted = expand::shell_quote(&stdin);
       outln!("{quoted}");
       return with_status(0);
@@ -97,15 +97,10 @@ impl super::Builtin for Unquote {
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     log::debug!("entered unquote execute()");
-    let input = if args.argv.is_empty() || args.has_stdin() {
-      if args.has_stdin() {
-        args.take_stdin().unwrap()
-      } else {
-        procio::read_input()?
-      }
-    } else {
-      super::join_raw_args(args.argv).0
-    };
+    let input = self
+      .get_input(&mut args)
+      .unwrap_or_else(|| super::join_raw_args(args.argv).0);
+
     let mut target = None;
     let mut delim = "\n";
 

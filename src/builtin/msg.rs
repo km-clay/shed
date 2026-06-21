@@ -19,12 +19,12 @@ impl super::Builtin for Msg {
       OptSpec::flag("broadcast"),
     ]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let mut system = false;
     let mut status = false;
     let mut broadcast = false;
 
-    for opt in args.opts {
+    for opt in &args.opts {
       match opt {
         Opt::Short('S') => system = true,
         Opt::Short('s') => status = true,
@@ -38,7 +38,11 @@ impl super::Builtin for Msg {
       }
     }
 
-    if args.argv.is_empty() {
+    let input = self
+      .get_input(&mut args)
+      .map(|s| s.trim_matches('\n').to_string());
+
+    if input.is_none() && args.argv.is_empty() {
       // argv is empty → list past messages and exit; nothing to post.
       let history = if system {
         Shed::system_msg_hist()
@@ -54,7 +58,7 @@ impl super::Builtin for Msg {
       return with_status(0);
     }
 
-    let (msg, _span) = join_raw_args(args.argv);
+    let msg = input.unwrap_or_else(|| join_raw_args(args.argv).0);
 
     if broadcast {
       // sends to all socket subscribers

@@ -273,6 +273,31 @@ pub(super) trait Builtin: Sync {
     }
     Ok((argv, opts))
   }
+
+  /// Default input getter
+  ///
+  /// Slurps stdin if `args.argv` is empty, or if stdin is available
+  fn get_input(&self, args: &mut BuiltinArgs) -> Option<String> {
+    self.get_input_with(args, |a| a.argv.is_empty())
+  }
+
+  /// Input getter. Takes a predicate that decides whether to slurp stdin or not.
+  fn get_input_with(
+    &self,
+    args: &mut BuiltinArgs,
+    should_slurp: fn(&BuiltinArgs) -> bool,
+  ) -> Option<String> {
+    if should_slurp(args) || args.has_stdin() {
+      if args.has_stdin() {
+        args.take_stdin()
+      } else {
+        procio::read_input().ok()
+      }
+    } else {
+      None
+    }
+  }
+
   /// The main entry point for running a builtin. This is responsible for setting up the environment, handling redirections, and catching control flow errors.
   fn setup_builtin(
     &self,

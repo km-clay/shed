@@ -4,7 +4,7 @@ use crate::{
   KeyEvent, ShResult,
   builtin::getopt::{Opt, OptSpec},
   eval::lex::Span,
-  expand, expand_keymap, outln, procio,
+  expand, expand_keymap, outln,
   readline::EditorCore,
   sherr,
   util::{self, ShResultExt, with_status},
@@ -324,20 +324,10 @@ impl super::Builtin for Vice {
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let input = if args.argv.is_empty() || args.has_stdin() {
-      if args.has_stdin() {
-        args.take_stdin()
-      } else {
-        procio::read_input().ok()
-      }
-    } else {
-      None
-    };
-
     let span = args.span();
     let prog = Self::parse_cmds(&args.opts).promote_err(span.clone())?;
 
-    if let Some(input) = input {
+    if let Some(input) = self.get_input(&mut args) {
       let ok = Self::run_stream(&input, &prog, &span)?;
       return with_status(i32::from(!ok));
     }

@@ -32,6 +32,7 @@ use register::{RegisterContent, RegisterName};
 use crate::interactive::{LoopAction, run_prompt_command};
 use crate::state::logic::AutoCmdKind;
 use crate::state::terminal::{Scroll, TermCtl};
+use crate::state::vars::Var;
 use crate::{exec_term, queue_term};
 
 use super::state::meta::MetaTab;
@@ -47,7 +48,7 @@ use super::{
     shopt::CompleteStyle,
     terminal::{SyncOutputGuard, calc_str_width, truncate_with_ellipsis},
     util::with_vars,
-    vars::{Var, VarFlags, VarKind},
+    vars::{VarFlags, VarKind},
   },
   status_msg, system_msg, try_var,
   util::{self, ShResult},
@@ -1080,35 +1081,7 @@ impl ShedLine {
       Ok(Some(comp_match)) => {
         let line = comp_match.into_line();
         let cand = comp.selected_candidate().unwrap_or_default();
-        with_vars(
-          [("COMP_CANDIDATE".into(), cand.content().to_string())],
-          || autocmd!(OnCompletionSelect),
-        );
-
-        let span_start = comp.token_span().0;
-
-        let new_cursor = span_start
-          + comp
-            .selected_candidate()
-            .map(|c| c.len())
-            .unwrap_or_default();
-
-        self.core.focused_editor().set_buffer(&line);
-        self.core.focused_editor().set_cursor_from_flat(new_cursor);
-
-        if !self.focused_history().at_pending() {
-          self.focused_history().reset_to_pending();
-        }
-        self.update_editor_hint();
-        Shed::vars_mut(|v| {
-          v.set_var(
-            "SHED_EDIT_MODE",
-            VarKind::string(self.core.mode.report_mode().to_string()),
-            VarFlags::empty(),
-          )
-        })
-        .ok();
-
+        self.apply_completion(comp.as_ref(), &line, &cand);
         // Single candidate, don't store the completer
       }
       Ok(None) => {
@@ -1181,29 +1154,7 @@ impl ShedLine {
             1 => {
               let cand = &candidates[0];
               let line = comp.get_completed_line(cand.content());
-              with_vars(
-                [("COMP_CANDIDATE".into(), cand.content().to_string())],
-                || autocmd!(OnCompletionSelect),
-              );
-
-              let span_start = comp.token_span().0;
-              let new_cursor = span_start + cand.len();
-
-              self.core.focused_editor().set_buffer(&line);
-              self.core.focused_editor().set_cursor_from_flat(new_cursor);
-
-              if !self.focused_history().at_pending() {
-                self.focused_history().reset_to_pending();
-              }
-              self.update_editor_hint();
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  "SHED_EDIT_MODE",
-                  VarKind::string(self.core.mode.report_mode().to_string()),
-                  VarFlags::empty(),
-                )
-              })
-              .ok();
+              self.apply_completion(comp.as_ref(), &line, cand);
             }
             _ => {
               self.completer = Some(comp);
@@ -1228,6 +1179,31 @@ impl ShedLine {
 
     self.needs_redraw = true;
     None
+  }
+
+  /// Apply a resolved completion candidate to the focused editor.
+  fn apply_completion(&mut self, comp: &dyn Completer, line: &str, cand: &Candidate) {
+    with_vars(
+      [("COMP_CANDIDATE".into(), cand.content().to_string())],
+      || autocmd!(OnCompletionSelect),
+    );
+
+    let new_cursor = comp.token_span().0 + cand.len();
+    self.core.focused_editor().set_buffer(line);
+    self.core.focused_editor().set_cursor_from_flat(new_cursor);
+
+    if !self.focused_history().at_pending() {
+      self.focused_history().reset_to_pending();
+    }
+    self.update_editor_hint();
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "SHED_EDIT_MODE",
+        VarKind::string(self.core.mode.report_mode().to_string()),
+        VarFlags::empty(),
+      )
+    })
+    .ok();
   }
 
   fn start_hist_search(&mut self) {
