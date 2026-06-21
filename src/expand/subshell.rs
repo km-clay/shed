@@ -2,7 +2,7 @@ use std::os::fd::AsRawFd;
 
 use crate::{
   builtin::SinkScope,
-  eval::{ParsedSrc, parse::node::nodes_have_only_builtins},
+  eval::{ParsedSrc, execute::exec_input, parse::node::nodes_have_only_builtins},
   state::vars::VarStr,
   util::isolation_guard,
 };
@@ -110,11 +110,10 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
   match unsafe { fork()? } {
     ForkResult::Child => {
-      Shed::term_mut(Terminal::detach_tty); // close tty fd
       let redir: RedirSet = RedirSpec::dup(wpipe.as_raw_fd(), 1, RedirType::Output).into();
       let _redir_guard = redir.apply()?;
 
-      if let Err(e) = exec_nonint(raw.to_string(), Some("command_sub".into())) {
+      if let Err(e) = exec_input(raw.to_string(), Some("command_sub".into())) {
         if let ShErrKind::CleanExit(code) = e.kind() {
           std::process::exit(*code);
         }
