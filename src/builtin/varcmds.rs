@@ -9,7 +9,9 @@ use super::{
   outln, sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, display_as_var, display_env_vars, display_local, display_readonly},
+    vars::{
+      VarFlags, VarKind, VarName, display_as_var, display_env_vars, display_local, display_readonly,
+    },
   },
   try_var,
   util::{ShResult, ShResultExt, split_at_unescaped, with_status},
@@ -325,11 +327,27 @@ impl super::Builtin for Unset {
     for (arg, _) in args.argv {
       if is_func {
         Shed::logic_mut(|l| l.remove_func(&arg));
-      } else {
-        if !Shed::vars(|v| v.var_exists(&arg)) {
-          continue;
+        continue;
+      }
+
+      let parsed = VarName::parse(&arg, true)?;
+      if !Shed::vars(|v| v.var_exists(parsed.name())) {
+        continue;
+      }
+
+      match parsed.index() {
+        None => {
+          Shed::vars_mut(|v| v.unset_var(parsed.name()))?;
         }
-        Shed::vars_mut(|v| v.unset_var(&arg))?;
+        Some(idx) => {
+          // resolve the raw index (a string key vs a numeric index) against
+          // the target's kind, then drop just that element
+          let Some(tag) = Shed::vars(|v| v.try_get_var_kind_tag(parsed.name())) else {
+            continue;
+          };
+          let resolved = idx.clone().resolve_for(tag)?;
+          Shed::vars_mut(|v| v.unset_index(parsed.name(), resolved))?;
+        }
       }
     }
 
@@ -512,6 +530,30 @@ mod tests {
     test_input("unset myvar").ok();
     assert_ne!(state::Shed::get_status(), 0);
     assert_eq!(var!("myvar"), "protected");
+  }
+
+  #[test]
+  fn unset_assoc_element() {
+    let g = TestGuard::new();
+    test_input(
+      "declare -A m; m[foo]=bar; m[baz]=qux; unset 'm[foo]'; echo \"[${m[foo]}][${m[baz]}]\"",
+    )
+    .unwrap();
+    crate::assert_output!(g, "[][qux]\n");
+  }
+
+  #[test]
+  fn unset_indexed_element() {
+    let g = TestGuard::new();
+    test_input("arr=(a b c d); unset 'arr[1]'; echo \"${arr[@]}\"").unwrap();
+    crate::assert_output!(g, "a c d\n");
+  }
+
+  #[test]
+  fn unset_missing_element_is_noop() {
+    let g = TestGuard::new();
+    test_input("declare -A m; m[a]=1; unset 'm[nope]'; echo \"[${m[a]}]\"").unwrap();
+    crate::assert_output!(g, "[1]\n");
   }
 
   #[test]

@@ -111,6 +111,16 @@ impl ScopeStack {
     }
     Err(sherr!(ExecFail, "Variable '{}' not found", var_name,))
   }
+  /// Indexed counterpart to `unset_var`: removes a single array element from
+  /// the scope that owns the array. `idx` must already be resolved.
+  pub fn unset_index(&mut self, var_name: &str, idx: ArrIndex) -> ShResult<()> {
+    for scope in self.bounded_scopes_rev_mut() {
+      if scope.var_exists(var_name) {
+        return scope.unset_index(var_name, idx);
+      }
+    }
+    Ok(())
+  }
   pub fn export_var(&mut self, var_name: &str) {
     for scope in self.bounded_scopes_rev_mut() {
       if scope.var_exists(var_name) {

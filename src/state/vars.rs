@@ -1213,6 +1213,50 @@ impl VarTab {
     }
     Ok(())
   }
+  pub fn unset_index(&mut self, var_name: &str, idx: ArrIndex) -> ShResult<()> {
+    let Some(var) = self.vars.get_mut(var_name) else {
+      return Ok(());
+    };
+    if var.flags.contains(VarFlags::READONLY) {
+      return Err(sherr!(
+        ExecFail,
+        "cannot unset readonly variable '{}'",
+        var_name
+      ));
+    }
+    match var.kind_mut() {
+      VarKind::Arr(items) => {
+        let i = match idx {
+          ArrIndex::Literal(n) => n,
+          ArrIndex::FromBack(n) if items.len() >= n => items.len() - n,
+          ArrIndex::FromBack(_) => return Ok(()),
+          _ => {
+            return Err(sherr!(
+              ExecFail,
+              "Cannot unset all elements of array '{}'",
+              var_name,
+            ));
+          }
+        };
+        if i < items.len() {
+          items.remove(i);
+        }
+        Ok(())
+      }
+      VarKind::AssocArr(items) => {
+        let ArrIndex::Key(key) = idx else {
+          return Err(sherr!(
+            ExecFail,
+            "Cannot unset all elements of associative array '{}'",
+            var_name,
+          ));
+        };
+        items.retain(|(k, _)| !(k == &key));
+        Ok(())
+      }
+      _ => Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name)),
+    }
+  }
   pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if let Some(var) = self.vars.get_mut(var_name) {
       if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {

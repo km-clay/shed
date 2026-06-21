@@ -29,7 +29,9 @@ macro_rules! flush_term {
 macro_rules! exec_term {
   ($($ctl:expr),* $(,)?) => {'exec_term: {
     use ::std::io::Write;
-    $crate::queue_term!($($ctl),*)?;
+    if let Err(e) = $crate::queue_term!($($ctl),*) {
+      break 'exec_term Err(e);
+    };
 
     if let Err(e) = Shed::term_mut(|t| t.flush()) {
       break 'exec_term Err($crate::util::ShErr::from(e));
