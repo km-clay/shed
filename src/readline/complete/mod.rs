@@ -433,7 +433,6 @@ impl Candidate {
   pub fn content(&self) -> &str {
     &self.content
   }
-  #[cfg(test)]
   pub fn desc(&self) -> Option<&str> {
     self.desc.as_deref()
   }

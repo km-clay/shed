@@ -496,6 +496,10 @@ impl Completer for GridCompleter {
     &self.completer.original_input
   }
 
+  fn all_candidates(&self) -> Vec<Candidate> {
+    self.completer.all_candidates()
+  }
+
   fn draw(&mut self) -> usize {
     self.selector.draw()
   }

@@ -749,6 +749,12 @@ impl VarKind {
   }
 }
 
+impl<K: AsRef<str>, V: AsRef<str>> From<Vec<(K, V)>> for VarKind {
+  fn from(value: Vec<(K, V)>) -> Self {
+    Self::assoc_arr(value)
+  }
+}
+
 impl Display for VarKind {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
@@ -812,6 +818,9 @@ impl Var {
   }
   pub fn kind_mut(&mut self) -> &mut VarKind {
     &mut self.kind
+  }
+  pub fn into_kind(self) -> VarKind {
+    self.kind
   }
   pub fn mark_for_export(&mut self) {
     self.flags.set(VarFlags::EXPORT, true);

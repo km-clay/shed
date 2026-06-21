@@ -29,6 +29,8 @@ use layout::{Layout, move_cursor_to_end, redraw};
 use linebuf::LineBuf;
 use register::{RegisterContent, RegisterName};
 
+use crate::interactive::{LoopAction, run_prompt_command};
+use crate::state::logic::AutoCmdKind;
 use crate::state::terminal::{Scroll, TermCtl};
 use crate::{exec_term, queue_term};
 
@@ -1112,28 +1114,112 @@ impl ShedLine {
       Ok(None) => {
         let candidates = comp.all_candidates();
         let num_candidates = candidates.len();
-        with_vars(
-          [
-            ("NUM_MATCHES".into(), Into::<Var>::into(num_candidates)),
-            ("MATCHES".into(), Into::<Var>::into(candidates)),
-            ("SEARCH_STR".into(), Into::<Var>::into(comp.token())),
-          ],
-          || autocmd!(OnCompletionStart),
-        );
 
-        if comp.is_active() {
-          self.completer = Some(comp);
-          Shed::vars_mut(|v| {
-            v.set_var(
-              "SHED_EDIT_MODE",
-              VarKind::string("COMPLETE"),
-              VarFlags::empty(),
-            )
+        let cand_assoc: VarKind = candidates
+          .into_iter()
+          .fold(vec![], |mut acc, cand| {
+            let desc = cand.desc().map(|d| d.to_string()).unwrap_or_default();
+            let name = cand.content().to_string();
+            acc.push((name, desc));
+            acc
           })
-          .ok();
-          self.refresh_ui();
-          self.needs_redraw = true;
-          self.core.editor.clear_hint();
+          .into();
+        Shed::vars_mut(|v| v.set_var("MATCHES", cand_assoc, VarFlags::LOCAL).unwrap());
+        Shed::vars_mut(|v| {
+          v.set_var(
+            "NUM_MATCHES",
+            VarKind::Int(num_candidates as i32),
+            VarFlags::LOCAL,
+          )
+        })
+        .unwrap();
+        Shed::vars_mut(|v| v.set_var("SEARCH_STR", VarKind::string(comp.token()), VarFlags::LOCAL))
+          .unwrap();
+
+        let cmds = Shed::logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
+        Shed::notify_autocmd(AutoCmdKind::OnCompletionStart);
+        let saved_status = Shed::get_status();
+        let mut res = LoopAction::Continue;
+
+        for cmd in cmds {
+          if let LoopAction::Break =
+            run_prompt_command(cmd.command().to_string(), false, None).ok()?
+          {
+            res = LoopAction::Break;
+            break;
+          }
+        }
+
+        scopeguard::defer! {
+          Shed::vars_mut(|v| {
+            v.unset_var("MATCHES").ok();
+            v.unset_var("NUM_MATCHES").ok();
+            v.unset_var("SEARCH_STR").ok();
+          })
+        }
+
+        let cancelled = res == LoopAction::Break || Shed::get_status() != 0;
+        Shed::set_status(saved_status);
+        if cancelled {
+          autocmd!(OnCompletionCancel)
+        } else if comp.is_active() {
+          let VarKind::AssocArr(filtered) = Shed::vars_mut(|v| v.try_take_var_kind("MATCHES"))?
+          else {
+            system_msg!("completion error: MATCHES variable must be an associative array");
+
+            return None;
+          };
+
+          let candidates: Vec<Candidate> =
+            filtered.into_iter().fold(vec![], |mut acc, (name, desc)| {
+              let cand: Candidate = Candidate::from(name).with_desc(desc.to_string());
+              acc.push(cand);
+              acc
+            });
+
+          match candidates.len() {
+            1 => {
+              let cand = &candidates[0];
+              let line = comp.get_completed_line(cand.content());
+              with_vars(
+                [("COMP_CANDIDATE".into(), cand.content().to_string())],
+                || autocmd!(OnCompletionSelect),
+              );
+
+              let span_start = comp.token_span().0;
+              let new_cursor = span_start + cand.len();
+
+              self.core.focused_editor().set_buffer(&line);
+              self.core.focused_editor().set_cursor_from_flat(new_cursor);
+
+              if !self.focused_history().at_pending() {
+                self.focused_history().reset_to_pending();
+              }
+              self.update_editor_hint();
+              Shed::vars_mut(|v| {
+                v.set_var(
+                  "SHED_EDIT_MODE",
+                  VarKind::string(self.core.mode.report_mode().to_string()),
+                  VarFlags::empty(),
+                )
+              })
+              .ok();
+            }
+            _ => {
+              self.completer = Some(comp);
+              Shed::vars_mut(|v| {
+                v.set_var(
+                  "SHED_EDIT_MODE",
+                  VarKind::string("COMPLETE"),
+                  VarFlags::empty(),
+                )
+              })
+              .ok();
+              self.refresh_ui();
+              self.needs_redraw = true;
+              self.core.editor.clear_hint();
+            }
+          }
         } else {
           Shed::term_mut(Terminal::send_bell).ok();
         }

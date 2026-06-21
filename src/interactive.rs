@@ -257,7 +257,8 @@ pub(super) fn shed_interactive(
   }
 }
 
-enum LoopAction {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoopAction {
   Continue,
   Break,
 }
@@ -581,7 +582,7 @@ fn handle_readline_event(
   }
 }
 
-fn run_prompt_command(
+pub(crate) fn run_prompt_command(
   input: String,
   clear_prompt: bool,
   source: Option<Rc<str>>,

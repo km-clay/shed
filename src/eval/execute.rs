@@ -1186,19 +1186,19 @@ impl Dispatcher {
 
       spans.push(cmd.get_span());
 
-      result = if should_fork_segment(&cmd) {
+      result = if should_fork_segment(cmd) {
         let name = cmd
           .get_command()
           .map(ToString::to_string)
           .unwrap_or_default();
 
         self.run_fork(&name, |s| {
-          if let Err(e) = s.dispatch_node(&cmd) {
+          if let Err(e) = s.dispatch_node(cmd) {
             e.print_error();
           }
         })
       } else {
-        self.dispatch_node(&cmd)
+        self.dispatch_node(cmd)
       };
 
       if !tty_attached && let Some(pgid) = tty_controller(self) {

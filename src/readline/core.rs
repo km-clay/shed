@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use scopeguard::defer;
 
 use super::editcmd::{Cmd, CmdFlags, EditCmd, Motion, Verb, invert_char_motion};
@@ -503,6 +505,42 @@ impl EditorCore {
       }
 
       Ok(())
+    }
+  }
+}
+
+impl Debug for EditorCore {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("EditorCore")
+      .field("editor", &self.editor)
+      .field("mode", &self.mode.report_mode())
+      .field(
+        "saved_mode",
+        &self.saved_mode.as_ref().map(|m| m.report_mode()),
+      )
+      .field("repeat_action", &self.repeat_action)
+      .field("repeat_motion", &self.repeat_motion)
+      .field("needs_redraw", &self.needs_redraw)
+      .field("shell_cmd_ran", &self.shell_cmd_ran)
+      .field("mode_changed", &self.mode_changed)
+      .finish()
+  }
+}
+
+impl Clone for EditorCore {
+  fn clone(&self) -> Self {
+    Self {
+      editor: self.editor.clone(),
+      mode: self.mode.report_mode().as_edit_mode(),
+      saved_mode: self
+        .saved_mode
+        .as_ref()
+        .map(|m| m.report_mode().as_edit_mode()),
+      repeat_action: self.repeat_action.clone(),
+      repeat_motion: self.repeat_motion.clone(),
+      needs_redraw: self.needs_redraw,
+      shell_cmd_ran: self.shell_cmd_ran,
+      mode_changed: self.mode_changed,
     }
   }
 }

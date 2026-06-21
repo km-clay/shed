@@ -508,6 +508,16 @@ impl ScopeStack {
       self.try_get_var(var.name())
     }
   }
+  pub fn try_take_var_meta(&mut self, var_name: &str) -> Option<Var> {
+    let var = self.try_get_var_meta(var_name)?;
+    self.unset_var(var_name).ok();
+    Some(var)
+  }
+  pub fn try_take_var_kind(&mut self, var_name: &str) -> Option<VarKind> {
+    let var = self.try_take_var_meta(var_name)?;
+    self.unset_var(var_name).ok();
+    Some(var.into_kind())
+  }
   pub fn take_var(&mut self, var_name: &str) -> VarStr {
     let var = self.get_var(var_name);
     self.unset_var(var_name).ok();
