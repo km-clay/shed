@@ -22,7 +22,6 @@ use crate::{
   exec_term,
   signal::FOCUS_GAINED,
   state::{logic::AutoCmdKind, terminal::CursorCtl, util::with_vars},
-  write_term,
 };
 
 use super::{

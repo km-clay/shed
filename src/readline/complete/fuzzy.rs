@@ -87,10 +87,10 @@ impl ScoredCandidate {
     self.penalize_len_diff = enable;
     self
   }
-  fn is_word_bound(prev: char, curr: char) -> bool {
+  fn is_word_bound(prev: char, curr: char, query_ch: char) -> bool {
     match prev {
       '/' | '_' | '-' | '.' | ' ' => true,
-      c if c.is_lowercase() && curr.is_uppercase() => true, // camelCase boundary
+      c if c.is_lowercase() && curr.is_uppercase() => query_ch.is_uppercase(),
       _ => false,
     }
   }
@@ -123,7 +123,13 @@ impl ScoredCandidate {
         score += Self::BONUS_FIRST_CHAR;
       }
 
-      if idx == 0 || Self::is_word_bound(candidate_chars[idx - 1], candidate_chars[idx]) {
+      if idx == 0
+        || Self::is_word_bound(
+          candidate_chars[idx - 1],
+          candidate_chars[idx],
+          query_chars[i],
+        )
+      {
         score += Self::BONUS_BOUNDARY;
       }
 
