@@ -1797,7 +1797,25 @@ impl ShedLine {
     // Always reserve at least one row at the bottom for ephemeral status
     // messages; reserve two when the full statline is on as well.
     let reserved = Terminal::reserved_rows() as usize;
-    let viewport_cap = t_rows.saturating_sub(prompt_lines + reserved).max(1);
+    // Reserve room for the completer/history overlay too, so a tall buffer plus
+    // the overlay below it can't push the prompt off the top and clip it.
+    let predicted_overlay_rows: u16 = self
+      .completer
+      .as_ref()
+      .and_then(|c| c.predicted_rows())
+      .unwrap_or(0)
+      .saturating_add(
+        self
+          .focused_history()
+          .fuzzy_finder
+          .as_ref()
+          .map_or(0, FuzzySelector::predicted_rows),
+      )
+      .try_into()
+      .unwrap_or(u16::MAX);
+    let viewport_cap = t_rows
+      .saturating_sub(prompt_lines + reserved + predicted_overlay_rows as usize)
+      .max(1);
     self.core.editor.set_viewport_cap(Some(viewport_cap));
     self.core.editor.update_scroll_offset();
 
@@ -1839,21 +1857,6 @@ impl ShedLine {
     if let Some(finder) = self.history_fzf() {
       finder.clear();
     }
-
-    let predicted_overlay_rows: u16 = self
-      .completer
-      .as_ref()
-      .and_then(|c| c.predicted_rows())
-      .unwrap_or(0)
-      .saturating_add(
-        self
-          .focused_history()
-          .fuzzy_finder
-          .as_ref()
-          .map_or(0, FuzzySelector::predicted_rows),
-      )
-      .try_into()
-      .unwrap_or(u16::MAX);
 
     let mut system_msg = String::new();
     if Shed::system_msg_pending() {
