@@ -985,6 +985,8 @@ HIST                                             *builtin-hist* *hist*
     `--restore`         restore previously deleted entries
     `--import {source}` import history from another shell (see below)
     `--ex`              operate on ex-mode history instead of shell command history
+    `--pull`            reload the in-memory history cache from the database,
+                        picking up entries written by other shell sessions
 
   Providing numeric arguments restricts results to those specific IDs:
 
