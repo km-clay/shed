@@ -721,16 +721,21 @@ impl VarKind {
 
       // Read the value until top-level whitespace, respecting quotes so
       // values like "foo bar biz" stay together.
+      // Quote characters are preserved so the expander still sees the original
+      // quoting context (e.g. `$'...'` ANSI-C strings); the quote state only
+      // gates whether whitespace terminates the value.
       let mut val = String::new();
       let mut qt_state = QuoteState::default();
       match_loop!(chars.peek() => &c => c, {
         '"' => {
           chars.next();
           qt_state.toggle_double();
+          val.push(c);
         }
         '\'' => {
           chars.next();
           qt_state.toggle_single();
+          val.push(c);
         }
         _ if c.is_whitespace() && qt_state.outside() => break,
         _ => {

@@ -714,6 +714,25 @@ mod tests {
     assert_eq!(var!("RO_WS"), "M    N");
   }
 
+  // Quoting context (e.g. `$'...'` ANSI-C strings) must survive assoc array
+  // literal parsing. Regression: the value reader stripped the quotes, turning
+  // `$'a\tb'` into the variable expansion `$a` followed by `\tb`.
+  #[test]
+  fn declare_assoc_preserves_ansi_c_quoting() {
+    let _g = TestGuard::new();
+    test_input(r#"declare -A aq=([k]=$'a\tb')"#).unwrap();
+    test_input(r#"aq_out="${aq[k]}""#).unwrap();
+    assert_eq!(var!("aq_out"), "a\tb");
+  }
+
+  #[test]
+  fn declare_assoc_preserves_multiline_value() {
+    let _g = TestGuard::new();
+    test_input(r#"declare -A aq=([k]=$'one\ntwo\nthree')"#).unwrap();
+    test_input(r#"aq_out="${aq[k]}""#).unwrap();
+    assert_eq!(var!("aq_out"), "one\ntwo\nthree");
+  }
+
   // ===================== Str += concat regression =====================
   // Was doing arithmetic when both sides parsed as i32, giving
   // sum-of-digits for `buf=""; buf+="2"; buf+="0"; buf+="1"; buf+="6"`.
