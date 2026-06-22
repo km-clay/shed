@@ -10,7 +10,7 @@ mod ui;
 
 use std::os::fd::BorrowedFd;
 
-use super::{Shed, eval, expand, match_loop, procio, sherr, state, system_msg, var, write_term};
+use super::{Shed, eval, expand, match_loop, procio, sherr, state, system_msg, var};
 
 use compact_str::CompactString;
 pub(super) use guards::{isolation_guard, scope_guard, shared_scope_guard, var_ctx_guard};
@@ -19,9 +19,8 @@ pub(super) use path::{
 };
 pub(super) use pos::{Pos, SignedPos};
 pub(super) use ui::{
-  BOT_LEFT, BOT_RIGHT, HOR_LINE, PaletteEntry, TOP_LEFT, TOP_RIGHT, TREE_LEFT, TREE_RIGHT,
-  VERT_LINE, ansi_from_description, pad_line, pad_line_into, style_from_description,
-  stylize_loglevel,
+  BOT_LEFT, BOT_RIGHT, HOR_LINE, PaletteEntry, TOP_LEFT, TOP_RIGHT, VERT_LINE,
+  ansi_from_description, pad_line_into, style_from_description, stylize_loglevel,
 };
 
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]

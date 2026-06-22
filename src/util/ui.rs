@@ -2,7 +2,6 @@ use super::{
   super::state::terminal::Terminal,
   ShResult, Shed, match_loop, sherr,
   state::terminal::{ColorMode, calc_str_width},
-  write_term,
 };
 use std::fmt::Write;
 use yansi::{Paint, Painted, Style};
@@ -13,8 +12,6 @@ pub const TOP_LEFT: &str = "\x1b[90m╭\x1b[0m";
 pub const TOP_RIGHT: &str = "\x1b[90m╮\x1b[0m";
 pub const HOR_LINE: &str = "\x1b[90m─\x1b[0m";
 pub const VERT_LINE: &str = "\x1b[90m│\x1b[0m";
-pub const TREE_LEFT: &str = "\x1b[90m├\x1b[0m";
-pub const TREE_RIGHT: &str = "\x1b[90m┤\x1b[0m";
 
 fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
   let r = (u16::from(r) * 5 / 255) as u8;
@@ -335,17 +332,6 @@ impl Decorations {
     self.inverted = true;
     self
   }
-}
-
-/// Pad `content` with `fill` to `cols` width, appending `right_border` at the end.
-pub fn pad_line(content: &str, fill: &str, right_border: &str, cols: usize) {
-  let used = calc_str_width(content);
-  let padding = cols.saturating_sub(used + 1);
-  write_term!("{content}").ok();
-  for _ in 0..padding {
-    write_term!("{fill}").ok();
-  }
-  write_term!("{right_border}").ok();
 }
 
 /// Pad `content` with `fill` to `cols` width, appending `right_border` at the end.
