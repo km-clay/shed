@@ -212,16 +212,6 @@ impl super::LineBuf {
       .is_some_and(|h| !h.lines().is_empty() && h.lines().iter().any(|l| !l.is_empty()))
   }
 
-  pub fn hint_lines(&self) -> Lines {
-    Lines(
-      self
-        .hint
-        .as_ref()
-        .map(|h| h.lines().to_vec())
-        .unwrap_or_default(),
-    )
-  }
-
   pub fn get_hint_text(&self) -> String {
     self.try_get_hint_text().unwrap_or_default()
   }

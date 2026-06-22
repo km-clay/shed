@@ -94,10 +94,14 @@ impl super::LineBuf {
         (f64::from(rows) * 0.5).round() as usize
       }
     });
-    let mut hint_lines = self.hint_lines();
-    let mut buf_lines = self.lines.clone();
-    buf_lines.attach_lines(&mut hint_lines);
-    let mut out = (raw.min(100)).min(buf_lines.len());
+    let buf_lines = self.lines.len();
+    let hint_lines = self.hint.as_ref().map_or(0, |h| h.lines().len());
+    let combined = if hint_lines == 0 {
+      buf_lines
+    } else {
+      buf_lines + hint_lines
+    };
+    let mut out = (raw.min(100)).min(combined);
     if let Some(cap) = self.viewport_cap {
       out = out.min(cap);
     }

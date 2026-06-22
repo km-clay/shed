@@ -1799,6 +1799,7 @@ impl ShedLine {
     let reserved = Terminal::reserved_rows() as usize;
     let viewport_cap = t_rows.saturating_sub(prompt_lines + reserved).max(1);
     self.core.editor.set_viewport_cap(Some(viewport_cap));
+    self.core.editor.update_scroll_offset();
 
     let line = self.core.editor.display_window_joined();
     let mut new_layout = self.get_layout(&line);
