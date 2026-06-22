@@ -330,7 +330,7 @@ fn parse_kill_target(arg: &str, blame: Span) -> ShResult<KillTarget> {
   })
 }
 
-fn list_all_signals() {
+pub(super) fn list_all_signals() {
   let signals: String = Signal::iterator()
     .map(|sig| {
       let sig = sig.to_string();
