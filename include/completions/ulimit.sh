@@ -1,18 +1,16 @@
 _ulimit_comp() {
 	local -A flags=(
-		[n]="open file count"
-		[s]="max stack size (bytes)"
-		[u]="process count"
-		[v]="virtual memory (bytes)"
-		[c]="core dump file size (bytes)"
+		[n]="set open file count limit"
+		[u]="set max process count"
+		[s]="set max stack size (bytes)"
+		[v]="set virtual memory limit (bytes)"
+		[c]="set max core dump file size (bytes)"
 	)
-	chars=( ${!flags[@]} );
-	descs=( ${flags[@]} );
 
 	case "$2" in
-		-*) compadd -a chars -d descs -P "-" ;;
+		-*) compadd -A flags -P "-" ;;
 		*)
-			case "$3" in ulimit) compadd -a chars -d descs -P '-' ;; esac
+			case "$3" in ulimit) compadd -A flags -P '-' ;; esac
 		;;
 	esac
 }

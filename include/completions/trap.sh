@@ -1,7 +1,20 @@
 _trap_comp() {
-	case "$3" in
-		trap) compadd $(compgen -W "-l -p" -- "$2") ;;
-		*)    compadd $(compgen -S -- "$2") ;;
-	esac
+  local -A flags=(
+    [l]="list traps"
+    [p]="print the trap commands"
+  )
+  local -a signals=( $(trap -l) )
+  case "$2" in
+    -*) compadd -A flags -P '-' ;;
+    *)
+      case "$3" in
+        trap)
+          compadd -A flags -P '-'
+          compadd -a signals -P 'SIG'
+          ;;
+        *)    compadd -a signals -P 'SIG' ;;
+      esac
+    ;;
+  esac
 }
 complete -F _trap_comp trap

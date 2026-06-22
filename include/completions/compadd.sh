@@ -1,17 +1,16 @@
 _compadd_comp() {
+  local -A flags=(
+    [P]="candidate prefix"
+    [S]="candidate suffix"
+    [d]="description array"
+    [a]="candidate array"
+    [A]="associative array (candidate=description)"
+  )
 	case "$2" in
-		-)
-			local flags=(P S d a)
-			local descs=(
-				"candidate prefix"
-				"candidate suffix"
-				"description array"
-				"candidate array"
-			)
-			compadd -P '-' -d descs -a flags
-		;;
+		-) compadd -P '-' -A flags ;;
 		*)
 			case "$3" in
+        compadd) compadd -P '-' -A flags ;;
 				-d|-a)
 					local vars=( $(compgen -v) )
 					for var in "${vars[@]}"; do
@@ -26,3 +25,4 @@ _compadd_comp() {
 		;;
 	esac
 }
+complete -F _compadd_comp compadd

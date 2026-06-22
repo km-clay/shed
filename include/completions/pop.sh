@@ -1,1 +1,2 @@
-_pop_comp() { compadd $(compgen -v -- "$2"); }
+_pop_comp() { compadd -D 'variable' $(compgen -v -- "$2"); }
+complete -F _pop_comp pop

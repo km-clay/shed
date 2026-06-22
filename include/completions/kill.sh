@@ -1,10 +1,10 @@
 _kill_comp() {
 	case "$3" in
-		-s|-l) compadd $(compgen -S -- $2) ;;
+		-s|-l) compadd -D 'signal' $(compgen -S -- "$2") ;;
 		*)
 			case "$2" in
-				-*) compadd -P '-' $(compgen -S -- "${2#-}") ;;
-				*) compadd $(compgen -j -- "$2") ;;
+				-*) compadd -D 'signal' -P '-' $(compgen -S -- "${2#-}") ;;
+				*) compadd -D 'job' $(compgen -j -- "$2") ;;
 			esac
 		;;
 	esac
