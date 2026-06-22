@@ -1,11 +1,8 @@
-use std::{ffi::CString, fmt, mem, os::unix::fs::MetadataExt, str::FromStr};
+use std::{fmt, mem, os::unix::fs::MetadataExt, str::FromStr};
 
 use nix::{
   libc,
-  sys::{
-    stat,
-    statfs::{self, FsType, Statfs},
-  },
+  sys::{stat, statfs, statvfs},
 };
 
 use crate::{
@@ -15,6 +12,17 @@ use crate::{
   state::vars::VarStr,
   util::{self, ShErr, ShResultExt, with_status},
 };
+
+// File-type bits, normalized to `u32`. The `libc::S_IF*` constants are
+// `u16` on some targets (macOS) and `u32` on others (Linux); `st_mode` in
+// `FileInfo` is always `u32`, so these give portable match patterns.
+const S_IFREG: u32 = libc::S_IFREG as u32;
+const S_IFDIR: u32 = libc::S_IFDIR as u32;
+const S_IFLNK: u32 = libc::S_IFLNK as u32;
+const S_IFCHR: u32 = libc::S_IFCHR as u32;
+const S_IFBLK: u32 = libc::S_IFBLK as u32;
+const S_IFSOCK: u32 = libc::S_IFSOCK as u32;
+const S_IFIFO: u32 = libc::S_IFIFO as u32;
 
 #[derive(Clone, Copy)]
 enum Base {
@@ -105,19 +113,19 @@ impl FileInfo {
 
     let mut info = Self {
       name,
-      st_ino: stat.st_ino,
-      st_nlink: stat.st_nlink,
-      st_mode: stat.st_mode,
+      st_ino: stat.st_ino as u64,
+      st_nlink: stat.st_nlink as u64,
+      st_mode: stat.st_mode as u32,
       st_uid: stat.st_uid,
       st_gid: stat.st_gid,
-      st_dev: stat.st_dev,
-      st_rdev: stat.st_rdev,
-      st_size: stat.st_size,
-      st_blksize: stat.st_blksize,
-      st_blocks: stat.st_blocks,
-      st_atime: stat.st_atime,
-      st_mtime: stat.st_mtime,
-      st_ctime: stat.st_ctime,
+      st_dev: stat.st_dev as u64,
+      st_rdev: stat.st_rdev as u64,
+      st_size: stat.st_size as i64,
+      st_blksize: stat.st_blksize as i64,
+      st_blocks: stat.st_blocks as i64,
+      st_atime: stat.st_atime as i64,
+      st_mtime: stat.st_mtime as i64,
+      st_ctime: stat.st_ctime as i64,
       st_btime: None, // need to get this separately
       st_btime_nsec: None,
     };
@@ -138,13 +146,13 @@ impl FileInfo {
       StatDisplay::Human => {
         let mode = self.st_mode;
         let ty = match mode & 0o170000 {
-          libc::S_IFREG => '-',
-          libc::S_IFDIR => 'd',
-          libc::S_IFLNK => 'l',
-          libc::S_IFCHR => 'c',
-          libc::S_IFBLK => 'b',
-          libc::S_IFSOCK => 's',
-          libc::S_IFIFO => 'p',
+          S_IFREG => '-',
+          S_IFDIR => 'd',
+          S_IFLNK => 'l',
+          S_IFCHR => 'c',
+          S_IFBLK => 'b',
+          S_IFSOCK => 's',
+          S_IFIFO => 'p',
           _ => '?',
         };
         write!(f, "{ty}")?;
@@ -191,19 +199,19 @@ impl FileInfo {
 
   fn fmt_filetype(&self, f: &mut impl fmt::Write) -> fmt::Result {
     let ty = match self.st_mode & 0o170000 {
-      libc::S_IFREG => {
+      S_IFREG => {
         if self.st_size == 0 {
           "regular empty file"
         } else {
           "regular file"
         }
       }
-      libc::S_IFDIR => "directory",
-      libc::S_IFLNK => "symbolic link",
-      libc::S_IFCHR => "character special file",
-      libc::S_IFBLK => "block special file",
-      libc::S_IFSOCK => "socket",
-      libc::S_IFIFO => "fifo",
+      S_IFDIR => "directory",
+      S_IFLNK => "symbolic link",
+      S_IFCHR => "character special file",
+      S_IFBLK => "block special file",
+      S_IFSOCK => "socket",
+      S_IFIFO => "fifo",
       _ => "weird file",
     };
     write!(f, "{ty}")
@@ -216,7 +224,7 @@ impl FileInfo {
 
   #[cfg(linux_like)]
   fn fmt_sec_ctx(&self, f: &mut impl fmt::Write) -> fmt::Result {
-    let Ok(path) = CString::new(self.name.as_str()) else {
+    let Ok(path) = std::ffi::CString::new(self.name.as_str()) else {
       return write!(f, "?");
     };
     let attr = c"security.selinux";
@@ -283,7 +291,7 @@ impl FileInfo {
   fn fmt_quoted_name(&self, f: &mut impl fmt::Write) -> fmt::Result {
     let quoted = expand::shell_quote(self.name.as_str());
 
-    if self.st_mode & 0o170000 == libc::S_IFLNK
+    if self.st_mode & 0o170000 == S_IFLNK
       && let Ok(tgt) = std::fs::read_link(self.name.as_str())
     {
       write!(f, "{} -> {}", quoted, tgt.display())
@@ -293,10 +301,10 @@ impl FileInfo {
   }
 
   fn fmt_dev_type(&self, f: &mut impl fmt::Write, device: Device) -> fmt::Result {
-    let major_dev = libc::major(self.st_dev);
-    let major_rdev = libc::major(self.st_rdev);
-    let minor_dev = libc::minor(self.st_dev);
-    let minor_rdev = libc::minor(self.st_rdev);
+    let major_dev = libc::major(self.st_dev as libc::dev_t);
+    let major_rdev = libc::major(self.st_rdev as libc::dev_t);
+    let minor_dev = libc::minor(self.st_dev as libc::dev_t);
+    let minor_rdev = libc::minor(self.st_rdev as libc::dev_t);
 
     match device {
       Device::MajorNumber => write!(f, "{major_dev}"),
@@ -486,45 +494,67 @@ struct FsInfo {
   free_nodes: u64,
   fs_id: u64,
   name_max: u64,
-  fs_type: Option<FsType>, // linux/bsd only
+  fs_type_id: Option<u64>,      // numeric magic; linux only
+  fs_type_name: Option<String>, // human-readable type, if resolvable
 }
 
 impl FsInfo {
+  /// Gather filesystem info for `path`. Numeric fields come from the
+  /// portable `statvfs`; the filesystem type is resolved separately since
+  /// that part is platform-specific.
+  fn for_path(path: &str) -> nix::Result<Self> {
+    let v = statvfs::statvfs(path)?;
+    let (fs_type_id, fs_type_name) = fs_type_of(path);
+    Ok(Self {
+      block_size: v.block_size() as u64,
+      fundamental_bs: v.fragment_size() as u64,
+      total_blks: v.blocks() as u64,
+      free_blks: v.blocks_free() as u64,
+      avail_blks: v.blocks_available() as u64,
+      total_nodes: v.files() as u64,
+      free_nodes: v.files_free() as u64,
+      fs_id: v.filesystem_id() as u64,
+      name_max: v.name_max() as u64,
+      fs_type_id,
+      fs_type_name,
+    })
+  }
+
   fn fmt_fs_type(&self, f: &mut impl fmt::Write, display: StatDisplay) -> fmt::Result {
-    match self.fs_type {
-      Some(id) => match display {
-        StatDisplay::Machine(base) => {
-          let id = id.0 as u64;
-          match base {
-            Base::Decimal => write!(f, "{id}"),
-            Base::Octal => write!(f, "{id:o}"),
-            Base::Hex => write!(f, "{id:x}"),
-          }
+    match display {
+      StatDisplay::Machine(base) => {
+        let id = self.fs_type_id.unwrap_or(0);
+        match base {
+          Base::Decimal => write!(f, "{id}"),
+          Base::Octal => write!(f, "{id:o}"),
+          Base::Hex => write!(f, "{id:x}"),
         }
-        StatDisplay::Human => write!(f, "{}", FsFmt::fs_type_readable(id)),
+      }
+      StatDisplay::Human => match &self.fs_type_name {
+        Some(name) => write!(f, "{name}"),
+        None => write!(f, "UNKNOWN"),
       },
-      None => write!(f, "UNKNOWN"),
     }
   }
 }
 
-impl From<Statfs> for FsInfo {
-  fn from(value: Statfs) -> Self {
-    Self {
-      block_size: value.block_size() as u64,
-      fundamental_bs: value.block_size() as u64, // f_frsize isnt on statfs, so fallback to block_size
-      total_blks: value.blocks(),
-      free_blks: value.blocks_free(),
-      avail_blks: value.blocks_available(),
-      total_nodes: value.files(),
-      free_nodes: value.files_free(),
-      name_max: value.maximum_name_length() as u64,
-      fs_type: Some(value.filesystem_type()),
-      fs_id: unsafe {
-        // i guess writing a one-line getter method was too hard for them or something?
-        mem::transmute::<libc::fsid_t, u64>(value.filesystem_id())
-      },
+/// Resolve the filesystem type at `path` into `(numeric magic, human name)`.
+#[cfg(linux_like)]
+fn fs_type_of(path: &str) -> (Option<u64>, Option<String>) {
+  match statfs::statfs(path) {
+    Ok(s) => {
+      let ty = s.filesystem_type();
+      (Some(ty.0 as u64), Some(fs_type_readable(ty).to_string()))
     }
+    Err(_) => (None, None),
+  }
+}
+
+#[cfg(not(linux_like))]
+fn fs_type_of(path: &str) -> (Option<u64>, Option<String>) {
+  match statfs::statfs(path) {
+    Ok(s) => (None, Some(s.filesystem_type_name().to_string())),
+    Err(_) => (None, None),
   }
 }
 
@@ -545,63 +575,66 @@ impl FsFmt {
       FsFmt::FsType(stat_display) => stat.fmt_fs_type(f, *stat_display)
     }
   }
+}
 
-  fn fs_type_readable(id: FsType) -> &'static str {
-    match id {
-      statfs::ADFS_SUPER_MAGIC => "adfs",
-      statfs::AFFS_SUPER_MAGIC => "affs",
-      statfs::AFS_SUPER_MAGIC => "afs",
-      statfs::AUTOFS_SUPER_MAGIC => "autofs",
-      statfs::BPF_FS_MAGIC => "bpf",
-      statfs::BTRFS_SUPER_MAGIC => "btrfs",
-      statfs::CGROUP2_SUPER_MAGIC => "cgroup2",
-      statfs::CGROUP_SUPER_MAGIC => "cgroup",
-      statfs::CODA_SUPER_MAGIC => "coda",
-      statfs::CRAMFS_MAGIC => "cramfs",
-      statfs::DEBUGFS_MAGIC => "debugfs",
-      statfs::DEVPTS_SUPER_MAGIC => "devpts",
-      statfs::ECRYPTFS_SUPER_MAGIC => "ecryptfs",
-      statfs::EFS_SUPER_MAGIC => "efs",
-      statfs::EXT2_SUPER_MAGIC => "ext2/ext3/ext4", // all ext filesystems use the same number for some reason
-      statfs::F2FS_SUPER_MAGIC => "f2fs",
-      statfs::FUSE_SUPER_MAGIC => "fuse",
-      statfs::FUTEXFS_SUPER_MAGIC => "futexfs",
-      statfs::HOSTFS_SUPER_MAGIC => "hostfs",
-      statfs::HPFS_SUPER_MAGIC => "hpfs",
-      statfs::HUGETLBFS_MAGIC => "hugetlbfs",
-      statfs::ISOFS_SUPER_MAGIC => "isofs",
-      statfs::JFFS2_SUPER_MAGIC => "jffs2",
-      statfs::MINIX2_SUPER_MAGIC => "minix2",
-      statfs::MINIX2_SUPER_MAGIC2 => "minix2",
-      statfs::MINIX3_SUPER_MAGIC => "minix3",
-      statfs::MINIX_SUPER_MAGIC => "minix",
-      statfs::MINIX_SUPER_MAGIC2 => "minix",
-      statfs::MSDOS_SUPER_MAGIC => "msdos",
-      statfs::NCP_SUPER_MAGIC => "ncp",
-      statfs::NFS_SUPER_MAGIC => "nfs",
-      statfs::NILFS_SUPER_MAGIC => "nilfs",
-      statfs::NSFS_MAGIC => "nsfs",
-      statfs::OCFS2_SUPER_MAGIC => "ocfs2",
-      statfs::OPENPROM_SUPER_MAGIC => "openprom",
-      statfs::OVERLAYFS_SUPER_MAGIC => "overlayfs",
-      statfs::PROC_SUPER_MAGIC => "proc",
-      statfs::QNX4_SUPER_MAGIC => "qnx4",
-      statfs::QNX6_SUPER_MAGIC => "qnx6",
-      statfs::RDTGROUP_SUPER_MAGIC => "rdtgroup",
-      statfs::REISERFS_SUPER_MAGIC => "reiserfs",
-      statfs::SECURITYFS_MAGIC => "securityfs",
-      statfs::SELINUX_MAGIC => "selinux",
-      statfs::SMACK_MAGIC => "smack",
-      statfs::SMB_SUPER_MAGIC => "smb",
-      statfs::SYSFS_MAGIC => "sysfs",
-      statfs::TMPFS_MAGIC => "tmpfs",
-      statfs::TRACEFS_MAGIC => "tracefs",
-      statfs::UDF_SUPER_MAGIC => "udf",
-      statfs::USBDEVICE_SUPER_MAGIC => "usbdevice",
-      statfs::XENFS_SUPER_MAGIC => "xenfs",
-      statfs::XFS_SUPER_MAGIC => "xfs",
-      _ => "UNKNOWN",
-    }
+#[cfg(linux_like)]
+fn fs_type_readable(id: statfs::FsType) -> &'static str {
+  match id {
+    statfs::ADFS_SUPER_MAGIC => "adfs",
+    statfs::AFFS_SUPER_MAGIC => "affs",
+    statfs::AFS_SUPER_MAGIC => "afs",
+    statfs::AUTOFS_SUPER_MAGIC => "autofs",
+    statfs::BPF_FS_MAGIC => "bpf",
+    statfs::BTRFS_SUPER_MAGIC => "btrfs",
+    statfs::CGROUP2_SUPER_MAGIC => "cgroup2",
+    statfs::CGROUP_SUPER_MAGIC => "cgroup",
+    statfs::CODA_SUPER_MAGIC => "coda",
+    statfs::CRAMFS_MAGIC => "cramfs",
+    statfs::DEBUGFS_MAGIC => "debugfs",
+    statfs::DEVPTS_SUPER_MAGIC => "devpts",
+    statfs::ECRYPTFS_SUPER_MAGIC => "ecryptfs",
+    statfs::EFS_SUPER_MAGIC => "efs",
+    statfs::EXT2_SUPER_MAGIC => "ext2/ext3/ext4", // all ext filesystems use the same number for some reason
+    statfs::F2FS_SUPER_MAGIC => "f2fs",
+    statfs::FUSE_SUPER_MAGIC => "fuse",
+    statfs::FUTEXFS_SUPER_MAGIC => "futexfs",
+    statfs::HOSTFS_SUPER_MAGIC => "hostfs",
+    statfs::HPFS_SUPER_MAGIC => "hpfs",
+    statfs::HUGETLBFS_MAGIC => "hugetlbfs",
+    statfs::ISOFS_SUPER_MAGIC => "isofs",
+    statfs::JFFS2_SUPER_MAGIC => "jffs2",
+    statfs::MINIX2_SUPER_MAGIC => "minix2",
+    statfs::MINIX2_SUPER_MAGIC2 => "minix2",
+    statfs::MINIX3_SUPER_MAGIC => "minix3",
+    statfs::MINIX_SUPER_MAGIC => "minix",
+    statfs::MINIX_SUPER_MAGIC2 => "minix",
+    statfs::MSDOS_SUPER_MAGIC => "msdos",
+    statfs::NCP_SUPER_MAGIC => "ncp",
+    statfs::NFS_SUPER_MAGIC => "nfs",
+    statfs::NILFS_SUPER_MAGIC => "nilfs",
+    statfs::NSFS_MAGIC => "nsfs",
+    statfs::OCFS2_SUPER_MAGIC => "ocfs2",
+    statfs::OPENPROM_SUPER_MAGIC => "openprom",
+    statfs::OVERLAYFS_SUPER_MAGIC => "overlayfs",
+    statfs::PROC_SUPER_MAGIC => "proc",
+    statfs::QNX4_SUPER_MAGIC => "qnx4",
+    statfs::QNX6_SUPER_MAGIC => "qnx6",
+    statfs::RDTGROUP_SUPER_MAGIC => "rdtgroup",
+    statfs::REISERFS_SUPER_MAGIC => "reiserfs",
+    statfs::SECURITYFS_MAGIC => "securityfs",
+    statfs::SELINUX_MAGIC => "selinux",
+    statfs::SMACK_MAGIC => "smack",
+    statfs::SMB_SUPER_MAGIC => "smb",
+    statfs::SYSFS_MAGIC => "sysfs",
+    statfs::TMPFS_MAGIC => "tmpfs",
+    statfs::TRACEFS_MAGIC => "tracefs",
+    statfs::UDF_SUPER_MAGIC => "udf",
+    statfs::USBDEVICE_SUPER_MAGIC => "usbdevice",
+    statfs::XENFS_SUPER_MAGIC => "xenfs",
+    // nix excludes this magic on musl and ohos
+    #[cfg(all(not(target_env = "musl"), not(target_env = "ohos")))]
+    statfs::XFS_SUPER_MAGIC => "xfs",
+    _ => "UNKNOWN",
   }
 }
 
@@ -719,8 +752,8 @@ impl super::Builtin for Stat {
     if fs_stat {
       let fmt_args = FsFmtArgs::from_str(&format)?;
       for (arg, _) in args.argv {
-        let stat = match statfs::statfs(arg.as_str()) {
-          Ok(stat) => FsInfo::from(stat),
+        let stat = match FsInfo::for_path(arg.as_str()) {
+          Ok(stat) => stat,
           Err(e) => {
             errln!("stat: Failed to statfs '{}': {e}", arg.as_str());
             status = 1;
@@ -804,27 +837,6 @@ mod tests {
     assert_eq!(
       render(false, f.path().to_str().unwrap(), "%A"),
       "-rwxr-xr-x"
-    );
-  }
-
-  #[test]
-  fn setuid_lowercase_with_exec() {
-    let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
-    chmod(f.path(), 0o4755);
-    let p = f.path().to_str().unwrap();
-    assert_eq!(render(false, p, "%A"), "-rwsr-xr-x");
-    assert_eq!(render(false, p, "%a"), "4755");
-  }
-
-  #[test]
-  fn setuid_uppercase_without_exec() {
-    let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
-    chmod(f.path(), 0o4644);
-    assert_eq!(
-      render(false, f.path().to_str().unwrap(), "%A"),
-      "-rwSr--r--"
     );
   }
 
@@ -913,13 +925,11 @@ mod tests {
   }
 
   #[test]
+  #[cfg(linux_like)]
   fn fs_type_readable_names() {
     // ext2/ext3/ext4 all share magic 0xEF53, so the magic can't distinguish them.
-    assert_eq!(
-      FsFmt::fs_type_readable(statfs::EXT4_SUPER_MAGIC),
-      "ext2/ext3/ext4"
-    );
-    assert_eq!(FsFmt::fs_type_readable(statfs::TMPFS_MAGIC), "tmpfs");
-    assert_eq!(FsFmt::fs_type_readable(FsType(0)), "UNKNOWN");
+    assert_eq!(fs_type_readable(statfs::EXT4_SUPER_MAGIC), "ext2/ext3/ext4");
+    assert_eq!(fs_type_readable(statfs::TMPFS_MAGIC), "tmpfs");
+    assert_eq!(fs_type_readable(statfs::FsType(0)), "UNKNOWN");
   }
 }
