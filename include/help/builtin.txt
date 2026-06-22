@@ -2214,6 +2214,8 @@ THRU                                             *builtin-thru* *thru*
 TRAP                                             *builtin-trap* *trap*
 
   `trap [{action}] {target} ...`
+  `trap -p [{target} ...]`
+  `trap -l`
 
   Register {action} to run when the shell receives {target}. {action}
   is a shell command string that runs in the current environment.
@@ -2221,6 +2223,21 @@ TRAP                                             *builtin-trap* *trap*
 
   Use `-` as {action} to reset a target to its default disposition.
   Use `""` to explicitly ignore a signal.
+
+  With no arguments, prints the currently registered traps, one per
+  line, in a form that can be fed back to `trap` to re-register them.
+
+  Options ~
+
+    `-p [{target} ...]`   print registered traps. With no targets,
+                          prints all of them; otherwise prints only the
+                          listed targets. Same reusable form as the
+                          no-argument listing.
+    `-l`                  list the available signal names.
+    `--`                  end option parsing. Everything after is taken
+                          as the {action} and {target}s, so an {action}
+                          beginning with `-` is not mistaken for a flag.
+                          The listing emits this form for round-tripping.
 
   Targets ~
 
@@ -2236,6 +2253,8 @@ TRAP                                             *builtin-trap* *trap*
       `trap 'cleanup' INT TERM`
       `trap - INT`              restore default SIGINT
       `trap '' HUP`             ignore SIGHUP
+      `trap -p INT`             print the trap registered for SIGINT
+      `trap -l`                 list available signal names
 
 ==============================================================================
 TIMES                                            *builtin-times* *times*
