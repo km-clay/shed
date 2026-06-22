@@ -1185,21 +1185,22 @@ mod fuzzy_selector_handle_key {
   }
 
   #[test]
-  fn shift_tab_wraps_at_top() {
+  fn shift_tab_clamps_at_top() {
     let _g = TestGuard::new();
     let mut sel = sel_with(&["a", "b", "c"]);
-    let last = sel.filtered()[2].candidate.clone();
+    let first = sel.filtered()[0].candidate.clone();
+    // At the top, Up/Shift+Tab clamps rather than wrapping to the far end.
     sel.handle_key(key!(Shift + Tab)).unwrap();
-    assert_eq!(sel.selected_candidate().unwrap(), last);
+    assert_eq!(sel.selected_candidate().unwrap(), first);
   }
 
   #[test]
-  fn up_wraps_at_top() {
+  fn up_clamps_at_top() {
     let _g = TestGuard::new();
     let mut sel = sel_with(&["a", "b"]);
-    let last = sel.filtered()[1].candidate.clone();
+    let first = sel.filtered()[0].candidate.clone();
     sel.handle_key(key!(Up)).unwrap();
-    assert_eq!(sel.selected_candidate().unwrap(), last);
+    assert_eq!(sel.selected_candidate().unwrap(), first);
   }
 
   #[test]
@@ -1216,9 +1217,11 @@ mod fuzzy_selector_handle_key {
   // ─── Response types ───────────────────────────────────────────────
 
   #[test]
-  fn all_movement_keys_return_consumed() {
+  fn all_movement_keys_return_preview() {
     let _g = TestGuard::new();
     let mut sel = sel_with(&["a", "b", "c"]);
+    // With a non-empty list, every move changes the selection, so the response
+    // carries the newly highlighted candidate for the caller to preview.
     for key in [
       key!(Down),
       key!(Up),
@@ -1228,7 +1231,7 @@ mod fuzzy_selector_handle_key {
       K(C::ScrollUp, M::NONE),
     ] {
       let resp = sel.handle_key(key).unwrap();
-      assert!(matches!(resp, SelectorResponse::Consumed));
+      assert!(matches!(resp, SelectorResponse::Preview(_)));
     }
   }
 
@@ -1240,7 +1243,8 @@ mod fuzzy_selector_handle_key {
     let mut sel = sel_with(&["alpha", "beta", "gamma"]);
     assert_eq!(sel.filtered().len(), 3);
     let resp = sel.handle_key(K(C::Char('g'), M::NONE)).unwrap();
-    assert!(matches!(resp, SelectorResponse::Consumed));
+    // Filtering leaves a match, so the response previews the new top result.
+    assert!(matches!(resp, SelectorResponse::Preview(_)));
     // 'g' only fuzzy-matches "gamma".
     assert_eq!(sel.filtered().len(), 1);
     assert_eq!(sel.filtered()[0].candidate.content(), "gamma");
@@ -1282,7 +1286,8 @@ mod fuzzy_selector_handle_key {
     sel.handle_key(K(C::Char('g'), M::NONE)).unwrap();
     assert_eq!(sel.filtered().len(), 1);
     let resp = sel.handle_key(key!(Ctrl + 'c')).unwrap();
-    assert!(matches!(resp, SelectorResponse::Consumed));
+    // Clearing the query restores the full list, previewing its top entry.
+    assert!(matches!(resp, SelectorResponse::Preview(_)));
     assert_eq!(sel.filtered().len(), 3);
   }
 

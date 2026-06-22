@@ -2,14 +2,17 @@ use crate::{queue_term, state::terminal::Terminal};
 
 use super::{
   Candidate, CompMatch, CompResponse, Completer, K as KeyEvent, ShResult, Shed, SimpleCompleter,
-  fuzzy::ClampedUsize, key, state::terminal::calc_str_width, write_term,
+  fuzzy::{ClampedUsize, emphasize_grid, one_line},
+  key,
+  state::terminal::calc_str_width,
+  write_term,
 };
 
 /// Truncate `s` (as display width) to at most `max_width` columns. Stops
 /// before adding a character that would push past the limit. Used when a
 /// description doesn't fit even after eating all the available padding —
 /// the caller appends an ellipsis after.
-fn truncate_to_width(s: &str, max_width: usize) -> String {
+pub(crate) fn truncate_to_width(s: &str, max_width: usize) -> String {
   let mut out = String::with_capacity(s.len());
   let mut w = 0;
   for ch in s.chars() {
@@ -23,120 +26,118 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
   out
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct CellMetrics {
-  /// Display width of the candidate's name.
-  pub name: usize,
-  /// Display width of the description portion `(desc)` including the parens,
-  /// or 0 if no description.
-  pub desc: usize,
-}
-
+/// Records the row count a selector drew, so `clear()` wipes exactly that many.
+/// The windowed layout itself is recomputed each draw by `pack_columns`.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct GridLayout {
-  top_left: usize,
+  /// Total rows drawn below the prompt, so `clear()` wipes exactly what we drew.
   rows: usize,
-  /// Total width of each column (`name_max` + 2 + `desc_max`, or just `name_max`
-  /// if no cell in that column has a description).
-  col_widths: Vec<usize>,
-  /// Max name width in each column. Used at render time to right-pad each
-  /// cell's name so descriptions within a column align vertically.
-  name_widths: Vec<usize>,
 }
 
 impl GridLayout {
-  const COL_GAP: usize = 2;
-  /// Cap on how many rows of the grid we render at once. Beyond this, the
-  /// selector scrolls vertically to keep the cursor visible.
+  pub(crate) const COL_GAP: usize = 2;
+  /// Each grid column is this many rows tall; beyond a screenful the selector
+  /// scrolls horizontally to keep the cursor visible.
   pub const MAX_VISIBLE_ROWS: usize = 10;
+}
 
-  pub fn from_metrics(cells: &[CellMetrics], t_cols: usize) -> Self {
-    if cells.is_empty() {
-      return Self::default();
-    }
-
-    let mut num_cols = cells.len();
-    while num_cols > 1 {
-      let (name_widths, desc_widths) = Self::col_dims_for(cells, num_cols);
-      let col_widths = Self::col_widths_from(&name_widths, &desc_widths);
-      let total: usize = col_widths.iter().sum::<usize>() + Self::COL_GAP * (num_cols - 1);
-      if total <= t_cols {
-        break;
-      }
-      num_cols -= 1;
-    }
-
-    // Re-tighten num_cols against the chosen num_rows. The horizontal-fit
-    // loop picks a `num_cols` whose rows-per-column is `ceil(N/num_cols)`,
-    // but for some inputs that leaves trailing columns completely empty
-    // (e.g. N=31 with num_cols=15 → num_rows=3 → only 11 columns get any
-    // cells). Recomputing from num_rows gives the minimum num_cols that
-    // covers all cells, which avoids empty-column edge cases everywhere.
-    let num_rows = cells.len().div_ceil(num_cols);
-    let num_cols = cells.len().div_ceil(num_rows);
-
-    let (name_widths, desc_widths) = Self::col_dims_for(cells, num_cols);
-    let mut col_widths = Self::col_widths_from(&name_widths, &desc_widths);
-
-    // If the ideal column widths overflow the terminal (because some
-    // description is enormous and the loop bottomed out at num_cols=1),
-    // cap each column at its fair share of the available width. The
-    // render path then truncates oversize descriptions to fit.
-    let total_gaps = Self::COL_GAP * num_cols.saturating_sub(1);
-    let budget = t_cols.saturating_sub(total_gaps);
-    let total: usize = col_widths.iter().sum();
-    if total > budget && num_cols > 0 {
-      let max_per_col = budget / num_cols;
-      for cw in &mut col_widths {
-        *cw = (*cw).min(max_per_col);
-      }
-    }
-
-    Self {
-      top_left: 0,
-      rows: num_rows,
-      col_widths,
-      name_widths,
-    }
-  }
-
-  /// For column-major layout with `n` columns (Tab moves down within a
-  /// column, wrapping into the next column at the bottom), compute the max
-  /// name-width and max description-width in each column. Column c spans
-  /// cells `c * num_rows .. (c+1) * num_rows` clamped to `cells.len()`.
-  fn col_dims_for(cells: &[CellMetrics], n: usize) -> (Vec<usize>, Vec<usize>) {
-    let num_rows = cells.len().div_ceil(n);
-    let col_slice = |c: usize| {
-      // Clamp both start and end against `cells.len()`. After the
-      // tightening in `from_metrics` no column should be empty, but during
-      // the search loop in `from_metrics` we may evaluate a num_cols value
-      // that's still loose; clamping start prevents the slice from
-      // panicking when start > len.
-      let start = (c * num_rows).min(cells.len());
-      let end = ((c + 1) * num_rows).min(cells.len());
-      &cells[start..end]
+/// Greedily pack fixed-height (`rows`-tall) columns, column-major, starting at
+/// column `scroll_col`, until the terminal width is used up. `col_width(start,
+/// end)` measures the column spanning candidate indices `start..end`. Returns
+/// each visible column's width. O(visible cells), never O(total candidates).
+pub(crate) fn pack_columns(
+  n: usize,
+  scroll_col: usize,
+  rows: usize,
+  t_cols: usize,
+  col_width: impl Fn(usize, usize) -> usize,
+) -> Vec<usize> {
+  let mut widths = Vec::new();
+  let mut used = 0usize;
+  let mut col = scroll_col;
+  while col * rows < n {
+    let start = col * rows;
+    let end = (start + rows).min(n);
+    // A column can never be wider than the terminal.
+    let w = col_width(start, end).min(t_cols);
+    let gap = if widths.is_empty() {
+      0
+    } else {
+      GridLayout::COL_GAP
     };
-    let name_widths = (0..n)
-      .map(|c| col_slice(c).iter().map(|m| m.name).max().unwrap_or(0))
-      .collect();
-    let desc_widths = (0..n)
-      .map(|c| col_slice(c).iter().map(|m| m.desc).max().unwrap_or(0))
-      .collect();
-    (name_widths, desc_widths)
+    // Always keep at least one column, even if it alone overflows the width.
+    if !widths.is_empty() && used + gap + w > t_cols {
+      break;
+    }
+    used += gap + w;
+    widths.push(w);
+    col += 1;
   }
+  widths
+}
 
-  /// `name_max + 2 + desc_max` when there's at least one description in the
-  /// column, otherwise just `name_max`.
-  fn col_widths_from(name_widths: &[usize], desc_widths: &[usize]) -> Vec<usize> {
-    name_widths
-      .iter()
-      .zip(desc_widths.iter())
-      .map(|(&n, &d)| if d > 0 { n + 2 + d } else { n })
-      .collect()
+/// Scroll `scroll_col` horizontally so the cursor's column stays on screen.
+pub(crate) fn scroll_into_view(
+  cursor: usize,
+  scroll_col: &mut usize,
+  n: usize,
+  rows: usize,
+  t_cols: usize,
+  col_width: impl Fn(usize, usize) -> usize,
+) {
+  if n == 0 {
+    *scroll_col = 0;
+    return;
   }
+  let cursor_col = cursor / rows;
+  if cursor_col < *scroll_col {
+    *scroll_col = cursor_col;
+  }
+  while cursor_col
+    >= *scroll_col
+      + pack_columns(n, *scroll_col, rows, t_cols, &col_width)
+        .len()
+        .max(1)
+  {
+    *scroll_col += 1;
+    if *scroll_col >= cursor_col {
+      *scroll_col = cursor_col;
+      break;
+    }
+  }
+}
 
-  pub fn cols(&self) -> usize {
-    self.col_widths.len()
+/// Move one column left/right, staying on the same row and optionally wrapping.
+/// The last column may be short, so plain `±rows` drifts by the shortfall on
+/// wrap; this lands on the same row in the target column instead.
+pub(crate) fn step_column(cursor: usize, n: usize, rows: usize, right: bool, wrap: bool) -> usize {
+  if n == 0 {
+    return 0;
+  }
+  let row = cursor % rows;
+  let col = cursor / rows;
+  let num_cols = n.div_ceil(rows);
+  if right {
+    let next = col + 1;
+    if next < num_cols && next * rows + row < n {
+      next * rows + row
+    } else if wrap {
+      // Wrap to the first column at this row (always present for `row < rows`).
+      row.min(n - 1)
+    } else {
+      cursor
+    }
+  } else if col > 0 {
+    (col - 1) * rows + row
+  } else if wrap {
+    // Wrap to the last column that actually has a cell at this row.
+    let mut c = num_cols - 1;
+    while c * rows + row >= n {
+      c -= 1;
+    }
+    c * rows + row
+  } else {
+    cursor
   }
 }
 
@@ -145,12 +146,23 @@ pub(crate) struct GridSelector {
   candidates: Vec<Candidate>,
   cursor: ClampedUsize,
   old_layout: Option<GridLayout>,
-  page_size: usize,
-
+  /// Index of the leftmost visible column (each column `MAX_VISIBLE_ROWS` tall).
+  scroll_col: usize,
   /// Column to return to after drawing
   prompt_cursor_col: usize,
-  /// True if the user presses tab again after activating
+  /// True once the user has stepped into the menu (first Tab/arrow).
   has_selection: bool,
+  /// The token being completed; its common prefix with each candidate is
+  /// emphasized in the grid.
+  prefix: String,
+}
+
+/// Number of leading characters `a` and `b` share, case-insensitively.
+fn common_prefix_len(a: &str, b: &str) -> usize {
+  a.chars()
+    .zip(b.chars())
+    .take_while(|(x, y)| x.eq_ignore_ascii_case(y))
+    .count()
 }
 
 impl GridSelector {
@@ -162,10 +174,10 @@ impl GridSelector {
   }
 
   pub fn activate(&mut self, candidates: Vec<Candidate>) {
+    self.cursor = ClampedUsize::new(0, candidates.len(), true);
     self.candidates = candidates;
-    self.cursor = ClampedUsize::new(0, self.candidates.len(), true);
     self.old_layout = None;
-    self.page_size = 0;
+    self.scroll_col = 0;
     self.has_selection = false;
   }
 
@@ -191,13 +203,32 @@ impl GridSelector {
     self.cursor.wrap_sub(1);
   }
 
+  /// Move one column left/right, wrapping at the ends.
+  pub fn move_col(&mut self, right: bool) {
+    if !self.has_selection {
+      self.has_selection = true;
+      return;
+    }
+    let next = step_column(
+      self.cursor.get(),
+      self.candidates.len(),
+      GridLayout::MAX_VISIBLE_ROWS,
+      right,
+      true,
+    );
+    self.cursor.set(next);
+  }
+
   pub fn set_prompt_line_context(&mut self, _line_width: usize, cursor_col: usize) {
     self.prompt_cursor_col = cursor_col;
   }
 
+  pub fn set_prefix(&mut self, prefix: String) {
+    self.prefix = prefix;
+  }
+
   pub fn clear(&mut self) {
     if let Some(layout) = self.old_layout.take() {
-      // cursor is in the editor b
       for _ in 0..layout.rows {
         queue_term!(TermCtl::Cursor(Down(1)), TermCtl::Clear(WholeLine)).ok();
       }
@@ -209,64 +240,74 @@ impl GridSelector {
     }
   }
 
-  pub fn get_metrics(&self) -> Vec<CellMetrics> {
-    // Per-candidate display metrics: name width + description width (with
-    // parens, 0 if absent). The layout uses these to compute per-column
-    // name- and description-maxes so descriptions align vertically within
-    // each column.
-    self
-      .candidates
+  /// `(max name width, max desc width incl. parens)` over candidates `start..end`.
+  fn col_dims(cands: &[Candidate]) -> (usize, usize) {
+    let name = cands
+      .iter()
+      .map(|c| calc_str_width(&one_line(c.as_str())))
+      .max()
+      .unwrap_or(0);
+    let desc = cands
       .iter()
       .map(|c| {
-        let name = calc_str_width(c.as_str());
-        let desc = c
-          .desc
+        c.desc
           .as_ref()
           .filter(|d| !d.is_empty())
-          .map_or(0, |d| calc_str_width(d) + 2);
-        CellMetrics { name, desc }
+          .map_or(0, |d| calc_str_width(d) + 2)
       })
-      .collect()
+      .max()
+      .unwrap_or(0);
+    (name, desc)
   }
 
+  fn col_width(cands: &[Candidate]) -> usize {
+    let (name, desc) = Self::col_dims(cands);
+    if desc > 0 { name + 2 + desc } else { name }
+  }
+
+  fn visible_window(&self, t_cols: usize) -> Vec<usize> {
+    pack_columns(
+      self.candidates.len(),
+      self.scroll_col,
+      GridLayout::MAX_VISIBLE_ROWS,
+      t_cols,
+      |start, end| Self::col_width(&self.candidates[start..end]),
+    )
+  }
+
+  fn ensure_cursor_visible(&mut self, t_cols: usize) {
+    let cursor = self.cursor.get();
+    let n = self.candidates.len();
+    let candidates = &self.candidates;
+    scroll_into_view(
+      cursor,
+      &mut self.scroll_col,
+      n,
+      GridLayout::MAX_VISIBLE_ROWS,
+      t_cols,
+      |start, end| Self::col_width(&candidates[start..end]),
+    );
+  }
+
+  /// Jump one screenful of columns forward/back, wrapping at the ends.
   pub fn next_page(&mut self) {
     self.has_selection = true;
-    let len = self.candidates.len();
-    if len == 0 {
+    if self.candidates.is_empty() {
       return;
     }
-    let next_stop = self.next_page_stop();
-    self.cursor.set(next_stop);
-  }
-
-  fn next_page_stop(&self) -> usize {
-    if self.page_size == 0 || self.candidates.is_empty() {
-      return 0;
-    }
-    let current_page = self.cursor.get() / self.page_size;
-    let total_pages = self.candidates.len().div_ceil(self.page_size);
-    let next_page = (current_page + 1) % total_pages;
-    next_page * self.page_size
+    let t_cols = Shed::term(Terminal::t_cols);
+    let step = self.visible_window(t_cols).len().max(1) * GridLayout::MAX_VISIBLE_ROWS;
+    self.cursor.wrap_add(step);
   }
 
   pub fn prev_page(&mut self) {
     self.has_selection = true;
-    let len = self.candidates.len();
-    if len == 0 {
+    if self.candidates.is_empty() {
       return;
     }
-    let prev_stop = self.prev_page_stop();
-    self.cursor.set(prev_stop);
-  }
-
-  fn prev_page_stop(&self) -> usize {
-    if self.page_size == 0 || self.candidates.is_empty() {
-      return 0;
-    }
-    let current_page = self.cursor.get() / self.page_size;
-    let total_pages = self.candidates.len().div_ceil(self.page_size);
-    let prev_page = (current_page + total_pages - 1) % total_pages;
-    prev_page * self.page_size
+    let t_cols = Shed::term(Terminal::t_cols);
+    let step = self.visible_window(t_cols).len().max(1) * GridLayout::MAX_VISIBLE_ROWS;
+    self.cursor.wrap_sub(step);
   }
 
   pub fn draw(&mut self) -> usize {
@@ -275,46 +316,39 @@ impl GridSelector {
     }
 
     let t_cols = Shed::term(Terminal::t_cols);
+    let rows = GridLayout::MAX_VISIBLE_ROWS;
+    self.ensure_cursor_visible(t_cols);
 
-    let metrics = self.get_metrics();
-    let mut layout = GridLayout::from_metrics(&metrics, t_cols);
-
+    let col_widths = self.visible_window(t_cols);
+    let num_cols = col_widths.len().max(1);
     let cursor_pos = self.cursor.get();
-    let num_cols = layout.cols();
-
-    // the grid is split into pages
-    // a page is 'num_cols * MAX_VISIBLE_ROWS' cells.
-    // the current page number is 'cursor / page_size'
-    self.page_size = num_cols.saturating_mul(GridLayout::MAX_VISIBLE_ROWS).max(1);
-    let total_pages = self.candidates.len().div_ceil(self.page_size);
-    let current_page = cursor_pos / self.page_size;
-    let page_start = current_page * self.page_size;
-    let page_end = (page_start + self.page_size).min(self.candidates.len());
-    let page_cells = page_end - page_start;
-    let page_rows = page_cells.div_ceil(num_cols);
+    let n = self.candidates.len();
+    let first = self.scroll_col * rows;
+    // The first visible column has the lowest indices, so it's the tallest.
+    let grid_rows = rows.min(n - first);
+    let visible_end = ((self.scroll_col + num_cols) * rows).min(n);
 
     // break the line to move under the prompt
     write_term!("\n").ok();
 
-    // Column-major within the page: cell at (col c, row r) within the page
-    // is at page-relative index `c * page_rows + r`. Absolute candidate
-    // index is `page_start + page_rel_idx`.
-    for r in 0..page_rows {
-      for c in 0..num_cols {
-        let page_rel_idx = c * page_rows + r;
-        if page_rel_idx >= page_cells {
-          break;
-        }
-        let idx = page_start + page_rel_idx;
-        if idx >= self.candidates.len() {
-          break;
+    // Column-major: cell (col c, row r) is candidate `(scroll_col + c) * rows + r`.
+    for r in 0..grid_rows {
+      for (c, col_w) in col_widths.iter().enumerate() {
+        let idx = (self.scroll_col + c) * rows + r;
+        if idx >= n {
+          break; // later columns at this row are exhausted too
         }
 
+        let col_start = (self.scroll_col + c) * rows;
+        let col_end = (col_start + rows).min(n);
+        let (col_name_max, _) = Self::col_dims(&self.candidates[col_start..col_end]);
+
         let cand = &self.candidates[idx];
-        let name = cand.as_str();
-        let name_w = metrics[idx].name;
-        let col_name_max = layout.name_widths[c];
-        let col_w = layout.col_widths[c];
+        let name_plain = one_line(cand.as_str());
+        let name_w = calc_str_width(&name_plain);
+        // Emphasize the prefix the candidate shares with the typed token.
+        let prefix_len = common_prefix_len(&self.prefix, &name_plain);
+        let name = emphasize_grid(&name_plain, |i| i < prefix_len);
 
         let is_selected = self.has_selection && idx == cursor_pos;
 
@@ -364,29 +398,30 @@ impl GridSelector {
           }
         }
 
-        // Inter-column gap (skip after the last column, or when the next
-        // column has no cell at this row within the page).
-        if c + 1 < num_cols {
-          let next_page_rel = (c + 1) * page_rows + r;
-          if next_page_rel < page_cells {
-            write_term!("{}", " ".repeat(GridLayout::COL_GAP)).ok();
-          }
+        // Inter-column gap, skipped when the next column has no cell here.
+        if c + 1 < num_cols && (self.scroll_col + c + 1) * rows + r < n {
+          write_term!("{}", " ".repeat(GridLayout::COL_GAP)).ok();
         }
       }
-      if r + 1 < page_rows {
+      if r + 1 < grid_rows {
         write_term!("\n").ok();
       }
     }
 
-    // When the candidate list spans multiple pages, append a "page n/N"
-    // counter underneath the grid so the user knows where they are.
-    let counter_rows = if total_pages > 1 {
-      write_term!("\n\x1b[4mpage {}/{}\x1b[24m", current_page + 1, total_pages,).ok();
+    // Show a position counter when not everything is on screen.
+    let counter_rows = if first > 0 || visible_end < n {
+      write_term!(
+        "\n\x1b[2mItems {} to {} of {}\x1b[22m",
+        first + 1,
+        visible_end,
+        n
+      )
+      .ok();
       1
     } else {
       0
     };
-    let rows_drawn = page_rows + counter_rows;
+    let rows_drawn = grid_rows + counter_rows;
 
     // Walk back up to the prompt row. Restore the column with \r +
     // horizontal move.
@@ -399,10 +434,8 @@ impl GridSelector {
       queue_term!(TermCtl::Cursor(Forward(self.prompt_cursor_col as u16))).ok();
     }
 
-    layout.top_left = 0;
-    // Store the *visible* row count so clear() wipes exactly what we drew.
-    layout.rows = rows_drawn;
-    self.old_layout = Some(layout);
+    // Store the visible row count so clear() wipes exactly what we drew.
+    self.old_layout = Some(GridLayout { rows: rows_drawn });
 
     rows_drawn
   }
@@ -418,6 +451,15 @@ impl GridCompleter {
     Self {
       completer: SimpleCompleter::default(),
       selector: GridSelector::new(),
+    }
+  }
+
+  /// Preview the selected candidate into the buffer, or just consume the key
+  /// if nothing is selected yet.
+  fn preview_response(&self) -> CompResponse {
+    match self.selected_candidate() {
+      Some(cand) => CompResponse::Preview(cand),
+      None => CompResponse::Consumed,
     }
   }
 }
@@ -462,6 +504,10 @@ impl Completer for GridCompleter {
       }
       _ => {
         self.selector.activate(candidates);
+        let (start, end) = self.completer.token_span;
+        self
+          .selector
+          .set_prefix(self.completer.original_input[start..end].to_string());
         Ok(None)
       }
     }
@@ -509,55 +555,43 @@ impl Completer for GridCompleter {
       return Some(0);
     }
     let t_cols = Shed::term(Terminal::t_cols);
-    let metrics = self.selector.get_metrics();
-    let layout = GridLayout::from_metrics(&metrics, t_cols);
-    // Page-based reporting: the visible portion is at most one page of
-    // `num_cols * MAX_VISIBLE_ROWS` cells. Counter row appears when the
-    // list spans more than one page.
-    let num_cols = layout.cols();
-    let page_size = num_cols.saturating_mul(GridLayout::MAX_VISIBLE_ROWS).max(1);
-    let total_pages = self.selector.candidates.len().div_ceil(page_size);
-    let cursor_pos = self.selector.cursor.get();
-    let current_page = cursor_pos / page_size;
-    let page_start = current_page * page_size;
-    let page_end = (page_start + page_size).min(self.selector.candidates.len());
-    let page_cells = page_end - page_start;
-    let page_rows = page_cells.div_ceil(num_cols.max(1));
-    let counter_rows = usize::from(total_pages > 1);
-    Some(page_rows + counter_rows)
+    let rows = GridLayout::MAX_VISIBLE_ROWS;
+    let n = self.selector.candidates.len();
+    let first = self.selector.scroll_col * rows;
+    let grid_rows = rows.min(n.saturating_sub(first)).max(1);
+    let num_cols = self.selector.visible_window(t_cols).len().max(1);
+    let visible_end = ((self.selector.scroll_col + num_cols) * rows).min(n);
+    let counter = usize::from(first > 0 || visible_end < n);
+    Some(grid_rows + counter)
   }
 
   fn handle_key(&mut self, key: KeyEvent) -> ShResult<CompResponse> {
     match key {
-      key!(Tab) => {
+      // Live preview: splice the now-selected candidate into the buffer so the
+      // user sees what they'd accept. The completer stays active.
+      key!(Tab) | key!(Down) => {
         self.selector.next_candidate();
-        // Live preview: splice the now-selected candidate into the buffer
-        // so the user sees what they'd accept. Completer stays active.
-        match self.selected_candidate() {
-          Some(cand) => Ok(CompResponse::Preview(cand)),
-          None => Ok(CompResponse::Consumed),
-        }
+        Ok(self.preview_response())
       }
-      key!(Shift + Tab) => {
+      key!(Shift + Tab) | key!(Up) => {
         self.selector.prev_candidate();
-        match self.selected_candidate() {
-          Some(cand) => Ok(CompResponse::Preview(cand)),
-          None => Ok(CompResponse::Consumed),
-        }
+        Ok(self.preview_response())
+      }
+      key!(Right) => {
+        self.selector.move_col(true);
+        Ok(self.preview_response())
+      }
+      key!(Left) => {
+        self.selector.move_col(false);
+        Ok(self.preview_response())
       }
       key!(Ctrl + 'f') | key!(PageDown) => {
         self.selector.next_page();
-        match self.selected_candidate() {
-          Some(cand) => Ok(CompResponse::Preview(cand)),
-          None => Ok(CompResponse::Consumed),
-        }
+        Ok(self.preview_response())
       }
       key!(Ctrl + 'b') | key!(PageUp) => {
         self.selector.prev_page();
-        match self.selected_candidate() {
-          Some(cand) => Ok(CompResponse::Preview(cand)),
-          None => Ok(CompResponse::Consumed),
-        }
+        Ok(self.preview_response())
       }
       key!(Enter) => match self.selected_candidate() {
         Some(cand) => Ok(CompResponse::Accept(cand)),

@@ -161,7 +161,7 @@ impl super::LineBuf {
       return;
     }
 
-    // Small buffer, or incremental bailed out — full relex.
+    // Small buffer, or incremental bailed out: full relex.
     let tokens = crate::readline::context::get_context_tokens(joined);
     self.highlight_cache = Some(super::HighlightCache {
       joined: joined.to_string(),

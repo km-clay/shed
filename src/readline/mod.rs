@@ -485,6 +485,10 @@ pub(super) struct ShedLine {
   ctrl_d_warning_counter: usize,
   status_msgs: VecDeque<(String, Instant)>,
 
+  /// Line (text + cursor) to restore if a history search is dismissed, since
+  /// navigating the finder overwrites the buffer with previews.
+  hist_preview_orig: Option<(String, usize)>,
+
   worker: HintWorker,
 }
 
@@ -535,6 +539,7 @@ impl ShedLine {
       needs_redraw: true,
       ctrl_d_warning_counter: 0,
       status_msgs: VecDeque::new(),
+      hist_preview_orig: None,
       worker: HintWorker::new(),
     };
     Shed::vars_mut(|v| {
@@ -734,6 +739,8 @@ impl ShedLine {
     let finder = self.history_fzf().unwrap();
     match finder.handle_key(key)? {
       SelectorResponse::Accept(cmd) => {
+        // The accepted entry replaces the buffer, so drop the dismiss-restore.
+        self.hist_preview_orig = None;
         let entry_idx = cmd.id().unwrap(); // history entries having an id to unwrap is an invariant.
         self.scroll_history_to(entry_idx);
         if let Some(finder) = self.history_fzf() {
@@ -759,6 +766,11 @@ impl ShedLine {
       SelectorResponse::Dismiss => {
         autocmd!(OnHistoryClose);
 
+        // Previews overwrote the buffer; put back the line we started with.
+        if let Some((line, cursor)) = self.hist_preview_orig.take() {
+          self.core.focused_editor().set_buffer(&line);
+          self.core.focused_editor().set_cursor_from_flat(cursor);
+        }
         self.core.editor.clear_hint();
         if let Some(finder) = self.history_fzf() {
           finder.clear();
@@ -773,6 +785,13 @@ impl ShedLine {
         })
         .ok();
         self.refresh_ui();
+        self.needs_redraw = true;
+      }
+      SelectorResponse::Preview(cmd) => {
+        // Show the highlighted entry in the buffer without committing to it.
+        self.core.focused_editor().set_buffer(cmd.content());
+        self.core.focused_editor().move_cursor_to_end();
+        self.core.editor.clear_hint();
         self.needs_redraw = true;
       }
       SelectorResponse::Consumed => {
@@ -1208,6 +1227,9 @@ impl ShedLine {
 
   fn start_hist_search(&mut self) {
     let initial = self.core.focused_editor().to_string();
+    // Snapshot the line so a dismissed search can restore it after previews
+    // have overwritten the buffer.
+    let restore = (initial.clone(), self.core.editor.cursor_to_flat());
     if let Some(entry) = self.focused_history().start_search(&initial) {
       with_vars([("HIST_ENTRY".into(), entry.clone())], || {
         autocmd!(OnHistorySelect);
@@ -1243,6 +1265,13 @@ impl ShedLine {
       );
 
       if self.history_fzf().is_some() {
+        self.hist_preview_orig = Some(restore);
+        // Preview the initially-selected entry right away, not just on the
+        // first navigation keypress.
+        if let Some(cand) = self.history_fzf().and_then(|f| f.selected_candidate()) {
+          self.core.focused_editor().set_buffer(cand.content());
+          self.core.focused_editor().move_cursor_to_end();
+        }
         Shed::vars_mut(|v| {
           v.set_var(
             "SHED_EDIT_MODE",
