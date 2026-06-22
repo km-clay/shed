@@ -1,5 +1,7 @@
 use itertools::{EitherOrBoth, Itertools};
 
+use crate::state::vars::VarStr;
+
 use super::{
   Dispatcher, NdRule, Node, ShResult,
   eval::lex::Span,
@@ -162,6 +164,7 @@ impl super::Builtin for Compadd {
       OptSpec::single_arg('P'),
       OptSpec::single_arg('S'),
       OptSpec::single_arg('d'),
+      OptSpec::single_arg('D'),
       OptSpec::single_arg('a'),
       OptSpec::single_arg('A'),
       OptSpec::flag('q'),
@@ -174,9 +177,11 @@ impl super::Builtin for Compadd {
     let mut desc_arr = None;
     let mut cand_arr = None;
     let mut assoc_arr = None;
+    let mut desc = None;
     for opt in args.opts {
       match opt {
         Opt::ShortWithArg('d', arg) => desc_arr = Some(arg),
+        Opt::ShortWithArg('D', arg) => desc = Some(arg),
         Opt::ShortWithArg('P', arg) => prefix = Some(arg),
         Opt::ShortWithArg('S', arg) => suffix = Some(arg),
         Opt::ShortWithArg('a', arg) => cand_arr = Some(arg),
@@ -211,12 +216,13 @@ impl super::Builtin for Compadd {
       candidates.extend(elems);
     }
 
-    let descriptions = if let Some(desc_arr) = desc_arr {
+    let descriptions = if let Some(desc) = desc {
+      vec![VarStr::from(desc); candidates.len()]
+    } else if let Some(desc_arr) = desc_arr {
       Shed::vars(|v| v.get_arr_elems(&desc_arr))
     } else {
       vec![]
-    }
-    .into_iter();
+    };
 
     let mut described: Vec<Candidate> = candidates
       .into_iter()
@@ -748,6 +754,31 @@ mod tests {
     assert_eq!(cands[1].desc(), Some("second"));
     assert_eq!(cands[2].content(), "c");
     assert_eq!(cands[2].desc(), Some("third"));
+  }
+
+  #[test]
+  fn compadd_shared_description() {
+    // -D applies one description to every candidate.
+    let _g = TestGuard::new();
+    test_input("compadd -D 'a file' x y z").unwrap();
+    let cands = take_comp_candidates();
+    assert_eq!(cands.len(), 3);
+    for c in &cands {
+      assert_eq!(c.desc(), Some("a file"));
+    }
+  }
+
+  #[test]
+  fn compadd_shared_description_with_array() {
+    // -D also covers candidates pulled from -a.
+    let _g = TestGuard::new();
+    test_input("words=(alpha beta)").unwrap();
+    test_input("compadd -D 'word' -a words").unwrap();
+    let cands = take_comp_candidates();
+    assert_eq!(collect_contents(&cands), vec!["alpha", "beta"]);
+    for c in &cands {
+      assert_eq!(c.desc(), Some("word"));
+    }
   }
 
   #[test]

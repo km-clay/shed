@@ -424,6 +424,10 @@ COMPADD                                          *builtin-compadd* *compadd*
                     from the indexed array `{name}`. Extra descriptions
                     are dropped; missing descriptions leave the
                     candidate undescribed.
+    `-D {desc}`     give every candidate the same description `{desc}`.
+                    Applies to positional and `-a` candidates; `-A`
+                    candidates keep their own descriptions. Takes
+                    precedence over `-d` if both are given.
     `-A {name}`     add candidates from the associative array `{name}`,
                     using each key as a candidate and the corresponding
                     value as its description. Insertion order is
@@ -458,6 +462,9 @@ COMPADD                                          *builtin-compadd* *compadd*
       `local -a words=(a b c) descs=(first second third)`
       `compadd -a words -d descs`
                   parallel arrays, first/second/third describe a/b/c
+
+      `compadd -D 'git branch' main dev feature`
+                  all three candidates share the description "git branch"
 
       `local -A modes=([n]=normal [i]=insert [v]=visual)`
       `compadd -A modes`
