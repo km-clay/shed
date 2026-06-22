@@ -151,20 +151,38 @@ behavior without modifying the shell itself.
 
   `on-completion-start`                        *autocmd-on-completion-start*
 
-      Fires when the completion menu becomes visible.
+      Fires when completion is triggered and more than one candidate
+      matches, before any menu is shown. A single unambiguous match
+      is inserted directly and does not fire this event. The commands
+      run interactively, so they may launch external programs (such
+      as `fzf`) that take over the terminal.
 
       Special variables:
-        `$MATCHES`      array of completion candidates
+        `$MATCHES`      associative array, candidate -> description
         `$NUM_MATCHES`  count of candidates
         `$SEARCH_STR`   the token being completed
 
+      `$MATCHES` is writable: whatever it holds when the autocmds
+      finish becomes the candidate set. Unset keys to filter it, or
+      rebuild it to reorder or replace candidates. After they return,
+      if `$MATCHES` contains only one entry, it is inserted directly,
+      and several entries opens the menu over that set. A non-zero exit
+      status (for example a cancelled `fzf`) cancels completion and fires
+      `on-completion-cancel`. Replacing `$MATCHES` with anything but
+      an associative array is an error. If you want to set `$MATCHES`
+      to a single item, the idiom is `declare -A MATCHES=([candidate]="description")`
+
   `on-completion-cancel`                       *autocmd-on-completion-cancel*
 
-      Fires when the completion menu is dismissed without selecting.
+      Fires when completion is dismissed without a selection: closing
+      the menu with Esc, or an `on-completion-start` autocmd exiting
+      non-zero (such as a cancelled picker).
 
   `on-completion-select`                       *autocmd-on-completion-select*
 
-      Fires when a completion candidate is accepted.
+      Fires when a completion candidate is accepted, whether picked
+      from the menu or narrowed to a single entry by an
+      `on-completion-start` autocmd.
 
       Special variables:
         `$COMP_CANDIDATE`  the selected completion candidate
