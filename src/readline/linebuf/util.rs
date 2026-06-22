@@ -105,7 +105,7 @@ impl super::LineBuf {
     if let Some(cap) = self.viewport_cap {
       out = out.min(cap);
     }
-    out
+    out.max(1)
   }
   pub fn update_scroll_offset(&mut self) {
     let height = self.get_viewport_height();
