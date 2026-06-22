@@ -125,6 +125,7 @@ mod shift;
 mod shopt;
 mod source;
 mod stash;
+mod stat;
 mod test; // [[ ]] thing
 mod times;
 mod trap;
@@ -213,6 +214,7 @@ register_builtins! {
   "shopt"    => shopt::Shopt,
   "source"   => source::Source,
   "stash"    => stash::StashBuiltin,
+  "stat"     => stat::Stat,
   "test"     => test::Test,
   "thru"     => Thru,
   "times"    => times::Times,

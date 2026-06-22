@@ -55,6 +55,7 @@ The following builtins are available:
   `shift`       shift positional parameters                 |builtin-shift|
   `shopt`       get or set shell options                    |builtin-shopt|
   `source`      execute a file in the current shell         |builtin-source|
+  `stat`        display file or filesystem status           |builtin-stat|
   `[[`          evaluate conditional expressions            |builtin-test|
   `thru`        pass stdin to stdout, optionally tee/limit  |builtin-thru|
   `times`       print shell and child CPU times             |builtin-times|
@@ -1935,6 +1936,111 @@ SOURCE                                           *builtin-source* *source*
 
       `source ~/.shed_profile`
       `. ./lib.sh`
+
+==============================================================================
+STAT                                             *builtin-stat* *stat*
+
+  `stat [-L] [-t] [-c {format}] {file} ...`
+  `stat -f [-t] [-c {format}] {file} ...`
+
+  Display detailed status for each {file}, drawn from `lstat(2)` (or
+  `statfs(2)` with `-f`). Without `-c`, a multi-line human-readable
+  report is printed per file. With `-c`, each file is rendered through
+  {format} and printed on its own line.
+
+  By default symbolic links are reported as themselves. Multiple files
+  may be given; a file that cannot be stat'd prints an error and sets a
+  non-zero exit status, but the remaining files are still processed.
+
+  Options:
+
+    `-L`, `--dereference`       follow symbolic links and report the
+                            target file instead of the link
+    `-f`, `--file-system`       report the status of the filesystem
+                            containing {file}, not the file itself
+    `-t`, `--terse`             print a terse, single-line summary with
+                            fields separated by spaces
+    `-c`, `--format={format}`   render each file through {format}
+
+  Format specifiers ~
+
+  In a {format} string, `%` introduces a specifier and `%%` is a literal
+  `%`. Any other character is copied verbatim, so escapes like `\n` and
+  `\t` are taken from the surrounding shell quoting, not interpreted by
+  `stat`. Unlike GNU `stat`, width and precision modifiers between the
+  `%` and the specifier letter are not supported.
+
+  File specifiers (default, and with `-L`):
+
+    `%a`    access permissions, octal (e.g. `0644`)
+    `%A`    access permissions, symbolic (e.g. `-rw-r--r--`)
+    `%b`    number of blocks allocated (see `%B`)
+    `%B`    size in bytes of each block reported by `%b`
+    `%C`    SELinux security context, or `?` if unavailable
+    `%d`    device number the file resides on, `major:minor` decimal
+    `%D`    device number the file resides on, `major:minor` hex
+    `%f`    raw mode, in hexadecimal
+    `%F`    file type in words (`regular file`, `directory`, ...)
+    `%g`    group ID of owner
+    `%G`    group name of owner
+    `%h`    number of hard links
+    `%Hd`   major device number the file resides on (decimal)
+    `%Ld`   minor device number the file resides on (decimal)
+    `%Hr`   major device type, for special files (decimal)
+    `%Lr`   minor device type, for special files (decimal)
+    `%i`    inode number
+    `%m`    mount point of the filesystem containing the file
+    `%n`    file name
+    `%N`    quoted file name, with `-> target` appended for symlinks
+    `%o`    optimal I/O transfer size hint
+    `%r`    alias for `%d`
+    `%R`    alias for `%D`
+    `%s`    total size in bytes
+    `%t`    major device type, for special files (hex)
+    `%T`    minor device type, for special files (hex)
+    `%u`    user ID of owner
+    `%U`    user name of owner
+    `%w`    time of file birth, human-readable (`-` if unknown)
+    `%W`    time of file birth, seconds since the epoch (`-` if unknown)
+    `%x`    time of last access, human-readable
+    `%X`    time of last access, seconds since the epoch
+    `%y`    time of last data modification, human-readable
+    `%Y`    time of last data modification, seconds since the epoch
+    `%z`    time of last status change, human-readable
+    `%Z`    time of last status change, seconds since the epoch
+
+  Filesystem specifiers (with `-f`):
+
+    `%a`    free blocks available to non-root
+    `%b`    total data blocks in the filesystem
+    `%c`    total inodes in the filesystem
+    `%d`    free inodes in the filesystem
+    `%f`    free blocks in the filesystem
+    `%i`    filesystem ID
+    `%l`    maximum length of a file name
+    `%n`    file name
+    `%s`    block size (for faster transfer)
+    `%S`    fundamental block size (for block counts)
+    `%t`    filesystem type, in hexadecimal
+    `%T`    filesystem type, in words (e.g. `ext2/ext3/ext4`, `tmpfs`)
+
+  Human-readable times are formatted as `%Y-%m-%d %H:%M:%S`. Birth time
+  is reported only when the underlying filesystem records it.
+
+  Examples ~
+
+      `stat -c '%n %s %A' file.txt`
+                                name, size, and symbolic permissions
+
+      `stat -c '%U:%G' file.txt`
+                                owner and group names
+
+      `stat -t file.txt`          terse single-line summary
+
+      `stat -f -c '%T %a/%b' .`
+                                filesystem type and free/total blocks
+
+  See also: |builtin-printf|
 
 ==============================================================================
 \[\[                                             *builtin-test* *[[*

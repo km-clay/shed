@@ -467,6 +467,12 @@ impl From<&Var> for VarStr {
   }
 }
 
+impl From<VarStr> for Vec<u8> {
+  fn from(value: VarStr) -> Self {
+    value.as_bytes().to_vec()
+  }
+}
+
 macro_rules! impl_varstr_from {
   ($($t:ty),*) => {
     $(impl From<$t> for VarStr {
