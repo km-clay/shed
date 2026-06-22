@@ -1012,34 +1012,15 @@ impl History {
     }
 
     let mut finder = FuzzySelector::new("History").number_candidates(true);
-    finder.set_query(initial);
 
-    let candidates: Vec<Candidate> = if initial.is_empty() {
-      all_entries
-        .into_iter()
-        .enumerate()
-        .map(|(i, e)| Candidate::from((i, e.command().to_string())))
-        .collect()
-    } else {
-      let filtered: Vec<Candidate> = all_entries
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| e.command().starts_with(initial))
-        .map(|(i, e)| Candidate::from((i, e.command().to_string())))
-        .collect();
-
-      if filtered.is_empty() {
-        all_entries
-          .into_iter()
-          .enumerate()
-          .map(|(i, e)| Candidate::from((i, e.command().to_string())))
-          .collect()
-      } else {
-        filtered
-      }
-    };
+    let candidates: Vec<Candidate> = all_entries
+      .into_iter()
+      .enumerate()
+      .map(|(i, e)| Candidate::from((i, e.command().to_string())))
+      .collect();
 
     finder.activate(candidates);
+    finder.set_query(initial);
     self.fuzzy_finder = Some(finder);
     None
   }
