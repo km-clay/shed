@@ -143,13 +143,21 @@ impl super::LineBuf {
       return;
     };
 
-    // Existing cache + buffer changed. try the incremental path.
-    if let Some(cache) = self.try_incremental_relex(joined, new_hash) {
+    // Incremental relexing only pays off on large buffers, where a full relex
+    // would be noticeably slow. Below this line count, the full relex is cheap
+    // enough that it isn't worth the incremental path's edge cases.
+    const INCREMENTAL_MIN_LINES: usize = 200;
+
+    // Existing cache + buffer changed. On large buffers, try the incremental
+    // path; otherwise fall through to a full relex.
+    if self.lines.len() >= INCREMENTAL_MIN_LINES
+      && let Some(cache) = self.try_incremental_relex(joined, new_hash)
+    {
       self.highlight_cache = Some(cache);
       return;
     }
 
-    // Incremental bailed out — fall back to a full relex.
+    // Small buffer, or incremental bailed out — full relex.
     let tokens = crate::readline::context::get_context_tokens(joined);
     self.highlight_cache = Some(super::HighlightCache {
       joined: joined.to_string(),
