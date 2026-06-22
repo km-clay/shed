@@ -1028,6 +1028,17 @@ fn herestring_variable_expansion() {
 }
 
 #[test]
+fn herestring_in_func_body_defers_expansion() {
+  // Defining a function must not expand a herestring word in its body;
+  // the command substitution should only run when the function is called.
+  let guard = TestGuard::new();
+  test_input("f() { cat <<< \"$(echo expanded)\"; }".to_string()).unwrap();
+  assert_eq!(guard.read_output(), "");
+  test_input("f".to_string()).unwrap();
+  assert_eq!(guard.read_output(), "expanded\n");
+}
+
+#[test]
 fn heredoc_double_quoted_delimiter_is_literal() {
   let guard = TestGuard::new();
   Shed::vars_mut(|v| v.set_var("X", VarKind::Str("val".into()), VarFlags::empty())).unwrap();

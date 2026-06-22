@@ -194,7 +194,10 @@ impl RedirBldr {
       RedirTarget::HereDoc { body, flags } => {
         log::debug!("heredoc body: {body:?}");
         // Strip leading tabs per line BEFORE expansion (POSIX order).
-        let buf = if flags.contains(TkFlags::TAB_HEREDOC) {
+        let buf = if flags.contains(TkFlags::HERESTRING) {
+          // Raw word; expanded and newline-terminated at redirection time.
+          body
+        } else if flags.contains(TkFlags::TAB_HEREDOC) {
           if body.is_empty() {
             String::new()
           } else {
@@ -480,7 +483,13 @@ impl RedirSpec {
         let owned: OwnedFd = file.into();
         let owned = move_high(owned)?;
 
-        if flags.contains(TkFlags::IS_HEREDOC) && !flags.contains(TkFlags::LIT_HEREDOC) {
+        if flags.contains(TkFlags::HERESTRING) {
+          buf = Expander::from_raw(&buf, flags)
+            .no_glob()
+            .no_split()
+            .expand_no_split()?;
+          buf.push('\n');
+        } else if flags.contains(TkFlags::IS_HEREDOC) && !flags.contains(TkFlags::LIT_HEREDOC) {
           buf = Expander::from_raw(&buf, flags)
             .expand()?
             .into_iter()

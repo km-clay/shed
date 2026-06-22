@@ -49,11 +49,9 @@ impl ParseStream {
     };
 
     let target = if class == RedirType::HereString {
-      let mut body = next_tk.clone().expand_no_split()?;
-      body.push('\n');
       RedirTarget::HereDoc {
-        body,
-        flags: redir_tk.flags,
+        body: next_tk.span.as_str().to_string(),
+        flags: next_tk.flags | TkFlags::HERESTRING,
       }
     } else {
       extend_span!(*span, next_tk.span);

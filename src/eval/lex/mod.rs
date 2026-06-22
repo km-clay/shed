@@ -346,6 +346,7 @@ bitflags! {
     const IS_ARITH     = 0b0001_0000_0000_0000;
     const FUNCNAME		 = 0b0010_0000_0000_0000;
     const REDIR_ALL		 = 0b0100_0000_0000_0000;
+    const HERESTRING	 = 0b1000_0000_0000_0000;
   }
 }
 
