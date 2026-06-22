@@ -316,7 +316,7 @@ impl LineBuf {
 
   pub fn attempt_inline_expansion(&mut self, history: &History) -> bool {
     let hist_res = self.attempt_history_expansion(history);
-    let alias_res = self.attempt_alias_expansion();
+    let alias_res = shopt!(prompt.expand_aliases) && self.attempt_alias_expansion();
 
     hist_res || alias_res
   }

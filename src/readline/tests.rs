@@ -870,6 +870,35 @@ fn alias_no_expand_when_disabled() {
   assert_ne!(joined, "git commit");
 }
 
+#[test]
+fn alias_no_inline_expand_when_disabled() {
+  // Regression for #100: with prompt.expand_aliases=false the automatic
+  // (Tab / submit / hint) expansion paths must leave the buffer untouched,
+  // so the raw command is what gets submitted and saved to history.
+  let _g = TestGuard::new();
+  Shed::shopts_mut(|o| o.prompt.expand_aliases = false);
+  Shed::logic_mut(|l| {
+    l.insert_alias("gc", "git commit", Span::default());
+  });
+
+  let prompt = Prompt::default();
+  let mut line = ShedLine::new_no_hist(prompt).unwrap();
+
+  Shed::term_mut(|t| t.feed_bytes(b"gc"));
+  let keys = Shed::term_mut(Terminal::drain_keys);
+  line.process_input(keys).unwrap();
+
+  // The Tab/inline path (and, by the same gate, submit) does not expand.
+  let expanded = line.core.editor.attempt_inline_expansion(&line.history);
+  assert!(!expanded, "alias expanded despite expand_aliases=false");
+  assert_eq!(line.core.editor.to_string(), "gc");
+
+  // The primitive itself stays unconditional: this is the path `:expand!`
+  // drives, so the manual escape hatch keeps working even when disabled.
+  assert!(line.core.editor.attempt_alias_expansion());
+  assert_eq!(line.core.editor.to_string(), "git commit");
+}
+
 // ===================== Hint Tests =====================
 //
 // prepopulates some commands into the test harness command history

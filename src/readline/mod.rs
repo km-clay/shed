@@ -1606,7 +1606,7 @@ impl ShedLine {
         Ok(None)
       }
       LineCmd::SubmitLine(cmd) => {
-        if self.core.editor.attempt_alias_expansion() {
+        if shopt!(prompt.expand_aliases) && self.core.editor.attempt_alias_expansion() {
           self.update_editor_hint();
         }
         if self.core.editor.attempt_history_expansion(&self.history) {

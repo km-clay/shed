@@ -130,7 +130,9 @@ impl super::LineBuf {
       // our cursor moved into the hint
       // so we split on the cursor's new position
       let old_len = self.count_graphemes();
-      self.attempt_alias_expansion();
+      if shopt!(prompt.expand_aliases) {
+        self.attempt_alias_expansion();
+      }
       let new_len = self.count_graphemes();
       let delta = new_len as isize - old_len as isize;
 
@@ -235,7 +237,9 @@ impl super::LineBuf {
       return;
     };
     self.lines.attach_lines(&mut hint_lines);
-    self.attempt_alias_expansion_all();
+    if shopt!(prompt.expand_aliases) {
+      self.attempt_alias_expansion_all();
+    }
 
     self.set_cursor(Pos::MAX);
     self.fix_cursor();
