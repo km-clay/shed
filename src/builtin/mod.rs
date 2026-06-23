@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-  procio::{bytes_to_string, out_bytes, stdout_fileno},
+  procio::{bytes_to_string, out_bytes, stdin_fileno},
   state::meta::UtilKind,
   util::{FdReader, ShResultExt},
 };
@@ -543,6 +543,9 @@ impl Builtin for False {
 
 struct Thru;
 impl Builtin for Thru {
+  fn strict_opts(&self) -> bool {
+    true
+  }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       OptSpec::flag('c'),
@@ -556,16 +559,6 @@ impl Builtin for Thru {
     ]
   }
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
-    let mut input = if args.argv.is_empty() || args.has_stdin() {
-      if let Some(stdin) = args.take_stdin() {
-        stdin
-      } else {
-        procio::read_input()?
-      }
-    } else {
-      return with_status(0);
-    };
-
     let mut count = false;
     let mut append = false;
     let mut tee = None;
@@ -574,67 +567,125 @@ impl Builtin for Thru {
     for opt in &args.opts {
       match opt {
         Opt::LongWithArg(flag, arg) => match flag.as_str() {
-          "tee" => tee = Some(arg.clone()),
           "append" => append = true,
           "count" => count = true,
-          "limit" => limit = Some(arg.clone()),
+          "tee" => tee = Some(arg.clone()),
+          "limit" => {
+            let Ok(parsed) = arg.parse::<usize>() else {
+              return Err(sherr!(InvalidOpt, "invalid limit: {arg}"));
+            };
+            limit = Some(parsed)
+          }
           _ => {}
         },
         Opt::ShortWithArg('t', dest) => tee = Some(dest.clone()),
-        Opt::ShortWithArg('L', dest) => limit = Some(dest.clone()),
+        Opt::ShortWithArg('L', arg) => {
+          let Ok(parsed) = arg.parse::<usize>() else {
+            return Err(sherr!(InvalidOpt, "invalid limit: {arg}"));
+          };
+          limit = Some(parsed)
+        }
         Opt::Short('c') => count = true,
         Opt::Short('a') => append = true,
         _ => {}
       }
     }
 
-    if append && tee.is_none() {
-      errln!("thru: warning: -a/--append ignored without -t/--tee");
-    }
+    let mut tee_file = tee
+      .map(|dest| {
+        let file = if append {
+          std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&dest)
+        } else {
+          std::fs::File::create(&dest)
+        };
+        file.inspect_err(|e| {
+          errln!("thru: failed to open {dest} for writing: {e}");
+        })
+      })
+      .transpose()
+      .ok()
+      .flatten();
 
-    if let Some(limit) = limit {
-      match limit.parse::<usize>() {
-        Ok(mut n) => {
-          n = n.min(input.len());
-          while n > 0 && !input.is_char_boundary(n) {
-            n -= 1;
+    let mut stdin = args.take_stdin();
+    let sources: Vec<Option<String>> = if args.argv.is_empty() {
+      vec![None]
+    } else {
+      args
+        .argv
+        .into_iter()
+        .map(|(a, _)| if a.as_str() == "-" { None } else { Some(a) })
+        .collect()
+    };
+
+    let mut byte_count = 0;
+    let mut took_stdin = false;
+
+    for src in sources {
+      if limit == Some(0) {
+        break;
+      };
+
+      let mut reader: Box<dyn Read> = match &src {
+        Some(path) => match fs::File::open(path) {
+          Ok(f) => Box::new(f),
+          Err(e) => {
+            errln!("thru: {path}: {e}");
+            continue;
           }
-          input.truncate(n);
+        },
+        None => match stdin.take() {
+          Some(buf) => {
+            took_stdin = true;
+            Box::new(io::Cursor::new(buf))
+          }
+          None => {
+            if took_stdin {
+              Box::new(io::empty())
+            } else {
+              Box::new(FdReader(stdin_fileno()))
+            }
+          }
+        },
+      };
+      let path = src.unwrap_or_else(|| "stdin".to_string());
+
+      let mut buf = [0u8; 8192];
+      loop {
+        let cap = limit.map_or(buf.len(), |r| r.min(buf.len()));
+        if cap == 0 {
+          break;
         }
-        Err(e) => {
-          errln!("thru: invalid limit {limit}: {e}");
+
+        let n = match reader.read(&mut buf[..cap]) {
+          Ok(0) => break,
+          Ok(n) => n,
+          Err(e) => {
+            errln!("thru: {path}: error reading input: {e}");
+            break;
+          }
+        };
+
+        let chunk = &buf[..n];
+        out_bytes(chunk);
+
+        if let Some(t) = tee_file.as_mut() {
+          use std::io::Write;
+          t.write_all(chunk).ok();
+        }
+
+        byte_count += n;
+        if let Some(l) = limit.as_mut() {
+          *l -= n;
         }
       }
     }
 
     if count {
-      let n = input.len();
-      errln!("thru: {n} bytes");
+      errln!("thru: {byte_count} bytes");
     }
-
-    if let Some(dest) = tee {
-      let file = if append {
-        std::fs::OpenOptions::new()
-          .create(true)
-          .append(true)
-          .open(&dest)
-      } else {
-        std::fs::File::create(&dest)
-      };
-      match file {
-        Ok(mut f) => {
-          use std::io::Write;
-          if let Err(e) = f.write_all(input.as_bytes()) {
-            errln!("thru: failed to write to {dest}: {e}");
-          }
-        }
-        Err(e) => {
-          errln!("thru: failed to open {dest} for writing: {e}");
-        }
-      }
-    }
-
-    out!("{input}");
 
     with_status(0)
   }

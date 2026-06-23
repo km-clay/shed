@@ -49,6 +49,14 @@ impl std::io::Write for FdWriter<'_> {
   }
 }
 
+pub(super) struct FdReader<'a>(pub BorrowedFd<'a>);
+
+impl std::io::Read for FdReader<'_> {
+  fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    nix::unistd::read(self.0, buf).map_err(|e| std::io::Error::from_raw_os_error(e as i32))
+  }
+}
+
 /// Returns a default `CompactString` with capacity 24
 ///
 /// Used for temporary buffers that are ideally put together via `push` or `push_str`
