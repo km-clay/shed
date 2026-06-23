@@ -499,8 +499,41 @@ impl ScopeStack {
     None
   }
   /// Resolve a pre-parsed `VarName`, handling array indexes and slicing if present.
+  /// Whether an array/assoc element actually exists. Mirrors the
+  /// `get_var`/`try_get_var` split for indexing: distinguishes a missing
+  /// key/index from a present-but-empty one, which the `${x+y}`/`${x-y}`
+  /// set-tests depend on.
+  pub fn index_is_set(&self, var_name: &str, idx: &ArrIndex) -> bool {
+    for scope in self.scopes_rev() {
+      if scope.var_exists(var_name)
+        && let Some(var) = scope.vars().get(var_name)
+      {
+        let Ok(idx) = idx.clone().resolve_for(var.kind().tag()) else {
+          return false;
+        };
+        return match var.kind() {
+          VarKind::Arr(items) => match idx {
+            ArrIndex::Literal(n) => n < items.len(),
+            ArrIndex::FromBack(n) => n >= 1 && n <= items.len(),
+            ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => !items.is_empty(),
+            _ => false,
+          },
+          VarKind::AssocArr(items) => match idx {
+            ArrIndex::Key(key) => items.iter().any(|(k, _)| k == &key),
+            ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => !items.is_empty(),
+            _ => false,
+          },
+          _ => false,
+        };
+      }
+    }
+    false
+  }
   pub fn resolve_var(&self, var: &VarName) -> Option<VarStr> {
     if let Some(idx) = var.index() {
+      if !self.index_is_set(var.name(), idx) {
+        return None;
+      }
       self
         .index_var_sliced(var.name(), idx, var.slice_start(), var.slice_len())
         .ok()

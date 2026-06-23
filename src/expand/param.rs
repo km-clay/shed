@@ -789,6 +789,34 @@ mod tests {
   }
 
   #[test]
+  fn param_assoc_missing_key_is_unset_not_empty() {
+    // The set-tests (+ / -) must distinguish a missing assoc key from a
+    // present-but-empty one, which means resolving the element to "unset"
+    // when the key is absent rather than the default empty string.
+    let _guard = TestGuard::new();
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "S",
+        VarKind::AssocArr(vec![
+          ("present".into(), "v".into()),
+          ("empty".into(), "".into()),
+        ]),
+        VarFlags::empty(),
+      )
+    })
+    .unwrap();
+
+    // `+`: a key that exists is "set" even when its value is empty.
+    assert_eq!(test_param_expansion("S[present]+x").unwrap(), "x");
+    assert_eq!(test_param_expansion("S[empty]+x").unwrap(), "x");
+    assert_eq!(test_param_expansion("S[missing]+x").unwrap(), "");
+
+    // `-`: a missing key falls back to the default; an empty value does not.
+    assert_eq!(test_param_expansion("S[missing]-d").unwrap(), "d");
+    assert_eq!(test_param_expansion("S[empty]-d").unwrap(), "");
+  }
+
+  #[test]
   fn param_length() {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("STR", VarKind::Str("hello".into()), VarFlags::empty())).unwrap();
