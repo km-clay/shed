@@ -688,7 +688,7 @@ impl VarKind {
       if chars.next() != Some('[') {
         return Err(sherr!(
           ParseErr,
-          "Invalid associative array element: expected '[' to start key in {raw}",
+          "Invalid associative array element: expected '[' to start key",
         ));
       }
 
@@ -731,6 +731,13 @@ impl VarKind {
       let mut val = String::new();
       let mut qt_state = QuoteState::default();
       match_loop!(chars.peek() => &c => c, {
+        '\\' if !qt_state.in_single() => {
+          chars.next();
+          val.push(c);
+          if let Some(next) = chars.next() {
+            val.push(next);
+          }
+        }
         '"' => {
           chars.next();
           qt_state.toggle_double();
@@ -1618,6 +1625,23 @@ mod set_index_tests {
       .set_index("h", ArrIndex::Key("k".into()), "v".into())
       .unwrap();
     assert_eq!(assoc_items(&tab, "h"), vec![("k".into(), "v".into())]);
+  }
+
+  #[test]
+  fn assoc_from_raw_handles_escaped_quote_in_value() {
+    // `'\''` (a single quote escaped between single-quoted spans) must not
+    // throw off the whitespace-delimited value-boundary scan.
+    let kind = VarKind::assoc_arr_from_raw(r#"([bar]='biz ba'\''zz buzz' [bam]='foo')"#).unwrap();
+    let VarKind::AssocArr(pairs) = kind else {
+      panic!("expected assoc array");
+    };
+    assert_eq!(
+      pairs,
+      vec![
+        ("bar".into(), "biz ba'zz buzz".into()),
+        ("bam".into(), "foo".into())
+      ]
+    );
   }
 
   #[test]
