@@ -2439,6 +2439,14 @@ VICE                                             *builtin-vice* *vice*
     {keys} use keymap notation: `<CR>`, `<Esc>`, `<C-a>`, `<tab>`, etc.,
     the same as |keymap|(builtin-keymap).
 
+    The mode reset between commands submits a pending search (`/`, `?`) or
+    ex (`:`) command rather than discarding it — it presses `<CR>`, not
+    `<Esc>`. So a search given as its own command needs no trailing
+    `<CR>`: `-m '/foo'` runs the search. Within a single command you still
+    need an explicit `<CR>` to submit a search before later keys act on
+    the match, as in `-c '/foo<CR>dd'`. A search submitted this way that
+    finds no target aborts the program (see Linewise below).
+
   Linewise ~
 
     `-l`, `--lines`    run the program against each input line separately
