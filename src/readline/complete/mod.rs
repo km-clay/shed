@@ -1,4 +1,7 @@
-use crate::{HashSet, state::vars::VarStr};
+use crate::{
+  HashSet,
+  state::{terminal::Terminal, vars::VarStr},
+};
 use std::{
   fmt::{Debug, Display},
   os::unix::fs::PermissionsExt,
@@ -962,6 +965,8 @@ impl BashCompSpec {
       shell_quote(&cword_str),
       shell_quote(&pword_str),
     );
+
+    let _cooked = Shed::term_mut(|t| t.yield_terminal(false));
     exec_nonint(input, Some("comp_function".into()))?;
 
     let comp_reply: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems("COMPREPLY"))
@@ -1059,7 +1064,7 @@ impl CompSpec for BashCompSpec {
     let mut candidates: Vec<Candidate> =
       path_candidates.into_iter().chain(name_candidates).collect();
 
-    candidates.sort_by_key(|c| c.content.len()); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
+    candidates.sort(); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
     candidates.reverse();
 
     Ok(candidates)
@@ -1569,7 +1574,7 @@ impl SimpleCompleter {
         let a_len = a_content.len();
         let b_len = b_content.len();
 
-        a_len.cmp(&b_len).then_with(|| a_content.cmp(b_content))
+        a_content.cmp(b_content).then_with(|| a_len.cmp(&b_len))
       });
       candidates.dedup();
     }
