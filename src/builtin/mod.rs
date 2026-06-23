@@ -9,6 +9,7 @@ use std::{
 };
 
 use crate::{
+  eval::execute,
   procio::{bytes_to_string, out_bytes, stdin_fileno},
   state::meta::UtilKind,
   util::{FdReader, ShResultExt},
@@ -287,6 +288,9 @@ pub(super) trait Builtin: Sync {
     } else {
       get_opts_from_tokens(argv, &opts).promote_err(cmd_span)?
     };
+    // `$_` is the last expanded word of the command line, captured here before
+    // the command name is stripped so a bare builtin still records itself.
+    execute::record_last_arg(argv.last().map(|(s, _)| s.clone()));
     if !argv.is_empty() {
       argv.remove(0);
     }

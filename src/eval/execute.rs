@@ -113,6 +113,36 @@ pub enum AssignBehavior {
   Set,
 }
 
+thread_local! {
+  // Last expanded word of the most recently expanded argv, the raw material for
+  // `$_`. Written by `prepare_argv_with`, consumed by `commit_underscore`.
+  static LAST_ARG: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+  static SUPPRESS_UNDERSCORE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Stash the last expanded word so a later `commit_underscore` can promote it to `$_`.
+pub(crate) fn record_last_arg(arg: Option<String>) {
+  LAST_ARG.with(|l| *l.borrow_mut() = arg);
+}
+
+/// Promote the most recently expanded last word to `$_`, unless we're mid-pipeline.
+fn commit_underscore() {
+  if SUPPRESS_UNDERSCORE.with(std::cell::Cell::get) {
+    return;
+  }
+  let last = LAST_ARG.with(|l| l.borrow_mut().take());
+  if let Some(arg) = last {
+    Shed::vars_mut(|v| v.set_var("_", VarKind::string(arg), VarFlags::EXPORT)).ok();
+  }
+}
+
+/// Suppress `$_` updates for the duration of the returned guard, restoring the
+/// prior state on drop so nested pipelines compose.
+fn suppress_underscore_guard() -> impl Drop {
+  let prev = SUPPRESS_UNDERSCORE.with(|s| s.replace(true));
+  scopeguard::guard((), move |()| SUPPRESS_UNDERSCORE.with(|s| s.set(prev)))
+}
+
 /// Arguments to the execvpe function
 pub struct ExecArgs {
   pub cmd: (CString, Span),
@@ -121,11 +151,6 @@ pub struct ExecArgs {
 }
 
 impl ExecArgs {
-  pub fn new(argv: &[Tk]) -> ShResult<Option<Self>> {
-    let argv = prepare_argv(argv)?;
-
-    Ok((!argv.is_empty()).then(|| Self::from_expanded(argv)))
-  }
   pub fn from_expanded(argv: Vec<(String, Span)>) -> Self {
     let cmd = Self::get_cmd(&argv);
     let argv = Self::get_argv(argv);
@@ -384,7 +409,7 @@ impl Dispatcher {
 
     let cmd_tk = node.get_command();
 
-    if is_func(&cmd_word) {
+    let result = if is_func(&cmd_word) {
       self.exec_func(node)
     } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTIN_NAMES.contains(&cmd_word.as_str()) {
       self.exec_builtin(node)
@@ -396,7 +421,10 @@ impl Dispatcher {
       exec_input(format!("cd {dir}"), Some(self.source_name.clone()))
     } else {
       self.exec_cmd(node)
-    }
+    };
+
+    commit_underscore();
+    result
   }
   pub fn exec_defer(node: &Node) -> ShResult<()> {
     let NdRule::DeferNode { body } = &node.class else {
@@ -1109,6 +1137,8 @@ impl Dispatcher {
       return self.exec_one(&cmds[0], should_fork_segment, pipeline_flags);
     }
 
+    let _underscore_guard = (num_cmds > 1).then(suppress_underscore_guard);
+
     let _cooked_guard = (!is_bg && interactive).then(|| Shed::term_mut(Terminal::prepare_for_exec));
 
     // closure that gets the pgid we need if the child wants the tty
@@ -1349,7 +1379,6 @@ impl Dispatcher {
   }
   #[expect(clippy::too_many_lines)]
   pub fn exec_cmd(&mut self, cmd: &Node) -> ShResult<()> {
-    let blame = cmd.get_span().clone();
     let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = &cmd.class else {
       unreachable!(
@@ -1387,6 +1416,12 @@ impl Dispatcher {
     let fg_job = self.fg_job;
     let interactive = Shed::term(Terminal::interactive);
 
+    let expanded = prepare_argv(argv)?;
+    if expanded.is_empty() {
+      Shed::set_status(0);
+      return Ok(());
+    }
+
     let child_logic = |pgid: Option<Pid>| -> ! {
       if let Some(pgid) = pgid {
         let _ = setpgid(Pid::from_raw(0), pgid);
@@ -1396,18 +1431,7 @@ impl Dispatcher {
       {
         Self::set_assignments(assignments, assign_behavior).ok();
       }
-      let exec_args = match ExecArgs::new(argv) {
-        Ok(Some(args)) => args,
-        Ok(None) => {
-          unsafe { nix::libc::_exit(0) };
-        }
-        Err(e) => {
-          sherr!(ExecFail @ blame, "{e}")
-            .with_context(context.iter())
-            .print_error();
-          unsafe { nix::libc::_exit(1) };
-        }
-      };
+      let exec_args = ExecArgs::from_expanded(expanded.clone());
 
       if interactive || !no_fork {
         crate::signal::reset_signals(fg_job);
@@ -1420,7 +1444,11 @@ impl Dispatcher {
       let Err(e) = if let Some(path) = exec_path {
         let path_bytes = path.as_os_str().to_str().unwrap_or_default().as_bytes();
         let c_path = CString::new(path_bytes).unwrap_or_default();
-        execve(&c_path, &exec_args.argv, &exec_args.envp)
+        let mut envp = exec_args.envp.to_vec();
+        envp.retain(|e| !e.as_bytes().starts_with(b"_="));
+        envp.push(unsafe { CString::from_vec_unchecked([b"_=", path_bytes].concat()) });
+
+        execve(&c_path, &exec_args.argv, &envp)
       } else {
         log::warn!("command not found in cache: {cmd_raw}");
         execvpe(cmd, &exec_args.argv, &exec_args.envp)
@@ -1770,6 +1798,8 @@ pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(String, S
       }
     }
   }
+
+  record_last_arg(out.last().map(|(s, _)| s.clone()));
 
   xtrace_print(&out);
   Ok(out)
@@ -3005,5 +3035,32 @@ mod tests {
       // so the function bails out with false.
       assert!(!is_in_path(tk("$UNSET_VAR_FOR_ISINPATH_TEST_xyz")));
     }
+  }
+
+  // ===================== $_ (last argument) =====================
+
+  #[test]
+  fn underscore_is_previous_commands_last_arg() {
+    let guard = TestGuard::new();
+    test_input("echo one two\necho \"[$_]\"").unwrap();
+    assert!(guard.read_output().contains("[two]"));
+  }
+
+  #[test]
+  fn underscore_mid_command_refers_to_previous_not_self() {
+    // `$_` in a non-final position must resolve to the previous command's last
+    // arg, not this command's (regression against set-before-exec/double-expand).
+    let guard = TestGuard::new();
+    test_input("echo one two\necho $_ END").unwrap();
+    assert!(guard.read_output().contains("two END"));
+  }
+
+  #[test]
+  fn pipeline_leaves_underscore_untouched() {
+    // A pipeline's stages are subshells, so the shell's `$_` is whatever it was
+    // before the pipeline, not a value leaked from a stage.
+    let guard = TestGuard::new();
+    test_input("echo keep\necho a | echo b\necho \"[$_]\"").unwrap();
+    assert!(guard.read_output().contains("[keep]"));
   }
 }

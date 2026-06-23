@@ -1060,8 +1060,10 @@ impl VarTab {
     let orig = stat::umask(stat::Mode::empty());
     let umask = stat::umask(orig);
     let mut umask_var = Var::env_var(&format!("{umask:04o}"));
+    let underline = Var::env_var(&std::env::args().next().unwrap_or_default());
     umask_var.flags |= VarFlags::READONLY;
     vars.push(("UMASK".to_string(), umask_var));
+    vars.push(("_".to_string(), underline));
 
     vars
   }

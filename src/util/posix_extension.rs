@@ -1,28 +1,34 @@
 use nix::errno::Errno;
 use nix::unistd::execve;
 use std::convert::Infallible;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 
 use crate::Shed;
 
-pub fn execvpe<SA: AsRef<CStr>, SE: AsRef<CStr>>(
-  filename: &CStr,
-  args: &[SA],
-  env: &[SE],
-) -> nix::Result<Infallible> {
+pub fn execvpe(filename: &CStr, args: &[CString], env: &[CString]) -> nix::Result<Infallible> {
   // for nix::unistd::execve
-  let args_c: Vec<&CStr> = args.iter().map(AsRef::as_ref).collect();
-  let env_c: Vec<&CStr> = env.iter().map(AsRef::as_ref).collect();
+  let mut envp = env.to_vec();
+
   let mut is_denied = false;
 
   if filename.to_bytes().contains(&b'/') {
-    execve(filename, &args_c, &env_c)?;
+    let path_str = filename.to_string_lossy();
+    let path_bytes = path_str.as_bytes();
+    envp.retain(|e| !e.as_bytes().starts_with(b"_="));
+    envp.push(unsafe { CString::from_vec_unchecked([b"_=", path_bytes].concat()) });
+
+    execve(filename, args, &envp)?;
   } else {
     let path = Shed::vars(|v| v.get_var("PATH"));
     for dir in std::env::split_paths(&path) {
       let full_path_str = dir.join(filename.to_str().unwrap());
+
+      let path_bytes = full_path_str.to_str().unwrap_or_default().as_bytes();
+      envp.retain(|e| !e.as_bytes().starts_with(b"_="));
+      envp.push(unsafe { CString::from_vec_unchecked([b"_=", path_bytes].concat()) });
+
       let c_path = std::ffi::CString::new(full_path_str.to_str().unwrap()).unwrap();
-      match execve(c_path.as_c_str(), &args_c, &env_c) {
+      match execve(c_path.as_c_str(), args, &envp) {
         Ok(_) => unreachable!(),
         Err(Errno::ENOENT | Errno::ENOTDIR) => (), // Try next path
         Err(Errno::EACCES) => is_denied = true,    // Permission denied
