@@ -164,63 +164,66 @@ impl ScoredCandidate {
     }
   }
   pub fn fuzzy_score(&mut self, other: &str) -> i32 {
-    if other.is_empty() {
-      self.score = Some(0);
-      return 0;
-    }
-
     let query_chars: Vec<char> = other.chars().collect();
-    let candidate_chars: Vec<char> = self.candidate.chars().collect();
-    let mut indices = vec![];
-    let mut qi = 0;
-    for (ci, c_ch) in self.candidate.chars().enumerate() {
-      if qi < query_chars.len() && c_ch.eq_ignore_ascii_case(&query_chars[qi]) {
-        indices.push(ci);
-        qi += 1;
-      }
-    }
-
-    if indices.len() != query_chars.len() {
-      self.score = Some(i32::MIN);
-      return i32::MIN;
-    }
-
-    let mut score: i32 = 0;
-
-    for (i, &idx) in indices.iter().enumerate() {
-      if idx == 0 {
-        score += Self::BONUS_FIRST_CHAR;
-      }
-
-      if idx == 0
-        || Self::is_word_bound(
-          candidate_chars[idx - 1],
-          candidate_chars[idx],
-          query_chars[i],
-        )
-      {
-        score += Self::BONUS_BOUNDARY;
-      }
-
-      if i > 0 {
-        let gap = idx - indices[i - 1] - 1;
-        if gap == 0 {
-          score += Self::BONUS_CONSECUTIVE;
-        } else {
-          score -= Self::PENALTY_GAP_START + (gap as i32 - 1) * Self::PENALTY_GAP_EXTEND;
-        }
-      }
-    }
-
-    if self.penalize_len_diff {
-      let len_diff = (candidate_chars.len() as isize - query_chars.len() as isize).unsigned_abs();
-      let len_penalty = (len_diff as i32) * 2;
-      score -= len_penalty;
-    }
-
+    let score = fuzzy_match_score(&self.candidate, &query_chars, self.penalize_len_diff);
     self.score = Some(score);
     score
   }
+}
+
+fn fuzzy_match_score(candidate: &str, query_chars: &[char], penalize_len_diff: bool) -> i32 {
+  if query_chars.is_empty() {
+    return 0;
+  }
+
+  let candidate_chars: Vec<char> = candidate.chars().collect();
+  let mut indices = vec![];
+  let mut qi = 0;
+  for (ci, c_ch) in candidate_chars.iter().enumerate() {
+    if qi < query_chars.len() && c_ch.eq_ignore_ascii_case(&query_chars[qi]) {
+      indices.push(ci);
+      qi += 1;
+    }
+  }
+
+  if indices.len() != query_chars.len() {
+    return i32::MIN;
+  }
+
+  let mut score: i32 = 0;
+
+  for (i, &idx) in indices.iter().enumerate() {
+    if idx == 0 {
+      score += ScoredCandidate::BONUS_FIRST_CHAR;
+    }
+
+    if idx == 0
+      || ScoredCandidate::is_word_bound(
+        candidate_chars[idx - 1],
+        candidate_chars[idx],
+        query_chars[i],
+      )
+    {
+      score += ScoredCandidate::BONUS_BOUNDARY;
+    }
+
+    if i > 0 {
+      let gap = idx - indices[i - 1] - 1;
+      if gap == 0 {
+        score += ScoredCandidate::BONUS_CONSECUTIVE;
+      } else {
+        score -= ScoredCandidate::PENALTY_GAP_START
+          + (gap as i32 - 1) * ScoredCandidate::PENALTY_GAP_EXTEND;
+      }
+    }
+  }
+
+  if penalize_len_diff {
+    let len_diff = (candidate_chars.len() as isize - query_chars.len() as isize).unsigned_abs();
+    score -= (len_diff as i32) * 2;
+  }
+
+  score
 }
 
 impl From<String> for ScoredCandidate {
@@ -280,6 +283,7 @@ pub(crate) enum SelectorResponse {
 pub(crate) struct FuzzySelector {
   query: QueryEditor,
   filtered: Vec<ScoredCandidate>,
+  last_query: String,
   candidates: Vec<Candidate>,
   cursor: ClampedUsize,
   old_layout: Option<FuzzyLayout>,
@@ -307,6 +311,7 @@ impl FuzzySelector {
     Self {
       query: QueryEditor::default(),
       filtered: vec![],
+      last_query: String::new(),
       candidates: vec![],
       cursor: ClampedUsize::new(0, 0, true),
       old_layout: None,
@@ -331,6 +336,8 @@ impl FuzzySelector {
 
   pub fn activate(&mut self, candidates: Vec<Candidate>) {
     self.candidates = candidates;
+    // New candidate set: `filtered` is stale, so force a full rescan.
+    self.last_query.clear();
     self.score_candidates();
   }
 
@@ -356,16 +363,33 @@ impl FuzzySelector {
   }
 
   pub fn score_candidates(&mut self) {
-    let mut scored: Vec<_> = self
-      .candidates
-      .clone()
-      .into_iter()
-      .filter_map(|c| {
-        let mut sc = ScoredCandidate::new(c);
-        let score = sc.fuzzy_score(&self.query.linebuf.to_string());
-        if score > i32::MIN { Some(sc) } else { None }
-      })
-      .collect();
+    let query = self.query.linebuf.to_string();
+    let query_chars: Vec<char> = query.chars().collect();
+
+    let extends = !self.last_query.is_empty() && query.starts_with(self.last_query.as_str());
+
+    let mut scored: Vec<ScoredCandidate> = if extends {
+      let mut prev = std::mem::take(&mut self.filtered);
+      prev.retain_mut(|sc| {
+        let score = fuzzy_match_score(&sc.candidate, &query_chars, sc.penalize_len_diff);
+        sc.score = Some(score);
+        score > i32::MIN
+      });
+      prev
+    } else {
+      self
+        .candidates
+        .iter()
+        .filter_map(|c| {
+          let score = fuzzy_match_score(c, &query_chars, false);
+          (score > i32::MIN).then(|| {
+            let mut sc = ScoredCandidate::new(c.clone());
+            sc.score = Some(score);
+            sc
+          })
+        })
+        .collect()
+    };
     scored.sort_by_key(|sc| sc.score.unwrap_or(i32::MIN));
     scored.reverse();
     self.cursor.set_max(scored.len());
@@ -373,6 +397,7 @@ impl FuzzySelector {
     self.cursor.set(0);
     self.scroll_col = 0;
     self.filtered = scored;
+    self.last_query = query;
   }
 
   /// `(max name width, max desc width incl. parens)` over a column's
