@@ -375,14 +375,31 @@ impl FuzzySelector {
     self.filtered = scored;
   }
 
-  /// Display width of a single candidate cell: the 2-column leader plus the
-  /// sanitized one-line text and, when present, the description.
-  fn cell_width(sc: &ScoredCandidate) -> usize {
-    let mut w = Self::LEADER_W + calc_str_width(&one_line(&sc.candidate.display()));
-    if let Some(desc) = sc.candidate.desc().filter(|d| !d.is_empty()) {
-      w += 2 + calc_str_width(desc);
-    }
-    w
+  /// `(max name width, max desc width incl. parens)` over a column's
+  /// candidates. Names and descriptions are maxed independently so the
+  /// aligned layout reserves room for the widest of each, not the widest
+  /// single name+desc pair.
+  fn col_dims(cands: &[ScoredCandidate]) -> (usize, usize) {
+    let name = cands
+      .iter()
+      .map(|sc| calc_str_width(&one_line(&sc.candidate.display())))
+      .max()
+      .unwrap_or(0);
+    let desc = cands
+      .iter()
+      .filter_map(|sc| sc.candidate.desc().filter(|d| !d.is_empty()))
+      .map(|d| calc_str_width(d) + 2) // includes parens
+      .max()
+      .unwrap_or(0);
+    (name, desc)
+  }
+
+  /// Display width of a column box: leader + name + (2-col gap + parenthesized
+  /// desc) when any desc is present. Used for both layout and scrolling, which
+  /// must agree on column widths.
+  fn col_box_width(cands: &[ScoredCandidate]) -> usize {
+    let (name, desc) = Self::col_dims(cands);
+    Self::LEADER_W + name + if desc > 0 { 2 + desc } else { 0 }
   }
 
   /// Per-visible-column widths (each column a fixed `MAX_VISIBLE_ROWS` tall).
@@ -392,13 +409,7 @@ impl FuzzySelector {
       self.scroll_col,
       GridLayout::MAX_VISIBLE_ROWS,
       t_cols,
-      |start, end| {
-        self.filtered[start..end]
-          .iter()
-          .map(Self::cell_width)
-          .max()
-          .unwrap_or(0)
-      },
+      |start, end| Self::col_box_width(&self.filtered[start..end]),
     )
   }
 
@@ -413,13 +424,7 @@ impl FuzzySelector {
       n,
       GridLayout::MAX_VISIBLE_ROWS,
       t_cols,
-      |start, end| {
-        filtered[start..end]
-          .iter()
-          .map(Self::cell_width)
-          .max()
-          .unwrap_or(0)
-      },
+      |start, end| Self::col_box_width(&filtered[start..end]),
     );
   }
 
@@ -583,31 +588,62 @@ impl FuzzySelector {
             break; // later columns at this row are exhausted too
           }
 
-          let name = one_line(&self.filtered[idx].candidate.display());
-          // Matched positions index the name, which is the cell's prefix, so
-          // they stay valid after the desc is appended and the cell truncated.
-          let positions = match_positions(&name, &query);
-          let mut cell = name;
-          if let Some(desc) = self.filtered[idx]
+          let name_plain = one_line(&self.filtered[idx].candidate.display());
+          let name_w = calc_str_width(&name_plain);
+          // Matched positions index the name (the cell's prefix), so they stay
+          // valid; the name is emphasized and the desc is laid out after it.
+          let positions = match_positions(&name_plain, &query);
+          let name = emphasize_fuzzy(&name_plain, |i| positions.binary_search(&i).is_ok());
+
+          // Per-column max name width, so descriptions align (like the grid).
+          let col_start = (self.scroll_col + c) * rows;
+          let col_end = (col_start + rows).min(n);
+          let (col_name_max, _) = Self::col_dims(&self.filtered[col_start..col_end]);
+
+          let avail = width.saturating_sub(Self::LEADER_W);
+          let is_selected = idx == cursor_pos;
+
+          let cell = match self.filtered[idx]
             .candidate
             .desc()
             .filter(|d| !d.is_empty())
           {
-            cell.push_str("  ");
-            cell.push_str(desc);
-          }
+            Some(desc) => {
+              // Aligned position is after col_name_max + a 2-col gap; if the
+              // desc doesn't fit there it may extend left into the name-pad,
+              // and past that it truncates with an ellipsis.
+              let desc_w_full = calc_str_width(desc) + 2; // includes parens
+              let aligned_avail = avail.saturating_sub(col_name_max + 2);
+              let max_extend_avail = avail.saturating_sub(name_w + 2);
+              let (pad_chars, desc_text) = if desc_w_full <= aligned_avail {
+                (col_name_max.saturating_sub(name_w), format!("({desc})"))
+              } else if desc_w_full <= max_extend_avail {
+                let need = desc_w_full - aligned_avail;
+                let pad = col_name_max.saturating_sub(name_w).saturating_sub(need);
+                (pad, format!("({desc})"))
+              } else {
+                let truncated = truncate_to_width(desc, max_extend_avail.saturating_sub(3));
+                (0, format!("({truncated}…)"))
+              };
+              let name_pad = " ".repeat(pad_chars);
+              let used = name_w + pad_chars + 2 + calc_str_width(&desc_text);
+              let trailing = " ".repeat(avail.saturating_sub(used));
+              if is_selected {
+                format!("{name}{name_pad}  {desc_text}{trailing}")
+              } else {
+                format!("{name}{name_pad}  \x1b[2m{desc_text}\x1b[22m{trailing}")
+              }
+            }
+            None => {
+              let trailing = " ".repeat(avail.saturating_sub(name_w));
+              format!("{name}{trailing}")
+            }
+          };
 
-          let avail = width.saturating_sub(Self::LEADER_W);
-          if calc_str_width(&cell) > avail {
-            cell = format!("{}…", truncate_to_width(&cell, avail.saturating_sub(1)));
-          }
-          let pad = " ".repeat(avail.saturating_sub(calc_str_width(&cell)));
-          let cell = emphasize_fuzzy(&cell, |i| positions.binary_search(&i).is_ok());
-
-          if idx == cursor_pos {
-            write_term!("{} \x1b[7m{cell}{pad}\x1b[27m", Self::SELECTED).ok();
+          if is_selected {
+            write_term!("{} \x1b[7m{cell}\x1b[27m", Self::SELECTED).ok();
           } else {
-            write_term!("\x1b[2m·\x1b[22m {cell}{pad}").ok();
+            write_term!("\x1b[2m·\x1b[22m {cell}").ok();
           }
 
           // Inter-column gap, skipped when the next column has no cell here.
