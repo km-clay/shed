@@ -515,12 +515,12 @@ impl ScopeStack {
           VarKind::Arr(items) => match idx {
             ArrIndex::Literal(n) => n < items.len(),
             ArrIndex::FromBack(n) => n >= 1 && n <= items.len(),
-            ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => !items.is_empty(),
+            ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => true,
             _ => false,
           },
           VarKind::AssocArr(items) => match idx {
             ArrIndex::Key(key) => items.iter().any(|(k, _)| k == &key),
-            ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => !items.is_empty(),
+            ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => true,
             _ => false,
           },
           _ => false,
