@@ -588,10 +588,16 @@ impl FuzzySelector {
             break; // later columns at this row are exhausted too
           }
 
-          let name_plain = one_line(&self.filtered[idx].candidate.display());
+          let avail = width.saturating_sub(Self::LEADER_W);
+
+          let mut name_plain = one_line(&self.filtered[idx].candidate.display());
+          if calc_str_width(&name_plain) > avail {
+            name_plain = format!(
+              "{}…",
+              truncate_to_width(&name_plain, avail.saturating_sub(1))
+            );
+          }
           let name_w = calc_str_width(&name_plain);
-          // Matched positions index the name (the cell's prefix), so they stay
-          // valid; the name is emphasized and the desc is laid out after it.
           let positions = match_positions(&name_plain, &query);
           let name = emphasize_fuzzy(&name_plain, |i| positions.binary_search(&i).is_ok());
 
@@ -600,7 +606,6 @@ impl FuzzySelector {
           let col_end = (col_start + rows).min(n);
           let (col_name_max, _) = Self::col_dims(&self.filtered[col_start..col_end]);
 
-          let avail = width.saturating_sub(Self::LEADER_W);
           let is_selected = idx == cursor_pos;
 
           let cell = match self.filtered[idx]
