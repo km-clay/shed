@@ -2005,6 +2005,7 @@ STAT                                             *builtin-stat* *stat*
     `%r`    alias for `%d`
     `%R`    alias for `%D`
     `%s`    total size in bytes
+    `%S`    total size, human readable
     `%t`    major device type, for special files (hex)
     `%T`    minor device type, for special files (hex)
     `%u`    user ID of owner

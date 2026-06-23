@@ -77,7 +77,7 @@ enum FileFmt {
   Filename,
   QuotedFilename,
   IoHint,
-  ByteSize,
+  FileSize(StatDisplay),
   DevType(Device),
   Uid,
   UidName,
@@ -194,6 +194,31 @@ impl FileInfo {
           write!(f, "{x_ch}")?;
         }
         Ok(())
+      }
+    }
+  }
+
+  fn fmt_filesize(&self, f: &mut impl fmt::Write, display: StatDisplay) -> fmt::Result {
+    let size = self.st_size;
+    match display {
+      StatDisplay::Machine(base) => match base {
+        Base::Decimal => write!(f, "{}", size),
+        Base::Octal => write!(f, "{size:o}"),
+        Base::Hex => write!(f, "{size:x}"),
+      },
+      StatDisplay::Human => {
+        let mut size = size as f64;
+        let units = ["B", "K", "M", "G", "T", "P", "E"];
+        let mut unit = 0;
+        while size >= 1024.0 && unit < units.len() - 1 {
+          size /= 1024.0;
+          unit += 1;
+        }
+        if unit == 0 {
+          write!(f, "{:.0}{}", size, units[unit])
+        } else {
+          write!(f, "{:.1}{}", size, units[unit])
+        }
       }
     }
   }
@@ -373,8 +398,8 @@ impl FileFmt {
       FileFmt::Inode /*=========*/ => write!(f, "{}", stat.st_ino),
       FileFmt::Filename /*------*/ => write!(f, "{}", stat.name),
       FileFmt::IoHint /*========*/ => write!(f, "{}", stat.st_blksize),
-      FileFmt::ByteSize /*------*/ => write!(f, "{}", stat.st_size),
       FileFmt::Uid /*===========*/ => write!(f, "{}", stat.st_uid),
+      FileFmt::FileSize(disp) /**/ => stat.fmt_filesize(f, *disp),
       FileFmt::FileType /*------*/ => stat.fmt_filetype(f),
       FileFmt::Perms(stat_display) => stat.fmt_mode(f, *stat_display),
       FileFmt::SecCtx /*--------*/ => stat.fmt_sec_ctx(f),
@@ -439,7 +464,8 @@ impl FromStr for FileFmtArgs {
           'n' => args.push(FileFmt::Filename),
           'N' => args.push(FileFmt::QuotedFilename),
           'o' => args.push(FileFmt::IoHint),
-          's' => args.push(FileFmt::ByteSize),
+          's' => args.push(FileFmt::FileSize(StatDisplay::Machine(Base::Decimal))),
+          'S' => args.push(FileFmt::FileSize(StatDisplay::Human)),
           'r' => args.push(FileFmt::DevType(Device::DevType(Base::Decimal))),
           'R' => args.push(FileFmt::DevType(Device::DevType(Base::Hex))),
           't' => args.push(FileFmt::DevType(Device::MajorDevType(Base::Hex))),
@@ -788,7 +814,7 @@ impl super::Builtin for Stat {
 }
 
 impl Stat {
-  const DEFAULT_FILE_FMT: &str = "  File: %N\n  Size: %s\t\tBlocks: %b\tIO Block: %o\t%F\nDevice: %Hd,%Ld\tInode: %i\t\tLinks: %h\nAccess: (%a/%A)  Uid: (%u/%U)  Gid: (%g/%G)\nAccess: %x\nModify: %y\nChange: %z\n Birth: %w";
+  const DEFAULT_FILE_FMT: &str = "  File: %N\n  Size: %S\t\tBlocks: %b\tIO Block: %o\t%F\nDevice: %Hd,%Ld\tInode: %i\t\tLinks: %h\nAccess: (%a/%A)  Uid: (%u/%U)  Gid: (%g/%G)\nAccess: %x\nModify: %y\nChange: %z\n Birth: %w";
   const DEFAULT_FS_FMT: &str = "  File: %N\n    ID: %i\tNamelen: %l\t Type: %t\nBlock size: %s\tFundamental block size: %S\nBlocks: Total: %b\tFree: %f\tAvailable: %a\nInodes: Total: %c\tFree: %d";
   const TERSE_FILE_FMT: &str = "%n %s %b %f %u %g %D %i %h %t %T %X %Y %Z %W %o";
   const TERSE_FS_FMT: &str = "%n %i %l %t %s %S %b %f %a %c %d";
