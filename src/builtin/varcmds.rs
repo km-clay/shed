@@ -151,11 +151,13 @@ impl super::Builtin for Declare {
   }
   fn get_argv_and_opts(
     &self,
+    cmd_span: Span,
     argv: &[Tk],
     _no_split: bool,
   ) -> ShResult<(super::ArgVector, Vec<Opt>)> {
-    let (raw_argv, opts) = get_opts_from_tokens_raw_no_split(argv, &self.opts())?;
-    let mut argv = prepare_assignment_argv(&raw_argv)?;
+    let (raw_argv, opts) =
+      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
+    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
     if !argv.is_empty() {
       argv.remove(0);
     }
@@ -281,10 +283,11 @@ impl super::Builtin for Readonly {
 
   fn get_argv_and_opts(
     &self,
+    cmd_span: Span,
     argv: &[Tk],
     _no_split: bool,
   ) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
-    let mut argv = prepare_assignment_argv(argv)?;
+    let mut argv = prepare_assignment_argv(argv).promote_err(cmd_span)?;
     if !argv.is_empty() {
       argv.remove(0);
     }
@@ -363,10 +366,11 @@ impl super::Builtin for Export {
 
   fn get_argv_and_opts(
     &self,
+    cmd_span: Span,
     argv: &[Tk],
     _no_split: bool,
   ) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
-    let mut argv = prepare_assignment_argv(argv)?;
+    let mut argv = prepare_assignment_argv(argv).promote_err(cmd_span)?;
     if !argv.is_empty() {
       argv.remove(0);
     }
@@ -407,11 +411,13 @@ impl super::Builtin for Local {
   }
   fn get_argv_and_opts(
     &self,
+    cmd_span: Span,
     argv: &[Tk],
     _no_split: bool,
   ) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
-    let (raw_argv, opts) = get_opts_from_tokens_raw_no_split(argv, &self.opts())?;
-    let mut argv = prepare_assignment_argv(&raw_argv)?;
+    let (raw_argv, opts) =
+      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
+    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
     if !argv.is_empty() {
       argv.remove(0);
     }

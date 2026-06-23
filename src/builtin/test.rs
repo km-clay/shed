@@ -1,6 +1,9 @@
 use std::{collections::VecDeque, fs::metadata, os::fd::BorrowedFd, path::PathBuf, str::FromStr};
 
-use crate::{eval::lex::Tk, util::replace_posix_classes};
+use crate::{
+  eval::lex::Tk,
+  util::{ShResultExt, replace_posix_classes},
+};
 
 use super::{
   Shed,
@@ -340,11 +343,12 @@ impl super::Builtin for Test {
   /// hand the operands-only argv to `execute`.
   fn get_argv_and_opts(
     &self,
+    cmd_span: Span,
     argv: &[Tk],
     no_split: bool,
   ) -> ShResult<(super::ArgVector, Vec<super::Opt>)> {
     let span = argv.get_span().unwrap();
-    let mut argv = prepare_argv_with(argv, no_split)?;
+    let mut argv = prepare_argv_with(argv, no_split).promote_err(cmd_span)?;
     let opener = argv
       .first()
       .map(|(s, _)| s.as_str())

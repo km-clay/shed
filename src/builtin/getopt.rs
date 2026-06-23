@@ -183,7 +183,7 @@ pub(crate) fn sort_tks(tokens: &[Tk], opt_specs: &[OptSpec], strict: bool) -> Ge
           .iter()
           .find(|o| !opt_specs.iter().any(|s| s.opt == **o))
           .unwrap();
-        return Err(sherr!(ParseErr, "Unknown option: {}", unknown.to_string(),));
+        return Err(sherr!(ParseErr, "Unknown option: '{unknown}'"));
       }
       non_opts.push((word, span));
       continue;

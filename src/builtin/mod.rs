@@ -3,7 +3,7 @@ use nix::unistd::Pid;
 use scopeguard::defer;
 use std::{cell::RefCell, fmt::Write};
 
-use crate::state::meta::UtilKind;
+use crate::{procio::{bytes_to_string, out_bytes, stdout_fileno}, state::meta::UtilKind, util::{FdReader, ShResultExt}};
 
 use super::{
   errln,
@@ -261,14 +261,22 @@ pub(super) trait Builtin: Sync {
   }
 
   /// The way that the builtin parses its options. Some of them are weird, like `set`
-  fn get_argv_and_opts(&self, argv: &[Tk], no_split: bool) -> ShResult<(ArgVector, Vec<Opt>)> {
+  fn get_argv_and_opts(
+    &self,
+    cmd_span: Span,
+    argv: &[Tk],
+    no_split: bool,
+  ) -> ShResult<(ArgVector, Vec<Opt>)> {
     let opts = self.opts();
     let (mut argv, opts) = if opts.is_empty() {
-      (prepare_argv_with(argv, no_split)?, vec![])
+      (
+        prepare_argv_with(argv, no_split).promote_err(cmd_span)?,
+        vec![],
+      )
     } else if self.strict_opts() {
-      get_opts_from_tokens_strict(argv, &opts)?
+      get_opts_from_tokens_strict(argv, &opts).promote_err(cmd_span)?
     } else {
-      get_opts_from_tokens(argv, &opts)?
+      get_opts_from_tokens(argv, &opts).promote_err(cmd_span)?
     };
     if !argv.is_empty() {
       argv.remove(0);
@@ -419,7 +427,7 @@ pub(super) trait Builtin: Sync {
       .map(|tk| tk.span.clone())
       .unwrap_or_else(|| span.clone());
 
-    let (argv, opts) = self.get_argv_and_opts(argv, no_split)?;
+    let (argv, opts) = self.get_argv_and_opts(cmd_span.clone(), argv, no_split)?;
     let builtin_args = BuiltinArgs {
       argv,
       opts,
