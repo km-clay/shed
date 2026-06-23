@@ -16,7 +16,7 @@ impl super::Builtin for Quote {
     vec![OptSpec::single_arg('v'), OptSpec::single_arg("var")]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    if let Some(stdin) = self.get_input_with(&mut args, |_| false) {
+    if let Some(stdin) = self.get_input_str_with(&mut args, |a| a.has_stdin()) {
       let quoted = expand::shell_quote(&stdin);
       outln!("{quoted}");
       return with_status(0);
@@ -98,7 +98,7 @@ impl super::Builtin for Unquote {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     log::debug!("entered unquote execute()");
     let input = self
-      .get_input(&mut args)
+      .get_input_str(&mut args)
       .unwrap_or_else(|| super::join_raw_args(args.argv).0);
 
     let mut target = None;

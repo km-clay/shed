@@ -163,7 +163,7 @@ impl super::Builtin for FixCmd {
     &self,
     node: &Node,
     _dispatcher: &mut Dispatcher,
-    _stdin: Option<String>,
+    _stdin: Option<Vec<u8>>,
   ) -> ShResult<()> {
     let span = node.get_span();
     let NdRule::Command {

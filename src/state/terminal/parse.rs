@@ -7,7 +7,7 @@ use std::{
   sync::atomic::Ordering,
 };
 
-use crate::match_loop;
+use crate::{match_loop, procio::bytes_to_string};
 
 use super::{
   ShErr, ShResult,
@@ -239,7 +239,7 @@ impl EventParser {
         u8::from_str_radix(&s, 16).ok()
       })
       .collect();
-    bytes.map(|b| String::from_utf8_lossy(&b).into_owned())
+    bytes.map(bytes_to_string)
   }
 }
 
@@ -576,7 +576,7 @@ impl PollReader {
       return None;
     }
     let bytes: Vec<u8> = self.byte_buf.drain(..).collect();
-    let verbatim_str = String::from_utf8_lossy(&bytes).to_string();
+    let verbatim_str = bytes_to_string(bytes);
     Some(KeyEvent(
       KeyCode::Verbatim(verbatim_str.into()),
       ModKeys::empty(),

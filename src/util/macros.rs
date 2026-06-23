@@ -421,7 +421,7 @@ macro_rules! err {
 macro_rules! _write_inner {
   (out, $macro:tt, $fd:expr, $($arg:tt)*) => {{
     if $crate::builtin::has_out_sink() {
-      use std::fmt::Write;
+      use std::io::Write;
       $crate::builtin::OUT_SINK.with(|s| {
         let mut borrow = s.borrow_mut();
         let sink = borrow.last_mut().unwrap();

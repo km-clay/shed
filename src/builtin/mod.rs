@@ -1,9 +1,18 @@
 use ariadne::Span as ASpan;
 use nix::unistd::Pid;
 use scopeguard::defer;
-use std::{cell::RefCell, fmt::Write};
+use std::{
+  cell::RefCell,
+  fmt::Write,
+  fs,
+  io::{self, Read},
+};
 
-use crate::{procio::{bytes_to_string, out_bytes, stdout_fileno}, state::meta::UtilKind, util::{FdReader, ShResultExt}};
+use crate::{
+  procio::{bytes_to_string, out_bytes, stdout_fileno},
+  state::meta::UtilKind,
+  util::{FdReader, ShResultExt},
+};
 
 use super::{
   errln,
@@ -25,13 +34,13 @@ use super::{
 // Stack of output sinks for in-process pipelines; the stack lets internal
 // pipelines nest inside command subs.
 thread_local! {
-  pub(crate) static OUT_SINK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-  pub(crate) static IN_SINK: RefCell<Vec<Option<String>>> = const { RefCell::new(Vec::new()) };
+  pub(crate) static OUT_SINK: RefCell<Vec<Vec<u8>>> = const { RefCell::new(Vec::new()) };
+  pub(crate) static IN_SINK: RefCell<Vec<Option<Vec<u8>>>> = const { RefCell::new(Vec::new()) };
 }
 
 fn install_out_sink() {
   OUT_SINK.with(|s| {
-    s.borrow_mut().push(String::new());
+    s.borrow_mut().push(vec![]);
   });
 }
 
@@ -43,7 +52,7 @@ pub(crate) fn has_in_sink() -> bool {
   IN_SINK.with(|s| s.borrow().last().is_some())
 }
 
-pub(crate) fn take_stdin() -> Option<String> {
+pub(crate) fn take_stdin() -> Option<Vec<u8>> {
   IN_SINK.with(|s| s.borrow_mut().last_mut().and_then(|opt| opt.take()))
 }
 
@@ -56,7 +65,7 @@ impl SinkScope {
     Self { taken: false }
   }
 
-  pub fn take(mut self) -> String {
+  pub fn take(mut self) -> Vec<u8> {
     self.taken = true;
     OUT_SINK
       .with(|s| s.borrow_mut().pop())
@@ -76,7 +85,7 @@ impl Drop for SinkScope {
 
 pub(crate) struct StdinScope;
 impl StdinScope {
-  pub fn push(input: String) -> Self {
+  pub fn push(input: Vec<u8>) -> Self {
     IN_SINK.with(|s| {
       s.borrow_mut().push(Some(input));
     });
@@ -284,11 +293,23 @@ pub(super) trait Builtin: Sync {
     Ok((argv, opts))
   }
 
+  fn get_input_str(&self, args: &mut BuiltinArgs) -> Option<String> {
+    self.get_input(args).map(bytes_to_string)
+  }
+
+  fn get_input_str_with(
+    &self,
+    args: &mut BuiltinArgs,
+    should_slurp: fn(&BuiltinArgs) -> bool,
+  ) -> Option<String> {
+    self.get_input_with(args, should_slurp).map(bytes_to_string)
+  }
+
   /// Default input getter
   ///
   /// Slurps stdin if `args.argv` is empty, or if stdin is available
-  fn get_input(&self, args: &mut BuiltinArgs) -> Option<String> {
-    self.get_input_with(args, |a| a.argv.is_empty())
+  fn get_input(&self, args: &mut BuiltinArgs) -> Option<Vec<u8>> {
+    self.get_input_with(args, |a| a.argv.is_empty() || a.has_stdin())
   }
 
   /// Input getter. Takes a predicate that decides whether to slurp stdin or not.
@@ -296,8 +317,8 @@ pub(super) trait Builtin: Sync {
     &self,
     args: &mut BuiltinArgs,
     should_slurp: fn(&BuiltinArgs) -> bool,
-  ) -> Option<String> {
-    if should_slurp(args) || args.has_stdin() {
+  ) -> Option<Vec<u8>> {
+    if should_slurp(args) {
       if args.has_stdin() {
         args.take_stdin()
       } else {
@@ -313,7 +334,7 @@ pub(super) trait Builtin: Sync {
     &self,
     node: &Node,
     dispatcher: &mut Dispatcher,
-    stdin: Option<String>,
+    stdin: Option<Vec<u8>>,
   ) -> ShResult<()> {
     let cmd_raw = node.get_command().unwrap().to_string();
     let context = node.context.clone();
@@ -410,7 +431,7 @@ pub(super) trait Builtin: Sync {
     &self,
     node: &Node,
     _dispatcher: &mut Dispatcher,
-    stdin: Option<String>,
+    stdin: Option<Vec<u8>>,
   ) -> ShResult<()> {
     let span = node.get_span().clone();
     let no_split = node.flags.contains(NdFlags::NO_SPLIT);
@@ -450,7 +471,7 @@ pub struct BuiltinArgs {
   opts: Vec<Opt>,
   span: Span,     // the entire call
   cmd_span: Span, // just the command
-  stdin: Option<String>,
+  stdin: Option<Vec<u8>>,
 }
 
 impl BuiltinArgs {
@@ -461,7 +482,7 @@ impl BuiltinArgs {
   pub fn cmd_span(&self) -> Span {
     self.cmd_span.clone()
   }
-  pub fn take_stdin(&mut self) -> Option<String> {
+  pub fn take_stdin(&mut self) -> Option<Vec<u8>> {
     self.stdin.take()
   }
   pub fn has_stdin(&self) -> bool {
@@ -629,7 +650,7 @@ impl Builtin for BuiltinBuiltin {
     &self,
     node: &Node,
     dispatcher: &mut Dispatcher,
-    stdin: Option<String>,
+    stdin: Option<Vec<u8>>,
   ) -> ShResult<()> {
     let span = node.get_span();
     let NdRule::Command { assignments, argv } = &node.class else {
@@ -661,7 +682,7 @@ impl Builtin for CommandBuiltin {
     &self,
     node: &Node,
     dispatcher: &mut Dispatcher,
-    _stdin: Option<String>,
+    _stdin: Option<Vec<u8>>,
   ) -> ShResult<()> {
     let NdRule::Command { assignments, argv } = &node.class else {
       unreachable!()

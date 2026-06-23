@@ -4,7 +4,7 @@ pub(super) struct Width;
 impl super::Builtin for Width {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let input = self
-      .get_input(&mut args)
+      .get_input_str(&mut args)
       .unwrap_or_else(|| super::join_raw_args(args.argv).0);
 
     let width = calc_str_width(&input);

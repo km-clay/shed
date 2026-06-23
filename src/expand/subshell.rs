@@ -3,6 +3,7 @@ use std::os::fd::AsRawFd;
 use crate::{
   builtin::SinkScope,
   eval::{ParsedSrc, execute::exec_input, parse::node::nodes_have_only_builtins},
+  procio::bytes_to_string,
   state::vars::VarStr,
   util::isolation_guard,
 };
@@ -94,7 +95,11 @@ pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
     e.print_error();
   }
 
-  Ok(sink_scope.take().trim_end_matches('\n').into())
+  Ok(
+    bytes_to_string(sink_scope.take())
+      .trim_end_matches('\n')
+      .into(),
+  )
 }
 
 /// Get the command output of a given command input as a String

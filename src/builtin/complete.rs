@@ -114,7 +114,7 @@ impl super::Builtin for CompGen {
     &self,
     node: &Node,
     _dispatcher: &mut Dispatcher,
-    _stdin: Option<String>,
+    _stdin: Option<Vec<u8>>,
   ) -> ShResult<()> {
     use super::getopt::get_opts_from_tokens_raw;
 

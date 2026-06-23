@@ -12,6 +12,8 @@ use std::{
   time::SystemTime,
 };
 
+use crate::procio::bytes_to_string;
+
 use super::{
   WtStat, autocmd, builtin, errln, eval, expand, keys, match_loop, procio, readline, sherr,
   shopt as shopt_macro, signal, socket,
@@ -393,7 +395,7 @@ impl Shed {
       bytes.pop();
     }
 
-    let input = String::from_utf8_lossy(&bytes).to_string();
+    let input = bytes_to_string(bytes);
     let request = match socket::SocketRequest::from_str(&input) {
       Ok(req) => req,
       Err(e) => {

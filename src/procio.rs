@@ -2,6 +2,7 @@ use std::{
   collections::{BTreeMap, BTreeSet},
   fmt::Debug,
   fs::{File, OpenOptions},
+  io::Write,
   os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
   path::Path,
   rc::Rc,
@@ -19,7 +20,13 @@ use nix::{
   unistd::{ForkResult, fork, isatty, read, write},
 };
 
-use crate::{Shed, signal, state::terminal::Terminal, util};
+use crate::{
+  Shed,
+  builtin::{OUT_SINK, has_out_sink},
+  signal,
+  state::terminal::Terminal,
+  util::{self, FdWriter},
+};
 
 use super::{
   eval::{
@@ -710,6 +717,23 @@ pub(super) fn read_fd_to_string(fd: OwnedFd) -> ShResult<String> {
   String::from_utf8(buf).map_err(|e| sherr!(InternalErr, "Failed to read fd: {}", e))
 }
 
+pub(super) fn bytes_to_string(buf: Vec<u8>) -> String {
+  match String::from_utf8(buf) {
+    Ok(s) => s,
+    Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
+  }
+}
+
+pub(super) fn out_bytes(buf: &[u8]) {
+  if has_out_sink() {
+    OUT_SINK.with(|s| {
+      let _ = s.borrow_mut().last_mut().unwrap().write_all(buf);
+    })
+  } else {
+    let _ = FdWriter(stdout_fileno()).write_all(buf);
+  }
+}
+
 pub(super) fn capture_command(
   cmd: &str,
   stdin: Option<&str>,
@@ -816,7 +840,7 @@ pub(super) fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShRes
   Ok(result?)
 }
 
-pub(super) fn read_input() -> ShResult<String> {
+pub(super) fn read_input() -> ShResult<Vec<u8>> {
   let _guard = isatty(stdin_fileno())
     .unwrap_or(false)
     .then(|| Shed::term_mut(Terminal::prepare_for_exec));
@@ -831,7 +855,7 @@ pub(super) fn read_input() -> ShResult<String> {
       Err(Errno::EINTR) => {
         if signal::sigint_pending() {
           state::Shed::set_status(130);
-          return Ok(String::new());
+          return Ok(vec![]);
         }
       }
       Err(e) => {
@@ -840,7 +864,7 @@ pub(super) fn read_input() -> ShResult<String> {
     }
   }
 
-  Ok(String::from_utf8_lossy(&input).to_string())
+  Ok(input)
 }
 
 #[cfg(test)]

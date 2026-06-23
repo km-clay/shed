@@ -330,7 +330,7 @@ impl super::Builtin for Vice {
     let span = args.span();
     let prog = Self::parse_cmds(&args.opts).promote_err(span.clone())?;
 
-    if let Some(input) = self.get_input(&mut args) {
+    if let Some(input) = self.get_input_str(&mut args) {
       let ok = Self::run_stream(&input, &prog, &span)?;
       return with_status(i32::from(!ok));
     }

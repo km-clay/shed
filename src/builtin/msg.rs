@@ -1,4 +1,4 @@
-use crate::socket_msg;
+use crate::{procio::bytes_to_string, socket_msg};
 
 use super::{
   Shed,
@@ -38,9 +38,11 @@ impl super::Builtin for Msg {
       }
     }
 
-    let input = self
-      .get_input(&mut args)
-      .map(|s| s.trim_matches('\n').to_string());
+    let input = self.get_input(&mut args).map(|s| {
+      let mut s = bytes_to_string(s);
+      s.truncate(s.trim_matches('\n').len());
+      s
+    });
 
     if input.is_none() && args.argv.is_empty() {
       // argv is empty → list past messages and exit; nothing to post.

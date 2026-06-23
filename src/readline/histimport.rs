@@ -5,6 +5,8 @@ use std::{
 
 use regex::Regex;
 
+use crate::procio::bytes_to_string;
+
 use super::{
   history::HistEntry,
   match_loop, sherr,
@@ -14,7 +16,7 @@ use super::{
 pub fn import_history<P: AsRef<Path>>(path: P) -> ShResult<Vec<HistEntry>> {
   let path = path.as_ref();
   let content = std::fs::read(path)
-    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+    .map(bytes_to_string)
     .map_err(|e| sherr!(ParseErr, "Failed to read history file: {e}"))?;
 
   let filename = path

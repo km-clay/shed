@@ -2,7 +2,10 @@ use std::{path::Path, sync::atomic::Ordering};
 
 use nix::unistd::{Pid, isatty};
 
-use crate::{eval::execute::exec_int, procio::read_input};
+use crate::{
+  eval::execute::exec_int,
+  procio::{bytes_to_string, read_input},
+};
 
 use super::{
   ShResult, Shed, errln,
@@ -20,12 +23,12 @@ pub fn dispatch_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
       cmd.clone()
     } else if args.stdin {
       // explicit `-s`: read stdin as the script, script_args are positional
-      read_input()?
+      bytes_to_string(read_input()?)
     } else if !args.script_args.is_empty() {
       let path = args.script_args.remove(0);
       std::fs::read_to_string(path)?
     } else if !isatty(procio::stdin_fileno()).unwrap_or(false) {
-      read_input()?
+      bytes_to_string(read_input()?)
     } else {
       // no input provided, just run interactively
       status_msg!("warning: --script was passed but no input was given");
@@ -50,7 +53,8 @@ pub fn dispatch_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
 }
 
 pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
-  let commands = read_input()?;
+  let bytes = read_input()?;
+  let commands = bytes_to_string(bytes);
 
   Shed::vars_mut(|v| {
     let scope = v.cur_scope_mut();
