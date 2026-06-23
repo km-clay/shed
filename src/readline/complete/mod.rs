@@ -1,7 +1,4 @@
-use crate::{
-  HashSet,
-  state::{terminal::Terminal, vars::VarStr},
-};
+use crate::{HashSet, state::vars::VarStr};
 use std::{
   fmt::{Debug, Display},
   os::unix::fs::PermissionsExt,

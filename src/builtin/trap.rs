@@ -49,7 +49,7 @@ impl super::Builtin for Trap {
       Shed::logic(|l| -> ShResult<()> {
         for entry in l.traps() {
           let target = entry.0;
-          if filter.is_empty() || filter.contains(&target) {
+          if filter.is_empty() || filter.contains(target) {
             let command = shell_quote(entry.1);
             outln!("trap -- {command} {target}");
           }

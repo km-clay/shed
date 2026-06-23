@@ -1,3 +1,4 @@
+#![expect(clippy::unnecessary_cast)]
 use std::{fmt, mem, os::unix::fs::MetadataExt, str::FromStr};
 
 use nix::{

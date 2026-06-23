@@ -140,10 +140,9 @@ impl Vice {
         ViceCmd::Cut(keys) => {
           let start = core.editor.cursor_to_flat();
 
-          core.feed_keys(keys)?;
           // A failed search aborts the whole program; leave the flag set so
           // the caller can skip the line or fail the buffer.
-          if core.editor.search_failed() {
+          if !core.feed_keys_fallible(keys)? {
             return Ok(());
           }
 
@@ -166,16 +165,14 @@ impl Vice {
             field.to_string()
           });
 
-          if let Some(sep) = prog.sep.clone() {
-            core.feed_keys(sep)?;
-            if core.editor.search_failed() {
-              return Ok(());
-            }
+          if let Some(sep) = prog.sep.clone()
+            && !core.feed_keys_fallible(sep)?
+          {
+            return Ok(());
           }
         }
         ViceCmd::Move(keys) => {
-          core.feed_keys(keys)?;
-          if core.editor.search_failed() {
+          if !core.feed_keys_fallible(keys)? {
             return Ok(());
           }
         }
@@ -493,6 +490,17 @@ mod tests {
     // `fX` fails on the middle line, which is dropped from the output.
     test_input("printf 'aXb\\ncYd\\neXf\\n' | vice -l -m 'fX' -c '$'").unwrap();
     assert_output!(g, "Xb\nXf\n");
+  }
+
+  #[test]
+  fn vice_lines_failed_search_not_masked_by_trailing_motion() {
+    // Regression: a search that fails partway through a command must still
+    // abort, even when a later motion in the same keystring would otherwise
+    // reset the failure flag. Here `fX` fails on the middle line; the trailing
+    // `l` must not mask it, so that line is dropped rather than emitting "Yd".
+    let g = TestGuard::new();
+    test_input("printf 'aXb\\ncYd\\neXf\\n' | vice -l -m 'fXl' -c '$'").unwrap();
+    assert_output!(g, "b\nf\n");
   }
 
   #[test]

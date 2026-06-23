@@ -89,6 +89,23 @@ impl EditorCore {
     Ok(())
   }
 
+  pub fn feed_key_fallible(&mut self, key: KeyEvent) -> ShResult<bool> {
+    let Some(cmd) = self.mode.handle_key(key) else {
+      return Ok(true);
+    };
+    self.exec_cmd(cmd, false)?;
+    Ok(!self.editor.search_failed())
+  }
+
+  pub fn feed_keys_fallible(&mut self, keys: impl IntoIterator<Item = KeyEvent>) -> ShResult<bool> {
+    for key in keys {
+      if !self.feed_key_fallible(key)? {
+        return Ok(false);
+      }
+    }
+    Ok(true)
+  }
+
   /// The full buffer contents as a string.
   pub fn text(&self) -> String {
     self.editor.to_string()
