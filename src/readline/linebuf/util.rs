@@ -385,18 +385,18 @@ impl super::LineBuf {
 
     line.0.get(col).is_some().then(|| line.0.remove(col))
   }
-  pub(super) fn insert_at(&mut self, mut pos: Pos, gr: Grapheme) {
+  pub(super) fn insert_at(&mut self, pos: Pos, gr: Grapheme) {
     if gr.is_lf() {
       self.break_line_at(pos);
-      pos = pos.row_add(1);
-      pos.set(pos.row, 0);
-    } else {
-      let row = pos.row;
-      let col = pos.col;
-      self.lines[row].insert(col, gr);
-      self.indent_cache = None;
-      pos = pos.col_add(1);
+      return;
     }
+
+    let row = pos.row;
+    let col = pos.col;
+    self.lines[row].insert(col, gr);
+    self.indent_cache = None;
+    let pos = pos.col_add(1);
+
     // Cheap test first: only consider dedenting if the line's trimmed content
     // is exactly a closer keyword. Skips the depth query for 99% of typing.
     let line = self.cur_line().to_string();

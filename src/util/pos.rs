@@ -64,10 +64,6 @@ impl Pos {
     self.row_col_add(0, -(rhs as isize))
   }
 
-  pub fn row_add(&self, rhs: usize) -> Self {
-    self.row_col_add(rhs as isize, 0)
-  }
-
   pub fn clamp_row<T>(&mut self, other: &[T]) {
     self.row = self.row.clamp(0, other.len().saturating_sub(1));
   }
