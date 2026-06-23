@@ -6,6 +6,7 @@ use yansi::Paint;
 use crate::{builtin::getopt::OptSpec, match_loop};
 
 use super::{
+  Shed,
   getopt::Opt,
   sherr,
   util::{ShErr, ShErrKind, ShResult, ShResultExt},
@@ -18,6 +19,9 @@ use super::{
 trait FlowCtl: super::Builtin {
   fn flow_control(&self, code: i32) -> ShErr;
   fn cmd(&self) -> &'static str;
+  fn default_code(&self) -> i32 {
+    0
+  }
   fn exec_flow_ctl(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let code = args
       .argv
@@ -33,7 +37,7 @@ trait FlowCtl: super::Builtin {
         })
       })
       .transpose()?
-      .unwrap_or(0);
+      .unwrap_or_else(|| self.default_code());
 
     Err(self.flow_control(code)).promote_err(args.span)
   }
@@ -52,6 +56,9 @@ impl super::Builtin for Return {
 impl FlowCtl for Return {
   fn cmd(&self) -> &'static str {
     "return"
+  }
+  fn default_code(&self) -> i32 {
+    Shed::get_status()
   }
   fn flow_control(&self, code: i32) -> ShErr {
     ShErr::simple(
@@ -115,6 +122,9 @@ impl super::Builtin for Exit {
 impl FlowCtl for Exit {
   fn cmd(&self) -> &'static str {
     "exit"
+  }
+  fn default_code(&self) -> i32 {
+    Shed::get_status()
   }
   fn flow_control(&self, code: i32) -> ShErr {
     ShErr::simple(ShErrKind::CleanExit(code), "")
@@ -328,6 +338,20 @@ mod tests {
     test_input("f() { return 42; }").unwrap();
     test_input("f").unwrap();
     assert_eq!(state::Shed::get_status(), 42);
+  }
+
+  #[test]
+  fn bare_return_propagates_last_status() {
+    // POSIX: `return` with no argument exits with the status of the last
+    // command executed, not 0.
+    let _g = TestGuard::new();
+    test_input("f() { false; return; }").unwrap();
+    test_input("f").unwrap();
+    assert_eq!(state::Shed::get_status(), 1);
+
+    test_input("g() { true; return; }").unwrap();
+    test_input("g").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
   }
 
   #[test]
