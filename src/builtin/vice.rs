@@ -192,6 +192,12 @@ impl Vice {
       spent_cmds.push(clone);
       if !prog.keep_mode {
         core.reset_mode(true)?;
+
+        // search mode and ex mode are submitted in the above mode
+        // so if a search failed after that, we return
+        if core.editor.search_failed() {
+          return Ok(());
+        }
       }
     }
 
