@@ -37,6 +37,7 @@ Cross-reference links can also be `clicked` directly with the mouse.
   `help glob`         Pathname expansion and wildcards             |glob|
   `help param`        Parameter expansion: `${}` operators           |param|
   `help redirect`     Redirection, pipes, heredocs                 |redirect|
+  `help tips`         Shed-specific features worth knowing about   |tips|
 
 ==============================================================================
 2. Navigating Help                             *help-nav*

@@ -1,0 +1,145 @@
+*tips* *features* *tricks*
+
+#TIPS & TRICKS#
+
+A tour of various features that are unique to `shed`.
+
+==============================================================================
+1. History concatenation                       *tips-hist-cat* *hist-cat*
+
+  Normally `Up`/`Down` replace the line with a history entry. When
+  `shopt prompt.hist_cat` is set to `true`, `Shift`/`Ctrl` + `Up`/`Down`
+  instead *stitch* history entries onto your current command
+  rather than replacing it:
+
+    `Shift+Up` `Shift+Down`     join entries with '` && `'
+    `Ctrl+Up`  `Ctrl+Down`      join entries with '`; `'
+
+  `Up` pulls older entries and prepends them to the left; `Down` pulls newer
+  entries and appends them to the right. The operation is reversible:
+  scroll back the other way to peel concatenated entries off again.
+
+  So you can assemble `cd proj && make && ./run` out of three separate
+  history commands without retyping any of them, or manually re-scrolling
+  to each one individually when re-executing.
+
+==============================================================================
+2. Work without losing your command line        *tips-ex*
+
+  Ex mode (`:` in vi normal mode, `Alt+;` in emacs mode) runs things
+  mid-edit without disturbing the buffer you're composing:
+
+    `:!cmd`         run a command at the main prompt
+    `:w !cmd`       pipe the buffer to a command (`:w !wl-copy` copies it)
+    `:w file.sh`    write the buffer to a file
+    `:r !cmd`       read a command's output into the buffer (`:r !wl-paste`)
+    `:r file.sh`    read a file into the buffer. good for editing scripts
+    `:stash`        set the buffer aside; `:stash pop` brings it back
+    `:h topic`      open a help page without leaving your line
+
+  See |ex mode|(ex).
+
+==============================================================================
+3. Scriptable keymaps with editor access         *tips-keymaps*
+
+  `keymap` bindings can run shell commands inline with `<CMD>...<CR>`, and
+  those commands can read and write the editor state through special
+  variables, similar to `zsh`'s zle widgets:
+
+    `$BUFFER`   current line contents
+    `$CURSOR`   cursor position (byte index, or `row:col`)
+    `$ANCHOR`   visual selection anchor
+    `$KEYS`     keys the editor will replay when the command returns
+
+  Assigning to these from within the command updates the editor on return.
+
+  See |the keymap builtin|(keymap).
+
+==============================================================================
+4. Built-in text processors                      *tips-text-tools*
+
+  shed ships text processing tools meant for use in scripts and pipelines:
+
+    |vice|(builtin-vice)             a vim-motion text processor; structural edits in a pipe
+    |thru|(builti-thru)             a streaming `cat`/`tee` replacement
+    |quote|(builtin-quote) |unquote|(builtin-unquote)    shell-quote text, or strip one layer of quoting
+    |width|(builtin-width)            display width of text (wide and combining chars aware)
+
+==============================================================================
+5. The prompt is a full text editor              *tips-editor*
+
+  The line editor is not a one-line prompt with extras; it is a modal,
+  multi-line editor with vi and emacs modes, registers, macros, visual
+  mode, and first-class multi-line buffers. Long compound commands are
+  meant to be edited as the multi-line text they are.
+
+  See |keybinds|(keybinds).
+
+==============================================================================
+6. Magic variables                               *tips-magic-vars*
+
+  Some variables are computed fresh on every access:
+
+    `$SECONDS`         seconds since the shell started
+    `$RANDOM`          a new random number each time it is read
+    `$EPOCHREALTIME`   current time as a floating-point seconds value
+    `$EPOCHSECONDS`    current time as an integral seconds value
+    `$LINES`           the current height of the terminal
+    `$COLUMNS`         the current width of the terminal
+    `$-`               the currently enabled `set` option flags
+
+  See |variables|(variables).
+
+==============================================================================
+7. Async workflows over the IPC socket            *tips-socket*
+
+  shed exposes a Unix socket for talking to the running shell from other
+  processes, which is the basis for asynchronous background workflows.
+  Commands sent to the background via '`&`' can talk to/control the parent shell
+  via the socket path it inherits in the `$SHED_SOCK` environment variable.
+  See |the socket docs|(socket).
+
+==============================================================================
+8. Arrays are double-ended queues (deques).       *tips-arrays*
+
+  shed's arrays are actually both a `deque` and a `ring buffer` under the hood.
+  Several builtins are exposed which allow you to easily take advantage of this:
+
+  |fpop|(builtin-fpop)             Pop an element from the front of the array.
+  |pop|(builtin-pop)              Pop an element from the back of the array.
+  |fpush|(builtin-fpush)            Push an element onto the front of the array.
+  |push|(builtin-push)             Push an element onto the back of the array.
+  |rotate|(builtin-rotate)           Rotate the array left or right by a given amount.
+
+  The `pop` commands both print the popped element to stdout. This allows for
+  popping and then using elements, like `foo=$(pop arr)`. (Note that builtin command
+  subs do not fork in shed, so this is a persistent mutation of `arr`).
+
+==============================================================================
+9. Ex mode `stash` tricks                         *tips-stash*
+
+  The `:stash` command in ex mode has some interesting behaviors associated with it.
+
+  Cross-session ~
+
+  A command stashed in one session can be `:stash pop`'d in any other session. This
+  is because stashed commands are stored in shed's `sqlite` database.
+
+  Code snippets ~
+
+  `stash` keeps two lists of commands: a stack which contains anonymous entries, and
+  a list of persistent, named entries. `:stash <name>` stores the current buffer as a
+  named entry, and also saves the exact position of your cursor. `:stash apply <name>`
+  then replaces the buffer with the named entry, and `:stash insert <name>` inserts it at
+  the cursor. In both cases, the cursor is moved by offset to the saved position. Named entries
+  can also be saved using the |stash|(builtin-stash) builtin, if you want to define them in your `rc` file.
+
+  This can be used to create code snippets when combined with |keymap|(builtin-keymap):
+  `stash --save "if_stmt" $'if :; then\n\t:\nfi' 0`
+  `keymap -n '<leader>if' '<CMD>stash insert if_stmt<CR>/:<CR>'`
+
+  The two commands above define a stash entry called `if_stmt` which contains an empty
+  `if...then...fi` statement, and a keymap which inserts it and then searches for the first
+  colon using `/:<CR>`. This has the effect of inserting the empty if statement at your cursor,
+  then moving the cursor to the condition, while also allowing you to jump to the next `:` by pressing
+  `n`. (This is assuming you have vim keybindings enabled).

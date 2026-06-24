@@ -1855,7 +1855,7 @@ SHOPT                                            *builtin-shopt* *shopt*
     `comp_limit`              max completion candidates shown
     `completion_ignore_case`  case-insensitive tab completion
     `expand_aliases`          fish-style alias expansion on the prompt
-    `hist_cat`                Shift+Up/Down history concatenation
+    `hist_cat`                Shift/Ctrl+Up/Down history concatenation (see |tips|(tips-hist-cat))
     `leader`                  leader key sequence for keymap bindings
     `idle_timeout`            idle seconds before firing `on-idle-timeout` autocmds (0=off)
     `substitute`              run var/cmd/arith expansion on PS1 after escapes
