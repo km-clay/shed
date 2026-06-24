@@ -1066,6 +1066,16 @@ KEYMAP                                           *builtin-keymap* *keymap*
   Key sequences use the same notation as the line editor. Special keys
   can be written as `<cr>`, `<esc>`, `<tab>`, `<space>`, etc.
 
+  Implied submission ~
+
+    If an {action} ends with a search (`/`, `?`) or ex (`<CMD>`, `:`) command that
+    has a pattern typed, it is run automatically, so the trailing `<cr>`
+    is optional. An {action} that opens an empty prompt (a bare `/` or
+    `:` with nothing after it) is left open for you to type into instead.
+
+        `keymap -n ',h' '/hello'`      jump to the next "hello" (auto-run)
+        `keymap -n '<leader>/' '/'`    open a search prompt to type into
+
   Examples:
 
       `keymap -i 'jk' '<esc>'`        map jk -> escape in insert mode

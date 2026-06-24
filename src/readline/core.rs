@@ -199,14 +199,21 @@ impl EditorCore {
     Ok(())
   }
 
+  /// Finalize a pending command-line mode (Ex / Search / RevSearch) by feeding
+  /// `Enter`, the way pressing it would. No-op in any other mode.
+  pub fn submit_cmdline(&mut self) -> ShResult<()> {
+    if matches!(
+      self.mode.report_mode(),
+      ModeReport::Ex | ModeReport::Search | ModeReport::RevSearch
+    ) {
+      self.feed_key(KeyEvent(KeyCode::Enter, ModKeys::NONE))?;
+    }
+    Ok(())
+  }
+
   pub fn reset_mode(&mut self, submit_pending: bool) -> ShResult<()> {
     if submit_pending {
-      match self.mode.report_mode() {
-        ModeReport::Ex | ModeReport::Search | ModeReport::RevSearch => {
-          self.feed_key(KeyEvent(KeyCode::Enter, ModKeys::NONE))?;
-        }
-        _ => {}
-      }
+      self.submit_cmdline()?;
     }
 
     let mut mode: Box<dyn EditMode> = Box::new(ViNormal::new());

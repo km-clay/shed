@@ -917,6 +917,12 @@ impl ShedLine {
           return Ok(Some(event));
         }
       }
+      // Implied submission: if the keymap left a non-empty search/ex pending
+      // (e.g. it ended in `/foo`), run it so the trailing `<CR>` is optional.
+      // A bare `/` or `:` that opened an empty prompt is left for the user.
+      if self.core.mode.pending_seq().is_some_and(|p| !p.is_empty()) {
+        self.core.submit_cmdline()?;
+      }
       self.needs_redraw = true;
     }
 

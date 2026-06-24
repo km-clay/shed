@@ -2136,3 +2136,46 @@ mod readline_mod_coverage {
     assert_eq!(vi.core.editor.to_string(), "three four five");
   }
 }
+
+mod keymap_implied_submit {
+  use super::*;
+  use crate::keys::{KeyMap, KeyMapFlags};
+  use crate::readline::ModeReport;
+
+  fn feed(line: &mut ShedLine, s: &str) {
+    Shed::term_mut(|t| t.feed_bytes(s.as_bytes()));
+    let keys = Shed::term_mut(|t| t.drain_keys());
+    line.process_input(keys).unwrap();
+  }
+
+  fn register(keys: &str, action: &str) {
+    Shed::logic_mut(|l| {
+      l.insert_keymap(KeyMap {
+        flags: KeyMapFlags::NORMAL,
+        keys: keys.to_string(),
+        action: action.to_string(),
+      });
+    });
+  }
+
+  #[test]
+  fn keymap_ending_in_search_auto_submits() {
+    let (mut vi, _g) = test_vi("foo bar foo");
+    feed(&mut vi, "\x1b"); // ensure normal mode
+    register(",s", "/bar"); // a search with no trailing <CR>
+    feed(&mut vi, ",s");
+    // the pending search was submitted: cursor jumped to "bar", back to normal
+    assert_eq!(vi.core.editor.cursor_to_flat(), 4);
+    assert_eq!(vi.core.mode.report_mode(), ModeReport::Normal);
+  }
+
+  #[test]
+  fn keymap_opening_empty_prompt_stays_open() {
+    let (mut vi, _g) = test_vi("foo bar foo");
+    feed(&mut vi, "\x1b");
+    register(",o", "/"); // opens a bare search prompt, nothing typed
+    feed(&mut vi, ",o");
+    // no pattern was typed, so the prompt is left open for the user
+    assert_eq!(vi.core.mode.report_mode(), ModeReport::Search);
+  }
+}

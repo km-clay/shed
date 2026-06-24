@@ -136,10 +136,10 @@ A tour of various features that are unique to `shed`.
 
   This can be used to create code snippets when combined with |keymap|(builtin-keymap):
   `stash --save "if_stmt" $'if :; then\n\t:\nfi' 0`
-  `keymap -n '<leader>if' '<CMD>stash insert if_stmt<CR>/:<CR>'`
+  `keymap -n '<leader>if' '<CMD>stash insert if_stmt<CR>/:'`
 
   The two commands above define a stash entry called `if_stmt` which contains an empty
   `if...then...fi` statement, and a keymap which inserts it and then searches for the first
-  colon using `/:<CR>`. This has the effect of inserting the empty if statement at your cursor,
+  colon using `/:`. This has the effect of inserting the empty if statement at your cursor,
   then moving the cursor to the condition, while also allowing you to jump to the next `:` by pressing
   `n`. (This is assuming you have vim keybindings enabled).
