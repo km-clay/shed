@@ -150,6 +150,8 @@ Available events:
 | `on-completion-start`, `on-completion-cancel`, `on-completion-select` | Tab completion events             |
 | `on-job-finish`                                                       | Background job completes          |
 | `on-time-report`                                                      | `time`-prefixed command completes |
+| `on-command-not-found`                                                | Command name can't be resolved    |
+| `on-idle-timeout`                                                     | Prompt idle past the idle timeout |
 | `on-exit`                                                             | Shell is exiting                  |
 
 Use `-c` to clear all autocmds for an event. Context variables (e.g. `$NEW_DIR`, `$TIME_REAL_MS`) are scoped to the autocmd execution and documented in `help autocmd`.
