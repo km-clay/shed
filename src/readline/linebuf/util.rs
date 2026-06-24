@@ -546,7 +546,7 @@ impl super::LineBuf {
     line
       .0
       .get(..col)
-      .is_none_or(|grs| grs.iter().all(Grapheme::is_ws))
+      .is_none_or(|grs| grs.iter().all(Grapheme::is_ws) && grs.iter().any(|gr| !gr.is_ws()))
   }
 
   pub fn cursor_is_escaped(&self) -> bool {
