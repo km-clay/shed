@@ -2407,7 +2407,7 @@ VICE                                             *builtin-vice* *vice*
   `cmd | vice [options] {program}`
 
   Slice and edit text with `vim` motions. `vice` is a programmatic interface
-  for `shed`'s text editing engine. Runs the given commands over its input
+  for `shed`'s text editing engine. Runs the given "program" over its input
   as a sequence of motion commands, capturing spans of text as fields or
   transforming the buffer in place. It is the structural counterpart
   to `cut`/`sed`: you navigate by motions and text objects instead
@@ -2433,12 +2433,16 @@ VICE                                             *builtin-vice* *vice*
                             each `-c`, advancing to the next field. Saves
                             repeating `-m` between captures.
     `-r`, `--repeat {N:R}`  repeat the previous {N} commands {R} times.
-    `--keep-mode`           do not reset to normal mode between commands
+    `--keep-mode`         do not reset to normal mode between commands
                             (lets an insert started in one command carry
                             into the next).
 
     {keys} use keymap notation: `<CR>`, `<Esc>`, `<C-a>`, `<tab>`, etc.,
     the same as |keymap|(builtin-keymap).
+
+    If no fields are cut out using `-c`, the entire buffer is printed to stdout.
+    This means that programs which only use `-m` can be used to edit input and
+    transparently pass the edited text through as output.
 
     The mode reset between commands submits a pending search (`/`, `?`) or
     ex (`:`) command rather than discarding it — it presses `<CR>`, not
@@ -2462,15 +2466,16 @@ VICE                                             *builtin-vice* *vice*
     If a search motion (`f`, `t`, `/`, `?`, `n`, `N`) finds no target the
     program is aborted for that input, mirroring `vim`'s cancellation of a
     macro on a failed search. Under `-l` the offending line is skipped and
-    no record is emitted for it; the run still succeeds. On a whole-buffer
-    run `vice` emits nothing and exits with status 1.
+    no record is emitted for it; if this occurs on every line, `vice` emits
+    nothing and exits with status 1. On a whole-buffer run `vice` emits nothing
+    and exits with status 1.
 
   Output ~
 
     `-q`, `--quoted`   encode the captured fields as a shell-quoted
                        (SQR) record, so the output pipes into the
                        |quoted-streams| adapters (`qmap`, `qtable`, ...).
-    `-d {delim}`       field delimiter for un-quoted output (default a
+    `-d {delim}`     field delimiter for un-quoted output (default a
                        single space).
 
     With no `-c` in the program, the whole (possibly edited) buffer is
@@ -2478,8 +2483,8 @@ VICE                                             *builtin-vice* *vice*
 
   In-place editing ~
 
-    `-i`, `--in-place`    write the transformed buffer back to each
-                          {file} rather than printing it.
+    `-i`, `--in-place`      write the transformed buffer back to each
+                            {file} rather than printing it.
     `--backup`            copy the original to `{file}.bak` first.
     `--backup-ext {ext}`  use {ext} instead of `bak`.
 
@@ -2487,20 +2492,28 @@ VICE                                             *builtin-vice* *vice*
 
   Examples:
 
-      `echo foo bar | vice -m 'w' -c 'e'`
-                          Skips past `foo` with `-m 'w'`, then slices `bar`
+      `echo foo bar | vice -m '2w' -c 'e'`
+                          Skips past `foo` with `-m '2w'`, then slices `bar`
                           into a field using `-c 'e'`. Output is 'bar'
 
-      `ls -l | vice -l -q --sep 'w' -c 'viW' -r 1:2 -c 'WEE' -c '$'`
-                          slice each line into SQR fields (the WORD columns,
-                          a multi-word date span, then the name), ready for
-                          the |quoted-streams| adapters
+      `vice -i -m '/TODO' -m 'dd' notes.txt`
+                          move to the first line containing 'TODO', then delete it
+                          editing the file in place.
 
-      `vice -i --backup -c '/TODO<CR>dd' notes.txt`
-                          delete the first `TODO` line, in place
-
-      `vice -i -m ':g/^$/d<CR>' file.txt`
+      `vice -i -m ':g/^$/d' file.txt`
                           delete all blank lines via `:g`, in place
+
+      `ls -l | vice -l -q --sep 'w' -c 'viW' -r 1:2 -c 'WEE' -c '$'`
+                          slice each line of `ls`'s output into quoted records.
+                          `--sep 'w'` runs `'w'` after each command, to position
+                          the cursor correctly for the next cut.
+                          the first 3 fields are captured using `-c viW -r 1:2`,
+                          then the whitespace-separated date is captured using
+                          `-c 'W2E'`, which moves to the start of the next word and
+                          captures to the end of the second word after that.
+                          The trailing filename is captured using `-c '$'`,
+                          which captures from the cursor to the end of the line.
+
 
   This is a `shed` extension; `bash` and `POSIX` do not provide it.
 

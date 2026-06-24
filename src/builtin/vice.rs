@@ -254,6 +254,7 @@ impl Vice {
     mut sink: impl FnMut(&str) -> ShResult<()>,
   ) -> ShResult<bool> {
     if prog.lines {
+      let mut emitted_line = false;
       let mut core = EditorCore::empty();
       for line in input.lines() {
         core.set_buffer(line);
@@ -261,9 +262,10 @@ impl Vice {
         if core.editor.search_failed() {
           continue;
         }
+        emitted_line = true;
         sink(&record)?;
       }
-      Ok(true)
+      Ok(emitted_line)
     } else {
       let mut core = EditorCore::headless(input);
       let record = Self::render(&mut core, prog, span)?;
