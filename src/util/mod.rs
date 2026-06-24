@@ -66,6 +66,16 @@ pub(super) fn scratch_buf() -> CompactString {
   CompactString::with_capacity(24)
 }
 
+pub(super) fn with_saved_status<F, T>(f: F) -> T
+where
+  F: FnOnce() -> T,
+{
+  let saved = Shed::get_status();
+  let res = f();
+  Shed::set_status(saved);
+  res
+}
+
 /// Given two things that implement Ord, make sure that the left is less than the right
 pub(super) fn ordered<T: Ord>(start: T, end: T) -> (T, T) {
   if start > end {

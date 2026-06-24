@@ -188,11 +188,14 @@ impl StatusLine {
         s.right_string.clone(),
       )
     });
-    let saved_status = state::Shed::get_status();
-    let left = expand_prompt(&left_raw).unwrap_or(left_raw.clone());
-    let middle = expand_prompt(&middle_raw).unwrap_or(middle_raw.clone());
-    let right = expand_prompt(&right_raw).unwrap_or(right_raw.clone());
-    state::Shed::set_status(saved_status);
+
+    let (left, middle, right) = util::with_saved_status(|| {
+      (
+        expand_prompt(&left_raw).unwrap_or(left_raw.clone()),
+        expand_prompt(&middle_raw).unwrap_or(middle_raw.clone()),
+        expand_prompt(&right_raw).unwrap_or(right_raw.clone()),
+      )
+    });
 
     Self {
       left,
@@ -269,21 +272,16 @@ impl Prompt {
       return Self::default();
     };
     // PS1 expansion may involve running commands (e.g., for \h or \W), which can modify shell state
-    let saved_status = state::Shed::get_status();
-
-    let Ok(ps1_expanded) = expand_prompt(&ps1_raw) else {
+    let Ok(ps1_expanded) = util::with_saved_status(|| expand_prompt(&ps1_raw)) else {
       return Self::default();
     };
     let psr_raw = try_var!("PSR");
     let psr_expanded = psr_raw
       .clone()
-      .map(|r| expand_prompt(&r))
+      .map(|r| util::with_saved_status(|| expand_prompt(&r)))
       .transpose()
       .ok()
       .flatten();
-
-    // Restore shell state after prompt expansion, since it may have been modified by command substitutions in the prompt
-    state::Shed::set_status(saved_status);
 
     autocmd!(PostPrompt);
 
@@ -301,10 +299,7 @@ impl Prompt {
     &self.ps1_expanded
   }
   fn refresh_now(&mut self) {
-    let saved_status = state::Shed::get_status();
-    *self = Self::new();
-    state::Shed::set_status(saved_status);
-    self.dirty = false;
+    *self = util::with_saved_status(Self::new);
   }
 
   pub fn refresh(&mut self) {
@@ -1136,17 +1131,20 @@ impl ShedLine {
 
         let cmds = Shed::logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
         Shed::notify_autocmd(AutoCmdKind::OnCompletionStart);
-        let saved_status = Shed::get_status();
         let mut res = LoopAction::Continue;
 
-        for cmd in cmds {
-          if let LoopAction::Break =
-            run_prompt_command(cmd.command().to_string(), Some(Redraw::Partial), None).ok()?
-          {
-            res = LoopAction::Break;
-            break;
+        util::with_saved_status(|| -> ShResult<()> {
+          for cmd in cmds {
+            if let LoopAction::Break =
+              run_prompt_command(cmd.command().to_string(), Some(Redraw::Partial), None)?
+            {
+              res = LoopAction::Break;
+              break;
+            }
           }
-        }
+          Ok(())
+        })
+        .ok()?;
 
         scopeguard::defer! {
           Shed::vars_mut(|v| {
@@ -1157,7 +1155,6 @@ impl ShedLine {
         }
 
         let cancelled = res == LoopAction::Break || Shed::get_status() != 0;
-        Shed::set_status(saved_status);
         if cancelled {
           autocmd!(OnCompletionCancel)
         } else if comp.is_active() {

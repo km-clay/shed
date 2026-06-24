@@ -1,7 +1,7 @@
 use nix::sys::stat;
 use scopeguard::guard;
 
-use crate::{HashSet, try_var, var};
+use crate::{HashSet, try_var, util, var};
 
 use super::{
   super::state::scopes::ScopeStack,
@@ -17,16 +17,16 @@ use super::{
 /// Drop variables registered by `local`
 fn guard_drop(_: ()) {
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
-  let saved_status = Shed::get_status();
 
-  while let Some(cmd) = deferred.pop() {
-    let mut dispatcher = Dispatcher::new(vec![cmd], "defer".into());
-    if let Err(e) = dispatcher.begin_dispatch() {
-      e.print_error();
+  util::with_saved_status(|| {
+    while let Some(cmd) = deferred.pop() {
+      let mut dispatcher = Dispatcher::new(vec![cmd], "defer".into());
+      if let Err(e) = dispatcher.begin_dispatch() {
+        e.print_error();
+      }
     }
-  }
+  });
 
-  Shed::set_status(saved_status);
   Shed::vars_mut(ScopeStack::ascend);
 }
 

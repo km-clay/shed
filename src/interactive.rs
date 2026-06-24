@@ -347,7 +347,6 @@ fn shed_loop_iter(
           // IdleTimeout autocmds execute in an interactive context.
           let cmds = Shed::logic(|l| l.get_autocmds(AutoCmdKind::OnIdleTimeout));
           Shed::notify_autocmd(AutoCmdKind::OnIdleTimeout);
-          let saved_status = Shed::get_status();
           let idle_secs = Shed::term_mut(Terminal::last_input_elapsed)
             .as_secs_f64()
             .round() as u64;
@@ -355,18 +354,16 @@ fn shed_loop_iter(
           let res = with_vars(
             [("IDLE_SECONDS".to_string(), idle_secs.to_string())],
             || -> ShResult<LoopAction> {
-              scopeguard::defer! {
-                Shed::set_status(saved_status);
-              }
-
-              for cmd in cmds {
-                if let LoopAction::Break =
-                  run_prompt_command(cmd.command().to_string(), None, None)?
-                {
-                  return Ok(LoopAction::Break);
+              util::with_saved_status(|| {
+                for cmd in cmds {
+                  if let LoopAction::Break =
+                    run_prompt_command(cmd.command().to_string(), None, None)?
+                  {
+                    return Ok(LoopAction::Break);
+                  }
                 }
-              }
-              Ok(LoopAction::Continue)
+                Ok(LoopAction::Continue)
+              })
             },
           );
 

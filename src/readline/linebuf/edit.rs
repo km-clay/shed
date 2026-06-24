@@ -286,6 +286,7 @@ mod depth_levels_tests {
   // These were validated against the parser's `block_depth` before that field
   // was retired; this pins the token-based derivation against regressions.
   #[rustfmt::skip]
+  #[expect(clippy::type_complexity)]
   const BATTERY: &[(&str, &str, &[(usize, usize)])] = &[
     ("if 1-line", "if true; then\n  echo hi\nfi", &[(0,1),(1,1),(1,0)]),
     ("if multiline", "if true\nthen\n  echo hi\nfi", &[(0,1),(1,1),(1,1),(1,0)]),

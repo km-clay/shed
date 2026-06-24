@@ -483,16 +483,17 @@ macro_rules! autocmd {
   ($kind:ident) => {{
     let post_cmds =
       $crate::state::Shed::logic(|l| l.get_autocmds($crate::state::logic::AutoCmdKind::$kind));
-    let saved_status = $crate::state::Shed::get_status();
-    $crate::state::Shed::notify_autocmd($crate::state::logic::AutoCmdKind::$kind);
-    for cmd in post_cmds {
-      if let Err(e) =
-        $crate::eval::execute::exec_nonint(cmd.command().to_string(), Some("autocmd".into()))
-      {
-        e.print_error();
+
+    $crate::util::with_saved_status(|| {
+      $crate::state::Shed::notify_autocmd($crate::state::logic::AutoCmdKind::$kind);
+      for cmd in post_cmds {
+        if let Err(e) =
+          $crate::eval::execute::exec_nonint(cmd.command().to_string(), Some("autocmd".into()))
+        {
+          e.print_error();
+        }
       }
-    }
-    $crate::state::Shed::set_status(saved_status);
+    })
   }};
 }
 

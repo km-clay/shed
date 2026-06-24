@@ -685,11 +685,11 @@ impl Dispatcher {
     let argv = prepare_argv(argv).try_blame(blame.clone())?;
     defer! {
       if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Return)) {
-        let saved_status = state::Shed::get_status();
-        if let Err(e) = exec_nonint(trap, Some("trap RETURN".into())) {
-          e.print_error();
-        }
-        state::Shed::set_status(saved_status);
+        util::with_saved_status(|| {
+          if let Err(e) = exec_nonint(trap, Some("trap RETURN".into())) {
+            e.print_error();
+          }
+        })
       }
     }
 
@@ -1893,9 +1893,7 @@ pub fn check_err(
 ) -> ShResult<()> {
   if state::Shed::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
     if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Error)) {
-      let saved_status = state::Shed::get_status();
-      exec_nonint(trap, Some("trap ERR".into()))?;
-      state::Shed::set_status(saved_status);
+      util::with_saved_status(|| exec_nonint(trap, Some("trap ERR".into())))?;
     }
     if Shed::shopts(|o| o.set.errexit) {
       if let Some(mut e) = err {
