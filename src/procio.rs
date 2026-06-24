@@ -781,10 +781,26 @@ pub(super) fn capture_command(
       });
 
       if let Some(pipe) = stdin_write {
-        write(pipe.as_fd(), stdin.unwrap().as_bytes())?;
+        let bytes = stdin.unwrap().as_bytes();
+        let mut written = 0;
+        while written < bytes.len() {
+          match write(pipe.as_fd(), &bytes[written..]) {
+            Ok(0) => break,
+            Ok(n) => written += n,
+            Err(Errno::EINTR) => {
+              if signal::sigint_pending() {
+                state::Shed::set_status(130);
+                break;
+              }
+            }
+            Err(e) => {
+              return Err(sherr!(InternalErr, "error writing to stdin pipe: {e}"));
+            }
+          }
+        }
       }
 
-      let captured = read_fd_to_string(rpipe)?.trim_end().to_string();
+      let captured = read_fd_to_string(rpipe)?.to_string();
 
       let status = loop {
         match waitpid(child, Some(WtFlag::WUNTRACED)) {
@@ -1041,14 +1057,6 @@ pub mod tests {
     let _g = TestGuard::new();
     let out = capture_command("echo hello", None, None).unwrap();
     assert_eq!(out, "hello");
-  }
-
-  #[test]
-  fn capture_strips_trailing_newlines() {
-    let _g = TestGuard::new();
-    // The function does trim_end on the captured output.
-    let out = capture_command("printf 'foo\\n\\n\\n'", None, None).unwrap();
-    assert_eq!(out, "foo");
   }
 
   #[test]
