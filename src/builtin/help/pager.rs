@@ -398,8 +398,8 @@ impl HelpPager {
   }
 
   pub fn max_scroll(&self) -> usize {
-    let t_rows = Shed::term(Terminal::t_rows);
-    self.content().lines().count().saturating_sub(t_rows)
+    let content_rows = Shed::term(Terminal::t_rows).saturating_sub(1);
+    self.content().lines().count().saturating_sub(content_rows)
   }
 
   pub fn search(&mut self, jump: bool) {
@@ -612,9 +612,9 @@ impl HelpPager {
         self.scroll_offset = 0;
       }
       PagerCmd::BottomOfPage => {
-        let rows = Shed::term(Terminal::t_rows);
+        let content_rows = Shed::term(Terminal::t_rows).saturating_sub(1);
         let n_lines = self.content().lines().count();
-        self.scroll_offset = n_lines.saturating_sub(rows);
+        self.scroll_offset = n_lines.saturating_sub(content_rows);
       }
     }
   }
