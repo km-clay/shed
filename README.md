@@ -21,7 +21,6 @@
     - [Vi mode](#vi-mode)
     - [Ex mode](#ex-mode)
   - [Interactive Documentation](#interactive-documentation)
-  - [Fuzzy Tab Completion/History Search](#fuzzy-tab-completionhistory-search)
   - [Keymaps](#keymaps)
   - [Autocmds](#autocmds)
   - [Command History](#command-history)
@@ -94,17 +93,6 @@ help cd         # opens the builtins page and jumps to the 'cd' entry
 ```
 
 Additionally, the help pages can be reached using `ex mode` like `:h some-topic`. This allows you to open the pager without losing the command that you're currently editing. Really convenient for when you forget what the `tar` flags do.
-
----
-
-### Fuzzy Tab Completion/History Search
-
-`shed` comes with fuzzy completion and history searching out of the box.
-<p align="center">
-	<img width="49%" alt="shed_comp" src="https://github.com/user-attachments/assets/489786e3-c925-433a-b905-a7b7ef1f9368" />
-	<img width="49%" alt="shed_hist" src="https://github.com/user-attachments/assets/5f07bcc7-0e3d-41ab-baae-59702a278969" />
-</p>
-Can be enabled using `shopt prompt.complete_style=fuzzy`.
 
 ---
 
