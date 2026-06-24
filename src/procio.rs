@@ -1056,7 +1056,7 @@ pub mod tests {
   fn capture_simple_echo() {
     let _g = TestGuard::new();
     let out = capture_command("echo hello", None, None).unwrap();
-    assert_eq!(out, "hello");
+    assert_eq!(out, "hello\n");
   }
 
   #[test]
@@ -1088,7 +1088,7 @@ pub mod tests {
     let _g = TestGuard::new();
     // Multi-statement: prints output then fails.
     let out = capture_command("echo before-fail; false", None, None).unwrap();
-    assert_eq!(out, "before-fail");
+    assert_eq!(out, "before-fail\n");
     assert_ne!(state::Shed::get_status(), 0);
   }
 
@@ -1111,7 +1111,7 @@ pub mod tests {
       return;
     }
     let out = capture_command("cat", Some("line1\nline2\nline3\n"), None).unwrap();
-    assert_eq!(out, "line1\nline2\nline3");
+    assert_eq!(out, "line1\nline2\nline3\n");
   }
 
   #[test]
@@ -1120,7 +1120,7 @@ pub mod tests {
     // The child's `read` builtin should successfully consume the
     // stdin we feed.
     let out = capture_command("read x; echo \"got=$x\"", Some("hello world\n"), None).unwrap();
-    assert_eq!(out, "got=hello world");
+    assert_eq!(out, "got=hello world\n");
   }
 
   // Note: there's no `no-stdin → child sees EOF` test because TestGuard
