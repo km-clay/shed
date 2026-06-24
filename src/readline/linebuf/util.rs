@@ -4,7 +4,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
 use crate::readline::linebuf::HighlightCache;
-use crate::readline::linebuf::edit::check_levels_per_row;
+use crate::readline::linebuf::edit::{
+  depth_levels_from_tokens, depth_levels_via_ctx, parse_failed_strict,
+};
 
 use super::{
   CharClass, DEFAULT_VIEWPORT_HEIGHT, Edit, Grapheme, Line, Lines, MotionKind, Pos, SelectMode,
@@ -408,23 +410,27 @@ impl super::LineBuf {
 
     if is_closer {
       let (start, end) = self.indent_levels_for_row(pos.row);
-      let parse_failed = self.parse_status;
-      let delta = if start > end {
-        start - end
+      let is_middle = lex::MIDDLES.contains(&trimmed);
+      // Align the line with its opener: a real closer pops a block (end < start)
+      // and lands at end; a middle (else/elif) is depth-neutral but renders one
+      // level out. The absolute target makes a trailing space idempotent.
+      let target = if is_middle && start > 0 {
+        Some(start - 1)
+      } else if !is_middle && end < start {
+        Some(end)
       } else {
-        // if the parse failed and we are in a block, dedent.
-        // meant to dedent closers like 'fi' if typed after an empty body.
-        // FIXME: this is a hack. a parser-level solution would be cleaner.
-        usize::from(parse_failed && start > 0)
+        None
       };
-      if delta > 0 {
+
+      if let Some(target) = target {
         let line = self.cur_line_mut();
-        for _ in 0..delta {
-          if line.0.first().is_some_and(|c| c.as_char() == Some('\t')) {
-            line.0.remove(0);
-          } else {
-            break;
-          }
+        let current = line
+          .0
+          .iter()
+          .take_while(|c| c.as_char() == Some('\t'))
+          .count();
+        for _ in target..current {
+          line.0.remove(0);
         }
       }
     }
@@ -794,17 +800,24 @@ impl super::LineBuf {
   pub fn cursor_indent_level(&mut self) -> (usize, bool) {
     let (to_cursor, _) = self.lines.clone().split_lines(self.cursor.pos);
     let raw = to_cursor.join();
-    let (levels, failed) = check_levels_per_row(&raw);
-    let depth = levels.last().copied().unwrap_or_default().1;
-    (depth, failed)
+    let depth = depth_levels_via_ctx(&raw)
+      .last()
+      .copied()
+      .unwrap_or_default()
+      .1;
+    (depth, parse_failed_strict(&raw))
   }
   pub fn indent_levels(&mut self) -> &[(usize, usize)] {
-    let has_cache = self.indent_cache.is_some();
-    if !has_cache {
+    if self.indent_cache.is_none() {
       let joined = self.to_string();
-      let (levels, status) = check_levels_per_row(&joined);
+      // Reuse the highlighter's token cache (rebuilt only on a buffer change).
+      self.refresh_highlight_cache(&joined);
+      let levels = self
+        .highlight_cache
+        .as_ref()
+        .map(|c| depth_levels_from_tokens(&c.tokens, &joined))
+        .unwrap_or_default();
       self.indent_cache = Some(levels);
-      self.parse_status = status;
     }
     self.indent_cache.as_ref().unwrap()
   }
@@ -1466,5 +1479,72 @@ pub(super) fn find_diff_range(old: &str, new: &str) -> Diff {
     start: left,
     end_old: right_old,
     end_new: right_new,
+  }
+}
+
+#[cfg(test)]
+mod indent_tests {
+  use crate::readline::LineBuf;
+  use crate::tests::testutil::TestGuard;
+
+  fn last_line(buf: &LineBuf) -> String {
+    buf
+      .to_string()
+      .lines()
+      .last()
+      .unwrap_or_default()
+      .to_string()
+  }
+
+  #[test]
+  fn closer_dedent_is_idempotent() {
+    // Typing fi aligns it with if; a trailing space must not dedent it again.
+    let _g = TestGuard::new();
+    let mut buf = LineBuf::default();
+    buf.set_buffer("if true; then\n\techo\n\t");
+    buf.move_cursor_to_end();
+    buf.insert_str("fi");
+    assert_eq!(last_line(&buf), "fi", "fi should dedent to the if's level");
+
+    buf.move_cursor_to_end();
+    buf.insert_str(" ");
+    assert_eq!(
+      last_line(&buf),
+      "fi ",
+      "trailing space must not dedent again"
+    );
+
+    buf.move_cursor_to_end();
+    buf.insert_str(" ");
+    assert_eq!(
+      last_line(&buf),
+      "fi  ",
+      "still idempotent on further spaces"
+    );
+  }
+
+  #[test]
+  fn middle_keyword_dedents_one_level() {
+    let _g = TestGuard::new();
+    let mut buf = LineBuf::default();
+    buf.set_buffer("if true; then\n\techo\n\t");
+    buf.move_cursor_to_end();
+    buf.insert_str("else");
+    assert_eq!(last_line(&buf), "else", "else should align with if");
+  }
+
+  #[test]
+  fn stray_closer_does_not_dedent() {
+    // A } that closes no open brace shouldn't dedent.
+    let _g = TestGuard::new();
+    let mut buf = LineBuf::default();
+    buf.set_buffer("echo hi\n\t");
+    buf.move_cursor_to_end();
+    buf.insert_str("}");
+    assert_eq!(
+      last_line(&buf),
+      "\t}",
+      "a brace that closes nothing is left in place"
+    );
   }
 }

@@ -300,6 +300,7 @@ pub enum CtxTkRule {
   AssignmentLeft,
   AssignmentOp,
   AssignmentRight,
+  ArrayLiteral,
 
   Operator,
   Redirect,
@@ -897,19 +898,39 @@ fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
   let rhs_start = op_end;
   let rhs_end = span_start + raw.len();
   let rhs_span = Span::new(rhs_start..rhs_end, span.get_source());
-  let mut rhs_chars = rhs_text.char_indices().peekable();
-  let (_, rhs_sub) = scan_subspans(
-    &mut rhs_chars,
-    &rhs_span,
-    flags,
-    &ScanCtx::TOP_LEVEL,
-    TerminatorCtx::Eof,
-  );
 
-  let rhs_tk = CtxTk {
-    span: rhs_span,
-    class: CtxTkRule::AssignmentRight,
-    sub_tokens: rhs_sub,
+  let rhs_tk = if rhs_text.starts_with('(') {
+    let close_off = rhs_text.rfind(')').filter(|&c| c > 0);
+    let inner_end = close_off.map_or(rhs_text.len(), |c| c);
+    let inner_text = &rhs_text[1..inner_end];
+    let inner_span = Span::new((rhs_start + 1)..(rhs_start + inner_end), span.get_source());
+    let mut inner_chars = inner_text.char_indices().peekable();
+    let (_, inner) = scan_subspans(
+      &mut inner_chars,
+      &inner_span,
+      flags,
+      &ScanCtx::TOP_LEVEL,
+      TerminatorCtx::Eof,
+    );
+    CtxTk {
+      span: rhs_span,
+      class: CtxTkRule::ArrayLiteral,
+      sub_tokens: inner,
+    }
+  } else {
+    let mut rhs_chars = rhs_text.char_indices().peekable();
+    let (_, rhs_sub) = scan_subspans(
+      &mut rhs_chars,
+      &rhs_span,
+      flags,
+      &ScanCtx::TOP_LEVEL,
+      TerminatorCtx::Eof,
+    );
+    CtxTk {
+      span: rhs_span,
+      class: CtxTkRule::AssignmentRight,
+      sub_tokens: rhs_sub,
+    }
   };
 
   vec![lhs_tk, op_tk, rhs_tk]

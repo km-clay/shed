@@ -93,7 +93,8 @@ impl Palette {
       | CtxTkRule::Separator
       | CtxTkRule::ArithNumber
       | CtxTkRule::ParamArg
-      | CtxTkRule::AssignmentRight => self.argument,
+      | CtxTkRule::AssignmentRight
+      | CtxTkRule::ArrayLiteral => self.argument,
       CtxTkRule::ArgumentFile => {
         let range = tk.span().range();
         let inclusive = range.start..=range.end;

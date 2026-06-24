@@ -490,7 +490,6 @@ pub(crate) struct LexStream {
   pos: Pos,
   pub name: Rc<str>,
   quote_state: QuoteState,
-  in_array: bool,
   brc_grp_depth: usize,
   brc_grp_start: Option<usize>,
   subsh_depth: usize,
@@ -511,7 +510,6 @@ impl LexStream {
       pos_offset: 0,
       pos: Pos::new(0, 0),
       quote_state: QuoteState::default(),
-      in_array: false,
       brc_grp_depth: 0,
       brc_grp_start: None,
       subsh_depth: 0,
@@ -551,9 +549,6 @@ impl LexStream {
   }
   pub fn in_subsh(&self) -> bool {
     self.subsh_depth > 0
-  }
-  pub fn in_array(&self) -> bool {
-    self.in_array
   }
   pub fn update_pos(&mut self) {
     if self.cursor < self.pos_offset {
@@ -1167,7 +1162,6 @@ impl LexStream {
         pos += 1; // '('
                   // looks like an array
         let mut found_end = false;
-        self.in_array = true;
         match_loop!(chars.next() => arr_ch, {
           '\\' => {
             pos += 1;
@@ -1197,9 +1191,6 @@ impl LexStream {
             pos..pos + 1,
             "Unclosed array assignment",
           ));
-        }
-        if found_end {
-          self.in_array = false;
         }
       }
       ')' => {

@@ -167,6 +167,7 @@ impl CompStrat {
       CtxTkRule::InvalidExCommand | CtxTkRule::ValidExCommand => Self::ExCommand { prefix },
 
       CtxTkRule::AssignmentRight
+      | CtxTkRule::ArrayLiteral
       | CtxTkRule::CmdSub
       | CtxTkRule::BacktickSub
       | CtxTkRule::ProcSubIn
@@ -241,7 +242,8 @@ impl CompStrat {
       | CtxTkRule::DoubleString
       | CtxTkRule::SingleString
       | CtxTkRule::DollarString
-      | CtxTkRule::AssignmentRight => Self::Argument {
+      | CtxTkRule::AssignmentRight
+      | CtxTkRule::ArrayLiteral => Self::Argument {
         path: String::new(),
       },
 

@@ -263,7 +263,6 @@ impl ParseStream {
 
       // Consume the closing ')'.
       extend_span!(span, self.next_tk().unwrap().span);
-      self.block_depth += 1;
 
       let mut found_end = false;
       while self.check_separator() {
@@ -271,7 +270,6 @@ impl ParseStream {
         if sep.has_double_semi() {
           extend_span!(span, self.next_tk().unwrap().span);
           found_end = true;
-          self.block_depth -= 1;
           break;
         }
         extend_span!(span, self.next_tk().unwrap().span);
@@ -294,7 +292,6 @@ impl ParseStream {
 
         if trailing_dbl_semi {
           found_end = true;
-          self.block_depth -= 1;
         }
       }
 
@@ -425,12 +422,8 @@ impl ParseStream {
     extend_span!(span, self.next_tk().unwrap().span);
 
     loop {
-      self.block_depth += 1;
       let prefix_keywrd = if cond_nodes.is_empty() { "if" } else { "elif" };
       let Some(mut cond) = self.parse_cmd_list()? else {
-        if prefix_keywrd == "elif" {
-          self.block_depth -= 1;
-        }
         bail!(self, span, "Expected a command after '{prefix_keywrd}'");
       };
       extend_span!(span, cond.get_span());
@@ -459,7 +452,6 @@ impl ParseStream {
 
       self.catch_separator(&mut span);
       if self.check_keyword("elif") {
-        self.block_depth -= 1;
         extend_span!(span, self.next_tk().unwrap().span);
         self.catch_separator(&mut span);
       } else {
@@ -469,25 +461,13 @@ impl ParseStream {
 
     self.catch_separator(&mut span);
     if self.check_keyword("else") {
-      self.block_depth -= 1;
       extend_span!(span, self.next_tk().unwrap().span);
-      let mut already_added = false;
-
-      if self.check_separator() || self.next_tk_is_some() {
-        already_added = true;
-        self.block_depth += 1;
-      }
-
       self.catch_separator(&mut span);
 
       let Some(body) = self.parse_cmd_list()? else {
         bail!(self, span, "Expected a command after 'else'");
       };
       else_block = Some(body);
-
-      if !already_added {
-        self.block_depth += 1;
-      }
     }
 
     self.catch_separator(&mut span);
@@ -495,7 +475,6 @@ impl ParseStream {
       bail!(self, span, "Expected 'fi' after if statement");
     }
     extend_span!(span, self.next_tk().unwrap().span);
-    self.block_depth -= 1;
 
     self.parse_redir(&mut redirs, &mut span)?;
 
@@ -701,8 +680,6 @@ impl ParseStream {
       return Ok(None);
     }
 
-    self.block_depth += 1;
-
     let mut span: Option<Span> = None;
     let mut redirs = vec![];
 
@@ -718,7 +695,6 @@ impl ParseStream {
     loop {
       if self.check_keyword("catch") {
         if body.is_empty() {
-          self.block_depth -= 1;
           bail!(
             self,
             span,
@@ -754,8 +730,6 @@ impl ParseStream {
         );
       }
     }
-
-    self.block_depth -= 1;
 
     let mut body = Box::new(node!(
       self,
@@ -810,8 +784,6 @@ impl ParseStream {
 
       return Ok(Some(node));
     }
-
-    self.block_depth += 1;
 
     extend_span!(span, self.next_tk().unwrap().span); // consume 'do'
 

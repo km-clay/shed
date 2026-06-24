@@ -109,7 +109,6 @@ pub struct LineBuf {
 
   concat_points: VecDeque<Pos>,
   indent_cache: Option<Vec<(usize, usize)>>,
-  parse_status: bool,
 
   open_file: Option<PathBuf>,
 
@@ -152,7 +151,6 @@ impl Default for LineBuf {
       kill_ring: KillRing::new(),
       concat_points: VecDeque::new(),
       indent_cache: None,
-      parse_status: true,
       highlight_cache: None,
     }
   }

@@ -44,9 +44,6 @@ pub(crate) struct ParsedSrc {
   pub lex_flags: LexFlags,
   pub parse_flags: ParseFlags,
   pub context: LabelCtx,
-
-  /// Not used internally, used mainly for auto-indent in the line editor. Mirrors the field on `ParseStream`
-  pub block_depth: usize,
 }
 
 impl ParsedSrc {
@@ -63,7 +60,6 @@ impl ParsedSrc {
       lex_flags: LexFlags::empty(),
       parse_flags: ParseFlags::empty(),
       context: VecDeque::new().into(),
-      block_depth: 0,
     }
   }
   pub fn with_name(mut self, name: Rc<str>) -> Self {
@@ -103,32 +99,19 @@ impl ParsedSrc {
       }
     }
 
-    let in_array = stream.in_array();
-
     let mut nodes = vec![];
     let parser = ParseStream::new(tokens, self.context.clone()).with_flags(self.parse_flags);
 
     for parse_result in parser {
       match parse_result {
-        Ok(node) => {
-          self.block_depth = 0;
-          nodes.push(node);
-        }
-        Err((depth, error)) => {
-          self.block_depth = depth;
+        Ok(node) => nodes.push(node),
+        Err(error) => {
           if self.parse_flags.contains(ParseFlags::ERR_RETURN) {
-            if in_array {
-              self.block_depth += 1;
-            }
             return Err(vec![error]);
           }
           errors.push(error);
         }
       }
-    }
-
-    if in_array {
-      self.block_depth += 1;
     }
 
     if !errors.is_empty() {
@@ -168,9 +151,6 @@ struct ParseStream {
   pub cursor: usize,
   pub context: LabelCtx,
   pub flags: ParseFlags,
-
-  /// Not used internally, used mainly for auto-indent in the line editor
-  pub block_depth: usize,
 }
 
 impl Debug for ParseStream {
@@ -178,7 +158,6 @@ impl Debug for ParseStream {
     f.debug_struct("ParseStream")
       .field("tokens", &self.tokens)
       .field("cursor", &self.cursor)
-      .field("block_depth", &self.block_depth)
       .finish_non_exhaustive()
   }
 }
@@ -193,7 +172,6 @@ impl ParseStream {
       tokens,
       cursor: 0,
       context,
-      block_depth: 0,
       flags: ParseFlags::empty(),
     }
   }
@@ -264,61 +242,31 @@ impl ParseStream {
   /// left-recursion issues in `self.parse_pipeln()`
   fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
     stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
-      if !check_pipelines {
-        self.block_depth += 1;
+      if check_pipelines {
+        try_match!(self.parse_pipeln()?);
+        return Ok(None);
       }
 
-      // You will live to see man made horrors beyond your comprehension
-      let result = || -> ShResult<Option<Node>> {
-        if check_pipelines {
-          try_match!(self.parse_pipeln()?);
-          Ok(None)
-        } else {
-          try_match!(self.parse_func_def()?);
-          try_match!(self.parse_brc_grp(false /* from_func_def */)?);
-          try_match!(self.parse_subsh()?);
-          try_match!(self.parse_case()?);
-          try_match!(self.parse_loop()?);
-          try_match!(self.parse_for()?);
-
-          // these aren't nested contexts
-          // so we decrement the depth and descend into
-          // yet another immediately-invoked closure
-          // please stabilize the try block my rust developers!!
-          self.block_depth -= 1;
-          let r = || -> ShResult<Option<Node>> {
-            try_match!(self.parse_if()?);
-            try_match!(self.parse_negate()?);
-            try_match!(self.parse_time()?);
-            try_match!(self.parse_defer()?);
-            try_match!(self.parse_try()?);
-            try_match!(self.parse_func_keyword()?);
-            try_match!(self.parse_arith()?);
-            try_match!(self.parse_cmd()?);
-            Ok(None)
-          }()?;
-          self.block_depth += 1;
-
-          Ok(r)
-        }
-      }()?;
-
-      if !check_pipelines {
-        self.block_depth -= 1;
-      }
-
-      Ok(result)
+      try_match!(self.parse_func_def()?);
+      try_match!(self.parse_brc_grp(false /* from_func_def */)?);
+      try_match!(self.parse_subsh()?);
+      try_match!(self.parse_case()?);
+      try_match!(self.parse_loop()?);
+      try_match!(self.parse_for()?);
+      try_match!(self.parse_if()?);
+      try_match!(self.parse_negate()?);
+      try_match!(self.parse_time()?);
+      try_match!(self.parse_defer()?);
+      try_match!(self.parse_try()?);
+      try_match!(self.parse_func_keyword()?);
+      try_match!(self.parse_arith()?);
+      try_match!(self.parse_cmd()?);
+      Ok(None)
     })
   }
   fn parse_compound(&mut self) -> ShResult<Option<Node>> {
-    // parse only a compound command.
-    // used by function definition
-    // because any compound command is a valid
-    // function body.
-    //
-    // also we don't increment block_depth here because it
-    // already happened in parse_block() -> parse_func_def()
-
+    // parse only a compound command, used by function definitions since any
+    // compound command is a valid function body.
     let result = || -> ShResult<Option<Node>> {
       try_match!(self.parse_brc_grp(true /* from_func_def */)?);
       try_match!(self.parse_subsh()?);
@@ -345,7 +293,7 @@ impl ParseStream {
 }
 
 impl Iterator for ParseStream {
-  type Item = Result<Node, (usize, ShErr)>; // (block_depth and error)
+  type Item = Result<Node, ShErr>;
   fn next(&mut self) -> Option<Self::Item> {
     // Empty token vector or only Soi/Eoi tokens, nothing to do
     if self.is_empty() && self.len() == 1 && self.tokens().last().unwrap().class == TkRule::Eoi {
@@ -365,10 +313,7 @@ impl Iterator for ParseStream {
     match result {
       Ok(Some(node)) => Some(Ok(node)),
       Ok(None) => None,
-      Err(e) => {
-        let block_depth = self.block_depth;
-        Some(Err((block_depth, e)))
-      }
+      Err(e) => Some(Err(e)),
     }
   }
 }
