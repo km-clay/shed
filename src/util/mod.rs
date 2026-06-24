@@ -76,6 +76,36 @@ where
   res
 }
 
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+pub(super) fn base64_encode(buf: &[u8]) -> String {
+  let mut out = String::with_capacity(buf.len().div_ceil(3) * 4);
+
+  for chunk in buf.chunks(3) {
+    let b = [
+      chunk[0],
+      *chunk.get(1).unwrap_or(&0),
+      *chunk.get(2).unwrap_or(&0),
+    ];
+    let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | (b[2] as u32);
+
+    out.push(B64[(n >> 18 & 63) as usize] as char);
+    out.push(B64[(n >> 12 & 63) as usize] as char);
+    out.push(if chunk.len() > 1 {
+      B64[(n >> 6 & 63) as usize] as char
+    } else {
+      '='
+    });
+    out.push(if chunk.len() > 2 {
+      B64[(n & 63) as usize] as char
+    } else {
+      '='
+    });
+  }
+
+  out
+}
+
 /// Given two things that implement Ord, make sure that the left is less than the right
 pub(super) fn ordered<T: Ord>(start: T, end: T) -> (T, T) {
   if start > end {

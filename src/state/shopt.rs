@@ -252,10 +252,6 @@ pub(crate) struct ShOptLine {
   /// Whether to suggest commands from history as commands are typed
   #[default(true)]
   pub auto_suggest: bool,
-
-  /// A command to use when text is yanked into the '+' register
-  #[default(String::new())]
-  pub clipboard_cmd: String,
 }
 
 #[derive(Clone, Debug, ShOptGroup)]

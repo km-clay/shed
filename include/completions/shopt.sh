@@ -114,7 +114,6 @@ _shopt_comp() {
       tab_width
       auto_indent
       auto_suggest
-      clipboard_cmd
     )
     local line_desc=(
       "whether enter breaks a new line on incomplete input, or submits the command as is"
@@ -125,7 +124,6 @@ _shopt_comp() {
       "visual width of tab characters in the line editor"
       "indentation level is tracked and maintained automatically"
       "the line editor will suggest similar commands from your history or tab completion as you type"
-      "the command to use with the '+' register to write to the system clipboard"
     )
     local set=(
       hashall

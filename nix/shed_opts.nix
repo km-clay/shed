@@ -203,11 +203,6 @@
                   default = true;
                   description = "Whether to suggest commands from history as commands are typed";
                 };
-                clipboard_cmd = lib.mkOption {
-                  type = lib.types.str;
-                  default = "";
-                  description = "A command to use when text is yanked into the '+' register";
-                };
               };
             };
             default = {};

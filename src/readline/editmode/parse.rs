@@ -577,7 +577,7 @@ impl ViParser {
       return RegisterName::default();
     };
     match reg_name {
-      'a'..='z' | 'A'..='Z' => RegisterName::new(Some(reg_name)),
+      'a'..='z' | 'A'..='Z' | '+' | '*' => RegisterName::new(Some(reg_name)),
       _ => RegisterName::default(),
     }
   }

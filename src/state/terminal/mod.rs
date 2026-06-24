@@ -38,6 +38,11 @@ use nix::{
   unistd::{Pid, getpgrp, isatty, tcsetpgrp, write},
 };
 
+use crate::{
+  status_msg,
+  util::{base64_encode, format_size},
+};
+
 use super::{
   Pos, ShErr, ShErrKind, ShResult, Shed,
   keys::{self, KeyEvent},
@@ -672,6 +677,25 @@ impl Terminal {
     }
 
     self.flush()?;
+    Ok(())
+  }
+
+  pub fn emit_osc_copy(&mut self, primary: bool, buf: &str) -> ShResult<()> {
+    let sel = if primary { "p" } else { "c" };
+    let encoded = base64_encode(buf.as_bytes());
+
+    if encoded.len() > (1024 * 75) {
+      // the limit for these is 75kb
+      status_msg!(
+        "clipboard copy failed: buffer too large ({})",
+        format_size(encoded.len() as u64)
+      );
+      return Ok(());
+    }
+
+    write!(self, "\x1b]52;{sel};{encoded}\x1b\\")?;
+    self.flush()?;
+
     Ok(())
   }
 

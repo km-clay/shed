@@ -2,7 +2,15 @@ use std::{cell::RefCell, fmt::Display};
 
 use itertools::Itertools;
 
-use crate::{HashMap, readline::linebuf::MotionKind, state::vars::VarStr, util};
+use crate::{
+  HashMap, Shed,
+  procio::capture_command,
+  readline::linebuf::MotionKind,
+  sherr,
+  state::{meta::UtilKind, util::which_util, vars::VarStr},
+  status_msg, try_var,
+  util::{self, ShErr},
+};
 
 use super::{
   super::keys::KeyEvent,
@@ -36,23 +44,15 @@ pub fn restore_registers() {
 }
 
 pub(crate) fn read_register(ch: Option<char>) -> Option<RegisterContent> {
-  REGISTERS.with(|regs| regs.borrow().get_reg(ch).map(|r| r.content().clone()))
+  REGISTERS.with(|regs| regs.borrow().read(ch))
 }
 
 pub(crate) fn write_register(ch: Option<char>, buf: RegisterContent) {
-  REGISTERS.with(|regs| {
-    if let Some(r) = regs.borrow_mut().get_reg_mut(ch) {
-      r.write(buf);
-    }
-  });
+  REGISTERS.with(|regs| regs.borrow_mut().write(ch, buf));
 }
 
 pub(crate) fn append_register(ch: Option<char>, buf: RegisterContent) {
-  REGISTERS.with(|regs| {
-    if let Some(r) = regs.borrow_mut().get_reg_mut(ch) {
-      r.append(buf);
-    }
-  });
+  REGISTERS.with(|regs| regs.borrow_mut().append(ch, buf));
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -155,8 +155,158 @@ impl Display for RegisterContent {
   }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum ClipboardProvider {
+  WlCopy,
+  Wayclip,
+  Xsel,
+  Xclip,
+  Tmux,
+  Termux,
+  PbCopy,
+  Osc52, // ...
+}
+
+impl Default for ClipboardProvider {
+  fn default() -> Self {
+    Self::detect()
+  }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum Selection {
+  Primary,
+  Clipboard,
+}
+
+impl TryFrom<char> for Selection {
+  type Error = ShErr;
+  fn try_from(value: char) -> Result<Self, Self::Error> {
+    match value {
+      '*' => Ok(Self::Primary),
+      '+' => Ok(Self::Clipboard),
+      _ => Err(sherr!(ParseErr, "Invalid selection register: {value}")),
+    }
+  }
+}
+
+fn wayland_set() -> bool {
+  try_var!("WAYLAND_DISPLAY").is_some()
+}
+
+fn display_set() -> bool {
+  try_var!("DISPLAY").is_some()
+}
+
+fn tmux_set() -> bool {
+  try_var!("TMUX").is_some()
+}
+
+fn exists(cmd: &str) -> bool {
+  which_util(cmd).is_some_and(|u| matches!(u.kind(), UtilKind::Command(_)))
+}
+
+impl ClipboardProvider {
+  pub fn detect() -> Self {
+    if exists("pbcopy") {
+      return Self::PbCopy;
+    }
+
+    if wayland_set() {
+      if exists("wl-copy") {
+        return Self::WlCopy;
+      }
+      if exists("wayclip") {
+        return Self::Wayclip;
+      }
+    }
+
+    if display_set() {
+      if exists("xsel") {
+        return Self::Xsel;
+      }
+      if exists("xclip") {
+        return Self::Xclip;
+      }
+    }
+
+    if exists("termux-clipboard-set") {
+      return Self::Termux;
+    }
+
+    if tmux_set() && exists("tmux") {
+      return Self::Tmux;
+    }
+
+    Self::Osc52
+  }
+
+  pub fn copy(&self, sel: Selection, content: &RegisterContent) {
+    let text = content.to_string();
+    match self.copy_argv(sel) {
+      Some(argv) => {
+        let res = util::with_saved_status(|| {
+          capture_command(argv, Some(&text), Some("clipboard copy".into()))
+        });
+
+        if let Err(e) = res {
+          status_msg!("clipboard copy failed: {e}");
+        }
+      }
+      None => {
+        Shed::term_mut(|t| t.emit_osc_copy(matches!(sel, Selection::Primary), &text)).ok();
+        //emit osc52
+      }
+    }
+  }
+
+  pub fn paste(&self, sel: Selection) -> Option<RegisterContent> {
+    let argv = self.paste_argv(sel)?;
+    let out =
+      util::with_saved_status(|| capture_command(argv, None, Some("clipboard paste".into())).ok())?;
+
+    Some(RegisterContent::Span(Lines::to_lines(&out).into_vec()))
+  }
+
+  pub fn copy_argv(&self, sel: Selection) -> Option<&'static str> {
+    Some(match (self, sel) {
+      (Self::WlCopy, Selection::Clipboard) => "wl-copy",
+      (Self::WlCopy, Selection::Primary) => "wl-copy --primary",
+      (Self::Wayclip, Selection::Primary) => "wayclip --primary",
+      (Self::Xsel, Selection::Clipboard) => "xsel --clipboard --input",
+      (Self::Xsel, Selection::Primary) => "xsel --primary --input",
+      (Self::Xclip, Selection::Clipboard) => "xclip -selection clipboard",
+      (Self::Xclip, Selection::Primary) => "xclip -selection primary",
+      (Self::Wayclip, _) => "waycopy",
+      (Self::Termux, _) => "termux-clipboard-set",
+      (Self::Tmux, _) => "tmux load-buffer -",
+      (Self::PbCopy, _) => "pbcopy",
+      (Self::Osc52, _) => return None,
+    })
+  }
+
+  pub fn paste_argv(&self, sel: Selection) -> Option<&'static str> {
+    Some(match (self, sel) {
+      (Self::WlCopy, Selection::Clipboard) => "wl-paste",
+      (Self::WlCopy, Selection::Primary) => "wl-paste --primary",
+      (Self::Xsel, Selection::Clipboard) => "xsel --clipboard --output",
+      (Self::Xsel, Selection::Primary) => "xsel --primary --output",
+      (Self::Xclip, Selection::Clipboard) => "xclip -selection clipboard -o",
+      (Self::Xclip, Selection::Primary) => "xclip -selection primary -o",
+      (Self::Wayclip, _) => "waypaste",
+      (Self::Termux, _) => "termux-clipboard-get",
+      (Self::Tmux, _) => "tmux save-buffer -",
+      (Self::PbCopy, _) => "pbpaste",
+      (Self::Osc52, _) => return None,
+    })
+  }
+}
+
 #[derive(Default, Clone, Debug)]
-pub struct Registers(HashMap<char, Register>);
+pub struct Registers {
+  registers: HashMap<char, Register>,
+  clipboard: ClipboardProvider,
+}
 
 impl Registers {
   pub fn new() -> Self {
@@ -165,25 +315,53 @@ impl Registers {
       regs.insert(c, Register::default());
     }
     regs.insert('"', Register::default()); // 'default' register
-    Self(regs)
+    regs.insert('+', Register::default()); // system clipboard register
+    regs.insert('*', Register::default()); // primary selection register
+    Self {
+      registers: regs,
+      clipboard: ClipboardProvider::default(),
+    }
   }
-  pub fn get_reg(&self, name: Option<char>) -> Option<&Register> {
-    let key = match name {
-      None | Some('"') => '"',
-      Some(c) if c.is_ascii_alphabetic() => c.to_ascii_lowercase(),
-      _ => return None,
-    };
-
-    self.0.get(&key.to_ascii_lowercase())
+  pub fn resolve_key(key: Option<char>) -> Option<char> {
+    match key.unwrap_or('"') {
+      '"' => Some('"'),
+      '+' => Some('+'),
+      '*' => Some('*'),
+      c if c.is_ascii_alphabetic() => Some(c.to_ascii_lowercase()),
+      _ => None,
+    }
   }
-  pub fn get_reg_mut(&mut self, name: Option<char>) -> Option<&mut Register> {
-    let key = match name {
-      None | Some('"') => '"',
-      Some(c) if c.is_ascii_alphabetic() => c.to_ascii_lowercase(),
-      _ => return None,
-    };
+  pub fn read(&self, name: Option<char>) -> Option<RegisterContent> {
+    let key = Self::resolve_key(name)?;
+    if let Ok(sel) = Selection::try_from(key)
+      && let Some(content) = self.clipboard.paste(sel)
+    {
+      return Some(content);
+    }
 
-    self.0.get_mut(&key.to_ascii_lowercase())
+    self.registers.get(&key).map(|r| r.content().clone())
+  }
+  pub fn write(&mut self, name: Option<char>, buf: RegisterContent) {
+    self.write_inner(name, buf, false);
+  }
+  pub fn append(&mut self, name: Option<char>, buf: RegisterContent) {
+    self.write_inner(name, buf, true);
+  }
+  pub fn write_inner(&mut self, name: Option<char>, buf: RegisterContent, append: bool) {
+    let Some(key) = Self::resolve_key(name) else {
+      return;
+    };
+    if let Ok(sel) = Selection::try_from(key) {
+      self.clipboard.copy(sel, &buf);
+    }
+
+    if let Some(r) = self.registers.get_mut(&key) {
+      if append {
+        r.append(buf);
+      } else {
+        r.write(buf);
+      }
+    }
   }
 }
 
