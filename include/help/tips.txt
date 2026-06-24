@@ -23,6 +23,10 @@ A tour of various features that are unique to `shed`.
   history commands without retyping any of them, or manually re-scrolling
   to each one individually when re-executing.
 
+  Additionally, history searching with `Ctrl`+`R` doesn't just set the buffer
+  to the history entry. It literally scrolls all the way to that entry, which
+  allows you to use history concatenation on the commands that surround it.
+
 ==============================================================================
 2. Work without losing your command line        *tips-ex*
 
@@ -36,6 +40,7 @@ A tour of various features that are unique to `shed`.
     `:r file.sh`    read a file into the buffer. good for editing scripts
     `:stash`        set the buffer aside; `:stash pop` brings it back
     `:h topic`      open a help page without leaving your line
+    `:expand`       performs shell expansion on the current buffer
 
   See |ex mode|(ex).
 
@@ -72,6 +77,41 @@ A tour of various features that are unique to `shed`.
   multi-line editor with vi and emacs modes, registers, macros, visual
   mode, and first-class multi-line buffers. Long compound commands are
   meant to be edited as the multi-line text they are.
+
+  The editor implements some behaviors that make it more usable as a general
+  purpose text editor:
+
+  * Pressing tab at the start of a line/before the first word inserts a tab,
+    instead of triggering completion.
+
+  * Pressing enter breaks the current line if the cursor is inside of
+    a "nested" context. This includes stuff like compound commands, function
+    definitions, etc.
+
+  * With `vi` bindings, Ctrl+D in `normal` mode scrolls down half a page,
+    rather than signalling EOF, so it can't clear the buffer or exit the shell
+    while you're navigating. In `insert` mode it keeps the usual shell convention:
+    `EOF` (exit) on an empty line, otherwise clear the buffer.
+
+  * The editor uses a clamped, scrolling viewport instead of writing the entire
+    buffer in the terminal. `shopt line.line_numbers=true` can help with navigation
+    in very large buffers, and `Ctrl`+`G` shows the current position in the buffer
+    as a status message. `shopt line.viewport_height` sets the maximum height of
+    the viewport, and can take an absolute number of lines like `line.viewport_height=10`
+    or a percentage of the terminal height like `line.viewport_height=80%`
+
+  When `shopt line.auto_suggest` is enabled, shed will show ghost text suggesting
+  command completions.  Shed's editor hints have some useful behaviors:
+
+  * Hints can be partially accepted. Hints are fully accepted with `Ctrl`+`S` or
+    the right arrow key at the end of the currently typed content, but other cursor
+    motions that move into the hint will accept the hint up to where the cursor lands.
+    This means you can use `normal` mode `E` to accept hints one word at a time, for instance.
+
+  * If no history entry matches the current buffer, it will pull hints from tab
+    completion candidates instead. This is performed asynchronously using a background
+    thread, so it has no effect on performance.
+
 
   See |keybinds|(keybinds).
 

@@ -247,8 +247,8 @@ command history navigable with `Up` and `Down`.
 
       Perform shell expansion on the addressed lines, replacing them
       in-place with the expanded result. Variables (`$VAR`,
-      `${param}`), command substitutions (`$(...)`, ``...``), tildes
-      (`~`, `~user`), arithmetic (`$((...))`), and brace expansion
+      `${param}`), command substitutions (`$(...)`, `\`...\``), tildes
+      (`~`, `~user`, `~uid`), arithmetic (`$((...))`), and brace expansion
       (`{a,b,c}`) are all expanded.
 
       Quoting structure is preserved: a value that was inside double
@@ -287,6 +287,8 @@ command history navigable with `Up` and `Down`.
       original. The bang form (`:expand!`) collapses shell syntax
       into literal data, which may not be re-executable if any
       expanded value contains shell metacharacters.
+
+  See also: |parameter expansion|(param)
 
 ==============================================================================
 9. Other Commands                              *ex-other*
