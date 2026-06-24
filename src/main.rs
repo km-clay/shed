@@ -48,13 +48,17 @@ fn main() -> ExitCode {
     return ExitCode::SUCCESS;
   };
 
-  if let Err(e) = input::dispatch_input(args) {
-    if let ShErrKind::CleanExit(code) = e.kind() {
-      QUIT_CODE.store(*code, Ordering::SeqCst);
-    } else {
-      e.print_error();
-      if QUIT_CODE.load(Ordering::SeqCst) == 0 {
-        QUIT_CODE.store(1, Ordering::SeqCst);
+  match input::dispatch_input(args) {
+    Ok(()) => QUIT_CODE.store(Shed::get_status(), Ordering::SeqCst),
+
+    Err(e) => {
+      if let ShErrKind::CleanExit(code) = e.kind() {
+        QUIT_CODE.store(*code, Ordering::SeqCst);
+      } else {
+        e.print_error();
+        if QUIT_CODE.load(Ordering::SeqCst) == 0 {
+          QUIT_CODE.store(1, Ordering::SeqCst);
+        }
       }
     }
   }
