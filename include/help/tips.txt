@@ -28,7 +28,22 @@ A tour of various features that are unique to `shed`.
   allows you to use history concatenation on the commands that surround it.
 
 ==============================================================================
-2. Work without losing your command line        *tips-ex*
+2. Sync history with other shell sessions       *tips-hist-sync* *hist-pull*
+
+  All open shed sessions each write their commands to the same history database.
+  On startup, shed reads the database and constructs its own `internal timeline`.
+  Commands that you enter are written to the database, but each session maintains
+  its own history.
+
+  `hist --pull` will make shed re-read the database and rebuild its internal
+  command history to be in sync with the database.
+
+  Searching history with `Ctrl`+`R` reads from the database, but does not
+  reconstruct the internal history. This can be used to pull specific commands
+  from other sessions without messing up your session's history.
+
+==============================================================================
+3. Work without losing your command line        *tips-ex*
 
   Ex mode (`:` in vi normal mode, `Alt+;` in emacs mode) runs things
   mid-edit without disturbing the buffer you're composing:
@@ -45,7 +60,7 @@ A tour of various features that are unique to `shed`.
   See |ex mode|(ex).
 
 ==============================================================================
-3. Scriptable keymaps with editor access         *tips-keymaps*
+4. Scriptable keymaps with editor access         *tips-keymaps*
 
   `keymap` bindings can run shell commands inline with `<CMD>...<CR>`, and
   those commands can read and write the editor state through special
@@ -61,7 +76,7 @@ A tour of various features that are unique to `shed`.
   See |the keymap builtin|(keymap).
 
 ==============================================================================
-4. Built-in text processors                      *tips-text-tools*
+5. Built-in text processors                      *tips-text-tools*
 
   shed ships text processing tools meant for use in scripts and pipelines:
 
@@ -71,7 +86,7 @@ A tour of various features that are unique to `shed`.
     |width|(builtin-width)            display width of text (wide and combining chars aware)
 
 ==============================================================================
-5. The prompt is a full text editor              *tips-editor*
+6. The prompt is a full text editor              *tips-editor*
 
   The line editor is not a one-line prompt with extras; it is a modal,
   multi-line editor with vi and emacs modes, registers, macros, visual
@@ -95,10 +110,11 @@ A tour of various features that are unique to `shed`.
 
   * The editor uses a clamped, scrolling viewport instead of writing the entire
     buffer in the terminal. `shopt line.line_numbers=true` can help with navigation
-    in very large buffers, and `Ctrl`+`G` shows the current position in the buffer
-    as a status message. `shopt line.viewport_height` sets the maximum height of
-    the viewport, and can take an absolute number of lines like `line.viewport_height=10`
-    or a percentage of the terminal height like `line.viewport_height=80%`
+    in very large buffers, and `Ctrl`+`G` in normal mode shows the current position
+    in the buffer as a status message. `shopt line.viewport_height` sets the maximum
+    height of the viewport, and can take an absolute number of lines like
+    `line.viewport_height=10` or a percentage of the terminal height like
+    `line.viewport_height=80%`
 
   When `shopt line.auto_suggest` is enabled, shed will show ghost text suggesting
   command completions.  Shed's editor hints have some useful behaviors:
@@ -106,7 +122,7 @@ A tour of various features that are unique to `shed`.
   * Hints can be partially accepted. Hints are fully accepted with `Ctrl`+`S` or
     the right arrow key at the end of the currently typed content, but other cursor
     motions that move into the hint will accept the hint up to where the cursor lands.
-    This means you can use `normal` mode `E` to accept hints one word at a time, for instance.
+    This means you can use `E` in `normal` mode to accept hints one word at a time, for instance.
 
   * If no history entry matches the current buffer, it will pull hints from tab
     completion candidates instead. This is performed asynchronously using a background
@@ -116,7 +132,7 @@ A tour of various features that are unique to `shed`.
   See |keybinds|(keybinds).
 
 ==============================================================================
-6. Magic variables                               *tips-magic-vars*
+7. Magic variables                               *tips-magic-vars*
 
   Some variables are computed fresh on every access:
 
@@ -131,7 +147,7 @@ A tour of various features that are unique to `shed`.
   See |variables|(variables).
 
 ==============================================================================
-7. Async workflows over the IPC socket            *tips-socket*
+8. Async workflows over the IPC socket            *tips-socket*
 
   shed exposes a Unix socket for talking to the running shell from other
   processes, which is the basis for asynchronous background workflows.
@@ -140,7 +156,7 @@ A tour of various features that are unique to `shed`.
   See |the socket docs|(socket).
 
 ==============================================================================
-8. Arrays are double-ended queues (deques).       *tips-arrays*
+9. Arrays are double-ended queues (deques).       *tips-arrays*
 
   shed's arrays are actually both a `deque` and a `ring buffer` under the hood.
   Several builtins are exposed which allow you to easily take advantage of this:
@@ -156,7 +172,7 @@ A tour of various features that are unique to `shed`.
   subs do not fork in shed, so this is a persistent mutation of `arr`).
 
 ==============================================================================
-9. Ex mode `stash` tricks                         *tips-stash*
+10. Ex mode `stash` tricks                         *tips-stash*
 
   The `:stash` command in ex mode has some interesting behaviors associated with it.
 
