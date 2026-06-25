@@ -199,3 +199,29 @@ A tour of various features that are unique to `shed`.
   colon using `/:`. This has the effect of inserting the empty if statement at your cursor,
   then moving the cursor to the condition, while also allowing you to jump to the next `:` by pressing
   `n`. (This is assuming you have vim keybindings enabled).
+
+==============================================================================
+10. Vice                                           *tips-vice*
+
+  |vice|(builtin-vice) is a builtin that lets you use shed's text editor to process
+  text programmatically. The primitives are explained in the builtin documentation,
+  but there are several interesting emergent behaviors that come with having full
+  access to the text editor.
+
+  Ex mode ~
+
+  Vice commands can use `ex mode`. This effectively turns vice into a scripting language,
+  since it can shell out using `:!some_cmd`, and commands run in this way have full access
+  to the buffer via the |buffer variables|(ex-bang). You can also read other arbitrary text
+  into the buffer using `:r`, write the buffer to files or pipe to commands using `:w`, the
+  whole deal.
+
+  Search ~
+
+  Search commands like `f<char>`, `t<char>`, `/<pattern>`, etc each signal the editor when
+  they fail to find a match. In the context of vice, a failed search `immediately aborts the program`.
+  In the case of `--lines`, it aborts for the current line and skips to the next one.
+  This can be used to create conditional logic in your programs. For instance:
+  `vice --lines -m '/foo' -c 'A -> Line Matches'`
+
+  This only executes `-c 'A -> Line Matches'` on lines where the `/foo` search found 'foo'.
