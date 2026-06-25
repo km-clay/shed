@@ -13,7 +13,7 @@ use crate::util::posix_extension::execvpe;
 
 use nix::{
   errno::Errno,
-  unistd::{ForkResult, Pid, execve, fork, isatty, setpgid},
+  unistd::{ForkResult, Pid, execve, fork, getpgrp, isatty, setpgid},
 };
 use scopeguard::defer;
 use shed_macros::styled_format;
@@ -1510,9 +1510,13 @@ impl Dispatcher {
 
         let child_pgid = if let Some(pgid) = existing_pgid {
           pgid
-        } else {
+        } else if interactive {
           job.set_pgid(child);
           child
+        } else {
+          let pgrp = getpgrp();
+          job.set_pgid(pgrp);
+          pgrp
         };
         let child_proc = ChildProc::new(child, Some(cmd_name), Some(child_pgid), timer);
         job.push_child(child_proc);
