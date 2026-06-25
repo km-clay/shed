@@ -666,6 +666,7 @@ impl Builtin for Thru {
         let n = match reader.read(&mut buf[..cap]) {
           Ok(0) => break,
           Ok(n) => n,
+          Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
           Err(e) => {
             errln!("thru: {path}: error reading input: {e}");
             break;
