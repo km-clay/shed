@@ -94,11 +94,13 @@ impl super::Builtin for Read {
       out!("{p}");
     }
 
-    let _guard = if flags.contains(ReadFlags::NO_ECHO) {
-      Shed::term_mut(Terminal::cooked_no_echo_guard)?
-    } else {
-      Shed::term_mut(Terminal::cooked_mode_guard)?
-    };
+    let _guard = unistd::isatty(stdin_fileno()).unwrap_or(false).then(|| {
+      if flags.contains(ReadFlags::NO_ECHO) {
+        Shed::term_mut(Terminal::cooked_no_echo_guard)
+      } else {
+        Shed::term_mut(Terminal::cooked_mode_guard)
+      }
+    });
 
     let input = do_read(
       delim,

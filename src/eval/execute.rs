@@ -415,8 +415,7 @@ impl Dispatcher {
       self.exec_builtin(node)
     } else if is_arith(cmd_tk) {
       Self::exec_arith(node)
-    } else if Shed::shopts(|s| s.core.autocd) && in_cd_path(cmd.clone()) && !is_in_path(cmd.clone())
-    {
+    } else if can_autocd(cmd) {
       let dir = cmd.span.as_str().to_string();
       exec_input(format!("cd {dir}"), Some(self.source_name.clone()))
     } else {
@@ -1818,6 +1817,10 @@ pub fn is_func(name: &str) -> bool {
 
 pub fn is_arith(tk: Option<&Tk>) -> bool {
   tk.is_some_and(|tk| tk.flags.contains(TkFlags::IS_ARITH))
+}
+
+pub fn can_autocd(cmd: &Tk) -> bool {
+  shopt!(core.autocd) && in_cd_path(cmd.clone()) && !is_in_path(cmd.clone())
 }
 
 pub(crate) fn is_builtin(cmd: &Node) -> bool {
