@@ -209,10 +209,12 @@ impl Vice {
     Self::exec_cmds(core, prog, prog.cmds.clone(), &mut fields, &mut spent_cmds)
       .promote_err(span.clone())?;
 
-    Ok(if fields.is_empty() {
-      core.text()
+    Ok(if !fields.is_empty() {
+      fields.join(&prog.delim) // captured fields, kept even on abort
+    } else if core.editor.search_failed() {
+      String::new() // aborted before capturing anything
     } else {
-      fields.join(&prog.delim)
+      core.text() // no -c: pass the whole buffer through
     })
   }
 
@@ -259,7 +261,7 @@ impl Vice {
       for line in input.lines() {
         core.set_buffer(line);
         let record = Self::render(&mut core, prog, span)?;
-        if core.editor.search_failed() {
+        if core.editor.search_failed() && record.is_empty() {
           continue;
         }
         emitted_line = true;
@@ -269,11 +271,14 @@ impl Vice {
     } else {
       let mut core = EditorCore::headless(input);
       let record = Self::render(&mut core, prog, span)?;
-      if core.editor.search_failed() {
-        return Ok(false);
+      let aborted = core.editor.search_failed();
+      // emit whatever was captured before an abort; drop only if nothing was
+      let emit = !(aborted && record.is_empty());
+      if emit {
+        sink(&record)?;
       }
-      sink(&record)?;
-      Ok(true)
+      // match linewise: the run "succeeds" whenever it produced output
+      Ok(emit)
     }
   }
 
