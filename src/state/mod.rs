@@ -1,12 +1,11 @@
 use chrono::{DateTime, Local};
-use rusqlite::Connection;
 use std::{
   cell::RefCell,
   collections::VecDeque,
   fmt::Display,
   os::{fd::AsFd, unix::net::UnixStream},
   sync::{
-    Arc, OnceLock,
+    Arc,
     atomic::{AtomicI32, Ordering},
   },
   time::SystemTime,
@@ -107,7 +106,6 @@ pub(super) struct Shed {
   logic: RefCell<logic::LogTab>,
   terminal: RefCell<terminal::Terminal>,
   shopts: RefCell<shopt::ShOpts>,
-  db_conn: OnceLock<Option<Arc<Connection>>>,
   status_code: AtomicI32,
 
   status_msg_queue: RefCell<VecDeque<Message>>,
@@ -132,7 +130,6 @@ impl Shed {
       logic: RefCell::new(logic::LogTab::new()),
       terminal: RefCell::new(terminal::Terminal::new()),
       shopts: RefCell::new(shopt::ShOpts::default()),
-      db_conn: OnceLock::new(),
       status_code: AtomicI32::new(0),
 
       status_msg_queue: RefCell::new(VecDeque::new()),
@@ -544,15 +541,6 @@ impl Shed {
   pub fn restore_state() {
     SHED.with(Shed::restore);
   }
-
-  #[cfg(test)]
-  fn clone_db_conn(&self) -> OnceLock<Option<Arc<Connection>>> {
-    let lock = OnceLock::new();
-    if let Some(val) = self.db_conn.get() {
-      let _ = lock.set(val.clone());
-    }
-    lock
-  }
 }
 
 impl Default for Shed {
@@ -570,7 +558,6 @@ impl Shed {
       meta: RefCell::new(self.meta.borrow().clone()),
       logic: RefCell::new(self.logic.borrow().clone()),
       shopts: RefCell::new(self.shopts.borrow().clone()),
-      db_conn: self.clone_db_conn(),
       terminal: RefCell::new(self.terminal.borrow().clone()),
       status_msg_queue: RefCell::new(self.status_msg_queue.borrow().clone()),
       status_msg_hist: RefCell::new(self.status_msg_hist.borrow().clone()),

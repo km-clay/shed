@@ -571,8 +571,14 @@ mod fc_edit_tests {
   /// in-memory sqlite conn is shared across tests in the thread).
   fn fresh_history() -> History {
     let conn = state::util::get_db_conn().expect("test db conn");
-    let _ = conn.execute_batch("DROP TABLE IF EXISTS shed_history");
-    let _ = conn.execute_batch("PRAGMA user_version = 0");
+    let _ = conn
+      .lock()
+      .unwrap()
+      .execute_batch("DROP TABLE IF EXISTS shed_history");
+    let _ = conn
+      .lock()
+      .unwrap()
+      .execute_batch("PRAGMA user_version = 0");
     History::new(conn, "shed_history").expect("history init")
   }
 
@@ -818,8 +824,14 @@ mod fc_run_builtin_tests {
 
   fn fresh_history() -> History {
     let conn = state::util::get_db_conn().expect("test db");
-    let _ = conn.execute_batch("DROP TABLE IF EXISTS shed_history");
-    let _ = conn.execute_batch("PRAGMA user_version = 0");
+    let _ = conn
+      .lock()
+      .unwrap()
+      .execute_batch("DROP TABLE IF EXISTS shed_history");
+    let _ = conn
+      .lock()
+      .unwrap()
+      .execute_batch("PRAGMA user_version = 0");
     History::new(conn, "shed_history").expect("history init")
   }
 
@@ -881,8 +893,14 @@ mod fc_reexec_tests {
 
   fn fresh_history() -> History {
     let conn = state::util::get_db_conn().expect("test db");
-    let _ = conn.execute_batch("DROP TABLE IF EXISTS shed_history");
-    let _ = conn.execute_batch("PRAGMA user_version = 0");
+    let _ = conn
+      .lock()
+      .unwrap()
+      .execute_batch("DROP TABLE IF EXISTS shed_history");
+    let _ = conn
+      .lock()
+      .unwrap()
+      .execute_batch("PRAGMA user_version = 0");
     History::new(conn, "shed_history").expect("history init")
   }
 

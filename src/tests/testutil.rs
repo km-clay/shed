@@ -215,7 +215,10 @@ impl TestGuard {
     state::util::init_test_db_conn();
     if let Some(conn) = state::util::get_db_conn() {
       // The table won't exist on first run; ignore that error.
-      let _ = conn.execute_batch("DROP TABLE IF EXISTS stash");
+      let _ = conn
+        .lock()
+        .unwrap()
+        .execute_batch("DROP TABLE IF EXISTS stash");
     }
     Self {
       _redir_guard: redir_guard,

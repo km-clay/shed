@@ -117,7 +117,11 @@ mod stash_builtin_tests {
   /// Drop any leftover stash entries from prior tests in this thread.
   fn fresh_stash() -> Stash {
     let conn = crate::state::util::get_db_conn().expect("test db");
-    conn.execute_batch("DROP TABLE IF EXISTS stash").ok();
+    conn
+      .lock()
+      .unwrap()
+      .execute_batch("DROP TABLE IF EXISTS stash")
+      .ok();
     Stash::new().unwrap()
   }
 

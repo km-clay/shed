@@ -517,9 +517,9 @@ impl super::Builtin for Hist {
       let entries_fmt = query.format_entries(&entries);
       let count = entries.len();
 
-      hist.transaction(|| {
+      hist.transaction(|conn| {
         for (_, entry) in entries {
-          hist.push_entry(entry).promote_err(span.clone())?;
+          hist.push_with(conn, entry).promote_err(span.clone())?;
         }
         Ok(())
       })?;
@@ -1215,9 +1215,18 @@ mod hist_builtin_execute_tests {
   /// seeding entries.
   fn fresh_history(table: &str) -> History {
     let conn = state::util::get_db_conn().expect("test db conn");
-    let _ = conn.execute_batch(&format!("DROP TABLE IF EXISTS {table}"));
-    let _ = conn.execute_batch(&format!("DROP TABLE IF EXISTS {table}_backup"));
-    let _ = conn.execute_batch("PRAGMA user_version = 0");
+    let _ = conn
+      .lock()
+      .unwrap()
+      .execute_batch(&format!("DROP TABLE IF EXISTS {table}"));
+    let _ = conn
+      .lock()
+      .unwrap()
+      .execute_batch(&format!("DROP TABLE IF EXISTS {table}_backup"));
+    let _ = conn
+      .lock()
+      .unwrap()
+      .execute_batch("PRAGMA user_version = 0");
     History::new(conn, table).expect("history init")
   }
 

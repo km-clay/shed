@@ -1,7 +1,7 @@
 use std::{
   cmp::Ordering,
   env,
-  sync::{Arc, LazyLock, RwLock},
+  sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock},
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -123,7 +123,7 @@ pub struct History {
   pub cursor: usize,
   pub virt_cursor: usize,
 
-  conn: Arc<Connection>,
+  conn: Arc<Mutex<Connection>>,
   table: String,
   search_mask: Vec<HistEntry>,
   mask_stale: bool,
@@ -133,10 +133,15 @@ pub struct History {
 
 impl History {
   const USER_VERSION: i32 = 2;
-  pub fn new(conn: Arc<Connection>, table: &str) -> ShResult<Self> {
+
+  fn lock(&self) -> MutexGuard<'_, Connection> {
+    self.conn.lock().unwrap_or_else(|e| e.into_inner())
+  }
+
+  pub fn new(conn: Arc<Mutex<Connection>>, table: &str) -> ShResult<Self> {
     let max_hist = shopt!(core.max_hist);
 
-    Self::init_db(&conn, table)?;
+    Self::init_db(&conn.lock().unwrap_or_else(|e| e.into_inner()), table)?;
 
     let max_size = (max_hist >= 0).then_some(max_hist as u32);
     let mut hist = Self {
@@ -168,11 +173,13 @@ impl History {
     let table_name = hist.table.clone();
     std::thread::spawn(move || {
       do_something_that_opens_fds_that_we_cant_access_hack(MIN_INTERNAL_FD, || {
-        let Some(conn) = state::util::open_db_conn().ok() else {
+        let Some(conn) = state::util::get_db_conn() else {
           return;
         };
-        conn.execute_batch("PRAGMA journal_mode=WAL").ok();
-        let loaded = query_masked(None, &conn, &table_name);
+        let loaded = {
+          let conn = conn.lock().unwrap_or_else(|e| e.into_inner());
+          query_masked(None, &conn, &table_name)
+        };
 
         let max_ts = loaded
           .iter()
@@ -216,7 +223,7 @@ impl History {
     let conn = Connection::open_in_memory().expect("Failed to open in-memory database");
     Self::init_db(&conn, table).expect("Failed to initialize in-memory database");
     Self {
-      conn: conn.into(),
+      conn: Arc::new(Mutex::new(conn)),
       table: table.to_string(),
       pending: None,
       search_mask: vec![],
@@ -305,37 +312,36 @@ impl History {
     if command.is_empty() {
       return Ok(None);
     }
-    if shopt!(core.hist_ignore_dupes) {
-      let last: Option<String> = self
-        .conn
-        .query_row(
-          &format!(
-            "SELECT command FROM {} ORDER BY id DESC LIMIT 1",
-            self.table
-          ),
-          [],
-          |row| row.get(0),
-        )
-        .ok();
-      if last.as_deref() == Some(command) {
-        return Ok(None);
-      }
-    }
     let table = &self.table;
     let timestamp = SystemTime::now()
       .duration_since(UNIX_EPOCH)
       .unwrap()
       .as_secs() as i64;
-    let new_id = self.last_id() + 1;
     let cwd = env::current_dir()
       .map(|p| p.to_string_lossy().to_string())
       .ok();
     let token = Uuid::new_v4();
 
-    self.conn.execute(
-      &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"),
-      rusqlite::params![new_id, timestamp, command, cwd.clone(), token.to_string()],
-    )?;
+    {
+      let conn = self.lock();
+      if shopt!(core.hist_ignore_dupes) {
+        let last: Option<String> = conn
+          .query_row(
+            &format!("SELECT command FROM {table} ORDER BY id DESC LIMIT 1"),
+            [],
+            |row| row.get(0),
+          )
+          .ok();
+        if last.as_deref() == Some(command) {
+          return Ok(None);
+        }
+      }
+      let new_id = Self::last_id_conn(&conn, table) + 1;
+      conn.execute(
+        &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"),
+        rusqlite::params![new_id, timestamp, command, cwd.clone(), token.to_string()],
+      )?;
+    }
 
     // Incremental cache update: the new entry supersedes any prior entry with
     // the same command (matching `query_masked`'s GROUP BY semantics).
@@ -367,10 +373,10 @@ impl History {
 
     std::thread::spawn(move || {
       do_something_that_opens_fds_that_we_cant_access_hack(MIN_INTERNAL_FD, || {
-        let Some(conn) = state::util::open_db_conn().ok() else {
+        let Some(conn) = state::util::get_db_conn() else {
           return;
         };
-        conn.execute_batch("PRAGMA journal_mode=WAL").ok();
+        let conn = conn.lock().unwrap_or_else(|e| e.into_inner());
         let micros = runtime.map_or(0, |r| r.as_micros() as i64);
         conn
           .execute(
@@ -384,7 +390,7 @@ impl History {
 
   fn unique_command_count(&self) -> i64 {
     self
-      .conn
+      .lock()
       .query_row(
         &format!("SELECT COUNT(DISTINCT command) FROM {}", self.table),
         [],
@@ -403,7 +409,7 @@ impl History {
     let table = &self.table;
     // Delete all rows belonging to the oldest `excess` unique commands.
     self
-      .conn
+      .lock()
       .execute(
         &format!(
           "DELETE FROM {table} WHERE command IN (
@@ -437,10 +443,14 @@ impl History {
   }
 
   pub fn last_id(&self) -> i64 {
-    self
-      .conn
+    Self::last_id_conn(&self.lock(), &self.table)
+  }
+
+  /// `last_id` against an already-held connection, for use inside a lock scope.
+  fn last_id_conn(conn: &Connection, table: &str) -> i64 {
+    conn
       .query_row(
-        &format!("SELECT id FROM {} ORDER BY id DESC LIMIT 1", self.table),
+        &format!("SELECT id FROM {table} ORDER BY id DESC LIMIT 1"),
         [],
         |row| row.get(0),
       )
@@ -455,7 +465,8 @@ impl History {
     let entries = self.query(where_clause, params)?;
     let table = &self.table;
 
-    let tx = self.conn.unchecked_transaction()?;
+    let conn = self.lock();
+    let tx = conn.unchecked_transaction()?;
     // rolling backup - overwritten on each delete, restorable via `hist --restore`
     tx.execute_batch(&format!(
       "DROP TABLE IF EXISTS {table}_backup; \
@@ -481,7 +492,8 @@ impl History {
   /// Restores the history table from the rolling backup created by the last delete operation.
   pub fn restore_backup(&self) -> ShResult<i64> {
     let table = &self.table;
-    let has_backup: bool = self.conn.query_row(
+    let conn = self.lock();
+    let has_backup: bool = conn.query_row(
       "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name=?1",
       [&format!("{table}_backup")],
       |row| row.get(0),
@@ -489,7 +501,7 @@ impl History {
     if !has_backup {
       return Err(sherr!(HistoryReadErr, "no backup table found"));
     }
-    let tx = self.conn.unchecked_transaction()?;
+    let tx = conn.unchecked_transaction()?;
     // index for fast NOT EXISTS lookup during merge
     tx.execute_batch(&format!(
       "CREATE INDEX IF NOT EXISTS {table}_restore_idx ON {table} (command, timestamp);"
@@ -535,7 +547,8 @@ impl History {
 
   pub fn sort_by_timestamp(&self) -> ShResult<()> {
     let table = &self.table;
-    let tx = self.conn.unchecked_transaction()?;
+    let conn = self.lock();
+    let tx = conn.unchecked_transaction()?;
     tx.execute_batch(&format!(
       r"
 			CREATE TABLE {table}_tmp (
@@ -558,15 +571,16 @@ impl History {
     Ok(())
   }
 
-  pub fn transaction<T, F: FnOnce() -> ShResult<T>>(&self, f: F) -> ShResult<T> {
-    self.conn.execute_batch("BEGIN")?;
-    match f() {
+  pub fn transaction<T, F: FnOnce(&Connection) -> ShResult<T>>(&self, f: F) -> ShResult<T> {
+    let conn = self.lock();
+    conn.execute_batch("BEGIN")?;
+    match f(&conn) {
       Ok(val) => {
-        self.conn.execute_batch("COMMIT")?;
+        conn.execute_batch("COMMIT")?;
         Ok(val)
       }
       Err(e) => {
-        self.conn.execute_batch("ROLLBACK").ok();
+        conn.execute_batch("ROLLBACK").ok();
         Err(e)
       }
     }
@@ -582,7 +596,8 @@ impl History {
     let sql = format!(
       "SELECT command, timestamp, runtime, cwd, status, token, id FROM {table} {where_clause}"
     );
-    let mut stmt = self.conn.prepare(&sql)?;
+    let conn = self.lock();
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params, |row| Ok((row.get(6)?, Self::row_to_entry(row)?)))?;
 
     Ok(rows.filter_map(Result::ok).collect())
@@ -612,7 +627,16 @@ impl History {
     )
   }
 
+  #[cfg_attr(not(test), allow(dead_code))]
   pub fn push_entry(&self, entry: HistEntry) -> ShResult<()> {
+    Self::push_entry_conn(&self.lock(), &self.table, entry)
+  }
+
+  pub fn push_with(&self, conn: &Connection, entry: HistEntry) -> ShResult<()> {
+    Self::push_entry_conn(conn, &self.table, entry)
+  }
+
+  fn push_entry_conn(conn: &Connection, table: &str, entry: HistEntry) -> ShResult<()> {
     let HistEntry {
       runtime,
       timestamp,
@@ -625,13 +649,9 @@ impl History {
       return Ok(());
     }
     if shopt!(core.hist_ignore_dupes) {
-      let last: Option<String> = self
-        .conn
+      let last: Option<String> = conn
         .query_row(
-          &format!(
-            "SELECT command FROM {} ORDER BY id DESC LIMIT 1",
-            self.table
-          ),
+          &format!("SELECT command FROM {table} ORDER BY id DESC LIMIT 1"),
           [],
           |row| row.get(0),
         )
@@ -640,10 +660,9 @@ impl History {
         return Ok(());
       }
     }
-    let table = &self.table;
     let timestamp = timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-    let new_id = self.last_id() + 1;
-    self.conn.execute(
+    let new_id = Self::last_id_conn(conn, table) + 1;
+    conn.execute(
       &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, status, token) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
       rusqlite::params![new_id, timestamp, runtime.as_micros() as i64, command, cwd, status, token.to_string()],
     )?;
@@ -725,7 +744,7 @@ impl History {
         Ordering::Less => {
           let offset = i64::from(num.unsigned_abs()) - 1;
           self
-            .conn
+            .lock()
             .query_row(
               &format!(
                 "SELECT command FROM {} ORDER BY id DESC LIMIT 1 OFFSET ?1",
@@ -740,7 +759,7 @@ impl History {
         Ordering::Greater => {
           let offset = i64::from(num) - 1;
           self
-            .conn
+            .lock()
             .query_row(
               &format!(
                 "SELECT command FROM {} ORDER BY id ASC LIMIT 1 OFFSET ?1",
@@ -755,7 +774,7 @@ impl History {
       }
     } else {
       self
-        .conn
+        .lock()
         .query_row(
           &format!(
             "SELECT command FROM {} WHERE command LIKE ?1 || '%' ORDER BY id DESC LIMIT 1",
@@ -781,7 +800,7 @@ impl History {
 
   pub fn last(&self) -> Option<HistEntry> {
     self
-      .conn
+      .lock()
       .query_row(
         &format!(
           "SELECT command, timestamp, runtime, cwd, status, token FROM {} ORDER BY id DESC LIMIT 1",
@@ -867,7 +886,7 @@ impl History {
 
   pub fn refresh_hist_entries(&self) -> usize {
     let num_entries_before = num_entries(&self.table);
-    let entries = query_masked(None, &self.conn, &self.table);
+    let entries = query_masked(None, &self.lock(), &self.table);
     if let Ok(mut cache) = HIST_ENTRIES.write() {
       cache.insert(self.table.clone(), entries);
     }
@@ -969,7 +988,7 @@ impl History {
       .and_then(|wm| wm.get(&self.table).copied())
       .unwrap_or(0);
 
-    let delta = query_since(watermark, &self.conn, &self.table);
+    let delta = query_since(watermark, &self.lock(), &self.table);
     if delta.is_empty() {
       return;
     }
@@ -1032,7 +1051,7 @@ impl History {
   #[cfg(test)]
   pub fn entry_count(&self) -> i64 {
     self
-      .conn
+      .lock()
       .query_row(&format!("SELECT COUNT(*) FROM {}", self.table), [], |row| {
         row.get(0)
       })

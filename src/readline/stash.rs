@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::Connection;
 
@@ -12,17 +12,22 @@ pub(crate) struct StashedCmd {
 }
 
 pub(crate) struct Stash {
-  conn: Arc<Connection>,
+  conn: Arc<Mutex<Connection>>,
 }
 
 impl Stash {
   pub fn new() -> ShResult<Self> {
     let conn =
       state::util::get_db_conn().ok_or_else(|| sherr!(InternalErr, "database not available"))?;
-    Self::init_stash_table(&conn)?;
+    Self::init_stash_table(&conn.lock().unwrap_or_else(|e| e.into_inner()))?;
     Ok(Self { conn })
   }
-  pub fn init_stash_table(conn: &Arc<Connection>) -> ShResult<()> {
+
+  fn lock(&self) -> MutexGuard<'_, Connection> {
+    self.conn.lock().unwrap_or_else(|e| e.into_inner())
+  }
+
+  pub fn init_stash_table(conn: &Connection) -> ShResult<()> {
     conn.execute_batch(
       r"
       CREATE TABLE IF NOT EXISTS stash (
@@ -39,7 +44,7 @@ impl Stash {
 
   pub fn stack_len(&self) -> usize {
     self
-      .conn
+      .lock()
       .query_row("SELECT COUNT(*) FROM stash WHERE name IS NULL", [], |row| {
         row.get(0)
       })
@@ -52,7 +57,7 @@ impl Stash {
       stack_only = false;
     }
     let stack: Vec<String> = self
-      .conn
+      .lock()
       .prepare("SELECT buffer FROM stash WHERE name IS NULL ORDER BY timestamp ASC")
       .and_then(|mut stmt| {
         stmt
@@ -61,7 +66,7 @@ impl Stash {
       })
       .unwrap_or_else(|_| vec![]);
     let named: Vec<(String, String)> = self
-      .conn
+      .lock()
       .prepare("SELECT name, buffer FROM stash WHERE name IS NOT NULL ORDER BY timestamp ASC")
       .and_then(|mut stmt| {
         stmt
@@ -116,33 +121,32 @@ impl Stash {
     {
       return Err(sherr!(ParseErr, "stash name cannot be a number"));
     }
+    let conn = self.lock();
     if let Some(ref name) = cmd.name {
-      self
-        .conn
-        .execute("DELETE FROM stash WHERE name = ?1", [name])?;
+      conn.execute("DELETE FROM stash WHERE name = ?1", [name])?;
     }
-    self.conn.execute(
+    conn.execute(
       "INSERT INTO stash (name, buffer, cursor, timestamp) VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
       (&cmd.name, &cmd.buffer, cmd.cursor_pos.trim())
     )?;
     Ok(())
   }
   pub fn delete_cmd(&self, cmd: &str) -> ShResult<()> {
+    let conn = self.lock();
     if let Ok(n) = cmd.parse::<usize>() {
-      self.conn.execute(
+      conn.execute(
         "DELETE FROM stash WHERE name IS NULL AND id IN (SELECT id FROM stash WHERE name IS NULL ORDER BY timestamp ASC LIMIT 1 OFFSET ?1)",
         [n as i64]
       )?;
     } else {
-      self
-        .conn
-        .execute("DELETE FROM stash WHERE name = ?1", [cmd])?;
+      conn.execute("DELETE FROM stash WHERE name = ?1", [cmd])?;
     }
     Ok(())
   }
 
   pub fn pop(&self, n: usize) -> ShResult<Option<StashedCmd>> {
-    let mut stmt = self.conn.prepare("
+    let conn = self.lock();
+    let mut stmt = conn.prepare("
       SELECT id, buffer, cursor FROM stash WHERE name IS NULL ORDER BY timestamp ASC LIMIT 1 OFFSET ?1
     ")?;
 
@@ -162,7 +166,7 @@ impl Stash {
       return Ok(None);
     };
 
-    self.conn.execute("DELETE FROM stash WHERE id = ?1", [id])?;
+    conn.execute("DELETE FROM stash WHERE id = ?1", [id])?;
     Ok(Some(cmd))
   }
 
@@ -172,12 +176,11 @@ impl Stash {
       return Err(sherr!(ParseErr, "stashed command name cannot be a number"));
     }
     let cursor = format!("{row}:{col}");
+    let conn = self.lock();
     if let Some(ref name) = name {
-      self
-        .conn
-        .execute("DELETE FROM stash WHERE name = ?1", [name])?;
+      conn.execute("DELETE FROM stash WHERE name = ?1", [name])?;
     }
-    let mut stmt = self.conn.prepare(
+    let mut stmt = conn.prepare(
       "
       INSERT INTO stash (name, buffer, cursor, timestamp) VALUES (?1, ?2, ?3, strftime('%s', 'now'))
     ",
@@ -188,7 +191,8 @@ impl Stash {
   }
 
   pub fn get_index(&self, n: usize) -> ShResult<Option<StashedCmd>> {
-    let mut stmt = self.conn.prepare(
+    let conn = self.lock();
+    let mut stmt = conn.prepare(
       "
       SELECT buffer, cursor FROM stash WHERE name IS NULL ORDER BY timestamp ASC LIMIT 1 OFFSET ?1
     ",
@@ -211,7 +215,8 @@ impl Stash {
   }
 
   pub fn get_named(&self, name: &str) -> ShResult<Option<StashedCmd>> {
-    let mut stmt = self.conn.prepare(
+    let conn = self.lock();
+    let mut stmt = conn.prepare(
       "
       SELECT buffer, cursor FROM stash WHERE name LIKE ?1 ORDER BY timestamp ASC LIMIT 1
     ",

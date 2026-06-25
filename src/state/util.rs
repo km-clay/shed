@@ -4,14 +4,14 @@ use crate::{
   util::{self, ShErrKind},
 };
 
-use super::{SHED, Shed, try_var};
+use super::{Shed, try_var};
 
 use std::{
   fs::OpenOptions,
   io::{Read, Write},
   path::{Path, PathBuf},
   rc::Rc,
-  sync::Arc,
+  sync::{Arc, Mutex, RwLock},
 };
 
 use nix::{
@@ -120,11 +120,12 @@ pub fn expand_arr_index(idx_raw: &str, allow_side_effects: bool) -> ShResult<Arr
 /// * Ok(None) means "there's no database connection"
 /// * Err(e) is your function's `ShErr`
 /// * Ok(Some(T)) means the connection exists and your function succeeded.
-pub fn query_db<T, F: FnOnce(Arc<Connection>) -> ShResult<T>>(f: F) -> ShResult<Option<T>> {
+pub fn query_db<T, F: FnOnce(&Connection) -> ShResult<T>>(f: F) -> ShResult<Option<T>> {
   let Some(conn) = get_db_conn() else {
     return Ok(None);
   };
-  f(conn).map(Some)
+  let conn = conn.lock().unwrap_or_else(|e| e.into_inner());
+  f(&conn).map(Some)
 }
 
 pub fn with_vars<F, H, V, T>(vars: H, f: F) -> T
@@ -718,37 +719,40 @@ pub fn set_sh_lvl() -> ShResult<()> {
 }
 
 /// Get a clone of the shared database connection, if available.
-#[expect(clippy::arc_with_non_send_sync)]
-pub fn get_db_conn() -> Option<Arc<Connection>> {
-  SHED.with(|shed| {
-    shed
-      .db_conn
-      .get_or_init(|| {
-        crate::procio::do_something_that_opens_fds_that_we_cant_access_hack(
-          crate::procio::MIN_INTERNAL_FD,
-          || {
-            let conn = open_db_conn().ok()?;
-            conn.execute_batch("PRAGMA journal_mode=WAL").ok()?;
-            conn.execute_batch("PRAGMA case_sensitive_like = 1").ok()?;
-            Some(Arc::new(conn))
-          },
-        )
-      })
-      .clone()
-  })
+/// The process-wide history database connection.
+static DB_CONN: RwLock<Option<Arc<Mutex<Connection>>>> = RwLock::new(None);
+
+fn open_shared_conn() -> Option<Arc<Mutex<Connection>>> {
+  crate::procio::do_something_that_opens_fds_that_we_cant_access_hack(
+    crate::procio::MIN_INTERNAL_FD,
+    || {
+      let conn = open_db_conn().ok()?;
+      conn.execute_batch("PRAGMA journal_mode=WAL").ok()?;
+      // Wait on contention instead of erroring out immediately; matters
+      // for the cross-process case (multiple shed sessions share this db).
+      conn.busy_timeout(std::time::Duration::from_secs(5)).ok()?;
+      conn.execute_batch("PRAGMA case_sensitive_like = 1").ok()?;
+      Some(Arc::new(Mutex::new(conn)))
+    },
+  )
 }
 
-/// Initialize the shared database connection with an in-memory sqlite
-/// database. Used by `TestGuard`. Safe to call multiple times — the `OnceLock`
-/// only takes effect on the first call, so all tests in a thread share the
-/// same in-memory db (per-test cleanup is handled separately by `TestGuard`).
+pub fn get_db_conn() -> Option<Arc<Mutex<Connection>>> {
+  if let Some(conn) = DB_CONN.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+    return Some(conn.clone());
+  }
+  let mut guard = DB_CONN.write().unwrap_or_else(|e| e.into_inner());
+  if guard.is_none() {
+    *guard = open_shared_conn();
+  }
+  guard.clone()
+}
+
 #[cfg(test)]
 pub fn init_test_db_conn() {
-  SHED.with(|shed| {
-    let _ = shed
-      .db_conn
-      .set(Connection::open_in_memory().ok().map(std::sync::Arc::new));
-  });
+  *DB_CONN.write().unwrap_or_else(|e| e.into_inner()) = Connection::open_in_memory()
+    .ok()
+    .map(|c| Arc::new(Mutex::new(c)));
 }
 
 pub fn open_db_conn() -> ShResult<Connection> {
