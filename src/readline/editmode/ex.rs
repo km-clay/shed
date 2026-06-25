@@ -201,6 +201,10 @@ bitflags! {
 pub const COMMANDS: &[(&str, ExCommand)] = &[
   ("edit", ExCommand::Edit),
   ("read", ExCommand::Read),
+  ("transfer", ExCommand::Transfer),
+  ("copy", ExCommand::Transfer),
+  ("move", ExCommand::Move),
+  ("join", ExCommand::Join),
   ("write", ExCommand::Write),
   ("quit", ExCommand::Quit),
   ("wq", ExCommand::WriteQuit),
@@ -237,6 +241,9 @@ impl ExTkRule {
       panic!("called unwrap_cmd on non-command token")
     }
   }
+  pub fn is_addr(&self) -> bool {
+    matches!(self, ExTkRule::Address(_))
+  }
   pub fn unwrap_addr(&self) -> ExLineAddr {
     if let ExTkRule::Address(addr) = self {
       *addr
@@ -268,6 +275,9 @@ pub enum ExCommand {
   Delete,
   Yank,
   Put,
+  Transfer,
+  Join,
+  Move,
   Edit,
   Read,
   Write,
@@ -517,6 +527,10 @@ impl<'a> ExLexer<'a> {
       ExCommand::Global => self.parse_global_arg(),
       ExCommand::Normal => self.parse_normal_seq(),
       ExCommand::Shell => self.parse_shell_cmd(),
+      ExCommand::Move | ExCommand::Transfer => {
+        self.skip_whitespace();
+        self.parse_one_addr();
+      }
       cmd => {
         // Some command like 'edit' or 'write' or something that just expects words
         // These are subject to shell expansion, so we use LexStream for these
@@ -727,6 +741,9 @@ pub enum ExNdRule {
   Yank,
   Put(Anchor),
   Expand,
+  Move(AddressRange),
+  Transfer(AddressRange),
+  Join,
 
   Edit(Box<[PathBuf]>),
   Read(ReadSrc),
@@ -950,14 +967,44 @@ impl ExParser {
       ExCommand::Stash => self.parse_stash(),
       ExCommand::Help => self.parse_help(),
       ExCommand::Shell => self.parse_shell(),
+      ExCommand::Move => self.parse_move(),
+      ExCommand::Transfer => self.parse_transfer(),
       ExCommand::Delete => ExR::success(ExNdRule::Delete),
       ExCommand::Yank => ExR::success(ExNdRule::Yank),
       ExCommand::Put => ExR::success(ExNdRule::Put(Anchor::After)),
+      ExCommand::Join => ExR::success(ExNdRule::Join),
       ExCommand::Quit => ExR::success(ExNdRule::Quit),
       ExCommand::WriteQuit => ExR::success(ExNdRule::WriteQuit),
       ExCommand::Expand => ExR::success(ExNdRule::Expand),
       ExCommand::Unknown => ExR::error(format!("not an editor command: {}", tk.span.as_str())),
     }
+  }
+  fn parse_addr_rule(
+    &mut self,
+    cmd: &'static str,
+    fact: fn(AddressRange) -> ExNdRule,
+  ) -> ExR<ExNdRule> {
+    let Some(addr) = self.tokens.next() else {
+      return ExR::error(format!("expected address after {cmd} command"));
+    };
+    if !addr.class.is_addr() {
+      return ExR::error(format!("expected address after {cmd} command"));
+    };
+
+    let dest = match Self::parse_one_address(&addr) {
+      ExInnerPartialParseResult::Partial(addr) => addr,
+      ExInnerPartialParseResult::Full(_) => {
+        return ExR::error("'%' is not a valid destination".into());
+      }
+    };
+
+    ExR::success(fact(AddressRange::Single(dest)))
+  }
+  fn parse_transfer(&mut self) -> ExR<ExNdRule> {
+    self.parse_addr_rule("transfer", ExNdRule::Transfer)
+  }
+  fn parse_move(&mut self) -> ExR<ExNdRule> {
+    self.parse_addr_rule("move", ExNdRule::Move)
   }
   fn parse_shell(&mut self) -> ExR<ExNdRule> {
     let mut args = vec![];

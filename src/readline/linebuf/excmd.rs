@@ -12,7 +12,7 @@ use scopeguard::defer;
 
 use super::{
   Line, Lines, MotionKind, Pos, ShResult, autocmd,
-  editcmd::{Anchor, Cmd, EditCmd, ReadSrc, StashArgs, StashListArg, Verb, WriteDest},
+  editcmd::{Anchor, Cmd, EditCmd, LineAddr, ReadSrc, StashArgs, StashListArg, Verb, WriteDest},
   editmode::{AddressRange, ExNdRule, ExNode, SubFlags},
   eval::{
     execute::{exec_int, exec_nonint},
@@ -26,7 +26,7 @@ use super::{
   status_msg, system_msg, try_var,
 };
 use crate::{
-  HashSet,
+  HashSet, sherr,
   util::{format_size, var_ctx_guard},
 };
 use crate::{state, verb};
@@ -61,9 +61,10 @@ impl super::LineBuf {
     let address = address.clone();
 
     match kind {
-      ExNdRule::Expand /*====================*/ => self.ex_expand(cmd, address, *bang),
-      ExNdRule::Delete /*--------------------*/ => self.ex_delete(cmd, address),
-      ExNdRule::Yank /*======================*/ => self.ex_yank(cmd, address),
+      ExNdRule::Expand /*--------------------*/ => self.ex_expand(cmd, address, *bang),
+      ExNdRule::Delete /*====================*/ => self.ex_delete(cmd, address),
+      ExNdRule::Yank /*----------------------*/ => self.ex_yank(cmd, address),
+      ExNdRule::Join /*======================*/ => self.ex_join(cmd, address),
       ExNdRule::Put(anchor) /*---------------*/ => self.ex_put(cmd, *anchor, address),
       ExNdRule::Edit(paths) /*===============*/ => Self::ex_edit(paths),
       ExNdRule::Write(write_dest) /*---------*/ => self.ex_write(write_dest),
@@ -73,6 +74,8 @@ impl super::LineBuf {
       ExNdRule::Stash(stash_args) /*---------*/ => self.ex_stash(stash_args),
       ExNdRule::Substitute { pat, repl, flags } => self.ex_substitute(cmd, pat, repl, *flags, address.as_ref()),
       ExNdRule::Global { pat, nested } /*----*/ => self.ex_global(cmd, *bang, pat, nested, address),
+      ExNdRule::Move(dest) /*================*/ => self.ex_move(cmd, address, dest, true),
+      ExNdRule::Transfer(dest) /*------------*/ => self.ex_move(cmd, address, dest, false),
       ExNdRule::Read(read_src) /*============*/ => {
         self.ex_read(read_src);
         Ok(())
@@ -87,6 +90,88 @@ impl super::LineBuf {
     }
   }
 
+  fn ex_move(
+    &mut self,
+    cmd: &EditCmd,
+    source: Option<AddressRange>,
+    dest: &AddressRange,
+    delete: bool,
+  ) -> ShResult<()> {
+    // Resolve the source line range as a motion (defaults to the current line).
+    let source = source.unwrap_or_default();
+    let src_cmd = EditCmd {
+      motion: Some(motion!(source.as_motion())),
+      ..cmd.clone()
+    };
+    let Some(motion) = self.eval_motion(&src_cmd)? else {
+      return Ok(());
+    };
+    let MotionKind::Line {
+      start,
+      end,
+      inclusive,
+    } = motion
+    else {
+      return Err(sherr!(ExecFail, "move/copy operate on whole lines"));
+    };
+    let src_start = start;
+    let src_end = if inclusive {
+      end
+    } else {
+      end.saturating_sub(1)
+    };
+    let AddressRange::Single(addr) = dest else {
+      return Err(sherr!(
+        ExecFail,
+        "move/copy take a single destination address"
+      ));
+    };
+    let insert_idx = match addr {
+      LineAddr::Number(n) if *n == 0 => 0,
+      other => {
+        let Some(row) = self.resolve_line_addr(other)? else {
+          return Err(sherr!(ExecFail, "could not resolve move/copy destination"));
+        };
+        row + 1
+      }
+    };
+
+    // Relocating a range into itself is undefined.
+    if delete && insert_idx > src_start && insert_idx <= src_end {
+      return Err(sherr!(ExecFail, "cannot move a range of lines into itself"));
+    }
+
+    let content = if delete {
+      self.delete_range(&motion)
+    } else {
+      self.yank_range(&motion)
+    };
+    let lines = content.0;
+    let count = lines.len();
+    if count == 0 {
+      return Ok(());
+    }
+
+    let final_idx = if delete && insert_idx > src_end {
+      insert_idx - count
+    } else {
+      insert_idx
+    }
+    .min(self.lines.len());
+
+    for (i, line) in lines.into_iter().enumerate() {
+      self.lines.insert(final_idx + i, line);
+    }
+
+    // Leave the cursor on the last relocated line, like vi.
+    let last = (final_idx + count)
+      .saturating_sub(1)
+      .min(self.lines.len().saturating_sub(1));
+    self.set_cursor(Pos { row: last, col: 0 });
+
+    Ok(())
+  }
+
   fn ex_global(
     &mut self,
     cmd: &EditCmd,
@@ -95,15 +180,9 @@ impl super::LineBuf {
     nested: &ExNode,
     range: Option<AddressRange>,
   ) -> ShResult<()> {
-    log::debug!(
-      "ex_global entry: negated={negated} pat={pat:?} range={range:?} nested.kind={:?}",
-      nested.kind
-    );
     let range = range.unwrap_or_else(AddressRange::all_lines);
     let constraint = range.as_motion();
-    log::debug!("ex_global: resolved constraint = {constraint:?}");
     let lines = self.get_matching_lines(&constraint, pat, negated)?;
-    log::debug!("ex_global: matched lines = {lines:?}");
 
     let nested_cmd = EditCmd {
       verb: Some(verb!(Verb::ExCmd(nested.clone()))),
@@ -111,7 +190,6 @@ impl super::LineBuf {
     };
 
     for line in lines.into_iter().rev() {
-      log::debug!("ex_global: dispatching nested for row {line}");
       self.set_cursor(Pos { row: line, col: 0 });
       self.dispatch_ex_node(&nested_cmd)?;
     }
@@ -690,6 +768,10 @@ impl super::LineBuf {
   fn ex_put(&mut self, cmd: &EditCmd, anchor: Anchor, range: Option<AddressRange>) -> ShResult<()> {
     let range = range.unwrap_or_default();
     self.replace_verb(cmd, Verb::Put(anchor), &range)
+  }
+  fn ex_join(&mut self, cmd: &EditCmd, range: Option<AddressRange>) -> ShResult<()> {
+    let range = range.unwrap_or_default();
+    self.replace_verb(cmd, Verb::JoinLines, &range)
   }
 
   fn replace_verb(&mut self, cmd: &EditCmd, verb: Verb, range: &AddressRange) -> ShResult<()> {

@@ -575,33 +575,29 @@ impl super::LineBuf {
     let old_exclusive = self.cursor.exclusive;
     let mut row = self.row();
     let mut count = count;
-    if self.select_range().is_some() {
-      // Derive the row range to join. Prefer a resolved motion (e.g.
-      // when a caller passed Motion::WholeLine); fall back to the
-      // visual selection when the EditCmd carries no motion — that's
-      // the path taken by ViVisual's `J` arm.
-      let (start_row, end_row) = match self.eval_motion(cmd)? {
-        Some(MotionKind::Line { start, end, .. }) => (start, end),
-        Some(MotionKind::Char { start, end, .. }) => (start.row, end.row),
-        Some(MotionKind::Block { .. }) => return Ok(()),
-        None => match self.select_range() {
-          Some(Motion::LineRange(s_addr, e_addr)) => {
-            let s = self
-              .resolve_line_addr(&s_addr)
-              .ok()
-              .flatten()
-              .unwrap_or(self.row());
-            let e = self
-              .resolve_line_addr(&e_addr)
-              .ok()
-              .flatten()
-              .unwrap_or(self.row());
-            (s, e)
-          }
-          Some(Motion::CharRange(s, e) | Motion::BlockRange(s, e)) => (s.row, e.row),
-          _ => return Ok(()),
-        },
-      };
+    let range = match self.eval_motion(cmd)? {
+      Some(MotionKind::Line { start, end, .. }) => Some((start, end)),
+      Some(MotionKind::Char { start, end, .. }) => Some((start.row, end.row)),
+      Some(MotionKind::Block { .. }) => return Ok(()),
+      None => match self.select_range() {
+        Some(Motion::LineRange(s_addr, e_addr)) => {
+          let s = self
+            .resolve_line_addr(&s_addr)
+            .ok()
+            .flatten()
+            .unwrap_or(self.row());
+          let e = self
+            .resolve_line_addr(&e_addr)
+            .ok()
+            .flatten()
+            .unwrap_or(self.row());
+          Some((s, e))
+        }
+        Some(Motion::CharRange(s, e) | Motion::BlockRange(s, e)) => Some((s.row, e.row)),
+        _ => None,
+      },
+    };
+    if let Some((start_row, end_row)) = range {
       let (s, e) = ordered(start_row, end_row);
       count = (e - s).max(1);
       row = s;

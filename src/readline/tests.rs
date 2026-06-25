@@ -266,6 +266,13 @@ vi_test! {
   ex_global_negated_sub    : "foo bar\nkeep\nfoo biz"       => ":g!/keep/s/foo/X/\r" => "X bar\nkeep\nX biz", 0;
   ex_normal_range          : "hello world\nfoo bar\nbiz"    => ":1,2normal!dw\r"     => "world\nbar\nbiz", 6;
   ex_repeat_global         : "echo foo\nls\necho bar\nls2"  => ":g/echo/d\r   :g\r"  => "ls\nls2", 0;
+  ex_move_line_to_end      : "a\nb\nc"                       => ":1m$\r"              => "b\nc\na", 4;
+  ex_move_line_to_top      : "a\nb\nc"                       => ":3m0\r"              => "c\na\nb", 0;
+  ex_move_range_to_end     : "a\nb\nc"                       => ":1,2m$\r"            => "c\na\nb", 4;
+  ex_copy_range_to_top     : "a\nb\nc"                       => ":1,2t0\r"            => "a\nb\na\nb\nc", 2;
+  ex_copy_line_to_end      : "a\nb\nc"                       => ":1t$\r"              => "a\nb\nc\na", 6;
+  ex_join_range            : "a\nb\nc"                       => ":1,2j\r"             => "a b\nc", 1;
+  ex_join_all              : "foo\nbar\nbaz"                 => ":%j\r"               => "foo bar baz", 7;
   visual_dot_repeat        : "hello\nworld\nfoo\nbar\nbiz"  => "jVjdu2k."            => "foo\nbar\nbiz", 0;
   visual_replace           : "echo ./barbiz/baz buzz"       => "wvEdwvep"            => "echo  ./barbiz/baz", 17;
   n_char_search_f          : "foo=(bar biz bam)"            => "d2fb"                => "iz bam)", 0;
