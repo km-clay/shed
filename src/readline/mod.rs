@@ -731,7 +731,10 @@ impl ShedLine {
   }
 
   fn handle_hist_search_key(&mut self, key: KeyEvent) -> ShResult<()> {
-    let finder = self.history_fzf().unwrap();
+    let Some(finder) = self.history_fzf() else {
+      status_msg!("No history search active");
+      return Ok(());
+    };
     match finder.handle_key(key)? {
       SelectorResponse::Accept(cmd) => {
         // The accepted entry replaces the buffer, so drop the dismiss-restore.
@@ -1246,7 +1249,10 @@ impl ShedLine {
       ));
       self.core.editor.clear_hint();
     } else {
-      let finder = self.history_fzf().unwrap();
+      let Some(finder) = self.history_fzf() else {
+        status_msg!("failed to start history search");
+        return;
+      };
       let entries = finder.candidates().to_vec();
       let matches = finder
         .filtered()
