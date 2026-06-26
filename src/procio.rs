@@ -780,27 +780,34 @@ pub(super) fn capture_command(
         w
       });
 
-      if let Some(pipe) = stdin_write {
+      let captured = if let Some(pipe) = stdin_write {
         let bytes = stdin.unwrap().as_bytes();
-        let mut written = 0;
-        while written < bytes.len() {
-          match write(pipe.as_fd(), &bytes[written..]) {
-            Ok(0) => break,
-            Ok(n) => written += n,
-            Err(Errno::EINTR) => {
-              if signal::sigint_pending() {
-                state::Shed::set_status(130);
-                break;
+        std::thread::scope(|scope| {
+          scope.spawn(move || {
+            let mut written = 0;
+            while written < bytes.len() {
+              match write(pipe.as_fd(), &bytes[written..]) {
+                Ok(0) => break,
+                Ok(n) => written += n,
+                Err(Errno::EINTR) => {
+                  if signal::sigint_pending() {
+                    state::Shed::set_status(130);
+                    break;
+                  }
+                }
+                // The child closed its stdin early (e.g. `head`); stop feeding it.
+                Err(Errno::EPIPE) => break,
+                Err(_) => break,
               }
             }
-            Err(e) => {
-              return Err(sherr!(InternalErr, "error writing to stdin pipe: {e}"));
-            }
-          }
-        }
-      }
-
-      let captured = read_fd_to_string(rpipe)?.to_string();
+            // Closing the write end signals EOF to the child's stdin.
+            drop(pipe);
+          });
+          read_fd_to_string(rpipe)
+        })?
+      } else {
+        read_fd_to_string(rpipe)?
+      };
 
       let status = loop {
         match waitpid(child, Some(WtFlag::WUNTRACED)) {

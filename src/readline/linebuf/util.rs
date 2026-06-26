@@ -449,6 +449,23 @@ impl super::LineBuf {
       }
     }
   }
+
+  /// Insert `s` verbatim with no auto-indent or dedent, in O(n).
+  pub(super) fn insert_str_verbatim(&mut self, s: &str) {
+    for gr in s.graphemes(true) {
+      let gr = Grapheme::from(gr);
+      let pos = self.cursor.pos;
+      if gr.is_lf() {
+        let rest = self.lines[pos.row].split_off(pos.col);
+        self.lines.insert(pos.row + 1, rest);
+        self.cursor.pos.set(pos.row + 1, 0);
+      } else {
+        self.lines[pos.row].insert(pos.col, gr);
+        self.cursor.pos.col += 1;
+      }
+    }
+    self.indent_cache = None;
+  }
   pub fn pop_left(&mut self) -> bool {
     let Some(pos) = self.concat_points.pop_front() else {
       return false;

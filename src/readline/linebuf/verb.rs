@@ -155,7 +155,7 @@ impl super::LineBuf {
     register.write_to_register(reg_content);
 
     self.fix_cursor();
-    self.insert_str(&expanded);
+    self.insert_str_verbatim(&expanded);
 
     Ok(())
   }

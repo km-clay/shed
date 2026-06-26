@@ -27,27 +27,41 @@ impl CharClass {
 
 impl From<&Grapheme> for CharClass {
   fn from(g: &Grapheme) -> Self {
-    let Some(&first) = g.0.first() else {
-      return Self::Other;
-    };
+    match g {
+      Grapheme::Single(ch) => {
+        if ch.is_alphanumeric() || ch == &'_' {
+          CharClass::Alphanum
+        } else if ch.is_whitespace() {
+          CharClass::Whitespace
+        } else if !ch.is_alphanumeric() {
+          CharClass::Symbol
+        } else {
+          CharClass::Other
+        }
+      }
+      Grapheme::Cluster(cluster) => {
+        let Some(first) = cluster.chars().next() else {
+          return Self::Other;
+        };
+        if first.is_alphanumeric()
+          && cluster[1..]
+            .chars()
+            .all(|c| c.is_ascii_punctuation() || c == '\u{0301}' || c == '\u{0308}')
+        {
+          // Handles things like `ï`, `é`, etc., by manually allowing common diacritics
+          return CharClass::Alphanum;
+        }
 
-    if first.is_alphanumeric()
-      && g.0[1..]
-        .iter()
-        .all(|&c| c.is_ascii_punctuation() || c == '\u{0301}' || c == '\u{0308}')
-    {
-      // Handles things like `ï`, `é`, etc., by manually allowing common diacritics
-      return CharClass::Alphanum;
-    }
-
-    if g.0.iter().all(|&c| c.is_alphanumeric() || c == '_') {
-      CharClass::Alphanum
-    } else if g.0.iter().all(|c| c.is_whitespace()) {
-      CharClass::Whitespace
-    } else if g.0.iter().all(|c| !c.is_alphanumeric()) {
-      CharClass::Symbol
-    } else {
-      CharClass::Other
+        if cluster.chars().all(|c| c.is_alphanumeric() || c == '_') {
+          CharClass::Alphanum
+        } else if cluster.chars().all(|c| c.is_whitespace()) {
+          CharClass::Whitespace
+        } else if cluster.chars().all(|c| !c.is_alphanumeric()) {
+          CharClass::Symbol
+        } else {
+          CharClass::Other
+        }
+      }
     }
   }
 }

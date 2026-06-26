@@ -4,16 +4,17 @@ use std::{
   slice::SliceIndex,
 };
 
-use smallvec::SmallVec;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
 use super::{CharClass, Pos};
 /// A single grapheme. Graphemes can be composed of multiple chars, but are always treated as a single unit for display and editing purposes.
-/// Using a `SmallVec`<[char; 4]> allows us to organize most multi-byte codepoints while maintaining both ownership and stack allocation.
-/// If we ever run into a Grapheme made of more than 4 chars, just that Grapheme will gracefully spill over onto the heap
+/// The common single-codepoint case stays inline in `Single`; only true multi-codepoint clusters take a heap allocation via `Cluster`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Grapheme(pub(super) SmallVec<[char; 4]>);
+pub enum Grapheme {
+  Single(char),
+  Cluster(Box<str>),
+}
 
 impl Grapheme {
   /// Returns the display width of the Grapheme. ASCII control bytes (other
@@ -21,24 +22,35 @@ impl Grapheme {
   /// `^M`, `^?`, etc.) in the highlighter, so their width must match.
   /// Other unprintable codepoints fall back to 0.
   pub fn width(&self) -> usize {
-    self
-      .0
-      .iter()
-      .map(|c| {
-        if Self::is_visualized_control(*c) {
+    match self {
+      Grapheme::Single(ch) => {
+        if Self::is_visualized_control(*ch) {
           2
         } else {
-          c.width().unwrap_or(0)
+          ch.width().unwrap_or(0)
         }
-      })
-      .sum()
+      }
+      Grapheme::Cluster(cluster) => cluster
+        .chars()
+        .map(|c| {
+          if Self::is_visualized_control(c) {
+            2
+          } else {
+            c.width().unwrap_or(0)
+          }
+        })
+        .sum(),
+    }
   }
 
   fn is_visualized_control(c: char) -> bool {
     matches!(c, '\x00'..='\x08' | '\x0b'..='\x1f' | '\x7f')
   }
   pub fn len_utf8(&self) -> usize {
-    self.0.iter().map(|c| c.len_utf8()).sum()
+    match self {
+      Grapheme::Single(ch) => ch.len_utf8(),
+      Grapheme::Cluster(cluster) => cluster.chars().map(|c| c.len_utf8()).sum(),
+    }
   }
   /// Returns true if the Grapheme is wrapping a linefeed ('\n')
   pub fn is_lf(&self) -> bool {
@@ -46,7 +58,7 @@ impl Grapheme {
   }
   /// Returns true if the Grapheme consists of exactly one char and that char is equal to `c`
   pub fn is_char(&self, c: char) -> bool {
-    self.0.len() == 1 && self.0[0] == c
+    self.as_char().is_some_and(|ch| ch == c)
   }
   /// Returns the `CharClass` of the Grapheme, which is determined by the properties of its chars
   /// Used for things like word motions
@@ -57,10 +69,9 @@ impl Grapheme {
   /// If the Grapheme consists of exactly one char, returns that char. Otherwise, returns None.
   /// All callsites that use this method operate on ascii, so never returning anything for multibyte sequences is fine.
   pub fn as_char(&self) -> Option<char> {
-    if self.0.len() == 1 {
-      Some(self.0[0])
-    } else {
-      None
+    match self {
+      Grapheme::Single(ch) => Some(*ch),
+      Grapheme::Cluster(_) => None,
     }
   }
 
@@ -72,20 +83,17 @@ impl Grapheme {
 
 impl From<char> for Grapheme {
   fn from(value: char) -> Self {
-    let mut new = SmallVec::<[char; 4]>::new();
-    new.push(value);
-    Self(new)
+    Self::Single(value)
   }
 }
 
 impl From<&str> for Grapheme {
   fn from(value: &str) -> Self {
-    assert_eq!(value.graphemes(true).count(), 1);
-    let mut new = SmallVec::<[char; 4]>::new();
-    for char in value.chars() {
-      new.push(char);
+    if value.chars().count() == 1 {
+      Self::Single(value.chars().next().unwrap())
+    } else {
+      Self::Cluster(value.into())
     }
-    Self(new)
   }
 }
 
@@ -103,10 +111,10 @@ impl From<&String> for Grapheme {
 
 impl Display for Grapheme {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    for ch in &self.0 {
-      write!(f, "{ch}")?;
+    match self {
+      Grapheme::Single(ch) => write!(f, "{ch}"),
+      Grapheme::Cluster(cluster) => write!(f, "{cluster}"),
     }
-    Ok(())
   }
 }
 
