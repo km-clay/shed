@@ -159,12 +159,7 @@ impl super::Builtin for FixCmd {
   fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
     unreachable!("fixcmd is a special snowflake command that needs really special handling");
   }
-  fn run_builtin(
-    &self,
-    node: &Node,
-    _dispatcher: &mut Dispatcher,
-    _stdin: Option<Vec<u8>>,
-  ) -> ShResult<()> {
+  fn run_builtin(&self, node: &Node, _dispatcher: &mut Dispatcher) -> ShResult<()> {
     let span = node.get_span();
     let NdRule::Command {
       assignments: _,

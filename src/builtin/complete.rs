@@ -110,12 +110,7 @@ impl super::Builtin for CompGen {
   fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
     unreachable!("CompGen uses run_builtin directly")
   }
-  fn run_builtin(
-    &self,
-    node: &Node,
-    _dispatcher: &mut Dispatcher,
-    _stdin: Option<Vec<u8>>,
-  ) -> ShResult<()> {
+  fn run_builtin(&self, node: &Node, _dispatcher: &mut Dispatcher) -> ShResult<()> {
     use super::getopt::get_opts_from_tokens_raw;
 
     let NdRule::Command {

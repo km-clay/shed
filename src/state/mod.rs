@@ -117,6 +117,8 @@ pub(super) struct Shed {
   socket: RefCell<Option<Arc<socket::ShedSocket>>>,
   subscribers: RefCell<Vec<Arc<UnixStream>>>,
 
+  sinks: RefCell<procio::Sinks>,
+
   #[cfg(test)]
   saved: RefCell<Option<Box<Self>>>,
 }
@@ -140,6 +142,8 @@ impl Shed {
 
       socket: RefCell::new(None),
       subscribers: RefCell::new(vec![]),
+
+      sinks: RefCell::new(procio::Sinks::new()),
 
       #[cfg(test)]
       saved: RefCell::new(None),
@@ -170,6 +174,15 @@ impl Shed {
    *
    * Overall, if we only use these to get and set data and not perform any actual calculations, we should be fine.
    */
+
+  /// Access the I/O sinks
+  #[track_caller]
+  pub fn sinks<T, F>(f: F) -> T
+  where
+    F: FnOnce(&mut procio::Sinks) -> T,
+  {
+    access_mut!(SHED, sinks, f)
+  }
 
   /// Read from the job table
   #[track_caller]
@@ -565,6 +578,7 @@ impl Shed {
       system_msg_hist: RefCell::new(self.system_msg_hist.borrow().clone()),
       socket: RefCell::new(self.socket.borrow().clone()),
       subscribers: RefCell::new(self.subscribers.borrow().clone()),
+      sinks: RefCell::new(self.sinks.borrow().clone()),
       saved: RefCell::new(None),
       status_code: AtomicI32::new(self.status_code.load(Ordering::Relaxed)),
     };

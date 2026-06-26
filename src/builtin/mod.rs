@@ -2,7 +2,6 @@ use ariadne::Span as ASpan;
 use nix::unistd::Pid;
 use scopeguard::defer;
 use std::{
-  cell::RefCell,
   fmt::Write,
   fs,
   io::{self, Read},
@@ -10,9 +9,9 @@ use std::{
 
 use crate::{
   eval::execute,
-  procio::{bytes_to_string, out_bytes, stdin_fileno},
+  procio::{bytes_to_string, out_bytes},
   state::meta::UtilKind,
-  util::{FdReader, ShResultExt},
+  util::ShResultExt,
 };
 
 use super::{
@@ -32,29 +31,23 @@ use super::{
   var,
 };
 
-// Stack of output sinks for in-process pipelines; the stack lets internal
-// pipelines nest inside command subs.
-thread_local! {
-  pub(crate) static OUT_SINK: RefCell<Vec<Vec<u8>>> = const { RefCell::new(Vec::new()) };
-  pub(crate) static IN_SINK: RefCell<Vec<Option<Vec<u8>>>> = const { RefCell::new(Vec::new()) };
-}
-
-fn install_out_sink() {
-  OUT_SINK.with(|s| {
-    s.borrow_mut().push(vec![]);
-  });
-}
+// The in-process pipeline sinks live on `Shed` (see `procio::Sinks`); these are
+// thin accessors over `Shed::sinks`. Each access must stay atomic: never hold a
+// `Shed::sinks` borrow across emitting output, a scope push/pop, or running a
+// command, or `access_mut` will panic on the re-entrant borrow.
 
 pub(crate) fn has_out_sink() -> bool {
-  OUT_SINK.with(|s| s.borrow().last().is_some())
+  Shed::sinks(|s| s.has_output())
 }
 
 pub(crate) fn has_in_sink() -> bool {
-  IN_SINK.with(|s| s.borrow().last().is_some())
+  Shed::sinks(|s| s.has_input())
 }
 
+/// Drain the remaining piped stdin so it can be handed to a forked child. The
+/// in-process read path goes through `Shed::sinks` (`io::Read`) instead.
 pub(crate) fn take_stdin() -> Option<Vec<u8>> {
-  IN_SINK.with(|s| s.borrow_mut().last_mut().and_then(|opt| opt.take()))
+  Shed::sinks(|s| s.drain_input())
 }
 
 pub(crate) struct SinkScope {
@@ -62,24 +55,20 @@ pub(crate) struct SinkScope {
 }
 impl SinkScope {
   pub fn new() -> Self {
-    install_out_sink();
+    Shed::sinks(|s| s.push_output());
     Self { taken: false }
   }
 
   pub fn take(mut self) -> Vec<u8> {
     self.taken = true;
-    OUT_SINK
-      .with(|s| s.borrow_mut().pop())
-      .expect("SinkScope should have an out sink")
+    Shed::sinks(|s| s.pop_output()).expect("SinkScope should have an out sink")
   }
 }
 
 impl Drop for SinkScope {
   fn drop(&mut self) {
     if !self.taken {
-      OUT_SINK
-        .with(|s| s.borrow_mut().pop())
-        .expect("SinkScope should have an out sink");
+      Shed::sinks(|s| s.pop_output()).expect("SinkScope should have an out sink");
     }
   }
 }
@@ -87,18 +76,14 @@ impl Drop for SinkScope {
 pub(crate) struct StdinScope;
 impl StdinScope {
   pub fn push(input: Vec<u8>) -> Self {
-    IN_SINK.with(|s| {
-      s.borrow_mut().push(Some(input));
-    });
+    Shed::sinks(|s| s.push_input(input));
     Self
   }
 }
 
 impl Drop for StdinScope {
   fn drop(&mut self) {
-    IN_SINK
-      .with(|s| s.borrow_mut().pop())
-      .expect("StdinScope should have an in sink");
+    Shed::sinks(|s| s.pop_input());
   }
 }
 
@@ -313,7 +298,7 @@ pub(super) trait Builtin: Sync {
   ///
   /// Slurps stdin if `args.argv` is empty, or if stdin is available
   fn get_input(&self, args: &mut BuiltinArgs) -> Option<Vec<u8>> {
-    self.get_input_with(args, |a| a.argv.is_empty() || a.has_stdin())
+    self.get_input_with(args, |a| a.argv.is_empty() || has_in_sink())
   }
 
   /// Input getter. Takes a predicate that decides whether to slurp stdin or not.
@@ -323,23 +308,18 @@ pub(super) trait Builtin: Sync {
     should_slurp: fn(&BuiltinArgs) -> bool,
   ) -> Option<Vec<u8>> {
     if should_slurp(args) {
-      if args.has_stdin() {
-        args.take_stdin()
-      } else {
-        procio::read_input().ok()
-      }
+      // Slurp the piped stdin sink if present, else the real fd — the `Read`
+      // impl on `Sinks` resolves which, and an exhausted sink reads as EOF
+      // rather than falling through to the fd.
+      let mut buf = Vec::new();
+      Shed::sinks(|s| s.read_to_end(&mut buf)).ok().map(|_| buf)
     } else {
       None
     }
   }
 
   /// The main entry point for running a builtin. This is responsible for setting up the environment, handling redirections, and catching control flow errors.
-  fn setup_builtin(
-    &self,
-    node: &Node,
-    dispatcher: &mut Dispatcher,
-    stdin: Option<Vec<u8>>,
-  ) -> ShResult<()> {
+  fn setup_builtin(&self, node: &Node, dispatcher: &mut Dispatcher) -> ShResult<()> {
     let cmd_raw = node.get_command().unwrap().to_string();
     let context = node.context.clone();
     let NdRule::Command { assignments, argv } = &node.class else {
@@ -395,7 +375,7 @@ pub(super) trait Builtin: Sync {
       guard.persist();
     }
 
-    let result = self.run_builtin(node, dispatcher, stdin);
+    let result = self.run_builtin(node, dispatcher);
 
     // Now we inspect the error that we got, if any
     match result {
@@ -431,12 +411,7 @@ pub(super) trait Builtin: Sync {
     }
   }
   /// Parse arguments and options, pack `BuiltinArgs`, run `self.execute()`
-  fn run_builtin(
-    &self,
-    node: &Node,
-    _dispatcher: &mut Dispatcher,
-    stdin: Option<Vec<u8>>,
-  ) -> ShResult<()> {
+  fn run_builtin(&self, node: &Node, _dispatcher: &mut Dispatcher) -> ShResult<()> {
     let span = node.get_span().clone();
     let no_split = node.flags.contains(NdFlags::NO_SPLIT);
     let NdRule::Command {
@@ -458,7 +433,6 @@ pub(super) trait Builtin: Sync {
       opts,
       span,
       cmd_span,
-      stdin,
     };
 
     self.execute(builtin_args)
@@ -475,7 +449,6 @@ pub struct BuiltinArgs {
   opts: Vec<Opt>,
   span: Span,     // the entire call
   cmd_span: Span, // just the command
-  stdin: Option<Vec<u8>>,
 }
 
 impl BuiltinArgs {
@@ -485,12 +458,6 @@ impl BuiltinArgs {
   }
   pub fn cmd_span(&self) -> Span {
     self.cmd_span.clone()
-  }
-  pub fn take_stdin(&mut self) -> Option<Vec<u8>> {
-    self.stdin.take()
-  }
-  pub fn has_stdin(&self) -> bool {
-    self.stdin.is_some()
   }
 }
 
@@ -562,7 +529,7 @@ impl Builtin for Thru {
       OptSpec::single_arg("limit"),
     ]
   }
-  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut count = false;
     let mut append = false;
     let mut tee = None;
@@ -613,7 +580,22 @@ impl Builtin for Thru {
       .ok()
       .flatten();
 
-    let mut stdin = args.take_stdin();
+    // Stdin reads go through `Sinks`: the in-process pipeline sink if present,
+    // else the real fd 0. Each chunk is its own `Shed::sinks` borrow so it
+    // never overlaps the `out_bytes` write below.
+    enum ThruSource {
+      File(fs::File),
+      Stdin,
+    }
+    impl ThruSource {
+      fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+          ThruSource::File(f) => f.read(buf),
+          ThruSource::Stdin => Shed::sinks(|s| s.read(buf)),
+        }
+      }
+    }
+
     let sources: Vec<Option<String>> = if args.argv.is_empty() {
       vec![None]
     } else {
@@ -625,34 +607,21 @@ impl Builtin for Thru {
     };
 
     let mut byte_count = 0;
-    let mut took_stdin = false;
 
     for src in sources {
       if limit == Some(0) {
         break;
       };
 
-      let mut reader: Box<dyn Read> = match &src {
+      let mut reader = match &src {
         Some(path) => match fs::File::open(path) {
-          Ok(f) => Box::new(f),
+          Ok(f) => ThruSource::File(f),
           Err(e) => {
             errln!("thru: {path}: {e}");
             continue;
           }
         },
-        None => match stdin.take() {
-          Some(buf) => {
-            took_stdin = true;
-            Box::new(io::Cursor::new(buf))
-          }
-          None => {
-            if took_stdin {
-              Box::new(io::empty())
-            } else {
-              Box::new(FdReader(stdin_fileno()))
-            }
-          }
-        },
+        None => ThruSource::Stdin,
       };
       let path = src.unwrap_or_else(|| "stdin".to_string());
 
@@ -702,12 +671,7 @@ impl Builtin for BuiltinBuiltin {
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     unreachable!("this one operates on the node directly")
   }
-  fn setup_builtin(
-    &self,
-    node: &Node,
-    dispatcher: &mut Dispatcher,
-    stdin: Option<Vec<u8>>,
-  ) -> ShResult<()> {
+  fn setup_builtin(&self, node: &Node, dispatcher: &mut Dispatcher) -> ShResult<()> {
     let span = node.get_span();
     let NdRule::Command { assignments, argv } = &node.class else {
       unreachable!()
@@ -725,7 +689,7 @@ impl Builtin for BuiltinBuiltin {
       assignments: assignments.clone(),
       argv: inner_argv,
     };
-    builtin.setup_builtin(&forwarded, dispatcher, stdin)
+    builtin.setup_builtin(&forwarded, dispatcher)
   }
 }
 
@@ -734,12 +698,7 @@ impl Builtin for CommandBuiltin {
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     unreachable!("this one operates on the node directly")
   }
-  fn run_builtin(
-    &self,
-    node: &Node,
-    dispatcher: &mut Dispatcher,
-    _stdin: Option<Vec<u8>>,
-  ) -> ShResult<()> {
+  fn run_builtin(&self, node: &Node, dispatcher: &mut Dispatcher) -> ShResult<()> {
     let NdRule::Command { assignments, argv } = &node.class else {
       unreachable!()
     };

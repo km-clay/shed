@@ -420,17 +420,8 @@ macro_rules! err {
 #[macro_export]
 macro_rules! _write_inner {
   (out, $macro:tt, $fd:expr, $($arg:tt)*) => {{
-    if $crate::builtin::has_out_sink() {
-      use std::io::Write;
-      $crate::builtin::OUT_SINK.with(|s| {
-        let mut borrow = s.borrow_mut();
-        let sink = borrow.last_mut().unwrap();
-        $macro!(sink, $($arg)*).ok();
-      })
-    } else {
-      use std::io::Write;
-      $macro!($crate::util::FdWriter($fd), $($arg)*).ok();
-    }
+    use ::std::io::Write;
+    $crate::state::Shed::sinks(|s| { $macro!(s, $($arg)*).ok(); });
   }};
   (err, $macro:tt, $fd:expr, $($arg:tt)*) => {{
     use ::std::io::Write;

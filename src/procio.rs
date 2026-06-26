@@ -2,7 +2,7 @@ use std::{
   collections::{BTreeMap, BTreeSet},
   fmt::Debug,
   fs::{File, OpenOptions},
-  io::Write,
+  io::{self, Cursor, Read, Write},
   os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
   path::Path,
   rc::Rc,
@@ -17,16 +17,10 @@ use nix::{
     stat::Mode,
     wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid},
   },
-  unistd::{ForkResult, fork, isatty, read, write},
+  unistd::{self, ForkResult, fork, isatty, read, write},
 };
 
-use crate::{
-  Shed,
-  builtin::{OUT_SINK, has_out_sink},
-  signal,
-  state::terminal::Terminal,
-  util::{self, FdWriter},
-};
+use crate::{Shed, signal, state::terminal::Terminal, util};
 
 use super::{
   eval::{
@@ -697,6 +691,75 @@ impl Iterator for PipeGenerator {
   }
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Sinks {
+  output_sinks: Vec<Vec<u8>>,
+  input_sinks: Vec<Cursor<Vec<u8>>>,
+}
+
+impl Sinks {
+  pub const fn new() -> Self {
+    Self {
+      output_sinks: Vec::new(),
+      input_sinks: Vec::new(),
+    }
+  }
+
+  pub(crate) fn push_output(&mut self) {
+    self.output_sinks.push(Vec::new());
+  }
+  pub(crate) fn pop_output(&mut self) -> Option<Vec<u8>> {
+    self.output_sinks.pop()
+  }
+  pub(crate) fn has_output(&self) -> bool {
+    !self.output_sinks.is_empty()
+  }
+
+  pub(crate) fn push_input(&mut self, bytes: Vec<u8>) {
+    self.input_sinks.push(Cursor::new(bytes));
+  }
+  pub(crate) fn pop_input(&mut self) {
+    self.input_sinks.pop();
+  }
+  pub(crate) fn has_input(&self) -> bool {
+    !self.input_sinks.is_empty()
+  }
+
+  /// Drain whatever is left in the top input cursor (from its current position)
+  /// so it can be handed to a forked child's fd 0. `None` if there is no input
+  /// sink frame.
+  pub(crate) fn drain_input(&mut self) -> Option<Vec<u8>> {
+    self.input_sinks.last_mut().map(|cur| {
+      let mut rest = Vec::new();
+      cur.read_to_end(&mut rest).ok();
+      rest
+    })
+  }
+}
+
+impl io::Read for Sinks {
+  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    if let Some(sink) = self.input_sinks.last_mut() {
+      return sink.read(buf);
+    }
+    unistd::read(stdin_fileno(), buf).map_err(|e| io::Error::from_raw_os_error(e as i32))
+  }
+}
+
+impl io::Write for Sinks {
+  fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    if let Some(sink) = self.output_sinks.last_mut() {
+      return sink.write(buf);
+    }
+
+    unistd::write(stdout_fileno(), buf).map_err(|e| io::Error::from_raw_os_error(e as i32))
+  }
+
+  fn flush(&mut self) -> std::io::Result<()> {
+    Ok(())
+  }
+}
+
 pub(super) fn stdin_fileno() -> BorrowedFd<'static> {
   unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) }
 }
@@ -725,13 +788,73 @@ pub(super) fn bytes_to_string(buf: Vec<u8>) -> String {
 }
 
 pub(super) fn out_bytes(buf: &[u8]) {
-  if has_out_sink() {
-    OUT_SINK.with(|s| {
-      let _ = s.borrow_mut().last_mut().unwrap().write_all(buf);
-    })
-  } else {
-    let _ = FdWriter(stdout_fileno()).write_all(buf);
+  let _ = Shed::sinks(|s| s.write_all(buf));
+}
+
+/// A pipe created before a fork to deliver stdin bytes to the child on fd 0.
+///
+/// Used to materialize an in-process pipeline stdin sink (or any byte buffer)
+/// onto a real fd when a stage forks a child that reads stdin, e.g. an external
+/// command inside a command substitution.
+pub(crate) struct StdinPipe {
+  read: OwnedFd,
+  write: OwnedFd,
+}
+
+impl StdinPipe {
+  /// Create the pipe. Call before forking.
+  pub(crate) fn new() -> ShResult<Self> {
+    let (read, write) = pipes_high()?;
+    Ok(Self { read, write })
   }
+
+  /// Child side: register the fd-0 dup into `specs`, drop the write end so the
+  /// child sees EOF once the parent finishes feeding, and return the read end
+  /// to keep alive until the redirs are applied.
+  pub(crate) fn into_child(self, specs: &mut Vec<RedirSpec>) -> OwnedFd {
+    specs.push(RedirSpec::dup(
+      self.read.as_raw_fd(),
+      STDIN_FILENO,
+      RedirType::Input,
+    ));
+    drop(self.write);
+    self.read
+  }
+
+  /// Parent side: drop the read end and return the write end for feeding.
+  pub(crate) fn into_writer(self) -> OwnedFd {
+    drop(self.read);
+    self.write
+  }
+}
+
+/// Write all of `bytes` to `fd`, tolerating `EINTR` and a child that closes its
+/// end early (`EPIPE`, e.g. `head`). Does not close `fd`.
+pub(crate) fn write_all_to_fd(fd: BorrowedFd, bytes: &[u8]) {
+  let mut written = 0;
+  while written < bytes.len() {
+    match write(fd, &bytes[written..]) {
+      Ok(0) => break,
+      Ok(n) => written += n,
+      Err(Errno::EINTR) => {
+        if signal::sigint_pending() {
+          state::Shed::set_status(130);
+          break;
+        }
+      }
+      Err(Errno::EPIPE) => break,
+      Err(_) => break,
+    }
+  }
+}
+
+/// Feed `bytes` to `fd` from a background thread, closing `fd` (signalling EOF)
+/// when done. Read the child's output before joining the returned handle so a
+/// large payload can't deadlock.
+pub(crate) fn feed_fd_async(fd: OwnedFd, bytes: Vec<u8>) -> std::thread::JoinHandle<()> {
+  std::thread::spawn(move || {
+    write_all_to_fd(fd.as_fd(), &bytes);
+  })
 }
 
 pub(super) fn capture_command(
@@ -740,8 +863,8 @@ pub(super) fn capture_command(
   name: Option<Rc<str>>,
 ) -> ShResult<String> {
   let (rpipe, wpipe) = pipes_high()?;
-  let stdin_pipes = if stdin.is_some() {
-    Some(pipes_high()?)
+  let stdin_pipe = if stdin.is_some() {
+    Some(StdinPipe::new()?)
   } else {
     None
   };
@@ -749,15 +872,8 @@ pub(super) fn capture_command(
   match unsafe { fork()? } {
     ForkResult::Child => {
       let mut specs = vec![RedirSpec::dup(wpipe.as_raw_fd(), 1, RedirType::Output)];
-      // Hold the read end alive long enough for redirs.apply() to dup2
-      // it onto fd 0; explicitly drop the write end so the pipe's
-      // writer-count drops to zero once the parent closes its own copy
-      // (otherwise the child's read on fd 0 never sees EOF).
-      let _stdin_r_keep_alive = stdin_pipes.map(|(r, w)| {
-        specs.push(RedirSpec::dup(r.as_raw_fd(), 0, RedirType::Input));
-        drop(w);
-        r
-      });
+      // Keep the read end alive until redirs.apply() dups it onto fd 0.
+      let _stdin_r_keep_alive = stdin_pipe.map(|p| p.into_child(&mut specs));
       let redirs: RedirSet = specs.into();
       let _guard = redirs.apply()?;
 
@@ -773,35 +889,18 @@ pub(super) fn capture_command(
     }
     ForkResult::Parent { child } => {
       drop(wpipe);
-      // Drop the parent's read end of the stdin pipe (only the child reads
-      // from it); keep the write end to feed `stdin` into the child.
-      let stdin_write = stdin_pipes.map(|(r, w)| {
-        drop(r);
-        w
-      });
 
-      let captured = if let Some(pipe) = stdin_write {
+      // Feed stdin from a thread while we read stdout here; writing it all
+      // first would deadlock once both pipes fill. We borrow `stdin` (rather
+      // than owning bytes) so a scoped thread is used instead of feed_fd_async.
+      let captured = if let Some(pipe) = stdin_pipe {
+        let writer = pipe.into_writer();
         let bytes = stdin.unwrap().as_bytes();
         std::thread::scope(|scope| {
           scope.spawn(move || {
-            let mut written = 0;
-            while written < bytes.len() {
-              match write(pipe.as_fd(), &bytes[written..]) {
-                Ok(0) => break,
-                Ok(n) => written += n,
-                Err(Errno::EINTR) => {
-                  if signal::sigint_pending() {
-                    state::Shed::set_status(130);
-                    break;
-                  }
-                }
-                // The child closed its stdin early (e.g. `head`); stop feeding it.
-                Err(Errno::EPIPE) => break,
-                Err(_) => break,
-              }
-            }
+            write_all_to_fd(writer.as_fd(), bytes);
             // Closing the write end signals EOF to the child's stdin.
-            drop(pipe);
+            drop(writer);
           });
           read_fd_to_string(rpipe)
         })?

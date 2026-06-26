@@ -13,7 +13,10 @@ use super::{
   ShErrKind, ShResult, Shed,
   arithmetic::expand_arithmetic_wrapped,
   eval::execute::exec_nonint,
-  procio::{RedirSet, RedirSpec, RedirType, pipes_high, pipes_high_no_cloexec, read_fd_to_string},
+  procio::{
+    RedirSet, RedirSpec, RedirType, StdinPipe, feed_fd_async, pipes_high, pipes_high_no_cloexec,
+    read_fd_to_string,
+  },
   sherr, state,
 };
 
@@ -48,6 +51,9 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
     _ => unreachable!(),
   };
 
+  let sink_stdin = (target_fd != 0).then(crate::builtin::take_stdin).flatten();
+  let stdin_pipe = sink_stdin.is_some().then(StdinPipe::new).transpose()?;
+
   match unsafe { fork()? } {
     ForkResult::Child => {
       // Drop our reference to the tty fd before exec; otherwise the
@@ -57,8 +63,13 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       Shed::term_mut(Terminal::detach_tty);
       drop(register_fd);
 
-      let redir: RedirSet =
-        RedirSpec::dup(proc_fd.as_raw_fd(), target_fd, RedirType::Output).into();
+      let mut specs = vec![RedirSpec::dup(
+        proc_fd.as_raw_fd(),
+        target_fd,
+        RedirType::Output,
+      )];
+      let _stdin_r_keep = stdin_pipe.map(|p| p.into_child(&mut specs));
+      let redir: RedirSet = specs.into();
       let _guard = redir.apply()?;
 
       if let Err(e) = exec_nonint(raw.to_string(), Some("process_sub".into())) {
@@ -69,6 +80,11 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
     }
     ForkResult::Parent { .. } => {
       Shed::meta_mut(|m| m.save_procsub_fd(register_fd));
+      // Feed the sink in the background; the procsub child is not waited on, so
+      // the feeder thread is detached and ends on its own at EOF/EPIPE.
+      if let (Some(pipe), Some(bytes)) = (stdin_pipe, sink_stdin) {
+        feed_fd_async(pipe.into_writer(), bytes);
+      }
       // Do not wait; process may run in background
       Ok(path)
     }
@@ -113,9 +129,17 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
   let (rpipe, wpipe) = pipes_high()?;
 
+  // If this fork happens while an in-process pipeline stdin sink is live,
+  // materialize it onto the child's fd 0 so a forked child (e.g. an external
+  // command inside the sub) can still read the piped input.
+  let sink_stdin = crate::builtin::take_stdin();
+  let stdin_pipe = sink_stdin.is_some().then(StdinPipe::new).transpose()?;
+
   match unsafe { fork()? } {
     ForkResult::Child => {
-      let redir: RedirSet = RedirSpec::dup(wpipe.as_raw_fd(), 1, RedirType::Output).into();
+      let mut specs = vec![RedirSpec::dup(wpipe.as_raw_fd(), 1, RedirType::Output)];
+      let _stdin_r_keep = stdin_pipe.map(|p| p.into_child(&mut specs));
+      let redir: RedirSet = specs.into();
       let _redir_guard = redir.apply()?;
 
       if let Err(e) = exec_input(raw.to_string(), Some("command_sub".into())) {
@@ -131,9 +155,17 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
     ForkResult::Parent { child } => {
       drop(wpipe);
 
+      let feeder = match (stdin_pipe, sink_stdin) {
+        (Some(pipe), Some(bytes)) => Some(feed_fd_async(pipe.into_writer(), bytes)),
+        _ => None,
+      };
+
       // Read output first (before waiting) to avoid deadlock if
       // child fills pipe buffer
       let output = read_fd_to_string(rpipe)?;
+      if let Some(handle) = feeder {
+        let _ = handle.join();
+      }
 
       // Wait for child with EINTR retry
       let status = loop {

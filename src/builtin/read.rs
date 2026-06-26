@@ -1,4 +1,4 @@
-use std::{os::fd::BorrowedFd, time::Duration};
+use std::{io::Read as _, os::fd::BorrowedFd, time::Duration};
 
 use bitflags::bitflags;
 use nix::{
@@ -15,7 +15,7 @@ use super::{
   eval::lex::Span,
   expand::expand_keymap,
   getopt::{Opt, OptSpec},
-  out,
+  has_in_sink, out,
   procio::stdin_fileno,
   sherr, signal,
   state::{
@@ -133,7 +133,7 @@ fn do_read(
 ) -> ShResult<String> {
   let fd = stdin_fileno();
 
-  if timeout.is_none() && unistd::lseek(fd, 0, unistd::Whence::SeekCur).is_ok() {
+  if !has_in_sink() && timeout.is_none() && unistd::lseek(fd, 0, unistd::Whence::SeekCur).is_ok() {
     seeking_read(fd, delim, escape_aware, max_bytes)
   } else {
     walking_read(fd, delim, escape_aware, timeout, max_bytes)
@@ -147,6 +147,7 @@ fn walking_read(
   timeout: Option<i32>,
   max_bytes: Option<usize>,
 ) -> ShResult<String> {
+  let use_sink = has_in_sink();
   let mut buf = vec![];
   let mut escaped = false;
   let poll_fd = PollFd::new(fd, PollFlags::POLLIN);
@@ -156,61 +157,70 @@ fn walking_read(
     .unwrap_or(PollTimeout::NONE);
 
   loop {
-    let ready = match poll(&mut [poll_fd.clone()], timeout) {
-      Ok(n) => n,
-      Err(Errno::EINTR) => {
-        if signal::sigint_pending() {
-          state::Shed::set_status(130);
-          return Ok(String::new());
+    if !use_sink {
+      let ready = match poll(&mut [poll_fd.clone()], timeout) {
+        Ok(n) => n,
+        Err(Errno::EINTR) => {
+          if signal::sigint_pending() {
+            state::Shed::set_status(130);
+            return Ok(String::new());
+          }
+          continue; // benign signal (e.g. SIGWINCH), retry the poll
         }
-        continue; // benign signal (e.g. SIGWINCH), retry the poll
+        Err(e) => return Err(e.into()),
+      };
+      if ready == 0 {
+        state::Shed::set_status(1);
+        return String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}")); // timeout
       }
-      Err(e) => return Err(e.into()),
-    };
-    if ready == 0 {
-      state::Shed::set_status(1);
-      return String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}")); // timeout
     }
 
     let mut in_buf = [0u8; 1];
-    match read(fd, &mut in_buf) {
-      Ok(0) => {
-        state::Shed::set_status(1);
-        let ret =
-          String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}"))?;
-        return Ok(ret); // EOF
+    let n = if use_sink {
+      match Shed::sinks(|s| s.read(&mut in_buf)) {
+        Ok(n) => n,
+        Err(e) => return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}")),
       }
-      Ok(_) => {
-        if escape_aware && escaped {
-          escaped = false;
-          if in_buf[0] != delim {
-            buf.push(in_buf[0]);
-            if let Some(max) = max_bytes
-              && buf.len() >= max
-            {
-              break;
-            }
+    } else {
+      match read(fd, &mut in_buf) {
+        Ok(n) => n,
+        Err(Errno::EINTR) => {
+          if signal::sigint_pending() {
+            state::Shed::set_status(130);
+            return Ok(String::new());
           }
-        } else if in_buf[0] == delim {
+          continue;
+        }
+        Err(e) => return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}")),
+      }
+    };
+
+    if n == 0 {
+      state::Shed::set_status(1);
+      return String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}")); // EOF
+    }
+
+    if escape_aware && escaped {
+      escaped = false;
+      if in_buf[0] != delim {
+        buf.push(in_buf[0]);
+        if let Some(max) = max_bytes
+          && buf.len() >= max
+        {
           break;
-        } else if escape_aware && in_buf[0] == b'\\' {
-          escaped = true;
-        } else {
-          buf.push(in_buf[0]);
-          if let Some(max) = max_bytes
-            && buf.len() >= max
-          {
-            break;
-          }
         }
       }
-      Err(Errno::EINTR) => {
-        if signal::sigint_pending() {
-          state::Shed::set_status(130);
-          return Ok(String::new());
-        }
+    } else if in_buf[0] == delim {
+      break;
+    } else if escape_aware && in_buf[0] == b'\\' {
+      escaped = true;
+    } else {
+      buf.push(in_buf[0]);
+      if let Some(max) = max_bytes
+        && buf.len() >= max
+      {
+        break;
       }
-      Err(e) => return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}")),
     }
   }
 

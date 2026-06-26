@@ -1,6 +1,6 @@
 use crate::{
   autocmd,
-  builtin::{self, SinkScope, StdinScope},
+  builtin::{SinkScope, StdinScope},
   eval::parse::node::{LabelCtx, node_has_only_builtins},
   shopt_mut, socket,
   state::{logic::AutoloadKind, vars::VarStr},
@@ -1356,17 +1356,15 @@ impl Dispatcher {
       return with_status(127);
     };
 
-    let stdin = builtin::take_stdin();
-
     if fork_builtins {
       log::trace!("Forking builtin: {cmd_raw}");
       self.run_fork(&cmd_raw, |s| {
-        if let Err(e) = builtin.setup_builtin(cmd, s, stdin) {
+        if let Err(e) = builtin.setup_builtin(cmd, s) {
           e.print_error();
         }
       })?;
       Ok(())
-    } else if let Err(e) = builtin.setup_builtin(cmd, self, stdin) {
+    } else if let Err(e) = builtin.setup_builtin(cmd, self) {
       let code = state::Shed::get_status();
       if code == 0 {
         state::Shed::set_status(1);
@@ -1835,7 +1833,6 @@ pub(crate) fn is_builtin(cmd: &Node) -> bool {
         && cmd_word.as_str() != "command"
         && cmd_word.as_str() != "exec"
         && cmd_word.as_str() != "eval"
-        && cmd_word.as_str() != "read"
         && cmd_word.flags.contains(TkFlags::BUILTIN)
     })
     .unwrap_or(true) // empty argv: assignment-only command

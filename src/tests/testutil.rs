@@ -68,7 +68,6 @@ macro_rules! assert_status_ne {
 }
 
 use crate::{
-  builtin,
   eval::{NdKind, ParsedSrc, execute::exec_nonint, lex::LexFlags},
   expand::expand_aliases,
   procio::{RedirGuard, RedirSet, RedirSpec, RedirType},
@@ -339,8 +338,7 @@ impl Drop for TestGuard {
       cleanup();
     }
     state::Shed::restore_state();
-    builtin::OUT_SINK.with(|o| o.borrow_mut().clear());
-    builtin::IN_SINK.with(|o| o.borrow_mut().clear());
+    state::Shed::sinks(|s| *s = crate::procio::Sinks::new());
     restore_registers();
   }
 }
