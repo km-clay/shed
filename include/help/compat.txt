@@ -78,6 +78,14 @@ DEVIATIONS                                                  *shed-deviations*
                   group, loop, `if` body), not only functions as
                   in `bash`.                                    |builtin-local|
 
+  pipelines       A trailing run of builtins runs in the current
+                  shell, not a subshell, so `cmd | read x` and
+                  `cmd | while read ...` leave their assignments set
+                  afterward, and an all-builtin pipeline runs entirely
+                  in-process. `bash` needs `shopt -s lastpipe` (job
+                  control off) and only spares the final stage; in
+                  `shed` it is the default.                     |pipe|
+
   arrays          A bare `$arr` expands to every element of the array,
                   and `${#arr}` is the element count. In `bash`, `$arr`
                   is just `${arr[0]}` and `${#arr}` is the length of

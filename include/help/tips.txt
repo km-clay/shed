@@ -220,8 +220,21 @@ A tour of various features that are unique to `shed`.
 
   Search commands like `f<char>`, `t<char>`, `/<pattern>`, etc each signal the editor when
   they fail to find a match. In the context of vice, a failed search `immediately aborts the program`.
-  In the case of `--lines`, it aborts for the current line and skips to the next one.
-  This can be used to create conditional logic in your programs. For instance:
-  `vice --lines -m '/foo' -c 'A -> Line Matches'`
+  In the case of `--lines`, it aborts for the current line, emits any already-cut fields and
+  skips to the next line. This can be used to create conditional logic in your programs.
+  For instance: `vice --lines -m '/foo' -c 'A -> Line Matches'`
 
   This only executes `-c 'A -> Line Matches'` on lines where the `/foo` search found 'foo'.
+
+  Expansion ~
+
+  `:expand` runs shed's shell expansion on the addressed lines, or the entire buffer,
+  replacing them in place with the result. Bare `:expand` preserves quoting so the command's
+  structure stays intact; `:expand!` performs full expansion, including quote removabl and word
+  splitting. It's handy for templating: compose a line with `$vars`, globs, or `$(...)` and
+  expand it in place to inspect or commit the resolved form before running. Since |vice|(builtin-vice)
+  can drive ex mode, it doubles as a shell-expansion filter over a pipe.
+
+  `:expand` should never be run on untrusted input: it expands command substitutions, which
+  run arbitrary commands. Treat `:expand` in your vice programs with the same respect you would
+  give to `eval` in your shell scripts.
