@@ -560,10 +560,20 @@ impl super::LineBuf {
   pub fn cursor_in_leading_ws(&self) -> bool {
     let line = self.line(self.row());
     let col = self.col();
+
+    let only_ws = self
+      .lines()
+      .iter()
+      .all(|ln| ln.0.iter().all(Grapheme::is_ws));
+
+    if only_ws {
+      return false;
+    }
+
     line
       .0
       .get(..col)
-      .is_none_or(|grs| grs.iter().all(Grapheme::is_ws) && grs.iter().any(|gr| !gr.is_ws()))
+      .is_none_or(|grs| grs.iter().all(Grapheme::is_ws))
   }
 
   pub fn cursor_is_escaped(&self) -> bool {
