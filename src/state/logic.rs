@@ -375,7 +375,7 @@ impl LogTab {
       .into_iter()
       .flat_map(move |k| self.autocmds.get(k).map(|v| v.iter()).into_iter().flatten())
   }
-  pub fn iter_keymaps(&self) -> &[KeyMap] {
+  pub fn keymaps(&self) -> &[KeyMap] {
     &self.keymaps
   }
   pub fn clear_autocmds(&mut self, kind: AutoCmdKind) {
