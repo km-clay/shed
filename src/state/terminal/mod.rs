@@ -686,10 +686,10 @@ impl Terminal {
 
     if encoded.len() > (1024 * 75) {
       // the limit for these is 75kb
-      status_msg!(
-        "clipboard copy failed: buffer too large ({})",
-        format_size(encoded.len() as u64)
-      );
+      let mut size = String::new();
+      format_size(encoded.len() as u64, &mut size)?;
+
+      status_msg!("clipboard copy failed: buffer too large ({size})");
       return Ok(());
     }
 

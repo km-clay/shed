@@ -561,7 +561,9 @@ impl super::LineBuf {
         let bytes = joined.as_bytes();
         let lines = bytecount::count(bytes, b'\n');
         let len = bytes.len() as u64;
-        let size = format_size(len);
+        let mut size = String::new();
+
+        format_size(len, &mut size)?;
 
         if let Err(e) = file.write_all(bytes) {
           system_msg!("Failed to write to file {display_path}: {e}");
@@ -605,7 +607,8 @@ impl super::LineBuf {
         };
         let line_count = contents.lines().count();
         let byte_count = contents.len();
-        let size = format_size(byte_count as u64);
+        let mut size = String::new();
+        format_size(byte_count as u64, &mut size).ok();
         status_msg!("Read {line_count} lines [{size}] from '{display_path}'",);
         let realpath = state::util::lex_normalize_path(path_buf);
         self.open_file = Some(realpath);

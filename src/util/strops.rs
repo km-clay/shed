@@ -484,8 +484,65 @@ pub(crate) fn format_time(dur: std::time::Duration) -> String {
   result.join(" ")
 }
 
-pub fn format_size(bytes: u64) -> String {
-  const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+/// Parse human-readable size strings into raw byte number
+pub fn parse_size(s: &str) -> ShResult<u64> {
+  let s = s.trim().to_lowercase();
+
+  let units: [(&str, f64); 19] = [
+    ("eib", (1u64 << 60) as f64), // 2^60 bytes (binary exabyte)
+    ("pib", (1u64 << 50) as f64), // 2^50 bytes (binary petabyte)
+    ("tib", (1u64 << 40) as f64), // 2^40 bytes (binary terabyte)
+    ("gib", (1u64 << 30) as f64), // 2^30 bytes (binary gigabyte)
+    ("mib", (1u64 << 20) as f64), // 2^20 bytes (binary megabyte)
+    ("kib", (1u64 << 10) as f64), // 2^10 bytes (binary kilobyte)
+    ("eb", 10u64.pow(18) as f64), // 10^18 bytes (decimal exabyte)
+    ("pb", 10u64.pow(15) as f64), // 10^15 bytes (decimal petabyte)
+    ("tb", 10u64.pow(12) as f64), // 10^12 bytes (decimal terabyte)
+    ("gb", 10u64.pow(9) as f64),  // 10^9 bytes (decimal gigabyte)
+    ("mb", 10u64.pow(6) as f64),  // 10^6 bytes (decimal megabyte)
+    ("kb", 10u64.pow(3) as f64),  // 10^3 bytes (decimal kilobyte)
+    ("e", 10u64.pow(18) as f64),  // allow omission of the 'b'
+    ("p", 10u64.pow(15) as f64),
+    ("t", 10u64.pow(12) as f64),
+    ("g", 10u64.pow(9) as f64),
+    ("m", 10u64.pow(6) as f64),
+    ("k", 10u64.pow(3) as f64),
+    ("b", 1.0), // bytes
+  ];
+
+  for (unit, multiplier) in units.iter() {
+    if s.ends_with(unit) {
+      let num_str = s.trim_end_matches(unit).trim();
+
+      match num_str.parse::<f64>() {
+        Ok(n) if n < 0.0 => {
+          return Err(sherr!(
+            ParseErr,
+            "Size number cannot be negative: {num_str}",
+          ));
+        }
+        Ok(n) => {
+          let bytes = n * multiplier;
+          if bytes > u64::MAX as f64 {
+            return Err(sherr!(ParseErr, "Size number too large: {num_str}{unit}",));
+          }
+          return Ok(bytes.round() as u64);
+        }
+        Err(_) => return Err(sherr!(ParseErr, "Invalid size number: {num_str}",)),
+      }
+    }
+  }
+
+  // If no unit suffix found, interpret as raw sector count
+  match s.parse::<i64>() {
+    Err(_) => Err(sherr!(ParseErr, "Invalid size number: {s}",)),
+    Ok(n) if n < 0 => Err(sherr!(ParseErr, "Size number cannot be negative: {s}",)),
+    Ok(n) => Ok(n as u64),
+  }
+}
+
+pub fn format_size(bytes: u64, buf: &mut impl std::fmt::Write) -> std::fmt::Result {
+  const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
   let mut size = bytes as f64;
   let mut unit = 0;
   while size >= 1024.0 && unit < UNITS.len() - 1 {
@@ -493,9 +550,9 @@ pub fn format_size(bytes: u64) -> String {
     unit += 1;
   }
   if unit == 0 {
-    format!("{} {}", size as u64, UNITS[unit])
+    write!(buf, "{} {}", size as u64, UNITS[unit])
   } else {
-    format!("{:.1} {}", size, UNITS[unit])
+    write!(buf, "{:.1} {}", size, UNITS[unit])
   }
 }
 

@@ -804,7 +804,9 @@ fn file_desc<P: AsRef<Path>>(path: P) -> String {
   let size = if kind == "dir" {
     String::from("-")
   } else {
-    util::format_size(meta.len())
+    let mut buf = String::new();
+    util::format_size(meta.len(), &mut buf).ok();
+    buf
   };
   let mode = util::format_mode(meta.permissions().mode());
 

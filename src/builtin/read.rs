@@ -15,7 +15,7 @@ use super::{
   eval::lex::Span,
   expand::expand_keymap,
   getopt::{Opt, OptSpec},
-  has_in_sink, out,
+  out, procio,
   procio::stdin_fileno,
   sherr, signal,
   state::{
@@ -133,7 +133,10 @@ fn do_read(
 ) -> ShResult<String> {
   let fd = stdin_fileno();
 
-  if !has_in_sink() && timeout.is_none() && unistd::lseek(fd, 0, unistd::Whence::SeekCur).is_ok() {
+  if !procio::has_in_sink()
+    && timeout.is_none()
+    && unistd::lseek(fd, 0, unistd::Whence::SeekCur).is_ok()
+  {
     seeking_read(fd, delim, escape_aware, max_bytes)
   } else {
     walking_read(fd, delim, escape_aware, timeout, max_bytes)
@@ -147,7 +150,7 @@ fn walking_read(
   timeout: Option<i32>,
   max_bytes: Option<usize>,
 ) -> ShResult<String> {
-  let use_sink = has_in_sink();
+  let use_sink = procio::has_in_sink();
   let mut buf = vec![];
   let mut escaped = false;
   let poll_fd = PollFd::new(fd, PollFlags::POLLIN);

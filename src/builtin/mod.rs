@@ -31,62 +31,6 @@ use super::{
   var,
 };
 
-// The in-process pipeline sinks live on `Shed` (see `procio::Sinks`); these are
-// thin accessors over `Shed::sinks`. Each access must stay atomic: never hold a
-// `Shed::sinks` borrow across emitting output, a scope push/pop, or running a
-// command, or `access_mut` will panic on the re-entrant borrow.
-
-pub(crate) fn has_out_sink() -> bool {
-  Shed::sinks(|s| s.has_output())
-}
-
-pub(crate) fn has_in_sink() -> bool {
-  Shed::sinks(|s| s.has_input())
-}
-
-/// Drain the remaining piped stdin so it can be handed to a forked child. The
-/// in-process read path goes through `Shed::sinks` (`io::Read`) instead.
-pub(crate) fn take_stdin() -> Option<Vec<u8>> {
-  Shed::sinks(|s| s.drain_input())
-}
-
-pub(crate) struct SinkScope {
-  taken: bool,
-}
-impl SinkScope {
-  pub fn new() -> Self {
-    Shed::sinks(|s| s.push_output());
-    Self { taken: false }
-  }
-
-  pub fn take(mut self) -> Vec<u8> {
-    self.taken = true;
-    Shed::sinks(|s| s.pop_output()).expect("SinkScope should have an out sink")
-  }
-}
-
-impl Drop for SinkScope {
-  fn drop(&mut self) {
-    if !self.taken {
-      Shed::sinks(|s| s.pop_output()).expect("SinkScope should have an out sink");
-    }
-  }
-}
-
-pub(crate) struct StdinScope;
-impl StdinScope {
-  pub fn push(input: Vec<u8>) -> Self {
-    Shed::sinks(|s| s.push_input(input));
-    Self
-  }
-}
-
-impl Drop for StdinScope {
-  fn drop(&mut self) {
-    Shed::sinks(|s| s.pop_input());
-  }
-}
-
 mod alias;
 mod arrops;
 mod autocmd;
@@ -298,7 +242,7 @@ pub(super) trait Builtin: Sync {
   ///
   /// Slurps stdin if `args.argv` is empty, or if stdin is available
   fn get_input(&self, args: &mut BuiltinArgs) -> Option<Vec<u8>> {
-    self.get_input_with(args, |a| a.argv.is_empty() || has_in_sink())
+    self.get_input_with(args, |a| a.argv.is_empty() || procio::has_in_sink())
   }
 
   /// Input getter. Takes a predicate that decides whether to slurp stdin or not.

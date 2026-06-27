@@ -30,6 +30,12 @@ fn guard_drop(_: ()) {
   Shed::vars_mut(ScopeStack::ascend);
 }
 
+/// Descend into a scope that mimics the isolation of forked subshells
+///
+/// The "global" namespace is still shared, but the 'ceiling' for new variables is set to the current scope,
+/// so that they are dropped on return.
+///
+/// Additionally, stuff like 'umask' and 'PWD' are restored to their previous values on return
 pub fn isolation_guard(args: Option<Vec<(String, Span)>>) -> impl Drop {
   let ceiling_guard = scope_ceiling_guard(args);
   let cwd_guard = cwd_guard();

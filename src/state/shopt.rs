@@ -1,6 +1,6 @@
 #![expect(clippy::struct_excessive_bools, clippy::trivially_copy_pass_by_ref)]
 
-use std::{fmt::Display, str::FromStr, time::Duration};
+use std::{fmt::Display, ops::Deref, str::FromStr, time::Duration};
 
 use nix::unistd::write;
 
@@ -15,7 +15,7 @@ use super::{
   scopes::ScopeStack,
   sherr, two_way_display,
 };
-use crate::shopt;
+use crate::{shopt, util};
 
 pub(crate) fn xtrace_print(argv: &[(String, Span)]) {
   if shopt!(set.xtrace) {
@@ -382,6 +382,10 @@ pub(crate) struct ShOptCore {
   /// Collapses error reporting stack traces
   #[default(false)]
   pub compact_errors: bool,
+
+  /// Output byte cap for command substitutions and pipelines; excess is truncated
+  #[default(ReadLimit::default())]
+  pub max_read_limit: ReadLimit,
 }
 
 fn validate_leader(v: &String) -> Result<(), String> {
@@ -389,6 +393,40 @@ fn validate_leader(v: &String) -> Result<(), String> {
     Err(format!("invalid leader key sequence '{v}'"))
   } else {
     Ok(())
+  }
+}
+
+#[derive(Clone, Debug, Copy)]
+pub(crate) struct ReadLimit(u64);
+
+impl Deref for ReadLimit {
+  type Target = u64;
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl Default for ReadLimit {
+  fn default() -> Self {
+    Self(1024 * 1024 * 1024) // 1 GiB
+  }
+}
+
+impl FromStr for ReadLimit {
+  type Err = ShErr;
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match util::parse_size(s) {
+      Err(e) => Err(e),
+      Ok(0) => Err(sherr!(SyntaxErr, "invalid read limit value '{s}'")),
+
+      Ok(n) => Ok(ReadLimit(n)),
+    }
+  }
+}
+
+impl Display for ReadLimit {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    util::format_size(self.0, f)
   }
 }
 

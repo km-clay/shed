@@ -20,7 +20,11 @@ use nix::{
   unistd::{self, ForkResult, fork, isatty, read, write},
 };
 
-use crate::{Shed, signal, state::terminal::Terminal, util};
+use crate::{
+  Shed, signal,
+  state::{shopt::ReadLimit, terminal::Terminal},
+  util,
+};
 
 use super::{
   eval::{
@@ -41,6 +45,10 @@ use super::{
 /// Minimum fd number for shell-internal file descriptors.
 /// User-visible fds (0-9) are kept clear so `exec 3>&-` etc. work as expected.
 pub const MIN_INTERNAL_FD: RawFd = 10;
+
+/// The status code returned when a builtin command's output is truncated
+/// due to exceeding the maximum size of the OutputSink
+pub const SINK_TRUNCATED_STATUS: i32 = 122;
 
 /// Like `dup()`, but places the new fd at `MIN_INTERNAL_FD` or above so it
 /// doesn't collide with user-managed fds.
@@ -477,7 +485,7 @@ impl RedirSpec {
       }
       RedirSpec::Close { fd } => Ok(Redir::close(fd)),
       RedirSpec::Buffer { fd, mut buf, flags } => {
-        use std::io::{Seek, SeekFrom, Write};
+        use io::{Seek, SeekFrom, Write};
 
         let file = tempfile::tempfile()
           .map_err(|e| sherr!(InternalErr, "heredoc tempfile creation failed: {e}"))?;
@@ -691,10 +699,87 @@ impl Iterator for PipeGenerator {
   }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct OutputSink {
+  limit: ReadLimit,
+  buf: Vec<u8>,
+  truncated: bool,
+}
+
+impl Default for OutputSink {
+  fn default() -> Self {
+    Self {
+      limit: shopt!(core.max_read_limit),
+      buf: Vec::new(),
+      truncated: false,
+    }
+  }
+}
+
+impl OutputSink {
+  fn new() -> Self {
+    Self::default()
+  }
+
+  pub fn limit(&self) -> ReadLimit {
+    self.limit
+  }
+
+  pub fn was_truncated(&self) -> bool {
+    self.truncated
+  }
+
+  pub fn into_buf(self) -> Vec<u8> {
+    self.buf
+  }
+}
+
+impl io::Write for OutputSink {
+  fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    if self.truncated {
+      return Ok(buf.len());
+    }
+    let limit = *self.limit as usize;
+
+    if self.buf.len() + buf.len() > limit {
+      self.truncated = true;
+      let remaining_space = limit - self.buf.len();
+      self.buf.extend_from_slice(&buf[..remaining_space]);
+      Ok(buf.len())
+    } else {
+      self.buf.extend_from_slice(buf);
+      Ok(buf.len())
+    }
+  }
+
+  fn flush(&mut self) -> io::Result<()> {
+    Ok(())
+  }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct InputSink {
+  buf: Cursor<Vec<u8>>,
+}
+
+impl InputSink {
+  fn from_input(sink: OutputSink) -> Self {
+    Self {
+      buf: Cursor::new(sink.buf),
+    }
+  }
+}
+
+impl io::Read for InputSink {
+  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    self.buf.read(buf)
+  }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Sinks {
-  output_sinks: Vec<Vec<u8>>,
-  input_sinks: Vec<Cursor<Vec<u8>>>,
+  output_sinks: Vec<OutputSink>,
+  input_sinks: Vec<InputSink>,
 }
 
 impl Sinks {
@@ -706,17 +791,17 @@ impl Sinks {
   }
 
   pub(crate) fn push_output(&mut self) {
-    self.output_sinks.push(Vec::new());
+    self.output_sinks.push(OutputSink::new());
   }
-  pub(crate) fn pop_output(&mut self) -> Option<Vec<u8>> {
+  pub(crate) fn pop_output(&mut self) -> Option<OutputSink> {
     self.output_sinks.pop()
   }
   pub(crate) fn has_output(&self) -> bool {
     !self.output_sinks.is_empty()
   }
 
-  pub(crate) fn push_input(&mut self, bytes: Vec<u8>) {
-    self.input_sinks.push(Cursor::new(bytes));
+  pub(crate) fn push_input(&mut self, sink: OutputSink) {
+    self.input_sinks.push(InputSink::from_input(sink));
   }
   pub(crate) fn pop_input(&mut self) {
     self.input_sinks.pop();
@@ -755,8 +840,59 @@ impl io::Write for Sinks {
     unistd::write(stdout_fileno(), buf).map_err(|e| io::Error::from_raw_os_error(e as i32))
   }
 
-  fn flush(&mut self) -> std::io::Result<()> {
+  fn flush(&mut self) -> io::Result<()> {
     Ok(())
+  }
+}
+
+pub(crate) fn has_out_sink() -> bool {
+  Shed::sinks(|s| s.has_output())
+}
+
+pub(crate) fn has_in_sink() -> bool {
+  Shed::sinks(|s| s.has_input())
+}
+
+/// Drain the remaining piped stdin so it can be handed to a forked child. The
+/// in-process read path goes through `Shed::sinks` (`io::Read`) instead.
+pub(crate) fn take_stdin() -> Option<Vec<u8>> {
+  Shed::sinks(|s| s.drain_input())
+}
+
+pub(crate) struct SinkScope {
+  taken: bool,
+}
+impl SinkScope {
+  pub fn new() -> Self {
+    Shed::sinks(|s| s.push_output());
+    Self { taken: false }
+  }
+
+  pub fn take(mut self) -> OutputSink {
+    self.taken = true;
+    Shed::sinks(|s| s.pop_output()).expect("SinkScope should have an out sink")
+  }
+}
+
+impl Drop for SinkScope {
+  fn drop(&mut self) {
+    if !self.taken {
+      Shed::sinks(|s| s.pop_output()).expect("SinkScope should have an out sink");
+    }
+  }
+}
+
+pub(crate) struct StdinScope;
+impl StdinScope {
+  pub fn push(sink: OutputSink) -> Self {
+    Shed::sinks(|s| s.push_input(sink));
+    Self
+  }
+}
+
+impl Drop for StdinScope {
+  fn drop(&mut self) {
+    Shed::sinks(|s| s.pop_input());
   }
 }
 
@@ -772,12 +908,41 @@ pub(super) fn stderr_fileno() -> BorrowedFd<'static> {
   unsafe { BorrowedFd::borrow_raw(STDERR_FILENO) }
 }
 
-pub(super) fn read_fd_to_string(fd: OwnedFd) -> ShResult<String> {
-  use std::io::Read;
-  let mut file = std::fs::File::from(fd);
-  let mut buf = Vec::new();
-  file.read_to_end(&mut buf)?;
-  String::from_utf8(buf).map_err(|e| sherr!(InternalErr, "Failed to read fd: {}", e))
+pub(super) fn read_to_sink(fd: OwnedFd) -> ShResult<OutputSink> {
+  let limit = shopt!(core.max_read_limit);
+
+  let mut out = Vec::new();
+  let mut buf = [0u8; 8192];
+  let mut remaining = *limit as usize;
+  let mut truncated = false;
+
+  loop {
+    match unistd::read(fd.as_fd(), &mut buf) {
+      Ok(0) => break,
+      Ok(n) => {
+        let bytes_read = n.min(remaining);
+        out.extend_from_slice(&buf[..bytes_read]);
+        remaining = remaining.saturating_sub(bytes_read);
+        if remaining == 0 {
+          truncated = true;
+          break;
+        }
+      }
+      Err(Errno::EINTR) => {
+        if signal::sigint_pending() {
+          state::Shed::set_status(130);
+          break;
+        }
+      }
+      Err(e) => return Err(e.into()),
+    }
+  }
+
+  Ok(OutputSink {
+    limit,
+    buf: out,
+    truncated,
+  })
 }
 
 pub(super) fn bytes_to_string(buf: Vec<u8>) -> String {
@@ -893,7 +1058,7 @@ pub(super) fn capture_command(
       // Feed stdin from a thread while we read stdout here; writing it all
       // first would deadlock once both pipes fill. We borrow `stdin` (rather
       // than owning bytes) so a scoped thread is used instead of feed_fd_async.
-      let captured = if let Some(pipe) = stdin_pipe {
+      let sink = if let Some(pipe) = stdin_pipe {
         let writer = pipe.into_writer();
         let bytes = stdin.unwrap().as_bytes();
         std::thread::scope(|scope| {
@@ -902,11 +1067,14 @@ pub(super) fn capture_command(
             // Closing the write end signals EOF to the child's stdin.
             drop(writer);
           });
-          read_fd_to_string(rpipe)
+          read_to_sink(rpipe)
         })?
       } else {
-        read_fd_to_string(rpipe)?
+        read_to_sink(rpipe)?
       };
+      let truncated = sink.was_truncated();
+      let size = sink.limit();
+      let captured = bytes_to_string(sink.into_buf());
 
       let status = loop {
         match waitpid(child, Some(WtFlag::WUNTRACED)) {
@@ -919,6 +1087,10 @@ pub(super) fn capture_command(
       match status {
         WtStat::Exited(_, code) => {
           state::Shed::set_status(code);
+          if truncated {
+            state::Shed::set_status(SINK_TRUNCATED_STATUS);
+            crate::errln!("shed: command output truncated (exceeded {size})");
+          }
           Ok(captured)
         }
         _ => Err(sherr!(InternalErr, "Command sub failed")),

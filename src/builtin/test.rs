@@ -2,6 +2,7 @@ use std::{collections::VecDeque, fs::metadata, os::fd::BorrowedFd, path::PathBuf
 
 use crate::{
   eval::lex::Tk,
+  procio,
   util::{ShResultExt, replace_posix_classes},
 };
 
@@ -148,10 +149,10 @@ fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
     UnaryOp::Terminal => match operand.parse::<i32>() {
       Ok(fd) => match fd {
         1 => {
-          !super::has_out_sink() && isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false)
+          !procio::has_out_sink() && isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false)
         }
         0 => {
-          !super::has_in_sink() && isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false)
+          !procio::has_in_sink() && isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false)
         }
         _ => isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false),
       },

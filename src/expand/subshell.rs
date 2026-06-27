@@ -1,9 +1,9 @@
 use std::os::fd::AsRawFd;
 
 use crate::{
-  builtin::SinkScope,
+  errln,
   eval::{ParsedSrc, execute::exec_input, parse::node::nodes_have_only_builtins},
-  procio::bytes_to_string,
+  procio::{self, SinkScope, bytes_to_string},
   state::vars::VarStr,
   util::isolation_guard,
 };
@@ -15,7 +15,7 @@ use super::{
   eval::execute::exec_nonint,
   procio::{
     RedirSet, RedirSpec, RedirType, StdinPipe, feed_fd_async, pipes_high, pipes_high_no_cloexec,
-    read_fd_to_string,
+    read_to_sink,
   },
   sherr, state,
 };
@@ -51,7 +51,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
     _ => unreachable!(),
   };
 
-  let sink_stdin = (target_fd != 0).then(crate::builtin::take_stdin).flatten();
+  let sink_stdin = (target_fd != 0).then(procio::take_stdin).flatten();
   let stdin_pipe = sink_stdin.is_some().then(StdinPipe::new).transpose()?;
 
   match unsafe { fork()? } {
@@ -111,8 +111,17 @@ pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
     e.print_error();
   }
 
+  let scope = sink_scope.take();
+
+  if scope.was_truncated() {
+    Shed::set_status(procio::SINK_TRUNCATED_STATUS);
+    let size = scope.limit();
+
+    errln!("shed: command sub truncated (exceeded {size})");
+  }
+
   Ok(
-    bytes_to_string(sink_scope.take())
+    bytes_to_string(scope.into_buf())
       .trim_end_matches('\n')
       .into(),
   )
@@ -132,7 +141,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
   // If this fork happens while an in-process pipeline stdin sink is live,
   // materialize it onto the child's fd 0 so a forked child (e.g. an external
   // command inside the sub) can still read the piped input.
-  let sink_stdin = crate::builtin::take_stdin();
+  let sink_stdin = procio::take_stdin();
   let stdin_pipe = sink_stdin.is_some().then(StdinPipe::new).transpose()?;
 
   match unsafe { fork()? } {
@@ -162,10 +171,13 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
       // Read output first (before waiting) to avoid deadlock if
       // child fills pipe buffer
-      let output = read_fd_to_string(rpipe)?;
+      let sink = read_to_sink(rpipe)?;
       if let Some(handle) = feeder {
         let _ = handle.join();
       }
+      let truncated = sink.was_truncated();
+      let size = sink.limit();
+      let output = bytes_to_string(sink.into_buf());
 
       // Wait for child with EINTR retry
       let status = loop {
@@ -179,6 +191,11 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
       match status {
         WtStat::Exited(_, code) => {
           state::Shed::set_status(code);
+          // Truncation takes precedence over the child's own exit code.
+          if truncated {
+            Shed::set_status(procio::SINK_TRUNCATED_STATUS);
+            errln!("shed: command sub truncated (exceeded {size})");
+          }
           Ok(output.trim_end_matches('\n').into())
         }
         _ => Err(sherr!(InternalErr, "Command sub failed")),

@@ -1,7 +1,7 @@
 use crate::{
   autocmd,
-  builtin::{SinkScope, StdinScope},
   eval::parse::node::{LabelCtx, node_has_only_builtins},
+  procio::{OutputSink, SinkScope, StdinScope},
   shopt_mut, socket,
   state::{logic::AutoloadKind, vars::VarStr},
   util::isolation_guard,
@@ -1303,7 +1303,7 @@ impl Dispatcher {
   /// so the caller can fold them into PIPESTATUS and the pipefail blame; the
   /// first hard error short-circuits the run.
   fn exec_internal_pipeline(&mut self, cmds: &[Node]) -> ShResult<Vec<(i32, Span)>> {
-    let mut prev = None;
+    let mut prev: Option<OutputSink> = None;
     let num_cmds = cmds.len();
     let last = num_cmds.saturating_sub(1);
     let mut statuses = Vec::with_capacity(num_cmds);
@@ -1335,7 +1335,14 @@ impl Dispatcher {
       statuses.push((Shed::get_status(), cmd.span.clone()));
 
       if let Some(scope) = out_scope {
-        prev = Some(scope.take());
+        let scope = scope.take();
+        if scope.was_truncated() {
+          Shed::set_status(procio::SINK_TRUNCATED_STATUS);
+          let size = scope.limit();
+
+          errln!("shed: pipeline output truncated (exceeded {size})");
+        }
+        prev = Some(scope);
       }
 
       result?;
@@ -1575,7 +1582,7 @@ impl Dispatcher {
       } else {
         VarKind::string(val.expand_no_split()?)
       };
-      let param_expansion_failed = state::Shed::get_status() != 0;
+      let param_expansion_status = (Shed::get_status() != 0).then(Shed::get_status);
 
       // Parse and expand array index BEFORE entering write_vars borrow
       let indexed = state::util::parse_arr_bracket(var_name)
@@ -1626,11 +1633,9 @@ impl Dispatcher {
               Ok(true)
             })?;
             if took_fast {
-              if param_expansion_failed {
-                state::Shed::set_status(1);
-              } else {
-                state::Shed::set_status(old_status);
-              }
+              let status = param_expansion_status.unwrap_or(old_status);
+
+              Shed::set_status(status);
               continue;
             }
           }
@@ -1753,11 +1758,8 @@ impl Dispatcher {
         }
       }
 
-      if param_expansion_failed {
-        state::Shed::set_status(1);
-      } else {
-        state::Shed::set_status(old_status);
-      }
+      let status = param_expansion_status.unwrap_or(old_status);
+      Shed::set_status(status);
 
       if matches!(behavior, AssignBehavior::Export) {
         new_env_vars.push(var.to_string());
