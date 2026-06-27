@@ -1846,6 +1846,7 @@ SHOPT                                            *builtin-shopt* *shopt*
     `hist_ignore_dupes`     skip duplicate consecutive history entries
     `interactive_comments`  allow `#` comments in interactive input
     `max_hist`              max history entries (-1 for unlimited)
+    `max_read_limit`        byte cap for |command-sub|(script-command-sub) & |pipeline|(script-pipelines) output
     `max_recurse_depth`     max recursive function call depth
     `xpg_echo`              make `echo` expand escapes by default
 

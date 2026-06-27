@@ -71,6 +71,7 @@ in
       "shopt core.xpg_echo=${boolToString cfg.shopts.core.xpg_echo}"
       "shopt core.bell_style='${cfg.shopts.core.bell_style}'"
       "shopt core.compact_errors=${boolToString cfg.shopts.core.compact_errors}"
+      "shopt core.max_read_limit=${toString cfg.shopts.core.max_read_limit}"
 
       "shopt set.hashall=${boolToString cfg.shopts.set.hashall}"
       "shopt set.vi=${boolToString cfg.shopts.set.vi}"

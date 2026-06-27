@@ -271,6 +271,11 @@
                   default = false;
                   description = "Collapse error stack traces to a single call-site label, hiding intermediate function-call context";
                 };
+                max_read_limit = lib.mkOption {
+                  type = lib.types.either lib.types.int lib.types.str;
+                  default = "1gib";
+                  description = "Caps the bytes a command substitution or in-process pipeline will buffer before its output is truncated. Accepts a raw byte count or a human-readable size like \"512mb\" or \"1gib\". On truncation, $? is set to 122.";
+                };
               };
             };
             default = {};
