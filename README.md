@@ -88,7 +88,7 @@ The help topics are opened in a custom interactive pager that uses a basic hyper
 
 Examples:
 ```bash
-help params     # opens the params page
+help param     # opens the parameter expansion page
 help cd         # opens the builtins page and jumps to the 'cd' entry
 ```
 
