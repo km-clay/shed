@@ -220,7 +220,7 @@ fn validate_viewport_height(v: &String) -> Result<(), String> {
 #[derive(Clone, Debug, ShOptGroup)]
 #[group_name = "line"]
 pub(crate) struct ShOptLine {
-  /// Whether to automatically insert a newline when the input is incomplete
+  /// Automatically insert a newline when the input is incomplete
   #[default(true)]
   pub linebreak_on_incomplete: bool,
 
@@ -229,11 +229,11 @@ pub(crate) struct ShOptLine {
   #[default("50%".to_string())]
   pub viewport_height: String,
 
-  /// If enabled, trims leading/trailing whitespace on submitting a command
+  /// Trims leading/trailing whitespace on submitting a command
   #[default(true)]
   pub trim_on_submit: bool,
 
-  /// Whether to display line numbers in multiline input
+  /// Display line numbers in multiline input
   #[default(true)]
   pub line_numbers: bool,
 
@@ -245,11 +245,11 @@ pub(crate) struct ShOptLine {
   #[default(4)]
   pub tab_width: usize,
 
-  /// Whether to automatically indent new lines in multiline commands
+  /// Automatically indent new lines in multiline commands
   #[default(true)]
   pub auto_indent: bool,
 
-  /// Whether to suggest commands from history as commands are typed
+  /// Suggest commands from history as commands are typed
   #[default(true)]
   pub auto_suggest: bool,
 }
@@ -257,7 +257,7 @@ pub(crate) struct ShOptLine {
 #[derive(Clone, Debug, ShOptGroup)]
 #[group_name = "set"]
 pub(crate) struct ShOptSet {
-  /// If set, the shell will remember the full path of commands and use that information to speed up command lookup
+  /// The shell will remember the full path of commands and use that information to speed up command lookup
   #[default(true)]
   pub hashall: bool,
 
@@ -265,51 +265,51 @@ pub(crate) struct ShOptSet {
   #[default(false)]
   pub vi: bool,
 
-  /// If set, all variables that are assigned will be automatically exported to the environment of subsequently executed commands
+  /// All variables that are assigned will be automatically exported to the environment of subsequently executed commands
   #[default(false)]
   pub allexport: bool,
 
-  /// If set, the shell will exit immediately if any command exits with a non-zero status, with some exceptions
+  /// The shell will exit immediately if any command exits with a non-zero status, with some exceptions
   #[default(false)]
   pub errexit: bool,
 
-  /// If set, '>' and '>>' redirections will fail if the target file already exists
+  /// '>' and '>>' redirections will fail if the target file already exists
   #[default(false)]
   pub noclobber: bool,
 
-  /// If set, jobs run in their own process groups, and report status before the next prompt.
+  /// Jobs run in their own process groups, and report status before the next prompt.
   #[default(true)]
   pub monitor: bool,
 
-  /// If set, filename expansion (globbing) is disabled
+  /// Filename expansion (globbing) is disabled
   #[default(false)]
   pub noglob: bool,
 
-  /// If set, the shell will not execute any interpreted commands. Useful for testing scripts.
+  /// The shell will not execute any interpreted commands. Useful for testing scripts.
   #[default(false)]
   pub noexec: bool,
 
-  /// If set, function definitions will not be written to command history.
+  /// Function definitions will not be written to command history.
   #[default(false)]
   pub nolog: bool,
 
-  /// If set, the shell will print job status info asynchronously when jobs exit or are stopped
+  /// The shell will print job status info asynchronously when jobs exit or are stopped
   #[default(false)]
   pub notify: bool,
 
-  /// If set, attempting to expand an unset variable besides '$*' or '@' is an error
+  /// Attempting to expand an unset variable besides '$*' or '@' is an error
   #[default(false)]
   pub nounset: bool,
 
-  /// If set, the shell will write it's input to stderr as it is read.
+  /// The shell will write it's input to stderr as it is read.
   #[default(false)]
   pub verbose: bool,
 
-  /// If set, the shell will write a trace for each command after it is expanded but before it is executed.
+  /// The shell will write a trace for each command after it is expanded but before it is executed.
   #[default(false)]
   pub xtrace: bool,
 
-  /// If set, a pipeline's status is its last non-zero status, instead of the status of the last command
+  /// A pipeline's status is its last non-zero status, instead of the status of the last command
   #[default(false)]
   pub pipefail: bool,
 }
@@ -354,15 +354,15 @@ pub(crate) struct ShOptCore {
   #[default(10_000isize)]
   pub max_hist: isize,
 
-  /// Whether or not to allow comments in interactive mode
+  /// Allow comments in interactive mode
   #[default(true)]
   pub interactive_comments: bool,
 
-  /// Whether or not to automatically save commands to the command history file
+  /// Automatically save commands to the command history file
   #[default(true)]
   pub auto_hist: bool,
 
-  /// Whether or not to allow shed to trigger the terminal bell
+  /// Allow shed to trigger the terminal bell
   #[default(true)]
   pub bell_enabled: bool,
 
@@ -370,7 +370,7 @@ pub(crate) struct ShOptCore {
   #[default(1000usize)]
   pub max_recurse_depth: usize,
 
-  /// Whether echo expands escape sequences by default
+  /// If set, 'echo' expands escape sequences by default
   #[default(false)]
   pub xpg_echo: bool,
 
@@ -379,7 +379,7 @@ pub(crate) struct ShOptCore {
   #[default("audible".to_string())]
   pub bell_style: String,
 
-  /// Collapses error reporting stack traces
+  /// Collapse error reporting stack traces
   #[default(false)]
   pub compact_errors: bool,
 
@@ -523,19 +523,19 @@ pub(crate) struct ShOptPrompt {
   #[default(CompleteStyle::Grid)]
   pub complete_style: CompleteStyle,
 
-  /// Whether tab completion matching is case-insensitive
+  /// Tab completion matching is case-insensitive
   #[default(false)]
   pub completion_ignore_case: bool,
 
-  /// If set, enables history concatenation with Shift+Up/Down
+  /// Enables history concatenation with Shift+Up/Down
   #[default(true)]
   pub hist_cat: bool,
 
-  /// If set, expands aliases on the prompt instead of after submitting
+  /// Expands aliases on the prompt instead of after submitting
   #[default(true)]
   pub expand_aliases: bool,
 
-  /// If set, performs substitution (variable, command, etc.) after expanding prompt sequences
+  /// Performs substitution (variable, command, etc.) after expanding prompt sequences
   #[default(true)]
   pub substitute: bool,
 }
@@ -543,7 +543,7 @@ pub(crate) struct ShOptPrompt {
 #[derive(Clone, Debug, ShOptGroup)]
 #[group_name = "statline"]
 pub(crate) struct ShOptStatLine {
-  /// Whether to enable the status line
+  /// Enable the status line
   #[default(false)]
   pub enable: bool,
 
@@ -571,11 +571,11 @@ fn validate_color(v: &String) -> Result<(), String> {
 #[derive(Clone, Debug, ShOptGroup)]
 #[group_name = "highlight"]
 pub(crate) struct ShOptHighlight {
-  /// Whether to enable syntax highlighting in the line editor
+  /// Enable syntax highlighting in the line editor
   #[default(true)]
   pub enable: bool,
 
-  /// Whether to underline valid paths. Can be slow on network mounts.
+  /// Underline valid paths. Can be slow on network mounts.
   #[default(true)]
   pub check_files: bool,
 
