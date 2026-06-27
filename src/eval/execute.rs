@@ -412,7 +412,7 @@ impl Dispatcher {
     let result = if is_func(&cmd_word) {
       self.exec_func(node)
     } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTIN_NAMES.contains(&cmd_word.as_str()) {
-      self.exec_builtin(node)
+      self.exec_builtin(node, &cmd_word)
     } else if is_arith(cmd_tk) {
       Self::exec_arith(node)
     } else if can_autocd(cmd) {
@@ -1351,21 +1351,17 @@ impl Dispatcher {
     Ok(statuses)
   }
 
-  fn exec_builtin(&mut self, cmd: &Node) -> ShResult<()> {
+  fn exec_builtin(&mut self, cmd: &Node, cmd_name: &str) -> ShResult<()> {
     let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
-    let cmd_raw = cmd
-      .get_command()
-      .unwrap_or_else(|| panic!("expected command NdRule, got {:?}", &cmd.class))
-      .to_string();
 
-    let Some(builtin) = lookup_builtin(&cmd_raw) else {
-      sherr!(NotFound @ cmd.get_span(), "builtin not found: {cmd_raw}").print_error();
+    let Some(builtin) = lookup_builtin(cmd_name) else {
+      sherr!(NotFound @ cmd.get_span(), "builtin not found: {cmd_name}").print_error();
       return with_status(127);
     };
 
     if fork_builtins {
-      log::trace!("Forking builtin: {cmd_raw}");
-      self.run_fork(&cmd_raw, |s| {
+      log::trace!("Forking builtin: {cmd_name}");
+      self.run_fork(cmd_name, |s| {
         if let Err(e) = builtin.setup_builtin(cmd, s) {
           e.print_error();
         }
