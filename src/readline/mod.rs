@@ -1136,7 +1136,7 @@ impl ShedLine {
         Shed::notify_autocmd(AutoCmdKind::OnCompletionStart);
         let mut res = LoopAction::Continue;
 
-        util::with_saved_status(|| -> ShResult<()> {
+        let cancelled = util::with_saved_status(|| -> ShResult<bool> {
           for cmd in cmds {
             if let LoopAction::Break =
               run_prompt_command(cmd.command().to_string(), Some(Redraw::Partial), None)?
@@ -1145,7 +1145,8 @@ impl ShedLine {
               break;
             }
           }
-          Ok(())
+          let cancelled = res == LoopAction::Break || Shed::get_status() != 0;
+          Ok(cancelled)
         })
         .ok()?;
 
@@ -1157,7 +1158,6 @@ impl ShedLine {
           })
         }
 
-        let cancelled = res == LoopAction::Break || Shed::get_status() != 0;
         if cancelled {
           autocmd!(OnCompletionCancel)
         } else if comp.is_active() {
