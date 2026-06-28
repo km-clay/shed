@@ -251,41 +251,18 @@ impl LineBuf {
     let new_cursor = self.cursor.pos;
 
     // Stop merging on any non-char-insert command, even if buffer didn't change
-    if !self.merging_undos
-      && !is_char_insert
-      && !is_undo_op
-      && let Some(edit) = self.undo_stack.last_mut()
-    {
-      edit.merging = false;
+    if !self.merging_undos && !is_char_insert && !is_undo_op {
+      self.set_top_merging(false);
     }
     let changed = before.as_ref().is_some_and(|b| &self.lines != b);
 
     if changed && !is_undo_op {
       let before = before.unwrap(); // `changed` implies `before` is Some
       self.redo_stack.clear();
-      if is_char_insert {
-        // Merge consecutive char inserts into one undo entry
-        if let Some(edit) = self.undo_stack.last_mut().filter(|e| e.merging) {
-          edit.new = self.lines.clone();
-          edit.new_cursor = new_cursor;
-        } else {
-          self.undo_stack.push(Edit {
-            old_cursor,
-            new_cursor,
-            old: before,
-            new: self.lines.clone(),
-            merging: true,
-          });
-        }
-      } else {
-        self.handle_edit(before, new_cursor, old_cursor);
-        // Change starts a new merge chain so subsequent InsertChars merge into it
-        if (starts_merge || self.merging_undos)
-          && let Some(edit) = self.undo_stack.last_mut()
-        {
-          edit.merging = true;
-        }
-      }
+      // Char inserts merge into one entry; a change with `starts_merge` (or an
+      // open merge group) opens a chain that subsequent inserts fold into.
+      let want_merge = is_char_insert || starts_merge || self.merging_undos;
+      self.record_edit(before, old_cursor, new_cursor, want_merge);
 
       if self.undo_stack.last().is_some_and(Edit::is_empty) {
         self.undo_stack.pop();

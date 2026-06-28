@@ -1,22 +1,287 @@
+use unicode_segmentation::UnicodeSegmentation;
+
 use super::{
   Grapheme, Line, Lines, Pos,
   eval::{ParseFlags, ParsedSrc, lex::LexFlags},
 };
-use crate::readline::context::CtxTk;
 use crate::readline::context::CtxTkRule;
+use crate::{readline::context::CtxTk, state::vars::VarStr, util::VarStrDisplay};
 
-#[derive(Default, Clone, Debug)]
+/// One undo step. Finalized steps are stored compactly as a positional delta;
+/// only an actively-merging entry keeps full buffer snapshots, and there is at
+/// most one of those at a time (the undo-stack top while a merge is open).
+#[derive(Clone, Debug)]
 pub struct Edit {
   pub old_cursor: Pos,
   pub new_cursor: Pos,
-  pub old: Lines,
-  pub new: Lines,
   pub merging: bool,
+  body: EditBody,
+}
+
+#[derive(Clone, Debug)]
+enum EditBody {
+  Delta {
+    at: Pos,
+    removed: VarStr,
+    inserted: VarStr,
+  },
+  Snapshot {
+    old: Lines,
+    new: Lines,
+  },
 }
 
 impl Edit {
+  fn delta(at: Pos, removed: VarStr, inserted: VarStr, old_cursor: Pos, new_cursor: Pos) -> Self {
+    Edit {
+      old_cursor,
+      new_cursor,
+      merging: false,
+      body: EditBody::Delta {
+        at,
+        removed,
+        inserted,
+      },
+    }
+  }
+  fn snapshot(old: Lines, new: Lines, old_cursor: Pos, new_cursor: Pos, merging: bool) -> Self {
+    Edit {
+      old_cursor,
+      new_cursor,
+      merging,
+      body: EditBody::Snapshot { old, new },
+    }
+  }
+  /// An empty step, used to break a merge chain without recording a change.
+  pub(super) fn barrier(cursor: Pos) -> Self {
+    Edit::delta(cursor, VarStr::new(), VarStr::new(), cursor, cursor)
+  }
   pub fn is_empty(&self) -> bool {
-    self.old == self.new
+    match &self.body {
+      EditBody::Delta {
+        removed, inserted, ..
+      } => removed.is_empty() && inserted.is_empty(),
+      EditBody::Snapshot { old, new } => old == new,
+    }
+  }
+  /// Extend an open merge with the current buffer state.
+  fn set_new(&mut self, new_lines: Lines, new_cursor: Pos) {
+    if let EditBody::Snapshot { new, .. } = &mut self.body {
+      *new = new_lines;
+    }
+    self.new_cursor = new_cursor;
+  }
+  /// Collapse a finished merge's snapshots into a compact delta.
+  pub(super) fn finalize(&mut self) {
+    let data = match &self.body {
+      EditBody::Snapshot { old, new } => Some(Diff::new(old, new)),
+      EditBody::Delta { .. } => None,
+    };
+    if let Some(Diff {
+      start,
+      removed,
+      inserted,
+    }) = data
+    {
+      self.body = EditBody::Delta {
+        at: start,
+        removed,
+        inserted,
+      };
+    }
+  }
+  /// Re-expand a delta into snapshots so the entry can be merged into. `current`
+  /// is the live buffer, which equals this entry's post-edit state.
+  fn make_snapshot(&mut self, current: &Lines) {
+    let snap = match &self.body {
+      EditBody::Delta {
+        at,
+        removed,
+        inserted,
+      } => {
+        let mut old = current.clone();
+        splice_lines(&mut old, *at, inserted, removed); // revert this delta
+        Some((old, current.clone()))
+      }
+      EditBody::Snapshot { .. } => None,
+    };
+    if let Some((old, new)) = snap {
+      self.body = EditBody::Snapshot { old, new };
+    }
+  }
+  pub(super) fn undo(&self, lines: &mut Lines) {
+    self.apply(lines, true);
+  }
+  pub(super) fn redo(&self, lines: &mut Lines) {
+    self.apply(lines, false);
+  }
+
+  /// Apply this step to `lines` in the undo (true) or redo (false) direction.
+  fn apply(&self, lines: &mut Lines, is_undo: bool) {
+    match &self.body {
+      EditBody::Snapshot { old, new } => {
+        *lines = if is_undo { old.clone() } else { new.clone() };
+      }
+      EditBody::Delta {
+        at,
+        removed,
+        inserted,
+      } => {
+        if is_undo {
+          splice_lines(lines, *at, inserted, removed);
+        } else {
+          splice_lines(lines, *at, removed, inserted);
+        }
+      }
+    }
+  }
+}
+
+pub struct Diff {
+  start: Pos,
+  removed: VarStr,
+  inserted: VarStr,
+}
+
+impl Diff {
+  fn new(before: &Lines, after: &Lines) -> Self {
+    if before.len() == after.len() {
+      let mut changed: Option<usize> = None;
+      let mut multiple = false;
+      for r in 0..before.len() {
+        if before[r] != after[r] {
+          if changed.is_some() {
+            multiple = true;
+            break;
+          }
+          changed = Some(r);
+        }
+      }
+      match changed {
+        Some(r) if !multiple => return Self::diff_single_row(r, &before[r], &after[r]),
+        None => {
+          return Self {
+            start: Pos::default(),
+            removed: VarStr::new(),
+            inserted: VarStr::new(),
+          };
+        } // identical
+        _ => {} // >1 differing rows: fall through to the flat diff
+      }
+    }
+    Self::diff_flat(before, after)
+  }
+  /// Flat grapheme diff over the whole newline-joined buffer. Correct for any
+  /// change including row insert/delete, at the cost of stringifying both buffers.
+  fn diff_flat(before: &Lines, after: &Lines) -> Self {
+    let a = before.to_string();
+    let b = after.to_string();
+    let ag: Vec<&str> = a.graphemes(true).collect();
+    let bg: Vec<&str> = b.graphemes(true).collect();
+    let pmax = ag.len().min(bg.len());
+    let mut p = 0;
+    while p < pmax && ag[p] == bg[p] {
+      p += 1;
+    }
+    let smax = (ag.len() - p).min(bg.len() - p);
+    let mut s = 0;
+    while s < smax && ag[ag.len() - 1 - s] == bg[bg.len() - 1 - s] {
+      s += 1;
+    }
+    let removed: VarStr = ag[p..ag.len() - s].concat().into();
+    let inserted: VarStr = bg[p..bg.len() - s].concat().into();
+    let mut row = 0;
+    let mut col = 0;
+    for g in &ag[..p] {
+      if *g == "\n" {
+        row += 1;
+        col = 0;
+      } else {
+        col += 1;
+      }
+    }
+    Self {
+      start: Pos { row, col },
+      removed,
+      inserted,
+    }
+  }
+
+  /// Diff two single lines into ((row, col), removed, inserted). No newlines are
+  /// involved, so the spans stay within the row.
+  fn diff_single_row(row: usize, before: &Line, after: &Line) -> Self {
+    let bg = before.graphemes();
+    let ag = after.graphemes();
+    let pmax = bg.len().min(ag.len());
+    let mut p = 0;
+    while p < pmax && bg[p] == ag[p] {
+      p += 1;
+    }
+    let smax = (bg.len() - p).min(ag.len() - p);
+    let mut s = 0;
+    while s < smax && bg[bg.len() - 1 - s] == ag[ag.len() - 1 - s] {
+      s += 1;
+    }
+    let removed: VarStr = Line(bg[p..bg.len() - s].to_vec()).to_var_str();
+    let inserted: VarStr = Line(ag[p..ag.len() - s].to_vec()).to_var_str();
+    Self {
+      start: Pos { row, col: p },
+      removed,
+      inserted,
+    }
+  }
+}
+
+/// Exclusive end position of `text` laid out starting at `at`.
+fn region_end(at: Pos, text: &str) -> Pos {
+  let nl = text.matches('\n').count();
+  if nl == 0 {
+    Pos {
+      row: at.row,
+      col: at.col + text.graphemes(true).count(),
+    }
+  } else {
+    let last = text.rsplit('\n').next().unwrap_or("");
+    Pos {
+      row: at.row + nl,
+      col: last.graphemes(true).count(),
+    }
+  }
+}
+
+/// Replace the region `remove` occupies (laid out at `at`) with `insert`.
+pub(super) fn splice_lines(lines: &mut Lines, at: Pos, remove: &str, insert: &str) {
+  let end = region_end(at, remove);
+  extract_range_contiguous(lines, at, end);
+  insert_lines_at(lines, at, insert);
+}
+
+fn insert_lines_at(lines: &mut Lines, at: Pos, text: &str) {
+  if text.is_empty() {
+    return;
+  }
+  let row = at.row.min(lines.len().saturating_sub(1));
+  let col = at.col.min(lines[row].len());
+  if !text.contains('\n') {
+    lines[row].insert_str(col, text);
+    return;
+  }
+  let segs: Vec<&str> = text.split('\n').collect();
+  let mut tail: Line = lines[row].split_off(col);
+  lines[row].push_str(segs[0]);
+  let mut new: Vec<Line> = segs[1..]
+    .iter()
+    .map(|seg| {
+      let mut l = Line::default();
+      l.push_str(seg);
+      l
+    })
+    .collect();
+  if let Some(last) = new.last_mut() {
+    last.append(&mut tail);
+  }
+  for (i, l) in new.into_iter().enumerate() {
+    lines.insert(row + 1 + i, l);
   }
 }
 
@@ -259,21 +524,50 @@ impl super::LineBuf {
     res
   }
   pub fn handle_edit(&mut self, old: Lines, new_cursor: Pos, old_cursor: Pos) {
-    let last_edit = self.undo_stack.last();
-    let edit_is_merging = last_edit.is_some_and(|edit| edit.merging);
-    if edit_is_merging {
-      // Update the `new` snapshot on the existing edit
-      if let Some(edit) = self.undo_stack.last_mut() {
-        edit.new = self.lines.clone();
-      }
+    self.record_edit(old, old_cursor, new_cursor, self.merging_undos);
+  }
+  /// Record an edit from `old` (the pre-edit buffer) to the current buffer. An
+  /// open merge at the top of the stack absorbs the change; otherwise a new
+  /// entry is pushed, kept as snapshots when `want_merge` so later edits fold in.
+  pub(super) fn record_edit(
+    &mut self,
+    old: Lines,
+    old_cursor: Pos,
+    new_cursor: Pos,
+    want_merge: bool,
+  ) {
+    if self.undo_stack.last().is_some_and(|e| e.merging) {
+      let new = self.lines.clone();
+      self.undo_stack.last_mut().unwrap().set_new(new, new_cursor);
+    } else if want_merge {
+      let new = self.lines.clone();
+      self
+        .undo_stack
+        .push(Edit::snapshot(old, new, old_cursor, new_cursor, true));
     } else {
-      self.undo_stack.push(Edit {
-        new_cursor,
-        old_cursor,
-        old,
-        new: self.lines.clone(),
-        merging: false,
-      });
+      let Diff {
+        start,
+        removed,
+        inserted,
+      } = Diff::new(&old, &self.lines);
+      self.undo_stack.push(Edit::delta(
+        start, removed, inserted, old_cursor, new_cursor,
+      ));
+    }
+  }
+  /// Open or close the top entry as a merge target, converting its
+  /// representation so that "merging ⟺ snapshot" always holds.
+  pub(super) fn set_top_merging(&mut self, merging: bool) {
+    if merging {
+      if self.undo_stack.last().is_some_and(|e| !e.merging) {
+        let current = self.lines.clone();
+        let top = self.undo_stack.last_mut().unwrap();
+        top.make_snapshot(&current);
+        top.merging = true;
+      }
+    } else if let Some(top) = self.undo_stack.last_mut() {
+      top.finalize();
+      top.merging = false;
     }
   }
 }

@@ -779,23 +779,13 @@ impl super::LineBuf {
   }
   pub fn stop_undo_merge(&mut self) {
     self.merging_undos = false;
-    if let Some(edit) = self.undo_stack.last_mut() {
-      edit.merging = false;
-    }
-
-    self.undo_stack.push(Edit {
-      old_cursor: self.cursor.pos,
-      new_cursor: self.cursor.pos,
-      old: self.lines.clone(),
-      new: self.lines.clone(),
-      merging: false,
-    });
+    self.set_top_merging(false);
+    // Barrier so the next edit can't fold into the just-closed group.
+    self.undo_stack.push(Edit::barrier(self.cursor.pos));
   }
   pub fn start_undo_merge(&mut self) {
     self.merging_undos = true;
-    if let Some(edit) = self.undo_stack.last_mut() {
-      edit.merging = true;
-    }
+    self.set_top_merging(true);
   }
   pub fn equalize_rows(&mut self, line_nums: Vec<usize>) {
     for row in line_nums {

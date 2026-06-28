@@ -370,28 +370,43 @@ impl super::LineBuf {
     self.edit_stack_op(false);
   }
   fn edit_stack_op(&mut self, is_undo: bool) {
-    let (from, to) = if is_undo {
-      (&mut self.undo_stack, &mut self.redo_stack)
-    } else {
-      (&mut self.redo_stack, &mut self.undo_stack)
+    // Pop the next non-empty step from the source stack (borrow released before
+    // we mutate `self.lines`).
+    let mut edit = loop {
+      let popped = if is_undo {
+        self.undo_stack.pop()
+      } else {
+        self.redo_stack.pop()
+      };
+      match popped {
+        Some(e) if e.is_empty() => continue,
+        Some(e) => break e,
+        None => return,
+      }
     };
 
-    if let Some(mut edit) = from.pop() {
-      while edit.is_empty() {
-        if let Some(next) = from.pop() {
-          edit = next;
-        } else {
-          return;
-        }
-      }
-      let (lines, cursor) = if is_undo {
-        (edit.old.clone(), edit.old_cursor)
-      } else {
-        (edit.new.clone(), edit.new_cursor)
-      };
-      self.lines = lines;
-      self.cursor.pos = cursor;
-      to.push(edit);
+    let cursor = if is_undo {
+      edit.old_cursor
+    } else {
+      edit.new_cursor
+    };
+
+    if is_undo {
+      edit.undo(&mut self.lines);
+    } else {
+      edit.redo(&mut self.lines);
+    }
+    self.cursor.pos = cursor;
+
+    // Off the live top now: compact any snapshots and clear the merge flag so
+    // it is not treated as an open merge target on the destination stack.
+    edit.finalize();
+    edit.merging = false;
+
+    if is_undo {
+      self.redo_stack.push(edit);
+    } else {
+      self.undo_stack.push(edit);
     }
   }
   fn put(&mut self, cmd: &EditCmd, anchor: Anchor) -> ShResult<()> {
