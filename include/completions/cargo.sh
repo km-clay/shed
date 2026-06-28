@@ -308,4 +308,4 @@ _cargo_remove_comp() {
 	fi
 }
 
-complete -F _cargo_comp cargo
+complete -d -f -F _cargo_comp cargo

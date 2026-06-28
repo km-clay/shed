@@ -51,4 +51,4 @@ _hist_comp() {
       ;;
 	esac
 }
-complete -F _hist_comp hist
+complete -d -f -F _hist_comp hist
