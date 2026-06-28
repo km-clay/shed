@@ -207,7 +207,7 @@ impl LineBuf {
       self.indent_cache = None;
     }
 
-    let before = self.lines.clone();
+    let before = is_edit.then(|| self.lines.clone());
     let old_cursor = self.cursor.pos;
 
     // Reset per command; the search motion arms raise it again if they fail.
@@ -258,9 +258,10 @@ impl LineBuf {
     {
       edit.merging = false;
     }
-    let changed = self.lines != before;
+    let changed = before.as_ref().is_some_and(|b| &self.lines != b);
 
     if changed && !is_undo_op {
+      let before = before.unwrap(); // `changed` implies `before` is Some
       self.redo_stack.clear();
       if is_char_insert {
         // Merge consecutive char inserts into one undo entry

@@ -8,7 +8,7 @@ use crate::{
   readline::EditorCore,
   sherr,
   state::vars::VarStr,
-  util::{self, ShResultExt, with_status},
+  util::{ShResultExt, with_status},
 };
 
 struct ViceProg {
@@ -139,7 +139,7 @@ impl Vice {
       let clone = cmd.clone();
       match cmd {
         ViceCmd::Cut(keys) => {
-          let start = core.editor.cursor_to_flat();
+          let start = core.editor.cursor();
 
           // A failed search aborts the whole program; leave the flag set so
           // the caller can skip the line or fail the buffer.
@@ -151,13 +151,9 @@ impl Vice {
             log::debug!("Vice: selection found: {:?}", sel);
             sel
           } else {
-            let mut end_cursor = core.editor.cursor();
-            let col = core.editor.offset_col_absolute(end_cursor.row, 1);
-            end_cursor.col = col;
-            let end = core.editor.pos_to_flat(end_cursor);
-
-            let (lo, hi) = util::ordered(start, end);
-            core.editor.slice(lo..hi).unwrap_or_default()
+            let mut end = core.editor.cursor();
+            end.col = core.editor.offset_col_absolute(end.row, 1);
+            core.editor.slice_pos(start, end)
           };
 
           fields.push(if prog.quoted {

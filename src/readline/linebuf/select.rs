@@ -90,6 +90,39 @@ impl super::LineBuf {
     Some(self.evaluate_selection(mode))
   }
 
+  pub fn selection_str(&self) -> Option<String> {
+    let (start, end) = match self.select_range()? {
+      Motion::CharRange(s, e) => {
+        let (s, e) = ordered(s, e);
+        // exclusive end: include the grapheme under the end cursor if present
+        let end = if e.col < self.line(e.row).len() {
+          Pos {
+            row: e.row,
+            col: e.col + 1,
+          }
+        } else {
+          e
+        };
+        (s, end)
+      }
+      Motion::LineRange(s, e) => {
+        let s = self.resolve_line_addr(&s).ok()??;
+        let e = self.resolve_line_addr(&e).ok()??;
+        let (s, e) = ordered(s, e);
+        (
+          Pos { row: s, col: 0 },
+          Pos {
+            row: e,
+            col: self.line(e).len(),
+          },
+        )
+      }
+      Motion::BlockRange(..) => return None,
+      _ => unreachable!(),
+    };
+    Some(self.pos_slice_exclusive(start, end))
+  }
+
   pub fn select_range_byte_pos(&mut self) -> Option<Range<usize>> {
     match self.select_range()? {
       Motion::CharRange(s, e) => {

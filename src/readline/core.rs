@@ -114,8 +114,7 @@ impl EditorCore {
   /// The text currently selected, if any. Used by headless drivers to capture
   /// the span a motion traversed.
   pub fn selection(&mut self) -> Option<String> {
-    let range = self.editor.select_range_byte_pos()?;
-    self.editor.to_string().get(range).map(str::to_string)
+    self.editor.selection_str()
   }
 
   /// The editor sub-buffer that currently has focus. Ex mode supplies its own

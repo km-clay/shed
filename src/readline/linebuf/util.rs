@@ -716,15 +716,6 @@ impl super::LineBuf {
       && self.hint.as_ref().is_none_or(|h| h.lines().len() <= 1)
   }
 
-  pub fn slice(&self, range: std::ops::Range<usize>) -> Option<String> {
-    let joined = self.to_string();
-    let graphemes: Vec<&str> = joined.graphemes(true).collect();
-    if range.start > graphemes.len() || range.end > graphemes.len() {
-      return None;
-    }
-    Some(graphemes[range].join(""))
-  }
-
   pub fn cursor_byte_pos(&self) -> usize {
     let mut pos = 0;
     for i in 0..self.cursor.pos.row {
@@ -1079,6 +1070,44 @@ impl super::LineBuf {
   }
   pub(super) fn get_row(&self, row: usize) -> Option<&Line> {
     self.lines.get(row)
+  }
+  pub fn slice_pos(&self, a: Pos, b: Pos) -> String {
+    let (lo, hi) = if (a.row, a.col) <= (b.row, b.col) {
+      (a, b)
+    } else {
+      (b, a)
+    };
+    self.pos_slice_exclusive(lo, hi)
+  }
+  pub(super) fn pos_slice_exclusive(&self, s: Pos, end: Pos) -> String {
+    let mut out = String::new();
+    if s.row == end.row {
+      let line = &self.lines[s.row].0;
+      let hi = end.col.min(line.len());
+      let lo = s.col.min(hi);
+      for g in &line[lo..hi] {
+        out.push_str(&g.to_string());
+      }
+      return out;
+    }
+    let first = &self.lines[s.row].0;
+    let lo = s.col.min(first.len());
+    for g in &first[lo..] {
+      out.push_str(&g.to_string());
+    }
+    for row in (s.row + 1)..end.row {
+      out.push('\n');
+      for g in &self.lines[row].0 {
+        out.push_str(&g.to_string());
+      }
+    }
+    out.push('\n');
+    let last = &self.lines[end.row].0;
+    let hi = end.col.min(last.len());
+    for g in &last[..hi] {
+      out.push_str(&g.to_string());
+    }
+    out
   }
   pub(super) fn pos_slice_str(&self, s: Pos, e: Pos) -> String {
     let (s, e) = ordered(s, e);
