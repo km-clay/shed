@@ -279,6 +279,11 @@
                   default = true;
                   description = "Whether to ignore consecutive duplicate entries in the command history";
                 };
+                ignore_space = lib.mkOption {
+                  type = lib.types.bool;
+                  default = true;
+                  description = "Whether to skip commands that start with a space when saving to history";
+                };
                 max_entries = lib.mkOption {
                   type = lib.types.int;
                   default = -1;

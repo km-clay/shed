@@ -332,6 +332,11 @@ impl History {
 
     {
       let conn = self.lock();
+
+      if shopt!(history.ignore_space) && command.starts_with(" ") {
+        return Ok(None);
+      }
+
       if shopt!(history.ignore_dupes) {
         let last: Option<String> = conn
           .query_row(

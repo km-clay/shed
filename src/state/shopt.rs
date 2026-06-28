@@ -459,6 +459,10 @@ pub(crate) struct ShOptHist {
   #[default(true)]
   pub ignore_dupes: bool,
 
+  /// Ignore commands that start with a space
+  #[default(true)]
+  pub ignore_space: bool,
+
   /// Maximum number of entries in the command history file (-1 for unlimited)
   #[validate(validate_max_hist)]
   #[default(-1isize)]

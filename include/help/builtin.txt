@@ -1851,6 +1851,7 @@ SHOPT                                            *builtin-shopt* *shopt*
 
     `auto_save`      automatically save commands to history
     `ignore_dupes`   skip duplicate consecutive history entries
+    `ignore_space`   skip commands that start with a space
     `max_entries`    max history entries (-1 for unlimited)
     `enable_concat`  Shift/Ctrl+Up/Down history concatenation (see |tips|(tips-hist-cat))
 

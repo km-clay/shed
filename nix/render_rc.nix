@@ -72,6 +72,7 @@ in
 
       "shopt history.auto_save=${boolToString cfg.shopts.history.auto_save}"
       "shopt history.ignore_dupes=${boolToString cfg.shopts.history.ignore_dupes}"
+      "shopt history.ignore_space=${boolToString cfg.shopts.history.ignore_space}"
       "shopt history.max_entries=${toString cfg.shopts.history.max_entries}"
       "shopt history.enable_concat=${boolToString cfg.shopts.history.enable_concat}"
 

@@ -82,12 +82,14 @@ _shopt_comp() {
     local history=(
       auto_save
       ignore_dupes
+      ignore_space
       max_entries
       enable_concat
     )
     local history_desc=(
       "saves executed commands to your history"
       "history ignores consecutive duplicate commands"
+      "commands starting with a space are not saved to history"
       "maximum number of history entries (-1 for unlimited)"
       "enables joining history entries together using Ctrl/Shift+Up/Down"
     )

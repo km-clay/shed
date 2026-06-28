@@ -8,7 +8,7 @@ A tour of various features that are unique to `shed`.
 1. History concatenation                       *tips-hist-cat* *hist-cat*
 
   Normally `Up`/`Down` replace the line with a history entry. When
-  `shopt prompt.hist_cat` is set to `true`, `Shift`/`Ctrl` + `Up`/`Down`
+  `shopt history.enable_concat` is set to `true`, `Shift`/`Ctrl` + `Up`/`Down`
   instead *stitch* history entries onto your current command
   rather than replacing it:
 
