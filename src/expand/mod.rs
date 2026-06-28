@@ -9,6 +9,8 @@ mod subshell;
 mod util;
 mod var;
 
+use std::rc::Rc;
+
 pub(super) use alias::{expand_alias_with_pos, expand_aliases, expand_keymap};
 pub(super) use arithmetic::{expand_arithmetic, expand_arithmetic_wrapped};
 pub(super) use escape::{
@@ -18,6 +20,11 @@ pub(super) use escape::{
 pub(super) use prompt::expand_prompt;
 pub(super) use util::{expand_case_pattern, glob_to_regex};
 pub(super) use var::{expand_glob, expand_raw, expand_raw_inner};
+
+use crate::{
+  state::vars::{VarStr, VarStrSliceExt},
+  util::scratch_buf,
+};
 
 use super::{
   Shed,
@@ -39,8 +46,8 @@ impl Tk {
       return Ok(self.clone());
     }
     if self.is_literal() {
-      let raw = self.span.as_str().to_string();
-      let class = TkRule::Expanded { exp: vec![raw] };
+      let raw = self.span.as_str().into();
+      let class = TkRule::Expanded { exp: [raw].into() };
       return Ok(Self {
         class,
         ..self.clone()
@@ -50,26 +57,29 @@ impl Tk {
     let flags = self.flags;
     let span = self.span.clone();
     let exp = Expander::new(self).expand().promote_err(span.clone())?;
-    let class = TkRule::Expanded { exp };
+    let class = TkRule::Expanded { exp: exp.into() };
     Ok(Self { class, span, flags })
   }
-  pub fn expand_to_words(&self) -> ShResult<Vec<String>> {
+  pub fn expand_to_words(&self) -> ShResult<Rc<[VarStr]>> {
     if let TkRule::Expanded { exp } = &self.class {
       return Ok(exp.clone());
     }
     if self.is_literal() {
-      return Ok(vec![self.span.as_str().to_string()]);
+      return Ok([self.span.as_str().into()].into());
     }
     let span = self.span.clone();
-    Expander::new(self).expand().promote_err(span)
+    Expander::new(self)
+      .expand()
+      .map(|w| w.into())
+      .promote_err(span)
   }
   pub fn expand_no_side_effects(&self) -> ShResult<Self> {
     if let TkRule::Expanded { .. } = self.class {
       return Ok(self.clone());
     }
     if self.is_literal() {
-      let raw = self.span.as_str().to_string();
-      let class = TkRule::Expanded { exp: vec![raw] };
+      let raw = self.span.as_str().into();
+      let class = TkRule::Expanded { exp: [raw].into() };
       return Ok(Self {
         class,
         ..self.clone()
@@ -78,18 +88,19 @@ impl Tk {
 
     let flags = self.flags;
     let span = self.span.clone();
-    let exp = Expander::new(self)
+    let exp: VarStr = Expander::new(self)
       .expand_no_side_effects()
       .promote_err(span.clone())?;
-    let class = TkRule::Expanded { exp: vec![exp] };
+
+    let class = TkRule::Expanded { exp: [exp].into() };
     Ok(Self { class, span, flags })
   }
-  pub fn expand_no_split(&self) -> ShResult<String> {
+  pub fn expand_no_split(&self) -> ShResult<VarStr> {
     if let TkRule::Expanded { exp } = &self.class {
-      return Ok(exp.join(" "));
+      return Ok(exp.join_with(" "));
     }
     if self.is_literal() {
-      return Ok(self.span.as_str().to_string());
+      return Ok(self.span.as_str().into());
     }
 
     let span = self.span.clone();
@@ -108,8 +119,8 @@ impl Tk {
       return Ok(self.clone());
     }
     if self.is_literal() {
-      let raw = self.span.as_str().to_string();
-      let class = TkRule::Expanded { exp: vec![raw] };
+      let raw = self.span.as_str().into();
+      let class = TkRule::Expanded { exp: [raw].into() };
       return Ok(Self {
         class,
         ..self.clone()
@@ -118,23 +129,24 @@ impl Tk {
 
     let flags = self.flags;
     let span = self.span.clone();
-    let exp = Expander::new(self)
+    let exp: VarStr = Expander::new(self)
       .no_split()
       .expand_no_split()
       .promote_err(span.clone())?;
-    let class = TkRule::Expanded { exp: vec![exp] };
+
+    let class = TkRule::Expanded { exp: [exp].into() };
     Ok(Self { class, span, flags })
   }
   /// Perform word splitting
-  pub fn get_words(&self) -> Vec<String> {
+  pub fn get_words(&self) -> Rc<[VarStr]> {
     match &self.class {
       TkRule::Expanded { exp } => exp.clone(),
-      _ => vec![self.to_string()],
+      _ => [self.as_str().into()].into(),
     }
   }
 
-  pub fn get_first_word(&self) -> Option<String> {
-    self.get_words().into_iter().next()
+  pub fn get_first_word(&self) -> Option<VarStr> {
+    self.get_words().iter().next().cloned()
   }
 }
 
@@ -188,8 +200,8 @@ impl Expander {
       ..self
     }
   }
-  pub fn expand(&mut self) -> ShResult<Vec<String>> {
-    let res = self.expand_inner()?;
+  pub fn expand(&mut self) -> ShResult<Vec<VarStr>> {
+    let res: VarStr = self.expand_inner()?.into();
     let words = if self.flags.contains(TkFlags::IS_HEREDOC) || self.nosplit {
       vec![res]
     } else {
@@ -200,55 +212,61 @@ impl Expander {
       return Ok(
         words
           .into_iter()
-          .map(escape::strip_escape_markers)
+          .map(|mut s| {
+            escape::strip_escape_markers(&mut s);
+            s
+          })
           .collect(),
       );
     }
 
     let nullglob = shopt!(core.nullglob);
-    let mut glob_words = Vec::with_capacity(words.len());
+    let mut glob_words: Vec<VarStr> = Vec::with_capacity(words.len());
 
-    for word in words {
+    for mut word in words {
       if !var::might_be_glob(&word) {
-        glob_words.push(escape::strip_escape_markers(word));
+        escape::strip_escape_markers(&mut word);
+        glob_words.push(word);
         continue;
       }
 
-      let expansions = expand_glob(&word).unwrap_or_else(|_| vec![word.clone()]);
+      let expansions = expand_glob(&word).unwrap_or_else(|_| vec![word.to_string()]);
 
       if expansions.is_empty() {
         if !nullglob {
-          glob_words.push(escape::strip_escape_markers(word));
+          escape::strip_escape_markers(&mut word);
+          glob_words.push(word);
         }
         continue;
       }
 
       for exp in expansions {
-        let exp = var::restore_glob_prefix(&word, exp);
-        glob_words.push(escape::strip_escape_markers(exp));
+        let mut exp = var::restore_glob_prefix(&word, exp).into();
+        escape::strip_escape_markers(&mut exp);
+        glob_words.push(exp);
       }
     }
 
     Ok(glob_words)
   }
-  pub fn expand_no_side_effects(&mut self) -> ShResult<String> {
+  pub fn expand_no_side_effects(&mut self) -> ShResult<VarStr> {
     self.allow_side_effects = false;
     let raw = self.expand_inner()?;
-    Ok(markers::strip_markers(&raw))
+    Ok(markers::strip_markers(&raw).into())
   }
-  pub fn expand_no_split(&mut self) -> ShResult<String> {
+  pub fn expand_no_split(&mut self) -> ShResult<VarStr> {
     let raw = self.expand_inner()?;
-    Ok(markers::strip_markers(&raw))
+    Ok(markers::strip_markers(&raw).into())
   }
-  pub fn expand_keep_quotes(&mut self) -> ShResult<String> {
+  pub fn expand_keep_quotes(&mut self) -> ShResult<VarStr> {
     let mut raw = self.expand_inner()?;
     raw = raw.replace(markers::DUB_QUOTE, "\"");
     raw = raw.replace(markers::SNG_QUOTE, "'");
-    Ok(markers::strip_markers(&raw))
+    Ok(markers::strip_markers(&raw).into())
   }
-  pub fn expand_for_glob(&mut self) -> ShResult<String> {
+  pub fn expand_for_glob(&mut self) -> ShResult<VarStr> {
     let raw = self.expand_inner()?;
-    Ok(escape::markers_to_glob_escapes(&raw))
+    Ok(escape::markers_to_glob_escapes(&raw).into())
   }
   pub fn expand_inner(&mut self) -> ShResult<String> {
     let mut chars = self.raw.chars().peekable();
@@ -256,10 +274,10 @@ impl Expander {
 
     Ok(self.raw.clone())
   }
-  pub fn split_words(&mut self) -> Vec<String> {
+  pub fn split_words(&mut self) -> Vec<VarStr> {
     let mut words = vec![];
     let mut chars = self.raw.chars();
-    let mut cur_word = String::new();
+    let mut cur_word = scratch_buf();
     let mut was_quoted = false;
     let ifs = state::util::get_separators();
     // Delimiter-run tracking: whitespace and non-whitespace IFS chars combine
@@ -286,7 +304,7 @@ impl Expander {
           delim_has_non_ws = false;
           match_loop!(chars.next() => q_ch, {
             markers::ARG_SEP if ch == markers::DUB_QUOTE => {
-              words.push(std::mem::take(&mut cur_word));
+              words.push(std::mem::take(&mut cur_word).into());
             }
             _ if q_ch == ch => {
               was_quoted = true;
@@ -309,12 +327,12 @@ impl Expander {
             // Just exited a field (or saw leading IFS). Decide whether to emit.
             if is_ws {
               if !cur_word.is_empty() || was_quoted {
-                words.push(std::mem::take(&mut cur_word));
+                words.push(std::mem::take(&mut cur_word).into());
                 was_quoted = false;
               }
             } else {
               // Non-WS IFS always emits (preserves leading/middle empty fields).
-              words.push(std::mem::take(&mut cur_word));
+              words.push(std::mem::take(&mut cur_word).into());
               was_quoted = false;
               delim_has_non_ws = true;
             }
@@ -323,7 +341,7 @@ impl Expander {
             // Already in a delimiter run and we hit another non-WS IFS char.
             if delim_has_non_ws {
               // Second non-WS in this run -> emit an empty field.
-              words.push(String::new());
+              words.push(VarStr::new());
             } else {
               // First non-WS adjacent to WS in the run -> just absorb into the run.
               delim_has_non_ws = true;
@@ -341,14 +359,14 @@ impl Expander {
     if words.is_empty() && (cur_word.is_empty() && !was_quoted) {
       return words;
     } else if !cur_word.is_empty() || was_quoted {
-      words.push(cur_word);
+      words.push(cur_word.into());
     }
 
     let null_exp = markers::NULL_EXPAND.to_string();
     words.retain(|w| w != &null_exp);
     for w in &mut words {
       if w.contains(markers::NULL_EXPAND) {
-        *w = w.replace(markers::NULL_EXPAND, "");
+        *w = w.replace(markers::NULL_EXPAND, "").into();
       }
     }
     words

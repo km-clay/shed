@@ -28,6 +28,7 @@ use super::{
 use crate::{
   HashSet, sherr,
   util::{format_size, var_ctx_guard},
+  varstr,
 };
 use crate::{state, verb};
 
@@ -262,7 +263,7 @@ impl super::LineBuf {
         let buffer = self.to_string();
         let (s, e) = (self.row(), self.col());
 
-        stash.push(name.as_ref(), &buffer, (s, e))?;
+        stash.push(name, &buffer, (s, e))?;
         self.clear_buffer();
         self.clear_hint();
         self.set_cursor(Pos::new(0, 0));
@@ -340,7 +341,7 @@ impl super::LineBuf {
         let stack_len = stash.stack_len();
         let name = arg
           .clone()
-          .unwrap_or(stack_len.saturating_sub(1).to_string());
+          .unwrap_or(varstr!("{}", stack_len.saturating_sub(1)));
 
         let Some(StashedCmd {
           name,
@@ -380,7 +381,7 @@ impl super::LineBuf {
         let stack_len = stash.stack_len();
         let name = arg
           .clone()
-          .unwrap_or(stack_len.saturating_sub(1).to_string());
+          .unwrap_or(varstr!("{}", stack_len.saturating_sub(1)));
 
         let Some(StashedCmd {
           name: _,
@@ -423,7 +424,7 @@ impl super::LineBuf {
         let stack_len = stash.stack_len();
         let ident = arg
           .clone()
-          .unwrap_or(stack_len.saturating_sub(1).to_string());
+          .unwrap_or(varstr!("{}", stack_len.saturating_sub(1)));
 
         let Some(StashedCmd {
           name: ent_name,
@@ -457,7 +458,7 @@ impl super::LineBuf {
         // from `idx` up to the top, returning to the original state
         // after (stack_len - idx + 1) invocations.
         if let Some(name) = ent_name.clone() {
-          stash.push(Some(&name), &curr_buf, curr_cursor)?;
+          stash.push(Some(name), &curr_buf, curr_cursor)?;
         } else {
           let idx = ident
             .parse::<usize>()
@@ -539,7 +540,10 @@ impl super::LineBuf {
   fn ex_write(&mut self, dest: &WriteDest) -> ShResult<()> {
     match dest {
       WriteDest::FileAppend(path_buf) | WriteDest::File(path_buf) => {
-        let Some(path_buf) = path_buf.clone().or_else(|| self.open_file.clone()) else {
+        let Some(path_buf) = path_buf
+          .clone()
+          .or_else(|| self.open_file.as_ref().map(PathBuf::from).clone())
+        else {
           status_msg!("expected file argument for write command");
           return Ok(());
         };
@@ -611,7 +615,7 @@ impl super::LineBuf {
         format_size(byte_count as u64, &mut size).ok();
         status_msg!("Read {line_count} lines [{size}] from '{display_path}'",);
         let realpath = state::util::lex_normalize_path(path_buf);
-        self.open_file = Some(realpath);
+        self.open_file = Some(realpath.to_string_lossy().into());
         contents
       }
       ReadSrc::Cmd(cmd) => {
@@ -640,7 +644,7 @@ impl super::LineBuf {
       let args = paths.iter().map(|p| format!("{}", p.display())).join(" ");
       let input = format!("$EDITOR {args}");
 
-      exec_int(input, Some(get_entry_name()))
+      exec_int(input.into(), Some(get_entry_name()))
     }
   }
 
@@ -709,7 +713,7 @@ impl super::LineBuf {
     } else {
       defer!(autocmd!(PostCmd));
       let _guard = Shed::term_mut(|t| t.yield_terminal(false));
-      exec_int(sh_cmd.to_string(), Some(get_entry_name()))?;
+      exec_int(sh_cmd.into(), Some(get_entry_name()))?;
       None
     };
 

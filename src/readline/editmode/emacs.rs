@@ -1,4 +1,7 @@
-use crate::readline::{RegisterName, editcmd::CmdFlags};
+use crate::{
+  readline::{RegisterName, editcmd::CmdFlags},
+  state::vars::VarStr,
+};
 
 use super::{
   CmdReplay, EditMode, ModeReport, common_cmds,
@@ -69,7 +72,7 @@ impl EditMode for Emacs {
       }
       E(K::Verbatim(seq), _) => {
         self.reset_cmd();
-        self.set_verb(verb!(Verb::Insert(seq.to_string())));
+        self.set_verb(verb!(Verb::Insert((*seq).into())));
         self.take_cmd()
       }
       key!(Backspace) => {
@@ -229,7 +232,7 @@ impl EditMode for Emacs {
   fn cursor_style(&self) -> CursorStyle {
     CursorStyle::Beam(false)
   }
-  fn pending_seq(&self) -> Option<String> {
+  fn pending_seq(&self) -> Option<VarStr> {
     None
   }
   fn clamp_cursor(&self) -> bool {

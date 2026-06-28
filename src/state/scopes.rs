@@ -37,17 +37,17 @@ impl ScopeStack {
       .insert(ShellParam::ShellName, shell_name.into());
     new
   }
-  pub fn descend(&mut self, argv: Option<Vec<String>>) {
+  pub fn descend(&mut self, argv: Option<Vec<VarStr>>) {
     let mut new_vars = VarTab::bare();
     if let Some(argv) = argv {
       for arg in argv {
-        new_vars.bpush_arg(arg.into());
+        new_vars.bpush_arg(arg);
       }
     }
     self.scopes.push(new_vars);
     self.depth += 1;
   }
-  pub fn descend_with_ceiling(&mut self, argv: Option<Vec<String>>) {
+  pub fn descend_with_ceiling(&mut self, argv: Option<Vec<VarStr>>) {
     self.descend(argv);
     if let Some(scope) = self.scopes.last_mut() {
       scope.set_is_ceiling(true);

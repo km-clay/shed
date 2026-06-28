@@ -1951,8 +1951,8 @@ mod readline_mod_coverage {
     Shed::logic_mut(|l| {
       l.insert_keymap(KeyMap {
         flags: KeyMapFlags::EMACS,
-        keys: "<C-a>".to_string(),
-        action: "<C-e>".to_string(),
+        keys: "<C-a>".into(),
+        action: "<C-e>".into(),
       });
     });
     line.handle_keymap(&key!(Ctrl + 'a')).unwrap();
@@ -2159,8 +2159,8 @@ mod keymap_implied_submit {
     Shed::logic_mut(|l| {
       l.insert_keymap(KeyMap {
         flags: KeyMapFlags::NORMAL,
-        keys: keys.to_string(),
-        action: action.to_string(),
+        keys: keys.into(),
+        action: action.into(),
       });
     });
   }

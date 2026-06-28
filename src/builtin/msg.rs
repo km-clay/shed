@@ -1,4 +1,4 @@
-use crate::{procio::bytes_to_string, socket_msg};
+use crate::{procio::bytes_to_string, socket_msg, state::vars::VarStr};
 
 use super::{
   Shed,
@@ -41,7 +41,7 @@ impl super::Builtin for Msg {
     let input = self.get_input(&mut args).map(|s| {
       let mut s = bytes_to_string(s);
       s.truncate(s.trim_matches('\n').len());
-      s
+      VarStr::from(s)
     });
 
     if input.is_none() && args.argv.is_empty() {
@@ -60,7 +60,7 @@ impl super::Builtin for Msg {
       return with_status(0);
     }
 
-    let msg = input.unwrap_or_else(|| join_raw_args(args.argv).0);
+    let msg: VarStr = input.unwrap_or_else(|| join_raw_args(args.argv).0);
 
     if broadcast {
       // sends to all socket subscribers

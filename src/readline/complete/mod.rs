@@ -1,4 +1,4 @@
-use crate::{HashSet, state::vars::VarStr};
+use crate::{HashSet, state::vars::VarStr, varstr};
 use std::{
   fmt::{Debug, Display},
   os::unix::fs::PermissionsExt,
@@ -70,9 +70,9 @@ bitflags! {
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct CompOpts {
-  pub func: Option<String>,
-  pub wordlist: Option<Vec<String>>,
-  pub action: Option<String>,
+  pub func: Option<VarStr>,
+  pub wordlist: Option<Vec<VarStr>>,
+  pub action: Option<VarStr>,
   pub flags: CompFlags,
   pub opt_flags: CompOptFlags,
 }
@@ -287,8 +287,8 @@ impl CompStrat {
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct Candidate {
-  content: String,
-  desc: Option<String>,
+  content: VarStr,
+  desc: Option<VarStr>,
   id: Option<usize>, // for stuff like history that cares about the original index
 }
 
@@ -314,7 +314,7 @@ impl Ord for Candidate {
 
 impl From<PathBuf> for Candidate {
   fn from(value: PathBuf) -> Self {
-    let path_raw = value.to_string_lossy().to_string();
+    let path_raw = value.to_string_lossy().into();
     let desc = file_desc(&value);
     Self {
       content: path_raw,
@@ -327,7 +327,7 @@ impl From<PathBuf> for Candidate {
 impl From<String> for Candidate {
   fn from(value: String) -> Self {
     Self {
-      content: value,
+      content: value.into(),
       desc: None,
       id: None,
     }
@@ -337,7 +337,17 @@ impl From<String> for Candidate {
 impl From<VarStr> for Candidate {
   fn from(value: VarStr) -> Self {
     Self {
-      content: value.to_string(),
+      content: value,
+      desc: None,
+      id: None,
+    }
+  }
+}
+
+impl From<&VarStr> for Candidate {
+  fn from(value: &VarStr) -> Self {
+    Self {
+      content: value.clone(),
       desc: None,
       id: None,
     }
@@ -353,7 +363,7 @@ impl From<Rc<Utility>> for Candidate {
 impl From<&state::meta::Utility> for Candidate {
   fn from(value: &state::meta::Utility) -> Self {
     Self {
-      content: value.name().to_string(),
+      content: value.name(),
       desc: None,
       id: None,
     }
@@ -369,7 +379,7 @@ impl From<state::meta::Utility> for Candidate {
 impl From<&String> for Candidate {
   fn from(value: &String) -> Self {
     Self {
-      content: value.clone(),
+      content: value.into(),
       desc: None,
       id: None,
     }
@@ -379,7 +389,7 @@ impl From<&String> for Candidate {
 impl From<&str> for Candidate {
   fn from(value: &str) -> Self {
     Self {
-      content: value.to_string(),
+      content: value.into(),
       desc: None,
       id: None,
     }
@@ -395,7 +405,7 @@ impl From<&&str> for Candidate {
 impl From<(usize, String)> for Candidate {
   fn from(value: (usize, String)) -> Self {
     Self {
-      content: value.1,
+      content: value.1.into(),
       desc: None,
       id: Some(value.0),
     }
@@ -444,7 +454,7 @@ impl Candidate {
   pub fn as_str(&self) -> &str {
     &self.content
   }
-  pub fn with_desc(mut self, desc: String) -> Self {
+  pub fn with_desc(mut self, desc: VarStr) -> Self {
     self.desc = Some(desc);
     self
   }
@@ -501,7 +511,7 @@ pub(crate) fn complete_aliases(start: &str) -> Vec<Candidate> {
   Shed::logic(|l| {
     l.aliases()
       .iter()
-      .map(|(a, v)| Candidate::from(a.clone()).with_desc(v.to_string()))
+      .map(|(a, v)| Candidate::from(a.clone()).with_desc(v.body()))
       .filter(|a| a.is_match(start))
       .collect()
   })
@@ -515,7 +525,7 @@ pub(crate) fn complete_jobs(start: &str) -> Vec<Candidate> {
         .filter_map(|j| j.as_ref())
         .filter_map(|j| {
           let name = j.name()?;
-          Some(Candidate::from(name.to_string()).with_desc(format!(
+          Some(Candidate::from(name.to_string()).with_desc(varstr!(
             "{} ({})",
             j.pgid(),
             j.get_cmd_line()
@@ -581,7 +591,7 @@ pub(crate) fn complete_vars_raw(raw: &str) -> Vec<Candidate> {
       .keys()
       .map(|k| {
         if let Some(val) = try_var!(k) {
-          Candidate::from(k.clone()).with_desc(val.to_string())
+          Candidate::from(k.clone()).with_desc(val)
         } else {
           Candidate::from(k.clone())
         }
@@ -610,19 +620,15 @@ fn complete_ex_commands(start: &str) -> Vec<Candidate> {
 fn command_utils() -> Vec<Utility> {
   let mut utils = Vec::new();
   Shed::logic(|l| {
-    utils.extend(l.aliases().keys().cloned().map(Utility::alias));
-    utils.extend(l.funcs().keys().cloned().map(Utility::function));
+    utils.extend(l.aliases().keys().map(VarStr::from).map(Utility::alias));
+    utils.extend(l.funcs().keys().map(VarStr::from).map(Utility::function));
   });
-  utils.extend(
-    BUILTIN_NAMES
-      .iter()
-      .map(|n| Utility::builtin((*n).to_string())),
-  );
+  utils.extend(BUILTIN_NAMES.iter().map(|n| Utility::builtin((*n).into())));
   Shed::meta(|m| {
     utils.extend(
       m.path_cache()
         .entries()
-        .map(|(name, path)| Utility::command(name.clone(), path.clone())),
+        .map(|(name, path)| Utility::command(name.into(), path.clone())),
     );
   });
   utils.extend(
@@ -702,10 +708,10 @@ fn is_char_boundary(bytes: &[u8], i: usize) -> bool {
 /// derived suffix. Tries an exact `strip_prefix(expanded)` first for the
 /// common no-expansion / escape-bearing case; falls back to a common-suffix
 /// splice for `~`/`$VAR` structural prefixes and case-insensitive matches.
-fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> String {
+fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> VarStr {
   if let Some(rest) = candidate.strip_prefix(expanded) {
     let rest_escaped = escape_str(rest, false);
-    return format!("{literal}{rest_escaped}");
+    return varstr!("{literal}{rest_escaped}");
   }
 
   let suffix_len = common_suffix_len(literal, expanded);
@@ -715,9 +721,9 @@ fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> Stri
   match candidate.strip_prefix(expanded_structural) {
     Some(rest) => {
       let rest_escaped = escape_str(rest, false);
-      format!("{literal_structural}{rest_escaped}")
+      varstr!("{literal_structural}{rest_escaped}")
     }
-    None => escape_str(candidate, false),
+    None => escape_str(candidate, false).into(),
   }
 }
 
@@ -771,20 +777,20 @@ fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
 
       // glob strips a leading ./ even when the search pattern had it
       if path.starts_with("./") && !c.content.starts_with("./") && !c.content.starts_with('/') {
-        c.content = format!("./{}", c.content);
+        c.content = varstr!("./{}", c.content);
       }
       if is_dir {
-        c.content.push('/');
+        c.content = varstr!("{}/", c.content);
       }
       c
     })
     .collect()
 }
 
-fn file_desc<P: AsRef<Path>>(path: P) -> String {
+fn file_desc<P: AsRef<Path>>(path: P) -> VarStr {
   let path = path.as_ref();
   let Ok(meta) = path.metadata() else {
-    return String::new();
+    return VarStr::new();
   };
   let kind = if meta.is_dir() {
     "dir"
@@ -810,7 +816,7 @@ fn file_desc<P: AsRef<Path>>(path: P) -> String {
   };
   let mode = util::format_mode(meta.permissions().mode());
 
-  format!("{kind:<4} {size:>6} {mode}")
+  varstr!("{kind:<4} {size:>6} {mode}")
 }
 
 pub(crate) enum CompSpecResult {
@@ -828,15 +834,15 @@ pub(crate) enum CompSpecResult {
 #[derive(Default, Debug, Clone)]
 pub(crate) struct BashCompSpec {
   /// -F: The name of a function to generate the possible completions.
-  pub function: Option<String>,
+  pub function: Option<VarStr>,
   /// -W: The list of words
-  pub wordlist: Option<Vec<String>>,
+  pub wordlist: Option<Vec<VarStr>>,
 
   pub targets: CompFlags,
 
   pub flags: CompOptFlags,
   /// The original command
-  pub source: String,
+  pub source: VarStr,
 }
 
 #[allow(dead_code)]
@@ -844,15 +850,15 @@ impl BashCompSpec {
   pub fn new() -> Self {
     Self::default()
   }
-  pub fn with_func(mut self, func: String) -> Self {
+  pub fn with_func(mut self, func: VarStr) -> Self {
     self.function = Some(func);
     self
   }
-  pub fn with_wordlist(mut self, wordlist: Vec<String>) -> Self {
+  pub fn with_wordlist(mut self, wordlist: Vec<VarStr>) -> Self {
     self.wordlist = Some(wordlist);
     self
   }
-  pub fn with_source(mut self, source: String) -> Self {
+  pub fn with_source(mut self, source: VarStr) -> Self {
     self.source = source;
     self
   }
@@ -908,7 +914,7 @@ impl BashCompSpec {
       wordlist,
       targets: flags,
       flags: opt_flags,
-      source: String::new(),
+      source: VarStr::new(),
     }
   }
   pub fn exec_comp_func(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {
@@ -920,7 +926,7 @@ impl BashCompSpec {
       "COMP_POINT",
       "COMPREPLY",
     ] {
-      vars_to_unset.insert(var.to_string());
+      vars_to_unset.insert(var.into());
     }
     let _guard = var_ctx_guard(vars_to_unset);
 
@@ -968,7 +974,7 @@ impl BashCompSpec {
     );
 
     let _cooked = Shed::term_mut(|t| t.yield_terminal(false));
-    exec_nonint(input, Some("comp_function".into()))?;
+    exec_nonint(input.into(), Some("comp_function".into()))?;
 
     let comp_reply: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems("COMPREPLY"))
       .into_iter()
@@ -1056,7 +1062,7 @@ impl CompSpec for BashCompSpec {
             prefix.clone()
           };
 
-          c.content = format!("{new_prefix}{tail}");
+          c.content = varstr!("{new_prefix}{tail}");
         }
         c
       })

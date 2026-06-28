@@ -14,7 +14,11 @@ use nix::{
 use scopeguard::defer;
 use yansi::Color;
 
-use crate::shopt;
+use crate::{
+  shopt,
+  state::vars::{VarStr, VarStrSliceExt},
+  varstr,
+};
 
 use super::{
   ShResult, Shed,
@@ -94,7 +98,7 @@ pub enum JobID {
 pub struct ChildProc {
   pgid: Pid,
   pid: Pid,
-  command: Option<String>,
+  command: Option<VarStr>,
   stat: WtStat,
   timer: Option<CmdTimer>,
 }
@@ -102,7 +106,7 @@ pub struct ChildProc {
 #[expect(clippy::similar_names)]
 impl ChildProc {
   pub fn new(pid: Pid, command: Option<&str>, pgid: Option<Pid>, timer: Option<CmdTimer>) -> Self {
-    let command = command.map(ToString::to_string);
+    let command = command.map(VarStr::from);
     let stat = if kill(pid, None).is_ok() {
       WtStat::StillAlive
     } else {
@@ -126,8 +130,8 @@ impl ChildProc {
   pub fn take_timer(&mut self) -> Option<CmdTimer> {
     self.timer.take()
   }
-  pub fn cmd(&self) -> Option<&str> {
-    self.command.as_deref()
+  pub fn cmd(&self) -> Option<VarStr> {
+    self.command.clone()
   }
   pub fn stat(&self) -> WtStat {
     self.stat
@@ -228,10 +232,10 @@ impl JobStack {
 
 #[derive(Debug)]
 pub struct JobData {
-  pub table_id: String,
+  pub table_id: VarStr,
   pub notify: bool,
   pub stats: Vec<WtStat>,
-  pub cmds: Vec<String>,
+  pub cmds: Vec<VarStr>,
   pub display: String,
   pub timer: Option<CmdTimer>,
 }
@@ -270,7 +274,7 @@ impl Job {
   pub fn pgid(&self) -> Pid {
     self.pgid
   }
-  pub fn get_cmds(&self) -> Vec<&str> {
+  pub fn get_cmds(&self) -> Vec<VarStr> {
     self
       .children
       .iter()
@@ -279,14 +283,10 @@ impl Job {
   }
   pub fn take_job_data(&mut self, job_order: &[usize], pid: Option<Pid>) -> JobData {
     JobData {
-      table_id: self.tabid().unwrap_or_default().to_string(),
+      table_id: varstr!("{}", self.tabid().unwrap_or_default()),
       notify: self.notify(),
       stats: self.get_stats(),
-      cmds: self
-        .get_cmds()
-        .into_iter()
-        .map(String::from)
-        .collect::<Vec<String>>(),
+      cmds: self.get_cmds().into_iter().collect::<Vec<_>>(),
       display: self.display(job_order, JobCmdFlags::PIDS).clone(),
       timer: pid.and_then(|pid| {
         self
@@ -297,8 +297,8 @@ impl Job {
       }),
     }
   }
-  pub fn get_cmd_line(&self) -> String {
-    self.get_cmds().join(" | ")
+  pub fn get_cmd_line(&self) -> VarStr {
+    self.get_cmds().join_with(" | ")
   }
   pub fn set_stats(&mut self, stat: WtStat) {
     for child in &mut self.children {
@@ -425,7 +425,7 @@ impl Job {
       }
     }
   }
-  pub fn name(&self) -> Option<&str> {
+  pub fn name(&self) -> Option<VarStr> {
     self.children().first().and_then(|child| child.cmd())
   }
   pub fn display(&self, job_order: &[usize], flags: JobCmdFlags) -> String {
@@ -991,7 +991,7 @@ mod tests {
     ChildProc {
       pgid: Pid::from_raw(pid),
       pid: Pid::from_raw(pid),
-      command: Some(cmd.to_string()),
+      command: Some(cmd.into()),
       stat,
       timer: None,
     }

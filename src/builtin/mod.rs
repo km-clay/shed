@@ -2,7 +2,6 @@ use ariadne::Span as ASpan;
 use nix::unistd::Pid;
 use scopeguard::defer;
 use std::{
-  fmt::Write,
   fs,
   io::{self, Read},
 };
@@ -10,8 +9,9 @@ use std::{
 use crate::{
   eval::execute,
   procio::{bytes_to_string, out_bytes},
-  state::meta::UtilKind,
+  state::{meta::UtilKind, vars::VarStr},
   util::ShResultExt,
+  varstr,
 };
 
 use super::{
@@ -19,13 +19,13 @@ use super::{
   eval::{
     self, NdFlags, NdRule, Node,
     execute::{AssignBehavior, Dispatcher, exec_nonint, prepare_argv_with},
-    lex::{KEYWORDS, Span, Tk},
+    lex::{KEYWORDS, Span, Tk, TkRule},
   },
   expand::{self, shell_quote},
   key, keys, match_loop, out, outln,
   procio::{self, RedirSet},
   readline, sherr, shopt, signal,
-  state::{self, Shed, jobs::ChildProc, meta::MetaTab, shopt as shopt_internal},
+  state::{self, Shed, jobs::ChildProc, meta::MetaTab},
   status_msg, system_msg, try_var,
   util::{self, ShErrKind, ShResult, var_ctx_guard, with_status},
   var,
@@ -178,7 +178,7 @@ pub(super) fn lookup_builtin(name: &str) -> Option<&'static dyn Builtin> {
     .map(|idx| BUILTIN_TABLE[idx].1 as &dyn Builtin)
 }
 
-type ArgVector = Vec<(String, Span)>;
+type ArgVector = Vec<(VarStr, Span)>;
 pub(super) trait Builtin: Sync {
   /// The actual logic of the builtin. The only required member of Builtin.
   fn execute(&self, args: BuiltinArgs) -> ShResult<()>;
@@ -283,7 +283,7 @@ pub(super) trait Builtin: Sync {
       // we have been asked for help
       // is this a hack? only the nose knows.
       return exec_nonint(
-        format!("help builtin-{cmd_raw}"),
+        varstr!("help builtin-{cmd_raw}"),
         Some("<builtin-help>".into()),
       );
     }
@@ -389,7 +389,7 @@ pub(super) trait Builtin: Sync {
 /// `span` of the entire command for error reporting, and `stdin` piped in
 /// from a previous builtin in an in-process pipeline.
 pub struct BuiltinArgs {
-  argv: Vec<(String, Span)>,
+  argv: Vec<(VarStr, Span)>,
   opts: Vec<Opt>,
   span: Span,     // the entire call
   cmd_span: Span, // just the command
@@ -407,12 +407,12 @@ impl BuiltinArgs {
 
 // Join all of the word-split arguments into a single string
 // Preserve the span too
-pub fn join_raw_args(args: Vec<(String, Span)>) -> (String, Span) {
+pub fn join_raw_args(args: Vec<(VarStr, Span)>) -> (VarStr, Span) {
   join_raw_arg_iter(args.into_iter())
 }
 
-pub fn join_raw_arg_iter(args: impl Iterator<Item = (String, Span)>) -> (String, Span) {
-  args.fold((String::new(), Span::default()), |mut acc, arg| {
+pub fn join_raw_arg_iter(args: impl Iterator<Item = (VarStr, Span)>) -> (VarStr, Span) {
+  args.fold((VarStr::new(), Span::default()), |mut acc, arg| {
     if acc.1 == Span::default() {
       acc.1 = arg.1.clone();
     } else {
@@ -424,7 +424,7 @@ pub fn join_raw_arg_iter(args: impl Iterator<Item = (String, Span)>) -> (String,
     if acc.0.is_empty() {
       acc.0 = arg.0;
     } else {
-      let _ = write!(acc.0, " {}", arg.0);
+      acc.0 = varstr!("{} {}", acc.0, arg.0);
     }
     acc
   })
@@ -540,7 +540,7 @@ impl Builtin for Thru {
       }
     }
 
-    let sources: Vec<Option<String>> = if args.argv.is_empty() {
+    let sources: Vec<Option<VarStr>> = if args.argv.is_empty() {
       vec![None]
     } else {
       args
@@ -567,7 +567,7 @@ impl Builtin for Thru {
         },
         None => ThruSource::Stdin,
       };
-      let path = src.unwrap_or_else(|| "stdin".to_string());
+      let path = src.unwrap_or_else(|| "stdin".into());
 
       let mut buf = [0u8; 8192];
       loop {
@@ -637,6 +637,29 @@ impl Builtin for BuiltinBuiltin {
   }
 }
 
+/// Expand and flatten an argv into single-word `Expanded` tokens.
+///
+/// `command`/`builtin` strip `argv[0]` themselves to peel off their own name, so
+/// they must expand first — otherwise a command smuggled through a variable
+/// (`C="command echo hi"`) is a single token and the strip eats the whole line.
+/// `Expanded` tokens are idempotent under further expansion, so the result is
+/// handed straight back to the dispatcher without re-running command subs.
+fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
+  let mut out = Vec::with_capacity(argv.len());
+  for tk in argv {
+    let words = tk.expand_to_words()?;
+    for word in words.iter() {
+      out.push(Tk {
+        class: TkRule::Expanded {
+          exp: [word.clone()].into(),
+        },
+        ..tk.clone()
+      });
+    }
+  }
+  Ok(out)
+}
+
 pub struct CommandBuiltin;
 impl Builtin for CommandBuiltin {
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
@@ -646,7 +669,9 @@ impl Builtin for CommandBuiltin {
     let NdRule::Command { assignments, argv } = &node.class else {
       unreachable!()
     };
-    let mut argv = argv.to_vec();
+    // Expand first so a smuggled `command` (`C="command echo hi"`) is split
+    // into words before we strip the leading `command`.
+    let mut argv = expand_argv(argv)?;
 
     if !argv.is_empty() {
       argv.remove(0);
@@ -666,7 +691,7 @@ impl Builtin for CommandBuiltin {
         continue;
       }
 
-      match tk.as_str() {
+      match tk.to_string().as_str() {
         "-p" => use_default_path = true,
 
         "-v" if !print_type => print_path = true,
@@ -713,7 +738,7 @@ impl Builtin for CommandBuiltin {
       defer! {
         Shed::meta_mut(MetaTab::rehash_path_cache);
       }
-      state::util::with_vars([("PATH".to_string(), default_path)], || {
+      state::util::with_vars([("PATH".into(), default_path)], || {
         Shed::meta_mut(MetaTab::rehash_path_cache);
         Self::execute_inner(print_path, print_type, &node, dispatcher)
       })
@@ -744,7 +769,7 @@ impl CommandBuiltin {
             let Some(alias) = Shed::logic(|l| l.get_alias(name_str)) else {
               return with_status(127);
             };
-            outln!("alias {name_str}={}", shell_quote(alias.body()));
+            outln!("alias {name_str}={}", shell_quote(&alias.body()));
           }
           UtilKind::Function | UtilKind::Builtin => outln!("{name_str}"),
           UtilKind::Command(p) | UtilKind::File(p) => outln!("{}", p.display()),
@@ -766,7 +791,7 @@ impl CommandBuiltin {
             let Some(alias) = Shed::logic(|l| l.get_alias(name_str)) else {
               return with_status(127);
             };
-            outln!("{name_str} is an alias for {}", shell_quote(alias.body()));
+            outln!("{name_str} is an alias for {}", shell_quote(&alias.body()));
           }
           UtilKind::Function => outln!("{name_str} is a function"),
           UtilKind::Builtin => outln!("{name_str} is a shell builtin"),

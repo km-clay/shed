@@ -15,16 +15,20 @@ use super::{
   scopes::ScopeStack,
   sherr, two_way_display,
 };
-use crate::{shopt, util};
+use crate::{
+  shopt,
+  state::vars::{VarStr, VarStrSliceExt},
+  util,
+};
 
-pub(crate) fn xtrace_print(argv: &[(String, Span)]) {
+pub(crate) fn xtrace_print(argv: &[(VarStr, Span)]) {
   if shopt!(set.xtrace) {
-    let words = argv.iter().map(|(s, _)| s.clone()).collect::<Vec<String>>();
+    let words = argv.iter().map(|(s, _)| s.clone()).collect::<Vec<VarStr>>();
 
     let stderr = stderr_fileno();
     let depth = Shed::vars(ScopeStack::depth);
     let prefix = "+".repeat((depth as usize) + 1);
-    let output = format!("{prefix} {}", words.join(" "));
+    let output = format!("{prefix} {}", words.join_with(" "));
     log::debug!("xtrace: {output:?}");
     write(stderr, output.trim().as_bytes()).ok();
     write(stderr, b"\n").ok();
@@ -100,30 +104,55 @@ pub(crate) enum ShoptSource {
 /// line, optional doc string)`. The composer in `state::util` joins these
 /// into final rc text and decides whether to render the doc as a trailing
 /// comment based on `GenRcConfig::include_comments`.
-pub(crate) type ShoptRcEntry = (String, &'static str, String, Option<String>);
+pub(crate) type ShoptRcEntry = (VarStr, &'static str, VarStr, Option<VarStr>);
 
-type RcEntries = Vec<(String, String, Option<String>)>;
+type RcEntries = Vec<(VarStr, VarStr, Option<VarStr>)>;
 impl ShOpts {
   /// All rc entries for every shopt group, in stable group order. The
   /// `group` field is the human-readable section header used when
   /// rendering with comments.
   pub fn rc_entries(&self, source: ShoptSource) -> Vec<ShoptRcEntry> {
+    let to_var_strs = |entries: Vec<(String, String, Option<String>)>| -> RcEntries {
+      entries
+        .into_iter()
+        .map(|(key, line, doc)| (key.into(), line.into(), doc.map(|s| s.into())))
+        .collect()
+    };
+
     let group_entries: [(&'static str, RcEntries); 6] = match source {
       ShoptSource::Defaults => [
-        ("Core", ShOptCore::rc_entries_default()),
-        ("Line Editor", ShOptLine::rc_entries_default()),
-        ("Prompt", ShOptPrompt::rc_entries_default()),
-        ("POSIX Set Options", ShOptSet::rc_entries_default()),
-        ("Syntax Highlighting", ShOptHighlight::rc_entries_default()),
-        ("Status Line", ShOptStatLine::rc_entries_default()),
+        ("Core", to_var_strs(ShOptCore::rc_entries_default())),
+        ("Line Editor", to_var_strs(ShOptLine::rc_entries_default())),
+        ("Prompt", to_var_strs(ShOptPrompt::rc_entries_default())),
+        (
+          "POSIX Set Options",
+          to_var_strs(ShOptSet::rc_entries_default()),
+        ),
+        (
+          "Syntax Highlighting",
+          to_var_strs(ShOptHighlight::rc_entries_default()),
+        ),
+        (
+          "Status Line",
+          to_var_strs(ShOptStatLine::rc_entries_default()),
+        ),
       ],
       ShoptSource::Current => [
-        ("Core", self.core.rc_entries_current()),
-        ("Line Editor", self.line.rc_entries_current()),
-        ("Prompt", self.prompt.rc_entries_current()),
-        ("POSIX Set Options", self.set.rc_entries_current()),
-        ("Syntax Highlighting", self.highlight.rc_entries_current()),
-        ("Status Line", self.statline.rc_entries_current()),
+        ("Core", to_var_strs(self.core.rc_entries_current())),
+        ("Line Editor", to_var_strs(self.line.rc_entries_current())),
+        ("Prompt", to_var_strs(self.prompt.rc_entries_current())),
+        (
+          "POSIX Set Options",
+          to_var_strs(self.set.rc_entries_current()),
+        ),
+        (
+          "Syntax Highlighting",
+          to_var_strs(self.highlight.rc_entries_current()),
+        ),
+        (
+          "Status Line",
+          to_var_strs(self.statline.rc_entries_current()),
+        ),
       ],
     };
 

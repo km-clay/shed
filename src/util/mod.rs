@@ -33,9 +33,10 @@ pub(crate) enum Direction {
 pub(super) use error::{ShErr, ShErrKind, ShResult, ShResultExt, get_context};
 
 pub(super) use strops::{
-  QuoteState, compile_glob, count_unescaped, ends_with_unescaped, expand_ansi_c, format_mode,
-  format_size, format_time, has_any_unescaped, has_unescaped, parse_size, replace_posix_classes,
-  scan_param_exp, scan_parens, split_at_unescaped, split_tk, starts_with_unescaped,
+  QuoteState, VarStrDisplay, compile_glob, count_unescaped, ends_with_unescaped, expand_ansi_c,
+  format_mode, format_size, format_time, has_any_unescaped, has_unescaped, parse_size,
+  replace_posix_classes, scan_param_exp, scan_parens, split_at_unescaped, split_tk,
+  starts_with_unescaped,
 };
 
 pub(super) struct FdWriter<'a>(pub BorrowedFd<'a>);

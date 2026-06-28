@@ -226,7 +226,7 @@ impl ParseStream {
           flags
         );
         nd.context.push_back(get_context(
-          "in variable assignment defined here".to_string(),
+          "in variable assignment defined here".into(),
           assignments_span,
         ));
         return Ok(Some(nd));

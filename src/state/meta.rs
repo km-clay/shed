@@ -374,43 +374,43 @@ pub(crate) enum UtilKind {
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) struct Utility {
-  name: String,
+  name: VarStr,
   kind: UtilKind,
 }
 
 impl Utility {
-  pub fn alias(name: String) -> Self {
+  pub fn alias(name: VarStr) -> Self {
     Self {
       name,
       kind: UtilKind::Alias,
     }
   }
-  pub fn function(name: String) -> Self {
+  pub fn function(name: VarStr) -> Self {
     Self {
       name,
       kind: UtilKind::Function,
     }
   }
-  pub fn builtin(name: String) -> Self {
+  pub fn builtin(name: VarStr) -> Self {
     Self {
       name,
       kind: UtilKind::Builtin,
     }
   }
-  pub fn command(name: String, path: PathBuf) -> Self {
+  pub fn command(name: VarStr, path: PathBuf) -> Self {
     Self {
       name,
       kind: UtilKind::Command(path),
     }
   }
-  pub fn file(name: String, path: PathBuf) -> Self {
+  pub fn file(name: VarStr, path: PathBuf) -> Self {
     Self {
       name,
       kind: UtilKind::File(path),
     }
   }
-  pub fn name(&self) -> &str {
-    &self.name
+  pub fn name(&self) -> VarStr {
+    self.name.clone()
   }
   pub fn kind(&self) -> &UtilKind {
     &self.kind
@@ -572,7 +572,7 @@ pub(crate) struct MetaTab {
   // envp cache - environment variables for execve
   envp_cache: Option<Rc<[CString]>>,
   // programmable completion specs
-  comp_specs: HashMap<String, Box<dyn CompSpec>>,
+  comp_specs: HashMap<VarStr, Box<dyn CompSpec>>,
 
   // stack of currently open procsubs
   procsub_stack: Vec<Vec<OwnedFd>>,
@@ -869,17 +869,19 @@ impl MetaTab {
   pub fn reset_getopts_char_offset(&mut self) {
     self.getopts_offset = 0;
   }
-  pub fn comp_specs(&self) -> &HashMap<String, Box<dyn CompSpec>> {
+  pub fn comp_specs(&self) -> &HashMap<VarStr, Box<dyn CompSpec>> {
     &self.comp_specs
   }
   pub fn get_comp_spec(&self, cmd: &str) -> Option<Box<dyn CompSpec>> {
-    self.comp_specs.get(cmd).cloned()
+    let var_str = VarStr::from(cmd);
+    self.comp_specs.get(&var_str).cloned()
   }
-  pub fn set_comp_spec(&mut self, cmd: String, spec: Box<dyn CompSpec>) {
+  pub fn set_comp_spec(&mut self, cmd: VarStr, spec: Box<dyn CompSpec>) {
     self.comp_specs.insert(cmd, spec);
   }
   pub fn remove_comp_spec(&mut self, cmd: &str) -> bool {
-    self.comp_specs.remove(cmd).is_some()
+    let var_str = VarStr::from(cmd);
+    self.comp_specs.remove(&var_str).is_some()
   }
   pub fn set_last_was_func_def(&mut self, was_func_def: bool) {
     self.last_was_func_def = was_func_def;
@@ -895,7 +897,7 @@ impl MetaTab {
         let is_exec = util::is_executable_file(&entry);
 
         if is_exec && let Some(name) = entry.file_name().to_str() {
-          let util = Utility::file(name.to_string(), entry.path());
+          let util = Utility::file(name.into(), entry.path());
           files.push(util.into());
         }
       }
@@ -1035,7 +1037,7 @@ impl MetaTab {
         && let Some(name) = entry.file_name().to_str()
         && seen.insert(name.to_string())
       {
-        let util = Utility::command(name.to_string(), entry.path());
+        let util = Utility::command(name.into(), entry.path());
         cmds.push(util.into());
       }
     }

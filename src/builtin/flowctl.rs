@@ -61,10 +61,7 @@ impl FlowCtl for Return {
     Shed::get_status()
   }
   fn flow_control(&self, code: i32) -> ShErr {
-    ShErr::simple(
-      ShErrKind::FuncReturn(code),
-      "'return' found outside of function",
-    )
+    sherr!(FuncReturn(code), "'return' found outside of function",)
   }
 }
 
@@ -83,7 +80,7 @@ impl FlowCtl for Break {
     "break"
   }
   fn flow_control(&self, code: i32) -> ShErr {
-    ShErr::simple(ShErrKind::LoopBreak(code), "'break' found outside of loop")
+    sherr!(LoopBreak(code), "'break' found outside of loop",)
   }
 }
 
@@ -102,10 +99,7 @@ impl FlowCtl for Continue {
     "continue"
   }
   fn flow_control(&self, code: i32) -> ShErr {
-    ShErr::simple(
-      ShErrKind::LoopContinue(code),
-      "'continue' found outside of loop",
-    )
+    sherr!(LoopContinue(code), "'continue' found outside of loop",)
   }
 }
 
@@ -127,7 +121,7 @@ impl FlowCtl for Exit {
     Shed::get_status()
   }
   fn flow_control(&self, code: i32) -> ShErr {
-    ShErr::simple(ShErrKind::CleanExit(code), "")
+    sherr!(CleanExit(code), "",)
   }
 }
 
@@ -205,7 +199,7 @@ impl super::Builtin for Raise {
     }
 
     let mut message_parts = vec![];
-    let mut part = String::new();
+    let mut part = util::scratch_buf();
     let mut color_map: HashMap<u32, yansi::Color> = HashMap::default();
     let mut arg_iter = args.argv.into_iter();
 
@@ -254,7 +248,7 @@ impl super::Builtin for Raise {
               return Err(sherr!(
                 SyntaxErr @ span,
                 "Invalid format specifier: '%{n_ch}'",
-              ).with_note("'raise' only takes digits or '%' after '%'").with_note("to include a literal '%', use '%%'"));
+              ).with_note("'raise' only takes digits or '%' after '%'".into()).with_note("to include a literal '%', use '%%'".into()));
             }
           }
         }
@@ -264,7 +258,7 @@ impl super::Builtin for Raise {
     }
 
     let message = message_parts.join(" ");
-    let mut error = ShErr::at(ShErrKind::Raised(kind, code), span, message);
+    let mut error = ShErr::at(ShErrKind::Raised(kind, code), span, message.into());
 
     for note in notes {
       error = error.with_note(note);

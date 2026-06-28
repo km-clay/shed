@@ -66,7 +66,7 @@ pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
     }
   });
 
-  exec_nonint(commands, None)
+  exec_nonint(commands.into(), None)
 }
 
 pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
@@ -100,9 +100,9 @@ pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult
   if let Some(pid) = controller
     && pid == Pid::this()
   {
-    exec_int(input, Some(source_path.into()))
+    exec_int(input.into(), Some(source_path.into()))
   } else {
-    exec_nonint(input, Some(source_path.into()))
+    exec_nonint(input.into(), Some(source_path.into()))
   }
 }
 

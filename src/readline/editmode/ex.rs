@@ -21,7 +21,7 @@ use super::{
   state::terminal::CursorStyle,
   status_msg,
 };
-use crate::{eval::lex::TkFlags, verb};
+use crate::{eval::lex::TkFlags, state::vars::VarStr, varstr, verb};
 use bitflags::bitflags;
 
 bitflags! {
@@ -162,8 +162,8 @@ impl EditMode for ViEx {
     true
   }
 
-  fn pending_seq(&self) -> Option<String> {
-    Some(self.pending_cmd.editor.buf.to_string())
+  fn pending_seq(&self) -> Option<VarStr> {
+    Some(varstr!("{}", self.pending_cmd.editor.buf))
   }
 
   fn pending_cursor(&self) -> Option<usize> {
@@ -927,11 +927,11 @@ impl ExParser {
         ExPR::Partial(LineAddr::Mark(mark_name))
       }
       ExLineAddr::Pattern => {
-        let pat = tk.span.as_str().to_string();
+        let pat = VarStr::from(tk.span.as_str());
         ExPR::Partial(LineAddr::Pattern(pat))
       }
       ExLineAddr::PatternRev => {
-        let pat = tk.span.as_str().to_string();
+        let pat = VarStr::from(tk.span.as_str());
         ExPR::Partial(LineAddr::PatternRev(pat))
       }
       ExLineAddr::Comma => unreachable!(),
@@ -1049,29 +1049,33 @@ impl ExParser {
   }
   fn parse_stash(&mut self) -> ExR<ExNdRule> {
     let arg_names = ["pop", "drop", "apply", "insert", "swap", "list"];
-    let arg = self.tokens.next().map(|tk| tk.span.as_str().to_string());
+    let arg = self.tokens.next().map(|tk| VarStr::from(tk.span.as_str()));
     if arg.is_none() {
       return ExR::success(ExNdRule::Stash(StashArgs::Push(None)));
     } else if !arg_names
       .iter()
-      .any(|name| name.starts_with(arg.as_ref().unwrap()))
+      .any(|name| name.starts_with(arg.as_ref().unwrap().as_str()))
     {
       return ExR::success(ExNdRule::Stash(StashArgs::Push(arg)));
     }
 
-    let name = self.tokens.next().map(|tk| tk.span.as_str().to_string());
+    let name = self.tokens.next().map(|tk| VarStr::from(tk.span.as_str()));
     let arg = arg.unwrap();
     // Inner matches use the same prefix direction as the outer gate:
     // `<name>.starts_with(arg)` — so abbreviations like `:stash p` or
     // `:stash ap` resolve to `pop` / `apply` etc. The subcommand names
     // have no shared prefixes, so this is unambiguous.
     match arg.as_str() {
-      _ if "pop".starts_with(&arg) => ExR::success(ExNdRule::Stash(StashArgs::Pop(name))),
-      _ if "drop".starts_with(&arg) => ExR::success(ExNdRule::Stash(StashArgs::Drop(name))),
-      _ if "apply".starts_with(&arg) => ExR::success(ExNdRule::Stash(StashArgs::Apply(name))),
-      _ if "insert".starts_with(&arg) => ExR::success(ExNdRule::Stash(StashArgs::Insert(name))),
-      _ if "swap".starts_with(&arg) => ExR::success(ExNdRule::Stash(StashArgs::Swap(name))),
-      _ if "list".starts_with(&arg) => {
+      _ if "pop".starts_with(arg.as_str()) => ExR::success(ExNdRule::Stash(StashArgs::Pop(name))),
+      _ if "drop".starts_with(arg.as_str()) => ExR::success(ExNdRule::Stash(StashArgs::Drop(name))),
+      _ if "apply".starts_with(arg.as_str()) => {
+        ExR::success(ExNdRule::Stash(StashArgs::Apply(name)))
+      }
+      _ if "insert".starts_with(arg.as_str()) => {
+        ExR::success(ExNdRule::Stash(StashArgs::Insert(name)))
+      }
+      _ if "swap".starts_with(arg.as_str()) => ExR::success(ExNdRule::Stash(StashArgs::Swap(name))),
+      _ if "list".starts_with(arg.as_str()) => {
         let target = name
           .map(|n| match n.as_str() {
             _ if "stack".starts_with(n.trim()) => Ok(Some(StashListArg::Stack)),
@@ -1175,7 +1179,7 @@ impl ExParser {
       }
       let args_raw = args
         .get_span() // extract total span of arg tokens
-        .map(|s| s.as_str().to_string())
+        .map(|s| s.as_str().into())
         .unwrap_or_default();
 
       if is_read {
@@ -1223,7 +1227,7 @@ fn expand_path_arg(arg: &str) -> PathBuf {
     .no_glob()
     .no_split()
     .expand_no_split()
-    .unwrap_or_else(|_| arg.to_string());
+    .unwrap_or_else(|_| arg.into());
   PathBuf::from(expanded)
 }
 

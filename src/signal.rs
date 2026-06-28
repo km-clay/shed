@@ -28,7 +28,7 @@ use super::{
   util::ShResult,
 };
 
-use crate::HashMap;
+use crate::{HashMap, state::vars::VarStr, varstr};
 
 static SIGNALS: AtomicU64 = AtomicU64::new(0);
 
@@ -384,30 +384,30 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   }
 
   let status_strs = stats.iter().map(|s| match s {
-    WtStat::Exited(_, code) => code.to_string(),
-    WtStat::Signaled(_, sig, _) => (128 + *sig as i32).to_string(),
+    WtStat::Exited(_, code) => varstr!("{code}"),
+    WtStat::Signaled(_, sig, _) => varstr!("{}", 128 + *sig as i32),
     _ => "1".into(),
   });
 
-  let children: Vec<(String, String)> = cmds.into_iter().zip(status_strs).collect();
+  let children: Vec<(VarStr, VarStr)> = cmds.into_iter().zip(status_strs).collect();
   let last_status = children.last().map(|c| c.1.clone()).unwrap_or_default();
   let cmd_count = children.len();
 
-  let post_job_vars: HashMap<String, Var> = [
+  let post_job_vars: HashMap<VarStr, Var> = [
     (
-      "CHILDREN".to_string(),
+      "CHILDREN".into(),
       Var::new(VarKind::assoc_arr(children), VarFlags::empty()),
     ),
     (
-      "CHILD_COUNT".to_string(),
+      "CHILD_COUNT".into(),
       Var::new(VarKind::string(cmd_count.to_string()), VarFlags::empty()),
     ),
     (
-      "JOB_ID".to_string(),
+      "JOB_ID".into(),
       Var::new(VarKind::string(table_id), VarFlags::empty()),
     ),
     (
-      "JOB_STATUS".to_string(),
+      "JOB_STATUS".into(),
       Var::new(VarKind::string(last_status), VarFlags::empty()),
     ),
   ]

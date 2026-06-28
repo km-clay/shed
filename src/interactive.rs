@@ -352,7 +352,7 @@ fn shed_loop_iter(
             .round() as u64;
 
           let res = with_vars(
-            [("IDLE_SECONDS".to_string(), idle_secs.to_string())],
+            [("IDLE_SECONDS".into(), idle_secs.to_string())],
             || -> ShResult<LoopAction> {
               util::with_saved_status(|| {
                 for cmd in cmds {
@@ -603,7 +603,7 @@ pub(crate) fn run_prompt_command(
 
   let res = {
     let _scroll_guard = Shed::term_mut(|t| t.yield_terminal(clear_prompt.is_some()));
-    exec_int(input, source)
+    exec_int(input.into(), source)
   };
 
   if let Some((row, col)) = position {

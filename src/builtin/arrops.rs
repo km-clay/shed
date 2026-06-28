@@ -42,8 +42,8 @@ trait ArrOp {
       Shed::vars_mut(|v| {
         if let Ok(arr) = v.get_arr_mut(&name) {
           match end {
-            End::Front => arr.push_front(val.into()),
-            End::Back => arr.push_back(val.into()),
+            End::Front => arr.push_front(val),
+            End::Back => arr.push_back(val),
           }
           Ok(())
         } else {

@@ -1,11 +1,11 @@
-use std::{collections::VecDeque, ops::Range, path::PathBuf};
+use std::{collections::VecDeque, ops::Range};
 
 use ariadne::Span as AriadneSpan;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
   readline::context,
-  state::vars::{VarFlags, VarKind},
+  state::vars::{VarFlags, VarKind, VarStr},
 };
 
 use super::{
@@ -89,7 +89,7 @@ pub struct LineBuf {
   last_substitute: Option<EditCmd>,
   last_global: Option<EditCmd>,
   last_search: Option<Motion>,
-  pending_search: Option<String>,
+  pending_search: Option<VarStr>,
 
   /// Set when the last command's `f`/`t`/search-style motion found no target.
   /// Drained by macro playback and the `vice` driver to abort a run.
@@ -110,7 +110,7 @@ pub struct LineBuf {
   concat_points: VecDeque<Pos>,
   indent_cache: Option<Vec<(usize, usize)>>,
 
-  open_file: Option<PathBuf>,
+  open_file: Option<VarStr>,
 
   /// Cached highlight info
   highlight_cache: Option<HighlightCache>,
@@ -436,7 +436,7 @@ impl LineBuf {
     }
   }
 
-  pub fn open_file(&self) -> Option<&PathBuf> {
-    self.open_file.as_ref()
+  pub fn open_file(&self) -> Option<VarStr> {
+    self.open_file.as_ref().cloned()
   }
 }

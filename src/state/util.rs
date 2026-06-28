@@ -1,7 +1,8 @@
 use crate::{
   HashMap,
   state::{logic::ShFunc, vars::VarStr},
-  util::{self, ShErrKind},
+  util::{self, ShErrKind, VarStrDisplay},
+  varstr,
 };
 
 use super::{Shed, try_var};
@@ -85,7 +86,7 @@ pub fn expand_arr_index(idx_raw: &str, allow_side_effects: bool) -> ShResult<Arr
     .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
     .try_fold(vec![], |mut acc, wrds| {
       match wrds {
-        Ok(wrds) => acc.extend(wrds),
+        Ok(wrds) => acc.extend_from_slice(&wrds),
         Err(e) => return Err(e),
       }
       Ok(acc)
@@ -131,11 +132,11 @@ pub fn query_db<T, F: FnOnce(&Connection) -> ShResult<T>>(f: F) -> ShResult<Opti
 pub fn with_vars<F, H, V, T>(vars: H, f: F) -> T
 where
   F: FnOnce() -> T,
-  H: IntoIterator<Item = (String, V)>,
+  H: IntoIterator<Item = (VarStr, V)>,
   V: Into<Var>,
 {
-  let vars: HashMap<String, V> = vars.into_iter().collect();
-  let restores: Vec<(String, Option<(VarKind, VarFlags)>)> = vars
+  let vars: HashMap<VarStr, V> = vars.into_iter().collect();
+  let restores: Vec<(VarStr, Option<(VarKind, VarFlags)>)> = vars
     .keys()
     .map(|k| {
       let prev = Shed::vars(|v| {
@@ -187,8 +188,8 @@ pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<String>) 
 
   with_vars(
     [
-      ("NEW_DIR".to_string(), dir_raw.as_str()),
-      ("OLD_DIR".to_string(), current_dir.as_str()),
+      ("NEW_DIR".into(), dir_raw.as_str()),
+      ("OLD_DIR".into(), current_dir.as_str()),
     ],
     || autocmd!(PreChangeDir),
   );
@@ -280,18 +281,18 @@ pub fn lookup_cmd(cmd: &str) -> Option<PathBuf> {
 
 pub fn which_util(name: &str) -> Option<Rc<Utility>> {
   if Shed::logic(|l| l.get_alias(name).is_some()) {
-    return Some(Rc::new(Utility::alias(name.to_string())));
+    return Some(Rc::new(Utility::alias(name.into())));
   }
   if Shed::logic(|l| l.has_command_func(name)) {
-    return Some(Rc::new(Utility::function(name.to_string())));
+    return Some(Rc::new(Utility::function(name.into())));
   }
   if crate::builtin::lookup_builtin(name).is_some() {
-    return Some(Rc::new(Utility::builtin(name.to_string())));
+    return Some(Rc::new(Utility::builtin(name.into())));
   }
   let cached = Shed::meta_mut(|m| {
     m.try_rehash_path_cache();
     m.lookup_cached_cmd(name)
-      .map(|p| Rc::new(Utility::command(name.to_string(), p.to_path_buf())))
+      .map(|p| Rc::new(Utility::command(name.into(), p.to_path_buf())))
   });
   cached.or_else(|| {
     // Last resort: an executable file living in $PWD that isn't in $PATH.
@@ -363,36 +364,36 @@ impl GenRcConfig {
 }
 
 /// Format an rc entry with an aligned trailing doc comment when `comments` is on.
-fn rc_entry(entry: &str, doc: &str, comments: bool) -> String {
+fn rc_entry(entry: &str, doc: &str, comments: bool) -> VarStr {
   if comments {
-    format!("{entry:<50} # {doc}")
+    varstr!("{entry:<50} # {doc}")
   } else {
-    entry.to_string()
+    entry.into()
   }
 }
 
 /// Live `alias` definitions, sorted by name.
-fn live_aliases() -> Vec<String> {
-  let mut aliases: Vec<(String, String)> = Shed::logic(|l| {
+fn live_aliases() -> Vec<VarStr> {
+  let mut aliases: Vec<(VarStr, VarStr)> = Shed::logic(|l| {
     l.aliases()
       .iter()
-      .map(|(name, a)| (name.clone(), a.body().to_string()))
+      .map(|(name, a)| (name.into(), a.body()))
       .collect()
   });
   aliases.sort_by(|a, b| a.0.cmp(&b.0));
   aliases
     .into_iter()
-    .map(|(name, body)| format!("alias {}", crate::state::vars::display_as_var(name, body)))
+    .map(|(name, body)| varstr!("alias {}", super::vars::display_as_var(name, body)))
     .collect()
 }
 
 /// Live user function definitions (verbatim source), sorted by name.
-fn live_funcs() -> Vec<String> {
-  let mut funcs: Vec<(String, String)> = Shed::logic(|l| {
+fn live_funcs() -> Vec<VarStr> {
+  let mut funcs: Vec<(VarStr, VarStr)> = Shed::logic(|l| {
     l.funcs()
       .iter()
       .filter_map(|(name, f)| match f {
-        ShFunc::Defined { source, .. } => Some((name.clone(), source.as_str().to_string())),
+        ShFunc::Defined { source, .. } => Some((name.into(), source.as_str().into())),
         ShFunc::Autoload(_) => None,
       })
       .collect()
@@ -402,11 +403,11 @@ fn live_funcs() -> Vec<String> {
 }
 
 /// Live `complete` registrations (verbatim source), sorted by command.
-fn live_completions() -> Vec<String> {
-  let mut specs: Vec<(String, String)> = Shed::meta(|m| {
+fn live_completions() -> Vec<VarStr> {
+  let mut specs: Vec<(VarStr, VarStr)> = Shed::meta(|m| {
     m.comp_specs()
       .iter()
-      .map(|(cmd, spec)| (cmd.clone(), spec.source().to_string()))
+      .map(|(cmd, spec)| (cmd.clone(), spec.source().into()))
       .collect()
   });
   specs.sort_by(|a, b| a.0.cmp(&b.0));
@@ -414,46 +415,46 @@ fn live_completions() -> Vec<String> {
 }
 
 /// Live `autocmd` registrations, in registration order.
-fn live_autocmds() -> Vec<String> {
-  Shed::logic(|l| l.iter_autocmds().map(|cmd| cmd.to_string()).collect())
+fn live_autocmds() -> Vec<VarStr> {
+  Shed::logic(|l| l.iter_autocmds().map(|cmd| cmd.to_var_str()).collect())
 }
 
 /// Live `keymap` registrations, in registration order.
-fn live_keymaps() -> Vec<String> {
-  Shed::logic(|l| l.keymaps().iter().map(|km| km.to_string()).collect())
+fn live_keymaps() -> Vec<VarStr> {
+  Shed::logic(|l| l.keymaps().iter().map(|km| km.to_var_str()).collect())
 }
 
-/// Render an rc file to a `Vec<String>` per `config`. Pure — no I/O, no
+/// Render an rc file to a `Vec<VarStr>` per `config`. Pure — no I/O, no
 /// side effects on `Shed` state. Caller decides where the lines go.
-pub fn compose_rc(config: &GenRcConfig) -> Vec<String> {
+pub fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
   use ShoptSource::{Current, Defaults};
 
   let comments = config.include_comments;
-  let mut lines: Vec<String> = vec![];
+  let mut lines: Vec<VarStr> = vec![];
 
   // Append a section (header comments + content + trailing blank) only when it
   // is enabled and has content, so empty sections aren't rendered as bare headers.
-  let section = |lines: &mut Vec<String>, include: bool, header: &[&str], content: Vec<String>| {
+  let section = |lines: &mut Vec<VarStr>, include: bool, header: &[&str], content: Vec<VarStr>| {
     if !include || content.is_empty() {
       return;
     }
     if comments {
-      lines.extend(header.iter().map(|h| (*h).to_string()));
+      lines.extend(header.iter().map(|h| VarStr::from(*h)));
     }
     lines.extend(content);
-    lines.push(String::new());
+    lines.push(VarStr::new());
   };
 
   // Content for a user-defined section: live entries, or nothing for the
   // factory defaults (these have no built-in entries).
-  let user_section = |live: fn() -> Vec<String>| match config.source {
+  let user_section = |live: fn() -> Vec<VarStr>| match config.source {
     Current => live(),
     Defaults => vec![],
   };
 
   // Content for a section that ships built-in defaults: the hardcoded entries
   // for the factory rc, or the live registrations when regenerating.
-  let default_section = |defaults: &[(&str, &str)], live: fn() -> Vec<String>| match config.source {
+  let default_section = |defaults: &[(&str, &str)], live: fn() -> Vec<VarStr>| match config.source {
     Defaults => defaults
       .iter()
       .map(|(e, d)| rc_entry(e, d, comments))
@@ -471,30 +472,30 @@ pub fn compose_rc(config: &GenRcConfig) -> Vec<String> {
     });
     lines.push("# Edit this file to customize, or use it as a reference.".into());
     lines.push("# Refer to the 'help' builtin for information on specific shed features.".into());
-    lines.push(String::new());
+    lines.push(VarStr::new());
   }
 
   // Shell options
   if config.include_shopts {
     if comments {
       lines.push("# -- Shell Options --".into());
-      lines.push(String::new());
+      lines.push(VarStr::new());
     }
     let mut current_group: Option<&'static str> = None;
     for (_key, group, entry, doc) in Shed::shopts(|o| o.rc_entries(config.source)) {
       if comments && Some(group) != current_group {
         if current_group.is_some() {
-          lines.push(String::new());
+          lines.push(VarStr::new());
         }
-        lines.push(format!("# - {group} -"));
+        lines.push(varstr!("# - {group} -"));
         current_group = Some(group);
       }
       lines.push(match (doc, comments) {
-        (Some(d), true) => format!("{entry:<50} # {d}"),
+        (Some(d), true) => varstr!("{entry:<50} # {d}"),
         _ => entry,
       });
     }
-    lines.push(String::new());
+    lines.push(VarStr::new());
   }
 
   // Remaining sections
@@ -575,7 +576,7 @@ pub fn compose_rc(config: &GenRcConfig) -> Vec<String> {
   );
 
   // Trim trailing blank lines so the file doesn't end with extra padding.
-  while lines.last().is_some_and(String::is_empty) {
+  while lines.last().is_some_and(|s| s.as_str().is_empty()) {
     lines.pop();
   }
   lines
@@ -606,7 +607,7 @@ pub fn generate_default_rc() -> ShResult<Option<PathBuf>> {
 }
 
 pub fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<()> {
-  let etc_path = PathBuf::from(format!("/etc/shed/{name}"));
+  let etc_path = PathBuf::from(varstr!("/etc/shed/{name}"));
   if etc_path.is_file()
     && let Err(e) = source_file(etc_path)
   {
@@ -658,7 +659,7 @@ pub fn source_file(path: PathBuf) -> ShResult<()> {
   // 'return' is valid inside of them, and we also track recursion depth
   let _guard = Shed::meta_mut(MetaTab::enter_func);
 
-  match exec_nonint(buf, Some(source_display.into())) {
+  match exec_nonint(buf.into(), Some(source_display.into())) {
     Ok(()) => Ok(()),
     Err(e) => match e.kind() {
       ShErrKind::FuncReturn(code) => {

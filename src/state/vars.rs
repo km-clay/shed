@@ -24,6 +24,7 @@ use nix::{
   sys::stat,
   unistd::{Pid, User, gethostname, getppid, isatty},
 };
+use rusqlite::{ToSql, types::FromSql};
 use smol_str::{SmolStr, SmolStrBuilder};
 
 use super::{
@@ -397,8 +398,11 @@ impl VarStrSliceExt for [&VarStr] {
   }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Default, Hash)]
-pub struct VarStr(SmolStr);
+/// shed's internal string type for variable values.
+///
+/// It is a wrapper around `SmolStr` that implements `Deref<Target=str>` and various conversions to/from `String`, `&str`, `Rc<str>`, and `PathBuf`.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
+pub(crate) struct VarStr(SmolStr);
 
 impl Deref for VarStr {
   type Target = str;
@@ -414,6 +418,21 @@ impl VarStr {
 
   pub fn as_str(&self) -> &str {
     &self.0
+  }
+}
+
+impl ToSql for VarStr {
+  fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+    Ok(rusqlite::types::ToSqlOutput::from(self.as_str()))
+  }
+}
+
+impl FromSql for VarStr {
+  fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+    match value {
+      rusqlite::types::ValueRef::Text(s) => Ok(Self(SmolStr::new(String::from_utf8_lossy(s)))),
+      _ => Err(rusqlite::types::FromSqlError::InvalidType),
+    }
   }
 }
 
@@ -619,11 +638,11 @@ impl VarKind {
       .try_fold(String::new(), |mut acc, wrds| {
         match wrds {
           Ok(wrds) => {
-            for wrd in wrds {
+            for wrd in wrds.iter() {
               if !acc.is_empty() {
                 acc.push(markers::ARG_SEP);
               }
-              acc.push_str(&wrd);
+              acc.push_str(wrd);
             }
           }
           Err(e) => return Err(e),
@@ -758,7 +777,7 @@ impl VarKind {
       // Expand the value
       let expanded_val = Expander::from_raw(&val, TkFlags::empty()).expand_no_split()?;
 
-      pairs.push((VarStr::from(expanded_key), VarStr::from(expanded_val)));
+      pairs.push((expanded_key, expanded_val));
     }
 
     Ok(Self::AssocArr(pairs))
@@ -1278,7 +1297,7 @@ impl VarTab {
             var_name,
           ));
         };
-        items.retain(|(k, _)| !(k == &key));
+        items.retain(|(k, _)| k != &key);
         Ok(())
       }
       _ => Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name)),

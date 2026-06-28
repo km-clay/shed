@@ -35,7 +35,7 @@ impl super::Builtin for Seek {
     let Ok(fd) = fd.parse::<u32>() else {
       return Err(
         sherr!(ExecFail @ fd_span, "Invalid file descriptor")
-          .with_note("file descriptors are integers"),
+          .with_note("file descriptors are integers".into()),
       );
     };
 
@@ -48,7 +48,7 @@ impl super::Builtin for Seek {
     let Ok(offset) = offset.parse::<i64>() else {
       return Err(
         sherr!(ExecFail @ offset_span, "Invalid offset")
-          .with_note("offset can be a positive or negative integer"),
+          .with_note("offset can be a positive or negative integer".into()),
       );
     };
 

@@ -16,7 +16,7 @@ impl super::Builtin for Alias {
     }
 
     for (arg, span) in args.argv {
-      let (name, value) = split_assignment_raw(arg);
+      let (name, value) = split_assignment_raw(&arg);
       if name == "command" || name == "builtin" {
         return Err(sherr!(
           ExecFail @ span,
@@ -25,8 +25,8 @@ impl super::Builtin for Alias {
       }
 
       if let Some(value) = value {
-        Shed::logic_mut(|l| l.insert_alias(&name, &value, span.clone()));
-      } else if let Some(alias) = Shed::logic(|l| l.get_alias(&name)) {
+        Shed::logic_mut(|l| l.insert_alias(name, value, span.clone()));
+      } else if let Some(alias) = Shed::logic(|l| l.get_alias(name)) {
         outln!("{}", display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(

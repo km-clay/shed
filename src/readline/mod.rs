@@ -32,8 +32,8 @@ use register::{RegisterContent, RegisterName};
 use crate::interactive::{LoopAction, Redraw, run_prompt_command};
 use crate::state::logic::AutoCmdKind;
 use crate::state::terminal::{Scroll, TermCtl};
-use crate::state::vars::Var;
-use crate::{exec_term, queue_term};
+use crate::state::vars::{Var, VarStr};
+use crate::{exec_term, queue_term, varstr};
 
 use super::state::meta::MetaTab;
 use super::state::terminal::Terminal;
@@ -373,11 +373,11 @@ impl MacroRecord {
   pub fn start_recording(&mut self, reg: RegisterName) {
     *self = MacroRecord::Recording(reg, vec![]);
   }
-  pub fn status(&self) -> Option<String> {
+  pub fn status(&self) -> Option<VarStr> {
     match self {
       MacroRecord::Recording(reg, _) => {
         let name = reg.display()?;
-        Some(format!("recording {name}"))
+        Some(varstr!("recording {name}"))
       }
       MacroRecord::Idle => None,
     }
@@ -1170,7 +1170,7 @@ impl ShedLine {
 
           let candidates: Vec<Candidate> =
             filtered.into_iter().fold(vec![], |mut acc, (name, desc)| {
-              let cand: Candidate = Candidate::from(name).with_desc(desc.to_string());
+              let cand: Candidate = Candidate::from(name).with_desc(desc);
               acc.push(cand);
               acc
             });
@@ -2039,7 +2039,7 @@ impl ShedLine {
           cursor_pos,
         )
         .ok();
-        pending_seq = highlighted;
+        pending_seq = highlighted.into();
       }
 
       queue_term!(

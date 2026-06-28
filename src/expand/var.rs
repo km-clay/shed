@@ -262,6 +262,7 @@ mod tests {
   use super::var;
   use crate::expand::escape::unescape_str;
   use crate::expand::{expand_glob, expand_raw, markers};
+  use crate::state::vars::VarStr;
   use crate::state::{Shed, vars::VarFlags, vars::VarKind};
   use crate::tests::testutil::TestGuard;
 
@@ -420,7 +421,7 @@ mod tests {
 
   /// Helper: drive the full expansion pipeline (`unescape_str` → `expand_raw` →
   /// `split_words` → `expand_glob` → strip ESCAPE) on a raw shell word.
-  fn expand_words_in(dir: &std::path::Path, raw: &str) -> Vec<String> {
+  fn expand_words_in(dir: &std::path::Path, raw: &str) -> Vec<VarStr> {
     use crate::eval::lex::TkFlags;
     use crate::expand::Expander;
 

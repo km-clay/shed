@@ -48,7 +48,7 @@ impl ParseStream {
     extend_span!(span, compound_cmd.get_span());
 
     compound_cmd.propagate_context(&get_context(
-      styled_format!("in function '{name_raw}' defined here"),
+      styled_format!("in function '{name_raw}' defined here").into(),
       span.clone().unwrap_or_default(),
     ));
 
@@ -202,7 +202,7 @@ impl ParseStream {
       span.clone(),
       "Expected a pattern after 'case' keyword"
     )
-    .with_note("Patterns can be raw text, or anything that gets substituted with raw text");
+    .with_note("Patterns can be raw text, or anything that gets substituted with raw text".into());
 
     let Some(pat_tk) = self.next_tk() else {
       self.panic_mode(&mut span);
@@ -746,7 +746,7 @@ impl ParseStream {
       try_tk_span
     };
     body.propagate_context(&get_context(
-      styled_format!("in '{}' block defined here", "try"),
+      styled_format!("in '{}' block defined here", "try").into(),
       try_span,
     ));
 
@@ -848,7 +848,7 @@ impl ParseStream {
     extend_span!(span, body.get_span());
 
     body.propagate_context(&get_context(
-      styled_format!("in '{}' block defined here", "defer"),
+      styled_format!("in '{}' block defined here", "defer").into(),
       defer_span,
     ));
 

@@ -1,4 +1,7 @@
-use crate::readline::{RegisterName, editcmd::CmdFlags};
+use crate::{
+  readline::{RegisterName, editcmd::CmdFlags},
+  state::vars::VarStr,
+};
 
 use super::{
   CmdReplay, E, EditMode, K, M, ModeReport, common_cmds,
@@ -83,7 +86,7 @@ impl EditMode for ViReplace {
   fn cursor_style(&self) -> CursorStyle {
     CursorStyle::Underline(false)
   }
-  fn pending_seq(&self) -> Option<String> {
+  fn pending_seq(&self) -> Option<VarStr> {
     None
   }
   fn as_replay(&self) -> Option<CmdReplay> {

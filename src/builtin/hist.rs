@@ -7,6 +7,8 @@ use std::{
 use chrono::Utc;
 use chrono_english::{Dialect, Interval, parse_date_string};
 
+use crate::state::vars::VarStr;
+
 use super::{
   Shed, errln,
   getopt::{Opt, OptSpec},
@@ -43,19 +45,19 @@ fn interval_to_micros(interval: Interval) -> i64 {
 #[expect(clippy::struct_excessive_bools)]
 #[derive(Debug, Default, Clone)]
 pub struct HistQuery {
-  after: (Option<String>, bool),
-  before: (Option<String>, bool),
-  contains: (Option<String>, bool),
+  after: (Option<VarStr>, bool),
+  before: (Option<VarStr>, bool),
+  contains: (Option<VarStr>, bool),
   lines_gt: (Option<u64>, bool),
   lines_lt: (Option<u64>, bool),
-  starts_with: (Option<String>, bool),
-  ends_with: (Option<String>, bool),
-  matches: (Option<String>, bool),
-  duration_gt: (Option<String>, bool),
-  duration_lt: (Option<String>, bool),
+  starts_with: (Option<VarStr>, bool),
+  ends_with: (Option<VarStr>, bool),
+  matches: (Option<VarStr>, bool),
+  duration_gt: (Option<VarStr>, bool),
+  duration_lt: (Option<VarStr>, bool),
   with_status: (Option<i32>, bool),
-  with_token: (Option<String>, bool),
-  in_dir: (Option<String>, bool),
+  with_token: (Option<VarStr>, bool),
+  in_dir: (Option<VarStr>, bool),
   limit: Option<u64>,
   specific_ids: Vec<i64>,
   no_numbers: bool,
@@ -65,7 +67,7 @@ pub struct HistQuery {
   count: bool,
   delete: bool,
   restore: bool,
-  import: Option<String>,
+  import: Option<VarStr>,
   ex_hist: bool,
 }
 
@@ -297,8 +299,8 @@ impl HistQuery {
             // using canonicalize here allows args like "." to work
             let dir = std::fs::canonicalize(arg)
               .unwrap_or(arg.into())
-              .display()
-              .to_string();
+              .to_string_lossy()
+              .into();
 
             new.in_dir = (Some(dir), negated);
           }
@@ -349,7 +351,7 @@ impl HistQuery {
               _ => PathBuf::from(arg),
             };
 
-            new.import = Some(path.to_string_lossy().to_string());
+            new.import = Some(path.to_string_lossy().into());
           }
           _ => {}
         },
@@ -403,8 +405,11 @@ impl HistQuery {
                 (timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs()).into(),
               ),
             );
-            map.insert("command".into(), serde_json::Value::String(command.clone()));
-            map.insert("cwd".into(), serde_json::Value::String(cwd.clone()));
+            map.insert(
+              "command".into(),
+              serde_json::Value::String(command.to_string()),
+            );
+            map.insert("cwd".into(), serde_json::Value::String(cwd.to_string()));
             map.insert(
               "status".into(),
               serde_json::Value::Number(i64::from(*status).into()),

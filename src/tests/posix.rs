@@ -17,7 +17,7 @@ macro_rules! __test_setup_vars {
   ([$($var:literal => $value:literal),* $(,)?]) => {
     $(
       $crate::eval::execute::exec_nonint(
-        format!("{}='{}'", $var, $value),
+        $crate::varstr!("{}='{}'", $var, $value),
         Some("test_input".into())
       ).unwrap();
     )*
@@ -53,7 +53,7 @@ macro_rules! test_input {
         let g = $crate::tests::testutil::TestGuard::new();
         $setup
         $crate::eval::execute::exec_nonint(
-          $input.to_string(),
+          $input.into(),
           Some("test_input".into())
         ).unwrap();
         $crate::assert_output!(g, $expected);
@@ -67,7 +67,7 @@ macro_rules! test_input {
       fn $name() {
         let g = $crate::tests::testutil::TestGuard::new();
         $crate::eval::execute::exec_nonint(
-          $input.to_string(),
+          $input.into(),
           Some("test_input".into())
         ).unwrap();
         $crate::assert_output!(g, $expected);
@@ -1377,7 +1377,7 @@ mod redirection_2_7 {
           let dir = g.in_temp_dir();
           dir_path = dir.clone();
           $crate::eval::execute::exec_nonint(
-            $input.to_string(),
+            $input.into(),
             Some("test_input".into())
           ).unwrap();
           let filename = dir.join($file);

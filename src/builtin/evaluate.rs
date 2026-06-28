@@ -1,3 +1,5 @@
+use crate::state::vars::VarStrSliceExt;
+
 use super::{
   exec_nonint, state,
   util::{ShResult, with_status},
@@ -19,7 +21,7 @@ impl super::Builtin for Eval {
       .into_iter()
       .map(|(s, _)| s)
       .collect::<Vec<_>>()
-      .join(&sep);
+      .join_with(&sep);
 
     exec_nonint(command, Some("eval".into()))
   }

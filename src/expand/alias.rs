@@ -86,9 +86,9 @@ impl<'a> AliasExpander<'a> {
 /// Expand aliases in the given input string
 ///
 /// Recursively calls itself until all aliases are expanded
-pub fn expand_aliases(input: String) -> String {
+pub fn expand_aliases(input: &str) -> String {
   let mut seen = HashSet::default();
-  AliasExpander::new(input, &mut seen).expand().0
+  AliasExpander::new(input.to_string(), &mut seen).expand().0
 }
 
 pub fn expand_alias_with_pos(input: String) -> (String, Option<usize>) {
@@ -328,7 +328,7 @@ mod tests {
     let dummy_span = Span::default();
     Shed::logic_mut(|l| l.insert_alias("ll", "ls -la", dummy_span.clone()));
 
-    let result = expand_aliases("ll".to_string());
+    let result = expand_aliases("ll");
     assert_eq!(result, "ls -la");
   }
 
@@ -338,7 +338,7 @@ mod tests {
     let dummy_span = Span::default();
     Shed::logic_mut(|l| l.insert_alias("foo", "foo --verbose", dummy_span.clone()));
 
-    let result = expand_aliases("foo".to_string());
+    let result = expand_aliases("foo");
     // After first expansion: "foo --verbose", then "foo" is in already_expanded
     // so it won't expand again
     assert_eq!(result, "foo --verbose");

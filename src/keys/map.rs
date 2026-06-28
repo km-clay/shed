@@ -2,6 +2,8 @@ use std::fmt::Display;
 
 use bitflags::bitflags;
 
+use crate::state::vars::VarStr;
+
 use super::{
   KeyEvent,
   expand::{expand_keymap, shell_quote},
@@ -53,8 +55,8 @@ pub enum KeyMapMatch {
 #[derive(Debug, Clone)]
 pub struct KeyMap {
   pub flags: KeyMapFlags,
-  pub keys: String,
-  pub action: String,
+  pub keys: VarStr,
+  pub action: VarStr,
 }
 
 impl KeyMap {

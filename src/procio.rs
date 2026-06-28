@@ -469,7 +469,7 @@ impl RedirSpec {
           return Err(sherr!(ExecFail @ span, "Redirection path must expand to exactly one word"));
         }
 
-        let path = path.into_iter().next().unwrap();
+        let path = path.iter().next().unwrap();
 
         let file: OwnedFd = get_redir_file(mode, path)?.into();
         let file = move_high(file)?;
@@ -496,13 +496,15 @@ impl RedirSpec {
           buf = Expander::from_raw(&buf, flags)
             .no_glob()
             .no_split()
-            .expand_no_split()?;
+            .expand_no_split()?
+            .to_string();
           buf.push('\n');
         } else if flags.contains(TkFlags::IS_HEREDOC) && !flags.contains(TkFlags::LIT_HEREDOC) {
           buf = Expander::from_raw(&buf, flags)
             .expand()?
             .into_iter()
             .next()
+            .map(|s| s.to_string())
             .unwrap_or_default();
         }
 
@@ -1042,7 +1044,7 @@ pub(super) fn capture_command(
       let redirs: RedirSet = specs.into();
       let _guard = redirs.apply()?;
 
-      if let Err(e) = exec_nonint(cmd.to_string(), name) {
+      if let Err(e) = exec_nonint(cmd.into(), name) {
         if let ShErrKind::CleanExit(code) = e.kind() {
           std::process::exit(*code);
         }

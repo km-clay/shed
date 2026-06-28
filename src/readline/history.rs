@@ -16,14 +16,14 @@ use super::{
   sherr, shopt, state,
   util::ShResult,
 };
-use crate::HashMap;
+use crate::{HashMap, state::vars::VarStr};
 
 #[derive(Debug, Clone)]
 pub struct HistEntry {
   pub runtime: Duration,
   pub timestamp: SystemTime,
-  pub command: String,
-  pub cwd: String,
+  pub command: VarStr,
+  pub cwd: VarStr,
   pub status: i32,
   pub token: Uuid,
 }
@@ -52,8 +52,8 @@ impl Default for HistEntry {
     Self {
       runtime: Duration::default(),
       timestamp: SystemTime::now(),
-      command: String::new(),
-      cwd: String::new(),
+      command: VarStr::new(),
+      cwd: VarStr::new(),
       status: 0,
       token: Uuid::new_v4(),
     }
@@ -191,7 +191,7 @@ impl History {
         // Merge helper: drop loaded entries shadowed by in-session pushes,
         // then prepend the rest so pushes stay at the end (newest).
         let merge = |existing: &mut Vec<HistEntry>, loaded: Vec<HistEntry>| {
-          let pushed_cmds: crate::HashSet<String> =
+          let pushed_cmds: crate::HashSet<VarStr> =
             existing.iter().map(|e| e.command.clone()).collect();
           let mut merged: Vec<HistEntry> = loaded
             .into_iter()
@@ -317,9 +317,7 @@ impl History {
       .duration_since(UNIX_EPOCH)
       .unwrap()
       .as_secs() as i64;
-    let cwd = env::current_dir()
-      .map(|p| p.to_string_lossy().to_string())
-      .ok();
+    let cwd: Option<VarStr> = env::current_dir().map(|p| p.to_string_lossy().into()).ok();
     let token = Uuid::new_v4();
 
     {
@@ -339,7 +337,7 @@ impl History {
       let new_id = Self::last_id_conn(&conn, table) + 1;
       conn.execute(
         &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"),
-        rusqlite::params![new_id, timestamp, command, cwd.clone(), token.to_string()],
+        rusqlite::params![new_id, timestamp, command, cwd, token.to_string()],
       )?;
     }
 
@@ -349,7 +347,7 @@ impl History {
     let entry = HistEntry {
       runtime: Duration::default(),
       timestamp: SystemTime::now(),
-      command: command.to_string(),
+      command: command.into(),
       cwd: cwd.unwrap_or_default(),
       status: 0,
       token,
@@ -792,7 +790,7 @@ impl History {
       command: row.get(0)?,
       timestamp: UNIX_EPOCH + Duration::from_secs(row.get::<_, i64>(1)? as u64),
       runtime: Duration::from_micros(row.get::<_, i64>(2)? as u64),
-      cwd: row.get(3).unwrap_or_else(|_| String::new()),
+      cwd: row.get(3).unwrap_or_default(),
       status: row.get(4).unwrap_or(0),
       token: Uuid::parse_str(row.get::<_, String>(5)?.as_str()).unwrap_or_default(),
     })

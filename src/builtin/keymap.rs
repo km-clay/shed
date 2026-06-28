@@ -55,7 +55,7 @@ impl super::Builtin for KeyMapBuiltin {
         ExecFail,
         "At least one mode option must be specified for keymap",
       ).with_note(
-        "Use -e for emacs mode, -n for normal mode, -i for insert mode, -v for visual mode, -x for ex mode, and -o for operator-pending mode".to_string(),
+        "Use -e for emacs mode, -n for normal mode, -i for insert mode, -v for visual mode, -x for ex mode, and -o for operator-pending mode".into(),
       ));
     }
 

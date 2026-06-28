@@ -321,25 +321,25 @@ macro_rules! sherr {
 	($kind:ident($($inner:tt)*)@$span:expr, $($arg:tt)*) => {
 		$crate::util::ShErr::at(
 			$crate::util::ShErrKind::$kind($($inner)*),
-			$span, ::shed_macros::styled_format!($($arg)*)
+			$span, ::shed_macros::styled_format!($($arg)*).into()
 		)
 	};
 	($kind:ident($($inner:tt)*), $($arg:tt)*) => {
 		$crate::util::ShErr::simple(
 			$crate::util::ShErrKind::$kind($($inner)*),
-			::shed_macros::styled_format!($($arg)*)
+			::shed_macros::styled_format!($($arg)*).into()
 		)
 	};
 	($kind:ident@$span:expr, $($arg:tt)*) => {
 		$crate::util::ShErr::at(
 			$crate::util::ShErrKind::$kind,
-			$span, ::shed_macros::styled_format!($($arg)*)
+			$span, ::shed_macros::styled_format!($($arg)*).into()
 		)
 	};
 	($kind:ident, $($arg:tt)*) => {
 		$crate::util::ShErr::simple(
 			$crate::util::ShErrKind::$kind,
-			::shed_macros::styled_format!($($arg)*)
+			$crate::state::vars::VarStr::from(::shed_macros::styled_format!($($arg)*))
 		)
 	};
 }
@@ -429,6 +429,13 @@ macro_rules! _write_inner {
   }};
 }
 
+#[macro_export]
+macro_rules! varstr {
+  ($($arg:tt)*) => {
+    $crate::state::vars::VarStr::from(smol_str::format_smolstr!($($arg)*))
+  };
+}
+
 // not ignoring io errors on this one since it takes an arbitrary fd
 #[macro_export]
 macro_rules! writefd {
@@ -478,9 +485,7 @@ macro_rules! autocmd {
     $crate::util::with_saved_status(|| {
       $crate::state::Shed::notify_autocmd($crate::state::logic::AutoCmdKind::$kind);
       for cmd in post_cmds {
-        if let Err(e) =
-          $crate::eval::execute::exec_nonint(cmd.command().to_string(), Some("autocmd".into()))
-        {
+        if let Err(e) = $crate::eval::execute::exec_nonint(cmd.command(), Some("autocmd".into())) {
           e.print_error();
         }
       }

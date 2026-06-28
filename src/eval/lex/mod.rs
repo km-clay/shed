@@ -7,7 +7,11 @@ use std::{
 
 use bitflags::bitflags;
 
-use crate::{assert_sorted, state::vars::VarStr, util};
+use crate::{
+  assert_sorted,
+  state::vars::{VarStr, VarStrSliceExt},
+  util,
+};
 
 use super::{
   Shed,
@@ -241,7 +245,7 @@ pub(crate) enum TkRule {
   /// These are only used as an intermediate state for tokens that are in the process of being expanded.
   /// You can be confident that any token you are working on does not have this rule.
   Expanded {
-    exp: Vec<String>,
+    exp: Rc<[VarStr]>,
   },
 }
 
@@ -294,6 +298,15 @@ impl Tk {
   pub fn as_str(&self) -> &str {
     self.span.as_str()
   }
+  /// The token's effective text as a `VarStr`: the joined expansion for an
+  /// expanded token, or the raw span otherwise. Mirrors `Display` without
+  /// routing through the formatter.
+  pub fn word(&self) -> VarStr {
+    match &self.class {
+      TkRule::Expanded { exp } => exp.join_with(" "),
+      _ => self.span.as_str().into(),
+    }
+  }
   pub fn source(&self) -> Rc<str> {
     self.span.source.content.clone()
   }
@@ -322,7 +335,7 @@ impl Tk {
 impl Display for Tk {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match &self.class {
-      TkRule::Expanded { exp } => write!(f, "{}", exp.join(" ")),
+      TkRule::Expanded { exp } => write!(f, "{}", exp.join_with(" ")),
       _ => write!(f, "{}", self.span.as_str()),
     }
   }

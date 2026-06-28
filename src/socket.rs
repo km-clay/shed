@@ -22,7 +22,10 @@ use nix::{
   unistd::{Pid, write},
 };
 
-use crate::{state::vars::VarStr, try_var, util};
+use crate::{
+  state::vars::{VarStr, VarStrSliceExt},
+  try_var, util, varstr,
+};
 
 use super::{
   Hint, LineData, Lines, ReadlineEvent, ShResult, Shed, ShedLine, expand_keymap,
@@ -631,15 +634,13 @@ pub(super) fn handle_socket_request(
         write(&conn, b"ok\n").ok();
       }
       QueryHeader::Status(headers) => {
-        let mut responses = vec![];
+        let mut responses: Vec<VarStr> = vec![];
         for header in headers {
           match header {
-            StatusHeader::ExitCode => responses.push(Shed::get_status().to_string()),
+            StatusHeader::ExitCode => responses.push(varstr!("{}", Shed::get_status())),
             StatusHeader::CommandName => {
-              let Some(name) =
-                Shed::meta(|m| m.last_job().and_then(|j| j.name()).map(ToString::to_string))
-              else {
-                responses.push(String::new());
+              let Some(name) = Shed::meta(|m| m.last_job().and_then(|j| j.name())) else {
+                responses.push(VarStr::new());
                 continue;
               };
 
@@ -647,36 +648,37 @@ pub(super) fn handle_socket_request(
             }
             StatusHeader::Runtime => {
               let Some(dur) = Shed::meta_mut(|m| m.get_time()) else {
-                responses.push(String::new());
+                responses.push(VarStr::new());
                 continue;
               };
-              responses.push(format!("{}", dur.as_millis()));
+              responses.push(varstr!("{}", dur.as_millis()));
             }
             StatusHeader::Pid => {
               let job = Shed::meta_mut(|m| {
                 m.last_job().map(|j| {
                   j.get_pids()
                     .first()
-                    .map(ToString::to_string)
+                    .map(|pid| varstr!("{pid}"))
                     .unwrap_or_default()
                 })
               });
               let Some(job) = job else {
-                responses.push(String::new());
+                responses.push(VarStr::new());
                 continue;
               };
               responses.push(job);
             }
             StatusHeader::Pgid => {
-              let Some(job) = Shed::meta_mut(|m| m.last_job().map(|j| j.pgid().to_string())) else {
-                responses.push(String::new());
+              let Some(job) = Shed::meta_mut(|m| m.last_job().map(|j| varstr!("{}", j.pgid())))
+              else {
+                responses.push(VarStr::new());
                 continue;
               };
               responses.push(job);
             }
           }
         }
-        let output = responses.join(" ");
+        let output = responses.join_with(" ");
         write(&conn, output.as_bytes()).ok();
         write(&conn, b"\n").ok();
       }

@@ -5,7 +5,11 @@ use super::{
   register::RegisterContent,
   status_msg,
 };
-use crate::{eval::lex::TkFlags, state::vars::VarStr, util, verb};
+use crate::{
+  eval::lex::TkFlags,
+  state::vars::{VarStr, VarStrSliceExt},
+  util, verb,
+};
 
 use super::{
   Grapheme, Line, Lines, MotionKind, Pos, SelectMode, killring, ordered, rot13_char,
@@ -140,7 +144,7 @@ impl super::LineBuf {
       // perform full expansion on the content
       expand::Expander::from_raw(&content_raw, TkFlags::empty())
         .expand()?
-        .join(" ")
+        .join_with(" ")
     } else {
       // got ':expand'
       // perform partial expansion on the content

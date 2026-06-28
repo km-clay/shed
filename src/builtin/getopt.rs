@@ -6,10 +6,11 @@ use std::fmt;
 
 use fmt::Display;
 
+use crate::state::vars::{VarStr, VarStrSliceExt};
+
 use super::{
   eval::lex::{Span, Tk},
   sherr,
-  state::shopt::xtrace_print,
   util::ShResult,
 };
 
@@ -25,24 +26,24 @@ impl AsOpt for char {
 
 impl AsOpt for String {
   fn as_opt(&self) -> Opt {
-    Opt::Long(self.clone())
+    Opt::Long(self.into())
   }
 }
 
 impl AsOpt for &str {
   fn as_opt(&self) -> Opt {
-    Opt::Long(self.to_string())
+    Opt::Long((*self).into())
   }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum Opt {
-  Long(String),
-  LongWithArg(String, String),
-  LongWithList(String, Vec<String>),
+  Long(VarStr),
+  LongWithArg(VarStr, VarStr),
+  LongWithList(VarStr, Vec<VarStr>),
   Short(char),
-  ShortWithArg(char, String),
-  ShortWithList(char, Vec<String>),
+  ShortWithArg(char, VarStr),
+  ShortWithList(char, Vec<VarStr>),
 }
 
 impl Opt {
@@ -50,7 +51,7 @@ impl Opt {
     let mut opts = vec![];
 
     if s.starts_with("--") {
-      opts.push(Opt::Long(s.trim_start_matches('-').to_string()));
+      opts.push(Opt::Long(s.trim_start_matches('-').into()));
     } else if s.starts_with('-') {
       let mut chars = s.trim_start_matches('-').chars();
       while let Some(ch) = chars.next() {
@@ -69,8 +70,8 @@ impl Display for Opt {
       Self::Short(opt) => write!(f, "-{opt}"),
       Self::LongWithArg(opt, arg) => write!(f, "--{opt} {arg}"),
       Self::ShortWithArg(opt, arg) => write!(f, "-{opt} {arg}"),
-      Self::LongWithList(opt, args) => write!(f, "--{} {}", opt, args.join(" ")),
-      Self::ShortWithList(opt, args) => write!(f, "-{} {}", opt, args.join(" ")),
+      Self::LongWithList(opt, args) => write!(f, "--{} {}", opt, args.join_with(" ")),
+      Self::ShortWithList(opt, args) => write!(f, "-{} {}", opt, args.join_with(" ")),
     }
   }
 }
@@ -110,7 +111,7 @@ impl OptSpec {
   }
 }
 
-type GetOptResult = ShResult<(Vec<(String, Span)>, Vec<Opt>)>;
+type GetOptResult = ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)>;
 pub(crate) fn get_opts_from_tokens_strict(tokens: &[Tk], opt_specs: &[OptSpec]) -> GetOptResult {
   sort_tks(tokens, opt_specs, true)
 }
@@ -140,17 +141,15 @@ pub(crate) fn get_opts_from_tokens_raw_no_split(
 
 pub(crate) fn sort_tks(tokens: &[Tk], opt_specs: &[OptSpec], strict: bool) -> GetOptResult {
   // Expand tokens and flatten via get_words, preserving spans
-  let mut words: Vec<(String, Span)> = vec![];
+  let mut words: Vec<(VarStr, Span)> = vec![];
   for tk in tokens {
     let tk = tk.clone();
     let span = tk.span.clone();
     let expanded = tk.expand()?;
-    for word in expanded.get_words() {
-      words.push((word, span.clone()));
+    for word in expanded.get_words().iter() {
+      words.push((word.clone(), span.clone()));
     }
   }
-
-  xtrace_print(&words);
 
   let mut words_iter = words.into_iter().peekable();
   let mut opts = vec![];
@@ -313,10 +312,7 @@ fn sort_tks_raw_inner(
         if opt_spec.opt == opt {
           match &opt_spec.takes_arg {
             OptArg::Single => {
-              let arg = tokens_iter
-                .next()
-                .map(|t| t.to_string())
-                .unwrap_or_default();
+              let arg = tokens_iter.next().map(|t| t.word()).unwrap_or_default();
               let opt = match opt {
                 Opt::Long(ref opt) => Opt::LongWithArg(opt.clone(), arg),
                 Opt::Short(opt) => Opt::ShortWithArg(opt, arg),
@@ -330,7 +326,7 @@ fn sort_tks_raw_inner(
                 if tk.as_str().starts_with('-') || args.len() >= *n {
                   break;
                 }
-                args.push(tokens_iter.next().unwrap().to_string());
+                args.push(tokens_iter.next().unwrap().word());
               }
               if args.len() != *n {
                 return Err(sherr!(
@@ -449,8 +445,8 @@ mod tests {
     let (non_opts, opts) = get_opts_from_tokens(&tokens, &opt_spec).unwrap();
 
     assert_eq!(opts, vec![Opt::ShortWithArg('o', "output.txt".into())]);
-    let non_opts: Vec<String> = non_opts.into_iter().map(|(s, _)| s).collect();
-    assert!(non_opts.contains(&"file.txt".to_string()));
+    let non_opts: Vec<VarStr> = non_opts.into_iter().map(|(s, _)| s).collect();
+    assert!(non_opts.contains(&"file.txt".into()));
   }
 
   #[test]
@@ -468,8 +464,8 @@ mod tests {
       opts,
       vec![Opt::LongWithArg("output".into(), "result.txt".into())]
     );
-    let non_opts: Vec<String> = non_opts.into_iter().map(|(s, _)| s).collect();
-    assert!(non_opts.contains(&"input.txt".to_string()));
+    let non_opts: Vec<VarStr> = non_opts.into_iter().map(|(s, _)| s).collect();
+    assert!(non_opts.contains(&"input.txt".into()));
   }
 
   #[test]
@@ -490,9 +486,9 @@ mod tests {
     let (non_opts, opts) = get_opts_from_tokens(&tokens, &opt_spec).unwrap();
 
     assert_eq!(opts, vec![Opt::Short('v')]);
-    let non_opts: Vec<String> = non_opts.into_iter().map(|(s, _)| s).collect();
-    assert!(non_opts.contains(&"-a".to_string()));
-    assert!(non_opts.contains(&"--foo".to_string()));
+    let non_opts: Vec<VarStr> = non_opts.into_iter().map(|(s, _)| s).collect();
+    assert!(non_opts.contains(&"-a".into()));
+    assert!(non_opts.contains(&"--foo".into()));
   }
 
   #[test]
@@ -567,8 +563,8 @@ mod tests {
         Opt::LongWithArg("output".into(), "file.txt".into()),
       ]
     );
-    let non_opts: Vec<String> = non_opts.into_iter().map(|(s, _)| s).collect();
-    assert!(non_opts.contains(&"input".to_string()));
+    let non_opts: Vec<VarStr> = non_opts.into_iter().map(|(s, _)| s).collect();
+    assert!(non_opts.contains(&"input".into()));
   }
 
   // ===================== Variable expansion through opts (TestGuard) =====================
@@ -674,7 +670,7 @@ mod tests {
     let (non_opts, opts) =
       get_opts_from_tokens_raw(&tokens, &raw_specs_v_flag_and_single()).unwrap();
     assert_eq!(opts, vec![Opt::Short('v')]);
-    let strs: Vec<String> = non_opts.iter().map(ToString::to_string).collect();
+    let strs: Vec<VarStr> = non_opts.iter().map(Tk::word).collect();
     assert_eq!(strs, vec!["-not-a-flag", "plain"]);
   }
 
@@ -804,7 +800,7 @@ mod tests {
     let tokens = lex("$SEP");
     let (non_opts, opts) = get_opts_from_tokens(&tokens, &specs_v_and_o_single()).unwrap();
     assert_eq!(opts, vec![Opt::Short('v')]);
-    let strs: Vec<String> = non_opts.into_iter().map(|(s, _)| s).collect();
+    let strs: Vec<VarStr> = non_opts.into_iter().map(|(s, _)| s).collect();
     assert_eq!(strs, vec!["-not-an-opt"]);
   }
 
@@ -815,7 +811,7 @@ mod tests {
     let tokens = lex("-v --");
     let (non_opts, opts) = get_opts_from_tokens(&tokens, &specs_v_and_o_single()).unwrap();
     assert_eq!(opts, vec![Opt::Short('v')]);
-    let strs: Vec<String> = non_opts.into_iter().map(|(s, _)| s).collect();
+    let strs: Vec<VarStr> = non_opts.into_iter().map(|(s, _)| s).collect();
     assert_eq!(strs, vec!["--"]);
   }
 
@@ -830,12 +826,12 @@ mod tests {
       [Opt::ShortWithList('s', args)] => {
         assert_eq!(
           args,
-          &vec!["a".to_string(), "b".to_string(), "c".to_string()]
+          &vec![VarStr::from("a"), VarStr::from("b"), VarStr::from("c")]
         );
       }
       other => panic!("expected ShortWithList('s'), got {other:?}"),
     }
-    let strs: Vec<String> = non_opts.into_iter().map(|(s, _)| s).collect();
+    let strs: Vec<VarStr> = non_opts.into_iter().map(|(s, _)| s).collect();
     assert_eq!(strs, vec!["extra"]);
   }
 
@@ -854,6 +850,6 @@ mod tests {
   fn sort_tks_single_arg_missing_uses_empty_string() {
     let tokens = lex("-o");
     let (_non_opts, opts) = get_opts_from_tokens(&tokens, &specs_v_and_o_single()).unwrap();
-    assert_eq!(opts, vec![Opt::ShortWithArg('o', String::new())]);
+    assert_eq!(opts, vec![Opt::ShortWithArg('o', VarStr::new())]);
   }
 }

@@ -3,6 +3,7 @@ use std::{collections::VecDeque, fs::metadata, os::fd::BorrowedFd, path::PathBuf
 use crate::{
   eval::lex::Tk,
   procio,
+  state::vars::VarStr,
   util::{ShResultExt, replace_posix_classes},
 };
 
@@ -170,7 +171,7 @@ fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
 }
 
 /// Evaluate a single binary test (`LHS OP RHS`).
-fn eval_binary(op: &BinaryOp, lhs: &(String, Span), rhs: &(String, Span)) -> ShResult<bool> {
+fn eval_binary(op: &BinaryOp, lhs: &(VarStr, Span), rhs: &(VarStr, Span)) -> ShResult<bool> {
   match op {
     BinaryOp::StringEq => {
       let pattern = expand::glob_to_regex(rhs.0.trim(), true);
@@ -234,14 +235,14 @@ fn eval_binary(op: &BinaryOp, lhs: &(String, Span), rhs: &(String, Span)) -> ShR
 ///   2 args → unary op + operand   (e.g. `-f foo`)
 ///   3 args → lhs op rhs           (e.g. `a -eq b`)
 struct ArgvParser<'a> {
-  argv: &'a [(String, Span)],
+  argv: &'a [(VarStr, Span)],
   pos: usize,
 }
 
 const STOP_TOKENS: &[&str] = &["-a", "-o", "&&", "||", ")", "!"];
 
 impl<'a> ArgvParser<'a> {
-  fn new(argv: &'a [(String, Span)]) -> Self {
+  fn new(argv: &'a [(VarStr, Span)]) -> Self {
     Self { argv, pos: 0 }
   }
 
@@ -306,7 +307,7 @@ impl<'a> ArgvParser<'a> {
 }
 
 /// POSIX arity dispatch on a leaf (no `!`, `(`, `)`, or conjuncts).
-fn eval_leaf(leaf: &[(String, Span)]) -> ShResult<bool> {
+fn eval_leaf(leaf: &[(VarStr, Span)]) -> ShResult<bool> {
   if leaf.is_empty() {
     return Ok(false);
   }

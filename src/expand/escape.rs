@@ -5,7 +5,7 @@ use std::str::Chars;
 
 use bitflags::bitflags;
 
-use crate::util;
+use crate::{state::vars::VarStr, util};
 
 use super::{QuoteState, ShResult, markers, match_loop, sherr, try_var, util::is_var_name_ch};
 
@@ -31,11 +31,21 @@ impl ExpandFlags {
 }
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
-pub(super) fn strip_escape_markers(s: String) -> String {
+pub(super) fn strip_escape_markers(s: &mut VarStr) {
   if !s.contains(markers::ESCAPE) {
-    return s;
+    return;
   }
-  s.replace(markers::ESCAPE, "")
+
+  *s = s.replace(markers::ESCAPE, "").into();
+}
+
+/// Strip ESCAPE markers from a string, leaving the characters they protect intact.
+pub(super) fn strip_escape_markers_str(s: &mut String) {
+  if !s.contains(markers::ESCAPE) {
+    return;
+  }
+
+  *s = s.replace(markers::ESCAPE, "");
 }
 
 /// Convert internal quote/escape markers into glob-syntax for `glob::Pattern`.

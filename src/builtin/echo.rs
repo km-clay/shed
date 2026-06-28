@@ -1,3 +1,8 @@
+use crate::{
+  state::vars::{VarStr, VarStrSliceExt},
+  varstr,
+};
+
 use super::{
   Builtin, ShResult,
   expand::expand_prompt,
@@ -46,23 +51,23 @@ impl Builtin for Echo {
     let use_prompt = flags.contains(EchoFlags::USE_PROMPT);
     let use_escape = flags.contains(EchoFlags::USE_ESCAPE);
 
-    let prepared: ShResult<Vec<String>> = args
+    let prepared: ShResult<Vec<VarStr>> = args
       .argv
       .into_iter()
-      .map(|(mut st, sp)| -> ShResult<String> {
-        if use_prompt {
-          st = expand_prompt(&st).promote_err(sp)?;
-        }
+      .map(|(st, sp)| -> ShResult<VarStr> {
         if use_escape {
-          st = expand_ansi_c(&st);
+          Ok(expand_ansi_c(&st).into())
+        } else if use_prompt {
+          Ok(expand_prompt(&st).promote_err(sp)?.into())
+        } else {
+          Ok(st)
         }
-        Ok(st)
       })
       .collect();
 
-    let mut joined = prepared?.join(" ");
+    let mut joined = prepared?.join_with(" ");
     if !flags.contains(EchoFlags::NO_NEWLINE) {
-      joined.push('\n');
+      joined = varstr!("{joined}\n");
     }
 
     out!("{joined}");

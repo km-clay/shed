@@ -3,8 +3,12 @@ use crate::{
   eval::parse::node::{LabelCtx, node_has_only_builtins},
   procio::{OutputSink, SinkScope, StdinScope},
   shopt_mut, socket,
-  state::{logic::AutoloadKind, vars::VarStr},
-  util::isolation_guard,
+  state::{
+    logic::AutoloadKind,
+    vars::{VarStr, VarStrSliceExt},
+  },
+  util::{VarStrDisplay, isolation_guard},
+  varstr,
 };
 use std::{collections::VecDeque, ffi::CString, os::unix::fs::PermissionsExt, path::Path, rc::Rc};
 
@@ -116,12 +120,12 @@ pub enum AssignBehavior {
 thread_local! {
   // Last expanded word of the most recently expanded argv, the raw material for
   // `$_`. Written by `prepare_argv_with`, consumed by `commit_underscore`.
-  static LAST_ARG: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+  static LAST_ARG: std::cell::RefCell<Option<VarStr>> = const { std::cell::RefCell::new(None) };
   static SUPPRESS_UNDERSCORE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Stash the last expanded word so a later `commit_underscore` can promote it to `$_`.
-pub(crate) fn record_last_arg(arg: Option<String>) {
+pub(crate) fn record_last_arg(arg: Option<VarStr>) {
   LAST_ARG.with(|l| *l.borrow_mut() = arg);
 }
 
@@ -151,18 +155,18 @@ pub struct ExecArgs {
 }
 
 impl ExecArgs {
-  pub fn from_expanded(argv: Vec<(String, Span)>) -> Self {
+  pub fn from_expanded(argv: Vec<(VarStr, Span)>) -> Self {
     let cmd = Self::get_cmd(&argv);
     let argv = Self::get_argv(argv);
     let envp = Self::get_envp();
     Self { cmd, argv, envp }
   }
-  pub fn get_cmd(argv: &[(String, Span)]) -> (CString, Span) {
+  pub fn get_cmd(argv: &[(VarStr, Span)]) -> (CString, Span) {
     let cmd = argv[0].0.as_str();
     let span = argv[0].1.clone();
     (CString::new(cmd).unwrap(), span)
   }
-  pub fn get_argv(argv: Vec<(String, Span)>) -> Rc<[CString]> {
+  pub fn get_argv(argv: Vec<(VarStr, Span)>) -> Rc<[CString]> {
     argv
       .into_iter()
       .map(|s| CString::new(s.0).unwrap())
@@ -202,7 +206,7 @@ pub fn exec_dash_c(input: String, args: Vec<String>) -> ShResult<()> {
     }
   });
 
-  let expanded = expand_aliases(input);
+  let expanded = expand_aliases(&input);
   let source_name: Rc<str> = name.into();
   let mut parser = ParsedSrc::new(expanded.into())
     .with_lex_flags(super::lex::LexFlags::empty())
@@ -268,13 +272,13 @@ pub fn exec_dash_c(input: String, args: Vec<String>) -> ShResult<()> {
 ///
 /// Used in the main loop and other places that are guaranteed to be interacting with a tty somehow.
 /// This controls whether or not the shell passes terminal control to child processes.
-pub fn exec_int(input: String, source_name: Option<Rc<str>>) -> ShResult<()> {
+pub fn exec_int(input: VarStr, source_name: Option<Rc<str>>) -> ShResult<()> {
   let _guard = Shed::term_mut(|t| t.interactive_guard(true));
   exec_input(input, source_name)
 }
 
 /// Execute non-interactively
-pub fn exec_nonint(input: String, source_name: Option<Rc<str>>) -> ShResult<()> {
+pub fn exec_nonint(input: VarStr, source_name: Option<Rc<str>>) -> ShResult<()> {
   let _guard = Shed::term_mut(|t| t.interactive_guard(false));
   exec_input(input, source_name)
 }
@@ -283,11 +287,11 @@ pub fn exec_nonint(input: String, source_name: Option<Rc<str>>) -> ShResult<()> 
 ///
 /// This should only be called directly if you wish to inherit
 /// the caller's interactive status.
-pub fn exec_input(mut input: String, source_name: Option<Rc<str>>) -> ShResult<()> {
+pub fn exec_input(mut input: VarStr, source_name: Option<Rc<str>>) -> ShResult<()> {
   let interactive = Shed::term(Terminal::interactive);
 
   if !interactive || !Shed::shopts(|o| o.prompt.expand_aliases) {
-    input = expand_aliases(input);
+    input = expand_aliases(&input).into();
   }
   let lex_flags = if interactive {
     super::lex::LexFlags::INTERACTIVE
@@ -395,7 +399,8 @@ impl Dispatcher {
     // We need to expand this token
     // so that a command smuggled inside of a variable is routed correctly,
     // instead of only hitting the exec_cmd path
-    let Some(cmd_word) = cmd.clone().expand_to_words()?.into_iter().next() else {
+    let words = cmd.clone().expand_to_words()?;
+    let Some(cmd_word) = words.iter().next().cloned() else {
       if let NdRule::Command {
         ref assignments,
         argv: _,
@@ -417,7 +422,7 @@ impl Dispatcher {
       Self::exec_arith(node)
     } else if can_autocd(cmd) {
       let dir = cmd.span.as_str().to_string();
-      exec_input(format!("cd {dir}"), Some(self.source_name.clone()))
+      exec_input(varstr!("cd {dir}"), Some(self.source_name.clone()))
     } else {
       self.exec_cmd(node)
     };
@@ -479,7 +484,7 @@ impl Dispatcher {
           for tk in err {
             msg_parts.push(tk.expand_no_split()?);
           }
-          let msg = msg_parts.join(" ");
+          let msg = msg_parts.join_with(" ");
 
           ShErr::at(ShErrKind::TryFailed, blame, msg)
             .with_context(context.iter())
@@ -659,7 +664,7 @@ impl Dispatcher {
     };
 
     let func_ctx = util::get_context(
-      styled_format!("in call to function '{}'", &func_name),
+      styled_format!("in call to function '{}'", &func_name).into(),
       blame.clone(),
     );
     let caller_contexts: Vec<_> = func.context.iter().cloned().collect();
@@ -980,26 +985,23 @@ impl Dispatcher {
     };
 
     let for_logic = |s: &mut Self| -> ShResult<()> {
-      let to_expanded_strings = |tks: &[Tk]| -> ShResult<Vec<String>> {
-        Ok(
-          tks
-            .iter()
-            .map(Tk::expand_to_words)
-            .collect::<ShResult<Vec<Vec<String>>>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>(),
-        )
+      let to_expanded_strings = |tks: &[Tk]| -> ShResult<Vec<VarStr>> {
+        let mut out = vec![];
+        for tk in tks {
+          out.extend(tk.expand_to_words()?.iter().cloned());
+        }
+
+        Ok(out)
       };
 
       // Expand all array variables
-      let arr: Vec<String> = to_expanded_strings(arr)?;
-      let vars: Vec<String> = to_expanded_strings(vars)?;
+      let arr: Vec<VarStr> = to_expanded_strings(arr)?;
+      let vars: Vec<VarStr> = to_expanded_strings(vars)?;
 
-      let mut for_guard = var_ctx_guard(vars.iter().map(ToString::to_string).collect());
+      let mut for_guard = var_ctx_guard(vars.iter().map(VarStr::clone).collect());
 
       'outer: for chunk in arr.chunks(vars.len()) {
-        let empty = String::new();
+        let empty = VarStr::new();
         let chunk_iter = vars
           .iter()
           .zip(chunk.iter().chain(std::iter::repeat(&empty)));
@@ -1555,7 +1557,7 @@ impl Dispatcher {
     self.timer_stack.last_mut().and_then(Option::take)
   }
   #[expect(clippy::too_many_lines)]
-  pub fn set_assignments(assigns: &[Node], behavior: AssignBehavior) -> ShResult<Vec<String>> {
+  pub fn set_assignments(assigns: &[Node], behavior: AssignBehavior) -> ShResult<Vec<VarStr>> {
     let mut new_env_vars = vec![];
     let mut flags = match behavior {
       AssignBehavior::Export => VarFlags::EXPORT,
@@ -1758,7 +1760,7 @@ impl Dispatcher {
       Shed::set_status(status);
 
       if matches!(behavior, AssignBehavior::Export) {
-        new_env_vars.push(var.to_string());
+        new_env_vars.push(var_name.into());
       }
     }
 
@@ -1766,7 +1768,7 @@ impl Dispatcher {
   }
 }
 
-pub fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<(String, Span)>> {
+pub fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
   prepare_argv_with(argv, false)
 }
 
@@ -1774,7 +1776,7 @@ pub fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<(String, Span)>> {
 /// `no_split` is set by `parse_cmd` for `[[`/`]]` commands so operands like
 /// `$unset` survive expansion as the empty string instead of vanishing
 /// from argv (bash `[[ ]]` semantics).
-pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(String, Span)>> {
+pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(VarStr, Span)>> {
   let mut out = Vec::with_capacity(argv.len());
 
   for arg in argv {
@@ -1786,14 +1788,14 @@ pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(String, S
       // but here it would turn the operator into `=/home/$USER`. Skip
       // expansion for the bare operator token.
       if arg.span.as_str() == "=~" {
-        out.push(("=~".to_string(), span));
+        out.push(("=~".into(), span));
         continue;
       }
       let word = arg.expand_no_split()?;
       out.push((word, span));
     } else {
-      for exp in arg.expand_to_words()? {
-        out.push((exp, span.clone()));
+      for exp in arg.expand_to_words()?.iter() {
+        out.push((exp.clone(), span.clone()));
       }
     }
   }

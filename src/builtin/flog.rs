@@ -41,10 +41,10 @@ impl super::Builtin for Flog {
     for opt in args.opts {
       match &opt {
         Opt::ShortWithArg('p', arg) => {
-          prefix_fmt = arg.into();
+          prefix_fmt = arg.clone();
         }
         Opt::LongWithArg(flag, arg) if flag.as_str() == "prefix" => {
-          prefix_fmt = arg.into();
+          prefix_fmt = arg.clone();
         }
         _ => {}
       }

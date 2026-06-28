@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 
-use crate::state::logic::{AutoloadKind, ShFunc};
+use crate::state::{
+  logic::{AutoloadKind, ShFunc},
+  vars::VarStr,
+};
 
 use super::{
   Span, Tk,
@@ -22,7 +25,7 @@ use super::{
 /// which treats `(` as a subshell opener and strips parens, breaking array
 /// assignment via `local`/`readonly`/`export`. Tokens that look like array
 /// literals are passed through verbatim so `arr_from_raw` can parse them.
-pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(String, Span)>> {
+pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
   let mut out = vec![];
   for tk in argv {
     let raw = tk.span.as_str();
@@ -30,7 +33,7 @@ pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(String, Span)>> {
 
     let is_arr_lit = eq_pos.is_some_and(|eq| raw[eq + 1..].starts_with('(') && raw.ends_with(')'));
     if is_arr_lit {
-      out.push((raw.to_string(), tk.span.clone()));
+      out.push((raw.into(), tk.span.clone()));
       continue;
     }
 
@@ -51,29 +54,29 @@ pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(String, Span)>> {
       }
     }
 
-    let expanded = tk.expand()?;
-    for exp in expanded.get_words() {
-      out.push((exp, span.clone()));
+    let expanded = tk.expand_to_words()?;
+    for exp in expanded.iter() {
+      out.push((exp.clone(), span.clone()));
     }
   }
   Ok(out)
 }
 
-pub fn split_assignment(arg: String) -> (String, Option<VarKind>) {
-  let Some((e, l)) = split_at_unescaped(&arg, "=") else {
-    return (arg, None);
+pub fn split_assignment(arg: &VarStr) -> (&str, Option<VarKind>) {
+  let Some((e, l)) = split_at_unescaped(arg, "=") else {
+    return (arg.as_str(), None);
   };
-  let var = arg[..e].trim().to_string();
-  let val = arg[e + l..].to_string();
-  (var, Some(VarKind::parse(&val)))
+  let var = arg[..e].trim();
+  let val = &arg[e + l..];
+  (var, Some(VarKind::parse(val)))
 }
 
-pub fn split_assignment_raw(arg: String) -> (String, Option<String>) {
-  let Some((e, l)) = split_at_unescaped(&arg, "=") else {
-    return (arg, None);
+pub fn split_assignment_raw(arg: &VarStr) -> (&str, Option<&str>) {
+  let Some((e, l)) = split_at_unescaped(arg, "=") else {
+    return (arg.as_str(), None);
   };
-  let var = arg[..e].trim().to_string();
-  let val = arg[e + l..].to_string();
+  let var = arg[..e].trim();
+  let val = &arg[e + l..];
   (var, Some(val))
 }
 
@@ -97,7 +100,7 @@ enum IntrospectMode {
 /// them onto `base_flags`, and applies each assignment in `argv` with the
 /// resulting kind+flags. Other opts (e.g. `-p`/`-f`/`-F`) are caller-handled
 /// before delegating here.
-fn apply_var_decl(opts: &[Opt], argv: Vec<(String, Span)>, base_flags: VarFlags) -> ShResult<()> {
+fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags) -> ShResult<()> {
   let mut flags = base_flags;
   let mut kind = DeclareKind::Str;
   for opt in opts {
@@ -112,8 +115,8 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(String, Span)>, base_flags: VarFlags)
   }
 
   for (arg, span) in argv {
-    let (name, raw_val) = split_assignment_raw(arg);
-    let val = match (kind, raw_val.as_deref()) {
+    let (name, raw_val) = split_assignment_raw(&arg);
+    let val = match (kind, raw_val) {
       (DeclareKind::Str, Some(v)) => VarKind::parse(v),
       (DeclareKind::Str, None) => VarKind::string(String::new()),
       (DeclareKind::Int, Some(v)) => {
@@ -129,7 +132,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(String, Span)>, base_flags: VarFlags)
       (DeclareKind::Assoc, Some(v)) => VarKind::assoc_arr_from_raw(v).promote_err(span.clone())?,
       (DeclareKind::Assoc, None) => VarKind::AssocArr(Vec::new()),
     };
-    Shed::vars_mut(|v| v.set_var(&name, val, flags)).promote_err(span)?;
+    Shed::vars_mut(|v| v.set_var(name, val, flags)).promote_err(span)?;
   }
 
   with_status(0)
@@ -189,7 +192,7 @@ impl super::Builtin for Declare {
   }
 }
 
-fn declare_introspect(mode: IntrospectMode, argv: &[(String, Span)]) -> ShResult<()> {
+fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult<()> {
   match mode {
     IntrospectMode::Vars => {
       if argv.is_empty() {
@@ -286,7 +289,7 @@ impl super::Builtin for Readonly {
     cmd_span: Span,
     argv: &[Tk],
     _no_split: bool,
-  ) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
+  ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
     let mut argv = prepare_assignment_argv(argv).promote_err(cmd_span)?;
     if !argv.is_empty() {
       argv.remove(0);
@@ -303,9 +306,9 @@ impl super::Builtin for Readonly {
     }
 
     for (arg, span) in args.argv {
-      let (var, val) = split_assignment(arg);
+      let (var, val) = split_assignment(&arg);
       Shed::vars_mut(|v| {
-        v.set_var(&var, val.unwrap_or_default(), VarFlags::READONLY)
+        v.set_var(var, val.unwrap_or_default(), VarFlags::READONLY)
           .promote_err(span)
       })?;
     }
@@ -369,7 +372,7 @@ impl super::Builtin for Export {
     cmd_span: Span,
     argv: &[Tk],
     _no_split: bool,
-  ) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
+  ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
     let mut argv = prepare_assignment_argv(argv).promote_err(cmd_span)?;
     if !argv.is_empty() {
       argv.remove(0);
@@ -385,12 +388,12 @@ impl super::Builtin for Export {
     }
 
     for (arg, span) in args.argv {
-      let (var, val) = split_assignment(arg);
+      let (var, val) = split_assignment(&arg);
       if let Some(val) = val {
-        Shed::vars_mut(|v| v.set_var(&var, val, VarFlags::EXPORT)).promote_err(span)?;
+        Shed::vars_mut(|v| v.set_var(var, val, VarFlags::EXPORT)).promote_err(span)?;
       } else {
         // Export an existing variable, if any
-        Shed::vars_mut(|v| v.export_var(&var));
+        Shed::vars_mut(|v| v.export_var(var));
       }
     }
 
@@ -414,7 +417,7 @@ impl super::Builtin for Local {
     cmd_span: Span,
     argv: &[Tk],
     _no_split: bool,
-  ) -> ShResult<(Vec<(String, Span)>, Vec<Opt>)> {
+  ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
     let (raw_argv, opts) =
       get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
     let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;

@@ -5,7 +5,7 @@ use std::{
 
 use regex::Regex;
 
-use crate::procio::bytes_to_string;
+use crate::{procio::bytes_to_string, state::vars::VarStr};
 
 use super::{
   history::HistEntry,
@@ -51,13 +51,13 @@ fn try_import_bash(content: &str) -> Vec<HistEntry> {
       if let Some(cmd) = lines.next() {
         entries.push(HistEntry {
           timestamp,
-          command: cmd.to_string(),
+          command: cmd.into(),
           ..HistEntry::default()
         });
       }
     } else {
       entries.push(HistEntry {
-        command: line.to_string(),
+        command: line.into(),
         ..HistEntry::default()
       });
     }
@@ -66,7 +66,7 @@ fn try_import_bash(content: &str) -> Vec<HistEntry> {
   entries
 }
 
-fn collect_continuation<'a>(first: &'a str, lines: &mut impl Iterator<Item = &'a str>) -> String {
+fn collect_continuation<'a>(first: &'a str, lines: &mut impl Iterator<Item = &'a str>) -> VarStr {
   let mut parts = vec![];
   let mut line = first;
   loop {
@@ -80,7 +80,7 @@ fn collect_continuation<'a>(first: &'a str, lines: &mut impl Iterator<Item = &'a
       break;
     }
   }
-  parts.join("\n")
+  parts.join("\n").into()
 }
 
 /// Returns true if `line` looks like a zsh extended-history header:
@@ -133,7 +133,7 @@ fn try_import_zsh(content: &str) -> ShResult<Vec<HistEntry>> {
   Ok(entries)
 }
 
-fn expand_fish_cmd(cmd: &str) -> String {
+fn expand_fish_cmd(cmd: &str) -> VarStr {
   let mut out = String::new();
   let mut chars = cmd.chars();
 
@@ -155,7 +155,7 @@ fn expand_fish_cmd(cmd: &str) -> String {
     _ => out.push(ch)
   });
 
-  out
+  out.into()
 }
 
 fn try_import_fish(content: &str) -> ShResult<Vec<HistEntry>> {

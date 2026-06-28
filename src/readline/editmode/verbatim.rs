@@ -1,3 +1,5 @@
+use crate::state::vars::VarStr;
+
 use super::{
   CmdReplay, E, EditMode, K, ModeReport, common_cmds,
   editcmd::{CmdFlags, EditCmd, Verb},
@@ -31,7 +33,7 @@ impl EditMode for ViVerbatim {
         log::debug!("Received verbatim key sequence: {seq:?}");
         let cmd = EditCmd {
           register: RegisterName::default(),
-          verb: Some(verb!(Verb::Insert(seq.to_string()))),
+          verb: Some(verb!(Verb::Insert((*seq).into()))),
           motion: None,
           raw_seq: seq.to_string(),
           flags: CmdFlags::EXIT_CUR_MODE,
@@ -54,7 +56,7 @@ impl EditMode for ViVerbatim {
   fn cursor_style(&self) -> CursorStyle {
     CursorStyle::Underline(true)
   }
-  fn pending_seq(&self) -> Option<String> {
+  fn pending_seq(&self) -> Option<VarStr> {
     None
   }
   fn clamp_cursor(&self) -> bool {

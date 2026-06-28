@@ -110,7 +110,7 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 pub(crate) fn test_input(input: impl Into<String>) -> ShResult<()> {
-  exec_nonint(input.into(), None)
+  exec_nonint(input.into().into(), None)
 }
 
 pub(crate) struct TestGuard {
@@ -344,7 +344,7 @@ impl Drop for TestGuard {
 }
 
 pub(crate) fn get_ast(input: &str) -> ShResult<Vec<crate::eval::Node>> {
-  let input = expand_aliases(input.into());
+  let input = expand_aliases(input);
 
   let mut parser = ParsedSrc::new(input.into())
     .with_lex_flags(LexFlags::empty())

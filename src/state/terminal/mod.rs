@@ -700,12 +700,7 @@ impl Terminal {
   }
 
   pub fn calc_cursor_movement(&mut self, old: Pos, new: Pos) -> ShResult<()> {
-    let err = |_| {
-      ShErr::simple(
-        ShErrKind::InternalErr,
-        "Failed to write to cursor movement buffer",
-      )
-    };
+    let err = |_| sherr!(InternalErr, "Failed to write to cursor movement buffer");
 
     match new.row.cmp(&old.row) {
       std::cmp::Ordering::Greater => {

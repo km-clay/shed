@@ -1,4 +1,7 @@
-use crate::readline::{RegisterName, editcmd::CmdFlags};
+use crate::{
+  readline::{RegisterName, editcmd::CmdFlags},
+  state::vars::VarStr,
+};
 
 use super::{
   CmdReplay, Direction, E, EditCmd, EditMode, K, M, ModeReport, Motion, To, Verb, ViNormal, Word,
@@ -110,7 +113,7 @@ impl EditMode for ViInsert {
       E(K::Verbatim(seq), _) => {
         self
           .pending_cmd
-          .set_verb(verb!(Verb::Insert(seq.to_string())));
+          .set_verb(verb!(Verb::Insert((*seq).into())));
         Some(self.register_and_return())
       }
       key!(Ctrl + 'o') => {
@@ -186,7 +189,7 @@ impl EditMode for ViInsert {
       .as_ref()
       .map_or_else(|| CursorStyle::Beam(false), super::EditMode::cursor_style)
   }
-  fn pending_seq(&self) -> Option<String> {
+  fn pending_seq(&self) -> Option<VarStr> {
     self.normal.as_ref().and_then(super::EditMode::pending_seq)
   }
   fn clamp_cursor(&self) -> bool {

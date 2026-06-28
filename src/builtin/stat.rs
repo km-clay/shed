@@ -735,7 +735,7 @@ impl super::Builtin for Stat {
     let mut deref = false;
     let mut fs_stat = false;
     let mut terse = false;
-    let mut format: Option<String> = None;
+    let mut format: Option<VarStr> = None;
 
     if args.argv.is_empty() {
       return Err(sherr!(ExecFail @ args.cmd_span(), "stat: Missing file operand"));
@@ -743,8 +743,8 @@ impl super::Builtin for Stat {
 
     for opt in &args.opts {
       match opt {
-        Opt::ShortWithArg('c', fmt) => format = Some(fmt.into()),
-        Opt::LongWithArg(flag, fmt) if flag == "format" => format = Some(fmt.into()),
+        Opt::ShortWithArg('c', fmt) => format = Some(fmt.clone()),
+        Opt::LongWithArg(flag, fmt) if flag == "format" => format = Some(fmt.clone()),
 
         Opt::Short('L') => deref = true,
         Opt::Long(flag) if flag == "dereference" => deref = true,

@@ -2,13 +2,15 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::Connection;
 
+use crate::state::vars::VarStr;
+
 use super::{ShResult, sherr, state};
 
 #[derive(Debug)]
 pub(crate) struct StashedCmd {
-  pub name: Option<String>,
-  pub buffer: String,
-  pub cursor_pos: String, // absolute grapheme pos or row:col
+  pub name: Option<VarStr>,
+  pub buffer: VarStr,
+  pub cursor_pos: VarStr, // absolute grapheme pos or row:col
 }
 
 pub(crate) struct Stash {
@@ -51,7 +53,7 @@ impl Stash {
       .unwrap_or(0i64) as usize
   }
 
-  pub fn list(&self, mut named_only: bool, mut stack_only: bool) -> String {
+  pub fn list(&self, mut named_only: bool, mut stack_only: bool) -> VarStr {
     if named_only && stack_only {
       named_only = false;
       stack_only = false;
@@ -111,7 +113,7 @@ impl Stash {
       );
     }
 
-    output
+    output.into()
   }
   pub fn stash_cmd(&self, cmd: &StashedCmd) -> ShResult<()> {
     if cmd
@@ -170,7 +172,7 @@ impl Stash {
     Ok(Some(cmd))
   }
 
-  pub fn push(&self, name: Option<&String>, buffer: &str, cursor: (usize, usize)) -> ShResult<()> {
+  pub fn push(&self, name: Option<VarStr>, buffer: &str, cursor: (usize, usize)) -> ShResult<()> {
     let (row, col) = cursor;
     if name.as_ref().is_some_and(|n| n.parse::<usize>().is_ok()) {
       return Err(sherr!(ParseErr, "stashed command name cannot be a number"));
@@ -225,7 +227,7 @@ impl Stash {
     let Some(cmd) = stmt
       .query_row([name], |row| {
         Ok(StashedCmd {
-          name: Some(name.to_string()),
+          name: Some(name.into()),
           buffer: row.get(0)?,
           cursor_pos: row.get(1)?,
         })

@@ -107,7 +107,7 @@ impl super::Builtin for GetOpts {
 
     let opts_spec = GetOptsSpec::from_str(&arg_string.0).promote_err(arg_string.1.clone())?;
 
-    let explicit_args: Vec<VarStr> = arg_vec.map(|s| s.0.into()).collect();
+    let explicit_args: Vec<VarStr> = arg_vec.map(|s| s.0).collect();
     if explicit_args.is_empty() {
       let pos_params: Vec<VarStr> = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect());
       getopts_inner(&opts_spec, &opt_var.0, &pos_params, &span)

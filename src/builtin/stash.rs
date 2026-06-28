@@ -1,3 +1,5 @@
+use crate::state::vars::VarStr;
+
 use super::{
   getopt::{Opt, OptSpec},
   match_loop, outln,
@@ -9,7 +11,7 @@ use super::{
 #[derive(Debug, Default)]
 pub(crate) struct StashOpts {
   pub to_save: Vec<StashedCmd>,
-  pub to_delete: Vec<String>,
+  pub to_delete: Vec<VarStr>,
   pub list: bool,
   pub only_named: bool,
   pub only_stack: bool,

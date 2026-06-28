@@ -5,6 +5,8 @@ use std::{
 
 use tempfile::NamedTempFile;
 
+use crate::{state::vars::VarStr, varstr};
+
 use super::{
   super::state::meta::MetaTab,
   Shed,
@@ -16,7 +18,6 @@ use super::{
   match_loop, out,
   readline::{HistEntry, History},
   sherr,
-  shopt_internal::xtrace_print,
   state::{self},
   try_var,
   util::{ShResult, ShResultExt, ordered},
@@ -33,7 +34,7 @@ bitflags! {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RangeArg {
   Number(i32),
-  Prefix(String),
+  Prefix(VarStr),
 }
 
 impl Default for RangeArg {
@@ -52,8 +53,8 @@ enum FixMode {
 
 #[derive(Debug, Default)]
 pub struct FixCmdOpts {
-  editor: Option<String>,
-  replace: Option<(String, String)>,
+  editor: Option<VarStr>,
+  replace: Option<(VarStr, VarStr)>,
   first: Option<RangeArg>,
   last: Option<RangeArg>,
   mode: FixMode,
@@ -61,21 +62,19 @@ pub struct FixCmdOpts {
   reverse: bool,
 }
 
-pub fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(String, Span)>, FixCmdOpts)> {
+pub fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCmdOpts)> {
   let mut args = args.iter();
   args.next(); // skip "fc" command itself
 
-  let mut words: Vec<(String, Span)> = vec![];
+  let mut words: Vec<(VarStr, Span)> = vec![];
   let mut opts = FixCmdOpts::default();
   for tk in args {
     let span = tk.span.clone();
     let expanded = tk.clone().expand()?;
-    for word in expanded.get_words() {
-      words.push((word, span.clone()));
+    for word in expanded.get_words().iter() {
+      words.push((word.clone(), span.clone()));
     }
   }
-
-  xtrace_print(&words);
 
   let mut words_iter = words.into_iter().peekable();
   let mut non_opts = vec![];
@@ -120,7 +119,7 @@ pub fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(String, Span)>, FixCmdOpts)>
 
       if !new.is_empty() {
         if opts.replace.is_none() {
-          opts.replace = Some((old, new));
+          opts.replace = Some((old.into(), new.into()));
         } else {
           non_opts.push((word, span));
         }
@@ -193,12 +192,12 @@ impl super::Builtin for FixCmd {
 }
 
 fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
-  let editor = if let Some(editor) = opts.editor {
-    editor.into()
-  } else if let Some(editor) = try_var!("FCEDIT") {
-    editor
-  } else if let Some(editor) = try_var!("EDITOR") {
-    editor
+  let editor = if let Some(cfg_editor) = opts.editor {
+    cfg_editor
+  } else if let Some(fc_editor) = try_var!("FCEDIT") {
+    fc_editor
+  } else if let Some(env_editor) = try_var!("EDITOR") {
+    env_editor
   } else {
     return Err(sherr!(ExecFail, "No editor specified for fc command"));
   };
@@ -218,17 +217,17 @@ fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
     tmp.write_all(old_cmd.as_bytes())?;
     tmp.flush()?;
 
-    let editor_cmd = format!("{editor} {}", tmp.path().display());
+    let editor_cmd = varstr!("{editor} {}", tmp.path().display());
 
     exec_input(editor_cmd, Some("fc edit".into()))?;
 
     tmp.rewind()?;
     tmp.read_to_string(&mut new_cmd)?;
-    new_cmd = new_cmd.trim().to_string();
+    new_cmd = new_cmd.trim().into();
 
-    should_push = new_cmd != old_cmd;
+    should_push = new_cmd.as_str() != old_cmd.as_str();
 
-    exec_input(new_cmd.clone(), Some("fc re-exec".into()))?;
+    exec_input(new_cmd.clone().into(), Some("fc re-exec".into()))?;
 
     if should_push {
       hist.push(&new_cmd)?;
@@ -248,9 +247,9 @@ fn fc_reexec(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
     let mut command = entry.command;
     let mut should_push = false;
     if let Some((old, new)) = &opts.replace {
-      let new_cmd = command.replace(old, new);
-      if new_cmd != command {
-        command = new_cmd;
+      let new_cmd = command.replace(old.as_str(), new);
+      if new_cmd.as_str() != command.as_str() {
+        command = new_cmd.into();
         should_push = true;
       }
     }
@@ -338,7 +337,7 @@ mod tests {
       .collect()
   }
 
-  fn parse(input: &str) -> (Vec<(String, Span)>, FixCmdOpts) {
+  fn parse(input: &str) -> (Vec<(VarStr, Span)>, FixCmdOpts) {
     let tks = lex_fc(input);
     parse_fc_args(&tks).expect("parse should succeed")
   }
@@ -614,7 +613,7 @@ mod fc_edit_tests {
   }
 
   fn fc_opts(
-    editor: Option<String>,
+    editor: Option<VarStr>,
     first: Option<RangeArg>,
     last: Option<RangeArg>,
   ) -> FixCmdOpts {
@@ -683,7 +682,7 @@ mod fc_edit_tests {
     hist.push(": original").unwrap();
     fc_edit(
       &hist,
-      fc_opts(Some(opts_path.to_string_lossy().to_string()), None, None),
+      fc_opts(Some(opts_path.to_string_lossy().into()), None, None),
     )
     .unwrap();
     // History should now contain the opts-editor's rewrite.
@@ -704,7 +703,7 @@ mod fc_edit_tests {
     let hist = fresh_history();
     hist.push(": original").unwrap();
     fc_edit(&hist, fc_opts(None, None, None)).unwrap();
-    let cmds: Vec<String> = hist_view()
+    let cmds: Vec<VarStr> = hist_view()
       .query_range(1, 100)
       .unwrap()
       .into_iter()
@@ -751,7 +750,7 @@ mod fc_edit_tests {
     fc_edit(
       &hist,
       fc_opts(
-        Some(editor_path.to_string_lossy().to_string()),
+        Some(editor_path.to_string_lossy().into()),
         Some(RangeArg::Number(1)),
         Some(RangeArg::Number(3)),
       ),

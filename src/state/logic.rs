@@ -6,7 +6,7 @@ use std::{
   str::FromStr,
 };
 
-use crate::{HashMap, ShResult, eval::execute::exec_nonint, sherr, util};
+use crate::{HashMap, ShResult, eval::execute::exec_nonint, sherr, state::vars::VarStr, util};
 
 use super::{
   ShErr,
@@ -18,16 +18,16 @@ use super::{
 
 #[derive(Clone, Debug)]
 pub(crate) struct ShAlias {
-  body: String,
+  body: VarStr,
   source: Span,
 }
 
 impl ShAlias {
-  pub fn new(body: String, source: Span) -> Self {
+  pub fn new(body: VarStr, source: Span) -> Self {
     Self { body, source }
   }
-  pub fn body(&self) -> &str {
-    &self.body
+  pub fn body(&self) -> VarStr {
+    self.body.clone()
   }
   pub fn source(&self) -> &Span {
     &self.source
@@ -142,7 +142,7 @@ impl AutoloadSrc {
             .ok_or_else(|| sherr!(NotFound, "Failed to load embedded completion: {s}"))?,
         }
         .data;
-        let text = String::from_utf8_lossy(&body).to_string();
+        let text = String::from_utf8_lossy(&body).into();
         exec_nonint(text, Some(format!("<include>/{s}").into()))
       }
     }
@@ -278,15 +278,15 @@ crate::two_way_display!(AutoCmdKind,
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct AutoCmd {
   kind: AutoCmdKind,
-  command: String,
+  command: VarStr,
 }
 
 impl AutoCmd {
-  pub fn new(kind: AutoCmdKind, command: String) -> Self {
+  pub fn new(kind: AutoCmdKind, command: VarStr) -> Self {
     Self { kind, command }
   }
-  pub fn command(&self) -> &str {
-    &self.command
+  pub fn command(&self) -> VarStr {
+    self.command.clone()
   }
 }
 
@@ -341,7 +341,7 @@ pub(crate) struct LogTab {
   comp_autoloads: HashMap<String, AutoloadSrc>,
   aliases: HashMap<String, ShAlias>,
 
-  traps: HashMap<TrapTarget, String>,
+  traps: HashMap<TrapTarget, VarStr>,
   keymaps: Vec<KeyMap>,
   autocmds: HashMap<AutoCmdKind, Vec<AutoCmd>>,
 }
@@ -413,16 +413,16 @@ impl LogTab {
     self.functions.insert(name.into(), src);
     self.invalidate_internal_cache();
   }
-  pub fn insert_trap(&mut self, target: TrapTarget, command: String) {
+  pub fn insert_trap(&mut self, target: TrapTarget, command: VarStr) {
     self.traps.insert(target, command);
   }
-  pub fn get_trap(&self, target: TrapTarget) -> Option<String> {
+  pub fn get_trap(&self, target: TrapTarget) -> Option<VarStr> {
     self.traps.get(&target).cloned()
   }
   pub fn remove_trap(&mut self, target: TrapTarget) {
     self.traps.remove(&target);
   }
-  pub fn traps(&self) -> &HashMap<TrapTarget, String> {
+  pub fn traps(&self) -> &HashMap<TrapTarget, VarStr> {
     &self.traps
   }
   pub fn has_command_func(&self, name: &str) -> bool {

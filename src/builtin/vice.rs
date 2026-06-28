@@ -7,6 +7,7 @@ use crate::{
   expand, expand_keymap, outln,
   readline::EditorCore,
   sherr,
+  state::vars::VarStr,
   util::{self, ShResultExt, with_status},
 };
 
@@ -15,10 +16,10 @@ struct ViceProg {
   sep: Option<Vec<KeyEvent>>,
   keep_mode: bool,
   quoted: bool,
-  delim: String,
+  delim: VarStr,
   inplace: bool,
   lines: bool,
-  backup_ext: Option<String>,
+  backup_ext: Option<VarStr>,
 }
 
 #[derive(Clone)]
@@ -47,7 +48,7 @@ impl Vice {
       sep: None,
       keep_mode: false,
       quoted: false,
-      delim: " ".to_string(),
+      delim: " ".into(),
       inplace: false,
       lines: false,
       backup_ext: None,
@@ -116,7 +117,7 @@ impl Vice {
           "in-place" => prog.inplace = true,
           "lines" => prog.lines = true,
           "backup" if prog.backup_ext.is_none() => {
-            prog.backup_ext = Some(".bak".to_string());
+            prog.backup_ext = Some(".bak".into());
           }
           _ => {}
         },
@@ -287,7 +288,7 @@ impl Vice {
   fn write_inplace(
     file: &str,
     output: &str,
-    backup_ext: Option<&String>,
+    backup_ext: Option<&VarStr>,
     span: &Span,
   ) -> ShResult<()> {
     if let Some(ext) = backup_ext {

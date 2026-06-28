@@ -1,4 +1,6 @@
-use std::{iter::Peekable, str::Chars};
+use std::{fmt::Display, iter::Peekable, str::Chars};
+
+use crate::{state::vars::VarStr, varstr};
 
 use super::{
   error::ShResult,
@@ -6,6 +8,16 @@ use super::{
   expand::{read_hex, read_octal, read_stty_escape},
   match_loop, sherr,
 };
+
+pub(crate) trait VarStrDisplay {
+  fn to_var_str(&self) -> VarStr;
+}
+
+impl<T: Display + ?Sized> VarStrDisplay for T {
+  fn to_var_str(&self) -> VarStr {
+    varstr!("{self}")
+  }
+}
 
 /// Used to track whether the lexer is currently inside a quote, and if so, which type
 #[derive(Default, Debug, PartialEq, Clone)]

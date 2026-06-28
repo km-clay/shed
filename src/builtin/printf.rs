@@ -698,7 +698,7 @@ fn strip_trailing_zeros(s: &str) -> String {
 pub(super) struct Printf;
 impl super::Builtin for Printf {
   fn execute(&self, args: super::BuiltinArgs) -> crate::ShResult<()> {
-    let mut argv = args.argv.into_iter().map(|(s, _)| s);
+    let mut argv = args.argv.into_iter().map(|(s, _)| s.to_string());
     let format_str = argv
       .next()
       .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;

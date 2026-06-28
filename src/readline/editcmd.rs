@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use bitflags::bitflags;
 
-use crate::verb;
+use crate::{state::vars::VarStr, verb};
 
 use super::{
   editmode::ExNode,
@@ -299,12 +299,12 @@ pub enum StashListArg {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum StashArgs {
-  Push(Option<String>),
-  Pop(Option<String>),
-  Drop(Option<String>),
-  Apply(Option<String>),
-  Insert(Option<String>),
-  Swap(Option<String>),
+  Push(Option<VarStr>),
+  Pop(Option<VarStr>),
+  Drop(Option<VarStr>),
+  Apply(Option<VarStr>),
+  Insert(Option<VarStr>),
+  Swap(Option<VarStr>),
   List(Option<StashListArg>),
 }
 
@@ -362,7 +362,7 @@ pub enum Verb {
   SwapVisualAnchor,
   JoinLines,
   InsertChar(char),
-  Insert(String),
+  Insert(VarStr),
   Indent,
   Dedent,
   Equalize,
@@ -442,8 +442,8 @@ pub enum LineAddr {
   Current,
   Last,
   Offset(isize),
-  Pattern(String),
-  PatternRev(String),
+  Pattern(VarStr),
+  PatternRev(VarStr),
   Mark(char),
 }
 
@@ -475,7 +475,7 @@ pub enum Motion {
   CharRange(Pos, Pos),
   LineRange(LineAddr, LineAddr),
   Line(LineAddr),
-  Search(String, Direction),
+  Search(VarStr, Direction),
   RepeatSearch,
   RepeatSearchRev,
   BlockRange(Pos, Pos),
@@ -593,14 +593,14 @@ pub enum To {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ReadSrc {
   File(PathBuf),
-  Cmd(String),
+  Cmd(VarStr),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum WriteDest {
   File(Option<PathBuf>),
   FileAppend(Option<PathBuf>),
-  Cmd(String),
+  Cmd(VarStr),
 }
 
 #[cfg(test)]

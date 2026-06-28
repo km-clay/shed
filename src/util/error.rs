@@ -6,7 +6,9 @@ use std::cell::RefCell;
 use std::fmt::{self, Display};
 use std::io::Write;
 
-use crate::{HashMap, shopt};
+use crate::procio::bytes_to_string;
+use crate::state::vars::VarStr;
+use crate::{HashMap, shopt, varstr};
 
 use super::{
   FdWriter,
@@ -83,7 +85,7 @@ pub(crate) fn last_color() -> Color {
   COLOR_RNG.with(|rng| rng.borrow_mut().last_color())
 }
 
-pub fn get_context(msg: String, span: Span) -> LabelBuilder {
+pub fn get_context(msg: VarStr, span: Span) -> LabelBuilder {
   let color = last_color();
   LabelBuilder::new(span.clone())
     .with_color(color)
@@ -176,7 +178,7 @@ impl<T> ShResultExt for Result<T, ShErr> {
 #[derive(Debug, Clone)]
 pub(crate) struct LabelBuilder {
   span: Span,
-  message: Option<String>,
+  message: Option<VarStr>,
   color: Option<Color>,
 }
 
@@ -188,8 +190,8 @@ impl LabelBuilder {
       color: None,
     }
   }
-  pub fn with_message(mut self, message: impl Into<String>) -> Self {
-    self.message = Some(message.into());
+  pub fn with_message(mut self, message: VarStr) -> Self {
+    self.message = Some(message);
     self
   }
   pub fn with_color(mut self, color: Color) -> Self {
@@ -220,7 +222,7 @@ pub(crate) struct ShErr {
   kind: ShErrKind,
   src_span: Option<Span>,
   labels: Vec<LabelBuilder>,
-  notes: Vec<String>,
+  notes: Vec<VarStr>,
 
   /// If we propagate through a redirect boundary, we take ownership of
   /// the RedirGuard(s) so that redirections stay alive until the error
@@ -239,23 +241,26 @@ impl ShErr {
       io_guards: vec![],
     }
   }
-  pub fn simple(kind: ShErrKind, msg: impl Into<String>) -> Self {
+  pub fn simple(kind: ShErrKind, msg: VarStr) -> Self {
     Self {
       kind,
       src_span: None,
       labels: vec![],
-      notes: vec![msg.into()],
+      notes: vec![msg],
       io_guards: vec![],
     }
   }
   pub fn loop_break(code: i32) -> Self {
     Self::simple(
       ShErrKind::LoopContinue(code),
-      "'continue' found outside of loop",
+      varstr!("'continue' found outside of loop"),
     )
   }
   pub fn loop_continue(code: i32) -> Self {
-    Self::simple(ShErrKind::LoopBreak(code), "'break' found outside of loop")
+    Self::simple(
+      ShErrKind::LoopBreak(code),
+      varstr!("'break' found outside of loop"),
+    )
   }
   pub fn is_flow_control(&self) -> bool {
     self.kind.is_flow_control()
@@ -328,16 +333,14 @@ impl ShErr {
     }
     self
   }
-  pub fn at(kind: ShErrKind, span: Span, msg: impl Into<String>) -> Self {
-    let msg: String = msg.into();
+  pub fn at(kind: ShErrKind, span: Span, msg: VarStr) -> Self {
     let color = last_color();
     let label = LabelBuilder::new(span.clone())
       .with_message(msg)
       .with_color(color);
     Self::new(kind, span.clone()).with_label(label)
   }
-  pub fn labeled(self, span: Span, msg: impl Into<String>) -> Self {
-    let msg: String = msg.into();
+  pub fn labeled(self, span: Span, msg: VarStr) -> Self {
     let color = last_color();
     let label = LabelBuilder::new(span.clone())
       .with_message(msg)
@@ -374,8 +377,8 @@ impl ShErr {
     self.labels.extend(ctx.cloned());
     self
   }
-  pub fn with_note(mut self, note: impl Into<String>) -> Self {
-    self.notes.push(note.into());
+  pub fn with_note(mut self, note: VarStr) -> Self {
+    self.notes.push(note);
     self
   }
   pub fn src_span(&self) -> Option<&Span> {
@@ -405,19 +408,19 @@ impl ShErr {
 
     Some(report.finish())
   }
-  fn collect_sources(&self) -> HashMap<SpanSource, String> {
+  fn collect_sources(&self) -> HashMap<SpanSource, VarStr> {
     let mut source_map = HashMap::default();
     if let Some(span) = &self.src_span {
       let src = span.span_source().clone();
       source_map
         .entry(src.clone())
-        .or_insert_with(|| src.content().to_string());
+        .or_insert_with(|| (*src.content()).into());
     }
     for span in self.labels.iter().map(|label| label.span()) {
       let src = span.span_source().clone();
       source_map
         .entry(src.clone())
-        .or_insert_with(|| src.content().to_string());
+        .or_insert_with(|| (*src.content()).into());
     }
     source_map
   }
@@ -464,8 +467,8 @@ impl Display for ShErr {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let mut buf = vec![];
     self.print_error_internal(&mut buf);
-    let buf = String::from_utf8_lossy(&buf);
-    write!(f, "{buf}")
+    let out = bytes_to_string(buf);
+    write!(f, "{out}")
   }
 }
 
@@ -477,26 +480,26 @@ impl From<std::fmt::Error> for ShErr {
 
 impl From<rusqlite::Error> for ShErr {
   fn from(value: rusqlite::Error) -> Self {
-    ShErr::simple(ShErrKind::HistoryReadErr, value.to_string())
+    ShErr::simple(ShErrKind::HistoryReadErr, varstr!("{value}"))
   }
 }
 
 impl From<std::io::Error> for ShErr {
   fn from(e: std::io::Error) -> Self {
     let msg = std::io::Error::last_os_error();
-    ShErr::simple(ShErrKind::IoErr(e.kind()), msg.to_string())
+    ShErr::simple(ShErrKind::IoErr(e.kind()), varstr!("{msg}"))
   }
 }
 
 impl From<std::env::VarError> for ShErr {
   fn from(value: std::env::VarError) -> Self {
-    ShErr::simple(ShErrKind::InternalErr, value.to_string())
+    ShErr::simple(ShErrKind::InternalErr, varstr!("{value}"))
   }
 }
 
 impl From<Errno> for ShErr {
   fn from(value: Errno) -> Self {
-    ShErr::simple(ShErrKind::Errno(value), value.to_string())
+    ShErr::simple(ShErrKind::Errno(value), varstr!("{value}"))
   }
 }
 
@@ -523,7 +526,7 @@ pub enum ShErrKind {
   FuncReturn(i32),
   LoopContinue(i32),
   LoopBreak(i32),
-  Raised(Option<String>, i32),
+  Raised(Option<VarStr>, i32),
   ErrInterrupt, // used for set -e
   Interrupt,    // used for Ctrl+C on loops
 }

@@ -342,7 +342,7 @@ impl super::Builtin for Set {
         let cur_scope = v.cur_scope_mut();
         cur_scope.clear_args();
         for arg in pos_args {
-          cur_scope.bpush_arg(arg.into());
+          cur_scope.bpush_arg(arg);
         }
       });
     }

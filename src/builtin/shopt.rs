@@ -1,3 +1,5 @@
+use crate::{state::vars::VarStr, varstr};
+
 use super::{
   super::state::shopt::ShOpts,
   Shed,
@@ -31,18 +33,21 @@ impl super::Builtin for Shopt {
       // Split into key + optional value so the deprecation check works
       // for both `shopt key` and `shopt key=value`.
       let (key, value) = match arg.split_once('=') {
-        Some((k, v)) => (k.to_string(), Some(v.to_string())),
+        Some((k, v)) => (k.into(), Some(VarStr::from(v))),
         None => (arg.clone(), None),
       };
 
-      if let Some((_, new_key)) = DEPRECATED_SHOPTS.iter().find(|(old, _)| *old == key) {
+      if let Some((_, new_key)) = DEPRECATED_SHOPTS
+        .iter()
+        .find(|(old, _)| *old == key.as_str())
+      {
         sherr!(DeprecationWarning @ span.clone(),
           "shopt: '{key}' has been renamed to '{new_key}'"
         )
         .print_error();
         arg = match value {
-          Some(v) => format!("{new_key}={v}"),
-          None => (*new_key).to_string(),
+          Some(v) => varstr!("{new_key}={v}"),
+          None => (*new_key).into(),
         };
       }
 

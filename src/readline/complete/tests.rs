@@ -1552,7 +1552,7 @@ mod bash_comp_spec_tests {
       .jobs(true)
       .aliases(true);
 
-    assert_eq!(spec.function, Some("complete_foo".to_string()));
+    assert_eq!(spec.function, Some("complete_foo".into()));
     assert_eq!(spec.wordlist, Some(vec!["a".into(), "b".into()]));
     assert_eq!(spec.source, "complete -F complete_foo cmd");
     assert!(spec.targets.contains(CompFlags::FILES));

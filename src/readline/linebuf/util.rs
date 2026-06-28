@@ -7,6 +7,7 @@ use crate::readline::linebuf::HighlightCache;
 use crate::readline::linebuf::edit::{
   depth_levels_from_tokens, depth_levels_via_ctx, parse_failed_strict,
 };
+use crate::state::vars::VarStr;
 
 use super::{
   CharClass, DEFAULT_VIEWPORT_HEIGHT, Edit, Grapheme, Line, Lines, MotionKind, Pos, SelectMode,
@@ -1476,7 +1477,7 @@ impl super::LineBuf {
   pub fn clear_pending_search(&mut self) {
     self.pending_search = None;
   }
-  pub fn update_pending_search(&mut self, new: Option<String>) {
+  pub fn update_pending_search(&mut self, new: Option<VarStr>) {
     let Some(new) = new else { return };
     self.pending_search = (!new.is_empty()).then_some(new);
   }

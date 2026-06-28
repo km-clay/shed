@@ -72,7 +72,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       let redir: RedirSet = specs.into();
       let _guard = redir.apply()?;
 
-      if let Err(e) = exec_nonint(raw.to_string(), Some("process_sub".into())) {
+      if let Err(e) = exec_nonint(raw.into(), Some("process_sub".into())) {
         e.print_error();
         unsafe { nix::libc::_exit(1) };
       }
@@ -151,7 +151,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
       let redir: RedirSet = specs.into();
       let _redir_guard = redir.apply()?;
 
-      if let Err(e) = exec_input(raw.to_string(), Some("command_sub".into())) {
+      if let Err(e) = exec_input(raw.into(), Some("command_sub".into())) {
         if let ShErrKind::CleanExit(code) = e.kind() {
           std::process::exit(*code);
         }

@@ -4,7 +4,7 @@ use crate::{
   ShResult, Shed,
   builtin::getopt::OptSpec,
   expand, match_loop, out, outln, procio,
-  state::vars::{VarFlags, VarKind},
+  state::vars::{VarFlags, VarKind, VarStr},
   util::{expand_ansi_c, with_status},
 };
 
@@ -78,8 +78,8 @@ fn quote_var(name: &str) -> Option<String> {
 }
 
 enum UnquoteTarget {
-  Array(String),
-  Var(String),
+  Array(VarStr),
+  Var(VarStr),
 }
 
 pub(super) struct Unquote;
@@ -97,8 +97,9 @@ impl super::Builtin for Unquote {
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     log::debug!("entered unquote execute()");
-    let input = self
+    let input: VarStr = self
       .get_input_str(&mut args)
+      .map(|s| s.into())
       .unwrap_or_else(|| super::join_raw_args(args.argv).0);
 
     let mut target = None;

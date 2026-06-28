@@ -7,7 +7,7 @@ use nix::{
   unistd::{self, read},
 };
 
-use crate::{builtin::quote, match_loop};
+use crate::{builtin::quote, match_loop, state::vars::VarStr};
 
 use super::{
   super::state::terminal::Terminal,
@@ -444,7 +444,7 @@ fn glue_zero_width(fields: Vec<String>) -> Vec<String> {
   out
 }
 
-fn field_split_vars(input: &str, vars: &[(String, Span)]) -> ShResult<()> {
+fn field_split_vars(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()> {
   if vars.is_empty() {
     Shed::vars_mut(|v| v.set_var("REPLY", VarKind::string(input), VarFlags::empty()))?;
     return Ok(());
@@ -472,7 +472,7 @@ fn field_split_arr(input: &str, arr_name: &str) -> ShResult<()> {
   Shed::vars_mut(|v| v.set_var(arr_name, VarKind::arr(fields), VarFlags::empty()))
 }
 
-fn field_split_vars_quoted(input: &str, vars: &[(String, Span)]) -> ShResult<()> {
+fn field_split_vars_quoted(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()> {
   let fields = glue_zero_width(quote::unquote_raw(input)?);
 
   if vars.is_empty() {

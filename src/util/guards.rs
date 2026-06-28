@@ -1,7 +1,7 @@
 use nix::sys::stat;
 use scopeguard::guard;
 
-use crate::{HashSet, try_var, util, var};
+use crate::{HashSet, state::vars::VarStr, try_var, util, var};
 
 use super::{
   super::state::scopes::ScopeStack,
@@ -36,7 +36,7 @@ fn guard_drop(_: ()) {
 /// so that they are dropped on return.
 ///
 /// Additionally, stuff like 'umask' and 'PWD' are restored to their previous values on return
-pub fn isolation_guard(args: Option<Vec<(String, Span)>>) -> impl Drop {
+pub fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let ceiling_guard = scope_ceiling_guard(args);
   let cwd_guard = cwd_guard();
   let umask_guard = umask_guard();
@@ -51,13 +51,13 @@ pub fn isolation_guard(args: Option<Vec<(String, Span)>>) -> impl Drop {
 ///
 /// The `local` builtin uses this scope to store its variables.
 /// The `defer` builtin registers commands to run when this drops.
-pub fn scope_guard(args: Option<Vec<(String, Span)>>) -> impl Drop {
+pub fn scope_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let arg_vec = args.map(|a| a.into_iter().map(|(s, _)| s).collect::<Vec<_>>());
   Shed::vars_mut(|v| v.descend(arg_vec));
   guard((), guard_drop)
 }
 
-pub fn scope_ceiling_guard(args: Option<Vec<(String, Span)>>) -> impl Drop {
+pub fn scope_ceiling_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let arg_vec = args.map(|a| a.into_iter().map(|(s, _)| s).collect::<Vec<_>>());
   Shed::vars_mut(|v| v.descend_with_ceiling(arg_vec));
   guard((), guard_drop)
@@ -101,8 +101,8 @@ pub fn shared_scope_guard() -> impl Drop {
 // ============================================================================
 
 pub fn var_ctx_guard(
-  vars: HashSet<String>,
-) -> scopeguard::ScopeGuard<HashSet<String>, impl FnOnce(HashSet<String>)> {
+  vars: HashSet<VarStr>,
+) -> scopeguard::ScopeGuard<HashSet<VarStr>, impl FnOnce(HashSet<VarStr>)> {
   guard(vars, |vars| {
     Shed::vars_mut(|v| {
       for var in &vars {

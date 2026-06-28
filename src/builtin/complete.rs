@@ -1,6 +1,9 @@
 use itertools::{EitherOrBoth, Itertools};
 
-use crate::state::vars::VarStr;
+use crate::{
+  state::vars::{VarStr, VarStrSliceExt},
+  varstr,
+};
 
 use super::{
   Dispatcher, NdRule, Node, ShResult,
@@ -122,9 +125,9 @@ impl super::Builtin for CompGen {
     };
     let src = argv
       .iter()
-      .map(|tk| tk.clone().expand().map(|tk| tk.get_words().join(" ")))
-      .collect::<ShResult<Vec<String>>>()?
-      .join(" ");
+      .map(|tk| tk.clone().expand().map(|tk| tk.get_words().join_with(" ")))
+      .collect::<ShResult<Vec<VarStr>>>()?
+      .join_with(" ");
 
     let (argv, opts) = get_opts_from_tokens_raw(argv, &self.opts())?;
 
@@ -212,7 +215,7 @@ impl super::Builtin for Compadd {
     }
 
     let descriptions = if let Some(desc) = desc {
-      vec![VarStr::from(desc); candidates.len()]
+      vec![desc; candidates.len()]
     } else if let Some(desc_arr) = desc_arr {
       Shed::vars(|v| v.get_arr_elems(&desc_arr))
     } else {
@@ -223,7 +226,7 @@ impl super::Builtin for Compadd {
       .into_iter()
       .zip_longest(descriptions)
       .filter_map(|pair| match pair {
-        EitherOrBoth::Both(cand, desc) => Some(cand.with_desc(desc.to_string())),
+        EitherOrBoth::Both(cand, desc) => Some(cand.with_desc(desc)),
         EitherOrBoth::Left(cand) => Some(cand),
         EitherOrBoth::Right(_) => None,
       })
@@ -234,7 +237,7 @@ impl super::Builtin for Compadd {
       && let VarKind::AssocArr(arr) = assoc_arr.kind()
     {
       for (cand, desc) in arr {
-        let cand = make_candidate(cand.as_str()).with_desc(desc.to_string());
+        let cand = make_candidate(cand.as_str()).with_desc(desc.clone());
 
         described.push(cand);
       }
@@ -250,18 +253,18 @@ impl super::Builtin for Compadd {
   }
 }
 
-fn build_source(opts: &[Opt], argv: &[(String, Span)]) -> String {
-  let mut parts: Vec<String> = vec!["complete".into()];
+fn build_source(opts: &[Opt], argv: &[(VarStr, Span)]) -> VarStr {
+  let mut parts: Vec<VarStr> = vec!["complete".into()];
   for opt in opts {
     match opt {
-      Opt::Short(c) => parts.push(format!("-{c}")),
-      Opt::Long(s) => parts.push(format!("--{s}")),
+      Opt::Short(c) => parts.push(varstr!("-{c}")),
+      Opt::Long(s) => parts.push(varstr!("--{s}")),
       Opt::ShortWithArg(c, a) => {
-        parts.push(format!("-{c}"));
+        parts.push(varstr!("-{c}"));
         parts.push(a.clone());
       }
       Opt::LongWithArg(s, a) => {
-        parts.push(format!("--{s}"));
+        parts.push(varstr!("--{s}"));
         parts.push(a.clone());
       }
       _ => {}
@@ -270,7 +273,7 @@ fn build_source(opts: &[Opt], argv: &[(String, Span)]) -> String {
   for (s, _) in argv {
     parts.push(s.clone());
   }
-  parts.join(" ")
+  parts.join_with(" ")
 }
 
 pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
@@ -282,12 +285,7 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
         comp_opts.func = Some(func);
       }
       Opt::ShortWithArg('W', wordlist) => {
-        comp_opts.wordlist = Some(
-          wordlist
-            .split_whitespace()
-            .map(ToString::to_string)
-            .collect(),
-        );
+        comp_opts.wordlist = Some(wordlist.split_whitespace().map(VarStr::from).collect());
       }
       Opt::ShortWithArg('A', action) => {
         comp_opts.action = Some(action);
