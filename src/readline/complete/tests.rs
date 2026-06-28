@@ -1674,4 +1674,33 @@ mod bash_comp_spec_tests {
       );
     }
   }
+
+  // ===================== redirect targets (issue #103) =====================
+
+  #[test]
+  fn redirect_target_completes_files() {
+    use crate::readline::context::get_context_tokens;
+    // The target of a redirect always completes as a file path, even when the
+    // command (`shopt` here) has its own argument completion spec.
+    for line in ["shopt > foo", "shopt >> foo", "shopt 2> foo", "echo < foo"] {
+      let tks = get_context_tokens(line);
+      let (strat, ..) = CompStrat::resolve(&tks, line.len());
+      assert!(
+        matches!(strat, CompStrat::Files { .. }),
+        "redirect target in {line:?} should complete files, got {strat:?}"
+      );
+    }
+  }
+
+  #[test]
+  fn non_redirect_argument_unaffected() {
+    use crate::readline::context::get_context_tokens;
+    let line = "shopt foo";
+    let tks = get_context_tokens(line);
+    let (strat, ..) = CompStrat::resolve(&tks, line.len());
+    assert!(
+      matches!(strat, CompStrat::Argument { .. }),
+      "a plain argument should stay an Argument, got {strat:?}"
+    );
+  }
 }

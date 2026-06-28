@@ -109,6 +109,32 @@ enum CompStrat {
 
 impl CompStrat {
   pub fn resolve(tks: &[CtxTk], cursor_pos: usize) -> (Self, Span, usize) {
+    // first check to see if it is a redirect target
+    // if it is, we complete files.
+    if let Some((idx, tok)) = tks
+      .iter()
+      .enumerate()
+      .find(|(_, t)| !t.get_branch(cursor_pos).is_empty())
+    {
+      let after_redirect = tks[..idx]
+        .iter()
+        .rev()
+        .find(|t| !matches!(t.class(), CtxTkRule::Separator))
+        .is_some_and(|t| matches!(t.class(), CtxTkRule::Redirect));
+
+      if after_redirect {
+        return (
+          Self::Files {
+            path: tok.span().as_str().to_string(),
+          },
+          tok.span().clone(),
+          tok
+            .relative_cursor_pos(cursor_pos)
+            .unwrap_or(tok.span().as_str().len()),
+        );
+      }
+    }
+
     // Cursor inside a token's span, complete what's currently being typed.
     let branch = tks.iter().find_map(|t| {
       let branch = t.get_branch(cursor_pos);
