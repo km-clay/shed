@@ -1839,16 +1839,20 @@ SHOPT                                            *builtin-shopt* *shopt*
   Core options (`core.*`) ~
 
     `autocd`                navigate to a dir by entering its name
-    `auto_hist`             automatically save commands to history
     `bell_enabled`          allow the terminal bell
     `compact_errors`        collapse error stack traces to a single label
     `dotglob`               include dotfiles in glob patterns
-    `hist_ignore_dupes`     skip duplicate consecutive history entries
     `interactive_comments`  allow `#` comments in interactive input
-    `max_hist`              max history entries (-1 for unlimited)
     `max_read_limit`        byte cap for |command-sub|(script-command-sub) & |pipeline|(script-pipelines) output
     `max_recurse_depth`     max recursive function call depth
     `xpg_echo`              make `echo` expand escapes by default
+
+  History options (`history.*`) ~
+
+    `auto_save`      automatically save commands to history
+    `ignore_dupes`   skip duplicate consecutive history entries
+    `max_entries`    max history entries (-1 for unlimited)
+    `enable_concat`  Shift/Ctrl+Up/Down history concatenation (see |tips|(tips-hist-cat))
 
   Line editor options (`line.*`) ~
 
@@ -1866,7 +1870,6 @@ SHOPT                                            *builtin-shopt* *shopt*
     `comp_limit`              max completion candidates shown
     `completion_ignore_case`  case-insensitive tab completion
     `expand_aliases`          fish-style alias expansion on the prompt
-    `hist_cat`                Shift/Ctrl+Up/Down history concatenation (see |tips|(tips-hist-cat))
     `leader`                  leader key sequence for keymap bindings
     `idle_timeout`            idle seconds before firing `on-idle-timeout` autocmds (0=off)
     `substitute`              run var/cmd/arith expansion on PS1 after escapes
@@ -1936,7 +1939,7 @@ SHOPT                                            *builtin-shopt* *shopt*
       `shopt core`                               list core options
       `shopt core.dotglob`                       print current value
       `shopt core.dotglob=true`                  enable dotglob
-      `shopt core.max_hist=5000`                 set max history
+      `shopt history.max_entries=5000`           set max history
       `shopt highlight.valid_command="bold green"`  customize colors
 
 ==============================================================================

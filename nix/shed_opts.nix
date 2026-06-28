@@ -226,25 +226,10 @@
                   default = false;
                   description = "Whether to automatically change into directories when they are entered as commands";
                 };
-                hist_ignore_dupes = lib.mkOption {
-                  type = lib.types.bool;
-                  default = false;
-                  description = "Whether to ignore duplicate entries in the command history";
-                };
-                max_hist = lib.mkOption {
-                  type = lib.types.int;
-                  default = 10000;
-                  description = "The maximum number of entries to keep in the command history";
-                };
                 interactive_comments = lib.mkOption {
                   type = lib.types.bool;
                   default = true;
                   description = "Whether to allow comments in interactive mode";
-                };
-                auto_hist = lib.mkOption {
-                  type = lib.types.bool;
-                  default = true;
-                  description = "Whether to automatically add commands to the history as they are executed";
                 };
                 bell_enabled = lib.mkOption {
                   type = lib.types.bool;
@@ -280,6 +265,34 @@
             };
             default = {};
             description = "Core settings (i.e. the 'shopt core.*' options)";
+          };
+          history = lib.mkOption {
+            type = lib.types.submodule {
+              options = {
+                auto_save = lib.mkOption {
+                  type = lib.types.bool;
+                  default = true;
+                  description = "Whether to automatically save commands to the command history as they are executed";
+                };
+                ignore_dupes = lib.mkOption {
+                  type = lib.types.bool;
+                  default = true;
+                  description = "Whether to ignore consecutive duplicate entries in the command history";
+                };
+                max_entries = lib.mkOption {
+                  type = lib.types.int;
+                  default = -1;
+                  description = "The maximum number of entries to keep in the command history (-1 for unlimited)";
+                };
+                enable_concat = lib.mkOption {
+                  type = lib.types.bool;
+                  default = true;
+                  description = "Whether to enable history concatenation. Ctrl/Shift+Up/Down joins sequential commands in history.";
+                };
+              };
+            };
+            default = {};
+            description = "Settings related to the command history (i.e. the 'shopt history.*' options)";
           };
           set = lib.mkOption {
             type = lib.types.submodule {
@@ -401,11 +414,6 @@
                   type = lib.types.enum ["grid" "fuzzy"];
                   default = "grid";
                   description = "Choose how completion candidates are presented";
-                };
-                hist_cat = lib.mkOption {
-                  type = lib.types.bool;
-                  default = true;
-                  description = "Whether to enable the history concatenation feature. Ctrl/Shift+Up/Down joins sequential commands in history.";
                 };
               };
             };

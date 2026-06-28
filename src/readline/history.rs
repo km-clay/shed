@@ -332,7 +332,7 @@ impl History {
 
     {
       let conn = self.lock();
-      if shopt!(core.hist_ignore_dupes) {
+      if shopt!(history.ignore_dupes) {
         let last: Option<String> = conn
           .query_row(
             &format!("SELECT command FROM {table} ORDER BY id DESC LIMIT 1"),

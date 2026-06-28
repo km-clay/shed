@@ -1,6 +1,8 @@
 #![expect(clippy::struct_excessive_bools, clippy::trivially_copy_pass_by_ref)]
 
-use std::{fmt::Display, ops::Deref, str::FromStr, time::Duration};
+use std::{
+  cell::RefCell, collections::HashSet, fmt::Display, ops::Deref, str::FromStr, time::Duration,
+};
 
 use nix::unistd::write;
 
@@ -18,7 +20,7 @@ use super::{
 use crate::{
   shopt,
   state::vars::{VarStr, VarStrSliceExt},
-  util,
+  system_msg, util,
 };
 
 pub(crate) fn xtrace_print(argv: &[(VarStr, Span)]) {
@@ -32,6 +34,36 @@ pub(crate) fn xtrace_print(argv: &[(VarStr, Span)]) {
     log::debug!("xtrace: {output:?}");
     write(stderr, output.trim().as_bytes()).ok();
     write(stderr, b"\n").ok();
+  }
+}
+
+const SHOPT_ALIASES: &[(&str, &str)] = &[
+  ("core.auto_hist", "history.auto_save"),
+  ("core.max_hist", "history.max_entries"),
+  ("core.hist_ignore_dupes", "history.ignore_dupes"),
+  ("prompt.hist_cat", "history.enable_concat"),
+];
+
+thread_local! {
+  static WARNED_ALIASES: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
+}
+
+fn warn_once(old: &'static str, new: &'static str) {
+  WARNED_ALIASES.with(|warned| {
+    let mut warned = warned.borrow_mut();
+    if !warned.contains(old) {
+      system_msg!("shopt: '{}' is deprecated; use '{}' instead", old, new);
+      warned.insert(old);
+    }
+  });
+}
+
+fn resolve_alias(path: &str) -> &str {
+  if let Some((old, new)) = SHOPT_ALIASES.iter().find(|(old, _)| *old == path) {
+    warn_once(old, new);
+    new
+  } else {
+    path
   }
 }
 
@@ -63,6 +95,7 @@ two_way_display! {ShedBellStyle,
 #[derive(Clone, Debug)]
 pub(crate) struct ShOpts {
   pub core: ShOptCore,
+  pub history: ShOptHist,
   pub line: ShOptLine,
   pub set: ShOptSet,
   pub prompt: ShOptPrompt,
@@ -73,6 +106,7 @@ pub(crate) struct ShOpts {
 impl Default for ShOpts {
   fn default() -> Self {
     let core = ShOptCore::default();
+    let history = ShOptHist::default();
     let line = ShOptLine::default();
     let set = ShOptSet::default();
     let prompt = ShOptPrompt::default();
@@ -81,6 +115,7 @@ impl Default for ShOpts {
 
     Self {
       core,
+      history,
       line,
       set,
       prompt,
@@ -119,9 +154,10 @@ impl ShOpts {
         .collect()
     };
 
-    let group_entries: [(&'static str, RcEntries); 6] = match source {
+    let group_entries: [(&'static str, RcEntries); 7] = match source {
       ShoptSource::Defaults => [
         ("Core", to_var_strs(ShOptCore::rc_entries_default())),
+        ("History", to_var_strs(ShOptHist::rc_entries_default())),
         ("Line Editor", to_var_strs(ShOptLine::rc_entries_default())),
         ("Prompt", to_var_strs(ShOptPrompt::rc_entries_default())),
         (
@@ -139,6 +175,7 @@ impl ShOpts {
       ],
       ShoptSource::Current => [
         ("Core", to_var_strs(self.core.rc_entries_current())),
+        ("History", to_var_strs(self.history.rc_entries_current())),
         ("Line Editor", to_var_strs(self.line.rc_entries_current())),
         ("Prompt", to_var_strs(self.prompt.rc_entries_current())),
         (
@@ -178,6 +215,7 @@ impl ShOpts {
   pub fn display_opts(&mut self) -> ShResult<String> {
     let output = [
       self.query("core")?.unwrap_or_default().clone(),
+      self.query("history")?.unwrap_or_default().clone(),
       self.query("line")?.unwrap_or_default().clone(),
       self.query("set")?.unwrap_or_default().clone(),
       self.query("prompt")?.unwrap_or_default().clone(),
@@ -188,7 +226,9 @@ impl ShOpts {
     Ok(output.join("\n"))
   }
 
-  pub fn set(&mut self, opt: &str, val: &str) -> ShResult<()> {
+  pub fn set(&mut self, mut opt: &str, val: &str) -> ShResult<()> {
+    opt = resolve_alias(opt);
+
     let mut query = opt.split('.');
     let Some(key) = query.next() else {
       return Err(sherr!(SyntaxErr, "shopt: No option given",));
@@ -198,6 +238,7 @@ impl ShOpts {
 
     match key {
       "core" => self.core.set(&remainder, val)?,
+      "history" => self.history.set(&remainder, val)?,
       "line" => self.line.set(&remainder, val)?,
       "set" => self.set.set(&remainder, val)?,
       "prompt" => self.prompt.set(&remainder, val)?,
@@ -210,7 +251,9 @@ impl ShOpts {
     Ok(())
   }
 
-  pub fn get(&self, query: &str) -> ShResult<Option<String>> {
+  pub fn get(&self, mut query: &str) -> ShResult<Option<String>> {
+    query = resolve_alias(query);
+
     // TODO: handle escapes?
     let mut query = query.split('.');
     let Some(key) = query.next() else {
@@ -220,6 +263,7 @@ impl ShOpts {
 
     match key {
       "core" => self.core.get(&remainder),
+      "history" => self.history.get(&remainder),
       "line" => self.line.get(&remainder),
       "set" => self.set.get(&remainder),
       "prompt" => self.prompt.get(&remainder),
@@ -374,22 +418,9 @@ pub(crate) struct ShOptCore {
   #[default(false)]
   pub autocd: bool,
 
-  /// Ignore consecutive duplicate command history entries
-  #[default(true)]
-  pub hist_ignore_dupes: bool,
-
-  /// Maximum number of entries in the command history file (-1 for unlimited)
-  #[validate(validate_max_hist)]
-  #[default(10_000isize)]
-  pub max_hist: isize,
-
   /// Allow comments in interactive mode
   #[default(true)]
   pub interactive_comments: bool,
-
-  /// Automatically save commands to the command history file
-  #[default(true)]
-  pub auto_hist: bool,
 
   /// Allow shed to trigger the terminal bell
   #[default(true)]
@@ -415,6 +446,27 @@ pub(crate) struct ShOptCore {
   /// Output byte cap for command substitutions and pipelines; excess is truncated
   #[default(ReadLimit::default())]
   pub max_read_limit: ReadLimit,
+}
+
+#[derive(Clone, Debug, ShOptGroup)]
+#[group_name = "history"]
+pub(crate) struct ShOptHist {
+  /// Automatically save commands to the command history file
+  #[default(true)]
+  pub auto_save: bool,
+
+  /// Ignore consecutive duplicate command history entries
+  #[default(true)]
+  pub ignore_dupes: bool,
+
+  /// Maximum number of entries in the command history file (-1 for unlimited)
+  #[validate(validate_max_hist)]
+  #[default(-1isize)]
+  pub max_entries: isize,
+
+  /// Enables history concatenation with Shift+Up/Down
+  #[default(true)]
+  pub enable_concat: bool,
 }
 
 fn validate_leader(v: &String) -> Result<(), String> {
@@ -555,10 +607,6 @@ pub(crate) struct ShOptPrompt {
   /// Tab completion matching is case-insensitive
   #[default(false)]
   pub completion_ignore_case: bool,
-
-  /// Enables history concatenation with Shift+Up/Down
-  #[default(true)]
-  pub hist_cat: bool,
 
   /// Expands aliases on the prompt instead of after submitting
   #[default(true)]
@@ -705,15 +753,19 @@ mod tests {
   #[test]
   fn set_and_get_core_int() {
     let mut opts = ShOpts::default();
-    assert_eq!(opts.core.max_hist, 10_000);
+    assert_eq!(opts.history.max_entries, -1);
 
+    // test aliases
     opts.set("core.max_hist", "500").unwrap();
-    assert_eq!(opts.core.max_hist, 500);
+    assert_eq!(opts.history.max_entries, 500);
 
-    opts.set("core.max_hist", "-1").unwrap();
-    assert_eq!(opts.core.max_hist, -1);
+    opts.set("history.max_entries", "1000").unwrap();
+    assert_eq!(opts.history.max_entries, 1000);
 
-    opts.set("core.max_hist", "-500").unwrap_err();
+    opts.set("history.max_entries", "-1").unwrap();
+    assert_eq!(opts.history.max_entries, -1);
+
+    opts.set("history.max_entries", "-500").unwrap_err();
     assert_status_ne!(0);
   }
 
@@ -774,8 +826,11 @@ mod tests {
     let core_output = opts.get("core").unwrap().unwrap();
     assert!(core_output.contains("dotglob"));
     assert!(core_output.contains("autocd"));
-    assert!(core_output.contains("max_hist"));
     assert!(core_output.contains("bell_enabled"));
+
+    let history_output = opts.get("history").unwrap().unwrap();
+    assert!(history_output.contains("max_entries"));
+    assert!(history_output.contains("auto_save"));
 
     let prompt_output = opts.get("prompt").unwrap().unwrap();
     assert!(prompt_output.contains("comp_limit"));

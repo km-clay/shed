@@ -493,7 +493,7 @@ fn handle_readline_event(
 ) -> ShResult<LoopAction> {
   match event {
     Ok(ReadlineEvent::Line(input)) => {
-      let token = shopt!(core.auto_hist)
+      let token = shopt!(history.auto_save)
         .then(|| readline.history_mut().push(&input).ok().flatten())
         .flatten(); // token is used as a stable identifier for the command in the history
 
@@ -530,7 +530,7 @@ fn handle_readline_event(
       let was_func_def = Shed::meta_mut(MetaTab::take_last_was_func_def);
       let nolog = was_func_def && shopt!(set.nolog);
 
-      let should_write = shopt!(core.auto_hist) && !nolog && !no_hist_save && !input.is_empty();
+      let should_write = shopt!(history.auto_save) && !nolog && !no_hist_save && !input.is_empty();
 
       let hist_update_start = Instant::now();
 
@@ -542,7 +542,7 @@ fn handle_readline_event(
           .delete("WHERE token = ?1", rusqlite::params![token.to_string()])?;
       }
 
-      if shopt!(core.auto_hist)
+      if shopt!(history.auto_save)
         && should_write
         && let Some(token) = token
       {

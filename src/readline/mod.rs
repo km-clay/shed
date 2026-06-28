@@ -1375,7 +1375,7 @@ impl ShedLine {
     if self.should_grab_history(&cmd) {
       let offset = cmd.history_scroll_offset().unwrap();
 
-      if shopt!(prompt.hist_cat)
+      if shopt!(history.enable_concat)
         && cmd
           .flags
           .intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL)

@@ -4,6 +4,7 @@ _shopt_comp() {
     local groups=(
       highlight
       core
+      history
       line
       set
       prompt
@@ -12,6 +13,7 @@ _shopt_comp() {
     local groups_desc=(
       "Syntax highlighting options"
       "Core config options"
+      "Command history options"
       "Line editor options"
       "POSIX set options"
       "Prompt config options"
@@ -59,10 +61,7 @@ _shopt_comp() {
       dotglob
       nullglob
       autocd
-      hist_ignore_dupes
-      max_hist
       interactive_comments
-      auto_hist
       bell_enabled
       max_recurse_depth
       xpg_echo
@@ -73,15 +72,24 @@ _shopt_comp() {
       "glob patterns match on hidden files"
       "expand to nothing when no files are found"
       "executing a directory name moves to it"
-      "history ignores consecutive duplicate commands"
-      "max number of history entries. -1 means no limit"
       "allows for writing comments on the interactive prompt"
-      "saves executed commands to your history"
       "allows the shell to ring the terminal's bell"
       "maximum depth of nested function calls"
       "whether or not 'echo' expands escape sequences by default"
       "whether shed sends an audible bell, a visual one, or 'both'"
       "collapse error stack traces to a single call-site label"
+    )
+    local history=(
+      auto_save
+      ignore_dupes
+      max_entries
+      enable_concat
+    )
+    local history_desc=(
+      "saves executed commands to your history"
+      "history ignores consecutive duplicate commands"
+      "maximum number of history entries (-1 for unlimited)"
+      "enables joining history entries together using Ctrl/Shift+Up/Down"
     )
     local prompt=(
       trunc_prompt_path
@@ -90,7 +98,6 @@ _shopt_comp() {
       idle_timeout
       completion_ignore_case
       complete_style
-      hist_cat
       expand_aliases
       substitute
     )
@@ -101,7 +108,6 @@ _shopt_comp() {
       "idle seconds before firing on-idle-timeout autocmds (0=off)"
       "if enabled, tab completion ignores case when matching"
       "choose how completion candidates are presented ('fuzzy' or 'grid')"
-      "enables joining history entries together using Ctrl/Shift+Up/Down"
       "if enabled, aliases are expanded on the prompt instead of during execution"
       "if enabled, performs substitution (variables, command output, etc.) after expanding prompt sequences"
     )

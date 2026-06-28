@@ -104,7 +104,7 @@ mod tests {
     let out = guard.read_output();
     assert!(out.contains("dotglob"));
     assert!(out.contains("autocd"));
-    assert!(out.contains("max_hist"));
+    assert!(out.contains("max_entries"));
     assert!(out.contains("comp_limit"));
   }
 
@@ -140,7 +140,7 @@ mod tests {
   fn shopt_set_int() {
     let _g = TestGuard::new();
     test_input("shopt core.max_hist=500").unwrap();
-    assert_eq!(Shed::shopts(|o| o.core.max_hist), 500);
+    assert_eq!(Shed::shopts(|o| o.history.max_entries), 500);
   }
 
   #[test]
