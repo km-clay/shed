@@ -12,7 +12,10 @@ use std::{
   io::{Read, Write},
   path::{Path, PathBuf},
   rc::Rc,
-  sync::{Arc, Mutex, RwLock},
+  sync::{
+    Arc, Mutex, Once, RwLock,
+    atomic::{AtomicBool, Ordering},
+  },
 };
 
 use nix::{
@@ -739,26 +742,104 @@ pub fn set_sh_lvl() -> ShResult<()> {
   Ok(())
 }
 
-/// Get a clone of the shared database connection, if available.
 /// The process-wide history database connection.
 static DB_CONN: RwLock<Option<Arc<Mutex<Connection>>>> = RwLock::new(None);
 
+static FORKED_CHILD: AtomicBool = AtomicBool::new(false);
+static ATFORK_ONCE: Once = Once::new();
+
+extern "C" fn db_atfork_child() {
+  FORKED_CHILD.store(true, Ordering::Relaxed);
+}
+fn register_db_atfork() {
+  ATFORK_ONCE.call_once(|| unsafe {
+    libc::pthread_atfork(None, None, Some(db_atfork_child));
+  });
+}
+
 fn open_shared_conn() -> Option<Arc<Mutex<Connection>>> {
+  register_db_atfork();
   crate::procio::do_something_that_opens_fds_that_we_cant_access_hack(
     crate::procio::MIN_INTERNAL_FD,
-    || {
-      let conn = open_db_conn().ok()?;
-      conn.execute_batch("PRAGMA journal_mode=WAL").ok()?;
-      // Wait on contention instead of erroring out immediately; matters
-      // for the cross-process case (multiple shed sessions share this db).
-      conn.busy_timeout(std::time::Duration::from_secs(5)).ok()?;
-      conn.execute_batch("PRAGMA case_sensitive_like = 1").ok()?;
-      Some(Arc::new(Mutex::new(conn)))
-    },
+    || configure_conn(false),
   )
 }
 
+fn configure_conn(is_retry: bool) -> Option<Arc<Mutex<Connection>>> {
+  let path = history_db_path();
+  let conn = match open_db_conn() {
+    Ok(c) => c,
+    Err(e) => {
+      log::error!("could not open history database at {}: {e}", path.display());
+      return None;
+    }
+  };
+
+  if let Err(e) = conn.busy_timeout(std::time::Duration::from_secs(5)) {
+    log::warn!("could not set history database busy timeout: {e}");
+  }
+
+  match conn.query_row("PRAGMA quick_check(1)", [], |r| r.get::<_, String>(0)) {
+    Ok(s) if s == "ok" => {}
+    Ok(s) => {
+      if is_retry {
+        log::error!("freshly created history database still fails integrity check: {s}");
+        return None;
+      }
+      log::error!(
+        "history database at {} is corrupt ({s}); quarantining it and starting fresh",
+        path.display()
+      );
+      drop(conn);
+      quarantine_db(&path);
+      return configure_conn(true);
+    }
+    Err(e) => log::warn!("history database integrity check could not run: {e}"),
+  }
+
+  if let Err(e) = conn.execute_batch("PRAGMA journal_mode=DELETE") {
+    log::warn!(
+      "could not switch history database to rollback-journal mode, continuing in its current mode: {e}"
+    );
+  }
+  if let Err(e) = conn.execute_batch("PRAGMA case_sensitive_like = 1") {
+    log::warn!("could not set case_sensitive_like on history database: {e}");
+  }
+
+  Some(Arc::new(Mutex::new(conn)))
+}
+
+/// Rename a corrupt database and its journal/WAL sidecars aside so a fresh one
+/// can take its place.
+fn quarantine_db(path: &Path) {
+  let stamp = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map_or(0, |d| d.as_secs());
+  for suffix in ["", "-wal", "-shm", "-journal"] {
+    let from = PathBuf::from(format!("{}{suffix}", path.display()));
+    if !from.exists() {
+      continue;
+    }
+    let to = PathBuf::from(format!("{}{suffix}.corrupt.{stamp}", path.display()));
+    match std::fs::rename(&from, &to) {
+      Ok(()) => log::error!(
+        "quarantined corrupt history file {} -> {}",
+        from.display(),
+        to.display()
+      ),
+      Err(e) => log::error!(
+        "could not quarantine corrupt history file {}: {e}",
+        from.display()
+      ),
+    }
+  }
+}
+
 pub fn get_db_conn() -> Option<Arc<Mutex<Connection>>> {
+  // A forked child must not use the connection it inherited from the parent.
+  if FORKED_CHILD.load(Ordering::Relaxed) {
+    return None;
+  }
   if let Some(conn) = DB_CONN.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
     return Some(conn.clone());
   }
@@ -776,8 +857,9 @@ pub fn init_test_db_conn() {
     .map(|c| Arc::new(Mutex::new(c)));
 }
 
-pub fn open_db_conn() -> ShResult<Connection> {
-  let db_path = if let Some(var) = try_var!("SHED_HISTDB") {
+/// The on-disk path of the history database.
+fn history_db_path() -> PathBuf {
+  let db_path: VarStr = if let Some(var) = try_var!("SHED_HISTDB") {
     var
   } else {
     let home = try_var!("HOME").unwrap_or_else(|| ".".into());
@@ -786,8 +868,11 @@ pub fn open_db_conn() -> ShResult<Connection> {
       |p| p.to_string_lossy().into(),
     )
   };
+  PathBuf::from(db_path.as_str())
+}
 
-  let db_path = PathBuf::from(db_path);
+pub fn open_db_conn() -> ShResult<Connection> {
+  let db_path = history_db_path();
   if let Some(parent) = db_path.parent() {
     std::fs::create_dir_all(parent)?;
   }
