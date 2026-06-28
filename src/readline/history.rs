@@ -132,7 +132,7 @@ pub struct History {
 }
 
 impl History {
-  const USER_VERSION: i32 = 3;
+  const USER_VERSION: i32 = 4;
 
   fn lock(&self) -> MutexGuard<'_, Connection> {
     self.conn.lock().unwrap_or_else(|e| e.into_inner())
@@ -310,6 +310,19 @@ impl History {
             "
           ))?;
           conn.execute_batch("PRAGMA user_version = 3")?;
+        }
+        3 => {
+          // add the directories table
+          conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS dir_history (
+              path        TEXT        PRIMARY KEY NOT NULL,
+              visits      INTEGER     NOT NULL DEFAULT 1,
+              last_visit  INTEGER     NOT NULL
+            );
+            ",
+          )?;
+          conn.execute_batch("PRAGMA user_version = 4")?;
         }
         _ => {}
       }

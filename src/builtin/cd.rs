@@ -1,10 +1,16 @@
-use std::path::{Path, PathBuf};
+use std::{
+  path::{Path, PathBuf},
+  time::{SystemTime, UNIX_EPOCH},
+};
+
+use crate::expand::{expand_raw_inner, markers::strip_markers, unescape_str};
+use crate::readline::{FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, match_positions};
 
 use super::{
-  ShResult,
+  ShResult, Shed,
   getopt::{Opt, OptSpec},
   outln, sherr,
-  state::util,
+  state::{terminal::Terminal, util},
   try_var, var, with_status,
 };
 
@@ -104,6 +110,332 @@ fn search_cd_path(new_dir: impl AsRef<Path>) -> Option<PathBuf> {
     .map(PathBuf::from);
 
   paths.find_map(|p| p.join(&new_dir).is_dir().then(|| p.join(&new_dir)))
+}
+
+pub(super) struct Zd;
+impl super::Builtin for Zd {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::flag('r'),
+      OptSpec::single_arg('d'),
+      OptSpec::single_arg("depth"),
+    ]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    match args.argv.first().map(|(s, _)| s.as_str()) {
+      Some("add") => self.add(args),
+      Some("remove") => self.remove(args),
+      Some("clean") => self.clean(args),
+      _ => self.query(args),
+    }
+  }
+}
+
+impl Zd {
+  /// zd add [-r] [dirs...] - add directories
+  fn add(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let depth = match args.opts.iter().find_map(|o| match o {
+      Opt::ShortWithArg('d', n) => Some(n.as_str()),
+      Opt::LongWithArg(name, n) if name.as_str() == "depth" => Some(n.as_str()),
+      _ => None,
+    }) {
+      Some(n) => match n.parse::<usize>() {
+        Ok(n) => Some(n),
+        Err(_) => return Err(sherr!(ParseErr @ args.span, "zd: invalid depth: {n}")),
+      },
+      None => None,
+    };
+    // a depth cap only makes sense recursively, so it implies -r.
+    let recursive = depth.is_some() || args.opts.iter().any(|o| matches!(o, Opt::Short('r')));
+
+    let mut dirs: Vec<PathBuf> = args
+      .argv
+      .iter()
+      .skip(1) // the "add" subcommand itself
+      .map(|(a, _)| PathBuf::from(a.as_str()))
+      .collect();
+    if dirs.is_empty()
+      && let Ok(cwd) = std::env::current_dir()
+    {
+      dirs.push(cwd);
+    }
+
+    let mut paths = Vec::new();
+    for dir in dirs {
+      if !dir.is_dir() {
+        return Err(sherr!(ExecFail @ args.span, "zd: not a directory: {}", dir.display()));
+      }
+      if recursive {
+        collect_subdirs(&dir, depth, &mut paths);
+      } else if let Ok(canon) = dir.canonicalize() {
+        paths.push(canon.to_string_lossy().into_owned());
+      }
+    }
+
+    let Some(conn) = util::get_db_conn() else {
+      return with_status(0);
+    };
+    let Ok(conn) = conn.try_lock() else {
+      return with_status(0);
+    };
+    let now = now_secs();
+    conn.execute_batch("BEGIN").ok();
+    for path in &paths {
+      conn
+        .execute(
+          "INSERT INTO dir_history (path, visits, last_visit) VALUES (?1, 1, ?2)
+           ON CONFLICT(path) DO NOTHING",
+          rusqlite::params![path, now],
+        )
+        .ok();
+    }
+    conn.execute_batch("COMMIT").ok();
+    with_status(0)
+  }
+
+  /// zd add [-r] <dirs...> - remove directories
+  fn remove(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let recursive = args.opts.iter().any(|o| matches!(o, Opt::Short('r')));
+    let targets: Vec<String> = args
+      .argv
+      .iter()
+      .skip(1) // the "remove" subcommand itself
+      .map(|(a, _)| a.as_str().to_string())
+      .collect();
+    if targets.is_empty() {
+      return Err(sherr!(ExecFail @ args.span, "zd: remove requires a directory"));
+    }
+
+    let Some(conn) = util::get_db_conn() else {
+      return with_status(0);
+    };
+    let Ok(conn) = conn.try_lock() else {
+      return with_status(0);
+    };
+    let mut removed = 0;
+    for target in &targets {
+      let canon = std::fs::canonicalize(target)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| target.clone());
+      removed += if recursive {
+        conn
+          .execute(
+            "DELETE FROM dir_history WHERE path = ?1 OR path GLOB ?1 || '/*'",
+            rusqlite::params![canon],
+          )
+          .unwrap_or(0)
+      } else {
+        conn
+          .execute(
+            "DELETE FROM dir_history WHERE path = ?1 OR path = ?2",
+            rusqlite::params![canon, target],
+          )
+          .unwrap_or(0)
+      };
+    }
+    with_status(i32::from(removed == 0))
+  }
+
+  /// `zd clean` - prune entries whose directory no longer exists.
+  fn clean(&self, _args: super::BuiltinArgs) -> ShResult<()> {
+    let Some(conn) = util::get_db_conn() else {
+      return with_status(0);
+    };
+    let Ok(conn) = conn.try_lock() else {
+      return with_status(0);
+    };
+    let dead: Vec<String> = {
+      let Ok(mut stmt) = conn.prepare("SELECT path FROM dir_history") else {
+        return with_status(0);
+      };
+      let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
+        return with_status(0);
+      };
+      rows.flatten().filter(|p| !Path::new(p).is_dir()).collect()
+    };
+    let mut removed = 0;
+    for path in &dead {
+      removed += conn
+        .execute(
+          "DELETE FROM dir_history WHERE path = ?1",
+          rusqlite::params![path],
+        )
+        .unwrap_or(0);
+    }
+    outln!(
+      "zd: pruned {removed} dead {}",
+      if removed == 1 {
+        "directory"
+      } else {
+        "directories"
+      }
+    );
+    with_status(0)
+  }
+
+  fn query(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    // every positional is concatenated into one subsequence query, so
+    // `zd pro fern` still finds `~/projects/fern`.
+    let query: String = args.argv.iter().map(|(a, _)| a.as_str()).collect();
+
+    let entries = load_dir_entries();
+    if entries.is_empty() {
+      return Err(sherr!(ExecFail @ args.span, "zd: no directory history yet"));
+    }
+
+    let target = if query.is_empty() {
+      if !Shed::term(Terminal::interactive) {
+        return Err(
+          sherr!(ExecFail @ args.span, "zd: a directory query is required when non-interactive"),
+        );
+      }
+      let selector = FuzzyBuilder::new()
+        .with_entries(entries)
+        .with_placeholder("pick a directory (type to filter, enter selects, esc cancels)")
+        .with_score_cb(fuzzy_score_dir)
+        .with_query_transform(expand_dir_query)
+        .with_highlight_cb(highlight_dir);
+
+      selector.pick()?
+    } else {
+      fuzzy_best_match(
+        &query,
+        entries,
+        Some(fuzzy_score_dir),
+        Some(expand_dir_query),
+      )
+    };
+
+    match target {
+      Some(path) => {
+        if let Err(e) = util::change_dir(&path) {
+          return Err(sherr!(ExecFail @ args.span, "zd: could not change directory: {e}"));
+        }
+        with_status(0)
+      }
+      // cancelled, or nothing matched the query
+      None => with_status(1),
+    }
+  }
+}
+
+/// Read-only expansion of a `zd` query: `~`/`$VAR` resolve so they match the
+/// canonical paths in the history, but `$(...)`/`<(...)` stay inert (no side
+/// effects), since this runs on every keystroke in the picker.
+fn expand_dir_query(raw: &str) -> String {
+  let unescaped = unescape_str(raw);
+  expand_raw_inner(&mut unescaped.chars().peekable(), false)
+    .map_or_else(|_| raw.to_string(), |s| strip_markers(&s))
+}
+
+/// Highlight the basename match, mirroring how `fuzzy_score_dir` rewards it, so
+/// the underline lands on (e.g.) the "dev" in ".../dev-shells" rather than being
+/// smeared across parent segments. Falls back to the default full-path match.
+fn highlight_dir(display: &str, query: &str) -> Option<Vec<usize>> {
+  let base = Path::new(display).file_name()?.to_str()?;
+  // char offset of the basename within the display string (positions are chars).
+  let offset = display.chars().count() - base.chars().count();
+  let positions = match_positions(base, query);
+  (!positions.is_empty()).then(|| positions.into_iter().map(|p| p + offset).collect())
+}
+
+fn fuzzy_score_dir(cand: &str, chars: &[char], penalize_len_diff: bool) -> i32 {
+  let path = Path::new(cand);
+
+  // An exact path match is unambiguous, so it always wins. This breaks ties like
+  // "/home/me" vs "/home/me/projects" for the query "/home/me", where the matched
+  // prefix otherwise scores identically for both.
+  if chars.iter().copied().eq(cand.chars()) {
+    return i32::MAX;
+  }
+
+  // Otherwise, add the basename's own score on top of the full-path score, so a
+  // match on the final segment ("fer" -> ".../fern") outranks one smeared across
+  // parent directories. Double-counting the basename is the point.
+  if let Some(base) = path.file_name().and_then(|b| b.to_str()) {
+    let base_score = fuzzy_match_score(base, chars, penalize_len_diff);
+    let full = fuzzy_match_score(cand, chars, penalize_len_diff);
+    if base_score > i32::MIN && full > i32::MIN {
+      return full.saturating_add(base_score);
+    }
+  }
+
+  fuzzy_match_score(cand, chars, penalize_len_diff)
+}
+
+fn now_secs() -> i64 {
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .map_or(0, |d| d.as_secs() as i64)
+}
+
+/// Recursively collect canonical paths of `root` and its subdirectories,
+/// skipping hidden directories and symlinks (avoids `.git` clutter and loops).
+/// `depth` caps how many levels below `root` to descend: `Some(0)` adds only
+/// `root`, `None` recurses without limit.
+fn collect_subdirs(root: &Path, depth: Option<usize>, out: &mut Vec<String>) {
+  if let Ok(canon) = root.canonicalize() {
+    out.push(canon.to_string_lossy().into_owned());
+  }
+  if depth == Some(0) {
+    return;
+  }
+  let Ok(entries) = std::fs::read_dir(root) else {
+    return;
+  };
+  let next = depth.map(|d| d - 1);
+  for entry in entries.flatten() {
+    let path = entry.path();
+    let hidden = path
+      .file_name()
+      .and_then(|n| n.to_str())
+      .is_some_and(|n| n.starts_with('.'));
+    if hidden || path.is_symlink() || !path.is_dir() {
+      continue;
+    }
+    collect_subdirs(&path, next, out);
+  }
+}
+
+/// Frecency weight from visit count and seconds since last visit. Recent and
+/// frequent directories rank highest; old ones keep a small baseline weight.
+fn dir_frecency(visits: i64, age_secs: i64) -> i32 {
+  let factor = match age_secs {
+    s if s < 3_600 => 4,   // within the hour
+    s if s < 86_400 => 3,  // within the day
+    s if s < 604_800 => 2, // within the week
+    _ => 1,
+  };
+  visits.saturating_mul(factor).clamp(0, i32::MAX as i64) as i32
+}
+
+/// Load visited directories as `(path, frecency weight)`, skipping any that no
+/// longer exist on disk.
+fn load_dir_entries() -> Vec<(String, i32)> {
+  let Some(conn) = util::get_db_conn() else {
+    return vec![];
+  };
+  let Ok(conn) = conn.try_lock() else {
+    return vec![];
+  };
+  let Ok(mut stmt) = conn.prepare("SELECT path, visits, last_visit FROM dir_history") else {
+    return vec![];
+  };
+  let now = now_secs();
+  let Ok(rows) = stmt.query_map([], |r| {
+    Ok((
+      r.get::<_, String>(0)?,
+      r.get::<_, i64>(1)?,
+      r.get::<_, i64>(2)?,
+    ))
+  }) else {
+    return vec![];
+  };
+  rows
+    .flatten()
+    .filter(|(path, ..)| Path::new(path).is_dir())
+    .map(|(path, visits, last_visit)| (path, dir_frecency(visits, now - last_visit)))
+    .collect()
 }
 
 fn get_old_pwd() -> PathBuf {
@@ -531,5 +863,219 @@ pub mod tests {
 
     let pwd = var!("PWD");
     assert_eq!(pwd, fs::canonicalize(&real).unwrap().display().to_string());
+  }
+
+  // ===================== zd: frecency =====================
+
+  #[test]
+  fn frecency_recent_outranks_old() {
+    // Same visit count, more recent wins.
+    assert!(super::dir_frecency(3, 60) > super::dir_frecency(3, 60 * 60 * 24 * 30));
+  }
+
+  #[test]
+  fn frecency_more_visits_outranks_fewer() {
+    // Same age bucket, more visits wins.
+    assert!(super::dir_frecency(10, 60) > super::dir_frecency(1, 60));
+  }
+
+  #[test]
+  fn frecency_saturates_without_overflow() {
+    assert_eq!(super::dir_frecency(i64::MAX, 60), i32::MAX);
+  }
+
+  // ===================== zd: directory scoring =====================
+
+  fn qchars(s: &str) -> Vec<char> {
+    s.chars().collect()
+  }
+
+  #[test]
+  fn score_dir_exact_path_wins() {
+    let q = qchars("/home/me");
+    let exact = super::fuzzy_score_dir("/home/me", &q, false);
+    let longer = super::fuzzy_score_dir("/home/me/projects", &q, false);
+    assert_eq!(exact, i32::MAX);
+    assert!(
+      exact > longer,
+      "exact path must outrank a longer prefix match"
+    );
+  }
+
+  #[test]
+  fn score_dir_basename_outranks_smeared() {
+    let q = qchars("dev");
+    // Basename "dev" matches cleanly; the other only matches across parent segments.
+    let basename = super::fuzzy_score_dir("/a/b/dev", &q, false);
+    let smeared = super::fuzzy_score_dir("/d/e/v/zzz", &q, false);
+    assert!(basename > smeared);
+  }
+
+  #[test]
+  fn score_dir_no_match_is_min() {
+    let q = qchars("zzz");
+    assert_eq!(
+      super::fuzzy_score_dir("/home/me/projects", &q, false),
+      i32::MIN
+    );
+  }
+
+  // ===================== zd: highlighting =====================
+
+  #[test]
+  fn highlight_dir_marks_basename_with_offset() {
+    // "/home/me/" is 9 chars, so the basename match lands at 9,10,11.
+    let pos = super::highlight_dir("/home/me/dev-shells", "dev").unwrap();
+    assert_eq!(pos, vec![9, 10, 11]);
+  }
+
+  #[test]
+  fn highlight_dir_falls_back_when_basename_unmatched() {
+    // Query matches only the parents → None, so the caller uses the full-path match.
+    assert!(super::highlight_dir("/home/dev/xyz", "dev").is_none());
+  }
+
+  #[test]
+  fn highlight_dir_none_without_basename() {
+    assert!(super::highlight_dir("/", "x").is_none());
+  }
+
+  // ===================== zd: read-only query expansion =====================
+
+  fn set_home(home: &str) {
+    Shed::vars_mut(|v| v.set_var("HOME", VarKind::Str(home.into()), VarFlags::EXPORT)).unwrap();
+  }
+
+  #[test]
+  fn expand_query_tilde_to_home() {
+    let _g = TestGuard::new();
+    set_home("/home/zztest");
+    assert_eq!(
+      super::expand_dir_query("~/projects"),
+      "/home/zztest/projects"
+    );
+  }
+
+  #[test]
+  fn expand_query_var_expands() {
+    let _g = TestGuard::new();
+    set_home("/home/zztest");
+    assert_eq!(super::expand_dir_query("$HOME/x"), "/home/zztest/x");
+  }
+
+  #[test]
+  fn expand_query_no_command_substitution() {
+    // `$(...)` must stay inert (no execution) since this runs per keystroke.
+    let _g = TestGuard::new();
+    assert_ne!(super::expand_dir_query("$(echo pwned)"), "pwned");
+  }
+
+  // ===================== zd: dir_history DB =====================
+
+  fn fresh_dir_history() {
+    let conn = state::util::get_db_conn().expect("test db");
+    conn
+      .lock()
+      .unwrap()
+      .execute_batch(
+        "CREATE TABLE IF NOT EXISTS dir_history (
+           path        TEXT     PRIMARY KEY NOT NULL,
+           visits      INTEGER  NOT NULL DEFAULT 1,
+           last_visit  INTEGER  NOT NULL
+         );
+         DELETE FROM dir_history;",
+      )
+      .unwrap();
+  }
+
+  fn dir_visits(path: &str) -> Option<i64> {
+    let conn = state::util::get_db_conn().unwrap();
+    let conn = conn.lock().unwrap();
+    conn
+      .query_row(
+        "SELECT visits FROM dir_history WHERE path = ?1",
+        [path],
+        |r| r.get(0),
+      )
+      .ok()
+  }
+
+  fn insert_dir(path: &str, visits: i64, last_visit: i64) {
+    let conn = state::util::get_db_conn().unwrap();
+    conn
+      .lock()
+      .unwrap()
+      .execute(
+        "INSERT OR REPLACE INTO dir_history (path, visits, last_visit) VALUES (?1, ?2, ?3)",
+        rusqlite::params![path, visits, last_visit],
+      )
+      .unwrap();
+  }
+
+  #[test]
+  fn zd_add_inserts_canonical_path() {
+    let _g = TestGuard::new();
+    fresh_dir_history();
+    let dir = TempDir::new().unwrap();
+    test_input(format!("zd add {}", dir.path().display())).unwrap();
+    let canon = fs::canonicalize(dir.path()).unwrap().display().to_string();
+    assert_eq!(dir_visits(&canon), Some(1));
+  }
+
+  #[test]
+  fn zd_add_is_idempotent() {
+    let _g = TestGuard::new();
+    fresh_dir_history();
+    let dir = TempDir::new().unwrap();
+    let cmd = format!("zd add {}", dir.path().display());
+    test_input(&cmd).unwrap();
+    test_input(&cmd).unwrap();
+    let canon = fs::canonicalize(dir.path()).unwrap().display().to_string();
+    // ON CONFLICT DO NOTHING: re-adding must not inflate the visit count.
+    assert_eq!(dir_visits(&canon), Some(1));
+  }
+
+  #[test]
+  fn zd_remove_deletes_entry() {
+    let _g = TestGuard::new();
+    fresh_dir_history();
+    let dir = TempDir::new().unwrap();
+    let canon = fs::canonicalize(dir.path()).unwrap().display().to_string();
+    insert_dir(&canon, 5, 1000);
+    test_input(format!("zd remove {}", dir.path().display())).unwrap();
+    assert_eq!(dir_visits(&canon), None);
+  }
+
+  #[test]
+  fn zd_clean_prunes_only_dead_dirs() {
+    let _g = TestGuard::new();
+    fresh_dir_history();
+    let live = TempDir::new().unwrap();
+    let live_canon = fs::canonicalize(live.path()).unwrap().display().to_string();
+    insert_dir(&live_canon, 1, 1000);
+    insert_dir("/nonexistent_zz_dir_12345", 1, 1000);
+    test_input("zd clean").unwrap();
+    assert!(
+      dir_visits(&live_canon).is_some(),
+      "existing dir must be kept"
+    );
+    assert_eq!(
+      dir_visits("/nonexistent_zz_dir_12345"),
+      None,
+      "dead dir must be pruned"
+    );
+  }
+
+  #[test]
+  fn load_dir_entries_skips_missing_dirs() {
+    let _g = TestGuard::new();
+    fresh_dir_history();
+    let live = TempDir::new().unwrap();
+    let live_canon = fs::canonicalize(live.path()).unwrap().display().to_string();
+    insert_dir(&live_canon, 3, 1000);
+    insert_dir("/nonexistent_zz_dir_98765", 9, 9999);
+    let entries = super::load_dir_entries();
+    assert!(entries.iter().any(|(p, _)| p == &live_canon));
+    assert!(!entries.iter().any(|(p, _)| p.starts_with("/nonexistent")));
   }
 }

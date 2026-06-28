@@ -168,6 +168,7 @@ register_builtins! {
   "vice"     => vice::Vice,
   "wait"     => jobctl::Wait,
   "width"    => width::Width,
+  "zd"       => cd::Zd,
 }
 
 /// Lookup a name in the builtin table via binary search

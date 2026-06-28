@@ -1,6 +1,6 @@
 use crate::{
   HashMap,
-  state::{logic::ShFunc, vars::VarStr},
+  state::{logic::ShFunc, terminal::Terminal, vars::VarStr},
   util::{self, ShErrKind, VarStrDisplay},
   varstr,
 };
@@ -16,6 +16,7 @@ use std::{
     Arc, Mutex, Once, RwLock,
     atomic::{AtomicBool, Ordering},
   },
+  time::SystemTime,
 };
 
 use nix::{
@@ -204,6 +205,27 @@ pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<String>) 
       .ok()
       .map_or_else(|| dir_raw.clone(), |p| p.display().to_string())
   });
+
+  if Shed::meta(MetaTab::interactive_shell)
+    && Shed::term(Terminal::interactive)
+    && let Ok(dir) = std::env::current_dir()
+    && let Some(conn) = get_db_conn()
+    && let Ok(conn) = conn.try_lock()
+  {
+    let dir_str = dir.to_string_lossy();
+    let timestamp = SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .unwrap()
+      .as_secs() as i64;
+
+    conn
+      .execute(
+        "INSERT INTO dir_history (path, visits, last_visit) VALUES (?1, 1, ?2)
+       ON CONFLICT(path) DO UPDATE SET visits = visits + 1, last_visit = ?2",
+        rusqlite::params![dir_str.as_ref(), timestamp],
+      )
+      .ok();
+  }
 
   Shed::vars_mut(|v| {
     v.set_var("OLDPWD", VarKind::Str(current_dir), VarFlags::EXPORT)?;
@@ -835,6 +857,9 @@ fn quarantine_db(path: &Path) {
   }
 }
 
+/// Try to obtain a connection to shed's sqlite database
+///
+/// Returns `None` in forked child processes
 pub fn get_db_conn() -> Option<Arc<Mutex<Connection>>> {
   // A forked child must not use the connection it inherited from the parent.
   if FORKED_CHILD.load(Ordering::Relaxed) {
