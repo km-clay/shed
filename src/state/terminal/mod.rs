@@ -365,6 +365,10 @@ impl Terminal {
     })
   }
 
+  /// Returns true if the current execution context is interactive
+  ///
+  /// This returns false for things like subshells, commands inside of functions,
+  /// or backgrounded commands
   pub fn interactive(&self) -> bool {
     self.interactive
   }
@@ -743,6 +747,12 @@ impl Terminal {
 
   pub fn t_cols(&self) -> usize {
     self.t_cols
+  }
+
+  /// The cursor style the terminal currently tracks, for save/restore around
+  /// transient style changes (e.g. the fuzzy picker's beam cursor).
+  pub fn cursor_style(&self) -> CursorStyle {
+    self.cursor_style
   }
 
   pub fn t_rows(&self) -> usize {

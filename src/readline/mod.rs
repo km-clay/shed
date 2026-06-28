@@ -4,6 +4,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 mod complete;
+pub(crate) use complete::{FuzzyBuilder, fuzzy_best_match, match_positions};
 mod context;
 mod core;
 mod editcmd;
@@ -57,7 +58,7 @@ use super::{
 
 pub(super) use complete::{
   BashCompSpec, Candidate, CompContext, CompFlags, CompMatch, CompOptFlags, CompOpts, CompSpec,
-  ScoredCandidate,
+  ScoredCandidate, fuzzy_match_score,
 };
 pub(super) use editcmd::Direction;
 pub(super) use editmode::ModeReport;
@@ -484,6 +485,11 @@ pub(super) struct ShedLine {
   /// navigating the finder overwrites the buffer with previews.
   hist_preview_orig: Option<(String, usize)>,
 
+  cursor_pos_callback: Option<fn(&mut Self) -> ShResult<()>>,
+  /// Rows the cursor was pushed below the prompt home by `cursor_pos_callback`
+  /// last render, so the next render can re-home before clearing the overlay.
+  overlay_cursor_offset: u16,
+
   worker: HintWorker,
 }
 
@@ -535,6 +541,8 @@ impl ShedLine {
       ctrl_d_warning_counter: 0,
       status_msgs: VecDeque::new(),
       hist_preview_orig: None,
+      cursor_pos_callback: None,
+      overlay_cursor_offset: 0,
       worker: HintWorker::new(),
     };
     Shed::vars_mut(|v| {
@@ -1889,6 +1897,13 @@ impl ShedLine {
       .unwrap_or_default();
     let one_line = new_layout.end.row == 0;
 
+    // Undo any overlay cursor displacement from the previous render so the
+    // clear() calls below start from the homed prompt line.
+    if self.overlay_cursor_offset > 0 {
+      let up = std::mem::take(&mut self.overlay_cursor_offset);
+      queue_term!(TermCtl::Cursor(Up(up)), TermCtl::Cursor(Col(1))).ok();
+    }
+
     if let Some(comp) = self.completer.as_mut() {
       comp.clear();
     }
@@ -2086,6 +2101,11 @@ impl ShedLine {
     }
     self.overlay_displacement = overlay_rows.try_into().unwrap_or(u16::MAX);
 
+    // While an overlay is shown, route the resting cursor onto its query line;
+    // otherwise leave it on the prompt. Applied last, in `finish`.
+    self.cursor_pos_callback = (self.completer.is_some() || self.history_fzf().is_some())
+      .then_some(Self::position_overlay_cursor as fn(&mut Self) -> ShResult<()>);
+
     if let Some(statline) = self.statline.as_mut()
       && !final_draw
     {
@@ -2146,6 +2166,10 @@ impl ShedLine {
     let finish = |this: &mut Self| {
       this.old_layout = Some(new_layout);
       this.needs_redraw = false;
+      // Last cursor op: park it on the active overlay's query line, if any.
+      if let Some(cb) = this.cursor_pos_callback {
+        cb(this)?;
+      }
       Ok(())
     };
 
@@ -2195,6 +2219,27 @@ impl ShedLine {
     }
 
     finish(self)
+  }
+
+  /// Park the real cursor on the active overlay's query line as a blinking beam.
+  /// Wired in as `cursor_pos_callback` while a completer/finder overlay is shown.
+  fn position_overlay_cursor(&mut self) -> ShResult<()> {
+    let col = if let Some(finder) = self.history_fzf() {
+      finder.query_cursor_col()
+    } else if let Some(col) = self.completer.as_ref().and_then(|c| c.query_cursor_col()) {
+      col
+    } else {
+      return Ok(());
+    };
+    // The overlay's query line is one row below the prompt home line.
+    queue_term!(
+      TermCtl::Cursor(Down(1)),
+      TermCtl::Cursor(Col(col as u16 + 1)),
+      TermCtl::Cursor(SetStyle(Beam(true))),
+    )
+    .ok();
+    self.overlay_cursor_offset = 1;
+    Ok(())
   }
 
   pub fn try_swap_mode_from_str(&mut self, name: &str) -> bool {

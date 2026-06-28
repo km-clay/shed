@@ -1022,6 +1022,7 @@ impl MetaTab {
   pub fn set_interactive_shell(&mut self, interactive: bool) {
     self.interactive_shell = interactive;
   }
+  /// Returns true if the shell started in interactive mode
   pub fn interactive_shell(&self) -> bool {
     self.interactive_shell
   }

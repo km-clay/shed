@@ -1,4 +1,9 @@
-use crate::state::terminal::Terminal;
+use nix::{
+  errno::Errno,
+  poll::{PollFd, PollFlags, PollTimeout, poll},
+};
+
+use crate::{flush_term, sherr, state::terminal::Terminal};
 
 use super::{
   Candidate, CompMatch, CompResponse, Completer, ShResult, Shed, SimpleCompleter,
@@ -63,7 +68,7 @@ fn emphasize(text: &str, hl: impl Fn(usize) -> bool, emph_on: &str) -> String {
 
 /// Char indices in `text` that a left-to-right fuzzy match of `query` lands on
 /// (the same greedy walk the scorer uses). Empty if `query` isn't a full match.
-fn match_positions(text: &str, query: &str) -> Vec<usize> {
+pub(crate) fn match_positions(text: &str, query: &str) -> Vec<usize> {
   let q: Vec<char> = query.chars().collect();
   if q.is_empty() {
     return vec![];
@@ -164,14 +169,21 @@ impl ScoredCandidate {
     }
   }
   pub fn fuzzy_score(&mut self, other: &str) -> i32 {
+    self.fuzzy_score_with(other, fuzzy_match_score)
+  }
+  pub fn fuzzy_score_with(&mut self, other: &str, cb: ScoreCallback) -> i32 {
     let query_chars: Vec<char> = other.chars().collect();
-    let score = fuzzy_match_score(&self.candidate, &query_chars, self.penalize_len_diff);
+    let score = cb(&self.candidate, &query_chars, self.penalize_len_diff);
     self.score = Some(score);
     score
   }
 }
 
-fn fuzzy_match_score(candidate: &str, query_chars: &[char], penalize_len_diff: bool) -> i32 {
+pub(crate) fn fuzzy_match_score(
+  candidate: &str,
+  query_chars: &[char],
+  penalize_len_diff: bool,
+) -> i32 {
   if query_chars.is_empty() {
     return 0;
   }
@@ -279,6 +291,143 @@ pub(crate) enum SelectorResponse {
   Consumed,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct FuzzyBuilder {
+  entries: Vec<(String, i32)>,
+  placeholder: Option<String>,
+  score_cb: Option<ScoreCallback>,
+  query_transform: Option<QueryTransform>,
+  highlight_cb: Option<HighlightCallback>,
+}
+
+impl FuzzyBuilder {
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  pub fn with_entries(mut self, entries: Vec<(String, i32)>) -> Self {
+    self.entries = entries;
+    self
+  }
+  pub fn with_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+    self.placeholder = Some(placeholder.into());
+    self
+  }
+  pub fn with_score_cb(mut self, cb: ScoreCallback) -> Self {
+    self.score_cb = Some(cb);
+    self
+  }
+  pub fn with_query_transform(mut self, cb: QueryTransform) -> Self {
+    self.query_transform = Some(cb);
+    self
+  }
+  pub fn with_highlight_cb(mut self, cb: HighlightCallback) -> Self {
+    self.highlight_cb = Some(cb);
+    self
+  }
+  pub fn pick(self) -> ShResult<Option<String>> {
+    if self.entries.is_empty() || Shed::term(Terminal::test_mode) {
+      return Ok(None);
+    }
+    let Some(tty) = Shed::term(Terminal::tty) else {
+      return Ok(None); // not attached to a terminal
+    };
+
+    let candidates = self
+      .entries
+      .into_iter()
+      .map(|(text, weight)| Candidate::from(text).with_weight(weight))
+      .collect();
+
+    let mut selector = FuzzySelector::new("");
+    selector.set_placeholder(self.placeholder);
+    selector.set_inline(true);
+    selector.set_score_cb(self.score_cb);
+    selector.set_query_transform(self.query_transform);
+    selector.set_highlight_cb(self.highlight_cb);
+    selector.activate(candidates);
+    selector.set_prompt_line_context(0, 0);
+
+    // The beam is set with a raw escape that bypasses `execute_control`, so the
+    // terminal's tracked style stays at the pre-picker value; restore to it on exit.
+    let restore_style = Shed::term(Terminal::cursor_style);
+    scopeguard::defer! {
+      flush_term!("{restore_style}").ok();
+    };
+
+    let tty_fd = PollFd::new(tty, PollFlags::POLLIN);
+    let chosen = loop {
+      selector.draw();
+      // Inline draw parks the cursor on the query line itself; rest the real cursor
+      // at the query position as a blinking beam, set apart from the query field.
+      let col = selector.query_cursor_col();
+      flush_term!("\r\x1b[{col}C\x1b[5 q").ok();
+
+      let mut decided = None;
+      match poll(&mut [tty_fd.clone()], PollTimeout::NONE) {
+        Ok(0) => decided = Some(None), // eof, treat as cancel
+        Ok(_) => {
+          Shed::term_mut(Terminal::read)?;
+          for key in Shed::term_mut(Terminal::drain_keys) {
+            match selector.handle_key(key)? {
+              SelectorResponse::Accept(c) => decided = Some(Some(c.as_str().to_string())),
+              SelectorResponse::Dismiss => decided = Some(None),
+              SelectorResponse::Preview(_) | SelectorResponse::Consumed => {}
+            }
+            if decided.is_some() {
+              break;
+            }
+          }
+        }
+        Err(Errno::EINTR) => {}
+        Err(e) => {
+          selector.clear();
+          return Err(sherr!(InternalErr, "fuzzy picker poll failed: {e}"));
+        }
+      }
+
+      // Erase the overlay (cursor is on the query line) before redraw/exit.
+      selector.clear();
+      if let Some(result) = decided {
+        break result;
+      }
+    };
+
+    // Wipe the query line so nothing lingers; defer restores the cursor style.
+    flush_term!("\r\x1b[2K").ok();
+    Ok(chosen)
+  }
+}
+
+/// Pick the best fuzzy match for `query` with no UI, breaking ties by weight.
+/// Used for the non-interactive `zd <query>` jump.
+pub(crate) fn fuzzy_best_match(
+  query: &str,
+  entries: Vec<(String, i32)>,
+  cb: Option<ScoreCallback>,
+  transform: Option<QueryTransform>,
+) -> Option<String> {
+  let score_cb = cb.unwrap_or(fuzzy_match_score);
+  let query = transform.map_or_else(|| query.to_string(), |f| f(query));
+  entries
+    .into_iter()
+    .filter_map(|(text, weight)| {
+      let score =
+        ScoredCandidate::new(Candidate::from(text.clone())).fuzzy_score_with(&query, score_cb);
+      (score > i32::MIN).then_some((score, weight, text))
+    })
+    .max_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)))
+    .map(|(.., text)| text)
+}
+
+type ScoreCallback = fn(&str, &[char], bool) -> i32;
+/// Transforms the raw typed query into the text actually matched against (e.g.
+/// zd's read-only `~`/`$VAR` expansion). The query box still shows the raw text.
+type QueryTransform = fn(&str) -> String;
+/// Returns the char positions in the display text to highlight for a match (e.g.
+/// zd highlighting the basename), or `None` to fall back to `match_positions`.
+type HighlightCallback = fn(&str, &str) -> Option<Vec<usize>>;
+
 #[derive(Default, Debug)]
 pub(crate) struct FuzzySelector {
   query: QueryEditor,
@@ -291,6 +440,19 @@ pub(crate) struct FuzzySelector {
   /// tall). Layout only ever touches the columns visible from here.
   scroll_col: usize,
   prompt_cursor_col: usize,
+  /// Hint shown in bright black inside the query box while it's empty.
+  placeholder: Option<String>,
+  /// Standalone mode (no prompt line above): the query line is the top row, so
+  /// `draw` skips the leading newline and `clear` erases its own row too.
+  inline: bool,
+
+  score_cb: Option<ScoreCallback>,
+  query_transform: Option<QueryTransform>,
+  highlight_cb: Option<HighlightCallback>,
+  /// The raw query run through `query_transform` (or the raw query when none).
+  /// Scoring and match highlighting both use this so they stay consistent.
+  effective_query: String,
+
   _mouse_guard: Option<TermGuard>,
 }
 
@@ -317,8 +479,41 @@ impl FuzzySelector {
       old_layout: None,
       scroll_col: 0,
       prompt_cursor_col: 0,
+      placeholder: None,
+      score_cb: None,
+      query_transform: None,
+      highlight_cb: None,
+      effective_query: String::new(),
+      inline: false,
       _mouse_guard: Some(Shed::term_mut(|t| t.mouse_support_guard(true.into()))),
     }
+  }
+
+  /// Hint text shown in the empty query box (e.g. for standalone pickers).
+  pub fn set_placeholder(&mut self, text: Option<impl Into<String>>) {
+    self.placeholder = text.map(|t| t.into());
+  }
+
+  pub fn set_score_cb(&mut self, cb: Option<fn(&str, &[char], bool) -> i32>) {
+    self.score_cb = cb;
+  }
+
+  pub fn set_query_transform(&mut self, cb: Option<QueryTransform>) {
+    self.query_transform = cb;
+  }
+
+  pub fn set_highlight_cb(&mut self, cb: Option<HighlightCallback>) {
+    self.highlight_cb = cb;
+  }
+
+  /// Standalone mode: the query line is the top row, with no prompt line above.
+  pub fn set_inline(&mut self, enable: bool) {
+    self.inline = enable;
+  }
+
+  /// Column of the query cursor on the query line, past the `► ` leader.
+  pub fn query_cursor_col(&self) -> usize {
+    Self::LEADER_W + self.query.linebuf.cursor_to_flat()
   }
 
   /// Retained for API compatibility; the grid layout doesn't number rows.
@@ -363,15 +558,28 @@ impl FuzzySelector {
   }
 
   pub fn score_candidates(&mut self) {
-    let query = self.query.linebuf.to_string();
+    let raw = self.query.linebuf.to_string();
+    // Match against the transformed query (e.g. expanded `~`/`$VAR`), while the
+    // box still shows the raw text. `extends` stays on the raw text: the transform
+    // is deterministic, so a raw prefix implies an effective prefix.
+    let query = self
+      .query_transform
+      .map_or_else(|| raw.clone(), |f| f(&raw));
     let query_chars: Vec<char> = query.chars().collect();
+    let score_fn = self.score_cb.unwrap_or(fuzzy_match_score);
 
-    let extends = !self.last_query.is_empty() && query.starts_with(self.last_query.as_str());
+    // The `extends` fast path retains a subset of the previous results, which is
+    // only valid when more typed chars mean fewer matches. A query transform
+    // breaks that (e.g. "$HOM" -> "" matches all, "$HOME" -> "/home/me"), so a
+    // full rescan is required whenever one is set.
+    let extends = self.query_transform.is_none()
+      && !self.last_query.is_empty()
+      && raw.starts_with(self.last_query.as_str());
 
     let mut scored: Vec<ScoredCandidate> = if extends {
       let mut prev = std::mem::take(&mut self.filtered);
       prev.retain_mut(|sc| {
-        let score = fuzzy_match_score(&sc.candidate, &query_chars, sc.penalize_len_diff);
+        let score = score_fn(&sc.candidate, &query_chars, sc.penalize_len_diff);
         sc.score = Some(score);
         score > i32::MIN
       });
@@ -381,7 +589,8 @@ impl FuzzySelector {
         .candidates
         .iter()
         .filter_map(|c| {
-          let score = fuzzy_match_score(c, &query_chars, false);
+          let score = score_fn(c, &query_chars, false);
+
           (score > i32::MIN).then(|| {
             let mut sc = ScoredCandidate::new(c.clone());
             sc.score = Some(score);
@@ -390,14 +599,23 @@ impl FuzzySelector {
         })
         .collect()
     };
-    scored.sort_by_key(|sc| sc.score.unwrap_or(i32::MIN));
+    // Sort ascending by (score, weight) then reverse, rather than sorting
+    // descending directly: the reverse also flips full ties into reverse-insert
+    // order, which keeps history (loaded oldest-first) showing newest at top.
+    scored.sort_by(|a, b| {
+      a.score
+        .unwrap_or(i32::MIN)
+        .cmp(&b.score.unwrap_or(i32::MIN))
+        .then(a.candidate.weight().cmp(&b.candidate.weight()))
+    });
     scored.reverse();
     self.cursor.set_max(scored.len());
     // Highlight the top match and scroll home after every (re)score.
     self.cursor.set(0);
     self.scroll_col = 0;
     self.filtered = scored;
-    self.last_query = query;
+    self.last_query = raw;
+    self.effective_query = query;
   }
 
   /// `(max name width, max desc width incl. parens)` over a column's
@@ -455,16 +673,28 @@ impl FuzzySelector {
 
   /// Render the query input with a reverse-video block standing in for the
   /// hardware cursor, which stays parked on the prompt line.
-  fn query_display(&self) -> String {
-    let chars: Vec<char> = self.query.linebuf.to_string().chars().collect();
-    let cur = self.query.linebuf.cursor_to_flat().min(chars.len());
-    let before: String = chars[..cur].iter().collect();
-    let at = chars.get(cur).copied().unwrap_or(' ');
-    let after: String = chars
-      .get(cur + 1..)
-      .map(|s| s.iter().collect())
-      .unwrap_or_default();
-    format!("{before}\x1b[7m{at}\x1b[27m{after}")
+  // `t_cols` is passed in rather than read here: this runs inside the
+  // `write_term!` (a `Shed::term_mut`) call in `draw`, so re-borrowing the
+  // terminal would panic.
+  fn query_display(&self, t_cols: usize) -> String {
+    // The query is a distinct input field: an underlined strip spanning the
+    // line, with empty cells as underlined spaces. The real hardware cursor
+    // (a blinking beam) marks the position, so there's no fake cursor here.
+    let field_width = t_cols.saturating_sub(Self::LEADER_W + 1);
+    let query = self.query.linebuf.to_string();
+    let (body, used) = match self.placeholder.as_ref() {
+      Some(placeholder) if query.is_empty() => {
+        let hint = truncate_to_width(placeholder, field_width);
+        let width = calc_str_width(&hint);
+        (format!("\x1b[90m{hint}\x1b[39m"), width)
+      }
+      _ => {
+        let width = calc_str_width(&query);
+        (query, width)
+      }
+    };
+    let fill = " ".repeat(field_width.saturating_sub(used));
+    format!("\x1b[4m{body}{fill}\x1b[24m")
   }
 
   pub fn predicted_rows(&self) -> usize {
@@ -583,9 +813,12 @@ impl FuzzySelector {
     let rows = GridLayout::MAX_VISIBLE_ROWS;
     self.ensure_cursor_visible(t_cols);
 
-    // Query line, one row below the prompt.
-    write_term!("\n").ok();
-    write_term!("{} {}", Self::PROMPT, self.query_display()).ok();
+    // Query line. In embedded mode it sits one row below the prompt; inline
+    // (standalone) it's the top row, so there's no leading newline.
+    if !self.inline {
+      write_term!("\n").ok();
+    }
+    write_term!("{} {}", Self::PROMPT, self.query_display(t_cols)).ok();
     let mut rows_drawn = 1usize;
 
     if self.filtered.is_empty() {
@@ -601,7 +834,10 @@ impl FuzzySelector {
       // The first visible column has the lowest indices, so it's the tallest.
       let grid_rows = rows.min(n - first);
       let visible_end = ((self.scroll_col + num_cols) * rows).min(n);
-      let query = self.query.linebuf.to_string();
+      // Highlight against the effective (transformed) query so matches line up
+      // with what was actually scored.
+      let query = self.effective_query.clone();
+      let highlight_cb = self.highlight_cb;
 
       // Column-major: cell (col c, row r) is candidate `(scroll_col + c) * rows + r`.
       for r in 0..grid_rows {
@@ -623,7 +859,9 @@ impl FuzzySelector {
             );
           }
           let name_w = calc_str_width(&name_plain);
-          let positions = match_positions(&name_plain, &query);
+          let positions = highlight_cb
+            .and_then(|cb| cb(&name_plain, &query))
+            .unwrap_or_else(|| match_positions(&name_plain, &query));
           let name = emphasize_fuzzy(&name_plain, |i| positions.binary_search(&i).is_ok());
 
           // Per-column max name width, so descriptions align (like the grid).
@@ -694,9 +932,10 @@ impl FuzzySelector {
       rows_drawn += 1;
     }
 
-    // Park the hardware cursor back on the prompt line (the grid contract). The
-    // query's visible cursor is faked with reverse video in `query_display`.
-    write_term!("\x1b[{rows_drawn}A\r").ok();
+    // Park the cursor back on the first overlay row: the prompt line in embedded
+    // mode (one above the query line), or the query line itself when inline.
+    let up = rows_drawn - usize::from(self.inline);
+    write_term!("\x1b[{up}A\r").ok();
     if self.prompt_cursor_col > 0 {
       write_term!("\x1b[{}C", self.prompt_cursor_col).ok();
     }
@@ -707,6 +946,19 @@ impl FuzzySelector {
 
   pub fn clear(&mut self) {
     if let Some(layout) = self.old_layout.take() {
+      if self.inline {
+        // Cursor rests on the first overlay row (the query line); erase it and
+        // each row below, then return to it.
+        write_term!("\x1b[2K").ok();
+        for _ in 1..layout.rows {
+          write_term!("\x1b[1B\x1b[2K").ok();
+        }
+        if layout.rows > 1 {
+          write_term!("\x1b[{}A", layout.rows - 1).ok();
+        }
+        write_term!("\r").ok();
+        return;
+      }
       for _ in 0..layout.rows {
         write_term!("\x1b[1B\x1b[2K").ok();
       }
@@ -800,6 +1052,9 @@ impl Completer for FuzzyCompleter {
   }
   fn draw(&mut self) -> usize {
     self.selector.draw()
+  }
+  fn query_cursor_col(&self) -> Option<usize> {
+    Some(self.selector.query_cursor_col())
   }
   fn reset(&mut self) {
     self.completer.reset();

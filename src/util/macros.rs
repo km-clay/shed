@@ -16,6 +16,12 @@ macro_rules! write_term {
 /// Note that this calls `Shed::term()` internally.
 #[macro_export]
 macro_rules! flush_term {
+  ($($arg:tt)*) => {{ || -> ShResult<()> {
+    use std::io::Write;
+    $crate::state::Shed::term_mut(|t| write!(t, $($arg)*))?;
+    $crate::state::Shed::term_mut(|t| t.flush())?;
+    Ok(())
+  }()}};
   () => {
     use std::io::Write;
     $crate::state::Shed::term_mut(|t| t.flush())

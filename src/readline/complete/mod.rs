@@ -10,6 +10,7 @@ use bitflags::bitflags;
 use nix::sys::signal::Signal;
 
 mod fuzzy;
+pub(crate) use fuzzy::{FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, match_positions};
 mod grid;
 #[cfg(test)]
 mod tests;
@@ -314,6 +315,7 @@ impl CompStrat {
 #[derive(Default, Debug, Clone)]
 pub(crate) struct Candidate {
   content: VarStr,
+  weight: i32,
   desc: Option<VarStr>,
   id: Option<usize>, // for stuff like history that cares about the original index
 }
@@ -344,6 +346,7 @@ impl From<PathBuf> for Candidate {
     let desc = file_desc(&value);
     Self {
       content: path_raw,
+      weight: 0,
       desc: Some(desc),
       id: None,
     }
@@ -354,6 +357,7 @@ impl From<String> for Candidate {
   fn from(value: String) -> Self {
     Self {
       content: value.into(),
+      weight: 0,
       desc: None,
       id: None,
     }
@@ -364,6 +368,7 @@ impl From<VarStr> for Candidate {
   fn from(value: VarStr) -> Self {
     Self {
       content: value,
+      weight: 0,
       desc: None,
       id: None,
     }
@@ -374,6 +379,7 @@ impl From<&VarStr> for Candidate {
   fn from(value: &VarStr) -> Self {
     Self {
       content: value.clone(),
+      weight: 0,
       desc: None,
       id: None,
     }
@@ -390,6 +396,7 @@ impl From<&state::meta::Utility> for Candidate {
   fn from(value: &state::meta::Utility) -> Self {
     Self {
       content: value.name(),
+      weight: 0,
       desc: None,
       id: None,
     }
@@ -406,6 +413,7 @@ impl From<&String> for Candidate {
   fn from(value: &String) -> Self {
     Self {
       content: value.into(),
+      weight: 0,
       desc: None,
       id: None,
     }
@@ -416,6 +424,7 @@ impl From<&str> for Candidate {
   fn from(value: &str) -> Self {
     Self {
       content: value.into(),
+      weight: 0,
       desc: None,
       id: None,
     }
@@ -432,6 +441,7 @@ impl From<(usize, String)> for Candidate {
   fn from(value: (usize, String)) -> Self {
     Self {
       content: value.1.into(),
+      weight: 0,
       desc: None,
       id: Some(value.0),
     }
@@ -477,11 +487,18 @@ impl Candidate {
   pub fn id(&self) -> Option<usize> {
     self.id
   }
+  pub fn weight(&self) -> i32 {
+    self.weight
+  }
   pub fn as_str(&self) -> &str {
     &self.content
   }
   pub fn with_desc(mut self, desc: VarStr) -> Self {
     self.desc = Some(desc);
+    self
+  }
+  pub fn with_weight(mut self, weight: i32) -> Self {
+    self.weight = weight;
     self
   }
   pub fn display(&self) -> String {
@@ -1269,6 +1286,10 @@ pub(crate) trait Completer {
     vec![]
   }
   fn predicted_rows(&self) -> Option<usize> {
+    None
+  }
+  /// Column of the cursor within the overlay's query line, if it has one.
+  fn query_cursor_col(&self) -> Option<usize> {
     None
   }
   fn selected_candidate(&self) -> Option<Candidate>;

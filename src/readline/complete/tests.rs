@@ -1704,3 +1704,113 @@ mod bash_comp_spec_tests {
     );
   }
 }
+
+// ===================== fuzzy_best_match + selector callbacks =====================
+
+fn make_cands(items: &[&str]) -> Vec<Candidate> {
+  items
+    .iter()
+    .map(|s| Candidate::from(s.to_string()))
+    .collect()
+}
+
+#[test]
+fn best_match_picks_highest_score() {
+  let entries = vec![
+    ("/home/me/projects".to_string(), 0),
+    ("/home/me/photos".to_string(), 0),
+  ];
+  assert_eq!(
+    fuzzy_best_match("proj", entries, None, None).as_deref(),
+    Some("/home/me/projects"),
+  );
+}
+
+#[test]
+fn best_match_empty_query_breaks_ties_by_weight() {
+  let entries = vec![("low".to_string(), 1), ("high".to_string(), 5)];
+  assert_eq!(
+    fuzzy_best_match("", entries, None, None).as_deref(),
+    Some("high")
+  );
+}
+
+#[test]
+fn best_match_no_match_is_none() {
+  let entries = vec![("abc".to_string(), 0)];
+  assert!(fuzzy_best_match("zzz", entries, None, None).is_none());
+}
+
+fn only_target(cand: &str, _q: &[char], _p: bool) -> i32 {
+  if cand == "target" { 1000 } else { i32::MIN }
+}
+
+#[test]
+fn best_match_uses_score_cb() {
+  let entries = vec![("aaa".to_string(), 0), ("target".to_string(), 0)];
+  assert_eq!(
+    fuzzy_best_match("a", entries, Some(only_target), None).as_deref(),
+    Some("target"),
+  );
+}
+
+fn to_proj(_q: &str) -> String {
+  "proj".to_string()
+}
+
+#[test]
+fn best_match_applies_query_transform() {
+  // Raw "xyz" matches neither; the transform rewrites it to "proj".
+  let entries = vec![("projects".to_string(), 0), ("photos".to_string(), 0)];
+  assert_eq!(
+    fuzzy_best_match("xyz", entries, None, Some(to_proj)).as_deref(),
+    Some("projects"),
+  );
+}
+
+fn transform_ab(q: &str) -> String {
+  // "a" matches nothing; extending to "ab" matches a candidate. Since raw "ab"
+  // extends "a", the (now-disabled) extends fast path would wrongly retain empty.
+  match q {
+    "a" => "zzzz".to_string(),
+    "ab" => "alpha".to_string(),
+    _ => q.to_string(),
+  }
+}
+
+#[test]
+fn transform_query_repopulates_across_extend() {
+  let _g = TestGuard::new();
+  let mut sel = FuzzySelector::new("test");
+  sel.set_query_transform(Some(transform_ab));
+  sel.activate(make_cands(&["alpha", "beta"]));
+  sel.set_query("a");
+  assert!(
+    sel.filtered().is_empty(),
+    "intermediate query matches nothing"
+  );
+  sel.set_query("ab");
+  assert!(
+    !sel.filtered().is_empty(),
+    "a transform must force a full rescan rather than retaining the empty set",
+  );
+}
+
+fn flat_score(cand: &str, q: &[char], _p: bool) -> i32 {
+  let q: String = q.iter().collect();
+  if cand.contains(&q) { 777 } else { i32::MIN }
+}
+
+#[test]
+fn score_cb_applies_in_extends_branch() {
+  let _g = TestGuard::new();
+  let mut sel = FuzzySelector::new("test");
+  sel.set_score_cb(Some(flat_score));
+  sel.activate(make_cands(&["abc"]));
+  sel.set_query("a");
+  assert_eq!(sel.filtered()[0].score, Some(777));
+  // "ab" extends "a", so this exercises the extends branch, which must still
+  // run the custom scorer (not fall back to the default).
+  sel.set_query("ab");
+  assert_eq!(sel.filtered().first().and_then(|s| s.score), Some(777));
+}
