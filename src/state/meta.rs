@@ -592,6 +592,11 @@ pub(crate) struct MetaTab {
   main_loop_timeout: Option<PollTimeout>,
 
   ignore_hist: bool,
+
+  /// True while a top-level command the REPL recorded in history is executing.
+  /// Lets `fc` skip its own just-recorded entry so it targets the previous
+  /// command instead of looping on itself.
+  current_cmd_recorded: bool,
 }
 
 impl Clone for MetaTab {
@@ -616,6 +621,7 @@ impl Clone for MetaTab {
       last_was_func_def: self.last_was_func_def,
       main_loop_timeout: self.main_loop_timeout,
       ignore_hist: self.ignore_hist,
+      current_cmd_recorded: self.current_cmd_recorded,
 
       last_job: None,
       procsub_stack: vec![],
@@ -647,6 +653,7 @@ impl Default for MetaTab {
       last_was_func_def: false,
       main_loop_timeout: None,
       ignore_hist: false,
+      current_cmd_recorded: false,
     }
   }
 }
@@ -681,6 +688,14 @@ impl MetaTab {
   }
   pub fn set_no_hist_save(&mut self) {
     self.ignore_hist = true;
+  }
+
+  pub fn set_current_cmd_recorded(&mut self, recorded: bool) {
+    self.current_cmd_recorded = recorded;
+  }
+
+  pub fn current_cmd_recorded(&self) -> bool {
+    self.current_cmd_recorded
   }
 
   pub fn no_hist_save(&mut self) -> bool {

@@ -204,7 +204,13 @@ fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
   let first = opts.first.unwrap_or_default();
   let last = opts.last.unwrap_or(first.clone());
 
-  let entries = get_entry_range(hist, Some(first), Some(last), opts.reverse)?;
+  let entries = get_entry_range(
+    hist,
+    Some(first),
+    Some(last),
+    opts.reverse,
+    Shed::meta(MetaTab::current_cmd_recorded),
+  )?;
   let mut should_push;
 
   Shed::meta_mut(MetaTab::set_no_hist_save);
@@ -240,9 +246,15 @@ fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
 fn fc_reexec(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
   let first = opts.first.unwrap_or_default();
   let last = opts.last.unwrap_or(first.clone());
-  let entries = get_entry_range(hist, Some(first), Some(last), opts.reverse)?;
+  let entries = get_entry_range(
+    hist,
+    Some(first),
+    Some(last),
+    opts.reverse,
+    Shed::meta(MetaTab::current_cmd_recorded),
+  )?;
 
-  Shed::meta_mut(MetaTab::no_hist_save);
+  Shed::meta_mut(MetaTab::set_no_hist_save);
   for (_, entry) in entries {
     let mut command = entry.command;
     let mut should_push = false;
@@ -271,7 +283,13 @@ fn fc_list(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
   };
   let last = opts.last.clone().unwrap_or_default();
 
-  let entries = get_entry_range(hist, Some(first), Some(last), opts.reverse)?;
+  let entries = get_entry_range(
+    hist,
+    Some(first),
+    Some(last),
+    opts.reverse,
+    Shed::meta(MetaTab::current_cmd_recorded),
+  )?;
 
   let mut buf = String::new();
   for (id, entry) in entries {
@@ -293,8 +311,12 @@ fn get_entry_range(
   first: Option<RangeArg>,
   last: Option<RangeArg>,
   reverse: bool,
+  skip_current: bool,
 ) -> ShResult<Vec<(i64, HistEntry)>> {
-  let last_id = hist.last_id();
+  let mut last_id = hist.last_id();
+  if skip_current && last_id > 0 {
+    last_id -= 1;
+  }
 
   let resolve = |arg: &RangeArg| -> ShResult<i64> {
     match arg {
@@ -780,6 +802,7 @@ mod fc_edit_tests {
       Some(RangeArg::Number(-1)),
       Some(RangeArg::Number(-1)),
       false,
+      false,
     )
     .unwrap();
     assert_eq!(entries.len(), 1);
@@ -799,6 +822,7 @@ mod fc_edit_tests {
       &hist,
       Some(RangeArg::Number(-3)),
       Some(RangeArg::Number(-1)),
+      false,
       false,
     )
     .unwrap();

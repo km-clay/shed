@@ -497,6 +497,10 @@ fn handle_readline_event(
         .then(|| readline.history_mut().push(&input).ok().flatten())
         .flatten(); // token is used as a stable identifier for the command in the history
 
+      // Mark that this command is now the most-recent history entry, so `fc`
+      // skips its own line instead of editing and re-running itself in a loop.
+      Shed::meta_mut(|m| m.set_current_cmd_recorded(token.is_some()));
+
       autocmd!(PreCmd);
 
       let cmd_start = Instant::now();
@@ -547,6 +551,8 @@ fn handle_readline_event(
           .set_status(token, runtime, state::Shed::get_status());
       }
       log::trace!("History update done in {:.2?}", hist_update_start.elapsed());
+
+      Shed::meta_mut(|m| m.set_current_cmd_recorded(false));
 
       let term_start = Instant::now();
 
