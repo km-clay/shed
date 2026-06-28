@@ -646,7 +646,10 @@ impl Terminal {
     if !shopt!(statline.enable) {
       return Ok(());
     }
-    let cursor_row = self.get_cursor_pos().ok().flatten().map(|(r, _)| r.0);
+    let (cursor_row, cursor_col) = match self.get_cursor_pos().ok().flatten() {
+      Some((row, col)) => (Some(row.0), Some(col.0 as u16)),
+      None => (None, None),
+    };
 
     if cursor_row.is_none_or(|r| r >= bottom as usize) {
       // Caller invokes us while the scroll region is still Unset (between
@@ -657,7 +660,7 @@ impl Terminal {
       self
         .execute_control(&TermCtl::Cursor(CursorCtl::Absolute {
           row: bottom,
-          col: 1,
+          col: cursor_col.unwrap_or(1),
         }))
         .ok();
     }
