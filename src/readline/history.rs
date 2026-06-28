@@ -132,14 +132,14 @@ pub struct History {
 }
 
 impl History {
-  const USER_VERSION: i32 = 2;
+  const USER_VERSION: i32 = 3;
 
   fn lock(&self) -> MutexGuard<'_, Connection> {
     self.conn.lock().unwrap_or_else(|e| e.into_inner())
   }
 
   pub fn new(conn: Arc<Mutex<Connection>>, table: &str) -> ShResult<Self> {
-    let max_hist = shopt!(core.max_hist);
+    let max_hist = shopt!(history.max_entries);
 
     Self::init_db(&conn.lock().unwrap_or_else(|e| e.into_inner()), table)?;
 
@@ -300,6 +300,16 @@ impl History {
           conn.execute_batch("COMMIT")?;
 
           conn.execute_batch("PRAGMA user_version = 2")?;
+        }
+        2 => {
+          // index the token field so we can check it faster
+          conn.execute_batch(&format!(
+            "
+            CREATE INDEX IF NOT EXISTS {table}_token_idx
+            ON {table}(token);
+            "
+          ))?;
+          conn.execute_batch("PRAGMA user_version = 3")?;
         }
         _ => {}
       }
@@ -626,15 +636,15 @@ impl History {
   }
 
   #[cfg_attr(not(test), allow(dead_code))]
-  pub fn push_entry(&self, entry: HistEntry) -> ShResult<()> {
-    Self::push_entry_conn(&self.lock(), &self.table, entry)
+  pub fn push_entry(&self, entry: HistEntry) -> ShResult<bool> {
+    self.push_entry_conn(&self.lock(), &self.table, entry)
   }
 
-  pub fn push_with(&self, conn: &Connection, entry: HistEntry) -> ShResult<()> {
-    Self::push_entry_conn(conn, &self.table, entry)
+  pub fn push_with(&self, conn: &Connection, entry: HistEntry) -> ShResult<bool> {
+    self.push_entry_conn(conn, &self.table, entry)
   }
 
-  fn push_entry_conn(conn: &Connection, table: &str, entry: HistEntry) -> ShResult<()> {
+  fn push_entry_conn(&self, conn: &Connection, table: &str, entry: HistEntry) -> ShResult<bool> {
     let HistEntry {
       runtime,
       timestamp,
@@ -644,9 +654,12 @@ impl History {
       token,
     } = entry;
     if command.is_empty() {
-      return Ok(());
+      return Ok(false);
     }
-    if shopt!(core.hist_ignore_dupes) {
+    if Self::token_exists(conn, table, token) {
+      return Ok(false);
+    }
+    if shopt!(history.ignore_dupes) {
       let last: Option<String> = conn
         .query_row(
           &format!("SELECT command FROM {table} ORDER BY id DESC LIMIT 1"),
@@ -655,16 +668,27 @@ impl History {
         )
         .ok();
       if last.as_deref() == Some(&command) {
-        return Ok(());
+        return Ok(false);
       }
     }
+
     let timestamp = timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
     let new_id = Self::last_id_conn(conn, table) + 1;
     conn.execute(
       &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, status, token) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
       rusqlite::params![new_id, timestamp, runtime.as_micros() as i64, command, cwd, status, token.to_string()],
     )?;
-    Ok(())
+    Ok(true)
+  }
+
+  pub fn token_exists(conn: &Connection, table: &str, token: Uuid) -> bool {
+    conn
+      .query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE token = ?1)", table),
+        rusqlite::params![token.to_string()],
+        |row| row.get(0),
+      )
+      .unwrap_or(false)
   }
 
   pub fn update_search_mask(&mut self, prefix: Option<&str>) {

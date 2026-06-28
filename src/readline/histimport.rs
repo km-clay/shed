@@ -4,6 +4,8 @@ use std::{
 };
 
 use regex::Regex;
+use serde_json::Value;
+use uuid::Uuid;
 
 use crate::{procio::bytes_to_string, state::vars::VarStr};
 
@@ -18,6 +20,10 @@ pub fn import_history<P: AsRef<Path>>(path: P) -> ShResult<Vec<HistEntry>> {
   let content = std::fs::read(path)
     .map(bytes_to_string)
     .map_err(|e| sherr!(ParseErr, "Failed to read history file: {e}"))?;
+
+  if let Ok(val) = serde_json::from_str::<Value>(&content) {
+    return import_json(val);
+  }
 
   let filename = path
     .file_name()
@@ -37,6 +43,79 @@ pub fn import_history<P: AsRef<Path>>(path: P) -> ShResult<Vec<HistEntry>> {
         .unwrap_or_else(|_| try_import_bash(&content)),
     ),
   }
+}
+
+fn import_json(content: Value) -> ShResult<Vec<HistEntry>> {
+  let obj = content
+    .as_object()
+    .ok_or_else(|| sherr!(ParseErr, "JSON history is not an object"))?;
+  let mut entries: Vec<(usize, HistEntry)> = vec![];
+
+  for (key, val) in obj.iter() {
+    let val_obj = val
+      .as_object()
+      .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' is not an object"))?;
+
+    let command = val_obj
+      .get("command")
+      .and_then(|v| v.as_str())
+      .ok_or_else(|| {
+        sherr!(
+          ParseErr,
+          "JSON history entry '{key}' missing 'command' string"
+        )
+      })?;
+    let cwd = val_obj
+      .get("cwd")
+      .and_then(|v| v.as_str())
+      .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' missing 'cwd' string"))?;
+    let runtime = val_obj
+      .get("runtime")
+      .and_then(|v| v.as_u64())
+      .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' missing 'runtime' u64"))?;
+    let status = val_obj
+      .get("status")
+      .and_then(|v| v.as_i64())
+      .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' missing 'status' i64"))?;
+    let timestamp = val_obj
+      .get("timestamp")
+      .and_then(|v| v.as_u64())
+      .ok_or_else(|| {
+        sherr!(
+          ParseErr,
+          "JSON history entry '{key}' missing 'timestamp' u64"
+        )
+      })?;
+    let token = val_obj
+      .get("token")
+      .and_then(|v| v.as_str())
+      .and_then(|v| Uuid::parse_str(v).ok())
+      .ok_or_else(|| {
+        sherr!(
+          ParseErr,
+          "JSON history entry '{key}' missing 'token' string"
+        )
+      })?;
+
+    let id = key
+      .parse::<usize>()
+      .map_err(|_| sherr!(ParseErr, "JSON history entry key '{key}' is not a valid id"))?;
+
+    let entry = HistEntry {
+      command: command.into(),
+      cwd: cwd.into(),
+      runtime: Duration::from_micros(runtime),
+      status: status as i32,
+      timestamp: UNIX_EPOCH + Duration::from_secs(timestamp),
+      token,
+    };
+
+    entries.push((id, entry));
+  }
+
+  entries.sort_by_key(|(id, _)| *id);
+
+  Ok(entries.into_iter().map(|(_, entry)| entry).collect())
 }
 
 fn try_import_bash(content: &str) -> Vec<HistEntry> {

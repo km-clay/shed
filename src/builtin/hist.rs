@@ -520,11 +520,12 @@ impl super::Builtin for Hist {
         .collect();
 
       let entries_fmt = query.format_entries(&entries);
-      let count = entries.len();
+      let mut count = 0;
 
       hist.transaction(|conn| {
         for (_, entry) in entries {
-          hist.push_with(conn, entry).promote_err(span.clone())?;
+          let pushed = hist.push_with(conn, entry).promote_err(span.clone())?;
+          count += i32::from(pushed);
         }
         Ok(())
       })?;
