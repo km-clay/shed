@@ -620,10 +620,13 @@ impl Builtin for BuiltinBuiltin {
     let NdRule::Command { assignments, argv } = &node.class else {
       unreachable!()
     };
-    let inner_argv = argv.iter().skip(1).cloned().collect::<Vec<Tk>>();
+    let mut inner_argv = expand_argv(argv)?;
+    if !inner_argv.is_empty() {
+      inner_argv.remove(0);
+    }
 
-    let cmd = inner_argv.first().map_or("", Tk::as_str);
-    let Some(builtin) = lookup_builtin(cmd) else {
+    let cmd = inner_argv.first().map(Tk::word).unwrap_or_default();
+    let Some(builtin) = lookup_builtin(&cmd) else {
       sherr!(NotFound @ span, "builtin not found: {cmd}").print_error();
       return with_status(127);
     };
@@ -691,7 +694,7 @@ impl Builtin for CommandBuiltin {
         continue;
       }
 
-      match tk.to_string().as_str() {
+      match tk.word().as_str() {
         "-p" => use_default_path = true,
 
         "-v" if !print_type => print_path = true,
@@ -762,7 +765,8 @@ impl CommandBuiltin {
       let Some(name) = argv.first() else {
         return with_status(2);
       };
-      let name_str = name.as_str();
+      let name_word = name.word();
+      let name_str = name_word.as_str();
       match state::util::which_util(name_str) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
@@ -784,7 +788,8 @@ impl CommandBuiltin {
       let Some(name) = argv.first() else {
         return with_status(2);
       };
-      let name_str = name.as_str();
+      let name_word = name.word();
+      let name_str = name_word.as_str();
       match state::util::which_util(name_str) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
@@ -1054,5 +1059,59 @@ pub mod tests {
       out.contains("PATH_NOW=/sentinel_path_xyz"),
       "PATH was not restored after `command -p`: got {out:?}",
     );
+  }
+
+  #[test]
+  fn command_smuggled_through_variable_dispatches() {
+    let g = TestGuard::new();
+    test_input(r#"C="command echo smuggled_cmd"; $C"#).unwrap();
+    let out = g.read_output();
+    assert!(out.contains("smuggled_cmd"), "got: {out:?}");
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn command_v_resolves_name_from_variable() {
+    let g = TestGuard::new();
+    test_input("F=echo; command -v $F").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("echo"), "got: {out:?}");
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  // ===================== builtin builtin =====================
+
+  #[test]
+  fn builtin_bare_dispatches() {
+    let g = TestGuard::new();
+    test_input("builtin echo hello_builtin").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("hello_builtin"), "got: {out:?}");
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn builtin_smuggled_through_variable_dispatches() {
+    let g = TestGuard::new();
+    test_input(r#"B="builtin echo smuggled_builtin"; $B"#).unwrap();
+    let out = g.read_output();
+    assert!(out.contains("smuggled_builtin"), "got: {out:?}");
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn builtin_resolves_name_from_variable() {
+    let g = TestGuard::new();
+    test_input("CMD=echo; builtin $CMD from_var").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("from_var"), "got: {out:?}");
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn builtin_unknown_name_is_127() {
+    let _g = TestGuard::new();
+    test_input("builtin __not_a_real_builtin__ x").unwrap();
+    assert_eq!(state::Shed::get_status(), 127);
   }
 }

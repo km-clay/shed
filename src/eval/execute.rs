@@ -7,7 +7,7 @@ use crate::{
     logic::AutoloadKind,
     vars::{VarStr, VarStrSliceExt},
   },
-  util::{VarStrDisplay, isolation_guard},
+  util::isolation_guard,
   varstr,
 };
 use std::{collections::VecDeque, ffi::CString, os::unix::fs::PermissionsExt, path::Path, rc::Rc};
