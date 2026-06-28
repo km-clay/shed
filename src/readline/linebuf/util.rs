@@ -311,7 +311,7 @@ impl super::LineBuf {
 
     // trim whitespace
     for (i, line) in self.lines.iter_mut().enumerate() {
-      if i == 0 {
+      if i == 0 && !shopt!(history.ignore_space) {
         while line.0.first().is_some_and(super::types::Grapheme::is_ws) {
           line.0.remove(0);
         }
