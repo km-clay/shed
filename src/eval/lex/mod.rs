@@ -1077,7 +1077,11 @@ impl LexStream {
         self.quote_state.toggle_double();
       }
       _ if self.quote_state.in_double() => pos += ch.len_utf8(),
-      '<' | '>' if chars.peek() == Some(&'(') => {
+      '<' | '>' => {
+        if chars.peek() != Some(&'(') {
+          break
+        }
+        // it's a process sub
         pos += 2;
         chars.next();
         let paren_pos = pos;
