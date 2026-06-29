@@ -1,18 +1,18 @@
 use std::{
   cmp::Ordering,
   path::PathBuf,
+  sync::{Arc, Mutex},
   time::{Duration, UNIX_EPOCH},
 };
 
 use chrono::Utc;
 use chrono_english::{Dialect, Interval, parse_date_string};
 
-use crate::state::vars::VarStr;
+use crate::{HashSet, expand::shell_quote_fmt, state::vars::VarStr};
 
 use super::{
   Shed, errln,
   getopt::{Opt, OptSpec},
-  outln,
   readline::{HistEntry, History, import_history},
   sherr, state,
   util::{ShResult, ShResultExt, with_status},
@@ -61,8 +61,10 @@ pub struct HistQuery {
   limit: Option<u64>,
   specific_ids: Vec<i64>,
   no_numbers: bool,
+  no_dupes: bool,
   reverse: bool,
   json: bool,
+  quoted: bool,
   pull: bool,
   count: bool,
   delete: bool,
@@ -365,6 +367,7 @@ impl HistQuery {
           "delete" => new.delete = true,
           "restore" => new.restore = true,
           "json" => new.json = true,
+          "quoted" => new.quoted = true,
           "pull" => new.pull = true,
           _ => {}
         },
@@ -380,70 +383,109 @@ impl HistQuery {
     Ok(new)
   }
 
-  pub fn format_entries(&self, entries: &[(i64, HistEntry)]) -> String {
-    if self.json {
-      let json: serde_json::Value = serde_json::Value::Object(
+  pub fn format_entries(
+    &self,
+    entries: &[(i64, HistEntry)],
+    f: &mut impl std::fmt::Write,
+  ) -> std::fmt::Result {
+    // Filters that don't depend on the output format run once, up front, so
+    // every renderer below inherits them.
+    let entries = self.dedupe(entries);
+
+    if self.count {
+      write!(f, "{}", entries.len())
+    } else if self.json {
+      self.format_json(&entries, f)
+    } else if self.quoted {
+      for (id, entry) in entries.iter() {
+        if !self.no_numbers {
+          write!(f, "{id} ")?;
+        }
+        shell_quote_fmt(entry.command(), f)?;
+        writeln!(f)?;
+      }
+
+      Ok(())
+    } else {
+      for (id, entry) in entries.iter() {
+        if !self.no_numbers {
+          write!(f, "{id}\t")?;
+        }
+        writeln!(f, "{}", entry.command())?;
+      }
+      Ok(())
+    }
+  }
+
+  /// Apply `no_dupes`: keep only the most recent entry per command, preserving
+  /// chronological order. Just borrows the input when the flag is off.
+  fn dedupe<'a>(&self, entries: &'a [(i64, HistEntry)]) -> Vec<&'a (i64, HistEntry)> {
+    if !self.no_dupes {
+      return entries.iter().collect();
+    }
+    // Walk newest-first so the kept copy of each command is the latest, then
+    // restore chronological order.
+    let mut seen: HashSet<&str> = HashSet::default();
+    let mut kept: Vec<_> = entries
+      .iter()
+      .rev()
+      .filter(|(_, e)| seen.insert(e.command()))
+      .collect();
+    kept.reverse();
+    kept
+  }
+
+  /// Entries as JSON: an object keyed by id, or (under `no_numbers`, where
+  /// there's no id to key on) a plain array of the same objects.
+  fn format_json(
+    &self,
+    entries: &[&(i64, HistEntry)],
+    f: &mut impl std::fmt::Write,
+  ) -> std::fmt::Result {
+    use serde_json::Value;
+    let entry_obj = |e: &HistEntry| {
+      let HistEntry {
+        runtime,
+        timestamp,
+        command,
+        cwd,
+        status,
+        token,
+      } = e;
+      let mut map = serde_json::Map::new();
+      map.insert(
+        "runtime".into(),
+        Value::Number((runtime.as_micros() as i64).into()),
+      );
+      map.insert(
+        "timestamp".into(),
+        Value::Number(
+          timestamp
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .into(),
+        ),
+      );
+      map.insert("command".into(), Value::String(command.to_string()));
+      map.insert("cwd".into(), Value::String(cwd.to_string()));
+      map.insert("status".into(), Value::Number(i64::from(*status).into()));
+      map.insert("token".into(), Value::String(token.to_string()));
+      Value::Object(map)
+    };
+
+    let json = if self.no_numbers {
+      Value::Array(entries.iter().map(|(_, e)| entry_obj(e)).collect())
+    } else {
+      Value::Object(
         entries
           .iter()
-          .map(|e| {
-            let HistEntry {
-              runtime,
-              timestamp,
-              command,
-              cwd,
-              status,
-              token,
-            } = &e.1;
-            let mut map = serde_json::Map::new();
-            map.insert(
-              "runtime".into(),
-              serde_json::Value::Number((runtime.as_micros() as i64).into()),
-            );
-            map.insert(
-              "timestamp".into(),
-              serde_json::Value::Number(
-                (timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs()).into(),
-              ),
-            );
-            map.insert(
-              "command".into(),
-              serde_json::Value::String(command.to_string()),
-            );
-            map.insert("cwd".into(), serde_json::Value::String(cwd.to_string()));
-            map.insert(
-              "status".into(),
-              serde_json::Value::Number(i64::from(*status).into()),
-            );
-            map.insert("token".into(), serde_json::Value::String(token.to_string()));
+          .map(|(id, e)| (id.to_string(), entry_obj(e)))
+          .collect(),
+      )
+    };
 
-            (e.0.to_string(), serde_json::Value::Object(map))
-          })
-          .collect::<serde_json::Map<String, serde_json::Value>>(),
-      );
-
-      serde_json::to_string_pretty(&json).unwrap_or_else(|_| {
-        let new = Self {
-          json: false,
-          ..self.clone()
-        };
-        new.format_entries(entries)
-      })
-    } else if self.count {
-      entries.len().to_string()
-    } else {
-      entries
-        .iter()
-        .map(|e| {
-          let fmt = if self.no_numbers {
-            e.1.command().to_string()
-          } else {
-            format!("{}\t{}", e.0, e.1.command())
-          };
-          fmt.replace('\n', "\n\t")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-    }
+    writeln!(f, "{json:#}")
   }
 }
 
@@ -457,6 +499,7 @@ impl super::Builtin for Hist {
       OptSpec::flag("count"),
       OptSpec::flag("not"),
       OptSpec::flag("json"),
+      OptSpec::flag("quoted"),
       OptSpec::flag("pull"),
       OptSpec::flag('n'),
       OptSpec::flag('r'),
@@ -485,10 +528,25 @@ impl super::Builtin for Hist {
     } else {
       "shed_history"
     };
-    let conn = state::util::get_db_conn()
-      .ok_or_else(|| sherr!(InternalErr, "database not available"))
-      .promote_err(span.clone())?;
-    let hist = History::new(conn, table).promote_err(span.clone())?;
+    let hist = match state::util::get_db_conn() {
+      Some(conn) => History::new(conn, table).promote_err(span.clone())?,
+
+      // we are in a forked child or something
+      // try to open the database read-only
+      None => {
+        if query.delete || query.pull || query.restore || query.import.is_some() {
+          return Err(
+            sherr!(
+              ExecFail,
+              "hist: history can't be modified from a pipeline or subshell"
+            )
+            .promote(span),
+          );
+        }
+        let conn = state::util::open_db_conn_readonly().promote_err(span.clone())?;
+        History::attach(Arc::new(Mutex::new(conn)), table)
+      }
+    };
 
     for (arg, span) in args.argv {
       let Ok(id) = arg.parse::<i64>() else {
@@ -519,7 +577,7 @@ impl super::Builtin for Hist {
         .map(|(i, e)| ((i as u64).cast_signed(), e))
         .collect();
 
-      let entries_fmt = query.format_entries(&entries);
+      Shed::sinks(|s| query.format_entries(&entries, s)).ok();
       let mut count = 0;
 
       hist.transaction(|conn| {
@@ -530,7 +588,6 @@ impl super::Builtin for Hist {
         Ok(())
       })?;
 
-      outln!("{entries_fmt}");
       errln!("hist: imported {count} entries.");
 
       hist.sort_by_timestamp()?;
@@ -538,9 +595,7 @@ impl super::Builtin for Hist {
     }
 
     let entries = query.execute(&hist).promote_err(span.clone())?;
-    let entries_fmt = query.format_entries(&entries);
-
-    outln!("{entries_fmt}");
+    Shed::sinks(|s| query.format_entries(&entries, s)).ok();
 
     if query.delete {
       let num_deleted = entries.len();
