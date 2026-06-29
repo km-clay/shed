@@ -677,7 +677,7 @@ impl PipeGenerator {
 }
 
 impl Iterator for PipeGenerator {
-  type Item = (Option<Redir>, Option<Redir>);
+  type Item = (Option<Redir>, Option<Redir>, Option<RawFd>);
   fn next(&mut self) -> Option<Self::Item> {
     if self.cursor >= self.num_cmds {
       return None;
@@ -686,9 +686,11 @@ impl Iterator for PipeGenerator {
     let needs_write = self.cursor + 1 < self.num_cmds; // this is not the last command
 
     let rpipe = self.last_rpipe.take(); // None if this is the first command
+    let mut downstream_read = None;
     let wpipe = needs_write
       .then(|| {
         let (r, w) = pipes_high().ok()?;
+        downstream_read = Some(r.as_raw_fd());
         let read = Redir::new(0, r);
         let write = Redir::new(1, w);
         self.last_rpipe = Some(read);
@@ -697,7 +699,7 @@ impl Iterator for PipeGenerator {
       .flatten();
 
     self.cursor += 1;
-    Some((rpipe, wpipe))
+    Some((rpipe, wpipe, downstream_read))
   }
 }
 
@@ -844,6 +846,15 @@ impl io::Write for Sinks {
 
   fn flush(&mut self) -> io::Result<()> {
     Ok(())
+  }
+}
+
+impl std::fmt::Write for Sinks {
+  fn write_str(&mut self, s: &str) -> std::fmt::Result {
+    self
+      .write_all(s.as_bytes())
+      .map(|_| ())
+      .map_err(|_| std::fmt::Error)
   }
 }
 

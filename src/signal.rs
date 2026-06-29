@@ -199,6 +199,7 @@ pub fn sig_setup(is_login: bool) {
 pub fn reset_signals(is_fg: bool) {
   let default = SigAction::new(SigHandler::SigDfl, SaFlags::empty(), SigSet::empty());
   unsafe {
+    sigaction(Signal::SIGPIPE, &default).ok();
     if !is_fg {
       sigaction(Signal::SIGTTIN, &default).ok();
       sigaction(Signal::SIGTTOU, &default).ok();

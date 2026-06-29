@@ -905,6 +905,18 @@ pub fn open_db_conn() -> ShResult<Connection> {
   Ok(Connection::open(&db_path)?)
 }
 
+/// Open a fresh read-only connection to the history database. Unlike
+/// [`get_db_conn`], this is safe to call in a forked child: it's a brand-new
+/// handle rather than the fenced inherited one, and being read-only it cannot
+/// corrupt the rollback journal. Callers must not rely on it for migrations or
+/// writes (the file is expected to already be migrated by the parent).
+pub fn open_db_conn_readonly() -> ShResult<Connection> {
+  let db_path = history_db_path();
+  let conn = Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+  conn.busy_timeout(std::time::Duration::from_secs(5)).ok();
+  Ok(conn)
+}
+
 #[cfg(target_os = "android")]
 pub fn get_default_path() -> Option<String> {
   // Android does not have conf_str or _CS_PATH

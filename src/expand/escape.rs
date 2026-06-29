@@ -613,52 +613,56 @@ pub fn unescape_math(raw: &str) -> ShResult<String> {
   Ok(result)
 }
 
-/// Escapes a string for displaying as a var value
-pub fn shell_quote(s: &str) -> String {
+pub fn shell_quote_fmt(s: &str, f: &mut impl std::fmt::Write) -> std::fmt::Result {
   // An empty string MUST be quoted, otherwise interpolating it into a command
   // line collapses into surrounding whitespace and the arg is silently dropped.
   if s.is_empty() {
-    return "''".to_string();
+    return write!(f, "''");
   }
   let has_control = s.chars().any(|c| c.is_ascii_control());
   let has_special = s.chars().any(|c| SPECIAL_CHARS.contains(c));
 
   if has_control {
     // $'...' ANSI-C quoting: backslashes and all special chars must be escaped
-    let mut result = String::with_capacity(s.len());
+    write!(f, "$'")?;
     for ch in s.chars() {
       match ch {
-        '\\' => result.push_str("\\\\"),
-        '\'' => result.push_str("\\'"),
-        '\n' => result.push_str("\\n"),
-        '\r' => result.push_str("\\r"),
-        '\t' => result.push_str("\\t"),
-        '\x07' => result.push_str("\\a"),
-        '\x08' => result.push_str("\\b"),
-        '\x0B' => result.push_str("\\v"),
-        '\x0C' => result.push_str("\\f"),
+        '\\' => write!(f, "\\\\")?,
+        '\'' => write!(f, "\\'")?,
+        '\n' => write!(f, "\\n")?,
+        '\r' => write!(f, "\\r")?,
+        '\t' => write!(f, "\\t")?,
+        '\x07' => write!(f, "\\a")?,
+        '\x08' => write!(f, "\\b")?,
+        '\x0B' => write!(f, "\\v")?,
+        '\x0C' => write!(f, "\\f")?,
         c if c.is_ascii_control() => {
-          let _ = write!(result, "\\x{:02x}", c as u8);
+          let _ = write!(f, "\\x{:02x}", c as u8);
         }
-        c => result.push(c),
+        c => write!(f, "{c}")?,
       }
     }
-    format!("$'{result}'")
+    write!(f, "'")
   } else if has_special {
-    let mut result = String::with_capacity(s.len() + 2);
-    result.push('\'');
+    write!(f, "'")?;
     for ch in s.chars() {
       if ch == '\'' {
-        result.push_str("'\\''");
+        write!(f, "'\\''")?;
       } else {
-        result.push(ch);
+        write!(f, "{ch}")?;
       }
     }
-    result.push('\'');
-    result
+    write!(f, "'")
   } else {
-    s.to_string()
+    write!(f, "{s}")
   }
+}
+
+/// Escapes a string for displaying as a var value
+pub fn shell_quote(s: &str) -> String {
+  let mut result = String::new();
+  shell_quote_fmt(s, &mut result).unwrap();
+  result
 }
 
 #[cfg(test)]

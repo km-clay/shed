@@ -138,6 +138,27 @@ impl History {
     self.conn.lock().unwrap_or_else(|e| e.into_inner())
   }
 
+  /// Wrap an already-migrated connection for read-only querying, skipping
+  /// `init_db` and the background cache loader. Used for forked-child access
+  /// (e.g. `hist` in a pipeline) where the inherited connection is fenced off
+  /// and migrating or writing isn't possible.
+  pub fn attach(conn: Arc<Mutex<Connection>>, table: &str) -> Self {
+    let max_hist = shopt!(history.max_entries);
+    let max_size = (max_hist >= 0).then_some(max_hist as u32);
+    Self {
+      conn,
+      table: table.to_string(),
+      pending: None,
+      search_mask: vec![],
+      mask_stale: true,
+      fuzzy_finder: None,
+      no_matches: false,
+      cursor: 0,
+      virt_cursor: 0,
+      max_size,
+    }
+  }
+
   pub fn new(conn: Arc<Mutex<Connection>>, table: &str) -> ShResult<Self> {
     let max_hist = shopt!(history.max_entries);
 

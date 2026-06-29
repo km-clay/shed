@@ -10,7 +10,10 @@ use crate::{
   util::isolation_guard,
   varstr,
 };
-use std::{collections::VecDeque, ffi::CString, os::unix::fs::PermissionsExt, path::Path, rc::Rc};
+use std::{
+  collections::VecDeque, ffi::CString, os::fd::RawFd, os::unix::fs::PermissionsExt, path::Path,
+  rc::Rc,
+};
 
 use crate::state::util::with_vars;
 use crate::util::posix_extension::execvpe;
@@ -321,6 +324,10 @@ pub struct Dispatcher {
   pub job_stack: JobStack,
   timer_stack: Vec<Option<CmdTimer>>,
   fg_job: bool,
+  /// A pipe fd a forked builtin/compound segment must close in its child (the
+  /// downstream read end it inherited but doesn't exec away). Set per-segment in
+  /// `exec_pipeline`, consumed in `run_fork`.
+  fork_close_fd: Option<RawFd>,
 }
 
 impl Dispatcher {
@@ -332,6 +339,7 @@ impl Dispatcher {
       job_stack: JobStack::new(),
       timer_stack: vec![],
       fg_job: true,
+      fork_close_fd: None,
     }
   }
   pub fn begin_dispatch(&mut self) -> ShResult<()> {
@@ -1176,7 +1184,7 @@ impl Dispatcher {
     // splice and pipefail blame after the forked prefix is waited on.
     let mut tail_statuses: Vec<(i32, Span)> = vec![];
 
-    for ((i, cmd), (r, w)) in cmds_and_pipes {
+    for ((i, cmd), (r, w, downstream_read)) in cmds_and_pipes {
       let has_redirs = has_redirs || (r.is_some() || w.is_some());
 
       if num_cmds > 1 && i != tail_start {
@@ -1217,6 +1225,7 @@ impl Dispatcher {
 
       spans.push(cmd.get_span());
 
+      self.fork_close_fd = downstream_read;
       result = if should_fork_segment(cmd) {
         let name = cmd
           .get_command()
@@ -1231,6 +1240,7 @@ impl Dispatcher {
       } else {
         self.dispatch_node(cmd)
       };
+      self.fork_close_fd = None;
 
       if !tty_attached && let Some(pgid) = tty_controller(self) {
         Shed::term_mut(|t| t.attach(pgid)).ok();
@@ -1534,6 +1544,12 @@ impl Dispatcher {
       ForkResult::Child => {
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
         crate::signal::reset_signals(self.fg_job);
+        // This segment never execs, so close the downstream pipe read end it
+        // inherited — otherwise it holds the reader's side open and a writer
+        // that outpaces the pipe buffer deadlocks.
+        if let Some(fd) = self.fork_close_fd {
+          let _ = nix::unistd::close(fd);
+        }
         let _guard = Shed::term_mut(|t| t.interactive_guard(false));
         f(self);
         unsafe { nix::libc::_exit(state::Shed::get_status()) }

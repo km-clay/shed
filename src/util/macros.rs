@@ -426,8 +426,10 @@ macro_rules! err {
 #[macro_export]
 macro_rules! _write_inner {
   (out, $macro:tt, $fd:expr, $($arg:tt)*) => {{
-    use ::std::io::Write;
-    $crate::state::Shed::sinks(|s| { $macro!(s, $($arg)*).ok(); });
+    $crate::state::Shed::sinks(|s| {
+      let s: &mut dyn ::std::io::Write = s;
+      $macro!(s, $($arg)*).ok();
+    });
   }};
   (err, $macro:tt, $fd:expr, $($arg:tt)*) => {{
     use ::std::io::Write;
