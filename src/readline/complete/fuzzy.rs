@@ -298,11 +298,20 @@ pub(crate) struct FuzzyBuilder {
   score_cb: Option<ScoreCallback>,
   query_transform: Option<QueryTransform>,
   highlight_cb: Option<HighlightCallback>,
+  inline: bool,
 }
 
 impl FuzzyBuilder {
   pub fn new() -> Self {
-    Self::default()
+    Self {
+      inline: true,
+      ..Default::default()
+    }
+  }
+
+  pub fn with_inline(mut self, enable: bool) -> Self {
+    self.inline = enable;
+    self
   }
 
   pub fn with_entries(mut self, entries: Vec<(String, i32)>) -> Self {
@@ -333,15 +342,18 @@ impl FuzzyBuilder {
       return Ok(None); // not attached to a terminal
     };
 
+    let _raw = Shed::term_mut(Terminal::raw_mode_guard)?;
+
     let candidates = self
       .entries
       .into_iter()
       .map(|(text, weight)| Candidate::from(text).with_weight(weight))
       .collect();
 
+    let inline = self.inline;
     let mut selector = FuzzySelector::new("");
     selector.set_placeholder(self.placeholder);
-    selector.set_inline(true);
+    selector.set_inline(inline);
     selector.set_score_cb(self.score_cb);
     selector.set_query_transform(self.query_transform);
     selector.set_highlight_cb(self.highlight_cb);
@@ -358,10 +370,9 @@ impl FuzzyBuilder {
     let tty_fd = PollFd::new(tty, PollFlags::POLLIN);
     let chosen = loop {
       selector.draw();
-      // Inline draw parks the cursor on the query line itself; rest the real cursor
-      // at the query position as a blinking beam, set apart from the query field.
       let col = selector.query_cursor_col();
-      flush_term!("\r\x1b[{col}C\x1b[5 q").ok();
+      let down = if inline { "" } else { "\x1b[1B" };
+      flush_term!("{down}\r\x1b[{col}C\x1b[5 q").ok();
 
       let mut decided = None;
       match poll(&mut [tty_fd.clone()], PollTimeout::NONE) {
@@ -386,15 +397,18 @@ impl FuzzyBuilder {
         }
       }
 
-      // Erase the overlay (cursor is on the query line) before redraw/exit.
+      if !inline {
+        flush_term!("\x1b[1A").ok();
+      }
       selector.clear();
       if let Some(result) = decided {
         break result;
       }
     };
 
-    // Wipe the query line so nothing lingers; defer restores the cursor style.
-    flush_term!("\r\x1b[2K").ok();
+    if inline {
+      flush_term!("\r\x1b[2K").ok();
+    }
     Ok(chosen)
   }
 }

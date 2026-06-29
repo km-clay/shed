@@ -866,6 +866,10 @@ pub(crate) fn has_in_sink() -> bool {
   Shed::sinks(|s| s.has_input())
 }
 
+pub(crate) fn stdin_is_tty() -> bool {
+  isatty(stdin_fileno()).unwrap_or(false)
+}
+
 /// Drain the remaining piped stdin so it can be handed to a forked child. The
 /// in-process read path goes through `Shed::sinks` (`io::Read`) instead.
 pub(crate) fn take_stdin() -> Option<Vec<u8>> {

@@ -58,6 +58,7 @@ mod pwd;
 mod quote;
 mod read;
 mod resource;
+mod scry;
 mod seek;
 mod set;
 mod shift;
@@ -147,6 +148,7 @@ register_builtins! {
   "readonly" => varcmds::Readonly,
   "return"   => flowctl::Return,
   "rotate"   => arrops::Rotate,
+  "scry"     => scry::Scry,
   "seek"     => seek::Seek,
   "set"      => set::Set,
   "shift"    => shift::Shift,
@@ -252,15 +254,29 @@ pub(super) trait Builtin: Sync {
     args: &mut BuiltinArgs,
     should_slurp: fn(&BuiltinArgs) -> bool,
   ) -> Option<Vec<u8>> {
-    if should_slurp(args) {
-      // Slurp the piped stdin sink if present, else the real fd — the `Read`
-      // impl on `Sinks` resolves which, and an exhausted sink reads as EOF
-      // rather than falling through to the fd.
-      let mut buf = Vec::new();
-      Shed::sinks(|s| s.read_to_end(&mut buf)).ok().map(|_| buf)
-    } else {
-      None
+    if !should_slurp(args) {
+      return None;
     }
+    // Nothing to slurp if stdin is the bare interactive terminal (no piped sink
+    if !procio::has_in_sink() && procio::stdin_is_tty() {
+      return None;
+    }
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+      match Shed::sinks(|s| s.read(&mut chunk)) {
+        Ok(0) => break,
+        Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+          if signal::sigint_pending() {
+            return None; // abort; the still-pending SIGINT aborts the command
+          }
+          // benign signal (SIGCHLD/SIGWINCH/…): retry the read
+        }
+        Err(_) => break,
+      }
+    }
+    Some(buf)
   }
 
   /// The main entry point for running a builtin. This is responsible for setting up the environment, handling redirections, and catching control flow errors.

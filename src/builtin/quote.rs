@@ -204,3 +204,11 @@ pub(crate) fn unquote_raw(s: &str) -> ShResult<Vec<String>> {
 
   Ok(fields)
 }
+
+pub(crate) fn unquote_records(input: &str) -> ShResult<Vec<Vec<String>>> {
+  input
+    .lines()
+    .filter(|l| !l.trim().is_empty())
+    .map(unquote_raw)
+    .collect()
+}
