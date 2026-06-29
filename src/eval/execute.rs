@@ -1205,6 +1205,9 @@ impl Dispatcher {
       if i == tail_start {
         // the rest of these are non-forking builtins
         std::mem::take(&mut out_rdrs).apply_persistent().ok();
+        if tail_start > 0 && !is_bg && Shed::term(Terminal::interactive) {
+          Shed::term_mut(|t| t.attach(getpgrp())).ok();
+        }
         result = match self.exec_internal_pipeline(&cmds[i..]) {
           Ok(statuses) => {
             tail_statuses = statuses;
