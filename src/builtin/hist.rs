@@ -368,6 +368,7 @@ impl HistQuery {
           "restore" => new.restore = true,
           "json" => new.json = true,
           "quoted" => new.quoted = true,
+          "no-dupes" => new.no_dupes = true,
           "pull" => new.pull = true,
           _ => {}
         },
@@ -500,6 +501,7 @@ impl super::Builtin for Hist {
       OptSpec::flag("not"),
       OptSpec::flag("json"),
       OptSpec::flag("quoted"),
+      OptSpec::flag("no-dupes"),
       OptSpec::flag("pull"),
       OptSpec::flag('n'),
       OptSpec::flag('r'),
