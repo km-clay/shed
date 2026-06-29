@@ -286,7 +286,7 @@ impl Zd {
       return Err(sherr!(ExecFail @ args.span, "zd: no directory history yet"));
     }
 
-    let target = if query.is_empty() {
+    let mut target = if query.is_empty() {
       if !Shed::term(Terminal::interactive) {
         return Err(
           sherr!(ExecFail @ args.span, "zd: a directory query is required when non-interactive"),
@@ -302,6 +302,13 @@ impl Zd {
     } else {
       fuzzy_best_match(&query, entries, Some(fuzzy_score_dir), None)
     };
+
+    if let Some(target) = target.as_mut()
+      && target.starts_with('~')
+      && let Some(home) = util::get_home_str()
+    {
+      *target = target.replacen('~', &home, 1);
+    }
 
     match target {
       Some(path) => {
