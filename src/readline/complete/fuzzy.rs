@@ -35,6 +35,25 @@ pub(crate) fn one_line(s: &str) -> String {
   out
 }
 
+/// Render control bytes as caret notation (`^M`, `^I`, `^[`, `^?`) for the
+/// single-line query field. Unlike the highlighter's `is_visualized_control`,
+/// this also visualizes `\n` and `\t`: neither belongs in a one-line field, and
+/// a stray newline (e.g. from Shift+Enter) would otherwise corrupt the display.
+fn caret_notation(s: &str) -> String {
+  let mut out = String::with_capacity(s.len());
+  for ch in s.chars() {
+    match ch {
+      '\x7f' => out.push_str("^?"),
+      c if (c as u32) < 0x20 => {
+        out.push('^');
+        out.push((c as u8 ^ 0x40) as char);
+      }
+      c => out.push(c),
+    }
+  }
+  out
+}
+
 /// Resets the emphasis attributes (intensity, underline, color) without
 /// disturbing surrounding reverse-video or dim state.
 const EMPH_OFF: &str = "\x1b[22;24;39m";
@@ -520,7 +539,10 @@ impl FuzzySelector {
 
   /// Column of the query cursor on the query line, past the `► ` leader.
   pub fn query_cursor_col(&self) -> usize {
-    Self::LEADER_W + self.query.linebuf.cursor_to_flat()
+    let raw = self.query.linebuf.to_string();
+    let flat = self.query.linebuf.cursor_to_flat();
+    let before: String = raw.chars().take(flat).collect();
+    Self::LEADER_W + calc_str_width(&caret_notation(&before))
   }
 
   /// Retained for API compatibility; the grid layout doesn't number rows.
@@ -688,7 +710,7 @@ impl FuzzySelector {
     // line, with empty cells as underlined spaces. The real hardware cursor
     // (a blinking beam) marks the position, so there's no fake cursor here.
     let field_width = t_cols.saturating_sub(Self::LEADER_W + 1);
-    let query = self.query.linebuf.to_string();
+    let query = caret_notation(&self.query.linebuf.to_string());
     let (body, used) = match self.placeholder.as_ref() {
       Some(placeholder) if query.is_empty() => {
         let hint = truncate_to_width(placeholder, field_width);
@@ -1089,5 +1111,24 @@ impl Completer for FuzzyCompleter {
   }
   fn original_input(&self) -> &str {
     &self.completer.original_input
+  }
+}
+
+#[cfg(test)]
+mod caret_tests {
+  use super::caret_notation;
+
+  #[test]
+  fn visualizes_newline_tab_cr_and_esc() {
+    assert_eq!(caret_notation("a\nb"), "a^Jb");
+    assert_eq!(caret_notation("a\rb"), "a^Mb");
+    assert_eq!(caret_notation("a\tb"), "a^Ib");
+    assert_eq!(caret_notation("a\x1bb"), "a^[b");
+    assert_eq!(caret_notation("a\x7fb"), "a^?b");
+  }
+
+  #[test]
+  fn leaves_plain_text_untouched() {
+    assert_eq!(caret_notation("~/projects/fern"), "~/projects/fern");
   }
 }
