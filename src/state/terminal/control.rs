@@ -70,6 +70,7 @@ impl TermCtl {
       Self::Query(TermQuery::KittyKbdFlags),
       Self::Query(TermQuery::Capability(CapQuery::SyncOutput)),
       Self::Query(TermQuery::Capability(CapQuery::TrueColor)),
+      Self::Query(TermQuery::Capability(CapQuery::UnderlineColor)),
       Self::Query(TermQuery::Version),
       Self::Query(TermQuery::DeviceAttrs),
     ]
@@ -159,6 +160,9 @@ impl Display for TermQuery {
 pub enum CapQuery {
   SyncOutput,
   TrueColor,
+  /// Styled underlines (`Smulx`). Terminals advertising this also support an
+  /// underline color independent of the foreground (SGR 58/59).
+  UnderlineColor,
 }
 
 impl Display for CapQuery {
@@ -166,6 +170,7 @@ impl Display for CapQuery {
     let name = match self {
       Self::SyncOutput => "Su",
       Self::TrueColor => "RGB",
+      Self::UnderlineColor => "Smulx",
     };
 
     // these have to be hex encoded

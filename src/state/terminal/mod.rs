@@ -452,6 +452,9 @@ impl Terminal {
           "Su" => {
             caps.insert(TermCap::SYNC_OUTPUT);
           }
+          "Smulx" => {
+            caps.insert(TermCap::UNDERLINE_STYLES);
+          }
           _ => {
           }
         }

@@ -3,7 +3,6 @@ use std::{
   time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::expand::{expand_raw_inner, markers::strip_markers, unescape_str};
 use crate::readline::{FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, match_positions};
 
 use super::{
@@ -278,7 +277,11 @@ impl Zd {
     // `zd pro fern` still finds `~/projects/fern`.
     let query: String = args.argv.iter().map(|(a, _)| a.as_str()).collect();
 
-    let entries = load_dir_entries();
+    let entries = if query.is_empty() {
+      load_abbreviated_dirs()
+    } else {
+      load_dir_entries()
+    };
     if entries.is_empty() {
       return Err(sherr!(ExecFail @ args.span, "zd: no directory history yet"));
     }
@@ -293,17 +296,11 @@ impl Zd {
         .with_entries(entries)
         .with_placeholder("pick a directory (type to filter, enter selects, esc cancels)")
         .with_score_cb(fuzzy_score_dir)
-        .with_query_transform(expand_dir_query)
         .with_highlight_cb(highlight_dir);
 
       selector.pick()?
     } else {
-      fuzzy_best_match(
-        &query,
-        entries,
-        Some(fuzzy_score_dir),
-        Some(expand_dir_query),
-      )
+      fuzzy_best_match(&query, entries, Some(fuzzy_score_dir), None)
     };
 
     match target {
@@ -317,15 +314,6 @@ impl Zd {
       None => with_status(1),
     }
   }
-}
-
-/// Read-only expansion of a `zd` query: `~`/`$VAR` resolve so they match the
-/// canonical paths in the history, but `$(...)`/`<(...)` stay inert (no side
-/// effects), since this runs on every keystroke in the picker.
-fn expand_dir_query(raw: &str) -> String {
-  let unescaped = unescape_str(raw);
-  expand_raw_inner(&mut unescaped.chars().peekable(), false)
-    .map_or_else(|_| raw.to_string(), |s| strip_markers(&s))
 }
 
 /// Highlight the basename match, mirroring how `fuzzy_score_dir` rewards it, so
@@ -409,9 +397,17 @@ fn dir_frecency(visits: i64, age_secs: i64) -> i32 {
   visits.saturating_mul(factor).clamp(0, i32::MAX as i64) as i32
 }
 
+fn load_dir_entries() -> Vec<(String, i32)> {
+  load_dir_entries_inner(false)
+}
+
+fn load_abbreviated_dirs() -> Vec<(String, i32)> {
+  load_dir_entries_inner(true)
+}
+
 /// Load visited directories as `(path, frecency weight)`, skipping any that no
 /// longer exist on disk.
-fn load_dir_entries() -> Vec<(String, i32)> {
+fn load_dir_entries_inner(format_paths: bool) -> Vec<(String, i32)> {
   let Some(conn) = util::get_db_conn() else {
     return vec![];
   };
@@ -434,7 +430,14 @@ fn load_dir_entries() -> Vec<(String, i32)> {
   rows
     .flatten()
     .filter(|(path, ..)| Path::new(path).is_dir())
-    .map(|(path, visits, last_visit)| (path, dir_frecency(visits, now - last_visit)))
+    .map(|(path, visits, last_visit)| {
+      let path = if format_paths {
+        util::display_path(path)
+      } else {
+        path
+      };
+      (path, dir_frecency(visits, now - last_visit))
+    })
     .collect()
 }
 
@@ -938,36 +941,6 @@ pub mod tests {
   #[test]
   fn highlight_dir_none_without_basename() {
     assert!(super::highlight_dir("/", "x").is_none());
-  }
-
-  // ===================== zd: read-only query expansion =====================
-
-  fn set_home(home: &str) {
-    Shed::vars_mut(|v| v.set_var("HOME", VarKind::Str(home.into()), VarFlags::EXPORT)).unwrap();
-  }
-
-  #[test]
-  fn expand_query_tilde_to_home() {
-    let _g = TestGuard::new();
-    set_home("/home/zztest");
-    assert_eq!(
-      super::expand_dir_query("~/projects"),
-      "/home/zztest/projects"
-    );
-  }
-
-  #[test]
-  fn expand_query_var_expands() {
-    let _g = TestGuard::new();
-    set_home("/home/zztest");
-    assert_eq!(super::expand_dir_query("$HOME/x"), "/home/zztest/x");
-  }
-
-  #[test]
-  fn expand_query_no_command_substitution() {
-    // `$(...)` must stay inert (no execution) since this runs per keystroke.
-    let _g = TestGuard::new();
-    assert_ne!(super::expand_dir_query("$(echo pwned)"), "pwned");
   }
 
   // ===================== zd: dir_history DB =====================

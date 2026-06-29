@@ -1768,34 +1768,6 @@ fn best_match_applies_query_transform() {
   );
 }
 
-fn transform_ab(q: &str) -> String {
-  // "a" matches nothing; extending to "ab" matches a candidate. Since raw "ab"
-  // extends "a", the (now-disabled) extends fast path would wrongly retain empty.
-  match q {
-    "a" => "zzzz".to_string(),
-    "ab" => "alpha".to_string(),
-    _ => q.to_string(),
-  }
-}
-
-#[test]
-fn transform_query_repopulates_across_extend() {
-  let _g = TestGuard::new();
-  let mut sel = FuzzySelector::new("test");
-  sel.set_query_transform(Some(transform_ab));
-  sel.activate(make_cands(&["alpha", "beta"]));
-  sel.set_query("a");
-  assert!(
-    sel.filtered().is_empty(),
-    "intermediate query matches nothing"
-  );
-  sel.set_query("ab");
-  assert!(
-    !sel.filtered().is_empty(),
-    "a transform must force a full rescan rather than retaining the empty set",
-  );
-}
-
 fn flat_score(cand: &str, q: &[char], _p: bool) -> i32 {
   let q: String = q.iter().collect();
   if cand.contains(&q) { 777 } else { i32::MIN }

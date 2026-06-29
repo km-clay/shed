@@ -3,7 +3,10 @@ use nix::{
   poll::{PollFd, PollFlags, PollTimeout, poll},
 };
 
-use crate::{flush_term, sherr, state::terminal::Terminal};
+use crate::{
+  flush_term, sherr,
+  state::terminal::{TermCap, Terminal},
+};
 
 use super::{
   Candidate, CompMatch, CompResponse, Completer, ShResult, Shed, SimpleCompleter,
@@ -296,7 +299,6 @@ pub(crate) struct FuzzyBuilder {
   entries: Vec<(String, i32)>,
   placeholder: Option<String>,
   score_cb: Option<ScoreCallback>,
-  query_transform: Option<QueryTransform>,
   highlight_cb: Option<HighlightCallback>,
   inline: bool,
 }
@@ -326,10 +328,6 @@ impl FuzzyBuilder {
     self.score_cb = Some(cb);
     self
   }
-  pub fn with_query_transform(mut self, cb: QueryTransform) -> Self {
-    self.query_transform = Some(cb);
-    self
-  }
   pub fn with_highlight_cb(mut self, cb: HighlightCallback) -> Self {
     self.highlight_cb = Some(cb);
     self
@@ -355,7 +353,6 @@ impl FuzzyBuilder {
     selector.set_placeholder(self.placeholder);
     selector.set_inline(inline);
     selector.set_score_cb(self.score_cb);
-    selector.set_query_transform(self.query_transform);
     selector.set_highlight_cb(self.highlight_cb);
     selector.activate(candidates);
     selector.set_prompt_line_context(0, 0);
@@ -508,12 +505,8 @@ impl FuzzySelector {
     self.placeholder = text.map(|t| t.into());
   }
 
-  pub fn set_score_cb(&mut self, cb: Option<fn(&str, &[char], bool) -> i32>) {
+  pub fn set_score_cb(&mut self, cb: Option<ScoreCallback>) {
     self.score_cb = cb;
-  }
-
-  pub fn set_query_transform(&mut self, cb: Option<QueryTransform>) {
-    self.query_transform = cb;
   }
 
   pub fn set_highlight_cb(&mut self, cb: Option<HighlightCallback>) {
@@ -690,7 +683,7 @@ impl FuzzySelector {
   // `t_cols` is passed in rather than read here: this runs inside the
   // `write_term!` (a `Shed::term_mut`) call in `draw`, so re-borrowing the
   // terminal would panic.
-  fn query_display(&self, t_cols: usize) -> String {
+  fn query_display(&self, t_cols: usize, underline_color: bool) -> String {
     // The query is a distinct input field: an underlined strip spanning the
     // line, with empty cells as underlined spaces. The real hardware cursor
     // (a blinking beam) marks the position, so there's no fake cursor here.
@@ -700,7 +693,7 @@ impl FuzzySelector {
       Some(placeholder) if query.is_empty() => {
         let hint = truncate_to_width(placeholder, field_width);
         let width = calc_str_width(&hint);
-        (format!("\x1b[90m{hint}\x1b[39m"), width)
+        (format!("\x1b[2m{hint}\x1b[22m"), width)
       }
       _ => {
         let width = calc_str_width(&query);
@@ -708,7 +701,11 @@ impl FuzzySelector {
       }
     };
     let fill = " ".repeat(field_width.saturating_sub(used));
-    format!("\x1b[4m{body}{fill}\x1b[24m")
+    if underline_color {
+      format!("\x1b[4;58:5:250m{body}{fill}\x1b[59;24m")
+    } else {
+      format!("\x1b[4m{body}{fill}\x1b[24m")
+    }
   }
 
   pub fn predicted_rows(&self) -> usize {
@@ -824,6 +821,8 @@ impl FuzzySelector {
 
   pub fn draw(&mut self) -> usize {
     let t_cols = Shed::term(Terminal::t_cols);
+    let underline_color =
+      Shed::term(|t| t.term_caps().contains(TermCap::UNDERLINE_STYLES) && t.color_mode().is_some());
     let rows = GridLayout::MAX_VISIBLE_ROWS;
     self.ensure_cursor_visible(t_cols);
 
@@ -832,7 +831,12 @@ impl FuzzySelector {
     if !self.inline {
       write_term!("\n").ok();
     }
-    write_term!("{} {}", Self::PROMPT, self.query_display(t_cols)).ok();
+    write_term!(
+      "{} {}",
+      Self::PROMPT,
+      self.query_display(t_cols, underline_color)
+    )
+    .ok();
     let mut rows_drawn = 1usize;
 
     if self.filtered.is_empty() {
