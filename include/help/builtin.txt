@@ -2202,18 +2202,21 @@ STAT                                             *builtin-stat* *stat*
 ==============================================================================
 THRU                                             *builtin-thru* *thru*
 
-  `thru [-c] [-t {dest}] [-a] [-L {bytes}]`
+  `thru [-c] [-t {dest}] [-a] [-L {bytes}] [{file}...]`
 
-  Pass standard input to standard output unchanged. Equivalent to a fork-free
-  `cat` with no arguments. Intended for two main use cases:
+  Pass input to standard output unchanged: a fork-free `cat`. With one or
+  more {file} arguments it reads each in order; with none it reads standard
+  input. A {file} of `-` also means standard input. Intended for three main
+  use cases:
 
+    - Reading file(s) without forking an external `cat`: `thru config.toml`.
     - Capturing stdin into a variable without spawning an external process:
       `var=$(thru)` instead of `var=$(cat)`.
     - Acting as a no-op stage in a pipeline that can optionally tee, count,
       or limit the byte stream without disturbing the data flow.
 
   With no flags, `thru` is the identity function for byte streams: every
-  byte read from stdin is written to stdout unchanged.
+  byte read is written to stdout unchanged.
 
   Options ~
 
@@ -2230,12 +2233,12 @@ THRU                                             *builtin-thru* *thru*
                   Only meaningful when `-t` is also given.
 
     `-c`, `--count`
-                  After draining stdin, write the total number of bytes
+                  After draining the input, write the total number of bytes
                   that passed through to standard error. Does not affect
                   the pass-through output.
 
     `-L {bytes}`, `--limit {bytes}`
-                  Pass through at most {bytes} bytes from stdin. Excess
+                  Pass through at most {bytes} bytes of input. Excess
                   input is discarded. The byte count snaps down to the
                   nearest UTF-8 character boundary so multi-byte characters
                   are never split.
@@ -2253,6 +2256,13 @@ THRU                                             *builtin-thru* *thru*
     effects observe the same final byte count.
 
   Examples ~
+
+      `thru config.toml`
+                                print a file without forking an external
+                                `cat`
+
+      `stamp=$(thru ~/.local/share/shed/last_run)`
+                                read a file into a variable
 
       `var=$(thru)`
                                 slurp stdin into `$var` without forking
