@@ -46,9 +46,10 @@ Quoted Stream Adapters ~                                  *quoted-streams*
       for plain identifiers)
     - empty fields are encoded as `''`
 
-  Producers (|split|(function-split), |quote|(builtin-quote)) emit
-  streams in this format. Consumers (these `q`-adapters,
-  |unquote|(builtin-unquote), `read -q`) decode them. The format is
+  Producers (|split|(function-split), |quote|(builtin-quote),
+  |hist|(builtin-hist) `--quoted`) emit streams in this format.
+  Consumers (these `q`-adapters, |unquote|(builtin-unquote),
+  |scry|(builtin-scry) `-q`, `read -q`) decode them. The format is
   byte-compatible with line-oriented Unix tools like `sort`, `head`,
   `tail`, `uniq`, and `wc`, which means quoted streams pipe through
   the standard toolchain without adapters.

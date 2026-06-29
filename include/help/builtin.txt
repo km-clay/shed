@@ -49,6 +49,7 @@ The following builtins are available:
   `break`       exit a loop                                 |builtin-break|
   `continue`    skip to the next loop iteration             |builtin-continue|
   `raise`       raise a user-facing error from a function   |builtin-raise|
+  `scry`        fuzzy-pick a line read from stdin           |builtin-scry|
   `seek`        seek a file descriptor to a byte offset     |builtin-seek|
   `set`         set shell options and positional parameters |builtin-set|
   `stash`       save and recall command snippets            |builtin-stash|
@@ -70,6 +71,7 @@ The following builtins are available:
   `vice`        slice and edit text with vim motions        |builtin-vice|
   `wait`        wait for background jobs to finish          |builtin-wait|
   `width`       print the display width of a string         |builtin-width|
+  `zd`          jump to a directory from history            |builtin-zd|
 
 ==============================================================================
 ALIAS                                            *builtin-alias* *alias*
@@ -978,6 +980,10 @@ HIST                                             *builtin-hist* *hist*
     `--count`      print only the count of matching entries
     `--json`       output as JSON (includes command, timestamp, runtime,
                    cwd, status, and token fields)
+    `--quoted`     emit each command as a shell-quoted record, so commands
+                   spanning multiple lines survive a pipeline (see
+                   |quoted-streams|)
+    `--no-dupes`   collapse repeated commands, keeping only the most recent
 
   Mutation Options ~
 
@@ -1021,6 +1027,10 @@ HIST                                             *builtin-hist* *hist*
       `hist --import bash`                      import from ~/.bash_history
       `hist --import zsh`                       import from ~/.zsh_history
       `hist --import ~/old_history`             import from explicit path
+      `hist --quoted --no-dupes -n`             unique commands, shell-quoted
+      `hist --quoted -n | scry -q`              fuzzy-pick a past command
+
+  See also: |builtin-scry|
 
 ==============================================================================
 JOBS                                             *builtin-jobs* *jobs*
@@ -1080,9 +1090,13 @@ KEYMAP                                           *builtin-keymap* *keymap*
 
       `keymap -i 'jk' '<esc>'`        map jk -> escape in insert mode
       `keymap -n 'gs' ':source ~/.shed_profile<cr>'`
+                                      source ~/.shed_profile with gs
       `keymap -i --remove 'jk'`       remove the jk binding
       `keymap`                        list all keymaps
       `keymap -i`                     list insert-mode keymaps
+      `keymap -n '!' '<CMD>r!hist --quoted -n | scry -q -n'`
+                                      fuzzy-pick a past command and insert it
+                                      at the cursor (see |builtin-scry|)
 
 ==============================================================================
 KILL                                             *builtin-kill* *kill*
@@ -1692,6 +1706,47 @@ RAISE                                            *builtin-raise* *raise*
       `}`
 
   See also: |try|(script-try), |return|(builtin-return)
+
+==============================================================================
+SCRY                                             *builtin-scry* *scry*
+
+  `scry [options]`
+
+  Read candidate lines from stdin, show them in the interactive fuzzy picker,
+  and write the chosen line to stdout. This is the same fuzzy finder used for
+  completion and history search, exposed as a command so it can be dropped
+  into a pipeline.
+
+  The picker is only shown when stdin has data and the shell is attached to a
+  terminal; with nothing piped in, `scry` exits 0 without doing anything.
+
+  Input Options ~
+
+    `-0`, `--read0`        candidates are NUL-separated, not newline-separated
+    `-q`, `--quote-in`     candidates are shell-quoted records; each is decoded
+                           before being displayed (see |quoted-streams|)
+    `-p`, `--prompt {t}`   placeholder hint shown while the query box is empty
+
+  Output Options ~
+
+    `-Q`, `--quote-out`    shell-quote the selected line before printing it
+    `-n`                   omit the trailing newline on the selected line
+
+  Exit status:
+
+    `0`    a candidate was selected, or there was no input to pick from
+    `1`    the picker was cancelled (escape)
+    `2`    input was supplied but held no candidates
+
+  Examples:
+
+      `ls | scry`                          pick a file name
+      `hist --quoted -n | scry -q`         pick a past command, decoded
+      `find . -type d -print0 | scry -0`   pick a directory, NUL-safe
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |quoted-streams|, |builtin-hist|
 
 ==============================================================================
 SEEK                                             *builtin-seek* *seek*
@@ -2533,3 +2588,52 @@ VICE                                             *builtin-vice* *vice*
   This is a `shed` extension; `bash` and `POSIX` do not provide it.
 
   See also: |quoted-streams|, |builtin-quote|, |keymap|(builtin-keymap)
+
+==============================================================================
+ZD                                               *builtin-zd* *zd*
+
+  `zd`
+  `zd {query}`
+  `zd add [-r] [-d|--depth {n}] [{dir}...]`
+  `zd remove [-r] [-d|--depth {n}] [{dir}...]`
+  `zd clean`
+
+  Jump between directories drawn from a frecency-ranked history (a blend of
+  how often and how recently each was visited). Directories you `cd` into are
+  recorded automatically while interactive.
+
+  With no argument, `zd` opens the interactive fuzzy picker over recorded
+  directories. Paths display with `$HOME` abbreviated to `~`, and matching
+  favors the final path segment, so a directory's basename usually surfaces
+  it first.
+
+  `zd {query}`    jump straight to the best match for {query}, skipping the
+                  picker. A query is required when not interactive.
+
+  Subcommands ~
+
+    `add [{dir}...]`     record {dir} (defaults to the current directory)
+    `remove [{dir}...]`  drop {dir} from the history
+    `clean`              prune entries whose directory no longer exists
+
+  Options for `add` and `remove`:
+
+    `-r`                 act on subdirectories too, recursively
+    `-d`, `--depth {n}`  (`add` only) cap recursion to {n} levels below each
+                         {dir}; implies `-r`. `--depth 0` records only {dir}
+
+  While recursing, `add` skips hidden directories and symlinks.
+
+  Examples:
+
+      `zd`                   open the directory picker
+      `zd fern`              jump to the best match for "fern"
+      `zd add`               record the current directory
+      `zd add -r ~/src`      record ~/src and every directory beneath it
+      `zd add --depth 2 .`   record . and two levels of subdirectories
+      `zd remove -r ~/old`   forget ~/old and its subdirectories
+      `zd clean`             drop entries for directories that no longer exist
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |builtin-cd|, |builtin-scry|
