@@ -115,7 +115,10 @@ pub fn continue_job(args: BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> {
   job.killpg(Signal::SIGCONT)?;
 
   match behavior {
-    JobBehavior::Foregound => wait_fg(job, true)?,
+    JobBehavior::Foregound => {
+      let _cooked = Shed::term_mut(|t| t.prepare_for_exec());
+      wait_fg(job, true)?;
+    }
     JobBehavior::Background => {
       let job_order = Shed::jobs(|j| j.order().to_vec());
       out!("{}", job.display(&job_order, JobCmdFlags::PIDS));
