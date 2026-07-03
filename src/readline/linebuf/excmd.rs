@@ -77,7 +77,8 @@ impl super::LineBuf {
       ExNdRule::Global { pat, nested } /*----*/ => self.ex_global(cmd, *bang, pat, nested, address),
       ExNdRule::Move(dest) /*================*/ => self.ex_move(cmd, address, dest, true),
       ExNdRule::Transfer(dest) /*------------*/ => self.ex_move(cmd, address, dest, false),
-      ExNdRule::Read(read_src) /*============*/ => {
+      ExNdRule::Trim /*======================*/ => self.ex_trim(address, *bang),
+      ExNdRule::Read(read_src) /*------------*/ => {
         self.ex_read(read_src);
         Ok(())
       }
@@ -89,6 +90,11 @@ impl super::LineBuf {
         Err(crate::sherr!(ExecFail, "ex command is handled by the editor driver, not the buffer"))
       }
     }
+  }
+
+  fn ex_trim(&mut self, addr: Option<AddressRange>, bang: bool) -> ShResult<()> {
+    let addr_range = addr.unwrap_or_else(AddressRange::all_lines);
+    self.trim_range(addr_range, bang)
   }
 
   fn ex_move(

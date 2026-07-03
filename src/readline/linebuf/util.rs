@@ -3,16 +3,19 @@ use std::fmt::{Display, Write};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
+use crate::readline::editmode::AddressRange;
 use crate::readline::linebuf::HighlightCache;
 use crate::readline::linebuf::edit::{
   depth_levels_from_tokens, depth_levels_via_ctx, parse_failed_strict,
 };
 use crate::state::vars::VarStr;
+use crate::util;
 
+use super::types::Grapheme;
 use super::{
-  CharClass, DEFAULT_VIEWPORT_HEIGHT, Edit, Grapheme, Line, Lines, MotionKind, Pos, SelectMode,
-  ShResult, Shed, editcmd::Motion, eval::lex, highlight, ordered, procio::stdin_fileno, sherr,
-  shopt, state::terminal::get_win_size, status_msg,
+  CharClass, DEFAULT_VIEWPORT_HEIGHT, Edit, Line, Lines, MotionKind, Pos, SelectMode, ShResult,
+  Shed, editcmd::Motion, eval::lex, highlight, ordered, procio::stdin_fileno, sherr, shopt,
+  state::terminal::get_win_size, status_msg,
 };
 
 use super::char_class::{CharClassIter, CharClassIterRev};
@@ -300,6 +303,98 @@ impl super::LineBuf {
 
     Lines(mid.to_vec()).join()
   }
+  pub fn trim_range(&mut self, range: AddressRange, trim_leading: bool) -> ShResult<()> {
+    let (start, mut end) = match range {
+      AddressRange::Single(line_addr) => {
+        let Some(addr) = self.resolve_line_addr(&line_addr)? else {
+          return Ok(());
+        };
+        util::ordered(addr, addr)
+      }
+      AddressRange::Range(start, end) => {
+        let Some(start) = self.resolve_line_addr(&start)? else {
+          return Ok(());
+        };
+        let Some(end) = self.resolve_line_addr(&end)? else {
+          return Ok(());
+        };
+        util::ordered(start, end)
+      }
+    };
+
+    // resolve_line_addr returns an inclusive index, so we add 1 here
+    // [start, end] -> [start, end)
+    end += 1;
+
+    let drop_empty_lines = |this: &mut Self, end: &mut usize| {
+      while start < *end && this.lines.get(start).is_some_and(|l| l.0.is_empty()) {
+        this.lines.remove(start);
+        *end -= 1;
+      }
+      while *end > start
+        && this
+          .lines
+          .get(end.saturating_sub(1))
+          .is_some_and(|l| l.0.is_empty())
+      {
+        this.lines.remove(end.saturating_sub(1));
+        *end -= 1;
+      }
+    };
+
+    drop_empty_lines(self, &mut end);
+
+    for line in self.lines.iter_mut().take(end).skip(start) {
+      while line.0.last().is_some_and(Grapheme::is_ws) {
+        line.0.pop();
+      }
+    }
+
+    drop_empty_lines(self, &mut end);
+
+    if !trim_leading {
+      return Ok(());
+    }
+
+    let mut prefix: Option<Vec<Grapheme>> = None;
+
+    for line in self.lines.iter().take(end).skip(start) {
+      if line.0.is_empty() {
+        continue;
+      }
+
+      let lead: Vec<Grapheme> = line.0.iter().take_while(|g| g.is_ws()).cloned().collect();
+
+      prefix = Some(match prefix {
+        None => lead,
+        Some(prev) => {
+          let keep = prev.iter().zip(&lead).take_while(|(a, b)| a == b).count();
+          lead.into_iter().take(keep).collect()
+        }
+      });
+
+      if prefix.as_ref().is_some_and(|p| p.is_empty()) {
+        // no common prefix, no need to continue
+        break;
+      }
+    }
+
+    let Some(prefix) = prefix else {
+      return Ok(());
+    };
+
+    if prefix.is_empty() {
+      return Ok(());
+    }
+
+    for line in self.lines.iter_mut().take(end).skip(start) {
+      if !line.0.is_empty() {
+        line.0.drain(0..prefix.len());
+      }
+    }
+
+    Ok(())
+  }
   pub fn trim(&mut self) {
     // trim empty lines
     while self.lines.first().is_some_and(|l| l.0.is_empty()) {
@@ -312,11 +407,11 @@ impl super::LineBuf {
     // trim whitespace
     for (i, line) in self.lines.iter_mut().enumerate() {
       if i == 0 && !shopt!(history.ignore_space) {
-        while line.0.first().is_some_and(super::types::Grapheme::is_ws) {
+        while line.0.first().is_some_and(Grapheme::is_ws) {
           line.0.remove(0);
         }
       }
-      while line.0.last().is_some_and(super::types::Grapheme::is_ws) {
+      while line.0.last().is_some_and(Grapheme::is_ws) {
         line.0.pop();
       }
     }
