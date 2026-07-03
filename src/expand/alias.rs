@@ -8,92 +8,72 @@ use super::{
 };
 use crate::{HashSet, util};
 
-struct AliasExpander<'a> {
+struct AliasExpander {
   input: String,
-  tokens: VecDeque<Tk>,
-  expanded: &'a mut HashSet<String>,
-  first_expand_pos: Option<usize>, // byte pos
+  first_expand_pos: Option<usize>, // byte pos of the first expansion, for cursor fixup
 }
 
-impl<'a> AliasExpander<'a> {
-  pub fn new(input: String, expanded: &'a mut HashSet<String>) -> Self {
-    let tokens: VecDeque<Tk> = LexStream::new(input.clone().into(), LexFlags::empty())
-      .filter_map(Result::ok)
-      .collect();
-
+impl AliasExpander {
+  fn new(input: String) -> Self {
     Self {
       input,
-      tokens,
-      expanded,
       first_expand_pos: None,
     }
   }
 
-  pub fn expand(mut self) -> (String, Option<usize>) {
-    let mut changed = false;
+  fn expand(mut self) -> (String, Option<usize>) {
+    let mut cursor = 0;
+    let mut active: HashSet<String> = HashSet::default();
 
-    while let Some(tk) = self.tokens.pop_front() {
-      if !tk.flags.contains(TkFlags::IS_CMD) {
-        continue;
-      }
-      if tk.flags.contains(TkFlags::KEYWORD) {
-        continue;
-      }
+    while let Some(tk) = self.next_cmd_token(cursor) {
+      let span = tk.span.range();
+      let (start, end) = (span.start, span.end);
+      let word = tk.as_str().to_string();
 
-      let word = tk.as_str();
-      if self.expanded.contains(word) {
-        continue;
-      }
-
-      let Some(alias) = Shed::logic(|l| l.aliases().get(word).cloned()) else {
-        continue;
+      let alias = if active.contains(&word) {
+        None // guarded: re-expanding would recurse
+      } else {
+        Shed::logic(|l| l.aliases().get(&word).cloned())
       };
 
-      let expansion = alias.to_string();
-
-      // Check if the input from this token already starts with the expansion
-      let rest = &self.input[tk.span.range().start..];
-      if rest.starts_with(&expansion) {
-        // Already expanded - skip, but still mark it
-        self.expanded.insert(word.to_string());
-        continue;
+      match alias {
+        Some(alias) => {
+          self.input.replace_range(start..end, &alias.to_string());
+          active.insert(word);
+          self.first_expand_pos.get_or_insert(start);
+        }
+        None => {
+          cursor = end;
+          active.clear();
+        }
       }
-
-      // Perform the expansion
-      self.input.replace_range(tk.span.range(), &expansion);
-      self.expanded.insert(word.to_string());
-      changed = true;
-      if self.first_expand_pos.is_none() {
-        self.first_expand_pos = Some(tk.span.range().start);
-      }
-
-      // Re-lex from the expansion point since spans shifted
-      break;
     }
 
-    if changed {
-      self.tokens = LexStream::new(self.input.clone().into(), LexFlags::empty())
-        .filter_map(Result::ok)
-        .collect();
+    (self.input, self.first_expand_pos)
+  }
 
-      self.expand()
-    } else {
-      (self.input, self.first_expand_pos)
-    }
+  /// The next command-position word at or after `cursor`, skipping keywords.
+  fn next_cmd_token(&self, cursor: usize) -> Option<Tk> {
+    LexStream::new(self.input.clone().into(), LexFlags::empty())
+      .filter_map(Result::ok)
+      .find(|tk| {
+        tk.span.range().start >= cursor
+          && tk.flags.contains(TkFlags::IS_CMD)
+          && !tk.flags.contains(TkFlags::KEYWORD)
+      })
   }
 }
 
-/// Expand aliases in the given input string
+/// Expand aliases in the given input string.
 ///
-/// Recursively calls itself until all aliases are expanded
+/// Walks command-position words left to right, expanding each alias and
+/// re-expanding the result within a per-position recursion guard.
 pub fn expand_aliases(input: &str) -> String {
-  let mut seen = HashSet::default();
-  AliasExpander::new(input.to_string(), &mut seen).expand().0
+  AliasExpander::new(input.to_string()).expand().0
 }
 
 pub fn expand_alias_with_pos(input: String) -> (String, Option<usize>) {
-  let mut seen = HashSet::default();
-  AliasExpander::new(input, &mut seen).expand()
+  AliasExpander::new(input).expand()
 }
 
 pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
