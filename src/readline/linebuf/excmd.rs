@@ -94,7 +94,7 @@ impl super::LineBuf {
 
   fn ex_trim(&mut self, addr: Option<AddressRange>, bang: bool) -> ShResult<()> {
     let addr_range = addr.unwrap_or_else(AddressRange::all_lines);
-    self.trim_range(addr_range, bang)
+    self.edit(|this| this.trim_range(addr_range.clone(), bang))
   }
 
   fn ex_move(
