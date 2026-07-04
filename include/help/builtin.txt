@@ -2374,7 +2374,7 @@ UNSET                                            *builtin-unset* *unset*
 ==============================================================================
 TYPE                                             *builtin-type* *type*
 
-  `type {name} ...`
+  `type [-s] {name} ...`
 
   Describe how the shell would interpret each {name} if used as a
   command. Reports the first match in lookup order:
@@ -2387,12 +2387,20 @@ TYPE                                             *builtin-type* *type*
 
   Returns exit status 1 if a name is not found.
 
+  Options ~
+
+    `-s`    Short output: print just the kind (`alias`, `function`, `builtin`,
+            `keyword`, `external`, …) instead of the prose and source
+            locations. Autoloaded functions print `name (origin) -> path`.
+            Handy for scripting.
+
   Examples:
 
       `type echo`       echo is a shell builtin
       `type ls`         ls is /usr/bin/ls
       `type if`         if is a shell keyword
       `type ll`         ll is an alias for 'ls -la' ...
+      `type -s ll`      alias
 
 ==============================================================================
 ULIMIT                                           *builtin-ulimit* *ulimit*
