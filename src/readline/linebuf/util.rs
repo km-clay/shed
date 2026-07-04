@@ -304,7 +304,7 @@ impl super::LineBuf {
     Lines(mid.to_vec()).join()
   }
   pub fn trim_range(&mut self, range: AddressRange, trim_leading: bool) -> ShResult<()> {
-    let (start, mut end) = match range {
+    let (start, end) = match range {
       AddressRange::Single(line_addr) => {
         let Some(addr) = self.resolve_line_addr(&line_addr)? else {
           return Ok(());
@@ -322,49 +322,39 @@ impl super::LineBuf {
       }
     };
 
-    // resolve_line_addr returns an inclusive index, so we add 1 here
-    // [start, end] -> [start, end)
-    end += 1;
+    // resolve_line_addr returns an inclusive index; make the end exclusive.
+    let mut end = (end + 1).min(self.lines.len());
 
-    let drop_empty_lines = |this: &mut Self, end: &mut usize| {
-      while start < *end && this.lines.get(start).is_some_and(|l| l.0.is_empty()) {
-        this.lines.remove(start);
-        *end -= 1;
-      }
-      while *end > start
-        && this
-          .lines
-          .get(end.saturating_sub(1))
-          .is_some_and(|l| l.0.is_empty())
-      {
-        this.lines.remove(end.saturating_sub(1));
-        *end -= 1;
-      }
-    };
-
-    drop_empty_lines(self, &mut end);
-
+    // Strip trailing whitespace on every line in the range.
     for line in self.lines.iter_mut().take(end).skip(start) {
       while line.0.last().is_some_and(Grapheme::is_ws) {
         line.0.pop();
       }
     }
 
-    drop_empty_lines(self, &mut end);
+    // Remove the run of blank lines trailing the range's last content line.
+    let mut cut = end;
+    while cut > start && self.lines.get(cut - 1).is_some_and(|l| l.0.is_empty()) {
+      cut -= 1;
+    }
+    while self.lines.get(cut).is_some_and(|l| l.0.is_empty()) {
+      self.lines.remove(cut);
+    }
+    end = cut; // the range's content ends here now
 
     if !trim_leading {
       return Ok(());
     }
+    // :trim! has been called
 
+    // lift the common leading-whitespace prefix off the range,
+    // keeping relative indentation
     let mut prefix: Option<Vec<Grapheme>> = None;
-
     for line in self.lines.iter().take(end).skip(start) {
       if line.0.is_empty() {
         continue;
       }
-
       let lead: Vec<Grapheme> = line.0.iter().take_while(|g| g.is_ws()).cloned().collect();
-
       prefix = Some(match prefix {
         None => lead,
         Some(prev) => {
@@ -372,25 +362,27 @@ impl super::LineBuf {
           lead.into_iter().take(keep).collect()
         }
       });
-
       if prefix.as_ref().is_some_and(|p| p.is_empty()) {
-        // no common prefix, no need to continue
         break;
       }
     }
-
-    let Some(prefix) = prefix else {
-      return Ok(());
-    };
-
-    if prefix.is_empty() {
-      return Ok(());
+    if let Some(prefix) = prefix.filter(|p| !p.is_empty()) {
+      for line in self.lines.iter_mut().take(end).skip(start) {
+        if !line.0.is_empty() {
+          line.0.drain(0..prefix.len());
+        }
+      }
     }
 
-    for line in self.lines.iter_mut().take(end).skip(start) {
-      if !line.0.is_empty() {
-        line.0.drain(0..prefix.len());
-      }
+    // remove the run of blank lines leading the range's first content
+    // line, extending before the range to the previous content or buffer start.
+    let mut first = start;
+    while first < end && self.lines.get(first).is_some_and(|l| l.0.is_empty()) {
+      first += 1;
+    }
+    while first > 0 && self.lines.get(first - 1).is_some_and(|l| l.0.is_empty()) {
+      self.lines.remove(first - 1);
+      first -= 1;
     }
 
     Ok(())
@@ -1688,5 +1680,61 @@ mod indent_tests {
       "\t}",
       "a brace that closes nothing is left in place"
     );
+  }
+}
+
+#[cfg(test)]
+mod trim_range_tests {
+  use crate::readline::LineBuf;
+  use crate::readline::editcmd::LineAddr;
+  use crate::readline::editmode::AddressRange;
+  use crate::tests::testutil::TestGuard;
+
+  fn trimmed(content: &str, lo: usize, hi: usize, bang: bool) -> String {
+    let mut b = LineBuf::default();
+    b.set_buffer(content);
+    b.trim_range(
+      AddressRange::Range(LineAddr::Number(lo), LineAddr::Number(hi)),
+      bang,
+    )
+    .unwrap();
+    b.to_string()
+  }
+
+  #[test]
+  fn removes_trailing_blank_run_past_range() {
+    let _g = TestGuard::new();
+    // range is only line 1; the trailing blank run (outside it) is still removed
+    assert_eq!(trimmed("foo\n\n\n", 1, 1, false), "foo");
+  }
+
+  #[test]
+  fn keeps_interior_blank_lines() {
+    let _g = TestGuard::new();
+    assert_eq!(trimmed("foo\n\nbar\n\n", 1, 3, false), "foo\n\nbar");
+  }
+
+  #[test]
+  fn strips_trailing_whitespace() {
+    let _g = TestGuard::new();
+    assert_eq!(trimmed("foo   \nbar", 1, 1, false), "foo\nbar");
+  }
+
+  #[test]
+  fn non_bang_keeps_leading_blank_run() {
+    let _g = TestGuard::new();
+    assert_eq!(trimmed("\n\nfoo", 3, 3, false), "\n\nfoo");
+  }
+
+  #[test]
+  fn bang_removes_leading_blank_run() {
+    let _g = TestGuard::new();
+    assert_eq!(trimmed("\n\nfoo", 3, 3, true), "foo");
+  }
+
+  #[test]
+  fn bang_dedents_common_prefix() {
+    let _g = TestGuard::new();
+    assert_eq!(trimmed("  a\n    b", 1, 2, true), "a\n  b");
   }
 }
