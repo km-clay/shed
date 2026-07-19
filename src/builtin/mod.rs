@@ -831,18 +831,24 @@ impl CommandBuiltin {
       return with_status(0);
     }
 
-    // this one has to offload to the dispatcher
-    dispatcher.exec_cmd(node)
+    // Per POSIX, `command` suppresses alias/function lookup but must still
+    // execute shell builtins (and external commands). Route through the same
+    // dispatcher logic as `dispatch_cmd`, just with function lookup disabled.
+    dispatcher.route_command(node, false)
   }
 }
 
 #[cfg(test)]
 pub mod tests {
+  use std::env;
+
+  use tempfile::TempDir;
+
   use crate::{
     Shed, assert_status_eq,
     eval::execute::exec_nonint,
     state::{self, vars::VarFlags},
-    tests::testutil::{TestGuard, has_cmd, test_input},
+    tests::testutil::{TestGuard, canon, has_cmd, test_input},
   };
 
   // You can never be too sure!!!!!!
@@ -1093,6 +1099,45 @@ pub mod tests {
     test_input("F=echo; command -v $F").unwrap();
     let out = g.read_output();
     assert!(out.contains("echo"), "got: {out:?}");
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  // POSIX: `command` suppresses alias/function lookup but must still
+  // execute shell builtins. `cd` has no external counterpart, so this
+  // verifies the builtin (not execve) path is taken. See also bash/dash.
+  #[test]
+  fn command_invokes_cd_builtin() {
+    let _g = TestGuard::new();
+    let old_dir = env::current_dir().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+
+    test_input(format!("command cd {}", temp_dir.path().display())).unwrap();
+
+    let new_dir = env::current_dir().unwrap();
+    assert_ne!(old_dir, new_dir, "cwd unchanged; `command cd` did not run the builtin");
+    assert_eq!(
+      new_dir.display().to_string(),
+      canon(temp_dir.path()).display().to_string()
+    );
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  // A backslash-quoted `\command` still routes through the `command`
+  // builtin after expansion, so it must behave the same as `command`.
+  #[test]
+  fn backslash_command_invokes_cd_builtin() {
+    let _g = TestGuard::new();
+    let old_dir = env::current_dir().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+
+    test_input(format!("\\command cd {}", temp_dir.path().display())).unwrap();
+
+    let new_dir = env::current_dir().unwrap();
+    assert_ne!(old_dir, new_dir, "cwd unchanged; `\\command cd` did not run the builtin");
+    assert_eq!(
+      new_dir.display().to_string(),
+      canon(temp_dir.path()).display().to_string()
+    );
     assert_eq!(state::Shed::get_status(), 0);
   }
 
