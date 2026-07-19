@@ -28,6 +28,13 @@ impl ExpandFlags {
   const HEREDOC: Self = Self::VAR.union(Self::CMDSUB);
 
   const PROMPT: Self = Self::VAR.union(Self::CMDSUB);
+
+  /// Word expansion minus bare `(...)` subshell recognition. Used for the
+  /// pattern and replacement operands of `${var#pat}`, `${var%pat}`,
+  /// `${var/pat/rep}`, ... where a literal `(` must reach the glob matcher
+  /// instead of being consumed as a subshell. `$(...)` and `$var` still
+  /// expand (CMDSUB/VAR stay on).
+  const PATTERN: Self = Self::WORD.difference(Self::SUBSHELL);
 }
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
@@ -133,8 +140,25 @@ fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
     (String::new(), false, false)
   };
 
+  // Depth inside a `${...}` parameter expansion. A bare `(` inside the body is
+  // part of a pattern/operand (e.g. `${v%(x)}`, `${v/x/(y)}`), not a
+  // subshell — keep it literal so it reaches the glob matcher. `$(...)`
+  // cmdsubs still work (handled by the CMDSUB arm, which consumes its own
+  // parens), and nested `${...}` increments this counter.
+  let mut param_depth: u32 = 0;
+
   while let Some(ch) = chars.next() {
     match ch {
+      // An existing ESCAPE marker (from a prior unescape pass, e.g. the
+      // marker-encoded operand of a parameter expansion) means the next
+      // char is literal — preserve both without re-processing, so e.g.
+      // `${v%\$(echo x)}` keeps `$(...)` literal instead of running it.
+      markers::ESCAPE => {
+        result.push(markers::ESCAPE);
+        if let Some(next_ch) = chars.next() {
+          result.push(next_ch);
+        }
+      }
       '~' if flags.contains(ExpandFlags::TILDE) && (last_was_word_break || first_char) => {
         result.push(markers::TILDE_SUB);
       }
@@ -166,9 +190,24 @@ fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
       }
       '$' if flags.intersects(ExpandFlags::VAR.union(ExpandFlags::CMDSUB)) => {
         read_varsub(&mut chars, &mut result);
+        // `${` opens a parameter expansion; track depth so bare `(` inside the
+        // body stays literal.
+        if chars.peek() == Some(&'{') {
+          chars.next();
+          result.push('{');
+          param_depth = param_depth.saturating_add(1);
+        }
       }
-      // Bare `(...)` as a substitution — only in word context.
-      '(' if flags.contains(ExpandFlags::SUBSHELL) => read_subsh(&mut chars, &mut result),
+      // `}` closes the innermost `${...}` body.
+      '}' if param_depth > 0 => {
+        result.push('}');
+        param_depth = param_depth.saturating_sub(1);
+      }
+      // Bare `(...)` as a substitution — only in word context, and only when
+      // not inside a `${...}` (where a bare `(` is a literal pattern char).
+      '(' if flags.contains(ExpandFlags::SUBSHELL) && param_depth == 0 => {
+        read_subsh(&mut chars, &mut result)
+      }
       _ => result.push(ch),
     }
     if flags.contains(ExpandFlags::TILDE) {
@@ -184,6 +223,14 @@ fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
 /// process subs, escapes. Used by the main expansion pipeline.
 pub fn unescape_str(raw: &str) -> String {
   unescape_with(raw, ExpandFlags::WORD)
+}
+
+/// Like `unescape_str` but for the pattern/replacement operand of a parameter
+/// expansion (`${var#pat}`, `${var%pat}`, `${var/pat/rep}`, ...): a bare `(` is
+/// a literal character, not a subshell. `$(...)`, `$var`, quotes, etc. still
+/// expand as in word context.
+pub(crate) fn unescape_pattern(raw: &str) -> String {
+  unescape_with(raw, ExpandFlags::PATTERN)
 }
 
 /// Prompt-context unescape: $var, ${var}, $(cmd), backticks. No quote handling,

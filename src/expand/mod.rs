@@ -163,12 +163,23 @@ impl Expander {
     Self::from_raw(tk_raw, raw.flags)
   }
   pub fn from_raw(raw: &str, flags: TkFlags) -> Self {
-    Self::from_raw_inner(raw, flags, true)
+    Self::from_raw_inner(raw, flags, true, false)
   }
+  #[allow(dead_code)]
   pub fn from_raw_no_brace(raw: &str, flags: TkFlags) -> Self {
-    Self::from_raw_inner(raw, flags, false)
+    Self::from_raw_inner(raw, flags, false, false)
   }
-  fn from_raw_inner(raw: &str, flags: TkFlags, expand_braces: bool) -> Self {
+  /// Like `from_raw` but the operand is a parameter-expansion pattern or
+  /// replacement (`${var#pat}`, `${var%pat}`, `${var/pat/rep}`): a bare `(` is
+  /// literal, not a subshell.
+  pub fn from_raw_pattern(raw: &str, flags: TkFlags) -> Self {
+    Self::from_raw_inner(raw, flags, true, true)
+  }
+  /// Brace-free variant of `from_raw_pattern`.
+  pub fn from_raw_no_brace_pattern(raw: &str, flags: TkFlags) -> Self {
+    Self::from_raw_inner(raw, flags, false, true)
+  }
+  fn from_raw_inner(raw: &str, flags: TkFlags, expand_braces: bool, for_pattern: bool) -> Self {
     let raw = if expand_braces && raw.contains('{') {
       brace::expand_braces_full(raw).join(" ")
     } else {
@@ -176,6 +187,8 @@ impl Expander {
     };
     let unescaped = if flags.contains(TkFlags::IS_HEREDOC) {
       unescape_heredoc(&raw)
+    } else if for_pattern {
+      escape::unescape_pattern(&raw)
     } else {
       unescape_str(&raw)
     };
