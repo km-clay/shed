@@ -93,7 +93,6 @@ macro_rules! register_builtins {
 // these have to be in alphabetical order, because of the way lookup_builtin() works
 // if the list is unsorted, that is a compile error thanks to the const evaluation above
 // if you're using vim, you can visual select the block and filter it through ''<,'>:!LC_ALL=C sort'
-// you can also yank this macro and execute it with @" -> /^register_builtins!$viB:!LC_ALL=C sort:wviBga=:w
 // if you're not using vim, idk. you know the alphabet right?
 register_builtins! {
   "."        => source::Source,
