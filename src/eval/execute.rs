@@ -17,6 +17,7 @@ use std::{
   rc::Rc,
 };
 
+use crate::expand::subshell::{last_cmdsub_status, reset_last_cmdsub_status};
 use crate::state::util::with_vars;
 use crate::util::posix_extension::execvpe;
 
@@ -1504,12 +1505,17 @@ impl Dispatcher {
     if let AssignBehavior::Set = assign_behavior {
       // argv is empty: a command with no command word. Perform any assignments
       // in the current shell, then apply any redirections.
-      if !assignments.is_empty()
-        && let Err(e) = Self::set_assignments(assignments, assign_behavior)
-      {
-        Shed::set_status(1);
-        e.print_error();
-        return Ok(());
+      if !assignments.is_empty() {
+        // Reset the cmdsub-status cell so it reflects only the command
+        // substitutions performed by this assignment command, not any from a
+        // previous command. `set_assignments` reads it to derive `$?` per
+        // POSIX (last cmdsub status, or 0).
+        reset_last_cmdsub_status();
+        if let Err(e) = Self::set_assignments(assignments, assign_behavior) {
+          Shed::set_status(1);
+          e.print_error();
+          return Ok(());
+        }
       }
       match RedirSet::from(&cmd.redirs).try_apply(false) {
         RedirResult::Applied(_) | RedirResult::NoRedirs => {
@@ -1716,6 +1722,13 @@ impl Dispatcher {
       };
       let old_status = Shed::get_status();
       let var_name = var.span.as_str();
+      // For an assignment-only command (Set), the exit status is the last
+      // command substitution's status (or 0). Reset `$?` before expanding so
+      // a leftover non-zero status from a prior command can't masquerade as an
+      // expansion failure; the cmdsub cell tracks whether one actually ran.
+      if matches!(behavior, AssignBehavior::Set) {
+        Shed::set_status(0);
+      }
       let is_integer = !is_arr
         && Shed::vars(|v| v.get_var_flags(var_name)).is_some_and(|f| f.contains(VarFlags::INTEGER));
       let val = if is_arr {
@@ -1787,7 +1800,13 @@ impl Dispatcher {
               Ok(true)
             })?;
             if took_fast {
-              let status = param_expansion_status.unwrap_or(old_status);
+              let status = if matches!(behavior, AssignBehavior::Set) {
+                // Assignment-only command: exit status is the last command
+                // substitution's status (or 0), not the pre-assignment status.
+                param_expansion_status.unwrap_or_else(|| last_cmdsub_status().unwrap_or(0))
+              } else {
+                param_expansion_status.unwrap_or(old_status)
+              };
 
               Shed::set_status(status);
               continue;
@@ -1938,7 +1957,13 @@ impl Dispatcher {
         }
       }
 
-      let status = param_expansion_status.unwrap_or(old_status);
+      let status = if matches!(behavior, AssignBehavior::Set) {
+        // Assignment-only command: exit status is the last command
+        // substitution's status (or 0), not the pre-assignment status.
+        param_expansion_status.unwrap_or_else(|| last_cmdsub_status().unwrap_or(0))
+      } else {
+        param_expansion_status.unwrap_or(old_status)
+      };
       Shed::set_status(status);
 
       if matches!(behavior, AssignBehavior::Export) {
@@ -2102,6 +2127,7 @@ pub fn check_err(
 }
 #[cfg(test)]
 mod tests {
+  use crate::assert_status_eq;
   use crate::state;
   use crate::tests::testutil::{TestGuard, test_input};
 
@@ -2821,6 +2847,72 @@ mod tests {
     let _g = TestGuard::new();
     test_input(r#"ml=$(printf 'a\nb\nc')"#).unwrap();
     assert_eq!(var!("ml"), "a\nb\nc");
+  }
+
+  // ─── Assignment exit status (POSIX §2.9.1) ─────────────────────────
+  // An assignment-only command's exit status is the status of the last
+  // command substitution performed, or 0 if there were none. The prior
+  // command's status must NOT leak through.
+
+  #[test]
+  fn assign_only_status_is_zero_with_no_cmdsub() {
+    let _g = TestGuard::new();
+    test_input("false; r=hi").unwrap();
+    assert_status_eq!(0);
+  }
+
+  #[test]
+  fn assign_only_status_zero_does_not_leak_after_success() {
+    let _g = TestGuard::new();
+    test_input("true; r=hi").unwrap();
+    assert_status_eq!(0);
+  }
+
+  #[test]
+  fn assign_only_status_reflects_failing_cmdsub() {
+    let _g = TestGuard::new();
+    test_input(r#"r=$(false)"#).unwrap();
+    assert_status_eq!(1);
+  }
+
+  #[test]
+  fn assign_only_status_reflects_failing_cmdsub_after_failure() {
+    // The prior `false` must not be what sets the status; the cmdsub does.
+    let _g = TestGuard::new();
+    test_input(r#"false; r=$(false)"#).unwrap();
+    assert_status_eq!(1);
+  }
+
+  #[test]
+  fn assign_only_status_reflects_succeeding_cmdsub_after_failure() {
+    // Key zoxide case: a failing condition before the assignment must not
+    // leak through and make a succeeding cmdsub look like it failed.
+    let _g = TestGuard::new();
+    test_input(r#"false; r=$(true)"#).unwrap();
+    assert_status_eq!(0);
+  }
+
+  #[test]
+  fn assign_only_status_is_last_cmdsub_across_multiple() {
+    let _g = TestGuard::new();
+    test_input(r#"r=$(false) s=$(true)"#).unwrap();
+    assert_status_eq!(0);
+  }
+
+  #[test]
+  fn assign_only_status_is_last_cmdsub_failing() {
+    let _g = TestGuard::new();
+    test_input(r#"r=$(true) s=$(false)"#).unwrap();
+    assert_status_eq!(1);
+  }
+
+  #[test]
+  fn assign_only_status_is_last_cmdsub_then_literal() {
+    // A trailing literal assignment doesn't reset the status; the last
+    // cmdsub's status wins.
+    let _g = TestGuard::new();
+    test_input(r#"r=$(false) s=hello"#).unwrap();
+    assert_status_eq!(1);
   }
 
   // ─── PlusEq on strings ──────────────────────────────────────────────

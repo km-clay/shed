@@ -5,7 +5,7 @@ mod escape;
 pub(super) mod markers;
 mod param;
 mod prompt;
-mod subshell;
+pub(crate) mod subshell;
 mod util;
 mod var;
 
