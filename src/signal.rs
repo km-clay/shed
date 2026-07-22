@@ -50,6 +50,8 @@ pub static FOCUS_GAINED: AtomicBool = AtomicBool::new(false);
 
 const MISC_SIGNALS: &[Signal] = &[
   Signal::SIGINT,
+  Signal::SIGHUP,
+  Signal::SIGTERM,
   Signal::SIGILL,
   Signal::SIGTRAP,
   Signal::SIGABRT,
@@ -106,15 +108,49 @@ pub fn sigint_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) & (1 << Signal::SIGINT as u64) != 0
 }
 
+/// Mark the shell for a clean exit with the wait-style status for `sig`.
+fn request_quit(sig: Signal) {
+  SHOULD_QUIT.store(true, Ordering::SeqCst);
+  QUIT_CODE.store(SIG_EXIT_OFFSET + sig as i32, Ordering::SeqCst);
+}
+
+/// Signals that get bespoke handling in `check_signals` before the generic
+/// loop. They must be skipped by that loop so their trap doesn't fire twice.
+fn has_dedicated_handling(sig: Signal) -> bool {
+  matches!(
+    sig,
+    Signal::SIGINT
+      | Signal::SIGHUP
+      | Signal::SIGTSTP
+      | Signal::SIGCHLD
+      | Signal::SIGWINCH
+      | Signal::SIGUSR1
+      | Signal::SIGTERM
+  )
+}
+
+/// Whether the OS default disposition for `sig` terminates the process. Used
+/// to decide what an untrapped signal does in a non-interactive shell.
+fn default_terminates(sig: Signal) -> bool {
+  !matches!(
+    sig,
+    Signal::SIGURG | Signal::SIGCONT | Signal::SIGCHLD | Signal::SIGWINCH
+  )
+}
+
 pub fn check_signals() -> ShResult<()> {
   let pending = SIGNALS.swap(0, Ordering::SeqCst);
 
   let got_signal = |sig: Signal| -> bool { pending & (1 << sig as u64) != 0 };
-  let run_trap = |sig: Signal| -> ShResult<()> {
+  // Returns whether a trap was actually registered (and thus ran), so callers
+  // can decide what the default action should be when there's no trap.
+  let run_trap = |sig: Signal| -> ShResult<bool> {
     if let Some(command) = Shed::logic(|l| l.get_trap(TrapTarget::Signal(sig))) {
       exec_nonint(command, Some("trap".into()))?;
+      Ok(true)
+    } else {
+      Ok(false)
     }
-    Ok(())
   };
 
   if got_signal(Signal::SIGINT) {
@@ -143,18 +179,19 @@ pub fn check_signals() -> ShResult<()> {
     run_trap(Signal::SIGUSR1)?;
   }
   if got_signal(Signal::SIGTERM) {
-    // POSIX says, if we are interactive, sigterm does nothing
-    // if we are not interactive, sigterm kills the shell
-    if !Shed::meta(MetaTab::interactive_shell) {
-      SHOULD_QUIT.store(true, Ordering::SeqCst);
-      QUIT_CODE.store(SIG_EXIT_OFFSET + Signal::SIGTERM as i32, Ordering::SeqCst);
+    let trapped = run_trap(Signal::SIGTERM)?;
+    if !trapped && !Shed::meta(MetaTab::interactive_shell) {
+      request_quit(Signal::SIGTERM);
     }
-    run_trap(Signal::SIGTERM)?;
   }
 
-  for sig in MISC_SIGNALS {
-    if got_signal(*sig) {
-      run_trap(*sig)?;
+  for &sig in MISC_SIGNALS {
+    if has_dedicated_handling(sig) || !got_signal(sig) {
+      continue;
+    }
+    let trapped = run_trap(sig)?;
+    if !trapped && !Shed::meta(MetaTab::interactive_shell) && default_terminates(sig) {
+      request_quit(sig);
     }
   }
 
@@ -172,19 +209,26 @@ pub fn enable_reaping() {
   REAPING_ENABLED.store(true, Ordering::SeqCst);
 }
 
-pub fn sig_setup(is_login: bool) {
+pub fn install_signal_handlers() {
   let flags = SaFlags::empty();
-
   let action = SigAction::new(SigHandler::Handler(handle_signal), flags, SigSet::empty());
 
+  unsafe {
+    for sig in MISC_SIGNALS {
+      sigaction(*sig, &action).unwrap();
+    }
+  }
+}
+
+pub fn sig_setup(is_login: bool) {
+  install_signal_handlers();
+
+  let flags = SaFlags::empty();
   let ignore = SigAction::new(SigHandler::SigIgn, flags, SigSet::empty());
 
   unsafe {
     sigaction(Signal::SIGTTIN, &ignore).unwrap();
     sigaction(Signal::SIGTTOU, &ignore).unwrap();
-    for sig in MISC_SIGNALS {
-      sigaction(*sig, &action).unwrap();
-    }
   }
 
   if is_login {
@@ -465,12 +509,28 @@ mod tests {
   fn check_signals_clears_pending_bitmask() {
     let _g = TestGuard::new();
     reset_signal_state();
-    // Set a "misc" signal that has no special handler — it'll just run a
-    // trap (none defined) and not return Err. Then verify the bit got
-    // cleared.
+    Shed::meta_mut(|m| m.set_interactive_shell(true));
     set_signal(Signal::SIGUSR2);
     assert!(check_signals().is_ok());
     assert_eq!(SIGNALS.load(Ordering::SeqCst), 0);
+  }
+
+  #[test]
+  fn check_signals_untrapped_misc_terminates_non_interactive() {
+    let _g = TestGuard::new();
+    reset_signal_state();
+    Shed::meta_mut(|m| m.set_interactive_shell(false));
+    // A non-interactive shell takes the default (terminate) action for an
+    // untrapped fatal signal instead of silently swallowing it.
+    set_signal(Signal::SIGUSR2);
+    let result = check_signals();
+    let quit = SHOULD_QUIT.load(Ordering::SeqCst);
+    // Clear the exit request we just raised before asserting, so it can't
+    // leak into other tests sharing this process (these globals are static).
+    reset_signal_state();
+    let err = result.expect_err("untrapped SIGUSR2 should quit");
+    assert!(matches!(err.kind(), ShErrKind::CleanExit(_)));
+    assert!(quit);
   }
 
   // ─── SIGINT → interrupt + Err(Interrupt) ─────────────────────────────

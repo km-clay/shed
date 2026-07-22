@@ -1,3 +1,6 @@
+//! Functions for handling input to the shell.
+//! The functions contained within handle both interactive and non-interactive contexts.
+
 use std::{path::Path, sync::atomic::Ordering};
 
 use nix::unistd::{Pid, isatty};
@@ -15,6 +18,9 @@ use super::{
   state, status_msg,
 };
 
+/// Dispatch input handling based on the given [`lifecycle::ShedArgs`]
+///
+/// Executes `-c` commands, reads from stdin, runs scripts, or falls back to interactive mode.
 pub fn dispatch_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
   if args.edit_script {
     // in this arm, we interpret the input we are given as a sequence of keys
@@ -52,6 +58,7 @@ pub fn dispatch_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
   }
 }
 
+/// Read and execute commands from stdin
 pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
   let bytes = read_input()?;
   let commands = bytes_to_string(bytes);
@@ -69,6 +76,9 @@ pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
   exec_nonint(commands.into(), None)
 }
 
+/// Read and execute the script at a given path
+///
+/// Fails if `shed` is not able to open or read the file.
 pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
   let path = path.as_ref();
   let source_path = state::util::display_path(path);

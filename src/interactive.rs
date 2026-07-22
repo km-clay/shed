@@ -1,3 +1,7 @@
+//! The logic for `shed`'s main interactive loop
+//!
+//! The loop handles both user input and input to the IPC socket.
+
 use std::{
   collections::VecDeque,
   os::fd::{AsRawFd, BorrowedFd},
@@ -49,11 +53,15 @@ thread_local! {
   static REPL_ENTRIES: AtomicUsize = const { AtomicUsize::new(1) };
 }
 
+/// Return a string that identifies the command being submitted
 fn get_repl_entry_name() -> Rc<str> {
   let id = REPL_ENTRIES.with(|c| c.fetch_add(1, Ordering::SeqCst));
   format!("repl_entry #{id}").into()
 }
 
+/// If the parent process has changed since we started, return true.
+///
+/// This indicates that the shell has been reparented, and should exit.
 fn was_reparented() -> bool {
   let Some(&ppid) = PARENT_PROCESS_ID.get() else {
     return false;
@@ -62,6 +70,9 @@ fn was_reparented() -> bool {
   now != ppid
 }
 
+/// Handle any pending signals and redraw the prompt if necessary.
+///
+/// Not limited to just OS signals, this also handles internal signals like job completion and focus changes.
 fn handle_signals_interactive(readline: &mut ShedLine) -> ShResult<bool> {
   // Handle any pending signals
   while signals_pending() {
@@ -103,10 +114,16 @@ fn handle_signals_interactive(readline: &mut ShedLine) -> ShResult<bool> {
   Ok(true)
 }
 
+/// The timeout to use for the next `poll()` call.
 enum ShedPollTimeout {
+  /// No timeout, wait indefinitely
   Null,
+  /// Wait for 0 milliseconds, return immediately
   Zero,
+  /// Wait for exactly 1000 milliseconds
   PendingKeymap,
+
+  /// User-provided manual poll timeout
   Override(PollTimeout),
   IdleTimeout(PollTimeout),
 }

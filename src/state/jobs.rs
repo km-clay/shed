@@ -815,16 +815,16 @@ impl JobTab {
     let mut jobs_to_remove = vec![];
     for job in jobs.iter().flatten() {
       let id = job.tabid().unwrap();
+      let stats = job.get_stats();
       if flags.contains(JobCmdFlags::RUNNING)
-        && !matches!(
-          job.get_stats().get(id).unwrap(),
-          WtStat::StillAlive | WtStat::Continued(_)
-        )
+        && !stats
+          .iter()
+          .any(|s| matches!(s, WtStat::StillAlive | WtStat::Continued(_)))
       {
         continue;
       }
       if flags.contains(JobCmdFlags::STOPPED)
-        && !matches!(job.get_stats().get(id).unwrap(), WtStat::Stopped(_, _))
+        && !stats.iter().any(|s| matches!(s, WtStat::Stopped(_, _)))
       {
         continue;
       }

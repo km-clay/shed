@@ -1,3 +1,6 @@
+//! This module contains functions for managing the lifecycle of the program.
+//! These functions do stuff like setting up the logger, parsing the command line arguments, hanging up child processes on exit, etc.
+
 use std::{io::Write, path::PathBuf, process::ExitCode, sync::atomic::Ordering};
 
 use clap::Parser;
@@ -7,7 +10,7 @@ use super::{
   eval::execute::{Dispatcher, exec_nonint},
   outln,
   procio::{self, RedirType},
-  signal::QUIT_CODE,
+  signal,
   state::{
     jobs::JobTab,
     logic::TrapTarget,
@@ -98,6 +101,14 @@ impl ShedArgs {
   ];
 }
 
+/// Internal set up for `shed`.
+///
+/// Does the following:
+/// - enables `yansi`
+/// - sets up `shed`'s panic handler
+/// - initializes the `flog` logger
+/// - sets the `$SH_LVL`, `$SHED_VERSION`, and `$SHED_VER_INFO` variables
+/// - installs OS signal handlers so `trap` works in every mode
 pub(super) fn setup() -> Option<ShedArgs> {
   yansi::enable();
   setup_panic_handler();
@@ -142,9 +153,17 @@ pub(super) fn setup() -> Option<ShedArgs> {
     Shed::shopts_mut(|o| o.query(&format!("set.{set_opt}=true"))).ok();
   }
 
+  // Install trap handlers for every mode. The interactive loop calls
+  // `sig_setup` later (adding tty/job-control setup on top); non-interactive
+  // shells rely on this so `trap` works in `-c` and scripts.
+  signal::install_signal_handlers();
+
   Some(args)
 }
 
+/// Run first time setup of `shed`.
+///
+/// Generates a default runtime commands file, and displays a status message announcing its path.
 pub(super) fn first_run_setup() -> ShResult<()> {
   let rc_path = generate_default_rc()?;
 
@@ -191,6 +210,12 @@ fn setup_panic_handler() {
   }));
 }
 
+/// Tear down `shed`'s execution environment.
+///
+/// When this program closes, we also need to send `SIGHUP` to any remaining child processes.
+/// We also execute the `on-exit` autocmd group here.
+///
+/// The return is an `ExitCode` constructed from the current value of [`signal::QUIT_CODE`]
 #[expect(clippy::cast_sign_loss)]
 pub(super) fn tear_down() -> ExitCode {
   if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit))
@@ -216,5 +241,5 @@ pub(super) fn tear_down() -> ExitCode {
   Shed::jobs_mut(JobTab::hang_up);
   Shed::term_mut(Terminal::reset_for_exit);
 
-  ExitCode::from(QUIT_CODE.load(Ordering::SeqCst) as u8)
+  ExitCode::from(signal::QUIT_CODE.load(Ordering::SeqCst) as u8)
 }
