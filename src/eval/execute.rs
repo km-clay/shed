@@ -4,6 +4,7 @@ use crate::{
   procio::{OutputSink, SinkScope, StdinScope},
   shopt_mut, socket,
   state::{
+    Shed,
     logic::AutoloadKind,
     vars::{VarStr, VarStrSliceExt},
   },
@@ -39,7 +40,7 @@ use super::{
   sherr, shopt,
   signal::{check_signals, signals_pending},
   state::{
-    self, Shed,
+    self,
     logic::{ShFunc, TrapTarget},
     meta::CmdTimer,
     shopt::xtrace_print,
@@ -521,7 +522,7 @@ impl Dispatcher {
           }
           e.print_error();
         }
-        state::Shed::set_status(0);
+        Shed::set_status(0);
 
         Ok(())
       }
@@ -532,8 +533,8 @@ impl Dispatcher {
       unreachable!()
     };
     self.dispatch_node(cmd)?;
-    let status = state::Shed::get_status();
-    state::Shed::set_status_from_bool(status != 0);
+    let status = Shed::get_status();
+    Shed::set_status_from_bool(status != 0);
 
     Ok(())
   }
@@ -566,7 +567,7 @@ impl Dispatcher {
         self.dispatch_node(cmd)?;
       }
 
-      let status = state::Shed::get_status();
+      let status = Shed::get_status();
       skip = match operator {
         ConjunctOp::And => status != 0,
         ConjunctOp::Or => status == 0,
@@ -581,7 +582,7 @@ impl Dispatcher {
     };
     let result = expand_arithmetic_wrapped(body.as_str())?;
     let val: f64 = result.parse().unwrap_or(0.0);
-    state::Shed::set_status_from_bool(val != 0.0);
+    Shed::set_status_from_bool(val != 0.0);
     Ok(())
   }
   pub fn exec_func_def(func_def: &Node) -> ShResult<()> {
@@ -616,7 +617,7 @@ impl Dispatcher {
       });
     }
 
-    state::Shed::set_status(0);
+    Shed::set_status(0);
     Ok(())
   }
   fn exec_func(&mut self, func: &Node) -> ShResult<()> {
@@ -737,11 +738,11 @@ impl Dispatcher {
       Ok(()) => Ok(()),
       Err(e) => match e.kind() {
         ShErrKind::FuncReturn(code) => {
-          state::Shed::set_status(*code);
+          Shed::set_status(*code);
           Ok(())
         }
         ShErrKind::Raised(_, code) => {
-          state::Shed::set_status(*code);
+          Shed::set_status(*code);
           if Shed::meta(MetaTab::func_depth) <= 1 {
             // raise builtin has been called
             // set the status, attach the function call span
@@ -906,26 +907,35 @@ impl Dispatcher {
       let _guard = shared_scope_guard();
       'outer: loop {
         if let Err(e) = s.dispatch_node(cond) {
-          state::Shed::set_status(1);
+          Shed::set_status(1);
           return Err(e);
         }
 
-        let status = state::Shed::get_status();
+        let status = Shed::get_status();
         if keep_going(*kind, status) {
-          if let Err(e) = s.dispatch_node(body) {
-            match e.kind() {
-              ShErrKind::LoopBreak(code) => {
-                state::Shed::set_status(*code);
-                break 'outer;
+          if let Err(mut e) = s.dispatch_node(body) {
+            match e.kind_mut() {
+              ShErrKind::LoopBreak(count) => {
+                if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
+                  Shed::set_status(0);
+                  break 'outer;
+                } else {
+                  *count -= 1;
+                  return Err(e);
+                }
               }
-              ShErrKind::LoopContinue(code) => {
-                state::Shed::set_status(*code);
+              ShErrKind::LoopContinue(count) => {
+                if *count > 1 && Shed::meta(MetaTab::loop_depth) > 1 {
+                  *count -= 1;
+                  return Err(e);
+                }
+                Shed::set_status(0);
               }
               _ => return Err(e),
             }
           }
         } else {
-          state::Shed::set_status(0);
+          Shed::set_status(0);
           break;
         }
       }
@@ -961,26 +971,34 @@ impl Dispatcher {
       'outer: loop {
         if let Some(cond_node) = cond {
           if let Err(e) = s.dispatch_node(cond_node) {
-            state::Shed::set_status(1);
+            Shed::set_status(1);
             return Err(e);
           }
-          let status = state::Shed::get_status();
+          let status = Shed::get_status();
           if status != 0 {
-            state::Shed::set_status(0);
+            Shed::set_status(0);
             break;
           }
         }
         let _guard = shared_scope_guard();
 
-        if let Err(e) = s.dispatch_node(&*body) {
-          match e.kind() {
-            ShErrKind::LoopBreak(code) => {
-              state::Shed::set_status(*code);
-              break 'outer;
+        if let Err(mut e) = s.dispatch_node(&*body) {
+          match e.kind_mut() {
+            ShErrKind::LoopBreak(count) => {
+              if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
+                Shed::set_status(0);
+                break 'outer;
+              } else {
+                *count -= 1;
+                return Err(e);
+              }
             }
-            ShErrKind::LoopContinue(code) => {
-              state::Shed::set_status(*code);
-              continue 'outer;
+            ShErrKind::LoopContinue(count) => {
+              if *count > 1 && Shed::meta(MetaTab::loop_depth) > 1 {
+                *count -= 1;
+                return Err(e);
+              }
+              Shed::set_status(0);
             }
             _ => return Err(e),
           }
@@ -989,7 +1007,7 @@ impl Dispatcher {
         if let Some(step_node) = step
           && let Err(e) = s.dispatch_node(step_node)
         {
-          state::Shed::set_status(1);
+          Shed::set_status(1);
           return Err(e);
         }
       }
@@ -1035,14 +1053,23 @@ impl Dispatcher {
 
         let _guard = shared_scope_guard();
 
-        if let Err(e) = s.dispatch_node(&*body) {
-          match e.kind() {
-            ShErrKind::LoopBreak(code) => {
-              state::Shed::set_status(*code);
-              break 'outer;
+        if let Err(mut e) = s.dispatch_node(&*body) {
+          match e.kind_mut() {
+            ShErrKind::LoopBreak(count) => {
+              if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
+                Shed::set_status(0);
+                break 'outer;
+              } else {
+                *count -= 1;
+                return Err(e);
+              }
             }
-            ShErrKind::LoopContinue(code) => {
-              state::Shed::set_status(*code);
+            ShErrKind::LoopContinue(count) => {
+              if *count > 1 && Shed::meta(MetaTab::loop_depth) > 1 {
+                *count -= 1;
+                return Err(e);
+              }
+              Shed::set_status(0);
             }
             _ => return Err(e),
           }
@@ -1072,11 +1099,11 @@ impl Dispatcher {
         let _guard = shared_scope_guard();
 
         if let Err(e) = s.dispatch_node(cond) {
-          state::Shed::set_status(1);
+          Shed::set_status(1);
           return Err(e);
         }
 
-        if state::Shed::get_status() == 0 {
+        if Shed::get_status() == 0 {
           matched = true;
           s.dispatch_node(body)?;
           break; // Don't check remaining elif conditions
@@ -1088,7 +1115,7 @@ impl Dispatcher {
           let _guard = shared_scope_guard();
           s.dispatch_node(body)?;
         } else {
-          state::Shed::set_status(0);
+          Shed::set_status(0);
         }
       }
 
@@ -1397,9 +1424,9 @@ impl Dispatcher {
       })?;
       Ok(())
     } else if let Err(e) = builtin.setup_builtin(cmd, self) {
-      let code = state::Shed::get_status();
+      let code = Shed::get_status();
       if code == 0 {
-        state::Shed::set_status(1);
+        Shed::set_status(1);
       }
       Err(e)
     } else {
@@ -1424,12 +1451,12 @@ impl Dispatcher {
     if let AssignBehavior::Set = assign_behavior {
       // argv is empty: a command with no command word. Perform any assignments
       // in the current shell, then apply any redirections.
-      if !assignments.is_empty() {
-        if let Err(e) = Self::set_assignments(assignments, assign_behavior) {
-          Shed::set_status(1);
-          e.print_error();
-          return Ok(());
-        }
+      if !assignments.is_empty()
+        && let Err(e) = Self::set_assignments(assignments, assign_behavior)
+      {
+        Shed::set_status(1);
+        e.print_error();
+        return Ok(());
       }
       match RedirSet::from(&cmd.redirs).apply() {
         Ok(_guard) => {
@@ -1583,7 +1610,7 @@ impl Dispatcher {
         }
         let _guard = Shed::term_mut(|t| t.interactive_guard(false));
         f(self);
-        unsafe { nix::libc::_exit(state::Shed::get_status()) }
+        unsafe { nix::libc::_exit(Shed::get_status()) }
       }
       ForkResult::Parent { child } => {
         let timer = self.take_timer();
@@ -1620,7 +1647,7 @@ impl Dispatcher {
       let NdRule::Assignment { kind, var, val } = &assign.class else {
         unreachable!()
       };
-      let old_status = state::Shed::get_status();
+      let old_status = Shed::get_status();
       let var_name = var.span.as_str();
       let val = if is_arr {
         VarKind::arr_from_tk(val)?
@@ -1942,7 +1969,7 @@ pub fn check_err(
   span: Option<Span>,
   context: LabelCtx,
 ) -> ShResult<()> {
-  if state::Shed::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
+  if Shed::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
     if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Error)) {
       util::with_saved_status(|| exec_nonint(trap, Some("trap ERR".into())))?;
     }

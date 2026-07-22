@@ -256,12 +256,10 @@ impl HistQuery {
       entries.retain(|e| re.is_match(e.1.command()) != *not);
     }
 
-    if self.delete {
-      if !entries.is_empty() {
-        let ids: Vec<i64> = entries.iter().map(|e| e.0).collect();
-        hist.delete_ids(&ids)?;
-        hist.refresh_hist_entries();
-      }
+    if self.delete && !entries.is_empty() {
+      let ids: Vec<i64> = entries.iter().map(|e| e.0).collect();
+      hist.delete_ids(&ids)?;
+      hist.refresh_hist_entries();
     }
 
     // 'self.reverse' means 'print the entries in descending order'

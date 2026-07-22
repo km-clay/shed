@@ -292,11 +292,10 @@ impl History {
     // every row has one, so it is safe to run on every startup.
     let ids: Vec<i64> = {
       let mut stmt = conn.prepare(&format!("SELECT id FROM {table} WHERE token IS NULL"))?;
-      let ids = stmt
+      stmt
         .query_map([], |r| r.get(0))?
         .filter_map(Result::ok)
-        .collect::<Vec<i64>>();
-      ids
+        .collect::<Vec<i64>>()
     };
     if !ids.is_empty() {
       conn.execute_batch("BEGIN")?;

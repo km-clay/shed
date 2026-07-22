@@ -1611,14 +1611,17 @@ BREAK                                            *builtin-break* *break*
 
   `break [n]`
 
-  Exit the current loop. If {n} is given, the loop exits with status {n};
-  otherwise exits with status 0. It is an error to call `break` outside
-  of a loop.
+  Exit the current loop. If {n} is given, exit the {n} innermost enclosing
+  loops (default 1); if {n} is greater than the number of enclosing loops,
+  the outermost loop is exited. {n} must be a positive integer. `break`
+  itself exits with status 0 (it does not set `$?` to {n}). It is an error
+  to call `break` outside of a loop.
 
   Examples:
 
       `while true; do break; done`
       `for i in 1 2 3; do break; done`
+      `for i in 1 2; do for j in a b; do break 2; done; done  # exits both loops`
 
 ==============================================================================
 CONTINUE                                         *builtin-continue* *continue*
@@ -1626,12 +1629,16 @@ CONTINUE                                         *builtin-continue* *continue*
   `continue [n]`
 
   Skip the remainder of the current loop iteration and begin the next.
-  If {n} is given, the iteration exits with status {n}; otherwise 0.
-  It is an error to call `continue` outside of a loop.
+  If {n} is given, resume the next iteration of the {n}th enclosing loop
+  (default 1); if {n} is greater than the number of enclosing loops, the
+  outermost loop is resumed. {n} must be a positive integer. `continue`
+  itself exits with status 0 (it does not set `$?` to {n}). It is an error
+  to call `continue` outside of a loop.
 
   Examples:
 
       `for i in 1 2 3; do [[ $i == 2 ]] && continue; echo $i; done`
+      `for i in 1 2; do for j in a b; do continue 2; done; done  # resumes outer loop`
 
 ==============================================================================
 RAISE                                            *builtin-raise* *raise*

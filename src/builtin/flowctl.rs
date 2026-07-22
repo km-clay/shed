@@ -79,8 +79,21 @@ impl FlowCtl for Break {
   fn cmd(&self) -> &'static str {
     "break"
   }
-  fn flow_control(&self, code: i32) -> ShErr {
-    sherr!(LoopBreak(code), "'break' found outside of loop",)
+  /// The "code" for `break` actually means the number of outer loops to break out of
+  ///
+  /// POSIX 1-indexes this, so we return `1`.
+  fn default_code(&self) -> i32 {
+    1
+  }
+  fn flow_control(&self, count: i32) -> ShErr {
+    if count <= 0 {
+      sherr!(
+        ParseErr,
+        "'break' count must be a positive integer, got {count}",
+      )
+    } else {
+      sherr!(LoopBreak(count), "'break' found outside of loop",)
+    }
   }
 }
 
@@ -98,8 +111,18 @@ impl FlowCtl for Continue {
   fn cmd(&self) -> &'static str {
     "continue"
   }
-  fn flow_control(&self, code: i32) -> ShErr {
-    sherr!(LoopContinue(code), "'continue' found outside of loop",)
+  fn default_code(&self) -> i32 {
+    1
+  }
+  fn flow_control(&self, count: i32) -> ShErr {
+    if count <= 0 {
+      sherr!(
+        ParseErr,
+        "'continue' count must be a positive integer, got {count}",
+      )
+    } else {
+      sherr!(LoopContinue(count), "'continue' found outside of loop",)
+    }
   }
 }
 
@@ -297,6 +320,66 @@ mod tests {
     assert_ne!(state::Shed::get_status(), 0);
   }
 
+  #[test]
+  fn break_one_is_innermost_only() {
+    // POSIX `break 1` is equivalent to bare `break`: it exits only the
+    // innermost loop, so the outer loop keeps iterating.
+    let guard = TestGuard::new();
+    test_input("for i in 1 2; do for j in a b; do echo $i$j; break 1; done; done").unwrap();
+    assert_eq!(
+      guard.read_output().split_whitespace().collect::<Vec<_>>(),
+      ["1a", "2a"]
+    );
+  }
+
+  #[test]
+  fn break_n_exits_n_enclosing_loops() {
+    // `break 2` escapes both loops, so the outer body after the inner loop
+    // and the outer loop's remaining iterations are skipped.
+    let guard = TestGuard::new();
+    test_input(
+      "for i in 1 2; do for j in a b; do echo $i$j; break 2; done; echo in$i; done; echo end",
+    )
+    .unwrap();
+    assert_eq!(
+      guard.read_output().split_whitespace().collect::<Vec<_>>(),
+      ["1a", "end"]
+    );
+  }
+
+  #[test]
+  fn break_count_exceeding_nesting_clamps_to_outermost() {
+    // POSIX: if n is greater than the number of enclosing loops, the outermost
+    // loop is exited (not an error). `break 5` inside 2 loops == `break 2`.
+    let guard = TestGuard::new();
+    test_input(
+      "for i in 1 2; do for j in a b; do echo $i$j; break 5; done; echo in$i; done; echo end",
+    )
+    .unwrap();
+    assert_eq!(
+      guard.read_output().split_whitespace().collect::<Vec<_>>(),
+      ["1a", "end"]
+    );
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn break_zero_is_rejected() {
+    // POSIX requires n >= 1; `break 0` is an error and must not break.
+    let _g = TestGuard::new();
+    test_input("for i in 1; do break 0; done").ok();
+    assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn break_leaves_status_zero() {
+    // `break` is a successful builtin (exit status 0), so it does not carry
+    // the loop body's prior status out of the loop.
+    let _g = TestGuard::new();
+    test_input("for i in 1; do false; break; done").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
   // ===================== continue =====================
 
   #[test]
@@ -313,6 +396,61 @@ mod tests {
     let _g = TestGuard::new();
     test_input("continue").ok();
     assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn continue_one_is_innermost_only() {
+    // `continue 1` == bare `continue`: it resumes the innermost loop, so every
+    // inner iteration still runs.
+    let guard = TestGuard::new();
+    test_input("for i in 1 2; do for j in a b; do echo $i$j; continue 1; echo un; done; done")
+      .unwrap();
+    assert_eq!(
+      guard.read_output().split_whitespace().collect::<Vec<_>>(),
+      ["1a", "1b", "2a", "2b"]
+    );
+  }
+
+  #[test]
+  fn continue_n_resumes_nth_enclosing_loop() {
+    // `continue 2` abandons the inner loop and resumes the OUTER loop's next
+    // iteration, so `echo un` and the rest of the inner loop are skipped.
+    let guard = TestGuard::new();
+    test_input("for i in 1 2; do for j in a b; do echo $i$j; continue 2; echo un; done; echo in$i; done; echo end")
+      .unwrap();
+    assert_eq!(
+      guard.read_output().split_whitespace().collect::<Vec<_>>(),
+      ["1a", "2a", "end"]
+    );
+  }
+
+  #[test]
+  fn continue_count_exceeding_nesting_clamps_to_outermost() {
+    // POSIX: n greater than the nesting resumes the outermost loop.
+    // `continue 5` inside 2 loops == `continue 2`.
+    let guard = TestGuard::new();
+    test_input("for i in 1 2; do for j in a b; do echo $i$j; continue 5; echo un; done; echo in$i; done; echo end")
+      .unwrap();
+    assert_eq!(
+      guard.read_output().split_whitespace().collect::<Vec<_>>(),
+      ["1a", "2a", "end"]
+    );
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn continue_zero_is_rejected() {
+    let _g = TestGuard::new();
+    test_input("for i in 1; do continue 0; done").ok();
+    assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn continue_leaves_status_zero() {
+    // `continue` is a successful builtin (exit status 0).
+    let _g = TestGuard::new();
+    test_input("for i in 1; do false; continue; done").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
   }
 
   // ===================== return =====================

@@ -765,6 +765,9 @@ impl MetaTab {
   pub fn in_loop(&self) -> bool {
     self.loop_depth > 0
   }
+  pub fn loop_depth(&self) -> usize {
+    self.loop_depth
+  }
   pub fn in_func(&self) -> bool {
     self.func_depth > 0
   }

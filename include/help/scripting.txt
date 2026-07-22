@@ -601,7 +601,7 @@ executable with a shebang line:
 
   7.5 The `break` and `continue` keywords     *script-break* *script-continue*
 
-      `break [N]` exits the innermost loop and sets `$?` to {N} (default 0):
+      `break [N]` exits the {N} innermost enclosing loops (default 1):
 
           `while true; do`
           `  read -r input`
@@ -611,7 +611,7 @@ executable with a shebang line:
           `  echo "you said: $input"`
           `done`
 
-      `continue [N]` restarts the loop and sets `$?` to {N} (default 0):
+      `continue [N]` resumes the {N}th enclosing loop (default 1):
 
           `for f in *; do`
           `  if [ -d "$f" ]; then`
@@ -619,6 +619,10 @@ executable with a shebang line:
           `  fi`
           `  wc -l "$f"`
           `done`
+
+      {N} must be a positive integer; if it exceeds the loop nesting, the
+      outermost loop is used. Both leave `$?` at 0, not {N} — use `return`
+      or `exit` when you need to set an exit status.
 
 ==============================================================================
 8. Functions                                     *script-functions*
