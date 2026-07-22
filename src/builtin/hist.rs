@@ -245,13 +245,24 @@ impl HistQuery {
     let query = format!("{where_clause} ORDER BY id DESC {limit}");
 
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(AsRef::as_ref).collect();
-    let mut entries = if self.delete {
-      let res = hist.delete(&query, &param_refs)?;
-      hist.refresh_hist_entries();
-      res
-    } else {
-      hist.query(&query, &param_refs)?
-    };
+
+    let mut entries = hist.query(&query, &param_refs)?;
+
+    if let (Some(pat), not) = &self.matches {
+      let re = match Shed::meta_mut(|m| m.get_regex(pat)) {
+        Ok(re) => re,
+        Err(e) => return Err(sherr!(ParseErr, "{e}")),
+      };
+      entries.retain(|e| re.is_match(e.1.command()) != *not);
+    }
+
+    if self.delete {
+      if !entries.is_empty() {
+        let ids: Vec<i64> = entries.iter().map(|e| e.0).collect();
+        hist.delete_ids(&ids)?;
+        hist.refresh_hist_entries();
+      }
+    }
 
     // 'self.reverse' means 'print the entries in descending order'
     if !self.reverse {
@@ -260,21 +271,7 @@ impl HistQuery {
       entries.reverse();
     }
 
-    match &self.matches {
-      (Some(pat), not) => {
-        let re = match Shed::meta_mut(|m| m.get_regex(pat)) {
-          Ok(re) => re,
-          Err(e) => return Err(sherr!(ParseErr, "{e}")),
-        };
-        Ok(
-          entries
-            .into_iter()
-            .filter(|e| re.is_match(e.1.command()) != *not)
-            .collect(),
-        )
-      }
-      _ => Ok(entries),
-    }
+    Ok(entries)
   }
 
   pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
@@ -1376,6 +1373,88 @@ mod hist_builtin_execute_tests {
     let out = g.read_output();
     assert!(out.contains(": kept"), "got: {out:?}");
     assert!(!out.contains(": doomed"), "got: {out:?}");
+  }
+
+  #[test]
+  fn hist_delete_matches_only_removes_matching_entries() {
+    // Regression: `--delete --matches <regex>` used to run the delete on the
+    // SQL WHERE (empty when --matches is the only filter) and apply the regex
+    // only to the displayed list — wiping the ENTIRE table. It must now delete
+    // exactly the regex-matched rows.
+    let g = TestGuard::new();
+    let h = fresh_history("shed_history");
+    h.push(": cargo build").unwrap();
+    h.push(": cargo test").unwrap();
+    h.push(": git status").unwrap();
+    test_input("hist --delete --matches '^: cargo'").unwrap();
+    g.read_output(); // drain --delete output
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.contains(": git status"),
+      "non-matching entry wiped: {out:?}"
+    );
+    assert!(
+      !out.contains(": cargo build"),
+      "matching entry survived: {out:?}"
+    );
+    assert!(
+      !out.contains(": cargo test"),
+      "matching entry survived: {out:?}"
+    );
+  }
+
+  #[test]
+  fn hist_delete_matches_none_keeps_all_entries() {
+    // A regex that matches nothing must delete nothing (must NOT fall through
+    // to an empty WHERE and wipe the table).
+    let g = TestGuard::new();
+    let h = fresh_history("shed_history");
+    h.push(": alpha").unwrap();
+    h.push(": beta").unwrap();
+    test_input("hist --delete --matches 'zzz-no-match'").unwrap();
+    g.read_output();
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(out.contains(": alpha"), "entry wiped: {out:?}");
+    assert!(out.contains(": beta"), "entry wiped: {out:?}");
+  }
+
+  #[test]
+  fn init_db_creates_all_tables_on_shared_connection() {
+    // Regression: init_db keyed its early-return on the DB-wide `user_version`,
+    // so once the first table bumped it to USER_VERSION, every later table on
+    // the same connection skipped its CREATE TABLE and silently never
+    // persisted. Simulate startup order on one shared connection.
+    let _g = TestGuard::new();
+    let conn = state::util::get_db_conn().expect("test db conn");
+    {
+      let c = conn.lock().unwrap();
+      c.execute_batch("DROP TABLE IF EXISTS shed_history").ok();
+      c.execute_batch("DROP TABLE IF EXISTS ex_history").ok();
+      // Fresh-ish DB so the FIRST init succeeds; the SECOND then hits the
+      // (formerly buggy) `user_version == USER_VERSION` early-return.
+      c.execute_batch("PRAGMA user_version = 0").ok();
+    }
+
+    // First table bumps user_version to USER_VERSION.
+    let first = History::new(conn.clone(), "shed_history").expect("init first table");
+    first.push(": first-table-entry").unwrap();
+
+    // Second table on the same connection, user_version now == USER_VERSION.
+    // Before the fix its CREATE TABLE was skipped, so this INSERT would fail.
+    let second = History::new(conn.clone(), "ex_history").expect("init second table");
+    second
+      .push(": second-table-entry")
+      .expect("second table must exist and be writable");
+
+    let entries = second.query("", &[]).expect("query second table");
+    assert!(
+      entries
+        .iter()
+        .any(|(_, e)| e.command() == ": second-table-entry"),
+      "second table did not persist its entry: {entries:?}"
+    );
   }
 
   #[test]
