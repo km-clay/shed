@@ -69,9 +69,13 @@ impl ParseStream {
   pub(super) fn assert_separator(&mut self, node_tks: &mut Option<Span>) -> ShResult<()> {
     let next_class = self.next_tk_class();
     match next_class {
-      TkRule::Eoi | TkRule::Or | TkRule::Bg | TkRule::And | TkRule::BraceGrpEnd | TkRule::Pipe => {
-        Ok(())
-      }
+      TkRule::Eoi
+      | TkRule::Or
+      | TkRule::Bg
+      | TkRule::And
+      | TkRule::BraceGrpEnd
+      | TkRule::SubshEnd
+      | TkRule::Pipe => Ok(()),
 
       TkRule::Sep => {
         if let Some(tk) = self.next_tk() {
