@@ -703,14 +703,18 @@ impl super::Builtin for Printf {
       .next()
       .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
     let formatter = PrintFormatter::parse(&format_str)?;
-    let mut values = argv.peekable();
+    let remaining: Vec<String> = argv.collect();
+    let mut values = remaining.into_iter().peekable();
 
     if formatter.has_specs() {
-      // Recycle the format string until args are exhausted.
+      // Recycle the format string until args are exhausted. If a full cycle
+      // consumes no arguments (e.g. the only spec is `%%`), stop instead of
+      // looping forever.
       loop {
+        let before = values.len();
         let out = formatter.apply_once(&mut values)?;
         out!("{out}");
-        if values.peek().is_none() {
+        if values.peek().is_none() || values.len() == before {
           break;
         }
       }
