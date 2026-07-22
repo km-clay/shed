@@ -182,7 +182,7 @@ impl ParseStream {
           extend_span!(span, prefix_tk.span);
           tk_counter += 1;
           let ctx = self.context.clone();
-          Self::push_redir(
+          if let Err(e) = Self::push_redir(
             prefix_tk,
             || {
               let tk = tk_iter.next().cloned();
@@ -194,7 +194,9 @@ impl ParseStream {
             &mut span,
             ctx,
             &mut redirs,
-          )?;
+          ) {
+            break 'out Err(e);
+          }
         } else if prefix_tk.class == TkRule::Sep {
           // Separator ends the prefix section - add it so commit() consumes it
           extend_span!(span, prefix_tk.span);
