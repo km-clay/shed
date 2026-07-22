@@ -84,7 +84,9 @@ impl super::Builtin for Read {
           let seconds = t
             .parse::<f64>()
             .map_err(|_| sherr!(ExecFail, "read: Invalid timeout value '{t}'"))?;
-          timeout = Some(Duration::from_secs_f64(seconds).as_millis() as i32);
+          let dur = Duration::try_from_secs_f64(seconds)
+            .map_err(|_| sherr!(ExecFail, "read: Invalid timeout value '{t}'"))?;
+          timeout = Some(dur.as_millis().min(i32::MAX as u128) as i32);
         }
         _ => return Err(sherr!(ExecFail, "read: Unexpected flag '{opt}'")).promote_err(args.span),
       }
