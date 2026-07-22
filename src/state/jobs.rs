@@ -675,11 +675,10 @@ impl JobTab {
       let msg = job.display(&self.order, JobCmdFlags::INIT);
       system_msg!("{msg}");
     }
-    if tab_pos == self.jobs.len() {
-      self.jobs.push(Some(job));
-    } else {
-      self.jobs[tab_pos] = Some(job);
+    if tab_pos >= self.jobs.len() {
+      self.jobs.resize_with(tab_pos + 1, || None);
     }
+    self.jobs[tab_pos] = Some(job);
 
     if let Some(pid) = last_pid {
       Shed::vars_mut(|v| v.set_param(ShellParam::LastJob, &pid.to_string()));
