@@ -218,13 +218,13 @@ impl ParseStream {
         flags |= NdFlags::NO_SPLIT;
       }
       if argv.is_empty() {
-        if assignments.is_empty() {
+        if assignments.is_empty() && redirs.is_empty() {
           break 'out Ok(None);
         }
-        // If we have assignments but no command word,
-        // return the assignment-only command without parsing more tokens
+        // we have an empty argv, but we got here with assignments and/or redirections.
+        // we still need to execute this, so emit an empty command node.
         self.commit(tk_counter);
-        let assignments_span = assignments.get_span().unwrap();
+        let assignments_span = assignments.get_span();
         let mut nd = node!(
           self,
           span.clone(),
@@ -232,10 +232,12 @@ impl ParseStream {
           redirs,
           flags
         );
-        nd.context.push_back(get_context(
-          "in variable assignment defined here".into(),
-          assignments_span,
-        ));
+        if let Some(assignments_span) = assignments_span {
+          nd.context.push_back(get_context(
+            "in variable assignment defined here".into(),
+            assignments_span,
+          ));
+        }
         return Ok(Some(nd));
       }
       loop {

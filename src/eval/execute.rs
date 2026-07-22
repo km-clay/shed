@@ -1422,14 +1422,28 @@ impl Dispatcher {
     };
 
     if let AssignBehavior::Set = assign_behavior {
-      // if we are here, argv is empty. set assignments and return.
+      // argv is empty: a command with no command word. Perform any assignments
+      // in the current shell, then apply any redirections.
       if !assignments.is_empty() {
         if let Err(e) = Self::set_assignments(assignments, assign_behavior) {
           Shed::set_status(1);
           e.print_error();
+          return Ok(());
         }
-        return Ok(());
       }
+      match RedirSet::from(&cmd.redirs).apply() {
+        Ok(_guard) => {
+          // this is a command with only redirections. set the status to 0
+          if assignments.is_empty() {
+            Shed::set_status(0);
+          }
+        }
+        Err(e) => {
+          e.print_error();
+          Shed::set_status(1);
+        }
+      }
+      return Ok(());
     }
     // argv is not empty. let's set this stuff here.
     let cmd_tk = argv[0].clone();
