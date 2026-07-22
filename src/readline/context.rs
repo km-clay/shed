@@ -752,7 +752,7 @@ fn check_path_exists(path: &str) -> bool {
   }
 
   let unescaped = unescape_str(path);
-  let Ok(expanded) = expand_raw_inner(&mut unescaped.chars().peekable(), false) else {
+  let Ok(expanded) = expand_raw_inner(&mut unescaped.chars().peekable(), false, false) else {
     return false;
   };
   let stripped = strip_markers(&expanded);

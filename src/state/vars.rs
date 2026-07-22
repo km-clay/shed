@@ -30,7 +30,7 @@ use smol_str::{SmolStr, SmolStrBuilder};
 use super::{
   ShResult, Shed,
   eval::{
-    lex::{LexFlags, LexStream, Tk},
+    lex::{LexFlags, LexStream, Tk, TkRule},
     parse::node::Node,
   },
   expand::{expand_arithmetic, expand_raw, markers, shell_quote},
@@ -172,7 +172,7 @@ impl ArrIndex {
   /// the `allow_side_effects` parameter controls whether or not mutating parameter
   /// expansions and command substitutions will be evaluated.
   pub fn parse(s: &str, allow_side_effects: bool) -> ShResult<Self> {
-    let s = crate::expand::expand_raw_inner(&mut s.chars().peekable(), allow_side_effects)?;
+    let s = crate::expand::expand_raw_inner(&mut s.chars().peekable(), allow_side_effects, false)?;
     match s.as_str() {
       "@" => Ok(Self::AllSplit),
       "*" => Ok(Self::AllJoined),
@@ -634,6 +634,14 @@ impl VarKind {
     let raw = raw[1..raw.len() - 1].to_string();
 
     let tokens: VecDeque<VarStr> = LexStream::new(raw.into(), LexFlags::empty())
+      .filter(|tk| {
+        !tk.as_ref().is_ok_and(|tk| {
+          matches!(
+            tk.class,
+            TkRule::Sep | TkRule::Soi | TkRule::Eoi | TkRule::Comment
+          )
+        })
+      })
       .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
       .try_fold(String::new(), |mut acc, wrds| {
         match wrds {

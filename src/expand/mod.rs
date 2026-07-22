@@ -201,11 +201,12 @@ impl Expander {
     }
   }
   pub fn expand(&mut self) -> ShResult<Vec<VarStr>> {
-    let res: VarStr = self.expand_inner()?.into();
-    let words = if self.flags.contains(TkFlags::IS_HEREDOC) || self.nosplit {
-      vec![res]
-    } else {
+    let mark_split = !self.flags.contains(TkFlags::IS_HEREDOC) && !self.nosplit;
+    let res: VarStr = self.expand_inner(mark_split)?.into();
+    let words = if mark_split {
       self.split_words()
+    } else {
+      vec![res]
     };
 
     if self.noglob {
@@ -251,29 +252,34 @@ impl Expander {
   }
   pub fn expand_no_side_effects(&mut self) -> ShResult<VarStr> {
     self.allow_side_effects = false;
-    let raw = self.expand_inner()?;
+    let raw = self.expand_inner(false)?;
     Ok(markers::strip_markers(&raw).into())
   }
   pub fn expand_no_split(&mut self) -> ShResult<VarStr> {
-    let raw = self.expand_inner()?;
+    let raw = self.expand_inner(false)?;
     Ok(markers::strip_markers(&raw).into())
   }
   pub fn expand_keep_quotes(&mut self) -> ShResult<VarStr> {
-    let mut raw = self.expand_inner()?;
+    let mut raw = self.expand_inner(false)?;
     raw = raw.replace(markers::DUB_QUOTE, "\"");
     raw = raw.replace(markers::SNG_QUOTE, "'");
     Ok(markers::strip_markers(&raw).into())
   }
   pub fn expand_for_glob(&mut self) -> ShResult<VarStr> {
-    let raw = self.expand_inner()?;
+    let raw = self.expand_inner(false)?;
     Ok(escape::markers_to_glob_escapes(&raw).into())
   }
-  pub fn expand_inner(&mut self) -> ShResult<String> {
+  pub fn expand_inner(&mut self, mark_split: bool) -> ShResult<String> {
     let mut chars = self.raw.chars().peekable();
-    self.raw = expand_raw_inner(&mut chars, self.allow_side_effects)?;
+    self.raw = expand_raw_inner(&mut chars, self.allow_side_effects, mark_split)?;
 
     Ok(self.raw.clone())
   }
+  /// Perform POSIX word splitting.
+  ///
+  /// Resolves escapes and the special `$@`/`$*` cases, and performs IFS field
+  /// splitting — but only inside `EXPAND_START`/`EXPAND_END` runs, i.e. on text
+  /// that came from an unquoted expansion. Literal characters are never split.
   pub fn split_words(&mut self) -> Vec<VarStr> {
     let mut words = vec![];
     let mut chars = self.raw.chars();
@@ -286,8 +292,16 @@ impl Expander {
     let mut in_delim_run = false;
     let mut delim_has_non_ws = false;
 
+    let mut expansion_depth = 0;
+
     'outer: while let Some(ch) = chars.next() {
       match ch {
+        markers::EXPAND_START => expansion_depth += 1,
+        markers::EXPAND_END => {
+          if expansion_depth > 0 {
+            expansion_depth -= 1;
+          }
+        }
         markers::ESCAPE => {
           in_delim_run = false;
           delim_has_non_ws = false;
@@ -321,7 +335,7 @@ impl Expander {
             }
           });
         }
-        _ if ifs.contains(ch) || ch == markers::ARG_SEP => {
+        _ if (expansion_depth > 0 && ifs.contains(ch)) || ch == markers::ARG_SEP => {
           let is_ws = matches!(ch, ' ' | '\t' | '\n') || ch == markers::ARG_SEP;
           if !in_delim_run {
             // Just exited a field (or saw leading IFS). Decide whether to emit.
@@ -390,9 +404,14 @@ mod tests {
   fn word_split_default_ifs() {
     let _guard = TestGuard::new();
 
+    let raw = format!(
+      "{}hello world\tfoo{}",
+      markers::EXPAND_START,
+      markers::EXPAND_END
+    );
     let mut exp = Expander {
       allow_side_effects: true,
-      raw: "hello world\tfoo".to_string(),
+      raw,
       noglob: false,
       nosplit: false,
       flags: TkFlags::empty(),
@@ -406,9 +425,10 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
 
+    let raw = format!("{}a:b:c{}", markers::EXPAND_START, markers::EXPAND_END);
     let mut exp = Expander {
       allow_side_effects: true,
-      raw: "a:b:c".to_string(),
+      raw,
       noglob: false,
       nosplit: false,
       flags: TkFlags::empty(),
@@ -423,9 +443,15 @@ mod tests {
     Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(VarStr::default()), VarFlags::empty()))
       .unwrap();
 
+    // Even as expansion output, an empty IFS suppresses all field splitting.
+    let raw = format!(
+      "{}hello world{}",
+      markers::EXPAND_START,
+      markers::EXPAND_END
+    );
     let mut exp = Expander {
       allow_side_effects: true,
-      raw: "hello world".to_string(),
+      raw,
       noglob: false,
       nosplit: false,
       flags: TkFlags::empty(),
@@ -497,8 +523,11 @@ mod tests {
       nosplit: false,
       flags: TkFlags::empty(),
     };
+    // A literal word with no expansion is never field-split, so neither the
+    // escaped `\:` nor the bare `:` splits — both are literal colons and the
+    // word stays whole (matches bash: `IFS=:; echo a\:b:c` -> `a:b:c`).
     let words = exp.expand().unwrap();
-    assert_eq!(words, vec!["a:b", "c"]);
+    assert_eq!(words, vec!["a:b:c"]);
   }
 
   // ===================== Array Indexing (TestGuard) =====================

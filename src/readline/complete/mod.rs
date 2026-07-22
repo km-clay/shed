@@ -721,7 +721,7 @@ fn complete_dirs(start: &str, cursor_pos: usize) -> Vec<Candidate> {
 
 fn unescape_for_completion(raw: &str) -> String {
   let unescaped = unescape_str(raw);
-  expand_raw_inner(&mut unescaped.chars().peekable(), false)
+  expand_raw_inner(&mut unescaped.chars().peekable(), false, false)
     .map_or_else(|_| raw.to_string(), |s| strip_markers(&s))
 }
 
@@ -1040,7 +1040,7 @@ impl CompSpec for BashCompSpec {
     let prefix = &ctx.words[ctx.cword];
 
     let unescaped = unescape_str(prefix.as_str());
-    let expanded = expand_raw_inner(&mut unescaped.chars().peekable(), false)?;
+    let expanded = expand_raw_inner(&mut unescaped.chars().peekable(), false, false)?;
     let stripped = strip_markers(&expanded);
 
     // path-shaped: wrapper handles expansion and escaping, candidates are

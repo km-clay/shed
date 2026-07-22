@@ -143,13 +143,13 @@ pub fn parse_param_exp(s: &str, allow_side_effects: bool) -> ShResult<ParamExp> 
 pub fn parse_pos_len(s: &str, allow_side_effects: bool) -> Option<(usize, Option<usize>)> {
   let raw = s.strip_prefix(':')?;
   if let Some((start, len)) = raw.split_once(':') {
-    let start = expand_raw_inner(&mut start.chars().peekable(), allow_side_effects)
+    let start = expand_raw_inner(&mut start.chars().peekable(), allow_side_effects, false)
       .unwrap_or_else(|_| start.to_string());
-    let len = expand_raw_inner(&mut len.chars().peekable(), allow_side_effects)
+    let len = expand_raw_inner(&mut len.chars().peekable(), allow_side_effects, false)
       .unwrap_or_else(|_| len.to_string());
     Some((start.parse::<usize>().ok()?, len.parse::<usize>().ok()))
   } else {
-    let raw = expand_raw_inner(&mut raw.chars().peekable(), allow_side_effects)
+    let raw = expand_raw_inner(&mut raw.chars().peekable(), allow_side_effects, false)
       .unwrap_or_else(|_| raw.to_string());
     Some((raw.parse::<usize>().ok()?, None))
   }
@@ -315,22 +315,21 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       ParamExp::DefaultUnsetOrNull(default) => {
         match Shed::vars(try_get).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val),
-          None => {
-            expand_raw_inner(&mut default.chars().peekable(), allow_side_effects).map(VarStr::from)
-          }
+          None => expand_raw_inner(&mut default.chars().peekable(), allow_side_effects, false)
+            .map(VarStr::from),
         }
       }
       ParamExp::DefaultUnset(default) => match Shed::vars(try_get) {
         Some(val) => Ok(val),
-        None => {
-          expand_raw_inner(&mut default.chars().peekable(), allow_side_effects).map(VarStr::from)
-        }
+        None => expand_raw_inner(&mut default.chars().peekable(), allow_side_effects, false)
+          .map(VarStr::from),
       },
       ParamExp::SetDefaultUnsetOrNull(default) => {
         match Shed::vars(try_get).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val),
           None => {
-            let expanded = expand_raw_inner(&mut default.chars().peekable(), allow_side_effects)?;
+            let expanded =
+              expand_raw_inner(&mut default.chars().peekable(), allow_side_effects, false)?;
             if allow_side_effects {
               Shed::vars_mut(|v| {
                 v.set_var(parsed.name(), VarKind::string(&expanded), VarFlags::empty())
@@ -343,7 +342,8 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       ParamExp::SetDefaultUnset(default) => match Shed::vars(try_get) {
         Some(val) => Ok(val),
         None => {
-          let expanded = expand_raw_inner(&mut default.chars().peekable(), allow_side_effects)?;
+          let expanded =
+            expand_raw_inner(&mut default.chars().peekable(), allow_side_effects, false)?;
           if allow_side_effects {
             Shed::vars_mut(|v| {
               v.set_var(parsed.name(), VarKind::string(&expanded), VarFlags::empty())
@@ -354,13 +354,13 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       },
       ParamExp::AltSetNotNull(alt) => match Shed::vars(try_get).filter(|v| !v.is_empty()) {
         Some(_) => {
-          expand_raw_inner(&mut alt.chars().peekable(), allow_side_effects).map(VarStr::from)
+          expand_raw_inner(&mut alt.chars().peekable(), allow_side_effects, false).map(VarStr::from)
         }
         None => Ok(VarStr::new()),
       },
       ParamExp::AltNotNull(alt) => match Shed::vars(try_get) {
         Some(_) => {
-          expand_raw_inner(&mut alt.chars().peekable(), allow_side_effects).map(VarStr::from)
+          expand_raw_inner(&mut alt.chars().peekable(), allow_side_effects, false).map(VarStr::from)
         }
         None => Ok(VarStr::new()),
       },
@@ -370,7 +370,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           if !allow_side_effects {
             return Ok(VarStr::new());
           }
-          let expanded = expand_raw_inner(&mut err.chars().peekable(), allow_side_effects)?;
+          let expanded = expand_raw_inner(&mut err.chars().peekable(), allow_side_effects, false)?;
           Err(sherr!(ExecFail, "{expanded}"))
         }
       },
@@ -380,7 +380,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           if !allow_side_effects {
             return Ok(VarStr::new());
           }
-          let expanded = expand_raw_inner(&mut err.chars().peekable(), allow_side_effects)?;
+          let expanded = expand_raw_inner(&mut err.chars().peekable(), allow_side_effects, false)?;
           Err(sherr!(ExecFail, "{expanded}"))
         }
       },

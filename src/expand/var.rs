@@ -4,7 +4,10 @@ use std::str::Chars;
 use nix::unistd::{Uid, User};
 use smol_str::format_smolstr;
 
-use crate::{state::vars::VarStr, util};
+use crate::{
+  state::vars::VarStr,
+  util::{self, QuoteState},
+};
 
 use super::{
   PARAMETERS, ShResult,
@@ -20,8 +23,10 @@ use super::{
 pub fn expand_raw_inner(
   chars: &mut Peekable<Chars<'_>>,
   allow_side_effects: bool,
+  mark_split: bool,
 ) -> ShResult<String> {
   let mut result = String::new();
+  let mut qt_state = QuoteState::default();
 
   match_loop!(chars.next() => ch, {
     markers::TILDE_SUB => {
@@ -76,8 +81,24 @@ pub fn expand_raw_inner(
       let fd_path = expand_proc_sub(&inner, true)?;
       result.push_str(&fd_path);
     }
+    markers::DUB_QUOTE => {
+      if !qt_state.in_single() {
+        qt_state.toggle_double();
+      }
+      result.push(ch);
+    }
+    markers::SNG_QUOTE => {
+      if !qt_state.in_double() {
+        qt_state.toggle_single();
+      }
+      result.push(ch);
+    }
     markers::VAR_SUB => {
-      let expanded = expand_var(chars, allow_side_effects)?;
+      let mut expanded = expand_var(chars, allow_side_effects)?;
+
+      if mark_split && qt_state.outside() {
+        expanded = format_smolstr!("{}{expanded}{}", markers::EXPAND_START, markers::EXPAND_END).into();
+      }
       result.push_str(&expanded);
     }
     _ => result.push(ch),
@@ -87,7 +108,7 @@ pub fn expand_raw_inner(
 }
 
 pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
-  expand_raw_inner(chars, true)
+  expand_raw_inner(chars, true, false)
 }
 
 pub fn expand_var(chars: &mut Peekable<Chars<'_>>, allow_side_effects: bool) -> ShResult<VarStr> {

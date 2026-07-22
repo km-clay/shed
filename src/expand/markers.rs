@@ -46,6 +46,11 @@ pub(crate) const NULL_EXPAND: Marker = '\u{fdd5}';
 /// formatting of the original arguments, including quoting
 pub(crate) const ARG_SEP: Marker = '\u{fdd6}';
 
+/// The start of an unquoted expansion
+pub(crate) const EXPAND_START: Marker = '\u{fde1}';
+/// The end of an unquoted expansion
+pub(crate) const EXPAND_END: Marker = '\u{fde2}';
+
 pub(crate) fn is_marker(c: Marker) -> bool {
   ('\u{fdd0}'..='\u{fdef}').contains(&c)
 }
