@@ -258,10 +258,6 @@ impl History {
   }
 
   fn init_db(conn: &Connection, table: &str) -> rusqlite::Result<()> {
-    let mut user_version = conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))?;
-    if user_version == Self::USER_VERSION {
-      return Ok(());
-    }
     conn.execute_batch(&format!(
       r"
 			CREATE TABLE IF NOT EXISTS {table} (
@@ -278,78 +274,77 @@ impl History {
 		"
     ))?;
 
-    while user_version < Self::USER_VERSION {
-      match user_version {
-        0 => {
-          conn.execute_batch(&format!(
-            r"
-						ALTER TABLE {table} ADD COLUMN cwd TEXT;
-						ALTER TABLE {table} ADD COLUMN status INT DEFAULT 0;
-						"
-          ))?;
-          conn.execute_batch("PRAGMA user_version = 1")?;
-        }
-        1 => {
-          // add the token field here.
-          // 'token' acts as an absolute identifier since
-          // the id field actually shifts after commands are deleted
-          conn
-            .execute_batch(&format!(
-              r"
-						ALTER TABLE {table} ADD COLUMN token TEXT;
-						"
-            ))
-            .ok();
+    // Per-table column migrations. These are gated on whether the column
+    // actually exists (not on the DB-wide `user_version`), so they are safe to
+    // run against both a brand-new table (columns already present -> skipped)
+    // and an old one carried over from a pre-token schema.
+    Self::add_column_if_missing(conn, table, "cwd", "TEXT")?;
+    Self::add_column_if_missing(conn, table, "status", "INT DEFAULT 0")?;
+    // 'token' acts as an absolute identifier since the id field actually shifts
+    // after commands are deleted.
+    Self::add_column_if_missing(conn, table, "token", "TEXT")?;
 
-          let mut stmt = conn.prepare(&format!("SELECT id FROM {table} WHERE token IS NULL"))?;
-          let ids: Vec<i64> = stmt
-            .query_map([], |r| r.get(0))?
-            .filter_map(Result::ok)
-            .collect();
+    conn.execute_batch(&format!(
+      "CREATE INDEX IF NOT EXISTS {table}_token_idx ON {table}(token);"
+    ))?;
 
-          conn.execute_batch("BEGIN")?;
-          for id in ids {
-            let res = conn.execute(
-              &format!("UPDATE {table} SET token = ?1 WHERE id = ?2"),
-              (Uuid::new_v4().to_string(), id),
-            );
-            if let Err(e) = res {
-              conn.execute_batch("ROLLBACK").ok();
-              return Err(e);
-            }
-          }
-          conn.execute_batch("COMMIT")?;
-
-          conn.execute_batch("PRAGMA user_version = 2")?;
+    // Backfill tokens for any rows that predate the token column. A no-op once
+    // every row has one, so it is safe to run on every startup.
+    let ids: Vec<i64> = {
+      let mut stmt = conn.prepare(&format!("SELECT id FROM {table} WHERE token IS NULL"))?;
+      let ids = stmt
+        .query_map([], |r| r.get(0))?
+        .filter_map(Result::ok)
+        .collect::<Vec<i64>>();
+      ids
+    };
+    if !ids.is_empty() {
+      conn.execute_batch("BEGIN")?;
+      for id in ids {
+        let res = conn.execute(
+          &format!("UPDATE {table} SET token = ?1 WHERE id = ?2"),
+          (Uuid::new_v4().to_string(), id),
+        );
+        if let Err(e) = res {
+          conn.execute_batch("ROLLBACK").ok();
+          return Err(e);
         }
-        2 => {
-          // index the token field so we can check it faster
-          conn.execute_batch(&format!(
-            "
-            CREATE INDEX IF NOT EXISTS {table}_token_idx
-            ON {table}(token);
-            "
-          ))?;
-          conn.execute_batch("PRAGMA user_version = 3")?;
-        }
-        3 => {
-          // add the directories table
-          conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS dir_history (
-              path        TEXT        PRIMARY KEY NOT NULL,
-              visits      INTEGER     NOT NULL DEFAULT 1,
-              last_visit  INTEGER     NOT NULL
-            );
-            ",
-          )?;
-          conn.execute_batch("PRAGMA user_version = 4")?;
-        }
-        _ => {}
       }
-      user_version = conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))?;
+      conn.execute_batch("COMMIT")?;
     }
 
+    conn.execute_batch(
+      "
+      CREATE TABLE IF NOT EXISTS dir_history (
+        path        TEXT        PRIMARY KEY NOT NULL,
+        visits      INTEGER     NOT NULL DEFAULT 1,
+        last_visit  INTEGER     NOT NULL
+      );
+      ",
+    )?;
+
+    conn.execute_batch(&format!("PRAGMA user_version = {}", Self::USER_VERSION))?;
+
+    Ok(())
+  }
+
+  /// Adds `column` to `table` only if it does not already exist, so it is safe
+  /// to run on both new and pre-existing tables. `table` is always an internal
+  /// constant (never user input), so interpolating it is safe.
+  fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    decl: &str,
+  ) -> rusqlite::Result<()> {
+    let count: i64 = conn.query_row(
+      &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+      [column],
+      |r| r.get(0),
+    )?;
+    if count == 0 {
+      conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
+    }
     Ok(())
   }
   pub fn push(&self, command: &str) -> ShResult<Option<Uuid>> {
@@ -534,6 +529,25 @@ impl History {
     tx.commit()?;
 
     Ok(entries)
+  }
+
+  /// Deletes exactly the rows with the given ids, reusing [`Self::delete`]'s
+  /// backup + rebuild machinery. Scoping by id lets callers apply non-SQL
+  /// filters (e.g. a `--matches` regex) in Rust and then delete precisely the
+  /// resolved set, instead of handing an unfiltered/empty WHERE to `delete`
+  /// (which would wipe the whole table).
+  pub fn delete_ids(&self, ids: &[i64]) -> ShResult<Vec<(i64, HistEntry)>> {
+    if ids.is_empty() {
+      return Ok(vec![]);
+    }
+    let placeholders = (1..=ids.len())
+      .map(|i| format!("?{i}"))
+      .collect::<Vec<_>>()
+      .join(", ");
+    let where_clause = format!("WHERE id IN ({placeholders})");
+    let params: Vec<&dyn rusqlite::ToSql> =
+      ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+    self.delete(&where_clause, &params)
   }
 
   /// Restores the history table from the rolling backup created by the last delete operation.
