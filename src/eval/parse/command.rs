@@ -103,7 +103,9 @@ impl ParseStream {
     let mut span: Option<Span> = None;
     let mut flags = NdFlags::empty();
 
+    let mut dangling_pipe: Option<Span> = None;
     while let Some(mut cmd) = self.parse_block(false)? {
+      dangling_pipe = None;
       let is_punctuated = cmd.flags.contains(NdFlags::PUNCTUATED);
 
       extend_span!(span, cmd.span);
@@ -125,11 +127,19 @@ impl ParseStream {
       } else if (!matches!(next_class, TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated {
         break;
       } else if let Some(pipe) = self.next_tk() {
+        dangling_pipe = Some(pipe.span.clone());
         extend_span!(span, pipe.span);
-        self.catch_separator(&mut span);
+        self.catch_linebreak(&mut span);
       } else {
         break;
       }
+    }
+    if let Some(pipe_span) = dangling_pipe {
+      return Err(parse_err!(
+        self,
+        Some(pipe_span),
+        "Expected a command after this pipe"
+      ));
     }
     if cmds.is_empty() {
       Ok(None)

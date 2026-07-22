@@ -197,7 +197,9 @@ impl ParseStream {
     let mut elements = vec![];
     let mut span: Option<Span> = None;
 
+    let mut dangling_op: Option<Span> = None;
     while let Some(mut block) = self.parse_block(true)? {
+      dangling_op = None;
       extend_span!(span, block.get_span());
       self.catch_separator(&mut span);
 
@@ -206,6 +208,16 @@ impl ParseStream {
         TkRule::Or => ConjunctOp::Or,
         _ => ConjunctOp::Null,
       };
+
+      // A `&&`/`||` may only directly follow a pipeline, not a separator:
+      // `echo a ; && echo b` is a syntax error, not `echo a && echo b`.
+      if conjunct_op != ConjunctOp::Null && self.last_consumed_was_sep() {
+        return Err(parse_err!(
+          self,
+          span,
+          "Unexpected binary operator after a separator"
+        ));
+      }
 
       if conjunct_op != ConjunctOp::Null {
         block.walk_tree(&mut Node::not_err);
@@ -220,13 +232,23 @@ impl ParseStream {
 
       if conjunct_op != ConjunctOp::Null {
         let Some(tk) = self.next_tk() else { break };
+        dangling_op = Some(tk.span.clone());
         extend_span!(span, tk.span);
-        self.catch_separator(&mut span);
+        // Only a newline (not `;`) may follow the operator.
+        self.catch_linebreak(&mut span);
       }
 
       if conjunct_op == ConjunctOp::Null {
         break;
       }
+    }
+
+    if let Some(op_span) = dangling_op {
+      return Err(parse_err!(
+        self,
+        Some(op_span),
+        "Expected a command after this operator"
+      ));
     }
 
     if elements.is_empty() {

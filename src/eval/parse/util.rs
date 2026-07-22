@@ -60,11 +60,20 @@ impl ParseStream {
       }
     }
   }
-  pub(super) fn check_separator(&mut self) -> bool {
-    matches!(
-      self.next_tk_class(),
-      TkRule::Or | TkRule::Bg | TkRule::And | TkRule::BraceGrpEnd | TkRule::Pipe | TkRule::Sep
-    )
+  /// Like [`Self::catch_separator`], but only consumes newline separators
+  /// (the POSIX "linebreak"), leaving any `;`-bearing separator in place.
+  ///
+  /// Used immediately after a binary operator (`&&`, `||`, `|`), where POSIX
+  /// permits a following newline but not a `;` — so `cmd &&\n cmd2` continues
+  /// while `cmd && ; cmd2` is left to fail as a dangling operator.
+  pub(super) fn catch_linebreak(&mut self, span: &mut Option<Span>) {
+    while self
+      .peek_tk()
+      .is_some_and(|tk| tk.class == TkRule::Sep && !tk.span.as_str().contains(';'))
+    {
+      let next = self.next_tk().unwrap();
+      extend_span!(*span, next.span);
+    }
   }
   pub(super) fn assert_separator(&mut self, node_tks: &mut Option<Span>) -> ShResult<()> {
     let next_class = self.next_tk_class();

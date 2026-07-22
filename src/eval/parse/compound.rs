@@ -265,7 +265,7 @@ impl ParseStream {
       extend_span!(span, self.next_tk().unwrap().span);
 
       let mut found_end = false;
-      while self.check_separator() {
+      while *self.next_tk_class() == TkRule::Sep {
         let sep = self.peek_tk().unwrap();
         if sep.has_double_semi() {
           extend_span!(span, self.next_tk().unwrap().span);
@@ -589,6 +589,8 @@ impl ParseStream {
     extend_span!(*span, self.next_tk().unwrap().span);
 
     self.parse_redir(&mut redirs, span)?;
+
+    self.assert_separator(span)?;
 
     Ok(Some(node!(
       self,
@@ -992,7 +994,7 @@ mod compound_parse_error_tests {
   #[test]
   fn case_with_empty_arm_takes_double_semi_break() {
     // `;;` immediately after the pattern — the `if sep.has_double_semi()`
-    // branch in the inner `while check_separator` loop fires.
+    // branch in the inner separator-scan loop fires.
     let g = TestGuard::new();
     test_input("case foo in foo) ;; esac").unwrap();
     let out = g.read_output();
