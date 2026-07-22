@@ -68,15 +68,29 @@ impl super::Builtin for PushDir {
 
     if let Some(idx) = parsed.index {
       let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-      let new_cwd = Shed::meta_mut(|m| {
+      let new_cwd = Shed::meta_mut(|m| -> ShResult<Option<PathBuf>> {
         let dirs = m.dirs_mut();
         dirs.push_front(cwd);
+        let len = dirs.len();
+        let (StackIdx::FromTop(n) | StackIdx::FromBottom(n)) = idx;
+        if n >= len {
+          dirs.pop_front();
+          let sign = if matches!(idx, StackIdx::FromTop(_)) {
+            '+'
+          } else {
+            '-'
+          };
+          return Err(sherr!(
+            ExecFail @ blame.clone(),
+            "pushd: directory index out of range: {sign}{n}",
+          ));
+        }
         match idx {
           StackIdx::FromTop(n) => dirs.rotate_left(n),
           StackIdx::FromBottom(n) => dirs.rotate_right(n + 1),
         }
-        dirs.pop_front()
-      });
+        Ok(dirs.pop_front())
+      })?;
 
       if let Some(dir) = new_cwd
         && !parsed.no_cd
