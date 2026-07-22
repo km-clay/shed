@@ -312,7 +312,16 @@ impl Iterator for ParseStream {
     let result = self.parse_cmd_list();
     match result {
       Ok(Some(node)) => Some(Ok(node)),
-      Ok(None) => None,
+      Ok(None) => match self.peek_tk() {
+        None => None,
+        Some(tk) if tk.class == TkRule::Eoi => None,
+        Some(tk) => {
+          let class = tk.class.clone();
+          let mut span = Some(tk.span.clone());
+          self.panic_mode(&mut span);
+          Some(Err(parse_err!(self, span, "Unexpected token: {class:?}")))
+        }
+      },
       Err(e) => Some(Err(e)),
     }
   }

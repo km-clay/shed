@@ -171,6 +171,11 @@ impl ParseStream {
           break;
         } else if is_assignment {
           let Some(assign) = self.parse_assignment(prefix_tk) else {
+            // it's marked as an assignment, but it doesn't parse.
+            // just treat it as the command word
+            extend_span!(span, prefix_tk.span);
+            tk_counter += 1;
+            argv.push(prefix_tk.clone());
             break;
           };
           extend_span!(span, prefix_tk.span);

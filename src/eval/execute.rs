@@ -219,6 +219,7 @@ pub fn exec_dash_c(input: String, args: Vec<String>) -> ShResult<()> {
     for error in errors {
       error.print_error();
     }
+    Shed::set_status(2);
     return Ok(());
   }
 
@@ -309,6 +310,7 @@ pub fn exec_input(mut input: VarStr, source_name: Option<Rc<str>>) -> ShResult<(
     for error in errors {
       error.print_error();
     }
+    Shed::set_status(2);
     return Ok(());
   }
 
