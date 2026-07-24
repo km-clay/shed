@@ -261,6 +261,7 @@ impl super::Builtin for Dirs {
       }
     });
 
+    let indexed = target_idx.is_some();
     if let Some(idx) = target_idx {
       let target = match idx {
         StackIdx::FromTop(n) => dirs.get(n),
@@ -290,6 +291,11 @@ impl super::Builtin for Dirs {
         *dir = format!("{i}\t{dir}");
       }
       output = dirs.join("\n");
+      output.push('\n');
+    } else if indexed {
+      // An index was supplied: print just the selected entry (`dirs` was
+      // narrowed above), not the whole stack.
+      output = dirs.join(" ");
       output.push('\n');
     } else {
       print_dirs()?;
@@ -634,13 +640,23 @@ pub mod tests {
     clear_stack();
     let t1 = TempDir::new().unwrap();
     let t2 = TempDir::new().unwrap();
-    test_input(format!("pushd {}", t1.path().display())).unwrap();
-    test_input(format!("pushd {}", t2.path().display())).unwrap();
+    let p1 = t1.path().to_string_lossy().to_string();
+    let p2 = t2.path().to_string_lossy().to_string();
+    test_input(format!("pushd {p1}")).unwrap();
+    test_input(format!("pushd {p2}")).unwrap();
     g.read_output();
-    // +0 is cwd; +1 is the top of the saved stack.
+
+    // The default format must print ONLY the selected entry, not the whole
+    // stack: +0 is cwd (t2), +1 is the top of the saved stack (t1).
     test_input("dirs +0").unwrap();
+    assert_eq!(g.read_output().trim(), p2);
+    test_input("dirs +1").unwrap();
     let out = g.read_output();
-    assert!(!out.is_empty(), "got: {out:?}");
+    assert_eq!(out.trim(), p1);
+    assert!(
+      !out.contains(&p2),
+      "index selection should not print the whole stack: {out:?}"
+    );
   }
 
   #[test]
