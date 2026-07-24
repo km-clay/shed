@@ -21,6 +21,11 @@ impl super::Builtin for Shift {
       })
     })?;
 
+    let argc = Shed::vars(|v| v.sh_argv().len());
+    if count > argc {
+      return with_status(1);
+    }
+
     for _ in 0..count {
       Shed::vars_mut(|v| v.sh_argv_scope_mut().fpop_arg());
     }
@@ -61,6 +66,22 @@ mod tests {
     test_input("f a b c").unwrap();
     let out = guard.read_output();
     assert_eq!(out.trim(), "[]");
+  }
+
+  #[test]
+  fn shift_beyond_bounds_is_noop_nonzero() {
+    // bash: `shift 5` with 2 params leaves them untouched and returns non-zero.
+    let guard = TestGuard::new();
+    test_input("set -- a b; shift 5; echo \"$#/$*\"").unwrap();
+    let out = guard.read_output();
+    assert_eq!(out.trim(), "2/a b");
+  }
+
+  #[test]
+  fn shift_beyond_bounds_status_is_nonzero() {
+    let _g = TestGuard::new();
+    test_input("set -- a; shift 5").unwrap();
+    assert_ne!(state::Shed::get_status(), 0);
   }
 
   #[test]
