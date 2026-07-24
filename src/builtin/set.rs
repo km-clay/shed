@@ -328,7 +328,10 @@ impl super::Builtin for Set {
               .promote_err(span.clone())?;
           }
         }
-        Some(_) => pos_args.push(arg),
+        Some(_) => {
+          pos_args.push(arg);
+          break 'outer;
+        }
         None => {}
       }
     }
@@ -479,6 +482,20 @@ mod tests {
       let _g = TestGuard::new();
       test_input("set -a").unwrap();
       assert!(Shed::shopts(|o| o.set.allexport));
+    }
+
+    #[test]
+    fn option_after_positional_is_not_parsed() {
+      // POSIX: the first non-option arg ends option recognition, so `-e` here
+      // is a positional parameter, not the errexit flag.
+      let g = TestGuard::new();
+      assert!(!Shed::shopts(|o| o.set.errexit));
+      test_input(r#"set foo -e; echo "$# $1 $2""#).unwrap();
+      assert_eq!(g.read_output().trim(), "2 foo -e");
+      assert!(
+        !Shed::shopts(|o| o.set.errexit),
+        "-e after a positional must not enable errexit"
+      );
     }
 
     #[test]
