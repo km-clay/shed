@@ -129,6 +129,14 @@ impl ScopeStack {
       }
     }
   }
+  pub fn unexport_var(&mut self, var_name: &str) {
+    for scope in self.bounded_scopes_rev_mut() {
+      if scope.var_exists(var_name) {
+        scope.unexport_var(var_name);
+        return;
+      }
+    }
+  }
   pub fn var_exists(&self, var_name: &str) -> bool {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name) {

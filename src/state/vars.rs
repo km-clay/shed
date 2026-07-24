@@ -1177,6 +1177,16 @@ impl VarTab {
       Shed::meta_mut(MetaTab::clear_envp);
     }
   }
+  /// Clear the export attribute (`export -n`), leaving the variable's value
+  /// intact as an ordinary shell variable.
+  pub fn unexport_var(&mut self, var_name: &str) {
+    if let Some(var) = self.vars.get_mut(var_name)
+      && var.flags.contains(VarFlags::EXPORT)
+    {
+      var.flags.remove(VarFlags::EXPORT);
+      Shed::meta_mut(MetaTab::clear_envp);
+    }
+  }
   pub fn try_get_local(&self, var_name: &str) -> Option<VarStr> {
     self.vars.get(var_name).map(VarStr::from)
   }

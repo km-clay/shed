@@ -370,20 +370,29 @@ impl super::Builtin for Export {
     true
   }
 
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::flag('n'), OptSpec::flag('p')]
+  }
+
   fn get_argv_and_opts(
     &self,
     cmd_span: Span,
     argv: &[Tk],
     _no_split: bool,
   ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
-    let mut argv = prepare_assignment_argv(argv).promote_err(cmd_span)?;
+    let (raw_argv, opts) =
+      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
+    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
     if !argv.is_empty() {
       argv.remove(0);
     }
-    Ok((argv, vec![]))
+    Ok((argv, opts))
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    if args.argv.is_empty() {
+    let unexport = args.opts.iter().any(|o| matches!(o, Opt::Short('n')));
+    let list = args.opts.iter().any(|o| matches!(o, Opt::Short('p')));
+
+    if list || (args.argv.is_empty() && !unexport) {
       // Display the environment variables
       let vars = display_env_vars();
       outln!("{vars}");
@@ -392,7 +401,12 @@ impl super::Builtin for Export {
 
     for (arg, span) in args.argv {
       let (var, val) = split_assignment(&arg);
-      if let Some(val) = val {
+      if unexport {
+        if let Some(val) = val {
+          Shed::vars_mut(|v| v.set_var(var, val, VarFlags::empty())).promote_err(span)?;
+        }
+        Shed::vars_mut(|v| v.unexport_var(var));
+      } else if let Some(val) = val {
         Shed::vars_mut(|v| v.set_var(var, val, VarFlags::EXPORT)).promote_err(span)?;
       } else {
         // Export an existing variable, if any
@@ -603,6 +617,34 @@ mod tests {
     let flags = Shed::vars(|v| v.get_var_flags("SHED_TEST_VAR3"));
     assert!(flags.unwrap().contains(VarFlags::EXPORT));
     unsafe { std::env::remove_var("SHED_TEST_VAR3") };
+  }
+
+  #[test]
+  fn export_n_clears_export_flag() {
+    let _g = TestGuard::new();
+    test_input("export SHED_UNEXP=1").unwrap();
+    assert!(
+      Shed::vars(|v| v.get_var_flags("SHED_UNEXP"))
+        .unwrap()
+        .contains(VarFlags::EXPORT)
+    );
+    test_input("export -n SHED_UNEXP").unwrap();
+    let flags = Shed::vars(|v| v.get_var_flags("SHED_UNEXP")).unwrap();
+    assert!(
+      !flags.contains(VarFlags::EXPORT),
+      "export -n should clear EXPORT"
+    );
+    assert_eq!(var!("SHED_UNEXP"), "1", "value must be preserved");
+    unsafe { std::env::remove_var("SHED_UNEXP") };
+  }
+
+  #[test]
+  fn export_n_with_value_assigns_unexported() {
+    let _g = TestGuard::new();
+    test_input("export -n SHED_UNEXP2=42").unwrap();
+    assert_eq!(var!("SHED_UNEXP2"), "42");
+    let flags = Shed::vars(|v| v.get_var_flags("SHED_UNEXP2")).unwrap();
+    assert!(!flags.contains(VarFlags::EXPORT));
   }
 
   #[test]
