@@ -76,6 +76,7 @@ impl EditorCore {
   /// execute it. No keymap matching, completion, or history; for headless and
   /// replay use.
   pub fn feed_key(&mut self, key: KeyEvent) -> ShResult<()> {
+    self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     let Some(cmd) = self.mode.handle_key(key) else {
       return Ok(());
     };
@@ -90,6 +91,7 @@ impl EditorCore {
   }
 
   pub fn feed_key_fallible(&mut self, key: KeyEvent) -> ShResult<bool> {
+    self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     let Some(cmd) = self.mode.handle_key(key) else {
       return Ok(true);
     };

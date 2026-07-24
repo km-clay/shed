@@ -385,6 +385,42 @@ mod tests {
     assert_output!(g, "one two three\n");
   }
 
+  // ===================== normal-mode EOL cursor (bug: $ overshoot) =====
+
+  #[test]
+  fn vice_dollar_x_deletes_last_char() {
+    // `$x` must delete the last character, not no-op past the end of line.
+    let g = TestGuard::new();
+    test_input("printf 'abc' | vice -m '$x'").unwrap();
+    assert_output!(g, "ab\n");
+  }
+
+  #[test]
+  fn vice_dollar_x_does_not_join_lines() {
+    // `$x` on a line with a following line must delete the last char, never
+    // the newline (which would join the two lines).
+    let g = TestGuard::new();
+    test_input("printf 'abc\\ndef' | vice -m '$x'").unwrap();
+    assert_output!(g, "ab\ndef\n");
+  }
+
+  #[test]
+  fn vice_dollar_insert_lands_on_last_char() {
+    // `$` clamps onto the last char (not past it), so `i` inserts before it.
+    let g = TestGuard::new();
+    test_input("printf 'ab' | vice -m '$ix'").unwrap();
+    assert_output!(g, "axb\n");
+  }
+
+  #[test]
+  fn vice_dollar_operator_still_reaches_true_end() {
+    // Regression guard: `$` as an operator motion (`d$`) must still delete
+    // through the last character.
+    let g = TestGuard::new();
+    test_input("printf 'abcdef' | vice -m 'lld$'").unwrap();
+    assert_output!(g, "ab\n");
+  }
+
   #[test]
   fn vice_two_fields_default_delim() {
     let g = TestGuard::new();

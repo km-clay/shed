@@ -335,7 +335,8 @@ pub enum Verb {
   Rot13,                         // lol
   ReplaceChar(char),             // char to replace with, number of chars to replace
   ReplaceCharInplace(char, u16), // char to replace with, number of chars to replace
-  ToggleCaseInplace(u16),        // Number of chars to toggle
+  ReplaceOrInsertChar(char),
+  ToggleCaseInplace(u16), // Number of chars to toggle
   ToggleCaseRange,
   IncrementNumber(u16),
   DecrementNumber(u16),
@@ -382,6 +383,7 @@ impl Verb {
         | Self::Change
         | Self::ReplaceChar(_)
         | Self::ReplaceCharInplace(_, _)
+        | Self::ReplaceOrInsertChar(_)
         | Self::ToLower
         | Self::ToUpper
         | Self::ToggleCaseRange
@@ -410,6 +412,7 @@ impl Verb {
         | Self::Change
         | Self::ReplaceChar(_)
         | Self::ReplaceCharInplace(_, _)
+        | Self::ReplaceOrInsertChar(_)
         | Self::ToggleCaseRange
         | Self::ToggleCaseInplace(_)
         | Self::ToLower

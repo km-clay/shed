@@ -193,6 +193,11 @@ vi_test! {
   ctrl_o_dw                : "hello world"                  => "i\x0fdw\x1b"         => "world", 0;
   ctrl_o_x                 : "hello"                        => "i\x0fx\x1b"          => "ello", 0;
   ctrl_o_motion            : "hello world"                  => "i\x0fwX\x1b"         => "hello Xworld", 6;
+  R_replace_exact          : "abc"                          => "RXYZ\x1b"            => "XYZ", 2;
+  R_replace_extends        : "abc"                          => "RXYZ1\x1b"           => "XYZ1", 3;
+  R_extend_short           : "x"                            => "Rab\x1b"             => "ab", 1;
+  R_on_empty               : ""                             => "Rabc\x1b"            => "abc", 2;
+  R_overwrite_then_append  : "ab"                           => "RXYZ\x1b"            => "XYZ", 2;
   u_undo_delete            : "hello world"                  => "dwu"                 => "hello world", 0;
   u_undo_change            : "hello world"                  => "ciwfoo\x1bu"         => "hello world", 0;
   u_undo_x                 : "hello"                        => "xu"                  => "hello", 0;

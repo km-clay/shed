@@ -42,7 +42,7 @@ impl EditMode for ViReplace {
       E(K::Char(ch), M::NONE) => {
         self
           .pending_cmd
-          .set_verb(verb!(Verb::ReplaceCharInplace(ch, 1)));
+          .set_verb(verb!(Verb::ReplaceOrInsertChar(ch)));
         self.pending_cmd.set_motion(motion!(Motion::ForwardChar));
         Some(self.register_and_return())
       }
@@ -93,7 +93,7 @@ impl EditMode for ViReplace {
     Some(CmdReplay::mode(self.cmds.clone(), self.repeat_count))
   }
   fn clamp_cursor(&self) -> bool {
-    true
+    false
   }
   fn report_mode(&self) -> ModeReport {
     ModeReport::Replace

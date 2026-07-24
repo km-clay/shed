@@ -56,6 +56,7 @@ impl super::LineBuf {
       Verb::Rot13 /*-------------------*/ => self.rot13(cmd),
       Verb::ReplaceChar(ch) /*=========*/ => self.replace_char(cmd, *ch),
       Verb::ReplaceCharInplace(ch, count) => self.replace_char_inplace(cmd, *ch, *count),
+      Verb::ReplaceOrInsertChar(ch) /*-*/ => self.replace_or_insert_char(cmd, *ch),
       Verb::ToggleCaseRange /*---------*/ => self.toggle_case_range(cmd),
       Verb::ToLower /*=================*/ => self.make_lower(cmd),
       Verb::ToUpper /*-----------------*/ => self.make_upper(cmd),
@@ -323,6 +324,21 @@ impl super::LineBuf {
   }
   fn replace_char_inplace(&mut self, cmd: &EditCmd, ch: char, count: u16) -> ShResult<()> {
     self.inplace_mutation(count, |_| Grapheme::from(ch));
+    if let Some(motion) = self.eval_motion_with_hint(cmd)? {
+      self.apply_motion_with_hint(&motion)?;
+    }
+    Ok(())
+  }
+  /// Replace (`R`) mode key: overwrite the grapheme under the cursor, but when
+  /// the cursor is at/past the end of the line (nothing to overwrite) insert
+  /// instead, so `R` can extend the line. In both cases the trailing motion
+  /// (`ForwardChar`) advances the cursor.
+  fn replace_or_insert_char(&mut self, cmd: &EditCmd, ch: char) -> ShResult<()> {
+    if self.col() < self.cur_line().len() {
+      self.inplace_mutation(1, |_| Grapheme::from(ch));
+    } else {
+      self.insert(Grapheme::from(ch));
+    }
     if let Some(motion) = self.eval_motion_with_hint(cmd)? {
       self.apply_motion_with_hint(&motion)?;
     }
