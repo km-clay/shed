@@ -70,7 +70,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       )];
       let _stdin_r_keep = stdin_pipe.map(|p| p.into_child(&mut specs));
       let redir: RedirSet = specs.into();
-      let _guard = redir.apply()?;
+      let _guard = redir.apply().or_fatal()?;
 
       if let Err(e) = exec_nonint(raw.into(), Some("process_sub".into())) {
         e.print_error();
@@ -149,7 +149,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
       let mut specs = vec![RedirSpec::dup(wpipe.as_raw_fd(), 1, RedirType::Output)];
       let _stdin_r_keep = stdin_pipe.map(|p| p.into_child(&mut specs));
       let redir: RedirSet = specs.into();
-      let _redir_guard = redir.apply()?;
+      let _redir_guard = redir.apply().or_fatal()?;
 
       if let Err(e) = exec_input(raw.into(), Some("command_sub".into())) {
         if let ShErrKind::CleanExit(code) = e.kind() {

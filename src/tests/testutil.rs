@@ -182,7 +182,7 @@ impl TestGuard {
     ]
     .into();
 
-    let redir_guard = redirs.apply().ok().flatten().unwrap();
+    let redir_guard = redirs.apply().or_fatal().ok().flatten().unwrap();
 
     let old_cwd = env::current_dir().unwrap();
     let saved_env = env::vars().collect();

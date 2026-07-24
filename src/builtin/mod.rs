@@ -23,9 +23,9 @@ use super::{
   },
   expand::{self, shell_quote},
   key, keys, match_loop, out, outln,
-  procio::{self, RedirSet},
+  procio::{self, RedirResult, RedirSet},
   readline, sherr, shopt, signal,
-  state::{self, Shed, jobs::ChildProc, meta::MetaTab},
+  state::{self, Shed, jobs::ChildProc, meta::MetaTab, terminal::Terminal},
   status_msg, system_msg, try_var,
   util::{self, ShErrKind, ShResult, var_ctx_guard, with_status},
   var,
@@ -306,7 +306,13 @@ pub(super) trait Builtin: Sync {
 
     // Set up redirections here so we can attach the guard to propagated errors.
     let redirs: RedirSet = RedirSet::from(&node.redirs);
-    let guard = redirs.apply()?;
+    let fatal = self.is_special() && !Shed::term(Terminal::interactive);
+    let guard = match redirs.try_apply(fatal) {
+      RedirResult::Applied(guard) => Some(guard),
+      RedirResult::NoRedirs => None,
+      RedirResult::Skipped => return Ok(()),
+      RedirResult::Error(e) => return Err(e),
+    };
 
     if fork_builtins {
       // Register ChildProc in current job

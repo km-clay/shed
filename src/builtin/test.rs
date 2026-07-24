@@ -171,15 +171,28 @@ fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
 }
 
 /// Evaluate a single binary test (`LHS OP RHS`).
-fn eval_binary(op: &BinaryOp, lhs: &(VarStr, Span), rhs: &(VarStr, Span)) -> ShResult<bool> {
+fn eval_binary(
+  op: &BinaryOp,
+  lhs: &(VarStr, Span),
+  rhs: &(VarStr, Span),
+  extended: bool,
+) -> ShResult<bool> {
   match op {
     BinaryOp::StringEq => {
-      let pattern = expand::glob_to_regex(rhs.0.trim(), true);
-      Ok(pattern.is_match(lhs.0.trim()))
+      if extended {
+        let pattern = expand::glob_to_regex(rhs.0.as_str(), true);
+        Ok(pattern.is_match(lhs.0.as_str()))
+      } else {
+        Ok(lhs.0.as_str() == rhs.0.as_str())
+      }
     }
     BinaryOp::StringNeq => {
-      let pattern = expand::glob_to_regex(rhs.0.trim(), true);
-      Ok(!pattern.is_match(lhs.0.trim()))
+      if extended {
+        let pattern = expand::glob_to_regex(rhs.0.as_str(), true);
+        Ok(!pattern.is_match(lhs.0.as_str()))
+      } else {
+        Ok(lhs.0.as_str() != rhs.0.as_str())
+      }
     }
     BinaryOp::IntEq
     | BinaryOp::IntNeq
@@ -237,13 +250,18 @@ fn eval_binary(op: &BinaryOp, lhs: &(VarStr, Span), rhs: &(VarStr, Span)) -> ShR
 struct ArgvParser<'a> {
   argv: &'a [(VarStr, Span)],
   pos: usize,
+  extended: bool,
 }
 
 const STOP_TOKENS: &[&str] = &["-a", "-o", "&&", "||", ")", "!"];
 
 impl<'a> ArgvParser<'a> {
-  fn new(argv: &'a [(VarStr, Span)]) -> Self {
-    Self { argv, pos: 0 }
+  fn new(argv: &'a [(VarStr, Span)], extended: bool) -> Self {
+    Self {
+      argv,
+      pos: 0,
+      extended,
+    }
   }
 
   fn peek(&self) -> Option<&str> {
@@ -302,12 +320,16 @@ impl<'a> ArgvParser<'a> {
       self.advance();
     }
     let leaf = &self.argv[start..self.pos];
-    if eval { eval_leaf(leaf) } else { Ok(false) }
+    if eval {
+      eval_leaf(leaf, self.extended)
+    } else {
+      Ok(false)
+    }
   }
 }
 
 /// POSIX arity dispatch on a leaf (no `!`, `(`, `)`, or conjuncts).
-fn eval_leaf(leaf: &[(VarStr, Span)]) -> ShResult<bool> {
+fn eval_leaf(leaf: &[(VarStr, Span)], extended: bool) -> ShResult<bool> {
   if leaf.is_empty() {
     return Ok(false);
   }
@@ -328,7 +350,7 @@ fn eval_leaf(leaf: &[(VarStr, Span)]) -> ShResult<bool> {
     3 => {
       // Arity-3: `LHS OP RHS`.
       let op: BinaryOp = leaf[1].0.parse()?;
-      eval_binary(&op, &leaf[0], &leaf[2])
+      eval_binary(&op, &leaf[0], &leaf[2], extended)
     }
     _ => Err(sherr!(
       SyntaxErr @ major_span,
@@ -382,7 +404,8 @@ impl super::Builtin for Test {
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
-    let result = ArgvParser::new(&args.argv)
+    let extended = args.cmd_span().as_str() == "[[";
+    let result = ArgvParser::new(&args.argv, extended)
       .parse_or(true)
       .map_err(|e| e.try_blame(span));
 
@@ -546,10 +569,55 @@ mod tests {
   }
 
   #[test]
+  fn test_string_eq_does_not_trim_whitespace() {
+    // Regression: `=` used to trim both operands, so whitespace-only vs empty
+    // compared equal. POSIX string equality is exact.
+    let _g = TestGuard::new();
+    test_input(r#"[ " " = "" ]"#).unwrap();
+    assert_ne!(state::Shed::get_status(), 0, "\" \" must not equal \"\"");
+  }
+
+  #[test]
+  fn test_string_eq_trailing_space_differs() {
+    let _g = TestGuard::new();
+    test_input(r#"[ "a " = "a" ]"#).unwrap();
+    assert_ne!(state::Shed::get_status(), 0, "\"a \" must not equal \"a\"");
+  }
+
+  #[test]
+  fn test_string_neq_whitespace_differs() {
+    // The inverse: strings differing only in whitespace ARE unequal.
+    let _g = TestGuard::new();
+    test_input(r#"[ "a " != "a" ]"#).unwrap();
+    assert_eq!(state::Shed::get_status(), 0, "\"a \" != \"a\" must be true");
+  }
+
+  #[test]
   fn test_string_glob_match() {
     let _g = TestGuard::new();
     test_input("[[ hello == hel* ]]").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_plain_bracket_does_not_glob() {
+    // POSIX `[`/`test`: `=` is literal, so `a*` is not a pattern.
+    let _g = TestGuard::new();
+    test_input(r#"[ abc = "a*" ]"#).unwrap();
+    assert_ne!(state::Shed::get_status(), 0, "[ ] must compare literally");
+    test_input(r#"test hello = "he*""#).unwrap();
+    assert_ne!(state::Shed::get_status(), 0, "test must compare literally");
+    // A literal glob string still matches itself.
+    test_input(r#"[ "a*" = "a*" ]"#).unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_double_bracket_globs() {
+    // `[[ ]]`: `==` matches the RHS as a glob pattern.
+    let _g = TestGuard::new();
+    test_input("[[ abc == a* ]]").unwrap();
+    assert_eq!(state::Shed::get_status(), 0, "[[ ]] must glob-match");
   }
 
   #[test]

@@ -1624,5 +1624,104 @@ mod exit_status_2_8 {
    * standard error and exit.
    */
 
-  // TODO: find a way to inspect errors
+  use crate::{eval::execute::exec_dash_c, state::Shed, tests::testutil::TestGuard};
+
+  /*
+   * §2.8.1 Consequences of Shell Errors
+   *
+   * "A redirection error [on a command that is not a special built-in] shall
+   * not cause the shell to abort." It sets a non-zero exit status and the shell
+   * continues with the next command; the command whose redirection failed is
+   * not executed.
+   */
+
+  #[test]
+  fn redirect_error_on_simple_command_is_nonfatal() {
+    let g = TestGuard::new();
+    exec_dash_c(
+      "echo before; echo SKIP > /nonexistent_dir_xyzq/f; echo after".into(),
+      vec![],
+    )
+    .unwrap();
+    let out = g.read_output();
+    assert!(out.contains("before"), "got: {out:?}");
+    assert!(
+      out.contains("after"),
+      "later command must still run: {out:?}"
+    );
+    assert!(
+      !out.contains("SKIP"),
+      "the command whose redirection failed must not run: {out:?}"
+    );
+  }
+
+  #[test]
+  fn redirect_error_sets_nonzero_status() {
+    let _g = TestGuard::new();
+    exec_dash_c("echo x > /nonexistent_dir_xyzq/f".into(), vec![]).unwrap();
+    assert_ne!(Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn redirect_error_on_nonspecial_builtin_is_nonfatal() {
+    // `true` is a builtin but not a *special* built-in, so its redirection
+    // error is non-fatal like any ordinary command.
+    let g = TestGuard::new();
+    exec_dash_c(
+      "true > /nonexistent_dir_xyzq/f; echo reached".into(),
+      vec![],
+    )
+    .unwrap();
+    assert!(
+      g.read_output().contains("reached"),
+      "must continue past the failure"
+    );
+  }
+
+  #[test]
+  fn redirect_error_on_function_is_nonfatal() {
+    // A redirection error on a function invocation skips the body but must not
+    // abort the shell.
+    let g = TestGuard::new();
+    exec_dash_c(
+      "f(){ echo FROMFUNC; }; f > /nonexistent_dir_xyzq/f; echo after".into(),
+      vec![],
+    )
+    .unwrap();
+    let out = g.read_output();
+    assert!(out.contains("after"), "must continue: {out:?}");
+    assert!(
+      !out.contains("FROMFUNC"),
+      "function body must be skipped: {out:?}"
+    );
+  }
+
+  #[test]
+  fn redirect_error_on_compound_is_nonfatal() {
+    // Same for compound commands (brace group / loop / if).
+    let g = TestGuard::new();
+    exec_dash_c(
+      "{ echo FROMGRP; } > /nonexistent_dir_xyzq/f; echo after".into(),
+      vec![],
+    )
+    .unwrap();
+    let out = g.read_output();
+    assert!(out.contains("after"), "must continue: {out:?}");
+    assert!(
+      !out.contains("FROMGRP"),
+      "compound body must be skipped: {out:?}"
+    );
+  }
+
+  #[test]
+  fn redirect_error_on_special_builtin_is_fatal() {
+    // `:` is a special built-in: a redirection error is fatal (non-interactive),
+    // so the following command must not run.
+    let g = TestGuard::new();
+    exec_dash_c(": > /nonexistent_dir_xyzq/f; echo AFTER".into(), vec![]).ok();
+    assert!(
+      !g.read_output().contains("AFTER"),
+      "special-built-in redirection error must abort the input"
+    );
+  }
 }

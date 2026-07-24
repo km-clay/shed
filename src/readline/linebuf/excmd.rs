@@ -592,7 +592,7 @@ impl super::LineBuf {
         };
 
         let redirs = RedirSet::from(spec);
-        let _guard = redirs.apply()?;
+        let _guard = redirs.apply().or_fatal()?;
 
         autocmd!(PreCmd);
         {

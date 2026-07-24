@@ -36,7 +36,7 @@ use super::{
   expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern},
   jobs::{ChildProc, JobStack, dispatch_job},
   lex::{KEYWORDS, Span, Tk, TkFlags},
-  procio::{self, PipeGenerator, RedirGuard, RedirSet, RedirSpec},
+  procio::{self, PipeGenerator, RedirGuard, RedirResult, RedirSet, RedirSpec},
   sherr, shopt,
   signal::{check_signals, signals_pending},
   state::{
@@ -705,7 +705,12 @@ impl Dispatcher {
     let _var_guard = var_ctx_guard(env_vars.into_iter().collect());
 
     let redirs = RedirSet::from(&func.redirs);
-    let _guard = redirs.apply()?;
+    let _guard = match redirs.try_apply(false) {
+      RedirResult::Applied(guard) => Some(guard),
+      RedirResult::NoRedirs => None,
+      RedirResult::Skipped => return Ok(()),
+      RedirResult::Error(e) => return Err(e),
+    };
 
     blame.rename(func_name.clone());
 
@@ -777,7 +782,12 @@ impl Dispatcher {
     let fork_builtins = flags.contains(NdFlags::FORK_BUILTINS);
 
     let redirs = RedirSet::from(redirs);
-    let guard = redirs.apply()?;
+    let guard = match redirs.try_apply(false) {
+      RedirResult::Applied(guard) => Some(guard),
+      RedirResult::NoRedirs => None,
+      RedirResult::Skipped => return Ok(()),
+      RedirResult::Error(e) => return Err(e),
+    };
 
     if fork_builtins {
       log::trace!("Forking compound command: {name}");
@@ -822,7 +832,12 @@ impl Dispatcher {
     let span = body.get_span();
 
     let redirs = RedirSet::from(&subsh.redirs);
-    let _guard = redirs.apply()?;
+    let _guard = match redirs.try_apply(false) {
+      RedirResult::Applied(guard) => Some(guard),
+      RedirResult::NoRedirs => None,
+      RedirResult::Skipped => return Ok(()),
+      RedirResult::Error(e) => return Err(e),
+    };
 
     let body_raw = span.as_str();
     let body_display = body_raw.graphemes(true).take(70).collect::<String>();
@@ -1458,17 +1473,16 @@ impl Dispatcher {
         e.print_error();
         return Ok(());
       }
-      match RedirSet::from(&cmd.redirs).apply() {
-        Ok(_guard) => {
-          // this is a command with only redirections. set the status to 0
+      match RedirSet::from(&cmd.redirs).try_apply(false) {
+        RedirResult::Applied(_) | RedirResult::NoRedirs => {
+          // command with only redirections: status 0 unless assignments
+          // already produced one.
           if assignments.is_empty() {
             Shed::set_status(0);
           }
         }
-        Err(e) => {
-          e.print_error();
-          Shed::set_status(1);
-        }
+        RedirResult::Skipped => {}
+        RedirResult::Error(e) => return Err(e),
       }
       return Ok(());
     }
@@ -1479,8 +1493,18 @@ impl Dispatcher {
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
-    let redirs = RedirSet::from(&cmd.redirs);
-    let _guard = redirs.apply()?;
+    // POSIX 2.8.1: a redirection failure on an ordinary command is non-fatal —
+    // print, set `$?`=1, skip the command, and keep executing the rest of the
+    // input. It stays fatal only for a special built-in in a non-interactive
+    // shell.
+    let fatal = !Shed::term(Terminal::interactive)
+      && lookup_builtin(cmd_name).is_some_and(|b| b.is_special());
+    let _guard = match RedirSet::from(&cmd.redirs).try_apply(fatal) {
+      RedirResult::Applied(guard) => Some(guard),
+      RedirResult::NoRedirs => None,
+      RedirResult::Skipped => return Ok(()),
+      RedirResult::Error(e) => return Err(e),
+    };
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
 
     let fg_job = self.fg_job;

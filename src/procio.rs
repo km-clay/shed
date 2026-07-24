@@ -522,6 +522,27 @@ impl RedirSpec {
   }
 }
 
+pub(super) enum RedirResult {
+  Applied(RedirGuard),
+  NoRedirs,
+  Skipped,
+  Error(ShErr),
+}
+
+impl RedirResult {
+  /// Collapse into a plain result, propagating any error. For callers where a
+  /// redirection failure is fatal (the pre-non-fatal default). Callers that can
+  /// continue should instead match the variants and handle [`Self::Skipped`].
+  pub fn or_fatal(self) -> ShResult<Option<RedirGuard>> {
+    match self {
+      RedirResult::Applied(guard) => Ok(Some(guard)),
+      // `apply()` never yields `Skipped`; proceed defensively if it somehow does.
+      RedirResult::NoRedirs | RedirResult::Skipped => Ok(None),
+      RedirResult::Error(e) => Err(e),
+    }
+  }
+}
+
 #[derive(Default, Debug)]
 pub(super) struct RedirSet(pub Vec<RedirSpec>);
 
@@ -533,13 +554,31 @@ impl RedirSet {
     }
     Ok(())
   }
-  pub fn apply(self) -> ShResult<Option<RedirGuard>> {
+  /// Apply the redirections, classifying a failure as fatal or not. When
+  /// `fatal` is false, a failure is reported (printed + `$?` set) and turned
+  /// into [`RedirResult::Skipped`] so the caller can skip the command and
+  /// continue; when `fatal` is true, the error is left to propagate.
+  pub fn try_apply(self, fatal: bool) -> RedirResult {
+    match self.apply() {
+      RedirResult::Error(e) if !fatal => {
+        e.print_error();
+        Shed::set_status(1);
+        RedirResult::Skipped
+      }
+      // Applied / NoRedirs / (fatal) Error pass through unchanged.
+      res => res,
+    }
+  }
+  pub fn apply(self) -> RedirResult {
     if self.0.is_empty() {
-      return Ok(None);
+      return RedirResult::NoRedirs;
     }
     let targets: BTreeSet<RawFd> = self.0.iter().map(RedirSpec::target_fd).collect();
 
-    let guard = RedirGuard::new(&targets)?;
+    let guard = match RedirGuard::new(&targets) {
+      Ok(g) => g,
+      Err(e) => return RedirResult::Error(e),
+    };
     for spec in self.0 {
       let span = if let RedirSpec::File { ref path, .. } = spec {
         Some(path.span.clone())
@@ -547,13 +586,20 @@ impl RedirSet {
         None
       };
 
-      let mut redir = spec
+      let res = spec
         .into_redir()
-        .map_err(|e| e.option_promote(span.clone()))?;
+        .map_err(|e| e.option_promote(span.clone()));
 
-      redir.apply().map_err(|e| e.option_promote(span))?;
+      let mut redir = match res {
+        Ok(r) => r,
+        Err(e) => return RedirResult::Error(e),
+      };
+
+      if let Err(e) = redir.apply().map_err(|e| e.option_promote(span)) {
+        return RedirResult::Error(e);
+      };
     }
-    Ok(Some(guard))
+    RedirResult::Applied(guard)
   }
   pub fn split_by_channel(self) -> (RedirSet, RedirSet) {
     let mut in_redirs = vec![];
@@ -1057,7 +1103,7 @@ pub(super) fn capture_command(
       // Keep the read end alive until redirs.apply() dups it onto fd 0.
       let _stdin_r_keep_alive = stdin_pipe.map(|p| p.into_child(&mut specs));
       let redirs: RedirSet = specs.into();
-      let _guard = redirs.apply()?;
+      let _guard = redirs.apply().or_fatal()?;
 
       if let Err(e) = exec_nonint(cmd.into(), name) {
         if let ShErrKind::CleanExit(code) = e.kind() {
