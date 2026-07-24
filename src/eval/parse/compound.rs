@@ -541,21 +541,47 @@ impl ParseStream {
     let mut arr: Vec<Tk> = vec![];
     let mut redirs = vec![];
 
-    while let Some(tk) = self.next_tk() {
-      extend_span!(*span, tk.clone().span);
-      if tk.as_str() == "in" {
+    // Read variable names, stopping at "in", a separator, or "do". Whether an
+    // "in" clause is present decides the iteration list: "for x in words"
+    // iterates "words" (possibly empty, zero iterations), while "for x" with
+    // no "in" iterates the positional parameters ("$@").
+    let mut positional = true;
+    let array_checks = |this: &Self| {
+      this.peek_tk().map(|tk| {
+        let is_in = tk.as_str() == "in";
+        let is_sep = tk.class == TkRule::Sep;
+        let is_do = tk.as_str() == "do";
+        (is_in, is_sep, is_do)
+      })
+    };
+
+    while let Some((is_in, is_sep, is_do)) = array_checks(self) {
+      if is_in {
+        // we have been given an explicit array
+        extend_span!(*span, self.next_tk().unwrap().span);
+        positional = false;
         break;
       }
-      vars.push(tk.clone());
+      if is_sep || is_do {
+        // we are done here
+        break;
+      }
+      let tk = self.next_tk().unwrap();
+      extend_span!(*span, tk.span);
+      vars.push(tk);
     }
 
-    while let Some(tk) = self.next_tk() {
-      extend_span!(*span, tk.clone().span);
-      if tk.class == TkRule::Sep {
-        break;
+    // Read the explicit word list only when an `in` clause was given.
+    if !positional {
+      while self.peek_tk().is_some_and(|tk| tk.class != TkRule::Sep) {
+        let tk = self.next_tk().unwrap();
+        extend_span!(*span, tk.span);
+        arr.push(tk);
       }
-      arr.push(tk.clone());
     }
+
+    // Consume the separator(s) between the header and `do`.
+    self.catch_separator(span);
 
     if vars.is_empty() {
       bail!(
@@ -564,7 +590,7 @@ impl ParseStream {
         "Expected a variable name for this for loop"
       );
     }
-    if !self.check_keyword("do") {
+    if self.peek_tk().is_none_or(|tk| tk.as_str() != "do") {
       bail!(
         self,
         span.clone(),
@@ -598,7 +624,8 @@ impl ParseStream {
       NdRule::ForNode {
         vars,
         arr,
-        body: Box::new(body)
+        body: Box::new(body),
+        positional
       },
       redirs
     )))

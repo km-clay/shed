@@ -1306,6 +1306,15 @@ impl LexStream {
         self.flags &= !LexFlags::EXPECTING_CASE_IN;
         self.flags |= LexFlags::CASE_PAT_EXPECTED;
       }
+    } else if self.flags.contains(LexFlags::EXPECTING_IN)
+      && !self.flags.contains(LexFlags::EXPECTING_CASE_IN)
+      && text == "do"
+    {
+      // "do" directly after the variable means that we implicitly
+      // use the shell's positional parameters instead of an explicit array
+      new_tk.mark(TkFlags::KEYWORD);
+      self.flags &= !LexFlags::EXPECTING_IN;
+      self.set_next_is_cmd(true);
     } else if text == "esac" && self.case_depth > 0 {
       // `esac` reached in pattern position (empty case body or right after `;;`).
       // The is_cmd block above is short-circuited by CASE_PAT_EXPECTED,

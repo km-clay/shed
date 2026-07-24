@@ -1035,7 +1035,13 @@ impl Dispatcher {
   }
   fn exec_for_arr(&mut self, for_stmt: &Node) -> ShResult<()> {
     let blame = for_stmt.get_span().clone();
-    let NdRule::ForNode { vars, arr, body } = &for_stmt.class else {
+    let NdRule::ForNode {
+      vars,
+      arr,
+      body,
+      positional,
+    } = &for_stmt.class
+    else {
       unreachable!();
     };
 
@@ -1049,8 +1055,13 @@ impl Dispatcher {
         Ok(out)
       };
 
-      // Expand all array variables
-      let arr: Vec<VarStr> = to_expanded_strings(arr)?;
+      let arr: Vec<VarStr> = if *positional {
+        // the for loop was written with no 'in' keyword
+        // so we use the positional parameters instead
+        Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect())
+      } else {
+        to_expanded_strings(arr)?
+      };
       let vars: Vec<VarStr> = to_expanded_strings(vars)?;
 
       let mut for_guard = var_ctx_guard(vars.iter().map(VarStr::clone).collect());

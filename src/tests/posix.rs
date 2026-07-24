@@ -620,6 +620,13 @@ mod reserved_words_2_4 {
     for_do_keyword       : "for x in a b; do echo $x; done"  => "a\nb\n";
     case_in_keyword      : "case foo in foo) echo y ;; esac" => "y\n";
     in_outside_position  : "echo in"                         => "in\n";
+
+    // No-`in` form: `for x` (and `for x do`) iterate the positional parameters.
+    for_no_in_semi       : "set -- a b c; for x; do echo $x; done"     => "a\nb\nc\n";
+    for_no_in_bare_do    : "set -- a b; for x do echo got $x; done"    => "got a\ngot b\n";
+    for_no_in_no_args    : "set --; for x; do echo $x; done; echo end" => "end\n";
+    // Explicit empty `in` list still iterates zero times (distinct from no-`in`).
+    for_empty_in_list    : "set -- a b; for x in; do echo $x; done; echo z" => "z\n";
   }
 }
 

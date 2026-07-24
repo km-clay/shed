@@ -345,6 +345,7 @@ pub(crate) enum NdRule {
     vars: Vec<Tk>,
     arr: Vec<Tk>,
     body: Box<Node>,
+    positional: bool, // true if no "in" keyword is passed to the for loop
   },
   TryNode {
     body: Box<Node>,
