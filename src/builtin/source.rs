@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::{ShErrKind, Shed};
+use crate::{ShErrKind, Shed, state::vars::VarStr};
 
 use super::{ShResult, sherr, state::util::source_file};
 
@@ -11,27 +11,59 @@ impl super::Builtin for Source {
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    for (arg, span) in args.argv {
-      let path = PathBuf::from(arg);
+    let mut argv = args.argv.into_iter();
+    let Some((file, span)) = argv.next() else {
+      return Err(sherr!(
+        ExecFail @ args.span,
+        "source: filename argument required",
+      ));
+    };
+    let path = PathBuf::from(file);
 
-      if !path.exists() {
-        return Err(sherr!(
-          ExecFail @ span,
-          "source: File '{}' not found", path.display(),
-        ));
-      } else if !path.is_file() {
-        return Err(sherr!(
-          ExecFail @ span,
-          "source: Given path '{}' is not a file", path.display(),
-        ));
-      }
+    if !path.exists() {
+      return Err(sherr!(
+        ExecFail @ span,
+        "source: File '{}' not found", path.display(),
+      ));
+    } else if !path.is_file() {
+      return Err(sherr!(
+        ExecFail @ span,
+        "source: Given path '{}' is not a file", path.display(),
+      ));
+    }
 
-      if let Err(e) = source_file(path)
-        && let ShErrKind::Raised(_, code) = e.kind()
-      {
-        Shed::set_status(*code);
-        return Err(e.force_promote(span));
-      }
+    let extra: Vec<VarStr> = argv.map(|(arg, _)| arg).collect();
+    let saved_argv = (!extra.is_empty()).then(|| {
+      Shed::vars_mut(|v| {
+        let scope = v.cur_scope_mut();
+        let saved = scope.sh_argv().clone();
+        let dollar0 = saved.front().cloned().unwrap_or_default();
+        scope.sh_argv_mut().clear();
+        scope.bpush_arg(dollar0);
+        for arg in &extra {
+          scope.bpush_arg(arg.clone());
+        }
+        saved
+      })
+    });
+
+    let result = source_file(path);
+
+    if let Some(saved) = saved_argv {
+      Shed::vars_mut(|v| {
+        let scope = v.cur_scope_mut();
+        scope.sh_argv_mut().clear();
+        for arg in saved {
+          scope.bpush_arg(arg);
+        }
+      });
+    }
+
+    if let Err(e) = result
+      && let ShErrKind::Raised(_, code) = e.kind()
+    {
+      Shed::set_status(*code);
+      return Err(e.force_promote(span));
     }
 
     Ok(())
@@ -109,18 +141,55 @@ pub mod tests {
   }
 
   #[test]
-  fn source_multiple_files() {
-    let _g = TestGuard::new();
-    let mut file1 = NamedTempFile::new().unwrap();
-    let mut file2 = NamedTempFile::new().unwrap();
-    let path1 = file1.path().display().to_string();
-    let path2 = file2.path().display().to_string();
-    file1.write_all(b"a=from_file1").unwrap();
-    file2.write_all(b"b=from_file2").unwrap();
+  fn source_passes_positional_params() {
+    // POSIX: `. file a b c` sources only `file`; a/b/c become $1/$2/$3.
+    let guard = TestGuard::new();
+    let mut file = NamedTempFile::new().unwrap();
+    let path = file.path().display().to_string();
+    file
+      .write_all(b"echo \"count=$# all=$* one=$1 two=$2\"")
+      .unwrap();
 
-    test_input(format!("source {path1} {path2}")).unwrap();
-    assert_eq!(var!("a"), "from_file1");
-    assert_eq!(var!("b"), "from_file2");
+    test_input(format!("source {path} x y z")).unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("count=3"), "got: {out:?}");
+    assert!(out.contains("all=x y z"), "got: {out:?}");
+    assert!(out.contains("one=x two=y"), "got: {out:?}");
+  }
+
+  #[test]
+  fn source_restores_positional_params() {
+    // The caller's positional parameters are restored after the source.
+    let guard = TestGuard::new();
+    let mut file = NamedTempFile::new().unwrap();
+    let path = file.path().display().to_string();
+    file.write_all(b":").unwrap(); // no-op body
+
+    test_input(format!(
+      "set -- outer1 outer2; source {path} inner; echo \"after=$# $1\""
+    ))
+    .unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("after=2 outer1"), "got: {out:?}");
+  }
+
+  #[test]
+  fn source_no_args_leaves_positionals_unchanged() {
+    let guard = TestGuard::new();
+    let mut file = NamedTempFile::new().unwrap();
+    let path = file.path().display().to_string();
+    file.write_all(b"echo \"inner=$# $1\"").unwrap();
+
+    test_input(format!(
+      "set -- keep1 keep2; source {path}; echo \"after=$# $1\""
+    ))
+    .unwrap();
+    let out = guard.read_output();
+    assert!(
+      out.contains("inner=2 keep1"),
+      "sourced script should see caller's params: {out:?}"
+    );
+    assert!(out.contains("after=2 keep1"), "got: {out:?}");
   }
 
   // ===================== Dot syntax =====================
