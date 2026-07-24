@@ -58,6 +58,7 @@ impl StashOpts {
           _ => return Err(sherr!(ParseErr, "unexpected option {opt} in stash"))
         }
       }
+      Opt::Short('l') => new.list = true,
       Opt::Long(arg) => {
         match arg.as_str() {
           "list" => new.list = true,
@@ -160,6 +161,25 @@ mod stash_builtin_tests {
     test_input("stash --list").unwrap();
     let out = g.read_output();
     assert!(out.contains("list_me"), "got: {out:?}");
+  }
+
+  #[test]
+  fn short_l_flag_prints_stashes() {
+    // Regression: `-l` parsed at the getopt layer but had no arm in
+    // from_opts, so it always errored with "unexpected option".
+    let g = TestGuard::new();
+    let stash = fresh_stash();
+    stash
+      .stash_cmd(&StashedCmd {
+        name: Some("list_me_short".into()),
+        buffer: "buf".into(),
+        cursor_pos: "0".into(),
+      })
+      .unwrap();
+    test_input("stash -l").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("list_me_short"), "got: {out:?}");
+    assert_eq!(state::Shed::get_status(), 0);
   }
 
   // ─── -d / --delete ────────────────────────────────────────────
