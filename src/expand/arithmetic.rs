@@ -134,12 +134,7 @@ impl StackVal {
   fn to_num(&self) -> ShResult<i64> {
     match self {
       StackVal::Num(n) => Ok(*n),
-      StackVal::Var(name) => {
-        let val = try_var!(name).unwrap_or_else(|| "0".into());
-        val
-          .parse::<i64>()
-          .map_err(|_| sherr!(ParseErr, "Variable '{name}' does not contain an integer",))
-      }
+      StackVal::Var(name) => resolve_var_num(name),
     }
   }
 }
@@ -160,11 +155,52 @@ fn radix_digit_value(c: char, base: u32) -> Option<u32> {
   (v < base).then_some(v)
 }
 
-fn read_var_as_i64(name: &str) -> ShResult<i64> {
-  let val = try_var!(name).unwrap_or_else(|| "0".into());
-  val
+/// Depth limit for recursive arithmetic variable resolution.
+/// `eval_rpn` has a huge stack frame so this can't be very large at the moment.
+const MAX_ARITH_DEPTH: u32 = 16; // TODO: slim down eval_rpn's stack frame size
+
+thread_local! {
+  static ARITH_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Restores the recursion depth counter on drop, even on the error path.
+struct DepthGuard;
+impl Drop for DepthGuard {
+  fn drop(&mut self) {
+    ARITH_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+  }
+}
+
+/// Resolve a variable to an integer for arithmetic. If its value is not already
+/// a literal integer, evaluate it *as an arithmetic expression* (POSIX 2.6.4 /
+/// bash), so a variable holding another name (`y=x`) or a sub-expression
+/// (`b="a+1"`) resolves transitively. Unset/empty resolves to 0; cyclic
+/// references are cut off by [`MAX_ARITH_DEPTH`].
+fn resolve_var_num(name: &str) -> ShResult<i64> {
+  let val = try_var!(name).unwrap_or_default();
+  let trimmed = val.trim();
+  if trimmed.is_empty() {
+    return Ok(0);
+  }
+  if let Ok(n) = trimmed.parse::<i64>() {
+    return Ok(n);
+  }
+  if ARITH_DEPTH.with(|d| d.get()) >= MAX_ARITH_DEPTH {
+    return Err(sherr!(
+      ParseErr,
+      "arithmetic recursion limit exceeded resolving '{name}'"
+    ));
+  }
+  ARITH_DEPTH.with(|d| d.set(d.get() + 1));
+  let _guard = DepthGuard;
+  let result = expand_arithmetic(trimmed)?;
+  result
     .parse::<i64>()
-    .map_err(|_| sherr!(ParseErr, "Variable '{name}' does not contain an integer",))
+    .map_err(|_| sherr!(ParseErr, "Variable '{name}' does not contain an integer"))
+}
+
+fn read_var_as_i64(name: &str) -> ShResult<i64> {
+  resolve_var_num(name)
 }
 
 impl ArithTk {
@@ -1270,6 +1306,39 @@ mod tests {
     // base out of range, and a digit out of range for the base
     assert!(expand_arithmetic("1#0").is_err());
     assert!(expand_arithmetic("2#5").is_err());
+  }
+
+  #[test]
+  fn arith_recursive_variable_resolution() {
+    let _g = TestGuard::new();
+    // A variable holding another name resolves transitively.
+    Shed::vars_mut(|v| v.set_var("x", VarKind::string("3"), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("y", VarKind::string("x"), VarFlags::empty())).unwrap();
+    assert_eq!(arith("y+1"), 4.0);
+    // A variable holding a sub-expression is evaluated.
+    Shed::vars_mut(|v| v.set_var("b", VarKind::string("x+1"), VarFlags::empty())).unwrap();
+    assert_eq!(arith("b*2"), 8.0);
+    // A chain resolves to the end.
+    Shed::vars_mut(|v| v.set_var("a", VarKind::string("b"), VarFlags::empty())).unwrap();
+    assert_eq!(arith("a"), 4.0);
+  }
+
+  #[test]
+  fn arith_recursion_cycle_errors_not_crashes() {
+    // Self-reference must error (via the depth cap), not overflow the stack.
+    let _g = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("z", VarKind::string("z"), VarFlags::empty())).unwrap();
+    assert!(expand_arithmetic("z").is_err());
+    // Mutual reference likewise.
+    Shed::vars_mut(|v| v.set_var("p", VarKind::string("q"), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("q", VarKind::string("p"), VarFlags::empty())).unwrap();
+    assert!(expand_arithmetic("p").is_err());
+  }
+
+  #[test]
+  fn arith_unset_variable_is_zero() {
+    let _g = TestGuard::new();
+    assert_eq!(arith("no_such_var_zzz + 7"), 7.0);
   }
 
   #[test]
