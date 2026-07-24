@@ -181,6 +181,8 @@ fn getopts_inner(
     Ok(())
   };
 
+  let _ = Shed::vars_mut(|v| v.unset_var("OPTARG"));
+
   match opts_spec.matches(ch) {
     OptMatch::NoMatch => {
       advance_one_char(last_char_in_arg)?;
@@ -540,6 +542,17 @@ mod tests {
   }
 
   // ===================== Error cases =====================
+
+  #[test]
+  fn getopts_optarg_cleared_for_flag_after_arg_option() {
+    // Regression: an option taking an argument (-b val) set OPTARG, and a
+    // following no-arg option (-c) left the stale value in place.
+    let g = TestGuard::new();
+    test_input(r#"set -- -b val -c; while getopts "b:c" o; do echo "$o=${OPTARG-}"; done"#)
+      .unwrap();
+    let out = g.read_output();
+    assert_eq!(out, "b=val\nc=\n");
+  }
 
   #[test]
   fn getopts_missing_spec() {
