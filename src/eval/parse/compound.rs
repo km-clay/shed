@@ -225,6 +225,12 @@ impl ParseStream {
     self.catch_separator(&mut span);
 
     loop {
+      if self.check_keyword("esac") {
+        extend_span!(span, self.next_tk().unwrap().span);
+        self.assert_separator(&mut span)?;
+        break;
+      }
+
       let leading_paren = matches!(self.next_tk_class(), TkRule::SubshStart);
       if leading_paren {
         // optional leading paren, push and continue
@@ -1014,6 +1020,20 @@ mod compound_parse_error_tests {
   fn case_missing_in_after_variable_errors() {
     let _g = TestGuard::new();
     assert!(get_ast("case x foo) ;; esac").is_err());
+  }
+
+  #[test]
+  fn empty_case_with_no_arms_parses() {
+    // POSIX: `case x in esac` is valid (no pattern arms).
+    let _g = TestGuard::new();
+    assert!(get_ast("case x in esac").is_ok());
+  }
+
+  #[test]
+  fn empty_case_runs_with_status_zero() {
+    let _g = TestGuard::new();
+    test_input("case x in esac").unwrap();
+    assert_eq!(crate::state::Shed::get_status(), 0);
   }
 
   // ─── case double-semi happy path (the *normal* break) ──────────────
