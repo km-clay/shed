@@ -132,6 +132,7 @@ register_builtins! {
   "jobs"     => jobctl::Jobs,
   "keymap"   => keymap::KeyMapBuiltin,
   "kill"     => jobctl::Kill,
+  "let"      => Let,
   "local"    => varcmds::Local,
   "msg"      => msg::Msg,
   "pop"      => arrops::Pop,
@@ -476,6 +477,22 @@ struct False;
 impl Builtin for False {
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     with_status(1)
+  }
+}
+
+struct Let;
+impl Builtin for Let {
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      // bash: `let` with no expressions returns 1
+      return with_status(1);
+    }
+    let mut last = 0i64;
+    for (expr, _) in args.argv {
+      let result = expand::expand_arithmetic(expr.as_str())?;
+      last = result.as_str().trim().parse::<i64>().unwrap_or(0);
+    }
+    with_status(if last == 0 { 1 } else { 0 })
   }
 }
 
@@ -880,6 +897,53 @@ pub mod tests {
     test_input(":").unwrap();
 
     assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  // ===================== let builtin =====================
+
+  #[test]
+  fn let_assigns_and_expands() {
+    let g = TestGuard::new();
+    test_input("let x=3+4; echo $x").unwrap();
+    let out = g.read_output();
+    assert_eq!(out.trim(), "7");
+  }
+
+  #[test]
+  fn let_nonzero_result_is_status_zero() {
+    let _g = TestGuard::new();
+    test_input("let 3+4").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn let_zero_result_is_status_one() {
+    let _g = TestGuard::new();
+    test_input("let 1-1").unwrap();
+    assert_eq!(state::Shed::get_status(), 1);
+  }
+
+  #[test]
+  fn let_status_reflects_last_expression() {
+    // first expr is zero, last is nonzero -> status 0
+    let _g = TestGuard::new();
+    test_input("let a=0 b=5").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn let_no_args_is_status_one() {
+    let _g = TestGuard::new();
+    test_input("let").unwrap();
+    assert_eq!(state::Shed::get_status(), 1);
+  }
+
+  #[test]
+  fn let_counter_increment() {
+    let g = TestGuard::new();
+    test_input("i=1; let i=i+1; echo $i").unwrap();
+    let out = g.read_output();
+    assert_eq!(out.trim(), "2");
   }
 
   // ===================== prefix-assignment scoping =====================
