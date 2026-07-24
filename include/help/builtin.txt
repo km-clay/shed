@@ -63,6 +63,7 @@ The following builtins are available:
   `trap`        set signal handlers                         |builtin-trap|
   `true`        return exit status 0                        |builtin-true|
   `type`        describe how a name would be interpreted    |builtin-type|
+  `typeset`     synonym for `declare`                       |builtin-typeset|
   `ulimit`      set process resource limits                 |builtin-ulimit|
   `umask`       set the file creation mask                  |builtin-umask|
   `unalias`     remove aliases                              |builtin-unalias|
@@ -699,21 +700,29 @@ EXIT                                             *builtin-exit* *exit*
 ==============================================================================
 EXPORT                                           *builtin-export* *export*
 
-  `export [name[=value] ...]`
+  `export [-n] [name[=value] ...]`
+  `export -p`
 
   Mark variables for automatic export to the environment of subsequently
   executed commands. With `name=value`, sets and exports in one step.
   With just {name}, marks an existing variable as exported.
 
-  With no arguments, lists all current environment variables
-  alphabetically as `name="value"` pairs.
+  `-n`    remove the export attribute from each {name}, keeping it as an
+          ordinary shell variable (its value is preserved). `export -n
+          NAME=value` also assigns the value, unexported.
+  `-p`    list the exported variables. Same as bare `export`.
+
+  With no arguments (or `-p`), lists the exported variables — including
+  ones exported this session, not just inherited ones — as reusable
+  `export name=value` lines, sorted by name.
 
   Examples:
 
-      `export`                  list all environment variables
+      `export`                  list exported variables
       `export PATH`             export an existing variable
       `export EDITOR=nvim`      set and export
       `export A=1 B=2`          multiple in one call
+      `export -n EDITOR`        stop exporting EDITOR (keep its value)
 
 ==============================================================================
 FALSE                                            *builtin-false* *false*
@@ -1550,19 +1559,21 @@ READ                                             *builtin-read* *read*
 ==============================================================================
 READONLY                                         *builtin-readonly* *readonly*
 
-  `readonly [name[=value] ...]`
+  `readonly [-p] [name[=value] ...]`
 
   Mark variables as read-only. Any attempt to reassign or unset a
   read-only variable is an error. With `name=value`, sets and protects
   in one step.
 
-  With no arguments, lists all read-only variables.
+  With no arguments (or `-p`), lists the read-only variables as reusable
+  `readonly name=value` lines.
 
   Examples:
 
       `readonly PI=3.14159`
       `readonly MYVAR`
       `readonly`              list read-only variables
+      `readonly -p`           same, portable form
 
 ==============================================================================
 READKEY                                         *builtin-readkey* *readkey*
@@ -2008,13 +2019,19 @@ SHOPT                                            *builtin-shopt* *shopt*
 ==============================================================================
 SOURCE                                           *builtin-source* *source*
 
-  `source {file} ...`
-  `. {file} ...`
+  `source {file} [args ...]`
+  `. {file} [args ...]`
 
   Execute {file} in the current shell environment. Unlike running a
   script as a child process, `source` runs in the current scope:
   variable assignments, function definitions, and directory changes all
-  persist. Multiple files may be given; they are sourced in order.
+  persist.
+
+  Only the first operand is the file to source. Any further operands
+  become the positional parameters (`$1`, `$2`, …) for the duration of
+  the sourced file; with no extra operands the caller's positional
+  parameters are left unchanged. The caller's parameters are restored
+  afterward.
 
   It is an error if {file} does not exist or is not a regular file.
 
@@ -2022,6 +2039,7 @@ SOURCE                                           *builtin-source* *source*
 
       `source ~/.shed_profile`
       `. ./lib.sh`
+      `. ./deploy.sh --env prod`   `$1` is --env, `$2` is prod
 
 ==============================================================================
 STAT                                             *builtin-stat* *stat*
@@ -2381,7 +2399,7 @@ UNSET                                            *builtin-unset* *unset*
 ==============================================================================
 TYPE                                             *builtin-type* *type*
 
-  `type [-s] {name} ...`
+  `type [-st] {name} ...`
 
   Describe how the shell would interpret each {name} if used as a
   command. Reports the first match in lookup order:
@@ -2397,9 +2415,14 @@ TYPE                                             *builtin-type* *type*
   Options ~
 
     `-s`    Short output: print just the kind (`alias`, `function`, `builtin`,
-            `keyword`, `external`, …) instead of the prose and source
-            locations. Autoloaded functions print `name (origin) -> path`.
-            Handy for scripting.
+            `keyword`, `external`, `string`, …) instead of the prose and
+            source locations. Autoloaded functions print `name (origin) ->
+            path`. A shed extension that also classifies variables.
+    `-t`    Terse, POSIX form: print just one of `alias`, `keyword`,
+            `function`, `builtin`, or `file` and nothing else. Unlike `-s`,
+            it does not classify variables — a name that is only a variable
+            (or unknown) prints nothing and returns non-zero. Ideal for
+            `[ "$(type -t deploy)" = function ]`.
 
   Examples:
 
@@ -2408,6 +2431,16 @@ TYPE                                             *builtin-type* *type*
       `type if`         if is a shell keyword
       `type ll`         ll is an alias for 'ls -la' ...
       `type -s ll`      alias
+      `type -t echo`    builtin
+      `type -t ls`      file
+
+==============================================================================
+TYPESET                                          *builtin-typeset* *typeset*
+
+  `typeset [-aAirx] [name[=value] ...]`
+
+  A synonym for `declare` (the ksh/zsh spelling); accepts the same flags
+  and behaves identically. See |builtin-declare|.
 
 ==============================================================================
 ULIMIT                                           *builtin-ulimit* *ulimit*

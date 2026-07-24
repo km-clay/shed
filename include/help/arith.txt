@@ -25,6 +25,16 @@ substitution before evaluation.
       Example:
         `echo $(( (2+3) * 4 ))`  # prints: 20
 
+  `**`                                         *arith-pow*
+
+      Exponentiation. Right-associative, and binds tighter than `* / %`
+      but looser than unary minus (so `-2**2` is `(-2)**2` == 4). A
+      negative exponent is an error.
+
+      Example:
+        `echo $((2 ** 10))`      # prints: 1024
+        `echo $((2 ** 2 ** 3))`  # prints: 256
+
   `*` `/` `%`                                  *arith-muldivmod*
 
       Multiplication, division, and modulo (remainder).
@@ -50,10 +60,33 @@ substitution before evaluation.
       `echo $(($x + 5))`        # prints: 15
       `echo $((x + 5))`         # also works
 
-  If a variable is unset or not a valid number, an error is reported.
+  An unset (or empty) variable counts as 0. A variable whose value is
+  not a plain integer is itself evaluated as an arithmetic expression,
+  so references resolve transitively:
+
+      `x=3; y=x;   echo $((y + 1))`   # prints: 4  (y -> x -> 3)
+      `a=2; b=a+1; echo $((b * 2))`   # prints: 6
+
+  A self- or mutual reference (`x=x`, `a=b; b=a`) is an error rather
+  than an infinite loop.
 
 ==============================================================================
-3. Nesting                                     *arith-nesting*
+3. Number formats                              *arith-numbers*
+
+  Integer literals may be written as:
+
+      decimal           `42`
+      hexadecimal        `0x` / `0X` prefix, e.g. `0xff` == 255
+      octal              leading `0`, e.g. `0755` == 493
+      radix              `base#digits`, base 2..64, e.g. `2#101` == 5,
+                         `16#ff` == 255, `36#z` == 35
+
+  For `base#digits`, digits 0-9 then letters carry values 10 and up. For
+  bases up to 36 letters are case-insensitive; for larger bases `a-z` are
+  10-35, `A-Z` are 36-61, `@` is 62 and `_` is 63.
+
+==============================================================================
+4. Nesting                                     *arith-nesting*
 
   Arithmetic expressions can be nested with parentheses to any depth:
 
@@ -64,7 +97,7 @@ substitution before evaluation.
       `echo "Total: $((price * qty))"`
 
 ==============================================================================
-4. Whitespace                                  *arith-whitespace*
+5. Whitespace                                  *arith-whitespace*
 
   Whitespace inside `$((...))` is ignored and can be used freely for
   readability:
