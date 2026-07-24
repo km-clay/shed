@@ -24,8 +24,8 @@ pub enum ParamExp {
   AltNotNull(String),                // +
   ErrUnsetOrNull(String),            // :?
   ErrUnset(String),                  // ?
-  SliceOpen(usize),                  // :pos
-  SliceClosed(usize, usize),         // :pos:len
+  SliceOpen(i64),                    // :pos  (pos may be negative: from end)
+  SliceClosed(i64, i64),             // :pos:len  (either may be negative)
   RemShortestPrefix(String),         // #pattern
   RemLongestPrefix(String),          // ##pattern
   RemShortestSuffix(String),         // %pattern
@@ -140,18 +140,40 @@ pub fn parse_param_exp(s: &str, allow_side_effects: bool) -> ShResult<ParamExp> 
   parse_err()
 }
 
-pub fn parse_pos_len(s: &str, allow_side_effects: bool) -> Option<(usize, Option<usize>)> {
+/// Expand and parse one signed substring component (offset or length).
+///
+/// Handles bash's disambiguating forms for a negative offset: a leading space
+/// (`${v: -2}`) and a single layer of surrounding parens (`${v:(-2)}`).
+fn parse_signed_component(s: &str, allow_side_effects: bool) -> Option<i64> {
+  let expanded = expand_raw_inner(&mut s.chars().peekable(), allow_side_effects, false)
+    .unwrap_or_else(|_| s.to_string());
+  let trimmed = expanded.trim();
+  let trimmed = trimmed
+    .strip_prefix('(')
+    .and_then(|t| t.strip_suffix(')'))
+    .map_or(trimmed, str::trim);
+  trimmed.parse::<i64>().ok()
+}
+
+pub fn parse_pos_len(s: &str, allow_side_effects: bool) -> Option<(i64, Option<i64>)> {
   let raw = s.strip_prefix(':')?;
   if let Some((start, len)) = raw.split_once(':') {
-    let start = expand_raw_inner(&mut start.chars().peekable(), allow_side_effects, false)
-      .unwrap_or_else(|_| start.to_string());
-    let len = expand_raw_inner(&mut len.chars().peekable(), allow_side_effects, false)
-      .unwrap_or_else(|_| len.to_string());
-    Some((start.parse::<usize>().ok()?, len.parse::<usize>().ok()))
+    Some((
+      parse_signed_component(start, allow_side_effects)?,
+      parse_signed_component(len, allow_side_effects),
+    ))
   } else {
-    let raw = expand_raw_inner(&mut raw.chars().peekable(), allow_side_effects, false)
-      .unwrap_or_else(|_| raw.to_string());
-    Some((raw.parse::<usize>().ok()?, None))
+    Some((parse_signed_component(raw, allow_side_effects)?, None))
+  }
+}
+
+/// Resolve a possibly-negative substring offset against a char count `n`.
+/// A negative offset counts from the end; results are clamped to `[0, n]`.
+fn resolve_offset(pos: i64, n: i64) -> i64 {
+  if pos < 0 {
+    (n + pos).max(0)
+  } else {
+    pos.min(n)
   }
 }
 
@@ -386,13 +408,30 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       },
       ParamExp::SliceOpen(pos) => {
         let value = Shed::vars(get);
-        let substr: String = value.chars().skip(pos).collect();
+        let chars: Vec<char> = value.chars().collect();
+        let n = chars.len() as i64;
+        let start = resolve_offset(pos, n) as usize;
+        let substr: String = chars[start..].iter().collect();
         Shed::set_status(0);
         Ok(substr.into())
       }
       ParamExp::SliceClosed(pos, len) => {
         let value = Shed::vars(get);
-        let substr: String = value.chars().skip(pos).take(len).collect();
+        let chars: Vec<char> = value.chars().collect();
+        let n = chars.len() as i64;
+        let start = resolve_offset(pos, n);
+        // A negative length is an offset from the end of the string; a positive
+        // one counts forward from `start`. bash errors if the end lands before
+        // the start ("substring expression < 0").
+        let end = if len < 0 {
+          n + len
+        } else {
+          (start + len).min(n)
+        };
+        if end < start {
+          return Err(sherr!(ExecFail, "substring expression < 0"));
+        }
+        let substr: String = chars[start as usize..end as usize].iter().collect();
         Shed::set_status(0);
         Ok(substr.into())
       }
@@ -722,6 +761,72 @@ mod tests {
   fn param_exp_substr_len() {
     let exp = test_param_parse(":1:3");
     assert!(matches!(exp, ParamExp::SliceClosed(1, 3)));
+  }
+
+  #[test]
+  fn param_exp_substr_negative_offset_parses() {
+    let exp = test_param_parse(": -2");
+    assert!(matches!(exp, ParamExp::SliceOpen(-2)));
+  }
+
+  #[test]
+  fn param_exp_substr_paren_negative_offset_parses() {
+    let exp = test_param_parse(":(-2)");
+    assert!(matches!(exp, ParamExp::SliceOpen(-2)));
+  }
+
+  #[test]
+  fn param_exp_substr_negative_length_parses() {
+    let exp = test_param_parse(":1:-1");
+    assert!(matches!(exp, ParamExp::SliceClosed(1, -1)));
+  }
+
+  fn set_v_abcdef() {
+    Shed::vars_mut(|v| v.set_var("V", VarKind::Str("abcdef".into()), VarFlags::empty())).unwrap();
+  }
+
+  #[test]
+  fn substr_negative_offset_counts_from_end() {
+    let _guard = TestGuard::new();
+    set_v_abcdef();
+    assert_eq!(test_param_expansion("V: -2").unwrap(), "ef");
+  }
+
+  #[test]
+  fn substr_negative_offset_with_length() {
+    let _guard = TestGuard::new();
+    set_v_abcdef();
+    assert_eq!(test_param_expansion("V: -3:2").unwrap(), "de");
+  }
+
+  #[test]
+  fn substr_negative_length_is_end_offset() {
+    let _guard = TestGuard::new();
+    set_v_abcdef();
+    assert_eq!(test_param_expansion("V:1:-1").unwrap(), "bcde");
+  }
+
+  #[test]
+  fn substr_paren_negative_offset() {
+    let _guard = TestGuard::new();
+    set_v_abcdef();
+    assert_eq!(test_param_expansion("V:(-2)").unwrap(), "ef");
+  }
+
+  #[test]
+  fn substr_positive_forms_still_work() {
+    let _guard = TestGuard::new();
+    set_v_abcdef();
+    assert_eq!(test_param_expansion("V:2").unwrap(), "cdef");
+    assert_eq!(test_param_expansion("V:1:3").unwrap(), "bcd");
+  }
+
+  #[test]
+  fn substr_end_before_start_errors() {
+    let _guard = TestGuard::new();
+    set_v_abcdef();
+    // ${V:4:-5}: end = 6 - 5 = 1 < start 4 -> error
+    assert!(test_param_expansion("V:4:-5").is_err());
   }
 
   // ===================== Parameter Expansion (TestGuard) =====================
