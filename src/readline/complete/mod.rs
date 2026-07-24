@@ -1114,8 +1114,7 @@ impl CompSpec for BashCompSpec {
     let mut candidates: Vec<Candidate> =
       path_candidates.into_iter().chain(name_candidates).collect();
 
-    candidates.sort(); // sort by length to prioritize shorter completions, ties are then sorted alphabetically
-    candidates.reverse();
+    candidates.sort(); // ascending alphabetical (Candidate::cmp compares content)
 
     Ok(candidates)
   }

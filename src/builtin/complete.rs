@@ -515,6 +515,17 @@ mod tests {
   }
 
   #[test]
+  fn compgen_emits_ascending_order() {
+    // Regression: candidates used to be emitted reverse-alphabetically
+    // (a stray `.reverse()` after the ascending sort).
+    let guard = TestGuard::new();
+    test_input("compgen -W 'delta alpha charlie bravo' ").unwrap();
+    let out = guard.read_output();
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines, ["alpha", "bravo", "charlie", "delta"]);
+  }
+
+  #[test]
   fn compgen_wordlist_no_match() {
     let guard = TestGuard::new();
     test_input("compgen -W 'foo bar baz' z").unwrap();
