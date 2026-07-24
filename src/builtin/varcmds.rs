@@ -13,7 +13,7 @@ use super::{
   state::{
     Shed,
     vars::{
-      VarFlags, VarKind, VarName, display_as_var, display_env_vars, display_local, display_readonly,
+      VarFlags, VarKind, VarName, display_as_var, display_exported, display_local, display_readonly,
     },
   },
   try_var,
@@ -287,21 +287,28 @@ impl super::Builtin for Readonly {
     true
   }
 
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::flag('p')]
+  }
+
   fn get_argv_and_opts(
     &self,
     cmd_span: Span,
     argv: &[Tk],
     _no_split: bool,
   ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
-    let mut argv = prepare_assignment_argv(argv).promote_err(cmd_span)?;
+    let (raw_argv, opts) =
+      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
+    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
     if !argv.is_empty() {
       argv.remove(0);
     }
-    Ok((argv, vec![]))
+    Ok((argv, opts))
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    if args.argv.is_empty() {
-      // Display the local variables
+    let list = args.opts.iter().any(|o| matches!(o, Opt::Short('p')));
+    if list || args.argv.is_empty() {
+      // List the readonly variables (bare `readonly` and `readonly -p`).
       let vars = Shed::vars(display_readonly);
       outln!("{vars}");
 
@@ -393,8 +400,8 @@ impl super::Builtin for Export {
     let list = args.opts.iter().any(|o| matches!(o, Opt::Short('p')));
 
     if list || (args.argv.is_empty() && !unexport) {
-      // Display the environment variables
-      let vars = display_env_vars();
+      // List the exported variables (bare `export` and `export -p` are the same).
+      let vars = Shed::vars(display_exported);
       outln!("{vars}");
       return with_status(0);
     }
@@ -494,6 +501,17 @@ mod tests {
     test_input("readonly").unwrap();
     let out = guard.read_output();
     assert!(out.contains("rdo_test_var=abc"));
+  }
+
+  #[test]
+  fn readonly_p_lists_readonly_vars() {
+    // `readonly -p` must list the readonly variables (previously it printed
+    // nothing because `-p` was swallowed into argv).
+    let guard = TestGuard::new();
+    test_input("readonly rdo_p_var=abc").unwrap();
+    test_input("readonly -p").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("readonly rdo_p_var=abc"), "got: {out:?}");
   }
 
   #[test]
@@ -653,6 +671,27 @@ mod tests {
     test_input("export").unwrap();
     let out = guard.read_output();
     assert!(out.contains("PATH=") || out.contains("HOME="));
+  }
+
+  #[test]
+  fn export_p_lists_session_exports() {
+    // `export -p` (and bare `export`) must include variables exported this
+    // session, not just the inherited process environment.
+    let guard = TestGuard::new();
+    test_input("export SHED_LISTED=hi").unwrap();
+    test_input("export -p").unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("export SHED_LISTED=hi"), "got: {out:?}");
+    // After unexport it drops out of the listing.
+    guard.read_output();
+    test_input("export -n SHED_LISTED").unwrap();
+    test_input("export -p").unwrap();
+    let out = guard.read_output();
+    assert!(
+      !out.contains("SHED_LISTED"),
+      "unexported var still listed: {out:?}"
+    );
+    unsafe { std::env::remove_var("SHED_LISTED") };
   }
 
   #[test]

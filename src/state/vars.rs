@@ -59,10 +59,6 @@ pub(crate) fn display_as_var(name: impl ToString, value: impl ToString) -> Strin
   format!("{}={}", name.to_string(), shell_quote(&value.to_string()))
 }
 
-pub(crate) fn display_env_vars() -> String {
-  display_as_vars(std::env::vars())
-}
-
 fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>) -> String {
   let vars = vars.flatten_vars().into_iter();
 
@@ -73,8 +69,32 @@ fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>) -> String 
   }
 }
 
+/// The readonly variables (`readonly` / `readonly -p`), each as a reusable
+/// `readonly NAME=value` line.
 pub(crate) fn display_readonly(vars: &ScopeStack) -> String {
-  display_vars_internal(vars, Some(VarFlags::READONLY))
+  let mut lines = vars
+    .flatten_vars()
+    .into_iter()
+    .filter(|(_, v)| v.flags().contains(VarFlags::READONLY))
+    .map(|(k, v)| format!("readonly {}", display_as_var(k, v)))
+    .collect::<Vec<String>>();
+  lines.sort();
+  lines.join("\n")
+}
+
+/// The exported variables (`export` / `export -p`), each as a reusable
+/// `export NAME=value` line. Reads the variable table (filtered by the export
+/// attribute) rather than the live process environment, so variables exported
+/// during this session are included, not just inherited ones.
+pub(crate) fn display_exported(vars: &ScopeStack) -> String {
+  let mut lines = vars
+    .flatten_vars()
+    .into_iter()
+    .filter(|(_, v)| v.flags().contains(VarFlags::EXPORT))
+    .map(|(k, v)| format!("export {}", display_as_var(k, v)))
+    .collect::<Vec<String>>();
+  lines.sort();
+  lines.join("\n")
 }
 
 pub(crate) fn display_local(vars: &ScopeStack) -> String {
