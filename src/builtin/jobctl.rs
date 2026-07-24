@@ -419,11 +419,16 @@ impl super::Builtin for Kill {
         return Ok(());
       };
 
-      // kill -l <signal> - print the name. Signal 0 isn't named, so we
-      // only accept real signals here.
+      // kill -l <arg> converts between names and numbers. A numeric argument
+      // prints the signal name; a name prints its number. Signal 0 isn't named,
+      // so we only accept real signals here.
       let sig = parse_signal(arg).promote_err(span.clone())?;
-      let name = sig.to_string();
-      outln!("{}", name.strip_prefix("SIG").unwrap_or(&name));
+      if arg.trim().parse::<i32>().is_ok() {
+        let name = sig.to_string();
+        outln!("{}", name.strip_prefix("SIG").unwrap_or(&name));
+      } else {
+        outln!("{}", sig as i32);
+      }
 
       return with_status(0);
     }
@@ -475,19 +480,36 @@ mod kill_tests {
   }
 
   #[test]
-  fn kill_dash_l_with_name_strips_sig_prefix() {
+  fn kill_dash_l_with_name_prints_number() {
     let g = TestGuard::new();
     test_input("kill -l TERM").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
-    assert_eq!(g.read_output().trim(), "TERM");
+    assert_eq!(g.read_output().trim(), "15");
   }
 
   #[test]
-  fn kill_dash_l_with_sigprefix_name_strips_to_short() {
+  fn kill_dash_l_with_sigprefix_name_prints_number() {
     let g = TestGuard::new();
     test_input("kill -l SIGTERM").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
-    assert_eq!(g.read_output().trim(), "TERM");
+    assert_eq!(g.read_output().trim(), "15");
+  }
+
+  #[test]
+  fn kill_dash_l_with_kill_name_prints_nine() {
+    let g = TestGuard::new();
+    test_input("kill -l KILL").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+    assert_eq!(g.read_output().trim(), "9");
+  }
+
+  #[test]
+  fn kill_dash_l_numeric_over_128_wraps_to_name() {
+    // 137 = 128 + 9 -> KILL
+    let g = TestGuard::new();
+    test_input("kill -l 137").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+    assert_eq!(g.read_output().trim(), "KILL");
   }
 
   #[test]
