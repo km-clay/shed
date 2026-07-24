@@ -16,13 +16,34 @@ use super::{
 pub(super) struct Type;
 impl super::Builtin for Type {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('s')]
+    vec![OptSpec::flag('s'), OptSpec::flag('t')]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut status = 0;
     let short = args.opts.contains(&Opt::Short('s'));
+    let terse = args.opts.contains(&Opt::Short('t'));
 
     for (arg, span) in args.argv {
+      if terse {
+        let word = if let Some(util) = state::util::which_util(&arg) {
+          match util.kind() {
+            UtilKind::Alias => Some("alias"),
+            UtilKind::Function => Some("function"),
+            UtilKind::Builtin => Some("builtin"),
+            UtilKind::Command(_) | UtilKind::File(_) => Some("file"),
+          }
+        } else if KEYWORDS.contains(&arg.as_str()) {
+          Some("keyword")
+        } else {
+          None
+        };
+        match word {
+          Some(w) => outln!("{w}"),
+          None => status = 1,
+        }
+        continue;
+      }
+
       if let Some(util) = state::util::which_util(&arg) {
         match util.kind() {
           UtilKind::Alias => {
@@ -132,6 +153,30 @@ mod tests {
   use crate::tests::testutil::{TestGuard, test_input};
 
   // ===================== Builtins =====================
+
+  #[test]
+  fn type_t_classifies() {
+    let g = TestGuard::new();
+    test_input("type -t echo").unwrap();
+    assert_eq!(g.read_output().trim(), "builtin");
+
+    test_input("tt_fn() { :; }").unwrap();
+    test_input("type -t tt_fn").unwrap();
+    assert_eq!(g.read_output().trim(), "function");
+
+    test_input("type -t if").unwrap();
+    assert_eq!(g.read_output().trim(), "keyword");
+  }
+
+  #[test]
+  fn type_t_variable_and_unknown_are_unknown() {
+    // `type -t` does not classify variables and errors on unknown names.
+    let _g = TestGuard::new();
+    test_input("tt_var=5; type -t tt_var").ok();
+    assert_ne!(state::Shed::get_status(), 0);
+    test_input("type -t no_such_name_zzz").ok();
+    assert_ne!(state::Shed::get_status(), 0);
+  }
 
   #[test]
   fn type_builtin_echo() {
