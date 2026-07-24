@@ -22,6 +22,7 @@ enum ArithOp {
   Mul,
   Div,
   Mod,
+  Pow,
   // comparison
   Lt,
   Gt,
@@ -59,6 +60,7 @@ impl FromStr for ArithOp {
       "+" => Ok(Self::Add),
       "-" => Ok(Self::Sub),
       "*" => Ok(Self::Mul),
+      "**" => Ok(Self::Pow),
       "/" => Ok(Self::Div),
       "%" => Ok(Self::Mod),
       "<" => Ok(Self::Lt),
@@ -142,6 +144,22 @@ impl StackVal {
   }
 }
 
+/// Digit value for a `base#digits` radix literal (bash rules): 0-9 → 0-9;
+/// for base <= 36 letters are case-insensitive 10-35; for base > 36, `a-z` →
+/// 10-35, `A-Z` → 36-61, `@` → 62, `_` → 63. Returns `None` if out of range.
+fn radix_digit_value(c: char, base: u32) -> Option<u32> {
+  let v = match c {
+    '0'..='9' => c as u32 - '0' as u32,
+    'a'..='z' => c as u32 - 'a' as u32 + 10,
+    'A'..='Z' if base <= 36 => c as u32 - 'A' as u32 + 10,
+    'A'..='Z' => c as u32 - 'A' as u32 + 36,
+    '@' => 62,
+    '_' => 63,
+    _ => return None,
+  };
+  (v < base).then_some(v)
+}
+
 fn read_var_as_i64(name: &str) -> ShResult<i64> {
   let val = try_var!(name).unwrap_or_else(|| "0".into());
   val
@@ -209,9 +227,39 @@ impl ArithTk {
               break;
             }
           }
-          num.parse::<i64>().map_err(|_| sherr!(
-            ParseErr, "Invalid number in arithmetic expression: '{}'", num,
-          ))?
+          // `base#digits` radix literal (bash), base 2..=64.
+          if chars.peek() == Some(&'#') {
+            chars.next(); // consume '#'
+            let base: u32 = num
+              .parse()
+              .ok()
+              .filter(|b| (2..=64).contains(b))
+              .ok_or_else(|| sherr!(ParseErr, "Invalid arithmetic base '{num}' (must be 2..64)"))?;
+            let mut digits = util::scratch_buf();
+            while let Some(&d) = chars.peek() {
+              if d.is_ascii_alphanumeric() || d == '@' || d == '_' {
+                digits.push(d);
+                chars.next();
+              } else {
+                break;
+              }
+            }
+            if digits.is_empty() {
+              return Err(sherr!(ParseErr, "Missing digits after base '{base}#'"));
+            }
+            let mut result: i64 = 0;
+            for c in digits.chars() {
+              let d = radix_digit_value(c, base).ok_or_else(|| {
+                sherr!(ParseErr, "Invalid digit '{c}' for base {base}")
+              })?;
+              result = result * i64::from(base) + i64::from(d);
+            }
+            result
+          } else {
+            num.parse::<i64>().map_err(|_| sherr!(
+              ParseErr, "Invalid number in arithmetic expression: '{}'", num,
+            ))?
+          }
         };
 
         tokens.push(Self::Num(parsed));
@@ -257,7 +305,10 @@ impl ArithTk {
 
       '*' => {
         chars.next();
-        if chars.peek() == Some(&'=') {
+        if chars.peek() == Some(&'*') {
+          chars.next();
+          tokens.push(Self::Op(ArithOp::Pow));
+        } else if chars.peek() == Some(&'=') {
           chars.next();
           tokens.push(Self::Op(ArithOp::MulAssign));
         } else {
@@ -478,8 +529,11 @@ impl ArithTk {
         ArithOp::ShiftL | ArithOp::ShiftR => 9,
         ArithOp::Add | ArithOp::Sub => 10,
         ArithOp::Mul | ArithOp::Div | ArithOp::Mod => 11,
+        // `**` binds tighter than `* / %` but looser than the unary operators
+        // (bash: `-2**2` == `(-2)**2` == 4).
+        ArithOp::Pow => 12,
       },
-      ArithTk::Not | ArithTk::Neg | ArithTk::UPlus | ArithTk::BitNot => 12,
+      ArithTk::Not | ArithTk::Neg | ArithTk::UPlus | ArithTk::BitNot => 13,
       _ => 0,
     }
   }
@@ -493,7 +547,8 @@ impl ArithTk {
         | ArithTk::BitNot
         | ArithTk::PendingTernaryElse(_)
         | ArithTk::Op(
-          ArithOp::Assign
+          ArithOp::Pow
+            | ArithOp::Assign
             | ArithOp::PlusAssign
             | ArithOp::MinusAssign
             | ArithOp::MulAssign
@@ -941,6 +996,14 @@ impl ArithTk {
               }
               stack.push(StackVal::Num(lhs / rhs));
             }
+            ArithOp::Pow => {
+              let exp = pop_num!();
+              let base = pop_num!();
+              if exp < 0 {
+                return Err(sherr!(InternalErr, "exponent less than 0"));
+              }
+              stack.push(StackVal::Num(base.wrapping_pow(exp as u32)));
+            }
             ArithOp::Mod => {
               let rhs = pop_num!();
               let lhs = pop_num!();
@@ -1176,6 +1239,37 @@ mod tests {
   #[test]
   fn arith_modulo() {
     assert_eq!(arith("(10%3)"), 1.0);
+  }
+
+  #[test]
+  fn arith_pow() {
+    assert_eq!(arith("2**10"), 1024.0);
+    assert_eq!(arith("2**0"), 1.0);
+    // right-associative
+    assert_eq!(arith("2**2**3"), 256.0);
+    // binds tighter than `*`, looser than unary minus (bash: -2**2 == 4)
+    assert_eq!(arith("2*3**2"), 18.0);
+    assert_eq!(arith("-2**2"), 4.0);
+    assert_eq!(arith("-2**3"), -8.0);
+  }
+
+  #[test]
+  fn arith_radix_literals() {
+    assert_eq!(arith("2#101"), 5.0);
+    assert_eq!(arith("16#ff"), 255.0);
+    assert_eq!(arith("8#17"), 15.0);
+    assert_eq!(arith("36#z"), 35.0); // case-insensitive for base <= 36
+    assert_eq!(arith("36#Z"), 35.0);
+    assert_eq!(arith("64#A"), 36.0); // base > 36: A..Z are 36..61
+    assert_eq!(arith("64#_"), 63.0);
+    assert_eq!(arith("2#10+16#f"), 17.0);
+  }
+
+  #[test]
+  fn arith_radix_invalid() {
+    // base out of range, and a digit out of range for the base
+    assert!(expand_arithmetic("1#0").is_err());
+    assert!(expand_arithmetic("2#5").is_err());
   }
 
   #[test]
