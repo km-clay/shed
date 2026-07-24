@@ -259,14 +259,22 @@ pub fn expand_glob(raw: &str) -> ShResult<Vec<String>> {
   }
   let escaped = super::escape_glob(raw, true);
 
+  let final_component = raw.rsplit('/').next().unwrap_or(raw);
+  let explicit_leading_dot = final_component.starts_with('.');
   let opts = glob::MatchOptions {
-    require_literal_leading_dot: !shopt!(core.dotglob),
+    require_literal_leading_dot: !(shopt!(core.dotglob) || explicit_leading_dot),
     ..Default::default()
   };
   for entry in
     glob::glob_with(&escaped, opts).map_err(|_| sherr!(SyntaxErr, "Invalid glob pattern"))?
   {
     let entry = entry.map_err(|_| sherr!(SyntaxErr, "Invalid filename found in glob"))?;
+    // Never let a pattern (e.g. `.*`) expand to the `.` or `..` directory
+    // entries. `Path::file_name` returns `None` for a path whose final
+    // component is `.`/`..`, which is exactly what we want to drop.
+    if entry.file_name().is_none() {
+      continue;
+    }
     let entry_raw = entry
       .to_str()
       .ok_or_else(|| sherr!(SyntaxErr, "Non-UTF8 filename found in glob"))?;
@@ -435,6 +443,58 @@ mod tests {
     assert!(
       stripped.contains("my file.txt"),
       "expected match for 'my\\ *'; got {stripped:?}"
+    );
+  }
+
+  #[test]
+  fn expand_glob_leading_dot_matches_bash_rule() {
+    use crate::expand::markers::strip_markers;
+    let _g = TestGuard::new();
+    let tmp = std::env::temp_dir().join("shed_test_glob_dotfiles");
+    std::fs::remove_dir_all(&tmp).ok();
+    std::fs::create_dir_all(&tmp).unwrap();
+    for f in [".foo", ".bar", "visible.txt"] {
+      std::fs::write(tmp.join(f), "").unwrap();
+    }
+
+    let saved = std::env::current_dir().ok();
+    std::env::set_current_dir(&tmp).unwrap();
+
+    let glob = |p: &str| -> Vec<String> {
+      expand_glob(p)
+        .unwrap()
+        .iter()
+        .map(|s| strip_markers(s))
+        .collect()
+    };
+    // Capture everything before restoring cwd so an assert failure can't leak it.
+    let dot_f = glob(".f*");
+    let star = glob("*");
+    let dot_star = glob(".*");
+
+    if let Some(prev) = saved {
+      let _ = std::env::set_current_dir(prev);
+    }
+    std::fs::remove_dir_all(&tmp).ok();
+
+    // An explicit leading dot matches dotfiles.
+    assert_eq!(dot_f, vec![".foo".to_string()], "`.f*` should match `.foo`");
+    // A bare wildcard must NOT sweep up dotfiles.
+    assert!(star.contains(&"visible.txt".to_string()), "got {star:?}");
+    assert!(
+      !star.iter().any(|s| s.starts_with('.')),
+      "`*` must not match dotfiles: {star:?}"
+    );
+    // `.*` matches real dotfiles but never `.` or `..`.
+    assert!(
+      dot_star.contains(&".foo".to_string()) && dot_star.contains(&".bar".to_string()),
+      "`.*` should match dotfiles: {dot_star:?}"
+    );
+    assert!(
+      !dot_star
+        .iter()
+        .any(|s| { s == "." || s == ".." || s.ends_with("/.") || s.ends_with("/..") }),
+      "`.*` must not include `.` or `..`: {dot_star:?}"
     );
   }
 
