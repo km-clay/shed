@@ -72,17 +72,25 @@ impl super::Builtin for Cd {
       )
     };
 
-    if resolve_syms && let Ok(canon) = std::fs::canonicalize(&new_dir) {
-      new_dir = canon;
-    }
+    let target = if resolve_syms {
+      match std::fs::canonicalize(&new_dir) {
+        Ok(canon) => canon,
+        Err(_) => new_dir,
+      }
+    } else {
+      match logical_pwd.as_deref() {
+        Some(logical) => PathBuf::from(logical),
+        None => new_dir,
+      }
+    };
 
-    if !new_dir.exists() {
-      return Err(sherr!(ExecFail @ span.clone(), "Directory not found: {}", new_dir.display()));
+    if !target.exists() {
+      return Err(sherr!(ExecFail @ span.clone(), "Directory not found: {}", target.display()));
     }
-    if !new_dir.is_dir() {
+    if !target.is_dir() {
       return Err(sherr!(ExecFail @ span.clone(), "Not a directory"));
     }
-    if let Err(e) = util::change_dir_with_pwd(new_dir, logical_pwd) {
+    if let Err(e) = util::change_dir_with_pwd(&target, logical_pwd) {
       return Err(sherr!(ExecFail @ span.clone(), "Failed to change directory: {e}"));
     }
 
@@ -487,6 +495,39 @@ pub mod tests {
     assert_eq!(
       new_dir.display().to_string(),
       canon(temp_dir.path()).display().to_string()
+    );
+  }
+
+  #[test]
+  fn cd_logical_keeps_kernel_cwd_in_sync_across_symlink() {
+    // Regression: in logical mode (-L, the default), `cd link; cd ..` must
+    // chdir the *logical* path so the kernel cwd matches $PWD (POSIX cd -L).
+    // Previously `..` was resolved physically, desyncing the kernel cwd from
+    // $PWD when the symlink's parent differed from its target's parent.
+    let _g = TestGuard::new();
+    let base = TempDir::new().unwrap();
+    // Canonicalize up front so /tmp being a symlink (e.g. on macOS) can't skew
+    // the comparison.
+    let root = canon(base.path());
+    let parent_a = root.join("A");
+    let target = root.join("B").join("target");
+    fs::create_dir_all(&parent_a).unwrap();
+    fs::create_dir_all(&target).unwrap();
+    let link = parent_a.join("link");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+
+    test_input(format!("cd {}", link.display())).unwrap();
+    test_input("cd ..").unwrap();
+
+    let kernel = env::current_dir().unwrap().display().to_string();
+    let pwd = var!("PWD").to_string();
+    // The core of the bug: kernel cwd and $PWD must agree.
+    assert_eq!(kernel, pwd, "kernel cwd must match $PWD (no desync)");
+    // And both must be the logical parent A, not the target's physical parent B.
+    assert_eq!(
+      pwd,
+      parent_a.display().to_string(),
+      "expected logical parent A"
     );
   }
 
