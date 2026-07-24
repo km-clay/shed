@@ -600,7 +600,6 @@ impl ScopeStack {
     }
     vars
   }
-  #[cfg(test)]
   pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name) {

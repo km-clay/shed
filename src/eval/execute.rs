@@ -33,7 +33,7 @@ use super::{
   ParsedSrc,
   builtin::{BUILTIN_NAMES, lookup_builtin},
   errln,
-  expand::{expand_aliases, expand_arithmetic_wrapped, expand_case_pattern},
+  expand::{expand_aliases, expand_arithmetic, expand_arithmetic_wrapped, expand_case_pattern},
   jobs::{ChildProc, JobStack, dispatch_job},
   lex::{KEYWORDS, Span, Tk, TkFlags},
   procio::{self, PipeGenerator, RedirGuard, RedirResult, RedirSet, RedirSpec},
@@ -1684,8 +1684,17 @@ impl Dispatcher {
       };
       let old_status = Shed::get_status();
       let var_name = var.span.as_str();
+      let is_integer = !is_arr
+        && Shed::vars(|v| v.get_var_flags(var_name)).is_some_and(|f| f.contains(VarFlags::INTEGER));
       let val = if is_arr {
         VarKind::arr_from_tk(val)?
+      } else if is_integer {
+        let raw = val.expand_no_split()?;
+        let n = expand_arithmetic(&raw)
+          .ok()
+          .and_then(|s| s.parse::<i32>().ok())
+          .unwrap_or(0);
+        VarKind::Int(n)
       } else {
         VarKind::string(val.expand_no_split()?)
       };

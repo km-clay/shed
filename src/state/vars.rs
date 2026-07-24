@@ -149,6 +149,7 @@ bitflags! {
     const EXPORT = 1 << 0;
     const LOCAL = 1 << 1;
     const READONLY = 1 << 2;
+    const INTEGER = 1 << 3;
   }
 }
 
@@ -1185,7 +1186,6 @@ impl VarTab {
   pub fn try_get_var_kind_tag(&self, var: &str) -> Option<VarKindTag> {
     self.vars.get(var).map(|v| v.kind().tag())
   }
-  #[cfg(test)]
   pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
     self.vars.get(var_name).map(|var| var.flags)
   }

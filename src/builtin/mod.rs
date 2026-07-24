@@ -161,6 +161,7 @@ register_builtins! {
   "trap"     => trap::Trap,
   "true"     => True,
   "type"     => intro::Type,
+  "typeset"  => varcmds::Declare,
   "ulimit"   => resource::ULimit,
   "umask"    => resource::UMask,
   "unalias"  => alias::Unalias,

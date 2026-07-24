@@ -107,7 +107,10 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
     match opt {
       Opt::Short('r') => flags |= VarFlags::READONLY,
       Opt::Short('x') => flags |= VarFlags::EXPORT,
-      Opt::Short('i') => kind = DeclareKind::Int,
+      Opt::Short('i') => {
+        kind = DeclareKind::Int;
+        flags |= VarFlags::INTEGER;
+      }
       Opt::Short('a') => kind = DeclareKind::Arr,
       Opt::Short('A') => kind = DeclareKind::Assoc,
       _ => {}
@@ -991,6 +994,52 @@ mod tests {
     test_input("declare -x exported=yes").unwrap();
     let flags = Shed::vars(|v| v.get_var_flags("exported"));
     assert!(flags.unwrap().contains(VarFlags::EXPORT));
+  }
+
+  #[test]
+  fn declare_i_sets_integer_flag() {
+    let _g = TestGuard::new();
+    test_input("declare -i n=5").unwrap();
+    let flags = Shed::vars(|v| v.get_var_flags("n")).unwrap();
+    assert!(flags.contains(VarFlags::INTEGER));
+  }
+
+  #[test]
+  fn declare_i_evaluates_later_assignments() {
+    let _g = TestGuard::new();
+    test_input("declare -i n").unwrap();
+    test_input("n=3+4").unwrap();
+    assert_eq!(var!("n"), "7");
+  }
+
+  #[test]
+  fn declare_i_pluseq_is_numeric() {
+    let _g = TestGuard::new();
+    test_input("declare -i n=10").unwrap();
+    test_input("n=5").unwrap();
+    test_input("n+=3").unwrap();
+    assert_eq!(var!("n"), "8");
+  }
+
+  #[test]
+  fn declare_i_non_numeric_is_zero() {
+    let _g = TestGuard::new();
+    test_input("declare -i n").unwrap();
+    test_input("n=abc").unwrap();
+    assert_eq!(var!("n"), "0");
+  }
+
+  #[test]
+  fn typeset_i_is_declare_synonym() {
+    let _g = TestGuard::new();
+    test_input("typeset -i m").unwrap();
+    test_input("m=6*7").unwrap();
+    assert_eq!(var!("m"), "42");
+    assert!(
+      Shed::vars(|v| v.get_var_flags("m"))
+        .unwrap()
+        .contains(VarFlags::INTEGER)
+    );
   }
 
   #[test]
