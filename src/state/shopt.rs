@@ -346,6 +346,11 @@ pub(crate) struct ShOptSet {
   #[default(false)]
   pub errexit: bool,
 
+  /// An interactive shell will not exit on EOF (Ctrl-D) at an empty prompt;
+  /// it requires an explicit `exit` (or repeated EOFs) instead.
+  #[default(false)]
+  pub ignoreeof: bool,
+
   /// '>' and '>>' redirections will fail if the target file already exists
   #[default(false)]
   pub noclobber: bool,

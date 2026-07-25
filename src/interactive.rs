@@ -503,6 +503,12 @@ fn run_script_keys(readline: &mut ShedLine, keys: Vec<KeyEvent>) -> ShResult<()>
   Ok(())
 }
 
+/// Consecutive Ctrl-D (EOF) presses at an empty prompt while `set -o ignoreeof`
+/// is active. Reset to 0 whenever a command line is submitted.
+static IGNOREEOF_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+const IGNOREEOF_LIMIT: usize = 10;
+
 /// Handle a `ReadlineEvent`. Returns a boolean, `true` means "exit the shell", `false` means "keep looping"
 fn handle_readline_event(
   readline: &mut ShedLine,
@@ -510,6 +516,9 @@ fn handle_readline_event(
 ) -> ShResult<LoopAction> {
   match event {
     Ok(ReadlineEvent::Line(input)) => {
+      // A submitted line breaks any run of ignoreeof Ctrl-D presses.
+      IGNOREEOF_COUNT.store(0, Ordering::SeqCst);
+
       let token = shopt!(history.auto_save)
         .then(|| readline.history_mut().push(&input).ok().flatten())
         .flatten(); // token is used as a stable identifier for the command in the history
@@ -584,7 +593,14 @@ fn handle_readline_event(
     Ok(ReadlineEvent::Eof) => {
       // Ctrl+D on empty line
       QUIT_CODE.store(0, Ordering::SeqCst);
-      Ok(LoopAction::Break)
+      if shopt!(set.ignoreeof) && IGNOREEOF_COUNT.fetch_add(1, Ordering::SeqCst) < IGNOREEOF_LIMIT {
+        Shed::post_system_msg("Use \"exit\" to leave the shell.".to_string());
+        readline.reset(true)?;
+        Ok(LoopAction::Continue)
+      } else {
+        QUIT_CODE.store(0, Ordering::SeqCst);
+        Ok(LoopAction::Break)
+      }
     }
     Ok(ReadlineEvent::Pending) => {
       // No complete input yet, keep polling
@@ -725,6 +741,11 @@ mod tests {
       // (VEOF=^D, VINTR=^C, VERASE=^?, etc.). Without this, those bytes
       // are consumed by the tty driver before they reach shed.
       Shed::term_mut(Terminal::enforce_raw_mode).unwrap();
+      // `ignoreeof` is a process-global set option and TestGuard doesn't reset
+      // shopts, so normalize it (and its counter) per harness so an ignoreeof
+      // test can't leak into the plain Ctrl-D-exits-the-shell cases.
+      shopt_mut!(set.ignoreeof = false);
+      IGNOREEOF_COUNT.store(0, Ordering::SeqCst);
       Self {
         g,
         readline,
@@ -828,6 +849,33 @@ mod tests {
       let action = h.iterate().unwrap();
       assert!(matches!(action, LoopAction::Break));
     }
+  }
+
+  #[test]
+  fn loop_iter_ignoreeof_keeps_shell_on_ctrl_d() {
+    // With `set -o ignoreeof`, a lone Ctrl-D on an empty line does not exit;
+    // the shell warns and keeps looping.
+    let mut h = LoopHarness::emacs();
+    shopt_mut!(set.ignoreeof = true);
+    h.type_chars(b"\x04");
+    let action = h.iterate().unwrap();
+    assert!(
+      matches!(action, LoopAction::Continue),
+      "ignoreeof should keep the shell alive on Ctrl-D"
+    );
+  }
+
+  #[test]
+  fn loop_iter_ignoreeof_exits_after_limit() {
+    // The safety valve: after IGNOREEOF_LIMIT tolerated EOFs, the next one exits.
+    let mut h = LoopHarness::emacs();
+    shopt_mut!(set.ignoreeof = true);
+    for _ in 0..IGNOREEOF_LIMIT {
+      h.type_chars(b"\x04");
+      assert!(matches!(h.iterate().unwrap(), LoopAction::Continue));
+    }
+    h.type_chars(b"\x04");
+    assert!(matches!(h.iterate().unwrap(), LoopAction::Break));
   }
 
   #[test]

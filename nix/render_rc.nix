@@ -80,6 +80,7 @@ in
       "shopt set.vi=${boolToString cfg.shopts.set.vi}"
       "shopt set.allexport=${boolToString cfg.shopts.set.allexport}"
       "shopt set.errexit=${boolToString cfg.shopts.set.errexit}"
+      "shopt set.ignoreeof=${boolToString cfg.shopts.set.ignoreeof}"
       "shopt set.noclobber=${boolToString cfg.shopts.set.noclobber}"
       "shopt set.monitor=${boolToString cfg.shopts.set.monitor}"
       "shopt set.noglob=${boolToString cfg.shopts.set.noglob}"

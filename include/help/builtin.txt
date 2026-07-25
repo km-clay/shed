@@ -1958,6 +1958,7 @@ SHOPT                                            *builtin-shopt* *shopt*
 
     `allexport`               auto-export all variable assignments (`set -a`)
     `errexit`                 exit on non-zero command status (`set -e`)
+    `ignoreeof`               don't exit an interactive shell on Ctrl-D at an empty prompt (`set -o ignoreeof`)
     `hashall`                 cache command locations in a hash table
     `monitor`                 enable job control and background processes (`set -m`)
     `noclobber`               prevent `>` from overwriting files (`set -C`)

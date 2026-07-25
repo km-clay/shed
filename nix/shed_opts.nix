@@ -322,6 +322,11 @@
                   default = false;
                   description = "Exit immediately if any command exits with a non-zero status (equivalent to set -e)";
                 };
+                ignoreeof = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
+                  description = "Do not exit an interactive shell on EOF (Ctrl-D) at an empty prompt; require an explicit 'exit' (equivalent to set -o ignoreeof)";
+                };
                 noclobber = lib.mkOption {
                   type = lib.types.bool;
                   default = false;
