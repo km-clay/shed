@@ -9,7 +9,7 @@ use std::{
 use crate::{
   eval::execute,
   procio::{bytes_to_string, out_bytes},
-  state::{meta::UtilKind, vars::VarStr},
+  state::{meta::UtilKind, shopt, vars::VarStr},
   util::ShResultExt,
   varstr,
 };
@@ -211,7 +211,8 @@ pub(super) trait Builtin: Sync {
     no_split: bool,
   ) -> ShResult<(ArgVector, Vec<Opt>)> {
     let opts = self.opts();
-    let (mut argv, opts) = if opts.is_empty() {
+    let opts_empty = opts.is_empty();
+    let (mut argv, opts) = if opts_empty {
       (
         prepare_argv_with(argv, no_split).promote_err(cmd_span)?,
         vec![],
@@ -221,6 +222,11 @@ pub(super) trait Builtin: Sync {
     } else {
       get_opts_from_tokens(argv, &opts).promote_err(cmd_span)?
     };
+
+    // set -x print
+    if !opts_empty {
+      shopt::xtrace_print(&argv);
+    }
     // `$_` is the last expanded word of the command line, captured here before
     // the command name is stripped so a bare builtin still records itself.
     execute::record_last_arg(argv.last().map(|(s, _)| s.clone()));
@@ -873,6 +879,42 @@ pub mod tests {
     state::{self, vars::VarFlags},
     tests::testutil::{TestGuard, canon, has_cmd, test_input},
   };
+
+  // ===================== xtrace (set -x) covers builtins =====================
+
+  #[test]
+  fn xtrace_traces_builtin_with_opts() {
+    // Regression: builtins with opts (echo, cd, read, …) took the
+    // get_opts_from_tokens path, which never emitted an xtrace line.
+    let g = TestGuard::new();
+    test_input("set -x; echo hello_xtrace; set +x").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("+ echo hello_xtrace"), "got: {out:?}");
+  }
+
+  #[test]
+  fn xtrace_traces_empty_opt_builtin() {
+    let g = TestGuard::new();
+    test_input("set -x; :; set +x").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("+ :"), "got: {out:?}");
+  }
+
+  #[test]
+  fn xtrace_traces_assignment_builtin() {
+    let g = TestGuard::new();
+    test_input("set -x; export XTRACE_FOO=bar; set +x").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("+ export XTRACE_FOO=bar"), "got: {out:?}");
+  }
+
+  #[test]
+  fn xtrace_off_produces_no_trace() {
+    let g = TestGuard::new();
+    test_input("echo no_trace_here").unwrap();
+    let out = g.read_output();
+    assert!(!out.contains("+ echo"), "unexpected trace: {out:?}");
+  }
 
   // You can never be too sure!!!!!!
   #[test]
