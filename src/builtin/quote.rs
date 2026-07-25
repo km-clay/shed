@@ -74,6 +74,7 @@ fn quote_var(name: &str) -> Option<String> {
       let resolved = magic_var()?;
       Some(expand::shell_quote(resolved.as_str()))
     }
+    VarKind::Unset => None,
   }
 }
 

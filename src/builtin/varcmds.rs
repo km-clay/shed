@@ -119,9 +119,13 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
 
   for (arg, span) in argv {
     let (name, raw_val) = split_assignment_raw(&arg);
+    if matches!(kind, DeclareKind::Str | DeclareKind::Int) && raw_val.is_none() {
+      Shed::vars_mut(|v| v.declare_var_novalue(name, flags)).promote_err(span)?;
+      continue;
+    }
     let val = match (kind, raw_val) {
       (DeclareKind::Str, Some(v)) => VarKind::parse(v),
-      (DeclareKind::Str, None) => VarKind::string(String::new()),
+      (DeclareKind::Str, None) => unreachable!("handled above"),
       (DeclareKind::Int, Some(v)) => {
         let evaluated = expand_arithmetic(v).promote_err(span.clone())?;
         let n = evaluated
@@ -129,7 +133,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
           .map_err(|_| sherr!(ExecFail @ span.clone(), "declare -i: invalid arithmetic '{v}'"))?;
         VarKind::Int(n)
       }
-      (DeclareKind::Int, None) => VarKind::Int(0),
+      (DeclareKind::Int, None) => unreachable!("handled above"),
       (DeclareKind::Arr, Some(v)) => VarKind::arr_from_raw(v).promote_err(span.clone())?,
       (DeclareKind::Arr, None) => VarKind::Arr(VecDeque::new()),
       (DeclareKind::Assoc, Some(v)) => VarKind::assoc_arr_from_raw(v).promote_err(span.clone())?,
@@ -206,6 +210,11 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
           let val = try_var!(name);
           match val {
             Some(v) => outln!("{}", display_as_var(name, v)),
+            None if Shed::vars(|v| v.try_get_var_meta(name)).is_some() => {
+              // Declared but unset: it exists, so show it value-less rather than
+              // erroring (cf. bash's `declare -- name`).
+              outln!("{name}=");
+            }
             None => {
               return Err(sherr!(
                 NotFound @ span.clone(),
@@ -1140,10 +1149,12 @@ mod tests {
   }
 
   #[test]
-  fn declare_i_no_value_is_zero() {
-    let _g = TestGuard::new();
-    test_input("declare -i n").unwrap();
-    assert_eq!(var!("n"), "0");
+  fn declare_i_no_value_is_unset() {
+    // bash leaves `declare -i n` unset until assigned: plain `$n` is empty and
+    // `${n-U}` yields the default, while arithmetic still treats it as 0.
+    let g = TestGuard::new();
+    test_input("declare -i n; echo \"[$n][${n-U}][$((n+1))]\"").unwrap();
+    assert_eq!(g.read_output().trim(), "[][U][1]");
   }
 
   #[test]
@@ -1317,6 +1328,79 @@ mod tests {
     test_input("echo ${aa[k]}").unwrap();
     let out = guard.read_output();
     assert!(out.contains("new"), "got {out:?}");
+  }
+
+  // ===================== declared-but-unset (no `=value`) =====================
+
+  #[test]
+  fn local_no_value_is_unset_not_empty() {
+    let g = TestGuard::new();
+    test_input("f(){ local x; echo \"[${x-UNSET}][${x+SET}]\"; }; f").unwrap();
+    assert_eq!(g.read_output().trim(), "[UNSET][]");
+  }
+
+  #[test]
+  fn local_multiple_names_all_unset() {
+    let g = TestGuard::new();
+    test_input("f(){ local a b c; echo \"[${b-X}]\"; }; f").unwrap();
+    assert_eq!(g.read_output().trim(), "[X]");
+  }
+
+  #[test]
+  fn declare_no_value_is_unset() {
+    let g = TestGuard::new();
+    test_input("f(){ declare d; echo \"[${d-UD}]\"; }; f").unwrap();
+    assert_eq!(g.read_output().trim(), "[UD]");
+  }
+
+  #[test]
+  fn local_explicit_empty_rhs_is_set_empty() {
+    // `local x=` (explicit empty) is set-but-null, distinct from bare `local x`.
+    let g = TestGuard::new();
+    test_input("f(){ local x=; echo \"[${x-UNSET}][${x+SET}]\"; }; f").unwrap();
+    assert_eq!(g.read_output().trim(), "[][SET]");
+  }
+
+  #[test]
+  fn local_unset_shadows_outer_value() {
+    // `local x` with an outer x=5 shadows it as unset; the outer is restored.
+    let g = TestGuard::new();
+    test_input("x=5; f(){ local x; echo \"[${x-U}]\"; }; f; echo \"[$x]\"").unwrap();
+    assert_eq!(g.read_output().trim().replace('\n', ""), "[U][5]");
+  }
+
+  #[test]
+  fn declare_no_value_preserves_existing_value() {
+    // Re-declaring an already-set name keeps its value (bash), rather than
+    // clobbering it to empty/unset.
+    let g = TestGuard::new();
+    test_input("x=5; declare x; echo \"[$x]\"").unwrap();
+    assert_eq!(g.read_output().trim(), "[5]");
+  }
+
+  #[test]
+  fn local_unset_then_assigned_becomes_set() {
+    let g = TestGuard::new();
+    test_input("f(){ local x; x=9; echo \"[${x-U}]\"; }; f").unwrap();
+    assert_eq!(g.read_output().trim(), "[9]");
+  }
+
+  #[test]
+  fn local_unset_append_behaves_as_empty() {
+    // `x+=foo` on a declared-unset scalar appends to empty (no regression / no error).
+    let g = TestGuard::new();
+    test_input("f(){ local x; x+=foo; echo \"[$x]\"; }; f").unwrap();
+    assert_eq!(g.read_output().trim(), "[foo]");
+  }
+
+  #[test]
+  fn declare_p_on_unset_var_shows_it_valueless() {
+    // A declared-but-unset variable exists, so `declare -p` lists it rather
+    // than erroring "not found".
+    let g = TestGuard::new();
+    test_input("f(){ local x; declare -p x; }; f").unwrap();
+    assert_eq!(g.read_output().trim(), "x=");
+    assert_eq!(state::Shed::get_status(), 0);
   }
 
   // ===================== local with declare-style flags =====================
