@@ -9,7 +9,7 @@ use std::{
 use crate::{
   eval::execute,
   procio::{bytes_to_string, out_bytes},
-  state::{meta::UtilKind, shopt, vars::VarStr},
+  state::{meta::UtilKind, vars::VarStr},
   util::ShResultExt,
   varstr,
 };
@@ -225,7 +225,7 @@ pub(super) trait Builtin: Sync {
 
     // set -x print
     if !opts_empty {
-      shopt::xtrace_print(&argv);
+      crate::state::shopt::xtrace_print(&argv);
     }
     // `$_` is the last expanded word of the command line, captured here before
     // the command name is stripped so a bare builtin still records itself.

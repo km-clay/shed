@@ -21,6 +21,25 @@ use super::{
   util::{ShResult, ShResultExt, split_at_unescaped, with_status},
 };
 
+trait VarCmd: super::Builtin {
+  fn parse_args(
+    &self,
+    cmd_span: Span,
+    argv: &[Tk],
+    _no_split: bool,
+  ) -> ShResult<(super::ArgVector, Vec<Opt>)> {
+    let (raw_argv, opts) =
+      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
+    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
+
+    shopt::xtrace_print(&argv);
+    if !argv.is_empty() {
+      argv.remove(0);
+    }
+    Ok((argv, opts))
+  }
+}
+
 /// Like `prepare_argv` but preserves raw token text for `name=(...)` array
 /// literal assignments. The normal expansion pipeline runs `unescape_str`
 /// which treats `(` as a subshell opener and strips parens, breaking array
@@ -147,6 +166,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
 }
 
 pub(super) struct Declare;
+impl VarCmd for Declare {}
 impl super::Builtin for Declare {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
@@ -164,17 +184,9 @@ impl super::Builtin for Declare {
     &self,
     cmd_span: Span,
     argv: &[Tk],
-    _no_split: bool,
+    no_split: bool,
   ) -> ShResult<(super::ArgVector, Vec<Opt>)> {
-    let (raw_argv, opts) =
-      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
-    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
-
-    shopt::xtrace_print(&argv);
-    if !argv.is_empty() {
-      argv.remove(0);
-    }
-    Ok((argv, opts))
+    self.parse_args(cmd_span, argv, no_split)
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut introspect: Option<IntrospectMode> = None;
@@ -294,6 +306,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
 }
 
 pub(super) struct Readonly;
+impl VarCmd for Readonly {}
 impl super::Builtin for Readonly {
   fn is_special(&self) -> bool {
     true
@@ -307,18 +320,9 @@ impl super::Builtin for Readonly {
     &self,
     cmd_span: Span,
     argv: &[Tk],
-    _no_split: bool,
+    no_split: bool,
   ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
-    let (raw_argv, opts) =
-      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
-    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
-
-    // set -x print
-    shopt::xtrace_print(&argv);
-    if !argv.is_empty() {
-      argv.remove(0);
-    }
-    Ok((argv, opts))
+    self.parse_args(cmd_span, argv, no_split)
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let list = args.opts.iter().any(|o| matches!(o, Opt::Short('p')));
@@ -387,6 +391,7 @@ impl super::Builtin for Unset {
 }
 
 pub(super) struct Export;
+impl VarCmd for Export {}
 impl super::Builtin for Export {
   fn is_special(&self) -> bool {
     true
@@ -400,19 +405,11 @@ impl super::Builtin for Export {
     &self,
     cmd_span: Span,
     argv: &[Tk],
-    _no_split: bool,
+    no_split: bool,
   ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
-    let (raw_argv, opts) =
-      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
-    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
-
-    // set -x print
-    shopt::xtrace_print(&argv);
-    if !argv.is_empty() {
-      argv.remove(0);
-    }
-    Ok((argv, opts))
+    self.parse_args(cmd_span, argv, no_split)
   }
+
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let unexport = args.opts.iter().any(|o| matches!(o, Opt::Short('n')));
     let list = args.opts.iter().any(|o| matches!(o, Opt::Short('p')));
@@ -444,6 +441,7 @@ impl super::Builtin for Export {
 }
 
 pub(super) struct Local;
+impl VarCmd for Local {}
 impl super::Builtin for Local {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
@@ -454,23 +452,16 @@ impl super::Builtin for Local {
       OptSpec::flag('A'),
     ]
   }
+
   fn get_argv_and_opts(
     &self,
     cmd_span: Span,
     argv: &[Tk],
-    _no_split: bool,
+    no_split: bool,
   ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
-    let (raw_argv, opts) =
-      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
-    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
-
-    // set -x print
-    shopt::xtrace_print(&argv);
-    if !argv.is_empty() {
-      argv.remove(0);
-    }
-    Ok((argv, opts))
+    self.parse_args(cmd_span, argv, no_split)
   }
+
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
       let vars = Shed::vars(display_local);
