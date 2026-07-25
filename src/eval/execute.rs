@@ -1745,6 +1745,12 @@ impl Dispatcher {
                     "cannot append associative array to indexed array"
                   ));
                 }
+                VarKind::Unset => {
+                  return Err(sherr!(
+                    InvalidAssignment @ span.clone(),
+                    "cannot append unset value to indexed array"
+                  ));
+                }
               }
               Ok(true)
             })?;
@@ -1789,6 +1795,20 @@ impl Dispatcher {
             }
             Ok(())
           };
+
+          // A declared-but-unset variable behaves as the zero value of its type
+          // for compound assignment (`local x; x+=foo` -> "foo"; a `-i` var
+          // starts from 0), so normalize it before applying the operator.
+          if matches!(var.kind(), VarKind::Unset) {
+            let zero = if var.flags().contains(VarFlags::INTEGER) {
+              VarKind::Int(0)
+            } else if is_arr {
+              VarKind::Arr(VecDeque::new())
+            } else {
+              VarKind::string(String::new())
+            };
+            *var.kind_mut() = zero;
+          }
 
           match var.kind_mut() {
             VarKind::Str(s) => {
@@ -1837,6 +1857,12 @@ impl Dispatcher {
                       "cannot append associative array to indexed array"
                     ));
                   }
+                  VarKind::Unset => {
+                    return Err(sherr!(
+                      InvalidAssignment @ span,
+                      "cannot append unset value to indexed array"
+                    ));
+                  }
                 }
               } else {
                 return Err(sherr!(
@@ -1855,6 +1881,12 @@ impl Dispatcher {
               return Err(sherr!(
                 InvalidAssignment @ span,
                 "cannot {op_name} associative array variable"
+              ));
+            }
+            VarKind::Unset => {
+              return Err(sherr!(
+                InvalidAssignment @ span,
+                "cannot {op_name} unset variable"
               ));
             }
           }

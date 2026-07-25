@@ -212,6 +212,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         VarKind::Str(_) | VarKind::Int(_) => var.to_string().len(),
         VarKind::Arr(items) => items.len(),
         VarKind::AssocArr(items) => items.len(),
+        VarKind::Unset => 0,
       }
       .to_string()
       .into(),

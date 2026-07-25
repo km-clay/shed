@@ -419,7 +419,7 @@ pub fn clean_input(input: &str) -> String {
     '\n' if !heredoc_queue.is_empty() => {
       output.push('\n');
       let delim = heredoc_queue.pop_front().unwrap();
-      // Strip leading '-' (<<- style) to get the bare delimiter word
+      let tab_strip = delim.starts_with('-');
       let match_delim = delim.trim_start_matches('-');
       let start = i + 1;
       let mut end = start;
@@ -427,7 +427,12 @@ pub fn clean_input(input: &str) -> String {
         output.push_str(line);
         output.push('\n');
         end += line.len() + 1;
-        if line.trim_start_matches('\t') == match_delim {
+        let line_to_match = if tab_strip {
+          line.trim_start_matches('\t')
+        } else {
+          line
+        };
+        if line_to_match == match_delim {
           // Advance chars iterator past all bytes we just copied
           while chars.peek().is_some_and(|&(j, _)| j < end) {
             chars.next();
@@ -897,9 +902,10 @@ impl LexStream {
     let mut line = String::new();
     let mut line_start = pos;
     let mut leading_tabs = true;
+    let strip_tabs = flags.contains(TkFlags::TAB_HEREDOC);
     while let Some(ch) = chars.next() {
       pos += ch.len_utf8();
-      if leading_tabs && ch == '\t' {
+      if strip_tabs && leading_tabs && ch == '\t' {
         continue;
       }
       if ch == '\n' {
@@ -1315,7 +1321,10 @@ impl LexStream {
       new_tk.mark(TkFlags::KEYWORD);
       self.flags &= !LexFlags::EXPECTING_IN;
       self.set_next_is_cmd(true);
-    } else if text == "esac" && self.case_depth > 0 {
+    } else if text == "esac"
+      && self.case_depth > 0
+      && self.flags.contains(LexFlags::CASE_PAT_EXPECTED)
+    {
       // `esac` reached in pattern position (empty case body or right after `;;`).
       // The is_cmd block above is short-circuited by CASE_PAT_EXPECTED,
       // so do the keyword recognition and depth bookkeeping here.

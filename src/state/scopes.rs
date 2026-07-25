@@ -177,6 +177,35 @@ impl ScopeStack {
     // Not found in any scope - create in global scope
     self.set_var_global(var_name, val, flags)
   }
+  /// Declare a name with no assigned value (`declare x` / `local x`).
+  ///
+  /// If the target scope already holds the variable, its value is preserved and
+  /// only the attribute flags are merged in. A brand-new name is created as
+  /// `VarKind::Unset` so `${x+}`/`${x-}` treat it as unset until it is assigned.
+  pub fn declare_var_novalue(&mut self, var_name: &str, flags: VarFlags) -> ShResult<()> {
+    if flags.contains(VarFlags::LOCAL) {
+      let Some(scope) = self.scopes.last_mut() else {
+        return Ok(());
+      };
+      if scope.var_exists(var_name) {
+        scope.merge_flags(var_name, flags);
+        return Ok(());
+      }
+      return scope.set_var(var_name, VarKind::Unset, flags);
+    }
+    // Dynamic scoping: preserve the value in the nearest scope that has it.
+    for scope in self.bounded_scopes_rev_mut() {
+      if scope.var_exists(var_name) {
+        scope.merge_flags(var_name, flags);
+        return Ok(());
+      }
+    }
+    // Not found anywhere - create in the global scope as declared-but-unset.
+    let Some(scope) = self.ceiling_mut() else {
+      return Ok(());
+    };
+    scope.set_var(var_name, VarKind::Unset, flags)
+  }
 
   /// Mutate the value of an existing variable in place, finding it in the
   /// nearest scope that owns it and preserving its existing flags. Falls
@@ -500,8 +529,11 @@ impl ScopeStack {
       return (!val.is_empty()).then_some(val);
     }
     for scope in self.scopes_rev() {
-      if let Some(val) = scope.try_get_local(var_name) {
-        return Some(val);
+      // Stop at the first scope that *declares* the name, even if it's a
+      // declared-but-unset local: it shadows outer scopes, so an unset local
+      // must read as unset rather than falling through to an outer value.
+      if scope.var_exists(var_name) {
+        return scope.try_get_local(var_name);
       }
     }
     None

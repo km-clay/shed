@@ -222,6 +222,10 @@ impl ArrIndex {
   pub fn resolve_for(self, tag: VarKindTag) -> ShResult<Self> {
     match self {
       Self::Raw(s) => match tag {
+        VarKindTag::Unset => Err(sherr!(
+          ParseErr,
+          "Cannot resolve array index '{s}': variable is unset"
+        )),
         VarKindTag::AssocArr => Ok(Self::Key(s)),
         VarKindTag::Arr | VarKindTag::Str | VarKindTag::Int | VarKindTag::Magic => {
           let evaluated = expand_arithmetic(&s)?;
@@ -613,6 +617,11 @@ pub(crate) enum VarKind {
   /// You can put call parens on the wrapped value directly to obtain the value of the variable.
   /// These aren't currently exposed in the user-facing syntax.
   Magic(MagicVar),
+
+  /// A variable that has been declared but not assigned a value.
+  /// This is distinct from a variable that has never been declared, which is represented by the absence of a `Var` entry in the variable table.
+  /// Created by non-assigning declare calls, like 'declare var'
+  Unset,
 }
 
 impl Default for VarKind {
@@ -628,6 +637,7 @@ pub(crate) enum VarKindTag {
   Arr,
   AssocArr,
   Magic,
+  Unset,
 }
 
 impl VarKind {
@@ -638,6 +648,7 @@ impl VarKind {
       Self::Arr(_) => VarKindTag::Arr,
       Self::AssocArr(_) => VarKindTag::AssocArr,
       Self::Magic(_) => VarKindTag::Magic,
+      Self::Unset => VarKindTag::Unset,
     }
   }
 }
@@ -848,6 +859,7 @@ impl Display for VarKind {
         Ok(())
       }
       VarKind::Magic(func) => write!(f, "{}", func().unwrap_or_default()),
+      VarKind::Unset => Ok(()),
     }
   }
 }
@@ -1208,7 +1220,13 @@ impl VarTab {
     }
   }
   pub fn try_get_local(&self, var_name: &str) -> Option<VarStr> {
-    self.vars.get(var_name).map(VarStr::from)
+    // A declared-but-unset variable is present in the scope (so it shadows
+    // outer scopes and keeps later assignments local) but has no value: it
+    // reads as unset for `${x-}`/`${x+}` and friends.
+    match self.vars.get(var_name) {
+      Some(var) if matches!(var.kind(), VarKind::Unset) => None,
+      other => other.map(VarStr::from),
+    }
   }
   pub fn try_get_var_meta(&self, var: &str) -> Option<Var> {
     self.vars.get(var).cloned()
@@ -1364,6 +1382,19 @@ impl VarTab {
       self.vars.insert(var_name.to_string(), var);
     }
     Ok(())
+  }
+  /// OR additional attribute flags onto an existing variable, leaving its value
+  /// untouched. Used when re-declaring an already-set name (`x=5; declare x`),
+  /// which adds attributes without clobbering the value.
+  pub fn merge_flags(&mut self, var_name: &str, flags: VarFlags) {
+    if let Some(var) = self.vars.get_mut(var_name) {
+      let newly_exported =
+        flags.contains(VarFlags::EXPORT) && !var.flags.contains(VarFlags::EXPORT);
+      var.flags |= flags;
+      if newly_exported {
+        Shed::meta_mut(MetaTab::clear_envp);
+      }
+    }
   }
   pub fn var_exists(&self, var_name: &str) -> bool {
     if let Ok(param) = var_name.parse::<ShellParam>() {
