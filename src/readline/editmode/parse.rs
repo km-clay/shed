@@ -186,7 +186,10 @@ impl ViParser {
       | ('=', Some(Cmd(_, Verb::Equalize)))
       | ('>', Some(Cmd(_, Verb::Indent)))
       | ('<', Some(Cmd(_, Verb::Dedent)))
-      | ('c', Some(Cmd(_, Verb::Change))) => {
+      | ('c', Some(Cmd(_, Verb::Change)))
+      | ('U', Some(Cmd(_, Verb::ToUpper)))
+      | ('u', Some(Cmd(_, Verb::ToLower)))
+      | ('~', Some(Cmd(_, Verb::ToggleCaseRange))) => {
         return C::partial(motion!(count, Motion::WholeLine));
       }
       _ => {}
@@ -272,6 +275,20 @@ impl ViParser {
           return C::partial(motion!(count, motion));
         }
         match next_ch {
+          // vim's alternate doubled-operator spellings: gUgU / gugu / g~g~
+          // repeat the g-prefixed verb to act on the whole line.
+          'U' if matches!(verb, Some(Cmd(_, Verb::ToUpper))) => {
+            chars.next();
+            C::partial(motion!(count, Motion::WholeLine))
+          }
+          'u' if matches!(verb, Some(Cmd(_, Verb::ToLower))) => {
+            chars.next();
+            C::partial(motion!(count, Motion::WholeLine))
+          }
+          '~' if matches!(verb, Some(Cmd(_, Verb::ToggleCaseRange))) => {
+            chars.next();
+            C::partial(motion!(count, Motion::WholeLine))
+          }
           'g' => {
             chars.next();
             C::partial(motion!(count, Motion::StartOfBuffer))
