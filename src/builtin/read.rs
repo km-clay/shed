@@ -207,7 +207,7 @@ fn walking_read(
 
     if escape_aware && escaped {
       escaped = false;
-      if in_buf[0] != delim {
+      if in_buf[0] != b'\n' {
         buf.push(in_buf[0]);
         if let Some(max) = max_bytes
           && buf.len() >= max
@@ -391,9 +391,11 @@ fn ifs_split(input: &str, ifs: &str, max: Option<usize>) -> Vec<String> {
       while chars.peek().is_some_and(|&(_, c)| is_ws(c)) {
         chars.next();
       }
-      // a hard delimiter abutting a whitespace run folds into one separator
       if chars.peek().is_some_and(|&(_, c)| is_hard(c)) {
         chars.next();
+        while chars.peek().is_some_and(|&(_, c)| is_ws(c)) {
+          chars.next();
+        }
       }
       // trailing whitespace must not produce an empty field
       if chars.peek().is_some() {
@@ -676,6 +678,24 @@ mod tests {
   }
 
   #[test]
+  fn read_ws_hard_ws_folds_into_one_separator() {
+    // POSIX: `ws* hard ws*` is a single delimiter. `a , b` with IFS=' ,'
+    // must yield two fields, not three (no spurious empty from trailing ws).
+    let _g = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(" ,".into()), VarFlags::empty())).unwrap();
+    test_input("read -a f < <(echo 'a , b')").unwrap();
+    assert_eq!(arr("f"), vec!["a", "b"]);
+  }
+
+  #[test]
+  fn read_ws_hard_ws_scalar_split() {
+    let g = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(" ,".into()), VarFlags::empty())).unwrap();
+    test_input("read x y < <(echo 'a , b'); echo \"[$x][$y]\"").unwrap();
+    assert_eq!(g.read_output().trim(), "[a][b]");
+  }
+
+  #[test]
   fn read_arr_glues_orphan_escape_into_next_field() {
     // A bare color escape between whitespace renders to nothing, so it merges
     // into the following field rather than becoming its own. This is what lets
@@ -736,6 +756,16 @@ mod tests {
     // -d sets the delimiter; printf sends "hello,world" - read stops at ','
     test_input("read -d , myvar < <(echo -n 'hello,world')").unwrap();
     assert_eq!(var!("myvar"), "hello");
+  }
+
+  #[test]
+  fn read_custom_delim_escaped_is_literal() {
+    // Regression: on the walking path (pipe/process-sub), `\<delim>` used to be
+    // dropped entirely. It should become a literal delimiter char (backslash
+    // consumed), matching bash and the seekable path.
+    let _g = TestGuard::new();
+    test_input(r"read -d : x < <(printf '%s' 'a\:b:')").unwrap();
+    assert_eq!(var!("x"), "a:b");
   }
 
   // ===================== Status =====================
