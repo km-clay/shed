@@ -1036,6 +1036,21 @@ mod compound_parse_error_tests {
     assert_eq!(crate::state::Shed::get_status(), 0);
   }
 
+  #[test]
+  fn esac_as_argument_does_not_corrupt_later_arm() {
+    // Regression: `esac` used as an ordinary argument inside an arm body
+    // wrongly decremented case_depth, breaking the *next* arm's pattern.
+    let g = TestGuard::new();
+    test_input("case x in x) echo has esac word ;; y) echo second ;; esac").unwrap();
+    assert_eq!(g.read_output().trim(), "has esac word");
+  }
+
+  #[test]
+  fn esac_as_argument_parses() {
+    let _g = TestGuard::new();
+    assert!(get_ast("case x in x) echo has esac word ;; y) echo second ;; esac").is_ok());
+  }
+
   // ─── case double-semi happy path (the *normal* break) ──────────────
 
   #[test]

@@ -1326,8 +1326,10 @@ impl LexStream {
       && self.flags.contains(LexFlags::CASE_PAT_EXPECTED)
     {
       // `esac` reached in pattern position (empty case body or right after `;;`).
-      // The is_cmd block above is short-circuited by CASE_PAT_EXPECTED,
-      // so do the keyword recognition and depth bookkeeping here.
+      // The is_cmd block above is short-circuited by CASE_PAT_EXPECTED, so do the
+      // keyword recognition and depth bookkeeping here. Gating on
+      // CASE_PAT_EXPECTED keeps `esac` used as an ordinary argument (`echo esac`,
+      // mid-arm-body) from being misread as the closer and corrupting case_depth.
       new_tk.mark(TkFlags::KEYWORD);
       self.case_depth -= 1;
       self.flags &= !LexFlags::CASE_PAT_EXPECTED;

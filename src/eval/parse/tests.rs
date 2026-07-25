@@ -948,6 +948,25 @@ fn heredoc_tab_stripping_uneven() {
   assert_eq!(out, "hello\nworld\n");
 }
 
+#[test]
+fn plain_heredoc_tab_indented_delim_is_body_not_closer() {
+  // A plain `<<EOF` matches the closer with no leading whitespace; a
+  // tab-indented `EOF` is body text, so reading continues to the real closer.
+  let guard = TestGuard::new();
+  test_input("cat <<EOF\nbody line\n\t\tEOF\nafter\nEOF".to_string()).unwrap();
+  let out = guard.read_output();
+  assert_eq!(out, "body line\n\t\tEOF\nafter\n");
+}
+
+#[test]
+fn dash_heredoc_tab_indented_closer_terminates() {
+  // `<<-` strips leading tabs, so a tab-indented `EOF` still closes it.
+  let guard = TestGuard::new();
+  test_input("cat <<-EOF\n\tbody\n\t\tEOF".to_string()).unwrap();
+  let out = guard.read_output();
+  assert_eq!(out, "body\n");
+}
+
 // Regressions: whitespace between `<<` and the delimiter word used to
 // be eaten by a consume-then-test loop that overran by one char,
 // producing errors like "Heredoc delimiter 'OF' not found".
