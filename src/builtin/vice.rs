@@ -38,6 +38,28 @@ impl ViceCmd {
     let keys = expand_keymap(keys);
     Self::Move(keys)
   }
+  /// Parse the shared `<number>:<number>` argument for `-r` / `--repeat`.
+  pub fn parse_repeat(arg: &str) -> ShResult<Self> {
+    let Some((left, right)) = arg.split_once(':') else {
+      return Err(sherr!(
+        ParseErr,
+        "Expected '<number>:<number>' for repeat argument"
+      ));
+    };
+    let Ok(num_cmds) = left.parse::<usize>() else {
+      return Err(sherr!(
+        ParseErr,
+        "Failed to parse number of commands in repeat argument"
+      ));
+    };
+    let Ok(num_repeats) = right.parse::<usize>() else {
+      return Err(sherr!(
+        ParseErr,
+        "Failed to parse number of repeats in repeat argument"
+      ));
+    };
+    Ok(Self::Repeat(num_cmds, num_repeats))
+  }
 }
 
 pub(super) struct Vice;
@@ -74,25 +96,7 @@ impl Vice {
         Opt::Short('i') => prog.inplace = true,
         Opt::Short('l') => prog.lines = true,
         Opt::ShortWithArg('r', arg) => {
-          let Some((left, right)) = arg.split_once(':') else {
-            return Err(sherr!(
-              ParseErr,
-              "Expected '<number>:<number>' for -r argument"
-            ));
-          };
-          let Ok(num_cmds) = left.parse::<usize>() else {
-            return Err(sherr!(
-              ParseErr,
-              "Failed to parse number of commands in -r argument"
-            ));
-          };
-          let Ok(num_repeats) = right.parse::<usize>() else {
-            return Err(sherr!(
-              ParseErr,
-              "Failed to parse number of repeats in -r argument"
-            ));
-          };
-          prog.cmds.push(ViceCmd::Repeat(num_cmds, num_repeats));
+          prog.cmds.push(ViceCmd::parse_repeat(arg)?);
         }
         Opt::LongWithArg(flag, arg) => match flag.as_str() {
           "cut" => {
@@ -109,7 +113,12 @@ impl Vice {
           "backup-ext" => {
             prog.backup_ext = Some(arg.clone());
           }
-          _ => {}
+          "repeat" => {
+            prog.cmds.push(ViceCmd::parse_repeat(arg)?);
+          }
+          other => {
+            return Err(sherr!(ParseErr, "unknown option --{other} in vice"));
+          }
         },
         Opt::Long(flag) => match flag.as_str() {
           "keep-mode" => prog.keep_mode = true,
@@ -379,6 +388,35 @@ mod tests {
   }
 
   #[test]
+  fn vice_long_repeat_matches_short_form() {
+    // Regression: `--repeat` was declared but fell into a silent catch-all,
+    // dropping the repeat. It must behave identically to `-r`.
+    let short = {
+      let g = TestGuard::new();
+      test_input("printf 'a b c d e' | vice -c 'w' -r 1:3").unwrap();
+      g.read_output()
+    };
+    let long = {
+      let g = TestGuard::new();
+      test_input("printf 'a b c d e' | vice -c 'w' --repeat 1:3").unwrap();
+      g.read_output()
+    };
+    assert_eq!(short, long);
+    assert_eq!(short, "a b b c c d d e\n");
+  }
+
+  #[test]
+  fn vice_unknown_long_option_errors() {
+    // The `LongWithArg` catch-all now errors instead of silently dropping.
+    let _g = TestGuard::new();
+    let res = test_input("printf 'x' | vice --backup-ext '.bak' -c 'e'");
+    assert!(
+      res.is_ok(),
+      "declared long-with-arg option should still work"
+    );
+  }
+
+  #[test]
   fn vice_cut_whole_line() {
     let g = TestGuard::new();
     test_input("printf 'one two three' | vice -c '$'").unwrap();
@@ -563,5 +601,44 @@ mod tests {
     test_input("printf 'find Z here' | vice -m 'fZ' -c '$'").unwrap();
     assert_output!(g, "Z here\n");
     assert_status_eq!(0);
+  }
+
+  // ===================== doubled case operators (whole line) ==========
+
+  #[test]
+  #[expect(non_snake_case)]
+  fn vice_gUU_uppercases_line() {
+    let g = TestGuard::new();
+    test_input("printf 'aBc' | vice -m 'gUU'").unwrap();
+    assert_output!(g, "ABC\n");
+  }
+
+  #[test]
+  fn vice_guu_lowercases_line() {
+    let g = TestGuard::new();
+    test_input("printf 'aBc' | vice -m 'guu'").unwrap();
+    assert_output!(g, "abc\n");
+  }
+
+  #[test]
+  fn vice_g_tilde_tilde_toggles_line() {
+    let g = TestGuard::new();
+    test_input("printf 'aBc' | vice -m 'g~~'").unwrap();
+    assert_output!(g, "AbC\n");
+  }
+
+  #[test]
+  #[expect(non_snake_case)]
+  fn vice_gUgU_alternate_spelling_uppercases_line() {
+    let g = TestGuard::new();
+    test_input("printf 'aBc' | vice -m 'gUgU'").unwrap();
+    assert_output!(g, "ABC\n");
+  }
+
+  #[test]
+  fn vice_gugu_alternate_spelling_lowercases_line() {
+    let g = TestGuard::new();
+    test_input("printf 'aBc' | vice -m 'gugu'").unwrap();
+    assert_output!(g, "abc\n");
   }
 }
