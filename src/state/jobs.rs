@@ -384,7 +384,13 @@ impl Job {
             stats.push(stat);
             break;
           }
-          Err(Errno::ECHILD) => break,
+          Err(Errno::ECHILD) => {
+            // we already reaped this somewhere else
+            if matches!(child.stat(), WtStat::Exited(..) | WtStat::Signaled(..)) {
+              stats.push(child.stat());
+            }
+            break;
+          }
           Err(Errno::EINTR) => (),
           Err(e) => return Err(e.into()),
         }
@@ -1226,6 +1232,55 @@ mod tests {
     let out = strip_ansi(&job.display(&[0], JobCmdFlags::empty()));
     // Three children → three trailing-newline lines in the body.
     assert_eq!(out.matches('\n').count(), 3, "got: {out:?}");
+  }
+
+  // ===================== wait_pgrp ECHILD fallback =====================
+
+  #[test]
+  fn wait_pgrp_echild_falls_back_to_recorded_exit_status() {
+    // A child already reaped elsewhere (pid isn't ours → waitpid ECHILD) must
+    // still contribute its recorded terminal status, not vanish (which would
+    // make `wait %n` report 0 for a job that actually failed).
+    let mut job = mk_job(
+      7,
+      vec![mk_child(
+        31_001,
+        "boom",
+        WtStat::Exited(Pid::from_raw(31_001), 3),
+      )],
+    );
+    let stats = job.wait_pgrp().unwrap();
+    assert_eq!(stats, vec![WtStat::Exited(Pid::from_raw(31_001), 3)]);
+  }
+
+  #[test]
+  fn wait_pgrp_echild_recovers_signaled_status() {
+    let mut job = mk_job(
+      7,
+      vec![mk_child(
+        31_002,
+        "killed",
+        WtStat::Signaled(Pid::from_raw(31_002), Signal::SIGTERM, false),
+      )],
+    );
+    let stats = job.wait_pgrp().unwrap();
+    assert_eq!(
+      stats,
+      vec![WtStat::Signaled(
+        Pid::from_raw(31_002),
+        Signal::SIGTERM,
+        false
+      )]
+    );
+  }
+
+  #[test]
+  fn wait_pgrp_echild_does_not_fabricate_status_for_non_terminal() {
+    // If the recorded status isn't terminal (e.g. StillAlive), ECHILD must not
+    // invent one — the stats stay empty rather than reporting a bogus exit.
+    let mut job = mk_job(7, vec![mk_child(31_003, "alive", WtStat::StillAlive)]);
+    let stats = job.wait_pgrp().unwrap();
+    assert!(stats.is_empty(), "got: {stats:?}");
   }
 
   // ===================== Job::update_by_id =====================

@@ -1272,7 +1272,26 @@ impl Dispatcher {
       if i == tail_start {
         // the rest of these are non-forking builtins
         std::mem::take(&mut out_rdrs).apply_persistent().ok();
-        if tail_start > 0 && !is_bg && Shed::term(Terminal::interactive) {
+        if is_bg {
+          let tail: Vec<Node> = cmds[i..].to_vec();
+          let name = tail
+            .first()
+            .and_then(Node::get_command)
+            .map(|c| c.to_string())
+            .unwrap_or_default();
+          result = self.run_fork(&name, move |s| {
+            if let Err(e) = s.exec_internal_pipeline(&tail) {
+              // `exit N` inside the backgrounded group surfaces as CleanExit;
+              // honor it as the child's exit code rather than printing it.
+              if let ShErrKind::CleanExit(code) = e.kind() {
+                std::process::exit(*code);
+              }
+              e.print_error();
+            }
+          });
+          break;
+        }
+        if tail_start > 0 && Shed::term(Terminal::interactive) {
           Shed::term_mut(|t| t.attach(getpgrp())).ok();
         }
         result = match self.exec_internal_pipeline(&cmds[i..]) {
@@ -2546,6 +2565,30 @@ mod tests {
     test_input("case foo in foo) echo a; echo b; echo c;; esac").unwrap();
     let out = g.read_output();
     assert_eq!(out, "a\nb\nc\n");
+  }
+
+  #[test]
+  fn backgrounded_brace_group_forks_no_state_leak() {
+    // Regression (Bug A): a backgrounded builtin/brace-group must run in a
+    // child, not inline. If it ran inline, the assignment would leak into the
+    // parent and `$x` would be 5.
+    let g = TestGuard::new();
+    test_input("x=0; { x=5; } & wait; echo \"[$x]\"").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.contains("[0]"),
+      "brace group leaked into parent: {out:?}"
+    );
+  }
+
+  #[test]
+  fn backgrounded_builtin_reports_real_status_via_wait() {
+    // Regression (Bug A + wait ECHILD): `wait` on a finished backgrounded
+    // builtin reports its real exit status, not 0.
+    let g = TestGuard::new();
+    test_input("false & wait %1; echo \"[$?]\"").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("[1]"), "got: {out:?}");
   }
 
   #[test]
