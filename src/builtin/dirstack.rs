@@ -68,44 +68,53 @@ impl super::Builtin for PushDir {
 
     if let Some(idx) = parsed.index {
       let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-      let new_cwd = Shed::meta_mut(|m| -> ShResult<Option<PathBuf>> {
-        let dirs = m.dirs_mut();
-        dirs.push_front(cwd);
-        let len = dirs.len();
-        let (StackIdx::FromTop(n) | StackIdx::FromBottom(n)) = idx;
-        if n >= len {
-          dirs.pop_front();
-          let sign = if matches!(idx, StackIdx::FromTop(_)) {
-            '+'
-          } else {
-            '-'
-          };
-          return Err(sherr!(
-            ExecFail @ blame.clone(),
-            "pushd: directory index out of range: {sign}{n}",
-          ));
-        }
-        match idx {
-          StackIdx::FromTop(n) => dirs.rotate_left(n),
-          StackIdx::FromBottom(n) => dirs.rotate_right(n + 1),
-        }
-        Ok(dirs.pop_front())
-      })?;
+      // Rotate a *copy* of the visible stack (`[cwd] + deque`); the real stack
+      // is only committed after a successful cd, so a failed cd (e.g. the
+      // target was removed from disk) leaves it untouched rather than dropping
+      // an entry.
+      let mut stack = Shed::meta(|m| m.dirs().clone());
+      stack.push_front(cwd);
+      let (StackIdx::FromTop(n) | StackIdx::FromBottom(n)) = idx;
+      if n >= stack.len() {
+        let sign = if matches!(idx, StackIdx::FromTop(_)) {
+          '+'
+        } else {
+          '-'
+        };
+        return Err(sherr!(
+          ExecFail @ blame,
+          "pushd: directory index out of range: {sign}{n}",
+        ));
+      }
+      match idx {
+        StackIdx::FromTop(n) => stack.rotate_left(n),
+        StackIdx::FromBottom(n) => stack.rotate_right(n + 1),
+      }
+      // The rotated top becomes the new cwd (and is dropped from the stack when
+      // we actually cd; for `-n` it's discarded and cwd stays put, matching
+      // bash's rotate-then-keep-cwd behavior).
+      let new_cwd = stack.pop_front();
 
-      if let Some(dir) = new_cwd
+      if let Some(dir) = &new_cwd
         && !parsed.no_cd
       {
-        change_dir(&dir).promote_err(blame)?;
-        print_dirs()?;
+        change_dir(dir).promote_err(blame)?;
       }
+      Shed::meta_mut(|m| *m.dirs_mut() = stack);
+      print_dirs()?;
     } else if let Some(dir) = parsed.dir {
+      if parsed.no_cd {
+        // `pushd -n dir`: add {dir} to the stack just below the current dir,
+        // without changing directory (bash). The old code pushed the *cwd*
+        // instead of {dir}, so the target was silently dropped.
+        Shed::meta_mut(|m| m.push_dir(dir));
+        print_dirs()?;
+        return with_status(0);
+      }
+
       let old_dir = env::current_dir()?;
       if old_dir != dir {
         Shed::meta_mut(|m| m.push_dir(old_dir));
-      }
-
-      if parsed.no_cd {
-        return with_status(0);
       }
 
       change_dir(&dir).promote_err(blame)?;
@@ -502,14 +511,43 @@ pub mod tests {
   #[test]
   fn test_pushd_no_cd_flag() {
     let _g = TestGuard::new();
+    state::Shed::meta_mut(|m| m.dirs_mut().clear());
     let original = env::current_dir().unwrap();
     let tmp = TempDir::new().unwrap();
-    let path = tmp.path().to_path_buf();
+    let path = canon(tmp.path());
 
     test_input(format!("pushd -n {}", path.display())).unwrap();
 
-    // -n means don't cd, but the dir should still be on the stack
+    // -n means don't cd...
     assert_eq!(env::current_dir().unwrap(), original);
+    // ...but the *target* dir must be on the stack (regression: it used to push
+    // the cwd instead and drop the target).
+    let stack: Vec<PathBuf> = state::Shed::meta(|m| m.dirs().iter().cloned().collect());
+    assert_eq!(
+      stack,
+      vec![path],
+      "pushd -n must push the target, got: {stack:?}"
+    );
+  }
+
+  #[test]
+  fn pushd_index_cd_failure_leaves_stack_intact() {
+    // Regression: the indexed rotation used to mutate the stack before the cd,
+    // so a cd failure (target removed from disk) dropped an entry. The rotation
+    // is now committed only after a successful cd.
+    let _g = TestGuard::new();
+    state::Shed::meta_mut(|m| m.dirs_mut().clear());
+    let tmp = TempDir::new().unwrap();
+    let path = canon(tmp.path());
+    test_input(format!("pushd -n {}", path.display())).unwrap();
+    let before: Vec<PathBuf> = state::Shed::meta(|m| m.dirs().iter().cloned().collect());
+
+    // Remove the target from disk, then try to rotate-and-cd onto it.
+    std::fs::remove_dir_all(tmp.path()).unwrap();
+    let _ = test_input("pushd +1");
+
+    let after: Vec<PathBuf> = state::Shed::meta(|m| m.dirs().iter().cloned().collect());
+    assert_eq!(before, after, "cd failure must not corrupt the stack");
   }
 
   #[test]
