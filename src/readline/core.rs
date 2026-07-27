@@ -447,7 +447,7 @@ impl EditorCore {
     // `:normal` runs a key sequence on each addressed line. It needs the mode
     // machine, so it's handled here rather than in LineBuf's ex dispatch (the
     // interactive layer intercepts it earlier; this catches the headless path).
-    if let Some(seq) = cmd.try_get_normal_seq() {
+    if let Some((seq, _)) = cmd.try_get_normal_seq() {
       let seq = seq.to_string();
       let lines = self.normal_seq_lines(&cmd)?;
       return self.run_normal_seq(&lines, &seq);

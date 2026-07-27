@@ -164,7 +164,7 @@ impl EditCmd {
       }
     })
   }
-  pub fn try_get_normal_seq(&self) -> Option<&str> {
+  pub fn try_get_normal_seq(&self) -> Option<(&str, bool)> {
     let Some(Cmd(_, Verb::ExCmd(node))) = self.verb.as_ref() else {
       return None;
     };
@@ -188,9 +188,9 @@ impl EditCmd {
 
 /// Walks an `ExNode` tree, descending through any nesting Global wrappers,
 /// looking for a Normal leaf. Returns the seq if found.
-fn find_normal_seq(node: &ExNode) -> Option<&str> {
+fn find_normal_seq(node: &ExNode) -> Option<(&str, bool)> {
   match &node.kind {
-    ExNdRule::Normal { seq } => Some(seq),
+    ExNdRule::Normal { seq, bang } => Some((seq, *bang)),
     ExNdRule::Global { nested, .. } => find_normal_seq(nested),
     _ => None,
   }

@@ -768,6 +768,7 @@ pub enum ExNdRule {
 
   Normal {
     seq: String,
+    bang: bool,
   },
   Shell(String),
 
@@ -965,7 +966,7 @@ impl ExParser {
       ExCommand::Read | ExCommand::Write => self.parse_read_write(&tk.class),
       ExCommand::Substitute => self.parse_substitute(),
       ExCommand::Global => self.parse_global(),
-      ExCommand::Normal => self.parse_normal(),
+      ExCommand::Normal => self.parse_normal(self.bang),
       ExCommand::Edit => self.parse_edit(),
       ExCommand::Stash => self.parse_stash(),
       ExCommand::Help => self.parse_help(),
@@ -1040,7 +1041,7 @@ impl ExParser {
 
     ExR::success(ExNdRule::Shell(cmd))
   }
-  fn parse_normal(&mut self) -> ExR<ExNdRule> {
+  fn parse_normal(&mut self, bang: bool) -> ExR<ExNdRule> {
     let Some(tk) = self
       .tokens
       .peeking_next(|tk| matches!(tk.class, ExTkRule::NormalSeq))
@@ -1049,7 +1050,7 @@ impl ExParser {
     };
 
     let seq = tk.span.as_str().to_string();
-    ExR::success(ExNdRule::Normal { seq })
+    ExR::success(ExNdRule::Normal { seq, bang })
   }
   fn parse_stash(&mut self) -> ExR<ExNdRule> {
     let arg_names = ["pop", "drop", "apply", "insert", "swap", "list"];

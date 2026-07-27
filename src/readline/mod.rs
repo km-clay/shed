@@ -329,7 +329,7 @@ enum LineCmd {
   WriteQuit,
   ClearScreen,
   ResetWidget,
-  NormalSeq(Vec<usize>, String),
+  NormalSeq(Vec<usize>, String, bool),
   TriggerCompletion,
   TriggerHistSearch,
 }
@@ -936,6 +936,29 @@ impl ShedLine {
     Ok(None)
   }
 
+  /// Resolve leftover keymap keys
+  ///
+  /// These are keys that are from an ambiguous keymap prefix that was never completed.
+  /// They are turned into literals here and executed.
+  fn flush_pending_keymap(&mut self) -> ShResult<Option<ReadlineEvent>> {
+    if self.pending_keymap.is_empty() {
+      return Ok(None);
+    }
+    let keymap_flags = self.curr_keymap_flags();
+    let matches = Shed::logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
+    let action = matches
+      .iter()
+      .find(|km| km.compare(&self.pending_keymap) == KeyMapMatch::IsExact)
+      .map(|km| km.action_expanded());
+    let keys = if let Some(action) = action {
+      self.pending_keymap.clear();
+      action
+    } else {
+      std::mem::take(&mut self.pending_keymap)
+    };
+    self.replay_keys(keys, false)
+  }
+
   /// Process any available input and return readline event
   /// This is non-blocking - returns Pending if no complete line yet
   pub fn process_input(&mut self, keys: Vec<KeyEvent>) -> ShResult<ReadlineEvent> {
@@ -1375,9 +1398,9 @@ impl ShedLine {
       return Ok(Some(LineCmd::ResetWidget));
     }
 
-    if let Some(seq) = cmd.try_get_normal_seq() {
+    if let Some((seq, bang)) = cmd.try_get_normal_seq() {
       let line_nums = self.extract_line_nums(&cmd)?;
-      return Ok(Some(LineCmd::NormalSeq(line_nums, seq.to_string())));
+      return Ok(Some(LineCmd::NormalSeq(line_nums, seq.to_string(), bang)));
     }
 
     if self.should_grab_history(&cmd) {
@@ -1590,7 +1613,7 @@ impl ShedLine {
         self.reset_active_widget(false)?;
         Ok(None)
       }
-      LineCmd::NormalSeq(line_nums, seq) => {
+      LineCmd::NormalSeq(line_nums, seq, bang) => {
         let keys = expand_keymap(&seq);
 
         self.core.editor.start_undo_merge();
@@ -1603,7 +1626,14 @@ impl ShedLine {
             .core
             .swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
 
-          if let Err(e) = self.replay_keys(keys.clone(), false) {
+          if let Err(e) = self.replay_keys(keys.clone(), !bang) {
+            self.core.editor.stop_undo_merge();
+            return Err(e);
+          }
+          // Flush any trailing ambiguous mapping prefix left buffered by the
+          // replay, so it can't leak into the next addressed line (or, after the
+          // loop, the next keystroke). No-op for `normal!` (keymaps bypassed).
+          if let Err(e) = self.flush_pending_keymap() {
             self.core.editor.stop_undo_merge();
             return Err(e);
           }

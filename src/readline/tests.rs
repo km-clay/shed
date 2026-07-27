@@ -2191,3 +2191,66 @@ mod keymap_implied_submit {
     assert_eq!(vi.core.mode.report_mode(), ModeReport::Search);
   }
 }
+
+mod normal_command_mappings {
+  use super::*;
+  use crate::keys::{KeyMap, KeyMapFlags};
+
+  fn feed(line: &mut ShedLine, s: &str) {
+    Shed::term_mut(|t| t.feed_bytes(s.as_bytes()));
+    let keys = Shed::term_mut(|t| t.drain_keys());
+    line.process_input(keys).unwrap();
+  }
+  fn register(keys: &str, action: &str) {
+    Shed::logic_mut(|l| {
+      l.insert_keymap(KeyMap {
+        flags: KeyMapFlags::NORMAL,
+        keys: keys.into(),
+        action: action.into(),
+      });
+    });
+  }
+  fn unregister(keys: &str) {
+    Shed::logic_mut(|l| l.remove_keymap(keys));
+  }
+
+  #[test]
+  fn normal_applies_mappings() {
+    // `:normal` (no bang) runs the sequence *with* mappings, so a mapped `x`
+    // (→ `dw`) deletes a word rather than a char.
+    let (mut vi, _g) = test_vi("hello world");
+    feed(&mut vi, "\x1b");
+    register("x", "dw");
+    feed(&mut vi, ":normal x\r");
+    unregister("x");
+    assert_eq!(vi.core.editor.to_string(), "world");
+  }
+
+  #[test]
+  fn normal_bang_ignores_mappings() {
+    // `:normal!` bypasses mappings, so `x` runs literally (delete one char).
+    let (mut vi, _g) = test_vi("hello world");
+    feed(&mut vi, "\x1b");
+    register("x", "dw");
+    feed(&mut vi, ":normal! x\r");
+    unregister("x");
+    assert_eq!(vi.core.editor.to_string(), "ello world");
+  }
+
+  #[test]
+  fn normal_flushes_trailing_partial_mapping() {
+    // A `:normal` sequence that ends on a proper prefix of a multi-key mapping
+    // (`g` of `gh`) must flush the buffered key instead of leaving it in
+    // `pending_keymap` to leak into the next keystroke.
+    let (mut vi, _g) = test_vi("abc");
+    feed(&mut vi, "\x1b");
+    register("gh", "x");
+    feed(&mut vi, ":normal g\r");
+    unregister("gh");
+    assert!(
+      vi.pending_keymap.is_empty(),
+      "trailing partial mapping leaked: {:?}",
+      vi.pending_keymap
+    );
+  }
+}
