@@ -384,15 +384,19 @@ impl LogTab {
   pub fn insert_keymap(&mut self, keymap: KeyMap) {
     for map in &mut self.keymaps {
       if map.keys == keymap.keys {
-        // overwrite old keymap with new one
-        *map = keymap.clone();
-        return;
+        map.flags.remove(keymap.flags);
       }
     }
+    self.keymaps.retain(|km| !km.flags.is_empty());
     self.keymaps.push(keymap);
   }
-  pub fn remove_keymap(&mut self, keys: &str) {
-    self.keymaps.retain(|km| km.keys != keys);
+  pub fn remove_keymap(&mut self, keys: &str, flags: KeyMapFlags) {
+    for km in &mut self.keymaps {
+      if km.keys == keys {
+        km.flags.remove(flags);
+      }
+    }
+    self.keymaps.retain(|km| !km.flags.is_empty());
   }
   pub fn keymaps_filtered(&self, flags: KeyMapFlags, pending: &[KeyEvent]) -> Vec<KeyMap> {
     self

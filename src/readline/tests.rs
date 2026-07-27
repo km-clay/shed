@@ -2214,7 +2214,7 @@ mod normal_command_mappings {
     });
   }
   fn unregister(keys: &str) {
-    Shed::logic_mut(|l| l.remove_keymap(keys));
+    Shed::logic_mut(|l| l.remove_keymap(keys, KeyMapFlags::NORMAL));
   }
 
   #[test]

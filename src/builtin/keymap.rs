@@ -60,7 +60,7 @@ impl super::Builtin for KeyMapBuiltin {
     }
 
     if let Some(keys) = remove {
-      Shed::logic_mut(|l| l.remove_keymap(&keys));
+      Shed::logic_mut(|l| l.remove_keymap(&keys, flags));
       return with_status(0);
     }
 
@@ -187,6 +187,50 @@ mod tests {
 
     let maps = Shed::logic(|l| l.keymaps_filtered(KeyMapFlags::NORMAL, &expand_keymap("jk")));
     assert!(maps.is_empty());
+  }
+
+  #[test]
+  fn keymap_same_keys_different_modes_coexist() {
+    // Binding `jk` in insert mode then normal mode must keep BOTH, not clobber.
+    let _g = TestGuard::new();
+    test_input("keymap -i jk '<ESC>'").unwrap();
+    test_input("keymap -n jk 'dd'").unwrap();
+
+    let insert = Shed::logic(|l| l.keymaps_filtered(KeyMapFlags::INSERT, &expand_keymap("jk")));
+    let normal = Shed::logic(|l| l.keymaps_filtered(KeyMapFlags::NORMAL, &expand_keymap("jk")));
+    assert_eq!(insert.len(), 1, "insert binding was clobbered");
+    assert_eq!(insert[0].action, "<ESC>");
+    assert_eq!(normal.len(), 1);
+    assert_eq!(normal[0].action, "dd");
+  }
+
+  #[test]
+  fn keymap_remove_is_mode_scoped() {
+    // Removing the normal-mode `jk` must leave the insert-mode `jk` intact.
+    let _g = TestGuard::new();
+    test_input("keymap -i jk '<ESC>'").unwrap();
+    test_input("keymap -n jk 'dd'").unwrap();
+    test_input("keymap -n --remove jk").unwrap();
+
+    let insert = Shed::logic(|l| l.keymaps_filtered(KeyMapFlags::INSERT, &expand_keymap("jk")));
+    let normal = Shed::logic(|l| l.keymaps_filtered(KeyMapFlags::NORMAL, &expand_keymap("jk")));
+    assert_eq!(insert.len(), 1, "insert binding was wrongly removed");
+    assert!(normal.is_empty(), "normal binding should be gone");
+  }
+
+  #[test]
+  fn keymap_multimode_bind_then_single_mode_override_splits() {
+    // `-nv jk X` then `-n jk Y`: normal gets Y, visual keeps X.
+    let _g = TestGuard::new();
+    test_input("keymap -n -v jk 'X'").unwrap();
+    test_input("keymap -n jk 'Y'").unwrap();
+
+    let normal = Shed::logic(|l| l.keymaps_filtered(KeyMapFlags::NORMAL, &expand_keymap("jk")));
+    let visual = Shed::logic(|l| l.keymaps_filtered(KeyMapFlags::VISUAL, &expand_keymap("jk")));
+    assert_eq!(normal.len(), 1);
+    assert_eq!(normal[0].action, "Y");
+    assert_eq!(visual.len(), 1);
+    assert_eq!(visual[0].action, "X", "visual binding should be untouched");
   }
 
   #[test]
