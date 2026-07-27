@@ -53,7 +53,7 @@ use super::{
   },
   status_msg, system_msg, try_var,
   util::{self, ShResult},
-  var, verb, write_term,
+  verb, write_term,
 };
 
 pub(super) use complete::{

@@ -43,7 +43,7 @@ use super::{
   },
   try_var,
   util::{self, ShResult, ends_with_unescaped, has_unescaped, var_ctx_guard},
-  var, write_term,
+  write_term,
 };
 
 bitflags! {
@@ -603,11 +603,6 @@ pub(crate) fn complete_users(start: &str) -> Vec<Candidate> {
 }
 
 pub(crate) fn complete_vars(start: &str) -> Vec<Candidate> {
-  if !var!(start).is_empty() {
-    return vec![];
-  }
-  // if we are here, we have a variable substitution that isn't complete
-  // so let's try to complete it
   Shed::vars(|v| {
     v.flatten_vars()
       .keys()
@@ -624,11 +619,6 @@ pub(crate) fn complete_vars(start: &str) -> Vec<Candidate> {
 }
 
 pub(crate) fn complete_vars_raw(raw: &str) -> Vec<Candidate> {
-  if !var!(raw).is_empty() {
-    return vec![];
-  }
-  // if we are here, we have a variable substitution that isn't complete
-  // so let's try to complete it
   Shed::vars(|v| {
     v.flatten_vars()
       .keys()

@@ -8,6 +8,7 @@ use crate::{
     vars::{VarFlags, VarKind},
   },
   tests::testutil::TestGuard,
+  var,
 };
 fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
   let g = TestGuard::new();
@@ -365,6 +366,39 @@ fn get_candidates_var_prefix_completes_with_shell_var() {
   assert!(
     cs.contains(&"UNIQUE_COMP_TEST_VAR_XYZZY"),
     "expected UNIQUE_COMP_TEST_VAR_XYZZY in candidates, got: {cs:?}"
+  );
+}
+
+#[test]
+fn get_candidates_var_prefix_completes_even_when_prefix_is_set_var() {
+  // Regression: `$FOO<Tab>` used to return nothing when FOO itself was a set
+  // variable, so a longer name like FOOBAR could never be completed.
+  let _g = TestGuard::new();
+  Shed::vars_mut(|v| {
+    v.set_var("SETPFX_ZZZ", VarKind::Str("1".into()), VarFlags::empty())
+      .unwrap();
+    v.set_var(
+      "SETPFX_ZZZ_LONG",
+      VarKind::Str("2".into()),
+      VarFlags::empty(),
+    )
+    .unwrap();
+  });
+  let mut comp = SimpleCompleter::default();
+  let line = "echo $SETPFX_ZZZ".to_string();
+  let cursor = line.len();
+  let result = comp
+    .get_candidates(&line, cursor, super::CompSource::Shell)
+    .unwrap();
+  let cs = contents(&result);
+  assert!(
+    cs.contains(&"SETPFX_ZZZ_LONG"),
+    "longer name should still complete when the prefix is a set var: {cs:?}"
+  );
+  // ...but the exact match itself is never offered.
+  assert!(
+    !cs.contains(&"SETPFX_ZZZ"),
+    "should not offer the exact match: {cs:?}"
   );
 }
 
