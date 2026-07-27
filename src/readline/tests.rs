@@ -255,6 +255,9 @@ vi_test! {
   join_indent_lines        : "echo foo\n\t\techo bar"       => "J"                   => "echo foo echo bar", 8;
   cw_stays_on_line         : "echo foo\necho bar"           => "wcw"                 => "echo \necho bar", 5;
   ex_sub_simple            : "echo foo\necho bar"           => ":%s/foo/bar/\r"      => "echo bar\necho bar", 0;
+  ex_sub_no_trailing_delim : "color me"                     => ":s/color/social\r"  => "social me", 0;
+  ex_sub_percent_no_trail  : "color\ncolor"                 => ":%s/color/social\r" => "social\nsocial", 0;
+  ex_sub_pat_no_repl_delim : "abc"                          => ":s/abc/x\r"         => "x", 0;
   ex_global_simple         : "echo foo\necho bar\necho biz" => ":g/echo/normal!dw\r" => "foo\nbar\nbiz", 8;
   ex_sub_first_only        : "foo foo foo"                  => ":s/foo/X/\r"         => "X foo foo", 0;
   ex_sub_global_flag       : "foo foo foo"                  => ":s/foo/X/g\r"        => "X X X", 0;

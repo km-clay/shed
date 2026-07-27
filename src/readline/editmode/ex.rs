@@ -314,6 +314,21 @@ impl From<Tk> for ExTk {
   }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum PatternEnd {
+  Closed(usize),
+  Open(usize),
+}
+
+impl From<PatternEnd> for usize {
+  fn from(value: PatternEnd) -> Self {
+    match value {
+      PatternEnd::Open(i) => i,
+      PatternEnd::Closed(i) => i,
+    }
+  }
+}
+
 pub struct ExLexer<'a> {
   input: Rc<str>,
   chars: Peekable<CharIndices<'a>>,
@@ -365,7 +380,7 @@ impl<'a> ExLexer<'a> {
     }
     end
   }
-  fn consume_pattern(&mut self, mut end: usize, delim: char) -> usize {
+  fn consume_pattern(&mut self, mut end: usize, delim: char) -> PatternEnd {
     match_loop!(self.chars.next() => (i,ch) => ch, {
       '\\' => {
         let Some(&(j,ch)) = self.chars.peek() else {
@@ -376,13 +391,13 @@ impl<'a> ExLexer<'a> {
       }
       _ if ch == delim => {
         end = i + ch.len_utf8();
-        return end
+        return PatternEnd::Closed(end);
       }
       _ => end = i + ch.len_utf8(),
     });
 
     self.flags |= ExLexFlags::LEX_UNFINISHED;
-    end
+    PatternEnd::Open(end)
   }
   fn peek_pos(&mut self) -> Option<usize> {
     self.chars.peek().map(|(i, _)| *i)
@@ -407,9 +422,12 @@ impl<'a> ExLexer<'a> {
     let span = self.get_span(range)?;
     Some(ExTk { class: rule, span })
   }
-  fn get_pattern_token(&self, range: Range<usize>) -> Option<ExTk> {
-    // strip delimiter chars
-    let span = self.get_span(range.start + 1..range.end.saturating_sub(1))?;
+  fn get_pattern_token(&self, start: usize, end: PatternEnd) -> Option<ExTk> {
+    let end = match end {
+      PatternEnd::Open(i) => i,
+      PatternEnd::Closed(i) => i.saturating_sub(1),
+    };
+    let span = self.get_span(start + 1..end)?;
     Some(ExTk {
       class: ExTkRule::Address(ExLineAddr::Pattern),
       span,
@@ -459,7 +477,7 @@ impl<'a> ExLexer<'a> {
     let delim = first;
 
     let end_before = self.consume_pattern(start, delim);
-    let Some(before) = self.get_pattern_token(start..end_before) else {
+    let Some(before) = self.get_pattern_token(start, end_before) else {
       return;
     };
     self.tokens.push(before);
@@ -468,8 +486,9 @@ impl<'a> ExLexer<'a> {
       return;
     }
 
-    let end_after = self.consume_pattern(end_before, delim);
-    let Some(after) = self.get_pattern_token(end_before.saturating_sub(1)..end_after) else {
+    let end_after = self.consume_pattern(end_before.into(), delim);
+    let Some(after) = self.get_pattern_token(usize::from(end_before).saturating_sub(1), end_after)
+    else {
       return;
     };
     self.tokens.push(after);
@@ -478,8 +497,8 @@ impl<'a> ExLexer<'a> {
       return;
     }
 
-    let end_flags = self.take_alphabetic(end_after);
-    let Some(flags) = self.get_token(end_after..end_flags, ExTkRule::Argument) else {
+    let end_flags = self.take_alphabetic(end_after.into());
+    let Some(flags) = self.get_token(end_after.into()..end_flags, ExTkRule::Argument) else {
       return;
     };
     self.tokens.push(flags);
@@ -491,7 +510,7 @@ impl<'a> ExLexer<'a> {
     let delim = first;
 
     let end_before = self.consume_pattern(start, delim);
-    let Some(before) = self.get_pattern_token(start..end_before) else {
+    let Some(before) = self.get_pattern_token(start, end_before) else {
       return;
     };
     self.tokens.push(before);
@@ -709,30 +728,32 @@ impl<'a> ExLexer<'a> {
         (i + c.len_utf8(), ExTkRule::Address(ExLineAddr::Mark))
       }
       ch @ ('/' | '?') => {
-        let rule = match ch {
-          '?' => ExTkRule::Address(ExLineAddr::PatternRev),
-          _ => ExTkRule::Address(ExLineAddr::Pattern),
-        };
         let end = self.consume_pattern(start + 1, first);
-        (end, rule)
+        // Forward `/pat/` strips its delimiters; reverse `?pat?` keeps them.
+        let tk = if ch == '?' {
+          self.get_token(
+            start..usize::from(end),
+            ExTkRule::Address(ExLineAddr::PatternRev),
+          )
+        } else {
+          self.get_pattern_token(start, end)
+        };
+        return match tk {
+          Some(tk) => {
+            self.tokens.push(tk);
+            true
+          }
+          None => false,
+        };
       }
       _ => return false, // unreachable probably
     };
 
-    if matches!(rule, ExTkRule::Address(ExLineAddr::Pattern)) {
-      if let Some(tk) = self.get_pattern_token(start..end) {
-        self.tokens.push(tk);
-        true
-      } else {
-        false
-      }
+    if let Some(tk) = self.get_token(start..end, rule) {
+      self.tokens.push(tk);
+      true
     } else {
-      if let Some(tk) = self.get_token(start..end, rule) {
-        self.tokens.push(tk);
-        true
-      } else {
-        false
-      }
+      false
     }
   }
 }
