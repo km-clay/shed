@@ -148,6 +148,47 @@ mod stash_builtin_tests {
   }
 
   #[test]
+  fn get_named_is_exact_case_sensitive_match() {
+    // Regression: `get_named` used `LIKE` (ASCII-case-insensitive) while save
+    // dedups with `=` (case-sensitive), so `Foo` and `foo` were distinct rows
+    // but `pop foo` returned the older `Foo`.
+    let _g = TestGuard::new();
+    let stash = fresh_stash();
+    stash
+      .stash_cmd(&StashedCmd {
+        name: Some("Foo".into()),
+        buffer: "A".into(),
+        cursor_pos: "0".into(),
+      })
+      .unwrap();
+    stash
+      .stash_cmd(&StashedCmd {
+        name: Some("foo".into()),
+        buffer: "B".into(),
+        cursor_pos: "0".into(),
+      })
+      .unwrap();
+    let got = stash.get_named("foo").unwrap();
+    assert_eq!(got.map(|c| c.buffer.to_string()), Some("B".to_string()));
+  }
+
+  #[test]
+  fn get_named_treats_underscore_literally() {
+    // `_` is a LIKE wildcard; with exact match it must be literal.
+    let _g = TestGuard::new();
+    let stash = fresh_stash();
+    stash
+      .stash_cmd(&StashedCmd {
+        name: Some("my_fix".into()),
+        buffer: "X".into(),
+        cursor_pos: "0".into(),
+      })
+      .unwrap();
+    assert!(stash.get_named("myXfix").unwrap().is_none());
+    assert!(stash.get_named("my_fix").unwrap().is_some());
+  }
+
+  #[test]
   fn list_flag_prints_stashes() {
     let g = TestGuard::new();
     let stash = fresh_stash();

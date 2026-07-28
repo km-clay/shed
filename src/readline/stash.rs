@@ -220,7 +220,7 @@ impl Stash {
     let conn = self.lock();
     let mut stmt = conn.prepare(
       "
-      SELECT buffer, cursor FROM stash WHERE name LIKE ?1 ORDER BY timestamp ASC LIMIT 1
+      SELECT buffer, cursor FROM stash WHERE name = ?1 ORDER BY timestamp ASC LIMIT 1
     ",
     )?;
 
