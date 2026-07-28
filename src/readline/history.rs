@@ -851,7 +851,7 @@ impl History {
         .lock()
         .query_row(
           &format!(
-            "SELECT command FROM {} WHERE command LIKE ?1 || '%' ORDER BY id DESC LIMIT 1",
+            "SELECT command FROM {} WHERE substr(command, 1, length(?1)) = ?1 ORDER BY id DESC LIMIT 1",
             self.table
           ),
           rusqlite::params![token],

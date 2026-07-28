@@ -529,6 +529,9 @@ hist_expansion_test! {
   bang_bang              : &["echo hello", "ls"]               => "!!\r"                => "ls";
   prefix_latest_match    : &["foo first", "bar", "foo second"] => "!f\r"                => "foo second";
   prefix                 : &["foo", "bar", "biz", "qux"]       => "!f\r"                => "foo";
+  prefix_underscore_literal
+    : &["my_script --safe", "my script.sh --dangerous"] => "!my_script\r" => "my_script --safe";
+  prefix_case_sensitive  : &["make build"]                     => "!Make\r"             => "Make";
 
   multiline
     : &["echo foo","if true; then\necho foo\nfi", "echo bar"]
