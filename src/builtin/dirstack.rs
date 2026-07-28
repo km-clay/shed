@@ -678,8 +678,8 @@ pub mod tests {
     clear_stack();
     let t1 = TempDir::new().unwrap();
     let t2 = TempDir::new().unwrap();
-    let p1 = t1.path().to_string_lossy().to_string();
-    let p2 = t2.path().to_string_lossy().to_string();
+    let p1 = canon(t1.path()).to_string_lossy().to_string();
+    let p2 = canon(t2.path()).to_string_lossy().to_string();
     test_input(format!("pushd {p1}")).unwrap();
     test_input(format!("pushd {p2}")).unwrap();
     g.read_output();
