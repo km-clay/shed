@@ -40,7 +40,7 @@ impl super::Builtin for Msg {
 
     let input = self.get_input(&mut args).map(|s| {
       let mut s = bytes_to_string(s);
-      s.truncate(s.trim_matches('\n').len());
+      s.truncate(s.trim_end_matches('\n').len());
       VarStr::from(s)
     });
 
@@ -104,6 +104,17 @@ mod msg_tests {
     assert_eq!(Shed::pop_status_msg().as_deref(), Some("hello"));
     assert_eq!(Shed::pop_system_msg(), None);
     assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn msg_piped_leading_newlines_strips_only_trailing() {
+    // Regression: `trim_matches` computed a both-ends-trimmed length but
+    // `truncate` cut from the end, so `\n\nhello\n` became `\n\nhel` (leading
+    // blanks kept, content lopped off). Only trailing newlines should go.
+    let _g = TestGuard::new();
+    drain_all();
+    test_input("printf '\\n\\nhello\\n' | msg").unwrap();
+    assert_eq!(Shed::pop_status_msg().as_deref(), Some("\n\nhello"));
   }
 
   #[test]
