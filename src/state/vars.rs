@@ -1070,12 +1070,12 @@ impl VarTab {
     let resolved_home = env["HOME"].clone();
     let resolved_user = env["USER"].clone();
 
-    let mut data_dir = env
-      .get("XDG_DATA_HOME")
+    let mut state_dir = env
+      .get("XDG_STATE_HOME")
       .map(PathBuf::from)
-      .unwrap_or_else(|| PathBuf::from(format!("{resolved_home}/.local/share")));
-    data_dir.push("shed");
-    let shed_db = data_dir.join("shed_hist.db");
+      .unwrap_or_else(|| PathBuf::from(format!("{resolved_home}/.local/state")));
+    state_dir.push("shed");
+    let shed_db = state_dir.join("shed_hist.db");
 
     env.entry("TMPDIR".into()).or_insert_with(|| "/tmp".into());
     env.entry("TERM".into()).or_insert_with(|| term);

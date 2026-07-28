@@ -882,22 +882,96 @@ pub fn init_test_db_conn() {
     .map(|c| Arc::new(Mutex::new(c)));
 }
 
+// Functions for history database path migration
+
+/// The default on-disk path of the history database, under `$XDG_STATE_HOME`
+/// (`~/.local/state/shed/shed_hist.db`). `None` only if `dirs` cannot resolve a
+/// state dir (non-Linux platforms), in which case the `$HOME` fallback is used.
+fn default_state_db_path() -> Option<PathBuf> {
+  dirs::state_dir().map(|p| p.join("shed").join("shed_hist.db"))
+}
+
+/// The "old" path to the history database
+fn legacy_data_db_path() -> Option<PathBuf> {
+  dirs::data_dir().map(|p| p.join("shed").join("shed_hist.db"))
+}
+
 /// The on-disk path of the history database.
 fn history_db_path() -> PathBuf {
   let db_path: VarStr = if let Some(var) = try_var!("SHED_HISTDB") {
     var
   } else {
     let home = try_var!("HOME").unwrap_or_else(|| ".".into());
-    dirs::data_dir().map_or_else(
-      || format!("{home}/.local/share/shed/shed_hist.db").into(),
+    default_state_db_path().map_or_else(
+      || format!("{home}/.local/state/shed/shed_hist.db").into(),
       |p| p.to_string_lossy().into(),
     )
   };
   PathBuf::from(db_path.as_str())
 }
 
+/// Migrate history database file from the legacy path to the new one
+fn migrate_legacy_history_db(new_path: &Path) {
+  // Scope strictly to the default target so a custom SHED_HISTDB is left alone.
+  let Some(default_new) = default_state_db_path() else {
+    return;
+  };
+  if new_path != default_new || new_path.exists() {
+    return;
+  }
+  let Some(old_path) = legacy_data_db_path() else {
+    return;
+  };
+  if !old_path.exists() {
+    return;
+  }
+
+  relocate_history_db(&old_path, new_path);
+}
+
+/// Move a history DB and its journal/WAL sidecars from `old_path` to `new_path`,
+/// creating `new_path`'s parent. A cross-filesystem `rename` falls back to
+/// copy-then-remove. Best-effort: failures are logged, never fatal.
+fn relocate_history_db(old_path: &Path, new_path: &Path) {
+  if let Some(parent) = new_path.parent()
+    && let Err(e) = std::fs::create_dir_all(parent)
+  {
+    log::warn!(
+      "history migration: could not create {}: {e}; leaving legacy DB in place",
+      parent.display()
+    );
+    return;
+  }
+
+  for suffix in ["", "-wal", "-shm", "-journal"] {
+    let from = PathBuf::from(format!("{}{suffix}", old_path.display()));
+    if !from.exists() {
+      continue;
+    }
+    let to = PathBuf::from(format!("{}{suffix}", new_path.display()));
+    match std::fs::rename(&from, &to) {
+      Ok(()) => log::info!("migrated history {} -> {}", from.display(), to.display()),
+      Err(_) => match std::fs::copy(&from, &to).and_then(|_| std::fs::remove_file(&from)) {
+        Ok(()) => log::info!(
+          "migrated history (copy) {} -> {}",
+          from.display(),
+          to.display()
+        ),
+        Err(e) => log::warn!(
+          "history migration: could not move {} -> {}: {e}",
+          from.display(),
+          to.display()
+        ),
+      },
+    }
+  }
+}
+
 pub fn open_db_conn() -> ShResult<Connection> {
   let db_path = history_db_path();
+  // Relocate a pre-XDG-state (~/.local/share) history DB before we'd otherwise
+  // create a fresh empty one at the new location.
+  migrate_legacy_history_db(&db_path);
   if let Some(parent) = db_path.parent() {
     std::fs::create_dir_all(parent)?;
   }
@@ -1056,6 +1130,35 @@ mod xdg_resolver_tests {
     unset_var("XDG_CONFIG_HOME");
     set_var("HOME", "/some/home");
     assert_eq!(xdg_config_home(), Some(PathBuf::from("/some/home/.config")));
+  }
+
+  // ─── history DB migration (share -> state) ────────────────────────
+
+  #[test]
+  fn relocate_history_db_moves_db_and_sidecars() {
+    use std::fs;
+    let old_dir = tempfile::TempDir::new().unwrap();
+    let new_dir = tempfile::TempDir::new().unwrap();
+    let old_db = old_dir.path().join("shed").join("shed_hist.db");
+    // New location's parent doesn't exist yet — relocate must create it.
+    let new_db = new_dir.path().join("shed").join("shed_hist.db");
+
+    fs::create_dir_all(old_db.parent().unwrap()).unwrap();
+    fs::write(&old_db, b"legacy-db-contents").unwrap();
+    fs::write(format!("{}-journal", old_db.display()), b"j").unwrap();
+
+    relocate_history_db(&old_db, &new_db);
+
+    assert!(!old_db.exists(), "legacy DB should have been moved away");
+    assert_eq!(fs::read(&new_db).unwrap(), b"legacy-db-contents");
+    assert!(
+      new_dir
+        .path()
+        .join("shed")
+        .join("shed_hist.db-journal")
+        .exists(),
+      "journal sidecar should have moved too"
+    );
   }
 
   // ─── xdg_runtime_dir ──────────────────────────────────────────────
