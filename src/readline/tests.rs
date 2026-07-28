@@ -676,6 +676,59 @@ fn hist_delete_removes_entries() {
 }
 
 #[test]
+fn hist_delete_purges_search_cache_no_resurrect() {
+  // Regression: a delete refreshed only the scroll cache (HIST_ENTRIES), so the
+  // deleted command lingered in the search cache (SEARCH_ENTRIES / Ctrl-R) and
+  // was resurrected into scroll history by merge_search_entries.
+  let _g = TestGuard::new();
+  let mut hist = History::empty("test_delete_search_cache");
+  hist.push("keep one").unwrap();
+  hist.push("secret token").unwrap();
+  hist.push("keep two").unwrap();
+
+  // push populates the search cache.
+  assert!(
+    hist
+      .search_cache_commands()
+      .iter()
+      .any(|c| c == "secret token")
+  );
+
+  hist
+    .delete(
+      "WHERE command = ?1",
+      &[&"secret token" as &dyn rusqlite::ToSql],
+    )
+    .unwrap();
+  hist.refresh_hist_entries();
+
+  assert!(
+    !hist
+      .search_cache_commands()
+      .iter()
+      .any(|c| c == "secret token"),
+    "deleted command still in search cache"
+  );
+  assert!(
+    !hist
+      .scroll_cache_commands()
+      .iter()
+      .any(|c| c == "secret token"),
+    "deleted command still in scroll cache"
+  );
+
+  // A subsequent search-merge must not resurrect it into scroll history.
+  hist.merge_search_entries();
+  assert!(
+    !hist
+      .scroll_cache_commands()
+      .iter()
+      .any(|c| c == "secret token"),
+    "deleted command resurrected via merge_search_entries"
+  );
+}
+
+#[test]
 fn hist_delete_reids_contiguously() {
   let _g = TestGuard::new();
   let hist = History::empty("test_reid");

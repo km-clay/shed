@@ -961,11 +961,48 @@ impl History {
   pub fn refresh_hist_entries(&self) -> usize {
     let num_entries_before = num_entries(&self.table);
     let entries = query_masked(None, &self.lock(), &self.table);
+    let max_ts = entries
+      .iter()
+      .filter_map(|e| e.timestamp.duration_since(std::time::UNIX_EPOCH).ok())
+      .map(|d| d.as_secs() as i64)
+      .max()
+      .unwrap_or(0);
     if let Ok(mut cache) = HIST_ENTRIES.write() {
+      cache.insert(self.table.clone(), entries.clone());
+    }
+    if let Ok(mut cache) = SEARCH_ENTRIES.write() {
       cache.insert(self.table.clone(), entries);
     }
+    if let Ok(mut wm) = SEARCH_WATERMARKS.write() {
+      wm.insert(self.table.clone(), max_ts);
+    }
+
     let num_entries_after = num_entries(&self.table);
     num_entries_after.saturating_sub(num_entries_before)
+  }
+
+  #[cfg(test)]
+  pub fn search_cache_commands(&self) -> Vec<String> {
+    SEARCH_ENTRIES
+      .read()
+      .ok()
+      .and_then(|c| c.get(&self.table).cloned())
+      .unwrap_or_default()
+      .iter()
+      .map(|e| e.command().to_string())
+      .collect()
+  }
+
+  #[cfg(test)]
+  pub fn scroll_cache_commands(&self) -> Vec<String> {
+    HIST_ENTRIES
+      .read()
+      .ok()
+      .and_then(|c| c.get(&self.table).cloned())
+      .unwrap_or_default()
+      .iter()
+      .map(|e| e.command().to_string())
+      .collect()
   }
 
   pub fn is_virtual_scrolling(&self) -> bool {
