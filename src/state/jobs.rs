@@ -443,7 +443,7 @@ impl Job {
     let pids = flags.contains(JobCmdFlags::PIDS);
 
     let current = job_order.last();
-    let prev = (job_order.len() > 2)
+    let prev = (job_order.len() >= 2)
       .then(|| job_order.get(job_order.len() - 2))
       .flatten();
 
@@ -661,6 +661,17 @@ impl JobTab {
       .find(|&&id| self.jobs.get(id).is_some_and(Option::is_some))
       .copied()
   }
+  pub fn marker_order(&self) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    for &id in self.order.iter().rev() {
+      let live = self.jobs.get(id).is_some_and(Option::is_some);
+      if live && !out.contains(&id) {
+        out.push(id);
+      }
+    }
+    out.reverse();
+    out
+  }
   fn prune_jobs(&mut self) {
     while let Some(job) = self.jobs.last() {
       if job.is_none() || job.as_ref().unwrap().is_done() {
@@ -680,14 +691,19 @@ impl JobTab {
     job.set_tabid(tab_pos);
     let last_pid = job.children().last().map(ChildProc::pid);
     self.order.push(tab_pos);
-    if !silent {
-      let msg = job.display(&self.order, JobCmdFlags::INIT);
-      system_msg!("{msg}");
-    }
     if tab_pos >= self.jobs.len() {
       self.jobs.resize_with(tab_pos + 1, || None);
     }
     self.jobs[tab_pos] = Some(job);
+    if !silent {
+      // Display after inserting so `marker_order` sees the new job as current.
+      let order = self.marker_order();
+      let msg = self.jobs[tab_pos]
+        .as_ref()
+        .unwrap()
+        .display(&order, JobCmdFlags::INIT);
+      system_msg!("{msg}");
+    }
 
     if let Some(pid) = last_pid {
       Shed::vars_mut(|v| v.set_param(ShellParam::LastJob, &pid.to_string()));
@@ -802,6 +818,7 @@ impl JobTab {
     }
   }
   pub fn print_jobs(&mut self, flags: JobCmdFlags) -> ShResult<()> {
+    let marker_order = self.marker_order();
     let jobs = if flags.contains(JobCmdFlags::NEW_ONLY) {
       &self
         .jobs
@@ -838,7 +855,7 @@ impl JobTab {
       }
       write(
         stdout_fileno(),
-        format!("{}\n", job.display(&self.order, flags)).as_bytes(),
+        format!("{}\n", job.display(&marker_order, flags)).as_bytes(),
       )?;
       if job
         .get_stats()
@@ -1054,18 +1071,53 @@ mod tests {
   }
 
   #[test]
-  fn display_prev_is_none_when_order_len_le_two() {
+  fn display_prev_gets_minus_with_exactly_two_jobs() {
     let _g = TestGuard::new();
-    // order = [0, 1]: len <= 2 → prev is None. Job with id=0 should not
-    // get "-"; only job with id=1 (current) gets "+".
+    // order = [0, 1]: two jobs is enough for a `-` (bash/zsh show `[1]- [2]+`).
+    // Job with id=0 is the previous job → "-".
     let job = mk_job(
       0,
       vec![mk_child(100, "ls", WtStat::Exited(Pid::from_raw(100), 0))],
     );
     let out = strip_ansi(&job.display(&[0, 1], JobCmdFlags::empty()));
-    // id=0 is neither current nor prev → " " (note: trailing space).
-    assert!(out.contains("[1] "), "got: {out:?}");
+    assert!(out.contains("[1]-"), "expected prev marker, got: {out:?}");
+  }
+
+  #[test]
+  fn display_single_job_has_no_prev_marker() {
+    let _g = TestGuard::new();
+    // order = [0]: one job → only `+`, never `-`.
+    let job = mk_job(
+      0,
+      vec![mk_child(100, "ls", WtStat::Exited(Pid::from_raw(100), 0))],
+    );
+    let out = strip_ansi(&job.display(&[0], JobCmdFlags::empty()));
+    assert!(out.contains("[1]+"), "got: {out:?}");
     assert!(!out.contains("[1]-"), "got: {out:?}");
+  }
+
+  #[test]
+  fn marker_order_excludes_removed_jobs() {
+    // Regression: `order` is append-only, so after a job is removed the raw
+    // history still references its (dead) id — `marker_order` must drop it so
+    // the `+`/`-` markers don't point at a removed job.
+    let _g = TestGuard::new();
+    let mut tab = JobTab::default();
+    tab.insert_job(
+      mk_job(0, vec![mk_child(100, "a", WtStat::StillAlive)]),
+      true,
+    );
+    tab.insert_job(
+      mk_job(1, vec![mk_child(200, "b", WtStat::StillAlive)]),
+      true,
+    );
+    assert_eq!(tab.marker_order(), vec![0, 1]);
+    tab.remove_job(JobID::TableID(1));
+    assert_eq!(
+      tab.marker_order(),
+      vec![0],
+      "removed job must not remain in marker order"
+    );
   }
 
   // ─── status-text per WaitStatus variant ────────────────────────────

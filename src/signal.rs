@@ -394,7 +394,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
 
   JOB_DONE.store(true, Ordering::SeqCst);
   let job_data = Shed::jobs_mut(|j| {
-    let order = j.order().to_vec();
+    let order = j.marker_order();
     j.query_mut(JobID::Pgid(child_pgid))
       .map(|job| job.take_job_data(&order, Some(pid)))
   });
