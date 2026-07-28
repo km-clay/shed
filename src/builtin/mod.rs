@@ -1226,7 +1226,10 @@ pub mod tests {
     test_input(format!("command cd {}", temp_dir.path().display())).unwrap();
 
     let new_dir = env::current_dir().unwrap();
-    assert_ne!(old_dir, new_dir, "cwd unchanged; `command cd` did not run the builtin");
+    assert_ne!(
+      old_dir, new_dir,
+      "cwd unchanged; `command cd` did not run the builtin"
+    );
     assert_eq!(
       new_dir.display().to_string(),
       canon(temp_dir.path()).display().to_string()
@@ -1245,7 +1248,10 @@ pub mod tests {
     test_input(format!("\\command cd {}", temp_dir.path().display())).unwrap();
 
     let new_dir = env::current_dir().unwrap();
-    assert_ne!(old_dir, new_dir, "cwd unchanged; `\\command cd` did not run the builtin");
+    assert_ne!(
+      old_dir, new_dir,
+      "cwd unchanged; `\\command cd` did not run the builtin"
+    );
     assert_eq!(
       new_dir.display().to_string(),
       canon(temp_dir.path()).display().to_string()
