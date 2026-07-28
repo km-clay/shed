@@ -25,7 +25,21 @@ impl AliasExpander {
     let mut cursor = 0;
     let mut active: HashSet<String> = HashSet::default();
 
-    while let Some(tk) = self.next_cmd_token(cursor) {
+    let mut tokens = self.lex_tokens();
+    let mut ti = 0;
+
+    loop {
+      while ti < tokens.len() {
+        let tk = &tokens[ti];
+        if tk.span.range().start >= cursor
+          && tk.flags.contains(TkFlags::IS_CMD)
+          && !tk.flags.contains(TkFlags::KEYWORD)
+        {
+          break;
+        }
+        ti += 1;
+      }
+      let Some(tk) = tokens.get(ti) else { break };
       let span = tk.span.range();
       let (start, end) = (span.start, span.end);
       let word = tk.as_str().to_string();
@@ -41,6 +55,11 @@ impl AliasExpander {
           self.input.replace_range(start..end, &alias.to_string());
           active.insert(word);
           self.first_expand_pos.get_or_insert(start);
+          // `input` changed; token spans past `start` are now stale. Re-lex and
+          // re-scan from `cursor` (unchanged) so the replacement is itself
+          // examined for chained/recursive expansion.
+          tokens = self.lex_tokens();
+          ti = 0;
         }
         None => {
           cursor = end;
@@ -52,15 +71,13 @@ impl AliasExpander {
     (self.input, self.first_expand_pos)
   }
 
-  /// The next command-position word at or after `cursor`, skipping keywords.
-  fn next_cmd_token(&self, cursor: usize) -> Option<Tk> {
+  /// Lex the current input into a token vector. Each token carries its own
+  /// snapshot of the source, so the returned tokens stay valid across a later
+  /// `input` mutation (they simply become stale and are dropped on re-lex).
+  fn lex_tokens(&self) -> Vec<Tk> {
     LexStream::new(self.input.clone().into(), LexFlags::empty())
       .filter_map(Result::ok)
-      .find(|tk| {
-        tk.span.range().start >= cursor
-          && tk.flags.contains(TkFlags::IS_CMD)
-          && !tk.flags.contains(TkFlags::KEYWORD)
-      })
+      .collect()
   }
 }
 
@@ -322,5 +339,42 @@ mod tests {
     // After first expansion: "foo --verbose", then "foo" is in already_expanded
     // so it won't expand again
     assert_eq!(result, "foo --verbose");
+  }
+
+  #[test]
+  fn alias_expands_every_command_position_only() {
+    // Exercises the single-lex + monotonic command-position scan: the alias
+    // fires in each command position (after `;`, `&&`, `|`) but never in an
+    // argument position (the trailing `g`).
+    let _guard = TestGuard::new();
+    let sp = Span::default();
+    Shed::logic_mut(|l| l.insert_alias("g", "git", sp.clone()));
+
+    let result = expand_aliases("g status; g log && g diff | g show g");
+    assert_eq!(result, "git status; git log && git diff | git show g");
+  }
+
+  #[test]
+  fn alias_chained_expansion_relexes() {
+    // a -> b -> c: each replacement mutates the input and must be re-lexed and
+    // re-examined at the same cursor, so the chain resolves fully.
+    let _guard = TestGuard::new();
+    let sp = Span::default();
+    Shed::logic_mut(|l| {
+      l.insert_alias("a", "b", sp.clone());
+      l.insert_alias("b", "c", sp.clone());
+    });
+
+    assert_eq!(expand_aliases("a"), "c");
+  }
+
+  #[test]
+  fn alias_not_expanded_in_argument_position() {
+    let _guard = TestGuard::new();
+    let sp = Span::default();
+    Shed::logic_mut(|l| l.insert_alias("ls", "ls --color", sp.clone()));
+
+    // `ls` as an argument to `echo` must stay literal.
+    assert_eq!(expand_aliases("echo ls"), "echo ls");
   }
 }
