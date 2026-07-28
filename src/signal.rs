@@ -311,9 +311,8 @@ pub fn wait_child() -> ShResult<()> {
 }
 
 pub fn child_signaled(pid: Pid, sig: Signal) {
-  let child_pgid = getpgid(Some(pid)).unwrap_or(pid);
   Shed::jobs_mut(|j| {
-    if let Some(job) = j.query_mut(JobID::Pgid(child_pgid)) {
+    if let Some(job) = j.query_mut(JobID::Pid(pid)) {
       let child = job
         .children_mut()
         .iter_mut()

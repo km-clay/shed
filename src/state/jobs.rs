@@ -154,6 +154,9 @@ impl ChildProc {
   pub fn exited(&self) -> bool {
     matches!(self.stat, WtStat::Exited(..))
   }
+  pub fn terminated(&self) -> bool {
+    matches!(self.stat, WtStat::Exited(..) | WtStat::Signaled(..))
+  }
 }
 
 impl Clone for ChildProc {
@@ -266,7 +269,7 @@ impl Job {
     self.notify
   }
   pub fn running(&self) -> bool {
-    !self.children.iter().all(ChildProc::exited)
+    !self.children.iter().all(ChildProc::terminated)
   }
   pub fn tabid(&self) -> Option<usize> {
     self.table_id
@@ -1091,6 +1094,46 @@ mod tests {
     );
     let out = strip_ansi(&job.display(&[0], JobCmdFlags::empty()));
     assert!(out.contains("failed: 42"), "got: {out:?}");
+  }
+
+  #[test]
+  fn job_with_signaled_member_is_not_running() {
+    // Regression: a pipeline member killed by a signal used to keep the whole
+    // job perpetually "running" (running() only counted Exited), so the job
+    // never completed once a stage was signal-killed.
+    let job = mk_job(
+      1,
+      vec![
+        mk_child(100, "a", WtStat::Exited(Pid::from_raw(100), 0)),
+        mk_child(
+          200,
+          "b",
+          WtStat::Signaled(Pid::from_raw(200), Signal::SIGKILL, false),
+        ),
+      ],
+    );
+    assert!(
+      !job.running(),
+      "a job whose members have all terminated is not running"
+    );
+  }
+
+  #[test]
+  fn job_with_alive_member_is_running() {
+    // Control: a still-alive leader keeps the job running even if another stage
+    // was signal-killed (the reported scenario before the leader exits).
+    let job = mk_job(
+      1,
+      vec![
+        mk_child(100, "a", WtStat::StillAlive),
+        mk_child(
+          200,
+          "b",
+          WtStat::Signaled(Pid::from_raw(200), Signal::SIGKILL, false),
+        ),
+      ],
+    );
+    assert!(job.running());
   }
 
   #[test]
