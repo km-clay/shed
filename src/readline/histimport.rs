@@ -149,8 +149,13 @@ fn collect_continuation<'a>(first: &'a str, lines: &mut impl Iterator<Item = &'a
   let mut parts = vec![];
   let mut line = first;
   loop {
-    parts.push(line.strip_suffix('\\').unwrap_or(line));
-    if !ends_with_unescaped(line, "\\") {
+    let cont = ends_with_unescaped(line, "\\");
+    parts.push(if cont {
+      line.strip_suffix('\\').unwrap()
+    } else {
+      line
+    });
+    if !cont {
       break;
     }
     if let Some(next) = lines.next() {
@@ -456,6 +461,20 @@ mod tests {
     let mut iter = std::iter::empty::<&str>();
     let result = collect_continuation("only\\", &mut iter);
     assert_eq!(result, "only");
+  }
+
+  #[test]
+  fn collect_continuation_preserves_escaped_trailing_backslash() {
+    // The physical line ends in an *escaped* backslash (`foo\\`), which is not a
+    // line continuation. The final `\` must be kept, and no further lines are
+    // consumed. (Regression: the old unconditional `strip_suffix('\\')` dropped
+    // the last backslash, corrupting the imported command.)
+    let rest = vec!["should_not_be_joined"];
+    let mut iter = rest.into_iter();
+    let result = collect_continuation("printf '%s' foo\\\\", &mut iter);
+    assert_eq!(result, "printf '%s' foo\\\\");
+    // The follow-up line was left untouched in the iterator.
+    assert_eq!(iter.next(), Some("should_not_be_joined"));
   }
 
   // ===================== import_history dispatch =====================
