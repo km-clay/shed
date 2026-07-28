@@ -401,6 +401,21 @@ impl Dispatcher {
     let (line, _) = node.get_span().clone().line_and_col();
     Shed::vars_mut(|v| v.set_var("LINENO", VarKind::Int((line + 1) as i32), VarFlags::empty()))?;
 
+    let result = self.route_command(node, true);
+    commit_underscore();
+    result
+  }
+
+  /// Route a simple command to its executor: function, builtin, arithmetic,
+  /// autocd, or external `exec_cmd`.
+  ///
+  /// `allow_func` gates function lookup. The `command` builtin passes `false`
+  /// so that, per POSIX, it suppresses function lookup while still running
+  /// shell builtins and external commands.
+  ///
+  /// `expand_to_words` is idempotent on already-expanded tokens, so this is
+  /// safe to call on the pre-expanded node built by `command`/`builtin`.
+  pub(crate) fn route_command(&mut self, node: &Node, allow_func: bool) -> ShResult<()> {
     let Some(cmd) = node.get_command() else {
       return self.exec_cmd(node); // Argv is empty, probably an assignment
     };
@@ -422,7 +437,7 @@ impl Dispatcher {
 
     let cmd_tk = node.get_command();
 
-    let result = if is_func(&cmd_word) {
+    if allow_func && is_func(&cmd_word) {
       self.exec_func(node)
     } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTIN_NAMES.contains(&cmd_word.as_str()) {
       self.exec_builtin(node, &cmd_word)
@@ -433,10 +448,7 @@ impl Dispatcher {
       exec_input(varstr!("cd {dir}"), Some(self.source_name.clone()))
     } else {
       self.exec_cmd(node)
-    };
-
-    commit_underscore();
-    result
+    }
   }
   pub fn exec_defer(node: &Node) -> ShResult<()> {
     let NdRule::DeferNode { body } = &node.class else {
