@@ -71,7 +71,7 @@ fn query_since(since_ts: i64, conn: &Connection, table: &str) -> Vec<HistEntry> 
     r"
     SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
     GROUP BY command
-    HAVING MAX(timestamp) > ?1
+    HAVING MAX(timestamp) >= ?1
     ORDER BY ts ASC
     "
   );
@@ -938,6 +938,36 @@ impl History {
     if let Ok(mut wm) = SEARCH_WATERMARKS.write() {
       wm.remove(table);
     }
+  }
+
+  /// Insert a row straight into the DB at an explicit whole-second timestamp,
+  /// bypassing the in-memory caches — simulates another session's write that
+  /// this session hasn't cached yet.
+  #[cfg(test)]
+  pub fn insert_raw_for_test(&self, command: &str, timestamp: i64) {
+    let table = &self.table;
+    let conn = self.lock();
+    let new_id = Self::last_id_conn(&conn, table) + 1;
+    conn
+      .execute(
+        &format!(
+          "INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"
+        ),
+        rusqlite::params![new_id, timestamp, command, "", Uuid::new_v4().to_string()],
+      )
+      .unwrap();
+  }
+
+  #[cfg(test)]
+  pub fn set_search_watermark_for_test(&self, ts: i64) {
+    if let Ok(mut wm) = SEARCH_WATERMARKS.write() {
+      wm.insert(self.table.clone(), ts);
+    }
+  }
+
+  #[cfg(test)]
+  pub fn sync_search_entries_for_test(&self) {
+    self.sync_search_entries();
   }
 
   /// Get a hint by scanning the in-memory cache. No database access.

@@ -732,6 +732,34 @@ fn hist_delete_purges_search_cache_no_resurrect() {
 }
 
 #[test]
+fn sync_picks_up_command_in_watermark_second() {
+  // Regression: cross-session sync used `HAVING MAX(timestamp) > watermark`.
+  // A command another session recorded in the *same whole second* as the
+  // current watermark was excluded by the strict `>` and — once local activity
+  // advanced the watermark past that second — missed for the rest of the
+  // session. `query_since` now uses `>=`, so the boundary second is included.
+  let _g = TestGuard::new();
+  let hist = History::empty("test_watermark_same_second");
+
+  // Another session recorded this command at second `t`; our search cache
+  // doesn't have it yet.
+  let t = 1_721_234_567;
+  hist.insert_raw_for_test("deploy --prod", t);
+
+  // Our watermark sits exactly at `t` (e.g. the load snapshot's newest second).
+  hist.set_search_watermark_for_test(t);
+  hist.sync_search_entries_for_test();
+
+  assert!(
+    hist
+      .search_cache_commands()
+      .iter()
+      .any(|c| c == "deploy --prod"),
+    "same-second command missed by cross-session sync"
+  );
+}
+
+#[test]
 fn hist_delete_reids_contiguously() {
   let _g = TestGuard::new();
   let hist = History::empty("test_reid");
