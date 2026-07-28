@@ -377,10 +377,12 @@ impl History {
           return Ok(None);
         }
       }
-      let new_id = Self::last_id_conn(&conn, table) + 1;
       conn.execute(
-        &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"),
-        rusqlite::params![new_id, timestamp, command, cwd, token.to_string()],
+        &format!(
+          "INSERT INTO {table} (id, timestamp, runtime, command, cwd, token)
+           SELECT COALESCE(MAX(id), 0) + 1, ?1, 0, ?2, ?3, ?4 FROM {table}"
+        ),
+        rusqlite::params![timestamp, command, cwd, token.to_string()],
       )?;
     }
 
@@ -954,6 +956,22 @@ impl History {
           "INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"
         ),
         rusqlite::params![new_id, timestamp, command, "", Uuid::new_v4().to_string()],
+      )
+      .unwrap();
+  }
+
+  /// Insert a row with an explicit id — simulates another session having
+  /// committed a specific PRIMARY KEY out of band.
+  #[cfg(test)]
+  pub fn insert_raw_with_id_for_test(&self, command: &str, id: i64, timestamp: i64) {
+    let table = &self.table;
+    let conn = self.lock();
+    conn
+      .execute(
+        &format!(
+          "INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"
+        ),
+        rusqlite::params![id, timestamp, command, "", Uuid::new_v4().to_string()],
       )
       .unwrap();
   }

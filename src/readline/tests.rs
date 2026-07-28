@@ -760,6 +760,23 @@ fn sync_picks_up_command_in_watermark_second() {
 }
 
 #[test]
+fn push_allocates_id_from_db_max_not_stale() {
+  let _g = TestGuard::new();
+  let hist = History::empty("test_push_id_alloc");
+
+  // Another session committed id 100 out of band (row count is 1, max id 100).
+  hist.insert_raw_with_id_for_test("from other session", 100, 1_721_234_567);
+
+  // Our push must take MAX(id)+1 = 101, not count+1 = 2, and must not error.
+  hist.push("our command").unwrap();
+  assert_eq!(hist.last_id(), 101, "push did not allocate MAX(id)+1");
+
+  // A second push continues contiguously from the DB max.
+  hist.push("another command").unwrap();
+  assert_eq!(hist.last_id(), 102);
+}
+
+#[test]
 fn hist_delete_reids_contiguously() {
   let _g = TestGuard::new();
   let hist = History::empty("test_reid");
