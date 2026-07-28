@@ -760,6 +760,40 @@ fn sync_picks_up_command_in_watermark_second() {
 }
 
 #[test]
+fn trim_removes_deleted_commands_not_front_of_cache() {
+  let _g = TestGuard::new();
+  let mut hist = History::empty("test_trim_match");
+  hist.set_max_size_for_test(3);
+
+  // Simulate the pre-load DB state: four old unique commands committed with
+  // ascending timestamps, none of them in the (still-empty) cache.
+  hist.insert_raw_with_id_for_test("old1", 1, 1_000);
+  hist.insert_raw_with_id_for_test("old2", 2, 2_000);
+  hist.insert_raw_with_id_for_test("old3", 3, 3_000);
+  hist.insert_raw_with_id_for_test("old4", 4, 4_000);
+
+  // A push during the load window: DB now has 5 unique commands (max 3), so
+  // trim deletes the 2 oldest (old1, old2). The just-pushed command has a
+  // now-timestamp, so it is the newest and must survive in both caches.
+  hist.push("session command").unwrap();
+
+  assert!(
+    hist
+      .scroll_cache_commands()
+      .iter()
+      .any(|c| c == "session command"),
+    "trim dropped the session's own command from the scroll cache"
+  );
+  assert!(
+    hist
+      .search_cache_commands()
+      .iter()
+      .any(|c| c == "session command"),
+    "trim dropped the session's own command from the search cache"
+  );
+}
+
+#[test]
 fn push_allocates_id_from_db_max_not_stale() {
   let _g = TestGuard::new();
   let hist = History::empty("test_push_id_alloc");

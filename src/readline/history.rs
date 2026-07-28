@@ -450,38 +450,39 @@ impl History {
       return;
     }
     let table = &self.table;
-    // Delete all rows belonging to the oldest `excess` unique commands.
-    self
-      .lock()
-      .execute(
-        &format!(
-          "DELETE FROM {table} WHERE command IN (
+    let deleted: crate::HashSet<String> = {
+      let conn = self.lock();
+      let sql = format!(
+        "DELETE FROM {table} WHERE command IN (
           SELECT command FROM {table}
           GROUP BY command
           ORDER BY MAX(timestamp) ASC
           LIMIT ?1
-        )"
-        ),
-        rusqlite::params![excess],
-      )
-      .ok();
+        ) RETURNING command"
+      );
+      match conn.prepare(&sql) {
+        Ok(mut stmt) => stmt
+          .query_map(rusqlite::params![excess], |row| row.get::<_, String>(0))
+          .map(|rows| rows.filter_map(Result::ok).collect())
+          .unwrap_or_default(),
+        Err(_) => crate::HashSet::default(),
+      }
+    };
 
-    // Trim the front of both caches (oldest entries are at the front,
-    // sorted by timestamp ASC from query_masked / push ordering).
-    let excess = excess as usize;
+    if deleted.is_empty() {
+      return;
+    }
 
     if let Ok(mut cache) = HIST_ENTRIES.write()
       && let Some(entries) = cache.get_mut(table.as_str())
     {
-      let drain_count = excess.min(entries.len());
-      entries.drain(0..drain_count);
+      entries.retain(|e| !deleted.contains(e.command()));
     }
 
     if let Ok(mut cache) = SEARCH_ENTRIES.write()
       && let Some(entries) = cache.get_mut(table.as_str())
     {
-      let drain_count = excess.min(entries.len());
-      entries.drain(0..drain_count);
+      entries.retain(|e| !deleted.contains(e.command()));
     }
   }
 
@@ -974,6 +975,11 @@ impl History {
         rusqlite::params![id, timestamp, command, "", Uuid::new_v4().to_string()],
       )
       .unwrap();
+  }
+
+  #[cfg(test)]
+  pub fn set_max_size_for_test(&mut self, max: u32) {
+    self.max_size = Some(max);
   }
 
   #[cfg(test)]
