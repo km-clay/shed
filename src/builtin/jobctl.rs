@@ -565,6 +565,8 @@ mod kill_tests {
   fn fork_pausing_child() -> nix::unistd::Pid {
     match unsafe { fork() }.unwrap() {
       ForkResult::Child => {
+        crate::lifecycle::setup_child();
+
         unsafe { nix::libc::pause() };
         // Should never get here — pause only returns on signal, and
         // default disposition for SIGTERM/SIGKILL is termination.

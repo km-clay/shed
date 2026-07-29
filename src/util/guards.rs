@@ -41,9 +41,9 @@ pub fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let cwd_guard = cwd_guard();
   let umask_guard = umask_guard();
   scopeguard::guard((), move |()| {
-    drop(ceiling_guard);
     drop(cwd_guard);
     drop(umask_guard);
+    drop(ceiling_guard);
   })
 }
 

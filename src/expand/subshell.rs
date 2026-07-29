@@ -3,21 +3,22 @@ use std::os::fd::AsRawFd;
 use crate::{
   errln,
   eval::{ParsedSrc, execute::exec_input, parse::node::nodes_have_only_builtins},
+  lifecycle,
   procio::{self, SinkScope, bytes_to_string},
-  state::vars::VarStr,
+  state::{Shed, vars::VarStr},
   util::isolation_guard,
 };
 
 use super::{
   super::state::terminal::Terminal,
-  ShErrKind, ShResult, Shed,
+  ShErrKind, ShResult,
   arithmetic::expand_arithmetic_wrapped,
   eval::execute::exec_nonint,
   procio::{
     RedirSet, RedirSpec, RedirType, StdinPipe, feed_fd_async, pipes_high, pipes_high_no_cloexec,
     read_to_sink,
   },
-  sherr, state,
+  sherr,
 };
 
 use nix::errno::Errno;
@@ -56,6 +57,8 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 
   match unsafe { fork()? } {
     ForkResult::Child => {
+      lifecycle::setup_child();
+
       // Drop our reference to the tty fd before exec; otherwise the
       // orphaned procsub child (we don't wait on it) holds the pty
       // slave open. On macOS that prevents the master from ever
@@ -74,9 +77,11 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 
       if let Err(e) = exec_nonint(raw.into(), Some("process_sub".into())) {
         e.print_error();
-        unsafe { nix::libc::_exit(1) };
+
+        lifecycle::exit_shed(true, 1);
       }
-      unsafe { nix::libc::_exit(0) };
+
+      lifecycle::exit_shed(true, Shed::get_status());
     }
     ForkResult::Parent { .. } => {
       Shed::meta_mut(|m| m.save_procsub_fd(register_fd));
@@ -146,6 +151,8 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
   match unsafe { fork()? } {
     ForkResult::Child => {
+      lifecycle::setup_child();
+
       let mut specs = vec![RedirSpec::dup(wpipe.as_raw_fd(), 1, RedirType::Output)];
       let _stdin_r_keep = stdin_pipe.map(|p| p.into_child(&mut specs));
       let redir: RedirSet = specs.into();
@@ -153,13 +160,14 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
       if let Err(e) = exec_input(raw.into(), Some("command_sub".into())) {
         if let ShErrKind::CleanExit(code) = e.kind() {
-          std::process::exit(*code);
+          lifecycle::exit_shed(true, *code);
         }
         e.print_error();
-        unsafe { nix::libc::_exit(1) };
+        lifecycle::exit_shed(true, 1);
       }
-      let status = state::Shed::get_status();
-      unsafe { nix::libc::_exit(status) };
+      let code = Shed::get_status();
+
+      lifecycle::exit_shed(true, code);
     }
     ForkResult::Parent { child } => {
       drop(wpipe);
@@ -190,7 +198,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
       match status {
         WtStat::Exited(_, code) => {
-          state::Shed::set_status(code);
+          Shed::set_status(code);
           // Truncation takes precedence over the child's own exit code.
           if truncated {
             Shed::set_status(procio::SINK_TRUNCATED_STATUS);
@@ -247,19 +255,60 @@ mod tests {
   }
 
   #[test]
+  fn cmd_sub_inprocess_isolates_cd() {
+    use crate::state::{Shed, vars::VarFlags, vars::VarKind};
+    use crate::tests::testutil::canon;
+
+    let _g = TestGuard::new();
+    let start = std::env::current_dir().unwrap();
+    // cwd_guard keys off `$PWD`; give it a baseline to save/compare against.
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "PWD",
+        VarKind::string(start.to_string_lossy()),
+        VarFlags::EXPORT,
+      )
+    })
+    .ok();
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    // `cd` is builtin-only, so this takes the in-process path (internal_cmd_sub).
+    let _ = expand_cmd_sub(&format!("cd {}", canon(tmp.path()).display()));
+
+    let after = std::env::current_dir().unwrap();
+    // Restore before asserting so a regression can't leak into sibling tests.
+    let _ = std::env::set_current_dir(&start);
+    assert_eq!(
+      canon(&after),
+      canon(&start),
+      "in-process command substitution leaked `cd` into the parent cwd"
+    );
+  }
+
+  #[test]
+  fn cmd_sub_runs_and_captures_in_sub_exit_trap() {
+    // `trap` forces a fork; the forked child must run its own EXIT trap on the
+    // way out (via exit_shed) and the output must land in the captured sub — not
+    // leak to the parent. Exercises trap-forces-fork + setup_child + exit_shed.
+    let _g = TestGuard::new();
+    let result = expand_cmd_sub("trap 'echo trapped' EXIT; true").unwrap();
+    assert_eq!(result, "trapped");
+  }
+
+  #[test]
   fn cmd_sub_sets_status_to_child_exit_code() {
     // `(exit N)` would hit the arithmetic fast-path; use a bare
     // command that genuinely exits with the desired status.
     let _g = TestGuard::new();
     expand_cmd_sub("false").unwrap();
-    assert_eq!(state::Shed::get_status(), 1);
+    assert_eq!(crate::state::Shed::get_status(), 1);
   }
 
   #[test]
   fn cmd_sub_zero_status_on_success() {
     let _g = TestGuard::new();
     expand_cmd_sub("true").unwrap();
-    assert_eq!(state::Shed::get_status(), 0);
+    assert_eq!(crate::state::Shed::get_status(), 0);
   }
 
   #[test]

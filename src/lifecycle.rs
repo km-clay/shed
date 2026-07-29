@@ -157,6 +157,7 @@ pub(super) fn setup() -> Option<ShedArgs> {
   // `sig_setup` later (adding tty/job-control setup on top); non-interactive
   // shells rely on this so `trap` works in `-c` and scripts.
   signal::install_signal_handlers();
+  util::register_fork_marker();
 
   Some(args)
 }
@@ -233,13 +234,45 @@ pub(super) fn tear_down() -> ExitCode {
     }
   }
 
-  autocmd!(OnExit);
-
   if Shed::meta(MetaTab::interactive_shell) {
+    autocmd!(OnExit);
     crate::write_term!("\n").ok();
   }
+
   Shed::jobs_mut(JobTab::hang_up);
   Shed::term_mut(Terminal::reset_for_exit);
 
   ExitCode::from(signal::QUIT_CODE.load(Ordering::SeqCst) as u8)
+}
+
+pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
+  if run_trap
+    && let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit))
+    && let Err(e) = exec_nonint(trap, Some("trap".into()))
+  {
+    e.print_error();
+  }
+
+  let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
+
+  while let Some(cmd) = deferred.pop() {
+    let mut dispatcher = Dispatcher::new(vec![cmd], "defer".into());
+    if let Err(e) = dispatcher.begin_dispatch() {
+      e.print_error();
+    }
+  }
+
+  std::process::exit(code)
+}
+
+/// Code for forked children to execute
+///
+/// Ideally this should be executed at the top of any `ForkResult::Child` block in the codebase
+pub(super) fn setup_child() {
+  if !util::FORKED_CHILD.load(Ordering::SeqCst) {
+    return;
+  }
+
+  // remove the inherited exit trap
+  Shed::logic_mut(|l| l.remove_trap(TrapTarget::Exit));
 }

@@ -767,20 +767,24 @@ pub fn set_sh_lvl() -> ShResult<()> {
 /// The process-wide history database connection.
 static DB_CONN: RwLock<Option<Arc<Mutex<Connection>>>> = RwLock::new(None);
 
-static FORKED_CHILD: AtomicBool = AtomicBool::new(false);
+pub(crate) static FORKED_CHILD: AtomicBool = AtomicBool::new(false);
 static ATFORK_ONCE: Once = Once::new();
 
-extern "C" fn db_atfork_child() {
+extern "C" fn mark_forked_child() {
   FORKED_CHILD.store(true, Ordering::Relaxed);
 }
-fn register_db_atfork() {
+
+pub(crate) fn register_fork_marker() {
   ATFORK_ONCE.call_once(|| unsafe {
-    libc::pthread_atfork(None, None, Some(db_atfork_child));
+    libc::pthread_atfork(None, None, Some(mark_forked_child));
   });
 }
 
 fn open_shared_conn() -> Option<Arc<Mutex<Connection>>> {
-  register_db_atfork();
+  // Idempotent; the primary registration is at startup (`register_fork_marker`
+  // in lifecycle::setup). Kept here too so the DB-fencing flag is armed even on
+  // paths that open the DB without going through `setup` (e.g. tests).
+  register_fork_marker();
   crate::procio::do_something_that_opens_fds_that_we_cant_access_hack(
     crate::procio::MIN_INTERNAL_FD,
     || configure_conn(false),

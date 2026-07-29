@@ -21,7 +21,7 @@ use nix::{
 };
 
 use crate::{
-  Shed, signal,
+  Shed, lifecycle, signal,
   state::{shopt::ReadLimit, terminal::Terminal},
   util,
 };
@@ -1099,6 +1099,8 @@ pub(super) fn capture_command(
 
   match unsafe { fork()? } {
     ForkResult::Child => {
+      lifecycle::setup_child();
+
       let mut specs = vec![RedirSpec::dup(wpipe.as_raw_fd(), 1, RedirType::Output)];
       // Keep the read end alive until redirs.apply() dups it onto fd 0.
       let _stdin_r_keep_alive = stdin_pipe.map(|p| p.into_child(&mut specs));

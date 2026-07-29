@@ -450,7 +450,7 @@ impl From<(usize, String)> for Candidate {
 
 impl Display for Candidate {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", &self.content)
+    write!(f, "{}", self.content)
   }
 }
 

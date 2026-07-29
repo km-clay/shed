@@ -27,7 +27,6 @@ use crate::{
 };
 
 use super::{
-  Shed,
   eval::{
     self,
     lex::{Tk, TkFlags, TkRule},

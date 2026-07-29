@@ -132,6 +132,10 @@ impl super::Builtin for Exit {
     true
   }
 
+  fn always_forks(&self) -> bool {
+    true
+  }
+
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     self.exec_flow_ctl(args)
   }

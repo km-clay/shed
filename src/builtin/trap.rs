@@ -13,6 +13,10 @@ impl super::Builtin for Trap {
     true
   }
 
+  fn always_forks(&self) -> bool {
+    true
+  }
+
   fn strict_opts(&self) -> bool {
     true
   }

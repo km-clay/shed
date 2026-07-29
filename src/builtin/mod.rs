@@ -203,6 +203,15 @@ pub(super) trait Builtin: Sync {
     false
   }
 
+  /// Whether or not the builtin forks a new process
+  ///
+  /// `false` by default, so that builtins are eligible for the in-process fast path by default.
+  /// Overridden by commands like `eval` and `command` that result in forking execution as a side effect.
+  /// `exit` also overrides this, so it doesn't stop the parent shell in subshells
+  fn always_forks(&self) -> bool {
+    false
+  }
+
   /// The way that the builtin parses its options. Some of them are weird, like `set`
   fn get_argv_and_opts(
     &self,
@@ -711,6 +720,10 @@ fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
 
 pub struct CommandBuiltin;
 impl Builtin for CommandBuiltin {
+  fn always_forks(&self) -> bool {
+    true
+  }
+
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     unreachable!("this one operates on the node directly")
   }

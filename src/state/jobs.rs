@@ -907,6 +907,7 @@ impl JobTab {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::lifecycle;
   use crate::tests::testutil::TestGuard;
   use nix::unistd::{ForkResult, fork};
 
@@ -948,6 +949,8 @@ mod tests {
     let _g = TestGuard::new();
     let pid = match unsafe { fork() }.unwrap() {
       ForkResult::Child => {
+        lifecycle::setup_child();
+
         // Don't let test machinery run in the child.
         unsafe { nix::libc::_exit(0) };
       }
@@ -962,6 +965,7 @@ mod tests {
     let _g = TestGuard::new();
     let pid = match unsafe { fork() }.unwrap() {
       ForkResult::Child => {
+        lifecycle::setup_child();
         unsafe { nix::libc::_exit(42) };
       }
       ForkResult::Parent { child } => child,
@@ -975,6 +979,7 @@ mod tests {
     let _g = TestGuard::new();
     let pid = match unsafe { fork() }.unwrap() {
       ForkResult::Child => {
+        lifecycle::setup_child();
         // Kill self with SIGTERM. The parent should see Signaled.
         unsafe { nix::libc::raise(nix::libc::SIGTERM) };
         // Should never reach here, but just in case:

@@ -11,6 +11,10 @@ impl super::Builtin for Eval {
     true
   }
 
+  fn always_forks(&self) -> bool {
+    true
+  }
+
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
       return with_status(0);

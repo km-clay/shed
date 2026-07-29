@@ -1,6 +1,7 @@
 use crate::{
   autocmd,
   eval::parse::node::{LabelCtx, node_has_only_builtins},
+  lifecycle,
   procio::{OutputSink, SinkScope, StdinScope},
   shopt_mut, socket,
   state::{
@@ -846,7 +847,7 @@ impl Dispatcher {
     self.run_fork(&name, |s| {
       if let Err(e) = s.dispatch_node(&*body) {
         if let ShErrKind::CleanExit(code) = e.kind() {
-          std::process::exit(*code);
+          lifecycle::exit_shed(true, *code);
         }
         e.print_error();
       }
@@ -1281,10 +1282,8 @@ impl Dispatcher {
             .unwrap_or_default();
           result = self.run_fork(&name, move |s| {
             if let Err(e) = s.exec_internal_pipeline(&tail) {
-              // `exit N` inside the backgrounded group surfaces as CleanExit;
-              // honor it as the child's exit code rather than printing it.
               if let ShErrKind::CleanExit(code) = e.kind() {
-                std::process::exit(*code);
+                lifecycle::exit_shed(true, *code);
               }
               e.print_error();
             }
@@ -1547,6 +1546,8 @@ impl Dispatcher {
     }
 
     let child_logic = |pgid: Option<Pid>| -> ! {
+      lifecycle::setup_child();
+
       if let Some(pgid) = pgid {
         let _ = setpgid(Pid::from_raw(0), pgid);
       }
@@ -1654,6 +1655,8 @@ impl Dispatcher {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     match unsafe { fork()? } {
       ForkResult::Child => {
+        lifecycle::setup_child();
+
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
         crate::signal::reset_signals(self.fg_job);
         // This segment never execs, so close the downstream pipe read end it
@@ -1664,7 +1667,8 @@ impl Dispatcher {
         }
         let _guard = Shed::term_mut(|t| t.interactive_guard(false));
         f(self);
-        unsafe { nix::libc::_exit(Shed::get_status()) }
+
+        lifecycle::exit_shed(true, Shed::get_status());
       }
       ForkResult::Parent { child } => {
         let timer = self.take_timer();
@@ -1999,9 +2003,7 @@ pub(crate) fn is_builtin(cmd: &Node) -> bool {
     .get_command()
     .map(|cmd_word| {
       !is_func(cmd_word.as_str())
-        && cmd_word.as_str() != "command"
-        && cmd_word.as_str() != "exec"
-        && cmd_word.as_str() != "eval"
+        && lookup_builtin(cmd_word.as_str()).is_some_and(|b| !b.always_forks())
         && cmd_word.flags.contains(TkFlags::BUILTIN)
     })
     .unwrap_or(true) // empty argv: assignment-only command

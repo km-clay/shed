@@ -421,7 +421,7 @@ impl super::LineBuf {
     let start_row = self.scroll_offset;
 
     for i in start_row..self.cursor.pos.row {
-      write!(result, "{}", &self.lines[i]).ok();
+      write!(result, "{}", self.lines[i]).ok();
       result.push('\n');
     }
     let line = &self.lines[self.cursor.pos.row];
