@@ -78,15 +78,22 @@ impl PrintFormatter {
     Ok(Self(segments.into_boxed_slice()))
   }
 
-  pub fn apply_once<I: Iterator<Item = String>>(&self, args: &mut Peekable<I>) -> ShResult<String> {
-    let mut output = String::new();
+  pub fn apply_once<I: Iterator<Item = String>>(
+    &self,
+    args: &mut Peekable<I>,
+  ) -> ShResult<Rendered> {
+    let mut out = Rendered::new(String::new());
     for seg in self.0.iter() {
       match seg {
-        Segment::Literal(s) => output.push_str(s),
-        Segment::Spec(spec) => output.push_str(&spec.apply(args)?),
+        Segment::Literal(s) => out.text.push_str(s),
+        Segment::Spec(spec) => {
+          let rendered = spec.apply(args)?;
+          out.text.push_str(&rendered.text);
+          out.merge_errors(rendered);
+        }
       }
     }
-    Ok(output)
+    Ok(out)
   }
 
   pub fn has_specs(&self) -> bool {
@@ -106,6 +113,32 @@ pub struct FmtSpec {
   conversion: Conversion,
 }
 
+/// Parse a printf numeric argument, returning the value and any soft error.
+/// A *missing* argument (fewer args than conversions) yields `0` with no error;
+/// a *present* argument that fails to parse yields `0` plus a
+/// [`PrintfErr::BadNumber`], so the caller still substitutes `0` and continues
+/// formatting while the run is flagged to exit non-zero.
+fn parse_num_arg<T: std::str::FromStr + Default>(arg: Option<String>) -> (T, Option<PrintfErr>) {
+  let Some(arg) = arg else {
+    return (T::default(), None);
+  };
+  match arg.parse() {
+    Ok(v) => (v, None),
+    Err(_) => (T::default(), Some(PrintfErr::BadNumber(arg))),
+  }
+}
+
+/// Write the stderr diagnostic for each collected printf error. Returns whether
+/// any were present, so the caller can set a non-zero exit status.
+fn emit_printf_errors(errors: &[PrintfErr]) -> bool {
+  for err in errors {
+    match err {
+      PrintfErr::BadNumber(arg) => crate::errln!("printf: {arg}: invalid number"),
+    }
+  }
+  !errors.is_empty()
+}
+
 impl FmtSpec {
   pub fn parse(chars: &mut Peekable<Chars>) -> ShResult<Self> {
     Ok(Self {
@@ -116,14 +149,16 @@ impl FmtSpec {
     })
   }
 
-  pub fn apply<I: Iterator<Item = String>>(&self, args: &mut Peekable<I>) -> ShResult<String> {
+  pub fn apply<I: Iterator<Item = String>>(&self, args: &mut Peekable<I>) -> ShResult<Rendered> {
     // Resolve dynamic width/precision. Negative width means left-justify
     // with abs(width); negative precision is treated as absent.
     let (flags, width) = self.resolve_width(args)?;
     let prec = self.resolve_precision(args)?;
 
+    // Numeric conversions return a `Rendered` (they may report a bad number);
+    // the rest produce plain text and are wrapped with `Rendered::new`.
     let out = match &self.conversion {
-      Conversion::Percent => "%".into(),
+      Conversion::Percent => Rendered::new("%".into()),
       Conversion::SignedDecimal => self.apply_signed_int(args, flags, width, prec)?,
       Conversion::UnsignedDecimal => self.apply_unsigned_int(args, flags, width, prec)?,
       Conversion::UnsignedOctal => self.apply_unsigned_octal(args, flags, width, prec)?,
@@ -133,12 +168,14 @@ impl FmtSpec {
       Conversion::ShortestFloat(case) => {
         self.apply_shortest_float(args, flags, width, prec, case)?
       }
-      Conversion::Char => self.apply_char(args, flags, width)?,
-      Conversion::Str => self.apply_str(args, flags, width, prec)?,
-      Conversion::RepeatStr => self.apply_repeat_str(args, width)?,
-      Conversion::AnsiC => self.apply_ansi_c(args, flags, width, prec)?,
-      Conversion::ShellQuote => self.apply_shell_quote(args, flags, width)?,
-      Conversion::StrfTime(format) => self.apply_strftime(args, flags, width, format.as_str())?,
+      Conversion::Char => Rendered::new(self.apply_char(args, flags, width)?),
+      Conversion::Str => Rendered::new(self.apply_str(args, flags, width, prec)?),
+      Conversion::RepeatStr => Rendered::new(self.apply_repeat_str(args, width)?),
+      Conversion::AnsiC => Rendered::new(self.apply_ansi_c(args, flags, width, prec)?),
+      Conversion::ShellQuote => Rendered::new(self.apply_shell_quote(args, flags, width)?),
+      Conversion::StrfTime(format) => {
+        Rendered::new(self.apply_strftime(args, flags, width, format.as_str())?)
+      }
     };
 
     Ok(out)
@@ -185,9 +222,8 @@ impl FmtSpec {
     flags: PrintFlags,
     width: Option<usize>,
     prec: Option<usize>,
-  ) -> ShResult<String> {
-    let arg = args.next().unwrap_or_default();
-    let n: i64 = arg.parse().unwrap_or(0);
+  ) -> ShResult<Rendered> {
+    let (n, err): (i64, _) = parse_num_arg(args.next());
     let abs = n.unsigned_abs();
     let sign = pick_sign(n.is_negative(), flags);
 
@@ -198,7 +234,10 @@ impl FmtSpec {
       }
     }
 
-    Ok(pad_to_width(&digits, sign, flags, width, prec.is_none()))
+    Ok(Rendered {
+      text: pad_to_width(&digits, sign, flags, width, prec.is_none()),
+      errors: err.into_iter().collect(),
+    })
   }
 
   fn apply_unsigned_int<I: Iterator<Item = String>>(
@@ -207,9 +246,8 @@ impl FmtSpec {
     flags: PrintFlags,
     width: Option<usize>,
     prec: Option<usize>,
-  ) -> ShResult<String> {
-    let arg = args.next().unwrap_or_default();
-    let n: u64 = arg.parse().unwrap_or(0);
+  ) -> ShResult<Rendered> {
+    let (n, err): (u64, _) = parse_num_arg(args.next());
 
     let mut digits = n.to_string();
     if let Some(p) = prec {
@@ -218,7 +256,10 @@ impl FmtSpec {
       }
     }
 
-    Ok(pad_to_width(&digits, "", flags, width, prec.is_none()))
+    Ok(Rendered {
+      text: pad_to_width(&digits, "", flags, width, prec.is_none()),
+      errors: err.into_iter().collect(),
+    })
   }
 
   fn apply_unsigned_octal<I: Iterator<Item = String>>(
@@ -227,9 +268,8 @@ impl FmtSpec {
     flags: PrintFlags,
     width: Option<usize>,
     prec: Option<usize>,
-  ) -> ShResult<String> {
-    let arg = args.next().unwrap_or_default();
-    let n: u64 = arg.parse().unwrap_or(0);
+  ) -> ShResult<Rendered> {
+    let (n, err): (u64, _) = parse_num_arg(args.next());
 
     let mut digits = format!("{n:o}");
     if let Some(p) = prec {
@@ -245,7 +285,10 @@ impl FmtSpec {
       ""
     };
 
-    Ok(pad_to_width(&digits, prefix, flags, width, prec.is_none()))
+    Ok(Rendered {
+      text: pad_to_width(&digits, prefix, flags, width, prec.is_none()),
+      errors: err.into_iter().collect(),
+    })
   }
 
   fn apply_unsigned_hex<I: Iterator<Item = String>>(
@@ -255,9 +298,8 @@ impl FmtSpec {
     width: Option<usize>,
     prec: Option<usize>,
     case: &Case,
-  ) -> ShResult<String> {
-    let arg = args.next().unwrap_or_default();
-    let n: u64 = arg.parse().unwrap_or(0);
+  ) -> ShResult<Rendered> {
+    let (n, err): (u64, _) = parse_num_arg(args.next());
 
     let mut digits = match case {
       Case::Lower => format!("{n:x}"),
@@ -279,7 +321,10 @@ impl FmtSpec {
       ""
     };
 
-    Ok(pad_to_width(&digits, prefix, flags, width, prec.is_none()))
+    Ok(Rendered {
+      text: pad_to_width(&digits, prefix, flags, width, prec.is_none()),
+      errors: err.into_iter().collect(),
+    })
   }
 
   fn apply_fixed_float<I: Iterator<Item = String>>(
@@ -288,9 +333,8 @@ impl FmtSpec {
     flags: PrintFlags,
     width: Option<usize>,
     prec: Option<usize>,
-  ) -> ShResult<String> {
-    let arg = args.next().unwrap_or_default();
-    let f: f64 = arg.parse().unwrap_or(0.0);
+  ) -> ShResult<Rendered> {
+    let (f, err): (f64, _) = parse_num_arg(args.next());
     let p = prec.unwrap_or(6);
 
     let body = format!("{f:.p$}", p = p);
@@ -299,7 +343,10 @@ impl FmtSpec {
 
     // For floats, ZERO_PAD applies independent of precision (precision
     // controls digits after decimal point, not minimum total digits).
-    Ok(pad_to_width(&abs_body, sign, flags, width, true))
+    Ok(Rendered {
+      text: pad_to_width(&abs_body, sign, flags, width, true),
+      errors: err.into_iter().collect(),
+    })
   }
 
   fn apply_scientific<I: Iterator<Item = String>>(
@@ -309,9 +356,8 @@ impl FmtSpec {
     width: Option<usize>,
     prec: Option<usize>,
     case: &Case,
-  ) -> ShResult<String> {
-    let arg = args.next().unwrap_or_default();
-    let f: f64 = arg.parse().unwrap_or(0.0);
+  ) -> ShResult<Rendered> {
+    let (f, err): (f64, _) = parse_num_arg(args.next());
     let p = prec.unwrap_or(6);
 
     let raw = match case {
@@ -322,7 +368,10 @@ impl FmtSpec {
     let abs_body = normalized.trim_start_matches('-').to_string();
     let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
 
-    Ok(pad_to_width(&abs_body, sign, flags, width, true))
+    Ok(Rendered {
+      text: pad_to_width(&abs_body, sign, flags, width, true),
+      errors: err.into_iter().collect(),
+    })
   }
 
   fn apply_shortest_float<I: Iterator<Item = String>>(
@@ -332,9 +381,8 @@ impl FmtSpec {
     width: Option<usize>,
     prec: Option<usize>,
     case: &Case,
-  ) -> ShResult<String> {
-    let arg = args.next().unwrap_or_default();
-    let f: f64 = arg.parse().unwrap_or(0.0);
+  ) -> ShResult<Rendered> {
+    let (f, err): (f64, _) = parse_num_arg(args.next());
     // %g: precision is number of significant digits (default 6, minimum 1).
     let p = prec.unwrap_or(6).max(1);
 
@@ -371,7 +419,10 @@ impl FmtSpec {
     let abs_body = body.trim_start_matches('-').to_string();
     let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
 
-    Ok(pad_to_width(&abs_body, sign, flags, width, true))
+    Ok(Rendered {
+      text: pad_to_width(&abs_body, sign, flags, width, true),
+      errors: err.into_iter().collect(),
+    })
   }
 
   fn apply_char<I: Iterator<Item = String>>(
@@ -695,6 +746,28 @@ fn strip_trailing_zeros(s: &str) -> String {
   }
 }
 
+pub(super) enum PrintfErr {
+  BadNumber(String),
+}
+
+pub(super) struct Rendered {
+  text: String,
+  errors: Vec<PrintfErr>,
+}
+
+impl Rendered {
+  pub fn new(text: String) -> Self {
+    Self {
+      text,
+      errors: vec![],
+    }
+  }
+
+  pub fn merge_errors(&mut self, other: Self) {
+    self.errors.extend(other.errors);
+  }
+}
+
 pub(super) struct Printf;
 impl super::Builtin for Printf {
   fn execute(&self, args: super::BuiltinArgs) -> crate::ShResult<()> {
@@ -706,31 +779,80 @@ impl super::Builtin for Printf {
     let remaining: Vec<String> = argv.collect();
     let mut values = remaining.into_iter().peekable();
 
+    // Set when any present numeric argument fails to convert; printf still emits
+    // the `0` fallback and continues, but exits non-zero (POSIX).
+    let mut had_error = false;
+
     if formatter.has_specs() {
       // Recycle the format string until args are exhausted. If a full cycle
       // consumes no arguments (e.g. the only spec is `%%`), stop instead of
       // looping forever.
       loop {
         let before = values.len();
-        let out = formatter.apply_once(&mut values)?;
-        out!("{out}");
+        let rendered = formatter.apply_once(&mut values)?;
+        out!("{}", rendered.text);
+        had_error |= emit_printf_errors(&rendered.errors);
         if values.peek().is_none() || values.len() == before {
           break;
         }
       }
     } else {
       // No specs: emit format once, ignore extra args.
-      let out = formatter.apply_once(&mut values)?;
-      out!("{out}");
+      let rendered = formatter.apply_once(&mut values)?;
+      out!("{}", rendered.text);
+      had_error |= emit_printf_errors(&rendered.errors);
     }
 
-    with_status(0)
+    with_status(i32::from(had_error))
   }
 }
 
 #[cfg(test)]
 mod tests {
+  use crate::state;
   use crate::tests::testutil::{TestGuard, test_input};
+
+  // ===================== invalid-number handling =====================
+
+  #[test]
+  fn printf_invalid_number_exits_nonzero() {
+    let _g = TestGuard::new();
+    test_input("printf '%d' abc").unwrap();
+    assert_eq!(state::Shed::get_status(), 1);
+  }
+
+  #[test]
+  fn printf_invalid_number_still_prints_fallback() {
+    // A bad number is a soft error: the width-formatted `0` is still emitted
+    // (stdout), alongside the diagnostic (stderr; the test harness merges them).
+    let g = TestGuard::new();
+    test_input("printf '[%5d]' abc").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.starts_with("[    0]"),
+      "fallback output missing: {out:?}"
+    );
+    assert!(
+      out.contains("printf: abc: invalid number"),
+      "diagnostic missing: {out:?}"
+    );
+  }
+
+  #[test]
+  fn printf_missing_number_arg_is_silent_success() {
+    // Fewer args than conversions: the missing one is `0` with no diagnostic
+    // and a zero exit status (bash), distinct from a present-but-invalid arg.
+    let _g = TestGuard::new();
+    test_input("printf '%d %d' 5").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn printf_valid_numbers_exit_zero() {
+    let _g = TestGuard::new();
+    test_input("printf '%d %.2f %x %g' 42 3.14 255 0.5").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
 
   // ===================== Basic conversions =====================
 
