@@ -1463,6 +1463,9 @@ impl Dispatcher {
       log::trace!("Forking builtin: {cmd_name}");
       self.run_fork(cmd_name, |s| {
         if let Err(e) = builtin.setup_builtin(cmd, s) {
+          if let ShErrKind::CleanExit(code) = e.kind() {
+            lifecycle::exit_shed(true, *code);
+          }
           e.print_error();
         }
       })?;
@@ -2140,6 +2143,37 @@ mod tests {
     // Loop body ended with `false` (status 1), but the loop itself
     // completed normally when the condition failed, so status should be 0
     assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  // ===================== pipeline `exit` stage =====================
+
+  #[test]
+  fn pipeline_last_stage_exit_sets_status() {
+    // A bare `exit N` pipeline stage sets the pipeline status to N (bash), not
+    // print the CleanExit box and drop it. `exit` forks (always_forks), so this
+    // exercises the forked-builtin CleanExit handling in `run_fork`/`exec_builtin`.
+    let _g = TestGuard::new();
+    test_input("false | exit 3").unwrap();
+    assert_eq!(state::Shed::get_status(), 3);
+  }
+
+  #[test]
+  fn pipeline_exit_stage_respects_pipefail() {
+    let _g = TestGuard::new();
+    test_input("set -o pipefail; true | exit 4").unwrap();
+    assert_eq!(state::Shed::get_status(), 4);
+  }
+
+  #[test]
+  fn pipeline_exit_stage_does_not_kill_shell() {
+    // `exit` in a stage terminates only that stage's subshell; the parent shell
+    // keeps running the rest of the input.
+    let g = TestGuard::new();
+    test_input("echo hi | exit 0; echo marker").unwrap();
+    assert!(
+      g.read_output().contains("marker"),
+      "shell did not continue after a pipeline `exit` stage"
+    );
   }
 
   // ===================== if/elif/else status =====================
