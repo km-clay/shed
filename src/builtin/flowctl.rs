@@ -543,14 +543,14 @@ mod tests {
   fn exit_returns_clean_exit() {
     let _g = TestGuard::new();
     test_input("exit 0").ok();
-    assert_ne!(state::Shed::get_status(), 0);
+    assert_eq!(state::Shed::get_status(), 0);
   }
 
   #[test]
   fn exit_with_code() {
     let _g = TestGuard::new();
     test_input("exit 5").ok();
-    assert_ne!(state::Shed::get_status(), 0);
+    assert_eq!(state::Shed::get_status(), 5);
   }
 
   #[test]

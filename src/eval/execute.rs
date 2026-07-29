@@ -1471,8 +1471,14 @@ impl Dispatcher {
       })?;
       Ok(())
     } else if let Err(e) = builtin.setup_builtin(cmd, self) {
-      let code = Shed::get_status();
-      if code == 0 {
+      let is_flow_ctl = matches!(
+        e.kind(),
+        ShErrKind::CleanExit(_)
+          | ShErrKind::FuncReturn(_)
+          | ShErrKind::LoopBreak(_)
+          | ShErrKind::LoopContinue(_)
+      );
+      if !is_flow_ctl && Shed::get_status() == 0 {
         Shed::set_status(1);
       }
       Err(e)

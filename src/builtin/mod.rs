@@ -384,7 +384,11 @@ pub(super) trait Builtin: Sync {
         };
 
         if should_propagate {
-          Shed::set_status(1);
+          let status = match e.kind() {
+            ShErrKind::CleanExit(code) => *code,
+            _ => 1,
+          };
+          Shed::set_status(status);
           Err(e.with_context(context.iter()))
         } else {
           e.with_context(context.iter()).print_error();
@@ -892,6 +896,22 @@ pub mod tests {
     state::{self, vars::VarFlags},
     tests::testutil::{TestGuard, canon, has_cmd, test_input},
   };
+
+  // ===================== exit status propagation =====================
+
+  #[test]
+  fn exit_leaves_status_equal_to_its_code() {
+    // Regression: `setup_builtin` blanket-set `$?`=1 on a propagated CleanExit,
+    // so interactively `exit N` exited with 1 (main.rs stores get_status() on
+    // normal completion). The status must now equal the exit code.
+    let _g = TestGuard::new();
+    for code in [5, 0, 42, 300] {
+      // exit raises CleanExit and propagates out of exec_nonint as an Err.
+      let _ = exec_nonint(format!("exit {code}").into(), None);
+      // `$?` is byte-masked, so 300 -> 44.
+      assert_eq!(Shed::get_status(), code % 256, "exit {code}");
+    }
+  }
 
   // ===================== xtrace (set -x) covers builtins =====================
 
