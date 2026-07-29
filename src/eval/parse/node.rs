@@ -220,7 +220,10 @@ impl Node {
 }
 
 bitflags! {
-#[derive(Clone,Copy,Debug)]
+  /// Bitfield containing miscellaneous info about a node
+  ///
+  /// This info is consumed by the parser and dispatcher
+  #[derive(Clone,Copy,Debug)]
   pub struct NdFlags: u32 {
     const BACKGROUND    = 1 << 0;
     const FORK_BUILTINS = 1 << 1;
@@ -235,12 +238,18 @@ bitflags! {
   }
 }
 
+/// A conditional AST node
+///
+/// Used in `while`/`until`/`if` conditions
 #[derive(Clone, Debug)]
 pub(crate) struct CondNode {
   pub cond: Box<Node>,
   pub body: Box<Node>,
 }
 
+/// A case block AST node
+///
+/// Used in `case` statements
 #[derive(Clone, Debug)]
 pub(crate) struct CaseNode {
   pub patterns: Vec<Tk>,
@@ -328,6 +337,10 @@ impl NdRule {
   }
 }
 
+/// The various types of AST nodes
+///
+/// A load-bearing component of `shed`'s execution logic.
+/// Each member contains all of the data required to execute the associated type of statement
 #[derive(Clone, Debug)]
 pub(crate) enum NdRule {
   List {

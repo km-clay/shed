@@ -501,7 +501,10 @@ impl ParseStream {
 
     let arith_tk = self.next_tk().unwrap(); // we checked already
     extend_span!(*span, arith_tk.clone().span);
-    let (init, cond, step) = split_for_arith_tk(&arith_tk)?;
+    let (init, cond, step) = match split_for_arith_tk(&arith_tk)? {
+      None => (None, None, None),
+      Some((init, cond, step)) => (Some(init), Some(cond), Some(step)),
+    };
     self.catch_separator(span);
 
     if !self.check_keyword("do") {
@@ -945,6 +948,32 @@ mod parse_for_arith_tests {
       .unwrap();
     let out = g.read_output();
     assert!(out.contains('6'), "expected 1+2+3=6, got: {out:?}");
+  }
+
+  #[test]
+  fn arith_for_loop_with_grouped_subexpr_in_clause() {
+    // A clause ending in `)` (grouping) must survive header stripping: the
+    // `((`/`))` delimiters come off but the inner `(1+1)` group stays.
+    let g = TestGuard::new();
+    test_input("for (( i=0; i<6; i=i+(1+1) )); do printf '%s ' $i; done").unwrap();
+    let out = g.read_output();
+    assert_eq!(out, "0 2 4 ", "got: {out:?}");
+  }
+
+  #[test]
+  fn arith_for_loop_empty_clauses_still_rejected() {
+    // Pinned behavior: `for ((;;))` (empty clauses) is not supported and parses
+    // to an error today. Header stripping must not silently change that.
+    let _g = TestGuard::new();
+    // A parse error prints but leaves $? untouched, so assert no infinite loop
+    // and that the body never ran (no output) rather than a status code.
+    let g2 = TestGuard::new();
+    test_input("for ((;;)); do echo ran; break; done").ok();
+    assert_eq!(
+      g2.read_output(),
+      "",
+      "empty-clause for-loop should not run its body"
+    );
   }
 
   #[test]

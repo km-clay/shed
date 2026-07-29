@@ -330,6 +330,28 @@ impl Tk {
     self.span.rebase_into(outer_span, offset);
     self
   }
+
+  /// Strip the leading/trailing parenthesis of an arithmetic statement
+  ///
+  /// returns a new `Tk` instead of mutating in-place. Altering spans directly
+  /// feels like a potential footgun.
+  pub fn strip_arith_header(&self) -> ShResult<Self> {
+    let s = self.as_str();
+    let trimmed = s.trim();
+
+    if trimmed.len() < 4 || !trimmed.starts_with("((") || !trimmed.ends_with("))") {
+      return Err(sherr!(ParseErr @ self.span.clone(), "malformed arithmetic for-loop header"));
+    }
+
+    let base = self.span.range.start;
+    let start = base + (s.len() - s.trim_start().len()) + 2;
+    let end = base + (s.trim_end().len()) - 2;
+
+    Ok(Self::new(
+      self.class.clone(),
+      Span::new(start..end, self.source()),
+    ))
+  }
 }
 
 impl Display for Tk {

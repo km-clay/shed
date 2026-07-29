@@ -1221,21 +1221,21 @@ pub fn expand_arithmetic(expr: &str) -> ShResult<VarStr> {
 /// Strip `((...))` or `(...)` wrappers and evaluate. Convenience for call sites
 /// that receive the raw token including its delimiters.
 pub fn expand_arithmetic_wrapped(raw: &str) -> ShResult<VarStr> {
-  let mut expr = raw;
-
-  if expr.starts_with("((") {
-    expr = &expr[2..];
-  } else if expr.starts_with('(') {
-    expr = &expr[1..];
+  let mut expr = raw.trim();
+  while let Some(inner) = strip_enclosing_parens(expr) {
+    expr = inner.trim();
   }
-
-  if expr.ends_with("))") {
-    expr = &expr[..expr.len() - 2];
-  } else if expr.ends_with(')') {
-    expr = &expr[..expr.len() - 1];
-  }
-
   expand_arithmetic(expr)
+}
+
+fn strip_enclosing_parens(s: &str) -> Option<&str> {
+  let inner = s.strip_prefix('(')?;
+  let mut chars = inner.chars().peekable();
+  let mut pos = 0;
+  // The opening `(` is already consumed (depth 1); scan to its matching `)`.
+  // `pos` lands just past that `)`; if that is the end of `inner`, the opening
+  // paren enclosed the whole string.
+  (util::scan_parens(&mut chars, &mut pos, 1) && pos == inner.len()).then(|| &inner[..pos - 1])
 }
 
 #[cfg(test)]
@@ -1248,6 +1248,40 @@ mod tests {
   fn arith(s: &str) -> f64 {
     // Tests pass raw expressions - no outer ((...)) wrapper stripping
     expand_arithmetic(s).unwrap().parse::<f64>().unwrap()
+  }
+
+  // ===================== Wrapper stripping =====================
+
+  #[test]
+  fn strip_enclosing_parens_only_full_enclosure() {
+    // Fully enclosing -> inner contents returned.
+    assert_eq!(strip_enclosing_parens("(a+b)"), Some("a+b"));
+    assert_eq!(strip_enclosing_parens("(2*(3))"), Some("2*(3)"));
+    assert_eq!(strip_enclosing_parens("((x))"), Some("(x)"));
+    // Leading `(` closes before the end -> NOT enclosing, left intact.
+    assert_eq!(strip_enclosing_parens("(1+2)+(3)"), None);
+    // No outer parens at all.
+    assert_eq!(strip_enclosing_parens("a+b"), None);
+  }
+
+  #[test]
+  fn wrapped_handles_body_ending_in_paren() {
+    // Regression: greedy `((`/`))` stripping dropped a real paren when the body
+    // began/ended with one, so these all raised a parse error.
+    let w = |s: &str| {
+      expand_arithmetic_wrapped(s)
+        .unwrap()
+        .parse::<f64>()
+        .unwrap()
+    };
+    assert_eq!(w("(5-(2))"), 3.0);
+    assert_eq!(w("(2*(3))"), 6.0);
+    assert_eq!(w("((1+2)+(3))"), 6.0);
+    assert_eq!(w("((1+2)*3)"), 9.0);
+    // Preserved: one pair, two pairs, and the comma operator inside a group.
+    assert_eq!(w("(2+3)"), 5.0);
+    assert_eq!(w("((2+3))"), 5.0);
+    assert_eq!(w("(a = 5, a * 2)"), 10.0);
   }
 
   // ===================== Basic math =====================

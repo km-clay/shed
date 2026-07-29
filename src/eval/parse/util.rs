@@ -120,16 +120,14 @@ impl ParseStream {
 }
 
 #[expect(clippy::type_complexity)]
-pub(super) fn split_for_arith_tk(
-  tk: &Tk,
-) -> ShResult<(Option<Box<Node>>, Option<Box<Node>>, Option<Box<Node>>)> {
+pub(super) fn split_for_arith_tk(tk: &Tk) -> ShResult<Option<(Box<Node>, Box<Node>, Box<Node>)>> {
   let span = tk.span.clone();
-  let mut tks = split_tk(tk, ";").into_iter();
+  let mut tks = split_tk(&tk.strip_arith_header()?, ";").into_iter();
 
   let Some(init_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing init statement"));
   };
-  let init = Some(Box::new(Node {
+  let init = Box::new(Node {
     class: NdRule::Arithmetic {
       body: init_tk.clone(),
     },
@@ -137,12 +135,12 @@ pub(super) fn split_for_arith_tk(
     redirs: vec![],
     span: init_tk.span,
     context: VecDeque::default().into(),
-  }));
+  });
 
   let Some(cond_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing condition statement"));
   };
-  let cond = Some(Box::new(Node {
+  let cond = Box::new(Node {
     class: NdRule::Arithmetic {
       body: cond_tk.clone(),
     },
@@ -150,12 +148,12 @@ pub(super) fn split_for_arith_tk(
     redirs: vec![],
     span: cond_tk.span,
     context: VecDeque::default().into(),
-  }));
+  });
 
   let Some(step_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing step statement"));
   };
-  let step = Some(Box::new(Node {
+  let step = Box::new(Node {
     class: NdRule::Arithmetic {
       body: step_tk.clone(),
     },
@@ -163,9 +161,9 @@ pub(super) fn split_for_arith_tk(
     redirs: vec![],
     span: step_tk.span,
     context: VecDeque::default().into(),
-  }));
+  });
 
-  Ok((init, cond, step))
+  Ok(Some((init, cond, step)))
 }
 
 pub(super) fn parse_err_full(reason: &str, blame: &Span, context: LabelCtx) -> ShErr {
