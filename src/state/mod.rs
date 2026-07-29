@@ -525,7 +525,8 @@ impl Shed {
   }
 
   pub fn get_status() -> i32 {
-    SHED.with(|shed| shed.status_code.load(Ordering::Relaxed))
+    // mask to 8 bits to match bash behavior
+    SHED.with(|shed| shed.status_code.load(Ordering::Relaxed)) & 255
   }
   pub fn set_status(code: i32) {
     SHED.with(|shed| shed.status_code.store(code, Ordering::Relaxed));

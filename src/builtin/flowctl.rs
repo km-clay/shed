@@ -300,6 +300,22 @@ mod tests {
   use crate::state;
   use crate::tests::testutil::{TestGuard, test_input};
 
+  // ===================== return/exit status masking =====================
+
+  #[test]
+  fn return_status_masked_to_byte() {
+    // `$?` is an 8-bit value; `return N` uses `N & 255` (get_status masks).
+    let _g = TestGuard::new();
+    for (arg, expect) in [(300, 44), (256, 0), (257, 1), (-1, 255), (-2, 254)] {
+      test_input(&format!("f() {{ return {arg}; }}; f")).unwrap();
+      assert_eq!(
+        state::Shed::get_status(),
+        expect,
+        "return {arg} should give $?={expect}"
+      );
+    }
+  }
+
   // ===================== break =====================
 
   #[test]
