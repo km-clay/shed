@@ -438,7 +438,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::RemShortestPrefix(prefix) => {
         let value = Shed::vars(get);
-        let expanded = Expander::from_raw_no_brace(&prefix, TkFlags::empty())
+        let expanded = Expander::from_raw_no_brace_pattern(&prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let pattern = compile_glob(&expanded).unwrap();
@@ -454,7 +454,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::RemLongestPrefix(prefix) => {
         let value = Shed::vars(get);
-        let expanded = Expander::from_raw_no_brace(&prefix, TkFlags::empty())
+        let expanded = Expander::from_raw_no_brace_pattern(&prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let pattern = compile_glob(&expanded).unwrap();
@@ -473,7 +473,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::RemShortestSuffix(suffix) => {
         let value = Shed::vars(get);
-        let expanded = Expander::from_raw_no_brace(&suffix, TkFlags::empty())
+        let expanded = Expander::from_raw_no_brace_pattern(&suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let pattern = compile_glob(&expanded).unwrap();
@@ -492,7 +492,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::RemLongestSuffix(suffix) => {
         let value = Shed::vars(get);
-        let expanded_suffix = Expander::from_raw_no_brace(&suffix, TkFlags::empty())
+        let expanded_suffix = Expander::from_raw_no_brace_pattern(&suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let pattern = compile_glob(&expanded_suffix).unwrap();
@@ -508,10 +508,10 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::ReplaceFirstMatch(search, replace) => {
         let value = Shed::vars(get);
-        let expanded_search = Expander::from_raw(&search, TkFlags::empty())
+        let expanded_search = Expander::from_raw_pattern(&search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let expanded_replace = Expander::from_raw(&replace, TkFlags::empty())
+        let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
         let regex = glob_to_regex(&expanded_search, false); // unanchored pattern
@@ -529,10 +529,10 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::ReplaceAllMatches(search, replace) => {
         let value = Shed::vars(get);
-        let expanded_search = Expander::from_raw(&search, TkFlags::empty())
+        let expanded_search = Expander::from_raw_pattern(&search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let expanded_replace = Expander::from_raw(&replace, TkFlags::empty())
+        let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
         let regex = glob_to_regex(&expanded_search, false);
@@ -552,10 +552,10 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::ReplacePrefix(search, replace) => {
         let value = Shed::vars(get);
-        let expanded_search = Expander::from_raw(&search, TkFlags::empty())
+        let expanded_search = Expander::from_raw_pattern(&search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let expanded_replace = Expander::from_raw(&replace, TkFlags::empty())
+        let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
         let pattern = compile_glob(&expanded_search).unwrap();
@@ -571,10 +571,10 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::ReplaceSuffix(search, replace) => {
         let value = Shed::vars(get);
-        let expanded_search = Expander::from_raw(&search, TkFlags::empty())
+        let expanded_search = Expander::from_raw_pattern(&search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let expanded_replace = Expander::from_raw(&replace, TkFlags::empty())
+        let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
         let pattern = compile_glob(&expanded_search).unwrap();
@@ -1088,6 +1088,37 @@ mod tests {
 
     let out = guard.read_output();
     assert_eq!(out, "hello world\n");
+  }
+
+  // A bare `(` in a strip pattern is a literal pattern char, not a subshell.
+  // Regression: the token-level unescape consumed `(` as a subshell marker,
+  // so `${v%(x)}` never matched (and in some cases ran the parenthesized
+  // text as a command). Must work both unquoted and inside double quotes.
+  #[test]
+  fn param_exp_suffix_removal_bare_parens() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("v", VarKind::Str("abc(x)".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo ${v%(x)}").unwrap();
+    assert_eq!(guard.read_output(), "abc\n");
+  }
+
+  #[test]
+  fn param_exp_suffix_removal_bare_parens_double_quoted() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("v", VarKind::Str("abc(x)".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo \"${v%(x)}\"").unwrap();
+    assert_eq!(guard.read_output(), "abc\n");
+  }
+
+  #[test]
+  fn param_exp_prefix_removal_bare_parens() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("v", VarKind::Str("(x)abc".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo ${v#(x)}").unwrap();
+    assert_eq!(guard.read_output(), "abc\n");
   }
 
   #[test]
@@ -1607,5 +1638,75 @@ mod tests {
     assert_eq!(test_param_expansion("x:0:1").unwrap().as_str(), "田");
     assert_eq!(test_param_expansion("x:1:1").unwrap().as_str(), "中");
     assert_eq!(test_param_expansion("x:2:2").unwrap().as_str(), "さん");
+  }
+
+  // ─── pattern operands must not treat `(` as a subshell ────────────
+  // A bare `(` in a strip/replace pattern was being consumed by the
+  // subshell recognizer (ExpandFlags::SUBSHELL) before reaching the glob
+  // matcher, so `${v%(x)}` never matched. Only `$(...)` should run.
+  #[test]
+  fn rem_shortest_suffix_strips_literal_parens() {
+    let _g = TestGuard::new();
+    set("x", "abc(x)");
+    let result = test_param_expansion("x%(x)").unwrap();
+    assert_eq!(result.as_str(), "abc");
+  }
+
+  #[test]
+  fn rem_shortest_prefix_strips_literal_parens() {
+    let _g = TestGuard::new();
+    set("x", "(x)abc");
+    let result = test_param_expansion("x#(x)").unwrap();
+    assert_eq!(result.as_str(), "abc");
+  }
+
+  #[test]
+  fn rem_longest_suffix_strips_literal_parens_glob() {
+    let _g = TestGuard::new();
+    set("x", "abc(x)(x)");
+    let result = test_param_expansion("x%%(x)").unwrap();
+    assert_eq!(result.as_str(), "abc(x)");
+  }
+
+  #[test]
+  fn rem_longest_prefix_strips_literal_parens_glob() {
+    let _g = TestGuard::new();
+    set("x", "(x)(x)abc");
+    let result = test_param_expansion("x##(x)").unwrap();
+    assert_eq!(result.as_str(), "(x)abc");
+  }
+
+  #[test]
+  fn rem_suffix_glob_with_open_paren_matches() {
+    let _g = TestGuard::new();
+    set("x", "abc(x)");
+    let result = test_param_expansion("x%(*)").unwrap();
+    assert_eq!(result.as_str(), "abc");
+  }
+
+  #[test]
+  fn replace_first_match_with_parens_in_search() {
+    let _g = TestGuard::new();
+    set("x", "abc(x)");
+    let result = test_param_expansion("x/abc(x)/X").unwrap();
+    assert_eq!(result.as_str(), "X");
+  }
+
+  #[test]
+  fn replace_suffix_with_parens_in_search() {
+    let _g = TestGuard::new();
+    set("x", "abc(x)");
+    // Anchored suffix replace uses `${v/%pat/rep}`.
+    let result = test_param_expansion("x/%abc(x)/X").unwrap();
+    assert_eq!(result.as_str(), "X");
+  }
+
+  #[test]
+  fn replace_first_match_with_parens_in_replacement() {
+    let _g = TestGuard::new();
+    set("x", "abc");
+    // A bare `(` in the replacement is literal, not a subshell.
+    let result = test_param_expansion("x/abc/(x)").unwrap();
+    assert_eq!(result.as_str(), "(x)");
   }
 }
