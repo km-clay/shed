@@ -20,6 +20,7 @@ The following builtins are available:
   `disown`      remove a job from the job table             |builtin-disown|
   `echo`        print arguments to stdout                   |builtin-echo|
   `eval`        evaluate a string as shell input            |builtin-eval|
+  `excmd`       define or list ex-mode command aliases      |builtin-excmd|
   `exec`        replace the shell process with a command    |builtin-exec|
   `exit`        exit the shell                              |builtin-exit|
   `export`      mark variables for export to environment    |builtin-export|
@@ -115,6 +116,41 @@ UNALIAS                                          *builtin-unalias* *unalias*
 
       `unalias ll`               remove the ll alias
       `unalias g gs`             remove multiple aliases
+
+==============================================================================
+EXCMD                                            *builtin-excmd* *excmd*
+
+  `excmd [name[=value] ...]`
+
+  Define or list ex-mode command aliases. An ex command alias maps a
+  {name} to an ex-command body. When {name} is used as the command
+  word of an ex-mode command line (see |ex|), it is textually replaced
+  with its body before the line is parsed. This is the ex-mode analog
+  of |alias|, which operates on ordinary shell commands.
+
+  With no arguments, lists all defined ex command aliases in the form
+  `name="value"`, valid input that can be reused to recreate them.
+
+  With arguments of the form `name=value`, defines an alias. Multiple
+  may be defined in a single call. With an argument that has no `=`,
+  prints the current definition of that alias.
+
+  Only the leading command word is replaced, so an address or range
+  prefix on the invocation is preserved and composes with the body. An
+  alias body may itself begin with another alias; expansion repeats
+  until no alias matches. Cyclic definitions terminate safely.
+
+  Examples:
+
+      `excmd`                     list all ex command aliases
+      `excmd sort='%!sort'`        define ex command `sort`
+      `excmd sort`                print: sort='!sort'
+
+  With `sort` defined as above, in ex mode:
+
+      `:sort`          → `:%!sort`     filter the whole buffer through sort
+
+  See also: |ex| |builtin-alias|
 
 ==============================================================================
 ARROPS                                           *builtin-arrops* *arrops*

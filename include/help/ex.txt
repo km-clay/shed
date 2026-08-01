@@ -399,4 +399,19 @@ command history navigable with `Up` and `Down`.
       `:stash apply commit`
 
 ==============================================================================
-See also: |keybinds| |autocmd| |prompt|
+CUSTOM COMMANDS                                                *ex-alias*
+
+  Ex-mode command names can be aliased with the |excmd|(builtin-excmd)
+  builtin. An alias maps a name to an ex-command body, expanded before
+  the line is parsed; only the leading command word is replaced, so an
+  address or range prefix on the invocation is preserved.
+
+      `excmd sort='!sort'`
+
+  Then in ex mode:
+
+      `:%sort`          filter the whole buffer through sort
+      `:'<,'>sort`      filter the selection through sort
+
+==============================================================================
+See also: |keybinds| |autocmd| |prompt| |builtin-excmd|
