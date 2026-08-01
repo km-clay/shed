@@ -1576,6 +1576,9 @@ impl SimpleCompleter {
     let (strat, replace_span, _leaf_cursor_pos) = CompStrat::resolve(&tks, cursor_pos);
 
     self.token_span = (replace_span.range().start, replace_span.range().end);
+
+    // reset this inbetween completions
+    self.add_space = false;
     let mut result = match strat {
       CompStrat::Var { prefix } => CompResult::from_candidates(complete_vars(&prefix)),
       CompStrat::Tilde { prefix } => CompResult::from_candidates(complete_users(&prefix)),
@@ -1599,18 +1602,14 @@ impl SimpleCompleter {
         let ctx = Self::build_comp_ctx(&tks, line, cursor_pos);
         match Self::try_comp_spec(&ctx)? {
           CompSpecResult::Match { result, flags } => {
-            if flags.contains(CompOptFlags::SPACE) {
-              self.add_space = true;
-            }
+            self.add_space = flags.contains(CompOptFlags::SPACE);
             result
           }
           CompSpecResult::NoSpec => {
             CompResult::from_candidates(with_expanded_prefix(&path, complete_path))
           }
           CompSpecResult::NoMatch { flags } => {
-            if flags.contains(CompOptFlags::SPACE) {
-              self.add_space = true;
-            }
+            self.add_space = flags.contains(CompOptFlags::SPACE);
             if flags.contains(CompOptFlags::DIRNAMES) || self.dirs_only {
               CompResult::from_candidates(with_expanded_prefix(&path, complete_dirs))
             } else if flags.contains(CompOptFlags::DEFAULT) {

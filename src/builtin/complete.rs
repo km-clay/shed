@@ -278,6 +278,7 @@ fn build_source(opts: &[Opt], argv: &[(VarStr, Span)]) -> VarStr {
 
 pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
   let mut comp_opts = CompOpts::default();
+  comp_opts.opt_flags |= CompOptFlags::SPACE;
 
   for opt in opts {
     match opt {

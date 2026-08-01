@@ -1820,3 +1820,35 @@ fn score_cb_applies_in_extends_branch() {
   sel.set_query("ab");
   assert_eq!(sel.filtered().first().and_then(|s| s.score), Some(777));
 }
+
+#[test]
+fn compspec_appends_space_by_default() {
+  use crate::tests::testutil::test_input;
+  let _g = TestGuard::new();
+  test_input("complete -W 'foobar baz' spcmd").unwrap();
+
+  let mut comp = SimpleCompleter::default();
+  let line = "spcmd foob".to_string();
+  let cursor = line.len();
+  let _ = comp.get_candidates(&line, cursor, super::CompSource::Shell);
+  assert!(
+    comp.add_space,
+    "default spec should append a trailing space"
+  );
+}
+
+#[test]
+fn compspec_nospace_suppresses_space() {
+  use crate::tests::testutil::test_input;
+  let _g = TestGuard::new();
+  test_input("complete -W 'foobar baz' -o nospace nscmd").unwrap();
+
+  let mut comp = SimpleCompleter::default();
+  let line = "nscmd foob".to_string();
+  let cursor = line.len();
+  let _ = comp.get_candidates(&line, cursor, super::CompSource::Shell);
+  assert!(
+    !comp.add_space,
+    "-o nospace should suppress the trailing space"
+  );
+}
