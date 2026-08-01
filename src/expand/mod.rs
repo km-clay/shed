@@ -165,10 +165,6 @@ impl Expander {
   pub fn from_raw(raw: &str, flags: TkFlags) -> Self {
     Self::from_raw_inner(raw, flags, true, false)
   }
-  #[allow(dead_code)]
-  pub fn from_raw_no_brace(raw: &str, flags: TkFlags) -> Self {
-    Self::from_raw_inner(raw, flags, false, false)
-  }
   /// Like `from_raw` but the operand is a parameter-expansion pattern or
   /// replacement (`${var#pat}`, `${var%pat}`, `${var/pat/rep}`): a bare `(` is
   /// literal, not a subshell.
