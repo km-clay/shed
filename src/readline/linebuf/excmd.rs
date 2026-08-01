@@ -71,7 +71,7 @@ impl super::LineBuf {
       ExNdRule::Write(write_dest) /*---------*/ => self.ex_write(write_dest),
       ExNdRule::RepeatSubstitute /*==========*/ => self.repeat_substitute(cmd),
       ExNdRule::RepeatGlobal /*--------------*/ => self.repeat_global(cmd),
-      ExNdRule::Shell(sh_cmd) /*=============*/ => self.ex_shell_cmd(cmd, sh_cmd),
+      ExNdRule::Shell(sh_cmd) /*=============*/ => self.ex_shell_cmd(address, sh_cmd),
       ExNdRule::Stash(stash_args) /*---------*/ => self.ex_stash(stash_args),
       ExNdRule::Substitute { pat, repl, flags } => self.ex_substitute(cmd, pat, repl, *flags, address.as_ref()),
       ExNdRule::Global { pat, nested } /*----*/ => self.ex_global(cmd, *bang, pat, nested, address),
@@ -654,16 +654,23 @@ impl super::LineBuf {
     }
   }
 
-  fn ex_shell_cmd(&mut self, cmd: &EditCmd, sh_cmd: &str) -> ShResult<()> {
-    let Some(MotionKind::Line {
-      start,
-      end,
-      inclusive,
-    }) = self.eval_motion(cmd)?
-    else {
+  fn ex_shell_cmd(&mut self, addr: Option<AddressRange>, sh_cmd: &str) -> ShResult<()> {
+    let lines = if addr.is_some() {
+      self.lines_for_address(addr.as_ref())?
+    } else {
       self.run_shell_cmd(sh_cmd, None)?;
       return Ok(());
     };
+
+    if lines.is_empty() {
+      self.run_shell_cmd(sh_cmd, None)?;
+      return Ok(());
+    }
+
+    let start = *lines.first().unwrap();
+    let end = *lines.last().unwrap();
+    let inclusive = matches!(addr, Some(AddressRange::Range(_, _)));
+
     let (s, mut e) = ordered(start, end);
     if !inclusive {
       e = e.saturating_sub(1);
@@ -1305,7 +1312,7 @@ mod tests {
 
   mod ex_shell_cmd_tests {
     use super::*;
-    use crate::readline::editcmd::{Cmd, EditCmd, LineAddr, Motion};
+    use crate::readline::editcmd::LineAddr;
 
     /// No motion attached → `ex_shell_cmd` falls through to
     /// `run_shell_cmd(_, None)` and the buffer is mutated only by
@@ -1314,11 +1321,10 @@ mod tests {
     fn no_motion_runs_command_without_replacing_lines() {
       let _g = TestGuard::new();
       let mut buf = make_buf("first\nsecond\nthird");
-      let cmd = EditCmd::new();
       // Assigning BUFFER inside the no-stdin path updates the linebuf
       // via run_shell_cmd's read-back. Use it to confirm the command
       // ran rather than the line-range path being taken.
-      buf.ex_shell_cmd(&cmd, "BUFFER=after_no_motion").unwrap();
+      buf.ex_shell_cmd(None, "BUFFER=after_no_motion").unwrap();
       assert_eq!(buf.to_string(), "after_no_motion");
     }
 
@@ -1335,9 +1341,9 @@ mod tests {
       let _g = TestGuard::new();
       let mut buf = make_buf("alpha\nbeta\ngamma");
       // Single-line motion targeting row 1 (zero-indexed: "beta").
-      let mut cmd = EditCmd::new();
-      cmd.set_motion(Cmd(1, Motion::Line(LineAddr::Number(2))));
-      buf.ex_shell_cmd(&cmd, "cat").unwrap();
+      buf
+        .ex_shell_cmd(Some(AddressRange::Single(LineAddr::Number(2))), "cat")
+        .unwrap();
       // Buffer should still contain all three originals — cat echoes
       // back what it read, so the splice replaces with identical text.
       let joined = buf.to_string();
