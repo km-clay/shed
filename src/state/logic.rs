@@ -473,6 +473,9 @@ impl LogTab {
       .ex_aliases
       .insert(name.into(), ShAlias::new(body.into(), source));
   }
+  pub fn remove_ex_alias(&mut self, name: &str) {
+    self.ex_aliases.remove(name);
+  }
   pub fn get_ex_alias(&self, name: &str) -> Option<ShAlias> {
     self.ex_aliases.get(name).cloned()
   }

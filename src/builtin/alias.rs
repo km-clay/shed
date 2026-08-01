@@ -1,5 +1,9 @@
+use crate::builtin::getopt::OptSpec;
+
 use super::{
-  ShResult, Shed, outln, sherr,
+  ShResult, Shed,
+  getopt::Opt,
+  outln, sherr,
   state::vars::{display_as_var, display_as_vars},
   varcmds::split_assignment_raw,
   with_status,
@@ -66,6 +70,9 @@ impl super::Builtin for Unalias {
 
 pub(super) struct ExCmd;
 impl super::Builtin for ExCmd {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::flag('r'), OptSpec::flag("remove")]
+  }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
       let output = Shed::logic(|l| display_as_vars(l.ex_aliases().iter()));
@@ -74,13 +81,27 @@ impl super::Builtin for ExCmd {
       return with_status(0);
     }
 
+    let mut remove = false;
+
+    for opt in &args.opts {
+      match opt {
+        Opt::Short('r') => remove = true,
+        Opt::Long(arg) if arg == "remove" => remove = true,
+        _ => {}
+      }
+    }
+
     for (arg, span) in args.argv {
       let (name, value) = split_assignment_raw(&arg);
 
-      if let Some(value) = value {
+      if !remove && let Some(value) = value {
         Shed::logic_mut(|l| l.insert_ex_alias(name, value, span.clone()));
       } else if let Some(alias) = Shed::logic(|l| l.get_ex_alias(name)) {
-        outln!("{}", display_as_var(name, alias.body()));
+        if remove {
+          Shed::logic_mut(|l| l.remove_ex_alias(name));
+        } else {
+          outln!("{}", display_as_var(name, alias.body()));
+        }
       } else {
         return Err(sherr!(
           SyntaxErr @ span,
