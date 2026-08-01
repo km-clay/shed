@@ -6,7 +6,7 @@ use crate::state::vars::VarStr;
 use crate::state::{
   Shed, scopes::ScopeStack, vars::ArrIndex, vars::VarFlags, vars::VarKind, vars::VarName,
 };
-use crate::util::{ShResult, compile_glob};
+use crate::util::{ShResult, compile_glob, split_at_unescaped_markers};
 use crate::{match_loop, util};
 use crate::{sherr, shopt, var};
 
@@ -43,6 +43,16 @@ pub enum ParamExp {
 /// The `allow_side_effects` thing prevents state-mutating stuff like "set if null" or expanding command subs
 /// It's set to false in places like the syntax highlighter where we really dont want to be silently executing
 /// unfinished commands.
+/// Split a `${var/pat/rep}` operand into its search pattern and replacement at
+/// the first unescaped, unquoted `/`. A missing separator means an empty
+/// replacement (`${var/pat}` deletes matches).
+fn split_search_repl(rest: &str) -> (String, String) {
+  match split_at_unescaped_markers(rest, "/") {
+    Some((pos, skip)) => (rest[..pos].to_string(), rest[pos + skip..].to_string()),
+    None => (rest.to_string(), String::new()),
+  }
+}
+
 pub fn parse_param_exp(s: &str, allow_side_effects: bool) -> ShResult<ParamExp> {
   use ParamExp as PE;
 
@@ -84,30 +94,24 @@ pub fn parse_param_exp(s: &str, allow_side_effects: bool) -> ShResult<ParamExp> 
     return Ok(PE::RemShortestSuffix(rest.to_string()));
   }
 
-  // Replacements
+  // Replacements. The pattern/replacement separator is the first `/` that is
+  // not escaped (by an `ESCAPE` marker) or quoted, so a literal `/` in the
+  // pattern (e.g. `${v/\//_}`) is honored.
   if let Some(rest) = s.strip_prefix("//") {
-    let mut parts = rest.splitn(2, '/');
-    let pattern = parts.next().unwrap_or("");
-    let repl = parts.next().unwrap_or("");
-    return Ok(PE::ReplaceAllMatches(pattern.to_string(), repl.to_string()));
+    let (pattern, repl) = split_search_repl(rest);
+    return Ok(PE::ReplaceAllMatches(pattern, repl));
   }
   if let Some(rest) = s.strip_prefix('/') {
     if let Some(rest) = rest.strip_prefix('%') {
-      let mut parts = rest.splitn(2, '/');
-      let pattern = parts.next().unwrap_or("");
-      let repl = parts.next().unwrap_or("");
-      return Ok(PE::ReplaceSuffix(pattern.to_string(), repl.to_string()));
+      let (pattern, repl) = split_search_repl(rest);
+      return Ok(PE::ReplaceSuffix(pattern, repl));
     } else if let Some(rest) = rest.strip_prefix('#') {
-      let mut parts = rest.splitn(2, '/');
-      let pattern = parts.next().unwrap_or("");
-      let repl = parts.next().unwrap_or("");
-      return Ok(PE::ReplacePrefix(pattern.to_string(), repl.to_string()));
+      let (pattern, repl) = split_search_repl(rest);
+      return Ok(PE::ReplacePrefix(pattern, repl));
     }
 
-    let mut parts = rest.splitn(2, '/');
-    let pattern = parts.next().unwrap_or("");
-    let repl = parts.next().unwrap_or("");
-    return Ok(PE::ReplaceFirstMatch(pattern.to_string(), repl.to_string()));
+    let (pattern, repl) = split_search_repl(rest);
+    return Ok(PE::ReplaceFirstMatch(pattern, repl));
   }
 
   // Fallback / assignment / alt
@@ -1119,6 +1123,128 @@ mod tests {
 
     test_input("echo ${v#(x)}").unwrap();
     assert_eq!(guard.read_output(), "abc\n");
+  }
+
+  // A backslash-escaped `}` inside a `${...}` replace pattern is a literal
+  // `}`, not the closing brace — both unquoted and inside double quotes. The
+  // double-quoted case regressed because `read_dub_quote` neutralized escapes
+  // by de-marking, which doesn't protect the char-driven `${...}` closer scan;
+  // it now emits an ESCAPE marker for `}` while inside a `${...}`.
+  #[test]
+  fn param_exp_replace_escaped_brace_unquoted() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("u", VarKind::Str("a}b".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo ${u/\\}/_}").unwrap();
+    assert_eq!(guard.read_output(), "a_b\n");
+  }
+
+  #[test]
+  fn param_exp_replace_escaped_brace_double_quoted() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("u", VarKind::Str("a}b".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo \"${u/\\}/_}\"").unwrap();
+    assert_eq!(guard.read_output(), "a_b\n");
+  }
+
+  // A `\}` *outside* any `${...}`, inside double quotes, keeps its backslash
+  // (bash leaves `"\}"` literal) — the escape protection must stay scoped to
+  // parameter expansions.
+  #[test]
+  fn double_quote_standalone_escaped_brace_keeps_backslash() {
+    let guard = TestGuard::new();
+    test_input("echo \"a\\}b\"").unwrap();
+    assert_eq!(guard.read_output(), "a\\}b\n");
+  }
+
+  // A backslash-escaped `/` in a `${v/pat/rep}` pattern is a literal `/`, not
+  // the pattern/replacement separator — both unquoted and double-quoted. Uses
+  // the marker-aware `split_at_unescaped_markers` split so the escaped `/`
+  // reaches the glob matcher instead of splitting the operand there.
+  #[test]
+  fn param_exp_replace_escaped_slash_unquoted() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("s", VarKind::Str("a/b".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo ${s/\\//_}").unwrap();
+    assert_eq!(guard.read_output(), "a_b\n");
+  }
+
+  #[test]
+  fn param_exp_replace_escaped_slash_double_quoted() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("s", VarKind::Str("a/b".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo \"${s/\\//_}\"").unwrap();
+    assert_eq!(guard.read_output(), "a_b\n");
+  }
+
+  // A single quote inside a `${...}` protects a structural char (`}`, `/`) as
+  // a quoted literal — even within double quotes, where a single quote is
+  // otherwise literal. bash re-enables single-quote quoting inside `${...}`.
+  #[test]
+  fn param_exp_replace_single_quoted_brace_double_quoted() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("u", VarKind::Str("a}b".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo \"${u/'}'/_}\"").unwrap();
+    assert_eq!(guard.read_output(), "a_b\n");
+  }
+
+  #[test]
+  fn param_exp_replace_single_quoted_slash_double_quoted() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("s", VarKind::Str("a/b".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo \"${s/'/'/_}\"").unwrap();
+    assert_eq!(guard.read_output(), "a_b\n");
+  }
+
+  // A single quote *outside* a `${...}` stays literal inside double quotes.
+  #[test]
+  fn double_quote_apostrophe_stays_literal() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("hi".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo \"${x}'s\"").unwrap();
+    assert_eq!(guard.read_output(), "hi's\n");
+  }
+
+  // A `"..."` nested inside a `${...}` that is itself inside double quotes
+  // opens a nested quoted region rather than closing the outer one, so the
+  // replacement is taken as the (quote-stripped) inner text. Previously the
+  // nested `"` terminated the expansion early, swallowing the rest.
+  #[test]
+  fn param_exp_replace_nested_double_quote() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("bar".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo \"${foo/bar/\"biz\"}\"").unwrap();
+    assert_eq!(guard.read_output(), "biz\n");
+  }
+
+  // A literal `'` inside that nested `"..."` must survive — the operand is
+  // re-expanded, and the second unescape pass has to preserve the existing
+  // quote-region markers rather than re-reading the `'` as a quote opener.
+  #[test]
+  fn param_exp_replace_nested_double_quote_with_apostrophe() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("bar".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo \"${foo/bar/\"'biz\"}\"").unwrap();
+    assert_eq!(guard.read_output(), "'biz\n");
+  }
+
+  // A `$var` inside the nested `"..."` still expands.
+  #[test]
+  fn param_exp_replace_nested_double_quote_expands_var() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("bar".into()), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("XX".into()), VarFlags::empty())).unwrap();
+
+    test_input("echo \"${foo/bar/\"$x\"}\"").unwrap();
+    assert_eq!(guard.read_output(), "XX\n");
   }
 
   #[test]

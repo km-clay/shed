@@ -149,14 +149,26 @@ fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
 
   while let Some(ch) = chars.next() {
     match ch {
-      // An existing ESCAPE marker (from a prior unescape pass, e.g. the
-      // marker-encoded operand of a parameter expansion) means the next
-      // char is literal — preserve both without re-processing, so e.g.
-      // `${v%\$(echo x)}` keeps `$(...)` literal instead of running it.
+      // An existing ESCAPE marker (from a prior unescape pass,
+      // e.g. the marker-encoded operand of a parameter expansion)
+      // means the next char is literal
       markers::ESCAPE => {
         result.push(markers::ESCAPE);
         if let Some(next_ch) = chars.next() {
           result.push(next_ch);
+        }
+      }
+      // An existing quote-region marker from a prior unescape pass.
+      // Its contents were already processed, so copy the whole region
+      // verbatim rather than re-scanning it
+      markers::DUB_QUOTE | markers::SNG_QUOTE => {
+        let closer = ch;
+        result.push(ch);
+        for inner in chars.by_ref() {
+          result.push(inner);
+          if inner == closer {
+            break;
+          }
         }
       }
       '~' if flags.contains(ExpandFlags::TILDE) && (last_was_word_break || first_char) => {
@@ -311,12 +323,23 @@ fn read_sng_quote(chars: &mut Peekable<Chars>, result: &mut String) {
 
 fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
   result.push(markers::DUB_QUOTE);
+
+  // the current depth of '${...}' expansions
+  let mut param_depth: u32 = 0;
+
   match_loop!(chars.next() => q_ch, {
     '\\' => {
       if let Some(next_ch) = chars.next() {
         match next_ch {
           '"' | '\\' | '`' | '$' | '!' => {
             // discard the backslash
+          }
+          '}' | '/' if param_depth > 0 => {
+            // `}` (the `${...}` closer) and `/` (the `${v/pat/rep}` separator)
+            // are detected by char-driven scans downstream, so a backslash
+            // escape on one inside a parameter expansion must be kept as an
+            // ESCAPE marker rather than neutralized by de-marking.
+            result.push(markers::ESCAPE);
           }
           _ => {
             result.push(q_ch);
@@ -331,12 +354,24 @@ fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
       result.push(sng_quote);
     }
     '$' => {
-      if read_varsub(chars, result) && chars.peek() == Some(&'(') {
-        chars.next();
-        read_subsh(chars, result);
+      if read_varsub(chars, result) {
+        if chars.peek() == Some(&'{') {
+          chars.next();
+          result.push('{');
+          param_depth = param_depth.saturating_add(1);
+        } else if chars.peek() == Some(&'(') {
+          chars.next();
+          read_subsh(chars, result);
+        }
       }
     }
+    '}' if param_depth > 0 => {
+      result.push('}');
+      param_depth = param_depth.saturating_sub(1);
+    }
+    '\'' if param_depth > 0 => read_sng_quote(chars, result),
     '`' => read_backtick(chars, result),
+    '"' if param_depth > 0 => read_dub_quote(chars, result),
     '"' => {
       result.push(markers::DUB_QUOTE);
       break;

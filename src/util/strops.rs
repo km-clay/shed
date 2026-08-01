@@ -5,7 +5,7 @@ use crate::{state::vars::VarStr, varstr};
 use super::{
   error::ShResult,
   eval::lex::{Span, Tk},
-  expand::{read_hex, read_octal, read_stty_escape},
+  expand::{markers, read_hex, read_octal, read_stty_escape},
   match_loop, sherr,
 };
 
@@ -176,17 +176,50 @@ pub fn split_at_unescaped(slice: &str, pat: &str) -> Option<(usize, usize)> {
 }
 
 pub fn split_at_any_unescaped(slice: &str, pats: &[&str]) -> Option<(usize, usize)> {
+  split_at_any_inner(slice, pats, '\\', '\'', '"')
+}
+
+/// Marker-aware counterpart of [`split_at_unescaped`], for strings that have
+/// already been through expansion unescaping. There the escape is
+/// `markers::ESCAPE` and quotes are the `SNG_QUOTE`/`DUB_QUOTE` markers rather
+/// than literal `\`, `'`, `"`. A string only ever uses one scheme (raw or
+/// marker-encoded), never a mix, so this is a separate variant rather than a
+/// combined one.
+pub fn split_at_unescaped_markers(slice: &str, pat: &str) -> Option<(usize, usize)> {
+  split_at_any_unescaped_markers(slice, &[pat])
+}
+
+pub fn split_at_any_unescaped_markers(slice: &str, pats: &[&str]) -> Option<(usize, usize)> {
+  split_at_any_inner(
+    slice,
+    pats,
+    markers::ESCAPE,
+    markers::SNG_QUOTE,
+    markers::DUB_QUOTE,
+  )
+}
+
+/// Split at the first of `pats` not escaped by `esc` and not inside a
+/// `sng_quote`/`dub_quote` region. Shared by the backslash and marker
+/// variants; only the escape/quote characters differ.
+fn split_at_any_inner(
+  slice: &str,
+  pats: &[&str],
+  esc: char,
+  sng_quote: char,
+  dub_quote: char,
+) -> Option<(usize, usize)> {
   let mut chars = slice.char_indices().peekable();
   let mut qt_state = QuoteState::default();
 
   while let Some((i, ch)) = chars.next() {
     match ch {
-      '\\' => {
+      _ if ch == esc => {
         chars.next();
         continue;
       }
-      '\'' => qt_state.toggle_single(),
-      '"' => qt_state.toggle_double(),
+      _ if ch == sng_quote => qt_state.toggle_single(),
+      _ if ch == dub_quote => qt_state.toggle_double(),
       _ if qt_state.in_quote() => continue,
       _ => {}
     }
