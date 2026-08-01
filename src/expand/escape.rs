@@ -349,9 +349,20 @@ fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
       }
     }
     '$' if chars.peek() == Some(&'\'') => {
-      result.push(q_ch);
-      let sng_quote = chars.next().unwrap();
-      result.push(sng_quote);
+      if param_depth > 0 {
+        // Inside a `${...}`, `$'...'` ANSI-C quoting is active even within the
+        // outer double quotes (matching bash). Consume the whole region so its
+        // closing `'` isn't mistaken for a bare single-quote opener by the
+        // `'` arm below.
+        chars.next();
+        result.push(markers::SNG_QUOTE);
+        read_dollar_quote(chars, result);
+        result.push(markers::SNG_QUOTE);
+      } else {
+        result.push(q_ch);
+        let sng_quote = chars.next().unwrap();
+        result.push(sng_quote);
+      }
     }
     '$' => {
       if read_varsub(chars, result) {
