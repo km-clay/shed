@@ -13,8 +13,12 @@ use crate::{
   varstr,
 };
 use std::{
-  collections::VecDeque, ffi::CString, os::fd::RawFd, os::unix::fs::PermissionsExt, path::Path,
+  collections::VecDeque,
+  ffi::CString,
+  os::{fd::RawFd, unix::fs::PermissionsExt},
+  path::Path,
   rc::Rc,
+  string::ToString,
 };
 
 use crate::expand::subshell::{last_cmdsub_status, reset_last_cmdsub_status};
@@ -56,7 +60,7 @@ use super::{
   var,
 };
 
-pub fn in_cd_path(name: Tk) -> bool {
+pub fn in_cd_path(name: &Tk) -> bool {
   let Ok(expanded) = name.expand_no_side_effects() else {
     return false;
   };
@@ -77,7 +81,7 @@ pub fn in_cd_path(name: Tk) -> bool {
   false
 }
 
-pub fn is_in_path(name: Tk) -> bool {
+pub fn is_in_path(name: &Tk) -> bool {
   let Ok(expanded) = name.expand_no_side_effects() else {
     return false;
   };
@@ -187,15 +191,14 @@ impl ExecArgs {
 /// Execute a `-c` command string, optimizing single simple commands to exec
 /// directly without forking. This avoids process group issues where grandchild
 /// processes (e.g. nvim spawning opencode) lose their controlling terminal.
-pub fn exec_dash_c(input: String, args: Vec<String>) -> ShResult<()> {
+pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
   let stdin = procio::stdin_fileno();
   let is_tty = isatty(stdin).unwrap_or(false);
   let _guard = Shed::term_mut(|t| t.interactive_guard(is_tty));
   let name = args
     .first()
     .cloned()
-    .map(VarStr::from)
-    .unwrap_or("<shed -c>".into());
+    .map_or("<shed -c>".into(), VarStr::from);
 
   Shed::vars_mut(|v| {
     v.set_param(ShellParam::ShellName, &name); // $0
@@ -212,7 +215,7 @@ pub fn exec_dash_c(input: String, args: Vec<String>) -> ShResult<()> {
     }
   });
 
-  let expanded = expand_aliases(&input);
+  let expanded = expand_aliases(input);
   let source_name: Rc<str> = name.into();
   let mut parser = ParsedSrc::new(expanded.into())
     .with_lex_flags(super::lex::LexFlags::empty())
@@ -690,7 +693,7 @@ impl Dispatcher {
 
     let func_ctx = util::get_context(
       styled_format!("in call to function '{}'", &func_name).into(),
-      blame.clone(),
+      &blame,
     );
     let caller_contexts: Vec<_> = func.context.iter().cloned().collect();
 
@@ -723,7 +726,7 @@ impl Dispatcher {
           if let Err(e) = exec_nonint(trap, Some("trap RETURN".into())) {
             e.print_error();
           }
-        })
+        });
       }
     }
 
@@ -936,10 +939,9 @@ impl Dispatcher {
                 if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
                   Shed::set_status(0);
                   break 'outer;
-                } else {
-                  *count -= 1;
-                  return Err(e);
                 }
+                *count -= 1;
+                return Err(e);
               }
               ShErrKind::LoopContinue(count) => {
                 if *count > 1 && Shed::meta(MetaTab::loop_depth) > 1 {
@@ -1005,10 +1007,9 @@ impl Dispatcher {
               if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
                 Shed::set_status(0);
                 break 'outer;
-              } else {
-                *count -= 1;
-                return Err(e);
               }
+              *count -= 1;
+              return Err(e);
             }
             ShErrKind::LoopContinue(count) => {
               if *count > 1 && Shed::meta(MetaTab::loop_depth) > 1 {
@@ -1087,10 +1088,9 @@ impl Dispatcher {
               if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
                 Shed::set_status(0);
                 break 'outer;
-              } else {
-                *count -= 1;
-                return Err(e);
               }
+              *count -= 1;
+              return Err(e);
             }
             ShErrKind::LoopContinue(count) => {
               if *count > 1 && Shed::meta(MetaTab::loop_depth) > 1 {
@@ -1186,7 +1186,7 @@ impl Dispatcher {
       // but you never know
       dispatch_job(job, false, Shed::term(Terminal::interactive))?;
     }
-    check_err(flags, None, Some(span), context)?;
+    check_err(flags, None, Some(span), &context)?;
     res
   }
 
@@ -1198,7 +1198,7 @@ impl Dispatcher {
       unreachable!()
     };
 
-    let mut cmds = cmds.to_vec();
+    let mut cmds = cmds.clone();
 
     let has_redirs = !pipeline.redirs.is_empty();
     let is_bg = pipeline_flags.contains(NdFlags::BACKGROUND);
@@ -1279,7 +1279,7 @@ impl Dispatcher {
           let name = tail
             .first()
             .and_then(Node::get_command)
-            .map(|c| c.to_string())
+            .map(ToString::to_string)
             .unwrap_or_default();
           result = self.run_fork(&name, move |s| {
             if let Err(e) = s.exec_internal_pipeline(&tail) {
@@ -1395,7 +1395,7 @@ impl Dispatcher {
       Some(pipeline_span)
     };
 
-    check_err(pipeline_flags, None, blame_span, pipeline_context)?;
+    check_err(pipeline_flags, None, blame_span, &pipeline_context)?;
     Ok(())
   }
 
@@ -1542,7 +1542,7 @@ impl Dispatcher {
     // input. It stays fatal only for a special built-in in a non-interactive
     // shell.
     let fatal = !Shed::term(Terminal::interactive)
-      && lookup_builtin(cmd_name).is_some_and(|b| b.is_special());
+      && lookup_builtin(cmd_name).is_some_and(crate::builtin::Builtin::is_special);
     let _guard = match RedirSet::from(&cmd.redirs).try_apply(fatal) {
       RedirResult::Applied(guard) => Some(guard),
       RedirResult::NoRedirs => None,
@@ -2016,8 +2016,7 @@ pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(VarStr, S
 pub fn is_func_node(cmd: &Node) -> bool {
   cmd
     .get_command()
-    .map(|cmd_word| is_func(cmd_word.as_str()))
-    .unwrap_or(false)
+    .is_some_and(|cmd_word| is_func(cmd_word.as_str()))
 }
 
 pub fn is_func(name: &str) -> bool {
@@ -2029,18 +2028,15 @@ pub fn is_arith(tk: Option<&Tk>) -> bool {
 }
 
 pub fn can_autocd(cmd: &Tk) -> bool {
-  shopt!(core.autocd) && in_cd_path(cmd.clone()) && !is_in_path(cmd.clone())
+  shopt!(core.autocd) && in_cd_path(cmd) && !is_in_path(cmd)
 }
 
 pub(crate) fn is_builtin(cmd: &Node) -> bool {
-  cmd
-    .get_command()
-    .map(|cmd_word| {
-      !is_func(cmd_word.as_str())
-        && lookup_builtin(cmd_word.as_str()).is_some_and(|b| !b.always_forks())
-        && cmd_word.flags.contains(TkFlags::BUILTIN)
-    })
-    .unwrap_or(true) // empty argv: assignment-only command
+  cmd.get_command().is_none_or(|cmd_word| {
+    !is_func(cmd_word.as_str())
+      && lookup_builtin(cmd_word.as_str()).is_some_and(|b| !b.always_forks())
+      && cmd_word.flags.contains(TkFlags::BUILTIN)
+  }) // empty argv: assignment-only command
 }
 
 /// Checks if a command will fork on its own or not
@@ -2098,7 +2094,7 @@ pub fn check_err(
   flags: NdFlags,
   err: Option<ShErr>,
   span: Option<Span>,
-  context: LabelCtx,
+  context: &LabelCtx,
 ) -> ShResult<()> {
   if Shed::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
     if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Error)) {
@@ -2845,7 +2841,7 @@ mod tests {
   #[test]
   fn assign_eq_cmd_sub_preserves_newlines() {
     let _g = TestGuard::new();
-    test_input(r#"ml=$(printf 'a\nb\nc')"#).unwrap();
+    test_input(r"ml=$(printf 'a\nb\nc')").unwrap();
     assert_eq!(var!("ml"), "a\nb\nc");
   }
 
@@ -2871,7 +2867,7 @@ mod tests {
   #[test]
   fn assign_only_status_reflects_failing_cmdsub() {
     let _g = TestGuard::new();
-    test_input(r#"r=$(false)"#).unwrap();
+    test_input(r"r=$(false)").unwrap();
     assert_status_eq!(1);
   }
 
@@ -2879,7 +2875,7 @@ mod tests {
   fn assign_only_status_reflects_failing_cmdsub_after_failure() {
     // The prior `false` must not be what sets the status; the cmdsub does.
     let _g = TestGuard::new();
-    test_input(r#"false; r=$(false)"#).unwrap();
+    test_input(r"false; r=$(false)").unwrap();
     assert_status_eq!(1);
   }
 
@@ -2888,21 +2884,21 @@ mod tests {
     // Key zoxide case: a failing condition before the assignment must not
     // leak through and make a succeeding cmdsub look like it failed.
     let _g = TestGuard::new();
-    test_input(r#"false; r=$(true)"#).unwrap();
+    test_input(r"false; r=$(true)").unwrap();
     assert_status_eq!(0);
   }
 
   #[test]
   fn assign_only_status_is_last_cmdsub_across_multiple() {
     let _g = TestGuard::new();
-    test_input(r#"r=$(false) s=$(true)"#).unwrap();
+    test_input(r"r=$(false) s=$(true)").unwrap();
     assert_status_eq!(0);
   }
 
   #[test]
   fn assign_only_status_is_last_cmdsub_failing() {
     let _g = TestGuard::new();
-    test_input(r#"r=$(true) s=$(false)"#).unwrap();
+    test_input(r"r=$(true) s=$(false)").unwrap();
     assert_status_eq!(1);
   }
 
@@ -2911,7 +2907,7 @@ mod tests {
     // A trailing literal assignment doesn't reset the status; the last
     // cmdsub's status wins.
     let _g = TestGuard::new();
-    test_input(r#"r=$(false) s=hello"#).unwrap();
+    test_input(r"r=$(false) s=hello").unwrap();
     assert_status_eq!(1);
   }
 
@@ -3155,20 +3151,20 @@ mod tests {
       let _g = TestGuard::new();
       let dir = TempDir::new().unwrap();
       let exe = make_exec(dir.path(), "prog");
-      assert!(is_in_path(tk(&exe.to_string_lossy())));
+      assert!(is_in_path(&tk(&exe.to_string_lossy())));
     }
 
     #[test]
     fn abs_path_to_nonexistent_returns_false() {
       let _g = TestGuard::new();
-      assert!(!is_in_path(tk("/this/path/should/never/exist/xyz123")));
+      assert!(!is_in_path(&tk("/this/path/should/never/exist/xyz123")));
     }
 
     #[test]
     fn abs_path_to_directory_returns_false() {
       let _g = TestGuard::new();
       let dir = TempDir::new().unwrap();
-      assert!(!is_in_path(tk(&dir.path().to_string_lossy())));
+      assert!(!is_in_path(&tk(&dir.path().to_string_lossy())));
     }
 
     #[test]
@@ -3176,7 +3172,7 @@ mod tests {
       let _g = TestGuard::new();
       let dir = TempDir::new().unwrap();
       let p = make_non_exec(dir.path(), "data.txt");
-      assert!(!is_in_path(tk(&p.to_string_lossy())));
+      assert!(!is_in_path(&tk(&p.to_string_lossy())));
     }
 
     #[test]
@@ -3189,7 +3185,7 @@ mod tests {
       let mut perms = std::fs::metadata(&p).unwrap().permissions();
       perms.set_mode(0o010); // group-execute only
       std::fs::set_permissions(&p, perms).unwrap();
-      assert!(is_in_path(tk(&p.to_string_lossy())));
+      assert!(is_in_path(&tk(&p.to_string_lossy())));
     }
 
     // ─── bare names searched in PATH ─────────────────────────────────
@@ -3200,7 +3196,7 @@ mod tests {
       let dir = TempDir::new().unwrap();
       make_exec(dir.path(), "myprog");
       test_input(format!("PATH={}", dir.path().display())).unwrap();
-      assert!(is_in_path(tk("myprog")));
+      assert!(is_in_path(&tk("myprog")));
     }
 
     #[test]
@@ -3208,7 +3204,7 @@ mod tests {
       let _g = TestGuard::new();
       let dir = TempDir::new().unwrap();
       test_input(format!("PATH={}", dir.path().display())).unwrap();
-      assert!(!is_in_path(tk("definitely_not_a_program_xyz")));
+      assert!(!is_in_path(&tk("definitely_not_a_program_xyz")));
     }
 
     #[test]
@@ -3223,7 +3219,7 @@ mod tests {
         d2.path().display()
       ))
       .unwrap();
-      assert!(is_in_path(tk("second")));
+      assert!(is_in_path(&tk("second")));
     }
 
     #[test]
@@ -3241,7 +3237,7 @@ mod tests {
         d2.path().display()
       ))
       .unwrap();
-      assert!(is_in_path(tk("dup")));
+      assert!(is_in_path(&tk("dup")));
     }
 
     #[test]
@@ -3251,7 +3247,7 @@ mod tests {
       // Create a *directory* with the program name — should not match.
       std::fs::create_dir(dir.path().join("subprog")).unwrap();
       test_input(format!("PATH={}", dir.path().display())).unwrap();
-      assert!(!is_in_path(tk("subprog")));
+      assert!(!is_in_path(&tk("subprog")));
     }
 
     #[test]
@@ -3260,7 +3256,7 @@ mod tests {
       let dir = TempDir::new().unwrap();
       make_non_exec(dir.path(), "noexec");
       test_input(format!("PATH={}", dir.path().display())).unwrap();
-      assert!(!is_in_path(tk("noexec")));
+      assert!(!is_in_path(&tk("noexec")));
     }
 
     #[test]
@@ -3269,7 +3265,7 @@ mod tests {
       let dir = TempDir::new().unwrap();
       make_exec(dir.path(), "real");
       test_input(format!("PATH=/nonexistent/xyz:{}", dir.path().display())).unwrap();
-      assert!(is_in_path(tk("real")));
+      assert!(is_in_path(&tk("real")));
     }
 
     #[test]
@@ -3277,7 +3273,7 @@ mod tests {
       let _g = TestGuard::new();
       // Use `unset` so try_var!("PATH") returns None.
       test_input("unset PATH").unwrap();
-      assert!(!is_in_path(tk("ls")));
+      assert!(!is_in_path(&tk("ls")));
     }
 
     // ─── relative paths ──────────────────────────────────────────────
@@ -3287,14 +3283,14 @@ mod tests {
       let mut g = TestGuard::new();
       let dir = g.in_temp_dir();
       make_exec(&dir, "prog");
-      assert!(is_in_path(tk("./prog")));
+      assert!(is_in_path(&tk("./prog")));
     }
 
     #[test]
     fn dot_slash_nonexistent_returns_false() {
       let mut g = TestGuard::new();
       let _dir = g.in_temp_dir();
-      assert!(!is_in_path(tk("./nope_xyz")));
+      assert!(!is_in_path(&tk("./nope_xyz")));
     }
 
     #[test]
@@ -3302,7 +3298,7 @@ mod tests {
       let mut g = TestGuard::new();
       let dir = g.in_temp_dir();
       make_non_exec(&dir, "data.txt");
-      assert!(!is_in_path(tk("./data.txt")));
+      assert!(!is_in_path(&tk("./data.txt")));
     }
 
     #[test]
@@ -3310,7 +3306,7 @@ mod tests {
       let mut g = TestGuard::new();
       let dir = g.in_temp_dir();
       std::fs::create_dir(dir.join("subdir")).unwrap();
-      assert!(!is_in_path(tk("./subdir")));
+      assert!(!is_in_path(&tk("./subdir")));
     }
 
     #[test]
@@ -3321,7 +3317,7 @@ mod tests {
       let inner = dir.join("inner");
       std::fs::create_dir(&inner).unwrap();
       std::env::set_current_dir(&inner).unwrap();
-      assert!(is_in_path(tk("../outerprog")));
+      assert!(is_in_path(&tk("../outerprog")));
     }
 
     // ─── absolute paths take precedence over PATH ────────────────────
@@ -3333,7 +3329,7 @@ mod tests {
       let dir = TempDir::new().unwrap();
       let exe = make_exec(dir.path(), "prog");
       test_input("PATH=/nonexistent/xyz").unwrap();
-      assert!(is_in_path(tk(&exe.to_string_lossy())));
+      assert!(is_in_path(&tk(&exe.to_string_lossy())));
     }
 
     // ─── expansion behavior ──────────────────────────────────────────
@@ -3344,7 +3340,7 @@ mod tests {
       let dir = TempDir::new().unwrap();
       let exe = make_exec(dir.path(), "prog");
       test_input(format!("MYEXE={}", exe.display())).unwrap();
-      assert!(is_in_path(tk("$MYEXE")));
+      assert!(is_in_path(&tk("$MYEXE")));
     }
 
     #[test]
@@ -3354,7 +3350,7 @@ mod tests {
       make_exec(dir.path(), "myprog");
       test_input(format!("PATH={}", dir.path().display())).unwrap();
       test_input("NAME=myprog").unwrap();
-      assert!(is_in_path(tk("$NAME")));
+      assert!(is_in_path(&tk("$NAME")));
     }
 
     #[test]
@@ -3362,7 +3358,7 @@ mod tests {
       let _g = TestGuard::new();
       // An unset, unquoted var expands to nothing; first word is None,
       // so the function bails out with false.
-      assert!(!is_in_path(tk("$UNSET_VAR_FOR_ISINPATH_TEST_xyz")));
+      assert!(!is_in_path(&tk("$UNSET_VAR_FOR_ISINPATH_TEST_xyz")));
     }
   }
 

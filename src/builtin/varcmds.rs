@@ -145,7 +145,6 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
     }
     let val = match (kind, raw_val) {
       (DeclareKind::Str, Some(v)) => VarKind::parse(v),
-      (DeclareKind::Str, None) => unreachable!("handled above"),
       (DeclareKind::Int, Some(v)) => {
         let evaluated = expand_arithmetic(v).promote_err(span.clone())?;
         let n = evaluated
@@ -153,11 +152,12 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
           .map_err(|_| sherr!(ExecFail @ span.clone(), "declare -i: invalid arithmetic '{v}'"))?;
         VarKind::Int(n)
       }
-      (DeclareKind::Int, None) => unreachable!("handled above"),
       (DeclareKind::Arr, Some(v)) => VarKind::arr_from_raw(v).promote_err(span.clone())?,
       (DeclareKind::Arr, None) => VarKind::Arr(VecDeque::new()),
       (DeclareKind::Assoc, Some(v)) => VarKind::assoc_arr_from_raw(v).promote_err(span.clone())?,
       (DeclareKind::Assoc, None) => VarKind::AssocArr(Vec::new()),
+
+      (DeclareKind::Str | DeclareKind::Int, None) => unreachable!("handled above"),
     };
     Shed::vars_mut(|v| v.set_var(name, val, flags)).promote_err(span)?;
   }
@@ -783,7 +783,7 @@ mod tests {
   #[test]
   fn local_cmd_sub_preserves_newlines() {
     let _g = TestGuard::new();
-    test_input(r#"local ml=$(printf 'a\nb\nc')"#).unwrap();
+    test_input(r"local ml=$(printf 'a\nb\nc')").unwrap();
     assert_eq!(var!("ml"), "a\nb\nc");
   }
 
@@ -825,7 +825,7 @@ mod tests {
   #[test]
   fn declare_assoc_preserves_ansi_c_quoting() {
     let _g = TestGuard::new();
-    test_input(r#"declare -A aq=([k]=$'a\tb')"#).unwrap();
+    test_input(r"declare -A aq=([k]=$'a\tb')").unwrap();
     test_input(r#"aq_out="${aq[k]}""#).unwrap();
     assert_eq!(var!("aq_out"), "a\tb");
   }
@@ -833,7 +833,7 @@ mod tests {
   #[test]
   fn declare_assoc_preserves_multiline_value() {
     let _g = TestGuard::new();
-    test_input(r#"declare -A aq=([k]=$'one\ntwo\nthree')"#).unwrap();
+    test_input(r"declare -A aq=([k]=$'one\ntwo\nthree')").unwrap();
     test_input(r#"aq_out="${aq[k]}""#).unwrap();
     assert_eq!(var!("aq_out"), "one\ntwo\nthree");
   }

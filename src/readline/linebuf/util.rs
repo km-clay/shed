@@ -129,6 +129,11 @@ impl super::LineBuf {
 
   fn refresh_highlight_cache(&mut self, joined: &str) {
     use std::hash::{Hash, Hasher};
+    // Incremental relexing only pays off on large buffers, where a full relex
+    // would be noticeably slow. Below this line count, the full relex is cheap
+    // enough that it isn't worth the incremental path's edge cases.
+    const INCREMENTAL_MIN_LINES: usize = 200;
+
     let mut h = std::collections::hash_map::DefaultHasher::new();
     joined.hash(&mut h);
     let new_hash = h.finish();
@@ -152,11 +157,6 @@ impl super::LineBuf {
       });
       return;
     };
-
-    // Incremental relexing only pays off on large buffers, where a full relex
-    // would be noticeably slow. Below this line count, the full relex is cheap
-    // enough that it isn't worth the incremental path's edge cases.
-    const INCREMENTAL_MIN_LINES: usize = 200;
 
     // Existing cache + buffer changed. On large buffers, try the incremental
     // path; otherwise fall through to a full relex.
@@ -362,7 +362,7 @@ impl super::LineBuf {
           lead.into_iter().take(keep).collect()
         }
       });
-      if prefix.as_ref().is_some_and(|p| p.is_empty()) {
+      if prefix.as_ref().is_some_and(Vec::is_empty) {
         break;
       }
     }

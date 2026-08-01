@@ -395,7 +395,7 @@ impl super::LineBuf {
         self.redo_stack.pop()
       };
       match popped {
-        Some(e) if e.is_empty() => continue,
+        Some(e) if e.is_empty() => (),
         Some(e) => break e,
         None => return,
       }

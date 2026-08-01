@@ -415,6 +415,6 @@ impl LineBuf {
   }
 
   pub fn open_file(&self) -> Option<VarStr> {
-    self.open_file.as_ref().cloned()
+    self.open_file.clone()
   }
 }

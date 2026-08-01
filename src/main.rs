@@ -1,3 +1,4 @@
+#![warn(clippy::pedantic)]
 #![expect(
   clippy::unnecessary_wraps,
   clippy::too_many_lines,

@@ -9,7 +9,7 @@ pub(crate) mod subshell;
 mod util;
 mod var;
 
-use std::rc::Rc;
+use std::{convert::Into, rc::Rc};
 
 pub(super) use alias::{expand_alias_with_pos, expand_aliases, expand_keymap};
 pub(super) use arithmetic::{expand_arithmetic, expand_arithmetic_wrapped};
@@ -69,7 +69,7 @@ impl Tk {
     let span = self.span.clone();
     Expander::new(self)
       .expand()
-      .map(|w| w.into())
+      .map(Into::into)
       .promote_err(span)
   }
   pub fn expand_no_side_effects(&self) -> ShResult<Self> {

@@ -1,5 +1,7 @@
 use std::{io::Write, path::Path};
 
+use bitflags::bitflags;
+
 use crate::{
   KeyEvent, ShResult,
   builtin::getopt::{Opt, OptSpec},
@@ -11,15 +13,36 @@ use crate::{
   util::{ShResultExt, with_status},
 };
 
+bitflags! {
+  struct ViceFlags: u32 {
+    const KEEP_MODE = 0b0000_0001;
+    const QUOTED = 0b0000_0010;
+    const INPLACE = 0b0000_0100;
+    const LINES = 0b0000_1000;
+  }
+}
+
 struct ViceProg {
   cmds: Vec<ViceCmd>,
   sep: Option<Vec<KeyEvent>>,
-  keep_mode: bool,
-  quoted: bool,
   delim: VarStr,
-  inplace: bool,
-  lines: bool,
+  flags: ViceFlags,
   backup_ext: Option<VarStr>,
+}
+
+impl ViceProg {
+  pub fn quoted(&self) -> bool {
+    self.flags.contains(ViceFlags::QUOTED)
+  }
+  pub fn inplace(&self) -> bool {
+    self.flags.contains(ViceFlags::INPLACE)
+  }
+  pub fn lines(&self) -> bool {
+    self.flags.contains(ViceFlags::LINES)
+  }
+  pub fn keep_mode(&self) -> bool {
+    self.flags.contains(ViceFlags::KEEP_MODE)
+  }
 }
 
 #[derive(Clone)]
@@ -68,11 +91,8 @@ impl Vice {
     let mut prog = ViceProg {
       cmds: vec![],
       sep: None,
-      keep_mode: false,
-      quoted: false,
       delim: " ".into(),
-      inplace: false,
-      lines: false,
+      flags: ViceFlags::empty(),
       backup_ext: None,
     };
 
@@ -92,9 +112,9 @@ impl Vice {
         Opt::ShortWithArg('d', arg) => {
           prog.delim = arg.clone();
         }
-        Opt::Short('q') => prog.quoted = true,
-        Opt::Short('i') => prog.inplace = true,
-        Opt::Short('l') => prog.lines = true,
+        Opt::Short('q') => prog.flags |= ViceFlags::QUOTED,
+        Opt::Short('i') => prog.flags |= ViceFlags::INPLACE,
+        Opt::Short('l') => prog.flags |= ViceFlags::LINES,
         Opt::ShortWithArg('r', arg) => {
           prog.cmds.push(ViceCmd::parse_repeat(arg)?);
         }
@@ -121,10 +141,10 @@ impl Vice {
           }
         },
         Opt::Long(flag) => match flag.as_str() {
-          "keep-mode" => prog.keep_mode = true,
-          "quoted" => prog.quoted = true,
-          "in-place" => prog.inplace = true,
-          "lines" => prog.lines = true,
+          "keep-mode" => prog.flags |= ViceFlags::KEEP_MODE,
+          "quoted" => prog.flags |= ViceFlags::QUOTED,
+          "in-place" => prog.flags |= ViceFlags::INPLACE,
+          "lines" => prog.flags |= ViceFlags::LINES,
           "backup" if prog.backup_ext.is_none() => {
             prog.backup_ext = Some(".bak".into());
           }
@@ -157,7 +177,7 @@ impl Vice {
           }
 
           let field = if let Some(sel) = core.selection() {
-            log::debug!("Vice: selection found: {:?}", sel);
+            log::debug!("Vice: selection found: {sel:?}");
             sel
           } else {
             let mut end = core.editor.cursor();
@@ -165,10 +185,10 @@ impl Vice {
             core.editor.slice_pos(start, end)
           };
 
-          fields.push(if prog.quoted {
+          fields.push(if prog.quoted() {
             expand::shell_quote(&field)
           } else {
-            field.to_string()
+            field.clone()
           });
 
           if let Some(sep) = prog.sep.clone()
@@ -193,7 +213,7 @@ impl Vice {
         }
       }
       spent_cmds.push(clone);
-      if !prog.keep_mode {
+      if !prog.keep_mode() {
         core.reset_mode(true)?;
 
         // search mode and ex mode are submitted in the above mode
@@ -230,7 +250,7 @@ impl Vice {
       collected.push_str(record);
       // Linewise emits one record per line; whole-buffer mode is written
       // back verbatim, so only the linewise records get terminators.
-      if prog.lines {
+      if prog.lines() {
         collected.push('\n');
       }
       Ok(())
@@ -261,7 +281,7 @@ impl Vice {
     span: &Span,
     mut sink: impl FnMut(&str) -> ShResult<()>,
   ) -> ShResult<bool> {
-    if prog.lines {
+    if prog.lines() {
       let mut emitted_line = false;
       let mut core = EditorCore::empty();
       for line in input.lines() {
@@ -354,7 +374,7 @@ impl super::Builtin for Vice {
         return Err(sherr!(ExecFail @ span, "Failed to read file: '{file}'"));
       };
 
-      let file_ok = if prog.inplace {
+      let file_ok = if prog.inplace() {
         Self::run_inplace(&file, &content, &prog, &span)?
       } else {
         Self::run_stream(&content, &prog, &span)?

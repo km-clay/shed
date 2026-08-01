@@ -21,12 +21,19 @@ impl Stash {
   pub fn new() -> ShResult<Self> {
     let conn =
       state::util::get_db_conn().ok_or_else(|| sherr!(InternalErr, "database not available"))?;
-    Self::init_stash_table(&conn.lock().unwrap_or_else(|e| e.into_inner()))?;
+    Self::init_stash_table(
+      &conn
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )?;
     Ok(Self { conn })
   }
 
   fn lock(&self) -> MutexGuard<'_, Connection> {
-    self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    self
+      .conn
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
   }
 
   pub fn init_stash_table(conn: &Connection) -> ShResult<()> {
@@ -172,7 +179,7 @@ impl Stash {
     Ok(Some(cmd))
   }
 
-  pub fn push(&self, name: Option<VarStr>, buffer: &str, cursor: (usize, usize)) -> ShResult<()> {
+  pub fn push(&self, name: Option<&VarStr>, buffer: &str, cursor: (usize, usize)) -> ShResult<()> {
     let (row, col) = cursor;
     if name.as_ref().is_some_and(|n| n.parse::<usize>().is_ok()) {
       return Err(sherr!(ParseErr, "stashed command name cannot be a number"));

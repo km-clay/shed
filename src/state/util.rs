@@ -129,7 +129,9 @@ pub fn query_db<T, F: FnOnce(&Connection) -> ShResult<T>>(f: F) -> ShResult<Opti
   let Some(conn) = get_db_conn() else {
     return Ok(None);
   };
-  let conn = conn.lock().unwrap_or_else(|e| e.into_inner());
+  let conn = conn
+    .lock()
+    .unwrap_or_else(std::sync::PoisonError::into_inner);
   f(&conn).map(Some)
 }
 
@@ -441,12 +443,12 @@ fn live_completions() -> Vec<VarStr> {
 
 /// Live `autocmd` registrations, in registration order.
 fn live_autocmds() -> Vec<VarStr> {
-  Shed::logic(|l| l.iter_autocmds().map(|cmd| cmd.to_var_str()).collect())
+  Shed::logic(|l| l.iter_autocmds().map(VarStrDisplay::to_var_str).collect())
 }
 
 /// Live `keymap` registrations, in registration order.
 fn live_keymaps() -> Vec<VarStr> {
-  Shed::logic(|l| l.keymaps().iter().map(|km| km.to_var_str()).collect())
+  Shed::logic(|l| l.keymaps().iter().map(VarStrDisplay::to_var_str).collect())
 }
 
 /// Render an rc file to a `Vec<VarStr>` per `config`. Pure — no I/O, no
@@ -869,10 +871,16 @@ pub fn get_db_conn() -> Option<Arc<Mutex<Connection>>> {
   if FORKED_CHILD.load(Ordering::Relaxed) {
     return None;
   }
-  if let Some(conn) = DB_CONN.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+  if let Some(conn) = DB_CONN
+    .read()
+    .unwrap_or_else(std::sync::PoisonError::into_inner)
+    .as_ref()
+  {
     return Some(conn.clone());
   }
-  let mut guard = DB_CONN.write().unwrap_or_else(|e| e.into_inner());
+  let mut guard = DB_CONN
+    .write()
+    .unwrap_or_else(std::sync::PoisonError::into_inner);
   if guard.is_none() {
     *guard = open_shared_conn();
   }
@@ -881,7 +889,9 @@ pub fn get_db_conn() -> Option<Arc<Mutex<Connection>>> {
 
 #[cfg(test)]
 pub fn init_test_db_conn() {
-  *DB_CONN.write().unwrap_or_else(|e| e.into_inner()) = Connection::open_in_memory()
+  *DB_CONN
+    .write()
+    .unwrap_or_else(std::sync::PoisonError::into_inner) = Connection::open_in_memory()
     .ok()
     .map(|c| Arc::new(Mutex::new(c)));
 }

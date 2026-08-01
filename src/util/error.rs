@@ -1,3 +1,4 @@
+#![expect(clippy::needless_pass_by_value)]
 use ariadne::{Color, Label};
 use ariadne::{Report, ReportKind};
 use nix::errno::Errno;
@@ -85,7 +86,7 @@ pub(crate) fn last_color() -> Color {
   COLOR_RNG.with(|rng| rng.borrow_mut().last_color())
 }
 
-pub fn get_context(msg: VarStr, span: Span) -> LabelBuilder {
+pub fn get_context(msg: VarStr, span: &Span) -> LabelBuilder {
   let color = last_color();
   LabelBuilder::new(span.clone())
     .with_color(color)
@@ -416,7 +417,7 @@ impl ShErr {
         .entry(src.clone())
         .or_insert_with(|| (*src.content()).into());
     }
-    for span in self.labels.iter().map(|label| label.span()) {
+    for span in self.labels.iter().map(LabelBuilder::span) {
       let src = span.span_source().clone();
       source_map
         .entry(src.clone())
@@ -570,9 +571,8 @@ impl Display for ShErrKind {
       Self::Raised(kind, _) => {
         if let Some(kind) = kind {
           return kind.fmt(f);
-        } else {
-          return write!(f, "Raised Error");
         }
+        return write!(f, "Raised Error");
       }
     };
     write!(f, "{output}")

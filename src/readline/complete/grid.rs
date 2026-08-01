@@ -565,6 +565,7 @@ impl Completer for GridCompleter {
     Some(grid_rows + counter)
   }
 
+  #[expect(clippy::unnested_or_patterns)]
   fn handle_key(&mut self, key: KeyEvent) -> ShResult<CompResponse> {
     match key {
       // Live preview: splice the now-selected candidate into the buffer so the

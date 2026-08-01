@@ -150,7 +150,7 @@ impl ShOpts {
     let to_var_strs = |entries: Vec<(String, String, Option<String>)>| -> RcEntries {
       entries
         .into_iter()
-        .map(|(key, line, doc)| (key.into(), line.into(), doc.map(|s| s.into())))
+        .map(|(key, line, doc)| (key.into(), line.into(), doc.map(VarStr::from)))
         .collect()
     };
 

@@ -241,7 +241,7 @@ impl ClipboardProvider {
     Self::Osc52
   }
 
-  pub fn copy(&self, sel: Selection, content: &RegisterContent) {
+  pub fn copy(self, sel: Selection, content: &RegisterContent) {
     let text = content.to_string();
     match self.copy_argv(sel) {
       Some(argv) => {
@@ -260,7 +260,7 @@ impl ClipboardProvider {
     }
   }
 
-  pub fn paste(&self, sel: Selection) -> Option<RegisterContent> {
+  pub fn paste(self, sel: Selection) -> Option<RegisterContent> {
     let argv = self.paste_argv(sel)?;
     let out =
       util::with_saved_status(|| capture_command(argv, None, Some("clipboard paste".into())).ok())?;
@@ -268,7 +268,7 @@ impl ClipboardProvider {
     Some(RegisterContent::Span(Lines::to_lines(&out).into_vec()))
   }
 
-  pub fn copy_argv(&self, sel: Selection) -> Option<&'static str> {
+  pub fn copy_argv(self, sel: Selection) -> Option<&'static str> {
     Some(match (self, sel) {
       (Self::WlCopy, Selection::Clipboard) => "wl-copy",
       (Self::WlCopy, Selection::Primary) => "wl-copy --primary",
@@ -285,7 +285,7 @@ impl ClipboardProvider {
     })
   }
 
-  pub fn paste_argv(&self, sel: Selection) -> Option<&'static str> {
+  pub fn paste_argv(self, sel: Selection) -> Option<&'static str> {
     Some(match (self, sel) {
       (Self::WlCopy, Selection::Clipboard) => "wl-paste",
       (Self::WlCopy, Selection::Primary) => "wl-paste --primary",

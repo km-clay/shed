@@ -302,19 +302,18 @@ impl Terminal {
 
   pub fn reset_last_input(&mut self) {
     if shopt!(prompt.idle_timeout).is_zero() {
-      self.last_input = None
+      self.last_input = None;
     } else {
       self.last_input = Some(Instant::now());
     }
   }
 
   pub fn last_input_elapsed(&mut self) -> Duration {
-    match self.last_input {
-      Some(instant) => instant.elapsed(),
-      None => {
-        self.last_input = Some(Instant::now());
-        Duration::ZERO
-      }
+    if let Some(instant) = self.last_input {
+      instant.elapsed()
+    } else {
+      self.last_input = Some(Instant::now());
+      Duration::ZERO
     }
   }
 

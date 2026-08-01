@@ -22,7 +22,7 @@ pub fn import_history<P: AsRef<Path>>(path: P) -> ShResult<Vec<HistEntry>> {
     .map_err(|e| sherr!(ParseErr, "Failed to read history file: {e}"))?;
 
   if let Ok(val) = serde_json::from_str::<Value>(&content) {
-    return import_json(val);
+    return import_json(&val);
   }
 
   let filename = path
@@ -45,13 +45,13 @@ pub fn import_history<P: AsRef<Path>>(path: P) -> ShResult<Vec<HistEntry>> {
   }
 }
 
-fn import_json(content: Value) -> ShResult<Vec<HistEntry>> {
+fn import_json(content: &Value) -> ShResult<Vec<HistEntry>> {
   let obj = content
     .as_object()
     .ok_or_else(|| sherr!(ParseErr, "JSON history is not an object"))?;
   let mut entries: Vec<(usize, HistEntry)> = vec![];
 
-  for (key, val) in obj.iter() {
+  for (key, val) in obj {
     let val_obj = val
       .as_object()
       .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' is not an object"))?;
@@ -71,15 +71,15 @@ fn import_json(content: Value) -> ShResult<Vec<HistEntry>> {
       .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' missing 'cwd' string"))?;
     let runtime = val_obj
       .get("runtime")
-      .and_then(|v| v.as_u64())
+      .and_then(serde_json::Value::as_u64)
       .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' missing 'runtime' u64"))?;
     let status = val_obj
       .get("status")
-      .and_then(|v| v.as_i64())
+      .and_then(serde_json::Value::as_i64)
       .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' missing 'status' i64"))?;
     let timestamp = val_obj
       .get("timestamp")
-      .and_then(|v| v.as_u64())
+      .and_then(serde_json::Value::as_u64)
       .ok_or_else(|| {
         sherr!(
           ParseErr,

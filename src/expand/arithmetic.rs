@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{cell::Cell, str::FromStr};
 
 use crate::{state::vars::VarStr, util};
 
@@ -185,7 +185,7 @@ fn resolve_var_num(name: &str) -> ShResult<i64> {
   if let Ok(n) = trimmed.parse::<i64>() {
     return Ok(n);
   }
-  if ARITH_DEPTH.with(|d| d.get()) >= MAX_ARITH_DEPTH {
+  if ARITH_DEPTH.with(Cell::get) >= MAX_ARITH_DEPTH {
     return Err(sherr!(
       ParseErr,
       "arithmetic recursion limit exceeded resolving '{name}'"

@@ -28,7 +28,7 @@ macro_rules! parse_err {
 		$crate::eval::parse::util::parse_err_full(
 			&format!($($arg)*),
 			&$span.unwrap_or_default(),
-			$parser.context.clone(),
+			&$parser.context,
 		)
 	};
 }

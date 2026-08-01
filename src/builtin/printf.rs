@@ -83,7 +83,7 @@ impl PrintFormatter {
     args: &mut Peekable<I>,
   ) -> ShResult<Rendered> {
     let mut out = Rendered::new(String::new());
-    for seg in self.0.iter() {
+    for seg in &self.0 {
       match seg {
         Segment::Literal(s) => out.text.push_str(s),
         Segment::Spec(spec) => {
@@ -159,22 +159,22 @@ impl FmtSpec {
     // the rest produce plain text and are wrapped with `Rendered::new`.
     let out = match &self.conversion {
       Conversion::Percent => Rendered::new("%".into()),
-      Conversion::SignedDecimal => self.apply_signed_int(args, flags, width, prec)?,
-      Conversion::UnsignedDecimal => self.apply_unsigned_int(args, flags, width, prec)?,
-      Conversion::UnsignedOctal => self.apply_unsigned_octal(args, flags, width, prec)?,
-      Conversion::UnsignedHex(case) => self.apply_unsigned_hex(args, flags, width, prec, case)?,
-      Conversion::FixedPointDecimal => self.apply_fixed_float(args, flags, width, prec)?,
-      Conversion::Scientific(case) => self.apply_scientific(args, flags, width, prec, case)?,
+      Conversion::SignedDecimal => Self::apply_signed_int(args, flags, width, prec)?,
+      Conversion::UnsignedDecimal => Self::apply_unsigned_int(args, flags, width, prec)?,
+      Conversion::UnsignedOctal => Self::apply_unsigned_octal(args, flags, width, prec)?,
+      Conversion::UnsignedHex(case) => Self::apply_unsigned_hex(args, flags, width, prec, case)?,
+      Conversion::FixedPointDecimal => Self::apply_fixed_float(args, flags, width, prec)?,
+      Conversion::Scientific(case) => Self::apply_scientific(args, flags, width, prec, case)?,
       Conversion::ShortestFloat(case) => {
-        self.apply_shortest_float(args, flags, width, prec, case)?
+        Self::apply_shortest_float(args, flags, width, prec, case)?
       }
-      Conversion::Char => Rendered::new(self.apply_char(args, flags, width)?),
-      Conversion::Str => Rendered::new(self.apply_str(args, flags, width, prec)?),
-      Conversion::RepeatStr => Rendered::new(self.apply_repeat_str(args, width)?),
-      Conversion::AnsiC => Rendered::new(self.apply_ansi_c(args, flags, width, prec)?),
-      Conversion::ShellQuote => Rendered::new(self.apply_shell_quote(args, flags, width)?),
+      Conversion::Char => Rendered::new(Self::apply_char(args, flags, width)?),
+      Conversion::Str => Rendered::new(Self::apply_str(args, flags, width, prec)?),
+      Conversion::RepeatStr => Rendered::new(Self::apply_repeat_str(args, width)?),
+      Conversion::AnsiC => Rendered::new(Self::apply_ansi_c(args, flags, width, prec)?),
+      Conversion::ShellQuote => Rendered::new(Self::apply_shell_quote(args, flags, width)?),
       Conversion::StrfTime(format) => {
-        Rendered::new(self.apply_strftime(args, flags, width, format.as_str())?)
+        Rendered::new(Self::apply_strftime(args, flags, width, format.as_str())?)
       }
     };
 
@@ -217,7 +217,6 @@ impl FmtSpec {
   }
 
   fn apply_signed_int<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -241,7 +240,6 @@ impl FmtSpec {
   }
 
   fn apply_unsigned_int<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -263,7 +261,6 @@ impl FmtSpec {
   }
 
   fn apply_unsigned_octal<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -292,7 +289,6 @@ impl FmtSpec {
   }
 
   fn apply_unsigned_hex<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -328,7 +324,6 @@ impl FmtSpec {
   }
 
   fn apply_fixed_float<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -337,7 +332,7 @@ impl FmtSpec {
     let (f, err): (f64, _) = parse_num_arg(args.next());
     let p = prec.unwrap_or(6);
 
-    let body = format!("{f:.p$}", p = p);
+    let body = format!("{f:.p$}");
     let abs_body = body.trim_start_matches('-').to_string();
     let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
 
@@ -350,7 +345,6 @@ impl FmtSpec {
   }
 
   fn apply_scientific<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -361,8 +355,8 @@ impl FmtSpec {
     let p = prec.unwrap_or(6);
 
     let raw = match case {
-      Case::Lower => format!("{f:.p$e}", p = p),
-      Case::Upper => format!("{f:.p$E}", p = p),
+      Case::Lower => format!("{f:.p$e}"),
+      Case::Upper => format!("{f:.p$E}"),
     };
     let normalized = normalize_exponent(&raw);
     let abs_body = normalized.trim_start_matches('-').to_string();
@@ -375,7 +369,6 @@ impl FmtSpec {
   }
 
   fn apply_shortest_float<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -398,8 +391,8 @@ impl FmtSpec {
     let body = if use_scientific {
       let mantissa_prec = p.saturating_sub(1);
       let raw = match case {
-        Case::Lower => format!("{f:.mp$e}", mp = mantissa_prec),
-        Case::Upper => format!("{f:.mp$E}", mp = mantissa_prec),
+        Case::Lower => format!("{f:.mantissa_prec$e}"),
+        Case::Upper => format!("{f:.mantissa_prec$E}"),
       };
       let normalized = normalize_exponent(&raw);
       if flags.contains(PrintFlags::ALT_FORM) {
@@ -409,7 +402,7 @@ impl FmtSpec {
       }
     } else {
       let fp = (p as i32 - 1 - exp).max(0) as usize;
-      let raw = format!("{f:.fp$}", fp = fp);
+      let raw = format!("{f:.fp$}");
       if flags.contains(PrintFlags::ALT_FORM) {
         raw
       } else {
@@ -426,7 +419,6 @@ impl FmtSpec {
   }
 
   fn apply_char<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -438,7 +430,6 @@ impl FmtSpec {
   }
 
   fn apply_str<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -453,7 +444,6 @@ impl FmtSpec {
   }
 
   fn apply_repeat_str<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     width: Option<usize>,
   ) -> ShResult<String> {
@@ -464,7 +454,6 @@ impl FmtSpec {
   }
 
   fn apply_ansi_c<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -480,7 +469,6 @@ impl FmtSpec {
   }
 
   fn apply_shell_quote<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -491,7 +479,6 @@ impl FmtSpec {
   }
 
   fn apply_strftime<I: Iterator<Item = String>>(
-    &self,
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -771,12 +758,12 @@ impl Rendered {
 pub(super) struct Printf;
 impl super::Builtin for Printf {
   fn execute(&self, args: super::BuiltinArgs) -> crate::ShResult<()> {
-    let mut argv = args.argv.into_iter().map(|(s, _)| s.to_string());
-    let format_str = argv
+    let mut arg_vec = args.argv.into_iter().map(|(s, _)| s.to_string());
+    let format_str = arg_vec
       .next()
       .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
     let formatter = PrintFormatter::parse(&format_str)?;
-    let remaining: Vec<String> = argv.collect();
+    let remaining: Vec<String> = arg_vec.collect();
     let mut values = remaining.into_iter().peekable();
 
     // Set when any present numeric argument fails to convert; printf still emits
@@ -859,28 +846,28 @@ mod tests {
   #[test]
   fn printf_string() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%s' hello"#).unwrap();
+    test_input(r"printf '%s' hello").unwrap();
     assert_eq!(guard.read_output(), "hello");
   }
 
   #[test]
   fn printf_repeat_literal_count() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%5r' x"#).unwrap();
+    test_input(r"printf '%5r' x").unwrap();
     assert_eq!(guard.read_output(), "xxxxx");
   }
 
   #[test]
   fn printf_repeat_dynamic_count() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%*r' 3 ab"#).unwrap();
+    test_input(r"printf '%*r' 3 ab").unwrap();
     assert_eq!(guard.read_output(), "ababab");
   }
 
   #[test]
   fn printf_repeat_multibyte() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%4r' '─'"#).unwrap();
+    test_input(r"printf '%4r' '─'").unwrap();
     assert_eq!(guard.read_output(), "────");
   }
 
@@ -889,21 +876,21 @@ mod tests {
     // Count 0 must come via the dynamic form; a literal leading `0` is the
     // zero-pad flag, not a count.
     let guard = TestGuard::new();
-    test_input(r#"printf '%*r' 0 x"#).unwrap();
+    test_input(r"printf '%*r' 0 x").unwrap();
     assert_eq!(guard.read_output(), "");
   }
 
   #[test]
   fn printf_repeat_bare_is_single_copy() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%r' hi"#).unwrap();
+    test_input(r"printf '%r' hi").unwrap();
     assert_eq!(guard.read_output(), "hi");
   }
 
   #[test]
   fn printf_repeat_recycles_format() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%*r' 3 a 2 b"#).unwrap();
+    test_input(r"printf '%*r' 3 a 2 b").unwrap();
     assert_eq!(guard.read_output(), "aaabb");
   }
 
@@ -911,98 +898,98 @@ mod tests {
   fn printf_repeat_in_separator_pattern() {
     // The qtable use case: build a separator inline, no fork.
     let guard = TestGuard::new();
-    test_input(r#"printf '╭%*r╮' 3 '─'"#).unwrap();
+    test_input(r"printf '╭%*r╮' 3 '─'").unwrap();
     assert_eq!(guard.read_output(), "╭───╮");
   }
 
   #[test]
   fn printf_signed_decimal() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%d' 42"#).unwrap();
+    test_input(r"printf '%d' 42").unwrap();
     assert_eq!(guard.read_output(), "42");
   }
 
   #[test]
   fn printf_signed_decimal_negative() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%d' -42"#).unwrap();
+    test_input(r"printf '%d' -42").unwrap();
     assert_eq!(guard.read_output(), "-42");
   }
 
   #[test]
   fn printf_i_alias() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%i' 42"#).unwrap();
+    test_input(r"printf '%i' 42").unwrap();
     assert_eq!(guard.read_output(), "42");
   }
 
   #[test]
   fn printf_unsigned_decimal() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%u' 42"#).unwrap();
+    test_input(r"printf '%u' 42").unwrap();
     assert_eq!(guard.read_output(), "42");
   }
 
   #[test]
   fn printf_octal() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%o' 8"#).unwrap();
+    test_input(r"printf '%o' 8").unwrap();
     assert_eq!(guard.read_output(), "10");
   }
 
   #[test]
   fn printf_hex_lower() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%x' 255"#).unwrap();
+    test_input(r"printf '%x' 255").unwrap();
     assert_eq!(guard.read_output(), "ff");
   }
 
   #[test]
   fn printf_hex_upper() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%X' 255"#).unwrap();
+    test_input(r"printf '%X' 255").unwrap();
     assert_eq!(guard.read_output(), "FF");
   }
 
   #[test]
   fn printf_fixed_float_default_precision() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%f' 3.14"#).unwrap();
+    test_input(r"printf '%f' 3.14").unwrap();
     assert_eq!(guard.read_output(), "3.140000");
   }
 
   #[test]
   fn printf_scientific_lower() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%e' 1234.5"#).unwrap();
+    test_input(r"printf '%e' 1234.5").unwrap();
     assert_eq!(guard.read_output(), "1.234500e+03");
   }
 
   #[test]
   fn printf_scientific_upper() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%E' 1234.5"#).unwrap();
+    test_input(r"printf '%E' 1234.5").unwrap();
     assert_eq!(guard.read_output(), "1.234500E+03");
   }
 
   #[test]
   fn printf_scientific_negative_exponent() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%e' 0.001"#).unwrap();
+    test_input(r"printf '%e' 0.001").unwrap();
     assert_eq!(guard.read_output(), "1.000000e-03");
   }
 
   #[test]
   fn printf_char_takes_first() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%c' hello"#).unwrap();
+    test_input(r"printf '%c' hello").unwrap();
     assert_eq!(guard.read_output(), "h");
   }
 
   #[test]
   fn printf_literal_percent() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%%'"#).unwrap();
+    test_input(r"printf '%%'").unwrap();
     assert_eq!(guard.read_output(), "%");
   }
 
@@ -1011,21 +998,21 @@ mod tests {
   #[test]
   fn printf_newline_escape() {
     let guard = TestGuard::new();
-    test_input(r#"printf 'a\nb'"#).unwrap();
+    test_input(r"printf 'a\nb'").unwrap();
     assert_eq!(guard.read_output(), "a\nb");
   }
 
   #[test]
   fn printf_tab_escape() {
     let guard = TestGuard::new();
-    test_input(r#"printf 'a\tb'"#).unwrap();
+    test_input(r"printf 'a\tb'").unwrap();
     assert_eq!(guard.read_output(), "a\tb");
   }
 
   #[test]
   fn printf_backslash_escape() {
     let guard = TestGuard::new();
-    test_input(r#"printf 'a\\b'"#).unwrap();
+    test_input(r"printf 'a\\b'").unwrap();
     assert_eq!(guard.read_output(), "a\\b");
   }
 
@@ -1034,49 +1021,49 @@ mod tests {
   #[test]
   fn printf_width_right_justify_default() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%5d]' 42"#).unwrap();
+    test_input(r"printf '[%5d]' 42").unwrap();
     assert_eq!(guard.read_output(), "[   42]");
   }
 
   #[test]
   fn printf_width_left_justify_flag() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%-5d]' 42"#).unwrap();
+    test_input(r"printf '[%-5d]' 42").unwrap();
     assert_eq!(guard.read_output(), "[42   ]");
   }
 
   #[test]
   fn printf_width_zero_pad() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%05d]' 42"#).unwrap();
+    test_input(r"printf '[%05d]' 42").unwrap();
     assert_eq!(guard.read_output(), "[00042]");
   }
 
   #[test]
   fn printf_width_string_right_pad() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%10s]' hi"#).unwrap();
+    test_input(r"printf '[%10s]' hi").unwrap();
     assert_eq!(guard.read_output(), "[        hi]");
   }
 
   #[test]
   fn printf_width_string_left_just() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%-10s]' hi"#).unwrap();
+    test_input(r"printf '[%-10s]' hi").unwrap();
     assert_eq!(guard.read_output(), "[hi        ]");
   }
 
   #[test]
   fn printf_width_dynamic_star() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%*d]' 8 42"#).unwrap();
+    test_input(r"printf '[%*d]' 8 42").unwrap();
     assert_eq!(guard.read_output(), "[      42]");
   }
 
   #[test]
   fn printf_width_less_than_content_no_truncate() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%2d]' 12345"#).unwrap();
+    test_input(r"printf '[%2d]' 12345").unwrap();
     assert_eq!(guard.read_output(), "[12345]");
   }
 
@@ -1085,42 +1072,42 @@ mod tests {
   #[test]
   fn printf_precision_float() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%.2f' 3.14159"#).unwrap();
+    test_input(r"printf '%.2f' 3.14159").unwrap();
     assert_eq!(guard.read_output(), "3.14");
   }
 
   #[test]
   fn printf_precision_zero_float() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%.0f' 3.7"#).unwrap();
+    test_input(r"printf '%.0f' 3.7").unwrap();
     assert_eq!(guard.read_output(), "4");
   }
 
   #[test]
   fn printf_precision_string_truncate() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%.3s' hello"#).unwrap();
+    test_input(r"printf '%.3s' hello").unwrap();
     assert_eq!(guard.read_output(), "hel");
   }
 
   #[test]
   fn printf_precision_int_min_digits() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%.5d' 42"#).unwrap();
+    test_input(r"printf '%.5d' 42").unwrap();
     assert_eq!(guard.read_output(), "00042");
   }
 
   #[test]
   fn printf_precision_dynamic_star() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%.*f' 3 3.14159"#).unwrap();
+    test_input(r"printf '%.*f' 3 3.14159").unwrap();
     assert_eq!(guard.read_output(), "3.142");
   }
 
   #[test]
   fn printf_width_and_precision_combined() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%10.3f]' 3.14159"#).unwrap();
+    test_input(r"printf '[%10.3f]' 3.14159").unwrap();
     assert_eq!(guard.read_output(), "[     3.142]");
   }
 
@@ -1129,28 +1116,28 @@ mod tests {
   #[test]
   fn printf_show_sign_positive() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%+d' 42"#).unwrap();
+    test_input(r"printf '%+d' 42").unwrap();
     assert_eq!(guard.read_output(), "+42");
   }
 
   #[test]
   fn printf_show_sign_negative_still_minus() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%+d' -42"#).unwrap();
+    test_input(r"printf '%+d' -42").unwrap();
     assert_eq!(guard.read_output(), "-42");
   }
 
   #[test]
   fn printf_space_sign_positive() {
     let guard = TestGuard::new();
-    test_input(r#"printf '% d' 42"#).unwrap();
+    test_input(r"printf '% d' 42").unwrap();
     assert_eq!(guard.read_output(), " 42");
   }
 
   #[test]
   fn printf_alt_form_hex_nonzero() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%#x' 255"#).unwrap();
+    test_input(r"printf '%#x' 255").unwrap();
     assert_eq!(guard.read_output(), "0xff");
   }
 
@@ -1158,21 +1145,21 @@ mod tests {
   fn printf_alt_form_hex_zero_no_prefix() {
     // # flag on 0 should NOT add 0x prefix per POSIX
     let guard = TestGuard::new();
-    test_input(r#"printf '%#x' 0"#).unwrap();
+    test_input(r"printf '%#x' 0").unwrap();
     assert_eq!(guard.read_output(), "0");
   }
 
   #[test]
   fn printf_alt_form_octal_ensures_leading_zero() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%#o' 8"#).unwrap();
+    test_input(r"printf '%#o' 8").unwrap();
     assert_eq!(guard.read_output(), "010");
   }
 
   #[test]
   fn printf_zero_pad_overrides_default_when_no_just_left() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%+06d]' 42"#).unwrap();
+    test_input(r"printf '[%+06d]' 42").unwrap();
     assert_eq!(guard.read_output(), "[+00042]");
   }
 
@@ -1181,28 +1168,28 @@ mod tests {
   #[test]
   fn printf_recycle_format() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%s:%d ' alice 1 bob 2 carol 3"#).unwrap();
+    test_input(r"printf '%s:%d ' alice 1 bob 2 carol 3").unwrap();
     assert_eq!(guard.read_output(), "alice:1 bob:2 carol:3 ");
   }
 
   #[test]
   fn printf_no_specs_ignores_extras() {
     let guard = TestGuard::new();
-    test_input(r#"printf 'hello' ignored extras"#).unwrap();
+    test_input(r"printf 'hello' ignored extras").unwrap();
     assert_eq!(guard.read_output(), "hello");
   }
 
   #[test]
   fn printf_missing_int_arg_defaults_to_zero() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%d-%d-%d' 1"#).unwrap();
+    test_input(r"printf '%d-%d-%d' 1").unwrap();
     assert_eq!(guard.read_output(), "1-0-0");
   }
 
   #[test]
   fn printf_missing_string_arg_defaults_to_empty() {
     let guard = TestGuard::new();
-    test_input(r#"printf '[%s][%s]' hi"#).unwrap();
+    test_input(r"printf '[%s][%s]' hi").unwrap();
     assert_eq!(guard.read_output(), "[hi][]");
   }
 
@@ -1211,21 +1198,21 @@ mod tests {
   #[test]
   fn printf_ansi_c_b_interprets_escapes() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%b' 'a\tb'"#).unwrap();
+    test_input(r"printf '%b' 'a\tb'").unwrap();
     assert_eq!(guard.read_output(), "a\tb");
   }
 
   #[test]
   fn printf_shell_quote_plain() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%q' hello"#).unwrap();
+    test_input(r"printf '%q' hello").unwrap();
     assert_eq!(guard.read_output(), "hello");
   }
 
   #[test]
   fn printf_shell_quote_with_whitespace() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%q' 'hello world'"#).unwrap();
+    test_input(r"printf '%q' 'hello world'").unwrap();
     assert_eq!(guard.read_output(), "'hello world'");
   }
 
@@ -1234,7 +1221,7 @@ mod tests {
     // Regression: parser used to leave the trailing 'T' in the format,
     // leaking it into the literal portion of the output.
     let guard = TestGuard::new();
-    test_input(r#"printf '%(%Y)T'"#).unwrap();
+    test_input(r"printf '%(%Y)T'").unwrap();
     let out = guard.read_output();
     assert!(
       !out.ends_with('T'),
@@ -1251,7 +1238,7 @@ mod tests {
   fn printf_strftime_explicit_epoch_zero() {
     // Year of epoch=0 is 1969 or 1970 depending on local timezone.
     let guard = TestGuard::new();
-    test_input(r#"printf '%(%Y)T' 0"#).unwrap();
+    test_input(r"printf '%(%Y)T' 0").unwrap();
     let out = guard.read_output();
     assert!(
       out == "1969" || out == "1970",
@@ -1264,21 +1251,21 @@ mod tests {
   #[test]
   fn printf_multi_string_specs() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%s and %s' alice bob"#).unwrap();
+    test_input(r"printf '%s and %s' alice bob").unwrap();
     assert_eq!(guard.read_output(), "alice and bob");
   }
 
   #[test]
   fn printf_mixed_spec_types() {
     let guard = TestGuard::new();
-    test_input(r#"printf '%s is %d' alice 30"#).unwrap();
+    test_input(r"printf '%s is %d' alice 30").unwrap();
     assert_eq!(guard.read_output(), "alice is 30");
   }
 
   #[test]
   fn printf_literals_around_specs() {
     let guard = TestGuard::new();
-    test_input(r#"printf '<<%s>>' middle"#).unwrap();
+    test_input(r"printf '<<%s>>' middle").unwrap();
     assert_eq!(guard.read_output(), "<<middle>>");
   }
 
@@ -1287,21 +1274,21 @@ mod tests {
   #[test]
   fn printf_empty_format() {
     let guard = TestGuard::new();
-    test_input(r#"printf ''"#).unwrap();
+    test_input(r"printf ''").unwrap();
     assert_eq!(guard.read_output(), "");
   }
 
   #[test]
   fn printf_format_with_no_specs_or_args() {
     let guard = TestGuard::new();
-    test_input(r#"printf 'just text'"#).unwrap();
+    test_input(r"printf 'just text'").unwrap();
     assert_eq!(guard.read_output(), "just text");
   }
 
   #[test]
   fn printf_status_zero() {
     let _g = TestGuard::new();
-    test_input(r#"printf '%s' hello"#).unwrap();
+    test_input(r"printf '%s' hello").unwrap();
     assert_eq!(crate::state::Shed::get_status(), 0);
   }
 }

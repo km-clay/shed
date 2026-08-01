@@ -21,8 +21,8 @@ impl super::Builtin for Shift {
       })
     })?;
 
-    let argc = Shed::vars(|v| v.sh_argv().len());
-    if count > argc {
+    let arg_count = Shed::vars(|v| v.sh_argv().len());
+    if count > arg_count {
       return with_status(1);
     }
 

@@ -49,7 +49,7 @@ impl ParseStream {
 
     compound_cmd.propagate_context(&get_context(
       styled_format!("in function '{name_raw}' defined here").into(),
-      span.clone().unwrap_or_default(),
+      &span.clone().unwrap_or_default(),
     ));
 
     self.parse_redir(&mut compound_cmd.redirs, &mut span)?;
@@ -785,7 +785,7 @@ impl ParseStream {
     };
     body.propagate_context(&get_context(
       styled_format!("in '{}' block defined here", "try").into(),
-      try_span,
+      &try_span,
     ));
 
     extend_span!(span, self.next_tk().unwrap().span); // consume 'catch'
@@ -887,7 +887,7 @@ impl ParseStream {
 
     body.propagate_context(&get_context(
       styled_format!("in '{}' block defined here", "defer").into(),
-      defer_span,
+      &defer_span,
     ));
 
     self.catch_separator(&mut span);

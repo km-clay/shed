@@ -165,8 +165,8 @@ fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
     UnaryOp::IsFloat => operand
       .parse::<f64>()
       .ok()
-      .filter(|n| n.is_finite())
-      .is_some(),
+      .as_ref()
+      .is_some_and(|n| n.is_finite()),
   }
 }
 

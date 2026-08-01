@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, rc::Rc};
+use std::{collections::VecDeque, rc::Rc, string::ToString};
 
 use crate::{
   ShResult, Shed,
@@ -440,7 +440,7 @@ pub(crate) fn node_has_only_builtins(node: &mut Node) -> bool {
           res = Some(is_builtin(node));
           return;
         }
-        let name = node.get_command().map(|tk| tk.to_string()).unwrap();
+        let name = node.get_command().map(ToString::to_string).unwrap();
 
         // Caller is about to execute this anyway (cmd sub, pipeline, etc),
         // so source the autoload now while we have the chance.
@@ -468,9 +468,8 @@ pub(crate) fn node_has_only_builtins(node: &mut Node) -> bool {
 
           match func {
             ShFunc::Defined { is_internal, .. } => match is_internal {
-              Some(IsInternal::Yes) => Some(true),
               Some(IsInternal::No) => Some(false),
-              Some(IsInternal::Checking) => Some(true),
+              Some(IsInternal::Yes | IsInternal::Checking) => Some(true),
               None => None,
             },
             ShFunc::Autoload(_) => Some(false),

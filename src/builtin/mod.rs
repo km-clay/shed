@@ -370,7 +370,7 @@ pub(super) trait Builtin: Sync {
         // which cancels execution. Let's catch that here
         let kind = e.kind_mut();
         let should_propagate = match kind {
-          ShErrKind::CleanExit(_) => true, // this one always goes
+          ShErrKind::CleanExit(_) | // this one always goes
           ShErrKind::Raised(_, _) => true,
           ShErrKind::LoopBreak(_) | ShErrKind::LoopContinue(_) => {
             state::Shed::meta(MetaTab::in_loop)
@@ -412,8 +412,7 @@ pub(super) trait Builtin: Sync {
 
     let cmd_span = argv
       .first()
-      .map(|tk| tk.span.clone())
-      .unwrap_or_else(|| span.clone());
+      .map_or_else(|| span.clone(), |tk| tk.span.clone());
 
     let (argv, opts) = self.get_argv_and_opts(cmd_span.clone(), argv, no_split)?;
     let builtin_args = BuiltinArgs {
@@ -512,7 +511,23 @@ impl Builtin for Let {
       let result = expand::expand_arithmetic(expr.as_str())?;
       last = result.as_str().trim().parse::<i64>().unwrap_or(0);
     }
-    with_status(if last == 0 { 1 } else { 0 })
+    with_status(i32::from(last == 0))
+  }
+}
+
+// Stdin reads go through `Sinks`: the in-process pipeline sink if present,
+// else the real fd 0. Each chunk is its own `Shed::sinks` borrow so it
+// never overlaps the `out_bytes` write below.
+enum ThruSource {
+  File(fs::File),
+  Stdin,
+}
+impl ThruSource {
+  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    match self {
+      ThruSource::File(f) => f.read(buf),
+      ThruSource::Stdin => Shed::sinks(|s| s.read(buf)),
+    }
   }
 }
 
@@ -549,7 +564,7 @@ impl Builtin for Thru {
             let Ok(parsed) = arg.parse::<usize>() else {
               return Err(sherr!(InvalidOpt, "invalid limit: {arg}"));
             };
-            limit = Some(parsed)
+            limit = Some(parsed);
           }
           _ => {}
         },
@@ -558,7 +573,7 @@ impl Builtin for Thru {
           let Ok(parsed) = arg.parse::<usize>() else {
             return Err(sherr!(InvalidOpt, "invalid limit: {arg}"));
           };
-          limit = Some(parsed)
+          limit = Some(parsed);
         }
         Opt::Short('c') => count = true,
         Opt::Short('a') => append = true,
@@ -584,22 +599,6 @@ impl Builtin for Thru {
       .ok()
       .flatten();
 
-    // Stdin reads go through `Sinks`: the in-process pipeline sink if present,
-    // else the real fd 0. Each chunk is its own `Shed::sinks` borrow so it
-    // never overlaps the `out_bytes` write below.
-    enum ThruSource {
-      File(fs::File),
-      Stdin,
-    }
-    impl ThruSource {
-      fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-          ThruSource::File(f) => f.read(buf),
-          ThruSource::Stdin => Shed::sinks(|s| s.read(buf)),
-        }
-      }
-    }
-
     let sources: Vec<Option<VarStr>> = if args.argv.is_empty() {
       vec![None]
     } else {
@@ -615,7 +614,7 @@ impl Builtin for Thru {
     for src in sources {
       if limit == Some(0) {
         break;
-      };
+      }
 
       let mut reader = match &src {
         Some(path) => match fs::File::open(path) {

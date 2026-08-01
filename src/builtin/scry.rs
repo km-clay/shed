@@ -75,12 +75,10 @@ impl super::Builtin for Scry {
       Some(item) => {
         if quote_out {
           Shed::sinks(|s| expand::shell_quote_fmt(&item, s)).ok();
+        } else if no_newline {
+          out!("{item}");
         } else {
-          if no_newline {
-            out!("{item}");
-          } else {
-            outln!("{item}");
-          }
+          outln!("{item}");
         }
         with_status(0)
       }

@@ -166,6 +166,6 @@ pub(super) fn split_for_arith_tk(tk: &Tk) -> ShResult<Option<(Box<Node>, Box<Nod
   Ok(Some((init, cond, step)))
 }
 
-pub(super) fn parse_err_full(reason: &str, blame: &Span, context: LabelCtx) -> ShErr {
+pub(super) fn parse_err_full(reason: &str, blame: &Span, context: &LabelCtx) -> ShErr {
   sherr!(ParseErr @ blame.clone(), "{reason}").with_context(context.iter())
 }

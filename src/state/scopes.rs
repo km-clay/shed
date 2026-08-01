@@ -269,7 +269,7 @@ impl ScopeStack {
     let pos = self
       .scopes
       .iter()
-      .rposition(|s| s.is_ceiling())
+      .rposition(VarTab::is_ceiling)
       .unwrap_or(0);
     self.scopes.get_mut(pos)
   }
@@ -501,7 +501,7 @@ impl ScopeStack {
     let skip = self
       .scopes
       .iter()
-      .rposition(|s| s.is_ceiling())
+      .rposition(VarTab::is_ceiling)
       .unwrap_or(0);
     self.scopes.iter_mut().skip(skip).rev()
   }

@@ -76,7 +76,7 @@ fn is_exec_wrapper(tk: &CtxTk) -> bool {
   get_exec_wrappers()
     .into_iter()
     .any(|wr| wr.as_str() == tk.span().as_str())
-    && is_valid_cmd(tk.as_tk()).is_some()
+    && is_valid_cmd(&tk.as_tk()).is_some()
 }
 
 fn promote_exec_wrappers(tokens: &mut [CtxTk]) {
@@ -115,7 +115,7 @@ fn promote_exec_wrappers(tokens: &mut [CtxTk]) {
             continue 'outer;
           }
           let target = tokens.next().unwrap();
-          target.class = match is_valid_cmd(target.as_tk()) {
+          target.class = match is_valid_cmd(&target.as_tk()) {
             Some(kind) => CtxTkRule::ValidCommand(kind),
             None => CtxTkRule::InvalidCommand,
           };
@@ -168,8 +168,8 @@ pub(crate) enum CmdKind {
 /// 2. Current directory if command is a path
 /// 3. All directories in PATH environment variable
 /// 4. Shell functions and aliases in the current shell state
-fn is_valid(command: Tk) -> Option<CmdKind> {
-  if shopt!(core.autocd) && in_cd_path(command.clone()) && !is_in_path(command.clone()) {
+fn is_valid(command: &Tk) -> Option<CmdKind> {
+  if shopt!(core.autocd) && in_cd_path(command) && !is_in_path(command) {
     // this is a directory and autocd is enabled
     return Some(CmdKind::Directory);
   }
@@ -177,7 +177,7 @@ fn is_valid(command: Tk) -> Option<CmdKind> {
   is_valid_cmd(command)
 }
 
-fn is_valid_cmd(command: Tk) -> Option<CmdKind> {
+fn is_valid_cmd(command: &Tk) -> Option<CmdKind> {
   let expanded = command.expand_no_side_effects().ok()?;
   let name = expanded.get_first_word()?;
   let cmd_path = Path::new(&name);
@@ -651,7 +651,7 @@ impl CtxTk {
         span,
       )];
     } else if flags.intersects(TkFlags::BUILTIN | TkFlags::IS_CMD) {
-      if let Some(kind) = is_valid(value.clone()) {
+      if let Some(kind) = is_valid(value) {
         CtxTkRule::ValidCommand(kind)
       } else {
         CtxTkRule::InvalidCommand

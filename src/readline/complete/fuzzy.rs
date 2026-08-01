@@ -1,3 +1,5 @@
+use std::convert::Into;
+
 use nix::{
   errno::Errno,
   poll::{PollFd, PollFlags, PollTimeout, poll},
@@ -521,7 +523,7 @@ impl FuzzySelector {
 
   /// Hint text shown in the empty query box (e.g. for standalone pickers).
   pub fn set_placeholder(&mut self, text: Option<impl Into<String>>) {
-    self.placeholder = text.map(|t| t.into());
+    self.placeholder = text.map(Into::into);
   }
 
   pub fn set_score_cb(&mut self, cb: Option<ScoreCallback>) {
@@ -755,11 +757,12 @@ impl FuzzySelector {
     }
   }
 
+  #[expect(clippy::unnested_or_patterns)]
   pub fn handle_key(&mut self, key: K) -> ShResult<SelectorResponse> {
     match key {
       // Pointer events are consumed but unhandled for now; hit-testing a
       // column-major paged grid needs a cell map we haven't built yet.
-      K(C::MousePos(..), _) | K(C::LeftClick(..), _) => Ok(SelectorResponse::Consumed),
+      K(C::MousePos(..) | C::LeftClick(..), _) => Ok(SelectorResponse::Consumed),
       key!(Ctrl + 'd') | key!(Esc) => {
         self.filtered.clear();
         Ok(SelectorResponse::Dismiss)
@@ -774,7 +777,7 @@ impl FuzzySelector {
       }
       // Up clamps at the top rather than wrapping to the far end of a long
       // history (a ~12k-index jump is jarring); Down still cycles forward.
-      key!(Shift + Tab) | key!(Up) => {
+      key!(Shift + Tab) | key!(Up) | key!(ScrollUp) => {
         self.cursor.sub(1);
         Ok(self.nav_response())
       }
@@ -804,10 +807,6 @@ impl FuzzySelector {
       }
       key!(ScrollDown) => {
         self.cursor.add(1);
-        Ok(self.nav_response())
-      }
-      key!(ScrollUp) => {
-        self.cursor.sub(1);
         Ok(self.nav_response())
       }
       key!(PageDown) | key!(Ctrl + 'f') => {
@@ -911,41 +910,41 @@ impl FuzzySelector {
 
           let is_selected = idx == cursor_pos;
 
-          let cell = match self.filtered[idx]
+          let cell = if let Some(desc) = self.filtered[idx]
             .candidate
             .desc()
             .filter(|d| !d.is_empty())
           {
-            Some(desc) => {
-              // Aligned position is after col_name_max + a 2-col gap; if the
-              // desc doesn't fit there it may extend left into the name-pad,
-              // and past that it truncates with an ellipsis.
-              let desc_w_full = calc_str_width(desc) + 2; // includes parens
-              let aligned_avail = avail.saturating_sub(col_name_max + 2);
-              let max_extend_avail = avail.saturating_sub(name_w + 2);
-              let (pad_chars, desc_text) = if desc_w_full <= aligned_avail {
-                (col_name_max.saturating_sub(name_w), format!("({desc})"))
-              } else if desc_w_full <= max_extend_avail {
-                let need = desc_w_full - aligned_avail;
-                let pad = col_name_max.saturating_sub(name_w).saturating_sub(need);
-                (pad, format!("({desc})"))
-              } else {
-                let truncated = truncate_to_width(desc, max_extend_avail.saturating_sub(3));
-                (0, format!("({truncated}…)"))
-              };
-              let name_pad = " ".repeat(pad_chars);
-              let used = name_w + pad_chars + 2 + calc_str_width(&desc_text);
-              let trailing = " ".repeat(avail.saturating_sub(used));
-              if is_selected {
-                format!("{name}{name_pad}  {desc_text}{trailing}")
-              } else {
-                format!("{name}{name_pad}  \x1b[2m{desc_text}\x1b[22m{trailing}")
-              }
+            // Aligned position is after col_name_max + a 2-col gap; if the
+            // desc doesn't fit there it may extend left into the name-pad,
+            // and past that it truncates with an ellipsis.
+            let desc_w_full = calc_str_width(desc) + 2; // includes parens
+            let aligned_avail = avail.saturating_sub(col_name_max + 2);
+            let max_extend_avail = avail.saturating_sub(name_w + 2);
+
+            let (pad_chars, desc_text) = if desc_w_full <= aligned_avail {
+              (col_name_max.saturating_sub(name_w), format!("({desc})"))
+            } else if desc_w_full <= max_extend_avail {
+              let need = desc_w_full - aligned_avail;
+              let pad = col_name_max.saturating_sub(name_w).saturating_sub(need);
+              (pad, format!("({desc})"))
+            } else {
+              let truncated = truncate_to_width(desc, max_extend_avail.saturating_sub(3));
+              (0, format!("({truncated}…)"))
+            };
+
+            let name_pad = " ".repeat(pad_chars);
+            let used = name_w + pad_chars + 2 + calc_str_width(&desc_text);
+            let trailing = " ".repeat(avail.saturating_sub(used));
+
+            if is_selected {
+              format!("{name}{name_pad}  {desc_text}{trailing}")
+            } else {
+              format!("{name}{name_pad}  \x1b[2m{desc_text}\x1b[22m{trailing}")
             }
-            None => {
-              let trailing = " ".repeat(avail.saturating_sub(name_w));
-              format!("{name}{trailing}")
-            }
+          } else {
+            let trailing = " ".repeat(avail.saturating_sub(name_w));
+            format!("{name}{trailing}")
           };
 
           if is_selected {

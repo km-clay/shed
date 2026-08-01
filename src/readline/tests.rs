@@ -2291,10 +2291,11 @@ mod keymap_implied_submit {
   use super::*;
   use crate::keys::{KeyMap, KeyMapFlags};
   use crate::readline::ModeReport;
+  use crate::state::terminal::Terminal;
 
   fn feed(line: &mut ShedLine, s: &str) {
     Shed::term_mut(|t| t.feed_bytes(s.as_bytes()));
-    let keys = Shed::term_mut(|t| t.drain_keys());
+    let keys = Shed::term_mut(Terminal::drain_keys);
     line.process_input(keys).unwrap();
   }
 
@@ -2332,11 +2333,14 @@ mod keymap_implied_submit {
 
 mod normal_command_mappings {
   use super::*;
-  use crate::keys::{KeyMap, KeyMapFlags};
+  use crate::{
+    keys::{KeyMap, KeyMapFlags},
+    state::terminal::Terminal,
+  };
 
   fn feed(line: &mut ShedLine, s: &str) {
     Shed::term_mut(|t| t.feed_bytes(s.as_bytes()));
-    let keys = Shed::term_mut(|t| t.drain_keys());
+    let keys = Shed::term_mut(Terminal::drain_keys);
     line.process_input(keys).unwrap();
   }
   fn register(keys: &str, action: &str) {

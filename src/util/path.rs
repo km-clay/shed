@@ -102,14 +102,7 @@ impl PathCache {
 
       match entry {
         EntryCache::Dir { dir_mtime, files } => {
-          if current_top_mtime != *dir_mtime {
-            // dir mtime moved, so an entry was added, removed, or renamed.
-            // re-walk picks up fresh mtimes for every file at once, so we
-            // skip the per-file check below.
-            *dir_mtime = current_top_mtime;
-            *files = collect_files_in_dir(path);
-            changed = true;
-          } else {
+          if current_top_mtime == *dir_mtime {
             for (file_path, file_mtime) in files.iter_mut() {
               let current = mtime_of(file_path);
               if current != *file_mtime {
@@ -117,6 +110,13 @@ impl PathCache {
                 changed = true;
               }
             }
+          } else {
+            // dir mtime moved, so an entry was added, removed, or renamed.
+            // re-walk picks up fresh mtimes for every file at once, so we
+            // skip the per-file check below.
+            *dir_mtime = current_top_mtime;
+            *files = collect_files_in_dir(path);
+            changed = true;
           }
         }
         EntryCache::File(mtime) => {

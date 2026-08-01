@@ -49,7 +49,7 @@ impl Grapheme {
   pub fn len_utf8(&self) -> usize {
     match self {
       Grapheme::Single(ch) => ch.len_utf8(),
-      Grapheme::Cluster(cluster) => cluster.chars().map(|c| c.len_utf8()).sum(),
+      Grapheme::Cluster(cluster) => cluster.chars().map(char::len_utf8).sum(),
     }
   }
   /// Returns true if the Grapheme is wrapping a linefeed ('\n')

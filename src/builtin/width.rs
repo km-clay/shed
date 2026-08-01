@@ -9,8 +9,7 @@ impl super::Builtin for Width {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let input = self
       .get_input_str(&mut args)
-      .map(VarStr::from)
-      .unwrap_or_else(|| super::join_raw_args(args.argv).0);
+      .map_or_else(|| super::join_raw_args(args.argv).0, VarStr::from);
 
     let width = calc_str_width(&input);
 

@@ -110,7 +110,7 @@ mod shell_intro_2_1 {
   fn test_input_dash_c() {
     let g = TestGuard::new();
     let args = vec!["foo".into(), "bar".into(), "biz".into()];
-    exec_dash_c("echo hello world; echo $0 $1 $2".into(), args).unwrap();
+    exec_dash_c("echo hello world; echo $0 $1 $2", args).unwrap();
     assert_output!(g, "hello world\nfoo bar biz\n");
   }
 
@@ -127,7 +127,7 @@ mod shell_intro_2_1 {
   #[test]
   fn dash_c_sets_dollar_zero() {
     let g = TestGuard::new();
-    exec_dash_c("echo $0".into(), vec!["myscript".into()]).unwrap();
+    exec_dash_c("echo $0", vec!["myscript".into()]).unwrap();
     assert_output!(g, "myscript\n");
   }
 
@@ -135,7 +135,7 @@ mod shell_intro_2_1 {
   fn dash_c_positional_params_in_order() {
     let g = TestGuard::new();
     exec_dash_c(
-      "echo $1 $2 $3".into(),
+      "echo $1 $2 $3",
       vec!["s".into(), "foo".into(), "bar".into(), "biz".into()],
     )
     .unwrap();
@@ -147,7 +147,7 @@ mod shell_intro_2_1 {
     let g = TestGuard::new();
     // $# is the count of positional params, NOT including $0.
     exec_dash_c(
-      "echo $#".into(),
+      "echo $#",
       vec!["s".into(), "a".into(), "b".into(), "c".into()],
     )
     .unwrap();
@@ -157,7 +157,7 @@ mod shell_intro_2_1 {
   #[test]
   fn dash_c_arg_count_no_args() {
     let g = TestGuard::new();
-    exec_dash_c("echo $#".into(), vec!["s".into()]).unwrap();
+    exec_dash_c("echo $#", vec!["s".into()]).unwrap();
     assert_output!(g, "0\n");
   }
 
@@ -165,7 +165,7 @@ mod shell_intro_2_1 {
   fn dash_c_at_expansion_unquoted() {
     let g = TestGuard::new();
     exec_dash_c(
-      "echo $@".into(),
+      "echo $@",
       vec!["s".into(), "a".into(), "b".into(), "c".into()],
     )
     .unwrap();
@@ -176,11 +176,11 @@ mod shell_intro_2_1 {
   fn dash_c_star_expansion_quoted_joins_with_ifs() {
     let g = TestGuard::new();
     let args = vec!["s".into(), "a".into(), "b".into(), "c".into()];
-    exec_dash_c("echo \"$*\"".into(), args.clone()).unwrap();
+    exec_dash_c("echo \"$*\"", args.clone()).unwrap();
     assert_output!(g, "a b c\n");
 
     Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
-    exec_dash_c("echo \"$*\"".into(), args.clone()).unwrap();
+    exec_dash_c("echo \"$*\"", args.clone()).unwrap();
     assert_output!(g, "a:b:c\n");
   }
 
@@ -188,7 +188,7 @@ mod shell_intro_2_1 {
   fn dash_c_at_expansion_quoted_preserves_arg_boundaries() {
     let g = TestGuard::new();
     exec_dash_c(
-      "for x in \"$@\"; do echo $x; done".into(),
+      "for x in \"$@\"; do echo $x; done",
       vec!["s".into(), "a b".into(), "c".into()],
     )
     .unwrap();
@@ -199,7 +199,7 @@ mod shell_intro_2_1 {
   fn dash_c_empty_arg_preserved() {
     let g = TestGuard::new();
     exec_dash_c(
-      "echo $#:$1:$2:$3".into(),
+      "echo $#:$1:$2:$3",
       vec!["s".into(), "first".into(), String::new(), "third".into()],
     )
     .unwrap();
@@ -209,7 +209,7 @@ mod shell_intro_2_1 {
   #[test]
   fn dash_c_no_args_dollar_zero_set() {
     let g = TestGuard::new();
-    exec_dash_c("echo $0".into(), vec![]).unwrap();
+    exec_dash_c("echo $0", vec![]).unwrap();
     let out = g.read_output();
     assert!(
       !out.trim().is_empty(),
@@ -220,7 +220,7 @@ mod shell_intro_2_1 {
   #[test]
   fn dash_c_args_not_re_expanded() {
     let g = TestGuard::new();
-    exec_dash_c("echo $1".into(), vec!["s".into(), "$HOME".into()]).unwrap();
+    exec_dash_c("echo $1", vec!["s".into(), "$HOME".into()]).unwrap();
     assert_output!(g, "$HOME\n");
   }
 
@@ -231,7 +231,7 @@ mod shell_intro_2_1 {
     // suppresses pathname expansion, so the literal pattern survives
     // even when a matching file exists — which is the actual property
     // we want to assert (the unquoted version would correctly glob).
-    exec_dash_c("echo \"$1\"".into(), vec!["s".into(), "*.toml".into()]).unwrap();
+    exec_dash_c("echo \"$1\"", vec!["s".into(), "*.toml".into()]).unwrap();
     assert_output!(g, "*.toml\n");
   }
 
@@ -239,7 +239,7 @@ mod shell_intro_2_1 {
   fn dash_c_shift_advances_positional() {
     let g = TestGuard::new();
     exec_dash_c(
-      "shift; echo $1 $#".into(),
+      "shift; echo $1 $#",
       vec!["s".into(), "a".into(), "b".into(), "c".into()],
     )
     .unwrap();
@@ -312,7 +312,7 @@ mod shell_intro_2_1 {
     // Unbalanced quote → ParsedSrc::parse_src returns Err; exec_dash_c
     // prints the errors but returns Ok(()) regardless.
     let _g = TestGuard::new();
-    let res = exec_dash_c("echo 'unterminated".into(), vec!["s".into()]);
+    let res = exec_dash_c("echo 'unterminated", vec!["s".into()]);
     assert!(res.is_ok());
   }
 
@@ -321,18 +321,14 @@ mod shell_intro_2_1 {
     let g = TestGuard::new();
     // Multiple statements: the single-cmd NO_FORK optimization should
     // be skipped (nodes.len() != 1 path), and both echos still run.
-    exec_dash_c(
-      "echo first; echo second; echo third".into(),
-      vec!["s".into()],
-    )
-    .unwrap();
+    exec_dash_c("echo first; echo second; echo third", vec!["s".into()]).unwrap();
     assert_output!(g, "first\nsecond\nthird\n");
   }
 
   #[test]
   fn dash_c_empty_input_is_ok() {
     let _g = TestGuard::new();
-    exec_dash_c(String::new(), vec!["s".into()]).unwrap();
+    exec_dash_c("", vec!["s".into()]).unwrap();
   }
 }
 
@@ -1646,7 +1642,7 @@ mod exit_status_2_8 {
   fn redirect_error_on_simple_command_is_nonfatal() {
     let g = TestGuard::new();
     exec_dash_c(
-      "echo before; echo SKIP > /nonexistent_dir_xyzq/f; echo after".into(),
+      "echo before; echo SKIP > /nonexistent_dir_xyzq/f; echo after",
       vec![],
     )
     .unwrap();
@@ -1665,7 +1661,7 @@ mod exit_status_2_8 {
   #[test]
   fn redirect_error_sets_nonzero_status() {
     let _g = TestGuard::new();
-    exec_dash_c("echo x > /nonexistent_dir_xyzq/f".into(), vec![]).unwrap();
+    exec_dash_c("echo x > /nonexistent_dir_xyzq/f", vec![]).unwrap();
     assert_ne!(Shed::get_status(), 0);
   }
 
@@ -1674,11 +1670,7 @@ mod exit_status_2_8 {
     // `true` is a builtin but not a *special* built-in, so its redirection
     // error is non-fatal like any ordinary command.
     let g = TestGuard::new();
-    exec_dash_c(
-      "true > /nonexistent_dir_xyzq/f; echo reached".into(),
-      vec![],
-    )
-    .unwrap();
+    exec_dash_c("true > /nonexistent_dir_xyzq/f; echo reached", vec![]).unwrap();
     assert!(
       g.read_output().contains("reached"),
       "must continue past the failure"
@@ -1691,7 +1683,7 @@ mod exit_status_2_8 {
     // abort the shell.
     let g = TestGuard::new();
     exec_dash_c(
-      "f(){ echo FROMFUNC; }; f > /nonexistent_dir_xyzq/f; echo after".into(),
+      "f(){ echo FROMFUNC; }; f > /nonexistent_dir_xyzq/f; echo after",
       vec![],
     )
     .unwrap();
@@ -1708,7 +1700,7 @@ mod exit_status_2_8 {
     // Same for compound commands (brace group / loop / if).
     let g = TestGuard::new();
     exec_dash_c(
-      "{ echo FROMGRP; } > /nonexistent_dir_xyzq/f; echo after".into(),
+      "{ echo FROMGRP; } > /nonexistent_dir_xyzq/f; echo after",
       vec![],
     )
     .unwrap();
@@ -1725,7 +1717,7 @@ mod exit_status_2_8 {
     // `:` is a special built-in: a redirection error is fatal (non-interactive),
     // so the following command must not run.
     let g = TestGuard::new();
-    exec_dash_c(": > /nonexistent_dir_xyzq/f; echo AFTER".into(), vec![]).ok();
+    exec_dash_c(": > /nonexistent_dir_xyzq/f; echo AFTER", vec![]).ok();
     assert!(
       !g.read_output().contains("AFTER"),
       "special-built-in redirection error must abort the input"

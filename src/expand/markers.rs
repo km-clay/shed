@@ -106,14 +106,14 @@ mod tests {
 
   #[test]
   fn actual_markers_still_stripped() {
-    let input = format!("hello{}world{}", NULL_EXPAND, ARG_SEP);
+    let input = format!("hello{NULL_EXPAND}world{ARG_SEP}");
     let stripped = strip_markers(&input);
     assert_eq!(stripped, "helloworld");
   }
 
   #[test]
   fn mixed_markers_and_pua_preserves_pua() {
-    let input = format!("a{}b{}c{}d", NULL_EXPAND, '\u{e0b0}', ARG_SEP);
+    let input = format!("a{NULL_EXPAND}b{}c{ARG_SEP}d", '\u{e0b0}');
     let stripped = strip_markers(&input);
     assert_eq!(stripped, "ab\u{e0b0}cd");
   }

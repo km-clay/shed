@@ -100,8 +100,7 @@ impl super::Builtin for Unquote {
     log::debug!("entered unquote execute()");
     let input: VarStr = self
       .get_input_str(&mut args)
-      .map(|s| s.into())
-      .unwrap_or_else(|| super::join_raw_args(args.argv).0);
+      .map_or_else(|| super::join_raw_args(args.argv).0, VarStr::from);
 
     let mut target = None;
     let mut delim = "\n";
@@ -168,7 +167,7 @@ pub(crate) fn unquote_raw(s: &str) -> ShResult<Vec<String>> {
       match_loop!(chars.next() => ch, {
         '\'' => break,
         _ => field.push(ch),
-      })
+      });
     }
     '$' if chars.peek() == Some(&'\'') => {
       started = true;

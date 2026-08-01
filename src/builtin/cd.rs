@@ -130,17 +130,17 @@ impl super::Builtin for Zd {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     match args.argv.first().map(|(s, _)| s.as_str()) {
-      Some("add") => self.add(args),
-      Some("remove") => self.remove(args),
-      Some("clean") => self.clean(args),
-      _ => self.query(args),
+      Some("add") => Self::add(args),
+      Some("remove") => Self::remove(args),
+      Some("clean") => Self::clean(),
+      _ => Self::query(args),
     }
   }
 }
 
 impl Zd {
   /// zd add [-r] [dirs...] - add directories
-  fn add(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn add(args: super::BuiltinArgs) -> ShResult<()> {
     let depth = match args.opts.iter().find_map(|o| match o {
       Opt::ShortWithArg('d', n) => Some(n.as_str()),
       Opt::LongWithArg(name, n) if name.as_str() == "depth" => Some(n.as_str()),
@@ -201,7 +201,7 @@ impl Zd {
   }
 
   /// zd add [-r] <dirs...> - remove directories
-  fn remove(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn remove(args: super::BuiltinArgs) -> ShResult<()> {
     let recursive = args.opts.iter().any(|o| matches!(o, Opt::Short('r')));
     let targets: Vec<String> = args
       .argv
@@ -222,8 +222,7 @@ impl Zd {
     let mut removed = 0;
     for target in &targets {
       let canon = std::fs::canonicalize(target)
-        .map(|c| c.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| target.clone());
+        .map_or_else(|_| target.clone(), |c| c.to_string_lossy().into_owned());
       removed += if recursive {
         conn
           .execute(
@@ -244,7 +243,7 @@ impl Zd {
   }
 
   /// `zd clean` - prune entries whose directory no longer exists.
-  fn clean(&self, _args: super::BuiltinArgs) -> ShResult<()> {
+  fn clean() -> ShResult<()> {
     let Some(conn) = util::get_db_conn() else {
       return with_status(0);
     };
@@ -280,7 +279,7 @@ impl Zd {
     with_status(0)
   }
 
-  fn query(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn query(args: super::BuiltinArgs) -> ShResult<()> {
     // every positional is concatenated into one subsequence query, so
     // `zd pro fern` still finds `~/projects/fern`.
     let query: String = args.argv.iter().map(|(a, _)| a.as_str()).collect();
@@ -409,7 +408,7 @@ fn dir_frecency(visits: i64, age_secs: i64) -> i32 {
     s if s < 604_800 => 2, // within the week
     _ => 1,
   };
-  visits.saturating_mul(factor).clamp(0, i32::MAX as i64) as i32
+  visits.saturating_mul(factor).clamp(0, i64::from(i32::MAX)) as i32
 }
 
 fn load_dir_entries() -> Vec<(String, i32)> {

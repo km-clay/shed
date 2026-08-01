@@ -435,7 +435,7 @@ impl Job {
     }
   }
   pub fn name(&self) -> Option<VarStr> {
-    self.children().first().and_then(|child| child.cmd())
+    self.children().first().and_then(ChildProc::cmd)
   }
   pub fn display(&self, job_order: &[usize], flags: JobCmdFlags) -> String {
     let long = flags.contains(JobCmdFlags::LONG);

@@ -15,7 +15,8 @@ use super::{
   eval::execute::{exec_dash_c, exec_nonint},
   expand_keymap, interactive, lifecycle, procio, sherr,
   signal::QUIT_CODE,
-  state, status_msg,
+  state::{self, terminal::Terminal},
+  status_msg,
 };
 
 /// Dispatch input handling based on the given [`lifecycle::ShedArgs`]
@@ -44,7 +45,7 @@ pub fn dispatch_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
     let keys = expand_keymap(&input);
     interactive::shed_interactive(&args, Some(keys))
   } else if let Some(cmd) = args.command {
-    exec_dash_c(cmd, args.script_args)
+    exec_dash_c(&cmd, args.script_args)
   } else if args.stdin {
     // explicit `-s`: read stdin, script_args are positional
     read_commands(args.script_args)
@@ -105,7 +106,7 @@ pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult
     }
   });
 
-  let controller = Shed::term(|t| t.controller());
+  let controller = Shed::term(Terminal::controller);
 
   if let Some(pid) = controller
     && pid == Pid::this()

@@ -139,14 +139,14 @@ impl FileInfo {
       StatDisplay::Machine(base) => {
         let mode = self.st_mode & 0o7777;
         match base {
-          Base::Decimal => write!(f, "{}", mode),
+          Base::Decimal => write!(f, "{mode}"),
           Base::Octal => write!(f, "{mode:04o}"),
           Base::Hex => write!(f, "{mode:x}"),
         }
       }
       StatDisplay::Human => {
         let mode = self.st_mode;
-        let ty = match mode & 0o170000 {
+        let ty = match mode & 0o170_000 {
           S_IFREG => '-',
           S_IFDIR => 'd',
           S_IFLNK => 'l',
@@ -202,7 +202,7 @@ impl FileInfo {
     let size = self.st_size;
     match display {
       StatDisplay::Machine(base) => match base {
-        Base::Decimal => write!(f, "{}", size),
+        Base::Decimal => write!(f, "{size}"),
         Base::Octal => write!(f, "{size:o}"),
         Base::Hex => write!(f, "{size:x}"),
       },
@@ -224,7 +224,7 @@ impl FileInfo {
   }
 
   fn fmt_filetype(&self, f: &mut impl fmt::Write) -> fmt::Result {
-    let ty = match self.st_mode & 0o170000 {
+    let ty = match self.st_mode & 0o170_000 {
       S_IFREG => {
         if self.st_size == 0 {
           "regular empty file"
@@ -317,15 +317,16 @@ impl FileInfo {
   fn fmt_quoted_name(&self, f: &mut impl fmt::Write) -> fmt::Result {
     let quoted = expand::shell_quote(self.name.as_str());
 
-    if self.st_mode & 0o170000 == S_IFLNK
+    if self.st_mode & 0o170_000 == S_IFLNK
       && let Ok(tgt) = std::fs::read_link(self.name.as_str())
     {
-      write!(f, "{} -> {}", quoted, tgt.display())
+      write!(f, "{quoted} -> {}", tgt.display())
     } else {
-      write!(f, "{}", quoted)
+      write!(f, "{quoted}")
     }
   }
 
+  #[expect(clippy::similar_names)]
   fn fmt_dev_type(&self, f: &mut impl fmt::Write, device: Device) -> fmt::Result {
     let major_dev = libc::major(self.st_dev as libc::dev_t);
     let major_rdev = libc::major(self.st_rdev as libc::dev_t);
@@ -346,7 +347,7 @@ impl FileInfo {
         Base::Hex => write!(f, "{minor_rdev:x}"),
       },
       Device::DevType(base) => match base {
-        Base::Decimal => write!(f, "{}:{}", major_dev, minor_dev),
+        Base::Decimal => write!(f, "{major_dev}:{minor_dev}"),
         Base::Octal => write!(f, "{major_dev:o}:{minor_dev:o}"),
         Base::Hex => write!(f, "{major_dev:x}:{minor_dev:x}"),
       },
@@ -365,7 +366,7 @@ impl FileInfo {
     };
 
     match display {
-      TimeDisplay::EpochSeconds => write!(f, "{}", time),
+      TimeDisplay::EpochSeconds => write!(f, "{time}"),
       TimeDisplay::Readable => {
         let time = chrono::DateTime::from_timestamp(time, 0).unwrap_or_default();
         write!(f, "{}", time.format("%Y-%m-%d %H:%M:%S"))
@@ -382,7 +383,7 @@ impl FileInfo {
       .duration_since(std::time::UNIX_EPOCH)
       .unwrap_or_default();
     self.st_btime = Some(btime_dur.as_secs() as i64);
-    self.st_btime_nsec = Some(btime_dur.subsec_nanos() as i64);
+    self.st_btime_nsec = Some(i64::from(btime_dur.subsec_nanos()));
   }
 }
 
@@ -391,12 +392,12 @@ impl FileFmt {
     match self {
       FileFmt::Literal(var_str)/**/=> write!(f, "{var_str}"),
       FileFmt::AllocBlocks /*---*/ => write!(f, "{}", stat.st_blocks),
-      FileFmt::BlockSize /*=====*/ => write!(f, "{}", stat.st_blksize),
       FileFmt::HexMode /*-------*/ => write!(f, "{:x}", stat.st_mode),
       FileFmt::Gid /*===========*/ => write!(f, "{}", stat.st_gid),
       FileFmt::HardLinks /*-----*/ => write!(f, "{}", stat.st_nlink),
       FileFmt::Inode /*=========*/ => write!(f, "{}", stat.st_ino),
       FileFmt::Filename /*------*/ => write!(f, "{}", stat.name),
+      FileFmt::BlockSize /*=====*/ |
       FileFmt::IoHint /*========*/ => write!(f, "{}", stat.st_blksize),
       FileFmt::Uid /*===========*/ => write!(f, "{}", stat.st_uid),
       FileFmt::FileSize(disp) /**/ => stat.fmt_filesize(f, *disp),
@@ -439,8 +440,9 @@ impl FromStr for FileFmtArgs {
           'b' => args.push(FileFmt::AllocBlocks),
           'B' => args.push(FileFmt::BlockSize),
           'C' => args.push(FileFmt::SecCtx),
-          'd' => args.push(FileFmt::DevType(Device::DevType(Base::Decimal))),
-          'D' => args.push(FileFmt::DevType(Device::DevType(Base::Hex))),
+          'd' |
+          'D' |
+          'R' => args.push(FileFmt::DevType(Device::DevType(Base::Hex))),
           first @ ('H' | 'L') => {
             let Some(next) = chars.next() else {
               return Err(sherr!(ExecFail, "stat: Incomplete format specifier"));
@@ -467,7 +469,6 @@ impl FromStr for FileFmtArgs {
           's' => args.push(FileFmt::FileSize(StatDisplay::Machine(Base::Decimal))),
           'S' => args.push(FileFmt::FileSize(StatDisplay::Human)),
           'r' => args.push(FileFmt::DevType(Device::DevType(Base::Decimal))),
-          'R' => args.push(FileFmt::DevType(Device::DevType(Base::Hex))),
           't' => args.push(FileFmt::DevType(Device::MajorDevType(Base::Hex))),
           'T' => args.push(FileFmt::DevType(Device::MinorDevType(Base::Hex))),
           'u' => args.push(FileFmt::Uid),
@@ -589,6 +590,7 @@ impl FsFmt {
   fn format(&self, f: &mut impl fmt::Write, name: &str, stat: &FsInfo) -> fmt::Result {
     match self {
       FsFmt::Literal(var_str )/**/=> write!(f, "{var_str}"),
+      FsFmt::FileName /*=======*/ => write!(f, "{name}"),
       FsFmt::FreeBlocksForNonRoot => write!(f, "{}", stat.avail_blks),
       FsFmt::FreeBlocks /*=====*/ => write!(f, "{}", stat.free_blks),
       FsFmt::TotalBlocks /*----*/ => write!(f, "{}", stat.total_blks),
@@ -596,7 +598,6 @@ impl FsFmt {
       FsFmt::FreeNodes /*------*/ => write!(f, "{}", stat.free_nodes),
       FsFmt::FsId /*===========*/ => write!(f, "{}", stat.fs_id),
       FsFmt::MaxNameLen /*-----*/ => write!(f, "{}", stat.name_max),
-      FsFmt::FileName /*=======*/ => write!(f, "{}", name),
       FsFmt::BlockSize /*------*/ => write!(f, "{}", stat.block_size),
       FsFmt::FundamentalBs /*==*/ => write!(f, "{}", stat.fundamental_bs),
       FsFmt::FsType(stat_display) => stat.fmt_fs_type(f, *stat_display)

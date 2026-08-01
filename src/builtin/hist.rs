@@ -393,7 +393,7 @@ impl HistQuery {
     } else if self.json {
       self.format_json(&entries, f)
     } else if self.quoted {
-      for (id, entry) in entries.iter() {
+      for (id, entry) in &entries {
         if !self.no_numbers {
           write!(f, "{id} ")?;
         }
@@ -403,7 +403,7 @@ impl HistQuery {
 
       Ok(())
     } else {
-      for (id, entry) in entries.iter() {
+      for (id, entry) in &entries {
         if !self.no_numbers {
           write!(f, "{id}\t")?;
         }
@@ -525,24 +525,20 @@ impl super::Builtin for Hist {
     } else {
       "shed_history"
     };
-    let hist = match state::util::get_db_conn() {
-      Some(conn) => History::new(conn, table).promote_err(span.clone())?,
-
-      // we are in a forked child or something
-      // try to open the database read-only
-      None => {
-        if query.delete || query.pull || query.restore || query.import.is_some() {
-          return Err(
-            sherr!(
-              ExecFail,
-              "hist: history can't be modified from a pipeline or subshell"
-            )
-            .promote(span),
-          );
-        }
-        let conn = state::util::open_db_conn_readonly().promote_err(span.clone())?;
-        History::attach(Arc::new(Mutex::new(conn)), table)
+    let hist = if let Some(conn) = state::util::get_db_conn() {
+      History::new(conn, table).promote_err(span.clone())?
+    } else {
+      if query.delete || query.pull || query.restore || query.import.is_some() {
+        return Err(
+          sherr!(
+            ExecFail,
+            "hist: history can't be modified from a pipeline or subshell"
+          )
+          .promote(span),
+        );
       }
+      let conn = state::util::open_db_conn_readonly().promote_err(span.clone())?;
+      History::attach(Arc::new(Mutex::new(conn)), table)
     };
 
     for (arg, span) in args.argv {

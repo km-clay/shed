@@ -135,7 +135,10 @@ impl History {
   const USER_VERSION: i32 = 4;
 
   fn lock(&self) -> MutexGuard<'_, Connection> {
-    self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    self
+      .conn
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
   }
 
   /// Wrap an already-migrated connection for read-only querying, skipping
@@ -162,7 +165,12 @@ impl History {
   pub fn new(conn: Arc<Mutex<Connection>>, table: &str) -> ShResult<Self> {
     let max_hist = shopt!(history.max_entries);
 
-    Self::init_db(&conn.lock().unwrap_or_else(|e| e.into_inner()), table)?;
+    Self::init_db(
+      &conn
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner),
+      table,
+    )?;
 
     let max_size = (max_hist >= 0).then_some(max_hist as u32);
     let mut hist = Self {
@@ -198,7 +206,9 @@ impl History {
           return;
         };
         let loaded = {
-          let conn = conn.lock().unwrap_or_else(|e| e.into_inner());
+          let conn = conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
           query_masked(None, &conn, &table_name)
         };
 
@@ -361,7 +371,7 @@ impl History {
     {
       let conn = self.lock();
 
-      if shopt!(history.ignore_space) && command.starts_with(" ") {
+      if shopt!(history.ignore_space) && command.starts_with(' ') {
         return Ok(None);
       }
 
@@ -419,7 +429,9 @@ impl History {
         let Some(conn) = state::util::get_db_conn() else {
           return;
         };
-        let conn = conn.lock().unwrap_or_else(|e| e.into_inner());
+        let conn = conn
+          .lock()
+          .unwrap_or_else(std::sync::PoisonError::into_inner);
         let micros = runtime.map_or(0, |r| r.as_micros() as i64);
         conn
           .execute(
@@ -692,14 +704,14 @@ impl History {
 
   #[cfg_attr(not(test), allow(dead_code))]
   pub fn push_entry(&self, entry: HistEntry) -> ShResult<bool> {
-    self.push_entry_conn(&self.lock(), &self.table, entry)
+    Self::push_entry_conn(&self.lock(), &self.table, entry)
   }
 
   pub fn push_with(&self, conn: &Connection, entry: HistEntry) -> ShResult<bool> {
-    self.push_entry_conn(conn, &self.table, entry)
+    Self::push_entry_conn(conn, &self.table, entry)
   }
 
-  fn push_entry_conn(&self, conn: &Connection, table: &str, entry: HistEntry) -> ShResult<bool> {
+  fn push_entry_conn(conn: &Connection, table: &str, entry: HistEntry) -> ShResult<bool> {
     let HistEntry {
       runtime,
       timestamp,
@@ -739,7 +751,7 @@ impl History {
   pub fn token_exists(conn: &Connection, table: &str, token: Uuid) -> bool {
     conn
       .query_row(
-        &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE token = ?1)", table),
+        &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE token = ?1)"),
         rusqlite::params![token.to_string()],
         |row| row.get(0),
       )

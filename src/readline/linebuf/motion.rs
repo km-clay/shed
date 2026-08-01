@@ -2,6 +2,7 @@ use super::{
   CharClass, Grapheme, MotionKind, Pos, ShResult, Shed,
   editcmd::{Bound, Cmd, Dest, Direction, EditCmd, LineAddr, Motion, TextObj, To, Verb, Word},
   ordered, status_msg,
+  types::Line,
 };
 
 impl super::LineBuf {
@@ -915,7 +916,7 @@ impl super::LineBuf {
     }
   }
   fn text_obj_paragraph(&mut self, from: Pos, bound: Bound) -> Option<MotionKind> {
-    let is_blank = |i: usize| self.lines.get(i).is_some_and(|l| l.is_empty());
+    let is_blank = |i: usize| self.lines.get(i).is_some_and(Line::is_empty);
     let this_line = from.row;
     let kind = is_blank(this_line);
     let around = matches!(bound, Bound::Around);
@@ -952,7 +953,7 @@ impl super::LineBuf {
   }
 
   fn paragraph_motion(&self, dir: Direction) -> Option<MotionKind> {
-    let is_blank = |i: usize| self.lines.get(i).is_some_and(|l| l.is_empty());
+    let is_blank = |i: usize| self.lines.get(i).is_some_and(Line::is_empty);
     let cur = self.row();
     let last = self.lines.len().saturating_sub(1);
 
@@ -962,7 +963,7 @@ impl super::LineBuf {
         Some(row) => Pos { row, col: 0 },
         None => Pos {
           row: last,
-          col: self.lines.get(last).map_or(0, |l| l.len()),
+          col: self.lines.get(last).map_or(0, Line::len),
         },
       },
       // last blank line above the cursor, else the top of the buffer

@@ -4,7 +4,7 @@ use nix::{
 };
 
 use super::{
-  super::state::jobs::JobTab,
+  super::state::{jobs::JobTab, terminal::Terminal},
   BuiltinArgs,
   eval::lex::Span,
   getopt::{Opt, OptSpec},
@@ -116,7 +116,7 @@ pub fn continue_job(args: BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> {
 
   match behavior {
     JobBehavior::Foregound => {
-      let _cooked = Shed::term_mut(|t| t.prepare_for_exec());
+      let _cooked = Shed::term_mut(Terminal::prepare_for_exec);
       wait_fg(job, true)?;
     }
     JobBehavior::Background => {

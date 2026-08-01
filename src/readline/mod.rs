@@ -1,4 +1,5 @@
 use nix::poll::PollTimeout;
+use std::string::ToString;
 use std::{collections::VecDeque, io::Write, sync::mpsc, time::Instant};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -31,6 +32,7 @@ use linebuf::LineBuf;
 use register::{RegisterContent, RegisterName};
 
 use crate::interactive::{LoopAction, Redraw, run_prompt_command};
+use crate::keys::KeyMap;
 use crate::state::logic::AutoCmdKind;
 use crate::state::terminal::{Scroll, TermCtl};
 use crate::state::vars::{Var, VarStr};
@@ -949,7 +951,7 @@ impl ShedLine {
     let action = matches
       .iter()
       .find(|km| km.compare(&self.pending_keymap) == KeyMapMatch::IsExact)
-      .map(|km| km.action_expanded());
+      .map(KeyMap::action_expanded);
     let keys = if let Some(action) = action {
       self.pending_keymap.clear();
       action
@@ -1145,7 +1147,7 @@ impl ShedLine {
         let cand_assoc: VarKind = candidates
           .into_iter()
           .fold(vec![], |mut acc, cand| {
-            let desc = cand.desc().map(|d| d.to_string()).unwrap_or_default();
+            let desc = cand.desc().map(ToString::to_string).unwrap_or_default();
             let name = cand.content().to_string();
             acc.push((name, desc));
             acc
@@ -1190,7 +1192,7 @@ impl ShedLine {
         }
 
         if cancelled {
-          autocmd!(OnCompletionCancel)
+          autocmd!(OnCompletionCancel);
         } else if comp.is_active() {
           let VarKind::AssocArr(filtered) = Shed::vars_mut(|v| v.try_take_var_kind("MATCHES"))?
           else {
@@ -1206,26 +1208,23 @@ impl ShedLine {
               acc
             });
 
-          match candidates.len() {
-            1 => {
-              let cand = &candidates[0];
-              let line = comp.get_completed_line(cand.content());
-              self.apply_completion(comp.as_ref(), &line, cand);
-            }
-            _ => {
-              self.completer = Some(comp);
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  "SHED_EDIT_MODE",
-                  VarKind::string("COMPLETE"),
-                  VarFlags::empty(),
-                )
-              })
-              .ok();
-              self.refresh_ui();
-              self.needs_redraw = true;
-              self.core.editor.clear_hint();
-            }
+          if candidates.len() == 1 {
+            let cand = &candidates[0];
+            let line = comp.get_completed_line(cand.content());
+            self.apply_completion(comp.as_ref(), &line, cand);
+          } else {
+            self.completer = Some(comp);
+            Shed::vars_mut(|v| {
+              v.set_var(
+                "SHED_EDIT_MODE",
+                VarKind::string("COMPLETE"),
+                VarFlags::empty(),
+              )
+            })
+            .ok();
+            self.refresh_ui();
+            self.needs_redraw = true;
+            self.core.editor.clear_hint();
           }
         } else {
           Shed::term_mut(Terminal::send_bell).ok();

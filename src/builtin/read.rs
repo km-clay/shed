@@ -260,11 +260,7 @@ fn seeking_read(
   let mut last_was_escaped = false;
 
   loop {
-    let scan_start = if last_was_escaped && escape_aware {
-      1
-    } else {
-      0
-    };
+    let scan_start = usize::from(last_was_escaped && escape_aware);
 
     let n = match read(fd, &mut buf) {
       Ok(0) => {
@@ -301,36 +297,36 @@ fn seeking_read(
         unistd::lseek(fd, -(leftover as i64), unistd::Whence::SeekCur)?;
       }
       return finalize(line, escape_aware);
+    }
+
+    line.extend_from_slice(chunk);
+
+    if escape_aware && n > 0 {
+      let mut escaped = false;
+      let mut i = n;
+
+      while i > scan_start {
+        i -= 1;
+        if chunk[i] != b'\\' {
+          break;
+        }
+        escaped = !escaped;
+      }
+
+      last_was_escaped = escaped;
     } else {
-      line.extend_from_slice(chunk);
+      last_was_escaped = false;
+    }
 
-      if escape_aware && n > 0 {
-        let mut escaped = false;
-        let mut i = n;
-
-        while i > scan_start {
-          i -= 1;
-          if chunk[i] != b'\\' {
-            break;
-          }
-          escaped = !escaped;
-        }
-
-        last_was_escaped = escaped;
-      } else {
-        last_was_escaped = false;
+    if let Some(max) = max_bytes
+      && line.len() >= max
+    {
+      let leftover = line.len() - max;
+      if leftover > 0 {
+        unistd::lseek(fd, -(leftover as i64), unistd::Whence::SeekCur)?;
+        line.truncate(max);
       }
-
-      if let Some(max) = max_bytes
-        && line.len() >= max
-      {
-        let leftover = line.len() - max;
-        if leftover > 0 {
-          unistd::lseek(fd, -(leftover as i64), unistd::Whence::SeekCur)?;
-          line.truncate(max);
-        }
-        return finalize(line, escape_aware);
-      }
+      return finalize(line, escape_aware);
     }
   }
 }
@@ -458,7 +454,7 @@ fn field_split_vars(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()> {
   let fields = ifs_split(input, &sep, Some(vars.len()));
 
   for (i, (name, _)) in vars.iter().enumerate() {
-    let value = fields.get(i).map(String::as_str).unwrap_or("");
+    let value = fields.get(i).map_or("", String::as_str);
     Shed::vars_mut(|v| v.set_var(name, VarKind::string(value), VarFlags::empty()))?;
   }
 
@@ -701,7 +697,7 @@ mod tests {
     // into the following field rather than becoming its own. This is what lets
     // colored, column-aligned output (eza/ls) survive positional splitting.
     let _g = TestGuard::new();
-    test_input(r#"read -a f < <(printf '\x1b[34m foo bar\n')"#).unwrap();
+    test_input(r"read -a f < <(printf '\x1b[34m foo bar\n')").unwrap();
     assert_eq!(arr("f"), vec!["\u{1b}[34mfoo", "bar"]);
   }
 
@@ -710,7 +706,7 @@ mod tests {
     // A dangling escape with nothing after it has no field to glue onto, so it
     // survives as its own element rather than being dropped.
     let _g = TestGuard::new();
-    test_input(r#"read -a f < <(printf 'foo \x1b[0m\n')"#).unwrap();
+    test_input(r"read -a f < <(printf 'foo \x1b[0m\n')").unwrap();
     assert_eq!(arr("f"), vec!["foo", "\u{1b}[0m"]);
   }
 

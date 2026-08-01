@@ -362,8 +362,7 @@ enum PatternEnd {
 impl From<PatternEnd> for usize {
   fn from(value: PatternEnd) -> Self {
     match value {
-      PatternEnd::Open(i) => i,
-      PatternEnd::Closed(i) => i,
+      PatternEnd::Open(i) | PatternEnd::Closed(i) => i,
     }
   }
 }
@@ -1057,7 +1056,7 @@ impl ExParser {
     };
     if !addr.class.is_addr() {
       return ExR::error(format!("expected address after {cmd} command"));
-    };
+    }
 
     let dest = match Self::parse_one_address(&addr) {
       ExInnerPartialParseResult::Partial(addr) => addr,

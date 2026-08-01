@@ -1,4 +1,4 @@
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsFd, AsRawFd};
 
 use crate::{
   errln,
@@ -206,7 +206,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
       // Read output first (before waiting) to avoid deadlock if
       // child fills pipe buffer
-      let sink = read_to_sink(rpipe)?;
+      let sink = read_to_sink(rpipe.as_fd())?;
       if let Some(handle) = feeder {
         let _ = handle.join();
       }

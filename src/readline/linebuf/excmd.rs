@@ -71,7 +71,7 @@ impl super::LineBuf {
       ExNdRule::Write(write_dest) /*---------*/ => self.ex_write(write_dest),
       ExNdRule::RepeatSubstitute /*==========*/ => self.repeat_substitute(cmd),
       ExNdRule::RepeatGlobal /*--------------*/ => self.repeat_global(cmd),
-      ExNdRule::Shell(sh_cmd) /*=============*/ => self.ex_shell_cmd(address, sh_cmd),
+      ExNdRule::Shell(sh_cmd) /*=============*/ => self.ex_shell_cmd(address.as_ref(), sh_cmd),
       ExNdRule::Stash(stash_args) /*---------*/ => self.ex_stash(stash_args),
       ExNdRule::Substitute { pat, repl, flags } => self.ex_substitute(cmd, pat, repl, *flags, address.as_ref()),
       ExNdRule::Global { pat, nested } /*----*/ => self.ex_global(cmd, *bang, pat, nested, address),
@@ -269,7 +269,7 @@ impl super::LineBuf {
         let buffer = self.to_string();
         let (s, e) = (self.row(), self.col());
 
-        stash.push(name, &buffer, (s, e))?;
+        stash.push(name.as_ref(), &buffer, (s, e))?;
         self.clear_buffer();
         self.clear_hint();
         self.set_cursor(Pos::new(0, 0));
@@ -464,7 +464,7 @@ impl super::LineBuf {
         // from `idx` up to the top, returning to the original state
         // after (stack_len - idx + 1) invocations.
         if let Some(name) = ent_name.clone() {
-          stash.push(Some(name), &curr_buf, curr_cursor)?;
+          stash.push(Some(&name), &curr_buf, curr_cursor)?;
         } else {
           let idx = ident
             .parse::<usize>()
@@ -654,9 +654,9 @@ impl super::LineBuf {
     }
   }
 
-  fn ex_shell_cmd(&mut self, addr: Option<AddressRange>, sh_cmd: &str) -> ShResult<()> {
+  fn ex_shell_cmd(&mut self, addr: Option<&AddressRange>, sh_cmd: &str) -> ShResult<()> {
     let lines = if addr.is_some() {
-      self.lines_for_address(addr.as_ref())?
+      self.lines_for_address(addr)?
     } else {
       self.run_shell_cmd(sh_cmd, None)?;
       return Ok(());
@@ -1342,7 +1342,7 @@ mod tests {
       let mut buf = make_buf("alpha\nbeta\ngamma");
       // Single-line motion targeting row 1 (zero-indexed: "beta").
       buf
-        .ex_shell_cmd(Some(AddressRange::Single(LineAddr::Number(2))), "cat")
+        .ex_shell_cmd(Some(&AddressRange::Single(LineAddr::Number(2))), "cat")
         .unwrap();
       // Buffer should still contain all three originals — cat echoes
       // back what it read, so the splice replaces with identical text.

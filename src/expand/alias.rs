@@ -50,21 +50,18 @@ impl AliasExpander {
         Shed::logic(|l| l.aliases().get(&word).cloned())
       };
 
-      match alias {
-        Some(alias) => {
-          self.input.replace_range(start..end, &alias.to_string());
-          active.insert(word);
-          self.first_expand_pos.get_or_insert(start);
-          // `input` changed; token spans past `start` are now stale. Re-lex and
-          // re-scan from `cursor` (unchanged) so the replacement is itself
-          // examined for chained/recursive expansion.
-          tokens = self.lex_tokens();
-          ti = 0;
-        }
-        None => {
-          cursor = end;
-          active.clear();
-        }
+      if let Some(alias) = alias {
+        self.input.replace_range(start..end, &alias.to_string());
+        active.insert(word);
+        self.first_expand_pos.get_or_insert(start);
+        // `input` changed; token spans past `start` are now stale. Re-lex and
+        // re-scan from `cursor` (unchanged) so the replacement is itself
+        // examined for chained/recursive expansion.
+        tokens = self.lex_tokens();
+        ti = 0;
+      } else {
+        cursor = end;
+        active.clear();
       }
     }
 

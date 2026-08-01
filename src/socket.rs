@@ -34,6 +34,7 @@ use super::{
   sherr,
   state::{
     self,
+    jobs::Job,
     vars::{VarFlags, VarKind},
   },
   status_msg, system_msg,
@@ -639,7 +640,7 @@ pub(super) fn handle_socket_request(
           match header {
             StatusHeader::ExitCode => responses.push(varstr!("{}", Shed::get_status())),
             StatusHeader::CommandName => {
-              let Some(name) = Shed::meta(|m| m.last_job().and_then(|j| j.name())) else {
+              let Some(name) = Shed::meta(|m| m.last_job().and_then(Job::name)) else {
                 responses.push(VarStr::new());
                 continue;
               };

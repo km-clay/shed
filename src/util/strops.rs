@@ -522,7 +522,7 @@ pub fn parse_size(s: &str) -> ShResult<u64> {
     ("b", 1.0), // bytes
   ];
 
-  for (unit, multiplier) in units.iter() {
+  for (unit, multiplier) in &units {
     if s.ends_with(unit) {
       let num_str = s.trim_end_matches(unit).trim();
 

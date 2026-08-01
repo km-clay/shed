@@ -207,7 +207,7 @@ impl super::Builtin for Compadd {
     if let Some(cand_arr) = cand_arr {
       let elems: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems(&cand_arr))
         .iter()
-        .map(|s| s.as_str())
+        .map(VarStr::as_str)
         .map(make_candidate)
         .collect();
 

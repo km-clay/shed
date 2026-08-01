@@ -206,7 +206,7 @@ fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
       // Bare `(...)` as a substitution — only in word context, and only when
       // not inside a `${...}` (where a bare `(` is a literal pattern char).
       '(' if flags.contains(ExpandFlags::SUBSHELL) && param_depth == 0 => {
-        read_subsh(&mut chars, &mut result)
+        read_subsh(&mut chars, &mut result);
       }
       _ => result.push(ch),
     }

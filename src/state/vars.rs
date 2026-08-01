@@ -932,7 +932,7 @@ impl From<Vec<Candidate>> for Var {
 impl From<&[String]> for Var {
   fn from(value: &[String]) -> Self {
     let mut new = VecDeque::new();
-    new.extend(value.iter().map(|s| s.into()));
+    new.extend(value.iter().map(VarStr::from));
     Self::new(VarKind::Arr(new), VarFlags::empty())
   }
 }
@@ -1070,10 +1070,10 @@ impl VarTab {
     let resolved_home = env["HOME"].clone();
     let resolved_user = env["USER"].clone();
 
-    let mut state_dir = env
-      .get("XDG_STATE_HOME")
-      .map(PathBuf::from)
-      .unwrap_or_else(|| PathBuf::from(format!("{resolved_home}/.local/state")));
+    let mut state_dir = env.get("XDG_STATE_HOME").map_or_else(
+      || PathBuf::from(format!("{resolved_home}/.local/state")),
+      PathBuf::from,
+    );
     state_dir.push("shed");
     let shed_db = state_dir.join("shed_hist.db");
 
@@ -1721,7 +1721,7 @@ mod set_index_tests {
   fn assoc_from_raw_handles_escaped_quote_in_value() {
     // `'\''` (a single quote escaped between single-quoted spans) must not
     // throw off the whitespace-delimited value-boundary scan.
-    let kind = VarKind::assoc_arr_from_raw(r#"([bar]='biz ba'\''zz buzz' [bam]='foo')"#).unwrap();
+    let kind = VarKind::assoc_arr_from_raw(r"([bar]='biz ba'\''zz buzz' [bam]='foo')").unwrap();
     let VarKind::AssocArr(pairs) = kind else {
       panic!("expected assoc array");
     };

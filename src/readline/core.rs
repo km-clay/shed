@@ -200,7 +200,7 @@ impl EditorCore {
     Ok(())
   }
 
-  /// Finalize a pending command-line mode (Ex / Search / RevSearch) by feeding
+  /// Finalize a pending command-line mode (Ex / Search / `RevSearch`) by feeding
   /// `Enter`, the way pressing it would. No-op in any other mode.
   pub fn submit_cmdline(&mut self) -> ShResult<()> {
     if matches!(

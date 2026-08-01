@@ -546,6 +546,7 @@ impl From<Regex> for Pattern {
 
 /// Miscellaneous global data storage
 #[derive(Debug)]
+#[expect(clippy::struct_excessive_bools)]
 pub(crate) struct MetaTab {
   // Time when the shell was started, used for calculating shell uptime
   shell_time: Instant,

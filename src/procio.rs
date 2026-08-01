@@ -47,7 +47,7 @@ use super::{
 pub const MIN_INTERNAL_FD: RawFd = 10;
 
 /// The status code returned when a builtin command's output is truncated
-/// due to exceeding the maximum size of the OutputSink
+/// due to exceeding the maximum size of the `OutputSink`
 pub const SINK_TRUNCATED_STATUS: i32 = 122;
 
 /// Like `dup()`, but places the new fd at `MIN_INTERNAL_FD` or above so it
@@ -597,7 +597,7 @@ impl RedirSet {
 
       if let Err(e) = redir.apply().map_err(|e| e.option_promote(span)) {
         return RedirResult::Error(e);
-      };
+      }
     }
     RedirResult::Applied(guard)
   }
@@ -623,7 +623,7 @@ impl From<&[RedirSpec]> for RedirSet {
 
 impl From<&Vec<RedirSpec>> for RedirSet {
   fn from(value: &Vec<RedirSpec>) -> Self {
-    Self(value.to_vec())
+    Self(value.clone())
   }
 }
 impl From<Vec<RedirSpec>> for RedirSet {
@@ -897,10 +897,7 @@ impl io::Write for Sinks {
 
 impl std::fmt::Write for Sinks {
   fn write_str(&mut self, s: &str) -> std::fmt::Result {
-    self
-      .write_all(s.as_bytes())
-      .map(|_| ())
-      .map_err(|_| std::fmt::Error)
+    self.write_all(s.as_bytes()).map_err(|_| std::fmt::Error)
   }
 }
 
@@ -919,7 +916,7 @@ pub(crate) fn stdin_is_tty() -> bool {
 /// Drain the remaining piped stdin so it can be handed to a forked child. The
 /// in-process read path goes through `Shed::sinks` (`io::Read`) instead.
 pub(crate) fn take_stdin() -> Option<Vec<u8>> {
-  Shed::sinks(|s| s.drain_input())
+  Shed::sinks(Sinks::drain_input)
 }
 
 pub(crate) struct SinkScope {
@@ -927,20 +924,20 @@ pub(crate) struct SinkScope {
 }
 impl SinkScope {
   pub fn new() -> Self {
-    Shed::sinks(|s| s.push_output());
+    Shed::sinks(Sinks::push_output);
     Self { taken: false }
   }
 
   pub fn take(mut self) -> OutputSink {
     self.taken = true;
-    Shed::sinks(|s| s.pop_output()).expect("SinkScope should have an out sink")
+    Shed::sinks(Sinks::pop_output).expect("SinkScope should have an out sink")
   }
 }
 
 impl Drop for SinkScope {
   fn drop(&mut self) {
     if !self.taken {
-      Shed::sinks(|s| s.pop_output()).expect("SinkScope should have an out sink");
+      Shed::sinks(Sinks::pop_output).expect("SinkScope should have an out sink");
     }
   }
 }
@@ -955,7 +952,7 @@ impl StdinScope {
 
 impl Drop for StdinScope {
   fn drop(&mut self) {
-    Shed::sinks(|s| s.pop_input());
+    Shed::sinks(Sinks::pop_input);
   }
 }
 
@@ -971,7 +968,7 @@ pub(super) fn stderr_fileno() -> BorrowedFd<'static> {
   unsafe { BorrowedFd::borrow_raw(STDERR_FILENO) }
 }
 
-pub(super) fn read_to_sink(fd: OwnedFd) -> ShResult<OutputSink> {
+pub(super) fn read_to_sink(fd: BorrowedFd) -> ShResult<OutputSink> {
   let limit = shopt!(core.max_read_limit);
 
   let mut out = Vec::new();
@@ -1062,7 +1059,7 @@ pub(crate) fn write_all_to_fd(fd: BorrowedFd, bytes: &[u8]) {
   let mut written = 0;
   while written < bytes.len() {
     match write(fd, &bytes[written..]) {
-      Ok(0) => break,
+      Ok(0) | Err(Errno::EPIPE) => break,
       Ok(n) => written += n,
       Err(Errno::EINTR) => {
         if signal::sigint_pending() {
@@ -1070,7 +1067,6 @@ pub(crate) fn write_all_to_fd(fd: BorrowedFd, bytes: &[u8]) {
           break;
         }
       }
-      Err(Errno::EPIPE) => break,
       Err(_) => break,
     }
   }
@@ -1132,10 +1128,10 @@ pub(super) fn capture_command(
             // Closing the write end signals EOF to the child's stdin.
             drop(writer);
           });
-          read_to_sink(rpipe)
+          read_to_sink(rpipe.as_fd())
         })?
       } else {
-        read_to_sink(rpipe)?
+        read_to_sink(rpipe.as_fd())?
       };
       let truncated = sink.was_truncated();
       let size = sink.limit();

@@ -54,7 +54,7 @@ impl From<&Grapheme> for CharClass {
 
         if cluster.chars().all(|c| c.is_alphanumeric() || c == '_') {
           CharClass::Alphanum
-        } else if cluster.chars().all(|c| c.is_whitespace()) {
+        } else if cluster.chars().all(char::is_whitespace) {
           CharClass::Whitespace
         } else if cluster.chars().all(|c| !c.is_alphanumeric()) {
           CharClass::Symbol

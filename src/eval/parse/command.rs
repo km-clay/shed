@@ -15,7 +15,7 @@ impl ParseStream {
     redir_tk: &Tk,
     mut next: F,
     span: &mut Option<Span>,
-    context: LabelCtx,
+    context: &LabelCtx,
   ) -> ShResult<RedirSpec> {
     let redir_bldr = RedirBldr::try_from(redir_tk.clone())?;
     if redir_bldr.target.is_some() {
@@ -67,7 +67,7 @@ impl ParseStream {
     redir_tk: &Tk,
     next: F,
     span: &mut Option<Span>,
-    context: LabelCtx,
+    context: &LabelCtx,
     redirs: &mut Vec<RedirSpec>,
   ) -> ShResult<()> {
     let redir = Self::build_redir(redir_tk, next, span, context)?;
@@ -91,7 +91,7 @@ impl ParseStream {
       let tk = self.next_tk().unwrap();
       extend_span!(*span, tk.span);
       let ctx = self.context.clone();
-      if let Err(e) = Self::push_redir(&tk, || self.next_tk(), span, ctx, redirs) {
+      if let Err(e) = Self::push_redir(&tk, || self.next_tk(), span, &ctx, redirs) {
         self.panic_mode(span);
         return Err(e);
       }
@@ -207,7 +207,7 @@ impl ParseStream {
               tk
             },
             &mut span,
-            ctx,
+            &ctx,
             &mut redirs,
           ) {
             break 'out Err(e);
@@ -245,7 +245,7 @@ impl ParseStream {
         if let Some(assignments_span) = assignments_span {
           nd.context.push_back(get_context(
             "in variable assignment defined here".into(),
-            assignments_span,
+            &assignments_span,
           ));
         }
         return Ok(Some(nd));
@@ -297,7 +297,7 @@ impl ParseStream {
                 tk
               },
               &mut span,
-              ctx,
+              &ctx,
               &mut redirs,
             ) {
               // excluding from coverage reports, see the

@@ -59,10 +59,10 @@ fn cached_tags<F: FnOnce() -> Vec<ScoredTag>>(build: F) -> Vec<ScoredTag> {
 
     if needs_rebuild {
       let tags = build();
-      let path_cache = borrow
-        .take()
-        .map(|(pc, _)| pc)
-        .unwrap_or_else(|| util::PathCache::new("SHED_HPATH".to_string()));
+      let path_cache = borrow.take().map_or_else(
+        || util::PathCache::new("SHED_HPATH".to_string()),
+        |(pc, _)| pc,
+      );
       *borrow = Some((path_cache, tags.clone()));
       tags
     } else {
