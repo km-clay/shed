@@ -3,7 +3,7 @@ _cd_comp() {
   shopt core.nullglob=true
   local word=${COMP_WORDS[$COMP_CWORD]}
 
-  for match in ${word}*; do
+  for match in "${word}"*; do
     if [ -d "$match" ]; then
       basename=${match#"$dir"/}
       mode=$(stat "$match" -c '%A')
@@ -31,4 +31,4 @@ _cd_comp() {
     done
   fi
 }
-complete -F _cd_comp -d cd
+complete -F _cd_comp -d -o filenames cd

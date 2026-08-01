@@ -1236,6 +1236,20 @@ mod tests {
     assert_eq!(guard.read_output(), "'biz\n");
   }
 
+  // `$'...'` ANSI-C quoting is active inside a `${...}` even within the outer
+  // double quotes (matching bash). Regression: the facet-C `'` handling made
+  // the closing quote of `$'\n'` re-open a single-quote region and swallow the
+  // `}` closer, so `"${s%%$'\n'*}"` expanded to empty.
+  #[test]
+  fn param_exp_ansi_c_quote_in_double_quoted_operand() {
+    let guard = TestGuard::new();
+    Shed::vars_mut(|v| v.set_var("s", VarKind::Str("first\nsecond".into()), VarFlags::empty()))
+      .unwrap();
+
+    test_input("printf '[%s]' \"${s%%$'\\n'*}\"").unwrap();
+    assert_eq!(guard.read_output(), "[first]");
+  }
+
   // A `$var` inside the nested `"..."` still expands.
   #[test]
   fn param_exp_replace_nested_double_quote_expands_var() {

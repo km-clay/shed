@@ -66,6 +66,7 @@ bitflags! {
     const DEFAULT  = 0b0000_0000_0001;
     const DIRNAMES = 0b0000_0000_0010;
     const SPACE    = 0b0000_0000_0100;
+    const FILENAMES   = 0b0000_0000_1000;
   }
 }
 
@@ -1093,6 +1094,18 @@ impl CompSpec for BashCompSpec {
             format!("{prefix}{cand_match}")
           } else {
             prefix.clone()
+          };
+
+          let tail = if self.flags.contains(CompOptFlags::FILENAMES) {
+            // TODO: make sure this stat call doesn't destroy performance
+            // for long candidate lists
+            if std::fs::metadata(&tail).is_ok_and(|m| m.is_dir()) {
+              escape_str(&format!("{tail}/"), false)
+            } else {
+              escape_str(&tail, false)
+            }
+          } else {
+            tail
           };
 
           c.content = varstr!("{new_prefix}{tail}");

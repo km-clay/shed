@@ -294,6 +294,7 @@ pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
         "default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
         "dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
         "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
+        "filenames" => comp_opts.opt_flags |= CompOptFlags::FILENAMES,
         "nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
         _ => {
           let span: crate::eval::lex::Span = Span::default();
