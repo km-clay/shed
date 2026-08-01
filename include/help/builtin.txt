@@ -421,6 +421,8 @@ COMPLETE                                         *builtin-complete* *complete*
                       spec produces no candidates
     `-o dirnames`     fall back to directory completion if no candidates
     `-o space`        append a space after a completed word (default)
+    `-o nospace`      do not append a space after a completed word
+    `-o filenames`    shell-escape candidates as though they were filenames.
 
   Management Flags ~
 
