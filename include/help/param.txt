@@ -187,11 +187,13 @@ of the name, or when using any of the operators below.
       Substring of {length} characters starting at {offset}.
 
       Negative offsets count from the end (note the space before the minus
-      to distinguish from `:-`):
+      to distinguish from `:-`). A negative {length} counts back from the
+      end of the string instead of being an absolute character count:
 
         `str="hello world"`
         `echo ${str: -5}`      # prints "world"
         `echo ${str:0:5}`      # prints "hello"
+        `echo ${str:0:-6}`     # prints "hello" (drop last 6 chars)
 
 ==============================================================================
 11. Exit Status                                  *param-status*

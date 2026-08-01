@@ -689,7 +689,8 @@ EXIT                                             *builtin-exit* *exit*
   `exit [n]`
 
   Exit the shell with status {n}. If {n} is omitted, exits with status
-  0. {n} must be a decimal integer.
+  0. {n} must be a decimal integer, and is taken modulo 256, so the
+  status is always in the range 0-255.
 
   Examples:
 
@@ -1133,7 +1134,8 @@ KILL                                             *builtin-kill* *kill*
   Multiple targets may be given. Use `--` to end flag parsing.
 
   `-l`             list all signal names
-  `-l {name|N}`    print signal name for {name} or number {N}.
+  `-l {name|N}`    convert between name and number: a number prints its
+                   signal name, a name prints its signal number.
                    Numbers > 128 are decoded as exit status (N - 128).
   `-v`             verbose: print each signal as it is sent
 
@@ -1145,6 +1147,25 @@ KILL                                             *builtin-kill* *kill*
       `kill %1`                SIGTERM to job 1
       `kill -l`                list all signals
       `kill -l 130`            print: INT
+
+==============================================================================
+LET                                              *builtin-let* *let*
+
+  `let {expr} [{expr} ...]`
+
+  Evaluate each {expr} as an arithmetic expression (the same evaluator
+  as `$(( ))`), assigning results and applying side effects. A wrapper
+  around arithmetic evaluation; quote expressions that contain spaces or
+  shell metacharacters. The exit status is 0 if the last {expr} is
+  non-zero, and 1 if it is zero (matching arithmetic truthiness).
+
+  See |arith| for the full expression syntax.
+
+  Examples:
+
+      `let x=2+3`              x is 5
+      `let "y = 4 * (1 + 2)"`  y is 12
+      `let a=1 b=a+1`          a is 1, b is 2
 
 ==============================================================================
 LOCAL                                            *builtin-local* *local*
@@ -1249,6 +1270,10 @@ PRINTF                                           *builtin-printf* *printf*
   format string is restarted from the beginning and applied repeatedly until
   all arguments are consumed. If there are fewer, missing numeric arguments
   default to 0 and missing string arguments default to the empty string.
+
+  A numeric conversion given an argument that is not a valid number still
+  prints 0, but writes a `printf: {arg}: invalid number` diagnostic to
+  standard error and sets a non-zero exit status.
 
   Conversion specifiers ~
 
@@ -1610,7 +1635,8 @@ RETURN                                           *builtin-return* *return*
 
   Return from the current function with exit status {n}. If {n} is
   omitted, returns with status 0. It is an error to call `return`
-  outside of a function.
+  outside of a function. {n} is taken modulo 256, so the status is
+  always in the range 0-255.
 
   Examples:
 
@@ -1881,8 +1907,9 @@ SHIFT                                            *builtin-shift* *shift*
   `shift [n]`
 
   Remove the first {n} positional parameters, shifting remaining ones
-  down. {n} defaults to 1. Excess shifts (beyond the count of current
-  parameters) are silent no-ops.
+  down. {n} defaults to 1. Shifting more than the number of current
+  positional parameters is an error (non-zero status) and leaves the
+  parameters unchanged.
 
   Examples:
 

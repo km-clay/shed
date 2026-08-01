@@ -174,15 +174,18 @@ see |the shopt builtin|(builtin-shopt) for more info.
 
   `g~{motion}`                                 *key-toggle-case*
 
-      Toggle the case of the text covered by {motion}.
+      Toggle the case of the text covered by {motion}. Doubling the
+      operator (`g~~`) applies it to the entire current line.
 
   `gu{motion}`                                 *key-gu*
 
-      Convert the text covered by {motion} to lowercase.
+      Convert the text covered by {motion} to lowercase. Doubling the
+      operator (`guu`) lowercases the entire current line.
 
   `gU{motion}`                                 *key-gU*
 
-      Convert the text covered by {motion} to uppercase.
+      Convert the text covered by {motion} to uppercase. Doubling the
+      operator (`gUU`) uppercases the entire current line.
 
   1.5 Single-Key Actions                       *normal-actions*
 

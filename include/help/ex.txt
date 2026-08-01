@@ -98,12 +98,16 @@ command history navigable with `Up` and `Down`.
 ==============================================================================
 4. Normal Mode Commands                        *ex-normal*
 
-  `:normal!{seq}`                              *ex-normal-cmd*
+  `:normal{seq}` / `:normal!{seq}`             *ex-normal-cmd*
 
-      Execute {seq} as a sequence of normal mode keystrokes. The `!`
-      is required. When used with a line range, the sequence is applied
-      to each line in the range independently, with the cursor starting
-      at column 0 of each line.
+      Execute {seq} as a sequence of normal mode keystrokes. The `!` is
+      optional and controls keymap handling: `:normal` runs the sequence
+      through any active user keymaps, while `:normal!` ignores them and
+      uses the built-in bindings (like vim's `normal!`).
+
+      When used with a line range, the sequence is applied to each line
+      in the range independently, with the cursor starting at column 0
+      of each line.
 
       All operations within a ranged `:normal!` are grouped into a
       single undo operation.
