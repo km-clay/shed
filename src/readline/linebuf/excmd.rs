@@ -667,23 +667,18 @@ impl super::LineBuf {
       return Ok(());
     }
 
-    let start = *lines.first().unwrap();
-    let end = *lines.last().unwrap();
-    let inclusive = matches!(addr, Some(AddressRange::Range(_, _)));
-
-    let (s, mut e) = ordered(start, end);
-    if !inclusive {
-      e = e.saturating_sub(1);
-    }
-    // Clamp to last valid row in case the motion over-reached.
+    let (s, mut e) = ordered(*lines.first().unwrap(), *lines.last().unwrap());
     e = e.min(self.lines.len().saturating_sub(1));
     let lines = self.lines.drain(s..=e).collect::<Vec<_>>();
     if self.lines.is_empty() {
       self.lines.push(Line::default());
     }
     let input = format!("{}\n", Lines(lines).join());
-    let output = self.run_shell_cmd(sh_cmd, Some(&input))?;
-    let new_lines = Lines::to_lines(&output.unwrap_or_default());
+    let output = self
+      .run_shell_cmd(sh_cmd, Some(&input))?
+      .unwrap_or_default();
+    let trimmed = output.strip_suffix('\n').unwrap_or(&output);
+    let new_lines = Lines::to_lines(trimmed);
     self.lines.0.splice(s..s, new_lines.0);
 
     Ok(())
@@ -1328,28 +1323,47 @@ mod tests {
       assert_eq!(buf.to_string(), "after_no_motion");
     }
 
-    /// With a Line motion attached, `ex_shell_cmd` drains the indicated
-    /// lines, pipes their text to the shell command, and splices the
-    /// output back in their place. `cat` is a faithful echo, so the
-    /// extracted lines should round-trip identically.
+    /// A single-line address (`:2!cmd`) filters exactly that line through
+    /// the command and splices the result back in place, leaving the
+    /// surrounding lines untouched. Uses a *transforming* filter (`tr`) with
+    /// an exact-equality assertion so an identity filter can't mask a
+    /// never-drained target line (the shape of the earlier regression).
     #[test]
-    fn line_motion_replaces_with_cat_output() {
+    fn single_addr_filters_only_that_line() {
       use crate::tests::testutil::has_cmd;
-      if !has_cmd("cat") {
+      if !has_cmd("tr") {
         return;
       }
       let _g = TestGuard::new();
       let mut buf = make_buf("alpha\nbeta\ngamma");
-      // Single-line motion targeting row 1 (zero-indexed: "beta").
       buf
-        .ex_shell_cmd(Some(&AddressRange::Single(LineAddr::Number(2))), "cat")
+        .ex_shell_cmd(
+          Some(&AddressRange::Single(LineAddr::Number(2))),
+          "tr a-z A-Z",
+        )
         .unwrap();
-      // Buffer should still contain all three originals — cat echoes
-      // back what it read, so the splice replaces with identical text.
-      let joined = buf.to_string();
-      assert!(joined.contains("alpha"), "got: {joined:?}");
-      assert!(joined.contains("beta"), "got: {joined:?}");
-      assert!(joined.contains("gamma"), "got: {joined:?}");
+      assert_eq!(buf.to_string(), "alpha\nBETA\ngamma");
+    }
+
+    /// A range address (`:1,2!cmd`) filters the whole inclusive span.
+    #[test]
+    fn range_addr_filters_whole_span() {
+      use crate::tests::testutil::has_cmd;
+      if !has_cmd("tr") {
+        return;
+      }
+      let _g = TestGuard::new();
+      let mut buf = make_buf("alpha\nbeta\ngamma");
+      buf
+        .ex_shell_cmd(
+          Some(&AddressRange::Range(
+            LineAddr::Number(1),
+            LineAddr::Number(2),
+          )),
+          "tr a-z A-Z",
+        )
+        .unwrap();
+      assert_eq!(buf.to_string(), "ALPHA\nBETA\ngamma");
     }
   }
 }
