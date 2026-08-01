@@ -598,6 +598,9 @@ pub(crate) struct MetaTab {
   /// Lets `fc` skip its own just-recorded entry so it targets the previous
   /// command instead of looping on itself.
   current_cmd_recorded: bool,
+
+  /// The exit status of the most recent command substitution
+  last_cmdsub_status: Option<i32>,
 }
 
 impl Clone for MetaTab {
@@ -623,6 +626,7 @@ impl Clone for MetaTab {
       main_loop_timeout: self.main_loop_timeout,
       ignore_hist: self.ignore_hist,
       current_cmd_recorded: self.current_cmd_recorded,
+      last_cmdsub_status: self.last_cmdsub_status,
 
       last_job: None,
       procsub_stack: vec![],
@@ -655,6 +659,7 @@ impl Default for MetaTab {
       main_loop_timeout: None,
       ignore_hist: false,
       current_cmd_recorded: false,
+      last_cmdsub_status: None,
     }
   }
 }
@@ -681,6 +686,18 @@ impl MetaTab {
   }
   pub fn take_poll_timeout(&mut self) -> Option<PollTimeout> {
     self.main_loop_timeout.take()
+  }
+
+  pub fn set_last_cmdsub_status(&mut self, status: i32) {
+    self.last_cmdsub_status = Some(status);
+  }
+
+  pub fn take_last_cmdsub_status(&mut self) -> Option<i32> {
+    self.last_cmdsub_status.take()
+  }
+
+  pub fn last_cmdsub_status(&self) -> Option<i32> {
+    self.last_cmdsub_status
   }
 
   pub fn push_procsub_frame(&mut self) -> ProcSubGuard {

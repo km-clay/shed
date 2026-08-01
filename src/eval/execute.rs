@@ -21,7 +21,6 @@ use std::{
   string::ToString,
 };
 
-use crate::expand::subshell::{last_cmdsub_status, reset_last_cmdsub_status};
 use crate::state::util::with_vars;
 use crate::util::posix_extension::execvpe;
 
@@ -1506,11 +1505,7 @@ impl Dispatcher {
       // argv is empty: a command with no command word. Perform any assignments
       // in the current shell, then apply any redirections.
       if !assignments.is_empty() {
-        // Reset the cmdsub-status cell so it reflects only the command
-        // substitutions performed by this assignment command, not any from a
-        // previous command. `set_assignments` reads it to derive `$?` per
-        // POSIX (last cmdsub status, or 0).
-        reset_last_cmdsub_status();
+        Shed::meta_mut(MetaTab::take_last_cmdsub_status);
         if let Err(e) = Self::set_assignments(assignments, assign_behavior) {
           Shed::set_status(1);
           e.print_error();
@@ -1803,7 +1798,8 @@ impl Dispatcher {
               let status = if matches!(behavior, AssignBehavior::Set) {
                 // Assignment-only command: exit status is the last command
                 // substitution's status (or 0), not the pre-assignment status.
-                param_expansion_status.unwrap_or_else(|| last_cmdsub_status().unwrap_or(0))
+                param_expansion_status
+                  .unwrap_or_else(|| Shed::meta(MetaTab::last_cmdsub_status).unwrap_or(0))
               } else {
                 param_expansion_status.unwrap_or(old_status)
               };
@@ -1960,7 +1956,8 @@ impl Dispatcher {
       let status = if matches!(behavior, AssignBehavior::Set) {
         // Assignment-only command: exit status is the last command
         // substitution's status (or 0), not the pre-assignment status.
-        param_expansion_status.unwrap_or_else(|| last_cmdsub_status().unwrap_or(0))
+        param_expansion_status
+          .unwrap_or_else(|| Shed::meta(MetaTab::last_cmdsub_status).unwrap_or(0))
       } else {
         param_expansion_status.unwrap_or(old_status)
       };

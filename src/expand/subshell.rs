@@ -96,31 +96,6 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
   }
 }
 
-thread_local! {
-  /// Exit status of the most recently performed command substitution, set by
-  /// `expand_cmd_sub`/`internal_cmd_sub`. Consumed by `set_assignments` to
-  /// implement the POSIX rule that an assignment-only command's exit status is
-  /// the last command substitution's status (or 0 if there were none).
-  static LAST_CMDSUB_STATUS: std::cell::Cell<Option<i32>> =
-    const { std::cell::Cell::new(None) };
-}
-
-/// Record the exit status of a command substitution as it completes.
-pub(crate) fn set_last_cmdsub_status(code: i32) {
-  LAST_CMDSUB_STATUS.with(|c| c.set(Some(code)));
-}
-
-/// Read the last command substitution's status without clearing it.
-pub(crate) fn last_cmdsub_status() -> Option<i32> {
-  LAST_CMDSUB_STATUS.with(std::cell::Cell::get)
-}
-
-/// Clear the recorded command-substitution status. Call at the start of an
-/// assignment-only command so the cell reflects only its own cmdsubs.
-pub(crate) fn reset_last_cmdsub_status() {
-  LAST_CMDSUB_STATUS.with(|c| c.set(None));
-}
-
 pub fn is_internal(raw: &str) -> bool {
   let mut parser = ParsedSrc::new(raw.into()).with_name("is_internal check".into());
 
@@ -150,7 +125,7 @@ pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
     errln!("shed: command sub truncated (exceeded {size})");
   }
 
-  set_last_cmdsub_status(Shed::get_status());
+  Shed::meta_mut(|m| m.set_last_cmdsub_status(Shed::get_status()));
 
   Ok(
     bytes_to_string(scope.into_buf())
@@ -231,7 +206,8 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
             Shed::set_status(procio::SINK_TRUNCATED_STATUS);
             errln!("shed: command sub truncated (exceeded {size})");
           }
-          set_last_cmdsub_status(Shed::get_status());
+
+          Shed::meta_mut(|m| m.set_last_cmdsub_status(Shed::get_status()));
           Ok(output.trim_end_matches('\n').into())
         }
         _ => Err(sherr!(InternalErr, "Command sub failed")),
