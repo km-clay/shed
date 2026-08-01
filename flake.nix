@@ -57,7 +57,7 @@
 
     packages.default = rustPlatform.buildRustPackage {
       pname = "shed";
-      version = "0.38.3";
+      version = "0.38.4";
 
       src = self;
       cargoLock = { lockFile = ./Cargo.lock; };
