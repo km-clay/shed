@@ -4,6 +4,8 @@ use std::{
 
 use bitflags::bitflags;
 
+use crate::Shed;
+
 use super::{
   builtin::BUILTIN_NAMES,
   editmode::{ExCommand, ExLineAddr, ExTk, ExTkRule},
@@ -606,7 +608,11 @@ impl CtxTk {
       },
       ExTkRule::Command(cmd) => {
         if let ExCommand::Unknown = cmd {
-          vec![Self::leaf(span, CtxTkRule::InvalidExCommand)]
+          if Shed::logic(|l| l.get_ex_alias(span.as_str())).is_some() {
+            vec![Self::leaf(span, CtxTkRule::ValidExCommand)]
+          } else {
+            vec![Self::leaf(span, CtxTkRule::InvalidExCommand)]
+          }
         } else {
           vec![Self::leaf(span, CtxTkRule::ValidExCommand)]
         }

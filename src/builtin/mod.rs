@@ -115,6 +115,7 @@ register_builtins! {
   "disown"   => jobctl::Disown,
   "echo"     => echo::Echo,
   "eval"     => evaluate::Eval,
+  "excmd"    => alias::ExCmd,
   "exec"     => exec::Exec,
   "exit"     => flowctl::Exit,
   "export"   => varcmds::Export,

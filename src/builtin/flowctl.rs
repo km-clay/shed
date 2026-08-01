@@ -307,7 +307,7 @@ mod tests {
     // `$?` is an 8-bit value; `return N` uses `N & 255` (get_status masks).
     let _g = TestGuard::new();
     for (arg, expect) in [(300, 44), (256, 0), (257, 1), (-1, 255), (-2, 254)] {
-      test_input(&format!("f() {{ return {arg}; }}; f")).unwrap();
+      test_input(format!("f() {{ return {arg}; }}; f")).unwrap();
       assert_eq!(
         state::Shed::get_status(),
         expect,

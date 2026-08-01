@@ -21,7 +21,7 @@ use super::{
   state::terminal::CursorStyle,
   status_msg,
 };
-use crate::{eval::lex::TkFlags, state::vars::VarStr, varstr, verb};
+use crate::{Shed, eval::lex::TkFlags, state::vars::VarStr, varstr, verb};
 use bitflags::bitflags;
 
 bitflags! {
@@ -179,8 +179,47 @@ impl EditMode for ViEx {
   }
 }
 
+/// Cap on ex-alias expansion rounds — a final backstop against cyclic
+/// definitions that the `active` set doesn't already catch.
+const MAX_EX_ALIAS_DEPTH: usize = 50;
+
+/// Expand ex-mode command aliases before parsing. The leading command word is
+/// looked up in the ex-alias table and textually replaced with its body,
+/// repeatedly, so an alias may expand to another. Only the command word is
+/// replaced, so an address/range prefix (`:5,10 myalias`) is preserved and
+/// composes naturally. Cyclic definitions (`a='b'`, `b='a'`) terminate: a name
+/// already being expanded is left literal (via `active`), with the depth cap as
+/// a final backstop.
+fn expand_ex_aliases(input: &str) -> String {
+  let mut input = input.to_string();
+  let mut active: crate::HashSet<String> = crate::HashSet::default();
+
+  for _ in 0..MAX_EX_ALIAS_DEPTH {
+    let tokens = ExLexer::new(&input).lex();
+    let Some(cmd_tk) = tokens
+      .iter()
+      .find(|t| matches!(t.class, ExTkRule::Command(_)))
+    else {
+      break;
+    };
+    let name = cmd_tk.span.as_str().to_string();
+    if active.contains(&name) {
+      break; // already expanding this name — treat it as a literal command
+    }
+    let Some(alias) = Shed::logic(|l| l.get_ex_alias(&name)) else {
+      break; // not an alias — leave it for the real command lookup
+    };
+    let range = cmd_tk.span.range();
+    input.replace_range(range, &alias.body());
+    active.insert(name);
+  }
+
+  input
+}
+
 fn parse_ex_input(input: &str) -> ExP<ExNode> {
-  let lexer = ExLexer::new(input);
+  let input = expand_ex_aliases(input);
+  let lexer = ExLexer::new(&input);
   let tokens = lexer.lex();
   let parser = ExParser::new(tokens);
   parser.parse()
@@ -237,7 +276,7 @@ pub enum ExTkRule {
 impl ExTkRule {
   pub fn unwrap_cmd(&self) -> ExCommand {
     if let ExTkRule::Command(cmd) = self {
-      *cmd
+      cmd.clone()
     } else {
       panic!("called unwrap_cmd on non-command token")
     }
@@ -267,7 +306,7 @@ pub enum ExLineAddr {
   PatternRev,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ExCommand {
   Expand,
   Substitute,
@@ -606,9 +645,12 @@ impl<'a> ExLexer<'a> {
     if name.is_empty() {
       return None;
     }
+
+    // Ex aliases are expanded textually before parsing (see `expand_ex_aliases`),
+    // so by the time we classify, `name` is a real command word.
     for (full, rule) in COMMANDS {
       if full.starts_with(name) {
-        return Some(*rule);
+        return Some(rule.clone());
       }
     }
     None
@@ -1822,5 +1864,67 @@ mod parse_command_tests {
       ExNdRule::Shell(s) => assert!(s.contains("echo"), "got: {s:?}"),
       other => panic!("expected Shell, got {other:?}"),
     }
+  }
+}
+
+#[cfg(test)]
+mod ex_alias_tests {
+  //! Ex-mode command aliases: `expand_ex_aliases` textually substitutes the
+  //! leading command word before parsing, repeatedly, with a cycle guard.
+  use super::*;
+  use crate::eval::lex::Span;
+  use crate::tests::testutil::TestGuard;
+
+  fn set_alias(name: &str, body: &str) {
+    Shed::logic_mut(|l| l.insert_ex_alias(name, body, Span::default()));
+  }
+
+  fn parse_ok(input: &str) -> ExNode {
+    match parse_ex_input(input) {
+      ExP::Success(n) => n,
+      ExP::Error(e) => panic!("parse error for {input:?}: {e}"),
+    }
+  }
+
+  #[test]
+  fn alias_expands_to_command() {
+    let _g = TestGuard::new();
+    set_alias("d", "delete");
+    assert_eq!(parse_ok("d").kind, ExNdRule::Delete);
+  }
+
+  #[test]
+  fn alias_chains_through_aliases() {
+    let _g = TestGuard::new();
+    set_alias("a", "b");
+    set_alias("b", "yank");
+    assert_eq!(parse_ok("a").kind, ExNdRule::Yank);
+  }
+
+  #[test]
+  fn cyclic_alias_terminates() {
+    let _g = TestGuard::new();
+    set_alias("foo", "bar");
+    set_alias("bar", "foo");
+    // Must not hang. The cycle guard leaves the name literal once it recurs, so
+    // it resolves as an unknown editor command rather than looping forever.
+    match parse_ex_input("foo") {
+      ExP::Error(msg) => assert!(msg.contains("foo"), "got: {msg}"),
+      ExP::Success(n) => panic!("expected error, got {:?}", n.kind),
+    }
+  }
+
+  #[test]
+  fn alias_preserves_address_prefix() {
+    // Only the command word is substituted, so a leading range composes:
+    // `1,3d` (d = delete) becomes `1,3delete`.
+    let _g = TestGuard::new();
+    set_alias("d", "delete");
+    let node = parse_ok("1,3d");
+    assert_eq!(node.kind, ExNdRule::Delete);
+    assert!(
+      node.address.is_some(),
+      "address prefix lost during expansion"
+    );
   }
 }

@@ -64,6 +64,35 @@ impl super::Builtin for Unalias {
   }
 }
 
+pub(super) struct ExCmd;
+impl super::Builtin for ExCmd {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    if args.argv.is_empty() {
+      let output = Shed::logic(|l| display_as_vars(l.ex_aliases().iter()));
+      outln!("{output}");
+
+      return with_status(0);
+    }
+
+    for (arg, span) in args.argv {
+      let (name, value) = split_assignment_raw(&arg);
+
+      if let Some(value) = value {
+        Shed::logic_mut(|l| l.insert_ex_alias(name, value, span.clone()));
+      } else if let Some(alias) = Shed::logic(|l| l.get_ex_alias(name)) {
+        outln!("{}", display_as_var(name, alias.body()));
+      } else {
+        return Err(sherr!(
+          SyntaxErr @ span,
+          "Unknown ex command alias '{name}'",
+        ));
+      }
+    }
+
+    with_status(0)
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use crate::{

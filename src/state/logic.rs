@@ -340,6 +340,7 @@ pub(crate) struct LogTab {
   functions: HashMap<String, ShFunc>,
   comp_autoloads: HashMap<String, AutoloadSrc>,
   aliases: HashMap<String, ShAlias>,
+  ex_aliases: HashMap<String, ShAlias>,
 
   traps: HashMap<TrapTarget, VarStr>,
   keymaps: Vec<KeyMap>,
@@ -465,5 +466,17 @@ impl LogTab {
   }
   pub fn remove_alias(&mut self, name: &str) {
     self.aliases.remove(name);
+  }
+
+  pub fn insert_ex_alias(&mut self, name: &str, body: &str, source: Span) {
+    self
+      .ex_aliases
+      .insert(name.into(), ShAlias::new(body.into(), source));
+  }
+  pub fn get_ex_alias(&self, name: &str) -> Option<ShAlias> {
+    self.ex_aliases.get(name).cloned()
+  }
+  pub fn ex_aliases(&self) -> &HashMap<String, ShAlias> {
+    &self.ex_aliases
   }
 }
