@@ -149,6 +149,14 @@ impl Tk {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnescapeMode {
+  /// Normal word context
+  Word,
+  /// Parameter expansion pattern/replacement operator
+  Pattern,
+}
+
 pub struct Expander {
   flags: TkFlags,
   noglob: bool,
@@ -163,19 +171,19 @@ impl Expander {
     Self::from_raw(tk_raw, raw.flags)
   }
   pub fn from_raw(raw: &str, flags: TkFlags) -> Self {
-    Self::from_raw_inner(raw, flags, true, false)
+    Self::from_raw_inner(raw, flags, true, UnescapeMode::Word)
   }
   /// Like `from_raw` but the operand is a parameter-expansion pattern or
   /// replacement (`${var#pat}`, `${var%pat}`, `${var/pat/rep}`): a bare `(` is
   /// literal, not a subshell.
   pub fn from_raw_pattern(raw: &str, flags: TkFlags) -> Self {
-    Self::from_raw_inner(raw, flags, true, true)
+    Self::from_raw_inner(raw, flags, true, UnescapeMode::Pattern)
   }
   /// Brace-free variant of `from_raw_pattern`.
   pub fn from_raw_no_brace_pattern(raw: &str, flags: TkFlags) -> Self {
-    Self::from_raw_inner(raw, flags, false, true)
+    Self::from_raw_inner(raw, flags, false, UnescapeMode::Pattern)
   }
-  fn from_raw_inner(raw: &str, flags: TkFlags, expand_braces: bool, for_pattern: bool) -> Self {
+  fn from_raw_inner(raw: &str, flags: TkFlags, expand_braces: bool, mode: UnescapeMode) -> Self {
     let raw = if expand_braces && raw.contains('{') {
       brace::expand_braces_full(raw).join(" ")
     } else {
@@ -183,10 +191,11 @@ impl Expander {
     };
     let unescaped = if flags.contains(TkFlags::IS_HEREDOC) {
       unescape_heredoc(&raw)
-    } else if for_pattern {
-      escape::unescape_pattern(&raw)
     } else {
-      unescape_str(&raw)
+      match mode {
+        UnescapeMode::Word => unescape_str(&raw),
+        UnescapeMode::Pattern => escape::unescape_pattern(&raw),
+      }
     };
     Self {
       raw: unescaped,
