@@ -57,6 +57,32 @@ fn fuzzy_boundary_bonus() {
   assert!(score_a > score_b);
 }
 
+// Within one candidate, the best alignment wins over the greedy leftmost one.
+// The old greedy scorer took the first occurrence of each query char
+// (`s`…`p`…`in` scattered across the string); the DP finds the whole `spin`
+// word instead, matching fzf.
+#[test]
+fn fuzzy_prefers_contiguous_run() {
+  // The user's real case.
+  let cand = "cp_snd luna_nights s1009_patapata spin";
+  let positions = match_positions(cand, "spin");
+  let start = cand.find("spin").unwrap();
+  assert_eq!(
+    positions,
+    (start..start + 4).collect::<Vec<_>>(),
+    "should land on the contiguous 'spin', got {positions:?}"
+  );
+
+  // A leftmost-scatter (s,p,i,n at 0,2,4,6, gappy, no boundaries) vs the
+  // contiguous run at the end — the DP must choose the contiguous one.
+  let cand = "sxpxixn spin";
+  let start = cand.find("spin").unwrap();
+  assert_eq!(
+    match_positions(cand, "spin"),
+    (start..start + 4).collect::<Vec<_>>()
+  );
+}
+
 // ===================== CompResult::from_candidates =====================
 
 #[test]

@@ -90,22 +90,18 @@ fn emphasize(text: &str, hl: impl Fn(usize) -> bool, emph_on: &str) -> String {
   out
 }
 
-/// Char indices in `text` that a left-to-right fuzzy match of `query` lands on
-/// (the same greedy walk the scorer uses). Empty if `query` isn't a full match.
+/// Char indices in `text` that the best-scoring fuzzy match of `query` lands
+/// on (the same optimal alignment the scorer picks, so highlights and score
+/// always agree). Empty if `query` isn't a subsequence of `text`.
 pub(crate) fn match_positions(text: &str, query: &str) -> Vec<usize> {
   let q: Vec<char> = query.chars().collect();
   if q.is_empty() {
     return vec![];
   }
-  let mut qi = 0;
-  let mut out = Vec::with_capacity(q.len());
-  for (i, ch) in text.chars().enumerate() {
-    if qi < q.len() && ch.eq_ignore_ascii_case(&q[qi]) {
-      out.push(i);
-      qi += 1;
-    }
-  }
-  if qi == q.len() { out } else { vec![] }
+  let text_chars: Vec<char> = text.chars().collect();
+  fuzzy_align(&text_chars, &q, true)
+    .map(|(_, positions)| positions)
+    .unwrap_or_default()
 }
 
 #[derive(Clone, Default, Debug)]
@@ -213,46 +209,9 @@ pub(crate) fn fuzzy_match_score(
   }
 
   let candidate_chars: Vec<char> = candidate.chars().collect();
-  let mut indices = vec![];
-  let mut qi = 0;
-  for (ci, c_ch) in candidate_chars.iter().enumerate() {
-    if qi < query_chars.len() && c_ch.eq_ignore_ascii_case(&query_chars[qi]) {
-      indices.push(ci);
-      qi += 1;
-    }
-  }
-
-  if indices.len() != query_chars.len() {
+  let Some((mut score, _)) = fuzzy_align(&candidate_chars, query_chars, false) else {
     return i32::MIN;
-  }
-
-  let mut score: i32 = 0;
-
-  for (i, &idx) in indices.iter().enumerate() {
-    if idx == 0 {
-      score += ScoredCandidate::BONUS_FIRST_CHAR;
-    }
-
-    if idx == 0
-      || ScoredCandidate::is_word_bound(
-        candidate_chars[idx - 1],
-        candidate_chars[idx],
-        query_chars[i],
-      )
-    {
-      score += ScoredCandidate::BONUS_BOUNDARY;
-    }
-
-    if i > 0 {
-      let gap = idx - indices[i - 1] - 1;
-      if gap == 0 {
-        score += ScoredCandidate::BONUS_CONSECUTIVE;
-      } else {
-        score -= ScoredCandidate::PENALTY_GAP_START
-          + (gap as i32 - 1) * ScoredCandidate::PENALTY_GAP_EXTEND;
-      }
-    }
-  }
+  };
 
   if penalize_len_diff {
     let len_diff = (candidate_chars.len() as isize - query_chars.len() as isize).unsigned_abs();
@@ -260,6 +219,140 @@ pub(crate) fn fuzzy_match_score(
   }
 
   score
+}
+
+/// Maximum-scoring alignment of `query` within `candidate`.
+///
+/// Runs an O(n·m) dynamic program (Smith–Waterman with affine gaps) using the
+/// same boundary / consecutive / gap constants the greedy scorer uses. The only
+/// change is that it considers *every* alignment and keeps the best one,
+/// so a contiguous run like `spin` inside `... spin` beats a scattered
+/// `s`…`p`…`in` walk.
+///
+/// Returns `(best_score, positions)`, or `None` if `query` is not a
+/// subsequence of `candidate`. `positions` is filled only when `track` is set
+/// (backtracking is skipped on the score-only hot path).
+fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, Vec<usize>)> {
+  use ScoredCandidate as Sc;
+
+  let n = candidate.len();
+  let m = query.len();
+  if m == 0 {
+    return Some((0, vec![]));
+  }
+  if m > n {
+    return None;
+  }
+
+  // Well below any real score, but not `i32::MIN` (leaves headroom for adds).
+  const NEG: i32 = i32::MIN / 2;
+
+  let char_bonus = |i: usize, qch: char| -> i32 {
+    let mut b = 0;
+    if i == 0 {
+      b += Sc::BONUS_FIRST_CHAR;
+    }
+    if i == 0 || Sc::is_word_bound(candidate[i - 1], candidate[i], qch) {
+      b += Sc::BONUS_BOUNDARY;
+    }
+    b
+  };
+
+  // `prev`/`curr` are the DP row for the previous / current query char:
+  // `prev[i]` = best score aligning query[..=j] with query[j] landing on
+  // candidate[i]. The first query char can start anywhere it matches.
+  let mut prev = vec![NEG; n];
+  for (i, &c) in candidate.iter().enumerate() {
+    if c.eq_ignore_ascii_case(&query[0]) {
+      prev[i] = char_bonus(i, query[0]);
+    }
+  }
+
+  // parent[j][i] = candidate index used for query[j-1] when query[j] lands on
+  // i; only needed to backtrack `positions`.
+  let mut parent = if track {
+    vec![vec![usize::MAX; n]; m]
+  } else {
+    vec![]
+  };
+
+  let mut curr = vec![NEG; n];
+  for j in 1..m {
+    let qch = query[j];
+    curr.iter_mut().for_each(|c| *c = NEG);
+
+    // running_gap = max over k <= i-2 of `prev[k] + k*GAP_EXTEND` (plus its
+    // argmax). Adding the i-dependent term below recovers the affine gap
+    // penalty for the best gapped predecessor in O(1).
+    let mut running_gap = NEG;
+    let mut running_gap_k = usize::MAX;
+
+    for i in 0..n {
+      let mut best = NEG;
+      let mut best_k = usize::MAX;
+
+      // Consecutive predecessor (k = i-1, no gap).
+      if i >= 1 && prev[i - 1] > NEG {
+        let consec = prev[i - 1] + Sc::BONUS_CONSECUTIVE;
+        if consec > best {
+          best = consec;
+          best_k = i - 1;
+        }
+      }
+      // Best gapped predecessor (k <= i-2), recovered from the running max.
+      if running_gap > NEG {
+        let gapped = running_gap - Sc::PENALTY_GAP_START - (i as i32 - 2) * Sc::PENALTY_GAP_EXTEND;
+        if gapped > best {
+          best = gapped;
+          best_k = running_gap_k;
+        }
+      }
+
+      if best > NEG && candidate[i].eq_ignore_ascii_case(&qch) {
+        curr[i] = char_bonus(i, qch) + best;
+        if track {
+          parent[j][i] = best_k;
+        }
+      }
+
+      // Fold k = i-1 into the running max so it's available for i+1.
+      if i >= 1 && prev[i - 1] > NEG {
+        let val = prev[i - 1] + (i as i32 - 1) * Sc::PENALTY_GAP_EXTEND;
+        if val > running_gap {
+          running_gap = val;
+          running_gap_k = i - 1;
+        }
+      }
+    }
+
+    std::mem::swap(&mut prev, &mut curr);
+  }
+
+  // Best end position for the last query char.
+  let mut best_i = None;
+  let mut best_score = NEG;
+  for (i, &s) in prev.iter().enumerate() {
+    if s > best_score {
+      best_score = s;
+      best_i = Some(i);
+    }
+  }
+  let best_i = best_i?;
+
+  let positions = if track {
+    let mut positions = vec![0usize; m];
+    let mut i = best_i;
+    for j in (1..m).rev() {
+      positions[j] = i;
+      i = parent[j][i];
+    }
+    positions[0] = i;
+    positions
+  } else {
+    vec![]
+  };
+
+  Some((best_score, positions))
 }
 
 impl From<String> for ScoredCandidate {
