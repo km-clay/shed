@@ -235,6 +235,9 @@ pub(crate) fn fuzzy_match_score(
 fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, Vec<usize>)> {
   use ScoredCandidate as Sc;
 
+  // Well below any real score, but not `i32::MIN` (leaves headroom for adds).
+  const NEG: i32 = i32::MIN / 2;
+
   let n = candidate.len();
   let m = query.len();
   if m == 0 {
@@ -243,10 +246,6 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
   if m > n {
     return None;
   }
-
-  // Well below any real score, but not `i32::MIN` (leaves headroom for adds).
-  const NEG: i32 = i32::MIN / 2;
-
   let char_bonus = |i: usize, qch: char| -> i32 {
     let mut b = 0;
     if i == 0 {
@@ -279,7 +278,8 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
   let mut curr = vec![NEG; n];
   for j in 1..m {
     let qch = query[j];
-    curr.iter_mut().for_each(|c| *c = NEG);
+
+    curr.fill(NEG);
 
     // running_gap = max over k <= i-2 of `prev[k] + k*GAP_EXTEND` (plus its
     // argmax). Adding the i-dependent term below recovers the affine gap

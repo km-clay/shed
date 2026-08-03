@@ -569,7 +569,12 @@ impl super::LineBuf {
         };
         let joined = self.to_string();
         let bytes = joined.as_bytes();
-        let lines = bytecount::count(bytes, b'\n');
+
+        // if we have content, 1 line. if no content, 0 lines.
+        let mut lines = usize::from(!joined.is_empty());
+
+        lines += bytecount::count(bytes, b'\n');
+
         let len = bytes.len() as u64;
         let mut size = String::new();
 
