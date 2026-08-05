@@ -1205,7 +1205,7 @@ mod tests {
       let mut buf = make_buf("new buffer content");
       buf.ex_write(&WriteDest::File(Some(path.clone()))).unwrap();
       let content = std::fs::read_to_string(&path).unwrap();
-      assert_eq!(content, "new buffer content");
+      assert_eq!(content, "new buffer content\n");
     }
 
     #[test]
@@ -1215,7 +1215,7 @@ mod tests {
       let path = dir.path().join("newfile.txt");
       let mut buf = make_buf("hello");
       buf.ex_write(&WriteDest::File(Some(path.clone()))).unwrap();
-      assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
+      assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello\n");
     }
 
     #[test]
@@ -1223,13 +1223,13 @@ mod tests {
       let _g = TestGuard::new();
       let dir = tempfile::TempDir::new().unwrap();
       let path = dir.path().join("append.txt");
-      std::fs::write(&path, "first ").unwrap();
+      std::fs::write(&path, "first\n").unwrap();
       let mut buf = make_buf("second");
       buf
         .ex_write(&WriteDest::FileAppend(Some(path.clone())))
         .unwrap();
       let content = std::fs::read_to_string(&path).unwrap();
-      assert_eq!(content, "first second");
+      assert_eq!(content, "first\nsecond\n");
     }
 
     #[test]
