@@ -567,14 +567,14 @@ impl super::LineBuf {
           system_msg!("Failed to open file {display_path}");
           return Ok(());
         };
-        let joined = self.to_string();
+        let mut joined = self.to_string();
+        if !joined.ends_with('\n') {
+          joined.push('\n');
+        }
+
         let bytes = joined.as_bytes();
 
-        // if we have content, 1 line. if no content, 0 lines.
-        let mut lines = usize::from(!joined.is_empty());
-
-        lines += bytecount::count(bytes, b'\n');
-
+        let lines = bytecount::count(bytes, b'\n');
         let len = bytes.len() as u64;
         let mut size = String::new();
 
