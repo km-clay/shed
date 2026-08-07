@@ -2721,6 +2721,7 @@ ZD                                               *builtin-zd* *zd*
   `zd add [-r] [-d|--depth {n}] [{dir}...]`
   `zd remove [-r] [-d|--depth {n}] [{dir}...]`
   `zd clean`
+  `zd list [--sort {key}] [-r] [--json|--quoted] [{filter}]`
 
   Jump between directories drawn from a frecency-ranked history (a blend of
   how often and how recently each was visited). Directories you `cd` into are
@@ -2739,6 +2740,7 @@ ZD                                               *builtin-zd* *zd*
     `add [{dir}...]`     record {dir} (defaults to the current directory)
     `remove [{dir}...]`  drop {dir} from the history
     `clean`              prune entries whose directory no longer exists
+    `list [{filter}]`    dump the recorded directories and their stats
 
   Options for `add` and `remove`:
 
@@ -2747,6 +2749,32 @@ ZD                                               *builtin-zd* *zd*
                          {dir}; implies `-r`. `--depth 0` records only {dir}
 
   While recursing, `add` skips hidden directories and symlinks.
+
+  Options for `list`:
+
+    `--sort {key}`       order by {key}: `frecency` (default), `visits`,
+                         `recent` (by last visit), or `path`. Counts and times
+                         sort largest-first; `path` sorts alphabetically.
+    `-r`, `--reverse`    reverse the sort direction
+    `--json`             emit a JSON array of objects instead of the default
+    `--quoted`           emit shell-quoted fields instead of the default
+    `{filter}`           show only paths containing the {filter} substring
+
+  `list` reports every recorded directory — including ones that no longer
+  exist on disk (run `clean` to prune those) — with its visit count, last-visit
+  time (epoch seconds), and frecency weight. This data is otherwise only
+  reachable by querying the database directly.
+
+  The default output is tab-separated, one record per line, with the path last
+  so `cut`/`awk` parse the numeric columns cleanly even for odd paths:
+
+      `visits<TAB>last_visit<TAB>frecency<TAB>path`
+
+  `--json` emits an array of `{path, visits, last_visit, frecency}` objects;
+  `--quoted` emits the same columns in the same order, |shell-quoted|(quoted-streams)
+  and space-separated. Use either when a path may contain a tab, space, or
+  newline that the bare format can't represent. `--json` and `--quoted` are
+  mutually exclusive.
 
   Examples:
 
@@ -2757,6 +2785,10 @@ ZD                                               *builtin-zd* *zd*
       `zd add --depth 2 .`   record . and two levels of subdirectories
       `zd remove -r ~/old`   forget ~/old and its subdirectories
       `zd clean`             drop entries for directories that no longer exist
+      `zd list`              dump every recorded directory, best-ranked first
+      `zd list --sort visits`  order the dump by visit count
+      `zd list src`          only paths containing "src"
+      `zd list --json | jq`  feed the structured stats to jq
 
   This is a `shed` extension; `bash` and `POSIX` do not provide it.
 

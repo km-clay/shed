@@ -3,7 +3,10 @@ use std::{
   time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::readline::{FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, match_positions};
+use crate::{
+  expand,
+  readline::{FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, match_positions},
+};
 
 use super::{
   ShResult, Shed,
@@ -119,6 +122,19 @@ fn search_cd_path(new_dir: impl AsRef<Path>) -> Option<PathBuf> {
   paths.find_map(|p| p.join(&new_dir).is_dir().then(|| p.join(&new_dir)))
 }
 
+struct Sort {
+  reverse: bool,
+  kind: SortKind,
+}
+
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+enum SortKind {
+  Frecency,
+  Visits,
+  Recent,
+  Path,
+}
+
 pub(super) struct Zd;
 impl super::Builtin for Zd {
   fn opts(&self) -> Vec<OptSpec> {
@@ -126,6 +142,10 @@ impl super::Builtin for Zd {
       OptSpec::flag('r'),
       OptSpec::single_arg('d'),
       OptSpec::single_arg("depth"),
+      OptSpec::flag("json"),
+      OptSpec::flag("quoted"),
+      OptSpec::flag("reverse"),
+      OptSpec::single_arg("sort"),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -133,6 +153,7 @@ impl super::Builtin for Zd {
       Some("add") => Self::add(args),
       Some("remove") => Self::remove(args),
       Some("clean") => Self::clean(),
+      Some("list") => Self::list(args),
       _ => Self::query(args),
     }
   }
@@ -242,6 +263,162 @@ impl Zd {
     with_status(i32::from(removed == 0))
   }
 
+  fn list(args: super::BuiltinArgs) -> ShResult<()> {
+    let mut quoted = false;
+    let mut json = false;
+
+    let mut sort = Sort {
+      reverse: false,
+      kind: SortKind::Frecency,
+    };
+
+    for opt in &args.opts {
+      match opt {
+        Opt::Short('r') => sort.reverse = true,
+        Opt::Long(name) => match name.as_str() {
+          "json" => json = true,
+          "quoted" => quoted = true,
+          "reverse" => sort.reverse = true,
+          _ => return Err(sherr!(ParseErr @ args.span, "invalid option: {opt}")),
+        },
+        Opt::LongWithArg(name, arg) if name == "sort" => match arg.as_str() {
+          "frecency" => sort.kind = SortKind::Frecency,
+          "visits" => sort.kind = SortKind::Visits,
+          "recent" => sort.kind = SortKind::Recent,
+          "path" => sort.kind = SortKind::Path,
+          _ => return Err(sherr!(ParseErr @ args.span, "invalid sort kind: {arg}")),
+        },
+        _ => return Err(sherr!(ParseErr @ args.span, "invalid option: {opt}")),
+      }
+    }
+    if json && quoted {
+      return Err(sherr!(ParseErr @ args.span, "--json and --quoted are mutually exclusive"));
+    }
+
+    let query = args
+      .argv
+      .iter()
+      .skip(1)
+      .map(|(a, _)| a.as_str())
+      .collect::<String>();
+
+    let mut rows = load_dir_stats();
+
+    if rows.is_empty() {
+      return Err(sherr!(ExecFail @ args.span, "zd: no directory history yet"));
+    }
+
+    if !query.is_empty() {
+      rows.retain(|r| r.path.contains(&query));
+    }
+
+    let default_desc = !matches!(sort.kind, SortKind::Path);
+    let descending = default_desc != sort.reverse;
+    rows.sort_by(|a, b| {
+      let ord = match sort.kind {
+        SortKind::Frecency => a.frecency.cmp(&b.frecency),
+        SortKind::Visits => a.visits.cmp(&b.visits),
+        SortKind::Recent => a.last_visit.cmp(&b.last_visit),
+        SortKind::Path => a.path.cmp(&b.path),
+      }
+      .then_with(|| a.path.cmp(&b.path)); // tie-breaker
+
+      if descending { ord.reverse() } else { ord }
+    });
+
+    if quoted {
+      // SQR serialization
+      let mut entries = vec![];
+
+      for row in &rows {
+        let mut entry = vec![];
+        let DirStat {
+          path,
+          visits,
+          last_visit,
+          frecency,
+        } = row;
+
+        // Same column order as the bare output (path last), just shell-quoted.
+        entry.push(expand::shell_quote(&visits.to_string()));
+        entry.push(expand::shell_quote(&last_visit.to_string()));
+        entry.push(expand::shell_quote(&frecency.to_string()));
+        entry.push(expand::shell_quote(path));
+
+        entries.push(entry.join(" ")); // SQR fields are separated by spaces
+      }
+
+      let output = entries.join("\n"); // SQR rows are separated by newlines
+
+      outln!("{output}");
+    } else if json {
+      // JSON formatted output
+      let mut entries = vec![];
+
+      for row in &rows {
+        let mut map = serde_json::Map::new();
+        let DirStat {
+          path,
+          visits,
+          last_visit,
+          frecency,
+        } = row;
+
+        map.insert("path".to_string(), serde_json::Value::String(path.clone()));
+        map.insert(
+          "visits".to_string(),
+          serde_json::Value::Number((*visits).into()),
+        );
+        map.insert(
+          "last_visit".to_string(),
+          serde_json::Value::Number((*last_visit).into()),
+        );
+        map.insert(
+          "frecency".to_string(),
+          serde_json::Value::Number((*frecency).into()),
+        );
+
+        entries.push(serde_json::Value::Object(map));
+      }
+
+      let json_arr = serde_json::Value::Array(entries);
+      let output = serde_json::to_string_pretty(&json_arr).unwrap();
+
+      outln!("{output}");
+    } else {
+      // no format specified, use tab-separated values
+      let mut entries = vec![];
+
+      for row in &rows {
+        let mut entry = vec![];
+        let DirStat {
+          path,
+          visits,
+          last_visit,
+          frecency,
+        } = row;
+
+        entry.push(visits.to_string());
+        entry.push(last_visit.to_string());
+        entry.push(frecency.to_string());
+        entry.push(path.clone()); // push the path last because it can be anything
+        // the previous stuff all follows a specific pattern (numbers)
+        // but the path can throw off cut/awk parsers if it's in the middle
+
+        entries.push(entry.join("\t"));
+      }
+
+      // we don't need to care about making sure the fields don't contain our separators here
+      // since --json and --quoted are used for that. so let's just naively separate by tabs and newlines
+      // when neither of those is passed.
+      let output = entries.join("\n");
+
+      outln!("{output}");
+    }
+
+    with_status(0)
+  }
+
   /// `zd clean` - prune entries whose directory no longer exists.
   fn clean() -> ShResult<()> {
     let Some(conn) = util::get_db_conn() else {
@@ -327,6 +504,53 @@ impl Zd {
       // cancelled, or nothing matched the query
       None => with_status(1),
     }
+  }
+}
+
+struct DirStat {
+  path: String,
+  visits: i64,
+  last_visit: i64,
+  frecency: i32,
+}
+
+fn query_dir_stats(conn: &rusqlite::Connection) -> Vec<DirStat> {
+  let Ok(mut stmt) = conn.prepare("SELECT path, visits, last_visit FROM dir_history") else {
+    return vec![];
+  };
+
+  let now = now_secs();
+  let Ok(rows) = stmt.query_map([], |r| {
+    Ok((
+      r.get::<_, String>(0)?, // path
+      r.get::<_, i64>(1)?,    // visits
+      r.get::<_, i64>(2)?,    // last_visit seconds
+    ))
+  }) else {
+    return vec![];
+  };
+
+  rows
+    .flatten()
+    .map(|(path, visits, last_visit)| DirStat {
+      path,
+      visits,
+      last_visit,
+      frecency: dir_frecency(visits, now - last_visit),
+    })
+    .collect()
+}
+
+fn load_dir_stats() -> Vec<DirStat> {
+  if let Some(shared) = util::get_db_conn() {
+    let Ok(conn) = shared.try_lock() else {
+      return vec![];
+    };
+    query_dir_stats(&conn)
+  } else if let Ok(conn) = util::open_db_conn_readonly() {
+    query_dir_stats(&conn)
+  } else {
+    vec![]
   }
 }
 
