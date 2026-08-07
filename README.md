@@ -9,7 +9,8 @@
 <h6 align="center">
   A modern POSIX shell focusing on smooth line editing and rich interactive features.
 </h6>
-<img width="1925" height="1026" alt="shed" src="https://github.com/user-attachments/assets/c7d7d410-6cf5-4a04-a2be-ef3b6146e155" />
+
+<img width="1924" height="1086" alt="shed_preview" src="https://github.com/user-attachments/assets/83276eb5-92bf-4eb4-891f-c2dfeddced5d" />
 
 <!-- TOC markers (for autoscript) -->
 <!--tocbeg-->
