@@ -366,6 +366,12 @@ impl Dispatcher {
         // and propagate back to the functions in main.rs
         check_signals()?;
       }
+
+      // set -n
+      if Shed::shopts(|o| o.set.noexec) {
+        return Ok(());
+      }
+
       match node.class {
         NdRule::List { .. } => self.exec_list(node),
         NdRule::Conjunction { .. } => self.exec_conjunction(node),
@@ -401,10 +407,6 @@ impl Dispatcher {
     Ok(())
   }
   pub fn dispatch_cmd(&mut self, node: &Node) -> ShResult<()> {
-    if Shed::shopts(|o| o.set.noexec) {
-      return Ok(());
-    }
-
     let (line, _) = node.get_span().clone().line_and_col();
     Shed::vars_mut(|v| v.set_var("LINENO", VarKind::Int((line + 1) as i32), VarFlags::empty()))?;
 
