@@ -8,7 +8,7 @@ use std::{
 use chrono::Utc;
 use chrono_english::{Dialect, Interval, parse_date_string};
 
-use crate::{HashSet, expand::shell_quote_fmt, state::vars::VarStr};
+use crate::{HashSet, expand::shell_quote_fmt, state::vars::VarStr, status_msg};
 
 use super::{
   Shed, errln,
@@ -557,7 +557,8 @@ impl super::Builtin for Hist {
     }
 
     if query.pull {
-      hist.refresh_hist_entries();
+      let pulled = hist.refresh_hist_entries();
+      status_msg!("hist: pulled {pulled} commands");
 
       return with_status(0);
     }
