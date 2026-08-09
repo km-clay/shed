@@ -9,7 +9,7 @@ use std::{
 use crate::{
   eval::execute,
   procio::{bytes_to_string, out_bytes},
-  state::{meta::UtilKind, vars::VarStr},
+  state::{meta::UtilKind, shopt::xtrace_print, vars::VarStr},
   util::ShResultExt,
   varstr,
 };
@@ -235,7 +235,7 @@ pub(super) trait Builtin: Sync {
 
     // set -x print
     if !opts_empty {
-      crate::state::shopt::xtrace_print(&argv);
+      xtrace_print(&argv);
     }
     // `$_` is the last expanded word of the command line, captured here before
     // the command name is stripped so a bare builtin still records itself.
@@ -939,6 +939,25 @@ pub mod tests {
     test_input("set -x; export XTRACE_FOO=bar; set +x").unwrap();
     let out = g.read_output();
     assert!(out.contains("+ export XTRACE_FOO=bar"), "got: {out:?}");
+  }
+
+  #[test]
+  fn xtrace_traces_bare_assignment() {
+    // Regression: an assignment-only command (`x=5`) applied its value without
+    // ever emitting an xtrace line.
+    let g = TestGuard::new();
+    test_input("set -x; XTRACE_BARE=5; set +x").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("+ XTRACE_BARE=5"), "got: {out:?}");
+  }
+
+  #[test]
+  fn xtrace_traces_bare_assignment_expanded_rhs() {
+    // The traced value is the *expanded* RHS, like bash (`+ x=4`, not `x=$((..)`).
+    let g = TestGuard::new();
+    test_input("set -x; XTRACE_N=$((2+2)); set +x").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("+ XTRACE_N=4"), "got: {out:?}");
   }
 
   #[test]

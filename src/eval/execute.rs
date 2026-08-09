@@ -24,6 +24,7 @@ use std::{
 use crate::state::util::with_vars;
 use crate::util::posix_extension::execvpe;
 
+use itertools::Itertools;
 use nix::{
   errno::Errno,
   unistd::{ForkResult, Pid, execve, fork, getpgrp, isatty, setpgid},
@@ -1711,6 +1712,9 @@ impl Dispatcher {
       flags = VarFlags::EXPORT;
     }
 
+    // standalone assignments get xtrace-printed here
+    let trace = matches!(behavior, AssignBehavior::Set) && Shed::shopts(|o| o.set.xtrace);
+
     for assign in assigns {
       let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
       let span = assign.get_span();
@@ -1753,6 +1757,26 @@ impl Dispatcher {
       } else {
         None
       };
+
+      if trace {
+        let op = match kind {
+          AssignKind::Eq => "=",
+          AssignKind::PlusEq => "+=",
+          AssignKind::MinusEq => "-=",
+          AssignKind::MultEq => "*=",
+          AssignKind::DivEq => "/=",
+        };
+        // Arrays render as `(a b c)`, matching bash's trace; scalars/ints use
+        // their plain value.
+        let rhs = match &val {
+          VarKind::Arr(items) => {
+            let items = items.iter().join(" ");
+            format!("({items})")
+          }
+          other => other.to_string(),
+        };
+        xtrace_print(&[(format!("{var_name}{op}{rhs}").into(), span.clone())]);
+      }
 
       match kind {
         AssignKind::Eq => {
