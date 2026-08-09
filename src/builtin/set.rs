@@ -342,10 +342,10 @@ impl super::Builtin for Set {
 
     if !pos_args.is_empty() || clear_if_empty {
       Shed::vars_mut(|v| {
-        let cur_scope = v.cur_scope_mut();
-        cur_scope.clear_args();
+        let argv_scope = v.sh_argv_scope_mut();
+        argv_scope.clear_args();
         for arg in pos_args {
-          cur_scope.bpush_arg(arg);
+          argv_scope.bpush_arg(arg);
         }
       });
     }
@@ -599,6 +599,28 @@ mod tests {
       test_input("set --").unwrap();
       let args: Vec<VarStr> = Shed::vars(|v| v.sh_argv().clone().into_iter().skip(1).collect());
       assert_eq!(args, Vec::<String>::new());
+    }
+
+    #[test]
+    fn set_dash_dash_inside_function_sets_positionals() {
+      // Regression (issue #110): a function body is a brace group, which
+      // pushes a shared scope with an empty argv. `set --` must target the
+      // function's argv-owning scope, not that transient lexical scope, or
+      // reads of $*/$#/$1 resolve to the wrong scope and come back empty.
+      let g = TestGuard::new();
+      test_input("u() { set -- test; echo \"$*/$#/$1\"; }").unwrap();
+      test_input("u").unwrap();
+      assert_eq!(g.read_output().trim(), "test/1/test");
+    }
+
+    #[test]
+    fn set_dash_dash_in_function_does_not_leak_to_caller() {
+      let g = TestGuard::new();
+      test_input("set -- outer1 outer2").unwrap();
+      test_input("u() { set -- inner; }").unwrap();
+      test_input("u").unwrap();
+      test_input("echo \"$*/$#\"").unwrap();
+      assert_eq!(g.read_output().trim(), "outer1 outer2/2");
     }
 
     #[test]
