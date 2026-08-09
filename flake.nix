@@ -80,7 +80,8 @@
         homepage = "https://github.com/km-clay/shed";
         license = licenses.mit;
         maintainers = [ ];
-        platforms = platforms.linux;
+        platforms = platforms.linux ++ platforms.darwin;
+        mainProgram = "shed";
       };
     };
   }) // {
