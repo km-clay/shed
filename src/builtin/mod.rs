@@ -961,6 +961,16 @@ pub mod tests {
   }
 
   #[test]
+  fn xtrace_traces_prefix_assignment() {
+    // A prefix assignment on a command (`x=1 cmd`) is traced on its own line,
+    // before the command — matching bash's `+ x=1` / `+ cmd`.
+    let g = TestGuard::new();
+    test_input("set -x; XTRACE_PRE=1 true; set +x").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("+ XTRACE_PRE=1"), "got: {out:?}");
+  }
+
+  #[test]
   fn xtrace_off_produces_no_trace() {
     let g = TestGuard::new();
     test_input("echo no_trace_here").unwrap();

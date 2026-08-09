@@ -1712,8 +1712,7 @@ impl Dispatcher {
       flags = VarFlags::EXPORT;
     }
 
-    // standalone assignments get xtrace-printed here
-    let trace = matches!(behavior, AssignBehavior::Set) && Shed::shopts(|o| o.set.xtrace);
+    let trace = Shed::shopts(|o| o.set.xtrace);
 
     for assign in assigns {
       let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
