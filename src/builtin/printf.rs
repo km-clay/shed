@@ -3,7 +3,7 @@ use std::{iter::Peekable, str::Chars};
 use bitflags::bitflags;
 
 use crate::{
-  ShResult, match_loop, out, sherr,
+  ShResult, expand, match_loop, out, sherr,
   state::vars::VarStr,
   util::{self, with_status},
 };
@@ -59,7 +59,7 @@ impl PrintFormatter {
       '%' => {
         if !literal.is_empty() {
           let lit: String = std::mem::take(&mut literal).into();
-          let expanded = util::expand_ansi_c(&lit);
+          let expanded = expand::expand_ansi_c(&lit);
           segments.push(Segment::Literal(expanded));
         }
 
@@ -71,7 +71,7 @@ impl PrintFormatter {
 
     if !literal.is_empty() {
       let lit: String = std::mem::take(&mut literal).into();
-      let expanded = util::expand_ansi_c(&lit);
+      let expanded = expand::expand_ansi_c(&lit);
       segments.push(Segment::Literal(expanded));
     }
 
@@ -460,7 +460,7 @@ impl FmtSpec {
     prec: Option<usize>,
   ) -> ShResult<String> {
     let s = args.next().unwrap_or_default();
-    let expanded = util::expand_ansi_c(&s);
+    let expanded = expand::expand_ansi_c(&s);
     let truncated = match prec {
       Some(p) => expanded.chars().take(p).collect::<String>(),
       None => expanded,
@@ -1014,6 +1014,53 @@ mod tests {
     let guard = TestGuard::new();
     test_input(r"printf 'a\\b'").unwrap();
     assert_eq!(guard.read_output(), "a\\b");
+  }
+
+  // ===================== Unicode escapes (\u / \U) =====================
+
+  // `\uHHHH`: up to 4 hex digits -> a BMP scalar, UTF-8 encoded. Bytes pinned
+  // to bash's output for U+F130 (`printf '' | xxd` -> ef 84 b0).
+  #[test]
+  fn printf_unicode_u_bmp() {
+    let guard = TestGuard::new();
+    test_input(r"printf '\uf130'").unwrap();
+    assert_eq!(guard.read_output().as_bytes(), b"\xef\x84\xb0");
+  }
+
+  // `\UHHHHHHHH`: up to 8 hex digits -> reaches past the BMP. U+F036C is a
+  // supplementary PUA-A scalar; bash emits the 4-byte f3 b0 8d ac.
+  #[test]
+  fn printf_unicode_big_u_supplementary() {
+    let guard = TestGuard::new();
+    test_input(r"printf '\U000f036c'").unwrap();
+    assert_eq!(guard.read_output().as_bytes(), b"\xf3\xb0\x8d\xac");
+  }
+
+  // Reading is variable-length and stops at the first non-hex digit, so each
+  // `\u48` consumes only two digits (U+0048 = 'H', U+0049 = 'I').
+  #[test]
+  fn printf_unicode_variable_length() {
+    let guard = TestGuard::new();
+    test_input(r"printf '\u48\u49'").unwrap();
+    assert_eq!(guard.read_output(), "HI");
+  }
+
+  // ...and a following literal survives: `x` -> U+F130 then a bare 'x'.
+  #[test]
+  fn printf_unicode_stops_before_literal() {
+    let guard = TestGuard::new();
+    test_input(r"printf '\uf130x'").unwrap();
+    assert_eq!(guard.read_output().as_bytes(), b"\xef\x84\xb0x");
+  }
+
+  // A surrogate isn't a valid Rust `char`, so shed leaves the escape literal
+  // (bash instead emits raw invalid-UTF-8 surrogate bytes). This documents the
+  // one deliberate divergence.
+  #[test]
+  fn printf_unicode_surrogate_left_literal() {
+    let guard = TestGuard::new();
+    test_input(r"printf '\uD800'").unwrap();
+    assert_eq!(guard.read_output(), r"\uD800");
   }
 
   // ===================== Width =====================

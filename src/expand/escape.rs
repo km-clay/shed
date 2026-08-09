@@ -197,7 +197,7 @@ fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
       '$' if flags.contains(ExpandFlags::VAR) && chars.peek() == Some(&'\'') => {
         chars.next();
         result.push(markers::SNG_QUOTE);
-        read_dollar_quote(&mut chars, &mut result);
+        expand_dollar_quote(&mut chars, &mut result);
         result.push(markers::SNG_QUOTE);
       }
       '$' if flags.intersects(ExpandFlags::VAR.union(ExpandFlags::CMDSUB)) => {
@@ -356,7 +356,7 @@ fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
         // `'` arm below.
         chars.next();
         result.push(markers::SNG_QUOTE);
-        read_dollar_quote(chars, result);
+        expand_dollar_quote(chars, result);
         result.push(markers::SNG_QUOTE);
       } else {
         result.push(q_ch);
@@ -391,37 +391,69 @@ fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
   });
 }
 
-fn read_dollar_quote(chars: &mut Peekable<Chars>, result: &mut String) {
+pub fn expand_ansi_c(s: &str) -> String {
+  let mut out = String::new();
+  expand_ansi_c_stream(&mut s.chars().peekable(), &mut out, None);
+  out
+}
+
+pub fn expand_dollar_quote(chars: &mut Peekable<Chars>, out: &mut String) {
+  expand_ansi_c_stream(chars, out, Some('\''));
+}
+
+pub fn expand_ansi_c_stream(
+  chars: &mut Peekable<Chars>,
+  out: &mut String,
+  terminator: Option<char>,
+) {
   match_loop!(chars.next() => q_ch, {
-    '\'' => {
-      break;
-    }
-    '\\' => {
-      let Some(esc) = chars.next() else { continue };
+    c if Some(c) == terminator => break,
+    '\\' if let Some(esc) = chars.next() => {
       match esc {
-        'n' => result.push('\n'),
-        't' => result.push('\t'),
-        'r' => result.push('\r'),
-        '"' => result.push('"'),
-        '\'' => result.push('\''),
-        '\\' => result.push('\\'),
-        'a' => result.push('\x07'),
-        'b' => result.push('\x08'),
-        'c' => read_stty_escape(chars, result),
-        'e' | 'E' => result.push('\x1b'),
-        'f' => result.push('\x0c'),
-        'v' => result.push('\x0b'),
-        'x' => read_hex(chars, result),
-        _ if esc.is_ascii_digit() => read_octal(chars, result, Some(esc)),
-        'o' => read_octal(chars, result, None),
+        'n' => out.push('\n'),
+        't' => out.push('\t'),
+        'r' => out.push('\r'),
+        '"' => out.push('"'),
+        '\'' => out.push('\''),
+        '\\' => out.push('\\'),
+        'a' => out.push('\x07'),
+        'b' => out.push('\x08'),
+        'c' => read_stty_escape(chars, out),
+        'e' | 'E' => out.push('\x1b'),
+        'f' => out.push('\x0c'),
+        'v' => out.push('\x0b'),
+        'x' => read_hex(chars, out),
+        'o' => read_octal(chars, out, None),
+        'u' | 'U' => read_unicode(chars, out, esc),
+        _ if esc.is_ascii_digit() => read_octal(chars, out, Some(esc)),
         _ => {
-          result.push('\\');
-          result.push(esc);
+          out.push('\\');
+          out.push(esc);
         }
       }
     }
-    _ => result.push(q_ch),
+    _ => out.push(q_ch),
   });
+}
+
+pub fn read_unicode(chars: &mut Peekable<Chars>, result: &mut String, marker: char) {
+  let mut hex = util::scratch_buf();
+  let max = match marker {
+    'u' => 4,
+    'U' => 8,
+    _ => unreachable!("read_unicode called with non-unicode marker"),
+  };
+
+  while hex.len() < max && chars.peek().is_some_and(char::is_ascii_hexdigit) {
+    hex.push(chars.next().unwrap());
+  }
+
+  if let Some(ch) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+    result.push(ch);
+  } else {
+    // empty or invalid, just push it literally
+    let _ = write!(result, "\\{marker}{hex}");
+  }
 }
 
 pub fn read_stty_escape(chars: &mut Peekable<Chars>, result: &mut String) {
@@ -896,5 +928,176 @@ mod tests {
     // Empty must be quoted so it survives whitespace collapsing when
     // interpolated into a command line.
     assert_eq!(shell_quote(""), "''");
+  }
+}
+
+#[cfg(test)]
+#[expect(non_snake_case)] // names preserve uppercase vs lowercase E
+mod expand_ansi_c_tests {
+  use super::expand_ansi_c;
+  // ─── identity passthrough ─────────────────────────────────────────
+
+  #[test]
+  fn plain_text_unchanged() {
+    assert_eq!(expand_ansi_c("hello world"), "hello world");
+  }
+
+  #[test]
+  fn empty_string() {
+    assert_eq!(expand_ansi_c(""), "");
+  }
+
+  // ─── named single-char escapes ───────────────────────────────────
+
+  #[test]
+  fn backslash_n_is_newline() {
+    assert_eq!(expand_ansi_c("a\\nb"), "a\nb");
+  }
+
+  #[test]
+  fn backslash_t_is_tab() {
+    assert_eq!(expand_ansi_c("a\\tb"), "a\tb");
+  }
+
+  #[test]
+  fn backslash_r_is_carriage_return() {
+    assert_eq!(expand_ansi_c("a\\rb"), "a\rb");
+  }
+
+  #[test]
+  fn backslash_a_is_bel() {
+    assert_eq!(expand_ansi_c("\\a"), "\x07");
+  }
+
+  #[test]
+  fn backslash_b_is_backspace() {
+    assert_eq!(expand_ansi_c("\\b"), "\x08");
+  }
+
+  #[test]
+  fn backslash_lower_e_is_escape() {
+    assert_eq!(expand_ansi_c("\\e"), "\x1b");
+  }
+
+  #[test]
+  fn backslash_upper_E_is_escape() {
+    assert_eq!(expand_ansi_c("\\E"), "\x1b");
+  }
+
+  #[test]
+  fn backslash_f_is_form_feed() {
+    assert_eq!(expand_ansi_c("\\f"), "\x0c");
+  }
+
+  #[test]
+  fn backslash_v_is_vertical_tab() {
+    assert_eq!(expand_ansi_c("\\v"), "\x0b");
+  }
+
+  // ─── escaped quote and backslash ─────────────────────────────────
+
+  #[test]
+  fn backslash_single_quote_is_single_quote() {
+    assert_eq!(expand_ansi_c("\\'"), "'");
+  }
+
+  #[test]
+  fn backslash_backslash_is_single_backslash() {
+    assert_eq!(expand_ansi_c("\\\\"), "\\");
+  }
+
+  // ─── \xNN — hex byte ─────────────────────────────────────────────
+
+  #[test]
+  fn hex_two_digits_decodes_byte() {
+    assert_eq!(expand_ansi_c("\\x41"), "A");
+  }
+
+  #[test]
+  fn hex_uppercase_digits() {
+    assert_eq!(expand_ansi_c("\\xFF"), "\u{ff}");
+  }
+
+  #[test]
+  fn hex_with_trailing_text() {
+    // \x41 = 'A', then literal "BC"
+    assert_eq!(expand_ansi_c("\\x41BC"), "ABC");
+  }
+
+  // ─── \oNNN — octal byte (with leading 'o') ──────────────────────
+
+  #[test]
+  fn octal_with_o_prefix() {
+    // 'A' = octal 101
+    assert_eq!(expand_ansi_c("\\o101"), "A");
+  }
+
+  // ─── \<digit>... — octal byte (no 'o' prefix) ────────────────────
+
+  #[test]
+  fn octal_digit_only() {
+    assert_eq!(expand_ansi_c("\\101"), "A");
+  }
+
+  #[test]
+  fn octal_short_form() {
+    // \0 → null byte
+    assert_eq!(expand_ansi_c("\\0"), "\0");
+  }
+
+  // ─── \c<char> — stty-style control char ──────────────────────────
+
+  #[test]
+  fn control_a() {
+    assert_eq!(expand_ansi_c("\\cA"), "\x01"); // Ctrl+A
+  }
+
+  #[test]
+  fn control_g_is_bel() {
+    assert_eq!(expand_ansi_c("\\cG"), "\x07"); // Ctrl+G = BEL
+  }
+
+  #[test]
+  fn control_lowercase_normalized_to_upper() {
+    // \ca and \cA both produce Ctrl+A.
+    assert_eq!(expand_ansi_c("\\ca"), "\x01");
+  }
+
+  #[test]
+  fn control_question_mark_is_del() {
+    assert_eq!(expand_ansi_c("\\c?"), "\x7f"); // DEL
+  }
+
+  #[test]
+  fn control_invalid_target_preserves_literal() {
+    // '0' is outside @..._ and isn't '?', so the escape isn't valid.
+    // read_stty_escape pushes back "\\c" and leaves the '0' for the
+    // outer loop to handle as a normal char.
+    assert_eq!(expand_ansi_c("\\c0"), "\\c0");
+  }
+
+  // ─── unrecognized escape — preserves backslash ───────────────────
+
+  #[test]
+  fn unknown_escape_preserves_backslash() {
+    assert_eq!(expand_ansi_c("\\z"), "\\z");
+  }
+
+  // ─── edge cases ──────────────────────────────────────────────────
+
+  #[test]
+  fn trailing_backslash_with_no_followup_kept() {
+    // Bare `\` at end of string is kept as-is.
+    assert_eq!(expand_ansi_c("foo\\"), "foo\\");
+  }
+
+  #[test]
+  fn multiple_escapes_in_sequence() {
+    assert_eq!(expand_ansi_c("\\t\\n\\r"), "\t\n\r");
+  }
+
+  #[test]
+  fn mixed_escapes_and_literals() {
+    assert_eq!(expand_ansi_c("line1\\nline2\\tcol2"), "line1\nline2\tcol2");
   }
 }

@@ -5,7 +5,7 @@ use crate::{
   builtin::getopt::OptSpec,
   expand, match_loop, out, outln, procio,
   state::vars::{VarFlags, VarKind, VarStr},
-  util::{expand_ansi_c, with_status},
+  util::with_status,
 };
 
 use super::getopt::Opt;
@@ -184,7 +184,7 @@ pub(crate) fn unquote_raw(s: &str) -> ShResult<Vec<String>> {
         _ => raw.push(ch),
       });
 
-      field.push_str(&expand_ansi_c(&raw));
+      field.push_str(&expand::expand_ansi_c(&raw));
     }
     _ if ch.is_whitespace() => {
       if started {

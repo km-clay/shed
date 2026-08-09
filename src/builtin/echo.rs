@@ -4,12 +4,10 @@ use crate::{
 };
 
 use super::{
-  Builtin, ShResult,
-  expand::expand_prompt,
+  Builtin, ShResult, expand,
   getopt::{Opt, OptSpec},
   out, shopt,
   util::ShResultExt,
-  util::expand_ansi_c,
   with_status,
 };
 use bitflags::bitflags;
@@ -56,9 +54,9 @@ impl Builtin for Echo {
       .into_iter()
       .map(|(st, sp)| -> ShResult<VarStr> {
         if use_escape {
-          Ok(expand_ansi_c(&st).into())
+          Ok(expand::expand_ansi_c(&st).into())
         } else if use_prompt {
-          Ok(expand_prompt(&st).promote_err(sp)?.into())
+          Ok(expand::expand_prompt(&st).promote_err(sp)?.into())
         } else {
           Ok(st)
         }
