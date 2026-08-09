@@ -4,39 +4,58 @@ use std::{
   cell::RefCell, collections::HashSet, fmt::Display, ops::Deref, str::FromStr, time::Duration,
 };
 
-use nix::unistd::write;
+use itertools::Itertools;
 
 use shed_macros::ShOptGroup;
 
 use super::{
-  ShErr, ShResult, Shed,
+  ShErr, ShResult,
   crate_util::{ansi_from_description, format_time},
   eval::lex::Span,
   expand::expand_keymap,
-  procio::stderr_fileno,
-  scopes::ScopeStack,
   sherr, two_way_display,
 };
 use crate::{
-  shopt,
-  state::vars::{VarStr, VarStrSliceExt},
-  system_msg, util,
+  Shed, errln, expand, shopt,
+  state::{self, meta::MetaTab, vars::VarStr},
+  system_msg, util, varstr,
 };
 
+/// Trace a command: shell-quote each argv word (like bash) and emit.
 pub(crate) fn xtrace_print(argv: &[(VarStr, Span)]) {
   if shopt!(set.xtrace) {
-    let words = argv.iter().map(|(s, _)| s.clone()).collect::<Vec<VarStr>>();
+    let words = argv.iter().map(|(s, _)| expand::xtrace_quote(s)).join(" ");
 
-    let stderr = stderr_fileno();
-    let depth = Shed::vars(ScopeStack::depth);
-    let prefix = "+".repeat((depth as usize) + 1);
-    let output = format!("{prefix} {}", words.join_with(" "));
-    log::debug!("xtrace: {output:?}");
-    write(stderr, output.trim().as_bytes()).ok();
-    write(stderr, b"\n").ok();
+    xtrace_line(&words);
   }
 }
 
+/// Format and print a `set -x` trace line
+pub(crate) fn xtrace_line(rendered: &str) {
+  if !shopt!(set.xtrace) {
+    return;
+  }
+
+  let ps4 = state::util::get_ps4();
+  let prefix_char = ps4
+    .chars()
+    .next()
+    .map(|c| varstr!("{c}"))
+    .unwrap_or_default();
+
+  let depth = Shed::meta(MetaTab::xtrace_depth);
+  let prefix = prefix_char.repeat(depth);
+
+  let output = varstr!("{prefix}{ps4}{rendered}");
+
+  log::debug!("xtrace: {output:?}");
+  errln!("{}", output.trim());
+}
+
+/// Renamed shopts mapped to their old names
+///
+/// Stored in the form (<old>, <new>)
+/// If a user tries to use the old form, `shed` will print a warning that points them to the new name.
 const SHOPT_ALIASES: &[(&str, &str)] = &[
   ("core.auto_hist", "history.auto_save"),
   ("core.max_hist", "history.max_entries"),
@@ -45,6 +64,7 @@ const SHOPT_ALIASES: &[(&str, &str)] = &[
 ];
 
 thread_local! {
+  /// A map of shopt aliases that `shed` has already warned the user about in this session.
   static WARNED_ALIASES: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
 }
 

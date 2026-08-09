@@ -1,7 +1,7 @@
 use crate::{
   autocmd,
   eval::parse::node::{LabelCtx, node_has_only_builtins},
-  lifecycle,
+  expand, lifecycle,
   procio::{OutputSink, SinkScope, StdinScope},
   shopt_mut, socket,
   state::{
@@ -49,7 +49,7 @@ use super::{
     self,
     logic::{ShFunc, TrapTarget},
     meta::CmdTimer,
-    shopt::xtrace_print,
+    shopt::{xtrace_line, xtrace_print},
     vars::{ShellParam, Var, VarFlags, VarKind, VarKindTag},
   },
   try_var,
@@ -1767,14 +1767,17 @@ impl Dispatcher {
         };
         // Arrays render as `(a b c)`, matching bash's trace; scalars/ints use
         // their plain value.
+        // bash quotes only the value (`x='a b'`, `a=('c d' e)`), not the
+        // `name=` prefix, so quote the value/elements and emit the assembled
+        // line directly (xtrace_line doesn't re-quote).
         let rhs = match &val {
           VarKind::Arr(items) => {
-            let items = items.iter().join(" ");
+            let items = items.iter().map(expand::xtrace_quote).join(" ");
             format!("({items})")
           }
-          other => other.to_string(),
+          other => expand::xtrace_quote(other.to_string()),
         };
-        xtrace_print(&[(format!("{var_name}{op}{rhs}").into(), span.clone())]);
+        xtrace_line(&format!("{var_name}{op}{rhs}"));
       }
 
       match kind {

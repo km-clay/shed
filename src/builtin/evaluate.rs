@@ -1,4 +1,7 @@
-use crate::state::vars::VarStrSliceExt;
+use crate::{
+  Shed,
+  state::{meta::MetaTab, vars::VarStrSliceExt},
+};
 
 use super::{
   exec_nonint, state,
@@ -26,6 +29,9 @@ impl super::Builtin for Eval {
       .map(|(s, _)| s)
       .collect::<Vec<_>>()
       .join_with(&sep);
+
+    // eval adds an xtrace layer
+    let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
 
     exec_nonint(command, Some("eval".into()))
   }

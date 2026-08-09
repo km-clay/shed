@@ -1,5 +1,7 @@
 use crate::{
   HashMap,
+  eval::lex::TkFlags,
+  expand::Expander,
   state::{logic::ShFunc, terminal::Terminal, vars::VarStr},
   util::{self, ShErrKind, VarStrDisplay},
   varstr,
@@ -279,6 +281,16 @@ pub fn get_separator() -> VarStr {
 /// Used mainly for splitting strings
 pub fn get_separators() -> VarStr {
   try_var!("IFS").unwrap_or_else(|| " \t\n".into())
+}
+
+pub fn get_ps4() -> VarStr {
+  try_var!("PS4")
+    .and_then(|ps4| {
+      Expander::from_raw(ps4.as_str(), TkFlags::empty())
+        .expand_no_split()
+        .ok()
+    })
+    .unwrap_or_else(|| varstr!("+ "))
 }
 
 pub fn get_time_fmt() -> VarStr {

@@ -5,7 +5,7 @@ use crate::{
   eval::{ParsedSrc, execute::exec_input, parse::node::nodes_have_only_builtins},
   lifecycle,
   procio::{self, SinkScope, bytes_to_string},
-  state::{Shed, vars::VarStr},
+  state::{Shed, meta::MetaTab, vars::VarStr},
   util::isolation_guard,
 };
 
@@ -139,6 +139,9 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
   if raw.starts_with('(') && raw.ends_with(')') {
     return expand_arithmetic_wrapped(raw);
   }
+  // command subs add an xtrace layer
+  let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
+
   if is_internal(raw) {
     return internal_cmd_sub(raw);
   }

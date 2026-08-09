@@ -56,7 +56,7 @@ pub(crate) fn display_as_vars(
 
 #[expect(clippy::needless_pass_by_value)]
 pub(crate) fn display_as_var(name: impl ToString, value: impl ToString) -> String {
-  format!("{}={}", name.to_string(), shell_quote(&value.to_string()))
+  format!("{}={}", name.to_string(), shell_quote(value.to_string()))
 }
 
 fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>) -> String {

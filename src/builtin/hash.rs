@@ -32,7 +32,7 @@ impl super::Builtin for Hash {
           .collect()
       });
       for (name, path) in entries {
-        let path = shell_quote(&path.to_string_lossy());
+        let path = shell_quote(path.to_string_lossy());
         outln!("{name}={path}");
       }
     }

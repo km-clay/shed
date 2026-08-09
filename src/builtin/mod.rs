@@ -836,7 +836,7 @@ impl CommandBuiltin {
             let Some(alias) = Shed::logic(|l| l.get_alias(name_str)) else {
               return with_status(127);
             };
-            outln!("alias {name_str}={}", shell_quote(&alias.body()));
+            outln!("alias {name_str}={}", shell_quote(alias.body()));
           }
           UtilKind::Function | UtilKind::Builtin => outln!("{name_str}"),
           UtilKind::Command(p) | UtilKind::File(p) => outln!("{}", p.display()),
@@ -859,7 +859,7 @@ impl CommandBuiltin {
             let Some(alias) = Shed::logic(|l| l.get_alias(name_str)) else {
               return with_status(127);
             };
-            outln!("{name_str} is an alias for {}", shell_quote(&alias.body()));
+            outln!("{name_str} is an alias for {}", shell_quote(alias.body()));
           }
           UtilKind::Function => outln!("{name_str} is a function"),
           UtilKind::Builtin => outln!("{name_str} is a shell builtin"),
@@ -968,6 +968,17 @@ pub mod tests {
     test_input("set -x; XTRACE_PRE=1 true; set +x").unwrap();
     let out = g.read_output();
     assert!(out.contains("+ XTRACE_PRE=1"), "got: {out:?}");
+  }
+
+  #[test]
+  fn xtrace_depth_not_inflated_by_function() {
+    // Regression: the prefix scaled by scope depth, so a command inside a
+    // function traced as `+++ echo` instead of bash's single `+ echo`.
+    let g = TestGuard::new();
+    test_input("xt_deep() { echo deep; }; set -x; xt_deep; set +x").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("+ echo deep"), "got: {out:?}");
+    assert!(!out.contains("++ echo deep"), "prefix inflated: {out:?}");
   }
 
   #[test]

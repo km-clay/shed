@@ -472,6 +472,13 @@ impl Drop for FuncGuard {
   }
 }
 
+pub(crate) struct XtraceGuard;
+impl Drop for XtraceGuard {
+  fn drop(&mut self) {
+    Shed::meta_mut(MetaTab::xtrace_ascend);
+  }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum Pattern {
   Any, // bare *, matches anything
@@ -583,6 +590,7 @@ pub(crate) struct MetaTab {
 
   func_depth: usize,
   loop_depth: usize,
+  xtrace_depth: usize,
 
   // completion candidates given by compadd
   comp_add_candidates: Vec<Candidate>,
@@ -615,6 +623,7 @@ impl Clone for MetaTab {
       old_path: self.old_path.clone(),
       loop_depth: self.loop_depth,
       func_depth: self.func_depth,
+      xtrace_depth: self.xtrace_depth,
       envp_cache: self.envp_cache.clone(),
       comp_add_candidates: self.comp_add_candidates.clone(),
       regexes: self.regexes.clone(),
@@ -647,6 +656,7 @@ impl Default for MetaTab {
       old_path: None,
       loop_depth: 0,
       func_depth: 0,
+      xtrace_depth: 0,
       envp_cache: None,
       procsub_stack: vec![],
       comp_add_candidates: vec![],
@@ -765,20 +775,35 @@ impl MetaTab {
 
     LoopGuard
   }
-  pub fn leave_loop(&mut self) {
-    if self.loop_depth > 0 {
-      self.loop_depth -= 1;
-    }
+  pub fn xtrace_descend(&mut self) -> XtraceGuard {
+    self.xtrace_depth += 1;
+
+    XtraceGuard
   }
   pub fn enter_func(&mut self) -> FuncGuard {
     self.func_depth += 1;
 
     FuncGuard
   }
-  pub fn leave_func(&mut self) {
+  // these are private, so that depth can only be managed
+  // by the guard struct Drop impls
+  fn leave_loop(&mut self) {
+    if self.loop_depth > 0 {
+      self.loop_depth -= 1;
+    }
+  }
+  fn xtrace_ascend(&mut self) {
+    if self.xtrace_depth > 0 {
+      self.xtrace_depth -= 1;
+    }
+  }
+  fn leave_func(&mut self) {
     if self.func_depth > 0 {
       self.func_depth -= 1;
     }
+  }
+  pub fn xtrace_depth(&self) -> usize {
+    self.xtrace_depth
   }
   pub fn in_loop(&self) -> bool {
     self.loop_depth > 0

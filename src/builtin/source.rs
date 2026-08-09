@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use crate::{ShErrKind, Shed, state::vars::VarStr};
+use crate::{
+  ShErrKind, Shed,
+  state::{meta::MetaTab, vars::VarStr},
+};
 
 use super::{ShResult, sherr, state::util::source_file};
 
@@ -46,6 +49,9 @@ impl super::Builtin for Source {
         saved
       })
     });
+
+    // source adds an xtrace layer
+    let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
 
     let result = source_file(path);
 

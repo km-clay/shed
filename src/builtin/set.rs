@@ -258,7 +258,7 @@ impl super::Builtin for Set {
             .join(" ");
           outln!("{k}=( {items} )");
         } else {
-          let v = shell_quote(&v.to_string());
+          let v = shell_quote(v.to_string());
           outln!("{k}={v}");
         }
       }

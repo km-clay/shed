@@ -340,9 +340,9 @@ impl Zd {
         } = row;
 
         // Same column order as the bare output (path last), just shell-quoted.
-        entry.push(expand::shell_quote(&visits.to_string()));
-        entry.push(expand::shell_quote(&last_visit.to_string()));
-        entry.push(expand::shell_quote(&frecency.to_string()));
+        entry.push(expand::shell_quote(visits.to_string()));
+        entry.push(expand::shell_quote(last_visit.to_string()));
+        entry.push(expand::shell_quote(frecency.to_string()));
         entry.push(expand::shell_quote(path));
 
         entries.push(entry.join(" ")); // SQR fields are separated by spaces

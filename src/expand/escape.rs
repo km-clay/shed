@@ -115,8 +115,6 @@ fn push_glob_literal(out: &mut String, c: char) {
   }
 }
 
-const SPECIAL_CHARS: &str = "#$^*()=|{}[]`<>?~;& '\"";
-
 /// Install internal marker characters for substitution, quoting, escape, etc.,
 fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
   if !raw.bytes().any(|b| {
@@ -738,14 +736,14 @@ pub fn unescape_math(raw: &str) -> ShResult<String> {
   Ok(result)
 }
 
-pub fn shell_quote_fmt(s: &str, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+fn quote_fmt(s: &str, f: &mut impl std::fmt::Write, special_chars: &str) -> std::fmt::Result {
   // An empty string MUST be quoted, otherwise interpolating it into a command
   // line collapses into surrounding whitespace and the arg is silently dropped.
   if s.is_empty() {
     return write!(f, "''");
   }
   let has_control = s.chars().any(|c| c.is_ascii_control());
-  let has_special = s.chars().any(|c| SPECIAL_CHARS.contains(c));
+  let has_special = s.chars().any(|c| special_chars.contains(c));
 
   if has_control {
     // $'...' ANSI-C quoting: backslashes and all special chars must be escaped
@@ -783,10 +781,29 @@ pub fn shell_quote_fmt(s: &str, f: &mut impl std::fmt::Write) -> std::fmt::Resul
   }
 }
 
-/// Escapes a string for displaying as a var value
-pub fn shell_quote(s: &str) -> String {
+pub fn xtrace_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
+  quote_fmt(s, f, " !*?$;|&<>(){}[]`'\"\\")
+}
+
+pub fn shell_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
+  quote_fmt(s, f, "\\!#$^*()=|{}[]`<>?~;& '\"")
+}
+
+/// Quotes a string such that it can be round-tripped as shell syntax
+pub fn shell_quote<S: AsRef<str>>(s: S) -> String {
+  quote(s, shell_quote_fmt)
+}
+
+/// Quotes an xtrace argument
+pub fn xtrace_quote<S: AsRef<str>>(s: S) -> String {
+  quote(s, xtrace_quote_fmt)
+}
+
+/// Takes a generic quoting function and applies it to the given string
+fn quote<S: AsRef<str>, F: Fn(&str, &mut String) -> std::fmt::Result>(s: S, f: F) -> String {
+  let s_str = s.as_ref();
   let mut result = String::new();
-  shell_quote_fmt(s, &mut result).unwrap();
+  f(s_str, &mut result).unwrap();
   result
 }
 
