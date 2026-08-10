@@ -1728,13 +1728,6 @@ impl Dispatcher {
       };
       let old_status = Shed::get_status();
       let var_name = var.span.as_str();
-      // For an assignment-only command (Set), the exit status is the last
-      // command substitution's status (or 0). Reset `$?` before expanding so
-      // a leftover non-zero status from a prior command can't masquerade as an
-      // expansion failure; the cmdsub cell tracks whether one actually ran.
-      if matches!(behavior, AssignBehavior::Set) {
-        Shed::set_status(0);
-      }
       let is_integer = !is_arr
         && Shed::vars(|v| v.get_var_flags(var_name)).is_some_and(|f| f.contains(VarFlags::INTEGER));
       let val = if is_arr {
@@ -1749,7 +1742,6 @@ impl Dispatcher {
       } else {
         VarKind::string(val.expand_no_split()?)
       };
-      let param_expansion_status = (Shed::get_status() != 0).then(Shed::get_status);
 
       // Parse and expand array index BEFORE entering write_vars borrow
       let indexed = state::util::parse_arr_bracket(var_name)
@@ -1832,10 +1824,9 @@ impl Dispatcher {
               let status = if matches!(behavior, AssignBehavior::Set) {
                 // Assignment-only command: exit status is the last command
                 // substitution's status (or 0), not the pre-assignment status.
-                param_expansion_status
-                  .unwrap_or_else(|| Shed::meta(MetaTab::last_cmdsub_status).unwrap_or(0))
+                Shed::meta(MetaTab::last_cmdsub_status).unwrap_or(0)
               } else {
-                param_expansion_status.unwrap_or(old_status)
+                Shed::meta(MetaTab::last_cmdsub_status).unwrap_or(old_status)
               };
 
               Shed::set_status(status);
@@ -1990,10 +1981,9 @@ impl Dispatcher {
       let status = if matches!(behavior, AssignBehavior::Set) {
         // Assignment-only command: exit status is the last command
         // substitution's status (or 0), not the pre-assignment status.
-        param_expansion_status
-          .unwrap_or_else(|| Shed::meta(MetaTab::last_cmdsub_status).unwrap_or(0))
+        Shed::meta(MetaTab::last_cmdsub_status).unwrap_or(0)
       } else {
-        param_expansion_status.unwrap_or(old_status)
+        Shed::meta(MetaTab::last_cmdsub_status).unwrap_or(old_status)
       };
       Shed::set_status(status);
 
@@ -3417,5 +3407,32 @@ mod tests {
     let guard = TestGuard::new();
     test_input("echo keep\necho a | echo b\necho \"[$_]\"").unwrap();
     assert!(guard.read_output().contains("[keep]"));
+  }
+
+  #[test]
+  fn assignment_rhs_sees_previous_status() {
+    // `rv=$?` must expand `$?` against the pre-assignment status, not a value
+    // reset by the assignment itself (issue #123).
+    let guard = TestGuard::new();
+    test_input("false\nrv=${?}\necho \"[$rv]\"").unwrap();
+    assert!(guard.read_output().contains("[1]"));
+  }
+
+  #[test]
+  fn plain_assignment_has_zero_status() {
+    // A plain assignment (no command substitution) succeeds: `$?` is 0
+    // afterward, regardless of the prior command's status.
+    let guard = TestGuard::new();
+    test_input("false\nx=$?\necho \"after=$?\"").unwrap();
+    assert!(guard.read_output().contains("after=0"));
+  }
+
+  #[test]
+  fn assignment_cmdsub_status_propagates() {
+    // When the RHS runs a command substitution, its status becomes the
+    // assignment command's status.
+    let guard = TestGuard::new();
+    test_input("x=$(exit 7)\necho \"after=$?\"").unwrap();
+    assert!(guard.read_output().contains("after=7"));
   }
 }
