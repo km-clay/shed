@@ -722,6 +722,11 @@ impl Dispatcher {
     blame.rename(func_name.clone());
 
     let argv = prepare_argv(argv).try_blame(blame.clone())?;
+
+    if !func.flags.contains(NdFlags::NO_TRACE) {
+      xtrace_print(&argv);
+    }
+
     defer! {
       if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Return)) {
         util::with_saved_status(|| {
@@ -1555,6 +1560,10 @@ impl Dispatcher {
       return Ok(());
     }
 
+    if !cmd.flags.contains(NdFlags::NO_TRACE) {
+      xtrace_print(&expanded);
+    }
+
     let child_logic = |pgid: Option<Pid>| -> ! {
       lifecycle::setup_child();
 
@@ -2031,7 +2040,6 @@ pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(VarStr, S
 
   record_last_arg(out.last().map(|(s, _)| s.clone()));
 
-  xtrace_print(&out);
   Ok(out)
 }
 

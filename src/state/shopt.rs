@@ -16,7 +16,9 @@ use super::{
   sherr, two_way_display,
 };
 use crate::{
-  Shed, errln, expand, shopt,
+  Shed, errln,
+  eval::lex::Tk,
+  expand, shopt,
   state::{self, meta::MetaTab, vars::VarStr},
   system_msg, util, varstr,
 };
@@ -25,6 +27,17 @@ use crate::{
 pub(crate) fn xtrace_print(argv: &[(VarStr, Span)]) {
   if shopt!(set.xtrace) {
     let words = argv.iter().map(|(s, _)| expand::xtrace_quote(s)).join(" ");
+
+    xtrace_line(&words);
+  }
+}
+
+pub(crate) fn xtrace_print_tokens(argv: &[Tk]) {
+  if shopt!(set.xtrace) {
+    let words = argv
+      .iter()
+      .map(|tk| expand::xtrace_quote(tk.word()))
+      .join(" ");
 
     xtrace_line(&words);
   }

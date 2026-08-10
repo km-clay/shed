@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 
 use crate::state::{
   logic::{AutoloadKind, ShFunc},
-  shopt,
   vars::VarStr,
 };
 
@@ -30,12 +29,8 @@ trait VarCmd: super::Builtin {
   ) -> ShResult<(super::ArgVector, Vec<Opt>)> {
     let (raw_argv, opts) =
       get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
-    let mut argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
+    let argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
 
-    shopt::xtrace_print(&argv);
-    if !argv.is_empty() {
-      argv.remove(0);
-    }
     Ok((argv, opts))
   }
 }

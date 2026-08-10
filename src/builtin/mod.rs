@@ -9,7 +9,11 @@ use std::{
 use crate::{
   eval::execute,
   procio::{bytes_to_string, out_bytes},
-  state::{meta::UtilKind, shopt::xtrace_print, vars::VarStr},
+  state::{
+    meta::UtilKind,
+    shopt::{xtrace_print, xtrace_print_tokens},
+    vars::VarStr,
+  },
   util::ShResultExt,
   varstr,
 };
@@ -224,7 +228,7 @@ pub(super) trait Builtin: Sync {
   ) -> ShResult<(ArgVector, Vec<Opt>)> {
     let opts = self.opts();
     let opts_empty = opts.is_empty();
-    let (mut argv, opts) = if opts_empty {
+    let (argv, opts) = if opts_empty {
       (
         prepare_argv_with(argv, no_split).promote_err(cmd_span)?,
         vec![],
@@ -235,16 +239,10 @@ pub(super) trait Builtin: Sync {
       get_opts_from_tokens(argv, &opts).promote_err(cmd_span)?
     };
 
-    // set -x print
-    if !opts_empty {
-      xtrace_print(&argv);
-    }
-    // `$_` is the last expanded word of the command line, captured here before
-    // the command name is stripped so a bare builtin still records itself.
+    // `$_` is the last expanded word of the command line. Returns the full argv
+    // (command word included); the caller (`run_builtin`) traces it, then strips
+    // the command word before building `BuiltinArgs`.
     execute::record_last_arg(argv.last().map(|(s, _)| s.clone()));
-    if !argv.is_empty() {
-      argv.remove(0);
-    }
     Ok((argv, opts))
   }
 
@@ -408,7 +406,15 @@ pub(super) trait Builtin: Sync {
       .first()
       .map_or_else(|| span.clone(), |tk| tk.span.clone());
 
-    let (argv, opts) = self.get_argv_and_opts(cmd_span.clone(), argv, no_split)?;
+    let (mut argv, opts) = self.get_argv_and_opts(cmd_span.clone(), argv, no_split)?;
+
+    if !node.flags.contains(NdFlags::NO_TRACE) {
+      xtrace_print(&argv);
+    }
+    if !argv.is_empty() {
+      argv.remove(0);
+    }
+
     let builtin_args = BuiltinArgs {
       argv,
       opts,
@@ -674,6 +680,11 @@ impl Builtin for BuiltinBuiltin {
       unreachable!()
     };
     let mut inner_argv = expand_argv(argv)?;
+
+    if !node.flags.contains(NdFlags::NO_TRACE) {
+      xtrace_print_tokens(&inner_argv);
+    }
+
     if !inner_argv.is_empty() {
       inner_argv.remove(0);
     }
@@ -689,6 +700,8 @@ impl Builtin for BuiltinBuiltin {
       assignments: assignments.clone(),
       argv: inner_argv,
     };
+    forwarded.flags |= NdFlags::NO_TRACE;
+
     builtin.setup_builtin(&forwarded, dispatcher)
   }
 }
@@ -732,6 +745,10 @@ impl Builtin for CommandBuiltin {
     // Expand first so a smuggled `command` (`C="command echo hi"`) is split
     // into words before we strip the leading `command`.
     let mut argv = expand_argv(argv)?;
+
+    if !node.flags.contains(NdFlags::NO_TRACE) {
+      xtrace_print_tokens(&argv);
+    }
 
     if !argv.is_empty() {
       argv.remove(0);
@@ -778,13 +795,14 @@ impl Builtin for CommandBuiltin {
 
     argv = rest;
 
-    let node = Node {
+    let mut node = Node {
       class: NdRule::Command {
         assignments: assignments.clone(),
         argv,
       },
       ..node.clone()
     };
+    node.flags |= NdFlags::NO_TRACE;
 
     if use_default_path {
       let Some(default_path) = state::util::get_default_path() else {

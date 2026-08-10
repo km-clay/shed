@@ -235,6 +235,7 @@ bitflags! {
     const PIPE_CMD      = 1 << 7; // is not the last command in a pipeline
     const NO_SPLIT      = 1 << 8; // don't split words, used in double bracket tests ('[[')
     const PUNCTUATED    = 1 << 9; // ends with a separator
+    const NO_TRACE      = 1 << 10;// no set -x trace output
   }
 }
 

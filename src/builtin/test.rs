@@ -372,7 +372,7 @@ impl super::Builtin for Test {
     no_split: bool,
   ) -> ShResult<(super::ArgVector, Vec<super::Opt>)> {
     let span = argv.get_span().unwrap();
-    let mut argv = prepare_argv_with(argv, no_split).promote_err(cmd_span)?;
+    let argv = prepare_argv_with(argv, no_split).promote_err(cmd_span)?;
     let opener = argv
       .first()
       .map(|(s, _)| s.as_str())
@@ -385,9 +385,7 @@ impl super::Builtin for Test {
     };
     if let Some(close) = want_close {
       match argv.last() {
-        Some((last, _)) if last == close => {
-          argv.pop();
-        }
+        Some((last, _)) if last == close => {}
         _ => {
           return Err(sherr!(
             SyntaxErr @ span,
@@ -396,16 +394,19 @@ impl super::Builtin for Test {
         }
       }
     }
-    if !argv.is_empty() {
-      argv.remove(0);
-    }
     Ok((argv, vec![]))
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
-    let extended = args.cmd_span().as_str() == "[[";
-    let result = ArgvParser::new(&args.argv, extended)
+    let cmd_span = args.cmd_span();
+    let cmd = cmd_span.as_str();
+    let extended = cmd == "[[";
+    let mut argv = args.argv;
+    if (cmd == "[" || cmd == "[[") && !argv.is_empty() {
+      argv.pop();
+    }
+    let result = ArgvParser::new(&argv, extended)
       .parse_or(true)
       .map_err(|e| e.try_blame(span));
 
