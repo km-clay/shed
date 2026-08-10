@@ -590,11 +590,10 @@ impl RedirSpec {
           buf.push('\n');
         } else if flags.contains(TkFlags::IS_HEREDOC) && !flags.contains(TkFlags::LIT_HEREDOC) {
           buf = Expander::from_raw(&buf, flags)
-            .expand()?
-            .into_iter()
-            .next()
-            .map(|s| s.to_string())
-            .unwrap_or_default();
+            .no_glob()
+            .no_split()
+            .expand_no_split()?
+            .to_string();
         }
 
         let mut file = std::fs::File::from(owned);

@@ -1600,6 +1600,26 @@ mod redirection_2_7 {
         "read var <<EOF\n$((1+1))\nEOF\necho $var"
         => "2\n";
 
+      // Quotes inside a `${...}` operand are shell-syntactic even in a heredoc
+      // body (where surrounding quotes are literal); they undergo quote removal
+      // and must not leak as literal quotes or internal markers.
+      heredoc_param_operand_dquote:
+        "unset foo\nread var <<EOF\n${foo:-\"a\"}\nEOF\necho \"[$var]\""
+        => "[a]\n";
+
+      heredoc_param_operand_squote:
+        "unset foo\nread var <<EOF\n${foo:-'a'}\nEOF\necho \"[$var]\""
+        => "[a]\n";
+
+      heredoc_param_operand_keeps_spaces:
+        "unset foo\nread -r var <<EOF\n${foo:-\"a b\"}\nEOF\necho \"[$var]\""
+        => "[a b]\n";
+
+      // A heredoc body is expanded as a single word: not field-split, not globbed.
+      heredoc_body_not_globbed:
+        "read -r var <<EOF\n*\nEOF\necho \"[$var]\""
+        => "[*]\n";
+
       heredoc_single_quoted_no_expansion:
         "X=42\nread var <<'EOF'\n$X\nEOF\necho $var"
         => "$X\n";

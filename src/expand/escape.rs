@@ -178,8 +178,12 @@ fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
           result.push(next_ch);
         }
       }
-      '"' if flags.contains(ExpandFlags::QUOTE) => read_dub_quote(&mut chars, &mut result),
-      '\'' if flags.contains(ExpandFlags::QUOTE) => read_sng_quote(&mut chars, &mut result),
+      '"' if flags.contains(ExpandFlags::QUOTE) || param_depth > 0 => {
+        read_dub_quote(&mut chars, &mut result)
+      }
+      '\'' if flags.contains(ExpandFlags::QUOTE) || param_depth > 0 => {
+        read_sng_quote(&mut chars, &mut result)
+      }
       '`' if flags.contains(ExpandFlags::CMDSUB) => read_backtick(&mut chars, &mut result),
       '<' if flags.contains(ExpandFlags::PROCSUB) && chars.peek() == Some(&'(') => {
         read_proc_sub_in(&mut chars, &mut result);
