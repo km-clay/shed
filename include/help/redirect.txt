@@ -72,10 +72,31 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
 
       Duplicate input file descriptor {M} onto {N}.
 
+  `command N>&word`                            *redir-dup-word*
+  `command N<&word`
+
+      The source {M} need not be a literal number. It is a word subject
+      to the usual expansions, and what it expands to selects the action:
+
+          a run of digits   duplicate that descriptor
+          `-`               close descriptor {N}
+          anything else     an "ambiguous redirect" error: the command is
+                            not run and the exit status is non-zero
+
+      This lets the source descriptor be dynamic. It pairs naturally with
+      descriptors allocated at runtime, such as the one |sock|(builtin-sock)
+      stores in `$SHED_CONN`:
+
+        `fd=1; echo hi >&$fd`       # write to the fd named by $fd
+        `read line <&"$conn"`       # quotes work too
+        `cat <&$((base + 1))`       # as does arithmetic
+
   `command N>&-`                               *redir-close-out*
   `command N<&-`                               *redir-close-in*
 
-      Close file descriptor {N}.
+      Close file descriptor {N}. Because the source is expanded, a word
+      that evaluates to `-` closes the descriptor as well: with `d=-`,
+      `exec 3>&$d` is equivalent to `exec 3>&-`.
 
       Example:
         `exec 3>&-`              # close fd 3
