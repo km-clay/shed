@@ -745,6 +745,9 @@ mod params_and_vars_2_5 {
     test_input! {
       setup: { __test_setup_params!(["a", "b", "c"]); },
       dollar_hash_count       : "echo $#"                            => "3\n";
+      braced_hash_count       : "echo ${#}"                          => "3\n";
+      braced_hash_star_count  : "echo ${#*}"                         => "3\n";
+      braced_hash_at_count    : "echo ${#@}"                         => "3\n";
       dollar_at_unquoted      : "echo $@"                            => "a b c\n";
       dollar_star_unquoted    : "echo $*"                            => "a b c\n";
       dollar_at_quoted_iter   : r#"for x in "$@"; do echo $x; done"# => "a\nb\nc\n";

@@ -5,7 +5,8 @@ use crate::expand::util::glob_to_regex;
 use crate::expand::var::expand_raw_inner;
 use crate::state::vars::VarStr;
 use crate::state::{
-  Shed, scopes::ScopeStack, vars::ArrIndex, vars::VarFlags, vars::VarKind, vars::VarName,
+  Shed, scopes::ScopeStack, vars::ArrIndex, vars::ShellParam, vars::VarFlags, vars::VarKind,
+  vars::VarName,
 };
 use crate::util::{ShResult, compile_glob, split_at_unescaped_markers};
 use crate::{match_loop, util};
@@ -189,6 +190,12 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
   let mut rest = util::scratch_buf();
   if raw.starts_with('#') {
     let var_spec = raw.strip_prefix('#').unwrap();
+    if var_spec.is_empty() || var_spec == "*" || var_spec == "@" {
+      // this is either asking for the `#` parameter directly, or asking for the length
+      // of `$*` or `$@`. All of these refer to the same thing: the number of positional
+      // arguments.
+      return Ok(Shed::vars(|v| v.get_param(ShellParam::ArgCount)));
+    }
     let parsed = VarName::parse(var_spec, allow_side_effects)?;
     if let Some(idx) = parsed.index() {
       match idx {
