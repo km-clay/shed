@@ -13,7 +13,7 @@ split() {
   fi
 
   if ! [ -t 0 ]; then
-    while IFS= read -r parts; do
+    while IFS= read -r parts || [ -n "$parts" ]; do
       # strip all trailing delimiters
       while [ "$parts" != "${parts%"${pat}"}" ]; do parts="${parts%"${pat}"}"; done
 
