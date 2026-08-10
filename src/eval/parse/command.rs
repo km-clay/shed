@@ -80,6 +80,7 @@ impl ParseStream {
         from: 1,
         to: 2,
         mode: RedirType::Output,
+        span: Some(redir_tk.span.clone()),
       });
     }
     Ok(())

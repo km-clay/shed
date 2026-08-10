@@ -212,8 +212,10 @@ impl RedirBldr {
 
     match target {
       RedirTarget::Path(path) if class.is_file_op() => Ok(RedirSpec::file(fd, path, class)),
-      RedirTarget::Close => Ok(RedirSpec::close(fd)),
-      RedirTarget::Fd(src_fd) if class.is_dup_op() => Ok(RedirSpec::dup(src_fd, fd, class)),
+      RedirTarget::Close => Ok(RedirSpec::close(fd, self.span.clone())),
+      RedirTarget::Fd(src_fd) if class.is_dup_op() => {
+        Ok(RedirSpec::dup_spanned(src_fd, fd, class, self.span.clone()))
+      }
       RedirTarget::FdExpr(word) if class.is_dup_op() => Ok(RedirSpec::dup_expr(word, fd, class)),
       RedirTarget::HereDoc { body, flags } => {
         log::debug!("heredoc body: {body:?}");
@@ -433,6 +435,7 @@ pub(super) enum RedirSpec {
     from: RawFd,
     to: RawFd,
     mode: RedirType,
+    span: Option<Span>,
   },
   DupExpr {
     word: Tk,
@@ -441,6 +444,7 @@ pub(super) enum RedirSpec {
   },
   Close {
     fd: RawFd,
+    span: Option<Span>,
   },
   Buffer {
     fd: RawFd,
@@ -454,13 +458,36 @@ impl RedirSpec {
     Self::File { fd, path, mode }
   }
   pub fn dup(from: RawFd, to: RawFd, mode: RedirType) -> Self {
-    Self::Dup { from, to, mode }
+    Self::Dup {
+      from,
+      to,
+      mode,
+      span: None,
+    }
+  }
+  pub fn dup_spanned(from: RawFd, to: RawFd, mode: RedirType, span: Option<Span>) -> Self {
+    Self::Dup {
+      from,
+      to,
+      mode,
+      span,
+    }
   }
   pub fn dup_expr(word: Tk, to: RawFd, mode: RedirType) -> Self {
     Self::DupExpr { word, to, mode }
   }
-  pub fn close(fd: RawFd) -> Self {
-    Self::Close { fd }
+  pub fn close(fd: RawFd, span: Option<Span>) -> Self {
+    Self::Close { fd, span }
+  }
+  /// The span of the redirection operator, if this spec carries one. Used to
+  /// point errors at the offending redirect.
+  pub fn span(&self) -> Option<Span> {
+    match self {
+      RedirSpec::File { path, .. } => Some(path.span.clone()),
+      RedirSpec::DupExpr { word, .. } => Some(word.span.clone()),
+      RedirSpec::Dup { span, .. } | RedirSpec::Close { span, .. } => span.clone(),
+      RedirSpec::Buffer { .. } => None,
+    }
   }
   pub fn buffer(fd: RawFd, buf: String, flags: TkFlags) -> Self {
     Self::Buffer { fd, buf, flags }
@@ -468,7 +495,9 @@ impl RedirSpec {
   pub fn target_fd(&self) -> RawFd {
     match self {
       RedirSpec::Dup { to, .. } | RedirSpec::DupExpr { to, .. } => *to,
-      RedirSpec::File { fd, .. } | RedirSpec::Close { fd } | RedirSpec::Buffer { fd, .. } => *fd,
+      RedirSpec::File { fd, .. } | RedirSpec::Close { fd, .. } | RedirSpec::Buffer { fd, .. } => {
+        *fd
+      }
     }
   }
   pub fn mode(&self) -> RedirType {
@@ -500,7 +529,7 @@ impl RedirSpec {
         let file = move_high(file)?;
         Ok(Redir::new(fd, file))
       }
-      RedirSpec::Dup { from, to, mode: _ } => {
+      RedirSpec::Dup { from, to, .. } => {
         let borrowed = unsafe { BorrowedFd::borrow_raw(from) };
         let owned = borrowed
           .try_clone_to_owned()
@@ -543,7 +572,7 @@ impl RedirSpec {
         let owned = move_high(owned)?;
         Ok(Redir::new(to, owned))
       }
-      RedirSpec::Close { fd } => Ok(Redir::close(fd)),
+      RedirSpec::Close { fd, .. } => Ok(Redir::close(fd)),
       RedirSpec::Buffer { fd, mut buf, flags } => {
         use io::{Seek, SeekFrom, Write};
 
@@ -640,11 +669,7 @@ impl RedirSet {
       Err(e) => return RedirResult::Error(e),
     };
     for spec in self.0 {
-      let span = if let RedirSpec::File { ref path, .. } = spec {
-        Some(path.span.clone())
-      } else {
-        None
-      };
+      let span = spec.span();
 
       let res = spec
         .into_redir()
@@ -1286,6 +1311,33 @@ pub(super) fn read_input() -> ShResult<Vec<u8>> {
 pub mod tests {
   use crate::tests::testutil::{TestGuard, has_cmd, has_cmds, test_input};
   use pretty_assertions::assert_eq;
+
+  // A dup/close redirection error (e.g. `>&9` on a closed fd) must be able to
+  // point at the operator, like file redirects do, so user-facing specs carry
+  // the operator span. Internally synthesized specs (pipe wiring, `|&`
+  // desugaring) have no source location and carry none.
+  #[test]
+  fn dup_and_close_specs_carry_operator_span() {
+    use super::{RedirSpec, RedirType};
+    use crate::eval::lex::Span;
+
+    let span = Span::new(0..3, "2>&".into());
+
+    assert!(
+      RedirSpec::dup_spanned(1, 2, RedirType::Output, Some(span.clone()))
+        .span()
+        .is_some(),
+      "a dup built from source should retain its operator span"
+    );
+    assert!(
+      RedirSpec::close(3, Some(span)).span().is_some(),
+      "a close built from source should retain its operator span"
+    );
+    assert!(
+      RedirSpec::dup(1, 2, RedirType::Output).span().is_none(),
+      "an internally synthesized dup has no source span"
+    );
+  }
 
   #[test]
   fn pipeline_simple() {
