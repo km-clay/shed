@@ -252,19 +252,11 @@ pub(super) trait Builtin: Sync {
     self.get_input(args).map(bytes_to_string)
   }
 
-  fn get_input_str_with(
-    &self,
-    args: &mut BuiltinArgs,
-    should_slurp: fn(&BuiltinArgs) -> bool,
-  ) -> Option<String> {
-    self.get_input_with(args, should_slurp).map(bytes_to_string)
-  }
-
   /// Default input getter
   ///
-  /// Slurps stdin if `args.argv` is empty, or if stdin is available
+  /// Only reads stdin whenn no arguments are given
   fn get_input(&self, args: &mut BuiltinArgs) -> Option<Vec<u8>> {
-    self.get_input_with(args, |a| a.argv.is_empty() || procio::has_in_sink())
+    self.get_input_with(args, |a| a.argv.is_empty())
   }
 
   /// Input getter. Takes a predicate that decides whether to slurp stdin or not.
