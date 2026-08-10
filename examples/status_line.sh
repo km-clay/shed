@@ -171,11 +171,9 @@ emit_mode() {
 # this one is *really* heavy, especially on network mounts
 # so we have some caching and escape hatches going on.
 git_stat_line() {
-  # fun shed fact: parameter expansion assignments return a status code.
-  # This means we can do stuff like check for prefixes, like we do here, and assign at the same time. cool!
-	if [[ -n "$GIT_STAT_DIR" ]] && ! _="${PWD#$GIT_STAT_DIR}"; then
-    # GIT_STAT_DIR is not empty, and is not a prefix of PWD
-    # therefore, we are no longer in the git directory.
+	if [[ -n "$GIT_STAT_DIR" ]] && [ "$PWD" = "${PWD#$GIT_STAT_DIR}" ]; then
+    # GIT_STAT_DIR is set, but stripping it as a prefix left PWD unchanged, so
+    # it is not a prefix of PWD: we are no longer in the git directory.
     # clear the cache and return
 	  export GIT_STAT_LINE=""
 	  export GIT_STAT_DIR=""

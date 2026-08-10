@@ -198,43 +198,27 @@ of the name, or when using any of the operators below.
 ==============================================================================
 11. Exit Status                                  *param-status*
 
-  Some parameter expansions set the shell exit status (`$?`) as a
-  side-channel signal of whether the expansion modified the value:
+  Parameter expansion never sets the shell exit status (`$?`). Whether a
+  pattern matched, a slice was in range, or a value changed does not affect
+  `$?`.
 
-      `0`   the expansion changed the value (something matched/fired)
-      `1`   the expansion was a no-op (nothing matched, slice out of
-            range, etc.)
+  This matches POSIX and every other shell: a simple command consisting
+  only of assignments completes with status `0` (or, if it contained a
+  command substitution, that substitution's status).
 
-  This is an extension over POSIX. The expansion's *value* is unaffected;
-  this is purely an extra signal for control flow.
+      `x=hello`
+      `y=${x%z}`             # `z` is not a suffix of `x`...
+      `echo $?`              # ...but $? is still 0
 
-  Operators that set the status ~
+  To branch on whether an expansion changed a value, compare explicitly:
 
-    Substring removal       `#`, `##`, `%`, `%%`
-    Search and replace      `/`, `//`, `/#`, `/%`
-    Case modification       `^`, `^^`, `,`, `,,`
-    Substrings              `:offset`, `:offset:length` (1 if out of range)
-
-  Operators that do not set the status (always `$? = 0`): default-value
-  forms (`:-`, `-`, `:=`, `=`, `:+`, `+`), error-on-unset (`:?`, `?`),
-  length (`${#var}`), and the basic forms (`$var`, `${var}`).
-
-  The canonical use case is loop-until-no-op:
-
-      `path=foo/bar/baz/`
-      `while path=${path%/*}; do`
-      `  echo "$path"`
-      `done`
-      # prints: foo/bar/baz, foo/bar, foo, then loop ends
-
-  Or as a guard:
-
-      `if foo=${foo#prefix-}; then`
+      `if [ "$foo" != "${foo#prefix-}" ]; then`
       `  echo "had a prefix"`
       `fi`
 
-  When checking after an assignment with multiple expansions, status
-  reflects only the last expansion in the assignment.
+  Note: earlier versions of shed derived `$?` from whether an expansion
+  matched. That non-standard behavior was removed for POSIX conformance —
+  it broke portable scripts relying on `a=${b%c}` being a no-op success.
 
 ==============================================================================
 See also: |redirect| |glob| |arith|

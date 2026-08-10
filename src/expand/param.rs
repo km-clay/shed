@@ -292,23 +292,12 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
   }
   let get = |v: &ScopeStack| v.resolve_var(&parsed).unwrap_or_default();
   let try_get = |v: &ScopeStack| v.resolve_var(&parsed);
-  let compare = |old: &str, new: &str| {
-    // for some of these that do mutation on the var, we set the status based on whether it changed
-    // this allows scripts to do stuff like "while foo=${foo#bar}" or just generally check
-    // whether a parameter expansion did anything without needing verbose checks like [[ "$foo" != "${foo#bar}" ]]
-    if old == new {
-      Shed::set_status(1);
-    } else {
-      Shed::set_status(0);
-    }
-  };
 
   if let Ok(expansion) = parse_param_exp(&rest, allow_side_effects) {
     match expansion {
       ParamExp::ToUpperAll => {
         let value = Shed::vars(get);
         let new = value.to_uppercase();
-        compare(&value, &new);
         Ok(new.into())
       }
       ParamExp::ToUpperFirst => {
@@ -320,13 +309,11 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           .unwrap_or_default();
 
         let new = first + chars.as_str();
-        compare(&value, &new);
         Ok(new.into())
       }
       ParamExp::ToLowerAll => {
         let value = Shed::vars(get);
         let new = value.to_lowercase();
-        compare(&value, &new);
         Ok(new.into())
       }
       ParamExp::ToLowerFirst => {
@@ -337,7 +324,6 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           .map(|c| c.to_lowercase().to_string())
           .unwrap_or_default();
         let new = first + chars.as_str();
-        compare(&value, &new);
         Ok(new.into())
       }
       ParamExp::DefaultUnsetOrNull(default) => {
@@ -420,7 +406,6 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         let n = chars.len() as i64;
         let start = resolve_offset(pos, n) as usize;
         let substr: String = chars[start..].iter().collect();
-        Shed::set_status(0);
         Ok(substr.into())
       }
       ParamExp::SliceClosed(pos, len) => {
@@ -440,7 +425,6 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           return Err(sherr!(ExecFail, "substring expression < 0"));
         }
         let substr: String = chars[start as usize..end as usize].iter().collect();
-        Shed::set_status(0);
         Ok(substr.into())
       }
       ParamExp::RemShortestPrefix(prefix) => {
@@ -452,11 +436,9 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
-            Shed::set_status(0);
             return Ok(value[i..].into());
           }
         }
-        Shed::set_status(1);
         Ok(value)
       }
       ParamExp::RemLongestPrefix(prefix) => {
@@ -471,11 +453,9 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
-            Shed::set_status(0);
             return Ok(value[i..].into());
           }
         }
-        Shed::set_status(1);
         Ok(value) // no match
       }
       ParamExp::RemShortestSuffix(suffix) => {
@@ -490,11 +470,9 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
-            Shed::set_status(0);
             return Ok(value[..i].into());
           }
         }
-        Shed::set_status(1);
         Ok(value)
       }
       ParamExp::RemLongestSuffix(suffix) => {
@@ -506,11 +484,9 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
-            Shed::set_status(0);
             return Ok(value[..i].into());
           }
         }
-        Shed::set_status(1);
         Ok(value)
       }
       ParamExp::ReplaceFirstMatch(search, replace) => {
@@ -527,10 +503,8 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           let before = &value[..mat.start()];
           let after = &value[mat.end()..];
           let result = format!("{before}{expanded_replace}{after}");
-          Shed::set_status(0);
           Ok(result.into())
         } else {
-          Shed::set_status(1);
           Ok(value)
         }
       }
@@ -554,7 +528,6 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
 
         // Append the rest of the string
         result.push_str(&value[last_match_end..]);
-        compare(&value, &result);
         Ok(result.into())
       }
       ParamExp::ReplacePrefix(search, replace) => {
@@ -569,11 +542,9 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
           if pattern.matches(sliced) {
-            Shed::set_status(0);
             return Ok(format!("{}{}", expanded_replace, &value[i..]).into());
           }
         }
-        Shed::set_status(1);
         Ok(value)
       }
       ParamExp::ReplaceSuffix(search, replace) => {
@@ -588,11 +559,9 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
           if pattern.matches(sliced) {
-            Shed::set_status(0);
             return Ok(format!("{}{}", &value[..i], expanded_replace).into());
           }
         }
-        Shed::set_status(1);
         Ok(value)
       }
       ParamExp::VarNamesWithPrefix(prefix) => {
@@ -1306,172 +1275,6 @@ mod tests {
     assert_eq!(out, "ba\n");
   }
 
-  // ===================== Exit status side-channel =====================
-  //
-  // shed extends POSIX: param expansions that "fire" (modify the value) set
-  // $? = 0; no-ops set $? = 1. Lets you write `while foo=${foo#bar}; ...`.
-
-  fn set_var(name: &str, val: &str) {
-    Shed::vars_mut(|v| v.set_var(name, VarKind::Str(val.into()), VarFlags::empty())).unwrap();
-  }
-
-  /// Run the assignment with status zeroed first, then read the resulting
-  /// status. `set_assignments` preserves prior status on a fire and sets 1
-  /// on a no-op, so we have to set a known baseline.
-  fn assignment_status(assignment: &str) -> i32 {
-    test_input("true").unwrap();
-    test_input(assignment).unwrap();
-    crate::state::Shed::get_status()
-  }
-
-  // ----- prefix removal -----
-  #[test]
-  fn status_prefix_short_match_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "abc.txt");
-    assert_eq!(assignment_status("foo=${v#a}"), 0);
-  }
-
-  #[test]
-  fn status_prefix_short_no_match_one() {
-    let _g = TestGuard::new();
-    set_var("v", "abc.txt");
-    assert_eq!(assignment_status("foo=${v#xyz}"), 1);
-  }
-
-  #[test]
-  fn status_prefix_long_match_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "/home/user/file.txt");
-    assert_eq!(assignment_status("foo=${v##*/}"), 0);
-  }
-
-  #[test]
-  fn status_prefix_long_no_match_one() {
-    let _g = TestGuard::new();
-    set_var("v", "abc");
-    assert_eq!(assignment_status("foo=${v##xyz*}"), 1);
-  }
-
-  // ----- suffix removal -----
-  #[test]
-  fn status_suffix_short_match_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "file.tar.gz");
-    assert_eq!(assignment_status("foo=${v%.gz}"), 0);
-  }
-
-  #[test]
-  fn status_suffix_short_no_match_one() {
-    let _g = TestGuard::new();
-    set_var("v", "file.tar.gz");
-    assert_eq!(assignment_status("foo=${v%.zip}"), 1);
-  }
-
-  #[test]
-  fn status_suffix_long_match_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "file.tar.gz");
-    assert_eq!(assignment_status("foo=${v%%.*}"), 0);
-  }
-
-  // ----- replacement -----
-  #[test]
-  fn status_replace_first_match_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "foo bar foo");
-    assert_eq!(assignment_status("x=${v/foo/baz}"), 0);
-  }
-
-  #[test]
-  fn status_replace_first_no_match_one() {
-    let _g = TestGuard::new();
-    set_var("v", "foo bar foo");
-    assert_eq!(assignment_status("x=${v/zzz/baz}"), 1);
-  }
-
-  #[test]
-  fn status_replace_all_match_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "foo bar foo");
-    assert_eq!(assignment_status("x=${v//foo/baz}"), 0);
-  }
-
-  #[test]
-  fn status_replace_all_no_match_one() {
-    let _g = TestGuard::new();
-    set_var("v", "foo bar");
-    assert_eq!(assignment_status("x=${v//zzz/baz}"), 1);
-  }
-
-  // ----- case modification -----
-  #[test]
-  fn status_upper_all_changes_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "hello");
-    assert_eq!(assignment_status("x=${v^^}"), 0);
-  }
-
-  #[test]
-  fn status_upper_all_no_change_one() {
-    let _g = TestGuard::new();
-    set_var("v", "HELLO");
-    assert_eq!(assignment_status("x=${v^^}"), 1);
-  }
-
-  #[test]
-  fn status_lower_all_changes_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "HELLO");
-    assert_eq!(assignment_status("x=${v,,}"), 0);
-  }
-
-  #[test]
-  fn status_lower_all_no_change_one() {
-    let _g = TestGuard::new();
-    set_var("v", "hello");
-    assert_eq!(assignment_status("x=${v,,}"), 1);
-  }
-
-  // ----- substring slicing -----
-  #[test]
-  fn status_slice_in_range_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "hello world");
-    assert_eq!(assignment_status("x=${v:0:5}"), 0);
-  }
-
-  #[test]
-  fn status_slice_open_in_range_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "hello");
-    assert_eq!(assignment_status("x=${v:1}"), 0);
-  }
-
-  #[test]
-  fn status_slice_out_of_range_zero() {
-    let _g = TestGuard::new();
-    set_var("v", "hi");
-    // Slice past the end yields an empty value, but the operation itself
-    // didn't fail — matches bash semantics. Previously this returned the
-    // whole string via a buggy fallback AND set status=1.
-    assert_eq!(assignment_status("x=${v:99}"), 0);
-  }
-
-  // ----- the canonical use case -----
-  #[test]
-  fn status_loop_pattern_terminates() {
-    // while loop using param-expansion status as condition. Each iteration
-    // strips one `/segment` from the end of $path. Loop exits when nothing
-    // is left to strip (no-op fires status=1).
-    let guard = TestGuard::new();
-    test_input("path=foo/bar/baz").unwrap();
-    test_input("while path=${path%/*}; do echo \"$path\"; done").unwrap();
-    let out = guard.read_output();
-    let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
-    assert_eq!(lines, vec!["foo/bar", "foo"]);
-  }
-
   // ===================== Case conversion =====================
 
   fn set(name: &str, val: &str) {
@@ -1693,22 +1496,36 @@ mod tests {
     assert_eq!(result, "5");
   }
 
-  // ===================== Status side effects from compare() =====================
+  // ===================== Exit status (issue #115) =====================
+  // Parameter expansion never sets `$?`. Every other POSIX shell returns 0 for
+  // an assignment-only command regardless of whether a pattern matched, and
+  // POSIX §2.9.1 mandates it. These assert the expansion leaves `$?` untouched.
 
   #[test]
-  fn param_uppercase_sets_status_zero_on_change() {
+  fn param_strip_no_match_leaves_status_untouched() {
     let _g = TestGuard::new();
-    set("x", "hello");
-    test_param_expansion("x^^").unwrap();
+    Shed::set_status(0);
+    set("x", "abc");
+    test_param_expansion("x%z").unwrap(); // no match
     assert_eq!(Shed::get_status(), 0);
   }
 
   #[test]
-  fn param_uppercase_sets_status_one_when_unchanged() {
+  fn param_strip_match_leaves_status_untouched() {
     let _g = TestGuard::new();
-    set("x", "ALREADY_UPPER");
+    Shed::set_status(42);
+    set("x", "abc");
+    test_param_expansion("x%c").unwrap(); // matches
+    assert_eq!(Shed::get_status(), 42, "expansion must not touch $?");
+  }
+
+  #[test]
+  fn param_uppercase_leaves_status_untouched() {
+    let _g = TestGuard::new();
+    Shed::set_status(7);
+    set("x", "hello");
     test_param_expansion("x^^").unwrap();
-    assert_eq!(Shed::get_status(), 1);
+    assert_eq!(Shed::get_status(), 7);
   }
 
   // ===================== UTF-8 boundary regression =====================

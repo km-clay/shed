@@ -14,24 +14,30 @@ split() {
 
   if ! [ -t 0 ]; then
     while IFS= read -r parts; do
-      while parts="${parts%"${pat}"}"; do :; done # strips all trailing delimiters
+      # strip all trailing delimiters
+      while [ "$parts" != "${parts%"${pat}"}" ]; do parts="${parts%"${pat}"}"; done
 
       parts="${parts}${pat}" # attaches a delimiter to the end
 
-      while part="${parts%%"${pat}"*}" && parts="${parts#*"${pat}"}"; do
-        quote "$part";
+      while [ -n "$parts" ]; do
+        part="${parts%%"${pat}"*}"
+        parts="${parts#*"${pat}"}"
+        quote "$part"
       done
     done
   elif [ -z "$2" ]; then
     return
   else
     parts="$2"
-    while parts="${parts%"${pat}"}"; do :; done # strips all trailing delimiters
+    # strip all trailing delimiters
+    while [ "$parts" != "${parts%"${pat}"}" ]; do parts="${parts%"${pat}"}"; done
 
     parts="${parts}${pat}" # attaches a delimiter to the end
 
-    while part="${parts%%"${pat}"*}" && parts="${parts#*"${pat}"}"; do
-      quote "$part";
+    while [ -n "$parts" ]; do
+      part="${parts%%"${pat}"*}"
+      parts="${parts#*"${pat}"}"
+      quote "$part"
     done
   fi
 

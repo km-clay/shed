@@ -177,7 +177,9 @@ _shopt_comp() {
       "raw string used for the middle of the status line"
       "raw string used for the right side of the status line"
     )
-    if group=${cword%.*} && option=${cword#*.}; then
+    if [[ "$cword" == *.* ]]; then
+        group=${cword%.*}
+        option=${cword#*.}
         for opt_grp in $groups; do
             if [[ "$opt_grp" == "$group" ]]; then
                 compadd -P "${opt_grp}." -S '=' -d ${opt_grp}_desc -a ${opt_grp}
