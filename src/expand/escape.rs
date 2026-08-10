@@ -179,10 +179,10 @@ fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
         }
       }
       '"' if flags.contains(ExpandFlags::QUOTE) || param_depth > 0 => {
-        read_dub_quote(&mut chars, &mut result)
+        read_dub_quote(&mut chars, &mut result);
       }
       '\'' if flags.contains(ExpandFlags::QUOTE) || param_depth > 0 => {
-        read_sng_quote(&mut chars, &mut result)
+        read_sng_quote(&mut chars, &mut result);
       }
       '`' if flags.contains(ExpandFlags::CMDSUB) => read_backtick(&mut chars, &mut result),
       '<' if flags.contains(ExpandFlags::PROCSUB) && chars.peek() == Some(&'(') => {
@@ -740,16 +740,25 @@ pub fn unescape_math(raw: &str) -> ShResult<String> {
   Ok(result)
 }
 
-fn quote_fmt(s: &str, f: &mut impl std::fmt::Write, special_chars: &str) -> std::fmt::Result {
+fn quote_fmt(
+  s: &str,
+  f: &mut impl std::fmt::Write,
+  special_chars: &str,
+  escape_ws_controls: bool,
+) -> std::fmt::Result {
   // An empty string MUST be quoted, otherwise interpolating it into a command
   // line collapses into surrounding whitespace and the arg is silently dropped.
   if s.is_empty() {
     return write!(f, "''");
   }
-  let has_control = s.chars().any(|c| c.is_ascii_control());
+
+  let has_hard_control = s
+    .chars()
+    .any(|c| c.is_ascii_control() && c != '\n' && c != '\t');
+  let has_ws_control = s.chars().any(|c| c == '\n' || c == '\t');
   let has_special = s.chars().any(|c| special_chars.contains(c));
 
-  if has_control {
+  if has_hard_control || (has_ws_control && escape_ws_controls) {
     // $'...' ANSI-C quoting: backslashes and all special chars must be escaped
     write!(f, "$'")?;
     for ch in s.chars() {
@@ -770,7 +779,7 @@ fn quote_fmt(s: &str, f: &mut impl std::fmt::Write, special_chars: &str) -> std:
       }
     }
     write!(f, "'")
-  } else if has_special {
+  } else if has_special || has_ws_control {
     write!(f, "'")?;
     for ch in s.chars() {
       if ch == '\'' {
@@ -786,11 +795,11 @@ fn quote_fmt(s: &str, f: &mut impl std::fmt::Write, special_chars: &str) -> std:
 }
 
 pub fn xtrace_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
-  quote_fmt(s, f, " !*?$;|&<>(){}[]`'\"\\")
+  quote_fmt(s, f, r#" !*?$;|&<>(){}[]`'"\"#, false)
 }
 
 pub fn shell_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
-  quote_fmt(s, f, "\\!#$^*()=|{}[]`<>?~;& '\"")
+  quote_fmt(s, f, r#"\\!#$^*()=|{}[]`<>?~;& "'"#, true)
 }
 
 /// Quotes a string such that it can be round-tripped as shell syntax
