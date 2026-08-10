@@ -623,6 +623,13 @@ mod reserved_words_2_4 {
     for_no_in_no_args    : "set --; for x; do echo $x; done; echo end" => "end\n";
     // Explicit empty `in` list still iterates zero times (distinct from no-`in`).
     for_empty_in_list    : "set -- a b; for x in; do echo $x; done; echo z" => "z\n";
+
+    // The loop variable is an ordinary global assignment: it retains its last
+    // value after the loop (POSIX §2.9.4.2), overwriting any prior binding. An
+    // empty word list runs zero times and leaves the prior value intact.
+    for_var_persists_last      : r#"for x in 1 2 3; do :; done; echo "[$x]""# => "[3]\n";
+    for_var_overwrites_prior   : r#"x=old; for x in 1 2 3; do :; done; echo "[$x]""# => "[3]\n";
+    for_empty_list_keeps_prior : r#"x=old; for x in; do :; done; echo "[$x]""# => "[old]\n";
   }
 }
 

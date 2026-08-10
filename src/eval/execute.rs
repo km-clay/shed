@@ -1069,8 +1069,6 @@ impl Dispatcher {
       };
       let vars: Vec<VarStr> = to_expanded_strings(vars)?;
 
-      let mut for_guard = var_ctx_guard(vars.iter().map(VarStr::clone).collect());
-
       'outer: for chunk in arr.chunks(vars.len()) {
         let empty = VarStr::new();
         let chunk_iter = vars
@@ -1079,7 +1077,6 @@ impl Dispatcher {
 
         for (var, val) in chunk_iter {
           Shed::vars_mut(|v| v.set_var(var.as_str(), VarKind::string(val), VarFlags::empty()))?;
-          for_guard.insert(var.clone());
         }
 
         let _guard = shared_scope_guard();
