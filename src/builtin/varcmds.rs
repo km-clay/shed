@@ -35,6 +35,12 @@ trait VarCmd: super::Builtin {
   }
 }
 
+pub fn is_array_literal_assignment(raw: &str) -> bool {
+  split_at_unescaped(raw, "=")
+    .map(|(eq, len)| &raw[eq + len..])
+    .is_some_and(|rhs| rhs.starts_with('(') && rhs.ends_with(')'))
+}
+
 /// Like `prepare_argv` but preserves raw token text for `name=(...)` array
 /// literal assignments. The normal expansion pipeline runs `unescape_str`
 /// which treats `(` as a subshell opener and strips parens, breaking array
@@ -46,8 +52,7 @@ pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
     let raw = tk.span.as_str();
     let eq_pos = split_at_unescaped(raw, "=").map(|(pos, _)| pos);
 
-    let is_arr_lit = eq_pos.is_some_and(|eq| raw[eq + 1..].starts_with('(') && raw.ends_with(')'));
-    if is_arr_lit {
+    if is_array_literal_assignment(raw) {
       out.push((raw.into(), tk.span.clone()));
       continue;
     }
@@ -77,13 +82,23 @@ pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
   Ok(out)
 }
 
-pub fn split_assignment(arg: &VarStr) -> (&str, Option<VarKind>) {
+/// Turn the variable value into a `VarKind`
+fn assignment_value(val: &str, src: &str) -> VarKind {
+  if is_array_literal_assignment(src) {
+    VarKind::parse(val)
+  } else {
+    VarKind::string(val)
+  }
+}
+
+/// Split `name=value`, building the value's `VarKind` from the raw source token
+pub fn split_assignment<'a>(arg: &'a VarStr, src: &str) -> (&'a str, Option<VarKind>) {
   let Some((e, l)) = split_at_unescaped(arg, "=") else {
     return (arg.as_str(), None);
   };
   let var = arg[..e].trim();
   let val = &arg[e + l..];
-  (var, Some(VarKind::parse(val)))
+  (var, Some(assignment_value(val, src)))
 }
 
 pub fn split_assignment_raw(arg: &VarStr) -> (&str, Option<&str>) {
@@ -139,7 +154,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
       continue;
     }
     let val = match (kind, raw_val) {
-      (DeclareKind::Str, Some(v)) => VarKind::parse(v),
+      (DeclareKind::Str, Some(v)) => assignment_value(v, span.as_str()),
       (DeclareKind::Int, Some(v)) => {
         let evaluated = expand_arithmetic(v).promote_err(span.clone())?;
         let n = evaluated
@@ -330,7 +345,7 @@ impl super::Builtin for Readonly {
     }
 
     for (arg, span) in args.argv {
-      let (var, val) = split_assignment(&arg);
+      let (var, val) = split_assignment(&arg, span.as_str());
       Shed::vars_mut(|v| {
         v.set_var(var, val.unwrap_or_default(), VarFlags::READONLY)
           .promote_err(span)
@@ -417,7 +432,7 @@ impl super::Builtin for Export {
     }
 
     for (arg, span) in args.argv {
-      let (var, val) = split_assignment(&arg);
+      let (var, val) = split_assignment(&arg, span.as_str());
       if unexport {
         if let Some(val) = val {
           Shed::vars_mut(|v| v.set_var(var, val, VarFlags::empty())).promote_err(span)?;
@@ -1538,5 +1553,39 @@ mod tests {
     test_input("foo").unwrap();
     // arr was local to foo; should not exist at top level.
     assert_eq!(var!("arr"), "");
+  }
+
+  // ===================== quoted `(...)` is a string, not an array (#121) =====================
+
+  #[test]
+  fn export_quoted_parens_is_literal_string() {
+    // A quoted `(...)` value must stay a literal string, not be re-parsed as an
+    // array by the expanded value's shape (issue #121).
+    let _g = TestGuard::new();
+    test_input("export t='(3[0-2]|([1-2][0-9])|[6-9])'").unwrap();
+    assert_eq!(var!("t"), "(3[0-2]|([1-2][0-9])|[6-9])");
+  }
+
+  #[test]
+  fn readonly_quoted_parens_is_literal_string() {
+    let _g = TestGuard::new();
+    test_input("readonly t='(a|b)'").unwrap();
+    assert_eq!(var!("t"), "(a|b)");
+  }
+
+  #[test]
+  fn declare_quoted_parens_is_literal_string() {
+    let _g = TestGuard::new();
+    test_input("declare t='(a b)'").unwrap();
+    assert_eq!(var!("t"), "(a b)");
+  }
+
+  #[test]
+  fn declare_unquoted_parens_still_makes_array() {
+    // The fix must not break genuine array-literal syntax (unquoted parens).
+    let _g = TestGuard::new();
+    let guard = TestGuard::new();
+    test_input("declare t=(a b c); printf '<%s>' \"${t[@]}\"; echo").unwrap();
+    assert!(guard.read_output().contains("<a><b><c>"));
   }
 }
