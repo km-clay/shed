@@ -1692,11 +1692,12 @@ mod redirection_2_7 {
     // prior statement so it is live when the dup is applied.
     #[test]
     fn dup_input_var_fd() {
-      let mut g = TestGuard::new();
-      let dir = g.in_temp_dir();
-      std::fs::write(dir.join("in.txt"), "hello\n").unwrap();
-      crate::tests::testutil::test_input("exec 3<in.txt; n=3; read x <&$n; echo \"x=$x\"").unwrap();
-      assert_eq!(g.read_output(), "x=hello\n");
+      let g = TestGuard::new();
+      crate::tests::testutil::test_input(
+        "printf 'hello\\n' | { n=0; read x <&$n; echo \"[$x]\"; }",
+      )
+      .unwrap();
+      assert_eq!(g.read_output(), "[hello]\n");
     }
 
     // A word expanding to '-' closes the descriptor, like >&-.
