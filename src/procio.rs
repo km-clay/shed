@@ -70,7 +70,7 @@ pub fn move_high(fd: OwnedFd) -> nix::Result<OwnedFd> {
 } // fd is closed here
 
 #[expect(clippy::needless_pass_by_value)]
-fn move_high_no_cloexec(fd: OwnedFd) -> nix::Result<OwnedFd> {
+pub fn move_high_no_cloexec(fd: OwnedFd) -> nix::Result<OwnedFd> {
   let new_fd = dup_high_no_cloexec(fd.as_fd())?;
   Ok(new_fd)
 }

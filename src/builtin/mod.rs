@@ -63,6 +63,7 @@ mod seek;
 mod set;
 mod shift;
 mod shopt;
+mod sock;
 mod source;
 mod stash;
 mod stat;
@@ -154,6 +155,7 @@ register_builtins! {
   "set"      => set::Set,
   "shift"    => shift::Shift,
   "shopt"    => shopt::Shopt,
+  "sock"     => sock::Sock,
   "source"   => source::Source,
   "stash"    => stash::StashBuiltin,
   "stat"     => stat::Stat,

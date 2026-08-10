@@ -56,6 +56,7 @@ The following builtins are available:
   `stash`       save and recall command snippets            |builtin-stash|
   `shift`       shift positional parameters                 |builtin-shift|
   `shopt`       get or set shell options                    |builtin-shopt|
+  `sock`        open a client socket on a file descriptor   |builtin-sock|
   `source`      execute a file in the current shell         |builtin-source|
   `stat`        display file or filesystem status           |builtin-stat|
   `[[`          evaluate conditional expressions            |builtin-test|
@@ -64,7 +65,7 @@ The following builtins are available:
   `trap`        set signal handlers                         |builtin-trap|
   `true`        return exit status 0                        |builtin-true|
   `type`        describe how a name would be interpreted    |builtin-type|
-  `typeset`     synonym for `declare`                       |builtin-typeset|
+  `typeset`     synonym for `declare`                         |builtin-typeset|
   `ulimit`      set process resource limits                 |builtin-ulimit|
   `umask`       set the file creation mask                  |builtin-umask|
   `unalias`     remove aliases                              |builtin-unalias|
@@ -2081,6 +2082,61 @@ SHOPT                                            *builtin-shopt* *shopt*
       `shopt core.dotglob=true`                  enable dotglob
       `shopt history.max_entries=5000`           set max history
       `shopt highlight.valid_command="bold green"`  customize colors
+
+==============================================================================
+SOCK                                             *builtin-sock* *sock*
+
+  `sock -U {path} [fd]`
+  `sock -U @{name} [fd]`
+  `sock -t {host} -p {port} [fd]`
+  `sock {target} -v {var}`
+
+  Open a client connection to a socket and bind it to a file descriptor
+  in the current shell. Once bound, the connection is an ordinary file
+  descriptor: read it with `<&fd`, write it with `>&fd`, and close it
+  with `exec fd>&-`.
+
+  `sock` is client-only: it connects to a socket that something else is
+  already listening on. It does not listen, bind, or accept.
+
+  Address forms (exactly one is required):
+
+  `-U {path}`        a filesystem Unix domain socket
+  `-U @{name}`       a Linux/Android abstract-namespace socket. The
+                     leading `@` selects the abstract namespace, which
+                     has no filesystem entry. Not available on macOS.
+  `-t {host}`        a TCP host: a name, or an IPv4/IPv6 literal.
+                     Requires `-p`. `--tcp` is a synonym.
+  `-p {port}`        a TCP port. Requires `-t`. `--port` is a synonym.
+
+  Target file descriptor:
+
+  If a numeric {fd} is given, the connection is bound to it. {fd} must
+  be less than 10; higher descriptors are reserved for the shell's
+  internal use.
+
+  If no {fd} is given, one is allocated automatically (>= 10):
+
+  `-v {var}`         store the bound descriptor number in {var}
+
+  With neither `-v` nor an explicit {fd}, the number is stored in
+  `$SHED_CONN`. When `-v` is given, {var} is always set — to the
+  explicit descriptor if one was given, otherwise the allocated one.
+
+  The bound descriptor is left open across `exec` and is inherited by
+  child processes, so external commands can read and write it too.
+
+  Examples:
+
+      `sock -U /run/docker.sock 3`      connect, bind to fd 3
+      `printf 'GET / HTTP/1.0\r\n\r\n' >&3`
+      `cat <&3`                         read the response
+      `exec 3>&-`                       close the connection
+
+      `sock -t example.com -p 80 4`     connect over TCP
+      `sock -U @shed.sock 5`            connect to an abstract socket
+
+  See also |redirect| for file-descriptor redirection.
 
 ==============================================================================
 SOURCE                                           *builtin-source* *source*
