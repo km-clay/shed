@@ -155,6 +155,7 @@ pub(super) struct RedirBldr {
   pub class: Option<RedirType>,
   pub target: Option<RedirTarget>,
   pub span: Option<Span>,
+  pub dup_from_word: bool, // target fd is not a literal digit
 }
 
 impl RedirBldr {
@@ -185,6 +186,12 @@ impl RedirBldr {
       ..self
     }
   }
+  pub fn with_dup_from_word(self) -> Self {
+    Self {
+      dup_from_word: true,
+      ..self
+    }
+  }
   pub fn build(self) -> ShResult<RedirSpec> {
     let Some(fd) = self.fd else {
       return Err(sherr!(ParseErr, "Redirection missing target fd").option_promote(self.span));
@@ -200,6 +207,7 @@ impl RedirBldr {
       RedirTarget::Path(path) if class.is_file_op() => Ok(RedirSpec::file(fd, path, class)),
       RedirTarget::Close => Ok(RedirSpec::close(fd)),
       RedirTarget::Fd(src_fd) if class.is_dup_op() => Ok(RedirSpec::dup(src_fd, fd, class)),
+      RedirTarget::FdExpr(word) if class.is_dup_op() => Ok(RedirSpec::dup_expr(word, fd, class)),
       RedirTarget::HereDoc { body, flags } => {
         log::debug!("heredoc body: {body:?}");
         // Strip leading tabs per line BEFORE expansion (POSIX order).
@@ -291,11 +299,9 @@ impl FromStr for RedirBldr {
           }
         }
         if src_fd.is_empty() {
-          return Err(sherr!(
-              ParseErr,
-              "Invalid character '{}' in redirection operator",
-              ch,
-          ));
+          // No inline fd or `-`: the dup source is a following word, expanded
+          // at redirection time (e.g. `>&$fd`).
+          redir = redir.with_dup_from_word();
         }
       }
       _ if ch.is_ascii_digit() && tgt_fd.is_empty() => {
@@ -349,6 +355,7 @@ impl TryFrom<Tk> for RedirBldr {
           flags,
         }),
         span: Some(span),
+        dup_from_word: false,
       })
     } else {
       match Self::from_str(tk.as_str()) {
@@ -403,6 +410,7 @@ impl RedirType {
 pub(super) enum RedirTarget {
   Path(Tk),
   Fd(RawFd),
+  FdExpr(Tk),
   Close,
   HereDoc { body: String, flags: TkFlags },
 }
@@ -416,6 +424,11 @@ pub(super) enum RedirSpec {
   },
   Dup {
     from: RawFd,
+    to: RawFd,
+    mode: RedirType,
+  },
+  DupExpr {
+    word: Tk,
     to: RawFd,
     mode: RedirType,
   },
@@ -436,6 +449,9 @@ impl RedirSpec {
   pub fn dup(from: RawFd, to: RawFd, mode: RedirType) -> Self {
     Self::Dup { from, to, mode }
   }
+  pub fn dup_expr(word: Tk, to: RawFd, mode: RedirType) -> Self {
+    Self::DupExpr { word, to, mode }
+  }
   pub fn close(fd: RawFd) -> Self {
     Self::Close { fd }
   }
@@ -444,13 +460,15 @@ impl RedirSpec {
   }
   pub fn target_fd(&self) -> RawFd {
     match self {
-      RedirSpec::Dup { to, .. } => *to,
+      RedirSpec::Dup { to, .. } | RedirSpec::DupExpr { to, .. } => *to,
       RedirSpec::File { fd, .. } | RedirSpec::Close { fd } | RedirSpec::Buffer { fd, .. } => *fd,
     }
   }
   pub fn mode(&self) -> RedirType {
     match self {
-      RedirSpec::File { mode, .. } | RedirSpec::Dup { mode, .. } => *mode,
+      RedirSpec::File { mode, .. }
+      | RedirSpec::Dup { mode, .. }
+      | RedirSpec::DupExpr { mode, .. } => *mode,
       RedirSpec::Close { .. } => RedirType::Null,
       RedirSpec::Buffer { .. } => RedirType::HereDoc,
     }
@@ -480,6 +498,41 @@ impl RedirSpec {
         let owned = borrowed
           .try_clone_to_owned()
           .map_err(|e| sherr!(InternalErr, "Failed to duplicate fd {}: {}", from, e))?;
+        let owned = move_high(owned)?;
+        Ok(Redir::new(to, owned))
+      }
+      RedirSpec::DupExpr { word, to, mode: _ } => {
+        let span = word.span.clone();
+        let words = word
+          .clone()
+          .expand()
+          .map(|tk| tk.get_words())
+          .unwrap_or_default();
+
+        if words.len() != 1 {
+          return Err(sherr!(
+            ExecFail @ span,
+            "ambiguous redirect: file descriptor must expand to a single word"
+          ));
+        }
+        let word_val = words.into_iter().next().unwrap();
+        let src = word_val.trim();
+
+        // A word that expands to `-` closes the target fd, mirroring `>&-`.
+        if src == "-" {
+          return Ok(Redir::close(to));
+        }
+
+        let from = src.parse::<RawFd>().map_err(|_| {
+          sherr!(
+            ExecFail @ span.clone(),
+            "ambiguous redirect: `{src}` is not a valid file descriptor"
+          )
+        })?;
+        let borrowed = unsafe { BorrowedFd::borrow_raw(from) };
+        let owned = borrowed
+          .try_clone_to_owned()
+          .map_err(|e| sherr!(InternalErr @ span, "Failed to duplicate fd {from}: {e}"))?;
         let owned = move_high(owned)?;
         Ok(Redir::new(to, owned))
       }

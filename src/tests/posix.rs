@@ -1617,6 +1617,65 @@ mod redirection_2_7 {
         => "foo\nbar\n";
     }
   }
+
+  mod _5_duplicating {
+    /*
+     * §2.7.5 Duplicating an Input File Descriptor  [n]<&word
+     * §2.7.6 Duplicating an Output File Descriptor [n]>&word
+     *
+     * word is expanded: if it evaluates to digits the descriptor is
+     * duplicated; if it evaluates to '-' the descriptor is closed. shed
+     * resolves the expansion at redirection time, so the source fd may come
+     * from a variable, quotes, or arithmetic (e.g. `>&$fd`).
+     */
+    use crate::{state::Shed, tests::testutil::TestGuard};
+
+    test_input! {
+      // >&word where word expands to a digit duplicates the descriptor
+      dup_output_var_fd:
+        "f=1; echo hi >&$f" => "hi\n";
+
+      // a leading fd with an expanded source (2>&$n)
+      dup_output_leading_fd_var:
+        "n=1; echo hi 2>&$n" => "hi\n";
+
+      // quoted expansion
+      dup_output_quoted_var:
+        r#"f=1; echo hi >&"$f""# => "hi\n";
+
+      // arithmetic expansion as the source
+      dup_output_arith:
+        "echo hi >&$((1))" => "hi\n";
+    }
+
+    // <&word duplicating an input descriptor. The source fd is opened in a
+    // prior statement so it is live when the dup is applied.
+    #[test]
+    fn dup_input_var_fd() {
+      let mut g = TestGuard::new();
+      let dir = g.in_temp_dir();
+      std::fs::write(dir.join("in.txt"), "hello\n").unwrap();
+      crate::tests::testutil::test_input("exec 3<in.txt; n=3; read x <&$n; echo \"x=$x\"").unwrap();
+      assert_eq!(g.read_output(), "x=hello\n");
+    }
+
+    // A word expanding to '-' closes the descriptor, like >&-.
+    #[test]
+    fn dup_close_via_expanded_dash() {
+      let _g = TestGuard::new();
+      crate::tests::testutil::test_input("exec 7>&1; d=-; exec 7>&$d").ok();
+      assert_eq!(Shed::get_status(), 0);
+    }
+
+    // A non-numeric, non-'-' expansion is an ambiguous redirect: a non-fatal
+    // redirection error that skips the command and sets a non-zero status.
+    #[test]
+    fn dup_ambiguous_nonnumeric_is_error() {
+      let _g = TestGuard::new();
+      crate::tests::testutil::test_input("x=notanum; echo nope >&$x").ok();
+      assert_ne!(Shed::get_status(), 0);
+    }
+  }
 }
 
 mod exit_status_2_8 {

@@ -48,7 +48,10 @@ impl ParseStream {
       // LCOV_EXCL_STOP
     };
 
-    let target = if class == RedirType::HereString {
+    let target = if redir_bldr.dup_from_word {
+      extend_span!(*span, next_tk.span);
+      RedirTarget::FdExpr(next_tk)
+    } else if class == RedirType::HereString {
       RedirTarget::HereDoc {
         body: next_tk.span.as_str().to_string(),
         flags: next_tk.flags | TkFlags::HERESTRING,

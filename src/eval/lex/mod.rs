@@ -689,28 +689,16 @@ impl LexStream {
         chars.next();
         pos += 1;
 
-        let mut found_fd = false;
         if chars.peek().is_some_and(|ch| *ch == '-') {
           chars.next();
-          found_fd = true;
           pos += 1;
         } else {
           while chars.peek().is_some_and(char::is_ascii_digit) {
             chars.next();
-            found_fd = true;
             pos += 1;
           }
         }
 
-        if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-          let span_start = self.cursor;
-          return Some(Err(lex_err!(
-            self,
-            pos,
-            span_start..pos,
-            "Invalid redirection",
-          )));
-        }
         tk = self.get_token(self.cursor..pos, TkRule::Redir);
         break;
       }
@@ -780,28 +768,16 @@ impl LexStream {
             chars.next();
             pos += 1;
 
-            let mut found_fd = false;
             if chars.peek().is_some_and(|ch| *ch == '-') {
               chars.next();
-              found_fd = true;
               pos += 1;
             } else {
               while chars.peek().is_some_and(char::is_ascii_digit) {
                 chars.next();
-                found_fd = true;
                 pos += 1;
               }
             }
 
-            if !found_fd && !self.flags.contains(LexFlags::LEX_UNFINISHED) {
-              let span_start = self.cursor;
-              return Some(Err(lex_err!(
-                self,
-                pos,
-                span_start..pos,
-                "Invalid redirection",
-              )));
-            }
             tk = self.get_token(self.cursor..pos, TkRule::Redir);
             break;
           }
