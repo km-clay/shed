@@ -1197,6 +1197,27 @@ pub mod tests {
   }
 
   #[test]
+  fn which_util_resolves_uncached_after_partial_cache() {
+    // Regression (#118): a single-command resolution (as a pipeline's external
+    // lookup does) marks $PATH as "seen" (`old_path`) while caching only that
+    // one command. `which_util` — backing `command -v`/`type` — must still
+    // resolve a *different*, un-hashed command via a real PATH walk instead of
+    // trusting the (incomplete) cache and reporting it as not-found.
+    if !has_cmd("cat") || !has_cmd("env") {
+      return;
+    }
+    let _g = TestGuard::new();
+    // Force the exact post-pipeline state: pristine cache, then resolve one
+    // command so $PATH is marked seen with only `cat` cached.
+    state::Shed::meta_mut(state::meta::MetaTab::clear_path_cache);
+    let _ = state::util::lookup_cmd("cat");
+    assert!(
+      state::util::which_util("env").is_some(),
+      "env must resolve even though only `cat` is cached"
+    );
+  }
+
+  #[test]
   #[expect(non_snake_case)]
   fn command_V_builtin_says_shell_builtin() {
     let g = TestGuard::new();

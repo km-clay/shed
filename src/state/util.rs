@@ -328,17 +328,13 @@ pub fn which_util(name: &str) -> Option<Rc<Utility>> {
   if crate::builtin::lookup_builtin(name).is_some() {
     return Some(Rc::new(Utility::builtin(name.into())));
   }
-  let cached = Shed::meta_mut(|m| {
-    m.try_rehash_path_cache();
-    m.lookup_cached_cmd(name)
-      .map(|p| Rc::new(Utility::command(name.into(), p.to_path_buf())))
-  });
-  cached.or_else(|| {
-    // Last resort: an executable file living in $PWD that isn't in $PATH.
-    MetaTab::get_exec_files_in_cwd()
-      .into_iter()
-      .find(|u| u.name() == name)
-  })
+  if let Some(p) = lookup_cmd(name) {
+    return Some(Rc::new(Utility::command(name.into(), p)));
+  }
+  // Last resort: an executable file living in $PWD that isn't in $PATH.
+  MetaTab::get_exec_files_in_cwd()
+    .into_iter()
+    .find(|u| u.name() == name)
 }
 
 pub fn try_hash() {
