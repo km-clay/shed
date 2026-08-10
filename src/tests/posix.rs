@@ -1015,6 +1015,19 @@ mod word_expansions_2_6 {
       param_exp_example_6: r"unset x; echo ${x:=bar}; echo $x" => "bar\nbar\n";
     }
 
+    // Regression (issue #112): the value stored by `:=`/`=` must be the quote-
+    // removed result, not the marker-laden intermediate. A leaked internal
+    // marker surfaced as spurious bytes when the variable was later expanded.
+    // `${#me}` == 1 proves the stored value is a bare `a`, not `<marker>a<marker>`.
+    test_input! {
+      assign_default_stores_clean_value:
+        r#"me=; : "${me:="a"}"; echo "[$me]""# => "[a]\n";
+      assign_default_stored_length_is_clean:
+        r#"me=; : "${me:="a"}"; echo "${#me}""# => "1\n";
+      assign_default_unset_form_stores_clean:
+        r#"unset foo; : "${foo="b"}"; echo "[$foo]-${#foo}""# => "[b]-1\n";
+    }
+
     test_input! {
       /*
        * ${parameter:+word}

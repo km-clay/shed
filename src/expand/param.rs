@@ -1,5 +1,6 @@
 use crate::eval::lex::TkFlags;
 use crate::expand::Expander;
+use crate::expand::markers::strip_markers;
 use crate::expand::util::glob_to_regex;
 use crate::expand::var::expand_raw_inner;
 use crate::state::vars::VarStr;
@@ -358,8 +359,9 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
             let expanded =
               expand_raw_inner(&mut default.chars().peekable(), allow_side_effects, false)?;
             if allow_side_effects {
+              let stored = strip_markers(&expanded);
               Shed::vars_mut(|v| {
-                v.set_var(parsed.name(), VarKind::string(&expanded), VarFlags::empty())
+                v.set_var(parsed.name(), VarKind::string(&stored), VarFlags::empty())
               })?;
             }
             Ok(expanded.into())
@@ -372,8 +374,9 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           let expanded =
             expand_raw_inner(&mut default.chars().peekable(), allow_side_effects, false)?;
           if allow_side_effects {
+            let stored = strip_markers(&expanded);
             Shed::vars_mut(|v| {
-              v.set_var(parsed.name(), VarKind::string(&expanded), VarFlags::empty())
+              v.set_var(parsed.name(), VarKind::string(&stored), VarFlags::empty())
             })?;
           }
           Ok(expanded.into())
