@@ -139,8 +139,15 @@ impl Redir {
       if ret < 0 {
         return Err(nix::Error::last().into());
       }
-    } else {
-      nix::unistd::close(self.fd)?;
+    } else if let Err(e) = nix::unistd::close(self.fd) {
+      match e {
+        Errno::EBADF => {
+          // fd is already closed; ignore
+        }
+        _ => {
+          return Err(e.into());
+        }
+      }
     }
     Ok(())
   }
