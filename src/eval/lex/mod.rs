@@ -413,32 +413,46 @@ bitflags! {
   }
 }
 
-#[expect(clippy::similar_names)]
 pub fn clean_input(input: &str) -> String {
   let input = input.to_string();
   let mut chars = input.char_indices().peekable();
   let mut output = String::new();
-  let mut in_squote = false;
+  let mut quotes = QuoteState::default();
+  let mut in_comment = false;
   // FIFO queue: heredocs on the same line are consumed in order
   let mut heredoc_queue: std::collections::VecDeque<VarStr> = std::collections::VecDeque::new();
   match_loop!(chars.next() => (i,ch) => ch, {
+    _ if in_comment && ch != '\n' && ch != '\r' => output.push(ch),
     '\'' => {
-      in_squote = !in_squote;
+      quotes.toggle_single();
       output.push(ch);
     }
-    '\\' if !in_squote && chars.peek().is_some_and(|(_,c)| *c == '\n') => {
-      chars.next();
-      while chars.peek().is_some_and(|(_,c)| c.is_whitespace() && *c != '\n') {
+    '"' => {
+      quotes.toggle_double();
+      output.push(ch);
+    }
+    '#' if quotes.outside()
+      && matches!(output.chars().next_back(), None | Some(' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')')) =>
+    {
+      in_comment = true;
+      output.push(ch);
+    }
+    '\\' if !quotes.in_single() && matches!(chars.peek(), Some((_, '\n' | '\r'))) => {
+      // line continuation
+      let nl = chars.next().map(|(_, c)| c);
+      if nl == Some('\r') && matches!(chars.peek(), Some((_, '\n'))) {
         chars.next();
       }
     }
     '\r' => {
+      in_comment = false;
       if let Some(&(_, '\n')) = chars.peek() {
         chars.next();
       }
       output.push('\n');
     }
     '\n' if !heredoc_queue.is_empty() => {
+      in_comment = false;
       output.push('\n');
       let delim = heredoc_queue.pop_front().unwrap();
       let tab_strip = delim.starts_with('-');
@@ -463,7 +477,11 @@ pub fn clean_input(input: &str) -> String {
         }
       }
     }
-    '<' if !in_squote && chars.peek().is_some_and(|(_,c)| *c == '<') => {
+    '\n' => {
+      in_comment = false;
+      output.push('\n');
+    }
+    '<' if quotes.outside() && chars.peek().is_some_and(|(_,c)| *c == '<') => {
       output.push(ch);
       let (_, second) = chars.next().unwrap();
       output.push(second);
@@ -1753,5 +1771,45 @@ mod tests {
       !classes.contains(&TkRule::Bang),
       "'!$' should NOT produce a Bang; got {classes:?}"
     );
+  }
+
+  // ===================== line continuation (`\<newline>`) =====================
+
+  #[test]
+  fn continuation_preserves_next_line_whitespace() {
+    // `\<newline>` drops only the pair; the next line's indentation stays, so
+    // `a=1\<nl>    b=2` splits into two words (issue #119).
+    assert_eq!(clean_input("export a=1\\\n    b=2"), "export a=1    b=2");
+  }
+
+  #[test]
+  fn continuation_joins_adjacent_words() {
+    assert_eq!(clean_input("echo one\\\ntwo"), "echo onetwo");
+  }
+
+  #[test]
+  fn continuation_not_applied_in_single_quotes() {
+    // Inside single quotes a `\<newline>` is literal, not a continuation.
+    let src = "'a\\\nb'";
+    assert_eq!(clean_input(src), src);
+  }
+
+  #[test]
+  fn continuation_applied_in_double_quotes() {
+    assert_eq!(clean_input("\"a\\\nb\""), "\"ab\"");
+  }
+
+  #[test]
+  fn trailing_backslash_in_comment_is_not_continuation() {
+    // A `\` ending a comment line does not splice the next line (issue #120):
+    // the newline ends the comment, so the source is unchanged.
+    let src = "# comment \\\na=1";
+    assert_eq!(clean_input(src), src);
+  }
+
+  #[test]
+  fn hash_mid_word_is_not_a_comment() {
+    // `#` not at a word boundary stays literal, so the continuation still fires.
+    assert_eq!(clean_input("a#b\\\nc"), "a#bc");
   }
 }
