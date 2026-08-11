@@ -1,8 +1,8 @@
 use std::{
-  net::TcpStream,
+  net::{TcpListener, TcpStream},
   os::{
-    fd::{IntoRawFd, OwnedFd},
-    unix::net::UnixStream,
+    fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
+    unix::{fs::FileTypeExt, net::UnixStream},
   },
   path::PathBuf,
 };
@@ -10,12 +10,22 @@ use std::{
 // The abstract namespace only exists on Linux-like platforms, so the address
 // types used to resolve it live behind the same gate as `connect_abstract`.
 #[cfg(linux_like)]
-use std::os::{linux::net::SocketAddrExt, unix::net::SocketAddr};
+use std::os::{
+  linux::net::SocketAddrExt,
+  unix::net::{SocketAddr, UnixListener},
+};
+
+use nix::{
+  errno::Errno,
+  libc,
+  sys::socket::{self, AddressFamily, SockFlag, SockType, accept4, connect, socket},
+  unistd::{ForkResult, Pid},
+};
 
 use crate::{
   ShResult, Shed,
   builtin::getopt::{Opt, OptSpec},
-  procio, sherr,
+  eval, lifecycle, procio, sherr, shopt, signal,
   state::vars::{VarFlags, VarKind, VarStr},
   util::{ShResultExt, with_status},
 };
@@ -33,6 +43,24 @@ fn connect_abstract(name: &str) -> ShResult<OwnedFd> {
   })?;
 
   Ok(stream.into())
+}
+
+#[cfg(linux_like)]
+fn bind_abstract(name: &str) -> ShResult<OwnedFd> {
+  let addr = SocketAddr::from_abstract_name(name.as_bytes())
+    .map_err(|e| sherr!(ExecFail, "Invalid abstract socket '@{name}': {e}"))?;
+  let listener = UnixListener::bind_addr(&addr)
+    .map_err(|e| sherr!(ExecFail, "Failed to bind to abstract socket '@{name}': {e}"))?;
+
+  Ok(listener.into())
+}
+
+#[cfg(not(linux_like))]
+fn bind_abstract(name: &str) -> ShResult<OwnedFd> {
+  Err(sherr!(
+    ExecFail,
+    "Abstract sockets are not supported on this platform"
+  ))
 }
 
 #[cfg(not(linux_like))]
@@ -63,11 +91,133 @@ impl TcpSocket {
 
     Ok(stream.into())
   }
+  fn bind(self) -> ShResult<OwnedFd> {
+    let listener = match self.host {
+      TcpHost::Hostname(hostname) => TcpListener::bind((hostname.as_str(), self.port)),
+      TcpHost::IpAddr(ip)/*-----*/=> TcpListener::bind((ip, self.port))
+    }
+    .map_err(|e| sherr!(ExecFail, "Failed to bind TCP socket: {e}"))?;
+
+    Ok(OwnedFd::from(listener))
+  }
 }
 
 enum UnixAddr {
   Path(PathBuf),
   Abstract(VarStr),
+}
+
+impl UnixAddr {
+  pub fn connect(self) -> ShResult<OwnedFd> {
+    match self {
+      UnixAddr::Abstract(var_str) => connect_abstract(&var_str),
+      UnixAddr::Path(path_buf) => UnixStream::connect(&path_buf)
+        .map_err(|e| {
+          sherr!(
+            ExecFail,
+            "Failed to connect to Unix socket '{}': {e}",
+            path_buf.display()
+          )
+        })
+        .map(OwnedFd::from),
+    }
+  }
+  fn poke(&self) -> ShResult<bool> {
+    // let's check if this path is a live socket or not
+    // true = "yes this socket exists and is being used"
+    let Self::Path(p) = self else {
+      return Ok(false);
+    };
+
+    let probe = socket(
+      AddressFamily::Unix,
+      SockType::Stream,
+      SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
+      None,
+    )
+    .map_err(|e| sherr!(ExecFail, "socket() probe failed: {e}"))?;
+
+    let addr = socket::UnixAddr::new(p)
+      .map_err(|e| sherr!(ExecFail, "Invalid Unix socket path '{}': {e}", p.display()))?;
+
+    let poke_result = match connect(probe.as_raw_fd(), &addr) {
+      Ok(()) | Err(Errno::EAGAIN | Errno::EINPROGRESS) => true,
+      Err(Errno::ECONNREFUSED | Errno::ENOENT) => false,
+      Err(e) => {
+        return Err(sherr!(
+          ExecFail,
+          "Failed to probe Unix socket '{}': {e}",
+          p.display()
+        ));
+      }
+    };
+
+    Ok(poke_result)
+  }
+  pub fn bind(self) -> ShResult<OwnedFd> {
+    match self {
+      UnixAddr::Abstract(var_str) => bind_abstract(&var_str),
+      UnixAddr::Path(ref path_buf) => {
+        // a bunch of checks now to make sure we can bind to this address
+        // the checks go like this:
+        // 1. if it exists and is a socket, remove the socket if it is not in use. If noclobber is set, this is an error.
+        // 2. if it exists and is not a socket, this is an error.
+        // 3. if it does not exist, we are free to bind to it.
+        match std::fs::symlink_metadata(path_buf) {
+          Err(e) if e.kind() == std::io::ErrorKind::NotFound => { /* free to bind */ }
+          Err(e) => {
+            return Err(sherr!(
+              ExecFail,
+              "Failed to stat Unix socket '{}': {e}",
+              path_buf.display()
+            ));
+          }
+          Ok(_) if shopt!(set.noclobber) => {
+            return Err(sherr!(
+              ExecFail,
+              "Cannot bind to Unix socket '{}': already exists and noclobber is set",
+              path_buf.display()
+            ));
+          }
+          Ok(m) if !m.file_type().is_socket() => {
+            return Err(sherr!(
+              ExecFail,
+              "Cannot bind to Unix socket '{}': path exists and is not a socket",
+              path_buf.display()
+            ));
+          }
+          Ok(_) if self.poke()? => {
+            return Err(sherr!(
+              ExecFail,
+              "Cannot bind to Unix socket '{}': already in use",
+              path_buf.display()
+            ));
+          }
+          Ok(_) => {
+            // if we are here, we can remove it
+            std::fs::remove_file(path_buf).map_err(|e| {
+              sherr!(
+                ExecFail,
+                "Failed to remove existing Unix socket '{}': {e}",
+                path_buf.display()
+              )
+            })?;
+          }
+        }
+
+        // now bind
+        UnixListener::bind(path_buf)
+          .map_err(|e| {
+            sherr!(
+              ExecFail,
+              "Failed to bind to Unix socket '{}': {e}",
+              path_buf.display()
+            )
+          })
+          .map(OwnedFd::from)
+      }
+    }
+  }
 }
 
 enum SockTarget {
@@ -161,6 +311,183 @@ impl SockOpts {
   }
 }
 
+/// Install an owned socket fd into the shell and record its number.
+fn install_socket_fd(
+  owned: OwnedFd,
+  target_fd: Option<RawFd>,
+  var_name: Option<VarStr>,
+  default_var: &str,
+) -> ShResult<()> {
+  let fd = if let Some(fd) = target_fd {
+    // Stage high first so the user asking for e.g. `3` can't collide with the
+    // fd the socket happened to be allocated on.
+    let staged = procio::move_high_no_cloexec(owned)?;
+    procio::Redir::new(fd, staged).apply()?;
+    fd
+  } else {
+    procio::move_high_no_cloexec(owned)?.into_raw_fd()
+  };
+
+  match (target_fd, var_name) {
+    (None, None) => {
+      Shed::vars_mut(|v| v.set_var(default_var, VarKind::Int(fd), VarFlags::empty()))?;
+    }
+    (_, Some(var)) => {
+      Shed::vars_mut(|v| v.set_var(&var, VarKind::Int(fd), VarFlags::empty()))?;
+    }
+    _ => {}
+  }
+
+  with_status(0)
+}
+
+pub(super) struct Accept;
+impl super::Builtin for Accept {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::single_arg('v'), // variable to store auto-allocated FD in (`$SHED_ACCEPT` by default)
+    ]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let mut var = None;
+    let cmd_span = args.cmd_span();
+    for opt in &args.opts {
+      match opt {
+        Opt::ShortWithArg('v', arg) => var = Some(arg.clone()),
+        _ => return Err(sherr!(ExecFail @ args.cmd_span(), "Unexpected option '{opt}'")),
+      }
+    }
+
+    let mut argv_iter = args.argv.into_iter();
+    let Some((fd, span)) = argv_iter.next() else {
+      return Err(sherr!(
+        ExecFail @ cmd_span,
+        "Missing file descriptor argument for accept",
+      ));
+    };
+
+    let Ok(listen) = fd.parse::<u32>() else {
+      return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{fd}'"));
+    };
+
+    match argv_iter.next() {
+      None => Self::bind_mode(listen as i32, None, var),
+      Some((arg, _)) => {
+        if let Ok(fd) = arg.parse::<u32>()
+          && fd < 10
+        {
+          Self::bind_mode(listen as i32, Some(fd as RawFd), var)
+        } else {
+          Self::serve_mode(listen as i32, arg)
+        }
+      }
+    }
+  }
+}
+
+impl Accept {
+  fn accept_conn(listen: RawFd) -> ShResult<OwnedFd> {
+    let conn = loop {
+      match accept4(listen, SockFlag::SOCK_CLOEXEC) {
+        Ok(fd) => break fd,
+        Err(Errno::EINTR) => signal::check_signals()?,
+        Err(e) => return Err(sherr!(ExecFail, "accept failed: {e}")),
+      }
+    };
+    Ok(unsafe { OwnedFd::from_raw_fd(conn) })
+  }
+  fn bind_mode(listen: RawFd, target_fd: Option<RawFd>, var_name: Option<VarStr>) -> ShResult<()> {
+    let conn = Self::accept_conn(listen)?;
+    install_socket_fd(conn, target_fd, var_name, "SHED_ACCEPT")
+  }
+  fn serve_mode(listen: RawFd, handler: VarStr) -> ShResult<()> {
+    let conn = Self::accept_conn(listen)?;
+
+    match unsafe { nix::unistd::fork()? } {
+      ForkResult::Parent { child: _ } => {
+        nix::unistd::close(conn).ok();
+        with_status(0)
+      }
+      ForkResult::Child => {
+        lifecycle::setup_child();
+
+        nix::unistd::dup2_stdin(&conn).ok();
+        nix::unistd::dup2_stdout(&conn).ok();
+        std::mem::drop(conn);
+        nix::unistd::close(listen).ok();
+
+        nix::unistd::setpgid(Pid::from_raw(0), Pid::from_raw(0)).ok();
+
+        signal::reset_signals(false);
+        let _guard = Shed::term_mut(|t| t.interactive_guard(false));
+
+        if let Err(e) = eval::execute::exec_nonint(handler, Some("accept handler".into())) {
+          e.print_error();
+        }
+
+        unsafe { libc::_exit(Shed::get_status()) }
+      }
+    }
+  }
+}
+
+pub(super) struct Listen;
+impl super::Builtin for Listen {
+  fn is_special(&self) -> bool {
+    true
+  }
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::single_arg('U'), // filesystem Unix socket
+      OptSpec::single_arg('t'), // TCP host
+      OptSpec::single_arg("tcp"),
+      OptSpec::single_arg('p'), // port number
+      OptSpec::single_arg("port"),
+      OptSpec::single_arg('v'), // variable to store auto-allocated FD in (`$SHED_LISTEN` by default)
+    ]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let SockOpts { target, fd_var } =
+      SockOpts::from_opts(&args.opts).promote_err(args.cmd_span())?;
+
+    if args.argv.len() > 1 {
+      return Err(sherr!(
+        ExecFail @ args.cmd_span(),
+        "Too many arguments, expected at most 1 file descriptor argument",
+      ));
+    }
+
+    let target_fd = if let Some((arg, span)) = args.argv.first() {
+      let Ok(arg) = arg.parse::<u32>() else {
+        return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{arg}'"));
+      };
+
+      if arg >= 10 {
+        return Err(sherr!(
+          ExecFail @ span.clone(),
+          "File descriptor '{arg}' is too high, must be less than 10",
+        ));
+      }
+
+      Some(arg)
+    } else {
+      None
+    };
+
+    let listen = match target {
+      SockTarget::Tcp(tcp_socket) => tcp_socket.bind().promote_err(args.cmd_span())?,
+      SockTarget::Unix(unix_addr) => unix_addr.bind().promote_err(args.cmd_span())?,
+    };
+
+    install_socket_fd(
+      listen,
+      target_fd.map(|fd| fd as RawFd),
+      fd_var,
+      "SHED_LISTEN",
+    )
+  }
+}
+
 pub(super) struct Sock;
 impl super::Builtin for Sock {
   fn is_special(&self) -> bool {
@@ -208,45 +535,10 @@ impl super::Builtin for Sock {
 
     let stream = match target {
       SockTarget::Tcp(tcp_socket) => tcp_socket.connect().promote_err(args.cmd_span())?,
-      SockTarget::Unix(unix_addr) => match unix_addr {
-        UnixAddr::Abstract(var_str) => connect_abstract(&var_str).promote_err(args.cmd_span())?,
-        UnixAddr::Path(path_buf) => UnixStream::connect(&path_buf)
-          .map_err(|e| sherr!(ExecFail @ args.cmd_span(), "Failed to connect to Unix socket '{}': {e}", path_buf.display()))?
-          .into(),
-      }
+      SockTarget::Unix(unix_addr) => unix_addr.connect().promote_err(args.cmd_span())?,
     };
 
-    let fd = if let Some(fd) = target_fd {
-      // move the fd to a definitely-open one
-      let staged = procio::move_high_no_cloexec(stream)?;
-      // now redirect it to the specified one
-      // this protects from the case of the user specifying "3"
-      // and the stream allocating to fd 3
-      procio::Redir::new(fd as i32, staged).apply()?;
-      fd as i32
-    } else {
-      procio::move_high_no_cloexec(stream)?.into_raw_fd()
-    };
-
-    match (target_fd, fd_var) {
-      (None, None) => {
-        // set $SHED_CONN to the auto-allocated fd
-        Shed::vars_mut(|v| v.set_var("SHED_CONN", VarKind::Int(fd), VarFlags::empty()))?;
-      }
-
-      (_, Some(var)) => {
-        // fd was specified, and variable was specified
-        // set the given variable
-        Shed::vars_mut(|v| v.set_var(&var, VarKind::Int(fd), VarFlags::empty()))?;
-      }
-
-      _ => {
-        // fd was specified but no variable specified
-        // so we don't do anything
-      }
-    }
-
-    with_status(0)
+    install_socket_fd(stream, target_fd.map(|fd| fd as RawFd), fd_var, "SHED_CONN")
   }
 }
 

@@ -7,6 +7,7 @@ external executables. They have access to shell state (variables, job table, etc
 
 The following builtins are available:
 
+  `accept`      accept a connection on a listening socket   |builtin-accept|
   `alias`       define or list command aliases              |builtin-alias|
   `arrops`      array manipulation (push, pop, rotate)      |builtin-arrops|
   `autocmd`     register hooks for shell events             |builtin-autocmd|
@@ -36,6 +37,7 @@ The following builtins are available:
   `jobs`        list background jobs                        |builtin-jobs|
   `keymap`      define custom key bindings                  |builtin-keymap|
   `kill`        send signals to processes                   |builtin-kill|
+  `listen`      create a listening socket on a descriptor   |builtin-listen|
   `local`       declare variables local to a function       |builtin-local|
   `msg`         post a message to the status bar            |builtin-msg|
   `popd`        pop the directory stack                     |builtin-popd|
@@ -2136,7 +2138,141 @@ SOCK                                             *builtin-sock* *sock*
       `sock -t example.com -p 80 4`     connect over TCP
       `sock -U @shed.sock 5`            connect to an abstract socket
 
-  See also |redirect| for file-descriptor redirection.
+  See also |builtin-listen| and |builtin-accept| for the server side, and
+  |redirect| for file-descriptor redirection.
+
+==============================================================================
+LISTEN                                           *builtin-listen* *listen*
+
+  `listen -U {path} [fd]`
+  `listen -U @{name} [fd]`
+  `listen -t [host] -p {port} [fd]`
+  `listen {target} -v {var}`
+
+  Create a socket, bind it to an address, mark it passive (listening), and
+  install it on a file descriptor in the current shell. This is the
+  server-side counterpart to |sock|(builtin-sock): `listen` owns an address and
+  waits for connections, and |accept|(builtin-accept) pulls them off.
+
+  A listening descriptor is not itself readable or writable; it only
+  holds the address and its queue of pending connections. Use
+  |accept|(builtin-accept) to turn an incoming connection into a usable
+  descriptor, or to fork a handler for it.
+
+  Address forms (exactly one is required):
+
+  `-U {path}`        a filesystem Unix domain socket. The path is created
+                     on bind (see "Existing paths" below).
+  `-U @{name}`       a Linux/Android abstract-namespace socket. The
+                     leading `@` selects the abstract namespace, which has
+                     no filesystem entry. Not available on macOS.
+  `-t [host]`        bind a TCP socket. {host} is the bind address; omit it
+                     to listen on all interfaces. `--tcp` is a synonym.
+  `-p {port}`        the TCP port. Requires `-t`. `--port` is a synonym.
+
+  Target file descriptor:
+
+  If a numeric {fd} is given, the listening socket is bound to it. {fd}
+  must be less than 10; higher descriptors are reserved for the shell's
+  internal use.
+
+  If no {fd} is given, one is allocated automatically (>= 10):
+
+  `-v {var}`         store the descriptor number in {var}
+
+  With neither `-v` nor an explicit {fd}, the number is stored in
+  `$SHED_LISTEN`. When `-v` is given, {var} is always set.
+
+  The listening descriptor is left open across `exec` and is inherited by
+  the handlers `accept` forks. Close it to stop serving (`exec fd>&-`).
+
+  Existing paths (filesystem Unix sockets):
+
+  A filesystem socket leaves its path behind when the server exits, so a
+  restart finds a stale entry. `listen` resolves this before binding:
+
+      path does not exist ............ bind
+      exists, not a socket ........... error (the file is never removed)
+      exists, socket, still served ... error ("already in use")
+      exists, socket, no listener .... remove the stale socket and bind
+      `noclobber` set ................ error on any existing path
+
+  Whether a socket is live or stale is decided by probing it with a
+  connection: a live listener answers, a dead one is refused. A file that
+  is not a socket is never removed.
+
+  Examples:
+
+      `listen -U /run/app.sock 5`        listen on a Unix socket, using fd 5
+      `listen -t -p 8080 -v lfd`         listen on TCP :8080, store fd in $lfd
+      `listen -U @app.sock 6`            abstract-namespace socket, using fd 6
+
+  See also |builtin-accept| and |builtin-sock|.
+
+==============================================================================
+ACCEPT                                           *builtin-accept* *accept*
+
+  `accept {lfd} {fd}`               bind mode: install the connection on {fd}
+  `accept {lfd} -v {var}`           bind mode: auto-allocate the descriptor
+  `accept {lfd}`                    bind mode: auto-allocate into $SHED_ACCEPT
+  `accept {lfd} {handler ...}`      serve mode: fork a handler per connection
+
+  Pull one connection off a listening descriptor created by
+  |listen|(builtin-listen). `accept` does exactly one accept per call; the caller
+  supplies the loop.
+
+  {lfd} is a listening file descriptor. The argument after it selects the mode.
+
+  Bind mode:
+
+      Selected by a numeric argument that is less than 10, `-v {var}`, or no further
+      argument. The accepted connection is installed as an ordinary
+      descriptor in the current shell; read it with `<&fd`, write it with
+      `>&fd`, close it with `exec fd>&-`, exactly like a |sock|(builtin-sock)
+      connection. One client is handled at a time, in-process. With no
+      argument and no `-v`, the file descriptor number is stored in
+      `$SHED_ACCEPT`.
+
+  Serve mode:
+
+      Selected by any non-file-descriptor argument, which is taken as a
+      handler: an eval-string run once per connection in a forked child.
+      In the child the connection is wired to stdin and stdout (inetd
+      style), the listening descriptor is closed, and the handler runs;
+      its exit status becomes the child's. The parent closes its copy of
+      the connection and returns immediately, so handlers run
+      concurrently. Because the child is a fork of the shell, the handler
+      inherits every function and variable in scope.
+
+  Disambiguation: an argument that is all digits and < 10 is a descriptor
+  (bind mode); anything else is a handler (serve mode).
+
+  `accept` blocks until a connection arrives. While blocked it stays
+  responsive to signals and reaps finished serve-mode handlers, so a
+  `while` loop over `accept` interrupts cleanly and does not accumulate
+  zombie processes.
+
+  Examples:
+
+      Bind mode — handle one request in-process:
+
+          `listen -U /run/app.sock -v lfd`
+          `accept "$lfd" 4`              block, put the connection on fd 4
+          `read request <&4`
+          `printf 'ok\n' >&4`
+          `exec 4>&-`
+
+      Serve mode — fork-per-connection echo server:
+
+          `listen -U /run/echo.sock -v lfd`
+          `while true; do accept "$lfd" cat; done`
+
+      Serve mode — a shell function as a network service:
+
+          `handle() { read q; printf 'you said: %s\n' "$q"; }`
+          `while true; do accept "$lfd" handle; done`
+
+  See also |builtin-listen| and |builtin-sock|.
 
 ==============================================================================
 SOURCE                                           *builtin-source* *source*

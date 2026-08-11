@@ -104,6 +104,7 @@ register_builtins! {
   ":"        => Colon,
   "["        => test::Test,
   "[["       => test::Test,
+  "accept"   => sock::Accept,
   "alias"    => alias::Alias,
   "autocmd"  => autocmd::AutoCmdBuiltin,
   "bg"       => jobctl::Bg,
@@ -139,6 +140,7 @@ register_builtins! {
   "keymap"   => keymap::KeyMapBuiltin,
   "kill"     => jobctl::Kill,
   "let"      => Let,
+  "listen"   => sock::Listen,
   "local"    => varcmds::Local,
   "msg"      => msg::Msg,
   "pop"      => arrops::Pop,
@@ -363,7 +365,11 @@ pub(super) trait Builtin: Sync {
         let kind = e.kind_mut();
         let should_propagate = match kind {
           ShErrKind::CleanExit(_) | // this one always goes
-          ShErrKind::Raised(_, _) => true,
+          ShErrKind::Raised(_, _) |
+          // Ctrl+C: must bubble up to break loops / abort execution, not be
+          // swallowed into a status (else `while true; do <builtin>; done`
+          // can't be interrupted).
+          ShErrKind::Interrupt => true,
           ShErrKind::LoopBreak(_) | ShErrKind::LoopContinue(_) => {
             state::Shed::meta(MetaTab::in_loop)
           }

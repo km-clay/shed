@@ -1678,9 +1678,7 @@ impl Dispatcher {
 
         let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
         crate::signal::reset_signals(self.fg_job);
-        // This segment never execs, so close the downstream pipe read end it
-        // inherited — otherwise it holds the reader's side open and a writer
-        // that outpaces the pipe buffer deadlocks.
+
         if let Some(fd) = self.fork_close_fd {
           let _ = nix::unistd::close(fd);
         }
