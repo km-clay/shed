@@ -2,7 +2,10 @@ use std::{
   net::{TcpListener, TcpStream},
   os::{
     fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
-    unix::{fs::FileTypeExt, net::UnixStream},
+    unix::{
+      fs::FileTypeExt,
+      net::{UnixListener, UnixStream},
+    },
   },
   path::PathBuf,
 };
@@ -10,15 +13,12 @@ use std::{
 // The abstract namespace only exists on Linux-like platforms, so the address
 // types used to resolve it live behind the same gate as `connect_abstract`.
 #[cfg(linux_like)]
-use std::os::{
-  linux::net::SocketAddrExt,
-  unix::net::{SocketAddr, UnixListener},
-};
+use std::os::{linux::net::SocketAddrExt, unix::net::SocketAddr};
 
 use nix::{
   errno::Errno,
   libc,
-  sys::socket::{self, AddressFamily, SockFlag, SockType, accept4, connect, socket},
+  sys::socket::{self, AddressFamily, SockFlag, SockType, accept, connect, socket},
   unistd::{ForkResult, Pid},
 };
 
@@ -29,6 +29,24 @@ use crate::{
   state::vars::{VarFlags, VarKind, VarStr},
   util::{ShResultExt, with_status},
 };
+
+fn set_cloexec(fd: RawFd) {
+  unsafe {
+    let flags = libc::fcntl(fd, libc::F_GETFD);
+    if flags >= 0 {
+      libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+    }
+  }
+}
+
+fn set_nonblocking(fd: RawFd) {
+  unsafe {
+    let flags = libc::fcntl(fd, libc::F_GETFL);
+    if flags >= 0 {
+      libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+    }
+  }
+}
 
 #[cfg(linux_like)]
 fn connect_abstract(name: &str) -> ShResult<OwnedFd> {
@@ -56,7 +74,7 @@ fn bind_abstract(name: &str) -> ShResult<OwnedFd> {
 }
 
 #[cfg(not(linux_like))]
-fn bind_abstract(name: &str) -> ShResult<OwnedFd> {
+fn bind_abstract(_name: &str) -> ShResult<OwnedFd> {
   Err(sherr!(
     ExecFail,
     "Abstract sockets are not supported on this platform"
@@ -64,7 +82,7 @@ fn bind_abstract(name: &str) -> ShResult<OwnedFd> {
 }
 
 #[cfg(not(linux_like))]
-fn connect_abstract(name: &str) -> ShResult<OwnedFd> {
+fn connect_abstract(_name: &str) -> ShResult<OwnedFd> {
   Err(sherr!(
     ExecFail,
     "Abstract sockets are not supported on this platform"
@@ -132,10 +150,12 @@ impl UnixAddr {
     let probe = socket(
       AddressFamily::Unix,
       SockType::Stream,
-      SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
+      SockFlag::empty(),
       None,
     )
     .map_err(|e| sherr!(ExecFail, "socket() probe failed: {e}"))?;
+    set_nonblocking(probe.as_raw_fd());
+    set_cloexec(probe.as_raw_fd());
 
     let addr = socket::UnixAddr::new(p)
       .map_err(|e| sherr!(ExecFail, "Invalid Unix socket path '{}': {e}", p.display()))?;
@@ -388,8 +408,11 @@ impl super::Builtin for Accept {
 impl Accept {
   fn accept_conn(listen: RawFd) -> ShResult<OwnedFd> {
     let conn = loop {
-      match accept4(listen, SockFlag::SOCK_CLOEXEC) {
-        Ok(fd) => break fd,
+      match accept(listen) {
+        Ok(fd) => {
+          set_cloexec(fd);
+          break fd;
+        }
         Err(Errno::EINTR) => signal::check_signals()?,
         Err(e) => return Err(sherr!(ExecFail, "accept failed: {e}")),
       }
