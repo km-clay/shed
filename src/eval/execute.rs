@@ -637,6 +637,9 @@ impl Dispatcher {
       func_call.flags.remove(NdFlags::FORK_BUILTINS);
       return self.run_fork(&name, |s| {
         if let Err(e) = s.exec_func(&func_call) {
+          if let ShErrKind::CleanExit(code) = e.kind() {
+            lifecycle::exit_shed(true, *code);
+          }
           e.print_error();
         }
       });
@@ -805,6 +808,9 @@ impl Dispatcher {
       log::trace!("Forking compound command: {name}");
       self.run_fork(name, |s| {
         if let Err(e) = logic(s) {
+          if let ShErrKind::CleanExit(code) = e.kind() {
+            lifecycle::exit_shed(true, *code);
+          }
           e.print_error();
         }
       })?;
@@ -1327,6 +1333,9 @@ impl Dispatcher {
 
         self.run_fork(&name, |s| {
           if let Err(e) = s.dispatch_node(cmd) {
+            if let ShErrKind::CleanExit(code) = e.kind() {
+              lifecycle::exit_shed(true, *code);
+            }
             e.print_error();
           }
         })
