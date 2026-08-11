@@ -890,6 +890,7 @@ impl Dispatcher {
         .map(ToString::to_string)
         .unwrap_or_default();
 
+      Shed::set_status(0);
       'outer: for block in case_blocks {
         let CaseNode { patterns, body } = block;
 
@@ -2421,6 +2422,37 @@ mod tests {
     let g = TestGuard::new();
     test_input("case zab in [ab][ab]) echo hit ;; *) echo miss ;; esac").unwrap();
     assert_eq!(g.read_output(), "miss\n");
+  }
+
+  #[test]
+  fn case_empty_matched_arm_status_zero() {
+    // A matched arm that runs no command exits 0, not the prior status (#128).
+    let _g = TestGuard::new();
+    test_input("false; case a in a) ;; esac").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn case_no_match_status_zero() {
+    let _g = TestGuard::new();
+    test_input("false; case a in b) echo no ;; esac").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn case_word_expansion_status_does_not_leak() {
+    // The status of the word's own expansion must not become the case's status.
+    let _g = TestGuard::new();
+    test_input("case $(exit 7) in x) ;; esac").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn case_matched_arm_command_status_wins() {
+    // A matched arm that runs a command reports that command's status.
+    let _g = TestGuard::new();
+    test_input("true; case a in a) false ;; esac").unwrap();
+    assert_eq!(state::Shed::get_status(), 1);
   }
 
   #[test]
