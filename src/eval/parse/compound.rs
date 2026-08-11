@@ -193,7 +193,7 @@ impl ParseStream {
     let mut span: Option<Span> = None;
 
     let mut case_blocks: Vec<CaseNode> = vec![];
-    let redirs = vec![];
+    let mut redirs = vec![];
 
     extend_span!(span, self.next_tk().unwrap().span);
 
@@ -227,6 +227,7 @@ impl ParseStream {
     loop {
       if self.check_keyword("esac") {
         extend_span!(span, self.next_tk().unwrap().span);
+        self.parse_redir(&mut redirs, &mut span)?;
         self.assert_separator(&mut span)?;
         break;
       }
@@ -319,6 +320,7 @@ impl ParseStream {
 
       if self.check_keyword("esac") {
         extend_span!(span, self.next_tk().unwrap().span);
+        self.parse_redir(&mut redirs, &mut span)?;
         self.assert_separator(&mut span)?;
         break;
       }
