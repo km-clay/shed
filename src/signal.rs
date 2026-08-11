@@ -251,6 +251,11 @@ pub fn reset_signals(is_fg: bool) {
   }
 }
 
+pub fn clear_quit_latch() {
+  SHOULD_QUIT.store(false, Ordering::SeqCst);
+  SIGNALS.store(0, Ordering::SeqCst);
+}
+
 extern "C" fn handle_signal(sig: libc::c_int) {
   SIGNALS.fetch_or(1 << sig, Ordering::SeqCst);
 }

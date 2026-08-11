@@ -219,6 +219,8 @@ fn setup_panic_handler() {
 /// The return is an `ExitCode` constructed from the current value of [`signal::QUIT_CODE`]
 #[expect(clippy::cast_sign_loss)]
 pub(super) fn tear_down() -> ExitCode {
+  signal::clear_quit_latch();
+
   if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit))
     && let Err(e) = exec_nonint(trap, Some("trap".into()))
   {
@@ -246,6 +248,8 @@ pub(super) fn tear_down() -> ExitCode {
 }
 
 pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
+  signal::clear_quit_latch();
+
   if run_trap
     && let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit))
     && let Err(e) = exec_nonint(trap, Some("trap".into()))

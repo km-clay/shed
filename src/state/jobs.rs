@@ -15,7 +15,7 @@ use scopeguard::defer;
 use yansi::Color;
 
 use crate::{
-  shopt,
+  shopt, signal,
   state::vars::{VarStr, VarStrSliceExt},
   varstr,
 };
@@ -574,6 +574,10 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
     enable_reaping();
   }
   let statuses = Shed::jobs_mut(|j| j.new_fg(job))?;
+  if signal::signals_pending() {
+    signal::check_signals()?;
+  }
+
   let mut code = 0;
   let pipefail = shopt!(set.pipefail);
 
