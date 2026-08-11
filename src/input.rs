@@ -3,20 +3,16 @@
 
 use std::{path::Path, sync::atomic::Ordering};
 
-use nix::unistd::{Pid, isatty};
+use nix::unistd::isatty;
 
-use crate::{
-  eval::execute::exec_int,
-  procio::{bytes_to_string, read_input},
-};
+use crate::procio::{bytes_to_string, read_input};
 
 use super::{
   ShResult, Shed, errln,
   eval::execute::{exec_dash_c, exec_nonint},
   expand_keymap, interactive, lifecycle, procio, sherr,
   signal::QUIT_CODE,
-  state::{self, terminal::Terminal},
-  status_msg,
+  state, status_msg,
 };
 
 /// Dispatch input handling based on the given [`lifecycle::ShedArgs`]
@@ -118,15 +114,7 @@ pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult
     }
   });
 
-  let controller = Shed::term(Terminal::controller);
-
-  if let Some(pid) = controller
-    && pid == Pid::this()
-  {
-    exec_int(input.into(), Some(source_path.into()))
-  } else {
-    exec_nonint(input.into(), Some(source_path.into()))
-  }
+  exec_nonint(input.into(), Some(source_path.into()))
 }
 
 #[cfg(test)]
