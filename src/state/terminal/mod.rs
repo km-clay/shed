@@ -499,13 +499,20 @@ impl Terminal {
   }
 
   pub fn yield_terminal(&mut self, clear: bool) -> TermGuard {
-    let guard = TermGuard::new().with_scroll_region(self.scroll_region);
+    let guard = TermGuard::new()
+      .with_scroll_region(self.scroll_region)
+      .with_kitty_proto(self.kitty_kbd_proto);
     let action = if clear {
       Scroll::ResetRegion
     } else {
       Scroll::ResetRegionNoClear
     };
     self.execute_control(&TermCtl::Scroll(action)).ok();
+    if self.kitty_kbd_proto {
+      self
+        .execute_control(&TermCtl::SetAttr(Attr::KittyKbdProto(false.into())))
+        .ok();
+    }
     self.flush().ok(); // ensure the reset reaches the terminal before exec
     guard.activate()
   }

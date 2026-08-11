@@ -175,7 +175,7 @@ fn get_poll_timeout(readline: &mut ShedLine) -> ShedPollTimeout {
 fn interactive_setup(args: &lifecycle::ShedArgs) -> ShResult<TermGuard> {
   let raw_mode = Shed::term_mut(Terminal::setup_terminal)?;
 
-  sig_setup(args.login_shell);
+  sig_setup();
 
   MetaTab::ensure_meta_table()?;
   Shed::create_socket()?;
