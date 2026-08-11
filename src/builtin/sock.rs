@@ -1,4 +1,5 @@
 use std::{
+  io,
   net::{TcpListener, TcpStream},
   os::{
     fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
@@ -23,11 +24,12 @@ use nix::{
 };
 
 use crate::{
-  ShResult, Shed,
+  ShErrKind, ShResult, Shed,
   builtin::getopt::{Opt, OptSpec},
   eval, lifecycle, procio, sherr, shopt, signal,
   state::vars::{VarFlags, VarKind, VarStr},
-  util::{ShResultExt, with_status},
+  util::{ShErr, ShResultExt, with_status},
+  varstr,
 };
 
 fn set_cloexec(fd: RawFd) {
@@ -48,33 +50,54 @@ fn set_nonblocking(fd: RawFd) {
   }
 }
 
-#[cfg(linux_like)]
-fn connect_abstract(name: &str) -> ShResult<OwnedFd> {
-  // connect to abstract socket
-  let addr = SocketAddr::from_abstract_name(name.as_bytes())
-    .map_err(|e| sherr!(ExecFail, "Invalid abstract socket '@{name}': {e}"))?;
-  let stream = UnixStream::connect_addr(&addr).map_err(|e| {
-    sherr!(
-      ExecFail,
-      "Failed to connect to abstract socket '@{name}': {e}"
+/// Convert an `io::Error` into a `ShErr`
+///
+/// The returned `ShErr` contains a status code related to the reason for the connection failing.
+fn socket_error(op: &str, err: &io::Error) -> ShErr {
+  let coded = |title: &str, reason: &str, code: i32| -> ShErr {
+    ShErr::simple(
+      ShErrKind::Custom(title.into(), code),
+      varstr!("{op}: {reason}"),
     )
-  })?;
+  };
+
+  match err.kind() {
+    io::ErrorKind::NotFound => coded("Address not found", "address not found", 3),
+    io::ErrorKind::ConnectionRefused => coded("Connection refused", "connection refused", 4),
+    io::ErrorKind::AddrInUse => coded("Address in use", "address in use", 5),
+    io::ErrorKind::TimedOut => coded("Connection timed out", "connection timed out", 6),
+    io::ErrorKind::PermissionDenied => coded("Permission denied", "permission denied", 7),
+    io::ErrorKind::ConnectionReset => coded("Connection reset", "connection reset", 8),
+    io::ErrorKind::ConnectionAborted => coded("Connection aborted", "connection aborted", 9),
+
+    _ => match err.raw_os_error() {
+      Some(c) if c == libc::EBADF || c == libc::ENOTSOCK => {
+        coded("Bad file descriptor", "not a valid socket descriptor", 2)
+      }
+      _ => ShErr::simple(ShErrKind::ExecFail, varstr!("{op}: {err}")),
+    },
+  }
+}
+
+#[cfg(linux_like)]
+fn connect_abstract(name: &str) -> io::Result<OwnedFd> {
+  // connect to abstract socket
+  let addr = SocketAddr::from_abstract_name(name.as_bytes())?;
+  let stream = UnixStream::connect_addr(&addr)?;
 
   Ok(stream.into())
 }
 
 #[cfg(linux_like)]
-fn bind_abstract(name: &str) -> ShResult<OwnedFd> {
-  let addr = SocketAddr::from_abstract_name(name.as_bytes())
-    .map_err(|e| sherr!(ExecFail, "Invalid abstract socket '@{name}': {e}"))?;
-  let listener = UnixListener::bind_addr(&addr)
-    .map_err(|e| sherr!(ExecFail, "Failed to bind to abstract socket '@{name}': {e}"))?;
+fn bind_abstract(name: &str) -> io::Result<OwnedFd> {
+  let addr = SocketAddr::from_abstract_name(name.as_bytes())?;
+  let listener = UnixListener::bind_addr(&addr)?;
 
   Ok(listener.into())
 }
 
 #[cfg(not(linux_like))]
-fn bind_abstract(_name: &str) -> ShResult<OwnedFd> {
+fn bind_abstract(_name: &str) -> io::Result<OwnedFd> {
   Err(sherr!(
     ExecFail,
     "Abstract sockets are not supported on this platform"
@@ -82,7 +105,7 @@ fn bind_abstract(_name: &str) -> ShResult<OwnedFd> {
 }
 
 #[cfg(not(linux_like))]
-fn connect_abstract(_name: &str) -> ShResult<OwnedFd> {
+fn connect_abstract(_name: &str) -> io::Result<OwnedFd> {
   Err(sherr!(
     ExecFail,
     "Abstract sockets are not supported on this platform"
@@ -100,21 +123,19 @@ struct TcpSocket {
 }
 
 impl TcpSocket {
-  fn connect(self) -> ShResult<OwnedFd> {
+  fn connect(self) -> io::Result<OwnedFd> {
     let stream = match self.host {
-      TcpHost::Hostname(hostname) => TcpStream::connect((hostname.as_str(), self.port)),
-      TcpHost::IpAddr(ip)/*-----*/=> TcpStream::connect((ip, self.port))
-    }
-    .map_err(|e| sherr!(ExecFail, "Failed to connect to TCP socket: {e}"))?;
+      TcpHost::Hostname(hostname) => TcpStream::connect((hostname.as_str(), self.port))?,
+      TcpHost::IpAddr(ip)/*-----*/=> TcpStream::connect((ip, self.port))?
+    };
 
     Ok(stream.into())
   }
-  fn bind(self) -> ShResult<OwnedFd> {
+  fn bind(self) -> io::Result<OwnedFd> {
     let listener = match self.host {
-      TcpHost::Hostname(hostname) => TcpListener::bind((hostname.as_str(), self.port)),
-      TcpHost::IpAddr(ip)/*-----*/=> TcpListener::bind((ip, self.port))
-    }
-    .map_err(|e| sherr!(ExecFail, "Failed to bind TCP socket: {e}"))?;
+      TcpHost::Hostname(hostname) => TcpListener::bind((hostname.as_str(), self.port))?,
+      TcpHost::IpAddr(ip)/*-----*/=> TcpListener::bind((ip, self.port))?
+    };
 
     Ok(OwnedFd::from(listener))
   }
@@ -126,21 +147,13 @@ enum UnixAddr {
 }
 
 impl UnixAddr {
-  pub fn connect(self) -> ShResult<OwnedFd> {
+  pub fn connect(self) -> io::Result<OwnedFd> {
     match self {
       UnixAddr::Abstract(var_str) => connect_abstract(&var_str),
-      UnixAddr::Path(path_buf) => UnixStream::connect(&path_buf)
-        .map_err(|e| {
-          sherr!(
-            ExecFail,
-            "Failed to connect to Unix socket '{}': {e}",
-            path_buf.display()
-          )
-        })
-        .map(OwnedFd::from),
+      UnixAddr::Path(path_buf) => UnixStream::connect(&path_buf).map(OwnedFd::from),
     }
   }
-  fn poke(&self) -> ShResult<bool> {
+  fn poke(&self) -> io::Result<bool> {
     // let's check if this path is a live socket or not
     // true = "yes this socket exists and is being used"
     let Self::Path(p) = self else {
@@ -152,29 +165,21 @@ impl UnixAddr {
       SockType::Stream,
       SockFlag::empty(),
       None,
-    )
-    .map_err(|e| sherr!(ExecFail, "socket() probe failed: {e}"))?;
+    )?;
     set_nonblocking(probe.as_raw_fd());
     set_cloexec(probe.as_raw_fd());
 
-    let addr = socket::UnixAddr::new(p)
-      .map_err(|e| sherr!(ExecFail, "Invalid Unix socket path '{}': {e}", p.display()))?;
+    let addr = socket::UnixAddr::new(p)?;
 
     let poke_result = match connect(probe.as_raw_fd(), &addr) {
       Ok(()) | Err(Errno::EAGAIN | Errno::EINPROGRESS) => true,
       Err(Errno::ECONNREFUSED | Errno::ENOENT) => false,
-      Err(e) => {
-        return Err(sherr!(
-          ExecFail,
-          "Failed to probe Unix socket '{}': {e}",
-          p.display()
-        ));
-      }
+      Err(e) => return Err(io::Error::from_raw_os_error(e as i32)),
     };
 
     Ok(poke_result)
   }
-  pub fn bind(self) -> ShResult<OwnedFd> {
+  pub fn bind(self) -> io::Result<OwnedFd> {
     match self {
       UnixAddr::Abstract(var_str) => bind_abstract(&var_str),
       UnixAddr::Path(ref path_buf) => {
@@ -186,55 +191,45 @@ impl UnixAddr {
         match std::fs::symlink_metadata(path_buf) {
           Err(e) if e.kind() == std::io::ErrorKind::NotFound => { /* free to bind */ }
           Err(e) => {
-            return Err(sherr!(
-              ExecFail,
-              "Failed to stat Unix socket '{}': {e}",
-              path_buf.display()
+            return Err(io::Error::other(
+              varstr!("Failed to stat Unix socket '{}': {e}", path_buf.display()).as_str(),
             ));
           }
           Ok(_) if shopt!(set.noclobber) => {
-            return Err(sherr!(
-              ExecFail,
-              "Cannot bind to Unix socket '{}': already exists and noclobber is set",
-              path_buf.display()
+            return Err(io::Error::other(
+              varstr!(
+                "Cannot bind to Unix socket '{}': already exists and noclobber is set",
+                path_buf.display()
+              )
+              .as_str(),
             ));
           }
           Ok(m) if !m.file_type().is_socket() => {
-            return Err(sherr!(
-              ExecFail,
-              "Cannot bind to Unix socket '{}': path exists and is not a socket",
-              path_buf.display()
+            return Err(io::Error::other(
+              varstr!(
+                "Cannot bind to Unix socket '{}': path exists and is not a socket",
+                path_buf.display()
+              )
+              .as_str(),
             ));
           }
           Ok(_) if self.poke()? => {
-            return Err(sherr!(
-              ExecFail,
-              "Cannot bind to Unix socket '{}': already in use",
-              path_buf.display()
+            return Err(io::Error::other(
+              varstr!(
+                "Cannot bind to Unix socket '{}': already in use",
+                path_buf.display()
+              )
+              .as_str(),
             ));
           }
           Ok(_) => {
             // if we are here, we can remove it
-            std::fs::remove_file(path_buf).map_err(|e| {
-              sherr!(
-                ExecFail,
-                "Failed to remove existing Unix socket '{}': {e}",
-                path_buf.display()
-              )
-            })?;
+            std::fs::remove_file(path_buf)?;
           }
         }
 
         // now bind
-        UnixListener::bind(path_buf)
-          .map_err(|e| {
-            sherr!(
-              ExecFail,
-              "Failed to bind to Unix socket '{}': {e}",
-              path_buf.display()
-            )
-          })
-          .map(OwnedFd::from)
+        UnixListener::bind(path_buf).map(OwnedFd::from)
       }
     }
   }
@@ -414,7 +409,12 @@ impl Accept {
           break fd;
         }
         Err(Errno::EINTR) => signal::check_signals()?,
-        Err(e) => return Err(sherr!(ExecFail, "accept failed: {e}")),
+        Err(e) => {
+          return Err(socket_error(
+            "accept failed",
+            &io::Error::from_raw_os_error(e as i32),
+          ));
+        }
       }
     };
     Ok(unsafe { OwnedFd::from_raw_fd(conn) })
@@ -498,8 +498,14 @@ impl super::Builtin for Listen {
     };
 
     let listen = match target {
-      SockTarget::Tcp(tcp_socket) => tcp_socket.bind().promote_err(args.cmd_span())?,
-      SockTarget::Unix(unix_addr) => unix_addr.bind().promote_err(args.cmd_span())?,
+      SockTarget::Tcp(tcp_socket) => tcp_socket
+        .bind()
+        .map_err(|e| socket_error("failed to bind TCP socket", &e))
+        .promote_err(args.cmd_span())?,
+      SockTarget::Unix(unix_addr) => unix_addr
+        .bind()
+        .map_err(|e| socket_error("failed to bind Unix socket", &e))
+        .promote_err(args.cmd_span())?,
     };
 
     install_socket_fd(
@@ -557,8 +563,14 @@ impl super::Builtin for Sock {
     };
 
     let stream = match target {
-      SockTarget::Tcp(tcp_socket) => tcp_socket.connect().promote_err(args.cmd_span())?,
-      SockTarget::Unix(unix_addr) => unix_addr.connect().promote_err(args.cmd_span())?,
+      SockTarget::Tcp(tcp_socket) => tcp_socket
+        .connect()
+        .map_err(|e| socket_error("failed to connect to TCP socket", &e))
+        .promote_err(args.cmd_span())?,
+      SockTarget::Unix(unix_addr) => unix_addr
+        .connect()
+        .map_err(|e| socket_error("failed to connect to Unix socket", &e))
+        .promote_err(args.cmd_span())?,
     };
 
     install_socket_fd(stream, target_fd.map(|fd| fd as RawFd), fd_var, "SHED_CONN")

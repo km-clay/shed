@@ -507,6 +507,7 @@ impl From<Errno> for ShErr {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ShErrKind {
   IoErr(std::io::ErrorKind),
+  Custom(VarStr, i32), // message, error code
   InvalidOpt,
   SyntaxErr,
   ParseErr,
@@ -552,6 +553,7 @@ impl Display for ShErrKind {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let output = match self {
       Self::IoErr(e) => &format!("I/O Error: {e}"),
+      Self::Custom(msg, _) => msg.as_str(),
       Self::InvalidOpt => "Invalid option",
       Self::ParseErr => "Parse Error",
       Self::InternalErr => "Internal Error",

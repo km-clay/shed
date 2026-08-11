@@ -384,14 +384,20 @@ pub(super) trait Builtin: Sync {
 
         if should_propagate {
           let status = match e.kind() {
-            ShErrKind::CleanExit(code) => *code,
+            ShErrKind::Custom(_, code) | ShErrKind::CleanExit(code) => *code,
             _ => 1,
           };
           Shed::set_status(status);
           Err(e.with_context(context.iter()))
         } else {
+          let status = if let ShErrKind::Custom(_, code) = e.kind() {
+            *code
+          } else {
+            1
+          };
+
           e.with_context(context.iter()).print_error();
-          with_status(1)
+          with_status(status)
         }
       }
     }

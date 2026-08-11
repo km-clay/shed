@@ -2138,6 +2138,20 @@ SOCK                                             *builtin-sock* *sock*
       `sock -t example.com -p 80 4`     connect over TCP
       `sock -U @shed.sock 5`            connect to an abstract socket
 
+  Exit status:
+
+  A failed connection exits with a code describing why, so callers can tell
+  "nothing is listening" apart from "no such address":
+
+  `0`   connected
+  `3`   address not found (no such host, or missing socket path)
+  `4`   connection refused (nothing is listening on the address)
+  `6`   connection timed out
+  `7`   permission denied
+  `8`   connection reset
+  `9`   connection aborted
+  `1`   any other failure, including usage errors
+
   See also |builtin-listen| and |builtin-accept| for the server side, and
   |redirect| for file-descriptor redirection.
 
@@ -2207,6 +2221,16 @@ LISTEN                                           *builtin-listen* *listen*
       `listen -t -p 8080 -v lfd`         listen on TCP :8080, store fd in $lfd
       `listen -U @app.sock 6`            abstract-namespace socket, using fd 6
 
+  Exit status:
+
+  A failed bind exits with a code describing why:
+
+  `0`   listening
+  `3`   address not found (a path component does not exist)
+  `5`   address already in use (a live listener already holds it)
+  `7`   permission denied
+  `1`   any other failure, including usage errors
+
   See also |builtin-accept| and |builtin-sock|.
 
 ==============================================================================
@@ -2271,6 +2295,21 @@ ACCEPT                                           *builtin-accept* *accept*
 
           `handle() { read q; printf 'you said: %s\n' "$q"; }`
           `while true; do accept "$lfd" handle; done`
+
+  Exit status:
+
+  `accept` reports the accept-side failures, not the connect-side ones, a
+  refused or not-found status belongs to |sock|(builtin-sock), not here:
+
+  `0`   a connection was accepted (bind mode) or forked to a handler (serve mode)
+  `2`   {lfd} is not a valid open socket
+  `7`   permission denied
+  `8`   connection reset
+  `9`   connection aborted
+  `1`   any other failure, including usage errors
+
+  A signal that interrupts the blocking wait (e.g. `SIGTERM`) is handled
+  normally and does not map to any of these codes.
 
   See also |builtin-listen| and |builtin-sock|.
 

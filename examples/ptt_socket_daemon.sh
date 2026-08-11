@@ -23,7 +23,18 @@ if [ -n "$1" ]; then
     key_down|key_up|toggle_mode)
       # We have received a valid request.
       # Let's open a connection to the socket file and write the request to it.
-      sock -U "$SOCK" 3 || { echo "ptt daemon not running" >&2; exit 1; }
+      sock -U "$SOCK" 3
+
+      # sock reports distinct statuses for distinct connect failures, which
+      # lets us tell "daemon never started" apart from "daemon crashed and left
+      # a stale socket behind".
+      case $? in
+        0) ;; # connected
+        3) echo "ptt daemon not running (no socket at $SOCK)" >&2; exit 1 ;;
+        4) echo "ptt daemon not running (stale socket, nothing listening)" >&2; exit 1 ;;
+        7) echo "permission denied opening $SOCK" >&2; exit 1 ;;
+        *) echo "could not reach ptt daemon" >&2; exit 1 ;;
+      esac
 
       # sock has now opened a client-side connection to the socket on fd 3.
       # now we can redirect to fd 3 to write to it.
@@ -87,7 +98,8 @@ on_release() {
 serve_one() {
   # accept will block until a connection is opened
   # with `-v conn`, the connection will be stored in `$conn`
-  accept "$1" -v conn || return
+  accept "$1" -v conn 2>/dev/null || return
+
   defer exec "$conn">&- # defer closing the connection, ensuring cleanup
 
   # handle the request
@@ -110,6 +122,9 @@ serve_one() {
         ;;
     esac
   done <&"$conn" # the while loop reads from the socket
+
+  # the only time this function returns non-zero is if accept fails
+  return 0
 }
 
 # open the lock file on fd 9
@@ -125,4 +140,19 @@ resting
 listen -U "$SOCK" -v lfd
 defer rm -f "$SOCK" # defer removing the socket file on exit
 
-while true; do serve_one "$lfd"; done # loop forever, serving requests
+while true; do
+  if serve_one "$lfd"; then
+    continue
+  fi
+
+  # if we are here, accept failed for some reason.
+  case $? in
+    2) reason="listen socket is no longer valid" ;;
+    7) reason="permission denied" ;;
+    8) reason="connection reset" ;;
+    9) reason="connection aborted" ;;
+    *) reason="unknown error" ;;
+  esac
+  printf 'failed to accept connection: %s\n' "$reason" >&2
+  exit 1
+done # loop forever, serving requests
