@@ -220,7 +220,7 @@ pub fn install_signal_handlers() {
   }
 }
 
-pub fn sig_setup(is_login: bool) {
+pub fn sig_setup() {
   install_signal_handlers();
 
   let flags = SaFlags::empty();
@@ -231,10 +231,8 @@ pub fn sig_setup(is_login: bool) {
     sigaction(Signal::SIGTTOU, &ignore).unwrap();
   }
 
-  if is_login {
-    let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
-    take_term().ok();
-  }
+  let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
+  take_term().ok();
 }
 
 /// Reset signal dispositions to `SIG_DFL`.
