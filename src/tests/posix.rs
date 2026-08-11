@@ -715,6 +715,12 @@ mod params_and_vars_2_5 {
       pos_at_empty         : "echo a$@b"                           => "ab\n";
       pos_star_empty       : "echo a$*b"                           => "ab\n";
       pos_at_quoted_empty  : r#"for x in "$@"; do echo hit; done"# => "";
+      // `"$*"` is always a single field — empty when there are no params — so
+      // unlike `"$@"` it survives quoting as one empty field (issue #127).
+      pos_star_quoted_empty_one_field : r#"for x in "$*"; do echo hit; done"#     => "hit\n";
+      pos_star_quoted_empty_dash_n    : r#"[ -n "$*" ]; echo $?"#                 => "1\n";
+      pos_star_quoted_empty_argc      : r#"f() { echo "$#"; }; f "$*""#           => "1\n";
+      pos_at_quoted_empty_argc        : r#"f() { echo "$#"; }; f "$@""#           => "0\n";
     }
   }
 

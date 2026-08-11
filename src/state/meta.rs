@@ -506,7 +506,7 @@ impl Pattern {
     // something like *foo*b[aA]r*b?z or something
     // let regex figure it out
     if count_unescaped(pattern, "*") > 2 || has_any_unescaped(pattern, &["?", "[", "{"]) {
-      return Self::Regex(glob_to_regex(pattern, false).into());
+      return Self::Regex(glob_to_regex(pattern, true).into());
     }
 
     let strip_glob_escapes = |s: &str| -> String {

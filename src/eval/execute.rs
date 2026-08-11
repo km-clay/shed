@@ -2404,6 +2404,26 @@ mod tests {
   }
 
   #[test]
+  fn case_question_matches_exactly_one_char() {
+    // `?` is one character, not one-or-more, and the pattern matches the whole
+    // string — not a substring (issue #129).
+    let g = TestGuard::new();
+    test_input("case ab in ?) echo 1 ;; ??) echo 2 ;; ???) echo 3 ;; esac").unwrap();
+    assert_eq!(g.read_output(), "2\n");
+  }
+
+  #[test]
+  fn case_glob_is_anchored_not_substring() {
+    // A `?`/`[...]` pattern must match the whole word, not appear inside it.
+    let g = TestGuard::new();
+    test_input("case xabcy in a?c) echo hit ;; *) echo miss ;; esac").unwrap();
+    assert_eq!(g.read_output(), "miss\n");
+    let g = TestGuard::new();
+    test_input("case zab in [ab][ab]) echo hit ;; *) echo miss ;; esac").unwrap();
+    assert_eq!(g.read_output(), "miss\n");
+  }
+
+  #[test]
   fn case_multiple_paren_wrapped_arms() {
     let g = TestGuard::new();
     test_input("case mid in (first) echo a ;; (mid) echo b ;; (*) echo c ;; esac").unwrap();
