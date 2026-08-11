@@ -195,7 +195,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>, allow_side_effects: bool) -> 
       let parameter = ch.encode_utf8(&mut buf);
       let val = var!(parameter);
 
-      if (ch == '@' || ch == '*') && val.is_empty() {
+      if ch == '@' && val.is_empty() {
         let mut buf = [0u8; 4];
         return Ok(VarStr::from(markers::NULL_EXPAND.encode_utf8(&mut buf)));
       }
