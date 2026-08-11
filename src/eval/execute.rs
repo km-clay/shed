@@ -938,6 +938,7 @@ impl Dispatcher {
       };
       let CondNode { cond, body } = cond_node;
       let _guard = shared_scope_guard();
+      let mut last_body_status = 0;
       'outer: loop {
         if let Err(e) = s.dispatch_node(cond) {
           Shed::set_status(1);
@@ -966,8 +967,9 @@ impl Dispatcher {
               _ => return Err(e),
             }
           }
+          last_body_status = Shed::get_status();
         } else {
-          Shed::set_status(0);
+          Shed::set_status(last_body_status);
           break;
         }
       }
@@ -1000,6 +1002,7 @@ impl Dispatcher {
         s.dispatch_node(init_node)?;
       }
 
+      let mut last_body_status = 0;
       'outer: loop {
         if let Some(cond_node) = cond {
           if let Err(e) = s.dispatch_node(cond_node) {
@@ -1008,7 +1011,7 @@ impl Dispatcher {
           }
           let status = Shed::get_status();
           if status != 0 {
-            Shed::set_status(0);
+            Shed::set_status(last_body_status);
             break;
           }
         }
@@ -1034,6 +1037,7 @@ impl Dispatcher {
             _ => return Err(e),
           }
         }
+        last_body_status = Shed::get_status();
 
         if let Some(step_node) = step
           && let Err(e) = s.dispatch_node(step_node)
@@ -2192,12 +2196,36 @@ mod tests {
   }
 
   #[test]
+  fn until_body_status_propagates() {
+    let _g = TestGuard::new();
+    // Same POSIX rule as `while`: the loop's status is the last body's.
+    test_input("X=0; until [[ $X -ge 1 ]]; do X=$((X+1)); false; done").unwrap();
+    assert_eq!(state::Shed::get_status(), 1);
+  }
+
+  #[test]
+  fn for_arith_body_status_propagates() {
+    let _g = TestGuard::new();
+    // C-style `for` reports the last body's status, captured before the step
+    // expression (which would otherwise overwrite `$?`).
+    test_input("for ((i = 0; i < 2; i++)); do false; done").unwrap();
+    assert_eq!(state::Shed::get_status(), 1);
+  }
+
+  #[test]
+  fn for_arith_empty_body_status_zero() {
+    let _g = TestGuard::new();
+    test_input("for ((i = 0; i < 0; i++)); do false; done").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
   fn while_body_status_propagates() {
     let _g = TestGuard::new();
     test_input("X=0; while [[ $X -lt 1 ]]; do X=$((X+1)); false; done").unwrap();
-    // Loop body ended with `false` (status 1), but the loop itself
-    // completed normally when the condition failed, so status should be 0
-    assert_eq!(state::Shed::get_status(), 0);
+    // POSIX §2.9.4: the loop's status is that of the last body executed. The
+    // body ended with `false`, so the loop's status is 1 (matches bash/dash).
+    assert_eq!(state::Shed::get_status(), 1);
   }
 
   // ===================== pipeline `exit` stage =====================
