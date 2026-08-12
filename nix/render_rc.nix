@@ -66,9 +66,9 @@ in
       "shopt core.bell_enabled=${boolToString cfg.shopts.core.bell_enabled}"
       "shopt core.max_recurse_depth=${toString cfg.shopts.core.max_recurse_depth}"
       "shopt core.xpg_echo=${boolToString cfg.shopts.core.xpg_echo}"
-      "shopt core.bell_style='${cfg.shopts.core.bell_style}'"
       "shopt core.compact_errors=${boolToString cfg.shopts.core.compact_errors}"
       "shopt core.max_read_limit=${toString cfg.shopts.core.max_read_limit}"
+      "shopt core.pipeline_style='${cfg.shopts.core.pipeline_style}'"
 
       "shopt history.auto_save=${boolToString cfg.shopts.history.auto_save}"
       "shopt history.ignore_dupes=${boolToString cfg.shopts.history.ignore_dupes}"

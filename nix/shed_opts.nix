@@ -246,11 +246,6 @@
                   default = false;
                   description = "Whether to have the 'echo' builtin expand escape sequences like \\n and \\t (if false, it will print them verbatim)";
                 };
-                bell_style = lib.mkOption {
-                  type = lib.types.enum ["audible" "visible" "both"];
-                  default = "audible";
-                  description = "Whether the terminal bell is audible, visible, or both";
-                };
                 compact_errors = lib.mkOption {
                   type = lib.types.bool;
                   default = false;
@@ -260,6 +255,11 @@
                   type = lib.types.either lib.types.int lib.types.str;
                   default = "1gib";
                   description = "Caps the bytes a command substitution or in-process pipeline will buffer before its output is truncated. Accepts a raw byte count or a human-readable size like \"512mb\" or \"1gib\". On truncation, $? is set to 122.";
+                };
+                pipeline_style = lib.mkOption {
+                  type = lib.types.enum ["last" "tail" "all"];
+                  default = "all";
+                  description = "How pipeline stages run relative to the current shell. \"last\": only the final stage runs in-process (earlier stages fork), so variables set in the last stage persist (like bash's lastpipe). \"tail\": the whole trailing run of builtin-only stages runs in-process, enabling fork-free pipelines. \"all\": every stage forks into its own subshell for full POSIX isolation.";
                 };
               };
             };

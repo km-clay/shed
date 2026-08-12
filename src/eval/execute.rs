@@ -7,6 +7,7 @@ use crate::{
   state::{
     Shed,
     logic::AutoloadKind,
+    shopt,
     vars::{VarStr, VarStrSliceExt},
   },
   util::isolation_guard,
@@ -1251,14 +1252,30 @@ impl Dispatcher {
 
     let mut spans = vec![];
 
-    // trailing builtins that we don't need to fork
-    let tail_start = match cmds
-      .iter_mut()
-      .rev()
-      .position(|n| !node_has_only_builtins(n))
-    {
-      Some(pos) => cmds.len() - pos,
-      None => 0,
+    // calculate when we should stop forking, based on `core.pipeline_style`
+    // tail -> the longest tail sequence of builtins executes in-process
+    // last -> the last command executes in-process if it is a builtin
+    // all -> every command forks, no matter what
+    let tail_start = match shopt!(core.pipeline_style) {
+      shopt::PipeStyle::All => num_cmds,
+      style @ (shopt::PipeStyle::Last | shopt::PipeStyle::Tail) => {
+        // start of the trailing run of builtin-only stages
+        let builtin_tail = match cmds
+          .iter_mut()
+          .rev()
+          .position(|n| !node_has_only_builtins(n))
+        {
+          Some(pos) => num_cmds - pos,
+          None => 0,
+        };
+
+        if matches!(style, shopt::PipeStyle::Last) {
+          // keep only the last stage in-process (or all-fork if it isn't a builtin)
+          builtin_tail.max(num_cmds - 1)
+        } else {
+          builtin_tail
+        }
+      }
     };
 
     let pipes = PipeGenerator::new((tail_start + 1).min(num_cmds));

@@ -1987,6 +1987,10 @@ SHOPT                                            *builtin-shopt* *shopt*
     `max_read_limit`        byte cap for |command-sub|(script-command-sub) & |pipeline|(script-pipelines) output
     `max_recurse_depth`     max recursive function call depth
     `xpg_echo`              make `echo` expand escapes by default
+    `pipeline_style`        which pipeline stages run in-process: `last`, `tail`, or `all`
+                            `last` -> the last command in a pipeline will not fork if it is a builtin
+                            `tail` -> any run of trailing builtins in a pipeline will not fork
+                            `all`  -> commands in a pipeline will always fork a new process
 
   History options (`history.*`) ~
 

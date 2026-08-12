@@ -112,7 +112,9 @@ mod msg_tests {
     // blanks kept, content lopped off). Only trailing newlines should go.
     let _g = TestGuard::new();
     drain_all();
-    test_input("printf '\\n\\nhello\\n' | msg").unwrap();
+    // `msg`'s side effect (posting to the status queue) only reaches the parent
+    // when the final pipeline stage runs in-process; the default `all` forks it.
+    test_input("shopt core.pipeline_style=last; printf '\\n\\nhello\\n' | msg").unwrap();
     assert_eq!(Shed::pop_status_msg().as_deref(), Some("\n\nhello"));
   }
 

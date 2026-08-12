@@ -65,8 +65,9 @@ _shopt_comp() {
       bell_enabled
       max_recurse_depth
       xpg_echo
-      bell_style
       compact_errors
+      max_read_limit
+      pipeline_style
     )
     local core_desc=(
       "glob patterns match on hidden files"
@@ -76,8 +77,9 @@ _shopt_comp() {
       "allows the shell to ring the terminal's bell"
       "maximum depth of nested function calls"
       "whether or not 'echo' expands escape sequences by default"
-      "whether shed sends an audible bell, a visual one, or 'both'"
       "collapse error stack traces to a single call-site label"
+      "byte cap for command substitution / pipeline output before truncation"
+      "how pipeline stages run: 'last', 'tail', or 'all'"
     )
     local history=(
       auto_save
