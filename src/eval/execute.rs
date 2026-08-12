@@ -1538,6 +1538,19 @@ impl Dispatcher {
     };
 
     if let AssignBehavior::Set = assign_behavior {
+      if cmd.flags.contains(NdFlags::FORK_BUILTINS) {
+        let mut child = cmd.clone();
+        child.flags.remove(NdFlags::FORK_BUILTINS);
+        return self.run_fork("", move |s| {
+          if let Err(e) = s.exec_cmd(&child) {
+            if let ShErrKind::CleanExit(code) = e.kind() {
+              lifecycle::exit_shed(true, *code);
+            }
+            e.print_error();
+          }
+        });
+      }
+
       // argv is empty: a command with no command word. Perform any assignments
       // in the current shell, then apply any redirections.
       if !assignments.is_empty() {
