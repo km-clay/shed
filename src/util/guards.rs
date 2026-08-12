@@ -1,7 +1,15 @@
 use nix::sys::stat;
 use scopeguard::guard;
 
-use crate::{HashSet, state::vars::VarStr, try_var, util, var};
+use crate::{
+  HashSet,
+  eval::{NdRule, Node},
+  state::{
+    util,
+    vars::{Var, VarStr},
+  },
+  try_var, util as crate_util, var,
+};
 
 use super::{
   super::state::scopes::ScopeStack,
@@ -18,7 +26,7 @@ use super::{
 fn guard_drop(_: ()) {
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
 
-  util::with_saved_status(|| {
+  crate_util::with_saved_status(|| {
     while let Some(cmd) = deferred.pop() {
       let mut dispatcher = Dispatcher::new(vec![cmd], "defer".into());
       if let Err(e) = dispatcher.begin_dispatch() {
@@ -118,6 +126,41 @@ pub fn var_ctx_guard(
     Shed::vars_mut(|v| {
       for var in &vars {
         v.unset_var(var).ok();
+      }
+    });
+  })
+}
+
+/// Snapshot and restore the variables used in prefix assignment
+pub fn prefix_assign_guard(assignments: &[Node]) -> impl Drop {
+  let saved: Vec<(String, Option<Var>)> = assignments
+    .iter()
+    .filter_map(|a| match &a.class {
+      NdRule::Assignment { var, .. } => {
+        let raw = var.span.as_str();
+        // An indexed assignment (`arr[i]=v`) touches the whole array variable,
+        // so snapshot/restore under the base name.
+        let name = util::parse_arr_bracket(raw)
+          .map_or_else(|| raw.to_string(), |(base, _)| base.to_string());
+        Some(name)
+      }
+      _ => None,
+    })
+    .map(|name| {
+      let prior = Shed::vars(|v| v.try_get_var_meta(&name));
+      (name, prior)
+    })
+    .collect();
+
+  guard(saved, |saved| {
+    Shed::vars_mut(|v| {
+      for (name, prior) in saved {
+        // Clear first so the re-set starts from a clean slate (`set_var` ORs
+        // flags onto an existing entry) and the export/envp bookkeeping runs.
+        v.unset_var(&name).ok();
+        if let Some(var) = prior {
+          v.set_var(&name, var.kind().clone(), var.flags()).ok();
+        }
       }
     });
   })

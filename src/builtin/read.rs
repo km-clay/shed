@@ -42,7 +42,7 @@ fn stdin_has_data() -> bool {
     return has;
   }
   let mut nbytes: nix::libc::c_int = 0;
-  unsafe { fionread(stdin_fileno().as_raw_fd(), &mut nbytes) }.is_ok() && nbytes > 0
+  unsafe { fionread(stdin_fileno().as_raw_fd(), &raw mut nbytes) }.is_ok() && nbytes > 0
 }
 
 bitflags! {

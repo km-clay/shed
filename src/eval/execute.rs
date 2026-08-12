@@ -55,8 +55,8 @@ use super::{
   },
   try_var,
   util::{
-    self, ShErr, ShErrKind, ShResult, ShResultExt, scope_guard, shared_scope_guard, var_ctx_guard,
-    with_status,
+    self, ShErr, ShErrKind, ShResult, ShResultExt, prefix_assign_guard, scope_guard,
+    shared_scope_guard, with_status,
   },
   var,
 };
@@ -712,8 +712,10 @@ impl Dispatcher {
       ));
     }
 
-    let env_vars = Self::set_assignments(assignments, AssignBehavior::Export)?;
-    let _var_guard = var_ctx_guard(env_vars.into_iter().collect());
+    // Prefix assignments on a function call (`X=2 f`) are temporary: snapshot
+    // the prior values first so they revert on return
+    let _var_guard = prefix_assign_guard(assignments);
+    Self::set_assignments(assignments, AssignBehavior::Export)?;
 
     let redirs = RedirSet::from(&func.redirs);
     let _guard = match redirs.try_apply(false) {

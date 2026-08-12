@@ -33,7 +33,7 @@ use super::{
   readline, sherr, shopt, signal,
   state::{self, Shed, jobs::ChildProc, meta::MetaTab, terminal::Terminal},
   status_msg, system_msg, try_var,
-  util::{self, ShErrKind, ShResult, var_ctx_guard, with_status},
+  util::{self, ShErrKind, ShResult, prefix_assign_guard, with_status},
   var,
 };
 
@@ -292,8 +292,11 @@ pub(super) trait Builtin: Sync {
       AssignBehavior::Export
     };
 
-    let vars = Dispatcher::set_assignments(assignments, assign_behavior)?;
-    let _var_guard = var_ctx_guard(vars.into_iter().collect());
+    // reverts any variable assignments made by the builtin if it is a special builtin
+    let _var_guard =
+      matches!(assign_behavior, AssignBehavior::Export).then(|| prefix_assign_guard(assignments));
+
+    Dispatcher::set_assignments(assignments, assign_behavior)?;
     let fork_builtins = node.flags.contains(NdFlags::FORK_BUILTINS);
 
     if argv.len() == 2 && argv[1].as_str() == "--help" {
