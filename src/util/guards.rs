@@ -35,15 +35,26 @@ fn guard_drop(_: ()) {
 /// The "global" namespace is still shared, but the 'ceiling' for new variables is set to the current scope,
 /// so that they are dropped on return.
 ///
-/// Additionally, stuff like 'umask' and 'PWD' are restored to their previous values on return
+/// Additionally, stuff like 'umask', 'PWD', and shell options are restored to
+/// their previous values on return
 pub fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let ceiling_guard = scope_ceiling_guard(args);
   let cwd_guard = cwd_guard();
   let umask_guard = umask_guard();
+  let shopt_guard = shopt_guard();
   scopeguard::guard((), move |()| {
+    drop(shopt_guard);
     drop(cwd_guard);
     drop(umask_guard);
     drop(ceiling_guard);
+  })
+}
+
+/// Snapshot the shell options, restoring them on drop.
+pub fn shopt_guard() -> impl Drop {
+  let saved = Shed::shopts(|o| o.clone());
+  guard(saved, |saved| {
+    Shed::shopts_mut(move |o| *o = saved);
   })
 }
 
