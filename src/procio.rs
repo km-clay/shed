@@ -944,6 +944,16 @@ impl Sinks {
     !self.input_sinks.is_empty()
   }
 
+  /// Whether the top input sink still has unread bytes. `None` if there is no
+  /// input sink frame (the caller should then check the real fd instead). Used
+  /// by `read -t 0` to poll for data without consuming it.
+  pub(crate) fn input_available(&self) -> Option<bool> {
+    self
+      .input_sinks
+      .last()
+      .map(|cur| (cur.buf.position() as usize) < cur.buf.get_ref().len())
+  }
+
   /// Drain whatever is left in the top input cursor (from its current position)
   /// so it can be handed to a forked child's fd 0. `None` if there is no input
   /// sink frame.

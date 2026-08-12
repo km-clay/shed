@@ -1,4 +1,8 @@
-use std::{io::Read as _, os::fd::BorrowedFd, time::Duration};
+use std::{
+  io::Read as _,
+  os::fd::{AsRawFd, BorrowedFd},
+  time::Duration,
+};
 
 use bitflags::bitflags;
 use nix::{
@@ -26,6 +30,20 @@ use super::{
 };
 
 const CHUNK_SIZE: usize = 4096; // 4kb
+
+// FIONREAD reports how many bytes are available to read on an fd. Unlike
+// `poll`, it distinguishes "data present" (n > 0) from "empty or EOF" (n == 0).
+nix::ioctl_read_bad!(fionread, nix::libc::FIONREAD, nix::libc::c_int);
+
+/// Whether stdin currently has data available, without consuming any. Used by
+/// `read -t 0` to poll non-destructively.
+fn stdin_has_data() -> bool {
+  if let Some(has) = Shed::sinks(|s| s.input_available()) {
+    return has;
+  }
+  let mut nbytes: nix::libc::c_int = 0;
+  unsafe { fionread(stdin_fileno().as_raw_fd(), &mut nbytes) }.is_ok() && nbytes > 0
+}
 
 bitflags! {
   pub struct ReadFlags: u32 {
@@ -96,6 +114,12 @@ impl super::Builtin for Read {
         "no-echo" => flags |= ReadFlags::NO_ECHO,
         _ => return Err(sherr!(ExecFail @ opt.span(), "unexpected flag '{opt}'")),
       }
+    }
+
+    // `read -t 0` polls without consuming or assigning: status 0 if input is
+    // available on stdin right now, non-zero otherwise (matches bash).
+    if timeout == Some(0) {
+      return with_status(i32::from(!stdin_has_data()));
     }
 
     if let Some(p) = prompt {
