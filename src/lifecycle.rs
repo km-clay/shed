@@ -20,7 +20,7 @@ use super::{
     vars::{VarFlags, VarKind},
   },
   status_msg, try_var,
-  util::flog,
+  util::{ShErrKind, flog},
 };
 
 #[expect(clippy::struct_excessive_bools)]
@@ -224,7 +224,11 @@ pub(super) fn tear_down() -> ExitCode {
   if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit))
     && let Err(e) = exec_nonint(trap, Some("trap".into()))
   {
-    e.print_error();
+    if let ShErrKind::CleanExit(code) = e.kind() {
+      signal::QUIT_CODE.store(*code, Ordering::SeqCst);
+    } else {
+      e.print_error();
+    }
   }
 
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
@@ -250,11 +254,16 @@ pub(super) fn tear_down() -> ExitCode {
 pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
   signal::clear_quit_latch();
 
+  let mut code = code;
   if run_trap
     && let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit))
     && let Err(e) = exec_nonint(trap, Some("trap".into()))
   {
-    e.print_error();
+    if let ShErrKind::CleanExit(trap_code) = e.kind() {
+      code = *trap_code;
+    } else {
+      e.print_error();
+    }
   }
 
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
