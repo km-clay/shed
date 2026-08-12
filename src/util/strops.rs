@@ -60,7 +60,75 @@ impl QuoteState {
 }
 
 pub(crate) fn compile_glob(s: &str) -> Result<glob::Pattern, glob::PatternError> {
-  glob::Pattern::new(&replace_posix_classes(s))
+  let replaced = replace_posix_classes(s);
+  match glob::Pattern::new(&replaced) {
+    Ok(pattern) => Ok(pattern),
+    // if we are here, we have an unclosed bracket in there
+    // so we've gotta escape it
+    Err(_) => glob::Pattern::new(&escape_stray_brackets(&replaced)),
+  }
+}
+
+/// Escapes unclosed bracket globs
+pub(crate) fn compile_glob_lenient(s: &str) -> glob::Pattern {
+  compile_glob(s).unwrap_or_else(|_| {
+    glob::Pattern::new(&glob::Pattern::escape(s)).expect("an escaped glob is always valid")
+  })
+}
+
+/// Escape any `[` that does not open a valid bracket expression
+fn escape_stray_brackets(s: &str) -> String {
+  let chars: Vec<char> = s.chars().collect();
+  let mut out = String::with_capacity(s.len());
+  let mut i = 0;
+  while i < chars.len() {
+    match chars[i] {
+      '\\' => {
+        out.push('\\');
+        if let Some(&next) = chars.get(i + 1) {
+          out.push(next);
+          i += 2;
+        } else {
+          i += 1;
+        }
+      }
+      '[' => {
+        if let Some(close) = valid_bracket_end(&chars, i) {
+          out.extend(&chars[i..=close]);
+          i = close + 1;
+        } else {
+          out.push_str("[[]");
+          i += 1;
+        }
+      }
+      c => {
+        out.push(c);
+        i += 1;
+      }
+    }
+  }
+  out
+}
+
+/// If a bracket expression opens at `open` (index of `[`), return the index of
+/// its closing `]`. Follows fnmatch rules: an initial `!`/`^` negates, and a `]`
+/// in the first position is a literal member rather than the terminator.
+fn valid_bracket_end(chars: &[char], open: usize) -> Option<usize> {
+  let mut j = open + 1;
+  if matches!(chars.get(j), Some('!' | '^')) {
+    j += 1;
+  }
+  if matches!(chars.get(j), Some(']')) {
+    j += 1;
+  }
+  while j < chars.len() {
+    match chars[j] {
+      '\\' => j += 2,
+      ']' => return Some(j),
+      _ => j += 1,
+    }
+  }
+  None
 }
 
 pub(crate) fn replace_posix_classes(s: &str) -> String {
