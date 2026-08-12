@@ -7,9 +7,13 @@ use crate::{
 pub(super) struct Width;
 impl super::Builtin for Width {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let input = self
-      .get_input_str(&mut args)
-      .map_or_else(|| super::join_raw_args(args.argv).0, VarStr::from);
+    let (arg_vec, _) = args.take_argv();
+    let input = if arg_vec.is_empty() {
+      self.get_input_str(&mut args)
+    } else {
+      None
+    }
+    .map_or_else(|| super::join_raw_args(arg_vec).0, VarStr::from);
 
     let width = calc_str_width(&input);
 

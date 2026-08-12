@@ -1,6 +1,8 @@
+use crate::opt;
+
 use super::{
   ShResult, Shed,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   outln, sherr,
   state::logic::{AutoCmd, AutoCmdKind},
   with_status,
@@ -9,18 +11,21 @@ use super::{
 pub(super) struct AutoCmdBuiltin;
 impl super::Builtin for AutoCmdBuiltin {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('c')]
+    vec![opt!("clear" | 'c')]
+  }
+  fn strict_opts(&self) -> bool {
+    true
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut clear = false;
-    for opt in args.opts {
-      match opt {
-        Opt::Short('c') => clear = true,
-        _ => return Err(sherr!(ExecFail, "unexpected option: {}", opt,)),
+    for opt in args.options() {
+      match opt.key() {
+        "clear" => clear = true,
+        _ => return Err(sherr!(ExecFail, "unexpected option: {opt}")),
       }
     }
 
-    let mut arg_vec = args.argv.into_iter();
+    let mut arg_vec = args.arguments();
 
     let Some((kind, kind_span)) = arg_vec.next() else {
       return display_autocmds(None);
@@ -28,7 +33,7 @@ impl super::Builtin for AutoCmdBuiltin {
 
     let Ok(autocmd_kind) = kind.parse::<AutoCmdKind>() else {
       return Err(sherr!(
-          ExecFail @ kind_span,
+          ExecFail @ kind_span.clone(),
           "invalid autocmd kind: {kind}",
       ));
     };

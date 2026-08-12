@@ -1,13 +1,13 @@
-use crate::{HashMap, util};
+use crate::{HashMap, opt, util};
 use std::fmt::Write;
 
 use yansi::Paint;
 
-use crate::{builtin::getopt::OptSpec, match_loop};
+use crate::match_loop;
 
 use super::{
   Shed,
-  getopt::Opt,
+  opt::OptSpec,
   sherr,
   util::{ShErr, ShErrKind, ShResult, ShResultExt},
 };
@@ -24,13 +24,12 @@ trait FlowCtl: super::Builtin {
   }
   fn exec_flow_ctl(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let code = args
-      .argv
-      .into_iter()
+      .arguments()
       .next()
       .map(|(st, sp)| {
         st.parse::<i32>().map_err(|_| {
           sherr!(
-            SyntaxErr @ sp,
+            SyntaxErr @ sp.clone(),
             "{}: Expected a number",
             self.cmd(),
           )
@@ -157,14 +156,11 @@ impl super::Builtin for Raise {
   fn is_special(&self) -> bool {
     true
   }
-  fn opts(&self) -> Vec<super::getopt::OptSpec> {
+  fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('c'),
-      OptSpec::single_arg("code"),
-      OptSpec::single_arg('k'),
-      OptSpec::single_arg("kind"),
-      OptSpec::single_arg('n'),
-      OptSpec::single_arg("note"),
+      opt!("code" | 'c', 1),
+      opt!("kind" | 'k', 1),
+      opt!("note" | 'n', 1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -173,52 +169,45 @@ impl super::Builtin for Raise {
     let mut notes = vec![];
     let span = args.cmd_span();
 
-    for opt in &args.opts {
-      match opt {
-        Opt::LongWithArg(name, arg) => match name.as_str() {
-          "code" => {
-            let Ok(code_arg) = arg.parse::<i32>() else {
-              return Err(sherr!(
-                  SyntaxErr @ args.span(),
-                  "Invalid exit code: expected a number, got '{arg}'",
-              ));
-            };
-            code = code_arg;
-          }
-          "kind" => {
-            kind = Some(arg.clone());
-          }
-          "note" => {
-            notes.push(arg.clone());
-          }
-          _ => {
+    for opt in args.options() {
+      match opt.key() {
+        "code" => {
+          let Some(c) = opt.value() else {
             return Err(sherr!(
-              SyntaxErr @ args.span(),
-              "Unknown option '--{name}'",
-            ));
-          }
-        },
-
-        Opt::ShortWithArg('k', kind_arg) => {
-          kind = Some(kind_arg.clone());
-        }
-
-        Opt::ShortWithArg('n', note_arg) => {
-          notes.push(note_arg.clone());
-        }
-
-        Opt::ShortWithArg('c', code_arg) => {
-          let Ok(code_arg) = code_arg.parse::<i32>() else {
-            return Err(sherr!(
-              SyntaxErr @ args.span(),
-              "Invalid exit code: expected a number, got '{code_arg}'",
+              SyntaxErr @ opt.span(),
+              "Option '--code' requires an argument",
             ));
           };
+          let Ok(code_arg) = c.parse::<i32>() else {
+            return Err(sherr!(
+              SyntaxErr @ opt.span(),
+              "Invalid exit code: expected a number, got '{code}'",
+            ));
+          };
+
           code = code_arg;
         }
-        opt => {
+        "kind" => {
+          let Some(k) = opt.value() else {
+            return Err(sherr!(
+              SyntaxErr @ opt.span(),
+              "Option '--kind' requires an argument",
+            ));
+          };
+          kind = Some(k.into());
+        }
+        "note" => {
+          let Some(n) = opt.value() else {
+            return Err(sherr!(
+              SyntaxErr @ opt.span(),
+              "Option '--note' requires an argument",
+            ));
+          };
+          notes.push(n.into());
+        }
+        _ => {
           return Err(sherr!(
-            SyntaxErr @ args.span(),
+            SyntaxErr @ opt.span(),
             "Unknown option '{opt}'"
           ));
         }
@@ -228,7 +217,7 @@ impl super::Builtin for Raise {
     let mut message_parts = vec![];
     let mut part = util::scratch_buf();
     let mut color_map: HashMap<u32, yansi::Color> = HashMap::default();
-    let mut arg_iter = args.argv.into_iter();
+    let mut arg_iter = args.arguments();
 
     while let Some((arg, span)) = arg_iter.next() {
       let mut chars = arg.chars().peekable();
@@ -261,7 +250,7 @@ impl super::Builtin for Raise {
 
               let Some((arg,_)) = arg_iter.next() else {
                 return Err(sherr!(
-                  SyntaxErr @ span,
+                  SyntaxErr @ span.clone(),
                   "missing format arg for '%{color_id}'",
                 ));
               };
@@ -273,7 +262,7 @@ impl super::Builtin for Raise {
             }
             _ => {
               return Err(sherr!(
-                SyntaxErr @ span,
+                SyntaxErr @ span.clone(),
                 "Invalid format specifier: '%{n_ch}'",
               ).with_note("'raise' only takes digits or '%' after '%'".into()).with_note("to include a literal '%', use '%%'".into()));
             }

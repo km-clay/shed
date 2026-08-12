@@ -2,7 +2,7 @@ use ariadne::Span;
 
 use super::{
   eval::lex::KEYWORDS,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   outln, sherr,
   state::{
     self, Shed,
@@ -16,16 +16,19 @@ use super::{
 pub(super) struct Type;
 impl super::Builtin for Type {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('s'), OptSpec::flag('t')]
+    vec![
+      OptSpec::new_short("short", 's'),
+      OptSpec::new_short("terse", 't'),
+    ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut status = 0;
-    let short = args.opts.contains(&Opt::Short('s'));
-    let terse = args.opts.contains(&Opt::Short('t'));
+    let short = args.options().any(|o| o.key() == "short");
+    let terse = args.options().any(|o| o.key() == "terse");
 
-    for (arg, span) in args.argv {
+    for (arg, span) in args.arguments() {
       if terse {
-        let word = if let Some(util) = state::util::which_util(&arg) {
+        let word = if let Some(util) = state::util::which_util(arg) {
           match util.kind() {
             UtilKind::Alias => Some("alias"),
             UtilKind::Function => Some("function"),
@@ -44,10 +47,10 @@ impl super::Builtin for Type {
         continue;
       }
 
-      if let Some(util) = state::util::which_util(&arg) {
+      if let Some(util) = state::util::which_util(arg) {
         match util.kind() {
           UtilKind::Alias => {
-            let alias = Shed::logic(|v| v.get_alias(&arg)).unwrap();
+            let alias = Shed::logic(|v| v.get_alias(arg)).unwrap();
             let (line, col) = alias.source().line_and_col();
             let name = alias.source().source().name();
             if short {
@@ -62,7 +65,7 @@ impl super::Builtin for Type {
             }
           }
           UtilKind::Function => {
-            let func = Shed::logic(|v| v.get_func(&arg)).unwrap();
+            let func = Shed::logic(|v| v.get_func(arg)).unwrap();
             match func {
               ShFunc::Autoload(src) => {
                 let (origin, location) = match &src {
@@ -136,7 +139,7 @@ impl super::Builtin for Type {
         }
       } else {
         sherr!(
-          NotFound @ span,
+          NotFound @ span.clone(),
           "'{arg}' is not a command, function, or alias",
         )
         .print_error();

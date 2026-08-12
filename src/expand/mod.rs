@@ -110,32 +110,6 @@ impl Tk {
       .promote_err(span.clone())?;
     Ok(exp)
   }
-  /// Like `expand()` but performs no word splitting. The resulting Tk has
-  /// `exp` as a single-element vec holding the unsplit expansion. For use
-  /// in contexts like assignment RHS where whitespace must be preserved.
-  pub fn expand_unsplit(&self) -> ShResult<Self> {
-    if let TkRule::Expanded { .. } = self.class {
-      return Ok(self.clone());
-    }
-    if self.is_literal() {
-      let raw = self.span.as_str().into();
-      let class = TkRule::Expanded { exp: [raw].into() };
-      return Ok(Self {
-        class,
-        ..self.clone()
-      });
-    }
-
-    let flags = self.flags;
-    let span = self.span.clone();
-    let exp: VarStr = Expander::new(self)
-      .no_split()
-      .expand_no_split()
-      .promote_err(span.clone())?;
-
-    let class = TkRule::Expanded { exp: [exp].into() };
-    Ok(Self { class, span, flags })
-  }
   /// Perform word splitting
   pub fn get_words(&self) -> Rc<[VarStr]> {
     match &self.class {

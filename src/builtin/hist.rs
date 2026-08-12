@@ -1,5 +1,6 @@
 use std::{
   cmp::Ordering,
+  convert::Into,
   path::PathBuf,
   sync::{Arc, Mutex},
   time::{Duration, UNIX_EPOCH},
@@ -8,11 +9,13 @@ use std::{
 use chrono::Utc;
 use chrono_english::{Dialect, Interval, parse_date_string};
 
-use crate::{HashSet, expand::shell_quote_fmt, state::vars::VarStr, status_msg};
+use crate::{
+  HashSet, builtin::opt::Opt, expand::shell_quote_fmt, opt, state::vars::VarStr, status_msg,
+};
 
 use super::{
   Shed, errln,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   readline::{HistEntry, History, import_history},
   sherr, state,
   util::{ShResult, ShResultExt, with_status},
@@ -275,100 +278,104 @@ impl HistQuery {
   pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut new = Self::new();
     let mut negated = false; // '--not' flag flips this for one argument
+    let value = |opt: &Opt| -> Option<VarStr> { opt.value().map(VarStr::from) };
 
     for opt in opts {
-      match opt {
-        Opt::LongWithArg(name, arg) => match name.as_str() {
-          "after" => new.after = (Some(arg.clone()), negated),
-          "before" => new.before = (Some(arg.clone()), negated),
-          "contains" => new.contains = (Some(arg.clone()), negated),
-          "starts-with" => new.starts_with = (Some(arg.clone()), negated),
-          "ends-with" => new.ends_with = (Some(arg.clone()), negated),
-          "matches" => new.matches = (Some(arg.clone()), negated),
-          "duration-gt" => new.duration_gt = (Some(arg.clone()), negated),
-          "duration-lt" => new.duration_lt = (Some(arg.clone()), negated),
-          "with-token" => new.with_token = (Some(arg.clone()), negated),
-          "with-status" => match arg.parse::<i32>() {
+      match opt.key() {
+        "after" => new.after = (value(opt), negated),
+        "before" => new.before = (value(opt), negated),
+        "contains" => new.contains = (value(opt), negated),
+        "starts-with" => new.starts_with = (value(opt), negated),
+        "ends-with" => new.ends_with = (value(opt), negated),
+        "matches" => new.matches = (value(opt), negated),
+        "duration-gt" => new.duration_gt = (value(opt), negated),
+        "duration-lt" => new.duration_lt = (value(opt), negated),
+        "with-token" => new.with_token = (value(opt), negated),
+        "with-status" => {
+          let Some(arg) = opt.value() else { continue };
+          match arg.parse::<i32>() {
             Ok(s) => new.with_status = (Some(s), negated),
             Err(e) => return Err(sherr!(ParseErr, "Invalid status code for {opt}: {e}")),
-          },
-          "in-dir" => {
-            // using canonicalize here allows args like "." to work
-            let dir = std::fs::canonicalize(arg)
-              .unwrap_or(arg.into())
-              .to_string_lossy()
-              .into();
-
-            new.in_dir = (Some(dir), negated);
           }
-          "limit" => new.limit = Some(arg.parse().unwrap_or(u64::MAX)),
-          opt @ ("lines-gt" | "lines-lt") => {
-            let is_gt = opt == "lines-gt";
-            let count = match arg.parse::<u64>() {
-              Ok(c) => c,
-              Err(e) => return Err(sherr!(ParseErr, "Invalid number for {opt}: {e}")),
-            };
-            if is_gt {
-              new.lines_gt = (Some(count), negated);
-            } else {
-              new.lines_lt = (Some(count), negated);
+        }
+        "in-dir" => {
+          // using canonicalize here allows args like "." to work
+          let Some(arg) = opt.value() else { continue };
+          let dir = std::fs::canonicalize(arg)
+            .unwrap_or(arg.into())
+            .to_string_lossy()
+            .into();
+
+          new.in_dir = (Some(dir), negated);
+        }
+        "limit" => {
+          let Some(arg) = opt.value() else { continue };
+          new.limit = Some(arg.parse().unwrap_or(u64::MAX));
+        }
+        opt_key @ ("lines-gt" | "lines-lt") => {
+          let is_gt = opt_key == "lines-gt";
+          let Some(arg) = opt.value() else { continue };
+          let count = match arg.parse::<u64>() {
+            Ok(c) => c,
+            Err(e) => return Err(sherr!(ParseErr, "Invalid number for {opt}: {e}")),
+          };
+          if is_gt {
+            new.lines_gt = (Some(count), negated);
+          } else {
+            new.lines_lt = (Some(count), negated);
+          }
+        }
+        "import" => {
+          let Some(arg) = opt.value() else { continue };
+          let path = match arg {
+            "bash" => {
+              let Some(home) = state::util::get_home() else {
+                return Err(sherr!(
+                  ParseErr,
+                  "Cannot use {opt} without a valid home directory"
+                ));
+              };
+              home.join(".bash_history")
             }
-          }
-          "import" => {
-            let path = match arg.as_str() {
-              "bash" => {
-                let Some(home) = state::util::get_home() else {
-                  return Err(sherr!(
-                    ParseErr,
-                    "Cannot use {opt} without a valid home directory"
-                  ));
-                };
-                home.join(".bash_history")
-              }
-              "zsh" => {
-                let Some(home) = state::util::get_home() else {
-                  return Err(sherr!(
-                    ParseErr,
-                    "Cannot use {opt} without a valid home directory"
-                  ));
-                };
-                home.join(".zsh_history")
-              }
-              "fish" => {
-                let Some(home) = state::util::get_home() else {
-                  return Err(sherr!(
-                    ParseErr,
-                    "Cannot use {opt} without a valid home directory"
-                  ));
-                };
-                let data_dir = dirs::data_dir()
-                  .unwrap_or_else(|| PathBuf::from(format!("{}/.local/share", home.display())));
-                data_dir.join("fish").join("fish_history")
-              }
-              _ => PathBuf::from(arg),
-            };
+            "zsh" => {
+              let Some(home) = state::util::get_home() else {
+                return Err(sherr!(
+                  ParseErr,
+                  "Cannot use {opt} without a valid home directory"
+                ));
+              };
+              home.join(".zsh_history")
+            }
+            "fish" => {
+              let Some(home) = state::util::get_home() else {
+                return Err(sherr!(
+                  ParseErr,
+                  "Cannot use {opt} without a valid home directory"
+                ));
+              };
+              let data_dir = dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from(format!("{}/.local/share", home.display())));
+              data_dir.join("fish").join("fish_history")
+            }
+            _ => PathBuf::from(arg),
+          };
 
-            new.import = Some(path.to_string_lossy().into());
-          }
-          _ => {}
-        },
-        Opt::Long(name) => match name.as_str() {
-          "not" => {
-            negated = !negated;
-            continue;
-          }
-          "ex" => new.ex_hist = true,
-          "count" => new.count = true,
-          "delete" => new.delete = true,
-          "restore" => new.restore = true,
-          "json" => new.json = true,
-          "quoted" => new.quoted = true,
-          "no-dupes" => new.no_dupes = true,
-          "pull" => new.pull = true,
-          _ => {}
-        },
-        Opt::Short('n') => new.no_numbers = true,
-        Opt::Short('r') => new.reverse = true,
+          new.import = Some(path.to_string_lossy().into());
+        }
+        "not" => {
+          negated = !negated;
+          continue;
+        }
+        "ex" => new.ex_hist = true,
+        "count" => new.count = true,
+        "delete" => new.delete = true,
+        "restore" => new.restore = true,
+        "json" => new.json = true,
+        "quoted" => new.quoted = true,
+        "no-dupes" => new.no_dupes = true,
+        "pull" => new.pull = true,
+        "no-numbers" => new.no_numbers = true,
+        "reverse" => new.reverse = true,
         _ => {
           return Err(sherr!(ParseErr, "Unknown option for history: {opt}"));
         }
@@ -489,37 +496,38 @@ pub(super) struct Hist;
 impl super::Builtin for Hist {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag("delete"),
-      OptSpec::flag("ex"),
-      OptSpec::flag("restore"),
-      OptSpec::flag("count"),
-      OptSpec::flag("not"),
-      OptSpec::flag("json"),
-      OptSpec::flag("quoted"),
-      OptSpec::flag("no-dupes"),
-      OptSpec::flag("pull"),
-      OptSpec::flag('n'),
-      OptSpec::flag('r'),
-      OptSpec::single_arg("after"),
-      OptSpec::single_arg("lines-gt"),
-      OptSpec::single_arg("lines-lt"),
-      OptSpec::single_arg("before"),
-      OptSpec::single_arg("ends-with"),
-      OptSpec::single_arg("contains"),
-      OptSpec::single_arg("starts-with"),
-      OptSpec::single_arg("matches"),
-      OptSpec::single_arg("duration-gt"),
-      OptSpec::single_arg("duration-lt"),
-      OptSpec::single_arg("with-status"),
-      OptSpec::single_arg("with-token"),
-      OptSpec::single_arg("in-dir"),
-      OptSpec::single_arg("limit"),
-      OptSpec::single_arg("import"),
+      OptSpec::new_short("no-numbers", 'n'),
+      OptSpec::new_short("reverse", 'r'),
+      opt!("delete"),
+      opt!("ex"),
+      opt!("restore"),
+      opt!("count"),
+      opt!("not"),
+      opt!("json"),
+      opt!("quoted"),
+      opt!("no-dupes"),
+      opt!("pull"),
+      opt!("after", 1),
+      opt!("lines-gt", 1),
+      opt!("lines-lt", 1),
+      opt!("before", 1),
+      opt!("ends-with", 1),
+      opt!("contains", 1),
+      opt!("starts-with", 1),
+      opt!("matches", 1),
+      opt!("duration-gt", 1),
+      opt!("duration-lt", 1),
+      opt!("with-status", 1),
+      opt!("with-token", 1),
+      opt!("in-dir", 1),
+      opt!("limit", 1),
+      opt!("import", 1),
     ]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
-    let mut query = HistQuery::from_opts(&args.opts).promote_err(span.clone())?;
+    let (arg_vec, opts) = args.take_argv();
+    let mut query = HistQuery::from_opts(&opts).promote_err(span.clone())?;
     let table = if query.ex_hist {
       "ex_history"
     } else {
@@ -541,10 +549,10 @@ impl super::Builtin for Hist {
       History::attach(Arc::new(Mutex::new(conn)), table)
     };
 
-    for (arg, span) in args.argv {
+    for (arg, span) in arg_vec {
       let Ok(id) = arg.parse::<i64>() else {
         Shed::set_status(2);
-        return Err(sherr!(ParseErr, "Invalid command ID: {arg}").promote(span));
+        return Err(sherr!(ParseErr @ span.clone(), "Invalid command ID: {arg}"));
       };
       query.specific_ids.push(id);
     }
@@ -609,49 +617,49 @@ mod tests {
     HistQuery::from_opts(opts).expect("from_opts should succeed")
   }
 
-  // ─── LongWithArg → field assignments ─────────────────────────────────
+  // ─── Options with an argument → field assignments ────────────────────
 
   #[test]
   fn opts_after() {
-    let q = parse(&[Opt::LongWithArg("after".into(), "yesterday".into())]);
+    let q = parse(&[Opt::for_test("after", &["yesterday"])]);
     assert_eq!(q.after, (Some("yesterday".into()), false));
   }
 
   #[test]
   fn opts_before() {
-    let q = parse(&[Opt::LongWithArg("before".into(), "tomorrow".into())]);
+    let q = parse(&[Opt::for_test("before", &["tomorrow"])]);
     assert_eq!(q.before, (Some("tomorrow".into()), false));
   }
 
   #[test]
   fn opts_contains() {
-    let q = parse(&[Opt::LongWithArg("contains".into(), "grep".into())]);
+    let q = parse(&[Opt::for_test("contains", &["grep"])]);
     assert_eq!(q.contains, (Some("grep".into()), false));
   }
 
   #[test]
   fn opts_starts_with() {
-    let q = parse(&[Opt::LongWithArg("starts-with".into(), "git".into())]);
+    let q = parse(&[Opt::for_test("starts-with", &["git"])]);
     assert_eq!(q.starts_with, (Some("git".into()), false));
   }
 
   #[test]
   fn opts_ends_with() {
-    let q = parse(&[Opt::LongWithArg("ends-with".into(), ".log".into())]);
+    let q = parse(&[Opt::for_test("ends-with", &[".log"])]);
     assert_eq!(q.ends_with, (Some(".log".into()), false));
   }
 
   #[test]
   fn opts_matches_regex() {
-    let q = parse(&[Opt::LongWithArg("matches".into(), "^cargo".into())]);
+    let q = parse(&[Opt::for_test("matches", &["^cargo"])]);
     assert_eq!(q.matches, (Some("^cargo".into()), false));
   }
 
   #[test]
   fn opts_duration_gt_lt() {
     let q = parse(&[
-      Opt::LongWithArg("duration-gt".into(), "1s".into()),
-      Opt::LongWithArg("duration-lt".into(), "1h".into()),
+      Opt::for_test("duration-gt", &["1s"]),
+      Opt::for_test("duration-lt", &["1h"]),
     ]);
     assert_eq!(q.duration_gt, (Some("1s".into()), false));
     assert_eq!(q.duration_lt, (Some("1h".into()), false));
@@ -659,28 +667,27 @@ mod tests {
 
   #[test]
   fn opts_with_token() {
-    let q = parse(&[Opt::LongWithArg("with-token".into(), "abcd-1234".into())]);
+    let q = parse(&[Opt::for_test("with-token", &["abcd-1234"])]);
     assert_eq!(q.with_token, (Some("abcd-1234".into()), false));
   }
 
   #[test]
   fn opts_with_status_parses_integer() {
-    let q = parse(&[Opt::LongWithArg("with-status".into(), "127".into())]);
+    let q = parse(&[Opt::for_test("with-status", &["127"])]);
     assert_eq!(q.with_status, (Some(127), false));
   }
 
   #[test]
   fn opts_with_status_invalid_errors() {
-    let result =
-      HistQuery::from_opts(&[Opt::LongWithArg("with-status".into(), "notanumber".into())]);
+    let result = HistQuery::from_opts(&[Opt::for_test("with-status", &["notanumber"])]);
     assert!(result.is_err());
   }
 
   #[test]
   fn opts_lines_gt_lt() {
     let q = parse(&[
-      Opt::LongWithArg("lines-gt".into(), "5".into()),
-      Opt::LongWithArg("lines-lt".into(), "20".into()),
+      Opt::for_test("lines-gt", &["5"]),
+      Opt::for_test("lines-lt", &["20"]),
     ]);
     assert_eq!(q.lines_gt, (Some(5), false));
     assert_eq!(q.lines_lt, (Some(20), false));
@@ -688,20 +695,20 @@ mod tests {
 
   #[test]
   fn opts_lines_gt_invalid_errors() {
-    let result = HistQuery::from_opts(&[Opt::LongWithArg("lines-gt".into(), "abc".into())]);
+    let result = HistQuery::from_opts(&[Opt::for_test("lines-gt", &["abc"])]);
     assert!(result.is_err());
   }
 
   #[test]
   fn opts_limit() {
-    let q = parse(&[Opt::LongWithArg("limit".into(), "50".into())]);
+    let q = parse(&[Opt::for_test("limit", &["50"])]);
     assert_eq!(q.limit, Some(50));
   }
 
   #[test]
   fn opts_limit_invalid_falls_back_to_max() {
-    // The code uses unwrap_or(usize::MAX) for limit specifically.
-    let q = parse(&[Opt::LongWithArg("limit".into(), "abc".into())]);
+    // The code uses unwrap_or(u64::MAX) for limit specifically.
+    let q = parse(&[Opt::for_test("limit", &["abc"])]);
     assert_eq!(q.limit, Some(u64::MAX));
   }
 
@@ -709,9 +716,9 @@ mod tests {
   fn opts_in_dir_uses_arg_when_not_canonicalizable() {
     let _g = TestGuard::new();
     // A clearly non-existent path falls back to the literal arg.
-    let q = parse(&[Opt::LongWithArg(
-      "in-dir".into(),
-      "/definitely/not/a/real/dir/xyz123".into(),
+    let q = parse(&[Opt::for_test(
+      "in-dir",
+      &["/definitely/not/a/real/dir/xyz123"],
     )]);
     assert_eq!(
       q.in_dir,
@@ -719,41 +726,41 @@ mod tests {
     );
   }
 
-  // ─── Long (no arg) → bool flags ──────────────────────────────────────
+  // ─── Flags (no arg) → bool ───────────────────────────────────────────
 
   #[test]
   fn opts_ex_hist_flag() {
-    let q = parse(&[Opt::Long("ex".into())]);
+    let q = parse(&[Opt::for_test("ex", &[])]);
     assert!(q.ex_hist);
   }
 
   #[test]
   fn opts_count_flag() {
-    let q = parse(&[Opt::Long("count".into())]);
+    let q = parse(&[Opt::for_test("count", &[])]);
     assert!(q.count);
   }
 
   #[test]
   fn opts_delete_flag() {
-    let q = parse(&[Opt::Long("delete".into())]);
+    let q = parse(&[Opt::for_test("delete", &[])]);
     assert!(q.delete);
   }
 
   #[test]
   fn opts_restore_flag() {
-    let q = parse(&[Opt::Long("restore".into())]);
+    let q = parse(&[Opt::for_test("restore", &[])]);
     assert!(q.restore);
   }
 
   #[test]
   fn opts_json_flag() {
-    let q = parse(&[Opt::Long("json".into())]);
+    let q = parse(&[Opt::for_test("json", &[])]);
     assert!(q.json);
   }
 
   #[test]
   fn opts_pull_flag() {
-    let q = parse(&[Opt::Long("pull".into())]);
+    let q = parse(&[Opt::for_test("pull", &[])]);
     assert!(q.pull);
   }
 
@@ -761,13 +768,15 @@ mod tests {
 
   #[test]
   fn opts_short_n_disables_numbers() {
-    let q = parse(&[Opt::Short('n')]);
+    // `-n` resolves to the "no-numbers" key.
+    let q = parse(&[Opt::for_test("no-numbers", &[])]);
     assert!(q.no_numbers);
   }
 
   #[test]
   fn opts_short_r_reverses() {
-    let q = parse(&[Opt::Short('r')]);
+    // `-r` resolves to the "reverse" key.
+    let q = parse(&[Opt::for_test("reverse", &[])]);
     assert!(q.reverse);
   }
 
@@ -776,8 +785,8 @@ mod tests {
   #[test]
   fn opts_not_flips_polarity_for_next_arg() {
     let q = parse(&[
-      Opt::Long("not".into()),
-      Opt::LongWithArg("contains".into(), "rm -rf".into()),
+      Opt::for_test("not", &[]),
+      Opt::for_test("contains", &["rm -rf"]),
     ]);
     assert_eq!(q.contains, (Some("rm -rf".into()), true));
   }
@@ -785,9 +794,9 @@ mod tests {
   #[test]
   fn opts_not_only_applies_to_next_arg_then_resets() {
     let q = parse(&[
-      Opt::Long("not".into()),
-      Opt::LongWithArg("contains".into(), "danger".into()),
-      Opt::LongWithArg("after".into(), "yesterday".into()),
+      Opt::for_test("not", &[]),
+      Opt::for_test("contains", &["danger"]),
+      Opt::for_test("after", &["yesterday"]),
     ]);
     assert_eq!(q.contains, (Some("danger".into()), true));
     // 'after' should NOT be negated — polarity reset after 'contains'.
@@ -797,9 +806,9 @@ mod tests {
   #[test]
   fn opts_double_not_cancels_polarity() {
     let q = parse(&[
-      Opt::Long("not".into()),
-      Opt::Long("not".into()),
-      Opt::LongWithArg("contains".into(), "x".into()),
+      Opt::for_test("not", &[]),
+      Opt::for_test("not", &[]),
+      Opt::for_test("contains", &["x"]),
     ]);
     assert_eq!(q.contains, (Some("x".into()), false));
   }
@@ -815,7 +824,7 @@ mod tests {
   fn opts_import_bash_resolves_to_home_bash_history() {
     let _g = TestGuard::new();
     set_shed_home("/tmp/some_home");
-    let q = parse(&[Opt::LongWithArg("import".into(), "bash".into())]);
+    let q = parse(&[Opt::for_test("import", &["bash"])]);
     assert_eq!(q.import.as_deref(), Some("/tmp/some_home/.bash_history"));
   }
 
@@ -823,36 +832,32 @@ mod tests {
   fn opts_import_zsh_resolves_to_home_zsh_history() {
     let _g = TestGuard::new();
     set_shed_home("/tmp/some_home");
-    let q = parse(&[Opt::LongWithArg("import".into(), "zsh".into())]);
+    let q = parse(&[Opt::for_test("import", &["zsh"])]);
     assert_eq!(q.import.as_deref(), Some("/tmp/some_home/.zsh_history"));
   }
 
   #[test]
   fn opts_import_arbitrary_path_passed_through() {
     let _g = TestGuard::new();
-    let q = parse(&[Opt::LongWithArg(
-      "import".into(),
-      "/etc/some.history".into(),
-    )]);
+    let q = parse(&[Opt::for_test("import", &["/etc/some.history"])]);
     assert_eq!(q.import.as_deref(), Some("/etc/some.history"));
   }
 
   // ─── Unknown / error handling ────────────────────────────────────────
+  //
+  // In practice only recognized keys reach `from_opts` (the option parser
+  // filters the rest), but the catch-all arm defensively errors on anything
+  // it doesn't recognize.
 
   #[test]
-  fn opts_unknown_long_silently_ignored() {
-    // Unknown long opts fall through `_ => {}` — they don't error.
-    let q = parse(&[Opt::LongWithArg("totally-made-up".into(), "x".into())]);
-    // No fields should have been set by this unknown opt.
-    assert_eq!(q.after, (None, false));
-    assert_eq!(q.before, (None, false));
+  fn opts_unknown_long_errors() {
+    let result = HistQuery::from_opts(&[Opt::for_test("totally-made-up", &["x"])]);
+    assert!(result.is_err());
   }
 
   #[test]
   fn opts_unknown_short_errors() {
-    // The catch-all arm at the bottom of the match returns an error for
-    // anything that doesn't fit the recognized Opt shapes.
-    let result = HistQuery::from_opts(&[Opt::ShortWithArg('x', "val".into())]);
+    let result = HistQuery::from_opts(&[Opt::for_test("x", &["val"])]);
     assert!(result.is_err());
   }
 
@@ -861,12 +866,12 @@ mod tests {
   #[test]
   fn opts_multiple_fields_compose() {
     let q = parse(&[
-      Opt::Short('r'),
-      Opt::Long("json".into()),
-      Opt::LongWithArg("contains".into(), "cargo".into()),
-      Opt::LongWithArg("limit".into(), "10".into()),
-      Opt::Long("not".into()),
-      Opt::LongWithArg("in-dir".into(), "/nonexistent/zzz".into()),
+      Opt::for_test("reverse", &[]),
+      Opt::for_test("json", &[]),
+      Opt::for_test("contains", &["cargo"]),
+      Opt::for_test("limit", &["10"]),
+      Opt::for_test("not", &[]),
+      Opt::for_test("in-dir", &["/nonexistent/zzz"]),
     ]);
     assert!(q.reverse);
     assert!(q.json);

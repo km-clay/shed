@@ -1,8 +1,8 @@
-use crate::builtin::getopt::OptSpec;
+use crate::opt;
 
 use super::{
   ShResult, Shed,
-  getopt::Opt,
+  opt::OptSpec,
   outln, sherr,
   state::vars::{display_as_var, display_as_vars},
   varcmds::split_assignment_raw,
@@ -19,11 +19,11 @@ impl super::Builtin for Alias {
       return with_status(0);
     }
 
-    for (arg, span) in args.argv {
-      let (name, value) = split_assignment_raw(&arg);
+    for (arg, span) in args.arguments() {
+      let (name, value) = split_assignment_raw(arg);
       if name == "command" || name == "builtin" {
         return Err(sherr!(
-          ExecFail @ span,
+          ExecFail @ span.clone(),
           "Cannot assign alias to reserved name '{name}'"
         ));
       }
@@ -34,7 +34,7 @@ impl super::Builtin for Alias {
         outln!("{}", display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(
-          SyntaxErr @ span,
+          SyntaxErr @ span.clone(),
           "Unknown alias '{name}'",
         ));
       }
@@ -54,14 +54,14 @@ impl super::Builtin for Unalias {
       return with_status(0);
     }
 
-    for (arg, span) in args.argv {
-      if Shed::logic(|l| l.get_alias(&arg)).is_none() {
+    for (arg, span) in args.arguments() {
+      if Shed::logic(|l| l.get_alias(arg)).is_none() {
         return Err(sherr!(
-          SyntaxErr @ span,
+          SyntaxErr @ span.clone(),
           "unalias: alias '{arg}' not found",
         ));
       }
-      Shed::logic_mut(|l| l.remove_alias(&arg));
+      Shed::logic_mut(|l| l.remove_alias(arg));
     }
 
     with_status(0)
@@ -71,7 +71,10 @@ impl super::Builtin for Unalias {
 pub(super) struct ExCmd;
 impl super::Builtin for ExCmd {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('r'), OptSpec::flag("remove")]
+    vec![opt!("remove" | 'r')]
+  }
+  fn strict_opts(&self) -> bool {
+    true
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
@@ -83,16 +86,14 @@ impl super::Builtin for ExCmd {
 
     let mut remove = false;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('r') => remove = true,
-        Opt::Long(arg) if arg == "remove" => remove = true,
-        _ => {}
+    for opt in args.options() {
+      if opt.key() == "remove" {
+        remove = true
       }
     }
 
-    for (arg, span) in args.argv {
-      let (name, value) = split_assignment_raw(&arg);
+    for (arg, span) in args.arguments() {
+      let (name, value) = split_assignment_raw(arg);
 
       if !remove && let Some(value) = value {
         Shed::logic_mut(|l| l.insert_ex_alias(name, value, span.clone()));
@@ -104,7 +105,7 @@ impl super::Builtin for ExCmd {
         }
       } else {
         return Err(sherr!(
-          SyntaxErr @ span,
+          SyntaxErr @ span.clone(),
           "Unknown ex command alias '{name}'",
         ));
       }

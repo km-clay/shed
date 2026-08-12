@@ -3,7 +3,7 @@ use crate::{state::vars::VarStr, varstr};
 use super::{
   super::state::shopt::ShOpts,
   Shed,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   outln, sherr,
   util::{ShResult, ShResultExt, with_status},
 };
@@ -16,12 +16,13 @@ const DEPRECATED_SHOPTS: &[(&str, &str)] =
 pub(super) struct Shopt;
 impl super::Builtin for Shopt {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('h')]
+    vec![OptSpec::new_short("print-help", 'h')]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let print_help = args.opts.contains(&Opt::Short('h'));
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, opts) = args.take_argv();
+    let print_help = opts.iter().any(|o| o.key() == "print-help");
 
-    if args.argv.is_empty() {
+    if arg_vec.is_empty() {
       let output = Shed::shopts_mut(ShOpts::display_opts)?;
 
       outln!("{}", prefix_sourceable(&output));
@@ -29,7 +30,7 @@ impl super::Builtin for Shopt {
       return with_status(0);
     }
 
-    for (mut arg, span) in args.argv {
+    for (mut arg, span) in arg_vec {
       // Split into key + optional value so the deprecation check works
       // for both `shopt key` and `shopt key=value`.
       let (key, value) = match arg.split_once('=') {

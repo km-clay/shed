@@ -1,6 +1,6 @@
 use super::{
   ShResult,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   outln,
   state::{
     shopt::ShoptSource,
@@ -17,14 +17,14 @@ pub struct GenRc;
 impl super::Builtin for GenRc {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('s'), // shopts
-      OptSpec::flag('a'), // alias
-      OptSpec::flag('k'), // keymaps
-      OptSpec::flag('A'), // autocmds
-      OptSpec::flag('f'), // functions
-      OptSpec::flag('c'), // completions
-      OptSpec::flag("default"),
-      OptSpec::flag("no-comments"),
+      OptSpec::new_short("shopts", 's'),
+      OptSpec::new_short("alias", 'a'),
+      OptSpec::new_short("keymaps", 'k'),
+      OptSpec::new_short("autocmds", 'A'),
+      OptSpec::new_short("functions", 'f'),
+      OptSpec::new_short("completions", 'c'),
+      OptSpec::new_long("default"),
+      OptSpec::new_long("no-comments"),
     ]
   }
 
@@ -45,34 +45,34 @@ impl super::Builtin for GenRc {
     let mut want_completions = false;
     let mut any_section_flag = false;
 
-    for opt in args.opts {
-      match opt {
-        Opt::Short('s') => {
+    for opt in args.options() {
+      match opt.key() {
+        "shopt" => {
           want_shopts = true;
           any_section_flag = true;
         }
-        Opt::Short('a') => {
+        "alias" => {
           want_aliases = true;
           any_section_flag = true;
         }
-        Opt::Short('k') => {
+        "keymaps" => {
           want_keymaps = true;
           any_section_flag = true;
         }
-        Opt::Short('A') => {
+        "autocmds" => {
           want_autocmds = true;
           any_section_flag = true;
         }
-        Opt::Short('f') => {
+        "functions" => {
           want_functions = true;
           any_section_flag = true;
         }
-        Opt::Short('c') => {
+        "completions" => {
           want_completions = true;
           any_section_flag = true;
         }
-        Opt::Long(name) if name == "default" => use_defaults = true,
-        Opt::Long(name) if name == "no-comments" => no_comments = true,
+        "default" => use_defaults = true,
+        "no-comments" => no_comments = true,
         _ => {}
       }
     }

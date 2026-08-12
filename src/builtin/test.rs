@@ -370,9 +370,12 @@ impl super::Builtin for Test {
     cmd_span: Span,
     argv: &[Tk],
     no_split: bool,
-  ) -> ShResult<(super::ArgVector, Vec<super::Opt>)> {
+  ) -> ShResult<super::opt::Parsed> {
     let span = argv.get_span().unwrap();
-    let argv = prepare_argv_with(argv, no_split).promote_err(cmd_span)?;
+    let argv = prepare_argv_with(argv, no_split)
+      .promote_err(cmd_span)?
+      .into_iter()
+      .collect::<Vec<_>>();
     let opener = argv
       .first()
       .map(|(s, _)| s.as_str())
@@ -394,19 +397,19 @@ impl super::Builtin for Test {
         }
       }
     }
-    Ok((argv, vec![]))
+    Ok(argv.into())
   }
 
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let cmd_span = args.cmd_span();
     let cmd = cmd_span.as_str();
     let extended = cmd == "[[";
-    let mut argv = args.argv;
-    if (cmd == "[" || cmd == "[[") && !argv.is_empty() {
-      argv.pop();
+    let (mut arg_vec, _) = args.take_argv();
+    if (cmd == "[" || cmd == "[[") && !arg_vec.is_empty() {
+      arg_vec.pop();
     }
-    let result = ArgvParser::new(&argv, extended)
+    let result = ArgvParser::new(&arg_vec, extended)
       .parse_or(true)
       .map_err(|e| e.try_blame(span));
 

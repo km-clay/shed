@@ -1,4 +1,5 @@
 use ariadne::Span as ASpan;
+use itertools::Itertools;
 use nix::unistd::Pid;
 use scopeguard::defer;
 use std::{
@@ -7,11 +8,12 @@ use std::{
 };
 
 use crate::{
+  builtin::opt::{Parsed, Word, parse_opts, parse_opts_strict},
   eval::execute,
   procio::{bytes_to_string, out_bytes},
   state::{
     meta::UtilKind,
-    shopt::{xtrace_print, xtrace_print_tokens},
+    shopt::{xtrace_print_raw, xtrace_print_tokens},
     vars::VarStr,
   },
   util::ShResultExt,
@@ -22,7 +24,7 @@ use super::{
   errln,
   eval::{
     self, NdFlags, NdRule, Node,
-    execute::{AssignBehavior, Dispatcher, exec_nonint, prepare_argv_with},
+    execute::{AssignBehavior, Dispatcher, exec_nonint},
     lex::{KEYWORDS, Span, Tk, TkRule},
   },
   expand::{self, shell_quote},
@@ -48,7 +50,6 @@ mod fixcmd;
 mod flog;
 mod flowctl;
 mod genrc;
-mod getopt;
 mod getopts;
 mod hash;
 mod help;
@@ -57,6 +58,7 @@ mod intro;
 mod jobctl;
 mod keymap;
 mod msg;
+mod opt;
 mod printf;
 mod pwd;
 mod quote;
@@ -78,8 +80,8 @@ mod varcmds;
 mod vice;
 mod width;
 
-use getopt::{Opt, OptSpec, get_opts_from_tokens, get_opts_from_tokens_strict};
 pub(crate) use help::HELP_PAGE_INSTALL_DIR;
+use opt::{Opt, OptSpec};
 
 macro_rules! register_builtins {
   ($($name:literal => $ty:expr),* $(,)?) => {
@@ -191,7 +193,6 @@ pub(super) fn lookup_builtin(name: &str) -> Option<&'static dyn Builtin> {
     .map(|idx| BUILTIN_TABLE[idx].1 as &dyn Builtin)
 }
 
-type ArgVector = Vec<(VarStr, Span)>;
 pub(super) trait Builtin: Sync {
   /// The actual logic of the builtin. The only required member of Builtin.
   fn execute(&self, args: BuiltinArgs) -> ShResult<()>;
@@ -222,30 +223,18 @@ pub(super) trait Builtin: Sync {
   }
 
   /// The way that the builtin parses its options. Some of them are weird, like `set`
-  fn get_argv_and_opts(
-    &self,
-    cmd_span: Span,
-    argv: &[Tk],
-    no_split: bool,
-  ) -> ShResult<(ArgVector, Vec<Opt>)> {
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
     let opts = self.opts();
-    let opts_empty = opts.is_empty();
-    let (argv, opts) = if opts_empty {
-      (
-        prepare_argv_with(argv, no_split).promote_err(cmd_span)?,
-        vec![],
-      )
-    } else if self.strict_opts() {
-      get_opts_from_tokens_strict(argv, &opts).promote_err(cmd_span)?
+    let parsed = if self.strict_opts() {
+      parse_opts_strict(argv, &opts).promote_err(cmd_span)?
     } else {
-      get_opts_from_tokens(argv, &opts).promote_err(cmd_span)?
+      parse_opts(argv, &opts).promote_err(cmd_span)?
     };
 
-    // `$_` is the last expanded word of the command line. Returns the full argv
-    // (command word included); the caller (`run_builtin`) traces it, then strips
-    // the command word before building `BuiltinArgs`.
-    execute::record_last_arg(argv.last().map(|(s, _)| s.clone()));
-    Ok((argv, opts))
+    // `$_` is the last expanded word of the command line, options included; the
+    // flat trace list preserves it in order.
+    execute::record_last_arg(parsed.trace.last().cloned());
+    Ok(parsed)
   }
 
   fn get_input_str(&self, args: &mut BuiltinArgs) -> Option<String> {
@@ -418,18 +407,21 @@ pub(super) trait Builtin: Sync {
       .first()
       .map_or_else(|| span.clone(), |tk| tk.span.clone());
 
-    let (mut argv, opts) = self.get_argv_and_opts(cmd_span.clone(), argv, no_split)?;
+    let parsed = self.get_argv_and_opts(cmd_span.clone(), argv, no_split)?;
 
     if !node.flags.contains(NdFlags::NO_TRACE) {
-      xtrace_print(&argv);
+      // Trace the flat, in-order expansion (options + their args intact),
+      // exactly as external commands are traced.
+      xtrace_print_raw(&parsed.trace);
     }
+
+    let mut argv = parsed.words;
     if !argv.is_empty() {
       argv.remove(0);
     }
 
     let builtin_args = BuiltinArgs {
       argv,
-      opts,
       span,
       cmd_span,
     };
@@ -444,8 +436,7 @@ pub(super) trait Builtin: Sync {
 /// `span` of the entire command for error reporting, and `stdin` piped in
 /// from a previous builtin in an in-process pipeline.
 pub struct BuiltinArgs {
-  argv: Vec<(VarStr, Span)>,
-  opts: Vec<Opt>,
+  argv: Vec<Word>,
   span: Span,     // the entire call
   cmd_span: Span, // just the command
 }
@@ -457,6 +448,39 @@ impl BuiltinArgs {
   }
   pub fn cmd_span(&self) -> Span {
     self.cmd_span.clone()
+  }
+
+  pub fn arguments(&self) -> impl Iterator<Item = (&VarStr, &Span)> {
+    self.argv.iter().filter_map(|word| match word {
+      Word::Arg(value, span) => Some((value, span)),
+      _ => None,
+    })
+  }
+  pub fn options(&self) -> impl Iterator<Item = &Opt> {
+    self.argv.iter().filter_map(|word| match word {
+      Word::Opt(opt) => Some(opt),
+      _ => None,
+    })
+  }
+  pub fn no_arguments(&self) -> bool {
+    self
+      .argv
+      .iter()
+      .all(|word| !matches!(word, Word::Arg(_, _)))
+  }
+  pub fn no_options(&self) -> bool {
+    self.argv.iter().all(|word| !matches!(word, Word::Opt(_)))
+  }
+  pub fn take_argv(&mut self) -> (Vec<(VarStr, Span)>, Vec<Opt>) {
+    self
+      .argv
+      .drain(..)
+      .filter(|word| !matches!(word, Word::Sep(_)))
+      .partition_map(|word| match word {
+        Word::Arg(var_str, span) => itertools::Either::Left((var_str, span)),
+        Word::Opt(opt) => itertools::Either::Right(opt),
+        Word::Sep(_) => unreachable!(),
+      })
   }
 }
 
@@ -514,12 +538,12 @@ impl Builtin for False {
 struct Let;
 impl Builtin for Let {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    if args.argv.is_empty() {
+    if args.arguments().next().is_none() {
       // bash: `let` with no expressions returns 1
       return with_status(1);
     }
     let mut last = 0i64;
-    for (expr, _) in args.argv {
+    for (expr, _) in args.arguments() {
       let result = expand::expand_arithmetic(expr.as_str())?;
       last = result.as_str().trim().parse::<i64>().unwrap_or(0);
     }
@@ -550,14 +574,10 @@ impl Builtin for Thru {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('c'),
-      OptSpec::flag("count"),
-      OptSpec::flag('a'),
-      OptSpec::flag("append"),
-      OptSpec::single_arg('t'),
-      OptSpec::single_arg("tee"),
-      OptSpec::single_arg('L'),
-      OptSpec::single_arg("limit"),
+      OptSpec::new("count").short('c').long("count"),
+      OptSpec::new("append").short('a').long("append"),
+      OptSpec::new("tee").short('t').long("tee").argc(1),
+      OptSpec::new("limit").short('L').long("limit").argc(1),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -566,29 +586,23 @@ impl Builtin for Thru {
     let mut tee = None;
     let mut limit = None;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::LongWithArg(flag, arg) => match flag.as_str() {
-          "append" => append = true,
-          "count" => count = true,
-          "tee" => tee = Some(arg.clone()),
-          "limit" => {
+    for opt in args.options() {
+      match opt.key() {
+        "append" => append = true,
+        "count" => count = true,
+        "tee" => {
+          if let Some(arg) = opt.value() {
+            tee = Some(arg.to_string());
+          }
+        }
+        "limit" => {
+          if let Some(arg) = opt.value() {
             let Ok(parsed) = arg.parse::<usize>() else {
               return Err(sherr!(InvalidOpt, "invalid limit: {arg}"));
             };
             limit = Some(parsed);
           }
-          _ => {}
-        },
-        Opt::ShortWithArg('t', dest) => tee = Some(dest.clone()),
-        Opt::ShortWithArg('L', arg) => {
-          let Ok(parsed) = arg.parse::<usize>() else {
-            return Err(sherr!(InvalidOpt, "invalid limit: {arg}"));
-          };
-          limit = Some(parsed);
         }
-        Opt::Short('c') => count = true,
-        Opt::Short('a') => append = true,
         _ => {}
       }
     }
@@ -611,15 +625,14 @@ impl Builtin for Thru {
       .ok()
       .flatten();
 
-    let sources: Vec<Option<VarStr>> = if args.argv.is_empty() {
-      vec![None]
-    } else {
-      args
-        .argv
-        .into_iter()
-        .map(|(a, _)| if a.as_str() == "-" { None } else { Some(a) })
-        .collect()
-    };
+    let mut sources: Vec<Option<VarStr>> = args
+      .arguments()
+      .map(|(a, _)| (a.as_str() != "-").then(|| a.clone()))
+      .collect();
+    if sources.is_empty() {
+      // no source operands → read stdin
+      sources.push(None);
+    }
 
     let mut byte_count = 0;
 

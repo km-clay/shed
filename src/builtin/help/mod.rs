@@ -11,13 +11,13 @@ use std::{
   path::Path,
 };
 
-use crate::{HashSet, state::meta::MetaTab};
+use crate::{HashSet, opt, state::meta::MetaTab};
 
 use super::{
   super::state::terminal::Terminal,
-  Shed, expand,
-  getopt::{Opt, OptSpec},
-  key, keys, match_loop, outln, procio,
+  Shed, expand, key, keys, match_loop,
+  opt::OptSpec,
+  outln, procio,
   readline::{self, ScoredCandidate},
   sherr, state,
   util::{self, Direction, ShResult, with_status},
@@ -74,25 +74,21 @@ fn cached_tags<F: FnOnce() -> Vec<ScoredTag>>(build: F) -> Vec<ScoredTag> {
 pub(super) struct Help;
 impl super::Builtin for Help {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag("list-tags"), OptSpec::flag('l')]
+    vec![opt!("list-tags" | 'l')]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let _guard = scopeguard::guard((), |()| {
       if !Shed::term(Terminal::test_mode) {
         Shed::meta_mut(|_| MetaTab::disable_welcome_message()).unwrap();
       }
     });
 
-    let mut arg_vec = args.argv.into_iter().peekable();
-    let list_tags =
-      args.opts.contains(&Opt::Long("list-tags".into())) || args.opts.contains(&Opt::Short('l'));
+    let (arg_vec, opts) = args.take_argv();
+    let list_tags = opts.iter().any(|o| o.key() == "list-tags");
 
     // Join all of the word-split arguments into a single string
     // Preserve the span too
-    let topic = arg_vec
-      .peek()
-      .is_some()
-      .then(|| super::join_raw_arg_iter(arg_vec));
+    let topic = (!arg_vec.is_empty()).then(|| super::join_raw_args(arg_vec));
 
     if list_tags {
       let tags = get_all_tags()?;

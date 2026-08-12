@@ -4,8 +4,11 @@ use crate::state::vars::VarStr;
 
 use super::{
   super::state::meta::MetaTab,
-  eval::lex::Span,
-  getopt::{Opt, OptArg, OptSpec},
+  eval::{
+    execute::prepare_argv_with,
+    lex::{Span, Tk},
+  },
+  opt::{Parsed, Word},
   sherr,
   state::{
     self, Shed,
@@ -24,24 +27,19 @@ enum OptMatch {
 #[derive(Debug)]
 struct GetOptsSpec {
   silent_err: bool,
-  opt_specs: Vec<OptSpec>,
+  // POSIX optstring, decoded to (option char, whether it takes an argument).
+  // getopts has its own parser, so it needs only this, not the internal
+  // `OptSpec` model (short/long/key/argc).
+  opts: Vec<(char, bool)>,
 }
 
 impl GetOptsSpec {
   pub fn matches(&self, ch: char) -> OptMatch {
-    for spec in &self.opt_specs {
-      let OptSpec { opt, takes_arg } = spec;
-      match opt {
-        Opt::Short(opt_ch) if ch == *opt_ch => {
-          if *takes_arg == OptArg::None {
-            return OptMatch::IsMatch;
-          }
-          return OptMatch::WantsArg;
-        }
-        _ => (),
-      }
+    match self.opts.iter().find(|(c, _)| *c == ch) {
+      Some((_, true)) => OptMatch::WantsArg,
+      Some((_, false)) => OptMatch::IsMatch,
+      None => OptMatch::NoMatch,
     }
-    OptMatch::NoMatch
   }
 }
 
@@ -49,7 +47,7 @@ impl FromStr for GetOptsSpec {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     let mut s = s;
-    let mut opt_specs = vec![];
+    let mut opts = vec![];
     let mut silent_err = false;
     if s.starts_with(':') {
       silent_err = true;
@@ -60,18 +58,13 @@ impl FromStr for GetOptsSpec {
     while let Some(ch) = chars.peek() {
       match ch {
         ch if ch.is_alphanumeric() => {
-          let opt = Opt::Short(*ch);
+          let opt_ch = *ch;
           chars.next();
           let has_arg = chars.peek() == Some(&':');
           if has_arg {
             chars.next();
           }
-          let takes_arg = if has_arg {
-            OptArg::Single
-          } else {
-            OptArg::None
-          };
-          opt_specs.push(OptSpec { opt, takes_arg });
+          opts.push((opt_ch, has_arg));
         }
         _ => {
           return Err(sherr!(ParseErr, "unexpected character '{ch}'",));
@@ -79,40 +72,51 @@ impl FromStr for GetOptsSpec {
       }
     }
 
-    Ok(GetOptsSpec {
-      silent_err,
-      opt_specs,
-    })
+    Ok(GetOptsSpec { silent_err, opts })
   }
 }
 
 pub(super) struct GetOpts;
 impl super::Builtin for GetOpts {
+  /// getopts parses its own operands with POSIX semantics (OPTIND, clustered
+  /// flags like `-ab`, attached args like `-bVALUE`, and `--`). The internal
+  /// option parser would split those apart, so pass every word through as a
+  /// plain argument and let `getopts_inner` do the parsing.
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+    let expanded = prepare_argv_with(argv, no_split).promote_err(cmd_span)?;
+    let trace = expanded.iter().map(|(word, _)| word.clone()).collect();
+    let words = expanded
+      .into_iter()
+      .map(|(word, span)| Word::Arg(word, span))
+      .collect();
+    Ok(Parsed { words, trace })
+  }
+
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
-    let mut arg_vec = args.argv.into_iter();
+    let mut arg_vec = args.arguments();
 
-    let Some(arg_string) = arg_vec.next() else {
+    let Some((arg_string, arg_span)) = arg_vec.next() else {
       return Err(sherr!(
           ExecFail @ span,
           "getopts: missing option spec",
       ));
     };
-    let Some(opt_var) = arg_vec.next() else {
+    let Some((opt_var, _)) = arg_vec.next() else {
       return Err(sherr!(
           ExecFail @ span,
           "getopts: missing variable name",
       ));
     };
 
-    let opts_spec = GetOptsSpec::from_str(&arg_string.0).promote_err(arg_string.1.clone())?;
+    let opts_spec = GetOptsSpec::from_str(arg_string.as_str()).promote_err(arg_span.clone())?;
 
-    let explicit_args: Vec<VarStr> = arg_vec.map(|s| s.0).collect();
+    let explicit_args: Vec<VarStr> = arg_vec.map(|(word, _)| word.clone()).collect();
     if explicit_args.is_empty() {
       let pos_params: Vec<VarStr> = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect());
-      getopts_inner(&opts_spec, &opt_var.0, &pos_params, &span)
+      getopts_inner(&opts_spec, opt_var.as_str(), &pos_params, &span)
     } else {
-      getopts_inner(&opts_spec, &opt_var.0, &explicit_args, &span)
+      getopts_inner(&opts_spec, opt_var.as_str(), &explicit_args, &span)
     }
   }
 }
@@ -268,7 +272,6 @@ fn getopts_inner(
 #[cfg(test)]
 mod tests {
   use super::var;
-  use crate::builtin::getopt::OptArg;
   use crate::state;
   use crate::tests::testutil::{TestGuard, test_input};
 
@@ -280,7 +283,7 @@ mod tests {
     use std::str::FromStr;
     let spec = GetOptsSpec::from_str("abc").unwrap();
     assert!(!spec.silent_err);
-    assert_eq!(spec.opt_specs.len(), 3);
+    assert_eq!(spec.opts.len(), 3);
   }
 
   #[test]
@@ -289,9 +292,9 @@ mod tests {
     use std::str::FromStr;
     let spec = GetOptsSpec::from_str("a:bc:").unwrap();
     assert!(!spec.silent_err);
-    assert_eq!(spec.opt_specs[0].takes_arg, OptArg::Single); // a:
-    assert_eq!(spec.opt_specs[1].takes_arg, OptArg::None); // b
-    assert_eq!(spec.opt_specs[2].takes_arg, OptArg::Single); // c:
+    assert!(spec.opts[0].1); // a: takes an arg
+    assert!(!spec.opts[1].1); // b does not
+    assert!(spec.opts[2].1); // c: takes an arg
   }
 
   #[test]
@@ -300,7 +303,7 @@ mod tests {
     use std::str::FromStr;
     let spec = GetOptsSpec::from_str(":ab").unwrap();
     assert!(spec.silent_err);
-    assert_eq!(spec.opt_specs.len(), 2);
+    assert_eq!(spec.opts.len(), 2);
   }
 
   #[test]

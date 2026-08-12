@@ -7,14 +7,14 @@ use nix::{
   unistd::{self, read},
 };
 
-use crate::{builtin::quote, match_loop, state::vars::VarStr};
+use crate::{builtin::quote, match_loop, state::vars::VarStr, varstr};
 
 use super::{
   super::state::terminal::Terminal,
   Shed,
   eval::lex::Span,
   expand::expand_keymap,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   out, procio,
   procio::stdin_fileno,
   sherr, signal,
@@ -41,18 +41,17 @@ pub(super) struct Read;
 impl super::Builtin for Read {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('r'),
-      OptSpec::flag('s'),
-      OptSpec::flag('q'),
-      OptSpec::flag("quoted"),
-      OptSpec::single_arg('a'),
-      OptSpec::single_arg('n'),
-      OptSpec::single_arg('t'),
-      OptSpec::single_arg('p'),
-      OptSpec::single_arg('d'),
+      OptSpec::new_short("no-escape", 'r'),
+      OptSpec::new_short("no-echo", 's'),
+      OptSpec::new_long("quoted").short('q'),
+      OptSpec::new_short("array", 'a').argc(1),
+      OptSpec::new_short("n-chars", 'n').argc(1),
+      OptSpec::new_short("timeout", 't').argc(1),
+      OptSpec::new_short("prompt", 'p').argc(1),
+      OptSpec::new_short("delim", 'd').argc(1),
     ]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let mut flags = ReadFlags::empty();
     let mut prompt = None;
     let mut timeout = None;
@@ -60,35 +59,52 @@ impl super::Builtin for Read {
     let mut array_name = None;
     let mut delim = b'\n';
 
-    for opt in &args.opts {
-      match opt {
-        Opt::Long(opt) => match opt.as_str() {
-          "quoted" => flags |= ReadFlags::QUOTED | ReadFlags::NO_ESCAPE,
-          _ => {
-            return Err(sherr!(ExecFail, "read: Unexpected flag '{opt}'")).promote_err(args.span);
-          }
-        },
-        Opt::Short('r') => flags |= ReadFlags::NO_ESCAPE,
-        Opt::Short('s') => flags |= ReadFlags::NO_ECHO,
-        Opt::Short('q') => flags |= ReadFlags::QUOTED | ReadFlags::NO_ESCAPE,
-        Opt::ShortWithArg('a', a) => array_name = Some(a.clone()),
-        Opt::ShortWithArg('p', p) => prompt = Some(p),
-        Opt::ShortWithArg('d', d) => delim = d.chars().map(|c| c as u8).next().unwrap_or(b'\n'),
-        Opt::ShortWithArg('n', n) => {
+    let (arg_vec, opts) = args.take_argv();
+
+    for opt in opts {
+      match opt.key() {
+        "array" => {
+          let Some(arr) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -a/--array"));
+          };
+          array_name = Some(varstr!("{arr}"));
+        }
+        "n-chars" => {
+          let Some(n) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -n/--n-chars"));
+          };
           let bytes = n
             .parse::<usize>()
-            .map_err(|_| sherr!(ExecFail, "read: Invalid byte count '{n}'"))?;
+            .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
           max_bytes = Some(bytes);
         }
-        Opt::ShortWithArg('t', t) => {
+        "prompt" => {
+          let Some(p) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -p/--prompt"));
+          };
+          prompt = Some(varstr!("{p}"));
+        }
+        "delim" => {
+          let Some(d) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -d/--delim"));
+          };
+          delim = d.chars().map(|c| c as u8).next().unwrap_or(b'\n');
+        }
+        "timeout" => {
+          let Some(t) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -t/--timeout"));
+          };
           let seconds = t
             .parse::<f64>()
-            .map_err(|_| sherr!(ExecFail, "read: Invalid timeout value '{t}'"))?;
+            .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid timeout value '{t}'"))?;
           let dur = Duration::try_from_secs_f64(seconds)
-            .map_err(|_| sherr!(ExecFail, "read: Invalid timeout value '{t}'"))?;
+            .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid timeout value '{t}'"))?;
           timeout = Some(dur.as_millis().min(i32::MAX as u128) as i32);
         }
-        _ => return Err(sherr!(ExecFail, "read: Unexpected flag '{opt}'")).promote_err(args.span),
+        "quoted" => flags |= ReadFlags::QUOTED | ReadFlags::NO_ESCAPE,
+        "no-escape" => flags |= ReadFlags::NO_ESCAPE,
+        "no-echo" => flags |= ReadFlags::NO_ECHO,
+        _ => return Err(sherr!(ExecFail @ opt.span(), "unexpected flag '{opt}'")),
       }
     }
 
@@ -119,9 +135,9 @@ impl super::Builtin for Read {
       }
     } else {
       if flags.contains(ReadFlags::QUOTED) {
-        field_split_vars_quoted(&input, &args.argv).promote_err(args.span())
+        field_split_vars_quoted(&input, &arg_vec).promote_err(args.span())
       } else {
-        field_split_vars(&input, &args.argv).promote_err(args.span())
+        field_split_vars(&input, &arg_vec).promote_err(args.span())
       }
     }
   }
@@ -510,9 +526,9 @@ pub(super) struct ReadKey;
 impl super::Builtin for ReadKey {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('v'), // var name
-      OptSpec::single_arg('w'), // char whitelist
-      OptSpec::single_arg('b'), // char blacklist
+      OptSpec::new_short("var", 'v').argc(1),
+      OptSpec::new_short("whitelist", 'w').argc(1),
+      OptSpec::new_short("blacklist", 'b').argc(1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -523,14 +539,32 @@ impl super::Builtin for ReadKey {
     let mut blacklist = None;
     let mut var_name = None;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::ShortWithArg('v', name) => var_name = Some(name),
-        Opt::ShortWithArg('w', wl) => whitelist = Some(wl),
-        Opt::ShortWithArg('b', bl) => blacklist = Some(bl),
+    for opt in args.options() {
+      match opt.key() {
+        "var" => {
+          let Some(name) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "readkey: Missing argument for -v/--var"));
+          };
+          var_name = Some(name);
+        }
+        "whitelist" => {
+          let Some(wl) = opt.value() else {
+            return Err(
+              sherr!(ExecFail @ opt.span(), "readkey: Missing argument for -w/--whitelist"),
+            );
+          };
+          whitelist = Some(wl);
+        }
+        "blacklist" => {
+          let Some(bl) = opt.value() else {
+            return Err(
+              sherr!(ExecFail @ opt.span(), "readkey: Missing argument for -b/--blacklist"),
+            );
+          };
+          blacklist = Some(bl);
+        }
         _ => {
-          return Err(sherr!(ExecFail, "readkey: Unexpected flag '{opt}'"))
-            .promote_err(args.span());
+          return Err(sherr!(ExecFail @ opt.span(), "readkey: Unexpected flag '{opt}'"));
         }
       }
     }

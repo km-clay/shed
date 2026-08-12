@@ -10,12 +10,10 @@ impl super::Builtin for Shift {
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut arg_vec = args.argv.into_iter();
-
-    let count = arg_vec.next().map_or(Ok(1), |(st, sp)| {
+    let count = args.arguments().next().map_or(Ok(1), |(st, sp)| {
       st.parse::<usize>().map_err(|_| {
         sherr!(
-          ExecFail @ sp,
+          ExecFail @ sp.clone(),
           "Expected a number in shift args",
         )
       })

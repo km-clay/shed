@@ -2,18 +2,17 @@ use itertools::Itertools;
 
 use crate::{
   ShResult, Shed,
-  builtin::getopt::OptSpec,
-  expand, match_loop, out, outln,
+  builtin::opt::OptSpec,
+  expand, match_loop, opt, out, outln, sherr,
   state::vars::{VarFlags, VarKind, VarStr},
   util::with_status,
+  varstr,
 };
-
-use super::getopt::Opt;
 
 pub(super) struct Quote;
 impl super::Builtin for Quote {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::single_arg('v'), OptSpec::single_arg("var")]
+    vec![opt!("var" | 'v', 1)]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     if let Some(stdin) = self.get_input_str(&mut args) {
@@ -23,24 +22,16 @@ impl super::Builtin for Quote {
     }
 
     let mut parts: Vec<String> = args
-      .argv
-      .iter()
+      .arguments()
       .map(|(s, _)| expand::shell_quote(s))
       .collect();
 
-    for opt in &args.opts {
-      match opt {
-        Opt::ShortWithArg('v', var) => {
-          if let Some(quoted) = quote_var(var) {
-            parts.push(quoted);
-          }
+    for opt in args.options() {
+      if opt.key() == "var" {
+        let Some(var) = opt.value() else { continue };
+        if let Some(quoted) = quote_var(var) {
+          parts.push(quoted);
         }
-        Opt::LongWithArg(flag, var) if flag == "var" => {
-          if let Some(quoted) = quote_var(var) {
-            parts.push(quoted);
-          }
-        }
-        _ => {}
       }
     }
 
@@ -85,38 +76,48 @@ enum UnquoteTarget {
 
 pub(super) struct Unquote;
 impl super::Builtin for Unquote {
-  fn opts(&self) -> Vec<super::getopt::OptSpec> {
+  fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('a'),
-      OptSpec::single_arg("array"),
-      OptSpec::single_arg('v'),
-      OptSpec::single_arg("var"),
-      OptSpec::single_arg('s'),
-      OptSpec::single_arg("sep"),
-      OptSpec::flag('0'),
+      OptSpec::new_short("null", '0'),
+      opt!("array" | 'a', 1),
+      opt!("var" | 'v', 1),
+      opt!("sep" | 's', 1),
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     log::debug!("entered unquote execute()");
-    let input: VarStr = self
-      .get_input_str(&mut args)
-      .map_or_else(|| super::join_raw_args(args.argv).0, VarStr::from);
+    let (arg_vec, opts) = args.take_argv();
+
+    let input: VarStr = if arg_vec.is_empty() {
+      self.get_input_str(&mut args)
+    } else {
+      None
+    }
+    .map_or_else(|| super::join_raw_args(arg_vec).0, VarStr::from);
 
     let mut target = None;
-    let mut delim = "\n";
+    let mut delim = "\n".into();
 
-    for opt in &args.opts {
-      match opt {
-        Opt::LongWithArg(flag, arg) => match flag.as_str() {
-          "array" => target = Some(UnquoteTarget::Array(arg.clone())),
-          "var" => target = Some(UnquoteTarget::Var(arg.clone())),
-          "sep" => delim = arg,
-          _ => {}
-        },
-        Opt::Short('0') => delim = "\0",
-        Opt::ShortWithArg('s', arg) => delim = arg,
-        Opt::ShortWithArg('a', arg) => target = Some(UnquoteTarget::Array(arg.clone())),
-        Opt::ShortWithArg('v', arg) => target = Some(UnquoteTarget::Var(arg.clone())),
+    for opt in opts {
+      match opt.key() {
+        "array" => {
+          let Some(val) = opt.value() else {
+            return Err(sherr!(ExecFail, "unquote: --array requires an argument"));
+          };
+          target = Some(UnquoteTarget::Array(val.into()));
+        }
+        "var" => {
+          let Some(val) = opt.value() else {
+            return Err(sherr!(ExecFail, "unquote: --var requires an argument"));
+          };
+          target = Some(UnquoteTarget::Var(val.into()));
+        }
+        "sep" => {
+          let Some(val) = opt.value() else {
+            return Err(sherr!(ExecFail, "unquote: --sep requires an argument"));
+          };
+          delim = varstr!("{val}");
+        }
         _ => {}
       }
     }

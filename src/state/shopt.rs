@@ -24,9 +24,20 @@ use crate::{
 };
 
 /// Trace a command: shell-quote each argv word (like bash) and emit.
+pub(crate) fn xtrace_print_raw(argv: &[VarStr]) {
+  if shopt!(set.xtrace) {
+    let words = argv.iter().map(expand::xtrace_quote).join(" ");
+
+    xtrace_line(&words);
+  }
+}
+
 pub(crate) fn xtrace_print(argv: &[(VarStr, Span)]) {
   if shopt!(set.xtrace) {
-    let words = argv.iter().map(|(s, _)| expand::xtrace_quote(s)).join(" ");
+    let words = argv
+      .iter()
+      .map(|(word, _span)| expand::xtrace_quote(word))
+      .join(" ");
 
     xtrace_line(&words);
   }

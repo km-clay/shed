@@ -1,32 +1,30 @@
 use std::str::FromStr;
 
+use crate::opt;
+
 use super::{
-  ShResult, Shed,
-  expand::markers,
-  getopt::{Opt, OptSpec},
-  join_raw_arg_iter, match_loop, sherr, try_var,
-  util::stylize_loglevel,
-  var, with_status,
+  ShResult, Shed, expand::markers, join_raw_args, match_loop, opt::OptSpec, sherr, try_var,
+  util::stylize_loglevel, var, with_status,
 };
 
 pub struct Flog;
 impl super::Builtin for Flog {
-  fn opts(&self) -> Vec<super::getopt::OptSpec> {
-    vec![OptSpec::single_arg('p'), OptSpec::single_arg("prefix")]
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![opt!("prefix" | 'p', 1)]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let source = span.span_source().name();
     let (line, col) = span.line_and_col();
 
-    let mut arg_vec = args.argv.into_iter();
+    let (arg_vec, opts) = args.take_argv();
 
-    let Some((first, span)) = arg_vec.next() else {
+    let Some((first, span)) = arg_vec.first() else {
       return Err(sherr!(ExecFail, "Usage: flog <LEVEL> <MESSAGE>"));
     };
     let level = first.to_ascii_uppercase();
     let Some(level) = log::Level::from_str(&level).ok() else {
-      return Err(sherr!(ExecFail @ span, "Invalid log level"));
+      return Err(sherr!(ExecFail @ span.clone(), "Invalid log level"));
     };
 
     let cur_level = Self::get_log_level().unwrap_or(log::Level::Error);
@@ -38,19 +36,16 @@ impl super::Builtin for Flog {
 
     let mut prefix_fmt = try_var!("FLOG_FMT").unwrap_or_else(|| "[{level}]".into());
 
-    for opt in args.opts {
-      match &opt {
-        Opt::ShortWithArg('p', arg) => {
-          prefix_fmt = arg.clone();
-        }
-        Opt::LongWithArg(flag, arg) if flag.as_str() == "prefix" => {
-          prefix_fmt = arg.clone();
-        }
-        _ => {}
+    for opt in opts {
+      if opt.key() == "prefix" {
+        let Some(prefix) = opt.value() else {
+          return Err(sherr!(ExecFail @ opt.span(), "Option --prefix requires an argument"));
+        };
+        prefix_fmt = prefix.into();
       }
     }
 
-    let (rest, _) = join_raw_arg_iter(arg_vec);
+    let (rest, _) = join_raw_args(arg_vec);
     let formatted = Self::expand_prefix_fmt(&prefix_fmt, &level, source, line, col);
 
     let out = format!("{formatted} {rest}");

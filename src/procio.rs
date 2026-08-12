@@ -551,7 +551,7 @@ impl RedirSpec {
             "ambiguous redirect: file descriptor must expand to a single word"
           ));
         }
-        let word_val = words.into_iter().next().unwrap();
+        let word_val = words.iter().next().unwrap();
         let src = word_val.trim();
 
         // A word that expands to `-` closes the target fd, mirroring `>&-`.

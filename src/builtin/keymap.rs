@@ -1,8 +1,4 @@
-use super::{
-  ShResult, Shed,
-  getopt::{Opt, OptSpec},
-  outln, sherr, with_status,
-};
+use super::{ShResult, Shed, opt::OptSpec, outln, sherr, with_status};
 
 use super::keys::{KeyMap, KeyMapFlags};
 
@@ -10,42 +6,42 @@ pub(super) struct KeyMapBuiltin;
 impl super::Builtin for KeyMapBuiltin {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('n'), // normal mode
-      OptSpec::flag('e'), // emacs mode
-      OptSpec::flag('i'), // insert mode
-      OptSpec::flag('v'), // visual mode
-      OptSpec::flag('x'), // ex mode
-      OptSpec::flag('o'), // operator-pending mode
-      OptSpec::flag('r'), // replace mode
-      OptSpec::single_arg("remove"),
+      OptSpec::new_short("normal", 'n'),
+      OptSpec::new_short("emacs", 'e'),
+      OptSpec::new_short("insert", 'i'),
+      OptSpec::new_short("visual", 'v'),
+      OptSpec::new_short("ex", 'x'),
+      OptSpec::new_short("op-pending", 'o'),
+      OptSpec::new_short("replace", 'r'),
+      OptSpec::new_long("remove").argc(1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let mut flags = KeyMapFlags::empty();
     let mut remove = None;
-    for opt in args.opts {
-      match opt {
-        Opt::Short('n') => flags |= KeyMapFlags::NORMAL,
-        Opt::Short('i') => flags |= KeyMapFlags::INSERT,
-        Opt::Short('v') => flags |= KeyMapFlags::VISUAL,
-        Opt::Short('x') => flags |= KeyMapFlags::EX,
-        Opt::Short('o') => flags |= KeyMapFlags::OP_PENDING,
-        Opt::Short('r') => flags |= KeyMapFlags::REPLACE,
-        Opt::Short('e') => flags |= KeyMapFlags::EMACS,
-        Opt::LongWithArg(name, arg) if name == "remove" => {
-          if remove.is_some() {
-            return Err(sherr!(ExecFail @ span, "Duplicate --remove option for keymap"));
-          }
-          remove = Some(arg.clone());
+    for opt in args.options() {
+      match opt.key() {
+        "normal" => flags |= KeyMapFlags::NORMAL,
+        "insert" => flags |= KeyMapFlags::INSERT,
+        "visual" => flags |= KeyMapFlags::VISUAL,
+        "ex" => flags |= KeyMapFlags::EX,
+        "op-pending" => flags |= KeyMapFlags::OP_PENDING,
+        "replace" => flags |= KeyMapFlags::REPLACE,
+        "emacs" => flags |= KeyMapFlags::EMACS,
+        "remove" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for --remove"));
+          };
+          remove = Some(arg.to_string());
         }
         _ => {
-          return Err(sherr!(ExecFail @ span, "Invalid option for keymap: {opt:?}"));
+          return Err(sherr!(ExecFail @ opt.span(), "Invalid option for keymap: '{opt}'"));
         }
       }
     }
 
-    if args.argv.is_empty() && remove.is_none() {
+    if args.no_arguments() && remove.is_none() {
       display_keymaps(flags);
       return with_status(0);
     }
@@ -64,14 +60,16 @@ impl super::Builtin for KeyMapBuiltin {
       return with_status(0);
     }
 
-    let Some((keys, _)) = args.argv.first() else {
+    let mut arguments = args.arguments();
+
+    let Some((keys, _)) = arguments.next() else {
       return Err(sherr!(
         ExecFail @ span,
         "missing keys argument",
       ));
     };
 
-    let Some((action, _)) = args.argv.get(1) else {
+    let Some((action, _)) = arguments.next() else {
       return Err(sherr!(
         ExecFail @ span,
         "missing action argument",

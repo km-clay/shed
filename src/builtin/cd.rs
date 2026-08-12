@@ -4,13 +4,13 @@ use std::{
 };
 
 use crate::{
-  expand,
+  expand, opt,
   readline::{FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, match_positions},
 };
 
 use super::{
   ShResult, Shed,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   outln, sherr,
   state::{terminal::Terminal, util},
   try_var, var, with_status,
@@ -19,29 +19,32 @@ use super::{
 pub(super) struct Cd;
 impl super::Builtin for Cd {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('P'), OptSpec::flag('L')]
+    vec![
+      OptSpec::new("physical").short('P'),
+      OptSpec::new("logical").short('L'),
+    ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut resolve_syms = false;
     let mut try_cd_path = false;
     let mut print_dir = false;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('P') => resolve_syms = true,
-        Opt::Short('L') => resolve_syms = false,
-        _ => return Err(sherr!(ParseErr @ args.span, "Invalid option: {opt}")),
+    for opt in args.options() {
+      match opt.key() {
+        "physical" => resolve_syms = true,
+        "logical" => resolve_syms = false,
+        _ => return Err(sherr!(ParseErr @ opt.span(), "Invalid option: {opt}")),
       }
     }
 
-    let (mut new_dir, arg_span) = if let Some((arg, span)) = args.argv.into_iter().next() {
+    let (mut new_dir, arg_span) = if let Some((arg, span)) = args.arguments().next() {
       if arg.as_str() == "-" {
         let old_pwd = get_old_pwd();
         print_dir = true;
-        (old_pwd, Some(span))
+        (old_pwd, Some(span.clone()))
       } else {
         try_cd_path = !arg.starts_with(['/', '.']);
-        (PathBuf::from(arg), Some(span))
+        (PathBuf::from(arg), Some(span.clone()))
       }
     } else {
       (
@@ -50,7 +53,7 @@ impl super::Builtin for Cd {
       )
     };
 
-    let span = arg_span.unwrap_or(args.span);
+    let span = arg_span.unwrap_or(args.cmd_span());
 
     if try_cd_path && let Some(found) = search_cd_path(&new_dir) {
       print_dir = true;
@@ -139,17 +142,17 @@ pub(super) struct Zd;
 impl super::Builtin for Zd {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('r'),
-      OptSpec::single_arg('d'),
-      OptSpec::single_arg("depth"),
-      OptSpec::flag("json"),
-      OptSpec::flag("quoted"),
-      OptSpec::flag("reverse"),
-      OptSpec::single_arg("sort"),
+      opt!("recursive" | 'r'),
+      opt!("depth" | 'd', 1),
+      opt!("json"),
+      opt!("quoted"),
+      opt!("reverse"),
+      opt!("sort"),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    match args.argv.first().map(|(s, _)| s.as_str()) {
+    let first = args.arguments().next().map(|(s, _)| s).cloned();
+    match first.as_deref() {
       Some("add") => Self::add(args),
       Some("remove") => Self::remove(args),
       Some("clean") => Self::clean(),
@@ -162,23 +165,21 @@ impl super::Builtin for Zd {
 impl Zd {
   /// zd add [-r] [dirs...] - add directories
   fn add(args: super::BuiltinArgs) -> ShResult<()> {
-    let depth = match args.opts.iter().find_map(|o| match o {
-      Opt::ShortWithArg('d', n) => Some(n.as_str()),
-      Opt::LongWithArg(name, n) if name.as_str() == "depth" => Some(n.as_str()),
+    let depth = match args.options().find_map(|o| match o.key() {
+      "depth" => o.value(),
       _ => None,
     }) {
       Some(n) => match n.parse::<usize>() {
         Ok(n) => Some(n),
-        Err(_) => return Err(sherr!(ParseErr @ args.span, "zd: invalid depth: {n}")),
+        Err(_) => return Err(sherr!(ParseErr @ args.span.clone(), "zd: invalid depth: {n}")),
       },
       None => None,
     };
     // a depth cap only makes sense recursively, so it implies -r.
-    let recursive = depth.is_some() || args.opts.iter().any(|o| matches!(o, Opt::Short('r')));
+    let recursive = depth.is_some() || args.options().any(|o| o.key() == "recursive");
 
     let mut dirs: Vec<PathBuf> = args
-      .argv
-      .iter()
+      .arguments()
       .skip(1) // the "add" subcommand itself
       .map(|(a, _)| PathBuf::from(a.as_str()))
       .collect();
@@ -223,10 +224,9 @@ impl Zd {
 
   /// zd add [-r] <dirs...> - remove directories
   fn remove(args: super::BuiltinArgs) -> ShResult<()> {
-    let recursive = args.opts.iter().any(|o| matches!(o, Opt::Short('r')));
+    let recursive = args.options().any(|o| o.key() == "recursive");
     let targets: Vec<String> = args
-      .argv
-      .iter()
+      .arguments()
       .skip(1) // the "remove" subcommand itself
       .map(|(a, _)| a.as_str().to_string())
       .collect();
@@ -272,23 +272,30 @@ impl Zd {
       kind: SortKind::Frecency,
     };
 
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('r') => sort.reverse = true,
-        Opt::Long(name) => match name.as_str() {
-          "json" => json = true,
-          "quoted" => quoted = true,
-          "reverse" => sort.reverse = true,
-          _ => return Err(sherr!(ParseErr @ args.span, "invalid option: {opt}")),
-        },
-        Opt::LongWithArg(name, arg) if name == "sort" => match arg.as_str() {
-          "frecency" => sort.kind = SortKind::Frecency,
-          "visits" => sort.kind = SortKind::Visits,
-          "recent" => sort.kind = SortKind::Recent,
-          "path" => sort.kind = SortKind::Path,
-          _ => return Err(sherr!(ParseErr @ args.span, "invalid sort kind: {arg}")),
-        },
-        _ => return Err(sherr!(ParseErr @ args.span, "invalid option: {opt}")),
+    for opt in args.options() {
+      match opt.key() {
+        // `-r` shares its short flag with `add`/`remove`'s recursive option, so
+        // it resolves to the "recursive" key — but in `list` it means reverse.
+        // (The parsed opt only carries the key, not the spelling, so `-r` and
+        // `--reverse` both arrive here.)
+        "reverse" | "recursive" => sort.reverse = true,
+        "json" => json = true,
+        "quoted" => quoted = true,
+
+        "sort" => {
+          let Some(val) = opt.value() else {
+            return Err(sherr!(ParseErr @ opt.span(), "zd: --sort requires an argument"));
+          };
+
+          match val {
+            "frecency" => sort.kind = SortKind::Frecency,
+            "visits" => sort.kind = SortKind::Visits,
+            "recent" => sort.kind = SortKind::Recent,
+            "path" => sort.kind = SortKind::Path,
+            _ => return Err(sherr!(ParseErr @ opt.span(), "invalid sort kind: {val}")),
+          }
+        }
+        _ => return Err(sherr!(ParseErr @ opt.span(), "invalid option: {opt}")),
       }
     }
     if json && quoted {
@@ -296,8 +303,7 @@ impl Zd {
     }
 
     let query = args
-      .argv
-      .iter()
+      .arguments()
       .skip(1)
       .map(|(a, _)| a.as_str())
       .collect::<String>();
@@ -459,7 +465,7 @@ impl Zd {
   fn query(args: super::BuiltinArgs) -> ShResult<()> {
     // every positional is concatenated into one subsequence query, so
     // `zd pro fern` still finds `~/projects/fern`.
-    let query: String = args.argv.iter().map(|(a, _)| a.as_str()).collect();
+    let query: String = args.arguments().map(|(a, _)| a.as_str()).collect();
 
     let entries = if query.is_empty() {
       load_abbreviated_dirs()

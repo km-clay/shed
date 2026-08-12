@@ -3,13 +3,7 @@ use crate::{
   varstr,
 };
 
-use super::{
-  Builtin, ShResult, expand,
-  getopt::{Opt, OptSpec},
-  out, shopt,
-  util::ShResultExt,
-  with_status,
-};
+use super::{Builtin, ShResult, expand, opt::OptSpec, out, shopt, util::ShResultExt, with_status};
 use bitflags::bitflags;
 
 bitflags! {
@@ -25,10 +19,10 @@ pub(super) struct Echo;
 impl Builtin for Echo {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('n'),
-      OptSpec::flag('E'),
-      OptSpec::flag('e'),
-      OptSpec::flag('p'),
+      OptSpec::new_short("no_newline", 'n'),
+      OptSpec::new_short("no_escape", 'E'),
+      OptSpec::new_short("escape", 'e'),
+      OptSpec::new_short("prompt", 'p'),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -37,12 +31,12 @@ impl Builtin for Echo {
     if xpg_echo {
       flags |= EchoFlags::USE_ESCAPE;
     }
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('n') => flags |= EchoFlags::NO_NEWLINE,
-        Opt::Short('p') => flags |= EchoFlags::USE_PROMPT,
-        Opt::Short('e') => flags |= EchoFlags::USE_ESCAPE,
-        Opt::Short('E') => flags &= !EchoFlags::USE_ESCAPE,
+    for opt in args.options() {
+      match opt.key() {
+        "no_newline" => flags |= EchoFlags::NO_NEWLINE,
+        "prompt" => flags |= EchoFlags::USE_PROMPT,
+        "escape" => flags |= EchoFlags::USE_ESCAPE,
+        "no_escape" => flags &= !EchoFlags::USE_ESCAPE,
         _ => {}
       }
     }
@@ -50,15 +44,14 @@ impl Builtin for Echo {
     let use_escape = flags.contains(EchoFlags::USE_ESCAPE);
 
     let prepared: ShResult<Vec<VarStr>> = args
-      .argv
-      .into_iter()
+      .arguments()
       .map(|(st, sp)| -> ShResult<VarStr> {
         if use_escape {
-          Ok(expand::expand_ansi_c(&st).into())
+          Ok(expand::expand_ansi_c(st).into())
         } else if use_prompt {
-          Ok(expand::expand_prompt(&st).promote_err(sp)?.into())
+          Ok(expand::expand_prompt(st).promote_err(sp.clone())?.into())
         } else {
-          Ok(st)
+          Ok(st.clone())
         }
       })
       .collect();

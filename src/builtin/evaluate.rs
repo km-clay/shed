@@ -19,13 +19,12 @@ impl super::Builtin for Eval {
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    if args.argv.is_empty() {
+    if args.arguments().count() == 0 {
       return with_status(0);
     }
     let sep = state::util::get_separator();
     let command = args
-      .argv
-      .into_iter()
+      .arguments()
       .map(|(s, _)| s)
       .collect::<Vec<_>>()
       .join_with(&sep);

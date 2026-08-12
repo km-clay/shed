@@ -1,7 +1,7 @@
 use super::{
   Shed, errln,
   expand::shell_quote,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   outln, sherr,
   state::logic::TrapTarget,
   util::{ShResult, ShResultExt, with_status},
@@ -22,17 +22,22 @@ impl super::Builtin for Trap {
   }
 
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('l'), OptSpec::flag('p')]
+    vec![
+      OptSpec::new_short("list", 'l'),
+      OptSpec::new_short("print", 'p'),
+    ]
   }
 
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let mut list_signals = false;
     let mut print = false;
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('l') => list_signals = true,
-        Opt::Short('p') => print = true,
-        _ => return Err(sherr!(ExecFail, "trap: Unsupported option '{opt}'")),
+    let (arg_vec, opts) = args.take_argv();
+
+    for opt in opts {
+      match opt.key() {
+        "list" => list_signals = true,
+        "print" => print = true,
+        _ => return Err(sherr!(ExecFail @ opt.span(), "trap: Unsupported option '{opt}'")),
       }
     }
 
@@ -43,9 +48,8 @@ impl super::Builtin for Trap {
 
     // Print mode: explicit `-p`, or a bare `trap` with no operands. Any
     // operands are parsed as targets and used to filter the output.
-    if print || args.argv.is_empty() {
-      let filter = args
-        .argv
+    if print || arg_vec.is_empty() {
+      let filter = arg_vec
         .iter()
         .map(|(arg, span)| arg.parse::<TrapTarget>().promote_err(span.clone()))
         .collect::<ShResult<Vec<_>>>()?;
@@ -63,16 +67,17 @@ impl super::Builtin for Trap {
       return with_status(0);
     }
 
-    if args.argv.len() == 1 {
+    if arg_vec.len() == 1 {
       errln!("usage: trap <COMMAND> [SIGNAL...]");
       return with_status(1);
     }
 
-    let mut arg_vec = args.argv.into_iter();
-    let command = arg_vec.next().unwrap().0;
+    let mut arg_iter = arg_vec.into_iter();
+
+    let command = arg_iter.next().unwrap().0;
     let mut targets = vec![];
 
-    for (arg, span) in arg_vec {
+    for (arg, span) in arg_iter {
       let target = arg.parse::<TrapTarget>().promote_err(span)?;
       targets.push(target);
     }

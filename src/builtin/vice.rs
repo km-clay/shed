@@ -4,9 +4,9 @@ use bitflags::bitflags;
 
 use crate::{
   KeyEvent, ShResult,
-  builtin::getopt::{Opt, OptSpec},
+  builtin::opt::{Opt, OptSpec},
   eval::lex::Span,
-  expand, expand_keymap, outln,
+  expand, expand_keymap, opt, outln,
   readline::EditorCore,
   sherr,
   state::vars::VarStr,
@@ -97,59 +97,52 @@ impl Vice {
     };
 
     for opt in opts {
-      match opt {
-        Opt::ShortWithArg('c', arg) => {
+      match opt.key() {
+        "cut" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
+          };
           let cmd = ViceCmd::parse_cut(arg);
           prog.cmds.push(cmd);
         }
-        Opt::ShortWithArg('s', arg) => {
+        "sep" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
+          };
           prog.sep = Some(expand_keymap(arg));
         }
-        Opt::ShortWithArg('m', arg) => {
+        "move" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
+          };
           let cmd = ViceCmd::parse_move(arg);
           prog.cmds.push(cmd);
         }
-        Opt::ShortWithArg('d', arg) => {
-          prog.delim = arg.clone();
-        }
-        Opt::Short('q') => prog.flags |= ViceFlags::QUOTED,
-        Opt::Short('i') => prog.flags |= ViceFlags::INPLACE,
-        Opt::Short('l') => prog.flags |= ViceFlags::LINES,
-        Opt::ShortWithArg('r', arg) => {
+        "repeat" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
+          };
           prog.cmds.push(ViceCmd::parse_repeat(arg)?);
         }
-        Opt::LongWithArg(flag, arg) => match flag.as_str() {
-          "cut" => {
-            let cmd = ViceCmd::parse_cut(arg);
-            prog.cmds.push(cmd);
-          }
-          "move" => {
-            let cmd = ViceCmd::parse_move(arg);
-            prog.cmds.push(cmd);
-          }
-          "sep" => {
-            prog.sep = Some(expand_keymap(arg));
-          }
-          "backup-ext" => {
-            prog.backup_ext = Some(arg.clone());
-          }
-          "repeat" => {
-            prog.cmds.push(ViceCmd::parse_repeat(arg)?);
-          }
-          other => {
-            return Err(sherr!(ParseErr, "unknown option --{other} in vice"));
-          }
-        },
-        Opt::Long(flag) => match flag.as_str() {
-          "keep-mode" => prog.flags |= ViceFlags::KEEP_MODE,
-          "quoted" => prog.flags |= ViceFlags::QUOTED,
-          "in-place" => prog.flags |= ViceFlags::INPLACE,
-          "lines" => prog.flags |= ViceFlags::LINES,
-          "backup" if prog.backup_ext.is_none() => {
-            prog.backup_ext = Some(".bak".into());
-          }
-          _ => {}
-        },
+        "delim" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
+          };
+          prog.delim = arg.into();
+        }
+        "quoted" => prog.flags |= ViceFlags::QUOTED,
+        "in-place" => prog.flags |= ViceFlags::INPLACE,
+        "lines" => prog.flags |= ViceFlags::LINES,
+        "keep-mode" => prog.flags |= ViceFlags::KEEP_MODE,
+        "backup-ext" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
+          };
+          prog.backup_ext = Some(arg.into());
+        }
+        "backup" if prog.backup_ext.is_none() && prog.backup_ext.is_none() => {
+          prog.backup_ext = Some(".bak".into());
+        }
         _ => {}
       }
     }
@@ -339,37 +332,33 @@ impl Vice {
 impl super::Builtin for Vice {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('s'),
-      OptSpec::single_arg("sep"),
-      OptSpec::single_arg('c'),
-      OptSpec::single_arg("cut"),
-      OptSpec::single_arg('m'),
-      OptSpec::single_arg("move"),
-      OptSpec::single_arg('r'),
-      OptSpec::single_arg("repeat"),
-      OptSpec::flag('q'),
-      OptSpec::flag("quoted"),
-      OptSpec::single_arg('d'),
-      OptSpec::flag('i'),
-      OptSpec::flag('l'),
-      OptSpec::flag("lines"),
-      OptSpec::flag("keep-mode"),
-      OptSpec::flag("in-place"),
-      OptSpec::flag("backup"),
-      OptSpec::single_arg("backup-ext"),
+      opt!("sep" | 's', 1),
+      opt!("cut" | 'c', 1),
+      opt!("move" | 'm', 1),
+      opt!("repeat" | 'r', 1),
+      opt!("backup-ext", 1),
+      opt!("delim" | 'd', 1),
+      opt!("quoted" | 'q'),
+      opt!("lines" | 'l'),
+      opt!("in-place" | 'i'),
+      opt!("backup"),
+      opt!("keep-mode"),
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
-    let prog = Self::parse_cmds(&args.opts).promote_err(span.clone())?;
+    let (arg_vec, opts) = args.take_argv();
+    let prog = Self::parse_cmds(&opts).promote_err(span.clone())?;
 
-    if let Some(input) = self.get_input_str(&mut args) {
+    if arg_vec.is_empty()
+      && let Some(input) = self.get_input_str(&mut args)
+    {
       let ok = Self::run_stream(&input, &prog, &span)?;
       return with_status(i32::from(!ok));
     }
 
     let mut ok = true;
-    for (file, span) in args.argv {
+    for (file, span) in arg_vec {
       let Ok(content) = std::fs::read_to_string(&file) else {
         return Err(sherr!(ExecFail @ span, "Failed to read file: '{file}'"));
       };

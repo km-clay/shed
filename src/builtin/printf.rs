@@ -757,13 +757,17 @@ impl Rendered {
 
 pub(super) struct Printf;
 impl super::Builtin for Printf {
-  fn execute(&self, args: super::BuiltinArgs) -> crate::ShResult<()> {
-    let mut arg_vec = args.argv.into_iter().map(|(s, _)| s.to_string());
-    let format_str = arg_vec
+  fn execute(&self, mut args: super::BuiltinArgs) -> crate::ShResult<()> {
+    let (arg_vec, _) = args.take_argv();
+
+    let mut arg_iter = arg_vec.into_iter();
+    let (format_str, _) = arg_iter
       .next()
       .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
+
     let formatter = PrintFormatter::parse(&format_str)?;
-    let remaining: Vec<String> = arg_vec.collect();
+    let remaining: Vec<String> = arg_iter.map(|(s, _)| s.to_string()).collect();
+
     let mut values = remaining.into_iter().peekable();
 
     // Set when any present numeric argument fails to convert; printf still emits

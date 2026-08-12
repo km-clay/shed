@@ -8,8 +8,8 @@ use nix::{
 
 use crate::{
   ShResult,
-  builtin::getopt::{Opt, OptSpec},
-  errln, expand, match_loop, outln, sherr,
+  builtin::opt::OptSpec,
+  errln, expand, match_loop, opt, outln, sherr,
   state::vars::VarStr,
   util::{self, ShErr, ShResultExt, with_status},
 };
@@ -720,43 +720,39 @@ impl super::Builtin for Stat {
   fn strict_opts(&self) -> bool {
     true
   }
-  fn opts(&self) -> Vec<super::getopt::OptSpec> {
+  fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('L'),
-      OptSpec::flag("dereference"),
-      OptSpec::flag('f'),
-      OptSpec::flag("file-system"),
-      OptSpec::flag('t'),
-      OptSpec::flag("terse"),
-      OptSpec::single_arg('c'),
-      OptSpec::single_arg("format"),
+      opt!("dereference" | 'L'),
+      opt!("file-system" | 'f'),
+      opt!("terse" | 't'),
+      opt!("format" | 'c', 1),
     ]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let mut deref = false;
     let mut fs_stat = false;
     let mut terse = false;
     let mut format: Option<VarStr> = None;
 
-    if args.argv.is_empty() {
+    let (arg_vec, opts) = args.take_argv();
+
+    if arg_vec.is_empty() {
       return Err(sherr!(ExecFail @ args.cmd_span(), "stat: Missing file operand"));
     }
 
-    for opt in &args.opts {
-      match opt {
-        Opt::ShortWithArg('c', fmt) => format = Some(fmt.clone()),
-        Opt::LongWithArg(flag, fmt) if flag == "format" => format = Some(fmt.clone()),
+    for opt in opts {
+      match opt.key() {
+        "format" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "stat: Missing argument for '{opt}'"));
+          };
+          format = Some(arg.into());
+        }
+        "dereference" => deref = true,
+        "file-system" => fs_stat = true,
+        "terse" => terse = true,
 
-        Opt::Short('L') => deref = true,
-        Opt::Long(flag) if flag == "dereference" => deref = true,
-
-        Opt::Short('f') => fs_stat = true,
-        Opt::Long(flag) if flag == "file-system" => fs_stat = true,
-
-        Opt::Short('t') => terse = true,
-        Opt::Long(flag) if flag == "terse" => terse = true,
-
-        _ => return Err(sherr!(ExecFail, "stat: Unsupported option '{}'", opt)),
+        _ => return Err(sherr!(ExecFail, "stat: Unsupported option '{opt}'")),
       }
     }
 
@@ -779,7 +775,7 @@ impl super::Builtin for Stat {
 
     if fs_stat {
       let fmt_args = FsFmtArgs::from_str(&format)?;
-      for (arg, _) in args.argv {
+      for (arg, _) in arg_vec {
         let stat = match FsInfo::for_path(arg.as_str()) {
           Ok(stat) => stat,
           Err(e) => {
@@ -796,7 +792,7 @@ impl super::Builtin for Stat {
       }
     } else {
       let fmt_args = FileFmtArgs::from_str(&format)?;
-      for (arg, span) in args.argv {
+      for (arg, span) in arg_vec {
         let Ok(stat) = FileInfo::new(deref, arg.as_str().into()).promote_err(span) else {
           errln!("stat: Failed to stat '{}'", arg.as_str());
           status = 1;

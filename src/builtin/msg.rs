@@ -1,9 +1,9 @@
-use crate::{procio::bytes_to_string, socket_msg, state::vars::VarStr};
+use crate::{opt, procio::bytes_to_string, socket_msg, state::vars::VarStr};
 
 use super::{
-  Shed,
-  getopt::{Opt, OptSpec},
-  join_raw_args, outln, sherr, status_msg, system_msg,
+  Shed, join_raw_args,
+  opt::OptSpec,
+  outln, sherr, status_msg, system_msg,
   util::{ShResult, with_status},
 };
 
@@ -11,12 +11,9 @@ pub(super) struct Msg;
 impl super::Builtin for Msg {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('s'),
-      OptSpec::flag('S'),
-      OptSpec::flag('b'),
-      OptSpec::flag("status"),
-      OptSpec::flag("system"),
-      OptSpec::flag("broadcast"),
+      opt!("status" | 's'),
+      opt!("system" | 'S'),
+      opt!("broadcast" | 'b'),
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
@@ -24,28 +21,30 @@ impl super::Builtin for Msg {
     let mut status = false;
     let mut broadcast = false;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('S') => system = true,
-        Opt::Short('s') => status = true,
-        Opt::Short('b') => broadcast = true,
-        Opt::Long(o) if o.as_str() == "system" => system = true,
-        Opt::Long(o) if o.as_str() == "status" => status = true,
-        Opt::Long(o) if o.as_str() == "broadcast" => broadcast = true,
+    let (arg_vec, opts) = args.take_argv();
+
+    for opt in &opts {
+      match opt.key() {
+        "system" => system = true,
+        "status" => status = true,
+        "broadcast" => broadcast = true,
         _ => {
           return Err(sherr!(ExecFail, "msg: Unexpected flag '{opt}'",));
         }
       }
     }
 
-    let input = self.get_input(&mut args).map(|s| {
-      let mut s = bytes_to_string(s);
-      s.truncate(s.trim_end_matches('\n').len());
-      VarStr::from(s)
-    });
+    let input = if arg_vec.is_empty() {
+      self.get_input(&mut args).map(|s| {
+        let mut s = bytes_to_string(s);
+        s.truncate(s.trim_end_matches('\n').len());
+        VarStr::from(s)
+      })
+    } else {
+      None
+    };
 
-    if input.is_none() && args.argv.is_empty() {
-      // argv is empty → list past messages and exit; nothing to post.
+    if input.is_none() && arg_vec.is_empty() {
       let history = if system {
         Shed::system_msg_hist()
       } else {
@@ -60,7 +59,7 @@ impl super::Builtin for Msg {
       return with_status(0);
     }
 
-    let msg: VarStr = input.unwrap_or_else(|| join_raw_args(args.argv).0);
+    let msg: VarStr = input.unwrap_or_else(|| join_raw_args(arg_vec).0);
 
     if broadcast {
       // sends to all socket subscribers

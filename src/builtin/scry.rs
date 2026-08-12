@@ -1,23 +1,18 @@
 use crate::{
-  ShResult, Shed, builtin::getopt::Opt, errln, expand, out, outln, readline::FuzzyBuilder,
-  util::with_status,
+  ShResult, Shed, errln, expand, opt, out, outln, readline::FuzzyBuilder, sherr, util::with_status,
 };
 
-use super::getopt::OptSpec;
+use super::opt::OptSpec;
 
 pub(super) struct Scry;
 impl super::Builtin for Scry {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('0'),
-      OptSpec::flag("read0"),
-      OptSpec::flag('q'),
-      OptSpec::flag("quote-in"),
-      OptSpec::flag('Q'),
-      OptSpec::flag("quote-out"),
-      OptSpec::flag('n'),
-      OptSpec::single_arg('p'),
-      OptSpec::single_arg("prompt"),
+      opt!("read0" | '0'),
+      opt!("quote-in" | 'q'),
+      opt!("quote-out" | 'Q'),
+      opt!("prompt" | 'p', 1),
+      OptSpec::new_short("no-newline", 'n'),
     ]
   }
   fn strict_opts(&self) -> bool {
@@ -33,21 +28,18 @@ impl super::Builtin for Scry {
     let mut prompt = None;
     let mut no_newline = false;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('0') => null_in = true,
-        Opt::Short('n') => no_newline = true,
-        Opt::Short('q') => quote_in = true,
-        Opt::Short('Q') => quote_out = true,
-        Opt::Long(flag) => match flag.as_str() {
-          "read0" => null_in = true,
-          "quote-in" => quote_in = true,
-          "quote-out" => quote_out = true,
-          _ => {}
-        },
-
-        Opt::ShortWithArg('p', arg) => prompt = Some(arg.clone()),
-        Opt::LongWithArg(flag, arg) if flag == "prompt" => prompt = Some(arg.clone()),
+    for opt in args.options() {
+      match opt.key() {
+        "read0" => null_in = true,
+        "quote-in" => quote_in = true,
+        "quote-out" => quote_out = true,
+        "no-newline" => no_newline = true,
+        "prompt" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "missing argument for --prompt"));
+          };
+          prompt = Some(arg.to_string());
+        }
         _ => {}
       }
     }

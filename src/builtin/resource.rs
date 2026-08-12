@@ -15,7 +15,7 @@ use crate::{
 use super::{
   ShResult,
   eval::lex::Span,
-  getopt::{Opt, OptSpec},
+  opt::{Opt, OptSpec},
   outln, sherr, with_status,
 };
 
@@ -36,44 +36,59 @@ impl RLimits {
     let mut vmem = None;
 
     for o in opts {
-      match o {
-        Opt::ShortWithArg('n', arg) => {
+      match o.key() {
+        "fds" => {
+          let Some(arg) = o.value() else {
+            return Err(sherr!(ParseErr @ o.span(), "missing argument for -n"));
+          };
           fds = Some(
             arg
               .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr, "invalid argument for -n: {arg}",))?,
+              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -n: {arg}",))?,
           );
         }
-        Opt::ShortWithArg('u', arg) => {
+        "procs" => {
+          let Some(arg) = o.value() else {
+            return Err(sherr!(ParseErr @ o.span(), "missing argument for -u"));
+          };
           procs = Some(
             arg
               .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr, "invalid argument for -u: {arg}",))?,
+              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -u: {arg}",))?,
           );
         }
-        Opt::ShortWithArg('s', arg) => {
+        "stack" => {
+          let Some(arg) = o.value() else {
+            return Err(sherr!(ParseErr @ o.span(), "missing argument for -s"));
+          };
           stack = Some(
             arg
               .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr, "invalid argument for -s: {arg}",))?,
+              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -s: {arg}",))?,
           );
         }
-        Opt::ShortWithArg('c', arg) => {
+        "core" => {
+          let Some(arg) = o.value() else {
+            return Err(sherr!(ParseErr @ o.span(), "missing argument for -c"));
+          };
           core = Some(
             arg
               .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr, "invalid argument for -c: {arg}",))?,
+              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -c: {arg}",))?,
           );
         }
-        Opt::ShortWithArg('v', arg) => {
+        "vmem" => {
+          let Some(arg) = o.value() else {
+            return Err(sherr!(ParseErr @ o.span(), "missing argument for -v"));
+          };
           vmem = Some(
             arg
               .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr, "invalid argument for -v: {arg}",))?,
+              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -v: {arg}",))?,
           );
         }
-        o => {
-          return Err(sherr!(ParseErr, "invalid option: {o}"));
+        _ => {
+          return Err(sherr!(ParseErr @ o.span(), "invalid option: {o}"));
         }
       }
     }
@@ -92,25 +107,26 @@ pub(super) struct ULimit;
 impl super::Builtin for ULimit {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('n'), // file descriptors
-      OptSpec::single_arg('u'), // max user processes
-      OptSpec::single_arg('s'), // stack size
-      OptSpec::single_arg('c'), // core dump file size
-      OptSpec::single_arg('v'), // virtual memory
+      OptSpec::new_short("fds", 'n').argc(1),
+      OptSpec::new_short("procs", 'u').argc(1),
+      OptSpec::new_short("stack", 's').argc(1),
+      OptSpec::new_short("core", 'c').argc(1),
+      OptSpec::new_short("vmem", 'v').argc(1),
     ]
   }
   fn strict_opts(&self) -> bool {
     true
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
+    let (_, opts) = args.take_argv();
     let RLimits {
       fds,
       procs,
       stack,
       core,
       vmem,
-    } = RLimits::from_opts(&args.opts).promote_err(span.clone())?;
+    } = RLimits::from_opts(&opts).promote_err(span.clone())?;
 
     if let Some(fds) = fds {
       let (_, hard) = getrlimit(Resource::RLIMIT_NOFILE).map_err(|e| {
@@ -291,20 +307,21 @@ fn format_symbolic(bits: stat::mode_t) -> String {
 pub(super) struct UMask;
 impl super::Builtin for UMask {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('S')]
+    vec![OptSpec::new_short("symbolic", 'S')]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let symbolic = args.opts.iter().any(|o| matches!(o, Opt::Short('S')));
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, opts) = args.take_argv();
+    let symbolic = opts.iter().any(|o| o.key() == "symbolic");
 
     let old = umask(Mode::empty());
     umask(old);
     let mut old_bits = old.bits();
 
-    if let Some((raw, span)) = args.argv.first() {
-      if args.argv.len() > 1 {
+    if let Some((raw, span)) = arg_vec.first() {
+      if arg_vec.len() > 1 {
         return Err(sherr!(
           ParseErr @ args.span(),
-          "umask takes at most one argument, got {}", args.argv.len(),
+          "umask takes at most one argument, got {}", arg_vec.len(),
         ));
       }
 

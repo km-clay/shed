@@ -25,10 +25,10 @@ use nix::{
 
 use crate::{
   ShErrKind, ShResult, Shed,
-  builtin::getopt::{Opt, OptSpec},
+  builtin::opt::{Opt, OptSpec},
   eval, lifecycle, procio, sherr, shopt, signal,
   state::vars::{VarFlags, VarKind, VarStr},
-  util::{ShErr, ShResultExt, with_status},
+  util::{ShErr, ShResultExt, VarStrDisplay, with_status},
   varstr,
 };
 
@@ -253,50 +253,46 @@ impl SockOpts {
     let mut fd_var = None;
 
     for opt in opts {
-      match opt {
-        Opt::ShortWithArg('U', arg) => {
+      match opt.key() {
+        "unix" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for '{opt}'"));
+          };
           let addr = match arg.strip_prefix('@') {
             Some(name) => UnixAddr::Abstract(name.into()),
-            None => UnixAddr::Path(PathBuf::from(arg.as_str())),
+            None => UnixAddr::Path(PathBuf::from(arg)),
           };
           unix_addr = Some(addr);
         }
-        Opt::ShortWithArg('t', arg) => {
+        "tcp" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for '{opt}'"));
+          };
           let host = if let Ok(ip) = arg.parse::<std::net::IpAddr>() {
             TcpHost::IpAddr(ip)
           } else {
-            TcpHost::Hostname(arg.clone())
+            TcpHost::Hostname(arg.into())
           };
           tcp_addr = Some(host);
         }
-        Opt::ShortWithArg('p', arg) => {
+        "port" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for '{opt}'"));
+          };
           let Ok(port) = arg.parse::<u16>() else {
             return Err(sherr!(ExecFail, "Invalid port number '{arg}'"));
           };
 
           tcp_port = Some(port);
         }
-        Opt::ShortWithArg('v', arg) => fd_var = Some(arg.clone()),
+        "var" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for '{opt}'"));
+          };
+          fd_var = Some(arg.to_var_str());
+        }
 
-        Opt::LongWithArg(name, arg) => match name.as_str() {
-          "tcp" => {
-            let host = if let Ok(ip) = arg.parse::<std::net::IpAddr>() {
-              TcpHost::IpAddr(ip)
-            } else {
-              TcpHost::Hostname(arg.clone())
-            };
-            tcp_addr = Some(host);
-          }
-          "port" => {
-            let Ok(port) = arg.parse::<u16>() else {
-              return Err(sherr!(ExecFail, "Invalid port number '{arg}'"));
-            };
-
-            tcp_port = Some(port);
-          }
-          _ => return Err(sherr!(ExecFail, "Unknown option '--{name}'")),
-        },
-        _ => return Err(sherr!(ExecFail, "Unexpected option '{opt}'")),
+        _ => return Err(sherr!(ExecFail @ opt.span(), "Unexpected option '{opt}'")),
       }
     }
 
@@ -360,20 +356,27 @@ pub(super) struct Accept;
 impl super::Builtin for Accept {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('v'), // variable to store auto-allocated FD in (`$SHED_ACCEPT` by default)
+      OptSpec::new_short("var", 'v').argc(1), // variable to store auto-allocated FD in (`$SHED_ACCEPT` by default)
     ]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let mut var = None;
+    let (arg_vec, opts) = args.take_argv();
+    let mut argv_iter = arg_vec.into_iter();
     let cmd_span = args.cmd_span();
-    for opt in &args.opts {
-      match opt {
-        Opt::ShortWithArg('v', arg) => var = Some(arg.clone()),
+
+    for opt in opts {
+      match opt.key() {
+        "var" => {
+          let Some(arg) = opt.value() else {
+            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for --var"));
+          };
+          var = Some(arg.to_var_str());
+        }
         _ => return Err(sherr!(ExecFail @ args.cmd_span(), "Unexpected option '{opt}'")),
       }
     }
 
-    let mut argv_iter = args.argv.into_iter();
     let Some((fd, span)) = argv_iter.next() else {
       return Err(sherr!(
         ExecFail @ cmd_span,
@@ -461,26 +464,24 @@ impl super::Builtin for Listen {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('U'), // filesystem Unix socket
-      OptSpec::single_arg('t'), // TCP host
-      OptSpec::single_arg("tcp"),
-      OptSpec::single_arg('p'), // port number
-      OptSpec::single_arg("port"),
-      OptSpec::single_arg('v'), // variable to store auto-allocated FD in (`$SHED_LISTEN` by default)
+      OptSpec::new_short("unix", 'U').argc(1), // filesystem Unix socket
+      OptSpec::new_long("tcp").short('t').argc(1), // TCP host
+      OptSpec::new_long("port").short('p').argc(1), // port number
+      OptSpec::new_short("var", 'v').argc(1), // variable to store auto-allocated FD in (`$SHED_LISTEN` by default)
     ]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let SockOpts { target, fd_var } =
-      SockOpts::from_opts(&args.opts).promote_err(args.cmd_span())?;
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, opts) = args.take_argv();
+    let SockOpts { target, fd_var } = SockOpts::from_opts(&opts).promote_err(args.cmd_span())?;
 
-    if args.argv.len() > 1 {
+    if arg_vec.len() > 1 {
       return Err(sherr!(
         ExecFail @ args.cmd_span(),
         "Too many arguments, expected at most 1 file descriptor argument",
       ));
     }
 
-    let target_fd = if let Some((arg, span)) = args.argv.first() {
+    let target_fd = if let Some((arg, span)) = arg_vec.first() {
       let Ok(arg) = arg.parse::<u32>() else {
         return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{arg}'"));
       };
@@ -525,27 +526,25 @@ impl super::Builtin for Sock {
 
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('U'), // filesystem Unix socket
-      OptSpec::single_arg('t'), // TCP host
-      OptSpec::single_arg("tcp"),
-      OptSpec::single_arg('p'), // port number
-      OptSpec::single_arg("port"),
-      OptSpec::single_arg('v'), // variable to store auto-allocated FD in (`$SHED_CONN` by default)
+      OptSpec::new_short("unix", 'U').argc(1), // filesystem Unix socket
+      OptSpec::new_long("tcp").short('t').argc(1), // TCP host
+      OptSpec::new_long("port").short('p').argc(1), // port number
+      OptSpec::new_short("var", 'v').argc(1), // variable to store auto-allocated FD in (`$SHED_CONN` by default)
     ]
   }
 
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let SockOpts { target, fd_var } =
-      SockOpts::from_opts(&args.opts).promote_err(args.cmd_span())?;
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, opts) = args.take_argv();
+    let SockOpts { target, fd_var } = SockOpts::from_opts(&opts).promote_err(args.cmd_span())?;
 
-    if args.argv.len() > 1 {
+    if arg_vec.len() > 1 {
       return Err(sherr!(
         ExecFail @ args.cmd_span(),
         "Too many arguments, expected at most 1 file descriptor argument",
       ));
     }
 
-    let target_fd = if let Some((arg, span)) = args.argv.first() {
+    let target_fd = if let Some((arg, span)) = arg_vec.first() {
       let Ok(arg) = arg.parse::<u32>() else {
         return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{arg}'"));
       };

@@ -13,9 +13,11 @@ impl super::Builtin for Source {
     true
   }
 
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut arg_vec = args.argv.into_iter();
-    let Some((file, span)) = arg_vec.next() else {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, _) = args.take_argv();
+    let mut arg_iter = arg_vec.into_iter();
+
+    let Some((file, span)) = arg_iter.next() else {
       return Err(sherr!(
         ExecFail @ args.span,
         "source: filename argument required",
@@ -35,7 +37,7 @@ impl super::Builtin for Source {
       ));
     }
 
-    let extra: Vec<VarStr> = arg_vec.map(|(arg, _)| arg).collect();
+    let extra: Vec<VarStr> = arg_iter.map(|(arg, _)| arg).collect();
     let saved_argv = (!extra.is_empty()).then(|| {
       Shed::vars_mut(|v| {
         let scope = v.cur_scope_mut();

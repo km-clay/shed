@@ -7,7 +7,7 @@ use super::{
   super::state::{jobs::JobTab, terminal::Terminal},
   BuiltinArgs,
   eval::lex::Span,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   out, outln, sherr,
   signal::parse_signal,
   state::{
@@ -81,27 +81,27 @@ pub enum JobBehavior {
 pub(super) struct Fg;
 impl super::Builtin for Fg {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    continue_job(args, &JobBehavior::Foregound)
+    continue_job(&args, &JobBehavior::Foregound)
   }
 }
 
 pub(super) struct Bg;
 impl super::Builtin for Bg {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    continue_job(args, &JobBehavior::Background)
+    continue_job(&args, &JobBehavior::Background)
   }
 }
 
-pub fn continue_job(args: BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> {
+pub fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> {
   let span = args.span();
-  let mut arg_vec = args.argv.into_iter();
+  let mut arg_vec = args.arguments();
 
   let Some(curr_job_id) = Shed::jobs(JobTab::curr_job) else {
     return Err(sherr!(ExecFail @ span, "No jobs found"));
   };
 
   let tabid = match arg_vec.next() {
-    Some((arg, blame)) => parse_job_id(&arg, blame)?,
+    Some((arg, blame)) => parse_job_id(arg, blame.clone())?,
     None => curr_job_id,
   };
 
@@ -133,22 +133,23 @@ pub(super) struct Jobs;
 impl super::Builtin for Jobs {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('l'),
-      OptSpec::flag('p'),
-      OptSpec::flag('n'),
-      OptSpec::flag('r'),
-      OptSpec::flag('s'),
+      OptSpec::new_short("long", 'l'),
+      OptSpec::new_short("pids", 'p'),
+      OptSpec::new_short("new-only", 'n'),
+      OptSpec::new_short("running", 'r'),
+      OptSpec::new_short("stopped", 's'),
+      OptSpec::new_short("verbose", 'v'),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut flags = JobCmdFlags::empty();
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('l') => flags |= JobCmdFlags::LONG,
-        Opt::Short('p') => flags |= JobCmdFlags::PIDS,
-        Opt::Short('n') => flags |= JobCmdFlags::NEW_ONLY,
-        Opt::Short('r') => flags |= JobCmdFlags::RUNNING,
-        Opt::Short('s') => flags |= JobCmdFlags::STOPPED,
+    for opt in args.options() {
+      match opt.key() {
+        "long" => flags |= JobCmdFlags::LONG,
+        "pids" => flags |= JobCmdFlags::PIDS,
+        "new-only" => flags |= JobCmdFlags::NEW_ONLY,
+        "running" => flags |= JobCmdFlags::RUNNING,
+        "stopped" => flags |= JobCmdFlags::STOPPED,
         _ => {
           return Err(sherr!(
             SyntaxErr @ args.span(),
@@ -171,13 +172,12 @@ impl super::Builtin for Wait {
       return with_status(0);
     }
     let arg_vec = args
-      .argv
-      .into_iter()
+      .arguments()
       .map(|arg| {
         if arg.0.as_str().chars().all(|ch| ch.is_ascii_digit()) {
           Ok(JobID::Pid(Pid::from_raw(arg.0.parse::<i32>().unwrap())))
         } else {
-          Ok(JobID::TableID(parse_job_id(&arg.0, arg.1)?))
+          Ok(JobID::TableID(parse_job_id(arg.0, arg.1.clone())?))
         }
       })
       .collect::<ShResult<Vec<JobID>>>()
@@ -200,17 +200,20 @@ impl super::Builtin for Wait {
 pub(super) struct Disown;
 impl super::Builtin for Disown {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('h'), OptSpec::flag('a')]
+    vec![
+      OptSpec::new_short("nohup", 'h'),
+      OptSpec::new_short("all", 'a'),
+    ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let mut nohup = false;
     let mut disown_all = false;
 
-    for opt in args.opts {
-      match opt {
-        Opt::Short('h') => nohup = true,
-        Opt::Short('a') => disown_all = true,
+    for opt in args.options() {
+      match opt.key() {
+        "nohup" => nohup = true,
+        "all" => disown_all = true,
         _ => {
           return Err(sherr!(
             SyntaxErr @ span,
@@ -228,8 +231,8 @@ impl super::Builtin for Disown {
     }
 
     let mut ids = vec![];
-    for (arg, span) in args.argv {
-      let id = parse_job_id(&arg, span)?;
+    for (arg, span) in args.arguments() {
+      let id = parse_job_id(arg, span.clone())?;
       ids.push(id);
     }
 
@@ -390,9 +393,9 @@ pub(super) struct Kill;
 impl super::Builtin for Kill {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('l'),
-      OptSpec::flag('v'),
-      OptSpec::single_arg('s'),
+      OptSpec::new_short("list", 'l'),
+      OptSpec::new_short("verbose", 'v'),
+      OptSpec::new_short("signal", 's').argc(1),
     ]
   }
 
@@ -401,11 +404,14 @@ impl super::Builtin for Kill {
     let mut list_sig = false;
     let mut verbose = false;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('v') => verbose = true,
-        Opt::Short('l') => list_sig = true,
-        Opt::ShortWithArg('s', sig_name) => {
+    for opt in args.options() {
+      match opt.key() {
+        "verbose" => verbose = true,
+        "list" => list_sig = true,
+        "signal" => {
+          let Some(sig_name) = opt.value() else {
+            continue;
+          };
           signal = Some(parse_kill_sig(sig_name).promote_err(args.span.clone())?);
         }
         _ => {}
@@ -413,7 +419,7 @@ impl super::Builtin for Kill {
     }
 
     if list_sig {
-      let Some((arg, span)) = args.argv.first() else {
+      let Some((arg, span)) = args.arguments().next() else {
         // kill -l - list all signals
         list_all_signals();
         return Ok(());
@@ -433,13 +439,13 @@ impl super::Builtin for Kill {
       return with_status(0);
     }
 
-    if args.argv.is_empty() {
+    if args.no_arguments() {
       return Err(sherr!(SyntaxErr @ args.span, "usage: kill [-signal] pid ..."));
     }
 
     let sig = signal.unwrap_or(KillSig::Real(Signal::SIGTERM));
 
-    for (arg, span) in &args.argv {
+    for (arg, span) in args.arguments() {
       // Check if the arg looks like a signal (e.g. kill -TERM pid, kill -0 pid)
       if arg.starts_with('-') && !arg.starts_with("--") {
         let stripped = arg.trim_start_matches('-');

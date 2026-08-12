@@ -1,14 +1,8 @@
 use std::{env, path::PathBuf};
 
 use super::{
-  super::state::meta::MetaTab,
-  ShResult, Shed, Span,
-  getopt::{Opt, OptSpec},
-  out, outln, sherr,
-  state::util::change_dir,
-  try_var,
-  util::ShResultExt,
-  with_status,
+  super::state::meta::MetaTab, ShResult, Shed, Span, opt::OptSpec, out, outln, sherr,
+  state::util::change_dir, try_var, util::ShResultExt, with_status,
 };
 
 fn is_index_arg(arg: &str) -> bool {
@@ -23,11 +17,11 @@ struct DirStackArgs {
 }
 
 fn parse_dirstack_args(args: &super::BuiltinArgs, cmd: &str) -> ShResult<DirStackArgs> {
-  let no_cd = args.opts.iter().any(|o| matches!(o, Opt::Short('n')));
+  let no_cd = args.options().any(|o| o.key() == "no_cd");
   let mut index = None;
   let mut dir = None;
 
-  for (arg, _) in &args.argv {
+  for (arg, _) in args.arguments() {
     if is_index_arg(arg) {
       index = Some(parse_stack_idx(arg, args.span(), cmd)?);
     } else if arg.starts_with('-') {
@@ -60,7 +54,7 @@ fn parse_dirstack_args(args: &super::BuiltinArgs, cmd: &str) -> ShResult<DirStac
 pub(super) struct PushDir;
 impl super::Builtin for PushDir {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('n')]
+    vec![OptSpec::new_short("no_cd", 'n')]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let blame = args.span();
@@ -128,7 +122,7 @@ impl super::Builtin for PushDir {
 pub(super) struct PopDir;
 impl super::Builtin for PopDir {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('n')]
+    vec![OptSpec::new_short("no_cd", 'n')]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let blame = args.span();
@@ -206,10 +200,10 @@ pub(super) struct Dirs;
 impl super::Builtin for Dirs {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('p'),
-      OptSpec::flag('v'),
-      OptSpec::flag('c'),
-      OptSpec::flag('l'),
+      OptSpec::new_short("one_per_line", 'p'),
+      OptSpec::new_short("one_per_line_indexed", 'v'),
+      OptSpec::new_short("clear_stack", 'c'),
+      OptSpec::new_short("no_home_truncation", 'l'),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -219,22 +213,21 @@ impl super::Builtin for Dirs {
     let mut clear_stack = false;
     let mut target_idx: Option<StackIdx> = None;
     let blame = args.span();
-    let arg_vec = args.argv;
 
-    for opt in args.opts {
-      match opt {
-        Opt::Short('p') => one_per_line = true,
-        Opt::Short('v') => one_per_line_indexed = true,
-        Opt::Short('c') => clear_stack = true,
-        Opt::Short('l') => abbreviate_home = false,
+    for opt in args.options() {
+      match opt.key() {
+        "one_per_line" => one_per_line = true,
+        "one_per_line_indexed" => one_per_line_indexed = true,
+        "clear_stack" => clear_stack = true,
+        "no_home_truncation" => abbreviate_home = false,
         _ => {}
       }
     }
 
-    for (arg, _) in arg_vec {
+    for (arg, _) in args.arguments() {
       match arg.as_str() {
-        _ if is_index_arg(&arg) => {
-          target_idx = Some(parse_stack_idx(&arg, blame.clone(), "dirs")?);
+        _ if is_index_arg(arg) => {
+          target_idx = Some(parse_stack_idx(arg, blame.clone(), "dirs")?);
         }
         _ if arg.starts_with('-') => {
           return Err(sherr!(

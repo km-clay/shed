@@ -18,12 +18,14 @@ impl super::Builtin for Exec {
     true
   }
 
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    if args.argv.is_empty() {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    if args.no_arguments() {
       return with_status(0);
     }
 
-    let args = ExecArgs::from_expanded(args.argv);
+    let (arg_vec, _) = args.take_argv();
+
+    let args = ExecArgs::from_expanded(arg_vec);
 
     let cmd = &args.cmd.0;
     let span = args.cmd.1;

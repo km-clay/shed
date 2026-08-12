@@ -1,14 +1,10 @@
 use itertools::{EitherOrBoth, Itertools};
 
-use crate::{
-  state::vars::{VarStr, VarStrSliceExt},
-  varstr,
-};
+use crate::state::vars::{VarStr, VarStrSliceExt};
 
 use super::{
-  Dispatcher, NdRule, Node, ShResult,
-  eval::lex::Span,
-  getopt::{Opt, OptSpec},
+  BuiltinArgs, Dispatcher, NdRule, Node, ShResult,
+  opt::{Opt, OptSpec, Word, parse_opts},
   out, outln,
   readline::{BashCompSpec, Candidate, CompContext, CompFlags, CompOptFlags, CompOpts, CompSpec},
   sherr,
@@ -20,30 +16,30 @@ pub(super) struct Complete;
 impl super::Builtin for Complete {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('j'),
-      OptSpec::flag('p'),
-      OptSpec::flag('r'),
-      OptSpec::flag('f'),
-      OptSpec::flag('d'),
-      OptSpec::flag('c'),
-      OptSpec::flag('u'),
-      OptSpec::flag('v'),
-      OptSpec::flag('a'),
-      OptSpec::flag('b'),
-      OptSpec::flag('S'),
-      OptSpec::single_arg('o'),
-      OptSpec::single_arg('F'),
-      OptSpec::single_arg('W'),
-      OptSpec::single_arg('A'),
+      OptSpec::new_short("jobs", 'j'),
+      OptSpec::new_short("print_specs", 'p'),
+      OptSpec::new_short("remove_spec", 'r'),
+      OptSpec::new_short("filenames", 'f'),
+      OptSpec::new_short("directories", 'd'),
+      OptSpec::new_short("commands", 'c'),
+      OptSpec::new_short("users", 'u'),
+      OptSpec::new_short("variables", 'v'),
+      OptSpec::new_short("aliases", 'a'),
+      OptSpec::new_short("builtins", 'b'),
+      OptSpec::new_short("signals", 'S'),
+      OptSpec::new_short("option", 'o').argc(1),
+      OptSpec::new_short("function", 'F').argc(1),
+      OptSpec::new_short("wordlist", 'W').argc(1),
+      OptSpec::new_short("action", 'A').argc(1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let blame = args.span();
-    let src = build_source(&args.opts, &args.argv);
-    let comp_opts = get_comp_opts(args.opts)?;
+    let src = build_source(&args);
+    let comp_opts = get_comp_opts(args.options())?;
 
     if comp_opts.flags.contains(CompFlags::PRINT) {
-      if args.argv.is_empty() {
+      if args.arguments().next().is_none() {
         Shed::meta(|m| -> ShResult<()> {
           let specs = m.comp_specs().values();
           for spec in specs {
@@ -53,7 +49,7 @@ impl super::Builtin for Complete {
         })?;
       } else {
         Shed::meta(|m| -> ShResult<()> {
-          for (cmd, _) in &args.argv {
+          for (cmd, _) in args.arguments() {
             if let Some(spec) = m.comp_specs().get(cmd) {
               out!("{}", spec.source());
             }
@@ -67,15 +63,15 @@ impl super::Builtin for Complete {
 
     if comp_opts.flags.contains(CompFlags::REMOVE) {
       Shed::meta_mut(|m| {
-        for (cmd, _) in &args.argv {
-          m.remove_comp_spec(cmd);
+        for (cmd, _) in args.arguments() {
+          m.remove_comp_spec(cmd.as_str());
         }
       });
 
       return with_status(0);
     }
 
-    if args.argv.is_empty() {
+    if args.arguments().next().is_none() {
       return Err(sherr!(
         ExecFail @ blame,
         "complete: no command specified",
@@ -84,8 +80,8 @@ impl super::Builtin for Complete {
 
     let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
 
-    for (cmd, _) in args.argv {
-      Shed::meta_mut(|m| m.set_comp_spec(cmd, Box::new(comp_spec.clone())));
+    for (cmd, _) in args.arguments() {
+      Shed::meta_mut(|m| m.set_comp_spec(cmd.clone(), Box::new(comp_spec.clone())));
     }
 
     with_status(0)
@@ -96,26 +92,24 @@ pub(super) struct CompGen;
 impl super::Builtin for CompGen {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('j'),
-      OptSpec::flag('f'),
-      OptSpec::flag('d'),
-      OptSpec::flag('c'),
-      OptSpec::flag('u'),
-      OptSpec::flag('v'),
-      OptSpec::flag('a'),
-      OptSpec::flag('S'),
-      OptSpec::flag('b'),
-      OptSpec::single_arg('o'),
-      OptSpec::single_arg('F'),
-      OptSpec::single_arg('W'),
+      OptSpec::new_short("jobs", 'j'),
+      OptSpec::new_short("filenames", 'f'),
+      OptSpec::new_short("directories", 'd'),
+      OptSpec::new_short("commands", 'c'),
+      OptSpec::new_short("users", 'u'),
+      OptSpec::new_short("variables", 'v'),
+      OptSpec::new_short("aliases", 'a'),
+      OptSpec::new_short("signals", 'S'),
+      OptSpec::new_short("builtins", 'b'),
+      OptSpec::new_short("option", 'o').argc(1),
+      OptSpec::new_short("function", 'F').argc(1),
+      OptSpec::new_short("wordlist", 'W').argc(1),
     ]
   }
   fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
     unreachable!("CompGen uses run_builtin directly")
   }
   fn run_builtin(&self, node: &Node, _dispatcher: &mut Dispatcher) -> ShResult<()> {
-    use super::getopt::get_opts_from_tokens_raw;
-
     let NdRule::Command {
       assignments: _,
       argv,
@@ -123,19 +117,31 @@ impl super::Builtin for CompGen {
     else {
       unreachable!()
     };
-    let src = argv
-      .iter()
-      .map(|tk| tk.clone().expand().map(|tk| tk.get_words().join_with(" ")))
-      .collect::<ShResult<Vec<VarStr>>>()?
-      .join_with(" ");
 
-    let (argv, opts) = get_opts_from_tokens_raw(argv, &self.opts())?;
+    let parsed = parse_opts(argv, &self.opts())?;
+    // the whole expanded command line, for the spec's stored source
+    let src = parsed.trace.join_with(" ");
 
-    let mut prefix = argv.into_iter().nth(1).unwrap_or_default().to_string();
+    let mut opts = vec![];
+    let mut args = vec![];
+    for word in parsed.words {
+      match word {
+        Word::Opt(opt) => opts.push(opt),
+        Word::Arg(value, span) => args.push((value, span)),
+        Word::Sep(_) => {}
+      }
+    }
+
+    // the word to complete is the first operand after `compgen` itself
+    let mut prefix = args
+      .into_iter()
+      .nth(1)
+      .map(|(v, _)| v.to_string())
+      .unwrap_or_default();
     if prefix.as_str() == "--" {
       prefix.clear();
     }
-    let comp_opts = get_comp_opts(opts)?;
+    let comp_opts = get_comp_opts(opts.iter())?;
     let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
 
     let dummy_ctx = CompContext {
@@ -159,14 +165,12 @@ pub(super) struct Compadd;
 impl super::Builtin for Compadd {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('P'),
-      OptSpec::single_arg('S'),
-      OptSpec::single_arg('d'),
-      OptSpec::single_arg('D'),
-      OptSpec::single_arg('a'),
-      OptSpec::single_arg('A'),
-      OptSpec::flag('q'),
-      OptSpec::flag("quoted"),
+      OptSpec::new_short("prefix", 'P').argc(1),
+      OptSpec::new_short("suffix", 'S').argc(1),
+      OptSpec::new_short("desc_arr", 'd').argc(1),
+      OptSpec::new_short("desc", 'D').argc(1),
+      OptSpec::new_short("cand_arr", 'a').argc(1),
+      OptSpec::new_short("assoc_arr", 'A').argc(1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -176,14 +180,14 @@ impl super::Builtin for Compadd {
     let mut cand_arr = None;
     let mut assoc_arr = None;
     let mut desc = None;
-    for opt in args.opts {
-      match opt {
-        Opt::ShortWithArg('d', arg) => desc_arr = Some(arg),
-        Opt::ShortWithArg('D', arg) => desc = Some(arg),
-        Opt::ShortWithArg('P', arg) => prefix = Some(arg),
-        Opt::ShortWithArg('S', arg) => suffix = Some(arg),
-        Opt::ShortWithArg('a', arg) => cand_arr = Some(arg),
-        Opt::ShortWithArg('A', arg) => assoc_arr = Some(arg),
+    for opt in args.options() {
+      match opt.key() {
+        "desc_arr" => desc_arr = opt.value().map(VarStr::from),
+        "desc" => desc = opt.value().map(VarStr::from),
+        "prefix" => prefix = opt.value().map(VarStr::from),
+        "suffix" => suffix = opt.value().map(VarStr::from),
+        "cand_arr" => cand_arr = opt.value().map(VarStr::from),
+        "assoc_arr" => assoc_arr = opt.value().map(VarStr::from),
         _ => {}
       }
     }
@@ -198,8 +202,7 @@ impl super::Builtin for Compadd {
     };
 
     let mut candidates: Vec<Candidate> = args
-      .argv
-      .iter()
+      .arguments()
       .map(|(s, _)| s.as_str())
       .map(make_candidate)
       .collect();
@@ -253,70 +256,64 @@ impl super::Builtin for Compadd {
   }
 }
 
-fn build_source(opts: &[Opt], argv: &[(VarStr, Span)]) -> VarStr {
+fn build_source(args: &BuiltinArgs) -> VarStr {
   let mut parts: Vec<VarStr> = vec!["complete".into()];
-  for opt in opts {
-    match opt {
-      Opt::Short(c) => parts.push(varstr!("-{c}")),
-      Opt::Long(s) => parts.push(varstr!("--{s}")),
-      Opt::ShortWithArg(c, a) => {
-        parts.push(varstr!("-{c}"));
-        parts.push(a.clone());
-      }
-      Opt::LongWithArg(s, a) => {
-        parts.push(varstr!("--{s}"));
-        parts.push(a.clone());
-      }
-      _ => {}
+  for opt in args.options() {
+    // the flag as written (e.g. `-W`), followed by its argument words
+    parts.push(opt.span().as_str().into());
+    for (arg, _) in opt.args() {
+      parts.push(arg.clone());
     }
   }
-  for (s, _) in argv {
-    parts.push(s.clone());
+  for (arg, _) in args.arguments() {
+    parts.push(arg.clone());
   }
   parts.join_with(" ")
 }
 
-pub fn get_comp_opts(opts: Vec<Opt>) -> ShResult<CompOpts> {
+pub fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult<CompOpts> {
   let mut comp_opts = CompOpts::default();
   comp_opts.opt_flags |= CompOptFlags::SPACE;
 
   for opt in opts {
-    match opt {
-      Opt::ShortWithArg('F', func) => {
-        comp_opts.func = Some(func);
-      }
-      Opt::ShortWithArg('W', wordlist) => {
-        comp_opts.wordlist = Some(wordlist.split_whitespace().map(VarStr::from).collect());
-      }
-      Opt::ShortWithArg('A', action) => {
-        comp_opts.action = Some(action);
-      }
-      Opt::ShortWithArg('o', opt_flag) => match opt_flag.as_str() {
-        "default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
-        "dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
-        "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
-        "filenames" => comp_opts.opt_flags |= CompOptFlags::FILENAMES,
-        "nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
-        _ => {
-          let span: crate::eval::lex::Span = Span::default();
-          return Err(sherr!(
-            InvalidOpt @ span,
-            "complete: invalid option: {opt_flag}"
-          ));
+    match opt.key() {
+      "function" => comp_opts.func = opt.value().map(VarStr::from),
+      "wordlist" => {
+        if let Some(wordlist) = opt.value() {
+          comp_opts.wordlist = Some(wordlist.split_whitespace().map(VarStr::from).collect());
         }
-      },
+      }
+      "action" => comp_opts.action = opt.value().map(VarStr::from),
+      "option" => {
+        let Some(opt_flag) = opt.value() else {
+          return Err(sherr!(InvalidOpt @ opt.span().clone(), "complete: -o requires an argument"));
+        };
+        match opt_flag {
+          "default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
+          "dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
+          "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
+          "filenames" => comp_opts.opt_flags |= CompOptFlags::FILENAMES,
+          "nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
+          _ => {
+            return Err(sherr!(
+              InvalidOpt @ opt.span().clone(),
+              "complete: invalid option: {opt_flag}"
+            ));
+          }
+        }
+      }
 
-      Opt::Short('a') => comp_opts.flags |= CompFlags::ALIAS,
-      Opt::Short('S') => comp_opts.flags |= CompFlags::SIGNALS,
-      Opt::Short('r') => comp_opts.flags |= CompFlags::REMOVE,
-      Opt::Short('j') => comp_opts.flags |= CompFlags::JOBS,
-      Opt::Short('p') => comp_opts.flags |= CompFlags::PRINT,
-      Opt::Short('f') => comp_opts.flags |= CompFlags::FILES,
-      Opt::Short('d') => comp_opts.flags |= CompFlags::DIRS,
-      Opt::Short('c') => comp_opts.flags |= CompFlags::CMDS,
-      Opt::Short('b') => comp_opts.flags |= CompFlags::BUILTINS,
-      Opt::Short('u') => comp_opts.flags |= CompFlags::USERS,
-      Opt::Short('v') => comp_opts.flags |= CompFlags::VARS,
+      "aliases" => comp_opts.flags |= CompFlags::ALIAS,
+      "signals" => comp_opts.flags |= CompFlags::SIGNALS,
+      "remove_spec" => comp_opts.flags |= CompFlags::REMOVE,
+      "jobs" => comp_opts.flags |= CompFlags::JOBS,
+      "print_specs" => comp_opts.flags |= CompFlags::PRINT,
+      "filenames" => comp_opts.flags |= CompFlags::FILES,
+      "directories" => comp_opts.flags |= CompFlags::DIRS,
+      "commands" => comp_opts.flags |= CompFlags::CMDS,
+      "builtins" => comp_opts.flags |= CompFlags::BUILTINS,
+      "users" => comp_opts.flags |= CompFlags::USERS,
+      "variables" => comp_opts.flags |= CompFlags::VARS,
       _ => unreachable!(),
     }
   }

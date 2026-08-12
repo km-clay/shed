@@ -1,29 +1,28 @@
 use std::{env, fs};
 
-use super::{
-  ShResult,
-  getopt::{Opt, OptSpec},
-  outln, sherr, try_var, with_status,
-};
+use super::{ShResult, opt::OptSpec, outln, sherr, try_var, with_status};
 
 pub(super) struct Pwd;
 impl super::Builtin for Pwd {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('L'), OptSpec::flag('P')]
+    vec![
+      OptSpec::new_short("logical", 'L'),
+      OptSpec::new_short("physical", 'P'),
+    ]
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut logical = true;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('L') => logical = true,
-        Opt::Short('P') => logical = false,
-        _ => return Err(sherr!(ParseErr @ args.span, "Invalid option: {opt}")),
+    for opt in args.options() {
+      match opt.key() {
+        "logical" => logical = true,
+        "physical" => logical = false,
+        _ => return Err(sherr!(ParseErr @ opt.span(), "Invalid option: {opt}")),
       }
     }
 
-    if !args.argv.is_empty() {
+    if !args.no_arguments() {
       return Err(sherr!(ParseErr @ args.span, "pwd: too many arguments"));
     }
 

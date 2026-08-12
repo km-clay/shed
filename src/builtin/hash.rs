@@ -1,7 +1,7 @@
 use super::{
   Shed,
   expand::shell_quote,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   outln, sherr,
   state::meta::MetaTab,
   util::{ShResult, with_status},
@@ -10,21 +10,28 @@ use super::{
 pub(super) struct Hash;
 impl super::Builtin for Hash {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('r'), OptSpec::flag("refresh")]
+    vec![
+      OptSpec::new_short("clear", 'r'),
+      OptSpec::new_long("refresh"),
+    ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut refresh = false;
     let mut clear = false;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('r') => clear = true,
-        Opt::Long(s) if s == "refresh" => refresh = true,
-        _ => return Err(sherr!(ParseErr, "Invalid hash option: {opt:?}").promote(args.span())),
+    for opt in args.options() {
+      match opt.key() {
+        "clear" => clear = true,
+        "refresh" => refresh = true,
+        _ => {
+          return Err(
+            sherr!(ParseErr @ opt.span(), "Invalid hash option: {opt}").promote(args.span()),
+          );
+        }
       }
     }
 
-    if args.argv.is_empty() && args.opts.is_empty() {
+    if args.no_arguments() && args.no_options() {
       let entries: Vec<(String, std::path::PathBuf)> = Shed::meta(|m| {
         m.path_cache()
           .entries()
@@ -46,12 +53,12 @@ impl super::Builtin for Hash {
       }
     });
 
-    if !args.argv.is_empty() {
+    if !args.no_arguments() {
       Shed::meta_mut(MetaTab::rehash_path_cache);
       Shed::meta(|m| -> ShResult<()> {
-        for (arg, span) in args.argv {
-          if m.lookup_cached_cmd(&arg).is_none() {
-            return Err(sherr!(NotFound, "Command not found: {arg}").promote(span));
+        for (arg, span) in args.arguments() {
+          if m.lookup_cached_cmd(arg).is_none() {
+            return Err(sherr!(NotFound, "Command not found: {arg}").promote(span.clone()));
           }
         }
         Ok(())

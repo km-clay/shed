@@ -6,8 +6,14 @@ use crate::state::{shopt::ShOptSet, vars::VarStrSliceExt};
 
 use super::{
   super::state::scopes::ScopeStack,
+  eval::{
+    execute::prepare_argv_with,
+    lex::{Span, Tk},
+  },
   expand::shell_quote,
-  match_loop, outln, sherr,
+  match_loop,
+  opt::Parsed,
+  outln, sherr,
   state::{Shed, vars::VarKind},
   util::{ShErr, ShResult, ShResultExt, with_status},
 };
@@ -242,10 +248,18 @@ impl super::Builtin for Set {
     true
   }
 
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+    Ok(
+      prepare_argv_with(argv, no_split)
+        .promote_err(cmd_span)?
+        .into(),
+    )
+  }
+
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
 
-    if args.argv.is_empty() {
+    if args.no_arguments() {
       // print values of all variables
       let all_vars = Shed::vars(ScopeStack::all_vars);
       for (k, v) in all_vars {
@@ -264,11 +278,13 @@ impl super::Builtin for Set {
       }
     }
 
-    let mut arg_vec = args.argv.into_iter().peekable();
+    let (arg_vec, _) = args.take_argv();
+    let mut arg_iter = arg_vec.into_iter().peekable();
+
     let mut clear_if_empty = false;
     let mut pos_args = vec![];
 
-    'outer: while let Some((arg, arg_span)) = arg_vec.next() {
+    'outer: while let Some((arg, arg_span)) = arg_iter.next() {
       let mut flags = SetFlags::empty();
       let mut chars = arg.chars().peekable();
 
@@ -283,12 +299,12 @@ impl super::Builtin for Set {
             }
             Some('o') => {
               let mut found = false;
-              while let Some((arg, _)) = arg_vec.peek() {
+              while let Some((arg, _)) = arg_iter.peek() {
                 found = true;
                 if arg.starts_with('-') || arg.starts_with('+') {
                   break;
                 }
-                let (arg, arg_span) = arg_vec.next().unwrap();
+                let (arg, arg_span) = arg_iter.next().unwrap();
                 match SetFlags::from_str(&arg) {
                   Ok(f) => flags |= f,
                   Err(e) => return Err(e).promote_err(arg_span),
@@ -336,7 +352,7 @@ impl super::Builtin for Set {
       }
     }
 
-    while let Some((arg, _)) = arg_vec.next() {
+    while let Some((arg, _)) = arg_iter.next() {
       pos_args.push(arg);
     }
 

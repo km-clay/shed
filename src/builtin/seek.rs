@@ -3,7 +3,7 @@ use std::os::fd::BorrowedFd;
 use nix::unistd::{Whence, lseek};
 
 use super::{
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   outln, sherr,
   util::{ShResult, with_status},
 };
@@ -11,25 +11,30 @@ use super::{
 pub(super) struct Seek;
 impl super::Builtin for Seek {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('c'), OptSpec::flag('e')]
+    vec![
+      OptSpec::new_short("cursor-rel", 'c'),
+      OptSpec::new_short("end-rel", 'e'),
+    ]
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let mut cursor_rel = false;
     let mut end_rel = false;
-    let mut arg_vec = args.argv.into_iter();
+    let (arg_vec, opts) = args.take_argv();
 
-    for opt in args.opts {
-      match opt {
-        Opt::Short('c') => cursor_rel = true,
-        Opt::Short('e') => end_rel = true,
+    let mut arg_iter = arg_vec.into_iter();
+
+    for opt in opts {
+      match opt.key() {
+        "cursor-rel" => cursor_rel = true,
+        "end-rel" => end_rel = true,
         _ => {
-          return Err(sherr!(ExecFail, "lseek: Unexpected flag '{opt}'",));
+          return Err(sherr!(ExecFail @ opt.span(), "lseek: Unexpected flag '{opt}'",));
         }
       }
     }
 
-    let Some((fd, fd_span)) = arg_vec.next() else {
+    let Some((fd, fd_span)) = arg_iter.next() else {
       return Err(sherr!(ExecFail @ span, "lseek: Missing required argument 'fd'",));
     };
     let Ok(fd) = fd.parse::<u32>() else {
@@ -39,9 +44,9 @@ impl super::Builtin for Seek {
       );
     };
 
-    let Some((offset, offset_span)) = arg_vec.next() else {
+    let Some((offset, offset_span)) = arg_iter.next() else {
       return Err(sherr!(
-        ExecFail,
+        ExecFail @ span,
         "lseek: Missing required argument 'offset'",
       ));
     };

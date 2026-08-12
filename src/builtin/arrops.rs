@@ -4,7 +4,7 @@ use crate::state::vars::VarStr;
 
 use super::{
   BuiltinArgs, ShResult, Shed,
-  getopt::{Opt, OptSpec},
+  opt::OptSpec,
   outln, sherr,
   state::vars::{VarFlags, VarKind},
   util::ShResultExt,
@@ -14,9 +14,9 @@ use super::{
 trait ArrOp {
   fn arr_opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::single_arg('c'),
-      OptSpec::single_arg('v'),
-      OptSpec::flag('r'),
+      OptSpec::new("count").short('c').argc(1),
+      OptSpec::new("variable").short('v').argc(1),
+      OptSpec::new("reverse").short('r'),
     ]
   }
   fn action(&self) -> Action;
@@ -31,26 +31,25 @@ trait ArrOp {
   }
   fn push(&self, args: BuiltinArgs) -> ShResult<()> {
     let end = self.direction();
-    if args.argv.is_empty() {
+    if args.no_arguments() {
       return Err(sherr!(ParseErr @ args.span(), "missing array name"));
     }
-    let mut argv = args.argv.into_iter();
+    let mut arguments = args.arguments();
+    let name = arguments.next().unwrap().0;
 
-    let name = argv.next().unwrap().0;
-
-    for (val, span) in argv {
+    for (val, span) in arguments {
       Shed::vars_mut(|v| {
-        if let Ok(arr) = v.get_arr_mut(&name) {
+        if let Ok(arr) = v.get_arr_mut(name) {
           match end {
-            End::Front => arr.push_front(val),
-            End::Back => arr.push_back(val),
+            End::Front => arr.push_front(val.clone()),
+            End::Back => arr.push_back(val.clone()),
           }
           Ok(())
         } else {
-          v.set_var(&name, VarKind::arr([val]), VarFlags::empty())
+          v.set_var(name, VarKind::arr([val]), VarFlags::empty())
         }
       })
-      .blame(span)?;
+      .promote_err(span.clone())?;
     }
 
     with_status(0)
@@ -61,34 +60,38 @@ trait ArrOp {
     let mut count = 1;
     let mut var = None;
 
-    for opt in &args.opts {
-      match opt {
-        Opt::ShortWithArg('c', c) => {
-          count = c
-            .parse::<usize>()
-            .map_err(|_| sherr!(ParseErr @ args.span(), "invalid count: {}", c))?;
+    for opt in args.options() {
+      match opt.key() {
+        "count" => {
+          if let Some(c) = opt.value() {
+            count = c
+              .parse::<usize>()
+              .map_err(|_| sherr!(ParseErr @ args.span(), "invalid count: {}", c))?;
+          }
         }
-        Opt::ShortWithArg('v', v) => {
-          var = Some(v);
+        "variable" => {
+          if let Some(v) = opt.value() {
+            var = Some(v);
+          }
         }
-        Opt::Short('r') => { /* no-op */ }
+        "reverse" => { /* no-op */ }
         _ => {
-          return Err(sherr!(ParseErr @ args.span(), "invalid option: '{opt}'"));
+          return Err(sherr!(ParseErr @ opt.span().clone(), "invalid option: '{opt}'"));
         }
       }
     }
 
-    if args.argv.is_empty() {
+    if args.no_arguments() {
       return Err(sherr!(ParseErr @ args.span(), "missing array name"));
     }
 
-    for (arg, _) in args.argv {
+    for (arg, _) in args.arguments() {
       for _ in 0..count {
         let pop = |arr: &mut VecDeque<VarStr>| match end {
           End::Front => arr.pop_front(),
           End::Back => arr.pop_back(),
         };
-        let Some(popped_val) = Shed::vars_mut(|v| v.get_arr_mut(&arg).ok().and_then(pop)) else {
+        let Some(popped_val) = Shed::vars_mut(|v| v.get_arr_mut(arg).ok().and_then(pop)) else {
           return with_status(1);
         };
         popped.push_back(popped_val);
@@ -199,18 +202,23 @@ impl super::Builtin for Push {
 pub(super) struct Rotate;
 impl super::Builtin for Rotate {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('r'), OptSpec::single_arg('c')]
+    vec![
+      OptSpec::new("reverse").short('r'),
+      OptSpec::new("count").short('c').argc(1),
+    ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut reverse = false;
     let mut count = 1;
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('r') => reverse = true,
-        Opt::ShortWithArg('c', c) => {
-          count = c
-            .parse::<usize>()
-            .map_err(|_| sherr!(ParseErr @ args.span(), "invalid count: {}", c))?;
+    for opt in args.options() {
+      match opt.key() {
+        "reverse" => reverse = true,
+        "count" => {
+          if let Some(c) = opt.value() {
+            count = c
+              .parse::<usize>()
+              .map_err(|_| sherr!(ParseErr @ args.span(), "invalid count: {}", c))?;
+          }
         }
         _ => {
           return Err(sherr!(ParseErr @ args.span(), "invalid option: '{opt}'"));
@@ -218,7 +226,7 @@ impl super::Builtin for Rotate {
       }
     }
 
-    for (arg, _) in &args.argv {
+    for (arg, _) in args.arguments() {
       Shed::vars_mut(|v| -> ShResult<()> {
         let arr = v.get_arr_mut(arg).promote_err(args.span())?;
         if reverse {

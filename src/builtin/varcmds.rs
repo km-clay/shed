@@ -8,7 +8,7 @@ use crate::state::{
 use super::{
   Span, Tk,
   expand::expand_arithmetic,
-  getopt::{Opt, OptSpec, get_opts_from_tokens_raw_no_split},
+  opt::{Opt, OptSpec, Parsed, Word, parse_opts_raw},
   outln, sherr,
   state::{
     Shed,
@@ -21,17 +21,32 @@ use super::{
 };
 
 trait VarCmd: super::Builtin {
-  fn parse_args(
-    &self,
-    cmd_span: Span,
-    argv: &[Tk],
-    _no_split: bool,
-  ) -> ShResult<(super::ArgVector, Vec<Opt>)> {
-    let (raw_argv, opts) =
-      get_opts_from_tokens_raw_no_split(argv, &self.opts()).promote_err(cmd_span.clone())?;
-    let argv = prepare_assignment_argv(&raw_argv).promote_err(cmd_span)?;
+  fn parse_args(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
+    // Options are parsed normally, but operands stay raw so `prepare_assignment_argv`
+    // can see the source (array literals, quoted RHS whitespace).
+    let (opts, operand_tks) = parse_opts_raw(argv, &self.opts());
+    let operand_argv = prepare_assignment_argv(&operand_tks).promote_err(cmd_span)?;
 
-    Ok((argv, opts))
+    // The command word (always the first operand) stays at `words[0]` so
+    // `run_builtin` strips it; options then follow, then the rest of the operands.
+    let mut operands = operand_argv.into_iter();
+    let mut words: Vec<Word> = vec![];
+    if let Some((word, span)) = operands.next() {
+      words.push(Word::Arg(word, span));
+    }
+    words.extend(opts.into_iter().map(Word::Opt));
+    words.extend(operands.map(|(word, span)| Word::Arg(word, span)));
+
+    let trace = words
+      .iter()
+      .map(|w| match w {
+        Word::Arg(value, _) => value.clone(),
+        Word::Opt(opt) => opt.span().as_str().into(),
+        Word::Sep(span) => span.as_str().into(),
+      })
+      .collect();
+
+    Ok(Parsed { words, trace })
   }
 }
 
@@ -134,15 +149,15 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
   let mut flags = base_flags;
   let mut kind = DeclareKind::Str;
   for opt in opts {
-    match opt {
-      Opt::Short('r') => flags |= VarFlags::READONLY,
-      Opt::Short('x') => flags |= VarFlags::EXPORT,
-      Opt::Short('i') => {
+    match opt.key() {
+      "readonly" => flags |= VarFlags::READONLY,
+      "export" => flags |= VarFlags::EXPORT,
+      "integer" => {
         kind = DeclareKind::Int;
         flags |= VarFlags::INTEGER;
       }
-      Opt::Short('a') => kind = DeclareKind::Arr,
-      Opt::Short('A') => kind = DeclareKind::Assoc,
+      "array" => kind = DeclareKind::Arr,
+      "assoc" => kind = DeclareKind::Assoc,
       _ => {}
     }
   }
@@ -180,47 +195,44 @@ impl VarCmd for Declare {}
 impl super::Builtin for Declare {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('i'),
-      OptSpec::flag('r'),
-      OptSpec::flag('x'),
-      OptSpec::flag('a'),
-      OptSpec::flag('A'),
-      OptSpec::flag('p'),
-      OptSpec::flag('f'),
-      OptSpec::flag('F'),
+      OptSpec::new_short("integer", 'i'),
+      OptSpec::new_short("readonly", 'r'),
+      OptSpec::new_short("export", 'x'),
+      OptSpec::new_short("array", 'a'),
+      OptSpec::new_short("assoc", 'A'),
+      OptSpec::new_short("print", 'p'),
+      OptSpec::new_short("functions", 'f'),
+      OptSpec::new_short("function-names", 'F'),
     ]
   }
-  fn get_argv_and_opts(
-    &self,
-    cmd_span: Span,
-    argv: &[Tk],
-    no_split: bool,
-  ) -> ShResult<(super::ArgVector, Vec<Opt>)> {
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, opts) = args.take_argv();
+
     let mut introspect: Option<IntrospectMode> = None;
-    for opt in &args.opts {
-      match opt {
-        Opt::Short('p') => introspect = Some(IntrospectMode::Vars),
-        Opt::Short('f') => introspect = Some(IntrospectMode::FunctionsFull),
-        Opt::Short('F') => introspect = Some(IntrospectMode::FunctionNames),
+    for opt in &opts {
+      match opt.key() {
+        "print" => introspect = Some(IntrospectMode::Vars),
+        "functions" => introspect = Some(IntrospectMode::FunctionsFull),
+        "function-names" => introspect = Some(IntrospectMode::FunctionNames),
         _ => {}
       }
     }
 
     if let Some(mode) = introspect {
-      return declare_introspect(mode, &args.argv);
+      return declare_introspect(mode, &arg_vec);
     }
 
-    if args.argv.is_empty() {
+    if arg_vec.is_empty() {
       // Bare `declare` prints all variables in declare-style format.
       let output = Shed::vars(display_local);
       outln!("{output}");
       return with_status(0);
     }
 
-    apply_var_decl(&args.opts, args.argv, VarFlags::empty())
+    apply_var_decl(&opts, arg_vec, VarFlags::empty())
   }
 }
 
@@ -323,20 +335,17 @@ impl super::Builtin for Readonly {
   }
 
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('p')]
+    vec![OptSpec::new_short("print", 'p')]
   }
 
-  fn get_argv_and_opts(
-    &self,
-    cmd_span: Span,
-    argv: &[Tk],
-    no_split: bool,
-  ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let list = args.opts.iter().any(|o| matches!(o, Opt::Short('p')));
-    if list || args.argv.is_empty() {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, opts) = args.take_argv();
+
+    let list = opts.iter().any(|o| o.key() == "print");
+    if list || arg_vec.is_empty() {
       // List the readonly variables (bare `readonly` and `readonly -p`).
       let vars = Shed::vars(display_readonly);
       outln!("{vars}");
@@ -344,7 +353,7 @@ impl super::Builtin for Readonly {
       return with_status(0);
     }
 
-    for (arg, span) in args.argv {
+    for (arg, span) in arg_vec {
       let (var, val) = split_assignment(&arg, span.as_str());
       Shed::vars_mut(|v| {
         v.set_var(var, val.unwrap_or_default(), VarFlags::READONLY)
@@ -363,13 +372,14 @@ impl super::Builtin for Unset {
   }
 
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('f')]
+    vec![OptSpec::new_short("functions", 'f')]
   }
 
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let is_func = args.opts.iter().any(|o| matches!(o, Opt::Short('f')));
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, opts) = args.take_argv();
+    let is_func = opts.iter().any(|o| o.key() == "functions");
 
-    for (arg, _) in args.argv {
+    for (arg, _) in arg_vec {
       if is_func {
         Shed::logic_mut(|l| l.remove_func(&arg));
         continue;
@@ -408,30 +418,30 @@ impl super::Builtin for Export {
   }
 
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::flag('n'), OptSpec::flag('p')]
+    vec![
+      OptSpec::new_short("unexport", 'n'),
+      OptSpec::new_short("print", 'p'),
+    ]
   }
 
-  fn get_argv_and_opts(
-    &self,
-    cmd_span: Span,
-    argv: &[Tk],
-    no_split: bool,
-  ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
 
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let unexport = args.opts.iter().any(|o| matches!(o, Opt::Short('n')));
-    let list = args.opts.iter().any(|o| matches!(o, Opt::Short('p')));
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, opts) = args.take_argv();
 
-    if list || (args.argv.is_empty() && !unexport) {
+    let unexport = opts.iter().any(|o| o.key() == "unexport");
+    let list = opts.iter().any(|o| o.key() == "print");
+
+    if list || (arg_vec.is_empty() && !unexport) {
       // List the exported variables (bare `export` and `export -p` are the same).
       let vars = Shed::vars(display_exported);
       outln!("{vars}");
       return with_status(0);
     }
 
-    for (arg, span) in args.argv {
+    for (arg, span) in arg_vec {
       let (var, val) = split_assignment(&arg, span.as_str());
       if unexport {
         if let Some(val) = val {
@@ -455,31 +465,28 @@ impl VarCmd for Local {}
 impl super::Builtin for Local {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::flag('i'),
-      OptSpec::flag('r'),
-      OptSpec::flag('x'),
-      OptSpec::flag('a'),
-      OptSpec::flag('A'),
+      OptSpec::new_short("integer", 'i'),
+      OptSpec::new_short("readonly", 'r'),
+      OptSpec::new_short("export", 'x'),
+      OptSpec::new_short("array", 'a'),
+      OptSpec::new_short("assoc", 'A'),
     ]
   }
 
-  fn get_argv_and_opts(
-    &self,
-    cmd_span: Span,
-    argv: &[Tk],
-    no_split: bool,
-  ) -> ShResult<(Vec<(VarStr, Span)>, Vec<Opt>)> {
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
 
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    if args.argv.is_empty() {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let (arg_vec, opts) = args.take_argv();
+
+    if arg_vec.is_empty() {
       let vars = Shed::vars(display_local);
       outln!("{vars}");
       return with_status(0);
     }
 
-    apply_var_decl(&args.opts, args.argv, VarFlags::LOCAL)
+    apply_var_decl(&opts, arg_vec, VarFlags::LOCAL)
   }
 }
 
