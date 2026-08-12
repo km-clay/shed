@@ -98,17 +98,17 @@ fn bind_abstract(name: &str) -> io::Result<OwnedFd> {
 
 #[cfg(not(linux_like))]
 fn bind_abstract(_name: &str) -> io::Result<OwnedFd> {
-  Err(sherr!(
-    ExecFail,
-    "Abstract sockets are not supported on this platform"
+  Err(io::Error::new(
+    io::ErrorKind::Unsupported,
+    "Abstract sockets are not supported on this platform",
   ))
 }
 
 #[cfg(not(linux_like))]
 fn connect_abstract(_name: &str) -> io::Result<OwnedFd> {
-  Err(sherr!(
-    ExecFail,
-    "Abstract sockets are not supported on this platform"
+  Err(io::Error::new(
+    io::ErrorKind::Unsupported,
+    "Abstract sockets are not supported on this platform",
   ))
 }
 
