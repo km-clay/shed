@@ -61,6 +61,21 @@ use super::{
   var,
 };
 
+/// Run a closure, catching and handling `ShErrKind::CleanExit(code)` if it is returned.
+pub fn catch_exit<F: FnMut() -> ShResult<()>, E: FnMut(i32)>(mut f: F, mut on_exit: E) {
+  if let Err(e) = f() {
+    if let ShErrKind::CleanExit(code) = e.kind() {
+      on_exit(*code);
+    } else {
+      e.print_error();
+    }
+  }
+}
+
+pub fn exit_with(code: i32) {
+  lifecycle::exit_shed(true, code);
+}
+
 pub fn in_cd_path(name: &Tk) -> bool {
   let Ok(expanded) = name.expand_no_side_effects() else {
     return false;
@@ -637,12 +652,7 @@ impl Dispatcher {
       let mut func_call = func.clone();
       func_call.flags.remove(NdFlags::FORK_BUILTINS);
       return self.run_fork(&name, |s| {
-        if let Err(e) = s.exec_func(&func_call) {
-          if let ShErrKind::CleanExit(code) = e.kind() {
-            lifecycle::exit_shed(true, *code);
-          }
-          e.print_error();
-        }
+        catch_exit(|| s.exec_func(&func_call), exit_with);
       });
     }
 
@@ -792,10 +802,10 @@ impl Dispatcher {
     redirs: &[RedirSpec],
     flags: NdFlags,
     blame: Span,
-    logic: F,
+    mut logic: F,
   ) -> ShResult<()>
   where
-    F: FnOnce(&mut Self) -> ShResult<()>,
+    F: FnMut(&mut Self) -> ShResult<()>,
   {
     let fork_builtins = flags.contains(NdFlags::FORK_BUILTINS);
 
@@ -810,12 +820,7 @@ impl Dispatcher {
     if fork_builtins {
       log::trace!("Forking compound command: {name}");
       self.run_fork(name, |s| {
-        if let Err(e) = logic(s) {
-          if let ShErrKind::CleanExit(code) = e.kind() {
-            lifecycle::exit_shed(true, *code);
-          }
-          e.print_error();
-        }
+        catch_exit(|| logic(s), exit_with);
       })?;
       Ok(())
     } else {
@@ -865,12 +870,7 @@ impl Dispatcher {
     let name = format!("( {body_display} )");
 
     self.run_fork(&name, |s| {
-      if let Err(e) = s.dispatch_node(&*body) {
-        if let ShErrKind::CleanExit(code) = e.kind() {
-          lifecycle::exit_shed(true, *code);
-        }
-        e.print_error();
-      }
+      catch_exit(|| s.dispatch_node(&*body), exit_with);
     })?;
 
     Ok(())
@@ -1316,12 +1316,7 @@ impl Dispatcher {
             .map(ToString::to_string)
             .unwrap_or_default();
           result = self.run_fork(&name, move |s| {
-            if let Err(e) = s.exec_internal_pipeline(&tail) {
-              if let ShErrKind::CleanExit(code) = e.kind() {
-                lifecycle::exit_shed(true, *code);
-              }
-              e.print_error();
-            }
+            catch_exit(|| s.exec_internal_pipeline(&tail).map(|_| ()), exit_with);
           });
           break;
         }
@@ -1356,12 +1351,7 @@ impl Dispatcher {
           .unwrap_or_default();
 
         self.run_fork(&name, |s| {
-          if let Err(e) = s.dispatch_node(cmd) {
-            if let ShErrKind::CleanExit(code) = e.kind() {
-              lifecycle::exit_shed(true, *code);
-            }
-            e.print_error();
-          }
+          catch_exit(|| s.dispatch_node(cmd), exit_with);
         })
       } else {
         self.dispatch_node(cmd)
@@ -1500,12 +1490,7 @@ impl Dispatcher {
     if fork_builtins {
       log::trace!("Forking builtin: {cmd_name}");
       self.run_fork(cmd_name, |s| {
-        if let Err(e) = builtin.setup_builtin(cmd, s) {
-          if let ShErrKind::CleanExit(code) = e.kind() {
-            lifecycle::exit_shed(true, *code);
-          }
-          e.print_error();
-        }
+        catch_exit(|| builtin.setup_builtin(cmd, s), exit_with);
       })?;
       Ok(())
     } else if let Err(e) = builtin.setup_builtin(cmd, self) {
@@ -1544,12 +1529,7 @@ impl Dispatcher {
         let mut child = cmd.clone();
         child.flags.remove(NdFlags::FORK_BUILTINS);
         return self.run_fork("", move |s| {
-          if let Err(e) = s.exec_cmd(&child) {
-            if let ShErrKind::CleanExit(code) = e.kind() {
-              lifecycle::exit_shed(true, *code);
-            }
-            e.print_error();
-          }
+          catch_exit(|| s.exec_cmd(&child), exit_with);
         });
       }
 

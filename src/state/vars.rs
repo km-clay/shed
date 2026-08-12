@@ -1405,20 +1405,22 @@ impl VarTab {
   pub fn set_param(&mut self, param: ShellParam, val: &str) {
     self.params.insert(param, val.into());
   }
-  pub fn get_param(&self, param: ShellParam) -> VarStr {
+  pub fn try_get_param(&self, param: ShellParam) -> Option<VarStr> {
     match param {
-      ShellParam::Pos(n) => self.sh_argv().get(n).cloned().unwrap_or_default(),
+      ShellParam::Pos(n) => self.sh_argv().get(n).cloned(),
       ShellParam::AllArgsStr => {
         let ifs = get_separator();
         self
           .params
           .get(&ShellParam::AllArgs)
           .map(|s| s.replace(markers::ARG_SEP, &ifs).into())
-          .unwrap_or_default()
       }
 
-      _ => self.params.get(&param).cloned().unwrap_or_default(),
+      _ => self.params.get(&param).cloned(),
     }
+  }
+  pub fn get_param(&self, param: ShellParam) -> VarStr {
+    self.try_get_param(param).unwrap_or_default()
   }
 }
 

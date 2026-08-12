@@ -5,6 +5,8 @@ use std::{io::Write, path::PathBuf, process::ExitCode, sync::atomic::Ordering};
 
 use clap::Parser;
 
+use crate::eval::execute;
+
 use super::{
   ShResult, Shed, autocmd,
   eval::execute::{Dispatcher, exec_nonint},
@@ -20,7 +22,7 @@ use super::{
     vars::{VarFlags, VarKind},
   },
   status_msg, try_var,
-  util::{ShErrKind, flog},
+  util::flog,
 };
 
 #[expect(clippy::struct_excessive_bools)]
@@ -221,14 +223,11 @@ fn setup_panic_handler() {
 pub(super) fn tear_down() -> ExitCode {
   signal::clear_quit_latch();
 
-  if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit))
-    && let Err(e) = exec_nonint(trap, Some("trap".into()))
-  {
-    if let ShErrKind::CleanExit(code) = e.kind() {
-      signal::QUIT_CODE.store(*code, Ordering::SeqCst);
-    } else {
-      e.print_error();
-    }
+  if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit)) {
+    execute::catch_exit(
+      || exec_nonint(trap.clone(), Some("trap".into())),
+      |code| signal::QUIT_CODE.store(code, Ordering::SeqCst),
+    );
   }
 
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
@@ -255,15 +254,11 @@ pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
   signal::clear_quit_latch();
 
   let mut code = code;
-  if run_trap
-    && let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit))
-    && let Err(e) = exec_nonint(trap, Some("trap".into()))
-  {
-    if let ShErrKind::CleanExit(trap_code) = e.kind() {
-      code = *trap_code;
-    } else {
-      e.print_error();
-    }
+  if run_trap && let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit)) {
+    execute::catch_exit(
+      || exec_nonint(trap.clone(), Some("trap".into())),
+      |status| code = status,
+    );
   }
 
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());

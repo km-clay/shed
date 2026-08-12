@@ -88,7 +88,7 @@ impl super::Builtin for ExCmd {
 
     for opt in args.options() {
       if opt.key() == "remove" {
-        remove = true
+        remove = true;
       }
     }
 

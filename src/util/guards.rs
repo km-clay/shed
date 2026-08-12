@@ -60,7 +60,7 @@ pub fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
 
 /// Snapshot the shell options, restoring them on drop.
 pub fn shopt_guard() -> impl Drop {
-  let saved = Shed::shopts(|o| o.clone());
+  let saved = Shed::shopts(Clone::clone);
   guard(saved, |saved| {
     Shed::shopts_mut(move |o| *o = saved);
   })

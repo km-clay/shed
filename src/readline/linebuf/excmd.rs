@@ -632,7 +632,7 @@ impl super::LineBuf {
       ReadSrc::Cmd(cmd) => {
         autocmd!(PreCmd);
         defer!(autocmd!(PostCmd));
-        match capture_command(cmd, None, Some(get_entry_name())) {
+        match capture_command(cmd, None, Some(&get_entry_name())) {
           Ok(out) => out,
           Err(e) => {
             e.print_error();
@@ -721,7 +721,7 @@ impl super::LineBuf {
       Some(capture_command(
         sh_cmd,
         Some(stdin),
-        Some(get_entry_name()),
+        Some(&get_entry_name()),
       )?)
     } else {
       defer!(autocmd!(PostCmd));

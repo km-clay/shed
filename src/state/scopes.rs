@@ -522,8 +522,7 @@ impl ScopeStack {
 
   pub fn try_get_var(&self, var_name: &str) -> Option<VarStr> {
     if let Ok(param) = var_name.parse::<ShellParam>() {
-      let val = self.get_param(param);
-      return (!val.is_empty()).then_some(val);
+      return self.try_get_param(param);
     }
     for scope in self.scopes_rev() {
       // Stop at the first scope that *declares* the name, even if it's a
@@ -645,11 +644,11 @@ impl ScopeStack {
     }
     None
   }
-  pub fn get_param(&self, param: ShellParam) -> VarStr {
+  pub fn try_get_param(&self, param: ShellParam) -> Option<VarStr> {
     if param.is_global()
       && let Some(val) = self.global_params.get(&param)
     {
-      return val.clone();
+      return Some(val.clone());
     }
     // Positional params are scope-local; only check the current scope
     if matches!(
@@ -657,16 +656,18 @@ impl ScopeStack {
       ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount
     ) {
       let scope = self.sh_argv_scope();
-      return scope.get_param(param);
+      return scope.try_get_param(param);
     }
     for scope in self.scopes_rev() {
-      let val = scope.get_param(param);
-      if !val.is_empty() {
-        return val;
+      if let Some(val) = scope.try_get_param(param) {
+        return Some(val);
       }
     }
-    // Fallback to empty string
-    VarStr::new()
+
+    None
+  }
+  pub fn get_param(&self, param: ShellParam) -> VarStr {
+    self.try_get_param(param).unwrap_or_default()
   }
   /// Set a shell parameter
   pub fn set_param(&mut self, param: ShellParam, val: &str) {

@@ -2,7 +2,11 @@ use std::os::fd::{AsFd, AsRawFd};
 
 use crate::{
   errln,
-  eval::{ParsedSrc, execute::exec_input, parse::node::nodes_have_only_builtins},
+  eval::{
+    ParsedSrc,
+    execute::{self, exec_input},
+    parse::node::nodes_have_only_builtins,
+  },
   lifecycle,
   procio::{self, SinkScope, bytes_to_string},
   state::{Shed, meta::MetaTab, vars::VarStr},
@@ -11,7 +15,7 @@ use crate::{
 
 use super::{
   super::state::terminal::Terminal,
-  ShErrKind, ShResult,
+  ShResult,
   arithmetic::expand_arithmetic_wrapped,
   eval::execute::exec_nonint,
   procio::{
@@ -163,15 +167,12 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
       let redir: RedirSet = specs.into();
       let _redir_guard = redir.apply().or_fatal()?;
 
-      if let Err(e) = exec_input(raw.into(), Some("command_sub".into())) {
-        if let ShErrKind::CleanExit(code) = e.kind() {
-          lifecycle::exit_shed(true, *code);
-        }
-        e.print_error();
-        lifecycle::exit_shed(true, 1);
-      }
-      let code = Shed::get_status();
+      execute::catch_exit(
+        || exec_input(raw.into(), Some("command_sub".into())),
+        execute::exit_with,
+      );
 
+      let code = Shed::get_status();
       lifecycle::exit_shed(true, code);
     }
     ForkResult::Parent { child } => {

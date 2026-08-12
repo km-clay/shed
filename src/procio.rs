@@ -21,7 +21,9 @@ use nix::{
 };
 
 use crate::{
-  Shed, lifecycle, signal,
+  Shed,
+  eval::execute,
+  lifecycle, signal,
   state::{shopt::ReadLimit, terminal::Terminal},
   util,
 };
@@ -33,7 +35,7 @@ use super::{
   },
   expand::Expander,
   match_loop, sherr, shopt, state,
-  util::{ShErr, ShErrKind, ShResult},
+  util::{ShErr, ShResult},
 };
 
 /*
@@ -1178,7 +1180,7 @@ pub(crate) fn feed_fd_async(fd: OwnedFd, bytes: Vec<u8>) -> std::thread::JoinHan
 pub(super) fn capture_command(
   cmd: &str,
   stdin: Option<&str>,
-  name: Option<Rc<str>>,
+  name: Option<&Rc<str>>,
 ) -> ShResult<String> {
   let (rpipe, wpipe) = pipes_high()?;
   let stdin_pipe = if stdin.is_some() {
@@ -1197,13 +1199,11 @@ pub(super) fn capture_command(
       let redirs: RedirSet = specs.into();
       let _guard = redirs.apply().or_fatal()?;
 
-      if let Err(e) = exec_nonint(cmd.into(), name) {
-        if let ShErrKind::CleanExit(code) = e.kind() {
-          std::process::exit(*code);
-        }
-        e.print_error();
-        unsafe { nix::libc::_exit(1) };
-      }
+      execute::catch_exit(
+        || exec_nonint(cmd.into(), name.cloned()),
+        |code| unsafe { nix::libc::_exit(code) },
+      );
+
       let status = state::Shed::get_status();
       unsafe { nix::libc::_exit(status) };
     }

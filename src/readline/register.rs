@@ -246,7 +246,7 @@ impl ClipboardProvider {
     match self.copy_argv(sel) {
       Some(argv) => {
         let res = util::with_saved_status(|| {
-          capture_command(argv, Some(&text), Some("clipboard copy".into()))
+          capture_command(argv, Some(&text), Some(&("clipboard copy".into())))
         });
 
         if let Err(e) = res {
@@ -262,8 +262,9 @@ impl ClipboardProvider {
 
   pub fn paste(self, sel: Selection) -> Option<RegisterContent> {
     let argv = self.paste_argv(sel)?;
-    let out =
-      util::with_saved_status(|| capture_command(argv, None, Some("clipboard paste".into())).ok())?;
+    let out = util::with_saved_status(|| {
+      capture_command(argv, None, Some(&("clipboard paste".into()))).ok()
+    })?;
 
     Some(RegisterContent::Span(Lines::to_lines(&out).into_vec()))
   }

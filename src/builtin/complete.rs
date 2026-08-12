@@ -279,7 +279,7 @@ pub fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult<CompOp
     match opt.key() {
       "function" => comp_opts.func = Some(opt.value()?.into()),
       "wordlist" => {
-        comp_opts.wordlist = Some(opt.value()?.split_whitespace().map(VarStr::from).collect())
+        comp_opts.wordlist = Some(opt.value()?.split_whitespace().map(VarStr::from).collect());
       }
       "action" => comp_opts.action = Some(opt.value()?.into()),
       "option" => match opt.value()? {
