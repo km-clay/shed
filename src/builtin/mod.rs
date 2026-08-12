@@ -583,25 +583,20 @@ impl Builtin for Thru {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut count = false;
     let mut append = false;
-    let mut tee = None;
+    let mut tee: Option<VarStr> = None;
     let mut limit = None;
 
     for opt in args.options() {
       match opt.key() {
         "append" => append = true,
         "count" => count = true,
-        "tee" => {
-          if let Some(arg) = opt.value() {
-            tee = Some(arg.to_string());
-          }
-        }
+        "tee" => tee = Some(opt.value()?.into()),
         "limit" => {
-          if let Some(arg) = opt.value() {
-            let Ok(parsed) = arg.parse::<usize>() else {
-              return Err(sherr!(InvalidOpt, "invalid limit: {arg}"));
-            };
-            limit = Some(parsed);
-          }
+          let arg = opt.value()?;
+          let Ok(parsed) = arg.parse::<usize>() else {
+            return Err(sherr!(InvalidOpt @ opt.span(), "invalid limit: {arg}"));
+          };
+          limit = Some(parsed);
         }
         _ => {}
       }

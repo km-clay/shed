@@ -174,20 +174,20 @@ impl super::Builtin for Compadd {
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut prefix = None;
-    let mut suffix = None;
-    let mut desc_arr = None;
-    let mut cand_arr = None;
-    let mut assoc_arr = None;
-    let mut desc = None;
+    let mut prefix: Option<VarStr> = None;
+    let mut suffix: Option<VarStr> = None;
+    let mut desc_arr: Option<VarStr> = None;
+    let mut cand_arr: Option<VarStr> = None;
+    let mut assoc_arr: Option<VarStr> = None;
+    let mut desc: Option<VarStr> = None;
     for opt in args.options() {
       match opt.key() {
-        "desc_arr" => desc_arr = opt.value().map(VarStr::from),
-        "desc" => desc = opt.value().map(VarStr::from),
-        "prefix" => prefix = opt.value().map(VarStr::from),
-        "suffix" => suffix = opt.value().map(VarStr::from),
-        "cand_arr" => cand_arr = opt.value().map(VarStr::from),
-        "assoc_arr" => assoc_arr = opt.value().map(VarStr::from),
+        "desc_arr" => desc_arr = Some(opt.value()?.into()),
+        "desc" => desc = Some(opt.value()?.into()),
+        "prefix" => prefix = Some(opt.value()?.into()),
+        "suffix" => suffix = Some(opt.value()?.into()),
+        "cand_arr" => cand_arr = Some(opt.value()?.into()),
+        "assoc_arr" => assoc_arr = Some(opt.value()?.into()),
         _ => {}
       }
     }
@@ -277,31 +277,24 @@ pub fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult<CompOp
 
   for opt in opts {
     match opt.key() {
-      "function" => comp_opts.func = opt.value().map(VarStr::from),
+      "function" => comp_opts.func = Some(opt.value()?.into()),
       "wordlist" => {
-        if let Some(wordlist) = opt.value() {
-          comp_opts.wordlist = Some(wordlist.split_whitespace().map(VarStr::from).collect());
-        }
+        comp_opts.wordlist = Some(opt.value()?.split_whitespace().map(VarStr::from).collect())
       }
-      "action" => comp_opts.action = opt.value().map(VarStr::from),
-      "option" => {
-        let Some(opt_flag) = opt.value() else {
-          return Err(sherr!(InvalidOpt @ opt.span().clone(), "complete: -o requires an argument"));
-        };
-        match opt_flag {
-          "default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
-          "dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
-          "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
-          "filenames" => comp_opts.opt_flags |= CompOptFlags::FILENAMES,
-          "nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
-          _ => {
-            return Err(sherr!(
-              InvalidOpt @ opt.span().clone(),
-              "complete: invalid option: {opt_flag}"
-            ));
-          }
+      "action" => comp_opts.action = Some(opt.value()?.into()),
+      "option" => match opt.value()? {
+        "default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
+        "dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
+        "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
+        "filenames" => comp_opts.opt_flags |= CompOptFlags::FILENAMES,
+        "nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
+        opt_flag => {
+          return Err(sherr!(
+            InvalidOpt @ opt.span().clone(),
+            "complete: invalid option: {opt_flag}"
+          ));
         }
-      }
+      },
 
       "aliases" => comp_opts.flags |= CompFlags::ALIAS,
       "signals" => comp_opts.flags |= CompFlags::SIGNALS,

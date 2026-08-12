@@ -99,35 +99,25 @@ impl Vice {
     for opt in opts {
       match opt.key() {
         "cut" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           let cmd = ViceCmd::parse_cut(arg);
           prog.cmds.push(cmd);
         }
         "sep" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           prog.sep = Some(expand_keymap(arg));
         }
         "move" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           let cmd = ViceCmd::parse_move(arg);
           prog.cmds.push(cmd);
         }
         "repeat" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           prog.cmds.push(ViceCmd::parse_repeat(arg)?);
         }
         "delim" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           prog.delim = arg.into();
         }
         "quoted" => prog.flags |= ViceFlags::QUOTED,
@@ -135,9 +125,7 @@ impl Vice {
         "lines" => prog.flags |= ViceFlags::LINES,
         "keep-mode" => prog.flags |= ViceFlags::KEEP_MODE,
         "backup-ext" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           prog.backup_ext = Some(arg.into());
         }
         "backup" if prog.backup_ext.is_none() && prog.backup_ext.is_none() => {

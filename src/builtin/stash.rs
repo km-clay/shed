@@ -44,10 +44,7 @@ impl StashOpts {
           });
         }
         "delete" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{opt}'"));
-          };
-          new.to_delete.push(arg.into());
+          new.to_delete.push(opt.value()?.into());
         }
         "list" => new.list = true,
         "stack" => new.only_stack = true,

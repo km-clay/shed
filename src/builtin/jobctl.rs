@@ -409,9 +409,7 @@ impl super::Builtin for Kill {
         "verbose" => verbose = true,
         "list" => list_sig = true,
         "signal" => {
-          let Some(sig_name) = opt.value() else {
-            continue;
-          };
+          let sig_name = opt.value()?;
           signal = Some(parse_kill_sig(sig_name).promote_err(args.span.clone())?);
         }
         _ => {}

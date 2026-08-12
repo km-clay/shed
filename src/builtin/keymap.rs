@@ -30,10 +30,7 @@ impl super::Builtin for KeyMapBuiltin {
         "replace" => flags |= KeyMapFlags::REPLACE,
         "emacs" => flags |= KeyMapFlags::EMACS,
         "remove" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for --remove"));
-          };
-          remove = Some(arg.to_string());
+          remove = Some(opt.value()?.to_string());
         }
         _ => {
           return Err(sherr!(ExecFail @ opt.span(), "Invalid option for keymap: '{opt}'"));

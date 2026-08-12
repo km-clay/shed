@@ -38,9 +38,7 @@ impl super::Builtin for Flog {
 
     for opt in opts {
       if opt.key() == "prefix" {
-        let Some(prefix) = opt.value() else {
-          return Err(sherr!(ExecFail @ opt.span(), "Option --prefix requires an argument"));
-        };
+        let prefix = opt.value()?;
         prefix_fmt = prefix.into();
       }
     }

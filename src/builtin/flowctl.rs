@@ -172,12 +172,7 @@ impl super::Builtin for Raise {
     for opt in args.options() {
       match opt.key() {
         "code" => {
-          let Some(c) = opt.value() else {
-            return Err(sherr!(
-              SyntaxErr @ opt.span(),
-              "Option '--code' requires an argument",
-            ));
-          };
+          let c = opt.value()?;
           let Ok(code_arg) = c.parse::<i32>() else {
             return Err(sherr!(
               SyntaxErr @ opt.span(),
@@ -188,21 +183,11 @@ impl super::Builtin for Raise {
           code = code_arg;
         }
         "kind" => {
-          let Some(k) = opt.value() else {
-            return Err(sherr!(
-              SyntaxErr @ opt.span(),
-              "Option '--kind' requires an argument",
-            ));
-          };
+          let k = opt.value()?;
           kind = Some(k.into());
         }
         "note" => {
-          let Some(n) = opt.value() else {
-            return Err(sherr!(
-              SyntaxErr @ opt.span(),
-              "Option '--note' requires an argument",
-            ));
-          };
+          let n = opt.value()?;
           notes.push(n.into());
         }
         _ => {

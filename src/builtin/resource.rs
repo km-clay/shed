@@ -38,9 +38,7 @@ impl RLimits {
     for o in opts {
       match o.key() {
         "fds" => {
-          let Some(arg) = o.value() else {
-            return Err(sherr!(ParseErr @ o.span(), "missing argument for -n"));
-          };
+          let arg = o.value()?;
           fds = Some(
             arg
               .parse::<u64>()
@@ -48,9 +46,7 @@ impl RLimits {
           );
         }
         "procs" => {
-          let Some(arg) = o.value() else {
-            return Err(sherr!(ParseErr @ o.span(), "missing argument for -u"));
-          };
+          let arg = o.value()?;
           procs = Some(
             arg
               .parse::<u64>()
@@ -58,9 +54,7 @@ impl RLimits {
           );
         }
         "stack" => {
-          let Some(arg) = o.value() else {
-            return Err(sherr!(ParseErr @ o.span(), "missing argument for -s"));
-          };
+          let arg = o.value()?;
           stack = Some(
             arg
               .parse::<u64>()
@@ -68,9 +62,7 @@ impl RLimits {
           );
         }
         "core" => {
-          let Some(arg) = o.value() else {
-            return Err(sherr!(ParseErr @ o.span(), "missing argument for -c"));
-          };
+          let arg = o.value()?;
           core = Some(
             arg
               .parse::<u64>()
@@ -78,9 +70,7 @@ impl RLimits {
           );
         }
         "vmem" => {
-          let Some(arg) = o.value() else {
-            return Err(sherr!(ParseErr @ o.span(), "missing argument for -v"));
-          };
+          let arg = o.value()?;
           vmem = Some(
             arg
               .parse::<u64>()

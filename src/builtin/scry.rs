@@ -1,5 +1,5 @@
 use crate::{
-  ShResult, Shed, errln, expand, opt, out, outln, readline::FuzzyBuilder, sherr, util::with_status,
+  ShResult, Shed, errln, expand, opt, out, outln, readline::FuzzyBuilder, util::with_status,
 };
 
 use super::opt::OptSpec;
@@ -35,10 +35,7 @@ impl super::Builtin for Scry {
         "quote-out" => quote_out = true,
         "no-newline" => no_newline = true,
         "prompt" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "missing argument for --prompt"));
-          };
-          prompt = Some(arg.to_string());
+          prompt = Some(opt.value()?.to_string());
         }
         _ => {}
       }

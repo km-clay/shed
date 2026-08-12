@@ -3,7 +3,7 @@ use itertools::Itertools;
 use crate::{
   ShResult, Shed,
   builtin::opt::OptSpec,
-  expand, match_loop, opt, out, outln, sherr,
+  expand, match_loop, opt, out, outln,
   state::vars::{VarFlags, VarKind, VarStr},
   util::with_status,
   varstr,
@@ -28,7 +28,7 @@ impl super::Builtin for Quote {
 
     for opt in args.options() {
       if opt.key() == "var" {
-        let Some(var) = opt.value() else { continue };
+        let var = opt.value()?;
         if let Some(quoted) = quote_var(var) {
           parts.push(quoted);
         }
@@ -101,21 +101,13 @@ impl super::Builtin for Unquote {
     for opt in opts {
       match opt.key() {
         "array" => {
-          let Some(val) = opt.value() else {
-            return Err(sherr!(ExecFail, "unquote: --array requires an argument"));
-          };
-          target = Some(UnquoteTarget::Array(val.into()));
+          target = Some(UnquoteTarget::Array(opt.value()?.into()));
         }
         "var" => {
-          let Some(val) = opt.value() else {
-            return Err(sherr!(ExecFail, "unquote: --var requires an argument"));
-          };
-          target = Some(UnquoteTarget::Var(val.into()));
+          target = Some(UnquoteTarget::Var(opt.value()?.into()));
         }
         "sep" => {
-          let Some(val) = opt.value() else {
-            return Err(sherr!(ExecFail, "unquote: --sep requires an argument"));
-          };
+          let val = opt.value()?;
           delim = varstr!("{val}");
         }
         _ => {}

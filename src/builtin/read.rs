@@ -64,36 +64,26 @@ impl super::Builtin for Read {
     for opt in opts {
       match opt.key() {
         "array" => {
-          let Some(arr) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -a/--array"));
-          };
+          let arr = opt.value()?;
           array_name = Some(varstr!("{arr}"));
         }
         "n-chars" => {
-          let Some(n) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -n/--n-chars"));
-          };
+          let n = opt.value()?;
           let bytes = n
             .parse::<usize>()
             .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
           max_bytes = Some(bytes);
         }
         "prompt" => {
-          let Some(p) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -p/--prompt"));
-          };
+          let p = opt.value()?;
           prompt = Some(varstr!("{p}"));
         }
         "delim" => {
-          let Some(d) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -d/--delim"));
-          };
+          let d = opt.value()?;
           delim = d.chars().map(|c| c as u8).next().unwrap_or(b'\n');
         }
         "timeout" => {
-          let Some(t) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "missing argument for -t/--timeout"));
-          };
+          let t = opt.value()?;
           let seconds = t
             .parse::<f64>()
             .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid timeout value '{t}'"))?;
@@ -542,26 +532,13 @@ impl super::Builtin for ReadKey {
     for opt in args.options() {
       match opt.key() {
         "var" => {
-          let Some(name) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "readkey: Missing argument for -v/--var"));
-          };
-          var_name = Some(name);
+          var_name = Some(opt.value()?);
         }
         "whitelist" => {
-          let Some(wl) = opt.value() else {
-            return Err(
-              sherr!(ExecFail @ opt.span(), "readkey: Missing argument for -w/--whitelist"),
-            );
-          };
-          whitelist = Some(wl);
+          whitelist = Some(opt.value()?);
         }
         "blacklist" => {
-          let Some(bl) = opt.value() else {
-            return Err(
-              sherr!(ExecFail @ opt.span(), "readkey: Missing argument for -b/--blacklist"),
-            );
-          };
-          blacklist = Some(bl);
+          blacklist = Some(opt.value()?);
         }
         _ => {
           return Err(sherr!(ExecFail @ opt.span(), "readkey: Unexpected flag '{opt}'"));

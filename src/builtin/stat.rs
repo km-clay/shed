@@ -743,10 +743,7 @@ impl super::Builtin for Stat {
     for opt in opts {
       match opt.key() {
         "format" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "stat: Missing argument for '{opt}'"));
-          };
-          format = Some(arg.into());
+          format = Some(opt.value()?.into());
         }
         "dereference" => deref = true,
         "file-system" => fs_stat = true,

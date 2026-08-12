@@ -63,17 +63,12 @@ trait ArrOp {
     for opt in args.options() {
       match opt.key() {
         "count" => {
-          if let Some(c) = opt.value() {
-            count = c
-              .parse::<usize>()
-              .map_err(|_| sherr!(ParseErr @ args.span(), "invalid count: {}", c))?;
-          }
+          let c = opt.value()?;
+          count = c
+            .parse::<usize>()
+            .map_err(|_| sherr!(ParseErr @ opt.span(), "invalid count: {c}"))?;
         }
-        "variable" => {
-          if let Some(v) = opt.value() {
-            var = Some(v);
-          }
-        }
+        "variable" => var = opt.value().ok(),
         "reverse" => { /* no-op */ }
         _ => {
           return Err(sherr!(ParseErr @ opt.span().clone(), "invalid option: '{opt}'"));
@@ -214,11 +209,10 @@ impl super::Builtin for Rotate {
       match opt.key() {
         "reverse" => reverse = true,
         "count" => {
-          if let Some(c) = opt.value() {
-            count = c
-              .parse::<usize>()
-              .map_err(|_| sherr!(ParseErr @ args.span(), "invalid count: {}", c))?;
-          }
+          let c = opt.value()?;
+          count = c
+            .parse::<usize>()
+            .map_err(|_| sherr!(ParseErr @ opt.span(), "invalid count: {c}"))?;
         }
         _ => {
           return Err(sherr!(ParseErr @ args.span(), "invalid option: '{opt}'"));

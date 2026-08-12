@@ -53,11 +53,11 @@ impl Opt {
   pub fn key(&self) -> &str {
     &self.key
   }
-  pub fn value(&self) -> Option<&str> {
+  pub fn value(&self) -> ShResult<&str> {
     if self.args.len() == 1 {
-      Some(self.args[0].0.as_str())
+      Ok(self.args[0].0.as_str())
     } else {
-      None
+      Err(sherr!(ParseErr @ self.span(), "option '{self}' requires an argument"))
     }
   }
 }

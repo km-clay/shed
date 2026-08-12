@@ -166,7 +166,7 @@ impl Zd {
   /// zd add [-r] [dirs...] - add directories
   fn add(args: super::BuiltinArgs) -> ShResult<()> {
     let depth = match args.options().find_map(|o| match o.key() {
-      "depth" => o.value(),
+      "depth" => o.value().ok(),
       _ => None,
     }) {
       Some(n) => match n.parse::<usize>() {
@@ -282,19 +282,13 @@ impl Zd {
         "json" => json = true,
         "quoted" => quoted = true,
 
-        "sort" => {
-          let Some(val) = opt.value() else {
-            return Err(sherr!(ParseErr @ opt.span(), "zd: --sort requires an argument"));
-          };
-
-          match val {
-            "frecency" => sort.kind = SortKind::Frecency,
-            "visits" => sort.kind = SortKind::Visits,
-            "recent" => sort.kind = SortKind::Recent,
-            "path" => sort.kind = SortKind::Path,
-            _ => return Err(sherr!(ParseErr @ opt.span(), "invalid sort kind: {val}")),
-          }
-        }
+        "sort" => match opt.value()? {
+          "frecency" => sort.kind = SortKind::Frecency,
+          "visits" => sort.kind = SortKind::Visits,
+          "recent" => sort.kind = SortKind::Recent,
+          "path" => sort.kind = SortKind::Path,
+          val => return Err(sherr!(ParseErr @ opt.span(), "invalid sort kind: {val}")),
+        },
         _ => return Err(sherr!(ParseErr @ opt.span(), "invalid option: {opt}")),
       }
     }

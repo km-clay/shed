@@ -255,9 +255,7 @@ impl SockOpts {
     for opt in opts {
       match opt.key() {
         "unix" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           let addr = match arg.strip_prefix('@') {
             Some(name) => UnixAddr::Abstract(name.into()),
             None => UnixAddr::Path(PathBuf::from(arg)),
@@ -265,9 +263,7 @@ impl SockOpts {
           unix_addr = Some(addr);
         }
         "tcp" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           let host = if let Ok(ip) = arg.parse::<std::net::IpAddr>() {
             TcpHost::IpAddr(ip)
           } else {
@@ -276,9 +272,7 @@ impl SockOpts {
           tcp_addr = Some(host);
         }
         "port" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           let Ok(port) = arg.parse::<u16>() else {
             return Err(sherr!(ExecFail, "Invalid port number '{arg}'"));
           };
@@ -286,9 +280,7 @@ impl SockOpts {
           tcp_port = Some(port);
         }
         "var" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for '{opt}'"));
-          };
+          let arg = opt.value()?;
           fd_var = Some(arg.to_var_str());
         }
 
@@ -368,9 +360,7 @@ impl super::Builtin for Accept {
     for opt in opts {
       match opt.key() {
         "var" => {
-          let Some(arg) = opt.value() else {
-            return Err(sherr!(ExecFail @ opt.span(), "Missing argument for --var"));
-          };
+          let arg = opt.value()?;
           var = Some(arg.to_var_str());
         }
         _ => return Err(sherr!(ExecFail @ args.cmd_span(), "Unexpected option '{opt}'")),

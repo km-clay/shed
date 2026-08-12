@@ -278,7 +278,7 @@ impl HistQuery {
   pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut new = Self::new();
     let mut negated = false; // '--not' flag flips this for one argument
-    let value = |opt: &Opt| -> Option<VarStr> { opt.value().map(VarStr::from) };
+    let value = |opt: &Opt| -> Option<VarStr> { opt.value().ok().map(VarStr::from) };
 
     for opt in opts {
       match opt.key() {
@@ -292,7 +292,7 @@ impl HistQuery {
         "duration-lt" => new.duration_lt = (value(opt), negated),
         "with-token" => new.with_token = (value(opt), negated),
         "with-status" => {
-          let Some(arg) = opt.value() else { continue };
+          let arg = opt.value()?;
           match arg.parse::<i32>() {
             Ok(s) => new.with_status = (Some(s), negated),
             Err(e) => return Err(sherr!(ParseErr, "Invalid status code for {opt}: {e}")),
@@ -300,7 +300,7 @@ impl HistQuery {
         }
         "in-dir" => {
           // using canonicalize here allows args like "." to work
-          let Some(arg) = opt.value() else { continue };
+          let arg = opt.value()?;
           let dir = std::fs::canonicalize(arg)
             .unwrap_or(arg.into())
             .to_string_lossy()
@@ -309,12 +309,12 @@ impl HistQuery {
           new.in_dir = (Some(dir), negated);
         }
         "limit" => {
-          let Some(arg) = opt.value() else { continue };
+          let arg = opt.value()?;
           new.limit = Some(arg.parse().unwrap_or(u64::MAX));
         }
         opt_key @ ("lines-gt" | "lines-lt") => {
           let is_gt = opt_key == "lines-gt";
-          let Some(arg) = opt.value() else { continue };
+          let arg = opt.value()?;
           let count = match arg.parse::<u64>() {
             Ok(c) => c,
             Err(e) => return Err(sherr!(ParseErr, "Invalid number for {opt}: {e}")),
@@ -326,7 +326,7 @@ impl HistQuery {
           }
         }
         "import" => {
-          let Some(arg) = opt.value() else { continue };
+          let arg = opt.value()?;
           let path = match arg {
             "bash" => {
               let Some(home) = state::util::get_home() else {
