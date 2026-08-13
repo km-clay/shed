@@ -144,6 +144,7 @@ impl super::Builtin for Zd {
     vec![
       opt!("recursive" | 'r'),
       opt!("depth" | 'd', 1),
+      opt!("print" | 'p'),
       opt!("json"),
       opt!("quoted"),
       opt!("reverse"),
@@ -460,6 +461,7 @@ impl Zd {
     // every positional is concatenated into one subsequence query, so
     // `zd pro fern` still finds `~/projects/fern`.
     let query: String = args.arguments().map(|(a, _)| a.as_str()).collect();
+    let print_dir = args.options().any(|o| o.key() == "print");
 
     let entries = if query.is_empty() {
       load_abbreviated_dirs()
@@ -496,7 +498,9 @@ impl Zd {
 
     match target {
       Some(path) => {
-        if let Err(e) = util::change_dir(&path) {
+        if print_dir {
+          outln!("{path}");
+        } else if let Err(e) = util::change_dir(&path) {
           return Err(sherr!(ExecFail @ args.span, "zd: could not change directory: {e}"));
         }
         with_status(0)

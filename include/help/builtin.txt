@@ -2948,7 +2948,7 @@ VICE                                             *builtin-vice* *vice*
 ZD                                               *builtin-zd* *zd*
 
   `zd`
-  `zd {query}`
+  `zd [-p|--print] {query}`
   `zd add [-r] [-d|--depth {n}] [{dir}...]`
   `zd remove [-r] [-d|--depth {n}] [{dir}...]`
   `zd clean`
@@ -2963,8 +2963,10 @@ ZD                                               *builtin-zd* *zd*
   favors the final path segment, so a directory's basename usually surfaces
   it first.
 
-  `zd {query}`    jump straight to the best match for {query}, skipping the
-                  picker. A query is required when not interactive.
+  `zd [-p|--print] {query}`    jump straight to the best match for {query}, skipping the
+                               picker. A query is required when not interactive.
+                               The `-p`/`--print` flags will print the best match to stdout
+                               instead of changing directories.
 
   Subcommands ~
 
