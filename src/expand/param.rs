@@ -1,8 +1,8 @@
 use crate::eval::lex::TkFlags;
-use crate::expand::Expander;
 use crate::expand::markers::strip_markers;
 use crate::expand::util::glob_to_regex;
 use crate::expand::var::expand_raw_inner;
+use crate::expand::{Expander, markers};
 use crate::state::vars::VarStr;
 use crate::state::{
   Shed, scopes::ScopeStack, vars::ArrIndex, vars::ShellParam, vars::VarFlags, vars::VarKind,
@@ -607,6 +607,10 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
     }
   } else {
     let var = Shed::vars(try_get);
+    // "${@}" must expand to zero fields
+    if var_name.as_str() == "@" && var.as_deref().unwrap_or_default().is_empty() {
+      return Ok(markers::NULL_EXPAND.to_string().into());
+    }
     if var.is_none() && shopt!(set.nounset) {
       return Err(sherr!(NotFound, "Variable '{}' is not set", parsed.name()));
     }
