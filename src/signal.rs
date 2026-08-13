@@ -108,6 +108,18 @@ pub fn sigint_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) & (1 << Signal::SIGINT as u64) != 0
 }
 
+/// Whether a pending signal warrants interrupting a blocking `read`
+pub fn has_actionable_pending() -> bool {
+  if SHOULD_QUIT.load(Ordering::SeqCst) {
+    return true;
+  }
+  const BENIGN: u64 = (1 << Signal::SIGCHLD as u64)
+    | (1 << Signal::SIGWINCH as u64)
+    | (1 << Signal::SIGURG as u64)
+    | (1 << Signal::SIGCONT as u64);
+  SIGNALS.load(Ordering::SeqCst) & !BENIGN != 0
+}
+
 /// Mark the shell for a clean exit with the wait-style status for `sig`.
 fn request_quit(sig: Signal) {
   SHOULD_QUIT.store(true, Ordering::SeqCst);

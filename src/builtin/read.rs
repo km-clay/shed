@@ -202,7 +202,12 @@ fn walking_read(
             state::Shed::set_status(130);
             return Ok(String::new());
           }
-          continue; // benign signal (e.g. SIGWINCH), retry the poll
+          if signal::has_actionable_pending() {
+            state::Shed::set_status(1);
+            return String::from_utf8(buf)
+              .map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}"));
+          }
+          continue; // untrapped SIGCHLD/SIGWINCH etc., retry the poll
         }
         Err(e) => return Err(e.into()),
       };
@@ -225,6 +230,11 @@ fn walking_read(
           if signal::sigint_pending() {
             state::Shed::set_status(130);
             return Ok(String::new());
+          }
+          if signal::has_actionable_pending() {
+            state::Shed::set_status(1);
+            return String::from_utf8(buf)
+              .map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}"));
           }
           continue;
         }
@@ -309,6 +319,10 @@ fn seeking_read(
           // we got ctrl+c
           state::Shed::set_status(130);
           return Ok(String::new());
+        }
+        if signal::has_actionable_pending() {
+          state::Shed::set_status(1);
+          return finalize(line, escape_aware);
         }
         continue;
       }
