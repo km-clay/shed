@@ -200,6 +200,15 @@ impl Shed {
     access_mut!(SHED, jobs, f)
   }
 
+  /// Attempt hanging up running jobs.
+  pub fn try_hang_up() {
+    SHED.with(|shed| {
+      if let Ok(mut jobs) = shed.jobs.try_borrow_mut() {
+        jobs.hang_up();
+      }
+    });
+  }
+
   /// Read from the var scope stack
   #[track_caller]
   pub fn vars<T, F>(f: F) -> T

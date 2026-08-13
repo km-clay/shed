@@ -327,14 +327,10 @@ pub fn wait_child() -> ShResult<()> {
 
 pub fn child_signaled(pid: Pid, sig: Signal) {
   Shed::jobs_mut(|j| {
-    if let Some(job) = j.query_mut(JobID::Pid(pid)) {
-      let child = job
-        .children_mut()
-        .iter_mut()
-        .find(|chld| pid == chld.pid())
-        .unwrap();
-      let stat = WtStat::Signaled(pid, sig, false);
-      child.set_stat(stat);
+    if let Some(job) = j.query_mut(JobID::Pid(pid))
+      && let Some(child) = job.children_mut().iter_mut().find(|chld| pid == chld.pid())
+    {
+      child.set_stat(WtStat::Signaled(pid, sig, false));
     }
   });
   if sig == Signal::SIGINT {
@@ -346,13 +342,9 @@ pub fn child_stopped(pid: Pid, sig: Signal) -> ShResult<()> {
   let child_pgid = getpgid(Some(pid)).unwrap_or(pid);
   Shed::jobs_mut(|j| {
     if let Some(job) = j.query_mut(JobID::Pgid(child_pgid)) {
-      let child = job
-        .children_mut()
-        .iter_mut()
-        .find(|chld| pid == chld.pid())
-        .unwrap();
-      let status = WtStat::Stopped(pid, sig);
-      child.set_stat(status);
+      if let Some(child) = job.children_mut().iter_mut().find(|chld| pid == chld.pid()) {
+        child.set_stat(WtStat::Stopped(pid, sig));
+      }
     } else if j.get_fg_mut().is_some_and(|fg| fg.pgid() == child_pgid) {
       j.fg_to_bg(WtStat::Stopped(pid, sig)).unwrap();
     }

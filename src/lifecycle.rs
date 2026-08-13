@@ -23,7 +23,7 @@ use super::{
     util::{self, generate_default_rc, source_env},
     vars::{VarFlags, VarKind, VarStr},
   },
-  status_msg, try_var,
+  status_msg,
   util::flog,
 };
 
@@ -288,27 +288,24 @@ fn setup_panic_handler() {
 
   // set our hook
   std::panic::set_hook(Box::new(move |info| {
-    // hang up jobs
-    Shed::jobs_mut(JobTab::hang_up);
+    // Best-effort job hangup.
+    Shed::try_hang_up();
 
-    // log panic
-    let data_dir = dirs::data_dir().unwrap_or_else(|| {
-      let home = try_var!("HOME").unwrap();
-      PathBuf::from(format!("{home}/.local/share"))
-    });
-    let log_dir = data_dir.join("shed").join("log");
-    std::fs::create_dir_all(&log_dir).unwrap();
-    let log_file_path = log_dir.join("panic.log");
-    let mut log_file = procio::get_redir_file(RedirType::Output, log_file_path).unwrap();
+    // Best-effort panic log.
+    let log_file = dirs::data_dir()
+      .or_else(|| {
+        std::env::var("HOME")
+          .ok()
+          .map(|home| PathBuf::from(format!("{home}/.local/share")))
+      })
+      .map(|dir| dir.join("shed").join("log"))
+      .filter(|dir| std::fs::create_dir_all(dir).is_ok())
+      .and_then(|dir| procio::get_redir_file(RedirType::Output, dir.join("panic.log")).ok());
 
-    let panic_info_raw = info.to_string();
-    log_file.write_all(panic_info_raw.as_bytes()).unwrap();
-    log_file.write_all(b"\n\n").unwrap();
-
-    let backtrace = std::backtrace::Backtrace::force_capture();
-    log_file
-      .write_all(format!("\nBacktrace:\n{backtrace:#?}").as_bytes())
-      .unwrap();
+    if let Some(mut log_file) = log_file {
+      let backtrace = std::backtrace::Backtrace::force_capture();
+      let _ = write!(log_file, "{info}\n\n\nBacktrace:\n{backtrace:#?}");
+    }
 
     // call the default panic hook
     default_panic_hook(info);
