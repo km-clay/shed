@@ -146,6 +146,13 @@ pub(crate) fn replace_posix_classes(s: &str) -> String {
     '[' if !in_bracket => {
       in_bracket = true;
       out.push(ch);
+
+      // convert '^' to '!'
+      // glob crate uses '!' for negation in it's patterns
+      if chars.peek() == Some(&'^') {
+        chars.next();
+        out.push('!');
+      }
     }
     ']' if in_bracket => {
       in_bracket = false;

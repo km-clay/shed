@@ -11,12 +11,15 @@ use std::{
 use crate::{
   HashMap,
   state::vars::VarStr,
-  util::{count_unescaped, ends_with_unescaped, has_any_unescaped, starts_with_unescaped},
+  util::{
+    compile_glob_lenient, count_unescaped, ends_with_unescaped, has_any_unescaped,
+    starts_with_unescaped,
+  },
 };
 
 use super::{
   ShResult, Shed, autocmd, crate_util as util,
-  expand::{expand_keymap, glob_to_regex},
+  expand::expand_keymap,
   jobs::Job,
   keys::KeyEvent,
   logic::AutoCmdKind,
@@ -27,6 +30,7 @@ use super::{
   var,
   vars::{VarFlags, VarKind},
 };
+use glob::Pattern as GlobPattern;
 use nix::{
   libc::time_t,
   poll::PollTimeout,
@@ -486,7 +490,7 @@ pub(crate) enum Pattern {
   Contains(Rc<str>),
   StartsWith(Rc<str>),
   EndsWith(Rc<str>),
-  Regex(Rc<Regex>),
+  Glob(GlobPattern),
 }
 
 impl Pattern {
@@ -506,7 +510,7 @@ impl Pattern {
     // something like *foo*b[aA]r*b?z or something
     // let regex figure it out
     if count_unescaped(pattern, "*") > 2 || has_any_unescaped(pattern, &["?", "[", "{"]) {
-      return Self::Regex(glob_to_regex(pattern, true).into());
+      return Self::Glob(compile_glob_lenient(pattern));
     }
 
     let strip_glob_escapes = |s: &str| -> String {
@@ -540,14 +544,8 @@ impl Pattern {
       Pattern::Contains(s) => text.contains(&**s),
       Pattern::StartsWith(s) => text.starts_with(&**s),
       Pattern::EndsWith(s) => text.ends_with(&**s),
-      Pattern::Regex(regex) => regex.is_match(text),
+      Pattern::Glob(g) => g.matches(text),
     }
-  }
-}
-
-impl From<Regex> for Pattern {
-  fn from(value: Regex) -> Self {
-    Self::Regex(value.into())
   }
 }
 
