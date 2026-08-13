@@ -98,7 +98,9 @@ impl super::Builtin for Read {
         }
         "delim" => {
           let d = opt.value()?;
-          delim = d.chars().map(|c| c as u8).next().unwrap_or(b'\n');
+
+          // empty argument means NUL byte
+          delim = d.chars().map(|c| c as u8).next().unwrap_or(b'\0');
         }
         "timeout" => {
           let t = opt.value()?;
