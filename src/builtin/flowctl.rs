@@ -1,4 +1,4 @@
-use crate::{HashMap, opt, util};
+use crate::{HashMap, eval::execute, opt, state::logic::TrapTarget, util};
 use std::fmt::Write;
 
 use yansi::Paint;
@@ -147,6 +147,17 @@ impl FlowCtl for Exit {
     Shed::get_status()
   }
   fn flow_control(&self, code: i32) -> ShErr {
+    // Run the EXIT trap here, before `CleanExit` unwinds the function-scope
+    // stack, so the trap sees function locals. set the status first so the trap
+    // can see it
+    let mut code = code;
+    Shed::set_status(code);
+    if let Some(trap) = Shed::logic_mut(|l| l.remove_trap(TrapTarget::Exit)) {
+      execute::catch_exit(
+        || execute::exec_nonint(trap.clone(), Some("trap".into())),
+        |trap_code| code = trap_code,
+      );
+    }
     sherr!(CleanExit(code), "",)
   }
 }

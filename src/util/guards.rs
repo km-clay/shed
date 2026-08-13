@@ -6,7 +6,7 @@ use crate::{
   eval::{NdRule, Node},
   state::{
     util,
-    vars::{Var, VarStr},
+    vars::{Var, VarFlags, VarStr},
   },
   try_var, util as crate_util, var,
 };
@@ -155,11 +155,17 @@ pub fn prefix_assign_guard(assignments: &[Node]) -> impl Drop {
   guard(saved, |saved| {
     Shed::vars_mut(|v| {
       for (name, prior) in saved {
-        // Clear first so the re-set starts from a clean slate (`set_var` ORs
-        // flags onto an existing entry) and the export/envp bookkeeping runs.
-        v.unset_var(&name).ok();
-        if let Some(var) = prior {
-          v.set_var(&name, var.kind().clone(), var.flags()).ok();
+        match prior {
+          Some(var) => {
+            v.update_var(&name, var.kind().clone()).ok();
+            if !var.flags().contains(VarFlags::EXPORT) {
+              v.unexport_var(&name);
+            }
+          }
+          // Didn't exist before the prefix assignment → remove what it created.
+          None => {
+            v.unset_var(&name).ok();
+          }
         }
       }
     });

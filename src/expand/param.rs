@@ -196,6 +196,15 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       // arguments.
       return Ok(Shed::vars(|v| v.get_param(ShellParam::ArgCount)));
     }
+    // A positional (`${#1}`) or other special param (`${#$}`, `${#0}`) is not a
+    // named variable, so `get_var_meta` below would miss it and report 0.
+    // Resolve it through the param path; `try_get_param` reports None for an
+    // unset positional (length 0) and Some("") for a set-but-empty one.
+    // `${#@}`/`${#*}`/`${#}` (argument count) are already handled above.
+    if let Ok(param) = var_spec.parse::<ShellParam>() {
+      let len = Shed::vars(|v| v.try_get_param(param)).map_or(0, |val| val.len());
+      return Ok(len.to_string().into());
+    }
     let parsed = VarName::parse(var_spec, allow_side_effects)?;
     if let Some(idx) = parsed.index() {
       match idx {

@@ -1419,9 +1419,6 @@ impl VarTab {
       _ => self.params.get(&param).cloned(),
     }
   }
-  pub fn get_param(&self, param: ShellParam) -> VarStr {
-    self.try_get_param(param).unwrap_or_default()
-  }
 }
 
 #[cfg(test)]

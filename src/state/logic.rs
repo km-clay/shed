@@ -424,8 +424,8 @@ impl LogTab {
   pub fn get_trap(&self, target: TrapTarget) -> Option<VarStr> {
     self.traps.get(&target).cloned()
   }
-  pub fn remove_trap(&mut self, target: TrapTarget) {
-    self.traps.remove(&target);
+  pub fn remove_trap(&mut self, target: TrapTarget) -> Option<VarStr> {
+    self.traps.remove(&target)
   }
   pub fn traps(&self) -> &HashMap<TrapTarget, VarStr> {
     &self.traps
