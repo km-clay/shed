@@ -273,32 +273,26 @@ fn read_varsub(chars: &mut Peekable<Chars>, result: &mut String) -> bool {
 fn read_subsh(chars: &mut Peekable<Chars>, result: &mut String) {
   result.push(markers::SUBSH);
   let mut paren_count = 1;
-  match_loop!(chars.next() => subsh_ch, {
+  let mut qt = QuoteState::default();
+  match_loop!(chars.next() => ch, {
     '\\' => {
-      result.push(subsh_ch);
+      result.push(ch);
       if let Some(next_ch) = chars.next() {
         result.push(next_ch);
       }
     }
     '\'' => {
-      result.push(subsh_ch);
-      match_loop!(chars.next() => q_ch, {
-        '\\' => {
-          result.push(q_ch);
-          if let Some(next_ch) = chars.next() {
-            result.push(next_ch);
-          }
-        }
-        '\'' => {
-          result.push(q_ch);
-          break;
-        }
-        _ => result.push(q_ch),
-      });
+      qt.toggle_single();
+      result.push(ch);
     }
+    '"' if !qt.in_single() => {
+      qt.toggle_double();
+      result.push(ch);
+    }
+    _ if qt.in_quote() => result.push(ch),
     '(' => {
       paren_count += 1;
-      result.push(subsh_ch);
+      result.push(ch);
     }
     ')' => {
       paren_count -= 1;
@@ -306,9 +300,9 @@ fn read_subsh(chars: &mut Peekable<Chars>, result: &mut String) {
         result.push(markers::SUBSH);
         break;
       }
-      result.push(subsh_ch);
+      result.push(ch);
     }
-    _ => result.push(subsh_ch),
+    _ => result.push(ch),
   });
 }
 
