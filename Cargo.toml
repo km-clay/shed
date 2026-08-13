@@ -5,6 +5,9 @@ resolver = "2"
 [package]
 name = "shed"
 description = "A linux shell written in rust"
+authors = ["Kyler Clay"]
+license = "MIT"
+repository = "https://github.com/km-clay/shed"
 publish = false
 version = "0.39.1"
 
@@ -24,7 +27,6 @@ ariadne = "0.6.0"
 bitflags = { version = "2.11.1", features = ["serde"] }
 chrono = "0.4.44"
 chrono-english = "0.1.8"
-clap = { version = "4.6.1", features = ["derive"] }
 dirs = "6.0.0"
 fnmatch-regex = "0.3.0"
 glob = "0.3.3"
