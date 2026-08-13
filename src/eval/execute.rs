@@ -1694,11 +1694,20 @@ impl Dispatcher {
   }
   fn run_fork(&mut self, name: &str, f: impl FnOnce(&mut Self)) -> ShResult<()> {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
+    let interactive = Shed::term(Terminal::interactive);
     match unsafe { fork()? } {
       ForkResult::Child => {
         lifecycle::setup_child();
 
-        let _ = setpgid(Pid::from_raw(0), existing_pgid.unwrap_or(Pid::from_raw(0)));
+        // only give a new job its own group under interactive job control.
+        // in a script, the child stays in the shell's process group
+        // otherwise a backgrounded subshell claims the tty and stops the
+        // entire script with SIGTTOU
+        if let Some(pgid) = existing_pgid {
+          let _ = setpgid(Pid::from_raw(0), pgid);
+        } else if interactive {
+          let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
+        }
         crate::signal::reset_signals(self.fg_job);
 
         if let Some(fd) = self.fork_close_fd {
@@ -1714,9 +1723,13 @@ impl Dispatcher {
         let job = self.job_stack.curr_job_mut().unwrap();
         let child_pgid = if let Some(pgid) = existing_pgid {
           pgid
-        } else {
+        } else if interactive {
           job.set_pgid(child);
           child
+        } else {
+          let pgrp = getpgrp();
+          job.set_pgid(pgrp);
+          pgrp
         };
         let child_proc = ChildProc::new(child, Some(name), Some(child_pgid), timer);
         job.push_child(child_proc);

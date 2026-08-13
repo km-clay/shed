@@ -368,7 +368,16 @@ impl Job {
       sig => WtStat::Signaled(self.pgid, sig, false),
     };
     self.set_stats(stat);
-    Ok(killpg(self.pgid, sig)?)
+    // if the job has our pgrp, we need to signal the job's processes individually
+    // or else the shell itself will get hit.
+    if self.pgid == getpgrp() {
+      for child in &self.children {
+        let _ = kill(child.pid(), sig);
+      }
+      Ok(())
+    } else {
+      Ok(killpg(self.pgid, sig)?)
+    }
   }
   pub fn wait_pgrp(&mut self) -> ShResult<Vec<WtStat>> {
     let mut stats = vec![];
