@@ -48,6 +48,7 @@ EXTENSIONS                                                  *shed-extensions*
     `test -i/-F`  integer & float type checks for `[`         |test-numeric|
     `~uid`        tilde expansion by numeric UID              |tilde-uid|
     `${...}`      expansion sets `$?` to changed/no-op        |param-status|
+    `core.pipeline_style`  which pipeline stages run in-process  |shopt|
 
   Interactive & shell ~                                    *shed-ext-interactive*
 
@@ -73,18 +74,6 @@ DEVIATIONS                                                  *shed-deviations*
                   aligned command output (`eza`, `ls`, `ps`) split
                   cleanly. Genuine empty fields (zero bytes) are
                   preserved.                                   |builtin-read|
-
-  `local`         Binds to whatever scope frame is current (brace
-                  group, loop, `if` body), not only functions as
-                  in `bash`.                                    |builtin-local|
-
-  pipelines       A trailing run of builtins runs in the current
-                  shell, not a subshell, so `cmd | read x` and
-                  `cmd | while read ...` leave their assignments set
-                  afterward, and an all-builtin pipeline runs entirely
-                  in-process. `bash` needs `shopt -s lastpipe` (job
-                  control off) and only spares the final stage; in
-                  `shed` it is the default.                     |pipe|
 
   arrays          A bare `$arr` expands to every element of the array,
                   and `${#arr}` is the element count. In `bash`, `$arr`

@@ -1213,16 +1213,11 @@ LOCAL                                            *builtin-local* *local*
 
   `local [name[=value] ...]`
 
-  Declare variables scoped to the current block. Local variables
-  shadow any outer variable of the same name and are discarded when
-  the enclosing scope exits. Unlike bash, where `local` only applies
-  in functions, shed binds `local` to whatever scope frame is current.
-
-  Scopes that hold `local` variables ~
-
-    Function bodies                     variables die on function return
-    Brace groups `{ ... }`              variables die on block exit
-    Compound commands (`if`, `for`,...) variables die on exiting the body
+  Declare variables scoped to the enclosing function. Local variables
+  shadow any outer variable of the same name and are discarded when the
+  function returns, even when declared inside a nested block (an `if`
+  body, loop, or brace group). Used outside a function, `local` is an
+  error, as in `bash`.
 
   With `name=value`, declares and sets in one step. With just {name},
   declares with an empty value. Multiple declarations per call are
@@ -1230,9 +1225,10 @@ LOCAL                                            *builtin-local* *local*
 
   With no arguments, lists all variables in the current scope.
 
-  Combine with |script-defer| for save-and-restore patterns: `local`
-  captures the value, `defer` registers the restore, and both vanish
-  together when the scope ends.
+  Unlike `local`, |script-defer| is per-block: a deferred command runs
+  when its own enclosing block exits, not when the function returns.
+  Combine the two for save-and-restore patterns: `local` captures the
+  value and `defer` registers the restore.
 
   Examples:
 
@@ -1990,7 +1986,7 @@ SHOPT                                            *builtin-shopt* *shopt*
     `pipeline_style`        which pipeline stages run in-process: `last`, `tail`, or `all`
                             `last` -> the last command in a pipeline will not fork if it is a builtin
                             `tail` -> any run of trailing builtins in a pipeline will not fork
-                            `all`  -> commands in a pipeline will always fork a new process
+                            `all`  -> commands in a pipeline will always fork a new process (default)
 
   History options (`history.*`) ~
 

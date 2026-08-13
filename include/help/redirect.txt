@@ -112,22 +112,28 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       Example:
         `cat file.txt | grep pattern | sort`
 
-      A trailing run of builtins, every builtin from the end of the
-      pipeline back to the first non-builtin, executes in the *current*
-      shell instead of a subshell. A pipeline made of only builtins runs
-      entirely in-process. Side effects in those stages, variable
-      assignments, `read`, `cd`, persist after the pipeline ends:
+      By default every stage runs in its own subshell, matching `bash`,
+      so side effects, variable assignments, `read`, `cd`, are lost once
+      the pipeline ends. The |shopt| `core.pipeline_style` selects which
+      stages instead run in the *current* shell:
 
+        `all`   every stage forks (the default, matches `bash`)
+        `last`  the final stage runs in-process, like `bash`'s
+                `shopt -s lastpipe`
+        `tail`  the whole trailing run of builtins, every builtin from
+                the end of the pipeline back to the first non-builtin,
+                runs in-process; an all-builtin pipeline runs entirely
+                in the current shell
+
+      Under `last` or `tail`, side effects in the qualifying stages
+      persist after the pipeline ends:
+
+        `shopt core.pipeline_style=tail`
         `printf '%s\n' a b c | while read x; do n=$((n + 1)); done`
         `echo "$n"`        # prints 3
 
-      Only the trailing run qualifies: a builtin followed by an external
-      command (`read x | cat`) is not at the end, so it still forks and its
-      assignments are lost.
-
-      `bash` discards these side effects unless `shopt -s lastpipe` is set
-      with job control off, and even then only for the final stage. In
-      `shed` it is the default. See |shed-deviations|.
+      A builtin that is not at the end (`read x | cat`) always forks and
+      loses its assignments, whatever the style. See |shed-extensions|.
 
   `command1 |& command2`                       *pipe-and*
 
