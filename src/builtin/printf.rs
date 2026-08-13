@@ -757,6 +757,9 @@ impl Rendered {
 
 pub(super) struct Printf;
 impl super::Builtin for Printf {
+  fn no_help(&self) -> bool {
+    true
+  }
   fn execute(&self, mut args: super::BuiltinArgs) -> crate::ShResult<()> {
     let (arg_vec, _) = args.take_argv();
 

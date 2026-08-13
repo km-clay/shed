@@ -66,7 +66,7 @@ mod read;
 mod resource;
 mod scry;
 mod seek;
-mod set;
+pub(crate) mod set;
 mod shift;
 mod shopt;
 mod sock;
@@ -206,6 +206,14 @@ pub(super) trait Builtin: Sync {
     false
   }
 
+  /// Whether `--help` opens the `help` page for a specific builtin.
+  ///
+  /// Certain builtins like `echo`/`printf` are supposed to read `--help` as
+  /// a literal argument.
+  fn no_help(&self) -> bool {
+    false
+  }
+
   /// If this is overridden to return `true`, variables
   /// assigned via command prefix, i.e. `FOO=bar command`,
   /// are persisted after the builtin returns. POSIX thing.
@@ -299,7 +307,7 @@ pub(super) trait Builtin: Sync {
     Dispatcher::set_assignments(assignments, assign_behavior)?;
     let fork_builtins = node.flags.contains(NdFlags::FORK_BUILTINS);
 
-    if argv.len() == 2 && argv[1].as_str() == "--help" {
+    if !self.no_help() && argv.len() == 2 && argv[1].as_str() == "--help" {
       // we have been asked for help
       // is this a hack? only the nose knows.
       return exec_nonint(
@@ -519,6 +527,9 @@ impl Builtin for Colon {
   fn is_special(&self) -> bool {
     true
   }
+  fn no_help(&self) -> bool {
+    true
+  }
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     with_status(0)
   }
@@ -526,6 +537,9 @@ impl Builtin for Colon {
 
 struct True;
 impl Builtin for True {
+  fn no_help(&self) -> bool {
+    true
+  }
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     with_status(0)
   }
@@ -533,6 +547,9 @@ impl Builtin for True {
 
 struct False;
 impl Builtin for False {
+  fn no_help(&self) -> bool {
+    true
+  }
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     with_status(1)
   }
