@@ -67,6 +67,19 @@ impl super::Builtin for Trap {
       return with_status(0);
     }
 
+    // if the first operand is an unsigned integer, every operand is a trap target
+    // to reset to its default action. e.g. `trap 0 2`, `trap 2 EXIT`, etc
+    if arg_vec
+      .first()
+      .is_some_and(|(a, _)| a.parse::<usize>().is_ok())
+    {
+      for (arg, span) in arg_vec {
+        let target = arg.parse::<TrapTarget>().promote_err(span)?;
+        Shed::logic_mut(|l| l.remove_trap(target));
+      }
+      return with_status(0);
+    }
+
     if arg_vec.len() == 1 {
       errln!("usage: trap <COMMAND> [SIGNAL...]");
       return with_status(1);

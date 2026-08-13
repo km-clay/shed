@@ -310,7 +310,7 @@ impl FromStr for TrapTarget {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s {
-      "EXIT" => Ok(TrapTarget::Exit),
+      "0" | "EXIT" => Ok(TrapTarget::Exit),
       "RETURN" => Ok(TrapTarget::Return),
       "ERR" => Ok(TrapTarget::Error),
       _ => Ok(TrapTarget::Signal(parse_signal(s)?)),
