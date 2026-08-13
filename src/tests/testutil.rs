@@ -13,7 +13,7 @@ use nix::{
   unistd::pipe,
 };
 
-use crate::HashMap;
+use crate::{HashMap, state::scopes::ScopeStack};
 
 #[macro_export]
 macro_rules! assert_output {
@@ -111,6 +111,26 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 pub(crate) fn test_input(input: impl Into<String>) -> ShResult<()> {
   exec_nonint(input.into().into(), None)
+}
+
+/// On creation, increments function depth and pushes a function stack frame.
+///
+/// On drop, this stack frame is popped.
+pub(crate) struct FuncScope(state::meta::FuncGuard);
+
+impl FuncScope {
+  pub(crate) fn new() -> Self {
+    let guard = Shed::meta_mut(MetaTab::enter_func);
+    Shed::vars_mut(|v| v.descend_into_function(None));
+    Self(guard)
+  }
+}
+
+impl Drop for FuncScope {
+  fn drop(&mut self) {
+    // Pop the function scope; the inner FuncGuard then decrements func_depth.
+    Shed::vars_mut(ScopeStack::ascend);
+  }
 }
 
 pub(crate) struct TestGuard {

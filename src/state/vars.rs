@@ -973,13 +973,21 @@ macro_rules! impl_var_from {
 
 impl_var_from!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, bool);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+pub(crate) enum ScopeKind {
+  Ceiling,
+  Function,
+  #[default]
+  Block,
+}
+
 #[derive(Default, Clone, Debug)]
 pub(crate) struct VarTab {
   vars: HashMap<String, Var>,
   params: HashMap<ShellParam, VarStr>,
   sh_argv: VecDeque<VarStr>, /* Using a VecDeque makes the implementation of `shift` straightforward */
 
-  is_ceiling: bool,
+  kind: ScopeKind,
   deferred_cmds: Vec<Node>,
 }
 
@@ -989,7 +997,7 @@ impl VarTab {
       vars: HashMap::default(),
       params: HashMap::default(),
       sh_argv: VecDeque::new(),
-      is_ceiling: false,
+      kind: ScopeKind::Block,
       deferred_cmds: Vec::new(),
     }
   }
@@ -1000,18 +1008,21 @@ impl VarTab {
       vars,
       params,
       sh_argv: VecDeque::new(),
-      is_ceiling: false,
+      kind: ScopeKind::Block,
       deferred_cmds: Vec::new(),
     };
     var_tab.init_sh_argv();
     var_tab.init_magic_vars();
     var_tab
   }
-  pub fn set_is_ceiling(&mut self, is_ceiling: bool) {
-    self.is_ceiling = is_ceiling;
+  pub fn set_kind(&mut self, scope_kind: ScopeKind) {
+    self.kind = scope_kind;
   }
   pub fn is_ceiling(&self) -> bool {
-    self.is_ceiling
+    matches!(self.kind, ScopeKind::Ceiling)
+  }
+  pub fn is_function(&self) -> bool {
+    matches!(self.kind, ScopeKind::Function)
   }
   fn init_params() -> HashMap<ShellParam, VarStr> {
     let mut params = HashMap::default();

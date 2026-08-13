@@ -4,7 +4,7 @@ use super::{
   ShResult, Shed,
   meta::MetaTab,
   sherr,
-  vars::{ArrIndex, ShellParam, Var, VarFlags, VarKind, VarKindTag, VarName, VarTab},
+  vars::{self, ArrIndex, ShellParam, Var, VarFlags, VarKind, VarKindTag, VarName, VarTab},
 };
 use crate::{
   HashMap,
@@ -50,7 +50,13 @@ impl ScopeStack {
   pub fn descend_with_ceiling(&mut self, argv: Option<Vec<VarStr>>) {
     self.descend(argv);
     if let Some(scope) = self.scopes.last_mut() {
-      scope.set_is_ceiling(true);
+      scope.set_kind(vars::ScopeKind::Ceiling);
+    }
+  }
+  pub fn descend_into_function(&mut self, argv: Option<Vec<VarStr>>) {
+    self.descend(argv);
+    if let Some(scope) = self.scopes.last_mut() {
+      scope.set_kind(vars::ScopeKind::Function);
     }
   }
   pub fn ascend(&mut self) {
@@ -80,24 +86,25 @@ impl ScopeStack {
       if !argv.is_empty() {
         return argv;
       }
+      if scope.is_function() {
+        break;
+      }
     }
 
     self.cur_scope().sh_argv()
   }
+  fn find_scope_idx<F: Fn(&VarTab) -> bool>(&self, f: F) -> Option<usize> {
+    self.scopes.iter().rposition(f)
+  }
+  fn local_scope_idx(&self) -> Option<usize> {
+    self.find_scope_idx(|s| s.is_function() || s.is_ceiling())
+  }
   pub fn sh_argv_scope_mut(&mut self) -> &mut VarTab {
-    let idx = self
-      .scopes
-      .iter()
-      .rposition(|s| !s.sh_argv().is_empty())
-      .unwrap_or(0);
+    let idx = self.find_scope_idx(VarTab::is_function).unwrap_or(0);
     self.scopes.get_mut(idx).unwrap()
   }
   pub fn sh_argv_scope(&self) -> &VarTab {
-    let idx = self
-      .scopes
-      .iter()
-      .rposition(|s| !s.sh_argv().is_empty())
-      .unwrap_or(0);
+    let idx = self.find_scope_idx(VarTab::is_function).unwrap_or(0);
     self.scopes.get(idx).unwrap()
   }
   pub fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
@@ -181,8 +188,12 @@ impl ScopeStack {
   /// `VarKind::Unset` so `${x+}`/`${x-}` treat it as unset until it is assigned.
   pub fn declare_var_novalue(&mut self, var_name: &str, flags: VarFlags) -> ShResult<()> {
     if flags.contains(VarFlags::LOCAL) {
-      let Some(scope) = self.scopes.last_mut() else {
-        return Ok(());
+      let idx = self.local_scope_idx().unwrap_or(0);
+      let Some(scope) = self.scopes.get_mut(idx) else {
+        return Err(sherr!(
+          ExecFail,
+          "No local scope available to set variable '{var_name}'"
+        ));
       };
       if scope.var_exists(var_name) {
         scope.merge_flags(var_name, flags);
@@ -277,8 +288,12 @@ impl ScopeStack {
     scope.set_var(var_name, val, flags)
   }
   fn set_var_local(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
-    let Some(scope) = self.scopes.last_mut() else {
-      return Ok(());
+    let idx = self.local_scope_idx().unwrap_or(0);
+    let Some(scope) = self.scopes.get_mut(idx) else {
+      return Err(sherr!(
+        ExecFail,
+        "No local scope available to set variable '{var_name}'"
+      ));
     };
     scope.set_var(var_name, val, flags)
   }

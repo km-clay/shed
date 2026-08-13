@@ -10,8 +10,7 @@ use crate::{
     shopt,
     vars::{VarStr, VarStrSliceExt},
   },
-  util::isolation_guard,
-  varstr,
+  util, varstr,
 };
 use std::{
   collections::VecDeque,
@@ -54,10 +53,7 @@ use super::{
     vars::{ShellParam, Var, VarFlags, VarKind, VarKindTag},
   },
   try_var,
-  util::{
-    self, ShErr, ShErrKind, ShResult, ShResultExt, prefix_assign_guard, scope_guard,
-    shared_scope_guard, with_status,
-  },
+  util::{ShErr, ShErrKind, ShResult, ShResultExt, with_status},
   var,
 };
 
@@ -724,7 +720,7 @@ impl Dispatcher {
 
     // Prefix assignments on a function call (`X=2 f`) are temporary: snapshot
     // the prior values first so they revert on return
-    let _var_guard = prefix_assign_guard(assignments);
+    let _var_guard = util::prefix_assign_guard(assignments);
     Self::set_assignments(assignments, AssignBehavior::Export)?;
 
     let redirs = RedirSet::from(&func.redirs);
@@ -753,7 +749,7 @@ impl Dispatcher {
       }
     }
 
-    let _guard = scope_guard(Some(argv));
+    let _guard = util::function_scope_guard(Some(argv));
     let _func_guard = Shed::meta_mut(MetaTab::enter_func);
 
     // getopts OPTIND variable
@@ -837,7 +833,7 @@ impl Dispatcher {
 
     let _timer = self.take_timer();
     let brc_grp_logic = |s: &mut Self| -> ShResult<()> {
-      let _guard = shared_scope_guard();
+      let _guard = util::shared_scope_guard();
       s.dispatch_node(&*body)?;
 
       Ok(())
@@ -901,14 +897,14 @@ impl Dispatcher {
           let pattern_exp = expand_case_pattern(pattern.span.as_str())?;
           if pattern_exp.is_empty() {
             if pattern_raw.is_empty() {
-              let _guard = shared_scope_guard();
+              let _guard = util::shared_scope_guard();
               s.dispatch_node(body)?;
               break 'outer;
             }
           } else {
             let pattern = Shed::meta_mut(|m| m.get_glob(&pattern_exp));
             if pattern.is_match(&pattern_raw) {
-              let _guard = shared_scope_guard();
+              let _guard = util::shared_scope_guard();
               s.dispatch_node(body)?;
               break 'outer;
             }
@@ -941,7 +937,7 @@ impl Dispatcher {
         }
       };
       let CondNode { cond, body } = cond_node;
-      let _guard = shared_scope_guard();
+      let _guard = util::shared_scope_guard();
       let mut last_body_status = 0;
       'outer: loop {
         if let Err(e) = s.dispatch_node(cond) {
@@ -1019,7 +1015,7 @@ impl Dispatcher {
             break;
           }
         }
-        let _guard = shared_scope_guard();
+        let _guard = util::shared_scope_guard();
 
         if let Err(mut e) = s.dispatch_node(&*body) {
           match e.kind_mut() {
@@ -1098,7 +1094,7 @@ impl Dispatcher {
           Shed::vars_mut(|v| v.set_var(var.as_str(), VarKind::string(val), VarFlags::empty()))?;
         }
 
-        let _guard = shared_scope_guard();
+        let _guard = util::shared_scope_guard();
 
         if let Err(mut e) = s.dispatch_node(&*body) {
           match e.kind_mut() {
@@ -1142,7 +1138,7 @@ impl Dispatcher {
       let mut matched = false;
       for node in cond_nodes {
         let CondNode { cond, body } = node;
-        let _guard = shared_scope_guard();
+        let _guard = util::shared_scope_guard();
 
         if let Err(e) = s.dispatch_node(cond) {
           Shed::set_status(1);
@@ -1158,7 +1154,7 @@ impl Dispatcher {
 
       if !matched {
         if let Some(body) = else_block {
-          let _guard = shared_scope_guard();
+          let _guard = util::shared_scope_guard();
           s.dispatch_node(body)?;
         } else {
           Shed::set_status(0);
@@ -1443,7 +1439,7 @@ impl Dispatcher {
 
       let result = match &cmd.class {
         NdRule::Subshell { body } => {
-          let _ceiling = isolation_guard(None);
+          let _ceiling = util::isolation_guard(None);
 
           match self.dispatch_node(body) {
             Err(e) => {

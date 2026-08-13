@@ -66,19 +66,19 @@ pub fn shopt_guard() -> impl Drop {
   })
 }
 
-/// Descend into a new variable scope, with a new argv that shadows the previous one.
-///
-/// The `local` builtin uses this scope to store its variables.
-/// The `defer` builtin registers commands to run when this drops.
-pub fn scope_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
-  let arg_vec = args.map(|a| a.into_iter().map(|(s, _)| s).collect::<Vec<_>>());
-  Shed::vars_mut(|v| v.descend(arg_vec));
-  guard((), guard_drop)
+fn make_arg_vec(args: Option<Vec<(VarStr, Span)>>) -> Option<Vec<VarStr>> {
+  args.map(|a| a.into_iter().map(|(s, _)| s).collect::<Vec<_>>())
 }
 
 pub fn scope_ceiling_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
-  let arg_vec = args.map(|a| a.into_iter().map(|(s, _)| s).collect::<Vec<_>>());
+  let arg_vec = make_arg_vec(args);
   Shed::vars_mut(|v| v.descend_with_ceiling(arg_vec));
+  guard((), guard_drop)
+}
+
+pub fn function_scope_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
+  let arg_vec = make_arg_vec(args);
+  Shed::vars_mut(|v| v.descend_into_function(arg_vec));
   guard((), guard_drop)
 }
 

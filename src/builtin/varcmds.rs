@@ -12,6 +12,7 @@ use super::{
   outln, sherr,
   state::{
     Shed,
+    meta::MetaTab,
     vars::{
       VarFlags, VarKind, VarName, display_as_var, display_exported, display_local, display_readonly,
     },
@@ -478,6 +479,10 @@ impl super::Builtin for Local {
   }
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    if !Shed::meta(MetaTab::in_func) {
+      return Err(sherr!(ExecFail, "local: can only be used in a function"));
+    }
+
     let (arg_vec, opts) = args.take_argv();
 
     if arg_vec.is_empty() {
@@ -493,7 +498,7 @@ impl super::Builtin for Local {
 #[cfg(test)]
 mod tests {
   use crate::state::{self, Shed, vars::VarFlags};
-  use crate::tests::testutil::{TestGuard, test_input};
+  use crate::tests::testutil::{FuncScope, TestGuard, test_input};
   use crate::var;
 
   // ===================== readonly =====================
@@ -746,6 +751,7 @@ mod tests {
   #[test]
   fn local_sets_variable() {
     let _g = TestGuard::new();
+    let _fn = FuncScope::new();
     test_input("local mylocal=hello").unwrap();
     assert_eq!(var!("mylocal"), "hello");
   }
@@ -753,6 +759,7 @@ mod tests {
   #[test]
   fn local_sets_flag() {
     let _g = TestGuard::new();
+    let _fn = FuncScope::new();
     test_input("local mylocal=val").unwrap();
     let flags = Shed::vars(|v| v.get_var_flags("mylocal"));
     assert!(flags.unwrap().contains(VarFlags::LOCAL));
@@ -761,6 +768,7 @@ mod tests {
   #[test]
   fn local_empty_value() {
     let _g = TestGuard::new();
+    let _fn = FuncScope::new();
     test_input("local mylocal").unwrap();
     assert_eq!(var!("mylocal"), "");
     assert!(
@@ -773,7 +781,8 @@ mod tests {
   #[test]
   fn local_display() {
     let guard = TestGuard::new();
-    test_input("lv_test=display_val").unwrap();
+    let _fn = FuncScope::new();
+    test_input("local lv_test=display_val").unwrap();
     test_input("local").unwrap();
     let out = guard.read_output();
     assert!(out.contains("lv_test=display_val"));
@@ -782,6 +791,7 @@ mod tests {
   #[test]
   fn local_multiple() {
     let _g = TestGuard::new();
+    let _fn = FuncScope::new();
     test_input("local x=10 y=20").unwrap();
     assert_eq!(var!("x"), "10");
     assert_eq!(var!("y"), "20");
@@ -790,6 +800,7 @@ mod tests {
   #[test]
   fn local_cmd_sub_preserves_whitespace() {
     let _g = TestGuard::new();
+    let _fn = FuncScope::new();
     // Regression: assignment RHS was going through word-splitting expand
     // which collapsed runs of whitespace into single spaces. Now uses
     // expand_no_split via the get_opts_from_tokens_raw_no_split path.
@@ -800,6 +811,7 @@ mod tests {
   #[test]
   fn local_cmd_sub_preserves_newlines() {
     let _g = TestGuard::new();
+    let _fn = FuncScope::new();
     test_input(r"local ml=$(printf 'a\nb\nc')").unwrap();
     assert_eq!(var!("ml"), "a\nb\nc");
   }
@@ -807,6 +819,7 @@ mod tests {
   #[test]
   fn local_bare_names_still_split() {
     let _g = TestGuard::new();
+    let _fn = FuncScope::new();
     // Make sure the no-split path didn't break bare-name declarations:
     // `local a b c` should still declare three separate variables.
     test_input("local la=1 lb=2 lc=3").unwrap();
@@ -891,6 +904,7 @@ mod tests {
   #[test]
   fn local_status_zero() {
     let _g = TestGuard::new();
+    let _fn = FuncScope::new();
     test_input("local z=1").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
   }
@@ -995,51 +1009,47 @@ mod tests {
   // ===================== block-scoped local =====================
 
   #[test]
-  fn local_brace_group_scoped() {
-    // local declared in a brace group dies when the brace closes.
+  fn local_outside_function_errors() {
+    // `local` outside any function is an error (bash/dash/ksh parity); it must
+    // not silently create a global. The error is non-fatal, so the following
+    // command still runs and `x` is never set.
     let guard = TestGuard::new();
-    test_input("{ local x=inside; echo \"in=$x\"; }; echo \"out=$x\"").unwrap();
+    test_input("{ local x=inside; }; echo \"out=${x-unset}\"").unwrap();
     let out = guard.read_output();
-    assert!(out.contains("in=inside"), "got {out:?}");
     assert!(
-      out.contains("out="),
-      "x should be unset outside block; got {out:?}"
-    );
-    // 'out=inside' would mean the local leaked
-    assert!(
-      !out.contains("out=inside"),
-      "local leaked out of block: {out:?}"
+      out.contains("out=unset"),
+      "top-level local must not set x: {out:?}"
     );
   }
 
   #[test]
   fn local_nested_brace_groups() {
-    // Inner brace group's local doesn't leak to outer; outer's doesn't leak past outer.
+    // POSIX: nested brace groups aren't scopes, so a `local` in the innermost
+    // attaches to the enclosing function and is visible all the way out.
     let guard = TestGuard::new();
-    test_input("{ { local x=inner; }; echo \"middle=$x\"; }; echo \"outer=$x\"").unwrap();
+    test_input("foo() { { { local x=inner; }; echo \"middle=$x\"; }; echo \"outer=$x\"; }")
+      .unwrap();
+    test_input("foo").unwrap();
     let out = guard.read_output();
-    assert!(out.contains("middle="), "got {out:?}");
-    assert!(
-      !out.contains("middle=inner"),
-      "inner local leaked to middle: {out:?}"
-    );
-    assert!(out.contains("outer="), "got {out:?}");
-    assert!(
-      !out.contains("outer=inner"),
-      "inner local leaked to outer: {out:?}"
-    );
+    assert!(out.contains("middle=inner"), "got {out:?}");
+    assert!(out.contains("outer=inner"), "got {out:?}");
   }
 
   #[test]
-  fn local_shadows_outer_within_block() {
-    // local x in inner block shadows outer; outer value restored after block.
+  fn local_in_block_redeclares_function_local() {
+    // POSIX: a brace group is not a scope, so the inner `local x` re-declares
+    // the function's single `x`. The value persists after the block — there's
+    // no block scope to restore an "outer" value from.
     let guard = TestGuard::new();
     test_input("foo() { local x=outer; { local x=inner; echo \"in=$x\"; }; echo \"after=$x\"; }")
       .unwrap();
     test_input("foo").unwrap();
     let out = guard.read_output();
     assert!(out.contains("in=inner"), "got {out:?}");
-    assert!(out.contains("after=outer"), "shadow not restored: {out:?}");
+    assert!(
+      out.contains("after=inner"),
+      "inner local should persist (no block scope): {out:?}"
+    );
   }
 
   #[test]
@@ -1060,15 +1070,15 @@ mod tests {
 
   #[test]
   fn local_brace_group_inside_function() {
-    // Brace group inside a function: local scoped to brace, not whole function.
+    // POSIX: a brace group inside a function is not its own scope, so `local`
+    // there attaches to the function and is visible after the brace closes.
     let guard = TestGuard::new();
     test_input("foo() { { local x=brace; }; echo \"after_brace=$x\"; }").unwrap();
     test_input("foo").unwrap();
     let out = guard.read_output();
-    assert!(out.contains("after_brace="), "got {out:?}");
     assert!(
-      !out.contains("after_brace=brace"),
-      "brace-local leaked into function scope: {out:?}"
+      out.contains("after_brace=brace"),
+      "local should be visible in the enclosing function: {out:?}"
     );
   }
 
