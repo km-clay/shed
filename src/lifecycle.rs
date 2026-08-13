@@ -17,7 +17,7 @@ use super::{
   sherr, signal,
   state::{
     jobs::JobTab,
-    logic::TrapTarget,
+    logic::{LogTab, TrapTarget},
     meta::MetaTab,
     terminal::Terminal,
     util::{self, generate_default_rc, source_env},
@@ -380,6 +380,5 @@ pub(super) fn setup_child() {
     return;
   }
 
-  // remove the inherited exit trap
-  Shed::logic_mut(|l| l.remove_trap(TrapTarget::Exit));
+  Shed::logic_mut(LogTab::reset_caught_traps);
 }

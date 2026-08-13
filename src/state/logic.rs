@@ -427,6 +427,9 @@ impl LogTab {
   pub fn remove_trap(&mut self, target: TrapTarget) -> Option<VarStr> {
     self.traps.remove(&target)
   }
+  pub fn reset_caught_traps(&mut self) {
+    self.traps.retain(|_, command| command.as_str().is_empty());
+  }
   pub fn traps(&self) -> &HashMap<TrapTarget, VarStr> {
     &self.traps
   }

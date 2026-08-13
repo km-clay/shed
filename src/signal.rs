@@ -110,13 +110,14 @@ pub fn sigint_pending() -> bool {
 
 /// Whether a pending signal warrants interrupting a blocking `read`
 pub fn has_actionable_pending() -> bool {
-  if SHOULD_QUIT.load(Ordering::SeqCst) {
-    return true;
-  }
   const BENIGN: u64 = (1 << Signal::SIGCHLD as u64)
     | (1 << Signal::SIGWINCH as u64)
     | (1 << Signal::SIGURG as u64)
     | (1 << Signal::SIGCONT as u64);
+
+  if SHOULD_QUIT.load(Ordering::SeqCst) {
+    return true;
+  }
   SIGNALS.load(Ordering::SeqCst) & !BENIGN != 0
 }
 
