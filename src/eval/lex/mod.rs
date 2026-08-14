@@ -1068,17 +1068,45 @@ impl LexStream {
         });
       }
       _ if self.quote_state.in_single() => pos += ch.len_utf8(),
-      '$' if chars.peek() == Some(&'(') => {
+      '$' if chars.peek() == Some(&'(') && self.slice(pos + 2..).is_some_and(|s| s.starts_with('(')) => {
         pos += 2;
         chars.next();
         let paren_pos = pos;
         if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
-          return Err(lex_err!(
-            self,
-            pos,
-            paren_pos..paren_pos + 1,
-            "Unclosed subshell",
-          ));
+          return Err(lex_err!(self, pos, paren_pos..paren_pos + 1, "Unclosed subshell"));
+        }
+      }
+      '$' if chars.peek() == Some(&'(') => {
+        pos += 2;
+        chars.next();
+        let paren_pos = pos;
+        // Delimit `$(...)` with the case-aware subshell scanner rather than a
+        // bare paren count, so a `case` pattern's `)` doesn't close it early.
+        match scan_cmd_sub_body(self.slice(pos..).unwrap_or("")) {
+          Some(close) => {
+            let consumed = close + 1; // include the closing `)`
+            for _ in 0..self.slice(pos..pos + consumed).unwrap_or("").chars().count() {
+              chars.next();
+            }
+            pos += consumed;
+          }
+          None if !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) => {
+            return Err(lex_err!(
+              self,
+              pos,
+              paren_pos..paren_pos + 1,
+              "Unclosed subshell",
+            ));
+          }
+          None => {
+            // Tolerant of partial input (e.g. tab completion): consume the rest.
+            let rest = self.slice(pos..).unwrap_or("");
+            let (bytes, count) = (rest.len(), rest.chars().count());
+            for _ in 0..count {
+              chars.next();
+            }
+            pos += bytes;
+          }
         }
       }
       '$' if chars.peek() == Some(&'{') => {
@@ -1667,6 +1695,24 @@ pub fn is_field_sep(ch: char) -> bool {
 
 pub fn is_keyword(slice: &str) -> bool {
   KEYWORDS.binary_search(&slice).is_ok()
+}
+
+pub fn scan_cmd_sub_body(body: &str) -> Option<usize> {
+  // Prepend `(` so the lexer enters a subshell context
+  let src: std::rc::Rc<str> = format!("({body}").into();
+  let mut lex = LexStream::new(src, LexFlags::LEX_UNFINISHED);
+  let mut entered = false;
+  while let Some(tk) = lex.next() {
+    let tk = tk.ok()?;
+    if lex.in_subsh() {
+      entered = true;
+    } else if entered {
+      // `tk` is the `)` that closed the subshell. Its span end is the byte just
+      // past `)` in `(`+body; strip the prepended `(` and the `)` itself.
+      return tk.span.range.end.checked_sub(2);
+    }
+  }
+  None
 }
 
 pub fn is_cmd_sub(slice: &str) -> bool {

@@ -5,7 +5,7 @@ use std::str::Chars;
 
 use bitflags::bitflags;
 
-use crate::{state::vars::VarStr, util};
+use crate::{eval::lex, state::vars::VarStr, util};
 
 use super::{QuoteState, ShResult, markers, match_loop, sherr, try_var, util::is_var_name_ch};
 
@@ -272,6 +272,18 @@ fn read_varsub(chars: &mut Peekable<Chars>, result: &mut String) -> bool {
 
 fn read_subsh(chars: &mut Peekable<Chars>, result: &mut String) {
   result.push(markers::SUBSH);
+  // `chars` sits just after `$(`. Delimit the body with the lexer's
+  // case-aware subshell scanner
+  let rest: String = chars.clone().collect();
+  if let Some(close) = lex::scan_cmd_sub_body(&rest) {
+    result.push_str(&rest[..close]);
+    result.push(markers::SUBSH);
+    for _ in 0..rest[..=close].chars().count() {
+      chars.next();
+    }
+    return;
+  }
+
   let mut paren_count = 1;
   let mut qt = QuoteState::default();
   match_loop!(chars.next() => ch, {
@@ -589,9 +601,13 @@ fn read_backtick(chars: &mut Peekable<Chars>, result: &mut String) {
   result.push(markers::SUBSH);
   match_loop!(chars.next() => bt_ch, {
     '\\' => {
-      result.push(bt_ch);
-      if let Some(next_ch) = chars.next() {
-        result.push(next_ch);
+      // POSIX: inside `...`, a backslash is removed only when it precedes
+      // `` ` ``, `$`, or `\`; elsewhere it stays literal. Stripping `\`` to a
+      // bare backtick is also what lets nested `\`...\`` command subs run — the
+      // inner shell sees a real backtick in the command text.
+      match chars.peek() {
+        Some('`' | '$' | '\\') => result.push(chars.next().unwrap()),
+        _ => result.push(bt_ch),
       }
     }
     // fun fact: this one match arm allows us to parse backtick statements nested in regular command subs inside of other backtick statements.
