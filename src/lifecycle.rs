@@ -322,7 +322,7 @@ fn setup_panic_handler() {
 pub(super) fn tear_down() -> ExitCode {
   signal::clear_quit_latch();
 
-  if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit)) {
+  if let Some(trap) = Shed::logic_mut(|l| l.remove_trap(TrapTarget::Exit)) {
     execute::catch_exit(
       || exec_nonint(trap.clone(), Some("trap".into())),
       |code| signal::QUIT_CODE.store(code, Ordering::SeqCst),
@@ -353,7 +353,7 @@ pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
   signal::clear_quit_latch();
 
   let mut code = code;
-  if run_trap && let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Exit)) {
+  if run_trap && let Some(trap) = Shed::logic_mut(|l| l.remove_trap(TrapTarget::Exit)) {
     execute::catch_exit(
       || exec_nonint(trap.clone(), Some("trap".into())),
       |status| code = status,
