@@ -527,7 +527,16 @@ pub fn wait_bg(id: &JobID) -> ShResult<()> {
     let stat = loop {
       match waitpid(*pid, None) {
         Ok(stat) => break stat,
-        Err(Errno::EINTR) => (),
+        Err(Errno::EINTR) => {
+          // interrupted by signal. check if it should interrupt our wait or not
+          // if so, run `signal::check_signals()`
+          if signal::has_actionable_pending() {
+            let sig = signal::first_actionable_signal().unwrap_or(0);
+            signal::check_signals()?;
+            Shed::set_status(SIG_EXIT_OFFSET + sig);
+            return Ok(());
+          }
+        }
         Err(Errno::ECHILD) => return Ok(()),
         Err(e) => return Err(e.into()),
       }
