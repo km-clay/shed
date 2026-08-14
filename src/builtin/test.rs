@@ -315,6 +315,14 @@ impl<'a> ArgvParser<'a> {
     let start = self.pos;
     while let Some(tok) = self.peek() {
       if STOP_TOKENS.contains(&tok) {
+        // if this is true, this token refers to the right hand side of a test
+        // and is therefore literal.
+        let is_rhs =
+          self.pos - start == 2 && self.argv[start + 1].0.as_str().parse::<BinaryOp>().is_ok();
+
+        if is_rhs {
+          self.advance();
+        }
         break;
       }
       self.advance();
@@ -409,6 +417,21 @@ impl super::Builtin for Test {
     if (cmd == "[" || cmd == "[[") && !arg_vec.is_empty() {
       arg_vec.pop();
     }
+
+    // POSIX arity-3 rule: exactly three operands with a binary operator in the
+    // middle is a binary test, whatever the operands look like (`[ -a = -a ]`,
+    // `[ b = -a ]`). The general `-a`/`-o` grammar would otherwise misread an
+    // operand as the conjunction operator.
+    if arg_vec.len() == 3 && arg_vec[1].0.as_str().parse::<BinaryOp>().is_ok() {
+      return match eval_leaf(&arg_vec, extended).map_err(|e| e.try_blame(span)) {
+        Err(e) => {
+          Shed::set_status(2);
+          Err(e)
+        }
+        Ok(res) => with_status(i32::from(!res)),
+      };
+    }
+
     let result = ArgvParser::new(&arg_vec, extended)
       .parse_or(true)
       .map_err(|e| e.try_blame(span));
