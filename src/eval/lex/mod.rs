@@ -1644,7 +1644,9 @@ impl Iterator for LexStream {
             .last()
             .is_some_and(|c| c.is_ascii_digit() || c == '-');
 
-          if dup_style {
+          let is_heredoc = matches!(tk.class, TkRule::HereDoc { .. });
+
+          if dup_style || is_heredoc {
             self.flags &= !LexFlags::NEXT_IS_REDIR;
           } else {
             self.flags |= LexFlags::NEXT_IS_REDIR;

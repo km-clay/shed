@@ -197,7 +197,7 @@ impl ParseStream {
           assignments.push(assign);
         } else if is_keyword {
           return Ok(None);
-        } else if prefix_tk.class == TkRule::Redir {
+        } else if matches!(prefix_tk.class, TkRule::Redir | TkRule::HereDoc { .. }) {
           extend_span!(span, prefix_tk.span);
           tk_counter += 1;
           let ctx = self.context.clone();
