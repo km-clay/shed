@@ -184,7 +184,7 @@ fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
       '\'' if flags.contains(ExpandFlags::QUOTE) || param_depth > 0 => {
         read_sng_quote(&mut chars, &mut result);
       }
-      '`' if flags.contains(ExpandFlags::CMDSUB) => read_backtick(&mut chars, &mut result),
+      '`' if flags.contains(ExpandFlags::CMDSUB) => read_backtick(&mut chars, &mut result, false),
       '<' if flags.contains(ExpandFlags::PROCSUB) && chars.peek() == Some(&'(') => {
         read_proc_sub_in(&mut chars, &mut result);
       }
@@ -389,7 +389,7 @@ fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
       param_depth = param_depth.saturating_sub(1);
     }
     '\'' if param_depth > 0 => read_sng_quote(chars, result),
-    '`' => read_backtick(chars, result),
+    '`' => read_backtick(chars, result, true),
     '"' if param_depth > 0 => read_dub_quote(chars, result),
     '"' => {
       result.push(markers::DUB_QUOTE);
@@ -596,17 +596,16 @@ fn read_proc_sub(chars: &mut Peekable<Chars>, result: &mut String, input: bool) 
   });
 }
 
-fn read_backtick(chars: &mut Peekable<Chars>, result: &mut String) {
+fn read_backtick(chars: &mut Peekable<Chars>, result: &mut String, in_dquote: bool) {
   result.push(markers::VAR_SUB);
   result.push(markers::SUBSH);
   match_loop!(chars.next() => bt_ch, {
     '\\' => {
-      // POSIX: inside `...`, a backslash is removed only when it precedes
-      // `` ` ``, `$`, or `\`; elsewhere it stays literal. Stripping `\`` to a
-      // bare backtick is also what lets nested `\`...\`` command subs run — the
-      // inner shell sees a real backtick in the command text.
+      // only push backslash for double quotes if we are already in double quotes
+      // this is some weird posix corner case
       match chars.peek() {
         Some('`' | '$' | '\\') => result.push(chars.next().unwrap()),
+        Some('"') if in_dquote => result.push(chars.next().unwrap()),
         _ => result.push(bt_ch),
       }
     }
