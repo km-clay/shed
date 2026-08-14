@@ -1214,12 +1214,6 @@ impl VarTab {
   pub fn vars_mut(&mut self) -> &mut HashMap<String, Var> {
     &mut self.vars
   }
-  pub fn export_var(&mut self, var_name: &str) {
-    if let Some(var) = self.vars.get_mut(var_name) {
-      var.mark_for_export();
-      Shed::meta_mut(MetaTab::clear_envp);
-    }
-  }
   /// Clear the export attribute (`export -n`), leaving the variable's value
   /// intact as an ordinary shell variable.
   pub fn unexport_var(&mut self, var_name: &str) {

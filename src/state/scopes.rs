@@ -125,14 +125,6 @@ impl ScopeStack {
     }
     Ok(())
   }
-  pub fn export_var(&mut self, var_name: &str) {
-    for scope in self.bounded_scopes_rev_mut() {
-      if scope.var_exists(var_name) {
-        scope.export_var(var_name);
-        return;
-      }
-    }
-  }
   pub fn unexport_var(&mut self, var_name: &str) {
     for scope in self.bounded_scopes_rev_mut() {
       if scope.var_exists(var_name) {

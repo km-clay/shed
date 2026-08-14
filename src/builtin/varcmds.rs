@@ -452,8 +452,8 @@ impl super::Builtin for Export {
       } else if let Some(val) = val {
         Shed::vars_mut(|v| v.set_var(var, val, VarFlags::EXPORT)).promote_err(span)?;
       } else {
-        // Export an existing variable, if any
-        Shed::vars_mut(|v| v.export_var(var));
+        // Upsert the variable
+        Shed::vars_mut(|v| v.declare_var_novalue(var, VarFlags::EXPORT)).promote_err(span)?;
       }
     }
 
