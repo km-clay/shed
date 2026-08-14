@@ -760,13 +760,25 @@ impl super::Builtin for Printf {
   fn no_help(&self) -> bool {
     true
   }
+  fn double_dash_operand(&self) -> bool {
+    // Keep `--` as an operand; `execute` strips only a single *leading* `--`
+    // (options end there), so a `--` at or after the format stays literal data.
+    true
+  }
   fn execute(&self, mut args: super::BuiltinArgs) -> crate::ShResult<()> {
     let (arg_vec, _) = args.take_argv();
 
     let mut arg_iter = arg_vec.into_iter();
-    let (format_str, _) = arg_iter
+    let mut first = arg_iter
       .next()
       .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
+    // A single leading `--` ends option processing (POSIX utility syntax).
+    if first.0.as_str() == "--" {
+      first = arg_iter
+        .next()
+        .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
+    }
+    let (format_str, _) = first;
 
     let formatter = PrintFormatter::parse(&format_str)?;
     let remaining: Vec<String> = arg_iter.map(|(s, _)| s.to_string()).collect();

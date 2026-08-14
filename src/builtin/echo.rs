@@ -20,6 +20,9 @@ impl Builtin for Echo {
   fn no_help(&self) -> bool {
     true
   }
+  fn double_dash_operand(&self) -> bool {
+    true
+  }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       OptSpec::new_short("no_newline", 'n'),

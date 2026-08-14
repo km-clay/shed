@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-  builtin::opt::{Parsed, Word, parse_opts, parse_opts_strict},
+  builtin::opt::{Parsed, Word, parse_opts_with},
   eval::execute,
   procio::{bytes_to_string, out_bytes},
   state::{
@@ -214,6 +214,14 @@ pub(super) trait Builtin: Sync {
     false
   }
 
+  /// Whether `--` is a literal operand rather than an end-of-options separator.
+  ///
+  /// `echo`/`printf` have no `--` terminator in operand position — POSIX `echo`
+  /// prints `--`, and `printf` treats it as data once the format is seen.
+  fn double_dash_operand(&self) -> bool {
+    false
+  }
+
   /// If this is overridden to return `true`, variables
   /// assigned via command prefix, i.e. `FOO=bar command`,
   /// are persisted after the builtin returns. POSIX thing.
@@ -233,11 +241,8 @@ pub(super) trait Builtin: Sync {
   /// The way that the builtin parses its options. Some of them are weird, like `set`
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
     let opts = self.opts();
-    let parsed = if self.strict_opts() {
-      parse_opts_strict(argv, &opts).promote_err(cmd_span)?
-    } else {
-      parse_opts(argv, &opts).promote_err(cmd_span)?
-    };
+    let parsed = parse_opts_with(argv, &opts, self.strict_opts(), self.double_dash_operand())
+      .promote_err(cmd_span)?;
 
     // `$_` is the last expanded word of the command line, options included; the
     // flat trace list preserves it in order.

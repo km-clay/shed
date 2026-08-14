@@ -170,14 +170,27 @@ macro_rules! opt {
 }
 
 pub fn parse_opts(tokens: &[Tk], specs: &[OptSpec]) -> ShResult<Parsed> {
-  parse_opts_inner(tokens, specs, false)
+  parse_opts_inner(tokens, specs, false, false)
 }
 
-pub fn parse_opts_strict(tokens: &[Tk], specs: &[OptSpec]) -> ShResult<Parsed> {
-  parse_opts_inner(tokens, specs, true)
+/// Like [`parse_opts`], but `keep_double_dash` controls whether `--` acts as an
+/// end-of-options separator (`false`) or is kept as a literal operand (`true`).
+/// `echo`/`printf` have no `--` terminator in operand position and pass `true`.
+pub fn parse_opts_with(
+  tokens: &[Tk],
+  specs: &[OptSpec],
+  strict: bool,
+  keep_double_dash: bool,
+) -> ShResult<Parsed> {
+  parse_opts_inner(tokens, specs, strict, keep_double_dash)
 }
 
-fn parse_opts_inner(tokens: &[Tk], specs: &[OptSpec], strict: bool) -> ShResult<Parsed> {
+fn parse_opts_inner(
+  tokens: &[Tk],
+  specs: &[OptSpec],
+  strict: bool,
+  keep_double_dash: bool,
+) -> ShResult<Parsed> {
   // Expand tokens and flatten via get_words, preserving spans
   let mut expanded_words = vec![];
   for tk in tokens {
@@ -199,8 +212,8 @@ fn parse_opts_inner(tokens: &[Tk], specs: &[OptSpec], strict: bool) -> ShResult<
   let mut words = vec![];
 
   while let Some((word, span)) = words_iter.next() {
-    // separator, denotes end of options
-    if word == "--" {
+    // separator, denotes end of options (unless the builtin keeps `--` literal)
+    if word == "--" && !keep_double_dash {
       if words_iter.peek().is_none() {
         // it's the last word, push it as an arg
         words.push(Word::Arg(word, span));
