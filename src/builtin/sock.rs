@@ -13,8 +13,12 @@ use std::{
 
 // The abstract namespace only exists on Linux-like platforms, so the address
 // types used to resolve it live behind the same gate as `connect_abstract`.
+#[cfg(all(linux_like, target_os = "linux"))]
+use std::os::linux::net::SocketAddrExt;
+#[cfg(all(linux_like, target_os = "android"))]
+use std::os::android::net::SocketAddrExt;
 #[cfg(linux_like)]
-use std::os::{linux::net::SocketAddrExt, unix::net::SocketAddr};
+use std::os::unix::net::SocketAddr;
 
 use nix::{
   errno::Errno,
@@ -799,7 +803,11 @@ mod tests {
   #[cfg(linux_like)]
   #[test]
   fn sock_connects_to_abstract_socket() {
+    #[cfg(all(linux_like, target_os = "linux"))]
     use std::os::linux::net::SocketAddrExt;
+    #[cfg(all(linux_like, target_os = "android"))]
+    use std::os::android::net::SocketAddrExt;
+    #[cfg(linux_like)]
     use std::os::unix::net::SocketAddr;
 
     let _g = TestGuard::new();
