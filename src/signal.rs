@@ -32,6 +32,13 @@ use crate::{HashMap, state::vars::VarStr, varstr};
 
 static SIGNALS: AtomicU64 = AtomicU64::new(0);
 
+/// Signals that don't warrant interrupting a blocking builtin (`read`/`wait`):
+/// child/window/urgent/continue notifications the wait loop handles by retrying.
+const BENIGN_SIGNALS: u64 = (1 << Signal::SIGCHLD as u64)
+  | (1 << Signal::SIGWINCH as u64)
+  | (1 << Signal::SIGURG as u64)
+  | (1 << Signal::SIGCONT as u64);
+
 pub static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
 pub static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
 pub static JOB_DONE: AtomicBool = AtomicBool::new(false);
@@ -108,17 +115,22 @@ pub fn sigint_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) & (1 << Signal::SIGINT as u64) != 0
 }
 
-/// Whether a pending signal warrants interrupting a blocking `read`
+/// Whether a pending signal warrants interrupting a blocking `read`/`wait`.
 pub fn has_actionable_pending() -> bool {
-  const BENIGN: u64 = (1 << Signal::SIGCHLD as u64)
-    | (1 << Signal::SIGWINCH as u64)
-    | (1 << Signal::SIGURG as u64)
-    | (1 << Signal::SIGCONT as u64);
-
   if SHOULD_QUIT.load(Ordering::SeqCst) {
     return true;
   }
-  SIGNALS.load(Ordering::SeqCst) & !BENIGN != 0
+  SIGNALS.load(Ordering::SeqCst) & !BENIGN_SIGNALS != 0
+}
+
+/// The first available interrupting signal, as an `i32`
+pub fn first_actionable_signal() -> Option<i32> {
+  let pending = SIGNALS.load(Ordering::SeqCst) & !BENIGN_SIGNALS;
+  MISC_SIGNALS
+    .iter()
+    .copied()
+    .find(|s| pending & (1 << *s as u64) != 0)
+    .map(|s| s as i32)
 }
 
 /// Mark the shell for a clean exit with the wait-style status for `sig`.
@@ -168,8 +180,10 @@ pub fn check_signals() -> ShResult<()> {
 
   if got_signal(Signal::SIGINT) {
     interrupt()?;
-    run_trap(Signal::SIGINT)?;
-    return Err(sherr!(Interrupt, "Interrupted"));
+    // SIGINT with a trap allows execution to continue. SIGINT with no trap interrrupts.
+    if !run_trap(Signal::SIGINT)? {
+      return Err(sherr!(Interrupt, "Interrupted"));
+    }
   }
   if got_signal(Signal::SIGHUP) {
     run_trap(Signal::SIGHUP)?;
