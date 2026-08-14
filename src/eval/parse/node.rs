@@ -505,6 +505,7 @@ pub(crate) fn node_has_only_builtins(node: &mut Node) -> bool {
         });
         res = Some(is);
       }
+      NdRule::Subshell { .. } => res = Some(false),
       _ => res = Some(true),
     }
   });
