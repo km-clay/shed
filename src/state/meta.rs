@@ -12,8 +12,8 @@ use crate::{
   HashMap,
   state::vars::VarStr,
   util::{
-    compile_glob_lenient, count_unescaped, ends_with_unescaped, has_any_unescaped,
-    starts_with_unescaped,
+    compile_glob_lenient, count_unescaped, ends_with_unescaped, has_any_unescaped, has_unescaped,
+    split_at_unescaped, starts_with_unescaped,
   },
 };
 
@@ -490,6 +490,7 @@ pub(crate) enum Pattern {
   Contains(Rc<str>),
   StartsWith(Rc<str>),
   EndsWith(Rc<str>),
+  DoubleSided(Rc<str>, Rc<str>), // something like a*b
   Glob(GlobPattern),
 }
 
@@ -527,14 +528,28 @@ impl Pattern {
       out
     };
 
-    match (
-      starts_with_unescaped(pattern, "*"),
-      ends_with_unescaped(pattern, "*"),
-    ) {
-      (true, false) => Self::EndsWith(strip_glob_escapes(&pattern[1..]).into()),
-      (false, true) => Self::StartsWith(strip_glob_escapes(&pattern[..pattern.len() - 1]).into()),
-      (true, true) => Self::Contains(strip_glob_escapes(&pattern[1..pattern.len() - 1]).into()),
-      (false, false) => Self::Equal(strip_glob_escapes(pattern).into()),
+    let left_star = starts_with_unescaped(pattern, "*");
+    let right_star = ends_with_unescaped(pattern, "*");
+
+    // The literal body sitting between the optional boundary stars.
+    let body = &pattern[usize::from(left_star)..pattern.len() - usize::from(right_star)];
+
+    if has_unescaped(body, "*") {
+      if !left_star && !right_star && count_unescaped(body, "*") == 1 {
+        let (star, star_len) = split_at_unescaped(body, "*").unwrap();
+        let lhs = strip_glob_escapes(&body[..star]).into();
+        let rhs = strip_glob_escapes(&body[star + star_len..]).into();
+        return Self::DoubleSided(lhs, rhs);
+      }
+      return Self::Glob(compile_glob_lenient(pattern));
+    }
+
+    let body: Rc<str> = strip_glob_escapes(body).into();
+    match (left_star, right_star) {
+      (false, false) => Self::Equal(body),
+      (true, false) => Self::EndsWith(body),
+      (false, true) => Self::StartsWith(body),
+      (true, true) => Self::Contains(body),
     }
   }
   pub fn is_match(&self, text: &str) -> bool {
@@ -545,6 +560,13 @@ impl Pattern {
       Pattern::StartsWith(s) => text.starts_with(&**s),
       Pattern::EndsWith(s) => text.ends_with(&**s),
       Pattern::Glob(g) => g.matches(text),
+      Pattern::DoubleSided(l, r) => {
+        // The prefix and suffix must not overlap: `ab*bc` requires at least
+        // `len("ab") + len("bc")` chars, so it can't match `abc`.
+        let len_match = text.len() >= l.len() + r.len();
+        let both_sides_match = text.starts_with(&**l) && text.ends_with(&**r);
+        len_match && both_sides_match
+      }
     }
   }
 }
@@ -1352,5 +1374,63 @@ mod cmd_timer_tests {
     let t = stopped_timer();
     let out = t.format_report("ms=%m").unwrap();
     assert_eq!(out, "ms=");
+  }
+}
+
+#[cfg(test)]
+mod pattern_tests {
+  use super::Pattern;
+
+  fn matches(pat: &str, text: &str) -> bool {
+    Pattern::compile(pat).is_match(text)
+  }
+
+  #[test]
+  fn interior_star_matches_like_glob() {
+    // Regression (#142): a `*` between two literals used to compile to a literal
+    // `Equal`/`StartsWith`/`EndsWith`, so `a*c` never matched `abc`.
+    assert!(matches("a*c", "abc"));
+    assert!(matches("a*c", "ac")); // star matches empty
+    assert!(matches("a*c", "aXXXc"));
+    assert!(!matches("a*c", "ab"));
+    assert!(!matches("a*c", "bc"));
+  }
+
+  #[test]
+  fn double_sided_prefix_suffix_must_not_overlap() {
+    // `ab*bc` needs len("ab") + len("bc") chars, so it can't match `abc`.
+    assert!(!matches("ab*bc", "abc"));
+    assert!(matches("ab*bc", "abbc"));
+    assert!(matches("ab*bc", "abXbc"));
+  }
+
+  #[test]
+  fn boundary_star_combined_with_interior_star() {
+    assert!(matches("*a*c", "XabYc"));
+    assert!(matches("a*c*", "abcX"));
+    assert!(matches("a*b*c", "aXbYc"));
+    assert!(!matches("a*b*c", "acb"));
+  }
+
+  #[test]
+  fn many_interior_segments_delegate_to_glob() {
+    assert!(matches("*foo*ba*biz*buzz*", "XfooYbaZbizWbuzzV"));
+    assert!(!matches("*foo*ba*biz*buzz*", "foobabizbuz"));
+  }
+
+  #[test]
+  fn escaped_star_is_literal() {
+    assert!(matches(r"a\*c", "a*c"));
+    assert!(!matches(r"a\*c", "abc"));
+  }
+
+  #[test]
+  fn plain_boundary_and_exact_shapes() {
+    assert!(matches("*", "anything"));
+    assert!(matches("foo*", "foobar"));
+    assert!(matches("*bar", "foobar"));
+    assert!(matches("*oob*", "foobar")); // Contains
+    assert!(matches("foo", "foo")); // Equal
+    assert!(!matches("foo", "foobar"));
   }
 }
