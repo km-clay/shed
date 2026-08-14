@@ -9,7 +9,7 @@ authors = ["Kyler Clay"]
 license = "MIT"
 repository = "https://github.com/km-clay/shed"
 publish = false
-version = "0.40.1"
+version = "0.40.2"
 
 edition = "2024"
 
