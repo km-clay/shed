@@ -3,6 +3,7 @@ use std::{collections::VecDeque, rc::Rc, string::ToString};
 use crate::{
   ShResult, Shed,
   eval::execute::{is_builtin, is_func_node},
+  expand::subshell,
   state::logic::{AutoloadKind, IsInternal, ShFunc},
   util::error::LabelBuilder,
 };
@@ -484,7 +485,7 @@ pub(crate) fn node_has_only_builtins(node: &mut Node) -> bool {
 
         // Cache miss: function exists, is Defined, is_internal is None.
         // Mark Checking and clone the body in a single borrow.
-        let Some(mut logic) = Shed::logic_mut(|l| match l.get_func_mut(&name) {
+        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&name) {
           Some(ShFunc::Defined {
             logic, is_internal, ..
           }) => {
@@ -496,7 +497,8 @@ pub(crate) fn node_has_only_builtins(node: &mut Node) -> bool {
           return;
         };
 
-        let is = node_has_only_builtins(&mut logic);
+        let body_src = logic.get_span().as_str().to_string();
+        let is = subshell::is_internal(&body_src);
         let verdict = if is { IsInternal::Yes } else { IsInternal::No };
         Shed::logic_mut(|l| {
           if let Some(func) = l.get_func_mut(&name) {

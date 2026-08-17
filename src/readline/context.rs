@@ -4,7 +4,7 @@ use std::{
 
 use bitflags::bitflags;
 
-use crate::Shed;
+use crate::{Shed, state::vars::VarStr, varstr};
 
 use super::{
   builtin::BUILTIN_NAMES,
@@ -58,6 +58,53 @@ pub fn get_ex_context_tokens(input: &str) -> Vec<CtxTk> {
     .collect();
 
   process_ctx_tokens(out)
+}
+
+/// A command, backtick, or process substitution found nested inside a word.
+pub(crate) enum NestedSub {
+  Cmd(VarStr),
+  Proc,
+}
+
+/// Collect every command, backtick, or process
+/// substitution nested inside a word of `input`
+pub(crate) fn nested_subs(input: &str) -> Vec<NestedSub> {
+  fn collect(tk: &CtxTk, out: &mut Vec<NestedSub>) {
+    match tk.class() {
+      CtxTkRule::ProcSubIn | CtxTkRule::ProcSubOut => {
+        out.push(NestedSub::Proc);
+        return;
+      }
+      CtxTkRule::CmdSub => {
+        let s = tk.span().as_str();
+        let body = s
+          .strip_prefix("$(")
+          .and_then(|s| s.strip_suffix(')'))
+          .unwrap_or(s);
+        out.push(NestedSub::Cmd(varstr!("{body}")));
+        return;
+      }
+      CtxTkRule::BacktickSub => {
+        let s = tk.span().as_str();
+        let body = s
+          .strip_prefix('`')
+          .and_then(|s| s.strip_suffix('`'))
+          .unwrap_or(s);
+        out.push(NestedSub::Cmd(varstr!("{body}")));
+        return;
+      }
+      _ => {}
+    }
+    for sub in tk.sub_tokens() {
+      collect(sub, out);
+    }
+  }
+
+  let mut out = vec![];
+  for tk in get_context_tokens(input) {
+    collect(&tk, &mut out);
+  }
+  out
 }
 
 fn process_ctx_tokens(mut out: Vec<CtxTk>) -> Vec<CtxTk> {

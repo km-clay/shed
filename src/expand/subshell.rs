@@ -9,6 +9,7 @@ use crate::{
   },
   lifecycle,
   procio::{self, SinkScope, bytes_to_string},
+  readline::{NestedSub, nested_subs},
   state::{Shed, meta::MetaTab, vars::VarStr},
   util::isolation_guard,
 };
@@ -109,7 +110,19 @@ pub fn is_internal(raw: &str) -> bool {
 
   let mut ast = parser.extract_nodes();
 
-  nodes_have_only_builtins(ast.iter_mut())
+  if !nodes_have_only_builtins(ast.iter_mut()) {
+    return false;
+  }
+
+  let has_forking_sub = nested_subs(raw).into_iter().any(|sub| match sub {
+    NestedSub::Proc => true,
+    NestedSub::Cmd(body) => !is_internal(&body),
+  });
+  if has_forking_sub {
+    return false;
+  }
+
+  true
 }
 
 pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
@@ -232,6 +245,78 @@ mod tests {
     let _guard = TestGuard::new();
     let result = expand_cmd_sub("echo hello").unwrap();
     assert_eq!(result, "hello");
+  }
+
+  // ===================== is_internal fast-path gate (#145) =====================
+  //
+  // A forking substitution buried in a word must disqualify the in-process
+  // path; a genuinely all-builtin body (even with all-builtin nesting) must
+  // stay in-process. Output alone can't distinguish the paths, so gate the
+  // decision directly.
+
+  #[test]
+  fn is_internal_plain_builtin_body() {
+    let _g = TestGuard::new();
+    assert!(is_internal("echo hi"));
+    assert!(is_internal("printf '%s' x"));
+  }
+
+  #[test]
+  fn is_internal_all_builtin_nesting_stays_inprocess() {
+    let _g = TestGuard::new();
+    assert!(is_internal(r#"echo "$(echo 1)""#));
+    assert!(is_internal(r#"echo "$(( 2 + 3 ))""#));
+    assert!(is_internal(r#"echo "$( { echo y; } )""#));
+  }
+
+  #[test]
+  fn is_internal_nested_external_forks() {
+    let _g = TestGuard::new();
+    assert!(!is_internal(r#"echo "$(echo 1 | cat)""#));
+    assert!(!is_internal(r#"echo "$(echo "$(echo 1 | cat)")""#));
+    assert!(!is_internal(r#"echo "`echo 7 | cat`""#));
+  }
+
+  #[test]
+  fn is_internal_nested_sub_forks_without_external() {
+    // Subshell and redirect both fork despite containing only builtins — the
+    // holes an "external command present" heuristic would miss.
+    let _g = TestGuard::new();
+    assert!(!is_internal(r#"echo "$( (echo x) )""#));
+    assert!(!is_internal(r#"echo "$(read v < /dev/null; echo $v)""#));
+  }
+
+  #[test]
+  fn is_internal_sub_in_param_exp_and_arith() {
+    let _g = TestGuard::new();
+    assert!(!is_internal(r#"echo "${foo:+$(echo 1 | cat)}""#));
+    assert!(!is_internal(r#"echo "$(( $(echo 3 | cat) + 1 ))""#));
+  }
+
+  #[test]
+  fn is_internal_single_quoted_sub_is_literal() {
+    // A `$(…)` inside single quotes is literal text, not a substitution.
+    let _g = TestGuard::new();
+    assert!(is_internal(r"echo '$(echo nope | cat)'"));
+  }
+
+  #[test]
+  fn is_internal_function_body_forking_sub() {
+    // A function whose body embeds a forking sub in a word must disqualify the
+    // caller — the AST walk alone can't see into the body's word tokens. (#145)
+    let _g = TestGuard::new();
+    expand_cmd_sub(r#"f() { echo "$(echo 1 | cat)"; }"#).unwrap();
+    assert!(!is_internal("f"));
+
+    expand_cmd_sub(r#"g() { echo "$( (echo x) )"; }"#).unwrap();
+    assert!(!is_internal("g"));
+  }
+
+  #[test]
+  fn is_internal_all_builtin_function_stays_inprocess() {
+    let _g = TestGuard::new();
+    expand_cmd_sub(r#"h() { echo "$(echo 1)"; }"#).unwrap();
+    assert!(is_internal("h"));
   }
 
   #[test]

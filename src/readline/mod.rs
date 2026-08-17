@@ -7,6 +7,7 @@ use unicode_width::UnicodeWidthStr;
 mod complete;
 pub(crate) use complete::{FuzzyBuilder, fuzzy_best_match, match_positions};
 mod context;
+pub(crate) use context::{NestedSub, nested_subs};
 mod core;
 mod editcmd;
 mod editmode;
