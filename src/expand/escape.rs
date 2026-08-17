@@ -414,34 +414,55 @@ pub fn expand_ansi_c_stream(
   out: &mut String,
   terminator: Option<char>,
 ) {
+  let mut pending: Vec<u8> = Vec::new();
+  macro_rules! flush {
+    () => {
+      if !pending.is_empty() {
+        push_bytes_utf8(&pending, out);
+        pending.clear();
+      }
+    };
+  }
+
   match_loop!(chars.next() => q_ch, {
     c if Some(c) == terminator => break,
     '\\' if let Some(esc) = chars.next() => {
       match esc {
-        'n' => out.push('\n'),
-        't' => out.push('\t'),
-        'r' => out.push('\r'),
-        '"' => out.push('"'),
-        '\'' => out.push('\''),
-        '\\' => out.push('\\'),
-        'a' => out.push('\x07'),
-        'b' => out.push('\x08'),
-        'c' => read_stty_escape(chars, out),
-        'e' | 'E' => out.push('\x1b'),
-        'f' => out.push('\x0c'),
-        'v' => out.push('\x0b'),
-        'x' => read_hex(chars, out),
-        'o' => read_octal(chars, out, None),
-        'u' | 'U' => read_unicode(chars, out, esc),
-        _ if esc.is_ascii_digit() => read_octal(chars, out, Some(esc)),
+        // byte-producing escapes: keep buffering so adjacent ones combine.
+        'x' => read_hex(chars, &mut pending),
+        'o' => read_octal(chars, &mut pending, None),
+        _ if esc.is_ascii_digit() => read_octal(chars, &mut pending, Some(esc)),
+        // everything else emits text. flush any pending byte run first.
         _ => {
-          out.push('\\');
-          out.push(esc);
+          flush!();
+          match esc {
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            'r' => out.push('\r'),
+            '"' => out.push('"'),
+            '\'' => out.push('\''),
+            '\\' => out.push('\\'),
+            'a' => out.push('\x07'),
+            'b' => out.push('\x08'),
+            'c' => read_stty_escape(chars, out),
+            'e' | 'E' => out.push('\x1b'),
+            'f' => out.push('\x0c'),
+            'v' => out.push('\x0b'),
+            'u' | 'U' => read_unicode(chars, out, esc),
+            _ => {
+              out.push('\\');
+              out.push(esc);
+            }
+          }
         }
       }
     }
-    _ => out.push(q_ch),
+    _ => {
+      flush!();
+      out.push(q_ch);
+    }
   });
+  flush!();
 }
 
 pub fn read_unicode(chars: &mut Peekable<Chars>, result: &mut String, marker: char) {
@@ -508,7 +529,37 @@ pub fn read_stty_escape(chars: &mut Peekable<Chars>, result: &mut String) {
   result.push(code as char);
 }
 
-pub fn read_octal(chars: &mut Peekable<Chars>, result: &mut String, first: Option<char>) {
+/// Append a byte run to a UTF-8 `String`, decoding valid UTF-8 sequences to
+/// their characters and mapping each byte that isn't part of a valid sequence
+/// to its Latin-1 code point
+///
+/// This lets adjacent byte escapes reassemble into a multibyte character
+fn push_bytes_utf8(bytes: &[u8], out: &mut String) {
+  let mut rest = bytes;
+  while !rest.is_empty() {
+    match std::str::from_utf8(rest) {
+      Ok(s) => {
+        out.push_str(s);
+        return;
+      }
+      Err(e) => {
+        let valid = e.valid_up_to();
+
+        let left = unsafe { std::str::from_utf8_unchecked(&rest[..valid]) };
+        let mid = rest[valid] as char;
+        let right = &rest[valid + 1..];
+
+        out.push_str(left);
+        // The byte at `valid` starts an invalid/incomplete sequence: emit it as
+        // latin-1 and resume after it.
+        out.push(mid);
+        rest = right;
+      }
+    }
+  }
+}
+
+pub fn read_octal(chars: &mut Peekable<Chars>, result: &mut Vec<u8>, first: Option<char>) {
   let mut oct = util::scratch_buf();
   if let Some(first) = first {
     oct.push(first);
@@ -526,30 +577,33 @@ pub fn read_octal(chars: &mut Peekable<Chars>, result: &mut String, first: Optio
     }
   }
   if let Ok(byte) = u8::from_str_radix(&oct, 8) {
-    result.push(byte as char);
+    result.push(byte);
   } else {
-    let _ = write!(result, "\\o{oct}");
+    result.extend_from_slice(b"\\o");
+    result.extend_from_slice(oct.as_bytes());
   }
 }
 
-pub fn read_hex(chars: &mut Peekable<Chars>, result: &mut String) {
+pub fn read_hex(chars: &mut Peekable<Chars>, result: &mut Vec<u8>) {
   let mut hex = util::scratch_buf();
   if let Some(h1) = chars.next() {
     hex.push(h1);
   } else {
-    result.push_str("\\x");
+    result.extend_from_slice(b"\\x");
     return;
   }
   if let Some(h2) = chars.next() {
     hex.push(h2);
   } else {
-    let _ = write!(result, "\\x{hex}");
+    result.extend_from_slice(b"\\x");
+    result.extend_from_slice(hex.as_bytes());
     return;
   }
   if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-    result.push(byte as char);
+    result.push(byte);
   } else {
-    let _ = write!(result, "\\x{hex}");
+    result.extend_from_slice(b"\\x");
+    result.extend_from_slice(hex.as_bytes());
   }
 }
 
@@ -1082,6 +1136,29 @@ mod expand_ansi_c_tests {
   fn octal_short_form() {
     // \0 → null byte
     assert_eq!(expand_ansi_c("\\0"), "\0");
+  }
+
+  // ─── multibyte UTF-8 from consecutive byte escapes (#146) ────────
+  //
+  // Adjacent `\ooo`/`\xHH` bytes must reassemble into one character rather than
+  // each byte being widened to its own code point.
+
+  #[test]
+  fn octal_bytes_reassemble_utf8() {
+    // \342\234\224 = e2 9c 94 = U+2714 ✔
+    assert_eq!(expand_ansi_c("\\342\\234\\224"), "\u{2714}");
+    assert_eq!(expand_ansi_c("\\342\\234\\224").as_bytes(), b"\xe2\x9c\x94");
+  }
+
+  #[test]
+  fn hex_bytes_reassemble_utf8() {
+    assert_eq!(expand_ansi_c("\\xe2\\x9c\\x94"), "\u{2714}");
+  }
+
+  #[test]
+  fn byte_escapes_flush_around_literal_text() {
+    // 'A' + ✔ + 'B': byte run flushes at the literal boundaries.
+    assert_eq!(expand_ansi_c("A\\342\\234\\224B"), "A\u{2714}B");
   }
 
   // ─── \c<char> — stty-style control char ──────────────────────────
